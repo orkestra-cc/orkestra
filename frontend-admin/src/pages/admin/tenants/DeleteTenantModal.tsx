@@ -23,7 +23,13 @@ const DeleteTenantModal: React.FC<Props> = ({ org, show, onHide }) => {
     if (!show) setConfirmText('');
   }, [show]);
 
-  const canDelete = !!org && confirmText === org.slug && !isLoading;
+  // The platform default guards every lifecycle mutation on the backend
+  // (409 tenant.default_reassignment_required) until it's reassigned
+  // elsewhere — never offer a confirm flow that would just fail. isDefault
+  // is derived straight from the org payload, never local state.
+  const isDefault = !!org?.isDefault;
+  const canDelete =
+    !!org && !isDefault && confirmText === org.slug && !isLoading;
 
   const onConfirm = async () => {
     if (!org) return;
@@ -51,34 +57,43 @@ const DeleteTenantModal: React.FC<Props> = ({ org, show, onHide }) => {
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
-        <p className="mb-3">
-          <Trans
-            i18nKey="adminTenants.deleteModal.intro"
-            values={{ name: org?.name }}
-            components={{ code: <code className="fs-9" /> }}
-          />
-        </p>
-        <Alert variant="warning" className="fs-10 mb-3">
-          <Trans
-            i18nKey="adminTenants.deleteModal.bindingsRemain"
-            components={{ strong: <strong />, em: <em /> }}
-          />
-        </Alert>
-        <Form.Group>
-          <Form.Label className="fw-semibold fs-10">
-            <Trans
-              i18nKey="adminTenants.deleteModal.typeToConfirm"
-              values={{ slug: org?.slug }}
-              components={{ code: <code /> }}
-            />
-          </Form.Label>
-          <Form.Control
-            type="text"
-            value={confirmText}
-            onChange={e => setConfirmText(e.target.value)}
-            placeholder={org?.slug}
-          />
-        </Form.Group>
+        {isDefault ? (
+          <Alert variant="warning" className="fs-10 mb-0">
+            <FontAwesomeIcon icon="info-circle" className="me-2" />
+            {t('adminTenants.default.reassignFirst')}
+          </Alert>
+        ) : (
+          <>
+            <p className="mb-3">
+              <Trans
+                i18nKey="adminTenants.deleteModal.intro"
+                values={{ name: org?.name }}
+                components={{ code: <code className="fs-9" /> }}
+              />
+            </p>
+            <Alert variant="warning" className="fs-10 mb-3">
+              <Trans
+                i18nKey="adminTenants.deleteModal.bindingsRemain"
+                components={{ strong: <strong />, em: <em /> }}
+              />
+            </Alert>
+            <Form.Group>
+              <Form.Label className="fw-semibold fs-10">
+                <Trans
+                  i18nKey="adminTenants.deleteModal.typeToConfirm"
+                  values={{ slug: org?.slug }}
+                  components={{ code: <code /> }}
+                />
+              </Form.Label>
+              <Form.Control
+                type="text"
+                value={confirmText}
+                onChange={e => setConfirmText(e.target.value)}
+                placeholder={org?.slug}
+              />
+            </Form.Group>
+          </>
+        )}
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" onClick={onHide} disabled={isLoading}>

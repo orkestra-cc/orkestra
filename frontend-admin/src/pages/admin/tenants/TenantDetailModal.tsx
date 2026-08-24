@@ -95,6 +95,11 @@ const TenantDetailModal: React.FC<Props> = ({
               {t('adminTenants.detailModal.badgeDeleted')}
             </SubtleBadge>
           ) : null}
+          {org.isDefault && (
+            <SubtleBadge bg="primary" pill data-testid="tenant-default-badge">
+              {t('adminTenants.default.badge')}
+            </SubtleBadge>
+          )}
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
@@ -130,22 +135,37 @@ const TenantDetailModal: React.FC<Props> = ({
         </Tabs>
       </Modal.Body>
       <Modal.Footer className="d-flex justify-content-between flex-wrap gap-2">
-        <div className="d-flex gap-2 flex-wrap">
-          {org.status !== 'purged' && !org.deletedAt && (
-            <Button
-              variant="outline-danger"
-              size="sm"
-              onClick={() => onDelete(org)}
-            >
-              <FontAwesomeIcon icon="trash" className="me-1" />
-              {t('adminTenants.detailModal.deleteButton')}
-            </Button>
-          )}
-          {org.status !== 'purged' && (
-            <Button variant="danger" size="sm" onClick={() => onPurge(org)}>
-              <FontAwesomeIcon icon="exclamation-triangle" className="me-1" />
-              {t('adminTenants.detailModal.purgeButton')}
-            </Button>
+        <div className="d-flex gap-2 flex-wrap align-items-center">
+          {org.isDefault ? (
+            // Guarded lifecycle: the backend 409s archive/delete/purge for
+            // the platform default until it's reassigned elsewhere. Explain
+            // that instead of offering buttons that would just fail.
+            <span className="text-muted fs-10">
+              <FontAwesomeIcon icon="info-circle" className="me-1" />
+              {t('adminTenants.default.reassignFirst')}
+            </span>
+          ) : (
+            <>
+              {org.status !== 'purged' && !org.deletedAt && (
+                <Button
+                  variant="outline-danger"
+                  size="sm"
+                  onClick={() => onDelete(org)}
+                >
+                  <FontAwesomeIcon icon="trash" className="me-1" />
+                  {t('adminTenants.detailModal.deleteButton')}
+                </Button>
+              )}
+              {org.status !== 'purged' && (
+                <Button variant="danger" size="sm" onClick={() => onPurge(org)}>
+                  <FontAwesomeIcon
+                    icon="exclamation-triangle"
+                    className="me-1"
+                  />
+                  {t('adminTenants.detailModal.purgeButton')}
+                </Button>
+              )}
+            </>
           )}
           {org.status === 'purged' && org.purgedAt && (
             <span className="text-muted fs-10">

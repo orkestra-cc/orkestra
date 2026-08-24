@@ -691,6 +691,14 @@
       "activeCount": "{{count}} attivi",
       "manage": "Gestisci policy"
     },
+    "default": {
+      "badge": "Predefinito",
+      "setAsDefault": "Imposta come predefinito",
+      "reassignFirst": "Questo è il tenant predefinito della piattaforma. Riassegna il predefinito a un altro tenant prima di poterlo sospendere, archiviare, rimuovere o eliminare.",
+      "transferSuccess": "\"{{name}}\" è ora il tenant predefinito della piattaforma",
+      "transferError": "Impossibile impostare il tenant predefinito: {{message}}",
+      "unknownError": "errore sconosciuto"
+    },
     "noOrgSelected": "Nessuna organizzazione selezionata",
     "rolesNeedOrg": "La gestione ruoli è limitata a una singola organizzazione. Selezionane o creane una dallo switcher in alto a destra per continuare.",
     "deleteModal": {
