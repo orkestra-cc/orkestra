@@ -186,11 +186,17 @@ func TestSetupRouteMount_AudienceAndAuth(t *testing.T) {
 			wantStatus: http.StatusUnauthorized,
 		},
 		{
+			// Task 5.4 implements FinalizationAccess for real: with the
+			// mount test's zero-value fakes (no coordinator record, an
+			// "administrator"-role caller), the binding is empty and the
+			// caller is not a super_admin, so the probe answers 200 with
+			// {canFinalize:false, canClaimRecovery:false,
+			// reason:"recovery_requires_super_admin"} rather than 501.
 			name:       "operator token reaches finalization-access handler",
 			method:     http.MethodGet,
 			path:       "/v1/setup/finalization-access",
 			bearer:     surface.operatorToken,
-			wantStatus: http.StatusNotImplemented,
+			wantStatus: http.StatusOK,
 		},
 		{
 			name:       "operator token reaches finalize handler",

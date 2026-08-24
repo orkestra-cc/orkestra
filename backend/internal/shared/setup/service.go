@@ -64,22 +64,37 @@ type Service struct {
 	store         systeminit.FinalizationStore
 	configService *module.ModuleConfigService
 	logger        *slog.Logger
+
+	// lifecycle is the narrow iface.UserLifecycleStateProvider capability of
+	// users, resolved once via type assertion at construction time. It
+	// backs evaluateAccess's usable/recovery classification (finalizer
+	// access probe + finalize POST). Deliberately NOT a widening of
+	// iface.UserProvider itself — see that interface's doc comment in
+	// pkg/sdk/iface/interfaces.go. nil when the wired UserProvider doesn't
+	// implement it; evaluateAccess then fails closed rather than panicking.
+	lifecycle iface.UserLifecycleStateProvider
 }
 
 // NewService wires the setup service. users, admin and store are required;
 // cfg may be nil (SMTP status degrades to false); a nil logger falls back
-// to slog.Default().
+// to slog.Default(). If users also implements iface.UserLifecycleStateProvider
+// (the canonical user-module service does), Service.lifecycle is derived
+// from it automatically.
 func NewService(users iface.UserProvider, admin AdminCreator, store systeminit.FinalizationStore, cfg *module.ModuleConfigService, logger *slog.Logger) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Service{
+	svc := &Service{
 		users:         users,
 		admin:         admin,
 		store:         store,
 		configService: cfg,
 		logger:        logger,
 	}
+	if lc, ok := users.(iface.UserLifecycleStateProvider); ok {
+		svc.lifecycle = lc
+	}
+	return svc
 }
 
 // refreshTTLProvider is the optional capability the setup handler needs
@@ -174,4 +189,117 @@ func (s *Service) CreateInitialAdmin(ctx context.Context, email, password, fullN
 	// setup wizard's OrgStep (or skipped, leaving the platform at zero
 	// tenants). See docs/superpowers/specs/2026-07-06-zero-tenant-setup-design.md.
 	return tokens, nil
+}
+
+// --- Finalizer access probe / shared authorization seam ---
+//
+// FinalizationAccess and evaluateAccess back GET /v1/setup/finalization-access
+// (this task) and, unchanged, the finalize POST's authorization decision
+// (Task 5.5). See the "Finalizer access probe" section of
+// docs/superpowers/specs/2026-08-23-tier1-default-tenant-setup-design.md.
+
+// FinalizationAccess is the payload returned by GET
+// /v1/setup/finalization-access. It carries exactly these three fields —
+// on purpose: the caller evaluating "may I finalize?" may have no right to
+// know who currently holds the binding, so the bound administrator's UUID,
+// email, name, and lifecycle state must never appear here or in any error
+// string this package returns.
+type FinalizationAccess struct {
+	CanFinalize      bool   `json:"canFinalize"`
+	CanClaimRecovery bool   `json:"canClaimRecovery"`
+	Reason           string `json:"reason"` // "", reasonBoundToAnotherAdmin, reasonRecoveryRequiresSuperAdmin
+}
+
+// Reason values carried on FinalizationAccess.Reason — the wire contract.
+// Empty string means "no reason needed": either CanFinalize or
+// CanClaimRecovery is true.
+const (
+	reasonBoundToAnotherAdmin        = "bound_to_another_admin"
+	reasonRecoveryRequiresSuperAdmin = "recovery_requires_super_admin"
+)
+
+// roleSuperAdmin is the one system role allowed to claim recovery of an
+// empty or unusable finalization binding. Matches the "super_admin" wire
+// value used across auth/authz (e.g. shared/middleware/jwt_validator.go).
+const roleSuperAdmin = "super_admin"
+
+// evaluateAccess is the shared authorization seam for the read-only
+// finalizer-access probe (this task) and the finalize POST's authorization
+// (Task 5.5). It NEVER mutates the coordinator record — only Get is called
+// — and never exposes the bound administrator's identity; callers translate
+// the returned FinalizationAccess into an HTTP response (the probe) or an
+// authorization decision (the POST, which performs the atomic claim this
+// function deliberately does not).
+//
+// A user/coordinator lookup failure is returned as an error, never folded
+// into a lifecycle class or an authorization outcome — the caller must map
+// it to 503 setup.finalizer_state_unavailable. This is the load-bearing
+// fail-closed rule: treating "we couldn't tell" as "the binding is gone"
+// would let any operator wait out a transient database blip and then claim
+// an in-progress setup.
+//
+// Logic: a nil record or empty rec.AdminUUID is treated as an empty
+// binding (a legacy record from before this feature existed). When the
+// binding is non-empty, its lifecycle state is resolved once; `active`
+// means usable — the caller may finalize only if they ARE the bound
+// admin, otherwise they're told the binding belongs to someone else.
+// Every other state (and an empty binding) falls through to the recovery
+// check: the caller must be an authenticated, active super_admin.
+func (s *Service) evaluateAccess(ctx context.Context, callerUUID, callerSystemRole string) (FinalizationAccess, *systeminit.FinalizationRecord, error) {
+	rec, err := s.store.Get(ctx)
+	if err != nil {
+		return FinalizationAccess{}, nil, fmt.Errorf("setup: read finalization coordinator: %w", err)
+	}
+
+	boundUUID := ""
+	if rec != nil {
+		boundUUID = rec.AdminUUID
+	}
+
+	if boundUUID != "" {
+		state, err := s.userLifecycleState(ctx, boundUUID)
+		if err != nil {
+			return FinalizationAccess{}, nil, err
+		}
+		if state == iface.UserLifecycleActive {
+			if callerUUID != "" && callerUUID == boundUUID {
+				return FinalizationAccess{CanFinalize: true}, rec, nil
+			}
+			return FinalizationAccess{Reason: reasonBoundToAnotherAdmin}, rec, nil
+		}
+		// Bound admin is missing/deleted/inactive: falls through to the
+		// recovery-eligibility check below, exactly like an empty binding.
+	}
+
+	// Binding is empty, or the bound administrator is unusable: only an
+	// authenticated, active super_admin may claim recovery. The role check
+	// runs first so a non-super_admin caller never triggers a lifecycle
+	// lookup on themselves.
+	if callerSystemRole != roleSuperAdmin {
+		return FinalizationAccess{Reason: reasonRecoveryRequiresSuperAdmin}, rec, nil
+	}
+	callerState, err := s.userLifecycleState(ctx, callerUUID)
+	if err != nil {
+		return FinalizationAccess{}, nil, err
+	}
+	if callerState != iface.UserLifecycleActive {
+		return FinalizationAccess{Reason: reasonRecoveryRequiresSuperAdmin}, rec, nil
+	}
+	return FinalizationAccess{CanClaimRecovery: true}, rec, nil
+}
+
+// userLifecycleState resolves userUUID's lifecycle class through the
+// narrow provider derived at construction time. A nil provider (the wired
+// UserProvider doesn't implement iface.UserLifecycleStateProvider) is a
+// wiring defect, not a lifecycle fact — it fails closed exactly like a
+// database error, never as iface.UserLifecycleMissing or any other state.
+func (s *Service) userLifecycleState(ctx context.Context, userUUID string) (iface.UserLifecycleState, error) {
+	if s.lifecycle == nil {
+		return "", errors.New("setup: user lifecycle provider not configured")
+	}
+	state, err := s.lifecycle.UserLifecycleState(ctx, userUUID)
+	if err != nil {
+		return "", fmt.Errorf("setup: resolve user lifecycle state: %w", err)
+	}
+	return state, nil
 }

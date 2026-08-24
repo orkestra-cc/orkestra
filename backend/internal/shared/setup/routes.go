@@ -11,6 +11,7 @@ import (
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/internal/shared/utils"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
 // Handler binds the setup service to Huma v2 HTTP routes.
@@ -99,19 +100,58 @@ func (h *Handler) CreateAdmin(ctx context.Context, req *CreateAdminRequest) (*Cr
 	return resp, nil
 }
 
-// --- GET /v1/setup/finalization-access (stub — Task 5.4 implements) ---
+// --- GET /v1/setup/finalization-access ---
 
 type FinalizationAccessResponse struct {
-	Body struct{}
+	CacheControl string `header:"Cache-Control"`
+	Body         FinalizationAccess
 }
 
-// FinalizationAccess is a stub: the route, its authenticated-operator
-// mount, and its OpenAPI operation are locked in by this task so Task 5.4
-// only has to fill in the body. A stub must fail closed — 501, never a
-// fabricated 200 — so nothing downstream can mistake "not implemented
-// yet" for "access granted."
-func (h *Handler) FinalizationAccess(_ context.Context, _ *struct{}) (*FinalizationAccessResponse, error) {
-	return nil, huma.Error501NotImplemented("Setup finalization access is not implemented yet.")
+// FinalizationAccess reports whether the calling operator may finalize the
+// in-progress setup saga, or claim recovery of an unusable binding — a
+// pure read against the coordinator record and the bound administrator's
+// lifecycle state. The wizard calls this before rendering an actionable
+// organization form so an operator who cannot submit is never shown a
+// form the finalize POST would reject. It never mutates the coordinator
+// and never emits an audit event; the actual claim happens only on the
+// finalize POST (Task 5.5), which shares evaluateAccess for its
+// authorization decision.
+//
+// Gating: the probe is meaningful only while setup is tenant_required.
+// Phase is checked BEFORE evaluateAccess runs — deliberately, so that once
+// setup is complete a lifecycle lookup failure on the now-irrelevant bound
+// admin can never surface as a spurious 503 instead of the correct 409.
+func (h *Handler) FinalizationAccess(ctx context.Context, _ *struct{}) (*FinalizationAccessResponse, error) {
+	userUUID, ok := ctxauth.GetUserUUID(ctx)
+	if !ok || userUUID == "" {
+		return nil, huma.Error401Unauthorized("not authenticated")
+	}
+	systemRole, _ := ctxauth.GetSystemRole(ctx)
+
+	st, err := h.svc.Status(ctx)
+	if err != nil {
+		return nil, finalizerStateUnavailable()
+	}
+	if st.Phase == PhaseComplete {
+		return nil, errcode.Conflict(errcode.SetupAlreadyCompleted, "Setup is already complete.")
+	}
+
+	access, _, err := h.svc.evaluateAccess(ctx, userUUID, systemRole)
+	if err != nil {
+		return nil, finalizerStateUnavailable()
+	}
+	return &FinalizationAccessResponse{CacheControl: "no-store", Body: access}, nil
+}
+
+// finalizerStateUnavailable is the stable 503 mapping for a coordinator or
+// bound-user lookup failure — shared by the probe above and (Task 5.5) the
+// finalize POST. It is never returned in a way that could be mistaken for
+// a recovery opportunity: it fails the request outright.
+func finalizerStateUnavailable() error {
+	return huma.ErrorWithHeaders(
+		errcode.ServiceUnavailable(errcode.SetupFinalizerStateUnavailable, "Finalizer state is temporarily unavailable. Retry shortly."),
+		http.Header{"Retry-After": []string{"5"}, "Cache-Control": []string{"no-store"}},
+	)
 }
 
 // --- POST /v1/setup/finalize (stub — Task 5.5 implements) ---
@@ -183,7 +223,7 @@ func (h *Handler) RegisterProtectedRoutes(api huma.API) {
 		Method:      http.MethodGet,
 		Path:        "/v1/setup/finalization-access",
 		Summary:     "Check whether the caller may finalize setup",
-		Description: "Authenticated-operator route. Reports whether the calling operator is bound to the in-progress setup finalization saga (default-tenant provisioning) and may call POST /v1/setup/finalize. Stub pending Task 5.4 — currently always answers 501.",
+		Description: "Authenticated-operator route. Reports whether the calling operator may finalize the in-progress setup saga (default-tenant provisioning) via POST /v1/setup/finalize, or claim recovery of an unusable binding. Read-only: never mutates the coordinator or emits an audit event. Returns 409 setup.already_completed once setup is complete, and 503 setup.finalizer_state_unavailable on a coordinator/lifecycle lookup failure.",
 		Tags:        []string{"Setup"},
 	}, h.FinalizationAccess)
 
