@@ -688,13 +688,13 @@
         "manual": "Solo manuale",
         "single": "Tenant singolo"
       },
-      "activeCount": "{{count}} attivi",
+      "activeCount": "Slot di provisioning occupati: {{count}}",
       "manage": "Gestisci policy"
     },
     "default": {
       "badge": "Predefinito",
       "setAsDefault": "Imposta come predefinito",
-      "reassignFirst": "Questo è il tenant predefinito della piattaforma. Riassegna il predefinito a un altro tenant prima di poterlo sospendere, archiviare, rimuovere o eliminare.",
+      "reassignFirst": "Questo è il tenant predefinito della piattaforma. Riassegna il predefinito a un altro tenant prima di poterlo eliminare o farne il purge.",
       "transferSuccess": "\"{{name}}\" è ora il tenant predefinito della piattaforma",
       "transferError": "Impossibile impostare il tenant predefinito: {{message}}",
       "unknownError": "errore sconosciuto"

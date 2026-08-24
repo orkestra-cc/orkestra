@@ -714,8 +714,10 @@ export const tenantApi = baseApi.injectEndpoints({
     }),
 
     // Read-only per-tier provisioning policy (open | manual | single) plus the
-    // current active-tenant counts. Backs the ProvisioningPolicyCard on the
-    // tenant management pages; the mode itself is edited at /admin/modules/tenant.
+    // current counts of tenants occupying a provisioning slot (deletedAt nil
+    // and status provisioning/active/suspended — a suspended tenant still
+    // holds its slot). Backs the ProvisioningPolicyCard on the tenant
+    // management pages; the mode itself is edited at /admin/modules/tenant.
     getProvisioningPolicy: builder.query<ProvisioningPolicy, void>({
       query: () => ({
         url: '/v1/admin/tenants/provisioning-policy',
@@ -726,9 +728,11 @@ export const tenantApi = baseApi.injectEndpoints({
 
     // Transfer the platform default to another operational internal tenant
     // (active, not soft-deleted). Gated server-side by system.tenants.admin
-    // PLUS step-up MFA (RequireStepUp) — a 401 {code:'step_up_required'}
-    // is paused, replayed, and retried automatically by the global
-    // baseApi.ts interceptor + StepUpModal; no extra plumbing needed here.
+    // PLUS RequireMFA — a session-long check that the access token's amr
+    // claim carries an MFA factor, NOT RequireStepUp's fresh-proof (maxAge)
+    // requirement. It still answers 401 {code:'step_up_required'}, which is
+    // paused, replayed, and retried automatically by the global baseApi.ts
+    // interceptor + StepUpModal; no extra plumbing needed here.
     // Invalidating the bare 'AdminOrg'/'Membership'/'Org' tag TYPES (not
     // just the target's own id) refreshes every list/detail view that
     // renders the isDefault badge, since the previous default's isDefault

@@ -688,13 +688,13 @@
         "manual": "Manual only",
         "single": "Single tenant"
       },
-      "activeCount": "{{count}} active",
+      "activeCount": "Provisioning slots used: {{count}}",
       "manage": "Manage policy"
     },
     "default": {
       "badge": "Default",
       "setAsDefault": "Set as default",
-      "reassignFirst": "This is the platform default tenant. Reassign the default to another tenant before you can suspend, archive, purge, or delete it.",
+      "reassignFirst": "This is the platform default tenant. Reassign the default to another tenant before you can delete or purge it.",
       "transferSuccess": "\"{{name}}\" is now the platform default tenant",
       "transferError": "Failed to set default tenant: {{message}}",
       "unknownError": "unknown error"

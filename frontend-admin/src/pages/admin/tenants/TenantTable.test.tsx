@@ -159,7 +159,7 @@ describe('TenantTable — guarded lifecycle on the default row', () => {
     ).not.toBeInTheDocument();
     expect(
       within(defaultRow).getByTitle(
-        'This is the platform default tenant. Reassign the default to another tenant before you can suspend, archive, purge, or delete it.'
+        'This is the platform default tenant. Reassign the default to another tenant before you can delete or purge it.'
       )
     ).toBeInTheDocument();
 
