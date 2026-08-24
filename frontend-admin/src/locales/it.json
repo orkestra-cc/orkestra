@@ -2446,6 +2446,23 @@
       "failed": "{{count}} in errore",
       "disabled": "{{count}} disattivati",
       "stopped": "{{count}} fermi"
+    },
+    "recordList": {
+      "add": "Aggiungi",
+      "confirm": "Conferma",
+      "cancel": "Annulla",
+      "remove": "Rimuovi",
+      "undo": "Annulla rimozione",
+      "empty": "Nessuna voce.",
+      "nameLabel": "Nome",
+      "slugPreview": "Chiave:",
+      "slugTaken": "Questa chiave è già in uso.",
+      "slugEmpty": "Digita un nome per generare la chiave.",
+      "stagedNotice": "Verrà eliminata al salvataggio",
+      "deleteConfirmTitle": "Eliminare al salvataggio?",
+      "deleteWarning_one": "Il salvataggio elimina definitivamente {{names}}, inclusi gli eventuali segreti. L’operazione non è reversibile.",
+      "deleteWarning_other": "Il salvataggio elimina definitivamente {{names}}, inclusi gli eventuali segreti. L’operazione non è reversibile.",
+      "conflict": "Qualcun altro ha modificato questo elenco mentre stavi lavorando. Ricarica la pagina e riprova."
     }
   },
   "moduleConfig": {

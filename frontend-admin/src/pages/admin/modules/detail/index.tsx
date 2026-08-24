@@ -21,6 +21,7 @@ import ModuleSaveBar from './ModuleSaveBar';
 import LoggingModulePage from '../logging';
 import { hasPageRail } from '../configModel';
 import { useModuleConfigController } from '../useModuleConfigController';
+import { RecordListProvider } from '../recordList/RecordListContext';
 
 // The rail's built-in, non-config entries. Reserved (double-underscore)
 // rather than the plain words a first draft used ('overview', 'dependencies',
@@ -102,6 +103,7 @@ const GenericModuleDetailPage: React.FC = () => {
     perGroup,
     saveBarErrors,
     unfilledByGroup,
+    recordList,
     error: saveError,
     success,
     clearError,
@@ -305,7 +307,7 @@ const GenericModuleDetailPage: React.FC = () => {
     // registered once above) still drives ModuleConfigSection here — it no
     // longer creates its own.
     return (
-      <>
+      <RecordListProvider value={recordList}>
         {blockerModal}
         {envSwitchModal}
         <Row className="g-3">
@@ -335,7 +337,7 @@ const GenericModuleDetailPage: React.FC = () => {
             <ModuleDependencyCard module={mod} allModules={allModules} />
           </Col>
         </Row>
-      </>
+      </RecordListProvider>
     );
   }
 
@@ -364,7 +366,7 @@ const GenericModuleDetailPage: React.FC = () => {
     );
 
   return (
-    <>
+    <RecordListProvider value={recordList}>
       {blockerModal}
       {envSwitchModal}
 
@@ -506,7 +508,7 @@ const GenericModuleDetailPage: React.FC = () => {
           )}
         </Col>
       </Row>
-    </>
+    </RecordListProvider>
   );
 };
 

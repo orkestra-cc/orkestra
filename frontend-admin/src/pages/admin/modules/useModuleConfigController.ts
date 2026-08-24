@@ -23,6 +23,8 @@ import {
   type PendingCreates
 } from './useModuleConfigForm';
 import { expandElement, labelKeyOf, rosterOf } from './recordList/expandSchema';
+import { useRosterReconciliation } from './recordList/useRosterReconciliation';
+import type { RecordListEditingContext } from './recordList/RecordListContext';
 import { translateConfigGroup } from 'helpers/configLabel';
 
 // Module-scope, stable-by-reference fallback for a module with no schema yet
@@ -43,15 +45,11 @@ const EMPTY_SCHEMA: ConfigField[] = [];
  * belongs at Save — where the operator can see everything the save will do —
  * not behind a button that reads like it hides a card.
  */
-export interface RecordListEditing {
+export interface RecordListEditing extends RecordListEditingContext {
   created: PendingCreates;
   stagedRemovals: PendingCreates;
-  /** Adds a slug to the list and seeds its label. */
-  create: (field: string, slug: string, label: string) => void;
-  /** Marks a slug for removal at the next save. Reversible until then. */
-  stageRemove: (field: string, slug: string) => void;
-  /** Takes a slug back off the removal list. */
-  undoRemove: (field: string, slug: string) => void;
+  /** True when any list has an unsaved membership change. */
+  hasMembershipChanges: boolean;
 }
 
 export interface ModuleConfigControllerGroupCount {
@@ -215,6 +213,15 @@ export const useModuleConfigController = (
     void form.trigger();
   }, [envConfig, mod?.configValues]);
 
+  // A roster that moves leaves react-hook-form holding registrations, errors
+  // and values for elements that are gone, and holding nothing for ones that
+  // have just appeared. Reconciled here, once, against the expanded schema.
+  useRosterReconciliation(
+    form,
+    expandedSchema.map(f => fieldNameOf(fieldNames, f.key)),
+    defaults
+  );
+
   const groupTree = useMemo(
     () => buildGroupTree(schema, mod?.configGroups),
     [schema, mod?.configGroups]
@@ -330,6 +337,14 @@ export const useModuleConfigController = (
   const recordList: RecordListEditing = {
     created,
     stagedRemovals,
+    hasMembershipChanges: Object.values(created)
+      .concat(Object.values(stagedRemovals))
+      .some(slugs => slugs.length > 0),
+    rosterFor: field => [
+      ...rosterOf(configSource, field),
+      ...(created[field] ?? [])
+    ],
+    stagedFor: field => stagedRemovals[field] ?? [],
     create: (field, slug, label) => {
       setCreated(prev => addTo(prev, field, slug));
       // Seeded on the next tick: the label field only exists once the roster
