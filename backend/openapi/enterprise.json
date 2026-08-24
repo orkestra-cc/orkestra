@@ -1388,6 +1388,15 @@
           "helpUrl": {
             "type": "string"
           },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigItemField"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "key": {
             "type": "string"
           },
@@ -1458,6 +1467,74 @@
         "required": [
           "key",
           "label"
+        ],
+        "type": "object"
+      },
+      "ConfigItemField": {
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "type": "string"
+          },
+          "dependsOn": {
+            "items": {
+              "$ref": "#/components/schemas/FieldCondition"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "dependsOnMatch": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "helpUrl": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "max": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "min": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "placeholder": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "type",
+          "required"
         ],
         "type": "object"
       },
