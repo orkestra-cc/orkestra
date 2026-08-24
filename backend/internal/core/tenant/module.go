@@ -10,6 +10,7 @@ package tenant
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
@@ -47,6 +48,11 @@ type Module struct {
 	// configService is where the persisted Tier-1 provisioning mode lives,
 	// including every named environment profile.
 	configService *module.ModuleConfigService
+	// logger is deps.Logger (the registry stamps module="tenant" on every
+	// record). Boot reconciliation uses it to report a lost reconcile
+	// lease, which is a coordination anomaly worth seeing but not a
+	// startup failure.
+	logger *slog.Logger
 }
 
 func NewModule() *Module { return &Module{} }
@@ -216,6 +222,10 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	m.handler = handlers.New(m.svc, deps.Services)
 	m.slotCount = m.svc.CountProvisioningSlotsByKind
 	m.configService = deps.ConfigService
+	m.logger = deps.Logger
+	if m.logger == nil {
+		m.logger = slog.Default()
+	}
 
 	// Boot-reconciliation wiring (Start, reconcile.go). Both seams are
 	// REQUIRED: missing wiring fails module initialization loudly rather

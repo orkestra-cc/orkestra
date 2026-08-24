@@ -27,13 +27,17 @@ const setupReconciliationVersion = 1
 // reconcile lease before another boot may take it over. It only has to
 // outlast the reconciliation itself (a handful of small reads plus at most
 // three writes), not any user-facing operation.
-const reconcileLeaseTTL = 60 * time.Second
+//
+// A var, not a const, ONLY so lease-expiry tests can shrink it — nothing in
+// production ever assigns to it. Tests that do must restore it and must not
+// run in parallel.
+var reconcileLeaseTTL = 60 * time.Second
 
 // reconcileWaitInterval is how long a replica that lost the lease race
 // waits before re-reading the version. The winner normally finishes in
 // well under one interval; the loser then observes the completed version
-// and returns.
-const reconcileWaitInterval = 2 * time.Second
+// and returns. A var for the same test-only reason as reconcileLeaseTTL.
+var reconcileWaitInterval = 2 * time.Second
 
 const provisioningInternalModeKey = "provisioning.internal.mode"
 
@@ -139,8 +143,35 @@ func (m *Module) reconcileSetupState(ctx context.Context) error {
 		if pristine {
 			return nil
 		}
-		if _, err := m.finalization.FinishReconcile(ctx, setupReconciliationVersion, owner); err != nil {
+		finished, err := m.finalization.FinishReconcile(ctx, setupReconciliationVersion, owner)
+		if err != nil {
 			return fmt.Errorf("tenant: finish reconcile: %w", err)
+		}
+		if !finished {
+			// The completion CAS did not match: this replica no longer held
+			// the reconcile lease when it tried to publish the version —
+			// its lease expired mid-run and another replica took over.
+			//
+			// Returning nil here would report startup success on the
+			// strength of "we held the lease and our writes returned nil",
+			// which is exactly the judgement the saga's own executor
+			// refuses to make (see finalize.go's runSaga: a lost renewal
+			// re-reads the record rather than assuming the stage landed).
+			// The version is not ours to stamp and, as far as this replica
+			// can prove, is not stamped at all — so loop back and let the
+			// record decide: either the new owner publishes it and the read
+			// at the top returns, or its lease lapses and this replica
+			// takes over and re-runs. Reconciliation is idempotent, so
+			// re-running is always safe.
+			//
+			// No sleep here: the re-entry either returns immediately (the
+			// version is current) or falls through to the lease claim,
+			// whose own !ok branch does the waiting.
+			m.logger.WarnContext(ctx, "tenant: lost the reconcile lease before publishing the version; re-deriving from the record",
+				"version", setupReconciliationVersion,
+				"owner", owner,
+			)
+			continue
 		}
 		return nil
 	}
