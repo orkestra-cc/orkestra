@@ -526,6 +526,22 @@ func (m *AuthMiddleware) recordImpersonationAudit(
 //     override it, so a Tier-2 session can never hop tenants.
 //  3. X-Tenant-ID header when the user is a member of that tenant.
 //  4. claims.TenantFallbackID.
+//
+// SPEC INVARIANT (Task 6.2): this function — and every other file under
+// internal/shared/middleware — never resolves the platform-wide default
+// Tier-1 tenant pointer (owned by the tenant module, tenant module PR 3;
+// its resolver type is declared in pkg/sdk/iface). The platform default may
+// influence a request only indirectly, by having already been folded into
+// TenantFallbackID at operator-audience token ISSUANCE time
+// (auth/services/jwt_service.go::loadMemberships), which only happens when
+// the default names one of the user's own valid memberships. By the time a
+// claim reaches this function, TenantFallbackID is an ordinary per-token
+// membership-validated value indistinguishable from any other fallback —
+// resolution here does not know or care whether it came from the platform
+// default or the owner-first rule. Resolving the pointer directly from
+// middleware would let a request influence itself with something that was
+// never membership-checked against the CALLER. Enforced by a package
+// hygiene test alongside this file (see the middleware isolation test).
 func resolveCurrentTenant(r *http.Request, claims *models.JWTClaims) (string, []string, string, bool) {
 	requested := r.Header.Get(TenantIDHeader)
 

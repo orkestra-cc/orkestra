@@ -588,11 +588,19 @@ func (r *Repository) DeleteMembershipsByUser(ctx context.Context, userUUID strin
 	return res.DeletedCount, nil
 }
 
+// ListMembershipsByUser returns the caller's memberships in a deterministic
+// order: joinedAt ascending, then the membership's tenant identifier
+// (persisted as tenantId) ascending as a stable tie-break. Order is
+// load-bearing — auth/services/jwt_service.go's loadMemberships relies on
+// it (and does not re-sort) to pick a deterministic tenant fallback and to
+// embed the membership list in JWT claims in the same order. Do not drop
+// the sort.
 func (r *Repository) ListMembershipsByUser(ctx context.Context, userUUID string) ([]models.TenantMembership, error) {
+	opts := options.Find().SetSort(bson.D{{Key: "joinedAt", Value: 1}, {Key: "tenantId", Value: 1}})
 	cur, err := r.db.Collection(CollMemberships).Find(ctx, bson.M{
 		"userUUID": userUUID,
 		"$or":      []bson.M{{"expiresAt": nil}, {"expiresAt": bson.M{"$gt": time.Now()}}},
-	})
+	}, opts)
 	if err != nil {
 		return nil, err
 	}
