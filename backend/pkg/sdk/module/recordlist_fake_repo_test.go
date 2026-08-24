@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"testing"
 )
@@ -29,19 +30,48 @@ type fakeConfigRepo struct {
 	docs        map[string]*ModuleConfig
 	casFailures int // fail this many CAS attempts before allowing one through
 	casCalls    int
+	// duringActivate runs inside ActivateEnvironment, modelling a concurrent
+	// write landing in the window a two-step activation leaves open.
+	duringActivate func()
 }
 
 func newFakeConfigRepo() *fakeConfigRepo {
 	return &fakeConfigRepo{docs: map[string]*ModuleConfig{}}
 }
 
+// FindByName returns a DEEP copy, the way a real Mongo read does: the caller
+// holds a snapshot, and a later write to the stored document is invisible to
+// it. A shallow copy shares every map, which would let a test that mutates
+// stored state be silently observed through the caller's "snapshot" — exactly
+// the staleness these tests exist to detect.
 func (f *fakeConfigRepo) FindByName(_ context.Context, name string) (*ModuleConfig, error) {
 	doc, ok := f.docs[name]
 	if !ok {
 		return nil, nil
 	}
 	cp := *doc
+	cp.ConfigValues = copyStrings(doc.ConfigValues)
+	cp.EncryptedValues = copyStrings(doc.EncryptedValues)
+	if doc.Environments != nil {
+		cp.Environments = make(map[string]EnvironmentConfig, len(doc.Environments))
+		for k, env := range doc.Environments {
+			env.ConfigValues = copyStrings(env.ConfigValues)
+			env.EncryptedValues = copyStrings(env.EncryptedValues)
+			cp.Environments[k] = env
+		}
+	}
 	return &cp, nil
+}
+
+func copyStrings(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
 
 func (f *fakeConfigRepo) FindAll(context.Context) ([]ModuleConfig, error) { return nil, nil }
@@ -104,4 +134,26 @@ func (f *fakeConfigRepo) CompareAndSwapEnvironment(_ context.Context, name, env 
 		doc.ConfigValues, doc.EncryptedValues = next.ConfigValues, next.EncryptedValues
 	}
 	return true, nil
+}
+
+// ActivateEnvironment mirrors the Mongo pipeline update: the values copied
+// into the legacy maps are read from the STORED document at execution time,
+// not from a snapshot the caller took earlier. duringActivate simulates a
+// write landing just before that read.
+func (f *fakeConfigRepo) ActivateEnvironment(_ context.Context, name, env string) error {
+	doc, ok := f.docs[name]
+	if !ok {
+		return fmt.Errorf("module %q not found", name)
+	}
+	if _, ok := doc.Environments[env]; !ok {
+		return fmt.Errorf("environment %q not found for module %q", env, name)
+	}
+	if f.duringActivate != nil {
+		f.duringActivate()
+	}
+	cfg := doc.Environments[env]
+	doc.ActiveEnvironment = env
+	doc.ConfigValues = copyStrings(cfg.ConfigValues)
+	doc.EncryptedValues = copyStrings(cfg.EncryptedValues)
+	return nil
 }

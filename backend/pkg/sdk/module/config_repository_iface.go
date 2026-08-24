@@ -17,6 +17,7 @@ type ConfigRepository interface {
 	UpdateConfigValues(ctx context.Context, name string, values, encrypted map[string]string) error
 	UpdateEnvironmentConfig(ctx context.Context, name, envName string, values, encrypted map[string]string) error
 	SetActiveEnvironment(ctx context.Context, name, envName string) error
+	ActivateEnvironment(ctx context.Context, name, envName string) error
 	MigrateToEnvironments(ctx context.Context, name string, configValues, encryptedValues map[string]string) error
 	ClearNeedsRestart(ctx context.Context, name string) error
 	RefreshMetadata(ctx context.Context, m Module) error

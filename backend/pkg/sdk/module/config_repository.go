@@ -274,6 +274,32 @@ func (r *ModuleConfigRepository) SetActiveEnvironment(ctx context.Context, name,
 	return nil
 }
 
+// ActivateEnvironment sets the active environment and copies that
+// environment's values into the legacy top-level maps in ONE update, reading
+// them server-side at execution time. The previous two-step version copied a
+// snapshot the process had read earlier, so a write landing in between was
+// silently rolled back — including a removal, which brought its secret back.
+func (r *ModuleConfigRepository) ActivateEnvironment(ctx context.Context, name, envName string) error {
+	envPath := "$environments." + envName
+	res, err := r.collection.UpdateOne(ctx,
+		bson.M{"moduleName": name, "environments." + envName: bson.M{"$exists": true}},
+		mongo.Pipeline{{{Key: "$set", Value: bson.M{
+			"activeEnvironment": envName,
+			"configValues":      bson.M{"$ifNull": bson.A{envPath + ".configValues", bson.M{}}},
+			"encryptedValues":   bson.M{"$ifNull": bson.A{envPath + ".encryptedValues", bson.M{}}},
+			"needsRestart":      true,
+			"updatedAt":         time.Now().UTC(),
+		}}}},
+	)
+	if err != nil {
+		return fmt.Errorf("activate environment %q for %q: %w", envName, name, err)
+	}
+	if res.MatchedCount == 0 {
+		return fmt.Errorf("environment %q not found for module %q", envName, name)
+	}
+	return nil
+}
+
 // MigrateToEnvironments copies legacy top-level ConfigValues/EncryptedValues
 // into the Environments map and sets ActiveEnvironment = "production".
 // This is a one-time migration for documents that predate the environment feature.

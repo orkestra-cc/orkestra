@@ -542,23 +542,14 @@ func (s *ModuleConfigService) SetActiveEnvironment(ctx context.Context, name, en
 		return fmt.Errorf("environment %q not found for module %q", envName, name)
 	}
 
-	if err := s.repo.SetActiveEnvironment(ctx, name, envName); err != nil {
+	// One write: the activation and the legacy-map sync are the same update,
+	// and the values copied are read server-side at execution time. Copying
+	// `doc` — a snapshot taken above — put back whatever a concurrent write
+	// had removed in between, secrets included. A failed sync is returned
+	// rather than logged: activeEnvironment pointing at a profile whose
+	// values were never copied is not a success.
+	if err := s.repo.ActivateEnvironment(ctx, name, envName); err != nil {
 		return err
-	}
-
-	// Sync the newly active environment's values to legacy top-level fields.
-	env := doc.Environments[envName]
-	cv := env.ConfigValues
-	if cv == nil {
-		cv = make(map[string]string)
-	}
-	ev := env.EncryptedValues
-	if ev == nil {
-		ev = make(map[string]string)
-	}
-	if err := s.repo.UpdateConfigValues(ctx, name, cv, ev); err != nil {
-		s.logger.Warn("SetActiveEnvironment: failed to sync legacy fields",
-			slog.String("module", name), slog.String("error", err.Error()))
 	}
 
 	return s.InvalidateCache(ctx, name)
