@@ -148,3 +148,31 @@ func TestClientSuppliedRosterKeyIsIgnored(t *testing.T) {
 		t.Fatal("stripping the roster key also dropped an ordinary value")
 	}
 }
+
+// A document written before environment profiles existed has no Environments
+// map. GetConfig migrates it lazily; reading the repository directly would
+// report the environment as missing and fail every record-list mutation on
+// every pre-existing module.
+func TestMutationMigratesALegacyDocument(t *testing.T) {
+	repo := newFakeConfigRepo()
+	repo.docs["demo"] = &ModuleConfig{
+		ModuleName:      "demo",
+		ConfigValues:    map[string]string{"existing": "kept"},
+		EncryptedValues: map[string]string{},
+	}
+	svc := NewModuleConfigService(repo, fakeRedisClient{}, slog.Default())
+
+	err := svc.UpdateEnvironmentConfigWithRecordLists(context.Background(), "demo", "production",
+		map[string]string{"email.profiles.a.host": "smtp.a"},
+		nil, []RecordListMutation{{Field: "email.profiles", Create: []string{"a"}}}, nil)
+	if err != nil {
+		t.Fatalf("mutation on a legacy document failed: %v", err)
+	}
+	env := repo.docs["demo"].Environments["production"]
+	if env.ConfigValues["email.profiles.__items"] != "a" {
+		t.Fatalf("roster = %q, want \"a\"", env.ConfigValues["email.profiles.__items"])
+	}
+	if env.ConfigValues["existing"] != "kept" {
+		t.Fatal("the migration dropped a pre-existing legacy value")
+	}
+}

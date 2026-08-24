@@ -102,7 +102,19 @@ func (f *fakeConfigRepo) SetActiveEnvironment(_ context.Context, name, env strin
 	return nil
 }
 
-func (f *fakeConfigRepo) MigrateToEnvironments(context.Context, string, map[string]string, map[string]string) error {
+// MigrateToEnvironments mirrors the real one: a no-op fake would let the
+// service believe a legacy document had been migrated while the stored one
+// still had no Environments map at all.
+func (f *fakeConfigRepo) MigrateToEnvironments(_ context.Context, name string, cv, ev map[string]string) error {
+	doc, ok := f.docs[name]
+	if !ok {
+		return fmt.Errorf("module %q not found", name)
+	}
+	doc.ActiveEnvironment = "production"
+	doc.Environments = map[string]EnvironmentConfig{
+		"production": {ConfigValues: copyStrings(cv), EncryptedValues: copyStrings(ev)},
+		"sandbox":    {ConfigValues: map[string]string{}, EncryptedValues: map[string]string{}},
+	}
 	return nil
 }
 

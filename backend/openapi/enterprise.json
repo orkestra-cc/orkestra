@@ -2136,6 +2136,10 @@
           "environment": {
             "type": "string"
           },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
           "secretStatus": {
             "additionalProperties": {
               "type": "boolean"
@@ -2150,7 +2154,8 @@
           "environment",
           "configValues",
           "secretStatus",
-          "updatedAt"
+          "updatedAt",
+          "revision"
         ],
         "type": "object"
       },
@@ -4988,6 +4993,39 @@
         ],
         "type": "object"
       },
+      "RecordListMutationDTO": {
+        "additionalProperties": false,
+        "properties": {
+          "create": {
+            "description": "Slugs being created",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "field": {
+            "description": "Record-list field key",
+            "type": "string"
+          },
+          "remove": {
+            "description": "Slugs being removed",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "field"
+        ],
+        "type": "object"
+      },
       "RegisterRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -6361,6 +6399,21 @@
             },
             "description": "Non-secret config values to update",
             "type": "object"
+          },
+          "recordLists": {
+            "description": "Record-list membership changes",
+            "items": {
+              "$ref": "#/components/schemas/RecordListMutationDTO"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "revision": {
+            "description": "Environment revision; required when any recordLists entry removes elements",
+            "format": "int64",
+            "type": "integer"
           },
           "secrets": {
             "additionalProperties": {

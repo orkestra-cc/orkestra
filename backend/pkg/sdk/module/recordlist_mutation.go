@@ -74,7 +74,10 @@ func (s *ModuleConfigService) UpdateEnvironmentConfigWithRecordLists(
 	}
 
 	for attempt := 0; attempt < recordListMaxAttempts; attempt++ {
-		doc, err := s.repo.FindByName(ctx, name)
+		// GetConfig, not repo.FindByName: it lazily migrates a document that
+		// predates environment profiles and lazy-seeds one that has gone
+		// missing. Reading the repository directly would 400 on both.
+		doc, err := s.GetConfig(ctx, name)
 		if err != nil {
 			return err
 		}
