@@ -24,6 +24,9 @@ var (
 	ErrEmptySlug     = errors.New("recordlist: name does not produce a slug")
 	ErrLabelRequired = errors.New("recordlist: label is required")
 	ErrLabelTooLong  = errors.New("recordlist: label exceeds 120 characters")
+	// ErrSlugLabelMismatch guards the readable key against lying about the
+	// record it names: at creation the slug must be the one its label mints.
+	ErrSlugLabelMismatch = errors.New("recordlist: slug does not match the label it was created from")
 
 	slugPattern    = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 	nonAlphaNumRun = regexp.MustCompile(`[^a-z0-9]+`)

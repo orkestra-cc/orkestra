@@ -15,6 +15,10 @@ var (
 	ErrSlugMissing         = errors.New("recordlist: slug does not exist")
 	ErrCreateRemoveOverlap = errors.New("recordlist: a slug cannot be created and removed in one request")
 	ErrRosterFull          = errors.New("recordlist: list is full")
+	// ErrUnknownSlug rejects a value aimed at an element that will not exist
+	// once the request is applied. A write to a missing element is a client
+	// acting on a stale view, never an implicit create.
+	ErrUnknownSlug = errors.New("recordlist: value addresses a slug that is not in the roster")
 )
 
 // ParseRoster reads a record list's membership out of the flat value map.

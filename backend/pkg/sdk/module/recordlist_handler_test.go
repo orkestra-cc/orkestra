@@ -20,6 +20,13 @@ func TestRecordListErrorsMapToStatusCodes(t *testing.T) {
 		{ErrRevisionStale, http.StatusConflict},
 		{ErrSlugExists, http.StatusConflict},
 		{ErrSlugMissing, http.StatusConflict},
+		// A value aimed at an element that is not there is the same class of
+		// mistake as a stale removal: the client's view no longer holds.
+		{ErrUnknownSlug, http.StatusConflict},
+		// Label rules and the creation binding are value validation, not races.
+		{ErrLabelRequired, http.StatusUnprocessableEntity},
+		{ErrLabelTooLong, http.StatusUnprocessableEntity},
+		{ErrSlugLabelMismatch, http.StatusUnprocessableEntity},
 	}
 	for _, c := range cases {
 		if got := recordListStatus(c.err); got != c.want {

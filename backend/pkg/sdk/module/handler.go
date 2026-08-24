@@ -471,10 +471,13 @@ func recordListStatus(err error) int {
 	switch {
 	case err == nil:
 		return 0
-	case errors.Is(err, ErrRevisionStale), errors.Is(err, ErrSlugExists), errors.Is(err, ErrSlugMissing):
+	case errors.Is(err, ErrRevisionStale), errors.Is(err, ErrSlugExists),
+		errors.Is(err, ErrSlugMissing), errors.Is(err, ErrUnknownSlug):
 		return http.StatusConflict
 	case errors.Is(err, ErrRevisionRequired), errors.Is(err, ErrDuplicateMutationField),
-		errors.Is(err, ErrCreateRemoveOverlap), errors.Is(err, ErrRosterFull):
+		errors.Is(err, ErrCreateRemoveOverlap), errors.Is(err, ErrRosterFull),
+		errors.Is(err, ErrLabelRequired), errors.Is(err, ErrLabelTooLong),
+		errors.Is(err, ErrSlugLabelMismatch):
 		return http.StatusUnprocessableEntity
 	default:
 		return 0

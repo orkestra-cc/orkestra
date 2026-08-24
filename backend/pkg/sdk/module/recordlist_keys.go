@@ -16,6 +16,14 @@ import "strings"
 //	<field>.<slug>.__label   the element's editable display label
 
 // RosterKey names the SDK-owned key holding a record list's slug roster.
+const (
+	// rosterSuffix and labelSuffix are the two SDK-owned key segments. They
+	// are constants because three places must agree on them: key composition,
+	// key splitting, and the reserved-prefix check in ValidateConfigDeclarations.
+	rosterSuffix = "__items"
+	labelSuffix  = "__label"
+)
+
 func RosterKey(field string) string { return field + ".__items" }
 
 // LabelKey names an element's editable display label.
@@ -39,4 +47,21 @@ func KeysUnderElement(keys []string, field, slug string) []string {
 		}
 	}
 	return out
+}
+
+// SplitElementKey decomposes a fully-composed value key into the element it
+// belongs to and the sub-field it names. It reports false for anything that is
+// not an element key — a key under another field, or the field's own roster,
+// which has no element segment.
+func SplitElementKey(field, key string) (slug, sub string, ok bool) {
+	prefix := field + "."
+	if !strings.HasPrefix(key, prefix) {
+		return "", "", false
+	}
+	rest := key[len(prefix):]
+	idx := strings.Index(rest, ".")
+	if idx <= 0 || idx == len(rest)-1 {
+		return "", "", false
+	}
+	return rest[:idx], rest[idx+1:], true
 }

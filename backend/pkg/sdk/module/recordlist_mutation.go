@@ -121,6 +121,18 @@ func (s *ModuleConfigService) UpdateEnvironmentConfigWithRecordLists(
 			}
 		}
 
+		// Layer B: the generic value rules the SDK owns. They run against the
+		// RECONCILED rosters in next, so an element and its values may be
+		// created in one request, and against the SUBMITTED values, so a
+		// label already stored is never re-judged by a rule that postdates it.
+		byField := make(map[string]RecordListMutation, len(mutations))
+		for _, m := range mutations {
+			byField[m.Field] = m
+		}
+		if err := validateRecordListSubmission(doc.ConfigSchema, values, next.ConfigValues, byField); err != nil {
+			return err
+		}
+
 		// Validate exactly what will be written.
 		if err := s.validateModuleConfig(ctx, name, next.ConfigValues); err != nil {
 			return err
@@ -161,4 +173,63 @@ func keysOf(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// validateRecordListSubmission enforces the record-list value rules that are
+// generic to the SDK: every submitted value must name an element that exists
+// once the request is applied, every written label must obey the label bounds,
+// and a created element must carry a label whose mint is its slug.
+//
+// It walks the SCHEMA rather than the mutations, because a request may write
+// into a record list without changing its membership at all — renaming an
+// element is exactly that, and would otherwise skip every check here.
+func validateRecordListSubmission(
+	schema []ConfigField,
+	submitted, reconciled map[string]string,
+	byField map[string]RecordListMutation,
+) error {
+	for _, field := range schema {
+		if field.Type != FieldRecordList {
+			continue
+		}
+
+		target := ParseRoster(reconciled, field.Key)
+		inTarget := make(map[string]bool, len(target))
+		for _, slug := range target {
+			inTarget[slug] = true
+		}
+
+		for key, val := range submitted {
+			slug, sub, ok := SplitElementKey(field.Key, key)
+			if !ok {
+				continue
+			}
+			if !inTarget[slug] {
+				return fmt.Errorf("%w: %q under %q", ErrUnknownSlug, slug, field.Key)
+			}
+			if sub == labelSuffix {
+				if err := ValidateLabel(val); err != nil {
+					return fmt.Errorf("%w (element %q under %q)", err, slug, field.Key)
+				}
+			}
+		}
+
+		// The slug/label binding holds at creation and nowhere else: afterwards
+		// the label is editable and the slug frozen, so the two are EXPECTED to
+		// diverge and nothing may re-mint to restore the equality.
+		for _, slug := range byField[field.Key].Create {
+			label, ok := submitted[LabelKey(field.Key, slug)]
+			if !ok {
+				return fmt.Errorf("%w: element %q under %q", ErrLabelRequired, slug, field.Key)
+			}
+			if err := ValidateLabel(label); err != nil {
+				return fmt.Errorf("%w (element %q under %q)", err, slug, field.Key)
+			}
+			if MintSlug(label) != slug {
+				return fmt.Errorf("%w: %q under %q was created from label %q, which mints %q",
+					ErrSlugLabelMismatch, slug, field.Key, label, MintSlug(label))
+			}
+		}
+	}
+	return nil
 }
