@@ -141,7 +141,10 @@ describe('setupApi.finalizeSetup — ordered session re-mint', () => {
     );
 
     expect(result.error).toBeUndefined();
-    expect(result.data).toEqual({ state: 'setup.finalization_in_progress' });
+    expect(result.data).toEqual({
+      state: 'setup.finalization_in_progress',
+      retryAfterSeconds: 3
+    });
 
     // Give the (absent) background continuation a chance to run so a
     // regression that dispatches unconditionally would be caught.
@@ -150,6 +153,32 @@ describe('setupApi.finalizeSetup — ordered session re-mint', () => {
     expect(getSessionInitiateSpy).not.toHaveBeenCalled();
     expect(invalidateSpy).not.toHaveBeenCalled();
     expect(store.getState().auth.accessToken).toBe('stale-token');
+  });
+
+  it('202: folds the header value onto the result, not the OrgStep default fallback (3s)', async () => {
+    // The sibling test above sends Retry-After: 3 — the same value
+    // OrgStep's DEFAULT_RETRY_AFTER_SECONDS falls back to — so it alone
+    // cannot tell a header-driven value apart from a regression that
+    // dropped the header read and silently defaulted. 7 is distinct from
+    // that default.
+    server.use(
+      http.post('*/v1/setup/finalize', () =>
+        HttpResponse.json(
+          { state: 'setup.finalization_in_progress' },
+          { status: 202, headers: { 'Retry-After': '7' } }
+        )
+      )
+    );
+
+    const store = seededStore('stale-token');
+    const result = await store.dispatch(
+      setupApi.endpoints.finalizeSetup.initiate(finalizeInput)
+    );
+
+    expect(result.data).toEqual({
+      state: 'setup.finalization_in_progress',
+      retryAfterSeconds: 7
+    });
   });
 
   it('200 but session refresh resolves without a token: no invalidation, token unchanged, mutation still resolves', async () => {

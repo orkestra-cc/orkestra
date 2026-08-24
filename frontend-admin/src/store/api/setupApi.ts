@@ -54,6 +54,13 @@ export interface FinalizeSetupResult {
   tenantSlug?: string;
   mode?: 'manual' | 'single';
   allowAdditionalInternalTenants?: boolean;
+  /**
+   * Present only alongside `state` (the 202 case). The backend always sends
+   * Retry-After on that response (routes.go hardcodes "3"), but the caller
+   * should still fall back to a sane default if a future change omits it —
+   * see OrgStep's DEFAULT_RETRY_AFTER_SECONDS.
+   */
+  retryAfterSeconds?: number;
 }
 
 export const setupApi = baseApi.injectEndpoints({
@@ -126,6 +133,25 @@ export const setupApi = baseApi.injectEndpoints({
     // retries the identical payload.
     finalizeSetup: builder.mutation<FinalizeSetupResult, FinalizeSetupInput>({
       query: body => ({ url: '/v1/setup/finalize', method: 'POST', body }),
+      // Only the 202 body carries Retry-After, and only as a response
+      // HEADER — fetchBaseQuery's success payload is just the JSON body, so
+      // fold the header onto the result here (additively) the same way
+      // getSetupStatus's transformErrorResponse does for its own 503. A 200
+      // response has no such header; the field stays undefined there.
+      transformResponse: (response: FinalizeSetupResult, meta) => {
+        if (response?.state !== 'setup.finalization_in_progress') {
+          return response;
+        }
+        const header = meta?.response?.headers.get('Retry-After');
+        const seconds = header ? Number(header) : undefined;
+        return {
+          ...response,
+          retryAfterSeconds:
+            seconds !== undefined && Number.isFinite(seconds)
+              ? seconds
+              : undefined
+        };
+      },
       async onQueryStarted(_arg, { dispatch, queryFulfilled }) {
         let result;
         try {

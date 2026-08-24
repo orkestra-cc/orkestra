@@ -59,7 +59,6 @@ describe('sanitizeReturnTo', () => {
     '/forgot-password',
     '/reset-password',
     '/verify-email',
-    '/setup',
     '/landing',
     '/logout'
   ])('rejects auth-flow loop target %s', authPath => {
@@ -70,6 +69,11 @@ describe('sanitizeReturnTo', () => {
     // /loginszzz is not /login or under /login/ — it is a legitimate deep link.
     expect(sanitizeReturnTo('/registers-of-deeds')).toBe('/registers-of-deeds');
     expect(sanitizeReturnTo('/setupwizardlike')).toBe('/setupwizardlike');
+  });
+
+  it('allows returning to /setup — the org step requires an authenticated session and must be reachable after a login round-trip', () => {
+    expect(sanitizeReturnTo('/setup')).toBe('/setup');
+    expect(sanitizeReturnTo('/setup?foo=1')).toBe('/setup?foo=1');
   });
 });
 
