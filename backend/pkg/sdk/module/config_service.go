@@ -12,7 +12,7 @@ import (
 // ModuleConfigService manages module configurations in MongoDB with Redis caching.
 // It provides the hot-path IsEnabled() check used by the ModuleGate middleware.
 type ModuleConfigService struct {
-	repo        *ModuleConfigRepository
+	repo        ConfigRepository
 	redis       RedisClient
 	logger      *slog.Logger
 	coreModules map[string]bool // precomputed set — never hits DB/Redis
@@ -30,7 +30,7 @@ const (
 )
 
 // NewModuleConfigService creates a new config service.
-func NewModuleConfigService(repo *ModuleConfigRepository, redis RedisClient, logger *slog.Logger) *ModuleConfigService {
+func NewModuleConfigService(repo ConfigRepository, redis RedisClient, logger *slog.Logger) *ModuleConfigService {
 	return &ModuleConfigService{
 		repo:         repo,
 		redis:        redis,
@@ -542,14 +542,16 @@ func (s *ModuleConfigService) SetActiveEnvironment(ctx context.Context, name, en
 		return fmt.Errorf("environment %q not found for module %q", envName, name)
 	}
 
-	env := doc.Environments[envName]
-	cv := env.ConfigValues
+	// Activation-time validation: the target profile as a whole, before any
+	// write. Mirrors validateModuleConfig's dispatch. It reads the profile
+	// from the `doc` snapshot deliberately — validating what the operator is
+	// activating — while the write below re-reads server-side; a profile
+	// mutated in between is caught by the next activation, not silently
+	// half-applied by this one.
+	cv := doc.Environments[envName].ConfigValues
 	if cv == nil {
 		cv = make(map[string]string)
 	}
-
-	// Activation-time validation: the target profile as a whole, before any
-	// write. Mirrors validateModuleConfig's dispatch (config_service.go:387).
 	if m, ok := s.knownModules[name]; ok {
 		if v, ok := m.(HasConfigActivationValidator); ok {
 			if err := v.ValidateConfigActivation(ctx, cv); err != nil {
@@ -558,18 +560,14 @@ func (s *ModuleConfigService) SetActiveEnvironment(ctx context.Context, name, en
 		}
 	}
 
-	if err := s.repo.SetActiveEnvironment(ctx, name, envName); err != nil {
+	// One write: the activation and the legacy-map sync are the same update,
+	// and the values copied are read server-side at execution time. Copying
+	// `doc` — a snapshot taken above — put back whatever a concurrent write
+	// had removed in between, secrets included. A failed sync is returned
+	// rather than logged: activeEnvironment pointing at a profile whose
+	// values were never copied is not a success.
+	if err := s.repo.ActivateEnvironment(ctx, name, envName); err != nil {
 		return err
-	}
-
-	// Sync the newly active environment's values to legacy top-level fields.
-	ev := env.EncryptedValues
-	if ev == nil {
-		ev = make(map[string]string)
-	}
-	if err := s.repo.UpdateConfigValues(ctx, name, cv, ev); err != nil {
-		s.logger.Warn("SetActiveEnvironment: failed to sync legacy fields",
-			slog.String("module", name), slog.String("error", err.Error()))
 	}
 
 	return s.InvalidateCache(ctx, name)
@@ -590,12 +588,29 @@ func (s *ModuleConfigService) GetEnvironmentConfig(ctx context.Context, name, en
 		return nil, nil, fmt.Errorf("environment %q not found for module %q", envName, name)
 	}
 
-	// Build secret status map.
+	// Build secret status map. A record list's secrets live one per element,
+	// at <field>.<slug>.<sub> — iterating the declared schema alone reports
+	// every one of them as unset, and the operator retypes a credential the
+	// deployment already holds.
 	secretStatus := make(map[string]bool)
 	for _, field := range doc.ConfigSchema {
 		if field.Type == FieldSecret {
 			_, hasValue := env.EncryptedValues[field.Key]
 			secretStatus[field.Key] = hasValue
+			continue
+		}
+		if field.Type != FieldRecordList {
+			continue
+		}
+		for _, slug := range ParseRoster(env.ConfigValues, field.Key) {
+			for _, item := range field.Items {
+				if item.Type != FieldSecret {
+					continue
+				}
+				key := ItemKey(field.Key, slug, item.Key)
+				_, hasValue := env.EncryptedValues[key]
+				secretStatus[key] = hasValue
+			}
 		}
 	}
 

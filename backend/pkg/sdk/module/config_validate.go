@@ -126,6 +126,8 @@ func ValidateConfigDeclarations(schema []ConfigField, groups []ConfigGroup) erro
 					f.Key, f.DependsOnMatch))
 		}
 
+		problems = append(problems, recordListDeclarationProblems(f)...)
+
 		for _, c := range f.DependsOn {
 			target, known := fieldByKey[c.Key]
 			if !known {
@@ -148,6 +150,73 @@ func ValidateConfigDeclarations(schema []ConfigField, groups []ConfigGroup) erro
 	}
 	sort.Strings(problems)
 	return fmt.Errorf("invalid config declarations: %s", strings.Join(problems, "; "))
+}
+
+// recordListDeclarationProblems reports every structural defect in one
+// field's record-list declaration. Split out of ValidateConfigDeclarations
+// because the checks are self-contained — everything they need is the field
+// itself, since an element's conditions may only reference its own siblings.
+//
+// The reserved "__" prefix belongs to the SDK: the roster lives at
+// <field>.__items and an element's label at <field>.<slug>.__label, both in
+// the same flat value map a sub-field key composes into. A sub-field named
+// __label would collide with the element's own label and silently overwrite
+// it.
+func recordListDeclarationProblems(field ConfigField) []string {
+	var problems []string
+	isList := field.Type == FieldRecordList
+
+	if isList && len(field.Items) == 0 {
+		problems = append(problems, fmt.Sprintf("field %q: type recordList requires items", field.Key))
+	}
+	if !isList && len(field.Items) > 0 {
+		problems = append(problems, fmt.Sprintf("field %q: items is only valid on type recordList", field.Key))
+	}
+	if !isList {
+		return problems
+	}
+
+	siblings := make([]string, 0, len(field.Items))
+	for _, it := range field.Items {
+		siblings = append(siblings, it.Key)
+	}
+
+	seen := map[string]bool{}
+	for _, it := range field.Items {
+		if it.Type == FieldRecordList {
+			problems = append(problems, fmt.Sprintf(
+				"field %q: sub-field %q may not be a recordList — the schema is not recursive", field.Key, it.Key))
+		}
+		if strings.HasPrefix(it.Key, "__") {
+			problems = append(problems, fmt.Sprintf(
+				"field %q: sub-field %q uses the reserved \"__\" prefix", field.Key, it.Key))
+		}
+		if seen[it.Key] {
+			problems = append(problems, fmt.Sprintf("field %q: duplicate sub-field key %q", field.Key, it.Key))
+		}
+		seen[it.Key] = true
+		if it.Min != nil && *it.Min < 0 {
+			problems = append(problems, fmt.Sprintf("field %q: sub-field %q has a negative min", field.Key, it.Key))
+		}
+		if it.Min != nil && it.Max != nil && *it.Min > *it.Max {
+			problems = append(problems, fmt.Sprintf("field %q: sub-field %q has min > max", field.Key, it.Key))
+		}
+		for _, c := range it.DependsOn {
+			if !containsFold(siblings, c.Key) {
+				problems = append(problems, fmt.Sprintf(
+					"field %q: sub-field %q depends on %q, which is not a sibling in the same element",
+					field.Key, it.Key, c.Key))
+			}
+		}
+	}
+
+	if field.Min != nil && *field.Min < 0 {
+		problems = append(problems, fmt.Sprintf("field %q: negative min arity", field.Key))
+	}
+	if field.Min != nil && field.Max != nil && *field.Min > *field.Max {
+		problems = append(problems, fmt.Sprintf("field %q: min arity exceeds max", field.Key))
+	}
+	return problems
 }
 
 // conditionValueProblems reports In entries that can never match the

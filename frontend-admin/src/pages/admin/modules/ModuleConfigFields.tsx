@@ -14,6 +14,9 @@ import {
 import type { ConfigField } from 'store/api/moduleApi';
 import { isFieldVisible } from './configModel';
 import { translateConfigField } from 'helpers/configLabel';
+import { RecordListField } from './recordList/RecordListField';
+import { expandElement, labelKeyOf } from './recordList/expandSchema';
+import { useRecordListEditing } from './recordList/RecordListContext';
 import {
   fieldNameOf,
   toSchemaValues,
@@ -82,8 +85,10 @@ export interface ModuleConfigFieldsProps {
  * own state — so an edit here survives the rail moving to a different group.
  * Its consumers are the admin module detail page's config section (directly,
  * for the flat/legacy layout) and `ModuleConfigPanel` (one group at a time).
- * Handles all seven backend field types: string, bool, int, duration, secret,
- * enum, stringList.
+ * Handles all seven leaf field types: string, bool, int, duration, secret,
+ * enum, stringList. The eighth, `recordList`, is not a leaf — it delegates to
+ * `RecordListField`, which calls back into this component for each element's
+ * own concrete fields.
  *
  * Field labels below carry **no typography classes on purpose**. The theme
  * already puts `.form-label` on the scale (`$form-label-font-size: fs-10`,
@@ -104,6 +109,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
   moduleName
 }) => {
   const { t } = useTranslation();
+  const recordList = useRecordListEditing();
   const [revealedSecrets, setRevealedSecrets] = useState<
     Record<string, boolean>
   >({});
@@ -129,6 +135,46 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
     <>
       {fields.map(field => {
         const key = field.key;
+
+        // A record list holds no value of its own, so it never registers.
+        // The container owns the card chrome and the membership intents; each
+        // element's body comes back through THIS renderer, one element's
+        // concrete fields at a time — which is why the seven leaf branches
+        // below never learn an eighth case.
+        if (field.type === 'recordList') {
+          const roster = recordList?.rosterFor(key) ?? [];
+          return (
+            <RecordListField
+              key={key}
+              field={field}
+              moduleName={moduleName}
+              roster={roster}
+              labels={Object.fromEntries(
+                roster.map(slug => [
+                  slug,
+                  watched[
+                    fieldNameOf(fieldNames, labelKeyOf(key, slug))
+                  ] as string
+                ])
+              )}
+              staged={recordList?.stagedFor(key) ?? []}
+              onCreate={(slug, label) => recordList?.create(key, slug, label)}
+              onStageRemove={slug => recordList?.stageRemove(key, slug)}
+              onUndoRemove={slug => recordList?.undoRemove(key, slug)}
+              renderElement={slug => (
+                <ModuleConfigFields
+                  schema={expandElement(field, slug)}
+                  moduleName={moduleName}
+                  control={control}
+                  register={register}
+                  fieldNames={fieldNames}
+                  secretStatus={secretStatus}
+                />
+              )}
+            />
+          );
+        }
+
         // Everything RHF touches — register, Controller, the errors lookup,
         // and the DOM id/name that mirror them — goes through `name`.
         // Everything else stays on `key`.
