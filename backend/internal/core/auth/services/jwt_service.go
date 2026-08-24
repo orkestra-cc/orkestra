@@ -262,7 +262,7 @@ func (s *jwtService) GenerateEnhancedAccessToken(
 		Audience:   s.audience,
 
 		Memberships:      memberships,
-		DefaultTenantID:  defaultTenant,
+		TenantFallbackID: defaultTenant,
 		ActingTenantID:   defaultTenant,
 		ActingTenantKind: defaultKind,
 
@@ -290,9 +290,9 @@ func (s *jwtService) GenerateEnhancedAccessToken(
 
 // loadMemberships fetches the user's tenant memberships via the tenant
 // provider. Returns an empty list if the provider isn't wired yet (edge case
-// during startup) or if the user belongs to no tenants. DefaultTenantID
+// during startup) or if the user belongs to no tenants. TenantFallbackID
 // picks the first owned tenant, otherwise the first membership. Also returns
-// the default tenant kind so middleware can dispatch on tier without
+// the tenant fallback kind so middleware can dispatch on tier without
 // re-reading the provider. See ADR-0001.
 func (s *jwtService) loadMemberships(userUUID string) (list []models.TenantMembership, defaultTenant, defaultKind string) {
 	if s.tenant == nil {
@@ -571,8 +571,8 @@ func (s *jwtService) claimsToMap(claims *models.JWTClaims) jwt.MapClaims {
 	if len(claims.Scope) > 0 {
 		m["scope"] = claims.Scope
 	}
-	if claims.DefaultTenantID != "" {
-		m["dtid"] = claims.DefaultTenantID
+	if claims.TenantFallbackID != "" {
+		m["dtid"] = claims.TenantFallbackID
 	}
 	if claims.ActingTenantID != "" {
 		m["acting_tenant_id"] = claims.ActingTenantID
@@ -621,7 +621,7 @@ func (s *jwtService) mapToClaims(m jwt.MapClaims) *models.JWTClaims {
 		Fingerprint:      getStringClaim(m, "fp"),
 		RiskScore:        getFloatClaim(m, "risk"),
 		OAuthProvider:    getStringClaim(m, "provider"),
-		DefaultTenantID:  getStringClaim(m, "dtid"),
+		TenantFallbackID: getStringClaim(m, "dtid"),
 		ActingTenantID:   getStringClaim(m, "acting_tenant_id"),
 		ActingTenantKind: getStringClaim(m, "acting_tenant_kind"),
 	}
@@ -742,7 +742,7 @@ func buildTenantScopedClaims(user *iface.User, tenantUUID, tenantKind string, ro
 		Memberships: []models.TenantMembership{
 			{TenantUUID: tenantUUID, TenantKind: tenantKind, Roles: roles},
 		},
-		DefaultTenantID:  tenantUUID,
+		TenantFallbackID: tenantUUID,
 		ActingTenantID:   tenantUUID,
 		ActingTenantKind: tenantKind,
 

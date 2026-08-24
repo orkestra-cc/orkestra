@@ -25,7 +25,7 @@ func tenantClaims(audience, actingTenant string, mbrs ...authModels.TenantMember
 		UserUUID:         "user-1",
 		Audience:         audience,
 		Memberships:      mbrs,
-		DefaultTenantID:  actingTenant,
+		TenantFallbackID: actingTenant,
 		ActingTenantID:   actingTenant,
 		ActingTenantKind: iface.TenantKindInternal,
 	}

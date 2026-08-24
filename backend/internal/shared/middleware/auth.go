@@ -338,7 +338,7 @@ func (m *AuthMiddleware) sendSessionRevoked(w http.ResponseWriter, r *http.Reque
 // context into the request. Tenant resolution order:
 //  1. claims.ActingTenantID — a JWT stamped for a specific tenant.
 //  2. X-Tenant-ID header when the user is a member of that tenant.
-//  3. claims.DefaultTenantID.
+//  3. claims.TenantFallbackID.
 //  4. empty — only allowed on RequireGlobal() routes.
 func (m *AuthMiddleware) setUserContext(w http.ResponseWriter, r *http.Request, claims *models.JWTClaims, next http.Handler) {
 	ctx := r.Context()
@@ -517,7 +517,7 @@ func (m *AuthMiddleware) recordImpersonationAudit(
 // Tier resolution order (ADR-0001, amended):
 //  1. X-Tenant-ID header, for OPERATOR-audience tokens only, when it names a
 //     tenant the user is a member of — this is the operator org switcher.
-//     Operator tokens stamp ActingTenantID = DefaultTenantID merely as a
+//     Operator tokens stamp ActingTenantID = TenantFallbackID merely as a
 //     default, so the header must be free to override it. A header naming a
 //     non-member tenant falls through (admin impersonation is handled by
 //     setUserContext when resolution yields ok=false).
@@ -525,7 +525,7 @@ func (m *AuthMiddleware) recordImpersonationAudit(
 //     client-portal token is minted pinned to one tenant; the header cannot
 //     override it, so a Tier-2 session can never hop tenants.
 //  3. X-Tenant-ID header when the user is a member of that tenant.
-//  4. claims.DefaultTenantID.
+//  4. claims.TenantFallbackID.
 func resolveCurrentTenant(r *http.Request, claims *models.JWTClaims) (string, []string, string, bool) {
 	requested := r.Header.Get(TenantIDHeader)
 
@@ -564,9 +564,9 @@ func resolveCurrentTenant(r *http.Request, claims *models.JWTClaims) (string, []
 		}
 		return "", nil, "", false
 	}
-	if claims.DefaultTenantID != "" {
+	if claims.TenantFallbackID != "" {
 		for _, mbr := range claims.Memberships {
-			if mbr.TenantUUID == claims.DefaultTenantID {
+			if mbr.TenantUUID == claims.TenantFallbackID {
 				return mbr.TenantUUID, mbr.Roles, mbr.TenantKind, true
 			}
 		}

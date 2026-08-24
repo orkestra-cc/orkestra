@@ -37,11 +37,11 @@ const (
 // Identity is the compact description of a test principal. The zero value
 // is meaningless; use NewIdentity to build one.
 type Identity struct {
-	UserUUID        string
-	Email           string
-	SystemRole      string
-	Memberships     []models.TenantMembership
-	DefaultTenantID string
+	UserUUID         string
+	Email            string
+	SystemRole       string
+	Memberships      []models.TenantMembership
+	TenantFallbackID string
 }
 
 // NewIdentity returns a platform-level (no-tenant) identity. Use WithTenant
@@ -56,25 +56,25 @@ func NewIdentity(userUUID, email, systemRole string) Identity {
 }
 
 // WithTenant appends a tenant membership. If defaultIfUnset is true and the
-// Identity has no DefaultTenantID, this call also sets it — the "first
+// Identity has no TenantFallbackID, this call also sets it — the "first
 // tenant wins" rule matches JWTService.embedMemberships on new accounts.
 func (i Identity) WithTenant(tenantUUID string, roles []string, defaultIfUnset bool) Identity {
 	i.Memberships = append(i.Memberships, models.TenantMembership{
 		TenantUUID: tenantUUID,
 		Roles:      append([]string(nil), roles...),
 	})
-	if defaultIfUnset && i.DefaultTenantID == "" {
-		i.DefaultTenantID = tenantUUID
+	if defaultIfUnset && i.TenantFallbackID == "" {
+		i.TenantFallbackID = tenantUUID
 	}
 	return i
 }
 
-// WithDefaultTenant sets the default tenant explicitly, overriding the
+// WithTenantFallback sets the tenant fallback explicitly, overriding the
 // first-wins rule from WithTenant. The tenant must already be in
 // Memberships; otherwise the returned Identity will fail tenant resolution
 // when used through ContextFor.
-func (i Identity) WithDefaultTenant(tenantUUID string) Identity {
-	i.DefaultTenantID = tenantUUID
+func (i Identity) WithTenantFallback(tenantUUID string) Identity {
+	i.TenantFallbackID = tenantUUID
 	return i
 }
 
@@ -85,12 +85,12 @@ func (i Identity) WithDefaultTenant(tenantUUID string) Identity {
 // them.
 func (i Identity) Claims() *models.JWTClaims {
 	return &models.JWTClaims{
-		UserUUID:        i.UserUUID,
-		Email:           i.Email,
-		SystemRole:      i.SystemRole,
-		TokenType:       "access",
-		Memberships:     i.Memberships,
-		DefaultTenantID: i.DefaultTenantID,
+		UserUUID:         i.UserUUID,
+		Email:            i.Email,
+		SystemRole:       i.SystemRole,
+		TokenType:        "access",
+		Memberships:      i.Memberships,
+		TenantFallbackID: i.TenantFallbackID,
 	}
 }
 
@@ -99,7 +99,7 @@ func (i Identity) Claims() *models.JWTClaims {
 //
 // activeTenantID selects which tenant the context is currently scoped to —
 // this mirrors the X-Tenant-ID header the client would send. Pass "" to let
-// the default tenant (if any) take over; pass "-" to explicitly leave the
+// the tenant fallback (if any) take over; pass "-" to explicitly leave the
 // context tenant-less (useful for testing RequireGlobal handlers).
 //
 // Panics if activeTenantID is set but does not match any membership,
@@ -123,7 +123,7 @@ func (i Identity) ContextFor(ctx context.Context, activeTenantID string) context
 	}
 	resolved := activeTenantID
 	if resolved == "" {
-		resolved = i.DefaultTenantID
+		resolved = i.TenantFallbackID
 	}
 	if resolved == "" {
 		return ctx

@@ -186,7 +186,7 @@ func parseClaims(m jwt.MapClaims) *authModels.JWTClaims {
 		Email:            getStr(m, "email"),
 		SystemRole:       getStr(m, "srole"),
 		TokenType:        getStr(m, "type"),
-		DefaultTenantID:  getStr(m, "dtid"),
+		TenantFallbackID: getStr(m, "dtid"),
 		ActingTenantID:   getStr(m, "acting_tenant_id"),
 		ActingTenantKind: getStr(m, "acting_tenant_kind"),
 		SessionID:        getStr(m, "sid"),

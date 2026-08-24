@@ -387,7 +387,7 @@ func (h *Handler) callerIsTenantAdmin(ctx context.Context) bool {
 
 // assertTenantScope fails the request unless the {tenantId} path segment names
 // the same tenant the auth middleware resolved for this request (from a
-// membership-validated X-Tenant-ID / ActingTenantID / DefaultTenantID, or the
+// membership-validated X-Tenant-ID / ActingTenantID / TenantFallbackID, or the
 // audited operator impersonation bypass). The per-tenant member routes gate on
 // a permission evaluated against the *resolved* tenant, but the handler bodies
 // below are shared with the platform-admin surface and act on the *path*

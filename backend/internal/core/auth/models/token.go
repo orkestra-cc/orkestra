@@ -49,8 +49,14 @@ type JWTClaims struct {
 	Audience   string `json:"aud,omitempty"` // Token audience
 
 	// Multi-tenancy claims
-	Memberships     []TenantMembership `json:"mbr,omitempty"`  // tenants the user belongs to
-	DefaultTenantID string             `json:"dtid,omitempty"` // selected when X-Tenant-ID header is absent
+	Memberships []TenantMembership `json:"mbr,omitempty"` // tenants the user belongs to
+
+	// TenantFallbackID is the per-token tenant fallback selected at issuance
+	// — used when no explicit tenant wins resolution. Wire key stays "dtid"
+	// for compatibility with already-issued tokens and clients; the GLOBAL
+	// platform-default designation is a different concept and lives in the
+	// tenant module (tenant_defaults). Legacy name: DefaultTenantID.
+	TenantFallbackID string `json:"dtid,omitempty"`
 
 	// ActingTenantID is the tenant this specific token is minted for. When
 	// set, middleware uses it directly instead of deriving the current tenant
