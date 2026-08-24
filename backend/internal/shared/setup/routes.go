@@ -288,6 +288,12 @@ func mapFinalizeError(logger *slog.Logger, err error) error {
 	case errors.Is(err, ErrRecoveryRequiresSuperAdmin):
 		return errcode.Forbidden(errcode.SetupRecoveryRequiresSuperAdmin,
 			"Recovering setup finalization requires an active super administrator.")
+	case errors.Is(err, ErrFinalizationTenantNameRequired):
+		return errcode.UnprocessableEntity(errcode.SetupTenantNameRequired,
+			"Enter a name for your organization.")
+	case errors.Is(err, ErrFinalizationTenantSlugRequired):
+		return errcode.UnprocessableEntity(errcode.SetupTenantSlugRequired,
+			"Enter a URL slug for your organization.")
 	case errors.Is(err, ErrFinalizationAlreadyStarted):
 		return errcode.Conflict(errcode.SetupFinalizationAlreadyStarted,
 			"A different setup finalization request is already in progress.")

@@ -102,6 +102,23 @@ var (
 	// already reserved. 409 setup.finalization_already_started.
 	ErrFinalizationAlreadyStarted = errors.New("setup: a different finalization request is already reserved")
 
+	// ErrFinalizationTenantNameRequired means the tenant name is empty once
+	// normalized. 422 setup.tenant_name_required.
+	//
+	// The request schema cannot express this: minLength:"1" constrains the
+	// RAW string, so "   " satisfies it and normalizeFinalize then collapses
+	// it to "". Nothing downstream re-checks — createTenantWithUUID only
+	// TrimSpaces what it is handed — so without this guard setup completes
+	// against a nameless Tier-1 organization, and every whitespace-only
+	// variant hashes identically and replays as "the same request".
+	ErrFinalizationTenantNameRequired = errors.New("setup: tenant name is required")
+
+	// ErrFinalizationTenantSlugRequired is the same guard for the slug.
+	// 422 setup.tenant_slug_required. The route's `pattern` makes this
+	// unreachable over HTTP today; the check exists so the invariant holds
+	// for non-HTTP callers and survives a future change to that pattern.
+	ErrFinalizationTenantSlugRequired = errors.New("setup: tenant slug is required")
+
 	// ErrFinalizationAlreadyCompleted means setup is complete and the
 	// payload does not match a replayable finalized request (or the caller
 	// is not the one authorized to replay it). 409 setup.already_completed.
@@ -231,6 +248,14 @@ func (s *Service) Finalize(ctx context.Context, callerUUID, callerSystemRole str
 		return nil, ErrRecoveryRequiresSuperAdmin
 	}
 	name, slug, mode, hash := normalizeFinalize(in.TenantName, in.TenantSlug, in.AllowAdditionalInternalTenants)
+	// Validate the NORMALIZED values, before the reservation: the schema
+	// only ever saw the raw ones. See the two sentinels' doc comments.
+	if name == "" {
+		return nil, ErrFinalizationTenantNameRequired
+	}
+	if slug == "" {
+		return nil, ErrFinalizationTenantSlugRequired
+	}
 
 	// Authorize, recovering the binding at most once. The loop body runs
 	// twice at most: once normally, and once more after a recovery claim

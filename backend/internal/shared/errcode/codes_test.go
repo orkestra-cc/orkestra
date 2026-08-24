@@ -57,6 +57,8 @@ var goldenCodes = map[string]string{
 	"SetupRecoveryRequiresSuperAdmin":   "setup.recovery_requires_super_admin",
 	"SetupFinalizationAlreadyStarted":   "setup.finalization_already_started",
 	"SetupAlreadyCompleted":             "setup.already_completed",
+	"SetupTenantNameRequired":           "setup.tenant_name_required",
+	"SetupTenantSlugRequired":           "setup.tenant_slug_required",
 }
 
 // TestCodesMatchGoldenSnapshot asserts every snapshotted code resolves

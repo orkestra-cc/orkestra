@@ -210,3 +210,11 @@ const SetupFinalizationAlreadyStarted = "setup.finalization_already_started"
 // SetupAlreadyCompleted: setup is complete and the payload does not match a
 // replayable finalized request. 409.
 const SetupAlreadyCompleted = "setup.already_completed"
+
+// SetupTenantNameRequired: the initial organization name is empty once
+// normalized (the schema's minLength constrains the raw string only). 422.
+const SetupTenantNameRequired = "setup.tenant_name_required"
+
+// SetupTenantSlugRequired: the initial organization slug is empty once
+// normalized. 422.
+const SetupTenantSlugRequired = "setup.tenant_slug_required"

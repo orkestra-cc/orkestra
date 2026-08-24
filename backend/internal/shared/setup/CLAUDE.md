@@ -211,8 +211,19 @@ Declared in `shared/errcode` (each with its exact `goldenCodes` row):
 (503), `setup.finalizer_bound_to_another_admin` (403),
 `setup.recovery_requires_super_admin` (403),
 `setup.finalization_already_started` (409), `setup.already_completed`
-(409). Both 503s carry `Retry-After` and `Cache-Control: no-store`; the
+(409), `setup.tenant_name_required` (422), `setup.tenant_slug_required`
+(422). Both 503s carry `Retry-After` and `Cache-Control: no-store`; the
 client retries the identical payload and the saga resumes where it stopped.
+
+**The two 422s validate the NORMALIZED payload, and must stay in the
+service rather than the schema.** `minLength:"1"` constrains the raw
+string, so `"   "` satisfies it and `normalizeFinalize` then collapses it
+to `""`; nothing downstream re-checks (`createTenantWithUUID` only
+`TrimSpace`s what it is handed). Without the check setup completes against
+a nameless Tier-1 organization — and because the reservation hash is
+computed over the normalized tuple, every whitespace-only variant hashes
+identically and replays as "the same request". The guard runs **before the
+reservation**, so a rejected payload leaves no coordinator state behind.
 
 Client-facing details are **fixed written sentences** — never `err.Error()`.
 Stage failures return a server error **without** marking setup complete, and
