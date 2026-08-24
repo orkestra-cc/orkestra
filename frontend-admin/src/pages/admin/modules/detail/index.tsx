@@ -104,6 +104,9 @@ const GenericModuleDetailPage: React.FC = () => {
     saveBarErrors,
     unfilledByGroup,
     recordList,
+    pendingDeletion,
+    confirmDeletion,
+    cancelDeletion,
     error: saveError,
     success,
     clearError,
@@ -299,6 +302,34 @@ const GenericModuleDetailPage: React.FC = () => {
     </Modal>
   );
 
+  // Deleting a record-list element destroys its stored keys, encrypted
+  // secrets included, and the backend will not bring them back. The elements
+  // are NAMED rather than counted — "delete 2 entries" is not a question an
+  // operator can actually answer.
+  const deletionModal = pendingDeletion && (
+    <Modal show centered onHide={cancelDeletion}>
+      <Modal.Header closeButton>
+        <Modal.Title>
+          {t('adminModules.recordList.deleteConfirmTitle')}
+        </Modal.Title>
+      </Modal.Header>
+      <Modal.Body className="fs-10">
+        {t('adminModules.recordList.deleteWarning', {
+          count: pendingDeletion.length,
+          names: pendingDeletion.join(', ')
+        })}
+      </Modal.Body>
+      <Modal.Footer>
+        <Button variant="secondary" size="sm" onClick={cancelDeletion}>
+          {t('adminModules.detail.configCard.stay')}
+        </Button>
+        <Button variant="danger" size="sm" onClick={confirmDeletion}>
+          {t('adminModules.recordList.remove')}
+        </Button>
+      </Modal.Footer>
+    </Modal>
+  );
+
   if (!showRail) {
     // Today's stacked page, unchanged: header, KPIs, environment switcher,
     // the config card (with its own, decoupled rail if the legacy heuristic
@@ -310,6 +341,7 @@ const GenericModuleDetailPage: React.FC = () => {
       <RecordListProvider value={recordList}>
         {blockerModal}
         {envSwitchModal}
+        {deletionModal}
         <Row className="g-3">
           <Col xxl={12}>
             <ModuleDetailHeader module={mod} />
@@ -369,6 +401,7 @@ const GenericModuleDetailPage: React.FC = () => {
     <RecordListProvider value={recordList}>
       {blockerModal}
       {envSwitchModal}
+      {deletionModal}
 
       <ModuleDetailHeader module={mod} />
 

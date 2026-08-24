@@ -17,7 +17,18 @@ import type { ConfigFormValues } from '../useModuleConfigForm';
 export const useRosterReconciliation = (
   form: UseFormReturn<ConfigFormValues>,
   names: string[],
-  defaults: ConfigFormValues
+  defaults: ConfigFormValues,
+  /**
+   * Values for fields that appeared *because the operator created them* —
+   * today, a new element's label. Seeded dirty, because they are an unsaved
+   * edit and the save diff is what carries them to the backend.
+   *
+   * Seeded here rather than at the click that created the element: the
+   * register name is only knowable once the roster has grown and the name map
+   * has been rebuilt around it, which happens on the render after that click.
+   * Reaching for the name any earlier reads a map that does not have it yet.
+   */
+  seeds: ConfigFormValues = {}
 ) => {
   // Joined rather than compared by identity: `names` is a fresh array every
   // render, so an identity dep would run this effect on every keystroke and
@@ -29,9 +40,11 @@ export const useRosterReconciliation = (
     const before = new Set(previous.current);
     const after = new Set(names);
     for (const name of names) {
-      if (!before.has(name)) {
-        form.setValue(name, defaults[name] ?? '', { shouldDirty: false });
-      }
+      if (before.has(name)) continue;
+      const seeded = Object.prototype.hasOwnProperty.call(seeds, name);
+      form.setValue(name, seeded ? seeds[name] : (defaults[name] ?? ''), {
+        shouldDirty: seeded
+      });
     }
     for (const name of previous.current) {
       if (!after.has(name)) form.unregister(name);
