@@ -36,11 +36,16 @@ const ProvisioningPolicyCard = ({ tier }: ProvisioningPolicyCardProps) => {
   const { t } = useTranslation();
   const { data, isLoading } = useGetProvisioningPolicyQuery();
 
+  // While the policy is still loading, default to 'manual' — the backend's
+  // own Default for both tiers (module.go ConfigSchema) — rather than
+  // 'open'. Internal is fail-closed and can never actually resolve to
+  // 'open' (ProvisioningMode.internal is "manual | single" once a policy is
+  // loaded), so this fallback keeps 'open' out of the loading state too.
   const mode: ProvisioningMode = data
     ? tier === 'internal'
       ? data.internal
       : data.external
-    : 'open';
+    : 'manual';
   const count = data
     ? tier === 'internal'
       ? data.internalCount
@@ -77,7 +82,7 @@ const ProvisioningPolicyCard = ({ tier }: ProvisioningPolicyCardProps) => {
         </div>
         <div className="mt-3">
           <Link
-            to="/admin/modules/tenant"
+            to={`/admin/modules/tenant?section=provisioning.${tier}`}
             className="fs-10 fw-semibold text-decoration-none"
           >
             {t('adminTenants.provisioning.manage')}

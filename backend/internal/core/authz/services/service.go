@@ -20,6 +20,7 @@ import (
 	"github.com/orkestra/backend/pkg/sdk/metrics"
 	"github.com/orkestra/backend/pkg/sdk/module"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // ErrSystemRoleImmutable is returned when UpdateRole is asked to change the
@@ -57,6 +58,14 @@ var ErrInsufficientPermissionsToGrant = errors.New("authz: caller cannot grant a
 // granter the cascade rule cannot be evaluated; refuse rather than
 // silently waive the check.
 var ErrGranterRequired = errors.New("authz: granter is required")
+
+// ErrBindingExists is returned when CreateBinding targets a
+// (tenantID, userUUID, roleID) tuple that already has a binding — surfaced
+// from the authz_bindings unique compound index (see this module's
+// CLAUDE.md and the 0009 migration) rather than a raw duplicate-key error.
+// Callers that want "grant if absent, otherwise return the existing row"
+// semantics should call EnsureBinding instead.
+var ErrBindingExists = errors.New("authz: role already bound")
 
 // granterSystem is the sentinel value handlers pass when a binding is
 // platform-issued rather than user-initiated (e.g. the OwnerRoleBinder
@@ -107,6 +116,7 @@ type repoBackend interface {
 	ListRoles(ctx context.Context, tenantID string) ([]models.Role, error)
 	DeleteRole(ctx context.Context, uuid string) error
 	CreateBinding(ctx context.Context, b *models.Binding) error
+	EnsureBinding(ctx context.Context, b *models.Binding) (*models.Binding, error)
 	DeleteBinding(ctx context.Context, tenantID, uuid string) error
 	DeleteBindingsByRoleUUID(ctx context.Context, roleUUID string) (int64, error)
 	DeleteBindingsByTenant(ctx context.Context, tenantUUID string) (int64, error)
@@ -1001,7 +1011,12 @@ func (s *Service) ListPermissions(ctx context.Context) ([]models.Permission, err
 
 // --- Bindings ---
 
-func (s *Service) CreateBinding(ctx context.Context, tenantID, grantedBy string, input models.CreateBindingInput) (*models.Binding, error) {
+// validateBindingGrant resolves the target role and runs the
+// binding-creation validation pipeline shared by CreateBinding and
+// EnsureBinding: role-active check, the system/tenant separation rule, and
+// (for non-"system" granters) the permission cascade rule. Extracted so the
+// two entry points can never drift apart on what a grant must satisfy.
+func (s *Service) validateBindingGrant(ctx context.Context, tenantID, grantedBy string, input models.CreateBindingInput) (*models.Role, error) {
 	role, err := s.repo.GetRoleByUUID(ctx, input.RoleUUID)
 	if err != nil {
 		return nil, err
@@ -1030,6 +1045,34 @@ func (s *Service) CreateBinding(ctx context.Context, tenantID, grantedBy string,
 			return nil, err
 		}
 	}
+	return role, nil
+}
+
+// afterBindingGrant runs the post-persist side effects shared by
+// CreateBinding and EnsureBinding: invalidate the target's cached effective
+// permissions, then — for a role that elevates privilege — eagerly start
+// their MFA enrollment grace clock. Safe to call unconditionally, including
+// on EnsureBinding's reused-existing-row path: cache invalidation is
+// idempotent, and StartMFAGraceIfUnset (per its name) no-ops once the clock
+// is already running, so a replayed ensure never resets it.
+func (s *Service) afterBindingGrant(ctx context.Context, userUUID, roleName string) {
+	s.cacheInvalidate(ctx, userUUID)
+	if s.startMFAGrace != nil && roleElevatesPrivilege(roleName) {
+		if err := s.startMFAGrace(ctx, userUUID); err != nil {
+			s.logger.Warn("authz: start MFA grace failed after binding",
+				"userUUID", userUUID,
+				"role", roleName,
+				"error", err.Error(),
+			)
+		}
+	}
+}
+
+func (s *Service) CreateBinding(ctx context.Context, tenantID, grantedBy string, input models.CreateBindingInput) (*models.Binding, error) {
+	role, err := s.validateBindingGrant(ctx, tenantID, grantedBy, input)
+	if err != nil {
+		return nil, err
+	}
 	b := &models.Binding{
 		UUID:      uuid.NewString(),
 		UserUUID:  input.UserUUID,
@@ -1040,24 +1083,55 @@ func (s *Service) CreateBinding(ctx context.Context, tenantID, grantedBy string,
 		ExpiresAt: input.ExpiresAt,
 	}
 	if err := s.repo.CreateBinding(ctx, b); err != nil {
+		// authz_bindings now carries a unique (tenantId, userUUID, roleId)
+		// index (see this module's CLAUDE.md + the 0009 migration). A
+		// plain CreateBinding on a tuple that is already granted surfaces
+		// as E11000 here rather than silently doubling the row — mapped to
+		// a sentinel so the handler can answer 409 instead of leaking the
+		// raw duplicate-key error. An EXPIRED incumbent is not "already
+		// granted": the repository reaps it and retries, so this path is
+		// reached only for a live one. Callers that want the idempotent
+		// grant-or-return-existing behavior should call EnsureBinding.
+		if mongo.IsDuplicateKeyError(err) {
+			return nil, ErrBindingExists
+		}
 		return nil, err
 	}
-	s.cacheInvalidate(ctx, input.UserUUID)
-
-	// Post-binding hook: privileged role grants eagerly start the MFA grace
-	// clock so the 7-day window begins at promotion rather than at next
-	// login. StartMFAGraceIfUnset on the user side is idempotent, so
-	// repeated grants don't reset the clock.
-	if s.startMFAGrace != nil && roleElevatesPrivilege(role.Name) {
-		if err := s.startMFAGrace(ctx, input.UserUUID); err != nil {
-			s.logger.Warn("authz: start MFA grace failed after binding",
-				"userUUID", input.UserUUID,
-				"role", role.Name,
-				"error", err.Error(),
-			)
-		}
-	}
+	s.afterBindingGrant(ctx, input.UserUUID, role.Name)
 	return b, nil
+}
+
+// EnsureBinding grants the (tenantID, input.UserUUID, input.RoleUUID) tuple
+// if it does not already exist, and returns the persisted row either way.
+// Runs the exact same validation pipeline as CreateBinding — role active,
+// system/tenant separation, cascade rule for non-"system" granters — but
+// persists via the concurrent-safe repo.EnsureBinding instead of a plain
+// insert, so calling it more than once (a lost response, a crashed setup
+// executor, an expired lease — see the tier-1 default-tenant-setup design)
+// is safe. Never overwrites an existing row: its uuid, grantedBy, grantedAt
+// and expiresAt all belong to whichever caller won the race. The
+// OwnerRoleBinder hook (module.go) uses this, not CreateBinding, for
+// exactly that reason.
+func (s *Service) EnsureBinding(ctx context.Context, tenantID, grantedBy string, input models.CreateBindingInput) (*models.Binding, error) {
+	role, err := s.validateBindingGrant(ctx, tenantID, grantedBy, input)
+	if err != nil {
+		return nil, err
+	}
+	b := &models.Binding{
+		UUID:      uuid.NewString(),
+		UserUUID:  input.UserUUID,
+		TenantID:  tenantID,
+		RoleUUID:  role.UUID,
+		RoleName:  role.Name,
+		GrantedBy: grantedBy,
+		ExpiresAt: input.ExpiresAt,
+	}
+	out, err := s.repo.EnsureBinding(ctx, b)
+	if err != nil {
+		return nil, err
+	}
+	s.afterBindingGrant(ctx, input.UserUUID, role.Name)
+	return out, nil
 }
 
 func (s *Service) ListBindings(ctx context.Context, tenantID string) ([]models.Binding, error) {

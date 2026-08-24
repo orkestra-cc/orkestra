@@ -70,6 +70,30 @@ const AuthOAuthProviderDisabled = "auth.oauth_provider_disabled"
 // existing organization slug. 409.
 const TenantSlugAlreadyInUse = "tenant.slug_already_in_use"
 
+// TenantProvisioningLocked signals that the active provisioning policy
+// refused to create or assign a tenant. Two distinct call sites share this
+// one stable code with two different fixed details, never a shared string:
+//   - Tier-1 (internal): the `single` provisioning mode blocks occupying a
+//     second Tier-1 provisioning slot.
+//   - Tier-2 (external): `external.mode == manual` blocks lazy
+//     personal-tenant provisioning for a caller with no admin-assigned
+//     tenant. `single` is not a valid external mode, so this branch must
+//     never reuse the Tier-1 wording. 409.
+const TenantProvisioningLocked = "tenant.provisioning_locked"
+
+// TenantInternalModeInvalid rejects a Tier-1 provisioning policy that is
+// not manual or single (open was removed from Tier-1). 422.
+const TenantInternalModeInvalid = "tenant.internal_mode_invalid"
+
+// TenantSingleModeConflict rejects selecting `single` while more than one
+// Tier-1 tenant occupies a provisioning slot. 422.
+const TenantSingleModeConflict = "tenant.single_mode_conflict"
+
+// TenantDefaultReassignmentRequired blocks suspending, archiving, purging,
+// or deleting the platform default tenant before the default is
+// transferred. 409.
+const TenantDefaultReassignmentRequired = "tenant.default_reassignment_required"
+
 // --- user ---
 
 // UserSelfDeleteForbidden signals that an admin tried to delete (or
@@ -160,3 +184,37 @@ const NavigationOverrideChildNotFound = "navigation.override_child_not_found"
 // NavigationOverrideDuplicateChild signals that the same itemKey
 // appeared twice in the orderedChildren list. 400.
 const NavigationOverrideDuplicateChild = "navigation.override_duplicate_child"
+
+// --- setup (shared bootstrap infrastructure, not a module) ---
+
+// SetupStatusUnavailable: the authoritative setup phase cannot be read;
+// the response carries Retry-After and no inferred phase. 503.
+const SetupStatusUnavailable = "setup.status_unavailable"
+
+// SetupFinalizerStateUnavailable: coordinator or bound-user state cannot be
+// read; never treated as recovery eligibility. 503.
+const SetupFinalizerStateUnavailable = "setup.finalizer_state_unavailable"
+
+// SetupFinalizerBoundToAnotherAdmin: the finalize POST caller is not the
+// usable bound administrator. 403.
+const SetupFinalizerBoundToAnotherAdmin = "setup.finalizer_bound_to_another_admin"
+
+// SetupRecoveryRequiresSuperAdmin: recovering an empty or unusable binding
+// requires an active super_admin. 403.
+const SetupRecoveryRequiresSuperAdmin = "setup.recovery_requires_super_admin"
+
+// SetupFinalizationAlreadyStarted: a different normalized finalization
+// request is already reserved. 409.
+const SetupFinalizationAlreadyStarted = "setup.finalization_already_started"
+
+// SetupAlreadyCompleted: setup is complete and the payload does not match a
+// replayable finalized request. 409.
+const SetupAlreadyCompleted = "setup.already_completed"
+
+// SetupTenantNameRequired: the initial organization name is empty once
+// normalized (the schema's minLength constrains the raw string only). 422.
+const SetupTenantNameRequired = "setup.tenant_name_required"
+
+// SetupTenantSlugRequired: the initial organization slug is empty once
+// normalized. 422.
+const SetupTenantSlugRequired = "setup.tenant_slug_required"

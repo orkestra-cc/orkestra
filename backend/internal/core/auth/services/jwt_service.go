@@ -60,6 +60,19 @@ type JWTService interface {
 	// Called by the auth module after the tenant module has initialized.
 	SetTenantProvider(tp iface.TenantProvider)
 
+	// SetDefaultTenantProvider wires the platform-default Tier-1 tenant
+	// resolver (iface.DefaultTenantProvider, tenant module PR 3). When
+	// set, token issuance prefers the platform default as the tenant
+	// fallback IF it names one of the user's valid memberships;
+	// otherwise selection falls through to the owner-first rule
+	// unchanged. Only the operator-audience JWT service is wired with
+	// this (auth/module.go) — client-audience tokens never consult the
+	// internal platform default (tier isolation). A nil provider, a
+	// "no default assigned" response, or a provider error all fall
+	// through the same way: fallback selection must never fail token
+	// issuance.
+	SetDefaultTenantProvider(dp iface.DefaultTenantProvider)
+
 	// AccessTokenTTL is the lifetime a token minted right now would
 	// carry: the admin-managed accessTokenTTL when a policy is wired,
 	// otherwise the env-driven default. Callers report it to clients so
@@ -85,6 +98,12 @@ type jwtService struct {
 	issuer        string
 	audience      string
 	tenant        iface.TenantProvider
+	// defaultTenants resolves the platform-default Tier-1 tenant
+	// (iface.DefaultTenantProvider). Nil unless wired via
+	// SetDefaultTenantProvider — only the operator-audience service
+	// gets it (auth/module.go). See the interface doc comment above for
+	// the full fallback/failure semantics.
+	defaultTenants iface.DefaultTenantProvider
 	// policy is the optional admin-managed source for accessTokenTTL.
 	// Nil falls back to accessExpiry (env-driven default). Set via
 	// SetPolicy after construction. Phase 3.1 of the auth-policy
@@ -231,6 +250,10 @@ func (s *jwtService) SetTenantProvider(tp iface.TenantProvider) {
 	s.tenant = tp
 }
 
+func (s *jwtService) SetDefaultTenantProvider(dp iface.DefaultTenantProvider) {
+	s.defaultTenants = dp
+}
+
 func (s *jwtService) IsEnabled() bool {
 	return s.privateKey != nil && s.publicKey != nil
 }
@@ -248,7 +271,7 @@ func (s *jwtService) GenerateEnhancedAccessToken(
 
 	primaryProvider := s.getPrimaryOAuthProvider(user)
 
-	memberships, defaultTenant, defaultKind := s.loadMemberships(user.UUID)
+	memberships, fallbackTenant, fallbackKind := s.loadMemberships(user.UUID)
 
 	claims := &models.JWTClaims{
 		UserUUID:   user.UUID,
@@ -262,9 +285,9 @@ func (s *jwtService) GenerateEnhancedAccessToken(
 		Audience:   s.audience,
 
 		Memberships:      memberships,
-		DefaultTenantID:  defaultTenant,
-		ActingTenantID:   defaultTenant,
-		ActingTenantKind: defaultKind,
+		TenantFallbackID: fallbackTenant,
+		ActingTenantID:   fallbackTenant,
+		ActingTenantKind: fallbackKind,
 
 		SessionID:     securityCtx.SessionID,
 		DeviceID:      deviceInfo.DeviceID,
@@ -290,11 +313,28 @@ func (s *jwtService) GenerateEnhancedAccessToken(
 
 // loadMemberships fetches the user's tenant memberships via the tenant
 // provider. Returns an empty list if the provider isn't wired yet (edge case
-// during startup) or if the user belongs to no tenants. DefaultTenantID
-// picks the first owned tenant, otherwise the first membership. Also returns
-// the default tenant kind so middleware can dispatch on tier without
-// re-reading the provider. See ADR-0001.
-func (s *jwtService) loadMemberships(userUUID string) (list []models.TenantMembership, defaultTenant, defaultKind string) {
+// during startup) or if the user belongs to no tenants.
+//
+// The embedded membership list is returned in the SAME order the provider
+// (repository) delivers it — joinedAt ascending, then tenantUUID ascending,
+// see tenant/repository.go::ListMembershipsByUser — and is never re-sorted
+// here, so the claims' `mbr` array and the fallback selection below always
+// agree on ordering.
+//
+// The tenant fallback is selected in this order:
+//  1. The operational platform default (iface.DefaultTenantProvider), when
+//     s.defaultTenants is wired AND it names one of the memberships just
+//     loaded. This grants nothing by itself — membership validation already
+//     happened above, and the operator X-Tenant-ID override still applies
+//     downstream in middleware. A nil provider, a "no default assigned"
+//     response, or a provider ERROR all fall straight through to rule 2 —
+//     fallback selection must never fail token issuance.
+//  2. The first OWNED membership, in the deterministic repo order.
+//  3. The first membership, in the deterministic repo order.
+//
+// Also returns the tenant fallback kind so middleware can dispatch on tier
+// without re-reading the provider. See ADR-0001.
+func (s *jwtService) loadMemberships(userUUID string) (list []models.TenantMembership, fallbackTenant, fallbackKind string) {
 	if s.tenant == nil {
 		return nil, "", ""
 	}
@@ -320,16 +360,35 @@ func (s *jwtService) loadMemberships(userUUID string) (list []models.TenantMembe
 			firstOwned = m.TenantUUID
 			firstOwnedKind = kind
 		}
-		if defaultTenant == "" {
-			defaultTenant = m.TenantUUID
-			defaultKind = kind
+		if fallbackTenant == "" {
+			fallbackTenant = m.TenantUUID
+			fallbackKind = kind
 		}
 	}
 	if firstOwned != "" {
-		defaultTenant = firstOwned
-		defaultKind = firstOwnedKind
+		fallbackTenant = firstOwned
+		fallbackKind = firstOwnedKind
 	}
-	return out, defaultTenant, defaultKind
+
+	// 1. The operational platform default, when it appears among the user's
+	// valid memberships. Selection grants nothing — membership validation
+	// and the operator X-Tenant-ID override still apply downstream.
+	if s.defaultTenants != nil {
+		dt, derr := s.defaultTenants.GetDefaultTenant(ctx)
+		if derr != nil {
+			slogDefault().WarnContext(ctx, "auth: platform-default tenant lookup failed, falling back to owner-first selection",
+				"error", derr.Error())
+		} else if dt != nil {
+			for _, m := range out {
+				if m.TenantUUID == dt.UUID {
+					return out, m.TenantUUID, m.TenantKind
+				}
+			}
+		}
+	}
+	// 2. first owned membership (joinedAt asc, tenantUUID asc — repo sort);
+	// 3. first membership. (existing loop above, unchanged)
+	return out, fallbackTenant, fallbackKind
 }
 
 func (s *jwtService) GenerateEnhancedRefreshToken(
@@ -571,8 +630,8 @@ func (s *jwtService) claimsToMap(claims *models.JWTClaims) jwt.MapClaims {
 	if len(claims.Scope) > 0 {
 		m["scope"] = claims.Scope
 	}
-	if claims.DefaultTenantID != "" {
-		m["dtid"] = claims.DefaultTenantID
+	if claims.TenantFallbackID != "" {
+		m["dtid"] = claims.TenantFallbackID
 	}
 	if claims.ActingTenantID != "" {
 		m["acting_tenant_id"] = claims.ActingTenantID
@@ -621,7 +680,7 @@ func (s *jwtService) mapToClaims(m jwt.MapClaims) *models.JWTClaims {
 		Fingerprint:      getStringClaim(m, "fp"),
 		RiskScore:        getFloatClaim(m, "risk"),
 		OAuthProvider:    getStringClaim(m, "provider"),
-		DefaultTenantID:  getStringClaim(m, "dtid"),
+		TenantFallbackID: getStringClaim(m, "dtid"),
 		ActingTenantID:   getStringClaim(m, "acting_tenant_id"),
 		ActingTenantKind: getStringClaim(m, "acting_tenant_kind"),
 	}
@@ -742,7 +801,7 @@ func buildTenantScopedClaims(user *iface.User, tenantUUID, tenantKind string, ro
 		Memberships: []models.TenantMembership{
 			{TenantUUID: tenantUUID, TenantKind: tenantKind, Roles: roles},
 		},
-		DefaultTenantID:  tenantUUID,
+		TenantFallbackID: tenantUUID,
 		ActingTenantID:   tenantUUID,
 		ActingTenantKind: tenantKind,
 

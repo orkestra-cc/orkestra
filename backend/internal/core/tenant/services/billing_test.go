@@ -45,10 +45,15 @@ func TestEnsureTenantForUser_EmptyUserUUID(t *testing.T) {
 	}
 }
 
+// TestProvisioningMode_DefaultsToOpen locks in the Tier-2 (external) default:
+// with no resolver wired, external resolution stays open, unchanged by the
+// Tier-1 fail-closed change (Task 3.2) — Tier-1's own nil-resolver default is
+// covered separately by TestProvisioningMode_InternalFailsClosedToManual in
+// provisioning_mode_test.go, since internal no longer defaults to open.
 func TestProvisioningMode_DefaultsToOpen(t *testing.T) {
 	t.Parallel()
 	s := New(nil) // no resolver wired
-	if got := s.ProvisioningMode(context.Background(), models.TenantKindInternal); got != models.ProvisioningModeOpen {
+	if got := s.ProvisioningMode(context.Background(), models.TenantKindExternal); got != models.ProvisioningModeOpen {
 		t.Fatalf("nil resolver: got %q, want open", got)
 	}
 }
@@ -69,10 +74,12 @@ func TestProvisioningMode_ResolverValuesAndNormalisation(t *testing.T) {
 		t.Errorf("external: got %q, want manual", got)
 	}
 
-	// Unknown / empty values normalise to open so a misconfigured doc never
-	// blocks creation.
+	// Unknown/empty values normalise to open for Tier-2 so a misconfigured
+	// doc never blocks self-serve creation. Tier-1's equivalent case (bogus
+	// values normalise to manual, fail-closed) is covered by
+	// TestProvisioningMode_InternalFailsClosedToManual.
 	s.SetProvisioningModeResolver(func(context.Context, models.TenantKind) string { return "bogus" })
-	if got := s.ProvisioningMode(context.Background(), models.TenantKindInternal); got != models.ProvisioningModeOpen {
+	if got := s.ProvisioningMode(context.Background(), models.TenantKindExternal); got != models.ProvisioningModeOpen {
 		t.Errorf("bogus value: got %q, want open", got)
 	}
 }

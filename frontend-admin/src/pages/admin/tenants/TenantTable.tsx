@@ -1,10 +1,14 @@
 import { useMemo, useState } from 'react';
 import { Button, Card, Form, Spinner, Table } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { toast } from 'react-toastify';
 import { Trans, useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
-import type { AdminOrgListItem } from 'store/api/tenantApi';
+import {
+  useSetDefaultTenantMutation,
+  type AdminOrgListItem
+} from 'store/api/tenantApi';
 import TenantTableHeader from './TenantTableHeader';
 
 const planColors: Record<string, BadgeColor> = {
@@ -12,6 +16,25 @@ const planColors: Record<string, BadgeColor> = {
   pro: 'primary',
   enterprise: 'success'
 };
+
+// Eligible for "Set as default": an internal, active, non-soft-deleted
+// tenant that isn't already the default. Mirrors the backend's
+// TransferDefaultTenant target validation (operational internal tenant) so
+// the UI never offers an action the server would 409 on the happy path —
+// the mutation itself is still the source of truth for a stale-cache race.
+const canSetAsDefault = (org: AdminOrgListItem): boolean =>
+  org.kind === 'internal' &&
+  org.status === 'active' &&
+  !org.deletedAt &&
+  !org.isDefault;
+
+function extractError(err: unknown, fallback: string): string {
+  if (err && typeof err === 'object' && 'data' in err) {
+    const data = (err as { data?: { detail?: string; title?: string } }).data;
+    return data?.detail || data?.title || fallback;
+  }
+  return String(err);
+}
 
 interface Props {
   orgs: AdminOrgListItem[];
@@ -57,6 +80,23 @@ const TenantTable: React.FC<Props> = ({
 }) => {
   const { t } = useTranslation();
   const [planFilter, setPlanFilter] = useState('');
+  const [setDefaultTenant, { isLoading: isSettingDefault }] =
+    useSetDefaultTenantMutation();
+
+  const handleSetDefault = async (org: AdminOrgListItem) => {
+    try {
+      await setDefaultTenant({ tenantId: org.id }).unwrap();
+      toast.success(
+        t('adminTenants.default.transferSuccess', { name: org.name })
+      );
+    } catch (err: unknown) {
+      toast.error(
+        t('adminTenants.default.transferError', {
+          message: extractError(err, t('adminTenants.default.unknownError'))
+        })
+      );
+    }
+  };
 
   // Plan filter stays client-side — the server-side `q` already narrows the
   // tenant list to text/member matches, and the plan dropdown is a small
@@ -161,7 +201,19 @@ const TenantTable: React.FC<Props> = ({
                     onClick={() => onRowClick(org)}
                   >
                     <td className="ps-3 fw-semibold text-900">
-                      <div>{org.name}</div>
+                      <div className="d-flex align-items-center gap-2">
+                        <span>{org.name}</span>
+                        {org.isDefault && (
+                          <SubtleBadge
+                            bg="primary"
+                            pill
+                            className="fs-11 fw-normal"
+                            data-testid="tenant-default-badge"
+                          >
+                            {t('adminTenants.default.badge')}
+                          </SubtleBadge>
+                        )}
+                      </div>
                       {searchActive &&
                         org.matchedMembers &&
                         org.matchedMembers.length > 0 && (
@@ -219,16 +271,38 @@ const TenantTable: React.FC<Props> = ({
                       >
                         {t('adminTenants.table.manage')}
                       </Button>
-                      {!deleted && !purged && (
+                      {canSetAsDefault(org) && (
                         <Button
                           variant="link"
                           size="sm"
-                          className="p-0 text-danger text-decoration-none"
-                          onClick={() => onDeleteClick(org)}
-                          title={t('adminTenants.table.archiveTitle')}
+                          className="p-0 me-3 text-decoration-none"
+                          disabled={isSettingDefault}
+                          onClick={() => handleSetDefault(org)}
+                          title={t('adminTenants.default.setAsDefault')}
                         >
-                          <FontAwesomeIcon icon="trash" />
+                          <FontAwesomeIcon icon="star" />
                         </Button>
+                      )}
+                      {org.isDefault ? (
+                        <span title={t('adminTenants.default.reassignFirst')}>
+                          <FontAwesomeIcon
+                            icon="info-circle"
+                            className="text-muted"
+                          />
+                        </span>
+                      ) : (
+                        !deleted &&
+                        !purged && (
+                          <Button
+                            variant="link"
+                            size="sm"
+                            className="p-0 text-danger text-decoration-none"
+                            onClick={() => onDeleteClick(org)}
+                            title={t('adminTenants.table.archiveTitle')}
+                          >
+                            <FontAwesomeIcon icon="trash" />
+                          </Button>
+                        )
                       )}
                     </td>
                   </tr>

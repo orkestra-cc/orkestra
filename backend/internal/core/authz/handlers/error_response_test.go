@@ -36,6 +36,7 @@ func TestMapCreateBindingErrorPreservesKnownClientErrors(t *testing.T) {
 		{"insufficient grant permissions", services.ErrInsufficientPermissionsToGrant, 403},
 		{"missing granter", services.ErrGranterRequired, 400},
 		{"unknown role", repository.ErrNotFound, 404},
+		{"binding exists", services.ErrBindingExists, 409},
 	}
 
 	for _, tt := range tests {

@@ -6,10 +6,13 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"os"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/compliance/models"
+	"github.com/orkestra/backend/internal/core/compliance/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -139,5 +142,67 @@ func TestRetentionPreviewAndRunOnce(t *testing.T) {
 	}
 	if purged != 2 {
 		t.Fatalf("RunOnce purged %d; want 2", purged)
+	}
+}
+
+// TestCreateKeyLiveMongoBarrier races LocalKMS.CreateKey against the real
+// unique tenantUuid index the compliance module declares in Collections()
+// (module.go) — the in-memory fake in kms_test.go models this index, but
+// only a real MongoDB proves the repository's mongo.IsDuplicateKeyError
+// translation actually recognizes the driver's E11000 error shape. Two
+// goroutines call CreateKey for the same tenant at once, looped enough
+// iterations to reliably land both inserts inside the race window: both
+// callers must converge on the same keyID, and exactly one document must
+// ever land in Mongo for that tenant.
+func TestCreateKeyLiveMongoBarrier(t *testing.T) {
+	db, cleanup := newServiceTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	coll := db.Collection(models.KMSKeysCollection)
+	//tenantscope:allow test setup mirrors the production unique index declared in module.go Collections()
+	if _, err := coll.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "tenantUuid", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		t.Fatalf("create tenantUuid unique index: %v", err)
+	}
+
+	repo := repository.NewKMSKeyRepo(db)
+	kms := &LocalKMS{repo: repo, masterKey: bytes32(0x5c)}
+
+	const iterations = 40
+	for i := 0; i < iterations; i++ {
+		tenantUUID := "t-live-race-" + strconv.Itoa(i)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		ids := make([]string, 2)
+		errs := make([]error, 2)
+		wg.Add(2)
+		for g := 0; g < 2; g++ {
+			go func(g int) {
+				defer wg.Done()
+				<-start
+				ids[g], errs[g] = kms.CreateKey(ctx, tenantUUID)
+			}(g)
+		}
+		close(start)
+		wg.Wait()
+
+		if errs[0] != nil || errs[1] != nil {
+			t.Fatalf("iteration %d: CreateKey errors: %v, %v", i, errs[0], errs[1])
+		}
+		if ids[0] == "" || ids[0] != ids[1] {
+			t.Fatalf("iteration %d: diverged keys %q != %q", i, ids[0], ids[1])
+		}
+
+		//tenantscope:allow test assertion counts rows in one isolated per-run test database
+		count, err := coll.CountDocuments(ctx, bson.M{"tenantUuid": tenantUUID})
+		if err != nil {
+			t.Fatalf("iteration %d: count documents: %v", i, err)
+		}
+		if count != 1 {
+			t.Fatalf("iteration %d: expected exactly one persisted key for tenant, got %d", i, count)
+		}
 	}
 }

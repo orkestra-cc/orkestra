@@ -28,6 +28,44 @@ Each module can maintain multiple named environments (e.g. `sandbox`, `productio
 PUT /v1/admin/modules/{name}/active-environment
 ```
 
+## Activation-time validation
+
+Switching the active environment normally performs **no semantic validation** — a module can activate any profile it has stored, including one an operator saved with values that later turned out to be invalid. That is deliberate: the stored profile might be a legacy-invalid one, and refusing to activate it would leave a deployment stuck. The exception is a module that implements the optional `HasConfigActivationValidator` interface:
+
+```go
+type HasConfigActivationValidator interface {
+    ValidateConfigActivation(ctx context.Context, targetValues map[string]string) error
+}
+```
+
+`ValidateConfigActivation` runs inside `SetActiveEnvironment`, after confirming the target environment exists and strictly before the repository write that flips the active profile and marks `needsRestart: true`. Returning an error — typically a `*module.ConfigValidationError` — aborts the switch before that write, so a rejected activation leaves both the previously active profile and `needsRestart` untouched. `targetValues` is the target profile's non-secret configuration map; secrets are never passed to the hook.
+
+This is a separate seam from `HasConfigValidator` (the PATCH-time hook covered above): PATCH-time validation sees one merged profile as it is being edited, while activation validation judges an already-stored profile as a complete whole before it becomes active. A module can implement either, both, or neither. Modules that omit `HasConfigActivationValidator` keep today's validation-free activation exactly as before — this is the seam a tenant-provisioning-policy validator hooks into to refuse activating a profile whose policy is no longer satisfiable, without pkg/sdk knowing anything about tenants.
+
+## Stable validation codes
+
+`ConfigValidationError` carries an optional `Code` field:
+
+```go
+type ConfigValidationError struct {
+    Field   string
+    Message string
+    Code    string // optional, e.g. "tenant.single_mode_conflict"
+}
+```
+
+When a validator — PATCH-time or activation-time — returns a `ConfigValidationError` with a non-empty `Code`, the admin API responds with a stable `{status, title, detail, code}` envelope instead of the legacy text-only `422`:
+
+```json
+{
+  "status": 422,
+  "title": "Unprocessable Entity",
+  "detail": "mode: profile not activatable",
+  "code": "tenant.single_mode_conflict"
+}
+```
+
+Leaving `Code` empty keeps the pre-existing text-only `422 Unprocessable Entity` response, so an existing validator needs no changes to keep working. The mapping is applied uniformly across all three module-admin mutation surfaces — `PATCH /v1/admin/modules/{name}`, `PATCH /v1/admin/modules/{name}/environments/{env}`, and `PUT /v1/admin/modules/{name}/active-environment` — so a frontend can key off `code` the same way on any of them.
 ## Repeatable fields (`recordList`)
 
 A module that needs an operator-managed **list of records** — several named

@@ -861,6 +861,17 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	}
 	tenantProvider := module.MustGetTyped[iface.TenantProvider](deps.Services, module.ServiceTenantProvider)
 	operatorJWT.SetTenantProvider(tenantProvider)
+	// Platform-default Tier-1 tenant resolver (iface.DefaultTenantProvider,
+	// tenant module PR 3). Optional: the tenant module's Init runs before
+	// auth's in the topological order, so it's already registered by now,
+	// but a missing key is tolerated (loadMemberships falls through to the
+	// owner-first rule). Wired ONLY on the operator-audience service —
+	// serviceJWT and clientJWT below deliberately do not get it, so a
+	// Tier-2 client-portal token can never consult the internal platform
+	// default.
+	if dp, ok := module.GetTyped[iface.DefaultTenantProvider](deps.Services, module.ServiceDefaultTenantProvider); ok {
+		operatorJWT.SetDefaultTenantProvider(dp)
+	}
 
 	// OAuth state service + signed-state JWT secret (D-6). The HMAC
 	// secret is derived from the JWT private key so every replica

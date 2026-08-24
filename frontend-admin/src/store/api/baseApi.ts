@@ -3,7 +3,8 @@ import {
   fetchBaseQuery,
   BaseQueryFn,
   FetchArgs,
-  FetchBaseQueryError
+  FetchBaseQueryError,
+  FetchBaseQueryMeta
 } from '@reduxjs/toolkit/query/react';
 import { toast } from 'react-toastify';
 import type { RootState } from '../index';
@@ -205,10 +206,18 @@ const baseQuery = fetchBaseQuery({
 });
 
 // Enhanced base query with automatic retry, error handling, and tenant context.
+// The explicit 5th (Meta) generic matters: BaseQueryFn defaults it to {},
+// which is what every endpoint's transformResponse/transformErrorResponse
+// would see as the `meta` type otherwise — even though the underlying
+// fetchBaseQuery call below always resolves a real FetchBaseQueryMeta
+// (request/response). Declaring it lets endpoints (e.g. setupApi's
+// getSetupStatus) read response headers via `meta.response.headers`.
 const baseQueryWithRetry: BaseQueryFn<
   string | FetchArgs,
   unknown,
-  FetchBaseQueryError
+  FetchBaseQueryError,
+  object,
+  FetchBaseQueryMeta
 > = async (args, api, extraOptions) => {
   // Inject X-Tenant-ID for every tenant-scoped request. Impersonation (set
   // by NineDotMenu / ImpersonateButton for system.tenants.admin holders)

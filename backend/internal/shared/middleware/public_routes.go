@@ -20,7 +20,14 @@ var PublicRoutes = append([]string{
 	"/openapi.json",
 
 	// Setup wizard — bootstraps the first administrator before any
-	// tenant exists.
+	// tenant exists. NOTE: this prefix is a tenant-baggage/coverage
+	// exemption, not an authentication statement — it contains both
+	// anonymous endpoints (/v1/setup/status, /v1/setup/admin) and
+	// authenticated-operator ones (/v1/setup/finalization-access,
+	// /v1/setup/finalize, mounted behind RequireAuth). No tenant exists
+	// yet for any of them, authenticated or not, which is why the whole
+	// prefix stays off the tenant-span coverage check — do not read "in
+	// PublicRoutes" as "reachable without a token."
 	"/v1/setup/",
 
 	// OAuth / OIDC callback endpoints. The callback itself is

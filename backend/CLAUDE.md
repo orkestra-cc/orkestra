@@ -76,7 +76,7 @@ backend/
 │   │   ├── openapiauth/            # OpenAPI.com OAuth-token minter (in-tree helper)
 │   │   ├── container/              # Docker SDK manager for module InfraContainers()
 │   │   ├── setup/                  # First-install wizard endpoints (/v1/setup/*)
-│   │   ├── systeminit/             # Atomic first-admin sentinel (system_init collection)
+│   │   ├── systeminit/             # Two-phase bootstrap: first-admin sentinel + setup-finalization saga (system_init collection)
 │   │   ├── ownerrepo/              # Polymorphic-owner scope helpers
 │   │   ├── telemetry/ geoip/ errcode/ errors/ types/ utils/
 │   └── testkit/                    # Test helpers for auth identity + context

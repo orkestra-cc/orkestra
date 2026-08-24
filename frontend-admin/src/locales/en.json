@@ -688,8 +688,16 @@
         "manual": "Manual only",
         "single": "Single tenant"
       },
-      "activeCount": "{{count}} active",
+      "activeCount": "Provisioning slots used: {{count}}",
       "manage": "Manage policy"
+    },
+    "default": {
+      "badge": "Default",
+      "setAsDefault": "Set as default",
+      "reassignFirst": "This is the platform default tenant. Reassign the default to another tenant before you can delete or purge it.",
+      "transferSuccess": "\"{{name}}\" is now the platform default tenant",
+      "transferError": "Failed to set default tenant: {{message}}",
+      "unknownError": "unknown error"
     },
     "noOrgSelected": "No organization selected",
     "rolesNeedOrg": "Role management is scoped to a single organization. Select or create one from the top-right org switcher to continue.",
@@ -2818,7 +2826,10 @@
       "errorTitle": "Cannot reach the Orkestra backend",
       "errorBody": "The frontend could not contact the backend to check whether the initial setup wizard should run. Make sure the backend container is up and reachable from your browser, then retry.",
       "errorDefaultDetail": "The setup probe at /v1/setup/status did not respond.",
-      "retry": "Retry"
+      "retry": "Retry",
+      "unavailableTitle": "Orkestra is temporarily unavailable",
+      "unavailableBody": "The backend could not determine setup status right now. This is usually transient — we'll check again automatically.",
+      "unavailableAutoRetryHint": "This page checks again automatically. You can also retry now."
     },
     "wizard": {
       "errorTitle": "Cannot reach the Orkestra backend",
@@ -2833,14 +2844,14 @@
     "welcome": {
       "title": "Welcome to Orkestra",
       "intro": "Let's get your deployment ready. This will take about a minute and needs to happen exactly once per install.",
-      "step1": "<strong>Create an administrator account.</strong> The first user becomes the root <code>developer</code> and can manage everything else from the admin UI.",
-      "step2": "<strong>Create your first organization.</strong> Orkestra is multi-tenant — every feature lives inside an organization, and you'll be enrolled as the owner.",
+      "step1": "<strong>Create an administrator account.</strong> The first user becomes the root <code>super_admin</code> and can manage everything else from the admin UI.",
+      "step2": "<strong>Create your first organization.</strong> Orkestra is multi-tenant — every feature lives inside an organization, and you'll be enrolled as the owner. This step is required: every install needs at least one internal tenant.",
       "step3": "<strong>You're done.</strong> The wizard won't reappear on the next boot.",
       "getStarted": "Get started"
     },
     "admin": {
       "title": "Create the administrator account",
-      "intro": "This user becomes the platform root with the <code>developer</code> role. You can add more users later from the admin UI.",
+      "intro": "This user becomes the platform root with the <code>super_admin</code> role. You can add more users later from the admin UI.",
       "labelFullName": "Full name",
       "labelEmail": "Email",
       "placeholderEmail": "admin@example.com",
@@ -2863,21 +2874,45 @@
       "nameHelp": "Human-readable label shown throughout the admin UI.",
       "labelSlug": "Slug",
       "slugHelp": "URL-safe identifier. Auto-derived from the name until you edit it. Lowercase letters, digits, and hyphens only.",
-      "defaultName": "{{firstName}}'s Workspace",
-      "defaultFirstName": "Default",
       "submit": "Create organization",
       "submitting": "Creating…",
-      "skip": "Skip for now",
-      "skipHint": "Prefer to set this up later? You can create an organization any time from Administration → Internal Tenants.",
       "errorNameRequired": "Organization name is required.",
       "errorSlugInvalid": "Slug must contain only lowercase letters, digits, and hyphens.",
       "errorSlugConflict": "An organization with slug \"{{slug}}\" already exists. Pick a different slug.",
-      "errorGeneric": "Could not create the organization. Please try again."
+      "errorGeneric": "Could not create the organization. Please try again.",
+      "errorFinalizationConflict": "Another finalization request is already in progress with different values. Wait for it to finish, or confirm the details with whoever started it.",
+      "errorAlreadyCompleted": "Setup was already completed by another operator. This page will redirect automatically.",
+      "inProgressBody": "Another request with the exact same details is already finalizing setup. This page is retrying automatically — no need to resubmit.",
+      "refreshingSessionError": "The organization was created, but your session could not be refreshed with the new access. Retry to pick up the new access token — nothing will be created twice.",
+      "provisioning": {
+        "label": "Additional Tier-1 tenants",
+        "help": "This choice is enforced by the backend and shapes how Tier-1 tenants can be provisioned going forward.",
+        "allowLabel": "Allow additional internal tenants",
+        "allowHelp": "Manual mode — more Tier-1 tenants can be created later from Administration → Internal Tenants.",
+        "singleLabel": "Lock to this one tenant",
+        "singleHelp": "Single mode — Tier-1 provisioning is permanently capped at this one tenant."
+      },
+      "access": {
+        "signInTitle": "Sign in to continue setup",
+        "signInBody": "Your session could not be restored. Sign in to continue creating the initial organization — you'll be brought right back here.",
+        "signInCta": "Go to sign in",
+        "unavailableTitle": "Setup access is temporarily unavailable",
+        "unavailableBody": "The backend could not determine whether you may finalize setup right now. This is usually transient — retry in a moment.",
+        "boundToAnotherAdminTitle": "Setup is reserved for a different administrator",
+        "boundToAnotherAdminBody": "Another administrator account started finalizing setup and must be the one to complete it. Switch to that account, or sign out and try again later.",
+        "recoveryRequiresSuperAdminTitle": "An active super administrator is required",
+        "recoveryRequiresSuperAdminBody": "The administrator bound to this setup is no longer usable, and only an active super administrator can recover it. Switch to that account, or sign out.",
+        "recoveryWarningTitle": "Recovering an abandoned setup",
+        "recoveryWarningBody": "The administrator previously bound to this setup is no longer usable. As an active super administrator, submitting this form will claim setup for your account.",
+        "switchAccount": "Switch account",
+        "logout": "Log out"
+      }
     },
     "finish": {
       "title": "Orkestra is ready",
       "bodyWithOrg": "Your administrator account has been created, you're signed in, and the organization <strong>{{orgName}}</strong> is active. You can rename it or create more organizations later.",
-      "bodyWithoutOrg": "Your administrator account has been created and you're signed in. No organization was created — you can add one any time from Administration → Internal Tenants. The setup wizard won't appear again.",
+      "modeSingle": "Tier-1 provisioning is locked to <strong>{{tenantName}}</strong> — no additional internal tenants can ever be created on this install.",
+      "modeManual": "<strong>{{tenantName}}</strong> is now the platform default. You can create additional internal tenants any time from Administration → Internal Tenants.",
       "smtpWarning": "<strong>SMTP is not configured.</strong> Password-reset and verification mail will log to the backend stdout instead of being delivered. Configure it any time from <code>/admin/modules</code> under the notification module.",
       "goToDashboard": "Go to the dashboard"
     }

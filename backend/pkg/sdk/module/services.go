@@ -106,6 +106,9 @@ const (
 	// its audit sink via SetAuditSink — the public provider interface stays
 	// slim, the concrete service carries post-init setters.
 	ServiceTenantService ServiceKey = "tenant.service"
+	// ServiceDefaultTenantProvider resolves the platform default Tier-1
+	// tenant (tenant_defaults pointer). Value: iface.DefaultTenantProvider.
+	ServiceDefaultTenantProvider ServiceKey = "tenant.default_provider"
 	// ServiceBillingTenantProvider exposes the unified-clients billing-party
 	// resolver: walks up Tenant.ParentTenantUUID until it finds a tenant
 	// carrying FatturaPA fields and returns the snapshot the billing send
@@ -134,6 +137,14 @@ const (
 	// to race-proof their first-user heuristic. Value: *systeminit.Repo
 	// (structurally an auth/services.FirstAdminClaimer).
 	ServiceFirstAdminClaimer ServiceKey = "system.first_admin_claimer"
+
+	// ServiceSetupFinalizationStore is the keyed bootstrap coordinator for
+	// the setup finalization saga (system_init/{key:"setup_finalization"}).
+	// Registered by main.go wiring with the same *systeminit.Repo value as
+	// ServiceFirstAdminClaimer; consumed by the setup service (explicitly
+	// wired) and by tenant.Module.Init for boot reconciliation. Value:
+	// *systeminit.Repo (structurally a systeminit.FinalizationStore).
+	ServiceSetupFinalizationStore ServiceKey = "system.setup_finalization_store"
 
 	ServicePaymentProvider        ServiceKey = "payments.provider"
 	ServiceSubscriptionReconciler ServiceKey = "subscriptions.reconciler"

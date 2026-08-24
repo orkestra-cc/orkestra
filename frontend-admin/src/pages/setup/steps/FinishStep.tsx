@@ -4,18 +4,31 @@ import { Trans, useTranslation } from 'react-i18next';
 
 interface FinishStepProps {
   smtpConfigured: boolean;
-  orgName: string;
+  /** Name of the Tier-1 organization the finalize saga just created. */
+  tenantName: string;
+  /**
+   * Backend-confirmed provisioning mode: true → manual (more Tier-1
+   * tenants can be created later), false → single (permanently capped at
+   * this one tenant).
+   */
+  allowAdditional: boolean;
   onFinish: () => void;
 }
 
 /**
- * Final step of the setup wizard. No backend call — once an admin exists,
- * `GET /v1/setup/status` reports setupCompleted=true and the SetupGate
- * stops redirecting here. Just a confirmation screen that recaps what
- * the previous steps created so the operator knows what state they just
+ * Final step of the setup wizard. No backend call — once the finalize saga
+ * completes, `GET /v1/setup/status` reports phase=complete and the
+ * SetupGate stops redirecting here. Just a confirmation screen that recaps
+ * what the previous steps created (an organization is now always created —
+ * there is no "skipped" path) so the operator knows what state they just
  * landed in.
  */
-const FinishStep = ({ smtpConfigured, orgName, onFinish }: FinishStepProps) => {
+const FinishStep = ({
+  smtpConfigured,
+  tenantName,
+  allowAdditional,
+  onFinish
+}: FinishStepProps) => {
   const { t } = useTranslation();
   return (
     <div className="text-center">
@@ -27,16 +40,23 @@ const FinishStep = ({ smtpConfigured, orgName, onFinish }: FinishStepProps) => {
         />
       </div>
       <h4 className="mb-2">{t('setup.finish.title')}</h4>
+      <p className="text-muted mb-2">
+        <Trans
+          i18nKey="setup.finish.bodyWithOrg"
+          values={{ orgName: tenantName }}
+          components={{ strong: <strong /> }}
+        />
+      </p>
       <p className="text-muted mb-4">
-        {orgName ? (
-          <Trans
-            i18nKey="setup.finish.bodyWithOrg"
-            values={{ orgName }}
-            components={{ strong: <strong /> }}
-          />
-        ) : (
-          t('setup.finish.bodyWithoutOrg')
-        )}
+        <Trans
+          i18nKey={
+            allowAdditional
+              ? 'setup.finish.modeManual'
+              : 'setup.finish.modeSingle'
+          }
+          values={{ tenantName }}
+          components={{ strong: <strong /> }}
+        />
       </p>
 
       {!smtpConfigured && (

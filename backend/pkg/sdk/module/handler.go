@@ -295,11 +295,7 @@ func (h *ModuleAdminHandler) UpdateModule(ctx context.Context, input *UpdateModu
 		// UpdateConfig merges into the stored config — keys the caller omits are
 		// preserved, so a config-only change never wipes the module's secrets.
 		if err := h.configService.UpdateConfig(ctx, input.Name, input.Body.Config, input.Body.Secrets); err != nil {
-			var invalid *ConfigValidationError
-			if errors.As(err, &invalid) {
-				return nil, huma.Error422UnprocessableEntity(invalid.Error())
-			}
-			return nil, err
+			return nil, mapConfigServiceError(err, func(e error) error { return e })
 		}
 		configChanged = true
 	}
@@ -425,17 +421,18 @@ func (h *ModuleAdminHandler) UpdateEnvironment(ctx context.Context, input *Updat
 		ctx, input.Name, input.Env,
 		input.Body.Config, input.Body.Secrets, mutations, input.Body.Revision,
 	); err != nil {
-		var invalid *ConfigValidationError
-		if errors.As(err, &invalid) {
-			return nil, huma.Error422UnprocessableEntity(invalid.Error())
-		}
-		// 409 means the client acted on a view of the world that no longer
-		// holds; 422 means the request itself is malformed. Both are more
-		// actionable than the blanket 400 below.
-		if code := recordListStatus(err); code != 0 {
-			return nil, huma.NewError(code, err.Error())
-		}
-		return nil, huma.Error400BadRequest(err.Error())
+		// mapConfigServiceError owns the ConfigValidationError case: a
+		// code-bearing validator gets the stable 422 envelope, a code-less
+		// one keeps the text-only 422. Everything else falls through to the
+		// record-list mapping — 409 means the client acted on a view of the
+		// world that no longer holds; 422 means the request itself is
+		// malformed. Both are more actionable than the blanket 400.
+		return nil, mapConfigServiceError(err, func(e error) error {
+			if code := recordListStatus(e); code != 0 {
+				return huma.NewError(code, e.Error())
+			}
+			return huma.Error400BadRequest(e.Error())
+		})
 	}
 
 	if h.registry.SupportsHotReload(input.Name) {
@@ -487,7 +484,7 @@ func recordListStatus(err error) int {
 // SetActiveEnvironment switches the active environment for a module.
 func (h *ModuleAdminHandler) SetActiveEnvironment(ctx context.Context, input *SetActiveEnvironmentInput) (*SetActiveEnvironmentOutput, error) {
 	if err := h.configService.SetActiveEnvironment(ctx, input.Name, input.Body.Environment); err != nil {
-		return nil, huma.Error400BadRequest(err.Error())
+		return nil, mapConfigServiceError(err, func(e error) error { return huma.Error400BadRequest(e.Error()) })
 	}
 
 	needsRestart := !h.registry.SupportsHotReload(input.Name)

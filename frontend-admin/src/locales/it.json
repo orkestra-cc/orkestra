@@ -688,8 +688,16 @@
         "manual": "Solo manuale",
         "single": "Tenant singolo"
       },
-      "activeCount": "{{count}} attivi",
+      "activeCount": "Slot di provisioning occupati: {{count}}",
       "manage": "Gestisci policy"
+    },
+    "default": {
+      "badge": "Predefinito",
+      "setAsDefault": "Imposta come predefinito",
+      "reassignFirst": "Questo è il tenant predefinito della piattaforma. Riassegna il predefinito a un altro tenant prima di poterlo eliminare o farne il purge.",
+      "transferSuccess": "\"{{name}}\" è ora il tenant predefinito della piattaforma",
+      "transferError": "Impossibile impostare il tenant predefinito: {{message}}",
+      "unknownError": "errore sconosciuto"
     },
     "noOrgSelected": "Nessuna organizzazione selezionata",
     "rolesNeedOrg": "La gestione ruoli è limitata a una singola organizzazione. Selezionane o creane una dallo switcher in alto a destra per continuare.",
@@ -2818,7 +2826,10 @@
       "errorTitle": "Impossibile raggiungere il backend Orkestra",
       "errorBody": "Il frontend non riesce a contattare il backend per verificare se eseguire la procedura guidata iniziale. Verifica che il container backend sia attivo e raggiungibile dal browser, poi riprova.",
       "errorDefaultDetail": "La probe di setup su /v1/setup/status non ha risposto.",
-      "retry": "Riprova"
+      "retry": "Riprova",
+      "unavailableTitle": "Orkestra è temporaneamente non disponibile",
+      "unavailableBody": "Il backend non è riuscito a determinare lo stato del setup in questo momento. Di solito è transitorio: verificheremo di nuovo automaticamente.",
+      "unavailableAutoRetryHint": "Questa pagina verifica di nuovo automaticamente. Puoi anche riprovare subito."
     },
     "wizard": {
       "errorTitle": "Impossibile raggiungere il backend Orkestra",
@@ -2833,14 +2844,14 @@
     "welcome": {
       "title": "Benvenuto in Orkestra",
       "intro": "Prepariamo il tuo deployment. Ci vorrà circa un minuto e va eseguito esattamente una volta per installazione.",
-      "step1": "<strong>Crea un account amministratore.</strong> Il primo utente diventa il <code>developer</code> root e può gestire tutto il resto dall'interfaccia admin.",
-      "step2": "<strong>Crea la tua prima organizzazione.</strong> Orkestra è multi-tenant — ogni funzionalità vive all'interno di un'organizzazione, e verrai registrato come proprietario.",
+      "step1": "<strong>Crea un account amministratore.</strong> Il primo utente diventa il <code>super_admin</code> root e può gestire tutto il resto dall'interfaccia admin.",
+      "step2": "<strong>Crea la tua prima organizzazione.</strong> Orkestra è multi-tenant — ogni funzionalità vive all'interno di un'organizzazione, e verrai registrato come proprietario. Questo passaggio è obbligatorio: ogni installazione richiede almeno un tenant interno.",
       "step3": "<strong>Hai finito.</strong> La procedura non riapparirà al prossimo avvio.",
       "getStarted": "Inizia"
     },
     "admin": {
       "title": "Crea l'account amministratore",
-      "intro": "Questo utente diventa il root della piattaforma con il ruolo <code>developer</code>. Puoi aggiungere altri utenti dopo dall'interfaccia admin.",
+      "intro": "Questo utente diventa il root della piattaforma con il ruolo <code>super_admin</code>. Puoi aggiungere altri utenti dopo dall'interfaccia admin.",
       "labelFullName": "Nome completo",
       "labelEmail": "Email",
       "placeholderEmail": "admin@esempio.com",
@@ -2863,21 +2874,45 @@
       "nameHelp": "Etichetta leggibile mostrata in tutta l'interfaccia admin.",
       "labelSlug": "Slug",
       "slugHelp": "Identificativo URL-safe. Derivato automaticamente dal nome finché non lo modifichi. Solo lettere minuscole, numeri e trattini.",
-      "defaultName": "Workspace di {{firstName}}",
-      "defaultFirstName": "Default",
       "submit": "Crea organizzazione",
       "submitting": "Creazione…",
-      "skip": "Salta per ora",
-      "skipHint": "Preferisci configurarlo più tardi? Puoi creare un'organizzazione in qualsiasi momento da Amministrazione → Tenant interni.",
       "errorNameRequired": "Il nome organizzazione è obbligatorio.",
       "errorSlugInvalid": "Lo slug può contenere solo lettere minuscole, numeri e trattini.",
       "errorSlugConflict": "Un'organizzazione con slug \"{{slug}}\" esiste già. Scegli uno slug diverso.",
-      "errorGeneric": "Impossibile creare l'organizzazione. Riprova."
+      "errorGeneric": "Impossibile creare l'organizzazione. Riprova.",
+      "errorFinalizationConflict": "Un'altra richiesta di finalizzazione è già in corso con valori diversi. Attendi che finisca, oppure verifica i dettagli con chi l'ha avviata.",
+      "errorAlreadyCompleted": "Il setup è già stato completato da un altro operatore. Questa pagina verrà reindirizzata automaticamente.",
+      "inProgressBody": "Un'altra richiesta con esattamente gli stessi dati sta già finalizzando il setup. Questa pagina riprova automaticamente — non serve inviare di nuovo.",
+      "refreshingSessionError": "L'organizzazione è stata creata, ma non è stato possibile aggiornare la tua sessione con il nuovo accesso. Riprova per ottenere il nuovo token — non verrà creato nulla due volte.",
+      "provisioning": {
+        "label": "Tenant Tier-1 aggiuntivi",
+        "help": "Questa scelta è applicata dal backend e determina come potranno essere creati i tenant Tier-1 in futuro.",
+        "allowLabel": "Consenti altri tenant interni",
+        "allowHelp": "Modalità manuale — potrai creare altri tenant Tier-1 in seguito da Amministrazione → Tenant interni.",
+        "singleLabel": "Blocca su questo unico tenant",
+        "singleHelp": "Modalità singola — il provisioning Tier-1 resterà permanentemente limitato a questo unico tenant."
+      },
+      "access": {
+        "signInTitle": "Accedi per continuare il setup",
+        "signInBody": "Non è stato possibile ripristinare la tua sessione. Accedi per continuare a creare l'organizzazione iniziale — verrai riportato subito qui.",
+        "signInCta": "Vai al login",
+        "unavailableTitle": "Accesso al setup temporaneamente non disponibile",
+        "unavailableBody": "Il backend non è riuscito a determinare se puoi finalizzare il setup in questo momento. Di solito è transitorio: riprova tra poco.",
+        "boundToAnotherAdminTitle": "Il setup è riservato a un altro amministratore",
+        "boundToAnotherAdminBody": "Un altro account amministratore ha avviato la finalizzazione del setup e deve essere quello a completarla. Passa a quell'account, oppure esci e riprova più tardi.",
+        "recoveryRequiresSuperAdminTitle": "È richiesto un super amministratore attivo",
+        "recoveryRequiresSuperAdminBody": "L'amministratore associato a questo setup non è più utilizzabile e solo un super amministratore attivo può recuperarlo. Passa a quell'account, oppure esci.",
+        "recoveryWarningTitle": "Recupero di un setup abbandonato",
+        "recoveryWarningBody": "L'amministratore precedentemente associato a questo setup non è più utilizzabile. Come super amministratore attivo, inviando questo modulo rivendicherai il setup per il tuo account.",
+        "switchAccount": "Cambia account",
+        "logout": "Esci"
+      }
     },
     "finish": {
       "title": "Orkestra è pronta",
       "bodyWithOrg": "Il tuo account amministratore è stato creato, sei autenticato e l'organizzazione <strong>{{orgName}}</strong> è attiva. Potrai rinominarla o creare altre organizzazioni in seguito.",
-      "bodyWithoutOrg": "Il tuo account amministratore è stato creato e sei autenticato. Nessuna organizzazione è stata creata — puoi aggiungerne una in qualsiasi momento da Amministrazione → Tenant interni. La procedura guidata non apparirà più.",
+      "modeSingle": "Il provisioning Tier-1 è bloccato su <strong>{{tenantName}}</strong> — non sarà possibile creare altri tenant interni su questa installazione.",
+      "modeManual": "<strong>{{tenantName}}</strong> è ora il tenant predefinito della piattaforma. Potrai creare altri tenant interni in qualsiasi momento da Amministrazione → Tenant interni.",
       "smtpWarning": "<strong>SMTP non è configurato.</strong> Le email di reset password e verifica verranno loggate sullo stdout del backend invece di essere consegnate. Puoi configurarlo in qualsiasi momento da <code>/admin/modules</code> nel modulo notification.",
       "goToDashboard": "Vai alla dashboard"
     }

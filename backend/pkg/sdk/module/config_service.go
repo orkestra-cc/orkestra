@@ -542,6 +542,24 @@ func (s *ModuleConfigService) SetActiveEnvironment(ctx context.Context, name, en
 		return fmt.Errorf("environment %q not found for module %q", envName, name)
 	}
 
+	// Activation-time validation: the target profile as a whole, before any
+	// write. Mirrors validateModuleConfig's dispatch. It reads the profile
+	// from the `doc` snapshot deliberately — validating what the operator is
+	// activating — while the write below re-reads server-side; a profile
+	// mutated in between is caught by the next activation, not silently
+	// half-applied by this one.
+	cv := doc.Environments[envName].ConfigValues
+	if cv == nil {
+		cv = make(map[string]string)
+	}
+	if m, ok := s.knownModules[name]; ok {
+		if v, ok := m.(HasConfigActivationValidator); ok {
+			if err := v.ValidateConfigActivation(ctx, cv); err != nil {
+				return err
+			}
+		}
+	}
+
 	// One write: the activation and the legacy-map sync are the same update,
 	// and the values copied are read server-side at execution time. Copying
 	// `doc` — a snapshot taken above — put back whatever a concurrent write

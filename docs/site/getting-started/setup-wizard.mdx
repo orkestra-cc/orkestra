@@ -1,0 +1,60 @@
+---
+title: Setup Wizard
+sidebar_position: 3
+description: What a fresh installation must do to come online, how the wizard resumes, and what an upgrade of an existing installation does automatically.
+---
+
+# Setup Wizard
+
+Every Orkestra installation — a brand-new one, or an existing one that has upgraded past this release — is guaranteed exactly one Tier-1 (internal) tenant, and the platform always knows which one is the default. This page covers the browser-based `/setup` flow a fresh install runs to get there, and what happens automatically when an existing install upgrades instead.
+
+This is a different thing from `orkestra.sh`'s **Setup** TUI option, which only scaffolds `docker/.env` and secrets before the stack ever starts (see [Installation](/getting-started/installation)). The wizard on this page runs inside the operator console itself, after the backend is already up.
+
+For local development only, the [dev-token shortcut](/getting-started/first-admin-login) mints a token directly and skips the wizard entirely — it does not exist on staging or production.
+
+## What a fresh installation does
+
+Visit the operator console against a database with no users yet, and every route redirects to `/setup` until the wizard finishes. It has three steps:
+
+1. **Create the administrator.** Whoever completes this step first becomes the platform's first `super_admin` — a system-wide role, independent of any tenant — and is signed in for the rest of the flow.
+2. **Name the initial Tier-1 organization.** This step is **required and cannot be skipped**: every install needs at least one internal tenant, and the wizard has no path forward without creating one. Alongside the name, you choose explicitly whether the platform accepts more Tier-1 tenants later:
+   - **Allow additional internal tenants** → provisioning mode `manual`. More Tier-1 tenants can be created afterwards from Administration → Internal Tenants.
+   - **Lock to this one tenant** → provisioning mode `single`. Tier-1 provisioning is permanently capped at the tenant you just named — no more can be created while that mode holds.
+3. **Done.** The tenant you named becomes the platform default, you're enrolled as its owner, and the wizard will not appear again.
+
+### Setup is resumable
+
+A page refresh, a lost response, or the backend restarting mid-request all resume exactly where they left off — the wizard reads the authoritative phase from the backend on load and starts at the right step rather than replaying from the beginning. Resubmitting the organization step with the same name, slug, and provisioning choice is treated as the same request, not a duplicate: nothing is created twice, whether the resubmission was automatic (the browser retrying while a request is already in flight) or you clicking submit again yourself.
+
+## If someone else is finalizing setup
+
+The organization step is bound to one administrator account — normally whoever completed step 1 first. (An upgraded install can instead start with nobody bound at all — see below.) Sign in as anyone else while setup is still open and you'll see a locked screen instead of the form:
+
+- **Setup is reserved for a different administrator** — switch to that account, or wait for it to finish.
+- **An active super administrator is required** — the bound administrator no longer exists, or has been deactivated. Signing in as any active `super_admin` shows a recovery warning instead of a hard lock: submitting the form claims setup for that account and continues normally.
+
+Neither screen names the administrator currently holding the binding — that's deliberate.
+
+## Upgrading an existing installation
+
+An installation that predates this release reconciles automatically the first time it boots the new backend. This runs once, during startup — never in response to an HTTP request — and needs no operator action in the common case:
+
+- **The platform default is assigned automatically**, if one isn't already set: the **oldest operational Tier-1 tenant** becomes the default. Suspended, archived, purged, and soft-deleted tenants are never eligible.
+- **A Tier-1 tenant already configured for `open` provisioning is rewritten to `manual`** — in every saved environment profile, not only the active one. `open` is no longer a valid mode for internal tenants. Tier-2 (external) tenants keep `open` untouched; it remains a supported, self-serve mode there.
+- **Existing tenants and memberships are never modified.** Reconciliation only ever touches the platform-default pointer and provisioning configuration — it never creates, renames, archives, or purges a tenant, and never touches a membership.
+- **An installation left with no operational Tier-1 tenant at all** is asked to complete setup: nobody is yet bound to it, so the console redirects to `/setup` and the next active `super_admin` to sign in can claim it and finish the organization step, exactly as described above.
+
+### An installation already locked to `single` with more than one Tier-1 tenant
+
+This can happen on an upgrade: an installation configured for `single` provisioning before this release, but already holding more than one Tier-1 tenant. Reconciliation does **not** loosen this automatically — the install keeps `single` and stays blocked from creating any more Tier-1 tenants, because that restriction was a deliberate administrator choice and silently relaxing it would discard it. To resolve it, an administrator either:
+
+- archives or deletes the extra tenants until exactly one remains, or
+- explicitly switches provisioning to `manual` at `/admin/modules/tenant`.
+
+## Transferring or removing the platform default
+
+The platform default isn't permanent — an administrator can transfer it to another operational Tier-1 tenant at any time. Transferring the default, and deleting or purging any tenant through the platform-admin routes, require a **second authentication factor** on top of the `system.tenants.admin` permission — these are the platform-admin operations that can either destroy a tenant outright or move which one the platform resolves to as the default. What the routes check (`RequireMFA`) is that the session you are calling with was authenticated with a second factor, for as long as that session lasts — not that you re-proved it in the last few minutes. A password-only session is refused with `401 step_up_required`, and the console collects the factor and replays the request for you. You cannot delete or purge the current platform default directly — reassign the default elsewhere first.
+
+That MFA requirement isn't unique to those three routes, though: most other tenant mutations sit behind the same session-long check too, each behind its own permission — renaming a tenant, changing its plan, inviting or removing a member, and an owner deleting (archiving) their own tenant all require it. Reads, and a small set of non-destructive platform-admin writes (for example the admin-side rename and plan-change endpoints), are the exceptions that don't.
+
+See the [tenant module reference](/modules/core/tenant#platform-default-tenant) for the full lifecycle contract.

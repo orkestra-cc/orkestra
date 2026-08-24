@@ -39,6 +39,7 @@ const setupSeededStore = async () => {
   await store.dispatch(
     setupApi.util.upsertQueryData('getSetupStatus', undefined, {
       setupCompleted: true,
+      phase: 'complete',
       smtpConfigured: true
     })
   );

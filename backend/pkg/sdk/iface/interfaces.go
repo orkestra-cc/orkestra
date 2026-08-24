@@ -114,6 +114,30 @@ type UserProvider interface {
 	ClearMFAGrace(ctx context.Context, userUUID string) error
 }
 
+// ---------------------------------------------------------------------------
+// UserLifecycleStateProvider — consumed by: shared/setup (finalizer-access
+// probe + recovery). Narrow on purpose: UserProvider.GetUserByID excludes
+// soft-deleted rows and so cannot distinguish `missing` from `deleted` for
+// recovery audit; this seam resolves ONLY the lifecycle class and returns
+// no profile data. The wide UserProvider is not widened.
+// ---------------------------------------------------------------------------
+
+type UserLifecycleState string
+
+const (
+	UserLifecycleActive   UserLifecycleState = "active"   // exists, not soft-deleted, IsActive
+	UserLifecycleInactive UserLifecycleState = "inactive" // exists, not soft-deleted, !IsActive
+	UserLifecycleDeleted  UserLifecycleState = "deleted"  // soft-deleted row
+	UserLifecycleMissing  UserLifecycleState = "missing"  // no row
+)
+
+// UserLifecycleStateProvider classifies one operator user UUID. A database
+// error is returned as an error and is distinct from every state — callers
+// fail closed and must never map a lookup failure onto a lifecycle class.
+type UserLifecycleStateProvider interface {
+	UserLifecycleState(ctx context.Context, userUUID string) (UserLifecycleState, error)
+}
+
 // OAuthLinkDataUpdater is the additive sub-interface that lets the auth
 // module refresh the embedded OAuthLink.OAuthData map (typically the
 // cached `picture` URL) on every OAuth callback. Adding this method
@@ -438,6 +462,22 @@ type TenantProvider interface {
 	// feature flag; Phase 3 flips the flag and migrates legacy clientbilling
 	// rows onto the resulting personal tenants.
 	EnsureTenantForUser(ctx context.Context, userUUID string) (*Tenant, error)
+}
+
+// ---------------------------------------------------------------------------
+// DefaultTenantProvider — consumed by: auth (operator JWT tenant-fallback
+// seeding), the local dev-token resolver. Deliberately narrow: the wide
+// TenantProvider is NOT widened (its test fakes and consumers stay intact).
+// ---------------------------------------------------------------------------
+
+// DefaultTenantProvider resolves the platform default Tier-1 tenant.
+// Returns (nil, nil) when no default is assigned or the pointer's target is
+// not operational (status active, not soft-deleted) — the provider never
+// hands out a non-operational target. It grants nothing: membership
+// validation, RBAC, audience checks, and X-Tenant-ID override all still
+// apply downstream.
+type DefaultTenantProvider interface {
+	GetDefaultTenant(ctx context.Context) (*Tenant, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -1122,9 +1162,12 @@ type KMSProvider interface {
 	// CreateKey mints a fresh DEK for tenantUUID, wraps it with the
 	// master key, persists the wrapped form, and returns the opaque
 	// keyID callers stamp on their tenant row. Idempotent at the
-	// tenant level: if a key already exists for tenantUUID, returns
-	// the existing keyID rather than overwriting — avoids wiping data
-	// when a create path runs twice.
+	// tenant level AND under concurrency: two racing calls for one
+	// tenantUUID both return the single winning keyID (implementations
+	// back this with a unique tenant index + duplicate-key reread).
+	// A caller may replay this call after a crash or a lost response —
+	// e.g. a resumable provisioning saga retrying a stage — and must
+	// never observe a second DEK for the same tenant.
 	CreateKey(ctx context.Context, tenantUUID string) (keyID string, err error)
 
 	// Encrypt seals plaintext with the tenant's DEK. The returned

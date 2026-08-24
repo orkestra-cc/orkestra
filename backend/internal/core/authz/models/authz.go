@@ -37,8 +37,14 @@ type Role struct {
 
 // Binding grants a role to a user in a specific tenant (or globally when
 // TenantID is empty — used for system role bindings derived from the user's
-// system role). Optional ExpiresAt supports contractor/trial grants and is
-// auto-reaped by a TTL index.
+// system role). Optional ExpiresAt supports contractor/trial grants.
+//
+// There is NO TTL index on expiresAt (a plain index only) and no background
+// reaper — both are tracked as future work in this module's CLAUDE.md — so
+// an expired row survives indefinitely. Because the unique
+// (tenantId, userUUID, roleId) index would then let a dead grant block
+// every future grant of that role, the repository's CreateBinding and
+// EnsureBinding reap the tuple's own expired row before re-granting it.
 type Binding struct {
 	ID        primitive.ObjectID `bson:"_id,omitempty" json:"-"`
 	UUID      string             `bson:"uuid" json:"id"`

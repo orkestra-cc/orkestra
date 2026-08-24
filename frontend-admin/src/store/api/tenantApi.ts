@@ -8,9 +8,22 @@ import type { Membership, EffectivePermissions } from '../slices/tenantSlice';
  * The canonical transitions are:
  *   provisioning → active ↔ suspended
  *                           ↘ archived → purged (terminal, crypto-shred)
+ *
+ * Declared as an array-derived type rather than an inline 5-member union:
+ * the two prettier versions in play here (the pre-commit hook pins 3.1.0;
+ * the workspace runs 3.9.x) disagree on how to wrap a broken multi-member
+ * union — one always expands one-per-line, the other hugs it onto a single
+ * continuation line — so a plain union oscillates between commits. An
+ * array literal's line-breaking is stable across both.
  */
-export type TenantStatus =
-  'provisioning' | 'active' | 'suspended' | 'archived' | 'purged';
+export const TENANT_STATUSES = [
+  'provisioning',
+  'active',
+  'suspended',
+  'archived',
+  'purged'
+] as const;
+export type TenantStatus = (typeof TENANT_STATUSES)[number];
 
 export interface Org {
   id: string;
@@ -41,6 +54,15 @@ export interface Org {
   billingAddress?: TenantAddress;
   fatturaPA?: FatturaPAProfile | null;
   signupChannel?: string;
+  /**
+   * Derived, never stored — true when this tenant is the current platform
+   * default (see `TenantAdminOutputBody`/`AdminTenantListItem` on the
+   * backend). Only the admin single-tenant response and the admin list
+   * item actually populate it; the plain Tier-2/self-service `Tenant`
+   * payload (createOrg/getOrg/updatePlan/…) never sends this field, hence
+   * optional here rather than required.
+   */
+  isDefault?: boolean;
 }
 
 export interface CreateOrgInput {
@@ -692,14 +714,36 @@ export const tenantApi = baseApi.injectEndpoints({
     }),
 
     // Read-only per-tier provisioning policy (open | manual | single) plus the
-    // current active-tenant counts. Backs the ProvisioningPolicyCard on the
-    // tenant management pages; the mode itself is edited at /admin/modules/tenant.
+    // current counts of tenants occupying a provisioning slot (deletedAt nil
+    // and status provisioning/active/suspended — a suspended tenant still
+    // holds its slot). Backs the ProvisioningPolicyCard on the tenant
+    // management pages; the mode itself is edited at /admin/modules/tenant.
     getProvisioningPolicy: builder.query<ProvisioningPolicy, void>({
       query: () => ({
         url: '/v1/admin/tenants/provisioning-policy',
         method: 'GET'
       }),
       providesTags: [{ type: 'AdminOrg', id: 'PROVISIONING' }]
+    }),
+
+    // Transfer the platform default to another operational internal tenant
+    // (active, not soft-deleted). Gated server-side by system.tenants.admin
+    // PLUS RequireMFA — a session-long check that the access token's amr
+    // claim carries an MFA factor, NOT RequireStepUp's fresh-proof (maxAge)
+    // requirement. It still answers 401 {code:'step_up_required'}, which is
+    // paused, replayed, and retried automatically by the global baseApi.ts
+    // interceptor + StepUpModal; no extra plumbing needed here.
+    // Invalidating the bare 'AdminOrg'/'Membership'/'Org' tag TYPES (not
+    // just the target's own id) refreshes every list/detail view that
+    // renders the isDefault badge, since the previous default's isDefault
+    // flips to false at the same time.
+    setDefaultTenant: builder.mutation<void, { tenantId: string }>({
+      query: body => ({
+        url: '/v1/admin/tenants/default',
+        method: 'PUT',
+        body
+      }),
+      invalidatesTags: ['AdminOrg', 'Membership', 'Org']
     })
   }),
   overrideExisting: false
@@ -739,5 +783,6 @@ export const {
   useCreateTenantDivisionAdminMutation,
   useSetTenantBillingIdentityAdminMutation,
   useSetTenantItalianBillableAdminMutation,
-  useGetProvisioningPolicyQuery
+  useGetProvisioningPolicyQuery,
+  useSetDefaultTenantMutation
 } = tenantApi;
