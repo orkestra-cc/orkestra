@@ -79,3 +79,29 @@ func (f *fakeConfigRepo) MigrateToEnvironments(context.Context, string, map[stri
 func (f *fakeConfigRepo) ClearNeedsRestart(context.Context, string) error { return nil }
 
 func (f *fakeConfigRepo) RefreshMetadata(context.Context, Module) error { return nil }
+
+// CompareAndSwapEnvironment mirrors the Mongo implementation's contract: a
+// mismatched revision is a lost race (false, nil), not an error. casFailures
+// forces the first N attempts to lose, which is how a concurrent writer is
+// modelled without a second goroutine.
+func (f *fakeConfigRepo) CompareAndSwapEnvironment(_ context.Context, name, env string, expected int64, next EnvironmentConfig) (bool, error) {
+	f.casCalls++
+	if f.casFailures > 0 {
+		f.casFailures--
+		return false, nil
+	}
+	doc, ok := f.docs[name]
+	if !ok {
+		return false, nil
+	}
+	cur := doc.Environments[env]
+	if cur.Revision != expected {
+		return false, nil
+	}
+	next.Revision = cur.Revision + 1
+	doc.Environments[env] = next
+	if doc.ActiveEnv() == env {
+		doc.ConfigValues, doc.EncryptedValues = next.ConfigValues, next.EncryptedValues
+	}
+	return true, nil
+}

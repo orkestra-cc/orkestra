@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -198,6 +199,65 @@ func (r *ModuleConfigRepository) UpdateEnvironmentConfig(ctx context.Context, na
 		return fmt.Errorf("update environment config %q/%q: %w", name, envName, err)
 	}
 	return nil
+}
+
+// CompareAndSwapEnvironment replaces ONE environment sub-document, and only
+// while its revision still matches. Returns false — not an error — when the
+// revision has moved: losing a race is an expected outcome the caller decides
+// what to do about, not a failure.
+//
+// Scoping the swap to the sub-document matters: Environments is a nested map,
+// so guarding a whole-document replace with one environment's revision would
+// silently discard concurrent edits to a sibling environment. When env is the
+// active one, the legacy top-level maps are synced in the SAME update, so the
+// two can never diverge.
+//
+// A document written before record lists existed carries no revision field at
+// all. Absent and 0 are the same value, so an expectation of 0 also matches a
+// missing field — otherwise the first mutation on every pre-existing module
+// would fail against nothing.
+func (r *ModuleConfigRepository) CompareAndSwapEnvironment(
+	ctx context.Context, name, envName string, expectedRevision int64, next EnvironmentConfig,
+) (bool, error) {
+	envPath := "environments." + envName
+	next.Revision = expectedRevision + 1
+	next.UpdatedAt = time.Now().UTC()
+
+	revisionMatches := bson.M{envPath + ".revision": expectedRevision}
+	if expectedRevision == 0 {
+		revisionMatches = bson.M{"$or": bson.A{
+			bson.M{envPath + ".revision": expectedRevision},
+			bson.M{envPath + ".revision": bson.M{"$exists": false}},
+		}}
+	}
+	filter := bson.M{"moduleName": name}
+	for k, v := range revisionMatches {
+		filter[k] = v
+	}
+
+	set := bson.M{
+		envPath:        next,
+		"needsRestart": true,
+		"updatedAt":    next.UpdatedAt,
+	}
+
+	var doc ModuleConfig
+	if err := r.collection.FindOne(ctx, bson.M{"moduleName": name}).Decode(&doc); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return false, fmt.Errorf("module %q not found", name)
+		}
+		return false, fmt.Errorf("compare-and-swap environment %q/%q: %w", name, envName, err)
+	}
+	if doc.ActiveEnv() == envName {
+		set["configValues"] = next.ConfigValues
+		set["encryptedValues"] = next.EncryptedValues
+	}
+
+	res, err := r.collection.UpdateOne(ctx, filter, bson.M{"$set": set})
+	if err != nil {
+		return false, fmt.Errorf("compare-and-swap environment %q/%q: %w", name, envName, err)
+	}
+	return res.MatchedCount == 1, nil
 }
 
 // SetActiveEnvironment switches the active environment for a module.

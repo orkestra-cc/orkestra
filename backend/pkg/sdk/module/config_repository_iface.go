@@ -20,4 +20,5 @@ type ConfigRepository interface {
 	MigrateToEnvironments(ctx context.Context, name string, configValues, encryptedValues map[string]string) error
 	ClearNeedsRestart(ctx context.Context, name string) error
 	RefreshMetadata(ctx context.Context, m Module) error
+	CompareAndSwapEnvironment(ctx context.Context, name, envName string, expectedRevision int64, next EnvironmentConfig) (bool, error)
 }
