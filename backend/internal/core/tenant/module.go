@@ -17,6 +17,7 @@ import (
 	"github.com/orkestra/backend/internal/core/tenant/models"
 	"github.com/orkestra/backend/internal/core/tenant/repository"
 	"github.com/orkestra/backend/internal/core/tenant/services"
+	"github.com/orkestra/backend/internal/shared/systeminit"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
@@ -31,6 +32,21 @@ type Module struct {
 	// directly so the validator's policy is exercised without booting
 	// MongoDB.
 	slotCount func(ctx context.Context, kind models.TenantKind) (int64, error)
+
+	// The three seams below back versioned boot reconciliation in Start
+	// (reconcile.go) and nothing else.
+	//
+	// finalization is the platform-global setup coordinator (`system_init`,
+	// key `setup_finalization`), resolved from the service registry in
+	// Init. systeminit.Repo is the only code that opens that collection;
+	// this module consumes the narrow FinalizationStore contract.
+	finalization systeminit.FinalizationStore
+	// users answers the single question reconciliation asks the user
+	// module: does this installation hold any operator users at all.
+	users userCounter
+	// configService is where the persisted Tier-1 provisioning mode lives,
+	// including every named environment profile.
+	configService *module.ModuleConfigService
 }
 
 func NewModule() *Module { return &Module{} }
@@ -189,6 +205,24 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	m.svc = services.New(repo)
 	m.handler = handlers.New(m.svc, deps.Services)
 	m.slotCount = m.svc.CountProvisioningSlotsByKind
+	m.configService = deps.ConfigService
+
+	// Boot-reconciliation wiring (Start, reconcile.go). Both seams are
+	// REQUIRED: missing wiring fails module initialization loudly rather
+	// than letting the upgrade path degrade into a silent no-op that a
+	// stamped version would then hide forever. The coordinator store is
+	// registered in main.go before InitAll; the user provider comes from
+	// the user module, which the registry initialises first (Dependencies).
+	store, ok := module.GetTyped[systeminit.FinalizationStore](deps.Services, module.ServiceSetupFinalizationStore)
+	if !ok || store == nil {
+		return errMissingSetupCoordinator
+	}
+	m.finalization = store
+	users, ok := module.GetTyped[userCounter](deps.Services, module.ServiceUserService)
+	if !ok || users == nil {
+		return errMissingUserProvider
+	}
+	m.users = users
 
 	// Wire the per-tier provisioning policy reader. Reads the admin-managed
 	// `provisioning.{internal,external}.mode` keys from this module's config

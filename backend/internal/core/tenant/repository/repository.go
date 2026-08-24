@@ -845,3 +845,54 @@ func (r *Repository) RestoreTenant(ctx context.Context, uuid string) error {
 	}
 	return nil
 }
+
+// ListOperationalByKindOldestFirst returns the OPERATIONAL tenants of a
+// tier — `status == active` AND `deletedAt == nil` — oldest first by
+// `createdAt`, with `uuid` ascending as a deterministic tie-break. A limit
+// <= 0 means no limit.
+//
+// This applies the "operational tenant" predicate, deliberately NOT the
+// provisioning-slot one (see CLAUDE.md#lifecycle): a suspended, archived,
+// purged or soft-deleted tenant is never returned, so boot reconciliation
+// can never adopt one as the platform default.
+//
+// The TOTAL ordering is load-bearing, not cosmetic. Two backend replicas
+// running boot reconciliation concurrently must pick the same tenant, or
+// AssignDefault's transactional conflict check would fail one of their
+// startups. `createdAt` alone is not a total order — two rows can share a
+// millisecond — which is why `uuid` breaks the tie.
+func (r *Repository) ListOperationalByKindOldestFirst(ctx context.Context, kind models.TenantKind, limit int64) ([]models.Tenant, error) {
+	opts := options.Find().SetSort(bson.D{
+		{Key: "createdAt", Value: 1},
+		{Key: "uuid", Value: 1},
+	})
+	if limit > 0 {
+		opts.SetLimit(limit)
+	}
+	//tenantscope:allow tenant registry — selecting the platform default spans every tenant of a tier by definition (mirrors ListTenantsByKind)
+	cur, err := r.db.Collection(CollTenants).Find(ctx, bson.M{
+		"kind":      string(kind),
+		"deletedAt": nil,
+		"status":    string(models.TenantStatusActive),
+	}, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	var out []models.Tenant
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CountAllTenants counts every tenant row of every tier, INCLUDING
+// soft-deleted, archived and purged ones. Boot reconciliation uses it for
+// exactly one decision — "has this installation ever held a tenant at all"
+// — which is why it deliberately ignores both lifecycle predicates: a
+// database holding only archived rows is an upgraded installation, not a
+// pristine one, and misclassifying it as fresh would skip the migration.
+func (r *Repository) CountAllTenants(ctx context.Context) (int64, error) {
+	//tenantscope:allow tenant registry — an "is this installation pristine" probe is platform-global by definition
+	return r.db.Collection(CollTenants).CountDocuments(ctx, bson.M{})
+}
