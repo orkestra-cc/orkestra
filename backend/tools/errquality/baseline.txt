@@ -11,5 +11,5 @@
 #     | sed -n 's#^.*/\(internal/[^:]*\):\([0-9]*\):[0-9]*: \[\([A-Z0-9]*\)\].*#\1:\2:\3#p' \
 #     | sort -u
 # — but never regenerate to silence a NEW violation. Fix that one.
-internal/shared/setup/routes.go:124:R1
-internal/shared/setup/routes.go:127:R3
+internal/shared/setup/routes.go:417:R1
+internal/shared/setup/routes.go:420:R3
