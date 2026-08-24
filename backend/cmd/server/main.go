@@ -21,8 +21,6 @@ import (
 
 	"github.com/orkestra/backend/internal/core/auth/services"
 	authzServices "github.com/orkestra/backend/internal/core/authz/services"
-	tenantModels "github.com/orkestra/backend/internal/core/tenant/models"
-	tenantRepo "github.com/orkestra/backend/internal/core/tenant/repository"
 	tenantServices "github.com/orkestra/backend/internal/core/tenant/services"
 	"github.com/orkestra/backend/internal/shared/blob"
 	"github.com/orkestra/backend/internal/shared/config"
@@ -496,18 +494,18 @@ func main() {
 	// exist on staging either — staging is internet-reachable. Handler.
 	// RegisterRoutes enforces the same rule independently.
 	if !cfg.IsProductionLike() {
-		// Resolver: when an operator dev token doesn't pin a tenant, default it
-		// to the first internal tenant so the token satisfies tenant-scoped
-		// reads (billing/documents). Nil-safe — falls back to a tenant-less
-		// token when the tenant service is absent or no internal tenant exists.
+		// Resolver: an operator dev token that doesn't pin a tenant defaults
+		// to the OPERATIONAL platform default (tenant_defaults pointer) — the
+		// old newest-internal shortcut could select an archived tenant.
+		// Nil-safe: no default assigned → tenant-less token (legacy behavior).
 		var devTenantResolver devtoken.DefaultTenantResolver
-		if tenantSvc, ok := module.GetTyped[*tenantServices.Service](svcRegistry, module.ServiceTenantService); ok && tenantSvc != nil {
+		if dp, ok := module.GetTyped[iface.DefaultTenantProvider](svcRegistry, module.ServiceDefaultTenantProvider); ok && dp != nil {
 			devTenantResolver = func(ctx context.Context) (string, string) {
-				views, err := tenantSvc.ListAllTenantsFiltered(ctx, tenantRepo.TenantListFilter{Kind: tenantModels.TenantKindInternal})
-				if err != nil || len(views) == 0 || views[0].Tenant == nil {
+				t, err := dp.GetDefaultTenant(ctx)
+				if err != nil || t == nil {
 					return "", ""
 				}
-				return views[0].Tenant.UUID, "internal"
+				return t.UUID, "internal"
 			}
 		}
 		devtoken.NewHandler(
