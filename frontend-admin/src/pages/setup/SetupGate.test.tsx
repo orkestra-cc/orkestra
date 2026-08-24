@@ -8,7 +8,7 @@
 // The stale-tenant-state cleanup effect must key off the same phase
 // condition as the redirect, not the legacy setupCompleted boolean.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { Routes, Route } from 'react-router';
 
@@ -140,12 +140,78 @@ describe('SetupGate — 503 setup.status_unavailable', () => {
     await waitFor(() => expect(statusCalls).toBe(1));
 
     // Not yet — the delay hasn't elapsed.
-    await vi.advanceTimersByTimeAsync(4000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
     expect(statusCalls).toBe(1);
 
     // Now it has.
-    await vi.advanceTimersByTimeAsync(1500);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
     await waitFor(() => expect(statusCalls).toBe(2));
+  });
+
+  it('drives the delay from the header value, not the hardcoded default — Retry-After: 2, not 5', async () => {
+    // DEFAULT_RETRY_AFTER_SECONDS in SetupGate.tsx is 5, same value the
+    // test above sends as the header — so that test alone cannot tell a
+    // header-driven timer apart from a regression that dropped the header
+    // read and always fell back to the default. Sending a header value
+    // clearly distinct from the default (2s, not 5s) and asserting the
+    // refetch lands near 2s — well before 5s would ever elapse — is what
+    // actually pins that the header's value drives the delay.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let statusCalls = 0;
+    server.use(
+      http.get(url('/v1/setup/status'), () => {
+        statusCalls += 1;
+        return HttpResponse.json(unavailableBody, {
+          status: 503,
+          headers: { 'Retry-After': '2' }
+        });
+      })
+    );
+
+    renderGate(<div>PROTECTED_CONTENT</div>);
+    await screen.findByText(i18n.t('setup.gate.unavailableTitle'));
+    await waitFor(() => expect(statusCalls).toBe(1));
+
+    // Not yet — well under the header's 2s.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(statusCalls).toBe(1);
+
+    // Past the header's 2s, and nowhere near the hardcoded 5s default — a
+    // regression that ignored the header would still show 1 call here.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(700);
+    });
+    await waitFor(() => expect(statusCalls).toBe(2));
+  });
+
+  it('falls back to the generic error alert for a 503 that is not setup.status_unavailable', async () => {
+    // Pins that the neutral-unavailable branch requires BOTH status 503
+    // AND the specific code — not status alone. The pre-existing
+    // generic-error branch (danger alert, errorTitle/errorBody/retry) is
+    // otherwise untouched by this task; this keeps that durable.
+    server.use(
+      http.get(url('/v1/setup/status'), () =>
+        HttpResponse.json(
+          { code: 'some.other_code', detail: 'unexpected' },
+          { status: 503 }
+        )
+      )
+    );
+
+    renderGate(<div>PROTECTED_CONTENT</div>);
+
+    expect(
+      await screen.findByText(i18n.t('setup.gate.errorTitle'))
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(i18n.t('setup.gate.unavailableTitle'))
+    ).not.toBeInTheDocument();
   });
 });
 
