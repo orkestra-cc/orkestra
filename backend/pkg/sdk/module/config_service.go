@@ -12,7 +12,7 @@ import (
 // ModuleConfigService manages module configurations in MongoDB with Redis caching.
 // It provides the hot-path IsEnabled() check used by the ModuleGate middleware.
 type ModuleConfigService struct {
-	repo        *ModuleConfigRepository
+	repo        ConfigRepository
 	redis       RedisClient
 	logger      *slog.Logger
 	coreModules map[string]bool // precomputed set — never hits DB/Redis
@@ -30,7 +30,7 @@ const (
 )
 
 // NewModuleConfigService creates a new config service.
-func NewModuleConfigService(repo *ModuleConfigRepository, redis RedisClient, logger *slog.Logger) *ModuleConfigService {
+func NewModuleConfigService(repo ConfigRepository, redis RedisClient, logger *slog.Logger) *ModuleConfigService {
 	return &ModuleConfigService{
 		repo:         repo,
 		redis:        redis,
