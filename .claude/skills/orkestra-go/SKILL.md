@@ -107,7 +107,7 @@ If you need a type that crosses module boundaries, **put it in `pkg/sdk/iface/`*
        optionalModules["<name>"] = func() module.Module { return <name>.NewModule() }
    }
    ```
-3. Declare `Collections()` (registry auto-creates indexes), `NavItems()` (sidebar), `ConfigSchema()` (admin form + first-boot env-var seed), `Dependencies()` (toposort), `Permissions()` (authz catalog).
+3. Declare `Collections()` (registry auto-creates indexes), `NavItems()` (sidebar), `ConfigSchema()` (admin form + first-boot env-var seed), `Dependencies()` (toposort), `Permissions()` (authz catalog). A setting an operator needs *N* of is one `FieldRecordList` with an `Items` sub-schema — not N duplicated fields; its elements are UI/API-managed and carry no `EnvVar`, so the env-var seed above covers scalar fields only.
 4. Use `pkg/sdk/iface` for cross-module deps. Add new interfaces there if needed.
 5. Register provided services with `deps.Services.Register(key, impl)`.
 6. **Add a `CLAUDE.md`** in the module directory if the module has non-obvious patterns.
