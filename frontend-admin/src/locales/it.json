@@ -2827,14 +2827,14 @@
     "welcome": {
       "title": "Benvenuto in Orkestra",
       "intro": "Prepariamo il tuo deployment. Ci vorrà circa un minuto e va eseguito esattamente una volta per installazione.",
-      "step1": "<strong>Crea un account amministratore.</strong> Il primo utente diventa il <code>developer</code> root e può gestire tutto il resto dall'interfaccia admin.",
+      "step1": "<strong>Crea un account amministratore.</strong> Il primo utente diventa il <code>super_admin</code> root e può gestire tutto il resto dall'interfaccia admin.",
       "step2": "<strong>Crea la tua prima organizzazione.</strong> Orkestra è multi-tenant — ogni funzionalità vive all'interno di un'organizzazione, e verrai registrato come proprietario. Questo passaggio è obbligatorio: ogni installazione richiede almeno un tenant interno.",
       "step3": "<strong>Hai finito.</strong> La procedura non riapparirà al prossimo avvio.",
       "getStarted": "Inizia"
     },
     "admin": {
       "title": "Crea l'account amministratore",
-      "intro": "Questo utente diventa il root della piattaforma con il ruolo <code>developer</code>. Puoi aggiungere altri utenti dopo dall'interfaccia admin.",
+      "intro": "Questo utente diventa il root della piattaforma con il ruolo <code>super_admin</code>. Puoi aggiungere altri utenti dopo dall'interfaccia admin.",
       "labelFullName": "Nome completo",
       "labelEmail": "Email",
       "placeholderEmail": "admin@esempio.com",

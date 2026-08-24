@@ -53,6 +53,8 @@ This can happen on an upgrade: an installation configured for `single` provision
 
 ## Transferring or removing the platform default
 
-The platform default isn't permanent — an administrator can transfer it to another operational Tier-1 tenant at any time. Transferring the default, and archiving, deleting, or purging any tenant, all require a **second authentication factor** (a fresh MFA step-up) on top of the `system.tenants.admin` permission: these are the only tenant operations gated that tightly, because each one either destroys a tenant outright or moves which one the platform resolves to by default. You cannot archive, delete, or purge the current platform default directly — reassign the default elsewhere first.
+The platform default isn't permanent — an administrator can transfer it to another operational Tier-1 tenant at any time. Transferring the default, and deleting or purging any tenant through the platform-admin routes, require a **second authentication factor** (a fresh MFA step-up) on top of the `system.tenants.admin` permission — these are the platform-admin operations that can either destroy a tenant outright or move which one the platform resolves to as the default. You cannot delete or purge the current platform default directly — reassign the default elsewhere first.
+
+That MFA step-up isn't unique to those three routes, though: most other tenant mutations sit behind the same fresh-step-up requirement too, each behind its own permission — renaming a tenant, changing its plan, inviting or removing a member, and an owner deleting (archiving) their own tenant all require it. Reads, and a small set of non-destructive platform-admin writes (for example the admin-side rename and plan-change endpoints), are the exceptions that don't.
 
 See the [tenant module reference](/modules/core/tenant#platform-default-tenant) for the full lifecycle contract.

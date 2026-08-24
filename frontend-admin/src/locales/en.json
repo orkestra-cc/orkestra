@@ -2827,14 +2827,14 @@
     "welcome": {
       "title": "Welcome to Orkestra",
       "intro": "Let's get your deployment ready. This will take about a minute and needs to happen exactly once per install.",
-      "step1": "<strong>Create an administrator account.</strong> The first user becomes the root <code>developer</code> and can manage everything else from the admin UI.",
+      "step1": "<strong>Create an administrator account.</strong> The first user becomes the root <code>super_admin</code> and can manage everything else from the admin UI.",
       "step2": "<strong>Create your first organization.</strong> Orkestra is multi-tenant — every feature lives inside an organization, and you'll be enrolled as the owner. This step is required: every install needs at least one internal tenant.",
       "step3": "<strong>You're done.</strong> The wizard won't reappear on the next boot.",
       "getStarted": "Get started"
     },
     "admin": {
       "title": "Create the administrator account",
-      "intro": "This user becomes the platform root with the <code>developer</code> role. You can add more users later from the admin UI.",
+      "intro": "This user becomes the platform root with the <code>super_admin</code> role. You can add more users later from the admin UI.",
       "labelFullName": "Full name",
       "labelEmail": "Email",
       "placeholderEmail": "admin@example.com",
