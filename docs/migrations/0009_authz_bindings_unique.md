@@ -12,7 +12,25 @@ Written as the deploy prerequisite for the idempotent owner-role-binding ensure 
 
 `(tenantId, userUUID, roleId)` as a unique compound index, **not sparse, no partial filter**. `tenantId == ""` rows are global/system-role grants (`super_admin`, `administrator`, `developer`, `manager`, `operator`, `guest`); the index deliberately covers them too — a user must not hold the same system role twice globally any more than they should hold the same tenant role twice in one tenant. Watch the field-name mismatch: the Go struct field is `RoleUUID`, but its bson tag — and the index key — is `roleId`.
 
-MongoDB refuses to build a unique index over a collection that already contains duplicates, so step 1 dedups first: for every `(tenantId, userUUID, roleId)` tuple with more than one row, it keeps the earliest by `grantedAt` (ties broken by `_id`, which is monotonic) and deletes the rest. Step 2 then creates the index and re-reads it to confirm it landed unique — throwing rather than reporting false success if it didn't.
+MongoDB refuses to build a unique index over a collection that already contains duplicates, so step 1 dedups first: for every `(tenantId, userUUID, roleId)` tuple with more than one row, it keeps **the grant conferring the most access** and deletes the rest. Step 2 then creates the index and re-reads it to confirm it landed unique — throwing rather than reporting false success if it didn't.
+
+### Why the survivor is chosen by expiry, not by age
+
+Deduplication must never revoke a privilege. An earlier draft of this script kept the earliest row by `grantedAt`, which does exactly that whenever a tuple holds both an expiring grant and a later permanent one — the ordinary shape when a trial or contractor grant is later made permanent. Keeping the older row there discards the permanent grant and the user loses the role the moment the survivor expires; when the older row has *already* expired, access is revoked the instant the migration runs, and the role cannot simply be granted again because the surviving dead row now occupies the newly-unique tuple.
+
+The ranking is therefore:
+
+1. a permanent grant (`expiresAt` null or missing) outranks every expiring one;
+2. among expiring grants, the furthest-future `expiresAt` wins;
+3. ties fall back to the earliest `grantedAt`, then `_id` — so the winner is total and reproducible, and a tuple with no expiry anywhere still resolves exactly as the earlier draft did.
+
+The `_perm` computed field in step 1 exists because rule 1 cannot be folded into the sort: BSON's canonical type ordering sorts null *below* dates, so `expiresAt: -1` alone would rank a grant expiring tomorrow above a permanent one.
+
+**Expired rows are not reaped here.** `authz_bindings` has no TTL index and no background reaper (both tracked as future work in [authz/CLAUDE.md](../../backend/internal/core/authz/CLAUDE.md)), so an expired survivor persists. It cannot become un-re-grantable, though: `CreateBinding` and `EnsureBinding` reap the tuple's own expired row before re-granting it.
+
+### Companion test
+
+`backend/migrations/20260823_authz_bindings_unique.test.js` seeds duplicate fixtures, `load()`s this exact migration file, and asserts that the set of effective grants is unchanged at every probed instant — the property the age-based rule broke. It runs against a throwaway database and drops `authz_bindings` on entry and exit; the invocation recipes are in its header.
 
 Declared spec: `backend/internal/core/authz/module.go` (`Collections()`, `CollBindings` block).
 

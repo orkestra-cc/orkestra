@@ -53,13 +53,35 @@ const c = db.getCollection(COLL);
 if (!db.getCollectionNames().includes(COLL)) {
   print(`${COLL}: collection absent — nothing to do`);
 } else {
-  // 1. Dedup: keep the earliest grantedAt per (tenantId, userUUID, roleId).
+  // 1. Dedup: per (tenantId, userUUID, roleId) keep the grant that confers
+  //    the MOST access. Deduplicating must never revoke a privilege, and
+  //    "oldest wins" does exactly that whenever a tuple holds both an
+  //    expiring grant and a later permanent one — the common shape when a
+  //    trial/contractor grant was later made permanent. Keeping the older
+  //    row there discards the permanent grant and the user loses the role
+  //    the moment the survivor expires; if the older row has ALREADY
+  //    expired, access is lost the instant this migration runs.
+  //
+  //    Ranking: permanent (expiresAt null or missing) beats every expiring
+  //    grant; among expiring grants the furthest-future expiry wins; ties
+  //    fall back to the earliest grantedAt and then _id, so the winner is
+  //    total and reproducible across replicas and reruns.
+  //
+  //    _perm cannot be folded into the sort on expiresAt: BSON's canonical
+  //    type ordering sorts null BELOW dates, so `expiresAt: -1` on its own
+  //    would rank a grant expiring tomorrow ABOVE a permanent one.
+  //
+  //    Expired rows are NOT reaped here — that is a separate concern (this
+  //    collection has no TTL and no reaper; see authz/CLAUDE.md). The
+  //    runtime grant paths reap the tuple's own expired row when a role is
+  //    granted again, so an expired survivor never becomes un-re-grantable.
   const dups = c.aggregate([
-    { $sort: { grantedAt: 1, _id: 1 } },
+    { $addFields: { _perm: { $cond: [{ $eq: [{ $type: "$expiresAt" }, "date"] }, 0, 1] } } },
+    { $sort: { _perm: -1, expiresAt: -1, grantedAt: 1, _id: 1 } },
     { $group: { _id: { t: "$tenantId", u: "$userUUID", r: "$roleId" },
                 keep: { $first: "$_id" }, all: { $push: "$_id" } } },
     { $match: { $expr: { $gt: [{ $size: "$all" }, 1] } } },
-  ]).toArray();
+  ], { allowDiskUse: true }).toArray();
   let removed = 0;
   for (const d of dups) {
     const losers = d.all.filter((id) => !id.equals(d.keep));

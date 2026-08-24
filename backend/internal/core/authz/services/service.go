@@ -1085,10 +1085,12 @@ func (s *Service) CreateBinding(ctx context.Context, tenantID, grantedBy string,
 	if err := s.repo.CreateBinding(ctx, b); err != nil {
 		// authz_bindings now carries a unique (tenantId, userUUID, roleId)
 		// index (see this module's CLAUDE.md + the 0009 migration). A
-		// plain CreateBinding on a tuple that already exists surfaces as
-		// E11000 here rather than silently doubling the row — mapped to
+		// plain CreateBinding on a tuple that is already granted surfaces
+		// as E11000 here rather than silently doubling the row — mapped to
 		// a sentinel so the handler can answer 409 instead of leaking the
-		// raw duplicate-key error. Callers that want the idempotent
+		// raw duplicate-key error. An EXPIRED incumbent is not "already
+		// granted": the repository reaps it and retries, so this path is
+		// reached only for a live one. Callers that want the idempotent
 		// grant-or-return-existing behavior should call EnsureBinding.
 		if mongo.IsDuplicateKeyError(err) {
 			return nil, ErrBindingExists
