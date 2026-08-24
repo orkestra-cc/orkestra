@@ -13,6 +13,10 @@ type EnvironmentConfig struct {
 	ConfigValues    map[string]string `bson:"configValues" json:"configValues"`
 	EncryptedValues map[string]string `bson:"encryptedValues" json:"-"`
 	UpdatedAt       time.Time         `bson:"updatedAt" json:"updatedAt"`
+	// Revision increments on every write to this environment. Absent in
+	// documents written before record lists existed; absent and 0 are the
+	// same value, so a first mutation there compares against 0 and wins.
+	Revision int64 `bson:"revision,omitempty" json:"revision"`
 }
 
 // DefaultEnvironments are seeded for every module on first boot.

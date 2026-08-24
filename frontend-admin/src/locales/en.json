@@ -2446,6 +2446,23 @@
       "failed": "{{count}} failed",
       "disabled": "{{count}} disabled",
       "stopped": "{{count}} stopped"
+    },
+    "recordList": {
+      "add": "Add",
+      "confirm": "Confirm",
+      "cancel": "Cancel",
+      "remove": "Remove",
+      "undo": "Undo",
+      "empty": "No entries yet.",
+      "nameLabel": "Name",
+      "slugPreview": "Key:",
+      "slugTaken": "That key is already in use.",
+      "slugEmpty": "Type a name to generate its key.",
+      "stagedNotice": "Will be deleted on save",
+      "deleteConfirmTitle": "Delete on save?",
+      "deleteWarning_one": "Saving deletes {{names}} permanently, including any secret it holds. This cannot be undone.",
+      "deleteWarning_other": "Saving deletes {{names}} permanently, including any secrets they hold. This cannot be undone.",
+      "conflict": "Someone else changed this list while you were editing. Reload the page and try again."
     }
   },
   "moduleConfig": {

@@ -18,6 +18,8 @@ Per [ADR-0006](/adrs/collapse-to-core-only-base) Orkestra ships **no addons** �
 
 :::tip Optional: a sectioned settings rail
 Declare `ConfigGroups()` ([ADR-0012](/adrs/module-config-group-contract)) to render your `ConfigSchema` as a grouped, master-detail settings page (with `DependsOn` for conditional fields and derived `config.fields.*` / `config.groups.*` i18n keys). **Declaring none is a supported end state** — your module keeps the flat form, no work required.
+
+If your module needs the operator to manage *several* of something rather than one, declare a single `FieldRecordList` field with the element's sub-schema in `Items` instead of repeating a block of fields per instance — see [Config service](/sdk/config-service#repeatable-fields-recordlist).
 :::
 
 For the archived snapshots of the verticals Orkestra used to ship (billing/SDI, RAG, agents, marketing, …), see the `orkestra-cc/orkestra-addon-*` repos — useful to crib from, not to depend on.

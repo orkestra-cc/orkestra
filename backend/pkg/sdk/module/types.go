@@ -25,6 +25,7 @@ const (
 	FieldSecret     ConfigFieldType = "secret"     // encrypted at rest with AES-256-GCM
 	FieldEnum       ConfigFieldType = "enum"       // single value from Options
 	FieldStringList ConfigFieldType = "stringList" // comma-separated list of strings; stored as a single comma-joined string
+	FieldRecordList ConfigFieldType = "recordList" // repeatable list of records; see ConfigField.Items
 )
 
 // ConfigGroup describes one section of the admin settings rail. Groups form
@@ -91,6 +92,33 @@ type FieldCondition struct {
 	In  []string `json:"in" bson:"in"`   // values that satisfy the condition, matched per the contract above
 }
 
+// ConfigItemField is one field inside a record-list element.
+//
+// It deliberately omits four things ConfigField has. Group, because grouping
+// is a page concept and an element is not a page. EnvVar, because an empty
+// list has no element to seed and an indexed env convention would have to be
+// invented. Advanced, which has no useful meaning inside an element card. And
+// Items — a sub-field cannot declare sub-fields, so the schema is
+// non-recursive by construction and no cyclic $ref reaches the OpenAPI
+// contract. Type is still ConfigFieldType, so ConfigItemField{Type:
+// FieldRecordList} remains constructible; ValidateConfigDeclarations rejects it.
+type ConfigItemField struct {
+	Key            string           `json:"key" bson:"key"`
+	Label          string           `json:"label" bson:"label"`
+	Description    string           `json:"description,omitempty" bson:"description,omitempty"`
+	Type           ConfigFieldType  `json:"type" bson:"type"`
+	Required       bool             `json:"required" bson:"required"`
+	Default        string           `json:"default,omitempty" bson:"default,omitempty"`
+	Options        []string         `json:"options,omitempty" bson:"options,omitempty"`
+	DependsOn      []FieldCondition `json:"dependsOn,omitempty" bson:"dependsOn,omitempty"`
+	DependsOnMatch string           `json:"dependsOnMatch,omitempty" bson:"dependsOnMatch,omitempty"`
+	Min            *int             `json:"min,omitempty" bson:"min,omitempty"`
+	Max            *int             `json:"max,omitempty" bson:"max,omitempty"`
+	Pattern        string           `json:"pattern,omitempty" bson:"pattern,omitempty"`
+	Placeholder    string           `json:"placeholder,omitempty" bson:"placeholder,omitempty"`
+	HelpURL        string           `json:"helpUrl,omitempty" bson:"helpUrl,omitempty"`
+}
+
 // ConfigField describes a single configurable setting for a module.
 // The admin UI renders forms from these declarations.
 type ConfigField struct {
@@ -121,6 +149,9 @@ type ConfigField struct {
 	Pattern        string `json:"pattern,omitempty" bson:"pattern,omitempty"`
 	Placeholder    string `json:"placeholder,omitempty" bson:"placeholder,omitempty"`
 	HelpURL        string `json:"helpUrl,omitempty" bson:"helpUrl,omitempty"`
+	// Items declares the sub-schema of a single element. Required when
+	// Type == FieldRecordList, rejected on every other type.
+	Items []ConfigItemField `json:"items,omitempty" bson:"items,omitempty"`
 }
 
 // CollectionSpec declares a MongoDB collection that a module owns.
@@ -217,8 +248,8 @@ type NavItemSpec struct {
 // A module declares its own templates rather than having them live in the
 // notification module: core must not know which addons exist (ADR-0006).
 type NotificationTemplateSpec struct {
-	TemplateID  string   // "<module>.<event>", e.g. "widgets.order_shipped"
-	Locale      string   // "en", "it"
+	TemplateID  string // "<module>.<event>", e.g. "widgets.order_shipped"
+	Locale      string // "en", "it"
 	Subject     string
 	BodyText    string
 	BodyHTML    string

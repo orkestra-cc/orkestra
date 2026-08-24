@@ -71,6 +71,26 @@ func unmarshalFromDoc(moduleName string, doc *ModuleConfig, v any) error {
 		values = doc.ActiveConfigValues()
 		encrypted = doc.ActiveEncryptedValues()
 	}
+	return unmarshalInto(moduleName, schema, values, encrypted, elem)
+}
+
+// UnmarshalConfig decodes a schema plus its raw value maps into v, which must
+// be a non-nil pointer to a struct. It is the repo-independent half of
+// UnmarshalModule — useful to a module that already holds a config snapshot,
+// and to tests, which need the coercion logic without a MongoDB fixture.
+func UnmarshalConfig(schema []ConfigField, values, encrypted map[string]string, v any) error {
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() || rv.Kind() != reflect.Pointer || rv.IsNil() {
+		return fmt.Errorf("UnmarshalConfig: v must be a non-nil pointer, got %T", v)
+	}
+	elem := rv.Elem()
+	if elem.Kind() != reflect.Struct {
+		return fmt.Errorf("UnmarshalConfig: v must point to a struct, got pointer to %s", elem.Kind())
+	}
+	return unmarshalInto("", schema, values, encrypted, elem)
+}
+
+func unmarshalInto(moduleName string, schema []ConfigField, values, encrypted map[string]string, elem reflect.Value) error {
 	schemaByKey := make(map[string]ConfigField, len(schema))
 	for _, f := range schema {
 		schemaByKey[f.Key] = f
@@ -91,6 +111,12 @@ func unmarshalFromDoc(moduleName string, doc *ModuleConfig, v any) error {
 			// No schema entry — leave the Go zero value.
 			continue
 		}
+		if field.Type == FieldRecordList {
+			if err := assignRecordList(elem.Field(i), field, values, encrypted); err != nil {
+				return fmt.Errorf("UnmarshalModule %q field %q: %w", moduleName, sf.Name, err)
+			}
+			continue
+		}
 		raw, err := resolveValue(field, values, encrypted)
 		if err != nil {
 			return fmt.Errorf("UnmarshalModule %q field %q: %w", moduleName, sf.Name, err)
@@ -100,6 +126,96 @@ func unmarshalFromDoc(moduleName string, doc *ModuleConfig, v any) error {
 		}
 	}
 	return nil
+}
+
+// assignRecordList decodes one record list into a []T, one element per roster
+// entry and in roster order. Inside T, `module:"slug"` receives the element's
+// immutable key segment and `module:"label"` its display label; every other
+// tag names a declared sub-field and goes through the same resolve/coerce path
+// a top-level field does, against the composed key.
+//
+// Element sub-fields carry no EnvVar by construction (ConfigItemField has no
+// such field), so resolution is stored value → sub-field Default. Nothing is
+// read from the process environment.
+func assignRecordList(target reflect.Value, field ConfigField, values, encrypted map[string]string) error {
+	if target.Kind() != reflect.Slice {
+		return fmt.Errorf("schema type recordList requires a slice field, got %s", target.Kind())
+	}
+	elemType := target.Type().Elem()
+	if elemType.Kind() != reflect.Struct {
+		return fmt.Errorf("schema type recordList requires a slice of structs, got []%s", elemType.Kind())
+	}
+
+	itemByKey := make(map[string]ConfigItemField, len(field.Items))
+	for _, it := range field.Items {
+		itemByKey[it.Key] = it
+	}
+
+	roster := ParseRoster(values, field.Key)
+	out := reflect.MakeSlice(target.Type(), 0, len(roster))
+	for _, slug := range roster {
+		elem := reflect.New(elemType).Elem()
+		for i := 0; i < elemType.NumField(); i++ {
+			sf := elemType.Field(i)
+			if !sf.IsExported() {
+				continue
+			}
+			key := schemaKeyForField(sf)
+			if key == "" {
+				continue
+			}
+			switch key {
+			case "slug":
+				if sf.Type.Kind() != reflect.String {
+					return fmt.Errorf("element field %q tagged \"slug\" must be a string, got %s", sf.Name, sf.Type.Kind())
+				}
+				elem.Field(i).SetString(slug)
+				continue
+			case "label":
+				if sf.Type.Kind() != reflect.String {
+					return fmt.Errorf("element field %q tagged \"label\" must be a string, got %s", sf.Name, sf.Type.Kind())
+				}
+				elem.Field(i).SetString(values[LabelKey(field.Key, slug)])
+				continue
+			}
+			item, ok := itemByKey[key]
+			if !ok {
+				// No declared sub-field — leave the Go zero value, matching
+				// the top-level behaviour for an unknown key.
+				continue
+			}
+			sub := itemAsField(item, ItemKey(field.Key, slug, key))
+			raw, err := resolveValue(sub, values, encrypted)
+			if err != nil {
+				return fmt.Errorf("element %q field %q: %w", slug, sf.Name, err)
+			}
+			if err := assignField(elem.Field(i), sf, sub, raw); err != nil {
+				return fmt.Errorf("element %q field %q: %w", slug, sf.Name, err)
+			}
+		}
+		out = reflect.Append(out, elem)
+	}
+	target.Set(out)
+	return nil
+}
+
+// itemAsField projects one sub-field onto the composed key it is stored under,
+// so resolveValue and assignField — which know only ConfigField — can be
+// reused unchanged. EnvVar is left empty on purpose: an element has no env
+// source, and inventing an indexed convention is a contract this design
+// deliberately does not take on.
+func itemAsField(item ConfigItemField, key string) ConfigField {
+	return ConfigField{
+		Key:      key,
+		Label:    item.Label,
+		Type:     item.Type,
+		Required: item.Required,
+		Default:  item.Default,
+		Options:  item.Options,
+		Min:      item.Min,
+		Max:      item.Max,
+		Pattern:  item.Pattern,
+	}
 }
 
 // schemaKeyForField returns the schema key the struct field maps to. An

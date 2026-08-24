@@ -29,13 +29,45 @@ export interface ConfigGroup {
   order?: number;
 }
 
+export type ConfigFieldType =
+  | 'string'
+  | 'bool'
+  | 'int'
+  | 'duration'
+  | 'secret'
+  | 'enum'
+  | 'stringList'
+  | 'recordList';
+
+/**
+ * One field inside a record-list element. Deliberately narrower than
+ * `ConfigField`: no `group` (an element is not a page), no `envVar` (an empty
+ * list has no element to seed), no `advanced`, and no `items` — the schema is
+ * non-recursive by construction.
+ */
+export interface ConfigItemField {
+  key: string;
+  label: string;
+  description?: string;
+  type: ConfigFieldType;
+  required: boolean;
+  default?: string;
+  options?: string[];
+  dependsOn?: FieldCondition[];
+  dependsOnMatch?: 'all' | 'any';
+  min?: number;
+  max?: number;
+  pattern?: string;
+  placeholder?: string;
+  helpUrl?: string;
+}
+
 export interface ConfigField {
   key: string;
   label: string;
   group?: string;
   description: string;
-  type:
-    'string' | 'bool' | 'int' | 'duration' | 'secret' | 'enum' | 'stringList';
+  type: ConfigFieldType;
   required: boolean;
   default: string;
   envVar: string;
@@ -48,6 +80,8 @@ export interface ConfigField {
   pattern?: string;
   placeholder?: string;
   helpUrl?: string;
+  /** Element sub-schema. Present only when `type === 'recordList'`. */
+  items?: ConfigItemField[];
 }
 
 export interface InfraContainerStatus {
@@ -86,6 +120,19 @@ export interface EnvironmentConfigResponse {
   configValues: Record<string, string>;
   secretStatus: Record<string, boolean>;
   updatedAt: string;
+  /**
+   * What a subsequent PATCH echoes back to remove record-list elements. The
+   * backend compares it against the stored one and refuses a removal decided
+   * against a state that has since moved.
+   */
+  revision: number;
+}
+
+/** One field's record-list membership intent. Never inferred from keys. */
+export interface RecordListMutation {
+  field: string;
+  create: string[];
+  remove: string[];
 }
 
 interface UpdateEnvironmentParams {
@@ -93,6 +140,13 @@ interface UpdateEnvironmentParams {
   environment: string;
   config?: Record<string, string>;
   secrets?: Record<string, string>;
+  recordLists?: RecordListMutation[];
+  /**
+   * Required when any `recordLists` entry removes elements. Optional (and
+   * omitted) otherwise, so an ordinary config save behaves exactly as it did
+   * before record lists existed.
+   */
+  revision?: number;
 }
 
 interface SetActiveEnvironmentParams {

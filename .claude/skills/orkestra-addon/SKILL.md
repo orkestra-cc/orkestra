@@ -50,6 +50,7 @@ Deep reference: **`orkestra-go` skill**, [`backend/CLAUDE.md`](../../../backend/
 6. **RBAC on every endpoint + declare the tier.** In `RegisterRoutes`, mount on `ri.Operator` (Tier-1) and/or `ri.Client` (Tier-2, may be nil — check). Gate every authed route with the audience's `AuthMW` (`RequirePermission` / `RequireSystemPermission` / `RequireCapability` / `RequireStepUp` …). Declare the permission catalog in `Permissions()` (`iface.PermissionSpec`). Tier filtering of routes/nav is via `Tier: "internal" | "external" | ""`. Non-core routes are auto-wrapped in `ModuleGate` → **503** (`module_disabled`) when disabled. Every new endpoint must state which tier it serves (CLAUDE.md mandate).
 
 7. **Config & secrets.** Declare admin-editable fields in `ConfigSchema()` (`ConfigField{Key,Type,EnvVar,…}`); use `Type: FieldSecret` for credentials — encrypted at rest (AES-256-GCM) via `ConfigService`. Read with `deps.GetConfig/GetSecret/…`. Never log or return secrets.
+   **When an operator manages *several* of something** (delivery profiles, webhook endpoints, per-region credentials), declare **one** `Type: FieldRecordList` field with the element's sub-schema in `Items []ConfigItemField` — do **not** hand-roll parallel field sets with a `secondary_`/`fallback_` prefix. That workaround costs a duplicated block plus a `DependsOn` condition per field, and every new attribute has to be added twice. Elements carry an immutable slug minted from the operator's label and decode into a `[]T` tagged `module:"<field>"` (`module:"slug"` / `module:"label"` inside `T`). `ConfigItemField` has no `EnvVar` — an empty list has no element to seed, so a record list is UI/API-managed only, and anything a fresh install must boot with belongs in a scalar field. See `pkg/sdk/CLAUDE.md`.
 
 8. **Error codes** live in `internal/shared/errcode/codes.go`, named `test.<situation>` (snake_case), returned through the `errcode` builders. They are wire contracts — stable, snake_case, module-namespaced.
 
@@ -101,6 +102,7 @@ Deep reference: **`orkestra-frontend-admin` skill**, [`frontend-admin/CLAUDE.md`
 - [ ] Collections prefixed `test_` (if ≥2)
 - [ ] Every endpoint gated by `AuthMW` + declares its tier; `Permissions()` declared
 - [ ] Secrets `FieldSecret`; never logged/returned
+- [ ] Repeated settings use one `FieldRecordList`, not duplicated field blocks
 - [ ] Error codes `test.<situation>` in `errcode/codes.go`
 - [ ] OpenAPI regenerated; `make ci-backend` green
 
