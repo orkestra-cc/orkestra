@@ -99,10 +99,9 @@ describe('OrgStep — mandatory organization form', () => {
     expect(allowRadio).not.toBeChecked();
     expect(singleRadio).not.toBeChecked();
 
-    // No skip control anywhere — neither a button nor stray text.
-    expect(
-      screen.queryByText(i18n.t('setup.org.skip'))
-    ).not.toBeInTheDocument();
+    // No skip control anywhere — the key was removed once the step became
+    // mandatory (see locales/en.json), so only the absence of any "skip"
+    // affordance is worth asserting here.
     expect(
       screen.queryByRole('button', { name: /skip/i })
     ).not.toBeInTheDocument();

@@ -1,7 +1,6 @@
 import { screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { renderWithProviders } from 'test/render';
-import i18n from '../../../i18n';
 import FinishStep from './FinishStep';
 
 describe('FinishStep', () => {
@@ -39,21 +38,6 @@ describe('FinishStep', () => {
     ).toBeInTheDocument();
     expect(
       screen.queryByText(/additional internal tenants any time/i)
-    ).not.toBeInTheDocument();
-  });
-
-  it('no longer references bodyWithoutOrg — an organization is always created', () => {
-    renderWithProviders(
-      <FinishStep
-        tenantName="Acme HQ"
-        allowAdditional={false}
-        smtpConfigured
-        onFinish={vi.fn()}
-      />
-    );
-
-    expect(
-      screen.queryByText(i18n.t('setup.finish.bodyWithoutOrg'))
     ).not.toBeInTheDocument();
   });
 

@@ -8,8 +8,9 @@ import { useCreateInitialAdminMutation } from 'store/api/setupApi';
 interface AdminStepProps {
   /**
    * Called once the admin is created and the auth slice is hydrated.
-   * The fullName is propagated upward so the next step (organization)
-   * can pre-fill a sensible default like "{first name}'s Workspace".
+   * `fullName` is passed through for the caller's convenience; the wizard
+   * no longer consumes it to pre-fill anything — the organization step
+   * (OrgStep) always starts blank with no suggested name.
    */
   onNext: (fullName: string) => void;
 }
