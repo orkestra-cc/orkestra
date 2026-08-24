@@ -392,20 +392,26 @@ func TestEnsureSetupTenant_RetryAfterPartialFailure(t *testing.T) {
 	}
 }
 
-// TestEnsureSetupTenant_SoftDeletedWithoutAttestationIsRemediation is the
-// coordinator half of the design's restore rule: restoring applies only
-// when "the COORDINATOR and immutable identity prove that a prior attempt
-// for this same setup reservation soft-deleted the row".
+// TestEnsureSetupTenant_AdminDeletedRowIsRemediation covers BOTH proofs the
+// restore branch requires, and the reason there have to be two.
 //
-// The identity half alone is not enough, because DeleteTenant — the
-// MFA-gated platform-admin destructive route — ends in the very same
-// repo.SoftDeleteTenant call this seam's own partial-failure rollback
-// makes, producing an identical row signature. A caller that cannot attest
-// to an in-flight reservation therefore gets remediation, not a silent
-// resurrection of a row an operator may have deleted on purpose. The
-// second half of the test proves the attestation is the ONLY difference:
-// the same row, same arguments, attested, restores cleanly.
-func TestEnsureSetupTenant_SoftDeletedWithoutAttestationIsRemediation(t *testing.T) {
+// The design's rule is that restoring applies only when "the COORDINATOR
+// and immutable identity prove that a prior attempt for this same setup
+// reservation soft-deleted the row". Identity alone is not enough, because
+// DeleteTenant — the MFA-gated platform-admin destructive route — ends in
+// the very same repo.SoftDeleteTenant call this seam's own partial-failure
+// rollback makes, producing an identical row signature.
+//
+// But the coordinator attestation alone is not enough either, and that is
+// the sharper point: it proves a reservation is OPEN, not that this row's
+// deletion was that saga's own rollback. An open reservation is exactly the
+// window in which an operator can reach the DELETE route — there is no
+// backend setup gate on it — so a saga retry after a deliberate deletion
+// would arrive attested and silently resurrect the tenant. What
+// distinguishes the two is the row's persisted provenance
+// (models.TenantDeleteReason), and an admin deletion is never restorable
+// regardless of who asks.
+func TestEnsureSetupTenant_AdminDeletedRowIsRemediation(t *testing.T) {
 	db, cleanup := newSetupTenantTestDB(t)
 	defer cleanup()
 	repo, svc, _, _ := newSetupTenantService(db)
@@ -420,32 +426,113 @@ func TestEnsureSetupTenant_SoftDeletedWithoutAttestationIsRemediation(t *testing
 	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true); err != nil {
 		t.Fatalf("EnsureSetupTenant: %v", err)
 	}
-	// Exactly what the platform-admin DELETE route does to the row.
-	if err := repo.SoftDeleteTenant(ctx, tenantUUID); err != nil {
+	// Exactly what the platform-admin DELETE route writes, provenance
+	// included.
+	if err := repo.SoftDeleteTenant(ctx, tenantUUID, models.TenantDeleteReasonAdminAction); err != nil {
 		t.Fatalf("SoftDeleteTenant: %v", err)
+	}
+
+	assertStillDeleted := func(t *testing.T, what string) {
+		t.Helper()
+		row, gerr := repo.GetTenantByUUIDIncludingDeleted(ctx, tenantUUID)
+		if gerr != nil {
+			t.Fatalf("GetTenantByUUIDIncludingDeleted: %v", gerr)
+		}
+		if row.DeletedAt == nil {
+			t.Fatalf("the row was restored despite %s", what)
+		}
 	}
 
 	err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, false)
 	if !errors.Is(err, ErrSetupTenantRemediation) {
 		t.Fatalf("unattested EnsureSetupTenant on a soft-deleted reserved row = %v, want ErrSetupTenantRemediation", err)
 	}
-	stillDeleted, gerr := repo.GetTenantByUUIDIncludingDeleted(ctx, tenantUUID)
-	if gerr != nil {
-		t.Fatalf("GetTenantByUUIDIncludingDeleted: %v", gerr)
+	assertStillDeleted(t, "the missing coordinator attestation")
+
+	// The fix: attestation does NOT override an administrative deletion.
+	err = svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true)
+	if !errors.Is(err, ErrSetupTenantRemediation) {
+		t.Fatalf("attested EnsureSetupTenant on an ADMIN-deleted reserved row = %v, want ErrSetupTenantRemediation "+
+			"(an in-flight reservation must not resurrect a tenant an operator deleted on purpose)", err)
 	}
-	if stillDeleted.DeletedAt == nil {
-		t.Fatal("the row was restored despite the missing coordinator attestation")
-	}
+	assertStillDeleted(t, "an admin_action deletion provenance")
+}
+
+// TestEnsureSetupTenant_UnknownDeleteProvenanceIsRemediation pins the
+// fail-closed default. A row soft-deleted before the provenance stamp
+// existed carries no reason at all; "unknown" is not "rollback", so it goes
+// to remediation rather than being resurrected on a guess.
+func TestEnsureSetupTenant_UnknownDeleteProvenanceIsRemediation(t *testing.T) {
+	db, cleanup := newSetupTenantTestDB(t)
+	defer cleanup()
+	repo, svc, _, _ := newSetupTenantService(db)
+	ctx := context.Background()
+
+	suffix := randSuffix(t)
+	tenantUUID := "setup-" + suffix
+	ownerUUID := "owner-" + suffix
+	name := "Setup Tenant " + suffix
+	slug := "setup-tenant-" + suffix
 
 	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true); err != nil {
-		t.Fatalf("attested EnsureSetupTenant on the same row: %v", err)
+		t.Fatalf("EnsureSetupTenant: %v", err)
+	}
+	if err := repo.SoftDeleteTenant(ctx, tenantUUID, models.TenantDeleteReasonAdminAction); err != nil {
+		t.Fatalf("SoftDeleteTenant: %v", err)
+	}
+	// Strip the stamp: a legacy row soft-deleted before the field shipped.
+	//tenantscope:allow test mutates one tenant row by uuid in an isolated per-run database to reproduce a pre-stamp legacy row
+	if _, err := db.Collection(repository.CollTenants).UpdateOne(ctx,
+		bson.M{"uuid": tenantUUID},
+		bson.M{"$unset": bson.M{"deletedReason": ""}}); err != nil {
+		t.Fatalf("strip deletedReason: %v", err)
+	}
+
+	err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true)
+	if !errors.Is(err, ErrSetupTenantRemediation) {
+		t.Fatalf("attested EnsureSetupTenant on a row with no deletion provenance = %v, want ErrSetupTenantRemediation", err)
+	}
+}
+
+// TestEnsureSetupTenant_RollbackProvenanceStamped proves the positive side
+// of the contract at the source: the creation primitive's own unwind stamps
+// provisioning_rollback, which is what makes the legitimate retry in
+// TestEnsureSetupTenant_RetryAfterPartialFailure restorable.
+func TestEnsureSetupTenant_RollbackProvenanceStamped(t *testing.T) {
+	db, cleanup := newSetupTenantTestDB(t)
+	defer cleanup()
+	repo, svc, _, binder := newSetupTenantService(db)
+	binder.failFirst = 1
+	ctx := context.Background()
+
+	suffix := randSuffix(t)
+	tenantUUID := "setup-" + suffix
+	ownerUUID := "owner-" + suffix
+	name := "Setup Tenant " + suffix
+	slug := "setup-tenant-" + suffix
+
+	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true); err == nil {
+		t.Fatal("EnsureSetupTenant with a failing bindOwner = nil, want an error")
+	}
+	row, err := repo.GetTenantByUUIDIncludingDeleted(ctx, tenantUUID)
+	if err != nil {
+		t.Fatalf("GetTenantByUUIDIncludingDeleted: %v", err)
+	}
+	if row.DeletedReason != models.TenantDeleteReasonProvisioningRollback {
+		t.Fatalf("rollback stamped deletedReason=%q, want %q — without it the legitimate retry cannot restore the row",
+			row.DeletedReason, models.TenantDeleteReasonProvisioningRollback)
+	}
+
+	// And the restore clears it, so a later soft-delete cannot inherit it.
+	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true); err != nil {
+		t.Fatalf("retry EnsureSetupTenant: %v", err)
 	}
 	restored, err := repo.GetTenantByUUID(ctx, tenantUUID)
 	if err != nil {
-		t.Fatalf("GetTenantByUUID after attested restore: %v", err)
+		t.Fatalf("GetTenantByUUID after restore: %v", err)
 	}
-	if restored.DeletedAt != nil || restored.Status != models.TenantStatusActive {
-		t.Errorf("attested restore left the row at deletedAt=%v status=%q", restored.DeletedAt, restored.Status)
+	if restored.DeletedReason != "" {
+		t.Fatalf("restored row still carries deletedReason=%q, want it cleared", restored.DeletedReason)
 	}
 }
 
@@ -478,6 +565,10 @@ func TestEnsureSetupTenant_RestoreBlockedByOccupiedSlot(t *testing.T) {
 		Plan:          models.PlanEnterprise,
 		DeletedAt:     &deletedAt,
 		ArchivedAt:    &deletedAt,
+		// A genuine prior-attempt rollback: this test is about the slot
+		// check, so the row has to clear the provenance gate that runs
+		// before it (see TestEnsureSetupTenant_AdminDeletedRowIsRemediation).
+		DeletedReason: models.TenantDeleteReasonProvisioningRollback,
 	})
 
 	// A second, unrelated internal tenant occupies the platform's only

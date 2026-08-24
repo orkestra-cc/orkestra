@@ -617,7 +617,7 @@ func (s *Service) createTenantWithUUID(ctx context.Context, ownerUUID, tenantUUI
 	if s.kms != nil {
 		keyID, err := s.kms.CreateKey(ctx, t.UUID)
 		if err != nil {
-			_ = s.repo.SoftDeleteTenant(ctx, t.UUID)
+			_ = s.repo.SoftDeleteTenant(ctx, t.UUID, models.TenantDeleteReasonProvisioningRollback)
 			return nil, fmt.Errorf("tenant: mint KMS key: %w", err)
 		}
 		t.KMSKeyID = &keyID
@@ -665,7 +665,7 @@ func (s *Service) createTenantWithUUID(ctx context.Context, ownerUUID, tenantUUI
 	// KMS step above — to avoid leaving a half-provisioned tenant.
 	if s.bindOwner != nil {
 		if err := s.bindOwner(ctx, ownerUUID, t.UUID, "org_owner"); err != nil {
-			_ = s.repo.SoftDeleteTenant(ctx, t.UUID)
+			_ = s.repo.SoftDeleteTenant(ctx, t.UUID, models.TenantDeleteReasonProvisioningRollback)
 			return nil, fmt.Errorf("tenant: bind owner role: %w", err)
 		}
 	}
@@ -822,14 +822,28 @@ func (s *Service) reconcileSetupTenant(ctx context.Context, existing *models.Ten
 	// — but against OTHER occupants: this row's own deletedAt != nil already
 	// excludes it from the count below.
 	if existing.DeletedAt != nil {
-		// The row signature alone does not prove WHO soft-deleted it:
-		// DeleteTenant (the MFA-gated platform-admin destructive route)
-		// writes exactly what this seam's own rollback writes. Without the
-		// caller's coordinator attestation — an in-flight reservation for
-		// this very setup — restoring would silently undo a deliberate
-		// operator action, so an unattested soft-deleted reserved row goes
-		// to remediation instead. See EnsureSetupTenant's contract.
+		// Two independent proofs are required, because they answer two
+		// different questions and neither alone is sufficient.
+		//
+		// 1. WHO is asking: the caller's coordinator attestation — an
+		//    in-flight, uncompleted reservation for this very setup. Only
+		//    the finalization saga can attest; every other caller passes
+		//    false and lands in remediation.
 		if !coordinatorAttested {
+			return ErrSetupTenantRemediation
+		}
+		// 2. WHAT deleted the row: its own persisted provenance. The
+		//    attestation proves a reservation is open, NOT that this row's
+		//    deletion was that saga's own rollback — and an open
+		//    reservation is exactly the window in which an operator can
+		//    reach the platform-admin DELETE route (there is no backend
+		//    setup gate on it). Restoring on the attestation alone would
+		//    therefore silently undo a deliberate, MFA-gated operator
+		//    deletion. DeleteTenant stamps admin_action; only
+		//    createTenantWithUUID's own unwind stamps
+		//    provisioning_rollback. An empty reason (a row predating the
+		//    stamp) is not a rollback either — this fails closed.
+		if existing.DeletedReason != models.TenantDeleteReasonProvisioningRollback {
 			return ErrSetupTenantRemediation
 		}
 		if s.ProvisioningMode(ctx, models.TenantKindInternal) == models.ProvisioningModeSingle {
@@ -1225,7 +1239,7 @@ func (s *Service) DeleteTenant(ctx context.Context, tenantUUID string) error {
 		if err := s.cascadeTenantData(sc, tenantUUID); err != nil {
 			return err
 		}
-		return s.repo.SoftDeleteTenant(sc, tenantUUID)
+		return s.repo.SoftDeleteTenant(sc, tenantUUID, models.TenantDeleteReasonAdminAction)
 	}); err != nil {
 		if errors.Is(err, repository.ErrDefaultGuard) {
 			s.emitDefaultGuardDenied(ctx, "tenant.deleted", tenantUUID)

@@ -294,7 +294,7 @@ func TestTransferVersusLifecycle_Serialized(t *testing.T) {
 			defer wg.Done()
 			<-start
 			_ = r.RunDefaultGuarded(ctx, models.TenantKindInternal, t2.UUID, func(sc mongo.SessionContext) error {
-				return r.SoftDeleteTenant(sc, t2.UUID)
+				return r.SoftDeleteTenant(sc, t2.UUID, models.TenantDeleteReasonAdminAction)
 			})
 		}()
 		close(start)

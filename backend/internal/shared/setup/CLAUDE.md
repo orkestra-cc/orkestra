@@ -190,6 +190,15 @@ its restore-a-soft-deleted-reserved-row branch on it — see
 [`../../core/tenant/CLAUDE.md`](../../core/tenant/CLAUDE.md) for why the row
 signature alone is not enough.
 
+**The attestation is only half the proof, and it is worth being precise
+about what it does NOT say.** It states that a reservation is *open*; it
+says nothing about how the row came to be deleted. Since no backend
+middleware gates the platform-admin routes during setup (the `SetupGate` is
+a frontend component), an operator can delete the reserved tenant while the
+reservation is still open — so the tenant seam additionally requires the
+row's own persisted deletion provenance to be `provisioning_rollback`.
+Do not "simplify" the seam by dropping either half.
+
 ### Wiring
 
 `main.go` constructs one `systeminit.Repo` and registers it under both

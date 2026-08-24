@@ -244,7 +244,42 @@ type Tenant struct {
 	//
 	// Deprecated: use Status.
 	DeletedAt *time.Time `bson:"deletedAt,omitempty" json:"-"`
+
+	// DeletedReason records WHY the row was soft-deleted. Set by every
+	// SoftDeleteTenant caller; cleared by RestoreTenant. Never exposed on
+	// the wire — it is provisioning provenance, not tenant data.
+	//
+	// It exists because the row signature alone cannot say who soft-deleted
+	// a tenant: the platform-admin DELETE route and the creation
+	// primitive's own partial-failure rollback write byte-identical state
+	// (status=archived + deletedAt + archivedAt). The setup saga's
+	// reserved-row restore branch must be able to tell the two apart, or a
+	// retry would silently resurrect a tenant an operator deleted on
+	// purpose. See TenantDeleteReason.
+	DeletedReason TenantDeleteReason `bson:"deletedReason,omitempty" json:"-"`
 }
+
+// TenantDeleteReason is the provenance stamped on a soft-deleted tenant row.
+//
+// An empty value means "unknown" — a row soft-deleted before this field
+// existed. It is deliberately NOT treated as a rollback: the setup restore
+// branch fails closed on it and routes to remediation, because resurrecting
+// a row whose deletion nobody can account for is the failure this stamp
+// exists to prevent.
+type TenantDeleteReason string
+
+const (
+	// TenantDeleteReasonProvisioningRollback marks a row soft-deleted by
+	// createTenantWithUUID unwinding its own partially-provisioned tenant
+	// (a KMS, membership, or owner-binding failure). This is the ONLY
+	// reason the setup saga's reserved-UUID restore branch accepts.
+	TenantDeleteReasonProvisioningRollback TenantDeleteReason = "provisioning_rollback"
+
+	// TenantDeleteReasonAdminAction marks a deliberate operator deletion
+	// via the MFA-gated platform-admin DELETE route. Never restorable —
+	// a reserved row carrying it goes to remediation.
+	TenantDeleteReasonAdminAction TenantDeleteReason = "admin_action"
+)
 
 // IsInternal reports whether the tenant is a Tier-1 operator tenant.
 func (t *Tenant) IsInternal() bool { return t.Kind == TenantKindInternal }

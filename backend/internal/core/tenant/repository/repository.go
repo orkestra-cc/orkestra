@@ -121,15 +121,23 @@ func (r *Repository) UpdateTenant(ctx context.Context, uuid string, update bson.
 	return nil
 }
 
-func (r *Repository) SoftDeleteTenant(ctx context.Context, uuid string) error {
+// SoftDeleteTenant archives the row and stamps WHY, which is load-bearing
+// rather than bookkeeping: the platform-admin DELETE route and
+// createTenantWithUUID's own partial-failure rollback write byte-identical
+// state here, and the setup saga's reserved-row restore branch has to tell
+// them apart. reason is required at every call site precisely so a new
+// deletion path cannot forget to declare its provenance and silently become
+// restorable. See models.TenantDeleteReason.
+func (r *Repository) SoftDeleteTenant(ctx context.Context, uuid string, reason models.TenantDeleteReason) error {
 	now := time.Now()
 	res, err := r.db.Collection(CollTenants).UpdateOne(ctx,
 		bson.M{"uuid": uuid},
 		bson.M{"$set": bson.M{
-			"deletedAt":  now,
-			"updatedAt":  now,
-			"status":     string(models.TenantStatusArchived),
-			"archivedAt": now,
+			"deletedAt":     now,
+			"updatedAt":     now,
+			"status":        string(models.TenantStatusArchived),
+			"archivedAt":    now,
+			"deletedReason": string(reason),
 		}})
 	if err != nil {
 		return err
@@ -834,8 +842,11 @@ func (r *Repository) RestoreTenant(ctx context.Context, uuid string) error {
 	res, err := r.db.Collection(CollTenants).UpdateOne(ctx,
 		bson.M{"uuid": uuid},
 		bson.M{
-			"$set":   bson.M{"status": string(models.TenantStatusActive), "updatedAt": now},
-			"$unset": bson.M{"deletedAt": "", "archivedAt": ""},
+			"$set": bson.M{"status": string(models.TenantStatusActive), "updatedAt": now},
+			// deletedReason goes with deletedAt: a live row must carry no
+			// deletion provenance, or a later soft-delete that forgot to
+			// stamp one would inherit this one.
+			"$unset": bson.M{"deletedAt": "", "archivedAt": "", "deletedReason": ""},
 		})
 	if err != nil {
 		return err
