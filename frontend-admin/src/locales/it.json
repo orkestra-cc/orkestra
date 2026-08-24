@@ -2801,7 +2801,10 @@
       "errorTitle": "Impossibile raggiungere il backend Orkestra",
       "errorBody": "Il frontend non riesce a contattare il backend per verificare se eseguire la procedura guidata iniziale. Verifica che il container backend sia attivo e raggiungibile dal browser, poi riprova.",
       "errorDefaultDetail": "La probe di setup su /v1/setup/status non ha risposto.",
-      "retry": "Riprova"
+      "retry": "Riprova",
+      "unavailableTitle": "Orkestra è temporaneamente non disponibile",
+      "unavailableBody": "Il backend non è riuscito a determinare lo stato del setup in questo momento. Di solito è transitorio: verificheremo di nuovo automaticamente.",
+      "unavailableAutoRetryHint": "Questa pagina verifica di nuovo automaticamente. Puoi anche riprovare subito."
     },
     "wizard": {
       "errorTitle": "Impossibile raggiungere il backend Orkestra",

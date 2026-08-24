@@ -66,7 +66,24 @@ export const setupApi = baseApi.injectEndpoints({
       // Cache for longer than the default — the underlying state only flips
       // once per deployment. Both phase boundaries invalidate explicitly:
       // createInitialAdmin already does, finalizeSetup does below.
-      keepUnusedDataFor: 300
+      keepUnusedDataFor: 300,
+      // The 503 setup.status_unavailable response carries Retry-After only
+      // as a response HEADER, not in its JSON body — fetchBaseQuery's error
+      // shape ({status, data}) drops headers entirely, and the query hook
+      // exposes no `meta`. Fold it onto the error here (additively — status
+      // and data are preserved) so SetupGate can honor it without reaching
+      // into fetch internals itself.
+      transformErrorResponse: (response, meta) => {
+        const header = meta?.response?.headers.get('Retry-After');
+        const seconds = header ? Number(header) : undefined;
+        return {
+          ...response,
+          retryAfterSeconds:
+            seconds !== undefined && Number.isFinite(seconds)
+              ? seconds
+              : undefined
+        };
+      }
     }),
 
     // Create the first administrator. Returns a full login response so the

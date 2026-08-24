@@ -2801,7 +2801,10 @@
       "errorTitle": "Cannot reach the Orkestra backend",
       "errorBody": "The frontend could not contact the backend to check whether the initial setup wizard should run. Make sure the backend container is up and reachable from your browser, then retry.",
       "errorDefaultDetail": "The setup probe at /v1/setup/status did not respond.",
-      "retry": "Retry"
+      "retry": "Retry",
+      "unavailableTitle": "Orkestra is temporarily unavailable",
+      "unavailableBody": "The backend could not determine setup status right now. This is usually transient — we'll check again automatically.",
+      "unavailableAutoRetryHint": "This page checks again automatically. You can also retry now."
     },
     "wizard": {
       "errorTitle": "Cannot reach the Orkestra backend",
