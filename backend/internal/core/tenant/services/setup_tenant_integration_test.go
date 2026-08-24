@@ -225,7 +225,7 @@ func TestEnsureSetupTenant_FreshCreatesWithReservedUUIDAndEnterprisePlan(t *test
 	name := "Setup Tenant " + suffix
 	slug := "setup-tenant-" + suffix
 
-	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug); err != nil {
+	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true); err != nil {
 		t.Fatalf("EnsureSetupTenant: %v", err)
 	}
 
@@ -292,10 +292,10 @@ func TestEnsureSetupTenant_RetryBypassesSingleGateAgainstItself(t *testing.T) {
 	name := "Setup Tenant " + suffix
 	slug := "setup-tenant-" + suffix
 
-	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug); err != nil {
+	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true); err != nil {
 		t.Fatalf("first EnsureSetupTenant: %v", err)
 	}
-	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug); err != nil {
+	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true); err != nil {
 		t.Fatalf("retry EnsureSetupTenant under `single` mode = %v, want nil (must not trip ErrProvisioningLocked against itself)", err)
 	}
 
@@ -347,7 +347,7 @@ func TestEnsureSetupTenant_RetryAfterPartialFailure(t *testing.T) {
 	name := "Setup Tenant " + suffix
 	slug := "setup-tenant-" + suffix
 
-	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug); err == nil {
+	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true); err == nil {
 		t.Fatal("first EnsureSetupTenant with a failing bindOwner = nil, want an error")
 	}
 
@@ -359,7 +359,7 @@ func TestEnsureSetupTenant_RetryAfterPartialFailure(t *testing.T) {
 		t.Fatal("tenant row not soft-deleted after bindOwner failure — createTenantWithUUID's rollback should have run")
 	}
 
-	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug); err != nil {
+	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true); err != nil {
 		t.Fatalf("retry EnsureSetupTenant with a healthy bindOwner: %v", err)
 	}
 
@@ -389,6 +389,63 @@ func TestEnsureSetupTenant_RetryAfterPartialFailure(t *testing.T) {
 	}
 	if got := binder.callCount(); got != 2 {
 		t.Errorf("bindOwner called %d times, want 2 (failing first call + succeeding retry)", got)
+	}
+}
+
+// TestEnsureSetupTenant_SoftDeletedWithoutAttestationIsRemediation is the
+// coordinator half of the design's restore rule: restoring applies only
+// when "the COORDINATOR and immutable identity prove that a prior attempt
+// for this same setup reservation soft-deleted the row".
+//
+// The identity half alone is not enough, because DeleteTenant — the
+// MFA-gated platform-admin destructive route — ends in the very same
+// repo.SoftDeleteTenant call this seam's own partial-failure rollback
+// makes, producing an identical row signature. A caller that cannot attest
+// to an in-flight reservation therefore gets remediation, not a silent
+// resurrection of a row an operator may have deleted on purpose. The
+// second half of the test proves the attestation is the ONLY difference:
+// the same row, same arguments, attested, restores cleanly.
+func TestEnsureSetupTenant_SoftDeletedWithoutAttestationIsRemediation(t *testing.T) {
+	db, cleanup := newSetupTenantTestDB(t)
+	defer cleanup()
+	repo, svc, _, _ := newSetupTenantService(db)
+	ctx := context.Background()
+
+	suffix := randSuffix(t)
+	tenantUUID := "setup-" + suffix
+	ownerUUID := "owner-" + suffix
+	name := "Setup Tenant " + suffix
+	slug := "setup-tenant-" + suffix
+
+	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true); err != nil {
+		t.Fatalf("EnsureSetupTenant: %v", err)
+	}
+	// Exactly what the platform-admin DELETE route does to the row.
+	if err := repo.SoftDeleteTenant(ctx, tenantUUID); err != nil {
+		t.Fatalf("SoftDeleteTenant: %v", err)
+	}
+
+	err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, false)
+	if !errors.Is(err, ErrSetupTenantRemediation) {
+		t.Fatalf("unattested EnsureSetupTenant on a soft-deleted reserved row = %v, want ErrSetupTenantRemediation", err)
+	}
+	stillDeleted, gerr := repo.GetTenantByUUIDIncludingDeleted(ctx, tenantUUID)
+	if gerr != nil {
+		t.Fatalf("GetTenantByUUIDIncludingDeleted: %v", gerr)
+	}
+	if stillDeleted.DeletedAt == nil {
+		t.Fatal("the row was restored despite the missing coordinator attestation")
+	}
+
+	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true); err != nil {
+		t.Fatalf("attested EnsureSetupTenant on the same row: %v", err)
+	}
+	restored, err := repo.GetTenantByUUID(ctx, tenantUUID)
+	if err != nil {
+		t.Fatalf("GetTenantByUUID after attested restore: %v", err)
+	}
+	if restored.DeletedAt != nil || restored.Status != models.TenantStatusActive {
+		t.Errorf("attested restore left the row at deletedAt=%v status=%q", restored.DeletedAt, restored.Status)
 	}
 }
 
@@ -435,7 +492,7 @@ func TestEnsureSetupTenant_RestoreBlockedByOccupiedSlot(t *testing.T) {
 		Plan:          models.PlanFree,
 	})
 
-	err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug)
+	err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true)
 	if !errors.Is(err, ErrProvisioningLocked) {
 		t.Fatalf("EnsureSetupTenant = %v, want ErrProvisioningLocked", err)
 	}
@@ -475,7 +532,7 @@ func TestEnsureSetupTenant_PurgedNotResurrected(t *testing.T) {
 		PurgedAt:      &purgedAt,
 	})
 
-	err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug)
+	err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true)
 	if !errors.Is(err, ErrSetupTenantRemediation) {
 		t.Fatalf("EnsureSetupTenant = %v, want ErrSetupTenantRemediation", err)
 	}
@@ -517,7 +574,7 @@ func TestEnsureSetupTenant_ArchivedNotResurrected(t *testing.T) {
 		// admin ArchiveTenant row from the seam's own soft-delete rollback.
 	})
 
-	err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug)
+	err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true)
 	if !errors.Is(err, ErrSetupTenantRemediation) {
 		t.Fatalf("EnsureSetupTenant on an admin-archived reserved row = %v, want ErrSetupTenantRemediation", err)
 	}
@@ -554,7 +611,7 @@ func TestEnsureSetupTenant_IdentityMismatch(t *testing.T) {
 		Plan:          models.PlanEnterprise,
 	})
 
-	err := svc.EnsureSetupTenant(ctx, tenantUUID, "different-owner-"+suffix, name, slug)
+	err := svc.EnsureSetupTenant(ctx, tenantUUID, "different-owner-"+suffix, name, slug, true)
 	if !errors.Is(err, ErrSetupTenantConflict) {
 		t.Fatalf("EnsureSetupTenant with mismatched owner = %v, want ErrSetupTenantConflict", err)
 	}
@@ -585,7 +642,7 @@ func TestEnsureSetupTenant_SlugHeldByOtherUUIDStaysConflict(t *testing.T) {
 
 	tenantUUID := "setup-" + suffix
 	ownerUUID := "owner-" + suffix
-	err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, "Setup Tenant "+suffix, slug)
+	err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, "Setup Tenant "+suffix, slug, true)
 	if !errors.Is(err, ErrSlugAlreadyInUse) {
 		t.Fatalf("EnsureSetupTenant with a slug held by an unrelated tenant = %v, want ErrSlugAlreadyInUse", err)
 	}
@@ -621,7 +678,7 @@ func TestEnsureSetupTenant_ConcurrentConvergesOnReservedUUID(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			results[i] = svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug)
+			results[i] = svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true)
 		}()
 	}
 	close(start)
@@ -688,7 +745,7 @@ func TestEnsureSetupTenant_StampsPlanOnLegacyRow(t *testing.T) {
 		Plan:          "", // legacy row, never stamped
 	})
 
-	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug); err != nil {
+	if err := svc.EnsureSetupTenant(ctx, tenantUUID, ownerUUID, name, slug, true); err != nil {
 		t.Fatalf("EnsureSetupTenant: %v", err)
 	}
 

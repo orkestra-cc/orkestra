@@ -154,20 +154,153 @@ func finalizerStateUnavailable() error {
 	)
 }
 
-// --- POST /v1/setup/finalize (stub — Task 5.5 implements) ---
+// --- POST /v1/setup/finalize ---
 
 type FinalizeRequest struct {
-	Body struct{}
+	Body struct {
+		TenantName string `json:"tenantName" minLength:"1" maxLength:"120" doc:"Initial Tier-1 organization name"`
+		TenantSlug string `json:"tenantSlug" minLength:"1" maxLength:"48" pattern:"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$" doc:"URL slug for the initial Tier-1 organization"`
+		// Required POINTER bool. An omitted value is a 422 schema error —
+		// it can never silently mean false, because false is the
+		// consequential choice here (single mode permanently caps Tier-1
+		// at one tenant).
+		AllowAdditionalInternalTenants *bool `json:"allowAdditionalInternalTenants" required:"true" doc:"true → manual provisioning mode (more Tier-1 tenants may be created later), false → single mode"`
+	}
 }
 
-type FinalizeResponse struct {
-	Body struct{}
+// FinalizeResponseBody serves both terminal shapes. Every member is
+// omitempty so the 202 serializes as exactly {"state":"…"} — a typed
+// accepted body, NOT a Problem Details envelope — while the 200 carries
+// the result snapshot and no state.
+type FinalizeResponseBody struct {
+	State                          string `json:"state,omitempty" doc:"Set to setup.finalization_in_progress on a 202 accepted response; absent on the terminal 200"`
+	TenantID                       string `json:"tenantId,omitempty" doc:"UUID of the created Tier-1 tenant"`
+	TenantName                     string `json:"tenantName,omitempty" doc:"Normalized tenant name"`
+	TenantSlug                     string `json:"tenantSlug,omitempty" doc:"Normalized tenant slug"`
+	Mode                           string `json:"mode,omitempty" doc:"Selected Tier-1 provisioning mode: manual | single"`
+	AllowAdditionalInternalTenants *bool  `json:"allowAdditionalInternalTenants,omitempty" doc:"Derived from mode == manual"`
 }
 
-// Finalize is a stub for the same reason FinalizationAccess is — Task 5.5
-// fills in the body against the mount point this task establishes.
-func (h *Handler) Finalize(_ context.Context, _ *FinalizeRequest) (*FinalizeResponse, error) {
-	return nil, huma.Error501NotImplemented("Setup finalization is not implemented yet.")
+// finalizeOutput carries a dynamic status: 200 for a terminal result
+// (fresh completion or authorized replay) and 202 for "an identical
+// request already holds the stage lease".
+type finalizeOutput struct {
+	Status       int
+	RetryAfter   string `header:"Retry-After"`
+	CacheControl string `header:"Cache-Control"`
+	Body         FinalizeResponseBody
+}
+
+// Finalize drives the resumable finalization saga.
+//
+// The 202 is the one non-obvious shape: it is a SUCCESS (no error
+// returned), so the frontend never has to parse a Huma error envelope for
+// the "somebody else is already running my exact request" path. It honors
+// Retry-After, reloads setup status, and retries the identical payload.
+func (h *Handler) Finalize(ctx context.Context, req *FinalizeRequest) (*finalizeOutput, error) {
+	userUUID, ok := ctxauth.GetUserUUID(ctx)
+	if !ok || userUUID == "" {
+		return nil, huma.Error401Unauthorized("not authenticated")
+	}
+	systemRole, _ := ctxauth.GetSystemRole(ctx)
+
+	if req.Body.AllowAdditionalInternalTenants == nil {
+		// Defense in depth: the schema marks this required, so Huma
+		// rejects an omitted value before the handler runs. Reaching here
+		// would mean the field was decoded as absent anyway — never treat
+		// that as false.
+		return nil, huma.Error422UnprocessableEntity("allowAdditionalInternalTenants is required and must be true or false.")
+	}
+
+	res, err := h.svc.Finalize(ctx, userUUID, systemRole, FinalizeInput{
+		TenantName:                     req.Body.TenantName,
+		TenantSlug:                     req.Body.TenantSlug,
+		AllowAdditionalInternalTenants: *req.Body.AllowAdditionalInternalTenants,
+	})
+	if err != nil {
+		if errors.Is(err, ErrFinalizationInProgress) {
+			return &finalizeOutput{
+				Status:       http.StatusAccepted,
+				RetryAfter:   "3",
+				CacheControl: "no-store",
+				Body:         FinalizeResponseBody{State: finalizeStateInProgress},
+			}, nil
+		}
+		return nil, mapFinalizeError(h.svc.logger, err)
+	}
+
+	allow := res.Mode == modeManual
+	return &finalizeOutput{
+		Status:       http.StatusOK,
+		CacheControl: "no-store",
+		Body: FinalizeResponseBody{
+			TenantID:                       res.TenantUUID,
+			TenantName:                     res.TenantName,
+			TenantSlug:                     res.TenantSlug,
+			Mode:                           res.Mode,
+			AllowAdditionalInternalTenants: &allow,
+		},
+	}, nil
+}
+
+// mapFinalizeError is the finalize error table. Every client-facing
+// detail is a fixed written sentence — the underlying error goes to the
+// log, never to the caller.
+func mapFinalizeError(logger *slog.Logger, err error) error {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	// Tenant-layer failures arrive pre-classified through the seam
+	// adapter cmd/server wires (see SeamError): shared/setup never
+	// matches a tenant sentinel or its text.
+	var seam *SeamError
+	if errors.As(err, &seam) {
+		switch seam.Kind {
+		case SeamSlugConflict:
+			return errcode.Conflict(errcode.TenantSlugAlreadyInUse,
+				"That organization slug is already in use. Choose a different slug.")
+		case SeamProvisioningLocked:
+			return errcode.Conflict(errcode.TenantProvisioningLocked,
+				"Tier-1 provisioning is locked to a single organization and one already exists.")
+		case SeamRemediation:
+			logger.Warn("setup: finalization requires operator remediation", "error", err.Error())
+			return huma.Error409Conflict(
+				"The reserved setup organization was archived or purged and cannot be restored automatically. Operator remediation is required.")
+		case SeamIdentityConflict:
+			logger.Error("setup: reserved setup tenant identity conflict", "error", err.Error())
+			return huma.Error500InternalServerError(
+				"The reserved setup organization does not match this setup request. Check the server logs.")
+		default:
+			logger.Error("setup: unclassified tenant seam failure", "error", err.Error())
+			return huma.Error500InternalServerError(
+				"Setup finalization failed while provisioning the organization. Check the server logs.")
+		}
+	}
+
+	switch {
+	case errors.Is(err, ErrFinalizerStateUnavailable):
+		logger.Warn("setup: finalizer state unavailable", "error", err.Error())
+		return finalizerStateUnavailable()
+	case errors.Is(err, ErrFinalizerBoundToAnotherAdmin):
+		return errcode.Forbidden(errcode.SetupFinalizerBoundToAnotherAdmin,
+			"Setup finalization is reserved for a different administrator account.")
+	case errors.Is(err, ErrRecoveryRequiresSuperAdmin):
+		return errcode.Forbidden(errcode.SetupRecoveryRequiresSuperAdmin,
+			"Recovering setup finalization requires an active super administrator.")
+	case errors.Is(err, ErrFinalizationAlreadyStarted):
+		return errcode.Conflict(errcode.SetupFinalizationAlreadyStarted,
+			"A different setup finalization request is already in progress.")
+	case errors.Is(err, ErrFinalizationAlreadyCompleted):
+		return errcode.Conflict(errcode.SetupAlreadyCompleted,
+			"Setup is already complete.")
+	default:
+		// An error the handler cannot name is a server fault, never the
+		// caller's — and its text stays in the log.
+		logger.Error("setup: finalization failed", "error", err.Error())
+		return huma.Error500InternalServerError(
+			"Setup finalization could not be completed. Retry the same request; the saga resumes where it stopped.")
+	}
 }
 
 // --- registration ---
@@ -228,12 +361,24 @@ func (h *Handler) RegisterProtectedRoutes(api huma.API) {
 	}, h.FinalizationAccess)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "setup-finalize",
-		Method:      http.MethodPost,
-		Path:        "/v1/setup/finalize",
-		Summary:     "Finalize setup (default tenant provisioning)",
-		Description: "Authenticated-operator route. Drives the resumable setup-finalization saga to completion for the caller bound to it. Stub pending Task 5.5 — currently always answers 501.",
-		Tags:        []string{"Setup"},
+		OperationID:   "setup-finalize",
+		Method:        http.MethodPost,
+		Path:          "/v1/setup/finalize",
+		Summary:       "Finalize setup (default tenant provisioning)",
+		Description:   "Authenticated-operator route. Drives the resumable setup-finalization saga for the administrator bound to it: persists the Tier-1 provisioning mode, ensures the reserved internal tenant, assigns it as the platform default, and marks setup complete. Idempotent — retrying the identical payload resumes the saga, and retrying after completion replays the persisted result. Answers 202 with `{\"state\":\"setup.finalization_in_progress\"}` plus Retry-After when an identical request already holds the stage lease (a success, not an error envelope), 403 when the caller is not the bound administrator or may not claim recovery, 409 for a different payload or an already-completed setup, and 503 when coordinator state cannot be read.",
+		DefaultStatus: http.StatusOK,
+		Responses: map[string]*huma.Response{
+			"202": {
+				Description: "Accepted — an identical finalization request already holds the current stage lease. Retry the identical payload after Retry-After seconds.",
+				Headers: map[string]*huma.Param{
+					"Retry-After": {Description: "Seconds to wait before retrying the identical payload", Schema: &huma.Schema{Type: huma.TypeString}},
+				},
+				Content: map[string]*huma.MediaType{
+					"application/json": {Schema: &huma.Schema{Ref: "#/components/schemas/FinalizeResponseBody"}},
+				},
+			},
+		},
+		Tags: []string{"Setup"},
 	}, h.Finalize)
 }
 

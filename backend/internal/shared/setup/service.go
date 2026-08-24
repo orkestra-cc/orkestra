@@ -57,13 +57,38 @@ type Status struct {
 	SMTPConfigured bool   `json:"smtpConfigured"`
 }
 
-// Service owns the two setup endpoints' business logic.
+// moduleConfigService is the narrow slice of *module.ModuleConfigService
+// this package uses: the SMTP-hint read (Status) and the
+// provisioning-mode write the finalization saga's first stage performs.
+// It is an interface — rather than the concrete type — so the saga's
+// config stage is exercisable without a live Mongo-backed config
+// repository; main.go still passes the one real *module.ModuleConfigService.
+//
+// UpdateConfig runs the target module's own validator, so persisting
+// "provisioning.internal.mode" through it passes the tenant module's
+// provisioning-policy validation by construction.
+type moduleConfigService interface {
+	GetConfig(ctx context.Context, name string) (*module.ModuleConfig, error)
+	UpdateConfig(ctx context.Context, name string, values map[string]string, secrets map[string]string) error
+}
+
+// Service owns the setup endpoints' business logic.
 type Service struct {
 	users         iface.UserProvider
 	admin         AdminCreator
 	store         systeminit.FinalizationStore
-	configService *module.ModuleConfigService
+	configService moduleConfigService
 	logger        *slog.Logger
+
+	// tenants is the local structural seam onto the tenant service — see
+	// SetupTenantEnsurer in finalize.go. nil when finalization is not
+	// wired, in which case the saga's tenant stages fail loudly rather
+	// than silently skipping a step.
+	tenants SetupTenantEnsurer
+
+	// audit is optional: nil when the compliance module is absent, and
+	// emits are then skipped rather than erroring on the hot path.
+	audit iface.AuditSink
 
 	// lifecycle is the narrow iface.UserLifecycleStateProvider capability of
 	// users, resolved once via type assertion at construction time. It
@@ -76,11 +101,24 @@ type Service struct {
 }
 
 // NewService wires the setup service. users, admin and store are required;
-// cfg may be nil (SMTP status degrades to false); a nil logger falls back
-// to slog.Default(). If users also implements iface.UserLifecycleStateProvider
-// (the canonical user-module service does), Service.lifecycle is derived
-// from it automatically.
-func NewService(users iface.UserProvider, admin AdminCreator, store systeminit.FinalizationStore, cfg *module.ModuleConfigService, logger *slog.Logger) *Service {
+// cfg, tenants and audit may be nil (SMTP status degrades to false, the
+// finalization saga refuses to run, audit emits are skipped); a nil logger
+// falls back to slog.Default(). If users also implements
+// iface.UserLifecycleStateProvider (the canonical user-module service
+// does), Service.lifecycle is derived from it automatically.
+//
+// In production main.go resolves every seam through MustGetTyped, so
+// missing wiring panics during module initialization rather than
+// degrading a bootstrap endpoint at runtime.
+func NewService(
+	users iface.UserProvider,
+	admin AdminCreator,
+	store systeminit.FinalizationStore,
+	cfg moduleConfigService,
+	tenants SetupTenantEnsurer,
+	audit iface.AuditSink,
+	logger *slog.Logger,
+) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -90,6 +128,8 @@ func NewService(users iface.UserProvider, admin AdminCreator, store systeminit.F
 		store:         store,
 		configService: cfg,
 		logger:        logger,
+		tenants:       tenants,
+		audit:         audit,
 	}
 	if lc, ok := users.(iface.UserLifecycleStateProvider); ok {
 		svc.lifecycle = lc
@@ -183,11 +223,31 @@ func (s *Service) CreateInitialAdmin(ctx context.Context, email, password, fullN
 		return nil, err
 	}
 
+	// Bind the finalization coordinator to the freshly created
+	// administrator. The UUID comes from the token response
+	// (UserManagementResponse exposes the user UUID as `id`) — never read
+	// back from the first_admin sentinel, whose lifecycle is deliberately
+	// independent: Release() can delete that record after a failed user
+	// create, and it must never be able to delete setup progress.
+	//
+	// InitializeFresh is $setOnInsert-only, so a legacy or recovery record
+	// that already exists is never clobbered.
+	//
+	// A binding failure is returned rather than swallowed: the coordinator
+	// is what authorizes the next step, so silently continuing would hand
+	// the operator a wizard that cannot finalize. The state is recoverable
+	// — the created administrator is an active super_admin, which is
+	// exactly who the empty-binding recovery path admits.
+	if tokens != nil && tokens.User != nil && tokens.User.ID != "" {
+		if err := s.store.InitializeFresh(ctx, tokens.User.ID); err != nil {
+			return nil, fmt.Errorf("setup: bind finalization coordinator: %w", err)
+		}
+	}
+
 	// The initial admin is a super_admin whose authority is a system role,
 	// independent of any tenant. We deliberately do NOT create an internal
-	// tenant here — tenant creation is an explicit operator choice in the
-	// setup wizard's OrgStep (or skipped, leaving the platform at zero
-	// tenants). See docs/superpowers/specs/2026-07-06-zero-tenant-setup-design.md.
+	// tenant here — tenant creation happens in the finalization saga
+	// (POST /v1/setup/finalize), which this coordinator record drives.
 	return tokens, nil
 }
 
@@ -246,9 +306,35 @@ const roleSuperAdmin = "super_admin"
 // Every other state (and an empty binding) falls through to the recovery
 // check: the caller must be an authenticated, active super_admin.
 func (s *Service) evaluateAccess(ctx context.Context, callerUUID, callerSystemRole string) (FinalizationAccess, *systeminit.FinalizationRecord, error) {
+	access, rec, _, err := s.evaluateAccessDetailed(ctx, callerUUID, callerSystemRole)
+	return access, rec, err
+}
+
+// Recovery reasons recorded in the setup.finalizer.recovered audit event.
+// Pinned by value to iface.UserLifecycle{Missing,Deleted,Inactive}; an
+// empty binding is reported as "missing" because there is no prior
+// administrator to classify. A lookup error is NEVER one of these — it
+// leaves evaluateAccessDetailed through the error return instead.
+const (
+	recoveryReasonMissing  = "missing"
+	recoveryReasonDeleted  = "deleted"
+	recoveryReasonInactive = "inactive"
+)
+
+// evaluateAccessDetailed is evaluateAccess plus the bound administrator's
+// lifecycle classification, which the finalize POST needs for the
+// setup.finalizer.recovered audit metadata. It is a separate entry point
+// so the read-only probe keeps its three-value signature and so the
+// recovery reason is derived from the SAME lookup the authorization
+// decision used — a second lookup could observe a different state and
+// audit a reason the decision was not based on.
+//
+// The returned reason is meaningful only when the caller may claim
+// recovery; it is empty otherwise.
+func (s *Service) evaluateAccessDetailed(ctx context.Context, callerUUID, callerSystemRole string) (FinalizationAccess, *systeminit.FinalizationRecord, string, error) {
 	rec, err := s.store.Get(ctx)
 	if err != nil {
-		return FinalizationAccess{}, nil, fmt.Errorf("setup: read finalization coordinator: %w", err)
+		return FinalizationAccess{}, nil, "", fmt.Errorf("setup: read finalization coordinator: %w", err)
 	}
 
 	boundUUID := ""
@@ -256,17 +342,20 @@ func (s *Service) evaluateAccess(ctx context.Context, callerUUID, callerSystemRo
 		boundUUID = rec.AdminUUID
 	}
 
+	// An empty binding has no prior administrator to classify.
+	reason := recoveryReasonMissing
 	if boundUUID != "" {
 		state, err := s.userLifecycleState(ctx, boundUUID)
 		if err != nil {
-			return FinalizationAccess{}, nil, err
+			return FinalizationAccess{}, nil, "", err
 		}
 		if state == iface.UserLifecycleActive {
 			if callerUUID != "" && callerUUID == boundUUID {
-				return FinalizationAccess{CanFinalize: true}, rec, nil
+				return FinalizationAccess{CanFinalize: true}, rec, "", nil
 			}
-			return FinalizationAccess{Reason: reasonBoundToAnotherAdmin}, rec, nil
+			return FinalizationAccess{Reason: reasonBoundToAnotherAdmin}, rec, "", nil
 		}
+		reason = lifecycleRecoveryReason(state)
 		// Bound admin is missing/deleted/inactive: falls through to the
 		// recovery-eligibility check below, exactly like an empty binding.
 	}
@@ -276,16 +365,31 @@ func (s *Service) evaluateAccess(ctx context.Context, callerUUID, callerSystemRo
 	// runs first so a non-super_admin caller never triggers a lifecycle
 	// lookup on themselves.
 	if callerSystemRole != roleSuperAdmin {
-		return FinalizationAccess{Reason: reasonRecoveryRequiresSuperAdmin}, rec, nil
+		return FinalizationAccess{Reason: reasonRecoveryRequiresSuperAdmin}, rec, "", nil
 	}
 	callerState, err := s.userLifecycleState(ctx, callerUUID)
 	if err != nil {
-		return FinalizationAccess{}, nil, err
+		return FinalizationAccess{}, nil, "", err
 	}
 	if callerState != iface.UserLifecycleActive {
-		return FinalizationAccess{Reason: reasonRecoveryRequiresSuperAdmin}, rec, nil
+		return FinalizationAccess{Reason: reasonRecoveryRequiresSuperAdmin}, rec, "", nil
 	}
-	return FinalizationAccess{CanClaimRecovery: true}, rec, nil
+	return FinalizationAccess{CanClaimRecovery: true}, rec, reason, nil
+}
+
+// lifecycleRecoveryReason maps a non-active lifecycle class onto the audit
+// vocabulary. UserLifecycleActive never reaches here (it is not a recovery
+// state); anything unrecognized degrades to "missing" rather than being
+// invented, since the audit vocabulary is closed.
+func lifecycleRecoveryReason(state iface.UserLifecycleState) string {
+	switch state {
+	case iface.UserLifecycleDeleted:
+		return recoveryReasonDeleted
+	case iface.UserLifecycleInactive:
+		return recoveryReasonInactive
+	default:
+		return recoveryReasonMissing
+	}
 }
 
 // userLifecycleState resolves userUUID's lifecycle class through the

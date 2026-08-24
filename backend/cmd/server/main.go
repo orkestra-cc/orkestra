@@ -453,13 +453,24 @@ func main() {
 	// Reachable without auth — gated by the "no users exist" invariant
 	// enforced inside setup.Service.CreateInitialAdmin. Operator-only:
 	// the initial admin is a Tier-1 super_admin, so the wizard lives on
-	// the operator host. Admin creation does not create a tenant — the
-	// wizard's OrgStep is the explicit (skippable) tenant-creation step.
+	// the operator host.
+	//
+	// Admin creation does not create a tenant. The initial Tier-1
+	// organization is MANDATORY and is provisioned by the authenticated
+	// finalization saga (POST /v1/setup/finalize) that the coordinator
+	// record bound during admin creation authorizes — there is no skip.
+	//
+	// Every seam below is resolved with MustGetTyped: missing wiring must
+	// fail module initialization loudly, not degrade a bootstrap endpoint
+	// at runtime. The audit sink is the one exception — it belongs to the
+	// compliance module and is nil-tolerated.
 	setupSvc := setup.NewService(
 		module.MustGetTyped[iface.UserProvider](svcRegistry, module.ServiceUserService),
 		module.MustGetTyped[setup.AdminCreator](svcRegistry, module.ServicePasswordAuthService),
 		module.MustGetTyped[systeminit.FinalizationStore](svcRegistry, module.ServiceSetupFinalizationStore),
 		configService,
+		newSetupTenantAdapter(module.MustGetTyped[*tenantServices.Service](svcRegistry, module.ServiceTenantService)),
+		setupAuditSink(svcRegistry),
 		logger,
 	)
 	setupHandler := setup.NewHandler(setupSvc, cfg.Auth.Cookie)

@@ -111,7 +111,7 @@ func (f *fakeFinalizationStore) FinishReconcile(_ context.Context, _ int, _ stri
 
 func TestStatus_NoUsers_AdminRequired(t *testing.T) {
 	store := &fakeFinalizationStore{}
-	svc := NewService(&stubUsers{count: 0}, &stubAdmin{}, store, nil, nil)
+	svc := NewService(&stubUsers{count: 0}, &stubAdmin{}, store, nil, nil, nil, nil)
 
 	st, err := svc.Status(context.Background())
 	if err != nil {
@@ -130,7 +130,7 @@ func TestStatus_NoUsers_AdminRequired(t *testing.T) {
 
 func TestStatus_UsersExist_NoRecord_TenantRequired(t *testing.T) {
 	store := &fakeFinalizationStore{rec: nil}
-	svc := NewService(&stubUsers{count: 1}, &stubAdmin{}, store, nil, nil)
+	svc := NewService(&stubUsers{count: 1}, &stubAdmin{}, store, nil, nil, nil, nil)
 
 	st, err := svc.Status(context.Background())
 	if err != nil {
@@ -147,7 +147,7 @@ func TestStatus_UsersExist_NoRecord_TenantRequired(t *testing.T) {
 func TestStatus_RecordCompleted_Complete(t *testing.T) {
 	completedAt := time.Now().UTC()
 	store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{CompletedAt: &completedAt}}
-	svc := NewService(&stubUsers{count: 3}, &stubAdmin{}, store, nil, nil)
+	svc := NewService(&stubUsers{count: 3}, &stubAdmin{}, store, nil, nil, nil, nil)
 
 	st, err := svc.Status(context.Background())
 	if err != nil {
@@ -163,7 +163,7 @@ func TestStatus_RecordCompleted_Complete(t *testing.T) {
 
 func TestStatus_RecordPresentIncomplete_TenantRequired(t *testing.T) {
 	store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{Stage: systeminit.StageTenant}}
-	svc := NewService(&stubUsers{count: 2}, &stubAdmin{}, store, nil, nil)
+	svc := NewService(&stubUsers{count: 2}, &stubAdmin{}, store, nil, nil, nil, nil)
 
 	st, err := svc.Status(context.Background())
 	if err != nil {
@@ -179,7 +179,7 @@ func TestStatus_RecordPresentIncomplete_TenantRequired(t *testing.T) {
 
 func TestStatus_UserCountError_FailsClosed(t *testing.T) {
 	store := &fakeFinalizationStore{}
-	svc := NewService(&stubUsers{countErr: errors.New("mongo down")}, &stubAdmin{}, store, nil, nil)
+	svc := NewService(&stubUsers{countErr: errors.New("mongo down")}, &stubAdmin{}, store, nil, nil, nil, nil)
 
 	st, err := svc.Status(context.Background())
 	if err == nil {
@@ -195,7 +195,7 @@ func TestStatus_UserCountError_FailsClosed(t *testing.T) {
 
 func TestStatus_StoreGetError_FailsClosed(t *testing.T) {
 	store := &fakeFinalizationStore{getErr: errors.New("mongo down")}
-	svc := NewService(&stubUsers{count: 1}, &stubAdmin{}, store, nil, nil)
+	svc := NewService(&stubUsers{count: 1}, &stubAdmin{}, store, nil, nil, nil, nil)
 
 	st, err := svc.Status(context.Background())
 	if err == nil {
@@ -213,7 +213,7 @@ func TestStatus_SMTPReadFailure_DegradesOnlySMTPFlag(t *testing.T) {
 	// non-authoritative and may degrade; the phase must not.
 	completedAt := time.Now().UTC()
 	store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{CompletedAt: &completedAt}}
-	svc := NewService(&stubUsers{count: 1}, &stubAdmin{}, store, nil, nil)
+	svc := NewService(&stubUsers{count: 1}, &stubAdmin{}, store, nil, nil, nil, nil)
 
 	st, err := svc.Status(context.Background())
 	if err != nil {
@@ -229,7 +229,7 @@ func TestStatus_SMTPReadFailure_DegradesOnlySMTPFlag(t *testing.T) {
 
 func TestStatus_NoWrites(t *testing.T) {
 	store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{}}
-	svc := NewService(&stubUsers{count: 5}, &stubAdmin{}, store, nil, nil)
+	svc := NewService(&stubUsers{count: 5}, &stubAdmin{}, store, nil, nil, nil, nil)
 
 	if _, err := svc.Status(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -249,7 +249,7 @@ func TestCreateInitialAdmin_EmptyDB_Succeeds(t *testing.T) {
 		SessionID:   "session-abc",
 	}
 	admin := &stubAdmin{resp: expected}
-	svc := NewService(&stubUsers{count: 0}, admin, &fakeFinalizationStore{}, nil, nil)
+	svc := NewService(&stubUsers{count: 0}, admin, &fakeFinalizationStore{}, nil, nil, nil, nil)
 
 	tokens, err := svc.CreateInitialAdmin(context.Background(), "root@example.com", "verysecretpw!", "Root Admin", "10.0.0.1")
 	if err != nil {
@@ -268,7 +268,7 @@ func TestCreateInitialAdmin_EmptyDB_Succeeds(t *testing.T) {
 
 func TestCreateInitialAdmin_NonEmptyDB_Refuses(t *testing.T) {
 	admin := &stubAdmin{}
-	svc := NewService(&stubUsers{count: 1}, admin, &fakeFinalizationStore{}, nil, nil)
+	svc := NewService(&stubUsers{count: 1}, admin, &fakeFinalizationStore{}, nil, nil, nil, nil)
 
 	_, err := svc.CreateInitialAdmin(context.Background(), "root@example.com", "verysecretpw!", "Root Admin", "10.0.0.1")
 	if !errors.Is(err, ErrAlreadyCompleted) {
@@ -283,7 +283,7 @@ func TestCreateInitialAdmin_CountError_Refuses(t *testing.T) {
 	// If we can't tell whether users exist, we must NOT create one —
 	// blindly writing could duplicate a developer role on a populated DB.
 	admin := &stubAdmin{}
-	svc := NewService(&stubUsers{countErr: errors.New("mongo down")}, admin, &fakeFinalizationStore{}, nil, nil)
+	svc := NewService(&stubUsers{countErr: errors.New("mongo down")}, admin, &fakeFinalizationStore{}, nil, nil, nil, nil)
 
 	_, err := svc.CreateInitialAdmin(context.Background(), "root@example.com", "verysecretpw!", "Root Admin", "10.0.0.1")
 	if err == nil {

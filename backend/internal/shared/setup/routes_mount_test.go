@@ -56,7 +56,7 @@ func discardLogger() *slog.Logger {
 // database.
 func newMountTestHandler(t *testing.T) *Handler {
 	t.Helper()
-	svc := NewService(&stubUsers{}, &stubAdmin{}, &fakeFinalizationStore{}, nil, discardLogger())
+	svc := NewService(&stubUsers{}, &stubAdmin{}, &fakeFinalizationStore{}, nil, nil, nil, discardLogger())
 	return NewHandler(svc, config.CookieConfig{})
 }
 
@@ -199,26 +199,33 @@ func TestSetupRouteMount_AudienceAndAuth(t *testing.T) {
 			wantStatus: http.StatusOK,
 		},
 		{
+			// Task 5.5 implements Finalize for real. The mount fixture's
+			// operator token carries role "administrator" and the fake
+			// store has no coordinator record, so the binding is empty and
+			// the caller may not claim recovery: the handler answers 403
+			// setup.recovery_requires_super_admin. What this case proves is
+			// unchanged — the request reached the handler rather than being
+			// stopped by the audience or auth gate.
 			name:       "operator token reaches finalize handler",
 			method:     http.MethodPost,
 			path:       "/v1/setup/finalize",
 			bearer:     surface.operatorToken,
-			wantStatus: http.StatusNotImplemented,
+			wantStatus: http.StatusForbidden,
 		},
 	}
 
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
-			// POST /v1/setup/finalize declares a (currently empty) JSON
-			// body, so Huma's request parsing requires one before it will
-			// even invoke the stub handler — send "{}" unconditionally so
+			// POST /v1/setup/finalize declares a required JSON body, so
+			// Huma's request validation rejects a malformed one before the
+			// handler runs — send a schema-valid payload unconditionally so
 			// every POST case reaches the same point in the pipeline the
-			// case is actually trying to test (auth/audience), rather
-			// than failing earlier on a missing body.
+			// case is actually trying to test (auth/audience), rather than
+			// failing earlier on a 422.
 			var body io.Reader
 			if c.method == http.MethodPost {
-				body = strings.NewReader("{}")
+				body = strings.NewReader(`{"tenantName":"Acme Corp","tenantSlug":"acme","allowAdditionalInternalTenants":false}`)
 			}
 			req := httptest.NewRequest(c.method, c.path, body)
 			if body != nil {

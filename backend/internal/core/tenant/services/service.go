@@ -720,7 +720,23 @@ var ErrSetupTenantRemediation = errors.New("tenant: reserved setup tenant requir
 //     archived with DeletedAt == nil — the ArchiveTenant signature, distinct
 //     from this seam's own soft-delete rollback), is never resurrected this
 //     way — see ErrSetupTenantRemediation.
-func (s *Service) EnsureSetupTenant(ctx context.Context, tenantUUID, ownerUUID, name, slug string) error {
+//
+// coordinatorAttested is the caller's statement that the setup coordinator
+// record for THIS reservation exists and is not completed — that a
+// finalization attempt is genuinely in flight. It is the missing half of
+// the design's restore rule ("the COORDINATOR and immutable identity prove
+// that a prior attempt for this same setup reservation soft-deleted the
+// row"): the platform-admin destructive delete route calls the very same
+// SoftDeleteTenant this seam's own rollback calls, so the row signature
+// alone cannot distinguish "our previous attempt rolled this back" from
+// "an operator deleted it". Only the setup saga holds the coordinator, so
+// only the setup saga can attest; every other caller passes false and a
+// soft-deleted reserved row then enters remediation instead of being
+// silently restored. The tenant service deliberately does not resolve the
+// coordinator itself — systeminit is not reachable from here, and
+// inventing a second source of truth for it would be worse than taking
+// the caller's word under a documented contract.
+func (s *Service) EnsureSetupTenant(ctx context.Context, tenantUUID, ownerUUID, name, slug string, coordinatorAttested bool) error {
 	normName := strings.TrimSpace(name)
 	normSlug := slugify(slug)
 	if normSlug == "" {
@@ -730,7 +746,7 @@ func (s *Service) EnsureSetupTenant(ctx context.Context, tenantUUID, ownerUUID, 
 	existing, err := s.repo.GetTenantByUUIDIncludingDeleted(ctx, tenantUUID)
 	switch {
 	case err == nil:
-		return s.reconcileSetupTenant(ctx, existing, ownerUUID, normName, normSlug)
+		return s.reconcileSetupTenant(ctx, existing, ownerUUID, normName, normSlug, coordinatorAttested)
 	case errors.Is(err, repository.ErrNotFound):
 		_, cerr := s.createTenantWithUUID(ctx, ownerUUID, tenantUUID, models.CreateTenantInput{
 			Name: normName,
@@ -751,7 +767,7 @@ func (s *Service) EnsureSetupTenant(ctx context.Context, tenantUUID, ownerUUID, 
 			// right error to propagate rather than mask.
 			winner, rerr := s.repo.GetTenantByUUIDIncludingDeleted(ctx, tenantUUID)
 			if rerr == nil {
-				return s.reconcileSetupTenant(ctx, winner, ownerUUID, normName, normSlug)
+				return s.reconcileSetupTenant(ctx, winner, ownerUUID, normName, normSlug, coordinatorAttested)
 			}
 			return cerr
 		}
@@ -771,7 +787,9 @@ func (s *Service) EnsureSetupTenant(ctx context.Context, tenantUUID, ownerUUID, 
 // replay-safe: a duplicate-key error from a racing writer — another
 // EnsureSetupTenant call, or the absent-to-present primitive itself — is read
 // back and VALIDATED, never trusted blind.
-func (s *Service) reconcileSetupTenant(ctx context.Context, existing *models.Tenant, ownerUUID, name, slug string) error {
+//
+// coordinatorAttested gates the restore branch only; see EnsureSetupTenant.
+func (s *Service) reconcileSetupTenant(ctx context.Context, existing *models.Tenant, ownerUUID, name, slug string, coordinatorAttested bool) error {
 	if existing.Kind != models.TenantKindInternal ||
 		existing.OwnerUserUUID != ownerUUID ||
 		existing.Slug != slug ||
@@ -804,6 +822,16 @@ func (s *Service) reconcileSetupTenant(ctx context.Context, existing *models.Ten
 	// — but against OTHER occupants: this row's own deletedAt != nil already
 	// excludes it from the count below.
 	if existing.DeletedAt != nil {
+		// The row signature alone does not prove WHO soft-deleted it:
+		// DeleteTenant (the MFA-gated platform-admin destructive route)
+		// writes exactly what this seam's own rollback writes. Without the
+		// caller's coordinator attestation — an in-flight reservation for
+		// this very setup — restoring would silently undo a deliberate
+		// operator action, so an unattested soft-deleted reserved row goes
+		// to remediation instead. See EnsureSetupTenant's contract.
+		if !coordinatorAttested {
+			return ErrSetupTenantRemediation
+		}
 		if s.ProvisioningMode(ctx, models.TenantKindInternal) == models.ProvisioningModeSingle {
 			n, err := s.repo.CountProvisioningSlotsByKind(ctx, models.TenantKindInternal)
 			if err != nil {

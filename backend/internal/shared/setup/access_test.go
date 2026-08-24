@@ -87,7 +87,7 @@ func assertOnlyThreeKeys(t *testing.T, access FinalizationAccess) {
 func TestEvaluateAccess_BoundEqualsCallerActive_CanFinalize(t *testing.T) {
 	users := &fakeLifecycleUsers{states: map[string]iface.UserLifecycleState{"admin-1": iface.UserLifecycleActive}}
 	store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{AdminUUID: "admin-1", Revision: 3}}
-	svc := NewService(users, &stubAdmin{}, store, nil, discardLogger())
+	svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
 	access, rec, err := svc.evaluateAccess(context.Background(), "admin-1", "administrator")
 	if err != nil {
@@ -115,7 +115,7 @@ func TestEvaluateAccess_BoundEqualsCallerActive_CanFinalize(t *testing.T) {
 func TestEvaluateAccess_BoundDiffersFromCallerActive_BoundToAnotherAdmin(t *testing.T) {
 	users := &fakeLifecycleUsers{states: map[string]iface.UserLifecycleState{"admin-1": iface.UserLifecycleActive}}
 	store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{AdminUUID: "admin-1"}}
-	svc := NewService(users, &stubAdmin{}, store, nil, discardLogger())
+	svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
 	access, _, err := svc.evaluateAccess(context.Background(), "someone-else", "administrator")
 	if err != nil {
@@ -158,7 +158,7 @@ func TestEvaluateAccess_UnusableBinding_ActiveSuperAdmin_CanClaimRecovery(t *tes
 				users.states[c.rec.AdminUUID] = c.boundState
 			}
 			store := &fakeFinalizationStore{rec: c.rec}
-			svc := NewService(users, &stubAdmin{}, store, nil, discardLogger())
+			svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
 			access, _, err := svc.evaluateAccess(context.Background(), "super-1", "super_admin")
 			if err != nil {
@@ -201,7 +201,7 @@ func TestEvaluateAccess_UnusableBinding_LowerRole_RecoveryRequiresSuperAdmin(t *
 				users.states[c.rec.AdminUUID] = c.boundState
 			}
 			store := &fakeFinalizationStore{rec: c.rec}
-			svc := NewService(users, &stubAdmin{}, store, nil, discardLogger())
+			svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
 			access, _, err := svc.evaluateAccess(context.Background(), "caller-1", "administrator")
 			if err != nil {
@@ -233,7 +233,7 @@ func TestEvaluateAccess_LifecycleLookupError_NeverGrantsRecovery(t *testing.T) {
 	t.Run("bound admin lookup error", func(t *testing.T) {
 		users := &fakeLifecycleUsers{err: lookupErr}
 		store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{AdminUUID: "admin-1"}}
-		svc := NewService(users, &stubAdmin{}, store, nil, discardLogger())
+		svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
 		access, rec, err := svc.evaluateAccess(context.Background(), "admin-1", "super_admin")
 		if err == nil {
@@ -253,7 +253,7 @@ func TestEvaluateAccess_LifecycleLookupError_NeverGrantsRecovery(t *testing.T) {
 	t.Run("caller lifecycle lookup error during recovery check", func(t *testing.T) {
 		users := &fakeLifecycleUsers{err: lookupErr}
 		store := &fakeFinalizationStore{rec: nil} // empty binding
-		svc := NewService(users, &stubAdmin{}, store, nil, discardLogger())
+		svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
 		access, _, err := svc.evaluateAccess(context.Background(), "super-1", "super_admin")
 		if err == nil {
@@ -267,7 +267,7 @@ func TestEvaluateAccess_LifecycleLookupError_NeverGrantsRecovery(t *testing.T) {
 	t.Run("coordinator read error", func(t *testing.T) {
 		users := &fakeLifecycleUsers{}
 		store := &fakeFinalizationStore{getErr: lookupErr}
-		svc := NewService(users, &stubAdmin{}, store, nil, discardLogger())
+		svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
 		access, _, err := svc.evaluateAccess(context.Background(), "super-1", "super_admin")
 		if err == nil {
@@ -314,7 +314,7 @@ func TestEvaluateAccess_NeverMutatesStore(t *testing.T) {
 		t.Run(sc.name, func(t *testing.T) {
 			users := &fakeLifecycleUsers{states: sc.states}
 			store := &fakeFinalizationStore{rec: sc.rec}
-			svc := NewService(users, &stubAdmin{}, store, nil, discardLogger())
+			svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
 			if _, _, err := svc.evaluateAccess(context.Background(), sc.callerUUID, sc.callerRole); err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -345,7 +345,7 @@ func TestFinalizationAccess_JSONRoundTrip_NoIdentityFields(t *testing.T) {
 func TestFinalizationAccessHandler_LifecycleLookupError_Returns503(t *testing.T) {
 	users := &fakeLifecycleUsers{count: 1, err: errors.New("mongo down")}
 	store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{AdminUUID: "admin-1"}}
-	svc := NewService(users, &stubAdmin{}, store, nil, discardLogger())
+	svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 	h := NewHandler(svc, config.CookieConfig{})
 
 	ctx := testkit.NewIdentity("admin-1", "admin@example.com", "administrator").ContextFor(context.Background(), "")
@@ -378,7 +378,7 @@ func TestFinalizationAccessHandler_PhaseComplete_Returns409_NoLifecycleLookup(t 
 	completedAt := time.Now().UTC()
 	users := &fakeLifecycleUsers{count: 1}
 	store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{AdminUUID: "admin-1", CompletedAt: &completedAt}}
-	svc := NewService(users, &stubAdmin{}, store, nil, discardLogger())
+	svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 	h := NewHandler(svc, config.CookieConfig{})
 
 	ctx := testkit.NewIdentity("admin-1", "admin@example.com", "administrator").ContextFor(context.Background(), "")
@@ -410,7 +410,7 @@ func TestFinalizationAccessHandler_PhaseComplete_Returns409_NoLifecycleLookup(t 
 func TestFinalizationAccessHandler_Success_SetsCacheControl(t *testing.T) {
 	users := &fakeLifecycleUsers{count: 1, states: map[string]iface.UserLifecycleState{"admin-1": iface.UserLifecycleActive}}
 	store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{AdminUUID: "admin-1"}}
-	svc := NewService(users, &stubAdmin{}, store, nil, discardLogger())
+	svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 	h := NewHandler(svc, config.CookieConfig{})
 
 	ctx := testkit.NewIdentity("admin-1", "admin@example.com", "administrator").ContextFor(context.Background(), "")
@@ -427,7 +427,7 @@ func TestFinalizationAccessHandler_Success_SetsCacheControl(t *testing.T) {
 }
 
 func TestFinalizationAccessHandler_NoCallerIdentity_Returns401(t *testing.T) {
-	svc := NewService(&fakeLifecycleUsers{count: 1}, &stubAdmin{}, &fakeFinalizationStore{}, nil, discardLogger())
+	svc := NewService(&fakeLifecycleUsers{count: 1}, &stubAdmin{}, &fakeFinalizationStore{}, nil, nil, nil, discardLogger())
 	h := NewHandler(svc, config.CookieConfig{})
 
 	_, err := h.FinalizationAccess(context.Background(), &struct{}{})
