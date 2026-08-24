@@ -556,15 +556,13 @@ func (s *Service) createTenantWithUUID(ctx context.Context, ownerUUID, tenantUUI
 	// creation path — POST /v1/tenants, divisions, lazy provisioning — is
 	// covered. The first tenant on a fresh install has count 0 and passes,
 	// so bootstrap is never blocked.
-	if s.ProvisioningMode(ctx, kind) == models.ProvisioningModeSingle {
-		n, err := s.repo.CountProvisioningSlotsByKind(ctx, kind)
-		if err != nil {
-			return nil, fmt.Errorf("tenant: count tenants for single-mode check: %w", err)
-		}
-		if n > 0 {
-			return nil, ErrProvisioningLocked
-		}
-	}
+	//
+	// The check is NOT performed here, though: counting and then inserting
+	// as two statements is a TOCTOU gap two concurrent creations both slip
+	// through. It moves into the same transaction as the insert, below, via
+	// repo.RunProvisioningGuarded — see that method for why a transaction
+	// alone is not enough and a shared lock row is required.
+	singleMode := s.ProvisioningMode(ctx, kind) == models.ProvisioningModeSingle
 
 	var parent *string
 	if input.ParentTenantUUID != nil && *input.ParentTenantUUID != "" {
@@ -605,7 +603,28 @@ func (s *Service) createTenantWithUUID(ctx context.Context, ownerUUID, tenantUUI
 		Plan:             plan,
 	}
 
-	if err := s.repo.CreateTenant(ctx, t); err != nil {
+	// In `single` mode the cardinality check and the insert commit as one
+	// transaction against a shared per-kind lock row, so two concurrent
+	// creations cannot both observe an empty tier. Only the row write is
+	// guarded: the dependent steps below (KMS, membership, owner binding)
+	// make external calls and stay outside, exactly as they were, and each
+	// still unwinds the row on failure.
+	//
+	// `manual` mode has no cardinality to enforce, so it keeps the plain
+	// insert — which also keeps ordinary tenant creation working on a
+	// standalone mongod, where transactions are unavailable.
+	if singleMode {
+		const maxSingleModeSlots = 1
+		err := s.repo.RunProvisioningGuarded(ctx, kind, maxSingleModeSlots, func(sc mongo.SessionContext) error {
+			return s.repo.CreateTenant(sc, t)
+		})
+		switch {
+		case errors.Is(err, repository.ErrProvisioningSlotTaken):
+			return nil, ErrProvisioningLocked
+		case err != nil:
+			return nil, tenantWriteError(err)
+		}
+	} else if err := s.repo.CreateTenant(ctx, t); err != nil {
 		return nil, tenantWriteError(err)
 	}
 
@@ -846,16 +865,27 @@ func (s *Service) reconcileSetupTenant(ctx context.Context, existing *models.Ten
 		if existing.DeletedReason != models.TenantDeleteReasonProvisioningRollback {
 			return ErrSetupTenantRemediation
 		}
+		// Restoring re-occupies a provisioning slot, so it takes the same
+		// cardinality check a genuine creation takes — and takes it the
+		// same way: inside one transaction against the shared per-kind
+		// lock row, so a restore racing a creation cannot land the tier at
+		// two occupants. Counting here and restoring afterwards would be
+		// the identical TOCTOU gap createTenantWithUUID just closed. The
+		// row's own deletedAt != nil already excludes it from the count,
+		// so the check only ever sees OTHER occupants.
 		if s.ProvisioningMode(ctx, models.TenantKindInternal) == models.ProvisioningModeSingle {
-			n, err := s.repo.CountProvisioningSlotsByKind(ctx, models.TenantKindInternal)
-			if err != nil {
-				return fmt.Errorf("tenant: count tenants for setup-tenant single-mode check: %w", err)
-			}
-			if n > 0 {
+			const maxSingleModeSlots = 1
+			err := s.repo.RunProvisioningGuarded(ctx, models.TenantKindInternal, maxSingleModeSlots,
+				func(sc mongo.SessionContext) error {
+					return s.repo.RestoreTenant(sc, existing.UUID)
+				})
+			switch {
+			case errors.Is(err, repository.ErrProvisioningSlotTaken):
 				return ErrProvisioningLocked
+			case err != nil:
+				return fmt.Errorf("tenant: restore setup tenant: %w", err)
 			}
-		}
-		if err := s.repo.RestoreTenant(ctx, existing.UUID); err != nil {
+		} else if err := s.repo.RestoreTenant(ctx, existing.UUID); err != nil {
 			return fmt.Errorf("tenant: restore setup tenant: %w", err)
 		}
 		existing.DeletedAt = nil

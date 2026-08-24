@@ -85,6 +85,18 @@ func newSetupTenantTestDB(t *testing.T) (*mongo.Database, func()) {
 	}); err != nil {
 		t.Fatalf("create tenant_ancestors unique index: %v", err)
 	}
+	// The provisioning-lock row's unique `kind` index is what gives two
+	// competing single-mode transactions a shared document to conflict on.
+	// Without it here, a concurrency test would pass on the strength of
+	// nothing at all — each upsert would insert its own row (see
+	// repository/provisioning_locks.go).
+	//tenantscope:allow system: test setup mirrors the production index build (module.go::Collections()) for the platform-global provisioning-cardinality lock
+	if _, err := db.Collection(repository.CollProvisioningLocks).Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "kind", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		t.Fatalf("create tenant_provisioning_locks unique index: %v", err)
+	}
 
 	cleanup := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

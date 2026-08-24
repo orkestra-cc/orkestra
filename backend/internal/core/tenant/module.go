@@ -171,6 +171,16 @@ func (m *Module) Collections() []module.CollectionSpec {
 		{Name: repository.CollDefaults, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"kind": 1}, Unique: true},
 		}},
+		// Platform-global provisioning-cardinality lock: one revision row
+		// per TenantKind, holding no tenant data. The unique `kind` index
+		// is what gives RunProvisioningGuarded's two competitors a shared
+		// document to conflict on — without it, two from-scratch upserts
+		// each insert their own row, nothing conflicts, and the `single`
+		// invariant degrades back to an unsafe count-then-write. See
+		// repository/provisioning_locks.go.
+		{Name: repository.CollProvisioningLocks, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"kind": 1}, Unique: true},
+		}},
 	}
 }
 
