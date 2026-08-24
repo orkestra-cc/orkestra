@@ -95,7 +95,7 @@ func TestResolveCurrentTenant_OperatorSwitcher(t *testing.T) {
 				t.Fatalf("kind = %q, want %q", gotKind, iface.TenantKindInternal)
 			}
 			// When the switcher selects tenant-B, the roles must come from that
-			// membership (org_admin), not the default tenant's (org_owner).
+			// membership (org_admin), not the tenant fallback's (org_owner).
 			if tc.wantTenant == "tenant-B" && (len(gotRoles) != 1 || gotRoles[0] != "org_admin") {
 				t.Fatalf("roles = %v, want [org_admin] for switched tenant", gotRoles)
 			}
