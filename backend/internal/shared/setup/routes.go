@@ -367,6 +367,16 @@ func (h *Handler) RegisterProtectedRoutes(api huma.API) {
 		Summary:       "Finalize setup (default tenant provisioning)",
 		Description:   "Authenticated-operator route. Drives the resumable setup-finalization saga for the administrator bound to it: persists the Tier-1 provisioning mode, ensures the reserved internal tenant, assigns it as the platform default, and marks setup complete. Idempotent — retrying the identical payload resumes the saga, and retrying after completion replays the persisted result. Answers 202 with `{\"state\":\"setup.finalization_in_progress\"}` plus Retry-After when an identical request already holds the stage lease (a success, not an error envelope), 403 when the caller is not the bound administrator or may not claim recovery, 409 for a different payload or an already-completed setup, and 503 when coordinator state cannot be read.",
 		DefaultStatus: http.StatusOK,
+		// Hand-writing Responses to document the 202 has one non-obvious
+		// consequence: huma's defineErrors adds its automatic `default` →
+		// application/problem+json → ErrorModel entry only when the
+		// operation has at most one response and no declared Errors, so a
+		// populated map SUPPRESSES it. This endpoint has the richest error
+		// table in the setup flow (401, two 403s, three 409s, 422, 500,
+		// 503) and a generated client with no error model for it would be
+		// strictly worse than one with no documented 202 — so the default
+		// is restored here by hand, identical to what every sibling
+		// operation gets automatically.
 		Responses: map[string]*huma.Response{
 			"202": {
 				Description: "Accepted — an identical finalization request already holds the current stage lease. Retry the identical payload after Retry-After seconds.",
@@ -375,6 +385,12 @@ func (h *Handler) RegisterProtectedRoutes(api huma.API) {
 				},
 				Content: map[string]*huma.MediaType{
 					"application/json": {Schema: &huma.Schema{Ref: "#/components/schemas/FinalizeResponseBody"}},
+				},
+			},
+			"default": {
+				Description: "Error",
+				Content: map[string]*huma.MediaType{
+					"application/problem+json": {Schema: &huma.Schema{Ref: "#/components/schemas/ErrorModel"}},
 				},
 			},
 		},

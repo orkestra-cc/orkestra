@@ -47,11 +47,15 @@ func (m *Module) Dependencies() []string { return []string{"user"} }
 // config. Read at request time by the service's ProvisioningModeResolver — edits
 // at /admin/modules/tenant take effect on the next creation with no restart.
 //
-// Both default to "manual" (admin-only creation): a fresh install starts with
-// zero tenants and expects an operator to create them deliberately — the first
-// internal tenant is created from the setup wizard's OrgStep or the admin UI.
-// External clients are never auto-provisioned and cannot self-create a tenant —
-// only a platform admin creates a client tenant and assigns it to a Tier-2 user.
+// Both default to "manual" (admin-only creation). The first internal tenant is
+// not optional and is not created here: the mandatory setup finalization saga
+// (POST /v1/setup/finalize) provisions exactly one, makes it the platform
+// default, and persists the Tier-1 mode the operator chose in the wizard —
+// which is why this key's stored value on a finished install reflects that
+// choice rather than the default below. Further internal tenants are created
+// deliberately from the admin UI, subject to that mode. External clients are
+// never auto-provisioned and cannot self-create a tenant — only a platform
+// admin creates a client tenant and assigns it to a Tier-2 user.
 func (m *Module) ConfigSchema() []module.ConfigField {
 	return []module.ConfigField{
 		{
