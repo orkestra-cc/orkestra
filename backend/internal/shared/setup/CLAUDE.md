@@ -117,12 +117,23 @@ incomplete stage**, with a CAS filtered by key, request hash, stage,
 revision, and an absent-or-expired lease; it advances with a second CAS on
 the same owner, stage and revision.
 
-**The three rules that must survive every edit:**
+**The four rules that must survive every edit:**
 
 - **Stage completion is judged ONLY by the CAS-advanced record — never by
   having held a lease.** Every loop iteration re-reads the record and
   drives from `rec.Stage`. A lost claim, a lost renewal and a lost advance
   all fall back to the same place: reread and re-derive.
+- **A CAS answers "did my filter match?", not "did the document
+  change?"** — so `systeminit.RenewLease` returns `MatchedCount`, not
+  `ModifiedCount`. MongoDB reports `modifiedCount=0` for a matched
+  document whose `$set` stores byte-identical values, and the renewal is
+  a pure refresh of `leaseUntil` + `updatedAt`: claim and renew inside one
+  millisecond and the write changes nothing. Reading that as a lost lease
+  made the executor loop, find its **own** live lease blocking the
+  re-claim, and answer `202` in-progress to the request it was in the
+  middle of completing — a flake that only appeared where the round trip
+  was fast enough to fit the pair inside a millisecond. Pinned by
+  `TestRenewLease_UnchangedWriteStillReportsOwnership`.
 - **The lease prevents routine double execution; it is NOT an
   exactly-once boundary.** An external effect can succeed in the instant
   before its executor loses the lease or crashes, so every stage body must

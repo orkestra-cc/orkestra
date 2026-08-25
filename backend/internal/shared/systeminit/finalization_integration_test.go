@@ -576,3 +576,80 @@ func TestReconcileLease_VersionedElection(t *testing.T) {
 		}
 	}
 }
+
+// TestRenewLease_UnchangedWriteStillReportsOwnership pins the one CAS in
+// this file whose write can legitimately change nothing.
+//
+// MongoDB reports modifiedCount=0 for a matched document whose $set stores
+// byte-identical values, so judging "do I still hold the lease?" by
+// modifiedCount answers "no" to an executor that demonstrably does hold it.
+// RenewLease is the only method here exposed to that: its $set is a pure
+// refresh (leaseUntil + updatedAt), and setup's saga renews inside the same
+// millisecond in which it claimed whenever the stage body and the
+// intervening round trip fit in one — the common case on a fast host.
+// Every other CAS here either $incs revision or writes a value its own
+// filter proves is different.
+//
+// The construction manufactures that collision rather than waiting for it:
+// the record is seeded in exactly the state ClaimStage leaves behind, with
+// updatedAt pinned to a millisecond that has not arrived yet, and
+// RenewLease is called at the start of that millisecond with the leaseUntil
+// already stored. The assertion runs only once the record proves the write
+// really did change nothing.
+func TestRenewLease_UnchangedWriteStillReportsOwnership(t *testing.T) {
+	repo, cleanup := liveFinalizationRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	const owner = "executor-1"
+	// Millisecond-aligned: the driver stores BSON datetimes at millisecond
+	// resolution, and the comparison that decides modifiedCount is made on
+	// the stored values.
+	leaseUntil := time.UnixMilli(time.Now().UTC().Add(30 * time.Second).UnixMilli()).UTC()
+
+	for attempt := 0; attempt < 64; attempt++ {
+		resetFinalization(ctx, t, repo)
+
+		// Far enough ahead that the insert's round trip lands before it.
+		target := time.UnixMilli(time.Now().UTC().UnixMilli() + 12).UTC()
+		//tenantscope:allow system: test-only seeding of the isolated per-run test database
+		if _, err := repo.coll.InsertOne(ctx, bson.M{
+			"key": keySetupFinalization, "adminUUID": "admin-1", "source": SourceFresh,
+			"requestHash": "hash-1", "stage": StageConfig, "revision": int64(2),
+			"reconciliationVersion": 0,
+			"leaseOwner":            owner, "leaseUntil": leaseUntil,
+			"createdAt": target, "updatedAt": target,
+		}); err != nil {
+			t.Fatalf("seed record: %v", err)
+		}
+		if time.Now().UTC().UnixMilli() >= target.UnixMilli() {
+			continue // the round trip overshot the window; take a new target
+		}
+		for time.Now().UTC().UnixMilli() < target.UnixMilli() {
+			// Spin: sleeping would overshoot a one-millisecond window.
+		}
+
+		ok, err := repo.RenewLease(ctx, owner, leaseUntil)
+		if err != nil {
+			t.Fatalf("RenewLease: %v", err)
+		}
+		rec, err := repo.Get(ctx)
+		if err != nil || rec == nil {
+			t.Fatalf("Get after renew: %v", err)
+		}
+		if rec.UpdatedAt.UnixMilli() != target.UnixMilli() {
+			continue // updatedAt moved: this call did change the document
+		}
+
+		// The document is byte-identical to what it held before the call
+		// and leaseOwner still names us: the lease was never lost.
+		if rec.LeaseOwner != owner {
+			t.Fatalf("seeded lease owner changed to %q", rec.LeaseOwner)
+		}
+		if !ok {
+			t.Fatal("RenewLease reported a lost lease for a write that changed nothing — the caller still holds it")
+		}
+		return
+	}
+	t.Fatal("could not construct an unchanged RenewLease write in 64 attempts")
+}

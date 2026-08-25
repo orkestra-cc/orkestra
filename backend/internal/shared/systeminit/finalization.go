@@ -229,6 +229,18 @@ func (r *Repo) ClaimStage(ctx context.Context, requestHash string, stage int, re
 // RenewLease extends the current lease owner's leaseUntil without touching
 // stage or revision. A false return means owner is no longer the lease
 // holder (lost the lease, or the stage already advanced past it).
+//
+// The result is MatchedCount, not ModifiedCount, and must stay that way.
+// The question this CAS answers is "did the filter still find me holding
+// the lease?", and MongoDB reports modifiedCount=0 for a matched document
+// whose $set stores byte-identical values. This method is the one place in
+// the file where that is reachable: its write is a pure refresh, so an
+// executor that claims a stage and renews within the same millisecond
+// re-writes the leaseUntil and updatedAt it just wrote. Reading that as a
+// lost lease made the setup saga's own executor step aside for itself —
+// it looped, found its own live lease blocking the re-claim, and answered
+// 202 in-progress to the request it was in the middle of completing.
+// See TestRenewLease_UnchangedWriteStillReportsOwnership.
 func (r *Repo) RenewLease(ctx context.Context, owner string, leaseUntil time.Time) (bool, error) {
 	now := time.Now().UTC()
 	//tenantscope:allow system: platform-global setup coordinator keyed by fixed key (lease renewal CAS)
@@ -239,7 +251,7 @@ func (r *Repo) RenewLease(ctx context.Context, owner string, leaseUntil time.Tim
 	if err != nil {
 		return false, fmt.Errorf("systeminit: renew stage lease: %w", err)
 	}
-	return res.ModifiedCount > 0, nil
+	return res.MatchedCount > 0, nil
 }
 
 // AdvanceStage completes the current stage held by owner: bumps Stage by
