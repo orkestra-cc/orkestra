@@ -185,6 +185,16 @@ func (f *fakeResolver) Default(context.Context) (SenderProfile, error) {
 	return f.profile, nil
 }
 
+func (f *fakeResolver) BySlug(_ context.Context, slug string) (SenderProfile, error) {
+	if f.err != nil {
+		return SenderProfile{}, f.err
+	}
+	if slug != f.profile.Slug {
+		return SenderProfile{}, ErrSenderNotFound
+	}
+	return f.profile, nil
+}
+
 // ---- helpers ------------------------------------------------------------
 
 type kit struct {
