@@ -218,3 +218,36 @@ const SetupTenantNameRequired = "setup.tenant_name_required"
 // SetupTenantSlugRequired: the initial organization slug is empty once
 // normalized. 422.
 const SetupTenantSlugRequired = "setup.tenant_slug_required"
+
+// --- notification ---
+
+// NotificationSenderPatternInvalid: a sender profile declares a category
+// pattern outside the grammar (exact "foo.bar", prefix "foo.*", or "*"). 422.
+const NotificationSenderPatternInvalid = "notification.sender_pattern_invalid"
+
+// NotificationSenderNoDefault: patterns are declared but no profile claims
+// "*", so an unmatched category would fail closed. 422.
+const NotificationSenderNoDefault = "notification.sender_no_default"
+
+// NotificationSenderDuplicateDefault: more than one profile claims "*". 422.
+const NotificationSenderDuplicateDefault = "notification.sender_duplicate_default"
+
+// NotificationSenderPatternConflict: the same pattern is declared by two
+// profiles, so the send would be ambiguous. 422.
+const NotificationSenderPatternConflict = "notification.sender_pattern_conflict"
+
+// NotificationSenderUnknownDriver: a routing profile's provider names no
+// registered driver. 422.
+const NotificationSenderUnknownDriver = "notification.sender_unknown_driver"
+
+// NotificationSenderIncomplete: a profile lacks a non-secret field its
+// driver requires (save time), or any required field (test send). 422.
+const NotificationSenderIncomplete = "notification.sender_incomplete"
+
+// NotificationSenderNotFound: a test send named a profile slug that is not
+// in the roster. 404.
+const NotificationSenderNotFound = "notification.sender_not_found"
+
+// NotificationSendFailed: the sender's transport or vendor refused a test
+// message. The detail carries the bounded diagnostic, never vendor text. 502.
+const NotificationSendFailed = "notification.send_failed"
