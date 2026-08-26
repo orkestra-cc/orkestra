@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/orkestra/backend/internal/core/auth/models"
+	notifModels "github.com/orkestra/backend/internal/core/notification/models"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -15,12 +16,22 @@ import (
 // SendTemplated request for assertions; Send is panics since the
 // suspicious-login path is templated-only.
 type stubNotifier struct {
-	configured bool
-	sends      []iface.TemplatedNotificationRequest
-	sendErr    error
+	configured    bool
+	configuredFor map[string]bool // when non-nil, the exact per-category answer
+	askedFor      []string
+	sends         []iface.TemplatedNotificationRequest
+	sendErr       error
 }
 
 func (s *stubNotifier) IsConfigured(_ context.Context) bool { return s.configured }
+
+func (s *stubNotifier) IsConfiguredFor(_ context.Context, category string) bool {
+	s.askedFor = append(s.askedFor, category)
+	if s.configuredFor != nil {
+		return s.configuredFor[category]
+	}
+	return s.configured
+}
 func (s *stubNotifier) Send(context.Context, iface.NotificationRequest) (*iface.NotificationResult, error) {
 	panic("Send should not be used by suspicious_login_notifier")
 }
@@ -186,6 +197,9 @@ func TestSuspiciousLogin_NotifierNotConfiguredSkipsEmail(t *testing.T) {
 	}
 	if len(notifier.sends) != 0 {
 		t.Errorf("IsConfigured=false must skip email, got %d sends", len(notifier.sends))
+	}
+	if len(notifier.askedFor) != 1 || notifier.askedFor[0] != notifModels.CategoryAuthSuspiciousLogin {
+		t.Fatalf("guard must ask for the category it is about to send, asked %v", notifier.askedFor)
 	}
 }
 

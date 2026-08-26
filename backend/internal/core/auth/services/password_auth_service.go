@@ -253,7 +253,7 @@ func (s *PasswordAuthService) Register(ctx context.Context, in RegisterInput) (*
 
 	// Reject signups up-front if verification is required but the
 	// notification sender isn't configured.
-	if s.requireEmailVerification && (s.notifier == nil || !s.notifier.IsConfigured(ctx)) {
+	if s.requireEmailVerification && !iface.IsConfiguredForCategory(ctx, s.notifier, notifModels.CategoryAuthVerifyEmail) {
 		return nil, ErrNotificationDown
 	}
 
@@ -966,7 +966,7 @@ func (s *PasswordAuthService) ForgotPassword(ctx context.Context, email, ip stri
 		return nil
 	}
 
-	if s.notifier == nil || !s.notifier.IsConfigured(ctx) {
+	if !iface.IsConfiguredForCategory(ctx, s.notifier, notifModels.CategoryAuthResetPassword) {
 		s.logger.Warn("forgot password: notifier not configured, cannot send email")
 		return nil
 	}
@@ -975,7 +975,7 @@ func (s *PasswordAuthService) ForgotPassword(ctx context.Context, email, ip stri
 	_, err = s.notifier.SendTemplated(ctx, iface.TemplatedNotificationRequest{
 		Channel:    "email",
 		Type:       "transactional",
-		Category:   authModels.EmailTokenPurposeResetPassword,
+		Category:   notifModels.CategoryAuthResetPassword,
 		TemplateID: "auth.reset_password",
 		Recipients: []iface.Recipient{{
 			UserUUID: user.UUID,
@@ -1277,7 +1277,7 @@ func (s *PasswordAuthService) sendVerificationEmail(ctx context.Context, user *i
 		return err
 	}
 
-	if s.notifier == nil || !s.notifier.IsConfigured(ctx) {
+	if !iface.IsConfiguredForCategory(ctx, s.notifier, notifModels.CategoryAuthVerifyEmail) {
 		return ErrNotificationDown
 	}
 
@@ -1285,7 +1285,7 @@ func (s *PasswordAuthService) sendVerificationEmail(ctx context.Context, user *i
 	_, err = s.notifier.SendTemplated(ctx, iface.TemplatedNotificationRequest{
 		Channel:    "email",
 		Type:       "transactional",
-		Category:   authModels.EmailTokenPurposeVerifyEmail,
+		Category:   notifModels.CategoryAuthVerifyEmail,
 		TemplateID: "auth.verify_email",
 		Recipients: []iface.Recipient{{
 			UserUUID: user.UUID,
@@ -1657,7 +1657,7 @@ func (s *PasswordAuthService) notifyNewDeviceLogin(
 	session *authModels.AuthSessionDoc,
 	deviceID, platform, ip, userAgent string,
 ) {
-	if s.notifier == nil || !s.notifier.IsConfigured(ctx) {
+	if !iface.IsConfiguredForCategory(ctx, s.notifier, notifModels.CategoryAuthNewDeviceLogin) {
 		return
 	}
 	if s.policy != nil && !s.policy.NotifyUserOnNewDeviceLogin(ctx) {
@@ -1764,7 +1764,7 @@ func (s *PasswordAuthService) AdminSendInvite(ctx context.Context, userUUID, inv
 		return err
 	}
 
-	if s.notifier == nil || !s.notifier.IsConfigured(ctx) {
+	if !iface.IsConfiguredForCategory(ctx, s.notifier, notifModels.CategoryAuthAdminInvite) {
 		return ErrNotificationDown
 	}
 
@@ -1836,7 +1836,7 @@ func (s *PasswordAuthService) AdminTriggerPasswordReset(ctx context.Context, use
 		return err
 	}
 
-	if s.notifier == nil || !s.notifier.IsConfigured(ctx) {
+	if !iface.IsConfiguredForCategory(ctx, s.notifier, notifModels.CategoryAuthResetPassword) {
 		return ErrNotificationDown
 	}
 
@@ -1844,7 +1844,7 @@ func (s *PasswordAuthService) AdminTriggerPasswordReset(ctx context.Context, use
 	_, err = s.notifier.SendTemplated(ctx, iface.TemplatedNotificationRequest{
 		Channel:    "email",
 		Type:       "transactional",
-		Category:   authModels.EmailTokenPurposeResetPassword,
+		Category:   notifModels.CategoryAuthResetPassword,
 		TemplateID: notifModels.CategoryAuthResetPassword,
 		Recipients: []iface.Recipient{{
 			UserUUID: userUUID,
