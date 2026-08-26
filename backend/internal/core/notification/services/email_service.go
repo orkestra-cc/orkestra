@@ -235,10 +235,3 @@ func buildMIMEMessage(cfg EmailSettings, msg EmailMessage) string {
 
 	return b.String()
 }
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
-}

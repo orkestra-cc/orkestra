@@ -42,24 +42,6 @@ func TestEncodeQuotedPrintable_LongLineWrapping(t *testing.T) {
 	}
 }
 
-func TestTruncate(t *testing.T) {
-	cases := []struct {
-		in   string
-		n    int
-		want string
-	}{
-		{"abc", 5, "abc"},
-		{"abc", 3, "abc"},
-		{"abcdef", 3, "abc..."},
-		{"", 5, ""},
-	}
-	for _, c := range cases {
-		if got := truncate(c.in, c.n); got != c.want {
-			t.Fatalf("truncate(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
-		}
-	}
-}
-
 func TestIsSMTPConfigured(t *testing.T) {
 	complete := EmailSettings{
 		Provider: "smtp", Host: "mail.example.com", Port: 587, FromAddress: "no-reply@example.com",
