@@ -201,7 +201,21 @@ Three layers, and the middle one has a limit worth stating rather than discoveri
 | non-empty | none | **do not apply** — every profile is a draft, and a pattern-less profile is never selected |
 | non-empty | ≥ 1 | **all apply** |
 
-In the third state: exactly one profile declares `*`; no pattern is claimed twice; every `provider` names a registered driver; and each driver's required **non-secret** fields are present **on the profiles that declare at least one pattern** — a draft profile alongside live ones is not held to completeness, for the same reason it is never selected. Failures return `*ConfigValidationError` → 422 with stable `notification.sender_*` codes.
+In the third state, each check has its own scope — and **every per-profile check applies only to profiles that declare at least one pattern**:
+
+| Check | Scope | Code |
+| --- | --- | --- |
+| pattern is well-formed | every profile declaring ≥1 pattern entry | `notification.sender_pattern_invalid` |
+| exactly one profile declares `*` | the map as a whole | `notification.sender_no_default` / `_duplicate_default` |
+| no pattern claimed by two profiles | across profiles declaring patterns | `notification.sender_pattern_conflict` |
+| `provider` names a registered driver | **profiles declaring ≥1 pattern** | `notification.sender_unknown_driver` |
+| driver's required **non-secret** fields present | **profiles declaring ≥1 pattern** | `notification.sender_incomplete` |
+
+A draft sitting alongside live profiles is exempt from the last two for the same reason it is never selected: nothing can route to it, so nothing it gets wrong can affect a send. Rejecting it would repeat the empty-roster mistake at a smaller scale — blocking a PATCH the operator did not intend to be about that profile. The concrete case is not hypothetical: a profile can hold a `provider` naming a driver that no longer exists, and thanks to the enum-orphan fix the console now shows that stale value **selected and visible** rather than silently snapping to the first option. The operator can see the problem; they should not be blocked from unrelated work by it, and adding a pattern to that profile is exactly when it starts to matter and exactly when it is rejected.
+
+Grammar is the deliberate exception. A malformed pattern is checked on any profile that declares one, because a profile *with* a pattern is not a draft — the operator has stated an intent to route — and a pattern that silently matches nothing is worse than a rejection. For this purpose a profile "declares a pattern" when its normalized list is non-empty, **whether or not the entries are well-formed**; otherwise a profile whose only pattern is malformed would classify itself as a draft and escape the very check aimed at it.
+
+Failures return `*ConfigValidationError` → 422 with stable `notification.sender_*` codes.
 
 Two consequences worth being explicit about, because a literal reading of "exactly one `*`" produces a broken module in both:
 
@@ -305,6 +319,7 @@ The backend has a coverage gate (`make backend-coverage-gate`), so tests are par
 | Target | Approach | Why there |
 | --- | --- | --- |
 | `SenderResolver` | table-driven, no infrastructure | longest-literal wins, `auth.x` vs `auth.*` (6 beats 5), `auth.oauth.*` vs `auth.*`, `*` last, no match, empty roster → synthesized legacy profile. Plus the grammar: `foo.*` must **not** match the bare `foo`, must match at any depth, and `"auth.*,,crm.*"` must yield two patterns — an empty entry becoming a match-everything pattern is the failure that would route the whole install to one profile |
+| `ValidateConfig` scoping | table-driven | a draft profile with an unregistered `provider` alongside a valid live one must **save**; the same profile once it declares a pattern must be **rejected**; a profile whose only pattern is malformed must be rejected rather than counted as a draft |
 | Schema/driver agreement | table-driven over the declared schema | for every driver, every field the schema marks `Required` **and** visible under that provider must be one the driver's `Validate` actually needs, and vice versa. A `noop` profile with nothing but a slug and a label must be savable — that is the regression test for the console blocking Save on a field its driver never reads |
 | Pattern normalization | table-driven | trim, lowercase both sides, drop empties, collapse within-profile duplicates **before** the cross-profile uniqueness check so a repeat is never reported as a conflict |
 | Driver registry + `Validate` | table-driven | unknown driver; each driver against incomplete profiles |
