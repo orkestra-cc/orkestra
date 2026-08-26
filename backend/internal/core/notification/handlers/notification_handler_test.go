@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/orkestra/backend/internal/core/notification/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 )
 
 const hostileSecret = "s3cr=t hunter2"
@@ -42,7 +44,14 @@ func TestSendTestEmail_HostileDriverTextNeverReachesTheResponse(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	texts := []string{err.Error()}
+	var ee *errcode.Error
+	if !errors.As(err, &ee) || ee.Code != errcode.NotificationSendFailed || ee.Status != http.StatusBadGateway {
+		t.Fatalf("want 502 %s, got %v", errcode.NotificationSendFailed, err)
+	}
+	if ee.Detail != "The sender did not accept the test message: sender=_legacy err=unknown" {
+		t.Fatalf("detail = %q", ee.Detail)
+	}
+	texts := []string{err.Error(), ee.Detail}
 	var em *huma.ErrorModel
 	if errors.As(err, &em) {
 		texts = append(texts, em.Detail)

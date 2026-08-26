@@ -59,6 +59,7 @@ All settings live in the `module_configs` collection under the `notification` mo
 | `email.from_address`          | `NOTIFICATION_EMAIL_FROM`      | —         |
 | `email.from_name`             | `NOTIFICATION_EMAIL_FROM_NAME` | `Orkestra` |
 | `email.reply_to`              | `NOTIFICATION_EMAIL_REPLY_TO`  | —         |
+| `email.senders`               | — *(record list, see Sender profiles)* | —         |
 | `email.smtp.host`             | `SMTP_HOST`                    | — *(required when provider is `smtp`)* |
 | `email.smtp.port`             | `SMTP_PORT`                    | `587`     |
 | `email.smtp.username`         | `SMTP_USERNAME`                | —         |
@@ -77,11 +78,8 @@ The `noop` provider logs rendered mail to the backend stdout instead of dialing 
 **resolve → validate → send**:
 
 1. `SenderResolver.Resolve({Category, Type, TenantID})` picks a `SenderProfile`
-   (transport **and** identity). Until some profile declares a pattern — every
-   install today — the resolver returns the profile **synthesized from the flat
-   `email.*` keys** (`slug=_legacy`, pattern `*`) without inspecting the
-   category, so behaviour is byte-identical to before. `TenantID` is read from
-   the request context and passed through; the resolver ignores it (D4).
+   (transport **and** identity). `TenantID` is read from the request context and
+   passed through; the resolver ignores it (D4).
 2. `DriverRegistry.Get(profile.Provider)` → `EmailDriver`; `ValidateProfile(driver,
    profile, RuntimeView)` checks the driver's `Requires()`.
 3. `driver.Send(ctx, profile, msg)`; `msg.Category` carries the routing category.
@@ -89,6 +87,43 @@ The `noop` provider logs rendered mail to the backend stdout instead of dialing 
 Every failure is **fail-closed** and still writes a `failed` log row whose `error`
 names the profile and the reason (`sender=default driver=smtp err=not_configured
 missing=smtp_host`). Nothing is silently rerouted.
+
+Profiles are declared in the `email.senders` record list (`FieldRecordList`,
+group **Sender profiles**). Storage is the flat map every setting uses:
+`email.senders.__items` (roster), `email.senders.<slug>.provider`,
+`.categories`, `.from_address`, `.from_name`, `.reply_to`, `.smtp_host`,
+`.smtp_port`, `.smtp_tls_mode`, `.smtp_username`, `.smtp_password` (secret,
+AES-256-GCM at its ordinary key). Element sub-fields carry **no `EnvVar`** by
+construction, so the flat `email.*` keys stay as the environment-bootstrap
+path: **until some profile declares a pattern** — the roster is empty, or holds
+only drafts — the resolver synthesizes `slug=_legacy`, pattern `*`, from them
+(D6). The leading underscore is outside the slug grammar, so a roster profile
+named "Default" can never collide with it; `BySlug` searches the roster first
+and answers `_legacy` only while the legacy profile carries mail. Creating a first draft, or removing the last pattern, therefore never
+strands mail; the cutover is the existence of a routing map, the same predicate
+the validator uses. No migration, no boot-time write.
+
+**Routing.** A pattern is exactly `*`, an exact category `foo.bar`, or a prefix
+`foo.*` (matches `foo.` + ≥1 char at any depth, never bare `foo`). Entries are
+trimmed, lowercased, empties dropped, within-profile duplicates collapsed. The
+most specific match (longest required literal) wins; `*` last. No match ⇒ the
+send **fails closed** (`ErrNoSenderForCategory`). A profile with no patterns is a
+draft: never selected, never validated beyond grammar. Once a routing map
+exists the category is inspected strictly: an empty or untrimmed category
+matches nothing, not even `*`.
+
+**Validation** (`config_validation.go` → `services.ValidateSenderConfig`, both
+`HasConfigValidator` and `HasConfigActivationValidator`). Rules apply only once
+the roster is non-empty **and** ≥1 profile declares a pattern; below that they
+are vacuous (a legacy install's PATCH to `app.name` must pass; the first save of
+the first profile carries no patterns). Then: every declared pattern is
+well-formed (`notification.sender_pattern_invalid`), exactly one profile declares
+`*` (`_no_default` / `_duplicate_default`), no pattern is claimed twice
+(`_pattern_conflict`), and — for profiles declaring ≥1 pattern only — the
+provider is a registered driver (`_unknown_driver`) and its **non-secret**
+requirements are present (`_incomplete`). The gate never sees secrets; a `mailup`
+profile missing only its secret saves and fails at send — `IsConfiguredFor`
+and the explicit-sender test send cover that gap.
 
 **Driver requirements** (`Requires()`): `noop` nothing; `smtp` `smtp_host`,
 `smtp_port`, `from_address` and **never credentials** — an anonymous relay is a
@@ -146,7 +181,7 @@ Registered in three groups with different middleware:
 ### Admin (`administrator` role)
 
 - `GET /v1/notifications` — paginated delivery log with filters by category / status / channel
-- `POST /v1/notifications/test` — send a test email through the default sender profile; bypasses preferences, idempotency and the delivery log
+- `POST /v1/notifications/test` — `{to, subject?, bodyText?, sender?}`; `sender` names a profile slug (default: the `*` profile). Bypasses preferences, idempotency and the delivery log. 404 `notification.sender_not_found`, 422 `notification.sender_incomplete` (driver unknown or a required field — secret included — missing), 502 `notification.send_failed` with the bounded diagnostic. This is the only way to prove a profile whose gap is a secret.
 - `GET /v1/notifications/templates` — list all templates
 - `GET /v1/notifications/templates/{templateId}?locale=en` — fetch a single template
 - `PUT /v1/notifications/templates/{templateId}` — override a template (sets `isSystem=false`)

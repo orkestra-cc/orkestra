@@ -6477,6 +6477,10 @@
             "description": "Optional body override",
             "type": "string"
           },
+          "sender": {
+            "description": "Sender profile slug to test; empty uses the default (*) profile",
+            "type": "string"
+          },
           "subject": {
             "description": "Optional subject override",
             "type": "string"
@@ -6509,6 +6513,10 @@
           "provider": {
             "type": "string"
           },
+          "sender": {
+            "description": "Slug of the profile that carried the message",
+            "type": "string"
+          },
           "success": {
             "type": "boolean"
           }
@@ -6516,6 +6524,7 @@
         "required": [
           "success",
           "provider",
+          "sender",
           "message"
         ],
         "type": "object"

@@ -2759,11 +2759,15 @@
       "groups": {
         "delivery": {
           "label": "Delivery",
-          "desc": "How mail leaves the platform. With the default noop provider, rendered mail is logged to the backend instead of sent — set the provider to SMTP to reveal the connection settings."
+          "desc": "The default transport. With the noop provider, rendered mail is logged to the backend instead of sent — set the provider to SMTP to reveal the connection settings. Ignored once at least one sender profile routes a category."
+        },
+        "senders": {
+          "label": "Sender profiles",
+          "desc": "Several senders, each with its own transport and identity, selected per message by category patterns (auth.*, crm.*, * for the default). Until one profile declares a pattern, the Delivery and Sender settings remain the single default."
         },
         "sender": {
           "label": "Sender",
-          "desc": "The addresses recipients see on every message."
+          "desc": "The addresses recipients see when the default transport is used."
         },
         "branding": {
           "label": "Branding & templates",
@@ -2782,7 +2786,11 @@
           },
           "from_address": { "label": "From address" },
           "from_name": { "label": "From name" },
-          "reply_to": { "label": "Reply-To address" }
+          "reply_to": { "label": "Reply-To address" },
+          "senders": {
+            "label": "Sender profiles",
+            "desc": "Each profile is a transport and an identity. Patterns decide which categories it carries; the most specific pattern wins and * is the default. A profile without patterns is a draft and receives no mail. Once any profile declares a pattern, exactly one must declare *."
+          }
         },
         "app": {
           "name": { "label": "App name (in templates)" },

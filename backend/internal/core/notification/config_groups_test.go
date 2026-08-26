@@ -3,6 +3,7 @@ package notification
 import (
 	"testing"
 
+	"github.com/orkestra/backend/internal/core/notification/services"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
@@ -98,4 +99,69 @@ func TestEnumConversions(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestSenderItems_SchemaDriverAgreement: for every driver, every sub-field
+// the schema marks Required AND visible under that provider must be one the
+// driver requires (secret or not — a required secret is a console-side
+// hint, D5); and every field the driver requires must be visible under that
+// provider and either Required or defaulted. A noop profile with
+// nothing but a slug and a label must be savable.
+func TestSenderItems_SchemaDriverAgreement(t *testing.T) {
+	items := services.SenderItems()
+	visible := func(it module.ConfigItemField, provider string) bool {
+		if len(it.DependsOn) == 0 {
+			return true
+		}
+		for _, c := range it.DependsOn {
+			if c.Key != services.SubProvider {
+				t.Fatalf("sub-field %q depends on %q; only provider is expected", it.Key, c.Key)
+			}
+			for _, v := range c.In {
+				if v == provider {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	for _, d := range services.CoreDrivers(nil) {
+		required := map[string]bool{} // every requirement, secrets included
+		for _, r := range d.Requires() {
+			required[r.Key] = true
+		}
+		for _, it := range items {
+			if it.Key == services.SubProvider {
+				continue // the selector itself is required and never gated
+			}
+			schemaRequired := it.Required && visible(it, d.Name())
+			if schemaRequired && !required[it.Key] {
+				t.Errorf("driver %s: schema requires %q but the driver does not — the console would block Save on a field the driver never reads", d.Name(), it.Key)
+			}
+			if required[it.Key] && !visible(it, d.Name()) {
+				t.Errorf("driver %s: requires %q but the schema hides it under that provider", d.Name(), it.Key)
+			}
+			if required[it.Key] && !it.Required && it.Default == "" {
+				t.Errorf("driver %s: requires %q but the schema neither marks it required nor defaults it", d.Name(), it.Key)
+			}
+		}
+	}
+	// noop: nothing visible is required.
+	for _, it := range items {
+		if it.Key != services.SubProvider && it.Required && visible(it, "noop") {
+			t.Errorf("a noop profile must be savable with nothing but a slug and a label; %q is required and visible", it.Key)
+		}
+	}
+}
+
+func TestSendersField_Declared(t *testing.T) {
+	for _, f := range (&NotificationModule{}).ConfigSchema() {
+		if f.Key == services.SendersField {
+			if f.Type != module.FieldRecordList || f.Group != "senders" || len(f.Items) == 0 {
+				t.Fatalf("email.senders must be a recordList in group senders with items: %+v", f)
+			}
+			return
+		}
+	}
+	t.Fatal("email.senders not declared")
 }

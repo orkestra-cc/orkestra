@@ -17,8 +17,20 @@ describe('dotted module-config i18n keys resolve', () => {
       'Delivery'
     );
     expect(i18n.t('moduleConfig.notification.groups.delivery.desc')).toContain(
-      'How mail leaves the platform'
+      'The default transport'
     );
+  });
+
+  it('resolves the sender-profiles group and record-list field (ADR-0019)', () => {
+    expect(i18n.t('moduleConfig.notification.groups.senders.label')).toBe(
+      'Sender profiles'
+    );
+    expect(i18n.t('moduleConfig.notification.fields.email.senders.label')).toBe(
+      'Sender profiles'
+    );
+    expect(
+      i18n.t('moduleConfig.notification.fields.email.senders.desc')
+    ).toContain('the most specific pattern wins');
   });
 
   it('resolves a nested tenant field label + group', () => {
