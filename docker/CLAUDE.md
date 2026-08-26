@@ -450,12 +450,12 @@ What `docker-compose.prod.yml` and `docker-compose.infra.yml` actually enforce (
 
 | Service | `cap_drop` | `cap_add` | `read_only` | Why |
 | --- | --- | --- | --- | --- |
-| backend | ALL | — | yes (+ `tmpfs: /tmp`) | Listens on 3000, no socket, writes only to mounted volumes |
+| backend | ALL | — | yes (+ `tmpfs: /tmp`) | Listens on 3000, no socket, writes only to mounted volumes. Runs as `user: "1000:1000"` (like staging): the image's own `nonroot` uid 65532 cannot read the 0600 JWT private key `orkestra.sh` enforces on the deploy user's `docker/keys/` |
 | frontend-admin | ALL | `CHOWN SETGID SETUID NET_BIND_SERVICE` | no | nginx master is root on :80 and drops workers to `nginx`; `10-write-config.sh` rewrites `config.js` inside the docroot at every start, so the rootfs must stay writable |
 | mongodb | ALL | `CHOWN DAC_OVERRIDE SETGID SETUID` | no | `replica-entrypoint.sh` writes the keyfile into the `mongodb`-owned config volume as root, then `docker-entrypoint.sh` chowns and `gosu`s |
 | redis, rustfs | ALL | — | no | Run on unprivileged ports, own their data dirs |
 
-Every service also sets `security_opt: [no-new-privileges:true]`. The backend's mutable paths are named volumes (`backend-uploads`, `backend-logs`) rather than `./backend/*` binds, which used to appear as root-owned untracked files under `docker/`.
+Every service also sets `security_opt: [no-new-privileges:true]`. The backend's mutable paths are named volumes (`backend-uploads`, `backend-logs`) rather than `./backend/*` binds, which used to appear as root-owned untracked files under `docker/`. `backend/Dockerfile` pre-creates both mount points `1777` so an empty named volume inherits a directory a non-root uid can write — Docker never chowns volumes for you.
 
 **Adding a service**: start from `cap_drop: [ALL]` + `no-new-privileges`, bring it up, and add only the capability the failing syscall names — commenting *why* next to each `cap_add`. Prefer `read_only: true` + `tmpfs` for scratch paths; if the image's entrypoint writes into its own filesystem (as nginx does here), say so in the compose comment instead of silently leaving it writable.
 

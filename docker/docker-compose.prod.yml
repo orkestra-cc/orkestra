@@ -22,6 +22,10 @@ services:
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
     restart: unless-stopped
+    # The production image runs as its own `nonroot` uid (65532), which cannot
+    # read the 0600 JWT private key orkestra.sh enforces on the deploy user's
+    # docker/keys/. Run as that user instead — same convention as staging.
+    user: "1000:1000"
     security_opt:
       - no-new-privileges:true
     # Listens on 3000 and needs no privileged syscall: nothing to re-add.
@@ -73,6 +77,17 @@ services:
       COOKIE_HTTP_ONLY: ${COOKIE_HTTP_ONLY:-true}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-strict}
+      # The binary defaults this to true (dev convenience) and refuses to
+      # boot in production with it set — so it must be passed explicitly.
+      ALLOW_LOCALHOST_REDIRECTS: ${ALLOW_LOCALHOST_REDIRECTS:-false}
+
+      # Google OAuth — config.Validate() refuses to boot a production binary
+      # without a client id/secret, even though the live values are owned by
+      # ConfigService (/admin/modules) and email/password login needs neither.
+      # Same placeholder fallback as staging; real values in docker/.env seed
+      # the module config on the first boot of a fresh install.
+      OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID:-placeholder.apps.googleusercontent.com}
+      OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET:-placeholder}
 
       # URLs
       FRONTEND_URL: ${FRONTEND_URL:-https://orkestra.cc}
@@ -147,6 +162,8 @@ services:
       # module_configs document is authoritative.
     # Named volumes, not ./backend/* binds: a bind under docker/ shows up as
     # root-owned untracked files in the checkout (and dies with a `git clean`).
+    # The Dockerfile pre-creates both mount points world-writable so a
+    # fresh volume inherits a directory any uid can write into.
     volumes:
       - backend-uploads:/app/uploads
       - backend-logs:/app/logs
