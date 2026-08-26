@@ -41,7 +41,7 @@ Give the `notification` module **sender profiles**: a configured list of senders
 
 A send is routed by matching its `Category` (`auth.verify_email`, `crm.campaign`, …) against patterns the operator declares on each profile. Precedence is **most-specific-match-wins**; `*` is the default, and at most one profile may claim it (D5 states when that becomes *exactly* one).
 
-`iface.NotificationSender` and its two request DTOs are **unchanged**. No consumer learns that profiles exist, no caller is edited, and no fork's addon needs a code change on sync. Which sender carries which mail becomes an operator decision made on a screen, not a developer decision made in a deploy.
+`iface.NotificationSender` and its two request DTOs are **unchanged**. No consumer learns that profiles exist, no fork's addon needs a code change on sync, and no *routing* decision reaches a caller. (D7 adds an **optional companion interface** for pre-flight checks — the `NotificationSender` contract itself is still untouched, and a sender that does not implement the companion keeps working.) Which sender carries which mail becomes an operator decision made on a screen, not a developer decision made in a deploy.
 
 Rejected: adding a `SenderProfile` field to the DTOs. It changes a frozen v1 SDK surface (OpenAPI diff, every fork on next sync) to move an operational decision into code.
 
@@ -81,14 +81,40 @@ Fail-closed is only safe if misconfiguration is caught before it can strand a pa
 
 So `email.provider`, `email.smtp.*` and `email.from_*` stay. When the `email.senders` roster is empty, the resolver synthesizes a `default` profile from them with `categories = *`. An installation that never opens the new screen behaves **identically to today**; a stack configured by `SMTP_HOST` keeps working. No data migration, no boot-time write, no rollback path to invent.
 
+### D7 — Pre-flight checks become category-aware through an optional companion interface
+
+`IsConfigured(ctx) bool` is a single boolean over a single transport. Under D1 it stops answering the question its callers ask. Every one of the seven call sites in `auth` — signup admission (`ErrNotificationDown`), password reset, email verification, new-device and suspicious-login notices, admin invite — is a **pre-flight for one specific category**, and each is followed within a few lines by a send that names it.
+
+With profiles, a global boolean is wrong in both directions. A valid default and a broken `auth.*` profile returns `true`, the signup is accepted, and the verification mail then fails — leaving a user who cannot get in and an account that cannot be completed. A broken default and a working `auth.*` returns `false` and refuses registrations that would have succeeded.
+
+Redefining `IsConfigured` as *"every routed profile is valid"* is worse than either: a misconfigured campaign sender would block signups, coupling two workloads that this ADR exists to separate.
+
+So the check becomes category-aware, using the house idiom for extending a frozen contract ([ADR-0012](0012-module-config-group-contract.md)'s `HasConfigGroups` / `ConfigGroupsOf`, mirrored on `HasServiceContracts` / `RequiredServicesOf`): an **optional companion interface** in `pkg/sdk/iface` with a resolving accessor.
+
+```go
+type CategoryConfiguredChecker interface {
+    IsConfiguredFor(ctx context.Context, category string) bool
+}
+
+// Exact answer when the sender implements the companion; the coarse
+// answer otherwise. A fork's own sender needs no change to keep working.
+func IsConfiguredForCategory(ctx context.Context, s NotificationSender, category string) bool
+```
+
+`IsConfiguredFor` resolves the category, then reports whether its profile's driver is registered and `Validate` passes. A category that matches no profile returns **false** — consistent with D5, and strictly better than today for that case: the signup is refused up front rather than accepted against mail that cannot be sent.
+
+`IsConfigured(ctx)` keeps its present meaning — the default (`*`) profile resolves and is valid — so no existing caller changes behaviour or breaks. Core's `auth` migrates its seven guards to the accessor.
+
+One useful asymmetry falls out. The save-time gate cannot see secrets (D5), but this runtime check runs inside the module against its own configuration and **can**. So `IsConfiguredFor` catches exactly the class of misconfiguration `ValidateConfig` is forbidden to see, at the last moment before it would matter.
+
 ## Consequences
 
 - **A fork gets workload separation without touching code.** Declaring two profiles and their patterns is enough; no consumer, no addon, and no `iface` implementation changes.
 - **Deliverability becomes diagnosable.** Every delivery-log row already carries `provider`; it gains the sender slug, so "which sender sent this, and which one failed" is answerable per message instead of inferred.
 - **The base now contains a vendor integration.** ADR-0006 collapsed Orkestra to a core-only base precisely to stop vendor verticals accumulating, and D3 puts an Italian ESP driver in the public base that every fork inherits. The alternative — the seam in core and the driver registered from a fork — was considered and rejected in favour of a single place to maintain and test. **This is a known tension, not an oversight.** If a second and third vendor driver follow, that is the signal to move drivers behind the fork seam after all, and this ADR should be revisited rather than extended.
 - **Fail-closed can strand mail that a fallback would have delivered.** A profile whose secret is missing passes validation and fails at send (D5). The mitigation is procedural — use the test-send — not structural.
-- **`IsConfigured(ctx)` changes meaning compatibly**: it reports whether the default (`*`) profile resolves and is valid, which is what consumers already mean when they call it to decide whether to degrade.
-- **No SDK change.** `recordList`, `DependsOn`, per-element secrets, the validator seams and the console renderer all exist. The contract in `pkg/sdk` is untouched, so nothing here reaches a fork as a breaking sync.
+- **`IsConfigured` stops silently lying, and starts catching what the save gate cannot.** Under D7 a pre-flight answers for the category it is about to send, and — unlike the save-time validator — it can see secrets, so a profile missing only its API key is caught before the mail is attempted rather than after.
+- **One additive interface in `pkg/sdk/iface`.** Everything else this design needs already exists: `recordList`, `DependsOn`, per-element secrets, both validator seams, the console renderer. The `NotificationSender` contract is untouched and the new companion is optional, so nothing reaches a fork as a breaking sync — a fork's own sender simply keeps getting the coarse answer.
 
 ## Alternatives considered
 
@@ -96,5 +122,7 @@ So `email.provider`, `email.smtp.*` and `email.from_*` stay. When the `email.sen
 - **Let the caller name the profile** (a `SenderProfile` field on the `iface` DTOs) — maximum explicitness. Rejected under D1: it breaks a frozen v1 surface and makes changing provider a deploy rather than a setting.
 - **Multiple SMTP profiles with no driver seam** — SES, SendGrid, Postmark, Resend and MailUp all expose an SMTP relay, so this covers most vendors with no new dependency and no driver to maintain. Rejected in favour of D3 so that vendors whose API offers batch send or delivery webhooks are reachable later without reopening the chokepoint. Noted honestly: for MailUp specifically the vendor documents its REST API and its SMTP relay as *"virtually the same features"*, so this driver buys little beyond proving the seam.
 - **Two record lists, profiles and routes, with roster-order precedence** — more explicit, and the SDK preserves roster order for free. Rejected under D2: a second list adds orphan rules, unreachable profiles, and an ordering the operator must curate, to express something specificity already decides.
+- **Redefine `IsConfigured` as "every routed profile is valid"** (D7) — no new interface, no caller edits. Rejected: a broken campaign sender would then block signups, re-coupling the two workloads this ADR exists to separate — the same failure mode, wearing the opposite sign.
+- **Change `IsConfigured`'s signature to take a category** — semantically exact with no companion interface. Rejected: it breaks every implementor and every caller in every fork on the next sync, to avoid one optional interface the codebase already has an idiom for.
 - **Per-tenant sender profiles now** (D4) — rejected as a different and larger project: a tenant-scoped collection with its own RBAC, console surface and GDPR cascade. The resolver parameter keeps the door open.
 - **Migrate the flat keys into a seeded `default` element at boot** — tidier end state, one shape instead of two. Rejected under D6: element sub-fields cannot carry `EnvVar`, so this would silently remove environment-variable configuration and require a data migration with a rollback story.

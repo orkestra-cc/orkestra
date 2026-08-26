@@ -37,6 +37,7 @@ Recorded in full, with rationale and rejected alternatives, in [ADR-0019](../../
 | D4 | Per-installation and per-environment; the resolver accepts a `TenantID` it ignores today. |
 | D5 | Fail-closed on resolution failure; structural validation at save time and at environment activation. |
 | D6 | Legacy flat keys survive as the env-bootstrap path and as the synthesized `default` profile. |
+| D7 | Pre-flight checks become category-aware via an **optional companion interface**; `IsConfigured(ctx)` keeps its meaning. |
 
 ## Design
 
@@ -48,7 +49,7 @@ Four additions, all under `internal/core/notification/services/`.
 | --- | --- | --- |
 | `SenderProfile` | struct decoded from the record list: identity + credentials of one sender | — |
 | `EmailDriver` + registry | `Name() / Validate(SenderProfile) error / Send(ctx, SenderProfile, EmailMessage) error`; registry holds `noop`, `smtp`, `mailup` | `SenderProfile` |
-| `SenderResolver` | `{Category, Type, TenantID}` → `SenderProfile` | the profile list |
+| `SenderResolver` | `{Category, Type, TenantID}` → `SenderProfile`; also backs `IsConfiguredFor` | the profile list |
 | `dispatchEmail` (modified) | resolve → validate → `driver.Send` | the three above |
 
 The current `emailService` is not deleted: it retires **inside** the `smtp` driver. `sendSMTP`, the TLS-mode handling and the quoted-printable encoding move unchanged; only the source of the credentials changes, from the global `SettingsLoader` to the profile.
@@ -155,7 +156,40 @@ Two consequences worth being explicit about, because a literal reading of "exact
 
 **Send time.** Fail-closed (D5), each error logged as above.
 
-`IsConfigured(ctx)` is redefined compatibly: true when the default (`*`) profile resolves and is valid.
+`IsConfigured(ctx)` keeps exactly its present meaning — the default (`*`) profile resolves and is valid — and is **no longer the right question for a category-specific pre-flight**. See §Pre-flight checks.
+
+### Pre-flight checks
+
+`auth` calls `IsConfigured` seven times before sending, and every call is a pre-flight for **one** category — each followed within a few lines by the send that names it:
+
+| Call site | Guards | Category it is about to send |
+| --- | --- | --- |
+| `password_auth_service.go:256` | signup admission → `ErrNotificationDown` | `auth.verify_email` |
+| `password_auth_service.go:969`, `:1839` | password reset | `auth.reset_password` |
+| `password_auth_service.go:1280` | email verification | `auth.verify_email` |
+| `password_auth_service.go:1660` | new-device notice | `auth.new_device_login` |
+| `password_auth_service.go:1767` | admin invite | `auth.admin_invite` |
+| `suspicious_login_notifier.go:216`, `:295` | suspicious-login notices | `auth.suspicious_login`, `auth.admin_suspicious_login` |
+
+Once routing is per-category, a single global boolean is wrong in both directions: a valid default with a broken `auth.*` returns `true` and the signup is accepted against mail that then fails; a broken default with a working `auth.*` refuses registrations that would have succeeded.
+
+`pkg/sdk/iface` therefore gains an optional companion (D7), following `HasConfigGroups`/`ConfigGroupsOf`:
+
+```go
+type CategoryConfiguredChecker interface {
+    IsConfiguredFor(ctx context.Context, category string) bool
+}
+
+func IsConfiguredForCategory(ctx context.Context, s NotificationSender, category string) bool
+```
+
+The accessor returns the exact answer when the sender implements the companion and falls back to `IsConfigured(ctx)` otherwise, so a fork's own `NotificationSender` needs no change.
+
+`IsConfiguredFor` resolves the category, then reports whether the profile's driver is registered and `Validate` passes. **No match returns false** — consistent with fail-closed, and better than today for that case: the signup is refused up front rather than accepted against mail that cannot be sent.
+
+Unlike `ValidateConfig`, this check runs inside the module against its own configuration and **can read secrets**, so it catches precisely the class of misconfiguration the save-time gate is forbidden to see.
+
+Core `auth` migrates its seven guards to the accessor. This lands in **PR 2**, not PR 1: until the roster is read, every category resolves to the same synthesized profile and the distinction cannot bite.
 
 ### MailUp driver
 
@@ -189,6 +223,9 @@ The backend has a coverage gate (`make backend-coverage-gate`), so tests are par
 | `smtp` driver | the existing 233 lines, re-pointed | the credentials' source changes, the behaviour does not |
 | `ValidateConfig` | table-driven over the merged map | the three states above are the point of the table: **an empty roster must accept a PATCH that touches only `app.name`** (the legacy-install regression), a roster of pattern-less drafts must save, and the save that first declares a pattern must demand a `*`. Plus a test that **documents the secret-blind limit** rather than leaving it implicit |
 | `ValidateConfigActivation` | table-driven over the target profile | same three states; a map broken in the third must not be promotable |
+| `IsConfiguredFor` | table-driven | valid default + broken `auth.*` ⇒ **false** for `auth.*` and true for the default (today's global boolean gets both wrong); unmatched category ⇒ false; secret-only gap ⇒ false, which `ValidateConfig` cannot see |
+| `IsConfiguredForCategory` accessor | table-driven | a sender implementing the companion gets the exact answer; one that does not falls back to `IsConfigured` — the fork-compatibility guarantee |
+| `auth` guards | existing auth tests, re-pointed | the seven call sites ask for the category they are about to send |
 | `dispatchEmail` | the existing 562 lines, unchanged | they are the compatibility safety net |
 | Compatibility | new | empty roster + flat keys only ⇒ byte-identical send behaviour to today |
 
@@ -200,7 +237,7 @@ Six PRs against upstream, each green and mergeable alone. Per repo convention ev
 | --- | --- | --- |
 | **0** | ADR-0019 + this spec + the implementation plan | docs only; merges before any code so PRs 1-5 can cite it |
 | **1** | `SenderProfile`, `EmailDriver`, registry with `noop` + `smtp`, resolver that always returns the synthesized legacy profile; `dispatchEmail` routed through it | **no behaviour change** — reviewable by confirming the existing tests still pass |
-| **2** | `email.senders` record list, its rail group, `ValidateConfig`, `ValidateConfigActivation`; resolver starts reading the roster with the legacy fallback | first behavioural change; EN/IT i18n (parity test) and the OpenAPI diff |
+| **2** | `email.senders` record list, its rail group, `ValidateConfig`, `ValidateConfigActivation`; resolver starts reading the roster with the legacy fallback; **`CategoryConfiguredChecker` + accessor in `pkg/sdk/iface`, and `auth`'s seven guards migrated to it** | first behavioural change. The pre-flight must land in the *same* PR that lets profiles diverge, or the guards are wrong for the length of a merge window. EN/IT i18n (parity test) and the OpenAPI diff |
 | **3** | `mailup` driver | opens with the endpoint spike; one file behind the registry |
 | **4** | `sender` on `POST /v1/notifications/test`; sender filter + column on `GET /v1/notifications` | OpenAPI diff |
 | **5** | `docs/site/modules/core/notification.mdx` and `docs/site/operating/notifications.mdx` | the operating page currently teaches pointing the single SMTP at SES/SendGrid and must be rewritten around profiles |
