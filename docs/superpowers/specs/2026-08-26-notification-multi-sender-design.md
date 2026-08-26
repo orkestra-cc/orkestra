@@ -106,11 +106,10 @@ A fork's CRM email-tracking rewriter operates on the rendered HTML **before** th
 - A pattern is either `*`, an exact category, or a dotted prefix ending in `.*` (`auth.*`, `crm.campaign.*`).
 - **An exact match always beats a prefix match.** `auth.verify_email` and `auth.*` are the same length, so length alone does not order them; specificity does.
 - Among prefix matches, the **longest** wins. `*` is treated as a zero-length prefix, so it wins only when nothing else matches.
-- Exactly one profile may declare `*`.
-- No pattern may be declared by two profiles.
+- At most one profile may declare `*`, and no pattern may be declared by two profiles.
 - A profile that declares **no** patterns is never selected. This is a legitimate state, not a misconfiguration: it lets an operator create and test a profile before routing any traffic to it.
 
-The `*` and duplicate rules are enforced at save time, not at send time.
+These two rules are enforced at save time, not at send time — but **only once a routing map actually exists**; see §Validation for the three states and why the distinction is load-bearing.
 
 ### Compatibility and environment bootstrap
 
@@ -127,13 +126,30 @@ default := SenderProfile{
 
 An installation that never opens the new screen behaves exactly as today; a stack configured through `SMTP_HOST` keeps working. No migration, no boot-time write, no rollback path.
 
+This compatibility is only real if **validation** honours it too: with an empty roster the sender rules must not fire at all, or every PATCH on a legacy install would 422 on a routing map it never asked for. See §Validation.
+
 ### Validation
 
 Three layers, and the middle one has a limit worth stating rather than discovering.
 
 **Declaration (test time).** `ValidateConfigDeclarations` already runs over the real catalog in `cmd/server`'s catalog test: `Items` present, no nested record list, no `__` prefix, `DependsOn` resolving to a sibling. A schema typo fails a test.
 
-**Save time.** `notification` implements `HasConfigValidator`. Rules: exactly one `*`; no pattern claimed twice; every `provider` is a registered driver; each driver's required **non-secret** fields are present. Failures return `*ConfigValidationError` → 422 with stable `notification.sender_*` codes. `HasConfigActivationValidator` re-runs the same structural rules before an environment is promoted, so sandbox → production cannot activate a broken map.
+**Save time.** `notification` implements `HasConfigValidator`. `ValidateConfig` runs on **every** PATCH to the module — including a PATCH that touches only `app.name` — so the routing rules must be scoped to the states in which a routing map exists. There are three, and conflating them breaks either legacy installs or the migration path:
+
+| Roster | Patterns declared | Routing rules |
+| --- | --- | --- |
+| empty | — | **do not apply** — a legacy installation configured entirely through the flat keys |
+| non-empty | none | **do not apply** — every profile is a draft, and a pattern-less profile is never selected |
+| non-empty | ≥ 1 | **all apply** |
+
+In the third state: exactly one profile declares `*`; no pattern is claimed twice; every `provider` names a registered driver; and each driver's required **non-secret** fields are present **on the profiles that declare at least one pattern** — a draft profile alongside live ones is not held to completeness, for the same reason it is never selected. Failures return `*ConfigValidationError` → 422 with stable `notification.sender_*` codes.
+
+Two consequences worth being explicit about, because a literal reading of "exactly one `*`" produces a broken module in both:
+
+- **An empty roster must not be validated against the synthesized default.** `notification` implements no validator today, so its flat keys have never been checked. Enforcing driver completeness on the synthesized profile would newly reject PATCHes that are legal right now — setting `email.provider = smtp` before filling `email.smtp.host` is the natural order in which an operator fills a form. With an empty roster the rules are **vacuous, not lenient**: the flat keys keep exactly today's save behaviour.
+- **The first profile must be creatable.** The console stages a create and writes the element with its sub-fields at their declared defaults, so the first save of the first profile carries no patterns. Requiring `*` at that moment would make the roster impossible to leave empty — an operator could neither stay legacy nor migrate. The pattern-less state is what makes the transition passable; the rules engage on the save that first declares a pattern, which is also the first save that could route anything.
+
+`HasConfigActivationValidator` applies the same three-state logic to the target profile before an environment is promoted, so sandbox → production cannot activate a map that is broken in the third state.
 
 > **Limit.** The seam contract states *"Secrets are never passed: a validator must not see decrypted secret material to do its job."* The gate therefore cannot check that `smtp_password` or `mailup_secret` is populated. A profile missing only its secret saves cleanly and fails at send. Covered by three existing mechanisms rather than a new one: the rail's "N to fill" badge over visible required fields (the console already receives per-element secret status), `POST /v1/notifications/test` with an explicit sender, and activation validation for the promotion path.
 
@@ -171,7 +187,8 @@ The backend has a coverage gate (`make backend-coverage-gate`), so tests are par
 | Driver registry + `Validate` | table-driven | unknown driver; each driver against incomplete profiles |
 | `mailup` driver | `httptest.Server` | asserts method, headers and body shape; 4xx / 5xx / timeout. No live calls |
 | `smtp` driver | the existing 233 lines, re-pointed | the credentials' source changes, the behaviour does not |
-| `ValidateConfig` | table-driven over the merged map | **includes a test that documents the secret-blind limit** rather than leaving it implicit |
+| `ValidateConfig` | table-driven over the merged map | the three states above are the point of the table: **an empty roster must accept a PATCH that touches only `app.name`** (the legacy-install regression), a roster of pattern-less drafts must save, and the save that first declares a pattern must demand a `*`. Plus a test that **documents the secret-blind limit** rather than leaving it implicit |
+| `ValidateConfigActivation` | table-driven over the target profile | same three states; a map broken in the third must not be promotable |
 | `dispatchEmail` | the existing 562 lines, unchanged | they are the compatibility safety net |
 | Compatibility | new | empty roster + flat keys only ⇒ byte-identical send behaviour to today |
 

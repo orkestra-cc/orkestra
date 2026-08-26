@@ -39,7 +39,7 @@ Give the `notification` module **sender profiles**: a configured list of senders
 
 ### D1 — The routing key is the notification **category**, and `iface` does not change
 
-A send is routed by matching its `Category` (`auth.verify_email`, `crm.campaign`, …) against patterns the operator declares on each profile. Precedence is **most-specific-match-wins**; `*` is the default and exactly one profile may claim it.
+A send is routed by matching its `Category` (`auth.verify_email`, `crm.campaign`, …) against patterns the operator declares on each profile. Precedence is **most-specific-match-wins**; `*` is the default, and at most one profile may claim it (D5 states when that becomes *exactly* one).
 
 `iface.NotificationSender` and its two request DTOs are **unchanged**. No consumer learns that profiles exist, no caller is edited, and no fork's addon needs a code change on sync. Which sender carries which mail becomes an operator decision made on a screen, not a developer decision made in a deploy.
 
@@ -69,7 +69,9 @@ The resolver's input carries a `TenantID` that is **ignored today**. Per-tenant 
 
 If no profile matches, or the matched profile's driver rejects it as incomplete, **the send fails**. It is never silently rerouted. Falling back to the default profile would push promotional mail through the transactional sender — violating the vendor terms that motivated this ADR and burning the reputation of the domain it exists to protect.
 
-Fail-closed is only safe if misconfiguration is caught before it can strand a password reset, so `notification` implements `HasConfigValidator` and `HasConfigActivationValidator`: exactly one profile claims `*`, no pattern is claimed twice, every `provider` names a registered driver, and each driver's required non-secret fields are present. Violations are 422 with stable `notification.sender_*` codes.
+Fail-closed is only safe if misconfiguration is caught before it can strand a password reset, so `notification` implements `HasConfigValidator` and `HasConfigActivationValidator`. Against a **configured routing map** they require: exactly one profile claims `*`, no pattern is claimed twice, every `provider` names a registered driver, and each driver's required non-secret fields are present. Violations are 422 with stable `notification.sender_*` codes.
+
+**Those rules apply only once a routing map exists.** `ValidateConfig` runs on every PATCH to the module, so an unconditional "exactly one `*`" would reject a legacy installation whose roster is empty (it has no profiles at all) and would also reject the first save of a first profile (the console writes a new element with its sub-fields at their defaults, so it carries no patterns yet). Either would make the roster impossible to leave empty *and* impossible to leave — an operator could neither stay on the flat keys nor migrate off them. The rules therefore engage only when the roster is non-empty **and** at least one profile declares a pattern; below that threshold they are vacuous, and the flat keys keep exactly the save behaviour they have today. See the spec's §Validation for the three states.
 
 **Known limit, accepted with eyes open.** The validator contract states that *"Secrets are never passed: a validator must not see decrypted secret material to do its job."* The gate therefore cannot verify that an SMTP password or a MailUp secret is populated — a profile missing only its secret saves cleanly and fails at send. Three existing mechanisms cover the gap rather than one new one: the rail's "N to fill" badge counts visible required fields (the console already receives per-element secret status), `POST /v1/notifications/test` with an explicit sender proves the profile for real, and activation validation re-checks structure before an environment is promoted.
 
