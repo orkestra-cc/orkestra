@@ -37,6 +37,11 @@
 5. **The console has no delivery-log page** (verified: nothing under `frontend-admin/src` consumes `GET /v1/notifications`), so PR 4's "delivery-log column" has nowhere to land. PR 4 ships the API side (`senderSlug` field + `sender` filter); the column follows whenever a page exists.
 6. **The SMTP driver sets a connection deadline** (context deadline, else 30s). Today a relay that accepts and never answers hangs the send goroutine forever; the spec's test table requires `err=timeout` for that case.
 
+## Corrections found while executing PR 1 (apply to later PRs)
+
+7. **`EmailMessage` must leave `email_service.go` in PR 1 Task 1, not Task 4.** Task 1 declares `EmailMessage` in `email_driver.go` while `email_service.go` still owns it, so the package does *not* still compile as Task 1 Step 5 claims — it fails with `EmailMessage redeclared`. Delete the old declaration in Task 1: the new one is a superset (adds `Category`), so the legacy transport compiles unchanged until Task 4 rewrites it.
+8. **The plan's `fakeResolver` violates the resolver contract.** It returns `f.profile, f.err` together, but `senderResolver` returns the **zero** profile on failure — and `TestNotificationService_Dispatch_FailClosedPaths` asserts exactly that (`sender=-`, empty `Provider`), so those two subtests fail against the plan's fake. The fake must return `SenderProfile{}` when `err != nil`, in both `Resolve` and `Default`. Already fixed in the committed test file; PR 2 extends the same fake and must keep it.
+
 ## Spec / ADR amendments made on this branch (PR 0) while planning
 
 - **D6 cutover is the routing map, not roster emptiness.** The spec and ADR said the legacy profile is synthesized "when the roster is empty"; taken literally, saving the first pattern-less profile would strand every send (no profile matches, `Default` fails, `auth` refuses signups) — contradicting the draft state both documents describe. Amended to: the flat keys carry mail **until some profile declares a pattern**; the resolver and `ValidateSenderConfig` share that predicate; a draft stays reachable by slug for the test send.

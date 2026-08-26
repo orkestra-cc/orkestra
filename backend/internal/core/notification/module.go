@@ -2,7 +2,6 @@ package notification
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -18,6 +17,7 @@ import (
 type NotificationModule struct {
 	module.BaseModule
 	svc     *services.NotificationService
+	drivers *services.DriverRegistry
 	handler *handlers.NotificationHandler
 }
 
@@ -171,26 +171,20 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 	prefService := services.NewPreferenceService(prefRepo)
 	unsubService := services.NewUnsubscribeService(unsubRepo)
 
-	// Settings loader: look up DB config with env var fallback at every send.
-	loader := func(ctx context.Context) services.EmailSettings {
-		port, _ := strconv.Atoi(deps.GetConfig("notification", "email.smtp.port"))
-		if port == 0 {
-			port = 587
+	// One document read per send: values and secrets of the active
+	// environment come from the same snapshot (D4), and admin UI changes
+	// still propagate without a restart. Until PR 2 reads the email.senders
+	// roster the legacy profile is the only one (ADR-0019 D6).
+	snapshot := func(ctx context.Context) (*module.ModuleConfig, error) {
+		if deps.ConfigService == nil {
+			return nil, nil
 		}
-		return services.EmailSettings{
-			Provider:    deps.GetConfig("notification", "email.provider"),
-			Host:        deps.GetConfig("notification", "email.smtp.host"),
-			Port:        port,
-			Username:    deps.GetConfig("notification", "email.smtp.username"),
-			Password:    deps.GetSecret("notification", "email.smtp.password"),
-			FromAddress: deps.GetConfig("notification", "email.from_address"),
-			FromName:    deps.GetConfig("notification", "email.from_name"),
-			ReplyTo:     deps.GetConfig("notification", "email.reply_to"),
-			TLSMode:     deps.GetConfig("notification", "email.smtp.tls_mode"),
-		}
+		return deps.ConfigService.GetConfig(ctx, "notification")
 	}
+	loader := services.NewSnapshotLoader(snapshot)
 
-	emailSender := services.NewEmailService(loader, deps.Logger)
+	m.drivers = services.NewDriverRegistry(services.CoreDrivers(deps.Logger)...)
+	resolver := services.NewSenderResolver(loader)
 
 	frontendURL := deps.Platform.FrontendURL()
 	urlBuilder := func(path string) string {
@@ -220,7 +214,8 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 		tmplService,
 		prefService,
 		unsubService,
-		emailSender,
+		resolver,
+		m.drivers,
 		deps.Logger,
 		services.Options{
 			AppName:       appName,
