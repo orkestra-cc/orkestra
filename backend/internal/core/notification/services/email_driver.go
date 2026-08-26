@@ -126,5 +126,5 @@ func (r *DriverRegistry) Names() []string {
 // CoreDrivers builds every driver the base ships. module.go registers them;
 // tests register fakes instead.
 func CoreDrivers(logger *slog.Logger) []EmailDriver {
-	return []EmailDriver{NewNoopDriver(logger), NewSMTPDriver(logger)}
+	return []EmailDriver{NewNoopDriver(logger), NewSMTPDriver(logger), NewMailUpDriver(logger)}
 }

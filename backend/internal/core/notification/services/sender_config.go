@@ -20,9 +20,13 @@ const SendersField = "email.senders"
 // make a noop profile unsavable.
 func SenderItems() []module.ConfigItemField {
 	smtpOnly := []module.FieldCondition{{Key: SubProvider, In: []string{"smtp"}}}
-	identity := []module.FieldCondition{{Key: SubProvider, In: []string{"smtp"}}}
+	// One condition with two values is an OR within the entry (ADR-0012), so
+	// no DependsOnMatch is needed: identity fields show for both transports
+	// that read them, and stay hidden for noop, which reads none.
+	identity := []module.FieldCondition{{Key: SubProvider, In: []string{"smtp", "mailup"}}}
+	mailUpOnly := []module.FieldCondition{{Key: SubProvider, In: []string{"mailup"}}}
 	return []module.ConfigItemField{
-		{Key: SubProvider, Label: "Provider", Type: module.FieldEnum, Options: []string{"noop", "smtp"}, Required: true, Default: "noop"},
+		{Key: SubProvider, Label: "Provider", Type: module.FieldEnum, Options: []string{"noop", "smtp", "mailup"}, Required: true, Default: "noop"},
 		{Key: SubCategories, Label: "Categories", Type: module.FieldStringList, Placeholder: "auth.*, *",
 			Description: "Routing patterns this profile serves: an exact category (auth.verify_email), a prefix (auth.*), or * for the default. Leave empty to keep the profile as a draft that receives no mail."},
 		{Key: SubFromAddress, Label: "From address", Type: module.FieldString, Required: true, DependsOn: identity},
@@ -34,6 +38,12 @@ func SenderItems() []module.ConfigItemField {
 		{Key: SubSMTPUsername, Label: "SMTP username", Type: module.FieldString, DependsOn: smtpOnly,
 			Description: "Leave username and password empty for an unauthenticated relay."},
 		{Key: SubSMTPPassword, Label: "SMTP password", Type: module.FieldSecret, DependsOn: smtpOnly},
+		{Key: SubMailUpUser, Label: "MailUp SMTP+ username", Type: module.FieldString, Required: true, Placeholder: "s12345_67",
+			DependsOn:   mailUpOnly,
+			Description: "An SMTP+ user created in the MailUp console after authorizing a trusted sender.",
+			HelpURL:     "https://helpmailup.atlassian.net/wiki/spaces/mailupapi/pages/36342655/Transactional+Emails+using+APIs"},
+		{Key: SubMailUpSecret, Label: "MailUp SMTP+ secret", Type: module.FieldSecret, Required: true,
+			DependsOn: mailUpOnly},
 	}
 }
 
