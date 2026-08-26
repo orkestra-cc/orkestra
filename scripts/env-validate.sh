@@ -141,6 +141,19 @@ validate_env_file() {
         else
             print_success "COOKIE_SAME_SITE is properly configured"
         fi
+
+        # A port Docker publishes on 0.0.0.0 bypasses the host firewall's INPUT
+        # chain, so in production the bind addresses are the exposure control.
+        if [[ "$env_name" == "production" ]]; then
+            for var in HOST_BIND_ADDRESS INFRA_BIND_ADDRESS; do
+                if grep -q "^${var}=0.0.0.0" "$ENV_FILE"; then
+                    print_warning "$var=0.0.0.0 publishes on every interface — use 127.0.0.1 or the private IP your reverse proxy reaches"
+                    warnings=$((warnings + 1))
+                else
+                    print_success "$var is not wide open"
+                fi
+            done
+        fi
         echo ""
     fi
 

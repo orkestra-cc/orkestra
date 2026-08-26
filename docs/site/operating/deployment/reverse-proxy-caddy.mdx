@@ -251,23 +251,14 @@ curl -fsS -H "Authorization: Bearer $TOKEN" https://api.example.com/v1/admin/mod
 
 ## Step 6 — Backend on private network
 
-For defence in depth, bind the backend to the loopback interface only so Caddy is the only path in:
-
-In `docker/docker-compose.prod.yml`, edit the `backend` port mapping:
-
-```yaml
-ports:
-  - "127.0.0.1:3000:3000"   # was: "${BACKEND_PORT:-3000}:3000"
-```
-
-Apply with `docker compose up -d`. Verify the public port is gone:
+With Caddy on the same VM there is nothing to edit: `docker-compose.prod.yml` binds the backend and console ports to `HOST_BIND_ADDRESS`, which defaults to `127.0.0.1` in production, and `docker-compose.infra.yml` binds MongoDB (27017), Redis (6379) and the RustFS console (9101) to `INFRA_BIND_ADDRESS`, also `127.0.0.1` (the RustFS S3 API on 9100 follows `HOST_BIND_ADDRESS`, since presigned uploads go through the proxy when `STORAGE_PUBLIC_ENDPOINT` is set). Caddy is the only path in. Verify from another machine that the public port is gone:
 
 ```bash
-# Should fail — port 3000 not externally reachable
-curl -fsS http://203.0.113.42:3000/health
+# Should time out — port 3000 not externally reachable
+curl -m 3 http://203.0.113.42:3000/health
 ```
 
-The same change in `docker/docker-compose.infra.yml` for `mongodb` and `redis` (they bind on `27027` / `6387` by default — bind them to `127.0.0.1` so only the backend container can reach them).
+If `docker/.env` was edited to open a port (`HOST_BIND_ADDRESS=0.0.0.0` from a dev template, say), `./scripts/env-validate.sh` flags it. For Caddy on a *different* VM, set `HOST_BIND_ADDRESS` to the private IP it reaches and add the `DOCKER-USER` rule from [Network exposure and firewall](./single-vm#step-4--network-exposure-and-firewall); the infra ports stay on loopback either way.
 
 ## What's deliberately not here
 
