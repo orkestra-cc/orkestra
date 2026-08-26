@@ -62,11 +62,17 @@ One new field, `email.senders` (`FieldRecordList`), in its own group on the sett
 | --- | --- | --- |
 | `provider` | enum `noop \| smtp \| mailup` | required |
 | `categories` | stringList | patterns served; `*` marks the default profile |
-| `from_address` | string | required |
+| `from_address` | string | `DependsOn provider in [smtp, mailup]`, required within it — **not** required for `noop`, which never uses it |
 | `from_name`, `reply_to` | string | — |
 | `smtp_host`, `smtp_port`, `smtp_tls_mode` | string / int / enum | `DependsOn provider in [smtp]`; `smtp_host` required |
 | `smtp_username`, `smtp_password` | string / secret | `DependsOn provider in [smtp]`; **optional — an anonymous relay is a supported configuration** |
-| `mailup_user`, `mailup_secret` | string / secret | `DependsOn provider in [mailup]` |
+| `mailup_user`, `mailup_secret` | string / secret | `DependsOn provider in [mailup]`, both required within it |
+
+**Every `Required` here is scoped by the same `DependsOn` that governs its driver**, and that is a correctness rule, not tidiness. `Required` is a hint the *server* does not enforce, but the console enforces it hard: `useModuleConfigForm`'s resolver skips hidden fields and then rejects a visible required field that is empty, which blocks Save. A field marked required outside the states where its driver needs it makes the profile unsavable through the only UI that configures it. `from_address` is the case that bites — a `noop` profile would demand a sender address it never reads.
+
+`from_address` uses one condition with two values rather than two conditions: per ADR-0012, `In` is an OR **within** an entry while separate entries are ANDed, so `{Key: "provider", In: ["smtp","mailup"]}` is the correct shape and no `DependsOnMatch: "any"` is needed.
+
+`mailup_secret` being marked required is a console-side hint only — the save-time validator cannot see secrets (D5) — but that hint is precisely one of the three mitigations D5 leans on: the rail badges it as unfilled.
 
 Storage stays flat, on the same key/value map every other setting uses:
 
@@ -183,7 +189,7 @@ Two consequences worth being explicit about, because a literal reading of "exact
 
 | Driver | `Validate` requires | Explicitly does **not** require |
 | --- | --- | --- |
-| `noop` | nothing | — |
+| `noop` | nothing | `from_address` — and the schema must agree, or the profile cannot be saved |
 | `smtp` | `host`, `port`, `from_address` | `username`, `password` |
 | `mailup` | `from_address`, `mailup_user`, `mailup_secret` | — |
 
@@ -191,7 +197,7 @@ Two consequences worth being explicit about, because a literal reading of "exact
 
 For the same reason `smtp` does not require a password *when a username is set*. Today `smtp.PlainAuth` is attempted with whatever password is stored and the server decides; adding a local requirement would be a tightening, and tightening is not this design's job.
 
-> **One deliberate tightening, declared.** `from_address` is `Required: true` on the profile element, while the flat `email.from_address` is not marked required in today's schema — even though `isSMTPConfigured` has always demanded it at runtime. So the schema and the runtime already disagree upstream, and the profile element resolves that disagreement in favour of the runtime. This changes what the console badges and rejects; it does not change which sends succeed.
+> **One deliberate tightening, declared.** `from_address` is required on the profile element **for `smtp` and `mailup`**, while the flat `email.from_address` is not marked required in today's schema — even though `isSMTPConfigured` has always demanded it at runtime. Schema and runtime already disagree upstream, and the profile element resolves the disagreement in favour of the runtime, scoped to the drivers that actually read the value. This changes what the console badges and rejects; it does not change which sends succeed.
 
 ### Pre-flight checks
 
@@ -266,6 +272,7 @@ The backend has a coverage gate (`make backend-coverage-gate`), so tests are par
 | Target | Approach | Why there |
 | --- | --- | --- |
 | `SenderResolver` | table-driven, no infrastructure | longest-match, exact-beats-prefix at equal length, `*`, no match, empty roster → synthesized legacy profile. Plus the grammar: `foo.*` must **not** match the bare `foo`, must match at any depth, and `"auth.*,,crm.*"` must yield two patterns — an empty entry becoming a match-everything pattern is the failure that would route the whole install to one profile |
+| Schema/driver agreement | table-driven over the declared schema | for every driver, every field the schema marks `Required` **and** visible under that provider must be one the driver's `Validate` actually needs, and vice versa. A `noop` profile with nothing but a slug and a label must be savable — that is the regression test for the console blocking Save on a field its driver never reads |
 | Pattern normalization | table-driven | trim, lowercase both sides, drop empties, collapse within-profile duplicates **before** the cross-profile uniqueness check so a repeat is never reported as a conflict |
 | Driver registry + `Validate` | table-driven | unknown driver; each driver against incomplete profiles |
 | `mailup` driver | `httptest.Server` | asserts method, auth placement and body shape; 4xx / 5xx / timeout — **and HTTP 200 carrying an error envelope** (see below). No live calls |
