@@ -148,11 +148,23 @@ The bare-`foo` exclusion is deliberate and matters in practice: a fork's CRM sen
 
 Deduplication happens **before** the cross-profile uniqueness check, so a within-profile repeat can never be reported as a conflict between profiles.
 
-**Precedence.**
+**Precedence.** Among the patterns that match a category, the winner is the one requiring the **longest literal**:
 
-- **An exact match always beats a prefix match.** `auth.verify_email` and `auth.*` are the same length, so length alone does not order them; specificity does.
-- Among prefix matches, the **longest** wins — `auth.oauth.*` beats `auth.*` for `auth.oauth.google`.
-- `*` is treated as a zero-length prefix, so it wins only when nothing else matches.
+| Pattern | Literal it requires | Length |
+| --- | --- | --- |
+| `*` | — | 0 |
+| `auth.*` | `auth.` | 5 |
+| `auth.x` | `auth.x` (the whole category) | 6 |
+
+So for the category `auth.x`, the exact pattern wins 6 to 5, and `*` loses to both. For `auth.oauth.google`, `auth.oauth.*` (11) beats `auth.*` (5).
+
+**Ties cannot happen**, which is why "exact beats prefix" is a consequence here rather than a rule that has to be stated and defended:
+
+- Two prefix patterns matching the same category are both prefixes of it; if their literals were the same length they would be the same string, and duplicate patterns are rejected.
+- An exact pattern and a prefix pattern matching the same category can never tie, because the exact one requires the entire category while the prefix one requires strictly less — the `.` and at least one character have to follow it.
+
+The remaining rules:
+
 - At most one profile may declare `*`, and no pattern may be declared by two profiles.
 - A profile that declares **no** patterns is never selected. This is a legitimate state, not a misconfiguration: it lets an operator create and test a profile before routing any traffic to it.
 
@@ -292,7 +304,7 @@ The backend has a coverage gate (`make backend-coverage-gate`), so tests are par
 
 | Target | Approach | Why there |
 | --- | --- | --- |
-| `SenderResolver` | table-driven, no infrastructure | longest-match, exact-beats-prefix at equal length, `*`, no match, empty roster → synthesized legacy profile. Plus the grammar: `foo.*` must **not** match the bare `foo`, must match at any depth, and `"auth.*,,crm.*"` must yield two patterns — an empty entry becoming a match-everything pattern is the failure that would route the whole install to one profile |
+| `SenderResolver` | table-driven, no infrastructure | longest-literal wins, `auth.x` vs `auth.*` (6 beats 5), `auth.oauth.*` vs `auth.*`, `*` last, no match, empty roster → synthesized legacy profile. Plus the grammar: `foo.*` must **not** match the bare `foo`, must match at any depth, and `"auth.*,,crm.*"` must yield two patterns — an empty entry becoming a match-everything pattern is the failure that would route the whole install to one profile |
 | Schema/driver agreement | table-driven over the declared schema | for every driver, every field the schema marks `Required` **and** visible under that provider must be one the driver's `Validate` actually needs, and vice versa. A `noop` profile with nothing but a slug and a label must be savable — that is the regression test for the console blocking Save on a field its driver never reads |
 | Pattern normalization | table-driven | trim, lowercase both sides, drop empties, collapse within-profile duplicates **before** the cross-profile uniqueness check so a repeat is never reported as a conflict |
 | Driver registry + `Validate` | table-driven | unknown driver; each driver against incomplete profiles |
