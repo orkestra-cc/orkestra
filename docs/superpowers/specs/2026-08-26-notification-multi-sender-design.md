@@ -48,29 +48,25 @@ Four additions, all under `internal/core/notification/services/`.
 | Component | Responsibility | Depends on |
 | --- | --- | --- |
 | `SenderProfile` | struct decoded from the record list: identity + credentials of one sender | — |
-| `EmailDriver` + registry | `Name() / Validate(SenderProfile) error / Send(ctx, SenderProfile, EmailMessage) error`; registry holds `noop`, `smtp`, `mailup` | `SenderProfile`, the extended `EmailMessage` |
+| `EmailDriver` + registry | `Name() / Validate(SenderProfile) error / Send(ctx, SenderProfile, EmailMessage) error`; registry holds `noop`, `smtp`, `mailup` | `SenderProfile`, `EmailMessage` (+ `Category`) |
 | `SenderResolver` | `{Category, Type, TenantID}` → `SenderProfile`; also backs `IsConfiguredFor` | the profile list |
 | `dispatchEmail` (modified) | resolve → validate → `driver.Send` | the three above |
 
-`EmailMessage` gains three fields. It is `{To, ToName, Subject, BodyText, BodyHTML}` today, which is enough to *transmit* a message and not enough to let a driver say anything about it:
+`EmailMessage` gains **one** field. It is `{To, ToName, Subject, BodyText, BodyHTML}` today, which is enough to *transmit* a message and not enough to let a driver say anything about it:
 
 ```go
 type EmailMessage struct {
     To, ToName, Subject, BodyText, BodyHTML string
 
-    Category    string // routing category, e.g. "auth.verify_email"
-    Type        string // "transactional" | "marketing"
-    MessageUUID string // the NotificationDoc UUID for this send
+    Category string // routing category, e.g. "auth.verify_email"
 }
 ```
 
-All three already exist at the chokepoint — `dispatchEmail` holds them while it builds the log document — so this carries data that is present rather than computing anything new. `EmailMessage` and `EmailDriver` live in `notification/services`: core-private, not `iface`, not a wire type, so no fork surface changes.
+`Category` already exists at the chokepoint — `dispatchEmail` holds it while it builds the log document — so this carries data that is present rather than computing anything new, and it is the field the `CampaignCode` mapping needs. `EmailMessage` and `EmailDriver` live in `notification/services`: core-private, not `iface`, not a wire type, so no fork surface changes.
 
-`Category` is what makes the `CampaignCode` mapping implementable at all. `MessageUUID` is the correlation handle any delivery-feedback work will need — the deferred suppression loop has to match a vendor webhook back to a message, and the value is already minted here and already used as the CRM tracking rewriter's nonce, so it is the established message identity rather than a new one. `Type` is carried as data and **no driver acts on it today**.
+> **Deliberately not added: `Type` and `MessageUUID`.** Both were in an earlier draft and both failed the only test that matters — nothing in this design reads them. `Type` would exist for a `mailup` driver that refuses `marketing` outright, a behaviour offered and not adopted. `MessageUUID` would exist for the delivery-feedback loop, which is out of scope. Because the struct is core-private, adding either later costs a compile of one package and nothing else, so there is no compatibility argument for reserving them now — and a field carried "for later" is one no test covers and no reader can tell is dead. If the `mailup` marketing refusal is wanted, it arrives with `Type`; if the webhook loop is built, it arrives with `MessageUUID`.
 
-> One thing a driver *could* do with `Type`, offered rather than decided: `mailup` could refuse a `marketing` send outright, since SMTP+'s terms forbid promotional mail. That would enforce the vendor's restriction in code instead of trusting the routing config to be right — the exact misconfiguration this ADR exists to prevent. It is three lines and fail-closed, but it is a behaviour beyond carrying data, so it is not in this design unless asked for.
-
-The `smtp` and `noop` drivers ignore all three fields, so D6's byte-identical promise is unaffected.
+The `smtp` and `noop` drivers ignore `Category`, so D6's byte-identical promise is unaffected.
 
 The current `emailService` is not deleted: it retires **inside** the `smtp` driver. `sendSMTP`, the TLS-mode handling and the quoted-printable encoding move unchanged; only the source of the credentials changes, from the global `SettingsLoader` to the profile.
 
@@ -119,7 +115,7 @@ Send / SendTemplated                          ← unchanged
        ├─ driver.Validate(profile)
        │     incomplete                  → ErrSenderNotConfigured     (fail-closed)
        ├─ driver.Send(ctx, profile, msg)
-       │     msg carries Category / Type / MessageUUID from this scope
+       │     msg carries Category from this scope
        └─ logDoc.Provider   = profile.Provider
           logDoc.SenderSlug = profile.Slug     ← new field, omitempty
 ```
@@ -324,7 +320,7 @@ The backend has a coverage gate (`make backend-coverage-gate`), so tests are par
 | Pattern normalization | table-driven | trim, lowercase both sides, drop empties, collapse within-profile duplicates **before** the cross-profile uniqueness check so a repeat is never reported as a conflict |
 | Driver registry + `Validate` | table-driven | unknown driver; each driver against incomplete profiles |
 | `mailup` driver | `httptest.Server` | asserts method, auth placement and body shape; **`CampaignCode` carries the category through**; 4xx / 5xx / timeout — **and HTTP 200 carrying an error envelope** (see below). No live calls |
-| `smtp` / `noop` drivers vs the new fields | the existing tests, unchanged | both ignore `Category`/`Type`/`MessageUUID` — the wire output must be byte-identical, which is what makes extending `EmailMessage` safe under D6 |
+| `smtp` / `noop` drivers vs the new field | the existing tests, unchanged | both ignore `Category` — the wire output must be byte-identical, which is what makes extending `EmailMessage` safe under D6 |
 | `smtp` driver | the existing 233 lines, re-pointed | the credentials' source changes, the behaviour does not |
 | `ValidateConfig` | table-driven over the merged map | the three states above are the point of the table: **an empty roster must accept a PATCH that touches only `app.name`** (the legacy-install regression), a roster of pattern-less drafts must save, and the save that first declares a pattern must demand a `*`. Plus a test that **documents the secret-blind limit** rather than leaving it implicit |
 | `ValidateConfigActivation` | table-driven over the target profile | same three states; a map broken in the third must not be promotable |
