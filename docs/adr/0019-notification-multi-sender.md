@@ -57,6 +57,8 @@ The routing rules live **on the profile** rather than in a second list. One surf
 
 `EmailDriver` (`Name` / `Validate(profile)` / `Send(ctx, profile, msg)`) with a registry. The existing SMTP transport retires *inside* the `smtp` driver unchanged; only the source of its credentials moves. A `mailup` driver for MailUp's SMTP+ REST API ships in the base.
 
+`Validate` is where D6's compatibility promise is either kept or quietly broken, so it is pinned per driver. **`smtp` requires host, port and from address — and not credentials**, reproducing `isSMTPConfigured` exactly: today `sendSMTP` authenticates only when a username is set, so an unauthenticated internal MTA is a supported configuration and not an edge case in a self-hosted product. A driver that demanded a password would break every such installation on upgrade, and would break it silently, because the configuration would still look complete. `mailup` genuinely requires its user and secret — its API cannot function without them.
+
 This is the decision that strains ADR-0006 most, and it was taken deliberately — see §Consequences.
 
 ### D4 — Profiles are per-installation, per-environment; the resolver already accepts a tenant
@@ -73,7 +75,7 @@ Fail-closed is only safe if misconfiguration is caught before it can strand a pa
 
 **Those rules apply only once a routing map exists.** `ValidateConfig` runs on every PATCH to the module, so an unconditional "exactly one `*`" would reject a legacy installation whose roster is empty (it has no profiles at all) and would also reject the first save of a first profile (the console writes a new element with its sub-fields at their defaults, so it carries no patterns yet). Either would make the roster impossible to leave empty *and* impossible to leave — an operator could neither stay on the flat keys nor migrate off them. The rules therefore engage only when the roster is non-empty **and** at least one profile declares a pattern; below that threshold they are vacuous, and the flat keys keep exactly the save behaviour they have today. See the spec's §Validation for the three states.
 
-**Known limit, accepted with eyes open.** The validator contract states that *"Secrets are never passed: a validator must not see decrypted secret material to do its job."* The gate therefore cannot verify that an SMTP password or a MailUp secret is populated — a profile missing only its secret saves cleanly and fails at send. Three existing mechanisms cover the gap rather than one new one: the rail's "N to fill" badge counts visible required fields (the console already receives per-element secret status), `POST /v1/notifications/test` with an explicit sender proves the profile for real, and activation validation re-checks structure before an environment is promoted.
+**Known limit, accepted with eyes open.** The validator contract states that *"Secrets are never passed: a validator must not see decrypted secret material to do its job."* The gate therefore cannot verify that a driver's secret is populated — a profile missing only its secret saves cleanly and fails at send. The blind spot is narrower than it first looks: it bites only where a secret is **mandatory**, which today means `mailup`. `smtp` requires no credentials at all (D3), so for the driver most installations use there is nothing to be blind about. Three existing mechanisms cover the gap rather than one new one: the rail's "N to fill" badge counts visible required fields (the console already receives per-element secret status), `POST /v1/notifications/test` with an explicit sender proves the profile for real, and activation validation re-checks structure before an environment is promoted.
 
 ### D6 — The legacy flat keys survive as the environment-bootstrap path
 
@@ -105,7 +107,7 @@ func IsConfiguredForCategory(ctx context.Context, s NotificationSender, category
 
 `IsConfigured(ctx)` keeps its present meaning — the default (`*`) profile resolves and is valid — so no existing caller changes behaviour or breaks. Core's `auth` migrates its seven guards to the accessor.
 
-One useful asymmetry falls out. The save-time gate cannot see secrets (D5), but this runtime check runs inside the module against its own configuration and **can**. So `IsConfiguredFor` catches exactly the class of misconfiguration `ValidateConfig` is forbidden to see, at the last moment before it would matter.
+One useful asymmetry falls out. The save-time gate cannot see secrets (D5), but this runtime check runs inside the module against its own configuration and **can**. So `IsConfiguredFor` catches exactly the class of misconfiguration `ValidateConfig` is forbidden to see — a `mailup` profile missing only its API secret — at the last moment before it would matter.
 
 ## Consequences
 

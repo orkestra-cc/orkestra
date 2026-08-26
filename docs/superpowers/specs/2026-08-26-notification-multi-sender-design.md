@@ -64,7 +64,8 @@ One new field, `email.senders` (`FieldRecordList`), in its own group on the sett
 | `categories` | stringList | patterns served; `*` marks the default profile |
 | `from_address` | string | required |
 | `from_name`, `reply_to` | string | — |
-| `smtp_host`, `smtp_port`, `smtp_username`, `smtp_password`, `smtp_tls_mode` | string / int / string / secret / enum | `DependsOn provider in [smtp]` |
+| `smtp_host`, `smtp_port`, `smtp_tls_mode` | string / int / enum | `DependsOn provider in [smtp]`; `smtp_host` required |
+| `smtp_username`, `smtp_password` | string / secret | `DependsOn provider in [smtp]`; **optional — an anonymous relay is a supported configuration** |
 | `mailup_user`, `mailup_secret` | string / secret | `DependsOn provider in [mailup]` |
 
 Storage stays flat, on the same key/value map every other setting uses:
@@ -127,7 +128,7 @@ default := SenderProfile{
 
 An installation that never opens the new screen behaves exactly as today; a stack configured through `SMTP_HOST` keeps working. No migration, no boot-time write, no rollback path.
 
-This compatibility is only real if **validation** honours it too: with an empty roster the sender rules must not fire at all, or every PATCH on a legacy install would 422 on a routing map it never asked for. See §Validation.
+This compatibility is only real if **validation** honours it too, in two places. With an empty roster the sender rules must not fire at all, or every PATCH on a legacy install would 422 on a routing map it never asked for (see §Validation). And `driver.Validate` for `smtp` must require exactly what `isSMTPConfigured` requires today — host, port, from address, and **not** credentials — or an anonymous internal relay stops working on upgrade (see §Driver validation contract).
 
 ### Validation
 
@@ -152,11 +153,27 @@ Two consequences worth being explicit about, because a literal reading of "exact
 
 `HasConfigActivationValidator` applies the same three-state logic to the target profile before an environment is promoted, so sandbox → production cannot activate a map that is broken in the third state.
 
-> **Limit.** The seam contract states *"Secrets are never passed: a validator must not see decrypted secret material to do its job."* The gate therefore cannot check that `smtp_password` or `mailup_secret` is populated. A profile missing only its secret saves cleanly and fails at send. Covered by three existing mechanisms rather than a new one: the rail's "N to fill" badge over visible required fields (the console already receives per-element secret status), `POST /v1/notifications/test` with an explicit sender, and activation validation for the promotion path.
+> **Limit.** The seam contract states *"Secrets are never passed: a validator must not see decrypted secret material to do its job."* The gate therefore cannot check that a driver's secret is populated — but this only bites for drivers whose secret is **mandatory**, which today means `mailup` alone. `smtp` has no such requirement (see §Driver validation contract), so there is nothing to be blind about there. A `mailup` profile missing only its secret saves cleanly and fails at send. Covered by three existing mechanisms rather than a new one: the rail's "N to fill" badge over visible required fields (the console already receives per-element secret status), `POST /v1/notifications/test` with an explicit sender, and `IsConfiguredFor` at request time, which *can* read secrets (D7).
 
 **Send time.** Fail-closed (D5), each error logged as above.
 
 `IsConfigured(ctx)` keeps exactly its present meaning — the default (`*`) profile resolves and is valid — and is **no longer the right question for a category-specific pre-flight**. See §Pre-flight checks.
+
+### Driver validation contract
+
+`driver.Validate(profile)` decides whether a profile is usable, and for `smtp` it must reproduce today's `isSMTPConfigured` **exactly** — otherwise D6's compatibility promise is words rather than behaviour.
+
+| Driver | `Validate` requires | Explicitly does **not** require |
+| --- | --- | --- |
+| `noop` | nothing | — |
+| `smtp` | `host`, `port`, `from_address` | `username`, `password` |
+| `mailup` | `from_address`, `mailup_user`, `mailup_secret` | — |
+
+**Anonymous SMTP relay stays supported, and this is the concrete thing "byte-identical" has to mean.** `email_service.go:97` requires only host, port and from address; `sendSMTP` calls `client.Auth` **only when `Username != ""`**. An internal MTA on a private network with no authentication is a first-class path in a self-hosted product, and a `Validate` that demanded a password would break every such installation on upgrade — silently, since the config would still look complete.
+
+For the same reason `smtp` does not require a password *when a username is set*. Today `smtp.PlainAuth` is attempted with whatever password is stored and the server decides; adding a local requirement would be a tightening, and tightening is not this design's job.
+
+> **One deliberate tightening, declared.** `from_address` is `Required: true` on the profile element, while the flat `email.from_address` is not marked required in today's schema — even though `isSMTPConfigured` has always demanded it at runtime. So the schema and the runtime already disagree upstream, and the profile element resolves that disagreement in favour of the runtime. This changes what the console badges and rejects; it does not change which sends succeed.
 
 ### Pre-flight checks
 
@@ -223,7 +240,8 @@ The backend has a coverage gate (`make backend-coverage-gate`), so tests are par
 | `smtp` driver | the existing 233 lines, re-pointed | the credentials' source changes, the behaviour does not |
 | `ValidateConfig` | table-driven over the merged map | the three states above are the point of the table: **an empty roster must accept a PATCH that touches only `app.name`** (the legacy-install regression), a roster of pattern-less drafts must save, and the save that first declares a pattern must demand a `*`. Plus a test that **documents the secret-blind limit** rather than leaving it implicit |
 | `ValidateConfigActivation` | table-driven over the target profile | same three states; a map broken in the third must not be promotable |
-| `IsConfiguredFor` | table-driven | valid default + broken `auth.*` ⇒ **false** for `auth.*` and true for the default (today's global boolean gets both wrong); unmatched category ⇒ false; secret-only gap ⇒ false, which `ValidateConfig` cannot see |
+| `IsConfiguredFor` | table-driven | valid default + broken `auth.*` ⇒ **false** for `auth.*` and true for the default (today's global boolean gets both wrong); unmatched category ⇒ false; a `mailup` profile with a secret-only gap ⇒ false, which `ValidateConfig` cannot see |
+| `smtp` driver `Validate` | table-driven | **an anonymous relay — host + port + from, no credentials — must validate**, as `isSMTPConfigured` does today; missing host, port or from must not. This is the regression test for D6 |
 | `IsConfiguredForCategory` accessor | table-driven | a sender implementing the companion gets the exact answer; one that does not falls back to `IsConfigured` — the fork-compatibility guarantee |
 | `auth` guards | existing auth tests, re-pointed | the seven call sites ask for the category they are about to send |
 | `dispatchEmail` | the existing 562 lines, unchanged | they are the compatibility safety net |
