@@ -43,7 +43,7 @@ A comprehensive, feature-rich admin dashboard template built with React 19 and B
 
 ### Core Technologies
 - **React 19.1.0** - Latest React with functional components and hooks
-- **Vite 7.0.5** - Lightning-fast build tool and development server
+- **Vite 8** (rolldown) - Lightning-fast build tool and development server
 - **React Bootstrap 2.10.10** - Bootstrap components for React
 - **Bootstrap 5.3.7** - Modern CSS framework
 - **React Router 7.7.0** - Declarative routing for React
