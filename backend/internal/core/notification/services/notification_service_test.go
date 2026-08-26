@@ -841,3 +841,24 @@ func TestNotificationService_SendTest_ExplicitSender(t *testing.T) {
 		t.Fatal("nothing must be sent for an unknown slug")
 	}
 }
+
+func TestNotificationService_Dispatch_StampsSenderSlug(t *testing.T) {
+	k := newKit(Options{})
+	k.resolver.profile.Slug = "esp-campagne"
+	if _, err := sendOne(t, k); err != nil {
+		t.Fatal(err)
+	}
+	if k.logRepo.created[0].SenderSlug != "esp-campagne" {
+		t.Fatalf("sent row must carry the sender slug: %+v", k.logRepo.created[0])
+	}
+	k.driver.sendErr = errors.New("boom")
+	_, _ = sendOne(t, k)
+	if k.logRepo.created[1].SenderSlug != "esp-campagne" || !strings.HasPrefix(k.logRepo.created[1].Error, "sender=esp-campagne ") {
+		t.Fatalf("failed row must carry the slug in both the field and the reason: %+v", k.logRepo.created[1])
+	}
+	k.resolver.err = ErrNoSenderForCategory
+	_, _ = sendOne(t, k)
+	if k.logRepo.created[2].SenderSlug != "" {
+		t.Fatalf("no resolved profile ⇒ no slug: %+v", k.logRepo.created[2])
+	}
+}
