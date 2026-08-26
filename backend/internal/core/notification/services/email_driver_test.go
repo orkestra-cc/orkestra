@@ -43,7 +43,7 @@ func TestValidateProfile_ViewsAndMissingFields(t *testing.T) {
 
 func TestSenderProfile_FieldRoundTrip(t *testing.T) {
 	var p SenderProfile
-	for _, key := range []string{SubProvider, SubFromAddress, SubFromName, SubReplyTo, SubSMTPHost, SubSMTPTLSMode, SubSMTPUsername, SubSMTPPassword} {
+	for _, key := range []string{SubProvider, SubFromAddress, SubFromName, SubReplyTo, SubSMTPHost, SubSMTPTLSMode, SubSMTPUsername, SubSMTPPassword, SubMailUpUser, SubMailUpSecret} {
 		p.setField(key, "v-"+key)
 		if got := p.Field(key); got != "v-"+key {
 			t.Errorf("Field(%q) = %q", key, got)

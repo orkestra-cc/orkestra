@@ -64,6 +64,11 @@ func TestValidateSenderConfig_ThreeStates(t *testing.T) {
 			profileValues([]string{"a"}, map[string]map[string]string{"a": {SubProvider: "smtp", SubCategories: "*", SubFromAddress: "f@x"}}),
 			errcode.NotificationSenderIncomplete, module.ItemKey(SendersField, "a", SubSMTPHost)},
 		{"anonymous smtp relay is complete", profileValues([]string{"a"}, map[string]map[string]string{"a": mergeSubs(smtpOK, SubCategories, "*")}), "", ""},
+		{"routing mailup profile missing user",
+			profileValues([]string{"a"}, map[string]map[string]string{"a": {SubProvider: "mailup", SubCategories: "*", SubFromAddress: "f@x"}}),
+			errcode.NotificationSenderIncomplete, module.ItemKey(SendersField, "a", SubMailUpUser)},
+		{"routing mailup profile missing only its secret saves (secret-blind)",
+			profileValues([]string{"a"}, map[string]map[string]string{"a": {SubProvider: "mailup", SubCategories: "*", SubFromAddress: "f@x", SubMailUpUser: "s1_2"}}), "", ""},
 		{"draft smtp profile missing host saves",
 			profileValues([]string{"a", "b"}, map[string]map[string]string{"a": {SubProvider: "noop", SubCategories: "*"}, "b": {SubProvider: "smtp"}}), "", ""},
 	}

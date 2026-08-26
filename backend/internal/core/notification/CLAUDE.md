@@ -60,6 +60,8 @@ All settings live in the `module_configs` collection under the `notification` mo
 | `email.from_name`             | `NOTIFICATION_EMAIL_FROM_NAME` | `Orkestra` |
 | `email.reply_to`              | `NOTIFICATION_EMAIL_REPLY_TO`  | —         |
 | `email.senders`               | — *(record list, see Sender profiles)* | —         |
+| `email.senders.<slug>.mailup_user`   | — *(element sub-field)*        | —         |
+| `email.senders.<slug>.mailup_secret` | — *(element sub-field, secret)* | —        |
 | `email.smtp.host`             | `SMTP_HOST`                    | — *(required when provider is `smtp`)* |
 | `email.smtp.port`             | `SMTP_PORT`                    | `587`     |
 | `email.smtp.username`         | `SMTP_USERNAME`                | —         |
@@ -93,7 +95,7 @@ group **Sender profiles**). Storage is the flat map every setting uses:
 `email.senders.__items` (roster), `email.senders.<slug>.provider`,
 `.categories`, `.from_address`, `.from_name`, `.reply_to`, `.smtp_host`,
 `.smtp_port`, `.smtp_tls_mode`, `.smtp_username`, `.smtp_password` (secret,
-AES-256-GCM at its ordinary key). Element sub-fields carry **no `EnvVar`** by
+AES-256-GCM at its ordinary key), `.mailup_user`, `.mailup_secret` (secret). Element sub-fields carry **no `EnvVar`** by
 construction, so the flat `email.*` keys stay as the environment-bootstrap
 path: **until some profile declares a pattern** — the roster is empty, or holds
 only drafts — the resolver synthesizes `slug=_legacy`, pattern `*`, from them
@@ -128,6 +130,16 @@ and the explicit-sender test send cover that gap.
 **Driver requirements** (`Requires()`): `noop` nothing; `smtp` `smtp_host`,
 `smtp_port`, `from_address` and **never credentials** — an anonymous relay is a
 supported configuration; `sendSMTP` authenticates only when a username is set.
+`mailup` `from_address`, `mailup_user`, `mailup_secret` (secret). Sends
+`POST https://send.mailup.com/API/v2.0/messages/sendmessage` with the SMTP+
+credentials in the body's `User` field — never an `Authorization` header — and
+`CampaignCode = Category` (empty falls back to the SMTP+ user's console
+default). **Success ⇔ 2xx ∧ body ≤ 64 KiB ∧ parses ∧ `Status=="done"` ∧
+`Code=="0"`** — anything else fails with `http=<n> status=<tok> code=<tok>`,
+`body=too_large`, or `body=unparseable bytes=<n> type=<media>`; the vendor's
+`Message` is never read. A success means *accepted*, not delivered. A
+`reply_to` differing from `from_address` must be enabled on the account by
+MailUp support, or the vendor rejects the message.
 
 **Error contract.** `NotificationDoc.Error` is served to operators and rides the
 GDPR export, so **no string produced by a remote peer is ever persisted or

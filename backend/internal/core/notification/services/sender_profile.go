@@ -20,6 +20,9 @@ type SenderProfile struct {
 	SMTPUsername string
 	SMTPPassword string
 	SMTPTLSMode  string // "starttls" | "tls" | "none"
+
+	MailUpUser   string // SMTP+ username, sNNNNN_NN
+	MailUpSecret string // SMTP+ secret
 }
 
 // Sub-field keys of one email.senders element. They are the record-list
@@ -36,6 +39,8 @@ const (
 	SubSMTPTLSMode  = "smtp_tls_mode"
 	SubSMTPUsername = "smtp_username"
 	SubSMTPPassword = "smtp_password"
+	SubMailUpUser   = "mailup_user"
+	SubMailUpSecret = "mailup_secret"
 )
 
 // LegacySlug names the profile synthesized from the flat email.* keys. The
@@ -70,6 +75,10 @@ func (p SenderProfile) Field(key string) string {
 		return p.SMTPUsername
 	case SubSMTPPassword:
 		return p.SMTPPassword
+	case SubMailUpUser:
+		return p.MailUpUser
+	case SubMailUpSecret:
+		return p.MailUpSecret
 	}
 	return ""
 }
@@ -96,6 +105,10 @@ func (p *SenderProfile) setField(key, v string) {
 		p.SMTPUsername = v
 	case SubSMTPPassword:
 		p.SMTPPassword = v
+	case SubMailUpUser:
+		p.MailUpUser = v
+	case SubMailUpSecret:
+		p.MailUpSecret = v
 	}
 }
 
