@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEncodeQuotedPrintable_Empty(t *testing.T) {
@@ -211,5 +212,35 @@ func TestBuildMIMEMessage_OmitsFromNameAndReplyToWhenBlank(t *testing.T) {
 	}
 	if strings.Contains(out, "Reply-To:") {
 		t.Fatalf("Reply-To header should be omitted when ReplyTo is blank")
+	}
+}
+
+// mimeGolden is the exact wire output of today's transport for one fixed
+// message at one fixed instant. The smtp driver must reproduce it byte for
+// byte — that is what "byte-identical under D6" means.
+const mimeGolden = "From: Orkestra <no-reply@example.com>\r\n" +
+	"To: Alice <alice@example.com>\r\n" +
+	"Subject: Hello\r\n" +
+	"Reply-To: support@example.com\r\n" +
+	"Date: Wed, 26 Aug 2026 12:00:00 +0000\r\n" +
+	"MIME-Version: 1.0\r\n" +
+	"Content-Type: multipart/alternative; boundary=\"orkestra_boundary_1787745600000000000\"\r\n\r\n" +
+	"--orkestra_boundary_1787745600000000000\r\n" +
+	"Content-Type: text/plain; charset=\"utf-8\"\r\n" +
+	"Content-Transfer-Encoding: quoted-printable\r\n\r\n" +
+	"Body with =3D sign\r\n" +
+	"--orkestra_boundary_1787745600000000000\r\n" +
+	"Content-Type: text/html; charset=\"utf-8\"\r\n" +
+	"Content-Transfer-Encoding: quoted-printable\r\n\r\n" +
+	"<p>html</p>\r\n" +
+	"--orkestra_boundary_1787745600000000000--\r\n"
+
+var mimeGoldenAt = time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+
+func TestBuildMIMEMessage_GoldenLegacy(t *testing.T) {
+	cfg := EmailSettings{FromAddress: "no-reply@example.com", FromName: "Orkestra", ReplyTo: "support@example.com"}
+	msg := EmailMessage{To: "alice@example.com", ToName: "Alice", Subject: "Hello", BodyText: "Body with = sign", BodyHTML: "<p>html</p>"}
+	if got := buildMIMEMessageAt(cfg, msg, mimeGoldenAt); got != mimeGolden {
+		t.Fatalf("golden does not match today's output:\n%q", got)
 	}
 }

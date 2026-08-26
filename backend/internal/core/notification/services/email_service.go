@@ -190,6 +190,12 @@ func (s *emailService) sendSMTP(ctx context.Context, cfg EmailSettings, msg Emai
 // buildMIMEMessage formats the message as multipart/alternative when both
 // text and HTML bodies are provided, or text/plain when only text is.
 func buildMIMEMessage(cfg EmailSettings, msg EmailMessage) string {
+	return buildMIMEMessageAt(cfg, msg, time.Now())
+}
+
+// buildMIMEMessageAt is buildMIMEMessage with the clock injected, so the
+// wire output can be pinned byte for byte in tests.
+func buildMIMEMessageAt(cfg EmailSettings, msg EmailMessage, now time.Time) string {
 	var b strings.Builder
 
 	from := cfg.FromAddress
@@ -207,11 +213,11 @@ func buildMIMEMessage(cfg EmailSettings, msg EmailMessage) string {
 	if cfg.ReplyTo != "" {
 		fmt.Fprintf(&b, "Reply-To: %s\r\n", cfg.ReplyTo)
 	}
-	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
+	fmt.Fprintf(&b, "Date: %s\r\n", now.UTC().Format(time.RFC1123Z))
 	b.WriteString("MIME-Version: 1.0\r\n")
 
 	if msg.BodyHTML != "" {
-		boundary := "orkestra_boundary_" + fmt.Sprint(time.Now().UnixNano())
+		boundary := "orkestra_boundary_" + fmt.Sprint(now.UnixNano())
 		fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=%q\r\n\r\n", boundary)
 
 		fmt.Fprintf(&b, "--%s\r\n", boundary)
