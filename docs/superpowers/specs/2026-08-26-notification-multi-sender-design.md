@@ -210,20 +210,28 @@ Core `auth` migrates its seven guards to the accessor. This lands in **PR 2**, n
 
 ### MailUp driver
 
-Verified from vendor documentation:
+| | |
+| --- | --- |
+| Send endpoint | `POST https://send.mailup.com/API/v2.0/messages/sendmessage` |
+| Methods | `SendMessage` (fully distinct content per message — what this driver uses) and `SendTemplate` (a stored body with merge tags) |
+| Authentication | the **SMTP+ credentials in the request body's `User` field**. OAuth 2 `Authorization: Bearer` belongs to the *management/console* APIs, not to sending |
+| Prerequisite | an SMTP+ user (`sNNNNN_NN` username format), created from the console or the management API after authorizing a trusted sender |
+| Payload | parameters that ride as headers over SMTP become fields of a JSON object |
+| Rate limit | tied to the purchased hourly message volume |
+| SMTP relay equivalent | `fast.smtpok.com`, which accepts an `X-SMTPAPI` JSON header for the same extras |
 
-- Transactional sending is the **SMTP+** product; it requires an SMTP+ user (`sNNNNN_NN` username format) created from the console or the REST API.
-- Authentication is either `Authorization: Bearer <access_token>` (OAuth 2) **or** the SMTP+ username and password carried in the request body's `User` parameter. **This design uses the second** — it keeps an OAuth token lifecycle out of the notification module.
-- Parameters that travel as headers over SMTP become fields of a JSON object over the API.
-- Rate limiting is tied to the purchased hourly message volume.
-- No delivery/bounce/complaint webhook is documented; statistics are pull-only.
+**Bounce and unsubscribe webhooks exist.** The product page states that *"With SMTP+, unsubscriptions and bounces are handled automatically, with notifications to the sender and WebHook to inform other applications or external databases."*
 
-> **Open item for implementation.** The exact endpoint path and request body schema could not be verified: MailUp's documentation is a JS-rendered wiki that does not yield its content to a plain fetch. **PR 3 opens with a short spike** against the live documentation or an account, and the driver is written against what it finds. Nothing else in this design depends on the answer — the driver is one file behind the registry.
+Read precisely, that is a property of the **SMTP+ product**, not of the API send path — it is available whichever way the message is submitted. So it is *not* an argument for the driver over the relay; it is what makes a suppression feedback loop genuinely buildable later (see §Out of scope).
+
+`CampaignCode` is worth noting for the implementation: MailUp uses it to aggregate messages for statistics. The notification category is the natural value to map onto it, which would make the vendor's own reporting line up with the routing this design introduces.
+
+> **What still needs reading at implementation time** — not a spike, ordinary reference work. The exact JSON field names of the `SendMessage` body are not transcribed here; PR 3 reads them from the [vendor page](https://helpmailup.atlassian.net/wiki/spaces/mailupapi/pages/36342655/Transactional+Emails+using+APIs) and writes the struct against them. The endpoint, the auth model and the method choice above are settled.
 
 ## Out of scope
 
 - **Per-tenant sender profiles.** The resolver parameter is reserved (D4); the tenant-scoped collection, RBAC surface, console UI and GDPR cascade are a separate project.
-- **Bounce / complaint feedback loop.** `notification_suppressions` exists and could be fed by delivery webhooks, but no driver in this design provides them (MailUp documents none). Adding a vendor that does is the moment to design this.
+- **Bounce / complaint feedback loop.** `notification_suppressions` exists and MailUp's SMTP+ **does** emit webhooks for bounces and unsubscriptions, so this is buildable rather than blocked — but it is a separate design: a public signed-webhook endpoint, per-vendor payload mapping, and a suppression-write path with its own idempotency. Deliberately not folded in here; this ADR is about choosing a sender, not about consuming delivery feedback.
 - **Batch / bulk send APIs.** The chokepoint is per-message by construction, and a fork's CRM depends on that for per-recipient idempotency and tracking. Batch sending would change that contract.
 - **Retiring the legacy flat keys.** They are load-bearing for environment configuration (D6) until `ConfigItemField` grows an env convention, which is its own ADR.
 - **Non-email channels.** The module is designed multi-channel; only email is implemented, and this design does not change that.
@@ -256,7 +264,7 @@ Six PRs against upstream, each green and mergeable alone. Per repo convention ev
 | **0** | ADR-0019 + this spec + the implementation plan | docs only; merges before any code so PRs 1-5 can cite it |
 | **1** | `SenderProfile`, `EmailDriver`, registry with `noop` + `smtp`, resolver that always returns the synthesized legacy profile; `dispatchEmail` routed through it | **no behaviour change** — reviewable by confirming the existing tests still pass |
 | **2** | `email.senders` record list, its rail group, `ValidateConfig`, `ValidateConfigActivation`; resolver starts reading the roster with the legacy fallback; **`CategoryConfiguredChecker` + accessor in `pkg/sdk/iface`, and `auth`'s seven guards migrated to it** | first behavioural change. The pre-flight must land in the *same* PR that lets profiles diverge, or the guards are wrong for the length of a merge window. EN/IT i18n (parity test) and the OpenAPI diff |
-| **3** | `mailup` driver | opens with the endpoint spike; one file behind the registry |
+| **3** | `mailup` driver against `POST https://send.mailup.com/API/v2.0/messages/sendmessage` | no spike — endpoint, auth model and method are settled; only the body field names are read from the vendor page. One file behind the registry, so a vendor API change touches nothing else |
 | **4** | `sender` on `POST /v1/notifications/test`; sender filter + column on `GET /v1/notifications` | OpenAPI diff |
 | **5** | `docs/site/modules/core/notification.mdx` and `docs/site/operating/notifications.mdx` | the operating page currently teaches pointing the single SMTP at SES/SendGrid and must be rewritten around profiles |
 
