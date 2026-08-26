@@ -5,7 +5,7 @@ _Parent: [../CLAUDE.md](../CLAUDE.md)_
 
 [← Root](../CLAUDE.md) | [☰ Module Map](../CLAUDE.md#module-map) | [🚀 Quick Start](../CLAUDE.md#quick-start) | [Tier-2 client SPA](../frontend-client/CLAUDE.md)
 
-React 19 + Vite 7 + TypeScript 5.9 operator console for Orkestra — the **Tier-1 admin dashboard** used by internal staff. Cookie-based auth with the Go backend (operator audience), dynamic navigation driven by `/v1/navigation`, per-module RTK Query slices, Orkestra design system + Bootstrap 5. Sibling to [`../frontend-client`](../frontend-client/CLAUDE.md), the Tier-2 customer-facing SPA — different audience, different cookie domain, different stack.
+React 19 + Vite 8 + TypeScript 5.9 operator console for Orkestra — the **Tier-1 admin dashboard** used by internal staff. Cookie-based auth with the Go backend (operator audience), dynamic navigation driven by `/v1/navigation`, per-module RTK Query slices, Orkestra design system + Bootstrap 5. Sibling to [`../frontend-client`](../frontend-client/CLAUDE.md), the Tier-2 customer-facing SPA — different audience, different cookie domain, different stack.
 
 > **Before writing any UI code here, invoke the `orkestra-frontend-admin` skill** (`.claude/skills/orkestra-frontend-admin/SKILL.md`). It enforces the reference-first workflow: read the matching `src/reference/*.tsx` showcase and a production-page precedent before any JSX.
 
@@ -16,7 +16,7 @@ The console's **visual design authority** is [`DESIGN.md`](DESIGN.md) — normat
 | Layer       | Choice                                                                                                                       |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | Framework   | React 19, React Router 8 (single `react-router` package — `react-router-dom` no longer exists)                               |
-| Build       | Vite 7 (dev server + production bundle)                                                                                      |
+| Build       | Vite 8 — rolldown (dev server + production bundle)                                                                           |
 | Language    | TypeScript 5.9 strict mode                                                                                                   |
 | State       | Redux Toolkit 2.9 + RTK Query (server state lives in RTK Query, not React Query)                                             |
 | UI kit      | React Bootstrap 2.10 + Bootstrap 5.3 + Orkestra SCSS theme                                                                   |

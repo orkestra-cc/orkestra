@@ -46,7 +46,7 @@ It runs on a **two-tier tenancy model**: Tier-1 operators manage staff and modul
 ## Architecture at a glance
 
 - **Backend.** Go 1.25, [Huma v2](https://huma.rocks) (OpenAPI-first), modular monolith, single Go module. 8 core modules always load; the optional-module catalog ships empty — a fork registers its own at `/admin/modules` (hot-reload, no restart). See [backend/CLAUDE.md](backend/CLAUDE.md).
-- **Frontend (admin).** React 19 + Vite 7 + TypeScript 5.9 strict. Navigation is fetched from `/v1/navigation` so the UI reflects whatever modules the backend has enabled. Cookie-based operator-audience auth. See [frontend-admin/CLAUDE.md](frontend-admin/CLAUDE.md).
+- **Frontend (admin).** React 19 + Vite 8 (rolldown) + TypeScript 5.9 strict. Navigation is fetched from `/v1/navigation` so the UI reflects whatever modules the backend has enabled. Cookie-based operator-audience auth. See [frontend-admin/CLAUDE.md](frontend-admin/CLAUDE.md).
 - **Frontend (client).** Tier-2 customer-facing SPA on the same React 19 + Vite 7 stack, separate cookie domain, separate audience JWT. See [frontend-client/CLAUDE.md](frontend-client/CLAUDE.md).
 - **Mobile.** Flutter 3.44 + Riverpod (early-stage).
 - **Data.** MongoDB 8 + Redis 8, plus RustFS (S3-compatible) for uploaded blobs.
@@ -216,7 +216,7 @@ orkestra/
 │   ├── pkg/sdk/             # In-tree SDK: Module, registry, iface, …
 │   ├── tools/               # tenantscope + policycoverage CI gates
 │   └── Dockerfile           # Multi-stage (dev + prod)
-├── frontend-admin/          # React 19 + Vite 7, operator console (Tier-1)
+├── frontend-admin/          # React 19 + Vite 8, operator console (Tier-1)
 ├── frontend-client/         # React 19 + Vite 7, external client SPA (Tier-2)
 ├── mobile/                  # Flutter 3.44
 ├── docker/                  # Compose files + env templates
