@@ -118,6 +118,7 @@ Send / SendTemplated                          ← unchanged
        │     msg carries Category from this scope
        └─ logDoc.Provider   = profile.Provider
           logDoc.SenderSlug = profile.Slug     ← new field, omitempty
+          logDoc.Error      = sanitize(err)    ← bounded; never a vendor body
 ```
 
 Every fail-closed path writes a `NotificationDoc` with `Status=failed` and the reason, so the admin delivery log answers *which* profile failed and why. A fail-closed design that cannot be diagnosed is worse than a fallback.
@@ -242,6 +243,30 @@ For the same reason `smtp` does not require a password *when a username is set*.
 
 > **One deliberate tightening, declared.** `from_address` is required on the profile element **for `smtp` and `mailup`**, while the flat `email.from_address` is not marked required in today's schema — even though `isSMTPConfigured` has always demanded it at runtime. Schema and runtime already disagree upstream, and the profile element resolves the disagreement in favour of the runtime, scoped to the drivers that actually read the value. This changes what the console badges and rejects; it does not change which sends succeed.
 
+### Driver error contract
+
+Whatever a driver returns ends up in `NotificationDoc.Error`, and that field is **not** private: it is served by `GET /v1/notifications` to operators, and `notification_messages` is registered as an `iface.PIIProducer`, so it also rides the GDPR export path. A vendor response body is untrusted external content and must never be persisted verbatim.
+
+Three concrete reasons, in increasing order of how bad they are:
+
+- **Size.** A proxy or WAF in front of the vendor answers with an HTML page, not JSON. Storing it puts kilobytes-to-megabytes of markup into a document the admin list then returns.
+- **PII.** An API that echoes the request back puts the recipient address, the subject and possibly the body into an error string — widening what a DSR export contains, for data the module already stores in its own typed fields.
+- **Credentials.** MailUp carries the SMTP+ user and secret **in the request body's `User` field**. A vendor error that echoes the request would write that secret into an admin-visible log. This is the case that makes the rule non-negotiable rather than merely tidy.
+
+So the chokepoint sanitizes before writing, once, for every driver:
+
+| Case | Recorded |
+| --- | --- |
+| vendor returned a parseable envelope | `http=<status> status=<Status> code=<Code> msg=<Message, truncated>` |
+| body did not parse, or was not JSON | `http=<status> body=unparseable bytes=<n> type=<content-type>` — **no content** |
+| transport failure (dial, TLS, timeout) | the Go error, truncated |
+
+Rules that apply to all three: `Message` is truncated to 200 runes on a rune boundary; the whole field is capped at 512; CR, LF and other control characters are stripped, so a vendor string cannot forge log structure; and **no driver ever includes its own request payload**, which is what keeps the credential case out by construction rather than by remembering.
+
+The raw body is not written anywhere else either — not to stdout, not at debug level — because the credential risk does not care which sink it reaches. It is also not needed: the vendor keeps its own copy, and the log row already carries its own UUID, its timestamp, the sender slug and the vendor's own status and code — enough to find the corresponding entry in MailUp's reporting without duplicating the payload here.
+
+This contract is not MailUp-specific. `smtp` already stores `sendErr.Error()` today, which can carry a server's response text — external content, usually short but not guaranteed. Defining the rule at the chokepoint fixes that too, and means a fork's future driver inherits it without being told.
+
 ### Pre-flight checks
 
 `auth` calls `IsConfigured` eight times before sending — six in `password_auth_service.go`, two in `suspicious_login_notifier.go`, and every call is a pre-flight for **one** category — each followed within a few lines by the send that names it:
@@ -304,7 +329,7 @@ Read precisely, that is a property of the **SMTP+ product**, not of the API send
 > success  ⇔  HTTP 2xx  ∧  body parses  ∧  Status == "done"  ∧  Code == "0"
 > ```
 >
-> Every other combination fails, with the raw body recorded in `NotificationDoc.Error`: non-2xx, unparseable body, 2xx with a different `Status`, a missing field, an empty body. Written the other way round — enumerate the errors, pass otherwise — a response shape the vendor adds later becomes a silent success.
+> Every other combination fails — non-2xx, unparseable body, 2xx with a different `Status`, a missing field, an empty body — and each records a **bounded diagnostic**, never the vendor's body (see §Driver error contract). Written the other way round — enumerate the errors, pass otherwise — a response shape the vendor adds later becomes a silent success.
 >
 > The two literals `"done"` and `"0"` come from review rather than from a page this design could fetch; the wiki is JS-rendered and does not yield its schema. **PR 3 confirms them against the response schema in the same pass that reads the request field names**, and the predicate above is what the test asserts either way — if the literals differ, only they change.
 
@@ -332,6 +357,7 @@ The backend has a coverage gate (`make backend-coverage-gate`), so tests are par
 | Pattern normalization | table-driven | trim, lowercase both sides, drop empties, collapse within-profile duplicates **before** the cross-profile uniqueness check so a repeat is never reported as a conflict |
 | Driver registry + `Validate` | table-driven | unknown driver; each driver against incomplete profiles |
 | `mailup` driver | `httptest.Server` | asserts method, auth placement and body shape; **`CampaignCode` carries the category through**. Success is asserted as the full predicate, and the failure table is driven from its negation: non-2xx, unparseable body, **2xx with a non-`done` `Status`**, 2xx with a non-zero `Code`, missing field, empty body, timeout. No live calls |
+| Error sanitization | table-driven | a 5 MB HTML error page ⇒ bounded `body=unparseable bytes=…`, **no markup stored**; an envelope echoing the request ⇒ **the SMTP+ secret never appears**; a `Message` with CRLF ⇒ control characters stripped; truncation lands on a rune boundary. This is the regression test for a secret reaching an admin-visible field |
 | `smtp` / `noop` drivers vs the new field | the existing tests, unchanged | both ignore `Category` — the wire output must be byte-identical, which is what makes extending `EmailMessage` safe under D6 |
 | `smtp` driver | the existing 233 lines, re-pointed | the credentials' source changes, the behaviour does not |
 | `ValidateConfig` | table-driven over the merged map | the three states above are the point of the table: **an empty roster must accept a PATCH that touches only `app.name`** (the legacy-install regression), a roster of pattern-less drafts must save, and the save that first declares a pattern must demand a `*`. Plus a test that **documents the secret-blind limit** rather than leaving it implicit |
