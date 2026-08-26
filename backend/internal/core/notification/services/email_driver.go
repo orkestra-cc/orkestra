@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sort"
 	"strings"
 )
@@ -120,4 +121,10 @@ func (r *DriverRegistry) Names() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// CoreDrivers builds every driver the base ships. module.go registers them;
+// tests register fakes instead.
+func CoreDrivers(logger *slog.Logger) []EmailDriver {
+	return []EmailDriver{NewNoopDriver(logger), NewSMTPDriver(logger)}
 }

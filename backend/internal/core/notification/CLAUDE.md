@@ -19,7 +19,9 @@ Primary consumer today is the auth module (verification, password reset). Design
 
 | Concern                | Where                                      |
 | ---------------------- | ------------------------------------------ |
-| SMTP transport         | `services/email_service.go`                |
+| Sender profiles + resolver | `services/sender_profile.go`, `services/sender_resolver.go`, `services/sender_loader.go` |
+| Driver seam + registry (`noop`, `smtp`) | `services/email_driver.go`, `services/driver_noop.go`, `services/driver_smtp.go` |
+| Send error contract     | `services/send_error.go`                   |
 | Template rendering     | `services/template_service.go`             |
 | Default system templates | `services/default_templates.go`           |
 | Per-user preferences   | `services/preference_service.go`           |
@@ -42,7 +44,7 @@ Declared in `module.go::Collections()` and auto-created on boot:
 
 ## Lifecycle
 
-- **Init**: constructs repositories, loads email settings via a closure over `ConfigService` (so admin UI changes propagate without restart), wires the `NotificationService` and registers it as `ServiceNotificationSender`.
+- **Init**: constructs repositories, builds the `SnapshotLoader` over `ConfigService.GetConfig` (**one** document read per send, so values and secrets always come from the same active environment — see [ADR-0019](../../../../docs/adr/0019-notification-multi-sender.md) D4 — while admin UI changes still propagate without a restart), registers the core drivers (`noop`, `smtp`) and the resolver, wires the `NotificationService` and registers it as `ServiceNotificationSender`.
 - **Start**: calls `TemplateService.SeedDefaults(ctx)` which inserts every `auth.*` system template (`verify_email`, `reset_password`, `suspicious_login`, `new_device_login`, `admin_suspicious_login`, `admin_invite`) into the DB if they are missing. Source strings live in `services/default_templates.go` as Go constants.
 - **Stop / HealthCheck**: inherit base no-op from `BaseModule`.
 - **GDPR/DSR** (`services/pii_producer.go`): registers an `iface.PIIProducer` (subject `"notification"`) on `ServicePIIProducerRegistry` at Init. Exports the subject's delivered-message history (`notification_messages`) + per-category delivery preferences (`notification_preferences`); purge deletes both under **either** erase mode. Suppressions are keyed by email address (not `userUUID`), so they ride the auth/email erasure path rather than this producer. Consumed by the [compliance module](../compliance/CLAUDE.md)'s DSR pipeline (ADR-0009).
@@ -68,6 +70,43 @@ All settings live in the `module_configs` collection under the `notification` mo
 `/admin/modules/notification` renders as a three-group rail declared via `ConfigGroups()`: **Delivery** (`email.provider` + the five `email.smtp.*` fields), **Sender** (`email.from_address`, `email.from_name`, `email.reply_to`), **Branding & templates** (`app.name`, `app.support_email`). `email.provider` and `email.smtp.tls_mode` are `FieldEnum` — selects, not free text. The five `email.smtp.*` fields carry `DependsOn: email.provider in [smtp]`, so a default `noop` install shows **one** visible Delivery field (`Email provider`) until it's switched to `smtp`, which reveals the SMTP connection settings.
 
 The `noop` provider logs rendered mail to the backend stdout instead of dialing an SMTP server — use it in dev and CI. The module reports `IsConfigured() = true` for `noop` so consumers can still make send calls without failing.
+
+## Sender profiles and drivers (ADR-0019)
+
+`dispatchEmail` no longer talks to a single transport. Per send it runs
+**resolve → validate → send**:
+
+1. `SenderResolver.Resolve({Category, Type, TenantID})` picks a `SenderProfile`
+   (transport **and** identity). Until some profile declares a pattern — every
+   install today — the resolver returns the profile **synthesized from the flat
+   `email.*` keys** (`slug=_legacy`, pattern `*`) without inspecting the
+   category, so behaviour is byte-identical to before. `TenantID` is read from
+   the request context and passed through; the resolver ignores it (D4).
+2. `DriverRegistry.Get(profile.Provider)` → `EmailDriver`; `ValidateProfile(driver,
+   profile, RuntimeView)` checks the driver's `Requires()`.
+3. `driver.Send(ctx, profile, msg)`; `msg.Category` carries the routing category.
+
+Every failure is **fail-closed** and still writes a `failed` log row whose `error`
+names the profile and the reason (`sender=default driver=smtp err=not_configured
+missing=smtp_host`). Nothing is silently rerouted.
+
+**Driver requirements** (`Requires()`): `noop` nothing; `smtp` `smtp_host`,
+`smtp_port`, `from_address` and **never credentials** — an anonymous relay is a
+supported configuration; `sendSMTP` authenticates only when a username is set.
+
+**Error contract.** `NotificationDoc.Error` is served to operators and rides the
+GDPR export, so **no string produced by a remote peer is ever persisted or
+logged**. Drivers return `*SendError`; it has no free-text field, and the diagnostic is rendered from its typed fields with
+allowlisted tokens (`[A-Za-z0-9._-]`, ≤64 chars; ≤512 overall). An SMTP
+rejection keeps only `smtp op=<step> code=<nnn>` — the server's text is dropped
+because a broken MTA can echo the `AUTH` argument (`base64(\0user\0pass)`) into
+its 5xx line. A local failure keeps a kind from a fixed set
+(`dial|tls|timeout|canceled|io`). An error of unknown shape (a fork's driver
+returning `fmt.Errorf` with a vendor body) is recorded as `err=unknown`.
+The SMTP driver bounds the exchange with the context deadline or 30 s.
+
+`IsConfigured(ctx)` means exactly what it did: the default (`*`) profile resolves
+and its driver accepts it.
 
 ## Templates
 
@@ -107,7 +146,7 @@ Registered in three groups with different middleware:
 ### Admin (`administrator` role)
 
 - `GET /v1/notifications` — paginated delivery log with filters by category / status / channel
-- `POST /v1/notifications/test` — send a test email using the current SMTP settings; useful for verifying the admin config before trusting it with real auth mail
+- `POST /v1/notifications/test` — send a test email through the default sender profile; bypasses preferences, idempotency and the delivery log
 - `GET /v1/notifications/templates` — list all templates
 - `GET /v1/notifications/templates/{templateId}?locale=en` — fetch a single template
 - `PUT /v1/notifications/templates/{templateId}` — override a template (sets `isSystem=false`)
@@ -135,7 +174,7 @@ Get the service via `module.GetTyped[iface.NotificationSender](deps.Services, mo
 
 ## Rules
 
-- **Never bypass the orchestrator.** Don't call `EmailSender.Send` directly from another module — always go through `NotificationSender.Send` or `SendTemplated` so preferences, suppressions, idempotency and the delivery log all fire.
+- **Never bypass the orchestrator.** Don't call `EmailDriver.Send` directly from another module — always go through `NotificationSender.Send` or `SendTemplated` so preferences, suppressions, idempotency and the delivery log all fire.
 - **Never hardcode templates in consumers.** Add a new `TemplateID` constant, a seed entry in `default_templates.go`, and document the variable contract. Consumers pass a `map[string]any` and the module renders.
 - **Secrets stay encrypted.** `email.smtp.password` is a `FieldSecret` — ConfigService encrypts it at rest with AES-256-GCM. Never read it from plain env after bootstrap; always go through `deps.GetSecret`.
 - **Transactional and marketing are different types.** Set `Type: "transactional"` for mail the user cannot opt out of (auth flows, invoices, legal notices). Marketing mail must set `Type: "marketing"` or preferences won't be honored.

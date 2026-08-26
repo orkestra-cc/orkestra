@@ -75,16 +75,12 @@ func (h *NotificationHandler) SendTestEmail(ctx context.Context, req *testEmailR
 	if body == "" {
 		body = "This is a test email sent from the Orkestra notification module at " + time.Now().Format(time.RFC3339)
 	}
-	err := h.svc.EmailSender().Send(ctx, services.EmailMessage{
-		To:       req.Body.To,
-		Subject:  subject,
-		BodyText: body,
-	})
+	res, err := h.svc.SendTest(ctx, services.TestSendInput{To: req.Body.To, Subject: subject, BodyText: body})
 	resp := &testEmailResponse{}
-	resp.Body.Provider = h.svc.EmailSender().ProviderName()
+	resp.Body.Provider = res.Provider
 	if err != nil {
 		resp.Body.Success = false
-		resp.Body.Message = err.Error()
+		resp.Body.Message = res.Diagnostic
 		return resp, huma.Error500InternalServerError("send failed", err)
 	}
 	resp.Body.Success = true

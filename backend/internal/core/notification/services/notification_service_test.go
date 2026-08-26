@@ -3,12 +3,14 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/notification/models"
 	"github.com/orkestra/backend/internal/core/notification/repository"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
@@ -143,41 +145,77 @@ func (f *fakeUnsubService) ConsumeToken(_ context.Context, _ string) (*models.Un
 
 func (f *fakeUnsubService) MarkUsed(_ context.Context, _ string) error { return nil }
 
-type fakeSender struct {
-	configured bool
-	provider   string
-	sendErr    error
-	sent       []EmailMessage
+type fakeDriver struct {
+	name     string
+	requires []ProfileRequirement
+	sendErr  error
+	sent     []EmailMessage
+	profiles []SenderProfile // the profile handed to each Send
 }
 
-func (f *fakeSender) IsConfigured() bool   { return f.configured }
-func (f *fakeSender) ProviderName() string { return f.provider }
-func (f *fakeSender) Send(_ context.Context, msg EmailMessage) error {
+func (f *fakeDriver) Name() string                   { return f.name }
+func (f *fakeDriver) Requires() []ProfileRequirement { return f.requires }
+func (f *fakeDriver) Send(_ context.Context, p SenderProfile, msg EmailMessage) error {
 	f.sent = append(f.sent, msg)
+	f.profiles = append(f.profiles, p)
 	return f.sendErr
+}
+
+type fakeResolver struct {
+	profile SenderProfile
+	err     error
+	inputs  []ResolveInput
+}
+
+// On error the fake returns the ZERO profile, as senderResolver does: a
+// resolver that failed has no profile to name, and the chokepoint's
+// diagnostic ("sender=-") depends on that.
+func (f *fakeResolver) Resolve(_ context.Context, in ResolveInput) (SenderProfile, error) {
+	f.inputs = append(f.inputs, in)
+	if f.err != nil {
+		return SenderProfile{}, f.err
+	}
+	return f.profile, nil
+}
+
+func (f *fakeResolver) Default(context.Context) (SenderProfile, error) {
+	if f.err != nil {
+		return SenderProfile{}, f.err
+	}
+	return f.profile, nil
 }
 
 // ---- helpers ------------------------------------------------------------
 
 type kit struct {
-	logRepo *fakeNotifRepo
-	tmpl    *fakeTemplateService
-	pref    *fakePrefService
-	unsub   *fakeUnsubService
-	email   *fakeSender
-	svc     *NotificationService
+	logRepo  *fakeNotifRepo
+	tmpl     *fakeTemplateService
+	pref     *fakePrefService
+	unsub    *fakeUnsubService
+	driver   *fakeDriver
+	resolver *fakeResolver
+	drivers  *DriverRegistry
+	svc      *NotificationService
 }
 
 func newKit(opts Options) *kit {
 	k := &kit{
-		logRepo: newFakeNotifRepo(),
-		tmpl:    &fakeTemplateService{},
-		pref:    &fakePrefService{can: true},
-		unsub:   &fakeUnsubService{token: "raw-token"},
-		email:   &fakeSender{configured: true, provider: "noop"},
+		logRepo:  newFakeNotifRepo(),
+		tmpl:     &fakeTemplateService{},
+		pref:     &fakePrefService{can: true},
+		unsub:    &fakeUnsubService{token: "raw-token"},
+		driver:   &fakeDriver{name: "noop"},
+		resolver: &fakeResolver{profile: SenderProfile{Slug: "default", Provider: "noop", Categories: []string{"*"}}},
 	}
-	k.svc = NewNotificationService(k.logRepo, k.tmpl, k.pref, k.unsub, k.email, discardLogger(), opts)
+	k.rewire(opts)
 	return k
+}
+
+// rewire rebuilds the registry and service after a test changed the fake
+// driver's name or the resolver's profile.
+func (k *kit) rewire(opts Options) {
+	k.drivers = NewDriverRegistry(k.driver)
+	k.svc = NewNotificationService(k.logRepo, k.tmpl, k.pref, k.unsub, k.resolver, k.drivers, discardLogger(), opts)
 }
 
 // ---- tests --------------------------------------------------------------
@@ -207,14 +245,14 @@ func TestNotificationService_IsConfigured(t *testing.T) {
 	if !k.svc.IsConfigured(context.Background()) {
 		t.Fatalf("expected configured")
 	}
-	k.email.configured = false
+	k.resolver.err = ErrNoSenderForCategory
 	if k.svc.IsConfigured(context.Background()) {
 		t.Fatalf("expected not configured")
 	}
 
-	// Nil email sender → never configured.
+	// Nil resolver / registry → never configured.
 	svc := NewNotificationService(newFakeNotifRepo(), &fakeTemplateService{}, &fakePrefService{can: true},
-		&fakeUnsubService{}, nil, discardLogger(), Options{})
+		&fakeUnsubService{}, nil, nil, discardLogger(), Options{})
 	if svc.IsConfigured(context.Background()) {
 		t.Fatalf("nil email sender should report not configured")
 	}
@@ -235,7 +273,7 @@ func TestNotificationService_Send_DefaultsChannelToEmail(t *testing.T) {
 	if res.Status != models.StatusSent {
 		t.Fatalf("status = %q, want sent", res.Status)
 	}
-	if len(k.email.sent) != 1 {
+	if len(k.driver.sent) != 1 {
 		t.Fatalf("expected one email sent")
 	}
 	if len(k.logRepo.created) != 1 || k.logRepo.created[0].Channel != models.ChannelEmail {
@@ -282,7 +320,7 @@ func TestNotificationService_Send_IdempotencyHitShortCircuits(t *testing.T) {
 	if res.ID != "prev-uuid" {
 		t.Fatalf("expected prev-uuid, got %q", res.ID)
 	}
-	if len(k.email.sent) != 0 {
+	if len(k.driver.sent) != 0 {
 		t.Fatalf("idempotency hit should skip email send")
 	}
 	if len(k.logRepo.created) != 0 {
@@ -326,7 +364,7 @@ func TestNotificationService_Send_SuppressedByPreference(t *testing.T) {
 	if res.Status != models.StatusSuppressed {
 		t.Fatalf("status = %q, want suppressed", res.Status)
 	}
-	if len(k.email.sent) != 0 {
+	if len(k.driver.sent) != 0 {
 		t.Fatalf("suppressed mail must not call the sender")
 	}
 	if len(k.logRepo.created) != 1 || k.logRepo.created[0].Status != models.StatusSuppressed {
@@ -336,30 +374,37 @@ func TestNotificationService_Send_SuppressedByPreference(t *testing.T) {
 
 func TestNotificationService_Send_TransportFailureLogsAndReturnsError(t *testing.T) {
 	k := newKit(Options{})
-	k.email.sendErr = errors.New("smtp boom")
+	boom := errors.New("smtp boom")
+	k.driver.sendErr = boom
 	res, err := k.svc.Send(context.Background(), iface.NotificationRequest{
 		Type:       models.TypeTransactional,
 		Recipients: []iface.Recipient{{Address: "a@example.com"}},
 		Subject:    "S",
 		Body:       "B",
 	})
-	if err == nil || !strings.Contains(err.Error(), "smtp boom") {
-		t.Fatalf("expected smtp error, got %v", err)
+	if !errors.Is(err, ErrSendFailed) || errors.Is(err, boom) {
+		t.Fatalf("the caller gets ErrSendFailed and never the raw driver error, got %v", err)
+	}
+	if err.Error() != "sender=default err=unknown" {
+		t.Fatalf("err.Error() must be the bounded reason (auth logs it), got %q", err.Error())
 	}
 	if res == nil || res.Status != models.StatusFailed {
 		t.Fatalf("expected failed result, got %+v", res)
 	}
-	if res.Error != "smtp boom" {
+	// An error of unknown shape is never persisted: only its kind is.
+	if res.Error != "sender=default err=unknown" {
 		t.Fatalf("result.Error = %q", res.Error)
 	}
-	if len(k.logRepo.created) != 1 || k.logRepo.created[0].Status != models.StatusFailed {
-		t.Fatalf("expected one failed log doc")
+	if len(k.logRepo.created) != 1 || k.logRepo.created[0].Status != models.StatusFailed || k.logRepo.created[0].Error != "sender=default err=unknown" {
+		t.Fatalf("expected one failed log doc with the bounded reason, got %+v", k.logRepo.created)
 	}
 }
 
 func TestNotificationService_Send_SuccessLogsRecipientAndProvider(t *testing.T) {
 	k := newKit(Options{})
-	k.email.provider = "smtp"
+	k.driver.name = "smtp"
+	k.resolver.profile.Provider = "smtp"
+	k.rewire(Options{})
 	_, err := k.svc.Send(context.Background(), iface.NotificationRequest{
 		Type:       models.TypeTransactional,
 		Recipients: []iface.Recipient{{Address: "a@example.com", UserUUID: "u-7", Name: "Alice"}},
@@ -370,10 +415,10 @@ func TestNotificationService_Send_SuccessLogsRecipientAndProvider(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	if len(k.email.sent) != 1 {
+	if len(k.driver.sent) != 1 {
 		t.Fatalf("expected one send")
 	}
-	msg := k.email.sent[0]
+	msg := k.driver.sent[0]
 	if msg.To != "a@example.com" || msg.ToName != "Alice" {
 		t.Fatalf("recipient passed incorrectly: %+v", msg)
 	}
@@ -425,8 +470,8 @@ func TestNotificationService_SendTemplated_HappyPath_AutoInjectsVariables(t *tes
 	}
 	// Render saw an UnsubscribeURL built from the raw token and the URLBuilder.
 	wantSubject := "[unsub=https://example.com/notifications/unsubscribe?token=raw-XYZ] rendered"
-	if k.email.sent[0].Subject != wantSubject {
-		t.Fatalf("Subject = %q, want %q", k.email.sent[0].Subject, wantSubject)
+	if k.driver.sent[0].Subject != wantSubject {
+		t.Fatalf("Subject = %q, want %q", k.driver.sent[0].Subject, wantSubject)
 	}
 }
 
@@ -507,8 +552,8 @@ func TestNotificationService_SendTemplated_IdempotencyShortCircuit(t *testing.T)
 	if err != nil {
 		t.Fatalf("SendTemplated: %v", err)
 	}
-	if res.ID != "prev" || len(k.email.sent) != 0 {
-		t.Fatalf("idempotency hit should short-circuit, got res=%+v sent=%d", res, len(k.email.sent))
+	if res.ID != "prev" || len(k.driver.sent) != 0 {
+		t.Fatalf("idempotency hit should short-circuit, got res=%+v sent=%d", res, len(k.driver.sent))
 	}
 }
 
@@ -556,7 +601,166 @@ func TestNotificationService_Accessors(t *testing.T) {
 	if k.svc.LogRepo() != k.logRepo {
 		t.Fatalf("LogRepo() accessor mismatch")
 	}
-	if k.svc.EmailSender() != k.email {
-		t.Fatalf("EmailSender() accessor mismatch")
+	if k.svc.Drivers() != k.drivers {
+		t.Fatalf("Drivers() accessor mismatch")
+	}
+}
+
+func TestNotificationService_IsConfigured_DefaultProfileMustBeUsable(t *testing.T) {
+	k := newKit(Options{})
+	k.driver.requires = []ProfileRequirement{{Key: SubSMTPHost}}
+	if k.svc.IsConfigured(context.Background()) {
+		t.Fatal("a default profile missing a required field must not report configured")
+	}
+	k.resolver.profile.SMTPHost = "h"
+	if !k.svc.IsConfigured(context.Background()) {
+		t.Fatal("a complete default profile must report configured")
+	}
+	k.resolver.profile.Provider = "ses" // no such driver registered
+	if k.svc.IsConfigured(context.Background()) {
+		t.Fatal("an unregistered driver must not report configured")
+	}
+}
+
+func sendOne(t *testing.T, k *kit) (*iface.NotificationResult, error) {
+	t.Helper()
+	return k.svc.Send(context.Background(), iface.NotificationRequest{
+		Type:       models.TypeTransactional,
+		Category:   "crm.campaign",
+		Recipients: []iface.Recipient{{Address: "a@example.com"}},
+		Subject:    "S",
+		Body:       "B",
+	})
+}
+
+func TestNotificationService_Dispatch_FailClosedPaths(t *testing.T) {
+	cases := []struct {
+		name      string
+		arrange   func(k *kit)
+		wantErr   error
+		wantError string
+		wantProv  string
+	}{
+		{"no sender for category", func(k *kit) { k.resolver.err = ErrNoSenderForCategory },
+			ErrNoSenderForCategory, "sender=- err=no_sender_for_category", ""},
+		{"config unavailable", func(k *kit) { k.resolver.err = ErrSenderConfigUnavailable },
+			ErrSenderConfigUnavailable, "sender=- err=config_unavailable", ""},
+		{"unknown driver", func(k *kit) { k.resolver.profile.Provider = "ses" },
+			ErrUnknownDriver, "sender=default driver=ses err=unknown_driver", "ses"},
+		{"incomplete profile", func(k *kit) { k.driver.requires = []ProfileRequirement{{Key: SubSMTPHost}, {Key: SubFromAddress}} },
+			ErrSenderNotConfigured, "sender=default driver=noop err=not_configured missing=smtp_host,from_address", "noop"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			k := newKit(Options{})
+			c.arrange(k)
+			res, err := sendOne(t, k)
+			if !errors.Is(err, c.wantErr) || !errors.Is(err, ErrSendFailed) {
+				t.Fatalf("err = %v, want %v and the ErrSendFailed umbrella", err, c.wantErr)
+			}
+			if res == nil || res.Status != models.StatusFailed || res.Error != c.wantError || res.Provider != c.wantProv {
+				t.Fatalf("res = %+v", res)
+			}
+			if len(k.driver.sent) != 0 {
+				t.Fatal("a fail-closed path must never reach the driver")
+			}
+			if len(k.logRepo.created) != 1 || k.logRepo.created[0].Error != c.wantError || k.logRepo.created[0].Status != models.StatusFailed {
+				t.Fatalf("every fail-closed path writes a failed log row naming the reason: %+v", k.logRepo.created)
+			}
+		})
+	}
+}
+
+func TestNotificationService_Dispatch_CarriesCategoryAndResolveInput(t *testing.T) {
+	k := newKit(Options{})
+	if _, err := sendOne(t, k); err != nil {
+		t.Fatal(err)
+	}
+	if len(k.driver.sent) != 1 || k.driver.sent[0].Category != "crm.campaign" {
+		t.Fatalf("Category must ride on EmailMessage: %+v", k.driver.sent)
+	}
+	if len(k.resolver.inputs) != 1 || k.resolver.inputs[0].Category != "crm.campaign" || k.resolver.inputs[0].Type != models.TypeTransactional {
+		t.Fatalf("resolver input = %+v", k.resolver.inputs)
+	}
+	if k.resolver.inputs[0].TenantID != "" {
+		t.Fatalf("no tenant in ctx ⇒ empty TenantID, got %q", k.resolver.inputs[0].TenantID)
+	}
+
+	// D4: the tenant on the request context reaches the resolver unchanged.
+	ctx := context.WithValue(context.Background(), ctxauth.KeyTenantID, "t-42")
+	if _, err := k.svc.Send(ctx, iface.NotificationRequest{Type: models.TypeTransactional, Category: "crm.campaign",
+		Recipients: []iface.Recipient{{Address: "b@example.com"}}, Subject: "S", Body: "B"}); err != nil {
+		t.Fatal(err)
+	}
+	if k.resolver.inputs[1].TenantID != "t-42" {
+		t.Fatalf("TenantID must be propagated from ctx, got %q", k.resolver.inputs[1].TenantID)
+	}
+	if k.driver.profiles[0].Slug != "default" {
+		t.Fatalf("driver must receive the resolved profile, got %+v", k.driver.profiles[0])
+	}
+	if k.logRepo.created[0].Provider != "noop" {
+		t.Fatalf("log row provider = %q", k.logRepo.created[0].Provider)
+	}
+}
+
+// TestNotificationService_Dispatch_HostileDriverErrorNeverEscapes is the
+// end-to-end containment test: a driver (a fork's, say) that returns a raw
+// error carrying a vendor body must leave no trace of it in the stored row,
+// in the result, or in the error a caller receives and logs.
+func TestNotificationService_Dispatch_HostileDriverErrorNeverEscapes(t *testing.T) {
+	const secret = "s3cr=t hunter2"
+	k := newKit(Options{})
+	k.driver.sendErr = fmt.Errorf("vendor response: 401 user=s12345_67 secret=%s <html>", secret)
+	res, err := sendOne(t, k)
+	for what, text := range map[string]string{
+		"stored row":     k.logRepo.created[0].Error,
+		"result.Error":   res.Error,
+		"returned error": err.Error(),
+	} {
+		if strings.Contains(text, secret) || strings.Contains(text, "vendor response") || strings.Contains(text, "<html>") {
+			t.Fatalf("%s leaked the driver's text: %q", what, text)
+		}
+		if text != "sender=default err=unknown" {
+			t.Fatalf("%s = %q", what, text)
+		}
+	}
+	if !errors.Is(err, ErrSendFailed) {
+		t.Fatalf("want ErrSendFailed, got %v", err)
+	}
+	var de *DispatchError
+	if !errors.As(err, &de) {
+		t.Fatalf("the chokepoint returns only *DispatchError, got %T", err)
+	}
+}
+
+func TestNotificationService_Dispatch_DriverDiagnosticIsStored(t *testing.T) {
+	k := newKit(Options{})
+	k.driver.sendErr = rejectionError("smtp", smtpOpAuth, 535, errors.New("535 AHVzZXIAcGFzcw=="))
+	res, _ := sendOne(t, k)
+	if res.Error != "sender=default smtp op=auth code=535" {
+		t.Fatalf("res.Error = %q", res.Error)
+	}
+}
+
+func TestNotificationService_SendTest(t *testing.T) {
+	k := newKit(Options{})
+	res, err := k.svc.SendTest(context.Background(), TestSendInput{To: "a@example.com", Subject: "T", BodyText: "B"})
+	if err != nil || res.Provider != "noop" || res.SenderSlug != "default" {
+		t.Fatalf("SendTest = %+v, %v", res, err)
+	}
+	if len(k.driver.sent) != 1 || k.driver.sent[0].To != "a@example.com" || k.driver.sent[0].Category != "" {
+		t.Fatalf("test send not delivered to the driver: %+v", k.driver.sent)
+	}
+	if len(k.logRepo.created) != 0 {
+		t.Fatal("a test send must not write a delivery-log row (unchanged from today)")
+	}
+
+	k.driver.sendErr = errors.New("boom secret=hunter2")
+	res, err = k.svc.SendTest(context.Background(), TestSendInput{To: "a@example.com"})
+	if err == nil || res.Diagnostic != "sender=default err=unknown" || res.Provider != "noop" {
+		t.Fatalf("SendTest failure = %+v, %v", res, err)
+	}
+	if err.Error() != res.Diagnostic || !errors.Is(err, ErrSendFailed) {
+		t.Fatalf("SendTest must return the sanitized DispatchError, got %v", err)
 	}
 }
