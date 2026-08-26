@@ -331,10 +331,12 @@ GOBIN=$PWD/.go-bin GOMODCACHE=$PWD/.go-mod-cache go install github.com/air-verse
 
 **Optimized production services**
 
-| Service      | Host port | Purpose       | Features                       |
+| Service      | Host port (default) | Purpose       | Features                       |
 | ------------ | --------- | ------------- | ------------------------------ |
-| **backend**  | 3000      | Go API server | Optimized build, health checks |
-| **frontend-admin** | 8080      | React web app | Nginx static serving           |
+| **backend**  | `${BACKEND_PORT:-3000}`  | Go API server | Optimized build, health checks, `read_only` rootfs |
+| **frontend-admin** | `${FRONTEND_PORT:-8080}` | React web app | Nginx static serving           |
+
+Both bind to `${HOST_BIND_ADDRESS:-127.0.0.1}` — closed by default; `docker/.env` opens them to the address the reverse proxy reaches. See [Container hardening](#container-hardening) for the capability/rootfs contract.
 
 ## Network Architecture
 
@@ -414,10 +416,12 @@ ${BACKEND_PORT:-3000}         → backend:3000
 ${FRONTEND_PORT:-8080}        → frontend-admin:5173    # operator console (Vite)
 ${CLIENT_FRONTEND_PORT:-8081} → client-frontend:5173   # Tier-2 client SPA (Vite)
 
-Production (docker-compose.prod.yml):
-${BACKEND_PORT:-3000} → backend:3000
-8080                  → frontend-admin:80   # Nginx static (fixed, not env-driven)
+Production (docker-compose.prod.yml) — bound to ${HOST_BIND_ADDRESS:-127.0.0.1}:
+${BACKEND_PORT:-3000}  → backend:3000
+${FRONTEND_PORT:-8080} → frontend-admin:80   # Nginx static
 ```
+
+`HOST_BIND_ADDRESS` defaults to `0.0.0.0` in dev (the compose default) and to `127.0.0.1` in prod: a production stack publishes nothing unless `docker/.env` says where. `scripts/env-validate.sh` warns when a production `.env` leaves either bind address at `0.0.0.0`.
 
 The observability overlay publishes its own block (Grafana, Prometheus, Loki, Tempo, OTel) — see the [observability section](#self-hosted-otel-stack-docker-composeobservabilityyml).
 
@@ -440,13 +444,24 @@ openssl enc -aes-256-cbc -d -in .env.prod.enc -out .env.prod
 # - Kubernetes Secrets
 ```
 
-**Container Security:**
+### Container hardening
 
-- Non-root users in production containers
-- Read-only root filesystems where possible
-- Resource limits to prevent DoS
-- Regular security scanning with Trivy
-- Minimal Alpine base images
+What `docker-compose.prod.yml` and `docker-compose.infra.yml` actually enforce (as opposed to aspire to):
+
+| Service | `cap_drop` | `cap_add` | `read_only` | Why |
+| --- | --- | --- | --- | --- |
+| backend | ALL | — | yes (+ `tmpfs: /tmp`) | Listens on 3000, no socket, writes only to mounted volumes |
+| frontend-admin | ALL | `CHOWN SETGID SETUID NET_BIND_SERVICE` | no | nginx master is root on :80 and drops workers to `nginx`; `10-write-config.sh` rewrites `config.js` inside the docroot at every start, so the rootfs must stay writable |
+| mongodb | ALL | `CHOWN DAC_OVERRIDE SETGID SETUID` | no | `replica-entrypoint.sh` writes the keyfile into the `mongodb`-owned config volume as root, then `docker-entrypoint.sh` chowns and `gosu`s |
+| redis, rustfs | ALL | — | no | Run on unprivileged ports, own their data dirs |
+
+Every service also sets `security_opt: [no-new-privileges:true]`. The backend's mutable paths are named volumes (`backend-uploads`, `backend-logs`) rather than `./backend/*` binds, which used to appear as root-owned untracked files under `docker/`.
+
+**Adding a service**: start from `cap_drop: [ALL]` + `no-new-privileges`, bring it up, and add only the capability the failing syscall names — commenting *why* next to each `cap_add`. Prefer `read_only: true` + `tmpfs` for scratch paths; if the image's entrypoint writes into its own filesystem (as nginx does here), say so in the compose comment instead of silently leaving it writable.
+
+**Follow-up**: `read_only` for frontend-admin needs `config.js` relocated out of the docroot (a `tmpfs` dir + an `alias` in the `location = /config.js` block of `frontend-admin/nginx.conf` and the Dockerfile's baked config) — tracked, not done.
+
+**Still aspirational**: resource limits, Trivy scanning, a non-root `USER` in the backend's production stage (the DHI base picks the uid today).
 
 ## Environment Configuration
 
