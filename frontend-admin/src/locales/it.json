@@ -2759,11 +2759,15 @@
       "groups": {
         "delivery": {
           "label": "Consegna",
-          "desc": "Come la posta lascia la piattaforma. Con il provider noop predefinito, la mail renderizzata viene registrata nel backend invece di essere inviata — imposta il provider su SMTP per mostrare le impostazioni di connessione."
+          "desc": "Il trasporto predefinito. Con il provider noop la mail renderizzata viene registrata nel backend invece di essere inviata — imposta il provider su SMTP per mostrare le impostazioni di connessione. Ignorato quando almeno un profilo mittente instrada una categoria."
+        },
+        "senders": {
+          "label": "Profili mittente",
+          "desc": "Più mittenti, ognuno con il proprio trasporto e la propria identità, scelti per ogni messaggio in base a pattern di categoria (auth.*, crm.*, * per il predefinito). Finché nessun profilo dichiara un pattern, le impostazioni Consegna e Mittente restano l'unico predefinito."
         },
         "sender": {
           "label": "Mittente",
-          "desc": "Gli indirizzi che i destinatari vedono su ogni messaggio."
+          "desc": "Gli indirizzi che i destinatari vedono quando si usa il trasporto predefinito."
         },
         "branding": {
           "label": "Branding e template",
@@ -2782,7 +2786,11 @@
           },
           "from_address": { "label": "Indirizzo mittente" },
           "from_name": { "label": "Nome mittente" },
-          "reply_to": { "label": "Indirizzo Reply-To" }
+          "reply_to": { "label": "Indirizzo Reply-To" },
+          "senders": {
+            "label": "Profili mittente",
+            "desc": "Ogni profilo è un trasporto e un'identità. I pattern decidono quali categorie trasporta; vince il pattern più specifico e * è il predefinito. Un profilo senza pattern è una bozza e non riceve posta. Quando un profilo dichiara un pattern, esattamente uno deve dichiarare *."
+          }
         },
         "app": {
           "name": { "label": "Nome app (nei template)" },
