@@ -195,16 +195,19 @@ For the same reason `smtp` does not require a password *when a username is set*.
 
 ### Pre-flight checks
 
-`auth` calls `IsConfigured` seven times before sending, and every call is a pre-flight for **one** category — each followed within a few lines by the send that names it:
+`auth` calls `IsConfigured` eight times before sending — six in `password_auth_service.go`, two in `suspicious_login_notifier.go`, and every call is a pre-flight for **one** category — each followed within a few lines by the send that names it:
 
-| Call site | Guards | Category it is about to send |
-| --- | --- | --- |
-| `password_auth_service.go:256` | signup admission → `ErrNotificationDown` | `auth.verify_email` |
-| `password_auth_service.go:969`, `:1839` | password reset | `auth.reset_password` |
-| `password_auth_service.go:1280` | email verification | `auth.verify_email` |
-| `password_auth_service.go:1660` | new-device notice | `auth.new_device_login` |
-| `password_auth_service.go:1767` | admin invite | `auth.admin_invite` |
-| `suspicious_login_notifier.go:216`, `:295` | suspicious-login notices | `auth.suspicious_login`, `auth.admin_suspicious_login` |
+| Call site | n | Guards | Category it is about to send |
+| --- | --- | --- | --- |
+| `password_auth_service.go:256` | 1 | signup admission → `ErrNotificationDown` | `auth.verify_email` |
+| `password_auth_service.go:969`, `:1839` | 2 | password reset | `auth.reset_password` |
+| `password_auth_service.go:1280` | 1 | email verification | `auth.verify_email` |
+| `password_auth_service.go:1660` | 1 | new-device notice | `auth.new_device_login` |
+| `password_auth_service.go:1767` | 1 | admin invite | `auth.admin_invite` |
+| `suspicious_login_notifier.go:216`, `:295` | 2 | suspicious-login notices | `auth.suspicious_login`, `auth.admin_suspicious_login` |
+| **total** | **8** | | |
+
+Six rows, eight call sites — two rows carry two each. Verify with `grep -c "IsConfigured(ctx)"` over the two files rather than counting rows.
 
 Once routing is per-category, a single global boolean is wrong in both directions: a valid default with a broken `auth.*` returns `true` and the signup is accepted against mail that then fails; a broken default with a working `auth.*` refuses registrations that would have succeeded.
 
@@ -224,7 +227,7 @@ The accessor returns the exact answer when the sender implements the companion a
 
 Unlike `ValidateConfig`, this check runs inside the module against its own configuration and **can read secrets**, so it catches precisely the class of misconfiguration the save-time gate is forbidden to see.
 
-Core `auth` migrates its seven guards to the accessor. This lands in **PR 2**, not PR 1: until the roster is read, every category resolves to the same synthesized profile and the distinction cannot bite.
+Core `auth` migrates all eight guards to the accessor. This lands in **PR 2**, not PR 1: until the roster is read, every category resolves to the same synthesized profile and the distinction cannot bite.
 
 ### MailUp driver
 
@@ -272,7 +275,7 @@ The backend has a coverage gate (`make backend-coverage-gate`), so tests are par
 | `IsConfiguredFor` | table-driven | valid default + broken `auth.*` ⇒ **false** for `auth.*` and true for the default (today's global boolean gets both wrong); unmatched category ⇒ false; a `mailup` profile with a secret-only gap ⇒ false, which `ValidateConfig` cannot see |
 | `smtp` driver `Validate` | table-driven | **an anonymous relay — host + port + from, no credentials — must validate**, as `isSMTPConfigured` does today; missing host, port or from must not. This is the regression test for D6 |
 | `IsConfiguredForCategory` accessor | table-driven | a sender implementing the companion gets the exact answer; one that does not falls back to `IsConfigured` — the fork-compatibility guarantee |
-| `auth` guards | existing auth tests, re-pointed | the seven call sites ask for the category they are about to send |
+| `auth` guards | existing auth tests, re-pointed | all eight call sites ask for the category they are about to send; the table above is the checklist |
 | `dispatchEmail` | the existing 562 lines, unchanged | they are the compatibility safety net |
 | Compatibility | new | empty roster + flat keys only ⇒ byte-identical send behaviour to today |
 
@@ -284,7 +287,7 @@ Six PRs against upstream, each green and mergeable alone. Per repo convention ev
 | --- | --- | --- |
 | **0** | ADR-0019 + this spec + the implementation plan | docs only; merges before any code so PRs 1-5 can cite it |
 | **1** | `SenderProfile`, `EmailDriver`, registry with `noop` + `smtp`, resolver that always returns the synthesized legacy profile; `dispatchEmail` routed through it | **no behaviour change** — reviewable by confirming the existing tests still pass |
-| **2** | `email.senders` record list, its rail group, `ValidateConfig`, `ValidateConfigActivation`; resolver starts reading the roster with the legacy fallback; **`CategoryConfiguredChecker` + accessor in `pkg/sdk/iface`, and `auth`'s seven guards migrated to it**; **`sender` on `POST /v1/notifications/test`** | first behavioural change, and everything D5 depends on has to be in it. The pre-flight must land in the same PR that lets profiles diverge or the guards are wrong for a merge window — and the explicit-sender test-send is the *only* mitigation that actually proves a profile, so shipping routing without it leaves fail-closed unverifiable. EN/IT i18n (parity test) |
+| **2** | `email.senders` record list, its rail group, `ValidateConfig`, `ValidateConfigActivation`; resolver starts reading the roster with the legacy fallback; **`CategoryConfiguredChecker` + accessor in `pkg/sdk/iface`, and `auth`'s eight guards migrated to it**; **`sender` on `POST /v1/notifications/test`** | first behavioural change, and everything D5 depends on has to be in it. The pre-flight must land in the same PR that lets profiles diverge or the guards are wrong for a merge window — and the explicit-sender test-send is the *only* mitigation that actually proves a profile, so shipping routing without it leaves fail-closed unverifiable. EN/IT i18n (parity test) |
 | **3** | `mailup` driver against `POST https://send.mailup.com/API/v2.0/messages/sendmessage` | no spike — endpoint, auth model and method are settled; only the body field names are read from the vendor page. One file behind the registry, so a vendor API change touches nothing else |
 | **4** | sender filter + `senderSlug` on `GET /v1/notifications`, and the delivery-log column | diagnostics, not mitigation: at PR 2 a failed send already names the profile in the log's reason string, so this improves triage rather than enabling it |
 | **5** | `docs/site/modules/core/notification.mdx` and `docs/site/operating/notifications.mdx` | the operating page currently teaches pointing the single SMTP at SES/SendGrid and must be rewritten around profiles |

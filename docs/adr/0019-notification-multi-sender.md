@@ -85,7 +85,7 @@ So `email.provider`, `email.smtp.*` and `email.from_*` stay. When the `email.sen
 
 ### D7 — Pre-flight checks become category-aware through an optional companion interface
 
-`IsConfigured(ctx) bool` is a single boolean over a single transport. Under D1 it stops answering the question its callers ask. Every one of the seven call sites in `auth` — signup admission (`ErrNotificationDown`), password reset, email verification, new-device and suspicious-login notices, admin invite — is a **pre-flight for one specific category**, and each is followed within a few lines by a send that names it.
+`IsConfigured(ctx) bool` is a single boolean over a single transport. Under D1 it stops answering the question its callers ask. Every one of the eight call sites in `auth` — six in `password_auth_service.go`, two in `suspicious_login_notifier.go` — — signup admission (`ErrNotificationDown`), password reset, email verification, new-device and suspicious-login notices, admin invite — is a **pre-flight for one specific category**, and each is followed within a few lines by a send that names it.
 
 With profiles, a global boolean is wrong in both directions. A valid default and a broken `auth.*` profile returns `true`, the signup is accepted, and the verification mail then fails — leaving a user who cannot get in and an account that cannot be completed. A broken default and a working `auth.*` returns `false` and refuses registrations that would have succeeded.
 
@@ -105,7 +105,7 @@ func IsConfiguredForCategory(ctx context.Context, s NotificationSender, category
 
 `IsConfiguredFor` resolves the category, then reports whether its profile's driver is registered and `Validate` passes. A category that matches no profile returns **false** — consistent with D5, and strictly better than today for that case: the signup is refused up front rather than accepted against mail that cannot be sent.
 
-`IsConfigured(ctx)` keeps its present meaning — the default (`*`) profile resolves and is valid — so no existing caller changes behaviour or breaks. Core's `auth` migrates its seven guards to the accessor.
+`IsConfigured(ctx)` keeps its present meaning — the default (`*`) profile resolves and is valid — so no existing caller changes behaviour or breaks. Core's `auth` migrates all eight guards to the accessor.
 
 One useful asymmetry falls out. The save-time gate cannot see secrets (D5), but this runtime check runs inside the module against its own configuration and **can**. So `IsConfiguredFor` catches exactly the class of misconfiguration `ValidateConfig` is forbidden to see — a `mailup` profile missing only its API secret — at the last moment before it would matter.
 
