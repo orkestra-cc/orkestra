@@ -274,7 +274,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 
 ### Infrastructure Services (`docker-compose.infra.yml`)
 
-**One instance per stack** — layered into the same `${STACK}` Compose project as the app services, not shared across stacks (see [Multi-Stack Model](#multi-stack-model)). Host ports below are the compose defaults; `docker/.env` overrides them per stack so several stacks coexist.
+**One instance per stack** — layered into the same `${STACK}` Compose project as the app services, not shared across stacks (see [Multi-Stack Model](#multi-stack-model)). Host ports below are the compose defaults; `docker/.env` overrides them per stack so several stacks coexist. They bind to `INFRA_BIND_ADDRESS` (default `127.0.0.1`) — except the RustFS S3 API port, which follows `HOST_BIND_ADDRESS` because presigned browser uploads reach it through the reverse proxy when `STORAGE_PUBLIC_ENDPOINT` is set. Nothing else off-host needs them — the backend uses service names on the stack network and backup/restore/audit go through `docker exec` — and a port published on `0.0.0.0` bypasses the host firewall. Every infra service runs with `cap_drop: [ALL]` + `no-new-privileges` (mongo re-adds `CHOWN/DAC_OVERRIDE/SETGID/SETUID` for its entrypoints' keyfile write, chown and gosu).
 
 | Service       | Host port (default) | Purpose             | Health Check     |
 | ------------- | ----------- | ------------------- | ---------------- |
@@ -402,10 +402,11 @@ curl -i -H 'Host: example.com' http://localhost:3000/health
 Every published host port is an `.env` variable with a compose default. `scripts/init.sh` seeds a non-colliding block per stack on first run, so multiple stacks coexist without arithmetic baked into compose. Container-internal ports stay standard.
 
 ```
-Infra (docker-compose.infra.yml) — one instance per stack:
+Infra (docker-compose.infra.yml) — one instance per stack, bound to
+${INFRA_BIND_ADDRESS:-127.0.0.1} (loopback unless docker/.env says otherwise):
 ${MONGO_PORT:-27017}        → mongodb:27017
 ${REDIS_PORT:-6379}         → redis:6379
-${RUSTFS_API_PORT:-9100}    → rustfs:9000    # S3 API
+${RUSTFS_API_PORT:-9100}    → rustfs:9000    # S3 API — on HOST_BIND_ADDRESS (browser-facing via proxy)
 ${RUSTFS_CONSOLE_PORT:-9101}→ rustfs:9001    # admin console
 
 App (docker-compose.dev.yml / docker-compose.staging.yml):
