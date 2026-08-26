@@ -349,6 +349,29 @@ type NotificationSender interface {
 	SendTemplated(ctx context.Context, req TemplatedNotificationRequest) (*NotificationResult, error)
 }
 
+// CategoryConfiguredChecker is an OPTIONAL companion to NotificationSender
+// (ADR-0019 D7). With sender profiles routed by category, IsConfigured's
+// single boolean is wrong in both directions for a caller about to send one
+// category; this answers for that category. A sender that does not
+// implement it keeps working — IsConfiguredForCategory falls back.
+type CategoryConfiguredChecker interface {
+	IsConfiguredFor(ctx context.Context, category string) bool
+}
+
+// IsConfiguredForCategory is the accessor every pre-flight guard should use:
+// the exact answer when s implements CategoryConfiguredChecker, the coarse
+// IsConfigured otherwise, false for a nil sender. Follows the
+// HasConfigGroups/ConfigGroupsOf idiom for extending a frozen contract.
+func IsConfiguredForCategory(ctx context.Context, s NotificationSender, category string) bool {
+	if s == nil {
+		return false
+	}
+	if c, ok := s.(CategoryConfiguredChecker); ok {
+		return c.IsConfiguredFor(ctx, category)
+	}
+	return s.IsConfigured(ctx)
+}
+
 // ---------------------------------------------------------------------------
 // TenantProvider — consumed by: authz, auth (JWT issuance), middleware,
 // every data module via the tenantrepo helper.

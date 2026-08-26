@@ -774,3 +774,56 @@ func TestNotificationService_SendTest(t *testing.T) {
 		t.Fatalf("SendTest must return the sanitized DispatchError, got %v", err)
 	}
 }
+
+func TestNotificationService_IsConfiguredFor(t *testing.T) {
+	auth := &fakeDriver{name: "smtp", requires: []ProfileRequirement{{Key: SubSMTPHost}}}
+	def := &fakeDriver{name: "noop"}
+	cfg := SenderConfig{Profiles: []SenderProfile{
+		{Slug: "default", Provider: "noop", Categories: []string{"*"}},
+		{Slug: "auth", Provider: "smtp", Categories: []string{"auth.*"}}, // broken: no host
+	}}
+	svc := NewNotificationService(newFakeNotifRepo(), &fakeTemplateService{}, &fakePrefService{can: true}, &fakeUnsubService{},
+		NewSenderResolver(fixedLoader(cfg)), NewDriverRegistry(auth, def), discardLogger(), Options{})
+	ctx := context.Background()
+
+	// Today's global boolean gets both of these wrong.
+	if svc.IsConfiguredFor(ctx, "auth.verify_email") {
+		t.Fatal("valid default + broken auth.* must be false for auth.*")
+	}
+	if !svc.IsConfiguredFor(ctx, "crm.campaign") || !svc.IsConfigured(ctx) {
+		t.Fatal("the default profile is fine")
+	}
+
+	// Secret-only gap: invisible to ValidateConfig, caught here.
+	secretDriver := &fakeDriver{name: "vendor", requires: []ProfileRequirement{{Key: SubSMTPPassword, Secret: true}}}
+	cfg2 := SenderConfig{Profiles: []SenderProfile{{Slug: "v", Provider: "vendor", Categories: []string{"*"}}}}
+	svc2 := NewNotificationService(newFakeNotifRepo(), &fakeTemplateService{}, &fakePrefService{can: true}, &fakeUnsubService{},
+		NewSenderResolver(fixedLoader(cfg2)), NewDriverRegistry(secretDriver), discardLogger(), Options{})
+	if svc2.IsConfiguredFor(ctx, "anything") {
+		t.Fatal("a profile missing only its secret must be reported unconfigured at request time")
+	}
+
+	// Malformed category ⇒ false, even with a "*" profile.
+	if svc.IsConfiguredFor(ctx, "") || svc.IsConfiguredFor(ctx, " crm.campaign") {
+		t.Fatal("an empty or untrimmed category must not ride the default")
+	}
+
+	// D4: the pre-flight hands the resolver the same TenantID the dispatch does.
+	k := newKit(Options{})
+	tctx := context.WithValue(context.Background(), ctxauth.KeyTenantID, "t-42")
+	if !k.svc.IsConfiguredFor(tctx, "crm.campaign") {
+		t.Fatal("fake default profile is usable")
+	}
+	if len(k.resolver.inputs) != 1 || k.resolver.inputs[0].TenantID != "t-42" || k.resolver.inputs[0].Category != "crm.campaign" {
+		t.Fatalf("pre-flight resolver input = %+v", k.resolver.inputs)
+	}
+
+	// Unmatched category ⇒ false.
+	cfg3 := SenderConfig{Profiles: []SenderProfile{{Slug: "auth", Provider: "noop", Categories: []string{"auth.*"}}}}
+	svc3 := NewNotificationService(newFakeNotifRepo(), &fakeTemplateService{}, &fakePrefService{can: true}, &fakeUnsubService{},
+		NewSenderResolver(fixedLoader(cfg3)), NewDriverRegistry(def), discardLogger(), Options{})
+	if svc3.IsConfiguredFor(ctx, "crm.campaign") {
+		t.Fatal("no match must be false")
+	}
+	var _ iface.CategoryConfiguredChecker = svc3
+}

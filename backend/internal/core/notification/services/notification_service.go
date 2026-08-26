@@ -87,6 +87,24 @@ func (s *NotificationService) IsConfigured(ctx context.Context) bool {
 	return err == nil
 }
 
+// IsConfiguredFor answers for one category: it resolves the profile that
+// would carry the send and checks its driver with secrets in view — which
+// the save-time gate cannot do. No match ⇒ false (fail-closed, D7).
+func (s *NotificationService) IsConfiguredFor(ctx context.Context, category string) bool {
+	if s.resolver == nil || s.drivers == nil {
+		return false
+	}
+	// Same input the dispatch path builds — TenantID included — so the
+	// pre-flight can never check a different profile than the send uses.
+	tenantID, _ := ctxauth.GetTenantID(ctx)
+	p, err := s.resolver.Resolve(ctx, ResolveInput{Category: category, TenantID: tenantID})
+	if err != nil {
+		return false
+	}
+	_, err = s.usableDriver(p)
+	return err == nil
+}
+
 // usableDriver is the second and third fail-closed step: the profile's
 // driver must be registered and must accept the profile with secrets in view.
 func (s *NotificationService) usableDriver(p SenderProfile) (EmailDriver, error) {
