@@ -56,6 +56,7 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 				{Keys: map[string]int{"recipientUserUuid": 1}},
 				{Keys: map[string]int{"category": 1}},
 				{Keys: map[string]int{"idempotencyKey": 1}},
+				{Keys: map[string]int{"senderSlug": 1}, Sparse: true},
 				{Keys: map[string]int{"createdAt": 1}, TTL: day90},
 			},
 		},

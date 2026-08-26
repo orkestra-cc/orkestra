@@ -289,6 +289,7 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 	now := time.Now()
 	logDoc.Status = models.StatusSent
 	logDoc.Provider = profile.Provider
+	logDoc.SenderSlug = profile.Slug
 	logDoc.SentAt = &now
 	_ = s.logRepo.Create(ctx, logDoc)
 
@@ -339,6 +340,7 @@ func (s *NotificationService) failSend(ctx context.Context, logDoc *models.Notif
 	de := newDispatchError(profile, err)
 	logDoc.Status = models.StatusFailed
 	logDoc.Provider = profile.Provider
+	logDoc.SenderSlug = profile.Slug // empty when no profile resolved
 	logDoc.Error = de.Reason
 	_ = s.logRepo.Create(ctx, logDoc)
 	s.logger.Warn("notification: send failed",

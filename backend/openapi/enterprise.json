@@ -4506,6 +4506,9 @@
           "recipientUserUuid": {
             "type": "string"
           },
+          "senderSlug": {
+            "type": "string"
+          },
           "sentAt": {
             "format": "date-time",
             "type": "string"
@@ -15035,6 +15038,16 @@
             "name": "status",
             "schema": {
               "description": "Filter by status",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by sender profile slug",
+            "explode": false,
+            "in": "query",
+            "name": "sender",
+            "schema": {
+              "description": "Filter by sender profile slug",
               "type": "string"
             }
           },

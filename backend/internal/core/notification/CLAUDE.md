@@ -36,7 +36,7 @@ Declared in `module.go::Collections()` and auto-created on boot:
 
 | Collection                          | Indexes                                           | TTL  |
 | ----------------------------------- | ------------------------------------------------- | ---- |
-| `notification_messages`             | `uuid` unique, `recipientUserUuid`, `category`, `idempotencyKey` | 90 days on `createdAt` |
+| `notification_messages`             | `uuid` unique, `recipientUserUuid`, `category`, `idempotencyKey`, `senderSlug` (sparse) | 90 days on `createdAt` |
 | `notification_templates`            | `uuid` unique, compound `templateId+locale` unique | — |
 | `notification_preferences`          | compound `userUuid+category+channel` unique       | — |
 | `notification_suppressions`         | `address` unique                                  | — |
@@ -85,6 +85,9 @@ The `noop` provider logs rendered mail to the backend stdout instead of dialing 
 2. `DriverRegistry.Get(profile.Provider)` → `EmailDriver`; `ValidateProfile(driver,
    profile, RuntimeView)` checks the driver's `Requires()`.
 3. `driver.Send(ctx, profile, msg)`; `msg.Category` carries the routing category.
+
+Each row records the profile that carried it: `logDoc.SenderSlug = profile.Slug`
+(empty when no profile resolved).
 
 Every failure is **fail-closed** and still writes a `failed` log row whose `error`
 names the profile and the reason (`sender=default driver=smtp err=not_configured
@@ -192,7 +195,7 @@ Registered in three groups with different middleware:
 
 ### Admin (`administrator` role)
 
-- `GET /v1/notifications` — paginated delivery log with filters by category / status / channel
+- `GET /v1/notifications` — paginated delivery log; filters: `category`, `status`, `sender` (profile slug). Every row carries `provider` and `senderSlug`, so *which* profile sent or refused a message is answerable per row.
 - `POST /v1/notifications/test` — `{to, subject?, bodyText?, sender?}`; `sender` names a profile slug (default: the `*` profile). Bypasses preferences, idempotency and the delivery log. 404 `notification.sender_not_found`, 422 `notification.sender_incomplete` (driver unknown or a required field — secret included — missing), 502 `notification.send_failed` with the bounded diagnostic. This is the only way to prove a profile whose gap is a secret.
 - `GET /v1/notifications/templates` — list all templates
 - `GET /v1/notifications/templates/{templateId}?locale=en` — fetch a single template

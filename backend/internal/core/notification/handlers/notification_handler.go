@@ -27,6 +27,7 @@ func NewNotificationHandler(svc *services.NotificationService) *NotificationHand
 type listNotificationsRequest struct {
 	Category string `query:"category" doc:"Filter by category"`
 	Status   string `query:"status" doc:"Filter by status"`
+	Sender   string `query:"sender" doc:"Filter by sender profile slug"`
 	Limit    int64  `query:"limit" doc:"Max rows (default 100)"`
 }
 
@@ -38,8 +39,9 @@ type listNotificationsResponse struct {
 
 func (h *NotificationHandler) ListNotifications(ctx context.Context, req *listNotificationsRequest) (*listNotificationsResponse, error) {
 	items, err := h.svc.LogRepo().List(ctx, repository.Filter{
-		Category: req.Category,
-		Status:   req.Status,
+		Category:   req.Category,
+		Status:     req.Status,
+		SenderSlug: req.Sender,
 	}, req.Limit)
 	if err != nil {
 		return nil, huma.Error500InternalServerError("list notifications failed", err)

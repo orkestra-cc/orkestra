@@ -19,6 +19,7 @@ type NotificationDoc struct {
 	Subject           string             `bson:"subject,omitempty" json:"subject,omitempty"`
 	Status            string             `bson:"status" json:"status"`
 	Provider          string             `bson:"provider,omitempty" json:"provider,omitempty"`
+	SenderSlug        string             `bson:"senderSlug,omitempty" json:"senderSlug,omitempty"`
 	Error             string             `bson:"error,omitempty" json:"error,omitempty"`
 	IdempotencyKey    string             `bson:"idempotencyKey,omitempty" json:"idempotencyKey,omitempty"`
 	CreatedAt         time.Time          `bson:"createdAt" json:"createdAt"`

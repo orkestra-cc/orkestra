@@ -96,9 +96,6 @@ internal/core/authz/repository/repository.go:440:Find
 internal/core/authz/repository/repository.go:54:Find
 internal/core/authz/repository/repository.go:67:Find
 internal/core/authz/repository/repository.go:93:UpdateOne
-internal/core/notification/repository/notification_repository.go:106:FindOne
-internal/core/notification/repository/notification_repository.go:56:FindOne
-internal/core/notification/repository/notification_repository.go:86:Find
 internal/core/notification/repository/preference_repository.go:107:UpdateOne
 internal/core/notification/repository/preference_repository.go:124:DeleteOne
 internal/core/notification/repository/preference_repository.go:40:FindOne

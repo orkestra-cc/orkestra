@@ -24,10 +24,11 @@ type NotificationRepository interface {
 
 // Filter narrows a notification list query.
 type Filter struct {
-	UserUUID string
-	Category string
-	Status   string
-	Channel  string
+	UserUUID   string
+	Category   string
+	Status     string
+	Channel    string
+	SenderSlug string
 }
 
 type notificationRepository struct {
@@ -53,6 +54,7 @@ func (r *notificationRepository) FindByIdempotencyKey(ctx context.Context, key s
 		return nil, nil
 	}
 	var doc models.NotificationDoc
+	//tenantscope:allow system: the delivery log is platform-global; idempotency keys are minted per send, not per tenant
 	err := r.coll.FindOne(ctx, bson.M{
 		"idempotencyKey": key,
 		"createdAt":      bson.M{"$gte": since},
@@ -80,9 +82,13 @@ func (r *notificationRepository) List(ctx context.Context, filter Filter, limit 
 	if filter.Channel != "" {
 		q["channel"] = filter.Channel
 	}
+	if filter.SenderSlug != "" {
+		q["senderSlug"] = filter.SenderSlug
+	}
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
+	//tenantscope:allow admin-view: operator delivery log spans every tenant (notification.log.read)
 	cursor, err := r.coll.Find(ctx, q,
 		options.Find().SetSort(bson.M{"createdAt": -1}).SetLimit(limit),
 	)
@@ -103,6 +109,7 @@ func (r *notificationRepository) List(ctx context.Context, filter Filter, limit 
 
 func (r *notificationRepository) GetByUUID(ctx context.Context, uuid string) (*models.NotificationDoc, error) {
 	var doc models.NotificationDoc
+	//tenantscope:allow admin-view: operator delivery log lookup by message UUID
 	err := r.coll.FindOne(ctx, bson.M{"uuid": uuid}).Decode(&doc)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return nil, ErrNotFound
