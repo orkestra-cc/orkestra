@@ -257,11 +257,21 @@ So the chokepoint sanitizes before writing, once, for every driver:
 
 | Case | Recorded |
 | --- | --- |
-| vendor returned a parseable envelope | `http=<status> status=<Status> code=<Code> msg=<Message, truncated>` |
-| body did not parse, or was not JSON | `http=<status> body=unparseable bytes=<n> type=<content-type>` — **no content** |
-| transport failure (dial, TLS, timeout) | the Go error, truncated |
+| vendor returned a parseable envelope | `http=<status> status=<Status> code=<Code>` — **no vendor free text** |
+| body did not parse, or was not JSON | `http=<status> body=unparseable bytes=<n> type=<content-type>` — no content |
+| transport failure (dial, TLS, timeout) | the Go error, truncated to 512 |
 
-Rules that apply to all three: `Message` is truncated to 200 runes on a rune boundary; the whole field is capped at 512; CR, LF and other control characters are stripped, so a vendor string cannot forge log structure; and **no driver ever includes its own request payload**, which is what keeps the credential case out by construction rather than by remembering.
+**The vendor's `Message` is never persisted.** Truncation does not make free text safe: if MailUp echoes the request into its error message — and it carries the SMTP+ user and secret in the request body's `User` field — the credential can sit inside the first 200 characters, where every cap and every control-character filter passes it straight through.
+
+Redacting it instead was considered and rejected. Redaction is a blocklist: it works only while the vendor echoes the secret in exactly the form we hold, and it fails **silently** against URL-encoding, JSON escaping, a partial echo, or any encoding added later. A rule that can only be verified by hunting for a string we hope to recognise is not a rule.
+
+`Status` and `Code` are kept, but structurally rather than on trust: each is passed through a `[A-Za-z0-9._-]` allowlist and capped at 64 characters, with anything else replaced by a marker. So even a vendor that one day returns a sentence in `Code` cannot turn it into a channel for echoed content.
+
+What this costs is the vendor's human-readable reason, and the cost is small: `Code` is the machine-readable form of the same thing and is what their documentation is indexed by, the full message stays in MailUp's own reporting, and the log row already carries the UUID, timestamp and sender slug needed to find it there.
+
+Transport errors keep the truncated Go error, as today. This is a stated decision, not an omission: that string is produced by our own stack and by an SMTP server's status line, and neither carries the credential — SMTP authenticates through `PlainAuth` rather than by echoing a body. The echo risk lives specifically in a response body, which is why that is where the hard rule applies.
+
+One rule genuinely does hold by construction: **no driver ever puts its own request payload into an error.** That is ours to guarantee, and it is guaranteed by never passing the request to the error path — unlike anything involving vendor text, which we can only bound.
 
 The raw body is not written anywhere else either — not to stdout, not at debug level — because the credential risk does not care which sink it reaches. It is also not needed: the vendor keeps its own copy, and the log row already carries its own UUID, its timestamp, the sender slug and the vendor's own status and code — enough to find the corresponding entry in MailUp's reporting without duplicating the payload here.
 
@@ -357,7 +367,7 @@ The backend has a coverage gate (`make backend-coverage-gate`), so tests are par
 | Pattern normalization | table-driven | trim, lowercase both sides, drop empties, collapse within-profile duplicates **before** the cross-profile uniqueness check so a repeat is never reported as a conflict |
 | Driver registry + `Validate` | table-driven | unknown driver; each driver against incomplete profiles |
 | `mailup` driver | `httptest.Server` | asserts method, auth placement and body shape; **`CampaignCode` carries the category through**. Success is asserted as the full predicate, and the failure table is driven from its negation: non-2xx, unparseable body, **2xx with a non-`done` `Status`**, 2xx with a non-zero `Code`, missing field, empty body, timeout. No live calls |
-| Error sanitization | table-driven | a 5 MB HTML error page ⇒ bounded `body=unparseable bytes=…`, **no markup stored**; an envelope echoing the request ⇒ **the SMTP+ secret never appears**; a `Message` with CRLF ⇒ control characters stripped; truncation lands on a rune boundary. This is the regression test for a secret reaching an admin-visible field |
+| Error sanitization | table-driven | assert the **shape**, not the absence of a string: for a parseable envelope the recorded value must match `^http=\d+ status=[A-Za-z0-9._-]{0,64} code=[A-Za-z0-9._-]{0,64}$` and nothing else. That makes "an envelope echoing the SMTP+ secret in `Message` leaves no trace" true by the assertion rather than by searching for a secret we would have to recognise. Plus: a 5 MB HTML error page ⇒ `body=unparseable bytes=…` with no markup; a `Code` containing a sentence ⇒ replaced by the marker; every field capped |
 | `smtp` / `noop` drivers vs the new field | the existing tests, unchanged | both ignore `Category` — the wire output must be byte-identical, which is what makes extending `EmailMessage` safe under D6 |
 | `smtp` driver | the existing 233 lines, re-pointed | the credentials' source changes, the behaviour does not |
 | `ValidateConfig` | table-driven over the merged map | the three states above are the point of the table: **an empty roster must accept a PATCH that touches only `app.name`** (the legacy-install regression), a roster of pattern-less drafts must save, and the save that first declares a pattern must demand a `*`. Plus a test that **documents the secret-blind limit** rather than leaving it implicit |
