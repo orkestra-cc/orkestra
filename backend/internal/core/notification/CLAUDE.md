@@ -181,7 +181,7 @@ Registered in three groups with different middleware:
 ### Admin (`administrator` role)
 
 - `GET /v1/notifications` — paginated delivery log with filters by category / status / channel
-- `POST /v1/notifications/test` — send a test email through the default sender profile; bypasses preferences, idempotency and the delivery log
+- `POST /v1/notifications/test` — `{to, subject?, bodyText?, sender?}`; `sender` names a profile slug (default: the `*` profile). Bypasses preferences, idempotency and the delivery log. 404 `notification.sender_not_found`, 422 `notification.sender_incomplete` (driver unknown or a required field — secret included — missing), 502 `notification.send_failed` with the bounded diagnostic. This is the only way to prove a profile whose gap is a secret.
 - `GET /v1/notifications/templates` — list all templates
 - `GET /v1/notifications/templates/{templateId}?locale=en` — fetch a single template
 - `PUT /v1/notifications/templates/{templateId}` — override a template (sets `isSystem=false`)

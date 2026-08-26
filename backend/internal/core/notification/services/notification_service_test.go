@@ -827,3 +827,17 @@ func TestNotificationService_IsConfiguredFor(t *testing.T) {
 	}
 	var _ iface.CategoryConfiguredChecker = svc3
 }
+
+func TestNotificationService_SendTest_ExplicitSender(t *testing.T) {
+	k := newKit(Options{})
+	res, err := k.svc.SendTest(context.Background(), TestSendInput{To: "a@example.com", Sender: "default"})
+	if err != nil || res.SenderSlug != "default" || len(k.driver.sent) != 1 {
+		t.Fatalf("explicit default: %+v %v", res, err)
+	}
+	if _, err := k.svc.SendTest(context.Background(), TestSendInput{To: "a@example.com", Sender: "nope"}); !errors.Is(err, ErrSenderNotFound) {
+		t.Fatalf("unknown slug must be ErrSenderNotFound, got %v", err)
+	}
+	if len(k.driver.sent) != 1 {
+		t.Fatal("nothing must be sent for an unknown slug")
+	}
+}

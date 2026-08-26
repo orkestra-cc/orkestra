@@ -383,6 +383,7 @@ type TestSendInput struct {
 	To       string
 	Subject  string
 	BodyText string
+	Sender   string // profile slug; empty = the default (*) profile
 }
 
 // TestSendResult reports which profile carried (or refused) a test send.
@@ -396,7 +397,15 @@ type TestSendResult struct {
 // SendTest sends through the default profile, bypassing preferences,
 // idempotency and the delivery log exactly as the /test endpoint always has.
 func (s *NotificationService) SendTest(ctx context.Context, in TestSendInput) (TestSendResult, error) {
-	profile, err := s.resolver.Default(ctx)
+	var (
+		profile SenderProfile
+		err     error
+	)
+	if in.Sender != "" {
+		profile, err = s.resolver.BySlug(ctx, in.Sender)
+	} else {
+		profile, err = s.resolver.Default(ctx)
+	}
 	if err != nil {
 		de := newDispatchError(profile, err)
 		return TestSendResult{Diagnostic: de.Reason}, de
