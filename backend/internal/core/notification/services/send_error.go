@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"regexp"
 	"strings"
@@ -222,4 +223,24 @@ func describeSendError(p SenderProfile, err error) string {
 		out = prefix + " err=unknown"
 	}
 	return capString(out, maxErrorValue)
+}
+
+// maxResponseBody bounds every vendor response — success path included —
+// before any parse. Generous for a JSON acknowledgement, harmless if a proxy
+// answers with a page of HTML.
+const maxResponseBody = 64 << 10
+
+// readBounded reads at most max+1 bytes. Reading the one extra byte is what
+// distinguishes "exactly at the cap" from "over it"; an oversized body costs
+// max bytes of memory rather than an allocation the size of whatever was
+// sent, and is never handed to a decoder.
+func readBounded(r io.Reader, max int) (body []byte, tooLarge bool, err error) {
+	b, err := io.ReadAll(io.LimitReader(r, int64(max)+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if len(b) > max {
+		return nil, true, nil
+	}
+	return b, false, nil
 }

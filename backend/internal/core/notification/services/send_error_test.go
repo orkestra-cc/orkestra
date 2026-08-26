@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"regexp"
 	"strings"
@@ -157,5 +158,43 @@ func TestDescribeSendError_IsCapped(t *testing.T) {
 	got := describeSendError(SenderProfile{Slug: "s"}, long)
 	if len(got) > 512 {
 		t.Fatalf("len = %d, want ≤ 512", len(got))
+	}
+}
+
+// countingReader counts bytes handed out so the test can assert how much
+// was READ, not merely how much was stored.
+type countingReader struct {
+	r io.Reader
+	n int
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += n
+	return n, err
+}
+
+func TestReadBounded(t *testing.T) {
+	// 5 MB HTML error page: rejected as too large, and at most max+1 bytes were read.
+	big := &countingReader{r: strings.NewReader(strings.Repeat("<html>", 1<<20))}
+	body, tooLarge, err := readBounded(big, maxResponseBody)
+	if err != nil || !tooLarge || body != nil {
+		t.Fatalf("want tooLarge with no body, got %v %v %d", tooLarge, err, len(body))
+	}
+	if big.n > maxResponseBody+1 {
+		t.Fatalf("read %d bytes, must stop at %d", big.n, maxResponseBody+1)
+	}
+
+	// Exactly at the cap is fine.
+	exact := strings.Repeat("a", maxResponseBody)
+	body, tooLarge, err = readBounded(strings.NewReader(exact), maxResponseBody)
+	if err != nil || tooLarge || len(body) != maxResponseBody {
+		t.Fatalf("exactly at the cap must be accepted: %v %v %d", tooLarge, err, len(body))
+	}
+
+	// One over the cap is not.
+	_, tooLarge, _ = readBounded(strings.NewReader(exact+"a"), maxResponseBody)
+	if !tooLarge {
+		t.Fatal("max+1 bytes must be rejected")
 	}
 }
