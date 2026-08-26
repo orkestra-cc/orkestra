@@ -265,6 +265,13 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
 
         if (field.type === 'enum') {
           const options = field.options ?? [];
+          // A value stored before an enum conversion (or after Options
+          // changed) may not be among the current options. Render it as its
+          // own selected option so the select reflects the truth and a save
+          // that doesn't touch this field preserves it, instead of silently
+          // snapping to the first option.
+          const current = values[field.key] ?? '';
+          const orphan = current !== '' && !options.includes(current);
           return (
             <Form.Group key={key} className="mb-3">
               <Form.Label htmlFor={`cfg-${name}`}>
@@ -291,6 +298,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                     {t('adminModules.configFields.enumNonePlaceholder')}
                   </option>
                 )}
+                {orphan && <option value={current}>{current}</option>}
                 {options.map(opt => (
                   <option key={opt} value={opt}>
                     {opt}
