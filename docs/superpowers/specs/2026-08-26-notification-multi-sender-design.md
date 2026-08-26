@@ -296,7 +296,19 @@ Read precisely, that is a property of the **SMTP+ product**, not of the API send
 
 `CampaignCode` — MailUp aggregates messages by it for statistics — is mapped from `EmailMessage.Category`, which is why that field is carried (see §Components). The effect is that the vendor's own reporting lines up with the routing this design introduces, instead of showing one undifferentiated stream.
 
-> **HTTP 200 is not success.** MailUp's REST surface is WCF-derived (`.svc` endpoints, SOAP heritage), and that family routinely answers `200 OK` with an error envelope in the body — a `Status` of `"error"` alongside a message, rather than a 4xx. A driver that treats the status line as the verdict would record `Status=sent` on mail that was never accepted, which under fail-closed is the worst possible failure: silent, and indistinguishable from success in the delivery log. **The driver decides from the parsed body, and only then from the status code.** This is a test case, not a comment.
+> **Success is an allowlist, not the absence of an error.** MailUp's REST surface is WCF-derived (`.svc` endpoints, SOAP heritage), and that family routinely answers `200 OK` with an error envelope in the body rather than a 4xx. A driver that treats the status line as the verdict would record `Status=sent` on mail that was never accepted — under fail-closed the worst failure available, because it is silent and indistinguishable from success in the delivery log.
+>
+> So the driver does not look for failure; it requires success, and treats everything else as a failure including shapes nobody anticipated:
+>
+> ```
+> success  ⇔  HTTP 2xx  ∧  body parses  ∧  Status == "done"  ∧  Code == "0"
+> ```
+>
+> Every other combination fails, with the raw body recorded in `NotificationDoc.Error`: non-2xx, unparseable body, 2xx with a different `Status`, a missing field, an empty body. Written the other way round — enumerate the errors, pass otherwise — a response shape the vendor adds later becomes a silent success.
+>
+> The two literals `"done"` and `"0"` come from review rather than from a page this design could fetch; the wiki is JS-rendered and does not yield its schema. **PR 3 confirms them against the response schema in the same pass that reads the request field names**, and the predicate above is what the test asserts either way — if the literals differ, only they change.
+
+> **A success means accepted, not delivered.** The vendor is explicit that *"all methods used to send emails are asynchronous, hence a successful return code means that the request was correct."* So `Status=sent` in the delivery log records that MailUp accepted the message, and nothing about what happened afterwards. That is the same guarantee the SMTP driver gives when a relay returns 250, so the log stays consistent across drivers — but it is the reason the deferred delivery-feedback loop is the only thing that could ever make that column mean *delivered*.
 
 > **What still needs reading at implementation time** — not a spike, ordinary reference work. The exact JSON field names of the `SendMessage` body are not transcribed here; PR 3 reads them from the [vendor page](https://helpmailup.atlassian.net/wiki/spaces/mailupapi/pages/36342655/Transactional+Emails+using+APIs) and writes the struct against them. The endpoint, the auth model and the method choice above are settled.
 
@@ -319,7 +331,7 @@ The backend has a coverage gate (`make backend-coverage-gate`), so tests are par
 | Schema/driver agreement | table-driven over the declared schema | for every driver, every field the schema marks `Required` **and** visible under that provider must be one the driver's `Validate` actually needs, and vice versa. A `noop` profile with nothing but a slug and a label must be savable — that is the regression test for the console blocking Save on a field its driver never reads |
 | Pattern normalization | table-driven | trim, lowercase both sides, drop empties, collapse within-profile duplicates **before** the cross-profile uniqueness check so a repeat is never reported as a conflict |
 | Driver registry + `Validate` | table-driven | unknown driver; each driver against incomplete profiles |
-| `mailup` driver | `httptest.Server` | asserts method, auth placement and body shape; **`CampaignCode` carries the category through**; 4xx / 5xx / timeout — **and HTTP 200 carrying an error envelope** (see below). No live calls |
+| `mailup` driver | `httptest.Server` | asserts method, auth placement and body shape; **`CampaignCode` carries the category through**. Success is asserted as the full predicate, and the failure table is driven from its negation: non-2xx, unparseable body, **2xx with a non-`done` `Status`**, 2xx with a non-zero `Code`, missing field, empty body, timeout. No live calls |
 | `smtp` / `noop` drivers vs the new field | the existing tests, unchanged | both ignore `Category` — the wire output must be byte-identical, which is what makes extending `EmailMessage` safe under D6 |
 | `smtp` driver | the existing 233 lines, re-pointed | the credentials' source changes, the behaviour does not |
 | `ValidateConfig` | table-driven over the merged map | the three states above are the point of the table: **an empty roster must accept a PATCH that touches only `app.name`** (the legacy-install regression), a roster of pattern-less drafts must save, and the save that first declares a pattern must demand a `*`. Plus a test that **documents the secret-blind limit** rather than leaving it implicit |
