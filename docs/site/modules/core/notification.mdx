@@ -17,15 +17,38 @@ To send real mail, switch `email.provider` to `smtp` at `/admin/modules/notifica
 
 ## Config
 
-Eleven keys, seeded from env vars on first boot and owned by the ConfigService afterwards. `/admin/modules/notification` renders them as a three-group rail:
+Eleven flat keys — seeded from env vars on first boot and owned by the ConfigService afterwards — plus one record list. `/admin/modules/notification` renders them as a four-group rail:
 
 | Group | Keys |
 |---|---|
-| **Delivery** | `email.provider` plus the five `email.smtp.*` fields — host, port, username, password, TLS mode |
-| **Sender** | `email.from_address`, `email.from_name`, `email.reply_to` |
+| **Delivery** | `email.provider` plus the five `email.smtp.*` fields — the **default transport**, used while no sender profile routes a category |
+| **Sender profiles** | `email.senders` — a repeatable list of senders, each with its own transport and identity ([ADR-0019](/adrs/notification-multi-sender)) |
+| **Sender** | `email.from_address`, `email.from_name`, `email.reply_to` — the identity of the default transport |
 | **Branding & templates** | `app.name`, `app.support_email` |
 
-The SMTP fields carry a `DependsOn` on `email.provider`, so a default `noop` install shows **one** visible Delivery field until you switch the provider — the connection settings appear only once they can matter. `email.smtp.password` is a `FieldSecret`: AES-256-GCM at rest, never read from plain env after bootstrap.
+The SMTP fields carry a `DependsOn` on `email.provider`, so a default `noop` install shows **one** visible Delivery field until you switch the provider — the connection settings appear only once they can matter. `email.smtp.password` and every profile's secret are `FieldSecret`: AES-256-GCM at rest, never read from plain env after bootstrap.
+
+## Sender profiles
+
+Email reputation is scored per domain and per IP, and bulk marketing and password resets do not belong on the same one. A **sender profile** is a transport **and** an identity — provider, credentials, from-address — and each profile declares the **category patterns** it carries:
+
+| Pattern | Matches |
+|---|---|
+| `*` | everything — the default; exactly one profile must declare it once any profile routes |
+| `auth.verify_email` | that category only |
+| `auth.*` | any category beginning `auth.` at any depth — never the bare `auth` |
+
+The most specific match wins (`auth.verify_email` beats `auth.*` beats `*`); a profile with no patterns is a **draft** that receives no mail. Resolution is **fail-closed**: a category no profile matches is not silently rerouted through the default — the send fails and the delivery log names the reason. Callers never see any of this: `iface.NotificationSender` is unchanged, and which sender carries which mail is an operator decision made on a screen.
+
+Three drivers ship in the base: `noop`, `smtp` (an unauthenticated internal relay is a supported configuration — username and password are optional), and `mailup` (MailUp's SMTP+ REST API; the SMTP+ user and secret are required, and the category becomes the vendor's `CampaignCode`).
+
+**The flat keys are still the environment-bootstrap path.** Record-list elements are never seeded from env vars, so a stack configured through `SMTP_HOST` keeps working: until some profile declares a pattern — the list is empty, or holds only drafts — the module synthesizes a profile (slug `_legacy`, a name no list element can take) from `email.provider`, `email.smtp.*` and `email.from_*`, routing `*`. Creating a first draft, or removing the last pattern, never changes which sender carries mail. Nothing migrates and nothing needs rolling back.
+
+**Validation** runs on every save and before an environment is activated, but only once a profile actually declares a pattern — a legacy install and a first, pattern-less profile are never blocked. It rejects a malformed pattern, a missing or duplicate `*`, a pattern claimed by two profiles, an unknown provider, and a routing profile missing a non-secret field its driver needs (`422`, codes `notification.sender_*`). It **cannot see secrets**: a MailUp profile missing only its secret saves and fails at send. Prove a profile with `POST /v1/notifications/test` and an explicit `sender`.
+
+**Pre-flight.** `IsConfigured` still answers only for the default profile. A consumer about to send should ask `iface.IsConfiguredForCategory(ctx, sender, category)`, which is exact for the core sender and falls back to `IsConfigured` for a fork's own implementation. Every `auth` guard does this.
+
+**Delivery-log errors are bounded.** No string produced by a remote peer is ever stored: an SMTP rejection keeps only `smtp op=auth code=535`, a MailUp refusal `http=200 status=error code=5` — the server's text is dropped because a relay can echo the `AUTH` argument, and MailUp carries its credentials in the request body. Every row also carries `provider` and `senderSlug`, so "which sender failed" is answerable per message.
 
 ## Templates
 
@@ -51,9 +74,9 @@ Every send accepts an idempotency key. Before dispatching, the orchestrator look
 |---|---|---|
 | Public | `GET /v1/notifications/unsubscribe` | none — consumes a token, always returns a generic success |
 | User | `GET` / `PUT /v1/notifications/preferences` | `guest`+ |
-| Admin | `GET /v1/notifications` (delivery log), `POST /v1/notifications/test`, and the four `…/templates` operations | `administrator` |
+| Admin | `GET /v1/notifications` (delivery log; filters `category`, `status`, `sender`), `POST /v1/notifications/test` (`{to, sender?}` — proves one profile end to end), and the four `…/templates` operations | `administrator` |
 
-`POST /v1/notifications/test` sends a message using the current settings — worth running before trusting a new SMTP config with real auth mail.
+`POST /v1/notifications/test` sends through the default profile, or the profile named by `sender` — the only check that sees a profile's secret before real mail depends on it.
 
 ## Storage
 

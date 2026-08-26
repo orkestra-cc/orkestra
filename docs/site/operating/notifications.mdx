@@ -9,14 +9,31 @@ The `notification` module boots in **`noop` mode** by default — verification a
 
 ## Switching to real delivery
 
+The quickest path is still one relay for everything:
+
 1. Open `/admin/modules/notification`.
 2. Under **Delivery**, change **Email provider** from `noop` to `smtp`. The SMTP connection fields appear only at this point — they carry a dependency on the provider field, so a default install shows one option instead of six irrelevant ones.
-3. Fill in host, port, username, password, and TLS mode.
+3. Fill in host, port and TLS mode; username and password only if your relay authenticates.
 4. Under **Sender**, set the from-address and display name.
-5. Save. The change takes effect immediately — no restart.
-6. Use **`POST /v1/notifications/test`** to send yourself a message before trusting the config with real auth mail.
+5. Save — it takes effect immediately, no restart — and send yourself a message with **`POST /v1/notifications/test`**.
+
+This configures the **legacy default sender**: until a profile under **Sender profiles** declares a pattern, these settings are the one profile every message uses (it appears in the delivery log as `senderSlug=_legacy`), and a stack that sets `SMTP_HOST` in `docker-compose` is configured the same way. Adding a profile without patterns changes nothing yet.
 
 The password is stored as a `FieldSecret`: AES-256-GCM encrypted at rest, never echoed back through the API.
+
+## Separating transactional from marketing mail
+
+Reputation is scored per domain and per IP, and vendors enforce the split contractually (MailUp's SMTP+ terms: *do not use it for promotional emails*). Once a fork sends campaigns, give each workload its own sender:
+
+1. Under **Sender profiles**, add a profile — say *Transactional* — pick its provider, fill its identity and credentials, and give it the pattern `*`. It is now the default for everything.
+2. Add a second profile — *Campaigns* — on its own domain and relay, with the patterns your campaign categories use: `crm.*`, `marketing`. (A category with no dot, like `marketing`, is matched only by the exact pattern; `marketing.*` would not capture it.)
+3. Optionally pin the access path explicitly: a third profile with `auth.*` carries verification, reset and security mail even if someone later edits the default.
+4. Save. The most specific pattern wins, so `auth.verify_email` goes to the `auth.*` profile, `crm.campaign` to `crm.*`, and anything else to `*`.
+5. Prove each profile: `POST /v1/notifications/test` with `{"to": "you@example.com", "sender": "<slug>"}`. This is the only check that exercises a profile's secret before real mail depends on it.
+
+A profile with no patterns is a **draft** — it receives nothing and is not validated beyond pattern grammar, so you can prepare a sender before routing traffic to it. Once any profile declares a pattern, exactly one must declare `*`; saving is refused otherwise (`notification.sender_no_default`).
+
+**Nothing is silently rerouted.** If a category matches no profile, or its profile is incomplete, the send **fails** and the delivery log row says why (`sender=campaigns driver=mailup err=not_configured missing=mailup_user`). Falling back to the default would push promotional mail through the transactional sender — the thing this feature exists to prevent.
 
 ## TLS mode
 
@@ -28,9 +45,11 @@ The password is stored as a `FieldSecret`: AES-256-GCM encrypted at rest, never 
 
 Port 25 is blocked outbound by most cloud providers, so `starttls` on 587 is the right first attempt.
 
-## Provider settings
+## Providers
 
-Every hosted relay maps onto the same five fields. Confirm the host against your provider's current documentation — these are stable but not ours to guarantee.
+`smtp` covers every hosted relay below and any internal MTA — credentials are optional, so an unauthenticated relay on a private network is a first-class setup. `mailup` talks to MailUp's SMTP+ API directly: create an SMTP+ user in the MailUp console after authorizing a trusted sender, and enter its username (`s12345_67`) and secret; the notification category is reported to MailUp as the `CampaignCode`, so their statistics line up with your routing (leave it to MailUp's own default by sending an empty category). A MailUp "success" means *accepted*, not delivered — the same guarantee an SMTP `250` gives. A `Reply-To` differing from the from-address has to be enabled on the account by MailUp support.
+
+Every hosted relay maps onto the same SMTP fields. Confirm the host against your provider's current documentation — these are stable but not ours to guarantee.
 
 | Provider | Host | Username | Password |
 |---|---|---|---|
@@ -61,10 +80,11 @@ Subjects and plain-text bodies render through Go's `text/template`; HTML bodies 
 Work down this list in order:
 
 1. **Is the provider still `noop`?** Then it never left the building — the rendered message is in the backend's stdout. This is the single most common cause.
-2. **Check the delivery log** at `GET /v1/notifications` — filter by category and status. A row with a failure status means Orkestra tried and the relay refused; no row at all means the send was never attempted.
+2. **Check the delivery log** at `GET /v1/notifications` — filter by `category`, `status`, or `sender`. A `failed` row names the profile and the reason (`sender=… smtp op=auth code=535`, `http=401 status=error code=401`, `err=no_sender_for_category`); Orkestra tried and the sender refused. No row at all means the send was never attempted — usually a pre-flight guard found the category's profile unusable, which for `auth` mail surfaces as a 503 on signup.
 3. **Is the address suppressed?** A suppression is keyed by address and silently drops delivery. There is no bounce ingestion in the base, so suppressions are added manually — check before assuming a config fault.
 4. **Was it deduplicated?** Every send carries an idempotency key, and a repeat within the hour returns the earlier result instead of sending again. Two clicks on "resend" produce one email, on purpose.
 5. **Then look at SPF/DKIM and the provider's own log.** By this point the problem is usually at the relay, not in Orkestra.
+6. **With several profiles, check which one carried it.** `senderSlug` on the row tells you; a category that rode the default when you expected `crm.*` means the pattern is misspelled — a pattern with no dot matches exactly, and `crm.*` never matches the bare `crm`.
 
 :::note Scope
 Email only. The interface was designed for SMS, push, and webhooks, but none are implemented. Sends are synchronous — there is no queue. No marketing automation, segmentation, or A/B testing; no bounce or complaint ingestion; DKIM signing is the relay's job.
