@@ -49,15 +49,6 @@ type EmailSettings struct {
 	TLSMode     string // "starttls" | "tls" | "none"
 }
 
-// EmailMessage is a fully rendered message ready to hand to the transport.
-type EmailMessage struct {
-	To       string
-	ToName   string
-	Subject  string
-	BodyText string
-	BodyHTML string
-}
-
 // EmailSender is the low-level transport interface.
 type EmailSender interface {
 	IsConfigured() bool
