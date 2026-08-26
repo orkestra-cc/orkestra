@@ -43,7 +43,7 @@ A send is routed by matching its `Category` (`auth.verify_email`, `crm.campaign`
 
 `iface.NotificationSender` and its two request DTOs are **unchanged**. No consumer learns that profiles exist, no fork's addon needs a code change on sync, and no *routing* decision reaches a caller. (D7 adds an **optional companion interface** for pre-flight checks — the `NotificationSender` contract itself is still untouched, and a sender that does not implement the companion keeps working.) Which sender carries which mail becomes an operator decision made on a screen, not a developer decision made in a deploy.
 
-Rejected: adding a `SenderProfile` field to the DTOs. It changes a frozen v1 SDK surface (OpenAPI diff, every fork on next sync) to move an operational decision into code.
+Rejected: adding a `SenderProfile` field to the DTOs. The mechanical cost is small — `iface`'s request structs are in-process Go, not wire types, so there is no OpenAPI diff, and adding a field to a struct is source-compatible. The cost is semantic, and larger: it puts the choice of sender in the calling code, so changing which vendor carries password resets becomes a code edit and a deploy instead of a setting, and every fork's addon has to be taught the profile vocabulary to route anything.
 
 ### D2 — A profile is transport **and** identity, declared as one `recordList`
 

@@ -105,13 +105,31 @@ A fork's CRM email-tracking rewriter operates on the rendered HTML **before** th
 
 ### Matching rules
 
-- A pattern is either `*`, an exact category, or a dotted prefix ending in `.*` (`auth.*`, `crm.campaign.*`).
+**Grammar.** A pattern is exactly one of:
+
+| Form | Meaning | Matches | Does **not** match |
+| --- | --- | --- | --- |
+| `*` | the default | everything | — |
+| `foo.bar` | exact | `foo.bar` only | `foo.bar.baz` |
+| `foo.*` | prefix | any category beginning `foo.` with **at least one** further character, at any depth — `foo.bar`, `foo.bar.baz` | the bare `foo` |
+
+Nothing else is legal: no `*` inside a token (`auth*`), no bare `*` mid-pattern (`auth.*.google`), no pattern that is only `.`. Malformed patterns are rejected at save time with `notification.sender_pattern_invalid`.
+
+The bare-`foo` exclusion is deliberate and matters in practice: a fork's CRM sends `Category: "marketing"`, a single token with no dot. Only the exact pattern `marketing` reaches it — `marketing.*` does not — so a category with no dot can never be captured by accident from a prefix rule written for a namespace.
+
+**Normalization.** Patterns are operator-typed free text, so on read each entry is trimmed and lowercased, empty entries are dropped (`"auth.*,,crm.*"` yields two patterns, not three — an empty string must never become a pattern that matches everything), and duplicates **within one profile** are collapsed silently. A repeated pattern in the same list is redundant, not an error, and rejecting it would be pedantry the operator has to work around. The category is lowercased for comparison too, so matching is effectively case-insensitive in both directions.
+
+Deduplication happens **before** the cross-profile uniqueness check, so a within-profile repeat can never be reported as a conflict between profiles.
+
+**Precedence.**
+
 - **An exact match always beats a prefix match.** `auth.verify_email` and `auth.*` are the same length, so length alone does not order them; specificity does.
-- Among prefix matches, the **longest** wins. `*` is treated as a zero-length prefix, so it wins only when nothing else matches.
+- Among prefix matches, the **longest** wins — `auth.oauth.*` beats `auth.*` for `auth.oauth.google`.
+- `*` is treated as a zero-length prefix, so it wins only when nothing else matches.
 - At most one profile may declare `*`, and no pattern may be declared by two profiles.
 - A profile that declares **no** patterns is never selected. This is a legitimate state, not a misconfiguration: it lets an operator create and test a profile before routing any traffic to it.
 
-These two rules are enforced at save time, not at send time — but **only once a routing map actually exists**; see §Validation for the three states and why the distinction is load-bearing.
+The uniqueness rules are enforced at save time, not at send time — but **only once a routing map actually exists**; see §Validation for the three states and why the distinction is load-bearing.
 
 ### Compatibility and environment bootstrap
 
@@ -226,6 +244,8 @@ Read precisely, that is a property of the **SMTP+ product**, not of the API send
 
 `CampaignCode` is worth noting for the implementation: MailUp uses it to aggregate messages for statistics. The notification category is the natural value to map onto it, which would make the vendor's own reporting line up with the routing this design introduces.
 
+> **HTTP 200 is not success.** MailUp's REST surface is WCF-derived (`.svc` endpoints, SOAP heritage), and that family routinely answers `200 OK` with an error envelope in the body — a `Status` of `"error"` alongside a message, rather than a 4xx. A driver that treats the status line as the verdict would record `Status=sent` on mail that was never accepted, which under fail-closed is the worst possible failure: silent, and indistinguishable from success in the delivery log. **The driver decides from the parsed body, and only then from the status code.** This is a test case, not a comment.
+
 > **What still needs reading at implementation time** — not a spike, ordinary reference work. The exact JSON field names of the `SendMessage` body are not transcribed here; PR 3 reads them from the [vendor page](https://helpmailup.atlassian.net/wiki/spaces/mailupapi/pages/36342655/Transactional+Emails+using+APIs) and writes the struct against them. The endpoint, the auth model and the method choice above are settled.
 
 ## Out of scope
@@ -242,9 +262,10 @@ The backend has a coverage gate (`make backend-coverage-gate`), so tests are par
 
 | Target | Approach | Why there |
 | --- | --- | --- |
-| `SenderResolver` | table-driven, no infrastructure | longest-match, `*`, no match, conflicting patterns, empty roster → synthesized legacy profile. The edge cases concentrate here |
+| `SenderResolver` | table-driven, no infrastructure | longest-match, exact-beats-prefix at equal length, `*`, no match, empty roster → synthesized legacy profile. Plus the grammar: `foo.*` must **not** match the bare `foo`, must match at any depth, and `"auth.*,,crm.*"` must yield two patterns — an empty entry becoming a match-everything pattern is the failure that would route the whole install to one profile |
+| Pattern normalization | table-driven | trim, lowercase both sides, drop empties, collapse within-profile duplicates **before** the cross-profile uniqueness check so a repeat is never reported as a conflict |
 | Driver registry + `Validate` | table-driven | unknown driver; each driver against incomplete profiles |
-| `mailup` driver | `httptest.Server` | asserts method, headers and body shape; 4xx / 5xx / timeout. No live calls |
+| `mailup` driver | `httptest.Server` | asserts method, auth placement and body shape; 4xx / 5xx / timeout — **and HTTP 200 carrying an error envelope** (see below). No live calls |
 | `smtp` driver | the existing 233 lines, re-pointed | the credentials' source changes, the behaviour does not |
 | `ValidateConfig` | table-driven over the merged map | the three states above are the point of the table: **an empty roster must accept a PATCH that touches only `app.name`** (the legacy-install regression), a roster of pattern-less drafts must save, and the save that first declares a pattern must demand a `*`. Plus a test that **documents the secret-blind limit** rather than leaving it implicit |
 | `ValidateConfigActivation` | table-driven over the target profile | same three states; a map broken in the third must not be promotable |
@@ -263,9 +284,14 @@ Six PRs against upstream, each green and mergeable alone. Per repo convention ev
 | --- | --- | --- |
 | **0** | ADR-0019 + this spec + the implementation plan | docs only; merges before any code so PRs 1-5 can cite it |
 | **1** | `SenderProfile`, `EmailDriver`, registry with `noop` + `smtp`, resolver that always returns the synthesized legacy profile; `dispatchEmail` routed through it | **no behaviour change** — reviewable by confirming the existing tests still pass |
-| **2** | `email.senders` record list, its rail group, `ValidateConfig`, `ValidateConfigActivation`; resolver starts reading the roster with the legacy fallback; **`CategoryConfiguredChecker` + accessor in `pkg/sdk/iface`, and `auth`'s seven guards migrated to it** | first behavioural change. The pre-flight must land in the *same* PR that lets profiles diverge, or the guards are wrong for the length of a merge window. EN/IT i18n (parity test) and the OpenAPI diff |
+| **2** | `email.senders` record list, its rail group, `ValidateConfig`, `ValidateConfigActivation`; resolver starts reading the roster with the legacy fallback; **`CategoryConfiguredChecker` + accessor in `pkg/sdk/iface`, and `auth`'s seven guards migrated to it**; **`sender` on `POST /v1/notifications/test`** | first behavioural change, and everything D5 depends on has to be in it. The pre-flight must land in the same PR that lets profiles diverge or the guards are wrong for a merge window — and the explicit-sender test-send is the *only* mitigation that actually proves a profile, so shipping routing without it leaves fail-closed unverifiable. EN/IT i18n (parity test) |
 | **3** | `mailup` driver against `POST https://send.mailup.com/API/v2.0/messages/sendmessage` | no spike — endpoint, auth model and method are settled; only the body field names are read from the vendor page. One file behind the registry, so a vendor API change touches nothing else |
-| **4** | `sender` on `POST /v1/notifications/test`; sender filter + column on `GET /v1/notifications` | OpenAPI diff |
+| **4** | sender filter + `senderSlug` on `GET /v1/notifications`, and the delivery-log column | diagnostics, not mitigation: at PR 2 a failed send already names the profile in the log's reason string, so this improves triage rather than enabling it |
 | **5** | `docs/site/modules/core/notification.mdx` and `docs/site/operating/notifications.mdx` | the operating page currently teaches pointing the single SMTP at SES/SendGrid and must be rewritten around profiles |
 
-**Gates to remember:** `make openapi-dump` after PRs 2 and 4; `backend-errquality` runs against a baseline, so the new `notification.sender_*` codes must be accounted for; the coverage gate applies to every PR. Render `docs/site/**` locally before merging PR 5 — nothing in this repo's CI builds the site.
+**Gates to remember.**
+
+- **OpenAPI.** Declaring `email.senders` produces **no** spec diff: per [ADR-0012](../../adr/0012-module-config-group-contract.md), `ConfigField`/`ConfigGroup` are the frozen shapes, and declaring *data* against them is not a shape change. So in PR 2 `openapi-check` acts as a **guard that nothing moved**, and a diff there is a signal to stop and find out why. PR 2 still needs `make openapi-dump` — but for the `sender` field on the test endpoint, which *is* a wire change. PR 4 needs it for the new query parameter and response field.
+- **Error codes.** `backend-errquality` runs against a baseline, so the new `notification.sender_*` codes must be accounted for.
+- **Coverage.** The gate applies to every PR.
+- **Docs site.** Render `docs/site/**` locally before merging PR 5 — nothing in this repo's CI builds the site.
