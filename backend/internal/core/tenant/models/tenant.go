@@ -41,12 +41,17 @@ func (k TenantKind) Valid() bool {
 // a given tier may be created. Read at request time from the tenant module's
 // config (`provisioning.internal.mode` / `provisioning.external.mode`).
 //
-//   - open   — any authenticated user may create (legacy behaviour, default).
-//   - manual — only holders of system.tenants.admin may create.
-//   - single — at most one active tenant of that tier may exist (internal only).
-//
-// An empty/unknown value is treated as ProvisioningModeOpen so a missing config
-// document never blocks creation.
+//   - open   — Tier-2 (external) only: any authenticated user may create, and
+//     lazy personal-tenant provisioning is allowed. Tier-1 (internal) never
+//     accepts this value at resolution time: missing, unknown, or a legacy
+//     stored `open` all normalise to manual — see Service.ProvisioningMode.
+//     The constant itself is kept only because Tier-2 still uses it.
+//   - manual — only holders of system.tenants.admin may create. Every Tier-1
+//     creation path requires this permission regardless of mode.
+//   - single — Tier-1 only: at most one Tier-1 tenant may occupy a
+//     provisioning slot (see CountProvisioningSlotsByKind). This adds a
+//     cardinality constraint on top of manual; it does not by itself grant
+//     creation authority.
 const (
 	ProvisioningModeOpen   = "open"
 	ProvisioningModeManual = "manual"
@@ -239,7 +244,42 @@ type Tenant struct {
 	//
 	// Deprecated: use Status.
 	DeletedAt *time.Time `bson:"deletedAt,omitempty" json:"-"`
+
+	// DeletedReason records WHY the row was soft-deleted. Set by every
+	// SoftDeleteTenant caller; cleared by RestoreTenant. Never exposed on
+	// the wire — it is provisioning provenance, not tenant data.
+	//
+	// It exists because the row signature alone cannot say who soft-deleted
+	// a tenant: the platform-admin DELETE route and the creation
+	// primitive's own partial-failure rollback write byte-identical state
+	// (status=archived + deletedAt + archivedAt). The setup saga's
+	// reserved-row restore branch must be able to tell the two apart, or a
+	// retry would silently resurrect a tenant an operator deleted on
+	// purpose. See TenantDeleteReason.
+	DeletedReason TenantDeleteReason `bson:"deletedReason,omitempty" json:"-"`
 }
+
+// TenantDeleteReason is the provenance stamped on a soft-deleted tenant row.
+//
+// An empty value means "unknown" — a row soft-deleted before this field
+// existed. It is deliberately NOT treated as a rollback: the setup restore
+// branch fails closed on it and routes to remediation, because resurrecting
+// a row whose deletion nobody can account for is the failure this stamp
+// exists to prevent.
+type TenantDeleteReason string
+
+const (
+	// TenantDeleteReasonProvisioningRollback marks a row soft-deleted by
+	// createTenantWithUUID unwinding its own partially-provisioned tenant
+	// (a KMS, membership, or owner-binding failure). This is the ONLY
+	// reason the setup saga's reserved-UUID restore branch accepts.
+	TenantDeleteReasonProvisioningRollback TenantDeleteReason = "provisioning_rollback"
+
+	// TenantDeleteReasonAdminAction marks a deliberate operator deletion
+	// via the MFA-gated platform-admin DELETE route. Never restorable —
+	// a reserved row carrying it goes to remediation.
+	TenantDeleteReasonAdminAction TenantDeleteReason = "admin_action"
+)
 
 // IsInternal reports whether the tenant is a Tier-1 operator tenant.
 func (t *Tenant) IsInternal() bool { return t.Kind == TenantKindInternal }
@@ -264,6 +304,30 @@ type TenantAncestor struct {
 	AncestorUUID   string             `bson:"ancestorUUID" json:"ancestorUUID"`
 	Depth          int                `bson:"depth" json:"depth"`
 	CreatedAt      time.Time          `bson:"createdAt" json:"createdAt"`
+}
+
+// Platform default pointer provenance. `updatedBy` stays UUID-only; the
+// automated origin is recorded separately in `updateSource` so a non-UUID
+// sentinel never lands in an actor field.
+const (
+	DefaultUpdateSourceSetup     = "setup"
+	DefaultUpdateSourceTransfer  = "admin_transfer"
+	DefaultUpdateSourceMigration = "migration"
+)
+
+// TenantDefault is the platform-global default-tenant pointer — one row
+// per kind (unique index), replaced atomically. The pointer row, not a
+// flag on tenant documents, is the canonical state; DTO `isDefault` is
+// derived from it. Revision is bumped by every guarded transaction so a
+// transfer serializes against lifecycle mutations via write-conflict retry.
+type TenantDefault struct {
+	Kind         TenantKind `bson:"kind"`
+	TenantUUID   string     `bson:"tenantUUID"`
+	UpdatedBy    string     `bson:"updatedBy,omitempty"`
+	UpdateSource string     `bson:"updateSource"`
+	Revision     int64      `bson:"revision"`
+	CreatedAt    time.Time  `bson:"createdAt"`
+	UpdatedAt    time.Time  `bson:"updatedAt"`
 }
 
 // TenantMembership links a user to a tenant with a set of role names. A user

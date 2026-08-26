@@ -2,7 +2,6 @@ package notification
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -18,6 +17,7 @@ import (
 type NotificationModule struct {
 	module.BaseModule
 	svc     *services.NotificationService
+	drivers *services.DriverRegistry
 	handler *handlers.NotificationHandler
 }
 
@@ -56,6 +56,7 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 				{Keys: map[string]int{"recipientUserUuid": 1}},
 				{Keys: map[string]int{"category": 1}},
 				{Keys: map[string]int{"idempotencyKey": 1}},
+				{Keys: map[string]int{"senderSlug": 1}, Sparse: true},
 				{Keys: map[string]int{"createdAt": 1}, TTL: day90},
 			},
 		},
@@ -122,10 +123,12 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 func (m *NotificationModule) ConfigGroups() []module.ConfigGroup {
 	return []module.ConfigGroup{
 		{Key: "delivery", Label: "Delivery", Order: 1,
-			Description: "How mail leaves the platform. With the default noop provider, rendered mail is logged to the backend instead of sent — set the provider to SMTP to reveal the connection settings."},
-		{Key: "sender", Label: "Sender", Order: 2,
-			Description: "The addresses recipients see on every message."},
-		{Key: "branding", Label: "Branding & templates", Order: 3,
+			Description: "The default transport. With the noop provider, rendered mail is logged to the backend instead of sent — set the provider to SMTP to reveal the connection settings. Ignored once at least one sender profile below routes a category."},
+		{Key: "senders", Label: "Sender profiles", Order: 2,
+			Description: "Several senders, each with its own transport and identity, selected per message by category patterns (auth.*, crm.*, * for the default). Until one profile declares a pattern, the Delivery and Sender settings remain the single default."},
+		{Key: "sender", Label: "Sender", Order: 3,
+			Description: "The addresses recipients see when the default transport is used."},
+		{Key: "branding", Label: "Branding & templates", Order: 4,
 			Description: "Values injected into every templated email."},
 	}
 }
@@ -147,6 +150,8 @@ func (m *NotificationModule) ConfigSchema() []module.ConfigField {
 		{Key: "email.from_address", Label: "From address", Group: "sender", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_FROM"},
 		{Key: "email.from_name", Label: "From name", Group: "sender", Type: module.FieldString, Default: "Orkestra", EnvVar: "NOTIFICATION_EMAIL_FROM_NAME"},
 		{Key: "email.reply_to", Label: "Reply-To address", Group: "sender", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_REPLY_TO"},
+		{Key: services.SendersField, Label: "Sender profiles", Group: "senders", Type: module.FieldRecordList, Items: services.SenderItems(),
+			Description: "Each profile is a transport and an identity. Patterns decide which categories it carries; the most specific pattern wins and * is the default. A profile without patterns is a draft and receives no mail. Once any profile declares a pattern, exactly one must declare *."},
 		{Key: "app.name", Label: "App name (in templates)", Group: "branding", Type: module.FieldString, Default: "Orkestra", EnvVar: "APP_NAME"},
 		{Key: "app.support_email", Label: "Support email (in templates)", Group: "branding", Type: module.FieldString, EnvVar: "SUPPORT_EMAIL"},
 		{Key: "app.default_locale", Label: "Default template locale", Group: "branding", Type: module.FieldEnum, Options: models.SupportedLocales, Default: "en", EnvVar: "NOTIFICATION_DEFAULT_LOCALE",
@@ -171,26 +176,20 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 	prefService := services.NewPreferenceService(prefRepo)
 	unsubService := services.NewUnsubscribeService(unsubRepo)
 
-	// Settings loader: look up DB config with env var fallback at every send.
-	loader := func(ctx context.Context) services.EmailSettings {
-		port, _ := strconv.Atoi(deps.GetConfig("notification", "email.smtp.port"))
-		if port == 0 {
-			port = 587
+	// One document read per send: values and secrets of the active
+	// environment come from the same snapshot (D4), and admin UI changes
+	// still propagate without a restart. Until PR 2 reads the email.senders
+	// roster the legacy profile is the only one (ADR-0019 D6).
+	snapshot := func(ctx context.Context) (*module.ModuleConfig, error) {
+		if deps.ConfigService == nil {
+			return nil, nil
 		}
-		return services.EmailSettings{
-			Provider:    deps.GetConfig("notification", "email.provider"),
-			Host:        deps.GetConfig("notification", "email.smtp.host"),
-			Port:        port,
-			Username:    deps.GetConfig("notification", "email.smtp.username"),
-			Password:    deps.GetSecret("notification", "email.smtp.password"),
-			FromAddress: deps.GetConfig("notification", "email.from_address"),
-			FromName:    deps.GetConfig("notification", "email.from_name"),
-			ReplyTo:     deps.GetConfig("notification", "email.reply_to"),
-			TLSMode:     deps.GetConfig("notification", "email.smtp.tls_mode"),
-		}
+		return deps.ConfigService.GetConfig(ctx, "notification")
 	}
+	loader := services.NewSnapshotLoader(snapshot)
 
-	emailSender := services.NewEmailService(loader, deps.Logger)
+	m.drivers = services.NewDriverRegistry(services.CoreDrivers(deps.Logger)...)
+	resolver := services.NewSenderResolver(loader)
 
 	frontendURL := deps.Platform.FrontendURL()
 	urlBuilder := func(path string) string {
@@ -220,7 +219,8 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 		tmplService,
 		prefService,
 		unsubService,
-		emailSender,
+		resolver,
+		m.drivers,
 		deps.Logger,
 		services.Options{
 			AppName:       appName,

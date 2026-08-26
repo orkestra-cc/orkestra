@@ -1,5 +1,16 @@
 # ORKESTRA Production Environment Docker Compose
 # Full security, production credentials
+#
+# Published ports bind to HOST_BIND_ADDRESS, default 127.0.0.1 — closed unless
+# docker/.env opens them. A reverse proxy on this VM reaches the services on
+# loopback; a proxy on another host needs HOST_BIND_ADDRESS set to the private
+# IPv4 it can reach (and a host firewall rule limiting that port to the proxy,
+# since a Docker-published port bypasses the host's INPUT chain). The deploy
+# gate, scripts/health-check.sh, probes the same address.
+#
+# Every service drops all capabilities and forbids privilege escalation; the
+# backend also runs on a read-only rootfs. frontend-admin stays writable
+# because its entrypoint rewrites config.js inside the nginx docroot on start.
 
 services:
   backend:
@@ -11,8 +22,21 @@ services:
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
     restart: unless-stopped
+    # The production image runs as its own `nonroot` uid (65532), which cannot
+    # read the 0600 JWT private key orkestra.sh enforces on the deploy user's
+    # docker/keys/. Run as that user instead — same convention as staging.
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    # Listens on 3000 and needs no privileged syscall: nothing to re-add.
+    cap_drop:
+      - ALL
+    # The binary writes nothing to its image; everything mutable is a mount.
+    read_only: true
+    tmpfs:
+      - /tmp
     ports:
-      - "${BACKEND_PORT:-3000}:3000"
+      - "${HOST_BIND_ADDRESS:-127.0.0.1}:${BACKEND_PORT:-3000}:3000"
     environment:
       ENV: production
       PORT: 3000  # Internal port is always 3000, BACKEND_PORT is for host mapping only
@@ -53,6 +77,17 @@ services:
       COOKIE_HTTP_ONLY: ${COOKIE_HTTP_ONLY:-true}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-strict}
+      # The binary defaults this to true (dev convenience) and refuses to
+      # boot in production with it set — so it must be passed explicitly.
+      ALLOW_LOCALHOST_REDIRECTS: ${ALLOW_LOCALHOST_REDIRECTS:-false}
+
+      # Google OAuth — config.Validate() refuses to boot a production binary
+      # without a client id/secret, even though the live values are owned by
+      # ConfigService (/admin/modules) and email/password login needs neither.
+      # Same placeholder fallback as staging; real values in docker/.env seed
+      # the module config on the first boot of a fresh install.
+      OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID:-placeholder.apps.googleusercontent.com}
+      OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET:-placeholder}
 
       # URLs
       FRONTEND_URL: ${FRONTEND_URL:-https://orkestra.cc}
@@ -125,9 +160,13 @@ services:
       # ConfigSchema EnvVar fields seed those values from the host environment
       # ONLY on first boot of a brand-new install — after that the
       # module_configs document is authoritative.
+    # Named volumes, not ./backend/* binds: a bind under docker/ shows up as
+    # root-owned untracked files in the checkout (and dies with a `git clean`).
+    # The Dockerfile pre-creates both mount points world-writable so a
+    # fresh volume inherits a directory any uid can write into.
     volumes:
-      - ./backend/uploads:/app/uploads
-      - ./backend/logs:/app/logs
+      - backend-uploads:/app/uploads
+      - backend-logs:/app/logs
       - ./keys:/app/keys:ro
     # Note: mongodb and redis are in docker-compose.infra.yml
     # Ensure infra is running: docker compose -f docker-compose.infra.yml up -d
@@ -172,8 +211,19 @@ services:
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # nginx master runs as root on :80, chowns its temp dirs and drops the
+    # workers to the `nginx` user — the four caps that path needs.
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
     ports:
-      - "8080:80"
+      - "${HOST_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-8080}:80"
     volumes:
       - ./frontend-admin/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
@@ -183,3 +233,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+volumes:
+  backend-uploads:
+    driver: local
+  backend-logs:
+    driver: local

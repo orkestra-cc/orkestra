@@ -7,6 +7,10 @@ export interface Badge {
 }
 
 export interface NavItem {
+  /** Backend module that contributed this item. */
+  moduleName?: string;
+  /** Stable module-local key used for translated labels. */
+  itemKey?: string;
   name: string;
   to?: string;
   icon?: string | string[];

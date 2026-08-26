@@ -18,8 +18,15 @@ import {
   collectDiff,
   fieldNameOf,
   toSchemaValues,
-  type ConfigFormValues
+  EMPTY_CREATES,
+  type ConfigFormValues,
+  type ConfigValues,
+  type PendingCreates
 } from './useModuleConfigForm';
+import { expandElement, labelKeyOf, rosterOf } from './recordList/expandSchema';
+import { useRosterReconciliation } from './recordList/useRosterReconciliation';
+import type { RecordListEditingContext } from './recordList/RecordListContext';
+import { buildSavePayload } from './recordList/buildSavePayload';
 import { translateConfigGroup } from 'helpers/configLabel';
 
 // Module-scope, stable-by-reference fallback for a module with no schema yet
@@ -30,6 +37,22 @@ import { translateConfigGroup } from 'helpers/configLabel';
 // (ModuleConfigSection and detail/index.tsx) now share this ONE constant
 // instead of each keeping their own copy.
 const EMPTY_SCHEMA: ConfigField[] = [];
+
+/**
+ * The unsaved half of a module's record lists, keyed by field key.
+ *
+ * A removal is STAGED rather than applied: the element stays on screen,
+ * muted, with an Undo, and is only destroyed by the save that carries it.
+ * Deleting an element destroys its secrets irreversibly, so the confirmation
+ * belongs at Save — where the operator can see everything the save will do —
+ * not behind a button that reads like it hides a card.
+ */
+export interface RecordListEditing extends RecordListEditingContext {
+  created: PendingCreates;
+  stagedRemovals: PendingCreates;
+  /** True when any list has an unsaved membership change. */
+  hasMembershipChanges: boolean;
+}
 
 export interface ModuleConfigControllerGroupCount {
   key: string;
@@ -85,6 +108,24 @@ export interface ModuleConfigController {
    * so the "to fill" badge tracks edits as the operator types.
    */
   unfilledByGroup: ReadonlyMap<string, number>;
+  /**
+   * Record-list membership the operator has changed but not saved, and the
+   * three intents that move it. Membership travels to the backend as explicit
+   * intent — it is never inferred from which keys happen to be in the payload
+   * — so it has to be held here rather than derived from form state.
+   */
+  recordList: RecordListEditing;
+  /**
+   * Labels of the elements a confirmed save would destroy, or null when no
+   * save is waiting on that confirmation. The page renders the modal; the
+   * controller decides when one is owed, because it is the only thing that
+   * knows what the save will send.
+   */
+  pendingDeletion: string[] | null;
+  /** Proceeds with the save the confirmation was holding. */
+  confirmDeletion: () => void;
+  /** Abandons it, leaving the removals staged and the form untouched. */
+  cancelDeletion: () => void;
   error: string | null;
   success: boolean;
   clearError: () => void;
@@ -136,9 +177,22 @@ export const useModuleConfigController = (
   // module with no declared environments, which skips the query above) the
   // module-list snapshot is the best available baseline.
   const configSource = envConfig?.configValues ?? mod?.configValues;
-  const { form, defaults, fieldNames } = useModuleConfigForm(
+
+  // Record-list membership the operator has changed but not yet saved.
+  // Creates reach schema expansion (a new element needs fields to fill in
+  // before the save that carries it); staged removals do NOT — the element
+  // stays on screen, muted, until Save, so Undo has something to restore.
+  const [created, setCreated] = useState<PendingCreates>(EMPTY_CREATES);
+  const [stagedRemovals, setStagedRemovals] =
+    useState<PendingCreates>(EMPTY_CREATES);
+  // Config key → the label typed when that element was created, held until
+  // the reconciliation effect below can seed it into the form.
+  const [pendingLabels, setPendingLabels] = useState<ConfigValues>({});
+
+  const { form, defaults, fieldNames, expandedSchema } = useModuleConfigForm(
     schema,
-    configSource
+    configSource,
+    created
   );
 
   // Re-seed the form whenever the server-known baseline changes: the
@@ -149,6 +203,12 @@ export const useModuleConfigController = (
   // very edits the sticky bar exists to accumulate across groups.
   useEffect(() => {
     form.reset(defaults);
+    // Pending membership belongs to the baseline that produced it. Carrying a
+    // staged removal across an environment switch would arm a destructive
+    // save against a profile the operator never looked at.
+    setCreated(EMPTY_CREATES);
+    setStagedRemovals(EMPTY_CREATES);
+    setPendingLabels({});
     // The save alerts belong to the baseline that produced them. A "save
     // failed" banner from `production` still on screen after switching to
     // `sandbox` reads as a failure against the environment now displayed —
@@ -170,6 +230,22 @@ export const useModuleConfigController = (
     void form.trigger();
   }, [envConfig, mod?.configValues]);
 
+  // A roster that moves leaves react-hook-form holding registrations, errors
+  // and values for elements that are gone, and holding nothing for ones that
+  // have just appeared. Reconciled here, once, against the expanded schema.
+  useRosterReconciliation(
+    form,
+    expandedSchema.map(f => fieldNameOf(fieldNames, f.key)),
+    defaults,
+    // Re-keyed here, on a render where `fieldNames` already covers the new
+    // element — which is exactly why the label is not set at click time.
+    Object.fromEntries(
+      Object.entries(pendingLabels)
+        .filter(([key]) => fieldNames.has(key))
+        .map(([key, label]) => [fieldNameOf(fieldNames, key), label])
+    )
+  );
+
   const groupTree = useMemo(
     () => buildGroupTree(schema, mod?.configGroups),
     [schema, mod?.configGroups]
@@ -184,9 +260,27 @@ export const useModuleConfigController = (
   const watched = useWatch({ control: form.control }) as ConfigFormValues;
   // Register names in, schema keys out — everything downstream of here
   // (`visibleFields`, `GroupNode.fieldKeys`, the save payload) is keyed by
-  // the schema key.
-  const values = toSchemaValues(schema, watched, fieldNames);
+  // the schema key. Re-keyed over the EXPANDED schema so an element's
+  // sub-field values are present for its own `dependsOn` to resolve against.
+  const values = toSchemaValues(expandedSchema, watched, fieldNames);
   const { errors, dirtyFields } = form.formState;
+
+  // A record list holds no value of its own, so its dirty/error state is the
+  // union of its elements'. Walking the declared schema keeps `dirtyKeys` and
+  // `errorKeys` in the same key space as `GroupNode.fieldKeys`, which is what
+  // the per-group tallies below intersect against.
+  const formNamesOf = (field: ConfigField): string[] => {
+    if (field.type !== 'recordList') {
+      return [fieldNameOf(fieldNames, field.key)];
+    }
+    const roster = [
+      ...rosterOf(configSource, field.key),
+      ...(created[field.key] ?? [])
+    ];
+    return roster.flatMap(slug =>
+      expandElement(field, slug).map(leaf => fieldNameOf(fieldNames, leaf.key))
+    );
+  };
 
   // Deliberately NOT useMemo here: react-hook-form mutates its `errors`
   // object in place (same reference across renders even as its content
@@ -198,12 +292,22 @@ export const useModuleConfigController = (
   // (schema keys) is what silently emptied both sets for every dotted-key
   // module — `dirtyFields` reported the synthesized `email` branch, which
   // matches no schema key at all.
+  // A membership change dirties its record list even though it moves no form
+  // field: a removal-only save touches nothing RHF tracks, and without this
+  // the save bar would never appear and `useBlocker` would let the operator
+  // navigate away from a staged deletion without a word.
+  const membershipChanged = (f: ConfigField): boolean =>
+    f.type === 'recordList' &&
+    ((created[f.key]?.length ?? 0) > 0 ||
+      (stagedRemovals[f.key]?.length ?? 0) > 0);
+
   const dirtyKeys = new Set(
     schema
       .filter(
         f =>
           visibleKeys.has(f.key) &&
-          Boolean(dirtyFields[fieldNameOf(fieldNames, f.key)])
+          (membershipChanged(f) ||
+            formNamesOf(f).some(name => Boolean(dirtyFields[name])))
       )
       .map(f => f.key)
   );
@@ -212,7 +316,7 @@ export const useModuleConfigController = (
       .filter(
         f =>
           visibleKeys.has(f.key) &&
-          Boolean(errors[fieldNameOf(fieldNames, f.key)])
+          formNamesOf(f).some(name => Boolean(errors[name]))
       )
       .map(f => f.key)
   );
@@ -246,17 +350,97 @@ export const useModuleConfigController = (
     ])
   );
 
+  const addTo = (
+    prev: PendingCreates,
+    field: string,
+    slug: string
+  ): PendingCreates =>
+    (prev[field] ?? []).includes(slug)
+      ? prev
+      : { ...prev, [field]: [...(prev[field] ?? []), slug] };
+
+  const removeFrom = (
+    prev: PendingCreates,
+    field: string,
+    slug: string
+  ): PendingCreates => ({
+    ...prev,
+    [field]: (prev[field] ?? []).filter(s => s !== slug)
+  });
+
+  const recordList: RecordListEditing = {
+    created,
+    stagedRemovals,
+    hasMembershipChanges: Object.values(created)
+      .concat(Object.values(stagedRemovals))
+      .some(slugs => slugs.length > 0),
+    rosterFor: field => [
+      ...rosterOf(configSource, field),
+      ...(created[field] ?? [])
+    ],
+    stagedFor: field => stagedRemovals[field] ?? [],
+    create: (field, slug, label) => {
+      setCreated(prev => addTo(prev, field, slug));
+      setPendingLabels(prev => ({ ...prev, [labelKeyOf(field, slug)]: label }));
+    },
+    stageRemove: (field, slug) => {
+      // A slug created in this same session was never stored, so there is
+      // nothing for the backend to remove — dropping it from `created` is the
+      // whole operation, and staging it would make the request contradict
+      // itself (create ∩ remove ≠ ∅ is a 422).
+      if ((created[field] ?? []).includes(slug)) {
+        setCreated(prev => removeFrom(prev, field, slug));
+        return;
+      }
+      setStagedRemovals(prev => addTo(prev, field, slug));
+    },
+    undoRemove: (field, slug) =>
+      setStagedRemovals(prev => removeFrom(prev, field, slug))
+  };
+
+  // Non-null while a save that would destroy elements is waiting for the
+  // operator to confirm. Holds the labels, because "delete 2 profiles" is not
+  // a question anyone can answer — "delete MailUp SMTP and SES bulk" is.
+  const [pendingDeletion, setPendingDeletion] = useState<string[] | null>(null);
+
+  const stagedLabels = (): string[] =>
+    Object.entries(stagedRemovals).flatMap(([field, slugs]) =>
+      slugs.map(slug => {
+        const name = fieldNames.get(labelKeyOf(field, slug));
+        const typed = name ? form.getValues(name) : '';
+        return typed || slug;
+      })
+    );
+
   const onSave = async () => {
     if (!mod) return;
+    // Deleting an element destroys its keys — encrypted secrets included —
+    // and the backend will not bring them back. Ask here, at the save, rather
+    // than behind the Remove button: this is the moment the destruction is
+    // actually armed, and the operator can see everything else the save will
+    // do at the same time.
+    const labels = stagedLabels();
+    if (labels.length > 0 && pendingDeletion === null) {
+      setPendingDeletion(labels);
+      return;
+    }
+    setPendingDeletion(null);
     const formValues = form.getValues();
+    // Diffed over the EXPANDED schema: an element's sub-fields are the
+    // concrete fields that actually hold values, and the record-list
+    // container holds none.
     const { config, secrets } = collectDiff(
-      schema,
+      expandedSchema,
       formValues,
       defaults,
       fieldNames
     );
     const keysBeingSaved = [...Object.keys(config), ...Object.keys(secrets)];
-    if (keysBeingSaved.length === 0) return;
+    // A membership-only save carries no changed keys at all — an element
+    // removed without any other edit, or added with every field left at its
+    // default. Returning early on an empty key diff would silently do
+    // nothing in exactly the case the operator most expects an effect.
+    if (keysBeingSaved.length === 0 && !recordList.hasMembershipChanges) return;
 
     // Validate only the fields actually being sent, not the whole form.
     // The backend itself accepts a stored '' on a required field
@@ -283,9 +467,23 @@ export const useModuleConfigController = (
       await updateEnv({
         name: mod.moduleName,
         environment,
-        config: Object.keys(config).length > 0 ? config : undefined,
-        secrets: Object.keys(secrets).length > 0 ? secrets : undefined
+        ...buildSavePayload({
+          config,
+          secrets,
+          created,
+          stagedRemovals,
+          // The revision the environment on screen was fetched at. Absent
+          // only before the first fetch resolves, when there is nothing to
+          // remove anyway; 0 is a real value, so `??` and not `||`.
+          revision: envConfig?.revision ?? 0
+        })
       }).unwrap();
+
+      // The membership the save just applied is now the server's, so the
+      // pending sets are spent. Cleared before the reset below so the
+      // re-render that follows expands the schema against the new roster.
+      setCreated(EMPTY_CREATES);
+      setStagedRemovals(EMPTY_CREATES);
 
       // Clears the bar immediately instead of waiting on the invalidated
       // query to refetch. Secret keys are forced back to '' here rather
@@ -298,7 +496,7 @@ export const useModuleConfigController = (
       // Register names, not schema keys — `resetValues` is a form-values
       // object, so clearing `email.smtp.password` under its schema key would
       // add a dead property and leave the real field holding the plaintext.
-      const secretNames = schema
+      const secretNames = expandedSchema
         .filter(f => f.type === 'secret')
         .map(f => fieldNameOf(fieldNames, f.key));
       const resetValues: ConfigFormValues = { ...formValues };
@@ -307,6 +505,19 @@ export const useModuleConfigController = (
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err: unknown) {
+      // A 409 here means the roster moved under the operator — another
+      // session added or removed an element between the fetch and this save.
+      // The backend's `detail` is accurate but written for an API client;
+      // this is the one failure with an action attached, so it gets a message
+      // that names it.
+      const status =
+        err && typeof err === 'object' && 'status' in err
+          ? (err as { status?: number }).status
+          : undefined;
+      if (status === 409) {
+        setError(t('adminModules.recordList.conflict'));
+        return;
+      }
       const message =
         err && typeof err === 'object' && 'data' in err
           ? String(
@@ -320,6 +531,13 @@ export const useModuleConfigController = (
 
   const handleDiscard = () => {
     form.reset(defaults);
+    // Discard means discard: a staged removal is an unsaved change like any
+    // other, and leaving one armed after "Discard" would destroy an element
+    // on the next save the operator made for an unrelated reason.
+    setCreated(EMPTY_CREATES);
+    setStagedRemovals(EMPTY_CREATES);
+    setPendingLabels({});
+    setPendingDeletion(null);
     setError(null);
     setSuccess(false);
   };
@@ -342,6 +560,12 @@ export const useModuleConfigController = (
     perGroup,
     saveBarErrors,
     unfilledByGroup,
+    recordList,
+    pendingDeletion,
+    confirmDeletion: () => {
+      void onSave();
+    },
+    cancelDeletion: () => setPendingDeletion(null),
     error,
     success,
     clearError: () => setError(null),

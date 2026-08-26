@@ -71,6 +71,10 @@ Pull it to evaluate. Build from source when you're developing, or when your fork
 
 ## First login
 
+On staging and production, open the operator console — it redirects to the [setup wizard](/getting-started/setup-wizard), which creates the first administrator and the initial Tier-1 organization for you; there's no dev-token endpoint on those environments.
+
+For a local dev stack, skip straight to a token instead:
+
 ```bash
 ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
 ```

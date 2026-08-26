@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/internal/shared/systeminit"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -41,38 +43,203 @@ func (s *stubAdmin) RegisterInitialAdmin(_ context.Context, email, _, fullName, 
 	return s.resp, s.err
 }
 
-func TestStatus_EmptyDB(t *testing.T) {
-	svc := NewService(&stubUsers{count: 0}, &stubAdmin{}, nil, nil)
+// fakeFinalizationStore is an in-memory systeminit.FinalizationStore for
+// exercising Service.Status without a live Mongo connection. Every mutator
+// increments mutatorCalls so a test can assert Status performs no writes —
+// only Get is a read.
+type fakeFinalizationStore struct {
+	rec          *systeminit.FinalizationRecord
+	getErr       error
+	mutatorCalls int
+}
 
-	st := svc.Status(context.Background())
+func (f *fakeFinalizationStore) Get(_ context.Context) (*systeminit.FinalizationRecord, error) {
+	return f.rec, f.getErr
+}
+
+func (f *fakeFinalizationStore) InitializeFresh(_ context.Context, _ string) error {
+	f.mutatorCalls++
+	return nil
+}
+
+func (f *fakeFinalizationStore) EnsureRecord(_ context.Context, _ string, _ *systeminit.FinalizationResult) (*systeminit.FinalizationRecord, error) {
+	f.mutatorCalls++
+	return nil, nil
+}
+
+func (f *fakeFinalizationStore) ReserveRequest(_ context.Context, _, _, _, _, _, _ string) (bool, error) {
+	f.mutatorCalls++
+	return false, nil
+}
+
+func (f *fakeFinalizationStore) ClaimStage(_ context.Context, _ string, _ int, _ int64, _ string, _ time.Time) (bool, error) {
+	f.mutatorCalls++
+	return false, nil
+}
+
+func (f *fakeFinalizationStore) RenewLease(_ context.Context, _ string, _ time.Time) (bool, error) {
+	f.mutatorCalls++
+	return false, nil
+}
+
+func (f *fakeFinalizationStore) AdvanceStage(_ context.Context, _ string, _ int, _ int64) (bool, error) {
+	f.mutatorCalls++
+	return false, nil
+}
+
+func (f *fakeFinalizationStore) Complete(_ context.Context, _ string, _ int64, _ systeminit.FinalizationResult) (bool, error) {
+	f.mutatorCalls++
+	return false, nil
+}
+
+func (f *fakeFinalizationStore) ClaimRecovery(_ context.Context, _ string, _ int64, _ string) (bool, error) {
+	f.mutatorCalls++
+	return false, nil
+}
+
+func (f *fakeFinalizationStore) ClaimReconcileLease(_ context.Context, _ int, _ string, _ time.Time) (bool, error) {
+	f.mutatorCalls++
+	return false, nil
+}
+
+func (f *fakeFinalizationStore) FinishReconcile(_ context.Context, _ int, _ string) (bool, error) {
+	f.mutatorCalls++
+	return false, nil
+}
+
+// --- Status: three persistent phases, fail-closed ---
+
+func TestStatus_NoUsers_AdminRequired(t *testing.T) {
+	store := &fakeFinalizationStore{}
+	svc := NewService(&stubUsers{count: 0}, &stubAdmin{}, store, nil, nil, nil, nil)
+
+	st, err := svc.Status(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.Phase != PhaseAdminRequired {
+		t.Errorf("phase = %q, want %q", st.Phase, PhaseAdminRequired)
+	}
 	if st.SetupCompleted {
-		t.Errorf("empty DB: expected setupCompleted=false, got true")
+		t.Errorf("no users: expected setupCompleted=false, got true")
 	}
 	if st.SMTPConfigured {
 		t.Errorf("nil configService: expected smtpConfigured=false, got true")
 	}
 }
 
-func TestStatus_WithUsers(t *testing.T) {
-	svc := NewService(&stubUsers{count: 3}, &stubAdmin{}, nil, nil)
+func TestStatus_UsersExist_NoRecord_TenantRequired(t *testing.T) {
+	store := &fakeFinalizationStore{rec: nil}
+	svc := NewService(&stubUsers{count: 1}, &stubAdmin{}, store, nil, nil, nil, nil)
 
-	st := svc.Status(context.Background())
-	if !st.SetupCompleted {
-		t.Errorf("userCount=3: expected setupCompleted=true, got false")
+	st, err := svc.Status(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-}
-
-func TestStatus_DBError_FailsOpen(t *testing.T) {
-	// A DB error must not lock the operator out of the wizard — the
-	// response should report setupCompleted=false so the frontend still
-	// offers a path forward.
-	svc := NewService(&stubUsers{countErr: errors.New("mongo down")}, &stubAdmin{}, nil, nil)
-
-	st := svc.Status(context.Background())
+	if st.Phase != PhaseTenantRequired {
+		t.Errorf("phase = %q, want %q", st.Phase, PhaseTenantRequired)
+	}
 	if st.SetupCompleted {
-		t.Errorf("DB error: expected setupCompleted=false (fail-open), got true")
+		t.Errorf("phase=tenant_required: expected setupCompleted=false, got true")
 	}
 }
+
+func TestStatus_RecordCompleted_Complete(t *testing.T) {
+	completedAt := time.Now().UTC()
+	store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{CompletedAt: &completedAt}}
+	svc := NewService(&stubUsers{count: 3}, &stubAdmin{}, store, nil, nil, nil, nil)
+
+	st, err := svc.Status(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.Phase != PhaseComplete {
+		t.Errorf("phase = %q, want %q", st.Phase, PhaseComplete)
+	}
+	if !st.SetupCompleted {
+		t.Errorf("phase=complete: expected setupCompleted=true, got false")
+	}
+}
+
+func TestStatus_RecordPresentIncomplete_TenantRequired(t *testing.T) {
+	store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{Stage: systeminit.StageTenant}}
+	svc := NewService(&stubUsers{count: 2}, &stubAdmin{}, store, nil, nil, nil, nil)
+
+	st, err := svc.Status(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.Phase != PhaseTenantRequired {
+		t.Errorf("phase = %q, want %q", st.Phase, PhaseTenantRequired)
+	}
+	if st.SetupCompleted {
+		t.Errorf("record present but incomplete: expected setupCompleted=false, got true")
+	}
+}
+
+func TestStatus_UserCountError_FailsClosed(t *testing.T) {
+	store := &fakeFinalizationStore{}
+	svc := NewService(&stubUsers{countErr: errors.New("mongo down")}, &stubAdmin{}, store, nil, nil, nil, nil)
+
+	st, err := svc.Status(context.Background())
+	if err == nil {
+		t.Fatalf("expected error when GetUserCount fails, got nil")
+	}
+	if st != (Status{}) {
+		t.Errorf("expected zero-value Status on error, got %+v", st)
+	}
+	if store.mutatorCalls != 0 {
+		t.Errorf("expected no store mutator calls, got %d", store.mutatorCalls)
+	}
+}
+
+func TestStatus_StoreGetError_FailsClosed(t *testing.T) {
+	store := &fakeFinalizationStore{getErr: errors.New("mongo down")}
+	svc := NewService(&stubUsers{count: 1}, &stubAdmin{}, store, nil, nil, nil, nil)
+
+	st, err := svc.Status(context.Background())
+	if err == nil {
+		t.Fatalf("expected error when store.Get fails, got nil")
+	}
+	if st != (Status{}) {
+		t.Errorf("expected zero-value Status on error, got %+v", st)
+	}
+}
+
+func TestStatus_SMTPReadFailure_DegradesOnlySMTPFlag(t *testing.T) {
+	// A nil configService is the existing "can't read SMTP config" path —
+	// isSMTPConfigured's early nil check returns false without touching
+	// phase computation at all. This is the deliberate asymmetry: SMTP is
+	// non-authoritative and may degrade; the phase must not.
+	completedAt := time.Now().UTC()
+	store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{CompletedAt: &completedAt}}
+	svc := NewService(&stubUsers{count: 1}, &stubAdmin{}, store, nil, nil, nil, nil)
+
+	st, err := svc.Status(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.SMTPConfigured {
+		t.Errorf("expected smtpConfigured=false on SMTP read failure, got true")
+	}
+	if st.Phase != PhaseComplete {
+		t.Errorf("SMTP failure must not affect phase: got %q, want %q", st.Phase, PhaseComplete)
+	}
+}
+
+func TestStatus_NoWrites(t *testing.T) {
+	store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{}}
+	svc := NewService(&stubUsers{count: 5}, &stubAdmin{}, store, nil, nil, nil, nil)
+
+	if _, err := svc.Status(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if store.mutatorCalls != 0 {
+		t.Errorf("Status must perform no writes; recorded %d mutator calls", store.mutatorCalls)
+	}
+}
+
+// --- CreateInitialAdmin: unchanged behavior, updated NewService call sites ---
 
 func TestCreateInitialAdmin_EmptyDB_Succeeds(t *testing.T) {
 	expected := &authModels.TokenResponse{
@@ -82,7 +249,7 @@ func TestCreateInitialAdmin_EmptyDB_Succeeds(t *testing.T) {
 		SessionID:   "session-abc",
 	}
 	admin := &stubAdmin{resp: expected}
-	svc := NewService(&stubUsers{count: 0}, admin, nil, nil)
+	svc := NewService(&stubUsers{count: 0}, admin, &fakeFinalizationStore{}, nil, nil, nil, nil)
 
 	tokens, err := svc.CreateInitialAdmin(context.Background(), "root@example.com", "verysecretpw!", "Root Admin", "10.0.0.1")
 	if err != nil {
@@ -101,7 +268,7 @@ func TestCreateInitialAdmin_EmptyDB_Succeeds(t *testing.T) {
 
 func TestCreateInitialAdmin_NonEmptyDB_Refuses(t *testing.T) {
 	admin := &stubAdmin{}
-	svc := NewService(&stubUsers{count: 1}, admin, nil, nil)
+	svc := NewService(&stubUsers{count: 1}, admin, &fakeFinalizationStore{}, nil, nil, nil, nil)
 
 	_, err := svc.CreateInitialAdmin(context.Background(), "root@example.com", "verysecretpw!", "Root Admin", "10.0.0.1")
 	if !errors.Is(err, ErrAlreadyCompleted) {
@@ -116,7 +283,7 @@ func TestCreateInitialAdmin_CountError_Refuses(t *testing.T) {
 	// If we can't tell whether users exist, we must NOT create one —
 	// blindly writing could duplicate a developer role on a populated DB.
 	admin := &stubAdmin{}
-	svc := NewService(&stubUsers{countErr: errors.New("mongo down")}, admin, nil, nil)
+	svc := NewService(&stubUsers{countErr: errors.New("mongo down")}, admin, &fakeFinalizationStore{}, nil, nil, nil, nil)
 
 	_, err := svc.CreateInitialAdmin(context.Background(), "root@example.com", "verysecretpw!", "Root Admin", "10.0.0.1")
 	if err == nil {

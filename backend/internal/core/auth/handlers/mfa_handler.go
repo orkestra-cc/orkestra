@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -576,7 +578,9 @@ func mapMFAError(err error) error {
 		// to a still-allowed type instead of retrying.
 		return huma.Error403Forbidden("mfa_method_disabled: this factor type is not allowed by policy")
 	default:
-		return huma.Error400BadRequest("mfa request failed")
+		slog.Default().Error("unmapped mfa auth error", slog.String("error", err.Error()))
+		return errcode.Internal(errcode.AuthUnavailable,
+			"MFA verification failed for an unexpected reason. The failure has been logged for an administrator.")
 	}
 }
 

@@ -8,14 +8,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/orkestra/backend/internal/core/tenant/models"
 	"github.com/orkestra/backend/internal/core/tenant/repository"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // Service owns tenant lifecycle and implements iface.TenantProvider.
@@ -35,15 +38,16 @@ type Service struct {
 	// provisioningMode reads the admin-managed per-tier tenant-creation policy
 	// (open | manual | single) from the tenant module config at request time.
 	// Wired by the tenant module's Init from the ModuleConfigService; nil
-	// (tests, config service missing) is tolerated and treated as "open" so
-	// behaviour is unchanged.
+	// (tests, config service missing) resolves per-tier via ProvisioningMode's
+	// fail-closed (internal) / fail-open (external) defaults — see that method.
 	provisioningMode ProvisioningModeResolver
 }
 
 // ProvisioningModeResolver returns the configured provisioning mode for a tenant
 // tier. Implemented as a closure over ModuleConfigService so admin edits at
 // /admin/modules/tenant take effect on the next call (30s Redis cache). An
-// empty return is treated as models.ProvisioningModeOpen.
+// empty, unknown, or (for internal) legacy `open` return is normalised by
+// Service.ProvisioningMode — see that method for the per-tier rules.
 type ProvisioningModeResolver func(ctx context.Context, kind models.TenantKind) string
 
 // ErrProvisioningLocked is returned by CreateTenant (and EnsureTenantForUser)
@@ -51,6 +55,36 @@ type ProvisioningModeResolver func(ctx context.Context, kind models.TenantKind) 
 // tier — `single` mode with one already present, or `manual`/`single` blocking
 // lazy provisioning of an external personal tenant. Handlers map it to 409.
 var ErrProvisioningLocked = errors.New("tenant: provisioning locked by policy")
+
+// ErrSlugAlreadyInUse is returned when a create or update would reuse an
+// existing tenant slug. Handlers map it to a stable 409 response; the wrapped
+// slug remains diagnostic data for logs only.
+var ErrSlugAlreadyInUse = errors.New("tenant: slug already in use")
+
+// ErrDefaultReassignmentRequired is returned by SuspendTenant, ArchiveTenant,
+// DeleteTenant, and PurgeTenant when the target is the platform default
+// Tier-1 tenant (repository.RunDefaultGuarded aborted with
+// repository.ErrDefaultGuard). Maps to 409 tenant.default_reassignment_required.
+// The caller must transfer the default (TransferDefaultTenant) to another
+// operational internal tenant before retrying the lifecycle mutation.
+var ErrDefaultReassignmentRequired = errors.New("tenant: default must be reassigned first")
+
+// ErrDefaultAlreadyAssigned is returned by AssignDefaultTenant when the
+// platform default pointer already names a DIFFERENT tenant than the one
+// requested (repository.AssignDefault detects this atomically inside its
+// own transaction — see repository.ErrDefaultAlreadyAssigned). AssignDefaultTenant
+// is the idempotent setup/migration entry point — pointing the default at a
+// different tenant once one is already assigned is an explicit admin action
+// (TransferDefaultTenant), never an implicit side effect of a second Assign
+// call.
+var ErrDefaultAlreadyAssigned = errors.New("tenant: default already assigned to a different tenant")
+
+func tenantWriteError(err error) error {
+	if mongo.IsDuplicateKeyError(err) && strings.Contains(err.Error(), "index: slug_1") {
+		return fmt.Errorf("%w: %v", ErrSlugAlreadyInUse, err)
+	}
+	return err
+}
 
 // OwnerRoleBinder is invoked from CreateTenant after the owner membership
 // is inserted, to grant the org_owner authz binding so the new tenant's
@@ -105,34 +139,41 @@ func (s *Service) SetOwnerRoleBinder(fn OwnerRoleBinder) { s.bindOwner = fn }
 func (s *Service) SetMemberUnbinder(fn MemberUnbinder) { s.unbindMember = fn }
 
 // SetProvisioningModeResolver wires the per-tier tenant-creation policy reader.
-// Wired by the tenant module's Init from the ModuleConfigService. Nil keeps the
-// legacy "open" behaviour (any authenticated user may create).
+// Wired by the tenant module's Init from the ModuleConfigService. Nil resolves
+// per-tier via ProvisioningMode's fail-closed (internal) / fail-open (external)
+// defaults.
 func (s *Service) SetProvisioningModeResolver(fn ProvisioningModeResolver) { s.provisioningMode = fn }
 
-// ProvisioningMode returns the active provisioning policy for a tier, defaulting
-// to models.ProvisioningModeOpen when no resolver is wired or the config value
-// is empty/unknown. An invalid kind is normalised to internal.
+// ProvisioningMode returns the active provisioning policy for a tier.
+// Tier-1 resolution is FAIL-CLOSED: missing, unknown, or legacy `open`
+// values resolve to manual — `open` is no longer a valid internal mode.
+// Tier-2 keeps its historical behaviour (unknown/missing resolve to open,
+// which still gates self-serve/lazy provisioning). An invalid kind is
+// normalised to internal.
 func (s *Service) ProvisioningMode(ctx context.Context, kind models.TenantKind) string {
 	if !kind.Valid() {
 		kind = models.TenantKindInternal
 	}
-	if s.provisioningMode == nil {
-		return models.ProvisioningModeOpen
+	var mode string
+	if s.provisioningMode != nil {
+		mode = strings.TrimSpace(s.provisioningMode(ctx, kind))
 	}
-	mode := strings.TrimSpace(s.provisioningMode(ctx, kind))
 	switch mode {
 	case models.ProvisioningModeManual, models.ProvisioningModeSingle:
 		return mode
-	default:
-		return models.ProvisioningModeOpen
 	}
+	if kind == models.TenantKindInternal {
+		return models.ProvisioningModeManual
+	}
+	return models.ProvisioningModeOpen
 }
 
-// CountActiveByKind returns the number of non-deleted tenants of a tier. Exposed
-// so handlers can render the provisioning-policy surface; also used internally
-// by the `single`-mode invariant.
-func (s *Service) CountActiveByKind(ctx context.Context, kind models.TenantKind) (int64, error) {
-	return s.repo.CountActiveByKind(ctx, kind)
+// CountProvisioningSlotsByKind returns the number of tenants of a tier that
+// occupy a provisioning slot. Exposed so handlers can render the
+// provisioning-policy surface; also used internally by the `single`-mode
+// invariant.
+func (s *Service) CountProvisioningSlotsByKind(ctx context.Context, kind models.TenantKind) (int64, error) {
+	return s.repo.CountProvisioningSlotsByKind(ctx, kind)
 }
 
 // TenantPostDeleteContext carries the data a cascade hook needs to clean
@@ -205,6 +246,22 @@ func actorFromContext(ctx context.Context) (userUUID, email, kind string) {
 		actorType = "user"
 	}
 	return userUUID, email, actorType
+}
+
+// resolveDefaultActor determines the audit actor for a default-tenant
+// assignment or transfer. An explicit actorUUID — passed by an HTTP handler
+// that already resolved the caller from ctxauth, or left empty by an
+// unattended migration/reconciliation caller — wins over the request
+// context; when it is empty the context is consulted (actorFromContext) so
+// a caller that only threads identity through ctx still attributes
+// correctly. Both empty means a genuinely unattended caller: ActorType
+// "system", ActorUserID "" — the literal string "system" is never stored in
+// the ActorUserID field itself, only in ActorType.
+func (s *Service) resolveDefaultActor(ctx context.Context, actorUUID string) (userUUID, email, actorType string) {
+	if actorUUID != "" {
+		return actorUUID, "", "user"
+	}
+	return actorFromContext(ctx)
 }
 
 // --- Provider interface ---
@@ -292,15 +349,195 @@ func (s *Service) IsMember(ctx context.Context, userUUID, tenantUUID string) (bo
 	return true, nil
 }
 
+// --- Platform default tenant ---
+//
+// Only kind=internal is supported: the platform default is always a Tier-1
+// (operator) tenant. See models.TenantDefault and repository/defaults.go for
+// the pointer row and its guarded transactions.
+
+// DefaultTenantUUID returns the platform default Tier-1 tenant's UUID, or
+// "" when no default has been assigned yet — an unassigned platform is a
+// normal (pre-setup) state, not an error.
+func (s *Service) DefaultTenantUUID(ctx context.Context) (string, error) {
+	d, err := s.repo.GetDefault(ctx, models.TenantKindInternal)
+	if errors.Is(err, repository.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return d.TenantUUID, nil
+}
+
+// GetDefaultTenant implements iface.DefaultTenantProvider. It returns
+// (nil, nil) — never an error — both when no default is assigned and when
+// the pointer names a tenant that is no longer operational (suspended,
+// archived, purged, or soft-deleted): the provider never hands out a
+// non-operational target. Membership validation, RBAC, audience checks, and
+// X-Tenant-ID override all still apply downstream; this method grants
+// nothing by itself.
+func (s *Service) GetDefaultTenant(ctx context.Context) (*iface.Tenant, error) {
+	d, err := s.repo.GetDefault(ctx, models.TenantKindInternal)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	t, err := s.repo.GetTenantByUUID(ctx, d.TenantUUID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			// Soft-deleted (GetTenantByUUID filters deletedAt) — not
+			// operational, so the provider hands out nothing rather than
+			// erroring.
+			return nil, nil
+		}
+		return nil, err
+	}
+	if t.Status != models.TenantStatusActive {
+		return nil, nil
+	}
+	return tenantToIface(t), nil
+}
+
+// AssignDefaultTenant is the setup/migration entry point for the platform
+// default. Idempotent: when the pointer already names tenantUUID this is a
+// no-op success (no repository write, no duplicate row, no re-emitted
+// audit event). When the pointer already names a DIFFERENT tenant it
+// returns ErrDefaultAlreadyAssigned rather than silently replacing it —
+// replacing an established default is an explicit admin action
+// (TransferDefaultTenant), never an implicit side effect of Assign. source
+// records provenance and must be one of the models.DefaultUpdateSource*
+// constants (typically Setup or Migration).
+//
+// The conflict decision (does a pointer already exist, and if so does it
+// already name tenantUUID) is made by repository.AssignDefault INSIDE its
+// own transaction — not by a read-then-act sequence here — because a
+// service-level pre-check followed by a separate write cannot close the
+// window between two concurrent callers both observing "unassigned" and
+// both proceeding to write. See repository.ErrDefaultAlreadyAssigned's doc
+// for how the transactional write-conflict retry makes that race safe.
+func (s *Service) AssignDefaultTenant(ctx context.Context, tenantUUID, actorUUID, source string) error {
+	created, err := s.repo.AssignDefault(ctx, models.TenantKindInternal, tenantUUID, actorUUID, source)
+	if err != nil {
+		if errors.Is(err, repository.ErrDefaultAlreadyAssigned) {
+			return ErrDefaultAlreadyAssigned
+		}
+		return err
+	}
+	if !created {
+		// Idempotent no-op: the pointer already named tenantUUID. No write
+		// happened, so no audit event — re-asserting an unchanged fact is
+		// not a new assignment.
+		return nil
+	}
+
+	userUUID, email, actorType := s.resolveDefaultActor(ctx, actorUUID)
+	s.emitAudit(ctx, iface.AuditEvent{
+		TenantID:     tenantUUID,
+		TenantKind:   string(models.TenantKindInternal),
+		ActorUserID:  userUUID,
+		ActorEmail:   email,
+		ActorType:    actorType,
+		Action:       "tenant.default.assigned",
+		ResourceType: "tenant",
+		ResourceID:   tenantUUID,
+		Metadata: map[string]any{
+			"tenantUUID": tenantUUID,
+			"source":     source,
+		},
+	})
+	return nil
+}
+
+// TransferDefaultTenant is the admin transfer path: system.tenants.admin
+// plus step-up MFA are enforced at the HTTP layer. Requires an existing
+// default pointer (repository.SetDefault's requireExisting=true) and moves
+// it to tenantUUID, which repository.SetDefault validates — inside the same
+// transaction — as an operational internal tenant. A target rejected as not
+// operational (repository.ErrDefaultTargetNotOperational) is audited as a
+// denied transfer and the pointer is left untouched; any other error
+// (including repository.ErrNotFound when no pointer exists yet) propagates
+// without an audit emission. On success, audits tenant.default.transferred
+// with the previous and new tenant UUIDs.
+func (s *Service) TransferDefaultTenant(ctx context.Context, tenantUUID, actorUUID string) error {
+	prevUUID, err := s.repo.SetDefault(ctx, models.TenantKindInternal, tenantUUID, actorUUID, models.DefaultUpdateSourceTransfer, true)
+	userUUID, email, actorType := s.resolveDefaultActor(ctx, actorUUID)
+	if err != nil {
+		if errors.Is(err, repository.ErrDefaultTargetNotOperational) {
+			s.emitAudit(ctx, iface.AuditEvent{
+				TenantID:     tenantUUID,
+				TenantKind:   string(models.TenantKindInternal),
+				ActorUserID:  userUUID,
+				ActorEmail:   email,
+				ActorType:    actorType,
+				Action:       "tenant.default.transferred",
+				ResourceType: "tenant",
+				ResourceID:   tenantUUID,
+				Outcome:      "denied",
+				Metadata: map[string]any{
+					"newTenantUUID": tenantUUID,
+					"reason":        "target_not_operational",
+				},
+			})
+		}
+		return err
+	}
+	s.emitAudit(ctx, iface.AuditEvent{
+		TenantID:     tenantUUID,
+		TenantKind:   string(models.TenantKindInternal),
+		ActorUserID:  userUUID,
+		ActorEmail:   email,
+		ActorType:    actorType,
+		Action:       "tenant.default.transferred",
+		ResourceType: "tenant",
+		ResourceID:   tenantUUID,
+		Metadata: map[string]any{
+			"previousTenantUUID": prevUUID,
+			"newTenantUUID":      tenantUUID,
+		},
+	})
+	return nil
+}
+
+// emitDefaultGuardDenied emits a denied audit event for a lifecycle
+// mutation blocked by the platform-default guard (repository.ErrDefaultGuard
+// via repository.RunDefaultGuarded). action must be exactly the action
+// string the same lifecycle method emits on success — the existing
+// denied-event convention reuses the action and flips Outcome, rather than
+// minting a separate "refused" action name.
+func (s *Service) emitDefaultGuardDenied(ctx context.Context, action, tenantUUID string) {
+	userUUID, email, actorType := actorFromContext(ctx)
+	s.emitAudit(ctx, iface.AuditEvent{
+		TenantID:     tenantUUID,
+		ActorUserID:  userUUID,
+		ActorEmail:   email,
+		ActorType:    actorType,
+		Action:       action,
+		ResourceType: "tenant",
+		ResourceID:   tenantUUID,
+		Outcome:      "denied",
+		Metadata:     map[string]any{"code": errcode.TenantDefaultReassignmentRequired},
+	})
+}
+
 // --- Tenant lifecycle ---
 
+// CreateTenant provisions a brand-new tenant with a freshly minted UUID.
+// It is a thin wrapper over the shared absent-to-present primitive so every
+// actual creation — normal or setup-reserved — passes the same service-level
+// provisioning guard. See tenant/CLAUDE.md#creation-vs-reconciliation.
 func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input models.CreateTenantInput) (*models.Tenant, error) {
+	return s.createTenantWithUUID(ctx, ownerUUID, uuid.Must(uuid.NewV7()).String(), input)
+}
+
+func (s *Service) createTenantWithUUID(ctx context.Context, ownerUUID, tenantUUID string, input models.CreateTenantInput) (*models.Tenant, error) {
 	slug := slugify(input.Slug)
 	if slug == "" {
 		slug = slugify(input.Name)
 	}
 	if existing, _ := s.repo.GetTenantBySlug(ctx, slug); existing != nil {
-		return nil, fmt.Errorf("slug already in use: %s", slug)
+		return nil, fmt.Errorf("%w: %s", ErrSlugAlreadyInUse, slug)
 	}
 
 	plan := input.Plan
@@ -314,19 +551,18 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 	}
 
 	// Provisioning policy backstop: in `single` mode a tier may hold at most
-	// one active tenant. Enforced here (not just at the handler) so every
+	// one tenant occupying a provisioning slot (see CLAUDE.md's Lifecycle
+	// terminology). Enforced here (not just at the handler) so every
 	// creation path — POST /v1/tenants, divisions, lazy provisioning — is
 	// covered. The first tenant on a fresh install has count 0 and passes,
 	// so bootstrap is never blocked.
-	if s.ProvisioningMode(ctx, kind) == models.ProvisioningModeSingle {
-		n, err := s.repo.CountActiveByKind(ctx, kind)
-		if err != nil {
-			return nil, fmt.Errorf("tenant: count tenants for single-mode check: %w", err)
-		}
-		if n > 0 {
-			return nil, ErrProvisioningLocked
-		}
-	}
+	//
+	// The check is NOT performed here, though: counting and then inserting
+	// as two statements is a TOCTOU gap two concurrent creations both slip
+	// through. It moves into the same transaction as the insert, below, via
+	// repo.RunProvisioningGuarded — see that method for why a transaction
+	// alone is not enough and a shared lock row is required.
+	singleMode := s.ProvisioningMode(ctx, kind) == models.ProvisioningModeSingle
 
 	var parent *string
 	if input.ParentTenantUUID != nil && *input.ParentTenantUUID != "" {
@@ -355,7 +591,7 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 	}
 
 	t := &models.Tenant{
-		UUID:             uuid.Must(uuid.NewV7()).String(),
+		UUID:             tenantUUID,
 		Kind:             kind,
 		Status:           models.TenantStatusActive,
 		ParentTenantUUID: parent,
@@ -367,8 +603,29 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 		Plan:             plan,
 	}
 
-	if err := s.repo.CreateTenant(ctx, t); err != nil {
-		return nil, err
+	// In `single` mode the cardinality check and the insert commit as one
+	// transaction against a shared per-kind lock row, so two concurrent
+	// creations cannot both observe an empty tier. Only the row write is
+	// guarded: the dependent steps below (KMS, membership, owner binding)
+	// make external calls and stay outside, exactly as they were, and each
+	// still unwinds the row on failure.
+	//
+	// `manual` mode has no cardinality to enforce, so it keeps the plain
+	// insert — which also keeps ordinary tenant creation working on a
+	// standalone mongod, where transactions are unavailable.
+	if singleMode {
+		const maxSingleModeSlots = 1
+		err := s.repo.RunProvisioningGuarded(ctx, kind, maxSingleModeSlots, func(sc mongo.SessionContext) error {
+			return s.repo.CreateTenant(sc, t)
+		})
+		switch {
+		case errors.Is(err, repository.ErrProvisioningSlotTaken):
+			return nil, ErrProvisioningLocked
+		case err != nil:
+			return nil, tenantWriteError(err)
+		}
+	} else if err := s.repo.CreateTenant(ctx, t); err != nil {
+		return nil, tenantWriteError(err)
 	}
 
 	// Per-tenant KMS key — minted before membership bookkeeping so a
@@ -379,7 +636,7 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 	if s.kms != nil {
 		keyID, err := s.kms.CreateKey(ctx, t.UUID)
 		if err != nil {
-			_ = s.repo.SoftDeleteTenant(ctx, t.UUID)
+			_ = s.repo.SoftDeleteTenant(ctx, t.UUID, models.TenantDeleteReasonProvisioningRollback)
 			return nil, fmt.Errorf("tenant: mint KMS key: %w", err)
 		}
 		t.KMSKeyID = &keyID
@@ -427,11 +684,279 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 	// KMS step above — to avoid leaving a half-provisioned tenant.
 	if s.bindOwner != nil {
 		if err := s.bindOwner(ctx, ownerUUID, t.UUID, "org_owner"); err != nil {
-			_ = s.repo.SoftDeleteTenant(ctx, t.UUID)
+			_ = s.repo.SoftDeleteTenant(ctx, t.UUID, models.TenantDeleteReasonProvisioningRollback)
 			return nil, fmt.Errorf("tenant: bind owner role: %w", err)
 		}
 	}
 	return t, nil
+}
+
+// ErrSetupTenantConflict is returned by EnsureSetupTenant when the reserved
+// tenant UUID already names a row whose immutable setup identity — kind,
+// owner, normalized name, or slug — does not match what the caller supplied.
+// This is a setup-remediation signal, never silent adoption: a reserved UUID
+// must resolve to the same tenant on every replay of the saga stage.
+var ErrSetupTenantConflict = errors.New("tenant: reserved setup tenant identity mismatch")
+
+// ErrSetupTenantRemediation is returned by EnsureSetupTenant when the
+// reserved tenant row is archived-and-purged (Status == purged, or PurgedAt
+// set). Purge is terminal — PurgeTenant has already crypto-shredded the
+// row's KMS key — so EnsureSetupTenant never resurrects it; an operator must
+// remediate (e.g. assign a fresh reservation) rather than have the saga
+// silently retry against a dead row.
+var ErrSetupTenantRemediation = errors.New("tenant: reserved setup tenant requires remediation")
+
+// EnsureSetupTenant converges the reserved setup-tenant UUID to a fully
+// reconciled, operational internal tenant. It is the primitive a resumable
+// provisioning saga (a later PR) calls repeatedly — after a lost response, a
+// crashed executor, or an expired lease — until it observes a nil error, so
+// every step it takes must be safe to replay any number of times, including
+// concurrently. Idempotency is ordered deliberately around the `single`
+// provisioning gate; see tenant/CLAUDE.md#creation-vs-reconciliation for the
+// contract this method and CreateTenant both honour:
+//
+//  1. The reserved UUID already names a row → this is RECONCILIATION, not
+//     creation: reconcileSetupTenant validates the row's immutable setup
+//     identity, stamps the enterprise plan, and reconciles its dependent
+//     rows. The `single` gate is never consulted for a row that already
+//     occupies its own slot, so the reserved tenant can never count against
+//     itself on a retry.
+//  2. No row exists yet → call the shared absent-to-present primitive with
+//     the reserved UUID and an EXPLICIT models.PlanEnterprise — CreateTenant's
+//     empty-plan fallback is `free`, and setup must never inherit it.
+//  3. The primitive fails with a duplicate-key error (on the tenant row
+//     itself, or — because a concurrent reconcile can race ahead of a
+//     concurrent creation — on one of the dependent rows the primitive also
+//     writes) → reread the reserved UUID and reconcile whatever is there.
+//     When the reread finds nothing, an UNRELATED tenant holds the slug:
+//     that is a real conflict, not a race, so the original
+//     ErrSlugAlreadyInUse propagates rather than being swallowed.
+//  4. A prior attempt's partial-failure rollback (createTenantWithUUID's own
+//     SoftDeleteTenant calls) soft-deleted the row → restoring it
+//     re-occupies a provisioning slot, so reconcileSetupTenant applies the
+//     `single` gate against OTHER occupants first. A row that reached
+//     Status == purged, OR that an operator explicitly archived (Status ==
+//     archived with DeletedAt == nil — the ArchiveTenant signature, distinct
+//     from this seam's own soft-delete rollback), is never resurrected this
+//     way — see ErrSetupTenantRemediation.
+//
+// coordinatorAttested is the caller's statement that the setup coordinator
+// record for THIS reservation exists and is not completed — that a
+// finalization attempt is genuinely in flight. It is the missing half of
+// the design's restore rule ("the COORDINATOR and immutable identity prove
+// that a prior attempt for this same setup reservation soft-deleted the
+// row"): the platform-admin destructive delete route calls the very same
+// SoftDeleteTenant this seam's own rollback calls, so the row signature
+// alone cannot distinguish "our previous attempt rolled this back" from
+// "an operator deleted it". Only the setup saga holds the coordinator, so
+// only the setup saga can attest; every other caller passes false and a
+// soft-deleted reserved row then enters remediation instead of being
+// silently restored. The tenant service deliberately does not resolve the
+// coordinator itself — systeminit is not reachable from here, and
+// inventing a second source of truth for it would be worse than taking
+// the caller's word under a documented contract.
+func (s *Service) EnsureSetupTenant(ctx context.Context, tenantUUID, ownerUUID, name, slug string, coordinatorAttested bool) error {
+	normName := strings.TrimSpace(name)
+	normSlug := slugify(slug)
+	if normSlug == "" {
+		normSlug = slugify(name)
+	}
+
+	existing, err := s.repo.GetTenantByUUIDIncludingDeleted(ctx, tenantUUID)
+	switch {
+	case err == nil:
+		return s.reconcileSetupTenant(ctx, existing, ownerUUID, normName, normSlug, coordinatorAttested)
+	case errors.Is(err, repository.ErrNotFound):
+		_, cerr := s.createTenantWithUUID(ctx, ownerUUID, tenantUUID, models.CreateTenantInput{
+			Name: normName,
+			Slug: normSlug,
+			Kind: models.TenantKindInternal,
+			Plan: models.PlanEnterprise, // explicit: never CreateTenant's free fallback
+		})
+		if cerr == nil {
+			return nil
+		}
+		if errors.Is(cerr, ErrSlugAlreadyInUse) || mongo.IsDuplicateKeyError(cerr) {
+			// A concurrent EnsureSetupTenant call for this SAME reserved
+			// UUID may have won the tenant-row insert, or raced us on a
+			// downstream dependent row (see reconcileSetupTenant). Either
+			// way the reread is the correct recovery: when it comes back
+			// empty, the reserved UUID is genuinely free and an unrelated
+			// tenant holds the slug, so cerr (ErrSlugAlreadyInUse) is the
+			// right error to propagate rather than mask.
+			winner, rerr := s.repo.GetTenantByUUIDIncludingDeleted(ctx, tenantUUID)
+			if rerr == nil {
+				return s.reconcileSetupTenant(ctx, winner, ownerUUID, normName, normSlug, coordinatorAttested)
+			}
+			return cerr
+		}
+		return cerr
+	default:
+		return err
+	}
+}
+
+// reconcileSetupTenant converges an EXISTING reserved-UUID row (soft-deleted
+// or not) to the fully-provisioned state EnsureSetupTenant promises. It
+// never trips the `single` provisioning gate against the row it is
+// reconciling: a row that already occupies a slot skips the gate entirely,
+// and a soft-deleted row being restored is checked against OTHER occupants
+// only (its own deletedAt != nil already excludes it from
+// CountProvisioningSlotsByKind's count). Every dependent write is treated as
+// replay-safe: a duplicate-key error from a racing writer — another
+// EnsureSetupTenant call, or the absent-to-present primitive itself — is read
+// back and VALIDATED, never trusted blind.
+//
+// coordinatorAttested gates the restore branch only; see EnsureSetupTenant.
+func (s *Service) reconcileSetupTenant(ctx context.Context, existing *models.Tenant, ownerUUID, name, slug string, coordinatorAttested bool) error {
+	if existing.Kind != models.TenantKindInternal ||
+		existing.OwnerUserUUID != ownerUUID ||
+		existing.Slug != slug ||
+		existing.Name != name {
+		return ErrSetupTenantConflict
+	}
+
+	// Archived-and-purged is terminal — PurgeTenant already crypto-shredded
+	// the KMS key — so it is never resurrected, remediation only.
+	if existing.PurgedAt != nil || existing.Status == models.TenantStatusPurged {
+		return ErrSetupTenantRemediation
+	}
+
+	// A row genuinely archived by the admin ArchiveTenant action (Status ==
+	// archived, DeletedAt == nil) is a DIFFERENT state from the setup-owned
+	// rollback signature checked below: ArchiveTenant never sets deletedAt,
+	// so this predicate can only be true for a tenant an operator
+	// deliberately archived outside the setup flow — never for a row this
+	// seam soft-deleted itself. The design spec is explicit that such a row
+	// is not resurrected either: "archived and purged reserved rows enter
+	// remediation rather than being resurrected."
+	if existing.Status == models.TenantStatusArchived && existing.DeletedAt == nil {
+		return ErrSetupTenantRemediation
+	}
+
+	// A prior attempt's own rollback (createTenantWithUUID's SoftDeleteTenant
+	// calls on a KMS/membership/bind failure) left this row soft-deleted.
+	// Restoring it re-occupies a provisioning slot, so apply the SAME
+	// `single` cardinality check CreateTenant applies on a genuine creation
+	// — but against OTHER occupants: this row's own deletedAt != nil already
+	// excludes it from the count below.
+	if existing.DeletedAt != nil {
+		// Two independent proofs are required, because they answer two
+		// different questions and neither alone is sufficient.
+		//
+		// 1. WHO is asking: the caller's coordinator attestation — an
+		//    in-flight, uncompleted reservation for this very setup. Only
+		//    the finalization saga can attest; every other caller passes
+		//    false and lands in remediation.
+		if !coordinatorAttested {
+			return ErrSetupTenantRemediation
+		}
+		// 2. WHAT deleted the row: its own persisted provenance. The
+		//    attestation proves a reservation is open, NOT that this row's
+		//    deletion was that saga's own rollback — and an open
+		//    reservation is exactly the window in which an operator can
+		//    reach the platform-admin DELETE route (there is no backend
+		//    setup gate on it). Restoring on the attestation alone would
+		//    therefore silently undo a deliberate, MFA-gated operator
+		//    deletion. DeleteTenant stamps admin_action; only
+		//    createTenantWithUUID's own unwind stamps
+		//    provisioning_rollback. An empty reason (a row predating the
+		//    stamp) is not a rollback either — this fails closed.
+		if existing.DeletedReason != models.TenantDeleteReasonProvisioningRollback {
+			return ErrSetupTenantRemediation
+		}
+		// Restoring re-occupies a provisioning slot, so it takes the same
+		// cardinality check a genuine creation takes — and takes it the
+		// same way: inside one transaction against the shared per-kind
+		// lock row, so a restore racing a creation cannot land the tier at
+		// two occupants. Counting here and restoring afterwards would be
+		// the identical TOCTOU gap createTenantWithUUID just closed. The
+		// row's own deletedAt != nil already excludes it from the count,
+		// so the check only ever sees OTHER occupants.
+		if s.ProvisioningMode(ctx, models.TenantKindInternal) == models.ProvisioningModeSingle {
+			const maxSingleModeSlots = 1
+			err := s.repo.RunProvisioningGuarded(ctx, models.TenantKindInternal, maxSingleModeSlots,
+				func(sc mongo.SessionContext) error {
+					return s.repo.RestoreTenant(sc, existing.UUID)
+				})
+			switch {
+			case errors.Is(err, repository.ErrProvisioningSlotTaken):
+				return ErrProvisioningLocked
+			case err != nil:
+				return fmt.Errorf("tenant: restore setup tenant: %w", err)
+			}
+		} else if err := s.repo.RestoreTenant(ctx, existing.UUID); err != nil {
+			return fmt.Errorf("tenant: restore setup tenant: %w", err)
+		}
+		existing.DeletedAt = nil
+		existing.ArchivedAt = nil
+		existing.Status = models.TenantStatusActive
+	}
+
+	// Plan: setup must land on enterprise regardless of what a legacy or
+	// partially-provisioned row currently carries.
+	if existing.Plan != models.PlanEnterprise {
+		if err := s.repo.UpdateTenant(ctx, existing.UUID, bson.M{"plan": models.PlanEnterprise}); err != nil {
+			return fmt.Errorf("tenant: stamp setup tenant plan: %w", err)
+		}
+	}
+
+	// KMS key: CreateKey is concurrent-idempotent (Task 4.1) — every caller
+	// converges on the single winning keyID — so it is always safe to call;
+	// only the stamp is conditional, to avoid a redundant write once a
+	// previous attempt already recorded it.
+	if s.kms != nil {
+		keyID, err := s.kms.CreateKey(ctx, existing.UUID)
+		if err != nil {
+			return fmt.Errorf("tenant: mint setup tenant KMS key: %w", err)
+		}
+		if existing.KMSKeyID == nil || *existing.KMSKeyID == "" {
+			if err := s.repo.UpdateTenant(ctx, existing.UUID, bson.M{"kmsKeyID": keyID}); err != nil {
+				return fmt.Errorf("tenant: stamp setup tenant KMS key: %w", err)
+			}
+		}
+	}
+
+	// Closure self-row: guarded by the (descendantUUID, ancestorUUID) unique
+	// index — a duplicate-key error means a racing writer already inserted
+	// it, which is success, not failure.
+	if err := s.repo.InsertSelfAncestor(ctx, existing.UUID); err != nil && !mongo.IsDuplicateKeyError(err) {
+		return fmt.Errorf("tenant: insert setup tenant self ancestor: %w", err)
+	}
+
+	// Owner membership: guarded by the (userUUID, tenantId) unique index. A
+	// duplicate-key loser rereads the winner and VALIDATES it rather than
+	// assuming it matches what this call intended to write.
+	membership := &models.TenantMembership{
+		UUID:       uuid.Must(uuid.NewV7()).String(),
+		UserUUID:   ownerUUID,
+		TenantUUID: existing.UUID,
+		TenantKind: models.TenantKindInternal,
+		Roles:      []string{"org_owner"},
+		IsOwner:    true,
+	}
+	if err := s.repo.CreateMembership(ctx, membership); err != nil {
+		if !mongo.IsDuplicateKeyError(err) {
+			return fmt.Errorf("tenant: create setup tenant owner membership: %w", err)
+		}
+		winner, rerr := s.repo.GetMembership(ctx, ownerUUID, existing.UUID)
+		if rerr != nil {
+			return fmt.Errorf("tenant: reread setup tenant owner membership: %w", rerr)
+		}
+		if !winner.IsOwner || winner.TenantKind != models.TenantKindInternal || !slices.Contains(winner.Roles, "org_owner") {
+			return ErrSetupTenantConflict
+		}
+	}
+
+	// authz binding: an ensure since Task 4.2 — concurrent-safe and
+	// replay-safe on its own.
+	if s.bindOwner != nil {
+		if err := s.bindOwner(ctx, ownerUUID, existing.UUID, "org_owner"); err != nil {
+			return fmt.Errorf("tenant: bind setup tenant owner role: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // CreateExternalTenant is the dedicated factory for Tier-2 tenants (external
@@ -553,8 +1078,23 @@ func (s *Service) MarkTenantActive(ctx context.Context, tenantUUID string) error
 // SuspendTenant, ArchiveTenant, PurgeTenant drive lifecycle transitions.
 // PurgeTenant eventually triggers crypto-shred of the tenant's KMS key
 // (Phase 4); today it only flips the status.
+//
+// Every one of these four lifecycle mutations — Suspend, Archive, Delete,
+// Purge — wraps its status/deletedAt write in repository.RunDefaultGuarded
+// so the platform default Tier-1 tenant cannot be suspended, archived,
+// soft-deleted, or purged out from under the platform without an explicit
+// TransferDefaultTenant first. The guard lives here, not only at the HTTP
+// handler boundary, because it is an invariant every caller must observe —
+// including non-HTTP callers (background flows, later saga stages) that
+// never pass through a handler at all.
 func (s *Service) SuspendTenant(ctx context.Context, tenantUUID string) error {
-	if err := s.repo.UpdateTenantStatus(ctx, tenantUUID, models.TenantStatusSuspended); err != nil {
+	if err := s.repo.RunDefaultGuarded(ctx, models.TenantKindInternal, tenantUUID, func(sc mongo.SessionContext) error {
+		return s.repo.UpdateTenantStatus(sc, tenantUUID, models.TenantStatusSuspended)
+	}); err != nil {
+		if errors.Is(err, repository.ErrDefaultGuard) {
+			s.emitDefaultGuardDenied(ctx, "tenant.lifecycle.suspended", tenantUUID)
+			return ErrDefaultReassignmentRequired
+		}
 		return err
 	}
 	s.emitLifecycle(ctx, "tenant.lifecycle.suspended", tenantUUID)
@@ -562,7 +1102,13 @@ func (s *Service) SuspendTenant(ctx context.Context, tenantUUID string) error {
 }
 
 func (s *Service) ArchiveTenant(ctx context.Context, tenantUUID string) error {
-	if err := s.repo.UpdateTenantStatus(ctx, tenantUUID, models.TenantStatusArchived); err != nil {
+	if err := s.repo.RunDefaultGuarded(ctx, models.TenantKindInternal, tenantUUID, func(sc mongo.SessionContext) error {
+		return s.repo.UpdateTenantStatus(sc, tenantUUID, models.TenantStatusArchived)
+	}); err != nil {
+		if errors.Is(err, repository.ErrDefaultGuard) {
+			s.emitDefaultGuardDenied(ctx, "tenant.lifecycle.archived", tenantUUID)
+			return ErrDefaultReassignmentRequired
+		}
 		return err
 	}
 	s.emitLifecycle(ctx, "tenant.lifecycle.archived", tenantUUID)
@@ -570,18 +1116,55 @@ func (s *Service) ArchiveTenant(ctx context.Context, tenantUUID string) error {
 }
 
 func (s *Service) PurgeTenant(ctx context.Context, tenantUUID string) error {
+	// Cheap pre-check FIRST — it answers the common denied case without
+	// opening a transaction at all. It is only an optimization: the read is
+	// racy (a concurrent transfer can move the default between it and the
+	// guarded write below), so the guarded UpdateTenantStatus write further
+	// down remains the actual invariant. Nothing destructive happens before
+	// that guard — cascadeTenantData now runs INSIDE the guarded
+	// transaction, so a lost race can no longer erase memberships and
+	// closure rows of a tenant the guard then refuses to touch.
+	//
+	// A repository error here FAILS CLOSED. An unreadable pointer means we
+	// cannot prove this tenant is not the platform default, and the
+	// mutation about to run is irreversible; treating "couldn't read" as
+	// "not the default" is exactly the fail-open behaviour the rest of this
+	// design avoids. Propagate it wrapped — handlers map it to their fixed
+	// 5xx detail, never to the 409 that reads as "nothing happened".
+	def, defErr := s.DefaultTenantUUID(ctx)
+	if defErr != nil {
+		return fmt.Errorf("tenant: resolve platform default before purge: %w", defErr)
+	}
+	if def == tenantUUID {
+		s.emitDefaultGuardDenied(ctx, "tenant.lifecycle.purged", tenantUUID)
+		return ErrDefaultReassignmentRequired
+	}
+
 	// Fetch first so we know the KMSKeyID (if any) before flipping
 	// status — the row is still readable in purged state but carrying
 	// a live keyID would defeat crypto-shred. Include soft-deleted rows:
 	// the documented flow is archive/soft-delete → purge, and the plain
 	// getter filters deletedAt:nil, so on that path existing would be nil
 	// and the crypto-shred + authz-binding cascade would silently no-op.
+	// Both reads happen before the guarded write so the cascade context is
+	// computed against pre-mutation state.
 	existing, lookupErr := s.repo.GetTenantByUUIDIncludingDeleted(ctx, tenantUUID)
 	cascadeCtx := s.buildPostDeleteContext(ctx, existing, true)
-	if err := s.cascadeTenantData(ctx, tenantUUID); err != nil {
-		return err
-	}
-	if err := s.repo.UpdateTenantStatus(ctx, tenantUUID, models.TenantStatusPurged); err != nil {
+	if err := s.repo.RunDefaultGuarded(ctx, models.TenantKindInternal, tenantUUID, func(sc mongo.SessionContext) error {
+		// Inside the guard: the pointer has been read under the same
+		// transaction that bumped its revision, and it does not name this
+		// tenant. Only now may the destructive cascade run, committed
+		// atomically with the status write — an aborted guard (or a failed
+		// status write) leaves memberships and closure rows untouched.
+		if err := s.cascadeTenantData(sc, tenantUUID); err != nil {
+			return err
+		}
+		return s.repo.UpdateTenantStatus(sc, tenantUUID, models.TenantStatusPurged)
+	}); err != nil {
+		if errors.Is(err, repository.ErrDefaultGuard) {
+			s.emitDefaultGuardDenied(ctx, "tenant.lifecycle.purged", tenantUUID)
+			return ErrDefaultReassignmentRequired
+		}
 		return err
 	}
 	// Crypto-shred: delete the DEK so every ciphertext written under
@@ -624,7 +1207,7 @@ func (s *Service) UpdateTenant(ctx context.Context, tenantUUID string, input mod
 	if input.Slug != nil {
 		slug := slugify(*input.Slug)
 		if existing, _ := s.repo.GetTenantBySlug(ctx, slug); existing != nil && existing.UUID != tenantUUID {
-			return fmt.Errorf("slug already in use: %s", slug)
+			return fmt.Errorf("%w: %s", ErrSlugAlreadyInUse, slug)
 		}
 		update["slug"] = slug
 	}
@@ -634,7 +1217,7 @@ func (s *Service) UpdateTenant(ctx context.Context, tenantUUID string, input mod
 	if len(update) == 0 {
 		return nil
 	}
-	return s.repo.UpdateTenant(ctx, tenantUUID, update)
+	return tenantWriteError(s.repo.UpdateTenant(ctx, tenantUUID, update))
 }
 
 // UpdatePlan updates the tenant's plan label. Plan is informational only —
@@ -645,17 +1228,53 @@ func (s *Service) UpdatePlan(ctx context.Context, tenantUUID string, input model
 }
 
 func (s *Service) DeleteTenant(ctx context.Context, tenantUUID string) error {
+	// Cheap pre-check FIRST — it answers the common denied case without
+	// opening a transaction at all. It is only an optimization: the read is
+	// racy (a concurrent transfer can move the default between it and the
+	// guarded write below), so the guarded SoftDeleteTenant write further
+	// down remains the actual invariant. Nothing destructive happens before
+	// that guard — cascadeTenantData now runs INSIDE the guarded
+	// transaction, so a lost race can no longer erase memberships and
+	// closure rows of a tenant the guard then refuses to touch.
+	//
+	// A repository error here FAILS CLOSED. An unreadable pointer means we
+	// cannot prove this tenant is not the platform default, and the
+	// mutation about to run is destructive; treating "couldn't read" as
+	// "not the default" is exactly the fail-open behaviour the rest of this
+	// design avoids. Propagate it wrapped — handlers map it to their fixed
+	// 5xx detail, never to the 409 that reads as "nothing happened".
+	def, defErr := s.DefaultTenantUUID(ctx)
+	if defErr != nil {
+		return fmt.Errorf("tenant: resolve platform default before delete: %w", defErr)
+	}
+	if def == tenantUUID {
+		s.emitDefaultGuardDenied(ctx, "tenant.deleted", tenantUUID)
+		return ErrDefaultReassignmentRequired
+	}
+
 	// Fetch the tenant before mutating so the cascade context
 	// (kind / owner / orphan flag) is computed against the pre-delete
 	// state. A missing row falls through with a nil snapshot — hooks
-	// already tolerate empty fields and the soft-delete below will
-	// surface ErrNotFound the same as before.
+	// already tolerate empty fields and the soft-delete below still
+	// surfaces ErrNotFound, now aborting the whole guarded transaction so
+	// the cascade is rolled back with it.
 	existing, _ := s.repo.GetTenantByUUID(ctx, tenantUUID)
 	cascadeCtx := s.buildPostDeleteContext(ctx, existing, false)
-	if err := s.cascadeTenantData(ctx, tenantUUID); err != nil {
-		return err
-	}
-	if err := s.repo.SoftDeleteTenant(ctx, tenantUUID); err != nil {
+	if err := s.repo.RunDefaultGuarded(ctx, models.TenantKindInternal, tenantUUID, func(sc mongo.SessionContext) error {
+		// Inside the guard: the pointer has been read under the same
+		// transaction that bumped its revision, and it does not name this
+		// tenant. Only now may the destructive cascade run, committed
+		// atomically with the soft-delete — an aborted guard (or a failed
+		// soft-delete) leaves memberships and closure rows untouched.
+		if err := s.cascadeTenantData(sc, tenantUUID); err != nil {
+			return err
+		}
+		return s.repo.SoftDeleteTenant(sc, tenantUUID, models.TenantDeleteReasonAdminAction)
+	}); err != nil {
+		if errors.Is(err, repository.ErrDefaultGuard) {
+			s.emitDefaultGuardDenied(ctx, "tenant.deleted", tenantUUID)
+			return ErrDefaultReassignmentRequired
+		}
 		return err
 	}
 	s.runPostDeleteHooks(ctx, cascadeCtx)
@@ -669,6 +1288,14 @@ func (s *Service) DeleteTenant(ctx context.Context, tenantUUID string) error {
 // are pure derived data, so dropping them outright matches the existing
 // invariants. Cross-module data (authz bindings, the owner's user row) is
 // handled by registered hooks.
+//
+// Callers pass the mongo.SessionContext of repository.RunDefaultGuarded, so
+// both deletes join that transaction and are committed with — or rolled back
+// alongside — the tenant row write the guard protects. That placement is
+// load-bearing: this is the only thing standing between a lost race against a
+// concurrent TransferDefaultTenant and a platform default tenant with no
+// members left. Because session.WithTransaction may replay the closure on a
+// transient error, both deletes must stay idempotent (DeleteMany is).
 func (s *Service) cascadeTenantData(ctx context.Context, tenantUUID string) error {
 	if _, err := s.repo.DeleteMembershipsByTenant(ctx, tenantUUID); err != nil {
 		return fmt.Errorf("tenant: drop memberships: %w", err)

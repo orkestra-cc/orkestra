@@ -213,7 +213,7 @@ func (n *suspiciousLoginNotifier) recordSecurityEvent(ctx context.Context, in Su
 // UUID so refresh-induced re-calls (or a parallel handler) don't
 // produce duplicate emails for the same login.
 func (n *suspiciousLoginNotifier) sendEmail(ctx context.Context, in SuspiciousLoginInput) {
-	if n.notifier == nil || !n.notifier.IsConfigured(ctx) {
+	if !iface.IsConfiguredForCategory(ctx, n.notifier, notifModels.CategoryAuthSuspiciousLogin) {
 		return
 	}
 	if in.User.Email == "" {
@@ -292,7 +292,7 @@ func (n *suspiciousLoginNotifier) sendEmail(ctx context.Context, in SuspiciousLo
 // admin edits don't require a restart. Best-effort — failures log and
 // continue to the next recipient instead of aborting the fan-out.
 func (n *suspiciousLoginNotifier) sendAdminEmail(ctx context.Context, in SuspiciousLoginInput) {
-	if n.policy == nil || n.notifier == nil || !n.notifier.IsConfigured(ctx) {
+	if n.policy == nil || !iface.IsConfiguredForCategory(ctx, n.notifier, notifModels.CategoryAuthAdminSuspiciousLogin) {
 		return
 	}
 	if !n.policy.NotifyAdminOnSuspiciousLogin(ctx) {

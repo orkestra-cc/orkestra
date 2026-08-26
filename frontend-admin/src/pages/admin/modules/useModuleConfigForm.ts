@@ -4,6 +4,7 @@ import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import type { ConfigField } from 'store/api/moduleApi';
 import { isFieldVisible } from './configModel';
+import { expandSchema, rosterKeyOf } from './recordList/expandSchema';
 
 /**
  * Mirrors the backend's `utils.ParseDuration` — NOT Go's `time.ParseDuration`,
@@ -328,9 +329,72 @@ export const collectDiff = (
   return { config, secrets };
 };
 
+/**
+ * Record-list slugs added in the UI and not yet saved, keyed by field. They
+ * have to reach schema expansion or a freshly added element would have no
+ * fields to fill in until after a save — which it cannot reach, because the
+ * save is what carries them.
+ */
+export type PendingCreates = Readonly<Record<string, string[]>>;
+
+/**
+ * Module-scope and stable by reference, for the same reason EMPTY_SCHEMA is:
+ * an inline `{}` default would mint a new object every render and rebuild the
+ * expanded schema, the register-name map and the yup object on every
+ * keystroke.
+ */
+export const EMPTY_CREATES: PendingCreates = {};
+
+/** configValues with each field's roster extended by its pending creates. */
+const withPendingCreates = (
+  configValues: ConfigValues | undefined,
+  pendingCreates: PendingCreates
+): ConfigValues | undefined => {
+  const fields = Object.keys(pendingCreates).filter(
+    f => pendingCreates[f].length > 0
+  );
+  if (fields.length === 0) return configValues;
+  const out: ConfigValues = { ...(configValues ?? {}) };
+  for (const field of fields) {
+    const key = rosterKeyOf(field);
+    const stored = (out[key] ?? '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+    out[key] = [
+      ...stored,
+      ...pendingCreates[field].filter(s => !stored.includes(s))
+    ].join(',');
+  }
+  return out;
+};
+
+/** Concatenation deduped by `key`, first occurrence winning. */
+const unionByKey = (a: ConfigField[], b: ConfigField[]): ConfigField[] => {
+  const seen = new Set<string>();
+  const out: ConfigField[] = [];
+  for (const f of [...a, ...b]) {
+    if (seen.has(f.key)) continue;
+    seen.add(f.key);
+    out.push(f);
+  }
+  return out;
+};
+
 export interface ModuleConfigForm {
   form: UseFormReturn<ConfigFormValues>;
   defaults: ConfigFormValues;
+  /**
+   * The declared schema with every `recordList` replaced by its elements'
+   * concrete fields (`expandSchema`). This — not the declared schema — is
+   * what the form machine is built from: defaults, the yup object, the save
+   * diff and the dirty/error tallies all iterate it, so the seven-type leaf
+   * renderer and the resolver never learn an eighth case.
+   *
+   * Layout still iterates the DECLARED schema, which is where the record-list
+   * container renders. The two are different lists on purpose.
+   */
+  expandedSchema: ConfigField[];
   /**
    * Schema key → react-hook-form register name, derived from the schema
    * exactly once per form. Every consumer that touches form state — the
@@ -349,13 +413,30 @@ export interface ModuleConfigForm {
  */
 export const useModuleConfigForm = (
   schema: ConfigField[],
-  configValues: ConfigValues | undefined
+  configValues: ConfigValues | undefined,
+  pendingCreates: PendingCreates = EMPTY_CREATES
 ): ModuleConfigForm => {
-  // Memoised on the same `[schema]` identity the resolver keys off — see the
-  // EMPTY_SCHEMA constant in useModuleConfigController for why a `?? []`
-  // fallback anywhere upstream would quietly defeat both.
-  const fieldNames = useMemo(() => buildFieldNames(schema), [schema]);
-  const defaults = buildDefaults(schema, configValues, fieldNames);
+  // A record list's membership is dynamic, so the schema the form is built
+  // from has to be recomputed when it moves — both when the server's roster
+  // changes and when the operator adds an element that has not been saved
+  // yet. Memoised on the identities that decide the result.
+  const rosterValues = useMemo(
+    () => withPendingCreates(configValues, pendingCreates),
+    [configValues, pendingCreates]
+  );
+  const expandedSchema = useMemo(
+    () => expandSchema(schema, rosterValues),
+    [schema, rosterValues]
+  );
+  // Names cover the declared schema AND the expanded leaves. The record-list
+  // container holds no value, but the layout iterates the declared schema and
+  // `fieldNameOf` throws rather than guessing — so the container needs a name
+  // even though nothing ever registers it.
+  const fieldNames = useMemo(
+    () => buildFieldNames(unionByKey(schema, expandedSchema)),
+    [schema, expandedSchema]
+  );
+  const defaults = buildDefaults(expandedSchema, configValues, fieldNames);
   // yupResolver validates the whole values object on every call, and
   // mode: 'onChange' calls it per keystroke — on a large module (auth's 63
   // fields) rebuilding the yup object from scratch on every render is pure
@@ -364,14 +445,14 @@ export const useModuleConfigForm = (
   const resolver = useMemo(
     () =>
       yupResolver(
-        buildYupSchema(schema, fieldNames)
+        buildYupSchema(expandedSchema, fieldNames)
       ) as unknown as Resolver<ConfigFormValues>,
-    [schema, fieldNames]
+    [expandedSchema, fieldNames]
   );
   const form = useForm<ConfigFormValues>({
     defaultValues: defaults,
     resolver,
     mode: 'onChange'
   });
-  return { form, defaults, fieldNames };
+  return { form, defaults, fieldNames, expandedSchema };
 };

@@ -103,6 +103,18 @@ WORKDIR /app
 # Copy binary from builder
 COPY --from=builder /app/bin/server /app/server
 
+# Mount points for the runtime-written paths (compose mounts named volumes
+# here). Pre-created world-writable with the sticky bit so a fresh volume
+# inherits a directory the server can use whatever uid compose runs it as —
+# Docker copies the image directory's mode into an empty named volume.
+# The DHI runtime image defaults to its `nonroot` uid, which cannot chmod
+# a path it does not own — switch to uid 0 for this one step and back again
+# (numeric: the hardened image ships no `root` entry in /etc/passwd).
+USER 0:0
+RUN mkdir -p /app/uploads /app/logs \
+    && chmod 1777 /app/uploads /app/logs
+USER 65532:65532
+
 # Expose port
 EXPOSE 3000
 

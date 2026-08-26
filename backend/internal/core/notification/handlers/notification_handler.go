@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/orkestra/backend/internal/core/notification/models"
 	"github.com/orkestra/backend/internal/core/notification/repository"
 	"github.com/orkestra/backend/internal/core/notification/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 )
 
 // NotificationHandler exposes admin + user endpoints for the notification module.
@@ -25,6 +27,7 @@ func NewNotificationHandler(svc *services.NotificationService) *NotificationHand
 type listNotificationsRequest struct {
 	Category string `query:"category" doc:"Filter by category"`
 	Status   string `query:"status" doc:"Filter by status"`
+	Sender   string `query:"sender" doc:"Filter by sender profile slug"`
 	Limit    int64  `query:"limit" doc:"Max rows (default 100)"`
 }
 
@@ -36,8 +39,9 @@ type listNotificationsResponse struct {
 
 func (h *NotificationHandler) ListNotifications(ctx context.Context, req *listNotificationsRequest) (*listNotificationsResponse, error) {
 	items, err := h.svc.LogRepo().List(ctx, repository.Filter{
-		Category: req.Category,
-		Status:   req.Status,
+		Category:   req.Category,
+		Status:     req.Status,
+		SenderSlug: req.Sender,
 	}, req.Limit)
 	if err != nil {
 		return nil, huma.Error500InternalServerError("list notifications failed", err)
@@ -52,6 +56,7 @@ type testEmailRequest struct {
 		To       string `json:"to" doc:"Recipient email address"`
 		Subject  string `json:"subject,omitempty" doc:"Optional subject override"`
 		BodyText string `json:"bodyText,omitempty" doc:"Optional body override"`
+		Sender   string `json:"sender,omitempty" doc:"Sender profile slug to test; empty uses the default (*) profile"`
 	}
 }
 
@@ -59,6 +64,7 @@ type testEmailResponse struct {
 	Body struct {
 		Success  bool   `json:"success"`
 		Provider string `json:"provider"`
+		Sender   string `json:"sender" doc:"Slug of the profile that carried the message"`
 		Message  string `json:"message"`
 	}
 }
@@ -75,19 +81,21 @@ func (h *NotificationHandler) SendTestEmail(ctx context.Context, req *testEmailR
 	if body == "" {
 		body = "This is a test email sent from the Orkestra notification module at " + time.Now().Format(time.RFC3339)
 	}
-	err := h.svc.EmailSender().Send(ctx, services.EmailMessage{
-		To:       req.Body.To,
-		Subject:  subject,
-		BodyText: body,
-	})
-	resp := &testEmailResponse{}
-	resp.Body.Provider = h.svc.EmailSender().ProviderName()
+	res, err := h.svc.SendTest(ctx, services.TestSendInput{To: req.Body.To, Subject: subject, BodyText: body, Sender: req.Body.Sender})
 	if err != nil {
-		resp.Body.Success = false
-		resp.Body.Message = err.Error()
-		return resp, huma.Error500InternalServerError("send failed", err)
+		switch {
+		case errors.Is(err, services.ErrSenderNotFound):
+			return nil, errcode.NotFound(errcode.NotificationSenderNotFound, "No sender profile has that slug.")
+		case errors.Is(err, services.ErrNoSenderForCategory), errors.Is(err, services.ErrUnknownDriver), errors.Is(err, services.ErrSenderNotConfigured):
+			return nil, errcode.UnprocessableEntity(errcode.NotificationSenderIncomplete, "The sender profile cannot send yet: "+res.Diagnostic)
+		default:
+			return nil, errcode.New(http.StatusBadGateway, errcode.NotificationSendFailed, "The sender did not accept the test message: "+res.Diagnostic)
+		}
 	}
+	resp := &testEmailResponse{}
 	resp.Body.Success = true
+	resp.Body.Provider = res.Provider
+	resp.Body.Sender = res.SenderSlug
 	resp.Body.Message = "Test email dispatched"
 	return resp, nil
 }

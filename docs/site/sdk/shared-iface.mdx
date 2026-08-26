@@ -17,6 +17,7 @@ A representative slice, not the full list — read the package for the rest.
 | `OperatorUserProvider` / `ClientUserProvider` | `user` | tier-specific lookups |
 | `SessionTerminator` | `user` | any module that must revoke a principal's sessions |
 | `NotificationSender` | `notification` | auth (verification, password reset) |
+| `CategoryConfiguredChecker` | `notification` | auth pre-flight guards — optional; `IsConfiguredForCategory` falls back to `IsConfigured` |
 | `TenantProvider` | `tenant` | authz, auth (JWT membership embedding), middleware |
 | `AccessProvider` | `tenant` | middleware (`RequireCapability`) |
 | `AuthzProvider` | `authz` | middleware (permission checks) |
@@ -29,6 +30,8 @@ A representative slice, not the full list — read the package for the rest.
 | [`ObjectStore` / `ObjectStoreProvider`](/sdk/object-storage) | the platform's blob provider | user (avatars), and any module storing uploads |
 
 `AuditSinkSetter` and `KMSProviderSetter` are the setter seams on core services: nil by default, so a fork can wire its own audit or key-management implementation the way the core compliance module does.
+
+`KMSProvider.CreateKey` is idempotent under concurrency, not just for sequential callers: two calls racing to create a key for the same `tenantUUID` must both return the single winning `keyID`, never mint two DEKs for one tenant. The in-tree `compliance` implementation backs this with the collection's unique `tenantUuid` index plus a duplicate-key reread; any other implementation of `KMSProvider` (a remote HTTP-backed client, say) must uphold the same guarantee, since a resumable operation (like tenant provisioning) may call `CreateKey` more than once for the same tenant.
 
 ## Reserved for a fork's addons
 

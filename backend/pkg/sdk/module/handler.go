@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -131,6 +132,9 @@ type EnvironmentConfigResponse struct {
 	ConfigValues map[string]string `json:"configValues"`
 	SecretStatus map[string]bool   `json:"secretStatus"`
 	UpdatedAt    string            `json:"updatedAt"`
+	// Revision is what a subsequent PATCH echoes back to remove record-list
+	// elements. Plain int64 here — a response always carries one.
+	Revision int64 `json:"revision"`
 }
 
 // GetEnvironmentOutput is the response for GET /v1/admin/modules/{name}/environments/{env}.
@@ -143,9 +147,24 @@ type UpdateEnvironmentInput struct {
 	Name string `path:"name" doc:"Module name"`
 	Env  string `path:"env" doc:"Environment name"`
 	Body struct {
-		Config  map[string]string `json:"config,omitempty" doc:"Non-secret config values to update"`
-		Secrets map[string]string `json:"secrets,omitempty" doc:"Secret config values (will be encrypted)"`
+		Config      map[string]string       `json:"config,omitempty" doc:"Non-secret config values to update"`
+		Secrets     map[string]string       `json:"secrets,omitempty" doc:"Secret config values (will be encrypted)"`
+		RecordLists []RecordListMutationDTO `json:"recordLists,omitempty" doc:"Record-list membership changes"`
+		// Pointer so an omitted revision is distinguishable from an explicit
+		// 0 — and 0 is a legitimate expectation for a document written before
+		// record lists existed.
+		Revision *int64 `json:"revision,omitempty" doc:"Environment revision; required when any recordLists entry removes elements"`
 	}
+}
+
+// RecordListMutationDTO is one field's membership intent on the wire. The
+// wire shape and the service type (RecordListMutation) are deliberately
+// separate: this one carries Huma's json/doc tags, and the service must not
+// depend on the transport's tagging rules.
+type RecordListMutationDTO struct {
+	Field  string   `json:"field" doc:"Record-list field key"`
+	Create []string `json:"create,omitempty" doc:"Slugs being created"`
+	Remove []string `json:"remove,omitempty" doc:"Slugs being removed"`
 }
 
 // UpdateEnvironmentOutput is the response for PATCH /v1/admin/modules/{name}/environments/{env}.
@@ -276,11 +295,7 @@ func (h *ModuleAdminHandler) UpdateModule(ctx context.Context, input *UpdateModu
 		// UpdateConfig merges into the stored config — keys the caller omits are
 		// preserved, so a config-only change never wipes the module's secrets.
 		if err := h.configService.UpdateConfig(ctx, input.Name, input.Body.Config, input.Body.Secrets); err != nil {
-			var invalid *ConfigValidationError
-			if errors.As(err, &invalid) {
-				return nil, huma.Error422UnprocessableEntity(invalid.Error())
-			}
-			return nil, err
+			return nil, mapConfigServiceError(err, func(e error) error { return e })
 		}
 		configChanged = true
 	}
@@ -390,18 +405,34 @@ func (h *ModuleAdminHandler) GetEnvironment(ctx context.Context, input *GetEnvir
 			ConfigValues: envConfig.ConfigValues,
 			SecretStatus: secretStatus,
 			UpdatedAt:    updatedAt,
+			Revision:     envConfig.Revision,
 		},
 	}, nil
 }
 
 // UpdateEnvironment updates config values for a specific environment.
 func (h *ModuleAdminHandler) UpdateEnvironment(ctx context.Context, input *UpdateEnvironmentInput) (*UpdateEnvironmentOutput, error) {
-	if err := h.configService.UpdateEnvironmentConfig(ctx, input.Name, input.Env, input.Body.Config, input.Body.Secrets); err != nil {
-		var invalid *ConfigValidationError
-		if errors.As(err, &invalid) {
-			return nil, huma.Error422UnprocessableEntity(invalid.Error())
-		}
-		return nil, huma.Error400BadRequest(err.Error())
+	mutations := make([]RecordListMutation, 0, len(input.Body.RecordLists))
+	for _, m := range input.Body.RecordLists {
+		mutations = append(mutations, RecordListMutation{Field: m.Field, Create: m.Create, Remove: m.Remove})
+	}
+
+	if err := h.configService.UpdateEnvironmentConfigWithRecordLists(
+		ctx, input.Name, input.Env,
+		input.Body.Config, input.Body.Secrets, mutations, input.Body.Revision,
+	); err != nil {
+		// mapConfigServiceError owns the ConfigValidationError case: a
+		// code-bearing validator gets the stable 422 envelope, a code-less
+		// one keeps the text-only 422. Everything else falls through to the
+		// record-list mapping — 409 means the client acted on a view of the
+		// world that no longer holds; 422 means the request itself is
+		// malformed. Both are more actionable than the blanket 400.
+		return nil, mapConfigServiceError(err, func(e error) error {
+			if code := recordListStatus(e); code != 0 {
+				return huma.NewError(code, e.Error())
+			}
+			return huma.Error400BadRequest(e.Error())
+		})
 	}
 
 	if h.registry.SupportsHotReload(input.Name) {
@@ -424,14 +455,36 @@ func (h *ModuleAdminHandler) UpdateEnvironment(ctx context.Context, input *Updat
 			ConfigValues: envConfig.ConfigValues,
 			SecretStatus: secretStatus,
 			UpdatedAt:    updatedAt,
+			Revision:     envConfig.Revision,
 		},
 	}, nil
+}
+
+// recordListStatus maps a record-list error to its HTTP status, or 0 when the
+// error is not one. The split is by what the client can do about it: a 409
+// means the roster moved under them and they should re-read and retry; a 422
+// means the request could never have succeeded as sent.
+func recordListStatus(err error) int {
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, ErrRevisionStale), errors.Is(err, ErrSlugExists),
+		errors.Is(err, ErrSlugMissing), errors.Is(err, ErrUnknownSlug):
+		return http.StatusConflict
+	case errors.Is(err, ErrRevisionRequired), errors.Is(err, ErrDuplicateMutationField),
+		errors.Is(err, ErrCreateRemoveOverlap), errors.Is(err, ErrRosterFull),
+		errors.Is(err, ErrLabelRequired), errors.Is(err, ErrLabelTooLong),
+		errors.Is(err, ErrSlugLabelMismatch):
+		return http.StatusUnprocessableEntity
+	default:
+		return 0
+	}
 }
 
 // SetActiveEnvironment switches the active environment for a module.
 func (h *ModuleAdminHandler) SetActiveEnvironment(ctx context.Context, input *SetActiveEnvironmentInput) (*SetActiveEnvironmentOutput, error) {
 	if err := h.configService.SetActiveEnvironment(ctx, input.Name, input.Body.Environment); err != nil {
-		return nil, huma.Error400BadRequest(err.Error())
+		return nil, mapConfigServiceError(err, func(e error) error { return huma.Error400BadRequest(e.Error()) })
 	}
 
 	needsRestart := !h.registry.SupportsHotReload(input.Name)

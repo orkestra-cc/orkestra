@@ -114,6 +114,30 @@ type UserProvider interface {
 	ClearMFAGrace(ctx context.Context, userUUID string) error
 }
 
+// ---------------------------------------------------------------------------
+// UserLifecycleStateProvider — consumed by: shared/setup (finalizer-access
+// probe + recovery). Narrow on purpose: UserProvider.GetUserByID excludes
+// soft-deleted rows and so cannot distinguish `missing` from `deleted` for
+// recovery audit; this seam resolves ONLY the lifecycle class and returns
+// no profile data. The wide UserProvider is not widened.
+// ---------------------------------------------------------------------------
+
+type UserLifecycleState string
+
+const (
+	UserLifecycleActive   UserLifecycleState = "active"   // exists, not soft-deleted, IsActive
+	UserLifecycleInactive UserLifecycleState = "inactive" // exists, not soft-deleted, !IsActive
+	UserLifecycleDeleted  UserLifecycleState = "deleted"  // soft-deleted row
+	UserLifecycleMissing  UserLifecycleState = "missing"  // no row
+)
+
+// UserLifecycleStateProvider classifies one operator user UUID. A database
+// error is returned as an error and is distinct from every state — callers
+// fail closed and must never map a lookup failure onto a lifecycle class.
+type UserLifecycleStateProvider interface {
+	UserLifecycleState(ctx context.Context, userUUID string) (UserLifecycleState, error)
+}
+
 // OAuthLinkDataUpdater is the additive sub-interface that lets the auth
 // module refresh the embedded OAuthLink.OAuthData map (typically the
 // cached `picture` URL) on every OAuth callback. Adding this method
@@ -325,6 +349,29 @@ type NotificationSender interface {
 	SendTemplated(ctx context.Context, req TemplatedNotificationRequest) (*NotificationResult, error)
 }
 
+// CategoryConfiguredChecker is an OPTIONAL companion to NotificationSender
+// (ADR-0019 D7). With sender profiles routed by category, IsConfigured's
+// single boolean is wrong in both directions for a caller about to send one
+// category; this answers for that category. A sender that does not
+// implement it keeps working — IsConfiguredForCategory falls back.
+type CategoryConfiguredChecker interface {
+	IsConfiguredFor(ctx context.Context, category string) bool
+}
+
+// IsConfiguredForCategory is the accessor every pre-flight guard should use:
+// the exact answer when s implements CategoryConfiguredChecker, the coarse
+// IsConfigured otherwise, false for a nil sender. Follows the
+// HasConfigGroups/ConfigGroupsOf idiom for extending a frozen contract.
+func IsConfiguredForCategory(ctx context.Context, s NotificationSender, category string) bool {
+	if s == nil {
+		return false
+	}
+	if c, ok := s.(CategoryConfiguredChecker); ok {
+		return c.IsConfiguredFor(ctx, category)
+	}
+	return s.IsConfigured(ctx)
+}
+
 // ---------------------------------------------------------------------------
 // TenantProvider — consumed by: authz, auth (JWT issuance), middleware,
 // every data module via the tenantrepo helper.
@@ -438,6 +485,22 @@ type TenantProvider interface {
 	// feature flag; Phase 3 flips the flag and migrates legacy clientbilling
 	// rows onto the resulting personal tenants.
 	EnsureTenantForUser(ctx context.Context, userUUID string) (*Tenant, error)
+}
+
+// ---------------------------------------------------------------------------
+// DefaultTenantProvider — consumed by: auth (operator JWT tenant-fallback
+// seeding), the local dev-token resolver. Deliberately narrow: the wide
+// TenantProvider is NOT widened (its test fakes and consumers stay intact).
+// ---------------------------------------------------------------------------
+
+// DefaultTenantProvider resolves the platform default Tier-1 tenant.
+// Returns (nil, nil) when no default is assigned or the pointer's target is
+// not operational (status active, not soft-deleted) — the provider never
+// hands out a non-operational target. It grants nothing: membership
+// validation, RBAC, audience checks, and X-Tenant-ID override all still
+// apply downstream.
+type DefaultTenantProvider interface {
+	GetDefaultTenant(ctx context.Context) (*Tenant, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -1122,9 +1185,12 @@ type KMSProvider interface {
 	// CreateKey mints a fresh DEK for tenantUUID, wraps it with the
 	// master key, persists the wrapped form, and returns the opaque
 	// keyID callers stamp on their tenant row. Idempotent at the
-	// tenant level: if a key already exists for tenantUUID, returns
-	// the existing keyID rather than overwriting — avoids wiping data
-	// when a create path runs twice.
+	// tenant level AND under concurrency: two racing calls for one
+	// tenantUUID both return the single winning keyID (implementations
+	// back this with a unique tenant index + duplicate-key reread).
+	// A caller may replay this call after a crash or a lost response —
+	// e.g. a resumable provisioning saga retrying a stage — and must
+	// never observe a second DEK for the same tenant.
 	CreateKey(ctx context.Context, tenantUUID string) (keyID string, err error)
 
 	// Encrypt seals plaintext with the tenant's DEK. The returned
@@ -1153,3 +1219,26 @@ func newStringError(s string) error { return &stringError{s: s} }
 type stringError struct{ s string }
 
 func (e *stringError) Error() string { return e.s }
+
+// CRMActivityInput describes a billing event worth a human follow-up.
+//
+// Email is how the CRM finds the person: the billing stack and the CRM keep
+// separate directories, and Email is the only field both hold.
+type CRMActivityInput struct {
+	TenantUUID string
+	Email      string
+	Kind       string // "payment_failed" | "subscription_suspended" | "manual_payment_required"
+	Summary    string
+	Metadata   map[string]string
+}
+
+// CRMActivitySink — implemented by: crm. Consumed by: subscriptions.
+//
+// Records a billing event against an existing CRM person so someone can act
+// on it. Implementations MUST NOT create a person that does not exist: the
+// CRM carries explicit consent records and a lawful basis per contact, and
+// enrolling someone off the back of a failed charge is not a decision a
+// billing notifier gets to make. No match = log and return nil.
+type CRMActivitySink interface {
+	RecordActivity(ctx context.Context, in CRMActivityInput) error
+}

@@ -182,10 +182,137 @@ func (r *Repository) DeleteRole(ctx context.Context, uuid string) error {
 
 // --- Bindings ---
 
+// bindingIsExpired reports whether b carries an absolute expiry that has
+// already passed. A nil ExpiresAt is a permanent grant, never expired.
+func bindingIsExpired(b *models.Binding, now time.Time) bool {
+	return b != nil && b.ExpiresAt != nil && !b.ExpiresAt.After(now)
+}
+
+// reapExpiredBinding deletes the (tenantId, userUUID, roleId) row when — and
+// only when — it carries an expiry that has already passed, reporting
+// whether it removed anything.
+//
+// An expired binding confers nothing: ListActiveBindingsForUser filters it
+// out of every effective-permission computation. But authz_bindings has no
+// TTL index and no reaper (see this module's CLAUDE.md — both are tracked as
+// future work), so the row survives forever, and the unique
+// (tenantId, userUUID, roleId) index then makes it block every subsequent
+// grant of that role. Reaping it at grant time is what keeps "expired" from
+// meaning "permanently un-re-grantable". Deleting a row that already grants
+// nothing loses no authority, which is why this is safe to do implicitly.
+//
+// The `$type: "date"` clause is load-bearing, not defensive noise: BSON's
+// canonical type ordering sorts null BELOW dates, so a bare
+// {"expiresAt": {"$lte": now}} would also match permanent grants — whose
+// expiresAt is null or missing — and silently reap the very bindings that
+// must never be touched.
+func (r *Repository) reapExpiredBinding(ctx context.Context, tenantID, userUUID, roleUUID string, now time.Time) (bool, error) {
+	//tenantscope:allow authz owns the global authz_bindings registry; the filter pins tenantId, userUUID and roleId explicitly (reap of the tuple's own expired row before a re-grant)
+	res, err := r.db.Collection(CollBindings).DeleteOne(ctx, bson.M{
+		"tenantId":  tenantID,
+		"userUUID":  userUUID,
+		"roleId":    roleUUID,
+		"expiresAt": bson.M{"$type": "date", "$lte": now},
+	})
+	if err != nil {
+		return false, err
+	}
+	return res.DeletedCount > 0, nil
+}
+
+// CreateBinding inserts a new binding, surfacing the unique index's
+// duplicate-key error when the tuple is already granted (the service maps it
+// to ErrBindingExists → 409).
+//
+// An EXPIRED incumbent is not such a duplicate: it grants nothing, so it is
+// reaped and the insert retried once. Without that, an expired contractor
+// grant would answer 409 "already granted" forever on a role the user does
+// not actually hold, and the only way out would be deleting a binding the
+// operator cannot see in any effective-permission view.
 func (r *Repository) CreateBinding(ctx context.Context, b *models.Binding) error {
 	b.GrantedAt = time.Now()
 	_, err := r.db.Collection(CollBindings).InsertOne(ctx, b)
+	if err == nil || !mongo.IsDuplicateKeyError(err) {
+		return err
+	}
+
+	reaped, rerr := r.reapExpiredBinding(ctx, b.TenantID, b.UserUUID, b.RoleUUID, time.Now())
+	if rerr != nil {
+		return rerr
+	}
+	if !reaped {
+		// A live incumbent holds the tuple: the duplicate-key error stands.
+		return err
+	}
+	// Exactly one retry. A second collision means a concurrent writer took
+	// the tuple in the meantime, which is a genuine duplicate.
+	_, err = r.db.Collection(CollBindings).InsertOne(ctx, b)
 	return err
+}
+
+// EnsureBinding grants the (tenantId, userUUID, roleId) tuple if absent and
+// returns the persisted row either way. Concurrent-safe: $setOnInsert upsert
+// against the unique compound index; the loser of a race reads the winner.
+// A fresh insert persists every field of b, including ExpiresAt — nil is a
+// legitimate value and is stored as BSON null rather than omitted, so an
+// inserting caller's expiry is honored exactly like CreateBinding's.
+// Existing LIVE rows are returned untouched — uuid/grantedBy/grantedAt/
+// expiresAt of the winner are preserved regardless of what a later, losing
+// caller's b carries.
+//
+// An existing EXPIRED row is not a grant and is never reused: it is reaped
+// and the ensure replayed once, so the caller gets a live binding. Returning
+// it verbatim (the previous behavior) reported success while granting
+// nothing at all — and because every OwnerRoleBinder call site
+// (tenant.CreateTenant, SetMemberRoles, AttachMember) discards the returned
+// row and only checks the error, an expired org_owner binding made
+// re-establishing ownership a silent no-op.
+func (r *Repository) EnsureBinding(ctx context.Context, b *models.Binding) (*models.Binding, error) {
+	out, err := r.ensureBindingOnce(ctx, b)
+	if err != nil {
+		return nil, err
+	}
+	if !bindingIsExpired(out, time.Now()) {
+		return out, nil
+	}
+	if _, rerr := r.reapExpiredBinding(ctx, b.TenantID, b.UserUUID, b.RoleUUID, time.Now()); rerr != nil {
+		return nil, rerr
+	}
+	// Exactly one replay, never a loop: a caller whose own ExpiresAt is
+	// already in the past legitimately produces an expired row, and that
+	// result must be returned rather than retried forever.
+	return r.ensureBindingOnce(ctx, b)
+}
+
+// ensureBindingOnce is EnsureBinding's single upsert attempt, without the
+// expired-incumbent handling its caller layers on top.
+func (r *Repository) ensureBindingOnce(ctx context.Context, b *models.Binding) (*models.Binding, error) {
+	//tenantscope:allow authz owns the global authz_bindings registry; the ensure filter pins tenantId, userUUID and roleId explicitly (owner-binding ensure — see authz/CLAUDE.md)
+	res := r.db.Collection(CollBindings).FindOneAndUpdate(ctx,
+		bson.M{"tenantId": b.TenantID, "userUUID": b.UserUUID, "roleId": b.RoleUUID},
+		bson.M{"$setOnInsert": bson.M{
+			"uuid": b.UUID, "userUUID": b.UserUUID, "tenantId": b.TenantID,
+			"roleId": b.RoleUUID, "roleName": b.RoleName,
+			"grantedBy": b.GrantedBy, "grantedAt": time.Now(), "expiresAt": b.ExpiresAt,
+		}},
+		options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After),
+	)
+	var out models.Binding
+	if err := res.Decode(&out); err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			// Upsert raced another insert between its find and insert phases;
+			// the tuple now exists — reread it.
+			//tenantscope:allow authz owns the global authz_bindings registry; reread of the winning tuple after a duplicate-key race
+			ferr := r.db.Collection(CollBindings).FindOne(ctx,
+				bson.M{"tenantId": b.TenantID, "userUUID": b.UserUUID, "roleId": b.RoleUUID}).Decode(&out)
+			if ferr != nil {
+				return nil, ferr
+			}
+			return &out, nil
+		}
+		return nil, err
+	}
+	return &out, nil
 }
 
 // DeleteBinding removes a binding by UUID scoped to tenantID. The tenantId

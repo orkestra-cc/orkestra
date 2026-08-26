@@ -245,7 +245,14 @@ export const configCompleteness = (
   if (!schema) return { filled: 0, total: 0 };
   const cv = configValues ?? {};
   const ss = secretStatus ?? {};
-  const required = visibleFields(schema, cv).filter(f => f.required);
+  // A record list is excluded from both completeness measures. It holds no
+  // value of its own, so `cv[f.key]` is always empty and a list marked
+  // required would read as permanently unfilled — an amber badge no operator
+  // could ever clear. Arity is the list's own concern (`min`/`max`), not this
+  // one's.
+  const required = visibleFields(schema, cv).filter(
+    f => f.required && f.type !== 'recordList'
+  );
   let filled = 0;
   for (const f of required) {
     if (f.type === 'secret') {
@@ -274,7 +281,8 @@ export const unfilledRequiredKeys = (
   if (!schema) return out;
   const ss = secretStatus ?? {};
   for (const f of visibleFields(schema, values)) {
-    if (!f.required) continue;
+    // See configCompleteness: a record list has no value to be "filled".
+    if (!f.required || f.type === 'recordList') continue;
     const typed = (values[f.key] ?? '').trim() !== '';
     const filled = f.type === 'secret' ? Boolean(ss[f.key]) || typed : typed;
     if (!filled) out.add(f.key);

@@ -428,3 +428,39 @@ describe('visibleFields', () => {
     ]);
   });
 });
+
+describe('record lists are excluded from completeness', () => {
+  const schema = [
+    {
+      key: 'email.profiles',
+      label: 'Profiles',
+      description: '',
+      type: 'recordList',
+      required: true,
+      default: '',
+      envVar: '',
+      items: []
+    },
+    {
+      key: 'apiKey',
+      label: 'API key',
+      description: '',
+      type: 'string',
+      required: true,
+      default: '',
+      envVar: ''
+    }
+  ] as unknown as ConfigField[];
+
+  // A record list holds no value of its own, so counting it would leave an
+  // amber "1 to fill" badge no operator could ever clear.
+  it('does not count a required record list as an unfilled field', () => {
+    expect(unfilledRequiredKeys(schema, { apiKey: 'set' }, {})).toEqual(
+      new Set()
+    );
+    expect(configCompleteness(schema, { apiKey: 'set' }, {})).toEqual({
+      filled: 1,
+      total: 1
+    });
+  });
+});

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/orkestra/backend/internal/core/tenant/models"
 	"github.com/orkestra/backend/internal/core/tenant/repository"
 	"github.com/orkestra/backend/internal/core/tenant/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
@@ -43,7 +45,9 @@ type fakeTenantSvc struct {
 	setItalianBillableFn     func(ctx context.Context, tenantUUID string, on bool) error
 	ensureTenantForUserFn    func(ctx context.Context, userUUID string) (*iface.Tenant, error)
 	provisioningModeFn       func(ctx context.Context, kind models.TenantKind) string
-	countActiveByKindFn      func(ctx context.Context, kind models.TenantKind) (int64, error)
+	countProvisioningSlotsFn func(ctx context.Context, kind models.TenantKind) (int64, error)
+	defaultTenantUUIDFn      func(ctx context.Context) (string, error)
+	transferDefaultTenantFn  func(ctx context.Context, tenantUUID, actorUUID string) error
 }
 
 func (f *fakeTenantSvc) GetTenant(ctx context.Context, t string) (*iface.Tenant, error) {
@@ -179,20 +183,43 @@ func (f *fakeTenantSvc) EnsureTenantForUser(ctx context.Context, u string) (*ifa
 	panic("unused: EnsureTenantForUser")
 }
 
-// ProvisioningMode and CountActiveByKind default to the legacy "open" /
-// zero-count behaviour so existing handler tests that don't exercise the
-// provisioning policy keep passing without wiring a stub.
+// ProvisioningMode and CountProvisioningSlotsByKind default to "open" /
+// zero-count so external-kind (division) tests that don't exercise the
+// provisioning policy keep passing without wiring a stub. This default is
+// inert for internal-kind gate checks: enforceManualGate now requires
+// system.tenants.admin for every Tier-1 creation regardless of what this
+// returns, so internal-kind tests must stub the authz registry instead (see
+// adminRegistry).
 func (f *fakeTenantSvc) ProvisioningMode(ctx context.Context, kind models.TenantKind) string {
 	if f.provisioningModeFn != nil {
 		return f.provisioningModeFn(ctx, kind)
 	}
 	return models.ProvisioningModeOpen
 }
-func (f *fakeTenantSvc) CountActiveByKind(ctx context.Context, kind models.TenantKind) (int64, error) {
-	if f.countActiveByKindFn != nil {
-		return f.countActiveByKindFn(ctx, kind)
+func (f *fakeTenantSvc) CountProvisioningSlotsByKind(ctx context.Context, kind models.TenantKind) (int64, error) {
+	if f.countProvisioningSlotsFn != nil {
+		return f.countProvisioningSlotsFn(ctx, kind)
 	}
 	return 0, nil
+}
+
+// DefaultTenantUUID defaults to "" (unassigned) rather than panicking:
+// listAllTenantsAdmin, listMembers, attachMemberAdmin, and getTenantAdmin
+// all call it now to stamp isDefault, so every pre-existing test exercising
+// those handlers would otherwise need an unrelated stub. "" is also the
+// correct behaviour for a test that doesn't care — every row simply reports
+// isDefault=false.
+func (f *fakeTenantSvc) DefaultTenantUUID(ctx context.Context) (string, error) {
+	if f.defaultTenantUUIDFn != nil {
+		return f.defaultTenantUUIDFn(ctx)
+	}
+	return "", nil
+}
+func (f *fakeTenantSvc) TransferDefaultTenant(ctx context.Context, tenantUUID, actorUUID string) error {
+	if f.transferDefaultTenantFn != nil {
+		return f.transferDefaultTenantFn(ctx, tenantUUID, actorUUID)
+	}
+	panic("unused: TransferDefaultTenant")
 }
 
 // fakeTenantUserProvider stubs iface.UserProvider for the handler's
@@ -293,6 +320,17 @@ func assertStatus(t *testing.T, err error, want int) {
 	}
 }
 
+func assertErrorCode(t *testing.T, err error, want string) {
+	t.Helper()
+	var coded *errcode.Error
+	if !errors.As(err, &coded) {
+		t.Fatalf("err %v is not an errcode.Error", err)
+	}
+	if coded.Code != want {
+		t.Errorf("code = %q, want %q", coded.Code, want)
+	}
+}
+
 // authedCtx returns a context with a userUUID stamped, mimicking what
 // AuthMiddleware does on a real request.
 func authedCtx(userUUID string) context.Context {
@@ -341,6 +379,47 @@ func TestListMyTenants_Happy(t *testing.T) {
 	}
 }
 
+// TestListMyTenants_StampsIsDefault covers the derived-DTO contract on
+// memberDTO — the operator console's tenant switcher reads isDefault off
+// this response. Resolved once per request (callCount), applied to
+// exactly the row whose TenantID matches the platform default.
+func TestListMyTenants_StampsIsDefault(t *testing.T) {
+	t.Parallel()
+	callCount := 0
+	svc := &fakeTenantSvc{
+		listUserMembershipsFn: func(context.Context, string) ([]iface.TenantMembership, error) {
+			return []iface.TenantMembership{
+				{TenantUUID: "t-a", TenantName: "Alpha", TenantSlug: "alpha", TenantKind: "internal", Roles: []string{"org_owner"}, IsOwner: true},
+				{TenantUUID: "t-b", TenantName: "Beta", TenantSlug: "beta", TenantKind: "internal", Roles: []string{"org_member"}},
+			}, nil
+		},
+		getTenantModelFn: func(_ context.Context, uuid string) (*models.Tenant, error) {
+			return &models.Tenant{UUID: uuid, Plan: "pro"}, nil
+		},
+		defaultTenantUUIDFn: func(context.Context) (string, error) {
+			callCount++
+			return "t-b", nil
+		},
+	}
+	h := New(svc, nil)
+	out, err := h.listMyTenants(authedCtx("u1"), nil)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("DefaultTenantUUID called %d times, want exactly 1 (resolved once per request, not per row)", callCount)
+	}
+	if len(out.Body.Memberships) != 2 {
+		t.Fatalf("got %d memberships, want 2", len(out.Body.Memberships))
+	}
+	for _, m := range out.Body.Memberships {
+		want := m.TenantID == "t-b"
+		if m.IsDefault != want {
+			t.Errorf("membership %+v: IsDefault = %v, want %v", m, m.IsDefault, want)
+		}
+	}
+}
+
 func TestListMyTenants_SvcError(t *testing.T) {
 	t.Parallel()
 	svc := &fakeTenantSvc{
@@ -372,7 +451,7 @@ func TestCreateTenant_Happy(t *testing.T) {
 			return &models.Tenant{UUID: "t-1", Name: "Acme"}, nil
 		},
 	}
-	h := New(svc, nil)
+	h := New(svc, adminRegistry())
 	out, err := h.createTenant(authedCtx("u1"), &createTenantInput{Body: models.CreateTenantInput{Name: "Acme"}})
 	if err != nil {
 		t.Fatalf("err = %v", err)
@@ -389,9 +468,24 @@ func TestCreateTenant_SvcError400(t *testing.T) {
 			return nil, errors.New("slug already in use")
 		},
 	}
-	h := New(svc, nil)
+	h := New(svc, adminRegistry())
 	_, err := h.createTenant(authedCtx("u1"), &createTenantInput{Body: models.CreateTenantInput{Name: "x"}})
-	assertStatus(t, err, 400)
+	assertStatus(t, err, 500)
+}
+
+func TestCreateTenant_ServiceFailureDoesNotLeakDriverText(t *testing.T) {
+	t.Parallel()
+	svc := &fakeTenantSvc{
+		createTenantFn: func(context.Context, string, models.CreateTenantInput) (*models.Tenant, error) {
+			return nil, errors.New("E11000 duplicate key error collection: tenants")
+		},
+	}
+	h := New(svc, adminRegistry())
+	_, err := h.createTenant(authedCtx("u1"), &createTenantInput{Body: models.CreateTenantInput{Name: "Acme"}})
+	assertStatus(t, err, 500)
+	if strings.Contains(err.Error(), "E11000") {
+		t.Fatalf("Mongo driver text reached the client: %q", err.Error())
+	}
 }
 
 // fakeAuthzProvider stubs iface.AuthzProvider for the provisioning manual-gate
@@ -408,6 +502,17 @@ func (f *fakeAuthzProvider) GetEffectivePermissions(context.Context, string, str
 }
 func (f *fakeAuthzProvider) RegisterPermissions(context.Context, []iface.PermissionSpec) error {
 	return nil
+}
+
+// adminRegistry builds a ServiceRegistry whose AuthzProvider grants every
+// HasPermission check — Tier-1 tenant creation now requires
+// system.tenants.admin in every provisioning mode, so any test exercising an
+// internal-kind createTenant success/error path (not the gate itself) must
+// stub the admin path to reach the code under test.
+func adminRegistry() *module.ServiceRegistry {
+	reg := module.NewServiceRegistry()
+	reg.Register(module.ServiceAuthzProvider, iface.AuthzProvider(&fakeAuthzProvider{hasPermission: true}))
+	return reg
 }
 
 func TestCreateTenant_ManualMode_NonAdmin403(t *testing.T) {
@@ -457,9 +562,25 @@ func TestCreateTenant_ProvisioningLocked409(t *testing.T) {
 			return nil, services.ErrProvisioningLocked
 		},
 	}
-	h := New(svc, nil)
+	h := New(svc, adminRegistry())
 	_, err := h.createTenant(authedCtx("u1"), &createTenantInput{Body: models.CreateTenantInput{Name: "x"}})
 	assertStatus(t, err, 409)
+}
+
+func TestCreateTenant_SlugAlreadyInUse409WithoutRawSlug(t *testing.T) {
+	t.Parallel()
+	svc := &fakeTenantSvc{
+		createTenantFn: func(context.Context, string, models.CreateTenantInput) (*models.Tenant, error) {
+			return nil, services.ErrSlugAlreadyInUse
+		},
+	}
+	h := New(svc, adminRegistry())
+	_, err := h.createTenant(authedCtx("u1"), &createTenantInput{Body: models.CreateTenantInput{Slug: "private-slug-42"}})
+	assertStatus(t, err, 409)
+	assertErrorCode(t, err, errcode.TenantSlugAlreadyInUse)
+	if strings.Contains(err.Error(), "private-slug-42") {
+		t.Fatalf("raw slug reached the client: %q", err)
+	}
 }
 
 // --- getTenant / updateTenant / deleteTenant / purgeTenant / updatePlan ---
@@ -495,6 +616,55 @@ func TestGetTenant(t *testing.T) {
 	})
 }
 
+func TestGetTenantAdmin(t *testing.T) {
+	t.Parallel()
+	t.Run("stamps isDefault true when it matches the platform default", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{
+			getTenantModelFn: func(context.Context, string) (*models.Tenant, error) {
+				return &models.Tenant{UUID: "t-1"}, nil
+			},
+			defaultTenantUUIDFn: func(context.Context) (string, error) { return "t-1", nil },
+		}
+		h := New(svc, nil)
+		out, err := h.getTenantAdmin(context.Background(), &tenantIDPath{TenantID: "t-1"})
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if !out.Body.IsDefault {
+			t.Errorf("IsDefault = false, want true")
+		}
+	})
+	t.Run("stamps isDefault false when the platform default is a different tenant", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{
+			getTenantModelFn: func(context.Context, string) (*models.Tenant, error) {
+				return &models.Tenant{UUID: "t-2"}, nil
+			},
+			defaultTenantUUIDFn: func(context.Context) (string, error) { return "t-1", nil },
+		}
+		h := New(svc, nil)
+		out, err := h.getTenantAdmin(context.Background(), &tenantIDPath{TenantID: "t-2"})
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if out.Body.IsDefault {
+			t.Errorf("IsDefault = true, want false")
+		}
+	})
+	t.Run("not found → 404", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{
+			getTenantModelFn: func(context.Context, string) (*models.Tenant, error) {
+				return nil, repository.ErrNotFound
+			},
+		}
+		h := New(svc, nil)
+		_, err := h.getTenantAdmin(context.Background(), &tenantIDPath{TenantID: "ghost"})
+		assertStatus(t, err, 404)
+	})
+}
+
 func TestUpdateTenant(t *testing.T) {
 	t.Parallel()
 	t.Run("happy reloads from svc", func(t *testing.T) {
@@ -522,7 +692,7 @@ func TestUpdateTenant(t *testing.T) {
 			t.Errorf("Name = %q", out.Body.Name)
 		}
 	})
-	t.Run("svc error → 400", func(t *testing.T) {
+	t.Run("unknown svc error → 500", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeTenantSvc{
 			updateTenantFn: func(context.Context, string, models.UpdateTenantInput) error {
@@ -531,7 +701,23 @@ func TestUpdateTenant(t *testing.T) {
 		}
 		h := New(svc, nil)
 		_, err := h.updateTenant(context.Background(), &updateTenantInput{TenantID: "t-1"})
-		assertStatus(t, err, 400)
+		assertStatus(t, err, 500)
+	})
+	t.Run("duplicate slug → 409 without raw slug", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{
+			updateTenantFn: func(context.Context, string, models.UpdateTenantInput) error {
+				return services.ErrSlugAlreadyInUse
+			},
+		}
+		h := New(svc, nil)
+		slug := "private-slug-42"
+		_, err := h.updateTenant(context.Background(), &updateTenantInput{TenantID: "t-1", Body: models.UpdateTenantInput{Slug: &slug}})
+		assertStatus(t, err, 409)
+		assertErrorCode(t, err, errcode.TenantSlugAlreadyInUse)
+		if strings.Contains(err.Error(), "private-slug-42") {
+			t.Fatalf("raw slug reached the client: %q", err)
+		}
 	})
 	t.Run("reload not found → 404", func(t *testing.T) {
 		t.Parallel()
@@ -556,12 +742,20 @@ func TestDeleteTenant(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
-	t.Run("svc error → 400", func(t *testing.T) {
+	t.Run("svc error → 500", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeTenantSvc{deleteTenantFn: func(context.Context, string) error { return errors.New("boom") }}
 		h := New(svc, nil)
 		_, err := h.deleteTenant(context.Background(), &tenantIDPath{TenantID: "t-1"})
-		assertStatus(t, err, 400)
+		assertStatus(t, err, 500)
+	})
+	t.Run("default reassignment required → 409 with errcode", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{deleteTenantFn: func(context.Context, string) error { return services.ErrDefaultReassignmentRequired }}
+		h := New(svc, nil)
+		_, err := h.deleteTenant(context.Background(), &tenantIDPath{TenantID: "t-1"})
+		assertStatus(t, err, 409)
+		assertErrorCode(t, err, errcode.TenantDefaultReassignmentRequired)
 	})
 }
 
@@ -576,12 +770,85 @@ func TestPurgeTenant(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
-	t.Run("svc error → 400", func(t *testing.T) {
+	t.Run("svc error → 500", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeTenantSvc{purgeTenantFn: func(context.Context, string) error { return errors.New("boom") }}
 		h := New(svc, nil)
 		_, err := h.purgeTenant(context.Background(), &tenantIDPath{TenantID: "t-1"})
-		assertStatus(t, err, 400)
+		assertStatus(t, err, 500)
+	})
+	t.Run("default reassignment required → 409 with errcode", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{purgeTenantFn: func(context.Context, string) error { return services.ErrDefaultReassignmentRequired }}
+		h := New(svc, nil)
+		_, err := h.purgeTenant(context.Background(), &tenantIDPath{TenantID: "t-1"})
+		assertStatus(t, err, 409)
+		assertErrorCode(t, err, errcode.TenantDefaultReassignmentRequired)
+	})
+}
+
+func TestSetDefaultTenant(t *testing.T) {
+	t.Parallel()
+	t.Run("requires auth", func(t *testing.T) {
+		t.Parallel()
+		h := New(&fakeTenantSvc{}, nil)
+		_, err := h.setDefaultTenant(context.Background(), &setDefaultInput{})
+		assertStatus(t, err, 401)
+	})
+	t.Run("happy", func(t *testing.T) {
+		t.Parallel()
+		var gotTenant, gotActor string
+		svc := &fakeTenantSvc{transferDefaultTenantFn: func(_ context.Context, tenantUUID, actorUUID string) error {
+			gotTenant, gotActor = tenantUUID, actorUUID
+			return nil
+		}}
+		h := New(svc, nil)
+		in := &setDefaultInput{}
+		in.Body.TenantID = "t-2"
+		_, err := h.setDefaultTenant(authedCtx("admin-1"), in)
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if gotTenant != "t-2" || gotActor != "admin-1" {
+			t.Errorf("TransferDefaultTenant called with (%q, %q), want (t-2, admin-1)", gotTenant, gotActor)
+		}
+	})
+	t.Run("non-operational target → 409", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{transferDefaultTenantFn: func(context.Context, string, string) error {
+			return repository.ErrDefaultTargetNotOperational
+		}}
+		h := New(svc, nil)
+		in := &setDefaultInput{}
+		in.Body.TenantID = "t-2"
+		_, err := h.setDefaultTenant(authedCtx("admin-1"), in)
+		assertStatus(t, err, 409)
+		if err == nil || !strings.Contains(err.Error(), "operational internal tenant") {
+			t.Errorf("err = %v, want mention of operational internal tenant", err)
+		}
+	})
+	t.Run("default reassignment required → 409 with errcode", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{transferDefaultTenantFn: func(context.Context, string, string) error {
+			return services.ErrDefaultReassignmentRequired
+		}}
+		h := New(svc, nil)
+		in := &setDefaultInput{}
+		in.Body.TenantID = "t-2"
+		_, err := h.setDefaultTenant(authedCtx("admin-1"), in)
+		assertStatus(t, err, 409)
+		assertErrorCode(t, err, errcode.TenantDefaultReassignmentRequired)
+	})
+	t.Run("unknown svc error → 500", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{transferDefaultTenantFn: func(context.Context, string, string) error {
+			return errors.New("boom")
+		}}
+		h := New(svc, nil)
+		in := &setDefaultInput{}
+		in.Body.TenantID = "t-2"
+		_, err := h.setDefaultTenant(authedCtx("admin-1"), in)
+		assertStatus(t, err, 500)
 	})
 }
 
@@ -604,14 +871,14 @@ func TestUpdatePlan(t *testing.T) {
 			t.Errorf("Plan = %q", out.Body.Plan)
 		}
 	})
-	t.Run("svc error → 400", func(t *testing.T) {
+	t.Run("svc error → 500", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeTenantSvc{
 			updatePlanFn: func(context.Context, string, models.UpdatePlanInput) error { return errors.New("nope") },
 		}
 		h := New(svc, nil)
 		_, err := h.updatePlan(context.Background(), &updatePlanInput{TenantID: "t-1"})
-		assertStatus(t, err, 400)
+		assertStatus(t, err, 500)
 	})
 }
 
@@ -631,6 +898,37 @@ func TestListMembers_NoRegistry(t *testing.T) {
 	}
 	if len(out.Body.Members) != 1 || out.Body.Members[0].Email != "" {
 		t.Errorf("members = %+v, want one row with empty email", out.Body.Members)
+	}
+}
+
+// TestListMembers_StampsIsDefault covers the derived-DTO contract on the
+// membershipRow: resolved once per request (one DefaultTenantUUID call,
+// asserted via callCount) and applied to every returned row.
+func TestListMembers_StampsIsDefault(t *testing.T) {
+	t.Parallel()
+	callCount := 0
+	svc := &fakeTenantSvc{
+		listMembersFn: func(context.Context, string) ([]models.TenantMembership, error) {
+			return []models.TenantMembership{
+				{UUID: "m1", UserUUID: "u1", TenantUUID: "t-1"},
+				{UUID: "m2", UserUUID: "u2", TenantUUID: "t-1"},
+			}, nil
+		},
+		defaultTenantUUIDFn: func(context.Context) (string, error) {
+			callCount++
+			return "t-1", nil
+		},
+	}
+	h := New(svc, nil)
+	out, err := h.listMembers(context.Background(), &tenantIDPath{TenantID: "t-1"})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("DefaultTenantUUID called %d times, want exactly 1 (resolved once per request, not per row)", callCount)
+	}
+	if len(out.Body.Members) != 2 || !out.Body.Members[0].IsDefault || !out.Body.Members[1].IsDefault {
+		t.Errorf("members = %+v, want both rows isDefault=true", out.Body.Members)
 	}
 }
 
@@ -692,12 +990,12 @@ func TestRemoveMember(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
-	t.Run("svc error → 400", func(t *testing.T) {
+	t.Run("svc error → 500", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeTenantSvc{removeMemberFn: func(context.Context, string, string) error { return errors.New("boom") }}
 		h := New(svc, nil)
 		_, err := h.removeMember(context.Background(), &removeMemberInput{TenantID: "t-1", UserUUID: "u-1"})
-		assertStatus(t, err, 400)
+		assertStatus(t, err, 500)
 	})
 }
 
@@ -768,6 +1066,7 @@ func TestAttachMemberAdmin_HappyByUUID(t *testing.T) {
 			}
 			return &models.TenantMembership{UUID: "m-1", UserUUID: u, TenantUUID: tID, Roles: []string{r}}, nil
 		},
+		defaultTenantUUIDFn: func(context.Context) (string, error) { return "t-1", nil },
 	}
 	reg := module.NewServiceRegistry()
 	// Operator-tier provider, used for the post-attach email enrichment.
@@ -786,6 +1085,9 @@ func TestAttachMemberAdmin_HappyByUUID(t *testing.T) {
 	}
 	if out.Body.Member.UUID != "m-1" {
 		t.Errorf("Member.UUID = %q", out.Body.Member.UUID)
+	}
+	if !out.Body.Member.IsDefault {
+		t.Errorf("Member.IsDefault = false, want true (t-1 is the platform default)")
 	}
 	// Pin a known bug: the UUID-only path's email enrichment passes
 	// []membershipRow{out.Body.Member} — a fresh slice containing a *copy*
@@ -925,7 +1227,7 @@ func TestCreateInvite_SvcError(t *testing.T) {
 	}
 	h := New(svc, nil)
 	_, err := h.createInvite(context.Background(), &inviteInput{TenantID: "t-1"})
-	assertStatus(t, err, 400)
+	assertStatus(t, err, 500)
 }
 
 func TestAcceptInvite(t *testing.T) {
@@ -955,7 +1257,7 @@ func TestAcceptInvite(t *testing.T) {
 			t.Errorf("UUID = %q", out.Body.UUID)
 		}
 	})
-	t.Run("svc error → 400", func(t *testing.T) {
+	t.Run("svc error → 500", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeTenantSvc{
 			acceptInviteFn: func(context.Context, string, string) (*models.Tenant, error) {
@@ -964,7 +1266,7 @@ func TestAcceptInvite(t *testing.T) {
 		}
 		h := New(svc, nil)
 		_, err := h.acceptInvite(authedCtx("u1"), &acceptInviteInput{Body: models.AcceptInviteInput{Token: "t"}})
-		assertStatus(t, err, 400)
+		assertStatus(t, err, 500)
 	})
 }
 
@@ -1033,12 +1335,12 @@ func TestRevokeInviteAdmin(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
-	t.Run("svc error → 400", func(t *testing.T) {
+	t.Run("svc error → 500", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeTenantSvc{revokeInviteFn: func(context.Context, string, string) error { return errors.New("boom") }}
 		h := New(svc, nil)
 		_, err := h.revokeInviteAdmin(context.Background(), &adminRevokeInviteInput{TenantID: "t-1", InviteID: "inv-1"})
-		assertStatus(t, err, 400)
+		assertStatus(t, err, 500)
 	})
 }
 
@@ -1080,6 +1382,46 @@ func TestListAllTenantsAdmin(t *testing.T) {
 		}
 		if len(out.Body.Tenants[0].MatchedMembers) != 1 || out.Body.Tenants[0].MatchedMembers[0].Email != "alice@example.com" {
 			t.Errorf("MatchedMembers = %+v", out.Body.Tenants[0].MatchedMembers)
+		}
+	})
+	// With a default assigned, exactly one row has isDefault: true — the
+	// derived-DTO contract, resolved once per request (callCount) rather
+	// than once per row.
+	t.Run("stamps isDefault on exactly the default row", func(t *testing.T) {
+		t.Parallel()
+		callCount := 0
+		svc := &fakeTenantSvc{
+			listAllTenantsFilteredFn: func(context.Context, repository.TenantListFilter) ([]services.TenantAdminView, error) {
+				return []services.TenantAdminView{
+					{Tenant: &models.Tenant{UUID: "t-1", Name: "Acme"}},
+					{Tenant: &models.Tenant{UUID: "t-2", Name: "Beta"}},
+					{Tenant: &models.Tenant{UUID: "t-3", Name: "Gamma"}},
+				}, nil
+			},
+			defaultTenantUUIDFn: func(context.Context) (string, error) {
+				callCount++
+				return "t-2", nil
+			},
+		}
+		h := New(svc, nil)
+		out, err := h.listAllTenantsAdmin(context.Background(), &adminTenantListInput{})
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if callCount != 1 {
+			t.Errorf("DefaultTenantUUID called %d times, want exactly 1", callCount)
+		}
+		defaultCount := 0
+		for _, tenant := range out.Body.Tenants {
+			if tenant.IsDefault {
+				defaultCount++
+				if tenant.UUID != "t-2" {
+					t.Errorf("isDefault=true on unexpected row %q", tenant.UUID)
+				}
+			}
+		}
+		if defaultCount != 1 {
+			t.Errorf("defaultCount = %d, want exactly 1", defaultCount)
 		}
 	})
 	t.Run("RootsOnly suppresses ParentTenantUUID", func(t *testing.T) {
@@ -1183,7 +1525,7 @@ func TestCreateDivision(t *testing.T) {
 			t.Errorf("UUID = %q", out.Body.UUID)
 		}
 	})
-	t.Run("svc error → 400", func(t *testing.T) {
+	t.Run("svc error → 500", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeTenantSvc{
 			createDivisionFn: func(context.Context, string, string, string, string) (*models.Tenant, error) {
@@ -1194,7 +1536,7 @@ func TestCreateDivision(t *testing.T) {
 		in := &createDivisionInput{TenantID: "parent"}
 		in.Body.Name = "x"
 		_, err := h.createDivision(authedCtx("u1"), in)
-		assertStatus(t, err, 400)
+		assertStatus(t, err, 500)
 	})
 }
 
@@ -1242,7 +1584,7 @@ func TestSetTenantBillingIdentityAdmin(t *testing.T) {
 		_, err := h.setTenantBillingIdentityAdmin(context.Background(), &setBillingIdentityInput{TenantID: "ghost"})
 		assertStatus(t, err, 404)
 	})
-	t.Run("other error → 400", func(t *testing.T) {
+	t.Run("other error → 500", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeTenantSvc{
 			setBillingIdentityFn: func(context.Context, string, services.SetBillingIdentityInput) error {
@@ -1251,7 +1593,7 @@ func TestSetTenantBillingIdentityAdmin(t *testing.T) {
 		}
 		h := New(svc, nil)
 		_, err := h.setTenantBillingIdentityAdmin(context.Background(), &setBillingIdentityInput{TenantID: "t-1"})
-		assertStatus(t, err, 400)
+		assertStatus(t, err, 500)
 	})
 }
 
@@ -1265,7 +1607,7 @@ func TestSetTenantItalianBillableAdmin(t *testing.T) {
 		{"happy", nil, 0},
 		{"ErrNotFound → 404", repository.ErrNotFound, 404},
 		{"missing profile → 422", services.ErrItalianBillableMissingProfile, 422},
-		{"unknown → 400", errors.New("boom"), 400},
+		{"unknown → 500", errors.New("boom"), 500},
 	}
 	for _, c := range cases {
 		c := c
@@ -1506,5 +1848,5 @@ func TestSetMyItalianBillable_UnknownErr(t *testing.T) {
 	h := New(svc, nil)
 	in := &setMyItalianBillableInput{}
 	_, err := h.setMyItalianBillable(authedCtx("u1"), in)
-	assertStatus(t, err, 400)
+	assertStatus(t, err, 500)
 }

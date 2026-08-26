@@ -40,6 +40,12 @@ const PurgeTenantModal: React.FC<Props> = ({ org, show, onHide, onPurged }) => {
 
   if (!org) return null;
 
+  // The platform default guards every lifecycle mutation on the backend
+  // (409 tenant.default_reassignment_required) until it's reassigned
+  // elsewhere — never let the wizard advance toward a confirm that would
+  // just fail. isDefault is derived straight from the org payload, never
+  // local state.
+  const isDefault = !!org.isDefault;
   const slugMatches = typed.trim() === org.slug;
 
   const handleClose = () => {
@@ -48,6 +54,7 @@ const PurgeTenantModal: React.FC<Props> = ({ org, show, onHide, onPurged }) => {
   };
 
   const onConfirm = async () => {
+    if (isDefault) return;
     try {
       await purgeOrg(org.id).unwrap();
       toast.success(
@@ -81,38 +88,51 @@ const PurgeTenantModal: React.FC<Props> = ({ org, show, onHide, onPurged }) => {
       {stage === 'warn' && (
         <>
           <Modal.Body className="fs-10">
-            <Alert variant="danger" className="fs-10 mb-3">
-              <strong>{t('adminTenants.purgeModal.alertHeading')}</strong>
-              <br />
-              {t('adminTenants.purgeModal.alertBody')}
-            </Alert>
-            <p className="mb-2">
-              <Trans
-                i18nKey="adminTenants.purgeModal.aboutToPurge"
-                values={{ name: org.name, slug: org.slug }}
-                components={{
-                  code: <code className="fs-9" />,
-                  muted: <span className="text-body-tertiary" />
-                }}
-              />
-            </p>
-            <ul className="mb-0">
-              <li>
-                <Trans
-                  i18nKey="adminTenants.purgeModal.consequenceStatus"
-                  components={{ code: <code /> }}
-                />
-              </li>
-              <li>{t('adminTenants.purgeModal.consequenceKms')}</li>
-              <li>{t('adminTenants.purgeModal.consequenceNoUndo')}</li>
-              <li>{t('adminTenants.purgeModal.consequenceAudit')}</li>
-            </ul>
+            {isDefault ? (
+              <Alert variant="warning" className="fs-10 mb-0">
+                <FontAwesomeIcon icon="info-circle" className="me-2" />
+                {t('adminTenants.default.reassignFirst')}
+              </Alert>
+            ) : (
+              <>
+                <Alert variant="danger" className="fs-10 mb-3">
+                  <strong>{t('adminTenants.purgeModal.alertHeading')}</strong>
+                  <br />
+                  {t('adminTenants.purgeModal.alertBody')}
+                </Alert>
+                <p className="mb-2">
+                  <Trans
+                    i18nKey="adminTenants.purgeModal.aboutToPurge"
+                    values={{ name: org.name, slug: org.slug }}
+                    components={{
+                      code: <code className="fs-9" />,
+                      muted: <span className="text-body-tertiary" />
+                    }}
+                  />
+                </p>
+                <ul className="mb-0">
+                  <li>
+                    <Trans
+                      i18nKey="adminTenants.purgeModal.consequenceStatus"
+                      components={{ code: <code /> }}
+                    />
+                  </li>
+                  <li>{t('adminTenants.purgeModal.consequenceKms')}</li>
+                  <li>{t('adminTenants.purgeModal.consequenceNoUndo')}</li>
+                  <li>{t('adminTenants.purgeModal.consequenceAudit')}</li>
+                </ul>
+              </>
+            )}
           </Modal.Body>
           <Modal.Footer>
             <Button variant="outline-secondary" onClick={handleClose}>
               {t('adminTenants.purgeModal.cancel')}
             </Button>
-            <Button variant="danger" onClick={() => setStage('type-slug')}>
+            <Button
+              variant="danger"
+              onClick={() => setStage('type-slug')}
+              disabled={isDefault}
+            >
               {t('adminTenants.purgeModal.iUnderstand')}
             </Button>
           </Modal.Footer>

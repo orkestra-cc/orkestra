@@ -1,3 +1,17 @@
+# Infra services (MongoDB, Redis, RustFS) — one instance per stack.
+#
+# Host ports bind to INFRA_BIND_ADDRESS (default 127.0.0.1): nothing outside
+# the host needs them (RustFS's S3 API is the exception — see below) — the backend reaches every service by name on the
+# stack network, and backup.sh / restore.sh / the audit scripts go through
+# `docker exec` or that same network. Loopback keeps host-side tooling
+# (mongosh, the Go integration tests, openapi-dump.sh) working while a
+# published port never crosses to a LAN/public interface, where Docker's
+# own iptables chains would bypass the host firewall. Set
+# INFRA_BIND_ADDRESS=0.0.0.0 in docker/.env only when a remote host must
+# reach the datastore directly.
+#
+# Every service drops all capabilities and forbids privilege escalation; the
+# few caps re-added are the ones each image's entrypoint actually needs.
 services:
   mongodb:
     image: mongo:8.0
@@ -5,8 +19,20 @@ services:
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # replica-entrypoint.sh writes the keyfile into the mongodb-owned
+    # /data/configdb as root before docker-entrypoint.sh chowns /data/* and
+    # drops to `mongodb` via gosu — hence DAC_OVERRIDE on top of the usual three.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
     ports:
-      - "${MONGO_PORT:-27017}:27017"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${MONGO_PORT:-27017}:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-changeme}
@@ -26,8 +52,12 @@ services:
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-changeme}
     volumes:
       - redis-data:/data
@@ -58,9 +88,16 @@ services:
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     ports:
-      - "${RUSTFS_API_PORT:-9100}:9000"
-      - "${RUSTFS_CONSOLE_PORT:-9101}:9001"
+      # The S3 API is browser-facing when STORAGE_PUBLIC_ENDPOINT routes
+      # presigned uploads through the reverse proxy (ADR-0011), so it follows
+      # HOST_BIND_ADDRESS like the app ports; the admin console stays internal.
+      - "${HOST_BIND_ADDRESS:-127.0.0.1}:${RUSTFS_API_PORT:-9100}:9000"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${RUSTFS_CONSOLE_PORT:-9101}:9001"
     environment:
       RUSTFS_ROOT_USER: ${RUSTFS_ROOT_USER:-orkestra}
       RUSTFS_ROOT_PASSWORD: ${RUSTFS_ROOT_PASSWORD:-changeme-rustfs}

@@ -56,7 +56,7 @@ There is no seeding. The nav-items list is assembled by the registry in `InitAll
 
 | Method | Path | Gate | Purpose |
 |---|---|---|---|
-| GET    | `/v1/navigation` | Bearer token (protected router) | Return the role-filtered menu tree for the current user (overrides applied) |
+| GET    | `/v1/navigation` | Bearer token (protected router) | Return the role-filtered menu tree for the current user (overrides applied); every item carries `moduleName`/`itemKey` so the SPA can attribute an entry to its owning module |
 | GET    | `/v1/admin/navigation` | `administrator` security scope on the operator router | Return the full unfiltered tree + per-item metadata (ItemKey, ModuleName, ModuleEnabled, MinRole, Tier, DeclaredOrder/EffectiveOrder/Overridden) plus `realmsParentKey` (the `__realms__` sentinel) and `realmsOverridden` (true when the realm order diverges from canonical) |
 | PATCH  | `/v1/admin/navigation/order` | `administrator` | Upsert the ordering override for one parent. Body: `{parentKey, orderedChildren[]}`. `parentKey` may be an `ItemKey`, a `__root.<realm>.<slug(section)>` synthetic key, or the `__realms__` sentinel. Items missing from `orderedChildren` keep their declared order and append after. |
 | DELETE | `/v1/admin/navigation/order` | `administrator` | Clear the override for `?parentKey=...` (idempotent — missing doc is OK). |

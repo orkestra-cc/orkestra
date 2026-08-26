@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -200,6 +201,65 @@ func (r *ModuleConfigRepository) UpdateEnvironmentConfig(ctx context.Context, na
 	return nil
 }
 
+// CompareAndSwapEnvironment replaces ONE environment sub-document, and only
+// while its revision still matches. Returns false — not an error — when the
+// revision has moved: losing a race is an expected outcome the caller decides
+// what to do about, not a failure.
+//
+// Scoping the swap to the sub-document matters: Environments is a nested map,
+// so guarding a whole-document replace with one environment's revision would
+// silently discard concurrent edits to a sibling environment. When env is the
+// active one, the legacy top-level maps are synced in the SAME update, so the
+// two can never diverge.
+//
+// A document written before record lists existed carries no revision field at
+// all. Absent and 0 are the same value, so an expectation of 0 also matches a
+// missing field — otherwise the first mutation on every pre-existing module
+// would fail against nothing.
+func (r *ModuleConfigRepository) CompareAndSwapEnvironment(
+	ctx context.Context, name, envName string, expectedRevision int64, next EnvironmentConfig,
+) (bool, error) {
+	envPath := "environments." + envName
+	next.Revision = expectedRevision + 1
+	next.UpdatedAt = time.Now().UTC()
+
+	revisionMatches := bson.M{envPath + ".revision": expectedRevision}
+	if expectedRevision == 0 {
+		revisionMatches = bson.M{"$or": bson.A{
+			bson.M{envPath + ".revision": expectedRevision},
+			bson.M{envPath + ".revision": bson.M{"$exists": false}},
+		}}
+	}
+	filter := bson.M{"moduleName": name}
+	for k, v := range revisionMatches {
+		filter[k] = v
+	}
+
+	set := bson.M{
+		envPath:        next,
+		"needsRestart": true,
+		"updatedAt":    next.UpdatedAt,
+	}
+
+	var doc ModuleConfig
+	if err := r.collection.FindOne(ctx, bson.M{"moduleName": name}).Decode(&doc); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return false, fmt.Errorf("module %q not found", name)
+		}
+		return false, fmt.Errorf("compare-and-swap environment %q/%q: %w", name, envName, err)
+	}
+	if doc.ActiveEnv() == envName {
+		set["configValues"] = next.ConfigValues
+		set["encryptedValues"] = next.EncryptedValues
+	}
+
+	res, err := r.collection.UpdateOne(ctx, filter, bson.M{"$set": set})
+	if err != nil {
+		return false, fmt.Errorf("compare-and-swap environment %q/%q: %w", name, envName, err)
+	}
+	return res.MatchedCount == 1, nil
+}
+
 // SetActiveEnvironment switches the active environment for a module.
 func (r *ModuleConfigRepository) SetActiveEnvironment(ctx context.Context, name, envName string) error {
 	now := time.Now()
@@ -210,6 +270,32 @@ func (r *ModuleConfigRepository) SetActiveEnvironment(ctx context.Context, name,
 	)
 	if err != nil {
 		return fmt.Errorf("set active environment for %q to %q: %w", name, envName, err)
+	}
+	return nil
+}
+
+// ActivateEnvironment sets the active environment and copies that
+// environment's values into the legacy top-level maps in ONE update, reading
+// them server-side at execution time. The previous two-step version copied a
+// snapshot the process had read earlier, so a write landing in between was
+// silently rolled back — including a removal, which brought its secret back.
+func (r *ModuleConfigRepository) ActivateEnvironment(ctx context.Context, name, envName string) error {
+	envPath := "$environments." + envName
+	res, err := r.collection.UpdateOne(ctx,
+		bson.M{"moduleName": name, "environments." + envName: bson.M{"$exists": true}},
+		mongo.Pipeline{{{Key: "$set", Value: bson.M{
+			"activeEnvironment": envName,
+			"configValues":      bson.M{"$ifNull": bson.A{envPath + ".configValues", bson.M{}}},
+			"encryptedValues":   bson.M{"$ifNull": bson.A{envPath + ".encryptedValues", bson.M{}}},
+			"needsRestart":      true,
+			"updatedAt":         time.Now().UTC(),
+		}}}},
+	)
+	if err != nil {
+		return fmt.Errorf("activate environment %q for %q: %w", envName, name, err)
+	}
+	if res.MatchedCount == 0 {
+		return fmt.Errorf("environment %q not found for module %q", envName, name)
 	}
 	return nil
 }

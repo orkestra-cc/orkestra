@@ -274,7 +274,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 
 ### Infrastructure Services (`docker-compose.infra.yml`)
 
-**One instance per stack** — layered into the same `${STACK}` Compose project as the app services, not shared across stacks (see [Multi-Stack Model](#multi-stack-model)). Host ports below are the compose defaults; `docker/.env` overrides them per stack so several stacks coexist.
+**One instance per stack** — layered into the same `${STACK}` Compose project as the app services, not shared across stacks (see [Multi-Stack Model](#multi-stack-model)). Host ports below are the compose defaults; `docker/.env` overrides them per stack so several stacks coexist. They bind to `INFRA_BIND_ADDRESS` (default `127.0.0.1`) — except the RustFS S3 API port, which follows `HOST_BIND_ADDRESS` because presigned browser uploads reach it through the reverse proxy when `STORAGE_PUBLIC_ENDPOINT` is set. Nothing else off-host needs them — the backend uses service names on the stack network and backup/restore/audit go through `docker exec` — and a port published on `0.0.0.0` bypasses the host firewall. Every infra service runs with `cap_drop: [ALL]` + `no-new-privileges` (mongo re-adds `CHOWN/DAC_OVERRIDE/SETGID/SETUID` for its entrypoints' keyfile write, chown and gosu).
 
 | Service       | Host port (default) | Purpose             | Health Check     |
 | ------------- | ----------- | ------------------- | ---------------- |
@@ -331,10 +331,12 @@ GOBIN=$PWD/.go-bin GOMODCACHE=$PWD/.go-mod-cache go install github.com/air-verse
 
 **Optimized production services**
 
-| Service      | Host port | Purpose       | Features                       |
+| Service      | Host port (default) | Purpose       | Features                       |
 | ------------ | --------- | ------------- | ------------------------------ |
-| **backend**  | 3000      | Go API server | Optimized build, health checks |
-| **frontend-admin** | 8080      | React web app | Nginx static serving           |
+| **backend**  | `${BACKEND_PORT:-3000}`  | Go API server | Optimized build, health checks, `read_only` rootfs |
+| **frontend-admin** | `${FRONTEND_PORT:-8080}` | React web app | Nginx static serving           |
+
+Both bind to `${HOST_BIND_ADDRESS:-127.0.0.1}` — closed by default; `docker/.env` opens them to the address the reverse proxy reaches. See [Container hardening](#container-hardening) for the capability/rootfs contract.
 
 ## Network Architecture
 
@@ -402,10 +404,11 @@ curl -i -H 'Host: example.com' http://localhost:3000/health
 Every published host port is an `.env` variable with a compose default. `scripts/init.sh` seeds a non-colliding block per stack on first run, so multiple stacks coexist without arithmetic baked into compose. Container-internal ports stay standard.
 
 ```
-Infra (docker-compose.infra.yml) — one instance per stack:
+Infra (docker-compose.infra.yml) — one instance per stack, bound to
+${INFRA_BIND_ADDRESS:-127.0.0.1} (loopback unless docker/.env says otherwise):
 ${MONGO_PORT:-27017}        → mongodb:27017
 ${REDIS_PORT:-6379}         → redis:6379
-${RUSTFS_API_PORT:-9100}    → rustfs:9000    # S3 API
+${RUSTFS_API_PORT:-9100}    → rustfs:9000    # S3 API — on HOST_BIND_ADDRESS (browser-facing via proxy)
 ${RUSTFS_CONSOLE_PORT:-9101}→ rustfs:9001    # admin console
 
 App (docker-compose.dev.yml / docker-compose.staging.yml):
@@ -413,10 +416,12 @@ ${BACKEND_PORT:-3000}         → backend:3000
 ${FRONTEND_PORT:-8080}        → frontend-admin:5173    # operator console (Vite)
 ${CLIENT_FRONTEND_PORT:-8081} → client-frontend:5173   # Tier-2 client SPA (Vite)
 
-Production (docker-compose.prod.yml):
-${BACKEND_PORT:-3000} → backend:3000
-8080                  → frontend-admin:80   # Nginx static (fixed, not env-driven)
+Production (docker-compose.prod.yml) — bound to ${HOST_BIND_ADDRESS:-127.0.0.1}:
+${BACKEND_PORT:-3000}  → backend:3000
+${FRONTEND_PORT:-8080} → frontend-admin:80   # Nginx static
 ```
+
+`HOST_BIND_ADDRESS` defaults to `0.0.0.0` in dev (the compose default) and to `127.0.0.1` in prod: a production stack publishes nothing unless `docker/.env` says where. `scripts/env-validate.sh` warns when a production `.env` leaves either bind address at `0.0.0.0`.
 
 The observability overlay publishes its own block (Grafana, Prometheus, Loki, Tempo, OTel) — see the [observability section](#self-hosted-otel-stack-docker-composeobservabilityyml).
 
@@ -439,13 +444,24 @@ openssl enc -aes-256-cbc -d -in .env.prod.enc -out .env.prod
 # - Kubernetes Secrets
 ```
 
-**Container Security:**
+### Container hardening
 
-- Non-root users in production containers
-- Read-only root filesystems where possible
-- Resource limits to prevent DoS
-- Regular security scanning with Trivy
-- Minimal Alpine base images
+What `docker-compose.prod.yml` and `docker-compose.infra.yml` actually enforce (as opposed to aspire to):
+
+| Service | `cap_drop` | `cap_add` | `read_only` | Why |
+| --- | --- | --- | --- | --- |
+| backend | ALL | — | yes (+ `tmpfs: /tmp`) | Listens on 3000, no socket, writes only to mounted volumes. Runs as `user: "1000:1000"` (like staging): the image's own `nonroot` uid 65532 cannot read the 0600 JWT private key `orkestra.sh` enforces on the deploy user's `docker/keys/` |
+| frontend-admin | ALL | `CHOWN SETGID SETUID NET_BIND_SERVICE` | no | nginx master is root on :80 and drops workers to `nginx`; `10-write-config.sh` rewrites `config.js` inside the docroot at every start, so the rootfs must stay writable |
+| mongodb | ALL | `CHOWN DAC_OVERRIDE SETGID SETUID` | no | `replica-entrypoint.sh` writes the keyfile into the `mongodb`-owned config volume as root, then `docker-entrypoint.sh` chowns and `gosu`s |
+| redis, rustfs | ALL | — | no | Run on unprivileged ports, own their data dirs |
+
+Every service also sets `security_opt: [no-new-privileges:true]`. The backend's mutable paths are named volumes (`backend-uploads`, `backend-logs`) rather than `./backend/*` binds, which used to appear as root-owned untracked files under `docker/`. `backend/Dockerfile` pre-creates both mount points `1777` so an empty named volume inherits a directory a non-root uid can write — Docker never chowns volumes for you.
+
+**Adding a service**: start from `cap_drop: [ALL]` + `no-new-privileges`, bring it up, and add only the capability the failing syscall names — commenting *why* next to each `cap_add`. Prefer `read_only: true` + `tmpfs` for scratch paths; if the image's entrypoint writes into its own filesystem (as nginx does here), say so in the compose comment instead of silently leaving it writable.
+
+**Follow-up**: `read_only` for frontend-admin needs `config.js` relocated out of the docroot (a `tmpfs` dir + an `alias` in the `location = /config.js` block of `frontend-admin/nginx.conf` and the Dockerfile's baked config) — tracked, not done.
+
+**Still aspirational**: resource limits, Trivy scanning, a non-root `USER` in the backend's production stage (the DHI base picks the uid today).
 
 ## Environment Configuration
 

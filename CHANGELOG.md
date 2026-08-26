@@ -4,6 +4,96 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.8.0] - 2026-08-22
+
+### ⚠️ Breaking Changes
+
+- **(auth)** Record ADR-0017 breaking changes for downstream forks ([ce82d42](https://github.com/orkestra-cc/orkestra/commit/ce82d421ea8088230b69ad98c6983d97b70861dd))
+
+### Features
+
+- **(auth)** Elected self-draining refresh-token retention sweep ([74419ed](https://github.com/orkestra-cc/orkestra/commit/74419ed3e56721576b878e09c086f9542f9e7da8))
+- **(auth)** Redis lease electing one maintenance scheduler across replicas ([e254c1f](https://github.com/orkestra-cc/orkestra/commit/e254c1fa3ac802eaad008c9a0c9dc40f29d14ac9))
+- **(metrics)** Refresh-token sweep deleted/backlog/duration families ([8b02cde](https://github.com/orkestra-cc/orkestra/commit/8b02cdee70b575124e509ffd843edf52e76f156e))
+- **(auth)** Bounded expired-refresh-token sweep with a hasMore probe ([0296893](https://github.com/orkestra-cc/orkestra/commit/02968931943e84bd56ee3590146909d3e9a2eb87))
+- **(auth)** TTL index on session documents, retention fallback set to 90d ([7745ca6](https://github.com/orkestra-cc/orkestra/commit/7745ca6268eab0ad34be80b147225fc875dd4700))
+- **(auth)** Surface session-cap expiry as its own code and clear the cookie ([9beb140](https://github.com/orkestra-cc/orkestra/commit/9beb140628c3db5328af9b45febd8d7cc8880f9a))
+- **(auth)** Enforce an absolute session cap on both refresh paths ([fbaba8a](https://github.com/orkestra-cc/orkestra/commit/fbaba8a9dd0bdb1b8c55f97e0ec8fd350517882d))
+- **(metrics)** Session-cap expiry, event-failure and anchor-anomaly counters ([4c9b025](https://github.com/orkestra-cc/orkestra/commit/4c9b0251b08e1136137627ab191dbab2e399507b))
+- **(auth)** Idempotent session-expiry transition for the absolute cap ([ae81e91](https://github.com/orkestra-cc/orkestra/commit/ae81e915c1b17d93d373b71429c856cc9afa89cd))
+- **(auth)** Declare sessionAbsoluteTTL and its retention-margin invariant ([98c62a8](https://github.com/orkestra-cc/orkestra/commit/98c62a8cd33ee30e1e396ea8c76c7816a60827da))
+- **(auth)** Validate credential-governing durations at the config boundary ([e1ff696](https://github.com/orkestra-cc/orkestra/commit/e1ff696bd052a304f6469bac52efb397d3bef360))
+- **(sdk)** Optional HasConfigValidator seam on module config updates ([c65c10f](https://github.com/orkestra-cc/orkestra/commit/c65c10ffc798f7abdc473c9f734480297c40bc4f))
+- **(blob)** Apply a bucket CORS policy so presigned browser uploads work ([37662ce](https://github.com/orkestra-cc/orkestra/commit/37662cecfc27206fdf06acd728f9031b4c566428))
+- **(ci)** Gate lockfile sync and backend coverage from make, not the workflow ([51b75ff](https://github.com/orkestra-cc/orkestra/commit/51b75ff8bfcdd76df8012ed185c91f25a1e8a983))
+- **(notification)** Make the default template locale configurable ([4d92a30](https://github.com/orkestra-cc/orkestra/commit/4d92a302ffadf4c32ebfd265f0701c278bf6f8b3))
+- **(notification)** Italian translations of the six default templates ([98f2370](https://github.com/orkestra-cc/orkestra/commit/98f2370e0de7fe8c185d6f617fe6913f3c7715c7))
+- **(sdk)** Collect and seed module notification templates at boot ([c594c4f](https://github.com/orkestra-cc/orkestra/commit/c594c4f44f2c85edcd27d4cff4ad2de8a1c9f997))
+- **(notification)** Seed templates declared by modules ([c62c7b0](https://github.com/orkestra-cc/orkestra/commit/c62c7b0f3f91b36a60c4a5ef1b2e4260287bb58f))
+- **(sdk)** Let a module declare its own notification templates ([ff6f333](https://github.com/orkestra-cc/orkestra/commit/ff6f3339d05ede48cf78bbaa8bb1382065d94229))
+- **(ui)** Promote the two-metric tile to StatCardPair ([9e3d4d8](https://github.com/orkestra-cc/orkestra/commit/9e3d4d8a484fedd857bb3f216950c02920308f87))
+- **(ui)** Add a drill-down footer slot to StatCard ([8305667](https://github.com/orkestra-cc/orkestra/commit/830566732cfda31fb46983c019e0f54983fec9bc))
+
+### Bug fixes
+
+- **(auth,spa)** Make the refresh-error taxonomy reach the user it was written for ([5783f3e](https://github.com/orkestra-cc/orkestra/commit/5783f3e2b2f65d2a295c0a4ff9a491a5072545ca))
+- **(auth)** Pin the risk scorer's history window to session retention ([edafb7f](https://github.com/orkestra-cc/orkestra/commit/edafb7f2f39771f3a8007658f00874ed3a6f1632))
+- **(sdk,auth)** Stop a failed config read from silently arming the session cap ([5ad35e1](https://github.com/orkestra-cc/orkestra/commit/5ad35e16af4d9570f75b905ece25272aae53cd93))
+- **(auth)** Exclude a zero expiresAt from the session TTL indexes ([1fe9491](https://github.com/orkestra-cc/orkestra/commit/1fe9491a994d294df79a97f2ba61a92fe63a6d79))
+- **(admin-ui)** Accept the bare-day duration suffix the backend parser takes ([c4d73a1](https://github.com/orkestra-cc/orkestra/commit/c4d73a173525dc618f3469922088be875572e592))
+- **(auth)** Renumber the tenantscope baseline after the session-retention change ([0382271](https://github.com/orkestra-cc/orkestra/commit/038227157095d6045e2219e39bde54c08e0d1db3))
+- **(auth)** Pin the session-revocation denylist TTL to the policy maximum ([8d7df5f](https://github.com/orkestra-cc/orkestra/commit/8d7df5ff072710d39f11879768a5b3060a9458ac))
+- **(auth)** Collapse the access-token 15m default to one source ([bf1815c](https://github.com/orkestra-cc/orkestra/commit/bf1815c40d900b02d2232d58f04bb67d45caada7))
+- **(auth)** Restore the admin -> env -> 15m access-token chain ([cb6cb6a](https://github.com/orkestra-cc/orkestra/commit/cb6cb6aea61ee24ef8180ade962e56bd24c989cf))
+- **(sdk)** Seed notification templates on RetryInit too ([27a0150](https://github.com/orkestra-cc/orkestra/commit/27a0150b3cd5d07671fd27623024dd3eefe4f7b7))
+- **(release)** Commit the refreshed changelog to dev, not main ([1be5db8](https://github.com/orkestra-cc/orkestra/commit/1be5db840546475930dbd818ab13bb977d6aea81))
+- **(agents)** Run integrated browser MCP through mise ([6e7eb06](https://github.com/orkestra-cc/orkestra/commit/6e7eb06d1e839fec99ec12c4a28321485e5c3052))
+- **(navigation)** Drop duplicate sidebar entry for the navigation workspace ([48e6787](https://github.com/orkestra-cc/orkestra/commit/48e678784bacc2dda495027beb2f8528ad8eae72))
+- **(docs)** Unbreak the v0.7.0 docs publish ([92d8e2b](https://github.com/orkestra-cc/orkestra/commit/92d8e2b206666a39d102ed89345af119b941a3bd))
+
+### Refactor
+
+- **(auth)** Single day-aware duration parser for env and admin values ([5419d33](https://github.com/orkestra-cc/orkestra/commit/5419d3348f69182270e9636afded30b9acd08c27))
+- **(ui)** Recalibrate the StatCard icon and anchor it to the card ([972be7e](https://github.com/orkestra-cc/orkestra/commit/972be7ee647219cc2a47ceedca1670094068fba8))
+
+### Documentation
+
+- **(auth)** Correct the risk-lookback contract on the session repository ([d931978](https://github.com/orkestra-cc/orkestra/commit/d931978d98f09f298b4b36090969c615a3f7b0fb))
+- **(auth)** Link the ADR-0017 fail-closed follow-up to its tracking issue ([c4e2cfc](https://github.com/orkestra-cc/orkestra/commit/c4e2cfc2c7db1bbae43756629bfd68df4e49f3fc))
+- **(auth)** Name the real index-conflict error on the session TTL upgrade path ([6a2d5e5](https://github.com/orkestra-cc/orkestra/commit/6a2d5e5a50582f8cdf44330e4ddbb0131d8491db))
+- **(auth)** Correct the session retention boundary on the published page ([b7ede66](https://github.com/orkestra-cc/orkestra/commit/b7ede6659097790e3d8a00654b532b051322c04f))
+- **(auth)** Document the three session lifetimes and close the last stale-30d mentions ([b425aef](https://github.com/orkestra-cc/orkestra/commit/b425aefe101dc74e996939f75c16bcdbf459cd16))
+- **(auth)** Align .env.example to 15m and correct the lifetime comments ([4fb9792](https://github.com/orkestra-cc/orkestra/commit/4fb9792207746fa2e099ec29dfee2c1ec9d25b3b))
+- **(adr)** Refine ADR-0017 and add the session-lifetime implementation plan ([c0d57cd](https://github.com/orkestra-cc/orkestra/commit/c0d57cd107f534e757ac5581ae1fee71013339e9))
+- **(adr)** Record ADR-0017 — session lifetime, token TTL sourcing, retention ([89f1974](https://github.com/orkestra-cc/orkestra/commit/89f19748d11baf8364bf93df44b0e00596abc5db))
+- **(claude)** Wire the module map to the published pages ([2a7e47a](https://github.com/orkestra-cc/orkestra/commit/2a7e47ad39d91200391cafbe123a665843af7714))
+- **(site)** Finish the last four Draft pages ([21892e6](https://github.com/orkestra-cc/orkestra/commit/21892e6bf40af439c52987347571763c58a880f6))
+- **(site)** Turn the five remaining core-module stubs into real pages ([de5f69a](https://github.com/orkestra-cc/orkestra/commit/de5f69a0e588e80a4d26bf9867ee9941ffd608b9))
+- **(site)** Document service accounts and the object-storage seam ([4e9e356](https://github.com/orkestra-cc/orkestra/commit/4e9e356c0eeb1d93d88c1e290b55fe0789b0b0a4))
+- Note that Quick Start's localhost assumes HOST_BIND_ADDRESS=0.0.0.0 ([8165e5e](https://github.com/orkestra-cc/orkestra/commit/8165e5e045b56fd2d525a12eb19dccfd693643f9))
+- **(sdk)** Use a neutral module name in the template examples ([d164d34](https://github.com/orkestra-cc/orkestra/commit/d164d34527188ff4c7c8f60bffcae941784e7547))
+- **(adr)** Unbreak the ADR-0014 docs build ([b751d8c](https://github.com/orkestra-cc/orkestra/commit/b751d8c21b02824b262b7aa944c5eeb07332f9cd))
+
+### Tests
+
+- **(auth)** Pin the lease type assertion and prove the sweep recovers ([dac6368](https://github.com/orkestra-cc/orkestra/commit/dac6368e832c0d544add80269cea0cd84c45ee57))
+- **(notification)** Guard that every template exists in every locale ([345d231](https://github.com/orkestra-cc/orkestra/commit/345d23162187ce1c51eedbe1388ab9cff2a31632))
+
+### Dependencies
+
+- **(deps)** Move the whole OpenTelemetry tree to 1.45.0 / 0.21.0 ([062bb89](https://github.com/orkestra-cc/orkestra/commit/062bb89872e75592090a94bfaf5a2502222bc155))
+
+### Chores
+
+- **(auth)** Remove dead COOKIE_MAX_AGE and correct the 30-day refresh claims ([c7c3251](https://github.com/orkestra-cc/orkestra/commit/c7c325133a7230243b454f34ae58065dedee22d4))
+- **(sync)** Absorb the #266 promotion merge into dev ([e0bf943](https://github.com/orkestra-cc/orkestra/commit/e0bf943619a509498e221bacbf8f3cfb72a239a1))
+- **(sync)** Absorb the #263 promotion merge into dev ([3ed4f6a](https://github.com/orkestra-cc/orkestra/commit/3ed4f6ae039086b14f98582fe6716468e763e4a6))
+- **(agents)** Synchronize project MCP configuration ([203ad4c](https://github.com/orkestra-cc/orkestra/commit/203ad4c0f1b46ed737bc47660b02fc4cce7b9c19))
+
+### Release
+
+- **(v0.8.0)** Promote dev ([55e363c](https://github.com/orkestra-cc/orkestra/commit/55e363c69ce9657deb454689937997ea5bb4eb6b))
+
 ## [0.7.0] - 2026-08-21
 
 ### Release

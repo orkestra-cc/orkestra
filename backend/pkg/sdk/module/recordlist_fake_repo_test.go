@@ -1,0 +1,171 @@
+package module
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"testing"
+)
+
+func TestServiceAcceptsAFakeRepository(t *testing.T) {
+	repo := newFakeConfigRepo()
+	repo.docs["demo"] = &ModuleConfig{ModuleName: "demo", ConfigValues: map[string]string{"a": "1"}}
+
+	svc := NewModuleConfigService(repo, fakeRedisClient{}, slog.Default())
+
+	got, err := svc.GetConfig(context.Background(), "demo")
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
+	if got == nil || got.ConfigValues["a"] != "1" {
+		t.Fatalf("service did not read through the fake repository: %+v", got)
+	}
+}
+
+// fakeConfigRepo is an in-memory ConfigRepository. It exists so the service's
+// concurrency behaviour can be asserted in a test that actually RUNS: the
+// MONGO_TEST_URI-guarded repository tests skip in every CI run, so a
+// guarantee asserted only there is not covered at all.
+type fakeConfigRepo struct {
+	docs        map[string]*ModuleConfig
+	casFailures int // fail this many CAS attempts before allowing one through
+	casCalls    int
+	// duringActivate runs inside ActivateEnvironment, modelling a concurrent
+	// write landing in the window a two-step activation leaves open.
+	duringActivate func()
+}
+
+func newFakeConfigRepo() *fakeConfigRepo {
+	return &fakeConfigRepo{docs: map[string]*ModuleConfig{}}
+}
+
+// FindByName returns a DEEP copy, the way a real Mongo read does: the caller
+// holds a snapshot, and a later write to the stored document is invisible to
+// it. A shallow copy shares every map, which would let a test that mutates
+// stored state be silently observed through the caller's "snapshot" — exactly
+// the staleness these tests exist to detect.
+func (f *fakeConfigRepo) FindByName(_ context.Context, name string) (*ModuleConfig, error) {
+	doc, ok := f.docs[name]
+	if !ok {
+		return nil, nil
+	}
+	cp := *doc
+	cp.ConfigValues = copyStrings(doc.ConfigValues)
+	cp.EncryptedValues = copyStrings(doc.EncryptedValues)
+	if doc.Environments != nil {
+		cp.Environments = make(map[string]EnvironmentConfig, len(doc.Environments))
+		for k, env := range doc.Environments {
+			env.ConfigValues = copyStrings(env.ConfigValues)
+			env.EncryptedValues = copyStrings(env.EncryptedValues)
+			cp.Environments[k] = env
+		}
+	}
+	return &cp, nil
+}
+
+func copyStrings(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+func (f *fakeConfigRepo) FindAll(context.Context) ([]ModuleConfig, error) { return nil, nil }
+
+func (f *fakeConfigRepo) Upsert(_ context.Context, c *ModuleConfig) error {
+	f.docs[c.ModuleName] = c
+	return nil
+}
+
+func (f *fakeConfigRepo) UpdateEnabled(context.Context, string, bool) error { return nil }
+
+func (f *fakeConfigRepo) UpdateConfigValues(_ context.Context, name string, v, e map[string]string) error {
+	doc := f.docs[name]
+	doc.ConfigValues, doc.EncryptedValues = v, e
+	return nil
+}
+
+func (f *fakeConfigRepo) UpdateEnvironmentConfig(_ context.Context, name, env string, v, e map[string]string) error {
+	doc := f.docs[name]
+	cfg := doc.Environments[env]
+	cfg.ConfigValues, cfg.EncryptedValues = v, e
+	doc.Environments[env] = cfg
+	return nil
+}
+
+func (f *fakeConfigRepo) SetActiveEnvironment(_ context.Context, name, env string) error {
+	f.docs[name].ActiveEnvironment = env
+	return nil
+}
+
+// MigrateToEnvironments mirrors the real one: a no-op fake would let the
+// service believe a legacy document had been migrated while the stored one
+// still had no Environments map at all.
+func (f *fakeConfigRepo) MigrateToEnvironments(_ context.Context, name string, cv, ev map[string]string) error {
+	doc, ok := f.docs[name]
+	if !ok {
+		return fmt.Errorf("module %q not found", name)
+	}
+	doc.ActiveEnvironment = "production"
+	doc.Environments = map[string]EnvironmentConfig{
+		"production": {ConfigValues: copyStrings(cv), EncryptedValues: copyStrings(ev)},
+		"sandbox":    {ConfigValues: map[string]string{}, EncryptedValues: map[string]string{}},
+	}
+	return nil
+}
+
+func (f *fakeConfigRepo) ClearNeedsRestart(context.Context, string) error { return nil }
+
+func (f *fakeConfigRepo) RefreshMetadata(context.Context, Module) error { return nil }
+
+// CompareAndSwapEnvironment mirrors the Mongo implementation's contract: a
+// mismatched revision is a lost race (false, nil), not an error. casFailures
+// forces the first N attempts to lose, which is how a concurrent writer is
+// modelled without a second goroutine.
+func (f *fakeConfigRepo) CompareAndSwapEnvironment(_ context.Context, name, env string, expected int64, next EnvironmentConfig) (bool, error) {
+	f.casCalls++
+	if f.casFailures > 0 {
+		f.casFailures--
+		return false, nil
+	}
+	doc, ok := f.docs[name]
+	if !ok {
+		return false, nil
+	}
+	cur := doc.Environments[env]
+	if cur.Revision != expected {
+		return false, nil
+	}
+	next.Revision = cur.Revision + 1
+	doc.Environments[env] = next
+	if doc.ActiveEnv() == env {
+		doc.ConfigValues, doc.EncryptedValues = next.ConfigValues, next.EncryptedValues
+	}
+	return true, nil
+}
+
+// ActivateEnvironment mirrors the Mongo pipeline update: the values copied
+// into the legacy maps are read from the STORED document at execution time,
+// not from a snapshot the caller took earlier. duringActivate simulates a
+// write landing just before that read.
+func (f *fakeConfigRepo) ActivateEnvironment(_ context.Context, name, env string) error {
+	doc, ok := f.docs[name]
+	if !ok {
+		return fmt.Errorf("module %q not found", name)
+	}
+	if _, ok := doc.Environments[env]; !ok {
+		return fmt.Errorf("environment %q not found for module %q", env, name)
+	}
+	if f.duringActivate != nil {
+		f.duringActivate()
+	}
+	cfg := doc.Environments[env]
+	doc.ActiveEnvironment = env
+	doc.ConfigValues = copyStrings(cfg.ConfigValues)
+	doc.EncryptedValues = copyStrings(cfg.EncryptedValues)
+	return nil
+}

@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useCreateOrgMutation } from 'store/api/tenantApi';
 import { baseApi } from 'store/api/baseApi';
 import { useAppDispatch } from 'store/hooks';
+import resolveErrorMessage, { type ApiErrorBody } from 'helpers/errorMessage';
 
 interface Props {
   show: boolean;
@@ -190,9 +191,9 @@ const CreateTenantModal: React.FC<Props> = ({
 
 function extractError(err: unknown, t: (key: string) => string): string {
   if (err && typeof err === 'object' && 'data' in err) {
-    const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return (
-      data?.detail || data?.title || t('adminTenants.createModal.unknownError')
+    return resolveErrorMessage(
+      (err as { data?: ApiErrorBody }).data,
+      t('adminTenants.createModal.unknownError')
     );
   }
   return String(err);

@@ -46,7 +46,7 @@ explicitly yet — the grep is the gate.
 | Package | Purpose | Stability |
 | --- | --- | --- |
 | `module/` | Module interface + 17 optional sub-interfaces, BaseModule, ModuleRegistry, ServiceRegistry, ConfigService, RouteInfo, RedisClient, secrets (AES-256-GCM helpers), `ConfigGroup`, `HasConfigGroups`. The boot kernel. | Required surface frozen at v1 |
-| `iface/` | Cross-module interfaces (UserProvider, TenantProvider, AuthzProvider, NotificationSender, JWTProvider, PDFProvider, AIModelProvider, RAGQueryProvider, AuditSink, SessionTerminator, BillingTenantProvider, PaymentProvider, …) + their DTOs (User, OAuthLink, Tenant, NotificationRequest, …). | Additive-only |
+| `iface/` | Cross-module interfaces (UserProvider, TenantProvider, AuthzProvider, NotificationSender, JWTProvider, PDFProvider, AIModelProvider, RAGQueryProvider, AuditSink, SessionTerminator, BillingTenantProvider, PaymentProvider, …) + their DTOs (User, OAuthLink, Tenant, NotificationRequest, …). Includes `CategoryConfiguredChecker` (optional companion to `NotificationSender`, ADR-0019) + the `IsConfiguredForCategory` accessor. | Additive-only |
 | `ctxauth/` | Request-context getters: `GetUserUUID`, `GetTenantID`, `GetTenantRoles`, `GetClientIP`, `IsImpersonating`, `TenantKindFromContext`. Plus the exported `Key*` string constants the backend AuthMiddleware writes against. | Frozen |
 | `modulegate/` | `ModuleGate(checker, name)` HTTP middleware (503 when disabled) + `ModuleEnabledChecker` interface. | Frozen |
 | `tenantrepo/` | Fail-closed Mongo query helpers (`Scope`, `MustScope`, `StampInsert`, `StampInsertM`, `ScopeAggregate`, `RequireInternalTenant`, `RequireExternalTenant`) + `ErrTenantScopeMissing` / `ErrTenantKindMismatch` sentinels. | Frozen |
@@ -168,6 +168,46 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   any `DependsOn` to combine. Both `Advanced` and `DependsOn` ride on the
   `configSchema` the admin handler already serializes, so an addon that
   declares them gets the behavior with no frontend code to write.
+- **`ConfigField.Type = FieldRecordList` declares a repeatable list of
+  records** — the construct a module needs when an operator manages *several*
+  of something (named delivery profiles, webhook endpoints) rather than one.
+  The element's sub-schema goes in `Items []ConfigItemField`; the schema is
+  **non-recursive by construction** (`ConfigItemField` has no `Items`), so no
+  cyclic `$ref` reaches the OpenAPI contract. `ConfigItemField` also omits
+  `Group` (an element is not a page), `Advanced`, and `EnvVar` — an empty list
+  has no element to seed, and an indexed env convention is a contract this
+  design deliberately does not take on.
+  Storage stays the existing flat key/value map: each element carries an
+  immutable slug (minted once from the operator's label, never changed by a
+  rename) and its values live at `<field>.<slug>.<sub>`, with the roster at
+  `<field>.__items` and the display name at `<field>.<slug>.__label`. **`__` is
+  reserved to the SDK** — `ValidateConfigDeclarations` rejects a sub-field key
+  using it, a `recordList` with no `Items`, `Items` on any other type, a nested
+  `recordList`, and a sub-field `DependsOn` naming anything but a sibling in
+  the same element. Because an element's secret is an ordinary encrypted value
+  at an ordinary key, per-key AES-256-GCM encryption is untouched.
+  Decode with a `[]T` field tagged `module:"<field>"`; inside `T`,
+  `module:"slug"` receives the key segment and `module:"label"` the display
+  name. `UnmarshalConfig(schema, values, encrypted, &v)` is the repo-free half
+  of `UnmarshalModule` for a caller that already holds a snapshot.
+  **Membership is explicit intent, never inferred from the keys a request
+  carries**, and is accepted ONLY on
+  `PATCH /v1/admin/modules/{name}/environments/{env}` via
+  `recordLists: [{field, create, remove}]` — the bare module PATCH does not
+  declare the field, and Huma's `additionalProperties: false` refuses it before
+  any handler runs. Every environment write is a compare-and-swap on
+  `EnvironmentConfig.Revision` (absent and 0 are the same value, so a
+  pre-feature document compares against 0 and wins). A request that removes
+  anything MUST carry the revision it read and is never retried — removal
+  destroys keys, secrets included, and replaying it against unseen state could
+  destroy an element that appeared in the meantime. A request that only adds
+  may omit it and IS retried against the refreshed roster, so two operators
+  each adding an element both succeed. 409 = the roster moved (stale revision,
+  `create` of an existing slug, `remove` of an absent one); 422 = the request
+  is malformed (removal with no revision, duplicate field, a slug in both
+  lists, over the 50-element ceiling). Preconditions are evaluated against the
+  **stored** roster on every attempt, and the module's `ValidateConfig` hook
+  sees the reconciled map — the exact map that will be written.
 - **`module.HasConfigValidator` is the optional module config-validation
   seam (ADR-0017 D6).** A module implements
   `ValidateConfig(ctx context.Context, mergedValues map[string]string) error`
@@ -189,7 +229,39 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   `SetActiveEnvironment` deliberately does **not** invoke it: switching to
   an already-stored (possibly legacy-invalid) profile must stay possible so
   the defensive readers keep the deployment operable until the operator
-  repairs the value on the next PATCH.
+  repairs the value on the next PATCH. See `HasConfigActivationValidator`
+  below for the separate, optional seam that *does* run on activation.
+- **`module.HasConfigActivationValidator` is the optional activation-veto
+  seam**, distinct from `HasConfigValidator` above: a module implements
+  `ValidateConfigActivation(ctx context.Context, targetValues map[string]string) error`
+  to refuse `PUT /v1/admin/modules/{name}/active-environment` when the
+  *complete* target profile — not a PATCH-merged one — is no longer
+  satisfiable as a whole (the motivating case: a tenant provisioning policy
+  stored in a profile that a later config edit elsewhere made
+  inconsistent). It runs inside `SetActiveEnvironment`, after the
+  "environment exists" check and strictly **before**
+  `repo.SetActiveEnvironment` — the point of no return, since that write
+  also flips `needsRestart: true`. A rejection therefore leaves both the
+  active profile name and `needsRestart` exactly as they were.
+  `targetValues` is the target profile's non-secret map only; secrets are
+  never passed. Modules that omit the interface keep today's
+  validation-free activation — this is deliberate legacy-recovery
+  behaviour (see the note above), not an oversight: a module that only
+  implements `HasConfigValidator` still activates a legacy-invalid stored
+  profile unconditionally.
+- **A `ConfigValidationError` with a non-empty `Code`** (e.g.
+  `"tenant.single_mode_conflict"`) upgrades the admin API's response from
+  the legacy text-only `422` to the `{status,title,detail,code}` envelope
+  shared with `internal/shared/errcode` — reproduced SDK-locally in
+  `config_error_envelope.go` since `pkg/sdk` cannot import
+  `internal/shared/errcode` (SDK self-containment). `mapConfigServiceError`
+  is the single mapper for all three module-admin mutation surfaces
+  (`UpdateModule`, `UpdateEnvironment`, `SetActiveEnvironment`): a
+  code-bearing error becomes the stable envelope, a codeless one keeps the
+  pre-existing text-only `huma.Error422UnprocessableEntity`, and anything
+  else falls through to the caller's own fallback status. Leave `Code`
+  empty for a validator that has no reason to add a stable machine-readable
+  identity yet — the legacy 422 remains correct and requires no opt-in.
 
 ## CI
 

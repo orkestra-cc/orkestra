@@ -107,20 +107,44 @@ All access and refresh tokens are RS256-signed JWTs from the same key pair (`AUT
   "memberships": [
     { "orgId": "...", "orgName": "...", "orgSlug": "...", "roles": ["org_admin"] }
   ],
+  "dtid": "<tenant-fallback-uuid>",
+  "acting_tenant_id": "<tenant-fallback-uuid>",
+  "acting_tenant_kind": "internal",
   "amr": ["pwd", "otp"],
   "last_otp_at": 1730000800
 }
 ```
 
-- **`srole`** is the global system role (`super_admin` > `administrator` > `developer` > `manager` > `operator` > `guest`). Memberships carry org-scoped roles. **Permissions are not embedded** — they are resolved per-request by middleware via `authz.HasPermission`.
+- **`srole`** is the global system role (`super_admin` > `administrator` > `developer` > `manager` > `operator` > `guest`). Memberships carry org-scoped roles. **Permissions are not embedded** — they are resolved per-request by middleware via `authz.HasPermission`. (The wire-compact `mbr` claim's membership objects use `{tid, k, r}`, not the expanded `{orgId, orgName, orgSlug, roles}` shown above for readability.)
+- **`dtid`** ("default tenant id" — the pre-rename name) carries `TenantFallbackID`: the tenant this token falls back to when nothing more specific resolves the current tenant (see [Tenant resolution](#tenant-resolution-and-the-fallback-claim) below). The key stays `dtid` on the wire for backward compatibility with already-issued tokens; only the Go field was renamed.
+- **`acting_tenant_id`** / **`acting_tenant_kind`** are the tenant (and its kind, `internal`/`external`) this specific token is minted to act in. For an operator-audience token they start out equal to `dtid`/its kind and can be overridden per-request by `X-Tenant-ID`; a client-portal token pins them for the token's whole lifetime.
 - **`amr`** (RFC 8176) records the authentication method(s) used. `pwd` for password login, `oauth` for OAuth, `otp` after MFA verification, `webauthn` after a passkey assertion, `reauth` after a successful password reconfirm via `/me/password-confirm`. `last_otp_at` lets `RequireStepUp(maxAge)` middleware demand a fresh MFA proof (or fresh reconfirm) for catastrophic actions.
 - **`sid`** is the canonical session UUID. One random UUID is created before either JWT is signed; the access JWT `sid`, refresh JWT `sid`, refresh-token row, session document, and token response match. Refresh rotation and MFA/WebAuthn completion preserve it. Logout / change-password add it to a Redis-backed revocation set so the access token stops working instantly without waiting for the TTL.
+
+### Tenant resolution and the fallback claim
+
+Every protected request resolves **one current tenant** from the token plus, optionally, an `X-Tenant-ID` header. `shared/middleware/auth.go::resolveCurrentTenant` applies these rules in order — unchanged by the platform-default work below:
+
+1. **Header override** — `X-Tenant-ID`, for **operator-audience tokens only**, when it names a tenant the caller is a member of. This is the operator org switcher.
+2. **Acting** — `acting_tenant_id` / `acting_tenant_kind`, when the issuer set them. A client-portal token is minted pinned to one tenant, so the header can never move it.
+3. **Header** — `X-Tenant-ID` again, this time for any audience, when the caller is a member of the named tenant.
+4. **Fallback** — `dtid` (`TenantFallbackID`).
+
+The platform default never appears in this list directly — it only ever influences step 4, and only at **issuance time**, not at resolution time. Middleware itself never reads the platform-default pointer.
+
+**How `dtid` is chosen at issuance** (operator-audience tokens only; `auth/services/jwt_service.go::loadMemberships`):
+
+1. The **platform default Tier-1 tenant** (a single global pointer the tenant module owns, seeded during first-install setup and transferable by an admin — see the [tenant module page](/modules/core/tenant#platform-default-tenant)), when it names one of the caller's own valid memberships. This grants nothing by itself: the tenant still has to already be a membership the caller holds, and the header override (rule 1) and acting-tenant pin (rule 2) above still take precedence at resolution time.
+2. Otherwise, the caller's first **owned** membership, in a deterministic order (memberships sorted by join date, then tenant id, so two tokens minted back-to-back for the same user always agree).
+3. Otherwise, the caller's first membership in that same order.
+
+A provider hiccup — the platform-default pointer being unreadable, or nothing assigned yet — never blocks login: selection quietly falls through to rule 2. And because `dtid` is baked into the signed token at mint time, **transferring the platform default does not touch tokens already issued** — they keep their old fallback until they're refreshed, re-authenticated, or expire; only a freshly minted or refreshed token picks up the new default. Client-audience (Tier-2) tokens never consult the platform default at all — their acting tenant is pinned by the issuer, and Tier-1's internal-only pointer has no business influencing a Tier-2 session.
 
 ### Refresh token
 
 Same shape, `type: "refresh"`, longer expiry (`JWT_REFRESH_TOKEN_EXPIRY`, default `7d`). Because rotation rewrites the expiry on every use, this value is the session's **idle** timeout; its absolute lifetime is bounded separately by `sessionAbsoluteTTL` (see [ADR-0017](/adrs/session-lifetime-and-token-retention)). Refresh tokens carry the **same `aud` claim** as the access token they paired with, so a refresh token issued for the operator host cannot be redeemed on the client host.
 
-Refresh tokens rotate on every use with family detection: each login mints a new `FamilyID`, every rotation preserves it via an atomic CAS, and replaying a rotated token revokes the entire family with `revokedReason="replay_detected"`. A durable tier-scoped family-revocation record fences a successor that races replay revocation; it cannot escape as active. No row is deleted while its token could still pass temporal validation, regardless of revocation state — an unexpired rotated row is exactly what replay detection matches a reused token against; once `expiresAt` is past, replaying it cannot mint credentials and the row may be swept ([ADR-0017](/adrs/session-lifetime-and-token-retention), D7).
+Refresh tokens rotate on every use with family detection: each login mints a new `FamilyID`, every rotation preserves it via an atomic CAS, and replaying a rotated token revokes the entire family with `revokedReason="replay_detected"`. A rotation lost to a *concurrent* caller is not a replay: within a 10-second grace window, and only while the family carries no revocation fence, the loser gets **409** `refresh_rotation_raced` — no family revocation and no credentials — and retries once with the successor cookie its sibling left in the jar. This is what keeps a browser with several console tabs open from signing itself out every time the access token expires; the operator console also serialises rotation across tabs with a Web Lock. A durable tier-scoped family-revocation record fences a successor that races replay revocation; it cannot escape as active. No row is deleted while its token could still pass temporal validation, regardless of revocation state — an unexpired rotated row is exactly what replay detection matches a reused token against; once `expiresAt` is past, replaying it cannot mint credentials and the row may be swept ([ADR-0017](/adrs/session-lifetime-and-token-retention), D7).
 
 ## 4. Email + password flow
 

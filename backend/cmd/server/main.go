@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+	_ "time/tzdata" // embed the IANA zone DB — the alpine base image ships none, and any module calling time.LoadLocation needs it
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -20,8 +21,6 @@ import (
 
 	"github.com/orkestra/backend/internal/core/auth/services"
 	authzServices "github.com/orkestra/backend/internal/core/authz/services"
-	tenantModels "github.com/orkestra/backend/internal/core/tenant/models"
-	tenantRepo "github.com/orkestra/backend/internal/core/tenant/repository"
 	tenantServices "github.com/orkestra/backend/internal/core/tenant/services"
 	"github.com/orkestra/backend/internal/shared/blob"
 	"github.com/orkestra/backend/internal/shared/config"
@@ -147,6 +146,7 @@ func main() {
 	// Initialize module registry
 	svcRegistry := module.NewServiceRegistry()
 	svcRegistry.Register(module.ServiceFirstAdminClaimer, firstAdminClaimer)
+	svcRegistry.Register(module.ServiceSetupFinalizationStore, firstAdminClaimer)
 	// PII producer registry is pre-created here so producer modules can
 	// register themselves during their own Init. ADR-0006: the core base
 	// has no in-tree consumer (compliance/DSR left with the addons); the
@@ -451,15 +451,36 @@ func main() {
 	// Reachable without auth — gated by the "no users exist" invariant
 	// enforced inside setup.Service.CreateInitialAdmin. Operator-only:
 	// the initial admin is a Tier-1 super_admin, so the wizard lives on
-	// the operator host. Admin creation does not create a tenant — the
-	// wizard's OrgStep is the explicit (skippable) tenant-creation step.
+	// the operator host.
+	//
+	// Admin creation does not create a tenant. The initial Tier-1
+	// organization is MANDATORY and is provisioned by the authenticated
+	// finalization saga (POST /v1/setup/finalize) that the coordinator
+	// record bound during admin creation authorizes — there is no skip.
+	//
+	// Every seam below is resolved with MustGetTyped: missing wiring must
+	// fail module initialization loudly, not degrade a bootstrap endpoint
+	// at runtime. The audit sink is the one exception — it belongs to the
+	// compliance module and is nil-tolerated.
 	setupSvc := setup.NewService(
 		module.MustGetTyped[iface.UserProvider](svcRegistry, module.ServiceUserService),
 		module.MustGetTyped[setup.AdminCreator](svcRegistry, module.ServicePasswordAuthService),
+		module.MustGetTyped[systeminit.FinalizationStore](svcRegistry, module.ServiceSetupFinalizationStore),
 		configService,
+		newSetupTenantAdapter(module.MustGetTyped[*tenantServices.Service](svcRegistry, module.ServiceTenantService)),
+		setupAuditSink(svcRegistry),
 		logger,
 	)
-	setup.NewHandler(setupSvc, cfg.Auth.Cookie).RegisterRoutes(operatorAPI)
+	setupHandler := setup.NewHandler(setupSvc, cfg.Auth.Cookie)
+	setupHandler.RegisterPublicRoutes(operatorAPI)
+	// Finalizer access + finalize are AUTHENTICATED operator routes. They
+	// share the tenant-baggage-exempt /v1/setup/ prefix (no tenant exists
+	// yet) but are mounted behind RequireAuth — never on the public setup
+	// registrar. Operator audience is enforced mux-wide by setupMiddleware.
+	operatorProtected.Group(func(r chi.Router) {
+		api := humachi.New(r, apiConfig)
+		setupHandler.RegisterProtectedRoutes(api)
+	})
 
 	// Dev-token endpoint (LOCAL DEVELOPMENT ONLY) — synthetic JWTs for
 	// first login + local API testing, used by scripts/devtoken.sh and the
@@ -473,18 +494,18 @@ func main() {
 	// exist on staging either — staging is internet-reachable. Handler.
 	// RegisterRoutes enforces the same rule independently.
 	if !cfg.IsProductionLike() {
-		// Resolver: when an operator dev token doesn't pin a tenant, default it
-		// to the first internal tenant so the token satisfies tenant-scoped
-		// reads (billing/documents). Nil-safe — falls back to a tenant-less
-		// token when the tenant service is absent or no internal tenant exists.
+		// Resolver: an operator dev token that doesn't pin a tenant defaults
+		// to the OPERATIONAL platform default (tenant_defaults pointer) — the
+		// old newest-internal shortcut could select an archived tenant.
+		// Nil-safe: no default assigned → tenant-less token (legacy behavior).
 		var devTenantResolver devtoken.DefaultTenantResolver
-		if tenantSvc, ok := module.GetTyped[*tenantServices.Service](svcRegistry, module.ServiceTenantService); ok && tenantSvc != nil {
+		if dp, ok := module.GetTyped[iface.DefaultTenantProvider](svcRegistry, module.ServiceDefaultTenantProvider); ok && dp != nil {
 			devTenantResolver = func(ctx context.Context) (string, string) {
-				views, err := tenantSvc.ListAllTenantsFiltered(ctx, tenantRepo.TenantListFilter{Kind: tenantModels.TenantKindInternal})
-				if err != nil || len(views) == 0 || views[0].Tenant == nil {
+				t, err := dp.GetDefaultTenant(ctx)
+				if err != nil || t == nil {
 					return "", ""
 				}
-				return views[0].Tenant.UUID, "internal"
+				return t.UUID, "internal"
 			}
 		}
 		devtoken.NewHandler(

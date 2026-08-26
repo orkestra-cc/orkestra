@@ -74,6 +74,70 @@ const healthCheckPlugin = () => {
   };
 };
 
+// /config.js holds the runtime config the SPA reads at boot
+// (window.__ORKESTRA_CONFIG__ — apiUrl, version, appName). Every
+// environment rewrites it at container start, so a client holding a
+// stale copy talks to the wrong backend. The production nginx image
+// already says so (Dockerfile: `location = /config.js { add_header
+// Cache-Control "no-store" }`); the dev server, which is what dev AND
+// staging run, did not — and the gap is not academic. Vite's public-dir
+// middleware serves the file with `Cache-Control: no-cache`, which means
+// "store it, but revalidate": enough for a CDN to keep a copy (Cloudflare
+// classifies `.js` as a static asset by extension) and hand browsers its
+// own default `max-age=14400` in place of the origin header. Staging kept
+// serving a 0.5.0 config for hours after a 0.8.0 deploy. `no-store` keeps
+// the file out of both the edge and the browser cache.
+//
+// This serves the file itself instead of setting a header and deferring:
+// sirv, the public-dir server, writes Cache-Control unconditionally into
+// its response head, clobbering whatever an upstream middleware set.
+// Short-circuiting is the same shape the /health plugin above uses.
+const runtimeConfigPlugin = () => {
+  const handlerFor = getDir => async (req, res, next) => {
+    const [pathname] = (req.url || '').split('?');
+    if (pathname !== '/config.js') {
+      next();
+      return;
+    }
+    let body;
+    try {
+      body = await fs.readFile(path.join(getDir(), 'config.js'));
+    } catch (err) {
+      // No config.js on disk (fresh checkout before the entrypoint runs),
+      // or a directory we failed to resolve. Fall through so the normal
+      // 404 path answers, as it did before — but say so first: falling
+      // through silently means the no-store header is quietly not applied
+      // and the file goes back to being cacheable without anyone noticing.
+      console.warn(
+        `[orkestra-runtime-config] /config.js not served from disk: ${err.message}`
+      );
+      next();
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/javascript',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff'
+    });
+    res.end(body);
+  };
+  return {
+    name: 'orkestra-runtime-config',
+    configureServer(server) {
+      server.middlewares.use(handlerFor(() => server.config.publicDir));
+    },
+    configurePreviewServer(server) {
+      // `vite preview` serves the built bundle, where config.js has been
+      // copied into outDir — publicDir is not on the request path there.
+      server.middlewares.use(
+        handlerFor(() =>
+          path.resolve(server.config.root, server.config.build.outDir)
+        )
+      );
+    }
+  };
+};
+
 // Vendor bundle grouping, consumed by build.rollupOptions.output.manualChunks
 // below. Kept as data (it used to BE the option value) because Vite 8 bundles
 // with rolldown, which accepts only a function there — the object form rollup
@@ -123,7 +187,11 @@ const VENDOR_CHUNKS = {
   ],
 
   // Editor and rich content
-  'editor-vendor': ['@tinymce/tinymce-react', 'tinymce', 'prism-react-renderer'],
+  'editor-vendor': [
+    '@tinymce/tinymce-react',
+    'tinymce',
+    'prism-react-renderer'
+  ],
 
   // Utilities
   'utils-vendor': ['uuid', 'fuse.js', 'imask', 'react-imask']
@@ -152,7 +220,12 @@ export default ({ mode }) => {
   process.env.VITE_APP_VERSION = APP_VERSION;
 
   return defineConfig({
-    plugins: [react(), compileSCSS(), healthCheckPlugin()],
+    plugins: [
+      react(),
+      compileSCSS(),
+      healthCheckPlugin(),
+      runtimeConfigPlugin()
+    ],
     base: process.env.VITE_PUBLIC_URL || '/',
     resolve: {
       extensions: ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json'],

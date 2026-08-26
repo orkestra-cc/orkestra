@@ -205,6 +205,13 @@ The Vite dev server runs inside Docker; if you need to rebuild outside Docker (e
 - **Prod (nginx image)**: the entrypoint at `/docker-entrypoint.d/10-write-config.sh` (baked in the `Dockerfile`) writes it from `ORKESTRA_API_BASE` / `ORKESTRA_STRIPE_PUBLISHABLE_KEY` before nginx starts.
 - **Bare `npm run dev` on the host**: no generator runs — copy the tracked template `public/config.example.js` to `public/config.js`.
 
+**`/config.js` is served `no-store` on both paths, and that is load-bearing.** It is rewritten on every container start, so a client holding a stale copy points at the wrong `apiBase` until its cache expires. Prod nginx sets the header in `Dockerfile` (`location = /config.js`); the dev server — dev **and** staging — gets it from the `orkestra-client-runtime-config` plugin in `vite.config.ts`, which serves the file itself rather than letting Vite's public-dir middleware answer. Two reasons, both non-obvious:
+
+- Vite's public-dir middleware (sirv) writes `Cache-Control` **unconditionally into the response head**, so a middleware that only calls `res.setHeader` upstream of it is silently overridden. Short-circuiting is the only way to own the header — the same shape `healthCheckPlugin` uses.
+- `no-cache`, which is what sirv sends by default, is not "don't cache" but "cache and revalidate" — enough for a CDN to keep a copy. Cloudflare classifies `.js` as a static asset **by extension** and replaces the origin header with its own default `max-age`; the operator console served a runtime config four hours stale after a deploy because of exactly this ([`frontend-admin/CLAUDE.md`](../frontend-admin/CLAUDE.md), Runtime config).
+
+The plugin also makes the missing-file case legible: when `config.js` is absent it logs `[orkestra-client-runtime-config] /config.js not served from disk` and falls through to the old behaviour, so the `nosniff` block above announces its cause instead of being a puzzle. If a middleware edit to `vite.config.ts` looks inert, restart the container: Vite's own config reload logs `server restarted` but cannot be relied on to replace a middleware a previous `configureServer` registered (it did pick this plugin up here, and did not on the operator console).
+
 ## Adding a feature — canonical workflow
 
 1. **Backend first**. If the feature needs a new endpoint, add it to the relevant backend module (a core module, or a fork's `backend/internal/addons/<module>/`), declare the route on `ri.Client.ProtectedRouter` if it's a Tier-2 self-service endpoint, ship the backend PR.

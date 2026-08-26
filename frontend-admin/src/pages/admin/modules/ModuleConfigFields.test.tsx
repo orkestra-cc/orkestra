@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { renderWithProviders } from 'test/render';
 import i18n from '../../../i18n';
 import type { ConfigField } from 'store/api/moduleApi';
@@ -298,5 +298,63 @@ describe('description', () => {
       {}
     );
     expect(screen.getByText('Only from i18n')).toBeInTheDocument();
+  });
+});
+
+describe('enum with a stored value outside its declared options', () => {
+  const schema = [
+    field({
+      key: 'email.provider',
+      label: 'Email provider',
+      type: 'enum',
+      required: true,
+      default: 'noop',
+      options: ['noop', 'smtp']
+    })
+  ];
+
+  it('renders the orphan value as a selected option instead of blanking', () => {
+    // A field that was free-text before the enum conversion can hold a value
+    // the new options list does not contain. Dropping it would show the first
+    // option (noop) as selected while the backend still holds the old value —
+    // the operator could neither see it nor preserve it on save.
+    renderWithProviders(
+      <Harness schema={schema} values={{ 'email.provider': 'sendgrid' }} />
+    );
+    const select = screen.getByLabelText(/Email provider/) as HTMLSelectElement;
+    expect(select.value).toBe('sendgrid');
+    expect(
+      within(select).getByRole('option', { name: 'sendgrid' })
+    ).toBeInTheDocument();
+  });
+
+  it('adds no orphan option when the stored value is a declared option', () => {
+    renderWithProviders(
+      <Harness schema={schema} values={{ 'email.provider': 'smtp' }} />
+    );
+    const select = screen.getByLabelText(/Email provider/) as HTMLSelectElement;
+    // Required enum → no empty placeholder; exactly the two declared options.
+    expect(within(select).getAllByRole('option')).toHaveLength(2);
+    expect(select.value).toBe('smtp');
+  });
+
+  it('keeps the empty placeholder alongside an orphan value for a non-required enum', () => {
+    const s = [
+      field({
+        key: 'mode',
+        label: 'Mode',
+        type: 'enum',
+        required: false,
+        options: ['a', 'b']
+      })
+    ];
+    renderWithProviders(<Harness schema={s} values={{ mode: 'legacy' }} />);
+    const select = screen.getByLabelText(/Mode/) as HTMLSelectElement;
+    expect(select.value).toBe('legacy');
+    // placeholder ('—') + orphan ('legacy') + a + b = 4 options
+    expect(within(select).getAllByRole('option')).toHaveLength(4);
+    expect(
+      within(select).getByRole('option', { name: 'legacy' })
+    ).toBeInTheDocument();
   });
 });

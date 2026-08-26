@@ -56,7 +56,7 @@ git clone https://github.com/<your-org>/orkestra.git .
 make init
 ```
 
-`make init` will scaffold `docker/.env` (with random secrets), generate RS256 JWT keys, and create the `orkestra-network` Docker bridge. See [I just forked Orkestra](/getting-started/forking) for what each step does.
+`make init` scaffolds `docker/.env` (with random secrets) and generates RS256 JWT keys. There is no shared Docker network to create — each stack gets its own `${APP_NAME}-${ENV}_default`. See [I just forked Orkestra](/getting-started/forking) for what each step does.
 
 Edit `docker/.env`:
 
@@ -65,33 +65,67 @@ Edit `docker/.env`:
 - Set `COOKIE_SECURE=true` and `COOKIE_SAME_SITE=strict`.
 - Set `ALLOW_LOCALHOST_REDIRECTS=false`.
 - Set `OPERATOR_COOKIE_DOMAIN` and `CLIENT_COOKIE_DOMAIN` to non-overlapping hosts — see [Cookie hardening](/operating/cookie-hardening-cross-tier).
+- Decide where the stack listens. `HOST_BIND_ADDRESS` is the address the backend and console ports bind to; production defaults to `127.0.0.1`, which is right when the reverse proxy runs on this VM. A proxy on another host needs the private IPv4 it reaches (e.g. `HOST_BIND_ADDRESS=10.0.0.5`) plus the firewall rule in [Step 4](#step-4--network-exposure-and-firewall). Leave `INFRA_BIND_ADDRESS=127.0.0.1` — nothing off-host talks to Mongo, Redis or RustFS. `FRONTEND_PORT` (default `8080`) is the console's host port.
 - Set `TRUSTED_PROXY_CIDRS` (or `TRUSTED_PROXY_COUNT`) to describe the reverse proxy in front of the backend. Leave both unset and Orkestra ignores `X-Forwarded-For` entirely, attributing every request to the proxy — which collapses all callers into one login rate-limit bucket and makes the operator IP allowlist and geo-block match the proxy instead of the client. With Caddy or nginx on the same VM, `TRUSTED_PROXY_COUNT=1` is correct.
 - (Optional) Set `LOG_LEVEL=info` and `PRETTY_LOGS=false` for JSON logs that ship to Loki / Datadog / Honeycomb cleanly.
 
 ## Step 3 — Start the stack
 
 ```bash
-cd /opt/orkestra/docker
-docker compose -f docker-compose.infra.yml up -d
-docker compose -f docker-compose.prod.yml --env-file .env up -d
+cd /opt/orkestra
+./orkestra.sh deploy --yes --rebuild
 ```
 
-Orkestra ships as a single image, so there's only one production compose file to launch.
+`deploy` refuses a dirty worktree or a `HEAD` that is not `origin/main`, builds the backend and console images, starts infra → backend → console, and gates on `scripts/health-check.sh` — the same checks you would otherwise run by hand. The equivalent manual sequence, useful when debugging the compose files themselves:
+
+```bash
+cd /opt/orkestra/docker
+export COMPOSE_PROJECT_NAME=orkestra-production   # ${APP_NAME}-${ENV}, what orkestra.sh uses
+docker compose -f docker-compose.infra.yml -f docker-compose.prod.yml --env-file .env up -d --build
+```
+
+Always set `COMPOSE_PROJECT_NAME` to what `orkestra.sh` derives (`${APP_NAME}-${ENV}`): volume names are prefixed with the project, so a bare `docker compose` here would create a second, empty `docker_mongodb-data` next to the real one.
 
 Verify:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env ps
-curl -s http://localhost:3000/health
+./orkestra.sh status
+curl -s http://127.0.0.1:3000/health     # or http://$HOST_BIND_ADDRESS:3000/health
 ```
 
-## Step 4 — systemd unit for auto-restart on reboot
+## Step 4 — Network exposure and firewall
 
-Create `/etc/systemd/system/orkestra.service`:
+A port Docker publishes does **not** go through the host's `INPUT` chain — Docker inserts its own forwarding rules ahead of it. A `ufw`/`nftables` policy of "drop everything but SSH" therefore says nothing about what the stack exposes; the bind addresses in `docker/.env` do.
+
+The production compose files default to closed:
+
+| Port | Binds to | Default | Who needs it |
+| --- | --- | --- | --- |
+| `BACKEND_PORT` (3000), `FRONTEND_PORT` (8080) | `HOST_BIND_ADDRESS` | `127.0.0.1` | the reverse proxy only |
+| `RUSTFS_API_PORT` (9100) | `HOST_BIND_ADDRESS` | `127.0.0.1` | the reverse proxy, only if `STORAGE_PUBLIC_ENDPOINT` routes browser uploads through it |
+| `MONGO_PORT`, `REDIS_PORT`, `RUSTFS_CONSOLE_PORT` | `INFRA_BIND_ADDRESS` | `127.0.0.1` | nobody off-host — containers use service names, `backup.sh` uses `docker exec` |
+
+**Proxy on this VM** (the [Caddy guide](./reverse-proxy-caddy)): nothing to do — Caddy reaches `127.0.0.1:3000` / `:8080` and no port is visible on the network.
+
+**Proxy on another host**: set `HOST_BIND_ADDRESS` to the private IPv4 the proxy reaches, then restrict those two ports to the proxy's address in Docker's `DOCKER-USER` chain — the one hook Docker evaluates before its own accept rules:
+
+```bash
+# 203.0.113.10 = the proxy; eth0 = the interface the bind address lives on
+sudo iptables -I DOCKER-USER -i eth0 -p tcp -m multiport --dports 3000,8080,9100 \
+  ! -s 203.0.113.10 -j DROP
+```
+
+`DOCKER-USER` is not persisted by Docker: put the rule in a small oneshot unit ordered `After=docker.service` (or your distro's `iptables-persistent`) so it survives a reboot. Check the daemon's firewall backend first — `docker info | grep -i firewall` — and use `nft` equivalents on a host that runs Docker with the nftables backend. Verify from a machine that is *not* the proxy: `curl -m 3 http://<HOST_BIND_ADDRESS>:3000/health` must time out.
+
+`./scripts/env-validate.sh` warns when a production `.env` leaves either bind address at `0.0.0.0`.
+
+## Step 5 — systemd unit for auto-restart on reboot
+
+The repo ships the unit at `scripts/systemd/orkestra.service`. Its `WorkingDirectory`, `User` and `Group` are placeholders — change them to your checkout path and deploy user before installing:
 
 ```ini
 [Unit]
-Description=Orkestra stack
+Description=Orkestra production stack (infra + backend + frontend-admin)
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
@@ -99,19 +133,20 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=/opt/orkestra/docker
 User=deploy
-Group=docker
-EnvironmentFile=/opt/orkestra/docker/.env
+Group=deploy
+SupplementaryGroups=docker
+WorkingDirectory=/opt/orkestra/docker
+Environment=COMPOSE_PROJECT_NAME=orkestra-production
 ExecStart=/usr/bin/docker compose -f docker-compose.infra.yml -f docker-compose.prod.yml --env-file .env up -d
-ExecStop=/usr/bin/docker compose -f docker-compose.infra.yml -f docker-compose.prod.yml --env-file .env down
+ExecStop=/usr/bin/docker compose -f docker-compose.infra.yml -f docker-compose.prod.yml --env-file .env stop
 TimeoutStartSec=300
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Replace `deploy` with your actual deploy user. Then:
+`COMPOSE_PROJECT_NAME` must match what `orkestra.sh` derives (`${APP_NAME}-${ENV}`), or the unit manages a different set of volumes than your deploys. Two further deliberate choices: no `EnvironmentFile=` (`--env-file` already feeds compose, and `EnvironmentFile=` would copy every secret in `docker/.env` into the unit's environment, visible in `systemctl show`), and `stop` rather than `down` on shutdown, so containers and their logs survive a reboot. Then:
 
 ```bash
 sudo systemctl daemon-reload
@@ -120,9 +155,9 @@ sudo systemctl start orkestra.service
 sudo systemctl status orkestra.service
 ```
 
-On VM reboot, Docker comes up, then orkestra.service brings the stack up automatically.
+On VM reboot, Docker comes up, then orkestra.service brings the stack up automatically. Rolling out a new version is still `./orkestra.sh deploy` — the unit only guarantees the stack comes back.
 
-## Step 5 — First admin login
+## Step 6 — First admin login
 
 The core dev-token issuer (`POST /dev/token`, used by `scripts/devtoken.sh`) is **auto-disabled when `ENV=production`** — so on a real production VM you can't mint an admin token. Create the first administrator through the **setup wizard** instead:
 
@@ -135,7 +170,7 @@ Follow the wizard (or its UI counterpart) to create the first administrator acco
 
 > For a non-production VM (`ENV=development` / `staging`), you can instead mint a one-time token with `ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator` — but never leave a non-production env exposed publicly.
 
-## Step 6 — Log rotation
+## Step 7 — Log rotation
 
 Docker's default JSON log driver grows unbounded. Configure rotation in `/etc/docker/daemon.json`:
 
@@ -159,25 +194,32 @@ docker compose -f docker-compose.observability.yml --env-file .env up -d
 
 Promtail tails Docker stdout, JSON-parses, ships to Loki. Grafana is at `http://localhost:3010` (admin/admin by default — change immediately).
 
-## Step 7 — Backups
+## Step 8 — Backups
 
 See [Backup and restore](/operating/backup-and-restore) for `mongodump` cron recipes and restore-test cadence. Redis is ephemeral (caches and sessions) — losing it logs everyone out but doesn't lose data.
 
-## Step 8 — Smoke tests
+A backup that lives only on the VM it protects is not a backup: follow [Off-site copies](/operating/backup-and-restore#off-site-copies) to ship the nightly bundle — encrypted, since it contains `docker/.env` and the JWT keys — to another host.
 
-After every deploy and after every restart, run:
+## Step 9 — Smoke tests
+
+After every deploy and after every restart, run (`scripts/health-check.sh production` does the first two for you):
 
 ```bash
 # Backend health (process + DB connectivity)
-curl -fsS http://localhost:3000/health | jq .
+curl -fsS http://127.0.0.1:3000/health | jq .
 
-# Admin modules list (should return JSON)
-TOKEN=$(./scripts/devtoken.sh administrator --quiet)
-curl -fsS -H "Authorization: Bearer $TOKEN" http://localhost:3000/v1/admin/modules | jq '.modules | length'
+# Console is serving and its runtime config points at the real API
+curl -fsS http://127.0.0.1:8080/health
+curl -fsS http://127.0.0.1:8080/config.js | grep apiUrl
+
+# Setup state — `completed: true` once the first administrator exists
+curl -fsS http://127.0.0.1:3000/v1/setup/status | jq .
 
 # OpenAPI spec count
-curl -fsS http://localhost:3000/openapi.json | jq '.paths | keys | length'
+curl -fsS http://127.0.0.1:3000/openapi.json | jq '.paths | keys | length'
 ```
+
+`scripts/devtoken.sh` is not an option here — `POST /dev/token` does not exist when `ENV=production` (see Step 6). Substitute `127.0.0.1` with `HOST_BIND_ADDRESS` if you set one.
 
 If any of these fail, check `docker compose -f docker-compose.prod.yml --env-file .env logs backend --tail 100`.
 
@@ -185,12 +227,10 @@ If any of these fail, check `docker compose -f docker-compose.prod.yml --env-fil
 
 ```bash
 cd /opt/orkestra
-git pull
-docker compose -f docker/docker-compose.prod.yml --env-file docker/.env pull
-sudo systemctl restart orkestra.service
+./orkestra.sh deploy --yes --rebuild
 ```
 
-The infra services (Mongo, Redis) are pinned to specific image versions in the compose file — they don't update on `pull`. To upgrade them, edit the compose file, then `docker compose up -d`.
+`deploy` pulls `origin/main`, rebuilds the backend and console images from the checkout (production images are built locally, not pulled), restarts the app services and gates on the health check. The infra services (Mongo, Redis, RustFS) are pinned to specific image versions in the compose file — to upgrade them, edit the compose file, then `docker compose up -d`.
 
 Mongo upgrades across major versions need attention — read the [Mongo upgrade docs](https://www.mongodb.com/docs/manual/release-notes/) before bumping. Orkestra ships with Mongo 8.0; the schema is forward-compatible to whatever 8.x lands.
 

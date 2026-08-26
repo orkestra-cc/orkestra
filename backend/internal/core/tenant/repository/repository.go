@@ -121,15 +121,23 @@ func (r *Repository) UpdateTenant(ctx context.Context, uuid string, update bson.
 	return nil
 }
 
-func (r *Repository) SoftDeleteTenant(ctx context.Context, uuid string) error {
+// SoftDeleteTenant archives the row and stamps WHY, which is load-bearing
+// rather than bookkeeping: the platform-admin DELETE route and
+// createTenantWithUUID's own partial-failure rollback write byte-identical
+// state here, and the setup saga's reserved-row restore branch has to tell
+// them apart. reason is required at every call site precisely so a new
+// deletion path cannot forget to declare its provenance and silently become
+// restorable. See models.TenantDeleteReason.
+func (r *Repository) SoftDeleteTenant(ctx context.Context, uuid string, reason models.TenantDeleteReason) error {
 	now := time.Now()
 	res, err := r.db.Collection(CollTenants).UpdateOne(ctx,
 		bson.M{"uuid": uuid},
 		bson.M{"$set": bson.M{
-			"deletedAt":  now,
-			"updatedAt":  now,
-			"status":     string(models.TenantStatusArchived),
-			"archivedAt": now,
+			"deletedAt":     now,
+			"updatedAt":     now,
+			"status":        string(models.TenantStatusArchived),
+			"archivedAt":    now,
+			"deletedReason": string(reason),
 		}})
 	if err != nil {
 		return err
@@ -179,14 +187,22 @@ func (r *Repository) ListTenantsByKind(ctx context.Context, kind models.TenantKi
 	return out, nil
 }
 
-// CountActiveByKind returns the number of non-deleted tenants of the given
-// tier. Backs the `single` provisioning-mode invariant (at most one active
-// internal tenant) and the admin provisioning-policy read.
-func (r *Repository) CountActiveByKind(ctx context.Context, kind models.TenantKind) (int64, error) {
+// CountProvisioningSlotsByKind returns the number of tenants of the given
+// tier that occupy a provisioning slot: deletedAt == nil AND status in
+// {provisioning, active, suspended}. A suspended tenant remains part of the
+// installation and keeps its slot; archived and purged tenants free theirs
+// even when a legacy row was never soft-deleted. Backs the `single`
+// cardinality gate, config validation, and the admin policy read.
+func (r *Repository) CountProvisioningSlotsByKind(ctx context.Context, kind models.TenantKind) (int64, error) {
 	//tenantscope:allow tenant registry — counting tenants by tier is inherently cross-tenant (mirrors ListTenantsByKind)
 	return r.db.Collection(CollTenants).CountDocuments(ctx, bson.M{
 		"kind":      string(kind),
 		"deletedAt": nil,
+		"status": bson.M{"$in": bson.A{
+			string(models.TenantStatusProvisioning),
+			string(models.TenantStatusActive),
+			string(models.TenantStatusSuspended),
+		}},
 	})
 }
 
@@ -580,11 +596,19 @@ func (r *Repository) DeleteMembershipsByUser(ctx context.Context, userUUID strin
 	return res.DeletedCount, nil
 }
 
+// ListMembershipsByUser returns the caller's memberships in a deterministic
+// order: joinedAt ascending, then the membership's tenant identifier
+// (persisted as tenantId) ascending as a stable tie-break. Order is
+// load-bearing — auth/services/jwt_service.go's loadMemberships relies on
+// it (and does not re-sort) to pick a deterministic tenant fallback and to
+// embed the membership list in JWT claims in the same order. Do not drop
+// the sort.
 func (r *Repository) ListMembershipsByUser(ctx context.Context, userUUID string) ([]models.TenantMembership, error) {
+	opts := options.Find().SetSort(bson.D{{Key: "joinedAt", Value: 1}, {Key: "tenantId", Value: 1}})
 	cur, err := r.db.Collection(CollMemberships).Find(ctx, bson.M{
 		"userUUID": userUUID,
 		"$or":      []bson.M{{"expiresAt": nil}, {"expiresAt": bson.M{"$gt": time.Now()}}},
-	})
+	}, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -799,4 +823,87 @@ func (r *Repository) IsAncestorOf(ctx context.Context, ancestorUUID, descendantU
 		return false, nil
 	}
 	return false, err
+}
+
+// RestoreTenant reverses SoftDeleteTenant: clears deletedAt/archivedAt and
+// returns the row to active status. The mirror-image counterpart lives in
+// the *service* layer (Service.reconcileSetupTenant, via EnsureSetupTenant)
+// rather than here, because restoring a row is a lifecycle transition that
+// re-occupies a provisioning slot — the caller must re-apply the `single`
+// cardinality gate against OTHER occupants before calling this, exactly the
+// way CreateTenant applies it before a genuine creation. This method itself
+// performs no such check; it is a plain, unconditional row write, the same
+// contract SoftDeleteTenant already has. Used only by the setup-tenant
+// reconciliation seam to resume a reservation that a prior attempt's
+// partial-failure rollback soft-deleted.
+func (r *Repository) RestoreTenant(ctx context.Context, uuid string) error {
+	now := time.Now()
+	//tenantscope:allow setup-tenant restore reverses SoftDeleteTenant for a resumable provisioning-saga retry
+	res, err := r.db.Collection(CollTenants).UpdateOne(ctx,
+		bson.M{"uuid": uuid},
+		bson.M{
+			"$set": bson.M{"status": string(models.TenantStatusActive), "updatedAt": now},
+			// deletedReason goes with deletedAt: a live row must carry no
+			// deletion provenance, or a later soft-delete that forgot to
+			// stamp one would inherit this one.
+			"$unset": bson.M{"deletedAt": "", "archivedAt": "", "deletedReason": ""},
+		})
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListOperationalByKindOldestFirst returns the OPERATIONAL tenants of a
+// tier — `status == active` AND `deletedAt == nil` — oldest first by
+// `createdAt`, with `uuid` ascending as a deterministic tie-break. A limit
+// <= 0 means no limit.
+//
+// This applies the "operational tenant" predicate, deliberately NOT the
+// provisioning-slot one (see CLAUDE.md#lifecycle): a suspended, archived,
+// purged or soft-deleted tenant is never returned, so boot reconciliation
+// can never adopt one as the platform default.
+//
+// The TOTAL ordering is load-bearing, not cosmetic. Two backend replicas
+// running boot reconciliation concurrently must pick the same tenant, or
+// AssignDefault's transactional conflict check would fail one of their
+// startups. `createdAt` alone is not a total order — two rows can share a
+// millisecond — which is why `uuid` breaks the tie.
+func (r *Repository) ListOperationalByKindOldestFirst(ctx context.Context, kind models.TenantKind, limit int64) ([]models.Tenant, error) {
+	opts := options.Find().SetSort(bson.D{
+		{Key: "createdAt", Value: 1},
+		{Key: "uuid", Value: 1},
+	})
+	if limit > 0 {
+		opts.SetLimit(limit)
+	}
+	//tenantscope:allow tenant registry — selecting the platform default spans every tenant of a tier by definition (mirrors ListTenantsByKind)
+	cur, err := r.db.Collection(CollTenants).Find(ctx, bson.M{
+		"kind":      string(kind),
+		"deletedAt": nil,
+		"status":    string(models.TenantStatusActive),
+	}, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	var out []models.Tenant
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CountAllTenants counts every tenant row of every tier, INCLUDING
+// soft-deleted, archived and purged ones. Boot reconciliation uses it for
+// exactly one decision — "has this installation ever held a tenant at all"
+// — which is why it deliberately ignores both lifecycle predicates: a
+// database holding only archived rows is an upgraded installation, not a
+// pristine one, and misclassifying it as fresh would skip the migration.
+func (r *Repository) CountAllTenants(ctx context.Context) (int64, error) {
+	//tenantscope:allow tenant registry — an "is this installation pristine" probe is platform-global by definition
+	return r.db.Collection(CollTenants).CountDocuments(ctx, bson.M{})
 }

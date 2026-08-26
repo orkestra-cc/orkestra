@@ -18,6 +18,82 @@ package errcode
 // the email already maps to a live user in this audience tier. 409.
 const AuthEmailInUse = "auth.email_in_use"
 
+// AuthJWTNotConfigured signals that the server cannot read its RS256
+// signing keys, so no token can be issued or verified. This is a
+// deployment fault, never the caller's: it answers 503, and the detail
+// names the cause so an operator reading the response alone can act on
+// it without tailing container logs.
+const AuthJWTNotConfigured = "auth.jwt_not_configured"
+
+// AuthUnavailable is the honest fallback for an unrecognized error on
+// any auth mapper (password, MFA, WebAuthn). An error the handler
+// cannot name is a server fault, so it answers 500 — never a 4xx,
+// which would blame the caller for the server's own gap.
+const AuthUnavailable = "auth.unavailable"
+
+// AuthEmailNotVerified signals that credentials were valid but the
+// account's email address has not been verified yet — the caller must
+// check their inbox (or request a new verification email) before
+// retrying. 403.
+const AuthEmailNotVerified = "auth.email_not_verified"
+
+// AuthRegistrationDisabled signals that self-service registration is
+// turned off for the surface (operator or client) the request came in
+// on. 403.
+const AuthRegistrationDisabled = "auth.registration_disabled"
+
+// AuthEmailDomainNotAllowed signals that a registration was rejected
+// because the email's domain is not on the surface's allow-list. 403.
+const AuthEmailDomainNotAllowed = "auth.email_domain_not_allowed"
+
+// AuthLoginDisabled signals that login (password or OAuth) is turned
+// off for the surface the request came in on. 403.
+const AuthLoginDisabled = "auth.login_disabled"
+
+// AuthCountryBlocked signals that the request's resolved country is on
+// the surface's block-list. 403.
+const AuthCountryBlocked = "auth.country_blocked"
+
+// AuthPasswordConfirmUnavailable signals that the step-up
+// "confirm with your password" endpoint cannot be used by this
+// account — it has an MFA factor enrolled, or no password at all — so
+// the caller must use MFA or reauthenticate via OAuth instead. 409.
+const AuthPasswordConfirmUnavailable = "auth.password_confirm_unavailable"
+
+// AuthOAuthProviderDisabled signals that the requested OAuth provider
+// is not enabled for the surface the request came in on. 403.
+const AuthOAuthProviderDisabled = "auth.oauth_provider_disabled"
+
+// --- tenant ---
+
+// TenantSlugAlreadyInUse signals that a tenant create or update would reuse an
+// existing organization slug. 409.
+const TenantSlugAlreadyInUse = "tenant.slug_already_in_use"
+
+// TenantProvisioningLocked signals that the active provisioning policy
+// refused to create or assign a tenant. Two distinct call sites share this
+// one stable code with two different fixed details, never a shared string:
+//   - Tier-1 (internal): the `single` provisioning mode blocks occupying a
+//     second Tier-1 provisioning slot.
+//   - Tier-2 (external): `external.mode == manual` blocks lazy
+//     personal-tenant provisioning for a caller with no admin-assigned
+//     tenant. `single` is not a valid external mode, so this branch must
+//     never reuse the Tier-1 wording. 409.
+const TenantProvisioningLocked = "tenant.provisioning_locked"
+
+// TenantInternalModeInvalid rejects a Tier-1 provisioning policy that is
+// not manual or single (open was removed from Tier-1). 422.
+const TenantInternalModeInvalid = "tenant.internal_mode_invalid"
+
+// TenantSingleModeConflict rejects selecting `single` while more than one
+// Tier-1 tenant occupies a provisioning slot. 422.
+const TenantSingleModeConflict = "tenant.single_mode_conflict"
+
+// TenantDefaultReassignmentRequired blocks suspending, archiving, purging,
+// or deleting the platform default tenant before the default is
+// transferred. 409.
+const TenantDefaultReassignmentRequired = "tenant.default_reassignment_required"
+
 // --- user ---
 
 // UserSelfDeleteForbidden signals that an admin tried to delete (or
@@ -108,3 +184,70 @@ const NavigationOverrideChildNotFound = "navigation.override_child_not_found"
 // NavigationOverrideDuplicateChild signals that the same itemKey
 // appeared twice in the orderedChildren list. 400.
 const NavigationOverrideDuplicateChild = "navigation.override_duplicate_child"
+
+// --- setup (shared bootstrap infrastructure, not a module) ---
+
+// SetupStatusUnavailable: the authoritative setup phase cannot be read;
+// the response carries Retry-After and no inferred phase. 503.
+const SetupStatusUnavailable = "setup.status_unavailable"
+
+// SetupFinalizerStateUnavailable: coordinator or bound-user state cannot be
+// read; never treated as recovery eligibility. 503.
+const SetupFinalizerStateUnavailable = "setup.finalizer_state_unavailable"
+
+// SetupFinalizerBoundToAnotherAdmin: the finalize POST caller is not the
+// usable bound administrator. 403.
+const SetupFinalizerBoundToAnotherAdmin = "setup.finalizer_bound_to_another_admin"
+
+// SetupRecoveryRequiresSuperAdmin: recovering an empty or unusable binding
+// requires an active super_admin. 403.
+const SetupRecoveryRequiresSuperAdmin = "setup.recovery_requires_super_admin"
+
+// SetupFinalizationAlreadyStarted: a different normalized finalization
+// request is already reserved. 409.
+const SetupFinalizationAlreadyStarted = "setup.finalization_already_started"
+
+// SetupAlreadyCompleted: setup is complete and the payload does not match a
+// replayable finalized request. 409.
+const SetupAlreadyCompleted = "setup.already_completed"
+
+// SetupTenantNameRequired: the initial organization name is empty once
+// normalized (the schema's minLength constrains the raw string only). 422.
+const SetupTenantNameRequired = "setup.tenant_name_required"
+
+// SetupTenantSlugRequired: the initial organization slug is empty once
+// normalized. 422.
+const SetupTenantSlugRequired = "setup.tenant_slug_required"
+
+// --- notification ---
+
+// NotificationSenderPatternInvalid: a sender profile declares a category
+// pattern outside the grammar (exact "foo.bar", prefix "foo.*", or "*"). 422.
+const NotificationSenderPatternInvalid = "notification.sender_pattern_invalid"
+
+// NotificationSenderNoDefault: patterns are declared but no profile claims
+// "*", so an unmatched category would fail closed. 422.
+const NotificationSenderNoDefault = "notification.sender_no_default"
+
+// NotificationSenderDuplicateDefault: more than one profile claims "*". 422.
+const NotificationSenderDuplicateDefault = "notification.sender_duplicate_default"
+
+// NotificationSenderPatternConflict: the same pattern is declared by two
+// profiles, so the send would be ambiguous. 422.
+const NotificationSenderPatternConflict = "notification.sender_pattern_conflict"
+
+// NotificationSenderUnknownDriver: a routing profile's provider names no
+// registered driver. 422.
+const NotificationSenderUnknownDriver = "notification.sender_unknown_driver"
+
+// NotificationSenderIncomplete: a profile lacks a non-secret field its
+// driver requires (save time), or any required field (test send). 422.
+const NotificationSenderIncomplete = "notification.sender_incomplete"
+
+// NotificationSenderNotFound: a test send named a profile slug that is not
+// in the roster. 404.
+const NotificationSenderNotFound = "notification.sender_not_found"
+
+// NotificationSendFailed: the sender's transport or vendor refused a test
+// message. The detail carries the bounded diagnostic, never vendor text. 502.
+const NotificationSendFailed = "notification.send_failed"

@@ -369,10 +369,12 @@ func (s *dynamicNavigationService) convert(ctx context.Context, spec module.NavI
 	}
 
 	item := models.NavItem{
-		Name:   spec.Name,
-		To:     spec.Path,
-		Icon:   spec.Icon,
-		Active: spec.Active,
+		ModuleName: spec.ModuleName,
+		ItemKey:    spec.ItemKey,
+		Name:       spec.Name,
+		To:         spec.Path,
+		Icon:       spec.Icon,
+		Active:     spec.Active,
 	}
 
 	for _, child := range spec.Children {

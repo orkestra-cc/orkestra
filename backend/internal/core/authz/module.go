@@ -79,6 +79,22 @@ func (m *Module) Collections() []module.CollectionSpec {
 			}},
 			{Keys: map[string]int{"roleId": 1}},
 			{Keys: map[string]int{"expiresAt": 1}},
+			// First uniqueness constraint on this collection. NOT sparse,
+			// NO partial filter: tenantId=="" rows are global/system-role
+			// grants and are deliberately covered too — a user must not
+			// hold the same system role twice globally any more than
+			// they should hold the same tenant role twice in one tenant.
+			// ensureCollections is create-only and non-fatal on failure,
+			// so an installation with pre-existing duplicate bindings
+			// needs the dedup migration run first — see
+			// docs/migrations/0009_authz_bindings_unique.md and the
+			// "Idempotent binding grants" section of this module's
+			// CLAUDE.md.
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "userUUID", Direction: 1},
+				{Field: "roleId", Direction: 1},
+			}, Unique: true},
 		}},
 		// ADR-0003 PR-B: tier-split role catalogs — same index shape
 		// as authz_roles so the seed/lookup paths can be drop-in
@@ -230,7 +246,15 @@ func (m *Module) Init(deps *module.Dependencies) error {
 			if err != nil {
 				return fmt.Errorf("authz: resolve owner role %q: %w", roleName, err)
 			}
-			if _, err := m.svc.CreateBinding(ctx, tenantUUID, "system", authzModels.CreateBindingInput{
+			// EnsureBinding (not CreateBinding): all three call sites of
+			// this hook — CreateTenant, SetMemberRoles, AttachMember —
+			// must be safe to replay after a lost response, a crashed
+			// executor, or an expired lease (tier-1 setup-saga work).
+			// EnsureBinding grants the (tenant, owner, role) tuple only
+			// if it does not already exist and otherwise returns the
+			// existing row untouched, backed by the unique compound
+			// index on authz_bindings — see this module's CLAUDE.md.
+			if _, err := m.svc.EnsureBinding(ctx, tenantUUID, "system", authzModels.CreateBindingInput{
 				UserUUID: ownerUUID,
 				RoleUUID: role.UUID,
 			}); err != nil {

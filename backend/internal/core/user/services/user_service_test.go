@@ -35,6 +35,11 @@ type fakeUserRepo struct {
 	// softAliased tracks calls to SoftDeleteAndAliasEmail so the
 	// idempotent-on-NotFound test can verify the call reached the repo.
 	softAliased []string
+	// lifecycleErr, when set, is returned verbatim by
+	// GetLifecycleProjection — simulates a repository failure distinct
+	// from every lifecycle state so the not-a-state contract can be
+	// tested.
+	lifecycleErr error
 }
 
 func newFakeUserRepo() *fakeUserRepo {
@@ -278,6 +283,25 @@ func (r *fakeUserRepo) ExistsByUUID(_ context.Context, id string) (bool, error) 
 	return ok, nil
 }
 func (r *fakeUserRepo) ExistsByUsername(_ context.Context, _ string) (bool, error) { return false, nil }
+
+// GetLifecycleProjection mirrors the production contract: it reads
+// directly from the backing map (which, unlike Delete/
+// SoftDeleteAndAliasEmail in this fake, is never pruned by a test that
+// seeds a soft-deleted row directly) so a seeded row with DeletedAt set
+// is still found — the INCLUDES-soft-deleted behaviour under test. Only
+// the two projected fields are copied out, never the full user.
+func (r *fakeUserRepo) GetLifecycleProjection(_ context.Context, uuid string) (*repository.LifecycleRow, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.lifecycleErr != nil {
+		return nil, r.lifecycleErr
+	}
+	u, ok := r.users[uuid]
+	if !ok {
+		return nil, repository.ErrUserNotFound
+	}
+	return &repository.LifecycleRow{IsActive: u.IsActive, DeletedAt: u.DeletedAt}, nil
+}
 func (r *fakeUserRepo) BackfillDefaultLanguage(_ context.Context, _ string) (int64, error) {
 	return 0, nil
 }
@@ -920,6 +944,97 @@ func TestValidateUserExistsAndActive(t *testing.T) {
 		ok, err := svc.ValidateUserActive(context.Background(), "ghost")
 		if err != nil || ok {
 			t.Errorf("missing user: ok=%v err=%v, want false/nil", ok, err)
+		}
+	})
+}
+
+// TestUserLifecycleState covers the five outcomes the setup finalizer's
+// access probe depends on: active, inactive, soft-deleted, absent, and a
+// repository failure. The last case is the sharpest edge of the contract —
+// a database error must come back as a Go error, never disguised as
+// UserLifecycleMissing or any other state (see
+// iface.UserLifecycleStateProvider's doc comment).
+func TestUserLifecycleState(t *testing.T) {
+	t.Parallel()
+
+	t.Run("active user", func(t *testing.T) {
+		t.Parallel()
+		svc, users, _ := newSvcForTest(t)
+		users.seed(&iface.User{UUID: "u-active", IsActive: true})
+
+		state, err := svc.UserLifecycleState(context.Background(), "u-active")
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if state != iface.UserLifecycleActive {
+			t.Errorf("state = %q, want %q", state, iface.UserLifecycleActive)
+		}
+	})
+
+	t.Run("inactive user", func(t *testing.T) {
+		t.Parallel()
+		svc, users, _ := newSvcForTest(t)
+		users.seed(&iface.User{UUID: "u-inactive", IsActive: false})
+
+		state, err := svc.UserLifecycleState(context.Background(), "u-inactive")
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if state != iface.UserLifecycleInactive {
+			t.Errorf("state = %q, want %q", state, iface.UserLifecycleInactive)
+		}
+	})
+
+	t.Run("soft-deleted user", func(t *testing.T) {
+		t.Parallel()
+		svc, users, _ := newSvcForTest(t)
+		deletedAt := time.Now()
+		// IsActive true on purpose: DeletedAt must win regardless of the
+		// active flag, otherwise a soft-deleted-but-still-flagged-active
+		// row would misclassify as "active".
+		users.seed(&iface.User{UUID: "u-deleted", IsActive: true, DeletedAt: &deletedAt})
+
+		state, err := svc.UserLifecycleState(context.Background(), "u-deleted")
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if state != iface.UserLifecycleDeleted {
+			t.Errorf("state = %q, want %q", state, iface.UserLifecycleDeleted)
+		}
+	})
+
+	t.Run("absent user", func(t *testing.T) {
+		t.Parallel()
+		svc, _, _ := newSvcForTest(t)
+
+		state, err := svc.UserLifecycleState(context.Background(), "u-ghost")
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if state != iface.UserLifecycleMissing {
+			t.Errorf("state = %q, want %q", state, iface.UserLifecycleMissing)
+		}
+	})
+
+	t.Run("repository failure is an error, not a state", func(t *testing.T) {
+		t.Parallel()
+		svc, users, _ := newSvcForTest(t)
+		users.lifecycleErr = errors.New("connection reset by peer")
+
+		state, err := svc.UserLifecycleState(context.Background(), "u-anything")
+		if err == nil {
+			t.Fatal("err = nil, want a non-nil error on repository failure")
+		}
+		if state != "" {
+			t.Errorf("state = %q, want empty on error — a failure must never be reported as a lifecycle state", state)
+		}
+		for _, s := range []iface.UserLifecycleState{
+			iface.UserLifecycleActive, iface.UserLifecycleInactive,
+			iface.UserLifecycleDeleted, iface.UserLifecycleMissing,
+		} {
+			if state == s {
+				t.Errorf("repository failure was mapped onto state %q — must fail closed with an error instead", s)
+			}
 		}
 	})
 }

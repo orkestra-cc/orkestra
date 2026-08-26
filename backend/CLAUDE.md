@@ -76,7 +76,7 @@ backend/
 │   │   ├── openapiauth/            # OpenAPI.com OAuth-token minter (in-tree helper)
 │   │   ├── container/              # Docker SDK manager for module InfraContainers()
 │   │   ├── setup/                  # First-install wizard endpoints (/v1/setup/*)
-│   │   ├── systeminit/             # Atomic first-admin sentinel (system_init collection)
+│   │   ├── systeminit/             # Two-phase bootstrap: first-admin sentinel + setup-finalization saga (system_init collection)
 │   │   ├── ownerrepo/              # Polymorphic-owner scope helpers
 │   │   ├── telemetry/ geoip/ errcode/ errors/ types/ utils/
 │   └── testkit/                    # Test helpers for auth identity + context
@@ -146,7 +146,7 @@ return nil, errcode.Conflict(errcode.AuthEmailInUse, "Email already in use")
 // → 409 {"status":409,"title":"Conflict","detail":"Email already in use","code":"auth.email_in_use"}
 ```
 
-Builders cover the common statuses (`BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `UnprocessableEntity`); `errcode.New(status, code, detail)` exists for one-offs. Handlers not yet migrated keep returning `huma.ErrorXxx` text-only — the frontend falls back to `detail` when `code` is missing.
+Builders cover the common statuses (`BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `UnprocessableEntity`, `ServiceUnavailable`, `Internal`); `errcode.New(status, code, detail)` exists for one-offs. Handlers not yet migrated keep returning `huma.ErrorXxx` text-only — the frontend falls back to `detail` when `code` is missing.
 
 Examples:
 
@@ -155,6 +155,8 @@ Examples:
 - `authz.permission_denied` — Cedar policy refused the action (403). Future.
 
 See [`../docs/archive/frontend-admin-i18n.md`](../docs/archive/frontend-admin-i18n.md) (Phase 2) for the rollout. Until a handler is migrated, do not invent a code for it from the frontend — read it off the response or fall back to `detail`.
+
+`make ci-backend` runs the **errquality** analyzer over `internal/`: a client-facing error may not pass `err.Error()` as its detail (R1), may not use a detail that repeats the status code — "Request failed", "Failed" — (R2), and may not return a 4xx from the `default:` branch of an `errors.Is` switch (R3), because an error the handler cannot name is the server's fault, not the caller's. Pre-existing violations are frozen in `tools/errquality/baseline.txt` and burned down per module; a genuine exception carries `//errquality:allow <reason>`.
 
 ## Dev Tokens (LOCAL DEVELOPMENT ONLY)
 

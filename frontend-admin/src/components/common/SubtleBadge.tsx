@@ -16,6 +16,8 @@ interface SubtleBadgeProps {
   children?: React.ReactNode;
   className?: string;
   title?: string;
+  /** Optional test hook — forwarded verbatim to the rendered element. */
+  'data-testid'?: string;
 }
 
 const SubtleBadge: React.FC<SubtleBadgeProps> = ({
@@ -23,7 +25,8 @@ const SubtleBadge: React.FC<SubtleBadgeProps> = ({
   pill,
   children,
   className,
-  title
+  title,
+  'data-testid': dataTestId
 }) => {
   return (
     <div
@@ -31,6 +34,7 @@ const SubtleBadge: React.FC<SubtleBadgeProps> = ({
         'rounded-pill': pill
       })}
       title={title}
+      data-testid={dataTestId}
     >
       {children}
     </div>

@@ -183,6 +183,38 @@ func (r *fakeRepo) CreateBinding(_ context.Context, b *models.Binding) error {
 	return nil
 }
 
+// EnsureBinding mirrors Repository.EnsureBinding: return the existing row
+// for the (tenantID, userUUID, roleId) tuple untouched if one is already
+// present, otherwise insert b (including b.ExpiresAt — a fresh insert
+// persists the inserting caller's expiry exactly like CreateBinding does)
+// and return it.
+func (r *fakeRepo) EnsureBinding(_ context.Context, b *models.Binding) (*models.Binding, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, existing := range r.bindings {
+		if existing.TenantID == b.TenantID && existing.UserUUID == b.UserUUID && existing.RoleUUID == b.RoleUUID {
+			out := existing
+			return &out, nil
+		}
+	}
+	if b.UUID == "" {
+		return nil, errors.New("fakeRepo.EnsureBinding: UUID required")
+	}
+	inserted := models.Binding{
+		UUID:      b.UUID,
+		UserUUID:  b.UserUUID,
+		TenantID:  b.TenantID,
+		RoleUUID:  b.RoleUUID,
+		RoleName:  b.RoleName,
+		GrantedBy: b.GrantedBy,
+		GrantedAt: time.Now(),
+		ExpiresAt: b.ExpiresAt,
+	}
+	r.bindings[inserted.UUID] = inserted
+	out := inserted
+	return &out, nil
+}
+
 func (r *fakeRepo) DeleteBinding(_ context.Context, tenantID, uuid string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

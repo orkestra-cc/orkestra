@@ -10,6 +10,7 @@ package tenant
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
@@ -17,6 +18,7 @@ import (
 	"github.com/orkestra/backend/internal/core/tenant/models"
 	"github.com/orkestra/backend/internal/core/tenant/repository"
 	"github.com/orkestra/backend/internal/core/tenant/services"
+	"github.com/orkestra/backend/internal/shared/systeminit"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
@@ -25,6 +27,32 @@ type Module struct {
 	module.BaseModule
 	handler *handlers.Handler
 	svc     *services.Service
+	// slotCount backs the provisioning-policy config validation (single
+	// mode) in config_validation.go. Defaults to
+	// svc.CountProvisioningSlotsByKind, wired in Init; tests override it
+	// directly so the validator's policy is exercised without booting
+	// MongoDB.
+	slotCount func(ctx context.Context, kind models.TenantKind) (int64, error)
+
+	// The three seams below back versioned boot reconciliation in Start
+	// (reconcile.go) and nothing else.
+	//
+	// finalization is the platform-global setup coordinator (`system_init`,
+	// key `setup_finalization`), resolved from the service registry in
+	// Init. systeminit.Repo is the only code that opens that collection;
+	// this module consumes the narrow FinalizationStore contract.
+	finalization systeminit.FinalizationStore
+	// users answers the single question reconciliation asks the user
+	// module: does this installation hold any operator users at all.
+	users userCounter
+	// configService is where the persisted Tier-1 provisioning mode lives,
+	// including every named environment profile.
+	configService *module.ModuleConfigService
+	// logger is deps.Logger (the registry stamps module="tenant" on every
+	// record). Boot reconciliation uses it to report a lost reconcile
+	// lease, which is a coordination anomaly worth seeing but not a
+	// startup failure.
+	logger *slog.Logger
 }
 
 func NewModule() *Module { return &Module{} }
@@ -41,18 +69,22 @@ func (m *Module) Dependencies() []string { return []string{"user"} }
 // config. Read at request time by the service's ProvisioningModeResolver — edits
 // at /admin/modules/tenant take effect on the next creation with no restart.
 //
-// Both default to "manual" (admin-only creation): a fresh install starts with
-// zero tenants and expects an operator to create them deliberately — the first
-// internal tenant is created from the setup wizard's OrgStep or the admin UI.
-// External clients are never auto-provisioned and cannot self-create a tenant —
-// only a platform admin creates a client tenant and assigns it to a Tier-2 user.
+// Both default to "manual" (admin-only creation). The first internal tenant is
+// not optional and is not created here: the mandatory setup finalization saga
+// (POST /v1/setup/finalize) provisions exactly one, makes it the platform
+// default, and persists the Tier-1 mode the operator chose in the wizard —
+// which is why this key's stored value on a finished install reflects that
+// choice rather than the default below. Further internal tenants are created
+// deliberately from the admin UI, subject to that mode. External clients are
+// never auto-provisioned and cannot self-create a tenant — only a platform
+// admin creates a client tenant and assigns it to a Tier-2 user.
 func (m *Module) ConfigSchema() []module.ConfigField {
 	return []module.ConfigField{
 		{
 			Key: "provisioning.internal.mode", Label: "Internal tenant creation", Group: "provisioning.internal",
-			Description: "Who may create internal (operator-tier) tenants. open: any authenticated user. manual (default): only platform administrators (system.tenants.admin). single: lock the platform to one internal tenant — once one exists, creation is blocked. A fresh install starts with zero internal tenants; the first is created from the setup wizard or the admin UI.",
+			Description: "Who may create internal (operator-tier) tenants. manual (default): only platform administrators (system.tenants.admin). single: additionally lock the platform to one occupied Tier-1 provisioning slot. Every Tier-1 creation requires system.tenants.admin regardless of mode.",
 			Type:        module.FieldEnum, Default: models.ProvisioningModeManual,
-			Options: []string{models.ProvisioningModeOpen, models.ProvisioningModeManual, models.ProvisioningModeSingle},
+			Options: []string{models.ProvisioningModeManual, models.ProvisioningModeSingle},
 			EnvVar:  "TENANT_PROVISIONING_INTERNAL_MODE",
 		},
 		{
@@ -84,6 +116,7 @@ func (m *Module) ProvidedServices() []module.ServiceKey {
 		module.ServiceAccessProvider,
 		module.ServiceTenantService,
 		module.ServiceBillingTenantProvider,
+		module.ServiceDefaultTenantProvider,
 	}
 }
 
@@ -137,6 +170,23 @@ func (m *Module) Collections() []module.CollectionSpec {
 			{Keys: map[string]int{"capabilityId": 1}},
 			{Keys: map[string]int{"expiresAt": 1}, Sparse: true},
 		}},
+		// Platform-global default-tenant pointer — deliberately carries no
+		// tenantId: it identifies the tenant used to BEGIN operator
+		// resolution, so it cannot itself be tenant-scoped. Unique `kind`
+		// makes replacement a single-document atomic update.
+		{Name: repository.CollDefaults, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"kind": 1}, Unique: true},
+		}},
+		// Platform-global provisioning-cardinality lock: one revision row
+		// per TenantKind, holding no tenant data. The unique `kind` index
+		// is what gives RunProvisioningGuarded's two competitors a shared
+		// document to conflict on — without it, two from-scratch upserts
+		// each insert their own row, nothing conflicts, and the `single`
+		// invariant degrades back to an unsafe count-then-write. See
+		// repository/provisioning_locks.go.
+		{Name: repository.CollProvisioningLocks, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"kind": 1}, Unique: true},
+		}},
 	}
 }
 
@@ -170,12 +220,36 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	repo := repository.New(deps.DB)
 	m.svc = services.New(repo)
 	m.handler = handlers.New(m.svc, deps.Services)
+	m.slotCount = m.svc.CountProvisioningSlotsByKind
+	m.configService = deps.ConfigService
+	m.logger = deps.Logger
+	if m.logger == nil {
+		m.logger = slog.Default()
+	}
+
+	// Boot-reconciliation wiring (Start, reconcile.go). Both seams are
+	// REQUIRED: missing wiring fails module initialization loudly rather
+	// than letting the upgrade path degrade into a silent no-op that a
+	// stamped version would then hide forever. The coordinator store is
+	// registered in main.go before InitAll; the user provider comes from
+	// the user module, which the registry initialises first (Dependencies).
+	store, ok := module.GetTyped[systeminit.FinalizationStore](deps.Services, module.ServiceSetupFinalizationStore)
+	if !ok || store == nil {
+		return errMissingSetupCoordinator
+	}
+	m.finalization = store
+	users, ok := module.GetTyped[userCounter](deps.Services, module.ServiceUserService)
+	if !ok || users == nil {
+		return errMissingUserProvider
+	}
+	m.users = users
 
 	// Wire the per-tier provisioning policy reader. Reads the admin-managed
 	// `provisioning.{internal,external}.mode` keys from this module's config
 	// (ModuleConfigService, 30s Redis cache) on every call so an edit at
 	// /admin/modules/tenant takes effect without a restart. Nil ConfigService
-	// (tests) leaves the resolver returning "" → the service treats it as open.
+	// (tests) leaves the resolver returning "" → the service fails closed to
+	// manual for internal, and stays open for external (see ProvisioningMode).
 	m.svc.SetProvisioningModeResolver(func(ctx context.Context, kind models.TenantKind) string {
 		if deps.ConfigService == nil {
 			return ""
@@ -207,6 +281,12 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	// fields and returns the snapshot the billing send path needs. Same
 	// concrete Service so the resolver shares the tenant repository.
 	deps.Services.Register(module.ServiceBillingTenantProvider, iface.BillingTenantProvider(m.svc))
+	// Platform default Tier-1 tenant resolver (iface.DefaultTenantProvider),
+	// consumed by auth's operator JWT tenant-fallback seeding and the local
+	// dev-token resolver. Deliberately registered under its own narrow
+	// service key rather than widening iface.TenantProvider — see
+	// pkg/sdk/iface/interfaces.go's DefaultTenantProvider doc.
+	deps.Services.Register(module.ServiceDefaultTenantProvider, iface.DefaultTenantProvider(m.svc))
 
 	// Cascade hook: evict the owner's client_users row when an external
 	// Tier-2 tenant is deleted and the owner has no other live
@@ -309,10 +389,22 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 	// developer via the system.tenants.admin permission. These bypass
 	// per-tenant membership so a platform operator can manage every tenant
 	// without joining each one.
+	//
+	// Reads and non-destructive mutations keep the permission gate alone;
+	// default transfer and default-threatening lifecycle mutations
+	// (archive/delete, purge) additionally require MFA (Block B step-up).
+	// This closes the long-standing purge TODO: the irreversible purge is
+	// no longer protected more weakly than default reassignment.
 	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.tenants.admin"))
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterAdminRoutes(api)
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.tenants.admin"))
+		r.Use(ri.Operator.AuthMW.RequireMFA())
+		api := humachi.New(r, ri.APIConfig)
+		m.handler.RegisterAdminDestructiveRoutes(api)
 	})
 
 	// Tier-2 self-service: /v1/me/billing-identity. Mounted on the client

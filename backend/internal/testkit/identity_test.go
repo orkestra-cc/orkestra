@@ -45,16 +45,16 @@ func TestContextKeysRoundTrip(t *testing.T) {
 	}
 }
 
-// TestDefaultTenantFallback: when activeTenantID is empty, the default
-// tenant takes over. Mirrors the JWT's `dtid` claim being used when the
+// TestTenantFallback: when activeTenantID is empty, the tenant fallback
+// takes over. Mirrors the JWT's `dtid` claim being used when the
 // X-Tenant-ID header is absent.
-func TestDefaultTenantFallback(t *testing.T) {
+func TestTenantFallback(t *testing.T) {
 	id := testkit.NewIdentity("user-1", "a@b", "manager").
 		WithTenant("tenant-a", []string{"org_owner"}, true)
 	ctx := id.ContextFor(context.Background(), "")
 	got, ok := ctxauth.GetTenantID(ctx)
 	if !ok || got != "tenant-a" {
-		t.Fatalf("expected default tenant-a, got (%q, %v)", got, ok)
+		t.Fatalf("expected tenant fallback tenant-a, got (%q, %v)", got, ok)
 	}
 }
 
@@ -91,8 +91,8 @@ func TestClaimsSnapshot(t *testing.T) {
 	if claims.UserUUID != "user-1" || claims.SystemRole != "developer" {
 		t.Errorf("identity mismatch: %+v", claims)
 	}
-	if claims.DefaultTenantID != "tenant-1" {
-		t.Errorf("expected default tenant-1, got %q", claims.DefaultTenantID)
+	if claims.TenantFallbackID != "tenant-1" {
+		t.Errorf("expected tenant fallback tenant-1, got %q", claims.TenantFallbackID)
 	}
 	if len(claims.Memberships) != 1 || claims.Memberships[0].TenantUUID != "tenant-1" {
 		t.Errorf("expected 1 membership for tenant-1, got %+v", claims.Memberships)

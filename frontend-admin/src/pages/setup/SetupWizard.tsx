@@ -1,4 +1,4 @@
-import { useState, useEffect, ReactNode } from 'react';
+import { useState, ReactNode } from 'react';
 import { Card, Nav, ProgressBar, Alert, Button } from 'react-bootstrap';
 import { Navigate, useNavigate } from 'react-router';
 import classNames from 'classnames';
@@ -35,17 +35,13 @@ const SetupWizard = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { data: status, isLoading, error, refetch } = useGetSetupStatusQuery();
-  const [step, setStep] = useState<number>(1);
-  const [adminFullName, setAdminFullName] = useState<string>('');
+  // A manual advance/back overrides the phase-derived starting point; while
+  // null, the step is derived from the authoritative phase below so a
+  // refresh mid-way through `tenant_required` resumes at the organization
+  // step instead of restarting at Welcome. See "Resume" in the task design.
+  const [manualStep, setManualStep] = useState<number | null>(null);
   const [orgName, setOrgName] = useState<string>('');
-
-  // If the wizard is re-opened after setup is already done, refuse to run it
-  // again — the UI shows a "setup already complete" notice instead.
-  useEffect(() => {
-    // When the user completes step 2, the admin-creation mutation already
-    // invalidates the Setup tag and the query refetches automatically.
-    // No manual refetch needed here.
-  }, [status]);
+  const [allowAdditional, setAllowAdditional] = useState<boolean>(false);
 
   if (isLoading) {
     return <OrkestraLoader />;
@@ -70,38 +66,37 @@ const SetupWizard = () => {
     );
   }
 
+  // Derive the starting step from the authoritative phase: a fresh install
+  // starts at Welcome (1), but a browser that reloads mid-`tenant_required`
+  // (the administrator already exists) resumes directly at the
+  // organization step (3) instead of replaying Welcome/Administrator.
+  // `manualStep` — set once the operator actually advances/goes back —
+  // always wins once present, so this derivation only matters for the
+  // very first render.
+  const derivedStep = status?.phase === 'tenant_required' ? 3 : 1;
+  const step = manualStep ?? derivedStep;
+
   // Setup already done — this page is not reachable through the normal gate,
   // so someone hit /setup manually. Show a short notice and a link home.
   if (status?.setupCompleted && step === 1) {
     return <Navigate to={DEFAULT_POST_LOGIN} replace />;
   }
 
-  const handlePrev = () => setStep(s => Math.max(1, s - 1));
-  const handleNext = () => setStep(s => Math.min(TOTAL, s + 1));
+  const handlePrev = () => setManualStep(Math.max(1, step - 1));
+  const handleNext = () => setManualStep(Math.min(TOTAL, step + 1));
 
   const stepContent: ReactNode = (() => {
     switch (step) {
       case 1:
         return <WelcomeStep onNext={handleNext} />;
       case 2:
-        return (
-          <AdminStep
-            onNext={fullName => {
-              setAdminFullName(fullName);
-              handleNext();
-            }}
-          />
-        );
+        return <AdminStep onNext={() => handleNext()} />;
       case 3:
         return (
           <OrgStep
-            adminFullName={adminFullName}
-            onNext={createdName => {
-              setOrgName(createdName);
-              handleNext();
-            }}
-            onSkip={() => {
-              setOrgName('');
+            onNext={(tenantName, allow) => {
+              setOrgName(tenantName);
+              setAllowAdditional(allow);
               handleNext();
             }}
           />
@@ -110,7 +105,8 @@ const SetupWizard = () => {
         return (
           <FinishStep
             smtpConfigured={status?.smtpConfigured ?? false}
-            orgName={orgName}
+            tenantName={orgName}
+            allowAdditional={allowAdditional}
             onFinish={() => navigate(DEFAULT_POST_LOGIN)}
           />
         );

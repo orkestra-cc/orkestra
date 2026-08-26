@@ -156,6 +156,20 @@
     "user": {
       "self_delete_forbidden": "You cannot delete your own account.",
       "last_admin_forbidden": "Refusing to remove the last active administrator."
+    },
+    "tenant": {
+      "slug_already_in_use": "An organization with this slug already exists."
+    },
+    "auth": {
+      "jwt_not_configured": "Sign-in is unavailable: the server cannot read its signing keys. Contact an administrator.",
+      "unavailable": "Sign-in failed unexpectedly. The problem has been logged.",
+      "email_not_verified": "Email address not verified. Please check your inbox for the verification email.",
+      "registration_disabled": "Self-service registration is disabled for this surface. Contact an administrator.",
+      "email_domain_not_allowed": "Registrations from this email domain are not allowed.",
+      "login_disabled": "Login is temporarily disabled for this surface. Contact an administrator.",
+      "country_blocked": "Access from your country is not permitted.",
+      "password_confirm_unavailable": "This account cannot reconfirm with a password. Use MFA or reauthenticate via OAuth.",
+      "oauth_provider_disabled": "This OAuth provider is not enabled for this surface. Contact an administrator."
     }
   },
   "banner": {
@@ -674,8 +688,16 @@
         "manual": "Manual only",
         "single": "Single tenant"
       },
-      "activeCount": "{{count}} active",
+      "activeCount": "Provisioning slots used: {{count}}",
       "manage": "Manage policy"
+    },
+    "default": {
+      "badge": "Default",
+      "setAsDefault": "Set as default",
+      "reassignFirst": "This is the platform default tenant. Reassign the default to another tenant before you can delete or purge it.",
+      "transferSuccess": "\"{{name}}\" is now the platform default tenant",
+      "transferError": "Failed to set default tenant: {{message}}",
+      "unknownError": "unknown error"
     },
     "noOrgSelected": "No organization selected",
     "rolesNeedOrg": "Role management is scoped to a single organization. Select or create one from the top-right org switcher to continue.",
@@ -2432,6 +2454,23 @@
       "failed": "{{count}} failed",
       "disabled": "{{count}} disabled",
       "stopped": "{{count}} stopped"
+    },
+    "recordList": {
+      "add": "Add",
+      "confirm": "Confirm",
+      "cancel": "Cancel",
+      "remove": "Remove",
+      "undo": "Undo",
+      "empty": "No entries yet.",
+      "nameLabel": "Name",
+      "slugPreview": "Key:",
+      "slugTaken": "That key is already in use.",
+      "slugEmpty": "Type a name to generate its key.",
+      "stagedNotice": "Will be deleted on save",
+      "deleteConfirmTitle": "Delete on save?",
+      "deleteWarning_one": "Saving deletes {{names}} permanently, including any secret it holds. This cannot be undone.",
+      "deleteWarning_other": "Saving deletes {{names}} permanently, including any secrets they hold. This cannot be undone.",
+      "conflict": "Someone else changed this list while you were editing. Reload the page and try again."
     }
   },
   "moduleConfig": {
@@ -2581,6 +2620,10 @@
           "label": "Password reset link lifetime",
           "desc": "Go duration string — how long the link in the reset-password email stays valid. Default 30m."
         },
+        "sessionAbsoluteTTL": {
+          "label": "Maximum session age",
+          "desc": "Go duration string — maximum lifetime of a session from login, independent of activity. When it elapses the user must authenticate again. Range 1h–89d; empty disables the cap. Default 720h (30 days)."
+        },
         "mfaMethods": {
           "label": "Allowed MFA methods",
           "desc": "Comma-separated list of factor types users may enroll. Empty = all allowed. Valid: totp, webauthn, backup_codes."
@@ -2716,11 +2759,15 @@
       "groups": {
         "delivery": {
           "label": "Delivery",
-          "desc": "How mail leaves the platform. With the default noop provider, rendered mail is logged to the backend instead of sent — set the provider to SMTP to reveal the connection settings."
+          "desc": "The default transport. With the noop provider, rendered mail is logged to the backend instead of sent — set the provider to SMTP to reveal the connection settings. Ignored once at least one sender profile routes a category."
+        },
+        "senders": {
+          "label": "Sender profiles",
+          "desc": "Several senders, each with its own transport and identity, selected per message by category patterns (auth.*, crm.*, * for the default). Until one profile declares a pattern, the Delivery and Sender settings remain the single default."
         },
         "sender": {
           "label": "Sender",
-          "desc": "The addresses recipients see on every message."
+          "desc": "The addresses recipients see when the default transport is used."
         },
         "branding": {
           "label": "Branding & templates",
@@ -2739,7 +2786,11 @@
           },
           "from_address": { "label": "From address" },
           "from_name": { "label": "From name" },
-          "reply_to": { "label": "Reply-To address" }
+          "reply_to": { "label": "Reply-To address" },
+          "senders": {
+            "label": "Sender profiles",
+            "desc": "Each profile is a transport and an identity. Patterns decide which categories it carries; the most specific pattern wins and * is the default. A profile without patterns is a draft and receives no mail. Once any profile declares a pattern, exactly one must declare *."
+          }
         },
         "app": {
           "name": { "label": "App name (in templates)" },
@@ -2783,7 +2834,10 @@
       "errorTitle": "Cannot reach the Orkestra backend",
       "errorBody": "The frontend could not contact the backend to check whether the initial setup wizard should run. Make sure the backend container is up and reachable from your browser, then retry.",
       "errorDefaultDetail": "The setup probe at /v1/setup/status did not respond.",
-      "retry": "Retry"
+      "retry": "Retry",
+      "unavailableTitle": "Orkestra is temporarily unavailable",
+      "unavailableBody": "The backend could not determine setup status right now. This is usually transient — we'll check again automatically.",
+      "unavailableAutoRetryHint": "This page checks again automatically. You can also retry now."
     },
     "wizard": {
       "errorTitle": "Cannot reach the Orkestra backend",
@@ -2798,14 +2852,14 @@
     "welcome": {
       "title": "Welcome to Orkestra",
       "intro": "Let's get your deployment ready. This will take about a minute and needs to happen exactly once per install.",
-      "step1": "<strong>Create an administrator account.</strong> The first user becomes the root <code>developer</code> and can manage everything else from the admin UI.",
-      "step2": "<strong>Create your first organization.</strong> Orkestra is multi-tenant — every feature lives inside an organization, and you'll be enrolled as the owner.",
+      "step1": "<strong>Create an administrator account.</strong> The first user becomes the root <code>super_admin</code> and can manage everything else from the admin UI.",
+      "step2": "<strong>Create your first organization.</strong> Orkestra is multi-tenant — every feature lives inside an organization, and you'll be enrolled as the owner. This step is required: every install needs at least one internal tenant.",
       "step3": "<strong>You're done.</strong> The wizard won't reappear on the next boot.",
       "getStarted": "Get started"
     },
     "admin": {
       "title": "Create the administrator account",
-      "intro": "This user becomes the platform root with the <code>developer</code> role. You can add more users later from the admin UI.",
+      "intro": "This user becomes the platform root with the <code>super_admin</code> role. You can add more users later from the admin UI.",
       "labelFullName": "Full name",
       "labelEmail": "Email",
       "placeholderEmail": "admin@example.com",
@@ -2828,21 +2882,45 @@
       "nameHelp": "Human-readable label shown throughout the admin UI.",
       "labelSlug": "Slug",
       "slugHelp": "URL-safe identifier. Auto-derived from the name until you edit it. Lowercase letters, digits, and hyphens only.",
-      "defaultName": "{{firstName}}'s Workspace",
-      "defaultFirstName": "Default",
       "submit": "Create organization",
       "submitting": "Creating…",
-      "skip": "Skip for now",
-      "skipHint": "Prefer to set this up later? You can create an organization any time from Administration → Internal Tenants.",
       "errorNameRequired": "Organization name is required.",
       "errorSlugInvalid": "Slug must contain only lowercase letters, digits, and hyphens.",
       "errorSlugConflict": "An organization with slug \"{{slug}}\" already exists. Pick a different slug.",
-      "errorGeneric": "Could not create the organization. Please try again."
+      "errorGeneric": "Could not create the organization. Please try again.",
+      "errorFinalizationConflict": "Another finalization request is already in progress with different values. Wait for it to finish, or confirm the details with whoever started it.",
+      "errorAlreadyCompleted": "Setup was already completed by another operator. This page will redirect automatically.",
+      "inProgressBody": "Another request with the exact same details is already finalizing setup. This page is retrying automatically — no need to resubmit.",
+      "refreshingSessionError": "The organization was created, but your session could not be refreshed with the new access. Retry to pick up the new access token — nothing will be created twice.",
+      "provisioning": {
+        "label": "Additional Tier-1 tenants",
+        "help": "This choice is enforced by the backend and shapes how Tier-1 tenants can be provisioned going forward.",
+        "allowLabel": "Allow additional internal tenants",
+        "allowHelp": "Manual mode — more Tier-1 tenants can be created later from Administration → Internal Tenants.",
+        "singleLabel": "Lock to this one tenant",
+        "singleHelp": "Single mode — Tier-1 provisioning is permanently capped at this one tenant."
+      },
+      "access": {
+        "signInTitle": "Sign in to continue setup",
+        "signInBody": "Your session could not be restored. Sign in to continue creating the initial organization — you'll be brought right back here.",
+        "signInCta": "Go to sign in",
+        "unavailableTitle": "Setup access is temporarily unavailable",
+        "unavailableBody": "The backend could not determine whether you may finalize setup right now. This is usually transient — retry in a moment.",
+        "boundToAnotherAdminTitle": "Setup is reserved for a different administrator",
+        "boundToAnotherAdminBody": "Another administrator account started finalizing setup and must be the one to complete it. Switch to that account, or sign out and try again later.",
+        "recoveryRequiresSuperAdminTitle": "An active super administrator is required",
+        "recoveryRequiresSuperAdminBody": "The administrator bound to this setup is no longer usable, and only an active super administrator can recover it. Switch to that account, or sign out.",
+        "recoveryWarningTitle": "Recovering an abandoned setup",
+        "recoveryWarningBody": "The administrator previously bound to this setup is no longer usable. As an active super administrator, submitting this form will claim setup for your account.",
+        "switchAccount": "Switch account",
+        "logout": "Log out"
+      }
     },
     "finish": {
       "title": "Orkestra is ready",
       "bodyWithOrg": "Your administrator account has been created, you're signed in, and the organization <strong>{{orgName}}</strong> is active. You can rename it or create more organizations later.",
-      "bodyWithoutOrg": "Your administrator account has been created and you're signed in. No organization was created — you can add one any time from Administration → Internal Tenants. The setup wizard won't appear again.",
+      "modeSingle": "Tier-1 provisioning is locked to <strong>{{tenantName}}</strong> — no additional internal tenants can ever be created on this install.",
+      "modeManual": "<strong>{{tenantName}}</strong> is now the platform default. You can create additional internal tenants any time from Administration → Internal Tenants.",
       "smtpWarning": "<strong>SMTP is not configured.</strong> Password-reset and verification mail will log to the backend stdout instead of being delivered. Configure it any time from <code>/admin/modules</code> under the notification module.",
       "goToDashboard": "Go to the dashboard"
     }

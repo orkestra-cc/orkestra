@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/orkestra/backend/internal/core/notification/models"
 	"github.com/orkestra/backend/internal/core/notification/repository"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -34,7 +35,8 @@ type NotificationService struct {
 	tmplService  TemplateService
 	prefService  PreferenceService
 	unsubService UnsubscribeService
-	email        EmailSender
+	resolver     SenderResolver
+	drivers      *DriverRegistry
 	logger       *slog.Logger
 	opts         Options
 }
@@ -44,7 +46,8 @@ func NewNotificationService(
 	tmplService TemplateService,
 	prefService PreferenceService,
 	unsubService UnsubscribeService,
-	email EmailSender,
+	resolver SenderResolver,
+	drivers *DriverRegistry,
 	logger *slog.Logger,
 	opts Options,
 ) *NotificationService {
@@ -54,25 +57,65 @@ func NewNotificationService(
 	if opts.IdempotencyTTL == 0 {
 		opts.IdempotencyTTL = 1 * time.Hour
 	}
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &NotificationService{
 		logRepo:      logRepo,
 		tmplService:  tmplService,
 		prefService:  prefService,
 		unsubService: unsubService,
-		email:        email,
+		resolver:     resolver,
+		drivers:      drivers,
 		logger:       logger,
 		opts:         opts,
 	}
 }
 
-// IsConfigured returns true when the active email channel has usable
-// transport credentials. Auth uses this to decide whether to allow signups
-// when email verification is required.
+// IsConfigured keeps its pre-ADR-0019 meaning: the default ("*") profile
+// resolves and its driver accepts it. It is deliberately coarse — a caller
+// about to send should ask IsConfiguredFor (PR 2, D7).
 func (s *NotificationService) IsConfigured(ctx context.Context) bool {
-	if s.email == nil {
+	if s.resolver == nil || s.drivers == nil {
 		return false
 	}
-	return s.email.IsConfigured()
+	p, err := s.resolver.Default(ctx)
+	if err != nil {
+		return false
+	}
+	_, err = s.usableDriver(p)
+	return err == nil
+}
+
+// IsConfiguredFor answers for one category: it resolves the profile that
+// would carry the send and checks its driver with secrets in view — which
+// the save-time gate cannot do. No match ⇒ false (fail-closed, D7).
+func (s *NotificationService) IsConfiguredFor(ctx context.Context, category string) bool {
+	if s.resolver == nil || s.drivers == nil {
+		return false
+	}
+	// Same input the dispatch path builds — TenantID included — so the
+	// pre-flight can never check a different profile than the send uses.
+	tenantID, _ := ctxauth.GetTenantID(ctx)
+	p, err := s.resolver.Resolve(ctx, ResolveInput{Category: category, TenantID: tenantID})
+	if err != nil {
+		return false
+	}
+	_, err = s.usableDriver(p)
+	return err == nil
+}
+
+// usableDriver is the second and third fail-closed step: the profile's
+// driver must be registered and must accept the profile with secrets in view.
+func (s *NotificationService) usableDriver(p SenderProfile) (EmailDriver, error) {
+	d, ok := s.drivers.Get(p.Provider)
+	if !ok {
+		return nil, ErrUnknownDriver
+	}
+	if err := ValidateProfile(d, p, RuntimeView); err != nil {
+		return nil, err
+	}
+	return d, nil
 }
 
 // Send dispatches a fully rendered notification. Consumers that already
@@ -216,42 +259,100 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 		return &iface.NotificationResult{ID: logDoc.UUID, Status: logDoc.Status}, nil
 	}
 
-	// Dispatch via the email sender. The sender returns an error on
-	// transport failures; we capture it in the log doc but still create
-	// the document so the admin can see the failure.
-	provider := s.email.ProviderName()
-	sendErr := s.email.Send(ctx, EmailMessage{
+	// Resolve → validate → send. Every failure before the driver is
+	// fail-closed (D5) and still writes a failed log row, so the delivery
+	// log answers which profile failed and why.
+	// TenantID rides to the resolver (D4) so per-tenant routing later needs
+	// no change at this chokepoint; the resolver ignores it today.
+	tenantID, _ := ctxauth.GetTenantID(ctx)
+	profile, err := s.resolver.Resolve(ctx, ResolveInput{Category: in.Category, Type: in.Type, TenantID: tenantID})
+	if err != nil {
+		return s.failSend(ctx, logDoc, profile, err)
+	}
+	driver, err := s.usableDriver(profile)
+	if err != nil {
+		return s.failSend(ctx, logDoc, profile, err)
+	}
+
+	sendErr := driver.Send(ctx, profile, EmailMessage{
 		To:       in.Recipient.Address,
 		ToName:   in.Recipient.Name,
 		Subject:  in.Subject,
 		BodyText: in.BodyText,
 		BodyHTML: in.BodyHTML,
+		Category: in.Category,
 	})
-
-	now := time.Now()
 	if sendErr != nil {
-		logDoc.Status = models.StatusFailed
-		logDoc.Error = sendErr.Error()
-		logDoc.Provider = provider
-		_ = s.logRepo.Create(ctx, logDoc)
-		return &iface.NotificationResult{
-			ID:       logDoc.UUID,
-			Status:   logDoc.Status,
-			Provider: provider,
-			Error:    sendErr.Error(),
-		}, sendErr
+		return s.failSend(ctx, logDoc, profile, sendErr)
 	}
 
+	now := time.Now()
 	logDoc.Status = models.StatusSent
-	logDoc.Provider = provider
+	logDoc.Provider = profile.Provider
+	logDoc.SenderSlug = profile.Slug
 	logDoc.SentAt = &now
 	_ = s.logRepo.Create(ctx, logDoc)
 
 	return &iface.NotificationResult{
 		ID:       logDoc.UUID,
 		Status:   logDoc.Status,
-		Provider: provider,
+		Provider: profile.Provider,
 	}, nil
+}
+
+// ErrSendFailed: the driver refused or could not deliver. The reason is in
+// the bounded diagnostic; the driver's own error is never in the chain.
+var ErrSendFailed = errors.New("notification: send failed")
+
+// trustedSentinels are the only errors a caller may test with errors.Is.
+var trustedSentinels = []error{ErrNoSenderForCategory, ErrSenderConfigUnavailable, ErrSenderNotFound, ErrUnknownDriver, ErrSenderNotConfigured}
+
+// DispatchError is the only error dispatchEmail and SendTest return. Error()
+// is the sanitized reason (the same string the delivery log stores). Is
+// answers true for ErrSendFailed on EVERY dispatch failure, and for the one
+// trusted sentinel that names the cause (ErrNoSenderForCategory, …) when
+// there is one — never for the raw driver error, which is dropped rather
+// than wrapped: auth logs err.Error() of a failed send, so a fork driver's
+// fmt.Errorf("vendor: %s", body) must not be reachable there.
+type DispatchError struct {
+	Reason   string
+	sentinel error
+}
+
+func (e *DispatchError) Error() string { return e.Reason }
+
+func (e *DispatchError) Is(target error) bool { return target == ErrSendFailed || e.sentinel == target }
+
+func newDispatchError(profile SenderProfile, err error) *DispatchError {
+	sentinel := ErrSendFailed
+	for _, s := range trustedSentinels {
+		if errors.Is(err, s) {
+			sentinel = s
+			break
+		}
+	}
+	return &DispatchError{Reason: describeSendError(profile, err), sentinel: sentinel}
+}
+
+// failSend records a failed attempt with the bounded reason and returns the
+// matching DispatchError. Nothing the driver wrote leaves this function.
+func (s *NotificationService) failSend(ctx context.Context, logDoc *models.NotificationDoc, profile SenderProfile, err error) (*iface.NotificationResult, error) {
+	de := newDispatchError(profile, err)
+	logDoc.Status = models.StatusFailed
+	logDoc.Provider = profile.Provider
+	logDoc.SenderSlug = profile.Slug // empty when no profile resolved
+	logDoc.Error = de.Reason
+	_ = s.logRepo.Create(ctx, logDoc)
+	s.logger.Warn("notification: send failed",
+		slog.String("category", logDoc.Category),
+		slog.String("reason", de.Reason),
+	)
+	return &iface.NotificationResult{
+		ID:       logDoc.UUID,
+		Status:   logDoc.Status,
+		Provider: profile.Provider,
+		Error:    de.Reason,
+	}, de
 }
 
 func (s *NotificationService) buildURL(path string) string {
@@ -273,8 +374,58 @@ func (s *NotificationService) UnsubscribeService() UnsubscribeService { return s
 // LogRepo exposes the log repository for admin listing.
 func (s *NotificationService) LogRepo() repository.NotificationRepository { return s.logRepo }
 
-// EmailSender exposes the configured sender (used by the /test endpoint).
-func (s *NotificationService) EmailSender() EmailSender { return s.email }
+// Drivers exposes the driver registry (tests, admin diagnostics).
+func (s *NotificationService) Drivers() *DriverRegistry { return s.drivers }
+
+// Resolver exposes the sender resolver.
+func (s *NotificationService) Resolver() SenderResolver { return s.resolver }
+
+// TestSendInput is one operator-initiated test message.
+type TestSendInput struct {
+	To       string
+	Subject  string
+	BodyText string
+	Sender   string // profile slug; empty = the default (*) profile
+}
+
+// TestSendResult reports which profile carried (or refused) a test send.
+// Diagnostic is the bounded reason on failure — safe to show an operator.
+type TestSendResult struct {
+	Provider   string
+	SenderSlug string
+	Diagnostic string
+}
+
+// SendTest sends through the default profile, bypassing preferences,
+// idempotency and the delivery log exactly as the /test endpoint always has.
+func (s *NotificationService) SendTest(ctx context.Context, in TestSendInput) (TestSendResult, error) {
+	var (
+		profile SenderProfile
+		err     error
+	)
+	if in.Sender != "" {
+		profile, err = s.resolver.BySlug(ctx, in.Sender)
+	} else {
+		profile, err = s.resolver.Default(ctx)
+	}
+	if err != nil {
+		de := newDispatchError(profile, err)
+		return TestSendResult{Diagnostic: de.Reason}, de
+	}
+	res := TestSendResult{Provider: profile.Provider, SenderSlug: profile.Slug}
+	driver, err := s.usableDriver(profile)
+	if err != nil {
+		de := newDispatchError(profile, err)
+		res.Diagnostic = de.Reason
+		return res, de
+	}
+	if err := driver.Send(ctx, profile, EmailMessage{To: in.To, Subject: in.Subject, BodyText: in.BodyText}); err != nil {
+		de := newDispatchError(profile, err)
+		res.Diagnostic = de.Reason
+		return res, de
+	}
+	return res, nil
+}
 
 // NormalizeAddress lowercases and trims an email address.
 func NormalizeAddress(addr string) string {

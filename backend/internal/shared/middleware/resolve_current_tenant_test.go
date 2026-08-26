@@ -25,7 +25,7 @@ func tenantClaims(audience, actingTenant string, mbrs ...authModels.TenantMember
 		UserUUID:         "user-1",
 		Audience:         audience,
 		Memberships:      mbrs,
-		DefaultTenantID:  actingTenant,
+		TenantFallbackID: actingTenant,
 		ActingTenantID:   actingTenant,
 		ActingTenantKind: iface.TenantKindInternal,
 	}
@@ -95,10 +95,41 @@ func TestResolveCurrentTenant_OperatorSwitcher(t *testing.T) {
 				t.Fatalf("kind = %q, want %q", gotKind, iface.TenantKindInternal)
 			}
 			// When the switcher selects tenant-B, the roles must come from that
-			// membership (org_admin), not the default tenant's (org_owner).
+			// membership (org_admin), not the tenant fallback's (org_owner).
 			if tc.wantTenant == "tenant-B" && (len(gotRoles) != 1 || gotRoles[0] != "org_admin") {
 				t.Fatalf("roles = %v, want [org_admin] for switched tenant", gotRoles)
 			}
 		})
+	}
+}
+
+// TestResolveCurrentTenant_FallbackNamingNonMemberResolvesNothing exercises
+// resolution rule 4 (see resolveCurrentTenant's doc block) in isolation: a
+// token whose TenantFallbackID names a tenant the caller is NOT a member of
+// — and whose ActingTenantID is empty, so rules 1-3 never fire — must
+// resolve nothing rather than fall back to an unauthorized tenant. This is
+// the middleware-side half of Task 6.2's platform-default guarantee: even
+// if a claim ever carried a fallback pointing at a non-member tenant (the
+// issuer never does this today — TenantFallbackID is always drawn from the
+// user's own membership list — this is defense in depth against exactly
+// that), the middleware must still refuse to resolve a current tenant from
+// it, never silently grant access.
+func TestResolveCurrentTenant_FallbackNamingNonMemberResolvesNothing(t *testing.T) {
+	tenantA := authModels.TenantMembership{TenantUUID: "tenant-A", TenantKind: iface.TenantKindInternal, Roles: []string{"org_owner"}}
+	claims := &authModels.JWTClaims{
+		UserUUID:         "user-1",
+		Audience:         authServices.AudienceOperator,
+		Memberships:      []authModels.TenantMembership{tenantA},
+		TenantFallbackID: "tenant-ghost", // not a membership
+		// ActingTenantID intentionally left empty so rules 1-3 all fall
+		// through and rule 4 (TenantFallbackID) is what's under test.
+	}
+
+	gotTenant, gotRoles, gotKind, gotOK := resolveCurrentTenant(reqWithTenantHeader(""), claims)
+	if gotOK {
+		t.Fatalf("ok = true, want false — fallback names a non-member tenant")
+	}
+	if gotTenant != "" || gotKind != "" || gotRoles != nil {
+		t.Fatalf("resolveCurrentTenant = (%q, %v, %q, %v), want all-zero on failure", gotTenant, gotRoles, gotKind, gotOK)
 	}
 }

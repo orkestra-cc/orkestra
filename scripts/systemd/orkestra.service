@@ -1,0 +1,33 @@
+[Unit]
+Description=Orkestra production stack (infra + backend + frontend-admin)
+Documentation=file:///opt/orkestra/docs/site/operating/deployment/single-vm.mdx
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=deploy
+Group=deploy
+# docker.sock access is via the docker group; system services don't pick up
+# the user's supplementary groups unless we name them explicitly.
+SupplementaryGroups=docker
+WorkingDirectory=/opt/orkestra/docker
+# Same project name orkestra.sh derives (${APP_NAME}-${ENV}); without it
+# compose would name the project after the directory ("docker") and create a
+# second, empty set of volumes next to the ones the deploys use.
+Environment=COMPOSE_PROJECT_NAME=orkestra-production
+# --env-file feeds compose substitution; deliberately no EnvironmentFile= —
+# that would copy every secret in docker/.env into the unit's environment.
+ExecStart=/usr/bin/docker compose -f docker-compose.infra.yml -f docker-compose.prod.yml --env-file .env up -d
+# `stop`, not `down`: containers and their logs survive a host shutdown, and
+# with restart: unless-stopped a stopped container stays stopped until this
+# unit's ExecStart brings it back on the next boot.
+ExecStop=/usr/bin/docker compose -f docker-compose.infra.yml -f docker-compose.prod.yml --env-file .env stop
+# First boot after a rebuild pulls/starts three infra images before the app;
+# 5 minutes leaves room for a slow disk without masking a genuinely stuck start.
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

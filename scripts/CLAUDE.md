@@ -54,6 +54,19 @@ Alongside `orkestra.sh` at the repo root:
 - **backup.sh** — TUI/CLI tool that bundles every stateful surface (`mongodb`, `redis`, `rustfs`, `secrets`) into a single tarball under `./backups/`. Scopes `mongodump` to `$MONGO_DATABASE` (default `orkestra`) so the `orkestra_openapi_dump` sandbox DB from `make openapi-dump` is not captured. Run `./backup.sh --help` for flags.
 - **restore.sh** — reverses a bundle produced by `backup.sh`. Reads the archive's `manifest.json` to know which components are available; supports `--dry-run` to preflight the entire restore (uses `mongorestore --dryRun` and `aws s3 sync --dryrun` internally) without mutating any container. Documented in [docs/site/operating/backup-and-restore.mdx](../docs/site/operating/backup-and-restore.mdx).
 
+### systemd units (`scripts/systemd/`)
+
+Installed by copying into `/etc/systemd/system/`. The `WorkingDirectory`, `User=` and `Group=` inside are placeholders (`/opt/orkestra`, `deploy`) — edit them for your checkout path and deploy user before installing. `SupplementaryGroups=docker` is what lets a system service reach `docker.sock`: system units do not pick up the user's supplementary groups unless they are named explicitly.
+
+- **orkestra.service** — brings the production stack up on boot (after `docker.service`) and stops it on shutdown: `docker compose -f docker-compose.infra.yml -f docker-compose.prod.yml --env-file .env up -d`. `stop`, not `down`, so containers and their logs survive a reboot; with `restart: unless-stopped` a stopped container stays stopped until this unit's `ExecStart` brings it back. `Environment=COMPOSE_PROJECT_NAME` must match what `orkestra.sh` derives (`${APP_NAME}-${ENV}`), or the unit manages a different set of volumes than your deploys. Deliberately no `EnvironmentFile=` — `--env-file` already feeds compose substitution, while `EnvironmentFile=` would copy every secret in `docker/.env` into the unit's environment, visible in `systemctl show`. Rolling out a new version is still `./orkestra.sh deploy`; this unit only guarantees the stack comes back after a reboot. Documented in [docs/site/operating/deployment/single-vm.mdx](../docs/site/operating/deployment/single-vm.mdx).
+
+```bash
+sudo cp scripts/systemd/orkestra.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now orkestra.service
+systemctl status orkestra.service
+```
+
 ### 🚫 Removed / Consolidated Scripts
 
 The following scripts used to exist and have been folded into `./orkestra.sh`:

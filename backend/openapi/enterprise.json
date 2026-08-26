@@ -725,6 +725,9 @@
           "isCompany": {
             "type": "boolean"
           },
+          "isDefault": {
+            "type": "boolean"
+          },
           "isItalianBillable": {
             "type": "boolean"
           },
@@ -803,6 +806,7 @@
         },
         "required": [
           "memberCount",
+          "isDefault",
           "id",
           "kind",
           "status",
@@ -1388,6 +1392,15 @@
           "helpUrl": {
             "type": "string"
           },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigItemField"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "key": {
             "type": "string"
           },
@@ -1458,6 +1471,74 @@
         "required": [
           "key",
           "label"
+        ],
+        "type": "object"
+      },
+      "ConfigItemField": {
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "type": "string"
+          },
+          "dependsOn": {
+            "items": {
+              "$ref": "#/components/schemas/FieldCondition"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "dependsOnMatch": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "helpUrl": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "max": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "min": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "placeholder": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "type",
+          "required"
         ],
         "type": "object"
       },
@@ -2059,6 +2140,10 @@
           "environment": {
             "type": "string"
           },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
           "secretStatus": {
             "additionalProperties": {
               "type": "boolean"
@@ -2073,7 +2158,8 @@
           "environment",
           "configValues",
           "secretStatus",
-          "updatedAt"
+          "updatedAt",
+          "revision"
         ],
         "type": "object"
       },
@@ -2411,6 +2497,114 @@
           "key",
           "in"
         ],
+        "type": "object"
+      },
+      "FinalizationAccess": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/FinalizationAccess.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "canClaimRecovery": {
+            "type": "boolean"
+          },
+          "canFinalize": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "canFinalize",
+          "canClaimRecovery",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "FinalizeRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/FinalizeRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "allowAdditionalInternalTenants": {
+            "description": "true → manual provisioning mode (more Tier-1 tenants may be created later), false → single mode",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "tenantName": {
+            "description": "Initial Tier-1 organization name",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "tenantSlug": {
+            "description": "URL slug for the initial Tier-1 organization",
+            "maxLength": 48,
+            "minLength": 1,
+            "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenantName",
+          "tenantSlug",
+          "allowAdditionalInternalTenants"
+        ],
+        "type": "object"
+      },
+      "FinalizeResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/FinalizeResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "allowAdditionalInternalTenants": {
+            "description": "Derived from mode == manual",
+            "type": "boolean"
+          },
+          "mode": {
+            "description": "Selected Tier-1 provisioning mode: manual | single",
+            "type": "string"
+          },
+          "state": {
+            "description": "Set to setup.finalization_in_progress on a 202 accepted response; absent on the terminal 200",
+            "type": "string"
+          },
+          "tenantId": {
+            "description": "UUID of the created Tier-1 tenant",
+            "type": "string"
+          },
+          "tenantName": {
+            "description": "Normalized tenant name",
+            "type": "string"
+          },
+          "tenantSlug": {
+            "description": "Normalized tenant slug",
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "ForgotPasswordRequestBody": {
@@ -3620,6 +3814,9 @@
       "MemberDTO": {
         "additionalProperties": false,
         "properties": {
+          "isDefault": {
+            "type": "boolean"
+          },
           "isOwner": {
             "type": "boolean"
           },
@@ -3655,7 +3852,8 @@
           "plan",
           "kind",
           "roles",
-          "isOwner"
+          "isOwner",
+          "isDefault"
         ],
         "type": "object"
       },
@@ -3702,6 +3900,9 @@
           "invitedBy": {
             "type": "string"
           },
+          "isDefault": {
+            "type": "boolean"
+          },
           "isOwner": {
             "type": "boolean"
           },
@@ -3729,6 +3930,7 @@
           }
         },
         "required": [
+          "isDefault",
           "id",
           "userUUID",
           "tenantId",
@@ -4059,8 +4261,16 @@
           "icon": {
             "description": "Icon identifier (string or array for FontAwesome)"
           },
+          "itemKey": {
+            "description": "Stable module-local navigation key",
+            "type": "string"
+          },
           "label": {
             "description": "Additional label text",
+            "type": "string"
+          },
+          "moduleName": {
+            "description": "Backend module that contributed this item",
             "type": "string"
           },
           "name": {
@@ -4294,6 +4504,9 @@
             "type": "string"
           },
           "recipientUserUuid": {
+            "type": "string"
+          },
+          "senderSlug": {
             "type": "string"
           },
           "sentAt": {
@@ -4833,16 +5046,16 @@
             "type": "string"
           },
           "externalCount": {
-            "description": "Number of active (non-deleted) external tenants",
+            "description": "Number of external tenants occupying a provisioning slot (deletedAt nil and status provisioning/active/suspended)",
             "format": "int64",
             "type": "integer"
           },
           "internal": {
-            "description": "Provisioning mode for internal tenants: open | manual | single",
+            "description": "Provisioning mode for internal tenants: manual | single (fail-closed; a stored legacy open normalises to manual)",
             "type": "string"
           },
           "internalCount": {
-            "description": "Number of active (non-deleted) internal tenants",
+            "description": "Number of internal tenants occupying a provisioning slot (deletedAt nil and status provisioning/active/suspended)",
             "format": "int64",
             "type": "integer"
           }
@@ -4900,6 +5113,39 @@
         },
         "required": [
           "ready"
+        ],
+        "type": "object"
+      },
+      "RecordListMutationDTO": {
+        "additionalProperties": false,
+        "properties": {
+          "create": {
+            "description": "Slugs being created",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "field": {
+            "description": "Record-list field key",
+            "type": "string"
+          },
+          "remove": {
+            "description": "Slugs being removed",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "field"
         ],
         "type": "object"
       },
@@ -5676,6 +5922,29 @@
         },
         "type": "object"
       },
+      "SetDefaultInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/SetDefaultInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "tenantId": {
+            "description": "UUID of the operational internal tenant to make the platform default",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenantId"
+        ],
+        "type": "object"
+      },
       "SetItalianBillableInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -5788,6 +6057,9 @@
             "readOnly": true,
             "type": "string"
           },
+          "phase": {
+            "type": "string"
+          },
           "setupCompleted": {
             "type": "boolean"
           },
@@ -5797,6 +6069,7 @@
         },
         "required": [
           "setupCompleted",
+          "phase",
           "smtpConfigured"
         ],
         "type": "object"
@@ -6014,6 +6287,123 @@
         },
         "type": "object"
       },
+      "TenantAdminOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/TenantAdminOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "archivedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "billingAddress": {
+            "$ref": "#/components/schemas/TenantAddress"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "fatturaPA": {
+            "$ref": "#/components/schemas/FatturaPAProfile"
+          },
+          "fiscalCode": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "isCompany": {
+            "type": "boolean"
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "isItalianBillable": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "legalName": {
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ownerUserUUID": {
+            "type": "string"
+          },
+          "parentTenantUUID": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "string"
+          },
+          "primaryContact": {
+            "$ref": "#/components/schemas/ContactInfo"
+          },
+          "purgedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "settings": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "signupChannel": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "stripeCustomerID": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "vatNumber": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "isDefault",
+          "id",
+          "kind",
+          "status",
+          "name",
+          "slug",
+          "ownerUserUUID",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
       "TenantInvite": {
         "additionalProperties": false,
         "properties": {
@@ -6090,6 +6480,10 @@
             "description": "Optional body override",
             "type": "string"
           },
+          "sender": {
+            "description": "Sender profile slug to test; empty uses the default (*) profile",
+            "type": "string"
+          },
           "subject": {
             "description": "Optional subject override",
             "type": "string"
@@ -6122,6 +6516,10 @@
           "provider": {
             "type": "string"
           },
+          "sender": {
+            "description": "Slug of the profile that carried the message",
+            "type": "string"
+          },
           "success": {
             "type": "boolean"
           }
@@ -6129,6 +6527,7 @@
         "required": [
           "success",
           "provider",
+          "sender",
           "message"
         ],
         "type": "object"
@@ -6276,6 +6675,21 @@
             },
             "description": "Non-secret config values to update",
             "type": "object"
+          },
+          "recordLists": {
+            "description": "Record-list membership changes",
+            "items": {
+              "$ref": "#/components/schemas/RecordListMutationDTO"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "revision": {
+            "description": "Environment revision; required when any recordLists entry removes elements",
+            "format": "int64",
+            "type": "integer"
           },
           "secrets": {
             "additionalProperties": {
@@ -9848,9 +10262,44 @@
         ]
       }
     },
+    "/v1/admin/tenants/default": {
+      "put": {
+        "description": "Atomically points the platform default at another operational internal tenant. Requires system.tenants.admin plus step-up MFA.",
+        "operationId": "set-default-tenant-admin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDefaultInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Transfer the platform default Tier-1 tenant",
+        "tags": [
+          "Tenants Admin"
+        ]
+      }
+    },
     "/v1/admin/tenants/provisioning-policy": {
       "get": {
-        "description": "Returns the active provisioning mode for each tier (open | manual | single) plus the current active-tenant count per tier. The mode itself is edited at /admin/modules/tenant; this endpoint backs the read-only policy card on the tenant management pages.",
+        "description": "Returns the active provisioning mode for each tier (internal: manual | single, fail-closed; external: open | manual) plus the current provisioning-slot count per tier. The mode itself is edited at /admin/modules/tenant; this endpoint backs the read-only policy card on the tenant management pages.",
         "operationId": "get-tenant-provisioning-policy-admin",
         "responses": {
           "200": {
@@ -9930,7 +10379,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Tenant"
+                  "$ref": "#/components/schemas/TenantAdminOutputBody"
                 }
               }
             },
@@ -11530,7 +11979,7 @@
     },
     "/v1/auth/client/me/password-confirm": {
       "post": {
-        "description": "Returns a fresh access token with amr += \"reauth\" so the next destructive request passes RequireStepUp. Refuses with 409 password_confirm_unavailable when the user has any MFA factor or no password.",
+        "description": "Returns a fresh access token with amr += \"reauth\" so the next destructive request passes RequireStepUp. Refuses with 409 auth.password_confirm_unavailable when the user has any MFA factor or no password.",
         "operationId": "client-password-confirm",
         "requestBody": {
           "content": {
@@ -13193,7 +13642,7 @@
     },
     "/v1/auth/operator/me/password-confirm": {
       "post": {
-        "description": "Returns a fresh access token with amr += \"reauth\" so the next destructive request passes RequireStepUp. Refuses with 409 password_confirm_unavailable when the user has any MFA factor or no password.",
+        "description": "Returns a fresh access token with amr += \"reauth\" so the next destructive request passes RequireStepUp. Refuses with 409 auth.password_confirm_unavailable when the user has any MFA factor or no password.",
         "operationId": "operator-password-confirm",
         "requestBody": {
           "content": {
@@ -14593,6 +15042,16 @@
             }
           },
           {
+            "description": "Filter by sender profile slug",
+            "explode": false,
+            "in": "query",
+            "name": "sender",
+            "schema": {
+              "description": "Filter by sender profile slug",
+              "type": "string"
+            }
+          },
+          {
             "description": "Max rows (default 100)",
             "explode": false,
             "in": "query",
@@ -15035,9 +15494,120 @@
         ]
       }
     },
+    "/v1/setup/finalization-access": {
+      "get": {
+        "description": "Authenticated-operator route. Reports whether the calling operator may finalize the in-progress setup saga (default-tenant provisioning) via POST /v1/setup/finalize, or claim recovery of an unusable binding. Read-only: never mutates the coordinator or emits an audit event. Returns 409 setup.already_completed once setup is complete, and 503 setup.finalizer_state_unavailable on a coordinator/lifecycle lookup failure.",
+        "operationId": "setup-finalization-access",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinalizationAccess"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Check whether the caller may finalize setup",
+        "tags": [
+          "Setup"
+        ]
+      }
+    },
+    "/v1/setup/finalize": {
+      "post": {
+        "description": "Authenticated-operator route. Drives the resumable setup-finalization saga for the administrator bound to it: persists the Tier-1 provisioning mode, ensures the reserved internal tenant, assigns it as the platform default, and marks setup complete. Idempotent — retrying the identical payload resumes the saga, and retrying after completion replays the persisted result. Answers 202 with `{\"state\":\"setup.finalization_in_progress\"}` plus Retry-After when an identical request already holds the stage lease (a success, not an error envelope), 403 when the caller is not the bound administrator or may not claim recovery, 409 for a different payload or an already-completed setup, and 503 when coordinator state cannot be read.",
+        "operationId": "setup-finalize",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalizeRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinalizeResponseBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinalizeResponseBody"
+                }
+              }
+            },
+            "description": "Accepted — an identical finalization request already holds the current stage lease. Retry the identical payload after Retry-After seconds.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying the identical payload",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Finalize setup (default tenant provisioning)",
+        "tags": [
+          "Setup"
+        ]
+      }
+    },
     "/v1/setup/status": {
       "get": {
-        "description": "Returns `setupCompleted` (at least one user exists) and `smtpConfigured` (notification module has real SMTP credentials). Used by the frontend SetupGate to decide whether to route to the onboarding wizard.",
+        "description": "Returns the authoritative setup `phase` (`admin_required` | `tenant_required` | `complete`), the derived `setupCompleted` (phase == complete, kept for backward compatibility), and `smtpConfigured` (notification module has real SMTP credentials). A failure to read the authoritative phase answers 503 with Retry-After rather than an inferred phase. Used by the frontend SetupGate to decide whether to route to the onboarding wizard.",
         "operationId": "setup-status",
         "responses": {
           "200": {
@@ -15048,7 +15618,14 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "default": {
             "content": {

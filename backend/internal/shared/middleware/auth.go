@@ -338,7 +338,7 @@ func (m *AuthMiddleware) sendSessionRevoked(w http.ResponseWriter, r *http.Reque
 // context into the request. Tenant resolution order:
 //  1. claims.ActingTenantID — a JWT stamped for a specific tenant.
 //  2. X-Tenant-ID header when the user is a member of that tenant.
-//  3. claims.DefaultTenantID.
+//  3. claims.TenantFallbackID.
 //  4. empty — only allowed on RequireGlobal() routes.
 func (m *AuthMiddleware) setUserContext(w http.ResponseWriter, r *http.Request, claims *models.JWTClaims, next http.Handler) {
 	ctx := r.Context()
@@ -517,7 +517,7 @@ func (m *AuthMiddleware) recordImpersonationAudit(
 // Tier resolution order (ADR-0001, amended):
 //  1. X-Tenant-ID header, for OPERATOR-audience tokens only, when it names a
 //     tenant the user is a member of — this is the operator org switcher.
-//     Operator tokens stamp ActingTenantID = DefaultTenantID merely as a
+//     Operator tokens stamp ActingTenantID = TenantFallbackID merely as a
 //     default, so the header must be free to override it. A header naming a
 //     non-member tenant falls through (admin impersonation is handled by
 //     setUserContext when resolution yields ok=false).
@@ -525,7 +525,23 @@ func (m *AuthMiddleware) recordImpersonationAudit(
 //     client-portal token is minted pinned to one tenant; the header cannot
 //     override it, so a Tier-2 session can never hop tenants.
 //  3. X-Tenant-ID header when the user is a member of that tenant.
-//  4. claims.DefaultTenantID.
+//  4. claims.TenantFallbackID.
+//
+// SPEC INVARIANT (Task 6.2): this function — and every other file under
+// internal/shared/middleware — never resolves the platform-wide default
+// Tier-1 tenant pointer (owned by the tenant module, tenant module PR 3;
+// its resolver type is declared in pkg/sdk/iface). The platform default may
+// influence a request only indirectly, by having already been folded into
+// TenantFallbackID at operator-audience token ISSUANCE time
+// (auth/services/jwt_service.go::loadMemberships), which only happens when
+// the default names one of the user's own valid memberships. By the time a
+// claim reaches this function, TenantFallbackID is an ordinary per-token
+// membership-validated value indistinguishable from any other fallback —
+// resolution here does not know or care whether it came from the platform
+// default or the owner-first rule. Resolving the pointer directly from
+// middleware would let a request influence itself with something that was
+// never membership-checked against the CALLER. Enforced by a package
+// hygiene test alongside this file (see the middleware isolation test).
 func resolveCurrentTenant(r *http.Request, claims *models.JWTClaims) (string, []string, string, bool) {
 	requested := r.Header.Get(TenantIDHeader)
 
@@ -564,9 +580,9 @@ func resolveCurrentTenant(r *http.Request, claims *models.JWTClaims) (string, []
 		}
 		return "", nil, "", false
 	}
-	if claims.DefaultTenantID != "" {
+	if claims.TenantFallbackID != "" {
 		for _, mbr := range claims.Memberships {
-			if mbr.TenantUUID == claims.DefaultTenantID {
+			if mbr.TenantUUID == claims.TenantFallbackID {
 				return mbr.TenantUUID, mbr.Roles, mbr.TenantKind, true
 			}
 		}

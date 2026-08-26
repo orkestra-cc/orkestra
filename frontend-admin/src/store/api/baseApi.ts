@@ -3,7 +3,8 @@ import {
   fetchBaseQuery,
   BaseQueryFn,
   FetchArgs,
-  FetchBaseQueryError
+  FetchBaseQueryError,
+  FetchBaseQueryMeta
 } from '@reduxjs/toolkit/query/react';
 import { toast } from 'react-toastify';
 import type { RootState } from '../index';
@@ -43,42 +44,98 @@ function isAuthEndpoint(url: string): boolean {
 // refresh requests that would rotate the refresh token N times and trip
 // the backend's family-replay guard.
 //
+// This guard is per-TAB — a module-level variable in one JS context. It
+// says nothing about the other tabs the operator has open, and those are
+// the ones that hurt: every tab shares a login, so their access tokens
+// expire at the same instant, each takes its own 401, and each posts the
+// same refresh cookie. Exactly one wins the backend's rotation CAS; the
+// losers used to be answered with refresh_token_replay, which revokes the
+// whole family — the winner's brand-new token included — and forced a full
+// re-login roughly once per access-token lifetime. REFRESH_LOCK_NAME
+// serialises the rotation across tabs so only one is ever in flight for
+// the origin; the others then rotate in turn, each with the cookie its
+// predecessor left behind.
+//
 // `retry` is NOT the same answer as `ok: false`. A 503 from the refresh
 // endpoint means the backend could not *evaluate* the session — the session
 // enforcement path's durable store was unreachable — and ADR-0017 gives that
 // its own status precisely so a client does not treat it as a sign-out: an
 // outage "would train clients to discard a session that is still perfectly
 // valid." Collapsing it into `ok: false`, as this did, logged the user out
-// for the exact reason the 503 exists to prevent.
+// for the exact reason the 503 exists to prevent. A 409
+// refresh_rotation_raced carries the same "do not sign out" meaning.
 type RefreshResult =
   | { ok: true; accessToken: string; expiresIn: number }
-  | { ok: false; retry?: boolean };
+  | { ok: false; retry?: boolean; raced?: boolean };
 let inFlightRefresh: Promise<RefreshResult> | null = null;
+
+const REFRESH_LOCK_NAME = 'orkestra:auth-refresh';
+
+// Web Locks is the only cross-tab primitive that releases automatically
+// when the holder navigates away or crashes, which a localStorage mutex
+// cannot promise. Where it is missing (non-secure context, jsdom under
+// test) we fall back to running unguarded: the backend's rotation grace
+// window still keeps a lost race from ending the session.
+async function withRefreshLock<T>(run: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+  if (!locks?.request) return run();
+  // LockGrantedCallback<T> is declared as returning T, so T infers here as
+  // Promise<RefreshResult>; the await unwraps both layers.
+  return await locks.request(REFRESH_LOCK_NAME, run);
+}
+
+async function refreshOnce(baseUrl: string): Promise<RefreshResult> {
+  try {
+    const res = await fetch(`${baseUrl}/v1/auth/operator/refresh-cookie`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    // 503 session_enforcement_unavailable: transient, keep the token.
+    if (res.status === 503) return { ok: false, retry: true } as const;
+    // 409 refresh_rotation_raced: a sibling rotated first and the family
+    // is intact. Our cookie jar already holds its successor.
+    if (res.status === 409) return { ok: false, raced: true } as const;
+    if (!res.ok) return { ok: false } as const;
+    const body = (await res.json()) as {
+      accessToken?: string;
+      expiresIn?: number;
+    };
+    if (!body.accessToken || !body.expiresIn) return { ok: false } as const;
+    return {
+      ok: true,
+      accessToken: body.accessToken,
+      expiresIn: body.expiresIn
+    } as const;
+  } catch {
+    return { ok: false } as const;
+  }
+}
 
 async function performRefresh(baseUrl: string): Promise<RefreshResult> {
   if (inFlightRefresh) return inFlightRefresh;
   inFlightRefresh = (async () => {
     try {
-      const res = await fetch(`${baseUrl}/v1/auth/operator/refresh-cookie`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      // 503 session_enforcement_unavailable: transient, keep the token.
-      if (res.status === 503) return { ok: false, retry: true } as const;
-      if (!res.ok) return { ok: false } as const;
-      const body = (await res.json()) as {
-        accessToken?: string;
-        expiresIn?: number;
-      };
-      if (!body.accessToken || !body.expiresIn) return { ok: false } as const;
-      return {
-        ok: true,
-        accessToken: body.accessToken,
-        expiresIn: body.expiresIn
-      } as const;
-    } catch {
-      return { ok: false } as const;
+      // refreshOnce never throws, but the lock itself can (an aborted or
+      // rejected request). Keep the original contract that performRefresh
+      // always RESOLVES: a lock failure says nothing about the session, so
+      // it must not be reported as a sign-out.
+      return await withRefreshLock(async () => {
+        const first = await refreshOnce(baseUrl);
+        if (!first.ok && first.raced) {
+          // Someone rotated between our 401 and our turn at the lock.
+          // Exactly one retry: the successor cookie is already in the jar,
+          // so a second attempt lands. A race that survives two attempts
+          // is reported as transient rather than as a sign-out — the
+          // session is far more likely alive than gone, and guessing
+          // "gone" is the failure this whole change exists to remove.
+          const second = await refreshOnce(baseUrl);
+          if (!second.ok && second.raced)
+            return { ok: false, retry: true } as const;
+          return second;
+        }
+        return first;
+      }).catch(() => ({ ok: false, retry: true }) as const);
     } finally {
       // Clear after the current microtask so concurrent awaiters all see
       // the same result, but a future 401 can kick off a fresh attempt.
@@ -149,10 +206,18 @@ const baseQuery = fetchBaseQuery({
 });
 
 // Enhanced base query with automatic retry, error handling, and tenant context.
+// The explicit 5th (Meta) generic matters: BaseQueryFn defaults it to {},
+// which is what every endpoint's transformResponse/transformErrorResponse
+// would see as the `meta` type otherwise — even though the underlying
+// fetchBaseQuery call below always resolves a real FetchBaseQueryMeta
+// (request/response). Declaring it lets endpoints (e.g. setupApi's
+// getSetupStatus) read response headers via `meta.response.headers`.
 const baseQueryWithRetry: BaseQueryFn<
   string | FetchArgs,
   unknown,
-  FetchBaseQueryError
+  FetchBaseQueryError,
+  object,
+  FetchBaseQueryMeta
 > = async (args, api, extraOptions) => {
   // Inject X-Tenant-ID for every tenant-scoped request. Impersonation (set
   // by NineDotMenu / ImpersonateButton for system.tenants.admin holders)

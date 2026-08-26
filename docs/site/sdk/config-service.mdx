@@ -27,3 +27,123 @@ Each module can maintain multiple named environments (e.g. `sandbox`, `productio
 ```http
 PUT /v1/admin/modules/{name}/active-environment
 ```
+
+## Activation-time validation
+
+Switching the active environment normally performs **no semantic validation** — a module can activate any profile it has stored, including one an operator saved with values that later turned out to be invalid. That is deliberate: the stored profile might be a legacy-invalid one, and refusing to activate it would leave a deployment stuck. The exception is a module that implements the optional `HasConfigActivationValidator` interface:
+
+```go
+type HasConfigActivationValidator interface {
+    ValidateConfigActivation(ctx context.Context, targetValues map[string]string) error
+}
+```
+
+`ValidateConfigActivation` runs inside `SetActiveEnvironment`, after confirming the target environment exists and strictly before the repository write that flips the active profile and marks `needsRestart: true`. Returning an error — typically a `*module.ConfigValidationError` — aborts the switch before that write, so a rejected activation leaves both the previously active profile and `needsRestart` untouched. `targetValues` is the target profile's non-secret configuration map; secrets are never passed to the hook.
+
+This is a separate seam from `HasConfigValidator` (the PATCH-time hook covered above): PATCH-time validation sees one merged profile as it is being edited, while activation validation judges an already-stored profile as a complete whole before it becomes active. A module can implement either, both, or neither. Modules that omit `HasConfigActivationValidator` keep today's validation-free activation exactly as before — this is the seam a tenant-provisioning-policy validator hooks into to refuse activating a profile whose policy is no longer satisfiable, without pkg/sdk knowing anything about tenants.
+
+## Stable validation codes
+
+`ConfigValidationError` carries an optional `Code` field:
+
+```go
+type ConfigValidationError struct {
+    Field   string
+    Message string
+    Code    string // optional, e.g. "tenant.single_mode_conflict"
+}
+```
+
+When a validator — PATCH-time or activation-time — returns a `ConfigValidationError` with a non-empty `Code`, the admin API responds with a stable `{status, title, detail, code}` envelope instead of the legacy text-only `422`:
+
+```json
+{
+  "status": 422,
+  "title": "Unprocessable Entity",
+  "detail": "mode: profile not activatable",
+  "code": "tenant.single_mode_conflict"
+}
+```
+
+Leaving `Code` empty keeps the pre-existing text-only `422 Unprocessable Entity` response, so an existing validator needs no changes to keep working. The mapping is applied uniformly across all three module-admin mutation surfaces — `PATCH /v1/admin/modules/{name}`, `PATCH /v1/admin/modules/{name}/environments/{env}`, and `PUT /v1/admin/modules/{name}/active-environment` — so a frontend can key off `code` the same way on any of them.
+## Repeatable fields (`recordList`)
+
+A module that needs an operator-managed **list of records** — several named
+delivery profiles, several webhook endpoints — declares one field of type
+`FieldRecordList` and describes a single element with `Items`:
+
+```go
+{
+    Key:   "email.profiles",
+    Label: "Delivery profiles",
+    Type:  module.FieldRecordList,
+    Items: []module.ConfigItemField{
+        {Key: "host", Label: "SMTP host", Type: module.FieldString, Required: true},
+        {Key: "password", Label: "Password", Type: module.FieldSecret},
+    },
+}
+```
+
+Storage stays the flat key/value map every other field uses. Each element gets
+an immutable **slug**, minted once from the name the operator types
+(`MailUp SMTP+` → `mailup-smtp`) and never changed by a later rename, and its
+values live at dotted keys built from it:
+
+| Key | Holds |
+| --- | --- |
+| `email.profiles.__items` | the roster — comma-joined slugs, in order |
+| `email.profiles.<slug>.__label` | the element's editable display name |
+| `email.profiles.<slug>.host` | one declared sub-field |
+
+Because an element's secret is an ordinary encrypted value at an ordinary key,
+per-key AES-256-GCM encryption is untouched. The `__` prefix is reserved to the
+SDK; `ValidateConfigDeclarations` rejects a sub-field key that uses it, a
+`recordList` with no `Items`, `Items` on any other type, a nested `recordList`,
+and a sub-field condition that names anything but a sibling in the same element.
+
+Read the list back as a Go slice:
+
+```go
+type profile struct {
+    Slug     string `module:"slug"`   // the immutable key segment
+    Label    string `module:"label"`  // the display name
+    Host     string `module:"host"`
+    Password string `module:"password"`
+}
+
+var cfg struct {
+    Profiles []profile `module:"email.profiles"`
+}
+err := svc.UnmarshalModule(ctx, "notification", &cfg)
+```
+
+### Changing membership
+
+Membership is **explicit intent**, never inferred from which keys a request
+happens to carry, and it is accepted only on the per-environment PATCH:
+
+```http
+PATCH /v1/admin/modules/{name}/environments/{env}
+{
+  "config":      { "email.profiles.ses.__label": "SES bulk" },
+  "recordLists": [{ "field": "email.profiles", "create": ["ses"], "remove": ["old"] }],
+  "revision":    7
+}
+```
+
+Every environment write is a compare-and-swap on a per-environment `revision`,
+returned by the matching `GET`. A request that **removes** anything must send
+one: removal destroys the element's keys, encrypted secrets included, and must
+not be replayed against a state the operator never saw. A request that only
+adds may omit it — two operators each adding an element is a compatible
+outcome, and the service retries the loser of that race against the refreshed
+roster rather than failing it.
+
+Status codes follow what the client can do about the failure. **409** means the
+roster moved underneath them (stale revision, creating a slug that now exists,
+removing one that no longer does) — re-read and retry. **422** means the
+request could never have succeeded as sent (a removal with no revision, the
+same field twice, a slug in both `create` and `remove`, or more than 50
+elements).
+
+A list is capped at **50** elements regardless of the field's `Max`.

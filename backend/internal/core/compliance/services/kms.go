@@ -71,7 +71,10 @@ func NewLocalKMS(repo *repository.KMSKeyRepository) (*LocalKMS, error) {
 
 // CreateKey mints a fresh DEK for tenantUUID, wraps it, and persists
 // the wrapped form. Idempotent: if the tenant already has a key,
-// returns the existing UUID rather than minting a second one.
+// returns the existing UUID rather than minting a second one. Also
+// concurrency-safe: if two callers race, the unique tenantUuid index
+// rejects the losing insert and that caller rereads + returns the
+// winner's UUID instead — both callers converge on one key.
 func (k *LocalKMS) CreateKey(ctx context.Context, tenantUUID string) (string, error) {
 	if existing, err := k.repo.GetByTenant(ctx, tenantUUID); err == nil && existing != nil {
 		return existing.UUID, nil
@@ -97,6 +100,15 @@ func (k *LocalKMS) CreateKey(ctx context.Context, tenantUUID string) (string, er
 		CreatedAt:    time.Now().UTC(),
 	}
 	if err := k.repo.Insert(ctx, row); err != nil {
+		if stderrors.Is(err, repository.ErrKMSKeyExists) {
+			// Concurrent winner: reread and return its key. Never mint twice —
+			// a second DEK would orphan ciphertexts on crypto-shred.
+			winner, gerr := k.repo.GetByTenant(ctx, tenantUUID)
+			if gerr != nil {
+				return "", fmt.Errorf("compliance: reread winning KMS key: %w", gerr)
+			}
+			return winner.UUID, nil
+		}
 		return "", fmt.Errorf("compliance: insert KMS key: %w", err)
 	}
 	return row.UUID, nil
