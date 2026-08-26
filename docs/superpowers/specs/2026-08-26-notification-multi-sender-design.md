@@ -36,7 +36,7 @@ Recorded in full, with rationale and rejected alternatives, in [ADR-0019](../../
 | D3 | Driver seam populated: `noop`, `smtp`, `mailup`. |
 | D4 | Per-installation and per-environment; the resolver accepts a `TenantID` it ignores today. |
 | D5 | Fail-closed on resolution failure; structural validation at save time and at environment activation. |
-| D6 | Legacy flat keys survive as the env-bootstrap path and as the synthesized `default` profile. |
+| D6 | Legacy flat keys survive as the env-bootstrap path and as the synthesized `_legacy` profile, used until some profile declares a pattern. |
 | D7 | Pre-flight checks become category-aware via an **optional companion interface**; `IsConfigured(ctx)` keeps its meaning. |
 
 ## Design
@@ -48,7 +48,7 @@ Four additions, all under `internal/core/notification/services/`.
 | Component | Responsibility | Depends on |
 | --- | --- | --- |
 | `SenderProfile` | struct decoded from the record list: identity + credentials of one sender | — |
-| `EmailDriver` + registry | `Name() / Validate(SenderProfile) error / Send(ctx, SenderProfile, EmailMessage) error`; registry holds `noop`, `smtp`, `mailup` | `SenderProfile`, `EmailMessage` (+ `Category`) |
+| `EmailDriver` + registry | `Name() / Requires() []ProfileRequirement / Send(ctx, SenderProfile, EmailMessage) error`; a package-level `ValidateProfile(driver, profile, view)` checks a profile against `Requires()` — `RuntimeView` (every requirement) for the send path and the pre-flight, `SaveTimeView` (non-secret requirements only) for the save-time gate. One declaration, two readers, so the two checks cannot drift; a driver that one day needs more than "field non-empty" adds a method then, with a recorded decision. Registry holds `noop`, `smtp`, `mailup` | `SenderProfile`, `EmailMessage` (+ `Category`) |
 | `SenderResolver` | `{Category, Type, TenantID}` → `SenderProfile`; also backs `IsConfiguredFor` | the profile list |
 | `dispatchEmail` (modified) | resolve → validate → `driver.Send` | the three above |
 
@@ -79,7 +79,7 @@ One new field, `email.senders` (`FieldRecordList`), in its own group on the sett
 | `provider` | enum `noop \| smtp \| mailup` | required |
 | `categories` | stringList | patterns served; `*` marks the default profile |
 | `from_address` | string | `DependsOn provider in [smtp, mailup]`, required within it — **not** required for `noop`, which never uses it |
-| `from_name`, `reply_to` | string | — |
+| `from_name`, `reply_to` | string | `DependsOn provider in [smtp, mailup]` — `noop` reads neither (D2: every field a driver does not read is gated off) |
 | `smtp_host`, `smtp_port`, `smtp_tls_mode` | string / int / enum | `DependsOn provider in [smtp]`; `smtp_host` required |
 | `smtp_username`, `smtp_password` | string / secret | `DependsOn provider in [smtp]`; **optional — an anonymous relay is a supported configuration** |
 | `mailup_user`, `mailup_secret` | string / secret | `DependsOn provider in [mailup]`, both required within it |
@@ -112,7 +112,7 @@ Send / SendTemplated                          ← unchanged
        │     no match                    → ErrNoSenderForCategory     (fail-closed)
        ├─ driver, ok := registry[profile.Provider]
        │     unknown                     → ErrUnknownDriver           (fail-closed)
-       ├─ driver.Validate(profile)
+       ├─ ValidateProfile(driver, profile, RuntimeView)
        │     incomplete                  → ErrSenderNotConfigured     (fail-closed)
        ├─ driver.Send(ctx, profile, msg)
        │     msg carries Category from this scope
@@ -123,7 +123,7 @@ Send / SendTemplated                          ← unchanged
 
 Every fail-closed path writes a `NotificationDoc` with `Status=failed` and the reason, so the admin delivery log answers *which* profile failed and why. A fail-closed design that cannot be diagnosed is worse than a fallback.
 
-`TenantID` rides in the resolver input and is ignored (D4).
+`TenantID` is read from the request context (`ctxauth.GetTenantID`) at the chokepoint and rides in the resolver input, where it is ignored (D4) — the point is that per-tenant routing later touches the resolver, not `dispatchEmail`.
 
 A fork's CRM email-tracking rewriter operates on the rendered HTML **before** this block and is untouched: open/click tracking behaves identically whichever profile carries the message.
 
@@ -137,11 +137,11 @@ A fork's CRM email-tracking rewriter operates on the rendered HTML **before** th
 | `foo.bar` | exact | `foo.bar` only | `foo.bar.baz` |
 | `foo.*` | prefix | any category beginning `foo.` with **at least one** further character, at any depth — `foo.bar`, `foo.bar.baz` | the bare `foo` |
 
-Nothing else is legal: no `*` inside a token (`auth*`), no bare `*` mid-pattern (`auth.*.google`), no pattern that is only `.`. Malformed patterns are rejected at save time with `notification.sender_pattern_invalid`.
+Nothing else is legal: no `*` inside a token (`auth*`), no bare `*` mid-pattern (`auth.*.google`), no pattern that is only `.`, no empty token (`a..b`). A token is otherwise **any non-empty run of characters other than `.`, `*` and `,`** — the comma is the `stringList` separator and can never be stored — and `iface` does not restrict a fork's category charset (`crm/campaign`, `vendor:event`), so the pattern grammar does not either. Malformed patterns are rejected at save time with `notification.sender_pattern_invalid`.
 
 The bare-`foo` exclusion is deliberate and matters in practice: a fork's CRM sends `Category: "marketing"`, a single token with no dot. Only the exact pattern `marketing` reaches it — `marketing.*` does not — so a category with no dot can never be captured by accident from a prefix rule written for a namespace.
 
-**Normalization.** Patterns are operator-typed free text, so on read each entry is trimmed and lowercased, empty entries are dropped (`"auth.*,,crm.*"` yields two patterns, not three — an empty string must never become a pattern that matches everything), and duplicates **within one profile** are collapsed silently. A repeated pattern in the same list is redundant, not an error, and rejecting it would be pedantry the operator has to work around. The category is lowercased for comparison too, so matching is effectively case-insensitive in both directions.
+**Normalization.** Patterns are operator-typed free text, so on read each entry is trimmed and lowercased, empty entries are dropped (`"auth.*,,crm.*"` yields two patterns, not three — an empty string must never become a pattern that matches everything), and duplicates **within one profile** are collapsed silently. A repeated pattern in the same list is redundant, not an error, and rejecting it would be pedantry the operator has to work around. The category is lowercased for comparison too — but **not trimmed**: an empty category, or one carrying leading or trailing whitespace, is malformed and the resolver rejects it **before matching**, so it cannot ride the `*` profile (which would otherwise match `""`). Matching is therefore case-insensitive in both directions and never repairs a value. **One declared exception:** while no profile declares a pattern the category is not inspected at all — an empty `Category` is legal today, and D6 promises byte-identical behaviour until a profile routes. The rule is a property of routing and starts with the routing map.
 
 Deduplication happens **before** the cross-profile uniqueness check, so a within-profile repeat can never be reported as a conflict between profiles.
 
@@ -171,18 +171,22 @@ The uniqueness rules are enforced at save time, not at send time — but **only 
 
 `ConfigItemField` carries **no `EnvVar`, by construction** — `config_unmarshal.go` is explicit that element sub-fields resolve stored-value → default and that *"Nothing is read from the process environment."*
 
-So the existing flat keys stay, and they are the environment-bootstrap path. When the `email.senders` roster is empty, the resolver synthesizes:
+So the existing flat keys stay, and they are the environment-bootstrap path. **Until some profile declares a pattern** — the roster is empty, or holds only drafts — the resolver synthesizes:
 
 ```
-default := SenderProfile{
-    Slug: "default", Provider: <email.provider>, Categories: []string{"*"},
+legacy := SenderProfile{
+    Slug: "_legacy", Provider: <email.provider>, Categories: []string{"*"},
     FromAddress: <email.from_address>, … , Host: <email.smtp.host>, …
 }
 ```
 
 An installation that never opens the new screen behaves exactly as today; a stack configured through `SMTP_HOST` keeps working. No migration, no boot-time write, no rollback path.
 
-This compatibility is only real if **validation** honours it too, in two places. With an empty roster the sender rules must not fire at all, or every PATCH on a legacy install would 422 on a routing map it never asked for (see §Validation). And `driver.Validate` for `smtp` must require exactly what `isSMTPConfigured` requires today — host, port, from address, and **not** credentials — or an anonymous internal relay stops working on upgrade (see §Driver validation contract).
+**Values and secrets are decoded from one snapshot.** Today's settings closure makes nine separate `GetConfig`/`GetSecret` reads per send, each its own `FindByName`; an environment activation landing between two of them pairs one environment's host with the other's password — which for SMTP means sending the new environment's credential to the old environment's relay. The loader therefore reads the module document **once** per send and decodes the legacy keys, the roster values and the roster secrets from that document's active environment (`ActiveConfigValues` + `ActiveEncryptedValues`, decrypted through the SDK's `UnmarshalConfig`); nothing is fetched by a second read. A read or decrypt failure fails closed.
+
+The cutover is **the existence of a routing map, not roster emptiness** — the same predicate §Validation uses. Taken literally, "empty roster" would strand every send the moment the first pattern-less profile is saved (nothing matches, `Default` fails, `auth` refuses signups), which is the opposite of what the draft state is for. So creating a first draft, or removing the last pattern, never changes which sender carries mail; a draft stays reachable by slug for the explicit-sender test send, and the legacy slug resolves only while the legacy profile is the one carrying mail. That slug is `_legacy`: the leading underscore is outside the record-list slug grammar (`^[a-z0-9]+(-[a-z0-9]+)*$`), so no roster element — not even one an operator labels "Default" — can ever mint it, and the resolver and the delivery log cannot confuse the two.
+
+This compatibility is only real if **validation** honours it too, in two places. With an empty roster the sender rules must not fire at all, or every PATCH on a legacy install would 422 on a routing map it never asked for (see §Validation). And the `smtp` driver's `Requires()` must list exactly what `isSMTPConfigured` requires today — host, port, from address, and **not** credentials — or an anonymous internal relay stops working on upgrade (see §Driver validation contract).
 
 ### Validation
 
@@ -229,15 +233,15 @@ Two consequences worth being explicit about, because a literal reading of "exact
 
 ### Driver validation contract
 
-`driver.Validate(profile)` decides whether a profile is usable, and for `smtp` it must reproduce today's `isSMTPConfigured` **exactly** — otherwise D6's compatibility promise is words rather than behaviour.
+`driver.Requires()` — read by `ValidateProfile` — decides whether a profile is usable, and for `smtp` it must reproduce today's `isSMTPConfigured` **exactly** — otherwise D6's compatibility promise is words rather than behaviour.
 
-| Driver | `Validate` requires | Explicitly does **not** require |
+| Driver | `Requires()` | Explicitly does **not** require |
 | --- | --- | --- |
 | `noop` | nothing | `from_address` — and the schema must agree, or the profile cannot be saved |
 | `smtp` | `host`, `port`, `from_address` | `username`, `password` |
 | `mailup` | `from_address`, `mailup_user`, `mailup_secret` | — |
 
-**Anonymous SMTP relay stays supported, and this is the concrete thing "byte-identical" has to mean.** `email_service.go:97` requires only host, port and from address; `sendSMTP` calls `client.Auth` **only when `Username != ""`**. An internal MTA on a private network with no authentication is a first-class path in a self-hosted product, and a `Validate` that demanded a password would break every such installation on upgrade — silently, since the config would still look complete.
+**Anonymous SMTP relay stays supported, and this is the concrete thing "byte-identical" has to mean.** `email_service.go:97` requires only host, port and from address; `sendSMTP` calls `client.Auth` **only when `Username != ""`**. An internal MTA on a private network with no authentication is a first-class path in a self-hosted product, and a `Requires()` that listed a password would break every such installation on upgrade — silently, since the config would still look complete.
 
 For the same reason `smtp` does not require a password *when a username is set*. Today `smtp.PlainAuth` is attempted with whatever password is stored and the server decides; adding a local requirement would be a tightening, and tightening is not this design's job.
 
@@ -253,7 +257,9 @@ Three concrete reasons, in increasing order of how bad they are:
 - **PII.** An API that echoes the request back puts the recipient address, the subject and possibly the body into an error string — widening what a DSR export contains, for data the module already stores in its own typed fields.
 - **Credentials.** MailUp carries the SMTP+ user and secret **in the request body's `User` field**. A vendor error that echoes the request would write that secret into an admin-visible log. This is the case that makes the rule non-negotiable rather than merely tidy.
 
-So the chokepoint sanitizes before writing, once, for every driver:
+**And what the chokepoint returns is bounded the same way.** `dispatchEmail` and the test send return only a `DispatchError` whose text is the stored reason and whose `errors.Is` answers for the trusted sentinels alone; the driver's own error is dropped, never wrapped. `auth` logs `err.Error()` of a failed send, so a raw `fmt.Errorf("vendor: %s", body)` from a future driver would otherwise reach the backend log by a second door.
+
+So the chokepoint sanitizes before writing, once, for every driver — and it does so **structurally**: a driver returns a `SendError` whose fields are typed (the step that failed, a numeric reply code, a failure kind from a fixed set, an HTTP status, the vendor's status and code) and which has **no free-text field**. The diagnostic is rendered from those fields at the chokepoint, every string through the allowlist below, so no driver — ours or a fork's — can hand it a remote body even by mistake: there is no field to put one in that is not allowlisted on the way out.
 
 **The read is bounded before the parse.** Everything above is about what gets *stored*; none of it helps if the client has already pulled an arbitrary number of bytes into memory to decide. A response body is attacker-shaped input from a host we do not control — a proxy or WAF in front of the vendor can answer with megabytes of HTML, and `io.ReadAll` or a bare `json.NewDecoder(resp.Body)` would take all of it before any rule here applies.
 
@@ -319,7 +325,7 @@ func IsConfiguredForCategory(ctx context.Context, s NotificationSender, category
 
 The accessor returns the exact answer when the sender implements the companion and falls back to `IsConfigured(ctx)` otherwise, so a fork's own `NotificationSender` needs no change.
 
-`IsConfiguredFor` resolves the category, then reports whether the profile's driver is registered and `Validate` passes. **No match returns false** — consistent with fail-closed, and better than today for that case: the signup is refused up front rather than accepted against mail that cannot be sent.
+`IsConfiguredFor` resolves the category — with the same `TenantID` the dispatch path passes — then reports whether the profile's driver is registered and `ValidateProfile` passes with secrets in view. **No match returns false** — consistent with fail-closed, and better than today for that case: the signup is refused up front rather than accepted against mail that cannot be sent.
 
 Unlike `ValidateConfig`, this check runs inside the module against its own configuration and **can read secrets**, so it catches precisely the class of misconfiguration the save-time gate is forbidden to see.
 
@@ -374,20 +380,20 @@ The backend has a coverage gate (`make backend-coverage-gate`), so tests are par
 
 | Target | Approach | Why there |
 | --- | --- | --- |
-| `SenderResolver` | table-driven, no infrastructure | longest-literal wins, `auth.x` vs `auth.*` (6 beats 5), `auth.oauth.*` vs `auth.*`, `*` last, no match, empty roster → synthesized legacy profile. Plus the grammar: `foo.*` must **not** match the bare `foo`, must match at any depth, and `"auth.*,,crm.*"` must yield two patterns — an empty entry becoming a match-everything pattern is the failure that would route the whole install to one profile |
+| `SenderResolver` | table-driven, no infrastructure | longest-literal wins, `auth.x` vs `auth.*` (6 beats 5), `auth.oauth.*` vs `auth.*`, `*` last, no match, empty roster → synthesized legacy profile, **all-draft roster → still the legacy profile, and a draft reachable by slug**. Plus the grammar: `foo.*` must **not** match the bare `foo`, must match at any depth, and `"auth.*,,crm.*"` must yield two patterns — an empty entry becoming a match-everything pattern is the failure that would route the whole install to one profile |
 | `ValidateConfig` scoping | table-driven | a draft profile with an unregistered `provider` alongside a valid live one must **save**; the same profile once it declares a pattern must be **rejected**; a profile whose only pattern is malformed must be rejected rather than counted as a draft |
-| Schema/driver agreement | table-driven over the declared schema | for every driver, every field the schema marks `Required` **and** visible under that provider must be one the driver's `Validate` actually needs, and vice versa. A `noop` profile with nothing but a slug and a label must be savable — that is the regression test for the console blocking Save on a field its driver never reads |
+| Schema/driver agreement | table-driven over the declared schema | for every driver, every field the schema marks `Required` **and** visible under that provider must be one the driver's `Requires()` actually lists, and vice versa (a field the driver requires must be visible and either required or defaulted). A `noop` profile with nothing but a slug and a label must be savable — that is the regression test for the console blocking Save on a field its driver never reads |
 | Pattern normalization | table-driven | trim, lowercase both sides, drop empties, collapse within-profile duplicates **before** the cross-profile uniqueness check so a repeat is never reported as a conflict |
-| Driver registry + `Validate` | table-driven | unknown driver; each driver against incomplete profiles |
+| Driver registry + `ValidateProfile` | table-driven | unknown driver; each driver against incomplete profiles, in both views |
 | `mailup` driver | `httptest.Server` | asserts method, auth placement and body shape; **`CampaignCode` carries the category through**. Success is asserted as the full predicate, and the failure table is driven from its negation: non-2xx, unparseable body, **2xx with a non-`done` `Status`**, 2xx with a non-zero `Code`, missing field, empty body, timeout. No live calls |
 | SMTP error sanitization | table-driven, fake SMTP server | a server whose `535` line **echoes the base64 AUTH argument** must leave `smtp op=auth code=535` and nothing else — the regression test for the credential path this design inherited from `sendErr.Error()`; a dial refusal ⇒ `err=dial`; a hung server ⇒ `err=timeout`, never the Go string |
-| Error sanitization | table-driven | assert the **shape**, not the absence of a string: for a parseable envelope the recorded value must match `^http=\d+ status=[A-Za-z0-9._-]{0,64} code=[A-Za-z0-9._-]{0,64}$` and nothing else. That makes "an envelope echoing the SMTP+ secret in `Message` leaves no trace" true by the assertion rather than by searching for a secret we would have to recognise. Plus: a 5 MB HTML error page ⇒ `body=too_large`, **and the test asserts at most 64 KiB+1 bytes were read from the reader**, not merely that the markup was not stored; a body just under the limit that is not JSON ⇒ `body=unparseable bytes=…`; a `Code` containing a sentence ⇒ replaced by the marker; every field capped |
+| Error sanitization | table-driven | a hostile `SendError` with remote text in every string field must render the fixed shape with the marker in place of the text — the chokepoint guarantee; then assert the **shape**, not the absence of a string: for a parseable envelope the recorded value must match `^http=\d+ status=[A-Za-z0-9._-]{0,64} code=[A-Za-z0-9._-]{0,64}$` and nothing else. That makes "an envelope echoing the SMTP+ secret in `Message` leaves no trace" true by the assertion rather than by searching for a secret we would have to recognise. Plus: a 5 MB HTML error page ⇒ `body=too_large`, **and the test asserts at most 64 KiB+1 bytes were read from the reader**, not merely that the markup was not stored; a body just under the limit that is not JSON ⇒ `body=unparseable bytes=…`; a `Code` containing a sentence ⇒ replaced by the marker; every field capped |
 | `smtp` / `noop` drivers vs the new field | the existing tests, unchanged | both ignore `Category` — the wire output must be byte-identical, which is what makes extending `EmailMessage` safe under D6 |
 | `smtp` driver | the existing 233 lines, re-pointed | the credentials' source changes, the behaviour does not |
 | `ValidateConfig` | table-driven over the merged map | the three states above are the point of the table: **an empty roster must accept a PATCH that touches only `app.name`** (the legacy-install regression), a roster of pattern-less drafts must save, and the save that first declares a pattern must demand a `*`. Plus a test that **documents the secret-blind limit** rather than leaving it implicit |
 | `ValidateConfigActivation` | table-driven over the target profile | same three states; a map broken in the third must not be promotable |
 | `IsConfiguredFor` | table-driven | valid default + broken `auth.*` ⇒ **false** for `auth.*` and true for the default (today's global boolean gets both wrong); unmatched category ⇒ false; a `mailup` profile with a secret-only gap ⇒ false, which `ValidateConfig` cannot see |
-| `smtp` driver `Validate` | table-driven | **an anonymous relay — host + port + from, no credentials — must validate**, as `isSMTPConfigured` does today; missing host, port or from must not. This is the regression test for D6 |
+| `smtp` driver `Requires()` | table-driven | **an anonymous relay — host + port + from, no credentials — must validate**, as `isSMTPConfigured` does today; missing host, port or from must not. This is the regression test for D6 |
 | `IsConfiguredForCategory` accessor | table-driven | a sender implementing the companion gets the exact answer; one that does not falls back to `IsConfigured` — the fork-compatibility guarantee |
 | `auth` guards | existing auth tests, re-pointed | all eight call sites ask for the category they are about to send; the table above is the checklist |
 | `dispatchEmail` | the existing 562 lines, unchanged | they are the compatibility safety net |
@@ -395,12 +401,12 @@ The backend has a coverage gate (`make backend-coverage-gate`), so tests are par
 
 ## Implementation shape
 
-Six PRs against upstream, each green and mergeable alone. Per repo convention every PR carries its own `CLAUDE.md` updates; there is no documentation PR at the end.
+Six PRs against upstream, each green and mergeable alone. Per repo convention every code PR carries its own `CLAUDE.md` updates in the same commits; the one documentation PR at the end (PR 5) is the docs **site**, which lives in `docs/site/` and is rendered separately.
 
 | PR | Content | Notes |
 | --- | --- | --- |
 | **0** | ADR-0019 + this spec + the implementation plan | docs only; merges before any code so PRs 1-5 can cite it |
-| **1** | `SenderProfile`, `EmailDriver`, registry with `noop` + `smtp`, resolver that always returns the synthesized legacy profile; `dispatchEmail` routed through it | **no behaviour change** — reviewable by confirming the existing tests still pass |
+| **1** | `SenderProfile`, `EmailDriver`, registry with `noop` + `smtp`, resolver that always returns the synthesized legacy profile; `dispatchEmail` routed through it; the single-snapshot loader | **no routing change** — the wire output is pinned byte for byte. Two declared behaviour changes ride with it because the SMTP driver is rewritten anyway: the send error contract (bounded diagnostics stored, returned and logged; no server text) and an SMTP exchange deadline (context or 30 s) where today a silent relay hangs the goroutine forever |
 | **2** | `email.senders` record list, its rail group, `ValidateConfig`, `ValidateConfigActivation`; resolver starts reading the roster with the legacy fallback; **`CategoryConfiguredChecker` + accessor in `pkg/sdk/iface`, and `auth`'s eight guards migrated to it**; **`sender` on `POST /v1/notifications/test`** | first behavioural change, and everything D5 depends on has to be in it. The pre-flight must land in the same PR that lets profiles diverge or the guards are wrong for a merge window — and the explicit-sender test-send is the *only* mitigation that actually proves a profile, so shipping routing without it leaves fail-closed unverifiable. EN/IT i18n (parity test) |
 | **3** | `mailup` driver against `POST https://send.mailup.com/API/v2.0/messages/sendmessage` | no spike — endpoint, auth model and method are settled; only the body field names are read from the vendor page. One file behind the registry, so a vendor API change touches nothing else |
 | **4** | sender filter + `senderSlug` on `GET /v1/notifications`, and the delivery-log column | diagnostics, not mitigation: at PR 2 a failed send already names the profile in the log's reason string, so this improves triage rather than enabling it |
