@@ -270,6 +270,58 @@ sudo chmod 600 /var/backups/orkestra/files-*.tar.gz
 
 Treat these as secrets — anyone with read access to a backup tarball has the encryption key that decrypts every secret in `module_configs`.
 
+## Off-site copies
+
+Neither bundled script moves anything off the host: `./backup.sh` writes a plain `tar.gz` under `./backups/` and `scripts/backup-scheduled.sh` prunes it to the last `ORKESTRA_BACKUP_KEEP` (7) archives. A disk failure, a bad `rm`, or ransomware on the VM takes the backups with the data.
+
+Two properties the off-site copy must have:
+
+- **Encrypted before it leaves the host.** The `secrets` component puts `docker/.env` (Mongo root password, cookie secret, `OAUTH_TOKEN_ENCRYPTION_KEY`, `ORKESTRA_KMS_MASTER_KEY`) and the RS256 JWT private key in the tarball in clear. Whoever can read the remote copy can impersonate every user and decrypt every stored secret. `scp` of the raw tarball to a NAS is not acceptable.
+- **Not writable from the production host beyond append.** A credential that can delete the remote copies is a credential ransomware on the VM can use. Prefer a remote user restricted to the backup path, and let the *remote* side (or a separate host) run retention.
+
+### Recommended: restic over SFTP to another host
+
+[restic](https://restic.net/) encrypts client-side, deduplicates (nightly Mongo dumps share most of their blocks), and needs only an SSH account on the far side.
+
+```bash
+# On the production VM, once
+sudo apt-get install -y restic
+sudo install -m 600 -o deploy -g deploy /dev/null /etc/orkestra/restic.env
+cat | sudo tee /etc/orkestra/restic.env >/dev/null <<'EOF'
+RESTIC_REPOSITORY=sftp:backup@backup-host.example.internal:/srv/restic/orkestra
+RESTIC_PASSWORD_FILE=/etc/orkestra/restic.password
+EOF
+sudo sh -c 'umask 077; openssl rand -base64 32 > /etc/orkestra/restic.password'
+# Keep a copy of restic.password somewhere that is NOT this VM — without it
+# the repository is unreadable, which is the point.
+
+set -a; . /etc/orkestra/restic.env; set +a
+restic init
+```
+
+Then, after each scheduled backup:
+
+```bash
+set -a; . /etc/orkestra/restic.env; set +a
+restic backup --tag orkestra /opt/orkestra/backups
+restic forget --keep-daily 14 --keep-weekly 8 --keep-monthly 6 --prune
+```
+
+Wire the two commands into `scripts/backup-scheduled.sh` (after the local prune) or into a second `ExecStart=` line of `orkestra-backup.service`, so the off-site push shares the timer and its failure shows up in `systemctl --failed`. The SSH key for `backup@backup-host` should be dedicated to this job and, on the receiving side, pinned with a `command=` restriction to an SFTP-only shell (`internal-sftp`) chrooted to the repository path.
+
+Object storage instead of SFTP is the same recipe with `RESTIC_REPOSITORY=s3:...` plus the bucket credentials in `restic.env` — give the key write-but-not-delete permission (S3 object lock or a bucket policy without `s3:DeleteObject`) to keep the append-only property.
+
+### Verify the off-site copy, not just the upload
+
+```bash
+restic snapshots --latest 3
+restic check --read-data-subset=5%          # monthly: actually reads a sample
+restic restore latest --target /tmp/restic-verify --include '*/orkestra-backup-*'
+./restore.sh --dry-run /tmp/restic-verify/…/orkestra-backup-<env>-<stamp>.tar.gz
+```
+
+Fold this into the [restore-test cadence](#restore-test-cadence) below: a restore drill that starts from the *remote* copy is the only proof the whole chain works.
+
 ## Restore-test cadence
 
 Run the restore drill at least quarterly, regardless of which path you use. The bundled `./restore.sh --dry-run` is a fast pre-flight (parses the archive end-to-end, validates target containers, lists what would change) but it doesn't substitute for an end-to-end restore against a real staging stack — only that catches encryption-key drift and schema migrations.
