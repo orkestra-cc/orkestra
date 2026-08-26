@@ -34,7 +34,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
     steps:
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         # schedule/workflow_dispatch bypass the gate entirely (see the
         # `if` on the scan jobs), so the filter only runs on PRs — where
