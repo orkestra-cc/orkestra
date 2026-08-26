@@ -89,7 +89,7 @@ So `email.provider`, `email.smtp.*` and `email.from_*` stay. When the `email.sen
 
 ### D7 — Pre-flight checks become category-aware through an optional companion interface
 
-`IsConfigured(ctx) bool` is a single boolean over a single transport. Under D1 it stops answering the question its callers ask. Every one of the eight call sites in `auth` — six in `password_auth_service.go`, two in `suspicious_login_notifier.go` — — signup admission (`ErrNotificationDown`), password reset, email verification, new-device and suspicious-login notices, admin invite — is a **pre-flight for one specific category**, and each is followed within a few lines by a send that names it.
+`IsConfigured(ctx) bool` is a single boolean over a single transport. Under D1 it stops answering the question its callers ask. Every one of the eight call sites in `auth` (six in `password_auth_service.go`, two in `suspicious_login_notifier.go`) — signup admission (`ErrNotificationDown`), password reset, email verification, new-device and suspicious-login notices, admin invite — is a **pre-flight for one specific category**, and each is followed within a few lines by a send that names it.
 
 With profiles, a global boolean is wrong in both directions. A valid default and a broken `auth.*` profile returns `true`, the signup is accepted, and the verification mail then fails — leaving a user who cannot get in and an account that cannot be completed. A broken default and a working `auth.*` returns `false` and refuses registrations that would have succeeded.
 
