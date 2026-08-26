@@ -255,10 +255,17 @@ Three concrete reasons, in increasing order of how bad they are:
 
 So the chokepoint sanitizes before writing, once, for every driver:
 
+**The read is bounded before the parse.** Everything above is about what gets *stored*; none of it helps if the client has already pulled an arbitrary number of bytes into memory to decide. A response body is attacker-shaped input from a host we do not control — a proxy or WAF in front of the vendor can answer with megabytes of HTML, and `io.ReadAll` or a bare `json.NewDecoder(resp.Body)` would take all of it before any rule here applies.
+
+So every response, **success path included**, is read through `io.LimitReader(resp.Body, maxBody+1)` with `maxBody = 64 KiB` — generous for a JSON acknowledgement envelope and small enough to be harmless. Reading one byte past the limit is what distinguishes "exactly at the cap" from "over it": if the limited read returns `maxBody+1` bytes the response is rejected as `body=too_large` and **never handed to the decoder**, so an oversized body costs 64 KiB rather than an allocation the size of whatever was sent. That connection's body is closed without draining — losing keep-alive on one connection is the cheaper half of that trade.
+
+`http.Client` carries an explicit `Timeout` for the same reason: Go's default client has none, so a vendor that accepts a connection and never answers would otherwise hold the send goroutine indefinitely. Bounding bytes without bounding time only moves the problem.
+
 | Case | Recorded |
 | --- | --- |
 | vendor returned a parseable envelope | `http=<status> status=<Status> code=<Code>` — **no vendor free text** |
-| body did not parse, or was not JSON | `http=<status> body=unparseable bytes=<n> type=<content-type>` — no content |
+| body exceeded the read limit | `http=<status> body=too_large` — not parsed, no byte count (we stopped reading) |
+| body did not parse, or was not JSON | `http=<status> body=unparseable bytes=<n> type=<content-type>` — no content; `n` is bounded by the limit above |
 | transport failure (dial, TLS, timeout) | the Go error, truncated to 512 |
 
 **The vendor's `Message` is never persisted.** Truncation does not make free text safe: if MailUp echoes the request into its error message — and it carries the SMTP+ user and secret in the request body's `User` field — the credential can sit inside the first 200 characters, where every cap and every control-character filter passes it straight through.
@@ -336,7 +343,8 @@ Read precisely, that is a property of the **SMTP+ product**, not of the API send
 > So the driver does not look for failure; it requires success, and treats everything else as a failure including shapes nobody anticipated:
 >
 > ```
-> success  ⇔  HTTP 2xx  ∧  body parses  ∧  Status == "done"  ∧  Code == "0"
+> success  ⇔  HTTP 2xx  ∧  body within the read limit  ∧  body parses
+>              ∧  Status == "done"  ∧  Code == "0"
 > ```
 >
 > Every other combination fails — non-2xx, unparseable body, 2xx with a different `Status`, a missing field, an empty body — and each records a **bounded diagnostic**, never the vendor's body (see §Driver error contract). Written the other way round — enumerate the errors, pass otherwise — a response shape the vendor adds later becomes a silent success.
@@ -367,7 +375,7 @@ The backend has a coverage gate (`make backend-coverage-gate`), so tests are par
 | Pattern normalization | table-driven | trim, lowercase both sides, drop empties, collapse within-profile duplicates **before** the cross-profile uniqueness check so a repeat is never reported as a conflict |
 | Driver registry + `Validate` | table-driven | unknown driver; each driver against incomplete profiles |
 | `mailup` driver | `httptest.Server` | asserts method, auth placement and body shape; **`CampaignCode` carries the category through**. Success is asserted as the full predicate, and the failure table is driven from its negation: non-2xx, unparseable body, **2xx with a non-`done` `Status`**, 2xx with a non-zero `Code`, missing field, empty body, timeout. No live calls |
-| Error sanitization | table-driven | assert the **shape**, not the absence of a string: for a parseable envelope the recorded value must match `^http=\d+ status=[A-Za-z0-9._-]{0,64} code=[A-Za-z0-9._-]{0,64}$` and nothing else. That makes "an envelope echoing the SMTP+ secret in `Message` leaves no trace" true by the assertion rather than by searching for a secret we would have to recognise. Plus: a 5 MB HTML error page ⇒ `body=unparseable bytes=…` with no markup; a `Code` containing a sentence ⇒ replaced by the marker; every field capped |
+| Error sanitization | table-driven | assert the **shape**, not the absence of a string: for a parseable envelope the recorded value must match `^http=\d+ status=[A-Za-z0-9._-]{0,64} code=[A-Za-z0-9._-]{0,64}$` and nothing else. That makes "an envelope echoing the SMTP+ secret in `Message` leaves no trace" true by the assertion rather than by searching for a secret we would have to recognise. Plus: a 5 MB HTML error page ⇒ `body=too_large`, **and the test asserts at most 64 KiB+1 bytes were read from the reader**, not merely that the markup was not stored; a body just under the limit that is not JSON ⇒ `body=unparseable bytes=…`; a `Code` containing a sentence ⇒ replaced by the marker; every field capped |
 | `smtp` / `noop` drivers vs the new field | the existing tests, unchanged | both ignore `Category` — the wire output must be byte-identical, which is what makes extending `EmailMessage` safe under D6 |
 | `smtp` driver | the existing 233 lines, re-pointed | the credentials' source changes, the behaviour does not |
 | `ValidateConfig` | table-driven over the merged map | the three states above are the point of the table: **an empty roster must accept a PATCH that touches only `app.name`** (the legacy-install regression), a roster of pattern-less drafts must save, and the save that first declares a pattern must demand a `*`. Plus a test that **documents the secret-blind limit** rather than leaving it implicit |
