@@ -51,7 +51,7 @@ dev_dependencies:
   # from carrying an unrelated dependency bump.
   build_runner: ^2.6.1
   freezed: ^3.2.3
-  json_serializable: ^6.11.2
+  json_serializable: ^6.14.1
 
 flutter:
   uses-material-design: true
