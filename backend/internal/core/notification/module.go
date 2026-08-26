@@ -122,10 +122,12 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 func (m *NotificationModule) ConfigGroups() []module.ConfigGroup {
 	return []module.ConfigGroup{
 		{Key: "delivery", Label: "Delivery", Order: 1,
-			Description: "How mail leaves the platform. With the default noop provider, rendered mail is logged to the backend instead of sent — set the provider to SMTP to reveal the connection settings."},
-		{Key: "sender", Label: "Sender", Order: 2,
-			Description: "The addresses recipients see on every message."},
-		{Key: "branding", Label: "Branding & templates", Order: 3,
+			Description: "The default transport. With the noop provider, rendered mail is logged to the backend instead of sent — set the provider to SMTP to reveal the connection settings. Ignored once at least one sender profile below routes a category."},
+		{Key: "senders", Label: "Sender profiles", Order: 2,
+			Description: "Several senders, each with its own transport and identity, selected per message by category patterns (auth.*, crm.*, * for the default). Until one profile declares a pattern, the Delivery and Sender settings remain the single default."},
+		{Key: "sender", Label: "Sender", Order: 3,
+			Description: "The addresses recipients see when the default transport is used."},
+		{Key: "branding", Label: "Branding & templates", Order: 4,
 			Description: "Values injected into every templated email."},
 	}
 }
@@ -147,6 +149,8 @@ func (m *NotificationModule) ConfigSchema() []module.ConfigField {
 		{Key: "email.from_address", Label: "From address", Group: "sender", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_FROM"},
 		{Key: "email.from_name", Label: "From name", Group: "sender", Type: module.FieldString, Default: "Orkestra", EnvVar: "NOTIFICATION_EMAIL_FROM_NAME"},
 		{Key: "email.reply_to", Label: "Reply-To address", Group: "sender", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_REPLY_TO"},
+		{Key: services.SendersField, Label: "Sender profiles", Group: "senders", Type: module.FieldRecordList, Items: services.SenderItems(),
+			Description: "Each profile is a transport and an identity. Patterns decide which categories it carries; the most specific pattern wins and * is the default. A profile without patterns is a draft and receives no mail. Once any profile declares a pattern, exactly one must declare *."},
 		{Key: "app.name", Label: "App name (in templates)", Group: "branding", Type: module.FieldString, Default: "Orkestra", EnvVar: "APP_NAME"},
 		{Key: "app.support_email", Label: "Support email (in templates)", Group: "branding", Type: module.FieldString, EnvVar: "SUPPORT_EMAIL"},
 		{Key: "app.default_locale", Label: "Default template locale", Group: "branding", Type: module.FieldEnum, Options: models.SupportedLocales, Default: "en", EnvVar: "NOTIFICATION_DEFAULT_LOCALE",

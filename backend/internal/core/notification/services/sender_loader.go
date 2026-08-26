@@ -47,7 +47,14 @@ func NewSnapshotLoader(get SnapshotGetter) SenderConfigLoader {
 		if err != nil {
 			return SenderConfig{Err: err}
 		}
-		return SenderConfig{Legacy: legacy}
+		// Roster and legacy keys from the SAME active-environment snapshot:
+		// the profile that carries a send and the secret it authenticates
+		// with can never come from different environments.
+		profiles, err := DecodeSenderProfiles(doc.ActiveConfigValues(), doc.ActiveEncryptedValues())
+		if err != nil {
+			return SenderConfig{Err: err} // fail closed (D5): a roster we cannot read must not be guessed
+		}
+		return SenderConfig{Legacy: legacy, Profiles: profiles}
 	}
 }
 

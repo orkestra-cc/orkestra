@@ -129,3 +129,42 @@ func TestSnapshotLoader_NoDocumentIsNoop(t *testing.T) {
 		t.Fatalf("nil getter ⇒ noop, got %+v", cfg.Legacy)
 	}
 }
+
+// TestSnapshotLoader_RosterFollowsTheSameSnapshot: a profile's host and its
+// secret come from the environment the document says is active — for every
+// load, across a switch — and never from a second read.
+func TestSnapshotLoader_RosterFollowsTheSameSnapshot(t *testing.T) {
+	t.Setenv("OAUTH_TOKEN_ENCRYPTION_KEY", testKeyHex)
+	doc := twoEnvDoc(t)
+	k := func(sub string) string { return module.ItemKey(SendersField, "auth", sub) }
+	for env, host := range map[string]string{"production": "prod.esp", "sandbox": "sand.esp"} {
+		e := doc.Environments[env]
+		e.ConfigValues[module.RosterKey(SendersField)] = "auth"
+		e.ConfigValues[k(SubProvider)] = "smtp"
+		e.ConfigValues[k(SubCategories)] = "*"
+		e.ConfigValues[k(SubFromAddress)] = "a@example.com"
+		e.ConfigValues[k(SubSMTPHost)] = host
+		e.EncryptedValues[k(SubSMTPPassword)] = encryptForTest(t, host+"-secret")
+		doc.Environments[env] = e
+	}
+	calls := 0
+	load := NewSnapshotLoader(func(context.Context) (*module.ModuleConfig, error) {
+		calls++
+		if calls > 1 {
+			doc.ActiveEnvironment = "sandbox"
+		}
+		return doc, nil
+	})
+	for _, want := range []string{"prod.esp", "sand.esp"} {
+		cfg := load(context.Background())
+		if cfg.Err != nil || len(cfg.Profiles) != 1 {
+			t.Fatalf("cfg = %+v", cfg)
+		}
+		if p := cfg.Profiles[0]; p.SMTPHost != want || p.SMTPPassword != want+"-secret" {
+			t.Fatalf("host %q with secret %q — environments mixed", p.SMTPHost, p.SMTPPassword)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("one read per load, got %d", calls)
+	}
+}
