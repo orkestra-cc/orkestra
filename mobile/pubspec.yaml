@@ -50,7 +50,7 @@ dev_dependencies:
   # next proposes it. Left at ^2.6.1 here only to keep the toolchain move
   # from carrying an unrelated dependency bump.
   build_runner: ^2.6.1
-  freezed: ^3.2.3
+  freezed: ^4.0.0
   json_serializable: ^6.14.1
 
 flutter:
