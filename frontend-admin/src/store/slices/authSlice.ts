@@ -1,4 +1,4 @@
-import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
+import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type { RootState } from '../index';
 
 // Import backend user types from authApi
@@ -48,28 +48,6 @@ const initialState: AuthState = {
   accessToken: null,
   tokenExpiry: null
 };
-
-export const refreshSession = createAsyncThunk(
-  'auth/refreshSession',
-  async () => {
-    try {
-      const response = await fetch('/v1/auth/operator/refresh', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include' // Use HttpOnly cookies exclusively
-      });
-
-      if (!response.ok) {
-        throw new Error('Session refresh failed');
-      }
-
-      const data = await response.json();
-      return data;
-    } catch (error) {
-      throw error;
-    }
-  }
-);
 
 const authSlice = createSlice({
   name: 'auth',
@@ -208,23 +186,6 @@ const authSlice = createSlice({
       state.accessToken = null;
       state.tokenExpiry = null;
     }
-  },
-  extraReducers: builder => {
-    builder
-      .addCase(refreshSession.pending, state => {
-        state.isLoading = true;
-      })
-      .addCase(refreshSession.fulfilled, state => {
-        // Session refreshed via HttpOnly cookies - just update expiry
-        state.sessionExpiry = new Date(
-          Date.now() + 24 * 60 * 60 * 1000
-        ).toISOString();
-        state.isLoading = false;
-      })
-      .addCase(refreshSession.rejected, state => {
-        Object.assign(state, initialState);
-        state.isLoading = false;
-      });
   }
 });
 
