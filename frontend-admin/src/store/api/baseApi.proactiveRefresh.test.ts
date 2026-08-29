@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, delay } from 'msw';
 import { server } from 'test/server';
 import { setupStore } from 'test/render';
 import { baseApi, PROACTIVE_REFRESH_SKEW_MS } from './baseApi';
@@ -206,5 +206,48 @@ describe('proactive refresh', () => {
     // Still valid for 30s — the original bearer goes out.
     expect(seenAuth).toEqual(['Bearer seed-access-token']);
     expect(store.getState().auth.accessToken).toBe('seed-access-token');
+  });
+
+  // refreshOnce bounds its fetch with AbortSignal.timeout(REFRESH_FETCH_TIMEOUT_MS)
+  // (baseApi.ts). Real timers only: AbortSignal.timeout schedules its own
+  // internal timer, not one vi.useFakeTimers() can see (verified against
+  // this Node/vitest pin — a fake-timer version of this test silently never
+  // fires). The AbortSignal.timeout spy below keeps the real wait short —
+  // it does not change the 10s constant, it only makes THIS timer fire fast
+  // — so the assertions below exercise the real timeout path in bounded
+  // wall-clock time.
+  it('sends the request anyway when /refresh-cookie never answers, and keeps the token', async () => {
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockImplementation(() => realTimeout(25));
+
+    const { seenAuth, counters } = arm();
+    server.use(
+      http.post('*/refresh-cookie', async () => {
+        counters.refresh += 1;
+        // Never resolves — the connection accepts and never answers, the
+        // exact scenario REFRESH_FETCH_TIMEOUT_MS exists to bound.
+        await delay('infinite');
+        return HttpResponse.json({ accessToken: 'never', expiresIn: 900 });
+      })
+    );
+    const store = await seededStore(inMs(PROACTIVE_REFRESH_SKEW_MS / 2));
+
+    const result = await store.dispatch(
+      probeApi.endpoints.proactiveProbe.initiate('/v1/burst/1')
+    );
+
+    // The request completes — it is not left hanging behind the refresh.
+    expect(result.error).toBeUndefined();
+    expect(counters.refresh).toBe(1);
+    // Still valid for 30s — falls back to the original bearer, same as 503.
+    expect(seenAuth).toEqual(['Bearer seed-access-token']);
+    // Not signed out: the token that was in the store before the timed-out
+    // refresh is still there afterwards.
+    expect(store.getState().auth.accessToken).toBe('seed-access-token');
+    expect(store.getState().auth.isAuthenticated).toBe(true);
+
+    timeoutSpy.mockRestore();
   });
 });
