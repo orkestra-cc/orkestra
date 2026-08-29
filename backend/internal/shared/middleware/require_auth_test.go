@@ -23,6 +23,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -589,11 +591,104 @@ var _ iface.TenantProvider = stubTenant{}
 // and /refresh — and the read-only mint lives in GET /v1/auth/session. A
 // middleware that rotated on any request lacking a valid bearer raced the
 // SPA's own serialised refresh and signed operators out mid-session.
+//
+// What the three "*_NeverRotates" tests below do and do not cover: they pin
+// the OBSERVABLE contract for a request that shows up with no valid bearer
+// alongside a refresh cookie — 401, downstream handler not reached, no
+// Set-Cookie, no minted-token header. They do NOT, by themselves, guard
+// against the deleted cookie branch being reintroduced: they build the
+// middleware via NewAuthMiddleware, which never wires an auth service or
+// config, so — with that seam gone — they would pass unchanged against the
+// pre-fix code too. TestAuthMiddleware_Fields_CannotReintroduceCookieRotation
+// below is the actual reintroduction guard; see its doc comment for why a
+// structural check is what that job needs.
 
-// testRefreshCookieName is the cookie name these tests present. It only
-// has to match what the TEMP wiring below configures: after the fix the
-// middleware has no notion of a cookie name at all (production reads its
-// own from COOKIE_NAME_REFRESH, default "orkestra_cookie" — irrelevant here).
+// TestAuthMiddleware_Fields_CannotReintroduceCookieRotation is a structural
+// tripwire, not a behavioural test. The behavioural tests above (and the
+// three "*_NeverRotates" tests below) can only exercise code paths that
+// exist; #317 deleted the cookie branch outright — along with the
+// authService/cookieName/config fields, NewAuthMiddlewareWithConfig,
+// SetAuthService, and the cookie helpers — so there is no path left to send
+// a request down and observe. A behavioural regression test for "the
+// deleted branch stays deleted" is therefore a contradiction: nothing built
+// through the public constructor can wire it back. The only thing left to
+// watch is the SHAPE of the type. This test reflects over AuthMiddleware's
+// field names and diffs them, in both directions, against the explicit set
+// below — so it fails the moment anyone adds a field back, before a single
+// line of behaviour is written against it.
+func TestAuthMiddleware_Fields_CannotReintroduceCookieRotation(t *testing.T) {
+	// Keep in sync with the field list in auth.go's AuthMiddleware struct.
+	expectedFields := map[string]bool{
+		"jwtService":             true,
+		"tenant":                 true,
+		"access":                 true,
+		"authz":                  true,
+		"auditSink":              true,
+		"sessionRevocation":      true,
+		"sessionRiskLookup":      true,
+		"mfaEnrollment":          true,
+		"stepUpPolicy":           true,
+		"users":                  true,
+		"errorManager":           true,
+		"impersonationDedupe":    true,
+		"impersonationDedupeTTL": true,
+	}
+
+	typ := reflect.TypeOf(AuthMiddleware{})
+	actualFields := make(map[string]bool, typ.NumField())
+	for i := 0; i < typ.NumField(); i++ {
+		actualFields[typ.Field(i).Name] = true
+	}
+
+	var unexpected, missing []string
+	for name := range actualFields {
+		if !expectedFields[name] {
+			unexpected = append(unexpected, name)
+		}
+	}
+	for name := range expectedFields {
+		if !actualFields[name] {
+			missing = append(missing, name)
+		}
+	}
+	sort.Strings(unexpected)
+	sort.Strings(missing)
+
+	if len(unexpected) > 0 {
+		t.Errorf(
+			"AuthMiddleware gained field(s) not in the expected set: %v\n\n"+
+				"RequireAuth is bearer-only per ADR-0020 / #317 (see the "+
+				"\"RequireAuth is bearer-only\" bullet in "+
+				"backend/internal/core/auth/CLAUDE.md). A field carrying an "+
+				"auth service, a config struct, or a cookie name is exactly "+
+				"the seam that let the old code silently rotate the refresh "+
+				"cookie on any request with a missing/expired/invalid bearer "+
+				"— do not add one to make this test pass.\n\n"+
+				"If %v is a legitimately unrelated new field, first confirm "+
+				"it gives RequireAuth no way to read or rotate a cookie or "+
+				"mint credentials outside the explicit refresh endpoints, "+
+				"THEN add its name to expectedFields in this test.",
+			unexpected, unexpected,
+		)
+	}
+	if len(missing) > 0 {
+		t.Errorf(
+			"AuthMiddleware lost expected field(s): %v — update expectedFields "+
+				"in this test (and, if the removal is significant, the "+
+				"\"RequireAuth is bearer-only\" bullet in "+
+				"backend/internal/core/auth/CLAUDE.md) so this list keeps "+
+				"tracking the real struct instead of silently going stale.",
+			missing,
+		)
+	}
+}
+
+// testRefreshCookieName is the cookie name these tests present, so the
+// tests can show the middleware ignores it: after the fix RequireAuth has
+// no notion of a cookie name at all — no field to configure, no branch that
+// reads one — so this constant need not match anything production uses
+// (production reads its own from COOKIE_NAME_REFRESH, default
+// "orkestra_cookie" — irrelevant here).
 const testRefreshCookieName = "orkestra_cookie"
 
 // refreshCookie mints a real refresh JWT and wraps it in the cookie.
