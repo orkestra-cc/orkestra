@@ -295,7 +295,6 @@ func main() {
 
 	// Retrieve auth infrastructure for middleware setup
 	jwtService := svcRegistry.MustGet(module.ServiceJWTService).(services.JWTService)
-	authService := svcRegistry.MustGet(module.ServiceAuthService).(services.AuthService)
 
 	// Error management
 	errorManager := errors.NewManager(logger, cfg.Server.Environment != "production")
@@ -303,8 +302,7 @@ func main() {
 
 	// Auth middleware. The tenant and authz providers are wired after
 	// InitAll so both are guaranteed registered in the ServiceRegistry.
-	authMW := authMiddleware.NewAuthMiddlewareWithConfig(jwtService, errorManager, cfg)
-	authMW.SetAuthService(authService)
+	authMW := authMiddleware.NewAuthMiddleware(jwtService, errorManager)
 	authMW.SetTenantProvider(module.MustGetTyped[iface.TenantProvider](svcRegistry, module.ServiceTenantProvider))
 	authMW.SetAccessProvider(module.MustGetTyped[iface.AccessProvider](svcRegistry, module.ServiceAccessProvider))
 	authMW.SetAuthzProvider(module.MustGetTyped[iface.AuthzProvider](svcRegistry, module.ServiceAuthzProvider))

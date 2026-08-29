@@ -718,12 +718,16 @@ export const authApi = baseApi.injectEndpoints({
         // the moment isAuthenticated flips true include the Authorization
         // header in their very first request. Doing it here — rather than
         // in a useEffect in useAuthRTK that runs after render — avoids a
-        // page-load race: without the token in Redux, those queries fire
-        // with no auth header, the backend's inline refresh-cookie
-        // rotation races across the concurrent middleware invocations, and
-        // the CAS-loss branch trips the family-replay guard. That revokes
-        // the entire session and bounces the user to /login on every
-        // page refresh.
+        // page-load race: without the token in Redux, those queries would
+        // fire with no auth header at all. The backend's RequireAuth is
+        // bearer-only (ADR-0020, #317) — it never reads the refresh cookie —
+        // so a bearer-less request is a plain 401. Without this dispatch,
+        // each of those queries would independently take that 401, then
+        // converge on the same serialised /refresh-cookie round-trip
+        // (performRefresh coalesces concurrent callers onto one in-flight
+        // promise, so it's one rotation, not one per query) before retrying
+        // — N pointless 401s and a rotation none of them needed, instead of
+        // going out already authenticated on their first try.
         if (sessionData && sessionData.accessToken) {
           api.dispatch(
             setAccessToken({

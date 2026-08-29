@@ -7,27 +7,7 @@ import (
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/orkestra/backend/internal/shared/config"
 )
-
-// cookieDomainForAudience returns the refresh-cookie Domain attribute the
-// middleware should mint for a request acting in the given audience.
-// ADR-0003 PR-D D-9 split: operator requests get cfg.Auth.Cookie.OperatorDomain,
-// client requests get ClientDomain. Anything else (or an unset per-tier
-// value) returns "" — the cookie is minted without a Domain attribute,
-// scoped to whatever host served the request.
-func cookieDomainForAudience(cfg *config.Config, audience string) string {
-	if cfg == nil {
-		return ""
-	}
-	switch audience {
-	case "operator":
-		return cfg.Auth.Cookie.OperatorDomain
-	case "client":
-		return cfg.Auth.Cookie.ClientDomain
-	}
-	return ""
-}
 
 // AudienceContextKey holds the resolved JWT audience for the current
 // request. Stamped by RequireAudience after a successful match.

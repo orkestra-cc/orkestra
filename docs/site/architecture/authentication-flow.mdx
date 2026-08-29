@@ -214,11 +214,13 @@ In production-like envs operators MUST set both explicitly — leaving them empt
 
 Refresh cookies are scoped narrowly enough that the browser won't send a `console.*` refresh cookie on an `api.*` request and vice versa, so cross-audience replay is structurally impossible at the cookie layer in addition to being rejected at the JWT layer.
 
-### Silent refresh
+### Access-token expiry and refresh
 
-When an authenticated request arrives with an expired access token but a valid refresh cookie, `AuthMiddleware` rotates transparently: it calls `RefreshTokensWithRiskAssessment`, sets a new refresh cookie scoped to the request's audience (looked up via `AudienceFromContext` → `cookieDomainForAudience`), returns the new access token in `X-New-Access-Token` + `X-Token-Refreshed: true` response headers, and serves the original request as if the user had presented the new access token to begin with.
+`AuthMiddleware.RequireAuth` is **bearer-only** ([ADR-0020](/adrs/bearer-only-require-auth)): a request whose access token is missing, expired or invalid gets a plain `401 authentication required`. The middleware never reads the refresh cookie and never rotates it. Rotation happens only where a client explicitly asks for it — `POST /v1/auth/{tier}/refresh-cookie` (HttpOnly cookie path, what both SPAs use) and `POST /v1/auth/{tier}/refresh` (token from the cookie, falling back to a JSON-body `refreshToken`; the new access token comes back in the `X-New-Access-Token` response header) — and the read-only mint (no rotation, used at app boot) is `GET /v1/auth/session`.
 
-Manual refresh is also exposed at `POST /v1/auth/{tier}/refresh` (header-supplied refresh token) and `POST /v1/auth/{tier}/refresh-cookie` (HttpOnly cookie path). Both refresh paths and the read-only session bootstrap reject inactive users; deactivation cannot extend a session.
+A browser client therefore recovers from an expired access token with `401 → POST /v1/auth/{tier}/refresh-cookie → retry`. Both SPAs implement it: `frontend-admin` serialises the rotation across tabs with a Web Lock and coalesces concurrent 401s onto one in-flight refresh, tolerating one `409 refresh_rotation_raced` retry (a sibling rotated first inside the 10-second `RefreshRotationGrace`, the family is intact, and the jar already holds the successor). `frontend-admin` also rotates **proactively**: any non-auth request whose token expires within 30 s first awaits the same serialised refresh, so expiry rarely lands on a burst of parallel requests (the skew is deliberately below the 60 s minimum access-token TTL, so a token at the floor is never refreshed on every request).
+
+Every refresh path and the read-only session bootstrap reject inactive users; deactivation cannot extend a session.
 
 ## 7. MFA + WebAuthn
 

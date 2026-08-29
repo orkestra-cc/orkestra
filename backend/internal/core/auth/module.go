@@ -1294,9 +1294,9 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 
 	// Canonical service registrations. After the D-8 cutover the
 	// operator-tier services back the canonical keys — they are the
-	// default an unaware consumer (setup wizard, dev token, middleware
-	// auto-refresh) gets. Audience-aware consumers (onboarding,
-	// compliance audit sink) request the per-tier key directly.
+	// default an unaware consumer (setup wizard, dev token) gets.
+	// Audience-aware consumers (onboarding, compliance audit sink)
+	// request the per-tier key directly.
 	deps.Services.Register(module.ServiceAuthService, opBundle.authService)
 	deps.Services.Register(module.ServiceJWTService, operatorJWT)
 	// ADR-0003 PR-D D-10: per-tier JWT services published so audience-

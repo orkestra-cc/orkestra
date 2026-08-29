@@ -22,6 +22,11 @@ const (
 	// callers. ADR-0017 D5.
 	MaxAccessTokenTTL = 24 * time.Hour
 	// MinAccessTokenTTL: below a minute the SPA enters a refresh loop.
+	// Must stay strictly above the SPA's PROACTIVE_REFRESH_SKEW_MS
+	// (frontend-admin/src/store/api/baseApi.ts) — lower this floor below
+	// that skew and a freshly minted floor-length token is already
+	// inside the SPA's refresh window the moment it arrives, so every
+	// request would rotate it again.
 	MinAccessTokenTTL = time.Minute
 
 	// MinPasswordResetTokenTTL: below five minutes the link dies before
