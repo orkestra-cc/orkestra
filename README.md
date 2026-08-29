@@ -56,6 +56,11 @@ It runs on a **two-tier tenancy model**: Tier-1 operators manage staff and modul
 
 One infra base (MongoDB + Redis + RustFS) plus one app file per environment — `docker-compose.{dev,staging,prod}.yml` — with an opt-in `docker-compose.observability.yml` overlay. The dev stack runs on public Alpine images with AIR + Vite hot reload, no registry auth required.
 
+The bundled MongoDB runs as a single-node `rs0` replica set so transactional
+operations work consistently in development, staging, production, and CI. Its
+health check waits for a writable primary rather than accepting a plain ping;
+keep `replicaSet=rs0&directConnection=true` on host-side Mongo URIs.
+
 ```bash
 make init                                                       # first time only — scaffolds docker/.env + JWT keys + ports
 cd docker

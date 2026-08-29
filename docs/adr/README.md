@@ -21,6 +21,7 @@ Durable, dated records of architectural decisions that shape Orkestra. One file 
 | [0014](0014-service-accounts-client-credentials.md) | Service accounts via OAuth2 client-credentials grant (Tier-1 user row, `aud: service`, admin REST lifecycle) | Accepted | 2026-08-18 |
 | [0017](0017-session-lifetime-and-token-retention.md) | Absolute session lifetime, single-sourced token TTL, and auth retention | Accepted | 2026-08-21 |
 | [0019](0019-notification-multi-sender.md) | Multi-sender email delivery (sender profiles, category routing, driver seam) | Accepted | 2026-08-26 |
+| [0020](0020-bearer-only-require-auth.md) | RequireAuth is bearer-only; refresh-token rotation only through explicit refresh endpoints | Accepted | 2026-08-29 |
 
 ## Numbering across the fork chain
 

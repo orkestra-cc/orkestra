@@ -71,11 +71,36 @@ let inFlightRefresh: Promise<RefreshResult> | null = null;
 
 const REFRESH_LOCK_NAME = 'orkestra:auth-refresh';
 
+// How long refreshOnce waits for /refresh-cookie to answer before treating
+// the attempt as failed rather than letting the caller hang. Since #317's
+// proactive rotation (PROACTIVE_REFRESH_SKEW_MS below) this fetch's await
+// sits on the OUTBOUND path of every request whose token is inside the skew
+// window, so a connection that accepts and never answers no longer just
+// delays an eventual error — it stalls the request itself, indefinitely.
+// 10s is generous for a same-origin POST under normal load, and short
+// enough that a stalled connection doesn't hold up requests for longer than
+// an operator will wait before assuming the app is broken. See the `catch`
+// below for why timing out must NOT be treated as a negative answer.
+export const REFRESH_FETCH_TIMEOUT_MS = 10_000;
+
 // Web Locks is the only cross-tab primitive that releases automatically
 // when the holder navigates away or crashes, which a localStorage mutex
 // cannot promise. Where it is missing (non-secure context, jsdom under
 // test) we fall back to running unguarded: the backend's rotation grace
 // window still keeps a lost race from ending the session.
+//
+// NOT bounded with a timeout signal (unlike refreshOnce's fetch below).
+// Web Locks only supports that via the 3-argument overload —
+// `request(name, { signal }, callback)` — instead of the 2-argument form
+// used here, and switching shapes is not the "straightforward" case: the
+// existing `takes the cross-tab lock when Web Locks is available` test in
+// baseApi.rotationRace.test.ts mocks the 2-arg form, and a 3-arg call
+// against that mock doesn't fail the test (it only asserts the call count
+// and lock name) — it silently hands the mock's `cb` parameter the options
+// object instead of the run callback, throws inside it, and that throw is
+// swallowed by performRefresh's own `.catch`. The test stays green while
+// no longer exercising what it was written to exercise. Restructuring that
+// mock is a real fix, just not one to do as a drive-by here.
 async function withRefreshLock<T>(run: () => Promise<T>): Promise<T> {
   const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
   if (!locks?.request) return run();
@@ -89,7 +114,8 @@ async function refreshOnce(baseUrl: string): Promise<RefreshResult> {
     const res = await fetch(`${baseUrl}/v1/auth/operator/refresh-cookie`, {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(REFRESH_FETCH_TIMEOUT_MS)
     });
     // 503 session_enforcement_unavailable: transient, keep the token.
     if (res.status === 503) return { ok: false, retry: true } as const;
@@ -108,7 +134,21 @@ async function refreshOnce(baseUrl: string): Promise<RefreshResult> {
       expiresIn: body.expiresIn
     } as const;
   } catch {
-    return { ok: false } as const;
+    // Nothing here distinguishes WHY the fetch threw — the
+    // AbortSignal.timeout above firing, a DNS failure, the tab going
+    // offline, a rejected promise from the network stack. What matters is
+    // that we never got an answer at all. The naive "just add a timeout"
+    // fix lands here and falls through to a bare `{ ok: false }`, which the
+    // 401 branch in baseQueryWithRetry reads as a REAL negative answer and
+    // signs the user out (clearAccessToken + navigateToLogin) — turning
+    // "the network is slow" into "you are logged out", a worse bug than
+    // the hang it replaces. No answer is not the same as "no": per
+    // ADR-0017's 503 handling, a request whose outcome the client could
+    // not observe must not be read as a session that is over, so this
+    // returns the same transient `retry: true` outcome as the 503 branch
+    // above — keep the token, the caller (or the next proactive check)
+    // tries again. Do not "simplify" this back to a bare `{ ok: false }`.
+    return { ok: false, retry: true } as const;
   }
 }
 
@@ -145,6 +185,32 @@ async function performRefresh(baseUrl: string): Promise<RefreshResult> {
     }
   })();
   return inFlightRefresh;
+}
+
+// Access tokens are rotated BEFORE they expire, not after. The backend's
+// RequireAuth is bearer-only (ADR-0020, #317): a request that arrives with
+// an expired — or, per prepareHeaders, withheld — bearer is a plain 401,
+// and the only way back to a valid token is /refresh-cookie. Doing that
+// rotation ahead of any request whose token is inside this window means
+// expiry almost never lands on a burst of parallel requests; when it does,
+// every request in the burst awaits the one in-flight performRefresh and
+// goes out with the fresh bearer instead of taking a 401 each.
+//
+// INVARIANT: strictly below the backend's MinAccessTokenTTL (60 s,
+// backend/internal/core/auth/services/auth_duration_bounds.go). At or above
+// the floor, a token minted at the minimum TTL is already inside this
+// window the moment it arrives, so every request would rotate again — a
+// refresh loop. 30 s leaves a floor-length token half its life of quiet.
+// Pinned by baseApi.proactiveRefresh.test.ts ("does not loop …").
+export const PROACTIVE_REFRESH_SKEW_MS = 30_000;
+
+function tokenNeedsRefresh(state: RootState): boolean {
+  const accessToken = state.auth?.accessToken;
+  const tokenExpiry = state.auth?.tokenExpiry;
+  if (!accessToken || !tokenExpiry) return false;
+  return (
+    new Date(tokenExpiry).getTime() - Date.now() < PROACTIVE_REFRESH_SKEW_MS
+  );
 }
 
 // Endpoints that must NOT carry X-Tenant-ID because they run before the
@@ -241,6 +307,33 @@ const baseQueryWithRetry: BaseQueryFn<
               }
             };
       args = merged;
+    }
+  }
+
+  // Proactive rotation (see PROACTIVE_REFRESH_SKEW_MS). Auth endpoints are
+  // excluded for the same reason they skip the 401 retry: /session mints on
+  // its own, and refreshing ahead of /refresh-cookie is redundant by
+  // construction — refreshOnce hits that endpoint with a raw fetch,
+  // bypassing this function entirely, so there is no call stack to recurse
+  // into. The exclusion stays as defence-in-depth, in case a future refresh
+  // path is ever routed through baseQueryWithRetry instead. Any outcome
+  // other than `ok` falls through untouched — the request goes out as-is
+  // and the 401 branch below stays the single owner of the sign-out
+  // decision (a dead session costs one extra refresh-cookie round-trip).
+  const preflightUrl = typeof args === 'string' ? args : args.url;
+  if (
+    !isAuthEndpoint(preflightUrl) &&
+    !preflightUrl.includes('v1/auth/session') &&
+    tokenNeedsRefresh(api.getState() as RootState)
+  ) {
+    const refreshed = await performRefresh(runtimeConfig.apiUrl);
+    if (refreshed.ok) {
+      api.dispatch(
+        setAccessToken({
+          accessToken: refreshed.accessToken,
+          expiresIn: refreshed.expiresIn
+        })
+      );
     }
   }
 

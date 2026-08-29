@@ -34,7 +34,7 @@ services:
       PATH: "/app/.go-bin:/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
       # MongoDB (internal port is always 27017, MONGO_PORT is for host mapping only)
-      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@${MONGO_HOST:-mongodb}:27017/${MONGO_DATABASE}?authSource=admin
+      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@${MONGO_HOST:-mongodb}:27017/${MONGO_DATABASE}?authSource=admin&replicaSet=rs0&directConnection=true
 
       # Redis (internal port is always 6379, REDIS_PORT is for host mapping only)
       REDIS_URL: redis://:${REDIS_PASSWORD}@${REDIS_HOST:-redis}:6379/${REDIS_DB:-0}

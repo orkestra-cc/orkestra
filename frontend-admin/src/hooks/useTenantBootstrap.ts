@@ -26,9 +26,10 @@ import {
  *      (the slice auto-picks a default current tenant if none is stored)
  *   3. GET /v1/tenants/{currentOrgId}/authz/me → dispatch setEffectivePermissions
  *   4. GET /v1/tenants/{currentOrgId} → dispatch setFeatures
+ *
+ * Steps 3 and 4 wait for step 2 on purpose — see the comment on the two
+ * queries below.
  */
-const STORAGE_KEY = 'orkestra.currentOrgId';
-
 export function useTenantBootstrap() {
   const dispatch = useAppDispatch();
   const isAuthenticated = useAppSelector(selectIsAuthenticated);
@@ -40,15 +41,6 @@ export function useTenantBootstrap() {
   // useModuleApi.ts for the full rationale.
   const hasAccessToken = useAppSelector(s => !!s.auth.accessToken);
   const gate = isAuthenticated && hasAccessToken;
-
-  // Use stored orgId as an optimistic hint so we can fire all three
-  // queries in parallel instead of waiting for memberships to resolve
-  // before fetching permissions and org details.
-  const storedOrgId =
-    typeof window !== 'undefined'
-      ? window.localStorage.getItem(STORAGE_KEY)
-      : null;
-  const optimisticOrgId = currentOrgId || storedOrgId;
 
   const { data: membershipsData } = useListMyOrgsQuery(undefined, {
     skip: !gate
@@ -62,15 +54,37 @@ export function useTenantBootstrap() {
   // after each fulfillment they'd stay empty until a full page reload,
   // unmounting every hasPermission-gated surface (e.g. the NineDotMenu for
   // single-membership admins).
+  //
+  // Both are keyed on `currentOrgId` — the membership-VALIDATED selection the
+  // slice only publishes once GET /v1/tenants has landed — and NOT on the raw
+  // localStorage value. They used to read `currentOrgId || storedOrgId` as an
+  // optimistic hint, to fire all three in parallel rather than waiting a round
+  // trip; that saved the round trip and broke both queries outright.
+  //
+  // The org id travels in the PATH here, and the backend's assertTenantScope
+  // (tenant/handlers/handler.go, authz/handlers/handler.go) 404s unless it
+  // equals the tenant the auth middleware resolved for the request — which it
+  // takes from X-Tenant-ID. baseApi stamps that header from `currentOrgId`
+  // alone, by the same deliberate rule (tenantSlice.ts: a stale stored id must
+  // never reach the wire before we know what the user is actually a member of).
+  // So the optimistic call sent a path id with no header to vouch for it, the
+  // backend fell back to the token's acting tenant — the platform default,
+  // which is not necessarily the workspace the operator picked — and both
+  // requests 404'd, every time.
+  //
+  // Nothing recovered from that: the cache key is the org id, and it does not
+  // change when currentOrgId later settles on the very value localStorage
+  // already held, so no refetch ever fires and tenant.permissions/features
+  // stay empty for the whole session.
   const { data: effective, fulfilledTimeStamp: effectiveFulfilledAt } =
-    useGetEffectivePermissionsQuery(optimisticOrgId as string, {
-      skip: !gate || !optimisticOrgId
+    useGetEffectivePermissionsQuery(currentOrgId as string, {
+      skip: !gate || !currentOrgId
     });
 
   const { data: org, fulfilledTimeStamp: orgFulfilledAt } = useGetOrgQuery(
-    optimisticOrgId as string,
+    currentOrgId as string,
     {
-      skip: !gate || !optimisticOrgId
+      skip: !gate || !currentOrgId
     }
   );
 

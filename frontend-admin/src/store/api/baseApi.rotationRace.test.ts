@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, delay } from 'msw';
 import { server } from 'test/server';
 import { setupStore } from 'test/render';
 import { baseApi } from './baseApi';
@@ -140,6 +140,44 @@ describe('refresh rotation race', () => {
     );
 
     expect(store.getState().auth.accessToken).toBeFalsy();
+  });
+
+  // This is the trap #317's follow-up brief calls out: refreshOnce's catch
+  // used to return a bare `{ ok: false }`, and the 401 branch above treats
+  // that as a REAL negative answer — clearAccessToken + navigateToLogin.
+  // An aborted/timed-out fetch throws into that same catch, so a naive
+  // `AbortSignal.timeout` on its own would turn "the network is slow" into
+  // "you are signed out". Prove the fix: a /refresh-cookie that never
+  // answers must NOT clear the token, must NOT navigate to login, and must
+  // surface the original 401 as a transient (`retry: true`) outcome — the
+  // same shape as the 503/409 cases above, not the "still clears the
+  // token" case right above this one.
+  it('does not sign the user out when /refresh-cookie never answers', async () => {
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockImplementation(() => realTimeout(25));
+
+    server.use(
+      http.get('*/v1/some/resource', () =>
+        HttpResponse.json({}, { status: 401 })
+      ),
+      http.post('*/refresh-cookie', async () => {
+        // Never resolves — the connection accepts and never answers.
+        await delay('infinite');
+        return HttpResponse.json({ accessToken: 'never', expiresIn: 900 });
+      })
+    );
+
+    const store = await setupSeededStore();
+    await store.dispatch(
+      probeApi.endpoints.raceProbe.initiate('/v1/some/resource')
+    );
+
+    // NOT signed out: the seeded token survives the timed-out refresh.
+    expect(store.getState().auth.accessToken).toBe('seed-access-token');
+
+    timeoutSpy.mockRestore();
   });
 });
 
