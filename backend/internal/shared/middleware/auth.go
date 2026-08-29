@@ -12,7 +12,6 @@ import (
 
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
-	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
@@ -80,7 +79,6 @@ type StepUpPolicy interface {
 
 type AuthMiddleware struct {
 	jwtService        services.JWTService
-	authService       services.AuthService
 	tenant            iface.TenantProvider
 	access            iface.AccessProvider
 	authz             iface.AuthzProvider
@@ -91,8 +89,6 @@ type AuthMiddleware struct {
 	stepUpPolicy      StepUpPolicy
 	users             iface.UserProvider
 	errorManager      *errors.Manager
-	cookieName        string
-	config            *config.Config
 
 	// impersonationDedupe throttles the admin.tenant.impersonate audit
 	// event to one emit per (actorUserUUID|targetTenantID) every
@@ -105,30 +101,8 @@ type AuthMiddleware struct {
 func NewAuthMiddleware(jwtService services.JWTService, errorManager *errors.Manager) *AuthMiddleware {
 	return &AuthMiddleware{
 		jwtService:   jwtService,
-		authService:  nil,
 		errorManager: errorManager,
-		cookieName:   "access_token",
-		config:       nil,
 	}
-}
-
-func NewAuthMiddlewareWithConfig(jwtService services.JWTService, errorManager *errors.Manager, cfg *config.Config) *AuthMiddleware {
-	cookieName := cfg.Auth.Cookie.Name
-	if cookieName == "" {
-		cookieName = "access_token"
-	}
-	return &AuthMiddleware{
-		jwtService:   jwtService,
-		authService:  nil,
-		errorManager: errorManager,
-		cookieName:   cookieName,
-		config:       cfg,
-	}
-}
-
-// SetAuthService sets the auth service for auto-refresh functionality.
-func (m *AuthMiddleware) SetAuthService(authService services.AuthService) {
-	m.authService = authService
 }
 
 // SetTenantProvider wires the tenant provider for org membership verification
@@ -208,69 +182,44 @@ func (m *AuthMiddleware) SetUserProvider(u iface.UserProvider) {
 	m.users = u
 }
 
+// RequireAuth is the bearer-only perimeter (ADR-0020, #317). A missing,
+// expired or invalid bearer is a plain 401: the refresh cookie is never
+// consulted here. Rotation happens only where a client explicitly asks
+// for it — POST /v1/auth/{tier}/refresh-cookie or /refresh — and the
+// read-only mint lives in GET /v1/auth/session; a client recovers from
+// an expired access token with 401 → refresh-cookie → retry. A
+// middleware that rotated on the caller's behalf raced that path and
+// signed users out mid-session.
 func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := m.extractBearerToken(r)
+		if token == "" {
+			m.sendErrorResponse(w, r, errors.AuthenticationError("authentication required").
+				WithOperation("require_auth").
+				Build())
+			return
+		}
 
-		if token != "" {
-			claims, err := m.jwtService.ValidateAccessToken(token)
-			if err == nil {
-				if revoked, reason := m.sessionRevocationState(r, claims); revoked {
-					m.sendSessionRevoked(w, r, reason)
-					return
-				}
-				m.setUserContext(w, r, claims, next)
-				return
-			}
-
-			if err != services.ErrTokenExpired && err != services.ErrInvalidToken {
-				m.sendErrorResponse(w, r, errors.TokenInvalidError().
+		claims, err := m.jwtService.ValidateAccessToken(token)
+		if err != nil {
+			if err == services.ErrTokenExpired || err == services.ErrInvalidToken {
+				m.sendErrorResponse(w, r, errors.AuthenticationError("authentication required").
 					WithOperation("require_auth").
-					WithInternal(err).
 					Build())
 				return
 			}
+			m.sendErrorResponse(w, r, errors.TokenInvalidError().
+				WithOperation("require_auth").
+				WithInternal(err).
+				Build())
+			return
 		}
 
-		if m.authService != nil && m.config != nil && !isLogoutRequest(r) && !isOAuthCallbackRequest(r) {
-			refreshToken := m.extractRefreshTokenFromCookie(r)
-			if refreshToken != "" {
-				securityCtx := &models.SecurityContext{
-					IPAddress: utils.GetClientIP(r),
-					Timestamp: time.Now(),
-				}
-
-				tokenResponse, err := m.authService.RefreshTokensWithRiskAssessment(r.Context(), refreshToken, securityCtx)
-				if err == nil {
-					// ADR-0003 PR-D D-9: write the rotated refresh cookie
-					// scoped to the request's audience so an operator
-					// silent-refresh stays on `console.*` and a client
-					// silent-refresh stays on `api.*`. Falls back to the
-					// legacy single-host Domain when the per-tier value
-					// is empty (single-host deployments).
-					cookieDomain := cookieDomainForAudience(m.config, AudienceFromContext(r.Context()))
-					isSecure := m.config.Auth.Cookie.Secure
-					utils.SetRefreshTokenCookie(w, m.cookieName, tokenResponse.RefreshToken, int(m.jwtService.RefreshTokenTTL().Seconds()), cookieDomain, isSecure)
-
-					w.Header().Set("X-New-Access-Token", tokenResponse.AccessToken)
-					w.Header().Set("X-Token-Refreshed", "true")
-
-					claims, err := m.jwtService.ValidateAccessToken(tokenResponse.AccessToken)
-					if err == nil {
-						if revoked, reason := m.sessionRevocationState(r, claims); revoked {
-							m.sendSessionRevoked(w, r, reason)
-							return
-						}
-						m.setUserContext(w, r, claims, next)
-						return
-					}
-				}
-			}
+		if revoked, reason := m.sessionRevocationState(r, claims); revoked {
+			m.sendSessionRevoked(w, r, reason)
+			return
 		}
-
-		m.sendErrorResponse(w, r, errors.AuthenticationError("authentication required").
-			WithOperation("require_auth").
-			Build())
+		m.setUserContext(w, r, claims, next)
 	})
 }
 
@@ -671,18 +620,6 @@ func (m *AuthMiddleware) extractBearerToken(r *http.Request) string {
 	return ""
 }
 
-// Extract refresh token from cookie.
-func (m *AuthMiddleware) extractRefreshTokenFromCookie(r *http.Request) string {
-	cookie, err := r.Cookie(m.cookieName)
-	if err == nil && cookie.Value != "" {
-		claims, err := m.jwtService.ParseUnverifiedClaims(cookie.Value)
-		if err == nil && claims.TokenType == "refresh" {
-			return cookie.Value
-		}
-	}
-	return ""
-}
-
 func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := m.extractBearerToken(r)
@@ -714,21 +651,6 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
-}
-
-// isLogoutRequest checks if the current request is a logout request.
-func isLogoutRequest(r *http.Request) bool {
-	return r.Method == "POST" && (r.URL.Path == "/v1/auth/logout" || r.URL.Path == "/auth/logout")
-}
-
-// isOAuthCallbackRequest checks if the current request is an OAuth callback.
-func isOAuthCallbackRequest(r *http.Request) bool {
-	return r.Method == "GET" && (strings.Contains(r.URL.Path, "/auth/callback") ||
-		strings.Contains(r.URL.Path, "/oauth/callback") ||
-		r.URL.Path == "/v1/auth/google/callback" ||
-		r.URL.Path == "/v1/auth/apple/callback" ||
-		r.URL.Path == "/v1/auth/discord/callback" ||
-		r.URL.Path == "/v1/auth/github/callback")
 }
 
 // --- Context accessors (auth-internal, JWT-claims-dependent) ---

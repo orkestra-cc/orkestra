@@ -8,10 +8,11 @@ package middleware
 // only exercised end-to-end in production.
 //
 // Setup is intentionally minimal: real *jwtService (so we exercise
-// the actual validator), in-memory revocation stub, no auth-service
-// (silent-refresh path is exercised separately by the existing
-// silent-refresh tests if any). httptest server captures the
-// downstream handler's view of the request context.
+// the actual validator), in-memory revocation stub, no auth-service —
+// RequireAuth is bearer-only (ADR-0020), so there is no silent-refresh
+// path to exercise; the three "NeverRotates" tests at the bottom pin
+// that. httptest server captures the downstream handler's view of the
+// request context.
 
 import (
 	"context"
@@ -117,6 +118,7 @@ func (f *reasonBlindRevocation) IsRevoked(_ context.Context, sid string) (bool, 
 // so each test stays a couple of lines.
 type requireAuthFixture struct {
 	t          *testing.T
+	priv       *rsa.PrivateKey
 	jwt        services.JWTService
 	revocation *fakeRevocation
 	mw         *AuthMiddleware
@@ -140,7 +142,7 @@ func newRequireAuthFixture(t *testing.T) *requireAuthFixture {
 	mw := NewAuthMiddleware(jwt, em)
 	rev := newFakeRevocation()
 	mw.SetSessionRevocation(rev)
-	return &requireAuthFixture{t: t, jwt: jwt, revocation: rev, mw: mw}
+	return &requireAuthFixture{t: t, priv: priv, jwt: jwt, revocation: rev, mw: mw}
 }
 
 // downstreamHandler reflects what the handler chain sees after
@@ -578,3 +580,138 @@ var _ services.SessionRevocationService = (*fakeRevocation)(nil)
 
 // And that stubTenant satisfies iface.TenantProvider — same idea.
 var _ iface.TenantProvider = stubTenant{}
+
+// ===== Bearer-only perimeter (ADR-0020, #317) =====
+//
+// RequireAuth must never touch the refresh cookie. Rotation happens only
+// through the explicit refresh endpoints — POST /v1/auth/{tier}/refresh-cookie
+// and /refresh — and the read-only mint lives in GET /v1/auth/session. A
+// middleware that rotated on any request lacking a valid bearer raced the
+// SPA's own serialised refresh and signed operators out mid-session.
+
+// testRefreshCookieName is the cookie name these tests present. It only
+// has to match what the TEMP wiring below configures: after the fix the
+// middleware has no notion of a cookie name at all (production reads its
+// own from COOKIE_NAME_REFRESH, default "orkestra_cookie" — irrelevant here).
+const testRefreshCookieName = "orkestra_cookie"
+
+// refreshCookie mints a real refresh JWT and wraps it in the cookie.
+func (f *requireAuthFixture) refreshCookie(userUUID string) *http.Cookie {
+	f.t.Helper()
+	user := &iface.User{UUID: userUUID, Email: userUUID + "@example.com", Role: "operator"}
+	tok, err := f.jwt.GenerateRefreshToken(user)
+	if err != nil {
+		f.t.Fatalf("GenerateRefreshToken: %v", err)
+	}
+	return &http.Cookie{Name: testRefreshCookieName, Value: tok}
+}
+
+// mintExpiredAccessToken returns an access token signed by the fixture's
+// key pair whose exp is already in the past: a sibling jwtService with a
+// 1 ns access TTL. NOT a negative one — NewJWTService swaps any TTL <= 0
+// for the 15-minute default and only clamps from above, so a negative
+// value would mint a perfectly valid token. A positive nanosecond passes
+// through untouched; exp is written as Unix seconds, so it truncates to
+// the current second and jwt/v5 (no leeway) reports the token expired on
+// the next validation. The fixture's validator then returns
+// services.ErrTokenExpired — the exact production input of #317. The
+// precondition below turns any drift in that reasoning into a loud
+// failure rather than a test that passes for the wrong reason.
+func (f *requireAuthFixture) mintExpiredAccessToken(userUUID string) string {
+	f.t.Helper()
+	expired, err := services.NewJWTServiceWithAudience(
+		f.priv, &f.priv.PublicKey, "test", services.AudienceOperator,
+		time.Nanosecond, 7*24*time.Hour,
+	)
+	if err != nil {
+		f.t.Fatalf("NewJWTServiceWithAudience(expired): %v", err)
+	}
+	expired.SetTenantProvider(stubTenant{})
+	user := &iface.User{UUID: userUUID, Email: userUUID + "@example.com", Role: "operator"}
+	tok, err := expired.GenerateAccessToken(user)
+	if err != nil {
+		f.t.Fatalf("GenerateAccessToken(expired): %v", err)
+	}
+	if _, verr := f.jwt.ValidateAccessToken(tok); verr != services.ErrTokenExpired {
+		f.t.Fatalf("precondition: want ErrTokenExpired from the fixture validator, got %v", verr)
+	}
+	return tok
+}
+
+// assertNoSilentRefresh is the whole contract in one place: 401, handler
+// not reached, and — the part that matters — no cookie rotation and no
+// minted token leaking out through headers.
+func assertNoSilentRefresh(t *testing.T, resp *http.Response, dh *downstreamHandler) {
+	t.Helper()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", resp.StatusCode)
+	}
+	if dh.called {
+		t.Errorf("downstream handler must NOT be reached on the strength of a refresh cookie")
+	}
+	if got := resp.Header.Get("Set-Cookie"); got != "" {
+		t.Errorf("RequireAuth must never rotate the refresh cookie, got Set-Cookie=%q", got)
+	}
+	for _, h := range []string{"X-New-Access-Token", "X-Token-Refreshed"} {
+		if got := resp.Header.Get(h); got != "" {
+			t.Errorf("%s must not be emitted, got %q", h, got)
+		}
+	}
+}
+
+func TestRequireAuth_RefreshCookieWithoutBearer_Returns401_NeverRotates(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	dh := &downstreamHandler{}
+	srv := httptest.NewServer(f.mw.RequireAuth(dh.handler()))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+	req.AddCookie(f.refreshCookie("u-cookie"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	assertNoSilentRefresh(t, resp, dh)
+}
+
+func TestRequireAuth_ExpiredBearerWithRefreshCookie_Returns401_NeverRotates(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	dh := &downstreamHandler{}
+	srv := httptest.NewServer(f.mw.RequireAuth(dh.handler()))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+f.mintExpiredAccessToken("u-cookie"))
+	req.AddCookie(f.refreshCookie("u-cookie"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	assertNoSilentRefresh(t, resp, dh)
+}
+
+// The contract is "missing, expired OR invalid bearer": a tampered signature
+// used to fall into the same cookie branch (ValidateAccessToken →
+// ErrInvalidToken), so it gets the same guard. Same tampering idiom as
+// TestRequireAuth_TamperedSignature_Returns401.
+func TestRequireAuth_TamperedBearerWithRefreshCookie_Returns401_NeverRotates(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	dh := &downstreamHandler{}
+	srv := httptest.NewServer(f.mw.RequireAuth(dh.handler()))
+	defer srv.Close()
+
+	tok := f.issueTokenForUser("u-cookie", "operator")
+	tampered := tok[:len(tok)-8] + "AAAAAAAA"
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+tampered)
+	req.AddCookie(f.refreshCookie("u-cookie"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	assertNoSilentRefresh(t, resp, dh)
+}

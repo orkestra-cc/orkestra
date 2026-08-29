@@ -102,6 +102,8 @@ token without rotating the refresh cookie (a deliberate anti-replay split), so
 a client calling only that endpoint would otherwise hold a session open
 forever.
 
+Rotation only ever happens on an explicit refresh call (`/refresh-cookie`, `/refresh`). `RequireAuth` itself is bearer-only — it never reads or rotates the refresh cookie ([ADR-0020](/adrs/bearer-only-require-auth)); an expired access token is a plain `401` that the client answers with `/refresh-cookie` and a retry.
+
 The same `session_max_age_reached` code comes back from any protected route
 once the terminated session's access token meets the revocation denylist — in
 practice that is the response a user actually sees, since the refresh
