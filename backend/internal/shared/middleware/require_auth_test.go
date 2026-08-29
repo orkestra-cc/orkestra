@@ -11,14 +11,25 @@ package middleware
 // the actual validator), in-memory revocation stub, no auth-service —
 // RequireAuth is bearer-only (ADR-0020), so there is no silent-refresh
 // path to exercise; the three "NeverRotates" tests at the bottom pin
-// that. httptest server captures the downstream handler's view of the
-// request context.
+// the OBSERVABLE contract for that claim (no Set-Cookie, no minted-
+// token header). The two structural tests further down —
+// TestAuthMiddleware_Fields_CannotReintroduceCookieRotation and
+// TestAuthGo_ContainsNoCookieRead — are the actual reintroduction
+// guards; see their doc comments for what each one covers and what it
+// doesn't. httptest server captures the downstream handler's view of
+// the request context.
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/printer"
+	"go/token"
 	"io"
 	"log/slog"
 	"net/http"
@@ -618,36 +629,36 @@ var _ iface.TenantProvider = stubTenant{}
 // line of behaviour is written against it.
 func TestAuthMiddleware_Fields_CannotReintroduceCookieRotation(t *testing.T) {
 	// Keep in sync with the field list in auth.go's AuthMiddleware struct.
-	expectedFields := map[string]bool{
-		"jwtService":             true,
-		"tenant":                 true,
-		"access":                 true,
-		"authz":                  true,
-		"auditSink":              true,
-		"sessionRevocation":      true,
-		"sessionRiskLookup":      true,
-		"mfaEnrollment":          true,
-		"stepUpPolicy":           true,
-		"users":                  true,
-		"errorManager":           true,
-		"impersonationDedupe":    true,
-		"impersonationDedupeTTL": true,
+	expectedFields := map[string]struct{}{
+		"jwtService":             {},
+		"tenant":                 {},
+		"access":                 {},
+		"authz":                  {},
+		"auditSink":              {},
+		"sessionRevocation":      {},
+		"sessionRiskLookup":      {},
+		"mfaEnrollment":          {},
+		"stepUpPolicy":           {},
+		"users":                  {},
+		"errorManager":           {},
+		"impersonationDedupe":    {},
+		"impersonationDedupeTTL": {},
 	}
 
 	typ := reflect.TypeOf(AuthMiddleware{})
-	actualFields := make(map[string]bool, typ.NumField())
+	actualFields := make(map[string]struct{}, typ.NumField())
 	for i := 0; i < typ.NumField(); i++ {
-		actualFields[typ.Field(i).Name] = true
+		actualFields[typ.Field(i).Name] = struct{}{}
 	}
 
 	var unexpected, missing []string
 	for name := range actualFields {
-		if !expectedFields[name] {
+		if _, ok := expectedFields[name]; !ok {
 			unexpected = append(unexpected, name)
 		}
 	}
 	for name := range expectedFields {
-		if !actualFields[name] {
+		if _, ok := actualFields[name]; !ok {
 			missing = append(missing, name)
 		}
 	}
@@ -679,6 +690,89 @@ func TestAuthMiddleware_Fields_CannotReintroduceCookieRotation(t *testing.T) {
 				"backend/internal/core/auth/CLAUDE.md) so this list keeps "+
 				"tracking the real struct instead of silently going stale.",
 			missing,
+		)
+	}
+}
+
+// TestAuthGo_ContainsNoCookieRead is the second structural guard, closing
+// the gap the field-diff test above leaves open. #317's rejected
+// alternative — ADR-0020's "Alternatives considered" section — needs no
+// new struct field at all: services.JWTService is already wired in as
+// m.jwtService, and it already exposes ValidateRefreshToken and
+// GenerateAccessToken/GenerateAccessTokenWithAMR. So a "mint-only" rewrite
+// of RequireAuth could read the refresh cookie, validate it with the
+// already-injected jwtService, mint a fresh access token, and return it
+// via X-New-Access-Token — reproducing exactly the variant ADR-0020
+// rejected — without adding, removing or renaming a single field. The
+// field-diff test would stay green throughout; this test is what catches
+// that shape.
+//
+// It parses auth.go — the file RequireAuth and its helpers live in — with
+// go/parser + go/ast, deliberately NOT a regex over the raw source: a
+// comment that merely mentions ".Cookie(" must not trip it, and a real
+// call must not be missed because of formatting. It walks every call
+// expression for a selector call named Cookie or Cookies — the two
+// *http.Request methods that read a cookie off an incoming request — and
+// fails if either appears anywhere in the file.
+//
+// This is deliberately FILE-scoped, not package-scoped: device.go, in
+// this same package, legitimately reads the device-id cookie
+// (DeviceIDCookieName, "orkestra_did") via r.Cookie — a package-wide
+// assertion would fail against correct code. The residual gap this
+// leaves: a helper placed in a *different* file of this package (or one
+// called indirectly through another package) could still read a cookie
+// and hand the value into RequireAuth unnoticed. This narrows the
+// reintroduction surface; it does not close it — reviewers still carry
+// that residue.
+func TestAuthGo_ContainsNoCookieRead(t *testing.T) {
+	const path = "auth.go"
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+
+	var offenders []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if sel.Sel.Name != "Cookie" && sel.Sel.Name != "Cookies" {
+			return true
+		}
+		pos := fset.Position(call.Pos())
+		var buf bytes.Buffer
+		if err := printer.Fprint(&buf, fset, call); err != nil {
+			buf.WriteString(sel.Sel.Name + "(...)")
+		}
+		offenders = append(offenders, fmt.Sprintf("%s:%d: %s", path, pos.Line, buf.String()))
+		return true
+	})
+
+	if len(offenders) > 0 {
+		t.Errorf(
+			"auth.go contains a cookie read: %v\n\n"+
+				"RequireAuth is bearer-only per ADR-0020 / #317. The alternative "+
+				"ADR-0020's \"Alternatives considered\" section explicitly "+
+				"rejected — a MINT-ONLY middleware — needs no new struct field: "+
+				"services.JWTService is already wired in as m.jwtService, and it "+
+				"already exposes ValidateRefreshToken and "+
+				"GenerateAccessToken/GenerateAccessTokenWithAMR. Reading the "+
+				"refresh cookie here, validating it with the already-injected "+
+				"jwtService, and minting a fresh access token reproduces exactly "+
+				"that rejected variant — and "+
+				"TestAuthMiddleware_Fields_CannotReintroduceCookieRotation will "+
+				"NOT catch it, because no field is added, removed or renamed. "+
+				"The sanctioned client recovery for a missing/expired/invalid "+
+				"bearer is 401 -> POST /v1/auth/{tier}/refresh-cookie -> retry, "+
+				"not a silent mint here. See the \"RequireAuth is bearer-only\" "+
+				"bullet in backend/internal/core/auth/CLAUDE.md.",
+			offenders,
 		)
 	}
 }
