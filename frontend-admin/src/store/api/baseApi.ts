@@ -147,6 +147,32 @@ async function performRefresh(baseUrl: string): Promise<RefreshResult> {
   return inFlightRefresh;
 }
 
+// Access tokens are rotated BEFORE they expire, not after. The backend's
+// RequireAuth is bearer-only (ADR-0020, #317): a request that arrives with
+// an expired — or, per prepareHeaders, withheld — bearer is a plain 401,
+// and the only way back to a valid token is /refresh-cookie. Doing that
+// rotation ahead of any request whose token is inside this window means
+// expiry almost never lands on a burst of parallel requests; when it does,
+// every request in the burst awaits the one in-flight performRefresh and
+// goes out with the fresh bearer instead of taking a 401 each.
+//
+// INVARIANT: strictly below the backend's MinAccessTokenTTL (60 s,
+// backend/internal/core/auth/services/auth_duration_bounds.go). At or above
+// the floor, a token minted at the minimum TTL is already inside this
+// window the moment it arrives, so every request would rotate again — a
+// refresh loop. 30 s leaves a floor-length token half its life of quiet.
+// Pinned by baseApi.proactiveRefresh.test.ts ("does not loop …").
+export const PROACTIVE_REFRESH_SKEW_MS = 30_000;
+
+function tokenNeedsRefresh(state: RootState): boolean {
+  const accessToken = state.auth?.accessToken;
+  const tokenExpiry = state.auth?.tokenExpiry;
+  if (!accessToken || !tokenExpiry) return false;
+  return (
+    new Date(tokenExpiry).getTime() - Date.now() < PROACTIVE_REFRESH_SKEW_MS
+  );
+}
+
 // Endpoints that must NOT carry X-Tenant-ID because they run before the
 // current tenant is known (login, refresh, tenant listing, tenant creation,
 // invite accept), or because they are platform-level (module admin,
@@ -241,6 +267,29 @@ const baseQueryWithRetry: BaseQueryFn<
               }
             };
       args = merged;
+    }
+  }
+
+  // Proactive rotation (see PROACTIVE_REFRESH_SKEW_MS). Auth endpoints are
+  // excluded for the same reason they skip the 401 retry: /session mints on
+  // its own, and refreshing ahead of /refresh-cookie would recurse. Any
+  // outcome other than `ok` falls through untouched — the request goes out
+  // as-is and the 401 branch below stays the single owner of the sign-out
+  // decision (a dead session costs one extra refresh-cookie round-trip).
+  const preflightUrl = typeof args === 'string' ? args : args.url;
+  if (
+    !isAuthEndpoint(preflightUrl) &&
+    !preflightUrl.includes('v1/auth/session') &&
+    tokenNeedsRefresh(api.getState() as RootState)
+  ) {
+    const refreshed = await performRefresh(runtimeConfig.apiUrl);
+    if (refreshed.ok) {
+      api.dispatch(
+        setAccessToken({
+          accessToken: refreshed.accessToken,
+          expiresIn: refreshed.expiresIn
+        })
+      );
     }
   }
 
