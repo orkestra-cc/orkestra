@@ -1287,9 +1287,13 @@ fullstack_execute_deploy() {
     # --- Smoke tests (production only) ---
     if [ "$ENV" = "production" ]; then
         p_section "Smoke tests"
-        local AUTH_STATUS DOCS_STATUS
-        AUTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${BACKEND_URL}/api/v1/auth/health" || echo "000")
-        [ "$AUTH_STATUS" = "200" ] && p_ok "Authentication endpoint healthy" || p_warn "Authentication endpoint returned: $AUTH_STATUS"
+        # /health is the backend liveness probe and reports its MongoDB/Redis
+        # checks; it is on the public-routes list so it answers without a JWT.
+        # (The old target, /api/v1/auth/health, never existed — routes have no
+        # /api prefix — and unknown paths get a 401 from the auth middleware.)
+        local HEALTH_STATUS DOCS_STATUS
+        HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${BACKEND_URL}/health" || echo "000")
+        [ "$HEALTH_STATUS" = "200" ] && p_ok "Backend health endpoint healthy" || p_warn "Backend health endpoint returned: $HEALTH_STATUS"
         DOCS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${BACKEND_URL}/docs" || echo "000")
         [ "$DOCS_STATUS" = "200" ] && p_ok "API documentation accessible" || p_warn "API documentation returned: $DOCS_STATUS"
     fi
