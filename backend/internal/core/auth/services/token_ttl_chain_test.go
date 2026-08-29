@@ -54,6 +54,37 @@ func TestAccessTokenTTL_EnvironmentAndConstructorClampToMaximum(t *testing.T) {
 	}
 }
 
+// TestNewJWTService_AccessTTLClampedIntoRange pins the constructor's own
+// clamping — as distinct from the persisted-value clamping covered by
+// TestAccessTokenTTL_PersistedOutOfRangeIsClamped above. NewJWTService is
+// fed directly by JWT_ACCESS_TOKEN_EXPIRY and by any other direct caller,
+// so an accessTTL below MinAccessTokenTTL (e.g. the 20s example from
+// #317) must be raised, not left to mint a token the SPA's proactive
+// refresh would rotate on every request (ADR-0020).
+func TestNewJWTService_AccessTTLClampedIntoRange(t *testing.T) {
+	cases := []struct {
+		name string
+		in   time.Duration
+		want time.Duration
+	}{
+		{"below floor is raised to the floor", 20 * time.Second, MinAccessTokenTTL},
+		{"exactly at the floor is unchanged", MinAccessTokenTTL, MinAccessTokenTTL},
+		{"comfortably above the floor is unchanged", 15 * time.Minute, 15 * time.Minute},
+		{"above the ceiling is still clamped to the ceiling", 48 * time.Hour, MaxAccessTokenTTL},
+		{"zero falls back to the 15m default", 0, defaultAccessTokenTTL},
+		{"negative falls back to the 15m default", -5 * time.Minute, defaultAccessTokenTTL},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			priv := testRSAKey()
+			svc := NewJWTService(priv, &priv.PublicKey, "test", tc.in, 7*24*time.Hour)
+			if got := svc.AccessTokenTTL(context.Background()); got != tc.want {
+				t.Errorf("NewJWTService(accessTTL=%v).AccessTokenTTL() = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestAccessTokenTTL_PersistedOutOfRangeIsClamped(t *testing.T) {
 	if got := newPolicy(map[string]string{"accessTokenTTL": "9999h"}).AccessTokenTTL(context.Background()); got != MaxAccessTokenTTL {
 		t.Errorf("legacy 9999h = %v, want %v", got, MaxAccessTokenTTL)

@@ -210,6 +210,7 @@ admin UI would show one value while a different one governed logins.
 | malformed value already in DB | warn, fall through to env | warn, use 30m |
 | out of range already in DB | warn and clamp | warn and clamp |
 | env / direct constructor above 24h | warn and clamp to 24h | n/a |
+| env / direct constructor below 1m | warn and clamp to 1m — below a minute the SPA's proactive refresh (inside a 30s skew of expiry) would rotate the token on every request (ADR-0020 D3, #317) | n/a |
 
 Write-time enforcement is `(*AuthModule).ValidateConfig` in
 `config_validation.go` — the module's implementation of the optional
@@ -387,7 +388,7 @@ different things depending on where it was typed, and
 |---|---|---|
 | `AUTH_JWT_PRIVATE_KEY` / `AUTH_JWT_PUBLIC_KEY` | RS256 key pair (paths or PEM) | — (required) |
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | Gate signup on successful verification | `true` in prod, `false` otherwise |
-| `JWT_ACCESS_TOKEN_EXPIRY` | Access-token TTL. **Level 2 of `admin accessTokenTTL → JWT_ACCESS_TOKEN_EXPIRY → 15m`.** Before ADR-0017 this level was unreachable — the policy substituted its 15m default for "unset" — so any deployment that set this by hand has been running on 15m regardless of the value. Repairing the chain activates their configured value, which may be longer than what they have actually been running: **diff this key against `docker/.env.example` before upgrading.** Effective values above 24h are clamped with a warning. | `15m` |
+| `JWT_ACCESS_TOKEN_EXPIRY` | Access-token TTL. **Level 2 of `admin accessTokenTTL → JWT_ACCESS_TOKEN_EXPIRY → 15m`.** Before ADR-0017 this level was unreachable — the policy substituted its 15m default for "unset" — so any deployment that set this by hand has been running on 15m regardless of the value. Repairing the chain activates their configured value, which may be longer than what they have actually been running: **diff this key against `docker/.env.example` before upgrading.** Effective values are clamped into `[MinAccessTokenTTL, MaxAccessTokenTTL]` (1m–24h) with a warning — below 1m the SPA's proactive refresh would rotate the token on every request (ADR-0020 D3, #317). | `15m` |
 | `JWT_REFRESH_TOKEN_EXPIRY` | Refresh-token TTL — and, because rotation writes `now + this` on every use, the **idle** timeout: this many days without a refresh ends the session. The absolute cap is the separate `sessionAbsoluteTTL`. The `refreshTTL <= 0 → 720h` guard in `NewJWTService` is unreachable through configuration. | `7d` |
 | `AUTH_DEVICE_TRUST_DURATION` | "Remember this device" trust-grant lifetime (`models.DeviceTrustDuration`), read via `parseDurationEnv` in `module.go`. Accepts the `d` suffix (`30d`); malformed or unset logs a warning and falls back to the default. | `30d` (720h) |
 | `COOKIE_NAME_REFRESH` / `COOKIE_SECURE` / `COOKIE_SAME_SITE` / `COOKIE_HTTP_ONLY` | Refresh-token cookie attributes shared across audiences. `COOKIE_NAME_REFRESH` names the cookie (the **only** cookie Orkestra sets — the SPA holds the access token in memory); defaults to `orkestra_cookie`. | set in `cfg.Auth.Cookie` |

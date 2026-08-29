@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/auth/services"
@@ -606,31 +607,50 @@ func (f *requireAuthFixture) refreshCookie(userUUID string) *http.Cookie {
 	return &http.Cookie{Name: testRefreshCookieName, Value: tok}
 }
 
-// mintExpiredAccessToken returns an access token signed by the fixture's
-// key pair whose exp is already in the past: a sibling jwtService with a
-// 1 ns access TTL. NOT a negative one — NewJWTService swaps any TTL <= 0
-// for the 15-minute default and only clamps from above, so a negative
-// value would mint a perfectly valid token. A positive nanosecond passes
-// through untouched; exp is written as Unix seconds, so it truncates to
-// the current second and jwt/v5 (no leeway) reports the token expired on
-// the next validation. The fixture's validator then returns
+// mintExpiredAccessToken returns an access token signed directly with the
+// fixture's private key whose exp is already in the past. It no longer
+// goes through NewJWTService at all: since NewJWTService clamps every
+// accessTTL into [MinAccessTokenTTL, MaxAccessTokenTTL] (ADR-0020 D3, #317),
+// a 1ns TTL — the previous trick for minting an already-expired token
+// without tripping the constructor's `<= 0` default — now clamps up to
+// MinAccessTokenTTL (60s) and mints a perfectly valid token instead.
+//
+// Signing by hand sidesteps that clamp entirely. The claim set mirrors
+// what jwtService.GenerateEnhancedAccessToken actually stamps (sub,
+// email, srole, type, iat/nbf/exp, iss, aud, sid, did, scope) so this is
+// a faithful stand-in for a production-issued token, just with exp
+// already elapsed. jwt/v5's default Parser always validates exp when
+// present (no parser options are needed to opt in — see
+// (*jwt.Validator).Validate), so jwt.Parse fails with an error wrapping
+// jwt.ErrTokenExpired before validateTokenEnhanced ever reaches its own
+// type/issuer/audience checks — those checks, and their claim values
+// here, are therefore irrelevant to *why* validation fails, but are kept
+// accurate for shape fidelity. The fixture's validator maps that to
 // services.ErrTokenExpired — the exact production input of #317. The
 // precondition below turns any drift in that reasoning into a loud
 // failure rather than a test that passes for the wrong reason.
 func (f *requireAuthFixture) mintExpiredAccessToken(userUUID string) string {
 	f.t.Helper()
-	expired, err := services.NewJWTServiceWithAudience(
-		f.priv, &f.priv.PublicKey, "test", services.AudienceOperator,
-		time.Nanosecond, 7*24*time.Hour,
-	)
-	if err != nil {
-		f.t.Fatalf("NewJWTServiceWithAudience(expired): %v", err)
+	now := time.Now()
+	issuedAt := now.Add(-2 * time.Hour)
+	expiresAt := now.Add(-1 * time.Hour)
+	claims := jwt.MapClaims{
+		"sub":   userUUID,
+		"email": userUUID + "@example.com",
+		"srole": "operator",
+		"type":  "access",
+		"iat":   issuedAt.Unix(),
+		"nbf":   issuedAt.Unix(),
+		"exp":   expiresAt.Unix(),
+		"iss":   "orkestra.test", // matches issuerFor("test"), the env newRequireAuthFixture builds f.jwt with
+		"aud":   services.AudienceOperator,
+		"sid":   "sess-expired",
+		"did":   "default",
+		"scope": []string{"profile", "email", "api"},
 	}
-	expired.SetTenantProvider(stubTenant{})
-	user := &iface.User{UUID: userUUID, Email: userUUID + "@example.com", Role: "operator"}
-	tok, err := expired.GenerateAccessToken(user)
+	tok, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(f.priv)
 	if err != nil {
-		f.t.Fatalf("GenerateAccessToken(expired): %v", err)
+		f.t.Fatalf("sign expired access token: %v", err)
 	}
 	if _, verr := f.jwt.ValidateAccessToken(tok); verr != services.ErrTokenExpired {
 		f.t.Fatalf("precondition: want ErrTokenExpired from the fixture validator, got %v", verr)
