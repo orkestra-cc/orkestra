@@ -272,9 +272,13 @@ const baseQueryWithRetry: BaseQueryFn<
 
   // Proactive rotation (see PROACTIVE_REFRESH_SKEW_MS). Auth endpoints are
   // excluded for the same reason they skip the 401 retry: /session mints on
-  // its own, and refreshing ahead of /refresh-cookie would recurse. Any
-  // outcome other than `ok` falls through untouched — the request goes out
-  // as-is and the 401 branch below stays the single owner of the sign-out
+  // its own, and refreshing ahead of /refresh-cookie is redundant by
+  // construction — refreshOnce hits that endpoint with a raw fetch,
+  // bypassing this function entirely, so there is no call stack to recurse
+  // into. The exclusion stays as defence-in-depth, in case a future refresh
+  // path is ever routed through baseQueryWithRetry instead. Any outcome
+  // other than `ok` falls through untouched — the request goes out as-is
+  // and the 401 branch below stays the single owner of the sign-out
   // decision (a dead session costs one extra refresh-cookie round-trip).
   const preflightUrl = typeof args === 'string' ? args : args.url;
   if (
