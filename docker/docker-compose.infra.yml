@@ -37,14 +37,22 @@ services:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-changeme}
       MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-orkestra}
+    entrypoint: ["bash", "/opt/orkestra/replica-entrypoint.sh"]
     volumes:
       - mongodb-data:/data/db
       - mongodb-config:/data/configdb
+      - ./mongo-init/replica-entrypoint.sh:/opt/orkestra/replica-entrypoint.sh:ro
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
-      interval: 10s
+      # A ping is insufficient: the app uses MongoDB transactions, which a
+      # standalone mongod cannot serve. Initialize the single-node set once,
+      # then report healthy only after it is primary. directConnection=true
+      # lets both host tests and stack containers connect without depending on
+      # the member's advertised hostname.
+      test: ["CMD-SHELL", "mongosh --quiet --host localhost --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'try { if (db.hello().isWritablePrimary) { quit(0); } } catch (error) {} try { rs.initiate({_id: \"rs0\", members: [{_id: 0, host: \"mongodb:27017\"}]}); } catch (error) {} quit(1);'"]
+      interval: 2s
       timeout: 10s
-      retries: 5
+      retries: 30
+      start_period: 30s
 
   redis:
     image: redis/redis-stack-server:latest

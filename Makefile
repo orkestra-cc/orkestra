@@ -150,7 +150,7 @@ frontend-client-clean:
 .PHONY: install install-hooks fmt ci-help
 .PHONY: ci ci-all ci-mcp ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 .PHONY: mcp-check mcp-test
-.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate
+.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config
 .PHONY: admin-lockcheck admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-lockcheck client-typecheck client-lint client-build
 .PHONY: mobile-lockcheck
@@ -267,8 +267,15 @@ mcp-test:
 
 # ---- Backend ----
 
-ci-backend: backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
+ci-backend: backend-mongo-config backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
 	@echo "Backend CI: OK"
+
+# Static gate: the compose stacks and CI must all provide a transaction-capable
+# MongoDB. This caught a real regression — a merge once kept the capabilities
+# the replica entrypoint needs while dropping the entrypoint itself, leaving a
+# standalone mongod that failed only at setup-finalization time.
+backend-mongo-config:
+	@docker/tests/mongodb-replica-set.test.sh
 
 # backend-openapi-check fails if the committed openapi/enterprise.json drifted
 # from the routes in the current source — same gate as policycoverage but for
