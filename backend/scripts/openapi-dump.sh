@@ -45,7 +45,7 @@ if [[ -z "${MONGO_URI:-}" || -z "${REDIS_URL:-}" ]]; then
   : "${REDIS_PORT:=6379}"
   if [[ -z "${MONGO_URI:-}" ]]; then
     : "${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD not in docker/.env}"
-    MONGO_URI="mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@localhost:${MONGO_PORT}/${DUMP_DB}?authSource=admin"
+    MONGO_URI="mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@localhost:${MONGO_PORT}/${DUMP_DB}?authSource=admin&replicaSet=rs0&directConnection=true"
   fi
   if [[ -z "${REDIS_URL:-}" ]]; then
     REDIS_AUTH=""

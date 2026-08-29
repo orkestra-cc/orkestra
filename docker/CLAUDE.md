@@ -278,11 +278,30 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 
 | Service       | Host port (default) | Purpose             | Health Check     |
 | ------------- | ----------- | ------------------- | ---------------- |
-| **mongodb**   | 27017       | Primary database    | mongosh ping     |
+| **mongodb**   | 27017       | Primary database (single-node `rs0`) | writable-primary check |
 | **redis**     | 6379        | Cache & sessions    | redis-cli incr ping |
 | **rustfs**    | 9100 / 9101 | S3-compatible object storage for user-uploaded blobs (avatars today) | wget /health |
 
 > **ADR-0006:** the Gotenberg / Memgraph / Hindsight addon-infra services, the backend-managed-container wiring (`Module.InfraContainers()` → `shared/container.Manager`), the `/var/run/docker.sock` mount, and `CONTAINER_CONTROL_ENABLED` were all removed with the addons. A fork that adds a module declaring `InfraContainers()` re-adds the socket mount + `CONTAINER_CONTROL_ENABLED=true` and provisions its own infra service. The `shared/container.Manager` seam is kept in the codebase for that purpose.
+
+**MongoDB transaction readiness:** The bundled Mongo service runs as a
+single-node replica set named `rs0`; the app relies on MongoDB transactions
+(tenant provisioning during setup finalization is the first thing to hit one),
+which standalone `mongod` does not support. `mongo-init/replica-entrypoint.sh`
+derives the internal replica key file from the generated root password on first
+start and retains it in the stack's `mongodb-config` volume, so there is no
+extra secret to manage. The health check idempotently calls `rs.initiate()` for
+an unconfigured volume and reports healthy only after the member is writable
+primary. Backend connection strings must keep both `replicaSet=rs0` and
+`directConnection=true`: the latter lets a host-side tool connect through the
+published port while containers connect by the `mongodb` service name, without
+depending on the advertised member name. Changing an existing stack requires
+**recreating** the Mongo container so it starts with `--replSet` (a plain
+`restart` is not enough); the data volume is retained and initialized in place.
+`docker/tests/mongodb-replica-set.test.sh` is a static gate wired into
+`make ci-backend` — it exists because a merge once kept the capabilities the
+entrypoint needs while dropping the entrypoint itself, leaving a standalone
+mongod whose only symptom was a failure at setup-finalization time.
 
 **RustFS status note**: RustFS 1.x is in beta (`rustfs/rustfs:latest` resolves to `1.0.0-beta.4` at time of writing). Single-node S3-API mode is "available" and fine for avatars; distributed mode is "under testing". Production deploys running at scale should swap `STORAGE_ENDPOINT` to a managed S3 (AWS / Backblaze B2 / etc.) and drop `STORAGE_FORCE_PATH_STYLE`. The backend's `internal/shared/blob` package speaks the S3 API uniformly via AWS SDK v2, so swapping is an env-var change.
 
