@@ -610,9 +610,12 @@ var _ iface.TenantProvider = stubTenant{}
 // against the deleted cookie branch being reintroduced: they build the
 // middleware via NewAuthMiddleware, which never wires an auth service or
 // config, so — with that seam gone — they would pass unchanged against the
-// pre-fix code too. TestAuthMiddleware_Fields_CannotReintroduceCookieRotation
-// below is the actual reintroduction guard; see its doc comment for why a
-// structural check is what that job needs.
+// pre-fix code too. The reintroduction guards are the two structural tests
+// below — TestAuthMiddleware_Fields_CannotReintroduceCookieRotation for a
+// resurrected dependency field, and TestAuthGo_ContainsNoCookieRead for a
+// mint-only rewrite that needs no field at all. See their doc comments for
+// why structural checks are what that job needs, and for the residue they
+// still leave to reviewers.
 
 // TestAuthMiddleware_Fields_CannotReintroduceCookieRotation is a structural
 // tripwire, not a behavioural test. The behavioural tests above (and the
@@ -713,7 +716,12 @@ func TestAuthMiddleware_Fields_CannotReintroduceCookieRotation(t *testing.T) {
 // call must not be missed because of formatting. It walks every call
 // expression for a selector call named Cookie or Cookies — the two
 // *http.Request methods that read a cookie off an incoming request — and
-// fails if either appears anywhere in the file.
+// fails if either appears anywhere in the file. It matches on the selector
+// NAME rather than resolving the receiver's static type through go/types:
+// that would need type-checking the whole package for no benefit today,
+// since nothing else imported by auth.go exposes a Cookie/Cookies method.
+// If that ever changes, the failure is a false positive — loud and easy to
+// diagnose — not a silent miss.
 //
 // This is deliberately FILE-scoped, not package-scoped: device.go, in
 // this same package, legitimately reads the device-id cookie
@@ -721,7 +729,12 @@ func TestAuthMiddleware_Fields_CannotReintroduceCookieRotation(t *testing.T) {
 // assertion would fail against correct code. The residual gap this
 // leaves: a helper placed in a *different* file of this package (or one
 // called indirectly through another package) could still read a cookie
-// and hand the value into RequireAuth unnoticed. This narrows the
+// and hand the value into RequireAuth unnoticed — and, within this file,
+// so could a rewrite that parses the raw header via r.Header.Get("Cookie")
+// instead of calling r.Cookie. Both are unlikely (nobody hand-parses a header
+// net/http already exposes an accessor for) and both stay obvious in review, but
+// they are gaps, so they are named here rather than left implied. This
+// narrows the
 // reintroduction surface; it does not close it — reviewers still carry
 // that residue.
 func TestAuthGo_ContainsNoCookieRead(t *testing.T) {
