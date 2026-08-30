@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -61,9 +62,12 @@ func TestGitHubGetUserInfo_FallsBackToAnyVerified(t *testing.T) {
 }
 
 func TestGitHubGetUserInfo_PublicProfileEmailIsNeverVerifiedByAssumption(t *testing.T) {
+	// A 200 that carries no verified address is an ANSWER, not a failure: the
+	// public-profile email survives as an UNVERIFIED fallback and the callback
+	// refuses to auto-link or sign up with it. A failing endpoint is a
+	// different thing entirely — see the test below.
 	cases := map[string]githubRoundTripper{
 		"no verified address":   {profile: githubProfile, emails: `[{"email":"x@example.com","primary":true,"verified":false}]`},
-		"emails endpoint 401":   {profile: githubProfile, emails: `{}`, status: map[string]int{"/user/emails": 401}},
 		"emails endpoint empty": {profile: githubProfile, emails: `[]`},
 	}
 	for name, rt := range cases {
@@ -74,6 +78,43 @@ func TestGitHubGetUserInfo_PublicProfileEmailIsNeverVerifiedByAssumption(t *test
 			}
 			if info.Email != "public-profile@example.com" || info.EmailVerified {
 				t.Fatalf("got %q verified=%v; the profile email survives only as an UNVERIFIED fallback", info.Email, info.EmailVerified)
+			}
+		})
+	}
+}
+
+func TestGitHubGetUserInfo_EmailsEndpointFailureIsAProviderError(t *testing.T) {
+	// A transient /user/emails failure must not masquerade as "you have no
+	// verified address": collapsing it into the unverified fallback makes the
+	// callback answer a permanent-sounding ErrOAuthEmailUnverified for what is
+	// an upstream outage. GitHub answers 401 on a revoked token, 403/429 on
+	// rate limits, and a truncated or non-JSON body is the same class of
+	// problem. Each is reported as a provider error for operation
+	// "user_emails", carrying the HTTP status where there is one, and its text
+	// leaks neither the access token nor any address.
+	for name, tc := range map[string]struct {
+		rt         githubRoundTripper
+		wantStatus int
+	}{
+		"401 unauthorized": {githubRoundTripper{profile: githubProfile, emails: `{}`, status: map[string]int{"/user/emails": 401}}, 401},
+		"429 rate limited": {githubRoundTripper{profile: githubProfile, emails: `{}`, status: map[string]int{"/user/emails": 429}}, 429},
+		"500 server error": {githubRoundTripper{profile: githubProfile, emails: `{}`, status: map[string]int{"/user/emails": 500}}, 500},
+		"malformed body":   {githubRoundTripper{profile: githubProfile, emails: `not json`}, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			info, err := githubService(tc.rt).GetUserInfo(context.Background(), "tok")
+			if err == nil {
+				t.Fatalf("got %+v, want an error: an unreachable /user/emails is an outage, not an unverified address", info)
+			}
+			var provErr *ProviderError
+			if !errors.As(err, &provErr) || provErr.Operation != "user_emails" {
+				t.Fatalf("err = %v, want a *ProviderError for operation user_emails", err)
+			}
+			if provErr.StatusCode != tc.wantStatus {
+				t.Fatalf("StatusCode = %d, want %d", provErr.StatusCode, tc.wantStatus)
+			}
+			if strings.Contains(err.Error(), "tok") || strings.Contains(err.Error(), "@example.com") {
+				t.Fatalf("error text leaks the access token or an address: %v", err)
 			}
 		})
 	}

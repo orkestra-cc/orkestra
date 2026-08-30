@@ -182,12 +182,19 @@ func (s *githubOAuthService) GetUserInfo(ctx context.Context, accessToken string
 
 	// §4.4 / §6: the address and its verified bit come ONLY from
 	// /user/emails (primary verified first, then any verified — see
-	// getPrimaryEmail). The public-profile `email` is a free-text field the
-	// user may set to any string, so it is never marked verified by
-	// assumption; it survives only as an UNVERIFIED fallback when the
-	// endpoint yields nothing, and the callback then refuses to auto-link
-	// or sign up with it.
-	email, emailVerified := s.getPrimaryEmail(ctx, accessToken)
+	// getPrimaryEmail). A failing endpoint is propagated as a provider
+	// error, never silently downgraded: an unreachable /user/emails is an
+	// upstream outage, and answering it with the unverified fallback would
+	// make the callback tell the user their email isn't verified — a
+	// permanent-sounding refusal for a transient fault. Only a 200 that
+	// carries no verified address reaches the fallback: the public-profile
+	// `email` is a free-text field the user may set to any string, so it is
+	// never marked verified by assumption and the callback then refuses to
+	// auto-link or sign up with it.
+	email, emailVerified, err := s.getPrimaryEmail(ctx, accessToken)
+	if err != nil {
+		return nil, err
+	}
 	if email == "" {
 		email = user.Email
 		emailVerified = false
@@ -210,10 +217,24 @@ func (s *githubOAuthService) GetUserInfo(ctx context.Context, accessToken string
 	return userInfo, nil
 }
 
-func (s *githubOAuthService) getPrimaryEmail(ctx context.Context, accessToken string) (string, bool) {
+// getPrimaryEmail asks /user/emails for the address GitHub itself vouches for:
+// the primary verified one, else any verified one. Its three outcomes are
+// distinct on purpose. A verified address is (email, true, nil). A 200 that
+// carries no verified address is ("", false, nil) — an answer, which the
+// caller degrades to the unverified public-profile email. Everything else —
+// a request that could not be built or sent, a non-200 (GitHub answers 401 on
+// a revoked token and 403/429 on rate limits), an unreadable or non-JSON body
+// — is an error, so a transient fault is never reported to the user as "your
+// email is not verified". Neither the access token nor any address is put into
+// the error.
+func (s *githubOAuthService) getPrimaryEmail(ctx context.Context, accessToken string) (string, bool, error) {
+	fail := func(err error) error {
+		return NewProviderError(models.OAuthProviderGitHub, "user_emails", err)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/user/emails", nil)
 	if err != nil {
-		return "", false
+		return "", false, fail(err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+accessToken)
@@ -222,12 +243,13 @@ func (s *githubOAuthService) getPrimaryEmail(ctx context.Context, accessToken st
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return "", false
+		return "", false, fail(err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", false
+		return "", false, NewProviderError(models.OAuthProviderGitHub, "user_emails", fmt.Errorf("HTTP %d", resp.StatusCode)).
+			WithStatusCode(resp.StatusCode)
 	}
 
 	var emails []struct {
@@ -238,28 +260,29 @@ func (s *githubOAuthService) getPrimaryEmail(ctx context.Context, accessToken st
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", false
+		return "", false, fail(err)
 	}
 
 	if err := json.Unmarshal(body, &emails); err != nil {
-		return "", false
+		return "", false, fail(fmt.Errorf("malformed /user/emails payload"))
 	}
 
 	// Find primary verified email
 	for _, e := range emails {
 		if e.Primary && e.Verified {
-			return e.Email, true
+			return e.Email, true, nil
 		}
 	}
 
 	// Fallback to first verified email
 	for _, e := range emails {
 		if e.Verified {
-			return e.Email, true
+			return e.Email, true, nil
 		}
 	}
 
-	return "", false
+	// A 200 with nothing verified: an answer, not a failure.
+	return "", false, nil
 }
 
 // Token management
