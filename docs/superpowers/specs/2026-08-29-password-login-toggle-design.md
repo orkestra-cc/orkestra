@@ -4,9 +4,9 @@
 |---|---|
 | **Date** | 2026-08-29 |
 | **Last review** | 2026-08-30 |
-| **Status** | Draft v4 — v3 review corrections applied; delivery split into four sequenced PRs; ready for implementation approval |
+| **Status** | Draft v4.1 — v4 plus the four contract decisions PR 1's planning surfaced (§0); ready for implementation approval |
 | **Scope** | `backend/internal/core/auth`, `backend/internal/shared/{middleware,errcode,config}`, `backend/pkg/sdk/{module,iface}` (additive validation snapshot + atomic config writes + audit wiring), `backend/cmd/server/main.go`, `frontend-admin`, `frontend-client` (adds OAuth login + Vitest), root CI targets, `docker/.env.example`, `docs/site` |
-| **ADR** | None. Both new fields default to `true`, so the feature is inert until explicitly changed. The SDK work is additive or repairs existing persistence guarantees: the frozen `Module` interface is unchanged; existing validator interfaces and `AuditSink` remain source-compatible. |
+| **ADR** | None. Both new fields default to `true`, so the feature is inert until explicitly changed. The SDK work is additive or repairs existing persistence guarantees: the frozen `Module` interface is unchanged; existing validator interfaces and `AuditSink` remain source-compatible. **One declared exception to additive-only:** `module.ConfigRepository` — provided *to* the config service by the host, never implemented *by* a module (the `RedisClient` category) — changes shape for atomic writes (§4.5). |
 
 ## 0. Revision log
 
@@ -50,6 +50,29 @@ email sourcing is recorded as existing behaviour with the fallback kept (§4.4);
 a malformed single provider toggle degrades only that provider instead of
 503-ing the whole list (§4.4, §5 #29); delivery is split into four sequenced
 PRs (§7).
+
+v4.1 (2026-08-30) records four contract decisions the PR 1 implementation
+plan surfaced, so they are approved here rather than decided in code:
+
+- `module.ConfigRepository` is provided to the config service, not
+  implemented by modules, and changes shape as a **declared exception** to
+  the SDK's additive-only rule — `CompareAndSwapConfig` added,
+  `CompareAndSwapEnvironment` and `MigrateToEnvironments` re-signed, the four
+  two-step write methods removed (§4.5, ADR row). A parallel CAS interface
+  was rejected: the service would have to keep the non-atomic path alive as
+  its fallback.
+- The admin API's two request lanes are enforced server-side: a secret key
+  in `config`, a non-secret or unknown key in `secrets`, the SDK-owned
+  roster key or any undeclared key is refused with 422
+  `module.config_key_invalid` before validation, encryption or persistence,
+  against the module's **live** schema (§4.5).
+- The boot backfill writes only schema keys whose `EnvVar`/`Default` is
+  non-empty and rebuilds the legacy mirror from the active profile; a key
+  with an empty fallback stays absent because absence is meaningful to
+  `GetRawValue` readers (§4.4, §5 #14).
+- `RequirePersistedConfig` is the **boot gate** for the modules it names: a
+  missing document, or a seeding / metadata-refresh / backfill failure
+  recorded for one of them, stops the server before it serves (§4.2).
 
 ## 1. Problem
 
@@ -225,9 +248,15 @@ after trimming. It does not use the permissive `readBool`, so an out-of-band
 Only `PolicyAudienceOperator` and `PolicyAudienceClient` are accepted.
 
 This accessor reads the repository directly; it never calls `GetConfig`'s
-lazy-seed path. More importantly, after boot seeding succeeds (or has been
-attempted), `cmd/server` marks `auth` as a **required persisted config** through
-an additive `ModuleConfigService.RequirePersistedConfig("auth")` call. For a
+lazy-seed path. More importantly, after boot seeding has run, `cmd/server`
+marks `auth` as a **required persisted config** through an additive
+`ModuleConfigService.RequirePersistedConfig(ctx, "auth")` call. That call is
+also the **boot gate** for the modules it names: it refuses — and the server
+exits before serving — when a named module's document is missing or boot
+seeding recorded a failure for it (first-boot upsert, schema metadata
+refresh, or the §4.4 backfill, including a secret that could not be
+encrypted), because a strict reader must never be handed an incomplete
+document; "log and continue" is the posture for ordinary modules only. For a
 required module the lazy-seed path is disabled for the rest of the process:
 `GetConfig("auth")` returns an error if the document disappears instead of
 rebuilding it from schema defaults, and `GetAllConfigs` — which feeds the
@@ -367,12 +396,24 @@ valid(S)        := passwordOn(S) ∨ (oauthOn(S) ∧ autoLink)
   released install seeded all eight keys at first boot; absent keys can exist
   only in documents created on pre-release dev/staging stacks. The design
   closes the drift source anyway: `SeedFromModules` gains a **backfill** step
-  for existing documents — every schema key absent from the active environment
-  (and the legacy mirror) is written with its `EnvVar`/`Default` value, secrets
-  included through the same encrypted path, `configRevision` advanced once, and
-  the backfilled key names logged at INFO. It runs once per boot before
-  traffic, so the runtime, the validator and the admin UI all read a document
-  in which every schema key is present. The runtime usable-provider and
+  for existing documents — every schema key absent from the **active
+  environment** whose `EnvVar`/`Default` is non-empty is written with that
+  value, secrets included through the same encrypted path (each encrypted
+  once), and the legacy mirror is rewritten as an exact copy of the resulting
+  profile: profiles are the source of truth, and a mirror is never backfilled
+  on its own, so a value present only in the profile reaches the mirror as
+  that value rather than as a schema default. `configRevision` advances once
+  (a lost compare-and-swap against a concurrently booting replica is re-read
+  and retried), the backfilled key names are logged at INFO, and a failure —
+  including a secret that cannot be encrypted — is recorded so
+  `RequirePersistedConfig` (§4.2) refuses to serve a required module. A key
+  whose fallback is empty stays **absent** on purpose: absence is meaningful
+  to `GetRawValue` readers (ADR-0017 D1 — an absent `sessionAbsoluteTTL` is
+  the default cap, a present empty one disables it), and a runtime read of
+  such a key needs no guess because its answer is empty either way. It runs
+  once per boot before traffic, so the runtime, the validator and the admin
+  UI all read a document in which every schema key that has a value to be
+  present with is present. The runtime usable-provider and
   auto-link accessors then use the same strict parser as the validator: an
   absent key (possible only for a fork that skips seeding) gets the schema
   default, and a malformed present value is an error rather than a silent
@@ -512,8 +553,20 @@ cannot pass each other unseen.
 
 The repository interface gains one service-facing `CompareAndSwapConfig`
 operation carrying the expected revision and an explicit mutation shape
-(legacy map, one named environment and/or active-environment name). The
-production repository translates it to **one** Mongo `UpdateOne` on the single
+(legacy map, one named environment and/or active-environment name);
+`CompareAndSwapEnvironment` (record lists) takes the `needsRestart` value and
+increments `configRevision` in the same update, deciding "is this the active
+profile" server-side; the legacy-profile migration `MigrateToEnvironments`
+becomes a compare-and-swap that matches only a document still without
+profiles at the read revision; the four two-step write methods leave the
+interface. `module.ConfigRepository` is provided *to* `ModuleConfigService`
+by the host and never implemented *by* a module — the `RedisClient` category
+in `pkg/sdk/CLAUDE.md` — so this is a **declared exception** to the SDK's
+additive-only rule, not a breach of it: the only code that tracks it is a
+fork's substitute repository (a test double), and the alternative — a parallel
+CAS interface — would keep the non-atomic two-write path alive as the
+service's fallback, which is the defect being removed. The production
+repository translates it to **one** Mongo `UpdateOne` on the single
 `module_configs` document:
 
 - active `UpdateConfig` / `UpdateEnvironmentConfig` set the environment,
@@ -535,6 +588,21 @@ revision errors or validation errors.
 
 Audit remains outside the repository transaction and is emitted from the
 handler after the mutation result, with the best-effort semantics in §4.11.
+
+**Request lanes are enforced server-side.** `PATCH /v1/admin/modules/{name}`
+and `PATCH …/environments/{env}` carry `config` and `secrets` as two blocks;
+the service refuses, before validation, encryption or persistence, any key
+that does not belong where it was sent: a declared secret (scalar or
+record-list sub-field) in `config`, a declared non-secret or a label key in
+`secrets`, the SDK-owned roster key `<field>.__items` from either, and any
+key the module does not declare — 422 with the SDK-owned code
+`module.config_key_invalid`, naming the key. Classification uses the
+module's **live** `ConfigSchema()`, never the stored snapshot (whose boot
+refresh may have failed), so a field that became a secret in the binary can
+no longer be written in plaintext through the older declaration. A module
+that declares no schema keeps accepting anything. This is what makes "no
+secret value crosses the validator boundary" true for the non-secret
+`Values`/`EffectiveValues` maps, which are otherwise copied verbatim.
 
 ### 4.6 Step-up re-authentication
 
@@ -835,7 +903,7 @@ evidence need the durable-outbox follow-up in §8.
 | 11 | Invitee on a password-off client surface | Invite redemption remains open and stores a password. A later OAuth attempt auto-links only with the same provider-verified email. No match means the user cannot enter until an operator changes policy or an invite-bound OAuth flow is added. Copy states this limitation. |
 | 12 | Password-only user with no prior OAuth link | Auto-link is available but conditional on a matching verified IdP email. The validator prevents a closed configuration loop, not per-user lockout. |
 | 13 | Both surfaces flipped independently | Own key, gate and validator clause. Operator/client rows are separate; no copy or API implies one row's password is shared across tiers. |
-| 14 | Existing deployment upgrades | Existing auth document + absent password keys → `true`; the boot backfill (§4.4) writes every other absent schema key with its default before traffic, so no runtime read guesses. Provider toggles were seeded on every released install (they predate `v0.1.0`). Missing document is an outage, not an upgrade default. `hasUsablePassword` remains one-release compatibility output. |
+| 14 | Existing deployment upgrades | Existing auth document + absent password keys → `true`; the boot backfill (§4.4) writes every other absent schema key that has a non-empty default before traffic and rebuilds the legacy mirror from the active profile, so no runtime read guesses; a backfill failure on `auth` stops the boot (§4.2). Provider toggles were seeded on every released install (they predate `v0.1.0`). Missing document is an outage, not an upgrade default. `hasUsablePassword` remains one-release compatibility output. |
 | 15 | `/policy` unreachable from the SPA | Fail-open display (existing); the backend still refuses; never a lockout. |
 | 16 | PATCH saves provider secret and disables password together | Accepted when the complete merged snapshot is valid; values+secrets persist in one atomic document update. Empty secret is not presence. |
 | 17 | Inactive target lacks a secret that the active profile has (or vice versa) | Target is judged from its own `SecretPresent` map. Invalid target is refused; valid target is not rejected because another profile differs. |
@@ -869,11 +937,26 @@ evidence need the durable-outbox follow-up in §8.
   module plus a `missing` row for `auth`. Ordinary non-required modules retain
   current self-healing. The required set is immutable once traffic starts.
 - `pkg/sdk/module/config_backfill_test.go` (new) — an existing document
-  missing schema keys gains them with `EnvVar`/`Default` values on the next
-  boot, in both the active environment and the legacy mirror; present keys
-  (including explicit empty strings) are untouched; secrets are backfilled
-  encrypted; `configRevision` advances exactly once; a document with every key
-  present is not rewritten.
+  missing schema keys gains those with a non-empty `EnvVar`/`Default` on the
+  next boot in the active environment, and the legacy mirror becomes an exact
+  copy of the resulting profile (a stale or divergent mirror is realigned, a
+  profile-only value is never replaced by a default); present keys (including
+  explicit empty strings) and empty-fallback keys are untouched; secrets are
+  backfilled encrypted, once, with identical ciphertext in profile and mirror;
+  `configRevision` advances exactly once; a lost compare-and-swap is re-read
+  and retried; a document with every key present is not rewritten; a secret
+  that cannot be encrypted fails the backfill, is recorded, and
+  `RequirePersistedConfig` refuses the module.
+- `pkg/sdk/module/config_lanes_test.go` (new) — a secret in the `config`
+  block, a non-secret or label in `secrets`, the roster key from either, an
+  undeclared key or sub-field are refused with `module.config_key_invalid` on
+  the bare PATCH, the named-environment PATCH and the record-list path (the
+  roster key is refused, never silently stripped); the live schema decides
+  over a stale stored one; a schema-less module accepts anything; nothing
+  reaches the validator, the encryptor or the repository.
+- `pkg/sdk/module/config_required_test.go` also covers the boot gate: a
+  missing document, a recorded seeding, metadata-refresh or backfill failure
+  makes `RequirePersistedConfig` refuse; a healthy document seals the set.
 - `services/gates_test.go` — `Login`, `Register` and `ForgotPassword` return
   `ErrPasswordLoginDisabled` per audience, while the other audience is
   unaffected. Operator break-glass permits only `Login`; client login and
