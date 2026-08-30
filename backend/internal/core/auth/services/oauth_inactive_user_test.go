@@ -114,7 +114,7 @@ func TestHandleOAuthCallbackWithLinking_RejectsInactiveEmailMatchedUser(t *testi
 	users.seed(inactive)
 	repo := &inactiveOAuthRepo{}
 	refresh := &ineligibleRefreshRepo{}
-	svc := &authService{userService: users, oauthProviderRepo: repo, refreshTokenRepo: refresh}
+	svc := &authService{userService: users, oauthProviderRepo: repo, refreshTokenRepo: refresh, policy: newPolicy(nil)}
 
 	_, err := svc.HandleOAuthCallbackWithLinking(context.Background(), authModels.OAuthProviderGoogle, map[string]interface{}{
 		"email": inactive.Email, "name": "Inactive", "provider_id": "google-2",

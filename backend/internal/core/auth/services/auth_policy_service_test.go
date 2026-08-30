@@ -2,11 +2,13 @@ package services
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // stubReader satisfies the configValueReader interface used by
@@ -14,9 +16,13 @@ import (
 // or Redis is required.
 type stubReader struct {
 	values map[string]string
-	// rawErr, when set, makes GetRawValue report a failed read. It stands
-	// in for an unreachable module_configs collection.
+	// rawErr, when set, makes GetRawValue and GetRawValueRequiredModule
+	// report a failed read. It stands in for an unreachable module_configs
+	// collection.
 	rawErr error
+	// requiredMissing models the auth document being absent: the strict
+	// readers must report it as an outage, never as "absent key".
+	requiredMissing bool
 }
 
 func (s *stubReader) GetValue(_ context.Context, _, key string) string {
@@ -33,15 +39,28 @@ func (s *stubReader) GetValue(_ context.Context, _, key string) string {
 //
 // A non-nil rawErr is the THIRD state the real accessor reports and the two
 // above cannot express: the read failed, so nothing is known about the key.
-// It returns the same ("", false) pair a genuine absence does, which is
-// precisely why the error has to be a separate return value — a caller
-// switching on presence alone cannot tell the two apart.
 func (s *stubReader) GetRawValue(_ context.Context, _, key string) (string, bool, error) {
 	if s == nil {
 		return "", false, nil
 	}
 	if s.rawErr != nil {
 		return "", false, s.rawErr
+	}
+	v, ok := s.values[key]
+	return v, ok, nil
+}
+
+// GetRawValueRequiredModule mirrors the strict accessor: a missing document
+// is the ERROR outcome (module.ErrRequiredConfigMissing), never "absent".
+func (s *stubReader) GetRawValueRequiredModule(_ context.Context, _, key string) (string, bool, error) {
+	if s == nil {
+		return "", false, errors.New("nil reader")
+	}
+	if s.rawErr != nil {
+		return "", false, s.rawErr
+	}
+	if s.requiredMissing {
+		return "", false, module.ErrRequiredConfigMissing
 	}
 	v, ok := s.values[key]
 	return v, ok, nil
@@ -687,17 +706,66 @@ func TestRecoveryCodesCount(t *testing.T) {
 	}
 }
 
-func TestOAuthAutoLinkByEmail_DefaultsTrue(t *testing.T) {
-	var p *AuthPolicyService
-	if !p.OAuthAutoLinkByEmail(context.Background()) {
-		t.Fatalf("nil policy must default to true (preserve current UX)")
+func TestOAuthAutoLinkByEmailEnabled_Strict(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name    string
+		policy  *AuthPolicyService
+		want    bool
+		wantErr bool
+	}{
+		{"nil policy is an outage, never true", nil, false, true},
+		{"absent key → schema default true", newPolicy(nil), true, false},
+		{"explicit false", newPolicy(map[string]string{"oauthAutoLinkByEmail": "false"}), false, false},
+		{"canonical true with case and space", newPolicy(map[string]string{"oauthAutoLinkByEmail": " TRUE "}), true, false},
+		{"malformed value is an error, not the default", newPolicy(map[string]string{"oauthAutoLinkByEmail": "treu"}), false, true},
+		{"present-empty is an error", newPolicy(map[string]string{"oauthAutoLinkByEmail": ""}), false, true},
+		{"readBool's '1'/'yes' are NOT accepted", newPolicy(map[string]string{"oauthAutoLinkByEmail": "yes"}), false, true},
+		{"read failure", &AuthPolicyService{cs: &stubReader{rawErr: errors.New("mongo down")}}, false, true},
+		{"missing auth document", &AuthPolicyService{cs: &stubReader{requiredMissing: true}}, false, true},
 	}
-	if !newPolicy(nil).OAuthAutoLinkByEmail(context.Background()) {
-		t.Fatalf("empty config must default to true")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.policy.OAuthAutoLinkByEmailEnabled(ctx)
+			if tc.wantErr {
+				if !errors.Is(err, ErrAuthPolicyUnavailable) {
+					t.Fatalf("err = %v, want ErrAuthPolicyUnavailable", err)
+				}
+				if got {
+					t.Fatal("an error must never come with true")
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("got %v, %v; want %v, nil", got, err, tc.want)
+			}
+		})
 	}
-	off := newPolicy(map[string]string{"oauthAutoLinkByEmail": "false"})
-	if off.OAuthAutoLinkByEmail(context.Background()) {
-		t.Fatalf("explicit false must opt out")
+}
+
+func TestStrictBool(t *testing.T) {
+	for raw, want := range map[string]bool{"true": true, "TRUE": true, " False ": false, "false": false} {
+		got, err := strictBool(raw)
+		if err != nil || got != want {
+			t.Errorf("strictBool(%q) = %v, %v; want %v", raw, got, err, want)
+		}
+	}
+	for _, raw := range []string{"", "1", "0", "yes", "no", "treu", "t"} {
+		if _, err := strictBool(raw); err == nil {
+			t.Errorf("strictBool(%q) must reject", raw)
+		}
+	}
+}
+
+func TestProviderToggleKey(t *testing.T) {
+	if k, ok := providerToggleKey(PolicyAudienceOperator, " GitHub "); !ok || k != "githubEnabledAdmin" {
+		t.Fatalf("got %q,%v", k, ok)
+	}
+	if k, ok := providerToggleKey(PolicyAudienceClient, "apple"); !ok || k != "appleEnabledClient" {
+		t.Fatalf("got %q,%v", k, ok)
+	}
+	if _, ok := providerToggleKey(PolicyAudienceOperator, "facebook"); ok {
+		t.Fatal("unknown provider must not resolve to a key")
 	}
 }
 

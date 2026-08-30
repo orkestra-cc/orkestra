@@ -58,6 +58,11 @@ var (
 	// already authenticated. Translated to 403 oauth_link_disabled at
 	// the handler boundary.
 	ErrOAuthLinkDisabled = errors.New("oauth account linking by email is disabled")
+	// ErrOAuthEmailUnverified signals that an OAuth identity with no
+	// existing (provider, providerID) link arrived with an email the IdP
+	// did not mark verified. It is returned BEFORE the local email lookup,
+	// so the caller learns nothing about whether an account exists.
+	ErrOAuthEmailUnverified = errors.New("oauth provider did not verify the email")
 	// ErrLastCredentialRemoval signals that an admin tried to unlink an
 	// OAuth identity that would leave the target with no usable login
 	// method (no password set AND it was their only OAuth provider).
@@ -1977,7 +1982,11 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			// who controls a matching IdP email hijack a password
 			// account. When off, refuse here so account linking must
 			// happen from an authenticated settings page instead.
-			if s.policy != nil && !s.policy.OAuthAutoLinkByEmail(ctx) {
+			autoLink, autoLinkErr := s.policy.OAuthAutoLinkByEmailEnabled(ctx)
+			if autoLinkErr != nil {
+				return nil, autoLinkErr
+			}
+			if !autoLink {
 				return nil, ErrOAuthLinkDisabled
 			}
 			user = convertUserResponseToAuthModel(userResponse)
