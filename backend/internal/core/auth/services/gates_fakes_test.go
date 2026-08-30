@@ -47,6 +47,9 @@ type gateUserFake struct {
 	// is still appended to createdUsers before returning the error.
 	createFromOAuthAbortErr error
 	updateUserErr           error
+	// getByEmailCalls counts GetUserByEmail — the lookup §4.4 forbids before
+	// the verified-email and auto-link-policy checks.
+	getByEmailCalls int
 }
 
 func newGateUserFake() *gateUserFake {
@@ -76,6 +79,7 @@ func (f *gateUserFake) GetUserByID(_ context.Context, id string) (*iface.User, e
 func (f *gateUserFake) GetUserByEmail(_ context.Context, email string) (*iface.UserManagementResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.getByEmailCalls++
 	if u, ok := f.byEmail[email]; ok {
 		return u.ToResponse(), nil
 	}

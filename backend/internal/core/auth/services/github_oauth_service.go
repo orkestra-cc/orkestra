@@ -180,13 +180,17 @@ func (s *githubOAuthService) GetUserInfo(ctx context.Context, accessToken string
 		return nil, NewProviderError(models.OAuthProviderGitHub, "user_info", err)
 	}
 
-	// Get primary email if not available in profile
-	email := user.Email
-	emailVerified := false
+	// §4.4 / §6: the address and its verified bit come ONLY from
+	// /user/emails (primary verified first, then any verified — see
+	// getPrimaryEmail). The public-profile `email` is a free-text field the
+	// user may set to any string, so it is never marked verified by
+	// assumption; it survives only as an UNVERIFIED fallback when the
+	// endpoint yields nothing, and the callback then refuses to auto-link
+	// or sign up with it.
+	email, emailVerified := s.getPrimaryEmail(ctx, accessToken)
 	if email == "" {
-		email, emailVerified = s.getPrimaryEmail(ctx, accessToken)
-	} else {
-		emailVerified = true // Email from profile is considered verified
+		email = user.Email
+		emailVerified = false
 	}
 
 	userInfo := &UserInfo{

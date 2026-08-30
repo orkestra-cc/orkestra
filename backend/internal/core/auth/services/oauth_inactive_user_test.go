@@ -85,6 +85,10 @@ func (r *ineligibleRefreshRepo) CreateRefreshToken(context.Context, *authModels.
 	return nil
 }
 
+// The userInfo map below carries no email_verified: an identity with an
+// existing (provider, providerID) link logs in regardless of the bit, which
+// §4.4 gates only for an unlinked identity. Keep it that way — this test is
+// the proof of that carve-out.
 func TestHandleOAuthCallbackWithLinking_RejectsInactiveLinkedUser(t *testing.T) {
 	users := newGateUserFake()
 	inactive := activeUser("inactive-linked@example.com", "x")
@@ -117,7 +121,7 @@ func TestHandleOAuthCallbackWithLinking_RejectsInactiveEmailMatchedUser(t *testi
 	svc := &authService{userService: users, oauthProviderRepo: repo, refreshTokenRepo: refresh, policy: newPolicy(nil)}
 
 	_, err := svc.HandleOAuthCallbackWithLinking(context.Background(), authModels.OAuthProviderGoogle, map[string]interface{}{
-		"email": inactive.Email, "name": "Inactive", "provider_id": "google-2",
+		"email": inactive.Email, "name": "Inactive", "provider_id": "google-2", "email_verified": true,
 	}, nil, nil, &authModels.DeviceInfo{DeviceID: "device-1"})
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
