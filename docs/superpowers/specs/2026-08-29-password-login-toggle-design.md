@@ -931,7 +931,12 @@ no-referrer/no-store headers) to `GET {CLIENT_API_URL}/v1/auth/client/oauth/comp
 relay** — IdP denial, missing code, provider unavailable, application
 refusal, success and the MFA continuation alike — so the deferred binding
 is always verified and the start-host cookie always cleared before the
-browser reaches the client SPA. That endpoint, on the client API host,
+browser reaches the client SPA. Two cases cannot reach the relay and are
+terminal 400s on the operator host instead: no client surface configured,
+and a relay record that cannot be stored. Both are safe (nothing was minted
+and the one-shot state is already consumed), but the start-host cookie
+cannot be cleared from the operator host in either — it expires on its own
+ten-minute `Max-Age`, and a fresh start overwrites it. That endpoint, on the client API host,
 takes the record atomically (a second presentation finds nothing), requires
 the `orkestra_oauth_state` cookie the same host set at start to equal the
 record's nonce in constant time — missing, foreign or link-mode/wrong-tier
@@ -1131,11 +1136,11 @@ evidence need the durable-outbox follow-up in §8.
 | 28 | OAuth return target is stale or crafted | It is take-and-deleted on every callback outcome, ignored after ten minutes, and accepted only after same-origin canonical validation; fallback is the fixed account/profile route. |
 | 29 | One provider toggle holds a malformed value (`"treu"`) while password is still on | That provider alone is unusable: omitted from `/providers`, 403 on its OAuth start, WARN naming the key; other providers and the password form keep working. Only a document-level read failure escalates to 503. The validator rejects the malformed value on the next write. |
 | 30 | Required `auth` document missing while an operator opens `/admin/modules` | The list renders with every other module and a `missing` badge on `auth`; `GetConfig("auth")` and every strict policy read fail closed. Nothing lazy-reseeds. |
-| 31 | Client-tier web OAuth callback lands on the operator host | The callback never sets the client cookie or mints tokens there: every terminal outcome of the valid state — failure codes included — becomes a one-shot encrypted relay record and a redirect to `CLIENT_API_URL/v1/auth/client/oauth/complete?relay=`; the client API host verifies the browser binding, clears its state cookie, then completes or renders the recorded failure (§4.10). With no client surface configured the state is a terminal 400. |
-| 35 | The browser holds an unrelated operator flow's nonce on `console.*` while a client-tier callback arrives | `StartHost` is checked first: the cross-host callback is deferred to the relay regardless of that cookie. A same-host (operator) callback with a foreign nonce is a 400. |
+| 31 | Client-tier web OAuth callback lands on the operator host | The callback never sets the client cookie or mints tokens there: every terminal outcome of the valid state — failure codes included — becomes a one-shot encrypted relay record and a redirect to `CLIENT_API_URL/v1/auth/client/oauth/complete?relay=`; the client API host verifies the browser binding, clears its state cookie, then completes or renders the recorded failure (§4.10). With no client surface configured, or when the relay record cannot be stored, the state is a terminal 400 on the operator host; the start-host cookie then expires on its own `Max-Age` (the operator host cannot clear it). |
 | 32 | Relay id replayed, expired, presented without the start-host state cookie, or with a foreign nonce | Terminal 400, no redirect, no token; the record was consumed by the first take. |
 | 33 | Two concurrent callbacks present the same state | Atomic `Take`: exactly one proceeds, the other is a generic 400. |
 | 34 | A state started for one provider is presented to another provider's callback | Generic 400 inside state resolution, before the IdP `error`, code or profile is read. |
+| 35 | The browser holds an unrelated operator flow's nonce on `console.*` while a client-tier callback arrives | `StartHost` is checked first: the cross-host callback is deferred to the relay regardless of that cookie. A same-host (operator) callback with a foreign nonce is a 400. |
 
 ## 6. Testing
 
