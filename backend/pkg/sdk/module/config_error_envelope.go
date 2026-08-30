@@ -53,5 +53,18 @@ func mapConfigServiceError(err error, fallback func(error) error) error {
 			Code:   CodeConfigRevisionStale,
 		}
 	}
+	if errors.Is(err, ErrRequiredConfigMissing) {
+		return mapConfigReadError(err)
+	}
 	return fallback(err)
+}
+
+// mapConfigReadError turns a required-module outage into a 503 the SPA can
+// render as retryable; every other error passes through unchanged.
+func mapConfigReadError(err error) error {
+	if errors.Is(err, ErrRequiredConfigMissing) {
+		return huma.Error503ServiceUnavailable(
+			"Module configuration is unavailable: the stored document is missing. Restore it or restart the backend.")
+	}
+	return err
 }

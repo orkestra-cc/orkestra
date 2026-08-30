@@ -73,13 +73,18 @@ type ModuleHealthStatus struct {
 // ModuleConfigResponse is the API representation of a module config.
 // Secrets are never returned — only a per-field indicator of whether a value exists.
 type ModuleConfigResponse struct {
-	ModuleName            string                 `json:"moduleName"`
-	DisplayName           string                 `json:"displayName"`
-	Description           string                 `json:"description"`
-	Category              ModuleCategory         `json:"category"`
-	Enabled               bool                   `json:"enabled"`
-	Status                string                 `json:"status"` // "running" | "failed" | "disabled" | "stopped"
-	Error                 string                 `json:"error,omitempty"`
+	ModuleName  string         `json:"moduleName"`
+	DisplayName string         `json:"displayName"`
+	Description string         `json:"description"`
+	Category    ModuleCategory `json:"category"`
+	Enabled     bool           `json:"enabled"`
+	Status      string         `json:"status"` // "running" | "failed" | "disabled" | "stopped" | "missing"
+	Error       string         `json:"error,omitempty"`
+	// Missing is true for a required module whose config document is absent
+	// (see ModuleConfigService.RequirePersistedConfig). Status is "missing",
+	// ConfigValues/SecretStatus are empty, and every mutation on the module
+	// returns 503 until the document is restored or the backend restarted.
+	Missing               bool                   `json:"missing,omitempty"`
 	NeedsRestart          bool                   `json:"needsRestart"`
 	ConfigValues          map[string]string      `json:"configValues"`
 	SecretStatus          map[string]bool        `json:"secretStatus"`
@@ -192,16 +197,18 @@ type SetActiveEnvironmentOutput struct {
 
 // ListModules returns all module configurations.
 func (h *ModuleAdminHandler) ListModules(ctx context.Context, _ *struct{}) (*ListModulesOutput, error) {
-	configs, err := h.configService.GetAllConfigs(ctx)
+	statuses, err := h.configService.ListConfigs(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	resp := make([]ModuleConfigResponse, len(configs))
-	for i, c := range configs {
-		resp[i] = h.toConfigResponse(c)
+	resp := make([]ModuleConfigResponse, 0, len(statuses))
+	for _, st := range statuses {
+		if st.Missing {
+			resp = append(resp, h.missingConfigResponse(st.Name))
+			continue
+		}
+		resp = append(resp, h.toConfigResponse(*st.Config))
 	}
-
 	return &ListModulesOutput{
 		Body: struct {
 			Modules []ModuleConfigResponse `json:"modules"`
@@ -209,11 +216,41 @@ func (h *ModuleAdminHandler) ListModules(ctx context.Context, _ *struct{}) (*Lis
 	}, nil
 }
 
+// missingConfigResponse renders a required module whose document is gone:
+// identity and schema come from the registered module (the binary is the
+// source of truth for those), state is "missing".
+func (h *ModuleAdminHandler) missingConfigResponse(name string) ModuleConfigResponse {
+	resp := ModuleConfigResponse{
+		ModuleName:            name,
+		DisplayName:           name,
+		Status:                "missing",
+		Missing:               true,
+		ConfigValues:          map[string]string{},
+		SecretStatus:          map[string]bool{},
+		ActiveEnvironment:     "production",
+		AvailableEnvironments: DefaultEnvironments,
+	}
+	for _, m := range h.registry.AllModules() {
+		if m.Name() != name {
+			continue
+		}
+		resp.DisplayName = DisplayNameOf(m)
+		resp.Description = DescriptionOf(m)
+		resp.Category = m.Category()
+		resp.ConfigSchema = ConfigSchemaOf(m)
+		resp.ConfigGroups = ConfigGroupsOf(m)
+		resp.DependsOn = DependenciesOf(m)
+		resp.Enabled = m.Category() == CategoryCore || h.registry.IsStarted(name)
+		break
+	}
+	return resp
+}
+
 // GetModule returns a single module configuration.
 func (h *ModuleAdminHandler) GetModule(ctx context.Context, input *GetModuleInput) (*GetModuleOutput, error) {
 	config, err := h.configService.GetConfig(ctx, input.Name)
 	if err != nil {
-		return nil, err
+		return nil, mapConfigReadError(err)
 	}
 	if config == nil {
 		return nil, huma.Error404NotFound(fmt.Sprintf("module %q not found", input.Name))
@@ -228,7 +265,7 @@ func (h *ModuleAdminHandler) UpdateModule(ctx context.Context, input *UpdateModu
 	// Check module exists
 	existing, err := h.configService.GetConfig(ctx, input.Name)
 	if err != nil {
-		return nil, err
+		return nil, mapConfigReadError(err)
 	}
 	if existing == nil {
 		return nil, huma.Error404NotFound(fmt.Sprintf("module %q not found", input.Name))
@@ -365,7 +402,7 @@ func (h *ModuleAdminHandler) HealthCheck(ctx context.Context, _ *struct{}) (*Mod
 func (h *ModuleAdminHandler) ListEnvironments(ctx context.Context, input *ListEnvironmentsInput) (*ListEnvironmentsOutput, error) {
 	config, err := h.configService.GetConfig(ctx, input.Name)
 	if err != nil {
-		return nil, err
+		return nil, mapConfigReadError(err)
 	}
 	if config == nil {
 		return nil, huma.Error404NotFound(fmt.Sprintf("module %q not found", input.Name))
@@ -386,6 +423,11 @@ func (h *ModuleAdminHandler) ListEnvironments(ctx context.Context, input *ListEn
 func (h *ModuleAdminHandler) GetEnvironment(ctx context.Context, input *GetEnvironmentInput) (*GetEnvironmentOutput, error) {
 	envConfig, secretStatus, err := h.configService.GetEnvironmentConfig(ctx, input.Name, input.Env)
 	if err != nil {
+		// A required-module outage is not "no such environment": it must win
+		// over the blanket 404 so the SPA renders it as retryable.
+		if errors.Is(err, ErrRequiredConfigMissing) {
+			return nil, mapConfigReadError(err)
+		}
 		return nil, huma.Error404NotFound(err.Error())
 	}
 
@@ -432,7 +474,7 @@ func (h *ModuleAdminHandler) UpdateEnvironment(ctx context.Context, input *Updat
 
 	envConfig, secretStatus, err := h.configService.GetEnvironmentConfig(ctx, input.Name, input.Env)
 	if err != nil {
-		return nil, err
+		return nil, mapConfigReadError(err)
 	}
 
 	updatedAt := ""

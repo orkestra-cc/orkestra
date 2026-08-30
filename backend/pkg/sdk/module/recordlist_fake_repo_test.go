@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"testing"
 )
 
@@ -47,6 +48,10 @@ type fakeConfigRepo struct {
 	beforeMigrate func()
 	// migrateErr, when set, makes MigrateToEnvironments fail with it.
 	migrateErr error
+	// refreshErr, when set, makes RefreshMetadata fail with it — the
+	// boot-seeding failure that leaves a document judged against a stale
+	// stored schema.
+	refreshErr error
 }
 
 func newFakeConfigRepo() *fakeConfigRepo {
@@ -88,7 +93,21 @@ func copyStrings(m map[string]string) map[string]string {
 	return out
 }
 
-func (f *fakeConfigRepo) FindAll(context.Context) ([]ModuleConfig, error) { return nil, nil }
+// FindAll returns deep copies in name order, like the Mongo repository
+// would (order is not part of the contract; determinism is convenient).
+func (f *fakeConfigRepo) FindAll(ctx context.Context) ([]ModuleConfig, error) {
+	names := make([]string, 0, len(f.docs))
+	for n := range f.docs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]ModuleConfig, 0, len(names))
+	for _, n := range names {
+		cp, _ := f.FindByName(ctx, n)
+		out = append(out, *cp)
+	}
+	return out, nil
+}
 
 func (f *fakeConfigRepo) Upsert(_ context.Context, c *ModuleConfig) error {
 	f.docs[c.ModuleName] = c
@@ -128,7 +147,7 @@ func (f *fakeConfigRepo) MigrateToEnvironments(_ context.Context, name string, c
 
 func (f *fakeConfigRepo) ClearNeedsRestart(context.Context, string) error { return nil }
 
-func (f *fakeConfigRepo) RefreshMetadata(context.Context, Module) error { return nil }
+func (f *fakeConfigRepo) RefreshMetadata(context.Context, Module) error { return f.refreshErr }
 
 // CompareAndSwapEnvironment mirrors the Mongo implementation's contract: a
 // mismatched revision is a lost race (false, nil), not an error; the

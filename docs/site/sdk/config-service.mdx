@@ -94,6 +94,10 @@ It runs on every mutation surface with the exact profile that would become effec
 
 Every module-config mutation is a single MongoDB `UpdateOne` guarded by the document's monotone `configRevision`: the service reads the document, validates the candidate, and writes profile values, secrets, the legacy mirror, `needsRestart` and `configRevision + 1` together — or nothing. A write that lost the race returns **409** with body code `module.config_revision_stale`; reload the document and review the diff before saving again. The operator console does exactly that ("Reload & review"). `needsRestart` is persisted in the same write from the module's `HotReloadConfig()` declaration, so a successful edit to a hot-reloadable module never leaves a stale restart hint. A legacy document that predates environment profiles is migrated on first access through the same compare-and-swap discipline, and a read that cannot complete that migration fails rather than serving the unmigrated document.
 
+### Required documents
+
+Lazy self-healing (an admin read rebuilding a wiped document from schema defaults) is the default, but a deployment can mark modules whose document must **not** be rebuilt at runtime — Orkestra marks `auth`, because its per-surface password-login policy is read strictly and a rebuilt default would silently re-enable password sign-in. For a marked module a missing document is an outage: `GET /v1/admin/modules/{name}` and every mutation return **503**, `GET /v1/admin/modules` still lists every other module and shows the marked one as `"status": "missing"` with `"missing": true`. Restore the document, or fix the database and restart so boot seeding runs.
+
 ## Repeatable fields (`recordList`)
 
 A module that needs an operator-managed **list of records** — several named

@@ -3,9 +3,11 @@ package module
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"time"
 )
 
@@ -30,6 +32,22 @@ type ModuleConfigService struct {
 	// never diverge through a later best-effort clear. Nil means every
 	// write marks needsRestart (the pre-resolver behaviour).
 	hotReload func(name string) bool
+
+	// requiredPersisted names modules whose config document must exist for
+	// the rest of the process: after boot seeding, a missing document for
+	// one of them is an outage — GetConfig fails and the list shows a
+	// `missing` row — never a reason to rebuild it from schema defaults.
+	// The strict credential-policy readers in auth depend on this: a lazy
+	// re-seed from an admin page read would recreate a permissive default
+	// exactly when the reader had correctly observed the outage. Populated
+	// once by RequirePersistedConfig before traffic and read-only after.
+	requiredPersisted map[string]bool
+	requiredSealed    bool
+	// seedFailures records, per module, the last boot-seeding or backfill
+	// failure SeedFromModules logged (nil-free when everything succeeded).
+	// RequirePersistedConfig consults it: a required module whose seed
+	// failed must stop the boot, not serve a possibly incomplete document.
+	seedFailures map[string]error
 }
 
 // SetHotReloadResolver installs the registry's hot-reload answer. See the
@@ -77,11 +95,13 @@ const (
 // NewModuleConfigService creates a new config service.
 func NewModuleConfigService(repo ConfigRepository, redis RedisClient, logger *slog.Logger) *ModuleConfigService {
 	return &ModuleConfigService{
-		repo:         repo,
-		redis:        redis,
-		logger:       logger,
-		coreModules:  make(map[string]bool),
-		knownModules: make(map[string]Module),
+		repo:              repo,
+		redis:             redis,
+		logger:            logger,
+		coreModules:       make(map[string]bool),
+		knownModules:      make(map[string]Module),
+		requiredPersisted: make(map[string]bool),
+		seedFailures:      make(map[string]error),
 	}
 }
 
@@ -176,6 +196,7 @@ func (s *ModuleConfigService) SeedFromModules(ctx context.Context, modules []Mod
 				slog.String("module", m.Name()),
 				slog.String("error", err.Error()),
 			)
+			s.seedFailures[m.Name()] = err
 			continue
 		}
 
@@ -189,6 +210,9 @@ func (s *ModuleConfigService) SeedFromModules(ctx context.Context, modules []Mod
 					slog.String("module", m.Name()),
 					slog.String("error", err.Error()),
 				)
+				// A stale stored schema is what the live-schema rule guards
+				// against; for a required module it is not a warning.
+				s.seedFailures[m.Name()] = err
 			}
 			// Clear needsRestart for loaded modules — this flag should only
 			// remain set for modules that are enabled in DB but not loaded.
@@ -208,6 +232,7 @@ func (s *ModuleConfigService) SeedFromModules(ctx context.Context, modules []Mod
 				slog.String("module", m.Name()),
 				slog.String("error", err.Error()),
 			)
+			s.seedFailures[m.Name()] = err
 			continue
 		}
 
@@ -288,6 +313,59 @@ func (s *ModuleConfigService) buildInitialConfig(m Module) ModuleConfig {
 	}
 }
 
+var (
+	// ErrRequiredConfigMissing: a module marked by RequirePersistedConfig has
+	// no document. Recovery is restore the document, or fix Mongo and perform
+	// a controlled restart so boot seeding can run — never a lazy re-seed.
+	ErrRequiredConfigMissing = errors.New("module: required config document is missing")
+	// ErrRequiredSetSealed: RequirePersistedConfig was already called. The set
+	// is decided once before traffic; pass every name in that one call.
+	ErrRequiredSetSealed = errors.New("module: required persisted-config set is already sealed")
+)
+
+// RequirePersistedConfig marks modules whose config document must exist
+// from now on (see requiredPersisted), and is the BOOT GATE for them: it
+// refuses — so cmd/server can abort before serving traffic — when a named
+// module's document is missing or its boot seeding/backfill recorded a
+// failure. A required module is one whose strict readers may never be
+// handed an incomplete document; "log and continue" is not an option for
+// it. Call it ONCE, after boot seeding has run; a second call fails with
+// ErrRequiredSetSealed so the set cannot drift while the process serves.
+// A refused call seals nothing (the caller is about to exit).
+func (s *ModuleConfigService) RequirePersistedConfig(ctx context.Context, names ...string) error {
+	if s.requiredSealed {
+		return ErrRequiredSetSealed
+	}
+	for _, n := range names {
+		if err := s.seedFailures[n]; err != nil {
+			return fmt.Errorf("module %q: boot seeding failed, refusing to serve: %w", n, err)
+		}
+		doc, err := s.repo.FindByName(ctx, n)
+		if err != nil {
+			return fmt.Errorf("module %q: verify config document: %w", n, err)
+		}
+		if doc == nil {
+			return fmt.Errorf("%w: %q", ErrRequiredConfigMissing, n)
+		}
+	}
+	s.requiredSealed = true
+	for _, n := range names {
+		s.requiredPersisted[n] = true
+	}
+	return nil
+}
+
+// IsRequiredPersisted reports whether name was marked by RequirePersistedConfig.
+func (s *ModuleConfigService) IsRequiredPersisted(name string) bool { return s.requiredPersisted[name] }
+
+// ModuleConfigStatus is one row of ListConfigs: a present document, or a
+// required module whose document is missing (Config nil).
+type ModuleConfigStatus struct {
+	Name    string
+	Missing bool
+	Config  *ModuleConfig
+}
+
 // GetConfig retrieves the full config document for a module. Used by admin API.
 // If the module is registered but has no document in MongoDB (e.g. the
 // collection was dropped while the backend was running), the config is
@@ -303,6 +381,11 @@ func (s *ModuleConfigService) GetConfig(ctx context.Context, name string) (*Modu
 			return nil, fmt.Errorf("module %q: migrate legacy config: %w", name, err)
 		}
 		return doc, nil
+	}
+	if s.requiredPersisted[name] {
+		s.logger.Error("GetConfig: required module config document is missing — restore it or restart",
+			slog.String("module", name))
+		return nil, fmt.Errorf("%w: %q", ErrRequiredConfigMissing, name)
 	}
 	return s.lazySeed(ctx, name)
 }
@@ -356,43 +439,68 @@ func (s *ModuleConfigService) ensureEnvironments(ctx context.Context, doc *Modul
 	return nil
 }
 
-// GetAllConfigs retrieves all module config documents. Used by admin API list endpoint.
-// If the DB is missing documents for modules we know about, they are lazily
-// rebuilt from each module's ConfigSchema so the admin UI never sees a
-// partially-seeded catalog after a live DB wipe.
-func (s *ModuleConfigService) GetAllConfigs(ctx context.Context) ([]ModuleConfig, error) {
+// ListConfigs returns one row per registered module: the document when it
+// exists (lazily migrated to profiles), a lazily re-seeded document for an
+// ordinary module that lost its document (dev DB wipe), and a `missing` row
+// for a REQUIRED module that lost its document. The required-missing case
+// never fails the whole list — the list is the page an operator repairs
+// from — and never re-seeds; a failed profile migration, being a write
+// failure, does fail it. Orphan documents (modules not compiled into this
+// binary) are dropped, non-destructively, as before.
+func (s *ModuleConfigService) ListConfigs(ctx context.Context) ([]ModuleConfigStatus, error) {
 	docs, err := s.repo.FindAll(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	// Drop orphan documents — modules no longer compiled into this binary
-	// (addons a fork removed, or the ADR-0006 core-only collapse). Their routes
-	// are gated/absent, so surfacing them in the admin UI is misleading. The
-	// documents are left in the collection (non-destructive); they are simply
-	// not returned. When knownModules is empty (service constructed without a
-	// boot seed, e.g. some tooling paths) there is no registry to filter
-	// against, so every document is returned unchanged.
 	var present map[string]bool
 	if len(s.knownModules) > 0 {
 		docs, present = filterKnown(docs, s.knownModules)
 	}
-
-	// Lazily migrate any kept documents without environments.
 	for i := range docs {
+		// A failed migration is a real write failure (the lost-race case is
+		// absorbed inside ensureEnvironments by re-reading); a read does not
+		// paper over it by serving the unmigrated document.
 		if err := s.ensureEnvironments(ctx, &docs[i]); err != nil {
-			s.logger.Warn("GetAllConfigs: failed to migrate environments",
-				slog.String("module", docs[i].ModuleName), slog.String("error", err.Error()))
+			return nil, fmt.Errorf("module %q: migrate legacy config: %w", docs[i].ModuleName, err)
 		}
 	}
-
-	// Lazy-seed any known module missing a document (e.g. after a dev DB wipe).
+	out := make([]ModuleConfigStatus, 0, len(docs)+len(s.knownModules))
+	for i := range docs {
+		out = append(out, ModuleConfigStatus{Name: docs[i].ModuleName, Config: &docs[i]})
+	}
+	names := make([]string, 0, len(s.knownModules))
 	for name := range s.knownModules {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
 		if present[name] {
 			continue
 		}
+		if s.requiredPersisted[name] {
+			s.logger.Error("ListConfigs: required module config document is missing — restore it or restart",
+				slog.String("module", name))
+			out = append(out, ModuleConfigStatus{Name: name, Missing: true})
+			continue
+		}
 		if seeded, err := s.lazySeed(ctx, name); err == nil && seeded != nil {
-			docs = append(docs, *seeded)
+			out = append(out, ModuleConfigStatus{Name: name, Config: seeded})
+		}
+	}
+	return out, nil
+}
+
+// GetAllConfigs is ListConfigs without the missing rows — the pre-existing
+// shape, kept for callers that only want documents.
+func (s *ModuleConfigService) GetAllConfigs(ctx context.Context) ([]ModuleConfig, error) {
+	statuses, err := s.ListConfigs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	docs := make([]ModuleConfig, 0, len(statuses))
+	for _, st := range statuses {
+		if st.Config != nil {
+			docs = append(docs, *st.Config)
 		}
 	}
 	return docs, nil
@@ -746,6 +854,26 @@ func (s *ModuleConfigService) GetRawValue(ctx context.Context, moduleName, key s
 		// Not an error: a module with no config document has said nothing
 		// about any key, which is exactly the "absent" answer.
 		return "", false, nil
+	}
+	v, ok := doc.ActiveConfigValues()[key]
+	return v, ok, nil
+}
+
+// GetRawValueRequiredModule is GetRawValue for a module whose document must
+// exist: the three outcomes are preserved, but a missing document is the
+// ERROR outcome (ErrRequiredConfigMissing), not "absent". It never calls
+// GetConfig's lazy-seed path. A caller governing credentials — auth's
+// per-surface password policy — reads through this so an outage can never
+// be mistaken for "the operator said nothing here" and fall back to a
+// permissive default. GetRawValue itself is unchanged: changing it would
+// alter SessionAbsoluteTTL's compatibility contract.
+func (s *ModuleConfigService) GetRawValueRequiredModule(ctx context.Context, moduleName, key string) (string, bool, error) {
+	doc, err := s.repo.FindByName(ctx, moduleName)
+	if err != nil {
+		return "", false, err
+	}
+	if doc == nil {
+		return "", false, fmt.Errorf("%w: %q", ErrRequiredConfigMissing, moduleName)
 	}
 	v, ok := doc.ActiveConfigValues()[key]
 	return v, ok, nil

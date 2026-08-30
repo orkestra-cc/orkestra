@@ -97,8 +97,10 @@ export interface ModuleConfig {
   description: string;
   category: 'core' | 'toggleable' | 'external';
   enabled: boolean;
-  status: 'running' | 'failed' | 'disabled' | 'stopped';
+  status: 'running' | 'failed' | 'disabled' | 'stopped' | 'missing';
   error?: string;
+  /** A required module whose stored config document is absent. */
+  missing?: boolean;
   needsRestart: boolean;
   configValues: Record<string, string>;
   secretStatus: Record<string, boolean>;

@@ -280,6 +280,16 @@ func main() {
 		log.Fatalf("Failed to initialize modules: %v", err)
 	}
 
+	// Boot seeding has run inside InitAll. From here on the documents of
+	// requiredPersistedModules must exist: GetConfig fails closed and the
+	// module list shows a `missing` row instead of lazily re-seeding them.
+	// This is also the boot gate for those modules: a missing document, or a
+	// seeding/backfill failure SeedFromModules recorded, aborts here rather
+	// than serving a strict policy reader an incomplete auth document.
+	if err := configService.RequirePersistedConfig(ctx, requiredPersistedModules...); err != nil {
+		log.Fatalf("Required module config is not serviceable: %v", err)
+	}
+
 	// ADR-0005 Phase F — hot-swap the slog handler's resolver from
 	// the boot env-driven static snapshot to the DB-backed live
 	// resolver. Every existing module logger (clones produced by

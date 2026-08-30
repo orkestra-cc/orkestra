@@ -303,6 +303,17 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   profiles at the read revision, so two concurrent writers on a legacy
   document cannot copy a stale legacy snapshot over a freshly written
   profile.
+- **`RequirePersistedConfig(ctx, names...)` turns off lazy self-heal for the
+  named modules and is their boot gate** — call it once, after `InitAll`,
+  before serving; it fails (and `cmd/server` exits) when a named module's
+  document is missing or `SeedFromModules` recorded a seeding/backfill failure
+  for it, because a strict reader must never be handed an incomplete
+  document. For those modules
+  a missing document makes `GetConfig` / `GetRawValueRequiredModule` return
+  `ErrRequiredConfigMissing` (503 on the admin API) and `ListConfigs` emit a
+  `ModuleConfigStatus{Missing: true}` row instead of re-seeding; every other
+  module keeps today's rebuild-from-schema behaviour. The set is sealed after
+  the first call. In-tree the server marks `auth` (`cmd/server/admin_wiring.go`).
 - **A `ConfigValidationError` with a non-empty `Code`** (e.g.
   `"tenant.single_mode_conflict"`) upgrades the admin API's response from
   the legacy text-only `422` to the `{status,title,detail,code}` envelope
