@@ -58,6 +58,11 @@ var (
 	// already authenticated. Translated to 403 oauth_link_disabled at
 	// the handler boundary.
 	ErrOAuthLinkDisabled = errors.New("oauth account linking by email is disabled")
+	// ErrOAuthEmailUnverified signals that an OAuth identity with no
+	// existing (provider, providerID) link arrived with an email the IdP
+	// did not mark verified. It is returned BEFORE the local email lookup,
+	// so the caller learns nothing about whether an account exists.
+	ErrOAuthEmailUnverified = errors.New("oauth provider did not verify the email")
 	// ErrLastCredentialRemoval signals that an admin tried to unlink an
 	// OAuth identity that would leave the target with no usable login
 	// method (no password set AND it was their only OAuth provider).
@@ -1907,7 +1912,25 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 		}
 		user = userModel
 	} else {
-		// No existing provider - check if user exists by email
+		// No existing (provider, providerID) link. §4.4 — three things are
+		// decided BEFORE the local email lookup, in this order:
+		//
+		//  1. The IdP must vouch for the address. A false/missing/non-bool
+		//     email_verified is refused now, identically whether or not a
+		//     local account exists (no account-existence oracle), and
+		//     before either the auto-link or the signup branch.
+		//  2. The auto-link policy must be establishable. A read failure,
+		//     a missing auth document or a malformed value is an outage
+		//     (503) — evaluated before the lookup so it cannot depend on
+		//     account state either.
+		//  3. Only then the lookup, and the branch it selects.
+		if verified, _ := userInfo["email_verified"].(bool); !verified {
+			return nil, ErrOAuthEmailUnverified
+		}
+		autoLink, err := s.policy.OAuthAutoLinkByEmailEnabled(ctx)
+		if err != nil {
+			return nil, err
+		}
 		userResponse, err := s.userService.GetUserByEmail(ctx, email)
 		if err != nil {
 			// Signup gates. Two toggles must both allow the new account:
@@ -1949,17 +1972,15 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 				}
 			}
 
-			// Trust the IdP's email_verified claim — every provider
-			// (Google, Apple, GitHub, Discord) populates this in the
-			// userInfoMap from its own verified-email signal. Missing
-			// or false falls through to the standard verification flow.
-			emailVerified, _ := userInfo["email_verified"].(bool)
+			// The IdP verified the address (checked above), so the account
+			// lands verified: nobody is asked to confirm what the IdP just
+			// confirmed.
 			createInput := &iface.CreateUserInput{
 				UUID:          newUUID,
 				Email:         email,
 				FullName:      userInfo["name"].(string),
 				Role:          role,
-				EmailVerified: emailVerified,
+				EmailVerified: true,
 			}
 
 			userModel, err := s.userService.CreateUserFromOAuth(ctx, createInput)
@@ -1971,13 +1992,13 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			}
 			user = convertUserModelToAuthModel(userModel)
 		} else {
-			// Phase 10: oauthAutoLinkByEmail gate. The callback found an
-			// existing Orkestra account by email — auto-linking the
-			// OAuth provider to it is convenient but lets an attacker
-			// who controls a matching IdP email hijack a password
-			// account. When off, refuse here so account linking must
-			// happen from an authenticated settings page instead.
-			if s.policy != nil && !s.policy.OAuthAutoLinkByEmail(ctx) {
+			// oauthAutoLinkByEmail gate (read strictly above). The callback
+			// found an existing Orkestra account by a VERIFIED matching
+			// email — auto-linking is convenient but lets whoever controls
+			// a matching IdP identity enter a password account. When off,
+			// refuse here so linking happens from an authenticated
+			// settings page instead.
+			if !autoLink {
 				return nil, ErrOAuthLinkDisabled
 			}
 			user = convertUserResponseToAuthModel(userResponse)

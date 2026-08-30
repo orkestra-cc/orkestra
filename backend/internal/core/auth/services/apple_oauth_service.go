@@ -310,7 +310,7 @@ func (s *appleOAuthService) ValidateIDToken(ctx context.Context, request *IDToke
 	userInfo := &UserInfo{
 		ProviderID:    getStringClaimFromMap(claims, "sub"),
 		Email:         getStringClaimFromMap(claims, "email"),
-		EmailVerified: getBoolClaimFromMap(claims, "email_verified"),
+		EmailVerified: getBoolOrStringClaimFromMap(claims, "email_verified"),
 		Name:          getStringClaimFromMap(claims, "name"),
 		GivenName:     getStringClaimFromMap(claims, "given_name"),
 		FamilyName:    getStringClaimFromMap(claims, "family_name"),
@@ -694,6 +694,24 @@ func getBoolClaimFromMap(claims jwt.MapClaims, key string) bool {
 		}
 	}
 	return false
+}
+
+// getBoolOrStringClaimFromMap reads a claim Apple documents as "String or
+// Boolean". `email_verified` arrives as a JSON bool on some flows and as the
+// string "true"/"false" on others, and §4.4 refuses an unlinked identity whose
+// bit is false — so reading the string shape as false would lock every Apple
+// signup and link out of the platform. Both shapes are accepted (case- and
+// space-insensitive); anything else is false. The claim value is never logged
+// or echoed into an error.
+func getBoolOrStringClaimFromMap(claims jwt.MapClaims, key string) bool {
+	switch v := claims[key].(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true")
+	default:
+		return false
+	}
 }
 
 func getIntClaimFromMap(claims jwt.MapClaims, key string) int {

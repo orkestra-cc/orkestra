@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -30,7 +29,7 @@ import (
 type AuthHandler struct {
 	authService       services.AuthService
 	oauthFactory      services.OAuthProviderFactory
-	oauthResolver     *services.OAuthConfigResolver
+	oauthResolver     services.OAuthResolver
 	oauthStateService services.OAuthStateService
 	oauthProviderRepo repository.OAuthProviderRepository
 	jwtService        services.JWTService
@@ -85,6 +84,14 @@ type AuthHandler struct {
 	// avatars fall back to whatever URL was stored on the user
 	// document (likely empty for fresh uploads).
 	blobStore blob.Store
+
+	// spaBaseURL is THIS tier's SPA origin, resolved once by module.go
+	// (OPERATOR_FRONTEND_URL / CLIENT_FRONTEND_URL → FRONTEND_URL) and
+	// handed over with SetSPAURL. Every browser-facing redirect a callback
+	// issues — login success/failure, MFA continuation, link return — is
+	// built on it (oauth_callback_redirect.go); the Origin header is never
+	// consulted. Empty falls back to config.Server.FrontendURL.
+	spaBaseURL string
 }
 
 // SetBlobStore wires the object-storage handle used to mint presigned
@@ -174,7 +181,7 @@ func (h *AuthHandler) SetTierDispatch(d map[string]*AuthHandler) {
 func NewAuthHandler(
 	authService services.AuthService,
 	oauthFactory services.OAuthProviderFactory,
-	oauthResolver *services.OAuthConfigResolver,
+	oauthResolver services.OAuthResolver,
 	oauthStateService services.OAuthStateService,
 	oauthProviderRepo repository.OAuthProviderRepository,
 	jwtService services.JWTService,
@@ -239,17 +246,11 @@ func (h *AuthHandler) resolveLogoutIdentity(ctx context.Context, r *http.Request
 	return userUUID, claims.DeviceID, userUUID != ""
 }
 
-// oauthSignupDisabled is a thin errors.Is wrapper kept inline so each
-// provider's callback can branch on the policy outcome without
-// duplicating the import. Phase 9 of the auth-policy roadmap.
-func oauthSignupDisabled(err error) bool {
-	return errors.Is(err, services.ErrOAuthSignupDisabled)
-}
-
 const invalidOAuthAuthenticationDetail = "Invalid OAuth authentication"
 
 type oauthErrorResponse struct {
 	status     int
+	code       string
 	humaDetail string
 	rawDetail  string
 	outcome    string
@@ -262,6 +263,24 @@ func oauthErrorResponseFor(err error) oauthErrorResponse {
 			humaDetail: invalidOAuthAuthenticationDetail,
 			rawDetail:  invalidOAuthAuthenticationDetail,
 			outcome:    "invalid_credentials",
+		}
+	}
+	if errors.Is(err, services.ErrOAuthEmailUnverified) {
+		return oauthErrorResponse{
+			status:     http.StatusForbidden,
+			code:       errcode.AuthOAuthEmailUnverified,
+			humaDetail: "The identity provider has not verified this email address",
+			rawDetail:  "The identity provider has not verified this email address",
+			outcome:    "email_unverified",
+		}
+	}
+	if errors.Is(err, services.ErrAuthPolicyUnavailable) {
+		return oauthErrorResponse{
+			status:     http.StatusServiceUnavailable,
+			code:       errcode.AuthPolicyUnavailable,
+			humaDetail: "Sign-in policy is temporarily unavailable; try again shortly",
+			rawDetail:  "Sign-in policy is temporarily unavailable; try again shortly",
+			outcome:    "policy_unavailable",
 		}
 	}
 	return oauthErrorResponse{
@@ -277,6 +296,9 @@ func oauthErrorResponseFor(err error) oauthErrorResponse {
 // otherwise valid identity belongs to a deactivated local account.
 func mapOAuthError(err error) error {
 	response := oauthErrorResponseFor(err)
+	if response.code != "" {
+		return errcode.New(response.status, response.code, response.humaDetail)
+	}
 	if response.status == http.StatusUnauthorized {
 		return huma.Error401Unauthorized(response.humaDetail)
 	}
@@ -288,26 +310,6 @@ func logOAuthAuthenticationFailure(provider models.OAuthProvider, outcome string
 		slog.String("provider", string(provider)),
 		slog.String("outcome", outcome),
 	)
-}
-
-func writeOAuthCallbackError(w http.ResponseWriter, provider models.OAuthProvider, err error) {
-	response := oauthErrorResponseFor(err)
-	logOAuthAuthenticationFailure(provider, response.outcome)
-	http.Error(w, response.rawDetail, response.status)
-}
-
-// redirectOAuthSignupDisabled bounces the caller back to the frontend
-// callback URL with success=false + error=oauth_signup_disabled. The
-// SPA renders a friendly "Sign-up is currently invitation-only" page
-// instead of a generic 500. Falls through to a plain 403 when the
-// frontend URL isn't configured.
-func redirectOAuthSignupDisabled(w http.ResponseWriter, r *http.Request, frontendURL string) {
-	if frontendURL == "" {
-		http.Error(w, "OAuth signup is disabled", http.StatusForbidden)
-		return
-	}
-	dest := fmt.Sprintf("%s/auth/callback?success=false&error=oauth_signup_disabled", frontendURL)
-	http.Redirect(w, r, dest, http.StatusFound)
 }
 
 // resolveProvider fetches the current config for an OAuth provider from the
@@ -387,20 +389,23 @@ type ListOAuthProvidersResponse struct {
 	}
 }
 
-// ListOAuthProviders returns the set of OAuth providers configured in the
-// admin panel. Public endpoint — no auth required — because it's used by
-// the unauthenticated login screen. The result is filtered by the
-// handler's audience: a provider that's configured but disabled for
-// this surface (per the OAuth Providers tab on /admin/modules/auth)
-// is omitted so the login UI never offers a button it can't honor.
+// ListOAuthProviders returns the providers that are USABLE on this
+// handler's surface: toggle on, structurally complete (spec §4.4) — from one
+// config read. Public endpoint — no auth required — because it's used by
+// the unauthenticated login screen. A document-level failure (missing auth
+// document, repository error, undecryptable stored secret) is 503 rather
+// than an empty list, because "no provider" is a legitimate steady state
+// the SPA renders differently from "we could not ask"; a per-provider
+// defect only omits that provider (WARN names the key).
 func (h *AuthHandler) ListOAuthProviders(ctx context.Context, _ *ListOAuthProvidersRequest) (*ListOAuthProvidersResponse, error) {
-	configured := h.oauthResolver.ConfiguredProviders(ctx)
+	usable, err := h.oauthResolver.UsableWebProviders(ctx, h.policyAudience())
+	if err != nil {
+		slog.Default().Warn("oauth providers unavailable", slog.String("tier", h.tier), slog.String("outcome", "config_unavailable"))
+		return nil, errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable, "Sign-in policy is temporarily unavailable; try again shortly")
+	}
 	resp := &ListOAuthProvidersResponse{}
-	resp.Body.Providers = make([]string, 0, len(configured))
-	for _, p := range configured {
-		if h.policy != nil && !h.policy.OAuthProviderEnabled(ctx, h.policyAudience(), string(p)) {
-			continue
-		}
+	resp.Body.Providers = make([]string, 0, len(usable))
+	for _, p := range usable {
 		resp.Body.Providers = append(resp.Body.Providers, string(p))
 	}
 	return resp, nil
@@ -434,8 +439,20 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 		slog.String("tier", h.tier),
 	)
 
-	if err := h.oauthProviderAllowed(ctx, string(req.Body.Provider)); err != nil {
-		return nil, err
+	if !h.loginAllowed(ctx) {
+		return nil, errcode.Forbidden(errcode.AuthLoginDisabled,
+			"Login is temporarily disabled for this surface. Contact an administrator.")
+	}
+	// One strict read decides toggle + structure and yields the config the
+	// provider is built from below — no check-then-reread (spec §4.4).
+	cfg, usable, err := h.oauthResolver.OAuthWebProviderUsable(ctx, h.policyAudience(), req.Body.Provider)
+	if err != nil {
+		logger.Warn("oauth initiation failed", slog.String("provider", string(req.Body.Provider)), slog.String("outcome", "config_unavailable"))
+		return nil, errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable, "Sign-in policy is temporarily unavailable; try again shortly")
+	}
+	if !usable {
+		return nil, errcode.Forbidden(errcode.AuthOAuthProviderDisabled,
+			"This OAuth provider is not enabled for this surface. Contact an administrator.")
 	}
 
 	if len(h.stateSecret) == 0 {
@@ -446,20 +463,9 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 		return nil, huma.Error500InternalServerError("OAuth not available", nil)
 	}
 
-	// Backend always determines frontend redirect URL automatically
-	var frontendRedirectURL string
-	if rawRequest, ok := ctx.Value("http_request").(*http.Request); ok {
-		origin := rawRequest.Header.Get("Origin")
-		if origin != "" {
-			frontendRedirectURL = origin + "/auth/callback"
-		} else {
-			// Fallback to configured frontend URL
-			frontendRedirectURL = h.config.Server.FrontendURL + "/auth/callback"
-		}
-	} else {
-		// Fallback to configured frontend URL
-		frontendRedirectURL = h.config.Server.FrontendURL + "/auth/callback"
-	}
+	// Stored for state compatibility only; the callback never reads it
+	// and it is NEVER derived from the Origin header (spec §4.10).
+	frontendRedirectURL := h.spaURL() + oauthCallbackPath
 
 	// Extract device info from context (set by device middleware)
 	var deviceInfo *models.DeviceInfo
@@ -506,18 +512,13 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 		return nil, huma.Error400BadRequest("Failed to create OAuth state", err)
 	}
 
-	// Create OAuth provider from live admin-panel config.
-	provider, _, err := h.resolveProvider(ctx, req.Body.Provider)
+	provider, err := h.oauthFactory.CreateProvider(req.Body.Provider, cfg)
 	if err != nil {
-		logger.Error("oauth initiation failed", slog.String("outcome", "provider_unavailable"))
-		return nil, huma.Error400BadRequest("OAuth provider not configured", err)
+		logger.Error("oauth initiation failed", slog.String("outcome", "provider_construct_failed"))
+		return nil, huma.Error500InternalServerError("OAuth not available", err)
 	}
-
-	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, req.Body.Provider)
-	if backendCallbackURL == "" {
-		return nil, huma.Error400BadRequest("OAuth provider redirect URL not configured", nil)
-	}
-
+	// Non-empty by the structural predicate that just passed.
+	backendCallbackURL := cfg.AdditionalConfig["redirect_url"]
 	authURL := provider.GetAuthURL(signedState, "", backendCallbackURL)
 
 	return &OAuthLoginResponse{
@@ -559,30 +560,29 @@ func (h *AuthHandler) InitiateOAuthLink(ctx context.Context, req *OAuthLinkReque
 	default:
 		return nil, huma.Error400BadRequest("unsupported provider")
 	}
-	if err := h.oauthProviderAllowed(ctx, string(provider)); err != nil {
-		return nil, err
+	if !h.loginAllowed(ctx) {
+		return nil, errcode.Forbidden(errcode.AuthLoginDisabled,
+			"Login is temporarily disabled for this surface. Contact an administrator.")
+	}
+	// One strict read decides toggle + structure and yields the config the
+	// provider is built from below — no check-then-reread (spec §4.4).
+	cfg, usable, err := h.oauthResolver.OAuthWebProviderUsable(ctx, h.policyAudience(), provider)
+	if err != nil {
+		logger.Warn("oauth link initiation failed", slog.String("provider", string(provider)), slog.String("outcome", "config_unavailable"))
+		return nil, errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable, "Sign-in policy is temporarily unavailable; try again shortly")
+	}
+	if !usable {
+		return nil, errcode.Forbidden(errcode.AuthOAuthProviderDisabled,
+			"This OAuth provider is not enabled for this surface. Contact an administrator.")
 	}
 	if len(h.stateSecret) == 0 {
 		logger.Error("oauth state secret not configured")
 		return nil, huma.Error500InternalServerError("OAuth not available", nil)
 	}
 
-	// SPA-side redirect target — same shape as InitiateOAuthLogin so
-	// the browser-facing post-callback path stays consistent. Linking
-	// flows redirect to /user/security?tab=oauth on success/failure;
-	// that targeting happens in the callback's link branch below, not
-	// here.
-	var frontendRedirectURL string
-	if rawRequest, ok := ctx.Value("http_request").(*http.Request); ok {
-		origin := rawRequest.Header.Get("Origin")
-		if origin != "" {
-			frontendRedirectURL = origin + "/user/security"
-		} else {
-			frontendRedirectURL = h.config.Server.FrontendURL + "/user/security"
-		}
-	} else {
-		frontendRedirectURL = h.config.Server.FrontendURL + "/user/security"
-	}
+	// Stored for state compatibility only; the callback never reads it
+	// and it is NEVER derived from the Origin header (spec §4.10).
+	frontendRedirectURL := h.spaURL() + oauthLinkReturnPath
 
 	csrf, err := services.GenerateOAuthCSRF()
 	if err != nil {
@@ -609,15 +609,13 @@ func (h *AuthHandler) InitiateOAuthLink(ctx context.Context, req *OAuthLinkReque
 		return nil, huma.Error400BadRequest("Failed to create OAuth state", err)
 	}
 
-	providerSvc, _, err := h.resolveProvider(ctx, provider)
+	providerSvc, err := h.oauthFactory.CreateProvider(provider, cfg)
 	if err != nil {
-		logger.Error("oauth link initiation failed", slog.String("outcome", "provider_unavailable"))
-		return nil, huma.Error400BadRequest("OAuth provider not configured", err)
+		logger.Error("oauth link initiation failed", slog.String("outcome", "provider_construct_failed"))
+		return nil, huma.Error500InternalServerError("OAuth not available", err)
 	}
-	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, provider)
-	if backendCallbackURL == "" {
-		return nil, huma.Error400BadRequest("OAuth provider redirect URL not configured", nil)
-	}
+	// Non-empty by the structural predicate that just passed.
+	backendCallbackURL := cfg.AdditionalConfig["redirect_url"]
 	authURL := providerSvc.GetAuthURL(signedState, "", backendCallbackURL)
 
 	return &OAuthLoginResponse{
@@ -632,12 +630,11 @@ func (h *AuthHandler) InitiateOAuthLink(ctx context.Context, req *OAuthLinkReque
 	}, nil
 }
 
-// finishOAuthLinkRedirect drives the link-mode branch of every
-// provider callback. Calls SelfLinkOAuthFromCallback on the
-// dispatched-target authService and renders a single neutral
-// 302 → /user/security?tab=oauth&link=<status>&provider=<x>. Caller
-// is responsible for having already validated the state token and
-// dispatched to the correct tier.
+// finishOAuthLinkRedirect drives the link-mode branch of the shared
+// callback: bind the returning identity to the authenticated user named by
+// the signed state, then render the link-mode return contract through the
+// target tier's builder. Never mints tokens. Link mode is operator-only
+// (the route is mounted on the operator side), so it never relays.
 func (h *AuthHandler) finishOAuthLinkRedirect(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -648,215 +645,86 @@ func (h *AuthHandler) finishOAuthLinkRedirect(
 	linkUserUUID string,
 ) {
 	logger := slog.Default()
-	frontendURL := target.config.Server.FrontendURL
-	if frontendURL == "" {
-		frontendURL = h.config.Server.FrontendURL
-	}
-	frontendURL = strings.TrimRight(frontendURL, "/")
-
-	redirect := func(status, code string) {
-		base := frontendURL + "/user/security?tab=oauth&link=" + url.QueryEscape(status) + "&provider=" + url.QueryEscape(string(provider))
-		if code != "" {
-			base += "&code=" + url.QueryEscape(code)
-		}
-		http.Redirect(w, r, base, http.StatusFound)
-	}
-
 	if err := target.authService.SelfLinkOAuthFromCallback(r.Context(), linkUserUUID, iface.OAuthProvider(provider), userInfo, oauthTokens); err != nil {
+		code := oauthLinkCodeInternal
 		switch {
 		case errors.Is(err, services.ErrOAuthLinkClaimedByOther):
-			logger.Info("oauth link refused: identity already claimed",
-				slog.String("provider", string(provider)))
-			redirect("failed", "already_linked")
-			return
+			code = oauthLinkCodeAlreadyLinked
 		case errors.Is(err, services.ErrOAuthLinkAlreadyExists):
-			logger.Info("oauth link refused: provider already attached",
-				slog.String("provider", string(provider)))
-			redirect("failed", "duplicate_provider")
-			return
+			code = oauthLinkCodeDuplicateProvider
 		case errors.Is(err, services.ErrOAuthLinkInvalidUserInfo):
-			logger.Warn("oauth link refused: incomplete provider userinfo",
-				slog.String("provider", string(provider)))
-			redirect("failed", "invalid_userinfo")
-			return
-		default:
-			logger.Error("oauth link failed",
-				slog.String("provider", string(provider)),
-				slog.String("outcome", "internal_error"))
-			redirect("failed", "internal")
-			return
+			code = oauthLinkCodeInvalidUserInfo
 		}
+		logger.Warn("oauth link refused", slog.String("provider", string(provider)), slog.String("outcome", code))
+		target.writeOAuthLinkRedirect(w, r, provider, false, code)
+		return
 	}
-	redirect("success", "")
+	target.writeOAuthLinkRedirect(w, r, provider, true, "")
 }
 
-// finishOAuthMFAPartialRedirect handles the partial-response branch
-// of the OAuth callback: when evaluateMFAForOAuth in the auth service
-// determines the user must complete a second factor before tokens are
-// minted, HandleOAuthCallbackWithLinking returns a TokenResponse with
-// RequiresMFA=true and no Access/RefreshToken. The callback must NOT
-// SetRefreshTokenCookie in that case — passing an empty value would
-// overwrite any previously valid cookie with an unusable one and leave
-// the SPA stuck on /auth/callback?success=true with no working session.
-//
-// Instead, redirect to /auth/callback with requiresMfa=true plus the
-// challenge id; SocialAuthCallback on the SPA reads those params and
-// routes to /mfa/verify (matching the password login MFA-partial path).
-// Returns true when the partial branch was hit and the caller should
-// stop processing.
-func (h *AuthHandler) finishOAuthMFAPartialRedirect(
-	w http.ResponseWriter,
-	r *http.Request,
-	target *AuthHandler,
-	tokenResponse *models.TokenResponse,
-	provider string,
-) bool {
-	if tokenResponse == nil || !tokenResponse.RequiresMFA {
-		return false
-	}
-	frontendURL := strings.TrimRight(target.config.Server.FrontendURL, "/")
-	qs := url.Values{}
-	qs.Set("requiresMfa", "true")
-	qs.Set("provider", provider)
-	if tokenResponse.MFAToken != "" {
-		qs.Set("mfaToken", tokenResponse.MFAToken)
-	}
-	if tokenResponse.WebAuthnAvailable {
-		qs.Set("webauthnAvailable", "true")
-	}
-	if tokenResponse.User != nil {
-		qs.Set("user_id", tokenResponse.User.ID)
-		qs.Set("email", tokenResponse.User.Email)
-	}
-	http.Redirect(w, r, frontendURL+"/auth/callback?"+qs.Encode(), http.StatusFound)
-	return true
-}
-
-// resolveOAuthMFAPartialRedirect is the Huma-handler counterpart of
-// finishOAuthMFAPartialRedirect — same contract, but returns the
-// OAuthCallbackResponse the GitHub Huma callback can hand back to the
-// framework. (nil, false) means the caller should fall through to the
-// regular full-token path.
-func (h *AuthHandler) resolveOAuthMFAPartialRedirect(
-	target *AuthHandler,
-	tokenResponse *models.TokenResponse,
-	provider string,
-) (*OAuthCallbackResponse, bool) {
-	if tokenResponse == nil || !tokenResponse.RequiresMFA {
-		return nil, false
-	}
-	frontendURL := strings.TrimRight(target.config.Server.FrontendURL, "/")
-	qs := url.Values{}
-	qs.Set("requiresMfa", "true")
-	qs.Set("provider", provider)
-	if tokenResponse.MFAToken != "" {
-		qs.Set("mfaToken", tokenResponse.MFAToken)
-	}
-	if tokenResponse.WebAuthnAvailable {
-		qs.Set("webauthnAvailable", "true")
-	}
-	if tokenResponse.User != nil {
-		qs.Set("user_id", tokenResponse.User.ID)
-		qs.Set("email", tokenResponse.User.Email)
-	}
-	resp := &OAuthCallbackResponse{Status: 302}
-	resp.Headers.Location = frontendURL + "/auth/callback?" + qs.Encode()
-	return resp, true
-}
-
-// resolveOAuthLinkRedirect is the Huma-handler counterpart to
-// finishOAuthLinkRedirect. Same link-mode contract; returns an
-// OAuthCallbackResponse the Huma handler can return directly so the
-// link branch composes inside the existing GitHub / Apple Huma
-// surfaces.
-func (h *AuthHandler) resolveOAuthLinkRedirect(
-	ctx context.Context,
-	target *AuthHandler,
-	provider models.OAuthProvider,
-	userInfo map[string]interface{},
-	oauthTokens *models.OAuthProviderTokens,
-	linkUserUUID string,
-) (*OAuthCallbackResponse, error) {
-	frontendURL := target.config.Server.FrontendURL
-	if frontendURL == "" {
-		frontendURL = h.config.Server.FrontendURL
-	}
-	frontendURL = strings.TrimRight(frontendURL, "/")
-	build := func(status, code string) string {
-		base := frontendURL + "/user/security?tab=oauth&link=" + url.QueryEscape(status) + "&provider=" + url.QueryEscape(string(provider))
-		if code != "" {
-			base += "&code=" + url.QueryEscape(code)
-		}
-		return base
-	}
-	resp := &OAuthCallbackResponse{Status: 302}
-
-	if err := target.authService.SelfLinkOAuthFromCallback(ctx, linkUserUUID, iface.OAuthProvider(provider), userInfo, oauthTokens); err != nil {
-		switch {
-		case errors.Is(err, services.ErrOAuthLinkClaimedByOther):
-			resp.Headers.Location = build("failed", "already_linked")
-		case errors.Is(err, services.ErrOAuthLinkAlreadyExists):
-			resp.Headers.Location = build("failed", "duplicate_provider")
-		case errors.Is(err, services.ErrOAuthLinkInvalidUserInfo):
-			resp.Headers.Location = build("failed", "invalid_userinfo")
-		default:
-			slog.Default().Error("oauth link failed",
-				slog.String("provider", string(provider)),
-				slog.String("outcome", "internal_error"))
-			resp.Headers.Location = build("failed", "internal")
-		}
-		return resp, nil
-	}
-	resp.Headers.Location = build("success", "")
-	return resp, nil
+// stateResolution is what a callback learns from a valid state.
+type stateResolution struct {
+	info   *services.OAuthStateInfo
+	claims *services.OAuthStateClaims
+	// bindingDeferred is true for a client-tier LOGIN flow: its state cookie
+	// lives on the client API host and its refresh cookie can only be set
+	// there, so the operator-host callback must hand the flow to the relay
+	// endpoint (which verifies the cookie) instead of completing it. Never
+	// true for the operator/legacy tiers or for link mode.
+	bindingDeferred bool
 }
 
 // resolveStateForCallback validates the signed-state JWT presented to a
-// callback handler, looks up the matching Redis side-data row, and
-// returns the (cross-checked) state info. Returns ErrInvalidStateToken
-// equivalents as a generic 400-style error so callers can render a
-// single neutral message regardless of the failure mode.
-//
-// Tier-cross-check: if the JWT tier claim is non-empty it must match
-// the Redis row's tier — otherwise an attacker who races a legitimate
-// flow could swap their own pre-stored row in. Empty tier on either
-// side is treated as legacy and only legacy-on-both-sides is accepted.
-func (h *AuthHandler) resolveStateForCallback(ctx context.Context, raw string) (*services.OAuthStateInfo, *services.OAuthStateClaims, error) {
+// callback, binds it to the browser, consumes the one-shot Redis row and
+// cross-checks it against the JWT and the endpoint. Order (spec §4.10 v4.3):
+// signature/expiry → browser binding → atomic take → tier → PROVIDER →
+// link-mode pair. Every failure is one generic error so a caller renders
+// the same 400 whatever the reason — an attacker must not learn which
+// check rejected them. All of it runs before the IdP `error`, the code or
+// any profile is looked at.
+func (h *AuthHandler) resolveStateForCallback(ctx context.Context, raw string, provider models.OAuthProvider) (*stateResolution, error) {
 	if len(h.stateSecret) == 0 {
-		return nil, nil, fmt.Errorf("oauth state secret not configured")
+		return nil, fmt.Errorf("oauth state secret not configured")
 	}
 	claims, err := services.ValidateOAuthStateToken(h.stateSecret, raw)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid OAuth state: %w", err)
+		return nil, fmt.Errorf("invalid OAuth state: %w", err)
 	}
-	// Bind the flow to the browser that started it. A valid signature
-	// only proves WE minted this state; without the cookie check an
-	// attacker can start a flow and have a victim finish it, which lands
-	// the victim in the attacker's session (or, in link mode, binds the
-	// victim's provider identity to the attacker's account).
-	if r, ok := ctx.Value("http_request").(*http.Request); ok && r != nil {
-		if err := verifyOAuthStateBinding(r, claims); err != nil {
-			return nil, nil, err
-		}
-	} else {
-		return nil, nil, fmt.Errorf("%w: no request available to verify against", ErrOAuthStateNotBound)
+	r, ok := ctx.Value("http_request").(*http.Request)
+	if !ok || r == nil {
+		return nil, fmt.Errorf("%w: no request available to verify against", ErrOAuthStateNotBound)
 	}
-	stateInfo, err := h.oauthStateService.ValidateOAuthState(ctx, claims.CSRF)
+	deferred, err := verifyOAuthStateBinding(r, claims)
 	if err != nil {
-		return nil, nil, fmt.Errorf("OAuth state not found or expired: %w", err)
+		return nil, err
+	}
+	clientLogin := claims.Tier == services.AudienceClient && claims.Mode != services.OAuthStateModeLink
+	if deferred && !clientLogin {
+		return nil, fmt.Errorf("%w: a cross-host callback can only be relayed for a client-tier login", ErrOAuthStateNotBound)
+	}
+	// A client-tier login ALWAYS completes on the client API host — even
+	// when a cookie happens to be present here, the api.* refresh cookie
+	// cannot be set from the operator host.
+	deferred = clientLogin
+
+	stateInfo, err := h.oauthStateService.ValidateOAuthState(ctx, claims.CSRF) // atomic one-shot take
+	if err != nil {
+		return nil, fmt.Errorf("OAuth state not found, expired or already used: %w", err)
 	}
 	if stateInfo.Tier != claims.Tier {
-		return nil, nil, fmt.Errorf("OAuth state tier mismatch")
+		return nil, fmt.Errorf("OAuth state tier mismatch")
+	}
+	if stateInfo.Provider != provider {
+		return nil, fmt.Errorf("OAuth state provider mismatch")
 	}
 	// Cross-check the link-mode pair (mode + linkUserUUID) — if either
-	// side stamped a link flow but the other didn't, treat it as a
-	// forged state (an attacker who tampered with one half in
-	// isolation). Both empty (login) or both populated (link with
-	// matching UUIDs) is fine.
+	// side stamped a link flow but the other didn't, treat it as a forged
+	// state. Both empty (login) or both populated (link with matching
+	// UUIDs) is fine.
 	if stateInfo.Mode != claims.Mode || stateInfo.LinkUserUUID != claims.LinkUserUUID {
-		return nil, nil, fmt.Errorf("OAuth state mode mismatch")
+		return nil, fmt.Errorf("OAuth state mode mismatch")
 	}
-	return stateInfo, claims, nil
+	return &stateResolution{info: stateInfo, claims: claims, bindingDeferred: deferred}, nil
 }
 
 // dispatchTarget picks the AuthHandler that should drive token issuance
@@ -874,568 +742,34 @@ func (h *AuthHandler) dispatchTarget(tier string) *AuthHandler {
 	return h
 }
 
-// OAuth Callback Request
-type OAuthCallbackRequest struct {
-	Code  string `query:"code" doc:"Authorization code from OAuth provider"`
-	State string `query:"state" doc:"OAuth state parameter"`
-}
-
-// OAuth Callback Response with redirect
-type OAuthCallbackResponse struct {
-	Headers struct {
-		Location string `header:"Location"`
-	}
-	Status int `status:"302"`
-}
-
-// Token Response (for non-redirect endpoints)
-type TokenResponse struct {
-	Body models.TokenResponse
-}
-
-// HandleGoogleCallbackHTTP handles Google OAuth callback with proper HTTP redirect
+// HandleGoogleCallbackHTTP handles the Google web callback (GET, query).
 func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Request) {
-	logger := slog.Default()
-	ctx := r.Context()
-
-	// Extract query parameters
-	state := r.URL.Query().Get("state")
-	code := r.URL.Query().Get("code")
-
-	if state == "" || code == "" {
-		logger.Warn("Missing state or code parameter in OAuth callback")
-		http.Error(w, "Missing state or code parameter", http.StatusBadRequest)
-		return
-	}
-
-	// ADR-0003 PR-D D-6: validate the signed-state JWT and dispatch
-	// to the tier-bound AuthHandler for token issuance. dispatchTarget
-	// returns the receiver when no tier was stamped (legacy flow) so
-	// existing /v1/auth/oauth/login callbacks keep self-handling.
-	stateInfo, claims, err := h.resolveStateForCallback(ctx, state)
-	if err != nil {
-		logger.Warn("oauth callback rejected", slog.String("outcome", "invalid_state"))
-		http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
-		return
-	}
-	// The flow is resolved; evict the nonce so a replayed callback URL
-	// cannot ride the same cookie. (The Redis row is one-shot already —
-	// this keeps the browser tidy.)
-	w.Header().Add("Set-Cookie", clearOAuthStateCookie(h.config.Auth.Cookie.Secure))
-	target := h.dispatchTarget(claims.Tier)
-
-	// Create Google OAuth provider from live admin-panel config.
-	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderGoogle)
-	if err != nil {
-		logger.Error("oauth callback failed", slog.String("outcome", "provider_unavailable"))
-		http.Error(w, "Google OAuth not configured", http.StatusInternalServerError)
-		return
-	}
-
-	// Exchange code for tokens
-	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, models.OAuthProviderGoogle)
-
-	tokenResp, err := provider.ExchangeCodeForToken(ctx, &services.CodeExchangeRequest{
-		Code:        code,
-		RedirectURI: backendCallbackURL,
-	})
-	if err != nil {
-		logger.Error("oauth callback failed", slog.String("outcome", "token_exchange_failed"))
-		http.Error(w, "Failed to exchange code", http.StatusBadRequest)
-		return
-	}
-
-	// Get user info from provider
-	userInfo, err := provider.GetUserInfo(ctx, tokenResp.AccessToken)
-	if err != nil {
-		logger.Error("oauth callback failed", slog.String("outcome", "userinfo_failed"))
-		http.Error(w, "Failed to get user info", http.StatusInternalServerError)
-		return
-	}
-
-	// Convert userInfo to map for enhanced auth service
-	userInfoMap := map[string]interface{}{
-		"email":          userInfo.Email,
-		"name":           userInfo.Name,
-		"picture":        userInfo.Picture,
-		"provider_id":    userInfo.ProviderID,
-		"email_verified": userInfo.EmailVerified,
-	}
-
-	// Prepare OAuth provider tokens for storage
-	oauthTokens := &models.OAuthProviderTokens{
-		AccessToken:  tokenResp.AccessToken,
-		RefreshToken: tokenResp.RefreshToken,
-		TokenType:    tokenResp.TokenType,
-		ExpiresIn:    int(tokenResp.ExpiresIn),
-		Scopes:       tokenResp.Scope,
-		IDToken:      tokenResp.IDToken,
-	}
-
-	// Link mode (state.Mode=="link"): the user is already
-	// authenticated; bind the new identity instead of minting tokens.
-	if claims.Mode == services.OAuthStateModeLink {
-		h.finishOAuthLinkRedirect(w, r, target, models.OAuthProviderGoogle, userInfoMap, oauthTokens, claims.LinkUserUUID)
-		return
-	}
-
-	// Use enhanced auth service for proper user creation and token management
-	tokenResponse, err := target.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderGoogle, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
-	if err != nil {
-		if oauthSignupDisabled(err) {
-			redirectOAuthSignupDisabled(w, r, target.config.Server.FrontendURL)
-			return
-		}
-		writeOAuthCallbackError(w, models.OAuthProviderGoogle, err)
-		return
-	}
-	// MFA-partial path: privileged user with an enrolled factor — no
-	// tokens were minted. Redirect to /auth/callback with the challenge
-	// id so the SPA routes to /mfa/verify, and skip the cookie write
-	// (an empty refresh token would clobber any previously valid one).
-	if h.finishOAuthMFAPartialRedirect(w, r, target, tokenResponse, "google") {
-		return
-	}
-
-	// Set only refresh token as secure HttpOnly cookie
-	// Use cookie configuration from environment
-	cookieName := target.config.Auth.Cookie.Name // Set from COOKIE_NAME env var
-	cookieDomain := target.cookieDomain          // ADR-0003 PR-D D-9: per-tier
-	isSecure := target.config.Auth.Cookie.Secure // Set from COOKIE_SECURE env var
-
-	// Set only refresh token in cookie (7 days expiry)
-	// Access token will be sent in the redirect URL for the client to store
-	utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, refreshCookieMaxAge(h.jwtService), cookieDomain, isSecure)
-
-	// Redirect to frontend without access token (refresh token is in cookie, access token will be fetched via /auth/session)
-	frontendURL := target.config.Server.FrontendURL
-	redirectURL := fmt.Sprintf("%s/auth/callback?success=true&user_id=%s&email=%s&provider=google",
-		frontendURL,
-		url.QueryEscape(tokenResponse.User.ID),
-		url.QueryEscape(tokenResponse.User.Email))
-
-	http.Redirect(w, r, redirectURL, http.StatusFound)
+	h.completeOAuthCallback(w, r, models.OAuthProviderGoogle, queryCallbackParams(r), exchangeWithUserInfo())
 }
 
-// HandleDiscordCallbackHTTP handles Discord OAuth callback with proper HTTP redirect
+// HandleDiscordCallbackHTTP handles the Discord web callback (GET, query).
 func (h *AuthHandler) HandleDiscordCallbackHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	// Extract query parameters
-	state := r.URL.Query().Get("state")
-	code := r.URL.Query().Get("code")
-
-	if state == "" || code == "" {
-		http.Error(w, "Missing state or code parameter", http.StatusBadRequest)
-		return
-	}
-
-	// ADR-0003 PR-D D-6: validate signed state + dispatch by tier.
-	stateInfo, claims, err := h.resolveStateForCallback(ctx, state)
-	if err != nil {
-		http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
-		return
-	}
-	// The flow is resolved; evict the nonce so a replayed callback URL
-	// cannot ride the same cookie. (The Redis row is one-shot already —
-	// this keeps the browser tidy.)
-	w.Header().Add("Set-Cookie", clearOAuthStateCookie(h.config.Auth.Cookie.Secure))
-	target := h.dispatchTarget(claims.Tier)
-
-	// Create Discord OAuth provider from live admin-panel config.
-	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderDiscord)
-	if err != nil {
-		http.Error(w, "Discord OAuth not configured", http.StatusInternalServerError)
-		return
-	}
-
-	// Exchange code for tokens
-	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, models.OAuthProviderDiscord)
-	tokenResponse, err := provider.ExchangeCodeForToken(ctx, &services.CodeExchangeRequest{
-		Code:        code,
-		RedirectURI: backendCallbackURL,
-	})
-	if err != nil {
-		http.Error(w, "Failed to exchange code for token", http.StatusInternalServerError)
-		return
-	}
-
-	// Get user info
-	userInfo, err := provider.GetUserInfo(ctx, tokenResponse.AccessToken)
-	if err != nil {
-		http.Error(w, "Failed to get user info", http.StatusInternalServerError)
-		return
-	}
-
-	// Convert userInfo to map for enhanced auth service
-	userInfoMap := map[string]interface{}{
-		"email":          userInfo.Email,
-		"name":           userInfo.Name,
-		"picture":        userInfo.Picture,
-		"provider_id":    userInfo.ProviderID,
-		"email_verified": userInfo.EmailVerified,
-	}
-
-	// Prepare OAuth provider tokens for storage
-	oauthTokens := &models.OAuthProviderTokens{
-		AccessToken:  tokenResponse.AccessToken,
-		RefreshToken: tokenResponse.RefreshToken,
-		TokenType:    tokenResponse.TokenType,
-		ExpiresIn:    int(tokenResponse.ExpiresIn),
-		Scopes:       tokenResponse.Scope,
-	}
-
-	if claims.Mode == services.OAuthStateModeLink {
-		h.finishOAuthLinkRedirect(w, r, target, models.OAuthProviderDiscord, userInfoMap, oauthTokens, claims.LinkUserUUID)
-		return
-	}
-
-	// Use enhanced auth service for proper user creation and token management
-	authTokenResponse, err := target.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderDiscord, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
-	if err != nil {
-		writeOAuthCallbackError(w, models.OAuthProviderDiscord, err)
-		return
-	}
-	if h.finishOAuthMFAPartialRedirect(w, r, target, authTokenResponse, "discord") {
-		return
-	}
-
-	// Set only refresh token as secure HttpOnly cookie
-	// Use cookie configuration from environment
-	cookieName := target.config.Auth.Cookie.Name // Set from COOKIE_NAME env var
-	cookieDomain := target.cookieDomain          // ADR-0003 PR-D D-9: per-tier
-	isSecure := target.config.Auth.Cookie.Secure // Set from COOKIE_SECURE env var
-
-	// Set only refresh token in cookie (7 days expiry)
-	// Access token will be sent in the redirect URL for the client to store
-	utils.SetRefreshTokenCookie(w, cookieName, authTokenResponse.RefreshToken, refreshCookieMaxAge(h.jwtService), cookieDomain, isSecure)
-
-	// Redirect to frontend without access token (refresh token is in cookie, access token will be fetched via /auth/session)
-	frontendURL := target.config.Server.FrontendURL
-	redirectURL := fmt.Sprintf("%s/auth/callback?success=true&user_id=%s&email=%s&provider=discord",
-		frontendURL,
-		url.QueryEscape(authTokenResponse.User.ID),
-		url.QueryEscape(authTokenResponse.User.Email))
-
-	http.Redirect(w, r, redirectURL, http.StatusFound)
+	h.completeOAuthCallback(w, r, models.OAuthProviderDiscord, queryCallbackParams(r), exchangeWithUserInfo())
 }
 
-// HandleAppleCallbackHTTP handles Apple OAuth callback with proper HTTP redirect
+// HandleGitHubCallbackHTTP handles the GitHub web callback (GET, query).
+// Raw chi handler like the others so it can set the refresh cookie — the
+// previous Huma operation never did, which left GitHub logins without a
+// session.
+func (h *AuthHandler) HandleGitHubCallbackHTTP(w http.ResponseWriter, r *http.Request) {
+	h.completeOAuthCallback(w, r, models.OAuthProviderGitHub, queryCallbackParams(r), exchangeWithUserInfo())
+}
+
+// HandleAppleCallbackHTTP handles Apple's form-post callback. A missing
+// state is a terminal 400 in EVERY environment — the former dev-only
+// fallback that fabricated state is gone (trust before destination).
 func (h *AuthHandler) HandleAppleCallbackHTTP(w http.ResponseWriter, r *http.Request) {
-	utils.AuthDebugFlow("HandleAppleCallbackHTTP")
-	ctx := r.Context()
-
-	// Parse form data (Apple uses POST with form data, not query parameters)
-	if err := r.ParseForm(); err != nil {
-		utils.AuthDebugError("parse_form", err)
-		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
+	params, err := formCallbackParams(r)
+	if err != nil {
+		writeCallbackRejection(w, "Invalid OAuth callback")
 		return
 	}
-
-	// Extract form parameters
-	state := r.FormValue("state")
-	code := r.FormValue("code")
-	idToken := r.FormValue("id_token")
-
-	// Debug logging with sensitive data protection
-	utils.AuthDebugPresence("state", state)
-	utils.AuthDebugPresence("code", code)
-	utils.AuthDebugPresence("id_token", idToken)
-
-	if code == "" {
-		utils.AuthDebugError("validation", fmt.Errorf("missing authorization code"))
-		http.Error(w, "Missing authorization code", http.StatusBadRequest)
-		return
-	}
-
-	var stateInfo *services.OAuthStateInfo
-	var claims *services.OAuthStateClaims
-	target := h
-
-	if state == "" {
-		// SECURITY: In production, state parameter is REQUIRED to prevent CSRF attacks
-		if h.config.IsProductionLike() {
-			utils.AuthDebugError("security", fmt.Errorf("missing state parameter in production - possible CSRF attack"))
-			http.Error(w, "Missing state parameter - authentication rejected for security", http.StatusBadRequest)
-			return
-		}
-
-		// Development only: Allow fallback with warning (for testing Apple Sign In configuration issues)
-		if idToken == "" {
-			utils.AuthDebugError("security", fmt.Errorf("missing both state and id_token"))
-			http.Error(w, "Missing security parameters", http.StatusBadRequest)
-			return
-		}
-
-		// Log security warning for development
-		utils.AuthDebug("SECURITY WARNING: State parameter missing - this would fail in production!")
-		utils.AuthDebug("Fix Apple Service ID configuration to include state parameter")
-
-		// Create minimal state info for development testing only
-		stateInfo = &services.OAuthStateInfo{
-			State:       "apple-dev-fallback",
-			Provider:    models.OAuthProviderApple,
-			RedirectURI: h.config.Server.FrontendURL + "/auth/callback",
-			DeviceInfo:  nil,
-			SecurityContext: &models.SecurityContext{
-				IPAddress: utils.GetClientIP(r),
-				Timestamp: time.Now(),
-			},
-		}
-	} else {
-		// ADR-0003 PR-D D-6: validate signed state + dispatch by tier.
-		var err error
-		stateInfo, claims, err = h.resolveStateForCallback(ctx, state)
-		if err != nil {
-			utils.AuthDebugError("state_validation", err)
-			http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
-			return
-		}
-		target = h.dispatchTarget(claims.Tier)
-		utils.AuthDebug("OAuth state validated - Provider: %s, Tier: %s", stateInfo.Provider, claims.Tier)
-	}
-
-	// Create Apple OAuth provider from live admin-panel config.
-	utils.AuthDebug("Creating Apple OAuth provider")
-	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderApple)
-	if err != nil {
-		utils.AuthDebugError("create_provider", err)
-		http.Error(w, "Apple OAuth not configured", http.StatusInternalServerError)
-		return
-	}
-
-	// Exchange code for tokens
-	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, models.OAuthProviderApple)
-	utils.AuthDebug("Exchanging code for tokens")
-
-	tokenResp, err := provider.ExchangeCodeForToken(ctx, &services.CodeExchangeRequest{
-		Code:        code,
-		RedirectURI: backendCallbackURL,
-	})
-	if err != nil {
-		utils.AuthDebugError("exchange_code", err)
-		http.Error(w, "Failed to exchange code", http.StatusBadRequest)
-		return
-	}
-	utils.AuthDebug("Code exchanged successfully")
-
-	// Get user info from Apple ID token (Apple doesn't provide a user info endpoint)
-	utils.AuthDebug("Validating Apple ID token")
-	userInfo, err := provider.ValidateIDToken(ctx, &services.IDTokenValidationRequest{
-		IDToken:     tokenResp.IDToken,
-		AccessToken: tokenResp.AccessToken,
-		Audience:    provider.GetClientID(),
-	})
-	if err != nil {
-		utils.AuthDebugError("validate_id_token", err)
-		http.Error(w, "Failed to validate ID token", http.StatusInternalServerError)
-		return
-	}
-	utils.AuthDebugPresence("user_email", userInfo.Email)
-
-	// Convert userInfo to map for enhanced auth service
-	userInfoMap := map[string]interface{}{
-		"email":          userInfo.Email,
-		"name":           userInfo.Name,
-		"picture":        userInfo.Picture,
-		"provider_id":    userInfo.ProviderID,
-		"email_verified": userInfo.EmailVerified,
-	}
-
-	// Prepare OAuth provider tokens for storage
-	oauthTokens := &models.OAuthProviderTokens{
-		AccessToken:  tokenResp.AccessToken,
-		RefreshToken: tokenResp.RefreshToken,
-		TokenType:    tokenResp.TokenType,
-		ExpiresIn:    int(tokenResp.ExpiresIn),
-		Scopes:       tokenResp.Scope,
-		IDToken:      tokenResp.IDToken,
-	}
-	utils.AuthDebug("OAuth tokens prepared - has access: %v, has refresh: %v",
-		tokenResp.AccessToken != "", tokenResp.RefreshToken != "")
-
-	if claims != nil && claims.Mode == services.OAuthStateModeLink {
-		h.finishOAuthLinkRedirect(w, r, target, models.OAuthProviderApple, userInfoMap, oauthTokens, claims.LinkUserUUID)
-		return
-	}
-
-	// Use enhanced auth service for proper user creation and token management
-	utils.AuthDebug("Processing OAuth callback with linking")
-	tokenResponse, err := target.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderApple, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
-	if err != nil {
-		writeOAuthCallbackError(w, models.OAuthProviderApple, err)
-		return
-	}
-	if h.finishOAuthMFAPartialRedirect(w, r, target, tokenResponse, "apple") {
-		return
-	}
-	// Set only refresh token as secure HttpOnly cookie
-	// Use cookie configuration from environment
-	cookieName := target.config.Auth.Cookie.Name // Set from COOKIE_NAME env var
-	cookieDomain := target.cookieDomain          // ADR-0003 PR-D D-9: per-tier
-	isSecure := target.config.Auth.Cookie.Secure // Set from COOKIE_SECURE env var
-
-	// Set only refresh token in cookie (7 days expiry)
-	// Access token will be sent in the redirect URL for the client to store
-	utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, refreshCookieMaxAge(h.jwtService), cookieDomain, isSecure)
-
-	// Redirect to frontend without access token (refresh token is in cookie, access token will be fetched via /auth/session)
-	frontendURL := target.config.Server.FrontendURL
-	redirectURL := fmt.Sprintf("%s/auth/callback?success=true&user_id=%s&email=%s&provider=apple",
-		frontendURL,
-		url.QueryEscape(tokenResponse.User.ID),
-		url.QueryEscape(tokenResponse.User.Email))
-
-	http.Redirect(w, r, redirectURL, http.StatusFound)
-}
-
-// HandleAppleCallback handles Apple OAuth callback
-func (h *AuthHandler) HandleAppleCallback(ctx context.Context, req *OAuthCallbackRequest) (*OAuthCallbackResponse, error) {
-	// Similar to Google callback
-	stateInfo, claims, err := h.resolveStateForCallback(ctx, req.State)
-	if err != nil {
-		return nil, huma.Error400BadRequest("Invalid OAuth state", err)
-	}
-	target := h.dispatchTarget(claims.Tier)
-
-	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderApple)
-	if err != nil {
-		return nil, huma.Error500InternalServerError("Apple OAuth not configured", err)
-	}
-
-	// Exchange code for tokens - must use same redirect URI as initial auth request
-	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, models.OAuthProviderApple)
-	tokenResp, err := provider.ExchangeCodeForToken(ctx, &services.CodeExchangeRequest{
-		Code:        req.Code,
-		RedirectURI: backendCallbackURL,
-	})
-	if err != nil {
-		return nil, huma.Error400BadRequest("Failed to exchange code", err)
-	}
-
-	userInfo, err := provider.GetUserInfo(ctx, tokenResp.AccessToken)
-	if err != nil {
-		return nil, huma.Error500InternalServerError("Failed to get user info", err)
-	}
-
-	// Convert userInfo to map for enhanced auth service
-	userInfoMap := map[string]interface{}{
-		"email":          userInfo.Email,
-		"name":           userInfo.Name,
-		"picture":        userInfo.Picture,
-		"provider_id":    userInfo.ProviderID,
-		"email_verified": userInfo.EmailVerified,
-	}
-
-	// Prepare OAuth provider tokens for storage
-	oauthTokens := &models.OAuthProviderTokens{
-		AccessToken:  tokenResp.AccessToken,
-		RefreshToken: tokenResp.RefreshToken,
-		TokenType:    tokenResp.TokenType,
-		ExpiresIn:    int(tokenResp.ExpiresIn),
-		IDToken:      tokenResp.IDToken,
-	}
-
-	// Use enhanced auth service for proper user creation and token management
-	tokenResponse, err := target.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderApple, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
-	if err != nil {
-		if errors.Is(err, services.ErrInvalidCredentials) {
-			return nil, mapOAuthError(err)
-		}
-		return nil, huma.Error500InternalServerError("Failed to process OAuth callback", err)
-	}
-
-	// Redirect to frontend with tokens (Note: Huma handlers can't set cookies directly)
-	frontendURL := target.config.Server.FrontendURL
-	redirectURL := fmt.Sprintf("%s/auth/callback?success=true&access_token=%s&token_type=Bearer&expires_in=%d&user_id=%s&email=%s&provider=apple",
-		frontendURL,
-		url.QueryEscape(tokenResponse.AccessToken),
-		tokenResponse.ExpiresIn,
-		url.QueryEscape(tokenResponse.User.ID),
-		url.QueryEscape(tokenResponse.User.Email))
-
-	resp := &OAuthCallbackResponse{
-		Status: 302,
-	}
-	resp.Headers.Location = redirectURL
-
-	return resp, nil
-}
-
-// HandleGitHubCallback handles GitHub OAuth callback
-func (h *AuthHandler) HandleGitHubCallback(ctx context.Context, req *OAuthCallbackRequest) (*OAuthCallbackResponse, error) {
-	stateInfo, claims, err := h.resolveStateForCallback(ctx, req.State)
-	if err != nil {
-		return nil, huma.Error400BadRequest("Invalid OAuth state", err)
-	}
-	target := h.dispatchTarget(claims.Tier)
-
-	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderGitHub)
-	if err != nil {
-		return nil, huma.Error500InternalServerError("GitHub OAuth not configured", err)
-	}
-
-	// Exchange code for tokens - must use same redirect URI as initial auth request
-	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, models.OAuthProviderGitHub)
-	tokenResp, err := provider.ExchangeCodeForToken(ctx, &services.CodeExchangeRequest{
-		Code:        req.Code,
-		RedirectURI: backendCallbackURL,
-	})
-	if err != nil {
-		return nil, huma.Error400BadRequest("Failed to exchange code", err)
-	}
-
-	userInfo, err := provider.GetUserInfo(ctx, tokenResp.AccessToken)
-	if err != nil {
-		return nil, huma.Error500InternalServerError("Failed to get user info", err)
-	}
-
-	// Convert userInfo to map for enhanced auth service
-	userInfoMap := map[string]interface{}{
-		"email":          userInfo.Email,
-		"name":           userInfo.Name,
-		"picture":        userInfo.Picture,
-		"provider_id":    userInfo.ProviderID,
-		"email_verified": userInfo.EmailVerified,
-	}
-
-	// Prepare OAuth provider tokens for storage
-	oauthTokens := &models.OAuthProviderTokens{
-		AccessToken: tokenResp.AccessToken,
-		TokenType:   tokenResp.TokenType,
-		Scopes:      tokenResp.Scope,
-	}
-
-	if claims.Mode == services.OAuthStateModeLink {
-		return h.resolveOAuthLinkRedirect(ctx, target, models.OAuthProviderGitHub, userInfoMap, oauthTokens, claims.LinkUserUUID)
-	}
-
-	// Use enhanced auth service for proper user creation and token management
-	tokenResponse, err := target.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderGitHub, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
-	if err != nil {
-		if errors.Is(err, services.ErrInvalidCredentials) {
-			return nil, mapOAuthError(err)
-		}
-		return nil, huma.Error500InternalServerError("Failed to process OAuth callback", err)
-	}
-	if resp, ok := h.resolveOAuthMFAPartialRedirect(target, tokenResponse, "github"); ok {
-		return resp, nil
-	}
-
-	// Redirect to frontend without access token (access token will be fetched via /auth/session)
-	// Note: Huma handlers can't set cookies directly, so refresh token handling may need adjustment
-	frontendURL := target.config.Server.FrontendURL
-	redirectURL := fmt.Sprintf("%s/auth/callback?success=true&user_id=%s&email=%s&provider=github",
-		frontendURL,
-		url.QueryEscape(tokenResponse.User.ID),
-		url.QueryEscape(tokenResponse.User.Email))
-
-	resp := &OAuthCallbackResponse{
-		Status: 302,
-	}
-	resp.Headers.Location = redirectURL
-
-	return resp, nil
+	h.completeOAuthCallback(w, r, models.OAuthProviderApple, params, exchangeAppleIDToken())
 }
 
 // Refresh Token Request
@@ -2444,29 +1778,22 @@ func (h *AuthHandler) GetCurrentUser(ctx context.Context, _ *struct{}) (*GetCurr
 // one callback per provider regardless of how many audiences exist. On
 // every callback the signed-state JWT carries the audience tier and
 // dispatchTarget routes the resulting token issuance to the matching
-// authService (ADR-0003 PR-D D-6).
-func (h *AuthHandler) RegisterOAuthRoutes(publicAPI huma.API, _ huma.API, router chi.Router, _ chi.Router) {
+// authService (ADR-0003 PR-D D-6). All four callbacks are raw chi
+// handlers so every one of them can set the refresh cookie and the
+// redirect headers; client-tier logins are relayed to the client host
+// mux (RegisterOAuthRelayRoute).
+func (h *AuthHandler) RegisterOAuthRoutes(_ huma.API, _ huma.API, router chi.Router, _ chi.Router) {
 	// OAuth callbacks — raw HTTP handlers for proper redirects. Hosted
 	// once on the operator host mux; the dispatched target's config
 	// owns cookie domain + frontend redirect.
 	router.Get("/v1/auth/oauth/google/callback", h.HandleGoogleCallbackHTTP)
 	router.Get("/v1/auth/oauth/discord/callback", h.HandleDiscordCallbackHTTP)
+	router.Get("/v1/auth/oauth/github/callback", h.HandleGitHubCallbackHTTP)
 	router.Post("/v1/auth/oauth/apple/callback", h.HandleAppleCallbackHTTP)
 
 	// Session initialization for web clients after OAuth callback — raw
 	// HTTP handler for cookies.
 	router.Get("/v1/auth/session", h.GetSessionHTTP)
-
-	// GitHub callback uses Huma for consistency with the existing
-	// implementation.
-	huma.Register(publicAPI, huma.Operation{
-		OperationID: "github-oauth-callback",
-		Method:      http.MethodGet,
-		Path:        "/v1/auth/oauth/github/callback",
-		Summary:     "GitHub OAuth callback",
-		Description: "Handle GitHub OAuth callback and exchange code for tokens",
-		Tags:        []string{"Authentication"},
-	}, h.HandleGitHubCallback)
 }
 
 // RegisterOAuthStartRoutes mounts the OAuth start endpoints under the
@@ -2536,7 +1863,7 @@ func (h *AuthHandler) RegisterOAuthLinkRoute(api huma.API, mount RouteMount) {
 		Method:      http.MethodPost,
 		Path:        "/v1/auth" + mount.PathPrefix + "/me/oauth/link/{provider}",
 		Summary:     "Initiate OAuth flow to add a sign-in provider to the current account",
-		Description: "Returns a redirect URL the SPA should navigate to. The signed-state JWT carries the caller's userUUID so the shared callback can bind the new identity without a fresh login. The callback redirects back to /user/security?tab=oauth&link=success|failed.",
+		Description: "Returns a redirect URL the SPA should navigate to. The signed-state JWT carries the caller's userUUID so the shared callback can bind the new identity without a fresh login. The callback redirects back to the security page's OAuth tab with link=success|failed.",
 		Tags:        []string{"Authentication", "Self-Service"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.InitiateOAuthLink)

@@ -1153,6 +1153,9 @@ func (s *ModuleConfigService) GetRawValueRequiredModule(ctx context.Context, mod
 	return v, ok, nil
 }
 
+// ActiveConfigRequiredModule (config_active_view.go) is the multi-key
+// counterpart: one read, every secret decrypt-checked, live-schema fallbacks.
+
 // GetSecret returns a decrypted secret config value for a module.
 // Lookup: active environment EncryptedValues (decrypt) → legacy EncryptedValues → env var → schema default → "".
 func (s *ModuleConfigService) GetSecret(ctx context.Context, moduleName, key string) string {

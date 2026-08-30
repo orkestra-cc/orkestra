@@ -24,6 +24,15 @@ type OAuthStateService interface {
 
 	// Clear expired OAuth states
 	CleanupExpiredStates(ctx context.Context) error
+
+	// StoreOAuthRelay persists the IdP half of a client-tier login (see
+	// OAuthRelayRecord) under a fresh one-shot id for OAuthRelayTTL and
+	// returns the id. The record is encrypted at rest.
+	StoreOAuthRelay(ctx context.Context, rec *OAuthRelayRecord) (string, error)
+	// TakeOAuthRelay atomically returns and removes a relay record. A
+	// second call with the same id, an unknown id or a record past its
+	// ExpiresAt is an error.
+	TakeOAuthRelay(ctx context.Context, id string) (*OAuthRelayRecord, error)
 }
 
 // StoreOAuthStateRequest contains parameters for storing OAuth state.
@@ -73,6 +82,37 @@ type OAuthStateInfo struct {
 	Mode         string `json:"mode,omitempty"`
 	LinkUserUUID string `json:"linkUserUuid,omitempty"`
 }
+
+// OAuthRelayRecord carries the IdP half of a client-tier web login from the
+// operator-host callback — the only place the provider's redirect URI
+// points — to the client API host, the only host that can set the client
+// refresh cookie. It holds everything the application half needs and the
+// state's CSRF nonce so the relay endpoint can verify the browser binding
+// against the cookie the client API host set at start. Stored encrypted
+// (utils.EncryptOAuthToken) under oauth:relay:<id> for OAuthRelayTTL.
+type OAuthRelayRecord struct {
+	Tier         string               `json:"tier"`
+	Provider     models.OAuthProvider `json:"provider"`
+	CSRF         string               `json:"csrf"`
+	Mode         string               `json:"mode,omitempty"`
+	LinkUserUUID string               `json:"linkUserUuid,omitempty"`
+	// FailureCode, when non-empty, is the allowlisted login-callback error
+	// the operator-host callback already decided (IdP denial, missing
+	// code, provider unavailable…). The relay endpoint still verifies the
+	// binding and clears the start-host cookie, then redirects with it
+	// instead of running the application half. Empty means "complete".
+	FailureCode     string                      `json:"failureCode,omitempty"`
+	UserInfo        map[string]interface{}      `json:"userInfo,omitempty"`
+	Tokens          *models.OAuthProviderTokens `json:"tokens,omitempty"`
+	SecurityContext *models.SecurityContext     `json:"securityContext,omitempty"`
+	DeviceInfo      *models.DeviceInfo          `json:"deviceInfo,omitempty"`
+	CreatedAt       time.Time                   `json:"createdAt"`
+	ExpiresAt       time.Time                   `json:"expiresAt"`
+}
+
+// OAuthRelayTTL bounds the hop between the operator-host callback and the
+// client API host: one browser redirect, so seconds, not minutes.
+const OAuthRelayTTL = 60 * time.Second
 
 // OAuthStateStore defines the storage interface for OAuth states
 type OAuthStateStore interface {
@@ -158,34 +198,22 @@ func (s *oAuthStateService) ValidateOAuthState(ctx context.Context, state string
 	if state == "" {
 		return nil, fmt.Errorf("OAuth state is required")
 	}
-
-	// Retrieve from store
-	storeKey := s.buildStateKey(state)
-	stateData, err := s.store.Get(ctx, storeKey)
+	// ONE-SHOT: Take (Redis GETDEL) returns the row to exactly one caller.
+	// The previous Get + deferred Delete let two concurrent callbacks both
+	// read the same state — the replay window the signed JWT alone cannot
+	// close, because the JWT is valid for ten minutes.
+	stateData, err := s.store.Take(ctx, s.buildStateKey(state))
 	if err != nil {
-		return nil, fmt.Errorf("OAuth state not found or expired: %w", err)
+		return nil, fmt.Errorf("OAuth state not found, expired or already used: %w", err)
 	}
-
-	// Deserialize state info
 	var stateInfo OAuthStateInfo
 	if err := json.Unmarshal(stateData, &stateInfo); err != nil {
 		return nil, fmt.Errorf("failed to deserialize OAuth state: %w", err)
 	}
-
-	// Validate expiry (double-check even though store should handle this)
+	// Belt and braces: the store's TTL should have evicted it already.
 	if time.Now().After(stateInfo.ExpiresAt) {
-		// Delete expired state
-		s.store.Delete(ctx, storeKey)
 		return nil, fmt.Errorf("OAuth state has expired")
 	}
-
-	// Delete state after successful validation (one-time use)
-	go func() {
-		deleteCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		s.store.Delete(deleteCtx, storeKey)
-	}()
-
 	return &stateInfo, nil
 }
 
@@ -197,6 +225,61 @@ func (s *oAuthStateService) CleanupExpiredStates(ctx context.Context) error {
 
 func (s *oAuthStateService) buildStateKey(state string) string {
 	return fmt.Sprintf("oauth:state:%s", state)
+}
+
+func (s *oAuthStateService) StoreOAuthRelay(ctx context.Context, rec *OAuthRelayRecord) (string, error) {
+	if rec == nil || rec.CSRF == "" || rec.Tier == "" || rec.Provider == "" {
+		return "", fmt.Errorf("oauth relay: tier, provider and csrf are required")
+	}
+	id, err := GenerateOAuthCSRF()
+	if err != nil {
+		return "", fmt.Errorf("oauth relay: mint id: %w", err)
+	}
+	now := time.Now()
+	rec.CreatedAt = now
+	if rec.ExpiresAt.IsZero() {
+		rec.ExpiresAt = now.Add(OAuthRelayTTL)
+	}
+	plain, err := json.Marshal(rec)
+	if err != nil {
+		return "", fmt.Errorf("oauth relay: serialize: %w", err)
+	}
+	// The record carries the IdP tokens and the user's email: encrypted at
+	// rest with the same AES-256-GCM helper the provider tokens use.
+	sealed, err := utils.EncryptOAuthToken(string(plain))
+	if err != nil {
+		return "", fmt.Errorf("oauth relay: encrypt: %w", err)
+	}
+	if err := s.store.Set(ctx, s.buildRelayKey(id), []byte(sealed), OAuthRelayTTL); err != nil {
+		return "", fmt.Errorf("oauth relay: store: %w", err)
+	}
+	return id, nil
+}
+
+func (s *oAuthStateService) TakeOAuthRelay(ctx context.Context, id string) (*OAuthRelayRecord, error) {
+	if id == "" {
+		return nil, fmt.Errorf("oauth relay: id is required")
+	}
+	sealed, err := s.store.Take(ctx, s.buildRelayKey(id))
+	if err != nil {
+		return nil, fmt.Errorf("oauth relay not found, expired or already used: %w", err)
+	}
+	plain, err := utils.DecryptOAuthToken(string(sealed))
+	if err != nil {
+		return nil, fmt.Errorf("oauth relay: decrypt: %w", err)
+	}
+	var rec OAuthRelayRecord
+	if err := json.Unmarshal([]byte(plain), &rec); err != nil {
+		return nil, fmt.Errorf("oauth relay: deserialize: %w", err)
+	}
+	if time.Now().After(rec.ExpiresAt) {
+		return nil, fmt.Errorf("oauth relay has expired")
+	}
+	return &rec, nil
+}
+
+func (s *oAuthStateService) buildRelayKey(id string) string {
+	return fmt.Sprintf("oauth:relay:%s", id)
 }
 
 // Redis implementation of OAuthStateStore

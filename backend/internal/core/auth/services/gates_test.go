@@ -544,7 +544,7 @@ func TestOAuthCallback_SignupDisabled_ReturnsErr(t *testing.T) {
 	_, err := env.auth.HandleOAuthCallbackWithLinking(
 		context.Background(),
 		authModels.OAuthProviderGoogle,
-		map[string]any{"id": "g-99", "email": "newcomer@example.com", "name": "New"},
+		map[string]any{"id": "g-99", "email": "newcomer@example.com", "name": "New", "email_verified": true},
 		nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
 	)
 	if !errors.Is(err, ErrOAuthSignupDisabled) {
@@ -567,7 +567,7 @@ func TestOAuthCallback_OperatorDefaultRoleGuest(t *testing.T) {
 	_, _ = env.auth.HandleOAuthCallbackWithLinking(
 		context.Background(),
 		authModels.OAuthProviderGoogle,
-		map[string]any{"id": "g-200", "email": "joiner@example.com", "name": "Joiner"},
+		map[string]any{"id": "g-200", "email": "joiner@example.com", "name": "Joiner", "email_verified": true},
 		nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
 	)
 	created := env.users.byEmail["joiner@example.com"]
@@ -592,7 +592,7 @@ func TestOAuthCallback_ClientDefaultRoleReadsPolicy(t *testing.T) {
 	_, _ = env.auth.HandleOAuthCallbackWithLinking(
 		context.Background(),
 		authModels.OAuthProviderGoogle,
-		map[string]any{"id": "g-300", "email": "client-joiner@example.com", "name": "Client"},
+		map[string]any{"id": "g-300", "email": "client-joiner@example.com", "name": "Client", "email_verified": true},
 		nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
 	)
 	created := env.users.byEmail["client-joiner@example.com"]
@@ -604,55 +604,109 @@ func TestOAuthCallback_ClientDefaultRoleReadsPolicy(t *testing.T) {
 	}
 }
 
-func TestOAuthCallback_PropagatesEmailVerifiedFromIdP(t *testing.T) {
-	// When the IdP (Google here) sets email_verified=true on the user
-	// info map, the new account must land with EmailVerified=true so we
-	// don't re-ask the user to verify what the IdP just confirmed.
-	// Conversely, missing or false must NOT auto-verify — that protects
-	// against IdPs (or providers we haven't audited) that don't actually
-	// own the inbox.
-	cases := []struct {
-		name     string
-		claim    map[string]any
-		expected bool
-	}{
-		{
-			name:     "claim_true",
-			claim:    map[string]any{"id": "g-verified", "email": "verified@example.com", "name": "V", "email_verified": true},
-			expected: true,
-		},
-		{
-			name:     "claim_false",
-			claim:    map[string]any{"id": "g-unverified", "email": "unverified@example.com", "name": "U", "email_verified": false},
-			expected: false,
-		},
-		{
-			name:     "claim_missing",
-			claim:    map[string]any{"id": "g-missing", "email": "missing@example.com", "name": "M"},
-			expected: false,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			env := newOAuthGatesEnv(t, PolicyAudienceOperator, nil)
-			env.users.seed(activeUser("seed-ev@example.com", "x"))
-			env.claimer.claimed = map[string]bool{"seed": true}
-			env.users.createFromOAuthAbortErr = errors.New("stop here, flag captured")
+func TestOAuthCallback_NewUser_RequiresVerifiedEmail(t *testing.T) {
+	// §4.4: an unlinked identity is matched or created only when the IdP
+	// vouches for the address. claim_true still lands EmailVerified=true so
+	// the user is not asked to confirm what the IdP confirmed; false or
+	// missing is refused BEFORE the email lookup and creates nothing.
+	env := newOAuthGatesEnv(t, PolicyAudienceOperator, nil)
+	env.users.seed(activeUser("seed-ev@example.com", "x"))
+	env.claimer.claimed = map[string]bool{"seed": true}
+	env.users.createFromOAuthAbortErr = errors.New("stop here, flag captured")
 
-			_, _ = env.auth.HandleOAuthCallbackWithLinking(
-				context.Background(),
-				authModels.OAuthProviderGoogle,
-				tc.claim,
+	_, _ = env.auth.HandleOAuthCallbackWithLinking(
+		context.Background(), authModels.OAuthProviderGoogle,
+		map[string]any{"provider_id": "g-verified", "email": "verified@example.com", "name": "V", "email_verified": true},
+		nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
+	)
+	created := env.users.byEmail["verified@example.com"]
+	if created == nil || !created.EmailVerified {
+		t.Fatalf("a verified IdP email must create a verified user: %+v", created)
+	}
+
+	for name, claim := range map[string]map[string]any{
+		"claim_false":   {"provider_id": "g-unverified", "email": "unverified@example.com", "name": "U", "email_verified": false},
+		"claim_missing": {"provider_id": "g-missing", "email": "missing@example.com", "name": "M"},
+		"claim_string":  {"provider_id": "g-string", "email": "string@example.com", "name": "S", "email_verified": "true"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := newOAuthGatesEnv(t, PolicyAudienceOperator, nil)
+			_, err := env.auth.HandleOAuthCallbackWithLinking(
+				context.Background(), authModels.OAuthProviderGoogle, claim,
 				nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
 			)
-			created := env.users.byEmail[tc.claim["email"].(string)]
-			if created == nil {
-				t.Fatalf("OAuth signup did not persist the new user before abort")
+			if !errors.Is(err, ErrOAuthEmailUnverified) {
+				t.Fatalf("err = %v, want ErrOAuthEmailUnverified", err)
 			}
-			if created.EmailVerified != tc.expected {
-				t.Fatalf("EmailVerified = %v, want %v", created.EmailVerified, tc.expected)
+			if env.users.getByEmailCalls != 0 {
+				t.Fatalf("GetUserByEmail was called %d times; must be 0 before the verified check", env.users.getByEmailCalls)
+			}
+			if len(env.users.createdUsers) != 0 {
+				t.Fatal("no user may be created")
 			}
 		})
+	}
+}
+
+func TestOAuthCallback_UnverifiedEmail_SameAnswerForKnownAndUnknownAccount(t *testing.T) {
+	// The refusal must not be an account-existence oracle: identical error,
+	// zero lookups, whether or not a local account with that email exists.
+	for name, seedKnown := range map[string]bool{"known": true, "unknown": false} {
+		t.Run(name, func(t *testing.T) {
+			env := newOAuthGatesEnv(t, PolicyAudienceOperator, nil)
+			if seedKnown {
+				env.users.seed(activeUser("probe@example.com", "x"))
+			}
+			_, err := env.auth.HandleOAuthCallbackWithLinking(
+				context.Background(), authModels.OAuthProviderGoogle,
+				map[string]any{"provider_id": "g-probe", "email": "probe@example.com", "name": "P", "email_verified": false},
+				nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
+			)
+			if !errors.Is(err, ErrOAuthEmailUnverified) || env.users.getByEmailCalls != 0 {
+				t.Fatalf("err = %v, lookups = %d", err, env.users.getByEmailCalls)
+			}
+		})
+	}
+}
+
+func TestOAuthCallback_AutoLinkPolicyUnavailable_FailsClosedBeforeLookup(t *testing.T) {
+	for name, reader := range map[string]*stubReader{
+		"read failure":     {rawErr: errors.New("mongo down")},
+		"missing document": {requiredMissing: true},
+		"malformed value":  {values: map[string]string{"oauthAutoLinkByEmail": "treu"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := newOAuthGatesEnv(t, PolicyAudienceOperator, nil)
+			env.policy.cs = reader
+			env.users.seed(activeUser("existing@example.com", "x"))
+			_, err := env.auth.HandleOAuthCallbackWithLinking(
+				context.Background(), authModels.OAuthProviderGoogle,
+				map[string]any{"provider_id": "g-existing", "email": "existing@example.com", "name": "E", "email_verified": true},
+				nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
+			)
+			if !errors.Is(err, ErrAuthPolicyUnavailable) {
+				t.Fatalf("err = %v, want ErrAuthPolicyUnavailable", err)
+			}
+			if env.users.getByEmailCalls != 0 || len(env.users.createdUsers) != 0 {
+				t.Fatalf("lookups = %d, created = %d; must both be 0", env.users.getByEmailCalls, len(env.users.createdUsers))
+			}
+		})
+	}
+}
+
+func TestOAuthCallback_NilPolicy_FailsClosed(t *testing.T) {
+	// A service wired without a policy cannot establish the auto-link
+	// rule; it must not fall open to the legacy "always link".
+	env := newOAuthGatesEnv(t, PolicyAudienceOperator, nil)
+	env.auth.SetPolicy(nil)
+	env.users.seed(activeUser("existing@example.com", "x"))
+	_, err := env.auth.HandleOAuthCallbackWithLinking(
+		context.Background(), authModels.OAuthProviderGoogle,
+		map[string]any{"provider_id": "g-existing", "email": "existing@example.com", "name": "E", "email_verified": true},
+		nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
+	)
+	if !errors.Is(err, ErrAuthPolicyUnavailable) || env.users.getByEmailCalls != 0 {
+		t.Fatalf("err = %v, lookups = %d", err, env.users.getByEmailCalls)
 	}
 }
 
@@ -667,7 +721,7 @@ func TestOAuthCallback_RegistrationDisabled_ReturnsErr(t *testing.T) {
 	_, err := env.auth.HandleOAuthCallbackWithLinking(
 		context.Background(),
 		authModels.OAuthProviderGoogle,
-		map[string]any{"id": "g-100", "email": "newcomer2@example.com", "name": "New2"},
+		map[string]any{"id": "g-100", "email": "newcomer2@example.com", "name": "New2", "email_verified": true},
 		nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
 	)
 	if !errors.Is(err, ErrOAuthSignupDisabled) {
@@ -686,11 +740,14 @@ func TestOAuthCallback_AutoLinkDisabled_ReturnsErr(t *testing.T) {
 	_, err := env.auth.HandleOAuthCallbackWithLinking(
 		context.Background(),
 		authModels.OAuthProviderGoogle,
-		map[string]any{"id": "g-existing", "email": "existing@example.com", "name": "Existing"},
+		map[string]any{"id": "g-existing", "email": "existing@example.com", "name": "Existing", "email_verified": true},
 		nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
 	)
 	if !errors.Is(err, ErrOAuthLinkDisabled) {
 		t.Fatalf("got %v, want ErrOAuthLinkDisabled", err)
+	}
+	if env.users.getByEmailCalls != 1 {
+		t.Fatalf("lookups = %d, want exactly 1 (policy is read BEFORE the lookup, the refusal comes after it)", env.users.getByEmailCalls)
 	}
 }
 

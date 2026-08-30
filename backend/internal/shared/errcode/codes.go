@@ -64,6 +64,20 @@ const AuthPasswordConfirmUnavailable = "auth.password_confirm_unavailable"
 // is not enabled for the surface the request came in on. 403.
 const AuthOAuthProviderDisabled = "auth.oauth_provider_disabled"
 
+// AuthPolicyUnavailable signals that an admin-managed sign-in policy — or
+// the auth configuration document it lives in — could not be read or
+// parsed. The decision fails closed, never open, so the caller retries
+// later rather than being granted a permissive default. 503.
+const AuthPolicyUnavailable = "auth.policy_unavailable"
+
+// AuthOAuthEmailUnverified signals that an OAuth identity with no existing
+// link presented an email the identity provider did not mark verified, so
+// it may neither auto-link to a local account nor sign up. Returned before
+// any local email lookup and identically whether or not such an account
+// exists — it must not become an account-existence oracle. 403 on JSON
+// surfaces; the same string is the web callback's `error=` code.
+const AuthOAuthEmailUnverified = "auth.oauth_email_unverified"
+
 // --- tenant ---
 
 // TenantSlugAlreadyInUse signals that a tenant create or update would reuse an

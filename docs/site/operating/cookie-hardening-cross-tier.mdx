@@ -86,6 +86,10 @@ If you set `COOKIE_DOMAIN=.example.com` and leave the audience-specific vars emp
 
 The validator in [`backend/internal/shared/config/config.go`](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/shared/config/config.go) doesn't currently reject this combination. **Treat it as a deployment-time review item** until a hard gate lands (tracked in the [ADR-0003 follow-ups](/adrs/three-audience-host-split)).
 
+## Why a client-tier social login relays to the client API host
+
+Every OAuth provider is registered with **one** redirect URI per provider, and that URI lives on the operator host. A client-tier flow therefore returns from the identity provider to `console.example.com` — a host that, by the model above, **cannot** set a cookie for `api.example.com` (the browser rejects a `Domain` that does not match the response host, and a shared parent domain is exactly what we refuse to configure). The callback does not try: for a client-tier flow it completes the identity-provider half, stores a 60-second single-use record, and redirects the browser to `CLIENT_API_URL/v1/auth/client/oauth/complete?relay=…`. That endpoint, on the client API host, takes the record once, requires the `orkestra_oauth_state` cookie the same host set when the flow started (so a login-CSRF attempt that finished someone else's flow is refused before any token exists), clears it, and then either sets the client refresh cookie on its own host and sends the user to the client SPA or — when the flow had already failed at the identity provider — sends them there with the failure code. Nothing about a client-tier login is decided for the browser anywhere else. Set `CLIENT_API_URL` to the client API's public origin; it is derived from `CLIENT_API_HOST` when empty.
+
 ## Verifying
 
 After deploying, inspect the cookies in a browser dev-tools session. Look at the `Domain=` attribute on the refresh cookie:

@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +36,47 @@ const (
 	defaultPasswordResetTokenTTL = 30 * time.Minute
 )
 
+// ErrAuthPolicyUnavailable is returned by every STRICT policy accessor when
+// the answer cannot be established: nil service, nil reader, missing auth
+// document, repository failure, or a present value that is not a canonical
+// boolean. Callers map it to 503 auth.policy_unavailable and never
+// substitute a default — an outage must not re-enable anything.
+var ErrAuthPolicyUnavailable = errors.New("auth policy unavailable")
+
+// strictBool accepts only canonical, case-insensitive "true" / "false" after
+// trimming. It deliberately does NOT accept readBool's "1"/"yes": an
+// out-of-band "treu" or "" must surface as an error, never as a default.
+func strictBool(raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+	return false, fmt.Errorf("not a canonical boolean")
+}
+
+// providerToggleKey maps (audience, provider) to the schema key of the
+// per-surface enable toggle. Unknown provider names resolve to nothing —
+// admin-managed lookups never fall through to "allow" for a typo.
+func providerToggleKey(audience PolicyAudience, provider string) (string, bool) {
+	suffix := "Admin"
+	if audience == PolicyAudienceClient {
+		suffix = "Client"
+	}
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "google":
+		return "googleEnabled" + suffix, true
+	case "apple":
+		return "appleEnabled" + suffix, true
+	case "github":
+		return "githubEnabled" + suffix, true
+	case "discord":
+		return "discordEnabled" + suffix, true
+	}
+	return "", false
+}
+
 // PolicyAudience names the surface a policy lookup is being performed for.
 // "operator" applies to /v1/auth/operator/* (Tier-1 console), "client" to
 // /v1/auth/client/* (Tier-2 client SPA / API). The two surfaces share the
@@ -63,6 +106,12 @@ type configValueReader interface {
 	// a cap the operator had disabled and signing out every session older
 	// than 30 days that refreshed in that window.
 	GetRawValue(ctx context.Context, moduleName, key string) (string, bool, error)
+	// GetRawValueRequiredModule is GetRawValue for a module whose document
+	// must exist: a missing document is the ERROR outcome
+	// (module.ErrRequiredConfigMissing), never "absent". The strict
+	// accessors below read through it so an outage can never be mistaken
+	// for "the operator said nothing here".
+	GetRawValueRequiredModule(ctx context.Context, moduleName, key string) (string, bool, error)
 }
 
 // AuthPolicyService resolves admin-managed authentication policy at
@@ -475,22 +524,14 @@ func (s *AuthPolicyService) MFAGraceExpiresAt(ctx context.Context, user *iface.U
 // deployments preserve behaviour after the schema migration. Unknown
 // provider names always return false — admin-managed lookups do not
 // fall through to "allow" for typos.
+//
+// PERMISSIVE by design and kept for the native/mobile ID-token endpoints
+// only. The web flow (provider list, OAuth start, callback) uses
+// OAuthConfigResolver.OAuthWebProviderUsable, which parses the same key
+// strictly with the schema default (false) for an absent key.
 func (s *AuthPolicyService) OAuthProviderEnabled(ctx context.Context, audience PolicyAudience, provider string) bool {
-	suffix := "Admin"
-	if audience == PolicyAudienceClient {
-		suffix = "Client"
-	}
-	var key string
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "google":
-		key = "googleEnabled" + suffix
-	case "apple":
-		key = "appleEnabled" + suffix
-	case "github":
-		key = "githubEnabled" + suffix
-	case "discord":
-		key = "discordEnabled" + suffix
-	default:
+	key, known := providerToggleKey(audience, provider)
+	if !known {
 		return false
 	}
 	if s == nil || s.cs == nil {
@@ -625,16 +666,29 @@ func (s *AuthPolicyService) RecoveryCodesCount(ctx context.Context) int {
 	return n
 }
 
-// OAuthAutoLinkByEmail reports whether the OAuth callback should
-// auto-attach a provider to an existing Orkestra account when the
-// emails match. Defaults to true — preserves today's UX. Operators
-// in higher-assurance deployments flip it off so account linking
-// must be initiated by an authenticated user from their settings.
-func (s *AuthPolicyService) OAuthAutoLinkByEmail(ctx context.Context) bool {
+// OAuthAutoLinkByEmailEnabled reports whether the OAuth callback may
+// auto-attach a provider to an existing account with the same VERIFIED
+// email. STRICT (spec §4.4): a nil service, a missing auth document, a
+// read failure or a malformed/empty present value is ErrAuthPolicyUnavailable
+// — the callback then answers 503 before any lookup, link or token
+// issuance. An absent key means the schema default, true (possible only for
+// a fork that skips boot seeding).
+func (s *AuthPolicyService) OAuthAutoLinkByEmailEnabled(ctx context.Context) (bool, error) {
 	if s == nil || s.cs == nil {
-		return true
+		return false, fmt.Errorf("%w: policy service not wired", ErrAuthPolicyUnavailable)
 	}
-	return readBool(s.cs.GetValue(ctx, "auth", "oauthAutoLinkByEmail"), true)
+	raw, ok, err := s.cs.GetRawValueRequiredModule(ctx, "auth", "oauthAutoLinkByEmail")
+	if err != nil {
+		return false, fmt.Errorf("%w: read oauthAutoLinkByEmail: %w", ErrAuthPolicyUnavailable, err)
+	}
+	if !ok {
+		return true, nil
+	}
+	v, err := strictBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%w: oauthAutoLinkByEmail is not a canonical boolean", ErrAuthPolicyUnavailable)
+	}
+	return v, nil
 }
 
 // MFARequiredRoles returns the admin-managed list of role names that

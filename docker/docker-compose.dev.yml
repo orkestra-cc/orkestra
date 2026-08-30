@@ -83,6 +83,7 @@ services:
       # so curl http://localhost:3000 still works.
       CONSOLE_HOST: ${CONSOLE_HOST:-console.localhost:3000}
       CLIENT_API_HOST: ${CLIENT_API_HOST:-api.localhost:3000}
+      CLIENT_API_URL: ${CLIENT_API_URL:-http://api.localhost:3000}
       OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
       # Default CLIENT_CORS_ORIGINS allows the new Tier-2 demo SPA at
       # http://client.localhost:8081 (served by client-frontend).

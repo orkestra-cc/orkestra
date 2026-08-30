@@ -42,6 +42,8 @@ var goldenCodes = map[string]string{
 	"AuthCountryBlocked":                 "auth.country_blocked",
 	"AuthPasswordConfirmUnavailable":     "auth.password_confirm_unavailable",
 	"AuthOAuthProviderDisabled":          "auth.oauth_provider_disabled",
+	"AuthPolicyUnavailable":              "auth.policy_unavailable",
+	"AuthOAuthEmailUnverified":           "auth.oauth_email_unverified",
 	"TenantSlugAlreadyInUse":             "tenant.slug_already_in_use",
 	"TenantProvisioningLocked":           "tenant.provisioning_locked",
 	"TenantInternalModeInvalid":          "tenant.internal_mode_invalid",

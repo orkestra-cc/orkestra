@@ -1077,6 +1077,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	m.operatorAuthHandler.SetStateSecret(oauthStateSecret)
 	m.operatorAuthHandler.SetTier(services.AudienceOperator)
 	m.operatorAuthHandler.SetPolicy(authPolicy)
+	m.operatorAuthHandler.SetSPAURL(opDeps.frontendURL)
 	// Avatar pipeline: hand the blob store so /me + login + refresh +
 	// session-poll resolve uploaded avatars to a fresh presigned GET.
 	// Without this, oauth_*/uploaded users see initials in the navbar
@@ -1243,6 +1244,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	m.clientAuthHandler.SetStateSecret(oauthStateSecret)
 	m.clientAuthHandler.SetTier(services.AudienceClient)
 	m.clientAuthHandler.SetPolicy(authPolicy)
+	m.clientAuthHandler.SetSPAURL(clDeps.frontendURL)
 	if store, ok := module.GetTyped[blob.Store](deps.Services, module.ServiceBlobStore); ok {
 		m.clientAuthHandler.SetBlobStore(store)
 		clBundle.authService.SetBlobStore(store)
@@ -1683,6 +1685,11 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 	if ri.ClientRouter != nil {
 		m.clientAuthHandler.RegisterTierMountableRoutes(ri.Client.PublicAPI, clientProtectedAPI, ri.ClientRouter, handlers.ClientMount)
 		m.clientAuthHandler.RegisterOAuthStartRoutes(ri.Client.PublicAPI, handlers.ClientMount)
+		// Client-tier web logins complete HERE (spec §4.10): the
+		// operator-host callback relays them because only this host can set
+		// the client refresh cookie and verify the state cookie it set at
+		// start.
+		m.clientAuthHandler.RegisterOAuthRelayRoute(ri.ClientRouter)
 	}
 	m.clientPasswordHandler.RegisterPublicRoutes(ri.Client.PublicAPI, handlers.ClientMount)
 	ri.Client.ProtectedRouter.Group(func(r chi.Router) {
