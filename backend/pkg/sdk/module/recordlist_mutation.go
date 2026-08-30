@@ -146,7 +146,13 @@ func (s *ModuleConfigService) UpdateEnvironmentConfigWithRecordLists(
 		}
 
 		// Validate exactly what will be written.
-		if err := s.validateModuleConfig(ctx, name, next.ConfigValues); err != nil {
+		if err := s.validateCandidate(ctx, name, candidate{
+			schema:           doc.ConfigSchema,
+			env:              envName,
+			values:           next.ConfigValues,
+			storedEncrypted:  next.EncryptedValues,
+			submittedSecrets: secrets,
+		}); err != nil {
 			return err
 		}
 

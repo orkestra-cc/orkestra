@@ -379,22 +379,6 @@ func (s *ModuleConfigService) lazySeed(ctx context.Context, name string) (*Modul
 	return s.repo.FindByName(ctx, name)
 }
 
-// validateModuleConfig runs the module's optional ValidateConfig hook
-// against exactly the non-secret values the update would persist.
-// Modules that are unknown to this service, or that omit the seam, are
-// accepted unchanged. ADR-0017 D6.
-func (s *ModuleConfigService) validateModuleConfig(ctx context.Context, name string, merged map[string]string) error {
-	m, ok := s.knownModules[name]
-	if !ok {
-		return nil
-	}
-	v, ok := m.(HasConfigValidator)
-	if !ok {
-		return nil
-	}
-	return v.ValidateConfig(ctx, merged)
-}
-
 // UpdateConfig updates a module's config values and encrypted secrets for the
 // active environment, then invalidates the Redis cache for immediate propagation.
 // Also keeps the legacy top-level fields in sync for backward compatibility.
@@ -420,7 +404,13 @@ func (s *ModuleConfigService) UpdateConfig(ctx context.Context, name string, val
 	}
 
 	mergedValues := mergeStringMaps(existing.ConfigValues, values)
-	if err := s.validateModuleConfig(ctx, name, mergedValues); err != nil {
+	if err := s.validateCandidate(ctx, name, candidate{
+		schema:           existing.ConfigSchema,
+		env:              existing.ActiveEnv(),
+		values:           mergedValues,
+		storedEncrypted:  existing.ActiveEncryptedValues(),
+		submittedSecrets: secrets,
+	}); err != nil {
 		return err
 	}
 
@@ -498,7 +488,13 @@ func (s *ModuleConfigService) UpdateEnvironmentConfig(ctx context.Context, name,
 	// it must not be a bypass around the active-config PATCH's validation.
 	existingEnv := doc.Environments[envName]
 	mergedValues := mergeStringMaps(existingEnv.ConfigValues, values)
-	if err := s.validateModuleConfig(ctx, name, mergedValues); err != nil {
+	if err := s.validateCandidate(ctx, name, candidate{
+		schema:           doc.ConfigSchema,
+		env:              envName,
+		values:           mergedValues,
+		storedEncrypted:  existingEnv.EncryptedValues,
+		submittedSecrets: secrets,
+	}); err != nil {
 		return err
 	}
 
@@ -543,8 +539,8 @@ func (s *ModuleConfigService) SetActiveEnvironment(ctx context.Context, name, en
 	}
 
 	// Activation-time validation: the target profile as a whole, before any
-	// write. Mirrors validateModuleConfig's dispatch. It reads the profile
-	// from the `doc` snapshot deliberately — validating what the operator is
+	// write. Mirrors validateCandidate's dispatch. It reads the profile from
+	// the `doc` snapshot deliberately — validating what the operator is
 	// activating — while the write below re-reads server-side; a profile
 	// mutated in between is caught by the next activation, not silently
 	// half-applied by this one.
@@ -552,12 +548,14 @@ func (s *ModuleConfigService) SetActiveEnvironment(ctx context.Context, name, en
 	if cv == nil {
 		cv = make(map[string]string)
 	}
-	if m, ok := s.knownModules[name]; ok {
-		if v, ok := m.(HasConfigActivationValidator); ok {
-			if err := v.ValidateConfigActivation(ctx, cv); err != nil {
-				return err
-			}
-		}
+	if err := s.validateCandidate(ctx, name, candidate{
+		schema:          doc.ConfigSchema,
+		env:             envName,
+		values:          cv,
+		storedEncrypted: doc.Environments[envName].EncryptedValues,
+		activation:      true,
+	}); err != nil {
+		return err
 	}
 
 	// One write: the activation and the legacy-map sync are the same update,
