@@ -18,7 +18,11 @@ const ModuleManagementPage: React.FC = () => {
       running: modules.filter(m => m.status === 'running').length,
       failed: modules.filter(m => m.status === 'failed').length,
       disabled: modules.filter(m => m.status === 'disabled').length,
-      stopped: modules.filter(m => m.status === 'stopped').length
+      stopped: modules.filter(m => m.status === 'stopped').length,
+      // A required module whose persisted document is missing is served as
+      // its own status, not as one of the four above — count it here or the
+      // strip's total stops matching the sum of its parts.
+      missing: modules.filter(m => m.status === 'missing').length
     };
   }, [modules]);
 
@@ -74,6 +78,15 @@ const ModuleManagementPage: React.FC = () => {
                         style={{ width: 8, height: 8 }}
                       />
                       {stats.stopped} {t('adminModules.status.stopped')}
+                    </span>
+                  )}
+                  {stats.missing > 0 && (
+                    <span>
+                      <span
+                        className="rounded-circle bg-danger d-inline-block me-1"
+                        style={{ width: 8, height: 8 }}
+                      />
+                      {stats.missing} {t('adminModules.status.missing')}
                     </span>
                   )}
                 </div>

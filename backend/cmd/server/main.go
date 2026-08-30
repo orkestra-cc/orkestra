@@ -286,7 +286,15 @@ func main() {
 	// This is also the boot gate for those modules: a missing document, or a
 	// seeding/backfill failure SeedFromModules recorded, aborts here rather
 	// than serving a strict policy reader an incomplete auth document.
-	if err := configService.RequirePersistedConfig(ctx, requiredPersistedModules...); err != nil {
+	//
+	// Its own short deadline, deliberately not the boot ctx above: that one
+	// is the infrastructure-connect budget and may be nearly spent after a
+	// slow first-boot Mongo race, and a healthy document must never be
+	// refused because THIS read timed out.
+	gateCtx, cancelGate := context.WithTimeout(context.Background(), 10*time.Second)
+	err = configService.RequirePersistedConfig(gateCtx, requiredPersistedModules...)
+	cancelGate()
+	if err != nil {
 		log.Fatalf("Required module config is not serviceable: %v", err)
 	}
 

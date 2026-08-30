@@ -149,3 +149,21 @@ func TestUpdateConfig_SecretInConfigLaneNeverReachesValidatorOrDocument(t *testi
 		t.Error("a refused key reached the record-list CAS")
 	}
 }
+
+// A refused key persists nothing — not even the legacy-profile migration
+// that UpdateConfig would otherwise run first.
+func TestUpdateConfig_LaneRefusalDoesNotMigrate(t *testing.T) {
+	withEncryptionKey(t)
+	repo := newFakeConfigRepo()
+	repo.docs["lane"] = &ModuleConfig{ModuleName: "lane", ConfigSchema: laneSchema, ConfigValues: map[string]string{"flag": "true"}, EncryptedValues: map[string]string{}}
+	svc := NewModuleConfigService(repo, fakeRedisClient{}, slog.Default())
+	svc.RegisterKnownModules([]Module{laneModule{}})
+	var typed *ConfigValidationError
+	if err := svc.UpdateConfig(context.Background(), "lane", map[string]string{"apiKey": "leak"}, nil); !errors.As(err, &typed) || typed.Code != CodeConfigKeyInvalid {
+		t.Fatalf("err = %v, want %s", err, CodeConfigKeyInvalid)
+	}
+	doc := repo.docs["lane"]
+	if len(doc.Environments) != 0 || doc.ConfigRevision != 0 {
+		t.Fatalf("a refused request migrated the document: environments=%d revision=%d", len(doc.Environments), doc.ConfigRevision)
+	}
+}

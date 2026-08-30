@@ -760,6 +760,13 @@ func (s *ModuleConfigService) UpdateConfig(ctx context.Context, name string, val
 	if doc == nil {
 		return fmt.Errorf("module %q not found", name)
 	}
+	// Lane refusal comes first: a request that is about to be refused with
+	// 422 must persist nothing, and ensureEnvironments below can commit a
+	// legacy-profile migration (and bump configRevision) on its own.
+	schema := s.schemaFor(name, doc)
+	if err := validateSubmittedKeys(schema, values, secrets); err != nil {
+		return err
+	}
 	// ensureEnvironments migrates under its own compare-and-swap and leaves
 	// doc current — profiles, activeEnvironment and configRevision — whether
 	// this call won the migration or re-read after another writer did.
@@ -770,10 +777,6 @@ func (s *ModuleConfigService) UpdateConfig(ctx context.Context, name string, val
 	cur, ok := doc.Environments[env]
 	if !ok {
 		return fmt.Errorf("environment %q not found for module %q", env, name)
-	}
-	schema := s.schemaFor(name, doc)
-	if err := validateSubmittedKeys(schema, values, secrets); err != nil {
-		return err
 	}
 	mergedValues := mergeStringMaps(cur.ConfigValues, values)
 

@@ -357,3 +357,22 @@ func TestAudit_NilSinkAndResolverTolerated_PanickingSinkContained(t *testing.T) 
 		t.Fatalf("a failing sink changed the HTTP result: out=%v err=%v", out, err)
 	}
 }
+
+// The recover() covers the WHOLE of emitAudit, not just the Emit call: the
+// host's actor resolver and a fork module's ConfigSchema() are foreign code
+// running after the mutation has already committed, so a panic there must
+// not turn a successful write into a 500.
+func TestAudit_PanickingActorResolverContained(t *testing.T) {
+	h, _, sink := newAuditHandler(t, &auditDemoModule{})
+	h.SetActorResolver(func(context.Context) AdminActor { panic("resolver exploded") })
+	out, err := h.UpdateModule(context.Background(), patchConfig(map[string]string{"flag": "true"}, nil))
+	if err != nil {
+		t.Fatalf("a panicking resolver changed the HTTP result: %v", err)
+	}
+	if out == nil || out.Body.ConfigValues["flag"] != "true" {
+		t.Fatalf("the write did not land: out=%v", out)
+	}
+	if len(sink.events) != 0 {
+		t.Errorf("the aborted event still reached the sink: %+v", sink.events)
+	}
+}

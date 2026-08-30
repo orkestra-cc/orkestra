@@ -42,9 +42,10 @@ func validateSubmittedKeys(schema []ConfigField, values, secrets map[string]stri
 }
 
 // keyAllowedInLane reports whether key may appear in the secrets (true) or
-// config (false) lane. The roster key (<field>.__items) is never accepted
-// from a request: it is SDK-owned, and the record-list path strips it
-// before this runs.
+// config (false) lane. The roster key (`<field>.__items`) is never accepted
+// from a request: it is SDK-owned, and on the record-list path this check
+// runs BEFORE the roster strip, so a submitted roster key is refused rather
+// than silently dropped.
 func keyAllowedInLane(schema []ConfigField, key string, secret bool) bool {
 	for _, f := range schema {
 		if f.Type != FieldRecordList {

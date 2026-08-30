@@ -71,6 +71,24 @@ func (h *ModuleAdminHandler) emitAudit(ctx context.Context, rec auditRecord) {
 	if h.auditSink == nil {
 		return
 	}
+	outcome := auditOutcomeSuccess
+	if rec.err != nil {
+		outcome = auditOutcomeFailure
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			// Registered before anything else runs: the host's actor resolver
+			// and a fork module's ConfigSchema() are foreign code on a path
+			// where the mutation has already committed; none of them may
+			// change the HTTP result. The panic value is foreign text; only
+			// its type is logged.
+			h.logger().Warn("module admin audit: sink failed",
+				slog.String("action", rec.action),
+				slog.String("module", rec.module),
+				slog.String("outcome", outcome),
+				slog.String("panic", fmt.Sprintf("%T", r)))
+		}
+	}()
 	var actor AdminActor
 	if h.actorResolver != nil {
 		actor = h.actorResolver(ctx)
@@ -105,10 +123,6 @@ func (h *ModuleAdminHandler) emitAudit(ctx context.Context, rec auditRecord) {
 	if actor.RequestID != "" {
 		meta["requestId"] = actor.RequestID
 	}
-	outcome := auditOutcomeSuccess
-	if rec.err != nil {
-		outcome = auditOutcomeFailure
-	}
 	actorType := "system"
 	if actor.UserID != "" {
 		actorType = "user"
@@ -126,16 +140,6 @@ func (h *ModuleAdminHandler) emitAudit(ctx context.Context, rec auditRecord) {
 		UserAgent:    boundString(actor.UserAgent, auditMaxUserAgent),
 		Metadata:     meta,
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			// The panic value is the sink's own text; only its type is logged.
-			h.logger().Warn("module admin audit: sink failed",
-				slog.String("action", rec.action),
-				slog.String("module", rec.module),
-				slog.String("outcome", outcome),
-				slog.String("panic", fmt.Sprintf("%T", r)))
-		}
-	}()
 	h.auditSink.Emit(ctx, ev)
 }
 
