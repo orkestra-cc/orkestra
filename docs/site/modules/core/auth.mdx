@@ -23,6 +23,8 @@ Almost every route is mirrored under `/v1/auth/operator/*` (Tier-1) and `/v1/aut
 
 Some surfaces exist on one tier only: session listing and OAuth link/unlink are operator-side self-service, while registration exists on both but is independently gated by config.
 
+Web OAuth is tier-aware end to end: a flow started on the client surface lands on the client SPA and a flow started on the console lands on the console, each under one closed callback contract (`success`/`provider`, an allowlisted `error` code, or an MFA continuation carried in the URL fragment) that never contains a token, an email or a user id. Because every provider redirects to the operator host and that host cannot set a client cookie, a client-tier login finishes through a single-use relay on the client API host, which also verifies that the browser completing the flow is the one that started it. A provider is offered to a surface only when its toggle is on **and** every field the flow needs is present; a defect on one provider removes that provider alone, while an unreadable auth document answers 503 everywhere so a configuration outage can never quietly widen access. An identity that has never been linked is matched to an existing account — or allowed to sign up — only with an address the identity provider itself marked verified.
+
 ## Service accounts
 
 A machine caller — an integration, a CI job, a fork's own backend — authenticates with the OAuth2 **client-credentials** grant. Adopted in [ADR-0014](/adrs/service-accounts-client-credentials); operator console at `/admin/service-accounts`.
