@@ -4,7 +4,7 @@
 |---|---|
 | **Date** | 2026-08-29 |
 | **Last review** | 2026-08-30 |
-| **Status** | Draft v3 — security and implementability review incorporated; ready for implementation approval |
+| **Status** | Draft v4 — v3 review corrections applied; delivery split into four sequenced PRs; ready for implementation approval |
 | **Scope** | `backend/internal/core/auth`, `backend/internal/shared/{middleware,errcode,config}`, `backend/pkg/sdk/{module,iface}` (additive validation snapshot + atomic config writes + audit wiring), `backend/cmd/server/main.go`, `frontend-admin`, `frontend-client` (adds OAuth login + Vitest), root CI targets, `docker/.env.example`, `docs/site` |
 | **ADR** | None. Both new fields default to `true`, so the feature is inert until explicitly changed. The SDK work is additive or repairs existing persistence guarantees: the frozen `Module` interface is unchanged; existing validator interfaces and `AuditSink` remain source-compatible. |
 
@@ -39,6 +39,17 @@ v3 answers the implementability/security review of v2. Material changes:
 - config audit is described honestly as best-effort under the existing
   `AuditSink` contract, and the Tier-2 OAuth state machine gains automated
   tests (§4.10–4.11).
+
+v4 applies the four corrections and two suggestions from the v3 code check:
+`module.config_revision_stale` is SDK-owned, not an `errcode` constant (§4.5,
+§6); a required module makes `GetConfig` fail but leaves `GetAllConfigs`
+serving the modules list with a per-module `missing` row (§4.2); the
+absent-key exposure of the provider toggles is stated with its bounding facts
+and closed by a boot-time schema backfill (§4.4, §5 #14); GitHub's verified
+email sourcing is recorded as existing behaviour with the fallback kept (§4.4);
+a malformed single provider toggle degrades only that provider instead of
+503-ing the whole list (§4.4, §5 #29); delivery is split into four sequenced
+PRs (§7).
 
 ## 1. Problem
 
@@ -216,15 +227,22 @@ Only `PolicyAudienceOperator` and `PolicyAudienceClient` are accepted.
 This accessor reads the repository directly; it never calls `GetConfig`'s
 lazy-seed path. More importantly, after boot seeding succeeds (or has been
 attempted), `cmd/server` marks `auth` as a **required persisted config** through
-an additive `ModuleConfigService.RequirePersistedConfig("auth")` call.
-`GetConfig` / `GetAllConfigs` then return an error if that document disappears
-during the process instead of rebuilding it from schema defaults. This is the
-intentional exception to the SDK's dev-wipe self-healing: otherwise an admin
-page read could recreate both password keys as `true` after the strict accessor
-had correctly observed the outage. Recovery is restore the document, or fix
-Mongo and perform a controlled restart so normal boot seeding can run; the
-operator-only break-glass remains available meanwhile. The required-module set
-is populated once before serving traffic and is read-only thereafter.
+an additive `ModuleConfigService.RequirePersistedConfig("auth")` call. For a
+required module the lazy-seed path is disabled for the rest of the process:
+`GetConfig("auth")` returns an error if the document disappears instead of
+rebuilding it from schema defaults, and `GetAllConfigs` — which feeds the
+`/admin/modules` list, the very page an operator repairs from — **keeps
+serving every other module** and reports the required module as a per-module
+`missing` row (`ModuleConfigStatus{Name, Missing: true}`, rendered by the
+list with a "configuration document missing — restore or restart" badge)
+rather than failing the whole list. This is the intentional exception to the
+SDK's dev-wipe self-healing (`internal/core/CLAUDE.md:109`, table row
+updated): otherwise an admin page read could recreate both password keys as
+`true` after the strict accessor had correctly observed the outage. Recovery
+is restore the document, or fix Mongo and perform a controlled restart so
+normal boot seeding can run; the operator-only break-glass remains available
+meanwhile. The required-module set is populated once before serving traffic
+and is read-only thereafter.
 
 The password services treat a nil policy, a policy with a nil ConfigService,
 or any read/parse failure as `ErrAuthPolicyUnavailable` → **503**
@@ -337,20 +355,46 @@ autoLink        := strictBool(rawValues["oauthAutoLinkByEmail"], default true)
 valid(S)        := passwordOn(S) ∨ (oauthOn(S) ∧ autoLink)
 ```
 
-- **Defaults match the schema.** Password and auto-link retain legacy `true`;
-  all eight provider toggles default to `false` (`module.go:500-539`). The
-  runtime usable-provider and auto-link accessors use the same strict parser,
-  so an absent key gets the same default and a malformed present value returns
-  an error rather than producing validator/runtime disagreement.
+- **Defaults match the schema — and the stored document matches the schema.**
+  Password and auto-link retain legacy `true`; all eight provider toggles
+  default to `false` (`module.go:500-539`). Today the runtime accessor
+  `OAuthProviderEnabled` treats an *absent* key as `true`
+  (`auth_policy_service.go:499`), the opposite of the schema, and
+  `SeedFromModules` never adds keys that a schema gained after the document
+  was created (`config_service.go:137-157`: `RefreshMetadata` leaves
+  `configValues` untouched). Two facts bound the exposure: the toggles were
+  introduced in `14261ec` (2026-05-07), before `v0.1.0` (2026-05-23), so every
+  released install seeded all eight keys at first boot; absent keys can exist
+  only in documents created on pre-release dev/staging stacks. The design
+  closes the drift source anyway: `SeedFromModules` gains a **backfill** step
+  for existing documents — every schema key absent from the active environment
+  (and the legacy mirror) is written with its `EnvVar`/`Default` value, secrets
+  included through the same encrypted path, `configRevision` advanced once, and
+  the backfilled key names logged at INFO. It runs once per boot before
+  traffic, so the runtime, the validator and the admin UI all read a document
+  in which every schema key is present. The runtime usable-provider and
+  auto-link accessors then use the same strict parser as the validator: an
+  absent key (possible only for a fork that skips seeding) gets the schema
+  default, and a malformed present value is an error rather than a silent
+  default. G6 holds for every released install; a pre-release document is
+  corrected by the backfill, not by a runtime guess.
 - **Structural, not "has a client ID".** `OAuthConfigResolver.Get`
   currently treats any provider with a client ID as configured. The predicate
   above names every field the web flow needs. A strict
   `OAuthWebProviderUsable(ctx, audience, provider) (resolvedConfig, bool, error)`
   combines canonical provider-toggle parsing with the single exported pure
   `ProviderStructurallyConfigured`. Provider listing, web OAuth start and §4.7
-  use it. Runtime resolution comes from one required config read;
-  listing propagates uncertainty as 503, and OAuth start builds the provider
-  from that same resolved value rather than checking and then rereading. A
+  use it. Runtime resolution comes from one required config read. Failure
+  granularity is deliberate: a **document-level** failure (missing document,
+  repository error, undecryptable document) makes
+  `GET /v1/auth/{tier}/providers` and OAuth start return 503; a
+  **per-provider** defect (a malformed toggle such as `"treu"`, a missing
+  structural field) makes only that provider unusable — it is omitted from
+  the list, OAuth start for it returns the existing 403
+  `auth.oauth_provider_disabled`, and a WARN names the offending key — so one bad
+  value cannot remove every social button while the password method still
+  works. OAuth start builds the provider from the same resolved value rather
+  than checking and then rereading. A
   path-backed Apple key counts only when the path identifies a readable regular
   file with non-empty content; PEM/credential correctness remains operational
   validation rather than G3. Native/mobile provider semantics remain outside
@@ -381,9 +425,15 @@ valid(S)        := passwordOn(S) ∨ (oauthOn(S) ∧ autoLink)
   entering either the auto-link or new-signup branch. False/missing returns the
   same 403 `auth.oauth_email_unverified` whether or not a matching local account
   exists, preventing an account-existence oracle as well as an unsafe link.
-  Google, Apple and Discord keep their provider claims. GitHub always queries
-  `/user/emails` with `user:email` and selects a primary verified address; a
-  public profile `email` is never marked verified by assumption. Comparison
+  Google, Apple and Discord keep their provider claims. GitHub **already**
+  sources the address correctly upstream — `github_oauth_service.go:210-256`
+  queries `/user/emails` with `user:email`, picks the primary verified address
+  and falls back to the first verified one, and the handler copies the
+  verified bit into `userInfo["email_verified"]` (`auth_handler.go:1399`).
+  Nothing there is reimplemented, and the fallback stays: a non-primary
+  address is still one GitHub verified. The change is downstream only — the
+  callback now *requires* the bit before any email lookup. A public profile
+  `email` is never marked verified by assumption. Comparison
   continues through the user service's canonical email lookup — no
   provider-specific dot/plus rewriting.
 - **Symmetric.** The policy refuses turning password off with no usable
@@ -451,8 +501,10 @@ absent in an old document means zero). A monotone integer is deliberate:
 because BSON datetimes have millisecond precision. Every values/secrets or
 activation mutation reads and validates revision `r`, filters the write on
 `configRevision == r` (also matching missing when `r == 0`), and increments it
-to `r+1`. A zero-match is 409 `module.config_revision_stale`; the caller
-reloads and retries. Environment writes also increment the existing
+to `r+1`. A zero-match is 409 with body code `module.config_revision_stale`;
+the constant is **SDK-owned** — it lives in `pkg/sdk/module` next to
+`ErrRevisionStale` (`recordlist_mutation.go:12`), because the SDK cannot
+import `internal/shared/errcode` — and the caller reloads and retries. Environment writes also increment the existing
 `EnvironmentConfig.Revision`, so record-list clients retain their current
 stale-removal protection. The record-list CAS path increments
 `ConfigRevision` in the same update, so ordinary and record-list config writes
@@ -783,7 +835,7 @@ evidence need the durable-outbox follow-up in §8.
 | 11 | Invitee on a password-off client surface | Invite redemption remains open and stores a password. A later OAuth attempt auto-links only with the same provider-verified email. No match means the user cannot enter until an operator changes policy or an invite-bound OAuth flow is added. Copy states this limitation. |
 | 12 | Password-only user with no prior OAuth link | Auto-link is available but conditional on a matching verified IdP email. The validator prevents a closed configuration loop, not per-user lockout. |
 | 13 | Both surfaces flipped independently | Own key, gate and validator clause. Operator/client rows are separate; no copy or API implies one row's password is shared across tiers. |
-| 14 | Existing deployment upgrades | Existing auth document + absent new keys → `true`; no migration. Missing document is an outage, not an upgrade default. `hasUsablePassword` remains one-release compatibility output. |
+| 14 | Existing deployment upgrades | Existing auth document + absent password keys → `true`; the boot backfill (§4.4) writes every other absent schema key with its default before traffic, so no runtime read guesses. Provider toggles were seeded on every released install (they predate `v0.1.0`). Missing document is an outage, not an upgrade default. `hasUsablePassword` remains one-release compatibility output. |
 | 15 | `/policy` unreachable from the SPA | Fail-open display (existing); the backend still refuses; never a lockout. |
 | 16 | PATCH saves provider secret and disables password together | Accepted when the complete merged snapshot is valid; values+secrets persist in one atomic document update. Empty secret is not presence. |
 | 17 | Inactive target lacks a secret that the active profile has (or vice versa) | Target is judged from its own `SecretPresent` map. Invalid target is refused; valid target is not rejected because another profile differs. |
@@ -798,6 +850,8 @@ evidence need the durable-outbox follow-up in §8.
 | 26 | Service accounts (ADR-0014), refresh rotation, `/dev/token` | Not password logins; untouched. `/dev/token` remains development-only and is not a production recovery path. |
 | 27 | Callback says success but session bootstrap is signed-out/unavailable | Neither SPA enters a protected route on the status flag alone. Signed-out returns to a generic login error; unavailable retains only the minimum bootstrap state and offers retry. Admin awaits the session query; client awaits refresh-cookie adoption. |
 | 28 | OAuth return target is stale or crafted | It is take-and-deleted on every callback outcome, ignored after ten minutes, and accepted only after same-origin canonical validation; fallback is the fixed account/profile route. |
+| 29 | One provider toggle holds a malformed value (`"treu"`) while password is still on | That provider alone is unusable: omitted from `/providers`, 403 on its OAuth start, WARN naming the key; other providers and the password form keep working. Only a document-level read failure escalates to 503. The validator rejects the malformed value on the next write. |
+| 30 | Required `auth` document missing while an operator opens `/admin/modules` | The list renders with every other module and a `missing` badge on `auth`; `GetConfig("auth")` and every strict policy read fail closed. Nothing lazy-reseeds. |
 
 ## 6. Testing
 
@@ -810,9 +864,16 @@ evidence need the durable-outbox follow-up in §8.
   error. The decision helper may apply break-glass only to operator login;
   the persisted-policy accessor used elsewhere never does.
 - `pkg/sdk/module/config_required_test.go` — boot seeding may create `auth`,
-  but once marked required, neither `GetConfig` nor `GetAllConfigs` lazy-seeds
-  a missing auth document; ordinary non-required modules retain current
-  self-healing. The required set is immutable once traffic starts.
+  but once marked required, `GetConfig("auth")` errors on a missing document
+  and `GetAllConfigs` neither lazy-seeds it nor fails: it returns every other
+  module plus a `missing` row for `auth`. Ordinary non-required modules retain
+  current self-healing. The required set is immutable once traffic starts.
+- `pkg/sdk/module/config_backfill_test.go` (new) — an existing document
+  missing schema keys gains them with `EnvVar`/`Default` values on the next
+  boot, in both the active environment and the legacy mirror; present keys
+  (including explicit empty strings) are untouched; secrets are backfilled
+  encrypted; `configRevision` advances exactly once; a document with every key
+  present is not rewritten.
 - `services/gates_test.go` — `Login`, `Register` and `ForgotPassword` return
   `ErrPasswordLoginDisabled` per audience, while the other audience is
   unaffected. Operator break-glass permits only `Login`; client login and
@@ -844,8 +905,9 @@ evidence need the durable-outbox follow-up in §8.
   blinding the last usable provider and activating an invalid profile are
   rejected. The provider-list and web OAuth-start paths use the same
   structural predicate;
-  malformed provider toggles/config reads return 503 rather than an empty list
-  or implicit enable.
+  a document-level read failure returns 503 rather than an empty list; a
+  malformed toggle on one provider omits only that provider (WARN, 403 on its
+  OAuth start) and never implicitly enables it.
 - OAuth auto-link tests — false or missing `email_verified` never links or
   issues a token **or calls local email lookup/signup**, with the same external
   response for a would-be known/unknown address; true permits the existing-
@@ -902,8 +964,10 @@ evidence need the durable-outbox follow-up in §8.
   no actor email, nil sink/resolver tolerated, and sink failure WARNed without
   changing the HTTP result. An in-tree server wiring test requires the real
   sink and actor resolver to be installed.
-- `shared/errcode/codes_test.go` — the four auth constants plus
-  `module.config_revision_stale` remain unique and stable.
+- `shared/errcode/codes_test.go` — the four auth constants remain unique and
+  stable, and the test additionally asserts that no `errcode` constant
+  collides with the SDK-owned `module.config_revision_stale`, which is itself
+  covered in `pkg/sdk/module/config_revision_test.go` alongside the CAS.
 - `make ci-backend` (includes `openapi-check`).
 
 **Frontend**
@@ -933,9 +997,23 @@ evidence need the durable-outbox follow-up in §8.
 
 ## 7. Rollout and verification
 
-Single PR against `dev`; no data migration and no ADR. The SDK interfaces are
-additive, but the ConfigService repository gains the atomic/CAS write contract
-in the same PR. The fields remain inert until an operator changes them.
+**Delivery: four sequenced PRs against `dev`**, one spec, no ADR, no data
+migration beyond the boot backfill. Each PR is independently valuable,
+reviewable on its own and leaves `dev` releasable; the feature flag itself
+lands in PR 3 and stays inert until an operator changes it.
+
+| PR | Content | Depends on |
+|---|---|---|
+| **1 — SDK config integrity** | `ConfigValidationSnapshot` + `HasConfigSnapshotValidator` dispatch; `configRevision` CAS + single `UpdateOne` repository write; `needsRestart` in the same write; `RequirePersistedConfig` + per-module `missing` row; `SeedFromModules` backfill; `ModuleAdminHandler` audit setters + generic events; config-before-lifecycle ordering; `useModuleConfigController` 409-by-code handling. §6 tests for `pkg/sdk/module` and the admin controller. | — |
+| **2 — OAuth callback hygiene** | `target.spaURL()` per-tier redirect; `oauthLoginCallbackURL` closed contract (allowlisted query, MFA in fragment, `Referrer-Policy: no-referrer`, no token/email/user ID — including the legacy Apple Huma path); trust-before-destination for invalid state; verified-email requirement before any email lookup + strict `OAuthAutoLinkByEmailEnabled`; per-provider failure granularity; admin `SocialAuthCallback` / `LoginMfaVerify` rework (scrub, awaited session, no router state). | — (standalone security fixes; ships before the toggle so PR 4's client SPA targets a safe contract) |
+| **3 — Password-login toggle** | Schema pair + `HotReloadConfig`; strict `PasswordLoginEnabled` / `PasswordLoginDecision` + break-glass; gates (§4.3) incl. pending-challenge re-check with `MFAChallenge.Audience`; auth validator migration to the snapshot contract + login-method invariant; step-up `PasswordReauthAllowed`; usable-link unlink guard; `AuthMethodsView` split; `/policy` fields; admin SPA gating and copy; docs. | 1, 2 |
+| **4 — Client OAuth login** | `frontend-client` providers / initiate / callback page, `bootstrapFromRefreshCookie`, safe `next`, policy gating; Vitest + RTL + MSW and the `client-test` target in `Makefile` / `frontend-client.yml`; `frontend-client/CLAUDE.md`. | 2 (contract), 3 (`passwordLoginEnabled` on `/policy`) |
+
+PR 3 is the only one that changes what an operator can do; PRs 1–2 fix defects
+that exist today and are worth merging even if PR 3 never shipped. The switch
+appears in the admin UI only from PR 3, so the challenge-TTL rule below applies
+to that deploy. Each PR carries its own `make ci` evidence and the documentation
+for the paths it touches, in the same commits.
 
 Before the first staging flip, verify that the auth module document exists,
 both current profiles validate, and at least one test user has a verified IdP
@@ -964,7 +1042,8 @@ new client-SPA OAuth path):
    reload returns the invariant's 422.
 6. Verify missing-document, malformed-value and repository-failure behaviour
    in automated/integration tests, including that an admin config read cannot
-   lazy-reseed `auth`. If repeated manually, use only a disposable cloned
+   lazy-reseed `auth` and that `/admin/modules` still renders with a `missing`
+   badge on `auth`. If repeated manually, use only a disposable cloned
    staging database and restore the exact document afterward (or restart to
    invoke boot seeding); never rename or remove the shared `module_configs`
    collection. Each case returns 503, not a password-login success.
