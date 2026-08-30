@@ -399,3 +399,39 @@ func TestSeedFromModules_RepairsAPlaintextOnlyLegacyMirror(t *testing.T) {
 		t.Errorf("clearRestartCalls = %d — the backfill write already persisted needsRestart=false", repo.clearRestartCalls)
 	}
 }
+
+// The legacy-branch twin of TestSeedFromModules_CompleteDocumentIsNotRewritten.
+// That branch gained a divergence rule so a mirror carrying plaintext under a
+// secret key is repaired at boot; this pins the other half of it — a legacy
+// document that is already complete AND already clean is left alone, and the
+// rule did not quietly become an unconditional write on every boot.
+func TestSeedFromModules_CompleteLegacyDocumentIsNotRewritten(t *testing.T) {
+	t.Setenv("BF_TEST_FROM_ENV", "")
+	full := map[string]string{"existing": "x", "cleared": "", "toggle": "true", "fromEnv": "envdefault", "noDefault": ""}
+	withEncryptionKey(t)
+	ct, _ := encryptSecret("s")
+	svc, repo := backfillSvc(t, &ModuleConfig{
+		ModuleName: "bf", ConfigRevision: 9,
+		ConfigValues: mergeStringMaps(full, nil), EncryptedValues: map[string]string{"secret": ct},
+	})
+	if err := svc.SeedFromModules(context.Background(), []Module{backfillModule{}}); err != nil {
+		t.Fatal(err)
+	}
+	doc := repo.docs["bf"]
+	if repo.docCasCalls != 0 || doc.ConfigRevision != 9 {
+		t.Errorf("a complete legacy document was rewritten: casCalls=%d revision=%d", repo.docCasCalls, doc.ConfigRevision)
+	}
+	if !reflect.DeepEqual(doc.ConfigValues, full) {
+		t.Errorf("mirror = %v, want it untouched: %v", doc.ConfigValues, full)
+	}
+	if !reflect.DeepEqual(doc.EncryptedValues, map[string]string{"secret": ct}) {
+		t.Errorf("secrets = %v, want them untouched", doc.EncryptedValues)
+	}
+	if len(doc.Environments) != 0 {
+		t.Error("backfill must not invent profiles — that is the lazy migration's job")
+	}
+	// Nothing was written, so the boot-time clear is still owed and made.
+	if repo.clearRestartCalls != 1 {
+		t.Errorf("clearRestartCalls = %d, want 1", repo.clearRestartCalls)
+	}
+}
