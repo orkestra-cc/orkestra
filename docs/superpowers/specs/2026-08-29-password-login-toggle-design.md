@@ -4,7 +4,7 @@
 |---|---|
 | **Date** | 2026-08-29 |
 | **Last review** | 2026-08-30 |
-| **Status** | Draft v4.3 — v4.2 plus the four blocking findings of the PR 2 plan review (§0); ready for implementation approval |
+| **Status** | Draft v4.4 — v4.3 plus the second PR 2 plan review round (§0); ready for implementation approval |
 | **Scope** | `backend/internal/core/auth`, `backend/internal/shared/{middleware,errcode,config}`, `backend/pkg/sdk/{module,iface}` (additive validation snapshot + atomic config writes + audit wiring), `backend/cmd/server/main.go`, `frontend-admin`, `frontend-client` (adds OAuth login + Vitest), root CI targets, `docker/.env.example`, `docs/site` |
 | **ADR** | None. Both new fields default to `true`, so the feature is inert until explicitly changed. The SDK work is additive or repairs existing persistence guarantees: the frozen `Module` interface is unchanged; existing validator interfaces and `AuditSink` remain source-compatible. **One declared exception to additive-only:** `module.ConfigRepository` — provided *to* the config service by the host, never implemented *by* a module (the `RedisClient` category) — changes shape for atomic writes (§4.5). |
 
@@ -170,6 +170,34 @@ and that the state machine is weaker than described:
   query outcome, or a success with an `error`, is treated as the generic
   failure (§4.10). The return-target take-and-delete runs in an effect,
   never during render.
+
+v4.4 (2026-08-30) answers the second review of the PR 2 plan:
+
+- **Binding order.** The browser-binding check consults `StartHost` first: a
+  cross-host callback is *deferred* regardless of any cookie the operator
+  host happens to hold, because an unrelated operator flow's nonce in the
+  same browser must not block a client-tier login; only a same-host
+  callback compares the cookie, and there it is required (§4.10).
+- **Every terminal outcome of a valid client-tier state travels through the
+  relay** — IdP denial, missing code, provider unavailable, application
+  refusal, success and the MFA continuation alike — so the deferred binding
+  is always verified and the start-host cookie always cleared before the
+  browser reaches the client SPA; the relay record carries the allowlisted
+  failure code when there is one. A client-tier state with no client
+  surface configured is a terminal 400 (§4.10, §5 #31).
+- **Security headers on every callback and relay response**, terminal 400s
+  included (their request URLs carry `state`, `code` or `relay`): not only
+  on redirects (§4.10).
+- **The console's callback parser is closed on exact key sets:** a success
+  is exactly `{success, provider}` with an empty fragment, a failure exactly
+  `{success, error}` with an empty fragment, an MFA continuation exactly
+  `{requiresMfa, mfaToken, webauthnAvailable}` in the fragment with an empty
+  query; any extra, duplicated or missing key is the generic failure
+  (§4.10).
+- The console's `socialAuthUtils` stops persisting `oauth_state` /
+  `oauth_provider` in `sessionStorage` and drops the client-side callback
+  helper that no longer has a consumer: the state cookie is HttpOnly and
+  the backend owns the callback (§4.10).
 
 ## 1. Problem
 
@@ -841,7 +869,7 @@ fallbacks.
 | `pages/user/security/{LinkedProvidersTab,PasswordTab}.tsx`, `pages/user/settings/SecuritySummaryCard.tsx`, `pages/admin/user-profile/AdminAuthMethodsCard.tsx` | §4.8 field migration + policy-aware copy |
 | `pages/admin/user-profile/AdminAuthMethodsCard.tsx` | send-password-reset button disabled with a tooltip when `!passwordUsableForLogin` (the backend 409s anyway) |
 | `pages/admin/modules/useModuleConfigController.ts` | distinguishes `module.config_revision_stale` by body code, not every 409 as a record-list conflict. It latches a conflict, disables Save and offers **Reload & review**. Refetch adopts the newest baseline and recomputes the unsaved diff; non-secret draft and any unsent secret remain only in component memory, are never auto-submitted, and clear on unmount. |
-| `components/authentication/SocialAuthCallback.tsx`, `LoginMfaVerify.tsx` | synchronously copies then scrubs query/fragment before the first await. Direct success force-dispatches and awaits the session endpoint; it removes the current invalidate + fixed 100 ms race and navigates only after the refresh-cookie session is confirmed. MFA renders an extracted `MfaVerifyPanel` locally with challenge props held only in component memory, never `location.state` (the password path's `LoginMfaVerify` page keeps reading router state — which never travels in a URL — until PR 3 reworks that form). Direct success lands on the SPA's `DEFAULT_POST_LOGIN` when no fresh return target exists. Stable error codes are allowlisted/i18n-mapped; raw URL text is never rendered. The parser is **closed**: `provider` must be one of `google|apple|github|discord`, `webauthnAvailable` must be exactly `true` or `false`, `mfaToken` must be non-empty, and a payload that combines an MFA fragment with a query outcome, or `success=true` with an `error`, is the generic failure. The existing sanitized return target becomes a ten-minute timestamped take-and-delete record on every outcome; the take runs in a layout effect, never during render. |
+| `components/authentication/SocialAuthCallback.tsx`, `LoginMfaVerify.tsx` | synchronously copies then scrubs query/fragment before the first await. Direct success force-dispatches and awaits the session endpoint; it removes the current invalidate + fixed 100 ms race and navigates only after the refresh-cookie session is confirmed. MFA renders an extracted `MfaVerifyPanel` locally with challenge props held only in component memory, never `location.state` (the password path's `LoginMfaVerify` page keeps reading router state — which never travels in a URL — until PR 3 reworks that form). Direct success lands on the SPA's `DEFAULT_POST_LOGIN` when no fresh return target exists. Stable error codes are allowlisted/i18n-mapped; raw URL text is never rendered. The parser is **closed on exact key sets**: a success is exactly the query `{success=true, provider∈google|apple|github|discord}` with an empty fragment; a failure exactly `{success=false, error}` with an empty fragment; an MFA continuation exactly the fragment `{requiresMfa=true, mfaToken≠"", webauthnAvailable∈true|false}` with an empty query. Any extra, duplicated or missing key on either side is the generic failure. `socialAuthUtils` no longer persists `oauth_state` / `oauth_provider` (the state cookie is HttpOnly) and the dead client-side callback helper is removed. The existing sanitized return target becomes a ten-minute timestamped take-and-delete record on every outcome; the take runs in a layout effect, never during render. |
 | i18n | `auth`: `pages.loginNoMethod`, `pages.passwordLoginDisabled`, `pages.passwordBreakGlassActive`, `pages.providersUnavailable`, `security.passwordKeptNotice`, callback error-code mappings; `adminModules`: config-revision conflict/reload copy |
 
 **frontend-client** (Tier-2 demo — TanStack Query, react-router v8, Tailwind;
@@ -887,27 +915,37 @@ does not match the response host, and the cross-tier isolation model
 deliberately has no shared parent domain. The operator-host callback
 therefore never completes a client-tier flow. For `tier=client` (login mode
 only — the link route is operator-only) the browser binding is **deferred**,
-not skipped: the callback resolves the state (signature, atomic take, tier
-and provider cross-checks), performs the IdP half (code exchange, user info)
-with the provider resolved strictly from one config read, then stores a
-**relay record** — tier, provider, the state's CSRF nonce, the user-info map,
-the provider tokens, security context and device info — encrypted at rest
-under a fresh random id with a 60-second TTL, and redirects (with the same
+not skipped. The binding check consults `StartHost` first: a cross-host
+callback is deferred regardless of any cookie the operator host happens to
+hold (an unrelated operator flow's nonce in the same browser must not block
+a client login); only a same-host callback compares the cookie, and there
+it is required. The callback resolves the state (signature, atomic take,
+tier and provider cross-checks), performs the IdP half (code exchange, user
+info) with the provider resolved strictly from one config read, then stores
+a **relay record** — tier, provider, the state's CSRF nonce, the user-info
+map, the provider tokens, security context and device info, or, for a flow
+that already failed, the allowlisted failure code — encrypted at rest under
+a fresh random id with a 60-second TTL, and redirects (with the same
 no-referrer/no-store headers) to `GET {CLIENT_API_URL}/v1/auth/client/oauth/complete?relay=<id>`.
-That endpoint, on the client API host, takes the record atomically (a second
-presentation finds nothing), requires the `orkestra_oauth_state` cookie the
-same host set at start to equal the record's nonce in constant time —
-missing, foreign or link-mode/wrong-tier records are a terminal 400 with no
-redirect and no token minted — clears that cookie, runs the application
-half (`HandleOAuthCallbackWithLinking` on the client authService), sets the
-refresh cookie on its own host and cookie domain, and redirects to the
-client SPA under the closed contract below. A login-CSRF attempt — an
+**Every terminal outcome of a valid client-tier state travels through the
+relay** — IdP denial, missing code, provider unavailable, application
+refusal, success and the MFA continuation alike — so the deferred binding
+is always verified and the start-host cookie always cleared before the
+browser reaches the client SPA. That endpoint, on the client API host,
+takes the record atomically (a second presentation finds nothing), requires
+the `orkestra_oauth_state` cookie the same host set at start to equal the
+record's nonce in constant time — missing, foreign or link-mode/wrong-tier
+records are a terminal 400 with no redirect and no token minted — clears
+that cookie, then either redirects with the recorded failure code or runs
+the application half (`HandleOAuthCallbackWithLinking` on the client
+authService), sets the refresh cookie on its own host and cookie domain, and
+redirects to the client SPA under the closed contract below. A login-CSRF attempt — an
 attacker-started state finished by a victim's browser — thus reaches the
 relay without the attacker's nonce cookie and is refused before any token
 exists. `CLIENT_API_URL` (the client API's public origin, falling back to
 `https://`/`http://` + `CLIENT_API_HOST` per environment) is the relay's
 destination; when the client surface is not configured a client-tier state
-is refused at the callback. Operator-tier and legacy (`tier=""`) flows start
+is a terminal 400 at the callback — there is no destination to trust. Operator-tier and legacy (`tier=""`) flows start
 and end on the operator host: the binding cookie is required there and the
 flow completes inline. The relay id is a single-use, browser-bound handle
 like the IdP `code`, never a credential; the forbidden-field rule applies to
@@ -946,7 +984,10 @@ strict read OAuth start used.
 
 The fragment keeps the five-minute one-shot challenge out of HTTP requests,
 reverse-proxy logs and referrers; both SPAs copy it into component memory and
-scrub it immediately. **No callback URL may contain an access token, refresh
+scrub it immediately. `Referrer-Policy: no-referrer` and `Cache-Control:
+no-store` are set on **every** callback and relay response — terminal 400s
+included, since their request URLs carry `state`, `code` or `relay` — not
+only on redirects. **No callback URL may contain an access token, refresh
 token, email or user ID.** This explicitly removes the legacy, unregistered Apple Huma
 callback (`access_token=...` in its query) and the PII fields emitted by all
 success redirects. Success authentication is recovered only from the audience-scoped
@@ -1090,7 +1131,8 @@ evidence need the durable-outbox follow-up in §8.
 | 28 | OAuth return target is stale or crafted | It is take-and-deleted on every callback outcome, ignored after ten minutes, and accepted only after same-origin canonical validation; fallback is the fixed account/profile route. |
 | 29 | One provider toggle holds a malformed value (`"treu"`) while password is still on | That provider alone is unusable: omitted from `/providers`, 403 on its OAuth start, WARN naming the key; other providers and the password form keep working. Only a document-level read failure escalates to 503. The validator rejects the malformed value on the next write. |
 | 30 | Required `auth` document missing while an operator opens `/admin/modules` | The list renders with every other module and a `missing` badge on `auth`; `GetConfig("auth")` and every strict policy read fail closed. Nothing lazy-reseeds. |
-| 31 | Client-tier web OAuth callback lands on the operator host | The callback never sets the client cookie or mints tokens there: it stores a one-shot encrypted relay record and redirects to `CLIENT_API_URL/v1/auth/client/oauth/complete?relay=`; the client API host verifies the browser binding, completes, sets its own cookie (§4.10). With no client surface configured the state is refused with 400. |
+| 31 | Client-tier web OAuth callback lands on the operator host | The callback never sets the client cookie or mints tokens there: every terminal outcome of the valid state — failure codes included — becomes a one-shot encrypted relay record and a redirect to `CLIENT_API_URL/v1/auth/client/oauth/complete?relay=`; the client API host verifies the browser binding, clears its state cookie, then completes or renders the recorded failure (§4.10). With no client surface configured the state is a terminal 400. |
+| 35 | The browser holds an unrelated operator flow's nonce on `console.*` while a client-tier callback arrives | `StartHost` is checked first: the cross-host callback is deferred to the relay regardless of that cookie. A same-host (operator) callback with a foreign nonce is a 400. |
 | 32 | Relay id replayed, expired, presented without the start-host state cookie, or with a foreign nonce | Terminal 400, no redirect, no token; the record was consumed by the first take. |
 | 33 | Two concurrent callbacks present the same state | Atomic `Take`: exactly one proceeds, the other is a generic 400. |
 | 34 | A state started for one provider is presented to another provider's callback | Generic 400 inside state resolution, before the IdP `error`, code or profile is read. |
@@ -1230,8 +1272,14 @@ evidence need the durable-outbox follow-up in §8.
   fails; N concurrent validations of one state have exactly one winner; a
   relay record round-trips encrypted, is single-use, and expires.
 - `handlers/oauth_state_binding_test.go` (extend) — the cross-host tier
-  split is reported as *deferred*, never as bound; the relay-side check
-  requires the cookie.
+  split is reported as *deferred*, never as bound, and a foreign cookie on
+  the callback host does not change that; a same-host foreign cookie is
+  rejected; the relay-side check requires the cookie. The flow tests add:
+  a client-tier callback carrying an unrelated operator nonce relays; an
+  IdP denial on a client-tier flow is relayed and the relay endpoint clears
+  the start-host cookie before redirecting with the failure code; every
+  terminal 400 of the callback and relay endpoints carries the no-store /
+  no-referrer headers.
 - `pkg/sdk/module/config_validate_test.go` — snapshot precedence and exact
   target-environment secret presence for legacy/active PATCH, named-profile
   PATCH and activation; newly submitted secrets are present to validation but

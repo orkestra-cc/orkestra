@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.25.13, Huma v2 + chi, `go/ast` structural tests, `httptest`, fakes embedding the service interfaces; MongoDB 8 (`MONGO_TEST_URI`-guarded tests unchanged — this PR adds none); React 19 / RTK Query / react-router 8, Vitest + RTL + MSW (`onUnhandledRequest: 'error'`), i18n EN/IT parity test.
 
-**Spec:** `docs/superpowers/specs/2026-08-29-password-login-toggle-design.md` **v4.3** (v4.1 + the PR 2 decisions and the four blocking review findings recorded in its §0 on 2026-08-30, committed on this branch). This plan implements the **PR 2** row of §7: §4.10 "Backend prerequisite and safe callback contract" + the `SocialAuthCallback` / `LoginMfaVerify` row; §4.4 "Structural, not has-a-client-ID" (`OAuthWebProviderUsable`, `ProviderStructurallyConfigured`, failure granularity), "Auto-link configuration" (strict `OAuthAutoLinkByEmailEnabled`) and "Verified email is mandatory before any email lookup"; §4.3's `ErrOAuthEmailUnverified` + `errcode.AuthOAuthEmailUnverified`; §5 rows 21, 22, 27, 28, 29; the §6 lines "OAuth auto-link tests", "handlers/oauth_callback_redirect_test.go", the provider-list / OAuth-start granularity sentence of `config_validation_test.go`, and the frontend-admin callback sentences. **It does not implement** the password toggle, the validator invariant, break-glass, `/policy` fields or `frontend-client` (PRs 3–4). Every file:line below is at `7574368a`; earlier tasks shift lines, so anchor on the code, not the number.
+**Spec:** `docs/superpowers/specs/2026-08-29-password-login-toggle-design.md` **v4.4** (v4.1 + the PR 2 decisions and two review rounds recorded in its §0 on 2026-08-30, committed on this branch). This plan implements the **PR 2** row of §7: §4.10 "Backend prerequisite and safe callback contract" + the `SocialAuthCallback` / `LoginMfaVerify` row; §4.4 "Structural, not has-a-client-ID" (`OAuthWebProviderUsable`, `ProviderStructurallyConfigured`, failure granularity), "Auto-link configuration" (strict `OAuthAutoLinkByEmailEnabled`) and "Verified email is mandatory before any email lookup"; §4.3's `ErrOAuthEmailUnverified` + `errcode.AuthOAuthEmailUnverified`; §5 rows 21, 22, 27, 28, 29; the §6 lines "OAuth auto-link tests", "handlers/oauth_callback_redirect_test.go", the provider-list / OAuth-start granularity sentence of `config_validation_test.go`, and the frontend-admin callback sentences. **It does not implement** the password toggle, the validator invariant, break-glass, `/policy` fields or `frontend-client` (PRs 3–4). Every file:line below is at `7574368a`; earlier tasks shift lines, so anchor on the code, not the number.
 
 **Depends on:** nothing (§7: PR 2 "Depends on: —"). PR 1 is already merged into `dev`; this plan uses two of its artefacts — `ErrRequiredConfigMissing` / `GetRawValueRequiredModule` and `ErrConfigSecretUnreadable` / `secretPresent` semantics — without changing them.
 
@@ -21,7 +21,8 @@
 - **Every callback redirect sets `Referrer-Policy: no-referrer`** (and `Cache-Control: no-store`, deviation 7).
 - **Trust before destination:** a missing, invalid, expired, replayed or unbound state is a terminal generic **400 with no redirect** (no trusted tier exists yet); only after a valid one-shot state is the IdP `error` interpreted, the code required, the provider resolved, or the application consulted — and each of those failures redirects to the **configured tier SPA** with an allowlisted code. The state cookie is cleared on every valid-state terminal outcome.
 - **One-shot state, bound to provider, tier and browser (spec §4.10 v4.3):** the Redis row is consumed with the store's atomic `Take` (never `Get` + deferred delete); state resolution checks signature/expiry → browser binding → atomic take → `tier` → **`provider` against the endpoint's provider** → link-mode pair, every mismatch a generic 400, all before the IdP `error`, the code or any profile is read.
-- **Client-tier flows never complete on the operator host.** A response from `console.*` cannot set a cookie for `api.*` (RFC 6265 §5.3 step 6 / §4.1.2.3) and the cross-tier isolation model has no shared parent domain, so for `tier=client` (login mode only — the link route is operator-only) the callback stores a one-shot **relay record** (tier, provider, the state's CSRF nonce, user-info map, provider tokens, security context, device info; encrypted at rest with `utils.EncryptOAuthToken`; `OAuthRelayTTL = 60s`; id from `GenerateOAuthCSRF`) and redirects to `{CLIENT_API_URL}/v1/auth/client/oauth/complete?relay=<id>`. That endpoint takes the record atomically, **requires** the `orkestra_oauth_state` cookie its host set at start to equal the record's nonce (constant time), refuses a missing/foreign cookie, a replay, a link-mode or wrong-tier record with a terminal 400 and no redirect, clears the cookie, then runs the shared completion and sets the refresh cookie on its own host. The cross-host "accept without binding" path is gone: a cross-host callback is *deferred* for a client-tier login and rejected for anything else.
+- **Client-tier flows never complete on the operator host.** A response from `console.*` cannot set a cookie for `api.*` (RFC 6265 §5.3 step 6 / §4.1.2.3) and the cross-tier isolation model has no shared parent domain, so for `tier=client` (login mode only — the link route is operator-only) the callback stores a one-shot **relay record** (tier, provider, the state's CSRF nonce, user-info map, provider tokens, security context, device info; encrypted at rest with `utils.EncryptOAuthToken`; `OAuthRelayTTL = 60s`; id from `GenerateOAuthCSRF`) and redirects to `{CLIENT_API_URL}/v1/auth/client/oauth/complete?relay=<id>`. That endpoint takes the record atomically, **requires** the `orkestra_oauth_state` cookie its host set at start to equal the record's nonce (constant time), refuses a missing/foreign cookie, a replay, a link-mode or wrong-tier record with a terminal 400 and no redirect, clears the cookie, then either redirects with the recorded failure code or runs the shared completion and sets the refresh cookie on its own host. **Every terminal outcome of a valid client-tier state travels through the relay** — IdP denial, missing code, provider unavailable, application refusal, success, MFA continuation — so the deferred binding is always verified and the start-host cookie always cleared before the browser reaches the client SPA; the record carries `FailureCode` for a failed flow. **Binding order:** `StartHost` is consulted first — a cross-host callback is deferred regardless of any cookie the operator host holds (an unrelated operator flow's nonce must not block a client login); a same-host callback requires a matching cookie. The cross-host "accept without binding" path is gone: a cross-host callback is *deferred* for a client-tier login and rejected for anything else; a client-tier state with no client surface configured is a terminal 400.
+- **Security headers on every callback and relay response**, terminal 400s included (their request URLs carry `state`, `code` or `relay`): `writeCallbackRejection` is the only writer of a 400 in the callback/relay flow and sets `Referrer-Policy: no-referrer` + `Cache-Control: no-store` before `http.Error`.
 - **`CLIENT_API_URL`** is the client API's public origin (new process-scoped env, `Server.Client.PublicURL`), falling back to `https://` + `CLIENT_API_HOST` in production-like environments and `http://` + host in development, empty when no client surface exists — then a client-tier state is refused at the callback.
 - **Per-tier SPA URL:** operator handler → `OPERATOR_FRONTEND_URL`, client handler → `CLIENT_FRONTEND_URL`, each falling back to `FRONTEND_URL` — exactly the rule `module.go:1051-1053` / `1217-1219` already applies for `tierBundleDeps.frontendURL`; the handler receives that resolved value (`SetSPAURL`) rather than re-deriving it. The `Origin` header is never read to build a redirect or a stored `RedirectURI`.
 - **Verified email before any email lookup:** for an identity with no existing `(provider, providerID)` link, `userInfo["email_verified"] == true` (a Go `bool`) is required before `GetUserByEmail`, before the auto-link policy is consulted, and before either the auto-link or signup branch; false/missing returns `ErrOAuthEmailUnverified` — 403 `auth.oauth_email_unverified` on JSON surfaces, `error=auth.oauth_email_unverified` on the web redirect — identically whether or not a local account exists. An existing provider-ID link logs in as today.
@@ -32,7 +33,7 @@
 - **SDK self-containment:** no file under `backend/pkg/sdk/` may import `backend/internal/*`. Verify with `grep -rn "internal/" backend/pkg/sdk/ --include="*.go"` before every commit — doc-comment hits only. The `Module` interface stays frozen; the only SDK change is additive (Task 1).
 - **No secret value ever enters a log line, an error message, a redirect URL or a response.** WARNs carry key names only. The pure predicate receives secret **presence**, never a value.
 - **Link mode keeps its own contract:** `/user/security?tab=oauth&link=success|failed&provider=<p>[&code=<allowlisted>]` — same SPA URL rule, same headers, same forbidden-field rule; never routed through the login callback state machine.
-- **SPA rules (frontend-admin only; `orkestra-frontend-admin` skill applies):** RTK Query only (`authApi.endpoints.getSession.initiate`), `t()` for every string with EN **and** IT keys (parity test), path aliases without `@/`, react-router 8 (`react-router`), `useRef`/`useState` for component-memory state — never `location.state` for the OAuth MFA challenge, never raw callback text in JSX. The callback parser is **closed**: `provider` ∈ `google|apple|github|discord`, `webauthnAvailable` exactly `true`/`false`, `mfaToken` non-empty, and an MFA fragment combined with any query outcome — or `success=true` combined with `error` — is the generic failure. The OAuth return target is a `{target, createdAt}` record in `sessionStorage`, taken-and-deleted on every callback outcome **inside a layout effect, never during render**, and honoured only within **10 minutes** and after `sanitizeReturnTo`.
+- **SPA rules (frontend-admin only; `orkestra-frontend-admin` skill applies):** RTK Query only (`authApi.endpoints.getSession.initiate`), `t()` for every string with EN **and** IT keys (parity test), path aliases without `@/`, react-router 8 (`react-router`), `useRef`/`useState` for component-memory state — never `location.state` for the OAuth MFA challenge, never raw callback text in JSX. The callback parser is **closed on exact key sets**: success = query keys exactly `{success=true, provider∈google|apple|github|discord}` + empty fragment; failure = query keys exactly `{success=false, error}` + empty fragment; MFA = fragment keys exactly `{requiresMfa=true, mfaToken≠"", webauthnAvailable∈true|false}` + empty query; every key single-valued; anything extra, duplicated or missing is the generic failure. `socialAuthUtils` persists nothing but the return-target record (no `oauth_state` / `oauth_provider`; the dead `handleSocialCallback`, `getStoredTokens`, `isAuthenticated` are removed). Forms use `react-hook-form` + `yup` and `orkestra-*` button variants (stack mandate — `MfaVerifyPanel` migrates the manual form it inherits). The OAuth return target is a `{target, createdAt}` record in `sessionStorage`, taken-and-deleted on every callback outcome **inside a layout effect, never during render**, and honoured only within **10 minutes** and after `sanitizeReturnTo`.
 - **Docs move in the same commit as the code** (repo rule, `feedback_commit_doc_hygiene`): `backend/internal/core/auth/CLAUDE.md`, `docs/site/architecture/authentication-flow.mdx`, `docs/site/modules/core/auth.mdx`, `backend/pkg/sdk/CLAUDE.md`, `docs/site/sdk/config-service.mdx`, `frontend-admin/CLAUDE.md`, `backend/openapi/enterprise.json` — each in the task that changes what it documents; Task 10 is the cross-cutting sweep, not the first time they are touched.
 - **Test commands** (absolute paths — `cd` drifts the shell between calls): backend `go test ./internal/core/auth/... ./pkg/sdk/module/... -count=1` from `/home/tore/orkestra/backend` after every step, `go vet ./...` before every commit (a `go build` does not compile `_test.go`); full gate `MONGO_TEST_URI='mongodb://127.0.0.1:28017/?directConnection=true' make -C /home/tore/orkestra ci-backend` (0 SKIP with the `ork-errquality-ci-mongo` helper up). Frontend `cd /home/tore/orkestra/frontend-admin && npx vitest run src/components/authentication src/utils && npm run typecheck && npm run lint`; full gate `make -C /home/tore/orkestra ci-frontend-admin`. OpenAPI: `make -C /home/tore/orkestra/backend openapi-dump` (self-configures from `docker/.env` against the staging infra on `localhost:27017/6379` — `grep "^ENV=" docker/.env` first; the local stack is `orkestra-public-*-staging`). Docs render: fresh clone of `orkestra-docs`, `npm ci`, `MONOREPO_LOCAL_PATH=/home/tore/orkestra npm run sync` (**full** sync, not `sync:site`), `CI=true npm run build`.
 - **Never start servers manually**; never `git push --tags`; never `--amend`; stage by path, never `git add -A`; commit with the `Claude-Session:` trailer the SDD run uses; the `conventional-pre-commit` hook rejects non-conventional subjects.
@@ -73,6 +74,12 @@ The spec was verified at `98911486`; four things differ at `7574368a` or were no
 19. **`CLIENT_API_URL` is a new process-scoped env** (`Server.Client.PublicURL`) with a derived fallback; `docker/.env.example` ships `http://api.localhost:3000` for the dev stack because the dev `CLIENT_API_HOST` has no port. Cost if wrong: a wrong derived origin sends the relay to the wrong host — the relay then 404s and no token is minted; the override is documented.
 20. **`verifyOAuthStateBinding` returns `(deferred bool, err error)`**; the deferral is accepted only for a client-tier login state (the link route is mounted on the operator side only, `module.go:1643`), and a client-tier login is relayed **even when a cookie happens to be present on the operator host**, because the api.* cookie can only be set on api.*. The existing `TestOAuthStateBinding_AllowsCrossHostTierSplit` becomes `_DefersCrossHostTierSplit`.
 21. **The relay endpoint is a raw chi route on the client mux** (`RegisterOAuthRelayRoute(ri.ClientRouter)`), mounted only when a client surface exists; it does not appear in OpenAPI (the browser is redirected to it, no client calls it).
+22. **`verifyOAuthStateBinding` checks `StartHost` before the cookie** (review round 2, P1): a cross-host callback is deferred whatever cookie the operator host holds; the cookie is compared only on the same host. Cost if wrong: none — a foreign cookie on the callback host proves nothing about a flow started elsewhere, and the relay still requires the right one.
+23. **Client-tier failures are relayed too.** `OAuthRelayRecord.FailureCode` carries the allowlisted code; the relay endpoint verifies the binding, clears the start-host cookie and only then redirects with that code. A client-tier state that cannot be relayed (no `CLIENT_API_URL`, relay store failure) is a terminal 400. Cost if wrong: one extra Redis write per failed client login; the invariants "binding before any client-facing outcome" and "cookie cleared on every valid-state terminal outcome" hold literally.
+24. **`writeCallbackRejection` is the only 400 writer** in the callback/relay flow and sets the two security headers first (request URLs of those responses carry `state`, `code` or `relay`).
+25. **The SPA parser is closed on exact key sets and cardinality**, not on the presence of expected keys.
+26. **`socialAuthUtils` keeps only what the new contract needs:** `initiateSocialLogin` (stash + navigate), the return-target helpers, `logoutSocial` and `clearSessionStorage` (which sweeps the two legacy keys for browsers that still hold them). `oauth_state` / `oauth_provider` are no longer written — the state cookie is HttpOnly and the backend owns the callback — and `handleSocialCallback`, `getStoredTokens`, `isAuthenticated` (no consumers: `utils/auth.ts` has its own `isAuthenticated`) are deleted.
+27. **`MfaVerifyPanel` moves the inherited manual form onto `react-hook-form` + `yup` with `orkestra-primary` / `orkestra-default` variants** — the stack mandate beats the page precedent (`LoginMfaVerify` predates it). Behaviour and copy are unchanged; the existing `LoginMfaVerify.test.tsx` keeps passing.
 16. **`StoreOAuthStateRequest.RedirectURI` is populated from `spaURL()` only** (`+ "/auth/callback"` for login, `+ "/user/security"` for link), never from the `Origin` header (§4.10 "populated only from the configured tier SPA … never concatenated from request input"). Nothing reads it back today; it stays for stored-state compatibility.
 
 ## File Structure
@@ -2393,7 +2400,7 @@ git commit -m "feat(auth): closed OAuth callback contract — one per-tier build
 
 **Interfaces:**
 - Consumes: `OAuthStateStore.Take` (`oauth_state_service.go:84`, Redis `GETDEL` / memory store), `GenerateOAuthCSRF`, `utils.EncryptOAuthToken` / `DecryptOAuthToken`, `NewMemoryOAuthStateStore`.
-- Produces: `type OAuthRelayRecord struct{Tier string; Provider models.OAuthProvider; CSRF, Mode, LinkUserUUID string; UserInfo map[string]interface{}; Tokens *models.OAuthProviderTokens; SecurityContext *models.SecurityContext; DeviceInfo *models.DeviceInfo; CreatedAt, ExpiresAt time.Time}`; `const OAuthRelayTTL = 60 * time.Second`; `OAuthStateService.StoreOAuthRelay(ctx, *OAuthRelayRecord) (string, error)`, `TakeOAuthRelay(ctx, id string) (*OAuthRelayRecord, error)`; `verifyOAuthStateBinding(r, claims) (deferred bool, err error)`; `verifyRelayBinding(r, csrf string) error`; `type stateResolution struct{info *services.OAuthStateInfo; claims *services.OAuthStateClaims; bindingDeferred bool}`; `func (h *AuthHandler) resolveStateForCallback(ctx, raw string, provider models.OAuthProvider) (*stateResolution, error)`. Consumed by Task 7.
+- Produces: `type OAuthRelayRecord struct{Tier string; Provider models.OAuthProvider; CSRF, Mode, LinkUserUUID, FailureCode string; UserInfo map[string]interface{}; Tokens *models.OAuthProviderTokens; SecurityContext *models.SecurityContext; DeviceInfo *models.DeviceInfo; CreatedAt, ExpiresAt time.Time}`; `const OAuthRelayTTL = 60 * time.Second`; `OAuthStateService.StoreOAuthRelay(ctx, *OAuthRelayRecord) (string, error)`, `TakeOAuthRelay(ctx, id string) (*OAuthRelayRecord, error)`; `verifyOAuthStateBinding(r, claims) (deferred bool, err error)`; `verifyRelayBinding(r, csrf string) error`; `type stateResolution struct{info *services.OAuthStateInfo; claims *services.OAuthStateClaims; bindingDeferred bool}`; `func (h *AuthHandler) resolveStateForCallback(ctx, raw string, provider models.OAuthProvider) (*stateResolution, error)`. Consumed by Task 7.
 
 - [ ] **Step 1: Write the failing service tests**
 
@@ -2516,6 +2523,19 @@ func TestOAuthRelay_RoundTripIsEncryptedAndOneShot(t *testing.T) {
 	}
 }
 
+func TestOAuthRelay_FailureRecordRoundTrips(t *testing.T) {
+	svc := newStateServiceForTest(t)
+	ctx := context.Background()
+	id, err := svc.StoreOAuthRelay(ctx, &OAuthRelayRecord{Tier: AudienceClient, Provider: models.OAuthProviderGoogle, CSRF: "n", FailureCode: "oauth_access_denied"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.TakeOAuthRelay(ctx, id)
+	if err != nil || got.FailureCode != "oauth_access_denied" || got.UserInfo != nil || got.Tokens != nil {
+		t.Fatalf("got %+v err=%v", got, err)
+	}
+}
+
 func TestOAuthRelay_ExpiresWithTTL(t *testing.T) {
 	if OAuthRelayTTL != 60*time.Second {
 		t.Fatalf("OAuthRelayTTL = %v, want 60s (spec §4.10)", OAuthRelayTTL)
@@ -2557,6 +2577,25 @@ func TestOAuthStateBinding_DefersCrossHostTierSplit(t *testing.T) {
 	deferred, err := verifyOAuthStateBinding(r, stateClaims("nonce-abc", "api.example.com"))
 	if err != nil || !deferred {
 		t.Fatalf("a cross-host tier-split callback must be DEFERRED, not bound or rejected: deferred=%v err=%v", deferred, err)
+	}
+}
+
+func TestOAuthStateBinding_CrossHostIgnoresForeignCookie(t *testing.T) {
+	// The same browser may hold the nonce of an unrelated OPERATOR flow on
+	// console.*. That cookie proves nothing about a flow started on api.*
+	// and must not block it: StartHost decides first, the cookie is only
+	// compared on the starting host.
+	r := callbackRequest("console.example.com", "some-operator-flows-nonce")
+
+	deferred, err := verifyOAuthStateBinding(r, stateClaims("nonce-abc", "api.example.com"))
+	if err != nil || !deferred {
+		t.Fatalf("a cross-host callback must be deferred regardless of the callback host's cookie: deferred=%v err=%v", deferred, err)
+	}
+	// …and a matching cookie on the callback host is still a deferral, not
+	// a binding — the api.* cookie can only be verified on api.*.
+	r = callbackRequest("console.example.com", "nonce-abc")
+	if deferred, err := verifyOAuthStateBinding(r, stateClaims("nonce-abc", "api.example.com")); err != nil || !deferred {
+		t.Fatalf("deferred=%v err=%v", deferred, err)
 	}
 }
 
@@ -2620,7 +2659,13 @@ type OAuthRelayRecord struct {
 	CSRF            string                     `json:"csrf"`
 	Mode            string                     `json:"mode,omitempty"`
 	LinkUserUUID    string                     `json:"linkUserUuid,omitempty"`
-	UserInfo        map[string]interface{}     `json:"userInfo"`
+	// FailureCode, when non-empty, is the allowlisted login-callback error
+	// the operator-host callback already decided (IdP denial, missing
+	// code, provider unavailable…). The relay endpoint still verifies the
+	// binding and clears the start-host cookie, then redirects with it
+	// instead of running the application half. Empty means "complete".
+	FailureCode     string                     `json:"failureCode,omitempty"`
+	UserInfo        map[string]interface{}     `json:"userInfo,omitempty"`
 	Tokens          *models.OAuthProviderTokens `json:"tokens,omitempty"`
 	SecurityContext *models.SecurityContext    `json:"securityContext,omitempty"`
 	DeviceInfo      *models.DeviceInfo         `json:"deviceInfo,omitempty"`
@@ -2727,37 +2772,43 @@ In `backend/internal/core/auth/handlers/oauth_state_binding.go` replace `verifyO
 // verifyOAuthStateBinding checks that the callback is being made by the
 // browser that started the flow.
 //
-// Three outcomes. (false, nil): the cookie matched — bound. (_, err): a
-// foreign cookie, a missing cookie on the starting host, or a state with no
-// StartHost — rejected. (true, nil): DEFERRED — the ADR-0003 tier split puts
-// client-tier starts on `api.*` while every provider callback lands on
-// `console.*`, so the cookie set at start cannot reach this request; the
-// caller may continue ONLY by handing the flow to the relay endpoint on the
-// start host, which requires that cookie (verifyRelayBinding). A cross-host
-// callback is never simply accepted: before v4.3 it was, which made the
-// "exception" the client tier's normal path and left login CSRF open there.
+// Three outcomes, decided in this order. A state with no StartHost is
+// rejected. A CROSS-HOST callback is (true, nil): DEFERRED — the ADR-0003
+// tier split puts client-tier starts on `api.*` while every provider
+// callback lands on `console.*`, so the cookie set at start cannot reach
+// this request and any cookie this host holds is irrelevant; the caller may
+// continue ONLY by handing the flow to the relay endpoint on the start host,
+// which requires that cookie (verifyRelayBinding). A SAME-HOST callback is
+// (false, nil) when the cookie matches — bound — and rejected when the
+// cookie is missing or names another flow. A cross-host callback is never
+// simply accepted: before v4.3 it was, which made the "exception" the client
+// tier's normal path and left login CSRF open there.
 func verifyOAuthStateBinding(r *http.Request, claims *services.OAuthStateClaims) (deferred bool, err error) {
 	if claims == nil || claims.CSRF == "" {
 		return false, ErrOAuthStateNotBound
 	}
-
-	cookie, cerr := r.Cookie(OAuthStateCookieName)
-	if cerr == nil && cookie.Value != "" {
-		if subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(claims.CSRF)) == 1 {
-			return false, nil
-		}
-		// A cookie that names a different flow is the clearest signal
-		// there is: this browser started something else.
-		return false, fmt.Errorf("%w: state nonce does not match the browser's cookie", ErrOAuthStateNotBound)
-	}
-
 	if claims.StartHost == "" {
 		return false, fmt.Errorf("%w: state carries no start host", ErrOAuthStateNotBound)
 	}
-	if sameHost(claims.StartHost, r.Host) {
+	// StartHost FIRST. A flow started on another host set its cookie there;
+	// whatever cookie THIS host holds (typically the nonce of an unrelated
+	// operator flow in the same browser) proves nothing about it and must
+	// neither bind nor block it — the relay endpoint on the start host is
+	// the only place that can decide.
+	if !sameHost(claims.StartHost, r.Host) {
+		return true, nil
+	}
+
+	cookie, cerr := r.Cookie(OAuthStateCookieName)
+	if cerr != nil || cookie.Value == "" {
 		return false, fmt.Errorf("%w: no state cookie presented on the starting host", ErrOAuthStateNotBound)
 	}
-	return true, nil
+	if subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(claims.CSRF)) == 1 {
+		return false, nil
+	}
+	// A cookie that names a different flow is the clearest signal there
+	// is: this browser started something else.
+	return false, fmt.Errorf("%w: state nonce does not match the browser's cookie", ErrOAuthStateNotBound)
 }
 
 // verifyRelayBinding is the relay endpoint's check: it runs on the host
@@ -2863,7 +2914,7 @@ In `backend/internal/core/auth/CLAUDE.md` replace the two invariant bullets at l
 ```markdown
 - **OAuth state is 10 minutes in Redis and ONE-SHOT.** `ValidateOAuthState` consumes the row with the store's atomic `Take` (Redis `GETDEL`); a `Get` followed by a deferred delete — the shape it had until v4.3 — let two concurrent callbacks both read one state. Exactly one presentation proceeds; a replay is a generic 400. `oauth_state_service_test.go` pins the one-winner race on the in-memory store.
 - **OAuth state is bound to the endpoint's provider, the tier, the link-mode pair and the browser, in that order after the signature.** `resolveStateForCallback(ctx, raw, provider)` runs signature/expiry → browser binding → atomic take → `tier` → `provider` (`stateInfo.Provider` must equal the callback's provider — a Google state presented to the Discord callback is a 400) → `mode`/`linkUserUUID`, every mismatch the same generic error, all before the IdP `error`, the code or any profile is read.
-- **The browser binding is verified where the cookie lives.** The signed state + one-shot row prove a callback belongs to a flow *we* started, not that it belongs to *this browser*: without a binding, login CSRF (an attacker-started flow finished by a victim's browser lands the victim in the attacker's session; in `mode=link` it attaches the victim's IdP identity to the attacker's account) is open. Both start endpoints therefore also drop the CSRF nonce into an HttpOnly `orkestra_oauth_state` cookie (SameSite=Lax — Strict would suppress the top-level redirect back from the IdP) and the callback requires the two to match (`handlers/oauth_state_binding.go`). Fails closed: a mismatched cookie, an absent cookie on the starting host, or a state with no `shost` claim are all rejected. The ADR-0003 tier split puts client-tier starts on `api.*` while every provider callback lands on `console.*`, so that cookie cannot reach the callback — such a callback is **deferred**, never accepted: the operator host does the IdP half only and hands the flow to `GET /v1/auth/client/oauth/complete` on the client API host through a one-shot relay record; the relay endpoint **requires** the cookie (`verifyRelayBinding`) and fails closed without it. The SPA must call the start endpoint with `credentials: 'include'` or the cookie is never stored — `frontend-admin`'s `socialAuthUtils.ts` and RTK `baseApi` both do.
+- **The browser binding is verified where the cookie lives.** The signed state + one-shot row prove a callback belongs to a flow *we* started, not that it belongs to *this browser*: without a binding, login CSRF (an attacker-started flow finished by a victim's browser lands the victim in the attacker's session; in `mode=link` it attaches the victim's IdP identity to the attacker's account) is open. Both start endpoints therefore also drop the CSRF nonce into an HttpOnly `orkestra_oauth_state` cookie (SameSite=Lax — Strict would suppress the top-level redirect back from the IdP) and the callback requires the two to match (`handlers/oauth_state_binding.go`). `StartHost` is checked first: a cross-host callback is **deferred** whatever cookie the operator host holds (an unrelated operator flow's nonce must not block a client login); on the starting host the cookie is required and a mismatched or absent one, like a state with no `shost` claim, is rejected. The ADR-0003 tier split puts client-tier starts on `api.*` while every provider callback lands on `console.*`, so that cookie cannot reach the callback — such a callback is deferred, never accepted: the operator host does the IdP half only and hands the flow to `GET /v1/auth/client/oauth/complete` on the client API host through a one-shot relay record; the relay endpoint **requires** the cookie (`verifyRelayBinding`) and fails closed without it. The SPA must call the start endpoint with `credentials: 'include'` or the cookie is never stored — `frontend-admin`'s `socialAuthUtils.ts` and RTK `baseApi` both do.
 ```
 
 - [ ] **Step 6: Commit**
@@ -2885,7 +2936,7 @@ git commit -m "fix(auth): OAuth state is one-shot (atomic Take) and bound to the
 - Modify: `backend/internal/core/auth/handlers/structured_logging_safety_test.go` (lines 15-25)
 - Modify: `backend/internal/core/auth/handlers/error_mapping_test.go` (delete `TestErrorMapping_WriteOAuthCallbackErrorStaysNeutralAndSanitized` 167-216, `TestOAuthSignupDisabled_MatchesSentinel` 335-345, `TestRedirectOAuthSignupDisabled_*` 347-375)
 - Modify: `backend/internal/shared/config/config.go` (`CLIENT_API_URL` after the `config.Server = ServerConfig{…}` literal, line ~254)
-- Modify: `docker/.env.example` (after `CLIENT_API_HOST=api.localhost`, line 87)
+- Modify: `docker/.env.example` (after `CLIENT_API_HOST=api.localhost`, line 87); `docker/docker-compose.dev.yml:85`, `docker/docker-compose.staging.yml:104`, `docker/docker-compose.prod.yml:105`
 - Modify: `backend/internal/core/auth/module.go` (after lines 1079 and 1245; inside the `if ri.ClientRouter != nil` block at 1683-1686)
 - Regenerate: `backend/openapi/enterprise.json`
 - Modify: `backend/internal/core/auth/CLAUDE.md` ("What it owns"; endpoint rows 448-452; new "### OAuth callback contract" section after the state-dispatch section; rules), `docs/site/operating/cookie-hardening-cross-tier.mdx` (new section before "## Verifying")
@@ -3282,6 +3333,27 @@ func refreshCookie(rec *httptest.ResponseRecorder) *http.Cookie {
 	return nil
 }
 
+// assertRejected is the shape of every terminal 400 in the callback/relay
+// flow: no redirect, no cookie, and the two security headers — the request
+// URL of such a response carries state, code or relay.
+func assertRejected(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body %q)", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "" {
+		t.Fatalf("no redirect may be issued: %q", loc)
+	}
+	if rec.Header().Get("Referrer-Policy") != "no-referrer" || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("a terminal 400 must carry the security headers: %v", rec.Header())
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "orkestra_cookie" {
+			t.Fatalf("no refresh cookie may be written on a rejection: %+v", c)
+		}
+	}
+}
+
 func assertNoRefreshCookie(t *testing.T, rec *httptest.ResponseRecorder) {
 	t.Helper()
 	if c := refreshCookie(rec); c != nil {
@@ -3335,36 +3407,113 @@ func TestCallback_ClientTierDefersToRelay_NoCookieNoTokenHere(t *testing.T) {
 		t.Fatal("the operator host must not run the application half of a client-tier flow")
 	}
 	rec2 := hx.state.relay
-	if rec2 == nil || rec2.Tier != services.AudienceClient || rec2.Provider != models.OAuthProviderGoogle || rec2.CSRF != testCSRF ||
+	if rec2 == nil || rec2.Tier != services.AudienceClient || rec2.Provider != models.OAuthProviderGoogle || rec2.CSRF != testCSRF || rec2.FailureCode != "" ||
 		rec2.UserInfo["provider_id"] != "g-1" || rec2.UserInfo["email_verified"] != true || rec2.Tokens == nil || rec2.Tokens.AccessToken != "idp-at" {
 		t.Fatalf("relay record = %+v", rec2)
 	}
 	assertNoPII(t, rec)
 }
 
-func TestCallback_ClientTierRelaysEvenWithACookieOnConsole(t *testing.T) {
-	hx := newCallbackHarness(t)
-	rec := httptest.NewRecorder()
-	hx.dispatcher.HandleGoogleCallbackHTTP(rec, hx.request(t, callbackOpts{tier: services.AudienceClient, startHost: clientAPIHost, cookie: true}))
-	assertCallbackHeaders(t, rec, false)
-	if !strings.HasPrefix(rec.Header().Get("Location"), "https://api.example/v1/auth/client/oauth/complete?relay=") {
-		t.Fatalf("a client-tier login always relays: %q", rec.Header().Get("Location"))
+func TestCallback_ClientTierRelaysWhateverCookieConsoleHolds(t *testing.T) {
+	// P1 of review round 2: the same browser may hold the nonce of an
+	// unrelated operator flow on console.*; it must neither block nor bind
+	// a client-tier login. And a matching cookie on console is still no
+	// reason to complete here — the api.* cookie is set on api.*.
+	for name, cookie := range map[string]string{"foreign operator nonce": "some-operator-flows-nonce", "matching nonce": testCSRF} {
+		t.Run(name, func(t *testing.T) {
+			hx := newCallbackHarness(t)
+			r := hx.request(t, callbackOpts{tier: services.AudienceClient, startHost: clientAPIHost})
+			r.AddCookie(&http.Cookie{Name: OAuthStateCookieName, Value: cookie})
+			rec := httptest.NewRecorder()
+			hx.dispatcher.HandleGoogleCallbackHTTP(rec, r)
+			assertCallbackHeaders(t, rec, false)
+			if !strings.HasPrefix(rec.Header().Get("Location"), "https://api.example/v1/auth/client/oauth/complete?relay=") {
+				t.Fatalf("a client-tier login always relays: %q", rec.Header().Get("Location"))
+			}
+			assertNoRefreshCookie(t, rec)
+			if hx.clAuth.calls != 0 {
+				t.Fatal("no application half on the operator host")
+			}
+		})
 	}
-	assertNoRefreshCookie(t, rec)
 }
 
-func TestCallback_ClientTierWithoutClientSurfaceIsRefused(t *testing.T) {
+func TestCallback_OperatorSameHostForeignNonce_400(t *testing.T) {
+	hx := newCallbackHarness(t)
+	r := hx.request(t, callbackOpts{tier: services.AudienceOperator})
+	r.AddCookie(&http.Cookie{Name: OAuthStateCookieName, Value: "attackers-nonce"})
+	rec := httptest.NewRecorder()
+	hx.dispatcher.HandleGoogleCallbackHTTP(rec, r)
+	assertRejected(t, rec)
+	if hx.state.validated != 0 || hx.provider.exchanges != 0 {
+		t.Fatal("a same-host foreign nonce is rejected before the state is consumed")
+	}
+}
+
+func TestCallback_ClientTierWithoutClientSurfaceIsRejected(t *testing.T) {
 	hx := newCallbackHarness(t)
 	hx.dispatcher.config.Server.Client.PublicURL = ""
 	rec := httptest.NewRecorder()
 	hx.dispatcher.HandleGoogleCallbackHTTP(rec, hx.request(t, callbackOpts{tier: services.AudienceClient, startHost: clientAPIHost}))
-	assertCallbackHeaders(t, rec, false)
-	base, q, _ := location(t, rec)
-	if base != "https://app.example/auth/callback" || q.Get("error") != OAuthCallbackErrProviderUnavailable {
-		t.Fatalf("base=%q q=%v", base, q)
-	}
+	assertRejected(t, rec) // no destination to trust → no redirect at all
 	if hx.provider.exchanges != 0 || hx.state.relay != nil {
 		t.Fatal("nothing is exchanged or stored when the relay has no destination")
+	}
+}
+
+func TestCallback_ClientTierFailuresAreRelayed(t *testing.T) {
+	// Every terminal outcome of a valid client-tier state goes through the
+	// relay, so the deferred binding is verified and the start-host cookie
+	// cleared before the browser reaches the client SPA — even for a
+	// failure decided on the operator host.
+	cases := map[string]struct {
+		arrange func(hx *callbackHarness)
+		opts    callbackOpts
+		want    string
+	}{
+		"IdP denial":          {func(*callbackHarness) {}, callbackOpts{noCode: true, query: "&error=access_denied"}, OAuthCallbackErrAccessDenied},
+		"missing code":        {func(*callbackHarness) {}, callbackOpts{noCode: true}, OAuthCallbackErrLoginFailed},
+		"provider unusable":   {func(hx *callbackHarness) { hx.resolver.usable = false }, callbackOpts{}, OAuthCallbackErrProviderUnavailable},
+		"exchange failed":     {func(hx *callbackHarness) { hx.provider.exchangeErr = errors.New("idp 500 u@example.com") }, callbackOpts{}, OAuthCallbackErrProviderUnavailable},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			hx := newCallbackHarness(t)
+			tc.arrange(hx)
+			o := tc.opts
+			o.tier, o.startHost = services.AudienceClient, clientAPIHost
+			rec := httptest.NewRecorder()
+			hx.dispatcher.HandleGoogleCallbackHTTP(rec, hx.request(t, o))
+			assertCallbackHeaders(t, rec, false)
+			if got := rec.Header().Get("Location"); got != "https://api.example/v1/auth/client/oauth/complete?relay=relay-1" {
+				t.Fatalf("a client-tier failure must be relayed, not sent to the SPA from here: %q", got)
+			}
+			if hx.state.relay == nil || hx.state.relay.FailureCode != tc.want || hx.state.relay.CSRF != testCSRF {
+				t.Fatalf("relay record = %+v, want FailureCode=%s", hx.state.relay, tc.want)
+			}
+			assertNoPII(t, rec)
+
+			// The relay endpoint binds, clears the start-host cookie, then
+			// renders the recorded failure; no application half, no token.
+			relay := httptest.NewRecorder()
+			hx.client.HandleOAuthRelayCompleteHTTP(relay, relayRequest("relay-1", testCSRF))
+			assertCallbackHeaders(t, relay, true)
+			base, q, _ := location(t, relay)
+			if base != "https://app.example/auth/callback" || q.Get("success") != "false" || q.Get("error") != tc.want {
+				t.Fatalf("base=%q q=%v", base, q)
+			}
+			assertNoRefreshCookie(t, relay)
+			if hx.clAuth.calls != 0 {
+				t.Fatal("a relayed failure never runs the application half")
+			}
+			// …and without the cookie the failure is not even rendered.
+			hx2 := newCallbackHarness(t)
+			tc.arrange(hx2)
+			hx2.dispatcher.HandleGoogleCallbackHTTP(httptest.NewRecorder(), hx2.request(t, o))
+			unbound := httptest.NewRecorder()
+			hx2.client.HandleOAuthRelayCompleteHTTP(unbound, relayRequest("relay-1", ""))
+			assertRejected(t, unbound)
+		})
 	}
 }
 
@@ -3410,10 +3559,7 @@ func TestRelayComplete_RefusalsAre400WithoutRedirectOrToken(t *testing.T) {
 			hx.dispatcher.HandleGoogleCallbackHTTP(httptest.NewRecorder(), hx.request(t, callbackOpts{tier: services.AudienceClient, startHost: clientAPIHost}))
 			rec := httptest.NewRecorder()
 			hx.client.HandleOAuthRelayCompleteHTTP(rec, arrange(hx))
-			if rec.Code != http.StatusBadRequest || rec.Header().Get("Location") != "" {
-				t.Fatalf("status=%d loc=%q; want a terminal 400 with no redirect", rec.Code, rec.Header().Get("Location"))
-			}
-			assertNoRefreshCookie(t, rec)
+			assertRejected(t, rec)
 			if hx.clAuth.calls != 0 {
 				t.Fatal("no token may be minted")
 			}
@@ -3431,9 +3577,7 @@ func TestRelayComplete_IsOneShot(t *testing.T) {
 	}
 	second := httptest.NewRecorder()
 	hx.client.HandleOAuthRelayCompleteHTTP(second, relayRequest("relay-1", testCSRF))
-	if second.Code != http.StatusBadRequest || refreshCookie(second) != nil {
-		t.Fatalf("a replayed relay must be a 400 with no cookie: %d", second.Code)
-	}
+	assertRejected(t, second)
 	if hx.clAuth.calls != 1 {
 		t.Fatalf("application half ran %d times, want 1", hx.clAuth.calls)
 	}
@@ -3471,12 +3615,7 @@ func TestCallback_TrustBeforeDestination(t *testing.T) {
 			hx := newCallbackHarness(t)
 			rec := httptest.NewRecorder()
 			hx.dispatcher.HandleGoogleCallbackHTTP(rec, hx.request(t, o))
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400", rec.Code)
-			}
-			if rec.Header().Get("Location") != "" {
-				t.Fatalf("no redirect may be issued before trust is established: %q", rec.Header().Get("Location"))
-			}
+			assertRejected(t, rec)
 			if hx.provider.exchanges != 0 || hx.opAuth.calls != 0 || hx.clAuth.calls != 0 || hx.state.relay != nil {
 				t.Fatal("nothing downstream may run")
 			}
@@ -3494,9 +3633,7 @@ func TestCallback_ReplayedOrUnknownState_400(t *testing.T) {
 	hx.state.err = errors.New("OAuth state not found, expired or already used")
 	rec := httptest.NewRecorder()
 	hx.dispatcher.HandleGoogleCallbackHTTP(rec, hx.request(t, callbackOpts{tier: services.AudienceOperator, cookie: true}))
-	if rec.Code != http.StatusBadRequest || rec.Header().Get("Location") != "" {
-		t.Fatalf("status=%d loc=%q", rec.Code, rec.Header().Get("Location"))
-	}
+	assertRejected(t, rec)
 }
 
 func TestCallback_ValidStateThenIdPDenial(t *testing.T) {
@@ -3665,9 +3802,7 @@ func TestCallback_AppleFormPost(t *testing.T) {
 	// No dev-only fallback: a missing state is a terminal 400 everywhere.
 	rec = httptest.NewRecorder()
 	hx.dispatcher.HandleAppleCallbackHTTP(rec, hx.request(t, callbackOpts{tier: services.AudienceOperator, form: true, path: "/v1/auth/oauth/apple/callback", noState: true, cookie: true, provider: models.OAuthProviderApple}))
-	if rec.Code != http.StatusBadRequest || rec.Header().Get("Location") != "" {
-		t.Fatalf("status=%d loc=%q", rec.Code, rec.Header().Get("Location"))
-	}
+	assertRejected(t, rec)
 }
 
 func TestCallback_GitHubSetsRefreshCookie(t *testing.T) {
@@ -3860,7 +3995,7 @@ func derivedPublicURL(host string, secure bool) string {
 CLIENT_API_URL=http://api.localhost:3000
 ```
 
-Then check the backend service reads the whole file: `grep -n 'env_file' docker/docker-compose.dev.yml docker/docker-compose.staging.yml docker/docker-compose.prod.yml` — if the backend service uses `env_file: .env` nothing else changes; if it enumerates variables under `environment:`, add `CLIENT_API_URL=${CLIENT_API_URL}` beside `CLIENT_API_HOST` in each file.
+The three compose files enumerate the backend's variables, so add `CLIENT_API_URL` next to `CLIENT_API_HOST` in each: `docker/docker-compose.dev.yml:85` → `CLIENT_API_URL: ${CLIENT_API_URL:-http://api.localhost:3000}`; `docker/docker-compose.staging.yml:104` → `CLIENT_API_URL: ${CLIENT_API_URL:-}`; `docker/docker-compose.prod.yml:105` → `CLIENT_API_URL: ${CLIENT_API_URL:-}` (empty = derived from `CLIENT_API_HOST`, https).
 
 - [ ] **Step 4: Write the shared flow and the relay endpoint**
 
@@ -3990,24 +4125,52 @@ func (h *AuthHandler) completeOAuthCallback(w http.ResponseWriter, r *http.Reque
 
 	if params.State == "" {
 		logger.Warn("oauth callback rejected", slog.String("provider", string(provider)), slog.String("outcome", "missing_state"))
-		http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
+		writeCallbackRejection(w, "Invalid OAuth state")
 		return
 	}
 	res, err := h.resolveStateForCallback(ctx, params.State, provider)
 	if err != nil {
 		logger.Warn("oauth callback rejected", slog.String("provider", string(provider)), slog.String("outcome", "invalid_state"))
-		http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
+		writeCallbackRejection(w, "Invalid OAuth state")
 		return
 	}
 
 	target := h.dispatchTarget(res.claims.Tier)
-	if !res.bindingDeferred {
+	linkMode := res.claims.Mode == services.OAuthStateModeLink
+
+	// A deferred flow needs somewhere to go. With no client surface there
+	// is no destination to trust: terminal 400, before the IdP code is
+	// spent on an exchange nobody can complete.
+	if res.bindingDeferred {
+		if _, ok := h.relayCompleteURL("probe"); !ok {
+			logger.Warn("oauth callback rejected", slog.String("provider", string(provider)), slog.String("outcome", "relay_unavailable"))
+			writeCallbackRejection(w, "Invalid OAuth state")
+			return
+		}
+	} else {
 		// The nonce cookie lives on this host: evict it on every terminal
 		// outcome from here on. A deferred flow's cookie lives on the
 		// client API host and is cleared by the relay endpoint.
 		w.Header().Add("Set-Cookie", clearOAuthStateCookie(h.config.Auth.Cookie.Secure))
 	}
-	linkMode := res.claims.Mode == services.OAuthStateModeLink
+
+	// relay hands the flow — success or failure — to the client API host.
+	// Every terminal outcome of a valid client-tier state goes through it,
+	// so the deferred binding is always verified and the start-host cookie
+	// always cleared before the browser reaches the client SPA.
+	relay := func(rec *services.OAuthRelayRecord) {
+		rec.Tier, rec.Provider, rec.CSRF = res.claims.Tier, provider, res.claims.CSRF
+		id, err := h.oauthStateService.StoreOAuthRelay(ctx, rec)
+		if err != nil {
+			logger.Warn("oauth callback rejected", slog.String("provider", string(provider)), slog.String("outcome", "relay_store_failed"))
+			writeCallbackRejection(w, "Invalid OAuth state")
+			return
+		}
+		dest, _ := h.relayCompleteURL(id)
+		logger.Info("oauth callback relayed to the client api host",
+			slog.String("provider", string(provider)), slog.Bool("failure", rec.FailureCode != ""))
+		h.writeRelayRedirect(w, r, dest)
+	}
 
 	fail := func(loginCode, linkCode, outcome string) {
 		logger.Warn("oauth callback failed",
@@ -4016,19 +4179,13 @@ func (h *AuthHandler) completeOAuthCallback(w http.ResponseWriter, r *http.Reque
 			slog.Bool("link_mode", linkMode),
 			slog.Bool("relayed", res.bindingDeferred),
 			slog.String("outcome", outcome))
-		if linkMode {
+		switch {
+		case linkMode:
 			target.writeOAuthLinkRedirect(w, r, provider, false, linkCode)
-			return
-		}
-		target.writeOAuthLoginRedirect(w, r, oauthLoginFailure(provider, loginCode))
-	}
-
-	// A deferred flow needs somewhere to go. Decide that before spending
-	// the IdP code on an exchange nobody can complete.
-	if res.bindingDeferred {
-		if _, ok := h.relayCompleteURL("probe"); !ok {
-			fail(OAuthCallbackErrProviderUnavailable, oauthLinkCodeProviderUnavailable, "relay_unavailable")
-			return
+		case res.bindingDeferred:
+			relay(&services.OAuthRelayRecord{FailureCode: loginCode})
+		default:
+			target.writeOAuthLoginRedirect(w, r, oauthLoginFailure(provider, loginCode))
 		}
 	}
 
@@ -4070,26 +4227,25 @@ func (h *AuthHandler) completeOAuthCallback(w http.ResponseWriter, r *http.Reque
 	}
 
 	if res.bindingDeferred {
-		id, err := h.oauthStateService.StoreOAuthRelay(ctx, &services.OAuthRelayRecord{
-			Tier:            res.claims.Tier,
-			Provider:        provider,
-			CSRF:            res.claims.CSRF,
+		relay(&services.OAuthRelayRecord{
 			UserInfo:        userInfo,
 			Tokens:          oauthTokens,
 			SecurityContext: res.info.SecurityContext,
 			DeviceInfo:      res.info.DeviceInfo,
 		})
-		if err != nil {
-			fail(OAuthCallbackErrLoginFailed, oauthLinkCodeInternal, "relay_store_failed")
-			return
-		}
-		dest, _ := h.relayCompleteURL(id)
-		logger.Info("oauth callback relayed to the client api host", slog.String("provider", string(provider)))
-		h.writeRelayRedirect(w, r, dest)
 		return
 	}
 
 	h.finishOAuthCompletion(w, r, target, provider, userInfo, oauthTokens, res.info.SecurityContext, res.info.DeviceInfo)
+}
+
+// writeCallbackRejection is the ONLY writer of a terminal 400 in the
+// callback/relay flow. The request URL of such a response carries state,
+// code or relay, so it gets the same no-store / no-referrer headers as a
+// redirect. The body is one neutral sentence whatever the reason.
+func writeCallbackRejection(w http.ResponseWriter, detail string) {
+	setCallbackRedirectHeaders(w)
+	http.Error(w, detail, http.StatusBadRequest)
 }
 
 // finishOAuthCompletion is the application half of a login: it runs on the
@@ -4138,7 +4294,7 @@ func (h *AuthHandler) HandleOAuthRelayCompleteHTTP(w http.ResponseWriter, r *htt
 	logger := slog.Default()
 	reject := func(outcome string) {
 		logger.Warn("oauth relay rejected", slog.String("tier", h.tier), slog.String("outcome", outcome))
-		http.Error(w, "Invalid OAuth relay", http.StatusBadRequest)
+		writeCallbackRejection(w, "Invalid OAuth relay")
 	}
 
 	id := r.URL.Query().Get("relay")
@@ -4159,7 +4315,18 @@ func (h *AuthHandler) HandleOAuthRelayCompleteHTTP(w http.ResponseWriter, r *htt
 		reject("relay_unbound")
 		return
 	}
+	// Bound. The cookie this host set at start is spent; clear it on every
+	// outcome below.
 	w.Header().Add("Set-Cookie", clearOAuthStateCookie(h.config.Auth.Cookie.Secure))
+	if rec.FailureCode != "" {
+		logger.Warn("oauth callback failed",
+			slog.String("provider", string(rec.Provider)),
+			slog.String("tier", h.tier),
+			slog.Bool("relayed", true),
+			slog.String("outcome", "relayed_failure"))
+		h.writeOAuthLoginRedirect(w, r, oauthLoginFailure(rec.Provider, rec.FailureCode))
+		return
+	}
 	h.finishOAuthCompletion(w, r, h, rec.Provider, rec.UserInfo, rec.Tokens, rec.SecurityContext, rec.DeviceInfo)
 }
 
@@ -4205,7 +4372,7 @@ func (h *AuthHandler) HandleGitHubCallbackHTTP(w http.ResponseWriter, r *http.Re
 func (h *AuthHandler) HandleAppleCallbackHTTP(w http.ResponseWriter, r *http.Request) {
 	params, err := formCallbackParams(r)
 	if err != nil {
-		http.Error(w, "Invalid OAuth callback", http.StatusBadRequest)
+		writeCallbackRejection(w, "Invalid OAuth callback")
 		return
 	}
 	h.completeOAuthCallback(w, r, models.OAuthProviderApple, params, exchangeAppleIDToken())
@@ -4267,7 +4434,7 @@ and `InitiateOAuthLink` (575-585) likewise with `frontendRedirectURL := h.spaURL
 	targets := map[string]bool{
 		"InitiateOAuthLogin": true, "InitiateOAuthLink": true,
 		"finishOAuthLinkRedirect": true, "completeOAuthCallback": true, "finishOAuthCompletion": true,
-		"HandleOAuthRelayCompleteHTTP": true,
+		"HandleOAuthRelayCompleteHTTP": true, "writeCallbackRejection": true,
 		"HandleGoogleCallbackHTTP": true, "HandleDiscordCallbackHTTP": true,
 		"HandleAppleCallbackHTTP": true, "HandleGitHubCallbackHTTP": true,
 		"HandleMobileGoogleAuth": true, "HandleMobileAppleAuth": true,
@@ -4328,7 +4495,7 @@ In `backend/internal/core/auth/CLAUDE.md`:
 
 Every provider callback runs `completeOAuthCallback` (`handlers/oauth_callback_flow.go`), whose order is **trust before destination**: `resolveStateForCallback(ctx, raw, provider)` checks signature/expiry → browser binding → atomic one-shot take → `tier` → `provider` → link-mode pair, and any failure is a terminal generic **400 with no redirect** — no trusted tier exists yet, so there is no SPA to send anyone to. Only then does the handler dispatch to the tier-bound instance, clear the `orkestra_oauth_state` cookie (if it lives on this host), interpret the IdP's `error`, require the code, resolve the provider **strictly from one config read** (`OAuthWebProviderUsable`, so a provider disabled mid-flow is refused and the provider is built from the value that answered the check) and exchange. Every failure from that point redirects to the **configured tier SPA** (`spaURL()` — `OPERATOR_FRONTEND_URL` / `CLIENT_FRONTEND_URL` → `FRONTEND_URL`, handed to the handler by `module.go` via `SetSPAURL`; the `Origin` header is never read) with a coarse allowlisted code; raw IdP/error text stays in sanitized log fields.
 
-**Where a flow completes depends on who owns the cookie.** Every provider callback is mounted on the operator host, and a response from `console.*` cannot set a cookie for `api.*` (RFC 6265 §5.3; the cross-tier isolation model has no shared parent domain). So an operator/legacy login completes inline (`finishOAuthCompletion`: application half, refresh cookie with the target tier's domain and TTL, redirect), while a **client-tier login is relayed**: the callback stores an encrypted one-shot `OAuthRelayRecord` (tier, provider, the state's CSRF nonce, user-info map, provider tokens, security context, device info; `OAuthRelayTTL` 60 s) and redirects to `{CLIENT_API_URL}/v1/auth/client/oauth/complete?relay=<id>`. `HandleOAuthRelayCompleteHTTP`, on the client host mux, takes the record atomically, **requires** the state cookie its own host set at start to equal the nonce (`verifyRelayBinding`) — the browser binding the operator host had to defer — refuses a missing/foreign cookie, a replay, a link-mode or wrong-tier record with 400 and no redirect, clears the cookie, then runs the same `finishOAuthCompletion` and sets the client refresh cookie on its own host. A login-CSRF attempt reaches the relay without the attacker's nonce and is refused before any token exists. The relay id is a single-use, browser-bound handle like the IdP code, never a credential.
+**Where a flow completes depends on who owns the cookie.** Every provider callback is mounted on the operator host, and a response from `console.*` cannot set a cookie for `api.*` (RFC 6265 §5.3; the cross-tier isolation model has no shared parent domain). So an operator/legacy login completes inline (`finishOAuthCompletion`: application half, refresh cookie with the target tier's domain and TTL, redirect), while a **client-tier login is relayed — every terminal outcome of it**: the callback stores an encrypted one-shot `OAuthRelayRecord` (tier, provider, the state's CSRF nonce, then either the user-info map + provider tokens + security context + device info, or the allowlisted `FailureCode` of a flow that already failed; `OAuthRelayTTL` 60 s) and redirects to `{CLIENT_API_URL}/v1/auth/client/oauth/complete?relay=<id>`. `HandleOAuthRelayCompleteHTTP`, on the client host mux, takes the record atomically, **requires** the state cookie its own host set at start to equal the nonce (`verifyRelayBinding`) — the browser binding the operator host had to defer (`verifyOAuthStateBinding` decides on `StartHost` first, so an unrelated operator nonce on `console.*` neither blocks nor binds a client flow) — refuses a missing/foreign cookie, a replay, a link-mode or wrong-tier record with 400 and no redirect, clears the cookie, then either redirects with the recorded failure code or runs the same `finishOAuthCompletion` and sets the client refresh cookie on its own host. A client-tier state with no client surface configured is a terminal 400. A login-CSRF attempt reaches the relay without the attacker's nonce and is refused before any token exists. The relay id is a single-use, browser-bound handle like the IdP code, never a credential.
 
 The wire shape is **closed** and lives in `handlers/oauth_callback_redirect.go`, the only file allowed to build these URLs:
 
@@ -4337,7 +4504,7 @@ The wire shape is **closed** and lives in `handlers/oauth_callback_redirect.go`,
 - MFA continuation: `{spa}/auth/callback#requiresMfa=true&mfaToken=<one-shot id>&webauthnAvailable=<bool>` — in the **fragment**, so the five-minute challenge id never reaches a server log, a proxy or a Referer; **no cookie is written** on a partial;
 - link mode: `{spa}/user/security?tab=oauth&link=success|failed&provider=<p>[&code=already_linked|duplicate_provider|invalid_userinfo|access_denied|provider_unavailable|internal]` — its own builder, never the login state machine, operator-only.
 
-Every redirect sets `Referrer-Policy: no-referrer` and `Cache-Control: no-store`. **No callback URL may carry `access_token`, `refresh_token`, `email` or `user_id`** — `TestCallbackURLBuilders_StructuralScan` fails the build on a literal outside the builder file or a forbidden `url.Values` key inside it, and `oauth_callback_flow_test.go` checks every `Location`'s exact parameter names and values. The legacy `success=true&user_id=…&email=…` and the unregistered Huma Apple callback's `access_token=…` are gone.
+Every callback and relay response — redirects **and** terminal 400s, whose request URLs carry `state`, `code` or `relay` — sets `Referrer-Policy: no-referrer` and `Cache-Control: no-store` (`writeCallbackRejection` is the only 400 writer). **No callback URL may carry `access_token`, `refresh_token`, `email` or `user_id`** — `TestCallbackURLBuilders_StructuralScan` fails the build on a literal outside the builder file or a forbidden `url.Values` key inside it, and `oauth_callback_flow_test.go` checks every `Location`'s exact parameter names and values. The legacy `success=true&user_id=…&email=…` and the unregistered Huma Apple callback's `access_token=…` are gone.
 ```
 
 (d) Rules: add `- **Never build a `/auth/callback` or `/user/security` URL outside `handlers/oauth_callback_redirect.go`**, never put a token, an email or a user id in one, and never set a client-tier cookie from the operator host — relay instead. The structural scan and `oauth_callback_flow_test.go` are the guards.`
@@ -4347,14 +4514,15 @@ In `docs/site/operating/cookie-hardening-cross-tier.mdx`, before `## Verifying` 
 ```markdown
 ## Why a client-tier social login relays to the client API host
 
-Every OAuth provider is registered with **one** redirect URI per provider, and that URI lives on the operator host. A client-tier flow therefore returns from the identity provider to `console.example.com` — a host that, by the model above, **cannot** set a cookie for `api.example.com` (the browser rejects a `Domain` that does not match the response host, and a shared parent domain is exactly what we refuse to configure). The callback does not try: for a client-tier flow it completes the identity-provider half, stores a 60-second single-use record, and redirects the browser to `CLIENT_API_URL/v1/auth/client/oauth/complete?relay=…`. That endpoint, on the client API host, takes the record once, requires the `orkestra_oauth_state` cookie the same host set when the flow started (so a login-CSRF attempt that finished someone else's flow is refused before any token exists), sets the client refresh cookie on its own host and sends the user to the client SPA. Set `CLIENT_API_URL` to the client API's public origin; it is derived from `CLIENT_API_HOST` when empty.
+Every OAuth provider is registered with **one** redirect URI per provider, and that URI lives on the operator host. A client-tier flow therefore returns from the identity provider to `console.example.com` — a host that, by the model above, **cannot** set a cookie for `api.example.com` (the browser rejects a `Domain` that does not match the response host, and a shared parent domain is exactly what we refuse to configure). The callback does not try: for a client-tier flow it completes the identity-provider half, stores a 60-second single-use record, and redirects the browser to `CLIENT_API_URL/v1/auth/client/oauth/complete?relay=…`. That endpoint, on the client API host, takes the record once, requires the `orkestra_oauth_state` cookie the same host set when the flow started (so a login-CSRF attempt that finished someone else's flow is refused before any token exists), clears it, and then either sets the client refresh cookie on its own host and sends the user to the client SPA or — when the flow had already failed at the identity provider — sends them there with the failure code. Nothing about a client-tier login is decided for the browser anywhere else. Set `CLIENT_API_URL` to the client API's public origin; it is derived from `CLIENT_API_HOST` when empty.
 ```
 
 - [ ] **Step 9: Commit**
 
 ```bash
 cd /home/tore/orkestra && git add backend/internal/core/auth/handlers/oauth_callback_flow.go backend/internal/core/auth/handlers/oauth_callback_flow_test.go backend/internal/core/auth/handlers/oauth_callback_scan_test.go backend/internal/core/auth/handlers/auth_handler.go backend/internal/core/auth/handlers/structured_logging_safety_test.go backend/internal/core/auth/handlers/error_mapping_test.go backend/internal/core/auth/module.go backend/internal/shared/config/config.go docker/.env.example backend/openapi/enterprise.json backend/internal/core/auth/CLAUDE.md docs/site/operating/cookie-hardening-cross-tier.mdx
-# plus any compose file / policycoverage baseline Steps 3 and 7 changed
+git add docker/docker-compose.dev.yml docker/docker-compose.staging.yml docker/docker-compose.prod.yml
+# plus the policycoverage baseline if Step 7 changed it
 git commit -m "fix(auth): one trust-before-destination OAuth callback flow — client-tier logins complete through a one-shot relay on the client API host; GitHub sets the refresh cookie; dead Huma Apple callback removed"
 ```
 
@@ -4656,11 +4824,11 @@ git commit -m "feat(auth): provider list and OAuth start resolve usability stric
 
 **Pre-flight (orkestra-frontend-admin skill — every file below was opened with Read while writing this plan; re-open them before editing):**
 - Production precedent: `src/components/authentication/SocialAuthCallback.tsx`, `LoginMfaVerify.tsx`, `SocialLoginForm.tsx` (Spinner / Alert states), `EmailPasswordForm.tsx` (MFA navigate shape), `Login.tsx` (`AuthCardLayout` + `Card` shell), `LoginMfaVerify.test.tsx` (router-state test pattern)
-- Reference read: `src/reference/components/ui/Alerts.tsx`, `src/reference/components/ui/Spinners.tsx`
-- Primitives: React Bootstrap `Alert`, `Spinner`, `Button`, `Card`, `Form`; `layouts/AuthCardLayout`; `react-i18next` `t()`; RTK Query `authApi.endpoints.getSession.initiate`; `utils/returnTo` `sanitizeReturnTo` / `DEFAULT_POST_LOGIN`
+- Reference read: `src/reference/components/ui/Alerts.tsx`, `src/reference/components/ui/Spinners.tsx`, `src/reference/components/forms/FormValidation.tsx`, `src/reference/components/forms/FormLayout.tsx`; production `react-hook-form` + `yup` precedent: `src/pages/admin/modules/useModuleConfigForm.ts` (`yupResolver` wiring)
+- Primitives: React Bootstrap `Alert`, `Spinner`, `Button` (`orkestra-primary` / `orkestra-default` variants), `Card`, `Form` + `Form.Control.Feedback`; `react-hook-form` `useForm` + `@hookform/resolvers/yup`; `layouts/AuthCardLayout`; `react-i18next` `t()`; RTK Query `authApi.endpoints.getSession.initiate`; `utils/returnTo` `sanitizeReturnTo` / `DEFAULT_POST_LOGIN`
 
 **Files:**
-- Modify: `frontend-admin/src/utils/socialAuthUtils.ts` (`OAUTH_RETURN_TO_KEY` + `initiateSocialLogin` lines 21-72)
+- Modify: `frontend-admin/src/utils/socialAuthUtils.ts` (rewrite: keep `SocialProvider`, `initiateSocialLogin`, `logoutSocial`, `clearSessionStorage`; add the return-target helpers; delete `handleSocialCallback`, `getStoredTokens`, `isAuthenticated`, `SocialOAuthCallbackResponse` and every `oauth_state` / `oauth_provider` write)
 - Create: `frontend-admin/src/utils/socialAuthUtils.test.ts`
 - Create: `frontend-admin/src/utils/oauthCallbackParams.ts`, `frontend-admin/src/utils/oauthCallbackParams.test.ts`
 - Create: `frontend-admin/src/components/authentication/MfaVerifyPanel.tsx`
@@ -4672,7 +4840,7 @@ git commit -m "feat(auth): provider list and OAuth start resolve usability stric
 
 **Interfaces:**
 - Consumes: backend contract from Task 5 (`?success=true&provider=`, `?success=false&error=`, `#requiresMfa=true&mfaToken=&webauthnAvailable=`), `authApi.endpoints.getSession` (`SessionResponse | null`; `authApi` is the named export at `authApi.ts:212`), `setUserFromApiResponse` / `setAccessToken` (`store/slices/authSlice`), `useLoginVerifyMfaMutation` etc. (`store/api/mfaApi`).
-- Produces: `stashOAuthReturnTo(target, now?)`, `takeOAuthReturnTo(now?)`, `OAUTH_RETURN_TO_TTL_MS`; `OAUTH_PROVIDERS`, `OAuthProviderName`, `parseOAuthCallback(search, hash): OAuthCallbackOutcome`, `OAUTH_CALLBACK_ERROR_KEYS`; `<MfaVerifyPanel challengeId email? webauthnAvailable returnTo />`.
+- Produces: `stashOAuthReturnTo(target, now?)`, `takeOAuthReturnTo(now?)`, `OAUTH_RETURN_TO_TTL_MS`; `OAUTH_PROVIDERS`, `OAuthProviderName`, `parseOAuthCallback(search, hash): OAuthCallbackOutcome`, `OAUTH_CALLBACK_ERROR_KEYS`; `<MfaVerifyPanel challengeId email? webauthnAvailable returnTo />` (react-hook-form + yup). `utils/auth.ts` keeps its own, unrelated `isAuthenticated`.
 
 - [ ] **Step 1: Write the failing unit tests for the two pure modules**
 
@@ -4696,6 +4864,25 @@ describe('parseOAuthCallback (closed contract)', () => {
     expect(parseOAuthCallback('?success=true&provider=facebook', '')).toEqual(GENERIC);
     expect(parseOAuthCallback('?success=true&provider=Google', '')).toEqual(GENERIC);
     expect(parseOAuthCallback('?success=true&provider=google&error=oauth_access_denied', '')).toEqual(GENERIC);
+  });
+
+  it('refuses extra, duplicated or stray keys on either side (exact key sets)', () => {
+    // extra query key
+    expect(parseOAuthCallback('?success=true&provider=google&foo=x', '')).toEqual(GENERIC);
+    // duplicated key, even with a consistent second value
+    expect(parseOAuthCallback('?success=true&success=false&provider=google', '')).toEqual(GENERIC);
+    expect(parseOAuthCallback('?success=true&success=true&provider=google', '')).toEqual(GENERIC);
+    expect(parseOAuthCallback('?success=true&provider=google&provider=google', '')).toEqual(GENERIC);
+    // a failure may not carry a provider
+    expect(parseOAuthCallback('?success=false&error=oauth_access_denied&provider=google', '')).toEqual(GENERIC);
+    // a query outcome may not carry any fragment, however harmless
+    expect(parseOAuthCallback('?success=true&provider=google', '#foo=x')).toEqual(GENERIC);
+    expect(parseOAuthCallback('?success=false&error=oauth_access_denied', '#x')).toEqual(GENERIC);
+    // an MFA fragment may not carry extra keys — not even a stray access_token
+    expect(parseOAuthCallback('', '#requiresMfa=true&mfaToken=ch-1&webauthnAvailable=false&access_token=x')).toEqual(GENERIC);
+    expect(parseOAuthCallback('', '#requiresMfa=true&mfaToken=ch-1&mfaToken=ch-2&webauthnAvailable=false')).toEqual(GENERIC);
+    // an MFA fragment may not carry any query, however harmless
+    expect(parseOAuthCallback('?foo=x', '#requiresMfa=true&mfaToken=ch-1&webauthnAvailable=false')).toEqual(GENERIC);
   });
 
   it('reads the MFA continuation from the fragment only, with every field explicit', () => {
@@ -4814,11 +5001,12 @@ Create `frontend-admin/src/utils/oauthCallbackParams.ts`:
 
 ```ts
 // The SPA side of the CLOSED OAuth callback contract
-// (backend: handlers/oauth_callback_redirect.go). Everything the backend may
-// put in the URL is enumerated here; anything else — an unknown provider, a
-// half-formed MFA fragment, an MFA fragment next to a query outcome, a
-// success next to an error — is the generic failure. Raw URL text is never
-// surfaced: only the mapped i18n key is.
+// (backend: handlers/oauth_callback_redirect.go). Each of the three shapes
+// is matched on its EXACT key set and cardinality; anything else — an
+// unknown provider, a half-formed MFA fragment, an extra or duplicated key,
+// a fragment next to a query outcome, a query next to an MFA fragment — is
+// the generic failure. Raw URL text is never surfaced: only the mapped i18n
+// key is.
 
 export const OAUTH_PROVIDERS = ['google', 'apple', 'github', 'discord'] as const;
 export type OAuthProviderName = (typeof OAUTH_PROVIDERS)[number];
@@ -4850,22 +5038,36 @@ const errorKeyFor = (code: string): OAuthCallbackErrorKey =>
     ? OAUTH_CALLBACK_ERROR_KEYS[code as keyof typeof OAUTH_CALLBACK_ERROR_KEYS]
     : 'loginFailed';
 
+/**
+ * exactKeys: `params` holds exactly the given keys, each exactly once.
+ * This — not "the expected keys are present" — is what makes the contract
+ * closed: an extra, duplicated or missing key on either side is a payload
+ * the backend never produces.
+ */
+const exactKeys = (params: URLSearchParams, keys: readonly string[]): boolean => {
+  const present = Array.from(new Set(params.keys()));
+  if (present.length !== keys.length) return false;
+  return keys.every(k => params.getAll(k).length === 1);
+};
+
+const SUCCESS_KEYS = ['success', 'provider'] as const;
+const FAILURE_KEYS = ['success', 'error'] as const;
 const MFA_KEYS = ['requiresMfa', 'mfaToken', 'webauthnAvailable'] as const;
-const OUTCOME_KEYS = ['success', 'error', 'provider'] as const;
 
 /**
- * Parse the callback URL parts. The MFA continuation is honoured ONLY from
- * the fragment and only when complete; a success only from the query and
- * only with an allowlisted provider; a failure only with `success=false`.
+ * Parse the callback URL parts against the three closed shapes:
+ *   success:  query = exactly {success=true, provider∈allowlist}, fragment empty
+ *   failure:  query = exactly {success=false, error},              fragment empty
+ *   MFA:      fragment = exactly {requiresMfa=true, mfaToken≠"", webauthnAvailable∈true|false}, query empty
+ * Anything else is the generic failure.
  */
 export const parseOAuthCallback = (search: string, hash: string): OAuthCallbackOutcome => {
   const query = new URLSearchParams(search);
   const frag = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
-  const hasMfa = MFA_KEYS.some(k => frag.has(k));
-  const hasOutcome = OUTCOME_KEYS.some(k => query.has(k));
+  const queryEmpty = Array.from(query.keys()).length === 0;
+  const fragEmpty = Array.from(frag.keys()).length === 0;
 
-  if (hasMfa) {
-    if (hasOutcome) return GENERIC; // ambiguous: the backend never sends both
+  if (queryEmpty && exactKeys(frag, MFA_KEYS)) {
     const token = frag.get('mfaToken');
     const webauthn = frag.get('webauthnAvailable');
     if (frag.get('requiresMfa') !== 'true' || !token || (webauthn !== 'true' && webauthn !== 'false')) {
@@ -4874,15 +5076,16 @@ export const parseOAuthCallback = (search: string, hash: string): OAuthCallbackO
     return { kind: 'mfa', challengeId: token, webauthnAvailable: webauthn === 'true' };
   }
 
-  const success = query.get('success');
-  if (success === 'true') {
+  if (fragEmpty && exactKeys(query, SUCCESS_KEYS) && query.get('success') === 'true') {
     const provider = query.get('provider');
-    if (query.has('error') || !isProvider(provider)) return GENERIC;
+    if (!isProvider(provider)) return GENERIC;
     return { kind: 'success', provider };
   }
-  if (success === 'false') {
+
+  if (fragEmpty && exactKeys(query, FAILURE_KEYS) && query.get('success') === 'false') {
     return { kind: 'error', errorKey: errorKeyFor(query.get('error') ?? '') };
   }
+
   return GENERIC;
 };
 ```
@@ -4935,20 +5138,27 @@ export const takeOAuthReturnTo = (now: number = Date.now()): string | null => {
 };
 ```
 
-and in `initiateSocialLogin` replace the `if (returnTo) { sessionStorage.setItem(OAUTH_RETURN_TO_KEY, returnTo); } else { … removeItem … }` block (lines 64-69) with `stashOAuthReturnTo(returnTo);`.
+and rewrite the rest of the file so only the new contract's material survives:
+
+- `initiateSocialLogin`: delete `sessionStorage.setItem('oauth_state', data.state);` and `sessionStorage.setItem('oauth_provider', provider);` (lines 62-63) — the signed state is bound to the browser by the backend's HttpOnly `orkestra_oauth_state` cookie, and the SPA never validates it itself; replace the `if (returnTo) { … } else { … }` block (64-69) with `stashOAuthReturnTo(returnTo);`.
+- Delete `SocialOAuthCallbackResponse` (lines 10-20), `handleSocialCallback` (79-131), `getStoredTokens` (155-172) and `isAuthenticated` (174-181): no consumer remains (`grep -rn "handleSocialCallback\|getStoredTokens\|socialAuthUtils'.*isAuthenticated" src` prints nothing; `utils/auth.ts:102` calls its own `isAuthenticated`), and a second, incompatible client-side implementation of the callback must not survive next to the backend contract.
+- `clearSessionStorage` (149-154): keep it, and keep the two `removeItem('oauth_state'|'oauth_provider')` calls with the comment `// Legacy keys older builds wrote; swept so no transient OAuth material lingers.` — they are the only remaining mention of those keys. Verify: `grep -n "oauth_state\|oauth_provider" src/utils/socialAuthUtils.ts` prints only those two sweep lines.
 
 Run: `npx vitest run src/utils/oauthCallbackParams.test.ts src/utils/socialAuthUtils.test.ts`
 Expected: PASS.
 
 - [ ] **Step 3: Extract `MfaVerifyPanel`**
 
-Create `frontend-admin/src/components/authentication/MfaVerifyPanel.tsx` — today's `LoginMfaVerify` body (lines 45-236) turned into a prop-driven component. Only the props, the removed `location.state` reads and the removed "bounce back" effect differ from the current file; the form, the TOTP/backup toggle and the passkey ceremony are verbatim:
+Create `frontend-admin/src/components/authentication/MfaVerifyPanel.tsx` — today's `LoginMfaVerify` body (lines 45-236) as a prop-driven component, with the inherited manual form moved onto `react-hook-form` + `yup` and the button variants onto `orkestra-*` (stack mandate; behaviour and copy unchanged). The passkey ceremony is verbatim:
 
 ```tsx
-import { useState, FormEvent } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, Button, Card, Form } from 'react-bootstrap';
 import { Link, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
+import { useForm } from 'react-hook-form';
+import { yupResolver } from '@hookform/resolvers/yup';
+import * as yup from 'yup';
 import AuthCardLayout from 'layouts/AuthCardLayout';
 import { useAppDispatch } from 'store/hooks';
 import {
@@ -4975,6 +5185,10 @@ export interface MfaVerifyPanelProps {
   returnTo: string;
 }
 
+interface MfaCodeForm {
+  code: string;
+}
+
 /**
  * Completes a login that paused on the MFA challenge. Shared by the
  * password path (LoginMfaVerify page) and the OAuth callback
@@ -4997,23 +5211,33 @@ const MfaVerifyPanel = ({
   const dispatch = useAppDispatch();
   const passkeyOffered = webauthnAvailable && browserSupportsWebAuthn();
 
-  const [code, setCode] = useState('');
   const [useBackup, setUseBackup] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
+
+  const schema = useMemo(
+    () =>
+      yup.object({
+        code: yup.string().trim().required(t('auth.mfa.errors.missingCode'))
+      }),
+    [t]
+  );
+  const {
+    register,
+    handleSubmit,
+    resetField,
+    formState: { errors }
+  } = useForm<MfaCodeForm>({
+    resolver: yupResolver(schema),
+    defaultValues: { code: '' }
+  });
 
   const [verify, { isLoading }] = useLoginVerifyMfaMutation();
   const [waBegin] = useWebAuthnLoginBeginMutation();
   const [waFinish] = useWebAuthnLoginFinishMutation();
 
-  const handleSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    setLocalError(null);
-    if (!code.trim()) {
-      setLocalError(t('auth.mfa.errors.missingCode'));
-      return;
-    }
-
+  const onSubmit = async ({ code }: MfaCodeForm) => {
+    setServerError(null);
     try {
       const res = await verify({
         challengeId,
@@ -5025,17 +5249,17 @@ const MfaVerifyPanel = ({
     } catch (err: unknown) {
       const anyErr = err as { status?: number; data?: { detail?: string } };
       if (anyErr?.status === 401) {
-        setLocalError(t('auth.mfa.errors.incorrectCode'));
+        setServerError(t('auth.mfa.errors.incorrectCode'));
       } else if (anyErr?.status === 429) {
-        setLocalError(t('auth.mfa.errors.tooMany'));
+        setServerError(t('auth.mfa.errors.tooMany'));
       } else {
-        setLocalError(anyErr?.data?.detail ?? t('auth.mfa.errors.generic'));
+        setServerError(anyErr?.data?.detail ?? t('auth.mfa.errors.generic'));
       }
     }
   };
 
   const handlePasskey = async () => {
-    setLocalError(null);
+    setServerError(null);
     setPasskeyBusy(true);
     try {
       const beginRes = await waBegin({
@@ -5063,11 +5287,11 @@ const MfaVerifyPanel = ({
         data?: { detail?: string };
       };
       if (anyErr?.name === 'NotAllowedError') {
-        setLocalError(t('auth.mfa.errors.passkeyCancelled'));
+        setServerError(t('auth.mfa.errors.passkeyCancelled'));
       } else if (anyErr?.status === 401) {
-        setLocalError(t('auth.mfa.errors.passkeyFailed'));
+        setServerError(t('auth.mfa.errors.passkeyFailed'));
       } else {
-        setLocalError(
+        setServerError(
           anyErr?.data?.detail ?? t('auth.mfa.errors.passkeyGeneric')
         );
       }
@@ -5088,21 +5312,21 @@ const MfaVerifyPanel = ({
             </p>
           </div>
 
-          {localError && (
+          {serverError && (
             <Alert
               variant="danger"
               className="mb-3"
-              onClose={() => setLocalError(null)}
+              onClose={() => setServerError(null)}
               dismissible
             >
-              {localError}
+              {serverError}
             </Alert>
           )}
 
           {passkeyOffered && (
             <div className="d-grid mb-3">
               <Button
-                variant="outline-primary"
+                variant="orkestra-default"
                 size="lg"
                 disabled={passkeyBusy}
                 onClick={handlePasskey}
@@ -5117,7 +5341,7 @@ const MfaVerifyPanel = ({
             </div>
           )}
 
-          <Form onSubmit={handleSubmit} noValidate>
+          <Form onSubmit={handleSubmit(onSubmit)} noValidate>
             <Form.Group className="mb-3">
               <Form.Label>
                 {useBackup
@@ -5129,21 +5353,23 @@ const MfaVerifyPanel = ({
                 inputMode={useBackup ? 'text' : 'numeric'}
                 autoComplete="one-time-code"
                 autoFocus
-                value={code}
-                onChange={e => setCode(e.target.value)}
+                isInvalid={!!errors.code}
                 placeholder={
                   useBackup
                     ? t('auth.mfa.backupPlaceholder')
                     : t('auth.mfa.authenticatorPlaceholder')
                 }
-                required
+                {...register('code')}
               />
+              <Form.Control.Feedback type="invalid">
+                {errors.code?.message}
+              </Form.Control.Feedback>
             </Form.Group>
 
             <div className="d-grid mb-3">
               <Button
                 type="submit"
-                variant="primary"
+                variant="orkestra-primary"
                 size="lg"
                 disabled={isLoading}
               >
@@ -5157,7 +5383,7 @@ const MfaVerifyPanel = ({
                 className="btn btn-link p-0"
                 onClick={() => {
                   setUseBackup(v => !v);
-                  setCode('');
+                  resetField('code');
                 }}
               >
                 {useBackup
@@ -5174,6 +5400,24 @@ const MfaVerifyPanel = ({
 };
 
 export default MfaVerifyPanel;
+```
+
+Add to `LoginMfaVerify.test.tsx` one case for the client-side validation the resolver now owns:
+
+```tsx
+  it('refuses an empty code client-side without calling the backend', async () => {
+    let calls = 0;
+    server.use(
+      http.post('*/v1/auth/operator/mfa/login/verify', () => {
+        calls++;
+        return HttpResponse.json({ success: true, user: { id: 'u-1', email: 'op@example.com', fullName: 'Op', isActive: true, roles: ['operator'], createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' } });
+      })
+    );
+    renderMfa({ challengeId: 'challenge-abc' });
+    await userEvent.setup().click(screen.getByRole('button', { name: /verify and sign in/i }));
+    expect(await screen.findByText(/enter the code shown in your authenticator app/i)).toBeInTheDocument();
+    expect(calls).toBe(0);
+  });
 ```
 
 Replace `frontend-admin/src/components/authentication/LoginMfaVerify.tsx` with the wrapper (password path, unchanged behaviour):
@@ -5659,15 +5903,15 @@ and in `it.json`:
 
 - [ ] **Step 7: Run the frontend gates**
 
-Run: `cd /home/tore/orkestra/frontend-admin && npx vitest run src/components/authentication src/utils src/locales && npm run typecheck && npm run lint`
-Expected: all PASS (the `SocialLoginForm.test.tsx` mock of `initiateSocialLogin` still applies; `LoginMfaVerify.test.tsx` unchanged and green; `parity.test.ts` green). The pinned prettier may reformat untouched locale lines — accept the churn, never `--no-verify`.
+Run: `cd /home/tore/orkestra/frontend-admin && npx vitest run src/components/authentication src/utils src/locales && npm run typecheck && npm run lint && grep -rn "handleSocialCallback\|getStoredTokens\|sessionStorage.setItem('oauth_" src || echo "no legacy OAuth storage"`
+Expected: all PASS (the `SocialLoginForm.test.tsx` mock of `initiateSocialLogin` still applies; `LoginMfaVerify.test.tsx` green with its new case; `parity.test.ts` green); the grep prints only `no legacy OAuth storage`. The pinned prettier may reformat untouched locale lines — accept the churn, never `--no-verify`.
 
 - [ ] **Step 8: Document**
 
 In `frontend-admin/CLAUDE.md`, line 66, after "…never hardcode the post-login destination." append:
 
 ```markdown
-The OAuth landing is `SocialAuthCallback`, bound to the backend's CLOSED callback contract (`?success=true&provider=<google|apple|github|discord>`, `?success=false&error=<allowlisted>`, MFA continuation in the **fragment** `#requiresMfa=true&mfaToken=&webauthnAvailable=<true|false>`; parser in `utils/oauthCallbackParams.ts` — an unknown provider, a half-formed fragment, a fragment next to a query outcome or a success next to an error is the generic failure; error codes → `auth.social.callback.errors.*`, raw URL text is never rendered). It parses the URL once on first render, then in a layout effect takes-and-deletes the return target and scrubs the URL (`navigate(pathname, {replace:true})`) before its first await; it force-fetches `getSession` and navigates only after the refresh-cookie session is confirmed (signed-out → login error, 503 → retry), and renders the MFA challenge through `MfaVerifyPanel` from component memory — never `location.state` (the password path's `LoginMfaVerify` page still reads router state, which never travels in a URL). The OAuth return target is a `{target, createdAt}` record under `oauth_return_to`, written by `stashOAuthReturnTo` and taken by `takeOAuthReturnTo` — a destructive read that must run in an effect, never during render — honoured only within 10 minutes and after `sanitizeReturnTo`.
+The OAuth landing is `SocialAuthCallback`, bound to the backend's CLOSED callback contract (`?success=true&provider=<google|apple|github|discord>`, `?success=false&error=<allowlisted>`, MFA continuation in the **fragment** `#requiresMfa=true&mfaToken=&webauthnAvailable=<true|false>`; parser in `utils/oauthCallbackParams.ts` matches each shape on its EXACT key set and cardinality — an unknown provider, a half-formed fragment, an extra or duplicated key, a fragment next to a query outcome or a query next to a fragment is the generic failure; error codes → `auth.social.callback.errors.*`, raw URL text is never rendered). It parses the URL once on first render, then in a layout effect takes-and-deletes the return target and scrubs the URL (`navigate(pathname, {replace:true})`) before its first await; it force-fetches `getSession` and navigates only after the refresh-cookie session is confirmed (signed-out → login error, 503 → retry), and renders the MFA challenge through `MfaVerifyPanel` from component memory — never `location.state` (the password path's `LoginMfaVerify` page still reads router state, which never travels in a URL). The OAuth return target is a `{target, createdAt}` record under `oauth_return_to`, written by `stashOAuthReturnTo` and taken by `takeOAuthReturnTo` — a destructive read that must run in an effect, never during render — honoured only within 10 minutes and after `sanitizeReturnTo`. `socialAuthUtils` persists nothing else: the signed state is bound to the browser by the backend's HttpOnly `orkestra_oauth_state` cookie, so `oauth_state` / `oauth_provider` are no longer written and the client-side callback helper is gone. `MfaVerifyPanel` is a `react-hook-form` + `yup` form with `orkestra-*` buttons — the shape every new auth form follows.
 ```
 
 - [ ] **Step 9: Commit**
@@ -5696,7 +5940,7 @@ Replace §5 "Web flow" steps 1–5 (lines 188-192) with:
 1. Frontend calls `POST /v1/auth/{tier}/oauth/login` with `{provider}`. The backend resolves the provider **strictly from one config read** (toggle on for this surface, client ID + redirect URL + secret present — 403 `auth.oauth_provider_disabled` otherwise, 503 `auth.policy_unavailable` when the auth document cannot be read), constructs a signed HS256 state JWT `{tier, csrf, shost, exp}` (HMAC secret deterministically derived from the JWT private key — every replica agrees without an env var, rotates implicitly when JWT keys rotate), drops the CSRF nonce in an HttpOnly cookie **on the host that served this call**, and stores per-flow side data (`provider`, `tier`, `deviceInfo`, `securityContext`, and a `redirectUri` that is always the configured tier SPA — never the `Origin` header) in Redis keyed by the nonce, with a 10-minute TTL. Returns `{authUrl, state}`.
 2. Frontend redirects the user to the provider.
 3. Provider redirects back to **the single shared callback URL** registered with each provider (`/v1/auth/oauth/{provider}/callback`, mounted on the operator mux only — one redirect URI per provider in IdP config; all four are raw handlers). The callback establishes **trust before destination**: signature/expiry, the browser binding, the **one-shot** Redis row (consumed atomically — a replay or a concurrent second presentation is refused), `state.tier == redis.tier`, `redis.provider == this endpoint's provider`, and the link-mode pair; any failure is a terminal generic 400 with no redirect. Only then does it dispatch to the matching tier's `AuthHandler` (empty / unknown tier falls through to the legacy operator handler) and interpret the IdP's `error`.
-4. The dispatched-to handler re-resolves the provider from the same strict read, exchanges the code and fetches user info. **Where the flow completes depends on who owns the cookie.** An operator/legacy flow completes here: `HandleOAuthCallbackWithLinking` (find by `(provider, providerId)`; for an unlinked identity it first requires a provider-**verified** email and an establishable auto-link policy — before any local email lookup — then links an existing email account or signs up), active-user check, a token pair stamped with the audience's `aud`, the refresh cookie on the operator cookie domain, and a redirect to the operator SPA. A **client-tier flow cannot** get its cookie from the operator host (a response from `console.*` cannot set a cookie for `api.*`), so the callback stores a 60-second single-use encrypted relay record and redirects the browser to `CLIENT_API_URL/v1/auth/client/oauth/complete?relay=<id>`; that endpoint, on the client API host, takes the record once, **requires** the state cookie the same host set in step 1 (a login-CSRF attempt that finished someone else's flow is refused before any token exists), runs the same application half on the client authService, sets the client refresh cookie on its own host and redirects to the client SPA. Both destinations use one closed contract: `?success=true&provider=<p>` on success, `?success=false&error=<oauth_access_denied|oauth_signup_disabled|oauth_link_disabled|auth.oauth_email_unverified|oauth_provider_unavailable|oauth_login_failed>` on any valid-state failure, and `#requiresMfa=true&mfaToken=<one-shot id>&webauthnAvailable=<bool>` in the **fragment** for an MFA continuation (no cookie is written then). Every redirect carries `Referrer-Policy: no-referrer`; **no callback URL ever contains an access token, refresh token, email or user id.**
+4. The dispatched-to handler re-resolves the provider from the same strict read, exchanges the code and fetches user info. **Where the flow completes depends on who owns the cookie.** An operator/legacy flow completes here: `HandleOAuthCallbackWithLinking` (find by `(provider, providerId)`; for an unlinked identity it first requires a provider-**verified** email and an establishable auto-link policy — before any local email lookup — then links an existing email account or signs up), active-user check, a token pair stamped with the audience's `aud`, the refresh cookie on the operator cookie domain, and a redirect to the operator SPA. A **client-tier flow cannot** get its cookie from the operator host (a response from `console.*` cannot set a cookie for `api.*`), so the callback stores a 60-second single-use encrypted relay record and redirects the browser to `CLIENT_API_URL/v1/auth/client/oauth/complete?relay=<id>`; that endpoint, on the client API host, takes the record once, **requires** the state cookie the same host set in step 1 (a login-CSRF attempt that finished someone else's flow is refused before any token exists), runs the same application half on the client authService, sets the client refresh cookie on its own host and redirects to the client SPA. Both destinations use one closed contract: `?success=true&provider=<p>` on success, `?success=false&error=<oauth_access_denied|oauth_signup_disabled|oauth_link_disabled|auth.oauth_email_unverified|oauth_provider_unavailable|oauth_login_failed>` on any valid-state failure, and `#requiresMfa=true&mfaToken=<one-shot id>&webauthnAvailable=<bool>` in the **fragment** for an MFA continuation (no cookie is written then). Every callback and relay response — redirects and terminal 400s alike — carries `Referrer-Policy: no-referrer` and `Cache-Control: no-store`; **no callback URL ever contains an access token, refresh token, email or user id.** A client-tier flow that fails before completion is relayed too, so the client host verifies the binding and clears its state cookie before the browser sees the failure.
 5. Frontend scrubs the URL, then calls `GET /v1/auth/session` (operator-only mount, post-OAuth cookie-based bootstrap) to exchange the refresh cookie for a fresh access token + user payload, and navigates only after that answer.
 ```
 
