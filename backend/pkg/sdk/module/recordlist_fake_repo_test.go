@@ -28,9 +28,18 @@ func TestServiceAcceptsAFakeRepository(t *testing.T) {
 // guarantee asserted only there is not covered at all.
 type fakeConfigRepo struct {
 	docs        map[string]*ModuleConfig
-	casFailures int // fail this many CAS attempts before allowing one through
+	casFailures int // fail this many environment-CAS attempts before allowing one through
 	casCalls    int
-	// duringActivate runs inside ActivateEnvironment, modelling a concurrent
+	// docCasFailures / docCasCalls are the document-level twins for
+	// CompareAndSwapConfig, kept separate so a record-list test's counters
+	// are never disturbed by a config-write test and vice versa.
+	docCasFailures int
+	docCasCalls    int
+	// beforeDocCAS runs inside CompareAndSwapConfig before the revision is
+	// compared — the window in which a concurrent writer lands. It is how a
+	// two-writer race is modelled without a second goroutine.
+	beforeDocCAS func()
+	// duringActivate runs inside an activation, modelling a concurrent
 	// write landing in the window a two-step activation leaves open.
 	duringActivate func()
 }
@@ -123,10 +132,10 @@ func (f *fakeConfigRepo) ClearNeedsRestart(context.Context, string) error { retu
 func (f *fakeConfigRepo) RefreshMetadata(context.Context, Module) error { return nil }
 
 // CompareAndSwapEnvironment mirrors the Mongo implementation's contract: a
-// mismatched revision is a lost race (false, nil), not an error. casFailures
-// forces the first N attempts to lose, which is how a concurrent writer is
-// modelled without a second goroutine.
-func (f *fakeConfigRepo) CompareAndSwapEnvironment(_ context.Context, name, env string, expected int64, next EnvironmentConfig) (bool, error) {
+// mismatched revision is a lost race (false, nil), not an error; the
+// document-level configRevision advances in the same write. casFailures
+// forces the first N attempts to lose.
+func (f *fakeConfigRepo) CompareAndSwapEnvironment(_ context.Context, name, env string, expected int64, next EnvironmentConfig, needsRestart bool) (bool, error) {
 	f.casCalls++
 	if f.casFailures > 0 {
 		f.casFailures--
@@ -145,6 +154,60 @@ func (f *fakeConfigRepo) CompareAndSwapEnvironment(_ context.Context, name, env 
 	if doc.ActiveEnv() == env {
 		doc.ConfigValues, doc.EncryptedValues = next.ConfigValues, next.EncryptedValues
 	}
+	doc.NeedsRestart = needsRestart
+	doc.ConfigRevision++
+	return true, nil
+}
+
+// CompareAndSwapConfig mirrors the Mongo single-update contract: the whole
+// mutation lands or nothing does, the revision is compared at execution time
+// (after beforeDocCAS, so a modelled concurrent write is visible), and an
+// activation copies the STORED profile maps rather than a caller snapshot.
+func (f *fakeConfigRepo) CompareAndSwapConfig(_ context.Context, name string, m ConfigMutation) (bool, error) {
+	if err := m.validate(); err != nil {
+		return false, err
+	}
+	f.docCasCalls++
+	if f.beforeDocCAS != nil {
+		f.beforeDocCAS()
+	}
+	if f.docCasFailures > 0 {
+		f.docCasFailures--
+		return false, nil
+	}
+	doc, ok := f.docs[name]
+	if !ok || doc.ConfigRevision != m.ExpectedRevision {
+		return false, nil
+	}
+	if m.Activate != "" {
+		if _, ok := doc.Environments[m.Activate]; !ok {
+			return false, nil
+		}
+		if f.duringActivate != nil {
+			f.duringActivate()
+		}
+		cfg := doc.Environments[m.Activate]
+		doc.ActiveEnvironment = m.Activate
+		doc.ConfigValues = copyStrings(cfg.ConfigValues)
+		doc.EncryptedValues = copyStrings(cfg.EncryptedValues)
+	} else {
+		if m.Env != "" {
+			cur, ok := doc.Environments[m.Env]
+			if !ok {
+				return false, nil
+			}
+			cur.ConfigValues = copyStrings(m.EnvValues)
+			cur.EncryptedValues = copyStrings(m.EnvSecrets)
+			cur.Revision = m.EnvRevision + 1
+			doc.Environments[m.Env] = cur
+		}
+		if m.WriteLegacy {
+			doc.ConfigValues = copyStrings(m.LegacyValues)
+			doc.EncryptedValues = copyStrings(m.LegacySecrets)
+		}
+	}
+	doc.NeedsRestart = m.NeedsRestart
+	doc.ConfigRevision = m.ExpectedRevision + 1
 	return true, nil
 }
 

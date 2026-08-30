@@ -208,54 +208,189 @@ func (r *ModuleConfigRepository) UpdateEnvironmentConfig(ctx context.Context, na
 //
 // Scoping the swap to the sub-document matters: Environments is a nested map,
 // so guarding a whole-document replace with one environment's revision would
-// silently discard concurrent edits to a sibling environment. When env is the
-// active one, the legacy top-level maps are synced in the SAME update, so the
-// two can never diverge.
+// silently discard concurrent edits to a sibling environment.
+//
+// It is a PIPELINE update: the "is this the active profile?" decision is
+// taken by the server against the document's CURRENT activeEnvironment, in
+// the same operation that writes the profile. The previous read-then-update
+// let a concurrent activation land between the two and left the legacy
+// mirror carrying the wrong profile. $literal stops the aggregation engine
+// from interpreting stored maps (dotted keys, "$"-prefixed values) as
+// expressions. configRevision advances in the same update, so an ordinary
+// config write that read the document before this roster change loses its
+// own compare-and-swap instead of passing it unseen; needsRestart is
+// persisted as given — the inverse of the module's hot-reload capability.
 //
 // A document written before record lists existed carries no revision field at
 // all. Absent and 0 are the same value, so an expectation of 0 also matches a
 // missing field — otherwise the first mutation on every pre-existing module
 // would fail against nothing.
 func (r *ModuleConfigRepository) CompareAndSwapEnvironment(
-	ctx context.Context, name, envName string, expectedRevision int64, next EnvironmentConfig,
+	ctx context.Context, name, envName string, expectedRevision int64, next EnvironmentConfig, needsRestart bool,
 ) (bool, error) {
 	envPath := "environments." + envName
 	next.Revision = expectedRevision + 1
 	next.UpdatedAt = time.Now().UTC()
+	if next.ConfigValues == nil {
+		next.ConfigValues = map[string]string{}
+	}
+	if next.EncryptedValues == nil {
+		next.EncryptedValues = map[string]string{}
+	}
 
-	revisionMatches := bson.M{envPath + ".revision": expectedRevision}
+	filter := bson.M{"moduleName": name}
 	if expectedRevision == 0 {
-		revisionMatches = bson.M{"$or": bson.A{
+		filter["$or"] = bson.A{
 			bson.M{envPath + ".revision": expectedRevision},
 			bson.M{envPath + ".revision": bson.M{"$exists": false}},
-		}}
-	}
-	filter := bson.M{"moduleName": name}
-	for k, v := range revisionMatches {
-		filter[k] = v
-	}
-
-	set := bson.M{
-		envPath:        next,
-		"needsRestart": true,
-		"updatedAt":    next.UpdatedAt,
-	}
-
-	var doc ModuleConfig
-	if err := r.collection.FindOne(ctx, bson.M{"moduleName": name}).Decode(&doc); err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return false, fmt.Errorf("module %q not found", name)
 		}
-		return false, fmt.Errorf("compare-and-swap environment %q/%q: %w", name, envName, err)
-	}
-	if doc.ActiveEnv() == envName {
-		set["configValues"] = next.ConfigValues
-		set["encryptedValues"] = next.EncryptedValues
+	} else {
+		filter[envPath+".revision"] = expectedRevision
 	}
 
-	res, err := r.collection.UpdateOne(ctx, filter, bson.M{"$set": set})
+	isActive := bson.M{"$eq": bson.A{
+		bson.M{"$ifNull": bson.A{"$activeEnvironment", "production"}},
+		envName,
+	}}
+	update := mongo.Pipeline{{{Key: "$set", Value: bson.M{
+		envPath:           bson.M{"$literal": next},
+		"configValues":    bson.M{"$cond": bson.A{isActive, bson.M{"$literal": next.ConfigValues}, "$configValues"}},
+		"encryptedValues": bson.M{"$cond": bson.A{isActive, bson.M{"$literal": next.EncryptedValues}, "$encryptedValues"}},
+		"needsRestart":    needsRestart,
+		"configRevision":  bson.M{"$add": bson.A{bson.M{"$ifNull": bson.A{"$configRevision", 0}}, 1}},
+		"updatedAt":       next.UpdatedAt,
+	}}}}
+
+	res, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return false, fmt.Errorf("compare-and-swap environment %q/%q: %w", name, envName, err)
+	}
+	return res.MatchedCount == 1, nil
+}
+
+// ConfigMutation is the explicit shape of ONE atomic module_configs write.
+// Exactly one of two forms is used:
+//
+//   - a values write: Env names the profile whose maps are REPLACED by
+//     EnvValues/EnvSecrets (callers merge first) and whose revision becomes
+//     EnvRevision+1; WriteLegacy additionally replaces the top-level legacy
+//     maps with LegacyValues/LegacySecrets — the active-profile write and
+//     the boot backfill both use this, the inactive-profile write does not;
+//   - an activation: Activate names the profile to make active, and its
+//     STORED maps are copied server-side into the legacy fields.
+//
+// Every form filters on ExpectedRevision, writes ExpectedRevision+1 back,
+// and persists NeedsRestart as given. Secrets are ciphertext by the time
+// they reach here.
+type ConfigMutation struct {
+	ExpectedRevision int64
+
+	Env         string
+	EnvValues   map[string]string
+	EnvSecrets  map[string]string
+	EnvRevision int64
+
+	WriteLegacy   bool
+	LegacyValues  map[string]string
+	LegacySecrets map[string]string
+
+	Activate string
+
+	NeedsRestart bool
+}
+
+// validate rejects a shape the repository cannot express in one update.
+// These are programming errors, not runtime conditions.
+func (m *ConfigMutation) validate() error {
+	switch {
+	case m.Activate != "" && (m.Env != "" || m.WriteLegacy):
+		return errors.New("config mutation: activation cannot be combined with a values write")
+	case m.Activate == "" && m.Env == "" && !m.WriteLegacy:
+		return errors.New("config mutation: nothing to write")
+	}
+	if m.Env != "" {
+		if m.EnvValues == nil {
+			m.EnvValues = map[string]string{}
+		}
+		if m.EnvSecrets == nil {
+			m.EnvSecrets = map[string]string{}
+		}
+	}
+	if m.WriteLegacy {
+		if m.LegacyValues == nil {
+			m.LegacyValues = map[string]string{}
+		}
+		if m.LegacySecrets == nil {
+			m.LegacySecrets = map[string]string{}
+		}
+	}
+	return nil
+}
+
+// CompareAndSwapConfig applies one ConfigMutation to a module document in a
+// SINGLE UpdateOne, and only while the document's configRevision still equals
+// m.ExpectedRevision (an absent field matches 0). Returns (false, nil) when
+// nothing matched — a lost race, or a profile that no longer exists — which
+// the service reports as ErrRevisionStale.
+//
+// Because it is one update, either every target field lands or none does:
+// there is no legacy/environment partial state and no second write whose
+// failure could be logged and swallowed. An activation is a pipeline update
+// so the copied values are read server-side at execution time, never from a
+// snapshot the process took earlier.
+func (r *ModuleConfigRepository) CompareAndSwapConfig(ctx context.Context, name string, m ConfigMutation) (bool, error) {
+	if err := m.validate(); err != nil {
+		return false, err
+	}
+	now := time.Now().UTC()
+	next := m.ExpectedRevision + 1
+
+	filter := bson.M{"moduleName": name}
+	if m.ExpectedRevision == 0 {
+		filter["$or"] = bson.A{
+			bson.M{"configRevision": int64(0)},
+			bson.M{"configRevision": bson.M{"$exists": false}},
+		}
+	} else {
+		filter["configRevision"] = m.ExpectedRevision
+	}
+
+	var update any
+	if m.Activate != "" {
+		filter["environments."+m.Activate] = bson.M{"$exists": true}
+		envPath := "$environments." + m.Activate
+		update = mongo.Pipeline{{{Key: "$set", Value: bson.M{
+			"activeEnvironment": m.Activate,
+			"configValues":      bson.M{"$ifNull": bson.A{envPath + ".configValues", bson.M{}}},
+			"encryptedValues":   bson.M{"$ifNull": bson.A{envPath + ".encryptedValues", bson.M{}}},
+			"needsRestart":      m.NeedsRestart,
+			"configRevision":    next,
+			"updatedAt":         now,
+		}}}}
+	} else {
+		set := bson.M{
+			"needsRestart":   m.NeedsRestart,
+			"configRevision": next,
+			"updatedAt":      now,
+		}
+		if m.Env != "" {
+			p := "environments." + m.Env
+			filter[p] = bson.M{"$exists": true}
+			set[p+".configValues"] = m.EnvValues
+			set[p+".encryptedValues"] = m.EnvSecrets
+			set[p+".revision"] = m.EnvRevision + 1
+			set[p+".updatedAt"] = now
+		}
+		if m.WriteLegacy {
+			set["configValues"] = m.LegacyValues
+			set["encryptedValues"] = m.LegacySecrets
+		}
+		update = bson.M{"$set": set}
+	}
+
+	res, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return false, fmt.Errorf("compare-and-swap config %q: %w", name, err)
 	}
 	return res.MatchedCount == 1, nil
 }

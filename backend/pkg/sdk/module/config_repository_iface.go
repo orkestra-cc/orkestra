@@ -21,5 +21,13 @@ type ConfigRepository interface {
 	MigrateToEnvironments(ctx context.Context, name string, configValues, encryptedValues map[string]string) error
 	ClearNeedsRestart(ctx context.Context, name string) error
 	RefreshMetadata(ctx context.Context, m Module) error
-	CompareAndSwapEnvironment(ctx context.Context, name, envName string, expectedRevision int64, next EnvironmentConfig) (bool, error)
+	CompareAndSwapEnvironment(ctx context.Context, name, envName string, expectedRevision int64, next EnvironmentConfig, needsRestart bool) (bool, error)
+	CompareAndSwapConfig(ctx context.Context, name string, m ConfigMutation) (bool, error)
 }
+
+// ConfigRepository is provided TO ModuleConfigService by the host, never
+// implemented BY a module — so, like RedisClient, it is outside the SDK's
+// additive-only rule for consumer interfaces (see pkg/sdk/CLAUDE.md,
+// "Versioning policy"). A fork that substitutes its own repository (a test
+// double, typically) tracks it.
+var _ ConfigRepository = (*ModuleConfigRepository)(nil)

@@ -8,10 +8,22 @@ import (
 )
 
 var (
-	ErrRevisionRequired       = errors.New("recordlist: a revision is required to remove elements")
-	ErrRevisionStale          = errors.New("recordlist: the environment changed since it was read")
+	ErrRevisionRequired = errors.New("recordlist: a revision is required to remove elements")
+	// ErrRevisionStale is returned by every compare-and-swap that lost its
+	// race — an environment revision (record lists) or the document's
+	// configRevision (ordinary config writes and activation). The caller's
+	// view of the document no longer holds; it reloads and retries.
+	ErrRevisionStale          = errors.New("module: the configuration changed since it was read")
 	ErrDuplicateMutationField = errors.New("recordlist: the same field appears twice in one request")
 )
+
+// CodeConfigRevisionStale is the stable body code the admin API carries on
+// the 409 produced by ErrRevisionStale. It is SDK-owned: pkg/sdk cannot
+// import internal/shared/errcode, so the constant lives here and errcode's
+// golden test asserts that no internal code collides with the module.*
+// namespace. A client that sees it reloads the document and re-reviews its
+// diff — it must never auto-retry.
+const CodeConfigRevisionStale = "module.config_revision_stale"
 
 // recordListMaxAttempts bounds the retry loop. Only value writes retry, and
 // each attempt re-reads a document another writer just moved — five is far
@@ -138,7 +150,7 @@ func (s *ModuleConfigService) UpdateEnvironmentConfigWithRecordLists(
 			return err
 		}
 
-		won, err := s.repo.CompareAndSwapEnvironment(ctx, name, envName, cur.Revision, next)
+		won, err := s.repo.CompareAndSwapEnvironment(ctx, name, envName, cur.Revision, next, true)
 		if err != nil {
 			return err
 		}
