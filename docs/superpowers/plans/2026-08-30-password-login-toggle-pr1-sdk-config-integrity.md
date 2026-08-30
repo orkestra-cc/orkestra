@@ -5287,7 +5287,7 @@ Expected: the four new tests FAIL (conflict copy not found; no Reload button).
 `en.json` — in `adminModules.detail.configCard` add `"revisionConflict": "Another operator changed this module's configuration after you loaded it. Reload to review your edits against the latest values before saving."` and `"reloadFailed": "Reloading the latest configuration failed. Try again before saving."`; in `adminModules.detail.saveBar` add `"reloadReview": "Reload & review"`.
 `it.json` — `"revisionConflict": "Un altro operatore ha modificato la configurazione di questo modulo dopo il caricamento. Ricarica per rivedere le tue modifiche rispetto ai valori più recenti prima di salvare."`, `"reloadFailed": "Il ricaricamento della configurazione più recente non è riuscito. Riprova prima di salvare."`; `"reloadReview": "Ricarica e rivedi"`.
 
-`moduleApi.ts` — after the types: 
+`moduleApi.ts` — after the types:
 
 ```ts
 /**
