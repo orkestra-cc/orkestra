@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"testing"
 )
 
@@ -28,11 +29,47 @@ func TestServiceAcceptsAFakeRepository(t *testing.T) {
 // guarantee asserted only there is not covered at all.
 type fakeConfigRepo struct {
 	docs        map[string]*ModuleConfig
-	casFailures int // fail this many CAS attempts before allowing one through
+	casFailures int // fail this many environment-CAS attempts before allowing one through
 	casCalls    int
-	// duringActivate runs inside ActivateEnvironment, modelling a concurrent
-	// write landing in the window a two-step activation leaves open.
+	// docCasFailures / docCasCalls are the document-level twins for
+	// CompareAndSwapConfig, kept separate so a record-list test's counters
+	// are never disturbed by a config-write test and vice versa.
+	docCasFailures int
+	docCasCalls    int
+	// beforeDocCAS runs inside CompareAndSwapConfig before the revision is
+	// compared — the window in which a concurrent writer lands. It is how a
+	// two-writer race is modelled without a second goroutine.
+	beforeDocCAS func()
+	// duringActivate runs inside an activation, BEFORE the revision is
+	// compared — the window in which a concurrent writer lands between the
+	// service's read and the update it decided from that read.
 	duringActivate func()
+	// beforeMigrate runs inside MigrateToEnvironments before the no-profiles
+	// check — the window in which a concurrent writer migrates first.
+	beforeMigrate func()
+	// migrateErr, when set, makes MigrateToEnvironments fail with it.
+	migrateErr error
+	// refreshErr, when set, makes RefreshMetadata fail with it — the
+	// boot-seeding failure that leaves a document judged against a stale
+	// stored schema.
+	refreshErr error
+	// findErr, when set, makes FindByName fail with it — models a
+	// repository outage.
+	findErr error
+	// findCalls counts FindByName calls; beforeFind runs BEFORE the read, so
+	// a hook can land a concurrent write in the window between two reads.
+	// The hook is passed the call number and decides itself which one to act
+	// on — it is never detached.
+	findCalls  int
+	beforeFind func(call int)
+	// clearRestartCalls counts ClearNeedsRestart / ClearNeedsRestartAt calls.
+	// The needsRestart hint is only observable if the fake honours it, so
+	// UpdateEnabled and the two clears below mirror the Mongo repository
+	// rather than being no-ops.
+	clearRestartCalls int
+	// beforeClearRestart runs inside ClearNeedsRestartAt BEFORE the revision
+	// is compared — the window in which a concurrent config write lands.
+	beforeClearRestart func()
 }
 
 func newFakeConfigRepo() *fakeConfigRepo {
@@ -45,6 +82,13 @@ func newFakeConfigRepo() *fakeConfigRepo {
 // stored state be silently observed through the caller's "snapshot" — exactly
 // the staleness these tests exist to detect.
 func (f *fakeConfigRepo) FindByName(_ context.Context, name string) (*ModuleConfig, error) {
+	f.findCalls++
+	if f.beforeFind != nil {
+		f.beforeFind(f.findCalls)
+	}
+	if f.findErr != nil {
+		return nil, f.findErr
+	}
 	doc, ok := f.docs[name]
 	if !ok {
 		return nil, nil
@@ -74,59 +118,100 @@ func copyStrings(m map[string]string) map[string]string {
 	return out
 }
 
-func (f *fakeConfigRepo) FindAll(context.Context) ([]ModuleConfig, error) { return nil, nil }
+// FindAll returns deep copies in name order, like the Mongo repository
+// would (order is not part of the contract; determinism is convenient).
+func (f *fakeConfigRepo) FindAll(ctx context.Context) ([]ModuleConfig, error) {
+	names := make([]string, 0, len(f.docs))
+	for n := range f.docs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]ModuleConfig, 0, len(names))
+	for _, n := range names {
+		cp, _ := f.FindByName(ctx, n)
+		out = append(out, *cp)
+	}
+	return out, nil
+}
 
 func (f *fakeConfigRepo) Upsert(_ context.Context, c *ModuleConfig) error {
 	f.docs[c.ModuleName] = c
 	return nil
 }
 
-func (f *fakeConfigRepo) UpdateEnabled(context.Context, string, bool) error { return nil }
-
-func (f *fakeConfigRepo) UpdateConfigValues(_ context.Context, name string, v, e map[string]string) error {
-	doc := f.docs[name]
-	doc.ConfigValues, doc.EncryptedValues = v, e
-	return nil
-}
-
-func (f *fakeConfigRepo) UpdateEnvironmentConfig(_ context.Context, name, env string, v, e map[string]string) error {
-	doc := f.docs[name]
-	cfg := doc.Environments[env]
-	cfg.ConfigValues, cfg.EncryptedValues = v, e
-	doc.Environments[env] = cfg
-	return nil
-}
-
-func (f *fakeConfigRepo) SetActiveEnvironment(_ context.Context, name, env string) error {
-	f.docs[name].ActiveEnvironment = env
+// UpdateEnabled mirrors the Mongo one: flipping the flag also marks the
+// document as needing a restart. A no-op fake made the combined
+// config+enable PATCH look correct while the real repository lost the hint.
+func (f *fakeConfigRepo) UpdateEnabled(_ context.Context, name string, enabled bool) error {
+	doc, ok := f.docs[name]
+	if !ok {
+		return fmt.Errorf("module %q not found", name)
+	}
+	doc.Enabled = enabled
+	doc.NeedsRestart = true
 	return nil
 }
 
 // MigrateToEnvironments mirrors the real one: a no-op fake would let the
 // service believe a legacy document had been migrated while the stored one
-// still had no Environments map at all.
-func (f *fakeConfigRepo) MigrateToEnvironments(_ context.Context, name string, cv, ev map[string]string) error {
+// still had no Environments map at all. Like the Mongo compare-and-swap, it
+// matches only a document that still has no profiles at the read revision.
+func (f *fakeConfigRepo) MigrateToEnvironments(_ context.Context, name string, cv, ev map[string]string, expectedRevision int64) (bool, error) {
+	if f.migrateErr != nil {
+		return false, f.migrateErr
+	}
+	if f.beforeMigrate != nil {
+		hook := f.beforeMigrate
+		f.beforeMigrate = nil
+		hook()
+	}
 	doc, ok := f.docs[name]
 	if !ok {
-		return fmt.Errorf("module %q not found", name)
+		return false, fmt.Errorf("module %q not found", name)
+	}
+	if len(doc.Environments) > 0 || doc.ConfigRevision != expectedRevision {
+		return false, nil
 	}
 	doc.ActiveEnvironment = "production"
 	doc.Environments = map[string]EnvironmentConfig{
 		"production": {ConfigValues: copyStrings(cv), EncryptedValues: copyStrings(ev)},
 		"sandbox":    {ConfigValues: map[string]string{}, EncryptedValues: map[string]string{}},
 	}
+	doc.ConfigRevision = expectedRevision + 1
+	return true, nil
+}
+
+func (f *fakeConfigRepo) ClearNeedsRestart(_ context.Context, name string) error {
+	f.clearRestartCalls++
+	if doc, ok := f.docs[name]; ok {
+		doc.NeedsRestart = false
+	}
 	return nil
 }
 
-func (f *fakeConfigRepo) ClearNeedsRestart(context.Context, string) error { return nil }
+// ClearNeedsRestartAt mirrors the Mongo one: the flag is cleared only while
+// the document is still at the revision the caller observed, the revision is
+// not advanced, and a mismatch is a lost race (false, nil), not an error.
+func (f *fakeConfigRepo) ClearNeedsRestartAt(_ context.Context, name string, expectedRevision int64) (bool, error) {
+	f.clearRestartCalls++
+	if f.beforeClearRestart != nil {
+		f.beforeClearRestart()
+	}
+	doc, ok := f.docs[name]
+	if !ok || doc.ConfigRevision != expectedRevision {
+		return false, nil
+	}
+	doc.NeedsRestart = false
+	return true, nil
+}
 
-func (f *fakeConfigRepo) RefreshMetadata(context.Context, Module) error { return nil }
+func (f *fakeConfigRepo) RefreshMetadata(context.Context, Module) error { return f.refreshErr }
 
 // CompareAndSwapEnvironment mirrors the Mongo implementation's contract: a
-// mismatched revision is a lost race (false, nil), not an error. casFailures
-// forces the first N attempts to lose, which is how a concurrent writer is
-// modelled without a second goroutine.
-func (f *fakeConfigRepo) CompareAndSwapEnvironment(_ context.Context, name, env string, expected int64, next EnvironmentConfig) (bool, error) {
+// mismatched revision is a lost race (false, nil), not an error; the
+// document-level configRevision advances in the same write. casFailures
+// forces the first N attempts to lose.
+func (f *fakeConfigRepo) CompareAndSwapEnvironment(_ context.Context, name, env string, expected int64, next EnvironmentConfig, needsRestart bool) (bool, error) {
 	f.casCalls++
 	if f.casFailures > 0 {
 		f.casFailures--
@@ -145,27 +230,62 @@ func (f *fakeConfigRepo) CompareAndSwapEnvironment(_ context.Context, name, env 
 	if doc.ActiveEnv() == env {
 		doc.ConfigValues, doc.EncryptedValues = next.ConfigValues, next.EncryptedValues
 	}
+	doc.NeedsRestart = needsRestart
+	doc.ConfigRevision++
 	return true, nil
 }
 
-// ActivateEnvironment mirrors the Mongo pipeline update: the values copied
-// into the legacy maps are read from the STORED document at execution time,
-// not from a snapshot the caller took earlier. duringActivate simulates a
-// write landing just before that read.
-func (f *fakeConfigRepo) ActivateEnvironment(_ context.Context, name, env string) error {
-	doc, ok := f.docs[name]
-	if !ok {
-		return fmt.Errorf("module %q not found", name)
+// CompareAndSwapConfig mirrors the Mongo single-update contract: the whole
+// mutation lands or nothing does, the revision is compared at execution time
+// (after beforeDocCAS / duringActivate, so a modelled concurrent write is
+// visible and can make this one lose), an activation WITHOUT WriteLegacy
+// copies the STORED profile maps rather than a caller snapshot, and one WITH
+// WriteLegacy copies the maps the caller supplied.
+func (f *fakeConfigRepo) CompareAndSwapConfig(_ context.Context, name string, m ConfigMutation) (bool, error) {
+	if err := m.validate(); err != nil {
+		return false, err
 	}
-	if _, ok := doc.Environments[env]; !ok {
-		return fmt.Errorf("environment %q not found for module %q", env, name)
+	f.docCasCalls++
+	if f.beforeDocCAS != nil {
+		f.beforeDocCAS()
 	}
-	if f.duringActivate != nil {
+	if m.Activate != "" && f.duringActivate != nil {
 		f.duringActivate()
 	}
-	cfg := doc.Environments[env]
-	doc.ActiveEnvironment = env
-	doc.ConfigValues = copyStrings(cfg.ConfigValues)
-	doc.EncryptedValues = copyStrings(cfg.EncryptedValues)
-	return nil
+	if f.docCasFailures > 0 {
+		f.docCasFailures--
+		return false, nil
+	}
+	doc, ok := f.docs[name]
+	if !ok || doc.ConfigRevision != m.ExpectedRevision {
+		return false, nil
+	}
+	if m.Activate != "" {
+		if _, ok := doc.Environments[m.Activate]; !ok {
+			return false, nil
+		}
+		doc.ActiveEnvironment = m.Activate
+		if !m.WriteLegacy {
+			cfg := doc.Environments[m.Activate]
+			doc.ConfigValues = copyStrings(cfg.ConfigValues)
+			doc.EncryptedValues = copyStrings(cfg.EncryptedValues)
+		}
+	}
+	if m.Env != "" {
+		cur, ok := doc.Environments[m.Env]
+		if !ok {
+			return false, nil
+		}
+		cur.ConfigValues = copyStrings(m.EnvValues)
+		cur.EncryptedValues = copyStrings(m.EnvSecrets)
+		cur.Revision = m.EnvRevision + 1
+		doc.Environments[m.Env] = cur
+	}
+	if m.WriteLegacy {
+		doc.ConfigValues = copyStrings(m.LegacyValues)
+		doc.EncryptedValues = copyStrings(m.LegacySecrets)
+	}
+	doc.NeedsRestart = m.NeedsRestart
+	doc.ConfigRevision = m.ExpectedRevision + 1
+	return true, nil
 }

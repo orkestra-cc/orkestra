@@ -4119,6 +4119,9 @@
               "null"
             ]
           },
+          "missing": {
+            "type": "boolean"
+          },
           "moduleName": {
             "type": "string"
           },

@@ -97,8 +97,10 @@ export interface ModuleConfig {
   description: string;
   category: 'core' | 'toggleable' | 'external';
   enabled: boolean;
-  status: 'running' | 'failed' | 'disabled' | 'stopped';
+  status: 'running' | 'failed' | 'disabled' | 'stopped' | 'missing';
   error?: string;
+  /** A required module whose stored config document is absent. */
+  missing?: boolean;
   needsRestart: boolean;
   configValues: Record<string, string>;
   secretStatus: Record<string, boolean>;
@@ -176,6 +178,13 @@ interface UpdateModuleParams {
   secrets?: Record<string, string>;
 }
 
+/**
+ * Body `code` the backend sends on a 409 when a module-config write lost its
+ * compare-and-swap: the document changed after it was loaded. Distinct from
+ * the codeless record-list roster conflicts, which keep their own copy.
+ */
+export const CONFIG_REVISION_STALE = 'module.config_revision_stale';
+
 // --- API Slice ---
 
 export const moduleApi = baseApi.injectEndpoints({
@@ -240,12 +249,26 @@ export const moduleApi = baseApi.injectEndpoints({
         method: 'PATCH',
         body
       }),
-      invalidatesTags: (_result, _error, { name, environment }) => [
-        { type: 'Module', id: name },
-        { type: 'Module', id: `${name}-env-${environment}` },
-        { type: 'Module', id: 'LIST' },
-        'ModuleHealth'
-      ]
+      // Only a save that actually landed invalidates anything. RTK Query
+      // runs `invalidatesTags` for a REJECTED mutation too
+      // (`isRejectedWithValue`), so a failed PATCH used to refetch the
+      // environment behind the operator's back — and the config
+      // controller's re-seed effect, which cannot tell that baseline from a
+      // deliberate one, then reset the form and cleared the very error
+      // banner explaining the failure. The operator's unsaved edits (typed
+      // secrets included) vanished, silently. Nothing changed on the server
+      // when the write failed, so there is nothing to invalidate; adopting
+      // the other writer's baseline after a stale-revision 409 is what
+      // `reloadAndReview` does, on demand.
+      invalidatesTags: (_result, error, { name, environment }) =>
+        error
+          ? []
+          : [
+              { type: 'Module', id: name },
+              { type: 'Module', id: `${name}-env-${environment}` },
+              { type: 'Module', id: 'LIST' },
+              'ModuleHealth'
+            ]
     }),
 
     setActiveEnvironment: builder.mutation<

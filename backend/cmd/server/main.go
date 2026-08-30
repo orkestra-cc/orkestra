@@ -280,6 +280,24 @@ func main() {
 		log.Fatalf("Failed to initialize modules: %v", err)
 	}
 
+	// Boot seeding has run inside InitAll. From here on the documents of
+	// requiredPersistedModules must exist: GetConfig fails closed and the
+	// module list shows a `missing` row instead of lazily re-seeding them.
+	// This is also the boot gate for those modules: a missing document, or a
+	// seeding/backfill failure SeedFromModules recorded, aborts here rather
+	// than serving a strict policy reader an incomplete auth document.
+	//
+	// Its own short deadline, deliberately not the boot ctx above: that one
+	// is the infrastructure-connect budget and may be nearly spent after a
+	// slow first-boot Mongo race, and a healthy document must never be
+	// refused because THIS read timed out.
+	gateCtx, cancelGate := context.WithTimeout(context.Background(), 10*time.Second)
+	err = configService.RequirePersistedConfig(gateCtx, requiredPersistedModules...)
+	cancelGate()
+	if err != nil {
+		log.Fatalf("Required module config is not serviceable: %v", err)
+	}
+
 	// ADR-0005 Phase F — hot-swap the slog handler's resolver from
 	// the boot env-driven static snapshot to the DB-backed live
 	// resolver. Every existing module logger (clones produced by
@@ -521,6 +539,9 @@ func main() {
 	// system permission; the MFA gate on the mutation group layers on top.
 	// Operator-only — module enable/disable is a Tier-1 operator concern.
 	moduleAdminHandler := module.NewModuleAdminHandler(configService, modRegistry)
+	if err := wireModuleAdminAudit(moduleAdminHandler, svcRegistry); err != nil {
+		log.Fatalf("Failed to wire module admin audit: %v", err)
+	}
 	operatorProtected.Group(func(r chi.Router) {
 		r.Use(authMW.RequireSystemPermission("system.modules.admin"))
 		adminAPI := humachi.New(r, apiConfig)
@@ -535,6 +556,10 @@ func main() {
 		// enablement or write secrets. Threshold is env-tunable so ops
 		// can widen the gate during staged rollouts.
 		r.Use(authMW.RequireLowRisk(riskStepUpThreshold()))
+		// The audit actor's User-Agent: Huma hands the handler a
+		// context.Context, not the *http.Request, so the header has to be
+		// stamped onto the context here.
+		r.Use(authMiddleware.RequestMeta)
 		adminAPI := humachi.New(r, apiConfig)
 		module.RegisterAdminModuleMutationRoutes(adminAPI, moduleAdminHandler)
 	})

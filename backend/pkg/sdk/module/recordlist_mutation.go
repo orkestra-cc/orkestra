@@ -8,10 +8,22 @@ import (
 )
 
 var (
-	ErrRevisionRequired       = errors.New("recordlist: a revision is required to remove elements")
-	ErrRevisionStale          = errors.New("recordlist: the environment changed since it was read")
+	ErrRevisionRequired = errors.New("recordlist: a revision is required to remove elements")
+	// ErrRevisionStale is returned by every compare-and-swap that lost its
+	// race — an environment revision (record lists) or the document's
+	// configRevision (ordinary config writes and activation). The caller's
+	// view of the document no longer holds; it reloads and retries.
+	ErrRevisionStale          = errors.New("module: the configuration changed since it was read")
 	ErrDuplicateMutationField = errors.New("recordlist: the same field appears twice in one request")
 )
+
+// CodeConfigRevisionStale is the stable body code the admin API carries on
+// the 409 produced by ErrRevisionStale. It is SDK-owned: pkg/sdk cannot
+// import internal/shared/errcode, so the constant lives here and errcode's
+// golden test asserts that no internal code collides with the module.*
+// namespace. A client that sees it reloads the document and re-reviews its
+// diff — it must never auto-retry.
+const CodeConfigRevisionStale = "module.config_revision_stale"
 
 // recordListMaxAttempts bounds the retry loop. Only value writes retry, and
 // each attempt re-reads a document another writer just moved — five is far
@@ -60,8 +72,18 @@ func (s *ModuleConfigService) UpdateEnvironmentConfigWithRecordLists(
 		return ErrRevisionRequired
 	}
 
-	// The roster is SDK-owned. A client that writes it directly would bypass
-	// every precondition below, so it never survives the request boundary.
+	// Lane validation runs on the payload AS SUBMITTED: the roster is
+	// SDK-owned, so a request that writes it directly is refused here, not
+	// silently dropped by the strip below. The schema is the live one
+	// (schemaFor); the document is read inside the loop only for its values.
+	if known, ok := s.knownModules[name]; ok {
+		if err := validateSubmittedKeys(ConfigSchemaOf(known), values, secrets); err != nil {
+			return err
+		}
+	}
+	// Defence in depth for a module this service does not know (no live
+	// schema to refuse against): the roster never survives the request
+	// boundary either way.
 	values = withoutRosterKeys(values)
 
 	encrypted := make(map[string]string, len(secrets))
@@ -129,21 +151,31 @@ func (s *ModuleConfigService) UpdateEnvironmentConfigWithRecordLists(
 		for _, m := range mutations {
 			byField[m.Field] = m
 		}
-		if err := validateRecordListSubmission(doc.ConfigSchema, values, next.ConfigValues, byField); err != nil {
+		schema := s.schemaFor(name, doc)
+		// A plaintext secret a legacy document still carries under a secret
+		// key is dropped here, so this write repairs it.
+		next.ConfigValues = nonSecretValues(schema, next.ConfigValues)
+		if err := validateRecordListSubmission(schema, values, secrets, next.ConfigValues, byField); err != nil {
 			return err
 		}
 
 		// Validate exactly what will be written.
-		if err := s.validateModuleConfig(ctx, name, next.ConfigValues); err != nil {
+		if err := s.validateCandidate(ctx, name, candidate{
+			schema:           schema,
+			env:              envName,
+			values:           next.ConfigValues,
+			storedEncrypted:  next.EncryptedValues,
+			submittedSecrets: secrets,
+		}); err != nil {
 			return err
 		}
 
-		won, err := s.repo.CompareAndSwapEnvironment(ctx, name, envName, cur.Revision, next)
+		won, err := s.repo.CompareAndSwapEnvironment(ctx, name, envName, cur.Revision, next, s.needsRestartFor(name))
 		if err != nil {
 			return err
 		}
 		if won {
-			return s.InvalidateCache(ctx, name)
+			return nil
 		}
 		if removing {
 			return ErrRevisionStale
@@ -176,16 +208,19 @@ func keysOf(m map[string]string) []string {
 }
 
 // validateRecordListSubmission enforces the record-list value rules that are
-// generic to the SDK: every submitted value must name an element that exists
-// once the request is applied, every written label must obey the label bounds,
-// and a created element must carry a label whose mint is its slug.
+// generic to the SDK: every submitted value AND every submitted secret must
+// name an element that exists once the request is applied, every written
+// label must obey the label bounds, and a created element must carry a label
+// whose mint is its slug. The label and slug-mint rules are values-only —
+// a label is not a secret — but membership binds both lanes: an orphan
+// ciphertext is a credential a later create would silently adopt.
 //
 // It walks the SCHEMA rather than the mutations, because a request may write
 // into a record list without changing its membership at all — renaming an
 // element is exactly that, and would otherwise skip every check here.
 func validateRecordListSubmission(
 	schema []ConfigField,
-	submitted, reconciled map[string]string,
+	submitted, submittedSecrets, reconciled map[string]string,
 	byField map[string]RecordListMutation,
 ) error {
 	for _, field := range schema {
@@ -211,6 +246,15 @@ func validateRecordListSubmission(
 				if err := ValidateLabel(val); err != nil {
 					return fmt.Errorf("%w (element %q under %q)", err, slug, field.Key)
 				}
+			}
+		}
+
+		// Secrets carry no label or mint rule, only membership — checked in
+		// sorted order so the reported slug is deterministic.
+		for _, key := range sortedKeys(keySet(submittedSecrets)) {
+			slug, _, ok := SplitElementKey(field.Key, key)
+			if ok && !inTarget[slug] {
+				return fmt.Errorf("%w: %q under %q", ErrUnknownSlug, slug, field.Key)
 			}
 		}
 

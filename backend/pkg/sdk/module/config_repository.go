@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -121,25 +122,6 @@ func (r *ModuleConfigRepository) UpdateEnabled(ctx context.Context, name string,
 	return nil
 }
 
-// UpdateConfigValues updates a module's plain and encrypted config values.
-// Sets needsRestart to true so the admin UI can signal a restart is needed.
-func (r *ModuleConfigRepository) UpdateConfigValues(ctx context.Context, name string, values map[string]string, encrypted map[string]string) error {
-	_, err := r.collection.UpdateOne(
-		ctx,
-		bson.M{"moduleName": name},
-		bson.M{"$set": bson.M{
-			"configValues":    values,
-			"encryptedValues": encrypted,
-			"needsRestart":    true,
-			"updatedAt":       time.Now(),
-		}},
-	)
-	if err != nil {
-		return fmt.Errorf("update config values for %q: %w", name, err)
-	}
-	return nil
-}
-
 // FindEnabledAddonNames returns the names of all non-core modules that have
 // enabled=true in the module_configs collection. Used by the boot path so
 // that modules enabled via the admin UI are loaded on next restart.
@@ -181,24 +163,39 @@ func (r *ModuleConfigRepository) ClearNeedsRestart(ctx context.Context, name str
 	return nil
 }
 
-// UpdateEnvironmentConfig updates config values and encrypted secrets for a
-// specific named environment within a module's Environments map.
-func (r *ModuleConfigRepository) UpdateEnvironmentConfig(ctx context.Context, name, envName string, values map[string]string, encrypted map[string]string) error {
-	now := time.Now()
-	update := bson.M{
-		"$set": bson.M{
-			fmt.Sprintf("environments.%s.configValues", envName):    values,
-			fmt.Sprintf("environments.%s.encryptedValues", envName): encrypted,
-			fmt.Sprintf("environments.%s.updatedAt", envName):       now,
-			"needsRestart": true,
-			"updatedAt":    now,
-		},
+// ClearNeedsRestartAt clears the flag only while the document's
+// configRevision still equals the one the caller observed. It is what keeps
+// an enable/disable from erasing a hint a CONCURRENT config change just
+// earned: the two requests are independent, and the lifecycle half must
+// only retract what its own read saw.
+//
+// It deliberately does NOT advance configRevision. needsRestart is a
+// presentation flag; bumping the revision to clear it would make an
+// in-flight config write lose its own compare-and-swap for no reason.
+//
+// Absent and 0 are the same value, so an expectation of 0 also matches a
+// document that predates the field — the same $or shape every other
+// revision filter here uses. Returns false, not an error, when the revision
+// has moved: a lost clear is an expected outcome.
+func (r *ModuleConfigRepository) ClearNeedsRestartAt(ctx context.Context, name string, expectedRevision int64) (bool, error) {
+	filter := bson.M{"moduleName": name}
+	if expectedRevision == 0 {
+		filter["$or"] = bson.A{
+			bson.M{"configRevision": int64(0)},
+			bson.M{"configRevision": bson.M{"$exists": false}},
+		}
+	} else {
+		filter["configRevision"] = expectedRevision
 	}
-	_, err := r.collection.UpdateOne(ctx, bson.M{"moduleName": name}, update)
+	res, err := r.collection.UpdateOne(
+		ctx,
+		filter,
+		bson.M{"$set": bson.M{"needsRestart": false, "updatedAt": time.Now()}},
+	)
 	if err != nil {
-		return fmt.Errorf("update environment config %q/%q: %w", name, envName, err)
+		return false, fmt.Errorf("clear needsRestart for %q: %w", name, err)
 	}
-	return nil
+	return res.MatchedCount == 1, nil
 }
 
 // CompareAndSwapEnvironment replaces ONE environment sub-document, and only
@@ -208,127 +205,248 @@ func (r *ModuleConfigRepository) UpdateEnvironmentConfig(ctx context.Context, na
 //
 // Scoping the swap to the sub-document matters: Environments is a nested map,
 // so guarding a whole-document replace with one environment's revision would
-// silently discard concurrent edits to a sibling environment. When env is the
-// active one, the legacy top-level maps are synced in the SAME update, so the
-// two can never diverge.
+// silently discard concurrent edits to a sibling environment.
+//
+// It is a PIPELINE update: the "is this the active profile?" decision is
+// taken by the server against the document's CURRENT activeEnvironment, in
+// the same operation that writes the profile. The previous read-then-update
+// let a concurrent activation land between the two and left the legacy
+// mirror carrying the wrong profile. $literal stops the aggregation engine
+// from interpreting stored maps (dotted keys, "$"-prefixed values) as
+// expressions. configRevision advances in the same update, so an ordinary
+// config write that read the document before this roster change loses its
+// own compare-and-swap instead of passing it unseen; needsRestart is
+// persisted as given — the inverse of the module's hot-reload capability.
 //
 // A document written before record lists existed carries no revision field at
 // all. Absent and 0 are the same value, so an expectation of 0 also matches a
 // missing field — otherwise the first mutation on every pre-existing module
 // would fail against nothing.
 func (r *ModuleConfigRepository) CompareAndSwapEnvironment(
-	ctx context.Context, name, envName string, expectedRevision int64, next EnvironmentConfig,
+	ctx context.Context, name, envName string, expectedRevision int64, next EnvironmentConfig, needsRestart bool,
 ) (bool, error) {
 	envPath := "environments." + envName
 	next.Revision = expectedRevision + 1
 	next.UpdatedAt = time.Now().UTC()
+	if next.ConfigValues == nil {
+		next.ConfigValues = map[string]string{}
+	}
+	if next.EncryptedValues == nil {
+		next.EncryptedValues = map[string]string{}
+	}
 
-	revisionMatches := bson.M{envPath + ".revision": expectedRevision}
+	filter := bson.M{"moduleName": name}
 	if expectedRevision == 0 {
-		revisionMatches = bson.M{"$or": bson.A{
+		filter["$or"] = bson.A{
 			bson.M{envPath + ".revision": expectedRevision},
 			bson.M{envPath + ".revision": bson.M{"$exists": false}},
-		}}
-	}
-	filter := bson.M{"moduleName": name}
-	for k, v := range revisionMatches {
-		filter[k] = v
-	}
-
-	set := bson.M{
-		envPath:        next,
-		"needsRestart": true,
-		"updatedAt":    next.UpdatedAt,
-	}
-
-	var doc ModuleConfig
-	if err := r.collection.FindOne(ctx, bson.M{"moduleName": name}).Decode(&doc); err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return false, fmt.Errorf("module %q not found", name)
 		}
-		return false, fmt.Errorf("compare-and-swap environment %q/%q: %w", name, envName, err)
-	}
-	if doc.ActiveEnv() == envName {
-		set["configValues"] = next.ConfigValues
-		set["encryptedValues"] = next.EncryptedValues
+	} else {
+		filter[envPath+".revision"] = expectedRevision
 	}
 
-	res, err := r.collection.UpdateOne(ctx, filter, bson.M{"$set": set})
+	isActive := bson.M{"$eq": bson.A{
+		bson.M{"$ifNull": bson.A{"$activeEnvironment", "production"}},
+		envName,
+	}}
+	update := mongo.Pipeline{{{Key: "$set", Value: bson.M{
+		envPath:           bson.M{"$literal": next},
+		"configValues":    bson.M{"$cond": bson.A{isActive, bson.M{"$literal": next.ConfigValues}, "$configValues"}},
+		"encryptedValues": bson.M{"$cond": bson.A{isActive, bson.M{"$literal": next.EncryptedValues}, "$encryptedValues"}},
+		"needsRestart":    needsRestart,
+		"configRevision":  bson.M{"$add": bson.A{bson.M{"$ifNull": bson.A{"$configRevision", 0}}, 1}},
+		"updatedAt":       next.UpdatedAt,
+	}}}}
+
+	res, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return false, fmt.Errorf("compare-and-swap environment %q/%q: %w", name, envName, err)
 	}
 	return res.MatchedCount == 1, nil
 }
 
-// SetActiveEnvironment switches the active environment for a module.
-func (r *ModuleConfigRepository) SetActiveEnvironment(ctx context.Context, name, envName string) error {
-	now := time.Now()
-	_, err := r.collection.UpdateOne(
-		ctx,
-		bson.M{"moduleName": name},
-		bson.M{"$set": bson.M{"activeEnvironment": envName, "needsRestart": true, "updatedAt": now}},
-	)
-	if err != nil {
-		return fmt.Errorf("set active environment for %q to %q: %w", name, envName, err)
+// ConfigMutation is the explicit shape of ONE atomic module_configs write.
+// Exactly one of two forms is used:
+//
+//   - a values write: Env names the profile whose maps are REPLACED by
+//     EnvValues/EnvSecrets (callers merge first) and whose revision becomes
+//     EnvRevision+1; WriteLegacy additionally replaces the top-level legacy
+//     maps with LegacyValues/LegacySecrets — the active-profile write and
+//     the boot backfill both use this, the inactive-profile write does not;
+//   - an activation: Activate names the profile to make active. WITHOUT
+//     WriteLegacy its STORED maps are copied server-side into the legacy
+//     fields. WITH WriteLegacy the caller supplies the legacy maps instead
+//     (and may repair the activated profile in the same write by setting
+//     Env == Activate, which then requires WriteLegacy and legacy maps EQUAL
+//     to the profile's — the mirror is that profile's copy) — the service
+//     uses that form so the mirror it publishes is stripped of any plaintext
+//     the stored profile still carries under a schema-secret key. The
+//     revision guard is what makes the client-side copy safe: any concurrent
+//     write advances configRevision, so a stale snapshot matches nothing.
+//
+// Every form filters on ExpectedRevision, writes ExpectedRevision+1 back,
+// and persists NeedsRestart as given. Secrets are ciphertext by the time
+// they reach here.
+type ConfigMutation struct {
+	ExpectedRevision int64
+
+	Env         string
+	EnvValues   map[string]string
+	EnvSecrets  map[string]string
+	EnvRevision int64
+
+	WriteLegacy   bool
+	LegacyValues  map[string]string
+	LegacySecrets map[string]string
+
+	Activate string
+
+	NeedsRestart bool
+}
+
+// validate rejects a shape the repository cannot express in one update, and
+// rejects a forgotten map rather than guessing at it. A nil EnvSecrets or
+// LegacySecrets is a caller bug, not "no secrets": this package already
+// shipped the alternative once (a nil normalized to {} and written over
+// every stored secret — "UpdateConfig wiped module secrets", fixed in
+// v0.3.2) and must never repeat it. A caller that means to clear a map
+// passes an explicit empty one; nil is refused instead.
+func (m ConfigMutation) validate() error {
+	switch {
+	case m.Activate == "" && m.Env == "" && !m.WriteLegacy:
+		return errors.New("config mutation: nothing to write")
+	case m.Activate != "" && m.Env != "" && m.Env != m.Activate:
+		return errors.New("config mutation: an activation may only write the profile it activates")
+	case m.Env != "" && (m.EnvValues == nil || m.EnvSecrets == nil):
+		return errors.New("config mutation: an environment write requires both maps (use an empty map to clear)")
+	case m.WriteLegacy && (m.LegacyValues == nil || m.LegacySecrets == nil):
+		return errors.New("config mutation: WriteLegacy requires both legacy maps (use an empty map to clear)")
+	case m.Activate != "" && m.Env != "" && !m.WriteLegacy:
+		// Mongo takes the pipeline branch for an activation without supplied
+		// maps and silently DISCARDS the Env lane, while the fake applies it.
+		// Refuse the shape rather than let the two implementations disagree
+		// about what an accepted mutation does.
+		return errors.New("config mutation: an activation that repairs its profile must also supply the legacy maps")
+	case m.Activate != "" && m.Env != "" &&
+		(!maps.Equal(m.EnvValues, m.LegacyValues) || !maps.Equal(m.EnvSecrets, m.LegacySecrets)):
+		// The mirror IS the copy of the activated profile. Publishing one
+		// that disagrees with it would be atomic and permanent, and the only
+		// production caller passes the same two maps.
+		return errors.New("config mutation: an activation's legacy mirror must equal the profile it activates")
 	}
 	return nil
 }
 
-// ActivateEnvironment sets the active environment and copies that
-// environment's values into the legacy top-level maps in ONE update, reading
-// them server-side at execution time. The previous two-step version copied a
-// snapshot the process had read earlier, so a write landing in between was
-// silently rolled back — including a removal, which brought its secret back.
-func (r *ModuleConfigRepository) ActivateEnvironment(ctx context.Context, name, envName string) error {
-	envPath := "$environments." + envName
-	res, err := r.collection.UpdateOne(ctx,
-		bson.M{"moduleName": name, "environments." + envName: bson.M{"$exists": true}},
-		mongo.Pipeline{{{Key: "$set", Value: bson.M{
-			"activeEnvironment": envName,
+// CompareAndSwapConfig applies one ConfigMutation to a module document in a
+// SINGLE UpdateOne, and only while the document's configRevision still equals
+// m.ExpectedRevision (an absent field matches 0). Returns (false, nil) when
+// nothing matched — a lost race, or a profile that no longer exists — which
+// the service reports as ErrRevisionStale.
+//
+// Because it is one update, either every target field lands or none does:
+// there is no legacy/environment partial state and no second write whose
+// failure could be logged and swallowed. An activation WITHOUT WriteLegacy is
+// a pipeline update so the copied values are read server-side at execution
+// time; WITH WriteLegacy it is a plain $set of the maps the caller supplies,
+// safe because the same configRevision filter refuses any snapshot a
+// concurrent write has already made stale.
+func (r *ModuleConfigRepository) CompareAndSwapConfig(ctx context.Context, name string, m ConfigMutation) (bool, error) {
+	if err := m.validate(); err != nil {
+		return false, err
+	}
+	now := time.Now().UTC()
+	next := m.ExpectedRevision + 1
+
+	filter := bson.M{"moduleName": name}
+	if m.ExpectedRevision == 0 {
+		filter["$or"] = bson.A{
+			bson.M{"configRevision": int64(0)},
+			bson.M{"configRevision": bson.M{"$exists": false}},
+		}
+	} else {
+		filter["configRevision"] = m.ExpectedRevision
+	}
+
+	var update any
+	if m.Activate != "" {
+		filter["environments."+m.Activate] = bson.M{"$exists": true}
+	}
+	if m.Activate != "" && !m.WriteLegacy {
+		envPath := "$environments." + m.Activate
+		update = mongo.Pipeline{{{Key: "$set", Value: bson.M{
+			"activeEnvironment": m.Activate,
 			"configValues":      bson.M{"$ifNull": bson.A{envPath + ".configValues", bson.M{}}},
 			"encryptedValues":   bson.M{"$ifNull": bson.A{envPath + ".encryptedValues", bson.M{}}},
-			"needsRestart":      true,
-			"updatedAt":         time.Now().UTC(),
-		}}}},
-	)
+			"needsRestart":      m.NeedsRestart,
+			"configRevision":    next,
+			"updatedAt":         now,
+		}}}}
+	} else {
+		set := bson.M{
+			"needsRestart":   m.NeedsRestart,
+			"configRevision": next,
+			"updatedAt":      now,
+		}
+		if m.Activate != "" {
+			set["activeEnvironment"] = m.Activate
+		}
+		if m.Env != "" {
+			p := "environments." + m.Env
+			filter[p] = bson.M{"$exists": true}
+			set[p+".configValues"] = m.EnvValues
+			set[p+".encryptedValues"] = m.EnvSecrets
+			set[p+".revision"] = m.EnvRevision + 1
+			set[p+".updatedAt"] = now
+		}
+		if m.WriteLegacy {
+			set["configValues"] = m.LegacyValues
+			set["encryptedValues"] = m.LegacySecrets
+		}
+		update = bson.M{"$set": set}
+	}
+
+	res, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
-		return fmt.Errorf("activate environment %q for %q: %w", envName, name, err)
+		return false, fmt.Errorf("compare-and-swap config %q: %w", name, err)
 	}
-	if res.MatchedCount == 0 {
-		return fmt.Errorf("environment %q not found for module %q", envName, name)
-	}
-	return nil
+	return res.MatchedCount == 1, nil
 }
 
-// MigrateToEnvironments copies legacy top-level ConfigValues/EncryptedValues
-// into the Environments map and sets ActiveEnvironment = "production".
-// This is a one-time migration for documents that predate the environment feature.
-func (r *ModuleConfigRepository) MigrateToEnvironments(ctx context.Context, name string, configValues, encryptedValues map[string]string) error {
+// MigrateToEnvironments copies the legacy top-level maps into a "production"
+// profile (plus an empty "sandbox") and sets activeEnvironment, in one
+// compare-and-swap that matches only while the document STILL has no
+// profiles and its configRevision is the one the caller read. Returns
+// (false, nil) when another writer migrated or moved the document first —
+// the caller re-reads instead of copying a stale legacy snapshot over a
+// profile that was just written. Advances configRevision.
+func (r *ModuleConfigRepository) MigrateToEnvironments(
+	ctx context.Context, name string, configValues, encryptedValues map[string]string, expectedRevision int64,
+) (bool, error) {
 	now := time.Now()
-	prodEnv := EnvironmentConfig{
-		ConfigValues:    configValues,
-		EncryptedValues: encryptedValues,
-		UpdatedAt:       now,
+	noProfiles := bson.M{"$or": bson.A{
+		bson.M{"environments": bson.M{"$exists": false}},
+		bson.M{"environments": bson.M{}},
+	}}
+	revision := bson.M{"configRevision": expectedRevision}
+	if expectedRevision == 0 {
+		revision = bson.M{"$or": bson.A{
+			bson.M{"configRevision": int64(0)},
+			bson.M{"configRevision": bson.M{"$exists": false}},
+		}}
 	}
-	sandboxEnv := EnvironmentConfig{
-		ConfigValues:    make(map[string]string),
-		EncryptedValues: make(map[string]string),
-		UpdatedAt:       now,
-	}
-	_, err := r.collection.UpdateOne(
-		ctx,
-		bson.M{"moduleName": name},
-		bson.M{"$set": bson.M{
-			"activeEnvironment":       "production",
-			"environments.production": prodEnv,
-			"environments.sandbox":    sandboxEnv,
-			"updatedAt":               now,
-		}},
-	)
+	filter := bson.M{"moduleName": name, "$and": bson.A{noProfiles, revision}}
+	update := bson.M{"$set": bson.M{
+		"activeEnvironment":       "production",
+		"environments.production": EnvironmentConfig{ConfigValues: configValues, EncryptedValues: encryptedValues, UpdatedAt: now},
+		"environments.sandbox":    EnvironmentConfig{ConfigValues: map[string]string{}, EncryptedValues: map[string]string{}, UpdatedAt: now},
+		"configRevision":          expectedRevision + 1,
+		"updatedAt":               now,
+	}}
+	res, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
-		return fmt.Errorf("migrate to environments for %q: %w", name, err)
+		return false, fmt.Errorf("migrate to environments for %q: %w", name, err)
 	}
-	return nil
+	return res.MatchedCount == 1, nil
 }
 
 // RefreshMetadata rewrites the fields derived from a module's code

@@ -1,11 +1,14 @@
 package module
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/danielgtaylor/huma/v2"
 )
 
 func TestRecordListErrorsMapToStatusCodes(t *testing.T) {
@@ -72,5 +75,24 @@ func TestEnvironmentPatchCarriesRecordListsAndAPointerRevision(t *testing.T) {
 	}
 	if revField.Type.Kind() != reflect.Pointer {
 		t.Fatalf("revision is %s, want a pointer — an omitted revision must not read as an explicit 0", revField.Type.Kind())
+	}
+}
+
+// An orphan element key is the client acting on a roster that no longer
+// holds — the same class as a stale removal, so 409, not the blanket 500
+// the bare PATCH's fallback used to produce.
+func TestUpdateModule_OrphanElementSecretIsA409(t *testing.T) {
+	h, repo, _ := newAuditHandler(t, &auditDemoModule{})
+	in := patchConfig(nil, map[string]string{"email.profiles.ghost.password": "x"})
+	_, err := h.UpdateModule(context.Background(), in)
+	if err == nil {
+		t.Fatal("expected the orphan secret to be refused")
+	}
+	var se huma.StatusError
+	if !errors.As(err, &se) || se.GetStatus() != http.StatusConflict {
+		t.Fatalf("err = %v (%T), want a 409 status error", err, err)
+	}
+	if repo.docCasCalls != 0 {
+		t.Errorf("docCasCalls = %d, want 0", repo.docCasCalls)
 	}
 }

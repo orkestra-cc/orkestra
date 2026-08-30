@@ -2306,7 +2306,8 @@
       "running": "attivi",
       "failed": "in errore",
       "disabled": "disabilitati",
-      "stopped": "fermi"
+      "stopped": "fermi",
+      "missing": "mancante"
     },
     "filters": {
       "searchPlaceholder": "Cerca moduli...",
@@ -2378,7 +2379,11 @@
         "switchEnvBody": "Hai modifiche di configurazione non salvate. Passando a {{environment}} andranno perse.",
         "switchEnvConfirm": "Ignora e cambia",
         "stay": "Resta",
-        "leave": "Esci"
+        "leave": "Esci",
+        "revisionConflict": "Un altro operatore ha modificato la configurazione di questo modulo dopo il caricamento. Ricarica per rivedere le tue modifiche rispetto ai valori più recenti prima di salvare.",
+        "reloadFailed": "Il ricaricamento della configurazione più recente non è riuscito. Riprova prima di salvare.",
+        "reloadDroppedEdits_one": "{{count}} delle tue modifiche riguardava una voce rimossa da un altro operatore ed è stata scartata.",
+        "reloadDroppedEdits_other": "{{count}} delle tue modifiche riguardavano voci rimosse da un altro operatore e sono state scartate."
       },
       "saveBar": {
         "changes_one": "{{count}} modifica non salvata",
@@ -2386,7 +2391,8 @@
         "perGroup": "{{group}} ({{count}})",
         "errors_one": "{{count}} campo da correggere",
         "errors_other": "{{count}} campi da correggere",
-        "goToError": "Vai a {{group}}"
+        "goToError": "Vai a {{group}}",
+        "reloadReview": "Ricarica e rivedi"
       },
       "rail": {
         "overview": "Panoramica",
@@ -2447,6 +2453,7 @@
       }
     },
     "loadError": "Impossibile caricare i moduli. Verifica i permessi.",
+    "missingConfig": "Documento di configurazione mancante — ripristinalo o riavvia il backend.",
     "footer": {
       "total_one": "{{count}} modulo in totale",
       "total_other": "{{count}} moduli in totale",
@@ -2745,14 +2752,32 @@
     },
     "compliance": {
       "groups": {
-        "soc2": { "label": "Evidenze SOC2", "desc": "La pagina e l'API delle evidenze SOC2, disattivate salvo che tu persegua la certificazione." },
-        "retention": { "label": "Retention e DSR", "desc": "Per quanto tempo sono conservati i tombstone anonimizzati e gli export DSR generati." }
+        "soc2": {
+          "label": "Evidenze SOC2",
+          "desc": "La pagina e l'API delle evidenze SOC2, disattivate salvo che tu persegua la certificazione."
+        },
+        "retention": {
+          "label": "Retention e DSR",
+          "desc": "Per quanto tempo sono conservati i tombstone anonimizzati e gli export DSR generati."
+        }
       },
       "fields": {
-        "soc2_enabled": { "label": "Evidenze SOC2", "desc": "Espone la pagina admin e l'API delle evidenze SOC2. Disattivato di default — abilitalo solo per deployment che perseguono la certificazione SOC2." },
-        "auto_cleanup_enabled": { "label": "Auto-cleanup retention", "desc": "Esegue un job giornaliero che cancella definitivamente i tombstone anonimizzati oltre la finestra di retention. DISATTIVO di default — è una cancellazione massiva irreversibile." },
-        "retention_years": { "label": "Anni di retention", "desc": "Anni per cui un tombstone anonimizzato è conservato prima che l'auto-cleanup possa cancellarlo definitivamente." },
-        "export_retention_days": { "label": "Retention export (giorni)", "desc": "Giorni per cui un export DSR generato resta scaricabile prima di scadere." }
+        "soc2_enabled": {
+          "label": "Evidenze SOC2",
+          "desc": "Espone la pagina admin e l'API delle evidenze SOC2. Disattivato di default — abilitalo solo per deployment che perseguono la certificazione SOC2."
+        },
+        "auto_cleanup_enabled": {
+          "label": "Auto-cleanup retention",
+          "desc": "Esegue un job giornaliero che cancella definitivamente i tombstone anonimizzati oltre la finestra di retention. DISATTIVO di default — è una cancellazione massiva irreversibile."
+        },
+        "retention_years": {
+          "label": "Anni di retention",
+          "desc": "Anni per cui un tombstone anonimizzato è conservato prima che l'auto-cleanup possa cancellarlo definitivamente."
+        },
+        "export_retention_days": {
+          "label": "Retention export (giorni)",
+          "desc": "Giorni per cui un export DSR generato resta scaricabile prima di scadere."
+        }
       }
     },
     "notification": {

@@ -48,7 +48,8 @@ What does **not** live here:
 ```bash
 cd ../orkestra-docs                       # a fresh clone; the sync is gitignored
 npm ci
-MONOREPO_LOCAL_PATH=/path/to/orkestra npm run sync:site
+# the full sync — sync:site alone leaves docs/api/reference/sidebar.ts missing and the build fails
+MONOREPO_LOCAL_PATH=/path/to/orkestra npm run sync
 CI=true npm run build
 ```
 
