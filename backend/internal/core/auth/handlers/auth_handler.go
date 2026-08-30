@@ -250,6 +250,7 @@ const invalidOAuthAuthenticationDetail = "Invalid OAuth authentication"
 
 type oauthErrorResponse struct {
 	status     int
+	code       string
 	humaDetail string
 	rawDetail  string
 	outcome    string
@@ -262,6 +263,24 @@ func oauthErrorResponseFor(err error) oauthErrorResponse {
 			humaDetail: invalidOAuthAuthenticationDetail,
 			rawDetail:  invalidOAuthAuthenticationDetail,
 			outcome:    "invalid_credentials",
+		}
+	}
+	if errors.Is(err, services.ErrOAuthEmailUnverified) {
+		return oauthErrorResponse{
+			status:     http.StatusForbidden,
+			code:       errcode.AuthOAuthEmailUnverified,
+			humaDetail: "The identity provider has not verified this email address",
+			rawDetail:  "The identity provider has not verified this email address",
+			outcome:    "email_unverified",
+		}
+	}
+	if errors.Is(err, services.ErrAuthPolicyUnavailable) {
+		return oauthErrorResponse{
+			status:     http.StatusServiceUnavailable,
+			code:       errcode.AuthPolicyUnavailable,
+			humaDetail: "Sign-in policy is temporarily unavailable; try again shortly",
+			rawDetail:  "Sign-in policy is temporarily unavailable; try again shortly",
+			outcome:    "policy_unavailable",
 		}
 	}
 	return oauthErrorResponse{
@@ -277,6 +296,9 @@ func oauthErrorResponseFor(err error) oauthErrorResponse {
 // otherwise valid identity belongs to a deactivated local account.
 func mapOAuthError(err error) error {
 	response := oauthErrorResponseFor(err)
+	if response.code != "" {
+		return errcode.New(response.status, response.code, response.humaDetail)
+	}
 	if response.status == http.StatusUnauthorized {
 		return huma.Error401Unauthorized(response.humaDetail)
 	}
@@ -367,20 +389,23 @@ type ListOAuthProvidersResponse struct {
 	}
 }
 
-// ListOAuthProviders returns the set of OAuth providers configured in the
-// admin panel. Public endpoint — no auth required — because it's used by
-// the unauthenticated login screen. The result is filtered by the
-// handler's audience: a provider that's configured but disabled for
-// this surface (per the OAuth Providers tab on /admin/modules/auth)
-// is omitted so the login UI never offers a button it can't honor.
+// ListOAuthProviders returns the providers that are USABLE on this
+// handler's surface: toggle on, structurally complete (spec §4.4) — from one
+// config read. Public endpoint — no auth required — because it's used by
+// the unauthenticated login screen. A document-level failure (missing auth
+// document, repository error, undecryptable stored secret) is 503 rather
+// than an empty list, because "no provider" is a legitimate steady state
+// the SPA renders differently from "we could not ask"; a per-provider
+// defect only omits that provider (WARN names the key).
 func (h *AuthHandler) ListOAuthProviders(ctx context.Context, _ *ListOAuthProvidersRequest) (*ListOAuthProvidersResponse, error) {
-	configured := h.oauthResolver.ConfiguredProviders(ctx)
+	usable, err := h.oauthResolver.UsableWebProviders(ctx, h.policyAudience())
+	if err != nil {
+		slog.Default().Warn("oauth providers unavailable", slog.String("tier", h.tier), slog.String("outcome", "config_unavailable"))
+		return nil, errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable, "Sign-in policy is temporarily unavailable; try again shortly")
+	}
 	resp := &ListOAuthProvidersResponse{}
-	resp.Body.Providers = make([]string, 0, len(configured))
-	for _, p := range configured {
-		if h.policy != nil && !h.policy.OAuthProviderEnabled(ctx, h.policyAudience(), string(p)) {
-			continue
-		}
+	resp.Body.Providers = make([]string, 0, len(usable))
+	for _, p := range usable {
 		resp.Body.Providers = append(resp.Body.Providers, string(p))
 	}
 	return resp, nil
@@ -414,8 +439,20 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 		slog.String("tier", h.tier),
 	)
 
-	if err := h.oauthProviderAllowed(ctx, string(req.Body.Provider)); err != nil {
-		return nil, err
+	if !h.loginAllowed(ctx) {
+		return nil, errcode.Forbidden(errcode.AuthLoginDisabled,
+			"Login is temporarily disabled for this surface. Contact an administrator.")
+	}
+	// One strict read decides toggle + structure and yields the config the
+	// provider is built from below — no check-then-reread (spec §4.4).
+	cfg, usable, err := h.oauthResolver.OAuthWebProviderUsable(ctx, h.policyAudience(), req.Body.Provider)
+	if err != nil {
+		logger.Warn("oauth initiation failed", slog.String("provider", string(req.Body.Provider)), slog.String("outcome", "config_unavailable"))
+		return nil, errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable, "Sign-in policy is temporarily unavailable; try again shortly")
+	}
+	if !usable {
+		return nil, errcode.Forbidden(errcode.AuthOAuthProviderDisabled,
+			"This OAuth provider is not enabled for this surface. Contact an administrator.")
 	}
 
 	if len(h.stateSecret) == 0 {
@@ -475,18 +512,13 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 		return nil, huma.Error400BadRequest("Failed to create OAuth state", err)
 	}
 
-	// Create OAuth provider from live admin-panel config.
-	provider, _, err := h.resolveProvider(ctx, req.Body.Provider)
+	provider, err := h.oauthFactory.CreateProvider(req.Body.Provider, cfg)
 	if err != nil {
-		logger.Error("oauth initiation failed", slog.String("outcome", "provider_unavailable"))
-		return nil, huma.Error400BadRequest("OAuth provider not configured", err)
+		logger.Error("oauth initiation failed", slog.String("outcome", "provider_construct_failed"))
+		return nil, huma.Error500InternalServerError("OAuth not available", err)
 	}
-
-	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, req.Body.Provider)
-	if backendCallbackURL == "" {
-		return nil, huma.Error400BadRequest("OAuth provider redirect URL not configured", nil)
-	}
-
+	// Non-empty by the structural predicate that just passed.
+	backendCallbackURL := cfg.AdditionalConfig["redirect_url"]
 	authURL := provider.GetAuthURL(signedState, "", backendCallbackURL)
 
 	return &OAuthLoginResponse{
@@ -528,8 +560,20 @@ func (h *AuthHandler) InitiateOAuthLink(ctx context.Context, req *OAuthLinkReque
 	default:
 		return nil, huma.Error400BadRequest("unsupported provider")
 	}
-	if err := h.oauthProviderAllowed(ctx, string(provider)); err != nil {
-		return nil, err
+	if !h.loginAllowed(ctx) {
+		return nil, errcode.Forbidden(errcode.AuthLoginDisabled,
+			"Login is temporarily disabled for this surface. Contact an administrator.")
+	}
+	// One strict read decides toggle + structure and yields the config the
+	// provider is built from below — no check-then-reread (spec §4.4).
+	cfg, usable, err := h.oauthResolver.OAuthWebProviderUsable(ctx, h.policyAudience(), provider)
+	if err != nil {
+		logger.Warn("oauth link initiation failed", slog.String("provider", string(provider)), slog.String("outcome", "config_unavailable"))
+		return nil, errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable, "Sign-in policy is temporarily unavailable; try again shortly")
+	}
+	if !usable {
+		return nil, errcode.Forbidden(errcode.AuthOAuthProviderDisabled,
+			"This OAuth provider is not enabled for this surface. Contact an administrator.")
 	}
 	if len(h.stateSecret) == 0 {
 		logger.Error("oauth state secret not configured")
@@ -565,15 +609,13 @@ func (h *AuthHandler) InitiateOAuthLink(ctx context.Context, req *OAuthLinkReque
 		return nil, huma.Error400BadRequest("Failed to create OAuth state", err)
 	}
 
-	providerSvc, _, err := h.resolveProvider(ctx, provider)
+	providerSvc, err := h.oauthFactory.CreateProvider(provider, cfg)
 	if err != nil {
-		logger.Error("oauth link initiation failed", slog.String("outcome", "provider_unavailable"))
-		return nil, huma.Error400BadRequest("OAuth provider not configured", err)
+		logger.Error("oauth link initiation failed", slog.String("outcome", "provider_construct_failed"))
+		return nil, huma.Error500InternalServerError("OAuth not available", err)
 	}
-	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, provider)
-	if backendCallbackURL == "" {
-		return nil, huma.Error400BadRequest("OAuth provider redirect URL not configured", nil)
-	}
+	// Non-empty by the structural predicate that just passed.
+	backendCallbackURL := cfg.AdditionalConfig["redirect_url"]
 	authURL := providerSvc.GetAuthURL(signedState, "", backendCallbackURL)
 
 	return &OAuthLoginResponse{

@@ -161,6 +161,31 @@ func TestErrorMapping_OAuthInvalidCredentialsStaysNeutral(t *testing.T) {
 	}
 }
 
+func TestMapOAuthError_NewSentinels(t *testing.T) {
+	cases := []struct {
+		in       error
+		wantCode int
+		wantSlug string
+	}{
+		{services.ErrOAuthEmailUnverified, http.StatusForbidden, errcode.AuthOAuthEmailUnverified},
+		{services.ErrAuthPolicyUnavailable, http.StatusServiceUnavailable, errcode.AuthPolicyUnavailable},
+		{services.ErrInvalidCredentials, http.StatusUnauthorized, ""},
+		{errors.New("anything else"), http.StatusInternalServerError, ""},
+	}
+	for _, tc := range cases {
+		err := mapOAuthError(tc.in)
+		if got := statusOf(t, err); got != tc.wantCode {
+			t.Errorf("%v → %d, want %d", tc.in, got, tc.wantCode)
+		}
+		if tc.wantSlug != "" {
+			var e *errcode.Error
+			if !errors.As(err, &e) || e.Code != tc.wantSlug {
+				t.Errorf("%v → %v, want code %s", tc.in, err, tc.wantSlug)
+			}
+		}
+	}
+}
+
 func TestMapMFAError_KnownCodes(t *testing.T) {
 	cases := []struct {
 		name     string
