@@ -109,6 +109,8 @@ const GenericModuleDetailPage: React.FC = () => {
     cancelDeletion,
     error: saveError,
     success,
+    conflict,
+    reloadAndReview,
     clearError,
     onSave,
     handleDiscard
@@ -535,6 +537,8 @@ const GenericModuleDetailPage: React.FC = () => {
               errorCount={errorCount}
               errors={saveBarErrorsDisplay}
               saving={saving}
+              conflict={conflict}
+              onReload={reloadAndReview}
               onDiscard={handleDiscard}
               onSave={onSave}
             />

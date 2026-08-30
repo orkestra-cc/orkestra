@@ -2379,7 +2379,9 @@
         "switchEnvBody": "You have unsaved configuration changes. Switching to {{environment}} will discard them.",
         "switchEnvConfirm": "Discard and switch",
         "stay": "Stay",
-        "leave": "Leave"
+        "leave": "Leave",
+        "revisionConflict": "Another operator changed this module's configuration after you loaded it. Reload to review your edits against the latest values before saving.",
+        "reloadFailed": "Reloading the latest configuration failed. Try again before saving."
       },
       "saveBar": {
         "changes_one": "{{count}} unsaved change",
@@ -2387,7 +2389,8 @@
         "perGroup": "{{group}} ({{count}})",
         "errors_one": "{{count}} field needs attention",
         "errors_other": "{{count}} fields need attention",
-        "goToError": "Go to {{group}}"
+        "goToError": "Go to {{group}}",
+        "reloadReview": "Reload & review"
       },
       "rail": {
         "overview": "Overview",

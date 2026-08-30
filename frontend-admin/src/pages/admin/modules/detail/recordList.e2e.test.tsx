@@ -188,4 +188,53 @@ describe('record lists on the module detail page', () => {
     ).not.toBeInTheDocument();
     expect(lastPatch).toBeNull();
   });
+
+  it('Reload & review disarms a staged removal even when the profile revision is unchanged', async () => {
+    const user = userEvent.setup();
+    stub(
+      {
+        'email.profiles.__items': 'primary',
+        'email.profiles.primary.__label': 'Primary'
+      },
+      {},
+      7
+    );
+    // The save lost its compare-and-swap because configRevision moved (an
+    // activation, or another profile's write); THIS profile is still at 7,
+    // so the reload returns identical data and the re-seed effect never runs.
+    server.use(
+      http.patch('*/v1/admin/modules/:name/environments/:env', () =>
+        HttpResponse.json(
+          {
+            status: 409,
+            title: 'Conflict',
+            detail: 'moved',
+            code: 'module.config_revision_stale'
+          },
+          { status: 409 }
+        )
+      )
+    );
+    render();
+
+    await user.click(await screen.findByRole('button', { name: /remove/i }));
+    await user.click(await screen.findByRole('button', { name: /^save/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /^remove$/i }));
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Reload & review' })
+    );
+    // The removal is no longer staged: no Undo, no "deleted on save" notice,
+    // the element is back to an ordinary card.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: /undo/i })
+      ).not.toBeInTheDocument()
+    );
+    expect(screen.getByText('Primary')).toBeInTheDocument();
+    expect(
+      screen.queryByText(/will be deleted on save/i)
+    ).not.toBeInTheDocument();
+  });
 });

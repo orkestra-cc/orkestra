@@ -53,6 +53,8 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
     unfilledByGroup,
     error,
     success,
+    conflict,
+    reloadAndReview,
     clearError,
     onSave,
     handleDiscard
@@ -170,6 +172,8 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
           errorCount={errorCount}
           errors={saveBarErrorsDisplay}
           saving={saving}
+          conflict={conflict}
+          onReload={reloadAndReview}
           onDiscard={handleDiscard}
           onSave={onSave}
         />

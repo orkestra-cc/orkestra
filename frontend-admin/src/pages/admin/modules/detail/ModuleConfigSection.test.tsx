@@ -509,3 +509,153 @@ describe('ModuleConfigSection', () => {
     expect(screen.queryByText(/General \(/)).not.toBeInTheDocument();
   });
 });
+
+describe('ModuleConfigSection revision conflict', () => {
+  const envGet = (hits: { n: number }, configValues: Record<string, string>) =>
+    http.get(url('/v1/admin/modules/:name/environments/:env'), () => {
+      hits.n += 1;
+      return HttpResponse.json({
+        environment: 'production',
+        configValues,
+        secretStatus: {},
+        updatedAt: '',
+        revision: hits.n
+      });
+    });
+
+  it('latches on module.config_revision_stale, re-applies only the dirty draft, and reloads on demand without retrying', async () => {
+    const user = userEvent.setup();
+    const mod = moduleWith(
+      [
+        field({ key: 'a', label: 'Alpha' }),
+        field({ key: 'b', label: 'Beta' }),
+        field({ key: 'c', label: 'Gamma' }),
+        field({ key: 's', label: 'API Key', type: 'secret' })
+      ],
+      { availableEnvironments: ['production'] }
+    );
+    const hits = { n: 0 };
+    let patches = 0;
+    server.use(
+      envGet(hits, { a: 'server-old', b: 'b-old', c: 'c-old' }),
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), () => {
+        patches += 1;
+        return HttpResponse.json(
+          {
+            status: 409,
+            title: 'Conflict',
+            detail: 'moved',
+            code: 'module.config_revision_stale'
+          },
+          { status: 409 }
+        );
+      })
+    );
+
+    renderWithProviders(<TestHost mod={mod} />);
+    const alpha = await screen.findByLabelText('Alpha');
+    await waitFor(() => expect(alpha).toHaveValue('server-old'));
+    await user.clear(alpha);
+    await user.type(alpha, 'mine');
+    await user.clear(screen.getByLabelText('Gamma')); // an intentional clear to ''
+    await user.type(screen.getByLabelText('API Key'), 'unsent-secret');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    // The conflict copy, not the record-list one; Save disabled; Reload offered.
+    expect(
+      await screen.findByText(/changed this module's configuration/)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/changed this list/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    expect(patches).toBe(1);
+
+    // Meanwhile the other operator changed a, b (untouched here) and c
+    // (cleared here). Reload adopts their baseline and re-applies ONLY the
+    // fields this operator touched.
+    server.use(envGet(hits, { a: 'server-new', b: 'b-new', c: 'c-new' }));
+    await user.click(screen.getByRole('button', { name: 'Reload & review' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled()
+    );
+    expect(screen.getByLabelText('Alpha')).toHaveValue('mine'); // dirty: re-applied
+    expect(screen.getByLabelText('Beta')).toHaveValue('b-new'); // untouched: theirs, NOT reverted to b-old
+    expect(screen.getByLabelText('Gamma')).toHaveValue(''); // intentional clear survives
+    expect(screen.getByLabelText('API Key')).toHaveValue('unsent-secret'); // unsent secret kept in memory
+    expect(screen.getByText(/3 unsaved changes/)).toBeInTheDocument();
+    // Nothing was auto-submitted.
+    expect(patches).toBe(1);
+  });
+
+  it('keeps Save disabled and the conflict latched when the reload itself fails', async () => {
+    const user = userEvent.setup();
+    const mod = moduleWith([field({ key: 'a', label: 'Alpha' })], {
+      availableEnvironments: ['production']
+    });
+    const hits = { n: 0 };
+    server.use(
+      envGet(hits, { a: 'x' }),
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), () =>
+        HttpResponse.json(
+          {
+            status: 409,
+            title: 'Conflict',
+            detail: 'moved',
+            code: 'module.config_revision_stale'
+          },
+          { status: 409 }
+        )
+      )
+    );
+    renderWithProviders(<TestHost mod={mod} />);
+    const alpha = await screen.findByLabelText('Alpha');
+    await waitFor(() => expect(alpha).toHaveValue('x'));
+    await user.clear(alpha);
+    await user.type(alpha, 'y');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByRole('button', { name: 'Reload & review' });
+
+    server.use(
+      http.get(url('/v1/admin/modules/:name/environments/:env'), () =>
+        HttpResponse.json(
+          { status: 503, title: 'Service Unavailable', detail: 'down' },
+          { status: 503 }
+        )
+      )
+    );
+    await user.click(screen.getByRole('button', { name: 'Reload & review' }));
+    expect(
+      await screen.findByText(/Reloading the latest configuration failed/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Reload & review' })
+    ).toBeInTheDocument();
+    expect(alpha).toHaveValue('y'); // the draft is untouched
+  });
+
+  it('keeps the record-list wording for a codeless 409', async () => {
+    const user = userEvent.setup();
+    const mod = moduleWith([field({ key: 'a', label: 'Alpha' })], {
+      availableEnvironments: ['production']
+    });
+    server.use(
+      envGet({ n: 0 }, { a: 'x' }),
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), () =>
+        HttpResponse.json(
+          { status: 409, title: 'Conflict', detail: 'slug exists' },
+          { status: 409 }
+        )
+      )
+    );
+    renderWithProviders(<TestHost mod={mod} />);
+    const alpha = await screen.findByLabelText('Alpha');
+    await waitFor(() => expect(alpha).toHaveValue('x'));
+    await user.clear(alpha);
+    await user.type(alpha, 'y');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(await screen.findByText(/changed this list/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Reload & review' })
+    ).not.toBeInTheDocument();
+  });
+});

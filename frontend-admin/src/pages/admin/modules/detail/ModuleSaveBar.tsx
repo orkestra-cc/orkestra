@@ -37,6 +37,9 @@ export interface ModuleSaveBarProps {
    */
   errors: ModuleSaveBarErrorGroup[];
   saving: boolean;
+  /** Save lost its compare-and-swap; Save is disabled until `onReload` runs. */
+  conflict?: boolean;
+  onReload?: () => void;
   onDiscard: () => void;
   onSave: () => void;
 }
@@ -55,6 +58,8 @@ const ModuleSaveBar: React.FC<ModuleSaveBarProps> = ({
   errorCount,
   errors,
   saving,
+  conflict,
+  onReload,
   onDiscard,
   onSave
 }) => {
@@ -107,12 +112,23 @@ const ModuleSaveBar: React.FC<ModuleSaveBarProps> = ({
             {t('adminModules.detail.configCard.discard')}
           </Button>
         )}
+        {conflict && onReload && (
+          <Button
+            type="button"
+            variant="warning"
+            size="sm"
+            onClick={onReload}
+            disabled={saving}
+          >
+            {t('adminModules.detail.saveBar.reloadReview')}
+          </Button>
+        )}
         <Button
           type="button"
           variant="primary"
           size="sm"
           onClick={onSave}
-          disabled={saving || dirtyCount === 0}
+          disabled={saving || dirtyCount === 0 || conflict}
         >
           {saving ? (
             <Spinner animation="border" size="sm" />

@@ -2379,7 +2379,9 @@
         "switchEnvBody": "Hai modifiche di configurazione non salvate. Passando a {{environment}} andranno perse.",
         "switchEnvConfirm": "Ignora e cambia",
         "stay": "Resta",
-        "leave": "Esci"
+        "leave": "Esci",
+        "revisionConflict": "Un altro operatore ha modificato la configurazione di questo modulo dopo il caricamento. Ricarica per rivedere le tue modifiche rispetto ai valori più recenti prima di salvare.",
+        "reloadFailed": "Il ricaricamento della configurazione più recente non è riuscito. Riprova prima di salvare."
       },
       "saveBar": {
         "changes_one": "{{count}} modifica non salvata",
@@ -2387,7 +2389,8 @@
         "perGroup": "{{group}} ({{count}})",
         "errors_one": "{{count}} campo da correggere",
         "errors_other": "{{count}} campi da correggere",
-        "goToError": "Vai a {{group}}"
+        "goToError": "Vai a {{group}}",
+        "reloadReview": "Ricarica e rivedi"
       },
       "rail": {
         "overview": "Panoramica",
