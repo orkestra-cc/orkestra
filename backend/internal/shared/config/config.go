@@ -100,6 +100,12 @@ type AudienceConfig struct {
 	// signup on the client SPA gets a verify URL on the client host (not
 	// the operator console). Empty falls back to ServerConfig.FrontendURL.
 	FrontendURL string
+	// PublicURL is the public origin of this audience's API (scheme +
+	// host, no path). The auth module redirects a client-tier OAuth
+	// callback to `{Client.PublicURL}/v1/auth/client/oauth/complete` so
+	// the refresh cookie is set by the host that owns it. Read from
+	// CLIENT_API_URL; empty means no client surface.
+	PublicURL string
 }
 
 type DatabaseConfig struct {

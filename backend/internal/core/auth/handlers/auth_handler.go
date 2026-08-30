@@ -85,6 +85,14 @@ type AuthHandler struct {
 	// avatars fall back to whatever URL was stored on the user
 	// document (likely empty for fresh uploads).
 	blobStore blob.Store
+
+	// spaBaseURL is THIS tier's SPA origin, resolved once by module.go
+	// (OPERATOR_FRONTEND_URL / CLIENT_FRONTEND_URL → FRONTEND_URL) and
+	// handed over with SetSPAURL. Every browser-facing redirect a callback
+	// issues — login success/failure, MFA continuation, link return — is
+	// built on it (oauth_callback_redirect.go); the Origin header is never
+	// consulted. Empty falls back to config.Server.FrontendURL.
+	spaBaseURL string
 }
 
 // SetBlobStore wires the object-storage handle used to mint presigned
