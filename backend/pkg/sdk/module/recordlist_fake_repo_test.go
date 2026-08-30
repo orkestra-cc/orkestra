@@ -42,6 +42,11 @@ type fakeConfigRepo struct {
 	// duringActivate runs inside an activation, modelling a concurrent
 	// write landing in the window a two-step activation leaves open.
 	duringActivate func()
+	// beforeMigrate runs inside MigrateToEnvironments before the no-profiles
+	// check — the window in which a concurrent writer migrates first.
+	beforeMigrate func()
+	// migrateErr, when set, makes MigrateToEnvironments fail with it.
+	migrateErr error
 }
 
 func newFakeConfigRepo() *fakeConfigRepo {
@@ -92,39 +97,33 @@ func (f *fakeConfigRepo) Upsert(_ context.Context, c *ModuleConfig) error {
 
 func (f *fakeConfigRepo) UpdateEnabled(context.Context, string, bool) error { return nil }
 
-func (f *fakeConfigRepo) UpdateConfigValues(_ context.Context, name string, v, e map[string]string) error {
-	doc := f.docs[name]
-	doc.ConfigValues, doc.EncryptedValues = v, e
-	return nil
-}
-
-func (f *fakeConfigRepo) UpdateEnvironmentConfig(_ context.Context, name, env string, v, e map[string]string) error {
-	doc := f.docs[name]
-	cfg := doc.Environments[env]
-	cfg.ConfigValues, cfg.EncryptedValues = v, e
-	doc.Environments[env] = cfg
-	return nil
-}
-
-func (f *fakeConfigRepo) SetActiveEnvironment(_ context.Context, name, env string) error {
-	f.docs[name].ActiveEnvironment = env
-	return nil
-}
-
 // MigrateToEnvironments mirrors the real one: a no-op fake would let the
 // service believe a legacy document had been migrated while the stored one
-// still had no Environments map at all.
-func (f *fakeConfigRepo) MigrateToEnvironments(_ context.Context, name string, cv, ev map[string]string) error {
+// still had no Environments map at all. Like the Mongo compare-and-swap, it
+// matches only a document that still has no profiles at the read revision.
+func (f *fakeConfigRepo) MigrateToEnvironments(_ context.Context, name string, cv, ev map[string]string, expectedRevision int64) (bool, error) {
+	if f.migrateErr != nil {
+		return false, f.migrateErr
+	}
+	if f.beforeMigrate != nil {
+		hook := f.beforeMigrate
+		f.beforeMigrate = nil
+		hook()
+	}
 	doc, ok := f.docs[name]
 	if !ok {
-		return fmt.Errorf("module %q not found", name)
+		return false, fmt.Errorf("module %q not found", name)
+	}
+	if len(doc.Environments) > 0 || doc.ConfigRevision != expectedRevision {
+		return false, nil
 	}
 	doc.ActiveEnvironment = "production"
 	doc.Environments = map[string]EnvironmentConfig{
 		"production": {ConfigValues: copyStrings(cv), EncryptedValues: copyStrings(ev)},
 		"sandbox":    {ConfigValues: map[string]string{}, EncryptedValues: map[string]string{}},
 	}
-	return nil
+	doc.ConfigRevision = expectedRevision + 1
+	return true, nil
 }
 
 func (f *fakeConfigRepo) ClearNeedsRestart(context.Context, string) error { return nil }
@@ -209,26 +208,4 @@ func (f *fakeConfigRepo) CompareAndSwapConfig(_ context.Context, name string, m 
 	doc.NeedsRestart = m.NeedsRestart
 	doc.ConfigRevision = m.ExpectedRevision + 1
 	return true, nil
-}
-
-// ActivateEnvironment mirrors the Mongo pipeline update: the values copied
-// into the legacy maps are read from the STORED document at execution time,
-// not from a snapshot the caller took earlier. duringActivate simulates a
-// write landing just before that read.
-func (f *fakeConfigRepo) ActivateEnvironment(_ context.Context, name, env string) error {
-	doc, ok := f.docs[name]
-	if !ok {
-		return fmt.Errorf("module %q not found", name)
-	}
-	if _, ok := doc.Environments[env]; !ok {
-		return fmt.Errorf("environment %q not found for module %q", env, name)
-	}
-	if f.duringActivate != nil {
-		f.duringActivate()
-	}
-	cfg := doc.Environments[env]
-	doc.ActiveEnvironment = env
-	doc.ConfigValues = copyStrings(cfg.ConfigValues)
-	doc.EncryptedValues = copyStrings(cfg.EncryptedValues)
-	return nil
 }

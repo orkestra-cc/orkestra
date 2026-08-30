@@ -289,20 +289,15 @@ func (h *ModuleAdminHandler) UpdateModule(ctx context.Context, input *UpdateModu
 		}
 	}
 
-	// Update config values
-	configChanged := false
+	// Update config values. needsRestart is persisted by the write itself,
+	// from the module's own hot-reload declaration — there is no follow-up
+	// clear to get out of step with it.
 	if len(input.Body.Config) > 0 || len(input.Body.Secrets) > 0 {
 		// UpdateConfig merges into the stored config — keys the caller omits are
 		// preserved, so a config-only change never wipes the module's secrets.
 		if err := h.configService.UpdateConfig(ctx, input.Name, input.Body.Config, input.Body.Secrets); err != nil {
 			return nil, mapConfigServiceError(err, func(e error) error { return e })
 		}
-		configChanged = true
-	}
-
-	// Modules that read config lazily don't need a restart for config-only changes.
-	if configChanged && input.Body.Enabled == nil && h.registry.SupportsHotReload(input.Name) {
-		_ = h.configService.ClearNeedsRestart(ctx, input.Name)
 	}
 
 	// Return updated config
@@ -435,10 +430,6 @@ func (h *ModuleAdminHandler) UpdateEnvironment(ctx context.Context, input *Updat
 		})
 	}
 
-	if h.registry.SupportsHotReload(input.Name) {
-		_ = h.configService.ClearNeedsRestart(ctx, input.Name)
-	}
-
 	envConfig, secretStatus, err := h.configService.GetEnvironmentConfig(ctx, input.Name, input.Env)
 	if err != nil {
 		return nil, err
@@ -487,10 +478,9 @@ func (h *ModuleAdminHandler) SetActiveEnvironment(ctx context.Context, input *Se
 		return nil, mapConfigServiceError(err, func(e error) error { return huma.Error400BadRequest(e.Error()) })
 	}
 
+	// The activation write already persisted this same value; it is recomputed
+	// here only to report it back.
 	needsRestart := !h.registry.SupportsHotReload(input.Name)
-	if !needsRestart {
-		_ = h.configService.ClearNeedsRestart(ctx, input.Name)
-	}
 
 	return &SetActiveEnvironmentOutput{
 		Body: struct {

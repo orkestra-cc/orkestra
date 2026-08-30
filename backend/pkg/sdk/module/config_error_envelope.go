@@ -41,5 +41,17 @@ func mapConfigServiceError(err error, fallback func(error) error) error {
 		}
 		return huma.Error422UnprocessableEntity(invalid.Error())
 	}
+	// A lost compare-and-swap is a 409 with a stable code on every surface:
+	// the client reloads the document and re-reviews its diff. It is
+	// deliberately never retried server-side — a retry would re-decide the
+	// operator's change against a state they never saw.
+	if errors.Is(err, ErrRevisionStale) {
+		return &configValidationHTTPError{
+			Status: http.StatusConflict,
+			Title:  http.StatusText(http.StatusConflict),
+			Detail: "The module configuration changed after it was loaded. Reload and review your changes before saving again.",
+			Code:   CodeConfigRevisionStale,
+		}
+	}
 	return fallback(err)
 }

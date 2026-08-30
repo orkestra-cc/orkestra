@@ -74,6 +74,15 @@ The SDK is on the path to v1.0 publication. Until then:
   turns "N tries" into "N tries per serial caller". A fork that
   substitutes its own `RedisClient` (a test double, typically) must add
   the two methods.
+- **`module.ConfigRepository` is provided TO `ModuleConfigService`, not
+  implemented BY modules** — the same category as `RedisClient`, and its own
+  doc comment says so ("exactly what the service calls — no more"). It is
+  therefore outside the additive-only rule: it changed shape for atomic
+  module-config writes (`CompareAndSwapConfig` added; `CompareAndSwapEnvironment`
+  and `MigrateToEnvironments` re-signed; the four two-step write methods
+  removed). The only thing that tracks it is a fork's substitute repository (a
+  test double); `var _ ConfigRepository = (*ModuleConfigRepository)(nil)` pins
+  the in-tree one.
 - **DTO field additions** in `iface/` should be optional (pointer types
   or `omitempty`) so older implementations keep compiling. Required
   fields are major-version bumps.
@@ -249,6 +258,31 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   behaviour (see the note above), not an oversight: a module that only
   implements `HasConfigValidator` still activates a legacy-invalid stored
   profile unconditionally.
+- **`module.HasConfigSnapshotValidator` is the successor seam that sees the
+  whole target snapshot.** `ValidateConfigSnapshot(ctx, module.ConfigValidationSnapshot)`
+  runs on all three mutation surfaces — active-config PATCH, named-environment
+  PATCH (record-list path included) and activation — with `Values` (raw merged
+  target, absent ≠ empty), `EffectiveValues` (the runtime EnvVar/Default
+  fallback applied) and `SecretPresent` (names → booleans, computed from the
+  **target** profile's own stored ciphertext, this request's submitted secrets,
+  and the schema fallback — never another profile's secrets, never plaintext).
+  A module that implements it is judged through it everywhere and its older
+  hooks are not called; a module that omits it keeps `HasConfigValidator` /
+  `HasConfigActivationValidator` exactly as before. A stored secret that cannot
+  be decrypted aborts the mutation (`ErrConfigSecretUnreadable`) unless the
+  request submits a replacement for that key.
+- **Every config mutation is ONE compare-and-swap `UpdateOne` on
+  `ModuleConfig.ConfigRevision`** (`ConfigRepository.CompareAndSwapConfig` with
+  an explicit `ConfigMutation`: profile write + legacy mirror, or server-side
+  activation). Profiles are the source of truth; the legacy top-level maps are
+  a mirror written in the same update. A lost race is `ErrRevisionStale` → 409
+  with body code `module.CodeConfigRevisionStale` (`"module.config_revision_stale"`,
+  SDK-owned — `errcode` must never declare a `module.*` code); the client
+  reloads and re-reviews, nothing auto-retries. The record-list CAS increments
+  `configRevision` in its own update, so record-list and ordinary writes cannot
+  pass each other unseen. `needsRestart` is persisted in that same write as
+  `!SupportsHotReload(name)` (`SetHotReloadResolver`, installed by the registry
+  before seeding); the admin handler no longer clears it afterwards.
 - **A `ConfigValidationError` with a non-empty `Code`** (e.g.
   `"tenant.single_mode_conflict"`) upgrades the admin API's response from
   the legacy text-only `422` to the `{status,title,detail,code}` envelope

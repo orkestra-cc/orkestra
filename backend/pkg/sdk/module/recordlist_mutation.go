@@ -72,8 +72,18 @@ func (s *ModuleConfigService) UpdateEnvironmentConfigWithRecordLists(
 		return ErrRevisionRequired
 	}
 
-	// The roster is SDK-owned. A client that writes it directly would bypass
-	// every precondition below, so it never survives the request boundary.
+	// Lane validation runs on the payload AS SUBMITTED: the roster is
+	// SDK-owned, so a request that writes it directly is refused here, not
+	// silently dropped by the strip below. The schema is the live one
+	// (schemaFor); the document is read inside the loop only for its values.
+	if known, ok := s.knownModules[name]; ok {
+		if err := validateSubmittedKeys(ConfigSchemaOf(known), values, secrets); err != nil {
+			return err
+		}
+	}
+	// Defence in depth for a module this service does not know (no live
+	// schema to refuse against): the roster never survives the request
+	// boundary either way.
 	values = withoutRosterKeys(values)
 
 	encrypted := make(map[string]string, len(secrets))
@@ -141,13 +151,14 @@ func (s *ModuleConfigService) UpdateEnvironmentConfigWithRecordLists(
 		for _, m := range mutations {
 			byField[m.Field] = m
 		}
-		if err := validateRecordListSubmission(doc.ConfigSchema, values, next.ConfigValues, byField); err != nil {
+		schema := s.schemaFor(name, doc)
+		if err := validateRecordListSubmission(schema, values, next.ConfigValues, byField); err != nil {
 			return err
 		}
 
 		// Validate exactly what will be written.
 		if err := s.validateCandidate(ctx, name, candidate{
-			schema:           doc.ConfigSchema,
+			schema:           schema,
 			env:              envName,
 			values:           next.ConfigValues,
 			storedEncrypted:  next.EncryptedValues,
@@ -156,12 +167,12 @@ func (s *ModuleConfigService) UpdateEnvironmentConfigWithRecordLists(
 			return err
 		}
 
-		won, err := s.repo.CompareAndSwapEnvironment(ctx, name, envName, cur.Revision, next, true)
+		won, err := s.repo.CompareAndSwapEnvironment(ctx, name, envName, cur.Revision, next, s.needsRestartFor(name))
 		if err != nil {
 			return err
 		}
 		if won {
-			return s.InvalidateCache(ctx, name)
+			return nil
 		}
 		if removing {
 			return ErrRevisionStale

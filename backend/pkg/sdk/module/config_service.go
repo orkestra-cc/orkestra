@@ -22,6 +22,51 @@ type ModuleConfigService struct {
 	// runtime (dev DB wipe, accidental drop, etc.) without requiring a
 	// backend restart. Populated once at boot and then read-only.
 	knownModules map[string]Module
+
+	// hotReload answers "does this module re-read its config at request
+	// time" — installed by the registry from SupportsHotReload. Every
+	// config/environment/activation write persists needsRestart =
+	// !hotReload(name) in the same update as the values, so the flag can
+	// never diverge through a later best-effort clear. Nil means every
+	// write marks needsRestart (the pre-resolver behaviour).
+	hotReload func(name string) bool
+}
+
+// SetHotReloadResolver installs the registry's hot-reload answer. See the
+// hotReload field.
+func (s *ModuleConfigService) SetHotReloadResolver(fn func(name string) bool) { s.hotReload = fn }
+
+func (s *ModuleConfigService) needsRestartFor(name string) bool {
+	if s.hotReload == nil {
+		return true
+	}
+	return !s.hotReload(name)
+}
+
+// schemaFor returns the schema every mutation is judged against: the
+// registered module's live declaration when the module is known — the
+// binary is the source of truth, and the stored copy is only a boot-time
+// snapshot whose refresh may have failed — or the stored snapshot for a
+// document whose module is not registered with this service.
+func (s *ModuleConfigService) schemaFor(name string, doc *ModuleConfig) []ConfigField {
+	if m, ok := s.knownModules[name]; ok {
+		return ConfigSchemaOf(m)
+	}
+	return doc.ConfigSchema
+}
+
+// encryptAll encrypts every submitted secret; an empty plaintext encrypts to
+// "" (clearing the key), which GetSecret then reads as "fall back".
+func encryptAll(secrets map[string]string) (map[string]string, error) {
+	encrypted := make(map[string]string, len(secrets))
+	for k, v := range secrets {
+		enc, err := encryptSecret(v)
+		if err != nil {
+			return nil, fmt.Errorf("encrypt secret %q: %w", k, err)
+		}
+		encrypted[k] = enc
+	}
+	return encrypted, nil
 }
 
 const (
@@ -255,8 +300,7 @@ func (s *ModuleConfigService) GetConfig(ctx context.Context, name string) (*Modu
 	}
 	if doc != nil {
 		if err := s.ensureEnvironments(ctx, doc); err != nil {
-			s.logger.Warn("GetConfig: failed to migrate environments",
-				slog.String("module", name), slog.String("error", err.Error()))
+			return nil, fmt.Errorf("module %q: migrate legacy config: %w", name, err)
 		}
 		return doc, nil
 	}
@@ -264,13 +308,16 @@ func (s *ModuleConfigService) GetConfig(ctx context.Context, name string) (*Modu
 }
 
 // ensureEnvironments lazily migrates a legacy document (no Environments map)
-// by copying the top-level ConfigValues/EncryptedValues into a "production"
-// environment profile and creating an empty "sandbox" profile.
+// by copying the top-level maps into a "production" profile and creating an
+// empty "sandbox" profile, under a compare-and-swap. On success doc is
+// updated in memory to match what was written (profiles AND the advanced
+// configRevision). If another writer migrated or moved the document first,
+// doc is REPLACED by a fresh read so the caller judges its own write against
+// the current document rather than a stale legacy snapshot.
 func (s *ModuleConfigService) ensureEnvironments(ctx context.Context, doc *ModuleConfig) error {
 	if len(doc.Environments) > 0 {
 		return nil // already migrated
 	}
-
 	cv := doc.ConfigValues
 	if cv == nil {
 		cv = make(map[string]string)
@@ -279,18 +326,33 @@ func (s *ModuleConfigService) ensureEnvironments(ctx context.Context, doc *Modul
 	if ev == nil {
 		ev = make(map[string]string)
 	}
-
-	if err := s.repo.MigrateToEnvironments(ctx, doc.ModuleName, cv, ev); err != nil {
+	won, err := s.repo.MigrateToEnvironments(ctx, doc.ModuleName, cv, ev, doc.ConfigRevision)
+	if err != nil {
 		return err
 	}
-
-	// Update in-memory doc so callers see the migration immediately.
-	now := time.Now()
-	doc.ActiveEnvironment = "production"
-	doc.Environments = map[string]EnvironmentConfig{
-		"production": {ConfigValues: cv, EncryptedValues: ev, UpdatedAt: now},
-		"sandbox":    {ConfigValues: make(map[string]string), EncryptedValues: make(map[string]string), UpdatedAt: now},
+	if won {
+		now := time.Now()
+		doc.ActiveEnvironment = "production"
+		doc.Environments = map[string]EnvironmentConfig{
+			"production": {ConfigValues: cv, EncryptedValues: ev, UpdatedAt: now},
+			"sandbox":    {ConfigValues: make(map[string]string), EncryptedValues: make(map[string]string), UpdatedAt: now},
+		}
+		doc.ConfigRevision++
+		return nil
 	}
+	fresh, err := s.repo.FindByName(ctx, doc.ModuleName)
+	if err != nil {
+		return err
+	}
+	if fresh == nil {
+		return fmt.Errorf("module %q not found", doc.ModuleName)
+	}
+	if len(fresh.Environments) == 0 {
+		// The revision moved without a migration (a legacy-only backfill
+		// landed). Retryable by the caller; never loop here.
+		return fmt.Errorf("module %q: %w (profile migration)", doc.ModuleName, ErrRevisionStale)
+	}
+	*doc = *fresh
 	return nil
 }
 
@@ -379,74 +441,72 @@ func (s *ModuleConfigService) lazySeed(ctx context.Context, name string) (*Modul
 	return s.repo.FindByName(ctx, name)
 }
 
-// UpdateConfig updates a module's config values and encrypted secrets for the
-// active environment, then invalidates the Redis cache for immediate propagation.
-// Also keeps the legacy top-level fields in sync for backward compatibility.
+// UpdateConfig merges values and secrets into the ACTIVE environment profile
+// and mirrors the result into the legacy top-level fields, in one
+// compare-and-swap write. Keys not present in the call are preserved, never
+// wiped — a toggle flip carries no secrets and must not blank the module's
+// credentials.
 //
-// Incoming values and secrets are MERGED into the module's stored config — keys
-// not present in the call are preserved, never wiped. Pass only the keys you
-// want to add or change. This guard is load-bearing: a config-only update
-// (e.g. flipping a feature toggle) carries no secrets, and replacing rather
-// than merging would blank out every encrypted secret the module holds.
+// Profiles are the source of truth; the legacy maps are a compatibility
+// mirror. The merge, the validation snapshot and the write all use the
+// active profile, so a pre-existing divergence between profile and mirror
+// is repaired by the write rather than perpetuated. A legacy document with
+// no profiles completes its lazy migration first — itself a compare-and-swap
+// — so the revision the write is judged against is the migrated document's.
 func (s *ModuleConfigService) UpdateConfig(ctx context.Context, name string, values map[string]string, secrets map[string]string) error {
-	// Load first: the module validator must see the merged document, and
-	// nothing may be encrypted or written before it has accepted it. The
-	// legacy top-level fields and the active environment can diverge, so
-	// each target is merged against its own existing maps below — the
-	// validator sees the legacy top-level merge, since that is the map the
-	// admin API has historically treated as the config of record.
-	existing, err := s.repo.FindByName(ctx, name)
+	doc, err := s.repo.FindByName(ctx, name)
 	if err != nil {
 		return err
 	}
-	if existing == nil {
+	if doc == nil {
 		return fmt.Errorf("module %q not found", name)
 	}
+	// ensureEnvironments migrates under its own compare-and-swap and leaves
+	// doc current — profiles, activeEnvironment and configRevision — whether
+	// this call won the migration or re-read after another writer did.
+	if err := s.ensureEnvironments(ctx, doc); err != nil {
+		return err
+	}
+	env := doc.ActiveEnv()
+	cur, ok := doc.Environments[env]
+	if !ok {
+		return fmt.Errorf("environment %q not found for module %q", env, name)
+	}
+	schema := s.schemaFor(name, doc)
+	if err := validateSubmittedKeys(schema, values, secrets); err != nil {
+		return err
+	}
+	mergedValues := mergeStringMaps(cur.ConfigValues, values)
 
-	mergedValues := mergeStringMaps(existing.ConfigValues, values)
 	if err := s.validateCandidate(ctx, name, candidate{
-		schema:           existing.ConfigSchema,
-		env:              existing.ActiveEnv(),
-		values:           mergedValues,
-		storedEncrypted:  existing.ActiveEncryptedValues(),
-		submittedSecrets: secrets,
+		schema: schema, env: env, values: mergedValues,
+		storedEncrypted: cur.EncryptedValues, submittedSecrets: secrets,
 	}); err != nil {
 		return err
 	}
 
-	encrypted := make(map[string]string, len(secrets))
-	for k, v := range secrets {
-		enc, err := encryptSecret(v)
-		if err != nil {
-			return fmt.Errorf("encrypt secret %q: %w", k, err)
-		}
-		encrypted[k] = enc
-	}
-
-	// Update legacy top-level fields for backward compat.
-	if err := s.repo.UpdateConfigValues(
-		ctx, name,
-		mergedValues,
-		mergeStringMaps(existing.EncryptedValues, encrypted),
-	); err != nil {
+	encrypted, err := encryptAll(secrets)
+	if err != nil {
 		return err
 	}
+	mergedSecrets := mergeStringMaps(cur.EncryptedValues, encrypted)
 
-	// Also update the active environment if environments exist.
-	if len(existing.Environments) > 0 {
-		activeEnv := existing.ActiveEnv()
-		env := existing.Environments[activeEnv]
-		if err := s.repo.UpdateEnvironmentConfig(
-			ctx, name, activeEnv,
-			mergeStringMaps(env.ConfigValues, values),
-			mergeStringMaps(env.EncryptedValues, encrypted),
-		); err != nil {
-			s.logger.Warn("UpdateConfig: failed to update environment config",
-				slog.String("module", name), slog.String("env", activeEnv), slog.String("error", err.Error()))
-		}
+	won, err := s.repo.CompareAndSwapConfig(ctx, name, ConfigMutation{
+		ExpectedRevision: doc.ConfigRevision,
+		Env:              env, EnvValues: mergedValues, EnvSecrets: mergedSecrets, EnvRevision: cur.Revision,
+		WriteLegacy: true, LegacyValues: mergedValues, LegacySecrets: mergedSecrets,
+		NeedsRestart: s.needsRestartFor(name),
+	})
+	if err != nil {
+		return err
 	}
-
-	return s.InvalidateCache(ctx, name)
+	if !won {
+		return ErrRevisionStale
+	}
+	// No cache invalidation: Redis caches only the enabled flag, which a
+	// config write does not change. The CAS is the commit; nothing after it
+	// may turn a committed write into a reported failure.
+	return nil
 }
 
 // mergeStringMaps returns a new map containing every key in base overlaid with
@@ -465,10 +525,13 @@ func mergeStringMaps(base, overlay map[string]string) map[string]string {
 	return out
 }
 
-// UpdateEnvironmentConfig updates config values and secrets for a specific
-// named environment. If updating the active environment, also syncs legacy fields.
+// UpdateEnvironmentConfig merges values and secrets into ONE named profile
+// in one compare-and-swap write. When that profile is the active one the
+// legacy mirror is synced in the same update; otherwise the mirror and the
+// active profile are untouched. The module's validation seam sees the
+// merged target profile — this surface must not be a bypass around the
+// active-config PATCH.
 func (s *ModuleConfigService) UpdateEnvironmentConfig(ctx context.Context, name, envName string, values map[string]string, secrets map[string]string) error {
-	// Ensure the module exists and has environments.
 	doc, err := s.GetConfig(ctx, name)
 	if err != nil {
 		return err
@@ -476,56 +539,54 @@ func (s *ModuleConfigService) UpdateEnvironmentConfig(ctx context.Context, name,
 	if doc == nil {
 		return fmt.Errorf("module %q not found", name)
 	}
-
-	// Verify environment exists.
-	if _, ok := doc.Environments[envName]; !ok {
+	cur, ok := doc.Environments[envName]
+	if !ok {
 		return fmt.Errorf("environment %q not found for module %q", envName, name)
 	}
+	schema := s.schemaFor(name, doc)
+	if err := validateSubmittedKeys(schema, values, secrets); err != nil {
+		return err
+	}
+	mergedValues := mergeStringMaps(cur.ConfigValues, values)
 
-	// Merge with existing env values (don't wipe unset fields), then let the
-	// module's optional validator see the merged result before anything is
-	// encrypted or persisted. This is the named-environment PATCH surface;
-	// it must not be a bypass around the active-config PATCH's validation.
-	existingEnv := doc.Environments[envName]
-	mergedValues := mergeStringMaps(existingEnv.ConfigValues, values)
 	if err := s.validateCandidate(ctx, name, candidate{
-		schema:           doc.ConfigSchema,
-		env:              envName,
-		values:           mergedValues,
-		storedEncrypted:  existingEnv.EncryptedValues,
-		submittedSecrets: secrets,
+		schema: schema, env: envName, values: mergedValues,
+		storedEncrypted: cur.EncryptedValues, submittedSecrets: secrets,
 	}); err != nil {
 		return err
 	}
 
-	encrypted := make(map[string]string, len(secrets))
-	for k, v := range secrets {
-		enc, err := encryptSecret(v)
-		if err != nil {
-			return fmt.Errorf("encrypt secret %q: %w", k, err)
-		}
-		encrypted[k] = enc
-	}
-
-	mergedEncrypted := mergeStringMaps(existingEnv.EncryptedValues, encrypted)
-
-	if err := s.repo.UpdateEnvironmentConfig(ctx, name, envName, mergedValues, mergedEncrypted); err != nil {
+	encrypted, err := encryptAll(secrets)
+	if err != nil {
 		return err
 	}
+	mergedSecrets := mergeStringMaps(cur.EncryptedValues, encrypted)
 
-	// If this is the active environment, also sync legacy top-level fields.
-	if envName == doc.ActiveEnv() {
-		if err := s.repo.UpdateConfigValues(ctx, name, mergedValues, mergedEncrypted); err != nil {
-			s.logger.Warn("UpdateEnvironmentConfig: failed to sync legacy fields",
-				slog.String("module", name), slog.String("error", err.Error()))
-		}
+	mut := ConfigMutation{
+		ExpectedRevision: doc.ConfigRevision,
+		Env:              envName, EnvValues: mergedValues, EnvSecrets: mergedSecrets, EnvRevision: cur.Revision,
+		NeedsRestart: s.needsRestartFor(name),
 	}
-
-	return s.InvalidateCache(ctx, name)
+	if envName == doc.ActiveEnv() {
+		mut.WriteLegacy, mut.LegacyValues, mut.LegacySecrets = true, mergedValues, mergedSecrets
+	}
+	won, err := s.repo.CompareAndSwapConfig(ctx, name, mut)
+	if err != nil {
+		return err
+	}
+	if !won {
+		return ErrRevisionStale
+	}
+	return nil
 }
 
-// SetActiveEnvironment switches the active environment for a module and syncs
-// the active environment's config to the legacy top-level fields.
+// SetActiveEnvironment switches the active profile in one compare-and-swap
+// pipeline update that also copies the target's STORED values and secrets
+// into the legacy mirror server-side. The module's validation seam judges
+// the stored target profile as a whole — with the target's own secret
+// presence, never the currently active profile's — strictly before the
+// write, so a refused activation leaves the active name, the mirror and
+// needsRestart exactly as they were.
 func (s *ModuleConfigService) SetActiveEnvironment(ctx context.Context, name, envName string) error {
 	doc, err := s.GetConfig(ctx, name)
 	if err != nil {
@@ -534,41 +595,31 @@ func (s *ModuleConfigService) SetActiveEnvironment(ctx context.Context, name, en
 	if doc == nil {
 		return fmt.Errorf("module %q not found", name)
 	}
-	if _, ok := doc.Environments[envName]; !ok {
+	target, ok := doc.Environments[envName]
+	if !ok {
 		return fmt.Errorf("environment %q not found for module %q", envName, name)
 	}
-
-	// Activation-time validation: the target profile as a whole, before any
-	// write. Mirrors validateCandidate's dispatch. It reads the profile from
-	// the `doc` snapshot deliberately — validating what the operator is
-	// activating — while the write below re-reads server-side; a profile
-	// mutated in between is caught by the next activation, not silently
-	// half-applied by this one.
-	cv := doc.Environments[envName].ConfigValues
+	cv := target.ConfigValues
 	if cv == nil {
 		cv = make(map[string]string)
 	}
 	if err := s.validateCandidate(ctx, name, candidate{
-		schema:          doc.ConfigSchema,
-		env:             envName,
-		values:          cv,
-		storedEncrypted: doc.Environments[envName].EncryptedValues,
-		activation:      true,
+		schema: s.schemaFor(name, doc), env: envName, values: cv,
+		storedEncrypted: target.EncryptedValues, activation: true,
 	}); err != nil {
 		return err
 	}
-
-	// One write: the activation and the legacy-map sync are the same update,
-	// and the values copied are read server-side at execution time. Copying
-	// `doc` — a snapshot taken above — put back whatever a concurrent write
-	// had removed in between, secrets included. A failed sync is returned
-	// rather than logged: activeEnvironment pointing at a profile whose
-	// values were never copied is not a success.
-	if err := s.repo.ActivateEnvironment(ctx, name, envName); err != nil {
+	won, err := s.repo.CompareAndSwapConfig(ctx, name, ConfigMutation{
+		ExpectedRevision: doc.ConfigRevision, Activate: envName,
+		NeedsRestart: s.needsRestartFor(name),
+	})
+	if err != nil {
 		return err
 	}
-
-	return s.InvalidateCache(ctx, name)
+	if !won {
+		return ErrRevisionStale
+	}
+	return nil
 }
 
 // GetEnvironmentConfig retrieves config values and secret status for a specific environment.
@@ -615,7 +666,10 @@ func (s *ModuleConfigService) GetEnvironmentConfig(ctx context.Context, name, en
 	return &env, secretStatus, nil
 }
 
-// UpdateEnabled toggles a module's enabled state and invalidates the cache.
+// UpdateEnabled persists a module's enabled state. The Redis-cached enabled
+// flag is invalidated best-effort: the persisted state is the truth, the
+// ModuleGate self-corrects within the 30-second cache TTL, and a Redis
+// hiccup must not report a committed write as a failure.
 func (s *ModuleConfigService) UpdateEnabled(ctx context.Context, name string, enabled bool) error {
 	if s.coreModules[name] {
 		return fmt.Errorf("cannot disable core module %q", name)
@@ -623,7 +677,11 @@ func (s *ModuleConfigService) UpdateEnabled(ctx context.Context, name string, en
 	if err := s.repo.UpdateEnabled(ctx, name, enabled); err != nil {
 		return err
 	}
-	return s.InvalidateCache(ctx, name)
+	if err := s.InvalidateCache(ctx, name); err != nil {
+		s.logger.Warn("UpdateEnabled: failed to invalidate the enabled-flag cache; the gate converges within the cache TTL",
+			slog.String("module", name), slog.String("error", err.Error()))
+	}
+	return nil
 }
 
 // InvalidateCache removes the Redis cached enabled state for a module,

@@ -121,25 +121,6 @@ func (r *ModuleConfigRepository) UpdateEnabled(ctx context.Context, name string,
 	return nil
 }
 
-// UpdateConfigValues updates a module's plain and encrypted config values.
-// Sets needsRestart to true so the admin UI can signal a restart is needed.
-func (r *ModuleConfigRepository) UpdateConfigValues(ctx context.Context, name string, values map[string]string, encrypted map[string]string) error {
-	_, err := r.collection.UpdateOne(
-		ctx,
-		bson.M{"moduleName": name},
-		bson.M{"$set": bson.M{
-			"configValues":    values,
-			"encryptedValues": encrypted,
-			"needsRestart":    true,
-			"updatedAt":       time.Now(),
-		}},
-	)
-	if err != nil {
-		return fmt.Errorf("update config values for %q: %w", name, err)
-	}
-	return nil
-}
-
 // FindEnabledAddonNames returns the names of all non-core modules that have
 // enabled=true in the module_configs collection. Used by the boot path so
 // that modules enabled via the admin UI are loaded on next restart.
@@ -177,26 +158,6 @@ func (r *ModuleConfigRepository) ClearNeedsRestart(ctx context.Context, name str
 	)
 	if err != nil {
 		return fmt.Errorf("clear needsRestart for %q: %w", name, err)
-	}
-	return nil
-}
-
-// UpdateEnvironmentConfig updates config values and encrypted secrets for a
-// specific named environment within a module's Environments map.
-func (r *ModuleConfigRepository) UpdateEnvironmentConfig(ctx context.Context, name, envName string, values map[string]string, encrypted map[string]string) error {
-	now := time.Now()
-	update := bson.M{
-		"$set": bson.M{
-			fmt.Sprintf("environments.%s.configValues", envName):    values,
-			fmt.Sprintf("environments.%s.encryptedValues", envName): encrypted,
-			fmt.Sprintf("environments.%s.updatedAt", envName):       now,
-			"needsRestart": true,
-			"updatedAt":    now,
-		},
-	}
-	_, err := r.collection.UpdateOne(ctx, bson.M{"moduleName": name}, update)
-	if err != nil {
-		return fmt.Errorf("update environment config %q/%q: %w", name, envName, err)
 	}
 	return nil
 }
@@ -388,75 +349,41 @@ func (r *ModuleConfigRepository) CompareAndSwapConfig(ctx context.Context, name 
 	return res.MatchedCount == 1, nil
 }
 
-// SetActiveEnvironment switches the active environment for a module.
-func (r *ModuleConfigRepository) SetActiveEnvironment(ctx context.Context, name, envName string) error {
+// MigrateToEnvironments copies the legacy top-level maps into a "production"
+// profile (plus an empty "sandbox") and sets activeEnvironment, in one
+// compare-and-swap that matches only while the document STILL has no
+// profiles and its configRevision is the one the caller read. Returns
+// (false, nil) when another writer migrated or moved the document first —
+// the caller re-reads instead of copying a stale legacy snapshot over a
+// profile that was just written. Advances configRevision.
+func (r *ModuleConfigRepository) MigrateToEnvironments(
+	ctx context.Context, name string, configValues, encryptedValues map[string]string, expectedRevision int64,
+) (bool, error) {
 	now := time.Now()
-	_, err := r.collection.UpdateOne(
-		ctx,
-		bson.M{"moduleName": name},
-		bson.M{"$set": bson.M{"activeEnvironment": envName, "needsRestart": true, "updatedAt": now}},
-	)
+	noProfiles := bson.M{"$or": bson.A{
+		bson.M{"environments": bson.M{"$exists": false}},
+		bson.M{"environments": bson.M{}},
+	}}
+	revision := bson.M{"configRevision": expectedRevision}
+	if expectedRevision == 0 {
+		revision = bson.M{"$or": bson.A{
+			bson.M{"configRevision": int64(0)},
+			bson.M{"configRevision": bson.M{"$exists": false}},
+		}}
+	}
+	filter := bson.M{"moduleName": name, "$and": bson.A{noProfiles, revision}}
+	update := bson.M{"$set": bson.M{
+		"activeEnvironment":       "production",
+		"environments.production": EnvironmentConfig{ConfigValues: configValues, EncryptedValues: encryptedValues, UpdatedAt: now},
+		"environments.sandbox":    EnvironmentConfig{ConfigValues: map[string]string{}, EncryptedValues: map[string]string{}, UpdatedAt: now},
+		"configRevision":          expectedRevision + 1,
+		"updatedAt":               now,
+	}}
+	res, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
-		return fmt.Errorf("set active environment for %q to %q: %w", name, envName, err)
+		return false, fmt.Errorf("migrate to environments for %q: %w", name, err)
 	}
-	return nil
-}
-
-// ActivateEnvironment sets the active environment and copies that
-// environment's values into the legacy top-level maps in ONE update, reading
-// them server-side at execution time. The previous two-step version copied a
-// snapshot the process had read earlier, so a write landing in between was
-// silently rolled back — including a removal, which brought its secret back.
-func (r *ModuleConfigRepository) ActivateEnvironment(ctx context.Context, name, envName string) error {
-	envPath := "$environments." + envName
-	res, err := r.collection.UpdateOne(ctx,
-		bson.M{"moduleName": name, "environments." + envName: bson.M{"$exists": true}},
-		mongo.Pipeline{{{Key: "$set", Value: bson.M{
-			"activeEnvironment": envName,
-			"configValues":      bson.M{"$ifNull": bson.A{envPath + ".configValues", bson.M{}}},
-			"encryptedValues":   bson.M{"$ifNull": bson.A{envPath + ".encryptedValues", bson.M{}}},
-			"needsRestart":      true,
-			"updatedAt":         time.Now().UTC(),
-		}}}},
-	)
-	if err != nil {
-		return fmt.Errorf("activate environment %q for %q: %w", envName, name, err)
-	}
-	if res.MatchedCount == 0 {
-		return fmt.Errorf("environment %q not found for module %q", envName, name)
-	}
-	return nil
-}
-
-// MigrateToEnvironments copies legacy top-level ConfigValues/EncryptedValues
-// into the Environments map and sets ActiveEnvironment = "production".
-// This is a one-time migration for documents that predate the environment feature.
-func (r *ModuleConfigRepository) MigrateToEnvironments(ctx context.Context, name string, configValues, encryptedValues map[string]string) error {
-	now := time.Now()
-	prodEnv := EnvironmentConfig{
-		ConfigValues:    configValues,
-		EncryptedValues: encryptedValues,
-		UpdatedAt:       now,
-	}
-	sandboxEnv := EnvironmentConfig{
-		ConfigValues:    make(map[string]string),
-		EncryptedValues: make(map[string]string),
-		UpdatedAt:       now,
-	}
-	_, err := r.collection.UpdateOne(
-		ctx,
-		bson.M{"moduleName": name},
-		bson.M{"$set": bson.M{
-			"activeEnvironment":       "production",
-			"environments.production": prodEnv,
-			"environments.sandbox":    sandboxEnv,
-			"updatedAt":               now,
-		}},
-	)
-	if err != nil {
-		return fmt.Errorf("migrate to environments for %q: %w", name, err)
-	}
-	return nil
+	return res.MatchedCount == 1, nil
 }
 
 // RefreshMetadata rewrites the fields derived from a module's code
