@@ -341,8 +341,19 @@
       "callback": {
         "failureTitle": "Autenticazione fallita",
         "redirectingToLogin": "Reindirizzamento alla pagina di accesso...",
-        "oauthErrorPrefix": "Errore OAuth",
-        "genericFailure": "Autenticazione fallita"
+        "verifying": "Completamento dell'accesso...",
+        "sessionSignedOut": "Accesso completato, ma non è stato possibile stabilire una sessione. Accedi di nuovo.",
+        "sessionUnavailable": "Il server non riesce a confermare la sessione in questo momento. Riprova tra poco.",
+        "retry": "Riprova",
+        "backToLogin": "Torna all'accesso",
+        "errors": {
+          "accessDenied": "L'accesso è stato annullato presso il provider di identità.",
+          "signupDisabled": "La registrazione è attualmente solo su invito. Contatta un amministratore.",
+          "linkDisabled": "Esiste già un account con questa email. Accedi e collega il provider dalle impostazioni di sicurezza.",
+          "emailUnverified": "Il provider di identità non ha verificato questo indirizzo email, quindi non può essere usato per accedere.",
+          "providerUnavailable": "Questo provider di accesso non è al momento disponibile. Riprova più tardi.",
+          "loginFailed": "Autenticazione fallita. Riprova."
+        }
       }
     },
     "errors": {

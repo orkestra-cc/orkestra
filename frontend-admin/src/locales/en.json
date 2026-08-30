@@ -341,8 +341,19 @@
       "callback": {
         "failureTitle": "Authentication failed",
         "redirectingToLogin": "Redirecting to the sign-in page...",
-        "oauthErrorPrefix": "OAuth error",
-        "genericFailure": "Authentication failed"
+        "verifying": "Completing sign-in...",
+        "sessionSignedOut": "Sign-in completed, but no session could be established. Please sign in again.",
+        "sessionUnavailable": "The server could not confirm your session right now. Try again in a moment.",
+        "retry": "Try again",
+        "backToLogin": "Back to sign-in",
+        "errors": {
+          "accessDenied": "Sign-in was cancelled at the identity provider.",
+          "signupDisabled": "Sign-up is currently invitation-only. Contact an administrator.",
+          "linkDisabled": "An account with this email already exists. Sign in and link the provider from your security settings.",
+          "emailUnverified": "The identity provider has not verified this email address, so it cannot be used to sign in.",
+          "providerUnavailable": "This sign-in provider is temporarily unavailable. Try again later.",
+          "loginFailed": "Authentication failed. Please try again."
+        }
       }
     },
     "errors": {
