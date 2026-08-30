@@ -121,6 +121,9 @@ func TestCompareAndSwapConfig_RejectsUnknownProfileAndMalformedShape(t *testing.
 	if _, err := repo.CompareAndSwapConfig(context.Background(), "demo", ConfigMutation{}); err == nil {
 		t.Error("an empty mutation must be rejected")
 	}
+	if _, err := repo.CompareAndSwapConfig(context.Background(), "demo", ConfigMutation{WriteLegacy: true, LegacyValues: map[string]string{}}); err == nil {
+		t.Error("a nil LegacySecrets must be rejected as a programming error, not normalized into a wipe")
+	}
 	if repo.docs["demo"].ConfigRevision != 0 {
 		t.Error("a rejected mutation moved the revision")
 	}

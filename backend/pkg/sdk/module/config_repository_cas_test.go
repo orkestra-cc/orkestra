@@ -69,13 +69,13 @@ func TestMongoCompareAndSwapConfig_StaleWriterChangesNothing(t *testing.T) {
 	seedRevisionDoc(t, repo)
 	// First writer moves the document to revision 1.
 	if won, err := repo.CompareAndSwapConfig(ctx, "cas", ConfigMutation{
-		ExpectedRevision: 0, WriteLegacy: true, LegacyValues: map[string]string{"a": "first"},
+		ExpectedRevision: 0, WriteLegacy: true, LegacyValues: map[string]string{"a": "first"}, LegacySecrets: map[string]string{},
 	}); err != nil || !won {
 		t.Fatalf("first writer: won=%v err=%v", won, err)
 	}
 	// Second writer still expects 0.
 	won, err := repo.CompareAndSwapConfig(ctx, "cas", ConfigMutation{
-		ExpectedRevision: 0, WriteLegacy: true, LegacyValues: map[string]string{"a": "second"},
+		ExpectedRevision: 0, WriteLegacy: true, LegacyValues: map[string]string{"a": "second"}, LegacySecrets: map[string]string{},
 	})
 	if err != nil || won {
 		t.Fatalf("stale writer: won=%v err=%v, want (false, nil)", won, err)
@@ -94,8 +94,8 @@ func TestMongoCompareAndSwapConfig_WriteErrorLeavesDocumentUnchanged(t *testing.
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := repo.CompareAndSwapConfig(cancelled, "cas", ConfigMutation{
-		ExpectedRevision: 0, Env: "production", EnvValues: map[string]string{"a": "never"},
-		WriteLegacy: true, LegacyValues: map[string]string{"a": "never"},
+		ExpectedRevision: 0, Env: "production", EnvValues: map[string]string{"a": "never"}, EnvSecrets: map[string]string{},
+		WriteLegacy: true, LegacyValues: map[string]string{"a": "never"}, LegacySecrets: map[string]string{},
 	})
 	if err == nil {
 		t.Fatal("a cancelled context must surface as an error")
@@ -180,7 +180,7 @@ func TestMongoCompareAndSwapEnvironment_BumpsConfigRevision(t *testing.T) {
 	if doc.ConfigRevision != 1 || doc.NeedsRestart {
 		t.Errorf("configRevision=%d needsRestart=%v after env CAS, want 1/false", doc.ConfigRevision, doc.NeedsRestart)
 	}
-	if won, err := repo.CompareAndSwapConfig(ctx, "cas", ConfigMutation{ExpectedRevision: 0, WriteLegacy: true, LegacyValues: map[string]string{}}); err != nil || won {
+	if won, err := repo.CompareAndSwapConfig(ctx, "cas", ConfigMutation{ExpectedRevision: 0, WriteLegacy: true, LegacyValues: map[string]string{}, LegacySecrets: map[string]string{}}); err != nil || won {
 		t.Errorf("ordinary writer at revision 0 must lose after a roster write: won=%v err=%v", won, err)
 	}
 }

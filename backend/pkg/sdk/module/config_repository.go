@@ -299,30 +299,23 @@ type ConfigMutation struct {
 	NeedsRestart bool
 }
 
-// validate rejects a shape the repository cannot express in one update.
-// These are programming errors, not runtime conditions.
-func (m *ConfigMutation) validate() error {
+// validate rejects a shape the repository cannot express in one update, and
+// rejects a forgotten map rather than guessing at it. A nil EnvSecrets or
+// LegacySecrets is a caller bug, not "no secrets": this package already
+// shipped the alternative once (a nil normalized to {} and written over
+// every stored secret — "UpdateConfig wiped module secrets", fixed in
+// v0.3.2) and must never repeat it. A caller that means to clear a map
+// passes an explicit empty one; nil is refused instead.
+func (m ConfigMutation) validate() error {
 	switch {
 	case m.Activate != "" && (m.Env != "" || m.WriteLegacy):
 		return errors.New("config mutation: activation cannot be combined with a values write")
 	case m.Activate == "" && m.Env == "" && !m.WriteLegacy:
 		return errors.New("config mutation: nothing to write")
-	}
-	if m.Env != "" {
-		if m.EnvValues == nil {
-			m.EnvValues = map[string]string{}
-		}
-		if m.EnvSecrets == nil {
-			m.EnvSecrets = map[string]string{}
-		}
-	}
-	if m.WriteLegacy {
-		if m.LegacyValues == nil {
-			m.LegacyValues = map[string]string{}
-		}
-		if m.LegacySecrets == nil {
-			m.LegacySecrets = map[string]string{}
-		}
+	case m.Env != "" && (m.EnvValues == nil || m.EnvSecrets == nil):
+		return errors.New("config mutation: an environment write requires both maps (use an empty map to clear)")
+	case m.WriteLegacy && (m.LegacyValues == nil || m.LegacySecrets == nil):
+		return errors.New("config mutation: WriteLegacy requires both legacy maps (use an empty map to clear)")
 	}
 	return nil
 }
