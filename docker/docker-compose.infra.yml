@@ -19,6 +19,12 @@ services:
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
     restart: unless-stopped
+    # dockerd's inherited soft nofile limit is 1024 (new systemd default);
+    # mongod fasserts with EMFILE during recovery on a data dir this size.
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     security_opt:
       - no-new-privileges:true
     cap_drop:
