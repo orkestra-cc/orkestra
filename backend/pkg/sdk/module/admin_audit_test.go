@@ -501,7 +501,12 @@ func TestAudit_EnvIsTheProfileTheWriteTargeted(t *testing.T) {
 	if doc.Environments["production"].ConfigValues["flag"] != "false" {
 		t.Errorf("production was written: %v", doc.Environments["production"].ConfigValues)
 	}
-	if len(sink.events) != 1 || sink.events[0].Metadata["env"] != "sandbox" {
+	// Fatalf, and separately: indexing events[0] inside the message of a
+	// combined check panics when the regression is "no event at all".
+	if len(sink.events) != 1 {
+		t.Fatalf("events = %d, want 1", len(sink.events))
+	}
+	if sink.events[0].Metadata["env"] != "sandbox" {
 		t.Errorf("event env = %v, want sandbox", sink.events[0].Metadata["env"])
 	}
 }

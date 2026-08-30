@@ -709,4 +709,92 @@ describe('ModuleConfigSection revision conflict', () => {
       await screen.findByRole('button', { name: /close/i })
     ).toBeInTheDocument();
   });
+
+  // A reload whose profile revision moved but whose VALUES did not — the
+  // other operator saved only secrets to this profile. RTK Query's
+  // structural sharing keeps the `configValues` reference, so the re-seed
+  // effect (keyed on that reference) does not run; the draft must therefore
+  // be cleared here, or it outlives the reload and is re-applied on top of
+  // the operator's NEXT successful save. A typed secret is re-applied
+  // unconditionally, so it is the one that reappears as a phantom change.
+  it('clears the draft when the reload returns the same baseline reference', async () => {
+    const user = userEvent.setup();
+    const mod = moduleWith(
+      [
+        field({ key: 'a', label: 'Alpha' }),
+        field({ key: 's', label: 'API Key', type: 'secret' })
+      ],
+      { availableEnvironments: ['production'] }
+    );
+    // `configValues` is rebuilt per response on purpose: RTK Query compares
+    // by value, not by reference, so an equal payload still collapses onto
+    // the stored reference. That is the behaviour under test.
+    const env = { values: { a: 'x' } as Record<string, string>, revision: 1 };
+    let patchStatus = 409;
+    server.use(
+      http.get(url('/v1/admin/modules/:name/environments/:env'), () =>
+        HttpResponse.json({
+          environment: 'production',
+          configValues: { ...env.values },
+          secretStatus: {},
+          updatedAt: '',
+          revision: env.revision
+        })
+      ),
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), () =>
+        patchStatus === 409
+          ? HttpResponse.json(
+              {
+                status: 409,
+                title: 'Conflict',
+                detail: 'moved',
+                code: 'module.config_revision_stale'
+              },
+              { status: 409 }
+            )
+          : HttpResponse.json({
+              environment: 'production',
+              configValues: { ...env.values },
+              secretStatus: {},
+              updatedAt: '',
+              revision: env.revision
+            })
+      )
+    );
+
+    renderWithProviders(<TestHost mod={mod} />);
+    const alpha = await screen.findByLabelText('Alpha');
+    await waitFor(() => expect(alpha).toHaveValue('x'));
+    await user.clear(alpha);
+    await user.type(alpha, 'mine');
+    await user.type(screen.getByLabelText('API Key'), 'sekret');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByRole('button', { name: 'Reload & review' });
+
+    // Same values, moved revision.
+    env.revision = 2;
+    await user.click(screen.getByRole('button', { name: 'Reload & review' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled()
+    );
+    // No re-seed ran, so the form still holds the draft as typed.
+    expect(screen.getByLabelText('Alpha')).toHaveValue('mine');
+    expect(screen.getByLabelText('API Key')).toHaveValue('sekret');
+    expect(screen.getByText(/2 unsaved changes/)).toBeInTheDocument();
+
+    // The save lands. Its invalidation refetches a baseline that DOES differ,
+    // so the re-seed effect runs — and must find no draft waiting for it.
+    patchStatus = 200;
+    env.values = { a: 'mine' };
+    env.revision = 3;
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Save Changes' })
+      ).toBeDisabled()
+    );
+    expect(screen.getByLabelText('Alpha')).toHaveValue('mine');
+    expect(screen.getByLabelText('API Key')).toHaveValue('');
+    expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
+  });
 });

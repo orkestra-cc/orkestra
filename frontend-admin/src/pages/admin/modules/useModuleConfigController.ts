@@ -688,7 +688,6 @@ export const useModuleConfigController = (
   };
 
   const reloadAndReview = async () => {
-    const baselineRevision = envConfig?.revision;
     droppedEntries.current = 0;
     pendingDraft.current = { environment, entries: captureDirtyDraft() };
     try {
@@ -696,9 +695,9 @@ export const useModuleConfigController = (
       // Pending membership is discarded on EVERY successful reload, here and
       // not only in the re-seed effect: a staged removal was decided against
       // the state the operator saw, and the 409 says that state is gone —
-      // even when this profile's own revision is unchanged (an activation or
-      // another profile's write moved only configRevision), in which case
-      // the data reference is identical and the effect never runs.
+      // including when the refetch returns the same baseline reference (an
+      // activation, another profile's write, or a secrets-only save to this
+      // one), in which case the effect never runs at all.
       setCreated(EMPTY_CREATES);
       setStagedRemovals(EMPTY_CREATES);
       setPendingLabels({});
@@ -719,14 +718,24 @@ export const useModuleConfigController = (
           ])
         );
       }
-      if (fresh.revision === baselineRevision) {
-        // Same profile revision ⇒ identical data ⇒ no re-seed. The form
-        // still holds the draft; nothing to re-apply.
+      if (fresh.configValues === configSource) {
+        // Same baseline reference ⇒ RTK Query kept the data (structural
+        // sharing) ⇒ the re-seed effect will not run. The form still holds
+        // the draft; nothing to re-apply.
+        //
+        // The test is identity, not `revision`: the two disagree exactly
+        // when another operator saved only SECRETS to this profile — the
+        // revision moves, the values do not, structural sharing keeps the
+        // reference. Keying on the revision there left the draft alive
+        // through a reload that never consumed it, and the next successful
+        // save re-seeded from a genuinely new baseline and re-applied it —
+        // a typed secret unconditionally — as a phantom unsaved change.
         pendingDraft.current = null;
       }
-      // Otherwise the data reference changes, the re-seed effect runs, and it
-      // consumes the draft — whichever of that render and this continuation
-      // comes first, the draft is applied exactly once.
+      // Otherwise the baseline reference changes, the re-seed effect runs on
+      // the identity this branch just tested, and it consumes the draft —
+      // whichever of that render and this continuation comes first, the
+      // draft is applied exactly once.
       setConflict(false);
       // The re-seed effect may already have run and reported dropped edits;
       // clearing unconditionally here would swallow that notice whenever
