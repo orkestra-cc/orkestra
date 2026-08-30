@@ -4,7 +4,7 @@
 |---|---|
 | **Date** | 2026-08-29 |
 | **Last review** | 2026-08-30 |
-| **Status** | Draft v4.1 — v4 plus the four contract decisions PR 1's planning surfaced (§0); ready for implementation approval |
+| **Status** | Draft v4.2 — v4.1 plus the contract decisions PR 2's planning surfaced against `7574368a` (§0); ready for implementation approval |
 | **Scope** | `backend/internal/core/auth`, `backend/internal/shared/{middleware,errcode,config}`, `backend/pkg/sdk/{module,iface}` (additive validation snapshot + atomic config writes + audit wiring), `backend/cmd/server/main.go`, `frontend-admin`, `frontend-client` (adds OAuth login + Vitest), root CI targets, `docker/.env.example`, `docs/site` |
 | **ADR** | None. Both new fields default to `true`, so the feature is inert until explicitly changed. The SDK work is additive or repairs existing persistence guarantees: the frozen `Module` interface is unchanged; existing validator interfaces and `AuditSink` remain source-compatible. **One declared exception to additive-only:** `module.ConfigRepository` — provided *to* the config service by the host, never implemented *by* a module (the `RedisClient` category) — changes shape for atomic writes (§4.5). |
 
@@ -73,6 +73,58 @@ plan surfaced, so they are approved here rather than decided in code:
 - `RequirePersistedConfig` is the **boot gate** for the modules it names: a
   missing document, or a seeding / metadata-refresh / backfill failure
   recorded for one of them, stops the server before it serves (§4.2).
+
+v4.2 (2026-08-30) records the decisions the PR 2 implementation plan
+surfaced against the code at `7574368a`, so they are approved here rather
+than decided in code:
+
+- **Four findings the v4 code check missed.** GitHub's `GetUserInfo` marks
+  the public-profile `email` verified by assumption
+  (`github_oauth_service.go:185-192`) — the §4.4 rule stands and the code
+  changes to match §6. The GitHub Huma callback never sets the refresh
+  cookie, so a GitHub web login produces no session today. The Huma
+  `HandleAppleCallback` that emits `access_token=` is unregistered dead
+  code. Apple's `form_post` callback cannot carry the `SameSite=Lax` state
+  cookie, so a same-host Apple flow fails the browser binding — recorded as
+  a follow-up (§8), not fixed by PR 2.
+- One **additive** SDK accessor,
+  `ModuleConfigService.ActiveConfigRequiredModule(ctx, name)` →
+  `ActiveConfigView`, is the "one required config read" §4.4 demands: raw
+  and effective values, every stored secret decrypted once, and the
+  revision, from a single repository read; a stored secret that no longer
+  decrypts fails the whole read (§4.4, §7). `NewActiveConfigView` is
+  exported for a fork's fakes. The `Module` interface is untouched.
+- `ErrAuthPolicyUnavailable`, `errcode.AuthPolicyUnavailable`, the strict
+  boolean parser and `configValueReader.GetRawValueRequiredModule` land in
+  PR 2 — the strict auto-link and provider-toggle reads need them; PR 3
+  reuses them unchanged (§4.3, §7).
+- All four web callbacks are raw chi handlers sharing one implementation;
+  the `github-oauth-callback` Huma operation leaves the OpenAPI document;
+  the dead Huma Apple callback and Apple's dev-only "missing state"
+  fallback are removed — a missing state is a terminal 400 in every
+  environment (§4.10).
+- The callback re-resolves provider usability through the same strict
+  one-read path OAuth start uses, so a provider disabled or blanked
+  mid-flow is refused with `oauth_provider_unavailable`, and the provider
+  is built from the value that answered the check (§4.4, §4.10).
+- On the web redirect surface, config uncertainty — the strict auto-link
+  read or a document-level provider resolution failing — maps to the
+  allowlisted `oauth_provider_unavailable`, because a redirect cannot carry
+  a 503; the JSON surfaces (mobile ID-token endpoints, `/providers`, OAuth
+  start) answer 503 `auth.policy_unavailable`. Both fail closed before
+  lookup, link or token issuance (§4.4, §4.10).
+- Every callback redirect sets `Cache-Control: no-store` next to
+  `Referrer-Policy: no-referrer`; the link-mode `code` allowlist gains
+  `access_denied` and `provider_unavailable`; the stored `RedirectURI` is
+  always the configured tier SPA (§4.10).
+- The mobile ID-token endpoints keep the permissive `OAuthProviderEnabled`
+  gate (native semantics stay outside this web-only change) and gain only
+  the mappings of the two new sentinels (§4.4).
+- In the operator console only the OAuth path is router-state-free: the
+  verify form is extracted into `MfaVerifyPanel`, rendered by the callback
+  from component memory; the password path's `LoginMfaVerify` page keeps
+  `location.state`, which never travels in a URL (PR 3 owns that form).
+  The OAuth landing falls back to the SPA's `DEFAULT_POST_LOGIN` (§4.10).
 
 ## 1. Problem
 
@@ -360,6 +412,10 @@ const AuthLoginMethodLockout    = "auth.login_method_lockout"    // 422, §4.4
 const AuthOAuthEmailUnverified  = "auth.oauth_email_unverified"  // 403 JSON / safe web callback code, §4.4
 ```
 
+`ErrOAuthEmailUnverified`, `ErrAuthPolicyUnavailable` and their two codes
+land in **PR 2** (§7) together with the strict boolean parser they share;
+`ErrPasswordLoginDisabled` and `AuthLoginMethodLockout` land in PR 3.
+
 ### 4.4 Anti-lockout validator + verified-email auto-link
 
 `internal/core/auth/config_validation.go` migrates from the old value-only
@@ -424,8 +480,16 @@ valid(S)        := passwordOn(S) ∨ (oauthOn(S) ∧ autoLink)
   above names every field the web flow needs. A strict
   `OAuthWebProviderUsable(ctx, audience, provider) (resolvedConfig, bool, error)`
   combines canonical provider-toggle parsing with the single exported pure
-  `ProviderStructurallyConfigured`. Provider listing, web OAuth start and §4.7
-  use it. Runtime resolution comes from one required config read. Failure
+  `ProviderStructurallyConfigured`. Provider listing, web OAuth start, the web
+  callback (which re-resolves the provider, so one disabled or blanked
+  mid-flow is refused) and §4.7 use it. Runtime resolution comes from one
+  required config read: the additive
+  `ModuleConfigService.ActiveConfigRequiredModule(ctx, "auth")`, returning an
+  `ActiveConfigView` of the active profile — raw and effective values with
+  schema-secret keys stripped, every stored secret decrypted once, secret
+  presence, the revision — whose read fails as a whole when a stored secret
+  cannot be decrypted, so a check and the value it guards can never observe
+  two different documents. Failure
   granularity is deliberate: a **document-level** failure (missing document,
   repository error, undecryptable document) makes
   `GET /v1/auth/{tier}/providers` and OAuth start return 503; a
@@ -438,8 +502,9 @@ valid(S)        := passwordOn(S) ∨ (oauthOn(S) ∧ autoLink)
   than checking and then rereading. A
   path-backed Apple key counts only when the path identifies a readable regular
   file with non-empty content; PEM/credential correctness remains operational
-  validation rather than G3. Native/mobile provider semantics remain outside
-  this web-only change.
+  validation rather than G3. Native/mobile provider semantics remain outside this web-only change: the
+  mobile ID-token endpoints keep the permissive `OAuthProviderEnabled` gate
+  and gain only the JSON mappings of the two new sentinels.
 - **Secrets belong to the target snapshot.** The validator never calls
   `ConfigService.GetSecret`: that would read the active environment while
   validating an inactive target. `ConfigValidationSnapshot.SecretPresent`
@@ -456,8 +521,11 @@ valid(S)        := passwordOn(S) ∨ (oauthOn(S) ∧ autoLink)
   local account cannot acquire its first provider link without authenticating
   first. On a password-off surface that is a closed loop, so the validator
   requires auto-link. The callback migrates to strict
-  `OAuthAutoLinkByEmailEnabled(ctx) (bool, error)`; config uncertainty returns
-  503 before lookup/link/token issuance. This guarantees that the path is open,
+  `OAuthAutoLinkByEmailEnabled(ctx) (bool, error)`, read **before** the email
+  lookup so an outage can never depend on account state; config
+  uncertainty — a nil policy included — returns 503 `auth.policy_unavailable`
+  on JSON surfaces and the allowlisted `oauth_provider_unavailable` on the
+  web redirect (§4.10), in both cases before lookup/link/token issuance. This guarantees that the path is open,
   not that every local user owns a matching IdP identity.
 - **Verified email is mandatory before any email lookup.** An existing
   provider-ID link may log in as today. For an unlinked provider identity,
@@ -466,15 +534,19 @@ valid(S)        := passwordOn(S) ∨ (oauthOn(S) ∧ autoLink)
   entering either the auto-link or new-signup branch. False/missing returns the
   same 403 `auth.oauth_email_unverified` whether or not a matching local account
   exists, preventing an account-existence oracle as well as an unsafe link.
-  Google, Apple and Discord keep their provider claims. GitHub **already**
-  sources the address correctly upstream — `github_oauth_service.go:210-256`
-  queries `/user/emails` with `user:email`, picks the primary verified address
-  and falls back to the first verified one, and the handler copies the
-  verified bit into `userInfo["email_verified"]` (`auth_handler.go:1399`).
-  Nothing there is reimplemented, and the fallback stays: a non-primary
-  address is still one GitHub verified. The change is downstream only — the
-  callback now *requires* the bit before any email lookup. A public profile
-  `email` is never marked verified by assumption. Comparison
+  Google, Apple and Discord keep their provider claims. GitHub's
+  `getPrimaryEmail` (`github_oauth_service.go:210-256`) already queries
+  `/user/emails` with `user:email`, picks the primary verified address and
+  falls back to the first verified one, and the handler copies the verified
+  bit into `userInfo["email_verified"]` (`auth_handler.go:1399`) — but
+  `GetUserInfo` consults it only when the public profile carries no `email`
+  and otherwise marks that free-text profile address verified by assumption
+  (`:185-192`; v4.2 finding). `GetUserInfo` therefore always takes the
+  address and its bit from `/user/emails` (primary verified, then any
+  verified — a non-primary address is still one GitHub verified); the
+  public-profile `email` survives only as an *unverified* fallback, which the
+  callback then refuses. A public profile `email` is never marked verified by
+  assumption. Comparison
   continues through the user service's canonical email lookup — no
   provider-specific dot/plus rewriting.
 - **Symmetric.** The policy refuses turning password off with no usable
@@ -724,7 +796,7 @@ fallbacks.
 | `pages/user/security/{LinkedProvidersTab,PasswordTab}.tsx`, `pages/user/settings/SecuritySummaryCard.tsx`, `pages/admin/user-profile/AdminAuthMethodsCard.tsx` | §4.8 field migration + policy-aware copy |
 | `pages/admin/user-profile/AdminAuthMethodsCard.tsx` | send-password-reset button disabled with a tooltip when `!passwordUsableForLogin` (the backend 409s anyway) |
 | `pages/admin/modules/useModuleConfigController.ts` | distinguishes `module.config_revision_stale` by body code, not every 409 as a record-list conflict. It latches a conflict, disables Save and offers **Reload & review**. Refetch adopts the newest baseline and recomputes the unsaved diff; non-secret draft and any unsent secret remain only in component memory, are never auto-submitted, and clear on unmount. |
-| `components/authentication/SocialAuthCallback.tsx`, `LoginMfaVerify.tsx` | synchronously copies then scrubs query/fragment before the first await. Direct success force-dispatches and awaits the session endpoint; it removes the current invalidate + fixed 100 ms race and navigates only after the refresh-cookie session is confirmed. MFA renders an extracted verification component locally with challenge props held only in component memory, never `location.state`. Stable error codes are allowlisted/i18n-mapped; raw URL text is never rendered. The existing sanitized return target becomes a ten-minute timestamped take-and-delete record on every outcome. |
+| `components/authentication/SocialAuthCallback.tsx`, `LoginMfaVerify.tsx` | synchronously copies then scrubs query/fragment before the first await. Direct success force-dispatches and awaits the session endpoint; it removes the current invalidate + fixed 100 ms race and navigates only after the refresh-cookie session is confirmed. MFA renders an extracted `MfaVerifyPanel` locally with challenge props held only in component memory, never `location.state` (the password path's `LoginMfaVerify` page keeps reading router state — which never travels in a URL — until PR 3 reworks that form). Direct success lands on the SPA's `DEFAULT_POST_LOGIN` when no fresh return target exists. Stable error codes are allowlisted/i18n-mapped; raw URL text is never rendered. The existing sanitized return target becomes a ten-minute timestamped take-and-delete record on every outcome. |
 | i18n | `auth`: `pages.loginNoMethod`, `pages.passwordLoginDisabled`, `pages.passwordBreakGlassActive`, `pages.providersUnavailable`, `security.passwordKeptNotice`, callback error-code mappings; `adminModules`: config-revision conflict/reload copy |
 
 **frontend-client** (Tier-2 demo — TanStack Query, react-router v8, Tailwind;
@@ -745,8 +817,9 @@ switch would strand it. This change adds the minimum web OAuth login:
 builds its own redirect against `target.config.Server.FrontendURL`; a client
 flow can therefore land on the operator console. One `target.spaURL()` uses
 the tier's resolved `deps.frontendURL` (`OPERATOR_FRONTEND_URL` /
-`CLIENT_FRONTEND_URL`, falling back to `FRONTEND_URL`) for success,
-signup-disabled, error and MFA-partial redirects. The `Origin`-derived
+`CLIENT_FRONTEND_URL`, falling back to `FRONTEND_URL`), handed to each
+tier's handler by `module.go`, for success, signup-disabled, error and
+MFA-partial redirects. The `Origin`-derived
 frontend `RedirectURI` is populated only from the configured tier SPA for
 stored-state compatibility, never concatenated from request input.
 The signed state's existing `StartHost`/CSRF binding still protects the flow;
@@ -754,8 +827,8 @@ the provider's backend callback URI remains the resolver's configured value.
 The configured SPA URL is the sole post-login destination.
 
 One `target.oauthLoginCallbackURL(result)` replaces every provider's literal
-login/signup/MFA redirect and sets `Referrer-Policy: no-referrer` on the
-redirect response. Its wire shape is closed:
+login/signup/MFA redirect and sets `Referrer-Policy: no-referrer` and
+`Cache-Control: no-store` on the redirect response. Its wire shape is closed:
 
 - success query: `?success=true&provider=<allowlisted-provider>`;
 - failure query: `?success=false&error=<allowlisted-stable-code>`;
@@ -766,28 +839,38 @@ The failure allowlist is closed to `oauth_access_denied`,
 `auth.oauth_email_unverified`, `oauth_provider_unavailable` and the generic
 `oauth_login_failed`; unrecognized/internal/provider-specific errors collapse
 to the generic code. Account status and local lookup results are never encoded.
+Config uncertainty on this surface — the strict auto-link read or the
+document-level provider resolution failing — maps to
+`oauth_provider_unavailable`, because a redirect cannot carry a 503; the JSON
+surfaces keep 503 `auth.policy_unavailable`.
 
 The backend resolves trust before destination: a missing/invalid/replayed state
 or failed CSRF-cookie binding gets a terminal generic 400 with no SPA redirect,
 because no trusted tier exists yet. With a valid one-shot state, IdP denial,
 missing code, provider/user-info failure and application rejection redirect to
 the configured tier SPA with an allowlisted coarse code; raw IdP/error text is
-logged only in sanitized server fields and never copied to the URL. State is
-validated before interpreting an IdP `error`, and the state cookie is cleared
-on every valid-state terminal outcome.
+logged only in sanitized server fields and never copied to the URL. State is validated before interpreting an IdP `error`, and the state cookie is cleared
+on every valid-state terminal outcome. Apple's dev-only fallback that
+fabricated a state when the form-post carried none is removed. Every provider
+callback — GitHub included, which moves from a Huma operation that could not
+set the refresh cookie to the same raw chi handler as the others — runs one
+shared implementation that re-resolves provider usability from the same
+strict read OAuth start used.
 
 The fragment keeps the five-minute one-shot challenge out of HTTP requests,
 reverse-proxy logs and referrers; both SPAs copy it into component memory and
 scrub it immediately. **No callback URL may contain an access token, refresh
-token, email or user ID.** This explicitly removes the legacy Apple Huma
-callback's `access_token=...` query and the PII fields emitted by all success
-redirects. Success authentication is recovered only from the audience-scoped
+token, email or user ID.** This explicitly removes the legacy, unregistered Apple Huma
+callback (`access_token=...` in its query) and the PII fields emitted by all
+success redirects. Success authentication is recovered only from the audience-scoped
 HttpOnly refresh cookie. Structural tests scan every callback builder for the
 forbidden parameter names in addition to behavioural redirect tests.
 
 Authenticated link mode keeps its distinct `/user/security?tab=oauth` return
 contract, but its helper accepts only the provider enum plus a stable result
-code and applies the same no-referrer header/forbidden-field rule. It is not
+code (`already_linked`, `duplicate_provider`, `invalid_userinfo`,
+`access_denied`, `provider_unavailable`, `internal`) and applies the same
+no-referrer header/forbidden-field rule. It is not
 forced through the login callback state machine.
 
 ### 4.11 Audit — one best-effort generic event per mutation attempt
@@ -991,13 +1074,30 @@ evidence need the durable-outbox follow-up in §8.
   a document-level read failure returns 503 rather than an empty list; a
   malformed toggle on one provider omits only that provider (WARN, 403 on its
   OAuth start) and never implicitly enables it.
-- OAuth auto-link tests — false or missing `email_verified` never links or
-  issues a token **or calls local email lookup/signup**, with the same external
-  response for a would-be known/unknown address; true permits the existing-
-  email link/new-user branch; an already linked provider ID is unaffected.
-  Missing/malformed auto-link policy → 503 before lookup/link/token issuance.
-  GitHub ignores public-profile email and selects only the primary verified
-  address returned by `/user/emails`.
+- OAuth auto-link tests (`services/gates_test.go`) — false or missing
+  `email_verified` never links or issues a token **or calls local email
+  lookup/signup**, with the same external response for a would-be
+  known/unknown address; true permits the existing-email link/new-user
+  branch; an already linked provider ID is unaffected. Missing/malformed
+  auto-link policy, or a nil policy → 503 before lookup/link/token issuance.
+  The former `TestOAuthCallback_PropagatesEmailVerifiedFromIdP`, whose
+  false/missing cases asserted an unverified signup, is replaced.
+  `services/github_oauth_service_test.go` (new) drives `GetUserInfo` through
+  an injected transport: GitHub ignores public-profile email and selects only
+  the primary verified address returned by `/user/emails`, then any verified
+  one; a profile-only address comes back unverified.
+- `services/oauth_provider_usability_test.go` (new) — the pure structural
+  predicate per provider (Apple inline key vs readable key file via an
+  injected probe), `ReadableNonEmptyFile`, and the resolver's granularity: a
+  document-level failure is an error, an absent toggle is the schema default
+  `false`, a malformed toggle or missing field makes only that provider
+  unusable with a WARN naming the key and no value, audience isolation, and
+  the usable list in canonical order from one read.
+- `pkg/sdk/module/config_active_view_test.go` (new) — a missing document, a
+  repository error and an undecryptable stored secret fail the read;
+  raw/effective/secret/presence semantics; a plaintext under a secret key is
+  stripped; the live schema supplies fallbacks over a stale stored copy; the
+  active profile only.
 - `services/password_confirm_test.go` — persisted method off →
   `ErrPasswordConfirmUnavailable`; read failure →
   `ErrAuthPolicyUnavailable`; break-glass is ignored.
@@ -1014,14 +1114,19 @@ evidence need the durable-outbox follow-up in §8.
 - `handlers/admin_user_auth_security_events_test.go` (extend) —
   `send-password-reset` → 409 when the target's surface is password-off and
   503 when policy cannot be established.
-- `handlers/oauth_callback_redirect_test.go` (new) — success, stable failure,
+- `handlers/oauth_callback_redirect_test.go` (new, builders) plus
+  `handlers/oauth_callback_flow_test.go` (new, the four raw handlers through
+  fakes) — success, stable failure,
   signup-disabled and MFA redirects use the correct tier URL with the
   documented fallback. MFA data is fragment-only; the response sets
   `Referrer-Policy: no-referrer`. Missing/invalid/replayed state never
   redirects; valid-state IdP denial/failure uses only a coarse allowlisted code
   and clears the CSRF cookie. Behavioural assertions plus a structural scan
   reject callback parameters named `access_token`, `refresh_token`, `email` or
-  `user_id`, including the legacy Apple path.
+  `user_id`, and confine every callback-path literal to the builder file, so
+  the legacy Apple path cannot return. `handlers/oauth_providers_handler_test.go`
+  (new) covers the list/start granularity (503 document-level, 403
+  per-provider, the stored `RedirectURI` from the tier SPA).
 - `pkg/sdk/module/config_validate_test.go` — snapshot precedence and exact
   target-environment secret presence for legacy/active PATCH, named-profile
   PATCH and activation; newly submitted secrets are present to validation but
@@ -1088,7 +1193,7 @@ lands in PR 3 and stays inert until an operator changes it.
 | PR | Content | Depends on |
 |---|---|---|
 | **1 — SDK config integrity** | `ConfigValidationSnapshot` + `HasConfigSnapshotValidator` dispatch; `configRevision` CAS + single `UpdateOne` repository write; `needsRestart` in the same write; `RequirePersistedConfig` + per-module `missing` row; `SeedFromModules` backfill; `ModuleAdminHandler` audit setters + generic events; config-before-lifecycle ordering; `useModuleConfigController` 409-by-code handling. §6 tests for `pkg/sdk/module` and the admin controller. | — |
-| **2 — OAuth callback hygiene** | `target.spaURL()` per-tier redirect; `oauthLoginCallbackURL` closed contract (allowlisted query, MFA in fragment, `Referrer-Policy: no-referrer`, no token/email/user ID — including the legacy Apple Huma path); trust-before-destination for invalid state; verified-email requirement before any email lookup + strict `OAuthAutoLinkByEmailEnabled`; per-provider failure granularity; admin `SocialAuthCallback` / `LoginMfaVerify` rework (scrub, awaited session, no router state). | — (standalone security fixes; ships before the toggle so PR 4's client SPA targets a safe contract) |
+| **2 — OAuth callback hygiene** | Additive SDK `ActiveConfigRequiredModule` → `ActiveConfigView`; `ErrAuthPolicyUnavailable` + `auth.policy_unavailable`, `ErrOAuthEmailUnverified` + `auth.oauth_email_unverified`, strict boolean parser; `target.spaURL()` per-tier redirect; `oauthLoginCallbackURL` closed contract (allowlisted query, MFA in fragment, `Referrer-Policy: no-referrer` + `Cache-Control: no-store`, no token/email/user ID); all four callbacks on one raw shared flow (GitHub gains the refresh cookie; dead Huma Apple callback and Apple no-state fallback removed); trust-before-destination for invalid state; callback re-checks provider usability; verified-email requirement before any email lookup + strict `OAuthAutoLinkByEmailEnabled` read before the lookup; GitHub email from `/user/emails` only; per-provider failure granularity on `/providers` and OAuth start; admin `SocialAuthCallback` rework (scrub, awaited session, `MfaVerifyPanel` from component memory, allowlisted codes, ten-minute return target). | — (standalone security fixes; ships before the toggle so PR 4's client SPA targets a safe contract) |
 | **3 — Password-login toggle** | Schema pair + `HotReloadConfig`; strict `PasswordLoginEnabled` / `PasswordLoginDecision` + break-glass; gates (§4.3) incl. pending-challenge re-check with `MFAChallenge.Audience`; auth validator migration to the snapshot contract + login-method invariant; step-up `PasswordReauthAllowed`; usable-link unlink guard; `AuthMethodsView` split; `/policy` fields; admin SPA gating and copy; docs. | 1, 2 |
 | **4 — Client OAuth login** | `frontend-client` providers / initiate / callback page, `bootstrapFromRefreshCookie`, safe `next`, policy gating; Vitest + RTL + MSW and the `client-test` target in `Makefile` / `frontend-client.yml`; `frontend-client/CLAUDE.md`. | 2 (contract), 3 (`passwordLoginEnabled` on `/policy`) |
 
@@ -1163,3 +1268,8 @@ new client-SPA OAuth path):
   tamper-evident/WORM export rather than claiming the current two-year TTL is
   sufficient for every audit scope.
 - **Remove the `hasUsablePassword` alias** after one release.
+- **Apple `form_post` vs the `SameSite=Lax` state cookie** — browsers do not
+  attach a Lax cookie to Apple's cross-site POST, so a same-host Apple flow
+  fails `verifyOAuthStateBinding` today and only the cross-host client-tier
+  hop passes. Needs its own decision (a `None` cookie scoped to the Apple
+  flow, or a GET bounce); recorded by PR 2's plan, not fixed by it.
