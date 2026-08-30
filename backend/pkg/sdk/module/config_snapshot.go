@@ -25,10 +25,16 @@ func buildValidationSnapshot(
 	schema []ConfigField, env string,
 	values, storedEncrypted, submittedSecrets map[string]string,
 ) (ConfigValidationSnapshot, error) {
+	// A legacy or malformed document can carry plaintext under a key the
+	// schema declares as a secret. The validator's contract is that it never
+	// sees one, so it is stripped here rather than trusted to be absent —
+	// the roster read below stays on the raw map, whose roster key is not a
+	// secret and is therefore identical in both.
+	clean := nonSecretValues(schema, values)
 	snap := ConfigValidationSnapshot{
 		Environment:     env,
-		Values:          mergeStringMaps(values, nil),
-		EffectiveValues: effectiveValues(schema, values),
+		Values:          mergeStringMaps(clean, nil),
+		EffectiveValues: effectiveValues(schema, clean),
 		SecretPresent:   map[string]bool{},
 	}
 	for _, key := range secretKeys(schema, values, storedEncrypted, submittedSecrets) {

@@ -2381,7 +2381,9 @@
         "stay": "Stay",
         "leave": "Leave",
         "revisionConflict": "Another operator changed this module's configuration after you loaded it. Reload to review your edits against the latest values before saving.",
-        "reloadFailed": "Reloading the latest configuration failed. Try again before saving."
+        "reloadFailed": "Reloading the latest configuration failed. Try again before saving.",
+        "reloadDroppedEdits_one": "{{count}} of your edits belonged to an entry another operator removed and was discarded.",
+        "reloadDroppedEdits_other": "{{count}} of your edits belonged to entries another operator removed and were discarded."
       },
       "saveBar": {
         "changes_one": "{{count}} unsaved change",

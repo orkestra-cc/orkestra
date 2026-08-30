@@ -35,7 +35,7 @@ func backfillSvc(t *testing.T, doc *ModuleConfig) (*ModuleConfigService, *fakeCo
 func TestSeedFromModules_BackfillsAbsentSchemaKeys(t *testing.T) {
 	t.Setenv("BF_TEST_FROM_ENV", "from-env")
 	svc, repo := backfillSvc(t, &ModuleConfig{
-		ModuleName: "bf", ActiveEnvironment: "sandbox", ConfigRevision: 5,
+		ModuleName: "bf", ActiveEnvironment: "sandbox", ConfigRevision: 5, NeedsRestart: true,
 		ConfigValues:    map[string]string{"existing": "legacy", "cleared": ""},
 		EncryptedValues: map[string]string{},
 		Environments: map[string]EnvironmentConfig{
@@ -89,6 +89,14 @@ func TestSeedFromModules_BackfillsAbsentSchemaKeys(t *testing.T) {
 	if doc.ConfigRevision != 6 || sb.Revision != 3 || repo.docCasCalls != 1 {
 		t.Errorf("revision=%d sbRevision=%d casCalls=%d, want 6/3/1", doc.ConfigRevision, sb.Revision, repo.docCasCalls)
 	}
+	// The backfill write carried needsRestart=false itself, so the second
+	// write boot would otherwise owe is not made.
+	if doc.NeedsRestart {
+		t.Error("the backfill write must persist needsRestart=false")
+	}
+	if repo.clearRestartCalls != 0 {
+		t.Errorf("clearRestartCalls = %d, want 0 — the backfill write already cleared it", repo.clearRestartCalls)
+	}
 }
 
 func TestSeedFromModules_CompleteDocumentIsNotRewritten(t *testing.T) {
@@ -108,6 +116,10 @@ func TestSeedFromModules_CompleteDocumentIsNotRewritten(t *testing.T) {
 	}
 	if repo.docs["bf"].ConfigRevision != 9 || repo.docCasCalls != 0 {
 		t.Errorf("a complete document was rewritten: revision=%d casCalls=%d", repo.docs["bf"].ConfigRevision, repo.docCasCalls)
+	}
+	// Nothing was written, so the boot-time clear is still owed and made.
+	if repo.clearRestartCalls != 1 {
+		t.Errorf("clearRestartCalls = %d, want 1", repo.clearRestartCalls)
 	}
 }
 

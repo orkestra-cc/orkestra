@@ -1,5 +1,7 @@
 package module
 
+import "fmt"
+
 // CodeConfigKeyInvalid is the stable 422 code for a submitted key the
 // module's schema does not accept in that lane. SDK-owned, like
 // CodeConfigRevisionStale.
@@ -77,4 +79,70 @@ func keySet(m map[string]string) map[string]bool {
 		out[k] = true
 	}
 	return out
+}
+
+// nonSecretValues returns a copy of values with every key the schema
+// declares as a secret removed: scalar FieldSecret keys and, for every
+// record-list field, any element key whose sub-field is a FieldSecret item
+// (regardless of roster membership — an orphan is still a secret). A legacy
+// or malformed document can hold plaintext under such a key; the lane rule
+// prevents new ones, this strips existing ones from every place a
+// non-secret map is read or written: the validation snapshot, the admin
+// responses, and the merged map every mutation persists — so the next write
+// repairs the document.
+func nonSecretValues(schema []ConfigField, values map[string]string) map[string]string {
+	out := make(map[string]string, len(values))
+	for k, v := range values {
+		if !isSchemaSecretKey(schema, k) {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func isSchemaSecretKey(schema []ConfigField, key string) bool {
+	for _, f := range schema {
+		if f.Type != FieldRecordList {
+			if f.Key == key {
+				return f.Type == FieldSecret
+			}
+			continue
+		}
+		_, sub, ok := SplitElementKey(f.Key, key)
+		if !ok {
+			continue
+		}
+		for _, it := range f.Items {
+			if it.Key == sub {
+				return it.Type == FieldSecret
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// validateElementKeysInRoster refuses any submitted element key — in either
+// lane — whose slug is not in the roster the write will be judged against:
+// an orphan value is dead weight, an orphan secret is a credential nobody
+// meant to store, silently adopted when that slug is created later.
+func validateElementKeysInRoster(schema []ConfigField, roster, values, secrets map[string]string) error {
+	for _, f := range schema {
+		if f.Type != FieldRecordList {
+			continue
+		}
+		in := map[string]bool{}
+		for _, slug := range ParseRoster(roster, f.Key) {
+			in[slug] = true
+		}
+		for _, lane := range []map[string]string{values, secrets} {
+			for _, key := range sortedKeys(keySet(lane)) {
+				slug, _, ok := SplitElementKey(f.Key, key)
+				if ok && !in[slug] {
+					return fmt.Errorf("%w: %q under %q", ErrUnknownSlug, slug, f.Key)
+				}
+			}
+		}
+	}
+	return nil
 }

@@ -152,7 +152,10 @@ func (s *ModuleConfigService) UpdateEnvironmentConfigWithRecordLists(
 			byField[m.Field] = m
 		}
 		schema := s.schemaFor(name, doc)
-		if err := validateRecordListSubmission(schema, values, next.ConfigValues, byField); err != nil {
+		// A plaintext secret a legacy document still carries under a secret
+		// key is dropped here, so this write repairs it.
+		next.ConfigValues = nonSecretValues(schema, next.ConfigValues)
+		if err := validateRecordListSubmission(schema, values, secrets, next.ConfigValues, byField); err != nil {
 			return err
 		}
 
@@ -205,16 +208,19 @@ func keysOf(m map[string]string) []string {
 }
 
 // validateRecordListSubmission enforces the record-list value rules that are
-// generic to the SDK: every submitted value must name an element that exists
-// once the request is applied, every written label must obey the label bounds,
-// and a created element must carry a label whose mint is its slug.
+// generic to the SDK: every submitted value AND every submitted secret must
+// name an element that exists once the request is applied, every written
+// label must obey the label bounds, and a created element must carry a label
+// whose mint is its slug. The label and slug-mint rules are values-only —
+// a label is not a secret — but membership binds both lanes: an orphan
+// ciphertext is a credential a later create would silently adopt.
 //
 // It walks the SCHEMA rather than the mutations, because a request may write
 // into a record list without changing its membership at all — renaming an
 // element is exactly that, and would otherwise skip every check here.
 func validateRecordListSubmission(
 	schema []ConfigField,
-	submitted, reconciled map[string]string,
+	submitted, submittedSecrets, reconciled map[string]string,
 	byField map[string]RecordListMutation,
 ) error {
 	for _, field := range schema {
@@ -240,6 +246,15 @@ func validateRecordListSubmission(
 				if err := ValidateLabel(val); err != nil {
 					return fmt.Errorf("%w (element %q under %q)", err, slug, field.Key)
 				}
+			}
+		}
+
+		// Secrets carry no label or mint rule, only membership — checked in
+		// sorted order so the reported slug is deterministic.
+		for _, key := range sortedKeys(keySet(submittedSecrets)) {
+			slug, _, ok := SplitElementKey(field.Key, key)
+			if ok && !inTarget[slug] {
+				return fmt.Errorf("%w: %q under %q", ErrUnknownSlug, slug, field.Key)
 			}
 		}
 

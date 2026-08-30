@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"reflect"
 	"testing"
 )
 
@@ -166,4 +167,123 @@ func TestUpdateConfig_LaneRefusalDoesNotMigrate(t *testing.T) {
 	if len(doc.Environments) != 0 || doc.ConfigRevision != 0 {
 		t.Fatalf("a refused request migrated the document: environments=%d revision=%d", len(doc.Environments), doc.ConfigRevision)
 	}
+}
+
+// isSchemaSecretKey classifies a STORED key, so it asks only "does the schema
+// declare this key as a secret" — roster membership is irrelevant: a
+// plaintext credential parked under an orphan element's secret sub-field is
+// still a credential.
+func TestIsSchemaSecretKey(t *testing.T) {
+	cases := []struct {
+		key  string
+		want bool
+	}{
+		{"apiKey", true},                  // scalar secret
+		{"flag", false},                   // scalar non-secret
+		{"profiles.a.password", true},     // element secret, slug in the roster
+		{"profiles.ghost.password", true}, // element secret, slug outside it
+		{"profiles.a.host", false},        // element non-secret
+		{"profiles.a.__label", false},     // SDK-owned label
+		{"profiles.__items", false},       // SDK-owned roster
+		{"undeclared", false},             // not in the schema at all
+	}
+	for _, c := range cases {
+		if got := isSchemaSecretKey(laneSchema, c.key); got != c.want {
+			t.Errorf("isSchemaSecretKey(%q) = %v, want %v", c.key, got, c.want)
+		}
+	}
+	// nonSecretValues drops exactly those keys and copies the rest verbatim.
+	got := nonSecretValues(laneSchema, map[string]string{
+		"apiKey": "leak", "profiles.ghost.password": "leak2",
+		"flag": "true", "profiles.a.host": "h", "profiles.__items": "a",
+	})
+	want := map[string]string{"flag": "true", "profiles.a.host": "h", "profiles.__items": "a"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("nonSecretValues = %v, want %v", got, want)
+	}
+	// A module with no schema classifies nothing — nothing is dropped.
+	if len(nonSecretValues(nil, map[string]string{"anything": "x"})) != 1 {
+		t.Error("a schema-less module must keep every key")
+	}
+}
+
+// An element key whose slug is not in the roster is dead weight in the value
+// lane and a credential nobody meant to store in the secret lane — one a
+// later `create: ["ghost"]` would silently adopt. Both lanes are refused,
+// on every mutation surface, before anything is written or encrypted.
+func TestOrphanElementKeysAreRefused(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("bare PATCH refuses an orphan secret", func(t *testing.T) {
+		svc, repo := newLaneService(t)
+		err := svc.UpdateConfig(ctx, "lane", nil, map[string]string{"profiles.ghost.password": "x"})
+		if !errors.Is(err, ErrUnknownSlug) {
+			t.Fatalf("err = %v, want ErrUnknownSlug", err)
+		}
+		if repo.docCasCalls != 0 {
+			t.Errorf("docCasCalls = %d, want 0", repo.docCasCalls)
+		}
+		prod := repo.docs["lane"].Environments["production"]
+		if _, ok := prod.EncryptedValues["profiles.ghost.password"]; ok {
+			t.Error("an orphan ciphertext was persisted")
+		}
+	})
+
+	t.Run("bare PATCH refuses an orphan value", func(t *testing.T) {
+		svc, repo := newLaneService(t)
+		if err := svc.UpdateConfig(ctx, "lane", map[string]string{"profiles.ghost.host": "h"}, nil); !errors.Is(err, ErrUnknownSlug) {
+			t.Fatalf("err = %v, want ErrUnknownSlug", err)
+		}
+		if repo.docCasCalls != 0 {
+			t.Errorf("docCasCalls = %d, want 0", repo.docCasCalls)
+		}
+	})
+
+	t.Run("named-environment PATCH refuses an orphan secret", func(t *testing.T) {
+		svc, repo := newLaneService(t)
+		err := svc.UpdateEnvironmentConfig(ctx, "lane", "production", nil, map[string]string{"profiles.ghost.password": "x"})
+		if !errors.Is(err, ErrUnknownSlug) {
+			t.Fatalf("err = %v, want ErrUnknownSlug", err)
+		}
+		if repo.docCasCalls != 0 {
+			t.Errorf("docCasCalls = %d, want 0", repo.docCasCalls)
+		}
+		if _, ok := repo.docs["lane"].Environments["production"].EncryptedValues["profiles.ghost.password"]; ok {
+			t.Error("an orphan ciphertext was persisted")
+		}
+	})
+
+	t.Run("record-list path refuses a secret for a slug it is not creating", func(t *testing.T) {
+		svc, repo := newLaneService(t)
+		err := svc.UpdateEnvironmentConfigWithRecordLists(ctx, "lane", "production",
+			nil, map[string]string{"profiles.ghost.password": "x"}, nil, nil)
+		if !errors.Is(err, ErrUnknownSlug) {
+			t.Fatalf("err = %v, want ErrUnknownSlug", err)
+		}
+		if repo.casCalls != 0 {
+			t.Errorf("casCalls = %d, want 0", repo.casCalls)
+		}
+		if _, ok := repo.docs["lane"].Environments["production"].EncryptedValues["profiles.ghost.password"]; ok {
+			t.Error("an orphan ciphertext was persisted")
+		}
+	})
+
+	t.Run("the same secret is accepted when the request creates the element", func(t *testing.T) {
+		svc, repo := newLaneService(t)
+		err := svc.UpdateEnvironmentConfigWithRecordLists(ctx, "lane", "production",
+			map[string]string{"profiles.ghost.__label": "ghost"},
+			map[string]string{"profiles.ghost.password": "x"},
+			[]RecordListMutation{{Field: "profiles", Create: []string{"ghost"}}}, nil)
+		if err != nil {
+			t.Fatalf("a secret for an element created in the same request: %v", err)
+		}
+		prod := repo.docs["lane"].Environments["production"]
+		enc, ok := prod.EncryptedValues["profiles.ghost.password"]
+		if !ok || enc == "" {
+			t.Fatalf("the ciphertext did not land: %v", prod.EncryptedValues)
+		}
+		if plain, err := decryptSecret(enc); err != nil || plain != "x" {
+			t.Errorf("decrypt = %q %v", plain, err)
+		}
+	})
 }

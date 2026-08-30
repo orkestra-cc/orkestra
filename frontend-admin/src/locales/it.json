@@ -2381,7 +2381,9 @@
         "stay": "Resta",
         "leave": "Esci",
         "revisionConflict": "Un altro operatore ha modificato la configurazione di questo modulo dopo il caricamento. Ricarica per rivedere le tue modifiche rispetto ai valori più recenti prima di salvare.",
-        "reloadFailed": "Il ricaricamento della configurazione più recente non è riuscito. Riprova prima di salvare."
+        "reloadFailed": "Il ricaricamento della configurazione più recente non è riuscito. Riprova prima di salvare.",
+        "reloadDroppedEdits_one": "{{count}} delle tue modifiche riguardava una voce rimossa da un altro operatore ed è stata scartata.",
+        "reloadDroppedEdits_other": "{{count}} delle tue modifiche riguardavano voci rimosse da un altro operatore e sono state scartate."
       },
       "saveBar": {
         "changes_one": "{{count}} modifica non salvata",

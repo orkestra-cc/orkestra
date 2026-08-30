@@ -55,6 +55,17 @@ type fakeConfigRepo struct {
 	// findErr, when set, makes FindByName fail with it — models a
 	// repository outage.
 	findErr error
+	// findCalls counts FindByName calls; beforeFind runs BEFORE the read, so
+	// a hook can land a concurrent write in the window between two reads.
+	// The hook is passed the call number and decides itself which one to act
+	// on — it is never detached.
+	findCalls  int
+	beforeFind func(call int)
+	// clearRestartCalls counts ClearNeedsRestart calls. The needsRestart
+	// hint is only observable if the fake honours it, so UpdateEnabled and
+	// ClearNeedsRestart below mirror the Mongo repository rather than being
+	// no-ops.
+	clearRestartCalls int
 }
 
 func newFakeConfigRepo() *fakeConfigRepo {
@@ -67,6 +78,10 @@ func newFakeConfigRepo() *fakeConfigRepo {
 // stored state be silently observed through the caller's "snapshot" — exactly
 // the staleness these tests exist to detect.
 func (f *fakeConfigRepo) FindByName(_ context.Context, name string) (*ModuleConfig, error) {
+	f.findCalls++
+	if f.beforeFind != nil {
+		f.beforeFind(f.findCalls)
+	}
 	if f.findErr != nil {
 		return nil, f.findErr
 	}
@@ -120,7 +135,18 @@ func (f *fakeConfigRepo) Upsert(_ context.Context, c *ModuleConfig) error {
 	return nil
 }
 
-func (f *fakeConfigRepo) UpdateEnabled(context.Context, string, bool) error { return nil }
+// UpdateEnabled mirrors the Mongo one: flipping the flag also marks the
+// document as needing a restart. A no-op fake made the combined
+// config+enable PATCH look correct while the real repository lost the hint.
+func (f *fakeConfigRepo) UpdateEnabled(_ context.Context, name string, enabled bool) error {
+	doc, ok := f.docs[name]
+	if !ok {
+		return fmt.Errorf("module %q not found", name)
+	}
+	doc.Enabled = enabled
+	doc.NeedsRestart = true
+	return nil
+}
 
 // MigrateToEnvironments mirrors the real one: a no-op fake would let the
 // service believe a legacy document had been migrated while the stored one
@@ -151,7 +177,13 @@ func (f *fakeConfigRepo) MigrateToEnvironments(_ context.Context, name string, c
 	return true, nil
 }
 
-func (f *fakeConfigRepo) ClearNeedsRestart(context.Context, string) error { return nil }
+func (f *fakeConfigRepo) ClearNeedsRestart(_ context.Context, name string) error {
+	f.clearRestartCalls++
+	if doc, ok := f.docs[name]; ok {
+		doc.NeedsRestart = false
+	}
+	return nil
+}
 
 func (f *fakeConfigRepo) RefreshMetadata(context.Context, Module) error { return f.refreshErr }
 

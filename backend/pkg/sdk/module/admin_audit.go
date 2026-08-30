@@ -217,6 +217,12 @@ func collapseRecordListKey(lists []ConfigField, key string, secret bool, set map
 // field, how many elements were created and removed. Slugs are operator
 // text and are never recorded; an intent on an undeclared field counts as
 // unknown.
+//
+// One row per FIELD, the first one seen: a duplicate intent is refused by
+// the service, but the failure is audited too, and two rows for one field
+// would read as two changes that never happened. Both lists are capped at
+// auditMaxKeys, like every other key list on an event — a request is
+// operator-supplied and must not size the audit document.
 func auditRecordLists(schema []ConfigField, mutations []RecordListMutation) (summary []map[string]any, fields []string, unknown int) {
 	declared := map[string]bool{}
 	for _, f := range schema {
@@ -224,10 +230,18 @@ func auditRecordLists(schema []ConfigField, mutations []RecordListMutation) (sum
 			declared[f.Key] = true
 		}
 	}
+	seen := map[string]bool{}
 	summary = []map[string]any{}
 	for _, m := range mutations {
 		if !declared[m.Field] {
 			unknown++
+			continue
+		}
+		if seen[m.Field] {
+			continue
+		}
+		seen[m.Field] = true
+		if len(summary) >= auditMaxKeys {
 			continue
 		}
 		fields = append(fields, m.Field)

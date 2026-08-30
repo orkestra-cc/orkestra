@@ -296,6 +296,17 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   Classification uses the module's LIVE `ConfigSchema()` (`schemaFor`),
   never the stored snapshot, whose boot refresh may have failed. A module
   that declares no schema keeps accepting anything.
+  The lane rule only stops NEW misfiled writes, so `nonSecretValues` strips
+  every key the live schema declares as a secret (scalar or record-list
+  sub-field) from every non-secret map the service reads or writes — the
+  validation snapshot, the `configValues` of every admin response, and the
+  merged map each mutation persists — so plaintext a legacy document still
+  carries is never validated, never echoed, and is dropped by the next
+  write. Membership is checked in BOTH lanes too
+  (`validateElementKeysInRoster`): an element key whose slug is not in the
+  roster the write is judged against is refused with `ErrUnknownSlug` → 409,
+  the same status the record-list route returns, so an orphan ciphertext is
+  never left for a later `create` to adopt.
 - **`GetConfig` propagates a failed legacy-profile migration** instead of
   logging it and serving the unmigrated document. The lost-race case is
   absorbed inside `ensureEnvironments` by re-reading: `MigrateToEnvironments`

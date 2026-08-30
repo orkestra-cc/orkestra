@@ -306,3 +306,34 @@ func TestGetConfig_MigrationFailureIsNotSwallowed(t *testing.T) {
 		t.Fatal("a failed legacy migration must surface, not be logged and served as if migrated")
 	}
 }
+
+// A legacy document can carry a plaintext secret under a key the schema
+// declares as a secret. The lane rule only refuses NEW misfiled writes; the
+// next ordinary write must also repair what is already stored, in the
+// profile and in the legacy mirror alike, without touching the ciphertext.
+func TestUpdateConfig_LegacyPlaintextSecretIsDroppedByTheNextWrite(t *testing.T) {
+	svc, repo := newInvService(t)
+	doc := repo.docs["inv"]
+	doc.ConfigValues["providerSecret"] = "legacy-plaintext"
+	prod := doc.Environments["production"]
+	prod.ConfigValues["providerSecret"] = "legacy-plaintext"
+	doc.Environments["production"] = prod
+	storedCiphertext := prod.EncryptedValues["providerSecret"]
+
+	if err := svc.UpdateConfig(context.Background(), "inv", map[string]string{"provider": "true"}, nil); err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+	doc = repo.docs["inv"]
+	prod = doc.Environments["production"]
+	for name, m := range map[string]map[string]string{"profile": prod.ConfigValues, "mirror": doc.ConfigValues} {
+		if v, ok := m["providerSecret"]; ok {
+			t.Errorf("%s still carries the plaintext secret: %q", name, v)
+		}
+		if m["provider"] != "true" || m["password"] != "true" {
+			t.Errorf("%s lost a non-secret key: %v", name, m)
+		}
+	}
+	if prod.EncryptedValues["providerSecret"] != storedCiphertext {
+		t.Error("the stored ciphertext must be untouched by the repair")
+	}
+}

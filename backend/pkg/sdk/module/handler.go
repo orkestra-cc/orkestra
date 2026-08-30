@@ -284,24 +284,42 @@ func (h *ModuleAdminHandler) UpdateModule(ctx context.Context, input *UpdateModu
 		return nil, notFound
 	}
 
+	configChanged := false
 	if len(input.Body.Config) > 0 || len(input.Body.Secrets) > 0 {
 		// UpdateConfig merges into the stored config — keys the caller omits
 		// are preserved, so a config-only change never wipes the module's secrets.
-		err := h.configService.UpdateConfig(ctx, input.Name, input.Body.Config, input.Body.Secrets)
+		// UpdateActiveConfig, not UpdateConfig: the profile above is from a
+		// SECOND read, and an activation landing between the two would file
+		// this change under the wrong one. env is "" only when the document
+		// could not be read, and emitAudit omits an empty env.
+		env, err := h.configService.UpdateActiveConfig(ctx, input.Name, input.Body.Config, input.Body.Secrets)
 		h.emitAudit(ctx, auditRecord{
-			action: ActionModuleConfigUpdated, module: input.Name, env: existing.ActiveEnv(),
+			action: ActionModuleConfigUpdated, module: input.Name, env: env,
 			config: input.Body.Config, secrets: input.Body.Secrets, err: err,
 		})
 		if err != nil {
-			return nil, mapConfigServiceError(err, func(e error) error { return e })
+			// Same mapping as UpdateEnvironment: a record-list error is a 409
+			// or a 422 the client can act on, never the blanket 500 an
+			// unmapped error becomes.
+			return nil, mapConfigServiceError(err, func(e error) error {
+				if code := recordListStatus(e); code != 0 {
+					return huma.NewError(code, e.Error())
+				}
+				return e
+			})
 		}
+		configChanged = true
 	}
 
 	if input.Body.Enabled != nil {
+		// The config half persisted needsRestart=true because this module
+		// reads config only at Init; the runtime start/stop does not re-run
+		// Init, so the hint must survive.
+		keepNeedsRestart := configChanged && !h.registry.SupportsHotReload(input.Name)
 		if *input.Body.Enabled {
-			err = h.enableModule(ctx, input.Name, existing)
+			err = h.enableModule(ctx, input.Name, existing, keepNeedsRestart)
 		} else {
-			err = h.disableModule(ctx, input.Name, existing)
+			err = h.disableModule(ctx, input.Name, existing, keepNeedsRestart)
 		}
 		if err != nil {
 			return nil, err
@@ -336,14 +354,16 @@ func (h *ModuleAdminHandler) auditAborted(ctx context.Context, input *UpdateModu
 }
 
 // enableModule persists enabled=true, retries a failed Init, starts the
-// module, and audits the actual result.
-func (h *ModuleAdminHandler) enableModule(ctx context.Context, name string, existing *ModuleConfig) error {
-	err := h.doEnable(ctx, name, existing)
+// module, and audits the actual result. keepNeedsRestart carries the config
+// half's verdict: a start is not a re-Init, so it may not clear a hint the
+// config write just earned.
+func (h *ModuleAdminHandler) enableModule(ctx context.Context, name string, existing *ModuleConfig, keepNeedsRestart bool) error {
+	err := h.doEnable(ctx, name, existing, keepNeedsRestart)
 	h.emitAudit(ctx, auditRecord{action: ActionModuleEnabled, module: name, err: err})
 	return err
 }
 
-func (h *ModuleAdminHandler) doEnable(ctx context.Context, name string, existing *ModuleConfig) error {
+func (h *ModuleAdminHandler) doEnable(ctx context.Context, name string, existing *ModuleConfig, keepNeedsRestart bool) error {
 	if err := h.configService.UpdateEnabled(ctx, name, true); err != nil {
 		if existing.Category == CategoryCore {
 			return huma.Error400BadRequest(err.Error())
@@ -358,18 +378,20 @@ func (h *ModuleAdminHandler) doEnable(ctx context.Context, name string, existing
 	if err := h.registry.StartModule(ctx, name); err != nil {
 		return huma.Error422UnprocessableEntity(fmt.Sprintf("module %q failed to start: %s", name, err.Error()))
 	}
-	_ = h.configService.ClearNeedsRestart(ctx, name)
+	if !keepNeedsRestart {
+		_ = h.configService.ClearNeedsRestart(ctx, name)
+	}
 	return nil
 }
 
 // disableModule persists enabled=false, stops the module, and audits.
-func (h *ModuleAdminHandler) disableModule(ctx context.Context, name string, existing *ModuleConfig) error {
-	err := h.doDisable(ctx, name, existing)
+func (h *ModuleAdminHandler) disableModule(ctx context.Context, name string, existing *ModuleConfig, keepNeedsRestart bool) error {
+	err := h.doDisable(ctx, name, existing, keepNeedsRestart)
 	h.emitAudit(ctx, auditRecord{action: ActionModuleDisabled, module: name, err: err})
 	return err
 }
 
-func (h *ModuleAdminHandler) doDisable(ctx context.Context, name string, existing *ModuleConfig) error {
+func (h *ModuleAdminHandler) doDisable(ctx context.Context, name string, existing *ModuleConfig, keepNeedsRestart bool) error {
 	if existing.Category == CategoryCore {
 		return huma.Error400BadRequest("core modules cannot be disabled")
 	}
@@ -383,7 +405,9 @@ func (h *ModuleAdminHandler) doDisable(ctx context.Context, name string, existin
 		// The module is disabled regardless; the stop error is diagnostic.
 		h.logger().Warn("module stop error", slog.String("module", name), slog.String("error", err.Error()))
 	}
-	_ = h.configService.ClearNeedsRestart(ctx, name)
+	if !keepNeedsRestart {
+		_ = h.configService.ClearNeedsRestart(ctx, name)
+	}
 	return nil
 }
 
@@ -480,7 +504,7 @@ func (h *ModuleAdminHandler) GetEnvironment(ctx context.Context, input *GetEnvir
 	return &GetEnvironmentOutput{
 		Body: EnvironmentConfigResponse{
 			Environment:  input.Env,
-			ConfigValues: envConfig.ConfigValues,
+			ConfigValues: nonSecretValues(h.schemaFor(input.Name), envConfig.ConfigValues),
 			SecretStatus: secretStatus,
 			UpdatedAt:    updatedAt,
 			Revision:     envConfig.Revision,
@@ -531,7 +555,7 @@ func (h *ModuleAdminHandler) UpdateEnvironment(ctx context.Context, input *Updat
 	return &UpdateEnvironmentOutput{
 		Body: EnvironmentConfigResponse{
 			Environment:  input.Env,
-			ConfigValues: envConfig.ConfigValues,
+			ConfigValues: nonSecretValues(h.schemaFor(input.Name), envConfig.ConfigValues),
 			SecretStatus: secretStatus,
 			UpdatedAt:    updatedAt,
 			Revision:     envConfig.Revision,
@@ -585,6 +609,18 @@ func (h *ModuleAdminHandler) SetActiveEnvironment(ctx context.Context, input *Se
 
 // --- Helpers ---
 
+// schemaForResponse is the schema a response is filtered against: the
+// registered module's live declaration, or — for a document whose module is
+// not registered (a fork's removed addon still in module_configs) — the
+// stored snapshot, so a secret declared before the module left is still
+// recognised as one.
+func (h *ModuleAdminHandler) schemaForResponse(c ModuleConfig) []ConfigField {
+	if live := h.schemaFor(c.ModuleName); live != nil {
+		return live
+	}
+	return c.ConfigSchema
+}
+
 func (h *ModuleAdminHandler) toConfigResponse(c ModuleConfig) ModuleConfigResponse {
 	// Build secret status from the active environment's encrypted values.
 	encryptedValues := c.ActiveEncryptedValues()
@@ -596,8 +632,10 @@ func (h *ModuleAdminHandler) toConfigResponse(c ModuleConfig) ModuleConfigRespon
 		}
 	}
 
-	// Use active environment's config values for the response.
-	configValues := c.ActiveConfigValues()
+	// Use active environment's config values for the response — minus any
+	// plaintext a legacy document still carries under a schema-declared
+	// secret key, which no admin read may echo.
+	configValues := nonSecretValues(h.schemaForResponse(c), c.ActiveConfigValues())
 
 	resp := ModuleConfigResponse{
 		ModuleName:            c.ModuleName,

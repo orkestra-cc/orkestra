@@ -4,9 +4,11 @@ import { useTranslation } from 'react-i18next';
 import type { ConfigField, ModuleConfig } from 'store/api/moduleApi';
 import {
   CONFIG_REVISION_STALE,
+  moduleApi,
   useGetModuleEnvironmentQuery,
   useUpdateModuleEnvironmentMutation
 } from 'store/api/moduleApi';
+import { useAppDispatch } from 'store/hooks';
 import {
   buildGroupTree,
   flattenTree,
@@ -147,6 +149,12 @@ export interface ModuleConfigController {
    * reload, even when this profile's revision did not move (they were
    * decided against a state the 409 says is gone). A failed refetch leaves
    * the conflict latched.
+   *
+   * It also invalidates the module tag so the parent's module query
+   * refetches — an activation is one of the things that causes this
+   * conflict, and the `live` badge must not stay stale. A dirty field whose
+   * record-list element the other operator removed cannot be re-applied;
+   * those entries are counted and reported, never dropped in silence.
    */
   reloadAndReview: () => Promise<void>;
   clearError: () => void;
@@ -181,6 +189,7 @@ export const useModuleConfigController = (
   environment: string
 ): ModuleConfigController => {
   const { t } = useTranslation();
+  const dispatch = useAppDispatch();
 
   const {
     data: envConfig,
@@ -211,6 +220,13 @@ export const useModuleConfigController = (
     environment: string;
     entries: DraftEntry[];
   } | null>(null);
+  // How many draft entries the last re-seed had to discard. A ref because
+  // the re-seed effect and `reloadAndReview`'s own continuation both write
+  // `error` and their order is not fixed — whichever runs second reads this
+  // and reports the same thing, so the notice cannot be lost to a race.
+  const droppedEntries = useRef(0);
+  const droppedEditsMessage = (count: number) =>
+    t('adminModules.detail.configCard.reloadDroppedEdits', { count });
 
   const schema = mod?.configSchema ?? EMPTY_SCHEMA;
   // The fetched environment wins once it has loaded; before that (or for a
@@ -235,12 +251,18 @@ export const useModuleConfigController = (
     created
   );
 
-  // Re-seed the form whenever the server-known baseline changes: the
-  // initial environment fetch resolving, switching environments, or a
-  // fresh `mod.configValues` reference from the parent. Deliberately NOT
-  // keyed on `defaults`/`form` — both are recomputed every render, and
-  // depending on `defaults` would reset on every keystroke, discarding the
-  // very edits the sticky bar exists to accumulate across groups.
+  // Re-seed the form whenever the server-known baseline changes — keyed on
+  // `configSource`, which IS that baseline: the initial environment fetch
+  // resolving, switching environments, or (for a module with no
+  // environments) a fresh `mod.configValues` reference from the parent.
+  // Keying on `envConfig`/`mod.configValues` separately covered the same
+  // triggers plus one that is not a baseline change at all: refreshing the
+  // module snapshot while a profile is loaded (what `reloadAndReview` now
+  // does for the `live` badge) minted a new `mod.configValues` reference and
+  // reset the form under the operator's draft. Still deliberately NOT keyed
+  // on `defaults`/`form` — both are recomputed every render, and depending
+  // on `defaults` would reset on every keystroke, discarding the very edits
+  // the sticky bar exists to accumulate across groups.
   useEffect(() => {
     form.reset(defaults);
     // Pending membership belongs to the baseline that produced it. Carrying a
@@ -257,8 +279,19 @@ export const useModuleConfigController = (
     // echoed), so a typed secret is always a change.
     const draft = pendingDraft.current;
     pendingDraft.current = null;
+    let dropped = 0;
     if (draft && draft.environment === environment) {
+      // The roster was rebuilt from the fresh baseline. An edit whose field
+      // is no longer registered belongs to an element the other operator
+      // removed: `setValue` would write it into a field nothing renders and
+      // nothing saves, so the edit would disappear without a word. Counted
+      // and reported instead.
+      const live = new Set(fieldNames.values());
       for (const { name, value, secret } of draft.entries) {
+        if (!live.has(name)) {
+          dropped += 1;
+          continue;
+        }
         if (secret || value !== (defaults[name] ?? '')) {
           form.setValue(name, value, { shouldDirty: true });
         }
@@ -269,7 +302,8 @@ export const useModuleConfigController = (
     // `sandbox` reads as a failure against the environment now displayed —
     // and a lingering success tick is just as misleading once the form
     // underneath has been re-seeded from a different source.
-    setError(null);
+    droppedEntries.current = dropped;
+    setError(dropped > 0 ? droppedEditsMessage(dropped) : null);
     setSuccess(false);
     // Validate the freshly seeded values once, right here. `mode: 'onChange'`
     // asks react-hook-form to validate a field when *that field* fires a
@@ -283,7 +317,7 @@ export const useModuleConfigController = (
     // values that need the same treatment, and gating on the same deps keeps
     // it from re-running per keystroke.
     void form.trigger();
-  }, [envConfig, mod?.configValues]);
+  }, [configSource]);
 
   // A roster that moves leaves react-hook-form holding registrations, errors
   // and values for elements that are gone, and holding nothing for ones that
@@ -655,6 +689,7 @@ export const useModuleConfigController = (
 
   const reloadAndReview = async () => {
     const baselineRevision = envConfig?.revision;
+    droppedEntries.current = 0;
     pendingDraft.current = { environment, entries: captureDirtyDraft() };
     try {
       const fresh = await refetchEnv().unwrap();
@@ -668,6 +703,22 @@ export const useModuleConfigController = (
       setStagedRemovals(EMPTY_CREATES);
       setPendingLabels({});
       setPendingDeletion(null);
+      // The profile is fresh now, but the module snapshot behind the `live`
+      // badge, the runtime status and `activeEnvironment` is a separate
+      // query — and an activation is one of the things that produces this
+      // very conflict, so it is exactly the stale view the operator must not
+      // review against. Invalidating the module tag makes the parent's
+      // `useGetModuleQuery` refetch; the environment query's own tag
+      // (`${name}-env-${env}`) is untouched, so this adds no second profile
+      // request.
+      if (mod) {
+        dispatch(
+          moduleApi.util.invalidateTags([
+            { type: 'Module', id: mod.moduleName },
+            { type: 'Module', id: 'LIST' }
+          ])
+        );
+      }
       if (fresh.revision === baselineRevision) {
         // Same profile revision ⇒ identical data ⇒ no re-seed. The form
         // still holds the draft; nothing to re-apply.
@@ -677,7 +728,14 @@ export const useModuleConfigController = (
       // consumes the draft — whichever of that render and this continuation
       // comes first, the draft is applied exactly once.
       setConflict(false);
-      setError(null);
+      // The re-seed effect may already have run and reported dropped edits;
+      // clearing unconditionally here would swallow that notice whenever
+      // this continuation happens to resume second.
+      setError(
+        droppedEntries.current > 0
+          ? droppedEditsMessage(droppedEntries.current)
+          : null
+      );
     } catch {
       pendingDraft.current = null;
       setError(t('adminModules.detail.configCard.reloadFailed'));

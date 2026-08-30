@@ -28,7 +28,8 @@ func (r *recordingSink) Emit(_ context.Context, ev iface.AuditEvent) {
 // record list, whose Start can be made to fail.
 type auditDemoModule struct {
 	BaseModule
-	startErr error
+	startErr  error
+	hotReload bool
 }
 
 func (m *auditDemoModule) Name() string             { return "demo" }
@@ -37,6 +38,7 @@ func (m *auditDemoModule) Init(*Dependencies) error { return nil }
 func (m *auditDemoModule) Start(context.Context) error {
 	return m.startErr
 }
+func (m *auditDemoModule) HotReloadConfig() bool { return m.hotReload }
 func (m *auditDemoModule) ConfigSchema() []ConfigField {
 	return []ConfigField{
 		{Key: "flag", Type: FieldBool, Default: "false"},
@@ -185,6 +187,29 @@ func TestAudit_RecordListKeysCollapseAndUnknownKeysAreCounted(t *testing.T) {
 	// so no slug can be in it.
 	if len(summary[0]) != 3 {
 		t.Errorf("summary row must carry field/created/removed only, got %v", summary[0])
+	}
+	// One row per FIELD. A duplicate intent is refused by the service, but
+	// the failure is audited too — and two rows for one field would read as
+	// two changes that never happened.
+	dup := make([]RecordListMutation, 0, 70)
+	for i := 0; i < 70; i++ {
+		dup = append(dup, RecordListMutation{Field: "email.profiles", Create: []string{"a"}})
+	}
+	summary, fields, unknown = auditRecordLists(schema, dup)
+	if len(summary) != 1 || !reflect.DeepEqual(fields, []string{"email.profiles"}) || unknown != 0 {
+		t.Errorf("duplicate fields must collapse to one row: summary=%v fields=%v unknown=%d", summary, fields, unknown)
+	}
+	// And the lists are bounded like every other key list on the event.
+	wide := make([]ConfigField, 0, 70)
+	many := make([]RecordListMutation, 0, 70)
+	for i := 0; i < 70; i++ {
+		key := fmt.Sprintf("list%02d", i)
+		wide = append(wide, ConfigField{Key: key, Type: FieldRecordList})
+		many = append(many, RecordListMutation{Field: key, Create: []string{"a"}})
+	}
+	summary, fields, _ = auditRecordLists(wide, many)
+	if len(summary) != auditMaxKeys || len(fields) != auditMaxKeys {
+		t.Errorf("summary=%d fields=%d, want both capped at %d", len(summary), len(fields), auditMaxKeys)
 	}
 }
 
@@ -374,5 +399,109 @@ func TestAudit_PanickingActorResolverContained(t *testing.T) {
 	}
 	if len(sink.events) != 0 {
 		t.Errorf("the aborted event still reached the sink: %+v", sink.events)
+	}
+}
+
+// A combined PATCH writes the config and then starts the module. The config
+// half persisted needsRestart=true because this module reads its config only
+// at Init, and StartModule does not re-run Init — so the runtime start must
+// not clear the hint it did not satisfy.
+func TestUpdateModule_CombinedPatchKeepsNeedsRestartForAColdModule(t *testing.T) {
+	h, repo, _ := newAuditHandler(t, &auditDemoModule{})
+	enabled := true
+	in := patchConfig(map[string]string{"flag": "true"}, nil)
+	in.Body.Enabled = &enabled
+	if _, err := h.UpdateModule(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if !repo.docs["demo"].NeedsRestart {
+		t.Error("a config change on a module without hot reload must keep needsRestart through the enable")
+	}
+	if repo.clearRestartCalls != 0 {
+		t.Errorf("clearRestartCalls = %d, want 0", repo.clearRestartCalls)
+	}
+}
+
+// An enable with no config half has nothing to re-read: the module starts on
+// the config it already has, and the hint UpdateEnabled sets is cleared.
+func TestUpdateModule_EnableOnlyClearsNeedsRestart(t *testing.T) {
+	h, repo, _ := newAuditHandler(t, &auditDemoModule{})
+	enabled := true
+	in := &UpdateModuleInput{Name: "demo"}
+	in.Body.Enabled = &enabled
+	if _, err := h.UpdateModule(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if repo.docs["demo"].NeedsRestart {
+		t.Error("an enable-only PATCH must clear needsRestart")
+	}
+	if repo.clearRestartCalls != 1 {
+		t.Errorf("clearRestartCalls = %d, want 1", repo.clearRestartCalls)
+	}
+}
+
+// A hot-reloadable module re-reads its config at request time, so the
+// combined PATCH owes no restart.
+func TestUpdateModule_CombinedPatchClearsNeedsRestartWhenHotReloadable(t *testing.T) {
+	h, repo, _ := newAuditHandler(t, &auditDemoModule{hotReload: true})
+	enabled := true
+	in := patchConfig(map[string]string{"flag": "true"}, nil)
+	in.Body.Enabled = &enabled
+	if _, err := h.UpdateModule(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if repo.docs["demo"].NeedsRestart {
+		t.Error("a hot-reloadable module must not keep needsRestart after a combined PATCH")
+	}
+	if repo.clearRestartCalls != 1 {
+		t.Errorf("clearRestartCalls = %d, want 1", repo.clearRestartCalls)
+	}
+}
+
+// The same rule on the way down: a config change followed by a disable
+// leaves the hint standing for a cold module.
+func TestUpdateModule_CombinedPatchKeepsNeedsRestartOnDisable(t *testing.T) {
+	h, repo, _ := newAuditHandler(t, &auditDemoModule{})
+	repo.docs["demo"].Enabled = true
+	disabled := false
+	in := patchConfig(map[string]string{"flag": "true"}, nil)
+	in.Body.Enabled = &disabled
+	if _, err := h.UpdateModule(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if !repo.docs["demo"].NeedsRestart {
+		t.Error("a config change on a module without hot reload must keep needsRestart through the disable")
+	}
+	if repo.clearRestartCalls != 0 {
+		t.Errorf("clearRestartCalls = %d, want 0", repo.clearRestartCalls)
+	}
+}
+
+// The handler's pre-read and the service's own read are two reads: an
+// activation landing between them moves the target profile. The event must
+// name the profile the write ACTUALLY landed in, not the one the handler saw
+// a moment earlier — an audit trail that files a production change under
+// sandbox is worse than none.
+func TestAudit_EnvIsTheProfileTheWriteTargeted(t *testing.T) {
+	h, repo, sink := newAuditHandler(t, &auditDemoModule{})
+	repo.beforeFind = func(call int) {
+		// Call 1 is the handler's pre-read (production); the other operator's
+		// activation lands before the service's own read on call 2.
+		if call == 2 {
+			repo.docs["demo"].ActiveEnvironment = "sandbox"
+		}
+	}
+	if _, err := h.UpdateModule(context.Background(), patchConfig(map[string]string{"flag": "true"}, nil)); err != nil {
+		t.Fatal(err)
+	}
+	doc := repo.docs["demo"]
+	if doc.Environments["sandbox"].ConfigValues["flag"] != "true" {
+		t.Errorf("the write did not land in sandbox: %v", doc.Environments["sandbox"].ConfigValues)
+	}
+	if doc.Environments["production"].ConfigValues["flag"] != "false" {
+		t.Errorf("production was written: %v", doc.Environments["production"].ConfigValues)
+	}
+	if len(sink.events) != 1 || sink.events[0].Metadata["env"] != "sandbox" {
+		t.Errorf("event env = %v, want sandbox", sink.events[0].Metadata["env"])
 	}
 }

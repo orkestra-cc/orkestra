@@ -752,44 +752,71 @@ func (s *ModuleConfigService) lazySeed(ctx context.Context, name string) (*Modul
 // is repaired by the write rather than perpetuated. A legacy document with
 // no profiles completes its lazy migration first — itself a compare-and-swap
 // — so the revision the write is judged against is the migrated document's.
+//
+// The body lives in UpdateActiveConfig, which additionally reports the
+// profile it targeted; this signature is the one every caller outside the
+// admin handler uses and is unchanged.
 func (s *ModuleConfigService) UpdateConfig(ctx context.Context, name string, values map[string]string, secrets map[string]string) error {
+	_, err := s.UpdateActiveConfig(ctx, name, values, secrets)
+	return err
+}
+
+// UpdateActiveConfig is UpdateConfig plus the one fact the caller cannot
+// derive: WHICH profile the write targeted. The handler's own pre-read is a
+// second read, and an activation landing between the two makes it name the
+// wrong profile — so the audit event takes the env from here, where the
+// document the write was judged against was read.
+//
+// env is returned as soon as it is determined, on the error paths too; "" only
+// when the document could not be read at all.
+func (s *ModuleConfigService) UpdateActiveConfig(ctx context.Context, name string, values map[string]string, secrets map[string]string) (string, error) {
 	doc, err := s.repo.FindByName(ctx, name)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if doc == nil {
-		return fmt.Errorf("module %q not found", name)
+		return "", fmt.Errorf("module %q not found", name)
 	}
+	env := doc.ActiveEnv()
 	// Lane refusal comes first: a request that is about to be refused with
 	// 422 must persist nothing, and ensureEnvironments below can commit a
 	// legacy-profile migration (and bump configRevision) on its own.
 	schema := s.schemaFor(name, doc)
 	if err := validateSubmittedKeys(schema, values, secrets); err != nil {
-		return err
+		return env, err
 	}
 	// ensureEnvironments migrates under its own compare-and-swap and leaves
 	// doc current — profiles, activeEnvironment and configRevision — whether
 	// this call won the migration or re-read after another writer did.
 	if err := s.ensureEnvironments(ctx, doc); err != nil {
-		return err
+		return env, err
 	}
-	env := doc.ActiveEnv()
+	env = doc.ActiveEnv()
 	cur, ok := doc.Environments[env]
 	if !ok {
-		return fmt.Errorf("environment %q not found for module %q", env, name)
+		return env, fmt.Errorf("environment %q not found for module %q", env, name)
+	}
+	// This surface changes no membership, so the STORED roster is the one the
+	// write is judged against: an element key for a slug outside it is
+	// refused rather than parked in the document.
+	if err := validateElementKeysInRoster(schema, cur.ConfigValues, values, secrets); err != nil {
+		return env, err
 	}
 	mergedValues := mergeStringMaps(cur.ConfigValues, values)
+	// A plaintext secret a legacy document still carries under a secret key
+	// is dropped here, so this write repairs it.
+	mergedValues = nonSecretValues(schema, mergedValues)
 
 	if err := s.validateCandidate(ctx, name, candidate{
 		schema: schema, env: env, values: mergedValues,
 		storedEncrypted: cur.EncryptedValues, submittedSecrets: secrets,
 	}); err != nil {
-		return err
+		return env, err
 	}
 
 	encrypted, err := encryptAll(secrets)
 	if err != nil {
-		return err
+		return env, err
 	}
 	mergedSecrets := mergeStringMaps(cur.EncryptedValues, encrypted)
 
@@ -800,15 +827,15 @@ func (s *ModuleConfigService) UpdateConfig(ctx context.Context, name string, val
 		NeedsRestart: s.needsRestartFor(name),
 	})
 	if err != nil {
-		return err
+		return env, err
 	}
 	if !won {
-		return ErrRevisionStale
+		return env, ErrRevisionStale
 	}
 	// No cache invalidation: Redis caches only the enabled flag, which a
 	// config write does not change. The CAS is the commit; nothing after it
 	// may turn a committed write into a reported failure.
-	return nil
+	return env, nil
 }
 
 // mergeStringMaps returns a new map containing every key in base overlaid with
@@ -849,7 +876,14 @@ func (s *ModuleConfigService) UpdateEnvironmentConfig(ctx context.Context, name,
 	if err := validateSubmittedKeys(schema, values, secrets); err != nil {
 		return err
 	}
+	// This surface changes no membership either — same rule, same roster.
+	if err := validateElementKeysInRoster(schema, cur.ConfigValues, values, secrets); err != nil {
+		return err
+	}
 	mergedValues := mergeStringMaps(cur.ConfigValues, values)
+	// A plaintext secret a legacy document still carries under a secret key
+	// is dropped here, so this write repairs it.
+	mergedValues = nonSecretValues(schema, mergedValues)
 
 	if err := s.validateCandidate(ctx, name, candidate{
 		schema: schema, env: envName, values: mergedValues,

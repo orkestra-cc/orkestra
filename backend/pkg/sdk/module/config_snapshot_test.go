@@ -252,3 +252,42 @@ func TestValidateCandidate_LegacyModuleNeverDecrypts(t *testing.T) {
 		t.Fatalf("legacy module must not be blocked by undecryptable secrets: %v", err)
 	}
 }
+
+// A legacy or malformed document can carry a plaintext secret under a key
+// the schema declares as a secret — a field migrated from string to secret,
+// or a write that predates the lane rule. It must never reach the validator:
+// the module would judge (and could log) a credential the snapshot contract
+// promises it never sees.
+func TestBuildValidationSnapshot_SchemaSecretsAreStrippedFromValues(t *testing.T) {
+	values := map[string]string{
+		"clientId":            "id",
+		"clientSecret":        "plaintext-leak",
+		"profiles.__items":    "a",
+		"profiles.a.__label":  "A",
+		"profiles.a.host":     "h",
+		"profiles.a.password": "leak2",
+	}
+	snap, err := buildValidationSnapshot(snapshotSchema, "production", values, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []map[string]string{snap.Values, snap.EffectiveValues} {
+		for _, k := range []string{"clientSecret", "profiles.a.password"} {
+			if v, ok := m[k]; ok {
+				t.Errorf("a plaintext secret reached the snapshot at %q = %q", k, v)
+			}
+		}
+	}
+	if snap.Values["clientId"] != "id" || snap.Values["profiles.a.host"] != "h" ||
+		snap.Values["profiles.a.__label"] != "A" || snap.Values["profiles.__items"] != "a" {
+		t.Errorf("non-secret keys were disturbed: %v", snap.Values)
+	}
+	// The roster still parsed, so the element's non-secret item default and
+	// its secret presence are still resolved.
+	if snap.EffectiveValues["profiles.a.host"] != "h" {
+		t.Errorf("effective values lost the element: %v", snap.EffectiveValues)
+	}
+	if !snap.SecretPresent["profiles.a.token"] {
+		t.Error("the roster read must still see the element (token has a default)")
+	}
+}
