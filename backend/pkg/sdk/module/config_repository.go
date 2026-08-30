@@ -162,6 +162,41 @@ func (r *ModuleConfigRepository) ClearNeedsRestart(ctx context.Context, name str
 	return nil
 }
 
+// ClearNeedsRestartAt clears the flag only while the document's
+// configRevision still equals the one the caller observed. It is what keeps
+// an enable/disable from erasing a hint a CONCURRENT config change just
+// earned: the two requests are independent, and the lifecycle half must
+// only retract what its own read saw.
+//
+// It deliberately does NOT advance configRevision. needsRestart is a
+// presentation flag; bumping the revision to clear it would make an
+// in-flight config write lose its own compare-and-swap for no reason.
+//
+// Absent and 0 are the same value, so an expectation of 0 also matches a
+// document that predates the field — the same $or shape every other
+// revision filter here uses. Returns false, not an error, when the revision
+// has moved: a lost clear is an expected outcome.
+func (r *ModuleConfigRepository) ClearNeedsRestartAt(ctx context.Context, name string, expectedRevision int64) (bool, error) {
+	filter := bson.M{"moduleName": name}
+	if expectedRevision == 0 {
+		filter["$or"] = bson.A{
+			bson.M{"configRevision": int64(0)},
+			bson.M{"configRevision": bson.M{"$exists": false}},
+		}
+	} else {
+		filter["configRevision"] = expectedRevision
+	}
+	res, err := r.collection.UpdateOne(
+		ctx,
+		filter,
+		bson.M{"$set": bson.M{"needsRestart": false, "updatedAt": time.Now()}},
+	)
+	if err != nil {
+		return false, fmt.Errorf("clear needsRestart for %q: %w", name, err)
+	}
+	return res.MatchedCount == 1, nil
+}
+
 // CompareAndSwapEnvironment replaces ONE environment sub-document, and only
 // while its revision still matches. Returns false — not an error — when the
 // revision has moved: losing a race is an expected outcome the caller decides
@@ -237,8 +272,15 @@ func (r *ModuleConfigRepository) CompareAndSwapEnvironment(
 //     EnvRevision+1; WriteLegacy additionally replaces the top-level legacy
 //     maps with LegacyValues/LegacySecrets — the active-profile write and
 //     the boot backfill both use this, the inactive-profile write does not;
-//   - an activation: Activate names the profile to make active, and its
-//     STORED maps are copied server-side into the legacy fields.
+//   - an activation: Activate names the profile to make active. WITHOUT
+//     WriteLegacy its STORED maps are copied server-side into the legacy
+//     fields. WITH WriteLegacy the caller supplies the legacy maps instead
+//     (and may repair the activated profile in the same write by setting
+//     Env == Activate) — the service uses that form so the mirror it
+//     publishes is stripped of any plaintext the stored profile still
+//     carries under a schema-secret key. The revision guard is what makes
+//     the client-side copy safe: any concurrent write advances
+//     configRevision, so a stale snapshot matches nothing.
 //
 // Every form filters on ExpectedRevision, writes ExpectedRevision+1 back,
 // and persists NeedsRestart as given. Secrets are ciphertext by the time
@@ -269,10 +311,10 @@ type ConfigMutation struct {
 // passes an explicit empty one; nil is refused instead.
 func (m ConfigMutation) validate() error {
 	switch {
-	case m.Activate != "" && (m.Env != "" || m.WriteLegacy):
-		return errors.New("config mutation: activation cannot be combined with a values write")
 	case m.Activate == "" && m.Env == "" && !m.WriteLegacy:
 		return errors.New("config mutation: nothing to write")
+	case m.Activate != "" && m.Env != "" && m.Env != m.Activate:
+		return errors.New("config mutation: an activation may only write the profile it activates")
 	case m.Env != "" && (m.EnvValues == nil || m.EnvSecrets == nil):
 		return errors.New("config mutation: an environment write requires both maps (use an empty map to clear)")
 	case m.WriteLegacy && (m.LegacyValues == nil || m.LegacySecrets == nil):
@@ -289,9 +331,11 @@ func (m ConfigMutation) validate() error {
 //
 // Because it is one update, either every target field lands or none does:
 // there is no legacy/environment partial state and no second write whose
-// failure could be logged and swallowed. An activation is a pipeline update
-// so the copied values are read server-side at execution time, never from a
-// snapshot the process took earlier.
+// failure could be logged and swallowed. An activation WITHOUT WriteLegacy is
+// a pipeline update so the copied values are read server-side at execution
+// time; WITH WriteLegacy it is a plain $set of the maps the caller supplies,
+// safe because the same configRevision filter refuses any snapshot a
+// concurrent write has already made stale.
 func (r *ModuleConfigRepository) CompareAndSwapConfig(ctx context.Context, name string, m ConfigMutation) (bool, error) {
 	if err := m.validate(); err != nil {
 		return false, err
@@ -312,6 +356,8 @@ func (r *ModuleConfigRepository) CompareAndSwapConfig(ctx context.Context, name 
 	var update any
 	if m.Activate != "" {
 		filter["environments."+m.Activate] = bson.M{"$exists": true}
+	}
+	if m.Activate != "" && !m.WriteLegacy {
 		envPath := "$environments." + m.Activate
 		update = mongo.Pipeline{{{Key: "$set", Value: bson.M{
 			"activeEnvironment": m.Activate,
@@ -326,6 +372,9 @@ func (r *ModuleConfigRepository) CompareAndSwapConfig(ctx context.Context, name 
 			"needsRestart":   m.NeedsRestart,
 			"configRevision": next,
 			"updatedAt":      now,
+		}
+		if m.Activate != "" {
+			set["activeEnvironment"] = m.Activate
 		}
 		if m.Env != "" {
 			p := "environments." + m.Env

@@ -27,6 +27,11 @@ import {
   type PendingCreates
 } from './useModuleConfigForm';
 import { expandElement, labelKeyOf, rosterOf } from './recordList/expandSchema';
+import {
+  captureDraftFromDirty,
+  resolveDraft,
+  type DraftEntry
+} from './configDraft';
 import { useRosterReconciliation } from './recordList/useRosterReconciliation';
 import type { RecordListEditingContext } from './recordList/RecordListContext';
 import { buildSavePayload } from './recordList/buildSavePayload';
@@ -205,12 +210,6 @@ export const useModuleConfigController = (
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [conflict, setConflict] = useState(false);
-  /** One dirty field captured by reloadAndReview, re-applied by the re-seed effect. */
-  interface DraftEntry {
-    name: string;
-    value: string;
-    secret: boolean;
-  }
   // The draft captured by reloadAndReview, consumed by the re-seed effect
   // once the fresh baseline lands. A ref, not state: it must survive the
   // render the refetch triggers without itself causing one. Tagged with the
@@ -281,20 +280,17 @@ export const useModuleConfigController = (
     pendingDraft.current = null;
     let dropped = 0;
     if (draft && draft.environment === environment) {
-      // The roster was rebuilt from the fresh baseline. An edit whose field
-      // is no longer registered belongs to an element the other operator
-      // removed: `setValue` would write it into a field nothing renders and
-      // nothing saves, so the edit would disappear without a word. Counted
-      // and reported instead.
-      const live = new Set(fieldNames.values());
-      for (const { name, value, secret } of draft.entries) {
-        if (!live.has(name)) {
-          dropped += 1;
-          continue;
-        }
-        if (secret || value !== (defaults[name] ?? '')) {
-          form.setValue(name, value, { shouldDirty: true });
-        }
+      // The roster was rebuilt from the fresh baseline, so each entry is
+      // resolved through the NEW name mapping by its immutable schema key —
+      // never by the name it carried before, which the reload may have
+      // reassigned to a colliding field of another element. A key with no
+      // name belongs to an element the other operator removed: `setValue`
+      // would write it into a field nothing renders and nothing saves, so
+      // the edit would disappear without a word. Counted and reported.
+      const resolved = resolveDraft(draft.entries, fieldNames, defaults);
+      dropped = resolved.dropped;
+      for (const [name, value] of resolved.apply) {
+        form.setValue(name, value, { shouldDirty: true });
       }
     }
     // The save alerts belong to the baseline that produced them. A "save
@@ -648,50 +644,68 @@ export const useModuleConfigController = (
     pendingDraft.current = null;
   };
 
-  // Only fields react-hook-form marks dirty — never the whole form, which
-  // would turn the other operator's changes into "local edits" pointing back
-  // at the old values. Register names are flat (`buildFieldNames`), so
-  // `dirtyFields[name]` is a plain boolean.
-  const captureDirtyDraft = (): DraftEntry[] => {
-    const values = form.getValues();
-    const secretNames = new Set(
-      expandedSchema
-        .filter(f => f.type === 'secret')
-        .map(f => fieldNameOf(fieldNames, f.key))
-    );
-    // Fields of elements created in this session go with the membership
-    // change they belong to: the reload discards pending creates, so their
-    // values must not come back as orphan edits.
-    const createdLeafNames = new Set(
-      schema
-        .filter(f => f.type === 'recordList')
-        .flatMap(f =>
-          (created[f.key] ?? []).flatMap(slug =>
-            expandElement(f, slug).map(leaf =>
-              fieldNameOf(fieldNames, leaf.key)
+  // The dirty fields, re-keyed to schema keys by `captureDraftFromDirty` —
+  // see configDraft.ts for why the register name cannot survive a reload.
+  const captureDirtyDraft = (): DraftEntry[] =>
+    captureDraftFromDirty(
+      form.formState.dirtyFields as Readonly<Record<string, unknown>>,
+      form.getValues(),
+      fieldNames,
+      new Set(
+        expandedSchema
+          .filter(f => f.type === 'secret')
+          .map(f => fieldNameOf(fieldNames, f.key))
+      ),
+      // Fields of elements created in this session go with the membership
+      // change they belong to: the reload discards pending creates, so their
+      // values must not come back as orphan edits.
+      new Set(
+        schema
+          .filter(f => f.type === 'recordList')
+          .flatMap(f =>
+            (created[f.key] ?? []).flatMap(slug =>
+              expandElement(f, slug).map(leaf =>
+                fieldNameOf(fieldNames, leaf.key)
+              )
             )
           )
-        )
+      )
     );
-    return (
-      Object.keys(form.formState.dirtyFields)
-        .filter(name => Boolean(form.formState.dirtyFields[name]))
-        .filter(name => !createdLeafNames.has(name))
-        .map(name => ({
-          name,
-          value: String(values[name] ?? ''),
-          secret: secretNames.has(name)
-        }))
-        // A secret typed and then cleared is not a change: nothing to re-send.
-        .filter(d => !d.secret || d.value !== '')
-    );
-  };
 
   const reloadAndReview = async () => {
     droppedEntries.current = 0;
     pendingDraft.current = { environment, entries: captureDirtyDraft() };
     try {
       const fresh = await refetchEnv().unwrap();
+      // The profile is fresh now, but the module snapshot behind the `live`
+      // badge, the runtime status and `activeEnvironment` is a separate
+      // query — and an activation is one of the things that produces this
+      // very conflict, so it is exactly the stale view the operator must not
+      // review against. AWAITED, and before the latch is lifted: a failed
+      // module refetch that only invalidated a tag would leave the badge and
+      // `activeEnvironment` showing the pre-conflict world with Save enabled
+      // on top of it. The environment query's own tag (`${name}-env-${env}`)
+      // is untouched, so this adds no second profile request.
+      if (mod) {
+        // The list page is not what the operator is reviewing: its refetch
+        // stays fire-and-forget.
+        dispatch(
+          moduleApi.util.invalidateTags([{ type: 'Module', id: 'LIST' }])
+        );
+        const refresh = dispatch(
+          moduleApi.endpoints.getModule.initiate(mod.moduleName, {
+            forceRefetch: true
+          })
+        );
+        try {
+          await refresh.unwrap();
+        } finally {
+          // `initiate` adds a cache subscription of its own. The page's
+          // `useGetModuleQuery` owns that entry's lifetime; releasing ours
+          // here — on the throw too — keeps the reload from pinning it.
+          refresh.unsubscribe();
+        }
+      }
       // Pending membership is discarded on EVERY successful reload, here and
       // not only in the re-seed effect: a staged removal was decided against
       // the state the operator saw, and the 409 says that state is gone —
@@ -702,22 +716,6 @@ export const useModuleConfigController = (
       setStagedRemovals(EMPTY_CREATES);
       setPendingLabels({});
       setPendingDeletion(null);
-      // The profile is fresh now, but the module snapshot behind the `live`
-      // badge, the runtime status and `activeEnvironment` is a separate
-      // query — and an activation is one of the things that produces this
-      // very conflict, so it is exactly the stale view the operator must not
-      // review against. Invalidating the module tag makes the parent's
-      // `useGetModuleQuery` refetch; the environment query's own tag
-      // (`${name}-env-${env}`) is untouched, so this adds no second profile
-      // request.
-      if (mod) {
-        dispatch(
-          moduleApi.util.invalidateTags([
-            { type: 'Module', id: mod.moduleName },
-            { type: 'Module', id: 'LIST' }
-          ])
-        );
-      }
       if (fresh.configValues === configSource) {
         // Same baseline reference ⇒ RTK Query kept the data (structural
         // sharing) ⇒ the re-seed effect will not run. The form still holds

@@ -16,6 +16,7 @@ type ConfigRepository interface {
 	UpdateEnabled(ctx context.Context, name string, enabled bool) error
 	MigrateToEnvironments(ctx context.Context, name string, configValues, encryptedValues map[string]string, expectedRevision int64) (bool, error)
 	ClearNeedsRestart(ctx context.Context, name string) error
+	ClearNeedsRestartAt(ctx context.Context, name string, expectedRevision int64) (bool, error)
 	RefreshMetadata(ctx context.Context, m Module) error
 	CompareAndSwapEnvironment(ctx context.Context, name, envName string, expectedRevision int64, next EnvironmentConfig, needsRestart bool) (bool, error)
 	CompareAndSwapConfig(ctx context.Context, name string, m ConfigMutation) (bool, error)

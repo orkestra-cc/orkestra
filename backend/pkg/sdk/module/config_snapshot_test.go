@@ -291,3 +291,53 @@ func TestBuildValidationSnapshot_SchemaSecretsAreStrippedFromValues(t *testing.T
 		t.Error("the roster read must still see the element (token has a default)")
 	}
 }
+
+// The snapshot branch strips schema-secret keys before the module sees them.
+// The LEGACY hooks are the same boundary and had the same contract broken:
+// they were handed the raw merged map, so a plaintext secret a legacy
+// document still carries crossed the validator boundary through the older
+// seam.
+func TestValidateCandidate_LegacyHooksNeverSeeSchemaSecrets(t *testing.T) {
+	ctx := context.Background()
+	vm := &validatingModule{}
+	avm := &activationValidatingModule{}
+	svcPatch := NewModuleConfigService(newFakeConfigRepo(), fakeRedisClient{}, slog.Default())
+	svcPatch.RegisterKnownModules([]Module{vm})
+	svcAct := NewModuleConfigService(newFakeConfigRepo(), fakeRedisClient{}, slog.Default())
+	svcAct.RegisterKnownModules([]Module{avm})
+
+	values := map[string]string{
+		"clientId":            "id",
+		"clientSecret":        "plaintext-leak",
+		"profiles.__items":    "a",
+		"profiles.a.host":     "h",
+		"profiles.a.password": "leak2",
+	}
+	c := candidate{schema: snapshotSchema, env: "sandbox", values: values}
+	if err := svcPatch.validateCandidate(ctx, "validating", c); err != nil {
+		t.Fatalf("PATCH dispatch: %v", err)
+	}
+	activation := c
+	activation.activation = true
+	if err := svcAct.validateCandidate(ctx, "validating", activation); err != nil {
+		t.Fatalf("activation dispatch: %v", err)
+	}
+	for name, seen := range map[string]map[string]string{"ValidateConfig": vm.seen, "ValidateConfigActivation": avm.sawTarget} {
+		if seen == nil {
+			t.Fatalf("%s was never called", name)
+		}
+		for _, k := range []string{"clientSecret", "profiles.a.password"} {
+			if v, ok := seen[k]; ok {
+				t.Errorf("%s saw a plaintext secret at %q = %q", name, k, v)
+			}
+		}
+		if seen["clientId"] != "id" || seen["profiles.a.host"] != "h" || seen["profiles.__items"] != "a" {
+			t.Errorf("%s lost non-secret keys: %v", name, seen)
+		}
+	}
+	// A nil values map still reaches the hook as an empty, non-nil map.
+	vm.seen = nil
+	if err := svcPatch.validateCandidate(ctx, "validating", candidate{schema: snapshotSchema}); err != nil || vm.seen == nil {
+		t.Errorf("nil values must reach the legacy hook as an empty map: err=%v seen=%v", err, vm.seen)
+	}
+}

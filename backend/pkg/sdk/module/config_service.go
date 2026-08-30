@@ -350,6 +350,14 @@ func (s *ModuleConfigService) backfillSchemaKeys(ctx context.Context, m Module, 
 // is encrypted once. Returns the mutation, the keys added to the profile
 // (or mirror, for a legacy document), and whether anything needs writing —
 // a mirror that merely diverged from a complete profile is realigned too.
+//
+// The candidate is seeded from nonSecretValues, never the raw map: a
+// document written before the lane rule can hold plaintext under a key the
+// schema declares as a secret, and a raw seed rewrote it into BOTH the
+// profile and the mirror on every boot. Stripping also makes a mirror that
+// still carries one differ from the candidate, so `mirrorDiverged` fires and
+// the mirror is repaired in the same write — that is the repair, not an
+// accident of the comparison.
 func (s *ModuleConfigService) buildBackfill(m Module, schema []ConfigField, doc *ModuleConfig) (mut ConfigMutation, added []string, write bool, err error) {
 	ciphertext := map[string]string{} // key → ciphertext, encrypted once per key
 	encryptOnce := func(f ConfigField, plain string) (string, error) {
@@ -369,7 +377,7 @@ func (s *ModuleConfigService) buildBackfill(m Module, schema []ConfigField, doc 
 	mut = ConfigMutation{ExpectedRevision: doc.ConfigRevision, NeedsRestart: false}
 
 	if len(doc.Environments) == 0 {
-		values, secrets, keys, err := missingSchemaKeys(schema, doc.ConfigValues, doc.EncryptedValues, encryptOnce)
+		values, secrets, keys, err := missingSchemaKeys(schema, nonSecretValues(schema, doc.ConfigValues), doc.EncryptedValues, encryptOnce)
 		if err != nil {
 			return mut, nil, false, err
 		}
@@ -386,7 +394,7 @@ func (s *ModuleConfigService) buildBackfill(m Module, schema []ConfigField, doc 
 	if !ok {
 		return mut, nil, false, nil
 	}
-	values, secrets, keys, err := missingSchemaKeys(schema, cur.ConfigValues, cur.EncryptedValues, encryptOnce)
+	values, secrets, keys, err := missingSchemaKeys(schema, nonSecretValues(schema, cur.ConfigValues), cur.EncryptedValues, encryptOnce)
 	if err != nil {
 		return mut, nil, false, err
 	}
@@ -588,14 +596,17 @@ func (s *ModuleConfigService) GetConfig(ctx context.Context, name string) (*Modu
 // configRevision). If another writer migrated or moved the document first,
 // doc is REPLACED by a fresh read so the caller judges its own write against
 // the current document rather than a stale legacy snapshot.
+//
+// The migrated profile is stripped of schema-secret keys a legacy mirror may
+// still carry in plaintext: copying the raw mirror would duplicate the leak
+// into the new production profile, where every later read and write would
+// carry it forward. nonSecretValues always returns a non-nil map, so the
+// nil-guard the raw copy needed is gone.
 func (s *ModuleConfigService) ensureEnvironments(ctx context.Context, doc *ModuleConfig) error {
 	if len(doc.Environments) > 0 {
 		return nil // already migrated
 	}
-	cv := doc.ConfigValues
-	if cv == nil {
-		cv = make(map[string]string)
-	}
+	cv := nonSecretValues(s.schemaFor(doc.ModuleName, doc), doc.ConfigValues)
 	ev := doc.EncryptedValues
 	if ev == nil {
 		ev = make(map[string]string)
@@ -917,12 +928,19 @@ func (s *ModuleConfigService) UpdateEnvironmentConfig(ctx context.Context, name,
 }
 
 // SetActiveEnvironment switches the active profile in one compare-and-swap
-// pipeline update that also copies the target's STORED values and secrets
-// into the legacy mirror server-side. The module's validation seam judges
-// the stored target profile as a whole — with the target's own secret
-// presence, never the currently active profile's — strictly before the
-// write, so a refused activation leaves the active name, the mirror and
-// needsRestart exactly as they were.
+// update that also publishes the target's values and secrets into the legacy
+// mirror. The module's validation seam judges the stored target profile as a
+// whole — with the target's own secret presence, never the currently active
+// profile's — strictly before the write, so a refused activation leaves the
+// active name, the mirror and needsRestart exactly as they were.
+//
+// The mirror is copied CLIENT-side, from the read at revision r, because the
+// copy has to be stripped of any plaintext the stored profile still carries
+// under a schema-secret key — a server-side $ifNull copy would republish it.
+// That is safe only because the write is guarded by the same revision: a
+// concurrent write advances configRevision, so this activation matches
+// nothing and its snapshot can never win. When stripping removed something,
+// the profile itself is repaired in the same update.
 func (s *ModuleConfigService) SetActiveEnvironment(ctx context.Context, name, envName string) error {
 	doc, err := s.GetConfig(ctx, name)
 	if err != nil {
@@ -935,20 +953,30 @@ func (s *ModuleConfigService) SetActiveEnvironment(ctx context.Context, name, en
 	if !ok {
 		return fmt.Errorf("environment %q not found for module %q", envName, name)
 	}
-	cv := target.ConfigValues
-	if cv == nil {
-		cv = make(map[string]string)
+	schema := s.schemaFor(name, doc)
+	clean := nonSecretValues(schema, target.ConfigValues)
+	enc := target.EncryptedValues
+	if enc == nil {
+		enc = map[string]string{}
 	}
 	if err := s.validateCandidate(ctx, name, candidate{
-		schema: s.schemaFor(name, doc), env: envName, values: cv,
+		schema: schema, env: envName, values: clean,
 		storedEncrypted: target.EncryptedValues, activation: true,
 	}); err != nil {
 		return err
 	}
-	won, err := s.repo.CompareAndSwapConfig(ctx, name, ConfigMutation{
+	mut := ConfigMutation{
 		ExpectedRevision: doc.ConfigRevision, Activate: envName,
+		WriteLegacy: true, LegacyValues: clean, LegacySecrets: enc,
 		NeedsRestart: s.needsRestartFor(name),
-	})
+	}
+	if len(clean) != len(target.ConfigValues) {
+		// Stripping removed a plaintext secret: repair the profile too, so
+		// the leak does not survive to be read by the runtime or echoed by
+		// the next GET.
+		mut.Env, mut.EnvValues, mut.EnvSecrets, mut.EnvRevision = envName, clean, enc, target.Revision
+	}
+	won, err := s.repo.CompareAndSwapConfig(ctx, name, mut)
 	if err != nil {
 		return err
 	}
@@ -1026,9 +1054,21 @@ func (s *ModuleConfigService) InvalidateCache(ctx context.Context, name string) 
 	return s.redis.Del(ctx, enabledCachePrefix+name)
 }
 
-// ClearNeedsRestart resets the needsRestart flag for a module.
+// ClearNeedsRestart resets the needsRestart flag for a module
+// unconditionally. It is for BOOT SEEDING only, where the process is the
+// only writer and the flag means "enabled in the DB but not loaded in this
+// process" — there is no concurrent request whose hint could be erased.
+// Every request-time clear goes through ClearNeedsRestartAt instead.
 func (s *ModuleConfigService) ClearNeedsRestart(ctx context.Context, name string) error {
 	return s.repo.ClearNeedsRestart(ctx, name)
+}
+
+// ClearNeedsRestartAt clears the flag only while the document is still at
+// the revision the caller observed, so an enable/disable cannot retract a
+// hint a concurrent config change earned. Returns false — not an error —
+// when the revision moved.
+func (s *ModuleConfigService) ClearNeedsRestartAt(ctx context.Context, name string, expectedRevision int64) (bool, error) {
+	return s.repo.ClearNeedsRestartAt(ctx, name, expectedRevision)
 }
 
 // --- Config value readers (used by modules in Init) ---

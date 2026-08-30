@@ -224,10 +224,12 @@ func (s *ModuleConfigService) validateCandidate(ctx context.Context, name string
 		}
 		return v.ValidateConfigSnapshot(ctx, snap)
 	}
-	values := c.values
-	if values == nil {
-		values = map[string]string{}
-	}
+	// The legacy hooks receive the same non-secret map the snapshot does — a
+	// plaintext secret a legacy document still carries never crosses the
+	// validator boundary through the older seam either. nonSecretValues
+	// always returns a non-nil map, so a nil candidate still arrives as an
+	// empty one.
+	values := nonSecretValues(c.schema, c.values)
 	if c.activation {
 		if v, ok := m.(HasConfigActivationValidator); ok {
 			return v.ValidateConfigActivation(ctx, values)

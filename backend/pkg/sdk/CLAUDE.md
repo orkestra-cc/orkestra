@@ -78,9 +78,11 @@ The SDK is on the path to v1.0 publication. Until then:
   implemented BY modules** — the same category as `RedisClient`, and its own
   doc comment says so ("exactly what the service calls — no more"). It is
   therefore outside the additive-only rule: it changed shape for atomic
-  module-config writes (`CompareAndSwapConfig` added; `CompareAndSwapEnvironment`
-  and `MigrateToEnvironments` re-signed; the four two-step write methods
-  removed). The only thing that tracks it is a fork's substitute repository (a
+  module-config writes (`CompareAndSwapConfig` added, and its `ConfigMutation`
+  now accepts `Activate` combined with `WriteLegacy`/`Env`;
+  `ClearNeedsRestartAt` added for the revision-guarded restart-hint clear;
+  `CompareAndSwapEnvironment` and `MigrateToEnvironments` re-signed; the four
+  two-step write methods removed). The only thing that tracks it is a fork's substitute repository (a
   test double); `var _ ConfigRepository = (*ModuleConfigRepository)(nil)` pins
   the in-tree one.
 - **DTO field additions** in `iface/` should be optional (pointer types
@@ -283,6 +285,21 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   pass each other unseen. `needsRestart` is persisted in that same write as
   `!SupportsHotReload(name)` (`SetHotReloadResolver`, installed by the registry
   before seeding); the admin handler no longer clears it afterwards.
+  The one clear it still does — after an enable/disable that carried no cold
+  config change — goes through `ClearNeedsRestartAt(ctx, name, revision)`, a
+  compare-and-swap on the revision the request itself observed (and one that
+  deliberately does NOT bump it, since a presentation-flag clear must not make
+  a concurrent config write lose its own CAS): a cold config change that
+  landed in between keeps the hint it earned, and the lost clear is logged at
+  INFO, never an error. `ClearNeedsRestart` stays unconditional for boot
+  seeding, where the process is the only writer.
+- **A module that fails to STOP is not disabled.** `StopModule` returns before
+  clearing `started`, so the module and any infra it declared keep running;
+  the admin handler therefore restores `enabled=true` and answers **422**
+  (`module %q failed to stop`), audits `module.disabled` with outcome
+  `failure`, and leaves `needsRestart` alone — reporting success would tell
+  the operator the opposite of what happened and let the next boot skip a
+  module they believe is merely stopped.
 - **The admin API's two request lanes are enforced server-side
   (`config_lanes.go`).** A key in `config` must be a declared non-secret
   field, a record-list label key or a non-secret sub-field key; a key in
@@ -299,10 +316,21 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   The lane rule only stops NEW misfiled writes, so `nonSecretValues` strips
   every key the live schema declares as a secret (scalar or record-list
   sub-field) from every non-secret map the service reads or writes — the
-  validation snapshot, the `configValues` of every admin response, and the
-  merged map each mutation persists — so plaintext a legacy document still
-  carries is never validated, never echoed, and is dropped by the next
-  write. Membership is checked in BOTH lanes too
+  validation snapshot (the LEGACY `ValidateConfig` /
+  `ValidateConfigActivation` hooks included, not just the snapshot seam),
+  the `configValues` of every admin response, the merged map each mutation
+  persists, the boot backfill's candidate (`buildBackfill`, so a boot stops
+  rewriting the plaintext into the profile AND the mirror, and realigns a
+  mirror that still holds one), the profile the legacy→profiles migration
+  creates (`ensureEnvironments`), and the map an activation publishes into
+  the mirror — so plaintext a legacy document still carries is never
+  validated, never echoed, and is dropped by the next write. Because the
+  activation's mirror copy must be stripped, it is made CLIENT-side from the
+  read at revision r (`ConfigMutation.Activate` combined with `WriteLegacy`,
+  a plain `$set` under the same `configRevision` filter) instead of the
+  server-side `$ifNull` pipeline; the revision guard is what makes that safe,
+  and when stripping removed something the activated profile is repaired in
+  the same update. Membership is checked in BOTH lanes too
   (`validateElementKeysInRoster`): an element key whose slug is not in the
   roster the write is judged against is refused with `ErrUnknownSlug` → 409,
   the same status the record-list route returns, so an orphan ciphertext is

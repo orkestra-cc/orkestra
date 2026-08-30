@@ -511,6 +511,12 @@ describe('ModuleConfigSection', () => {
 });
 
 describe('ModuleConfigSection revision conflict', () => {
+  // "Reload & review" refreshes the module snapshot as well as the profile,
+  // and awaits both — so every test that clicks it needs this handler even
+  // though `TestHost` takes `mod` as a prop and never fetches it itself.
+  const moduleGet = (mod: ModuleConfig) =>
+    http.get(url('/v1/admin/modules/:name'), () => HttpResponse.json(mod));
+
   const envGet = (hits: { n: number }, configValues: Record<string, string>) =>
     http.get(url('/v1/admin/modules/:name/environments/:env'), () => {
       hits.n += 1;
@@ -537,6 +543,7 @@ describe('ModuleConfigSection revision conflict', () => {
     const hits = { n: 0 };
     let patches = 0;
     server.use(
+      moduleGet(mod),
       envGet(hits, { a: 'server-old', b: 'b-old', c: 'c-old' }),
       http.patch(url('/v1/admin/modules/:name/environments/:env'), () => {
         patches += 1;
@@ -631,6 +638,64 @@ describe('ModuleConfigSection revision conflict', () => {
       screen.getByRole('button', { name: 'Reload & review' })
     ).toBeInTheDocument();
     expect(alpha).toHaveValue('y'); // the draft is untouched
+  });
+
+  // The module snapshot — the `live` badge, the runtime status,
+  // `activeEnvironment` — is the other half of what the operator is asked to
+  // review. Lifting the latch while it is still the pre-conflict one invites
+  // a save decided against exactly the state the 409 said was gone, so the
+  // reload is not finished until BOTH halves have landed.
+  it('keeps Save disabled and the conflict latched when the module refetch fails', async () => {
+    const user = userEvent.setup();
+    const mod = moduleWith([field({ key: 'a', label: 'Alpha' })], {
+      availableEnvironments: ['production']
+    });
+    const hits = { n: 0 };
+    server.use(
+      envGet(hits, { a: 'x' }),
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), () =>
+        HttpResponse.json(
+          {
+            status: 409,
+            title: 'Conflict',
+            detail: 'moved',
+            code: 'module.config_revision_stale'
+          },
+          { status: 409 }
+        )
+      )
+    );
+    renderWithProviders(<TestHost mod={mod} />);
+    const alpha = await screen.findByLabelText('Alpha');
+    await waitFor(() => expect(alpha).toHaveValue('x'));
+    await user.clear(alpha);
+    await user.type(alpha, 'y');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByRole('button', { name: 'Reload & review' });
+
+    // The profile half succeeds and brings a genuinely new baseline; only the
+    // module snapshot fails.
+    let moduleHits = 0;
+    server.use(
+      envGet(hits, { a: 'theirs' }),
+      http.get(url('/v1/admin/modules/:name'), () => {
+        moduleHits += 1;
+        return HttpResponse.json(
+          { status: 503, title: 'Service Unavailable', detail: 'down' },
+          { status: 503 }
+        );
+      })
+    );
+    await user.click(screen.getByRole('button', { name: 'Reload & review' }));
+
+    expect(
+      await screen.findByText(/Reloading the latest configuration failed/)
+    ).toBeInTheDocument();
+    expect(moduleHits).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Reload & review' })
+    ).toBeInTheDocument();
   });
 
   it('keeps the record-list wording for a codeless 409', async () => {
@@ -732,6 +797,7 @@ describe('ModuleConfigSection revision conflict', () => {
     const env = { values: { a: 'x' } as Record<string, string>, revision: 1 };
     let patchStatus = 409;
     server.use(
+      moduleGet(mod),
       http.get(url('/v1/admin/modules/:name/environments/:env'), () =>
         HttpResponse.json({
           environment: 'production',

@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
@@ -29,6 +30,7 @@ func (r *recordingSink) Emit(_ context.Context, ev iface.AuditEvent) {
 type auditDemoModule struct {
 	BaseModule
 	startErr  error
+	stopErr   error
 	hotReload bool
 }
 
@@ -37,6 +39,9 @@ func (m *auditDemoModule) Category() ModuleCategory { return CategoryToggleable 
 func (m *auditDemoModule) Init(*Dependencies) error { return nil }
 func (m *auditDemoModule) Start(context.Context) error {
 	return m.startErr
+}
+func (m *auditDemoModule) Stop(context.Context) error {
+	return m.stopErr
 }
 func (m *auditDemoModule) HotReloadConfig() bool { return m.hotReload }
 func (m *auditDemoModule) ConfigSchema() []ConfigField {
@@ -508,5 +513,128 @@ func TestAudit_EnvIsTheProfileTheWriteTargeted(t *testing.T) {
 	}
 	if sink.events[0].Metadata["env"] != "sandbox" {
 		t.Errorf("event env = %v, want sandbox", sink.events[0].Metadata["env"])
+	}
+}
+
+// Request A persists a cold config change (needsRestart=true) at revision N.
+// A concurrent enable-only request B must not clear the hint it never saw:
+// its clear is a compare-and-swap on the revision B itself observed, and a
+// lost clear is an ordinary outcome, not an error.
+func TestAudit_ConcurrentConfigWriteKeepsNeedsRestart(t *testing.T) {
+	h, repo, _ := newAuditHandler(t, &auditDemoModule{})
+	enabled := true
+	in := &UpdateModuleInput{Name: "demo"}
+	in.Body.Enabled = &enabled
+
+	// Request A lands between B's read and B's clear.
+	repo.beforeClearRestart = func() {
+		repo.docs["demo"].NeedsRestart = true
+		repo.docs["demo"].ConfigRevision++
+	}
+	out, err := h.UpdateModule(context.Background(), in)
+	if err != nil || out == nil {
+		t.Fatalf("enable-only PATCH: out=%v err=%v", out, err)
+	}
+	if !repo.docs["demo"].NeedsRestart {
+		t.Fatal("the concurrent config change's restart hint was cleared by an unrelated enable")
+	}
+
+	// Same request with no concurrent writer still clears it.
+	repo.beforeClearRestart = nil
+	repo.docs["demo"].NeedsRestart = true
+	if _, err := h.UpdateModule(context.Background(), in); err != nil {
+		t.Fatalf("second enable-only PATCH: %v", err)
+	}
+	if repo.docs["demo"].NeedsRestart {
+		t.Fatal("an uncontended enable must still clear needsRestart")
+	}
+}
+
+// StopModule returns before clearing `started`, so a module whose Stop fails
+// keeps running — with its infra, its jobs and its routes. Persisting
+// enabled=false and answering 200 would tell the operator the opposite of
+// what happened, so the disable is rolled back and the request fails.
+func TestDisable_AFailedStopIsNotSuccess(t *testing.T) {
+	mod := &auditDemoModule{}
+	h, repo, sink := newAuditHandler(t, mod)
+	ctx := context.Background()
+
+	enabled, disabled := true, false
+	on := &UpdateModuleInput{Name: "demo"}
+	on.Body.Enabled = &enabled
+	if _, err := h.UpdateModule(ctx, on); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if !h.registry.IsStarted("demo") {
+		t.Fatal("precondition: the module must be started")
+	}
+
+	mod.stopErr = errors.New("connection pool still draining")
+	off := &UpdateModuleInput{Name: "demo"}
+	off.Body.Enabled = &disabled
+	_, err := h.UpdateModule(ctx, off)
+	if err == nil {
+		t.Fatal("a failed stop reported success")
+	}
+	var status interface{ GetStatus() int }
+	if !errors.As(err, &status) || status.GetStatus() != 422 {
+		t.Fatalf("err = %v, want a 422", err)
+	}
+	if !repo.docs["demo"].Enabled {
+		t.Error("enabled stayed false while the module is still running")
+	}
+	if !h.registry.IsStarted("demo") {
+		t.Error("precondition changed: the module is no longer started")
+	}
+	last := sink.events[len(sink.events)-1]
+	if last.Action != ActionModuleDisabled || last.Outcome != auditOutcomeFailure {
+		t.Errorf("last event = %s/%s, want module.disabled/failure", last.Action, last.Outcome)
+	}
+}
+
+// The User-Agent is the one free-text header an event keeps, and it is cut to
+// a byte bound. Cutting bytes mid-rune produces invalid UTF-8, which BSON
+// refuses — so the audit of a mutation that already happened would be lost
+// to a header the caller controls.
+func TestBoundString_IsRuneSafe(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"multi-byte runes cut mid-sequence", "a" + strings.Repeat("é", 300)},
+		{"multi-byte runes cut on a boundary", strings.Repeat("é", 300)},
+		{"already invalid", "a\xffb"},
+		{"already invalid and over the bound", "a\xff" + strings.Repeat("é", 300)},
+		{"ascii under the bound", "UA/1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := boundString(c.in, auditMaxUserAgent)
+			if !utf8.ValidString(got) {
+				t.Errorf("boundString(%q…) = %q, which is not valid UTF-8", c.name, got)
+			}
+			if len(got) > auditMaxUserAgent {
+				t.Errorf("len = %d, want <= %d", len(got), auditMaxUserAgent)
+			}
+		})
+	}
+	// A cut never eats more than the partial rune it lands in.
+	if n := len(boundString(strings.Repeat("é", 300), auditMaxUserAgent)); n != auditMaxUserAgent {
+		t.Errorf("len = %d, want %d — 256 is a whole number of 2-byte runes", n, auditMaxUserAgent)
+	}
+	// An invalid byte early in a long header must not cost the whole value.
+	if got := boundString("a\xff"+strings.Repeat("b", 300), auditMaxUserAgent); got != "a"+strings.Repeat("b", auditMaxUserAgent-1) {
+		t.Errorf("boundString dropped everything after an early invalid byte: %q", got)
+	}
+	// The event carries the bounded value, not the raw header.
+	h, _, sink := newAuditHandler(t, &auditDemoModule{})
+	h.SetActorResolver(func(context.Context) AdminActor {
+		return AdminActor{UserID: "u-1", UserAgent: strings.Repeat("é", 300)}
+	})
+	if _, err := h.UpdateModule(context.Background(), patchConfig(map[string]string{"flag": "true"}, nil)); err != nil {
+		t.Fatal(err)
+	}
+	if ua := sink.events[0].UserAgent; !utf8.ValidString(ua) || len(ua) > auditMaxUserAgent {
+		t.Errorf("event UserAgent len=%d valid=%v", len(ua), utf8.ValidString(ua))
 	}
 }

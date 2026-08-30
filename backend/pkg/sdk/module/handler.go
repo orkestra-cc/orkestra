@@ -375,16 +375,52 @@ func (h *ModuleAdminHandler) doEnable(ctx context.Context, name string, existing
 			return huma.Error422UnprocessableEntity(fmt.Sprintf("module %q init failed: %s", name, err.Error()))
 		}
 	}
+	// Read the revision this half is allowed to retract a hint for, AFTER
+	// the config half (whose write moved it) and before the lifecycle step.
+	// A read failure only costs the clear, never the enable.
+	revision, ok := h.observedRevision(ctx, name)
 	if err := h.registry.StartModule(ctx, name); err != nil {
 		return huma.Error422UnprocessableEntity(fmt.Sprintf("module %q failed to start: %s", name, err.Error()))
 	}
-	if !keepNeedsRestart {
-		_ = h.configService.ClearNeedsRestart(ctx, name)
+	if !keepNeedsRestart && ok {
+		h.clearNeedsRestart(ctx, name, revision)
 	}
 	return nil
 }
 
-// disableModule persists enabled=false, stops the module, and audits.
+// observedRevision reads the configRevision this request is entitled to
+// clear needsRestart against. A failed read is reported, not fatal: the
+// lifecycle change already happened (or is about to), and losing a
+// presentation-flag clear is strictly better than clearing one blind.
+func (h *ModuleAdminHandler) observedRevision(ctx context.Context, name string) (int64, bool) {
+	doc, err := h.configService.GetConfig(ctx, name)
+	if err != nil || doc == nil {
+		h.logger().Info("needsRestart kept: the module config could not be re-read",
+			slog.String("module", name))
+		return 0, false
+	}
+	return doc.ConfigRevision, true
+}
+
+// clearNeedsRestart retracts the hint only while the document is still at
+// the revision this request observed. Losing that compare-and-swap means a
+// config change landed in between and earned the hint for itself — an
+// ordinary outcome, logged and never an error.
+func (h *ModuleAdminHandler) clearNeedsRestart(ctx context.Context, name string, revision int64) {
+	won, err := h.configService.ClearNeedsRestartAt(ctx, name, revision)
+	switch {
+	case err != nil:
+		h.logger().Info("needsRestart kept: the clear failed",
+			slog.String("module", name), slog.String("error", err.Error()))
+	case !won:
+		h.logger().Info("needsRestart kept: the configuration changed concurrently",
+			slog.String("module", name))
+	}
+}
+
+// disableModule persists enabled=false, stops the module, and audits the
+// actual result — including the rollback when the stop fails, which is a
+// module.disabled/failure event derived from the returned error.
 func (h *ModuleAdminHandler) disableModule(ctx context.Context, name string, existing *ModuleConfig, keepNeedsRestart bool) error {
 	err := h.doDisable(ctx, name, existing, keepNeedsRestart)
 	h.emitAudit(ctx, auditRecord{action: ActionModuleDisabled, module: name, err: err})
@@ -401,12 +437,28 @@ func (h *ModuleAdminHandler) doDisable(ctx context.Context, name string, existin
 	if err := h.configService.UpdateEnabled(ctx, name, false); err != nil {
 		return err
 	}
+	revision, ok := h.observedRevision(ctx, name)
 	if err := h.registry.StopModule(ctx, name); err != nil {
-		// The module is disabled regardless; the stop error is diagnostic.
-		h.logger().Warn("module stop error", slog.String("module", name), slog.String("error", err.Error()))
+		// The module is NOT disabled: StopModule returns before clearing
+		// `started`, so the module — and any infra it declared — keeps
+		// running. Persisting enabled=false and answering 200 would state
+		// the opposite of what happened, and the next boot would then skip
+		// a module the operator believes is merely stopped. Roll the flag
+		// back and fail; disableModule audits module.disabled/failure from
+		// the returned error. needsRestart is deliberately NOT cleared —
+		// nothing was retracted.
+		h.logger().Error("module stop failed; restoring enabled=true",
+			slog.String("module", name), slog.String("error", err.Error()))
+		if restoreErr := h.configService.UpdateEnabled(ctx, name, true); restoreErr != nil {
+			h.logger().Error("module stop failed AND enabled=true could not be restored; the document now says disabled while the module runs",
+				slog.String("module", name),
+				slog.String("error", restoreErr.Error()),
+				slog.String("stopError", err.Error()))
+		}
+		return huma.Error422UnprocessableEntity(fmt.Sprintf("module %q failed to stop: %s", name, err.Error()))
 	}
-	if !keepNeedsRestart {
-		_ = h.configService.ClearNeedsRestart(ctx, name)
+	if !keepNeedsRestart && ok {
+		h.clearNeedsRestart(ctx, name, revision)
 	}
 	return nil
 }

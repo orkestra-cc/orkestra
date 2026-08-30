@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { Route, Routes } from 'react-router';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
@@ -263,8 +263,12 @@ describe('record lists on the module detail page', () => {
           modules: [{ moduleName: 'demo', status: 'healthy' }]
         })
       ),
-      http.get('*/v1/admin/modules/:name', () => {
+      // Deliberately slower than the profile GET: the two halves of the
+      // reload resolve in a fixed order, so "Save became usable before the
+      // badge caught up" is a deterministic failure rather than a race.
+      http.get('*/v1/admin/modules/:name', async () => {
         moduleHits += 1;
+        await delay(80);
         return HttpResponse.json({ ...listModule, activeEnvironment });
       }),
       http.patch('*/v1/admin/modules/:name/environments/:env', () =>
@@ -301,12 +305,15 @@ describe('record lists on the module detail page', () => {
     activeEnvironment = 'sandbox';
     await user.click(screen.getByRole('button', { name: 'Reload & review' }));
 
-    await waitFor(() => expect(moduleHits).toBeGreaterThan(before));
+    // The latch is what the operator reads as "you may save now", so it must
+    // not lift before the snapshot they would be judging against has landed:
+    // the ONLY thing waited on here is Save becoming usable, and by then the
+    // badge already says sandbox.
     await waitFor(() =>
-      expect(screen.getByText('live').parentElement).toHaveTextContent(
-        'sandbox'
-      )
+      expect(screen.getByRole('button', { name: /^save/i })).toBeEnabled()
     );
+    expect(moduleHits).toBeGreaterThan(before);
+    expect(screen.getByText('live').parentElement).toHaveTextContent('sandbox');
     // The refreshed module snapshot must not re-seed the form under the draft.
     expect(screen.getByDisplayValue('smtp.mine')).toBeInTheDocument();
   });

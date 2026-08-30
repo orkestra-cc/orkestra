@@ -184,3 +184,89 @@ func TestMongoCompareAndSwapEnvironment_BumpsConfigRevision(t *testing.T) {
 		t.Errorf("ordinary writer at revision 0 must lose after a roster write: won=%v err=%v", won, err)
 	}
 }
+
+// Activation combined with WriteLegacy writes the maps the SERVICE supplies
+// (stripped of any plaintext the stored profile carried under a secret key)
+// rather than copying the stored ones server-side, and may repair the
+// activated profile in the same update. The revision guard is what makes
+// that client-side copy safe.
+func TestMongoCompareAndSwapConfig_ActivationWithSuppliedMaps(t *testing.T) {
+	ctx := context.Background()
+	_, repo := newTestConfigService(t)
+	seedRevisionDoc(t, repo) // active: production; sandbox holds a:"sb" / s:"ct"
+
+	supplied := map[string]string{"a": "supplied"}
+	secrets := map[string]string{"s": "ct"}
+	won, err := repo.CompareAndSwapConfig(ctx, "cas", ConfigMutation{
+		ExpectedRevision: 0, Activate: "sandbox",
+		Env: "sandbox", EnvValues: supplied, EnvSecrets: secrets, EnvRevision: 0,
+		WriteLegacy: true, LegacyValues: supplied, LegacySecrets: secrets,
+		NeedsRestart: true,
+	})
+	if err != nil || !won {
+		t.Fatalf("activation with supplied maps: won=%v err=%v", won, err)
+	}
+	doc, _ := repo.FindByName(ctx, "cas")
+	if doc.ActiveEnv() != "sandbox" {
+		t.Errorf("activeEnvironment = %q, want sandbox", doc.ActiveEnv())
+	}
+	sb := doc.Environments["sandbox"]
+	if doc.ConfigValues["a"] != "supplied" || sb.ConfigValues["a"] != "supplied" {
+		t.Errorf("supplied values did not land: mirror=%v profile=%v", doc.ConfigValues, sb.ConfigValues)
+	}
+	if doc.EncryptedValues["s"] != "ct" || sb.EncryptedValues["s"] != "ct" {
+		t.Errorf("supplied secrets did not land: mirror=%v profile=%v", doc.EncryptedValues, sb.EncryptedValues)
+	}
+	if doc.ConfigRevision != 1 || sb.Revision != 1 || !doc.NeedsRestart {
+		t.Errorf("configRevision=%d envRevision=%d needsRestart=%v, want 1/1/true", doc.ConfigRevision, sb.Revision, doc.NeedsRestart)
+	}
+	if doc.Environments["production"].ConfigValues["a"] != "old" {
+		t.Error("sibling profile disturbed")
+	}
+	// A stale expectation changes nothing.
+	won, err = repo.CompareAndSwapConfig(ctx, "cas", ConfigMutation{
+		ExpectedRevision: 0, Activate: "production",
+		WriteLegacy: true, LegacyValues: map[string]string{"a": "never"}, LegacySecrets: map[string]string{},
+	})
+	if err != nil || won {
+		t.Fatalf("stale activation: won=%v err=%v, want (false, nil)", won, err)
+	}
+	doc, _ = repo.FindByName(ctx, "cas")
+	if doc.ActiveEnv() != "sandbox" || doc.ConfigValues["a"] != "supplied" || doc.ConfigRevision != 1 {
+		t.Errorf("a stale activation changed the document: %+v", doc)
+	}
+}
+
+// The needsRestart clear is guarded by the revision the caller observed, so a
+// config write that landed in between keeps its hint. It does NOT advance the
+// revision: a presentation-flag clear must not make a concurrent config write
+// lose its own compare-and-swap.
+func TestMongoClearNeedsRestartAt_RevisionGuard(t *testing.T) {
+	ctx := context.Background()
+	_, repo := newTestConfigService(t)
+	doc := &ModuleConfig{ModuleName: "cas", Category: CategoryCore, NeedsRestart: true}
+	if err := repo.Upsert(ctx, doc); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	won, err := repo.ClearNeedsRestartAt(ctx, "cas", 1)
+	if err != nil || won {
+		t.Fatalf("stale clear: won=%v err=%v, want (false, nil)", won, err)
+	}
+	got, _ := repo.FindByName(ctx, "cas")
+	if !got.NeedsRestart {
+		t.Error("a stale clear cleared the flag anyway")
+	}
+
+	won, err = repo.ClearNeedsRestartAt(ctx, "cas", 0)
+	if err != nil || !won {
+		t.Fatalf("current clear: won=%v err=%v, want (true, nil)", won, err)
+	}
+	got, _ = repo.FindByName(ctx, "cas")
+	if got.NeedsRestart {
+		t.Error("the clear did not land")
+	}
+	if got.ConfigRevision != 0 {
+		t.Errorf("configRevision = %d, want 0 — the clear must not bump it", got.ConfigRevision)
+	}
+}

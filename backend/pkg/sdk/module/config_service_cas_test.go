@@ -337,3 +337,77 @@ func TestUpdateConfig_LegacyPlaintextSecretIsDroppedByTheNextWrite(t *testing.T)
 		t.Error("the stored ciphertext must be untouched by the repair")
 	}
 }
+
+// The lazy legacy→profiles migration used to copy the raw legacy mirror into
+// the new production profile, duplicating any plaintext a pre-lane-rule
+// document still carried under a secret key. The migrated profile is
+// stripped instead.
+func TestEnsureEnvironments_StripsLegacyPlaintext(t *testing.T) {
+	withEncryptionKey(t)
+	repo := newFakeConfigRepo()
+	repo.docs["inv"] = &ModuleConfig{
+		ModuleName:      "inv",
+		ConfigSchema:    invariantModule{}.ConfigSchema(),
+		ConfigValues:    map[string]string{"providerSecret": "plain", "password": "true"},
+		EncryptedValues: map[string]string{},
+	}
+	svc := NewModuleConfigService(repo, fakeRedisClient{}, slog.Default())
+	svc.RegisterKnownModules([]Module{invariantModule{}})
+
+	doc, err := svc.GetConfig(context.Background(), "inv")
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
+	prod := doc.Environments["production"]
+	if v, ok := prod.ConfigValues["providerSecret"]; ok {
+		t.Errorf("the migrated profile carries the plaintext secret: %q", v)
+	}
+	if prod.ConfigValues["password"] != "true" {
+		t.Errorf("the migration lost a non-secret value: %v", prod.ConfigValues)
+	}
+	if v, ok := repo.docs["inv"].Environments["production"].ConfigValues["providerSecret"]; ok {
+		t.Errorf("the persisted profile carries the plaintext secret: %q", v)
+	}
+}
+
+// Activation copies the target profile into the legacy mirror. That copy has
+// to be STRIPPED — otherwise activating a legacy profile republishes its
+// plaintext into the mirror — and, when stripping removed something, the
+// profile itself is repaired in the same compare-and-swap.
+func TestSetActiveEnvironment_StripsAndRepairsTheTarget(t *testing.T) {
+	svc, repo := newInvService(t)
+	extra, err := encryptSecret("extra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sb := repo.docs["inv"].Environments["sandbox"]
+	sb.ConfigValues = map[string]string{"providerSecret": "plain", "password": "true", "provider": "true"}
+	sb.EncryptedValues = map[string]string{"extraSecret": extra}
+	repo.docs["inv"].Environments["sandbox"] = sb
+
+	if err := svc.SetActiveEnvironment(context.Background(), "inv", "sandbox"); err != nil {
+		t.Fatalf("SetActiveEnvironment: %v", err)
+	}
+	doc := repo.docs["inv"]
+	if doc.ActiveEnvironment != "sandbox" {
+		t.Fatalf("activeEnvironment = %q, want sandbox", doc.ActiveEnvironment)
+	}
+	got := doc.Environments["sandbox"]
+	for name, m := range map[string]map[string]string{"mirror": doc.ConfigValues, "profile": got.ConfigValues} {
+		if v, ok := m["providerSecret"]; ok {
+			t.Errorf("%s carries the plaintext secret after activation: %q", name, v)
+		}
+		if m["password"] != "true" || m["provider"] != "true" {
+			t.Errorf("%s lost a non-secret value: %v", name, m)
+		}
+	}
+	if doc.EncryptedValues["extraSecret"] != extra || got.EncryptedValues["extraSecret"] != extra {
+		t.Errorf("the target's ciphertext was not copied: mirror=%v profile=%v", doc.EncryptedValues, got.EncryptedValues)
+	}
+	if got.Revision != 1 {
+		t.Errorf("sandbox revision = %d, want 1 (the repair is a profile write)", got.Revision)
+	}
+	if doc.ConfigRevision != 4 {
+		t.Errorf("configRevision = %d, want 4", doc.ConfigRevision)
+	}
+}

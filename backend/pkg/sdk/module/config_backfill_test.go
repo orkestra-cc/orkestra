@@ -300,3 +300,47 @@ func TestSeedFromModules_BackfillFailureIsRecorded(t *testing.T) {
 		t.Fatal("the required-module gate must refuse a module whose backfill failed")
 	}
 }
+
+// A document written before the lane rule can hold a plaintext secret under
+// a key the schema declares as a secret. The boot backfill used to seed the
+// candidate from the RAW profile, so it rewrote that plaintext into both the
+// profile and the mirror on every boot. It must strip it instead — and,
+// because the mirror comparison is against the stripped candidate, the
+// mirror that still holds it is realigned in the same write.
+func TestSeedFromModules_StripsLegacyPlaintextSecrets(t *testing.T) {
+	svc, repo := backfillSvc(t, &ModuleConfig{
+		ModuleName: "bf", ActiveEnvironment: "production", ConfigRevision: 4,
+		ConfigValues:    map[string]string{"secret": "plain", "existing": "x"},
+		EncryptedValues: map[string]string{},
+		Environments: map[string]EnvironmentConfig{
+			"production": {ConfigValues: map[string]string{"secret": "plain", "existing": "x"}, EncryptedValues: map[string]string{}, Revision: 1},
+		},
+	})
+	if err := svc.SeedFromModules(context.Background(), []Module{backfillModule{}}); err != nil {
+		t.Fatal(err)
+	}
+	doc := repo.docs["bf"]
+	prod := doc.Environments["production"]
+	for name, m := range map[string]map[string]string{"profile": prod.ConfigValues, "mirror": doc.ConfigValues} {
+		if v, ok := m["secret"]; ok {
+			t.Errorf("%s still carries the plaintext secret: %q", name, v)
+		}
+		if m["existing"] != "x" {
+			t.Errorf("%s lost a non-secret value: %v", name, m)
+		}
+	}
+	// The schema default was backfilled as CIPHERTEXT, in the secret map.
+	enc, ok := prod.EncryptedValues["secret"]
+	if !ok || enc == "" {
+		t.Fatalf("the secret default was not backfilled as ciphertext: %v", prod.EncryptedValues)
+	}
+	if plain, err := decryptSecret(enc); err != nil || plain != "s3cr3t" {
+		t.Errorf("backfilled ciphertext = %q/%v, want the schema default", plain, err)
+	}
+	if doc.EncryptedValues["secret"] != enc {
+		t.Errorf("mirror ciphertext %q != profile ciphertext %q", doc.EncryptedValues["secret"], enc)
+	}
+	if repo.docCasCalls != 1 {
+		t.Errorf("docCasCalls = %d, want exactly 1 write", repo.docCasCalls)
+	}
+}

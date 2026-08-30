@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
@@ -143,11 +145,25 @@ func (h *ModuleAdminHandler) emitAudit(ctx context.Context, rec auditRecord) {
 	h.auditSink.Emit(ctx, ev)
 }
 
+// boundString caps a free-text header at max BYTES without ever producing
+// invalid UTF-8. A plain byte slice can cut a multi-byte rune in half, and
+// BSON refuses an invalid string — so the audit of a mutation that ALREADY
+// COMMITTED would be lost to a header the caller fully controls.
+//
+// Sanitising comes first, then the cut: an invalid byte early in a long
+// header would otherwise force the boundary search all the way down to zero
+// and throw the whole value away. After ToValidUTF8 the string is valid, so
+// the search backs off at most three bytes to the last complete rune.
 func boundString(v string, max int) string {
+	v = strings.ToValidUTF8(v, "")
 	if len(v) <= max {
 		return v
 	}
-	return v[:max]
+	n := max
+	for n > 0 && !utf8.ValidString(v[:n]) {
+		n--
+	}
+	return v[:n]
 }
 
 // auditKeyNames reduces a submitted key set to schema-derived names. secret
