@@ -100,6 +100,8 @@ Every module-config mutation is a single MongoDB `UpdateOne` guarded by the docu
 
 Lazy self-healing (an admin read rebuilding a wiped document from schema defaults) is the default, but a deployment can mark modules whose document must **not** be rebuilt at runtime — Orkestra marks `auth`, because its per-surface password-login policy is read strictly and a rebuilt default would silently re-enable password sign-in. For a marked module a missing document is an outage: `GET /v1/admin/modules/{name}` and every mutation return **503**, `GET /v1/admin/modules` still lists every other module and shows the marked one as `"status": "missing"` with `"missing": true`. Restore the document, or fix the database and restart so boot seeding runs.
 
+A module that must decide something across several keys at once — the auth module's "is this OAuth provider enabled *and* structurally complete, and which secret do I build it from" — reads them through `ActiveConfigRequiredModule`, which returns one consistent, read-once view of the active profile with every stored secret decrypted up front. A secret that no longer decrypts fails that read as an outage instead of quietly substituting the environment-variable fallback the way single-key reads do.
+
 ## Repeatable fields (`recordList`)
 
 A module that needs an operator-managed **list of records** — several named

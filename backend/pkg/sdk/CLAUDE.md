@@ -357,6 +357,19 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   `ModuleConfigStatus{Missing: true}` row instead of re-seeding; every other
   module keeps today's rebuild-from-schema behaviour. The set is sealed after
   the first call. In-tree the server marks `auth` (`cmd/server/admin_wiring.go`).
+- **`ActiveConfigRequiredModule(ctx, name)` is the multi-key strict reader** —
+  ONE repository read returning an immutable `ActiveConfigView` of the active
+  profile: `Raw(key)` (presence-aware, schema-secret keys stripped),
+  `Effective(key)` (GetValue's present-non-empty-else-EnvVar/Default rule),
+  `Secret(key)` / `SecretPresent(key)` (GetSecret's rule, decrypted once at
+  read time) and `Revision()`. A missing document is `ErrRequiredConfigMissing`
+  and a stored ciphertext that no longer decrypts fails the WHOLE read with
+  `ErrConfigSecretUnreadable` naming the key — a document-level outage, never
+  a silent env-var fallback. Fallbacks and secret-ness come from the LIVE
+  schema. `auth` reads every OAuth provider decision (toggle, structural
+  fields, the secret the provider is built from) out of one view so a check
+  and the value it guards can never observe two different documents.
+  `NewActiveConfigView` is exported for a fork's fakes.
 - **`SeedFromModules` backfills absent schema keys with a non-empty `EnvVar`/`Default`
   on existing documents** (the active profile gains its defaults and the
   legacy mirror is rewritten as an exact copy of it — never backfilled on its
