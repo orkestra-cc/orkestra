@@ -243,6 +243,10 @@ services:
       VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3000}
       VITE_HMR_HOST: ${VITE_HMR_HOST:-staging.orkestra.cc}
       VITE_ALLOWED_HOSTS: ${VITE_ALLOWED_HOSTS:-}
+      # File-watcher override for the Vite dev server. Unset = auto-detect
+      # (polling only under a WSL kernel; inotify everywhere else). Set true
+      # if hot reload misses edits (repo on /mnt/c), false to force events.
+      CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-}
       # Host-computed app version surfaced in the SPA footer. orkestra.sh
       # exports this from `git describe`; the container has no git so
       # this passthrough is the only path. See docker-compose.dev.yml.

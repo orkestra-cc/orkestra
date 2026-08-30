@@ -179,6 +179,10 @@ services:
       # Extra hosts the Vite dev server accepts (DNS-rebinding defence), for
       # LAN/Tailscale access via a hostname. Comma-separated; '*' allows any.
       VITE_ALLOWED_HOSTS: ${VITE_ADMIN_ALLOWED_HOSTS:-}
+      # File-watcher override for the Vite dev server. Unset = auto-detect
+      # (polling only under a WSL kernel; inotify everywhere else). Set true
+      # if hot reload misses edits (repo on /mnt/c), false to force events.
+      CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-}
       # Application version surfaced in the SPA footer. orkestra.sh exports
       # this from `git describe`; CI overrides via GITHUB_REF_NAME at
       # image-build time. The container has no git, so this passthrough

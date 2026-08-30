@@ -240,6 +240,8 @@ npm run test:watch        # Vitest watch mode
 
 The `tsc` step in `build` enforces strict mode — TypeScript errors fail the build.
 
+**Dev-server file watcher** — `vite.config.js`'s `resolveWatchOptions()` enables chokidar stat-polling (300 ms) only when `/proc/version` shows a WSL kernel, where inotify events from a `/mnt/c` bind mount never arrive; everywhere else the default event watcher runs, because polling this tree (~1.4k files) kept idle containers at a double-digit CPU share and ~1 GB RSS. `CHOKIDAR_USEPOLLING=true|false` (passed through by the dev/staging compose files from `docker/.env`) overrides the auto-detect in either direction. Don't hardcode `usePolling` back into the config.
+
 ## Testing
 
 Vitest + React Testing Library + happy-dom + MSW. The infra lives in `src/test/`:

@@ -159,6 +159,8 @@ docker exec orkestra-backend-development go build -o /app/tmp/main ./cmd/server/
 docker restart orkestra-backend-development
 ```
 
+The frontend has the mirror-image concern: `frontend-admin/vite.config.js` enables chokidar stat-polling **only when it detects a WSL kernel** (containers see the host kernel in `/proc/version`), because polling costs constant CPU and hundreds of MB of RSS per dev-server container while native Linux gets inotify through bind mounts for free. `CHOKIDAR_USEPOLLING=true|false` in `docker/.env` overrides the auto-detect in either direction — set `true` if hot reload misses edits; never re-hardcode `usePolling` in the config.
+
 ### CI/CD
 
 GitHub Actions workflows (`.github/workflows/`) run on PR and push to `dev`/`main` (except where noted below). Non-gating jobs — Docker image publish, coverage-badge refresh, the weekly security cron — additionally require the repo-level Actions variable **`CI_FULL=true`** (set on the public upstream and commons); a product fork defaults to minimal CI and opts in per repo, no file edits. **CI workflows invoke `make` targets from the repo root — local and CI cannot drift.** Run `make ci-help` for the full list.
