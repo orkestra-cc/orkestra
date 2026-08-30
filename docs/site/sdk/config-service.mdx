@@ -179,3 +179,7 @@ same field twice, a slug in both `create` and `remove`, or more than 50
 elements).
 
 A list is capped at **50** elements regardless of the field's `Max`.
+
+## Audit
+
+Every mutation through the admin API emits one audit event per actual result into the compliance trail — `module.config.updated`, `module.config.environment_activated`, `module.enabled`, `module.disabled` — carrying the acting user's UUID, tenant, IP and User-Agent, the changed key names (and, for record lists, per-field created/removed counts), and the failure code when there is one. Values, secrets and slugs are never recorded. Emission is best-effort: a failed insert is logged and never rolls back the mutation, and the sink's own insert runs under a two-second timeout — the most latency an emit can add to the request.

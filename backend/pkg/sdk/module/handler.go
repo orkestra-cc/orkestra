@@ -4,16 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // ModuleAdminHandler provides Huma-compatible handlers for the admin module API.
 type ModuleAdminHandler struct {
 	configService *ModuleConfigService
 	registry      *ModuleRegistry
+	auditSink     iface.AuditSink
+	actorResolver func(context.Context) AdminActor
 }
 
 // NewModuleAdminHandler creates a new admin handler.
@@ -259,91 +264,127 @@ func (h *ModuleAdminHandler) GetModule(ctx context.Context, input *GetModuleInpu
 	return &GetModuleOutput{Body: h.toConfigResponse(*config)}, nil
 }
 
-// UpdateModule updates a module's enabled state and/or configuration.
-// When enabling/disabling, the module is started/stopped at runtime — no restart needed.
+// UpdateModule updates a module's configuration and/or enabled state.
+//
+// Order is the substance: the config half — candidate validation AND the
+// compare-and-swap write — completes before any lifecycle side effect, so a
+// 422, a stale-revision 409 or an infrastructure failure can never still
+// start or stop the module. If config succeeds and the later lifecycle step
+// fails, the config stays changed and the two audit events report those
+// distinct actual results; the response is still an error.
 func (h *ModuleAdminHandler) UpdateModule(ctx context.Context, input *UpdateModuleInput) (*UpdateModuleOutput, error) {
-	// Check module exists
 	existing, err := h.configService.GetConfig(ctx, input.Name)
 	if err != nil {
+		h.auditAborted(ctx, input, err)
 		return nil, mapConfigReadError(err)
 	}
 	if existing == nil {
-		return nil, huma.Error404NotFound(fmt.Sprintf("module %q not found", input.Name))
+		notFound := huma.Error404NotFound(fmt.Sprintf("module %q not found", input.Name))
+		h.auditAborted(ctx, input, notFound)
+		return nil, notFound
 	}
 
-	// Toggle enabled state with runtime Start/Stop
-	if input.Body.Enabled != nil {
-		if *input.Body.Enabled {
-			// --- ENABLING ---
-			if err := h.configService.UpdateEnabled(ctx, input.Name, true); err != nil {
-				if existing.Category == CategoryCore {
-					return nil, huma.Error400BadRequest(err.Error())
-				}
-				return nil, err
-			}
-
-			// If module previously failed Init, retry before starting.
-			failedModules := h.registry.FailedModules()
-			if _, isFailed := failedModules[input.Name]; isFailed {
-				if err := h.registry.RetryInit(input.Name); err != nil {
-					return nil, huma.Error422UnprocessableEntity(
-						fmt.Sprintf("module %q init failed: %s", input.Name, err.Error()),
-					)
-				}
-			}
-
-			// Start the module's background jobs.
-			if err := h.registry.StartModule(ctx, input.Name); err != nil {
-				return nil, huma.Error422UnprocessableEntity(
-					fmt.Sprintf("module %q failed to start: %s", input.Name, err.Error()),
-				)
-			}
-
-			_ = h.configService.ClearNeedsRestart(ctx, input.Name)
-
-		} else {
-			// --- DISABLING ---
-			if existing.Category == CategoryCore {
-				return nil, huma.Error400BadRequest("core modules cannot be disabled")
-			}
-
-			// Check dependency constraints before disabling.
-			if err := h.registry.CheckCanDisable(input.Name); err != nil {
-				return nil, huma.Error409Conflict(err.Error())
-			}
-
-			if err := h.configService.UpdateEnabled(ctx, input.Name, false); err != nil {
-				return nil, err
-			}
-
-			// Stop the module's background jobs.
-			if err := h.registry.StopModule(ctx, input.Name); err != nil {
-				// Log but don't fail — the module is disabled regardless.
-				fmt.Printf("warning: module %s stop error: %v\n", input.Name, err)
-			}
-
-			_ = h.configService.ClearNeedsRestart(ctx, input.Name)
-		}
-	}
-
-	// Update config values. needsRestart is persisted by the write itself,
-	// from the module's own hot-reload declaration — there is no follow-up
-	// clear to get out of step with it.
 	if len(input.Body.Config) > 0 || len(input.Body.Secrets) > 0 {
-		// UpdateConfig merges into the stored config — keys the caller omits are
-		// preserved, so a config-only change never wipes the module's secrets.
-		if err := h.configService.UpdateConfig(ctx, input.Name, input.Body.Config, input.Body.Secrets); err != nil {
+		// UpdateConfig merges into the stored config — keys the caller omits
+		// are preserved, so a config-only change never wipes the module's secrets.
+		err := h.configService.UpdateConfig(ctx, input.Name, input.Body.Config, input.Body.Secrets)
+		h.emitAudit(ctx, auditRecord{
+			action: ActionModuleConfigUpdated, module: input.Name, env: existing.ActiveEnv(),
+			config: input.Body.Config, secrets: input.Body.Secrets, err: err,
+		})
+		if err != nil {
 			return nil, mapConfigServiceError(err, func(e error) error { return e })
 		}
 	}
 
-	// Return updated config
-	updated, err := h.configService.GetConfig(ctx, input.Name)
-	if err != nil {
-		return nil, err
+	if input.Body.Enabled != nil {
+		if *input.Body.Enabled {
+			err = h.enableModule(ctx, input.Name, existing)
+		} else {
+			err = h.disableModule(ctx, input.Name, existing)
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 
+	updated, err := h.configService.GetConfig(ctx, input.Name)
+	if err != nil {
+		return nil, mapConfigReadError(err)
+	}
 	return &UpdateModuleOutput{Body: h.toConfigResponse(*updated)}, nil
+}
+
+// auditAborted records a mutation that reached the handler but could not be
+// dispatched — the document could not be read, or the module does not exist.
+// One failure event per intended half, so G7's "every mutation that reaches
+// the handler" holds on the abort path too.
+func (h *ModuleAdminHandler) auditAborted(ctx context.Context, input *UpdateModuleInput, err error) {
+	if len(input.Body.Config) > 0 || len(input.Body.Secrets) > 0 {
+		h.emitAudit(ctx, auditRecord{
+			action: ActionModuleConfigUpdated, module: input.Name,
+			config: input.Body.Config, secrets: input.Body.Secrets, err: err,
+		})
+	}
+	if input.Body.Enabled != nil {
+		action := ActionModuleDisabled
+		if *input.Body.Enabled {
+			action = ActionModuleEnabled
+		}
+		h.emitAudit(ctx, auditRecord{action: action, module: input.Name, err: err})
+	}
+}
+
+// enableModule persists enabled=true, retries a failed Init, starts the
+// module, and audits the actual result.
+func (h *ModuleAdminHandler) enableModule(ctx context.Context, name string, existing *ModuleConfig) error {
+	err := h.doEnable(ctx, name, existing)
+	h.emitAudit(ctx, auditRecord{action: ActionModuleEnabled, module: name, err: err})
+	return err
+}
+
+func (h *ModuleAdminHandler) doEnable(ctx context.Context, name string, existing *ModuleConfig) error {
+	if err := h.configService.UpdateEnabled(ctx, name, true); err != nil {
+		if existing.Category == CategoryCore {
+			return huma.Error400BadRequest(err.Error())
+		}
+		return err
+	}
+	if _, isFailed := h.registry.FailedModules()[name]; isFailed {
+		if err := h.registry.RetryInit(name); err != nil {
+			return huma.Error422UnprocessableEntity(fmt.Sprintf("module %q init failed: %s", name, err.Error()))
+		}
+	}
+	if err := h.registry.StartModule(ctx, name); err != nil {
+		return huma.Error422UnprocessableEntity(fmt.Sprintf("module %q failed to start: %s", name, err.Error()))
+	}
+	_ = h.configService.ClearNeedsRestart(ctx, name)
+	return nil
+}
+
+// disableModule persists enabled=false, stops the module, and audits.
+func (h *ModuleAdminHandler) disableModule(ctx context.Context, name string, existing *ModuleConfig) error {
+	err := h.doDisable(ctx, name, existing)
+	h.emitAudit(ctx, auditRecord{action: ActionModuleDisabled, module: name, err: err})
+	return err
+}
+
+func (h *ModuleAdminHandler) doDisable(ctx context.Context, name string, existing *ModuleConfig) error {
+	if existing.Category == CategoryCore {
+		return huma.Error400BadRequest("core modules cannot be disabled")
+	}
+	if err := h.registry.CheckCanDisable(name); err != nil {
+		return huma.Error409Conflict(err.Error())
+	}
+	if err := h.configService.UpdateEnabled(ctx, name, false); err != nil {
+		return err
+	}
+	if err := h.registry.StopModule(ctx, name); err != nil {
+		// The module is disabled regardless; the stop error is diagnostic.
+		h.logger().Warn("module stop error", slog.String("module", name), slog.String("error", err.Error()))
+	}
+	_ = h.configService.ClearNeedsRestart(ctx, name)
+	return nil
 }
 
 // HealthCheck runs health checks on all started modules.
@@ -454,10 +495,15 @@ func (h *ModuleAdminHandler) UpdateEnvironment(ctx context.Context, input *Updat
 		mutations = append(mutations, RecordListMutation{Field: m.Field, Create: m.Create, Remove: m.Remove})
 	}
 
-	if err := h.configService.UpdateEnvironmentConfigWithRecordLists(
+	err := h.configService.UpdateEnvironmentConfigWithRecordLists(
 		ctx, input.Name, input.Env,
 		input.Body.Config, input.Body.Secrets, mutations, input.Body.Revision,
-	); err != nil {
+	)
+	h.emitAudit(ctx, auditRecord{
+		action: ActionModuleConfigUpdated, module: input.Name, env: input.Env,
+		config: input.Body.Config, secrets: input.Body.Secrets, recordLists: mutations, err: err,
+	})
+	if err != nil {
 		// mapConfigServiceError owns the ConfigValidationError case: a
 		// code-bearing validator gets the stable 422 envelope, a code-less
 		// one keeps the text-only 422. Everything else falls through to the
@@ -516,7 +562,9 @@ func recordListStatus(err error) int {
 
 // SetActiveEnvironment switches the active environment for a module.
 func (h *ModuleAdminHandler) SetActiveEnvironment(ctx context.Context, input *SetActiveEnvironmentInput) (*SetActiveEnvironmentOutput, error) {
-	if err := h.configService.SetActiveEnvironment(ctx, input.Name, input.Body.Environment); err != nil {
+	err := h.configService.SetActiveEnvironment(ctx, input.Name, input.Body.Environment)
+	h.emitAudit(ctx, auditRecord{action: ActionModuleEnvironmentActivated, module: input.Name, env: input.Body.Environment, err: err})
+	if err != nil {
 		return nil, mapConfigServiceError(err, func(e error) error { return huma.Error400BadRequest(e.Error()) })
 	}
 

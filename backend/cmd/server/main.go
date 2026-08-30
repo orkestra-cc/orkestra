@@ -531,6 +531,9 @@ func main() {
 	// system permission; the MFA gate on the mutation group layers on top.
 	// Operator-only — module enable/disable is a Tier-1 operator concern.
 	moduleAdminHandler := module.NewModuleAdminHandler(configService, modRegistry)
+	if err := wireModuleAdminAudit(moduleAdminHandler, svcRegistry); err != nil {
+		log.Fatalf("Failed to wire module admin audit: %v", err)
+	}
 	operatorProtected.Group(func(r chi.Router) {
 		r.Use(authMW.RequireSystemPermission("system.modules.admin"))
 		adminAPI := humachi.New(r, apiConfig)
@@ -545,6 +548,10 @@ func main() {
 		// enablement or write secrets. Threshold is env-tunable so ops
 		// can widen the gate during staged rollouts.
 		r.Use(authMW.RequireLowRisk(riskStepUpThreshold()))
+		// The audit actor's User-Agent: Huma hands the handler a
+		// context.Context, not the *http.Request, so the header has to be
+		// stamped onto the context here.
+		r.Use(authMiddleware.RequestMeta)
 		adminAPI := humachi.New(r, apiConfig)
 		module.RegisterAdminModuleMutationRoutes(adminAPI, moduleAdminHandler)
 	})

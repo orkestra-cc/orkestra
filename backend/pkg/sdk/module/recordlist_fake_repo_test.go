@@ -52,6 +52,9 @@ type fakeConfigRepo struct {
 	// boot-seeding failure that leaves a document judged against a stale
 	// stored schema.
 	refreshErr error
+	// findErr, when set, makes FindByName fail with it — models a
+	// repository outage.
+	findErr error
 }
 
 func newFakeConfigRepo() *fakeConfigRepo {
@@ -64,6 +67,9 @@ func newFakeConfigRepo() *fakeConfigRepo {
 // stored state be silently observed through the caller's "snapshot" — exactly
 // the staleness these tests exist to detect.
 func (f *fakeConfigRepo) FindByName(_ context.Context, name string) (*ModuleConfig, error) {
+	if f.findErr != nil {
+		return nil, f.findErr
+	}
 	doc, ok := f.docs[name]
 	if !ok {
 		return nil, nil

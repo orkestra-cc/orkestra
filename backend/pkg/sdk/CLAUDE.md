@@ -336,6 +336,13 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   else falls through to the caller's own fallback status. Leave `Code`
   empty for a validator that has no reason to add a stable machine-readable
   identity yet — the legacy 422 remains correct and requires no opt-in.
+- **`ModuleAdminHandler` audits every mutation it serves** through the
+  nil-tolerant `SetAuditSink(iface.AuditSink)` + `SetActorResolver(func(ctx) module.AdminActor)`
+  seams. Config validation and the CAS write happen **before** the
+  enable/disable side effect; each half emits its own event with its actual
+  result. Metadata is key names (schema-derived, bounded), `code`, `env`,
+  `requestId` — never values. A panicking sink is recovered and WARNed; the
+  HTTP result never changes because of the sink.
 
 ## CI
 
