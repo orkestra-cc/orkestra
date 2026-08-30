@@ -275,9 +275,13 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   request submits a replacement for that key.
 - **Every config mutation is ONE compare-and-swap `UpdateOne` on
   `ModuleConfig.ConfigRevision`** (`ConfigRepository.CompareAndSwapConfig` with
-  an explicit `ConfigMutation`: profile write + legacy mirror, or server-side
-  activation). Profiles are the source of truth; the legacy top-level maps are
-  a mirror written in the same update. A lost race is `ErrRevisionStale` → 409
+  an explicit `ConfigMutation`: profile write + legacy mirror, or an activation
+  that copies the STRIPPED target profile into the mirror client-side under the
+  same revision guard — the server-side `$ifNull` copy remains for an `Activate`
+  without supplied maps; that combined form additionally requires the legacy maps
+  to EQUAL the profile it activates, since the mirror is that profile's copy).
+  Profiles are the source of truth; the legacy top-level maps are a mirror
+  written in the same update. A lost race is `ErrRevisionStale` → 409
   with body code `module.CodeConfigRevisionStale` (`"module.config_revision_stale"`,
   SDK-owned — `errcode` must never declare a `module.*` code); the client
   reloads and re-reviews, nothing auto-retries. The record-list CAS increments
@@ -356,7 +360,10 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
 - **`SeedFromModules` backfills absent schema keys with a non-empty `EnvVar`/`Default`
   on existing documents** (the active profile gains its defaults and the
   legacy mirror is rewritten as an exact copy of it — never backfilled on its
-  own; each secret encrypted once; one CAS retried on a lost race;
+  own, and rewritten whenever it merely DIVERGES from the stripped candidate,
+  which is how a legacy document whose only defect is plaintext under a secret
+  key is repaired at boot rather than at the next operator save; each secret
+  encrypted once; one CAS retried on a lost race;
   `configRevision +1`; `needsRestart=false` in the same write; INFO log of the
   names; a failure is recorded for `RequirePersistedConfig` to refuse a
   required module). Empty-fallback keys stay absent — presence is a signal to

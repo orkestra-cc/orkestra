@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -276,11 +277,12 @@ func (r *ModuleConfigRepository) CompareAndSwapEnvironment(
 //     WriteLegacy its STORED maps are copied server-side into the legacy
 //     fields. WITH WriteLegacy the caller supplies the legacy maps instead
 //     (and may repair the activated profile in the same write by setting
-//     Env == Activate) — the service uses that form so the mirror it
-//     publishes is stripped of any plaintext the stored profile still
-//     carries under a schema-secret key. The revision guard is what makes
-//     the client-side copy safe: any concurrent write advances
-//     configRevision, so a stale snapshot matches nothing.
+//     Env == Activate, which then requires WriteLegacy and legacy maps EQUAL
+//     to the profile's — the mirror is that profile's copy) — the service
+//     uses that form so the mirror it publishes is stripped of any plaintext
+//     the stored profile still carries under a schema-secret key. The
+//     revision guard is what makes the client-side copy safe: any concurrent
+//     write advances configRevision, so a stale snapshot matches nothing.
 //
 // Every form filters on ExpectedRevision, writes ExpectedRevision+1 back,
 // and persists NeedsRestart as given. Secrets are ciphertext by the time
@@ -319,6 +321,18 @@ func (m ConfigMutation) validate() error {
 		return errors.New("config mutation: an environment write requires both maps (use an empty map to clear)")
 	case m.WriteLegacy && (m.LegacyValues == nil || m.LegacySecrets == nil):
 		return errors.New("config mutation: WriteLegacy requires both legacy maps (use an empty map to clear)")
+	case m.Activate != "" && m.Env != "" && !m.WriteLegacy:
+		// Mongo takes the pipeline branch for an activation without supplied
+		// maps and silently DISCARDS the Env lane, while the fake applies it.
+		// Refuse the shape rather than let the two implementations disagree
+		// about what an accepted mutation does.
+		return errors.New("config mutation: an activation that repairs its profile must also supply the legacy maps")
+	case m.Activate != "" && m.Env != "" &&
+		(!maps.Equal(m.EnvValues, m.LegacyValues) || !maps.Equal(m.EnvSecrets, m.LegacySecrets)):
+		// The mirror IS the copy of the activated profile. Publishing one
+		// that disagrees with it would be atomic and permanent, and the only
+		// production caller passes the same two maps.
+		return errors.New("config mutation: an activation's legacy mirror must equal the profile it activates")
 	}
 	return nil
 }

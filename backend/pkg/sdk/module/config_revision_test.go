@@ -118,6 +118,44 @@ func TestCompareAndSwapConfig_RejectsUnknownProfileAndMalformedShape(t *testing.
 	if _, err := repo.CompareAndSwapConfig(context.Background(), "demo", ConfigMutation{Activate: "sandbox", Env: "production"}); err == nil {
 		t.Error("activation combined with a values write must be rejected as a programming error")
 	}
+	// An activation that repairs its own profile has to supply the legacy
+	// maps too: without WriteLegacy the Mongo repository takes the pipeline
+	// branch and silently DISCARDS the Env lane, while the fake applies it —
+	// an accepted shape the two implementations disagree about.
+	if _, err := repo.CompareAndSwapConfig(context.Background(), "demo", ConfigMutation{
+		Activate: "sandbox", Env: "sandbox",
+		EnvValues: map[string]string{"a": "1"}, EnvSecrets: map[string]string{},
+	}); err == nil {
+		t.Error("an activation repairing its profile without WriteLegacy must be rejected: Mongo would discard the Env lane")
+	}
+	// The mirror IS the copy of the activated profile. A mutation whose
+	// legacy maps differ from the profile it activates would publish a
+	// mirror that disagrees with it, atomically and permanently.
+	for _, m := range []ConfigMutation{
+		{
+			Activate: "sandbox", Env: "sandbox",
+			EnvValues: map[string]string{"a": "1"}, EnvSecrets: map[string]string{},
+			WriteLegacy: true, LegacyValues: map[string]string{"a": "2"}, LegacySecrets: map[string]string{},
+		},
+		{
+			Activate: "sandbox", Env: "sandbox",
+			EnvValues: map[string]string{"a": "1"}, EnvSecrets: map[string]string{"s": "ct"},
+			WriteLegacy: true, LegacyValues: map[string]string{"a": "1"}, LegacySecrets: map[string]string{},
+		},
+	} {
+		if _, err := repo.CompareAndSwapConfig(context.Background(), "demo", m); err == nil {
+			t.Errorf("an activation whose mirror differs from its profile must be rejected: %+v", m)
+		}
+	}
+	// The legitimate shape — mirror equal to the profile — is accepted.
+	if won, err := repo.CompareAndSwapConfig(context.Background(), "demo", ConfigMutation{
+		Activate: "sandbox", Env: "sandbox",
+		EnvValues: map[string]string{"a": "1"}, EnvSecrets: map[string]string{},
+		WriteLegacy: true, LegacyValues: map[string]string{"a": "1"}, LegacySecrets: map[string]string{},
+	}); err != nil || !won {
+		t.Errorf("an activation supplying a matching mirror must be accepted: won=%v err=%v", won, err)
+	}
+	repo.docs["demo"] = revisionDoc(0) // that one legitimately advanced it
 	if _, err := repo.CompareAndSwapConfig(context.Background(), "demo", ConfigMutation{}); err == nil {
 		t.Error("an empty mutation must be rejected")
 	}

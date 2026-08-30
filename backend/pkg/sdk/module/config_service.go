@@ -346,10 +346,12 @@ func (s *ModuleConfigService) backfillSchemaKeys(ctx context.Context, m Module, 
 // defaults, and the legacy mirror is rewritten to exactly that candidate —
 // never backfilled on its own, which would hand a key present only in the
 // profile a schema default instead of the profile's value. A document with
-// no profiles (not yet migrated) backfills its mirror alone. Every secret
-// is encrypted once. Returns the mutation, the keys added to the profile
-// (or mirror, for a legacy document), and whether anything needs writing —
-// a mirror that merely diverged from a complete profile is realigned too.
+// no profiles (not yet migrated) backfills its mirror alone, and rewrites it
+// whenever the stripped candidate differs — not only when a schema key was
+// missing. Every secret is encrypted once. Returns the mutation, the keys
+// added to the profile (or mirror, for a legacy document), and whether
+// anything needs writing — a mirror that merely diverged from a complete
+// profile is realigned too.
 //
 // The candidate is seeded from nonSecretValues, never the raw map: a
 // document written before the lane rule can hold plaintext under a key the
@@ -381,7 +383,11 @@ func (s *ModuleConfigService) buildBackfill(m Module, schema []ConfigField, doc 
 		if err != nil {
 			return mut, nil, false, err
 		}
-		if len(keys) == 0 {
+		// Same divergence rule as the profile branch below: a mirror that
+		// differs from the stripped candidate is rewritten even when nothing
+		// was MISSING — otherwise a legacy document whose only defect is
+		// plaintext under a secret key waits for the next operator save.
+		if len(keys) == 0 && maps.Equal(values, doc.ConfigValues) && maps.Equal(secrets, doc.EncryptedValues) {
 			return mut, nil, false, nil
 		}
 		mut.WriteLegacy, mut.LegacyValues, mut.LegacySecrets = true, values, secrets

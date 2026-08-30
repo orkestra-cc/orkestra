@@ -344,3 +344,58 @@ func TestSeedFromModules_StripsLegacyPlaintextSecrets(t *testing.T) {
 		t.Errorf("docCasCalls = %d, want exactly 1 write", repo.docCasCalls)
 	}
 }
+
+// A legacy document (no profiles) whose ONLY defect is plaintext under a
+// secret key has nothing MISSING, so the backfill used to decide there was
+// nothing to write and the leak waited for the next operator save. The
+// legacy branch now applies the same divergence rule the profile branch
+// already used: a stored mirror that differs from the stripped candidate is
+// rewritten at boot.
+func TestSeedFromModules_RepairsAPlaintextOnlyLegacyMirror(t *testing.T) {
+	doc := &ModuleConfig{
+		ModuleName: "bf", ConfigRevision: 2,
+		// Every schema key with a non-empty fallback is already present, so
+		// missingSchemaKeys adds nothing; `secret` is the sole defect.
+		ConfigValues: map[string]string{
+			"existing": "x", "cleared": "", "toggle": "true", "fromEnv": "v",
+			"secret": "plain",
+		},
+		EncryptedValues: map[string]string{"secret": "ct"},
+	}
+	svc, repo := backfillSvc(t, doc)
+
+	// The pure computation: nothing was added, but the write still happens.
+	mut, keys, write, err := svc.buildBackfill(backfillModule{}, backfillModule{}.ConfigSchema(), doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 0 || !write {
+		t.Fatalf("keys=%v write=%v, want no added keys and a write (the mirror-realigned path)", keys, write)
+	}
+	if !mut.WriteLegacy || mut.Env != "" {
+		t.Errorf("a legacy document must write only its mirror: %+v", mut)
+	}
+	if v, ok := mut.LegacyValues["secret"]; ok {
+		t.Errorf("the candidate still carries the plaintext secret: %q", v)
+	}
+
+	if err := svc.SeedFromModules(context.Background(), []Module{backfillModule{}}); err != nil {
+		t.Fatal(err)
+	}
+	got := repo.docs["bf"]
+	if v, ok := got.ConfigValues["secret"]; ok {
+		t.Errorf("boot left the plaintext secret in the mirror: %q", v)
+	}
+	if got.ConfigValues["existing"] != "x" || got.ConfigValues["toggle"] != "true" {
+		t.Errorf("non-secret values were disturbed: %v", got.ConfigValues)
+	}
+	if got.EncryptedValues["secret"] != "ct" {
+		t.Errorf("the stored ciphertext was disturbed: %v", got.EncryptedValues)
+	}
+	if repo.docCasCalls != 1 {
+		t.Errorf("docCasCalls = %d, want exactly 1 write", repo.docCasCalls)
+	}
+	if repo.clearRestartCalls != 0 {
+		t.Errorf("clearRestartCalls = %d — the backfill write already persisted needsRestart=false", repo.clearRestartCalls)
+	}
+}
