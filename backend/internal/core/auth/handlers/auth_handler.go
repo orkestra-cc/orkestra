@@ -819,52 +819,69 @@ func (h *AuthHandler) resolveOAuthLinkRedirect(
 	return resp, nil
 }
 
+// stateResolution is what a callback learns from a valid state.
+type stateResolution struct {
+	info   *services.OAuthStateInfo
+	claims *services.OAuthStateClaims
+	// bindingDeferred is true for a client-tier LOGIN flow: its state cookie
+	// lives on the client API host and its refresh cookie can only be set
+	// there, so the operator-host callback must hand the flow to the relay
+	// endpoint (which verifies the cookie) instead of completing it. Never
+	// true for the operator/legacy tiers or for link mode.
+	bindingDeferred bool
+}
+
 // resolveStateForCallback validates the signed-state JWT presented to a
-// callback handler, looks up the matching Redis side-data row, and
-// returns the (cross-checked) state info. Returns ErrInvalidStateToken
-// equivalents as a generic 400-style error so callers can render a
-// single neutral message regardless of the failure mode.
-//
-// Tier-cross-check: if the JWT tier claim is non-empty it must match
-// the Redis row's tier — otherwise an attacker who races a legitimate
-// flow could swap their own pre-stored row in. Empty tier on either
-// side is treated as legacy and only legacy-on-both-sides is accepted.
-func (h *AuthHandler) resolveStateForCallback(ctx context.Context, raw string) (*services.OAuthStateInfo, *services.OAuthStateClaims, error) {
+// callback, binds it to the browser, consumes the one-shot Redis row and
+// cross-checks it against the JWT and the endpoint. Order (spec §4.10 v4.3):
+// signature/expiry → browser binding → atomic take → tier → PROVIDER →
+// link-mode pair. Every failure is one generic error so a caller renders
+// the same 400 whatever the reason — an attacker must not learn which
+// check rejected them. All of it runs before the IdP `error`, the code or
+// any profile is looked at.
+func (h *AuthHandler) resolveStateForCallback(ctx context.Context, raw string, provider models.OAuthProvider) (*stateResolution, error) {
 	if len(h.stateSecret) == 0 {
-		return nil, nil, fmt.Errorf("oauth state secret not configured")
+		return nil, fmt.Errorf("oauth state secret not configured")
 	}
 	claims, err := services.ValidateOAuthStateToken(h.stateSecret, raw)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid OAuth state: %w", err)
+		return nil, fmt.Errorf("invalid OAuth state: %w", err)
 	}
-	// Bind the flow to the browser that started it. A valid signature
-	// only proves WE minted this state; without the cookie check an
-	// attacker can start a flow and have a victim finish it, which lands
-	// the victim in the attacker's session (or, in link mode, binds the
-	// victim's provider identity to the attacker's account).
-	if r, ok := ctx.Value("http_request").(*http.Request); ok && r != nil {
-		if err := verifyOAuthStateBinding(r, claims); err != nil {
-			return nil, nil, err
-		}
-	} else {
-		return nil, nil, fmt.Errorf("%w: no request available to verify against", ErrOAuthStateNotBound)
+	r, ok := ctx.Value("http_request").(*http.Request)
+	if !ok || r == nil {
+		return nil, fmt.Errorf("%w: no request available to verify against", ErrOAuthStateNotBound)
 	}
-	stateInfo, err := h.oauthStateService.ValidateOAuthState(ctx, claims.CSRF)
+	deferred, err := verifyOAuthStateBinding(r, claims)
 	if err != nil {
-		return nil, nil, fmt.Errorf("OAuth state not found or expired: %w", err)
+		return nil, err
+	}
+	clientLogin := claims.Tier == services.AudienceClient && claims.Mode != services.OAuthStateModeLink
+	if deferred && !clientLogin {
+		return nil, fmt.Errorf("%w: a cross-host callback can only be relayed for a client-tier login", ErrOAuthStateNotBound)
+	}
+	// A client-tier login ALWAYS completes on the client API host — even
+	// when a cookie happens to be present here, the api.* refresh cookie
+	// cannot be set from the operator host.
+	deferred = clientLogin
+
+	stateInfo, err := h.oauthStateService.ValidateOAuthState(ctx, claims.CSRF) // atomic one-shot take
+	if err != nil {
+		return nil, fmt.Errorf("OAuth state not found, expired or already used: %w", err)
 	}
 	if stateInfo.Tier != claims.Tier {
-		return nil, nil, fmt.Errorf("OAuth state tier mismatch")
+		return nil, fmt.Errorf("OAuth state tier mismatch")
+	}
+	if stateInfo.Provider != provider {
+		return nil, fmt.Errorf("OAuth state provider mismatch")
 	}
 	// Cross-check the link-mode pair (mode + linkUserUUID) — if either
-	// side stamped a link flow but the other didn't, treat it as a
-	// forged state (an attacker who tampered with one half in
-	// isolation). Both empty (login) or both populated (link with
-	// matching UUIDs) is fine.
+	// side stamped a link flow but the other didn't, treat it as a forged
+	// state. Both empty (login) or both populated (link with matching
+	// UUIDs) is fine.
 	if stateInfo.Mode != claims.Mode || stateInfo.LinkUserUUID != claims.LinkUserUUID {
-		return nil, nil, fmt.Errorf("OAuth state mode mismatch")
+		return nil, fmt.Errorf("OAuth state mode mismatch")
 	}
-	return stateInfo, claims, nil
+	return &stateResolution{info: stateInfo, claims: claims, bindingDeferred: deferred}, nil
 }
 
 // dispatchTarget picks the AuthHandler that should drive token issuance
@@ -920,12 +937,13 @@ func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Re
 	// to the tier-bound AuthHandler for token issuance. dispatchTarget
 	// returns the receiver when no tier was stamped (legacy flow) so
 	// existing /v1/auth/oauth/login callbacks keep self-handling.
-	stateInfo, claims, err := h.resolveStateForCallback(ctx, state)
+	res, err := h.resolveStateForCallback(ctx, state, models.OAuthProviderGoogle)
 	if err != nil {
 		logger.Warn("oauth callback rejected", slog.String("outcome", "invalid_state"))
 		http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
 		return
 	}
+	stateInfo, claims := res.info, res.claims
 	// The flow is resolved; evict the nonce so a replayed callback URL
 	// cannot ride the same cookie. (The Redis row is one-shot already —
 	// this keeps the browser tidy.)
@@ -1039,11 +1057,12 @@ func (h *AuthHandler) HandleDiscordCallbackHTTP(w http.ResponseWriter, r *http.R
 	}
 
 	// ADR-0003 PR-D D-6: validate signed state + dispatch by tier.
-	stateInfo, claims, err := h.resolveStateForCallback(ctx, state)
+	res, err := h.resolveStateForCallback(ctx, state, models.OAuthProviderDiscord)
 	if err != nil {
 		http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
 		return
 	}
+	stateInfo, claims := res.info, res.claims
 	// The flow is resolved; evict the nonce so a replayed callback URL
 	// cannot ride the same cookie. (The Redis row is one-shot already —
 	// this keeps the browser tidy.)
@@ -1192,13 +1211,13 @@ func (h *AuthHandler) HandleAppleCallbackHTTP(w http.ResponseWriter, r *http.Req
 		}
 	} else {
 		// ADR-0003 PR-D D-6: validate signed state + dispatch by tier.
-		var err error
-		stateInfo, claims, err = h.resolveStateForCallback(ctx, state)
+		res, err := h.resolveStateForCallback(ctx, state, models.OAuthProviderApple)
 		if err != nil {
 			utils.AuthDebugError("state_validation", err)
 			http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
 			return
 		}
+		stateInfo, claims = res.info, res.claims
 		target = h.dispatchTarget(claims.Tier)
 		utils.AuthDebug("OAuth state validated - Provider: %s, Tier: %s", stateInfo.Provider, claims.Tier)
 	}
@@ -1300,10 +1319,11 @@ func (h *AuthHandler) HandleAppleCallbackHTTP(w http.ResponseWriter, r *http.Req
 // HandleAppleCallback handles Apple OAuth callback
 func (h *AuthHandler) HandleAppleCallback(ctx context.Context, req *OAuthCallbackRequest) (*OAuthCallbackResponse, error) {
 	// Similar to Google callback
-	stateInfo, claims, err := h.resolveStateForCallback(ctx, req.State)
+	res, err := h.resolveStateForCallback(ctx, req.State, models.OAuthProviderApple)
 	if err != nil {
 		return nil, huma.Error400BadRequest("Invalid OAuth state", err)
 	}
+	stateInfo, claims := res.info, res.claims
 	target := h.dispatchTarget(claims.Tier)
 
 	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderApple)
@@ -1372,10 +1392,11 @@ func (h *AuthHandler) HandleAppleCallback(ctx context.Context, req *OAuthCallbac
 
 // HandleGitHubCallback handles GitHub OAuth callback
 func (h *AuthHandler) HandleGitHubCallback(ctx context.Context, req *OAuthCallbackRequest) (*OAuthCallbackResponse, error) {
-	stateInfo, claims, err := h.resolveStateForCallback(ctx, req.State)
+	res, err := h.resolveStateForCallback(ctx, req.State, models.OAuthProviderGitHub)
 	if err != nil {
 		return nil, huma.Error400BadRequest("Invalid OAuth state", err)
 	}
+	stateInfo, claims := res.info, res.claims
 	target := h.dispatchTarget(claims.Tier)
 
 	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderGitHub)
