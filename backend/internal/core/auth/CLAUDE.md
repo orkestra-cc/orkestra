@@ -405,10 +405,14 @@ different things depending on where it was typed, and
 
 | Method | Returns |
 |---|---|
-| `Get(ctx, provider)` | `(*OAuthProviderConfig, bool)` — builds the full config for `factory.CreateProvider(p, cfg)`; `false` means client ID is empty |
-| `RedirectURL(ctx, provider)` | Web callback URL, or `""` |
+| `OAuthWebProviderUsable(ctx, audience, provider)` | `(*OAuthProviderConfig, bool, error)` — **the web path.** ONE `ActiveConfigRequiredModule` read; strict toggle (`{provider}Enabled{Admin,Client}`: absent → schema default `false`, malformed → unusable + WARN naming the key) then `ProviderStructurallyConfigured` over the same view, then the config the provider is built from — no check-then-reread. `(nil, false, nil)` is a per-provider defect; a non-nil error (missing document, repository error, undecryptable stored secret) is document-level and maps to **503 `auth.policy_unavailable`** |
+| `UsableWebProviders(ctx, audience)` | `([]models.OAuthProvider, error)` — the above over `WebProviderOrder` (google, apple, github, discord) from one read; served by `GET /v1/auth/{tier}/providers` |
+| `Get(ctx, provider)` | `(*OAuthProviderConfig, bool)` — **legacy per-key path, mobile only**; `false` means client ID is empty. Every key is a separate `module_configs` read and a decrypt failure silently falls back to the env var — which is why the web flow does not use it |
+| `RedirectURL(ctx, provider)` | Web callback URL, or `""` (legacy) |
 | `MobileAudience(ctx, provider, platform)` | Platform-specific client ID for mobile ID-token validation; falls back to the web client ID when `platform` is unknown |
-| `ConfiguredProviders(ctx)` | List of provider names that currently have a client ID — served by `GET /v1/auth/providers` to the login UI |
+| `ConfiguredProviders(ctx)` | Legacy "has a client ID" list; no longer serves `/providers` |
+
+`services.OAuthResolver` is the interface `AuthHandler` holds (the concrete resolver satisfies it; tests inject a fake). `ProviderStructurallyConfigured(p, fields, probe)` is the single exported pure predicate — `clientId ≠ "" ∧ redirectURL ≠ "" ∧ secret present` (apple: `teamId ∧ keyId ∧ (inline key ∨ readable non-empty key file)`) — and receives secret **presence** only; the PR 3 validator reuses it against the target snapshot.
 
 ### OAuth state-encoded tier dispatch (ADR-0003 PR-D D-6)
 
