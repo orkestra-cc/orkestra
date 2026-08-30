@@ -283,6 +283,26 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   pass each other unseen. `needsRestart` is persisted in that same write as
   `!SupportsHotReload(name)` (`SetHotReloadResolver`, installed by the registry
   before seeding); the admin handler no longer clears it afterwards.
+- **The admin API's two request lanes are enforced server-side
+  (`config_lanes.go`).** A key in `config` must be a declared non-secret
+  field, a record-list label key or a non-secret sub-field key; a key in
+  `secrets` a declared secret or secret sub-field key. The SDK-owned roster
+  key (`<field>.__items`) and any undeclared key are refused from either
+  lane. The refusal is a 422 carrying the SDK-owned code
+  `module.CodeConfigKeyInvalid` (`"module.config_key_invalid"`), naming the
+  key only, and happens BEFORE validation, encryption or persistence — on
+  every mutation surface, and on the record-list path before the roster
+  strip, so a roster key is refused rather than silently dropped.
+  Classification uses the module's LIVE `ConfigSchema()` (`schemaFor`),
+  never the stored snapshot, whose boot refresh may have failed. A module
+  that declares no schema keeps accepting anything.
+- **`GetConfig` propagates a failed legacy-profile migration** instead of
+  logging it and serving the unmigrated document. The lost-race case is
+  absorbed inside `ensureEnvironments` by re-reading: `MigrateToEnvironments`
+  is itself a compare-and-swap that matches only a document still without
+  profiles at the read revision, so two concurrent writers on a legacy
+  document cannot copy a stale legacy snapshot over a freshly written
+  profile.
 - **A `ConfigValidationError` with a non-empty `Code`** (e.g.
   `"tenant.single_mode_conflict"`) upgrades the admin API's response from
   the legacy text-only `422` to the `{status,title,detail,code}` envelope
