@@ -461,6 +461,11 @@ func TestCallback_ClientTierDefersToRelay_NoCookieNoTokenHere(t *testing.T) {
 		rec2.UserInfo["provider_id"] != "g-1" || rec2.UserInfo["email_verified"] != true || rec2.Tokens == nil || rec2.Tokens.AccessToken != "idp-at" {
 		t.Fatalf("relay record = %+v", rec2)
 	}
+	// A login flow stamps no mode pair — this is what keeps the relay
+	// endpoint's link-mode guard meaningful rather than permanently inert.
+	if rec2.Mode != "" || rec2.LinkUserUUID != "" {
+		t.Fatalf("a login-flow relay record must carry no mode/link data: mode=%q linkUserUUID=%q", rec2.Mode, rec2.LinkUserUUID)
+	}
 	assertNoPII(t, rec)
 }
 
@@ -560,6 +565,11 @@ func TestCallback_ClientTierFailuresAreRelayed(t *testing.T) {
 			if hx.state.relay == nil || hx.state.relay.FailureCode != tc.want || hx.state.relay.CSRF != testCSRF {
 				t.Fatalf("relay record = %+v, want FailureCode=%s", hx.state.relay, tc.want)
 			}
+			// These failures are all decided on a login-mode state — the
+			// relay record must not carry link-mode data.
+			if hx.state.relay.Mode != "" {
+				t.Fatalf("a login-flow failure relay record must carry no mode: mode=%q", hx.state.relay.Mode)
+			}
 			assertNoPII(t, rec)
 
 			// The relay endpoint binds, clears the start-host cookie, then
@@ -620,6 +630,14 @@ func TestRelayComplete_RefusalsAre400WithoutRedirectOrToken(t *testing.T) {
 		"no state cookie":      func(hx *callbackHarness) *http.Request { return relayRequest("relay-1", "") },
 		"foreign nonce (CSRF)": func(hx *callbackHarness) *http.Request { return relayRequest("relay-1", "attackers-nonce") },
 		"link-mode record": func(hx *callbackHarness) *http.Request {
+			// Forged by hand: resolveStateForCallback correctly makes a real
+			// deferred client-tier link flow impossible to produce end-to-end
+			// (link mode never relays — see completeOAuthCallback's linkMode
+			// branch), so there is no producer path left that stores a relay
+			// record with Mode == link. The producer gap is closed; this
+			// forgery exists solely to pin the consumer-side guard in
+			// HandleOAuthRelayCompleteHTTP so it stays enforced even though
+			// nothing can currently trigger it legitimately.
 			hx.state.relay.Mode = services.OAuthStateModeLink
 			return relayRequest("relay-1", testCSRF)
 		},

@@ -157,7 +157,7 @@ func (h *AuthHandler) completeOAuthCallback(w http.ResponseWriter, r *http.Reque
 	// so the deferred binding is always verified and the start-host cookie
 	// always cleared before the browser reaches the client SPA.
 	relay := func(rec *services.OAuthRelayRecord) {
-		rec.Tier, rec.Provider, rec.CSRF = res.claims.Tier, provider, res.claims.CSRF
+		rec.Tier, rec.Provider, rec.CSRF, rec.Mode, rec.LinkUserUUID = res.claims.Tier, provider, res.claims.CSRF, res.claims.Mode, res.claims.LinkUserUUID
 		id, err := h.oauthStateService.StoreOAuthRelay(ctx, rec)
 		if err != nil {
 			// Terminal on THIS host: nothing was minted and the one-shot

@@ -443,7 +443,7 @@ Every provider callback runs `completeOAuthCallback` (`handlers/oauth_callback_f
 
 The wire shape is **closed** and lives in `handlers/oauth_callback_redirect.go`, the only file allowed to build these URLs:
 
-- success: `{spa}/auth/callback?success=true&provider=<google|apple|github|discord>` — the refresh cookie is the only credential; the SPA bootstraps through `GET /v1/auth/session`;
+- success: `{spa}/auth/callback?success=true&provider=<google|apple|github|discord>` — the refresh cookie is the only credential; the operator/legacy SPA bootstraps through `GET /v1/auth/session` (operator mux only), while a client-tier SPA bootstraps through `POST /v1/auth/client/refresh-cookie` — mounted per tier by `RegisterTierMountableRoutes` — since `/v1/auth/session` does not exist on the client host;
 - failure: `{spa}/auth/callback?success=false&error=<oauth_access_denied | oauth_signup_disabled | oauth_link_disabled | auth.oauth_email_unverified | oauth_provider_unavailable | oauth_login_failed>` — anything else collapses to `oauth_login_failed`; account status and lookup results are never encoded; config uncertainty on this surface is `oauth_provider_unavailable`;
 - MFA continuation: `{spa}/auth/callback#requiresMfa=true&mfaToken=<one-shot id>&webauthnAvailable=<bool>` — in the **fragment**, so the five-minute challenge id never reaches a server log, a proxy or a Referer; **no cookie is written** on a partial;
 - link mode: `{spa}/user/security?tab=oauth&link=success|failed&provider=<p>[&code=already_linked|duplicate_provider|invalid_userinfo|access_denied|provider_unavailable|internal]` — its own builder, never the login state machine, operator-only.

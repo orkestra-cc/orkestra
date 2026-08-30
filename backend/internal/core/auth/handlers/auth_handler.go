@@ -772,11 +772,6 @@ func (h *AuthHandler) HandleAppleCallbackHTTP(w http.ResponseWriter, r *http.Req
 	h.completeOAuthCallback(w, r, models.OAuthProviderApple, params, exchangeAppleIDToken())
 }
 
-// Token Response (for non-redirect endpoints)
-type TokenResponse struct {
-	Body models.TokenResponse
-}
-
 // Refresh Token Request
 type RefreshTokenRequest struct {
 	RefreshToken string `json:"refreshToken" doc:"Refresh token to exchange for new tokens"`
