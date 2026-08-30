@@ -8,12 +8,12 @@
 
 **Tech Stack:** Go 1.25.13, Huma v2, MongoDB 8 (`UpdateOne` + pipeline update), `pkg/sdk/module` fake repository tests + `MONGO_TEST_URI`-guarded integration tests, React 19 / RTK Query / react-hook-form, Vitest + RTL + MSW (`onUnhandledRequest: 'error'`), i18n EN/IT parity test.
 
-**Spec:** `docs/superpowers/specs/2026-08-29-password-login-toggle-design.md` — this plan implements the **PR 1** row of §7 (§4.1 `needsRestart` in the same write, §4.2 required-persisted-config + `missing` row, §4.4 boot backfill, §4.5 snapshot validation + atomic CAS writes, §4.10 `useModuleConfigController` 409-by-code, §4.11 audit, §4.12 docs, and the §6 tests for `pkg/sdk/module` + the admin controller). PRs 2–4 get their own plans.
+**Spec:** `docs/superpowers/specs/2026-08-29-password-login-toggle-design.md` **v4.1** — the four decisions this plan surfaced (the `ConfigRepository` additive-only exception, server-side lane validation, the backfill's scope and mirror-from-profile rule, `RequirePersistedConfig` as the boot gate) are decided *in the spec*, approved before execution; the plan changes no contract on its own. It implements the **PR 1** row of §7 (§4.1 `needsRestart` in the same write, §4.2 required-persisted-config + `missing` row, §4.4 boot backfill, §4.5 snapshot validation + atomic CAS writes, §4.10 `useModuleConfigController` 409-by-code, §4.11 audit, §4.12 docs, and the §6 tests for `pkg/sdk/module` + the admin controller). PRs 2–4 get their own plans.
 
 ## Global Constraints
 
 - **Branch:** work on the current branch `feat/auth-password-login-toggle` (it carries the spec + this plan), rebased onto `origin/dev`. PR 1 targets `dev`. PRs 2–4 branch from `dev` after PR 1 merges.
-- **`ConfigRepository` is provided TO the config service, not implemented BY modules** — the same posture `backend/pkg/sdk/CLAUDE.md` records for `module.RedisClient`, and the one its own doc comment already states ("the surface is exactly what `ModuleConfigService` calls"). Changing it (new `CompareAndSwapConfig`, new signatures for `CompareAndSwapEnvironment` / `MigrateToEnvironments`, four methods removed) is therefore a **declared exception to additive-only**, recorded in the versioning policy (Task 3 Step 7) and in the PR body; it ripples only to a fork that substitutes its own repository (a test double). The spec itself decides the widening (§4.5: "the repository interface gains one service-facing `CompareAndSwapConfig` operation"). An optional sub-interface was rejected because the service would have to keep the non-atomic two-write path alive as the fallback — the very defect this PR removes.
+- **`ConfigRepository` is provided TO the config service, not implemented BY modules** — the same posture `backend/pkg/sdk/CLAUDE.md` records for `module.RedisClient`, and the one its own doc comment already states ("the surface is exactly what `ModuleConfigService` calls"). Changing it (new `CompareAndSwapConfig`, new signatures for `CompareAndSwapEnvironment` / `MigrateToEnvironments`, four methods removed) is therefore a **declared exception to additive-only**, decided in spec v4.1 (§4.5 and the ADR row) and recorded in the versioning policy (Task 3 Step 7) and in the PR body; it ripples only to a fork that substitutes its own repository (a test double). An optional sub-interface was rejected because the service would have to keep the non-atomic two-write path alive as the fallback — the very defect this PR removes.
 - **SDK self-containment:** no file under `backend/pkg/sdk/` may import `backend/internal/*`. `pkg/sdk/module` MAY import `pkg/sdk/iface` (it already does). Verify with `grep -rn "internal/" backend/pkg/sdk/ --include="*.go"` before every commit — doc-comment hits only.
 - **The `Module` interface is frozen** at `Name / Category / Init`. `HasConfigSnapshotValidator` is a new optional sub-interface; `HasConfigValidator` and `HasConfigActivationValidator` stay source-compatible and keep their current dispatch when a module omits the new one.
 - **`module.config_revision_stale` is SDK-owned:** the constant `CodeConfigRevisionStale` lives in `pkg/sdk/module/recordlist_mutation.go` next to `ErrRevisionStale`; `internal/shared/errcode/codes.go` gets NO `module.*` constant, and `codes_test.go` asserts the non-collision.
@@ -38,11 +38,11 @@
 6. **The `missing` row is a `ModuleConfigStatus{Name, Missing, Config}` returned by a new `ListConfigs`;** `GetAllConfigs` keeps its `[]ModuleConfig` signature as a thin wrapper (present documents only) so a fork calling it still compiles.
 7. **A sink that *panics* is the testable stand-in for "sink failure"** in the handler: `iface.AuditSink.Emit` returns nothing, so the only handler-observable failure is a panic; the compliance sink already WARNs its own insert failures. The handler recovers, WARNs, and leaves the HTTP result unchanged.
 8. **`User-Agent` reaches the actor resolver through a 10-line `RequestMeta` middleware** in `internal/shared/middleware`, mounted on the admin mutation groups in `main.go`. Huma handlers see only `context.Context`; declaring a `header:"User-Agent"` input would put the header into the OpenAPI contract.
-9. **Reload & review re-applies only the DIRTY fields and clears staged record-list removals.** Capturing every form value would put the other operator's changes back to the old value as a "local edit"; only fields the operator actually touched are captured, non-secret ones keep an intentional clear to `""`, secrets are re-applied only when non-empty (a typed-then-cleared secret is no change), and `Save` is unlocked only after the refetch succeeded. A staged removal is a destructive decision made against a state the operator saw; re-arming it against a state they have not seen is the exact failure the record-list revision rule exists to prevent.
-10. **The boot backfill writes only schema keys whose `EnvVar`/`Default` is non-empty, and rebuilds the mirror from the active profile.** Absence is a signal to `GetRawValue` readers (ADR-0017 D1: an absent `sessionAbsoluteTTL` means the default cap, a present `""` means "cap disabled"), so inventing `""` for every empty-fallback key would silently change policy. The spec's "every schema key present" wording is **amended in Task 5 Step 5** (§4.4, §5 #14, §6) so spec and code agree; it is no longer a deviation once that commit lands.
+9. **Reload & review re-applies only the DIRTY fields and discards pending record-list membership (staged removals and unsaved creates) on every successful reload — explicitly, not via the re-seed effect, which does not run when the profile's own revision is unchanged.** Capturing every form value would put the other operator's changes back to the old value as a "local edit"; only fields the operator actually touched are captured, non-secret ones keep an intentional clear to `""`, secrets are re-applied only when non-empty (a typed-then-cleared secret is no change), and `Save` is unlocked only after the refetch succeeded. A staged removal is a destructive decision made against a state the operator saw; re-arming it against a state they have not seen is the exact failure the record-list revision rule exists to prevent.
+10. **The boot backfill writes only schema keys whose `EnvVar`/`Default` is non-empty, and rebuilds the mirror from the active profile** — decided in spec v4.1 §4.4 (absence is a signal to `GetRawValue` readers, ADR-0017 D1: an absent `sessionAbsoluteTTL` means the default cap, a present `""` means "cap disabled"). Listed here only so a reader of v4 knows why the older wording no longer applies.
 11. **The backfill writes `needsRestart=false`, not the resolver's answer.** Seeding runs inside `InitAll` before any module's `Init`, so every module reads the backfilled document — no restart is owed; the resolver governs post-boot edits. Writing `false` there folds the `ClearNeedsRestart` that follows for loaded modules into the same update instead of adding a second write.
 12. **The `MigrateToEnvironments` legacy migration is itself a compare-and-swap** (matches only a document that still has no profiles at the read revision; a loser re-reads). Without it two concurrent `UpdateConfig`s on a legacy document could both migrate and the second would copy its stale legacy snapshot over the first's fresh profile — outside the revision guard.
-13. **`ConfigRepository` changes are a declared additive-only exception**, not a sub-interface: see Global Constraints. A compile-time assertion `var _ ConfigRepository = (*ModuleConfigRepository)(nil)` pins the concrete repository to the contract.
+13. **`ConfigRepository` changes are a declared additive-only exception**, decided in spec v4.1, not a sub-interface: see Global Constraints. A compile-time assertion `var _ ConfigRepository = (*ModuleConfigRepository)(nil)` pins the concrete repository to the contract.
 14. **Lane validation is enforced only for modules that declare a schema.** A module with no `ConfigSchema` has nothing to classify a key against and keeps today's accept-anything behaviour (the existing `TestConfigUpdate_ModuleValidatorOptional` depends on it); every in-tree module declares one.
 15. **`InvalidateCache` leaves the config-write paths.** Redis caches only the `enabled` flag (`module:enabled:*`), which no config/environment/activation write changes, so the call could only turn a committed write into a reported failure. `UpdateEnabled` keeps it as best-effort (WARN): the gate self-corrects within the 30 s TTL, and the persisted state is the truth.
 
@@ -1902,7 +1902,7 @@ func (s *ModuleConfigService) UpdateConfig(ctx context.Context, name string, val
 	mergedValues := mergeStringMaps(cur.ConfigValues, values)
 
 	if err := s.validateCandidate(ctx, name, candidate{
-		schema: doc.ConfigSchema, env: env, values: mergedValues,
+		schema: schema, env: env, values: mergedValues,
 		storedEncrypted: cur.EncryptedValues, submittedSecrets: secrets,
 	}); err != nil {
 		return err
@@ -1933,6 +1933,8 @@ func (s *ModuleConfigService) UpdateConfig(ctx context.Context, name string, val
 }
 ```
 
+(Step 3c inserts `schema := s.schemaFor(name, doc)` plus the lane check just above `mergedValues := …` in this function and the next; the `candidate{schema: schema, …}` above refers to that variable.)
+
 Replace `UpdateEnvironmentConfig` (lines 478-529) with:
 
 ```go
@@ -1957,7 +1959,7 @@ func (s *ModuleConfigService) UpdateEnvironmentConfig(ctx context.Context, name,
 	mergedValues := mergeStringMaps(cur.ConfigValues, values)
 
 	if err := s.validateCandidate(ctx, name, candidate{
-		schema: doc.ConfigSchema, env: envName, values: mergedValues,
+		schema: schema, env: envName, values: mergedValues,
 		storedEncrypted: cur.EncryptedValues, submittedSecrets: secrets,
 	}); err != nil {
 		return err
@@ -2015,7 +2017,7 @@ func (s *ModuleConfigService) SetActiveEnvironment(ctx context.Context, name, en
 		cv = make(map[string]string)
 	}
 	if err := s.validateCandidate(ctx, name, candidate{
-		schema: doc.ConfigSchema, env: envName, values: cv,
+		schema: s.schemaFor(name, doc), env: envName, values: cv,
 		storedEncrypted: target.EncryptedValues, activation: true,
 	}); err != nil {
 		return err
@@ -2311,21 +2313,50 @@ func keySet(m map[string]string) map[string]bool {
 }
 ```
 
-Call it in all three service paths, right after the target profile is located and before the merge — in `UpdateConfig` and `UpdateEnvironmentConfig`:
+**The schema is the LIVE one, never the stored snapshot.** `doc.ConfigSchema` is refreshed by `RefreshMetadata` at boot, and that refresh is log-only; a field that changed from `string` to `secret` in the binary would still be accepted in plaintext against a stale snapshot. Add to `config_service.go`:
 
 ```go
-	if err := validateSubmittedKeys(doc.ConfigSchema, values, secrets); err != nil {
+// schemaFor returns the schema every mutation is judged against: the
+// registered module's live declaration when the module is known — the
+// binary is the source of truth, and the stored copy is only a boot-time
+// snapshot whose refresh may have failed — or the stored snapshot for a
+// document whose module is not registered with this service.
+func (s *ModuleConfigService) schemaFor(name string, doc *ModuleConfig) []ConfigField {
+	if m, ok := s.knownModules[name]; ok {
+		return ConfigSchemaOf(m)
+	}
+	return doc.ConfigSchema
+}
+```
+
+and use it everywhere a mutation classifies a key or builds a snapshot: `candidate.schema: s.schemaFor(name, doc)` in `UpdateConfig`, `UpdateEnvironmentConfig`, `SetActiveEnvironment` and the record-list path (which also passes it to `validateRecordListSubmission` instead of `doc.ConfigSchema`).
+
+Call the lane check in all three service paths **on the payload as submitted**. In `UpdateConfig` and `UpdateEnvironmentConfig`, right after the target profile is located and before the merge:
+
+```go
+	schema := s.schemaFor(name, doc)
+	if err := validateSubmittedKeys(schema, values, secrets); err != nil {
 		return err
 	}
 	mergedValues := mergeStringMaps(cur.ConfigValues, values)
 ```
 
-and in `UpdateEnvironmentConfigWithRecordLists`, inside the loop right after the `cur := doc.Environments[envName]` line (the roster keys were already stripped by `withoutRosterKeys` above the loop):
+In `UpdateEnvironmentConfigWithRecordLists` the check must run **before** `values = withoutRosterKeys(values)` (line 65) — after the strip a submitted roster key would be silently dropped instead of refused — and it therefore needs the schema before the document read inside the loop. Replace lines 63-65 with:
 
 ```go
-			if err := validateSubmittedKeys(doc.ConfigSchema, values, secrets); err != nil {
-				return err
-			}
+	// Lane validation runs on the payload AS SUBMITTED: the roster is
+	// SDK-owned, so a request that writes it directly is refused here, not
+	// silently dropped by the strip below. The schema is the live one
+	// (schemaFor); the document is read inside the loop only for its values.
+	if known, ok := s.knownModules[name]; ok {
+		if err := validateSubmittedKeys(ConfigSchemaOf(known), values, secrets); err != nil {
+			return err
+		}
+	}
+	// Defence in depth for a module this service does not know (no live
+	// schema to refuse against): the roster never survives the request
+	// boundary either way.
+	values = withoutRosterKeys(values)
 ```
 
 `mapConfigServiceError` already turns a code-bearing `ConfigValidationError` into the 422 envelope, so the wire shape needs nothing new.
@@ -2338,6 +2369,7 @@ package module
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 )
 
@@ -2384,6 +2416,77 @@ func TestValidateSubmittedKeys(t *testing.T) {
 	}
 }
 
+// laneModule declares a record list so the roster and element rules can be
+// exercised through the service, not just the helper.
+type laneModule struct{ BaseModule }
+
+func (laneModule) Name() string               { return "lane" }
+func (laneModule) Init(*Dependencies) error   { return nil }
+func (laneModule) ConfigSchema() []ConfigField { return laneSchema }
+
+func newLaneService(t *testing.T) (*ModuleConfigService, *fakeConfigRepo) {
+	t.Helper()
+	withEncryptionKey(t)
+	repo := newFakeConfigRepo()
+	repo.docs["lane"] = &ModuleConfig{
+		ModuleName: "lane", ActiveEnvironment: "production", ConfigSchema: laneSchema,
+		ConfigValues: map[string]string{}, EncryptedValues: map[string]string{},
+		Environments: map[string]EnvironmentConfig{
+			"production": {ConfigValues: map[string]string{"profiles.__items": "a", "profiles.a.__label": "A"}, EncryptedValues: map[string]string{}},
+		},
+	}
+	svc := NewModuleConfigService(repo, fakeRedisClient{}, slog.Default())
+	svc.RegisterKnownModules([]Module{laneModule{}})
+	return svc, repo
+}
+
+// The roster key is refused on every path — including the record-list one,
+// where it used to be silently stripped — and a legitimate membership
+// request still works.
+func TestRecordListPath_RosterKeyIsRefusedNotStripped(t *testing.T) {
+	svc, repo := newLaneService(t)
+	ctx := context.Background()
+	var typed *ConfigValidationError
+	err := svc.UpdateEnvironmentConfigWithRecordLists(ctx, "lane", "production",
+		map[string]string{"profiles.__items": "a,evil"}, nil, nil, nil)
+	if !errors.As(err, &typed) || typed.Field != "profiles.__items" || typed.Code != CodeConfigKeyInvalid {
+		t.Fatalf("record-list path with a roster key: err = %v, want 422 %s on profiles.__items", err, CodeConfigKeyInvalid)
+	}
+	if repo.casCalls != 0 || repo.docs["lane"].Environments["production"].ConfigValues["profiles.__items"] != "a" {
+		t.Fatal("a refused roster key reached the repository")
+	}
+	if err := svc.UpdateConfig(ctx, "lane", map[string]string{"profiles.__items": "a,evil"}, nil); !errors.As(err, &typed) {
+		t.Errorf("bare PATCH with a roster key: %v", err)
+	}
+	// Membership through the declared intent still works, label and all.
+	err = svc.UpdateEnvironmentConfigWithRecordLists(ctx, "lane", "production",
+		map[string]string{"profiles.b.__label": "B", "profiles.b.host": "h"}, map[string]string{"profiles.b.password": "p"},
+		[]RecordListMutation{{Field: "profiles", Create: []string{"b"}}}, nil)
+	if err != nil {
+		t.Fatalf("legitimate create: %v", err)
+	}
+	if got := repo.docs["lane"].Environments["production"].ConfigValues["profiles.__items"]; got != "a,b" {
+		t.Errorf("roster = %q, want a,b", got)
+	}
+}
+
+// The live schema decides, never the stored snapshot: a field that became a
+// secret in the binary is refused in the config lane even while the
+// document still carries the old string declaration.
+func TestUpdateConfig_LiveSchemaBeatsStaleStoredSchema(t *testing.T) {
+	svc, repo := newLaneService(t)
+	stale := append([]ConfigField(nil), laneSchema...)
+	stale[1] = ConfigField{Key: "apiKey", Type: FieldString} // stored snapshot predates the change
+	repo.docs["lane"].ConfigSchema = stale
+	var typed *ConfigValidationError
+	if err := svc.UpdateConfig(context.Background(), "lane", map[string]string{"apiKey": "leak"}, nil); !errors.As(err, &typed) || typed.Code != CodeConfigKeyInvalid {
+		t.Fatalf("stale stored schema must not admit a live secret in the config lane: %v", err)
+	}
+	if _, ok := repo.docs["lane"].ConfigValues["apiKey"]; ok {
+		t.Fatal("plaintext secret persisted")
+	}
+}
+
 // The refusal happens before the validator, before encryption and before the
 // write: nothing observes the misfiled secret.
 func TestUpdateConfig_SecretInConfigLaneNeverReachesValidatorOrDocument(t *testing.T) {
@@ -2407,6 +2510,9 @@ func TestUpdateConfig_SecretInConfigLaneNeverReachesValidatorOrDocument(t *testi
 	}
 	if err := svc.UpdateEnvironmentConfigWithRecordLists(context.Background(), "inv", "sandbox", map[string]string{"bogus": "x"}, nil, nil, nil); !errors.As(err, &typed) {
 		t.Errorf("record-list path: %v", err)
+	}
+	if repo.casCalls != 0 {
+		t.Error("a refused key reached the record-list CAS")
 	}
 }
 ```
@@ -2828,7 +2934,24 @@ In `config_service.go` add to the struct:
 	seedFailures map[string]error
 ```
 
-Initialize `requiredPersisted: make(map[string]bool)` and `seedFailures: make(map[string]error)` in `NewModuleConfigService`. In `SeedFromModules` record every per-module failure that affects the document's content — the `FindByName` error at line 129, the first-boot `Upsert` error at line 162, and (Task 5) the backfill error — with `s.seedFailures[m.Name()] = err` next to the existing `logger.Error`. Then add:
+Initialize `requiredPersisted: make(map[string]bool)` and `seedFailures: make(map[string]error)` in `NewModuleConfigService`. In `SeedFromModules` record every per-module failure that affects the document's content or the schema it is judged against — the `FindByName` error at line 129, the `RefreshMetadata` error at line 142 (a stale stored schema is what the live-schema rule guards against; for a required module it is not a warning), the first-boot `Upsert` error at line 162, and (Task 5) the backfill error — with `s.seedFailures[m.Name()] = err` next to the existing `logger.Error`. Add `refreshErr error` to the fake (`RefreshMetadata` returns it when set) and this test to `config_required_test.go`:
+
+```go
+func TestRequirePersistedConfig_RefusesAFailedMetadataRefresh(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := requiredService(t)
+	repo.docs["auth"] = &ModuleConfig{ModuleName: "auth", ConfigValues: map[string]string{}, EncryptedValues: map[string]string{}}
+	repo.refreshErr = errors.New("schema refresh refused")
+	if err := svc.SeedFromModules(ctx, []Module{minimalModule{name: "auth"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RequirePersistedConfig(ctx, "auth"); err == nil || !strings.Contains(err.Error(), "schema refresh refused") {
+		t.Fatalf("a failed metadata refresh must stop a required module from serving: %v", err)
+	}
+}
+```
+
+Then add:
 
 ```go
 var (
@@ -3269,7 +3392,7 @@ Refs: spec §4.2, §5 #10 #30"
 
 **Interfaces:**
 - Consumes: Task 1 `CompareAndSwapConfig`, Task 2 `schemaFallbackValue`.
-- Produces: `func (s *ModuleConfigService) backfillSchemaKeys(ctx, m Module, doc *ModuleConfig) (keys []string, wrote bool, err error)`; `func (s *ModuleConfigService) buildBackfill(m Module, schema []ConfigField, doc *ModuleConfig) (ConfigMutation, []string, bool)`; `func missingSchemaKeys(schema []ConfigField, values, encrypted map[string]string, encryptOnce func(ConfigField, string) (string, bool)) (map[string]string, map[string]string, []string)`; `const backfillMaxAttempts = 3`.
+- Produces: `func (s *ModuleConfigService) backfillSchemaKeys(ctx, m Module, doc *ModuleConfig) (keys []string, wrote bool, err error)`; `func (s *ModuleConfigService) buildBackfill(m Module, schema []ConfigField, doc *ModuleConfig) (ConfigMutation, []string, bool, error)`; `func missingSchemaKeys(schema []ConfigField, values, encrypted map[string]string, encryptOnce func(ConfigField, string) (string, error)) (map[string]string, map[string]string, []string, error)`; `const backfillMaxAttempts = 3`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3463,6 +3586,36 @@ func TestSeedFromModules_EmptyFallbackKeysStayAbsent(t *testing.T) {
 	}
 }
 
+// A secret that cannot be encrypted (no OAUTH_TOKEN_ENCRYPTION_KEY) is a
+// backfill FAILURE, not a skipped key: nothing is written, the failure is
+// recorded, and the required-module gate refuses. First-boot seeding keeps
+// its warn-and-skip; a backfill that "succeeded" minus a secret would let
+// a strict reader serve an incomplete document.
+func TestSeedFromModules_UnencryptableSecretFailsTheBackfill(t *testing.T) {
+	t.Setenv("BF_TEST_FROM_ENV", "")
+	svc, repo := backfillSvc(t, &ModuleConfig{
+		ModuleName: "bf", ActiveEnvironment: "production",
+		ConfigValues: map[string]string{}, EncryptedValues: map[string]string{},
+		Environments: map[string]EnvironmentConfig{"production": {ConfigValues: map[string]string{}, EncryptedValues: map[string]string{}}},
+	})
+	t.Setenv("OAUTH_TOKEN_ENCRYPTION_KEY", "")
+	if err := svc.SeedFromModules(context.Background(), []Module{backfillModule{}}); err != nil {
+		t.Fatal(err)
+	}
+	if repo.docCasCalls != 0 {
+		t.Error("a backfill that could not encrypt a secret must write nothing")
+	}
+	if _, ok := repo.docs["bf"].Environments["production"].ConfigValues["existing"]; ok {
+		t.Error("non-secret keys must not be written by a failed backfill (all-or-nothing)")
+	}
+	if err := svc.seedFailures["bf"]; err == nil {
+		t.Fatal("the encryption failure must be recorded")
+	}
+	if err := svc.RequirePersistedConfig(context.Background(), "bf"); err == nil {
+		t.Fatal("the required-module gate must refuse")
+	}
+}
+
 func TestBackfillSchemaKeys_ReturnsSortedNamesWrittenOnce(t *testing.T) {
 	t.Setenv("BF_TEST_FROM_ENV", "")
 	svc, repo := backfillSvc(t, &ModuleConfig{
@@ -3630,7 +3783,10 @@ const backfillMaxAttempts = 3
 func (s *ModuleConfigService) backfillSchemaKeys(ctx context.Context, m Module, doc *ModuleConfig) (keys []string, wrote bool, err error) {
 	schema := ConfigSchemaOf(m)
 	for attempt := 0; attempt < backfillMaxAttempts; attempt++ {
-		mut, added, write := s.buildBackfill(m, schema, doc)
+		mut, added, write, err := s.buildBackfill(m, schema, doc)
+		if err != nil {
+			return nil, false, err
+		}
 		if !write {
 			return nil, false, nil
 		}
@@ -3662,56 +3818,62 @@ func (s *ModuleConfigService) backfillSchemaKeys(ctx context.Context, m Module, 
 // is encrypted once. Returns the mutation, the keys added to the profile
 // (or mirror, for a legacy document), and whether anything needs writing —
 // a mirror that merely diverged from a complete profile is realigned too.
-func (s *ModuleConfigService) buildBackfill(m Module, schema []ConfigField, doc *ModuleConfig) (mut ConfigMutation, added []string, write bool) {
+func (s *ModuleConfigService) buildBackfill(m Module, schema []ConfigField, doc *ModuleConfig) (mut ConfigMutation, added []string, write bool, err error) {
 	ciphertext := map[string]string{} // key → ciphertext, encrypted once per key
-	encryptOnce := func(f ConfigField, plain string) (string, bool) {
+	encryptOnce := func(f ConfigField, plain string) (string, error) {
 		if enc, ok := ciphertext[f.Key]; ok {
-			return enc, true
+			return enc, nil
 		}
 		enc, err := encryptSecret(plain)
 		if err != nil {
-			// Same posture as first-boot seeding: warn and skip the secret,
-			// never fail the boot over a missing OAUTH_TOKEN_ENCRYPTION_KEY.
-			s.logger.Warn("SeedFromModules: failed to encrypt backfilled secret, skipping",
-				slog.String("module", m.Name()), slog.String("field", f.Key), slog.String("error", err.Error()))
-			return "", false
+			// NOT the first-boot posture (warn and skip). A backfill that
+			// silently omits a secret would report success and let the
+			// required-module gate serve an incomplete document.
+			return "", fmt.Errorf("encrypt backfilled secret %q: %w", f.Key, err)
 		}
 		ciphertext[f.Key] = enc
-		return enc, true
+		return enc, nil
 	}
 	mut = ConfigMutation{ExpectedRevision: doc.ConfigRevision, NeedsRestart: false}
 
 	if len(doc.Environments) == 0 {
-		values, secrets, keys := missingSchemaKeys(schema, doc.ConfigValues, doc.EncryptedValues, encryptOnce)
+		values, secrets, keys, err := missingSchemaKeys(schema, doc.ConfigValues, doc.EncryptedValues, encryptOnce)
+		if err != nil {
+			return mut, nil, false, err
+		}
 		if len(keys) == 0 {
-			return mut, nil, false
+			return mut, nil, false, nil
 		}
 		mut.WriteLegacy, mut.LegacyValues, mut.LegacySecrets = true, values, secrets
 		sort.Strings(keys)
-		return mut, keys, true
+		return mut, keys, true, nil
 	}
 
 	env := doc.ActiveEnv()
 	cur, ok := doc.Environments[env]
 	if !ok {
-		return mut, nil, false
+		return mut, nil, false, nil
 	}
-	values, secrets, keys := missingSchemaKeys(schema, cur.ConfigValues, cur.EncryptedValues, encryptOnce)
+	values, secrets, keys, err := missingSchemaKeys(schema, cur.ConfigValues, cur.EncryptedValues, encryptOnce)
+	if err != nil {
+		return mut, nil, false, err
+	}
 	mirrorDiverged := !maps.Equal(doc.ConfigValues, values) || !maps.Equal(doc.EncryptedValues, secrets)
 	if len(keys) == 0 && !mirrorDiverged {
-		return mut, nil, false
+		return mut, nil, false, nil
 	}
 	mut.Env, mut.EnvValues, mut.EnvSecrets, mut.EnvRevision = env, values, secrets, cur.Revision
 	mut.WriteLegacy, mut.LegacyValues, mut.LegacySecrets = true, values, secrets
 	sort.Strings(keys) // missingSchemaKeys adds each schema key at most once
-	return mut, keys, true
+	return mut, keys, true, nil
 }
 
 // missingSchemaKeys returns copies of values/secrets with every absent
 // schema key whose EnvVar/Default is non-empty added, plus the keys added.
 // Secrets are obtained through encryptOnce so a key missing from both the
-// profile and the mirror is encrypted a single time.
-func missingSchemaKeys(schema []ConfigField, values, encrypted map[string]string, encryptOnce func(ConfigField, string) (string, bool)) (map[string]string, map[string]string, []string) {
+// profile and the mirror is encrypted a single time; an encryption failure
+// is the caller's failure, never a silently skipped key.
+func missingSchemaKeys(schema []ConfigField, values, encrypted map[string]string, encryptOnce func(ConfigField, string) (string, error)) (map[string]string, map[string]string, []string, error) {
 	outValues := mergeStringMaps(values, nil)
 	outSecrets := mergeStringMaps(encrypted, nil)
 	var added []string
@@ -3727,9 +3889,9 @@ func missingSchemaKeys(schema []ConfigField, values, encrypted map[string]string
 			if _, ok := outSecrets[f.Key]; ok {
 				continue
 			}
-			enc, ok := encryptOnce(f, v)
-			if !ok {
-				continue
+			enc, err := encryptOnce(f, v)
+			if err != nil {
+				return nil, nil, nil, err
 			}
 			outSecrets[f.Key] = enc
 		} else {
@@ -3740,7 +3902,7 @@ func missingSchemaKeys(schema []ConfigField, values, encrypted map[string]string
 		}
 		added = append(added, f.Key)
 	}
-	return outValues, outSecrets, added
+	return outValues, outSecrets, added, nil
 }
 ```
 
@@ -3749,15 +3911,9 @@ func missingSchemaKeys(schema []ConfigField, values, encrypted map[string]string
 Run: `cd backend && go test ./pkg/sdk/module/ -count=1`
 Expected: PASS.
 
-- [ ] **Step 5: Amend the spec's wording, docs, commit**
+- [ ] **Step 5: Docs + commit**
 
-The spec (§4.4 line 370, §5 #14, §6 `config_backfill_test.go` row) says "every schema key absent … is written with its `EnvVar`/`Default` value" and "a document in which every schema key is present". That is not what ships, on purpose (deviation #10): a key with an empty fallback stays absent. Amend `docs/superpowers/specs/2026-08-29-password-login-toggle-design.md` in this commit so the contract and the code say the same thing:
-
-- §4.4, the `SeedFromModules` backfill sentence → "every schema key absent from the active environment **whose `EnvVar`/`Default` is non-empty** is written with that value, secrets included through the same encrypted path, **and the legacy mirror is rewritten as an exact copy of the resulting profile** (profiles are the source of truth; a mirror is never backfilled on its own), `configRevision` advanced once, and the backfilled key names logged at INFO. A key whose fallback is empty stays absent: absence is meaningful to `GetRawValue` readers (ADR-0017 D1 — an absent `sessionAbsoluteTTL` is the default cap, a present empty one disables it), and a runtime read of such a key needs no guess because its answer is empty either way."
-- §4.4, "a document in which every schema key is present" → "a document in which every schema key that has a value to be present with is present".
-- §5 #14, "writes every other absent schema key with its default before traffic" → "writes every other absent schema key that has a non-empty default before traffic".
-- §6, the `config_backfill_test.go` row: "gains them with `EnvVar`/`Default` values" → "gains those with a non-empty `EnvVar`/`Default`"; add "the legacy mirror is rebuilt from the active profile; a lost CAS is re-read and retried; a failure is recorded and refused by the required-module gate".
-- §0 revision log: append "v4.1 (planning, 2026-08-30): backfill scoped to non-empty fallbacks and mirror-from-profile; `RequirePersistedConfig` is the boot gate for required modules; `ConfigRepository` change declared as an additive-only exception (§4.5); server-side lane validation `module.config_key_invalid` (§4.5)."
+(The spec already says what this task builds — v4.1 §4.4 / §5 #14 / §6 were amended and approved before execution; nothing in the spec changes here.)
 
 `backend/CLAUDE.md` — in the **First-boot seeding** paragraph, after "Subsequent boots ignore env defaults; admin-set values in `module_configs` are authoritative." insert: "Subsequent boots also **backfill** any schema key an existing document lacks (a key the schema gained after the document was created) with its `EnvVar`/`Default` **when that fallback is non-empty** — present values, explicit empty strings included, are never touched, and a key whose fallback is empty stays absent because absence is meaningful to `GetRawValue` readers (ADR-0017: an absent `sessionAbsoluteTTL` is the default cap, a present empty one disables it). The backfilled key names are logged at INFO. So a runtime read never has to guess a default for a key the document was created without."
 
@@ -3765,7 +3921,7 @@ The spec (§4.4 line 370, §5 #14, §6 `config_backfill_test.go` row) says "ever
 
 ```bash
 cd backend && go vet ./pkg/sdk/... && cd ..
-git add backend/pkg/sdk/module/config_service.go backend/pkg/sdk/module/config_backfill_test.go backend/CLAUDE.md backend/pkg/sdk/CLAUDE.md docs/superpowers/specs/2026-08-29-password-login-toggle-design.md
+git add backend/pkg/sdk/module/config_service.go backend/pkg/sdk/module/config_backfill_test.go backend/CLAUDE.md backend/pkg/sdk/CLAUDE.md
 git commit -m "feat(sdk): SeedFromModules backfills schema keys with a non-empty fallback
 
 Every schema key absent from the ACTIVE profile whose EnvVar/Default is
@@ -3775,9 +3931,11 @@ one CAS before traffic — retried on a lost race, recorded on failure so
 RequirePersistedConfig refuses to serve a required module. Empty-fallback
 keys stay absent (ADR-0017 presence semantics). Closes the drift where
 provider toggles default false in the schema but were absent (and read
-as true) in pre-release documents. Spec §4.4/§5/§6 amended to match.
+as true) in pre-release documents. A secret that cannot be encrypted
+fails the backfill (recorded for the required-module gate) rather than
+being skipped.
 
-Refs: spec §4.4, §5 #14"
+Refs: spec v4.1 §4.4, §5 #14"
 ```
 
 ---
@@ -4943,7 +5101,7 @@ Refs: spec §4.11, G7"
 - Modify: `frontend-admin/src/pages/admin/modules/useModuleConfigController.ts:63-134` (interface) and `:164-231, 415-543` (behaviour)
 - Modify: `frontend-admin/src/pages/admin/modules/detail/ModuleSaveBar.tsx` (`conflict`, `onReload`)
 - Modify: `frontend-admin/src/pages/admin/modules/detail/ModuleConfigSection.tsx:40-58, ~140` and `detail/index.tsx:95-115, ~530` (pass the props)
-- Modify: `frontend-admin/src/pages/admin/modules/detail/ModuleConfigSection.test.tsx` (new `describe`)
+- Modify: `frontend-admin/src/pages/admin/modules/detail/ModuleConfigSection.test.tsx` (new `describe`), `frontend-admin/src/pages/admin/modules/detail/recordList.e2e.test.tsx` (one test: same-revision reload disarms a staged removal)
 - Modify: `frontend-admin/src/locales/en.json`, `frontend-admin/src/locales/it.json`
 
 **Interfaces:**
@@ -5082,8 +5240,47 @@ describe('ModuleConfigSection revision conflict', () => {
 });
 ```
 
-Run: `cd frontend-admin && npx vitest run src/pages/admin/modules/detail/ModuleConfigSection.test.tsx`
-Expected: the three new tests FAIL (conflict copy not found; no Reload button).
+Append to the `describe` in `recordList.e2e.test.tsx` (its `stub` helper answers every GET with the fixed `revision`, which is exactly the "profile revision unchanged" case):
+
+```tsx
+  it('Reload & review disarms a staged removal even when the profile revision is unchanged', async () => {
+    const user = userEvent.setup();
+    stub(
+      { 'email.profiles.__items': 'primary', 'email.profiles.primary.__label': 'Primary' },
+      {},
+      7
+    );
+    // The save lost its compare-and-swap because configRevision moved (an
+    // activation, or another profile's write); THIS profile is still at 7,
+    // so the reload returns identical data and the re-seed effect never runs.
+    server.use(
+      http.patch('*/v1/admin/modules/:name/environments/:env', () =>
+        HttpResponse.json(
+          { status: 409, title: 'Conflict', detail: 'moved', code: 'module.config_revision_stale' },
+          { status: 409 }
+        )
+      )
+    );
+    render();
+
+    await user.click(await screen.findByRole('button', { name: /remove/i }));
+    await user.click(await screen.findByRole('button', { name: /^save/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /^remove$/i }));
+
+    await user.click(await screen.findByRole('button', { name: 'Reload & review' }));
+    // The removal is no longer staged: no Undo, no "deleted on save" notice,
+    // the element is back to an ordinary card.
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /undo/i })).not.toBeInTheDocument()
+    );
+    expect(screen.getByText('Primary')).toBeInTheDocument();
+    expect(screen.queryByText(/will be deleted on save/i)).not.toBeInTheDocument();
+  });
+```
+
+Run: `cd frontend-admin && npx vitest run src/pages/admin/modules/detail/ModuleConfigSection.test.tsx src/pages/admin/modules/detail/recordList.e2e.test.tsx`
+Expected: the four new tests FAIL (conflict copy not found; no Reload button).
 
 - [ ] **Step 2: i18n**
 
@@ -5123,9 +5320,11 @@ Interface (`ModuleConfigController`), after `success: boolean;`:
    * dirty fields on top of it — non-secret edits (an intentional clear to
    * '' included) and unsent non-empty secrets — so the diff is recomputed
    * against what the server holds now. Fields the operator never touched
-   * adopt the other writer's values. Staged record-list removals are
-   * cleared (they were decided against the old state). A failed refetch
-   * leaves the conflict latched.
+   * adopt the other writer's values. Pending record-list membership —
+   * staged removals AND unsaved creates — is discarded on every successful
+   * reload, even when this profile's revision did not move (they were
+   * decided against a state the 409 says is gone). A failed refetch leaves
+   * the conflict latched.
    */
   reloadAndReview: () => Promise<void>;
 ```
@@ -5211,8 +5410,21 @@ At the start of `onSave`, right after the `pendingDeletion` check, add `if (conf
         .filter(f => f.type === 'secret')
         .map(f => fieldNameOf(fieldNames, f.key))
     );
+    // Fields of elements created in this session go with the membership
+    // change they belong to: the reload discards pending creates, so their
+    // values must not come back as orphan edits.
+    const createdLeafNames = new Set(
+      schema
+        .filter(f => f.type === 'recordList')
+        .flatMap(f =>
+          (created[f.key] ?? []).flatMap(slug =>
+            expandElement(f, slug).map(leaf => fieldNameOf(fieldNames, leaf.key))
+          )
+        )
+    );
     return Object.keys(form.formState.dirtyFields)
       .filter(name => Boolean(form.formState.dirtyFields[name]))
+      .filter(name => !createdLeafNames.has(name))
       .map(name => ({
         name,
         value: String(values[name] ?? ''),
@@ -5227,11 +5439,19 @@ At the start of `onSave`, right after the `pendingDeletion` check, add `if (conf
     pendingDraft.current = { environment, entries: captureDirtyDraft() };
     try {
       const fresh = await refetchEnv().unwrap();
+      // Pending membership is discarded on EVERY successful reload, here and
+      // not only in the re-seed effect: a staged removal was decided against
+      // the state the operator saw, and the 409 says that state is gone —
+      // even when this profile's own revision is unchanged (an activation or
+      // another profile's write moved only configRevision), in which case
+      // the data reference is identical and the effect never runs.
+      setCreated(EMPTY_CREATES);
+      setStagedRemovals(EMPTY_CREATES);
+      setPendingLabels({});
+      setPendingDeletion(null);
       if (fresh.revision === baselineRevision) {
-        // Same profile revision ⇒ identical data ⇒ RTK Query keeps the same
-        // reference and the re-seed effect will not run (the 409 came from
-        // an activation or another profile's write, which move only
-        // configRevision). The form still holds the draft; nothing to do.
+        // Same profile revision ⇒ identical data ⇒ no re-seed. The form
+        // still holds the draft; nothing to re-apply.
         pendingDraft.current = null;
       }
       // Otherwise the data reference changes, the re-seed effect runs, and it
@@ -5287,6 +5507,7 @@ Expected: PASS, including every pre-existing `ModuleConfigSection`, `index`, `re
 git add frontend-admin/src/store/api/moduleApi.ts frontend-admin/src/pages/admin/modules/useModuleConfigController.ts \
   frontend-admin/src/pages/admin/modules/detail/ModuleSaveBar.tsx frontend-admin/src/pages/admin/modules/detail/ModuleConfigSection.tsx \
   frontend-admin/src/pages/admin/modules/detail/index.tsx frontend-admin/src/pages/admin/modules/detail/ModuleConfigSection.test.tsx \
+  frontend-admin/src/pages/admin/modules/detail/recordList.e2e.test.tsx \
   frontend-admin/src/locales/en.json frontend-admin/src/locales/it.json
 git commit -m "feat(admin): latch module.config_revision_stale with Reload & review, never auto-retry
 
