@@ -518,7 +518,11 @@ const GenericModuleDetailPage: React.FC = () => {
             <Alert
               variant="danger"
               className="fs-10"
-              dismissible
+              // Not dismissible while the conflict is latched — see
+              // ModuleConfigSection: this banner is the only thing explaining
+              // the disabled Save, and Discard is the plausible next move
+              // without it.
+              dismissible={!conflict}
               onClose={clearError}
             >
               {saveError}

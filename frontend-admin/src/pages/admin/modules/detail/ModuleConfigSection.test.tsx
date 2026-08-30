@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, type HttpHandler } from 'msw';
 import { server } from 'test/server';
 import { url } from 'test/handlers';
 import { renderWithProviders } from 'test/render';
@@ -657,5 +657,56 @@ describe('ModuleConfigSection revision conflict', () => {
     expect(
       screen.queryByRole('button', { name: 'Reload & review' })
     ).not.toBeInTheDocument();
+  });
+
+  it('makes the conflict banner non-dismissible, while an ordinary error keeps its close button', async () => {
+    const user = userEvent.setup();
+    const mod = moduleWith([field({ key: 'a', label: 'Alpha' })], {
+      availableEnvironments: ['production']
+    });
+    // Dismissing the conflict banner would leave a greyed-out Save with
+    // nothing on screen saying why, and the plausible next move from there —
+    // Discard — destroys the very draft the latch exists to protect.
+    const saveAgainst = async (patch: HttpHandler) => {
+      server.use(envGet({ n: 0 }, { a: 'x' }), patch);
+      const view = renderWithProviders(<TestHost mod={mod} />);
+      const alpha = await screen.findByLabelText('Alpha');
+      await waitFor(() => expect(alpha).toHaveValue('x'));
+      await user.clear(alpha);
+      await user.type(alpha, 'y');
+      await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+      return view;
+    };
+
+    const latched = await saveAgainst(
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), () =>
+        HttpResponse.json(
+          {
+            status: 409,
+            title: 'Conflict',
+            detail: 'moved',
+            code: 'module.config_revision_stale'
+          },
+          { status: 409 }
+        )
+      )
+    );
+    await screen.findByRole('button', { name: 'Reload & review' });
+    expect(
+      screen.queryByRole('button', { name: /close/i })
+    ).not.toBeInTheDocument();
+    latched.unmount();
+
+    await saveAgainst(
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), () =>
+        HttpResponse.json(
+          { status: 409, title: 'Conflict', detail: 'slug exists' },
+          { status: 409 }
+        )
+      )
+    );
+    expect(
+      await screen.findByRole('button', { name: /close/i })
+    ).toBeInTheDocument();
   });
 });
