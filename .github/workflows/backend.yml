@@ -46,6 +46,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       MONGO_URI: mongodb://localhost:27017/?replicaSet=rs0&directConnection=true
+      # Unlocks the MONGO_TEST_URI-guarded repository/integration tests that
+      # otherwise silently skip on every run.
+      MONGO_TEST_URI: mongodb://localhost:27017/?replicaSet=rs0&directConnection=true
       REDIS_URL: redis://localhost:6379
       # Consumed by `make ci-backend`'s coverage gate (Makefile: COVERAGE_THRESHOLD ?= 15).
       COVERAGE_THRESHOLD: 15
