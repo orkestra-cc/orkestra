@@ -314,6 +314,15 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   `ModuleConfigStatus{Missing: true}` row instead of re-seeding; every other
   module keeps today's rebuild-from-schema behaviour. The set is sealed after
   the first call. In-tree the server marks `auth` (`cmd/server/admin_wiring.go`).
+- **`SeedFromModules` backfills absent schema keys with a non-empty `EnvVar`/`Default`
+  on existing documents** (the active profile gains its defaults and the
+  legacy mirror is rewritten as an exact copy of it — never backfilled on its
+  own; each secret encrypted once; one CAS retried on a lost race;
+  `configRevision +1`; `needsRestart=false` in the same write; INFO log of the
+  names; a failure is recorded for `RequirePersistedConfig` to refuse a
+  required module). Empty-fallback keys stay absent — presence is a signal to
+  `GetRawValue` readers (ADR-0017). A schema default therefore never has to be
+  re-implemented as a runtime guess.
 - **A `ConfigValidationError` with a non-empty `Code`** (e.g.
   `"tenant.single_mode_conflict"`) upgrades the admin API's response from
   the legacy text-only `422` to the `{status,title,detail,code}` envelope

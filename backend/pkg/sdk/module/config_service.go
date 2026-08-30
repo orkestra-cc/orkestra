@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"sort"
 	"time"
@@ -214,13 +215,43 @@ func (s *ModuleConfigService) SeedFromModules(ctx context.Context, modules []Mod
 				// against; for a required module it is not a warning.
 				s.seedFailures[m.Name()] = err
 			}
-			// Clear needsRestart for loaded modules — this flag should only
-			// remain set for modules that are enabled in DB but not loaded.
-			if err := s.repo.ClearNeedsRestart(ctx, m.Name()); err != nil {
-				s.logger.Error("SeedFromModules: failed to clear needsRestart",
+			// Backfill: RefreshMetadata refreshes the SCHEMA but has never
+			// added the keys a schema gained after the document was created,
+			// so a runtime read of such a key had to guess a default. After
+			// this, every schema key with a non-empty fallback is present in
+			// the active profile and the legacy mirror, and the runtime, the
+			// validator and the admin UI all read the same document.
+			keys, wrote, err := s.backfillSchemaKeys(ctx, m, existing)
+			switch {
+			case err != nil:
+				// Recorded so RequirePersistedConfig can refuse to serve a
+				// required module whose document may be incomplete.
+				s.seedFailures[m.Name()] = err
+				s.logger.Error("SeedFromModules: failed to backfill schema keys",
 					slog.String("module", m.Name()),
 					slog.String("error", err.Error()),
 				)
+			case len(keys) > 0:
+				s.logger.Info("Module config backfilled with schema defaults",
+					slog.String("module", m.Name()),
+					slog.Any("keys", keys),
+				)
+			case wrote:
+				s.logger.Info("Module config legacy mirror realigned to the active profile",
+					slog.String("module", m.Name()),
+				)
+			}
+			// Clear needsRestart for loaded modules — this flag should only
+			// remain set for modules that are enabled in DB but not loaded. A
+			// backfill write already persisted needsRestart=false in its own
+			// update, so the second write is owed only when nothing was written.
+			if !wrote {
+				if err := s.repo.ClearNeedsRestart(ctx, m.Name()); err != nil {
+					s.logger.Error("SeedFromModules: failed to clear needsRestart",
+						slog.String("module", m.Name()),
+						slog.String("error", err.Error()),
+					)
+				}
 			}
 			continue
 		}
@@ -244,6 +275,166 @@ func (s *ModuleConfigService) SeedFromModules(ctx context.Context, modules []Mod
 	}
 
 	return nil
+}
+
+// backfillMaxAttempts bounds the boot backfill's compare-and-swap retry. A
+// lost race means a replica booted concurrently; re-reading and recomputing
+// converges in one step, and three is plenty.
+const backfillMaxAttempts = 3
+
+// backfillSchemaKeys writes every schema key that is absent from the ACTIVE
+// profile AND has a non-empty EnvVar/Default, then rewrites the legacy
+// mirror to exactly the resulting profile, in ONE compare-and-swap that
+// advances configRevision once. The profile is the source of truth (it is
+// what ActiveConfigValues serves to the runtime and the admin UI); the
+// mirror is never backfilled on its own, so a value present only in the
+// profile reaches the mirror as that value, not as a schema default, and a
+// mirror that had diverged is realigned. Secrets go through the same
+// encrypted path first-boot seeding uses, each encrypted ONCE so the profile
+// and the mirror carry identical ciphertext. Present profile keys, explicit
+// empty strings included, are never touched.
+//
+// Keys whose fallback is empty stay ABSENT on purpose: absence is meaningful
+// to GetRawValue readers (ADR-0017 D1 — an absent sessionAbsoluteTTL is the
+// default cap, a present "" is "cap disabled"), so inventing "" would
+// silently change policy. Record lists are schema-level constructs with
+// nothing to seed. A document with no profiles gets only its mirror
+// backfilled — the lazy migration copies it into the production profile
+// later.
+//
+// NeedsRestart is written false: seeding runs before any module's Init, so
+// every module reads the backfilled document and no restart is owed — the
+// hot-reload resolver governs post-boot edits, not this one. Writing it here
+// folds the ClearNeedsRestart that would otherwise follow into the same
+// update.
+//
+// A lost compare-and-swap means a concurrently booting replica wrote first;
+// the document is re-read and the missing set recomputed — that replica may
+// run an older binary whose schema knows fewer keys. Returns the sorted,
+// de-duplicated key names written; nil when nothing was missing (no write).
+func (s *ModuleConfigService) backfillSchemaKeys(ctx context.Context, m Module, doc *ModuleConfig) (keys []string, wrote bool, err error) {
+	schema := ConfigSchemaOf(m)
+	for attempt := 0; attempt < backfillMaxAttempts; attempt++ {
+		mut, added, write, err := s.buildBackfill(m, schema, doc)
+		if err != nil {
+			return nil, false, err
+		}
+		if !write {
+			return nil, false, nil
+		}
+		won, err := s.repo.CompareAndSwapConfig(ctx, m.Name(), mut)
+		if err != nil {
+			return nil, false, err
+		}
+		if won {
+			return added, true, nil
+		}
+		fresh, err := s.repo.FindByName(ctx, m.Name())
+		if err != nil {
+			return nil, false, err
+		}
+		if fresh == nil {
+			return nil, false, fmt.Errorf("module %q: document disappeared during backfill", m.Name())
+		}
+		doc = fresh
+	}
+	return nil, false, fmt.Errorf("module %q: %w (backfill)", m.Name(), ErrRevisionStale)
+}
+
+// buildBackfill computes the mutation for one document. Profiles are the
+// source of truth: the candidate is the ACTIVE profile plus its missing
+// defaults, and the legacy mirror is rewritten to exactly that candidate —
+// never backfilled on its own, which would hand a key present only in the
+// profile a schema default instead of the profile's value. A document with
+// no profiles (not yet migrated) backfills its mirror alone. Every secret
+// is encrypted once. Returns the mutation, the keys added to the profile
+// (or mirror, for a legacy document), and whether anything needs writing —
+// a mirror that merely diverged from a complete profile is realigned too.
+func (s *ModuleConfigService) buildBackfill(m Module, schema []ConfigField, doc *ModuleConfig) (mut ConfigMutation, added []string, write bool, err error) {
+	ciphertext := map[string]string{} // key → ciphertext, encrypted once per key
+	encryptOnce := func(f ConfigField, plain string) (string, error) {
+		if enc, ok := ciphertext[f.Key]; ok {
+			return enc, nil
+		}
+		enc, err := encryptSecret(plain)
+		if err != nil {
+			// NOT the first-boot posture (warn and skip). A backfill that
+			// silently omits a secret would report success and let the
+			// required-module gate serve an incomplete document.
+			return "", fmt.Errorf("encrypt backfilled secret %q: %w", f.Key, err)
+		}
+		ciphertext[f.Key] = enc
+		return enc, nil
+	}
+	mut = ConfigMutation{ExpectedRevision: doc.ConfigRevision, NeedsRestart: false}
+
+	if len(doc.Environments) == 0 {
+		values, secrets, keys, err := missingSchemaKeys(schema, doc.ConfigValues, doc.EncryptedValues, encryptOnce)
+		if err != nil {
+			return mut, nil, false, err
+		}
+		if len(keys) == 0 {
+			return mut, nil, false, nil
+		}
+		mut.WriteLegacy, mut.LegacyValues, mut.LegacySecrets = true, values, secrets
+		sort.Strings(keys)
+		return mut, keys, true, nil
+	}
+
+	env := doc.ActiveEnv()
+	cur, ok := doc.Environments[env]
+	if !ok {
+		return mut, nil, false, nil
+	}
+	values, secrets, keys, err := missingSchemaKeys(schema, cur.ConfigValues, cur.EncryptedValues, encryptOnce)
+	if err != nil {
+		return mut, nil, false, err
+	}
+	mirrorDiverged := !maps.Equal(doc.ConfigValues, values) || !maps.Equal(doc.EncryptedValues, secrets)
+	if len(keys) == 0 && !mirrorDiverged {
+		return mut, nil, false, nil
+	}
+	mut.Env, mut.EnvValues, mut.EnvSecrets, mut.EnvRevision = env, values, secrets, cur.Revision
+	mut.WriteLegacy, mut.LegacyValues, mut.LegacySecrets = true, values, secrets
+	sort.Strings(keys) // missingSchemaKeys adds each schema key at most once
+	return mut, keys, true, nil
+}
+
+// missingSchemaKeys returns copies of values/secrets with every absent
+// schema key whose EnvVar/Default is non-empty added, plus the keys added.
+// Secrets are obtained through encryptOnce so a key missing from both the
+// profile and the mirror is encrypted a single time; an encryption failure
+// is the caller's failure, never a silently skipped key.
+func missingSchemaKeys(schema []ConfigField, values, encrypted map[string]string, encryptOnce func(ConfigField, string) (string, error)) (map[string]string, map[string]string, []string, error) {
+	outValues := mergeStringMaps(values, nil)
+	outSecrets := mergeStringMaps(encrypted, nil)
+	var added []string
+	for _, f := range schema {
+		if f.Type == FieldRecordList {
+			continue
+		}
+		v := schemaFallbackValue(f)
+		if v == "" {
+			continue
+		}
+		if f.Type == FieldSecret {
+			if _, ok := outSecrets[f.Key]; ok {
+				continue
+			}
+			enc, err := encryptOnce(f, v)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			outSecrets[f.Key] = enc
+		} else {
+			if _, ok := outValues[f.Key]; ok {
+				continue
+			}
+			outValues[f.Key] = v
+		}
+		added = append(added, f.Key)
+	}
+	return outValues, outSecrets, added, nil
 }
 
 // buildInitialConfig constructs a ModuleConfig from a module's declarations
