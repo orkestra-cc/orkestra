@@ -4540,18 +4540,6 @@
         ],
         "type": "object"
       },
-      "OAuthCallbackResponseHeaders": {
-        "additionalProperties": false,
-        "properties": {
-          "Location": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "Location"
-        ],
-        "type": "object"
-      },
       "OAuthLoginRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -12764,60 +12752,6 @@
         ]
       }
     },
-    "/v1/auth/oauth/github/callback": {
-      "get": {
-        "description": "Handle GitHub OAuth callback and exchange code for tokens",
-        "operationId": "github-oauth-callback",
-        "parameters": [
-          {
-            "description": "Authorization code from OAuth provider",
-            "explode": false,
-            "in": "query",
-            "name": "code",
-            "schema": {
-              "description": "Authorization code from OAuth provider",
-              "type": "string"
-            }
-          },
-          {
-            "description": "OAuth state parameter",
-            "explode": false,
-            "in": "query",
-            "name": "state",
-            "schema": {
-              "description": "OAuth state parameter",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "No Content",
-            "headers": {
-              "Headers": {
-                "schema": {
-                  "$ref": "#/components/schemas/OAuthCallbackResponseHeaders"
-                }
-              }
-            }
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorModel"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "GitHub OAuth callback",
-        "tags": [
-          "Authentication"
-        ]
-      }
-    },
     "/v1/auth/operator/accept-invite": {
       "post": {
         "operationId": "operator-password-accept-invite",
@@ -13527,7 +13461,7 @@
     },
     "/v1/auth/operator/me/oauth/link/{provider}": {
       "post": {
-        "description": "Returns a redirect URL the SPA should navigate to. The signed-state JWT carries the caller's userUUID so the shared callback can bind the new identity without a fresh login. The callback redirects back to /user/security?tab=oauth\u0026link=success|failed.",
+        "description": "Returns a redirect URL the SPA should navigate to. The signed-state JWT carries the caller's userUUID so the shared callback can bind the new identity without a fresh login. The callback redirects back to the security page's OAuth tab with link=success|failed.",
         "operationId": "operator-self-oauth-link-init",
         "parameters": [
           {

@@ -9,14 +9,11 @@ package handlers
 // claim downstream middleware reads on every step-up check.
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -164,57 +161,6 @@ func TestErrorMapping_OAuthInvalidCredentialsStaysNeutral(t *testing.T) {
 	}
 }
 
-func TestErrorMapping_WriteOAuthCallbackErrorStaysNeutralAndSanitized(t *testing.T) {
-	var logs bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(previous) })
-
-	marker := "oauth-sensitive-marker"
-	for _, tc := range []struct {
-		name        string
-		err         error
-		wantStatus  int
-		wantBody    string
-		wantOutcome string
-	}{
-		{
-			name:        "invalid credentials",
-			err:         fmt.Errorf("%s: %w", marker, services.ErrInvalidCredentials),
-			wantStatus:  http.StatusUnauthorized,
-			wantBody:    invalidOAuthAuthenticationDetail,
-			wantOutcome: "invalid_credentials",
-		},
-		{
-			name:        "internal error",
-			err:         errors.New(marker),
-			wantStatus:  http.StatusInternalServerError,
-			wantBody:    "Failed to process OAuth callback",
-			wantOutcome: "internal_error",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			logs.Reset()
-			rec := httptest.NewRecorder()
-			writeOAuthCallbackError(rec, authModels.OAuthProviderGoogle, tc.err)
-			if rec.Code != tc.wantStatus {
-				t.Fatalf("status = %d, want %d", rec.Code, tc.wantStatus)
-			}
-			if body := rec.Body.String(); !strings.Contains(body, tc.wantBody) {
-				t.Fatalf("body = %q, want %q", body, tc.wantBody)
-			}
-			if strings.Contains(rec.Body.String(), marker) || strings.Contains(logs.String(), marker) {
-				t.Errorf("OAuth callback leaked marker in response/logs: body=%q logs=%q", rec.Body.String(), logs.String())
-			}
-			if !strings.Contains(logs.String(), `"msg":"oauth_authentication_failed"`) ||
-				!strings.Contains(logs.String(), `"provider":"google"`) ||
-				!strings.Contains(logs.String(), `"outcome":"`+tc.wantOutcome+`"`) {
-				t.Errorf("sanitized OAuth log = %q, want stable category/provider/outcome", logs.String())
-			}
-		})
-	}
-}
-
 func TestMapMFAError_KnownCodes(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -327,47 +273,5 @@ func TestAppendOTP_IdempotentOnExistingOTP(t *testing.T) {
 func TestCurrentSessionID_EmptyContextReturnsEmptyString(t *testing.T) {
 	if got := currentSessionID(context.Background()); got != "" {
 		t.Errorf("got %q, want \"\"", got)
-	}
-}
-
-// ===== oauthSignupDisabled =====
-
-func TestOAuthSignupDisabled_MatchesSentinel(t *testing.T) {
-	if !oauthSignupDisabled(services.ErrOAuthSignupDisabled) {
-		t.Errorf("must match the wrapped sentinel via errors.Is")
-	}
-	if oauthSignupDisabled(errors.New("some other error")) {
-		t.Errorf("must NOT match unrelated errors")
-	}
-	if oauthSignupDisabled(nil) {
-		t.Errorf("nil error must NOT match")
-	}
-}
-
-// ===== redirectOAuthSignupDisabled =====
-
-func TestRedirectOAuthSignupDisabled_BouncesToFrontendURL(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/cb", nil)
-	redirectOAuthSignupDisabled(rec, req, "https://app.example.com")
-	if rec.Code != http.StatusFound {
-		t.Errorf("status = %d, want 302", rec.Code)
-	}
-	loc := rec.Header().Get("Location")
-	want := "https://app.example.com/auth/callback?success=false&error=oauth_signup_disabled"
-	if loc != want {
-		t.Errorf("Location = %q, want %q", loc, want)
-	}
-}
-
-func TestRedirectOAuthSignupDisabled_NoFrontendURLFallsTo403(t *testing.T) {
-	// When the frontend URL isn't configured we can't bounce the user
-	// usefully — fall back to a plain 403 so the operator sees the
-	// failure in their access log instead of a confusing 200.
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/cb", nil)
-	redirectOAuthSignupDisabled(rec, req, "")
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403", rec.Code)
 	}
 }

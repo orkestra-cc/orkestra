@@ -259,6 +259,13 @@ func Load() (*Config, error) {
 		},
 	}
 
+	// CLIENT_API_URL is the client API's public origin — where the auth
+	// module relays a client-tier OAuth callback so the refresh cookie is
+	// set by the host that owns it (spec §4.10). Derived from
+	// CLIENT_API_HOST when unset: https in production-like environments,
+	// http in development. Empty when no client surface exists.
+	config.Server.Client.PublicURL = getEnv("CLIENT_API_URL", derivedPublicURL(config.Server.Client.Host, config.IsProductionLike()))
+
 	config.Database = DatabaseConfig{
 		MongoURI:        getEnv("MONGO_URI", "mongodb://localhost:27017/orkestra"),
 		DatabaseName:    getEnv("MONGO_DATABASE", "orkestra"),
@@ -457,6 +464,24 @@ func defaultOperatorCookieDomain(_ string) string {
 // client surface (api.*).
 func defaultClientCookieDomain(_ string) string {
 	return ""
+}
+
+// derivedPublicURL builds "scheme://host" for an audience whose public
+// origin was not configured explicitly. The scheme follows the environment
+// (a production-like deployment terminates TLS in front of the API).
+func derivedPublicURL(host string, secure bool) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	if strings.Contains(host, "://") {
+		return strings.TrimRight(host, "/")
+	}
+	scheme := "http"
+	if secure {
+		scheme = "https"
+	}
+	return scheme + "://" + host
 }
 
 func getEnv(key, defaultValue string) string {

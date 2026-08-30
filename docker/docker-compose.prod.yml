@@ -103,6 +103,7 @@ services:
       # hostnames behind the ingress.
       CONSOLE_HOST: ${CONSOLE_HOST:-console.orkestra.com}
       CLIENT_API_HOST: ${CLIENT_API_HOST:-api.orkestra.com}
+      CLIENT_API_URL: ${CLIENT_API_URL:-}
       OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
       CLIENT_CORS_ORIGINS: ${CLIENT_CORS_ORIGINS:-}
 
