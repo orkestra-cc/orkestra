@@ -31,6 +31,11 @@
   - `api/client.ts:47-51` described only the 503 exception → the comment now covers the transport-failure case D17 introduced (**Task 4**).
   - `CLAUDE_SESSION` is unset in the executing environment, so the trailer would have been empty → the value is stated in Global Constraints and every commit uses `${CLAUDE_SESSION:?…}`, which aborts the commit instead of writing an empty trailer; the exit checklist counts the trailers.
   - D17 and D18 approved by the reviewer → table updated.
+- **v4 (2026-08-31)** — round 3: no functional or security blocks left; two operational corrections and two reinforcements:
+  - Each Bash invocation starts a fresh shell, so an `export CLAUDE_SESSION=…` in one call never reaches the next — every commit block now begins with its own `export`; the `${CLAUDE_SESSION:?…}` guard stays as the belt (Global Constraints).
+  - The accidental double `cd` in Task 4's commit block removed.
+  - A page-level case for a **pre-existing session marker** (returning user): `AuthProvider`'s mount refresh fires, the page's first effect — take-and-delete the return target, then `navigate(replace)` — has already run when that request leaves (React runs a child's passive effects before its ancestor's), and the flow still lands on the deep link (**Task 6**).
+  - The browser smoke no longer assumes an empty cookie jar: with a valid client refresh cookie `/auth/callback?success=true…` correctly lands on `/account`; the recipe says how to reach the 401 path (**Task 8**).
 
 ## Global Constraints
 
@@ -50,7 +55,7 @@
 - **Toolchain facts (F6, F7):** Node `v24.19.0` locally, `node = "24"` in `.mise.toml`; vitest `4.1.10` peer-accepts vite `^7` (installed `7.3.2`); happy-dom (2–3× faster than jsdom, no MSW/AbortSignal mismatch — `frontend-admin/vitest.config.ts`). `frontend-client` has **no** prettier config, so the pre-commit `prettier` hook (`.pre-commit-config.yaml:76-85`) applies prettier **defaults** (double quotes, semicolons, trailing commas `all`, 80 cols): write new code in that style and run `npx prettier --write <files>` before `git add` so the hook does not rewrite staged files. ESLint runs with `--max-warnings 0`, `@typescript-eslint/consistent-type-imports: error` (use `import type` / inline `type`), `react-refresh/only-export-components` (a `.tsx` file exports components **or** non-components, never both), `no-control-regex` (disable inline where the control-char check needs it).
 - **Docs move in the same commit as the code** (`feedback_commit_doc_hygiene`). The mapping is explicit: Task 1 → `frontend-client/CLAUDE.md` (Tech stack row, `src/test/` layout, `npm test` commands, workflow step), `frontend-client/README.md` (Stack + commands), root `CLAUDE.md:170`, `CONTRIBUTING.md:64`, `docs/site/contributing/ci-and-make.mdx:16`, `.github/workflows/frontend-client.yml:3-5` header; Task 3 → `frontend-client/CLAUDE.md` "How auth works" (policy helper) + the `forgotPassword` comment in `api/auth.ts`; Task 4 → `frontend-client/CLAUDE.md` "How auth works" item 3 (session marker + bootstrap) and the refresh-choreography note; Task 5 → `frontend-client/CLAUDE.md` login gating + `docs/site/architecture/authentication-flow.mdx:179` + `docs/site/modules/core/auth.mdx:88-93` (both currently say the client SPA lacks the gating); Task 6 → `frontend-client/CLAUDE.md` new "OAuth login" subsection + Don'ts, `docs/site/operating/oauth-providers.mdx:255` (step 4, predates the relay); Task 7 → `frontend-client/CLAUDE.md` navigation paragraph + the `ForgotPasswordPage` header comment; Task 8 is the cross-cutting VERIFICATION sweep — it completes and reconciles, it is never the first touch.
 - **Test commands** (absolute paths — `cd` drifts the shell between calls): single file `cd /home/tore/orkestra/frontend-client && npx vitest run src/path/to/file.test.tsx`; whole suite `cd /home/tore/orkestra/frontend-client && npm test`; `npm run typecheck && npm run lint -- --max-warnings 0` before every commit; full gate `make -C /home/tore/orkestra ci-frontend-client` (lockcheck → typecheck → lint → test → build after Task 1). Never run two vitest processes at once in this checkout. Docs render for the `docs/site/**` edits: `D=$(mktemp -d /tmp/orkestra-docs-pr4.XXXXXX)`, clone `orkestra-docs`, `npm ci`, `MONOREPO_LOCAL_PATH=/home/tore/orkestra npm run sync` (**full** sync, not `sync:site`), `CI=true npm run build`, then `rm -rf "$D"` (`/tmp` is a 16 GB tmpfs; check `df -h /tmp` first). Browser smoke (Task 8) drives the **running** staging client through `integrated-browser-mcp` — this checkout owns the `orkestra-public-*-staging` stack whose `client-frontend` is a Vite dev server bind-mounted on `../frontend-client` (`docker/docker-compose.staging.yml:308-330`), so the branch renders live; **never start or restart a server**.
-- **Never start servers manually**; never `git push --tags`; never `--amend`; stage by path, never `git add -A`; conventional-commit subjects (the `conventional-pre-commit` hook rejects anything else). **Every commit carries the `Claude-Session:` trailer.** The variable is NOT set by the harness: once per shell run `export CLAUDE_SESSION=https://claude.ai/code/session_01QBHr35WPNoZZ1r2oNY7fDE` (the session that owns this plan; an executor in another session substitutes its own URL — the controller states it in every dispatch brief). Every commit command below passes `-m "Claude-Session: ${CLAUDE_SESSION:?…}"`, so an unset variable aborts the commit instead of writing an empty trailer; the exit checklist counts the trailers. If the prettier hook rewrites a staged file, the commit fails once: re-run `git add <same paths>` and commit again.
+- **Never start servers manually**; never `git push --tags`; never `--amend`; stage by path, never `git add -A`; conventional-commit subjects (the `conventional-pre-commit` hook rejects anything else). **Every commit carries the `Claude-Session:` trailer.** The variable is NOT set by the harness, and each Bash invocation starts a fresh shell — an export in one call never reaches the next — so **every commit block below begins with its own `export CLAUDE_SESSION="https://claude.ai/code/session_01QBHr35WPNoZZ1r2oNY7fDE"`** (the session that owns this plan; an executor in another session replaces that URL in the export lines once — e.g. `sed -i 's#session_01QBHr35WPNoZZ1r2oNY7fDE#session_<yours>#' <plan file>` — and never leaves it unset). Every commit command additionally passes `-m "Claude-Session: ${CLAUDE_SESSION:?…}"`, so a missing value aborts the commit instead of writing an empty trailer; the exit checklist counts the trailers. If the prettier hook rewrites a staged file, the commit fails once: re-run `git add <same paths>` and commit again.
 
 ## Findings against `4d7c0397` that spec v4.5 does not state
 
@@ -633,6 +638,7 @@ Expected: `frontend-client: package-lock.json is in sync with package.json`, typ
 - [ ] **Step 8: Commit**
 
 ```bash
+export CLAUDE_SESSION="https://claude.ai/code/session_01QBHr35WPNoZZ1r2oNY7fDE"
 cd /home/tore/orkestra && npx --prefix frontend-client prettier --write frontend-client/src/test/*.ts frontend-client/src/test/*.tsx frontend-client/src/locales/locales.test.ts frontend-client/vite.config.ts frontend-client/package.json >/dev/null
 git add frontend-client/package.json frontend-client/package-lock.json frontend-client/vite.config.ts frontend-client/src/test/webStorage.ts frontend-client/src/test/setup.ts frontend-client/src/test/server.ts frontend-client/src/test/handlers.ts frontend-client/src/test/render.tsx frontend-client/src/test/harness.test.tsx frontend-client/src/locales/locales.test.ts Makefile .github/workflows/frontend-client.yml CLAUDE.md CONTRIBUTING.md docs/site/contributing/ci-and-make.mdx frontend-client/CLAUDE.md frontend-client/README.md
 git commit -m "test(frontend-client): add Vitest + RTL + MSW harness and the client-test CI gate
@@ -1323,6 +1329,7 @@ Expected: 4 files PASS; typecheck and lint exit 0.
 - [ ] **Step E3: Commit**
 
 ```bash
+export CLAUDE_SESSION="https://claude.ai/code/session_01QBHr35WPNoZZ1r2oNY7fDE"
 cd /home/tore/orkestra && npx --prefix frontend-client prettier --write frontend-client/src/lib/*.ts >/dev/null
 git add frontend-client/src/lib/oauthProviders.ts frontend-client/src/lib/safeNext.ts frontend-client/src/lib/oauthReturnTo.ts frontend-client/src/lib/oauthCallback.ts frontend-client/src/lib/oauthProviders.test.ts frontend-client/src/lib/safeNext.test.ts frontend-client/src/lib/oauthReturnTo.test.ts frontend-client/src/lib/oauthCallback.test.ts frontend-client/CLAUDE.md
 git commit -m "feat(frontend-client): OAuth security primitives — safe next, return-target record, closed callback parser
@@ -1833,6 +1840,7 @@ Expected: `auth.test.ts` 20 tests PASS (3 policy + 1 reader + 1 code + 9 provide
 - [ ] **Step D4: Commit**
 
 ```bash
+export CLAUDE_SESSION="https://claude.ai/code/session_01QBHr35WPNoZZ1r2oNY7fDE"
 cd /home/tore/orkestra && npx --prefix frontend-client prettier --write frontend-client/src/api/auth.ts frontend-client/src/api/auth.test.ts frontend-client/src/test/handlers.ts >/dev/null
 git add frontend-client/src/api/auth.ts frontend-client/src/api/auth.test.ts frontend-client/src/test/handlers.ts frontend-client/CLAUDE.md
 git commit -m "feat(frontend-client): policy fields, providers list and OAuth start in the auth API
@@ -2346,7 +2354,8 @@ Expected: both exit 0.
 - [ ] **Step C3: Commit**
 
 ```bash
-cd /home/tore/orkestra && cd /home/tore/orkestra && npx --prefix frontend-client prettier --write frontend-client/src/auth/tokenStore.ts frontend-client/src/auth/authContext.ts frontend-client/src/auth/AuthProvider.tsx frontend-client/src/api/client.ts frontend-client/src/auth/tokenStore.test.ts frontend-client/src/auth/AuthProvider.test.tsx >/dev/null
+export CLAUDE_SESSION="https://claude.ai/code/session_01QBHr35WPNoZZ1r2oNY7fDE"
+cd /home/tore/orkestra && npx --prefix frontend-client prettier --write frontend-client/src/auth/tokenStore.ts frontend-client/src/auth/authContext.ts frontend-client/src/auth/AuthProvider.tsx frontend-client/src/api/client.ts frontend-client/src/auth/tokenStore.test.ts frontend-client/src/auth/AuthProvider.test.tsx >/dev/null
 git add frontend-client/src/auth/tokenStore.ts frontend-client/src/auth/authContext.ts frontend-client/src/auth/AuthProvider.tsx frontend-client/src/api/client.ts frontend-client/src/auth/tokenStore.test.ts frontend-client/src/auth/AuthProvider.test.tsx frontend-client/CLAUDE.md
 git commit -m "feat(frontend-client): unconditional refresh + bootstrapFromRefreshCookie for a relay-set cookie
 
@@ -3558,6 +3567,7 @@ no-sign-in-method notice when none is configured).
 - [ ] **Step C2: Commit**
 
 ```bash
+export CLAUDE_SESSION="https://claude.ai/code/session_01QBHr35WPNoZZ1r2oNY7fDE"
 cd /home/tore/orkestra && npx --prefix frontend-client prettier --write frontend-client/src/pages/LoginPage.tsx frontend-client/src/pages/LoginPage.test.tsx frontend-client/src/components/MfaChallenge.tsx frontend-client/src/locales/en.json frontend-client/src/locales/it.json >/dev/null
 git add frontend-client/src/pages/LoginPage.tsx frontend-client/src/pages/LoginPage.test.tsx frontend-client/src/components/MfaChallenge.tsx frontend-client/src/locales/en.json frontend-client/src/locales/it.json frontend-client/CLAUDE.md docs/site/architecture/authentication-flow.mdx docs/site/modules/core/auth.mdx
 git commit -m "feat(frontend-client): SSO-capable login page — policy gate, provider buttons, no-method alert
@@ -3668,7 +3678,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { RequireAuth } from "@/auth/RequireAuth";
-import { hasSessionMarker } from "@/auth/sessionMarker";
+import { hasSessionMarker, setSessionMarker } from "@/auth/sessionMarker";
 import {
   OAUTH_RETURN_TO_KEY,
   OAUTH_RETURN_TO_TTL_MS,
@@ -3886,6 +3896,42 @@ describe("OAuthCallbackPage — success", () => {
       "/account",
     );
     expect(calls()).toBe(2);
+  });
+
+  it("with a session marker already present (returning user), the page's first effect runs before the provider's automatic refresh leaves, and the flow still lands on the deep link", async () => {
+    // AuthProvider fires refreshAccessToken on mount whenever the marker
+    // exists (AuthProvider.tsx:35-42) — a request this page did not issue.
+    // React runs a child's passive effects before its ancestor's, so the
+    // page's first effect — take-and-delete the return target, then
+    // navigate(replace), synchronously — has run before that request
+    // leaves. The stash is the observable: gone at request time. (The
+    // Probe's DOM may lag React's re-render here, so it is not the anchor
+    // in this case; the coalescing itself is proven in tokenStore.test.ts.)
+    setSessionMarker();
+    stash("/account/security");
+    let hits = 0;
+    let stashAtRequest: string | null = "not-yet-observed";
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post(REFRESH, async () => {
+        hits++;
+        stashAtRequest = sessionStorage.getItem(OAUTH_RETURN_TO_KEY);
+        await gate;
+        return HttpResponse.json(tokenBody);
+      }),
+    );
+    renderCallback("?success=true&provider=google");
+    await waitFor(() => expect(hits).toBeGreaterThanOrEqual(1));
+    expect(stashAtRequest).toBeNull();
+    release();
+    expect(await screen.findByTestId("deeplink-location")).toHaveTextContent(
+      /^\/account\/security$/,
+    );
+    expect(hasSessionMarker()).toBe(true);
+    expect(storageDump()).not.toContain("at-1");
   });
 });
 
@@ -4118,7 +4164,7 @@ export function OAuthCallbackPage() {
 }
 ```
 
-- [ ] **Step A4: Run it — GREEN.** `npx vitest run src/pages/OAuthCallbackPage.test.tsx` → 11 PASS (6 success + 5 failures).
+- [ ] **Step A4: Run it — GREEN.** `npx vitest run src/pages/OAuthCallbackPage.test.tsx` → 12 PASS (7 success + 5 failures).
 
 #### Increment B — the MFA continuation
 
@@ -4233,7 +4279,7 @@ Insert **before** the final `return (` of the component:
   }
 ```
 
-- [ ] **Step B4: Run it — GREEN.** `npx vitest run src/pages/OAuthCallbackPage.test.tsx` → 14 PASS (6 + 5 + 3).
+- [ ] **Step B4: Run it — GREEN.** `npx vitest run src/pages/OAuthCallbackPage.test.tsx` → 15 PASS (7 + 5 + 3).
 
 #### Increment C — the route, and the callback through the real route table
 
@@ -4367,7 +4413,7 @@ and the route after `/login` (`:26`):
         <Route path="/auth/callback" element={<OAuthCallbackPage />} />
 ```
 
-- [ ] **Step C4: Run it — GREEN, then the gates.** `npx vitest run src/App.test.tsx src/pages/OAuthCallbackPage.test.tsx` → 2 + 14 PASS; then `npm run typecheck && npm run lint -- --max-warnings 0 && npm test && npm run build` → all exit 0.
+- [ ] **Step C4: Run it — GREEN, then the gates.** `npx vitest run src/App.test.tsx src/pages/OAuthCallbackPage.test.tsx` → 2 + 15 PASS; then `npm run typecheck && npm run lint -- --max-warnings 0 && npm test && npm run build` → all exit 0.
 
 #### Close the task
 
@@ -4399,6 +4445,7 @@ Add two bullets to the "Don't" list:
 - [ ] **Step D2: Commit**
 
 ```bash
+export CLAUDE_SESSION="https://claude.ai/code/session_01QBHr35WPNoZZ1r2oNY7fDE"
 cd /home/tore/orkestra && npx --prefix frontend-client prettier --write frontend-client/src/pages/OAuthCallbackPage.tsx frontend-client/src/pages/OAuthCallbackPage.test.tsx frontend-client/src/App.tsx frontend-client/src/App.test.tsx frontend-client/src/test/handlers.ts frontend-client/src/locales/en.json frontend-client/src/locales/it.json >/dev/null
 git add frontend-client/src/pages/OAuthCallbackPage.tsx frontend-client/src/pages/OAuthCallbackPage.test.tsx frontend-client/src/App.tsx frontend-client/src/App.test.tsx frontend-client/src/test/handlers.ts frontend-client/src/locales/en.json frontend-client/src/locales/it.json frontend-client/CLAUDE.md docs/site/operating/oauth-providers.mdx
 git commit -m "feat(frontend-client): /auth/callback page — scrub before the first request, cookie bootstrap, MFA in memory
@@ -4803,6 +4850,7 @@ Anonymous entry points are policy-aware: the header's Sign-up CTA, `/signup` and
 - [ ] **Step D3: Commit**
 
 ```bash
+export CLAUDE_SESSION="https://claude.ai/code/session_01QBHr35WPNoZZ1r2oNY7fDE"
 cd /home/tore/orkestra && npx --prefix frontend-client prettier --write frontend-client/src/pages/SignupPage.tsx frontend-client/src/components/Layout.tsx frontend-client/src/pages/ForgotPasswordPage.tsx frontend-client/src/pages/SignupPage.test.tsx frontend-client/src/components/Layout.test.tsx frontend-client/src/pages/ForgotPasswordPage.test.tsx frontend-client/src/locales/en.json frontend-client/src/locales/it.json >/dev/null
 git add frontend-client/src/pages/SignupPage.tsx frontend-client/src/components/Layout.tsx frontend-client/src/pages/ForgotPasswordPage.tsx frontend-client/src/pages/SignupPage.test.tsx frontend-client/src/components/Layout.test.tsx frontend-client/src/pages/ForgotPasswordPage.test.tsx frontend-client/src/locales/en.json frontend-client/src/locales/it.json frontend-client/CLAUDE.md
 git commit -m "feat(frontend-client): hide password sign-up, recovery and the header CTA when the method is off
@@ -4916,7 +4964,7 @@ Then, with `browser_navigate` / `browser_snapshot` / `browser_url` / `browser_co
 1. `${ORIGIN}/login` — the page must settle into one of the shapes Task 5 tests: password form + provider buttons, password form alone, provider buttons alone, the no-method notice, or the password form + the retryable providers error (the last is expected when the staging API rejects the browser's origin — record which). No raw error text, no `undefined`, no i18n key rendered as text.
 2. `${ORIGIN}/auth/callback?success=false&error=oauth_access_denied` — "Sign-in was cancelled at the identity provider." (or its Italian twin if the browser's language is IT) and **`browser_url` reports `${ORIGIN}/auth/callback` with no query** — the scrub happened in the real browser.
 3. `${ORIGIN}/auth/callback?success=false&error=%3Cscript%3Ealert(1)%3C%2Fscript%3E` — the generic copy; `browser_snapshot` contains no `<script>` text; `browser_console` shows no uncaught error.
-4. `${ORIGIN}/auth/callback?success=true&provider=google` (no relay cookie in this browser) — the 401 path: "no session could be established" and a link back to sign in; **or**, if the API is unreachable from this origin, the unavailable state with its retry button. Either is a correct render; a spinner that never settles is a defect.
+4. `${ORIGIN}/auth/callback?success=true&provider=google` — the integrated browser shares the user's cookie jar, so the outcome depends on whether a valid **client** refresh cookie exists: **with** one, the page correctly bootstraps and lands on `${ORIGIN}/account` (record that); **without** one, the 401 path: "no session could be established" and a link back to sign in — or, if the API is unreachable from this origin, the unavailable state with its retry button. To exercise the 401 path deliberately, first open `${ORIGIN}/account`: if it renders signed in, use the header's **Sign out** (it calls `/logout`, which clears the client cookie) and repeat. A spinner that never settles is a defect in every case.
 5. `${ORIGIN}/signup` and `${ORIGIN}/forgot-password` — render (form or notice according to the staging policy), no console errors.
 
 Record the observed shape of each page in the task report. The provider round-trip with a real IdP (spec §7 "client through the new client-SPA OAuth path") remains a manual staging step after merge.
@@ -4924,6 +4972,7 @@ Record the observed shape of each page in the task report. The provider round-tr
 - [ ] **Step 6: Commit**
 
 ```bash
+export CLAUDE_SESSION="https://claude.ai/code/session_01QBHr35WPNoZZ1r2oNY7fDE"
 cd /home/tore/orkestra && npx --prefix frontend-client prettier --write frontend-client/README.md frontend-client/CLAUDE.md >/dev/null
 git add frontend-client/CLAUDE.md frontend-client/README.md
 git commit -m "docs(frontend-client): current surface includes web OAuth login; README layout tree matches the tree
