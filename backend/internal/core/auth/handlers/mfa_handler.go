@@ -169,8 +169,13 @@ func (h *MFAHandler) SetDeviceTrust(dt services.DeviceTrustService) {
 
 // SetPolicy wires the admin-managed AuthPolicyService so the Status
 // endpoint reports the configured grace deadline (instead of the
-// hardcoded 7-day fallback) and honours the master mfaEnabled flag.
-// Optional — nil falls back to legacy hardcoded values.
+// hardcoded 7-day fallback), honours the master mfaEnabled flag, and lets
+// LoginVerify re-evaluate a password-sourced challenge's per-surface
+// policy at completion time (spec §4.3). Wired unconditionally in
+// module.go. Nil still falls back to the legacy hardcoded values for the
+// MFA-enabled / grace reads, but it makes every PASSWORD-SOURCED
+// completion fail closed with 503 auth.policy_unavailable — see decider
+// and recheckPasswordChallenge above.
 func (h *MFAHandler) SetPolicy(p *services.AuthPolicyService) {
 	h.policy = p
 }

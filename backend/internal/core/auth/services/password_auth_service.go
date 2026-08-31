@@ -1004,8 +1004,15 @@ func (s *PasswordAuthService) ResendVerification(ctx context.Context, email, ip 
 	return nil
 }
 
-// ForgotPassword issues a reset token and emails it. Always returns nil
-// regardless of whether the email exists (prevents enumeration).
+// ForgotPassword issues a reset token and emails it.
+//
+// ErrPasswordLoginDisabled and ErrAuthPolicyUnavailable are the ONLY
+// errors it returns (spec §4.3). Both come from the per-surface method
+// gate below, which is evaluated BEFORE the user lookup, so neither
+// depends on account state. Every account-specific outcome after that
+// gate — unknown address, inactive account, token-mint or delivery
+// failure — is swallowed and returns nil, and that is what makes the
+// endpoint's single generic response non-enumerable.
 func (s *PasswordAuthService) ForgotPassword(ctx context.Context, email, ip string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
 

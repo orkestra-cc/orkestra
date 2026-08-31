@@ -199,11 +199,23 @@ type ForgotPasswordResponse struct {
 
 func (h *PasswordAuthHandler) ForgotPassword(ctx context.Context, req *ForgotPasswordRequest) (*ForgotPasswordResponse, error) {
 	ip := clientIPFromCtx(ctx)
-	// The service returns ONLY the two per-surface policy errors (spec
-	// §4.3) and swallows every account-specific outcome itself, so
-	// propagating err verbatim cannot become an enumeration oracle.
+	// Spec §4.3: this endpoint propagates ONLY the two per-surface policy
+	// sentinels. They are decided before the user lookup, so neither can
+	// carry account information. The service swallows every
+	// account-specific outcome itself; enforcing the contract here as
+	// well means a future service-side error cannot turn the generic body
+	// into an enumeration oracle by answering differently for some
+	// addresses — anything else falls through to the same success body
+	// the pre-toggle handler always returned.
 	if err := h.svc.ForgotPassword(ctx, req.Body.Email, ip); err != nil {
-		return nil, mapPasswordError(err)
+		if errors.Is(err, services.ErrPasswordLoginDisabled) ||
+			errors.Is(err, services.ErrAuthPolicyUnavailable) {
+			return nil, mapPasswordError(err)
+		}
+		// A bug or an infrastructure failure. Logged for an operator —
+		// never with the address, which is the thing being protected.
+		slog.Default().Warn("forgot password: unexpected service error, answering generically",
+			slog.String("error", err.Error()))
 	}
 	resp := &ForgotPasswordResponse{}
 	resp.Body.Success = true

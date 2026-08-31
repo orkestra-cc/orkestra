@@ -122,9 +122,28 @@ type configValueReader interface {
 // AuthPolicyService resolves admin-managed authentication policy at
 // request time from the auth module's config document. Reads go through
 // ModuleConfigService's Redis cache (30s TTL), so calling this on every
-// signup is cheap. A nil receiver is valid — every accessor returns the
-// schema default, which preserves current behaviour for consumers that
-// haven't been wired to the service yet.
+// signup is cheap.
+//
+// A nil receiver — or a non-nil service with a nil reader — is valid, and
+// the two accessor families answer it differently:
+//
+//   - PERMISSIVE (the majority): RegistrationAllowed, LoginAllowed,
+//     AllowedEmailDomains/EmailDomainAllowed, the lockout / TTL / MFA /
+//     grace / password-policy / recovery-code readers, the notification
+//     and IP/geo lists, OAuthProviderEnabled, OAuthAllowSignup,
+//     RevokeSessionsOnPasswordChange, InactiveAccountAutoDisableDays,
+//     DefaultClientRole … — each returns its schema default, preserving
+//     pre-policy behaviour for consumers not yet wired to the service.
+//   - STRICT (spec §4.4): PasswordLoginEnabled, PasswordLoginDecision,
+//     PasswordReauthAllowed and OAuthAutoLinkByEmailEnabled — each
+//     returns an error wrapping ErrAuthPolicyUnavailable instead.
+//     Callers map it to 503 auth.policy_unavailable and never substitute
+//     a default: missing wiring is an outage, and an outage must not
+//     re-enable a method the operator turned off.
+//
+// SessionAbsoluteTTL (session_cap.go) is a third shape: it defaults on a
+// nil receiver but fails closed with ErrSessionEnforcementUnavailable
+// when the read itself fails (ADR-0017 D1).
 type AuthPolicyService struct {
 	cs configValueReader
 	// operatorBreakGlass mirrors AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS,
@@ -135,8 +154,10 @@ type AuthPolicyService struct {
 }
 
 // NewAuthPolicyService binds the service to the live ConfigService.
-// Passing nil is supported and makes every accessor fall through to its
-// permissive default (matching pre-policy behaviour).
+// Passing nil is supported: the permissive accessors then fall through to
+// their schema defaults (matching pre-policy behaviour), while the strict
+// accessors listed on the type above answer ErrAuthPolicyUnavailable — a
+// policy service without a reader can never allow a password sign-in.
 func NewAuthPolicyService(cs *module.ModuleConfigService) *AuthPolicyService {
 	if cs == nil {
 		return &AuthPolicyService{}
