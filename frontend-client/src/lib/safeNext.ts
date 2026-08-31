@@ -10,9 +10,12 @@ export const DEFAULT_POST_LOGIN = "/account";
 // itself (a self-loop) and the anonymous auth pages, which would redirect
 // straight back out or strand the user on a form they no longer need.
 // Stored as segment lists and compared against the DECODED, lower-cased,
-// normalised path — the way react-router matches (case-insensitively, on
-// the decoded pathname) — so "/LOGIN", "/%6cogin", "/auth//callback" and
-// "/login%2Fx" are all judged as the page the router would render.
+// normalised path — the way react-router itself matches (case-insensitively,
+// on the decoded pathname), so "/LOGIN" and "/%6cogin" land here exactly as
+// the router would treat them. "/auth//callback" and "/login%2Fx" are
+// rejected too, but that's this gate being stricter than the router, not a
+// router-accurate read — react-router 404s on both instead of routing them
+// to the auth page.
 const AUTH_ROUTES: readonly (readonly string[])[] = [
   ["auth", "callback"],
   ["login"],

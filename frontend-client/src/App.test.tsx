@@ -58,7 +58,7 @@ describe("App — the OAuth callback through the real route table and Layout (F1
       await screen.findByRole("link", { name: "Sign in" }),
     ).toBeInTheDocument();
     expect(await screen.findByText(/completing sign-in/i)).toBeInTheDocument();
-    // Scrubbed before the refresh left, while Layout's own query is in flight.
+    // Scrubbed before the refresh left: the URL bar already shows the bare path.
     await waitFor(() =>
       expect(screen.getByTestId("app-location")).toHaveTextContent(
         /^\/auth\/callback$/,
@@ -66,7 +66,7 @@ describe("App — the OAuth callback through the real route table and Layout (F1
     );
     await waitFor(() => expect(refreshHits).toBe(1));
     // Order proof on the real tree: the bare path was committed before the
-    // refresh left, with Layout's own query in flight beside it.
+    // refresh request left.
     expect(locationAtRequest).toBe("/auth/callback");
     expect(screen.getByTestId("app-location")).toHaveTextContent(
       /^\/auth\/callback$/,

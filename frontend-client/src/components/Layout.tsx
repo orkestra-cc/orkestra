@@ -13,10 +13,11 @@ export function Layout() {
   const { isAuthenticated, signOut } = useAuth();
   const { data: me } = useMe();
   const navigate = useNavigate();
-  // Hide the prominent "Sign up" CTA when self-service registration is
-  // off — visiting /signup directly still renders a banner via the page
-  // itself, but most users discover the route via the header. Same
-  // cache key used by /login + /signup so all three share one fetch.
+  // Hide the prominent "Sign up" CTA when self-service registration or
+  // password sign-in is off — visiting /signup directly still swaps the
+  // form for a full-page notice in the off case, but most users discover
+  // the route via the header. Same cache key used by /login, /signup and
+  // /forgot-password, so all four surfaces share one fetch.
   const { data: policy } = useQuery({
     queryKey: ["authPolicy"],
     queryFn: fetchAuthPolicy,
