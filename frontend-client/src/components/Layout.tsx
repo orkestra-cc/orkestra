@@ -2,7 +2,7 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
-import { fetchAuthPolicy } from "@/api/auth";
+import { fetchAuthPolicy, passwordLoginUsable } from "@/api/auth";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { UserAvatar } from "@/components/UserAvatar";
 import { useAuth } from "@/auth/useAuth";
@@ -13,10 +13,11 @@ export function Layout() {
   const { isAuthenticated, signOut } = useAuth();
   const { data: me } = useMe();
   const navigate = useNavigate();
-  // Hide the prominent "Sign up" CTA when self-service registration is
-  // off — visiting /signup directly still renders a banner via the page
-  // itself, but most users discover the route via the header. Same
-  // cache key used by /login + /signup so all three share one fetch.
+  // Hide the prominent "Sign up" CTA when self-service registration or
+  // password sign-in is off — visiting /signup directly still swaps the
+  // form for a full-page notice in the off case, but most users discover
+  // the route via the header. Same cache key used by /login, /signup and
+  // /forgot-password, so all four surfaces share one fetch.
   const { data: policy } = useQuery({
     queryKey: ["authPolicy"],
     queryFn: fetchAuthPolicy,
@@ -24,6 +25,7 @@ export function Layout() {
     enabled: !isAuthenticated,
   });
   const registrationEnabled = policy?.registrationEnabled ?? true;
+  const passwordOn = passwordLoginUsable(policy);
 
   async function handleSignOut() {
     await signOut();
@@ -70,7 +72,7 @@ export function Layout() {
                 >
                   {t("nav.signin")}
                 </Link>
-                {registrationEnabled && (
+                {registrationEnabled && passwordOn && (
                   <Link
                     to="/signup"
                     className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"

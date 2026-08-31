@@ -152,7 +152,7 @@ frontend-client-clean:
 .PHONY: mcp-check mcp-test
 .PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config
 .PHONY: admin-lockcheck admin-typecheck admin-lint admin-test admin-audit admin-build
-.PHONY: client-lockcheck client-typecheck client-lint client-build
+.PHONY: client-lockcheck client-typecheck client-lint client-test client-build
 .PHONY: mobile-lockcheck
 .PHONY: mobile-analyze mobile-test
 
@@ -389,7 +389,7 @@ admin-build:
 
 # ---- Frontend Client ----
 
-ci-frontend-client: client-lockcheck client-typecheck client-lint client-build
+ci-frontend-client: client-lockcheck client-typecheck client-lint client-test client-build
 	@echo "Frontend-client CI: OK"
 
 client-lockcheck:
@@ -400,6 +400,9 @@ client-typecheck:
 
 client-lint:
 	@cd frontend-client && npm run lint -- --max-warnings 0
+
+client-test:
+	@cd frontend-client && npm test
 
 client-build:
 	@cd frontend-client && npm run build
@@ -444,7 +447,7 @@ ci-help:
 	@echo ""
 	@echo "  make ci-backend            - Backend CI (lint + tests + analyzers + vuln + coverage + build)"
 	@echo "  make ci-frontend-admin     - Admin SPA CI (lockfile + typecheck + lint + tests + build + audit)"
-	@echo "  make ci-frontend-client    - Client SPA CI (lockfile + typecheck + lint + build)"
+	@echo "  make ci-frontend-client    - Client SPA CI (lockfile + typecheck + lint + test + build)"
 	@echo "  make ci-mobile             - Flutter CI (lockfile + analyze + test)"
 	@echo "  make ci-mcp                - Shared Claude Code/Codex MCP config check"
 	@echo "  make mcp-check             - Verify project MCP definitions are in sync"

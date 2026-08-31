@@ -4,18 +4,19 @@ import {
   useMemo,
   useState,
   type ReactNode,
-} from 'react';
+} from "react";
 
 import {
+  bootstrapFromRefreshCookie as bootstrapFromRefreshCookieStore,
   clearAccessToken,
   getAccessToken,
   refreshAccessToken,
   setAccessToken,
   subscribe,
-} from '@/auth/tokenStore';
-import { apiBaseURL } from '@/api/client';
-import { AuthContext, type AuthState } from '@/auth/authContext';
-import { clearSessionMarker, setSessionMarker } from '@/auth/sessionMarker';
+} from "@/auth/tokenStore";
+import { apiBaseURL } from "@/api/client";
+import { AuthContext, type AuthState } from "@/auth/authContext";
+import { clearSessionMarker, setSessionMarker } from "@/auth/sessionMarker";
 
 interface AuthProviderProps {
   children: ReactNode;
@@ -49,8 +50,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const signOut = useCallback(async () => {
     try {
       await fetch(`${apiBaseURL}/v1/auth/client/logout`, {
-        method: 'POST',
-        credentials: 'include',
+        method: "POST",
+        credentials: "include",
       });
     } finally {
       clearSessionMarker();
@@ -58,14 +59,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, []);
 
+  const bootstrapFromRefreshCookie = useCallback(
+    () => bootstrapFromRefreshCookieStore(apiBaseURL),
+    [],
+  );
+
   const value = useMemo<AuthState>(
     () => ({
       accessToken: token,
       isAuthenticated: token !== null,
       signIn,
       signOut,
+      bootstrapFromRefreshCookie,
     }),
-    [token, signIn, signOut],
+    [token, signIn, signOut, bootstrapFromRefreshCookie],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -61,7 +61,7 @@ That parity is load-bearing on private forks, whose Actions runners are billing-
 | `make ci-all` | Every surface — what CI does on `dev`/`main` |
 | `make ci-backend` | Backend: lint, tenant-scope, policy-coverage, vuln, tests, coverage threshold, build, openapi-check |
 | `make ci-frontend-admin` | Admin SPA: lockfile sync, typecheck, lint, tests, audit, build |
-| `make ci-frontend-client` | Client SPA: lockfile sync, typecheck, lint, build |
+| `make ci-frontend-client` | Client SPA: lockfile sync, typecheck, lint, tests, build |
 | `make ci-mobile` | Flutter: lockfile sync, analyze, test |
 | `make admin-lockcheck` | Is a lockfile still able to satisfy its manifest? (also `client-`, `mobile-`) |
 | `make fmt` | Run every formatter in write mode (gofmt, prettier, dart format) |

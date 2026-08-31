@@ -13,7 +13,7 @@ CI invokes `make` targets from the monorepo root, so local and CI cannot drift. 
 | `make ci-all`        | Everything CI runs on push to `dev` or `main`                           |
 | `make ci-backend`    | lint, tenantscope, policycoverage, vuln, tests, build                  |
 | `make ci-frontend-admin` | typecheck, eslint, tests, audit, build                              |
-| `make ci-frontend-client`| typecheck, eslint, build                                            |
+| `make ci-frontend-client`| typecheck, eslint, tests, build                                     |
 | `make ci-mobile`     | flutter analyze, test                                                   |
 | `make build`         | Build the backend binary / Docker image locally (single binary, no SKUs) |
 

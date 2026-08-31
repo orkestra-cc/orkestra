@@ -5,7 +5,11 @@
 // in staging/prod) — the SPA never sees it directly; it just calls the
 // refresh endpoint and stores the resulting access token here.
 
-import { clearSessionMarker, hasSessionMarker } from '@/auth/sessionMarker';
+import {
+  clearSessionMarker,
+  hasSessionMarker,
+  setSessionMarker,
+} from "@/auth/sessionMarker";
 
 let accessToken: string | null = null;
 const subscribers = new Set<(token: string | null) => void>();
@@ -44,61 +48,90 @@ export function subscribe(fn: (token: string | null) => void): () => void {
  * the next cold load then short-circuits before even trying.
  */
 export type RefreshOutcome =
-  | { status: 'ok'; accessToken: string }
-  | { status: 'signed-out' }
-  | { status: 'unavailable' };
+  | { status: "ok"; accessToken: string }
+  | { status: "signed-out" }
+  | { status: "unavailable" };
 
-// In-flight refresh promise — coalesces concurrent 401s into a single
-// /v1/auth/client/refresh-cookie call so a burst of parallel requests
-// can't trigger N refresh attempts.
+// In-flight refresh promise — coalesces concurrent callers (a burst of
+// 401s, a StrictMode double-invoked bootstrap, a bootstrap racing the
+// cold-load refresh) into a single /v1/auth/client/refresh-cookie call, so
+// the rotating refresh cookie is never presented twice at once.
 let inflightRefresh: Promise<RefreshOutcome> | null = null;
 
-// refreshAccessToken issues a single coalesced refresh request. Skips
-// the request entirely when no session marker is present (anonymous
-// visitor) — refresh cookies are httpOnly so the SPA can't probe for
-// them, and a guaranteed-401 every cold load shows up as console noise
-// for every anonymous visitor. The marker is stamped on signIn and
-// cleared on signOut / 401, so returning users still auto-rehydrate.
-export async function refreshAccessToken(apiBase: string): Promise<RefreshOutcome> {
-  if (!hasSessionMarker()) return { status: 'signed-out' };
+const signedOut = (): RefreshOutcome => {
+  clearSessionMarker();
+  clearAccessToken();
+  return { status: "signed-out" };
+};
+
+// performRefresh presents the refresh cookie once — coalesced, and
+// UNCONDITIONAL: it never consults the session marker, so a storage that
+// throws (private mode, disabled storage) cannot turn a valid cookie into a
+// sign-out. It is the single place the outcome is decided:
+//   ok           2xx with an access token → installed in memory (never stored)
+//   signed-out   401, any other non-503 non-2xx, or a 2xx without a token →
+//                marker and token cleared; there is nothing to retry
+//   unavailable  503 (ADR-0017: the session could not be evaluated) or the
+//                fetch itself rejecting (a transport failure) → token and
+//                marker untouched; the caller may retry
+async function performRefresh(apiBase: string): Promise<RefreshOutcome> {
   if (inflightRefresh) return inflightRefresh;
-  inflightRefresh = (async () => {
+  inflightRefresh = (async (): Promise<RefreshOutcome> => {
     try {
-      const res = await fetch(`${apiBase}/v1/auth/client/refresh-cookie`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (res.status === 503) {
-        // Transient: the server could not evaluate the session. Keep both
-        // the token and the marker so the next attempt can succeed.
-        return { status: 'unavailable' } as const;
+      let res: Response;
+      try {
+        res = await fetch(`${apiBase}/v1/auth/client/refresh-cookie`, {
+          method: "POST",
+          credentials: "include",
+        });
+      } catch {
+        return { status: "unavailable" };
       }
-      if (!res.ok) {
-        // Stale marker — clear it so the next page load doesn't repeat
-        // the doomed refresh attempt.
-        clearSessionMarker();
-        clearAccessToken();
-        return { status: 'signed-out' } as const;
-      }
-      // The refresh-cookie response shape comes from the backend's
-      // RefreshCookieResponse — we read accessToken from the body.
-      // Codegen will sharpen the type once src/api/openapi.gen.ts has
-      // the operation typed; for now we accept either { accessToken }
-      // or { token } until the contract is locked in Phase 3.
+      if (res.status === 503) return { status: "unavailable" };
+      if (!res.ok) return signedOut();
+      // models.TokenResponse — we read accessToken from the body (a legacy
+      // `token` key is tolerated).
       const body = (await res.json().catch(() => ({}))) as {
         accessToken?: string;
         token?: string;
       };
       const fresh = body.accessToken ?? body.token ?? null;
+      // A 2xx with no token is a broken response, not an outage.
+      if (!fresh) return signedOut();
       setAccessToken(fresh);
-      // A 200 with no token in the body is a broken response, not an
-      // outage — treat it as signed out rather than retry-forever.
-      return fresh
-        ? ({ status: 'ok', accessToken: fresh } as const)
-        : ({ status: 'signed-out' } as const);
+      return { status: "ok", accessToken: fresh };
     } finally {
       inflightRefresh = null;
     }
   })();
   return inflightRefresh;
+}
+
+// refreshAccessToken — the AUTOMATIC path (cold-load rehydration in
+// AuthProvider, the 401 middleware in api/client.ts). Skips the request
+// entirely when no session marker is present (anonymous visitor): refresh
+// cookies are httpOnly so the SPA cannot probe for them, and a
+// guaranteed-401 on every cold load is console noise for every anonymous
+// visitor. The marker is stamped on signIn (and by bootstrapFromRefreshCookie)
+// and cleared on signOut / any signed-out outcome. Never rejects.
+export async function refreshAccessToken(
+  apiBase: string,
+): Promise<RefreshOutcome> {
+  if (!hasSessionMarker()) return { status: "signed-out" };
+  return performRefresh(apiBase);
+}
+
+// bootstrapFromRefreshCookie adopts a refresh cookie the SPA did not set
+// itself — the client-tier OAuth relay sets it on the API host and lands
+// the browser on /auth/callback with nothing else (spec §4.10, §5 #23).
+// The marker is stamped FIRST, speculatively, so the next cold load and any
+// concurrent automatic refresh know a cookie exists; then the cookie is
+// presented REGARDLESS of whether that stamp succeeded. `ok` keeps the
+// marker; every `signed-out` shape clears it again; `unavailable` (503 or
+// transport failure) keeps it so the caller can offer a retry. Never rejects.
+export async function bootstrapFromRefreshCookie(
+  apiBase: string,
+): Promise<RefreshOutcome> {
+  setSessionMarker();
+  return performRefresh(apiBase);
 }

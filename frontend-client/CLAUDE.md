@@ -29,6 +29,7 @@ This SPA only ever speaks to the **client** API audience (`api.localhost:3000` i
 | OpenAPI codegen | `openapi-typescript` against `${VITE_API_BASE}/openapi.json`                                                 |
 | i18n            | `react-i18next` (Italian default, English fallback) — wired from day 1                                       |
 | Auth            | In-memory access token + httpOnly refresh cookie (Domain-scoped to the API host)                             |
+| Tests           | Vitest 4 + React Testing Library + MSW 2 on happy-dom — `npm test`; an unhandled request fails the run       |
 | Payments        | _(none in the base — the Stripe Checkout flow left with the addons; see "Current surface")_                  |
 
 ## Directory layout
@@ -59,11 +60,22 @@ frontend-client/
 │   ├── components/
 │   │   ├── Layout.tsx          # App shell — header (logo + nav + lang switcher), main, footer
 │   │   ├── LanguageSwitcher.tsx
+│   │   ├── MfaChallenge.tsx        # TOTP / backup-code step shared by LoginPage and OAuthCallbackPage (challenge id in caller state only)
 │   │   └── UserAvatar.tsx      # Renders user avatar (image URL or initials over deterministic color)
 │   ├── lib/
 │   │   ├── avatarColor.ts      # Deterministic per-user color + initials helper for UserAvatar fallback
+│   │   ├── oauthProviders.ts   # the closed provider union (google|apple|github|discord) + display labels
+│   │   ├── safeNext.ts         # sanitizeNext — the ONE open-redirect gate; auth routes judged on the decoded, normalised path
+│   │   ├── oauthReturnTo.ts    # ten-minute take-and-delete `next` record across the IdP round-trip
+│   │   ├── oauthCallback.ts    # closed exact-key parser for /auth/callback + the error-code allowlist
 │   │   └── format.ts           # Intl currency + date helpers
 │   ├── locales/                # it.json (default), en.json — react-i18next bundles
+│   ├── test/
+│   │   ├── setup.ts            # jest-dom, EN copy, MSW lifecycle (unhandled request = error), explicit RTL cleanup, spy restore, global-stub + storage + token reset
+│   │   ├── server.ts           # the one MSW server
+│   │   ├── handlers.ts         # url() + reusable stubs (clientPolicyHandler, providersHandler, …)
+│   │   ├── render.tsx          # renderWithProviders (QueryClient + AuthProvider + MemoryRouter), waitForQuerySettled
+│   │   └── webStorage.ts       # restores localStorage/sessionStorage under Node ≥ 25
 │   └── pages/                  # Routed views — one file per route, no nested folders
 ├── README.md                   # User-facing project intro + dev quickstart
 ├── Dockerfile                  # Multi-stage: node:24-alpine builder → nginx:alpine
@@ -75,11 +87,12 @@ frontend-client/
 
 ## How auth works
 
-Three moving parts:
+Four moving parts:
 
 1. **In-memory access token** — `src/auth/tokenStore.ts` holds the RS256 JWT in a module-scoped variable. Never localStorage, never sessionStorage. The token is read synchronously by the openapi-fetch middleware on every request so the React tree is not in the fetch path.
 2. **httpOnly refresh cookie** — set by the backend at login on `Domain=api.localhost` (dev) or `Domain=api.orkestra.com` (prod). The SPA cannot read it directly; it only triggers `POST /v1/auth/client/refresh-cookie`, which mints a fresh access token. Per ADR-0003 PR-D D-9 the operator host (`console.*`) and client host (`api.*`) get distinct cookies — a token minted here cannot refresh on the operator console and vice versa.
-3. **Session marker** — a tiny `client.session=1` localStorage flag stamped on `signIn` and cleared on `signOut`/401. `refreshAccessToken` short-circuits when the marker is missing so anonymous visitors don't fire a guaranteed-401 on every cold load.
+3. **Session marker** — a tiny `client.session=1` localStorage flag stamped on `signIn` and cleared on `signOut`/401. `refreshAccessToken` short-circuits when the marker is missing so anonymous visitors don't fire a guaranteed-401 on every cold load. `bootstrapFromRefreshCookie()` (on the auth context, implemented in `tokenStore.ts`) is the one place that stamps the marker _speculatively_: the OAuth callback page calls it to adopt the cookie the client-tier relay set on the API host, and it presents the cookie **whether or not the stamp succeeded** — a storage that throws must not turn a valid cookie into a sign-out. Both it and the automatic `refreshAccessToken` go through one unconditional `performRefresh`: `ok` installs the memory-only token; every signed-out shape (401, other non-2xx, a 200 with no token) clears marker and token; `unavailable` — a 503 **or a transport failure** — keeps both so the caller can retry. Neither function rejects.
+4. **Public policy + OAuth start** — `fetchAuthPolicy()` (`GET /v1/auth/client/policy`) falls open on failure, and `passwordLoginUsable(policy)` is the **only** reader of `passwordLoginEnabled`: `undefined` (still loading) reads as usable, `false` **and** `null` read as off, so an SSO-only client surface hides the password UI instead of showing a form the backend refuses with 403 (spec §4.10, G5). `fetchOAuthProviders()` deliberately does **not** fall open — a 503, a network error or a body without a `providers` array is a retryable error state, never "no method"; only `{providers: []}` is empty. `initiateOAuthLogin(provider, next)` POSTs the allowlisted provider **with `credentials:'include'`** (the response sets the HttpOnly `orkestra_oauth_state` cookie the relay endpoint requires), stashes the validated `next` and leaves through `browserNavigation.assign` — the seam tests spy on. On the login page this means: nothing paints until `/policy` resolves; with the method on, the password form renders above an "or continue with" provider section; with it off (`false` or `null`) only the providers render, the forgot/sign-up links disappear, and a provider list that _resolved_ empty shows the no-sign-in-method notice — a provider-query error (503, network, malformed body) is a retryable alert, never that notice. The kill switch (`loginEnabled=false`) keeps the maintenance banner and hides the provider section.
 
 ### Refresh choreography
 
@@ -92,7 +105,7 @@ fetch X → 401 with expired access token
         → second 401 → bubble up; AuthProvider sees null token → router redirects to /login?next=<original>
 ```
 
-Two consecutive 401s trigger logout. The `?next=` parameter on the login redirect carries the originally requested path so post-login the user lands where they were headed.
+Two consecutive 401s trigger logout. A 503 or a network failure during the refresh is `unavailable`: the original 401 is surfaced to the caller and the token is kept, because nothing is known about the session (ADR-0017). The `?next=` parameter on the login redirect carries the originally requested path so post-login the user lands where they were headed.
 
 ### Reading tenant memberships from the JWT
 
@@ -105,6 +118,12 @@ The client API surface deliberately **does not** expose `/v1/tenants` or `/v1/me
 Compact keys come from `backend/internal/core/auth/services/jwt_service.go::claimsToMap`. Ownership is inferred from `r.includes("org_owner")` since the JWT does not carry an `isOwner` boolean. The backend re-validates ownership against `TenantProvider.ListUserMemberships` on every `/v1/me/*` call, so the client-side filter is a UX hint, not a security gate.
 
 `useOwnedTenants()` re-renders when the access token rotates (login, refresh, logout) via `useSyncExternalStore` subscribed to the token store.
+
+### OAuth login (web)
+
+`LoginPage` lists the providers the backend currently accepts (`GET /v1/auth/client/providers` — toggle on **and** structurally configured; a 503, a network failure or a malformed body is a retryable error state, never "no method") and starts a flow with `initiateOAuthLogin(provider, next)`: `POST /v1/auth/client/oauth/login {provider}` **with `credentials:'include'`** — the response sets the HttpOnly `orkestra_oauth_state` cookie on the API host and the relay endpoint later _requires_ it — then stashes the validated `next` (`lib/oauthReturnTo.ts`, a ten-minute record) and leaves for `authUrl`. Every provider redirects to the **operator** host, which cannot set a cookie for `api.*`, so the backend relays the client-tier outcome to `GET {CLIENT_API_URL}/v1/auth/client/oauth/complete?relay=<id>`; that endpoint verifies the browser binding against the state cookie, sets the client refresh cookie on its own host and redirects to `{CLIENT_FRONTEND_URL}/auth/callback` under a **closed contract** — `?success=true&provider=<p>`, `?success=false&error=<allowlisted code>`, or `#requiresMfa=true&mfaToken=<id>&webauthnAvailable=<bool>`; never a token, an email or a user id.
+
+`pages/OAuthCallbackPage.tsx` parses that URL once with `lib/oauthCallback.ts` (exact key sets — anything else is the generic failure), scrubs it in its first passive effect **before any request**, take-and-deletes the return target on every outcome, and then: success → `bootstrapFromRefreshCookie()` and navigate to the target or `/account` only once a token exists (signed-out is a login error; a 503 or a network failure offers retry); MFA → the same `components/MfaChallenge.tsx` the password path uses, challenge id in component memory only (`webauthnAvailable` is parsed but the client SPA has no WebAuthn login, so the TOTP / backup-code form renders — a passkey-only user cannot complete an OAuth-MFA continuation here yet); error → the mapped `oauth.callback.errors.*` copy. Raw URL text is never rendered. `src/App.test.tsx` mounts this page through the real route table so the shell's own queries are proven not to disturb the order scrub → bootstrap.
 
 ## How data fetching works
 
@@ -131,6 +150,8 @@ There is **no axios** and **no custom fetch helpers**. New endpoints either use 
 **Flat React Router table in `src/App.tsx`.** Unlike the operator console, this app does NOT consume `/v1/navigation` — there is no dynamic sidebar, no module catalog, no role-based menu rebuild. The route surface is small (home, signup, login, account/{profile,security,billing}, …) and each route is mounted explicitly.
 
 Auth-gated routes wrap their element in `<RequireAuth>`. Anonymous routes mount directly under `<Layout>`.
+
+Anonymous entry points are policy-aware: the header's Sign-up CTA, `/signup` and `/forgot-password` hide their password forms behind a notice when `passwordLoginUsable(policy)` is false for the client surface (the backend refuses those routes with 403 anyway), and the CTA also stays hidden when `registrationEnabled` is off. When the policy read fell open, the forgot-password form still renders the backend's answer mapped by code (`forgot.passwordDisabled`, `error.policyUnavailable`, `error.generic`) — never the raw detail. `/reset-password` and `/accept-invite` stay open — the backend keeps those routes open too (spec §4.3).
 
 When you add a new page:
 
@@ -188,6 +209,8 @@ Local commands you'll actually run from your editor:
 
 ```bash
 npm run typecheck          # tsc -b --noEmit — CI-safe, run before pushing
+npm test                   # vitest run — happy-dom + MSW; CI runs it between lint and build
+npm run test:watch
 npm run lint               # eslint src --ext .ts,.tsx
 npm run build              # tsc -b && vite build (production bundle)
 npm run codegen            # openapi-typescript against $VITE_API_BASE/openapi.json
@@ -220,8 +243,9 @@ The plugin also makes the missing-file case legible: when `config.js` is absent 
 4. **Add the page** in `src/pages/<Name>Page.tsx`. Co-locate any one-off helpers or components in the same file unless they're reused.
 5. **Wire the route** in `src/App.tsx`. Wrap in `<RequireAuth>` if the endpoint requires `aud=client` + a logged-in user.
 6. **Add i18n strings** to **both** `src/locales/{en,it}.json`. Lead with the IT translation since IT is the default locale.
-7. **Run** `npm run typecheck && npm run lint && npm run build` before committing. The build catches type errors that `tsc --noEmit` misses (Vite plugins).
-8. **Test in a browser** if it's a UI change — start the dev stack, walk the golden path, check the relevant edge cases. The build passing does **not** mean the feature works.
+7. **Write the test** next to the page (`<Name>Page.test.tsx`) with `renderWithProviders` from `@/test/render`. Stub every endpoint the component mounts (`src/test/handlers.ts` or `server.use(...)`) — MSW runs with `onUnhandledRequest: 'error'`, so a missing stub is a red run. Anchor every absence assertion on a settled positive state first (`waitForQuerySettled(queryClient, key)` when the tree is identical before and after the query lands).
+8. **Run** `npm run typecheck && npm run lint && npm test && npm run build` before committing. The build catches type errors that `tsc --noEmit` misses (Vite plugins).
+9. **Test in a browser** if it's a UI change — start the dev stack, walk the golden path, check the relevant edge cases. The build passing does **not** mean the feature works.
 
 ## Conventions
 
@@ -242,10 +266,12 @@ The plugin also makes the missing-file case legible: when `config.js` is absent 
 - **Don't add Stripe Elements without explicit sign-off.** Hosted Checkout is the locked decision; Elements would re-introduce PCI scope.
 - **Don't ship English-only strings.** Every user-visible string goes through `t()` with both `en.json` and `it.json` entries in the same PR.
 - **Don't share storage / cookies / auth state with `../frontend-admin`.** Cookie domains, JWT audiences, and refresh cookies are deliberately split per ADR-0003 PR-D D-8/D-9.
+- **Don't build, parse or trust an `/auth/callback` URL outside `src/lib/oauthCallback.ts`**, don't render raw callback text, and don't put the MFA challenge id in router state or storage — it lives in the callback page's component memory only.
+- **Don't navigate to a `?next=` value without `sanitizeNext`** (`src/lib/safeNext.ts`) — it is the SPA's only open-redirect gate, for the password path and the OAuth return target alike.
 
 ## Current surface (ADR-0006)
 
-The base SPA is a **thin auth/account demo**: anonymous home + signup + email verify, login + password recovery + MFA enrol, account (profile, security, billing identity), accept-invite. The subscribe/transactions/payment-methods dashboard, the service catalog, the owner-scope switcher, and the Stripe checkout flow were removed with the `subscriptions`/`payments` backend addons. The sections above describe how a fork **rebuilds** that layer — they are not present in the base.
+The base SPA is a **thin auth/account demo**: anonymous home + signup + email verify, login with email/password **and web OAuth** (Google / Apple / GitHub / Discord through the client-tier relay, `/auth/callback`), password recovery + MFA enrol, account (profile, security, billing identity), accept-invite. The subscribe/transactions/payment-methods dashboard, the service catalog, the owner-scope switcher, and the Stripe checkout flow were removed with the `subscriptions`/`payments` backend addons. The sections above describe how a fork **rebuilds** that layer — they are not present in the base.
 
 ## Related
 

@@ -1,26 +1,35 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import {
+  apiErrorCode,
   fetchAuthPolicy,
+  fetchOAuthProviders,
+  initiateOAuthLogin,
   login,
-  mfaLoginVerify,
+  passwordLoginUsable,
   type LoginResult,
-  type MfaLoginVerifyResult,
 } from "@/api/auth";
 import { resendVerificationEmail } from "@/api/verifyEmail";
 import { useAuth } from "@/auth/useAuth";
+import { MfaChallenge } from "@/components/MfaChallenge";
+import {
+  OAUTH_PROVIDER_LABELS,
+  type OAuthProviderName,
+} from "@/lib/oauthProviders";
+import { DEFAULT_POST_LOGIN, sanitizeNext } from "@/lib/safeNext";
 
 // Backend marks the "address not verified" 403 with code="auth.email_not_verified"
 // (see auth/handlers/password_handler.go::mapPasswordError). We discriminate
 // on the code, not on the localized detail string.
-type ApiErrorWithCode = Error & { code?: string; status?: number };
-
 function isEmailNotVerified(err: unknown): boolean {
-  const e = err as ApiErrorWithCode | null;
-  return !!e && e.code === "auth.email_not_verified";
+  return apiErrorCode(err) === "auth.email_not_verified";
 }
 
 // Two-state page: credentials (default) → mfa-required (after a partial
@@ -28,26 +37,40 @@ function isEmailNotVerified(err: unknown): boolean {
 // component because a navigation away should drop the in-flight
 // challenge — the backend's mfaToken is short-lived and one-shot
 // anyway. On full success (either branch) we stamp the in-memory token
-// + session marker via AuthProvider.signIn and redirect to ?next= or
-// /account.
+// + session marker via AuthProvider.signIn and redirect to the validated
+// ?next= or /account.
 type Stage =
   | { name: "credentials" }
   | { name: "mfa"; mfaToken: string; webauthnAvailable: boolean };
+
+const INPUT_CLASS =
+  "block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500";
+const PRIMARY_BUTTON_CLASS =
+  "inline-flex w-full items-center justify-center rounded-md bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400";
+const NOTICE_CLASS =
+  "mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900";
 
 export function LoginPage() {
   const { t } = useTranslation();
   const { signIn } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const next = params.get("next") ?? "/account";
+  // One redirect gate for both sign-in paths (lib/safeNext.ts): the deep
+  // link RequireAuth stamped on ?next= is honoured only when it is a
+  // same-origin relative path outside the auth routes; otherwise /account.
+  // useSearchParams already decoded the value once — no second decode.
+  const next = sanitizeNext(params.get("next"));
+  const destination = next ?? DEFAULT_POST_LOGIN;
 
   const [stage, setStage] = useState<Stage>({ name: "credentials" });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  // Public policy: drives the maintenance banner and hides the signup
-  // link when self-service registration is also off. Falls open on any
-  // network failure inside fetchAuthPolicy itself.
+  // Public policy. fetchAuthPolicy never rejects (it falls open on any
+  // failure — spec §4.10), so `policy === undefined` means exactly "still
+  // loading": the page paints neither sign-in surface until it lands
+  // (deviation D1) rather than flashing a password form on an SSO-only
+  // surface.
   const { data: policy } = useQuery({
     queryKey: ["authPolicy"],
     queryFn: fetchAuthPolicy,
@@ -55,10 +78,21 @@ export function LoginPage() {
   });
   const loginEnabled = policy?.loginEnabled ?? true;
   const registrationEnabled = policy?.registrationEnabled ?? true;
+  const passwordOn = passwordLoginUsable(policy);
+
+  // Providers the backend will accept a login from right now
+  // (GET /v1/auth/client/providers). Runs in parallel with the policy
+  // read. A rejection — 503, network failure, malformed body — is a
+  // retryable error state, never "no method".
+  const providers = useQuery({
+    queryKey: ["oauthProviders"],
+    queryFn: ({ signal }) => fetchOAuthProviders(signal),
+    staleTime: 30_000,
+  });
 
   function complete(token: string) {
     signIn(token);
-    navigate(decodeURIComponent(next), { replace: true });
+    navigate(destination, { replace: true });
   }
 
   const loginMutation = useMutation<LoginResult, Error, void>({
@@ -82,23 +116,65 @@ export function LoginPage() {
     loginMutation.mutate();
   }
 
+  if (stage.name === "mfa") {
+    return (
+      <section className="mx-auto max-w-md px-6 py-16">
+        <h1 className="mb-6 text-3xl font-semibold tracking-tight">
+          {t("login.title")}
+        </h1>
+        <MfaChallenge
+          mfaToken={stage.mfaToken}
+          onCancel={() => setStage({ name: "credentials" })}
+          onSuccess={(result) => complete(result.accessToken)}
+        />
+      </section>
+    );
+  }
+
+  if (policy === undefined) {
+    return (
+      <section className="mx-auto max-w-md px-6 py-16">
+        <h1 className="mb-2 text-3xl font-semibold tracking-tight">
+          {t("login.title")}
+        </h1>
+        <p role="status" className="text-sm text-slate-500">
+          {t("loading")}
+        </p>
+      </section>
+    );
+  }
+
+  // The no-method alert needs three settled facts: kill switch off,
+  // persisted password policy false/null, and a provider list that has
+  // RESOLVED empty. A provider-query error keeps its own retryable state.
+  const noMethod =
+    loginEnabled &&
+    !passwordOn &&
+    providers.isSuccess &&
+    providers.data.length === 0;
+
   return (
     <section className="mx-auto max-w-md px-6 py-16">
       <h1 className="mb-2 text-3xl font-semibold tracking-tight">
         {t("login.title")}
       </h1>
-      <p className="mb-8 text-slate-600">{t("login.subtitle")}</p>
+      <p className="mb-8 text-slate-600">
+        {passwordOn ? t("login.subtitle") : t("login.subtitleSso")}
+      </p>
 
-      {!loginEnabled && stage.name === "credentials" && (
-        <div
-          className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
-          role="alert"
-        >
+      {!loginEnabled && (
+        <div className={NOTICE_CLASS} role="alert">
           {t("login.disabled")}
         </div>
       )}
 
-      {stage.name === "credentials" ? (
+      {noMethod && (
+        <div className={NOTICE_CLASS} role="alert">
+          {t("login.noMethod")}
+        </div>
+      )}
+
+      {passwordOn && (
         <form onSubmit={onSubmitCredentials} noValidate className="space-y-5">
           <div>
             <label
@@ -114,7 +190,7 @@ export function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+              className={INPUT_CLASS}
             />
           </div>
           <div>
@@ -131,7 +207,7 @@ export function LoginPage() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+              className={INPUT_CLASS}
             />
           </div>
 
@@ -152,7 +228,7 @@ export function LoginPage() {
           <button
             type="submit"
             disabled={loginMutation.isPending || !loginEnabled}
-            className="inline-flex w-full items-center justify-center rounded-md bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+            className={PRIMARY_BUTTON_CLASS}
           >
             {loginMutation.isPending
               ? t("login.submitting")
@@ -176,11 +252,13 @@ export function LoginPage() {
             )}
           </div>
         </form>
-      ) : (
-        <MfaChallenge
-          mfaToken={stage.mfaToken}
-          onCancel={() => setStage({ name: "credentials" })}
-          onSuccess={(result) => complete(result.accessToken)}
+      )}
+
+      {loginEnabled && (
+        <OAuthProviderButtons
+          providers={providers}
+          next={next}
+          showDivider={passwordOn}
         />
       )}
     </section>
@@ -250,93 +328,130 @@ function EmailNotVerifiedNotice({ email }: EmailNotVerifiedNoticeProps) {
   );
 }
 
-interface MfaChallengeProps {
-  mfaToken: string;
-  onCancel: () => void;
-  onSuccess: (result: MfaLoginVerifyResult) => void;
+// startErrorKey maps the backend `code` of a failed OAuth start to copy
+// (deviation D6). Anything unmapped is the generic key — the backend
+// detail string is never rendered.
+function startErrorKey(e: unknown): string {
+  switch (apiErrorCode(e)) {
+    case "auth.oauth_provider_disabled":
+      return "login.oauth.providerDisabled";
+    case "auth.policy_unavailable":
+      return "error.policyUnavailable";
+    case "auth.login_disabled":
+      return "login.disabled";
+    default:
+      return "login.oauth.startFailed";
+  }
 }
 
-function MfaChallenge({ mfaToken, onCancel, onSuccess }: MfaChallengeProps) {
+interface OAuthProviderButtonsProps {
+  providers: UseQueryResult<OAuthProviderName[], Error>;
+  next: string | null;
+  // False when no password form renders above: the "or continue with"
+  // divider would have nothing to divide from.
+  showDivider: boolean;
+}
+
+// The provider section of the login page. Three distinct states (spec
+// §4.10): loading, a retryable error, and the resolved list — an empty
+// list renders nothing here (the page owns the no-method alert). The
+// buttons are text-only on purpose: brand names, no icon library.
+function OAuthProviderButtons({
+  providers,
+  next,
+  showDivider,
+}: OAuthProviderButtonsProps) {
   const { t } = useTranslation();
-  const [code, setCode] = useState("");
-  const [useBackup, setUseBackup] = useState(false);
+  const [starting, setStarting] = useState<OAuthProviderName | null>(null);
+  const [startError, setStartError] = useState<{
+    key: string;
+    provider: OAuthProviderName;
+  } | null>(null);
 
-  const verify = useMutation<MfaLoginVerifyResult, Error, void>({
-    mutationFn: () =>
-      mfaLoginVerify({
-        challengeId: mfaToken,
-        code: code.trim(),
-        useBackup,
-      }),
-    onSuccess,
-  });
-
-  function onSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!code.trim()) return;
-    verify.mutate();
+  async function start(provider: OAuthProviderName) {
+    setStarting(provider);
+    setStartError(null);
+    try {
+      // Stashes the validated `next`, then leaves the SPA — on success
+      // there is nothing to reset here.
+      await initiateOAuthLogin(provider, next);
+    } catch (e) {
+      setStartError({ key: startErrorKey(e), provider });
+      setStarting(null);
+    }
   }
 
-  return (
-    <form onSubmit={onSubmit} noValidate className="space-y-5">
-      <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
-        {t("login.mfa.prompt")}
-      </p>
-      <div>
-        <label
-          htmlFor="mfa-code"
-          className="mb-1 block text-sm font-medium text-slate-700"
-        >
-          {useBackup ? t("login.mfa.backupCode") : t("login.mfa.code")}
-        </label>
-        <input
-          id="mfa-code"
-          type="text"
-          inputMode={useBackup ? "text" : "numeric"}
-          autoComplete="one-time-code"
-          autoFocus
-          required
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base tracking-widest focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
-        />
-      </div>
+  const divider = showDivider ? (
+    <p className="my-6 text-center text-xs uppercase tracking-wide text-slate-400">
+      {t("login.oauth.divider")}
+    </p>
+  ) : null;
 
-      <label className="flex items-center gap-2 text-sm text-slate-700">
-        <input
-          type="checkbox"
-          checked={useBackup}
-          onChange={(e) => setUseBackup(e.target.checked)}
-          className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
-        />
-        {t("login.mfa.useBackup")}
-      </label>
+  if (providers.isPending) {
+    return (
+      <>
+        {divider}
+        <p role="status" className="text-center text-sm text-slate-500">
+          {t("login.oauth.loading")}
+        </p>
+      </>
+    );
+  }
 
-      {verify.isError && (
-        <p
-          className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
+  if (providers.isError) {
+    return (
+      <>
+        {divider}
+        <div
+          className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
           role="alert"
         >
-          {verify.error.message}
-        </p>
-      )}
+          <p>{t("login.oauth.loadError")}</p>
+          <button
+            type="button"
+            onClick={() => void providers.refetch()}
+            className="mt-2 text-sm font-medium underline hover:text-amber-950"
+          >
+            {t("login.oauth.retry")}
+          </button>
+        </div>
+      </>
+    );
+  }
 
-      <div className="flex gap-3">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="flex-1 rounded-md border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          {t("login.mfa.cancel")}
-        </button>
-        <button
-          type="submit"
-          disabled={verify.isPending}
-          className="flex-1 rounded-md bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-        >
-          {verify.isPending ? t("login.mfa.submitting") : t("login.mfa.submit")}
-        </button>
+  if (providers.data.length === 0) return null;
+
+  return (
+    <>
+      {divider}
+      <div className="space-y-3">
+        {startError && (
+          <p
+            className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
+            role="alert"
+          >
+            {t(startError.key, {
+              provider: OAUTH_PROVIDER_LABELS[startError.provider],
+            })}
+          </p>
+        )}
+        {providers.data.map((provider) => {
+          const label = OAUTH_PROVIDER_LABELS[provider];
+          return (
+            <button
+              key={provider}
+              type="button"
+              disabled={starting !== null}
+              onClick={() => void start(provider)}
+              className="inline-flex w-full items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {starting === provider
+                ? t("login.oauth.redirecting", { provider: label })
+                : t("login.oauth.continueWith", { provider: label })}
+            </button>
+          );
+        })}
       </div>
-    </form>
+    </>
   );
 }
