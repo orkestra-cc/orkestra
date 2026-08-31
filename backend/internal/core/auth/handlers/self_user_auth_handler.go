@@ -10,6 +10,7 @@ import (
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
@@ -198,6 +199,9 @@ func mapSelfAuthError(err error) error {
 		return nil
 	}
 	switch {
+	case errors.Is(err, services.ErrAuthPolicyUnavailable):
+		return errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
+			"Sign-in policy is temporarily unavailable; try again shortly.")
 	case errors.Is(err, services.ErrLastCredentialRemoval):
 		return huma.NewError(http.StatusConflict, "last_credential",
 			&huma.ErrorDetail{Message: "you have no other login method — set a password before unlinking this provider"})

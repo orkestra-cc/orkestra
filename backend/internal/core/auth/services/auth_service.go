@@ -131,16 +131,17 @@ type AuthService interface {
 	// AdminUnlinkOAuth removes a linked OAuth identity from another
 	// user's account. Enforces two safeguards in addition to the route
 	// gate: rejects self-action (actorUUID == targetUUID) and rejects
-	// removing the user's only remaining credential (no password +
-	// single OAuth link). Both safeguards live here so any caller —
-	// HTTP handler, future CLI, internal job — gets the same checks.
+	// removing the user's only remaining USABLE credential (§4.7 — a
+	// password the surface refuses and a disabled/unconfigured provider
+	// are not ways in). Both safeguards live here so any caller — HTTP
+	// handler, future CLI, internal job — gets the same checks.
 	AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUID string, provider iface.OAuthProvider) error
 	// SelfUnlinkOAuth removes one OAuth identity from the caller's own
-	// account. Mirrors AdminUnlinkOAuth's last-credential safeguard so
-	// a user cannot accidentally remove their only login method, but
-	// drops the self-action check (self-action IS the point here). The
-	// HTTP handler is gated by RequireStepUp(5m) — credential removal
-	// demands a fresh MFA proof.
+	// account. Mirrors AdminUnlinkOAuth's last-usable-credential
+	// safeguard so a user cannot accidentally remove their only login
+	// method, but drops the self-action check (self-action IS the point
+	// here). The HTTP handler is gated by RequireStepUp(5m) —
+	// credential removal demands a fresh MFA proof.
 	SelfUnlinkOAuth(ctx context.Context, userUUID string, provider iface.OAuthProvider) error
 	// SelfLinkOAuthFromCallback binds a freshly-completed OAuth flow
 	// to an authenticated user. Called from the OAuth callback when
@@ -252,6 +253,13 @@ type AuthService interface {
 	// signature. Empty falls back to operator semantics.
 	SetAudience(a PolicyAudience)
 
+	// SetProviderUsability wires the per-audience "is this provider a
+	// usable web login method" resolver (§4.7): providerOn ∧ structurally
+	// configured against the active snapshot, without this package
+	// importing the resolver type. Unlink guards refuse with a policy
+	// error when it is missing — an uncertain link must not be counted.
+	SetProviderUsability(f func(ctx context.Context, audience PolicyAudience, provider iface.OAuthProvider) (bool, error))
+
 	// Enhanced OAuth callback handling with account linking
 	HandleOAuthCallbackWithLinking(ctx context.Context, provider models.OAuthProvider, userInfo map[string]interface{}, oauthTokens *models.OAuthProviderTokens, securityCtx *models.SecurityContext, deviceInfo *models.DeviceInfo) (*models.TokenResponse, error)
 }
@@ -301,6 +309,11 @@ type authService struct {
 	// signup gating can read the audience-scoped oauthAllowSignup
 	// policy without needing the caller to pass it explicitly.
 	audience PolicyAudience
+	// providerUsability answers "is this OAuth provider a usable web
+	// login method on this surface" for the unlink guards. Wired
+	// post-construction from module.go over the shared OAuth config
+	// resolver; nil means the guards refuse rather than guess.
+	providerUsability func(ctx context.Context, audience PolicyAudience, provider iface.OAuthProvider) (bool, error)
 	// sessionRevocation is the Redis-backed sid revocation store
 	// shared across all tiers. Wired post-construction via
 	// SetSessionRevocation; nil disables the in-flight access-token
@@ -355,6 +368,37 @@ func (s *authService) SetPolicy(p *AuthPolicyService) {
 // reads can fetch audience-scoped knobs.
 func (s *authService) SetAudience(a PolicyAudience) {
 	s.audience = a
+}
+
+// SetProviderUsability wires the per-audience provider-usability
+// resolver the unlink guards consult (§4.7).
+func (s *authService) SetProviderUsability(f func(ctx context.Context, audience PolicyAudience, provider iface.OAuthProvider) (bool, error)) {
+	s.providerUsability = f
+}
+
+// usableProvidersForLinks precomputes usability for every ACTIVE link's
+// provider before any mutation (§4.7). Any config read, decrypt or parse
+// error — or missing wiring — refuses with the policy sentinel rather
+// than counting an uncertain link.
+func (s *authService) usableProvidersForLinks(ctx context.Context, links []iface.OAuthLink) (map[iface.OAuthProvider]bool, error) {
+	if s.providerUsability == nil {
+		return nil, fmt.Errorf("%w: provider usability not wired", ErrAuthPolicyUnavailable)
+	}
+	out := make(map[iface.OAuthProvider]bool, len(links))
+	for _, link := range links {
+		if !link.IsActive {
+			continue
+		}
+		if _, seen := out[link.Provider]; seen {
+			continue
+		}
+		ok, err := s.providerUsability(ctx, s.audience, link.Provider)
+		if err != nil {
+			return nil, err
+		}
+		out[link.Provider] = ok
+	}
+	return out, nil
 }
 
 // SetSessionRevocation wires the Redis-backed sid revocation store.
@@ -542,9 +586,13 @@ func (s *authService) userHasEnrolledMFAFactor(ctx context.Context, userUUID str
 //  1. actorUUID != targetUUID — admins must not unlink their own
 //     identities through the admin path; the self-service flow exists
 //     for that and carries different audit semantics.
-//  2. Last-credential lockout — refuse when the target has no usable
-//     password AND this is their only OAuth link. The operator should
-//     send a password-reset first, then unlink.
+//  2. Last-credential lockout — refuse when removing a USABLE link
+//     would leave the target with no usable credential: no password the
+//     surface accepts, and no other link whose provider is enabled and
+//     structurally configured (§4.7). The operator should re-enable a
+//     method or send a password-reset first, then unlink. Any policy or
+//     provider-config uncertainty refuses with ErrAuthPolicyUnavailable
+//     rather than counting a link it cannot vouch for.
 //
 // The provider-specific subject ID is resolved from the target's
 // User.OAuthLinks rather than from the OAuth provider repo so this
@@ -569,7 +617,18 @@ func (s *authService) AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUI
 	if err != nil {
 		return err
 	}
-	providerID, locked, found := wouldLockOutOAuthUnlink(target, links, provider)
+	// §4.7: resolve what actually counts as a way in BEFORE mutating.
+	// Strict reads — break-glass never counts as a lasting credential,
+	// and any uncertainty refuses with 503 rather than guessing.
+	passwordUsable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+	if err != nil {
+		return err
+	}
+	usable, err := s.usableProvidersForLinks(ctx, links)
+	if err != nil {
+		return err
+	}
+	providerID, locked, found := wouldLockOutOAuthUnlink(target, links, provider, passwordUsable, usable)
 	if !found {
 		return ErrOAuthLinkNotFound
 	}
@@ -588,29 +647,40 @@ func (s *authService) AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUI
 }
 
 // wouldLockOutOAuthUnlink computes the shared lockout decision used by
-// AdminUnlinkOAuth and SelfUnlinkOAuth. Returns the matched providerID
-// (empty when no link is found), a `locked` flag set when removing the
-// link would leave the user with no usable credential (no password
-// AND single active OAuth link), and a `found` flag distinguishing
-// "provider not linked" (404) from a benign mismatch.
-func wouldLockOutOAuthUnlink(target *iface.User, links []iface.OAuthLink, provider iface.OAuthProvider) (providerID string, locked bool, found bool) {
+// AdminUnlinkOAuth and SelfUnlinkOAuth, counting USABLE credentials
+// (§4.7): a link whose provider is disabled or structurally incomplete
+// is not a way in, and neither is a password the surface refuses.
+//
+//	targetUsable    := target link IsActive ∧ usableProviders[provider]
+//	remainingUsable := count(other links: IsActive ∧ usableProviders[Provider])
+//	locked          := targetUsable ∧ (¬passwordUsable ∨ PasswordHash == "") ∧ remainingUsable == 0
+//
+// Removing an unusable target link is always allowed. found=false keeps
+// meaning "provider not linked" (404).
+func wouldLockOutOAuthUnlink(target *iface.User, links []iface.OAuthLink,
+	provider iface.OAuthProvider, passwordUsable bool,
+	usableProviders map[iface.OAuthProvider]bool) (providerID string, locked bool, found bool) {
 	if target == nil {
 		return "", false, false
 	}
-	activeCount := 0
+	targetActive := false
+	remainingUsable := 0
 	for _, link := range links {
-		if link.IsActive {
-			activeCount++
-		}
 		if link.Provider == provider && providerID == "" {
 			providerID = link.ProviderID
+			targetActive = link.IsActive
+			continue
+		}
+		if link.IsActive && usableProviders[link.Provider] {
+			remainingUsable++
 		}
 	}
 	found = providerID != ""
 	if !found {
 		return "", false, false
 	}
-	locked = target.PasswordHash == "" && activeCount <= 1
+	targetUsable := targetActive && usableProviders[provider]
+	locked = targetUsable && (!passwordUsable || target.PasswordHash == "") && remainingUsable == 0
 	return providerID, locked, true
 }
 
@@ -635,7 +705,18 @@ func (s *authService) SelfUnlinkOAuth(ctx context.Context, userUUID string, prov
 	if err != nil {
 		return err
 	}
-	providerID, locked, found := wouldLockOutOAuthUnlink(user, links, provider)
+	// §4.7: resolve what actually counts as a way in BEFORE mutating.
+	// Strict reads — break-glass never counts as a lasting credential,
+	// and any uncertainty refuses with 503 rather than guessing.
+	passwordUsable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+	if err != nil {
+		return err
+	}
+	usable, err := s.usableProvidersForLinks(ctx, links)
+	if err != nil {
+		return err
+	}
+	providerID, locked, found := wouldLockOutOAuthUnlink(user, links, provider, passwordUsable, usable)
 	if !found {
 		return ErrOAuthLinkNotFound
 	}
@@ -806,14 +887,23 @@ func (s *authService) GetUserAuthMethods(ctx context.Context, targetUUID string)
 		return nil, ErrOAuthLinkNotFound
 	}
 
+	// §4.8: presence and usability are different facts. The strict read
+	// fails the whole call (503) rather than guessing — an outage must
+	// not render an unlock the backend would refuse.
+	passwordUsable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+	if err != nil {
+		return nil, err
+	}
 	view := &models.AuthMethodsView{
-		HasUsablePassword: user.PasswordHash != "",
-		PasswordUpdatedAt: user.PasswordUpdatedAt,
-		EmailVerified:     user.EmailVerified,
-		LastLoginAt:       user.LastLogin,
-		MFAGraceStartedAt: user.MFAGraceStartedAt,
-		MFAFactors:        []models.MFAFactorView{},
-		OAuthProviders:    []models.OAuthProviderView{},
+		HasPasswordSet:         user.PasswordHash != "",
+		PasswordUsableForLogin: user.PasswordHash != "" && passwordUsable,
+		HasUsablePassword:      user.PasswordHash != "", // Deprecated alias of HasPasswordSet
+		PasswordUpdatedAt:      user.PasswordUpdatedAt,
+		EmailVerified:          user.EmailVerified,
+		LastLoginAt:            user.LastLogin,
+		MFAGraceStartedAt:      user.MFAGraceStartedAt,
+		MFAFactors:             []models.MFAFactorView{},
+		OAuthProviders:         []models.OAuthProviderView{},
 	}
 
 	// MFARequired starts from the role-only check — covers the system

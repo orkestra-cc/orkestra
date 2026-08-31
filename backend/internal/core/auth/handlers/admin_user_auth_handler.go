@@ -183,6 +183,9 @@ func mapAdminUserAuthError(err error) error {
 		return nil
 	}
 	switch {
+	case errors.Is(err, services.ErrAuthPolicyUnavailable):
+		return errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
+			"Sign-in policy is temporarily unavailable; try again shortly.")
 	case errors.Is(err, services.ErrLastCredentialRemoval):
 		return huma.NewError(http.StatusConflict, "last_credential",
 			&huma.ErrorDetail{Message: "user has no other login method — send a password reset first"})

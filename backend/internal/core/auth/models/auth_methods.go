@@ -8,10 +8,19 @@ import "time"
 // the admin profile card consumes. Mirrors the operator-facing card so
 // every method shown in the UI maps to a concrete field here.
 type AuthMethodsView struct {
-	// HasUsablePassword is true iff the user has a non-empty password
-	// hash. "Usable" is the right framing because OAuth-only accounts
-	// have no password — they cannot log in via email+password until
-	// one is set (typically via the password-reset flow).
+	// HasPasswordSet is true iff the user has a non-empty password hash.
+	// Presence only: whether the surface currently ACCEPTS the password
+	// is PasswordUsableForLogin.
+	HasPasswordSet bool `json:"hasPasswordSet"`
+	// PasswordUsableForLogin is HasPasswordSet ∧ the per-surface
+	// passwordLoginEnabled policy for this user's tier. Unlink and reset
+	// decisions read this; "set / change / last updated" UI reads
+	// HasPasswordSet.
+	PasswordUsableForLogin bool `json:"passwordUsableForLogin"`
+	// HasUsablePassword is the pre-toggle name.
+	//
+	// Deprecated: alias of HasPasswordSet (NOT of usability), kept one
+	// release for wire compatibility; remove per spec §8.
 	HasUsablePassword bool       `json:"hasUsablePassword"`
 	PasswordUpdatedAt *time.Time `json:"passwordUpdatedAt,omitempty"`
 

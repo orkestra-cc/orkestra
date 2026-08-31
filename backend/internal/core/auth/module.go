@@ -1280,6 +1280,19 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	clBundle.authService.SetSessionRevocation(sessionRevocationSvc)
 	clBundle.passwordSvc.SetSessionRevocation(sessionRevocationSvc)
 
+	// §4.7: the unlink guards count usable links through the same strict
+	// one-read resolver the web flow uses; the closure keeps the resolver
+	// type out of the services package.
+	providerUsability := func(ctx context.Context, audience services.PolicyAudience, p iface.OAuthProvider) (bool, error) {
+		_, ok, err := oauthResolver.OAuthWebProviderUsable(ctx, audience, models.OAuthProvider(string(p)))
+		if err != nil {
+			return false, err
+		}
+		return ok, nil
+	}
+	opBundle.authService.SetProviderUsability(providerUsability)
+	clBundle.authService.SetProviderUsability(providerUsability)
+
 	m.clientMFAHandler = handlers.NewMFAHandler(
 		clBundle.mfaSvc,
 		mfaChallengeSvc,
