@@ -198,9 +198,12 @@ func TestLoginVerify_PasswordPolicyRecheck(t *testing.T) {
 	})
 	t.Run("missing policy wiring answers 503 and retains the challenge", func(t *testing.T) {
 		// Built exactly like newCompletionMFAHandler but WITHOUT SetPolicy, so
-		// h.policy is a nil *AuthPolicyService. decider() must hand the helper
-		// a nil INTERFACE rather than a typed-nil one — a typed nil would sail
-		// past the helper's nil check and call methods on it.
+		// h.policy is a nil *AuthPolicyService. What is pinned is the OUTCOME:
+		// missing wiring is an outage — 503, challenge retained, nothing minted
+		// or audited. TWO mechanisms produce it (decider() maps the nil pointer
+		// to a nil INTERFACE, and PasswordLoginDecision is itself nil-receiver
+		// safe), so this case does not distinguish them; what it does catch is
+		// the helper's nil branch being changed to a pass.
 		svc := newChallengeService(t)
 		ch := newLoginChallenge(t, svc, "operator")
 		issuer := &completionIssuer{}

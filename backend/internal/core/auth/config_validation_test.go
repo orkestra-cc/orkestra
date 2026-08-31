@@ -207,7 +207,8 @@ func TestLoginMethodInvariant(t *testing.T) {
 }
 
 // TestValidateConfigSnapshot_BindsLoginMethodInvariant pins the WIRING, not
-// the rule: every case above calls validateLoginMethodInvariant directly, so
+// the rule: every case in TestLoginMethodInvariant calls
+// validateLoginMethodInvariant directly, so
 // deleting the call from ValidateConfigSnapshot would leave them all green
 // while the admin API stopped enforcing §4.4 entirely. This one case goes
 // through the exported method the SDK actually calls.
