@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.25 (Huma v2, chi), MongoDB via PR 1's CAS repository (no new collections), React 19 + TypeScript (RTK Query, react-hook-form + yup, react-i18next), Vitest + MSW.
 
-**Spec:** `docs/superpowers/specs/2026-08-29-password-login-toggle-design.md` (v4.4). PR 3 implements the §7 row "3 — Password-login toggle"; every §-reference below is to that file. PR 1 (SDK config integrity, merged as `7574368a`) and PR 2 (OAuth callback hygiene, merged as `8bde7e5e`) are both in `dev`; this plan was verified against `dev` at **`ca24e614`** — every file:line below refers to that commit.
+**Spec:** `docs/superpowers/specs/2026-08-29-password-login-toggle-design.md` (v4.5 — v4.4 plus the §0 entry recording D1/D10/D11). PR 3 implements the §7 row "3 — Password-login toggle"; every §-reference below is to that file. PR 1 (SDK config integrity, merged as `7574368a`) and PR 2 (OAuth callback hygiene, merged as `8bde7e5e`) are both in `dev`; this plan was verified against `dev` at **`ca24e614`** — every file:line below refers to that commit.
 
 ## Global Constraints
 
@@ -27,7 +27,7 @@
 - **No secret, token, password or full email** in any log line, audit event, error message or response introduced by this PR. WARNs and validation errors name keys, never values.
 - **SDK self-containment:** the only `pkg/sdk` change is two additive `iface` error sentinels (deviation 1). No file under `backend/pkg/sdk/` may import `backend/internal/*` — verify with `grep -rn "internal/" backend/pkg/sdk/ --include="*.go"` (doc-comment hits only) before every commit touching the SDK. The `Module` interface stays frozen (`HotReloadConfig` is already part of it; `BaseModule` defaults it to false and `AuthModule` overrides it).
 - **SPA rules (frontend-admin only; `orkestra-frontend-admin` skill applies):** RTK Query only; `react-hook-form` + `yup` for forms (stack mandate — `EmailPasswordForm` migrates as it is reworked, deviation 8); every string through `t()` with EN **and** IT keys (parity test enforces); path aliases without `@/`; react-router 8 (`react-router`). The SPA hides password UI on persisted false/null instead of showing a 403 on submit (G5); the ONLY visible password form under persisted-off is the operator emergency form while `passwordLoginBreakGlassEffective` is true, clearly labelled, with forgot-password + register CTAs hidden. On an ordinary `/policy` failure the SPAs keep their fail-open display fallback (the backend still refuses — §4.9).
-- **Docs move in the same commit as the code** (`feedback_commit_doc_hygiene`): `backend/internal/core/auth/CLAUDE.md`, `backend/pkg/sdk/CLAUDE.md` + `docs/site/sdk/shared-iface.mdx` (the two new sentinels), `docs/site/modules/core/auth.mdx` (63 → 65 fields + "SSO-only surface"), `docs/site/operating/oauth-providers.mdx` ("Going SSO-only"), `docs/site/architecture/authentication-flow.mdx`, `docker/.env.example`, the `StepUpPolicy` doc comment in `backend/internal/shared/middleware/auth.go`, `frontend-admin/CLAUDE.md` — The mapping is explicit: Task 1 → `backend/pkg/sdk/CLAUDE.md` + `docs/site/sdk/shared-iface.mdx` + `docker/.env.example`; Tasks 2–7 → the `backend/internal/core/auth/CLAUDE.md` rows for what each changes; Task 5 → the `StepUpPolicy` doc comment; Task 7 → `backend/openapi/enterprise.json`; Tasks 8–9 → `frontend-admin/CLAUDE.md` if its auth notes drift; Task 10 is the cross-cutting VERIFICATION sweep — it completes and reconciles, it is never the first touch.
+- **Docs move in the same commit as the code** (`feedback_commit_doc_hygiene`): `backend/internal/core/auth/CLAUDE.md`, `backend/pkg/sdk/CLAUDE.md` + `docs/site/sdk/shared-iface.mdx` (the two new sentinels), `docs/site/modules/core/auth.mdx` (63 → 65 fields + "SSO-only surface"), `docs/site/operating/oauth-providers.mdx` ("Going SSO-only"), `docs/site/architecture/authentication-flow.mdx`, `docker/.env.example`, the `StepUpPolicy` doc comment in `backend/internal/shared/middleware/auth.go`, `frontend-admin/CLAUDE.md` — The mapping is explicit: Task 1 → `backend/pkg/sdk/CLAUDE.md` + `docs/site/sdk/shared-iface.mdx` + `docker/.env.example`; Tasks 2–7 → the `backend/internal/core/auth/CLAUDE.md` rows for what each changes; Task 5 → the `StepUpPolicy` doc comment; Task 7 → `backend/openapi/enterprise.json`; Task 8 → `frontend-admin/CLAUDE.md` (its authentication-components paragraph describes exactly the components Task 8 reworks); Task 9's field migration is not described by any standing doc; Task 10 is the cross-cutting VERIFICATION sweep — it completes and reconciles, it is never the first touch.
 - **Test commands** (absolute paths — `cd` drifts the shell between calls): backend `go test ./internal/core/auth/... ./internal/shared/... ./pkg/sdk/... ./internal/core/user/... -count=1` run from `/home/tore/orkestra/backend` after every step; `go vet ./...` before every commit (a bare `go build` does not compile `_test.go`); full gate `MONGO_TEST_URI='mongodb://127.0.0.1:28017/?directConnection=true' make -C /home/tore/orkestra ci-backend` (0 SKIP with the `ork-errquality-ci-mongo` helper up). Frontend: `cd /home/tore/orkestra/frontend-admin && npx vitest run src/components/authentication src/pages/user src/pages/admin/user-profile && npm run typecheck && npm run lint`; full gate `make -C /home/tore/orkestra ci-frontend-admin`. OpenAPI: `make -C /home/tore/orkestra/backend openapi-dump` (self-configures from `docker/.env` against the staging infra on `localhost:27017/6379` — `grep "^ENV=" /home/tore/orkestra/docker/.env` first; the local stack is `orkestra-public-*-staging`). Docs render: fresh clone of `orkestra-docs`, `npm ci`, `MONOREPO_LOCAL_PATH=/home/tore/orkestra npm run sync` (**full** sync, not `sync:site`), `CI=true npm run build`.
 - **Never start servers manually**; never `git push --tags`; never `--amend`; stage by path, never `git add -A`; conventional-commit subjects (the `conventional-pre-commit` hook rejects anything else). **Every commit carries the `Claude-Session:` trailer**: once per shell run `export CLAUDE_SESSION=<your session id>` (it is in your task brief / harness environment) — the commit commands below all pass it as a second `-m`.
 - **errquality (CI):** no `err.Error()` as a client-facing detail, no detail that merely repeats the status, no 4xx from the `default:` branch of an `errors.Is` switch. Every new mapping case is an explicit `errors.Is`.
@@ -44,24 +44,24 @@ Each is folded into a numbered deviation below where it changes the design; none
 - **F6 — Challenge provenance is already consistent.** The password path stamps `LoginMethod:"password"` + `SourceAMR:["pwd"]` (`password_auth_service.go:701-714`); the OAuth path stamps `LoginMethod:"oauth"` + `SourceAMR:["oauth"]` (`auth_service.go:2249-2254`). The gate's "password-sourced" predicate (LoginMethod=="password" ∨ SourceAMR∋"pwd") is decidable for every challenge either path can mint today; the new `Audience` field removes the remaining ambiguity for post-v3 challenges, and an empty `Audience` marks a pre-v3 in-flight challenge (invalid + consumed).
 - **F7 — Compose files enumerate env vars explicitly.** The backend service blocks in `docker-compose.{dev,staging,prod}.yml` list every variable they forward (e.g. `ALLOW_LOCALHOST_REDIRECTS`, `docker-compose.prod.yml:82`); a variable not listed never reaches the container, so the documented break-glass procedure would silently no-op without deviation 4. (Same finding PR 2 hit with `CLIENT_API_URL`.)
 
-## Declared deviations from spec v4.4 — decision table
+## Declared deviations — decision table (all resolved; contract rows recorded in spec v4.5 §0)
 
-Execution is BLOCKED until every row reads **Approved**. Contract-shaped rows (SDK surface, wire behaviour, or a spec-§ contradiction) additionally require a spec §0 bump (v4.5) recording the decision — the spec is the contract, a plan cannot amend it. The reviewer flips each Status; the executor re-checks this table before Task 1.
+Every row is resolved: the reviewer approved the twelve deviations in plan review round 2 (2026-08-31), and the three contract-shaped readings are recorded in **spec v4.5 §0** (same branch, commit `ee95efb7`) — the spec is the contract, a plan cannot amend it. The executor re-checks this table before Task 1; a Status regression back to PENDING blocks execution.
 
 | # | Deviation | Shape | Status |
 |---|---|---|---|
-| D1 | `iface.ErrPasswordLoginDisabled` / `iface.ErrAuthPolicyUnavailable` + services aliases | **Contract** (additive SDK surface; changes §4.3's declared sentinel homes) | PENDING review round 2 |
-| D2 | `strictBool` exported as `services.StrictBool` | Implementation (in-tree visibility) | PENDING |
-| D3 | Break-glass flag carried by `AuthPolicyService` (setter + display accessor) | Implementation (spec names env+config field, not the carrier) | PENDING |
-| D4 | Compose files enumerate `AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS` | Implementation (deployment artifact; F7) | PENDING |
-| D5 | `LoginTokenIssuer` gains `EmitBreakGlassUsed` | Implementation (in-tree handler interface; §4.2 fixes the event, not the seam) | PENDING |
-| D6 | Completion re-check runs before factor verification | Implementation (spec fixes outcomes, not placement) | PENDING |
-| D7 | `completeLogin` gains the decision param; OAuth `BeginLogin` stamps `Audience` | Implementation (delivers §4.3's required fields) | PENDING |
-| D8 | `EmailPasswordForm` migrates to RHF + yup | Implementation (stack mandate; PR 2 dev-27 precedent) | PENDING |
-| D9 | `SocialLoginForm.onProvidersResolved(count)` | Implementation (the seam §4.10's own table names) | PENDING |
-| D10 | Malformed booleans among the eleven invariant keys rejected up-front | **Contract-adjacent** (wire-visible 422 on writes; reading of §4.4 + edge #29 — confirm the reading in the spec bump) | PENDING |
-| D11 | `Register`: nil policy = 503 for non-bootstrap signups | **Contract-adjacent** (wire-visible only during an outage; G4's own demand — confirm in the spec bump) | PENDING |
-| D12 | `/policy`'s pre-existing fields keep permissive reads | Implementation (spec §4.2 states it; restated to bound scope) | PENDING |
+| D1 | `iface.ErrPasswordLoginDisabled` / `iface.ErrAuthPolicyUnavailable` + services aliases | **Contract** (additive SDK surface; changes §4.3's declared sentinel homes) | **Approved — spec v4.5 §0** |
+| D2 | `strictBool` exported as `services.StrictBool` | Implementation (in-tree visibility) | Approved (round 2) |
+| D3 | Break-glass flag carried by `AuthPolicyService` (setter + display accessor) | Implementation (spec names env+config field, not the carrier) | Approved (round 2) |
+| D4 | Compose files enumerate `AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS` | Implementation (deployment artifact; F7) | Approved (round 2) |
+| D5 | `LoginTokenIssuer` gains `EmitBreakGlassUsed` | Implementation (in-tree handler interface; §4.2 fixes the event, not the seam) | Approved (round 2) |
+| D6 | Completion re-check runs before factor verification | Implementation (spec fixes outcomes, not placement) | Approved (round 2) |
+| D7 | `completeLogin` gains the decision param; OAuth `BeginLogin` stamps `Audience` | Implementation (delivers §4.3's required fields) | Approved (round 2) |
+| D8 | `EmailPasswordForm` migrates to RHF + yup | Implementation (stack mandate; PR 2 dev-27 precedent) | Approved (round 2) |
+| D9 | `SocialLoginForm.onProvidersResolved(count)` | Implementation (the seam §4.10's own table names) | Approved (round 2) |
+| D10 | Malformed booleans among the eleven invariant keys rejected up-front | **Contract-adjacent** (wire-visible 422 on writes; reading of §4.4 + edge #29) | **Approved — spec v4.5 §0** |
+| D11 | `Register`: nil policy = 503 for non-bootstrap signups | **Contract-adjacent** (wire-visible only during an outage; G4's own demand) | **Approved — spec v4.5 §0** |
+| D12 | `/policy`'s pre-existing fields keep permissive reads | Implementation (spec §4.2 states it; restated to bound scope) | Approved (round 2) |
 
 1. **Two error sentinels move to `pkg/sdk/iface`, next to `AdminAuthInviter`.** `iface.ErrPasswordLoginDisabled` and `iface.ErrAuthPolicyUnavailable` are declared beside the interface both admin reset routes consume (precedent: `iface.ErrKMSKeyNotFound` beside `KMSProvider`), and the services vars become aliases preserving identity: `services.ErrAuthPolicyUnavailable = iface.ErrAuthPolicyUnavailable` (re-homing PR 2's `errors.New`) and `services.ErrPasswordLoginDisabled = iface.ErrPasswordLoginDisabled` (instead of §4.3's `stderrors.New` literal). Every existing `errors.Is`/`%w` use keeps working — only the declaration site changes. Why: F1 — the user-module twin must map the sentinels across a module boundary that forbids importing `auth/services`, and message equality breaks on wrapped errors. Rejected alternative: `strings.Contains` on `err.Error()` — a copy-editing change to an error message would silently turn a 409 into a 500. Cost if wrong: two additive exported SDK vars a fork could reference.
 2. **`strictBool` is exported as `services.StrictBool`.** The snapshot validator lives in package `auth` and implements the §4.4 formula; the parser it must share (PR 2's, `auth_policy_service.go:52-61`) is unexported. Straight rename + the two internal call-site updates (`OAuthAutoLinkByEmailEnabled`, `usableFromView`). Cost: none — additive visibility.
@@ -105,7 +105,7 @@ Execution is BLOCKED until every row reads **Approved**. Contract-shaped rows (S
 
 **Backend — new test files:** `internal/core/auth/handlers/mfa_login_verify_test.go` (completion re-check pair). Everything else extends existing suites: `services/auth_policy_service_test.go`, `services/gates_test.go` (+ `gates_fakes_test.go`), `config_validation_test.go`, `services/password_confirm_test.go`, `services/auth_service_admin_unlink_test.go`, `services/auth_service_self_unlink_test.go`, `services/auth_service_get_methods_test.go`, `shared/middleware/step_up_test.go`, `handlers/error_mapping_test.go`, `internal/core/user/handlers` (client twin mapping), `shared/errcode/codes_test.go`, plus new `/policy` handler tests in `handlers/auth_policy_endpoint_test.go`.
 
-**Frontend-admin — modify:** `src/store/api/authApi.ts`, `src/store/api/userApi.ts`, `src/components/authentication/{EmailPasswordForm,RegisterForm,ForgotPasswordForm,Login,SocialLoginForm}.tsx`, `src/pages/user/security/{PasswordTab,LinkedProvidersTab}.tsx`, `src/pages/user/settings/SecuritySummaryCard.tsx`, `src/pages/admin/user-profile/AdminAuthMethodsCard.tsx`, `src/locales/{en,it}.json`. Tests beside each component (existing suites extended; new `EmailPasswordForm.test.tsx` and `Login.test.tsx` if absent).
+**Frontend-admin — modify:** `src/store/api/authApi.ts`, `src/store/api/userApi.ts`, `src/components/authentication/{EmailPasswordForm,RegisterForm,ForgotPasswordForm,Login,SocialLoginForm}.tsx`, `src/pages/user/security/{PasswordTab,LinkedProvidersTab}.tsx`, `src/pages/user/settings/SecuritySummaryCard.tsx`, `src/pages/admin/user-profile/AdminAuthMethodsCard.tsx`, `src/locales/{en,it}.json`. Also `src/test/handlers.ts` and `frontend-admin/CLAUDE.md`. Tests: `EmailPasswordForm.test.tsx` + `SocialLoginForm.test.tsx` extended; new `Login.test.tsx`, `RegisterForm.test.tsx`, `ForgotPasswordForm.test.tsx`, `PasswordTab.test.tsx`, `LinkedProvidersTab.test.tsx`, `SecuritySummaryCard.test.tsx`, `AdminAuthMethodsCard.test.tsx`.
 
 **Docs:** `backend/internal/core/auth/CLAUDE.md`, `backend/pkg/sdk/CLAUDE.md`, `docs/site/sdk/shared-iface.mdx`, `docs/site/modules/core/auth.mdx`, `docs/site/operating/oauth-providers.mdx`, `docs/site/architecture/authentication-flow.mdx`, `frontend-admin/CLAUDE.md`.
 
@@ -2729,7 +2729,20 @@ func TestSelfUnlinkOAuth_UsableLinkGuard(t *testing.T) {
 }
 ```
 
-The pre-existing cases `TestAdminUnlinkOAuth_Success/_LastCredentialLockout/_LastOAuthLinkButPasswordSet` (and the self-unlink twins) now construct via `newGuardedUnlinkSvc(fake, nil /*password on by default*/, map[iface.OAuthProvider]bool{...all their providers true...}, nil)` — same assertions, updated constructor: their subjects are unchanged semantics under all-usable input.
+The pre-existing cases that reach the guard swap `newAdminUnlinkSvc(fake)` for the guarded constructor — same assertions, unchanged subjects, all-usable input (`nil` policyValues = absent keys = legacy password-on):
+
+| Test | New constructor call |
+|---|---|
+| `TestAdminUnlinkOAuth_Success` (`:156`) | `newGuardedUnlinkSvc(fake, nil, map[iface.OAuthProvider]bool{"google": true, "github": true}, nil)` |
+| `TestAdminUnlinkOAuth_LastCredentialLockout` (`:203`) | `newGuardedUnlinkSvc(fake, nil, map[iface.OAuthProvider]bool{"google": true}, nil)` |
+| `TestAdminUnlinkOAuth_LastOAuthLinkButPasswordSet` (`:221`) | `newGuardedUnlinkSvc(fake, nil, map[iface.OAuthProvider]bool{"google": true}, nil)` |
+| `TestAdminUnlinkOAuth_ProviderNotLinked` (`:239`) | `newGuardedUnlinkSvc(fake, nil, map[iface.OAuthProvider]bool{"google": true}, nil)` |
+| `TestSelfUnlinkOAuth_Success` (`self:17`) | `newGuardedUnlinkSvc(fake, nil, map[iface.OAuthProvider]bool{"google": true, "github": true}, nil)` |
+| `TestSelfUnlinkOAuth_LastCredentialLockout` (`self:40`) | `newGuardedUnlinkSvc(fake, nil, map[iface.OAuthProvider]bool{"google": true}, nil)` |
+| `TestSelfUnlinkOAuth_ProviderNotLinked` (`self:57`) | `newGuardedUnlinkSvc(fake, nil, map[iface.OAuthProvider]bool{"google": true}, nil)` |
+| `TestSelfUnlinkOAuth_SelfActionAllowed` (`self:75`) | `newGuardedUnlinkSvc(fake, nil, map[iface.OAuthProvider]bool{"google": true, "github": true}, nil)` |
+
+`TestAdminUnlinkOAuth_SelfAction` (`:185`), `TestAdminUnlinkOAuth_RejectsEmptyArgs` (`:253`) and `TestSelfUnlinkOAuth_RejectsEmptyUUID` (`self:92`) keep the bare `newAdminUnlinkSvc(fake)`: they short-circuit (self-action check, empty-args check) before the new policy/usability prelude runs.
 
 Append to `auth_service_get_methods_test.go` (update `newGetMethodsSvc` to take `policyValues map[string]string` and set `policy`+`audience` like `newGuardedUnlinkSvc`; existing calls pass `nil` for legacy-true):
 
@@ -2957,10 +2970,10 @@ func wouldLockOutOAuthUnlink(target *iface.User, links []iface.OAuthLink,
 		return ok, nil
 	}
 	opBundle.authService.SetProviderUsability(providerUsability)
-	clientBundle.authService.SetProviderUsability(providerUsability)
+	clBundle.authService.SetProviderUsability(providerUsability)
 ```
 
-(use the actual client-bundle variable name at that site.)
+(`clBundle` is the client bundle's variable at that site — `module.go:1221`.)
 
 - [ ] **Step 5: Fix the ripple**
 
@@ -3156,7 +3169,7 @@ Pre-flight (orkestra-frontend-admin skill): production precedent = `src/componen
 **Files:**
 - Modify: `frontend-admin/src/store/api/authApi.ts:143-147` (`AuthPolicy` type) + `:219-231` (fallback)
 - Modify: `frontend-admin/src/components/authentication/EmailPasswordForm.tsx` (rework), `RegisterForm.tsx`, `ForgotPasswordForm.tsx`, `Login.tsx`, `SocialLoginForm.tsx`
-- Modify: `frontend-admin/src/locales/en.json`, `it.json`
+- Modify: `frontend-admin/src/locales/en.json`, `it.json`, `frontend-admin/CLAUDE.md` (authentication paragraph)
 - Test: `EmailPasswordForm.test.tsx`, `SocialLoginForm.test.tsx` (extend), `Login.test.tsx`, `RegisterForm.test.tsx`, `ForgotPasswordForm.test.tsx` (new)
 
 **Interfaces:**
@@ -3220,11 +3233,14 @@ describe('password-login policy gating (PR 3 §4.10)', () => {
       })
     );
     renderForm();
+    // auth.pages.passwordBreakGlassActive (added in Step 7)
     expect(
-      await screen.findByText(/emergency/i, { exact: false })
+      await screen.findByText(/emergency access mode/i)
     ).toBeInTheDocument();
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
-    expect(screen.queryByText(/forgot/i)).not.toBeInTheDocument();
+    // existing copy: auth.forgotPassword = "Forgot password?" (en.json:215),
+    // auth.createOne = "Create one" (en.json:219)
+    expect(screen.queryByText(/forgot password\?/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/create one/i)).not.toBeInTheDocument();
   });
 
@@ -3238,7 +3254,7 @@ describe('password-login policy gating (PR 3 §4.10)', () => {
 });
 ```
 
-(assert copy through the EN keys added below — match on the rendered strings the way the file's existing tests do; adjust the matchers to the exact copy.)
+(every matcher above is pinned to verified copy: `auth.pages.passwordBreakGlassActive` from Step 7, `auth.forgotPassword` = "Forgot password?" at `en.json:215`, `auth.createOne` = "Create one" at `en.json:219`.)
 
 `SocialLoginForm.test.tsx` — append (the file already stubs `initiateSocialLogin` via `vi.mock` and overrides `*/v1/auth/operator/providers` per test):
 
@@ -3275,13 +3291,13 @@ describe('onProvidersResolved (PR 3 §4.10)', () => {
     );
     const resolved = vi.fn();
     renderWithProviders(<SocialLoginForm onProvidersResolved={resolved} />);
-    await screen.findByText(/couldn|load|unable/i); // the existing auth.social.loadError copy
+    // auth.social.loadError, en.json:340: "Could not load the social
+    // sign-in options. Please try again."
+    await screen.findByText(/could not load the social sign-in options/i);
     expect(resolved).not.toHaveBeenCalled();
   });
 });
 ```
-
-(adjust the loadError matcher to the exact `auth.social.loadError` EN string in `en.json`.)
 
 New `Login.test.tsx` (policy + providers via MSW; `policyWith` as in `EmailPasswordForm.test.tsx` — import or re-declare locally):
 
@@ -3373,7 +3389,7 @@ New `RegisterForm.test.tsx` and `ForgotPasswordForm.test.tsx` — the two direct
 // RegisterForm.test.tsx
 import { describe, it, expect } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { screen, waitFor } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
 import RegisterForm from './RegisterForm';
@@ -3710,7 +3726,7 @@ Both: read the policy, and when `!passwordUiVisible(policy)` render ONLY the dis
 
 - [ ] **Step 6: `Login` no-method alert + `SocialLoginForm` callback**
 
-`SocialLoginForm.tsx`: add the prop and the resolution effect:
+`SocialLoginForm.tsx`: the React import becomes `import { useEffect, useState } from 'react';` (`useEffect` is new); then add the prop and the resolution effect:
 
 ```tsx
 interface SocialLoginFormProps {
@@ -3781,13 +3797,32 @@ and `auth.errors` gains (yup owns email-shape validation now that the form is `n
 
 Task note: the spec's key list also names `pages.providersUnavailable`; the provider-query error state is already rendered by the existing `auth.social.loadError` — no dead key is added, recorded here so the reviewer sees the delta deliberately.
 
-- [ ] **Step 8: Run, typecheck, lint, commit**
+- [ ] **Step 8: Same-commit docs**
+
+`frontend-admin/CLAUDE.md` — the `components/authentication/` paragraph (the long entry around line 66) currently describes the pre-toggle forms; append to it, in the same voice:
+
+```markdown
+The unauthenticated password surface is policy-gated (PR 3): `EmailPasswordForm`
+(now `react-hook-form` + `yup`) renders only when `/policy`'s
+`passwordLoginEnabled` is literally `true` — a served `false` OR `null` hides
+it (the shared predicate is `passwordUiVisible` in `store/api/authApi.ts`;
+only a TRANSPORT failure falls open, via the queryFn fallback) — except under
+`passwordLoginBreakGlassEffective`, which renders a labelled emergency form
+with the forgot-password and register CTAs hidden. `RegisterForm` and
+`ForgotPasswordForm` render only the disabled alert in that state, break-glass
+included. `SocialLoginForm` reports its resolved provider count through
+`onProvidersResolved` (success only, never on a query error) so `Login` can
+show the no-sign-in-method alert without a second query — an outage renders
+the retryable provider error instead, never "no method".
+```
+
+- [ ] **Step 9: Run, typecheck, lint, commit**
 
 `cd /home/tore/orkestra/frontend-admin && npx vitest run src/components/authentication && npm run typecheck && npm run lint`
 Expected: PASS (locale parity included).
 
 ```bash
-git add frontend-admin/src/store/api/authApi.ts frontend-admin/src/components/authentication/EmailPasswordForm.tsx frontend-admin/src/components/authentication/EmailPasswordForm.test.tsx frontend-admin/src/components/authentication/RegisterForm.tsx frontend-admin/src/components/authentication/RegisterForm.test.tsx frontend-admin/src/components/authentication/ForgotPasswordForm.tsx frontend-admin/src/components/authentication/ForgotPasswordForm.test.tsx frontend-admin/src/components/authentication/Login.tsx frontend-admin/src/components/authentication/Login.test.tsx frontend-admin/src/components/authentication/SocialLoginForm.tsx frontend-admin/src/components/authentication/SocialLoginForm.test.tsx frontend-admin/src/locales/en.json frontend-admin/src/locales/it.json
+git add frontend-admin/CLAUDE.md frontend-admin/src/store/api/authApi.ts frontend-admin/src/components/authentication/EmailPasswordForm.tsx frontend-admin/src/components/authentication/EmailPasswordForm.test.tsx frontend-admin/src/components/authentication/RegisterForm.tsx frontend-admin/src/components/authentication/RegisterForm.test.tsx frontend-admin/src/components/authentication/ForgotPasswordForm.tsx frontend-admin/src/components/authentication/ForgotPasswordForm.test.tsx frontend-admin/src/components/authentication/Login.tsx frontend-admin/src/components/authentication/Login.test.tsx frontend-admin/src/components/authentication/SocialLoginForm.tsx frontend-admin/src/components/authentication/SocialLoginForm.test.tsx frontend-admin/src/locales/en.json frontend-admin/src/locales/it.json
 git commit -m "feat(frontend-admin): hide password UI per policy, labelled break-glass form, no-method alert" -m "Claude-Session: $CLAUDE_SESSION"
 ```
 
@@ -3826,9 +3861,22 @@ export const emptySelfAuthMethods = {
   hasUsablePassword: true, // deprecated alias, mirrors hasPasswordSet
   emailVerified: true,
   mfaRequired: false,
-  // …existing mfaFactors / oauthProviders arrays unchanged…
+  mfaFactors: [] as Array<{
+    type: 'totp' | 'webauthn';
+    enrolledAt?: string;
+    lastUsedAt?: string;
+    backupCodesRemaining?: number;
+  }>,
+  oauthProviders: [] as Array<{
+    provider: 'google' | 'apple' | 'github' | 'discord';
+    email: string;
+    linkedAt: string;
+    isPrimary: boolean;
+  }>
 };
 ```
+
+(the two typed arrays are verbatim from the current `handlers.ts:25-37`; only the three password fields are new.)
 
 New `PasswordTab.test.tsx` (`selfAuthMethodsHandler` + the policy handler; `renderWithProviders` as in `SessionsTab.test.tsx`):
 
@@ -3863,7 +3911,11 @@ describe('PasswordTab split password fields (PR 3 §4.8)', () => {
     expect(screen.queryByText(/disabled on this surface/i)).toBeNull();
   });
 
-  it('no hash: the set-a-password state keys off hasPasswordSet', async () => {
+  it('no hash: current password stays rendered but stops being required', async () => {
+    // The component never removes the field — it flips `required`
+    // (PasswordTab.tsx:96, `required={hasPassword}`); the PR 3 change is
+    // only WHICH view field feeds hasPassword (hasPasswordSet, not the
+    // deprecated alias).
     server.use(
       selfAuthMethodsHandler({
         ...emptySelfAuthMethods,
@@ -3873,14 +3925,14 @@ describe('PasswordTab split password fields (PR 3 §4.8)', () => {
       })
     );
     renderWithProviders(<PasswordTab />);
-    await waitFor(() =>
-      expect(screen.queryByLabelText(/current password/i)).toBeNull()
-    );
+    const current = await screen.findByLabelText(/current password/i);
+    expect(current).toBeInTheDocument();
+    expect(current).not.toBeRequired();
   });
 });
 ```
 
-(match the two field-label matchers to the tab's actual EN copy — `userSecurity.passwordTab.*` in `en.json` — before finalising.)
+(label matchers are the exact EN copy: `userSecurity.passwordTab.labelCurrent` = "Current password"; the notice matcher is the new `keptNotice` copy's "disabled on this surface".)
 
 New `AdminAuthMethodsCard.test.tsx` (admin endpoint, not the self one):
 
@@ -3891,7 +3943,7 @@ import { screen } from '@testing-library/react';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
 import AdminAuthMethodsCard from './AdminAuthMethodsCard';
-import type { User } from 'types/user';
+import type { User } from 'store/api/userApi';
 
 const targetUser = { id: 'u-1', name: 'Target User' } as User;
 
@@ -3911,21 +3963,29 @@ const adminAuthMethods = (overrides: Record<string, unknown>) =>
   );
 
 describe('AdminAuthMethodsCard split password fields (PR 3 §4.8)', () => {
-  it('method off: reset button disabled with the policy tooltip; badge still reads presence', async () => {
+  // Button-name matchers are the exact EN copy:
+  //   adminUserProfile.authMethods.passwordSendResetButton = "Send password-reset email"
+  //   adminUserProfile.authMethods.oauthActionsAria       = "actions for {{provider}}"
+  it('method off: reset button disabled; presence badge still reads hasPasswordSet', async () => {
     server.use(adminAuthMethods({ passwordUsableForLogin: false }));
     renderWithProviders(<AdminAuthMethodsCard user={targetUser} />);
-    const reset = await screen.findByRole('button', { name: /reset/i });
+    const reset = await screen.findByRole('button', {
+      name: /send password-reset email/i
+    });
     expect(reset).toBeDisabled();
-    expect(screen.getByText(/set/i)).toBeInTheDocument(); // presence badge from hasPasswordSet
+    // presence badge (adminUserProfile.authMethods.passwordBadgeSet = "Set")
+    expect(screen.getByText(/^set$/i)).toBeInTheDocument();
   });
 
   it('method on: reset button enabled', async () => {
     server.use(adminAuthMethods({}));
     renderWithProviders(<AdminAuthMethodsCard user={targetUser} />);
-    expect(await screen.findByRole('button', { name: /reset/i })).toBeEnabled();
+    expect(
+      await screen.findByRole('button', { name: /send password-reset email/i })
+    ).toBeEnabled();
   });
 
-  it('unlink block-reason keys off usability even with a hash present', async () => {
+  it('provider actions block keys off usability even with a hash present', async () => {
     server.use(
       adminAuthMethods({
         hasPasswordSet: true,
@@ -3936,14 +3996,17 @@ describe('AdminAuthMethodsCard split password fields (PR 3 §4.8)', () => {
       })
     );
     renderWithProviders(<AdminAuthMethodsCard user={targetUser} />);
-    await screen.findByText(/google/i);
-    // The row's unlink control must be blocked with the only-credential reason.
-    expect(screen.getByRole('button', { name: /unlink/i })).toBeDisabled();
+    // The blocked ProviderActions button carries the same aria-label as
+    // the enabled dropdown toggle (Step 3.4).
+    const actions = await screen.findByRole('button', {
+      name: /actions for google/i
+    });
+    expect(actions).toBeDisabled();
   });
 });
 ```
 
-(adjust the badge/button matchers to the card's `adminUserProfile.authMethods.*` EN copy and to how the row disables — tooltip-wrapped span or disabled prop — after reading the final JSX; `renderWithProviders` must carry an authenticated admin in the store the way the page's sibling tests do — if none exists, seed `selectUser` state via the render helper's preloaded state, same idiom as `useUserTable.test.tsx`.)
+(`renderWithProviders` must carry an authenticated admin in the store so `isSelf` resolves false — seed `selectUser` state via the render helper's preloaded state with an id ≠ `u-1`, the same idiom `useUserTable.test.tsx` uses.)
 
 Extend the existing security-center coverage for the other two consumers, same files' suites:
 
@@ -3966,7 +4029,9 @@ describe('LinkedProvidersTab only-credential (PR 3 §4.8)', () => {
     );
     renderWithProviders(<LinkedProvidersTab />);
     await screen.findByText(/google/i);
-    expect(screen.getByRole('button', { name: /unlink|disconnect/i })).toBeDisabled();
+    // userSecurity.linkedProvidersTab.rowUnlink = "Unlink" — a real text
+    // button (LinkedProvidersTab.tsx:276-282, disabled={onlyCredential || isFetching}).
+    expect(screen.getByRole('button', { name: /^unlink$/i })).toBeDisabled();
   });
 
   it('two providers keep unlink available', async () => {
@@ -3982,8 +4047,10 @@ describe('LinkedProvidersTab only-credential (PR 3 §4.8)', () => {
     );
     renderWithProviders(<LinkedProvidersTab />);
     await screen.findByText(/github/i);
-    const unlinks = screen.getAllByRole('button', { name: /unlink|disconnect/i });
-    expect(unlinks.some(b => !(b as HTMLButtonElement).disabled)).toBe(true);
+    // onlyCredential is false with two rows, so BOTH unlink buttons stay enabled.
+    for (const b of screen.getAllByRole('button', { name: /^unlink$/i })) {
+      expect(b).toBeEnabled();
+    }
   });
 });
 ```
@@ -4023,7 +4090,19 @@ describe('SecuritySummaryCard password row (PR 3 §4.8)', () => {
 });
 ```
 
-(both files carry the standard vitest/MSW import block of `PasswordTab.test.tsx`; `SecuritySummaryCard` may need the sessions handler stubbed too — `emptySessions` from `test/handlers` — check what the card fetches before finalising.)
+Both files carry the standard vitest/MSW import block of `PasswordTab.test.tsx`. `SecuritySummaryCard` fires THREE queries (`SecuritySummaryCard.tsx:45-49`: `useGetCurrentUserQuery` → `GET */v1/auth/operator/me`, `useGetSelfAuthMethodsQuery`, `useGetMySessionsQuery`) and an unhandled MSW request fails the run, so every SSC test stubs all three:
+
+```tsx
+server.use(
+  http.get('*/v1/auth/operator/me', () =>
+    HttpResponse.json({ id: 'u-1', email: 'op@example.com', name: 'Operator' })
+  ),
+  mySessionsHandler(emptySessions),
+  selfAuthMethodsHandler({ /* per-case override as above */ })
+);
+```
+
+(`mySessionsHandler` and `emptySessions` are existing exports of `test/handlers.ts`; match the `/me` body to `BackendUser`'s required fields if the typecheck asks for more.)
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -4041,32 +4120,58 @@ describe('SecuritySummaryCard password row (PR 3 §4.8)', () => {
 
 - `LinkedProvidersTab.tsx:107`: `const onlyCredential = !data?.passwordUsableForLogin && providers.length === 1;` (§4.8: unlink decisions → usability; the backend guard is authoritative, this only pre-explains the 409).
 - `SecuritySummaryCard.tsx:137`: the summary row keys off `hasPasswordSet`; when set-but-unusable append the muted note `t('settings.security.summary.passwordKeptNotice')`.
-- `AdminAuthMethodsCard.tsx`: `:178`/`:189` badge + last-changed read `hasPasswordSet`; `:320` `onlyCredential` reads `!data.passwordUsableForLogin && data.oauthProviders.length === 1`; the send-reset `action` button becomes
+- `AdminAuthMethodsCard.tsx`, three edits:
+  1. `:178`/`:189`: the badge + last-changed sub read `hasPasswordSet` instead of `hasUsablePassword`.
+  2. `:320`: `onlyCredential` reads `!data.passwordUsableForLogin && data.oauthProviders.length === 1`.
+  3. The send-reset `action` button (label stays the EXISTING key `adminUserProfile.authMethods.passwordSendResetButton`, `en.json:1865` — no new label key; the tooltip appears only in the blocked state, carrying the new `resetBlockedPolicy` copy):
 
 ```tsx
-              <OverlayTrigger
-                overlay={
-                  <Tooltip>
-                    {data.passwordUsableForLogin
-                      ? t('adminUserProfile.authMethods.passwordResetTooltip')
-                      : t('adminUserProfile.authMethods.resetBlockedPolicy')}
-                  </Tooltip>
-                }
-              >
-                <span className="d-inline-block">
-                  <Button
-                    variant="orkestra-default"
-                    size="sm"
-                    disabled={pwBusy || !data.passwordUsableForLogin}
-                    onClick={handleSendReset}
-                  >
-                    {t('adminUserProfile.authMethods.passwordResetSend')}
-                  </Button>
-                </span>
-              </OverlayTrigger>
+            action={
+              data.passwordUsableForLogin ? (
+                <Button
+                  variant="orkestra-default"
+                  size="sm"
+                  disabled={pwBusy}
+                  onClick={handleSendReset}
+                >
+                  {t('adminUserProfile.authMethods.passwordSendResetButton')}
+                </Button>
+              ) : (
+                <OverlayTrigger
+                  placement="left"
+                  overlay={
+                    <Tooltip>
+                      {t('adminUserProfile.authMethods.resetBlockedPolicy')}
+                    </Tooltip>
+                  }
+                >
+                  {/* span keeps the tooltip alive over a disabled button —
+                      Bootstrap's documented idiom */}
+                  <span className="d-inline-block">
+                    <Button variant="orkestra-default" size="sm" disabled>
+                      {t('adminUserProfile.authMethods.passwordSendResetButton')}
+                    </Button>
+                  </span>
+                </OverlayTrigger>
+              )
+            }
 ```
 
-(the `span` wrapper keeps the tooltip alive over a disabled button — Bootstrap's documented idiom; reuse the button's existing label/props from the file, and keep any existing tooltip copy key if one already wraps it).
+  4. `ProviderActions`'s BLOCKED branch (`:472-488`): the icon-only disabled button today has no accessible name (the enabled `Dropdown.Toggle` at `:495-500` already carries `aria-label={t('adminUserProfile.authMethods.oauthActionsAria', { provider })}` — "actions for {{provider}}"). Give the blocked button the SAME aria-label so it is the same control to assistive tech and to the tests:
+
+```tsx
+          <Button
+            variant="link"
+            size="sm"
+            disabled
+            className="text-body-tertiary"
+            aria-label={t('adminUserProfile.authMethods.oauthActionsAria', {
+              provider: provider.provider
+            })}
+          >
+            <FontAwesomeIcon icon="ellipsis-h" />
+          </Button>
+```
 
 - [ ] **Step 4: i18n (EN + IT)**
 
@@ -4101,7 +4206,7 @@ git commit -m "feat(frontend-admin): security pages read the split password fiel
 Earlier tasks each carried their same-commit docs (the mapping in Global Constraints); this task RECONCILES them — reads every touched doc against the final branch state, completes what an earlier task could only sketch (the docs-site narrative pages, which no code task owns), and runs the complete local gate set. Nothing here is a first touch except the three docs-site pages.
 
 **Files:**
-- Modify: `backend/internal/core/auth/CLAUDE.md`, `backend/pkg/sdk/CLAUDE.md`, `docs/site/sdk/shared-iface.mdx`, `docs/site/modules/core/auth.mdx`, `docs/site/operating/oauth-providers.mdx`, `docs/site/architecture/authentication-flow.mdx`, `frontend-admin/CLAUDE.md` (check its auth-surface notes against the Task 8/9 diff; if genuinely untouched, drop it from the git add — an unstaged listed file is a decision, not an oversight)
+- Modify: `backend/internal/core/auth/CLAUDE.md`, `backend/pkg/sdk/CLAUDE.md`, `docs/site/sdk/shared-iface.mdx`, `docs/site/modules/core/auth.mdx`, `docs/site/operating/oauth-providers.mdx`, `docs/site/architecture/authentication-flow.mdx`, `frontend-admin/CLAUDE.md` (reconcile Task 8's paragraph against the final branch — first touched in Task 8)
 
 **Interfaces:** none — prose only. Every claim below is written against the code as merged by Tasks 1–9, not against this plan.
 
