@@ -27,9 +27,9 @@
 - **No secret, token, password or full email** in any log line, audit event, error message or response introduced by this PR. WARNs and validation errors name keys, never values.
 - **SDK self-containment:** the only `pkg/sdk` change is two additive `iface` error sentinels (deviation 1). No file under `backend/pkg/sdk/` may import `backend/internal/*` — verify with `grep -rn "internal/" backend/pkg/sdk/ --include="*.go"` (doc-comment hits only) before every commit touching the SDK. The `Module` interface stays frozen (`HotReloadConfig` is already part of it; `BaseModule` defaults it to false and `AuthModule` overrides it).
 - **SPA rules (frontend-admin only; `orkestra-frontend-admin` skill applies):** RTK Query only; `react-hook-form` + `yup` for forms (stack mandate — `EmailPasswordForm` migrates as it is reworked, deviation 8); every string through `t()` with EN **and** IT keys (parity test enforces); path aliases without `@/`; react-router 8 (`react-router`). The SPA hides password UI on persisted false/null instead of showing a 403 on submit (G5); the ONLY visible password form under persisted-off is the operator emergency form while `passwordLoginBreakGlassEffective` is true, clearly labelled, with forgot-password + register CTAs hidden. On an ordinary `/policy` failure the SPAs keep their fail-open display fallback (the backend still refuses — §4.9).
-- **Docs move in the same commit as the code** (`feedback_commit_doc_hygiene`): `backend/internal/core/auth/CLAUDE.md`, `backend/pkg/sdk/CLAUDE.md` + `docs/site/sdk/shared-iface.mdx` (the two new sentinels), `docs/site/modules/core/auth.mdx` (63 → 65 fields + "SSO-only surface"), `docs/site/operating/oauth-providers.mdx` ("Going SSO-only"), `docs/site/architecture/authentication-flow.mdx`, `docker/.env.example`, the `StepUpPolicy` doc comment in `backend/internal/shared/middleware/auth.go`, `frontend-admin/CLAUDE.md` — each first touched in the task that changes what it documents; Task 10 is the cross-cutting sweep, not the first touch.
+- **Docs move in the same commit as the code** (`feedback_commit_doc_hygiene`): `backend/internal/core/auth/CLAUDE.md`, `backend/pkg/sdk/CLAUDE.md` + `docs/site/sdk/shared-iface.mdx` (the two new sentinels), `docs/site/modules/core/auth.mdx` (63 → 65 fields + "SSO-only surface"), `docs/site/operating/oauth-providers.mdx` ("Going SSO-only"), `docs/site/architecture/authentication-flow.mdx`, `docker/.env.example`, the `StepUpPolicy` doc comment in `backend/internal/shared/middleware/auth.go`, `frontend-admin/CLAUDE.md` — The mapping is explicit: Task 1 → `backend/pkg/sdk/CLAUDE.md` + `docs/site/sdk/shared-iface.mdx` + `docker/.env.example`; Tasks 2–7 → the `backend/internal/core/auth/CLAUDE.md` rows for what each changes; Task 5 → the `StepUpPolicy` doc comment; Task 7 → `backend/openapi/enterprise.json`; Tasks 8–9 → `frontend-admin/CLAUDE.md` if its auth notes drift; Task 10 is the cross-cutting VERIFICATION sweep — it completes and reconciles, it is never the first touch.
 - **Test commands** (absolute paths — `cd` drifts the shell between calls): backend `go test ./internal/core/auth/... ./internal/shared/... ./pkg/sdk/... ./internal/core/user/... -count=1` run from `/home/tore/orkestra/backend` after every step; `go vet ./...` before every commit (a bare `go build` does not compile `_test.go`); full gate `MONGO_TEST_URI='mongodb://127.0.0.1:28017/?directConnection=true' make -C /home/tore/orkestra ci-backend` (0 SKIP with the `ork-errquality-ci-mongo` helper up). Frontend: `cd /home/tore/orkestra/frontend-admin && npx vitest run src/components/authentication src/pages/user src/pages/admin/user-profile && npm run typecheck && npm run lint`; full gate `make -C /home/tore/orkestra ci-frontend-admin`. OpenAPI: `make -C /home/tore/orkestra/backend openapi-dump` (self-configures from `docker/.env` against the staging infra on `localhost:27017/6379` — `grep "^ENV=" /home/tore/orkestra/docker/.env` first; the local stack is `orkestra-public-*-staging`). Docs render: fresh clone of `orkestra-docs`, `npm ci`, `MONOREPO_LOCAL_PATH=/home/tore/orkestra npm run sync` (**full** sync, not `sync:site`), `CI=true npm run build`.
-- **Never start servers manually**; never `git push --tags`; never `--amend`; stage by path, never `git add -A`; conventional-commit subjects (the `conventional-pre-commit` hook rejects anything else); commit with the `Claude-Session:` trailer the SDD run uses.
+- **Never start servers manually**; never `git push --tags`; never `--amend`; stage by path, never `git add -A`; conventional-commit subjects (the `conventional-pre-commit` hook rejects anything else). **Every commit carries the `Claude-Session:` trailer**: once per shell run `export CLAUDE_SESSION=<your session id>` (it is in your task brief / harness environment) — the commit commands below all pass it as a second `-m`.
 - **errquality (CI):** no `err.Error()` as a client-facing detail, no detail that merely repeats the status, no 4xx from the `default:` branch of an `errors.Is` switch. Every new mapping case is an explicit `errors.Is`.
 
 ## Findings against `ca24e614` that spec v4.4 does not state
@@ -44,7 +44,24 @@ Each is folded into a numbered deviation below where it changes the design; none
 - **F6 — Challenge provenance is already consistent.** The password path stamps `LoginMethod:"password"` + `SourceAMR:["pwd"]` (`password_auth_service.go:701-714`); the OAuth path stamps `LoginMethod:"oauth"` + `SourceAMR:["oauth"]` (`auth_service.go:2249-2254`). The gate's "password-sourced" predicate (LoginMethod=="password" ∨ SourceAMR∋"pwd") is decidable for every challenge either path can mint today; the new `Audience` field removes the remaining ambiguity for post-v3 challenges, and an empty `Audience` marks a pre-v3 in-flight challenge (invalid + consumed).
 - **F7 — Compose files enumerate env vars explicitly.** The backend service blocks in `docker-compose.{dev,staging,prod}.yml` list every variable they forward (e.g. `ALLOW_LOCALHOST_REDIRECTS`, `docker-compose.prod.yml:82`); a variable not listed never reaches the container, so the documented break-glass procedure would silently no-op without deviation 4. (Same finding PR 2 hit with `CLIENT_API_URL`.)
 
-## Declared deviations from spec v4.4 (present to the reviewer before executing; contract-shaped ones need a spec §0 bump on approval)
+## Declared deviations from spec v4.4 — decision table
+
+Execution is BLOCKED until every row reads **Approved**. Contract-shaped rows (SDK surface, wire behaviour, or a spec-§ contradiction) additionally require a spec §0 bump (v4.5) recording the decision — the spec is the contract, a plan cannot amend it. The reviewer flips each Status; the executor re-checks this table before Task 1.
+
+| # | Deviation | Shape | Status |
+|---|---|---|---|
+| D1 | `iface.ErrPasswordLoginDisabled` / `iface.ErrAuthPolicyUnavailable` + services aliases | **Contract** (additive SDK surface; changes §4.3's declared sentinel homes) | PENDING review round 2 |
+| D2 | `strictBool` exported as `services.StrictBool` | Implementation (in-tree visibility) | PENDING |
+| D3 | Break-glass flag carried by `AuthPolicyService` (setter + display accessor) | Implementation (spec names env+config field, not the carrier) | PENDING |
+| D4 | Compose files enumerate `AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS` | Implementation (deployment artifact; F7) | PENDING |
+| D5 | `LoginTokenIssuer` gains `EmitBreakGlassUsed` | Implementation (in-tree handler interface; §4.2 fixes the event, not the seam) | PENDING |
+| D6 | Completion re-check runs before factor verification | Implementation (spec fixes outcomes, not placement) | PENDING |
+| D7 | `completeLogin` gains the decision param; OAuth `BeginLogin` stamps `Audience` | Implementation (delivers §4.3's required fields) | PENDING |
+| D8 | `EmailPasswordForm` migrates to RHF + yup | Implementation (stack mandate; PR 2 dev-27 precedent) | PENDING |
+| D9 | `SocialLoginForm.onProvidersResolved(count)` | Implementation (the seam §4.10's own table names) | PENDING |
+| D10 | Malformed booleans among the eleven invariant keys rejected up-front | **Contract-adjacent** (wire-visible 422 on writes; reading of §4.4 + edge #29 — confirm the reading in the spec bump) | PENDING |
+| D11 | `Register`: nil policy = 503 for non-bootstrap signups | **Contract-adjacent** (wire-visible only during an outage; G4's own demand — confirm in the spec bump) | PENDING |
+| D12 | `/policy`'s pre-existing fields keep permissive reads | Implementation (spec §4.2 states it; restated to bound scope) | PENDING |
 
 1. **Two error sentinels move to `pkg/sdk/iface`, next to `AdminAuthInviter`.** `iface.ErrPasswordLoginDisabled` and `iface.ErrAuthPolicyUnavailable` are declared beside the interface both admin reset routes consume (precedent: `iface.ErrKMSKeyNotFound` beside `KMSProvider`), and the services vars become aliases preserving identity: `services.ErrAuthPolicyUnavailable = iface.ErrAuthPolicyUnavailable` (re-homing PR 2's `errors.New`) and `services.ErrPasswordLoginDisabled = iface.ErrPasswordLoginDisabled` (instead of §4.3's `stderrors.New` literal). Every existing `errors.Is`/`%w` use keeps working — only the declaration site changes. Why: F1 — the user-module twin must map the sentinels across a module boundary that forbids importing `auth/services`, and message equality breaks on wrapped errors. Rejected alternative: `strings.Contains` on `err.Error()` — a copy-editing change to an error message would silently turn a 409 into a 500. Cost if wrong: two additive exported SDK vars a fork could reference.
 2. **`strictBool` is exported as `services.StrictBool`.** The snapshot validator lives in package `auth` and implements the §4.4 formula; the parser it must share (PR 2's, `auth_policy_service.go:52-61`) is unexported. Straight rename + the two internal call-site updates (`OAuthAutoLinkByEmailEnabled`, `usableFromView`). Cost: none — additive visibility.
@@ -543,14 +560,37 @@ All three compose files (`docker-compose.dev.yml`, `docker-compose.staging.yml`,
       AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS: ${AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS:-false}
 ```
 
-- [ ] **Step 9: Full package pass + vet + commit**
+- [ ] **Step 9: Same-commit docs (the SDK surface this task adds)**
+
+`backend/pkg/sdk/CLAUDE.md` — in the iface section, one entry:
+
+```markdown
+- **Cross-module auth-policy sentinels** — `iface.ErrPasswordLoginDisabled` and
+  `iface.ErrAuthPolicyUnavailable` live beside `AdminAuthInviter` because its
+  consumers (the user module's client-user reset routes) must map them across
+  the module boundary with `errors.Is`; message matching breaks on wrapped
+  errors. `auth/services` aliases both, so each name is ONE identity. Same
+  pattern as `ErrKMSKeyNotFound` beside `KMSProvider`.
+```
+
+`docs/site/sdk/shared-iface.mdx` — in the error-sentinel/reference list (match the page's existing row format):
+
+```markdown
+- `ErrPasswordLoginDisabled` — the email/password method is administratively
+  disabled for the target user's surface; the admin send-password-reset routes
+  answer 409 `auth.password_login_disabled` with it.
+- `ErrAuthPolicyUnavailable` — a persisted sign-in policy could not be read or
+  parsed; consumers fail closed with 503 `auth.policy_unavailable`.
+```
+
+- [ ] **Step 10: Full package pass + vet + commit**
 
 Run: `go test ./internal/core/auth/... ./pkg/sdk/... ./internal/shared/... -count=1` then `go vet ./...`, and `grep -rn "internal/" pkg/sdk/ --include="*.go"` (doc-comment hits only).
 Expected: PASS; no new SDK→internal imports.
 
 ```bash
-git add backend/pkg/sdk/iface/interfaces.go backend/internal/core/auth/services/auth_policy_service.go backend/internal/core/auth/services/oauth_provider_usability.go backend/internal/core/auth/services/password_auth_service.go backend/internal/core/auth/services/auth_policy_service_test.go backend/internal/shared/errcode/codes.go backend/internal/shared/errcode/codes_test.go backend/internal/shared/config/config.go backend/internal/core/auth/module.go docker/.env.example docker/docker-compose.dev.yml docker/docker-compose.staging.yml docker/docker-compose.prod.yml
-git commit -m "feat(auth): strict per-surface password-login policy read with operator-only break-glass"
+git add backend/pkg/sdk/iface/interfaces.go backend/pkg/sdk/CLAUDE.md docs/site/sdk/shared-iface.mdx backend/internal/core/auth/services/auth_policy_service.go backend/internal/core/auth/services/oauth_provider_usability.go backend/internal/core/auth/services/password_auth_service.go backend/internal/core/auth/services/auth_policy_service_test.go backend/internal/shared/errcode/codes.go backend/internal/shared/errcode/codes_test.go backend/internal/shared/config/config.go backend/internal/core/auth/module.go docker/.env.example docker/docker-compose.dev.yml docker/docker-compose.staging.yml docker/docker-compose.prod.yml
+git commit -m "feat(auth): strict per-surface password-login policy read with operator-only break-glass" -m "Claude-Session: $CLAUDE_SESSION"
 ```
 
 ### Task 2: Schema pair, `HotReloadConfig`, and the snapshot validator with the anti-lockout invariant
@@ -934,7 +974,15 @@ Imports for the file become: `context`, `fmt`, `strings`, `time`, `github.com/or
 Run: `go test ./internal/core/auth/ -count=1`
 Expected: PASS — durations behave identically through the snapshot path; the invariant table passes; group counts read 65.
 
-(§6's "successful writes atomically persist needsRestart=false" is PR 1 machinery keyed off this declaration: the registry's `SupportsHotReload` reads `HotReloadConfig()` (`pkg/sdk/module/module.go:414`, `registry.go:671`) and the CAS write already persists its inverse — covered by PR 1's `pkg/sdk/module` suites. PR 3's assertion that the auth module DECLARES it is the missing link, and it lives in `TestAuthModuleImplementsSnapshotValidator`.)
+**Why the pure table plus the interface assertion covers all three mutation surfaces** (the three-surface claim is NOT re-proven here; it rests on this exact PR 1 chain — verify each link exists before relying on it):
+
+1. All three exported surfaces route every mutation through `validateCandidate`: `UpdateConfig` (`pkg/sdk/module/config_service.go:776` → `:827`), `UpdateEnvironmentConfig` (`:880` → `:905`), `SetActiveEnvironment` (`:950` → `:968`).
+2. `TestValidateCandidate_Dispatch` (`pkg/sdk/module/config_snapshot_test.go:193-242`) proves a `HasConfigSnapshotValidator` module is judged through the snapshot on PATCH **and** activation, sees the target environment, and its legacy hooks are never called.
+3. `TestBuildValidationSnapshot_RawVersusEffective` (`:24`), `_EnvVarBeatsDefault` (`:67`), `_SecretPresence` (`:78`) and `_CorruptCiphertext` (`:121`) prove the snapshot's raw/effective/secret-presence semantics, including "a stored secret that cannot decrypt aborts the mutation".
+4. `TestSnapshot_TargetSecretsNotActiveSecrets` (`pkg/sdk/module/config_service_cas_test.go:172`) and `TestUpdateConfig_ConcurrentWritersCannotSkew` (`:109`) prove, through the exported service API, that the snapshot carries the TARGET profile's secret presence and that two individually-valid snapshots cannot skew into an invalid document.
+5. This task's `TestAuthModuleImplementsSnapshotValidator` closes the chain: `AuthModule` implements the snapshot seam and no longer the legacy one, so per link 2 the invariant runs on every surface.
+
+(§6's "successful writes atomically persist needsRestart=false" is the same kind of PR 1 machinery keyed off this declaration: the registry's `SupportsHotReload` reads `HotReloadConfig()` (`pkg/sdk/module/module.go:414`, `registry.go:671`) and the CAS write persists its inverse — `TestUpdateConfig_NeedsRestartWithoutResolverOrForColdModule`, `config_service_cas_test.go:90`.)
 
 - [ ] **Step 6: Docs touched by this task**
 
@@ -946,7 +994,7 @@ Run: `go vet ./...`
 
 ```bash
 git add backend/internal/core/auth/module.go backend/internal/core/auth/config_validation.go backend/internal/core/auth/config_validation_test.go backend/internal/core/auth/config_groups_test.go backend/internal/core/auth/CLAUDE.md
-git commit -m "feat(auth): password-login schema pair, hot-reload declaration and snapshot validator with anti-lockout invariant"
+git commit -m "feat(auth): password-login schema pair, hot-reload declaration and snapshot validator with anti-lockout invariant" -m "Claude-Session: $CLAUDE_SESSION"
 ```
 
 ### Task 3: The gates — Login, Register, ForgotPassword, both admin send-password-reset routes
@@ -1276,7 +1324,34 @@ func TestSendPasswordReset_PasswordPolicyOutcomes(t *testing.T) {
 }
 ```
 
-(No success case here on purpose: success calls `h.auth.RecordAdminAuthEvent`, which a nil `services.AuthService` cannot answer — the happy path is covered by the Task 3 service tests plus live wiring. `assertStatusAndCode` is defined once in this package by Task 4; since Task 3 executes first, define it here — `error_mapping_test.go`'s `statusOf` + an `errors.As` on `*errcode.Error` asserting `.Code` — and Task 4 reuses it instead of redefining.)
+(No success case here on purpose: success calls `h.auth.RecordAdminAuthEvent`, which a nil `services.AuthService` cannot answer — the happy path is covered by the Task 3 service tests plus live wiring.)
+
+`assertStatusAndCode` does not exist yet — define it in this file, once for the whole package (Task 4's suites reuse it; `statusOf` already lives in `error_mapping_test.go`, same package, and `errcode.Error.Code` is the field — `internal/shared/errcode/errcode.go:23-28`):
+
+```go
+// assertStatusAndCode asserts the HTTP status and, when wantCode is
+// non-empty, the stable body code of an errcode envelope. A wantCode of
+// "" accepts any body (the generic huma 401 has none).
+func assertStatusAndCode(t *testing.T, err error, wantStatus int, wantCode string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if got := statusOf(t, err); got != wantStatus {
+		t.Fatalf("status = %d, want %d", got, wantStatus)
+	}
+	if wantCode == "" {
+		return
+	}
+	var ec *errcode.Error
+	if !errors.As(err, &ec) {
+		t.Fatalf("want *errcode.Error, got %T (%v)", err, err)
+	}
+	if ec.Code != wantCode {
+		t.Fatalf("code = %q, want %q", ec.Code, wantCode)
+	}
+}
+```
 
 Create `backend/internal/core/user/handlers/admin_client_users_reset_gate_test.go`:
 
@@ -1536,14 +1611,18 @@ func (h *PasswordAuthHandler) ForgotPassword(ctx context.Context, req *ForgotPas
 
 `go build ./...` will surface every `completeLogin` caller — only `Login` exists (`:620`). Any pre-existing gate tests that constructed logins with password off in policy seeds now hit the new gate: adjust seeds, not assertions, unless the test's subject IS the gate.
 
-- [ ] **Step 7: Run the suites, vet, commit**
+- [ ] **Step 7: Same-commit docs**
+
+`backend/internal/core/auth/CLAUDE.md` — the route rows this task changes: login/register/forgot-password refuse with 403 `auth.password_login_disabled` per surface (gate before the user lookup, counters untouched); both admin send-password-reset routes answer 409 with the same code (client twin via `iface.AdminAuthInviter` + the iface sentinels); `reset-password`/`accept-invite`/`verify-email`/`change-password` stay open; break-glass rescues operator `Login` only and emits `auth.policy.break_glass_used`.
+
+- [ ] **Step 8: Run the suites, vet, commit**
 
 Run: `go test ./internal/core/auth/... ./internal/core/user/... -count=1` then `go vet ./...`
 Expected: PASS.
 
 ```bash
-git add backend/internal/core/auth/services/password_auth_service.go backend/internal/core/auth/services/gates_test.go backend/internal/core/auth/services/gates_fakes_test.go backend/internal/core/auth/handlers/password_handler.go backend/internal/core/auth/handlers/admin_user_auth_handler.go backend/internal/core/auth/handlers/error_mapping_test.go backend/internal/core/auth/handlers/admin_user_auth_security_events_test.go backend/internal/core/user/handlers/admin_client_handler.go backend/internal/core/user/handlers/admin_client_users_reset_gate_test.go
-git commit -m "feat(auth): per-surface password-method gates on login, register, forgot-password and both admin reset routes"
+git add backend/internal/core/auth/CLAUDE.md backend/internal/core/auth/services/password_auth_service.go backend/internal/core/auth/services/gates_test.go backend/internal/core/auth/services/gates_fakes_test.go backend/internal/core/auth/handlers/password_handler.go backend/internal/core/auth/handlers/admin_user_auth_handler.go backend/internal/core/auth/handlers/error_mapping_test.go backend/internal/core/auth/handlers/admin_user_auth_security_events_test.go backend/internal/core/user/handlers/admin_client_handler.go backend/internal/core/user/handlers/admin_client_users_reset_gate_test.go
+git commit -m "feat(auth): per-surface password-method gates on login, register, forgot-password and both admin reset routes" -m "Claude-Session: $CLAUDE_SESSION"
 ```
 
 ### Task 4: The pending-challenge re-check — `MFAChallenge.Audience`/`BreakGlassUsed`, both completion handlers
@@ -1709,34 +1788,7 @@ func TestRecheckPasswordChallenge(t *testing.T) {
 }
 ```
 
-with this assertion helper — defined ONCE in the package (Task 3 already introduced it in `admin_user_auth_security_events_test.go`; if executing tasks out of order, whichever lands first defines it):
-
-```go
-// assertStatusAndCode asserts the HTTP status and, when wantCode is
-// non-empty, the stable body code of an errcode envelope. A wantCode of
-// "" accepts any body (the generic huma 401 has none).
-func assertStatusAndCode(t *testing.T, err error, wantStatus int, wantCode string) {
-	t.Helper()
-	if err == nil {
-		t.Fatal("want an error")
-	}
-	if got := statusOf(t, err); got != wantStatus {
-		t.Fatalf("status = %d, want %d", got, wantStatus)
-	}
-	if wantCode == "" {
-		return
-	}
-	var ec *errcode.Error
-	if !errors.As(err, &ec) {
-		t.Fatalf("want *errcode.Error, got %T (%v)", err, err)
-	}
-	if ec.Code != wantCode {
-		t.Fatalf("code = %q, want %q", ec.Code, wantCode)
-	}
-}
-```
-
-(the `errcode.Error` struct's field IS `Code` — `internal/shared/errcode/errcode.go:23-28`).
+using `assertStatusAndCode` — already defined once for this package by Task 3 (`admin_user_auth_security_events_test.go`); do not redefine it.
 
 *Layer 2 — the two handlers end-to-end* (spec §6's `mfa_login_verify_test.go` row: refusal consumes + 403, transient policy error 503 + retained, OAuth-sourced unaffected, break-glass permits one winning completion and produces **exactly one** rescued-login audit event). Drive the real policy service through the `services.NewAuthPolicyServiceForTest` / `NewAuthPolicyServiceForTestErr` constructors (introduced in Step 5 below) and fake the rest with the interface-embedding idiom `oauth_callback_flow_test.go:157-162` already uses (`fakeJWT` embeds `services.JWTService` and overrides one method — a call to anything else panics loudly):
 
@@ -1915,7 +1967,34 @@ func TestWebAuthnLoginFinish_PasswordPolicyRecheck(t *testing.T) {
 
 (`ValidateTokenEligibleUser` must accept `completionUsers`' fixture user — active, non-service; verify its rules in `services` before adjusting the fixture.)
 
-Also append to `backend/internal/core/auth/services/mfa_challenge_service_test.go`: `BeginLogin` round-trips `Audience` and `BreakGlassUsed` through the store (marshal → Peek → fields intact), following that file's existing BeginLogin test idiom.
+Also append to `backend/internal/core/auth/services/mfa_challenge_service_test.go`:
+
+```go
+func TestBeginLogin_RoundTripsAudienceAndBreakGlass(t *testing.T) {
+	svc := NewMFAChallengeService(NewMemoryOAuthStateStore())
+	ch, err := svc.BeginLogin(context.Background(), LoginChallengeInput{
+		UserUUID:       "u-1",
+		SessionID:      "sid-1",
+		SourceAMR:      []string{"pwd"},
+		LoginMethod:    "password",
+		Audience:       "operator",
+		BreakGlassUsed: true,
+	})
+	if err != nil {
+		t.Fatalf("begin login: %v", err)
+	}
+	if ch.Audience != "operator" || !ch.BreakGlassUsed {
+		t.Fatalf("BeginLogin must copy the new fields, got %+v", ch)
+	}
+	got, err := svc.Peek(context.Background(), ch.ID)
+	if err != nil {
+		t.Fatalf("peek: %v", err)
+	}
+	if got.Audience != "operator" || !got.BreakGlassUsed {
+		t.Fatalf("audience/break-glass must survive the JSON round-trip, got %+v", got)
+	}
+}
+```
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -2039,11 +2118,29 @@ func passwordSourcedChallenge(ch *services.MFAChallenge) bool {
 }
 ```
 
-3. `LoginVerify` — after the purpose/session checks (`:483`), before `req.Body.UseBackup`:
+3. One tiny method on both handler types keeps the typed-nil trap out of the call sites (`h.policy` is a concrete `*services.AuthPolicyService`; wrapping a nil pointer in the interface directly would dodge the helper's `policy == nil` branch):
 
 ```go
-	// Spec §4.3: a password-sourced challenge must still be allowed NOW.
-	rescued, err := recheckPasswordChallenge(ctx, h.policy, h.challenges, ch)
+// decider adapts the handler's concrete policy pointer to the helper's
+// interface, mapping a nil pointer to a nil INTERFACE so missing wiring
+// takes the fail-closed 503 branch instead of a typed-nil surprise.
+func (h *MFAHandler) decider() passwordLoginDecider {
+	if h.policy == nil {
+		return nil
+	}
+	return h.policy
+}
+```
+
+(and the identical `func (h *WebAuthnHandler) decider() passwordLoginDecider` once that handler has its `policy` field.)
+
+4. `LoginVerify` — after the purpose/session checks (`:483`), before `req.Body.UseBackup`:
+
+```go
+	// Spec §4.3: a password-sourced challenge must still be allowed NOW
+	// (before the factor is verified, so a disabled login can neither
+	// burn attempt budget nor probe factor state — deviation 6).
+	rescued, err := recheckPasswordChallenge(ctx, h.decider(), h.challenges, ch)
 	if err != nil {
 		return nil, err
 	}
@@ -2060,9 +2157,7 @@ and after the successful `IssueLoginTokensForSession` (`:519`):
 	}
 ```
 
-(`h.policy` is `*services.AuthPolicyService`, which satisfies `passwordLoginDecider`; a nil concrete pointer must be handed to the helper as a nil INTERFACE — pass it through a guard: `var decider passwordLoginDecider; if h.policy != nil { decider = h.policy }` — a typed-nil interface would dodge the `policy == nil` branch and then fail strangely inside the accessor. Same guard in `LoginFinish`.)
-
-4. `webauthn_handler.go`: struct gains `policy *services.AuthPolicyService`; add:
+5. `webauthn_handler.go`: struct gains `policy *services.AuthPolicyService`; add:
 
 ```go
 // SetPolicy wires the admin-managed AuthPolicyService so LoginFinish can
@@ -2074,11 +2169,29 @@ func (h *WebAuthnHandler) SetPolicy(p *services.AuthPolicyService) {
 }
 ```
 
-`LoginFinish` — after its purpose/session checks (`:383`), before `GetUserByID`, the same re-check block; after its successful mint, the same emission block (using `loginCh`).
+`LoginFinish` — after its purpose/session checks (`:383`), before `GetUserByID`:
 
-5. `module.go`: after each `NewWebAuthnHandler` construction (`:1119-1131` operator, the client twin below `:1271`), add `m.operatorWebAuthnHandler.SetPolicy(authPolicy)` / `m.clientWebAuthnHandler.SetPolicy(authPolicy)`.
+```go
+	// Spec §4.3: a password-sourced challenge must still be allowed NOW
+	// (before the assertion ceremony — deviation 6).
+	rescued, err := recheckPasswordChallenge(ctx, h.decider(), h.mfaChallenges, loginCh)
+	if err != nil {
+		return nil, err
+	}
+```
 
-6. In `services/auth_policy_service.go`, the two exported test constructors the handler tests (and Task 7's) build policy states with — small, honest, logic-free:
+and after its successful `IssueLoginTokensForSession` (`:412`):
+
+```go
+	// One rescued-login audit event per winning completion (spec §4.2).
+	if rescued || loginCh.BreakGlassUsed {
+		h.tokens.EmitBreakGlassUsed(ctx, loginCh.Audience, loginCh.UserUUID, loginCh.SessionID, loginCh.IPAddress)
+	}
+```
+
+6. `module.go`: after each `NewWebAuthnHandler` construction (`:1119-1131` operator, the client twin below `:1271`), add `m.operatorWebAuthnHandler.SetPolicy(authPolicy)` / `m.clientWebAuthnHandler.SetPolicy(authPolicy)`.
+
+7. In `services/auth_policy_service.go`, the two exported test constructors the handler tests (and Task 7's) build policy states with — small, honest, logic-free:
 
 ```go
 // NewAuthPolicyServiceForTest builds a policy service over a fixed value
@@ -2120,14 +2233,18 @@ func (r fixedValueReader) GetRawValueRequiredModule(ctx context.Context, moduleN
 
 Every test fake implementing `LoginTokenIssuer` needs the no-op `EmitBreakGlassUsed` (grep `IssueLoginTokensForSession` across `*_test.go`). Run `go build ./... && go vet ./...` to enumerate.
 
-- [ ] **Step 7: Run the suites + commit**
+- [ ] **Step 7: Same-commit docs**
+
+`backend/internal/core/auth/CLAUDE.md` — the MFA-completion row: password-sourced challenges (LoginMethod `"password"` ∨ SourceAMR∋`"pwd"`) are re-checked at completion — disabled → consumed + 403; policy outage → 503 with the challenge retained; empty/unknown `Audience` → consumed + 401 (pre-toggle in-flight; rollout waits one 5-minute TTL); OAuth-sourced untouched; the winning rescued completion emits one `auth.policy.break_glass_used`. `MFAChallenge` carries `Audience` + `BreakGlassUsed`.
+
+- [ ] **Step 8: Run the suites + commit**
 
 Run: `go test ./internal/core/auth/... -count=1`
-Expected: PASS, including the new `TestRecheckPasswordChallenge` and the challenge round-trip.
+Expected: PASS, including the new `TestRecheckPasswordChallenge`, both handler-level suites and the challenge round-trip.
 
 ```bash
-git add backend/internal/core/auth/services/mfa_challenge_service.go backend/internal/core/auth/services/mfa_challenge_service_test.go backend/internal/core/auth/services/password_auth_service.go backend/internal/core/auth/services/auth_service.go backend/internal/core/auth/services/auth_policy_service.go backend/internal/core/auth/handlers/mfa_handler.go backend/internal/core/auth/handlers/webauthn_handler.go backend/internal/core/auth/handlers/mfa_login_verify_test.go backend/internal/core/auth/module.go
-git commit -m "feat(auth): re-check password policy at MFA/WebAuthn completion; challenges carry audience and break-glass provenance"
+git add backend/internal/core/auth/CLAUDE.md backend/internal/core/auth/services/mfa_challenge_service.go backend/internal/core/auth/services/mfa_challenge_service_test.go backend/internal/core/auth/services/password_auth_service.go backend/internal/core/auth/services/auth_service.go backend/internal/core/auth/services/auth_policy_service.go backend/internal/core/auth/handlers/mfa_handler.go backend/internal/core/auth/handlers/webauthn_handler.go backend/internal/core/auth/handlers/mfa_login_verify_test.go backend/internal/core/auth/module.go
+git commit -m "feat(auth): re-check password policy at MFA/WebAuthn completion; challenges carry audience and break-glass provenance" -m "Claude-Session: $CLAUDE_SESSION"
 ```
 
 ### Task 5: Step-up — `PasswordReauthAllowed` in the middleware, strict gate in password-confirm
@@ -2415,14 +2532,18 @@ func (s *AuthPolicyService) PasswordReauthAllowed(ctx context.Context, audience 
 	}
 ```
 
-- [ ] **Step 6: Run the suites + vet + commit**
+- [ ] **Step 6: Same-commit docs**
+
+The `StepUpPolicy` doc comment written in Step 4 IS the middleware contract (§4.12 — there is no middleware/CLAUDE.md). `backend/internal/core/auth/CLAUDE.md` — the step-up row: no-factor + method disabled → `mfa_enrollment_required`; policy error or missing wiring → 503 `auth.policy_unavailable`, never a fabricated obligation; `password-confirm` 409s a disabled method (same branch as no-hash), break-glass invisible.
+
+- [ ] **Step 7: Run the suites + vet + commit**
 
 Run: `go test ./internal/shared/middleware/ ./internal/core/auth/... ./internal/core/tenant/handlers/ -count=1` then `go vet ./...`
 Expected: PASS (including every pre-existing step-up test — the zero-value fake keeps them green; any no-policy no-factor case now asserts 503).
 
 ```bash
-git add backend/internal/shared/middleware/auth.go backend/internal/shared/middleware/step_up_test.go backend/internal/core/tenant/handlers/admin_mfa_routes_test.go backend/internal/core/auth/services/auth_policy_service.go backend/internal/core/auth/services/auth_policy_service_test.go backend/internal/core/auth/services/password_auth_service.go backend/internal/core/auth/services/password_confirm_test.go
-git commit -m "feat(auth): step-up honours the per-surface password policy; password-confirm refuses a disabled method"
+git add backend/internal/core/auth/CLAUDE.md backend/internal/shared/middleware/auth.go backend/internal/shared/middleware/step_up_test.go backend/internal/core/tenant/handlers/admin_mfa_routes_test.go backend/internal/core/auth/services/auth_policy_service.go backend/internal/core/auth/services/auth_policy_service_test.go backend/internal/core/auth/services/password_auth_service.go backend/internal/core/auth/services/password_confirm_test.go
+git commit -m "feat(auth): step-up honours the per-surface password policy; password-confirm refuses a disabled method" -m "Claude-Session: $CLAUDE_SESSION"
 ```
 
 ### Task 6: Unlink guard counts *usable* links; `AuthMethodsView` splits the password concept
@@ -2562,7 +2683,51 @@ func TestAdminUnlinkOAuth_UsableLinkGuard(t *testing.T) {
 }
 ```
 
-Mirror the guard trio (`password off → last_credential`, `unusable target removable`, `uncertainty → sentinel`) in `auth_service_self_unlink_test.go` against `SelfUnlinkOAuth`, following that file's fixture.
+Append to `auth_service_self_unlink_test.go` (same package — `newGuardedUnlinkSvc` and the fakes are shared; `SelfUnlinkOAuth` short-circuits before persistence, so `fake.removedCall` is the mutation probe):
+
+```go
+// PR 3 §4.7: the self-service guard counts usable links too.
+func TestSelfUnlinkOAuth_UsableLinkGuard(t *testing.T) {
+	seed := func(fake *adminUnlinkUserFake, hash string) {
+		fake.seed(&iface.User{UUID: "u-1", PasswordHash: hash,
+			OAuthLinks: []iface.OAuthLink{{Provider: "google", ProviderID: "g-1", IsActive: true}}})
+	}
+	t.Run("password off makes the sole usable link last_credential", func(t *testing.T) {
+		fake := newAdminUnlinkUserFake()
+		seed(fake, "argon2id$...")
+		svc := newGuardedUnlinkSvc(fake, map[string]string{"passwordLoginEnabledAdmin": "false"},
+			map[iface.OAuthProvider]bool{"google": true}, nil)
+		if err := svc.SelfUnlinkOAuth(context.Background(), "u-1", "google"); !errors.Is(err, ErrLastCredentialRemoval) {
+			t.Fatalf("want ErrLastCredentialRemoval, got %v", err)
+		}
+		if fake.removedCall != nil {
+			t.Errorf("guard must short-circuit before persistence; got %+v", fake.removedCall)
+		}
+	})
+	t.Run("unusable target link is removable even with no password", func(t *testing.T) {
+		fake := newAdminUnlinkUserFake()
+		seed(fake, "")
+		svc := newGuardedUnlinkSvc(fake, nil, map[iface.OAuthProvider]bool{"google": false}, nil)
+		if err := svc.SelfUnlinkOAuth(context.Background(), "u-1", "google"); err != nil {
+			t.Fatalf("disabled link is not a credential; want removal, got %v", err)
+		}
+		if fake.removedCall == nil || fake.removedCall.providerID != "g-1" {
+			t.Fatalf("expected RemoveOAuthLinkFromUser(g-1); got %+v", fake.removedCall)
+		}
+	})
+	t.Run("usability uncertainty refuses with the policy sentinel", func(t *testing.T) {
+		fake := newAdminUnlinkUserFake()
+		seed(fake, "argon2id$...")
+		svc := newGuardedUnlinkSvc(fake, nil, nil, fmt.Errorf("%w: undecryptable secret", ErrAuthPolicyUnavailable))
+		if err := svc.SelfUnlinkOAuth(context.Background(), "u-1", "google"); !errors.Is(err, ErrAuthPolicyUnavailable) {
+			t.Fatalf("want ErrAuthPolicyUnavailable, got %v", err)
+		}
+		if fake.removedCall != nil {
+			t.Errorf("uncertainty must not mutate; got %+v", fake.removedCall)
+		}
+	})
+}
+```
 
 The pre-existing cases `TestAdminUnlinkOAuth_Success/_LastCredentialLockout/_LastOAuthLinkButPasswordSet` (and the self-unlink twins) now construct via `newGuardedUnlinkSvc(fake, nil /*password on by default*/, map[iface.OAuthProvider]bool{...all their providers true...}, nil)` — same assertions, updated constructor: their subjects are unchanged semantics under all-usable input.
 
@@ -2801,14 +2966,18 @@ func wouldLockOutOAuthUnlink(target *iface.User, links []iface.OAuthLink,
 
 `go build ./...`: the two updated fixtures (`newAdminUnlinkSvc` extensions, `newGetMethodsSvc` signature) and any other `wouldLockOutOAuthUnlink` reference. `GetUserAuthMethods` fixtures that left `policy` nil now inject the permissive stub (legacy-true absent keys).
 
-- [ ] **Step 6: Run + vet + commit**
+- [ ] **Step 6: Same-commit docs**
+
+`backend/internal/core/auth/CLAUDE.md` — the unlink-guard row (usable links only: `targetUsable ∧ (¬passwordUsable ∨ no hash) ∧ remainingUsable == 0`; a disabled/unconfigured link is removable and never satisfies the guard; any config uncertainty → 503 via the `SetProviderUsability` seam) and the `AuthMethodsView` row (`hasPasswordSet` / `passwordUsableForLogin`; `hasUsablePassword` deprecated alias for one release).
+
+- [ ] **Step 7: Run + vet + commit**
 
 Run: `go test ./internal/core/auth/... -count=1` then `go vet ./...`
 Expected: PASS.
 
 ```bash
-git add backend/internal/core/auth/services/auth_service.go backend/internal/core/auth/models/auth_methods.go backend/internal/core/auth/module.go backend/internal/core/auth/handlers/admin_user_auth_handler.go backend/internal/core/auth/handlers/self_user_auth_handler.go backend/internal/core/auth/services/auth_service_admin_unlink_test.go backend/internal/core/auth/services/auth_service_self_unlink_test.go backend/internal/core/auth/services/auth_service_get_methods_test.go
-git commit -m "feat(auth): unlink guard counts usable links only; auth-methods view splits password presence from usability"
+git add backend/internal/core/auth/CLAUDE.md backend/internal/core/auth/services/auth_service.go backend/internal/core/auth/models/auth_methods.go backend/internal/core/auth/module.go backend/internal/core/auth/handlers/admin_user_auth_handler.go backend/internal/core/auth/handlers/self_user_auth_handler.go backend/internal/core/auth/services/auth_service_admin_unlink_test.go backend/internal/core/auth/services/auth_service_self_unlink_test.go backend/internal/core/auth/services/auth_service_get_methods_test.go
+git commit -m "feat(auth): unlink guard counts usable links only; auth-methods view splits password presence from usability" -m "Claude-Session: $CLAUDE_SESSION"
 ```
 
 ### Task 7: `/policy` exposes the persisted state and the operator break-glass display flag
@@ -2921,12 +3090,12 @@ func TestGetAuthPolicy_PasswordLoginFields(t *testing.T) {
 }
 ```
 
-(`services.NewAuthPolicyServiceForTest` / `NewAuthPolicyServiceForTestErr` landed in Task 4 step 5.6; `auth_policy_service_test.go`'s `stubReader` stays for in-package tests — it has richer knobs.)
+(`services.NewAuthPolicyServiceForTest` / `NewAuthPolicyServiceForTestErr` landed in Task 4 step 5.7; `auth_policy_service_test.go`'s `stubReader` stays for in-package tests — it has richer knobs.)
 
 - [ ] **Step 2: Run to verify failure**
 
 `go test ./internal/core/auth/handlers/ -run TestGetAuthPolicy -count=1`
-Expected: compile FAILURE (fields + constructors undefined).
+Expected: compile FAILURE — the two response-body fields are undefined (the test constructors already exist from Task 4).
 
 - [ ] **Step 3: Implement**
 
@@ -2967,11 +3136,15 @@ Expected: compile FAILURE (fields + constructors undefined).
 `go test ./internal/core/auth/... -count=1` — PASS.
 `grep "^ENV=" /home/tore/orkestra/docker/.env` then `make -C /home/tore/orkestra/backend openapi-dump`; verify with `git diff --stat backend/openapi/enterprise.json` that only the intended operations changed (`/policy` pair on both tiers, auth-methods fields from Task 6, the 409s carry no schema change).
 
-- [ ] **Step 5: Vet + commit**
+- [ ] **Step 5: Same-commit docs**
+
+`backend/internal/core/auth/CLAUDE.md` — the `/policy` row: `passwordLoginEnabled` (nullable only in the operator emergency case) + `passwordLoginBreakGlassEffective` (operator endpoint only), read error without break-glass → 503; the pre-existing fields keep their permissive reads (D12).
+
+- [ ] **Step 6: Vet + commit**
 
 ```bash
-git add backend/internal/core/auth/handlers/auth_handler.go backend/internal/core/auth/handlers/auth_policy_endpoint_test.go backend/openapi/enterprise.json
-git commit -m "feat(auth): /policy exposes persisted password-login state and the operator break-glass display flag"
+git add backend/internal/core/auth/CLAUDE.md backend/internal/core/auth/handlers/auth_handler.go backend/internal/core/auth/handlers/auth_policy_endpoint_test.go backend/openapi/enterprise.json
+git commit -m "feat(auth): /policy exposes persisted password-login state and the operator break-glass display flag" -m "Claude-Session: $CLAUDE_SESSION"
 ```
 
 ### Task 8: frontend-admin — login/register/forgot gating, the emergency form, the no-method alert
@@ -2984,7 +3157,7 @@ Pre-flight (orkestra-frontend-admin skill): production precedent = `src/componen
 - Modify: `frontend-admin/src/store/api/authApi.ts:143-147` (`AuthPolicy` type) + `:219-231` (fallback)
 - Modify: `frontend-admin/src/components/authentication/EmailPasswordForm.tsx` (rework), `RegisterForm.tsx`, `ForgotPasswordForm.tsx`, `Login.tsx`, `SocialLoginForm.tsx`
 - Modify: `frontend-admin/src/locales/en.json`, `it.json`
-- Test: `EmailPasswordForm.test.tsx`, `SocialLoginForm.test.tsx` (extend), `Login.test.tsx` (new)
+- Test: `EmailPasswordForm.test.tsx`, `SocialLoginForm.test.tsx` (extend), `Login.test.tsx`, `RegisterForm.test.tsx`, `ForgotPasswordForm.test.tsx` (new)
 
 **Interfaces:**
 - Consumes: Task 7's `/policy` fields.
@@ -3067,14 +3240,234 @@ describe('password-login policy gating (PR 3 §4.10)', () => {
 
 (assert copy through the EN keys added below — match on the rendered strings the way the file's existing tests do; adjust the matchers to the exact copy.)
 
-`SocialLoginForm.test.tsx` — add: `onProvidersResolved` fires with the filtered count on success; does NOT fire on query error; fires with 0 on an empty list.
+`SocialLoginForm.test.tsx` — append (the file already stubs `initiateSocialLogin` via `vi.mock` and overrides `*/v1/auth/operator/providers` per test):
 
-New `Login.test.tsx` — mounts `Login` with MSW policy + providers handlers:
-- password off + empty providers → the no-method alert renders;
-- password off + one provider → no alert, the provider button renders;
-- password off + provider query ERROR → no no-method alert (the retryable error shows instead);
-- password on + empty providers → no alert, the password form renders;
-- break-glass → no alert even with empty providers (the emergency form is a method).
+```tsx
+describe('onProvidersResolved (PR 3 §4.10)', () => {
+  it('fires with the filtered count when the query resolves', async () => {
+    server.use(
+      http.get('*/v1/auth/operator/providers', () =>
+        HttpResponse.json({ providers: ['google', 'github', 'not-a-provider'] })
+      )
+    );
+    const resolved = vi.fn();
+    renderWithProviders(<SocialLoginForm onProvidersResolved={resolved} />);
+    await screen.findByRole('button', { name: /google/i });
+    await waitFor(() => expect(resolved).toHaveBeenCalledWith(2));
+  });
+
+  it('fires with 0 on a resolved-empty list', async () => {
+    server.use(
+      http.get('*/v1/auth/operator/providers', () =>
+        HttpResponse.json({ providers: [] })
+      )
+    );
+    const resolved = vi.fn();
+    renderWithProviders(<SocialLoginForm onProvidersResolved={resolved} />);
+    await waitFor(() => expect(resolved).toHaveBeenCalledWith(0));
+  });
+
+  it('never fires on a query error — an outage is not "no method"', async () => {
+    server.use(
+      http.get('*/v1/auth/operator/providers', () =>
+        HttpResponse.json({ detail: 'boom' }, { status: 503 })
+      )
+    );
+    const resolved = vi.fn();
+    renderWithProviders(<SocialLoginForm onProvidersResolved={resolved} />);
+    await screen.findByText(/couldn|load|unable/i); // the existing auth.social.loadError copy
+    expect(resolved).not.toHaveBeenCalled();
+  });
+});
+```
+
+(adjust the loadError matcher to the exact `auth.social.loadError` EN string in `en.json`.)
+
+New `Login.test.tsx` (policy + providers via MSW; `policyWith` as in `EmailPasswordForm.test.tsx` — import or re-declare locally):
+
+```tsx
+import { describe, it, expect, vi } from 'vitest';
+import { http, HttpResponse } from 'msw';
+import { screen, waitFor } from '@testing-library/react';
+import { renderWithProviders } from 'test/render';
+import { server } from 'test/server';
+import Login from './Login';
+
+vi.mock('utils/socialAuthUtils', async () => {
+  const actual = await vi.importActual<typeof import('utils/socialAuthUtils')>(
+    'utils/socialAuthUtils'
+  );
+  return { ...actual, initiateSocialLogin: vi.fn().mockResolvedValue(undefined) };
+});
+
+const policyWith = (overrides: Record<string, unknown>) =>
+  http.get('*/v1/auth/operator/policy', () =>
+    HttpResponse.json({
+      registrationEnabled: true,
+      loginEnabled: true,
+      passwordMinLength: 10,
+      passwordLoginEnabled: true,
+      passwordLoginBreakGlassEffective: false,
+      ...overrides
+    })
+  );
+const providersWith = (providers: string[]) =>
+  http.get('*/v1/auth/operator/providers', () =>
+    HttpResponse.json({ providers })
+  );
+
+describe('Login no-method alert (PR 3 §4.10)', () => {
+  it('renders the alert when password is off and providers resolve empty', async () => {
+    server.use(policyWith({ passwordLoginEnabled: false }), providersWith([]));
+    renderWithProviders(<Login />);
+    expect(
+      await screen.findByText(/no sign-in method/i)
+    ).toBeInTheDocument();
+  });
+
+  it('no alert when a provider resolves', async () => {
+    server.use(policyWith({ passwordLoginEnabled: false }), providersWith(['google']));
+    renderWithProviders(<Login />);
+    await screen.findByRole('button', { name: /google/i });
+    expect(screen.queryByText(/no sign-in method/i)).not.toBeInTheDocument();
+  });
+
+  it('a provider-query error shows the retryable error, never the alert', async () => {
+    server.use(
+      policyWith({ passwordLoginEnabled: false }),
+      http.get('*/v1/auth/operator/providers', () =>
+        HttpResponse.json({ detail: 'boom' }, { status: 503 })
+      )
+    );
+    renderWithProviders(<Login />);
+    await waitFor(() =>
+      expect(screen.queryByText(/no sign-in method/i)).not.toBeInTheDocument()
+    );
+  });
+
+  it('no alert while password is on, even with zero providers', async () => {
+    server.use(policyWith({}), providersWith([]));
+    renderWithProviders(<Login />);
+    expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no sign-in method/i)).not.toBeInTheDocument();
+  });
+
+  it('no alert under break-glass — the emergency form is a method', async () => {
+    server.use(
+      policyWith({
+        passwordLoginEnabled: false,
+        passwordLoginBreakGlassEffective: true
+      }),
+      providersWith([])
+    );
+    renderWithProviders(<Login />);
+    expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no sign-in method/i)).not.toBeInTheDocument();
+  });
+});
+```
+
+New `RegisterForm.test.tsx` and `ForgotPasswordForm.test.tsx` — the two direct-navigation gates (§4.10: "direct navigation must not show a working form, including during break-glass"):
+
+```tsx
+// RegisterForm.test.tsx
+import { describe, it, expect } from 'vitest';
+import { http, HttpResponse } from 'msw';
+import { screen, waitFor } from '@testing-library/react';
+import { renderWithProviders } from 'test/render';
+import { server } from 'test/server';
+import RegisterForm from './RegisterForm';
+
+const policyWith = (overrides: Record<string, unknown>) =>
+  http.get('*/v1/auth/operator/policy', () =>
+    HttpResponse.json({
+      registrationEnabled: true,
+      loginEnabled: true,
+      passwordMinLength: 10,
+      passwordLoginEnabled: true,
+      passwordLoginBreakGlassEffective: false,
+      ...overrides
+    })
+  );
+
+describe('RegisterForm password-method gate (PR 3 §4.10)', () => {
+  it.each([
+    ['persisted false', { passwordLoginEnabled: false }],
+    ['emergency null', { passwordLoginEnabled: null }],
+    [
+      'break-glass does not reopen it',
+      { passwordLoginEnabled: false, passwordLoginBreakGlassEffective: true }
+    ]
+  ])('renders only the disabled alert — %s', async (_name, overrides) => {
+    server.use(policyWith(overrides));
+    renderWithProviders(<RegisterForm />);
+    expect(
+      await screen.findByText(/email\/password sign-in is disabled/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /create|register/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders the working form when the method is on', async () => {
+    server.use(policyWith({}));
+    renderWithProviders(<RegisterForm />);
+    expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
+  });
+});
+```
+
+```tsx
+// ForgotPasswordForm.test.tsx
+import { describe, it, expect } from 'vitest';
+import { http, HttpResponse } from 'msw';
+import { screen } from '@testing-library/react';
+import { renderWithProviders } from 'test/render';
+import { server } from 'test/server';
+import ForgotPasswordForm from './ForgotPasswordForm';
+
+const policyWith = (overrides: Record<string, unknown>) =>
+  http.get('*/v1/auth/operator/policy', () =>
+    HttpResponse.json({
+      registrationEnabled: true,
+      loginEnabled: true,
+      passwordMinLength: 10,
+      passwordLoginEnabled: true,
+      passwordLoginBreakGlassEffective: false,
+      ...overrides
+    })
+  );
+
+describe('ForgotPasswordForm password-method gate (PR 3 §4.10)', () => {
+  it.each([
+    ['persisted false', { passwordLoginEnabled: false }],
+    ['emergency null', { passwordLoginEnabled: null }],
+    [
+      'break-glass does not reopen it',
+      { passwordLoginEnabled: false, passwordLoginBreakGlassEffective: true }
+    ]
+  ])('renders only the disabled alert — %s', async (_name, overrides) => {
+    server.use(policyWith(overrides));
+    renderWithProviders(<ForgotPasswordForm />);
+    expect(
+      await screen.findByText(/email\/password sign-in is disabled/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /send|submit|reset/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders the working form when the method is on', async () => {
+    server.use(policyWith({}));
+    renderWithProviders(<ForgotPasswordForm />);
+    expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
+  });
+});
+```
+
+(`policyWith` is now declared in four files — extracting it into `test/policyHandlers.ts` is the better shape; if extracted, update the four imports in the same commit. Either way, no test depends on another test file.)
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -3103,43 +3496,117 @@ fallback (`:224-229`) gains `passwordLoginEnabled: true, passwordLoginBreakGlass
 
 - [ ] **Step 4: Rework `EmailPasswordForm`**
 
-Shape (RHF + yup per the reference read; behaviour and copy preserved — same mutation, same MFA `navigate('/mfa/verify', { state })` hand-off, same error mapping):
+The complete replacement (`frontend-admin/src/components/authentication/EmailPasswordForm.tsx` — behaviour, copy and the MFA `location.state` hand-off preserved from the current file; only form state moves to RHF + yup and the two policy gates are added; the submit button keeps `variant="primary"` for visual parity with the sibling auth forms on the same layout — D8 scopes the rework to form state, not restyling):
 
 ```tsx
+import { useState } from 'react';
+import { Alert, Button, Form } from 'react-bootstrap';
+import { Link, useLocation, useNavigate } from 'react-router';
+import { useTranslation } from 'react-i18next';
+import { useForm } from 'react-hook-form';
+import { yupResolver } from '@hookform/resolvers/yup';
+import * as yup from 'yup';
+import { useAppDispatch } from 'store/hooks';
+import {
+  passwordUiVisible,
+  useGetAuthPolicyQuery,
+  useLoginMutation
+} from 'store/api/authApi';
+import { login as loginAction } from 'store/slices/authSlice';
+import {
+  DEFAULT_POST_LOGIN,
+  locationToReturnTo,
+  sanitizeReturnTo
+} from 'utils/returnTo';
+
 const schema = yup.object({
   email: yup.string().email().required(),
   password: yup.string().required()
 });
+
 type LoginFormData = yup.InferType<typeof schema>;
 
 const EmailPasswordForm = () => {
-  // …hooks as today (t, navigate, location, dispatch, returnTo)…
-  const { data: policy } = useGetAuthPolicyQuery();
-  const loginEnabled = policy?.loginEnabled ?? true;
-  const registrationEnabled = policy?.registrationEnabled ?? true;
-  const breakGlass = policy?.passwordLoginBreakGlassEffective ?? false;
-  const passwordVisible = passwordUiVisible(policy) || breakGlass;
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const dispatch = useAppDispatch();
+  // Where ProtectedRoute wanted to send the user before bouncing them to login.
+  // Sanitised against open-redirect / auth-loop targets; null falls back to the
+  // dashboard. Survives the MFA hop by riding along in /mfa/verify's state.
+  const returnTo = sanitizeReturnTo(
+    locationToReturnTo((location.state as { from?: unknown } | null)?.from)
+  );
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [login, { isLoading }] = useLoginMutation();
   const {
     register,
     handleSubmit,
     formState: { errors }
   } = useForm<LoginFormData>({ resolver: yupResolver(schema) });
-  const [localError, setLocalError] = useState<string | null>(null);
-  const [login, { isLoading }] = useLoginMutation();
+  // Surface admin-managed kill switches. The transport-failure fallback in
+  // authApi keeps everything enabled so a degraded /policy fetch doesn't
+  // block legitimate users; a SERVED false/null is honoured strictly.
+  const { data: policy } = useGetAuthPolicyQuery();
+  const loginEnabled = policy?.loginEnabled ?? true;
+  const registrationEnabled = policy?.registrationEnabled ?? true;
+  const breakGlass = policy?.passwordLoginBreakGlassEffective ?? false;
+  const persistedOn = passwordUiVisible(policy);
 
-  // G5: persisted false/null hides the password UI entirely — the
-  // backend would 403 anyway; a page must not advertise a dead method.
+  // G5: persisted false/null hides the password UI entirely — the backend
+  // would 403 anyway; a sign-in page must not advertise a dead method.
   // The ONE exception is the labelled emergency form under break-glass.
-  if (!passwordVisible) return null;
+  if (!persistedOn && !breakGlass) return null;
+
+  // Under break-glass with the persisted method off, this is an emergency
+  // surface: label it, and hide every credential-minting CTA.
+  const emergencyOnly = breakGlass && !persistedOn;
 
   const onSubmit = handleSubmit(async ({ email, password }) => {
-    // …exactly today's submit body (:38-84), minus the manual
-    // missing-fields check (yup owns it now)…
+    setLocalError(null);
+    try {
+      const result = await login({ email, password }).unwrap();
+
+      // Account has an enrolled second factor — hold the credentials flow
+      // and send the user to the verify page with the challenge id.
+      if (result.requiresMfa && result.mfaToken) {
+        navigate('/mfa/verify', {
+          state: {
+            challengeId: result.mfaToken,
+            email,
+            webauthnAvailable: result.webauthnAvailable ?? false,
+            returnTo
+          }
+        });
+        return;
+      }
+
+      if (!result.user) {
+        setLocalError(t('auth.errors.unableToSignIn'));
+        return;
+      }
+      dispatch(loginAction({ userData: result.user }));
+
+      navigate(returnTo ?? DEFAULT_POST_LOGIN, { replace: true });
+    } catch (err: unknown) {
+      const anyErr = err as { data?: { detail?: string }; status?: number };
+      if (anyErr?.status === 401) {
+        setLocalError(t('auth.errors.invalidCredentials'));
+      } else if (anyErr?.status === 403) {
+        setLocalError(
+          anyErr?.data?.detail || t('auth.errors.emailNotVerified')
+        );
+      } else if (anyErr?.status === 429) {
+        setLocalError(t('auth.errors.tooManyAttempts'));
+      } else {
+        setLocalError(anyErr?.data?.detail || t('auth.errors.unableToSignIn'));
+      }
+    }
   });
 
   return (
     <Form onSubmit={onSubmit} noValidate>
-      {breakGlass && !passwordUiVisible(policy) && (
+      {emergencyOnly && (
         <Alert variant="warning" className="mb-3">
           {t('auth.pages.passwordBreakGlassActive')}
         </Alert>
@@ -3149,18 +3616,81 @@ const EmailPasswordForm = () => {
           {t('auth.loginDisabled')}
         </Alert>
       )}
-      {/* localError alert unchanged */}
-      {/* email + password Form.Groups as today, driven by {...register('email')} /
-          {...register('password')} + isInvalid={!!errors.email} etc.;
-          the forgot-password Link renders ONLY when !breakGlass or the
-          persisted policy is true; the register CTA ONLY when
-          registrationEnabled && passwordUiVisible(policy) && !breakGlass */}
+      {localError && (
+        <Alert
+          variant="danger"
+          className="mb-3"
+          onClose={() => setLocalError(null)}
+          dismissible
+        >
+          {localError}
+        </Alert>
+      )}
+
+      <Form.Group className="mb-3" controlId="login-email">
+        <Form.Label>{t('auth.email')}</Form.Label>
+        <Form.Control
+          type="email"
+          placeholder={t('auth.emailPlaceholder')}
+          autoComplete="email"
+          isInvalid={!!errors.email}
+          {...register('email')}
+        />
+        <Form.Control.Feedback type="invalid">
+          {errors.email?.type === 'email'
+            ? t('auth.errors.invalidEmail')
+            : t('auth.errors.missingFields')}
+        </Form.Control.Feedback>
+      </Form.Group>
+
+      <Form.Group className="mb-3" controlId="login-password">
+        <div className="d-flex justify-content-between">
+          <Form.Label>{t('auth.password')}</Form.Label>
+          {!emergencyOnly && (
+            <Link to="/forgot-password" className="fs-10">
+              {t('auth.forgotPassword')}
+            </Link>
+          )}
+        </div>
+        <Form.Control
+          type="password"
+          placeholder={t('auth.passwordPlaceholder')}
+          autoComplete="current-password"
+          isInvalid={!!errors.password}
+          {...register('password')}
+        />
+        <Form.Control.Feedback type="invalid">
+          {t('auth.errors.missingFields')}
+        </Form.Control.Feedback>
+      </Form.Group>
+
+      <div className="d-grid mb-3">
+        <Button
+          type="submit"
+          variant="primary"
+          size="lg"
+          disabled={isLoading || !loginEnabled}
+        >
+          {isLoading ? t('auth.signingIn') : t('auth.signIn')}
+        </Button>
+      </div>
+
+      {registrationEnabled && !emergencyOnly && (
+        <div className="text-center">
+          <small className="text-muted">
+            {t('auth.noAccount')}{' '}
+            <Link to="/register">{t('auth.createOne')}</Link>
+          </small>
+        </div>
+      )}
     </Form>
   );
 };
+
+export default EmailPasswordForm;
 ```
 
-The submit button keeps `disabled={isLoading || !loginEnabled}`. Under break-glass with persisted false, forgot-password and register CTAs are hidden (§4.10 row); with persisted true the form renders exactly as today even if the env var is set (a stored true needs no override — the flag is then false anyway, §4.9).
+Behavioural invariants to hold against the current file (`EmailPasswordForm.tsx:1-158` at `ca24e614`): same mutation and unwrap flow, same MFA `navigate('/mfa/verify', { state })` payload, same 401/403/429/default error mapping, same `disabled={isLoading || !loginEnabled}`; with persisted true the form renders exactly as today even when the env var is set (a stored true needs no override — the flag is false then, §4.9). The pre-existing `EmailPasswordForm.test.tsx` suite must keep passing unmodified except for the policy-handler fields.
 
 - [ ] **Step 5: Gate `RegisterForm` and `ForgotPasswordForm`**
 
@@ -3231,12 +3761,22 @@ with `{noMethod && <Alert variant="warning">{t('auth.pages.loginNoMethod')}</Ale
 "passwordBreakGlassActive": "Emergency access mode — email/password sign-in is temporarily restored for operators only. Repair the sign-in provider configuration, then disable the override."
 ```
 
+and `auth.errors` gains (yup owns email-shape validation now that the form is `noValidate`):
+
+```json
+"invalidEmail": "Enter a valid email address."
+```
+
 `it.json` twins:
 
 ```json
 "loginNoMethod": "Nessun metodo di accesso è al momento disponibile su questa console. Contatta un amministratore.",
 "passwordLoginDisabled": "L'accesso con email e password è disabilitato su questa superficie. Usa un provider di accesso configurato o contatta un amministratore.",
 "passwordBreakGlassActive": "Modalità di accesso di emergenza — l'accesso con email e password è temporaneamente ripristinato per i soli operatori. Ripara la configurazione dei provider, poi disattiva l'override."
+```
+
+```json
+"invalidEmail": "Inserisci un indirizzo email valido."
 ```
 
 Task note: the spec's key list also names `pages.providersUnavailable`; the provider-query error state is already rendered by the existing `auth.social.loadError` — no dead key is added, recorded here so the reviewer sees the delta deliberately.
@@ -3247,8 +3787,8 @@ Task note: the spec's key list also names `pages.providersUnavailable`; the prov
 Expected: PASS (locale parity included).
 
 ```bash
-git add frontend-admin/src/store/api/authApi.ts frontend-admin/src/components/authentication/EmailPasswordForm.tsx frontend-admin/src/components/authentication/EmailPasswordForm.test.tsx frontend-admin/src/components/authentication/RegisterForm.tsx frontend-admin/src/components/authentication/ForgotPasswordForm.tsx frontend-admin/src/components/authentication/Login.tsx frontend-admin/src/components/authentication/Login.test.tsx frontend-admin/src/components/authentication/SocialLoginForm.tsx frontend-admin/src/components/authentication/SocialLoginForm.test.tsx frontend-admin/src/locales/en.json frontend-admin/src/locales/it.json
-git commit -m "feat(frontend-admin): hide password UI per policy, labelled break-glass form, no-method alert"
+git add frontend-admin/src/store/api/authApi.ts frontend-admin/src/components/authentication/EmailPasswordForm.tsx frontend-admin/src/components/authentication/EmailPasswordForm.test.tsx frontend-admin/src/components/authentication/RegisterForm.tsx frontend-admin/src/components/authentication/RegisterForm.test.tsx frontend-admin/src/components/authentication/ForgotPasswordForm.tsx frontend-admin/src/components/authentication/ForgotPasswordForm.test.tsx frontend-admin/src/components/authentication/Login.tsx frontend-admin/src/components/authentication/Login.test.tsx frontend-admin/src/components/authentication/SocialLoginForm.tsx frontend-admin/src/components/authentication/SocialLoginForm.test.tsx frontend-admin/src/locales/en.json frontend-admin/src/locales/it.json
+git commit -m "feat(frontend-admin): hide password UI per policy, labelled break-glass form, no-method alert" -m "Claude-Session: $CLAUDE_SESSION"
 ```
 
 ### Task 9: frontend-admin — security pages on the split view fields
@@ -3261,7 +3801,8 @@ Pre-flight (orkestra-frontend-admin skill): production precedent = `src/pages/ad
 - Modify: `frontend-admin/src/store/api/authApi.ts:178-196` (`SelfAuthMethods`), `frontend-admin/src/store/api/userApi.ts:165-196` (admin mirror)
 - Modify: `frontend-admin/src/pages/user/security/PasswordTab.tsx`, `LinkedProvidersTab.tsx`, `frontend-admin/src/pages/user/settings/SecuritySummaryCard.tsx`, `frontend-admin/src/pages/admin/user-profile/AdminAuthMethodsCard.tsx`
 - Modify: `frontend-admin/src/locales/en.json`, `it.json`
-- Test: `frontend-admin/src/pages/user/security/PasswordTab.test.tsx` (new), `frontend-admin/src/pages/admin/user-profile/AdminAuthMethodsCard.test.tsx` (new)
+- Modify: `frontend-admin/src/test/handlers.ts` (`emptySelfAuthMethods` gains the split fields)
+- Test: `frontend-admin/src/pages/user/security/PasswordTab.test.tsx`, `frontend-admin/src/pages/user/security/LinkedProvidersTab.test.tsx`, `frontend-admin/src/pages/user/settings/SecuritySummaryCard.test.tsx`, `frontend-admin/src/pages/admin/user-profile/AdminAuthMethodsCard.test.tsx` (all new)
 
 **Interfaces:**
 - Consumes: Task 6's wire fields (`hasPasswordSet`, `passwordUsableForLogin`, deprecated `hasUsablePassword`).
@@ -3274,15 +3815,219 @@ Pre-flight (orkestra-frontend-admin skill): production precedent = `src/pages/ad
   hasUsablePassword: boolean;
 ```
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Extend the shared fixture, then write the failing tests**
 
-`PasswordTab.test.tsx` (model on `SessionsTab.test.tsx`'s MSW + `renderWithProviders` idiom): auth-methods fixture with `hasPasswordSet: true, passwordUsableForLogin: false` → the change-password form still renders (credential management stays, non-goal §2) AND the retained-password notice shows; with `passwordUsableForLogin: true` → no notice; with `hasPasswordSet: false` → today's "set a password" state.
+`frontend-admin/src/test/handlers.ts` — `emptySelfAuthMethods` (`:21-37`) gains the three new fields so every existing security-center test keeps type-checking:
 
-`AdminAuthMethodsCard.test.tsx`: fixture with `passwordUsableForLogin: false` → the send-reset button is disabled and the tooltip copy present; the password badge still reads from `hasPasswordSet`; unlink block-reason appears when the target is the only provider and `passwordUsableForLogin` is false EVEN IF `hasPasswordSet` is true.
+```typescript
+export const emptySelfAuthMethods = {
+  hasPasswordSet: true,
+  passwordUsableForLogin: true,
+  hasUsablePassword: true, // deprecated alias, mirrors hasPasswordSet
+  emailVerified: true,
+  mfaRequired: false,
+  // …existing mfaFactors / oauthProviders arrays unchanged…
+};
+```
+
+New `PasswordTab.test.tsx` (`selfAuthMethodsHandler` + the policy handler; `renderWithProviders` as in `SessionsTab.test.tsx`):
+
+```tsx
+import { describe, it, expect } from 'vitest';
+import { screen, waitFor } from '@testing-library/react';
+import { renderWithProviders } from 'test/render';
+import { server } from 'test/server';
+import { emptySelfAuthMethods, selfAuthMethodsHandler } from 'test/handlers';
+import PasswordTab from './PasswordTab';
+
+describe('PasswordTab split password fields (PR 3 §4.8)', () => {
+  it('set-but-unusable: form stays (credential management), notice shows', async () => {
+    server.use(
+      selfAuthMethodsHandler({
+        ...emptySelfAuthMethods,
+        hasPasswordSet: true,
+        passwordUsableForLogin: false
+      })
+    );
+    renderWithProviders(<PasswordTab />);
+    expect(
+      await screen.findByText(/disabled on this surface/i)
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/current password/i)).toBeInTheDocument();
+  });
+
+  it('usable password: no notice', async () => {
+    server.use(selfAuthMethodsHandler());
+    renderWithProviders(<PasswordTab />);
+    await screen.findByLabelText(/current password/i);
+    expect(screen.queryByText(/disabled on this surface/i)).toBeNull();
+  });
+
+  it('no hash: the set-a-password state keys off hasPasswordSet', async () => {
+    server.use(
+      selfAuthMethodsHandler({
+        ...emptySelfAuthMethods,
+        hasPasswordSet: false,
+        passwordUsableForLogin: false,
+        hasUsablePassword: false
+      })
+    );
+    renderWithProviders(<PasswordTab />);
+    await waitFor(() =>
+      expect(screen.queryByLabelText(/current password/i)).toBeNull()
+    );
+  });
+});
+```
+
+(match the two field-label matchers to the tab's actual EN copy — `userSecurity.passwordTab.*` in `en.json` — before finalising.)
+
+New `AdminAuthMethodsCard.test.tsx` (admin endpoint, not the self one):
+
+```tsx
+import { describe, it, expect } from 'vitest';
+import { http, HttpResponse } from 'msw';
+import { screen } from '@testing-library/react';
+import { renderWithProviders } from 'test/render';
+import { server } from 'test/server';
+import AdminAuthMethodsCard from './AdminAuthMethodsCard';
+import type { User } from 'types/user';
+
+const targetUser = { id: 'u-1', name: 'Target User' } as User;
+
+const adminAuthMethods = (overrides: Record<string, unknown>) =>
+  http.get('*/v1/admin/users/u-1/auth-methods', () =>
+    HttpResponse.json({
+      hasPasswordSet: true,
+      passwordUsableForLogin: true,
+      hasUsablePassword: true,
+      passwordUpdatedAt: '2026-05-01T00:00:00Z',
+      emailVerified: true,
+      mfaRequired: false,
+      mfaFactors: [],
+      oauthProviders: [],
+      ...overrides
+    })
+  );
+
+describe('AdminAuthMethodsCard split password fields (PR 3 §4.8)', () => {
+  it('method off: reset button disabled with the policy tooltip; badge still reads presence', async () => {
+    server.use(adminAuthMethods({ passwordUsableForLogin: false }));
+    renderWithProviders(<AdminAuthMethodsCard user={targetUser} />);
+    const reset = await screen.findByRole('button', { name: /reset/i });
+    expect(reset).toBeDisabled();
+    expect(screen.getByText(/set/i)).toBeInTheDocument(); // presence badge from hasPasswordSet
+  });
+
+  it('method on: reset button enabled', async () => {
+    server.use(adminAuthMethods({}));
+    renderWithProviders(<AdminAuthMethodsCard user={targetUser} />);
+    expect(await screen.findByRole('button', { name: /reset/i })).toBeEnabled();
+  });
+
+  it('unlink block-reason keys off usability even with a hash present', async () => {
+    server.use(
+      adminAuthMethods({
+        hasPasswordSet: true,
+        passwordUsableForLogin: false,
+        oauthProviders: [
+          { provider: 'google', email: 'u@example.com', linkedAt: '2026-05-01T00:00:00Z', isPrimary: true }
+        ]
+      })
+    );
+    renderWithProviders(<AdminAuthMethodsCard user={targetUser} />);
+    await screen.findByText(/google/i);
+    // The row's unlink control must be blocked with the only-credential reason.
+    expect(screen.getByRole('button', { name: /unlink/i })).toBeDisabled();
+  });
+});
+```
+
+(adjust the badge/button matchers to the card's `adminUserProfile.authMethods.*` EN copy and to how the row disables — tooltip-wrapped span or disabled prop — after reading the final JSX; `renderWithProviders` must carry an authenticated admin in the store the way the page's sibling tests do — if none exists, seed `selectUser` state via the render helper's preloaded state, same idiom as `useUserTable.test.tsx`.)
+
+Extend the existing security-center coverage for the other two consumers, same files' suites:
+
+```tsx
+// LinkedProvidersTab.test.tsx (new, same MSW idiom): the unlink control on
+// the sole linked provider is blocked when passwordUsableForLogin=false
+// even though hasPasswordSet=true, and unblocked when a second provider
+// row exists.
+describe('LinkedProvidersTab only-credential (PR 3 §4.8)', () => {
+  it('sole provider + unusable password blocks unlink', async () => {
+    server.use(
+      selfAuthMethodsHandler({
+        ...emptySelfAuthMethods,
+        hasPasswordSet: true,
+        passwordUsableForLogin: false,
+        oauthProviders: [
+          { provider: 'google', email: 'u@example.com', linkedAt: '2026-05-01T00:00:00Z', isPrimary: true }
+        ]
+      })
+    );
+    renderWithProviders(<LinkedProvidersTab />);
+    await screen.findByText(/google/i);
+    expect(screen.getByRole('button', { name: /unlink|disconnect/i })).toBeDisabled();
+  });
+
+  it('two providers keep unlink available', async () => {
+    server.use(
+      selfAuthMethodsHandler({
+        ...emptySelfAuthMethods,
+        passwordUsableForLogin: false,
+        oauthProviders: [
+          { provider: 'google', email: 'u@example.com', linkedAt: '2026-05-01T00:00:00Z', isPrimary: true },
+          { provider: 'github', email: 'u@example.com', linkedAt: '2026-05-02T00:00:00Z', isPrimary: false }
+        ]
+      })
+    );
+    renderWithProviders(<LinkedProvidersTab />);
+    await screen.findByText(/github/i);
+    const unlinks = screen.getAllByRole('button', { name: /unlink|disconnect/i });
+    expect(unlinks.some(b => !(b as HTMLButtonElement).disabled)).toBe(true);
+  });
+});
+```
+
+```tsx
+// SecuritySummaryCard.test.tsx (new): the password row keys off
+// hasPasswordSet and appends the kept-notice when unusable.
+describe('SecuritySummaryCard password row (PR 3 §4.8)', () => {
+  it('set-but-unusable shows the kept note', async () => {
+    server.use(
+      selfAuthMethodsHandler({
+        ...emptySelfAuthMethods,
+        hasPasswordSet: true,
+        passwordUsableForLogin: false
+      })
+    );
+    renderWithProviders(<SecuritySummaryCard />);
+    expect(
+      await screen.findByText(/sign-in with it is disabled/i)
+    ).toBeInTheDocument();
+  });
+
+  it('no hash hides the password row entirely', async () => {
+    server.use(
+      selfAuthMethodsHandler({
+        ...emptySelfAuthMethods,
+        hasPasswordSet: false,
+        passwordUsableForLogin: false,
+        hasUsablePassword: false
+      })
+    );
+    renderWithProviders(<SecuritySummaryCard />);
+    await waitFor(() =>
+      expect(screen.queryByText(/password/i)).toBeNull()
+    );
+  });
+});
+```
+
+(both files carry the standard vitest/MSW import block of `PasswordTab.test.tsx`; `SecuritySummaryCard` may need the sessions handler stubbed too — `emptySessions` from `test/handlers` — check what the card fetches before finalising.)
 
 - [ ] **Step 2: Run to verify failure**
 
-`npx vitest run src/pages/user/security src/pages/admin/user-profile` — FAIL.
+`npx vitest run src/pages/user src/pages/admin/user-profile` — FAIL (new fields absent from the TS mirrors, notices unrendered, buttons not gated).
 
 - [ ] **Step 3: Migrate the four consumers**
 
@@ -3331,7 +4076,15 @@ Pre-flight (orkestra-frontend-admin skill): production precedent = `src/pages/ad
 "adminUserProfile": { "authMethods": { "resetBlockedPolicy": "Email/password sign-in is disabled on this user's surface — a reset link would mint a credential the surface refuses." } }
 ```
 
-(merge into the existing nested objects, EN + IT; the IT twins follow Task 8's tone. Task note: the spec's single `auth.security.passwordKeptNotice` key is realised per-page-namespace — `userSecurity.*`, `settings.security.*` — because that is the repo's i18n convention; one shared key across three namespaces would break the feature-namespacing mandate.)
+and the `it.json` twins:
+
+```json
+"userSecurity": { "passwordTab": { "keptNotice": "L'accesso con email e password è disabilitato su questa superficie; la password memorizzata è conservata per una futura riattivazione." } },
+"settings":     { "security": { "summary": { "passwordKeptNotice": "impostata, ma l'accesso con essa è disabilitato su questa superficie" } } },
+"adminUserProfile": { "authMethods": { "resetBlockedPolicy": "L'accesso con email e password è disabilitato sulla superficie di questo utente — un link di reset creerebbe una credenziale che la superficie rifiuta." } }
+```
+
+(merge into the existing nested objects — do not replace the parent keys. Task note: the spec's single `auth.security.passwordKeptNotice` key is realised per-page-namespace — `userSecurity.*`, `settings.security.*`, `adminUserProfile.*` — because that is the repo's i18n convention; one shared key across three namespaces would break the feature-namespacing mandate.)
 
 - [ ] **Step 5: Run the full frontend gate + commit**
 
@@ -3339,22 +4092,22 @@ Pre-flight (orkestra-frontend-admin skill): production precedent = `src/pages/ad
 Expected: PASS.
 
 ```bash
-git add frontend-admin/src/store/api/authApi.ts frontend-admin/src/store/api/userApi.ts frontend-admin/src/pages/user/security/PasswordTab.tsx frontend-admin/src/pages/user/security/PasswordTab.test.tsx frontend-admin/src/pages/user/security/LinkedProvidersTab.tsx frontend-admin/src/pages/user/settings/SecuritySummaryCard.tsx frontend-admin/src/pages/admin/user-profile/AdminAuthMethodsCard.tsx frontend-admin/src/pages/admin/user-profile/AdminAuthMethodsCard.test.tsx frontend-admin/src/locales/en.json frontend-admin/src/locales/it.json
-git commit -m "feat(frontend-admin): security pages read the split password fields; reset button honours the per-surface policy"
+git add frontend-admin/src/store/api/authApi.ts frontend-admin/src/store/api/userApi.ts frontend-admin/src/test/handlers.ts frontend-admin/src/pages/user/security/PasswordTab.tsx frontend-admin/src/pages/user/security/PasswordTab.test.tsx frontend-admin/src/pages/user/security/LinkedProvidersTab.tsx frontend-admin/src/pages/user/security/LinkedProvidersTab.test.tsx frontend-admin/src/pages/user/settings/SecuritySummaryCard.tsx frontend-admin/src/pages/user/settings/SecuritySummaryCard.test.tsx frontend-admin/src/pages/admin/user-profile/AdminAuthMethodsCard.tsx frontend-admin/src/pages/admin/user-profile/AdminAuthMethodsCard.test.tsx frontend-admin/src/locales/en.json frontend-admin/src/locales/it.json
+git commit -m "feat(frontend-admin): security pages read the split password fields; reset button honours the per-surface policy" -m "Claude-Session: $CLAUDE_SESSION"
 ```
 
-### Task 10: Documentation sweep and the full gates
+### Task 10: Documentation reconciliation sweep and the full gates
 
-Every doc the feature touches, brought current in one pass (earlier tasks already carried their same-commit minimums), then the complete local gate set on the whole branch.
+Earlier tasks each carried their same-commit docs (the mapping in Global Constraints); this task RECONCILES them — reads every touched doc against the final branch state, completes what an earlier task could only sketch (the docs-site narrative pages, which no code task owns), and runs the complete local gate set. Nothing here is a first touch except the three docs-site pages.
 
 **Files:**
-- Modify: `backend/internal/core/auth/CLAUDE.md`, `backend/pkg/sdk/CLAUDE.md`, `docs/site/sdk/shared-iface.mdx`, `docs/site/modules/core/auth.mdx`, `docs/site/operating/oauth-providers.mdx`, `docs/site/architecture/authentication-flow.mdx`, `frontend-admin/CLAUDE.md` (only if its auth-surface notes exist and drifted — check first)
+- Modify: `backend/internal/core/auth/CLAUDE.md`, `backend/pkg/sdk/CLAUDE.md`, `docs/site/sdk/shared-iface.mdx`, `docs/site/modules/core/auth.mdx`, `docs/site/operating/oauth-providers.mdx`, `docs/site/architecture/authentication-flow.mdx`, `frontend-admin/CLAUDE.md` (check its auth-surface notes against the Task 8/9 diff; if genuinely untouched, drop it from the git add — an unstaged listed file is a decision, not an oversight)
 
 **Interfaces:** none — prose only. Every claim below is written against the code as merged by Tasks 1–9, not against this plan.
 
-- [ ] **Step 1: `backend/internal/core/auth/CLAUDE.md`**
+- [ ] **Step 1: `backend/internal/core/auth/CLAUDE.md` — reconcile**
 
-Update (§4.12 list, adapted to what PR 3 actually shipped):
+Tasks 2–7 each added their rows; this step re-reads the whole file against the final diff and reconciles overlap/ordering (§4.12 list, adapted to what PR 3 actually shipped):
 - **Login & Sessions row**: the `passwordLoginEnabled{Admin,Client}` pair — strict fail-closed read (`PasswordLoginEnabled`, absent-key-means-true, everything else `ErrAuthPolicyUnavailable` → 503), the §4.4 validator invariant (snapshot contract, all three surfaces, `auth.login_method_lockout`), verified-email auto-link already documented by PR 2 — cross-reference it.
 - **Break-glass**: `AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS` — operator login + its MFA continuation ONLY; the decision/accessor split (`PasswordLoginDecision` vs `PasswordLoginEnabled`); boot WARN; `auth.policy.break_glass_used` audit event (audience, user UUID, SID, IP; no email/token/password).
 - **Route table**: the §4.3 verdict table verbatim (login/register/forgot 403; both admin resets 409; MFA/WebAuthn completion re-check incl. `MFAChallenge.Audience` + consume/retain semantics; reset-password/accept-invite/verify-email/change-password open).
@@ -3391,8 +4144,8 @@ Expected: ci-backend green with **0 SKIP** (the `ork-errquality-ci-mongo` helper
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/internal/core/auth/CLAUDE.md backend/pkg/sdk/CLAUDE.md docs/site/sdk/shared-iface.mdx docs/site/modules/core/auth.mdx docs/site/operating/oauth-providers.mdx docs/site/architecture/authentication-flow.mdx
-git commit -m "docs(auth): SSO-only surface, break-glass procedure, split auth-methods fields and the iface sentinels"
+git add backend/internal/core/auth/CLAUDE.md backend/pkg/sdk/CLAUDE.md docs/site/sdk/shared-iface.mdx docs/site/modules/core/auth.mdx docs/site/operating/oauth-providers.mdx docs/site/architecture/authentication-flow.mdx frontend-admin/CLAUDE.md
+git commit -m "docs(auth): SSO-only surface, break-glass procedure, split auth-methods fields and the iface sentinels" -m "Claude-Session: $CLAUDE_SESSION"
 ```
 
 ---
