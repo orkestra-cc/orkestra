@@ -113,6 +113,13 @@ func (m *AuthModule) Name() string        { return "auth" }
 func (m *AuthModule) DisplayName() string { return "Authentication" }
 func (m *AuthModule) Description() string { return "OAuth 2.1, JWT, sessions, RBAC" }
 
+// HotReloadConfig declares what has always been true: AuthPolicyService and
+// the OAuth resolver read module config at request time, so a successful
+// config write is live immediately and must persist needsRestart=false in
+// the same atomic update (spec §4.1) instead of leaving a false restart
+// banner in the admin UI.
+func (m *AuthModule) HotReloadConfig() bool { return true }
+
 func (m *AuthModule) Dependencies() []string {
 	return []string{"user", "notification", "tenant", "authz"}
 }
@@ -399,6 +406,16 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		{
 			Key: "loginEnabledClient", Label: "Allow logins on client app", Group: "login",
 			Description: "When off, POST /v1/auth/client/login returns 403. Affects /v1/auth/client/* only.",
+			Type:        module.FieldBool, Default: "true",
+		},
+		{
+			Key: "passwordLoginEnabledAdmin", Label: "Allow email/password sign-in on operator console", Group: "login",
+			Description: "When off, the operator console accepts OAuth only: new password sign-ins, signups and reset requests on /v1/auth/operator/* are refused (403 auth.password_login_disabled), in-flight password logins cannot complete, and a password no longer counts as a credential for step-up re-authentication or OAuth-unlink checks. Sessions opened before the change are not revoked. Cannot be turned off unless at least one OAuth provider is fully configured for this surface and 'Auto-link OAuth provider to existing email account' is on.",
+			Type:        module.FieldBool, Default: "true",
+		},
+		{
+			Key: "passwordLoginEnabledClient", Label: "Allow email/password sign-in on client app", Group: "login",
+			Description: "When off, the client app accepts OAuth only: new password sign-ins, signups and reset requests on /v1/auth/client/* are refused (403 auth.password_login_disabled), in-flight password logins cannot complete, and a password no longer counts as a credential for step-up re-authentication or OAuth-unlink checks. Sessions opened before the change are not revoked. Cannot be turned off unless at least one OAuth provider is fully configured for this surface and 'Auto-link OAuth provider to existing email account' is on.",
 			Type:        module.FieldBool, Default: "true",
 		},
 		{

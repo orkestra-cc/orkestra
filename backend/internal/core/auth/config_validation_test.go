@@ -3,8 +3,11 @@ package auth
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
@@ -47,7 +50,7 @@ func TestAuthDurationPatchValidation(t *testing.T) {
 	m := &AuthModule{}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := m.ValidateConfig(context.Background(), tc.values)
+			err := m.ValidateConfigSnapshot(context.Background(), module.ConfigValidationSnapshot{Values: tc.values})
 			if tc.wantField == "" {
 				if err != nil {
 					t.Fatalf("ValidateConfig(%v) = %v, want nil", tc.values, err)
@@ -65,6 +68,150 @@ func TestAuthDurationPatchValidation(t *testing.T) {
 	}
 }
 
-func TestAuthModuleImplementsConfigValidator(t *testing.T) {
-	var _ module.HasConfigValidator = (*AuthModule)(nil)
+// The auth module is judged through the snapshot contract on all three
+// mutation surfaces; the legacy value-only hook is gone so the SDK can
+// never fall back to a validator that cannot see secret presence.
+func TestAuthModuleImplementsSnapshotValidator(t *testing.T) {
+	var _ module.HasConfigSnapshotValidator = (*AuthModule)(nil)
+	var mod interface{} = &AuthModule{}
+	if _, ok := mod.(module.HasConfigValidator); ok {
+		t.Fatal("AuthModule must NOT keep HasConfigValidator — the snapshot validator replaces it")
+	}
+	if !(&AuthModule{}).HotReloadConfig() {
+		t.Fatal("auth reads config lazily at request time; HotReloadConfig must be true so successful writes persist needsRestart=false")
+	}
+}
+
+// snapFor builds a target snapshot with a structurally complete Google
+// provider available for wiring into either surface. Tests override or
+// delete keys per case. probe(nil) means "no readable Apple key file".
+func snapFor(overrides map[string]string, secrets map[string]bool) module.ConfigValidationSnapshot {
+	values := map[string]string{}
+	effective := map[string]string{
+		"googleClientId":    "gid.apps.example",
+		"googleRedirectURL": "https://api.example.com/auth/oauth/google/callback",
+	}
+	present := map[string]bool{"googleClientSecret": true}
+	for k, v := range overrides {
+		values[k] = v
+		// Non-secret overrides participate in the structural predicate via
+		// EffectiveValues exactly as ConfigService merges them (§4.5).
+		effective[k] = v
+	}
+	for k, v := range secrets {
+		present[k] = v
+	}
+	return module.ConfigValidationSnapshot{
+		Environment:     "production",
+		Values:          values,
+		EffectiveValues: effective,
+		SecretPresent:   present,
+	}
+}
+
+func TestLoginMethodInvariant(t *testing.T) {
+	googleOnAdmin := map[string]string{"googleEnabledAdmin": "true"}
+
+	cases := []struct {
+		name      string
+		overrides map[string]string
+		secrets   map[string]bool
+		probe     services.KeyFileProbe
+		wantField string
+		wantCode  string
+	}{
+		// Defaults: both password keys absent → legacy true → always valid.
+		{name: "empty snapshot is valid", overrides: nil},
+		// Password off with a usable provider + auto-link (default true) is the SSO-only happy path.
+		{name: "admin off with usable google", overrides: merge(googleOnAdmin, map[string]string{"passwordLoginEnabledAdmin": "false"})},
+		// Cross-field failures name passwordLoginEnabled<S> with the lockout code (§4.4).
+		{name: "admin off with no provider at all", overrides: map[string]string{"passwordLoginEnabledAdmin": "false"},
+			wantField: "passwordLoginEnabledAdmin", wantCode: errcode.AuthLoginMethodLockout},
+		{name: "client off while only admin has google", overrides: merge(googleOnAdmin, map[string]string{"passwordLoginEnabledClient": "false"}),
+			wantField: "passwordLoginEnabledClient", wantCode: errcode.AuthLoginMethodLockout},
+		{name: "admin off, provider toggled but structurally incomplete (no secret)",
+			overrides: merge(googleOnAdmin, map[string]string{"passwordLoginEnabledAdmin": "false"}),
+			secrets:   map[string]bool{"googleClientSecret": false},
+			wantField: "passwordLoginEnabledAdmin", wantCode: errcode.AuthLoginMethodLockout},
+		{name: "admin off, provider structurally complete but toggle off",
+			overrides: map[string]string{"passwordLoginEnabledAdmin": "false", "googleEnabledAdmin": "false"},
+			wantField: "passwordLoginEnabledAdmin", wantCode: errcode.AuthLoginMethodLockout},
+		{name: "admin off, auto-link explicitly off closes the linking loop",
+			overrides: merge(googleOnAdmin, map[string]string{"passwordLoginEnabledAdmin": "false", "oauthAutoLinkByEmail": "false"}),
+			wantField: "passwordLoginEnabledAdmin", wantCode: errcode.AuthLoginMethodLockout},
+		// Blanking a structural field of the last usable provider while password is off (§4.4 symmetric).
+		{name: "admin off, redirect URL blanked",
+			overrides: merge(googleOnAdmin, map[string]string{"passwordLoginEnabledAdmin": "false", "googleRedirectURL": ""}),
+			wantField: "passwordLoginEnabledAdmin", wantCode: errcode.AuthLoginMethodLockout},
+		// Apple structural rules: inline PEM presence or a readable key file (probe-injected).
+		{name: "admin off, apple usable via key file",
+			overrides: map[string]string{
+				"passwordLoginEnabledAdmin": "false", "appleEnabledAdmin": "true",
+				"appleClientId": "com.example.svc", "appleRedirectURL": "https://api.example.com/cb",
+				"appleTeamId": "TEAM1", "appleKeyId": "KEY1", "applePrivateKeyPath": "/keys/apple.p8",
+			},
+			probe: func(path string) bool { return path == "/keys/apple.p8" }},
+		{name: "admin off, apple key file unreadable",
+			overrides: map[string]string{
+				"passwordLoginEnabledAdmin": "false", "appleEnabledAdmin": "true",
+				"appleClientId": "com.example.svc", "appleRedirectURL": "https://api.example.com/cb",
+				"appleTeamId": "TEAM1", "appleKeyId": "KEY1", "applePrivateKeyPath": "/keys/apple.p8",
+			},
+			probe:     func(string) bool { return false },
+			wantField: "passwordLoginEnabledAdmin", wantCode: errcode.AuthLoginMethodLockout},
+		// Malformed booleans among the eleven §4.4 keys are 422 naming THAT key,
+		// up-front, regardless of surface state (deviation 10, edge #29).
+		{name: "malformed password toggle", overrides: map[string]string{"passwordLoginEnabledAdmin": "treu"},
+			wantField: "passwordLoginEnabledAdmin"},
+		{name: "malformed provider toggle rejected even with password on",
+			overrides: map[string]string{"githubEnabledClient": "treu"},
+			wantField: "githubEnabledClient"},
+		{name: "malformed auto-link", overrides: map[string]string{"oauthAutoLinkByEmail": "yes"},
+			wantField: "oauthAutoLinkByEmail"},
+		{name: "empty present password toggle is malformed", overrides: map[string]string{"passwordLoginEnabledClient": ""},
+			wantField: "passwordLoginEnabledClient"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			probe := tc.probe
+			if probe == nil {
+				probe = func(string) bool { return false }
+			}
+			err := validateLoginMethodInvariant(snapFor(tc.overrides, tc.secrets), probe)
+			if tc.wantField == "" {
+				if err != nil {
+					t.Fatalf("want valid, got %v", err)
+				}
+				return
+			}
+			var typed *module.ConfigValidationError
+			if !errors.As(err, &typed) {
+				t.Fatalf("want *ConfigValidationError, got %v", err)
+			}
+			if typed.Field != tc.wantField {
+				t.Errorf("Field = %q, want %q", typed.Field, tc.wantField)
+			}
+			if typed.Code != tc.wantCode {
+				t.Errorf("Code = %q, want %q", typed.Code, tc.wantCode)
+			}
+			if tc.wantCode == errcode.AuthLoginMethodLockout {
+				// Both exits must be named (§4.4 error shape).
+				for _, needle := range []string{"password", "provider", "auto-link"} {
+					if !strings.Contains(strings.ToLower(typed.Message), needle) {
+						t.Errorf("message %q must name the %s exit", typed.Message, needle)
+					}
+				}
+			}
+		})
+	}
+}
+
+func merge(maps ...map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, m := range maps {
+		for k, v := range m {
+			out[k] = v
+		}
+	}
+	return out
 }
