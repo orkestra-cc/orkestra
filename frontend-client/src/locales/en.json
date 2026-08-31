@@ -61,6 +61,18 @@
     "forgot": "Forgot password?",
     "signupLink": "Create an account",
     "disabled": "Login is temporarily disabled by an administrator. Please try again later.",
+    "subtitleSso": "Continue with one of the sign-in providers below.",
+    "noMethod": "No sign-in method is currently available. Contact an administrator.",
+    "oauth": {
+      "divider": "or continue with",
+      "continueWith": "Continue with {{provider}}",
+      "redirecting": "Redirecting to {{provider}}…",
+      "loading": "Loading sign-in options…",
+      "loadError": "Could not load the sign-in providers.",
+      "retry": "Try again",
+      "startFailed": "Could not start sign-in with {{provider}}. Please try again.",
+      "providerDisabled": "{{provider}} sign-in is not available on this surface. Contact an administrator."
+    },
     "mfa": {
       "prompt": "Enter the 6-digit code from your authenticator app.",
       "code": "Verification code",
@@ -283,6 +295,7 @@
   },
   "loading": "Loading…",
   "error": {
-    "generic": "Something went wrong. Please try again."
+    "generic": "Something went wrong. Please try again.",
+    "policyUnavailable": "Sign-in policy is temporarily unavailable. Try again shortly."
   }
 }

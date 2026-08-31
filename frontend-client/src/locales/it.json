@@ -61,6 +61,18 @@
     "forgot": "Password dimenticata?",
     "signupLink": "Crea un account",
     "disabled": "L'accesso è momentaneamente disabilitato da un amministratore. Riprova più tardi.",
+    "subtitleSso": "Continua con uno dei provider di accesso qui sotto.",
+    "noMethod": "Nessun metodo di accesso è al momento disponibile. Contatta un amministratore.",
+    "oauth": {
+      "divider": "oppure continua con",
+      "continueWith": "Continua con {{provider}}",
+      "redirecting": "Reindirizzamento a {{provider}}…",
+      "loading": "Caricamento delle opzioni di accesso…",
+      "loadError": "Impossibile caricare i provider di accesso.",
+      "retry": "Riprova",
+      "startFailed": "Impossibile avviare l'accesso con {{provider}}. Riprova.",
+      "providerDisabled": "L'accesso con {{provider}} non è disponibile su questa superficie. Contatta un amministratore."
+    },
     "mfa": {
       "prompt": "Inserisci il codice a 6 cifre del tuo autenticatore.",
       "code": "Codice di verifica",
@@ -283,6 +295,7 @@
   },
   "loading": "Caricamento…",
   "error": {
-    "generic": "Si è verificato un errore. Riprova."
+    "generic": "Si è verificato un errore. Riprova.",
+    "policyUnavailable": "La policy di accesso non è al momento disponibile. Riprova tra poco."
   }
 }
