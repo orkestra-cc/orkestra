@@ -44,6 +44,10 @@ type gatesEnv struct {
 	tenant       gateTenantProvider
 	auth         *PasswordAuthService
 	authAudience PolicyAudience
+	// emailTokens + audit back the §4.3 reset paths and the break-glass
+	// audit assertions; both are inert for every pre-existing case.
+	emailTokens *gateEmailTokenRepo
+	audit       *gateAuditSink
 }
 
 // newGatesEnv assembles a wired PasswordAuthService against in-memory
@@ -78,13 +82,15 @@ func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]
 		claimer:      newGateClaimer(),
 		tenant:       tenant,
 		authAudience: audience,
+		emailTokens:  &gateEmailTokenRepo{},
+		audit:        &gateAuditSink{},
 	}
 	env.auth = NewPasswordAuthService(PasswordAuthConfig{
 		UserService:              env.users,
 		TenantProvider:           env.tenant,
 		PasswordService:          env.pwd,
 		JWTService:               env.jwt,
-		EmailTokenRepo:           nil, // not exercised
+		EmailTokenRepo:           env.emailTokens,
 		RefreshTokenRepo:         env.refresh,
 		AuthSessionRepo:          env.sessions,
 		MFAFactorRepo:            nil, // no MFA in the gate paths
@@ -100,6 +106,7 @@ func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]
 		Audience:                 audience,
 		GeoResolver:              env.geo,
 	})
+	env.auth.SetAuditSink(env.audit)
 	t.Cleanup(env.rateLimiter.Close)
 	return env
 }
@@ -916,3 +923,215 @@ func mustGenerateTOTPNow(t *testing.T, secretBase32 string) string {
 
 // suppress lint when the iface package is unused after pruning.
 var _ iface.NotificationSender = (*gateNotifier)(nil)
+
+// --- PR 3 §4.3: per-surface password-method gates ---
+
+func passwordOff(surface string) map[string]string {
+	return map[string]string{"passwordLoginEnabled" + surface: "false"}
+}
+
+func TestLogin_PasswordMethodGate(t *testing.T) {
+	t.Run("off refuses before the user lookup, per audience", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceOperator, passwordOff("Admin"), nil)
+		// Deliberately NO user seeded: the gate must answer before
+		// GetUserForAuth, so the outcome cannot be ErrInvalidCredentials.
+		_, err := env.auth.Login(context.Background(), LoginInput{Email: "who@example.com", Password: "pw", IP: "203.0.113.9"})
+		if !errors.Is(err, ErrPasswordLoginDisabled) {
+			t.Fatalf("want ErrPasswordLoginDisabled, got %v", err)
+		}
+		// Counters untouched: same email must still have its full budget.
+		if env.rateLimiter.IsBlocked(context.Background(), "email:who@example.com") {
+			t.Fatal("rate limiter must not tick on a policy refusal")
+		}
+	})
+	t.Run("other audience unaffected", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceClient, passwordOff("Admin"), nil)
+		u := env.hashedUser("c@example.com", "correct horse battery staple")
+		u.EmailVerified = true
+		resp, err := env.auth.Login(context.Background(), LoginInput{Email: "c@example.com", Password: "correct horse battery staple"})
+		if err != nil || resp == nil || resp.AccessToken == "" {
+			t.Fatalf("client login with only Admin off must succeed, got (%v, %v)", resp, err)
+		}
+	})
+	t.Run("policy outage is 503-shaped, never open", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceOperator, nil, nil)
+		env.policy.cs = &stubReader{rawErr: errors.New("mongo down")}
+		_, err := env.auth.Login(context.Background(), LoginInput{Email: "a@example.com", Password: "pw"})
+		if !errors.Is(err, ErrAuthPolicyUnavailable) {
+			t.Fatalf("want ErrAuthPolicyUnavailable, got %v", err)
+		}
+	})
+	t.Run("nil policy is an outage, not legacy-allow", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceOperator, nil, nil)
+		env.auth.policy = nil
+		_, err := env.auth.Login(context.Background(), LoginInput{Email: "a@example.com", Password: "pw"})
+		if !errors.Is(err, ErrAuthPolicyUnavailable) {
+			t.Fatalf("want ErrAuthPolicyUnavailable, got %v", err)
+		}
+	})
+	t.Run("break-glass rescues operator login and audits once", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceOperator, passwordOff("Admin"), nil)
+		env.policy.SetOperatorBreakGlass(true)
+		u := env.hashedUser("op@example.com", "correct horse battery staple")
+		u.EmailVerified = true
+		resp, err := env.auth.Login(context.Background(), LoginInput{Email: "op@example.com", Password: "correct horse battery staple", IP: "203.0.113.9"})
+		if err != nil || resp == nil || resp.AccessToken == "" {
+			t.Fatalf("rescued login must mint tokens, got (%v, %v)", resp, err)
+		}
+		got := env.audit.byAction("auth.policy.break_glass_used")
+		if len(got) != 1 {
+			t.Fatalf("want exactly one break-glass event, got %d", len(got))
+		}
+		e := got[0]
+		if e.ActorUserID != u.UUID || e.IPAddress != "203.0.113.9" {
+			t.Errorf("event must carry user UUID + source IP, got %+v", e)
+		}
+		if e.Metadata["audience"] != "operator" || e.Metadata["sessionId"] != resp.SessionID {
+			t.Errorf("event must carry audience + session id, got %+v", e.Metadata)
+		}
+		if e.ActorEmail != "" {
+			t.Errorf("event must not carry a full email, got %q", e.ActorEmail)
+		}
+	})
+	t.Run("break-glass never rescues client login", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceClient, passwordOff("Client"), nil)
+		env.policy.SetOperatorBreakGlass(true)
+		_, err := env.auth.Login(context.Background(), LoginInput{Email: "c@example.com", Password: "pw"})
+		if !errors.Is(err, ErrPasswordLoginDisabled) {
+			t.Fatalf("want ErrPasswordLoginDisabled, got %v", err)
+		}
+	})
+	t.Run("failed break-glass attempt claims nothing", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceOperator, passwordOff("Admin"), nil)
+		env.policy.SetOperatorBreakGlass(true)
+		u := env.hashedUser("op@example.com", "correct horse battery staple")
+		u.EmailVerified = true
+		_, err := env.auth.Login(context.Background(), LoginInput{Email: "op@example.com", Password: "WRONG", IP: "203.0.113.9"})
+		if !errors.Is(err, ErrInvalidCredentials) {
+			t.Fatalf("want ErrInvalidCredentials, got %v", err)
+		}
+		if n := len(env.audit.byAction("auth.policy.break_glass_used")); n != 0 {
+			t.Fatalf("failed attempts must not claim the override was used, got %d events", n)
+		}
+	})
+}
+
+func TestRegister_PasswordMethodGate(t *testing.T) {
+	// Password follows this file's existing idiom ("correct-horse-battery"):
+	// Register runs ValidatePolicy, whose HIBP check is on by default, and
+	// the xkcd passphrase is a known-breached string.
+	in := RegisterInput{Email: "new@example.com", Password: "correct-horse-battery", FullName: "New User"}
+
+	t.Run("off refuses, per audience, break-glass ignored", func(t *testing.T) {
+		for _, tc := range []struct {
+			aud     PolicyAudience
+			surface string
+		}{{PolicyAudienceOperator, "Admin"}, {PolicyAudienceClient, "Client"}} {
+			env := newGatesEnv(t, tc.aud, passwordOff(tc.surface), nil)
+			env.policy.SetOperatorBreakGlass(true)
+			// A non-first signup: seed one existing user so the operator
+			// bootstrap branch cannot fire.
+			env.users.seed(&iface.User{UUID: "existing", Email: "e@example.com", IsActive: true})
+			_, err := env.auth.Register(context.Background(), in)
+			if !errors.Is(err, ErrPasswordLoginDisabled) {
+				t.Fatalf("%s: want ErrPasswordLoginDisabled, got %v", tc.aud, err)
+			}
+		}
+	})
+	t.Run("operator first-user bootstrap bypasses the gate", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceOperator, passwordOff("Admin"), nil)
+		u, err := env.auth.Register(context.Background(), in)
+		if err != nil || u == nil {
+			t.Fatalf("first operator signup must bypass the method gate, got (%v, %v)", u, err)
+		}
+		if u.Role != "super_admin" {
+			t.Fatalf("first user must claim super_admin, got %q", u.Role)
+		}
+	})
+	t.Run("RegisterInitialAdmin bootstrap stays reachable with password off", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceOperator, passwordOff("Admin"), nil)
+		resp, err := env.auth.RegisterInitialAdmin(context.Background(), "root@example.com", "correct-horse-battery", "Root", "203.0.113.9")
+		if err != nil || resp == nil || resp.AccessToken == "" {
+			t.Fatalf("setup-wizard bootstrap is an explicit G2 exception; got (%v, %v)", resp, err)
+		}
+	})
+	t.Run("empty Tier-2 collection gets no bypass", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceClient, passwordOff("Client"), nil)
+		if _, err := env.auth.Register(context.Background(), in); !errors.Is(err, ErrPasswordLoginDisabled) {
+			t.Fatalf("want ErrPasswordLoginDisabled, got %v", err)
+		}
+	})
+	t.Run("policy outage refuses non-bootstrap signups", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceClient, nil, nil)
+		env.policy.cs = &stubReader{rawErr: errors.New("mongo down")}
+		if _, err := env.auth.Register(context.Background(), in); !errors.Is(err, ErrAuthPolicyUnavailable) {
+			t.Fatalf("want ErrAuthPolicyUnavailable, got %v", err)
+		}
+	})
+}
+
+func TestForgotPassword_PasswordMethodGate(t *testing.T) {
+	t.Run("off refuses before the lookup, identically for any email", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceClient, passwordOff("Client"), nil)
+		env.policy.SetOperatorBreakGlass(true) // must be invisible here
+		known := env.hashedUser("known@example.com", "correct horse battery staple")
+		known.IsActive = true
+		for _, email := range []string{"known@example.com", "unknown@example.com"} {
+			err := env.auth.ForgotPassword(context.Background(), email, "203.0.113.9")
+			if !errors.Is(err, ErrPasswordLoginDisabled) {
+				t.Fatalf("%s: want ErrPasswordLoginDisabled, got %v", email, err)
+			}
+		}
+		if n := len(env.emailTokens.created); n != 0 {
+			t.Fatalf("no reset token may be minted under the gate, got %d", n)
+		}
+	})
+	t.Run("on keeps the generic swallow for known and unknown email", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceClient, nil, nil)
+		known := env.hashedUser("known@example.com", "correct horse battery staple")
+		known.IsActive = true
+		for _, email := range []string{"known@example.com", "unknown@example.com"} {
+			if err := env.auth.ForgotPassword(context.Background(), email, "203.0.113.9"); err != nil {
+				t.Fatalf("%s: account-specific outcomes must stay swallowed, got %v", email, err)
+			}
+		}
+	})
+	t.Run("policy outage propagates", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceClient, nil, nil)
+		env.policy.cs = &stubReader{rawErr: errors.New("mongo down")}
+		if err := env.auth.ForgotPassword(context.Background(), "a@example.com", ""); !errors.Is(err, ErrAuthPolicyUnavailable) {
+			t.Fatalf("want ErrAuthPolicyUnavailable, got %v", err)
+		}
+	})
+}
+
+func TestAdminTriggerPasswordReset_PasswordMethodGate(t *testing.T) {
+	t.Run("off refuses; break-glass ignored", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceClient, passwordOff("Client"), nil)
+		env.policy.SetOperatorBreakGlass(true)
+		u := env.hashedUser("victim@example.com", "correct horse battery staple")
+		if err := env.auth.AdminTriggerPasswordReset(context.Background(), u.UUID); !errors.Is(err, ErrPasswordLoginDisabled) {
+			t.Fatalf("want ErrPasswordLoginDisabled, got %v", err)
+		}
+		if n := len(env.emailTokens.created); n != 0 {
+			t.Fatalf("no reset token may be minted under the gate, got %d", n)
+		}
+	})
+	t.Run("on still works", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceClient, nil, nil)
+		u := env.hashedUser("victim@example.com", "correct horse battery staple")
+		if err := env.auth.AdminTriggerPasswordReset(context.Background(), u.UUID); err != nil {
+			t.Fatalf("want success, got %v", err)
+		}
+		if n := len(env.emailTokens.created); n != 1 {
+			t.Fatalf("want one reset token, got %d", n)
+		}
+	})
+	t.Run("policy outage propagates", func(t *testing.T) {
+		env := newGatesEnv(t, PolicyAudienceClient, nil, nil)
+		env.policy.cs = &stubReader{rawErr: errors.New("mongo down")}
+		if err := env.auth.AdminTriggerPasswordReset(context.Background(), "any"); !errors.Is(err, ErrAuthPolicyUnavailable) {
+			t.Fatalf("want ErrAuthPolicyUnavailable, got %v", err)
+		}
+	})
+}

@@ -236,16 +236,31 @@ func (s *PasswordAuthService) Register(ctx context.Context, in RegisterInput) (*
 	// Admin-managed registration policy. Bypass for the very first operator
 	// account on a fresh install — otherwise an operator who flips
 	// "registrationEnabledAdmin=false" before any user exists locks themselves
-	// out. Bypass detection: ask the user count; the firstAdminClaimer's atomic
+	// out.
+	//
+	// Bypass detection for the very first operator account — outside the
+	// policy guard because the bootstrap exceptions must stay reachable
+	// with no policy read at all (G2); the firstAdminClaimer's atomic
 	// claim later still races correctly.
-	if s.policy != nil {
-		isFirstUser := false
-		if isOperatorBootstrap {
-			if count, err := s.userService.GetUserCount(ctx, nil); err == nil && count == 0 {
-				isFirstUser = true
-			}
+	isFirstUser := false
+	if isOperatorBootstrap {
+		if count, err := s.userService.GetUserCount(ctx, nil); err == nil && count == 0 {
+			isFirstUser = true
 		}
-		if !isFirstUser {
+	}
+	if !isFirstUser {
+		// Per-surface method gate (spec §4.3): registration creates a
+		// password credential the surface will not accept. Strict read —
+		// break-glass never opens registration, and a nil policy is an
+		// outage (503), not the legacy allow.
+		enabled, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+		if err != nil {
+			return nil, err
+		}
+		if !enabled {
+			return nil, ErrPasswordLoginDisabled
+		}
+		if s.policy != nil {
 			if !s.policy.RegistrationAllowed(ctx, s.audience) {
 				return nil, ErrRegistrationDisabled
 			}
@@ -471,6 +486,19 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		return nil, ErrLoginDisabled
 	}
 
+	// Per-surface method gate (spec §4.3): sits before GetUserForAuth so
+	// lockout counters, the rate limiter and the audit trail see nothing
+	// and every email receives the identical response. Only the operator
+	// surface can be rescued by the boot-time break-glass; a nil policy
+	// or failed read is an outage (503), never a pass.
+	decision, err := s.policy.PasswordLoginDecision(ctx, s.audience)
+	if err != nil {
+		return nil, err
+	}
+	if !decision.Allowed {
+		return nil, ErrPasswordLoginDisabled
+	}
+
 	// Geo block — checked before the rate-limiter and password lookup so
 	// a blocked country never spends a token from the per-IP bucket and
 	// never lights up the audit log with a noisy rejected-login row.
@@ -621,7 +649,17 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		},
 	})
 
-	return s.completeLogin(ctx, user, in, []string{"pwd"})
+	resp, err := s.completeLogin(ctx, user, in, []string{"pwd"}, decision)
+	if err != nil {
+		return nil, err
+	}
+	// A direct full-token success under the override is a rescued login
+	// (spec §4.2). The MFA-partial case is audited by the winning
+	// completion instead, which re-evaluates the decision itself.
+	if decision.BreakGlassUsed && !resp.RequiresMFA {
+		s.EmitBreakGlassUsed(ctx, string(s.audience), user.UUID, resp.SessionID, in.IP)
+	}
+	return resp, nil
 }
 
 // emitLoginFailed is a terse helper for the many login-failure branches.
@@ -643,6 +681,27 @@ func (s *PasswordAuthService) emitLoginFailed(ctx context.Context, email, userUU
 	})
 }
 
+// EmitBreakGlassUsed records one rescued password authentication (spec
+// §4.2): the boot-time operator break-glass — not persisted policy — is
+// what allowed it. Called by Login on a direct full-token success and by
+// the winning MFA/WebAuthn completion of a rescued challenge (via the
+// handlers' LoginTokenIssuer). Best-effort through the nil-guarded audit
+// sink; carries audience, user UUID, session id and source IP — never a
+// password, a token or a full email.
+func (s *PasswordAuthService) EmitBreakGlassUsed(ctx context.Context, audience, userUUID, sessionID, ip string) {
+	s.emitAudit(ctx, iface.AuditEvent{
+		ActorUserID: userUUID,
+		ActorType:   "user",
+		Action:      "auth.policy.break_glass_used",
+		Outcome:     "success",
+		IPAddress:   ip,
+		Metadata: map[string]any{
+			"audience":  audience,
+			"sessionId": sessionID,
+		},
+	})
+}
+
 // completeLogin applies the MFA decision tree to a user who has already
 // satisfied primary credentials. `sourceAMR` is the list of factors used so
 // far (["pwd"] for password, ["oauth"] for OAuth). Returns one of:
@@ -650,7 +709,7 @@ func (s *PasswordAuthService) emitLoginFailed(ctx context.Context, email, userUU
 //   - partial TokenResponse with RequiresMFA=true (factor enrolled, client
 //     must call /v1/auth/mfa/login/verify)
 //   - ErrMFAEnrollmentRequired (privileged user, no factor, grace expired)
-func (s *PasswordAuthService) completeLogin(ctx context.Context, user *iface.User, in LoginInput, sourceAMR []string) (*authModels.TokenResponse, error) {
+func (s *PasswordAuthService) completeLogin(ctx context.Context, user *iface.User, in LoginInput, sourceAMR []string, decision PasswordAuthDecision) (*authModels.TokenResponse, error) {
 	memberships := s.loadMembershipsAsAuthModel(ctx, user.UUID)
 	requires := s.policy.MFARequired(user, memberships)
 	if !requires {
@@ -943,6 +1002,20 @@ func (s *PasswordAuthService) ResendVerification(ctx context.Context, email, ip 
 // regardless of whether the email exists (prevents enumeration).
 func (s *PasswordAuthService) ForgotPassword(ctx context.Context, email, ip string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
+
+	// Per-surface method gate (spec §4.3): public, and it mints a
+	// credential-setting token for a rejected method. Strict read, never
+	// break-glass, evaluated BEFORE the user lookup so the outcome cannot
+	// depend on account state. These two errors are the ONLY ones this
+	// method returns; every account-specific outcome below stays swallowed.
+	enabled, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return ErrPasswordLoginDisabled
+	}
+
 	user, err := s.userService.GetUserForAuth(ctx, email)
 	if err != nil || user == nil {
 		return nil
@@ -1817,6 +1890,18 @@ func (s *PasswordAuthService) AdminResendVerification(ctx context.Context, userU
 // 503 ErrNotificationDown). The redemption path is the same
 // /v1/auth/{tier}/reset-password the public flow uses.
 func (s *PasswordAuthService) AdminTriggerPasswordReset(ctx context.Context, userUUID string) error {
+	// Per-surface method gate (spec §4.3): an operator-minted reset for a
+	// method the target's surface rejects would also revoke the target's
+	// sessions and leave an unusable password — the handlers map this to
+	// 409. Strict read; break-glass never opens it.
+	enabled, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return ErrPasswordLoginDisabled
+	}
+
 	user, err := s.userService.GetUserByID(ctx, userUUID)
 	if err != nil {
 		return err

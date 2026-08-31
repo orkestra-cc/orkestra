@@ -902,3 +902,55 @@ func activeUser(email, hash string) *iface.User {
 		UpdatedAt:     time.Now(),
 	}
 }
+
+// gateAuditSink captures emitted audit events so the break-glass tests
+// can assert exactly one auth.policy.break_glass_used with the right
+// minimized fields.
+type gateAuditSink struct {
+	mu     sync.Mutex
+	events []iface.AuditEvent
+}
+
+func (g *gateAuditSink) Emit(_ context.Context, e iface.AuditEvent) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.events = append(g.events, e)
+}
+
+func (g *gateAuditSink) byAction(action string) []iface.AuditEvent {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []iface.AuditEvent
+	for _, e := range g.events {
+		if e.Action == action {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// gateEmailTokenRepo is the minimal EmailTokenRepository the ForgotPassword
+// and AdminTriggerPasswordReset paths touch. Everything else panics.
+type gateEmailTokenRepo struct {
+	mu      sync.Mutex
+	created []*authModels.EmailTokenDoc
+}
+
+func (g *gateEmailTokenRepo) Create(_ context.Context, d *authModels.EmailTokenDoc) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.created = append(g.created, d)
+	return nil
+}
+func (g *gateEmailTokenRepo) GetByHash(context.Context, string) (*authModels.EmailTokenDoc, error) {
+	panic("GetByHash not used in these tests")
+}
+func (g *gateEmailTokenRepo) MarkUsed(context.Context, string) error {
+	panic("MarkUsed not used in these tests")
+}
+func (g *gateEmailTokenRepo) InvalidateByUserAndPurpose(context.Context, string, string) error {
+	return nil
+}
+func (g *gateEmailTokenRepo) DeleteAllByUser(context.Context, string) (int64, error) {
+	panic("DeleteAllByUser not used in these tests")
+}

@@ -199,7 +199,12 @@ type ForgotPasswordResponse struct {
 
 func (h *PasswordAuthHandler) ForgotPassword(ctx context.Context, req *ForgotPasswordRequest) (*ForgotPasswordResponse, error) {
 	ip := clientIPFromCtx(ctx)
-	_ = h.svc.ForgotPassword(ctx, req.Body.Email, ip)
+	// The service returns ONLY the two per-surface policy errors (spec
+	// §4.3) and swallows every account-specific outcome itself, so
+	// propagating err verbatim cannot become an enumeration oracle.
+	if err := h.svc.ForgotPassword(ctx, req.Body.Email, ip); err != nil {
+		return nil, mapPasswordError(err)
+	}
 	resp := &ForgotPasswordResponse{}
 	resp.Body.Success = true
 	resp.Body.Message = "If an account with that email exists, a password reset email has been sent."
@@ -432,6 +437,12 @@ func mapPasswordError(err error) error {
 	case errors.Is(err, services.ErrLoginDisabled):
 		return errcode.Forbidden(errcode.AuthLoginDisabled,
 			"Login is temporarily disabled for this surface. Contact an administrator.")
+	case errors.Is(err, services.ErrPasswordLoginDisabled):
+		return errcode.Forbidden(errcode.AuthPasswordLoginDisabled,
+			"Email/password sign-in is disabled on this surface. Use a configured sign-in provider, or contact an administrator.")
+	case errors.Is(err, services.ErrAuthPolicyUnavailable):
+		return errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
+			"Sign-in policy is temporarily unavailable; try again shortly.")
 	case errors.Is(err, services.ErrCountryBlocked):
 		return errcode.Forbidden(errcode.AuthCountryBlocked,
 			"Access from your country is not permitted.")

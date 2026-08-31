@@ -76,7 +76,7 @@ All routes are behind `RequireSystemPermission("system.users.admin")` (`module.g
 | POST | `/v1/admin/client-users/invite` | Invite-flow create: row with no password, 7-day `admin_invite` email-token sent. Recipient redeems via `/v1/auth/client/accept-invite` |
 | POST | `/v1/admin/client-users/{id}/invite/resend` | Re-emit the invite email (invalidates prior unused invite token) |
 | POST | `/v1/admin/client-users/{id}/resend-verification` | Admin-trigger variant of resend verification — surfaces real errors instead of the public flow's silent return |
-| POST | `/v1/admin/client-users/{id}/send-password-reset` | Admin-trigger variant of forgot-password — same enumeration-safe primitive but signals 404 / 503 directly to the operator |
+| POST | `/v1/admin/client-users/{id}/send-password-reset` | Admin-trigger variant of forgot-password — same enumeration-safe primitive but signals 404 / 503 directly to the operator. Answers **409** `auth.password_login_disabled` when the client surface has `passwordLoginEnabledClient=false` (a reset link would mint a credential the surface refuses) and **503** `auth.policy_unavailable` when the policy cannot be established. `mapInviteErr` matches those by **identity** on the `iface` sentinels (`errors.Is` against `iface.ErrPasswordLoginDisabled` / `iface.ErrAuthPolicyUnavailable`), never by message — this package must not import `auth/services`. Operator-side twin: `/v1/admin/users/{userId}/send-password-reset` |
 | PATCH | `/v1/admin/client-users/{id}` | Update name / username / email / phone / role / isActive on a client user |
 | DELETE | `/v1/admin/client-users/{id}` | Soft-delete + email alias on a client user (reuses `SoftDeleteAndAliasEmail`) |
 
