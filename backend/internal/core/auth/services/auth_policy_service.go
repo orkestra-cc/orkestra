@@ -793,6 +793,21 @@ func (s *AuthPolicyService) PasswordLoginEnabled(ctx context.Context, audience P
 	return v, nil
 }
 
+// PasswordReauthAllowed adapts strict PasswordLoginEnabled to the
+// middleware's StepUpPolicy shape (§4.6). The name differs from the
+// service method deliberately: Go has no overloading and the middleware
+// cannot import PolicyAudience. Never break-glass: a temporary override
+// is not a durable login method.
+func (s *AuthPolicyService) PasswordReauthAllowed(ctx context.Context, audience string) (bool, error) {
+	switch audience {
+	case string(PolicyAudienceOperator):
+		return s.PasswordLoginEnabled(ctx, PolicyAudienceOperator)
+	case string(PolicyAudienceClient):
+		return s.PasswordLoginEnabled(ctx, PolicyAudienceClient)
+	}
+	return false, fmt.Errorf("%w: unknown audience %q for password reauth", ErrAuthPolicyUnavailable, audience)
+}
+
 // PasswordAuthDecision is PasswordLoginDecision's answer: whether the
 // password may authenticate now, and whether the boot-time break-glass —
 // not the persisted policy — is what allowed it (audit context).

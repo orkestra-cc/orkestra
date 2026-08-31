@@ -1105,3 +1105,25 @@ func TestPasswordLoginDecision_BreakGlassIsOperatorOnly(t *testing.T) {
 		}
 	})
 }
+
+// PR 3 §4.6: the middleware's StepUpPolicy adapter. It is a thin, strict
+// projection of PasswordLoginEnabled onto the middleware's string-typed
+// audience — including the two ways it must refuse: an audience it does
+// not own, and a break-glass override it must not honour.
+func TestPasswordReauthAllowed_AdapterContract(t *testing.T) {
+	ctx := context.Background()
+	p := newPolicy(map[string]string{"passwordLoginEnabledAdmin": "false"})
+	if ok, err := p.PasswordReauthAllowed(ctx, "operator"); err != nil || ok {
+		t.Fatalf("operator off → (false, nil), got (%v, %v)", ok, err)
+	}
+	if ok, err := p.PasswordReauthAllowed(ctx, "client"); err != nil || !ok {
+		t.Fatalf("client untouched → (true, nil), got (%v, %v)", ok, err)
+	}
+	if _, err := p.PasswordReauthAllowed(ctx, "service"); !errors.Is(err, ErrAuthPolicyUnavailable) {
+		t.Fatalf("unknown audience must be an outage, got %v", err)
+	}
+	p.SetOperatorBreakGlass(true)
+	if ok, _ := p.PasswordReauthAllowed(ctx, "operator"); ok {
+		t.Fatal("break-glass must never count as a durable method")
+	}
+}

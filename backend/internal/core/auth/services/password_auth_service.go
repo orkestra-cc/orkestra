@@ -1261,6 +1261,16 @@ func (s *PasswordAuthService) ConfirmPasswordWithSecurity(ctx context.Context, u
 	if user.PasswordHash == "" {
 		return nil, ErrPasswordConfirmUnavailable
 	}
+	// PR 3 §4.6: a password the surface refuses cannot prove presence.
+	// Strict read — break-glass is invisible here — and same 409 shape as
+	// "no password hash"; a policy outage is a 503, never a guess.
+	usable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+	if err != nil {
+		return nil, err
+	}
+	if !usable {
+		return nil, ErrPasswordConfirmUnavailable
+	}
 	// Refuse when the user already has a stronger factor. The frontend
 	// should never reach this endpoint in that case (the middleware
 	// emits step_up_required, not password_confirm_required), but the

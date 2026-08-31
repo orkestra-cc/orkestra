@@ -216,6 +216,15 @@ func TestStepUpSessionIdentity_PasswordConfirmPreservesSID(t *testing.T) {
 		UserService:     &stepUpUsers{user: user},
 		PasswordService: passwords,
 		JWTService:      jwt,
+		// PR 3 §4.6: the reconfirm now reads the per-surface password
+		// policy, and an unreadable one is an outage (503) rather than a
+		// silent allow — so this fixture must carry the same Policy +
+		// Audience pair production wiring always supplies. Empty values =
+		// key absent = password login enabled, which is the state this
+		// test is about: a SUCCESSFUL reconfirm preserving the session
+		// identity.
+		Policy:   services.NewAuthPolicyServiceForTest(nil),
+		Audience: services.PolicyAudienceOperator,
 	})
 	h := NewPasswordAuthHandler(svc, "", "", false)
 	req := &PasswordConfirmRequest{}
