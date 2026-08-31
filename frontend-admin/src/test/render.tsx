@@ -4,9 +4,11 @@ import { Provider } from 'react-redux';
 import { MemoryRouter, type InitialEntry } from 'react-router';
 import {
   render,
+  waitFor,
   type RenderOptions,
   type RenderResult
 } from '@testing-library/react';
+import { QueryStatus } from '@reduxjs/toolkit/query';
 
 import authReducer from 'store/slices/authSlice';
 import kanbanReducer from 'store/slices/kanbanSlice';
@@ -81,3 +83,24 @@ export function renderWithProviders(
   });
   return { store, ...renderResult };
 }
+
+// waitForQuerySettled — resolves once the named RTK Query endpoint has a
+// SETTLED cache entry (fulfilled or rejected). Policy-gated UI is often
+// byte-identical before and after its query lands, because the fail-open
+// default renders the same tree the enabled policy does; a DOM anchor then
+// lets a following absence assertion pass vacuously against the first
+// paint. Anchoring on the cache entry is honest: that state change is what
+// drives the re-render, so once it is settled the gated tree has been
+// evaluated with the real answer. Prefer a DOM anchor whenever one exists.
+export const waitForQuerySettled = (store: TestStore, endpointName: string) =>
+  waitFor(() => {
+    const settled = Object.values(
+      store.getState()[baseApi.reducerPath].queries
+    ).some(
+      entry =>
+        entry?.endpointName === endpointName &&
+        (entry.status === QueryStatus.fulfilled ||
+          entry.status === QueryStatus.rejected)
+    );
+    if (!settled) throw new Error(`${endpointName} has not settled yet`);
+  });

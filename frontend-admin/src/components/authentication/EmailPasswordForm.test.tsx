@@ -3,7 +3,7 @@ import { http, HttpResponse, delay } from 'msw';
 import { Routes, Route, useLocation } from 'react-router';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { renderWithProviders } from 'test/render';
+import { renderWithProviders, waitForQuerySettled } from 'test/render';
 import { server } from 'test/server';
 import { operatorPolicyHandler } from 'test/handlers';
 import EmailPasswordForm from './EmailPasswordForm';
@@ -323,7 +323,13 @@ describe('password-login policy gating (PR 3 §4.10)', () => {
     server.use(
       http.get('*/v1/auth/operator/policy', () => HttpResponse.error())
     );
-    renderForm();
-    expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
+    const { store } = renderForm();
+    // The fail-open fallback paints a tree byte-identical to the pre-fetch
+    // one, so finding the email field on its own proves nothing. Anchor on
+    // the query having SETTLED — the queryFn swallows the transport error
+    // and resolves with the fallback, so the entry reaches `fulfilled` —
+    // then assert the form survived that answer.
+    await waitForQuerySettled(store, 'getAuthPolicy');
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
   });
 });

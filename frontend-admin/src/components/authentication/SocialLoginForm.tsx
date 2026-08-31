@@ -23,6 +23,9 @@ interface SocialLoginFormProps {
   // error) with the count of renderable providers — the seam Login uses
   // for the no-sign-in-method alert without issuing a second query.
   onProvidersResolved?: (count: number) => void;
+  // False when no password form renders above this section, so the
+  // "or continue with" divider would have nothing to divide from.
+  showDivider?: boolean;
 }
 
 // PROVIDER_META is the FE-side mapping from a backend provider string to
@@ -46,7 +49,8 @@ const KNOWN_PROVIDERS = new Set(Object.keys(PROVIDER_META));
 const SocialLoginForm = ({
   backendUrl = runtimeConfig.apiUrl,
   onError,
-  onProvidersResolved
+  onProvidersResolved,
+  showDivider = true
 }: SocialLoginFormProps) => {
   const { t } = useTranslation();
   const location = useLocation();
@@ -62,8 +66,11 @@ const SocialLoginForm = ({
 
   // Live list of providers the backend currently exposes for this audience.
   // Filtered server-side by (a) configured client_id presence and (b) the
-  // OAuth Providers toggle tab on /admin/modules/auth. The hook returns
-  // an empty list on network failure (fail-closed) — see authApi.
+  // OAuth Providers toggle tab on /admin/modules/auth. On failure the hook
+  // does NOT fall back to an empty list: it is a plain query, so `isError`
+  // goes true and `data` stays undefined (authApi's transformResponse only
+  // normalises a SUCCESSFUL malformed body). That distinction is what makes
+  // the onProvidersResolved "never on error" guarantee below possible.
   const { data, isLoading, isError } = useGetOAuthProvidersQuery();
 
   // Filter the backend list against the FE icon/label map. Unknown
@@ -115,15 +122,20 @@ const SocialLoginForm = ({
 
   // The "or continue with" divider belongs to this component, not the login
   // page: it only makes sense when a social section actually renders below
-  // the password form.
-  const Divider = () => (
-    <div className="position-relative mt-4 mb-3">
-      <hr className="text-300" />
-      <div className="divider-content-center">
-        {t('auth.pages.loginContinueWith')}
+  // the password form. When the password method is policy-hidden this
+  // section IS the whole sign-in surface, so the caller passes
+  // showDivider={false} and the buttons stand alone. Gated here, at the one
+  // definition, so the rule cannot drift across the loading / error /
+  // populated branches that all render it.
+  const Divider = () =>
+    !showDivider ? null : (
+      <div className="position-relative mt-4 mb-3">
+        <hr className="text-300" />
+        <div className="divider-content-center">
+          {t('auth.pages.loginContinueWith')}
+        </div>
       </div>
-    </div>
-  );
+    );
 
   // Loading: placeholder while the providers query is in flight. We
   // intentionally do NOT render the buttons optimistically — the whole
