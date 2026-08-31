@@ -54,10 +54,17 @@ type gatesEnv struct {
 // fakes. policyValues seeds the auth-policy reader.
 func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]string, geoByIP map[string]string) *gatesEnv {
 	t.Helper()
-	if policyValues == nil {
-		policyValues = map[string]string{}
+	// HIBP off for every env built here. ValidatePolicy hands the decision
+	// to the POLICY toggle as soon as a policy is wired (see
+	// password_service.go), so the constructor's hibpEnabled=false below is
+	// not enough on its own: without this seed every Register / reset in
+	// this file would reach api.pwnedpasswords.com over the network. Seeded
+	// UNDER the caller's keys, so a case that wants the check on still can.
+	values := map[string]string{"breachedPasswordCheck": "false"}
+	for k, v := range policyValues {
+		values[k] = v
 	}
-	policy := &AuthPolicyService{cs: &stubReader{values: policyValues}}
+	policy := &AuthPolicyService{cs: &stubReader{values: values}}
 	pwd := NewPasswordService(silentLogger(), false /* HIBP off via policy */)
 	pwd.SetPolicy(policy)
 
@@ -1017,9 +1024,11 @@ func TestLogin_PasswordMethodGate(t *testing.T) {
 }
 
 func TestRegister_PasswordMethodGate(t *testing.T) {
-	// Password follows this file's existing idiom ("correct-horse-battery"):
-	// Register runs ValidatePolicy, whose HIBP check is on by default, and
-	// the xkcd passphrase is a known-breached string.
+	// Password follows this file's existing idiom ("correct-horse-battery")
+	// rather than the full xkcd passphrase, which is a known-breached
+	// string: newGatesEnv seeds breachedPasswordCheck=false so Register's
+	// ValidatePolicy never calls HIBP, and the idiom keeps the case honest
+	// for any env that re-enables the check.
 	in := RegisterInput{Email: "new@example.com", Password: "correct-horse-battery", FullName: "New User"}
 
 	t.Run("off refuses, per audience, break-glass ignored", func(t *testing.T) {
@@ -1134,4 +1143,70 @@ func TestAdminTriggerPasswordReset_PasswordMethodGate(t *testing.T) {
 			t.Fatalf("want ErrAuthPolicyUnavailable, got %v", err)
 		}
 	})
+}
+
+// TestOpenRoutes_UnaffectedByPasswordMethodGate pins the OPEN column of the
+// §4.3 verdict table: the routes that manage or verify an existing
+// credential never consult the per-surface method gate, on either surface.
+//
+// Each subtest calls the service method under a password-off policy with
+// minimal / invalid input and asserts ONLY that neither policy sentinel
+// came back. The specific error (invalid token, wrong password) is
+// pre-existing behaviour that belongs to those routes' own tests and is
+// deliberately not asserted here — over-asserting it would make this test
+// fail for reasons that have nothing to do with the gate.
+//
+// The token-redeeming routes are called with an empty token: the shared
+// gateEmailTokenRepo panics in GetByHash by design, and an empty token
+// short-circuits in lookupEmailToken. That is still the right probe — on
+// every gated route the gate sits AHEAD of the token/user lookup (see
+// ForgotPassword), so a gate on these routes would fire here too.
+func TestOpenRoutes_UnaffectedByPasswordMethodGate(t *testing.T) {
+	for _, tier := range []struct {
+		name     string
+		audience PolicyAudience
+		surface  string
+	}{
+		{"operator", PolicyAudienceOperator, "Admin"},
+		{"client", PolicyAudienceClient, "Client"},
+	} {
+		t.Run(tier.name, func(t *testing.T) {
+			env := newGatesEnv(t, tier.audience, passwordOff(tier.surface), nil)
+			u := env.hashedUser("open@example.com", "correct horse battery staple")
+			unverified := env.hashedUser("pending@example.com", "correct horse battery staple")
+			unverified.EmailVerified = false
+
+			for _, c := range []struct {
+				route string
+				run   func() error
+			}{
+				{"reset-password", func() error {
+					return env.auth.ResetPassword(context.Background(), "", "another correct horse staple")
+				}},
+				{"accept-invite", func() error {
+					return env.auth.ConsumeInvite(context.Background(), "", "another correct horse staple")
+				}},
+				{"verify-email", func() error {
+					return env.auth.VerifyEmail(context.Background(), "")
+				}},
+				{"verify-email/resend", func() error {
+					return env.auth.ResendVerification(context.Background(), unverified.Email, "203.0.113.9")
+				}},
+				{"change-password", func() error {
+					return env.auth.ChangePassword(context.Background(), ChangePasswordInput{
+						UserUUID: u.UUID,
+						Current:  "the wrong current password",
+						New:      "another correct horse staple",
+					})
+				}},
+			} {
+				t.Run(c.route, func(t *testing.T) {
+					err := c.run()
+					if errors.Is(err, ErrPasswordLoginDisabled) || errors.Is(err, ErrAuthPolicyUnavailable) {
+						t.Fatalf("open route must never consult the password-method gate, got %v", err)
+					}
+				})
+			}
+		})
+	}
 }

@@ -196,6 +196,24 @@ func TestLoginVerify_PasswordPolicyRecheck(t *testing.T) {
 			t.Fatal("nothing may be minted or audited on a refusal")
 		}
 	})
+	t.Run("missing policy wiring answers 503 and retains the challenge", func(t *testing.T) {
+		// Built exactly like newCompletionMFAHandler but WITHOUT SetPolicy, so
+		// h.policy is a nil *AuthPolicyService. decider() must hand the helper
+		// a nil INTERFACE rather than a typed-nil one — a typed nil would sail
+		// past the helper's nil check and call methods on it.
+		svc := newChallengeService(t)
+		ch := newLoginChallenge(t, svc, "operator")
+		issuer := &completionIssuer{}
+		h := NewMFAHandler(completionMFA{}, svc, completionJWT{}, completionUsers{}, issuer, "cookie", "", false)
+		_, err := h.LoginVerify(ctx, verifyReq(ch.ID))
+		assertStatusAndCode(t, err, 503, "auth.policy_unavailable")
+		if _, perr := svc.Peek(ctx, ch.ID); perr != nil {
+			t.Fatal("missing wiring must not consume the challenge")
+		}
+		if issuer.issued != 0 || len(issuer.breakGlass) != 0 {
+			t.Fatal("nothing may be minted or audited without a policy")
+		}
+	})
 	t.Run("transient policy error answers 503 and retains the challenge", func(t *testing.T) {
 		svc := newChallengeService(t)
 		ch := newLoginChallenge(t, svc, "operator")

@@ -148,7 +148,7 @@ func TestConfigGroups_DeclarationsValidate(t *testing.T) {
 // condition set exactly, and that every condition's `In` is exactly
 // `["true"]`, closes both gaps.
 func TestProviderCredentials_HiddenUntilEitherSurfaceEnabled(t *testing.T) {
-	// The whole point of the migration: 19 of 63 fields are provider
+	// The whole point of the migration: 19 of 65 fields are provider
 	// credentials that are dead weight on an install not using that provider.
 	cases := map[string][]string{
 		"oauth.google":  {"googleEnabledAdmin", "googleEnabledClient"},

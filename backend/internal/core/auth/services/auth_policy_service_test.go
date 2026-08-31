@@ -1078,6 +1078,20 @@ func TestPasswordLoginDecision_BreakGlassIsOperatorOnly(t *testing.T) {
 			t.Fatal("client outage must stay an error under break-glass")
 		}
 	})
+	t.Run("override never rescues an unknown audience", func(t *testing.T) {
+		// The rescue is keyed on PolicyAudienceOperator specifically, not on
+		// "the read failed and the override is set": an audience the key map
+		// does not know must stay an outage even with break-glass armed.
+		p := newPolicy(offBoth)
+		p.SetOperatorBreakGlass(true)
+		d, err := p.PasswordLoginDecision(ctx, PolicyAudience("service"))
+		if !errors.Is(err, ErrAuthPolicyUnavailable) {
+			t.Fatalf("want ErrAuthPolicyUnavailable, got %v", err)
+		}
+		if d.Allowed || d.BreakGlassUsed {
+			t.Fatalf("want the zero decision, got %+v", d)
+		}
+	})
 	t.Run("outage without override stays an error — never fails open", func(t *testing.T) {
 		p := &AuthPolicyService{cs: &stubReader{requiredMissing: true}}
 		if _, err := p.PasswordLoginDecision(ctx, PolicyAudienceOperator); !errors.Is(err, ErrAuthPolicyUnavailable) {

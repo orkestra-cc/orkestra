@@ -206,6 +206,28 @@ func TestLoginMethodInvariant(t *testing.T) {
 	}
 }
 
+// TestValidateConfigSnapshot_BindsLoginMethodInvariant pins the WIRING, not
+// the rule: every case above calls validateLoginMethodInvariant directly, so
+// deleting the call from ValidateConfigSnapshot would leave them all green
+// while the admin API stopped enforcing §4.4 entirely. This one case goes
+// through the exported method the SDK actually calls.
+func TestValidateConfigSnapshot_BindsLoginMethodInvariant(t *testing.T) {
+	// Password off on the operator surface with no enabled provider — the
+	// snapshot has Google's structural fields but no googleEnabledAdmin.
+	err := (&AuthModule{}).ValidateConfigSnapshot(context.Background(),
+		snapFor(map[string]string{"passwordLoginEnabledAdmin": "false"}, nil))
+	var typed *module.ConfigValidationError
+	if !errors.As(err, &typed) {
+		t.Fatalf("want *ConfigValidationError, got %v", err)
+	}
+	if typed.Code != errcode.AuthLoginMethodLockout {
+		t.Errorf("Code = %q, want %q", typed.Code, errcode.AuthLoginMethodLockout)
+	}
+	if typed.Field != "passwordLoginEnabledAdmin" {
+		t.Errorf("Field = %q, want %q", typed.Field, "passwordLoginEnabledAdmin")
+	}
+}
+
 func merge(maps ...map[string]string) map[string]string {
 	out := map[string]string{}
 	for _, m := range maps {
