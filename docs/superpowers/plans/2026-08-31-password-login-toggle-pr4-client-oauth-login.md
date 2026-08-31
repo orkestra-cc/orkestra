@@ -24,6 +24,13 @@
   - No browser verification before handoff → a browser smoke test on the running staging client (bind-mounted Vite) joins **Task 8**; the IdP round-trip stays manual.
   - `$SCRATCHPAD` was not guaranteed and the scope check covered four directories → `mktemp -d` and an allowlist of every path this PR may touch (**Task 8**).
   - Steps of several hundred lines → Tasks 2–7 are split into RED/GREEN cycles per behaviour; each implementation increment is shown as the code it adds.
+- **v3 (2026-08-31)** — round 2 found one blocker and five corrections, all confirmed:
+  - **Blocker:** with `globals: false` React Testing Library never registers its automatic `cleanup()` (it needs a global `afterEach`; the admin SPA avoids this with `globals: true`), so every render would have leaked into the next test — two buttons for `AuthProvider.test.tsx`'s second case, stale `AuthProvider`s still subscribed to the token store → `setup.ts` calls `cleanup()` explicitly, right after `vi.unstubAllGlobals()` (**Task 1**).
+  - The "scrub before the refresh" tests only proved both facts became true, not their order → the MSW refresh handler now records the router location the page had committed when the request arrived, and the tests assert it is already `/auth/callback` (**Task 6**, page and App level).
+  - `auth.test.ts` has 20 tests, not 17 (the providers `it.each` expands to 4 rows: 9 provider cases) → count corrected (**Task 3**).
+  - `api/client.ts:47-51` described only the 503 exception → the comment now covers the transport-failure case D17 introduced (**Task 4**).
+  - `CLAUDE_SESSION` is unset in the executing environment, so the trailer would have been empty → the value is stated in Global Constraints and every commit uses `${CLAUDE_SESSION:?…}`, which aborts the commit instead of writing an empty trailer; the exit checklist counts the trailers.
+  - D17 and D18 approved by the reviewer → table updated.
 
 ## Global Constraints
 
@@ -39,11 +46,11 @@
 - **Session bootstrap (§4.10, §5 #23, #27; round-1 B1/B2).** One shared, coalesced, **unconditional** `performRefresh(apiBase)` issues `POST /v1/auth/client/refresh-cookie` and decides the outcome: `ok` → token installed in memory; `signed-out` (401, any non-503 non-2xx, **or** 200 with no token) → marker **and** token cleared; `unavailable` (503 **or the fetch rejecting — a transport failure**) → token and marker untouched. `refreshAccessToken` (the automatic path: cold load, 401 middleware) keeps its marker short-circuit and delegates to `performRefresh`. `bootstrapFromRefreshCookie(apiBase)` stamps the marker **first** (speculatively — so the next cold load and any concurrent auto-refresh know a cookie exists) and then calls `performRefresh` **regardless of whether the stamp succeeded**: a storage that throws (private mode, disabled storage) must never turn a relay-set cookie into a signed-out. The SPA never enters a protected route on the `success=true` flag alone.
 - **No secret in storage.** Tests scan every `localStorage` and `sessionStorage` value after success and after an MFA completion: no access token, no `mfaToken`, no challenge id.
 - **Kill switch.** `loginEnabled=false` keeps today's banner + disabled password submit, and the provider section is not rendered (OAuth start would refuse with 403 `auth.login_disabled`, `auth_handler.go:465-468`; §1 "it stops OAuth too").
-- **Testing discipline (spec §6 "frontend-client", `feedback_plan_writing_lessons`):** MSW `onUnhandledRequest: 'error'` — every endpoint a component mounts is stubbed; **every absence assertion is anchored on a settled positive state first** (a DOM anchor, or `waitForQuerySettled(queryClient, key)` when the tree is byte-identical before/after); tests assert English copy pinned to `en.json` (the setup forces `i18n.changeLanguage("en")`); no `vi.mock` of the module under test's own collaborators when an MSW stub can express the behaviour — the only sanctioned stubs are the `browserNavigation.assign` spy and `vi.stubGlobal("localStorage", …)` for a throwing storage (`vi.unstubAllGlobals()` runs in the shared `afterEach`); a test that passes at RED is a defect unless the step names it as a regression guard. Each task is a sequence of RED → GREEN cycles per behaviour; run the named test file after each increment, never only at the end.
+- **Testing discipline (spec §6 "frontend-client", `feedback_plan_writing_lessons`):** MSW `onUnhandledRequest: 'error'` — every endpoint a component mounts is stubbed; **every absence assertion is anchored on a settled positive state first** (a DOM anchor, or `waitForQuerySettled(queryClient, key)` when the tree is byte-identical before/after); tests assert English copy pinned to `en.json` (the setup forces `i18n.changeLanguage("en")`); no `vi.mock` of the module under test's own collaborators when an MSW stub can express the behaviour — the only sanctioned stubs are the `browserNavigation.assign` spy and `vi.stubGlobal("localStorage", …)` for a throwing storage (`vi.unstubAllGlobals()` runs in the shared `afterEach`); `globals: false` means React Testing Library does **not** auto-register `cleanup()` — the shared `afterEach` calls it explicitly, so no test inherits the previous test's tree; a test that passes at RED is a defect unless the step names it as a regression guard. Each task is a sequence of RED → GREEN cycles per behaviour; run the named test file after each increment, never only at the end.
 - **Toolchain facts (F6, F7):** Node `v24.19.0` locally, `node = "24"` in `.mise.toml`; vitest `4.1.10` peer-accepts vite `^7` (installed `7.3.2`); happy-dom (2–3× faster than jsdom, no MSW/AbortSignal mismatch — `frontend-admin/vitest.config.ts`). `frontend-client` has **no** prettier config, so the pre-commit `prettier` hook (`.pre-commit-config.yaml:76-85`) applies prettier **defaults** (double quotes, semicolons, trailing commas `all`, 80 cols): write new code in that style and run `npx prettier --write <files>` before `git add` so the hook does not rewrite staged files. ESLint runs with `--max-warnings 0`, `@typescript-eslint/consistent-type-imports: error` (use `import type` / inline `type`), `react-refresh/only-export-components` (a `.tsx` file exports components **or** non-components, never both), `no-control-regex` (disable inline where the control-char check needs it).
 - **Docs move in the same commit as the code** (`feedback_commit_doc_hygiene`). The mapping is explicit: Task 1 → `frontend-client/CLAUDE.md` (Tech stack row, `src/test/` layout, `npm test` commands, workflow step), `frontend-client/README.md` (Stack + commands), root `CLAUDE.md:170`, `CONTRIBUTING.md:64`, `docs/site/contributing/ci-and-make.mdx:16`, `.github/workflows/frontend-client.yml:3-5` header; Task 3 → `frontend-client/CLAUDE.md` "How auth works" (policy helper) + the `forgotPassword` comment in `api/auth.ts`; Task 4 → `frontend-client/CLAUDE.md` "How auth works" item 3 (session marker + bootstrap) and the refresh-choreography note; Task 5 → `frontend-client/CLAUDE.md` login gating + `docs/site/architecture/authentication-flow.mdx:179` + `docs/site/modules/core/auth.mdx:88-93` (both currently say the client SPA lacks the gating); Task 6 → `frontend-client/CLAUDE.md` new "OAuth login" subsection + Don'ts, `docs/site/operating/oauth-providers.mdx:255` (step 4, predates the relay); Task 7 → `frontend-client/CLAUDE.md` navigation paragraph + the `ForgotPasswordPage` header comment; Task 8 is the cross-cutting VERIFICATION sweep — it completes and reconciles, it is never the first touch.
 - **Test commands** (absolute paths — `cd` drifts the shell between calls): single file `cd /home/tore/orkestra/frontend-client && npx vitest run src/path/to/file.test.tsx`; whole suite `cd /home/tore/orkestra/frontend-client && npm test`; `npm run typecheck && npm run lint -- --max-warnings 0` before every commit; full gate `make -C /home/tore/orkestra ci-frontend-client` (lockcheck → typecheck → lint → test → build after Task 1). Never run two vitest processes at once in this checkout. Docs render for the `docs/site/**` edits: `D=$(mktemp -d /tmp/orkestra-docs-pr4.XXXXXX)`, clone `orkestra-docs`, `npm ci`, `MONOREPO_LOCAL_PATH=/home/tore/orkestra npm run sync` (**full** sync, not `sync:site`), `CI=true npm run build`, then `rm -rf "$D"` (`/tmp` is a 16 GB tmpfs; check `df -h /tmp` first). Browser smoke (Task 8) drives the **running** staging client through `integrated-browser-mcp` — this checkout owns the `orkestra-public-*-staging` stack whose `client-frontend` is a Vite dev server bind-mounted on `../frontend-client` (`docker/docker-compose.staging.yml:308-330`), so the branch renders live; **never start or restart a server**.
-- **Never start servers manually**; never `git push --tags`; never `--amend`; stage by path, never `git add -A`; conventional-commit subjects (the `conventional-pre-commit` hook rejects anything else). **Every commit carries the `Claude-Session:` trailer**: once per shell run `export CLAUDE_SESSION=<the session URL from your harness environment>` — the commit commands below all pass it as a second `-m`. If the prettier hook rewrites a staged file, the commit fails once: re-run `git add <same paths>` and commit again.
+- **Never start servers manually**; never `git push --tags`; never `--amend`; stage by path, never `git add -A`; conventional-commit subjects (the `conventional-pre-commit` hook rejects anything else). **Every commit carries the `Claude-Session:` trailer.** The variable is NOT set by the harness: once per shell run `export CLAUDE_SESSION=https://claude.ai/code/session_01QBHr35WPNoZZ1r2oNY7fDE` (the session that owns this plan; an executor in another session substitutes its own URL — the controller states it in every dispatch brief). Every commit command below passes `-m "Claude-Session: ${CLAUDE_SESSION:?…}"`, so an unset variable aborts the commit instead of writing an empty trailer; the exit checklist counts the trailers. If the prettier hook rewrites a staged file, the commit fails once: re-run `git add <same paths>` and commit again.
 
 ## Findings against `4d7c0397` that spec v4.5 does not state
 
@@ -65,9 +72,9 @@ Each is folded into a numbered deviation below where it changes the design; none
 - **F14 — react-router matches routes case-insensitively on the decoded pathname.** Verified by the reviewer against the installed react-router 8.3.0: `/LOGIN`, `/%6cogin` and `/auth/%63allback` resolve to `/login` and `/auth/callback`. A case-sensitive, undecoded prefix compare in `sanitizeNext` would accept them as post-login targets — not an open redirect, but a loop or a forbidden landing (round-1 gap).
 - **F15 — Endpoints an integrated callback test must stub.** `Layout` mounts `GET /v1/auth/client/policy` while anonymous (`Layout.tsx:20-25`) and `GET /v1/auth/client/me` once authenticated (`useMe`, `Layout.tsx:14`); `AccountPage` reads only `useMe` (`AccountPage.tsx:16`). A test that mounts `App` at `/auth/callback` and lands on `/account` therefore needs `/policy`, `/refresh-cookie` and `/me` stubbed.
 
-## Declared deviations — decision table (reviewer's round-1 rulings recorded)
+## Declared deviations — decision table (reviewer's round-1 and round-2 rulings recorded)
 
-Every row records the reviewer's ruling from plan review round 1 (2026-08-31). D4 and D11 are approved **conditional** on the round-1 corrections, which this revision contains; D17 and D18 are new in v2 (they come from blockers B2 and B3) and await a ruling — they are executed as written here unless the reviewer objects. None changes a backend contract, so no spec §0 bump is expected.
+Every row records the reviewer's rulings from plan review rounds 1 and 2 (2026-08-31). D4 and D11 are approved conditional on the round-1 corrections, which this revision contains; D17 and D18 (from blockers B2 and B3) were approved in round 2. Every row is now approved; none changes a backend contract, so no spec §0 bump is expected.
 
 | # | Deviation | Shape | Status |
 |---|---|---|---|
@@ -87,8 +94,8 @@ Every row records the reviewer's ruling from plan review round 1 (2026-08-31). D
 | D14 | Callback error/signed-out phases render a "Back to sign in" link (no 3-second auto-redirect) | Implementation | **Approved (round 1)** |
 | D15 | Every `signed-out` shape of the refresh — 401, other non-503 non-2xx, **200 without a token** — clears the marker and the token, inside the shared `performRefresh` (so the automatic path gains it too) | Implementation (F2) | **Approved (round 1)** |
 | D16 | `Layout`'s Sign-up CTA hides on password-off; `oauth-providers.mdx` step 4 is corrected to the relay + `/auth/callback` landing | Implementation / docs | **Approved (round 1)** |
-| D17 | A transport failure of the refresh (`fetch` rejecting) is `unavailable` for **every** caller — token and marker preserved. For the 401 middleware this means the original 401 is returned without clearing the token (today: an unhandled rejection) | Implementation (F11; round-1 B2 asked for the callback — the shared function is where the fetch lives) | PENDING (new in v2) |
-| D18 | A `/providers` body whose `providers` is not an array rejects with a 500-shaped `ApiError` (same shape as "200 without `authUrl`"); only `{providers: []}` is the empty state | Implementation (round-1 B3) | PENDING (new in v2) |
+| D17 | A transport failure of the refresh (`fetch` rejecting) is `unavailable` for **every** caller — token and marker preserved. For the 401 middleware this means the original 401 is returned without clearing the token (today: an unhandled rejection) | Implementation (F11; round-1 B2 asked for the callback — the shared function is where the fetch lives) | **Approved (round 2)** |
+| D18 | A `/providers` body whose `providers` is not an array rejects with a 500-shaped `ApiError` (same shape as "200 without `authUrl`"); only `{providers: []}` is the empty state | Implementation (round-1 B3) | **Approved (round 2)** |
 
 1. **`LoginPage` waits for the policy before painting either surface.** `fetchAuthPolicy` never rejects (fail-open inside), so `policy === undefined` is exactly "request in flight". Painting the password form optimistically would flash it on an SSO-only surface for ~100 ms on every cold load, and would make every "form absent" test assertion pass vacuously against the first paint — the exact defect PR 3's reviewers caught in the console. A `role="status"` line (`t("loading")`, existing key) renders instead. `SignupPage`, `ForgotPasswordPage` and `Layout` keep painting immediately (their fail-open first paint is the pre-existing `registrationEnabled` pattern and their password-off state swaps the form for an alert, which is itself the settled anchor). Cost if wrong: one extra frame on cold login loads; reverting is a three-line change.
 2. **The closed parser is ported, not re-derived.** `lib/oauthCallback.ts` is `frontend-admin/src/utils/oauthCallbackParams.ts` with the provider union imported from `lib/oauthProviders.ts`. Same three shapes, same `exactKeys` cardinality rule, same generic collapse.
@@ -220,7 +227,9 @@ and add a `test` block as the last property of the exported config (after `previ
   // "Expected signal to be an instance of AbortSignal" mismatch jsdom +
   // MSW v2 + Node fetch trip over (same call as frontend-admin). No
   // globals: every test imports describe/it/expect/vi from "vitest", so
-  // tsc and ESLint see exactly what each file uses.
+  // tsc and ESLint see exactly what each file uses. Without globals React
+  // Testing Library cannot register its automatic cleanup (it looks for a
+  // global afterEach) — src/test/setup.ts calls cleanup() explicitly.
   test: {
     environment: "happy-dom",
     setupFiles: ["./src/test/setup.ts"],
@@ -407,6 +416,7 @@ export const waitForQuerySettled = (
 // Node >= 25 before anything else can touch them. See webStorage.ts.
 import "./webStorage";
 import "@testing-library/jest-dom/vitest";
+import { cleanup } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
 
 import i18n from "@/i18n";
@@ -428,6 +438,11 @@ afterEach(() => {
   // First: a test that stubbed a global (tokenStore.test.ts installs a
   // throwing localStorage) must not leak it into the storage reset below.
   vi.unstubAllGlobals();
+  // React Testing Library registers its automatic cleanup only when a
+  // global afterEach exists (globals: false here) — unmount explicitly, or
+  // the next test finds the previous tree still mounted and its
+  // AuthProvider still subscribed to the token store.
+  cleanup();
   server.resetHandlers();
   // tokenStore is module-scoped state; a token left by one test would
   // make the next render start authenticated.
@@ -580,7 +595,7 @@ Expected: vitest runs the 2 files, exit 0.
 - Directory layout (`:36-74`): add under `src/`, after the `locales/` line:
   ```
   │   ├── test/
-  │   │   ├── setup.ts            # jest-dom, EN copy, MSW lifecycle (unhandled request = error), global-stub + storage + token reset
+  │   │   ├── setup.ts            # jest-dom, EN copy, MSW lifecycle (unhandled request = error), explicit RTL cleanup, global-stub + storage + token reset
   │   │   ├── server.ts           # the one MSW server
   │   │   ├── handlers.ts         # url() + reusable stubs (clientPolicyHandler, providersHandler, …)
   │   │   ├── render.tsx          # renderWithProviders (QueryClient + AuthProvider + MemoryRouter), waitForQuerySettled
@@ -628,7 +643,7 @@ router), waitForQuerySettled for policy-gated trees, an EN/IT locale
 parity test and a harness smoke test. make ci-frontend-client now runs
 lockcheck → typecheck → lint → test → build; the workflow header, root
 CLAUDE.md, CONTRIBUTING.md and ci-and-make.mdx stop claiming the client
-has no tests." -m "Claude-Session: $CLAUDE_SESSION"
+has no tests." -m "Claude-Session: ${CLAUDE_SESSION:?export CLAUDE_SESSION=<session URL> first}"
 ```
 
 
@@ -1319,7 +1334,7 @@ the way react-router matches — so /LOGIN, /%6cogin and /auth//callback are
 rejected too; the return target is a ten-minute take-and-delete
 sessionStorage record re-validated on the way out; the /auth/callback
 parser matches the three closed shapes on exact key sets and maps only the
-allowlisted error codes (spec §4.10). Pure modules, no React." -m "Claude-Session: $CLAUDE_SESSION"
+allowlisted error codes (spec §4.10). Pure modules, no React." -m "Claude-Session: ${CLAUDE_SESSION:?export CLAUDE_SESSION=<session URL> first}"
 ```
 
 ### Task 3: `api/auth.ts` — policy fields, `passwordLoginUsable`, providers list, OAuth start
@@ -1648,7 +1663,7 @@ export async function fetchOAuthProviders(
 }
 ```
 
-- [ ] **Step B4: Run it — GREEN.** `npx vitest run src/api/auth.test.ts -t fetchOAuthProviders` → 6 blocks (incl. 4 `it.each` rows) PASS.
+- [ ] **Step B4: Run it — GREEN.** `npx vitest run src/api/auth.test.ts -t fetchOAuthProviders` → 9 tests PASS (6 blocks; the `it.each` expands to 4).
 
 #### Cycle C — `initiateOAuthLogin` through the `browserNavigation` seam
 
@@ -1805,7 +1820,7 @@ export async function forgotPassword(email: string): Promise<void> {
 - [ ] **Step D2: Whole file, typecheck, lint**
 
 Run: `cd /home/tore/orkestra/frontend-client && npx vitest run src/api/auth.test.ts src/test && npm run typecheck && npm run lint -- --max-warnings 0`
-Expected: `auth.test.ts` 17 tests PASS (3 policy + 1 reader + 1 code + 6 providers + 6 start), the harness tests still green; typecheck and lint exit 0 (no leftover stub — `grep -n "not implemented" src/api/auth.ts` prints nothing).
+Expected: `auth.test.ts` 20 tests PASS (3 policy + 1 reader + 1 code + 9 providers — the `it.each` expands to 4 — + 6 start), the harness tests still green; typecheck and lint exit 0 (no leftover stub — `grep -n "not implemented" src/api/auth.ts` prints nothing).
 
 - [ ] **Step D3: Document the policy reader and the start contract**
 
@@ -1830,7 +1845,7 @@ rejects instead of falling open — 503, network failure and a body without
 a providers array alike; only {providers: []} is the empty state — and
 filters to the closed union; initiateOAuthLogin POSTs with credentials,
 stashes the validated next and leaves through the browserNavigation seam
-(spec §4.10). The forgot-password comment no longer claims always-200." -m "Claude-Session: $CLAUDE_SESSION"
+(spec §4.10). The forgot-password comment no longer claims always-200." -m "Claude-Session: ${CLAUDE_SESSION:?export CLAUDE_SESSION=<session URL> first}"
 ```
 
 ### Task 4: The unconditional refresh, `bootstrapFromRefreshCookie`, and the context seam
@@ -1841,6 +1856,7 @@ The session bootstrap of §4.10 / §5 #23 after round 1: one shared `performRefr
 - Modify: `frontend-client/src/auth/tokenStore.ts:8` (import) and `:51-104` (the refresh half, replaced)
 - Modify: `frontend-client/src/auth/authContext.ts:3-8` (`AuthState`)
 - Modify: `frontend-client/src/auth/AuthProvider.tsx:9-15` (import), after `:59` (callback), `:61-69` (value)
+- Modify: `frontend-client/src/api/client.ts:47-51` (the middleware comment describes only the 503 exception; D17 adds the transport failure)
 - Test: `frontend-client/src/auth/tokenStore.test.ts`, `frontend-client/src/auth/AuthProvider.test.tsx`
 - Modify: `frontend-client/CLAUDE.md` ("How auth works" item 3 `:82`, "Refresh choreography" `:84-95`)
 
@@ -2313,13 +2329,25 @@ Expected: both exit 0.
 `bootstrapFromRefreshCookie()` (on the auth context, implemented in `tokenStore.ts`) is the one place that stamps the marker *speculatively*: the OAuth callback page calls it to adopt the cookie the client-tier relay set on the API host, and it presents the cookie **whether or not the stamp succeeded** — a storage that throws must not turn a valid cookie into a sign-out. Both it and the automatic `refreshAccessToken` go through one unconditional `performRefresh`: `ok` installs the memory-only token; every signed-out shape (401, other non-2xx, a 200 with no token) clears marker and token; `unavailable` — a 503 **or a transport failure** — keeps both so the caller can retry. Neither function rejects.
 ```
 
+`frontend-client/src/api/client.ts:47-51` — the middleware's comment block (from `// A refresh that comes back 503 is the exception` to `// tokenStore.ts and ADR-0017.`) becomes:
+
+```ts
+// A refresh that comes back `unavailable` is the exception: a 503 means
+// the server could not evaluate the session, and a transport failure (the
+// fetch itself rejecting) means nothing is known about it — neither is the
+// same as the session being over. Surfacing the original 401 without
+// clearing the token leaves the user signed in so the next request can
+// retry. See RefreshOutcome and performRefresh in tokenStore.ts and
+// ADR-0017.
+```
+
 "Refresh choreography" (`:84-95`) — replace the sentence "Two consecutive 401s trigger logout." with: `Two consecutive 401s trigger logout. A 503 or a network failure during the refresh is \`unavailable\`: the original 401 is surfaced to the caller and the token is kept, because nothing is known about the session (ADR-0017).`
 
 - [ ] **Step C3: Commit**
 
 ```bash
-cd /home/tore/orkestra && npx --prefix frontend-client prettier --write frontend-client/src/auth/tokenStore.ts frontend-client/src/auth/authContext.ts frontend-client/src/auth/AuthProvider.tsx frontend-client/src/auth/tokenStore.test.ts frontend-client/src/auth/AuthProvider.test.tsx >/dev/null
-git add frontend-client/src/auth/tokenStore.ts frontend-client/src/auth/authContext.ts frontend-client/src/auth/AuthProvider.tsx frontend-client/src/auth/tokenStore.test.ts frontend-client/src/auth/AuthProvider.test.tsx frontend-client/CLAUDE.md
+cd /home/tore/orkestra && cd /home/tore/orkestra && npx --prefix frontend-client prettier --write frontend-client/src/auth/tokenStore.ts frontend-client/src/auth/authContext.ts frontend-client/src/auth/AuthProvider.tsx frontend-client/src/api/client.ts frontend-client/src/auth/tokenStore.test.ts frontend-client/src/auth/AuthProvider.test.tsx >/dev/null
+git add frontend-client/src/auth/tokenStore.ts frontend-client/src/auth/authContext.ts frontend-client/src/auth/AuthProvider.tsx frontend-client/src/api/client.ts frontend-client/src/auth/tokenStore.test.ts frontend-client/src/auth/AuthProvider.test.tsx frontend-client/CLAUDE.md
 git commit -m "feat(frontend-client): unconditional refresh + bootstrapFromRefreshCookie for a relay-set cookie
 
 One shared performRefresh presents the cookie: coalesced, never gated on
@@ -2329,7 +2357,7 @@ rejection, and every signed-out shape — 401, other non-2xx, 200 without a
 token — clears marker and token. refreshAccessToken keeps its marker
 short-circuit on top; bootstrapFromRefreshCookie stamps the marker first
 and always refreshes; exposed on the auth context for the OAuth callback
-page (spec §4.10, §5 #23; plan F11, F13, D15, D17)." -m "Claude-Session: $CLAUDE_SESSION"
+page (spec §4.10, §5 #23; plan F11, F13, D15, D17)." -m "Claude-Session: ${CLAUDE_SESSION:?export CLAUDE_SESSION=<session URL> first}"
 ```
 
 ### Task 5: `LoginPage` — policy gate, password-off, one redirect policy (increment A); provider section, no-method alert, OAuth start (increment B)
@@ -3541,7 +3569,7 @@ failure and a malformed body are all the error) and the no-method alert
 needs a list that resolved empty; OAuth start stashes the validated next
 and leaves through browserNavigation; the password path's ?next= goes
 through the same sanitizeNext (it was unvalidated and double-decoded).
-MfaChallenge moves to src/components for its second use (spec §4.10)." -m "Claude-Session: $CLAUDE_SESSION"
+MfaChallenge moves to src/components for its second use (spec §4.10)." -m "Claude-Session: ${CLAUDE_SESSION:?export CLAUDE_SESSION=<session URL> first}"
 ```
 
 ### Task 6: `OAuthCallbackPage` — success and failures (A), MFA in memory (B), the route and an integrated test through `App` (C)
@@ -3681,8 +3709,11 @@ const storageDump = (): string =>
     ),
   ].join("\n");
 
-// A refresh endpoint the test releases by hand, so "scrub before the first
-// request" is observable: the URL must already be clean while it pends.
+// A refresh endpoint the test releases by hand. At the moment the request
+// arrives it records the marker AND the router location the page had
+// committed (read from the Probe's DOM) — the order proof for "scrub before
+// the first request": both must already hold when the handler runs, not
+// merely become true at some point.
 const deferredRefresh = () => {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -3690,10 +3721,13 @@ const deferredRefresh = () => {
   });
   let hits = 0;
   let markerAtRequest: boolean | null = null;
+  let locationAtRequest: string | null = null;
   server.use(
     http.post(REFRESH, async () => {
       hits++;
       markerAtRequest = hasSessionMarker();
+      locationAtRequest =
+        screen.queryByTestId("cb-location")?.textContent ?? null;
       await gate;
       return HttpResponse.json(tokenBody);
     }),
@@ -3702,6 +3736,7 @@ const deferredRefresh = () => {
     release,
     hits: () => hits,
     markerAtRequest: () => markerAtRequest,
+    locationAtRequest: () => locationAtRequest,
   };
 };
 
@@ -3766,6 +3801,9 @@ describe("OAuthCallbackPage — success", () => {
       ),
     );
     await waitFor(() => expect(refresh.hits()).toBe(1));
+    // Order, not coincidence: when the request left, the page had already
+    // committed the bare path and the marker was already stamped.
+    expect(refresh.locationAtRequest()).toBe("/auth/callback");
     expect(refresh.markerAtRequest()).toBe(true);
     // Nothing navigates while the bootstrap pends, and the URL stays clean.
     expect(screen.getByTestId("cb-location")).toHaveTextContent(
@@ -4243,11 +4281,14 @@ describe("App — the OAuth callback through the real route table and Layout (F1
       release = resolve;
     });
     let refreshHits = 0;
+    let locationAtRequest: string | null = null;
     server.use(
       clientPolicyHandler(), // Layout mounts /policy while anonymous
       meHandler(), // Layout + AccountPage once authenticated
       http.post(REFRESH, async () => {
         refreshHits++;
+        locationAtRequest =
+          screen.queryByTestId("app-location")?.textContent ?? null;
         await gate;
         return HttpResponse.json(tokenBody);
       }),
@@ -4266,6 +4307,9 @@ describe("App — the OAuth callback through the real route table and Layout (F1
       ),
     );
     await waitFor(() => expect(refreshHits).toBe(1));
+    // Order proof on the real tree: the bare path was committed before the
+    // refresh left, with Layout's own query in flight beside it.
+    expect(locationAtRequest).toBe("/auth/callback");
     expect(screen.getByTestId("app-location")).toHaveTextContent(
       /^\/auth\/callback$/,
     );
@@ -4367,7 +4411,7 @@ retry) and never enters a protected route on the success flag alone; an
 MFA continuation renders the shared MfaChallenge from component memory;
 failures render only the mapped allowlisted copy. An App-level test
 mounts the page through the real route table with Layout (spec §4.10,
-§5 #22/#23/#27/#28)." -m "Claude-Session: $CLAUDE_SESSION"
+§5 #22/#23/#27/#28)." -m "Claude-Session: ${CLAUDE_SESSION:?export CLAUDE_SESSION=<session URL> first}"
 ```
 
 ### Task 7: `SignupPage`, `ForgotPasswordPage` (+ its mutation error) and the `Layout` CTA when the method is off
@@ -4769,7 +4813,7 @@ forgot-password form now also renders the backend's answer mapped by code
 (403 auth.password_login_disabled, 503 auth.policy_unavailable, generic)
 instead of swallowing it, and its header no longer claims always-200; the
 Layout Sign-up CTA hides on password-off as it already did on
-registration-off (spec §4.3, §4.10)." -m "Claude-Session: $CLAUDE_SESSION"
+registration-off (spec §4.3, §4.10)." -m "Claude-Session: ${CLAUDE_SESSION:?export CLAUDE_SESSION=<session URL> first}"
 ```
 
 ### Task 8: Documentation reconciliation sweep, the full gates, and the browser smoke test
@@ -4887,7 +4931,7 @@ git commit -m "docs(frontend-client): current surface includes web OAuth login; 
 The README's src/ tree still listed the catalog/subscriptions/payments
 files that left with ADR-0006; it now lists what exists, including the
 test harness and the OAuth modules. CLAUDE.md's surface summary names the
-client-tier OAuth login." -m "Claude-Session: $CLAUDE_SESSION"
+client-tier OAuth login." -m "Claude-Session: ${CLAUDE_SESSION:?export CLAUDE_SESSION=<session URL> first}"
 ```
 
 ## Post-plan verification (not a task — the executor's exit checklist)
@@ -4895,7 +4939,7 @@ client-tier OAuth login." -m "Claude-Session: $CLAUDE_SESSION"
 Before handing the branch to the reviewer, confirm each line and paste the evidence in the final report:
 
 - `make -C /home/tore/orkestra ci-frontend-client` green on the tip (lockcheck, typecheck, lint, tests, build) — the test count and file count from the vitest summary.
-- `git log --oneline 4d7c0397..HEAD` shows the plan commits plus exactly the 8 task commits (plus any reviewed fix commits), every subject conventional, every body ending with the `Claude-Session:` trailer.
+- `git log --oneline 4d7c0397..HEAD` shows the plan commits plus exactly the 8 task commits (plus any reviewed fix commits), every subject conventional; `test "$(git log --format=%B 4d7c0397..HEAD | grep -c '^Claude-Session: https://')" -eq "$(git rev-list --count 4d7c0397..HEAD)"` holds — one non-empty trailer per commit.
 - The allowlist scope check from Task 8 step 3 prints `scope: OK`.
 - `grep -rn "no tests yet\|still reads only\|React Router v7\|Always returns 200" CLAUDE.md CONTRIBUTING.md frontend-client docs/site .github/workflows/frontend-client.yml --include=*.md --include=*.mdx --include=*.yml --include=*.ts --include=*.tsx` is empty.
 - `cd frontend-client && npx vitest run src/locales` green (EN/IT parity after every key added in Tasks 5–7).
