@@ -63,6 +63,10 @@ frontend-client/
 │   │   └── UserAvatar.tsx      # Renders user avatar (image URL or initials over deterministic color)
 │   ├── lib/
 │   │   ├── avatarColor.ts      # Deterministic per-user color + initials helper for UserAvatar fallback
+│   │   ├── oauthProviders.ts   # the closed provider union (google|apple|github|discord) + display labels
+│   │   ├── safeNext.ts         # sanitizeNext — the ONE open-redirect gate; auth routes judged on the decoded, normalised path
+│   │   ├── oauthReturnTo.ts    # ten-minute take-and-delete `next` record across the IdP round-trip
+│   │   ├── oauthCallback.ts    # closed exact-key parser for /auth/callback + the error-code allowlist
 │   │   └── format.ts           # Intl currency + date helpers
 │   ├── locales/                # it.json (default), en.json — react-i18next bundles
 │   ├── test/
