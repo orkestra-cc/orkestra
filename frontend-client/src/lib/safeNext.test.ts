@@ -46,6 +46,9 @@ describe("sanitizeNext", () => {
     ["/a\nb"],
     ["/account%00x"],
     ["/%E0%A4%A"],
+    ["/.//evil.example"],
+    ["/%2e//evil.example"],
+    ["/a/..//evil.example"],
   ])("rejects %j", (raw) => {
     expect(sanitizeNext(raw)).toBeNull();
   });

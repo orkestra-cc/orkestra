@@ -98,5 +98,11 @@ export function sanitizeNext(raw: unknown): string | null {
   const segments = canonicalSegments(parsed.pathname);
   if (segments === null || isAuthRoute(segments)) return null;
 
+  // The parser folds "." / ".." / "%2e" segments and can leave an EMPTY
+  // first segment: "/.//evil.example" serialises back as "//evil.example",
+  // which is protocol-relative. The prefix rule at the top only saw the
+  // pre-parse spelling, so re-assert it on what we are about to return.
+  if (parsed.pathname[1] === "/") return null;
+
   return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
