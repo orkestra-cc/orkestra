@@ -244,10 +244,19 @@ export const useModuleConfigController = (
   // the reconciliation effect below can seed it into the form.
   const [pendingLabels, setPendingLabels] = useState<ConfigValues>({});
 
+  // Which secrets the backend already stores. Threaded into the form's
+  // resolver so a required-but-stored secret is not flagged as missing, and
+  // memoised because the resolver rebuild is keyed on its identity.
+  const secretStatus = useMemo(
+    () => envConfig?.secretStatus ?? mod?.secretStatus ?? {},
+    [envConfig?.secretStatus, mod?.secretStatus]
+  );
+
   const { form, defaults, fieldNames, expandedSchema } = useModuleConfigForm(
     schema,
     configSource,
-    created
+    created,
+    secretStatus
   );
 
   // Re-seed the form whenever the server-known baseline changes — keyed on
@@ -336,8 +345,6 @@ export const useModuleConfigController = (
     [schema, mod?.configGroups]
   );
   const flatNodes = useMemo(() => flattenTree(groupTree), [groupTree]);
-
-  const secretStatus = envConfig?.secretStatus ?? mod?.secretStatus ?? {};
 
   // Live values for visibility (dependsOn can reference a field in a
   // different group than the one currently on screen) and for the save
