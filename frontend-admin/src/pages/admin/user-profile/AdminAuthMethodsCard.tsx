@@ -68,6 +68,13 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
 
   const unknownErr = t('adminUserProfile.authMethods.errorUnknown');
 
+  // Blocked only when the method is KNOWN off for this surface — a hash
+  // exists and is unusable. With no hash at all, sending a reset is the
+  // designed remedy for an OAuth-only user (the backend's method gate
+  // accepts it), so the button must stay enabled in that case.
+  const resetBlockedByPolicy =
+    !!data?.hasPasswordSet && !data?.passwordUsableForLogin;
+
   const handleSendReset = async () => {
     try {
       await sendPasswordReset(user.id).unwrap();
@@ -193,7 +200,7 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
                 : t('adminUserProfile.authMethods.passwordOauthOnly')
             }
             action={
-              data.passwordUsableForLogin ? (
+              !resetBlockedByPolicy ? (
                 <Button
                   variant="orkestra-default"
                   size="sm"
@@ -343,9 +350,13 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
                   const blockReason = isSelf
                     ? t('adminUserProfile.authMethods.oauthBlockSelf')
                     : onlyCredential
-                      ? t(
-                          'adminUserProfile.authMethods.oauthBlockOnlyCredential'
-                        )
+                      ? data.hasPasswordSet && !data.passwordUsableForLogin
+                        ? t(
+                            'adminUserProfile.authMethods.oauthBlockOnlyCredentialPasswordDisabled'
+                          )
+                        : t(
+                            'adminUserProfile.authMethods.oauthBlockOnlyCredential'
+                          )
                       : null;
                   return (
                     <li

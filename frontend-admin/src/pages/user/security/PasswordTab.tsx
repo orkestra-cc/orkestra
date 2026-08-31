@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { Alert, Button, Card, Form, Spinner } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import {
+  passwordUiVisible,
   useChangePasswordMutation,
   useGetAuthPolicyQuery
 } from 'store/api/authApi';
@@ -78,7 +79,7 @@ const PasswordTab = () => {
             {t('userSecurity.passwordTab.keptNotice')}
           </Alert>
         )}
-        {!hasPassword && (
+        {!hasPassword && passwordUiVisible(policy) && (
           <Alert variant="info" className="fs-10">
             {t('userSecurity.passwordTab.ssoOnlyHint')}
           </Alert>

@@ -55,4 +55,44 @@ describe('PasswordTab split password fields (PR 3 §4.8)', () => {
     expect(current).toBeInTheDocument();
     expect(current).not.toBeRequired();
   });
+
+  // Fix round 1, item 3: the SSO-only hint promises "set a password here"
+  // as a second login method — that's only true when this surface's
+  // password method is actually on. When it's off, offering the hint
+  // would be a lie: the tab would reject the very password being set.
+  it('no hash, method OFF on this surface: SSO hint is hidden', async () => {
+    server.use(
+      operatorPolicyHandler({ passwordLoginEnabled: false }),
+      selfAuthMethodsHandler({
+        ...emptySelfAuthMethods,
+        hasPasswordSet: false,
+        passwordUsableForLogin: false,
+        hasUsablePassword: false
+      })
+    );
+    renderWithProviders(<PasswordTab />);
+    const current = await screen.findByLabelText(/current password/i);
+    expect(current).not.toBeRequired();
+    expect(
+      screen.queryByText(/single sign-on provider only/i)
+    ).not.toBeInTheDocument();
+  });
+
+  it('no hash, method ON on this surface: SSO hint is shown', async () => {
+    server.use(
+      operatorPolicyHandler(),
+      selfAuthMethodsHandler({
+        ...emptySelfAuthMethods,
+        hasPasswordSet: false,
+        passwordUsableForLogin: false,
+        hasUsablePassword: false
+      })
+    );
+    renderWithProviders(<PasswordTab />);
+    const current = await screen.findByLabelText(/current password/i);
+    expect(current).not.toBeRequired();
+    expect(
+      await screen.findByText(/single sign-on provider only/i)
+    ).toBeInTheDocument();
+  });
 });

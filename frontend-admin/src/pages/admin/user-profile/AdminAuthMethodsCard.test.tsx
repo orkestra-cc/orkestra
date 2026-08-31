@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
 import AdminAuthMethodsCard from './AdminAuthMethodsCard';
@@ -96,6 +97,26 @@ describe('AdminAuthMethodsCard split password fields (PR 3 §4.8)', () => {
     ).toBeEnabled();
   });
 
+  // Fix round 1, item 1: the reset button is blocked only when the method
+  // is KNOWN off (a hash exists and is unusable) — with no hash at all,
+  // sending a reset is the designed remedy for an OAuth-only user and the
+  // backend's method-policy gate would accept it.
+  it('no password set: reset button stays enabled (the remedy is still offered)', async () => {
+    server.use(
+      adminAuthMethods({
+        hasPasswordSet: false,
+        passwordUsableForLogin: false,
+        hasUsablePassword: false
+      })
+    );
+    renderWithProviders(<AdminAuthMethodsCard user={targetUser} />, {
+      preloadedState: preloadedAuthState
+    });
+    expect(
+      await screen.findByRole('button', { name: /send password-reset email/i })
+    ).toBeEnabled();
+  });
+
   it('provider actions block keys off usability even with a hash present', async () => {
     server.use(
       adminAuthMethods({
@@ -120,5 +141,13 @@ describe('AdminAuthMethodsCard split password fields (PR 3 §4.8)', () => {
       name: /actions for google/i
     });
     expect(actions).toBeDisabled();
+    // Fix round 1, item 1(b): the block reason must be the PASSWORD-DISABLED
+    // copy (hasPasswordSet && !passwordUsableForLogin), not the "send a
+    // reset first" copy that no longer applies once a hash already exists.
+    // React Bootstrap's Tooltip only renders its content on hover.
+    await userEvent.hover(actions);
+    expect(
+      await screen.findByText(/re-enable password sign-in for this surface/i)
+    ).toBeInTheDocument();
   });
 });

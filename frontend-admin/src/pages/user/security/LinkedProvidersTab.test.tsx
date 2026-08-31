@@ -29,6 +29,41 @@ describe('LinkedProvidersTab only-credential (PR 3 §4.8)', () => {
     // userSecurity.linkedProvidersTab.rowUnlink = "Unlink" — a real text
     // button (LinkedProvidersTab.tsx:276-282, disabled={onlyCredential || isFetching}).
     expect(screen.getByRole('button', { name: /^unlink$/i })).toBeDisabled();
+    // Fix round 1, item 2: the password already exists (hasPasswordSet),
+    // so the remedy can't be "set a password first" — it's disabled on
+    // this surface, so the fix is re-enabling it or linking another
+    // provider. onlyCredentialWarningPasswordDisabled.
+    expect(
+      screen.getByText(/link another provider first/i)
+    ).toBeInTheDocument();
+  });
+
+  it('sole provider + no password at all blocks unlink with the "set a password" remedy', async () => {
+    server.use(
+      selfAuthMethodsHandler({
+        ...emptySelfAuthMethods,
+        hasPasswordSet: false,
+        passwordUsableForLogin: false,
+        hasUsablePassword: false,
+        oauthProviders: [
+          {
+            provider: 'google',
+            email: 'u@example.com',
+            linkedAt: '2026-05-01T00:00:00Z',
+            isPrimary: true
+          }
+        ]
+      })
+    );
+    renderWithProviders(<LinkedProvidersTab />);
+    await screen.findByText(/google/i);
+    expect(screen.getByRole('button', { name: /^unlink$/i })).toBeDisabled();
+    // No hash exists at all — the ORIGINAL onlyCredentialWarning copy
+    // ("set a password first") is the honest remedy here.
+    expect(screen.getByText(/set a password first/i)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/link another provider first/i)
+    ).not.toBeInTheDocument();
   });
 
   it('two providers keep unlink available', async () => {
