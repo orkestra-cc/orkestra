@@ -44,11 +44,13 @@ const authMiddleware: Middleware = {
 // PR-D D-9) and retry the original request once. Two consecutive 401s
 // trigger logout — the SPA's auth context routes the user back to /login.
 //
-// A refresh that comes back 503 is the exception: the server could not
-// evaluate the session, which is not the same as the session being over.
-// Surfacing the original 401 without clearing the token leaves the user
-// signed in so the next request can retry. See RefreshOutcome in
-// tokenStore.ts and ADR-0017.
+// A refresh that comes back `unavailable` is the exception: a 503 means
+// the server could not evaluate the session, and a transport failure (the
+// fetch itself rejecting) means nothing is known about it — neither is the
+// same as the session being over. Surfacing the original 401 without
+// clearing the token leaves the user signed in so the next request can
+// retry. See RefreshOutcome and performRefresh in tokenStore.ts and
+// ADR-0017.
 const refreshMiddleware: Middleware = {
   async onResponse({ request, response }) {
     if (response.status !== 401 || request.headers.get("X-Retry") === "1") {
