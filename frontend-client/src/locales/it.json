@@ -91,6 +91,24 @@
       "resendDone": "Se l'indirizzo è registrato e non ancora verificato, ti abbiamo inviato una nuova email."
     }
   },
+  "oauth": {
+    "callback": {
+      "verifying": "Completamento dell'accesso…",
+      "failureTitle": "Accesso non riuscito",
+      "sessionSignedOut": "Accesso completato, ma non è stato possibile stabilire una sessione. Accedi di nuovo.",
+      "sessionUnavailable": "Il server non riesce a confermare la sessione in questo momento. Riprova tra poco.",
+      "retry": "Riprova",
+      "backToLogin": "Torna all'accesso",
+      "errors": {
+        "accessDenied": "L'accesso è stato annullato presso il provider di identità.",
+        "signupDisabled": "La registrazione è attualmente solo su invito. Contatta un amministratore.",
+        "linkDisabled": "Esiste già un account con questa email e il collegamento automatico è disattivato. Contatta un amministratore.",
+        "emailUnverified": "Il provider di identità non ha verificato questo indirizzo email, quindi non può essere usato per accedere.",
+        "providerUnavailable": "Questo provider di accesso non è al momento disponibile. Riprova più tardi.",
+        "loginFailed": "Accesso non riuscito. Riprova."
+      }
+    }
+  },
   "forgot": {
     "title": "Password dimenticata",
     "subtitle": "Inserisci la tua email e ti invieremo un link per reimpostare la password.",

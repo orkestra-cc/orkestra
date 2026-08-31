@@ -119,6 +119,12 @@ Compact keys come from `backend/internal/core/auth/services/jwt_service.go::clai
 
 `useOwnedTenants()` re-renders when the access token rotates (login, refresh, logout) via `useSyncExternalStore` subscribed to the token store.
 
+### OAuth login (web)
+
+`LoginPage` lists the providers the backend currently accepts (`GET /v1/auth/client/providers` — toggle on **and** structurally configured; a 503, a network failure or a malformed body is a retryable error state, never "no method") and starts a flow with `initiateOAuthLogin(provider, next)`: `POST /v1/auth/client/oauth/login {provider}` **with `credentials:'include'`** — the response sets the HttpOnly `orkestra_oauth_state` cookie on the API host and the relay endpoint later _requires_ it — then stashes the validated `next` (`lib/oauthReturnTo.ts`, a ten-minute record) and leaves for `authUrl`. Every provider redirects to the **operator** host, which cannot set a cookie for `api.*`, so the backend relays the client-tier outcome to `GET {CLIENT_API_URL}/v1/auth/client/oauth/complete?relay=<id>`; that endpoint verifies the browser binding against the state cookie, sets the client refresh cookie on its own host and redirects to `{CLIENT_FRONTEND_URL}/auth/callback` under a **closed contract** — `?success=true&provider=<p>`, `?success=false&error=<allowlisted code>`, or `#requiresMfa=true&mfaToken=<id>&webauthnAvailable=<bool>`; never a token, an email or a user id.
+
+`pages/OAuthCallbackPage.tsx` parses that URL once with `lib/oauthCallback.ts` (exact key sets — anything else is the generic failure), scrubs it in its first passive effect **before any request**, take-and-deletes the return target on every outcome, and then: success → `bootstrapFromRefreshCookie()` and navigate to the target or `/account` only once a token exists (signed-out is a login error; a 503 or a network failure offers retry); MFA → the same `components/MfaChallenge.tsx` the password path uses, challenge id in component memory only (`webauthnAvailable` is parsed but the client SPA has no WebAuthn login, so the TOTP / backup-code form renders — a passkey-only user cannot complete an OAuth-MFA continuation here yet); error → the mapped `oauth.callback.errors.*` copy. Raw URL text is never rendered. `src/App.test.tsx` mounts this page through the real route table so the shell's own queries are proven not to disturb the order scrub → bootstrap.
+
 ## How data fetching works
 
 All server state goes through **TanStack Query v5**, not RTK Query. (The operator console at `../frontend-admin` uses RTK Query; this app intentionally diverges because the surface is small enough that the Redux infrastructure is not worth it.)
@@ -258,6 +264,8 @@ The plugin also makes the missing-file case legible: when `config.js` is absent 
 - **Don't add Stripe Elements without explicit sign-off.** Hosted Checkout is the locked decision; Elements would re-introduce PCI scope.
 - **Don't ship English-only strings.** Every user-visible string goes through `t()` with both `en.json` and `it.json` entries in the same PR.
 - **Don't share storage / cookies / auth state with `../frontend-admin`.** Cookie domains, JWT audiences, and refresh cookies are deliberately split per ADR-0003 PR-D D-8/D-9.
+- **Don't build, parse or trust an `/auth/callback` URL outside `src/lib/oauthCallback.ts`**, don't render raw callback text, and don't put the MFA challenge id in router state or storage — it lives in the callback page's component memory only.
+- **Don't navigate to a `?next=` value without `sanitizeNext`** (`src/lib/safeNext.ts`) — it is the SPA's only open-redirect gate, for the password path and the OAuth return target alike.
 
 ## Current surface (ADR-0006)
 

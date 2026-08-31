@@ -44,3 +44,17 @@ export const providersUnavailableHandler = () =>
 // empty: a component that mounts an endpoint must stub it explicitly, so a
 // missing stub is a red run, never a silently passing one.
 export const defaultHandlers: RequestHandler[] = [];
+
+// GET /v1/auth/client/me — the minimum MeResponse Layout (header avatar +
+// nav) and AccountPage read once a session exists.
+export const meHandler = (overrides: Record<string, unknown> = {}) =>
+  http.get(url("/v1/auth/client/me"), () =>
+    HttpResponse.json({
+      id: "u-1",
+      email: "user@example.com",
+      fullName: "Client User",
+      emailVerified: true,
+      isActive: true,
+      ...overrides,
+    }),
+  );

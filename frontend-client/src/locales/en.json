@@ -91,6 +91,24 @@
       "resendDone": "If that address is registered and not yet verified, we've sent a new email."
     }
   },
+  "oauth": {
+    "callback": {
+      "verifying": "Completing sign-in…",
+      "failureTitle": "Sign-in failed",
+      "sessionSignedOut": "Sign-in completed, but no session could be established. Please sign in again.",
+      "sessionUnavailable": "The server could not confirm your session right now. Try again in a moment.",
+      "retry": "Try again",
+      "backToLogin": "Back to sign in",
+      "errors": {
+        "accessDenied": "Sign-in was cancelled at the identity provider.",
+        "signupDisabled": "Sign-up is currently invitation-only. Contact an administrator.",
+        "linkDisabled": "An account with this email already exists and automatic linking is off. Contact an administrator.",
+        "emailUnverified": "The identity provider has not verified this email address, so it cannot be used to sign in.",
+        "providerUnavailable": "This sign-in provider is temporarily unavailable. Try again later.",
+        "loginFailed": "Sign-in failed. Please try again."
+      }
+    }
+  },
   "forgot": {
     "title": "Forgot password",
     "subtitle": "Enter your email and we'll send you a link to reset your password.",
