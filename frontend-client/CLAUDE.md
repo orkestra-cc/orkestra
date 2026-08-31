@@ -151,6 +151,8 @@ There is **no axios** and **no custom fetch helpers**. New endpoints either use 
 
 Auth-gated routes wrap their element in `<RequireAuth>`. Anonymous routes mount directly under `<Layout>`.
 
+Anonymous entry points are policy-aware: the header's Sign-up CTA, `/signup` and `/forgot-password` hide their password forms behind a notice when `passwordLoginUsable(policy)` is false for the client surface (the backend refuses those routes with 403 anyway), and the CTA also stays hidden when `registrationEnabled` is off. When the policy read fell open, the forgot-password form still renders the backend's answer mapped by code (`forgot.passwordDisabled`, `error.policyUnavailable`, `error.generic`) — never the raw detail. `/reset-password` and `/accept-invite` stay open — the backend keeps those routes open too (spec §4.3).
+
 When you add a new page:
 
 1. Create the page in `src/pages/MyPage.tsx`.

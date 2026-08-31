@@ -35,7 +35,8 @@
     "errorPasswordTooShort": "La password deve avere almeno 10 caratteri",
     "errorFullNameRequired": "Il nome è obbligatorio",
     "errorTermsRequired": "Devi accettare i termini per continuare",
-    "disabled": "La registrazione self-service è momentaneamente disabilitata. Contattaci se hai bisogno di un account."
+    "disabled": "La registrazione self-service è momentaneamente disabilitata. Contattaci se hai bisogno di un account.",
+    "passwordDisabled": "La registrazione con email e password è disabilitata qui. Accedi con uno dei provider disponibili."
   },
   "verify": {
     "title": "Verifica email",
@@ -117,7 +118,8 @@
     "submitting": "Invio in corso…",
     "successTitle": "Controlla la tua email",
     "successBody": "Se l'indirizzo è registrato, abbiamo inviato un link per reimpostare la password.",
-    "backToLogin": "Torna al login"
+    "backToLogin": "Torna al login",
+    "passwordDisabled": "L'accesso con password è disabilitato qui, quindi la password non può essere reimpostata. Accedi con uno dei provider disponibili o contatta un amministratore."
   },
   "reset": {
     "title": "Reimposta la password",

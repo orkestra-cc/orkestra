@@ -35,7 +35,8 @@
     "errorPasswordTooShort": "Password must be at least 10 characters",
     "errorFullNameRequired": "Name is required",
     "errorTermsRequired": "You must accept the terms to continue",
-    "disabled": "Self-service registration is currently disabled. Please contact us if you need an account."
+    "disabled": "Self-service registration is currently disabled. Please contact us if you need an account.",
+    "passwordDisabled": "Sign-up with email and password is disabled here. Sign in with one of the available providers instead."
   },
   "verify": {
     "title": "Verify email",
@@ -117,7 +118,8 @@
     "submitting": "Sending…",
     "successTitle": "Check your email",
     "successBody": "If that address is registered, we've sent a password reset link.",
-    "backToLogin": "Back to sign in"
+    "backToLogin": "Back to sign in",
+    "passwordDisabled": "Password sign-in is disabled here, so a password cannot be reset. Sign in with one of the available providers or contact an administrator."
   },
   "reset": {
     "title": "Reset password",
