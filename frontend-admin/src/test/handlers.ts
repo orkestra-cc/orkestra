@@ -19,7 +19,9 @@ export const resetCapturedRequests = () => {
 // Default empty self-auth-methods. Tests that need a populated state
 // pass an override to selfAuthMethodsHandler.
 export const emptySelfAuthMethods = {
-  hasUsablePassword: true,
+  hasPasswordSet: true,
+  passwordUsableForLogin: true,
+  hasUsablePassword: true, // deprecated alias, mirrors hasPasswordSet
   emailVerified: true,
   mfaRequired: false,
   mfaFactors: [] as Array<{

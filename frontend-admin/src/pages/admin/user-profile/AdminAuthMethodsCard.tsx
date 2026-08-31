@@ -175,7 +175,7 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
             icon="key"
             title={t('adminUserProfile.authMethods.passwordTitle')}
             badge={
-              data.hasUsablePassword ? (
+              data.hasPasswordSet ? (
                 <SubtleBadge bg="success">
                   {t('adminUserProfile.authMethods.passwordBadgeSet')}
                 </SubtleBadge>
@@ -186,25 +186,46 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
               )
             }
             sub={
-              data.hasUsablePassword && data.passwordUpdatedAt
+              data.hasPasswordSet && data.passwordUpdatedAt
                 ? t('adminUserProfile.authMethods.passwordLastChanged', {
                     date: formatDate(data.passwordUpdatedAt)
                   })
                 : t('adminUserProfile.authMethods.passwordOauthOnly')
             }
             action={
-              <Button
-                variant="orkestra-default"
-                size="sm"
-                disabled={pwBusy}
-                onClick={handleSendReset}
-              >
-                {pwBusy ? (
-                  <Spinner size="sm" animation="border" />
-                ) : (
-                  t('adminUserProfile.authMethods.passwordSendResetButton')
-                )}
-              </Button>
+              data.passwordUsableForLogin ? (
+                <Button
+                  variant="orkestra-default"
+                  size="sm"
+                  disabled={pwBusy}
+                  onClick={handleSendReset}
+                >
+                  {pwBusy ? (
+                    <Spinner size="sm" animation="border" />
+                  ) : (
+                    t('adminUserProfile.authMethods.passwordSendResetButton')
+                  )}
+                </Button>
+              ) : (
+                <OverlayTrigger
+                  placement="left"
+                  overlay={
+                    <Tooltip>
+                      {t('adminUserProfile.authMethods.resetBlockedPolicy')}
+                    </Tooltip>
+                  }
+                >
+                  {/* span keeps the tooltip alive over a disabled button —
+                      Bootstrap's documented idiom */}
+                  <span className="d-inline-block">
+                    <Button variant="orkestra-default" size="sm" disabled>
+                      {t(
+                        'adminUserProfile.authMethods.passwordSendResetButton'
+                      )}
+                    </Button>
+                  </span>
+                </OverlayTrigger>
+              )
             }
           />
 
@@ -317,7 +338,8 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
               <ul className="list-unstyled mb-0 ms-4">
                 {data.oauthProviders.map(p => {
                   const onlyCredential =
-                    !data.hasUsablePassword && data.oauthProviders.length === 1;
+                    !data.passwordUsableForLogin &&
+                    data.oauthProviders.length === 1;
                   const blockReason = isSelf
                     ? t('adminUserProfile.authMethods.oauthBlockSelf')
                     : onlyCredential
@@ -481,6 +503,9 @@ const ProviderActions: React.FC<ProviderActionsProps> = ({
             size="sm"
             disabled
             className="text-body-tertiary"
+            aria-label={t('adminUserProfile.authMethods.oauthActionsAria', {
+              provider: provider.provider
+            })}
           >
             <FontAwesomeIcon icon="ellipsis-h" />
           </Button>

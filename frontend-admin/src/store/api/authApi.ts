@@ -188,6 +188,9 @@ export interface SelfAuthOAuthProvider {
 }
 
 export interface SelfAuthMethods {
+  hasPasswordSet: boolean;
+  passwordUsableForLogin: boolean;
+  /** @deprecated alias of hasPasswordSet (NOT usability); removed after one release */
   hasUsablePassword: boolean;
   passwordUpdatedAt?: string;
   emailVerified: boolean;

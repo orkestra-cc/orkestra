@@ -26,7 +26,10 @@ const PasswordTab = () => {
   const [error, setError] = useState<string | null>(null);
 
   const minLength = policy?.passwordMinLength ?? 10;
-  const hasPassword = authMethods?.hasUsablePassword ?? true;
+  const hasPassword = authMethods?.hasPasswordSet ?? true;
+  const passwordKeptButUnusable =
+    authMethods?.hasPasswordSet &&
+    authMethods?.passwordUsableForLogin === false;
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -70,6 +73,11 @@ const PasswordTab = () => {
         </Card.Title>
       </Card.Header>
       <Card.Body>
+        {passwordKeptButUnusable && (
+          <Alert variant="info" className="mb-3">
+            {t('userSecurity.passwordTab.keptNotice')}
+          </Alert>
+        )}
         {!hasPassword && (
           <Alert variant="info" className="fs-10">
             {t('userSecurity.passwordTab.ssoOnlyHint')}

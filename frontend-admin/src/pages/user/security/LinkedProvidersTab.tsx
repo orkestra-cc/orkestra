@@ -104,7 +104,8 @@ const LinkedProvidersTab = () => {
     );
   }
 
-  const onlyCredential = !data?.hasUsablePassword && providers.length === 1;
+  const onlyCredential =
+    !data?.passwordUsableForLogin && providers.length === 1;
 
   const onStartLink = async (provider: OAuthProvider) => {
     setError(null);

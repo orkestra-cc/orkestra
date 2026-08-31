@@ -556,6 +556,7 @@
         "passwordAgeKnown_one": "Password updated {{count}} day ago",
         "passwordAgeKnown_other": "Password updated {{count}} days ago",
         "passwordAgeUnknown": "Password update date unknown",
+        "passwordKeptNotice": "set, but sign-in with it is disabled on this surface",
         "oauthLinked": "Sign-in providers:"
       }
     },
@@ -1191,6 +1192,7 @@
     "passwordTab": {
       "title": "Change password",
       "ssoOnlyHint": "Your account uses a single sign-on provider only. Set a password here to add a second login method.",
+      "keptNotice": "Email/password sign-in is disabled on this surface; your stored password is retained for a later re-enable.",
       "labelCurrent": "Current password",
       "labelNew": "New password",
       "labelConfirm": "Confirm new password",
@@ -1867,6 +1869,7 @@
       "passwordLastChanged": "Last changed {{date}}",
       "passwordOauthOnly": "No password set — user signs in via OAuth only.",
       "passwordSendResetButton": "Send password-reset email",
+      "resetBlockedPolicy": "Email/password sign-in is disabled on this user's surface — a reset link would mint a credential the surface refuses.",
       "emailTitle": "Email verification",
       "emailBadgeVerified": "Verified",
       "emailBadgeUnverified": "Unverified",
