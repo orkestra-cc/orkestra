@@ -271,7 +271,7 @@ The plugin also makes the missing-file case legible: when `config.js` is absent 
 
 ## Current surface (ADR-0006)
 
-The base SPA is a **thin auth/account demo**: anonymous home + signup + email verify, login + password recovery + MFA enrol, account (profile, security, billing identity), accept-invite. The subscribe/transactions/payment-methods dashboard, the service catalog, the owner-scope switcher, and the Stripe checkout flow were removed with the `subscriptions`/`payments` backend addons. The sections above describe how a fork **rebuilds** that layer — they are not present in the base.
+The base SPA is a **thin auth/account demo**: anonymous home + signup + email verify, login with email/password **and web OAuth** (Google / Apple / GitHub / Discord through the client-tier relay, `/auth/callback`), password recovery + MFA enrol, account (profile, security, billing identity), accept-invite. The subscribe/transactions/payment-methods dashboard, the service catalog, the owner-scope switcher, and the Stripe checkout flow were removed with the `subscriptions`/`payments` backend addons. The sections above describe how a fork **rebuilds** that layer — they are not present in the base.
 
 ## Related
 
