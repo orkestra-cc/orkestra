@@ -212,7 +212,8 @@ export const buildDefaults = (
  */
 export const buildYupSchema = (
   schema: ConfigField[],
-  fieldNames: ReadonlyMap<string, string> = buildFieldNames(schema)
+  fieldNames: ReadonlyMap<string, string> = buildFieldNames(schema),
+  secretStatus?: Record<string, boolean>
 ): yup.ObjectSchema<Record<string, unknown>> => {
   const shape: Record<string, yup.StringSchema> = {};
 
@@ -256,7 +257,14 @@ export const buildYupSchema = (
 
         const raw = (value ?? '').trim();
 
-        if (field.required && raw === '') {
+        // A stored secret is never echoed back — the input deliberately
+        // resets to '' after save — so an empty required secret with
+        // secretStatus true is *configured*, not missing. Same predicate as
+        // `unfilledRequiredKeys`; diverging here paints "required" in red
+        // next to the "Set" badge driven by the very same map.
+        const storedSecret =
+          field.type === 'secret' && Boolean(secretStatus?.[field.key]);
+        if (field.required && raw === '' && !storedSecret) {
           return this.createError({ message: 'required' });
         }
         if (raw === '') return true;
@@ -414,7 +422,8 @@ export interface ModuleConfigForm {
 export const useModuleConfigForm = (
   schema: ConfigField[],
   configValues: ConfigValues | undefined,
-  pendingCreates: PendingCreates = EMPTY_CREATES
+  pendingCreates: PendingCreates = EMPTY_CREATES,
+  secretStatus?: Record<string, boolean>
 ): ModuleConfigForm => {
   // A record list's membership is dynamic, so the schema the form is built
   // from has to be recomputed when it moves — both when the server's roster
@@ -445,9 +454,9 @@ export const useModuleConfigForm = (
   const resolver = useMemo(
     () =>
       yupResolver(
-        buildYupSchema(expandedSchema, fieldNames)
+        buildYupSchema(expandedSchema, fieldNames, secretStatus)
       ) as unknown as Resolver<ConfigFormValues>,
-    [expandedSchema, fieldNames]
+    [expandedSchema, fieldNames, secretStatus]
   );
   const form = useForm<ConfigFormValues>({
     defaultValues: defaults,
