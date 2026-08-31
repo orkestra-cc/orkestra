@@ -349,10 +349,16 @@ func main() {
 	// MFA-enrollment lookup + auth policy reader feed RequireStepUp's
 	// no-factor branch. When the user has no factor: privileged roles
 	// get 403 mfa_enrollment_required; everyone else gets 401
-	// password_confirm_required so the frontend can collect a password
-	// reconfirm instead of asking for an MFA code that can't exist. All
-	// three setters are optional — when any is unwired, RequireStepUp
-	// falls back to today's "always emit step_up_required" behaviour.
+	// password_confirm_required — but only when the policy still accepts
+	// the password for that audience — so the frontend can collect a
+	// password reconfirm instead of asking for an MFA code that can't
+	// exist. SetMFAEnrollmentLookup and SetUserProvider are optional and
+	// degrade to the legacy "always emit step_up_required" path when
+	// unwired. SetStepUpPolicy is NOT: since PR 3 the no-factor branch
+	// must read passwordLoginEnabled{Admin,Client} before offering a
+	// reconfirm, so an unwired policy answers 503 auth.policy_unavailable
+	// there rather than guessing (an outage is never dressed up as a user
+	// obligation). RequireMFA's master-switch read stays nil-tolerant.
 	if lookup, ok := module.GetTyped[authMiddleware.MFAEnrollmentLookup](svcRegistry, module.ServiceMFAEnrollmentLookup); ok {
 		authMW.SetMFAEnrollmentLookup(lookup)
 	}
