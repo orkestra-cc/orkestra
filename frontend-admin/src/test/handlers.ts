@@ -80,6 +80,24 @@ export const trustedDevicesHandler = (
     HttpResponse.json(body)
   );
 
+// --- Public auth policy (/v1/auth/operator/policy) ---
+
+// Operator /policy with everything enabled; per-test overrides flip the
+// PR 3 password-login fields.
+export const operatorPolicyHandler = (
+  overrides: Record<string, unknown> = {}
+) =>
+  http.get(url('/v1/auth/operator/policy'), () =>
+    HttpResponse.json({
+      registrationEnabled: true,
+      loginEnabled: true,
+      passwordMinLength: 10,
+      passwordLoginEnabled: true,
+      passwordLoginBreakGlassEffective: false,
+      ...overrides
+    })
+  );
+
 // Default handlers used by every test unless overridden. Keep this list
 // small — only stub endpoints the harness itself depends on, plus any
 // chatty endpoints that components fire on mount (none yet).

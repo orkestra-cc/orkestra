@@ -203,7 +203,10 @@
       "registerTitle": "Crea account",
       "registerSubtitle": "Inizia con Orkestra in un minuto.",
       "forgotTitle": "Reimposta password",
-      "resetTitle": "Scegli una nuova password"
+      "resetTitle": "Scegli una nuova password",
+      "loginNoMethod": "Nessun metodo di accesso è al momento disponibile su questa console. Contatta un amministratore.",
+      "passwordLoginDisabled": "L'accesso con email e password è disabilitato su questa superficie. Usa un provider di accesso configurato o contatta un amministratore.",
+      "passwordBreakGlassActive": "Modalità di accesso di emergenza — l'accesso con email e password è temporaneamente ripristinato per i soli operatori. Ripara la configurazione dei provider, poi disattiva l'override."
     },
     "email": "Email",
     "password": "Password",
@@ -358,6 +361,7 @@
     },
     "errors": {
       "missingFields": "Inserisci sia email che password.",
+      "invalidEmail": "Inserisci un indirizzo email valido.",
       "fillRequiredFields": "Compila tutti i campi obbligatori.",
       "passwordTooShort": "La password deve essere di almeno {{count}} caratteri.",
       "acceptTerms": "Devi accettare i termini per continuare.",

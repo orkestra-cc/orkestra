@@ -5,16 +5,19 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
+import { operatorPolicyHandler } from 'test/handlers';
 import EmailPasswordForm from './EmailPasswordForm';
 import { DEFAULT_POST_LOGIN } from 'utils/returnTo';
 
-// Default policy handler — login + registration enabled. Individual tests
-// that need the kill switch override this.
+// Default policy handler — login + registration enabled, password sign-in
+// persisted on. Individual tests that need a kill switch override this.
 const policyOk = http.get('*/v1/auth/operator/policy', () =>
   HttpResponse.json({
     registrationEnabled: true,
     loginEnabled: true,
-    passwordMinLength: 10
+    passwordMinLength: 10,
+    passwordLoginEnabled: true,
+    passwordLoginBreakGlassEffective: false
   })
 );
 
@@ -254,7 +257,9 @@ describe('EmailPasswordForm', () => {
         HttpResponse.json({
           registrationEnabled: false,
           loginEnabled: false,
-          passwordMinLength: 10
+          passwordMinLength: 10,
+          passwordLoginEnabled: true,
+          passwordLoginBreakGlassEffective: false
         })
       ),
       // If the form ever calls login while disabled, this handler will
@@ -272,5 +277,53 @@ describe('EmailPasswordForm', () => {
     expect(screen.getByRole('button', { name: /sign in/i })).toBeDisabled();
     // Registration link is hidden by the same kill switch.
     expect(screen.queryByText(/create one/i)).toBeNull();
+  });
+});
+
+describe('password-login policy gating (PR 3 §4.10)', () => {
+  it('renders nothing when the persisted method is off', async () => {
+    server.use(operatorPolicyHandler({ passwordLoginEnabled: false }));
+    renderForm();
+    await waitFor(() =>
+      expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument()
+    );
+    expect(
+      screen.queryByRole('button', { name: /sign in/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders nothing on the emergency-null state without break-glass', async () => {
+    server.use(operatorPolicyHandler({ passwordLoginEnabled: null }));
+    renderForm();
+    await waitFor(() =>
+      expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument()
+    );
+  });
+
+  it('break-glass renders a labelled emergency form without forgot/register CTAs', async () => {
+    server.use(
+      operatorPolicyHandler({
+        passwordLoginEnabled: false,
+        passwordLoginBreakGlassEffective: true
+      })
+    );
+    renderForm();
+    // auth.pages.passwordBreakGlassActive (added in Step 7)
+    expect(
+      await screen.findByText(/emergency access mode/i)
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
+    // existing copy: auth.forgotPassword = "Forgot password?" (en.json:215),
+    // auth.createOne = "Create one" (en.json:219)
+    expect(screen.queryByText(/forgot password\?/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/create one/i)).not.toBeInTheDocument();
+  });
+
+  it('policy transport failure keeps the form (display fail-open)', async () => {
+    server.use(
+      http.get('*/v1/auth/operator/policy', () => HttpResponse.error())
+    );
+    renderForm();
+    expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
   });
 });

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, Form, Alert, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -19,6 +19,10 @@ import runtimeConfig from 'config/environment';
 interface SocialLoginFormProps {
   backendUrl?: string;
   onError?: (error: Error) => void;
+  // Fired when the provider query RESOLVES (success only, never on
+  // error) with the count of renderable providers — the seam Login uses
+  // for the no-sign-in-method alert without issuing a second query.
+  onProvidersResolved?: (count: number) => void;
 }
 
 // PROVIDER_META is the FE-side mapping from a backend provider string to
@@ -41,7 +45,8 @@ const KNOWN_PROVIDERS = new Set(Object.keys(PROVIDER_META));
 
 const SocialLoginForm = ({
   backendUrl = runtimeConfig.apiUrl,
-  onError
+  onError,
+  onProvidersResolved
 }: SocialLoginFormProps) => {
   const { t } = useTranslation();
   const location = useLocation();
@@ -74,6 +79,16 @@ const SocialLoginForm = ({
       return false;
     })
     .map(name => ({ provider: name, ...PROVIDER_META[name] }));
+
+  // Report the resolved provider count upward. Success only: on a query
+  // error the caller must keep showing the retryable alert below rather
+  // than concluding "no sign-in method exists".
+  useEffect(() => {
+    if (data && !isError) {
+      onProvidersResolved?.(socialProviders.length);
+    }
+    // socialProviders derives from data; its length is the stable dep.
+  }, [data, isError, socialProviders.length, onProvidersResolved]);
 
   const providerLabel = (provider: SocialProvider): string =>
     PROVIDER_META[provider]?.label ?? provider;

@@ -145,7 +145,19 @@ export interface AuthPolicy {
   registrationEnabled: boolean;
   loginEnabled: boolean;
   passwordMinLength: number;
+  // Persisted per-surface email/password policy. null is the emergency
+  // state: the store was unreadable while the operator break-glass is
+  // active. Only a literal true may render ordinary password UI.
+  passwordLoginEnabled: boolean | null;
+  // Operator surface only: render the labelled emergency login form.
+  passwordLoginBreakGlassEffective: boolean;
 }
+
+// Whether the persisted policy allows rendering password-credential UI.
+// A served null (emergency-unknown state) hides it — only the emergency
+// login form may render then, and only under the break-glass flag.
+export const passwordUiVisible = (policy: AuthPolicy | undefined): boolean =>
+  policy ? policy.passwordLoginEnabled === true : true;
 
 // --- Self-service security center ---
 // Mirrors authModels.AuthMethodsView and SessionInfo from the Go
@@ -220,12 +232,16 @@ export const authApi = baseApi.injectEndpoints({
         if (result.error) {
           // Network failure / 404 → assume "everything enabled" so a
           // misconfigured deployment doesn't block legitimate users.
-          // The backend re-validates on submit anyway.
+          // The backend re-validates on submit anyway. This is a DISPLAY
+          // fail-open on transport failure only: a SERVED false/null is
+          // honoured strictly by passwordUiVisible above.
           return {
             data: {
               registrationEnabled: true,
               loginEnabled: true,
-              passwordMinLength: 10
+              passwordMinLength: 10,
+              passwordLoginEnabled: true,
+              passwordLoginBreakGlassEffective: false
             }
           };
         }

@@ -203,7 +203,10 @@
       "registerTitle": "Create account",
       "registerSubtitle": "Get started with Orkestra in a minute.",
       "forgotTitle": "Reset password",
-      "resetTitle": "Choose a new password"
+      "resetTitle": "Choose a new password",
+      "loginNoMethod": "No sign-in method is currently available on this console. Contact an administrator.",
+      "passwordLoginDisabled": "Email/password sign-in is disabled on this surface. Use a configured sign-in provider, or contact an administrator.",
+      "passwordBreakGlassActive": "Emergency access mode — email/password sign-in is temporarily restored for operators only. Repair the sign-in provider configuration, then disable the override."
     },
     "email": "Email",
     "password": "Password",
@@ -358,6 +361,7 @@
     },
     "errors": {
       "missingFields": "Please enter both email and password.",
+      "invalidEmail": "Enter a valid email address.",
       "fillRequiredFields": "Please fill in all required fields.",
       "passwordTooShort": "Password must be at least {{count}} characters.",
       "acceptTerms": "You must accept the terms to continue.",

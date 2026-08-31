@@ -2,13 +2,21 @@ import { useState, FormEvent } from 'react';
 import { Alert, Button, Form } from 'react-bootstrap';
 import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { useForgotPasswordMutation } from 'store/api/authApi';
+import {
+  passwordUiVisible,
+  useForgotPasswordMutation,
+  useGetAuthPolicyQuery
+} from 'store/api/authApi';
 
 const ForgotPasswordForm = () => {
   const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [forgotPassword, { isLoading }] = useForgotPasswordMutation();
+  // A reset link mints a password credential, so this surface follows the
+  // persisted method: a served false OR null closes it, break-glass
+  // included. Only a TRANSPORT failure falls open (authApi's fallback).
+  const { data: policy } = useGetAuthPolicyQuery();
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -20,6 +28,16 @@ const ForgotPasswordForm = () => {
     }
     setSubmitted(true);
   };
+
+  // G5: direct navigation must not show a working form when the method
+  // is off — the backend would refuse the reset anyway.
+  if (!passwordUiVisible(policy)) {
+    return (
+      <Alert variant="warning" className="mb-3">
+        {t('auth.pages.passwordLoginDisabled')}
+      </Alert>
+    );
+  }
 
   if (submitted) {
     return (
@@ -37,7 +55,7 @@ const ForgotPasswordForm = () => {
   return (
     <Form onSubmit={handleSubmit}>
       <p className="text-muted mb-4">{t('auth.forgot.description')}</p>
-      <Form.Group className="mb-3">
+      <Form.Group className="mb-3" controlId="forgot-email">
         <Form.Label>{t('auth.email')}</Form.Label>
         <Form.Control
           type="email"
