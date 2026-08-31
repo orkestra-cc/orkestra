@@ -1121,6 +1121,9 @@
           "emailVerified": {
             "type": "boolean"
           },
+          "hasPasswordSet": {
+            "type": "boolean"
+          },
           "hasUsablePassword": {
             "type": "boolean"
           },
@@ -1160,9 +1163,14 @@
           "passwordUpdatedAt": {
             "format": "date-time",
             "type": "string"
+          },
+          "passwordUsableForLogin": {
+            "type": "boolean"
           }
         },
         "required": [
+          "hasPasswordSet",
+          "passwordUsableForLogin",
           "hasUsablePassword",
           "emailVerified",
           "mfaRequired",
@@ -2679,6 +2687,17 @@
             "description": "Whether an unknown email returning from an OAuth flow may be auto-provisioned on this surface",
             "type": "boolean"
           },
+          "passwordLoginBreakGlassEffective": {
+            "description": "Operator endpoint only: the boot-time break-glass override is set AND the persisted policy is false or unreadable, so the console must render the labelled emergency login form. Always false on the client endpoint.",
+            "type": "boolean"
+          },
+          "passwordLoginEnabled": {
+            "description": "Persisted per-surface email/password policy. Null ONLY when the policy store is unreadable while the operator break-glass is active — the emergency case; every ordinary read is non-null.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "passwordMaxLength": {
             "description": "Maximum password length the signup form should accept",
             "format": "int64",
@@ -2720,7 +2739,9 @@
           "passwordRequireUpper",
           "passwordRequireLower",
           "passwordRequireDigit",
-          "passwordRequireSymbol"
+          "passwordRequireSymbol",
+          "passwordLoginEnabled",
+          "passwordLoginBreakGlassEffective"
         ],
         "type": "object"
       },
