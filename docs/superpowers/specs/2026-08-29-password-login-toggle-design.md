@@ -4,7 +4,7 @@
 |---|---|
 | **Date** | 2026-08-29 |
 | **Last review** | 2026-08-30 |
-| **Status** | Draft v4.4 — v4.3 plus the second PR 2 plan review round (§0); ready for implementation approval |
+| **Status** | Draft v4.5 — v4.4 plus the PR 3 plan decisions (§0); ready for implementation approval |
 | **Scope** | `backend/internal/core/auth`, `backend/internal/shared/{middleware,errcode,config}`, `backend/pkg/sdk/{module,iface}` (additive validation snapshot + atomic config writes + audit wiring), `backend/cmd/server/main.go`, `frontend-admin`, `frontend-client` (adds OAuth login + Vitest), root CI targets, `docker/.env.example`, `docs/site` |
 | **ADR** | None. Both new fields default to `true`, so the feature is inert until explicitly changed. The SDK work is additive or repairs existing persistence guarantees: the frozen `Module` interface is unchanged; existing validator interfaces and `AuditSink` remain source-compatible. **One declared exception to additive-only:** `module.ConfigRepository` — provided *to* the config service by the host, never implemented *by* a module (the `RedisClient` category) — changes shape for atomic writes (§4.5). |
 
@@ -201,6 +201,33 @@ v4.4 (2026-08-30) answers the second review of the PR 2 plan:
   `oauth_provider` in `sessionStorage` and drops the client-side callback
   helper that no longer has a consumer: the state cookie is HttpOnly and
   the backend owns the callback (§4.10).
+
+v4.5 (2026-08-31) records the three decisions the PR 3 implementation plan
+surfaced against the code at `ca24e614`, so they are approved here rather
+than decided in code:
+
+- **The two §4.3 sentinels that cross the `AdminAuthInviter` boundary live
+  in `pkg/sdk/iface`.** `iface.ErrPasswordLoginDisabled` and
+  `iface.ErrAuthPolicyUnavailable` are declared beside `AdminAuthInviter`
+  (the `ErrKMSKeyNotFound`-beside-`KMSProvider` pattern), and the
+  `auth/services` vars become aliases preserving identity. The client-user
+  send-password-reset twin is served by the `user` module, which cannot
+  import `auth/services` and today matches sentinel MESSAGES by exact
+  string equality — an equality that breaks on the wrapped errors the
+  strict accessors return. This supersedes §4.3's declaration-site listing
+  for these two sentinels only; every `errors.Is`/`%w` use is unchanged.
+- **Malformed booleans among the eleven §4.4 invariant keys are rejected
+  up-front by the snapshot validator** — on every mutation, naming the
+  malformed key, regardless of which surface is off. This is §4.4's "a
+  malformed bool … is not silently coerced" and edge #29's "the validator
+  rejects the malformed value on the next write" read together; only the
+  cross-field lockout failure names `passwordLoginEnabled<S>` and carries
+  `auth.login_method_lockout`.
+- **A nil policy service is an outage for `Register`.** G4's strictness
+  means a non-bootstrap signup with no wired policy answers 503
+  `auth.policy_unavailable`, never the legacy allow; the two operator-only
+  bootstrap exceptions (first-user branch, `RegisterInitialAdmin`) remain
+  reachable with no policy read at all, exactly as G2 names them.
 
 ## 1. Problem
 
