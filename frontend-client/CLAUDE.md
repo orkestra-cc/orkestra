@@ -86,11 +86,12 @@ frontend-client/
 
 ## How auth works
 
-Three moving parts:
+Four moving parts:
 
 1. **In-memory access token** — `src/auth/tokenStore.ts` holds the RS256 JWT in a module-scoped variable. Never localStorage, never sessionStorage. The token is read synchronously by the openapi-fetch middleware on every request so the React tree is not in the fetch path.
 2. **httpOnly refresh cookie** — set by the backend at login on `Domain=api.localhost` (dev) or `Domain=api.orkestra.com` (prod). The SPA cannot read it directly; it only triggers `POST /v1/auth/client/refresh-cookie`, which mints a fresh access token. Per ADR-0003 PR-D D-9 the operator host (`console.*`) and client host (`api.*`) get distinct cookies — a token minted here cannot refresh on the operator console and vice versa.
 3. **Session marker** — a tiny `client.session=1` localStorage flag stamped on `signIn` and cleared on `signOut`/401. `refreshAccessToken` short-circuits when the marker is missing so anonymous visitors don't fire a guaranteed-401 on every cold load.
+4. **Public policy + OAuth start** — `fetchAuthPolicy()` (`GET /v1/auth/client/policy`) falls open on failure, and `passwordLoginUsable(policy)` is the **only** reader of `passwordLoginEnabled`: `undefined` (still loading) reads as usable, `false` **and** `null` read as off, so an SSO-only client surface hides the password UI instead of showing a form the backend refuses with 403 (spec §4.10, G5). `fetchOAuthProviders()` deliberately does **not** fall open — a 503, a network error or a body without a `providers` array is a retryable error state, never "no method"; only `{providers: []}` is empty. `initiateOAuthLogin(provider, next)` POSTs the allowlisted provider **with `credentials:'include'`** (the response sets the HttpOnly `orkestra_oauth_state` cookie the relay endpoint requires), stashes the validated `next` and leaves through `browserNavigation.assign` — the seam tests spy on.
 
 ### Refresh choreography
 

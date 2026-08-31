@@ -6,13 +6,15 @@ import type { AuthPolicy } from "@/api/auth";
 // (window.__ORKESTRA_CONFIG__, VITE_API_BASE, or the built-in default).
 export const url = (path: string) => `*${path}`;
 
-// The client /policy with everything enabled. Task 3 widens AuthPolicy
-// with the PR 3 fields (passwordLoginEnabled, passwordLoginBreakGlassEffective)
-// and extends this literal; per-test overrides then flip the password field.
+// The client /policy with everything enabled. Per-test overrides flip the
+// PR 3 password-login field; passwordLoginBreakGlassEffective is always
+// false on this tier (spec §4.9).
 export const openPolicy: AuthPolicy = {
   registrationEnabled: true,
   loginEnabled: true,
   passwordMinLength: 10,
+  passwordLoginEnabled: true,
+  passwordLoginBreakGlassEffective: false,
 };
 
 export const clientPolicyHandler = (overrides: Partial<AuthPolicy> = {}) =>
