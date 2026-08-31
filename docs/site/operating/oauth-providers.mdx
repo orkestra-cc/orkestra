@@ -261,6 +261,91 @@ For the Flutter mobile app, update:
 3. Test both authentication flows (operator + client).
 4. Verify tokens are properly generated and stored.
 
+## Going SSO-only
+
+Once a provider works, a surface can stop accepting email/password
+altogether. The two switches live under **Login & Sessions** at
+`/admin/modules/auth`: `passwordLoginEnabledAdmin` for the operator
+console and `passwordLoginEnabledClient` for the client app. They are
+independent — take one surface SSO-only and leave the other alone.
+
+**Do it in this order.**
+
+1. **Configure the provider and verify it end to end** on the surface you
+   are about to close, following the setup guide above. A provider counts
+   only when its toggle for *that* surface is on **and** every field the
+   flow needs is filled in: client ID, redirect URL and client secret —
+   for Apple, also team ID, key ID and a private key (inline or a
+   readable, non-empty key file).
+2. **Sign in through it at least once**, with an account you will still
+   need afterwards. The identity provider must return the address as
+   **verified**; an unverified one can neither sign up nor attach to an
+   existing account.
+3. **Leave "Auto-link OAuth provider to existing email account"
+   (`oauthAutoLinkByEmail`) ON.** This is what lets accounts created with
+   a password reach their account through the provider afterwards. It is
+   part of the guard below, not a nicety.
+4. **Turn the surface's `passwordLoginEnabled…` switch off** and save.
+   The change is live immediately — no restart, no restart banner.
+
+**What the validator refuses.** A save that would leave a surface with no
+way to sign in is rejected with **422 `auth.login_method_lockout`**, and
+nothing is written — neither the config values nor the module's enabled
+state. That covers an ordinary save, a save into a named environment, and
+*activating* an environment whose own configuration is invalid, so you
+cannot walk into a lockout sideways. In practice you will meet it when
+you try to disable the last usable provider for a closed surface, blank
+one of its required fields, remove its secret, or turn auto-link off.
+A field that is not a literal `true`/`false` is refused separately,
+naming that field.
+
+Two more behaviours are worth knowing before you flip:
+
+- **Existing sessions are not revoked.** Whoever is signed in stays
+  signed in. Flipping the switch governs the *next* authentication.
+- **Password-related recovery closes with it.** Signup, forgot-password
+  and the operator's *send password reset* stop working for that surface
+  (the last one answers `409`); `reset-password`, `accept-invite`,
+  `verify-email` and `change-password` stay open so a recovery already in
+  flight can finish.
+
+Walk the checks in the [auth module reference](/modules/core/auth#sso-only-surface)
+before and after the flip: password login refused with the stable code
+and the form gone, OAuth login working, an admin password reset refused,
+and unlinking the sole usable identity refused.
+
+### The break-glass drill
+
+If the console is SSO-only and OAuth then breaks — a rotated secret, a
+lost key, an outage at the identity provider — there is a boot-time
+escape hatch that restores **operator password login only**:
+
+```bash
+# docker/.env
+AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS=true
+```
+
+1. Set it, then restart the backend through the sanctioned stack
+   lifecycle (`./orkestra.sh`).
+2. Sign in on the console's labelled emergency form. MFA still applies,
+   and so does every RBAC and step-up gate on what you do next.
+3. Repair the provider configuration at `/admin/modules/auth`.
+4. Unset the variable and restart again.
+
+It is deliberately narrow: it rescues `POST /v1/auth/operator/login` and
+the MFA continuation of a login it allowed — nothing else. Registration,
+forgot/reset password, password reconfirmation, the OAuth-unlink guard
+and the whole client surface stay closed, and the persisted policy is
+never rewritten. While the variable is set the backend logs a warning on
+**every** boot, and every rescued sign-in is audited with the audience,
+the user id, the session id and the source IP — never a credential. Treat
+a lingering warning in the logs as an unfinished incident.
+
+**Rehearse it on staging before you need it**: set the variable, restart,
+confirm the emergency form appears and an operator can sign in while
+signup and forgot-password stay absent and client login stays refused,
+then unset it, restart, and confirm the form and the warning are gone.
+
 ## Security best practices
 
 1. **Never commit secrets** to version control.

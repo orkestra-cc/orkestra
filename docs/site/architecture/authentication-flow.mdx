@@ -56,6 +56,7 @@ POST  /v1/auth/{tier}/refresh               refresh via header-supplied token
 POST  /v1/auth/{tier}/refresh-cookie        refresh via HttpOnly cookie
 POST  /v1/auth/{tier}/logout                revoke refresh + invalidate session
 
+GET   /v1/auth/{tier}/policy                public slice of admin-managed auth policy the login/signup pages render against
 GET   /v1/auth/{tier}/providers             list OAuth providers USABLE on this audience (toggle on + structurally complete; 503 when the auth document cannot be read)
 POST  /v1/auth/{tier}/oauth/login           start a web OAuth flow
 GET   /v1/auth/client/oauth/complete        (client host only) completes a relayed client-tier web login
@@ -170,9 +171,12 @@ When `GetUserForAuth` finds no user, the password service runs `Verify` against 
 ### Login
 
 1. `POST /v1/auth/{tier}/login` with `{email, password}`.
-2. Two rate-limit buckets (per IP and per email, both 3 attempts / 15 min) gate the request.
-3. After 5 consecutive misses, `User.LockedUntil` is set 15 minutes in the future and the handler short-circuits with `429`.
-4. On success: failed counter cleared, hash rehashed if needed, `AuthSessionDoc{LoginMethod="password"}` written for audit, **state machine forks on MFA policy** (see §7), tokens issued, refresh cookie set on the audience-correct domain. Inactive users receive no credentials.
+2. **Is the password still an accepted method on this surface?** After the `loginEnabled…` maintenance kill switch and **before anything reads the account**, the handler evaluates the per-surface `passwordLoginEnabled{Admin,Client}` policy. Off → `403 auth.password_login_disabled`; unreadable or malformed → `503 auth.policy_unavailable` (the read is strict and fails closed — an outage never re-opens the method). Because it sits ahead of `GetUserForAuth`, the rate-limit buckets, the lockout counter and the audit trail see nothing, and every address — registered or not — gets the identical answer. On the **operator** surface only, a boot-time break-glass variable can convert a stored `false` or a failed read into a rescued login, which is audited; see [SSO-only surface](/modules/core/auth#sso-only-surface).
+3. Two rate-limit buckets (per IP and per email, both 3 attempts / 15 min) gate the request.
+4. After 5 consecutive misses, `User.LockedUntil` is set 15 minutes in the future and the handler short-circuits with `429`.
+5. On success: failed counter cleared, hash rehashed if needed, `AuthSessionDoc{LoginMethod="password"}` written for audit, **state machine forks on MFA policy** (see §7), tokens issued, refresh cookie set on the audience-correct domain. Inactive users receive no credentials.
+
+The same policy is the reason the login page can render honestly rather than guessing: `GET /v1/auth/{tier}/policy` carries `passwordLoginEnabled` for the surface, alongside `passwordLoginBreakGlassEffective` — only ever true on the operator endpoint, where it tells the console to render the labelled emergency form, so an SSO-only surface hides the password form instead of showing one that would 403 on submit.
 
 ### Verification + reset
 
@@ -240,17 +244,22 @@ A privileged user logging in without an MFA factor has `User.MFAGraceStartedAt` 
 | Privileged + no factor + within 7-day grace          | Full token pair + `mfaEnrollmentRequired: true` + `mfaGraceExpiresAt`                                                                                                                                                          |
 | Privileged + no factor + grace expired               | `403 mfa_enrollment_required`                                                                                                                                                                                                  |
 
+**A paused login is re-checked when its second factor lands.** A challenge lives five minutes, so without this, turning email/password off for a surface would still let every in-flight password login complete for the next five minutes. The challenge records the surface it was created for and whether the initial check was a break-glass rescue, and both completion endpoints (`/mfa/login/verify`, `/mfa/webauthn/login/finish`) re-evaluate the password policy **before** the factor is verified — so a login that is no longer allowed can neither spend attempt budget nor probe factor state. A challenge that did not come from a password login is untouched. Disabled → the challenge is consumed and the answer is `403 auth.password_login_disabled`. A policy outage → `503 auth.policy_unavailable` with the challenge **retained**, so a transient failure is retryable inside the original five minutes. A challenge minted before this shipped carries no surface and is consumed with the generic "invalid or expired challenge" `401` — which is why a rollout waits one challenge TTL after deploy before the switch is exposed.
+
 ### Step-up gate
 
 `RoleMiddleware.RequireStepUp(maxAge)` is a stricter variant applied to catastrophic / irreversible actions (`POST /v1/auth/{tier}/me/mfa/remove`, `POST /v1/admin/users/{id}/mfa/reset`, self-service OAuth link/unlink, session revoke / revoke-all, backup-code regeneration). It checks both that `amr` contains an MFA-or-reauth marker **AND** that `last_otp_at` is within `maxAge` of now — a session-long MFA proof is not enough.
 
-The middleware emits **three** distinct envelopes so the SPA can pick the right modal without a second round-trip:
+The middleware emits **four** distinct envelopes so the SPA can pick the right modal without a second round-trip:
 
 1. **`401 step_up_required`** — the user has at least one MFA factor enrolled; ask for an OTP / passkey. The global `StepUpModal` drives the user through `/v1/auth/{tier}/mfa/verify` (or WebAuthn assertion) and replays the original request.
-2. **`401 password_confirm_required`** — the user has **no** MFA factor enrolled AND the policy doesn't require them to. The `PasswordConfirmModal` posts the password to `POST /v1/auth/{tier}/me/password-confirm`; the response mints a fresh access token with `amr += "reauth"` + `last_otp_at = now`, and `RequireStepUp` accepts the `"reauth"` marker on the replay.
-3. **`403 mfa_enrollment_required`** — the user's role obligates MFA but they haven't enrolled. No bypass — the SPA nudges them to enroll a factor first.
+2. **`401 password_confirm_required`** — the user has **no** MFA factor enrolled, the policy doesn't require them to, **and** the password is still an accepted credential for the token's audience. The `PasswordConfirmModal` posts the password to `POST /v1/auth/{tier}/me/password-confirm`; the response mints a fresh access token with `amr += "reauth"` + `last_otp_at = now`, and `RequireStepUp` accepts the `"reauth"` marker on the replay.
+3. **`403 mfa_enrollment_required`** — the user's role obligates MFA but they haven't enrolled, **or** the surface no longer accepts email/password (see [SSO-only surface](/modules/core/auth#sso-only-surface)) so no password reconfirm can be offered. No bypass — the SPA nudges them to enroll a factor first.
+4. **`503 auth.policy_unavailable`** — the password-method policy could not be evaluated on the no-factor branch. Retryable, and deliberately *not* a step-up prompt: an outage must never be dressed up as a user obligation or as a modal the user cannot satisfy.
 
-The enrollment branching is driven by `MFAEnrollmentLookup` (per-tier `MFAFactorRepository` lookups for TOTP + WebAuthn) and the live `AuthPolicyService.MFARequired` check. Any lookup error fails closed to `step_up_required` — a degraded Mongo must never silently weaken the gate. MFA completion rechecks eligibility and atomically consumes the challenge, so exactly one concurrent successful completion can mint the preserved pending SID.
+The enrollment branching is driven by `MFAEnrollmentLookup` (per-tier `MFAFactorRepository` lookups for TOTP + WebAuthn) and the live `AuthPolicyService.MFARequired` check. Any lookup error fails closed to `step_up_required` — a degraded Mongo must never silently weaken the gate; a *policy* error fails closed to the `503` above. The break-glass override is invisible here: a temporary emergency switch is not a durable login method, so it must never keep the password modal on offer.
+
+One consequence worth naming: a **service account** hitting a step-up-gated route now receives that `503` rather than the old `401 password_confirm_required`. Machine principals carry no password hash, so neither answer ever succeeded — but the status code did change, and a definitive 4xx for principals that can never satisfy step-up is an open contract question rather than something to invent at the middleware. MFA completion rechecks eligibility and atomically consumes the challenge, so exactly one concurrent successful completion can mint the preserved pending SID.
 
 ### TOTP details
 

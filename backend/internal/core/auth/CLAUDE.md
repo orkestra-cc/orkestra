@@ -130,7 +130,7 @@ OAuth provider settings are admin-managed through `ConfigSchema()` — stored in
 `auth` declares an 11-key group tree via `ConfigGroups()` — 7 top-level groups
 (`registration`, `login`, `password`, `mfa`, `oauth`, `antiabuse`, `sessions`) plus
 `oauth.google` / `oauth.apple` / `oauth.github` / `oauth.discord` nested under `oauth`
-(`Parent: "oauth"`). It is the largest configuration surface in the base — 63
+(`Parent: "oauth"`). It is the largest configuration surface in the base — 65
 `ConfigField` entries — and is the first (and so far only) module to actually render
 the settings page's sectioned rail rather than the plain-form degradation path. This is
 the shape a contributor adding a field to `ConfigSchema()` must keep valid:
@@ -240,6 +240,131 @@ successful write now persists `needsRestart=false` in the same atomic
 update instead of leaving a stale restart banner in the admin UI.
 Read-time enforcement is the pre-existing `clampPersistedDuration` in
 `services/auth_duration_bounds.go`, which stays as-is.
+
+#### Login method invariant (password-login toggle, spec §4.4)
+
+`passwordLoginEnabledAdmin` / `passwordLoginEnabledClient` are the only
+config keys that can leave a surface with **no way to sign in at all**, so
+turning either off is refused at write time unless OAuth can carry the
+surface on its own. `validateLoginMethodInvariant`
+(`config_validation.go`) is the second rule `ValidateConfigSnapshot` runs,
+after the duration bounds, and therefore judges the target snapshot on
+**all three** mutation surfaces — active-profile PATCH,
+named-environment PATCH, and environment activation.
+
+Per surface `S ∈ {Admin, Client}`:
+
+```
+passwordOn(S)   := strictBool(Values["passwordLoginEnabled"+S],  default true)
+providerOn(p,S) := strictBool(Values[p+"Enabled"+S],             default false)
+structural(p)   := EffectiveValues[p+"ClientId"]    ≠ "" ∧
+                   EffectiveValues[p+"RedirectURL"] ≠ "" ∧ secret(p)
+    where secret(google|github|discord) := SecretPresent[p+"ClientSecret"]
+          secret(apple)                 := EffectiveValues["appleTeamId"] ≠ "" ∧
+                                           EffectiveValues["appleKeyId"]  ≠ "" ∧
+                                           (SecretPresent["applePrivateKey"] ∨
+                                            readable non-empty applePrivateKeyPath)
+oauthOn(S)      := ∃ p ∈ services.WebProviderOrder : providerOn(p,S) ∧ structural(p)
+autoLink        := strictBool(Values["oauthAutoLinkByEmail"],    default true)
+
+valid(S)        := passwordOn(S) ∨ (oauthOn(S) ∧ autoLink)
+```
+
+- **Only the target snapshot is consulted** — never the active profile,
+  never a secret *value*. Booleans come from `snap.Values` (raw, so an
+  absent key takes the schema default), the structural strings from
+  `snap.EffectiveValues` (EnvVar/`Default` fallback applied), and secrets
+  from `snap.SecretPresent`. `providerStructuralFromSnapshot` assembles the
+  same `services.ProviderStructuralFields` the runtime's `usableFromView`
+  assembles, field-for-field, and hands them to the **same** exported
+  predicate the OAuth flow uses, `services.ProviderStructurallyConfigured`,
+  so the validator and `OAuthWebProviderUsable` can never disagree about
+  what "configured" means. Apple's file leg is probed through `services.ReadableNonEmptyFile`
+  (the `KeyFileProbe` seam), so a path naming a missing or empty file is
+  not a present secret.
+- **`autoLink` is the PR 2 half of the invariant.** An SSO-only surface is
+  only survivable if an existing account can still be reached by its
+  provider-**verified** email; `oauthAutoLinkByEmail` is the switch that
+  allows it (documented on the OAuth Providers row above), so turning it
+  off while a surface is password-off is the same lockout and gets the
+  same refusal.
+- **Malformed booleans are rejected up front.** All eleven participating
+  keys — `oauthAutoLinkByEmail` plus, per surface, `passwordLoginEnabled<S>`
+  and the four `{provider}Enabled<S>` toggles — are parsed with
+  `services.StrictBool` *before* any surface is judged, so an out-of-band
+  `"treu"` is refused on **every** write rather than only when its surface
+  happens to be the one being switched off. That failure is a
+  `*module.ConfigValidationError` naming **that key** ("must be exactly
+  true or false") with **no** `Code` — it is a field-shape error, not the
+  invariant.
+- **Only the cross-field lockout carries a code.** It names
+  `passwordLoginEnabled<S>` and sets `errcode.AuthLoginMethodLockout`
+  (`auth.login_method_lockout`); the admin API maps the whole envelope to
+  **422** before anything reaches `UpdateConfig`, so config *and* enabled
+  state are unchanged and the audit row records `outcome=failure` with key
+  names only. The message names both ways out: keep the password method
+  on, or leave one fully configured, enabled OAuth provider on this
+  surface **together with** auto-link.
+- **This is why `auth` moved to the snapshot seam.** The legacy value-only
+  `HasConfigValidator` sees one key's new value; `structural(p)` needs
+  secret *presence* across the whole target profile, which only
+  `ConfigValidationSnapshot` carries. `auth` no longer implements the
+  legacy hook.
+
+Pinned by `config_validation_test.go`. The staging drill for the refusal
+(and for the concurrent-PATCH race that ends in `409
+module.config_revision_stale` then this 422 on retry) is spec §7 steps 2–3
+and 5.
+
+#### Password-login gate verdicts (spec §4.3)
+
+The rule: **a route is gated iff it authenticates, or mints an
+unauthenticated path to authenticate, with the password.** Routes that
+*manage* the credential stay open — the credential legitimately continues
+to exist for the other surface and for a later re-enable, and deleting it
+is a different decision this toggle does not make.
+
+| Route | Verdict | Accessor / notes |
+|---|---|---|
+| `POST /v1/auth/{tier}/login` | **403** `auth.password_login_disabled` | `PasswordLoginDecision`. Sits after the `loginEnabledAdmin/Client` kill switch and **before** `GetUserForAuth`, so lockout counters, the rate limiter and the audit trail see nothing and every email — known or unknown — gets the identical answer. Only the operator surface can be rescued |
+| `POST /v1/auth/{tier}/register` | **403** | Strict `PasswordLoginEnabled` — break-glass never opens registration. The **operator-only** first-user branch and `RegisterInitialAdmin` (setup wizard) are the two bootstrap exceptions: they are evaluated before the gate and read no policy at all. The client tier has no first-user bypass |
+| `POST /v1/auth/{tier}/forgot-password` | **403** | Strict `PasswordLoginEnabled`, evaluated **before** the user lookup, so no reset token is minted and the outcome cannot depend on account state. `ErrPasswordLoginDisabled` and `ErrAuthPolicyUnavailable` are the ONLY errors this service method propagates — every account-specific outcome stays swallowed behind the generic success body, so it is not an enumeration oracle |
+| `POST /v1/auth/{tier}/mfa/login/verify`, `POST /v1/auth/{tier}/mfa/webauthn/login/finish` | **403** when the challenge was password-sourced | `PasswordLoginDecision`, re-evaluated **before** the factor is verified. See "Completion re-check" under HTTP endpoints for the four outcomes (untouched / 403+consume / 503+retain / 401 on an empty audience) |
+| `POST /v1/admin/users/{userId}/send-password-reset` **and** `POST /v1/admin/client-users/{userId}/send-password-reset` | **409** `auth.password_login_disabled` | Strict `PasswordLoginEnabled` on the target's tier, inside `AdminTriggerPasswordReset`. A reset link for a refused method would also revoke the target's sessions and leave them an unusable password. Break-glass never opens it. Both handlers match `iface.ErrPasswordLoginDisabled` with `errors.Is` |
+| `POST /v1/auth/{tier}/me/password-confirm` | **409** `auth.password_confirm_unavailable` | Same 409 branch as "no password hash": a credential the surface refuses cannot prove presence either (§4.6) |
+| `POST /v1/auth/{tier}/reset-password` | **open** | Redeems a token only the gated routes can mint; closing it would strand a reset in flight |
+| `POST /v1/auth/{tier}/accept-invite` | **open** | Sets the password **and** marks the email verified atomically; auto-link is what lets that account sign in with OAuth later |
+| `verify-email`, `verify-email/resend`, `change-password` | **open** | Not a credential, or authenticated credential management |
+
+Every gated path answers **503** `auth.policy_unavailable` instead when
+the policy cannot be established — a nil policy service is an outage, never
+a legacy allow.
+
+**Decision vs accessor — two methods, and the split is the security
+boundary.** `AuthPolicyService.PasswordLoginEnabled(ctx, audience)` is the
+strict accessor: absent key → `true` (compatibility applies to the key, not
+to the document), present canonical boolean → its value, and a missing
+document / repository failure / malformed value / unknown audience / unwired
+service → an error wrapping `ErrAuthPolicyUnavailable`. It **never** sees
+the break-glass. `PasswordLoginDecision(ctx, audience)` wraps it and is used
+by exactly two callers — `Login` and the completion of a challenge `Login`
+created: on the **operator** audience only, and only when
+`AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS` is set, it converts a stored
+`false` *or* a failed read into `{Allowed: true, BreakGlassUsed: true}`. So
+an outage never silently fails open, while the recovery switch still works
+when ConfigService itself is the outage. Everything else — registration,
+forgot/reset, admin reset, password-confirm, `PasswordReauthAllowed`, the
+unlink guard, `AuthMethodsView` — calls the accessor and is blind to the
+override by construction.
+
+A rescued authentication emits exactly one `auth.policy.break_glass_used`
+audit row (`EmitBreakGlassUsed`, best-effort through the nil-guarded sink):
+from `Login` on a direct full-token success, or from the **winning**
+MFA/WebAuthn completion when either that completion's own decision or the
+challenge's stamped `BreakGlassUsed` was a rescue. The row carries the
+audience, the user UUID, the session id and the source IP — never a
+password, a token or a full email. A failed credential attempt under the
+override claims nothing.
 
 #### Absolute session cap (ADR-0017 D1)
 
@@ -403,6 +528,7 @@ different things depending on where it was typed, and
 |---|---|---|
 | `AUTH_JWT_PRIVATE_KEY` / `AUTH_JWT_PUBLIC_KEY` | RS256 key pair (paths or PEM) | — (required) |
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | Gate signup on successful verification | `true` in prod, `false` otherwise |
+| `AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS` | **Emergency only.** Read once at boot into `cfg.Auth.OperatorPasswordLoginBreakGlass` and handed to `AuthPolicyService.SetOperatorBreakGlass` by `module.go::Init`, which also logs a WARN on **every** boot while it is set. Rescues `POST /v1/auth/operator/login` (and the MFA/WebAuthn completion of a challenge that login created) when `passwordLoginEnabledAdmin` is `false` **or** unreadable — see "Login method invariant" and "Password-login gate verdicts" below. It opens nothing else: not registration, not forgot/reset, not password-confirm, not the unlink guard, not `AuthMethodsView`, not the client surface, and it never bypasses `loginEnabledAdmin` or the MFA / low-risk / RBAC gates on the config repair that follows. There is no unset path short of a restart. `docker/.env.example` carries the five-step drill. | `false` |
 | `JWT_ACCESS_TOKEN_EXPIRY` | Access-token TTL. **Level 2 of `admin accessTokenTTL → JWT_ACCESS_TOKEN_EXPIRY → 15m`.** Before ADR-0017 this level was unreachable — the policy substituted its 15m default for "unset" — so any deployment that set this by hand has been running on 15m regardless of the value. Repairing the chain activates their configured value, which may be longer than what they have actually been running: **diff this key against `docker/.env.example` before upgrading.** Effective values are clamped into `[MinAccessTokenTTL, MaxAccessTokenTTL]` (1m–24h) with a warning — below 1m the SPA's proactive refresh would rotate the token on every request (ADR-0020 D3, #317). | `15m` |
 | `JWT_REFRESH_TOKEN_EXPIRY` | Refresh-token TTL — and, because rotation writes `now + this` on every use, the **idle** timeout: this many days without a refresh ends the session. The absolute cap is the separate `sessionAbsoluteTTL`. The `refreshTTL <= 0 → 720h` guard in `NewJWTService` is unreachable through configuration. | `7d` |
 | `AUTH_DEVICE_TRUST_DURATION` | "Remember this device" trust-grant lifetime (`models.DeviceTrustDuration`), read via `parseDurationEnv` in `module.go`. Accepts the `d` suffix (`30d`); malformed or unset logs a warning and falls back to the default. | `30d` (720h) |

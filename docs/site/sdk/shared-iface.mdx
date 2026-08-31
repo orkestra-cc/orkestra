@@ -43,6 +43,10 @@ must match them across the module boundary with `errors.Is`.
   answer 409 `auth.password_login_disabled` with it.
 - `ErrAuthPolicyUnavailable` — a persisted sign-in policy could not be read or
   parsed; consumers fail closed with 503 `auth.policy_unavailable`.
+- `ErrKMSKeyNotFound` — the precedent for the pattern: a per-tenant key lookup
+  found nothing, either because the key never existed or because it was
+  shredded; callers branch on it without importing the `compliance`
+  implementation.
 
 ## Reserved for a fork's addons
 
