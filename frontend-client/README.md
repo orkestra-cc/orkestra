@@ -6,10 +6,11 @@ Tier-2 (external client) demo SPA. Consumes the ADR-0003 **client** API surface 
 
 - React 19 + TypeScript 5.9 (strict)
 - Vite 7 + Tailwind v4 (zero-config, design tokens in `src/index.css`)
-- React Router v7 + TanStack Query v5
+- React Router v8 + TanStack Query v5
 - `openapi-typescript` + `openapi-fetch` against `${VITE_API_BASE}/openapi.json`
 - `react-i18next` (Italian + English from day 1)
 - `@stripe/stripe-js` for hosted-Checkout redirects
+- Vitest 4 + React Testing Library + MSW (happy-dom) — `npm test`
 
 ## Dev quickstart
 
@@ -40,6 +41,16 @@ Open:
 - **Demo SPA** — http://client.localhost:8081
 - Operator console — http://console.localhost:8080
 - Backend API — http://api.localhost:3000 (client surface) + http://console.localhost:3000 (operator)
+
+## Tests
+
+```bash
+cd frontend-client
+npm test              # vitest run — what `make ci-frontend-client` runs between lint and build
+npm run test:watch
+```
+
+MSW runs with `onUnhandledRequest: 'error'`: stub every endpoint a component mounts.
 
 ## OpenAPI codegen
 

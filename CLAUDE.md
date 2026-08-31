@@ -167,7 +167,7 @@ GitHub Actions workflows (`.github/workflows/`) run on PR and push to `dev`/`mai
 
 - `backend.yml` → `make ci-backend` (lint, tenantscope, policycoverage, piiscan, vuln, tests, build, openapi-check) + a single Docker image build on push
 - `frontend-admin.yml` → `make ci-frontend-admin` (typecheck, eslint, tests, audit, build)
-- `frontend-client.yml` → `make ci-frontend-client` (typecheck, eslint, build) — no tests yet
+- `frontend-client.yml` → `make ci-frontend-client` (typecheck, eslint, tests, build)
 - `mobile.yml` → `make ci-mobile` (flutter analyze, test)
 - `security.yml` — govulncheck + npm audit; runs on PR (jobs gated per changed area) + weekly cron, **no push trigger** — a push would re-scan the dependency set the PR just scanned
 - `ghcr-cleanup.yml` — weekly deletion of untagged GHCR image versions (private-repo package storage is billed); manifest-aware, safe with buildx provenance

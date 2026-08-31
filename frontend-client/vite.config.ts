@@ -3,7 +3,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { defineConfig, type Plugin } from "vite";
+import type { Plugin } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -169,5 +170,19 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 5173,
     allowedHosts: allowedHosts.includes("*") ? true : allowedHosts,
+  },
+  // Vitest. happy-dom over jsdom: 2-3x faster and free of the
+  // "Expected signal to be an instance of AbortSignal" mismatch jsdom +
+  // MSW v2 + Node fetch trip over (same call as frontend-admin). No
+  // globals: every test imports describe/it/expect/vi from "vitest", so
+  // tsc and ESLint see exactly what each file uses. Without globals React
+  // Testing Library cannot register its automatic cleanup (it looks for a
+  // global afterEach) — src/test/setup.ts calls cleanup() explicitly.
+  test: {
+    environment: "happy-dom",
+    setupFiles: ["./src/test/setup.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
+    globals: false,
+    css: false,
   },
 });

@@ -1,0 +1,44 @@
+import { http, HttpResponse, type RequestHandler } from "msw";
+
+import type { AuthPolicy } from "@/api/auth";
+
+// Wildcard host so handlers match whatever apiBaseURL resolves to
+// (window.__ORKESTRA_CONFIG__, VITE_API_BASE, or the built-in default).
+export const url = (path: string) => `*${path}`;
+
+// The client /policy with everything enabled. Task 3 widens AuthPolicy
+// with the PR 3 fields (passwordLoginEnabled, passwordLoginBreakGlassEffective)
+// and extends this literal; per-test overrides then flip the password field.
+export const openPolicy: AuthPolicy = {
+  registrationEnabled: true,
+  loginEnabled: true,
+  passwordMinLength: 10,
+};
+
+export const clientPolicyHandler = (overrides: Partial<AuthPolicy> = {}) =>
+  http.get(url("/v1/auth/client/policy"), () =>
+    HttpResponse.json({ ...openPolicy, ...overrides }),
+  );
+
+// GET /v1/auth/client/providers → {providers: string[]} (auth_handler.go:409).
+export const providersHandler = (providers: string[]) =>
+  http.get(url("/v1/auth/client/providers"), () =>
+    HttpResponse.json({ providers }),
+  );
+
+// The document-level failure: 503 auth.policy_unavailable (auth_handler.go:424).
+export const providersUnavailableHandler = () =>
+  http.get(url("/v1/auth/client/providers"), () =>
+    HttpResponse.json(
+      {
+        code: "auth.policy_unavailable",
+        detail: "Sign-in policy is temporarily unavailable; try again shortly",
+      },
+      { status: 503 },
+    ),
+  );
+
+// Default handlers used by every test unless overridden. Keep this list
+// empty: a component that mounts an endpoint must stub it explicitly, so a
+// missing stub is a red run, never a silently passing one.
+export const defaultHandlers: RequestHandler[] = [];

@@ -1,8 +1,8 @@
 name: Frontend Client CI
 
-# Tier-2 customer-facing SPA. Tests not yet wired (vitest not configured);
-# `make ci-frontend-client` runs typecheck + lint + build. Add a test job
-# here when tests land.
+# Tier-2 customer-facing SPA. `make ci-frontend-client` runs lockfile sync,
+# typecheck, lint, the Vitest suite (happy-dom + MSW) and the production
+# build — the single target the job below invokes.
 
 on:
   pull_request:

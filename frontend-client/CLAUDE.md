@@ -29,6 +29,7 @@ This SPA only ever speaks to the **client** API audience (`api.localhost:3000` i
 | OpenAPI codegen | `openapi-typescript` against `${VITE_API_BASE}/openapi.json`                                                 |
 | i18n            | `react-i18next` (Italian default, English fallback) — wired from day 1                                       |
 | Auth            | In-memory access token + httpOnly refresh cookie (Domain-scoped to the API host)                             |
+| Tests           | Vitest 4 + React Testing Library + MSW 2 on happy-dom — `npm test`; an unhandled request fails the run       |
 | Payments        | _(none in the base — the Stripe Checkout flow left with the addons; see "Current surface")_                  |
 
 ## Directory layout
@@ -64,6 +65,12 @@ frontend-client/
 │   │   ├── avatarColor.ts      # Deterministic per-user color + initials helper for UserAvatar fallback
 │   │   └── format.ts           # Intl currency + date helpers
 │   ├── locales/                # it.json (default), en.json — react-i18next bundles
+│   ├── test/
+│   │   ├── setup.ts            # jest-dom, EN copy, MSW lifecycle (unhandled request = error), explicit RTL cleanup, global-stub + storage + token reset
+│   │   ├── server.ts           # the one MSW server
+│   │   ├── handlers.ts         # url() + reusable stubs (clientPolicyHandler, providersHandler, …)
+│   │   ├── render.tsx          # renderWithProviders (QueryClient + AuthProvider + MemoryRouter), waitForQuerySettled
+│   │   └── webStorage.ts       # restores localStorage/sessionStorage under Node ≥ 25
 │   └── pages/                  # Routed views — one file per route, no nested folders
 ├── README.md                   # User-facing project intro + dev quickstart
 ├── Dockerfile                  # Multi-stage: node:24-alpine builder → nginx:alpine
@@ -188,6 +195,8 @@ Local commands you'll actually run from your editor:
 
 ```bash
 npm run typecheck          # tsc -b --noEmit — CI-safe, run before pushing
+npm test                   # vitest run — happy-dom + MSW; CI runs it between lint and build
+npm run test:watch
 npm run lint               # eslint src --ext .ts,.tsx
 npm run build              # tsc -b && vite build (production bundle)
 npm run codegen            # openapi-typescript against $VITE_API_BASE/openapi.json
@@ -220,8 +229,9 @@ The plugin also makes the missing-file case legible: when `config.js` is absent 
 4. **Add the page** in `src/pages/<Name>Page.tsx`. Co-locate any one-off helpers or components in the same file unless they're reused.
 5. **Wire the route** in `src/App.tsx`. Wrap in `<RequireAuth>` if the endpoint requires `aud=client` + a logged-in user.
 6. **Add i18n strings** to **both** `src/locales/{en,it}.json`. Lead with the IT translation since IT is the default locale.
-7. **Run** `npm run typecheck && npm run lint && npm run build` before committing. The build catches type errors that `tsc --noEmit` misses (Vite plugins).
-8. **Test in a browser** if it's a UI change — start the dev stack, walk the golden path, check the relevant edge cases. The build passing does **not** mean the feature works.
+7. **Write the test** next to the page (`<Name>Page.test.tsx`) with `renderWithProviders` from `@/test/render`. Stub every endpoint the component mounts (`src/test/handlers.ts` or `server.use(...)`) — MSW runs with `onUnhandledRequest: 'error'`, so a missing stub is a red run. Anchor every absence assertion on a settled positive state first (`waitForQuerySettled(queryClient, key)` when the tree is identical before and after the query lands).
+8. **Run** `npm run typecheck && npm run lint && npm test && npm run build` before committing. The build catches type errors that `tsc --noEmit` misses (Vite plugins).
+9. **Test in a browser** if it's a UI change — start the dev stack, walk the golden path, check the relevant edge cases. The build passing does **not** mean the feature works.
 
 ## Conventions
 
