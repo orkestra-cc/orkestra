@@ -142,6 +142,12 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
 - **Never add a required method to an existing `iface` interface.**
   Doing so breaks every external implementor at compile time. Add a new
   interface and have the registry probe with `module.GetTyped[T]`.
+- **Cross-module auth-policy sentinels** — `iface.ErrPasswordLoginDisabled` and
+  `iface.ErrAuthPolicyUnavailable` live beside `AdminAuthInviter` because its
+  consumers (the user module's client-user reset routes) must map them across
+  the module boundary with `errors.Is`; message matching breaks on wrapped
+  errors. `auth/services` aliases both, so each name is ONE identity. Same
+  pattern as `ErrKMSKeyNotFound` beside `KMSProvider`.
 - **Encryption helpers live here, not via `shared/utils`.** The SDK has
   its own `secrets.go` reading `OAUTH_TOKEN_ENCRYPTION_KEY` — the
   algorithm matches `internal/shared/utils.{Encrypt,Decrypt}OAuthToken`

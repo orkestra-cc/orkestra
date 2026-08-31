@@ -80,6 +80,7 @@ services:
       # The binary defaults this to true (dev convenience) and refuses to
       # boot in production with it set — so it must be passed explicitly.
       ALLOW_LOCALHOST_REDIRECTS: ${ALLOW_LOCALHOST_REDIRECTS:-false}
+      AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS: ${AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS:-false}
 
       # Google OAuth — config.Validate() refuses to boot a production binary
       # without a client id/secret, even though the live values are owned by

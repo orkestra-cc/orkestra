@@ -180,7 +180,7 @@ func (r *OAuthConfigResolver) usableFromView(view *module.ActiveConfigView, audi
 	}
 	on := false
 	if raw, present := view.Raw(key); present {
-		v, err := strictBool(raw)
+		v, err := StrictBool(raw)
 		if err != nil {
 			r.log().Warn("oauth provider toggle is not a canonical boolean; provider treated as unusable",
 				slog.String("provider", string(p)), slog.String("key", key))

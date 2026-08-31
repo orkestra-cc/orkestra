@@ -745,14 +745,14 @@ func TestOAuthAutoLinkByEmailEnabled_Strict(t *testing.T) {
 
 func TestStrictBool(t *testing.T) {
 	for raw, want := range map[string]bool{"true": true, "TRUE": true, " False ": false, "false": false} {
-		got, err := strictBool(raw)
+		got, err := StrictBool(raw)
 		if err != nil || got != want {
-			t.Errorf("strictBool(%q) = %v, %v; want %v", raw, got, err, want)
+			t.Errorf("StrictBool(%q) = %v, %v; want %v", raw, got, err, want)
 		}
 	}
 	for _, raw := range []string{"", "1", "0", "yes", "no", "treu", "t"} {
-		if _, err := strictBool(raw); err == nil {
-			t.Errorf("strictBool(%q) must reject", raw)
+		if _, err := StrictBool(raw); err == nil {
+			t.Errorf("StrictBool(%q) must reject", raw)
 		}
 	}
 }
@@ -966,4 +966,142 @@ func TestDefaultClientRole_FallbackAndOverride(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- PR 3: strict per-surface password-login policy (spec §4.2) ---
+
+func TestPasswordLoginEnabled_Strict(t *testing.T) {
+	ctx := context.Background()
+	repoErr := errors.New("mongo down")
+	cases := []struct {
+		name     string
+		policy   *AuthPolicyService
+		audience PolicyAudience
+		want     bool
+		wantErr  bool
+	}{
+		// Compatibility applies to the KEY, not the document: an absent key
+		// in an existing auth document means legacy true (G6).
+		{"absent key means true (operator)", newPolicy(map[string]string{}), PolicyAudienceOperator, true, false},
+		{"absent key means true (client)", newPolicy(map[string]string{}), PolicyAudienceClient, true, false},
+		{"explicit true", newPolicy(map[string]string{"passwordLoginEnabledAdmin": "true"}), PolicyAudienceOperator, true, false},
+		{"explicit false", newPolicy(map[string]string{"passwordLoginEnabledAdmin": "false"}), PolicyAudienceOperator, false, false},
+		{"canonical is case-insensitive and trimmed", newPolicy(map[string]string{"passwordLoginEnabledClient": "  False "}), PolicyAudienceClient, false, false},
+		// Audience isolation: the client key never answers an operator read.
+		{"audience isolation", newPolicy(map[string]string{"passwordLoginEnabledClient": "false"}), PolicyAudienceOperator, true, false},
+		// Strictness: a PRESENT malformed or empty value is an outage, not a default.
+		{"malformed present value", newPolicy(map[string]string{"passwordLoginEnabledAdmin": "treu"}), PolicyAudienceOperator, false, true},
+		{"readBool truthiness is rejected", newPolicy(map[string]string{"passwordLoginEnabledAdmin": "1"}), PolicyAudienceOperator, false, true},
+		{"empty present value", newPolicy(map[string]string{"passwordLoginEnabledAdmin": ""}), PolicyAudienceOperator, false, true},
+		// Outages: missing document, read failure, nil wiring, unknown audience.
+		{"missing auth document", &AuthPolicyService{cs: &stubReader{requiredMissing: true}}, PolicyAudienceOperator, false, true},
+		{"repository failure", &AuthPolicyService{cs: &stubReader{rawErr: repoErr}}, PolicyAudienceOperator, false, true},
+		{"nil service", nil, PolicyAudienceOperator, false, true},
+		{"nil reader", &AuthPolicyService{}, PolicyAudienceOperator, false, true},
+		{"unknown audience", newPolicy(map[string]string{}), PolicyAudience("service"), false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.policy.PasswordLoginEnabled(ctx, tc.audience)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("want error, got (%v, nil)", got)
+				}
+				if !errors.Is(err, ErrAuthPolicyUnavailable) {
+					t.Fatalf("error must wrap ErrAuthPolicyUnavailable, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// The sentinel must keep one identity across the iface boundary — the
+// user module's client-user reset twin matches it with errors.Is.
+func TestAuthPolicySentinels_IfaceIdentity(t *testing.T) {
+	if !errors.Is(ErrAuthPolicyUnavailable, iface.ErrAuthPolicyUnavailable) {
+		t.Fatal("services.ErrAuthPolicyUnavailable must BE iface.ErrAuthPolicyUnavailable")
+	}
+	if !errors.Is(ErrPasswordLoginDisabled, iface.ErrPasswordLoginDisabled) {
+		t.Fatal("services.ErrPasswordLoginDisabled must BE iface.ErrPasswordLoginDisabled")
+	}
+}
+
+func TestPasswordLoginDecision_BreakGlassIsOperatorOnly(t *testing.T) {
+	ctx := context.Background()
+	offBoth := map[string]string{
+		"passwordLoginEnabledAdmin":  "false",
+		"passwordLoginEnabledClient": "false",
+	}
+
+	t.Run("stored true is an ordinary allow, no break-glass claimed", func(t *testing.T) {
+		p := newPolicy(map[string]string{"passwordLoginEnabledAdmin": "true"})
+		p.SetOperatorBreakGlass(true)
+		d, err := p.PasswordLoginDecision(ctx, PolicyAudienceOperator)
+		if err != nil || !d.Allowed || d.BreakGlassUsed {
+			t.Fatalf("want ordinary allow, got (%+v, %v)", d, err)
+		}
+	})
+	t.Run("stored false without override stays false", func(t *testing.T) {
+		p := newPolicy(offBoth)
+		d, err := p.PasswordLoginDecision(ctx, PolicyAudienceOperator)
+		if err != nil || d.Allowed || d.BreakGlassUsed {
+			t.Fatalf("want plain deny, got (%+v, %v)", d, err)
+		}
+	})
+	t.Run("override converts stored false, operator only", func(t *testing.T) {
+		p := newPolicy(offBoth)
+		p.SetOperatorBreakGlass(true)
+		d, err := p.PasswordLoginDecision(ctx, PolicyAudienceOperator)
+		if err != nil || !d.Allowed || !d.BreakGlassUsed {
+			t.Fatalf("operator: want rescued allow, got (%+v, %v)", d, err)
+		}
+		cd, err := p.PasswordLoginDecision(ctx, PolicyAudienceClient)
+		if err != nil || cd.Allowed || cd.BreakGlassUsed {
+			t.Fatalf("client must never see the override, got (%+v, %v)", cd, err)
+		}
+	})
+	t.Run("override converts a read failure, operator only", func(t *testing.T) {
+		p := &AuthPolicyService{cs: &stubReader{rawErr: errors.New("mongo down")}}
+		p.SetOperatorBreakGlass(true)
+		d, err := p.PasswordLoginDecision(ctx, PolicyAudienceOperator)
+		if err != nil || !d.Allowed || !d.BreakGlassUsed {
+			t.Fatalf("operator outage under break-glass must rescue, got (%+v, %v)", d, err)
+		}
+		if _, err := p.PasswordLoginDecision(ctx, PolicyAudienceClient); err == nil {
+			t.Fatal("client outage must stay an error under break-glass")
+		}
+	})
+	t.Run("outage without override stays an error — never fails open", func(t *testing.T) {
+		p := &AuthPolicyService{cs: &stubReader{requiredMissing: true}}
+		if _, err := p.PasswordLoginDecision(ctx, PolicyAudienceOperator); !errors.Is(err, ErrAuthPolicyUnavailable) {
+			t.Fatalf("want ErrAuthPolicyUnavailable, got %v", err)
+		}
+	})
+	t.Run("nil service cannot be rescued", func(t *testing.T) {
+		var p *AuthPolicyService
+		if _, err := p.PasswordLoginDecision(ctx, PolicyAudienceOperator); !errors.Is(err, ErrAuthPolicyUnavailable) {
+			t.Fatalf("want ErrAuthPolicyUnavailable, got %v", err)
+		}
+	})
+	t.Run("OperatorBreakGlassConfigured is nil-safe and reports the flag", func(t *testing.T) {
+		var pnil *AuthPolicyService
+		if pnil.OperatorBreakGlassConfigured() {
+			t.Fatal("nil service must report false")
+		}
+		p := newPolicy(nil)
+		if p.OperatorBreakGlassConfigured() {
+			t.Fatal("default must be false")
+		}
+		p.SetOperatorBreakGlass(true)
+		if !p.OperatorBreakGlassConfigured() {
+			t.Fatal("flag must latch")
+		}
+	})
 }

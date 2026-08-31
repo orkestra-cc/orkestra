@@ -78,6 +78,22 @@ const AuthPolicyUnavailable = "auth.policy_unavailable"
 // surfaces; the same string is the web callback's `error=` code.
 const AuthOAuthEmailUnverified = "auth.oauth_email_unverified"
 
+// AuthPasswordLoginDisabled signals that the email/password method is
+// administratively disabled for the surface the request came in on
+// (auth module keys passwordLoginEnabled{Admin,Client}). 403 on the
+// self-service routes (login, register, forgot-password, password-
+// sourced MFA completion); 409 on the two admin send-password-reset
+// routes, where the operator asked to mint a reset for a method the
+// target's surface refuses.
+const AuthPasswordLoginDisabled = "auth.password_login_disabled"
+
+// AuthLoginMethodLockout signals that a module-config mutation would
+// leave a surface with no way to authenticate: password off with no
+// structurally configured OAuth provider, or with verified-email
+// auto-link off. Emitted by the auth module's snapshot validator on
+// every mutation surface. 422.
+const AuthLoginMethodLockout = "auth.login_method_lockout"
+
 // --- tenant ---
 
 // TenantSlugAlreadyInUse signals that a tenant create or update would reuse an

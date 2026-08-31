@@ -978,6 +978,15 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// instance — schema keys carry their own Admin/Client suffix so a
 	// single ConfigService read disambiguates by audience.
 	authPolicy := services.NewAuthPolicyService(deps.ConfigService)
+	// Operator-only break-glass (spec §4.2): read once at boot, handed to
+	// the ONE decision path allowed to see it. The WARN repeats on every
+	// boot while the variable is set so a forgotten override stays loud.
+	if cfg.Auth.OperatorPasswordLoginBreakGlass {
+		authPolicy.SetOperatorBreakGlass(true)
+		logger.Warn("auth: operator password-login BREAK-GLASS override is ACTIVE — " +
+			"persisted policy is bypassed for operator login (and its MFA continuation) only; " +
+			"repair the OAuth configuration, then unset AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS and restart")
+	}
 	// Hand the policy to the (already-constructed) shared password
 	// service so length / complexity / HIBP rules can be edited live
 	// at /admin/modules/auth without a restart.

@@ -44,6 +44,10 @@ var (
 	// Translated to 409 auth.password_confirm_unavailable so the frontend
 	// can nudge the user to the MFA path or a fresh OAuth flow.
 	ErrPasswordConfirmUnavailable = stderrors.New("password reconfirm not available for this account")
+	// ErrPasswordLoginDisabled is iface.ErrPasswordLoginDisabled (one
+	// identity across the AdminAuthInviter boundary); the per-surface
+	// method gates of spec §4.3 return it.
+	ErrPasswordLoginDisabled = iface.ErrPasswordLoginDisabled
 )
 
 // FirstAdminClaimer is the contract the password auth service uses to

@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -41,12 +40,18 @@ const (
 // document, repository failure, or a present value that is not a canonical
 // boolean. Callers map it to 503 auth.policy_unavailable and never
 // substitute a default — an outage must not re-enable anything.
-var ErrAuthPolicyUnavailable = errors.New("auth policy unavailable")
+//
+// It IS iface.ErrAuthPolicyUnavailable: the admin send-password-reset twin
+// in the user module matches the sentinel across the module boundary with
+// errors.Is, so both packages must share one identity.
+var ErrAuthPolicyUnavailable = iface.ErrAuthPolicyUnavailable
 
-// strictBool accepts only canonical, case-insensitive "true" / "false" after
+// StrictBool accepts only canonical, case-insensitive "true" / "false" after
 // trimming. It deliberately does NOT accept readBool's "1"/"yes": an
 // out-of-band "treu" or "" must surface as an error, never as a default.
-func strictBool(raw string) (bool, error) {
+// Exported because the auth module's snapshot validator implements the
+// §4.4 invariant with the same parser the runtime accessors use.
+func StrictBool(raw string) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "true":
 		return true, nil
@@ -122,6 +127,11 @@ type configValueReader interface {
 // haven't been wired to the service yet.
 type AuthPolicyService struct {
 	cs configValueReader
+	// operatorBreakGlass mirrors AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS,
+	// read once at boot and handed here by auth module Init. Consulted
+	// ONLY by PasswordLoginDecision (operator audience) and, as a display
+	// flag, by the operator /policy endpoint. Never by PasswordLoginEnabled.
+	operatorBreakGlass bool
 }
 
 // NewAuthPolicyService binds the service to the live ConfigService.
@@ -684,11 +694,99 @@ func (s *AuthPolicyService) OAuthAutoLinkByEmailEnabled(ctx context.Context) (bo
 	if !ok {
 		return true, nil
 	}
-	v, err := strictBool(raw)
+	v, err := StrictBool(raw)
 	if err != nil {
 		return false, fmt.Errorf("%w: oauthAutoLinkByEmail is not a canonical boolean", ErrAuthPolicyUnavailable)
 	}
 	return v, nil
+}
+
+// SetOperatorBreakGlass records the boot-time emergency override. Called
+// once from auth module Init before traffic; there is no unset path short
+// of a restart, matching the env var's boot-time semantics.
+func (s *AuthPolicyService) SetOperatorBreakGlass(active bool) {
+	if s == nil {
+		return
+	}
+	s.operatorBreakGlass = active
+}
+
+// OperatorBreakGlassConfigured reports whether the boot-time override is
+// set. Display-flag input for the operator /policy endpoint (§4.9) — it
+// says nothing about whether the override was ever NEEDED.
+func (s *AuthPolicyService) OperatorBreakGlassConfigured() bool {
+	return s != nil && s.operatorBreakGlass
+}
+
+// passwordLoginKeyFor maps the audience to its schema key. Unknown
+// audiences are an error — a policy read must never guess a surface.
+func passwordLoginKeyFor(audience PolicyAudience) (string, error) {
+	switch audience {
+	case PolicyAudienceOperator:
+		return "passwordLoginEnabledAdmin", nil
+	case PolicyAudienceClient:
+		return "passwordLoginEnabledClient", nil
+	}
+	return "", fmt.Errorf("%w: unknown policy audience %q", ErrAuthPolicyUnavailable, string(audience))
+}
+
+// PasswordLoginEnabled returns the persisted per-surface method policy
+// (spec §4.2). Compatibility applies to the key, not to the document: an
+// absent key in an existing auth document means true; a missing document,
+// malformed value, invalid audience or unavailable reader returns an error
+// wrapping ErrAuthPolicyUnavailable. It never sees the break-glass:
+// registration/reset gates, auth-method views and unlink protection must
+// treat the override as invisible.
+func (s *AuthPolicyService) PasswordLoginEnabled(ctx context.Context, audience PolicyAudience) (bool, error) {
+	if s == nil || s.cs == nil {
+		return false, fmt.Errorf("%w: policy service not wired", ErrAuthPolicyUnavailable)
+	}
+	key, err := passwordLoginKeyFor(audience)
+	if err != nil {
+		return false, err
+	}
+	raw, present, err := s.cs.GetRawValueRequiredModule(ctx, "auth", key)
+	if err != nil {
+		return false, fmt.Errorf("%w: read %s: %w", ErrAuthPolicyUnavailable, key, err)
+	}
+	if !present {
+		return true, nil
+	}
+	v, err := StrictBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%w: %s is not a canonical boolean", ErrAuthPolicyUnavailable, key)
+	}
+	return v, nil
+}
+
+// PasswordAuthDecision is PasswordLoginDecision's answer: whether the
+// password may authenticate now, and whether the boot-time break-glass —
+// not the persisted policy — is what allowed it (audit context).
+type PasswordAuthDecision struct {
+	Allowed        bool
+	BreakGlassUsed bool
+}
+
+// PasswordLoginDecision is used ONLY by Login and by completion of the
+// MFA/WebAuthn challenge it created (spec §4.2). It first evaluates the
+// persisted policy; a stored true is an ordinary allow. For the operator
+// audience only, the boot-time override converts a stored false OR a
+// policy read/parse failure into {Allowed:true, BreakGlassUsed:true} —
+// so an outage never silently fails open, while the recovery switch still
+// works when ConfigService itself is the outage. It does not consult the
+// separate loginEnabledAdmin maintenance switch.
+func (s *AuthPolicyService) PasswordLoginDecision(ctx context.Context, audience PolicyAudience) (PasswordAuthDecision, error) {
+	allowed, err := s.PasswordLoginEnabled(ctx, audience)
+	if err == nil && allowed {
+		return PasswordAuthDecision{Allowed: true}, nil
+	}
+	if audience == PolicyAudienceOperator && s.OperatorBreakGlassConfigured() {
+		return PasswordAuthDecision{Allowed: true, BreakGlassUsed: true}, nil
+	}
+	if err != nil {
+		return PasswordAuthDecision{}, err
+	}
+	return PasswordAuthDecision{Allowed: false}, nil
 }
 
 // MFARequiredRoles returns the admin-managed list of role names that
