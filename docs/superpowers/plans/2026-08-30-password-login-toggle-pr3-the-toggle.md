@@ -1559,12 +1559,12 @@ func (h *PasswordAuthHandler) ForgotPassword(ctx context.Context, req *ForgotPas
 	}
 	resp := &ForgotPasswordResponse{}
 	resp.Body.Success = true
-	resp.Body.Message = "If the email exists, a reset link has been sent"
+	resp.Body.Message = "If an account with that email exists, a password reset email has been sent."
 	return resp, nil
 }
 ```
 
-(keep the existing body copy verbatim — read it before editing.)
+(the success body is byte-for-byte the current one — `password_handler.go:203-206`; only the error propagation is new.)
 
 `mapPasswordError` gains, next to the `ErrLoginDisabled` case:
 
@@ -1965,7 +1965,7 @@ func TestWebAuthnLoginFinish_PasswordPolicyRecheck(t *testing.T) {
 }
 ```
 
-(`ValidateTokenEligibleUser` must accept `completionUsers`' fixture user — active, non-service; verify its rules in `services` before adjusting the fixture.)
+(`ValidateTokenEligibleUser` — `auth_service.go:2181-2186` — requires only a non-nil user with a non-empty UUID and `IsActive: true`; `completionUsers`' fixture satisfies it as written.)
 
 Also append to `backend/internal/core/auth/services/mfa_challenge_service_test.go`:
 
@@ -2358,7 +2358,45 @@ func runStepUpWithPolicy(t *testing.T, claims *authModels.JWTClaims, hasFactor b
 }
 ```
 
-(`runStepUpThrough(t, m, claims) (bool, int, map[string]any)` does not exist yet: factor the request-driving tail of `runStepUpWithEnrollment` — the part after its `SetStepUpPolicy` call that builds the request with claims on the context, runs `m.RequireStepUp(...)` around a recording handler and decodes the JSON body — into that helper, then re-express `runStepUpWithEnrollment` as lookup+policy setup followed by `runStepUpThrough`. Pure extraction; every existing caller keeps passing.)
+`runStepUpThrough` is the request-driving tail of today's `runStepUpWithEnrollment` (`step_up_test.go:161-177`), extracted verbatim:
+
+```go
+// runStepUpThrough drives one request with claims on the context through
+// RequireStepUp(5m) on the given middleware and decodes the JSON body.
+// Extracted from runStepUpWithEnrollment so the PR 3 policy matrix can
+// wire its own StepUpPolicy (or none) before driving the gate.
+func runStepUpThrough(t *testing.T, m *AuthMiddleware, claims *authModels.JWTClaims) (bool, int, map[string]any) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/anything", nil)
+	if claims != nil {
+		req = req.WithContext(context.WithValue(req.Context(), ctxClaims, claims))
+	}
+	rec := httptest.NewRecorder()
+	called := false
+	handler := m.RequireStepUp(5 * time.Minute)(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		called = true
+	}))
+	handler.ServeHTTP(rec, req)
+
+	var body map[string]any
+	if rec.Body.Len() > 0 {
+		_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	}
+	return called, rec.Code, body
+}
+```
+
+and `runStepUpWithEnrollment` (`:150-177`) becomes a one-line wrapper, so every existing caller keeps passing:
+
+```go
+// runStepUpWithEnrollment is the pre-PR-3 harness shape: enrollment
+// lookup + a policy that always answers. Kept as a wrapper over
+// runStepUpWithPolicy so its many existing callers stay untouched.
+func runStepUpWithEnrollment(t *testing.T, claims *authModels.JWTClaims, hasFactor bool, lookupErr error, mfaRequired bool) (bool, int, map[string]any) {
+	t.Helper()
+	return runStepUpWithPolicy(t, claims, hasFactor, lookupErr, &fakeStepUpPolicy{required: mfaRequired})
+}
+```
 
 Existing tests that reach the password-confirm envelope through `runStepUpWithEnrollment` (which always sets a policy) keep passing because the zero-value fake answers `(true, nil)`. Any pre-existing test that reaches the no-factor branch with NO policy set now expects 503 — update those assertions; the spec changed that outcome deliberately (F4).
 
@@ -2906,7 +2944,7 @@ func wouldLockOutOAuthUnlink(target *iface.User, links []iface.OAuthLink,
 }
 ```
 
-3. Both callers gain the same prelude between the links read and the guard (`AdminUnlinkOAuth:571`, `SelfUnlinkOAuth:637`):
+3. Both callers gain the prelude between the links read and the guard. In `AdminUnlinkOAuth` (`:571`, its user variable is `target`):
 
 ```go
 	// §4.7: resolve what actually counts as a way in BEFORE mutating.
@@ -2923,7 +2961,22 @@ func wouldLockOutOAuthUnlink(target *iface.User, links []iface.OAuthLink,
 	providerID, locked, found := wouldLockOutOAuthUnlink(target, links, provider, passwordUsable, usable)
 ```
 
-(`SelfUnlinkOAuth` names its user `user` — adjust.)
+and in `SelfUnlinkOAuth` (`:637`, its user variable is `user`):
+
+```go
+	// §4.7: resolve what actually counts as a way in BEFORE mutating.
+	// Strict reads — break-glass never counts as a lasting credential,
+	// and any uncertainty refuses with 503 rather than guessing.
+	passwordUsable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+	if err != nil {
+		return err
+	}
+	usable, err := s.usableProvidersForLinks(ctx, links)
+	if err != nil {
+		return err
+	}
+	providerID, locked, found := wouldLockOutOAuthUnlink(user, links, provider, passwordUsable, usable)
+```
 
 4. `GetUserAuthMethods` (`:809-817`): the view literal sets all three fields, then the strict read:
 
@@ -3169,7 +3222,7 @@ Pre-flight (orkestra-frontend-admin skill): production precedent = `src/componen
 **Files:**
 - Modify: `frontend-admin/src/store/api/authApi.ts:143-147` (`AuthPolicy` type) + `:219-231` (fallback)
 - Modify: `frontend-admin/src/components/authentication/EmailPasswordForm.tsx` (rework), `RegisterForm.tsx`, `ForgotPasswordForm.tsx`, `Login.tsx`, `SocialLoginForm.tsx`
-- Modify: `frontend-admin/src/locales/en.json`, `it.json`, `frontend-admin/CLAUDE.md` (authentication paragraph)
+- Modify: `frontend-admin/src/test/handlers.ts` (shared `operatorPolicyHandler`), `frontend-admin/src/locales/en.json`, `it.json`, `frontend-admin/CLAUDE.md` (authentication paragraph)
 - Test: `EmailPasswordForm.test.tsx`, `SocialLoginForm.test.tsx` (extend), `Login.test.tsx`, `RegisterForm.test.tsx`, `ForgotPasswordForm.test.tsx` (new)
 
 **Interfaces:**
@@ -3190,24 +3243,12 @@ export const passwordUiVisible = (policy: AuthPolicy | undefined): boolean =>
 
 - [ ] **Step 1: Write the failing tests**
 
-`EmailPasswordForm.test.tsx` — the file's `policyOk` handler gains the two new fields (`passwordLoginEnabled: true, passwordLoginBreakGlassEffective: false`); add a local override helper and the new suite:
+`EmailPasswordForm.test.tsx` — the file's `policyOk` handler gains the two new fields (`passwordLoginEnabled: true, passwordLoginBreakGlassEffective: false`); the new suite imports the shared stub (`import { operatorPolicyHandler } from 'test/handlers';`):
 
 ```typescript
-const policyWith = (overrides: Record<string, unknown>) =>
-  http.get('*/v1/auth/operator/policy', () =>
-    HttpResponse.json({
-      registrationEnabled: true,
-      loginEnabled: true,
-      passwordMinLength: 10,
-      passwordLoginEnabled: true,
-      passwordLoginBreakGlassEffective: false,
-      ...overrides
-    })
-  );
-
 describe('password-login policy gating (PR 3 §4.10)', () => {
   it('renders nothing when the persisted method is off', async () => {
-    server.use(policyWith({ passwordLoginEnabled: false }));
+    server.use(operatorPolicyHandler({ passwordLoginEnabled: false }));
     renderForm();
     await waitFor(() =>
       expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument()
@@ -3218,7 +3259,7 @@ describe('password-login policy gating (PR 3 §4.10)', () => {
   });
 
   it('renders nothing on the emergency-null state without break-glass', async () => {
-    server.use(policyWith({ passwordLoginEnabled: null }));
+    server.use(operatorPolicyHandler({ passwordLoginEnabled: null }));
     renderForm();
     await waitFor(() =>
       expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument()
@@ -3227,7 +3268,7 @@ describe('password-login policy gating (PR 3 §4.10)', () => {
 
   it('break-glass renders a labelled emergency form without forgot/register CTAs', async () => {
     server.use(
-      policyWith({
+      operatorPolicyHandler({
         passwordLoginEnabled: false,
         passwordLoginBreakGlassEffective: true
       })
@@ -3299,14 +3340,15 @@ describe('onProvidersResolved (PR 3 §4.10)', () => {
 });
 ```
 
-New `Login.test.tsx` (policy + providers via MSW; `policyWith` as in `EmailPasswordForm.test.tsx` — import or re-declare locally):
+New `Login.test.tsx`:
 
 ```tsx
 import { describe, it, expect, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { screen, waitFor } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
+import { operatorPolicyHandler } from 'test/handlers';
 import Login from './Login';
 
 vi.mock('utils/socialAuthUtils', async () => {
@@ -3316,17 +3358,6 @@ vi.mock('utils/socialAuthUtils', async () => {
   return { ...actual, initiateSocialLogin: vi.fn().mockResolvedValue(undefined) };
 });
 
-const policyWith = (overrides: Record<string, unknown>) =>
-  http.get('*/v1/auth/operator/policy', () =>
-    HttpResponse.json({
-      registrationEnabled: true,
-      loginEnabled: true,
-      passwordMinLength: 10,
-      passwordLoginEnabled: true,
-      passwordLoginBreakGlassEffective: false,
-      ...overrides
-    })
-  );
 const providersWith = (providers: string[]) =>
   http.get('*/v1/auth/operator/providers', () =>
     HttpResponse.json({ providers })
@@ -3334,7 +3365,7 @@ const providersWith = (providers: string[]) =>
 
 describe('Login no-method alert (PR 3 §4.10)', () => {
   it('renders the alert when password is off and providers resolve empty', async () => {
-    server.use(policyWith({ passwordLoginEnabled: false }), providersWith([]));
+    server.use(operatorPolicyHandler({ passwordLoginEnabled: false }), providersWith([]));
     renderWithProviders(<Login />);
     expect(
       await screen.findByText(/no sign-in method/i)
@@ -3342,7 +3373,7 @@ describe('Login no-method alert (PR 3 §4.10)', () => {
   });
 
   it('no alert when a provider resolves', async () => {
-    server.use(policyWith({ passwordLoginEnabled: false }), providersWith(['google']));
+    server.use(operatorPolicyHandler({ passwordLoginEnabled: false }), providersWith(['google']));
     renderWithProviders(<Login />);
     await screen.findByRole('button', { name: /google/i });
     expect(screen.queryByText(/no sign-in method/i)).not.toBeInTheDocument();
@@ -3350,19 +3381,21 @@ describe('Login no-method alert (PR 3 §4.10)', () => {
 
   it('a provider-query error shows the retryable error, never the alert', async () => {
     server.use(
-      policyWith({ passwordLoginEnabled: false }),
+      operatorPolicyHandler({ passwordLoginEnabled: false }),
       http.get('*/v1/auth/operator/providers', () =>
         HttpResponse.json({ detail: 'boom' }, { status: 503 })
       )
     );
     renderWithProviders(<Login />);
-    await waitFor(() =>
-      expect(screen.queryByText(/no sign-in method/i)).not.toBeInTheDocument()
-    );
+    // Anchor on the SETTLED error state first (auth.social.loadError,
+    // en.json:340) — asserting the alert's absence before the query
+    // resolves would pass vacuously.
+    await screen.findByText(/could not load the social sign-in options/i);
+    expect(screen.queryByText(/no sign-in method/i)).not.toBeInTheDocument();
   });
 
   it('no alert while password is on, even with zero providers', async () => {
-    server.use(policyWith({}), providersWith([]));
+    server.use(operatorPolicyHandler({}), providersWith([]));
     renderWithProviders(<Login />);
     expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
     expect(screen.queryByText(/no sign-in method/i)).not.toBeInTheDocument();
@@ -3370,7 +3403,7 @@ describe('Login no-method alert (PR 3 §4.10)', () => {
 
   it('no alert under break-glass — the emergency form is a method', async () => {
     server.use(
-      policyWith({
+      operatorPolicyHandler({
         passwordLoginEnabled: false,
         passwordLoginBreakGlassEffective: true
       }),
@@ -3388,23 +3421,11 @@ New `RegisterForm.test.tsx` and `ForgotPasswordForm.test.tsx` — the two direct
 ```tsx
 // RegisterForm.test.tsx
 import { describe, it, expect } from 'vitest';
-import { http, HttpResponse } from 'msw';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
+import { operatorPolicyHandler } from 'test/handlers';
 import RegisterForm from './RegisterForm';
-
-const policyWith = (overrides: Record<string, unknown>) =>
-  http.get('*/v1/auth/operator/policy', () =>
-    HttpResponse.json({
-      registrationEnabled: true,
-      loginEnabled: true,
-      passwordMinLength: 10,
-      passwordLoginEnabled: true,
-      passwordLoginBreakGlassEffective: false,
-      ...overrides
-    })
-  );
 
 describe('RegisterForm password-method gate (PR 3 §4.10)', () => {
   it.each([
@@ -3415,7 +3436,7 @@ describe('RegisterForm password-method gate (PR 3 §4.10)', () => {
       { passwordLoginEnabled: false, passwordLoginBreakGlassEffective: true }
     ]
   ])('renders only the disabled alert — %s', async (_name, overrides) => {
-    server.use(policyWith(overrides));
+    server.use(operatorPolicyHandler(overrides));
     renderWithProviders(<RegisterForm />);
     expect(
       await screen.findByText(/email\/password sign-in is disabled/i)
@@ -3427,7 +3448,7 @@ describe('RegisterForm password-method gate (PR 3 §4.10)', () => {
   });
 
   it('renders the working form when the method is on', async () => {
-    server.use(policyWith({}));
+    server.use(operatorPolicyHandler({}));
     renderWithProviders(<RegisterForm />);
     expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
   });
@@ -3437,23 +3458,11 @@ describe('RegisterForm password-method gate (PR 3 §4.10)', () => {
 ```tsx
 // ForgotPasswordForm.test.tsx
 import { describe, it, expect } from 'vitest';
-import { http, HttpResponse } from 'msw';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
+import { operatorPolicyHandler } from 'test/handlers';
 import ForgotPasswordForm from './ForgotPasswordForm';
-
-const policyWith = (overrides: Record<string, unknown>) =>
-  http.get('*/v1/auth/operator/policy', () =>
-    HttpResponse.json({
-      registrationEnabled: true,
-      loginEnabled: true,
-      passwordMinLength: 10,
-      passwordLoginEnabled: true,
-      passwordLoginBreakGlassEffective: false,
-      ...overrides
-    })
-  );
 
 describe('ForgotPasswordForm password-method gate (PR 3 §4.10)', () => {
   it.each([
@@ -3464,7 +3473,7 @@ describe('ForgotPasswordForm password-method gate (PR 3 §4.10)', () => {
       { passwordLoginEnabled: false, passwordLoginBreakGlassEffective: true }
     ]
   ])('renders only the disabled alert — %s', async (_name, overrides) => {
-    server.use(policyWith(overrides));
+    server.use(operatorPolicyHandler(overrides));
     renderWithProviders(<ForgotPasswordForm />);
     expect(
       await screen.findByText(/email\/password sign-in is disabled/i)
@@ -3476,14 +3485,14 @@ describe('ForgotPasswordForm password-method gate (PR 3 §4.10)', () => {
   });
 
   it('renders the working form when the method is on', async () => {
-    server.use(policyWith({}));
+    server.use(operatorPolicyHandler({}));
     renderWithProviders(<ForgotPasswordForm />);
     expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
   });
 });
 ```
 
-(`policyWith` is now declared in four files — extracting it into `test/policyHandlers.ts` is the better shape; if extracted, update the four imports in the same commit. Either way, no test depends on another test file.)
+(every gated-component test imports the ONE `operatorPolicyHandler` from `test/handlers.ts` — declared in Task 8 Step 3; no test file declares its own policy stub.)
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -3491,6 +3500,26 @@ describe('ForgotPasswordForm password-method gate (PR 3 §4.10)', () => {
 Expected: FAIL — new fields/props/copy absent.
 
 - [ ] **Step 3: Types + fallback**
+
+`frontend-admin/src/test/handlers.ts` — one shared policy stub next to the existing helpers (every gated component fetches `/v1/auth/operator/policy`, and MSW runs with `onUnhandledRequest: 'error'`, so each of the nine test files below needs this; one definition, nine imports):
+
+```typescript
+// Operator /policy with everything enabled; per-test overrides flip the
+// PR 3 password-login fields.
+export const operatorPolicyHandler = (
+  overrides: Record<string, unknown> = {}
+) =>
+  http.get(url('/v1/auth/operator/policy'), () =>
+    HttpResponse.json({
+      registrationEnabled: true,
+      loginEnabled: true,
+      passwordMinLength: 10,
+      passwordLoginEnabled: true,
+      passwordLoginBreakGlassEffective: false,
+      ...overrides
+    })
+  );
+```
 
 `authApi.ts`:
 
@@ -3822,7 +3851,7 @@ the retryable provider error instead, never "no method".
 Expected: PASS (locale parity included).
 
 ```bash
-git add frontend-admin/CLAUDE.md frontend-admin/src/store/api/authApi.ts frontend-admin/src/components/authentication/EmailPasswordForm.tsx frontend-admin/src/components/authentication/EmailPasswordForm.test.tsx frontend-admin/src/components/authentication/RegisterForm.tsx frontend-admin/src/components/authentication/RegisterForm.test.tsx frontend-admin/src/components/authentication/ForgotPasswordForm.tsx frontend-admin/src/components/authentication/ForgotPasswordForm.test.tsx frontend-admin/src/components/authentication/Login.tsx frontend-admin/src/components/authentication/Login.test.tsx frontend-admin/src/components/authentication/SocialLoginForm.tsx frontend-admin/src/components/authentication/SocialLoginForm.test.tsx frontend-admin/src/locales/en.json frontend-admin/src/locales/it.json
+git add frontend-admin/CLAUDE.md frontend-admin/src/store/api/authApi.ts frontend-admin/src/test/handlers.ts frontend-admin/src/components/authentication/EmailPasswordForm.tsx frontend-admin/src/components/authentication/EmailPasswordForm.test.tsx frontend-admin/src/components/authentication/RegisterForm.tsx frontend-admin/src/components/authentication/RegisterForm.test.tsx frontend-admin/src/components/authentication/ForgotPasswordForm.tsx frontend-admin/src/components/authentication/ForgotPasswordForm.test.tsx frontend-admin/src/components/authentication/Login.tsx frontend-admin/src/components/authentication/Login.test.tsx frontend-admin/src/components/authentication/SocialLoginForm.tsx frontend-admin/src/components/authentication/SocialLoginForm.test.tsx frontend-admin/src/locales/en.json frontend-admin/src/locales/it.json
 git commit -m "feat(frontend-admin): hide password UI per policy, labelled break-glass form, no-method alert" -m "Claude-Session: $CLAUDE_SESSION"
 ```
 
@@ -3882,15 +3911,23 @@ New `PasswordTab.test.tsx` (`selfAuthMethodsHandler` + the policy handler; `rend
 
 ```tsx
 import { describe, it, expect } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
-import { emptySelfAuthMethods, selfAuthMethodsHandler } from 'test/handlers';
+import {
+  emptySelfAuthMethods,
+  operatorPolicyHandler,
+  selfAuthMethodsHandler
+} from 'test/handlers';
 import PasswordTab from './PasswordTab';
 
+// The tab fires TWO queries on mount (PasswordTab.tsx:18-19: the auth
+// policy for passwordMinLength, and the self auth methods); MSW runs with
+// onUnhandledRequest: 'error', so both are stubbed in every test.
 describe('PasswordTab split password fields (PR 3 §4.8)', () => {
   it('set-but-unusable: form stays (credential management), notice shows', async () => {
     server.use(
+      operatorPolicyHandler(),
       selfAuthMethodsHandler({
         ...emptySelfAuthMethods,
         hasPasswordSet: true,
@@ -3905,7 +3942,7 @@ describe('PasswordTab split password fields (PR 3 §4.8)', () => {
   });
 
   it('usable password: no notice', async () => {
-    server.use(selfAuthMethodsHandler());
+    server.use(operatorPolicyHandler(), selfAuthMethodsHandler());
     renderWithProviders(<PasswordTab />);
     await screen.findByLabelText(/current password/i);
     expect(screen.queryByText(/disabled on this surface/i)).toBeNull();
@@ -3917,6 +3954,7 @@ describe('PasswordTab split password fields (PR 3 §4.8)', () => {
     // only WHICH view field feeds hasPassword (hasPasswordSet, not the
     // deprecated alias).
     server.use(
+      operatorPolicyHandler(),
       selfAuthMethodsHandler({
         ...emptySelfAuthMethods,
         hasPasswordSet: false,
@@ -4008,13 +4046,20 @@ describe('AdminAuthMethodsCard split password fields (PR 3 §4.8)', () => {
 
 (`renderWithProviders` must carry an authenticated admin in the store so `isSelf` resolves false — seed `selectUser` state via the render helper's preloaded state with an id ≠ `u-1`, the same idiom `useUserTable.test.tsx` uses.)
 
-Extend the existing security-center coverage for the other two consumers, same files' suites:
+The other two consumers get their own complete test files.
+
+`LinkedProvidersTab.test.tsx`:
 
 ```tsx
-// LinkedProvidersTab.test.tsx (new, same MSW idiom): the unlink control on
-// the sole linked provider is blocked when passwordUsableForLogin=false
-// even though hasPasswordSet=true, and unblocked when a second provider
-// row exists.
+import { describe, it, expect } from 'vitest';
+import { screen } from '@testing-library/react';
+import { renderWithProviders } from 'test/render';
+import { server } from 'test/server';
+import { emptySelfAuthMethods, selfAuthMethodsHandler } from 'test/handlers';
+import LinkedProvidersTab from './LinkedProvidersTab';
+
+// The tab mounts ONE query (useGetSelfAuthMethodsQuery,
+// LinkedProvidersTab.tsx:51); the link/unlink mutations fire only on click.
 describe('LinkedProvidersTab only-credential (PR 3 §4.8)', () => {
   it('sole provider + unusable password blocks unlink', async () => {
     server.use(
@@ -4055,12 +4100,39 @@ describe('LinkedProvidersTab only-credential (PR 3 §4.8)', () => {
 });
 ```
 
+`SecuritySummaryCard.test.tsx` (the card fires THREE queries on mount — `SecuritySummaryCard.tsx:45-49`: `useGetCurrentUserQuery` → `GET */v1/auth/operator/me`, `useGetSelfAuthMethodsQuery`, `useGetMySessionsQuery` — and an unhandled MSW request fails the run, so every test stubs all three):
+
 ```tsx
-// SecuritySummaryCard.test.tsx (new): the password row keys off
-// hasPasswordSet and appends the kept-notice when unusable.
+import { describe, it, expect } from 'vitest';
+import { http, HttpResponse } from 'msw';
+import { screen } from '@testing-library/react';
+import { renderWithProviders } from 'test/render';
+import { server } from 'test/server';
+import {
+  emptySelfAuthMethods,
+  emptySessions,
+  mySessionsHandler,
+  selfAuthMethodsHandler
+} from 'test/handlers';
+import SecuritySummaryCard from './SecuritySummaryCard';
+
+// Minimal BackendUser body (authApi.ts:39-51: id, email, username,
+// fullName, role are the required fields).
+const meHandler = http.get('*/v1/auth/operator/me', () =>
+  HttpResponse.json({
+    id: 'u-1',
+    email: 'op@example.com',
+    username: 'op',
+    fullName: 'Operator One',
+    role: 'administrator'
+  })
+);
+
 describe('SecuritySummaryCard password row (PR 3 §4.8)', () => {
   it('set-but-unusable shows the kept note', async () => {
     server.use(
+      meHandler,
+      mySessionsHandler(emptySessions),
       selfAuthMethodsHandler({
         ...emptySelfAuthMethods,
         hasPasswordSet: true,
@@ -4068,13 +4140,16 @@ describe('SecuritySummaryCard password row (PR 3 §4.8)', () => {
       })
     );
     renderWithProviders(<SecuritySummaryCard />);
+    // settings.security.summary.passwordKeptNotice (added in Step 4)
     expect(
       await screen.findByText(/sign-in with it is disabled/i)
     ).toBeInTheDocument();
   });
 
-  it('no hash hides the password row entirely', async () => {
+  it('no hash hides the password row', async () => {
     server.use(
+      meHandler,
+      mySessionsHandler(emptySessions),
       selfAuthMethodsHandler({
         ...emptySelfAuthMethods,
         hasPasswordSet: false,
@@ -4083,26 +4158,20 @@ describe('SecuritySummaryCard password row (PR 3 §4.8)', () => {
       })
     );
     renderWithProviders(<SecuritySummaryCard />);
-    await waitFor(() =>
-      expect(screen.queryByText(/password/i)).toBeNull()
-    );
+    // Anchor on a SETTLED auth-methods element first — with zero factors
+    // the card renders settings.security.summary.mfaOff = "Two-factor off";
+    // asserting an absence before the query resolves passes vacuously.
+    await screen.findByText(/two-factor off/i);
+    // settings.security.summary.passwordAgeUnknown = "Password update date
+    // unknown" is the password row's copy when no updatedAt is present.
+    expect(
+      screen.queryByText(/password update date unknown/i)
+    ).not.toBeInTheDocument();
   });
 });
 ```
 
-Both files carry the standard vitest/MSW import block of `PasswordTab.test.tsx`. `SecuritySummaryCard` fires THREE queries (`SecuritySummaryCard.tsx:45-49`: `useGetCurrentUserQuery` → `GET */v1/auth/operator/me`, `useGetSelfAuthMethodsQuery`, `useGetMySessionsQuery`) and an unhandled MSW request fails the run, so every SSC test stubs all three:
-
-```tsx
-server.use(
-  http.get('*/v1/auth/operator/me', () =>
-    HttpResponse.json({ id: 'u-1', email: 'op@example.com', name: 'Operator' })
-  ),
-  mySessionsHandler(emptySessions),
-  selfAuthMethodsHandler({ /* per-case override as above */ })
-);
-```
-
-(`mySessionsHandler` and `emptySessions` are existing exports of `test/handlers.ts`; match the `/me` body to `BackendUser`'s required fields if the typecheck asks for more.)
+(the zero-factor branch is verified: `SecuritySummaryCard.tsx:107-111` renders `settings.security.summary.mfaOff` = "Two-factor off" whenever `hasMfa` is false, and the whole list replaces the loading `Placeholder` only once the auth-methods query settles — so the anchor proves settlement.)
 
 - [ ] **Step 2: Run to verify failure**
 
