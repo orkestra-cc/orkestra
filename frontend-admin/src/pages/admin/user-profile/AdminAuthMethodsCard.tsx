@@ -68,6 +68,13 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
 
   const unknownErr = t('adminUserProfile.authMethods.errorUnknown');
 
+  // Blocked only when the method is KNOWN off for this surface — a hash
+  // exists and is unusable. With no hash at all, sending a reset is the
+  // designed remedy for an OAuth-only user (the backend's method gate
+  // accepts it), so the button must stay enabled in that case.
+  const resetBlockedByPolicy =
+    !!data?.hasPasswordSet && !data?.passwordUsableForLogin;
+
   const handleSendReset = async () => {
     try {
       await sendPasswordReset(user.id).unwrap();
@@ -175,7 +182,7 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
             icon="key"
             title={t('adminUserProfile.authMethods.passwordTitle')}
             badge={
-              data.hasUsablePassword ? (
+              data.hasPasswordSet ? (
                 <SubtleBadge bg="success">
                   {t('adminUserProfile.authMethods.passwordBadgeSet')}
                 </SubtleBadge>
@@ -186,25 +193,46 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
               )
             }
             sub={
-              data.hasUsablePassword && data.passwordUpdatedAt
+              data.hasPasswordSet && data.passwordUpdatedAt
                 ? t('adminUserProfile.authMethods.passwordLastChanged', {
                     date: formatDate(data.passwordUpdatedAt)
                   })
                 : t('adminUserProfile.authMethods.passwordOauthOnly')
             }
             action={
-              <Button
-                variant="orkestra-default"
-                size="sm"
-                disabled={pwBusy}
-                onClick={handleSendReset}
-              >
-                {pwBusy ? (
-                  <Spinner size="sm" animation="border" />
-                ) : (
-                  t('adminUserProfile.authMethods.passwordSendResetButton')
-                )}
-              </Button>
+              !resetBlockedByPolicy ? (
+                <Button
+                  variant="orkestra-default"
+                  size="sm"
+                  disabled={pwBusy}
+                  onClick={handleSendReset}
+                >
+                  {pwBusy ? (
+                    <Spinner size="sm" animation="border" />
+                  ) : (
+                    t('adminUserProfile.authMethods.passwordSendResetButton')
+                  )}
+                </Button>
+              ) : (
+                <OverlayTrigger
+                  placement="left"
+                  overlay={
+                    <Tooltip>
+                      {t('adminUserProfile.authMethods.resetBlockedPolicy')}
+                    </Tooltip>
+                  }
+                >
+                  {/* span keeps the tooltip alive over a disabled button —
+                      Bootstrap's documented idiom */}
+                  <span className="d-inline-block">
+                    <Button variant="orkestra-default" size="sm" disabled>
+                      {t(
+                        'adminUserProfile.authMethods.passwordSendResetButton'
+                      )}
+                    </Button>
+                  </span>
+                </OverlayTrigger>
+              )
             }
           />
 
@@ -317,13 +345,18 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
               <ul className="list-unstyled mb-0 ms-4">
                 {data.oauthProviders.map(p => {
                   const onlyCredential =
-                    !data.hasUsablePassword && data.oauthProviders.length === 1;
+                    !data.passwordUsableForLogin &&
+                    data.oauthProviders.length === 1;
                   const blockReason = isSelf
                     ? t('adminUserProfile.authMethods.oauthBlockSelf')
                     : onlyCredential
-                      ? t(
-                          'adminUserProfile.authMethods.oauthBlockOnlyCredential'
-                        )
+                      ? data.hasPasswordSet && !data.passwordUsableForLogin
+                        ? t(
+                            'adminUserProfile.authMethods.oauthBlockOnlyCredentialPasswordDisabled'
+                          )
+                        : t(
+                            'adminUserProfile.authMethods.oauthBlockOnlyCredential'
+                          )
                       : null;
                   return (
                     <li
@@ -481,6 +514,9 @@ const ProviderActions: React.FC<ProviderActionsProps> = ({
             size="sm"
             disabled
             className="text-body-tertiary"
+            aria-label={t('adminUserProfile.authMethods.oauthActionsAria', {
+              provider: provider.provider
+            })}
           >
             <FontAwesomeIcon icon="ellipsis-h" />
           </Button>

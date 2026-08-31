@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -130,16 +131,20 @@ func TestRequireStepUp_DefaultMaxAgeWhenZero(t *testing.T) {
 	}
 }
 
-// runStepUpWithEnrollment is the enrollment-aware variant: it wires the
-// MFA enrollment lookup + step-up policy + user provider so the gate
-// can branch into the password-confirm / mfa-enrollment-required paths.
-// Returns (downstreamRan, status, body) like runStepUp.
+// fakeStepUpPolicy is the in-package StepUpPolicy double. Every knob
+// defaults to the pre-PR-3 answer so a zero value keeps the behaviour
+// every existing step-up test was written against.
 type fakeStepUpPolicy struct {
 	required bool
 	// mfaDisabled flips the master MFA switch off. Defaults false so the
 	// zero value reports the switch ON — every existing step-up test keeps
 	// its behaviour without being updated.
 	mfaDisabled bool
+	// reauthDisabled / reauthErr drive the PR 3 PasswordReauthAllowed
+	// branch: zero values report (true, nil) so pre-existing tests that
+	// reach the password-confirm envelope keep passing unchanged.
+	reauthDisabled bool
+	reauthErr      error
 }
 
 func (f *fakeStepUpPolicy) MFARequired(_ *iface.User, _ []authModels.OrgMembership) bool {
@@ -150,14 +155,19 @@ func (f *fakeStepUpPolicy) MFAEnabled(_ context.Context) bool {
 	return !f.mfaDisabled
 }
 
-func runStepUpWithEnrollment(t *testing.T, claims *authModels.JWTClaims, hasFactor bool, lookupErr error, mfaRequired bool) (bool, int, map[string]any) {
-	t.Helper()
-	m := newTestMiddleware(&fakeAuthz{}, &fakeTenantProvider{}, nil)
-	m.SetMFAEnrollmentLookup(func(_ context.Context, _, _ string) (bool, error) {
-		return hasFactor, lookupErr
-	})
-	m.SetStepUpPolicy(&fakeStepUpPolicy{required: mfaRequired})
+func (f *fakeStepUpPolicy) PasswordReauthAllowed(_ context.Context, _ string) (bool, error) {
+	if f.reauthErr != nil {
+		return false, f.reauthErr
+	}
+	return !f.reauthDisabled, nil
+}
 
+// runStepUpThrough drives one request with claims on the context through
+// RequireStepUp(5m) on the given middleware and decodes the JSON body.
+// Extracted from runStepUpWithEnrollment so the PR 3 policy matrix can
+// wire its own StepUpPolicy (or none) before driving the gate.
+func runStepUpThrough(t *testing.T, m *AuthMiddleware, claims *authModels.JWTClaims) (bool, int, map[string]any) {
+	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/admin/anything", nil)
 	if claims != nil {
 		req = req.WithContext(context.WithValue(req.Context(), ctxClaims, claims))
@@ -174,6 +184,28 @@ func runStepUpWithEnrollment(t *testing.T, claims *authModels.JWTClaims, hasFact
 		_ = json.Unmarshal(rec.Body.Bytes(), &body)
 	}
 	return called, rec.Code, body
+}
+
+// runStepUpWithPolicy is runStepUpWithEnrollment with an explicit policy
+// (nil = SetStepUpPolicy never called), for the PR 3 branch matrix.
+func runStepUpWithPolicy(t *testing.T, claims *authModels.JWTClaims, hasFactor bool, lookupErr error, policy StepUpPolicy) (bool, int, map[string]any) {
+	t.Helper()
+	m := newTestMiddleware(&fakeAuthz{}, &fakeTenantProvider{}, nil)
+	m.SetMFAEnrollmentLookup(func(_ context.Context, _, _ string) (bool, error) {
+		return hasFactor, lookupErr
+	})
+	if policy != nil {
+		m.SetStepUpPolicy(policy)
+	}
+	return runStepUpThrough(t, m, claims)
+}
+
+// runStepUpWithEnrollment is the pre-PR-3 harness shape: enrollment
+// lookup + a policy that always answers. Kept as a wrapper over
+// runStepUpWithPolicy so its many existing callers stay untouched.
+func runStepUpWithEnrollment(t *testing.T, claims *authModels.JWTClaims, hasFactor bool, lookupErr error, mfaRequired bool) (bool, int, map[string]any) {
+	t.Helper()
+	return runStepUpWithPolicy(t, claims, hasFactor, lookupErr, &fakeStepUpPolicy{required: mfaRequired})
 }
 
 func TestRequireStepUp_NoFactorNonPrivilegedEmitsPasswordConfirm(t *testing.T) {
@@ -269,6 +301,52 @@ func TestRequireStepUp_ReauthAMRSatisfiesGate(t *testing.T) {
 	called, status, _ := runStepUp(t, 5*time.Minute, claims)
 	if !called {
 		t.Errorf("reauth proof must pass; status %d", status)
+	}
+}
+
+// PR 3 §4.6: the password-confirm fallback is offered only when the
+// password is an accepted credential for the token's audience.
+func TestRequireStepUp_PasswordReauthDisabledBecomesEnrollmentRequired(t *testing.T) {
+	claims := &authModels.JWTClaims{UserUUID: "u-1", Audience: "operator", AMR: []string{"pwd"}}
+	called, status, body := runStepUpWithPolicy(t, claims, false /*hasFactor*/, nil, &fakeStepUpPolicy{reauthDisabled: true})
+	if called {
+		t.Fatal("downstream must not run")
+	}
+	if status != http.StatusForbidden || body["code"] != "mfa_enrollment_required" {
+		t.Fatalf("want 403 mfa_enrollment_required, got %d %v", status, body["code"])
+	}
+}
+
+func TestRequireStepUp_PolicyErrorIs503NotEnrollment(t *testing.T) {
+	claims := &authModels.JWTClaims{UserUUID: "u-1", Audience: "operator", AMR: []string{"pwd"}}
+	called, status, body := runStepUpWithPolicy(t, claims, false, nil, &fakeStepUpPolicy{reauthErr: errors.New("mongo down")})
+	if called {
+		t.Fatal("downstream must not run")
+	}
+	if status != http.StatusServiceUnavailable || body["code"] != "auth.policy_unavailable" {
+		t.Fatalf("an outage must be reported as an outage, got %d %v", status, body["code"])
+	}
+}
+
+func TestRequireStepUp_MissingPolicyIs503OnPasswordConfirmBranch(t *testing.T) {
+	claims := &authModels.JWTClaims{UserUUID: "u-1", Audience: "operator", AMR: []string{"pwd"}}
+	called, status, body := runStepUpWithPolicy(t, claims, false, nil, nil /*no StepUpPolicy*/)
+	if called {
+		t.Fatal("downstream must not run")
+	}
+	if status != http.StatusServiceUnavailable || body["code"] != "auth.policy_unavailable" {
+		t.Fatalf("missing wiring must fail closed, got %d %v", status, body["code"])
+	}
+}
+
+func TestRequireStepUp_ReauthAllowedKeepsPasswordConfirm(t *testing.T) {
+	claims := &authModels.JWTClaims{UserUUID: "u-1", Audience: "operator", AMR: []string{"pwd"}}
+	called, status, body := runStepUpWithPolicy(t, claims, false, nil, &fakeStepUpPolicy{})
+	if called {
+		t.Fatal("downstream must not run")
+	}
+	if status != http.StatusUnauthorized || body["code"] != "password_confirm_required" {
+		t.Fatalf("allowed method keeps today's envelope, got %d %v", status, body["code"])
 	}
 }
 

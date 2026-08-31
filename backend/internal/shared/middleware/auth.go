@@ -63,8 +63,11 @@ type MFAEnrollmentLookup func(ctx context.Context, audience, userUUID string) (h
 // when the user has no factor. The interface is declared here (not in
 // shared/iface) to avoid a package cycle — AuthMiddleware already imports
 // auth/services, but the policy reader is parameter-shaped so a test can
-// substitute a fake. Nil-tolerant: when unset, the gate falls back to the
-// legacy "always emit step_up_required" behaviour.
+// substitute a fake. Nil-tolerant where an answer can be defaulted safely
+// (MFARequired / MFAEnabled), but NOT on the password-reauth branch: with
+// no policy wired the gate cannot know whether the password is still an
+// accepted method, so RequireStepUp answers 503 auth.policy_unavailable
+// rather than offering a reconfirm the endpoint would only refuse.
 type StepUpPolicy interface {
 	MFARequired(user *iface.User, memberships []models.OrgMembership) bool
 	// MFAEnabled reports the master MFA switch (auth module's mfaEnabled).
@@ -75,6 +78,16 @@ type StepUpPolicy interface {
 	// back on. Mirrors AuthPolicyService.MFARequired, which already
 	// short-circuits to false when the switch is off. Nil-safe on the impl.
 	MFAEnabled(ctx context.Context) bool
+	// PasswordReauthAllowed reports whether a password may serve as the
+	// re-authentication proof for the token's audience ("operator" |
+	// "client"). False means the per-surface method is administratively
+	// disabled (auth module passwordLoginEnabled{Admin,Client}); an error
+	// means the policy could not be evaluated and the caller must answer
+	// a retryable 503 auth.policy_unavailable — never mfa_enrollment_
+	// required, which would misreport an outage as a user obligation.
+	// The operator break-glass is deliberately invisible here: a
+	// temporary override must not look like a durable login method.
+	PasswordReauthAllowed(ctx context.Context, audience string) (bool, error)
 }
 
 type AuthMiddleware struct {
@@ -928,16 +941,22 @@ func (m *AuthMiddleware) RequireMFA() func(http.Handler) http.Handler {
 // (what RequireMFA accepts) would leave too wide a window between
 // authentication and action.
 //
-// The gate has three failure shapes so the frontend can pick the right
+// The gate has four failure shapes so the frontend can pick the right
 // modal without a second round-trip:
 //
 //   - code="step_up_required" — user has a factor; ask for an OTP/passkey
 //     (the legacy path, unchanged).
 //   - code="password_confirm_required" — user has no factor enrolled AND
-//     the policy doesn't require them to. Frontend collects a password
-//     reconfirm via POST /v1/auth/{tier}/me/password-confirm and replays.
+//     the policy doesn't require them to AND the password is still an
+//     accepted credential for the token's audience. Frontend collects a
+//     password reconfirm via POST /v1/auth/{tier}/me/password-confirm
+//     and replays.
 //   - code="mfa_enrollment_required" — user's role requires MFA but they
-//     haven't enrolled. Frontend nudges them to /user/settings to enroll.
+//     haven't enrolled, or the password method is disabled for this
+//     surface so no reconfirm can be offered. Frontend nudges them to
+//     /user/settings to enroll.
+//   - code="auth.policy_unavailable" (503) — the sign-in policy could not
+//     be evaluated. Retryable; the frontend must not open a modal.
 //
 // The split is gated by the MFAEnrollmentLookup setter. When the lookup
 // isn't wired (legacy tests, sidecar fallback) every step-up failure
@@ -971,14 +990,20 @@ func (m *AuthMiddleware) RequireStepUp(maxAge time.Duration) func(http.Handler) 
 }
 
 // dispatchStepUpFailure picks the failure envelope that lets the
-// frontend run the right recovery UX. Three outcomes:
+// frontend run the right recovery UX. Four outcomes:
 //
 //  1. enrollment lookup unavailable, or it reports the user has at
 //     least one factor → step_up_required (legacy path).
 //  2. no factor + role requires MFA → mfa_enrollment_required (the user
 //     must enroll before they can use the destructive surface).
-//  3. no factor + role does not require MFA → password_confirm_required
-//     (the password reconfirm path).
+//  3. no factor + role does not require MFA + the password is a method
+//     this audience still accepts → password_confirm_required (the
+//     password reconfirm path). A method the surface refuses answers
+//     mfa_enrollment_required instead — the reconfirm endpoint would
+//     only 409 it (PR 3 §4.6).
+//  4. the password-method policy cannot be read (no StepUpPolicy wired,
+//     or the read failed) → 503 auth.policy_unavailable. An outage is
+//     reported as an outage, never dressed up as a user obligation.
 //
 // The branching is deliberately defensive: any error from the lookup
 // falls through to the legacy step_up_required path. A degraded Mongo
@@ -996,8 +1021,24 @@ func (m *AuthMiddleware) dispatchStepUpFailure(w http.ResponseWriter, r *http.Re
 	}
 	// No factor enrolled. If the role requires MFA, the right answer is
 	// "enroll first" — letting them bypass with a password would defeat
-	// the policy. Otherwise emit the password-confirm envelope.
+	// the policy. Otherwise the password-confirm fallback is offered ONLY
+	// when the password is an accepted credential for this audience
+	// (PR 3 §4.6): a disabled method also answers "enroll first", and an
+	// unanswerable policy is a 503, never a fabricated obligation.
 	if m.roleRequiresMFA(r.Context(), claims) {
+		m.sendMFAEnrollmentRequired(w, r)
+		return
+	}
+	if m.stepUpPolicy == nil {
+		m.sendPolicyUnavailable(w)
+		return
+	}
+	allowed, err := m.stepUpPolicy.PasswordReauthAllowed(r.Context(), claims.Audience)
+	if err != nil {
+		m.sendPolicyUnavailable(w)
+		return
+	}
+	if !allowed {
 		m.sendMFAEnrollmentRequired(w, r)
 		return
 	}
@@ -1149,6 +1190,22 @@ func (m *AuthMiddleware) sendPasswordConfirmRequired(w http.ResponseWriter, _ *h
 		}},
 		"code":          "password_confirm_required",
 		"maxAgeSeconds": int(maxAge.Seconds()),
+	})
+}
+
+// sendPolicyUnavailable emits the 503 envelope for a sign-in policy that
+// could not be evaluated (nil StepUpPolicy or a failed read). Retryable;
+// deliberately NOT one of the step-up prompts — the frontend must show
+// "try again shortly", not open a password modal or an enrollment nudge.
+func (m *AuthMiddleware) sendPolicyUnavailable(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status": http.StatusServiceUnavailable,
+		"title":  "sign-in policy unavailable",
+		"detail": "the sign-in policy could not be evaluated; try again shortly",
+		"type":   "about:blank",
+		"code":   "auth.policy_unavailable",
 	})
 }
 

@@ -24,7 +24,7 @@ Does not own user profile data (delegates to `iface.UserProvider`), org membersh
 | `handlers/password_handler.go` | Register, login, verify email, forgot/reset/change password |
 | `handlers/admin_user_auth_handler.go` | Operator-side admin endpoints under `/v1/admin/users/{id}/...` — auth-methods aggregator, send-password-reset, resend-verification, oauth unlink. Inline error mapping translates the typed service errors to 404 / 409 with body codes |
 | `handlers/self_user_auth_handler.go` | Self-service endpoints under `/v1/auth/{tier}/me/...` — auth-methods aggregator, session list/revoke, OAuth self-unlink. Drives the operator-tier `/user/security` page; mirrors the admin handler's structure with self-action allowed |
-| `services/auth_service.go` | OAuth orchestration, provider linking, token pair issuance, auth-methods aggregator (`GetUserAuthMethods`), admin OAuth unlink (`AdminUnlinkOAuth`) + self-service unlink (`SelfUnlinkOAuth`) sharing a `wouldLockOutOAuthUnlink` lockout helper, session list / revoke methods with three-step revocation (refresh tokens → session doc → Redis sid) |
+| `services/auth_service.go` | OAuth orchestration, provider linking, token pair issuance, auth-methods aggregator (`GetUserAuthMethods`), admin OAuth unlink (`AdminUnlinkOAuth`) + self-service unlink (`SelfUnlinkOAuth`) sharing a `wouldLockOutOAuthUnlink` lockout helper that counts **usable** credentials (`usableProvidersForLinks` + the `SetProviderUsability` seam), session list / revoke methods with three-step revocation (refresh tokens → session doc → Redis sid) |
 | `services/password_auth_service.go` | Password register/login/verify/reset/change, rate-limited |
 | `services/password_service.go` | Argon2id hashing + policy validation |
 | `services/jwt_service.go` | RS256 JWT signing, validation, membership embedding |
@@ -130,7 +130,7 @@ OAuth provider settings are admin-managed through `ConfigSchema()` — stored in
 `auth` declares an 11-key group tree via `ConfigGroups()` — 7 top-level groups
 (`registration`, `login`, `password`, `mfa`, `oauth`, `antiabuse`, `sessions`) plus
 `oauth.google` / `oauth.apple` / `oauth.github` / `oauth.discord` nested under `oauth`
-(`Parent: "oauth"`). It is the largest configuration surface in the base — 63
+(`Parent: "oauth"`). It is the largest configuration surface in the base — 65
 `ConfigField` entries — and is the first (and so far only) module to actually render
 the settings page's sectioned rail rather than the plain-form degradation path. This is
 the shape a contributor adding a field to `ConfigSchema()` must keep valid:
@@ -182,7 +182,7 @@ ConfigService is missing).
 | Group | Keys | Effect |
 |---|---|---|
 | Registration | `registrationEnabledAdmin/Client`, `defaultRoleClient`, `allowedEmailDomainsAdmin/Client` | **`registrationEnabledAdmin/Client` both default to `false`** — a fresh install accepts no self-service signups until the super_admin opens them. `Register` returns 403 `auth.registration_disabled` / `auth.email_domain_not_allowed` per surface, and the OAuth callback's new-user branch returns `ErrOAuthSignupDisabled` (mapped to the `error=oauth_signup_disabled` callback redirect) when `registrationEnabledAdmin/Client=false` — both paths share the same umbrella kill switch. `defaultRoleClient` overrides the role assigned to a new Tier-2 signup (consulted by both the password and OAuth paths). Non-first operator-tier signups default to `guest` (lowest system role) on both paths so a fresh callback can't grant elevated privileges; the first-admin sentinel still upgrades the very first account to `super_admin`. The very first user on a fresh install bypasses the password Register's kill switch so a misconfigured flag can't lock everyone out — the OAuth path has no first-user bypass; operators bootstrap via password. |
-| Login & Sessions | `loginEnabledAdmin/Client`, `accountLockoutThreshold`, `accountLockoutDuration`, `sessionAbsoluteTTL` | `Login` returns 403 `auth.login_disabled` per surface; OAuth start endpoints (`InitiateOAuthLogin`, `HandleMobile{Google,Apple}Auth`) honour the same gate. The lockout pair is plumbed into `RateLimiter.SetAuthFailedConfig` on every login attempt — admin edits take effect on the next try. `accountLockoutDuration` (like `accessTokenTTL` / `passwordResetTokenTTL`) is parsed by `utils.ParseDuration`, so `30d` typed into the admin UI now works the same as it does in an env var. `sessionAbsoluteTTL` (ADR-0017 D1) caps total session age from login, independent of the refresh TTL's idle-timeout behaviour; resolved via `AuthPolicyService.SessionAbsoluteTTL` — see the dedicated section below. One field for both audience tiers, unlike the `*Admin`/`*Client` pairs elsewhere on this tab. |
+| Login & Sessions | `loginEnabledAdmin/Client`, `passwordLoginEnabledAdmin/Client`, `accountLockoutThreshold`, `accountLockoutDuration`, `sessionAbsoluteTTL` | `Login` returns 403 `auth.login_disabled` per surface; OAuth start endpoints (`InitiateOAuthLogin`, `HandleMobile{Google,Apple}Auth`) honour the same gate. The lockout pair is plumbed into `RateLimiter.SetAuthFailedConfig` on every login attempt — admin edits take effect on the next try. `accountLockoutDuration` (like `accessTokenTTL` / `passwordResetTokenTTL`) is parsed by `utils.ParseDuration`, so `30d` typed into the admin UI now works the same as it does in an env var. `sessionAbsoluteTTL` (ADR-0017 D1) caps total session age from login, independent of the refresh TTL's idle-timeout behaviour; resolved via `AuthPolicyService.SessionAbsoluteTTL` — see the dedicated section below. `passwordLoginEnabledAdmin/Client` (both default `true`, the password-login toggle) is read strictly via `services.StrictBool` on every password sign-in, signup and reset-request check on `/v1/auth/{tier}/*` (absent key → `true`; malformed → the read fails closed rather than silently defaulting), refusing with 403 `auth.password_login_disabled` when off, and 503 `auth.policy_unavailable` when the policy cannot be established. Which routes are gated, which stay open, and with what status, is owned by the "Password-login gate verdicts" section below — read the table there rather than a copy here. The boot-time `AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS` override rescues the **operator `Login` path and the MFA/WebAuthn completion of a challenge that login created** — never registration, never a reset, never the client surface — and a rescue emits exactly one `auth.policy.break_glass_used` audit event, from the direct full-token login OR from the winning completion, carrying audience, user UUID, session id and source IP (never a password, token or full email). A failed credential attempt under the override claims nothing. Turning either off is additionally guarded at config-write time — see the login-method invariant below — so it can never be flipped into a state with no usable sign-in method. One field pair per audience tier, unlike `sessionAbsoluteTTL` which is shared. |
 | Password Policy | `passwordMinLength`, `passwordMaxLength`, `passwordRequireUpper/Lower/Digit/Symbol`, `breachedPasswordCheck` | `passwordService.ValidatePolicy` reads the live policy on every signup / change-password / reset. Defaults match the legacy hardcoded values (10..128 chars, no complexity, HIBP on). New errors: `ErrPasswordMissing{Upper,Lower,Digit,Symbol}`. An inverted min/max range is swapped on read so a misedit can't reject every password. |
 | OAuth Providers | `{google,apple,github,discord}Enabled{Admin,Client}`, `oauthAllowSignup{Admin,Client}`, `oauthAutoLinkByEmail` | **All eight `{provider}Enabled{Admin,Client}` toggles default to `false`** — a fresh install exposes no social-login button until the super_admin both configures the provider's credentials AND flips its surface toggle on (a provider with no client ID is already filtered out regardless; the toggle is the explicit second gate). The **web** path (`/providers`, OAuth start, callback) reads the toggles strictly through `OAuthConfigResolver.OAuthWebProviderUsable` — absent → `false` (the schema default), malformed → that provider alone is unusable with a WARN naming the key — while the **mobile** ID-token endpoints keep the permissive `OAuthProviderEnabled` (absent → `true`) until the native flow gets its own decision. A disabled or incomplete provider answers 403 `auth.oauth_provider_disabled` on start; an unreadable auth document answers 503 `auth.policy_unavailable`. Credentials still live one-set-per-provider in the existing tabs. Phase 9: `oauthAllowSignup{Admin,Client}` (default true) is the OAuth-specific signup gate — checked **in addition to** `registrationEnabledAdmin/Client` on the Registration tab (both must allow). When either is off, the OAuth callback returns `ErrOAuthSignupDisabled` and redirects to `/auth/callback?success=false&error=oauth_signup_disabled` instead of creating the user. Phase 10: `oauthAutoLinkByEmail` (default true) gates auto-attaching a provider to an existing account whose email matches the IdP's **verified** address; read strictly by `OAuthAutoLinkByEmailEnabled` (absent → true; malformed/unreadable → 503 `auth.policy_unavailable` before any lookup). When off, the callback returns `ErrOAuthLinkDisabled` (`error=oauth_link_disabled`) and the user must initiate linking from authenticated settings. |
 | MFA | `mfaEnabled`, `mfaEnrollmentGraceDays`, `mfaRequiredForRoles`, `recoveryCodesCount` | `mfaEnabled` **defaults to `false`** — a fresh install's first account is `super_admin` (privileged), so seeding it `true` would block that operator from the config writes (e.g. SMTP) needed to finish setup with an MFA prompt for a factor they never enrolled. Operators turn it on **after** enrolling a second factor; otherwise privileged users hit the enrollment grace window on their next login. `mfaEnabled=false` short-circuits `MFARequired` to false (existing enrollments are not deleted; voluntary verification still works). `mfaEnrollmentGraceDays` overrides the legacy 7-day `MFAEnrollmentGraceWindow` constant — new value takes effect on the next login. Phase 9: `mfaRequiredForRoles` (stringList, lowercased on read) replaces the built-in privileged-role list when set. Empty falls back to the built-in (super_admin, administrator, org_owner, org_admin). The kill switch wins over both the built-in and the configured list. Phase 10: `recoveryCodesCount` overrides the legacy `BackupCodeCount` constant when in the safe range 1..50; out-of-range falls back to the legacy default 10. Read at enrollment-confirm time so admin edits take effect on the next user's enrollment. |
@@ -215,10 +215,15 @@ admin UI would show one value while a different one governed logins.
 | env / direct constructor above 24h | warn and clamp to 24h | n/a |
 | env / direct constructor below 1m | warn and clamp to 1m — below a minute the SPA's proactive refresh (inside a 30s skew of expiry) would rotate the token on every request (ADR-0020 D3, #317) | n/a |
 
-Write-time enforcement is `(*AuthModule).ValidateConfig` in
+Write-time enforcement is `(*AuthModule).ValidateConfigSnapshot` in
 `config_validation.go` — the module's implementation of the optional
-`module.HasConfigValidator` seam (ADR-0017 D6). It rejects a non-empty
-value outside `[services.MinAccessTokenTTL, services.MaxAccessTokenTTL]`
+`module.HasConfigSnapshotValidator` seam (ADR-0017 D6; PR 1's snapshot
+contract). It judges the complete target snapshot on **all three**
+mutation surfaces — active-profile PATCH, named-environment PATCH, and
+environment activation — running two rules in sequence: these duration
+bounds, then the password-login toggle's anti-lockout invariant (see
+"Login method invariant" below). It rejects a non-empty duration value
+outside `[services.MinAccessTokenTTL, services.MaxAccessTokenTTL]`
 (1m–24h) or `[services.MinPasswordResetTokenTTL,
 services.MaxPasswordResetTokenTTL]` (5m–24h) with a
 `*module.ConfigValidationError`, which the admin API maps to 422 before
@@ -226,8 +231,144 @@ the value ever reaches `UpdateConfig`. An empty value is always accepted —
 emptiness is a decision with field-specific meaning, not an omission to
 reject. Generic `UpdateConfig` still validates nothing on its own; the
 seam is opt-in per module, and `auth` is currently its only implementer.
+`auth` no longer implements the legacy value-only `HasConfigValidator` —
+the snapshot seam replaced it so the login-method invariant can see
+secret *presence*, which the legacy value-only hook never could.
+`AuthModule.HotReloadConfig()` returns `true`: `AuthPolicyService` and the
+OAuth resolver have always read config live at request time, so a
+successful write now persists `needsRestart=false` in the same atomic
+update instead of leaving a stale restart banner in the admin UI.
 Read-time enforcement is the pre-existing `clampPersistedDuration` in
 `services/auth_duration_bounds.go`, which stays as-is.
+
+#### Login method invariant (password-login toggle, spec §4.4)
+
+`passwordLoginEnabledAdmin` / `passwordLoginEnabledClient` are the only
+config keys that can leave a surface with **no way to sign in at all**, so
+turning either off is refused at write time unless OAuth can carry the
+surface on its own. `validateLoginMethodInvariant`
+(`config_validation.go`) is the second rule `ValidateConfigSnapshot` runs,
+after the duration bounds, and therefore judges the target snapshot on
+**all three** mutation surfaces — active-profile PATCH,
+named-environment PATCH, and environment activation.
+
+Per surface `S ∈ {Admin, Client}`:
+
+```
+passwordOn(S)   := strictBool(Values["passwordLoginEnabled"+S],  default true)
+providerOn(p,S) := strictBool(Values[p+"Enabled"+S],             default false)
+structural(p)   := EffectiveValues[p+"ClientId"]    ≠ "" ∧
+                   EffectiveValues[p+"RedirectURL"] ≠ "" ∧ secret(p)
+    where secret(google|github|discord) := SecretPresent[p+"ClientSecret"]
+          secret(apple)                 := EffectiveValues["appleTeamId"] ≠ "" ∧
+                                           EffectiveValues["appleKeyId"]  ≠ "" ∧
+                                           (SecretPresent["applePrivateKey"] ∨
+                                            readable non-empty applePrivateKeyPath)
+oauthOn(S)      := ∃ p ∈ services.WebProviderOrder : providerOn(p,S) ∧ structural(p)
+autoLink        := strictBool(Values["oauthAutoLinkByEmail"],    default true)
+
+valid(S)        := passwordOn(S) ∨ (oauthOn(S) ∧ autoLink)
+```
+
+- **Only the target snapshot is consulted** — never the active profile,
+  never a secret *value*. Booleans come from `snap.Values` (raw, so an
+  absent key takes the schema default), the structural strings from
+  `snap.EffectiveValues` (EnvVar/`Default` fallback applied), and secrets
+  from `snap.SecretPresent`. `providerStructuralFromSnapshot` assembles the
+  same `services.ProviderStructuralFields` the runtime's `usableFromView`
+  assembles, field-for-field, and hands them to the **same** exported
+  predicate the OAuth flow uses, `services.ProviderStructurallyConfigured`,
+  so the validator and `OAuthWebProviderUsable` can never disagree about
+  what "configured" means. Apple's file leg is probed through `services.ReadableNonEmptyFile`
+  (the `KeyFileProbe` seam), so a path naming a missing or empty file is
+  not a present secret.
+- **`autoLink` is the PR 2 half of the invariant.** An SSO-only surface is
+  only survivable if an existing account can still be reached by its
+  provider-**verified** email; `oauthAutoLinkByEmail` is the switch that
+  allows it (documented on the OAuth Providers row above), so turning it
+  off while a surface is password-off is the same lockout and gets the
+  same refusal.
+- **Malformed booleans are rejected up front.** All eleven participating
+  keys — `oauthAutoLinkByEmail` plus, per surface, `passwordLoginEnabled<S>`
+  and the four `{provider}Enabled<S>` toggles — are parsed with
+  `services.StrictBool` *before* any surface is judged, so an out-of-band
+  `"treu"` is refused on **every** write rather than only when its surface
+  happens to be the one being switched off. That failure is a
+  `*module.ConfigValidationError` naming **that key** ("must be exactly
+  true or false") with **no** `Code` — it is a field-shape error, not the
+  invariant.
+- **Only the cross-field lockout carries a code.** It names
+  `passwordLoginEnabled<S>` and sets `errcode.AuthLoginMethodLockout`
+  (`auth.login_method_lockout`); the admin API maps the whole envelope to
+  **422** before anything reaches `UpdateConfig`, so config *and* enabled
+  state are unchanged and the audit row records `outcome=failure` with key
+  names only. The message names both ways out: keep the password method
+  on, or leave one fully configured, enabled OAuth provider on this
+  surface **together with** auto-link.
+- **This is why `auth` moved to the snapshot seam.** The legacy value-only
+  `HasConfigValidator` sees one key's new value; `structural(p)` needs
+  secret *presence* across the whole target profile, which only
+  `ConfigValidationSnapshot` carries. `auth` no longer implements the
+  legacy hook.
+
+Pinned by `config_validation_test.go`. The staging drill for the refusal
+(and for the concurrent-PATCH race that ends in `409
+module.config_revision_stale` then this 422 on retry) is spec §7 steps 2–3
+and 5.
+
+#### Password-login gate verdicts (spec §4.3)
+
+The rule: **a route is gated iff it would authenticate a NEW session — or
+mint a credential-setting token — with the password method.** Routes that
+manage or verify the credential *inside an existing flow* stay open:
+change-password, reset-password, accept-invite, verify-email,
+resend-verification. (Change-password verifies the current password, so
+"authenticates with the password" alone would wrongly gate it.) The
+credential legitimately continues to exist for the other surface and for a
+later re-enable, and deleting it is a different decision this toggle does
+not make.
+
+| Route | Verdict | Accessor / notes |
+|---|---|---|
+| `POST /v1/auth/{tier}/login` | **403** `auth.password_login_disabled` | `PasswordLoginDecision`. Sits after the `loginEnabledAdmin/Client` kill switch and **before** `GetUserForAuth`, so lockout counters, the rate limiter and the audit trail see nothing and every email — known or unknown — gets the identical answer. Only the operator surface can be rescued |
+| `POST /v1/auth/{tier}/register` | **403** | Strict `PasswordLoginEnabled` — break-glass never opens registration. The **operator-only** first-user branch and `RegisterInitialAdmin` (setup wizard) are the two bootstrap exceptions: they are evaluated before the gate and read no policy at all. The client tier has no first-user bypass |
+| `POST /v1/auth/{tier}/forgot-password` | **403** | Strict `PasswordLoginEnabled`, evaluated **before** the user lookup, so no reset token is minted and the outcome cannot depend on account state. `ErrPasswordLoginDisabled` and `ErrAuthPolicyUnavailable` are the ONLY errors this service method propagates — every account-specific outcome stays swallowed behind the generic success body, so it is not an enumeration oracle. `PasswordAuthHandler.ForgotPassword` enforces the same contract independently: it maps those two sentinels and lets **any** other error fall through to the generic success body (logged at warn, never with the address), so a future service-side error cannot answer differently for some addresses |
+| `POST /v1/auth/{tier}/mfa/login/verify`, `POST /v1/auth/{tier}/mfa/webauthn/login/finish` | **403** when the challenge was password-sourced | `PasswordLoginDecision`, re-evaluated **before** the factor is verified. See "Completion re-check" under HTTP endpoints for the four outcomes (untouched / 403+consume / 503+retain / 401 on an empty audience) |
+| `POST /v1/admin/users/{userId}/send-password-reset` **and** `POST /v1/admin/client-users/{id}/send-password-reset` | **409** `auth.password_login_disabled` | Strict `PasswordLoginEnabled` on the target's tier, inside `AdminTriggerPasswordReset`. A reset link for a refused method would also revoke the target's sessions and leave them an unusable password. Break-glass never opens it. Both handlers match `iface.ErrPasswordLoginDisabled` with `errors.Is` |
+| `POST /v1/auth/{tier}/me/password-confirm` | **409** `auth.password_confirm_unavailable` | Same 409 branch as "no password hash": a credential the surface refuses cannot prove presence either (§4.6) |
+| `POST /v1/auth/{tier}/reset-password` | **open** | Redeems a token only the gated routes can mint; closing it would strand a reset in flight |
+| `POST /v1/auth/{tier}/accept-invite` | **open** | Sets the password **and** marks the email verified atomically; auto-link is what lets that account sign in with OAuth later |
+| `verify-email`, `verify-email/resend`, `change-password` | **open** | Not a credential, or authenticated credential management |
+
+Every gated path answers **503** `auth.policy_unavailable` instead when
+the policy cannot be established — a nil policy service is an outage, never
+a legacy allow.
+
+**Decision vs accessor — two methods, and the split is the security
+boundary.** `AuthPolicyService.PasswordLoginEnabled(ctx, audience)` is the
+strict accessor: absent key → `true` (compatibility applies to the key, not
+to the document), present canonical boolean → its value, and a missing
+document / repository failure / malformed value / unknown audience / unwired
+service → an error wrapping `ErrAuthPolicyUnavailable`. It **never** sees
+the break-glass. `PasswordLoginDecision(ctx, audience)` wraps it and is used
+by exactly two callers — `Login` and the completion of a challenge `Login`
+created: on the **operator** audience only, and only when
+`AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS` is set, it converts a stored
+`false` *or* a failed read into `{Allowed: true, BreakGlassUsed: true}`. So
+an outage never silently fails open, while the recovery switch still works
+when ConfigService itself is the outage. Everything else — registration,
+forgot/reset, admin reset, password-confirm, `PasswordReauthAllowed`, the
+unlink guard, `AuthMethodsView` — calls the accessor and is blind to the
+override by construction.
+
+A rescued authentication emits exactly one `auth.policy.break_glass_used`
+audit row (`EmitBreakGlassUsed`, best-effort through the nil-guarded sink):
+from `Login` on a direct full-token success, or from the **winning**
+MFA/WebAuthn completion when either that completion's own decision or the
+challenge's stamped `BreakGlassUsed` was a rescue. The row carries the
+audience, the user UUID, the session id and the source IP — never a
+password, a token or a full email. A failed credential attempt under the
+override claims nothing.
 
 #### Absolute session cap (ADR-0017 D1)
 
@@ -391,6 +532,7 @@ different things depending on where it was typed, and
 |---|---|---|
 | `AUTH_JWT_PRIVATE_KEY` / `AUTH_JWT_PUBLIC_KEY` | RS256 key pair (paths or PEM) | — (required) |
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | Gate signup on successful verification | `true` in prod, `false` otherwise |
+| `AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS` | **Emergency only.** Read once at boot into `cfg.Auth.OperatorPasswordLoginBreakGlass` and handed to `AuthPolicyService.SetOperatorBreakGlass` by `module.go::Init`, which also logs a WARN on **every** boot while it is set. Rescues `POST /v1/auth/operator/login` (and the MFA/WebAuthn completion of a challenge that login created) when `passwordLoginEnabledAdmin` is `false` **or** unreadable — see "Login method invariant" and "Password-login gate verdicts" above. It opens nothing else: not registration, not forgot/reset, not password-confirm, not the unlink guard, not `AuthMethodsView`, not the client surface, and it never bypasses `loginEnabledAdmin` or the MFA / low-risk / RBAC gates on the config repair that follows. There is no unset path short of a restart. `docker/.env.example` carries the five-step drill. | `false` |
 | `JWT_ACCESS_TOKEN_EXPIRY` | Access-token TTL. **Level 2 of `admin accessTokenTTL → JWT_ACCESS_TOKEN_EXPIRY → 15m`.** Before ADR-0017 this level was unreachable — the policy substituted its 15m default for "unset" — so any deployment that set this by hand has been running on 15m regardless of the value. Repairing the chain activates their configured value, which may be longer than what they have actually been running: **diff this key against `docker/.env.example` before upgrading.** Effective values are clamped into `[MinAccessTokenTTL, MaxAccessTokenTTL]` (1m–24h) with a warning — below 1m the SPA's proactive refresh would rotate the token on every request (ADR-0020 D3, #317). | `15m` |
 | `JWT_REFRESH_TOKEN_EXPIRY` | Refresh-token TTL — and, because rotation writes `now + this` on every use, the **idle** timeout: this many days without a refresh ends the session. The absolute cap is the separate `sessionAbsoluteTTL`. The `refreshTTL <= 0 → 720h` guard in `NewJWTService` is unreachable through configuration. | `7d` |
 | `AUTH_DEVICE_TRUST_DURATION` | "Remember this device" trust-grant lifetime (`models.DeviceTrustDuration`), read via `parseDurationEnv` in `module.go`. Accepts the `d` suffix (`30d`); malformed or unset logs a warning and falls back to the default. | `30d` (720h) |
@@ -463,7 +605,7 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/v1/auth/{tier}/providers` | List OAuth providers **usable** on this audience — from one strict config read (`OAuthConfigResolver.UsableWebProviders`): the per-surface toggle parsed strictly (absent → `false`, malformed → omitted + WARN naming the key) AND `ProviderStructurallyConfigured` (client ID, redirect URL, secret present; Apple team/key + inline key or readable key file). A document-level failure (missing auth document, repository error, undecryptable stored secret) is **503 `auth.policy_unavailable`**, never an empty list. The unauthenticated login pages drive their social-login buttons off this endpoint; edits resolve on the next request. |
-| GET | `/v1/auth/{tier}/policy` | Public slice of admin-managed auth policy: `{registrationEnabled, loginEnabled, passwordMinLength}`. Read by the SPA login + signup pages so kill switches hide the CTA instead of surfacing as a 403 on submit |
+| GET | `/v1/auth/{tier}/policy` | Public slice of admin-managed auth policy: `{registrationEnabled, loginEnabled, passwordMinLength, ...}`. Read by the SPA login + signup pages so kill switches hide the CTA instead of surfacing as a 403 on submit. The pre-existing fields keep their permissive nil-safe reads (deviation 12) — a policy-read failure never affects them. **§4.9 pair:** `passwordLoginEnabled` is the strict, non-null persisted per-surface value on an OK read; it is `null` **only** in the operator emergency case — the policy store is unreadable AND the operator break-glass override is active. `passwordLoginBreakGlassEffective` is **operator-endpoint only** (always `false` on the client tier) and is `true` exactly when the override is configured AND the persisted value is `false` or unreadable, telling the console to render the labelled emergency login form. A read failure **without** the override answers **503** `auth.policy_unavailable` for the whole response — the strict pair must never mask a failure the permissive pair is allowed to shrug off |
 | POST | `/v1/auth/{tier}/oauth/login` | Start an OAuth flow. The signed-state JWT carries `tier` so the shared callback dispatches to the matching authService. Refuses with 403 `auth.login_disabled` (kill switch), 403 `auth.oauth_provider_disabled` (per-provider defect) or 503 `auth.policy_unavailable` (document-level), and builds the provider from the same resolved config the check answered with. The stored `RedirectURI` is the configured tier SPA + `/auth/callback`, never the `Origin` header. |
 | POST | `/v1/auth/{tier}/google/mobile` | Exchange a Google ID token from a mobile app for an Orkestra session; mints tokens with `aud=tier` |
 | POST | `/v1/auth/{tier}/apple/mobile` | Exchange an Apple ID token from a mobile app for an Orkestra session; mints tokens with `aud=tier` |
@@ -473,13 +615,13 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 | GET | `/v1/auth/oauth/github/callback` | GitHub web OAuth callback (raw HTTP since PR 2 — the former Huma operation never set the refresh cookie) |
 | GET | `/v1/auth/client/oauth/complete` | **Client host mux only.** The relay endpoint that completes a client-tier web login: takes the one-shot relay record, requires the state cookie this host set at start, sets the client refresh cookie, redirects to the client SPA. Not in OpenAPI |
 | GET | `/v1/auth/session` | Poll for session after OAuth redirect finishes |
-| POST | `/v1/auth/{tier}/register` | Email+password signup |
-| POST | `/v1/auth/{tier}/login` | Email+password login |
+| POST | `/v1/auth/{tier}/register` | Email+password signup. Refuses with 403 `auth.password_login_disabled` when `passwordLoginEnabled{Admin,Client}` is off for **this** surface (strict read; the operator break-glass is invisible here — it never opens registration), and 503 `auth.policy_unavailable` when the policy cannot be established. The very first operator account and `RegisterInitialAdmin` (setup wizard) are the two bootstrap exceptions and bypass the method gate entirely, with no policy read at all |
+| POST | `/v1/auth/{tier}/login` | Email+password login. Refuses with 403 `auth.password_login_disabled` per surface, and 503 `auth.policy_unavailable` on an unestablishable policy (a nil policy is an outage, never a legacy allow). The gate sits **after** the `loginEnabledAdmin/Client` kill switch and **before** `GetUserForAuth`, so lockout counters, the rate limiter and the audit trail see nothing and every email — known or unknown — gets the identical answer. Operator-surface only, the boot-time break-glass converts a stored `false` or a failed read into a rescued login; a direct full-token success then emits the `auth.policy.break_glass_used` audit event (audience, user UUID, session id, source IP — never an email) |
 | POST | `/v1/auth/{tier}/verify-email` | Consume a verification token |
 | POST | `/v1/auth/{tier}/verify-email/resend` | Request a new verification email |
-| POST | `/v1/auth/{tier}/forgot-password` | Send a password reset email |
-| POST | `/v1/auth/{tier}/reset-password` | Consume a reset token and set a new password |
-| POST | `/v1/auth/{tier}/accept-invite` | Consume an `admin_invite` token: set the user's password **and** mark email verified atomically. Issued by the operator-side admin invite flow (see user CLAUDE.md). |
+| POST | `/v1/auth/{tier}/forgot-password` | Send a password reset email. Gated the same strict way (403 `auth.password_login_disabled` / 503 `auth.policy_unavailable`), evaluated **before** the user lookup so the outcome cannot depend on account state, and no reset token is minted. Those two policy errors are the ONLY ones the service returns — every account-specific outcome stays swallowed behind the unchanged generic success body, so propagating them is not an enumeration oracle |
+| POST | `/v1/auth/{tier}/reset-password` | Consume a reset token and set a new password. **Not** gated by the password-login toggle — redeeming an already-issued token stays open so a reset in flight when the method is turned off can still complete |
+| POST | `/v1/auth/{tier}/accept-invite` | Consume an `admin_invite` token: set the user's password **and** mark email verified atomically. Issued by the operator-side admin invite flow (see user CLAUDE.md). Redemption, like `reset-password` and `verify-email`, is **not** gated by the password-login toggle. |
 | POST | `/v1/auth/{tier}/refresh` | Refresh using a header-supplied refresh token |
 | POST | `/v1/auth/{tier}/refresh-cookie` | Refresh using the `Cookie:` header |
 | POST | `/v1/auth/{tier}/logout` | Revoke refresh cookie, invalidate session. Public route — identity comes from `resolveLogoutIdentity`, which requires a **signature-verified** refresh cookie whenever the request context is anonymous (see Key invariants) |
@@ -507,16 +649,16 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 | POST | `/v1/auth/{tier}/mfa/webauthn/verify/finish` | `RequireGlobal()` | Finish a step-up assertion; mints a stepped-up access token with `amr:[..., "otp", "webauthn"]` + `last_otp_at=now` |
 | GET | `/v1/auth/{tier}/me/auth-methods` | `RequireGlobal()` | Self-service: aggregate password / MFA / OAuth state of the calling user. Same `models.AuthMethodsView` shape the admin route returns. Drives the `/user/security` page header |
 | GET | `/v1/auth/{tier}/me/sessions` | `RequireGlobal()` | Self-service: list active sessions for the caller. `IsCurrent` flag stamped from JWT `sid` |
-| DELETE | `/v1/auth/{tier}/me/oauth/{provider}` | `RequireGlobal()` + `RequireStepUp(5m)` | Self-service: unlink one of the caller's OAuth identities. Service-layer last-credential safeguard rejects with 409 `last_credential` when removing would leave the user with no usable login |
+| DELETE | `/v1/auth/{tier}/me/oauth/{provider}` | `RequireGlobal()` + `RequireStepUp(5m)` | Self-service: unlink one of the caller's OAuth identities. Service-layer last-credential safeguard rejects with 409 `last_credential` when removing would leave the user with no **usable** login — usable links and a usable password only; 503 `auth.policy_unavailable` when usability cannot be established |
 | POST | `/v1/auth/{tier}/me/oauth/link/{provider}` | `RequireGlobal()` + `RequireStepUp(5m)` | Self-service: start the OAuth flow that adds a new sign-in provider to the caller's account. Returns `{authUrl, state}` — the SPA navigates to `authUrl`; the shared callback redirects back to `/user/security?tab=oauth&link=success\|failed&provider=<x>[&code=already_linked\|duplicate_provider\|invalid_userinfo\|access_denied\|provider_unavailable\|internal]`. The signed-state JWT carries `mode=link` + `linkUserUUID` so the callback binds the new identity to the authenticated user without trusting any query-string parameter. Provider usability is checked the same strict way as the login start. Operator-only: link mode never relays. |
 | DELETE | `/v1/auth/{tier}/me/sessions/{sessionId}` | `RequireGlobal()` + `RequireStepUp(5m)` | Self-service: revoke one session by UUID. Returns 409 `cannot_revoke_current` when the target sid matches the caller's JWT — logout is the right tool for that |
 | DELETE | `/v1/auth/{tier}/me/sessions` | `RequireGlobal()` + `RequireStepUp(5m)` | Self-service: revoke every active session except the calling one. Returns `{revoked: int}` |
 | POST | `/v1/auth/{tier}/me/mfa/backup-codes/regenerate` | `RequireGlobal()` + `RequireStepUp(5m)` | Self-service: replace the user's TOTP backup-code list with a fresh set. Old codes stop working immediately. Returns `{codes: string[]}` exactly once |
-| POST | `/v1/auth/{tier}/me/password-confirm` | `RequireGlobal()` | Self-service: reconfirm password to satisfy `RequireStepUp` when no MFA factor is enrolled. Returns a fresh access token with `amr += "reauth"` + `last_otp_at = now`. Refuses with 409 `auth.password_confirm_unavailable` for users with any MFA factor (must use the MFA path) or no password (pure-OAuth account) |
+| POST | `/v1/auth/{tier}/me/password-confirm` | `RequireGlobal()` | Self-service: reconfirm password to satisfy `RequireStepUp` when no MFA factor is enrolled. Returns a fresh access token with `amr += "reauth"` + `last_otp_at = now`. Refuses with 409 `auth.password_confirm_unavailable` for users with any MFA factor (must use the MFA path), no password (pure-OAuth account), or a surface whose password method is disabled; 503 `auth.policy_unavailable` when that policy can't be read |
 | GET | `/v1/admin/users/{userId}/auth-methods` | `RequireSystemPermission("system.users.admin")` | Admin: aggregate password / MFA / OAuth state of an operator user. Drives the Authentication Methods card on `/admin/user/profile/:userId`. Read-only |
-| POST | `/v1/admin/users/{userId}/send-password-reset` | `RequireSystemPermission("system.users.password_reset")` | Admin: trigger the standard password-reset email for an operator user. Operator-side companion of the existing client-user route |
+| POST | `/v1/admin/users/{userId}/send-password-reset` | `RequireSystemPermission("system.users.password_reset")` | Admin: trigger the standard password-reset email for an operator user. Operator-side companion of the existing client-user route. Answers **409** `auth.password_login_disabled` when the target's surface rejects the method — minting a reset link there would revoke the target's sessions and leave an unusable password — and 503 `auth.policy_unavailable` on an unestablishable policy. Break-glass never opens it |
 | POST | `/v1/admin/users/{userId}/resend-verification` | `RequireSystemPermission("system.users.email_verify_resend")` | Admin: re-emit the email-verification message. Idempotent — already-verified users return 200 with no action |
-| DELETE | `/v1/admin/users/{userId}/oauth/{provider}` | `RequireSystemPermission("system.users.oauth_unlink")` + `RequireStepUp(5m)` | Admin: unlink a Google/Apple/GitHub/Discord identity. Service-layer safeguards reject self-action (409 `self_action`) and last-credential lockout — no password + sole OAuth link returns 409 `last_credential` |
+| DELETE | `/v1/admin/users/{userId}/oauth/{provider}` | `RequireSystemPermission("system.users.oauth_unlink")` + `RequireStepUp(5m)` | Admin: unlink a Google/Apple/GitHub/Discord identity. Service-layer safeguards reject self-action (409 `self_action`) and last-**usable**-credential lockout — sole usable link with no usable password returns 409 `last_credential`; uncertainty returns 503 `auth.policy_unavailable` |
 | GET | `/v1/admin/service-accounts` | `RequireSystemPermission("auth.service_accounts.read")` | List service accounts with live active-credential counts. Never returns secrets |
 | GET | `/v1/admin/service-accounts/{id}` | `RequireSystemPermission("auth.service_accounts.read")` | Get one service account plus its full credential history (active and revoked) |
 | POST | `/v1/admin/service-accounts` | `RequireSystemPermission("auth.service_accounts.manage")` + `RequireStepUp(5m)` | Create a service account (`{name}`) — mints the `kind=service` user row plus its first credential. Response carries `clientId` + `clientSecret` exactly once. `201` |
@@ -528,9 +670,17 @@ And a public endpoint that completes a login after a partial response:
 
 | Method | Path | Gate | Purpose |
 |---|---|---|---|
-| POST | `/v1/auth/{tier}/mfa/login/verify` | none (uses `challengeId`) | Complete a login by validating TOTP/backup; mints full token pair with `amr:[source,otp]` |
+| POST | `/v1/auth/{tier}/mfa/login/verify` | none (uses `challengeId`) | Complete a login by validating TOTP/backup; mints full token pair with `amr:[source,otp]`. Re-checks the password policy first — see the completion re-check below |
 | POST | `/v1/auth/{tier}/mfa/webauthn/login/begin` | none (uses `loginChallengeId`) | Begin a passkey assertion to satisfy a paused login |
-| POST | `/v1/auth/{tier}/mfa/webauthn/login/finish` | none (uses both challenge ids) | Finish a passkey assertion; mints full token pair with `amr:[source, otp, webauthn]` |
+| POST | `/v1/auth/{tier}/mfa/webauthn/login/finish` | none (uses both challenge ids) | Finish a passkey assertion; mints full token pair with `amr:[source, otp, webauthn]`. Same completion re-check |
+
+**Completion re-check (both endpoints).** A login paused for MFA must still be an *allowed* login when its second factor lands — otherwise turning `passwordLoginEnabled{Admin,Client}` off leaves every in-flight password login able to complete for the next five minutes. `MFAChallenge` therefore carries `Audience` (`"operator"`/`"client"`, stamped by both producers) and `BreakGlassUsed` (whether the *initial* check was rescued by the operator break-glass — audit context only, never a standing permission), and `recheckPasswordChallenge` (`handlers/mfa_handler.go`, shared by `LoginVerify` and `LoginFinish`) re-evaluates `PasswordLoginDecision` **before** the factor is verified — so a disabled login can neither burn attempt budget nor probe factor state:
+
+- a challenge that is not password-sourced (`LoginMethod == "password"` ∨ `SourceAMR ∋ "pwd"`) is **untouched** — OAuth-sourced logins complete regardless of the password toggle;
+- **disabled** → the challenge is atomically consumed, **403** `auth.password_login_disabled`;
+- **policy outage** (read failure, or a nil policy service — missing wiring is an outage, never a pass) → **503** `auth.policy_unavailable` with the challenge **retained**, so a transient failure is retryable inside the original TTL;
+- **empty or unknown `Audience`** → a pre-toggle in-flight challenge: consumed, **401** with the generic "invalid or expired challenge" wording. Rollout therefore waits one 5-minute challenge TTL after deploy before exposing the switch;
+- **allowed** → the flow proceeds unchanged; the one-winner `Consume` stays where it was. The completion that wins it emits exactly one `auth.policy.break_glass_used` when either this decision or the challenge's stamped `BreakGlassUsed` was a rescue.
 
 `change-password` and the self-service MFA routes are deliberately global (no org context) because they're user-level flows.
 
@@ -540,18 +690,21 @@ And a public endpoint that completes a login after a partial response:
 - **Grace period defaults to 7 days** (legacy `MFAEnrollmentGraceWindow` constant; runtime value comes from `mfaEnrollmentGraceDays` on the MFA policy tab). A privileged user logging in without a factor has `User.MFAGraceStartedAt` stamped on that login (idempotent via `UserProvider.StartMFAGraceIfUnset`). Past the window, login returns 403 `mfa_enrollment_required`. Granting a privileged role via authz `CreateBinding` also eagerly starts the clock so the configured window begins at promotion, not next login. The master `mfaEnabled` flag short-circuits the requirement entirely without deleting existing enrollments.
 - **Login state machine** (`PasswordAuthService.completeLogin`; OAuth mirrors via `AuthService.evaluateMFAForOAuth`): (a) non-privileged → full token with `amr:["pwd"]`/`["oauth"]`; (b) privileged with factor → partial 200 response `{requiresMfa: true, mfaToken: <challengeId>}` and no access token — client must call `/v1/auth/mfa/login/verify`; (c) privileged without factor within grace → full token + `mfaEnrollmentRequired:true` + `mfaGraceExpiresAt`; (d) privileged without factor past grace → `ErrMFAEnrollmentRequired` → 403.
 - Factor secrets are AES-256-GCM encrypted with `MFA_SECRET_ENCRYPTION_KEY` (falls back to `OAUTH_TOKEN_ENCRYPTION_KEY` for single-key dev setups). Backup codes are argon2id hashed via the existing `PasswordService`.
-- Challenge state lives in Redis under `mfa:challenge:<uuid>` with a 5-minute TTL; after 5 failed verifications the challenge is deleted. Login challenges additionally carry `DeviceID`/`Platform`/`IPAddress`/`Fingerprint`/`SourceAMR` so the public login-verify endpoint can mint a token pair without re-posting the user's password.
+- Challenge state lives in Redis under `mfa:challenge:<uuid>` with a 5-minute TTL; after 5 failed verifications the challenge is deleted. Login challenges additionally carry `DeviceID`/`Platform`/`IPAddress`/`Fingerprint`/`SourceAMR` so the public login-verify endpoint can mint a token pair without re-posting the user's password, plus `Audience` + `BreakGlassUsed` for the completion re-check above.
 - **TOTP replay guard** — `MFAFactorDoc.LastUsedStep` advances via an atomic `AdvanceLastUsedStep` CAS in the repo (`$or: lastUsedStep < step OR $exists:false`). A captured code cannot be used twice within its 30-second window, whether by the same caller or a concurrent one.
 - `JWTClaims.AMR` (RFC 8176) and `JWTClaims.LastOTPAt` are emitted `omitempty` so pre-Block-A tokens still validate. Password login sets `amr:["pwd"]`, OAuth `amr:["oauth"]`, MFA verify sets `amr:[source,"otp"]` + `last_otp_at=now`, and the password-confirm bypass sets `amr:[source,"reauth"]` + `last_otp_at=now`. The local `"reauth"` marker is accepted by `amrSatisfiesMFA` so `RequireStepUp` treats it as a satisfied proof — `ConfirmPassword` is the gatekeeper: it refuses to mint a `reauth` token for users with any enrolled factor, so the marker can never bypass MFA-required scenarios.
 - `RoleMiddleware.RequireMFA()` is applied to the routes whose abuse MFA exists to prevent: authz role + binding mutations (create/update/delete-role, create/delete-binding), tenant scoped mutations (update/delete-org, update-plan, remove-member, create-invite), and module config writes (`update-module`, `update-module-environment`, `set-active-environment`). Read paths stay open. **The gate honours the `mfaEnabled` master switch**: when MFA is globally off (`AuthPolicyService.MFAEnabled` → false) `RequireMFA()` passes through, mirroring `MFARequired`. Without this a never-enrolled operator on an MFA-off install is deadlocked — their password-only token (`amr=["pwd"]`) can never satisfy the gate, so they can't perform the very module/config writes (e.g. enabling an addon, configuring SMTP) needed to run the platform. The switch is read via the wired `StepUpPolicy` (nil-tolerant: when no policy is wired, the gate keeps its legacy unconditional behaviour). `RequireStepUp` is **not** relaxed this way — it keeps demanding a fresh proof and instead offers the `password_confirm_required` reauth fallback for no-factor users.
-- `RoleMiddleware.RequireStepUp(maxAge)` is a stricter variant applied to catastrophic / irreversible actions (currently `POST /v1/auth/me/mfa/remove`, `POST /v1/admin/users/{id}/mfa/reset`, the self-service OAuth link/unlink + session revoke/revoke-all, and backup-code regeneration). It checks both that `amr` contains an MFA marker AND that `last_otp_at` is within `maxAge` of now — a session-long MFA proof is not enough. The middleware emits **three** distinct envelopes so the frontend can pick the right modal without a second round-trip:
+- `RoleMiddleware.RequireStepUp(maxAge)` is a stricter variant applied to catastrophic / irreversible actions (currently `POST /v1/auth/me/mfa/remove`, `POST /v1/admin/users/{id}/mfa/reset`, the self-service OAuth link/unlink + session revoke/revoke-all, and backup-code regeneration). It checks both that `amr` contains an MFA marker AND that `last_otp_at` is within `maxAge` of now — a session-long MFA proof is not enough. The middleware emits **four** distinct envelopes so the frontend can pick the right modal without a second round-trip:
   - **`code="step_up_required"`** (401) — user has an MFA factor; ask for a fresh OTP / passkey. The global `StepUpModal` drives the user through `/mfa/verify` (or WebAuthn assertion) and replays.
-  - **`code="password_confirm_required"`** (401) — user has **no** MFA factor enrolled AND the policy doesn't require them to. The `PasswordConfirmModal` posts the password to `/v1/auth/{tier}/me/password-confirm`; the response mints a fresh access token with `amr += "reauth"` + `last_otp_at = now`, which the middleware then accepts via `amrSatisfiesMFA` (the `"reauth"` marker is treated as a satisfied proof).
-  - **`code="mfa_enrollment_required"`** (403) — the user's role obligates MFA but they haven't enrolled. No bypass — the SPA nudges them to enroll a factor.
+  - **`code="password_confirm_required"`** (401) — user has **no** MFA factor enrolled, the policy doesn't require them to, AND the password is still an accepted credential for the token's audience. The `PasswordConfirmModal` posts the password to `/v1/auth/{tier}/me/password-confirm`; the response mints a fresh access token with `amr += "reauth"` + `last_otp_at = now`, which the middleware then accepts via `amrSatisfiesMFA` (the `"reauth"` marker is treated as a satisfied proof).
+  - **`code="mfa_enrollment_required"`** (403) — the user's role obligates MFA but they haven't enrolled, **or** the per-surface password method is disabled (`passwordLoginEnabled{Admin,Client}` = false) so no reconfirm can be offered. No bypass — the SPA nudges them to enroll a factor.
+  - **`code="auth.policy_unavailable"`** (503) — the password-method policy could not be evaluated on the no-factor branch: no `StepUpPolicy` is wired, or `PasswordReauthAllowed` returned an error. Retryable, and deliberately **not** a step-up prompt — an outage must never be dressed up as a user obligation (`mfa_enrollment_required`) or as a modal the user cannot satisfy.
 
-  The branching is fed by `SetMFAEnrollmentLookup` (per-tier `MFAFactorRepository.FindByUserAndType` for TOTP + WebAuthn), `SetStepUpPolicy` (the live `*AuthPolicyService`), and `SetUserProvider` (so a stale role on the JWT doesn't shadow a fresh policy check). Wired in `cmd/server/main.go` post-InitAll. Any lookup error fails closed to the legacy `step_up_required` path — a degraded Mongo must never silently weaken the gate.
+  **The `service` audience reaches this 503, and that is a real behaviour change — not an unreachable case.** The operator mux is mounted for **both** `operator` and `service` audiences (`cmd/server/main.go`), the enrollment lookup falls back to the operator `mfa_factors` repo for any audience that isn't `client` and so answers "no factor" for a service principal (`auth/module.go`), service-account tokens are minted by `GenerateAccessToken` with **no** `amr` and **no** `last_otp_at` (`services/service_account_service.go`) so `amrSatisfiesMFA` is always false and the gate always dispatches, and the service user's role is `guest` so `roleRequiresMFA` is false. Control therefore reaches `PasswordReauthAllowed(ctx, "service")`, which the adapter refuses as an unknown audience → 503. A service account hitting a `RequireStepUp` route (`POST`/`PATCH /v1/admin/service-accounts`, credential issue/revoke, `/v1/admin/users/{id}/mfa/reset`, …) used to get **401 `password_confirm_required`** and now gets **503 `auth.policy_unavailable`**. Neither outcome ever succeeded — service accounts carry no password hash, so the reconfirm endpoint would refuse them anyway — so this is not a capability or security regression, but it *is* reachable and the status code did change. There is **no** service-kind short-circuit in `internal/shared/middleware/`: giving non-`operator`/`client` audiences a definitive 4xx ("step-up is not available to this principal") is a contract decision the spec has not made, tracked as a follow-up for the spec owner rather than invented here.
 
-- **Password reconfirm endpoint** — `POST /v1/auth/{tier}/me/password-confirm` lives on `PasswordAuthHandler` (`handlers/password_handler.go`) and is mounted under `RequireGlobal()` only (no step-up gate; it's the bypass). The service-layer `PasswordAuthService.ConfirmPassword` refuses with `ErrPasswordConfirmUnavailable` → 409 `auth.password_confirm_unavailable` when the user has no password (pure-OAuth account) or has any MFA factor enrolled (defensive — a crafted direct call must not be able to downgrade an MFA-required user). Audit: emits `auth.password.reconfirmed` on success.
+  The branching is fed by `SetMFAEnrollmentLookup` (per-tier `MFAFactorRepository.FindByUserAndType` for TOTP + WebAuthn), `SetStepUpPolicy` (the live `*AuthPolicyService`), and `SetUserProvider` (so a stale role on the JWT doesn't shadow a fresh policy check). Wired in `cmd/server/main.go` post-InitAll. Any **enrollment-lookup** error fails closed to the legacy `step_up_required` path — a degraded Mongo must never silently weaken the gate; a **policy** error fails closed to the 503 above. `middleware.StepUpPolicy.PasswordReauthAllowed(ctx, audience string)` is the seam (`*AuthPolicyService.PasswordReauthAllowed` adapts strict `PasswordLoginEnabled` onto the middleware's string audience); its doc comment on the interface is the contract — there is no `middleware/CLAUDE.md`. The operator break-glass is **invisible** to it: a temporary override is not a durable login method, so it must not keep the password modal on offer.
+
+- **Password reconfirm endpoint** — `POST /v1/auth/{tier}/me/password-confirm` lives on `PasswordAuthHandler` (`handlers/password_handler.go`) and is mounted under `RequireGlobal()` only (no step-up gate; it's the bypass). The service-layer `PasswordAuthService.ConfirmPassword` refuses with `ErrPasswordConfirmUnavailable` → 409 `auth.password_confirm_unavailable` when the user has no password (pure-OAuth account), when the per-surface password method is disabled (`passwordLoginEnabled{Admin,Client}` = false — a credential the surface refuses cannot prove presence either, so it takes the *same* 409 branch as "no password hash"), or when the user has any MFA factor enrolled (defensive — a crafted direct call must not be able to downgrade an MFA-required user). The method-policy read is **strict**: the operator break-glass is invisible here, and a policy that cannot be read returns `ErrAuthPolicyUnavailable` → 503 `auth.policy_unavailable` via `mapPasswordError` rather than guessing. A `PasswordAuthService` built without `Policy`+`Audience` therefore 503s this endpoint — production wiring always supplies both, and a consumer-package test can use `services.NewAuthPolicyServiceForTest`. Audit: emits `auth.password.reconfirmed` on success.
 - **Session revocation list** — Redis-backed set at `auth:revoked:session:<sid>` checked on every authenticated request by both `AuthMiddleware` and the lightweight public-key-only `JWTValidator` (both satisfy `module.RoleMiddleware`). Populated on logout + change-password; payload is the reason string for operator debugging. Entries auto-expire after a **fixed** 24h + 1min — the maximum access-token lifetime the platform permits, plus clock skew — never a value derived from the live `accessTokenTTL`. Sizing the entry from the current policy value strands tokens on both sides of a policy change: raising the TTL leaves long tokens uncovered, lowering it expires the entry while tokens minted under the old value are still valid. `NewJWTService` clamps every effective access-token lifetime to 24h so the window is always sufficient. ADR-0017 D5. Fails open on Redis errors — a degraded Redis must not lock every user out. Logout invalidates the current sid only; `allDevices=true` still relies on refresh-token revocation (per-user-generation counter is a follow-up).
 - **Grace countdown on `/v1/auth/me/mfa`** — response now carries `requiresMfa` + `graceExpiresAt` computed from the user record + JWT memberships, so the frontend banner/countdown can render without relying on the one-shot login response.
 - **WebAuthn / passkeys** — second-factor enrollment under `services/webauthn_service.go` + `handlers/webauthn_handler.go`. Library: `github.com/go-webauthn/webauthn`. Configuration: `WEBAUTHN_RP_ID` (eTLD+1 host, no scheme/port) + `WEBAUTHN_RP_ORIGINS` (comma-separated full URLs). Both env vars are optional — if either is missing the module derives them from `FRONTEND_URL` (eg. `http://localhost:8080` → `rpId=localhost`, `origins=[http://localhost:8080]`); if neither resolves, WebAuthn is disabled and the endpoints don't mount. Credentials live as an embedded `webauthnCredentials[]` array on the same `*_mfa_factors` row (one row per user with `type=webauthn`); the (userUuid,type) unique index naturally allows a user to enroll both TOTP and passkeys. Login/step-up via passkey sets `amr=[..., "otp", "webauthn"]` so existing step-up middleware accepts the proof. The partial login response carries `webauthnAvailable: bool` so the verify page can offer the passkey button alongside the code field.
@@ -568,8 +721,10 @@ required for credential / session removal. Backup-codes regeneration
 lives on `MFAHandler` for cohesion with the rest of the MFA surface.
 
 The service layer reuses the lockout helper extracted from
-`AdminUnlinkOAuth` so a self-unlink that would leave the user with no
-usable login method is rejected with 409 `last_credential`. The
+`AdminUnlinkOAuth` — same usable-credential arithmetic, same
+`SetProviderUsability` prelude, same 503 on uncertainty — so a
+self-unlink that would leave the user with no usable login method is
+rejected with 409 `last_credential`. The
 companion **link** endpoint (`POST /me/oauth/link/{provider}`) mints a
 signed-state JWT with `Mode=link` + `LinkUserUUID=caller` so the
 single shared OAuth callback can bind the returning identity to the
@@ -594,10 +749,10 @@ as the admin paths.
 
 `handlers/admin_user_auth_handler.go` hosts four operator-tier admin endpoints under `/v1/admin/users/{userId}/...` that power the **Authentication Methods** card on `/admin/user/profile/:userId`. Each route is in its own router group with its own permission gate; only the unlink route adds `RequireStepUp(5m)`.
 
-- `GET .../auth-methods` — aggregates `User.PasswordHash` presence + `PasswordUpdatedAt`, MFA factor rows from `operator_mfa_factors`, OAuth identities from `User.OAuthLinks`, and email-verification + last-login state into one `models.AuthMethodsView`. Backed by `AuthService.GetUserAuthMethods`. Read-only — gated by `system.users.admin` rather than a new permission since reading is incidental to user administration.
-- `POST .../send-password-reset` — proxies to `iface.AdminAuthInviter.AdminTriggerPasswordReset` on the operator-tier `*PasswordAuthService`. No step-up — the action emits a notification, it does not read or mutate a credential.
+- `GET .../auth-methods` — aggregates `User.PasswordHash` presence + `PasswordUpdatedAt`, MFA factor rows from `operator_mfa_factors`, OAuth identities from `User.OAuthLinks`, and email-verification + last-login state into one `models.AuthMethodsView`. Backed by `AuthService.GetUserAuthMethods`. Read-only — gated by `system.users.admin` rather than a new permission since reading is incidental to user administration. **The view splits the password concept:** `hasPasswordSet` is hash presence only, `passwordUsableForLogin` is `hasPasswordSet ∧` the strict per-surface `passwordLoginEnabled{Admin,Client}` policy for this user's tier. "Set / change / last updated" UI reads `hasPasswordSet`; unlink and reset decisions read `passwordUsableForLogin`. `hasUsablePassword` survives one release as a **deprecated alias of `hasPasswordSet`** (not of usability) for wire compatibility. The policy read is strict and fails the whole call with 503 `auth.policy_unavailable` — an outage must not render an unlock the backend would refuse.
+- `POST .../send-password-reset` — proxies to `iface.AdminAuthInviter.AdminTriggerPasswordReset` on the operator-tier `*PasswordAuthService`. No step-up — the action emits a notification, it does not read or mutate a credential. `mapAdminInviterError` maps the per-surface method gate to **409** `auth.password_login_disabled` and an unestablishable policy to **503** `auth.policy_unavailable`. The client-user twin (`POST /v1/admin/client-users/{id}/send-password-reset`, user module `mapInviteErr`) answers identically, matching the **`iface`** sentinels (`iface.ErrPasswordLoginDisabled` / `iface.ErrAuthPolicyUnavailable`) with `errors.Is` — by identity, never by message, and the user module must not import `auth/services`. The auth package's `services.Err*` names are aliases of those same vars, so both halves are one identity.
 - `POST .../resend-verification` — same pattern via `AdminResendVerification`. Idempotent (200 with no action when already verified).
-- `DELETE .../oauth/{provider}` — backed by `AuthService.AdminUnlinkOAuth`. Service-layer safeguards: rejects `actorUUID == targetUUID` (`ErrAdminSelfAction` → 409 `self_action`) and rejects the operation when it would leave the user with no usable login method, i.e. `PasswordHash == "" && len(activeOAuthLinks) == 1` (`ErrLastCredentialRemoval` → 409 `last_credential`). Step-up gated because the action removes a credential.
+- `DELETE .../oauth/{provider}` — backed by `AuthService.AdminUnlinkOAuth`. Service-layer safeguards: rejects `actorUUID == targetUUID` (`ErrAdminSelfAction` → 409 `self_action`) and rejects the operation when it would leave the user with no **usable** login method (`ErrLastCredentialRemoval` → 409 `last_credential`). The guard counts usable credentials, not active rows: `locked := targetUsable ∧ (¬passwordUsable ∨ PasswordHash == "") ∧ remainingUsable == 0`, where `targetUsable` is the target link being active **and** its provider usable, `remainingUsable` counts the other active links whose provider is usable, and `passwordUsable` is the strict per-surface `passwordLoginEnabled{Admin,Client}` read (break-glass invisible). Consequences: a link whose provider is disabled or structurally unconfigured is **removable** and never satisfies the guard on its own; a password hash the surface refuses does not rescue a sole usable link. Both `AdminUnlinkOAuth` and `SelfUnlinkOAuth` precompute usability for every active link through `usableProvidersForLinks` **before** mutating — it calls the `SetProviderUsability` seam (wired in `module.go` over `OAuthConfigResolver.OAuthWebProviderUsable`, one closure shared by both tier bundles). Missing wiring or any policy/provider-config uncertainty refuses with `ErrAuthPolicyUnavailable` → 503 `auth.policy_unavailable` rather than counting a link it cannot vouch for. Step-up gated because the action removes a credential.
 
 Each successful action emits three audit lanes in parallel: (1) `slog.Info("auth_security_event", event=…)` for log shipping; (2) one row into `auth_security_events` via `securityEventRepo.Insert` (the auth-private audit collection — Phase 2.1); (3) one row into `compliance_audit_events` via the compliance `iface.AuditSink` when the compliance addon is enabled (Phase 6 of the /admin/users hardening). The compliance lane is driven by `authEventComplianceAction` (`services/auth_service.go`), which maps the internal event-type strings (`admin_password_reset_sent`, `admin_verification_resent`, `admin_oauth_unlink`, `admin_mfa_reset`, plus `self_oauth_unlink` / `self_oauth_link` / `self_session_revoke[_all]`) onto the dotted compliance vocabulary (`auth.password.reset_requested` / `auth.email.verify_resend` / `auth.oauth.unlinked` / `auth.mfa.reset` / `auth.oauth.unlinked.self` / …). Unmapped event-types still hit slog + `auth_security_events` but don't get duplicated to compliance — adding an event to the SOC2 view is a deliberate opt-in via the mapping function.
 

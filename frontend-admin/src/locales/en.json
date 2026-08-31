@@ -203,7 +203,10 @@
       "registerTitle": "Create account",
       "registerSubtitle": "Get started with Orkestra in a minute.",
       "forgotTitle": "Reset password",
-      "resetTitle": "Choose a new password"
+      "resetTitle": "Choose a new password",
+      "loginNoMethod": "No sign-in method is currently available on this console. Contact an administrator.",
+      "passwordLoginDisabled": "Email/password sign-in is disabled on this surface. Use a configured sign-in provider, or contact an administrator.",
+      "passwordBreakGlassActive": "Emergency access mode — email/password sign-in is temporarily restored for operators only. Repair the sign-in provider configuration, then disable the override."
     },
     "email": "Email",
     "password": "Password",
@@ -358,6 +361,7 @@
     },
     "errors": {
       "missingFields": "Please enter both email and password.",
+      "invalidEmail": "Enter a valid email address.",
       "fillRequiredFields": "Please fill in all required fields.",
       "passwordTooShort": "Password must be at least {{count}} characters.",
       "acceptTerms": "You must accept the terms to continue.",
@@ -552,6 +556,7 @@
         "passwordAgeKnown_one": "Password updated {{count}} day ago",
         "passwordAgeKnown_other": "Password updated {{count}} days ago",
         "passwordAgeUnknown": "Password update date unknown",
+        "passwordKeptNotice": "— sign-in with it is disabled on this surface",
         "oauthLinked": "Sign-in providers:"
       }
     },
@@ -1187,6 +1192,7 @@
     "passwordTab": {
       "title": "Change password",
       "ssoOnlyHint": "Your account uses a single sign-on provider only. Set a password here to add a second login method.",
+      "keptNotice": "Email/password sign-in is disabled on this surface; your stored password is retained for a later re-enable.",
       "labelCurrent": "Current password",
       "labelNew": "New password",
       "labelConfirm": "Confirm new password",
@@ -1271,6 +1277,7 @@
       "emptyHasMore": "Use the “Link a sign-in” button above to add one.",
       "emptyAllLinked": "All supported providers have been linked.",
       "onlyCredentialWarning": "This is your only login method. Unlinking it would lock you out — set a password first.",
+      "onlyCredentialWarningPasswordDisabled": "This is your only sign-in method accepted on this surface — email/password sign-in is disabled here, so unlinking it would lock you out. Link another provider first.",
       "colProvider": "Provider",
       "colEmail": "Email",
       "colLinked": "Linked",
@@ -1863,6 +1870,7 @@
       "passwordLastChanged": "Last changed {{date}}",
       "passwordOauthOnly": "No password set — user signs in via OAuth only.",
       "passwordSendResetButton": "Send password-reset email",
+      "resetBlockedPolicy": "Email/password sign-in is disabled on this user's surface — a reset link would mint a credential the surface refuses.",
       "emailTitle": "Email verification",
       "emailBadgeVerified": "Verified",
       "emailBadgeUnverified": "Unverified",
@@ -1893,6 +1901,7 @@
       "oauthLinkedAt": "linked {{date}}",
       "oauthBlockSelf": "You cannot unlink your own OAuth identity from the admin surface.",
       "oauthBlockOnlyCredential": "Send a password-reset first to keep the account accessible.",
+      "oauthBlockOnlyCredentialPasswordDisabled": "This is the only sign-in method this surface currently accepts — email/password sign-in is disabled here, so unlinking it would lock the user out. Re-enable password sign-in for this surface, or have the user link another provider, before unlinking.",
       "oauthActionsAria": "actions for {{provider}}",
       "oauthUnlinkMenuItem": "Unlink…",
       "unlinkConfirmTitle": "Unlink {{provider}}?",

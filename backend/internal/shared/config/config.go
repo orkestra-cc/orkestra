@@ -135,6 +135,13 @@ type AuthConfig struct {
 	Discord                 DiscordOAuthConfig
 	GitHub                  GitHubOAuthConfig
 	AllowLocalhostRedirects bool // Allow localhost OAuth redirects (should be false in production)
+	// OperatorPasswordLoginBreakGlass mirrors AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS:
+	// a boot-time, operator-login-only override of passwordLoginEnabledAdmin
+	// (spec §4.2). It never opens client login, registration, resets,
+	// password-confirm or unlink decisions, and never bypasses the
+	// loginEnabledAdmin maintenance switch or the MFA/low-risk/RBAC gates
+	// on the subsequent config repair.
+	OperatorPasswordLoginBreakGlass bool
 }
 
 type JWTConfig struct {
@@ -344,7 +351,8 @@ func Load() (*Config, error) {
 			ClientSecret: getEnv("OAUTH_GITHUB_CLIENT_SECRET", ""),
 			RedirectURL:  getEnv("OAUTH_GITHUB_REDIRECT_URL", "http://localhost:3000/auth/oauth/github/callback"),
 		},
-		AllowLocalhostRedirects: getEnvAsBool("ALLOW_LOCALHOST_REDIRECTS", true), // Default true for development
+		AllowLocalhostRedirects:         getEnvAsBool("ALLOW_LOCALHOST_REDIRECTS", true), // Default true for development
+		OperatorPasswordLoginBreakGlass: getEnvAsBool("AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS", false),
 	}
 
 	config.Rate = RateLimitConfig{

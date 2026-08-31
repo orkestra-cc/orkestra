@@ -12,6 +12,7 @@ import (
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -182,6 +183,9 @@ func mapAdminUserAuthError(err error) error {
 		return nil
 	}
 	switch {
+	case errors.Is(err, services.ErrAuthPolicyUnavailable):
+		return errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
+			"Sign-in policy is temporarily unavailable; try again shortly.")
 	case errors.Is(err, services.ErrLastCredentialRemoval):
 		return huma.NewError(http.StatusConflict, "last_credential",
 			&huma.ErrorDetail{Message: "user has no other login method — send a password reset first"})
@@ -206,6 +210,14 @@ func mapAdminUserAuthError(err error) error {
 func mapAdminInviterError(err error, generic string) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, services.ErrPasswordLoginDisabled) {
+		return errcode.Conflict(errcode.AuthPasswordLoginDisabled,
+			"Email/password sign-in is disabled on this user's surface; a reset link would mint a credential the surface refuses. Re-enable the method first.")
+	}
+	if errors.Is(err, services.ErrAuthPolicyUnavailable) {
+		return errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
+			"Sign-in policy is temporarily unavailable; try again shortly.")
 	}
 	if msg := err.Error(); msg == "user not found" {
 		return huma.Error404NotFound("user not found")

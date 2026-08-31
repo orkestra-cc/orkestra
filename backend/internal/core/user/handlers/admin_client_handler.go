@@ -583,6 +583,14 @@ func mapInviteErr(err error, generic string) error {
 	case errors.Is(err, services.ErrInvalidInput):
 		return huma.Error400BadRequest("Invalid user id", err)
 	}
+	if errors.Is(err, iface.ErrPasswordLoginDisabled) {
+		return errcode.Conflict(errcode.AuthPasswordLoginDisabled,
+			"Email/password sign-in is disabled on the client surface; a reset link would mint a credential the surface refuses. Re-enable the method first.")
+	}
+	if errors.Is(err, iface.ErrAuthPolicyUnavailable) {
+		return errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
+			"Sign-in policy is temporarily unavailable; try again shortly.")
+	}
 	// ErrNotificationDown lives in auth/services and we don't import it
 	// from here — match by message so we still surface 503 cleanly.
 	if msg := err.Error(); msg == "notifications disabled — cannot send email" {

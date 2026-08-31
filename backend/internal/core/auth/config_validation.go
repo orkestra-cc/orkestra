@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
-
-var _ module.HasConfigValidator = (*AuthModule)(nil)
 
 // durationBound is one admin-editable duration that governs credentials
 // already in circulation, and therefore cannot be left unbounded.
@@ -45,17 +45,26 @@ var authDurationBounds = []durationBound{
 	},
 }
 
-// ValidateConfig rejects malformed or out-of-range duration values before
-// they are persisted, so the value the admin UI displays is the value in
-// force. It is the write half of ADR-0017 D6; the read half is the
-// clamping in services.clampPersistedDuration, which stays as a defence
-// for values written by an older release or directly to Mongo.
-//
-// An empty value is always accepted: emptiness is a decision with a
-// field-specific meaning (accessTokenTTL falls through to the
-// environment, passwordResetTokenTTL uses its 30-minute default,
-// sessionAbsoluteTTL disables the cap), never an omission to reject.
-func (m *AuthModule) ValidateConfig(_ context.Context, values map[string]string) error {
+var _ module.HasConfigSnapshotValidator = (*AuthModule)(nil)
+
+// ValidateConfigSnapshot judges the complete target snapshot on all three
+// mutation surfaces (active PATCH, named-environment PATCH, activation —
+// spec §4.5): the duration bounds of ADR-0017 D6, then the login-method
+// anti-lockout invariant of the password-login toggle (spec §4.4). The
+// legacy value-only ValidateConfig hook is gone: the invariant depends on
+// secret PRESENCE, which only the snapshot carries — no secret value
+// crosses this boundary.
+func (m *AuthModule) ValidateConfigSnapshot(_ context.Context, snap module.ConfigValidationSnapshot) error {
+	if err := validateAuthDurations(snap.Values); err != nil {
+		return err
+	}
+	return validateLoginMethodInvariant(snap, services.ReadableNonEmptyFile)
+}
+
+// validateAuthDurations is the ValidateConfig loop verbatim: an empty value
+// is always accepted (emptiness has field-specific meaning), a present
+// malformed or out-of-range duration is a 422 naming the field.
+func validateAuthDurations(values map[string]string) error {
 	for _, b := range authDurationBounds {
 		raw, present := values[b.key]
 		if !present {
@@ -80,4 +89,108 @@ func (m *AuthModule) ValidateConfig(_ context.Context, values map[string]string)
 		}
 	}
 	return nil
+}
+
+// loginMethodSurfaces are the schema-key suffixes of the two tenancy
+// surfaces (§4.4: S ∈ {Admin, Client}).
+var loginMethodSurfaces = []string{"Admin", "Client"}
+
+// validateLoginMethodInvariant enforces, per surface S:
+//
+//	valid(S) := passwordOn(S) ∨ (oauthOn(S) ∧ autoLink)
+//
+// judged from the TARGET snapshot's raw values (strict booleans, schema
+// defaults for absent keys), effective values (EnvVar/default fallback for
+// the structural fields) and secret presence — never from the active
+// profile, never from a secret value. Malformed booleans among the eleven
+// participating keys are rejected up-front naming that key (edge #29);
+// only the cross-field lockout failure names passwordLoginEnabled<S> and
+// carries the stable auth.login_method_lockout code.
+func validateLoginMethodInvariant(snap module.ConfigValidationSnapshot, probe services.KeyFileProbe) error {
+	autoLink, err := snapshotBool(snap.Values, "oauthAutoLinkByEmail", true)
+	if err != nil {
+		return err
+	}
+	// Parse all ten surface-scoped booleans first so a malformed value is
+	// refused on every write, not only when its surface happens to be off.
+	passwordOn := map[string]bool{}
+	providerOn := map[string]map[string]bool{}
+	for _, surface := range loginMethodSurfaces {
+		on, err := snapshotBool(snap.Values, "passwordLoginEnabled"+surface, true)
+		if err != nil {
+			return err
+		}
+		passwordOn[surface] = on
+		providerOn[surface] = map[string]bool{}
+		for _, p := range services.WebProviderOrder {
+			pv, err := snapshotBool(snap.Values, string(p)+"Enabled"+surface, false)
+			if err != nil {
+				return err
+			}
+			providerOn[surface][string(p)] = pv
+		}
+	}
+	for _, surface := range loginMethodSurfaces {
+		if passwordOn[surface] {
+			continue
+		}
+		usable := false
+		for _, p := range services.WebProviderOrder {
+			if !providerOn[surface][string(p)] {
+				continue
+			}
+			if _, ok := providerStructuralFromSnapshot(snap, p, probe); ok {
+				usable = true
+				break
+			}
+		}
+		if usable && autoLink {
+			continue
+		}
+		return &module.ConfigValidationError{
+			Field: "passwordLoginEnabled" + surface,
+			Code:  errcode.AuthLoginMethodLockout,
+			Message: "turning email/password sign-in off would lock this surface out: keep the password method enabled, " +
+				"or leave at least one fully configured OAuth provider enabled for this surface " +
+				"(client ID, redirect URL and secret — for Apple also team ID, key ID and a private key) " +
+				"together with 'Auto-link OAuth provider to existing email account'",
+		}
+	}
+	return nil
+}
+
+// snapshotBool applies §4.4's strictBool over a raw snapshot value: absent
+// key → schema default; present canonical boolean → its value; present
+// malformed or empty → 422 naming the key. Never readBool.
+func snapshotBool(values map[string]string, key string, def bool) (bool, error) {
+	raw, present := values[key]
+	if !present {
+		return def, nil
+	}
+	v, err := services.StrictBool(raw)
+	if err != nil {
+		return false, &module.ConfigValidationError{
+			Field:   key,
+			Message: "must be exactly true or false",
+		}
+	}
+	return v, nil
+}
+
+// providerStructuralFromSnapshot mirrors usableFromView's field mapping
+// (oauth_provider_usability.go) over a VALIDATION snapshot instead of the
+// active view, so the validator and the runtime agree field-for-field.
+func providerStructuralFromSnapshot(snap module.ConfigValidationSnapshot, p models.OAuthProvider, probe services.KeyFileProbe) (string, bool) {
+	fields := services.ProviderStructuralFields{
+		ClientID:       snap.EffectiveValues[string(p)+"ClientId"],
+		RedirectURL:    snap.EffectiveValues[string(p)+"RedirectURL"],
+		SecretPresent:  snap.SecretPresent[string(p)+"ClientSecret"],
+		TeamID:         snap.EffectiveValues["appleTeamId"],
+		KeyID:          snap.EffectiveValues["appleKeyId"],
+		PrivateKeyPath: snap.EffectiveValues["applePrivateKeyPath"],
+	}
+	if p == models.OAuthProviderApple {
+		fields.SecretPresent = snap.SecretPresent["applePrivateKey"]
+	}
+	return services.ProviderStructurallyConfigured(p, fields, probe)
 }

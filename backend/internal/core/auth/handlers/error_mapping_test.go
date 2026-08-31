@@ -55,6 +55,8 @@ func TestMapPasswordError_KnownCodes(t *testing.T) {
 		{"EmailDomainNotAllowed → 403 auth.email_domain_not_allowed", services.ErrEmailDomainNotAllowed, http.StatusForbidden, errcode.AuthEmailDomainNotAllowed},
 		{"LoginDisabled → 403 auth.login_disabled", services.ErrLoginDisabled, http.StatusForbidden, errcode.AuthLoginDisabled},
 		{"CountryBlocked → 403 auth.country_blocked", services.ErrCountryBlocked, http.StatusForbidden, errcode.AuthCountryBlocked},
+		{"password login disabled", services.ErrPasswordLoginDisabled, http.StatusForbidden, errcode.AuthPasswordLoginDisabled},
+		{"policy unavailable", services.ErrAuthPolicyUnavailable, http.StatusServiceUnavailable, errcode.AuthPolicyUnavailable},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

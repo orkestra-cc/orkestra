@@ -146,3 +146,28 @@ func TestMFAChallengeConsume_DoesNotDependOnBestEffortDelete(t *testing.T) {
 		t.Fatalf("second Consume = %v, want ErrMFAChallengeNotFound", err)
 	}
 }
+
+func TestBeginLogin_RoundTripsAudienceAndBreakGlass(t *testing.T) {
+	svc := NewMFAChallengeService(NewMemoryOAuthStateStore())
+	ch, err := svc.BeginLogin(context.Background(), LoginChallengeInput{
+		UserUUID:       "u-1",
+		SessionID:      "sid-1",
+		SourceAMR:      []string{"pwd"},
+		LoginMethod:    "password",
+		Audience:       "operator",
+		BreakGlassUsed: true,
+	})
+	if err != nil {
+		t.Fatalf("begin login: %v", err)
+	}
+	if ch.Audience != "operator" || !ch.BreakGlassUsed {
+		t.Fatalf("BeginLogin must copy the new fields, got %+v", ch)
+	}
+	got, err := svc.Peek(context.Background(), ch.ID)
+	if err != nil {
+		t.Fatalf("peek: %v", err)
+	}
+	if got.Audience != "operator" || !got.BreakGlassUsed {
+		t.Fatalf("audience/break-glass must survive the JSON round-trip, got %+v", got)
+	}
+}

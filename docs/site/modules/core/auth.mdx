@@ -25,6 +25,79 @@ Some surfaces exist on one tier only: session listing and OAuth link/unlink are 
 
 Web OAuth is tier-aware end to end: a flow started on the client surface lands on the client SPA and a flow started on the console lands on the console, each under one closed callback contract (`success`/`provider`, an allowlisted `error` code, or an MFA continuation carried in the URL fragment) that never contains a token, an email or a user id. Because every provider redirects to the operator host and that host cannot set a client cookie, a client-tier login finishes through a single-use relay on the client API host, which also verifies that the browser completing the flow is the one that started it. A provider is offered to a surface only when its toggle is on **and** every field the flow needs is present; a defect on one provider removes that provider alone, while an unreadable auth document answers 503 everywhere so a configuration outage can never quietly widen access. An identity that has never been linked is matched to an existing account — or allowed to sign up — only with an address the identity provider itself marked verified.
 
+## SSO-only surface
+
+Either surface can be made **OAuth-only**: `passwordLoginEnabledAdmin` and
+`passwordLoginEnabledClient` (Login & Sessions, both default `true`) decide
+whether email/password is still an accepted way to sign in there. They are
+independent — the console can go SSO-only while the client app keeps
+passwords, or the reverse.
+
+**Turning one off is guarded so it cannot lock the surface out.** A config
+write that would leave a surface with nothing to sign in with is refused
+with **422 `auth.login_method_lockout`**, on every mutation path (an
+ordinary save, a save to a named environment, and activating an
+environment). There are exactly two ways to satisfy the guard for a
+surface: keep the password method enabled, **or** leave at least one
+OAuth provider both enabled for that surface *and* fully configured for
+it — client ID, redirect URL and secret; for Apple also team ID, key ID
+and a private key — **together with** "Auto-link OAuth provider to
+existing email account". Auto-link is part of the exit because it is what
+lets an account that was created with a password still be reached by its
+provider-verified email; without it, an SSO-only surface can be a closed
+door for everyone already registered. The guard reads the configuration
+you are about to save, not the one currently live, and it judges secret
+*presence* only — no secret value is involved.
+
+**The read is strict and fails closed.** The persisted value is parsed as
+a literal `true`/`false`; anything else — a malformed value, a missing
+`auth` config document, an unreachable store — answers **503
+`auth.policy_unavailable`** rather than assuming a default. An outage
+never re-opens a method an operator turned off, and it is never reported
+as a rejected password either.
+
+**What the switch blocks is new authentication, not existing access.**
+With it off for a surface, `login`, `register` and `forgot-password` on
+that surface answer **403 `auth.password_login_disabled`**; a login already
+paused for MFA cannot complete (the second factor is re-checked against
+the policy before it is even verified); an operator's *send password
+reset* for a user on that surface answers **409** rather than mailing a
+link for a method the surface refuses; step-up re-authentication stops
+offering the password-reconfirm fallback; and a password no longer counts
+as a credential when deciding whether unlinking an OAuth identity would
+strand the account. Two operator-only bootstrap paths stay open by
+design — the very first account on a fresh install, and the setup
+wizard's initial administrator — so a fresh install can never be
+unreachable. `reset-password`, `accept-invite`, `verify-email` and
+`change-password` also stay open: they redeem or replace a credential
+that already exists, and closing them would strand a reset already in
+flight.
+
+**Existing sessions are deliberately not revoked.** Flipping the switch
+changes what can authenticate *next*; anyone already signed in with a
+password stays signed in until their session ends normally. Revoking them
+is a separate, deliberate action. Two capabilities are named as
+follow-ups rather than shipped here: a "revoke every password-opened
+session on this surface" admin action (sessions already record the login
+method, so it is feasible), and consuming an invite token inside the
+OAuth callback so SSO-only clients need not lean on auto-link by email at
+all.
+
+The unauthenticated pages read the resulting state from `GET
+/v1/auth/{tier}/policy`, which carries `passwordLoginEnabled` for the
+surface, so the login page hides the password form instead of showing one
+that would 403 on submit. The **operator console** does this today; the
+client SPA gains the same gating with the client OAuth login work — until
+then it reads only `loginEnabled` / `registrationEnabled` from the same
+endpoint, so its login page still renders a form the backend refuses with
+403 on submit.
+
+If the OAuth configuration then breaks on an SSO-only **console**, the
+operator break-glass restores password login for `POST
+/v1/auth/operator/login` alone, without reopening signups, resets or the
+client surface — see [Going SSO-only](/operating/oauth-providers#going-sso-only)
+for the procedure and the drill.
+
 ## Service accounts
 
 A machine caller — an integration, a CI job, a fork's own backend — authenticates with the OAuth2 **client-credentials** grant. Adopted in [ADR-0014](/adrs/service-accounts-client-credentials); operator console at `/admin/service-accounts`.
@@ -170,7 +243,7 @@ Keys in the **system set** are granted by the `super_admin` / `administrator` / 
 
 ## Config
 
-auth is by far the largest configuration surface in the base — 63 fields at `/admin/modules/auth`, arranged into a group rail: **Registration**, **Login & Sessions**, **Password Policy**, **MFA**, **OAuth Providers** (with Google, Apple, GitHub, and Discord as child nodes), **Anti-abuse & Notifications**, and **Sessions & Account**. Fields are seeded from their `EnvVar` on first boot and owned by the ConfigService thereafter — see [Module configuration](/operating/module-configuration) and [OAuth providers](/operating/oauth-providers) for the operator walkthrough.
+auth is by far the largest configuration surface in the base — 65 fields at `/admin/modules/auth`, arranged into a group rail: **Registration**, **Login & Sessions**, **Password Policy**, **MFA**, **OAuth Providers** (with Google, Apple, GitHub, and Discord as child nodes), **Anti-abuse & Notifications**, and **Sessions & Account**. Fields are seeded from their `EnvVar` on first boot and owned by the ConfigService thereafter — see [Module configuration](/operating/module-configuration) and [OAuth providers](/operating/oauth-providers) for the operator walkthrough.
 
 The **Login & Sessions** group's `sessionAbsoluteTTL` is the admin-facing field behind the absolute cap — see [Session lifetime](#session-lifetime) above for what it does and enforces.
 

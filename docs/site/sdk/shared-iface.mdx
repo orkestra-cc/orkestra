@@ -33,6 +33,21 @@ A representative slice, not the full list — read the package for the rest.
 
 `KMSProvider.CreateKey` is idempotent under concurrency, not just for sequential callers: two calls racing to create a key for the same `tenantUUID` must both return the single winning `keyID`, never mint two DEKs for one tenant. The in-tree `compliance` implementation backs this with the collection's unique `tenantUuid` index plus a duplicate-key reread; any other implementation of `KMSProvider` (a remote HTTP-backed client, say) must uphold the same guarantee, since a resumable operation (like tenant provisioning) may call `CreateKey` more than once for the same tenant.
 
+## Error sentinels
+
+A representative slice — sentinels declared beside the interface whose consumers
+must match them across the module boundary with `errors.Is`.
+
+- `ErrPasswordLoginDisabled` — the email/password method is administratively
+  disabled for the target user's surface; the admin send-password-reset routes
+  answer 409 `auth.password_login_disabled` with it.
+- `ErrAuthPolicyUnavailable` — a persisted sign-in policy could not be read or
+  parsed; consumers fail closed with 503 `auth.policy_unavailable`.
+- `ErrKMSKeyNotFound` — the precedent for the pattern: a per-tenant key lookup
+  found nothing, either because the key never existed or because it was
+  shredded; callers branch on it without importing the `compliance`
+  implementation.
+
 ## Reserved for a fork's addons
 
 [ADR-0006](/adrs/collapse-to-core-only-base) collapsed the base to core-only, but kept the interfaces the removed verticals used. Nothing in the base implements these — they are the shape a fork's addon satisfies so it plugs into the same seam:

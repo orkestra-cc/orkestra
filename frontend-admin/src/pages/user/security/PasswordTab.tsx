@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { Alert, Button, Card, Form, Spinner } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import {
+  passwordUiVisible,
   useChangePasswordMutation,
   useGetAuthPolicyQuery
 } from 'store/api/authApi';
@@ -26,7 +27,10 @@ const PasswordTab = () => {
   const [error, setError] = useState<string | null>(null);
 
   const minLength = policy?.passwordMinLength ?? 10;
-  const hasPassword = authMethods?.hasUsablePassword ?? true;
+  const hasPassword = authMethods?.hasPasswordSet ?? true;
+  const passwordKeptButUnusable =
+    authMethods?.hasPasswordSet &&
+    authMethods?.passwordUsableForLogin === false;
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -70,7 +74,12 @@ const PasswordTab = () => {
         </Card.Title>
       </Card.Header>
       <Card.Body>
-        {!hasPassword && (
+        {passwordKeptButUnusable && (
+          <Alert variant="info" className="mb-3">
+            {t('userSecurity.passwordTab.keptNotice')}
+          </Alert>
+        )}
+        {!hasPassword && passwordUiVisible(policy) && (
           <Alert variant="info" className="fs-10">
             {t('userSecurity.passwordTab.ssoOnlyHint')}
           </Alert>

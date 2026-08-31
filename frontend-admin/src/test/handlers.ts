@@ -19,7 +19,9 @@ export const resetCapturedRequests = () => {
 // Default empty self-auth-methods. Tests that need a populated state
 // pass an override to selfAuthMethodsHandler.
 export const emptySelfAuthMethods = {
-  hasUsablePassword: true,
+  hasPasswordSet: true,
+  passwordUsableForLogin: true,
+  hasUsablePassword: true, // deprecated alias, mirrors hasPasswordSet
   emailVerified: true,
   mfaRequired: false,
   mfaFactors: [] as Array<{
@@ -78,6 +80,24 @@ export const trustedDevicesHandler = (
 ) =>
   http.get(url('/v1/auth/operator/me/devices/trust'), () =>
     HttpResponse.json(body)
+  );
+
+// --- Public auth policy (/v1/auth/operator/policy) ---
+
+// Operator /policy with everything enabled; per-test overrides flip the
+// PR 3 password-login fields.
+export const operatorPolicyHandler = (
+  overrides: Record<string, unknown> = {}
+) =>
+  http.get(url('/v1/auth/operator/policy'), () =>
+    HttpResponse.json({
+      registrationEnabled: true,
+      loginEnabled: true,
+      passwordMinLength: 10,
+      passwordLoginEnabled: true,
+      passwordLoginBreakGlassEffective: false,
+      ...overrides
+    })
   );
 
 // Default handlers used by every test unless overridden. Keep this list

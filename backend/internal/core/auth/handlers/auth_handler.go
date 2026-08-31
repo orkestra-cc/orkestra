@@ -347,6 +347,9 @@ type GetAuthPolicyResponse struct {
 		PasswordRequireLower  bool `json:"passwordRequireLower" doc:"Whether the signup form should advertise a lowercase requirement"`
 		PasswordRequireDigit  bool `json:"passwordRequireDigit" doc:"Whether the signup form should advertise a digit requirement"`
 		PasswordRequireSymbol bool `json:"passwordRequireSymbol" doc:"Whether the signup form should advertise a symbol requirement"`
+
+		PasswordLoginEnabled             *bool `json:"passwordLoginEnabled" doc:"Persisted per-surface email/password policy. Null ONLY when the policy store is unreadable while the operator break-glass is active — the emergency case; every ordinary read is non-null."`
+		PasswordLoginBreakGlassEffective bool  `json:"passwordLoginBreakGlassEffective" doc:"Operator endpoint only: the boot-time break-glass override is set AND the persisted policy is false or unreadable, so the console must render the labelled emergency login form. Always false on the client endpoint."`
 	}
 }
 
@@ -373,6 +376,26 @@ func (h *AuthHandler) GetAuthPolicy(ctx context.Context, _ *GetAuthPolicyRequest
 	resp.Body.PasswordRequireLower = pp.RequireLower
 	resp.Body.PasswordRequireDigit = pp.RequireDigit
 	resp.Body.PasswordRequireSymbol = pp.RequireSymbol
+
+	// §4.9: the new pair is STRICT — the display contract must never show
+	// a working password form because a read failed. A read error without
+	// the operator override is a retryable 503; with it, the emergency
+	// form must stay reachable, so the unknown state is explicit null.
+	operatorSurface := audience == services.PolicyAudienceOperator
+	enabled, perr := h.policy.PasswordLoginEnabled(ctx, audience)
+	switch {
+	case perr == nil:
+		resp.Body.PasswordLoginEnabled = &enabled
+		if operatorSurface && !enabled && h.policy.OperatorBreakGlassConfigured() {
+			resp.Body.PasswordLoginBreakGlassEffective = true
+		}
+	case operatorSurface && h.policy.OperatorBreakGlassConfigured():
+		resp.Body.PasswordLoginBreakGlassEffective = true
+	default:
+		return nil, errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
+			"Sign-in policy is temporarily unavailable; try again shortly.")
+	}
+
 	return resp, nil
 }
 

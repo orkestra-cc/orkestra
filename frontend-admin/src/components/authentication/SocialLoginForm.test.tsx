@@ -148,3 +148,42 @@ describe('SocialLoginForm', () => {
     warnSpy.mockRestore();
   });
 });
+
+describe('onProvidersResolved (PR 3 §4.10)', () => {
+  it('fires with the filtered count when the query resolves', async () => {
+    server.use(
+      http.get('*/v1/auth/operator/providers', () =>
+        HttpResponse.json({ providers: ['google', 'github', 'not-a-provider'] })
+      )
+    );
+    const resolved = vi.fn();
+    renderWithProviders(<SocialLoginForm onProvidersResolved={resolved} />);
+    await screen.findByRole('button', { name: /google/i });
+    await waitFor(() => expect(resolved).toHaveBeenCalledWith(2));
+  });
+
+  it('fires with 0 on a resolved-empty list', async () => {
+    server.use(
+      http.get('*/v1/auth/operator/providers', () =>
+        HttpResponse.json({ providers: [] })
+      )
+    );
+    const resolved = vi.fn();
+    renderWithProviders(<SocialLoginForm onProvidersResolved={resolved} />);
+    await waitFor(() => expect(resolved).toHaveBeenCalledWith(0));
+  });
+
+  it('never fires on a query error — an outage is not "no method"', async () => {
+    server.use(
+      http.get('*/v1/auth/operator/providers', () =>
+        HttpResponse.json({ detail: 'boom' }, { status: 503 })
+      )
+    );
+    const resolved = vi.fn();
+    renderWithProviders(<SocialLoginForm onProvidersResolved={resolved} />);
+    // auth.social.loadError, en.json:340: "Could not load the social
+    // sign-in options. Please try again."
+    await screen.findByText(/could not load the social sign-in options/i);
+    expect(resolved).not.toHaveBeenCalled();
+  });
+});

@@ -4,6 +4,7 @@ import (
 	"context"
 	stderrors "errors"
 	"testing"
+	"time"
 
 	"github.com/orkestra/backend/internal/core/auth/models"
 )
@@ -141,5 +142,30 @@ func TestMergeAMRWithReauth_AppendsAndDedupes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// PR 3 §4.6: a password that is not an accepted credential cannot be a
+// proof of presence either. Same 409 branch as "no password hash";
+// break-glass is ignored; an unreadable policy is a 503, not a guess.
+func TestConfirmPassword_MethodDisabledIsUnavailable(t *testing.T) {
+	env := newGatesEnv(t, PolicyAudienceOperator, passwordOff("Admin"), nil)
+	env.policy.SetOperatorBreakGlass(true) // must be invisible here
+	u := env.hashedUser("op@example.com", "correct horse battery staple")
+	_, err := env.auth.ConfirmPasswordWithSecurity(context.Background(), u.UUID, "correct horse battery staple",
+		[]string{"pwd"}, &models.DeviceInfo{}, &models.SecurityContext{SessionID: "sid-1", Timestamp: time.Now()})
+	if !stderrors.Is(err, ErrPasswordConfirmUnavailable) {
+		t.Fatalf("want ErrPasswordConfirmUnavailable, got %v", err)
+	}
+}
+
+func TestConfirmPassword_PolicyOutageIs503Shaped(t *testing.T) {
+	env := newGatesEnv(t, PolicyAudienceOperator, nil, nil)
+	u := env.hashedUser("op@example.com", "correct horse battery staple")
+	env.policy.cs = &stubReader{rawErr: stderrors.New("mongo down")}
+	_, err := env.auth.ConfirmPasswordWithSecurity(context.Background(), u.UUID, "correct horse battery staple",
+		[]string{"pwd"}, &models.DeviceInfo{}, &models.SecurityContext{SessionID: "sid-1", Timestamp: time.Now()})
+	if !stderrors.Is(err, ErrAuthPolicyUnavailable) {
+		t.Fatalf("want ErrAuthPolicyUnavailable, got %v", err)
 	}
 }
