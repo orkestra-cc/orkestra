@@ -176,7 +176,7 @@ When `GetUserForAuth` finds no user, the password service runs `Verify` against 
 4. After 5 consecutive misses, `User.LockedUntil` is set 15 minutes in the future and the handler short-circuits with `429`.
 5. On success: failed counter cleared, hash rehashed if needed, `AuthSessionDoc{LoginMethod="password"}` written for audit, **state machine forks on MFA policy** (see §7), tokens issued, refresh cookie set on the audience-correct domain. Inactive users receive no credentials.
 
-The same policy is the reason the login page can render honestly rather than guessing: `GET /v1/auth/{tier}/policy` carries `passwordLoginEnabled` for the surface, alongside `passwordLoginBreakGlassEffective` — only ever true on the operator endpoint, where it tells the console to render the labelled emergency form, so an SSO-only surface hides the password form instead of showing one that would 403 on submit.
+The same policy is the reason the login page can render honestly rather than guessing: `GET /v1/auth/{tier}/policy` carries `passwordLoginEnabled` for the surface, alongside `passwordLoginBreakGlassEffective` — only ever true on the operator endpoint, where it tells the console to render the labelled emergency form, so an SSO-only surface hides the password form instead of showing one that would 403 on submit. That is the **operator console** today; the client SPA still reads only `loginEnabled` / `registrationEnabled` and gains the same gating with the client OAuth login work — until then its login page renders a form the backend refuses with 403 on submit.
 
 ### Verification + reset
 

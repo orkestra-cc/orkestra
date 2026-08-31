@@ -556,7 +556,7 @@
         "passwordAgeKnown_one": "Password updated {{count}} day ago",
         "passwordAgeKnown_other": "Password updated {{count}} days ago",
         "passwordAgeUnknown": "Password update date unknown",
-        "passwordKeptNotice": "set, but sign-in with it is disabled on this surface",
+        "passwordKeptNotice": "— sign-in with it is disabled on this surface",
         "oauthLinked": "Sign-in providers:"
       }
     },

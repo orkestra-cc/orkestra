@@ -556,7 +556,7 @@
         "passwordAgeKnown_one": "Password aggiornata {{count}} giorno fa",
         "passwordAgeKnown_other": "Password aggiornata {{count}} giorni fa",
         "passwordAgeUnknown": "Data aggiornamento password non disponibile",
-        "passwordKeptNotice": "impostata, ma l'accesso con essa è disabilitato su questa superficie",
+        "passwordKeptNotice": "— l'accesso con essa è disabilitato su questa superficie",
         "oauthLinked": "Provider di accesso:"
       }
     },

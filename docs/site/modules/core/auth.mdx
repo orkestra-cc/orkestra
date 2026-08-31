@@ -86,7 +86,11 @@ all.
 The unauthenticated pages read the resulting state from `GET
 /v1/auth/{tier}/policy`, which carries `passwordLoginEnabled` for the
 surface, so the login page hides the password form instead of showing one
-that would 403 on submit.
+that would 403 on submit. The **operator console** does this today; the
+client SPA gains the same gating with the client OAuth login work — until
+then it reads only `loginEnabled` / `registrationEnabled` from the same
+endpoint, so its login page still renders a form the backend refuses with
+403 on submit.
 
 If the OAuth configuration then breaks on an SSO-only **console**, the
 operator break-glass restores password login for `POST
