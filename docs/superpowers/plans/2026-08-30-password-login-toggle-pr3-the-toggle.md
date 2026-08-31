@@ -1609,7 +1609,12 @@ func (h *PasswordAuthHandler) ForgotPassword(ctx context.Context, req *ForgotPas
 
 - [ ] **Step 6: Fix the ripple**
 
-`go build ./...` will surface every `completeLogin` caller — only `Login` exists (`:620`). Any pre-existing gate tests that constructed logins with password off in policy seeds now hit the new gate: adjust seeds, not assertions, unless the test's subject IS the gate.
+Verified at `ca24e614` — the ripple is empty, so this step is a confirmation run, not a hunt:
+
+- `completeLogin` has exactly one caller, `Login` (`password_auth_service.go:620`), edited in Step 4.
+- Only three test suites construct a `PasswordAuthService`: `gates_test.go` (via `newGatesEnv`, whose policy is wired with empty values → legacy true → every existing login/register/forgot case passes the new gates untouched); `password_credential_revocation_test.go` (calls only the ungated `ResetPassword`/`ChangePassword`); `session_identity_test.go` (its own constructor at `:62-69` calls only `IssueLoginTokens`, and its one `env.auth.Login` at `:160` runs through `newGatesEnv`'s legacy-true policy).
+
+Run `go build ./... && go vet ./...` and expect zero fallout beyond the files this task edits; any surprise is a NEW caller worth reading, not something to silence.
 
 - [ ] **Step 7: Same-commit docs**
 
@@ -2231,7 +2236,13 @@ func (r fixedValueReader) GetRawValueRequiredModule(ctx context.Context, moduleN
 
 - [ ] **Step 6: Fix the ripple**
 
-Every test fake implementing `LoginTokenIssuer` needs the no-op `EmitBreakGlassUsed` (grep `IssueLoginTokensForSession` across `*_test.go`). Run `go build ./... && go vet ./...` to enumerate.
+Verified at `ca24e614`: exactly ONE baseline fake implements `LoginTokenIssuer` — `countingLoginTokenIssuer` (`handlers/step_up_session_identity_test.go:69-77`). It gains the no-op:
+
+```go
+func (i *countingLoginTokenIssuer) EmitBreakGlassUsed(context.Context, string, string, string, string) {}
+```
+
+(this task's own `completionIssuer` already implements the method). Run `go build ./... && go vet ./...`; anything else that fails to compile is a NEW implementor added since `ca24e614` and gets the same one-line no-op.
 
 - [ ] **Step 7: Same-commit docs**
 
@@ -3030,7 +3041,13 @@ and in `SelfUnlinkOAuth` (`:637`, its user variable is `user`):
 
 - [ ] **Step 5: Fix the ripple**
 
-`go build ./...`: the two updated fixtures (`newAdminUnlinkSvc` extensions, `newGetMethodsSvc` signature) and any other `wouldLockOutOAuthUnlink` reference. `GetUserAuthMethods` fixtures that left `policy` nil now inject the permissive stub (legacy-true absent keys).
+Verified at `ca24e614` — the complete ripple:
+
+- `wouldLockOutOAuthUnlink` has NO reference outside `auth_service.go` and this task's tests (grep-verified), so the re-signature rips nothing else.
+- The unlink-suite constructor swaps are exactly the Step 1 table (eight guarded, three untouched).
+- `newGetMethodsSvc` has six existing call sites, all in `auth_service_get_methods_test.go` — lines 38 (`_PasswordOnly`), 83 (`_TOTPEnrolled`), 130 (`_BothFactors`), 177 (`_OAuthOnly`), 199 (`_UnknownUser`), 208 (`_RejectsEmptyTarget`); each gains the third argument `nil` (legacy-true policy). `_UnknownUser` and `_RejectsEmptyTarget` fail before the policy read (user lookup / empty-target guard), so `nil` is inert there too.
+
+Run `go build ./... && go vet ./...` and expect zero fallout beyond these files.
 
 - [ ] **Step 6: Same-commit docs**
 
@@ -3241,9 +3258,29 @@ export const passwordUiVisible = (policy: AuthPolicy | undefined): boolean =>
 
   - `SocialLoginForm` prop `onProvidersResolved?: (count: number) => void` (deviation 9), fired from an effect only when the provider query succeeds (never on error), with the count of KNOWN providers after the `PROVIDER_META` filter.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: The shared policy stub, then the failing tests**
 
-`EmailPasswordForm.test.tsx` — the file's `policyOk` handler gains the two new fields (`passwordLoginEnabled: true, passwordLoginBreakGlassEffective: false`); the new suite imports the shared stub (`import { operatorPolicyHandler } from 'test/handlers';`):
+First the stub — WITHOUT it every new test file below fails at import resolution, and Step 2 must fail on BEHAVIOUR, not on a missing module. `frontend-admin/src/test/handlers.ts`, next to the existing helpers (five test files consume it: `EmailPasswordForm.test.tsx`, `Login.test.tsx`, `RegisterForm.test.tsx`, `ForgotPasswordForm.test.tsx` here, `PasswordTab.test.tsx` in Task 9 — the components behind them all fetch `/v1/auth/operator/policy`, and MSW runs with `onUnhandledRequest: 'error'`):
+
+```typescript
+// Operator /policy with everything enabled; per-test overrides flip the
+// PR 3 password-login fields.
+export const operatorPolicyHandler = (
+  overrides: Record<string, unknown> = {}
+) =>
+  http.get(url('/v1/auth/operator/policy'), () =>
+    HttpResponse.json({
+      registrationEnabled: true,
+      loginEnabled: true,
+      passwordMinLength: 10,
+      passwordLoginEnabled: true,
+      passwordLoginBreakGlassEffective: false,
+      ...overrides
+    })
+  );
+```
+
+Then the tests. `EmailPasswordForm.test.tsx` — the file's `policyOk` handler gains the two new fields (`passwordLoginEnabled: true, passwordLoginBreakGlassEffective: false`); the new suite imports the shared stub (`import { operatorPolicyHandler } from 'test/handlers';`):
 
 ```typescript
 describe('password-login policy gating (PR 3 §4.10)', () => {
@@ -3492,7 +3529,7 @@ describe('ForgotPasswordForm password-method gate (PR 3 §4.10)', () => {
 });
 ```
 
-(every gated-component test imports the ONE `operatorPolicyHandler` from `test/handlers.ts` — declared in Task 8 Step 3; no test file declares its own policy stub.)
+(every gated-component test imports the ONE `operatorPolicyHandler` from `test/handlers.ts` — declared at the top of Step 1; no test file declares its own policy stub. Five consumers in total: the four files here plus Task 9's `PasswordTab.test.tsx`.)
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -3500,26 +3537,6 @@ describe('ForgotPasswordForm password-method gate (PR 3 §4.10)', () => {
 Expected: FAIL — new fields/props/copy absent.
 
 - [ ] **Step 3: Types + fallback**
-
-`frontend-admin/src/test/handlers.ts` — one shared policy stub next to the existing helpers (every gated component fetches `/v1/auth/operator/policy`, and MSW runs with `onUnhandledRequest: 'error'`, so each of the nine test files below needs this; one definition, nine imports):
-
-```typescript
-// Operator /policy with everything enabled; per-test overrides flip the
-// PR 3 password-login fields.
-export const operatorPolicyHandler = (
-  overrides: Record<string, unknown> = {}
-) =>
-  http.get(url('/v1/auth/operator/policy'), () =>
-    HttpResponse.json({
-      registrationEnabled: true,
-      loginEnabled: true,
-      passwordMinLength: 10,
-      passwordLoginEnabled: true,
-      passwordLoginBreakGlassEffective: false,
-      ...overrides
-    })
-  );
-```
 
 `authApi.ts`:
 
@@ -3983,7 +4000,53 @@ import { server } from 'test/server';
 import AdminAuthMethodsCard from './AdminAuthMethodsCard';
 import type { User } from 'store/api/userApi';
 
-const targetUser = { id: 'u-1', name: 'Target User' } as User;
+// Honest User value — every required field of the interface
+// (userApi.ts:11-26), no cast.
+const targetUser: User = {
+  id: 'u-1',
+  email: 'target@example.com',
+  username: 'target',
+  fullName: 'Target User',
+  role: 'operator',
+  providers: [],
+  isActive: true,
+  emailVerified: true,
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z'
+};
+
+// The card reads the CURRENT admin from the auth slice to compute isSelf
+// (AdminAuthMethodsCard.tsx:50-52); seed a different id so isSelf is
+// false. Same AuthState shape useUserTable.test.tsx:57-84 preloads.
+const preloadedAuthState = {
+  auth: {
+    user: {
+      id: 'admin-1',
+      email: 'admin@example.com',
+      username: 'admin',
+      fullName: 'Admin One',
+      role: 'administrator',
+      providers: [],
+      isActive: true,
+      emailVerified: true,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z'
+    },
+    isAuthenticated: true,
+    isLoading: false,
+    error: null,
+    sessionExpiry: null,
+    permissions: [] as string[],
+    preferences: {
+      theme: 'light' as const,
+      language: 'en',
+      notifications: true
+    },
+    _isLoggingOut: false,
+    accessToken: 'test-token',
+    tokenExpiry: null
+  }
+};
 
 const adminAuthMethods = (overrides: Record<string, unknown>) =>
   http.get('*/v1/admin/users/u-1/auth-methods', () =>
@@ -4006,7 +4069,9 @@ describe('AdminAuthMethodsCard split password fields (PR 3 §4.8)', () => {
   //   adminUserProfile.authMethods.oauthActionsAria       = "actions for {{provider}}"
   it('method off: reset button disabled; presence badge still reads hasPasswordSet', async () => {
     server.use(adminAuthMethods({ passwordUsableForLogin: false }));
-    renderWithProviders(<AdminAuthMethodsCard user={targetUser} />);
+    renderWithProviders(<AdminAuthMethodsCard user={targetUser} />, {
+      preloadedState: preloadedAuthState
+    });
     const reset = await screen.findByRole('button', {
       name: /send password-reset email/i
     });
@@ -4017,7 +4082,9 @@ describe('AdminAuthMethodsCard split password fields (PR 3 §4.8)', () => {
 
   it('method on: reset button enabled', async () => {
     server.use(adminAuthMethods({}));
-    renderWithProviders(<AdminAuthMethodsCard user={targetUser} />);
+    renderWithProviders(<AdminAuthMethodsCard user={targetUser} />, {
+      preloadedState: preloadedAuthState
+    });
     expect(
       await screen.findByRole('button', { name: /send password-reset email/i })
     ).toBeEnabled();
@@ -4033,7 +4100,9 @@ describe('AdminAuthMethodsCard split password fields (PR 3 §4.8)', () => {
         ]
       })
     );
-    renderWithProviders(<AdminAuthMethodsCard user={targetUser} />);
+    renderWithProviders(<AdminAuthMethodsCard user={targetUser} />, {
+      preloadedState: preloadedAuthState
+    });
     // The blocked ProviderActions button carries the same aria-label as
     // the enabled dropdown toggle (Step 3.4).
     const actions = await screen.findByRole('button', {
@@ -4044,7 +4113,7 @@ describe('AdminAuthMethodsCard split password fields (PR 3 §4.8)', () => {
 });
 ```
 
-(`renderWithProviders` must carry an authenticated admin in the store so `isSelf` resolves false — seed `selectUser` state via the render helper's preloaded state with an id ≠ `u-1`, the same idiom `useUserTable.test.tsx` uses.)
+(the preloaded auth state above is what makes `isSelf` resolve false; without it the card blocks every provider action with the self-action reason.)
 
 The other two consumers get their own complete test files.
 
@@ -4116,15 +4185,20 @@ import {
 } from 'test/handlers';
 import SecuritySummaryCard from './SecuritySummaryCard';
 
-// Minimal BackendUser body (authApi.ts:39-51: id, email, username,
-// fullName, role are the required fields).
+// Complete required BackendUser body (authApi.ts:39-62: id, email,
+// username, fullName, role, isActive, emailVerified, createdAt,
+// updatedAt are the non-optional fields).
 const meHandler = http.get('*/v1/auth/operator/me', () =>
   HttpResponse.json({
     id: 'u-1',
     email: 'op@example.com',
     username: 'op',
     fullName: 'Operator One',
-    role: 'administrator'
+    role: 'administrator',
+    isActive: true,
+    emailVerified: true,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z'
   })
 );
 
