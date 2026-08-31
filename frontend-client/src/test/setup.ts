@@ -24,6 +24,10 @@ afterEach(() => {
   // First: a test that stubbed a global (tokenStore.test.ts installs a
   // throwing localStorage) must not leak it into the storage reset below.
   vi.unstubAllGlobals();
+  // Then restore every vi.spyOn spy (the browserNavigation.assign spy
+  // later tasks install) so a spy — and its recorded calls — never
+  // survives into the next test.
+  vi.restoreAllMocks();
   // React Testing Library registers its automatic cleanup only when a
   // global afterEach exists (globals: false here) — unmount explicitly, or
   // the next test finds the previous tree still mounted and its

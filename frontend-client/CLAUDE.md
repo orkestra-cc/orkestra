@@ -66,7 +66,7 @@ frontend-client/
 │   │   └── format.ts           # Intl currency + date helpers
 │   ├── locales/                # it.json (default), en.json — react-i18next bundles
 │   ├── test/
-│   │   ├── setup.ts            # jest-dom, EN copy, MSW lifecycle (unhandled request = error), explicit RTL cleanup, global-stub + storage + token reset
+│   │   ├── setup.ts            # jest-dom, EN copy, MSW lifecycle (unhandled request = error), explicit RTL cleanup, spy restore, global-stub + storage + token reset
 │   │   ├── server.ts           # the one MSW server
 │   │   ├── handlers.ts         # url() + reusable stubs (clientPolicyHandler, providersHandler, …)
 │   │   ├── render.tsx          # renderWithProviders (QueryClient + AuthProvider + MemoryRouter), waitForQuerySettled
