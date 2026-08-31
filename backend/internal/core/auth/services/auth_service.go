@@ -2252,6 +2252,10 @@ func (s *authService) evaluateMFAForOAuth(ctx context.Context, user *iface.User,
 			SourceAMR:   []string{"oauth"},
 			LoginMethod: "oauth",
 			TrustLevel:  "medium",
+			// Stamped for parity with the password producer; the
+			// completion re-check skips OAuth-sourced challenges, and
+			// an OAuth login is never break-glass.
+			Audience: string(s.audience),
 		}
 		if deviceInfo != nil {
 			in.DeviceID = deviceInfo.DeviceID

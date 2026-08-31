@@ -144,6 +144,40 @@ func NewAuthPolicyService(cs *module.ModuleConfigService) *AuthPolicyService {
 	return &AuthPolicyService{cs: cs}
 }
 
+// NewAuthPolicyServiceForTest builds a policy service over a fixed value
+// map with GetRawValue semantics (absent key = absent; present empty =
+// present). For consumer-package tests only — production wiring uses
+// NewAuthPolicyService(*module.ModuleConfigService).
+func NewAuthPolicyServiceForTest(values map[string]string) *AuthPolicyService {
+	return &AuthPolicyService{cs: fixedValueReader{values: values}}
+}
+
+// NewAuthPolicyServiceForTestErr builds a policy service whose reads all
+// fail with err — the "module_configs unreachable" fixture.
+func NewAuthPolicyServiceForTestErr(err error) *AuthPolicyService {
+	return &AuthPolicyService{cs: fixedValueReader{err: err}}
+}
+
+// fixedValueReader is the minimal configValueReader behind the ForTest
+// constructors. A missing document is modelled only through err — a nil
+// map simply has every key absent (= legacy defaults).
+type fixedValueReader struct {
+	values map[string]string
+	err    error
+}
+
+func (r fixedValueReader) GetValue(_ context.Context, _, key string) string { return r.values[key] }
+func (r fixedValueReader) GetRawValue(_ context.Context, _, key string) (string, bool, error) {
+	if r.err != nil {
+		return "", false, r.err
+	}
+	v, ok := r.values[key]
+	return v, ok, nil
+}
+func (r fixedValueReader) GetRawValueRequiredModule(ctx context.Context, moduleName, key string) (string, bool, error) {
+	return r.GetRawValue(ctx, moduleName, key)
+}
+
 // RegistrationAllowed reports whether self-service signup is currently
 // enabled for the given audience. Defaults to true when the value is
 // unset so existing deployments preserve current behaviour after the

@@ -772,6 +772,12 @@ func (s *PasswordAuthService) completeLogin(ctx context.Context, user *iface.Use
 			Fingerprint: in.Fingerprint,
 			UserAgent:   in.UserAgent,
 			LoginMethod: "password",
+			// Provenance the completion re-check needs (spec §4.3): the
+			// surface whose password policy must still allow this login
+			// when the second factor lands, and whether the initial
+			// check was rescued by the operator break-glass.
+			Audience:       string(s.audience),
+			BreakGlassUsed: decision.BreakGlassUsed,
 		})
 		if err != nil {
 			return nil, err

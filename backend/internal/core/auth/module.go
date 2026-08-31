@@ -1153,6 +1153,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 			cfg.Auth.Cookie.Secure,
 		)
 		m.operatorWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
+		m.operatorWebAuthnHandler.SetPolicy(authPolicy)
 		deps.Services.Register(module.ServiceWebAuthn, opBundle.webauthnSvc)
 	}
 
@@ -1305,6 +1306,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 			cfg.Auth.Cookie.Secure,
 		)
 		m.clientWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
+		m.clientWebAuthnHandler.SetPolicy(authPolicy)
 	}
 
 	// ADR-0003 PR-D D-6: per-tier dispatcher map on the operator
