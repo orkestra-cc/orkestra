@@ -17,7 +17,7 @@ require (
 	github.com/cedar-policy/cedar-go v1.8.0
 	github.com/danielgtaylor/huma/v2 v2.39.1
 	github.com/docker/docker v28.5.2+incompatible
-	github.com/docker/go-connections v0.7.0
+	github.com/docker/go-connections v0.8.1
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-chi/cors v1.2.2
 	github.com/go-playground/validator/v10 v10.30.3
