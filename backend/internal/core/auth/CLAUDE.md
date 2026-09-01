@@ -445,7 +445,8 @@ that rule is to be tightened to fail-closed in the first minor release after
 usable `CreatedAt` is **not** an anomaly — it has a perfectly good anchor,
 and counting it would poison the observation window.
 
-**The three cap outcomes above surface as five distinct HTTP responses**
+**The cap outcomes above, and the refresh-path outcomes beside them, surface
+as five distinct HTTP responses**
 (`writeRefreshErr`, called from all three refresh-flow handlers —
 `RefreshTokensWithHeaderHTTP`, `GetSessionHTTP`, `RefreshTokensHTTP`):
 `ErrSessionEnforcementUnavailable` is **503** `session_enforcement_unavailable`
@@ -470,7 +471,7 @@ just renewed and signed every tab out. `benignRotationRetry` now returns
 503 **without** revoking. A replay verdict that *was* reached still answers 401
 even if its `RevokeFamily` fails: fail closed denies the current request, it
 does not invent a verdict and persist it.
-Before this, all five of those infrastructure sites were wrapped
+Before this, the FIRST FIVE of those infrastructure sites were wrapped
 generically and answered as a codeless 401, so a Mongo blip during a refresh
 reached the SPA as the same answer a dead refresh token produces and no
 client-side rule could separate them. The picker case is the one that
@@ -538,13 +539,18 @@ opportunistically while editing this file.
 > *after* the credential was accepted: `setUserContext`'s
 > impersonation-bypass branch, `sendMFARequired`.) Every other
 > rejection on the credential path — missing bearer, malformed, forged
-> signature, wrong audience — keeps the **codeless** generic 401 it has
+> signature — keeps the **codeless** generic 401 it has
 > always had: `sendErrorResponse`
 > puts the `AppError`'s code in `errors[0].value`, and for an
 > `AuthenticationError` that is `INVALID_CREDENTIALS`, the same value a
 > wrong password produces, so it discriminates nothing. That is
 > deliberate — the codes are a small, closed set, not a per-branch
-> taxonomy.
+> taxonomy. A **wrong-audience** token is not in that list: on every
+> mounted router `RequireAudience` runs in FRONT of `RequireAuth` and
+> answers it first with `401 audience_mismatch`
+> (`shared/middleware/audience.go:102-108`), so `RequireAuth`'s codeless
+> 401 is only what a wrong audience would get on a router that mounted
+> `RequireAuth` alone.
 >
 > `access_token_expired` is the **only non-terminal one of the three**:
 > the other two say the session is gone and the client must clear and
