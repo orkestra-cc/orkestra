@@ -80,7 +80,7 @@ cd /opt/orkestra
 
 ```bash
 cd /opt/orkestra/docker
-export COMPOSE_PROJECT_NAME=orkestra-production   # ${APP_NAME}-${ENV}, what orkestra.sh uses
+export COMPOSE_PROJECT_NAME=orkestra-production   # ${APP_NAME}-${ENV}, what orkestra.sh uses — with APP_NAME=orkestra-acme in docker/.env this is orkestra-acme-production
 docker compose -f docker-compose.infra.yml -f docker-compose.prod.yml --env-file .env up -d --build
 ```
 
@@ -137,6 +137,7 @@ User=deploy
 Group=deploy
 SupplementaryGroups=docker
 WorkingDirectory=/opt/orkestra/docker
+# ${APP_NAME}-${ENV} from docker/.env — orkestra-acme-production on a fork with APP_NAME=orkestra-acme
 Environment=COMPOSE_PROJECT_NAME=orkestra-production
 ExecStart=/usr/bin/docker compose -f docker-compose.infra.yml -f docker-compose.prod.yml --env-file .env up -d
 ExecStop=/usr/bin/docker compose -f docker-compose.infra.yml -f docker-compose.prod.yml --env-file .env stop
