@@ -8,7 +8,7 @@ import {
 
 import {
   bootstrapFromRefreshCookie as bootstrapFromRefreshCookieStore,
-  clearAccessToken,
+  clearSessionLocally,
   getAccessToken,
   refreshAccessToken,
   setAccessToken,
@@ -16,7 +16,7 @@ import {
 } from "@/auth/tokenStore";
 import { apiBaseURL } from "@/api/client";
 import { AuthContext, type AuthState } from "@/auth/authContext";
-import { clearSessionMarker, setSessionMarker } from "@/auth/sessionMarker";
+import { setSessionMarker } from "@/auth/sessionMarker";
 
 interface AuthProviderProps {
   children: ReactNode;
@@ -54,8 +54,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
         credentials: "include",
       });
     } finally {
-      clearSessionMarker();
-      clearAccessToken();
+      // The one sanctioned local clear (tokenStore.ts): marker AND token, in
+      // one place. Clearing them inline here is exactly how the deleted
+      // client.ts middleware drifted into clearing only the token and leaving
+      // a marker that short-circuited the next cold load.
+      clearSessionLocally();
     }
   }, []);
 

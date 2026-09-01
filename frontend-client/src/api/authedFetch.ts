@@ -27,7 +27,7 @@ import {
 // password_confirm_required, audience_mismatch). `if (body.code) → clear` reads
 // as the obvious simplification and would sign a user out for being asked to
 // confirm a password. Adding to this set is a decision, not a chore.
-export const TERMINAL_CODES = new Set([
+export const TERMINAL_CODES: ReadonlySet<string> = new Set([
   "session_revoked",
   "session_max_age_reached",
 ]);
@@ -176,6 +176,16 @@ export async function authedFetch(
   //    marker gate — which answers `signed-out` while clearing NOTHING — must
   //    not get to veto the cookie. A true anonymous visitor keeps the
   //    optimisation the gate was written for.
+  //
+  //    4b is UNREACHABLE BY CONSTRUCTION, and is kept as the honest expression
+  //    of the split rather than as live code. With no bearer sent, `expiresAt`
+  //    is null — the store writes the pair together and `setAccessToken(null)`
+  //    nulls both — so (b) cannot hold; and a missing-bearer 401 from
+  //    RequireAuth is codeless, so (a) cannot hold either. Branch 2 has
+  //    therefore already returned. The one way in is a caller that supplies
+  //    its OWN Authorization header while the store is empty. Do not delete it
+  //    as dead, and do not reorder the branches to make it reachable (P23):
+  //    branch 2 sitting in front of every recovery is the replay guard.
   const outcome =
     sent.token !== null
       ? await refreshAfterUnauthorized(apiBaseURL)

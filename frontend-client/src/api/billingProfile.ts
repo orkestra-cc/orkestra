@@ -12,6 +12,10 @@
 // function names are preserved for source-level compatibility with
 // callers that pre-flighted the legacy endpoint.
 import { authedFetch } from "@/api/authedFetch";
+// The shared error shape and reader. This module used to carry its own
+// `BillingProfileApiError` + `readError`, structurally identical and imported
+// by nobody — a third copy of a shape pages branch on by `code`.
+import { readError } from "@/api/auth";
 
 export interface BillingAddress {
   line1?: string;
@@ -40,34 +44,6 @@ export interface BillingIdentity {
   fiscalCode?: string;
   billingAddress?: BillingAddress;
   fatturaPA?: FatturaPAProfile;
-}
-
-export interface BillingProfileApiError extends Error {
-  status: number;
-  code?: string;
-}
-
-function err(
-  message: string,
-  status: number,
-  code?: string,
-): BillingProfileApiError {
-  const e = new Error(message) as BillingProfileApiError;
-  e.status = status;
-  if (code) e.code = code;
-  return e;
-}
-
-async function readError(
-  res: Response,
-  fallback: string,
-): Promise<BillingProfileApiError> {
-  const body = (await res.json().catch(() => ({}))) as {
-    detail?: string;
-    title?: string;
-    code?: string;
-  };
-  return err(body.detail ?? body.title ?? fallback, res.status, body.code);
 }
 
 export async function getBillingProfile(

@@ -6,7 +6,7 @@
 // codegen will pick these up after the next `npm run codegen`.
 
 import { authedFetch } from "@/api/authedFetch";
-import type { MeResponse } from "@/api/auth";
+import { readError, type ApiError, type MeResponse } from "@/api/auth";
 
 export type AvatarSource =
   | "initials"
@@ -23,25 +23,15 @@ export interface PresignedAvatarUpload {
   expiresAt: string;
 }
 
-interface ApiError extends Error {
-  status: number;
-  code?: string;
-}
-
+// The error SHAPE is @/api/auth's, not a local copy: pages branch on `code`,
+// and a second definition that drifts is a real hazard. Only the constructor
+// stays here, for the one failure below that is not an API response at all
+// (the direct-to-storage PUT, which has no JSON body to read).
 function err(message: string, status: number, code?: string): ApiError {
   const e = new Error(message) as ApiError;
   e.status = status;
   if (code) e.code = code;
   return e;
-}
-
-async function readError(res: Response, fallback: string): Promise<ApiError> {
-  const body = (await res.json().catch(() => ({}))) as {
-    detail?: string;
-    title?: string;
-    code?: string;
-  };
-  return err(body.detail ?? body.title ?? fallback, res.status, body.code);
 }
 
 // presignAvatarUpload mints a short-lived signed PUT URL the SPA
