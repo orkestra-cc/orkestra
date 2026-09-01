@@ -283,10 +283,15 @@ describe("access-token expiry reckoning (§4.5)", () => {
     }
   });
 
-  // The test that fails if ANY single call site in the §4.6 table is missed:
-  // a dropped lifetime reads as "unknown", which reads as "live", which means
-  // the recovery never fires. Sign in, cross the recorded lifetime, and the
-  // expiry must have gone from "in the future" to "in the past".
+  // What this pins is the STORE's end of §4.6, and only that: a lifetime handed
+  // to setAccessToken becomes a real deadline that actually passes, so
+  // `expiresAt` cannot silently be a value nothing ever crosses. It calls
+  // setAccessToken DIRECTLY, so it proves nothing about whether any given call
+  // site passes one — and a dropped lifetime reads as "unknown", which reads as
+  // "live", which means the recovery never fires. The per-site coverage is
+  // elsewhere: LoginPage.test.tsx and OAuthCallbackPage.test.tsx, both under
+  // "§4.6", assert the lifetime the login / MFA-verify response carried reaches
+  // this store.
   it("a recorded lifetime actually elapses", () => {
     vi.useFakeTimers();
     try {
@@ -627,6 +632,11 @@ describe("performRefresh is bounded (§4.1c)", () => {
       setSessionMarker();
       const refresh = countingRefresh(() => HttpResponse.json(okBody));
       await refreshAccessToken(API);
+      // The assertion that actually discriminates the clearTimeout. Advancing
+      // the clock below only shows nothing BAD happened — a live 10s timer
+      // whose abort lands after the answer is a no-op — so a missing
+      // clearTimeout passes that. A leaked timer is still ON the fake clock.
+      expect(vi.getTimerCount()).toBe(0);
       await vi.advanceTimersByTimeAsync(REFRESH_FETCH_TIMEOUT_MS * 2);
       expect(refresh.hits()).toBe(1); // nothing re-fired, nothing aborted
     } finally {
@@ -653,6 +663,11 @@ describe("refreshAfterUnauthorized (§4.1e)", () => {
     // The assertion is on the REQUEST having happened, not just the outcome —
     // a marker-gated implementation short-circuits with no request at all.
     expect(refresh.hits()).toBe(1);
+    // …and on the marker still being ABSENT when it happened. Without this,
+    // "skips the gate" is indistinguishable from "stamps the marker first and
+    // then satisfies the gate" — which is a stamp-then-hope, not a repair, and
+    // would leave a knowingly-false marker behind on every failed refresh.
+    expect(refresh.markerAtRequest()).toBe(false);
     expect(getAccessToken()).toBe("at-new");
     // A repair, not a stamp-then-hope: the refresh has just PROVED a cookie
     // exists, so leaving the marker unset would keep the store in a

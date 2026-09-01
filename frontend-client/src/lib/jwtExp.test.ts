@@ -38,6 +38,11 @@ describe("jwtExp", () => {
       "payload that is JSON but not an object",
       `h.${Buffer.from("42").toString("base64url")}.s`,
     ],
+    // The one JSON value `typeof payload !== "object"` does NOT catch:
+    // typeof null IS "object". Only the explicit `payload === null` check
+    // stops it, and without that check the very next line — reading `.exp`
+    // off it — throws a TypeError out of a function documented never to.
+    ["payload that is the literal null", tokenWithPayloadJSON("null")],
   ])("returns null for %s", (_label, input) => {
     expect(jwtExp(input as string | null | undefined)).toBeNull();
   });
