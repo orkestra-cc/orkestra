@@ -2,11 +2,10 @@
 // the three /v1/me/avatar/* endpoints mounted by the backend user
 // module on the client API. Mirrors the operator-console
 // authApi.ts/AvatarSettings pattern but stays on this SPA's stack
-// (raw fetch + tokenStore, no RTK Query). Hand-typed for now —
+// (authedFetch + tokenStore, no RTK Query). Hand-typed for now —
 // codegen will pick these up after the next `npm run codegen`.
 
-import { apiBaseURL } from "@/api/client";
-import { getAccessToken } from "@/auth/tokenStore";
+import { authedFetch } from "@/api/authedFetch";
 import type { MeResponse } from "@/api/auth";
 
 export type AvatarSource =
@@ -45,20 +44,6 @@ async function readError(res: Response, fallback: string): Promise<ApiError> {
   return err(body.detail ?? body.title ?? fallback, res.status, body.code);
 }
 
-async function authedJson(path: string, init?: RequestInit): Promise<Response> {
-  const token = getAccessToken();
-  return fetch(`${apiBaseURL}${path}`, {
-    credentials: "include",
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...(init?.headers ?? {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-}
-
 // presignAvatarUpload mints a short-lived signed PUT URL the SPA
 // uploads to directly, bypassing the backend body. The returned
 // `key` round-trips back to commit so the backend can verify the
@@ -67,7 +52,7 @@ export async function presignAvatarUpload(input: {
   contentType: string;
   sizeBytes: number;
 }): Promise<PresignedAvatarUpload> {
-  const res = await authedJson("/v1/me/avatar/presign-upload", {
+  const res = await authedFetch("/v1/me/avatar/presign-upload", {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -81,7 +66,7 @@ export async function presignAvatarUpload(input: {
 export async function commitAvatarUpload(input: {
   key: string;
 }): Promise<MeResponse> {
-  const res = await authedJson("/v1/me/avatar/commit", {
+  const res = await authedFetch("/v1/me/avatar/commit", {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -97,7 +82,7 @@ export async function commitAvatarUpload(input: {
 export async function setAvatarSource(input: {
   source: Exclude<AvatarSource, "uploaded">;
 }): Promise<MeResponse> {
-  const res = await authedJson("/v1/me/avatar/source", {
+  const res = await authedFetch("/v1/me/avatar/source", {
     method: "PATCH",
     body: JSON.stringify(input),
   });
@@ -109,6 +94,14 @@ export async function setAvatarSource(input: {
 // Separate from the API wrappers because the URL is signed with no
 // auth header and the body is binary, not JSON. Returns void on
 // success — the caller chains to commitAvatarUpload.
+//
+// This is the ONLY raw `fetch` left in this file and it stays that way
+// deliberately: the target is a foreign origin (the object store), the URL
+// carries its own signature, and `credentials: 'omit'` is the point — nothing
+// of ours may leak to it. authedFetch cannot express this call and must not
+// be bent to: it prefixes apiBaseURL, attaches our bearer, and forces
+// credentials:'include'. A 401 here is the signature expiring, which no
+// token refresh can repair.
 export async function putAvatarBlob(
   presigned: PresignedAvatarUpload,
   blob: Blob,
