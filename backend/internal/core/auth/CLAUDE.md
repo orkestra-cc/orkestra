@@ -459,8 +459,18 @@ that simply aged out.
 `ErrRefreshLookupUnavailable` is **503** `refresh_lookup_unavailable` — the
 rotation could not be *completed* because infrastructure failed: the token
 store or user store was unreachable, signing failed, the rotating write
-failed, **or the picker in front of the rotation could not classify a cookie
-candidate** (`PeekRefreshToken`'s lookup). Before this, all five were wrapped
+failed, **the picker in front of the rotation could not classify a cookie
+candidate** (`PeekRefreshToken`'s lookup), **or the rotation-race classifier
+could not read the family state** (`benignRotationRetry`'s `FamilyRevoked`, or
+the post-CAS re-read). That last one is the destructive case: both used to fold
+"could not read" into "revoked" and run `handleRefreshReplay`, so a store
+hiccup during a legitimate multi-tab race revoked the family the winner had
+just renewed and signed every tab out. `benignRotationRetry` now returns
+`(benign, err)` — three states, not two — and on the error both callers answer
+503 **without** revoking. A replay verdict that *was* reached still answers 401
+even if its `RevokeFamily` fails: fail closed denies the current request, it
+does not invent a verdict and persist it.
+Before this, all five of those infrastructure sites were wrapped
 generically and answered as a codeless 401, so a Mongo blip during a refresh
 reached the SPA as the same answer a dead refresh token produces and no
 client-side rule could separate them. The picker case is the one that
@@ -479,11 +489,19 @@ is never expired on this outcome (`clearRefreshCookieOnTerminalRefreshErr`
 is an allowlist), and `refreshFailureOutcome` logs it as
 `lookup_unavailable`, not `invalid_token`.
 
-**Scope, precisely:** the five sites are the four inside
-`RefreshTokensWithRiskAssessment` plus `PeekRefreshToken`'s lookup, so
-`POST /v1/auth/{tier}/refresh-cookie` and `POST /v1/auth/{tier}/refresh` are
-covered end to end, and `GET /v1/auth/session` is covered only as far as the
-picker. **`MintAccessTokenFromRefresh` is deliberately NOT classified** — it
+**Scope, precisely:** the seven sites are the four infrastructure wraps inside
+`RefreshTokensWithRiskAssessment` (token lookup, user lookup, mint, rotating
+write), `PeekRefreshToken`'s lookup, and the two race-classifier reads —
+`benignRotationRetry`'s `FamilyRevoked` and the post-CAS re-read in the
+`ErrTokenAlreadyRotated` branch. So `POST /v1/auth/{tier}/refresh-cookie` and
+`POST /v1/auth/{tier}/refresh` are covered end to end, and
+`GET /v1/auth/session` is covered only as far as the picker. The rule the last
+two encode: **an unreadable family state answers 503 and revokes nothing;
+replay may fire only on a family state that was actually read.** A readable
+state behaves exactly as before — inside the grace window against a healthy
+family it is `ErrRefreshRotationRaced` (409), outside it or against a revoked
+family it is `handleRefreshReplay` + 401. **`MintAccessTokenFromRefresh` is
+deliberately NOT classified** — it
 still carries three generic wraps (its own `GetByTokenAny`, its `GetUserByID`,
 and `GenerateAccessTokenForSessionWithAMR`), each of which becomes a codeless
 401. That path is reachable: Peek and Mint issue separate reads, so a blip

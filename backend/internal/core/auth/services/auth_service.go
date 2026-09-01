@@ -1443,7 +1443,8 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 //  5. Mint a new access + refresh pair and persist the new row via
 //     RotateWithFamily, which atomically marks the old row rotated.
 //     A CAS failure means another caller beat us to the rotation —
-//     treat that as replay too.
+//     re-read to tell a race from a replay; an unreadable state is
+//     neither, and answers ErrRefreshLookupUnavailable without revoking.
 func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refreshToken string, securityCtx *models.SecurityContext) (*models.TokenResponse, error) {
 	// 1. Validate JWT structure and extract claims.
 	claims, err := s.jwtService.ValidateRefreshToken(refreshToken)
@@ -1468,10 +1469,19 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 	// 3+4. Already-revoked branches.
 	if tokenDoc.IsRevoked {
 		if tokenDoc.RevokedReason == models.RevokeReasonRotated {
-			// A sibling caller rotated this row between our read and
-			// theirs. Inside the grace window that is the multi-tab race,
-			// not an attack — answer "retry" and leave the family alone.
-			if s.benignRotationRetry(ctx, tokenDoc) {
+			// Three answers, not two. A sibling caller rotated this row
+			// between our read and theirs; inside the grace window against
+			// a healthy family that is the multi-tab race, not an attack —
+			// answer "retry" and leave the family alone. Against a revoked
+			// family or outside the window it is a replay. And if the
+			// family could not be READ, it is neither: answer 503 and touch
+			// nothing, because the sibling that won this race is holding a
+			// live successor that a revocation here would kill.
+			benign, err := s.benignRotationRetry(ctx, tokenDoc)
+			if err != nil {
+				return nil, err
+			}
+			if benign {
 				return nil, ErrRefreshRotationRaced
 			}
 			s.handleRefreshReplay(ctx, tokenDoc, securityCtx, "rotated_token_reused")
@@ -1561,17 +1571,26 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		if errors.Is(err, repository.ErrTokenAlreadyRotated) {
 			// Concurrency: another caller rotated between our Get and our
 			// CAS, or the client retried. Re-read the row to tell the two
-			// apart — our stale copy still says isRevoked:false. A sibling
-			// that won the CAS within the grace window leaves a healthy
-			// family and gets "retry"; anything else is a replay and the
-			// family dies. This branch also covers the case where our own
-			// CAS succeeded but the family was revoked underneath us
-			// (RotateWithFamily reports that as ErrTokenAlreadyRotated
-			// too) — FamilyRevoked sees the fence and routes it to replay.
-			if current, rerr := s.refreshTokenRepo.GetByTokenAny(ctx, hashedToken); rerr == nil &&
-				s.benignRotationRetry(ctx, current) {
+			// apart — our stale copy still says isRevoked:false. The
+			// re-read's OWN failure is an outage, not evidence: answer 503
+			// before the family check, and never fire replay on it.
+			current, rerr := s.refreshTokenRepo.GetByTokenAny(ctx, hashedToken)
+			if rerr != nil {
+				return nil, fmt.Errorf("post-CAS re-read failed: %w: %w", ErrRefreshLookupUnavailable, rerr)
+			}
+			benign, berr := s.benignRotationRetry(ctx, current)
+			if berr != nil {
+				return nil, berr
+			}
+			if benign {
 				return nil, ErrRefreshRotationRaced
 			}
+			// A sibling that won the CAS within the grace window leaves a
+			// healthy family and gets "retry" above; anything else is a
+			// replay and the family dies. This also covers our own CAS
+			// having succeeded while the family was revoked underneath us
+			// (RotateWithFamily reports that as ErrTokenAlreadyRotated too)
+			// — FamilyRevoked sees the fence and routes it here.
 			s.handleRefreshReplay(ctx, tokenDoc, securityCtx, "rotation_cas_lost")
 			return nil, ErrRefreshTokenReplay
 		}
@@ -1732,30 +1751,37 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 // once the family has been revoked, is detected exactly as before.
 const RefreshRotationGrace = 10 * time.Second
 
-// benignRotationRetry reports whether doc is a token a concurrent caller
-// rotated moments ago, with the family still intact — the multi-tab race
-// rather than a replay.
+// benignRotationRetry reports whether a rotated row presented inside the
+// grace window belongs to a HEALTHY family — the multi-tab race the 409
+// exists for — as opposed to a replay that already tripped detection or a
+// rotation that lost to a concurrent family revocation.
 //
 // The family check is what separates the two cases that both present a
 // row marked "rotated": a racing sibling runs against a healthy family,
 // while a replay that already tripped detection (or a rotation that lost
-// to a concurrent family revocation) runs against a revoked one. On a
-// read error we return false, which keeps the pre-existing replay
-// behaviour rather than inventing a new failure mode.
-func (s *authService) benignRotationRetry(ctx context.Context, doc *models.RefreshTokenDoc) bool {
+// to a concurrent family revocation) runs against a revoked one.
+//
+// The error return is the THIRD state: the family could not be read, so
+// neither "retry" nor "replay" is justified. A caller must answer 503 on it
+// and must NOT revoke. This used to return false here, with a log line
+// saying "treating rotation as replay" — and both callers then revoked the
+// family, so a store hiccup during a legitimate two-tab race signed every
+// tab out and killed the successor the winner had just minted. Fail closed
+// denies the CURRENT request; it does not invent a verdict and persist it.
+func (s *authService) benignRotationRetry(ctx context.Context, doc *models.RefreshTokenDoc) (bool, error) {
 	if doc == nil || !doc.IsRevoked || doc.RevokedReason != models.RevokeReasonRotated {
-		return false
+		return false, nil
 	}
 	if doc.RevokedAt == nil || time.Since(*doc.RevokedAt) > RefreshRotationGrace {
-		return false
+		return false, nil
 	}
 	revoked, err := s.refreshTokenRepo.FamilyRevoked(ctx, doc.FamilyID)
 	if err != nil {
-		slogDefault().WarnContext(ctx, "refresh: family-state read failed, treating rotation as replay",
+		slogDefault().WarnContext(ctx, "refresh: family-state read failed, answering unavailable",
 			"outcome", errorOutcome(err))
-		return false
+		return false, fmt.Errorf("family state read failed: %w: %w", ErrRefreshLookupUnavailable, err)
 	}
-	return !revoked
+	return !revoked, nil
 }
 
 func (s *authService) handleRefreshReplay(ctx context.Context, doc *models.RefreshTokenDoc, securityCtx *models.SecurityContext, kind string) {
