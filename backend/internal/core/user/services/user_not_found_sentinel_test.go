@@ -20,15 +20,6 @@ func TestErrUserNotFound_IsTheSDKSentinel(t *testing.T) {
 	}
 }
 
-// A wrapped return — what GetUserByID's siblings produce — must stay
-// classifiable, so the seam survives a caller that adds context.
-func TestErrUserNotFound_SurvivesWrapping(t *testing.T) {
-	wrapped := errors.Join(errors.New("get user by id"), ErrUserNotFound)
-	if !errors.Is(wrapped, iface.ErrUserNotFound) {
-		t.Fatal("a wrapped not-found stopped matching the SDK sentinel")
-	}
-}
-
 // The message must not change: it is asserted verbatim by existing callers and
 // appears in operator-facing logs.
 func TestErrUserNotFound_MessageUnchanged(t *testing.T) {

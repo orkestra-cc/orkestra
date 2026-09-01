@@ -594,7 +594,7 @@ func (s *userService) GetUserByID(ctx context.Context, id string) (*iface.User, 
 
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
-		if err == repository.ErrUserNotFound {
+		if errors.Is(err, repository.ErrUserNotFound) {
 			return nil, ErrUserNotFound
 		}
 		return nil, fmt.Errorf("failed to get user by ID: %w", err)

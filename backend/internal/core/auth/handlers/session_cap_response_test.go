@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -137,7 +139,14 @@ func TestClearRefreshCookieOnTerminalRefreshErr(t *testing.T) {
 // TestWriteRefreshErr_EnforcementUnavailableIs503 above.)
 func TestWriteRefreshErr_LookupUnavailable_Is503WithDistinctCode(t *testing.T) {
 	rec := httptest.NewRecorder()
-	writeRefreshErr(rec, services.ErrRefreshLookupUnavailable)
+	// WRAPPED, never the bare sentinel: every emitting site returns
+	// `fmt.Errorf("...: %w: %w", ErrRefreshLookupUnavailable, err)`, so the
+	// bare sentinel is an input this handler never actually receives — and the
+	// internals sweep below cannot fail against it, because the sentinel's own
+	// message names no store. The wrap is what makes the sweep real.
+	writeRefreshErr(rec, fmt.Errorf("refresh token lookup failed: %w: %w",
+		services.ErrRefreshLookupUnavailable,
+		errors.New("mongo: no reachable servers")))
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503 — a 401 here is the Mongo-blip logout this change removes", rec.Code)

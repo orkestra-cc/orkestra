@@ -48,9 +48,14 @@ var (
 	// Translated to 409 refresh_rotation_raced at the handler boundary.
 	ErrRefreshRotationRaced = errors.New("refresh token superseded by a concurrent rotation — retry")
 	// ErrRefreshLookupUnavailable signals that the rotation could not be
-	// COMPLETED because infrastructure failed — the token store was
-	// unreachable, the user store was unreachable, signing failed, or the
-	// rotating write failed. It says nothing about whether the session is
+	// COMPLETED because infrastructure failed. SEVEN sites return it: the
+	// refresh-token lookup, the user lookup, the mint, the rotating write,
+	// PeekRefreshToken's lookup in the candidate picker that runs in FRONT of
+	// the rotation, and the two reads the rotation-race classifier makes —
+	// benignRotationRetry's FamilyRevoked and the post-CAS re-read. The last
+	// two are the destructive ones: before §4.9 they folded "could not read"
+	// into "revoked" and signed every tab out over a store hiccup.
+	// It says nothing about whether the session is
 	// alive, so it must never be answered as an authentication failure:
 	// ADR-0017 gave session enforcement its own 503 precisely so a storage
 	// outage would not "train clients to discard a session that is still
