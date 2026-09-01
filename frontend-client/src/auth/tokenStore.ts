@@ -79,15 +79,24 @@ export function subscribe(fn: (token: string | null) => void): () => void {
 /**
  * The outcome of a refresh attempt.
  *
- * `unavailable` is the case that must NOT be collapsed into `signed-out`.
- * The backend answers 503 `session_enforcement_unavailable` when it could
- * not *evaluate* the session — the durable store behind session enforcement
- * was unreachable. ADR-0017 gives that its own status precisely so a client
- * does not treat it as a sign-out: a repository outage "would train clients
- * to discard a session that is still perfectly valid." Clearing the token
- * and the session marker on a 503, as this used to, is exactly the behaviour
- * the 503 exists to prevent — and clearing the marker makes it sticky, since
- * the next cold load then short-circuits before even trying.
+ * `unavailable` is the case that must NOT be collapsed into `signed-out`, and
+ * it is now the DEFAULT: it covers 503 (`session_enforcement_unavailable` and
+ * `refresh_lookup_unavailable`), 429 from the router's global rate limiter,
+ * 408, every other 5xx and every other 4xx, a twice-raced 409, a 2xx that
+ * carries no token, a transport failure and the 10s fetch timeout. All of
+ * those say something about the SERVER and nothing about the session.
+ *
+ * The backend answers 503 when it could not *evaluate* the session — the
+ * durable store behind session enforcement was unreachable. ADR-0017 gives
+ * that its own status precisely so a client does not treat it as a sign-out:
+ * a repository outage "would train clients to discard a session that is still
+ * perfectly valid." Clearing the token and the session marker on a 503, as
+ * this used to, is exactly the behaviour the 503 exists to prevent — and
+ * clearing the marker makes it sticky, since the next cold load then
+ * short-circuits before even trying.
+ *
+ * `signed-out` is an ALLOWLIST of exactly one status: 401, the one answer that
+ * means "the credential I presented was rejected".
  */
 export type RefreshOutcome =
   | { status: "ok"; accessToken: string }
@@ -106,44 +115,155 @@ const signedOut = (): RefreshOutcome => {
   return { status: "signed-out" };
 };
 
-// performRefresh presents the refresh cookie once — coalesced, and
-// UNCONDITIONAL: it never consults the session marker, so a storage that
-// throws (private mode, disabled storage) cannot turn a valid cookie into a
-// sign-out. It is the single place the outcome is decided:
+// The cross-tab rotation lock. Web Locks is the only cross-tab primitive that
+// releases automatically when the holder navigates away or crashes. The name is
+// shared with the operator console, but locks are PER-ORIGIN, so client.* and
+// console.* never contend — and by ADR-0003 D-9 they hold different refresh
+// cookies anyway.
+export const REFRESH_LOCK_NAME = "orkestra:auth-refresh";
+
+// The value frontend-admin settled on (baseApi.ts:84). This bound is what makes
+// the unbounded Web Lock above safe: everything done while holding the lock
+// happens inside it, so the lock is bounded TRANSITIVELY. Weakening this
+// re-arms the lock.
+export const REFRESH_FETCH_TIMEOUT_MS = 10_000;
+
+async function withRefreshLock<T>(run: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  // `!locks?.request`, NOT `typeof locks === "undefined"`: happy-dom 20.x sets
+  // navigator.locks to NULL, and `typeof null === "object"`, so the typeof
+  // guard passes and then throws on `.request`. Read at CALL time, never
+  // captured at module load — a console (and Task 10's manual probe) can null
+  // it out between calls.
+  if (!locks?.request) return run();
+  // Deliberately the 2-argument overload. Bounding the LOCK needs
+  // request(name, {signal}, cb), and frontend-admin's own comment records that
+  // switching shapes silently defeated its test. The bound comes from the
+  // fetch timeout instead.
+  return await locks.request(REFRESH_LOCK_NAME, run);
+}
+
+// A promise that rejects when the signal aborts and never resolves otherwise.
+// `fetch` resolves on HEADERS, and the body stream of a mocked or proxied
+// response does not always observe the request's abort signal (MSW's does not
+// — measured), so the body read is raced against the signal EXPLICITLY. The
+// transitive bound on the Web Lock must not depend on the platform propagating
+// an abort into the body: a server that sends headers and then stalls would
+// otherwise hold the lock — and the in-flight promise — for as long as it
+// stalls. Nothing inspects the rejection value; it only unblocks the race.
+function rejectOnAbort(signal: AbortSignal): Promise<never> {
+  return new Promise<never>((_, reject) => {
+    const fail = () => reject(new Error("refresh aborted"));
+    if (signal.aborted) {
+      fail();
+      return;
+    }
+    signal.addEventListener("abort", fail, { once: true });
+  });
+}
+
+type RefreshAttempt =
+  | { kind: "ok"; accessToken: string; expiresIn?: number }
+  | { kind: "raced" }
+  | { kind: "signed-out" }
+  | { kind: "unavailable" };
+
+// One presentation of the refresh cookie.
+//
+// The outcome rule is an ALLOWLIST: 401 is the only status that means "the
+// credential I presented was rejected". Everything else that is not a usable
+// 2xx says something about the SERVER and nothing about the session, so it is
+// `unavailable` and nothing is cleared (G2). A denylist is what defect C was —
+// and /refresh-cookie sits under the router's GLOBAL rate limiter, so 429 is
+// reachable on every refresh and a burst of tabs is exactly what trips it.
+async function attemptRefresh(apiBase: string): Promise<RefreshAttempt> {
+  const ctrl = new AbortController();
+  // AbortController + setTimeout, NOT AbortSignal.timeout: the latter runs on
+  // an internal timer vitest's fake clock does not control, so the timeout
+  // case could not be tested the way a reader would expect. It also cannot be
+  // cancelled, leaving a live 10s timer behind after every refresh.
+  const timer = setTimeout(() => ctrl.abort(), REFRESH_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${apiBase}/v1/auth/client/refresh-cookie`, {
+      method: "POST",
+      credentials: "include",
+      signal: ctrl.signal,
+    });
+    // 409 refresh_rotation_raced: a sibling rotated first and the family is
+    // intact — our cookie jar already holds its successor.
+    if (res.status === 409) return { kind: "raced" };
+    if (res.status === 401) return { kind: "signed-out" };
+    if (!res.ok) return { kind: "unavailable" };
+    // models.TokenResponse — we read accessToken from the body (a legacy
+    // `token` key is tolerated). The parse is neutralised BEFORE the race, so a
+    // body that errors after the abort won the race cannot surface as an
+    // unhandled rejection; racing it against the signal is what makes the
+    // timer bound the READ as well as the fetch.
+    const parsed = res.json().catch(() => ({}));
+    const body = (await Promise.race([parsed, rejectOnAbort(ctrl.signal)])) as {
+      accessToken?: string;
+      token?: string;
+      expiresIn?: number;
+    };
+    const fresh = body.accessToken ?? body.token ?? null;
+    // A 2xx with no token is a BROKEN RESPONSE, which is the reason not to act
+    // on it: it has told us nothing about the session.
+    if (!fresh) return { kind: "unavailable" };
+    return { kind: "ok", accessToken: fresh, expiresIn: body.expiresIn };
+  } catch {
+    // A transport failure, or the abort — including one that fires during the
+    // body read, which is why clearTimeout is in the `finally` and NOWHERE
+    // else. `fetch` resolves on HEADERS, so clearing the timer straight after
+    // the await bounds almost nothing: a server that sends headers and stalls
+    // the body would hold the Web Lock for as long as it stalls.
+    // "No answer" is not "no".
+    return { kind: "unavailable" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// performRefresh presents the refresh cookie — coalesced in-tab, serialised
+// ACROSS tabs by the Web Lock, and UNCONDITIONAL: it never consults the
+// session marker, so a storage that throws (private mode, disabled storage)
+// cannot turn a valid cookie into a sign-out. It is the single place the
+// outcome is decided, and the table is an ALLOWLIST:
 //   ok           2xx with an access token → installed in memory (never stored)
-//   signed-out   401, any other non-503 non-2xx, or a 2xx without a token →
-//                marker and token cleared; there is nothing to retry
-//   unavailable  503 (ADR-0017: the session could not be evaluated) or the
-//                fetch itself rejecting (a transport failure) → token and
-//                marker untouched; the caller may retry
+//   signed-out   401, and ONLY 401 → marker and token cleared; nothing to retry
+//   unavailable  everything else — 503, 429, 408, any other 5xx or 4xx, a
+//                twice-raced 409, a 2xx without a token, a transport failure,
+//                the 10s timeout → token and marker untouched; caller may retry
+// A 409 `refresh_rotation_raced` is retried exactly once before it lands in
+// `unavailable`. The in-flight promise wraps the lock, so a second in-tab
+// caller shares the first one's answer instead of queueing behind the lock.
 async function performRefresh(apiBase: string): Promise<RefreshOutcome> {
   if (inflightRefresh) return inflightRefresh;
   inflightRefresh = (async (): Promise<RefreshOutcome> => {
     try {
-      let res: Response;
-      try {
-        res = await fetch(`${apiBase}/v1/auth/client/refresh-cookie`, {
-          method: "POST",
-          credentials: "include",
-        });
-      } catch {
-        return { status: "unavailable" };
-      }
-      if (res.status === 503) return { status: "unavailable" };
-      if (!res.ok) return signedOut();
-      // models.TokenResponse — we read accessToken from the body (a legacy
-      // `token` key is tolerated).
-      const body = (await res.json().catch(() => ({}))) as {
-        accessToken?: string;
-        token?: string;
-        expiresIn?: number;
-      };
-      const fresh = body.accessToken ?? body.token ?? null;
-      // A 2xx with no token is a broken response, not an outage.
-      if (!fresh) return signedOut();
-      setAccessToken(fresh, body.expiresIn);
-      return { status: "ok", accessToken: fresh };
+      return await withRefreshLock(async (): Promise<RefreshOutcome> => {
+        let attempt = await attemptRefresh(apiBase);
+        if (attempt.kind === "raced") {
+          // A sibling won the CAS, so the browser already holds the successor
+          // cookie and a second attempt lands. Exactly ONE retry: a race
+          // surviving two attempts is far more likely a live session than a
+          // dead one, and guessing "dead" is the failure this removes. The
+          // marker is untouched on every 409 path.
+          attempt = await attemptRefresh(apiBase);
+          if (attempt.kind === "raced") return { status: "unavailable" };
+        }
+        if (attempt.kind === "signed-out") return signedOut();
+        if (attempt.kind === "unavailable") return { status: "unavailable" };
+        setAccessToken(attempt.accessToken, attempt.expiresIn);
+        return { status: "ok", accessToken: attempt.accessToken };
+      });
     } finally {
+      // Cleared SYNCHRONOUSLY, and the window it leaves is deliberately not
+      // load-bearing: a 401 answered after this point is handled by
+      // authedFetch's sent-token comparison (§4.3 branch 3), which is correct
+      // for ANY delay. Do not "fix" this by deferring it to a macrotask and
+      // conclude the race is thereby closed — it only widens the window by one
+      // turn of the event loop, while the 401 it must survive can arrive
+      // seconds later.
       inflightRefresh = null;
     }
   })();

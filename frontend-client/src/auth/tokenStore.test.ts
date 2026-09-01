@@ -8,6 +8,8 @@ import {
   getAccessToken,
   getAccessTokenSnapshot,
   refreshAccessToken,
+  REFRESH_FETCH_TIMEOUT_MS,
+  REFRESH_LOCK_NAME,
   setAccessToken,
 } from "@/auth/tokenStore";
 import { url } from "@/test/handlers";
@@ -91,12 +93,16 @@ describe("bootstrapFromRefreshCookie", () => {
     expect(getAccessToken()).toBeNull();
   });
 
-  it("a 200 without a token is signed-out too and clears the marker", async () => {
+  // §4.1's outcome table supersedes the old D15 rule: a 2xx WITHOUT a token is
+  // a broken response, which is precisely the reason NOT to act on it — the
+  // server has said nothing about the session. The speculative marker survives
+  // so the caller can retry, and no token is installed.
+  it("a 200 without a token is unavailable and KEEPS the speculative marker (§4.1)", async () => {
     server.use(http.post(REFRESH, () => HttpResponse.json({ ok: true })));
     await expect(bootstrapFromRefreshCookie(API)).resolves.toEqual({
-      status: "signed-out",
+      status: "unavailable",
     });
-    expect(hasSessionMarker()).toBe(false);
+    expect(hasSessionMarker()).toBe(true);
     expect(getAccessToken()).toBeNull();
   });
 
@@ -189,13 +195,17 @@ describe("refreshAccessToken (the automatic path)", () => {
     expect(getAccessToken()).toBe("at-0");
   });
 
-  it("a 200 without a token now clears the marker on the automatic path too (D15)", async () => {
+  // The mirror of the bootstrap case above — the two entry points share one
+  // rule, and §4.1 replaced D15's "a 2xx without a token signs out" with
+  // `unavailable` on both.
+  it("a 200 without a token is unavailable on the automatic path too — marker kept (§4.1)", async () => {
     setSessionMarker();
     server.use(http.post(REFRESH, () => HttpResponse.json({})));
     await expect(refreshAccessToken(API)).resolves.toEqual({
-      status: "signed-out",
+      status: "unavailable",
     });
-    expect(hasSessionMarker()).toBe(false);
+    expect(hasSessionMarker()).toBe(true);
+    expect(getAccessToken()).toBeNull();
   });
 });
 
@@ -304,5 +314,296 @@ describe("access-token expiry reckoning (§4.5)", () => {
       accessToken: "at-noexp",
     });
     expect(getAccessToken()).toBe("at-noexp");
+  });
+});
+
+// A helper that seeds a live-looking session, so every assertion below can
+// check that BOTH the token and the marker survived.
+const seedSession = () => {
+  setSessionMarker();
+  setAccessToken("at-live", 900);
+};
+
+describe("performRefresh outcome allowlist (§4.1, defect C)", () => {
+  // The rule INVERTS: signed-out is an allowlist of exactly one status. Only a
+  // 401 says "the credential I presented was rejected"; every other non-2xx
+  // says something about the SERVER and nothing about the session. A denylist
+  // is what defect C was — and 429 is not hypothetical, /refresh-cookie is
+  // mounted under the router's GLOBAL rate limiter
+  // (cmd/server/middleware.go:131), and a burst of tabs rotating at once is
+  // exactly the traffic shape that trips it.
+  it.each([
+    ["429 from the global rate limiter", 429, { "Retry-After": "30" }],
+    ["500", 500, {}],
+    ["502 from a proxy during a deploy", 502, {}],
+    ["504", 504, {}],
+    ["408", 408, {}],
+    ["404 from a misrouted host", 404, {}],
+  ])(
+    "%s is unavailable and keeps token AND marker",
+    async (_l, status, headers) => {
+      seedSession();
+      server.use(
+        http.post(REFRESH, () =>
+          HttpResponse.json({ detail: "nope" }, { status, headers }),
+        ),
+      );
+      await expect(refreshAccessToken(API)).resolves.toEqual({
+        status: "unavailable",
+      });
+      expect(getAccessToken()).toBe("at-live");
+      expect(hasSessionMarker()).toBe(true);
+    },
+  );
+
+  // v1 called this "a broken response, not an outage" and signed the user out.
+  // It IS a broken response, which is the reason not to act on it: a server
+  // that answers 200 with no token has told us nothing about the session.
+  it("a 2xx with no token is unavailable, not a sign-out", async () => {
+    seedSession();
+    server.use(http.post(REFRESH, () => HttpResponse.json({ ok: true })));
+    await expect(refreshAccessToken(API)).resolves.toEqual({
+      status: "unavailable",
+    });
+    expect(getAccessToken()).toBe("at-live");
+    expect(hasSessionMarker()).toBe(true);
+  });
+
+  // The allowlist's only member. Without this the table above could silently
+  // become "nothing ever signs out".
+  it("401 is the ONLY status that signs out, and clears both", async () => {
+    seedSession();
+    server.use(
+      http.post(REFRESH, () => new HttpResponse(null, { status: 401 })),
+    );
+    await expect(refreshAccessToken(API)).resolves.toEqual({
+      status: "signed-out",
+    });
+    expect(getAccessToken()).toBeNull();
+    expect(hasSessionMarker()).toBe(false);
+  });
+});
+
+describe("performRefresh 409 handling (§4.1b, G7)", () => {
+  it("409 then 2xx is ok, and the marker survives", async () => {
+    seedSession();
+    let hits = 0;
+    server.use(
+      http.post(REFRESH, () => {
+        hits++;
+        return hits === 1
+          ? HttpResponse.json(
+              { code: "refresh_rotation_raced" },
+              { status: 409 },
+            )
+          : HttpResponse.json({ accessToken: "at-2", expiresIn: 900 });
+      }),
+    );
+    await expect(refreshAccessToken(API)).resolves.toEqual({
+      status: "ok",
+      accessToken: "at-2",
+    });
+    expect(hits).toBe(2);
+    expect(hasSessionMarker()).toBe(true);
+  });
+
+  // THE regression test for defect B: a lost rotation race used to fall into
+  // !res.ok → signedOut(), and clearing the MARKER made it sticky, so the
+  // session stayed lost across a cold load even though the cookie in the jar
+  // was perfectly valid.
+  it("409 twice is unavailable — token and marker both kept", async () => {
+    seedSession();
+    let hits = 0;
+    server.use(
+      http.post(REFRESH, () => {
+        hits++;
+        return HttpResponse.json(
+          { code: "refresh_rotation_raced" },
+          { status: 409 },
+        );
+      }),
+    );
+    await expect(refreshAccessToken(API)).resolves.toEqual({
+      status: "unavailable",
+    });
+    expect(hits).toBe(2); // exactly one retry, never a loop
+    expect(getAccessToken()).toBe("at-live");
+    expect(hasSessionMarker()).toBe(true);
+  });
+
+  it("409 then 401 is signed-out, and clears both", async () => {
+    seedSession();
+    let hits = 0;
+    server.use(
+      http.post(REFRESH, () => {
+        hits++;
+        return hits === 1
+          ? HttpResponse.json(
+              { code: "refresh_rotation_raced" },
+              { status: 409 },
+            )
+          : new HttpResponse(null, { status: 401 });
+      }),
+    );
+    await expect(refreshAccessToken(API)).resolves.toEqual({
+      status: "signed-out",
+    });
+    expect(getAccessToken()).toBeNull();
+    expect(hasSessionMarker()).toBe(false);
+  });
+});
+
+describe("performRefresh cross-tab lock (§4.1a, G6)", () => {
+  // happy-dom 20.9 sets navigator.locks to NULL, not undefined — and
+  // `typeof null === "object"`, so a guard written
+  // `typeof navigator.locks === "undefined"` passes and then throws on
+  // `.request`. The guard must be `!locks?.request`.
+  it("runs unguarded when navigator.locks is null (happy-dom's default)", async () => {
+    expect(navigator.locks).toBeNull(); // asserts the premise, not the code
+    setSessionMarker();
+    const refresh = countingRefresh(() => HttpResponse.json(okBody));
+    await expect(refreshAccessToken(API)).resolves.toEqual({
+      status: "ok",
+      accessToken: "at-1",
+    });
+    expect(refresh.hits()).toBe(1);
+  });
+
+  it("takes the named lock and runs the refresh inside it", async () => {
+    const calls: string[] = [];
+    let ranInside = false;
+    vi.stubGlobal("navigator", {
+      locks: {
+        request: async (name: string, cb: () => Promise<unknown>) => {
+          calls.push(name);
+          const out = await cb();
+          ranInside = true;
+          return out;
+        },
+      },
+    });
+    setSessionMarker();
+    server.use(http.post(REFRESH, () => HttpResponse.json(okBody)));
+    await refreshAccessToken(API);
+    expect(calls).toEqual([REFRESH_LOCK_NAME]);
+    expect(REFRESH_LOCK_NAME).toBe("orkestra:auth-refresh");
+    expect(ranInside).toBe(true);
+  });
+
+  // The in-tab coalescing must survive the lock — a second caller must share
+  // the in-flight promise rather than queue behind the lock. Task 7 widens
+  // this to the MIXED shape (refreshAccessToken + refreshAfterUnauthorized),
+  // because both entry points then funnel through performRefresh and a
+  // regression that coalesced only within one of them would otherwise pass.
+  it("coalesces concurrent callers into one request", async () => {
+    setSessionMarker();
+    const refresh = countingRefresh(() => HttpResponse.json(okBody));
+    await Promise.all([refreshAccessToken(API), refreshAccessToken(API)]);
+    expect(refresh.hits()).toBe(1);
+  });
+});
+
+describe("performRefresh is bounded (§4.1c)", () => {
+  // ⚠️ AbortSignal.timeout is NOT controlled by vitest's fake clock (probed:
+  // `aborted` stays false after advancing 20s). If someone "simplifies"
+  // AbortController + setTimeout back to it, these cases stop aborting and
+  // either hang for ten real seconds or fail — which is the tripwire that
+  // keeps the divergence from frontend-admin honest.
+  it("a fetch that never resolves is unavailable at the timeout, keeping both", async () => {
+    vi.useFakeTimers();
+    try {
+      seedSession();
+      server.use(http.post(REFRESH, () => new Promise<never>(() => {})));
+      const p = refreshAccessToken(API);
+      await vi.advanceTimersByTimeAsync(REFRESH_FETCH_TIMEOUT_MS + 10);
+      await expect(p).resolves.toEqual({ status: "unavailable" });
+      expect(getAccessToken()).toBe("at-live");
+      expect(hasSessionMarker()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The round-13 regression test. It MUST use a streamed body: `fetch`
+  // resolves on HEADERS, so a delayed whole response is caught even by a
+  // clearTimeout placed right after `await fetch` — that shape would pass
+  // against the bug. Measured against the buggy version: fetch resolved at
+  // 31ms, the timer was cleared, and the body finished 3s later with no abort.
+  it("a response whose HEADERS arrive but whose BODY stalls still times out", async () => {
+    vi.useFakeTimers();
+    try {
+      seedSession();
+      server.use(
+        http.post(REFRESH, () => {
+          const stream = new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"accessToken":'));
+              // never closed — the body stalls after the headers
+            },
+          });
+          return new HttpResponse(stream, {
+            headers: { "Content-Type": "application/json" },
+          });
+        }),
+      );
+      const p = refreshAccessToken(API);
+      await vi.advanceTimersByTimeAsync(REFRESH_FETCH_TIMEOUT_MS + 10);
+      await expect(p).resolves.toEqual({ status: "unavailable" });
+      expect(getAccessToken()).toBe("at-live");
+      expect(hasSessionMarker()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The assertion that actually pins §4.1a's transitive bound: a contender
+  // queued behind a stalled holder must get the lock when the timeout fires,
+  // not wait forever. Without this, "the lock is bounded transitively" is a
+  // claim rather than a tested property — which is exactly what round 13
+  // found it to be.
+  it("releases the lock when the timeout fires", async () => {
+    vi.useFakeTimers();
+    try {
+      let chain: Promise<unknown> = Promise.resolve();
+      const locks = {
+        request: (_name: string, cb: () => Promise<unknown>) => {
+          const run = chain.then(() => cb());
+          chain = run.catch(() => undefined);
+          return run;
+        },
+      };
+      vi.stubGlobal("navigator", { locks });
+      seedSession();
+      server.use(http.post(REFRESH, () => new Promise<never>(() => {})));
+
+      const holder = refreshAccessToken(API);
+      let contenderRan = false;
+      const contender = locks.request(REFRESH_LOCK_NAME, async () => {
+        contenderRan = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(REFRESH_FETCH_TIMEOUT_MS + 10);
+      await holder;
+      await contender;
+      expect(contenderRan).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // A refresh that answers normally must not leave a live 10s timer behind —
+  // which is also why clearTimeout beats AbortSignal.timeout, since that one
+  // cannot be cancelled at all.
+  it("clears the timer on a normal answer", async () => {
+    vi.useFakeTimers();
+    try {
+      setSessionMarker();
+      const refresh = countingRefresh(() => HttpResponse.json(okBody));
+      await refreshAccessToken(API);
+      await vi.advanceTimersByTimeAsync(REFRESH_FETCH_TIMEOUT_MS * 2);
+      expect(refresh.hits()).toBe(1); // nothing re-fired, nothing aborted
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
