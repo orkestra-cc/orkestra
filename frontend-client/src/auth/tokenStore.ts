@@ -109,9 +109,22 @@ export type RefreshOutcome =
 // the rotating refresh cookie is never presented twice at once.
 let inflightRefresh: Promise<RefreshOutcome> | null = null;
 
-const signedOut = (): RefreshOutcome => {
+// clearSessionLocally is the ONLY sanctioned way for code outside this module
+// to end a session's local state, and it clears BOTH the token and the marker.
+// Exported because §4.3 branch 1 (a 401 carrying a terminal code) and the
+// terminal retry must end the session without a refresh. Clearing only one of
+// the two is exactly the defect the deleted client.ts middleware had: it
+// cleared the token and left a marker that then short-circuited the next cold
+// load.
+export function clearSessionLocally(): void {
   clearSessionMarker();
   clearAccessToken();
+}
+
+// One implementation, so the module-internal path and the exported one can
+// never drift.
+const signedOut = (): RefreshOutcome => {
+  clearSessionLocally();
   return { status: "signed-out" };
 };
 
