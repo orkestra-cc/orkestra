@@ -47,6 +47,23 @@ var (
 	// so the correct client response is to retry the refresh once.
 	// Translated to 409 refresh_rotation_raced at the handler boundary.
 	ErrRefreshRotationRaced = errors.New("refresh token superseded by a concurrent rotation — retry")
+	// ErrRefreshLookupUnavailable signals that the rotation could not be
+	// COMPLETED because infrastructure failed — the token store was
+	// unreachable, the user store was unreachable, signing failed, or the
+	// rotating write failed. It says nothing about whether the session is
+	// alive, so it must never be answered as an authentication failure:
+	// ADR-0017 gave session enforcement its own 503 precisely so a storage
+	// outage would not "train clients to discard a session that is still
+	// perfectly valid", and these are its siblings. Translated to
+	// 503 refresh_lookup_unavailable at the handler boundary — a code
+	// DISTINCT from session_enforcement_unavailable, because both clients
+	// treat 503 identically so the distinction is free on the wire and tells
+	// whoever reads the support ticket which subsystem failed.
+	//
+	// Every site that returns it wraps BOTH this sentinel and the underlying
+	// error (`fmt.Errorf("...: %w: %w", ErrRefreshLookupUnavailable, err)`),
+	// so classification holds and the cause survives for whoever logs.
+	ErrRefreshLookupUnavailable = errors.New("refresh path infrastructure unavailable")
 	// ErrOAuthSignupDisabled signals that an OAuth callback resolved to
 	// an unknown email but the audience-scoped oauthAllowSignup policy
 	// is off, so we refuse to provision a new account. Translated to
@@ -1438,7 +1455,8 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 	hashedToken := utils.HashRefreshToken(refreshToken)
 	tokenDoc, err := s.refreshTokenRepo.GetByTokenAny(ctx, hashedToken)
 	if err != nil {
-		return nil, fmt.Errorf("failed to validate refresh token: %w", err)
+		// An unreachable store is not a verdict on the token. 503, not 401.
+		return nil, fmt.Errorf("refresh token lookup failed: %w: %w", ErrRefreshLookupUnavailable, err)
 	}
 	if tokenDoc == nil {
 		return nil, ErrInvalidRefreshToken
@@ -1462,10 +1480,21 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		return nil, ErrInvalidRefreshToken
 	}
 
-	// Load the user for JWT claim population.
+	// Load the user for JWT claim population. A user that is genuinely GONE is
+	// terminal — 401, or the client holds a token for a deleted account
+	// forever. Anything else is the store being unreachable, and answering
+	// that 401 is how an outage acquires the appearance of a deleted account.
+	// The not-found branch is checked FIRST so the outage wrap can never
+	// re-classify a deletion.
 	userModel, err := s.userService.GetUserByID(ctx, claims.UserUUID)
 	if err != nil {
-		return nil, fmt.Errorf("user not found: %w", err)
+		if errors.Is(err, iface.ErrUserNotFound) {
+			return nil, ErrInvalidRefreshToken
+		}
+		return nil, fmt.Errorf("user lookup failed: %w: %w", ErrRefreshLookupUnavailable, err)
+	}
+	if userModel == nil {
+		return nil, ErrInvalidRefreshToken
 	}
 	user := convertUserModelToAuthModel(userModel)
 
@@ -1503,7 +1532,8 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 
 	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, claims.AMR, claims.LastOTPAt)
 	if err != nil {
-		return nil, fmt.Errorf("failed to mint token pair: %w", err)
+		// Signing is ours to get right; a failure here is not the caller's.
+		return nil, fmt.Errorf("token mint failed: %w: %w", ErrRefreshLookupUnavailable, err)
 	}
 	newDoc := &models.RefreshTokenDoc{
 		UUID:         models.GenerateTimeOrderedUUID(),
@@ -1545,7 +1575,8 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 			s.handleRefreshReplay(ctx, tokenDoc, securityCtx, "rotation_cas_lost")
 			return nil, ErrRefreshTokenReplay
 		}
-		return nil, fmt.Errorf("failed to rotate refresh token: %w", err)
+		// Not the CAS sentinel: the write itself failed. An outage, not a verdict.
+		return nil, fmt.Errorf("refresh token rotation write failed: %w: %w", ErrRefreshLookupUnavailable, err)
 	}
 
 	// Refresh user OAuth provider list for the response (matches the
@@ -1577,7 +1608,10 @@ func (s *authService) PeekRefreshToken(ctx context.Context, refreshToken string)
 	hashedToken := utils.HashRefreshToken(refreshToken)
 	doc, err := s.refreshTokenRepo.GetByTokenAny(ctx, hashedToken)
 	if err != nil {
-		return nil, fmt.Errorf("failed to look up refresh token: %w", err)
+		// An unreachable store is NOT "not a candidate". The picker in front
+		// of the rotation reads this sentinel and answers 503; every other
+		// error from this function is an invalid candidate and is skipped.
+		return nil, fmt.Errorf("refresh token lookup failed: %w: %w", ErrRefreshLookupUnavailable, err)
 	}
 	if doc == nil {
 		return nil, ErrInvalidRefreshToken

@@ -445,7 +445,7 @@ that rule is to be tightened to fail-closed in the first minor release after
 usable `CreatedAt` is **not** an anomaly — it has a perfectly good anchor,
 and counting it would poison the observation window.
 
-**The three cap outcomes above surface as four distinct HTTP responses**
+**The three cap outcomes above surface as five distinct HTTP responses**
 (`writeRefreshErr`, called from all three refresh-flow handlers —
 `RefreshTokensWithHeaderHTTP`, `GetSessionHTTP`, `RefreshTokensHTTP`):
 `ErrSessionEnforcementUnavailable` is **503** `session_enforcement_unavailable`
@@ -455,6 +455,29 @@ valid, and the caller may retry once storage recovers.
 `ErrSessionMaxAgeReached` is **401** `session_max_age_reached` — distinct
 from `refresh_token_replay` because "revoked" is inaccurate for a session
 that simply aged out.
+
+`ErrRefreshLookupUnavailable` is **503** `refresh_lookup_unavailable` — the
+rotation could not be *completed* because infrastructure failed: the token
+store or user store was unreachable, signing failed, the rotating write
+failed, **or the picker in front of the rotation could not classify a cookie
+candidate** (`PeekRefreshToken`'s lookup). Before this, all five were wrapped
+generically and answered as a codeless 401, so a Mongo blip during a refresh
+reached the SPA as the same answer a dead refresh token produces and no
+client-side rule could separate them. The picker case is the one that
+actually answers a browser: the cookie handlers never reach the rotation
+until every candidate is classified, so `pickRefreshCandidate` now returns a
+lookup error as a third value, and on that input the handlers answer 503
+**and suppress the rotated-token replay fallback** — a candidate the store
+could not read may have been the valid successor, and revoking that family
+is the PR-D D-9 regression in a new shape. A user who is genuinely **gone**
+still answers 401 (`errors.Is(err, iface.ErrUserNotFound)`) — the
+distinction is what stops this becoming a blanket 503 that never lets a dead
+session end. Every emitting site wraps the sentinel *and* the underlying
+error (`fmt.Errorf("…: %w: %w", ErrRefreshLookupUnavailable, err)`) so the
+cause survives into the log while `errors.Is` still classifies. The cookie
+is never expired on this outcome (`clearRefreshCookieOnTerminalRefreshErr`
+is an allowlist), and `refreshFailureOutcome` logs it as
+`lookup_unavailable`, not `invalid_token`.
 
 > **The same code is also emitted by `shared/middleware.AuthMiddleware`,
 > and that is the path that actually reaches a user.** The three refresh

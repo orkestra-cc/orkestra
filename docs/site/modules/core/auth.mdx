@@ -193,6 +193,15 @@ access token and retry on the next request. Reporting a storage outage as an
 authentication failure would train clients to discard sessions that are still
 perfectly valid.
 
+The same argument covers the rotation itself. When the refresh path cannot
+*complete* — a cookie candidate cannot be looked up, the token store or the
+user store is unreachable, signing fails, or the rotating write fails — the
+endpoint answers **503 `refresh_lookup_unavailable`** rather than 401. It is a
+separate code from `session_enforcement_unavailable` only so the failing
+subsystem is legible in a support ticket; both are 503 and every client
+already treats 503 as transient. An account that has genuinely been deleted
+still answers 401 — otherwise a dead session could never end.
+
 ### Upgrading
 
 Deploying the absolute cap for the first time signs out any session that began

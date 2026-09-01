@@ -910,13 +910,18 @@ func (h *AuthHandler) RefreshTokensWithHeaderHTTP(w http.ResponseWriter, r *http
 	cookieName := h.config.Auth.Cookie.Name
 	candidates := utils.GetAllRefreshTokensFromCookies(r, cookieName)
 	if len(candidates) > 0 {
-		chosen, fallbackRotated := h.pickRefreshCandidate(ctx, candidates)
+		chosen, fallbackRotated, pickErr := h.pickRefreshCandidate(ctx, candidates)
 		switch {
 		case chosen != "":
 			tokenResponse, err = h.authService.RefreshTokensWithRiskAssessment(ctx, chosen, securityCtx)
 			if tokenResponse != nil {
 				tokenSource = "cookie"
 			}
+		case pickErr != nil:
+			// The store could not classify what the browser sent. Not a
+			// sign-out — and NOT the replay fallback, which the picker has
+			// already suppressed for this input.
+			err = pickErr
 		case fallbackRotated != "":
 			_, err = h.authService.RefreshTokensWithRiskAssessment(ctx, fallbackRotated, securityCtx)
 		default:
@@ -991,7 +996,12 @@ func (h *AuthHandler) RefreshTokensWithHeaderHTTP(w http.ResponseWriter, r *http
 //   - fallbackRotated: a rotated candidate to use ONLY when chosen is
 //     empty — calling RefreshTokensWithRiskAssessment on it fires
 //     genuine replay detection (the lone token the browser holds is
-//     already rotated, which is the real theft signature).
+//     already rotated, which is the real theft signature). Suppressed
+//     whenever lookupErr is set.
+//   - lookupErr: a candidate could not be CLASSIFIED because the store
+//     failed (services.ErrRefreshLookupUnavailable). Returned only when
+//     no valid candidate was found, and it replaces fallbackRotated —
+//     see the free function below for why.
 //
 // The two-pass shape is the fix for the PR-D D-9 cookie-domain split
 // regression: deployments that migrate the refresh cookie from a
@@ -1000,22 +1010,39 @@ func (h *AuthHandler) RefreshTokensWithHeaderHTTP(w http.ResponseWriter, r *http
 // frozen at a rotated value, and the browser sends BOTH on every
 // request. Processing the stale one first must not revoke the family
 // behind the valid sibling.
-func (h *AuthHandler) pickRefreshCandidate(ctx context.Context, candidates []string) (chosen, fallbackRotated string) {
+func (h *AuthHandler) pickRefreshCandidate(ctx context.Context, candidates []string) (chosen, fallbackRotated string, lookupErr error) {
 	return pickRefreshCandidate(ctx, h.authService.PeekRefreshToken, candidates)
 }
 
-// pickRefreshCandidate is the free-function form of the picker, with
-// the Peek dependency injected so unit tests don't need a full
-// AuthService. Behaviour is otherwise identical to the method.
+// pickRefreshCandidate is the free-function form of the picker, with the Peek
+// dependency injected so unit tests don't need a full AuthService.
+//
+// The third return is what keeps an OUTAGE from being answered as a sign-out.
+// Peek used to fail for exactly one reason the picker cared about — "this is
+// not a usable candidate" — so every error was skipped. An unreachable store
+// fails the same call, and skipping it left the handler with "no candidate"
+// and a synthesised 401, which is the one status the client treats as the end
+// of the session. So: a Peek error that IS services.ErrRefreshLookupUnavailable
+// is recorded and the loop continues (a valid sibling is proof enough on its
+// own); at the end, a valid chosen wins regardless, and otherwise a recorded
+// lookup failure is returned INSTEAD of the rotated fallback — a candidate we
+// could not classify may have been the valid successor, and firing replay
+// detection on that family is the PR-D D-9 regression in a new shape.
 func pickRefreshCandidate(
 	ctx context.Context,
 	peek func(context.Context, string) (*models.RefreshTokenDoc, error),
 	candidates []string,
-) (chosen, fallbackRotated string) {
+) (chosen, fallbackRotated string, lookupErr error) {
 	now := time.Now()
 	for _, c := range candidates {
 		doc, err := peek(ctx, c)
-		if err != nil || doc == nil {
+		if err != nil {
+			if errors.Is(err, services.ErrRefreshLookupUnavailable) {
+				lookupErr = err
+			}
+			continue
+		}
+		if doc == nil {
 			continue
 		}
 		if now.After(doc.ExpiresAt) {
@@ -1027,9 +1054,12 @@ func pickRefreshCandidate(
 			}
 			continue
 		}
-		return c, ""
+		return c, "", nil
 	}
-	return "", fallbackRotated
+	if lookupErr != nil {
+		return "", "", lookupErr
+	}
+	return "", fallbackRotated, nil
 }
 
 // clearStaleParentDomainCookies emits Set-Cookie Max-Age=0 for every
@@ -1131,12 +1161,17 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 	// Only valid (non-revoked) candidates are usable here — a lone
 	// rotated cookie returns 401 without firing replay (rotation is
 	// reserved for the dedicated endpoint).
-	chosen, _ := h.pickRefreshCandidate(ctx, candidates)
+	chosen, _, pickErr := h.pickRefreshCandidate(ctx, candidates)
 	var tokenResponse *models.TokenResponse
 	var lastErr error
-	if chosen != "" {
+	switch {
+	case chosen != "":
 		tokenResponse, lastErr = h.authService.MintAccessTokenFromRefresh(ctx, chosen, securityCtx)
-	} else {
+	case pickErr != nil:
+		// An unreadable candidate is not an unauthenticated browser: 503, so
+		// the console retries instead of dropping the session on boot.
+		lastErr = pickErr
+	default:
 		lastErr = services.ErrInvalidRefreshToken
 	}
 	if tokenResponse == nil {
@@ -1451,13 +1486,18 @@ func (h *AuthHandler) RefreshTokensHTTP(w http.ResponseWriter, r *http.Request) 
 	cookieName := h.config.Auth.Cookie.Name
 	candidates := utils.GetAllRefreshTokensFromCookies(r, cookieName)
 	if len(candidates) > 0 {
-		chosen, fallbackRotated := h.pickRefreshCandidate(ctx, candidates)
+		chosen, fallbackRotated, pickErr := h.pickRefreshCandidate(ctx, candidates)
 		switch {
 		case chosen != "":
 			tokenResponse, lastErr = h.authService.RefreshTokensWithRiskAssessment(ctx, chosen, securityCtx)
 			if tokenResponse != nil {
 				tokenSource = "cookie"
 			}
+		case pickErr != nil:
+			// The store could not classify what the browser sent. Not a
+			// sign-out — and NOT the replay fallback, which the picker has
+			// already suppressed for this input.
+			lastErr = pickErr
 		case fallbackRotated != "":
 			_, lastErr = h.authService.RefreshTokensWithRiskAssessment(ctx, fallbackRotated, securityCtx)
 		default:
@@ -1613,6 +1653,8 @@ func refreshFailureOutcome(err error) string {
 		return "session_max_age"
 	case errors.Is(err, services.ErrSessionEnforcementUnavailable):
 		return "enforcement_unavailable"
+	case errors.Is(err, services.ErrRefreshLookupUnavailable):
+		return "lookup_unavailable"
 	}
 	var degraded *services.SessionRevocationDegradedError
 	if errors.As(err, &degraded) {
@@ -1934,12 +1976,19 @@ func (h *AuthHandler) RegisterTierMountableRoutes(publicAPI huma.API, protectedA
 
 // writeRefreshErr writes the JSON error for a refresh-flow failure.
 //
-// Four outcomes are deliberately distinct:
+// Five outcomes are deliberately distinct:
 //   - 503 session_enforcement_unavailable — the cap could not be
 //     evaluated or applied because storage failed. NOT a 401: reporting
 //     an outage as an authentication failure would train clients to
 //     discard a session that is still perfectly valid, and the caller may
 //     retry once storage recovers.
+//   - 503 refresh_lookup_unavailable — the rotation could not be
+//     COMPLETED because infrastructure failed: the token store or the
+//     user store was unreachable, signing failed, the rotating write
+//     failed, or the picker in front of the rotation could not classify a
+//     cookie candidate. Same 503 argument as its sibling above; a
+//     separate code only so the failing subsystem is legible in a
+//     support ticket.
 //   - 401 session_max_age_reached — the session hit its configured
 //     maximum age and has been logged out. "Revoked" is inaccurate for a
 //     session that simply aged out, and the distinction matters to
@@ -1956,6 +2005,24 @@ func writeRefreshErr(w http.ResponseWriter, err error) {
 			"title":  "Service Unavailable",
 			"detail": "session enforcement is temporarily unavailable — please retry",
 			"code":   "session_enforcement_unavailable",
+		})
+		return
+	}
+
+	if errors.Is(err, services.ErrRefreshLookupUnavailable) {
+		// §4.9 / defect C: the rotation could not be COMPLETED because
+		// infrastructure failed — inside the rotation, or in the picker that
+		// classifies cookies in front of it. Distinct from
+		// session_enforcement_unavailable so the failing subsystem is legible
+		// in a support ticket; identical on the wire (503) so every existing
+		// client already handles it.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": http.StatusServiceUnavailable,
+			"title":  "Service Unavailable",
+			"detail": "the refresh path is temporarily unavailable — please retry",
+			"code":   "refresh_lookup_unavailable",
 		})
 		return
 	}

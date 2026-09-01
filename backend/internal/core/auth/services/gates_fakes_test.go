@@ -321,6 +321,59 @@ type gateRefreshRepo struct {
 	// that the sweep scheduler surfaces a repository error rather than
 	// reporting a clean cycle.
 	sweepErr error
+	// onGetByTokenAny, when set, intercepts every GetByTokenAny: it receives the
+	// 1-based call number and the COPY the map would have returned (possibly nil)
+	// and decides what the caller sees. Models "the store failed" (Task 2) and
+	// "the row changed / the store failed BETWEEN the read and the re-read"
+	// (Task 2b). Deliberately not the same input as "no such row" (nil, nil) or
+	// repository.ErrTokenAlreadyRotated: §4.9 exists precisely because those
+	// used to produce one indistinguishable answer.
+	onGetByTokenAny    func(call int, doc *authModels.RefreshTokenDoc) (*authModels.RefreshTokenDoc, error)
+	getByTokenAnyCalls int
+	// rotateErr short-circuits RotateWithFamily with the given error, no mutation.
+	rotateErr error
+	// familyRevokedErr makes FamilyRevoked fail — the read the race classifier
+	// turns a family revocation on.
+	familyRevokedErr error
+	// revokeFamilyCalls counts RevokeFamily invocations, so a test can assert the
+	// classifier did not DECIDE to revoke — activeFamilyMembers alone cannot tell
+	// "never called" from "called and failed".
+	revokeFamilyCalls int
+}
+
+// setGetByTokenAnyErr is the convenience form of setOnGetByTokenAny: every read
+// fails with err, whatever the call number and whatever the map holds.
+func (r *gateRefreshRepo) setGetByTokenAnyErr(err error) {
+	r.setOnGetByTokenAny(func(int, *authModels.RefreshTokenDoc) (*authModels.RefreshTokenDoc, error) {
+		return nil, err
+	})
+}
+
+func (r *gateRefreshRepo) setOnGetByTokenAny(fn func(call int, doc *authModels.RefreshTokenDoc) (*authModels.RefreshTokenDoc, error)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onGetByTokenAny = fn
+}
+
+func (r *gateRefreshRepo) setRotateErr(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rotateErr = err
+}
+
+func (r *gateRefreshRepo) setFamilyRevokedErr(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.familyRevokedErr = err
+}
+
+// revokeFamilyCalled reports how many times RevokeFamily was invoked, counted
+// before any error short-circuit so "called and failed" is distinguishable from
+// "never called".
+func (r *gateRefreshRepo) revokeFamilyCalled() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.revokeFamilyCalls
 }
 
 type testFamilyRevocation struct {
@@ -379,6 +432,8 @@ func (r *gateRefreshRepo) backdateRevocation(tokenHash string, by time.Duration)
 func (r *gateRefreshRepo) GetByTokenAny(_ context.Context, tokenHash string) (*authModels.RefreshTokenDoc, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.getByTokenAnyCalls++
+	var out *authModels.RefreshTokenDoc
 	if d, ok := r.byHash[tokenHash]; ok {
 		c := *d
 		if state, compromised := r.compromised[c.FamilyID]; compromised {
@@ -386,13 +441,20 @@ func (r *gateRefreshRepo) GetByTokenAny(_ context.Context, tokenHash string) (*a
 			c.RevokedAt = &state.at
 			c.RevokedReason = state.reason
 		}
-		return &c, nil
+		out = &c
 	}
-	return nil, nil
+	if r.onGetByTokenAny != nil {
+		return r.onGetByTokenAny(r.getByTokenAnyCalls, out)
+	}
+	return out, nil
 }
 
 func (r *gateRefreshRepo) RotateWithFamily(_ context.Context, oldHash string, newDoc *authModels.RefreshTokenDoc) error {
 	r.mu.Lock()
+	if err := r.rotateErr; err != nil {
+		r.mu.Unlock()
+		return err
+	}
 	old, ok := r.byHash[oldHash]
 	if !ok || old.IsRevoked {
 		r.mu.Unlock()
@@ -435,11 +497,17 @@ func (r *gateRefreshRepo) FamilyRevoked(_ context.Context, familyID string) (boo
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.familyRevokedErr != nil {
+		return false, r.familyRevokedErr
+	}
 	_, revoked := r.compromised[familyID]
 	return revoked, nil
 }
 
 func (r *gateRefreshRepo) RevokeFamily(_ context.Context, familyID, reason string) (int64, error) {
+	r.mu.Lock()
+	r.revokeFamilyCalls++
+	r.mu.Unlock()
 	if r.revokeFamilyErr != nil {
 		return 0, r.revokeFamilyErr
 	}
