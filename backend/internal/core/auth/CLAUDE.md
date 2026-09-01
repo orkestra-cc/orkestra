@@ -479,6 +479,18 @@ is never expired on this outcome (`clearRefreshCookieOnTerminalRefreshErr`
 is an allowlist), and `refreshFailureOutcome` logs it as
 `lookup_unavailable`, not `invalid_token`.
 
+**Scope, precisely:** the five sites are the four inside
+`RefreshTokensWithRiskAssessment` plus `PeekRefreshToken`'s lookup, so
+`POST /v1/auth/{tier}/refresh-cookie` and `POST /v1/auth/{tier}/refresh` are
+covered end to end, and `GET /v1/auth/session` is covered only as far as the
+picker. **`MintAccessTokenFromRefresh` is deliberately NOT classified** — it
+still carries three generic wraps (its own `GetByTokenAny`, its `GetUserByID`,
+and `GenerateAccessTokenForSessionWithAMR`), each of which becomes a codeless
+401. That path is reachable: Peek and Mint issue separate reads, so a blip
+opening between them gives Peek-OK → Mint-fail → 401 on session bootstrap.
+Extending §4.9 to cover it is a spec change, not a refactor — do not "fix" it
+opportunistically while editing this file.
+
 > **The same code is also emitted by `shared/middleware.AuthMiddleware`,
 > and that is the path that actually reaches a user.** The three refresh
 > handlers above are read by machinery, not people: `frontend-admin`'s

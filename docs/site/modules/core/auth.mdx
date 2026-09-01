@@ -193,14 +193,23 @@ access token and retry on the next request. Reporting a storage outage as an
 authentication failure would train clients to discard sessions that are still
 perfectly valid.
 
-The same argument covers the rotation itself. When the refresh path cannot
+The same argument covers the rotation itself. When the **rotation** path cannot
 *complete* — a cookie candidate cannot be looked up, the token store or the
-user store is unreachable, signing fails, or the rotating write fails — the
-endpoint answers **503 `refresh_lookup_unavailable`** rather than 401. It is a
+user store is unreachable, signing fails, or the rotating write fails —
+`POST /v1/auth/{tier}/refresh-cookie` and `POST /v1/auth/{tier}/refresh` answer
+**503 `refresh_lookup_unavailable`** rather than 401. It is a
 separate code from `session_enforcement_unavailable` only so the failing
 subsystem is legible in a support ticket; both are 503 and every client
 already treats 503 as transient. An account that has genuinely been deleted
 still answers 401 — otherwise a dead session could never end.
+
+The bootstrap endpoint `GET /v1/auth/session` shares only the first half of
+that. Its cookie-classification step answers 503 the same way, but the
+read-only mint it performs afterwards (`MintAccessTokenFromRefresh`) is not
+yet classified, so a store failure opening between that call's own lookup and
+its mint still answers a codeless 401. Closing that gap is a tracked
+follow-up; until then, do not read the paragraph above as covering the whole
+refresh surface.
 
 ### Upgrading
 
