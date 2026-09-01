@@ -7,7 +7,7 @@ _Parent: [../CLAUDE.md](../CLAUDE.md)_
 
 The customer-facing SPA — sibling to the operator console at [`../frontend-admin`](../frontend-admin/CLAUDE.md), with a separate origin, cookie domain, design system, and data layer. External (Tier-2) tenants register, manage their account (profile, security/MFA, billing identity), and log in here.
 
-> **ADR-0006:** this SPA is a **thin auth/account demo**. The catalog → subscribe → Stripe-checkout → transactions → payment-methods flows left with the `subscriptions`/`payments` addons; only login + account + billing-identity remain. The sections below describing subscribe/Stripe are retained as a record of how a fork rebuilds that layer.
+> **ADR-0006:** this SPA is a **thin auth/account demo**. The catalog → subscribe → Stripe-checkout → transactions → payment-methods flows left with the `subscriptions`/`payments` addons; only login + account + billing-identity remain. The sections describing subscribe/Stripe are retained as a record of how a fork rebuilds that layer; they are headed **Fork reference**, and nothing under them exists in this tree.
 
 This app **does not** render anything operator-specific. Internal admin pages live in `../frontend-admin`. If a feature targets internal staff, it does not belong here.
 
@@ -17,20 +17,20 @@ This SPA only ever speaks to the **client** API audience (`api.localhost:3000` i
 
 ## Tech stack
 
-| Layer           | Choice                                                                                                       |
-| --------------- | ------------------------------------------------------------------------------------------------------------ |
-| Framework       | React 19, React Router v8 (single `react-router` package — `react-router-dom` no longer exists)              |
-| Build           | Vite 7                                                                                                       |
-| Language        | TypeScript 5.9 strict mode                                                                                   |
-| Styling         | Tailwind v4 (zero-config, design tokens in `src/index.css`) — **not** Bootstrap/Falcon                       |
-| Server state    | TanStack Query v5 — **not** RTK Query (the operator console uses RTK Query; this app intentionally diverges) |
-| Client state    | React state + module-scoped stores (no Redux)                                                                |
-| HTTP client     | `openapi-fetch` for typed routes + raw `fetch` for the few endpoints the codegen stub doesn't cover yet      |
-| OpenAPI codegen | `openapi-typescript` against `${VITE_API_BASE}/openapi.json`                                                 |
-| i18n            | `react-i18next` (Italian default, English fallback) — wired from day 1                                       |
-| Auth            | In-memory access token + httpOnly refresh cookie (Domain-scoped to the API host)                             |
-| Tests           | Vitest 4 + React Testing Library + MSW 2 on happy-dom — `npm test`; an unhandled request fails the run       |
-| Payments        | _(none in the base — the Stripe Checkout flow left with the addons; see "Current surface")_                  |
+| Layer           | Choice                                                                                                                                           |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Framework       | React 19, React Router v8 (single `react-router` package — `react-router-dom` no longer exists)                                                  |
+| Build           | Vite 7                                                                                                                                           |
+| Language        | TypeScript 5.9 strict mode                                                                                                                       |
+| Styling         | Tailwind v4 (zero-config, design tokens in `src/index.css`) — **not** Bootstrap/Falcon                                                           |
+| Server state    | TanStack Query v5 — **not** RTK Query (the operator console uses RTK Query; this app intentionally diverges)                                     |
+| Client state    | React state + module-scoped stores (no Redux)                                                                                                    |
+| HTTP client     | Hand-typed `fetch` wrappers in `src/api/*`; the `openapi-fetch` client in `client.ts` is wired but **no module imports it yet**                  |
+| OpenAPI codegen | `openapi-typescript` against `${VITE_API_BASE}/openapi.json`                                                                                     |
+| i18n            | `react-i18next` (Italian default, English fallback) — wired from day 1                                                                           |
+| Auth            | In-memory access token + httpOnly refresh cookie (Domain-scoped to the API host)                                                                 |
+| Tests           | Vitest 4 + React Testing Library + MSW 2 on happy-dom — `npm test`; an unhandled request fails the run                                           |
+| Payments        | _(none in the base — the Stripe Checkout flow left with the addons. `@stripe/stripe-js` stays in `package.json` unimported, for the fork chain)_ |
 
 ## Directory layout
 
@@ -43,7 +43,7 @@ frontend-client/
 │   ├── index.css               # Tailwind v4 entry + @theme overrides
 │   ├── vite-env.d.ts
 │   ├── api/
-│   │   ├── client.ts           # openapi-fetch wrapper + 401 silent-refresh middleware
+│   │   ├── client.ts           # apiBaseURL (the only export anyone imports) + a dormant openapi-fetch client
 │   │   ├── openapi.gen.ts      # Generated by `npm run codegen` (committed for CI)
 │   │   ├── auth.ts             # /v1/auth/client/{register,login,me,...,mfa/...,password recovery}
 │   │   ├── avatar.ts           # /v1/me/avatar/{presign-upload,commit,source} self-service
@@ -89,35 +89,41 @@ frontend-client/
 
 Four moving parts:
 
-1. **In-memory access token** — `src/auth/tokenStore.ts` holds the RS256 JWT in a module-scoped variable. Never localStorage, never sessionStorage. The token is read synchronously by the openapi-fetch middleware on every request so the React tree is not in the fetch path.
+1. **In-memory access token** — `src/auth/tokenStore.ts` holds the RS256 JWT in a module-scoped variable. Never localStorage, never sessionStorage. The token is read synchronously by `authedFetch` (`src/api/auth.ts`) on every authenticated call, so the React tree is never in the fetch path. The middleware in `client.ts` reads it the same way, but nothing routes through that client today.
 2. **httpOnly refresh cookie** — set by the backend at login on `Domain=api.localhost` (dev) or `Domain=api.orkestra.com` (prod). The SPA cannot read it directly; it only triggers `POST /v1/auth/client/refresh-cookie`, which mints a fresh access token. Per ADR-0003 PR-D D-9 the operator host (`console.*`) and client host (`api.*`) get distinct cookies — a token minted here cannot refresh on the operator console and vice versa.
 3. **Session marker** — a tiny `client.session=1` localStorage flag stamped on `signIn` and cleared on `signOut`/401. `refreshAccessToken` short-circuits when the marker is missing so anonymous visitors don't fire a guaranteed-401 on every cold load. `bootstrapFromRefreshCookie()` (on the auth context, implemented in `tokenStore.ts`) is the one place that stamps the marker _speculatively_: the OAuth callback page calls it to adopt the cookie the client-tier relay set on the API host, and it presents the cookie **whether or not the stamp succeeded** — a storage that throws must not turn a valid cookie into a sign-out. Both it and the automatic `refreshAccessToken` go through one unconditional `performRefresh`: `ok` installs the memory-only token; every signed-out shape (401, other non-2xx, a 200 with no token) clears marker and token; `unavailable` — a 503 **or a transport failure** — keeps both so the caller can retry. Neither function rejects.
 4. **Public policy + OAuth start** — `fetchAuthPolicy()` (`GET /v1/auth/client/policy`) falls open on failure, and `passwordLoginUsable(policy)` is the **only** reader of `passwordLoginEnabled`: `undefined` (still loading) reads as usable, `false` **and** `null` read as off, so an SSO-only client surface hides the password UI instead of showing a form the backend refuses with 403 (spec §4.10, G5). `fetchOAuthProviders()` deliberately does **not** fall open — a 503, a network error or a body without a `providers` array is a retryable error state, never "no method"; only `{providers: []}` is empty. `initiateOAuthLogin(provider, next)` POSTs the allowlisted provider **with `credentials:'include'`** (the response sets the HttpOnly `orkestra_oauth_state` cookie the relay endpoint requires), stashes the validated `next` and leaves through `browserNavigation.assign` — the seam tests spy on. On the login page this means: nothing paints until `/policy` resolves; with the method on, the password form renders above an "or continue with" provider section; with it off (`false` or `null`) only the providers render, the forgot/sign-up links disappear, and a provider list that _resolved_ empty shows the no-sign-in-method notice — a provider-query error (503, network, malformed body) is a retryable alert, never that notice. The kill switch (`loginEnabled=false`) keeps the maintenance banner and hides the provider section.
 
 ### Refresh choreography
 
+A refresh happens in exactly **two** places today, and neither of them is a mid-session 401:
+
 ```
-fetch X → 401 with expired access token
-        → openapi-fetch refreshMiddleware
-        → tokenStore.refreshAccessToken (coalesced — concurrent 401s share one in-flight promise)
-        → POST /v1/auth/client/refresh-cookie (browser attaches the httpOnly cookie via credentials:'include')
-        → new access token → retry X with X-Retry: 1 header
-        → second 401 → bubble up; AuthProvider sees null token → router redirects to /login?next=<original>
+AuthProvider mounts   → tokenStore.refreshAccessToken(apiBaseURL)   # one-shot, no-op without the session marker
+/auth/callback        → bootstrapFromRefreshCookie()                # speculative: stamps the marker, then presents the cookie
+        → POST /v1/auth/client/refresh-cookie   (browser attaches the httpOnly cookie via credentials:'include')
+        → ok           → in-memory access token installed
+        → signed-out   → marker + token cleared
+        → unavailable  → both kept, caller may retry
 ```
 
-Two consecutive 401s trigger logout. A 503 or a network failure during the refresh is `unavailable`: the original 401 is surfaced to the caller and the token is kept, because nothing is known about the session (ADR-0017). The `?next=` parameter on the login redirect carries the originally requested path so post-login the user lands where they were headed.
+Both go through one coalesced `performRefresh`, so concurrent callers share a single in-flight promise, and neither function rejects.
 
-### Reading tenant memberships from the JWT
+**An expired token on an ordinary call does _not_ silently refresh.** `client.ts` carries a `refreshMiddleware` that would refresh and retry once with an `X-Retry: 1` header — but every wrapper in `src/api/*` calls `fetch` directly and nothing imports the `api` client, so that middleware is dead code until something does. Today a 401 mid-session surfaces as a failed query, and the session is only rehydrated on the next mount-time refresh. Routing the wrappers through `api`, or lifting the retry into `authedFetch`, is the fix when this starts to bite — the middleware itself is written and tested.
 
-The client API surface deliberately **does not** expose `/v1/tenants` or `/v1/me/tenants` — that endpoint is mounted on the operator router only. To know which tenant the caller owns (e.g. for the subscribe flow), `src/auth/memberships.ts` decodes the access token's `mbr` claim:
+A 503 or a network failure during a refresh is `unavailable`: the token is kept, because nothing is known about the session (ADR-0017). The `?next=` parameter on the login redirect carries the originally requested path so post-login the user lands where they were headed.
+
+### Fork reference: reading tenant memberships from the JWT
+
+`src/auth/memberships.ts` and `useOwnedTenants()` **do not exist in the base** — they left with the subscribe flow. The technique is recorded because a fork rebuilding an owner-scoped feature needs it.
+
+The client API surface deliberately **does not** expose `/v1/tenants` or `/v1/me/tenants` — that endpoint is mounted on the operator router only. To know which tenant the caller owns, decode the access token's `mbr` claim:
 
 ```
 { mbr: [ { tid: "uuid", k: "external", r: ["org_owner"] }, ... ] }
 ```
 
-Compact keys come from `backend/internal/core/auth/services/jwt_service.go::claimsToMap`. Ownership is inferred from `r.includes("org_owner")` since the JWT does not carry an `isOwner` boolean. The backend re-validates ownership against `TenantProvider.ListUserMemberships` on every `/v1/me/*` call, so the client-side filter is a UX hint, not a security gate.
-
-`useOwnedTenants()` re-renders when the access token rotates (login, refresh, logout) via `useSyncExternalStore` subscribed to the token store.
+Compact keys come from `backend/internal/core/auth/services/jwt_service.go::claimsToMap`. Ownership is inferred from `r.includes("org_owner")` since the JWT does not carry an `isOwner` boolean. The backend re-validates ownership against `TenantProvider.ListUserMemberships` on every `/v1/me/*` call, so a client-side filter is a UX hint, **not** a security gate. Subscribe to the token store with `useSyncExternalStore` so the derived list re-renders when the token rotates (login, refresh, logout).
 
 ### OAuth login (web)
 
@@ -130,20 +136,20 @@ Compact keys come from `backend/internal/core/auth/services/jwt_service.go::clai
 All server state goes through **TanStack Query v5**, not RTK Query. (The operator console at `../frontend-admin` uses RTK Query; this app intentionally diverges because the surface is small enough that the Redux infrastructure is not worth it.)
 
 ```
-QueryClient (created once in main.tsx)
+QueryClient (created once in main.tsx — retry: 1, staleTime: 30s)
   → useQuery / useMutation in pages
-    → openapi-fetch helpers in src/api/* (typed routes)
-      → bearer + refresh middleware in src/api/client.ts
+    → hand-typed wrappers in src/api/* (jsonFetch / authedFetch)
+      → fetch with credentials:'include' + the in-memory bearer token
 ```
 
 Conventions:
 
-- **Cache keys are tuples**: `['catalog']`, `['me']`, `['subscription', uuid]`. Keep them flat and stable.
-- **`staleTime` is opt-in**: anonymous catalog uses 60s; auth-sensitive queries default to 0.
+- **Cache keys are flat tuples**: `['me']`, `['authPolicy']`, `['oauthProviders']`, `['mfa-status']`, `['billing-profile']`. Add a discriminator (`['thing', id]`) only when the query is per-resource. Keep them stable.
+- **`staleTime` is a global 30s default** set on the `QueryClient` in `main.tsx` — it is _not_ opt-in. Pass a per-query `staleTime` when a view must always be fresh; the test harness (`src/test/render.tsx`) uses `staleTime: 0` and `retry: false` so tests never serve a cached answer.
 - **`enabled` gates auth-only queries**: `useMe` checks `isAuthenticated` before firing.
 - **Mutations call query invalidation explicitly**: there is no global tag system like RTK Query — invalidate `queryClient` keys by hand after a successful mutation.
 
-There is **no axios** and **no custom fetch helpers**. New endpoints either use openapi-fetch (preferred, after re-running codegen) or a small hand-typed wrapper in `src/api/<feature>.ts` mirroring the pattern in `subscriptions.ts` / `payments.ts`. Both paths share the same `apiBaseURL` constant and bearer token plumbing.
+There is **no axios**. Every endpoint today is a hand-typed wrapper in `src/api/<feature>.ts` built on the `jsonFetch` / `authedFetch` helpers in `auth.ts`; `openapi-fetch` is available in `client.ts` for typed routes once codegen sharpens, but nothing imports it yet. Both paths share the same `apiBaseURL` constant and bearer-token plumbing — mirror `billingProfile.ts` for a simple read/write pair, `auth.ts` for a multi-flow module.
 
 ## How navigation works
 
@@ -170,9 +176,11 @@ When you add a new page:
 - **Currency / dates**: use `src/lib/format.ts::formatPrice` for money, `Intl.DateTimeFormat` for dates. Don't hand-format with `${amount}€`.
 - **Addons (ADR-0007)**: this SPA has no module/manifest system today, so all strings live in the core `src/locales/{en,it}.json`. When/if a fork gives the client an addon seam (as `frontend-admin` has), addon strings must follow [ADR-0007](../docs/adr/0007-per-addon-i18n-namespaces.md): a per-addon i18next namespace registered via `i18n.addResourceBundle(lng, '<name>', bundle)`, never appended to the core locale files. Mirror `frontend-admin/src/modules/useModuleI18n.ts` when that day comes.
 
-## Stripe Checkout
+## Fork reference: Stripe Checkout
 
-Phase 4 uses **hosted Stripe Checkout** — the backend opens a session via `POST /v1/me/payments/{,setup-}checkout-session`, returns a URL, and the SPA redirects via `window.location.href`. **No Stripe Elements**, **no PaymentIntent choreography on the SPA**. The publishable key (`VITE_STRIPE_PUBLISHABLE_KEY`) is therefore not required to subscribe; it stays reserved in `src/lib/stripe.ts` for a future Elements/Embedded Checkout migration.
+> **None of this is in the base.** The endpoints, pages and `src/lib/stripe.ts` left with the `subscriptions`/`payments` addons under ADR-0006. What follows is the design record a fork rebuilding the layer should follow — written in the present tense as it was when it shipped.
+
+The flow used **hosted Stripe Checkout** — the backend opens a session via `POST /v1/me/payments/{,setup-}checkout-session`, returns a URL, and the SPA redirects via `window.location.href`. **No Stripe Elements**, **no PaymentIntent choreography on the SPA**. The publishable key (`VITE_STRIPE_PUBLISHABLE_KEY`, still plumbed through `/config.js` but read by nothing in the base) was therefore not required to subscribe; it was reserved in `src/lib/stripe.ts` for a future Elements/Embedded Checkout migration.
 
 Two modes are available:
 
@@ -185,9 +193,9 @@ Return URL: `/subscribe/return?sub={uuid}&result=success|cancel`. Stripe is told
 
 If you add a third Stripe flow (refunds UI, customer portal redirect, etc.), follow the same pattern: backend creates the session, frontend redirects via `window.location.href`. Never embed Stripe Elements without explicit sign-off — the MVP design call is hosted-only to minimize PCI scope.
 
-### Owner & billing-profile gate
+### Fork reference: owner & billing-profile gate
 
-Subscribes are polymorphic: `SubscribePage` defaults to **personal** (`ownerKind:"user"` — the calling user is the owner) and only renders an organization picker when `useOwnedTenants()` returns rows. Personal subscribes pre-flight `GET /v1/me/billing-identity` (Phase 6 of the Unified Client Aggregate refactor — the predecessor `/v1/me/billing-profile` and the `clientbilling_customers` collection are gone, replaced by a per-user personal Tenant aggregate that the backend lazy-provisions via `EnsureTenantForUser`). The SPA bounces to `/account/billing?next=/subscribe?...` if `hasBillingProfile()` reports the identity is missing (no `billingAddress.country`, or `isCompany=true` without `legalName`); the same redirect runs as a fallback when a post-create checkout-session call still 409s. Tenant-owner subscribes reuse the existing `tenant.StripeCustomerID` seam and do not need the billing-identity form.
+`SubscribePage` and `useOwnedTenants()` are part of the removed layer; `GET /v1/me/billing-identity` and `BillingProfilePage` are the parts that **do** survive in the base. Subscribes were polymorphic: `SubscribePage` defaults to **personal** (`ownerKind:"user"` — the calling user is the owner) and only renders an organization picker when `useOwnedTenants()` returns rows. Personal subscribes pre-flight `GET /v1/me/billing-identity` (Phase 6 of the Unified Client Aggregate refactor — the predecessor `/v1/me/billing-profile` and the `clientbilling_customers` collection are gone, replaced by a per-user personal Tenant aggregate that the backend lazy-provisions via `EnsureTenantForUser`). The SPA bounces to `/account/billing?next=/subscribe?...` if `hasBillingProfile()` reports the identity is missing (no `billingAddress.country`, or `isCompany=true` without `legalName`); the same redirect runs as a fallback when a post-create checkout-session call still 409s. Tenant-owner subscribes reuse the existing `tenant.StripeCustomerID` seam and do not need the billing-identity form.
 
 ## Path aliases
 
@@ -195,7 +203,7 @@ Vite + tsconfig declare a single alias: `@/*` → `src/*`. Use it everywhere:
 
 ```ts
 import { useAuth } from "@/auth/useAuth";
-import { listPublicCatalog } from "@/api/catalog";
+import { getBillingProfile } from "@/api/billingProfile";
 import { Layout } from "@/components/Layout";
 ```
 
@@ -222,7 +230,7 @@ The Vite dev server runs inside Docker; if you need to rebuild outside Docker (e
 
 ### Runtime config
 
-`index.html` loads `public/config.js` (`window.__ORKESTRA_CONFIG__` — `apiBase`, `stripePublishableKey`) before the bundle; `src/api/client.ts` consults it first and uses the build-time `VITE_API_BASE` only as a fallback for environments that don't set it (Vitest, scratch SSR). `public/config.js` is **gitignored** — each environment writes its own:
+`index.html` loads `public/config.js` (`window.__ORKESTRA_CONFIG__` — `apiBase`, plus a `stripePublishableKey` slot the base declares in the `Window` type but never reads) before the bundle; `src/api/client.ts` consults it first and uses the build-time `VITE_API_BASE` only as a fallback for environments that don't set it (Vitest, scratch SSR). `public/config.js` is **gitignored** — each environment writes its own:
 
 - **Dev / staging (Vite in Docker)**: the `client-frontend` service `command` in `docker-compose.{dev,staging}.yml` regenerates the file from `VITE_API_BASE` / `VITE_STRIPE_PUBLISHABLE_KEY` at container start. It is written **only at startup** — after any git operation that deletes it under the bind mount (checkout, merge), recreate the container; otherwise Vite serves `index.html` for `/config.js` and the browser blocks it (`nosniff`).
 - **Prod (nginx image)**: the entrypoint at `/docker-entrypoint.d/10-write-config.sh` (baked in the `Dockerfile`) writes it from `ORKESTRA_API_BASE` / `ORKESTRA_STRIPE_PUBLISHABLE_KEY` before nginx starts.
@@ -239,7 +247,7 @@ The plugin also makes the missing-file case legible: when `config.js` is absent 
 
 1. **Backend first**. If the feature needs a new endpoint, add it to the relevant backend module (a core module, or a fork's `backend/internal/addons/<module>/`), declare the route on `ri.Client.ProtectedRouter` if it's a Tier-2 self-service endpoint, ship the backend PR.
 2. **Re-run codegen**: `npm run codegen` against the running backend so `src/api/openapi.gen.ts` picks up the new operation.
-3. **Add an API wrapper** in `src/api/<feature>.ts`. Hand-typed today, openapi-fetch typed once codegen sharpens — both patterns coexist; mirror the file closest to your shape (`subscriptions.ts` for self-service reads/writes, `auth.ts` for the heavy multi-flow modules).
+3. **Add an API wrapper** in `src/api/<feature>.ts`. Hand-typed today, openapi-fetch typed once codegen sharpens — both patterns coexist; mirror the file closest to your shape (`billingProfile.ts` for self-service reads/writes, `auth.ts` for the heavy multi-flow modules).
 4. **Add the page** in `src/pages/<Name>Page.tsx`. Co-locate any one-off helpers or components in the same file unless they're reused.
 5. **Wire the route** in `src/App.tsx`. Wrap in `<RequireAuth>` if the endpoint requires `aud=client` + a logged-in user.
 6. **Add i18n strings** to **both** `src/locales/{en,it}.json`. Lead with the IT translation since IT is the default locale.
@@ -251,7 +259,7 @@ The plugin also makes the missing-file case legible: when `config.js` is absent 
 
 - **Tailwind v4 utility classes only** — no inline `style={{ ... }}` for colors/spacing, no SCSS files, no CSS-in-JS. Custom design tokens go in `src/index.css` `@theme`.
 - **One page per route**, named `<Thing>Page.tsx`. No nested folders under `pages/` for now — the surface is small enough.
-- **`credentials: 'include'`** on every fetch that talks to the API. The shared `apiBaseURL` + middleware in `src/api/client.ts` already do this for openapi-fetch calls; raw `fetch` callers must set it explicitly.
+- **`credentials: 'include'`** on every call that needs the session cookie. `jsonFetch` / `authedFetch` (`src/api/auth.ts`) set it for you; a raw `fetch` must set it itself. Two deliberate exceptions: `verifyEmail.ts` talks to anonymous endpoints and sends no cookie, and `avatar.ts`'s presigned PUT sets `credentials: 'omit'` so nothing leaks to the object store.
 - **Never persist the access token to storage**. In-memory only. The session marker in localStorage is _just a hint_ that a refresh cookie probably exists.
 - **Co-locate sub-components** next to the page that uses them. Promote to `src/components/` only on second use.
 - **Keep `src/components/` small**. The operator console has dozens of shared primitives because it's a 50-page admin app. This SPA has ~12 routes — most "shared" UI is one inline `<Field>` away from being co-located instead.
