@@ -124,11 +124,15 @@ export const REFRESH_LOCK_NAME = "orkestra:auth-refresh";
 
 // The value frontend-admin settled on (baseApi.ts:84). This bound is what makes
 // the unbounded Web Lock above safe: everything done while holding the lock
-// happens inside it, so the lock is bounded TRANSITIVELY. Weakening this
-// re-arms the lock.
+// happens inside a fetch timeout, so the lock is bounded TRANSITIVELY.
+// The true hold is at most TWO of these — 2 x REFRESH_FETCH_TIMEOUT_MS — because
+// the single 409 retry is a second full attempt inside the same lock; the
+// PER-FETCH bound stays 10s. Weakening this re-arms the lock.
 export const REFRESH_FETCH_TIMEOUT_MS = 10_000;
 
-async function withRefreshLock<T>(run: () => Promise<T>): Promise<T> {
+async function withRefreshLock(
+  run: () => Promise<RefreshOutcome>,
+): Promise<RefreshOutcome> {
   const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
   // `!locks?.request`, NOT `typeof locks === "undefined"`: happy-dom 20.x sets
   // navigator.locks to NULL, and `typeof null === "object"`, so the typeof
@@ -136,11 +140,34 @@ async function withRefreshLock<T>(run: () => Promise<T>): Promise<T> {
   // captured at module load — a console (and Task 10's manual probe) can null
   // it out between calls.
   if (!locks?.request) return run();
-  // Deliberately the 2-argument overload. Bounding the LOCK needs
-  // request(name, {signal}, cb), and frontend-admin's own comment records that
-  // switching shapes silently defeated its test. The bound comes from the
-  // fetch timeout instead.
-  return await locks.request(REFRESH_LOCK_NAME, run);
+  // `granted` scopes the catch below to the ACQUISITION alone. request()
+  // rejects for two unrelated reasons — the lock manager refusing to grant
+  // (InvalidStateError when the document is not fully active, an
+  // implementation that throws) and the callback itself throwing — and only
+  // the first says nothing about the session. The callback never throws by
+  // construction (attemptRefresh catches everything and every branch returns
+  // a RefreshOutcome), so a rejection AFTER it started is a programming error
+  // and is rethrown rather than silently reported as an outage.
+  let granted = false;
+  try {
+    // Deliberately the 2-argument overload. Bounding the LOCK needs
+    // request(name, {signal}, cb), and frontend-admin's own comment records
+    // that switching shapes silently defeated its test. The bound comes from
+    // the fetch timeout instead.
+    return await locks.request(REFRESH_LOCK_NAME, () => {
+      granted = true;
+      return run();
+    });
+  } catch (err) {
+    if (granted) throw err;
+    // A lock we could not take is not an answer about the session, so by the
+    // §4.1 allowlist it is `unavailable` — token and marker kept. It must not
+    // propagate either: AuthProvider's mount-time call is
+    // `void refreshAccessToken(...)`, so a rejection here would land as an
+    // unhandled rejection and the documented "never rejects" contract on both
+    // entry points would be false.
+    return { status: "unavailable" };
+  }
 }
 
 // A promise that rejects when the signal aborts and never resolves otherwise.
@@ -234,8 +261,11 @@ async function attemptRefresh(apiBase: string): Promise<RefreshAttempt> {
 //                twice-raced 409, a 2xx without a token, a transport failure,
 //                the 10s timeout → token and marker untouched; caller may retry
 // A 409 `refresh_rotation_raced` is retried exactly once before it lands in
-// `unavailable`. The in-flight promise wraps the lock, so a second in-tab
-// caller shares the first one's answer instead of queueing behind the lock.
+// `unavailable` — which is why the lock is held for at most TWO fetch timeouts
+// (2 x REFRESH_FETCH_TIMEOUT_MS), the retry being a second full attempt inside
+// it. A lock request that REJECTS is `unavailable` too, never a rejection. The
+// in-flight promise wraps the lock, so a second in-tab caller shares the first
+// one's answer instead of queueing behind the lock.
 async function performRefresh(apiBase: string): Promise<RefreshOutcome> {
   if (inflightRefresh) return inflightRefresh;
   inflightRefresh = (async (): Promise<RefreshOutcome> => {

@@ -490,6 +490,33 @@ describe("performRefresh cross-tab lock (§4.1a, G6)", () => {
     expect(ranInside).toBe(true);
   });
 
+  // P20: a lock the browser REFUSES to grant (the document is not fully
+  // active, an implementation that throws) says nothing about the session, so
+  // it lands in `unavailable` like every other non-401 — and it must never
+  // propagate. AuthProvider's mount-time call is `void refreshAccessToken(…)`,
+  // so a rejection escaping here would surface as an unhandled rejection.
+  it("a lock request that REJECTS is unavailable, never a rejection", async () => {
+    vi.stubGlobal("navigator", {
+      locks: {
+        request: () =>
+          Promise.reject(
+            new DOMException(
+              "Document is not fully active",
+              "InvalidStateError",
+            ),
+          ),
+      },
+    });
+    seedSession();
+    const refresh = countingRefresh(() => HttpResponse.json(okBody));
+    await expect(refreshAccessToken(API)).resolves.toEqual({
+      status: "unavailable",
+    });
+    expect(refresh.hits()).toBe(0); // the cookie was never presented
+    expect(getAccessToken()).toBe("at-live");
+    expect(hasSessionMarker()).toBe(true);
+  });
+
   // The in-tab coalescing must survive the lock — a second caller must share
   // the in-flight promise rather than queue behind the lock. Task 7 widens
   // this to the MIXED shape (refreshAccessToken + refreshAfterUnauthorized),
