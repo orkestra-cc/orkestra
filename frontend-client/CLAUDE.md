@@ -98,11 +98,13 @@ Four moving parts:
 
 ### Refresh choreography
 
-A refresh happens in exactly **two** places today, and neither of them is a mid-session 401:
+A refresh happens in exactly **three** places, and the third one **is** a mid-session 401 — the recovery landed with #325, so a reader who remembers "this SPA does not refresh mid-session" is remembering the old behaviour:
 
 ```
 AuthProvider mounts   → tokenStore.refreshAccessToken(apiBaseURL)   # one-shot, no-op without the session marker
 /auth/callback        → bootstrapFromRefreshCookie()                # speculative: stamps the marker, then presents the cookie
+authedFetch 401       → refreshAfterUnauthorized(apiBaseURL)        # the mid-session recovery: only on proof the handler
+                                                                    # never ran; marker gate skipped; retries once
         → POST /v1/auth/client/refresh-cookie   (serialised across tabs by a Web Lock;
                                                  10s per fetch; one 409 retry)
         → ok           → in-memory access token + expiry installed
@@ -116,9 +118,9 @@ AuthProvider mounts   → tokenStore.refreshAccessToken(apiBaseURL)   # one-shot
 >
 > A `navigator.locks.request` that **rejects** — the document is not fully active, an implementation that throws — is `unavailable` as well, and is never propagated: `AuthProvider` calls `void refreshAccessToken(...)` on mount, so a rejection escaping `performRefresh` would be an unhandled rejection. The catch is scoped to the acquisition; a throw from inside the lock callback still propagates.
 
-All **three** entry points — the two above and `refreshAfterUnauthorized` below — go through one coalesced `performRefresh`, so concurrent callers share a single in-flight promise, and none of the three rejects. The in-flight promise **wraps** the lock, so a second caller in the same tab shares the first one's answer instead of queueing behind the lock.
+All **three** entry points above go through one coalesced `performRefresh`, so concurrent callers share a single in-flight promise, and none of the three rejects. The in-flight promise **wraps** the lock, so a second caller in the same tab shares the first one's answer instead of queueing behind the lock.
 
-The **third** entry point is `refreshAfterUnauthorized(apiBase)`, the authenticated-retry path, and as of this branch it is **wired**. It deliberately **skips the marker gate** and goes straight through `performRefresh`, so — unlike `refreshAccessToken`, whose gate returns `signed-out` while clearing nothing — every `signed-out` it yields clears **both** the token and the marker (G3), and an `ok` repairs a marker that was missing. It is for a 401 that answered a request which actually carried a bearer: a bearer in memory is proof a session existed, so the anonymous-visitor optimisation has no business vetoing a cookie that may still be valid. It too never rejects. Its one caller is `src/api/authedFetch.ts` — the one authenticated request path and, now that every `src/api/*` wrapper routes through it, the only 401 algorithm in this tree.
+The third of them, `refreshAfterUnauthorized(apiBase)`, is the authenticated-retry path, and as of this branch it is **wired**. It deliberately **skips the marker gate** and goes straight through `performRefresh`, so — unlike `refreshAccessToken`, whose gate returns `signed-out` while clearing nothing — every `signed-out` it yields clears **both** the token and the marker (G3), and an `ok` repairs a marker that was missing. It is for a 401 that answered a request which actually carried a bearer: a bearer in memory is proof a session existed, so the anonymous-visitor optimisation has no business vetoing a cookie that may still be valid. It too never rejects. Its one caller is `src/api/authedFetch.ts` — the one authenticated request path and, now that every `src/api/*` wrapper routes through it, the only 401 algorithm in this tree.
 
 **An expired access token on an authenticated call recovers silently.**
 Every authenticated request goes through `src/api/authedFetch.ts`, which
