@@ -146,6 +146,24 @@ describe("authedFetch header merging (§4.2)", () => {
     },
   );
 
+  // §4.2 rule 2, and the only enumerated rule of §4.2 with no other witness:
+  // the httpOnly refresh cookie is Domain-scoped to the API host (ADR-0003
+  // D-9) and attaches ONLY when credentials are explicitly included. Drop the
+  // line and every other assertion in this file still passes while the whole
+  // recovery quietly stops working in a browser, because the cookie never
+  // travels. The default it falls back to is "same-origin", which is not it.
+  it("sends credentials: include, and a caller cannot turn it off", async () => {
+    const rec = recordRequests(() => HttpResponse.json({ ok: true }));
+    seedToken("at-1", 900);
+    await authedFetch("/v1/me/thing");
+    expect(rec.seen[0].credentials).toBe("include");
+
+    // Written AFTER the ...init spread, so it always wins — the same "last
+    // write wins" rule the bearer follows.
+    await authedFetch("/v1/me/thing", { credentials: "omit" });
+    expect(rec.seen[1].credentials).toBe("include");
+  });
+
   it("sends no Authorization at all when the store is empty", async () => {
     const rec = recordRequests(() => HttpResponse.json({ ok: true }));
     // no token, no marker
@@ -172,6 +190,37 @@ describe("authedFetch 401 recovery (§4.3)", () => {
     expect(rec.seen.length).toBe(2);
     expect(rec.header(0, "Authorization")).toBe("Bearer at-old");
     expect(rec.header(1, "Authorization")).toBe("Bearer at-new");
+  });
+
+  // Neither of these is visible from a header or a status code, so both are
+  // invisible to every other case in this file. A retry that dropped
+  // `init.body` reaches the handler as an EMPTY POST — the request succeeds,
+  // the caller gets a 200, and the payload is silently gone. And §5.10: the
+  // retry state is a local variable, never a header; v0.10.0's deleted
+  // client.ts middleware set `X-Retry: 1` and leaked the recovery to the
+  // server, where nothing needed it.
+  it("the retry re-sends the caller's body and adds no X-Retry header", async () => {
+    const refresh = countRefresh(() =>
+      HttpResponse.json({ accessToken: "at-new", expiresIn: 900 }),
+    );
+    const rec = recordRequests((hit) =>
+      hit === 1
+        ? new HttpResponse(null, { status: 401 })
+        : HttpResponse.json({ ok: true }),
+    );
+    seedExpiredToken("at-old");
+
+    const res = await authedFetch("/v1/me/thing", {
+      method: "POST",
+      body: JSON.stringify({ a: 1 }),
+    });
+    expect(res.status).toBe(200);
+    expect(refresh.hits()).toBe(1);
+    expect(rec.seen.length).toBe(2);
+    expect(await rec.seen[0].text()).toBe('{"a":1}');
+    expect(await rec.seen[1].text()).toBe('{"a":1}');
+    expect(rec.header(0, "X-Retry")).toBeNull();
+    expect(rec.header(1, "X-Retry")).toBeNull();
   });
 
   // THE lockout-hazard regression test (§4.4). change-password is an
