@@ -8,6 +8,7 @@ import {
   getAccessToken,
   getAccessTokenSnapshot,
   refreshAccessToken,
+  refreshAfterUnauthorized,
   REFRESH_FETCH_TIMEOUT_MS,
   REFRESH_LOCK_NAME,
   setAccessToken,
@@ -518,14 +519,13 @@ describe("performRefresh cross-tab lock (§4.1a, G6)", () => {
   });
 
   // The in-tab coalescing must survive the lock — a second caller must share
-  // the in-flight promise rather than queue behind the lock. Task 7 widens
-  // this to the MIXED shape (refreshAccessToken + refreshAfterUnauthorized),
-  // because both entry points then funnel through performRefresh and a
+  // the in-flight promise rather than queue behind the lock. The MIXED shape
+  // is deliberate: both entry points funnel through performRefresh, and a
   // regression that coalesced only within one of them would otherwise pass.
-  it("coalesces concurrent callers into one request", async () => {
+  it("coalesces concurrent callers across BOTH entry points into one request", async () => {
     setSessionMarker();
     const refresh = countingRefresh(() => HttpResponse.json(okBody));
-    await Promise.all([refreshAccessToken(API), refreshAccessToken(API)]);
+    await Promise.all([refreshAccessToken(API), refreshAfterUnauthorized(API)]);
     expect(refresh.hits()).toBe(1);
   });
 });
@@ -632,5 +632,71 @@ describe("performRefresh is bounded (§4.1c)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("refreshAfterUnauthorized (§4.1e)", () => {
+  // Route (i) into "a token in memory with no marker": signIn calls
+  // setSessionMarker() first, which swallows a throwing storage by design
+  // ("acceptable degradation"), then installs the token. Private mode or
+  // blocked site data leaves a live session with no marker.
+  it("presents the cookie with NO marker, and repairs the marker on success", async () => {
+    setAccessToken("at-stale", 900);
+    expect(hasSessionMarker()).toBe(false);
+    const refresh = countingRefresh(() =>
+      HttpResponse.json({ accessToken: "at-new", expiresIn: 900 }),
+    );
+    await expect(refreshAfterUnauthorized(API)).resolves.toEqual({
+      status: "ok",
+      accessToken: "at-new",
+    });
+    // The assertion is on the REQUEST having happened, not just the outcome —
+    // a marker-gated implementation short-circuits with no request at all.
+    expect(refresh.hits()).toBe(1);
+    expect(getAccessToken()).toBe("at-new");
+    // A repair, not a stamp-then-hope: the refresh has just PROVED a cookie
+    // exists, so leaving the marker unset would keep the store in a
+    // knowingly-false state and lose the session at the next cold load.
+    expect(hasSessionMarker()).toBe(true);
+  });
+
+  // Route (ii): a sibling tab signed out. localStorage is shared across tabs,
+  // so clearSessionMarker() removed it for everyone while the in-memory token
+  // — which is per-tab — survived. The cookie is normally dead server-side.
+  // THE direct regression test for the v3 assumption that a signed-out outcome
+  // had already cleared the token: it had not.
+  it("a dead cookie clears BOTH the token and the marker (G3)", async () => {
+    setAccessToken("at-stale", 900);
+    setSessionMarker();
+    server.use(
+      http.post(REFRESH, () => new HttpResponse(null, { status: 401 })),
+    );
+    await expect(refreshAfterUnauthorized(API)).resolves.toEqual({
+      status: "signed-out",
+    });
+    expect(getAccessToken()).toBeNull();
+    expect(hasSessionMarker()).toBe(false);
+  });
+
+  it("keeps token and marker on unavailable", async () => {
+    setAccessToken("at-stale", 900);
+    setSessionMarker();
+    server.use(
+      http.post(REFRESH, () => new HttpResponse(null, { status: 503 })),
+    );
+    await expect(refreshAfterUnauthorized(API)).resolves.toEqual({
+      status: "unavailable",
+    });
+    expect(getAccessToken()).toBe("at-stale");
+    expect(hasSessionMarker()).toBe(true);
+  });
+
+  // The anonymous optimisation must survive this change UNTOUCHED.
+  it("refreshAccessToken with no marker still short-circuits with NO request", async () => {
+    const refresh = countingRefresh(() => HttpResponse.json(okBody));
+    await expect(refreshAccessToken(API)).resolves.toEqual({
+      status: "signed-out",
+    });
+    expect(refresh.hits()).toBe(0);
   });
 });

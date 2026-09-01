@@ -314,6 +314,34 @@ export async function refreshAccessToken(
   return performRefresh(apiBase);
 }
 
+// refreshAfterUnauthorized — the AUTHENTICATED-RETRY path.
+//
+// Unlike refreshAccessToken it does NOT consult the session marker. The gate
+// exists to spare an anonymous visitor a guaranteed-401 round-trip on every
+// cold load; a 401 answering a request that carried a bearer is not that case,
+// because a bearer in memory is proof a session existed. A marker that is
+// absent for an unrelated reason — a throwing localStorage, a sibling tab's
+// signOut — must not veto a cookie that is still valid.
+//
+// Every outcome therefore comes from performRefresh, which is the only place
+// that decides them, so a `signed-out` here ALWAYS clears both token and
+// marker (G3). refreshAccessToken's marker gate is the one `signed-out` in
+// this store that clears nothing, and this function is how the 401 path routes
+// around it. Never rejects.
+export async function refreshAfterUnauthorized(
+  apiBase: string,
+): Promise<RefreshOutcome> {
+  const outcome = await performRefresh(apiBase);
+  // A repair, not a stamp-then-hope: the refresh has just proved a cookie
+  // exists, so leaving the marker unset would keep the store in a
+  // knowingly-false state and lose the session at the next cold load.
+  // Best-effort by construction — setSessionMarker swallows a throwing
+  // storage. The accepted cost (O5) is that a sibling tab's sign-out whose
+  // POST /logout failed can be outlived across a reload.
+  if (outcome.status === "ok") setSessionMarker();
+  return outcome;
+}
+
 // bootstrapFromRefreshCookie adopts a refresh cookie the SPA did not set
 // itself — the client-tier OAuth relay sets it on the API host and lands
 // the browser on /auth/callback with nothing else (spec §4.10, §5 #23).
