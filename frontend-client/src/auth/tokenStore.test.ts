@@ -4,7 +4,9 @@ import { http, HttpResponse } from "msw";
 import { hasSessionMarker, setSessionMarker } from "@/auth/sessionMarker";
 import {
   bootstrapFromRefreshCookie,
+  clearAccessToken,
   getAccessToken,
+  getAccessTokenSnapshot,
   refreshAccessToken,
   setAccessToken,
 } from "@/auth/tokenStore";
@@ -194,5 +196,113 @@ describe("refreshAccessToken (the automatic path)", () => {
       status: "signed-out",
     });
     expect(hasSessionMarker()).toBe(false);
+  });
+});
+
+describe("access-token expiry reckoning (§4.5)", () => {
+  it("records expiresAt from the reported duration, in the local clock domain", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-01T12:00:00.000Z"));
+      setAccessToken("at-1", 900);
+      expect(getAccessTokenSnapshot()).toEqual({
+        token: "at-1",
+        expiresAt: Date.now() + 900_000,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The reason the duration is used at all. Both ends of the comparison are
+  // taken from the same clock, so a constant offset cancels: a client whose
+  // clock is hours off still reads a token installed 60s ago, with a 900s
+  // life, as live. A Date.now()-vs-`exp` implementation fails this.
+  it("is immune to a wall-clock offset between install and read", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-01T12:00:00.000Z"));
+      setAccessToken("at-skew", 900);
+      const at = getAccessTokenSnapshot().expiresAt!;
+      // The clock jumps hours forward AND the elapsed time is only 60s: this
+      // is the shape a badly set clock produces on the NEXT read.
+      vi.advanceTimersByTime(60_000);
+      expect(at).toBeGreaterThan(Date.now());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back to the JWT exp when no duration is supplied", () => {
+    const seg = Buffer.from('{"exp":1700000000}', "utf8").toString("base64url");
+    setAccessToken(`h.${seg}.s`);
+    expect(getAccessTokenSnapshot().expiresAt).toBe(1700000000 * 1000);
+  });
+
+  it("records an UNKNOWN expiry when neither is available", () => {
+    setAccessToken("opaque-not-a-jwt");
+    expect(getAccessTokenSnapshot()).toEqual({
+      token: "opaque-not-a-jwt",
+      expiresAt: null,
+    });
+  });
+
+  it("clearing the token clears the expiry too", () => {
+    setAccessToken("at-1", 900);
+    clearAccessToken();
+    expect(getAccessTokenSnapshot()).toEqual({ token: null, expiresAt: null });
+  });
+
+  it("a refresh installs the pair from the response body", async () => {
+    vi.useFakeTimers();
+    try {
+      setSessionMarker();
+      server.use(
+        http.post(REFRESH, () =>
+          HttpResponse.json({ accessToken: "at-r", expiresIn: 120 }),
+        ),
+      );
+      await refreshAccessToken(API);
+      expect(getAccessTokenSnapshot()).toEqual({
+        token: "at-r",
+        expiresAt: Date.now() + 120_000,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The test that fails if ANY single call site in the §4.6 table is missed:
+  // a dropped lifetime reads as "unknown", which reads as "live", which means
+  // the recovery never fires. Sign in, cross the recorded lifetime, and the
+  // expiry must have gone from "in the future" to "in the past".
+  it("a recorded lifetime actually elapses", () => {
+    vi.useFakeTimers();
+    try {
+      setAccessToken("at-e2e", 60);
+      const { expiresAt } = getAccessTokenSnapshot();
+      expect(expiresAt).toBeGreaterThan(Date.now());
+      vi.advanceTimersByTime(61_000);
+      expect(getAccessTokenSnapshot().expiresAt).toBeLessThanOrEqual(
+        Date.now(),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The deliberate divergence from frontend-admin, which treats a response
+  // without expiresIn as a FAILED refresh. Turning a valid rotation into a
+  // sign-out over a missing optional field is the wrong trade.
+  it("a refresh WITHOUT expiresIn still installs the token", async () => {
+    setSessionMarker();
+    server.use(
+      http.post(REFRESH, () => HttpResponse.json({ accessToken: "at-noexp" })),
+    );
+    await expect(refreshAccessToken(API)).resolves.toEqual({
+      status: "ok",
+      accessToken: "at-noexp",
+    });
+    expect(getAccessToken()).toBe("at-noexp");
   });
 });

@@ -10,17 +10,59 @@ import {
   hasSessionMarker,
   setSessionMarker,
 } from "@/auth/sessionMarker";
+import { jwtExp } from "@/lib/jwtExp";
 
 let accessToken: string | null = null;
+// The moment the current token expires, in the Date.now() domain — recorded
+// from the DURATION the server reported at receipt, not from the token's
+// absolute `exp`. Both ends of the eventual comparison then come from the same
+// clock, so a constant offset cancels and clock skew stops being a failure
+// mode rather than merely being tolerated (§4.5). `null` means UNKNOWN, which
+// §4.3 branch 2 treats as LIVE.
+let accessTokenExpiresAt: number | null = null;
 const subscribers = new Set<(token: string | null) => void>();
 
 export function getAccessToken(): string | null {
   return accessToken;
 }
 
-export function setAccessToken(token: string | null): void {
+// The token and what we know about its life are ONE fact and must be read
+// together: a 401 handler that read them separately could compare a token it
+// sent against an expiry a sibling request installed moments later.
+export function getAccessTokenSnapshot(): {
+  token: string | null;
+  expiresAt: number | null;
+} {
+  return { token: accessToken, expiresAt: accessTokenExpiresAt };
+}
+
+// expiresInSeconds is the server's own figure (LoginResult.expiresIn,
+// MfaLoginVerifyResult.expiresIn, the refresh body). It is OPTIONAL, and an
+// absent one is not an error: the JWT's own `exp` is tried next, and an
+// unreadable one leaves the expiry unknown.
+export function setAccessToken(
+  token: string | null,
+  expiresInSeconds?: number,
+): void {
   accessToken = token;
+  accessTokenExpiresAt = resolveExpiresAt(token, expiresInSeconds);
   for (const fn of subscribers) fn(token);
+}
+
+function resolveExpiresAt(
+  token: string | null,
+  expiresInSeconds?: number,
+): number | null {
+  if (token === null) return null;
+  // Number.isFinite guards the same hazard jwtExp does: a body carrying
+  // `expiresIn: 1e400` would otherwise record a token that never expires.
+  if (
+    typeof expiresInSeconds === "number" &&
+    Number.isFinite(expiresInSeconds)
+  ) {
+    return Date.now() + expiresInSeconds * 1000;
+  }
+  return jwtExp(token);
 }
 
 export function clearAccessToken(): void {
@@ -94,11 +136,12 @@ async function performRefresh(apiBase: string): Promise<RefreshOutcome> {
       const body = (await res.json().catch(() => ({}))) as {
         accessToken?: string;
         token?: string;
+        expiresIn?: number;
       };
       const fresh = body.accessToken ?? body.token ?? null;
       // A 2xx with no token is a broken response, not an outage.
       if (!fresh) return signedOut();
-      setAccessToken(fresh);
+      setAccessToken(fresh, body.expiresIn);
       return { status: "ok", accessToken: fresh };
     } finally {
       inflightRefresh = null;

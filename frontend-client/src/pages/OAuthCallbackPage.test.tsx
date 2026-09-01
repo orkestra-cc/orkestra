@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 
 import { RequireAuth } from "@/auth/RequireAuth";
 import { hasSessionMarker, setSessionMarker } from "@/auth/sessionMarker";
+import { getAccessTokenSnapshot } from "@/auth/tokenStore";
 import {
   OAUTH_RETURN_TO_KEY,
   OAUTH_RETURN_TO_TTL_MS,
@@ -380,6 +381,42 @@ describe("OAuthCallbackPage — MFA continuation", () => {
     expect(await screen.findByTestId("deeplink-location")).toHaveTextContent(
       "/account/security",
     );
+  });
+
+  // §4.6 — the mirror of the login page's MFA case. This page has the OTHER
+  // `signIn` call site, and a lifetime dropped here fails just as silently.
+  it("records the token lifetime the MFA verify response carried (§4.6)", async () => {
+    server.use(
+      http.post(VERIFY, () =>
+        HttpResponse.json({
+          success: true,
+          accessToken: "at-mfa",
+          tokenType: "Bearer",
+          expiresIn: 180,
+          sessionId: "s1",
+        }),
+      ),
+    );
+    // The store stamps Date.now() + lifetime at install, so the recorded
+    // expiry must fall inside [before, after] + 180s — a window milliseconds
+    // wide. That excludes null (the lifetime was dropped) and 900.
+    const before = Date.now();
+    renderCallback(
+      "",
+      "#requiresMfa=true&mfaToken=ch-1&webauthnAvailable=false",
+    );
+    const user = userEvent.setup();
+    await user.type(
+      await screen.findByLabelText(/verification code/i),
+      "123456",
+    );
+    await user.click(screen.getByRole("button", { name: /^verify$/i }));
+    await waitFor(() => expect(getAccessTokenSnapshot().token).toBe("at-mfa"));
+    const after = Date.now();
+    const { expiresAt } = getAccessTokenSnapshot();
+    expect(expiresAt).not.toBeNull();
+    expect(expiresAt!).toBeGreaterThanOrEqual(before + 180_000);
+    expect(expiresAt!).toBeLessThanOrEqual(after + 180_000);
   });
 
   it("cancel returns to the login page", async () => {

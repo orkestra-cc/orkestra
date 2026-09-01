@@ -42,9 +42,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     void refreshAccessToken(apiBaseURL);
   }, []);
 
-  const signIn = useCallback((next: string) => {
+  const signIn = useCallback((next: string, expiresInSeconds?: number) => {
     setSessionMarker();
-    setAccessToken(next);
+    setAccessToken(next, expiresInSeconds);
   }, []);
 
   const signOut = useCallback(async () => {

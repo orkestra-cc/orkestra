@@ -174,7 +174,8 @@ export type LoginResult =
       kind: "token";
       accessToken: string;
       tokenType: string;
-      expiresIn: number;
+      // OPTIONAL, and deliberately so: see the mapping below.
+      expiresIn?: number;
       user?: LoginUser;
       mfaEnrollmentRequired?: boolean;
       mfaGraceExpiresAt?: string;
@@ -223,7 +224,13 @@ export async function login(input: LoginInput): Promise<LoginResult> {
     kind: "token",
     accessToken: body.accessToken,
     tokenType: body.tokenType ?? "Bearer",
-    expiresIn: body.expiresIn ?? 900,
+    // `expiresIn` is OPTIONAL on the wire. It used to default to 900, which
+    // FABRICATES a fifteen-minute lifetime the server never promised: on a
+    // deployment running a 60s TTL the store would then read every 401 as
+    // "not a token problem" for the rest of that quarter hour. An unknown
+    // lifetime is a fact the store knows how to handle (§4.5's fallback
+    // chain); a wrong one is not.
+    expiresIn: body.expiresIn,
     user: body.user,
     mfaEnrollmentRequired: body.mfaEnrollmentRequired,
     mfaGraceExpiresAt: body.mfaGraceExpiresAt,
@@ -242,7 +249,9 @@ export interface MfaLoginVerifyInput {
 export interface MfaLoginVerifyResult {
   accessToken: string;
   tokenType: string;
-  expiresIn: number;
+  // Optional for the same reason as LoginResult's: an absent lifetime must
+  // reach the store as "unknown", never as an invented number.
+  expiresIn?: number;
   user?: LoginUser;
 }
 
@@ -259,7 +268,7 @@ export async function mfaLoginVerify(
   const body = (await res.json()) as {
     accessToken: string;
     tokenType: string;
-    expiresIn: number;
+    expiresIn?: number;
     user?: LoginUser;
   };
   return body;

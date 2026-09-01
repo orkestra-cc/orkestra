@@ -90,8 +90,11 @@ export function LoginPage() {
     staleTime: 30_000,
   });
 
-  function complete(token: string) {
-    signIn(token);
+  // Takes the whole result rather than `result.accessToken`: the lifetime is
+  // already on it, and the two `.accessToken` projections below are exactly
+  // where it used to be lost.
+  function complete(result: { accessToken: string; expiresIn?: number }) {
+    signIn(result.accessToken, result.expiresIn);
     navigate(destination, { replace: true });
   }
 
@@ -106,7 +109,7 @@ export function LoginPage() {
         });
         return;
       }
-      complete(result.accessToken);
+      complete(result);
     },
   });
 
@@ -125,7 +128,7 @@ export function LoginPage() {
         <MfaChallenge
           mfaToken={stage.mfaToken}
           onCancel={() => setStage({ name: "credentials" })}
-          onSuccess={(result) => complete(result.accessToken)}
+          onSuccess={(result) => complete(result)}
         />
       </section>
     );
