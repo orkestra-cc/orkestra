@@ -8,6 +8,10 @@ _Related: [ADR-0020](../../adr/0020-bearer-only-require-auth.md), [ADR-0017](../
 
 | Rev | Date | Change |
 | --- | ---- | ------ |
+| v16 | 2026-09-01 | **Review round 14.** §4.5 asserted that every path installing a token supplies the duration; that was the *requirement* written as if it were the state. Today **none** of them do — `signIn` takes only a token, and both call sites drop the `expiresIn` their result already carries. §4.6 now carries the full migration inventory (`setAccessToken`, `AuthState.signIn`, `AuthProvider`, `LoginPage.complete` and its two callers, `OAuthCallbackPage`), and flags `auth.ts`'s `?? 900` fallback, which fabricates a lifetime rather than admitting an unknown one. |
+| v15 | 2026-09-01 | **Review round 13 — blocking.** §4.1c's timer was cleared right after `await fetch`, which resolves on **headers**, leaving the body read unbounded — so round 6's "the lock is bounded transitively" argument was false, and a stalled body could hold the cross-tab lock forever. Reproduced locally: fetch resolved at 31 ms, timer cleared, body finished at 3029 ms against a 1000 ms timeout with no abort; moving `clearTimeout` past the body read aborts at 1006 ms. The timer now spans fetch + classification + body. Also documents the residual the timeout creates: an abort after the server rotated but before the `Set-Cookie` lands strands the successor, and the 409 retry cannot recover it. |
+| v14 | 2026-09-01 | **Review round 12 — blocking, and N4 falls.** The refresh outcome was a denylist — everything that was not 2xx/409/503 meant "signed out" — so a 429 from the *global* rate limiter, a 5xx, a malformed 2xx, or a Mongo outage would log the user out. Worse, four infrastructure failures on the refresh path are wrapped generically and answered as a plain 401 (`auth_service.go`), which the client cannot tell from a genuinely dead refresh token. **G2/G3 are unreachable while N4 stands**, so N4 is replaced by a scoped backend change: infrastructure failures on the refresh path map to 503. The client rule inverts to an allowlist — sign out **only** on 401 — and defect C, §4.9, the new tests and O6 follow. |
+| v13 | 2026-09-01 | **Review round 11 — blocking.** The replay guard had a 30-second hole. Branch 2 called a token "live" only above `now + SKEW`, but the server accepts it until the instant it expires: a `change-password` sent with 20 s left reaches the handler, the wrong password is counted, and the client — reading 20 s < SKEW — refreshed and **replayed it**. The margin *was* the defect, so it is gone: recovery is now permitted only when the token was **already expired when it was sent**, which is the one condition under which the handler provably never ran. `SKEW` leaves the 401 path entirely, an unreadable expiry now counts as **live** rather than expired (§4.5's earlier direction was unsafe under this rule), and §4.4's reachability argument — which was simply wrong — is restated. |
 | v12 | 2026-09-01 | **Review round 10 (minor).** Manual procedure for two tabs crossing the TTL together written out in full (§6). The existing two-tab item only *reloaded* both tabs, which exercises `AuthProvider`'s mount refresh, not the 401-driven path — a different code path with a different expected shape. Writing it also corrected an expectation: two tabs produce **two** serialised rotations, not one, because branch 3 is per-tab and each tab needs its own access token. A lock-disabled variant is included, since the 409 retry is otherwise unreachable by hand. |
 | v11 | 2026-09-01 | **Review round 9 (minor).** `jwtExp` test cases added for a non-numeric/non-finite `exp` and for unpadded base64url — both probed first, and both came back different from the assumption. `Infinity` **is** reachable through valid JSON (`1e400`), so `typeof === "number"` is not enough and §4.5 now requires `Number.isFinite`. Missing padding, by contrast, is *tolerated* by `atob` in this runtime; what actually throws is the base64url alphabet, so the test is specified with a fixture that provably contains `-`/`_` and asserts its own fixture. |
 | v10 | 2026-09-01 | **Review round 8 (minor).** §3.C's description corrected: the generic `RequireAuth` 401 carries **no top-level `code`** — `sendErrorResponse` puts `appErr.Code` in `errors[0].value` (`auth.go:1258-1279`). Enumerating the emitters to write that correction falsified a second claim, mine: the middleware emits **at least seven** distinct top-level codes, several of them on 401s (`step_up_required`, `mfa_enrollment_required`, `password_confirm_required`, `audience_mismatch`), so a presence test on `code` would sign users out on four non-terminal conditions. `TERMINAL_CODES` is restated as a **membership** test with that as its justification, and §5.11 and the tests follow. |
@@ -118,14 +122,48 @@ Two further gaps behind the same call:
 on a signed-in session and reload both together. Both `AuthProvider`s fire the
 mount refresh, one wins the rotation CAS, the loser gets 409 → signed out.
 
+### Defect C — an outage is indistinguishable from a dead session (pre-existing, both tiers)
+
+ADR-0017 gave `session_enforcement_unavailable` its own 503 precisely so a storage
+outage would not "train clients to discard a session that is still perfectly
+valid". The refresh path has three more doors into the same failure, and they were
+all left open.
+
+**On the wire.** `/refresh-cookie` is mounted under the router's **global** rate
+limiter — `router.Use(errorManager.GetRateLimiter().Middleware("api:general"))`
+(`cmd/server/middleware.go:131`) — so it can answer **429** with a `Retry-After`
+(`errors/rate_limiter.go:353`). A reverse proxy can answer 502/504, the endpoint
+can 500, and a 2xx can arrive without a token. None of these says the session is
+over; the client's denylist called every one of them a sign-out.
+
+**In the service.** `RefreshTokensWithRiskAssessment` wraps **four** distinct
+infrastructure failures in generic errors that `writeRefreshErr` then answers as a
+plain 401 `Invalid refresh token`, with no `code`:
+
+| Site | Wrapped as | What it really is |
+| ---- | ---------- | ----------------- |
+| `refreshTokenRepo.GetByTokenAny` | `failed to validate refresh token` | the store is unreachable |
+| the user lookup | **`user not found`** | same — and this one *reads* as terminal |
+| `mintTokenPair` | `failed to mint token pair` | signing/key failure |
+| `refreshTokenRepo.RotateWithFamily` | `failed to rotate refresh token` | write failure |
+
+A Mongo blip during a refresh therefore reaches the SPA as the same codeless 401 a
+genuinely invalid refresh token produces. **No client-side rule can separate
+them**, which is why this defect is what removes N4 rather than something the
+helper can be made clever about.
+
 ## 2. Goals and non-goals
 
 ### Goals
 
 - **G1** — An expired access token on an authenticated call recovers silently:
   refresh once, retry once; the caller never sees the 401.
-- **G2** — A refresh that is `unavailable` (503, transport failure, timeout)
-  surfaces the original 401 **and keeps token + marker**, per ADR-0017.
+- **G2** — **Only an explicit rejection ends a session.** A refresh that could not
+  be *completed* — 429 from the rate limiter, 408, any 5xx, a transport failure, a
+  timeout, a 2xx without a token, a twice-raced 409 — surfaces the original 401
+  and **keeps token and marker**, per ADR-0017's reasoning. This is an allowlist:
+  the sign-out case is enumerated (§4.1), and everything not on that list is
+  transient by default. A denylist is what defect C was.
 - **G3** — A genuinely dead session clears token **and** marker so `AuthProvider`
   re-renders and `RequireAuth` redirects, instead of leaving a broken page. This
   is a guarantee about the *observable state*, not about which function was
@@ -161,8 +199,17 @@ mount refresh, one wins the rotation CAS, the loser gets 409 → signed out.
   and arm a trap for whoever first imports `api`. Follow-up #2 re-adds the client
   wired to this spec's policy, which is three lines against a real generated type.
 - **N3 — Fixing `frontend-admin`.** §7 records a real defect found there; own PR.
-- **N4 — Any backend change.** No route, status, or body shape moves. Every
-  status this spec newly handles is one the backend already emits.
+- **N4 (withdrawn in round 12) — a scoped backend change is now in scope.**
+  Earlier revisions forbade touching the backend. Defect C shows that G2 and G3
+  are then **unreachable**: four infrastructure failures on the refresh path are
+  answered as a codeless 401, and no client-side rule can tell them from a dead
+  refresh token. So N4 becomes a boundary rather than a prohibition — **the only
+  backend work in scope is error *classification* on the refresh path** (§4.9):
+  infrastructure failures answer 503 instead of 401. No route moves, no field is
+  removed, nothing that already works changes shape. Anything wider — including
+  §3.D's `access_token_expired` on `RequireAuth`, which touches every protected
+  route — stays out, and **O6** asks whether to pull that one in while the same
+  code is open.
 
 ## 3. Alternatives considered
 
@@ -219,6 +266,25 @@ Everything else — the actual expired-vs-wrong-credentials question — is answ
 client-side from the token we sent (§4.3 branch 2), because the server does not
 answer it.
 
+### D — Have the backend say `access_token_expired` (the right answer, deferred)
+
+The client is inferring something the server knows for certain. If `RequireAuth`'s
+expired-bearer 401 carried a distinct top-level `code`, §4.3 branch 2 would stop
+being an inference: refresh **iff** that code is present, and the replay hazard
+disappears by construction rather than by an argument about when the handler runs.
+It would also fix `frontend-admin`'s copy of the same hazard (§7) in one change,
+and it composes with the closed set already read in branch 1.
+
+Not taken here — but no longer because backend work is forbidden, since round 12
+withdrew N4 for the refresh path (§4.9). The reason now is **blast radius**: this
+touches `RequireAuth`, which answers every protected route on both tiers, days
+after ADR-0020 reworked exactly that code, whereas §4.9 changes the classification
+of four error returns on a single endpoint. §4.3's rule is safe without it — it
+never replays; it only gives up auto-recovery for a token that expired *in flight*
+(§4.4). **O6** asks whether to pull it in anyway. Recorded as follow-up #1 with a
+sketch — it is the eventual
+right answer, not a rejected idea.
+
 ## 4. Design
 
 ### 4.1 `tokenStore.performRefresh` — cross-tab, 409-aware, bounded
@@ -254,9 +320,15 @@ name — and by ADR-0003 D-9 they hold different refresh cookies anyway.
 records that switching shapes silently defeated its own test. Same decision, same
 reason — **and it is safe only because of (c)**. A tab that takes the lock and
 then hangs would otherwise block every other tab on the origin indefinitely; since
-the only thing it does while holding it is the fetch that (c) bounds at 10 s, the
-lock is bounded transitively. The two are one safety argument, not two unrelated
-choices: **weakening (c) re-arms the lock.**
+everything it does while holding the lock happens inside (c)'s bound, the lock is
+bounded transitively. The two are one safety argument, not two unrelated choices:
+**weakening (c) re-arms the lock.**
+
+Round 13 showed how easily "weakening" happens without anyone intending it: (c)'s
+first sketch cleared the timer immediately after `await fetch`, which bounds the
+headers and nothing else, so a stalled body held the lock indefinitely and this
+paragraph was simply false. The bound is only real while the timer covers the body
+read — which is why (c) now spells out where `clearTimeout` may sit.
 
 **(b) Classify 409 correctly, with exactly one retry.** Inside the lock:
 
@@ -269,10 +341,18 @@ if first is raced (409):
 else: → first
 ```
 
-Rationale, unchanged from `frontend-admin`: after losing the race the browser
-already holds the successor cookie, so a second attempt lands. A race surviving
-two attempts is far more likely a live session than a dead one, and guessing
-"dead" is the failure this removes. **The marker is untouched on every 409 path.**
+Rationale, unchanged from `frontend-admin`: in the case the 409 was designed for —
+a **sibling** rotated first — the browser already holds the successor cookie, so a
+second attempt lands. A race surviving two attempts is far more likely a live
+session than a dead one, and guessing "dead" is the failure this removes. **The
+marker is untouched on every 409 path.**
+
+**That justification does not cover every 409.** If the rotation succeeded
+server-side but its response never reached the browser (§5.12), the successor is
+in nobody's jar, and the retry re-presents the same superseded cookie for a second
+409. The design still degrades correctly — two 409s are `unavailable`, token and
+marker kept — but the retry is a *hope* there, not a guarantee, and the spec should
+not claim otherwise.
 
 **(c) Bound the fetch.** `REFRESH_FETCH_TIMEOUT_MS = 10_000`, the value
 `frontend-admin` settled on (`baseApi.ts:74`). A `/refresh-cookie` that accepts the
@@ -285,15 +365,48 @@ classification and must stay that way: **"no answer" is not "no"**. A bare
 hang it replaces. So: **timeout → `unavailable`, token and marker untouched**,
 identical to the 503 and transport-failure paths.
 
-**Build the signal from an `AbortController` + `setTimeout`, not
-`AbortSignal.timeout`** — and clear the timer in a `finally`:
+**The timer must span the whole operation — fetch, classification *and* the body
+read.** `fetch` resolves when the **headers** arrive, not when the body is
+complete, so a `clearTimeout` placed straight after the `await` bounds almost
+nothing: a server that sends headers and then stalls the body is unbounded, and
+because `performRefresh` runs inside the Web Lock, it holds that lock for as long
+as it stalls. Measured against a server that writes headers and half a JSON body,
+then finishes 3 s later, with a 1 s timeout:
+
+```
+clearTimeout immediately after await fetch
+  fetch resolved at   31 ms   → timer cleared
+  body completed at 3029 ms   → no abort, 3× past the timeout
+
+clearTimeout moved past the body read
+  fetch resolved at   30 ms
+  ABORT at          1006 ms   → AbortError, and the lock is released here
+```
+
+So the `finally` goes around everything, and nothing may be cleared early:
 
 ```ts
 const ctrl = new AbortController();
 const timer = setTimeout(() => ctrl.abort(), REFRESH_FETCH_TIMEOUT_MS);
-try { res = await fetch(url, { …, signal: ctrl.signal }); }
-finally { clearTimeout(timer); }
+try {
+  res = await fetch(url, { …, signal: ctrl.signal });
+  // status classification and the body read happen INSIDE the timer's scope —
+  // aborting the signal rejects an in-flight res.json() too.
+  …
+  const body = await res.json();
+  …
+} finally {
+  clearTimeout(timer);          // only here, on every path
+}
 ```
+
+An abort during the body read rejects, and that rejection classifies as
+`unavailable` like any other "no answer" (§4.1's table) — it must **not** fall
+through to the malformed-body reasoning, though under round 12's inverted table
+both land on `unavailable` anyway, so the two agree rather than fight.
+
+**Build the signal from an `AbortController` + `setTimeout`, not
+`AbortSignal.timeout`** — the second reason for the same choice:
 
 This is a **deliberate divergence from `frontend-admin`**, which uses
 `AbortSignal.timeout`, and it is not stylistic. Probed in this repo's own harness:
@@ -353,16 +466,39 @@ routes around it.
 
 **Outcome table after this change:**
 
+**The rule inverts: `signed-out` is an allowlist of one.** Only a **401** clears
+anything — the single status that means "the credential I presented was rejected".
+Everything else that is not `ok` is `unavailable`, because it says something about
+the *server* and nothing about the session (G2, defect C).
+
 | Response | Outcome | Token | Marker |
 | -------- | ------- | ----- | ------ |
-| 2xx with token | `ok` | installed | kept |
-| 2xx without token | `signed-out` | cleared | cleared |
-| 401 | `signed-out` | cleared | cleared |
-| **409, then 2xx on retry** | **`ok`** | **installed** | **kept** |
-| **409 twice** | **`unavailable`** | **kept** | **kept** |
+| 2xx with a token | `ok` | installed | kept |
+| **401** | **`signed-out`** | **cleared** | **cleared** |
+| 409, then 2xx on retry | `ok` | installed | kept |
+| 409 twice | `unavailable` | kept | kept |
 | 503 | `unavailable` | kept | kept |
+| **429** (the global rate limiter, `Retry-After`) | **`unavailable`** | **kept** | **kept** |
+| **408, 5xx, 4xx other than 401** | **`unavailable`** | **kept** | **kept** |
+| **2xx without a token** | **`unavailable`** | **kept** | **kept** |
 | transport failure / timeout | `unavailable` | kept | kept |
-| other non-2xx | `signed-out` | cleared | cleared |
+
+Three rows changed in round 12, and each was a way to log a user out for something
+that was not their session:
+
+- **429** — reachable on every refresh, since the rate limiter is global
+  (`cmd/server/middleware.go:131`). A burst of tabs rotating at once is exactly
+  the traffic shape that trips it, so this row and §4.1a's lock are related: the
+  lock makes 429 rarer, this row makes it harmless.
+- **408 / 5xx / other 4xx** — a proxy timeout, a 502 during a deploy, a 404 from a
+  misrouted host. None is a session ending.
+- **2xx without a token** — v1 called this "a broken response, not an outage" and
+  signed the user out. It is a broken response, which is the reason *not* to act on
+  it: a server that answers 200 with no body has told us nothing about the session.
+
+**This row set is only correct once §4.9 lands.** Until infrastructure failures
+answer 503 instead of a codeless 401, the `401 → signed-out` row still swallows a
+Mongo outage. That ordering is a hard dependency, not a nicety (§7).
 
 ### 4.2 The one helper
 
@@ -443,16 +579,15 @@ own:
 The two are used for different questions. **The sent token decides whether it was
 plausibly the cause; the store decides how to recover.**
 
-The expiry is judged **at 401 time, against the sent token's own recorded
-lifetime** — a request slow enough to outlive its token was genuinely rejected for
-expiry, and §4.4's argument still covers it: an expired bearer is refused by
-`RequireAuth` before the handler runs, so the retry is the handler's first sight
-of it.
+The expiry is judged **at send time, with no margin**: the only question that
+makes recovery safe is "was this token already dead when it left?" — see §4.4.
 
 ```ts
-// Both halves captured together, before the fetch: at 401 time the store's
-// expiry may already belong to a token a sibling installed (§5.1).
+// Captured together, before the fetch: at 401 time the store's expiry may
+// already belong to a token a sibling installed (§5.1), and `sentAt` is the
+// instant the whole decision below turns on.
 const sent = getAccessTokenSnapshot();    // { token, expiresAt }
+const sentAt = Date.now();
 const res = await doFetch(path, init, sent.token);
 if (res.status !== 401) return res;
 
@@ -493,19 +628,29 @@ without touching the body — but it is not in the API's CORS `ExposedHeaders`
 (`cmd/server/middleware.go:103`, which lists only `Link`, `X-Total-Count`, the two
 rate-limit headers and `X-New-Access-Token`), and this SPA is cross-origin to the
 API host. JS cannot read it. Do not "simplify" the clone away by reaching for it
-without adding the header to that list first — a backend change this spec does not
-make (**N4**).
+without adding the header to that list first. §4.9 is the only backend change in
+scope, and a CORS `ExposedHeaders` edit is not it.
 
 | # | Condition | Action |
 | - | --------- | ------ |
 | 1 | `terminal !== null` — the cloned body carried a terminal `code` | Clear token + marker. **No refresh, no retry** — a token minted from the same cookie carries the same dead `sid`. Return the original response. |
-| 2 | `sent.token` exists **and** `sent.expiresAt > Date.now() + SKEW` — by our own duration reckoning (§4.5) it still had life left | Return the original response **unchanged**. The token was live, so the 401 is not about the token: no refresh, no replay (**G4**, §4.4). |
+| 2 | **NOT** (`sent.expiresAt !== null` **and** `sent.expiresAt <= sentAt`) — i.e. the token was *not* provably dead before it was sent, including when its expiry is unknown | Return the original response **unchanged**. The request may have reached the handler, so a retry could re-consume whatever it consumed: no refresh, no replay (**G4**, §4.4). |
 | 3 | Store now holds a **different, non-null** token than `sent.token` | A sibling already rotated. Retry **once** with the store's token. **No refresh** (**G8**). |
 | 4a | Otherwise, **and a bearer was sent** (`sent.token` non-null) | `refreshAfterUnauthorized(apiBaseURL)` (§4.1e) — **not** marker-gated. `ok`: retry **once** with the new bearer. `signed-out`: `performRefresh` has cleared token **and** marker (**G3**); return the original. `unavailable`: return the original, token and marker untouched (**G2**, **G7**). |
 | 4b | Otherwise, **and no bearer was sent** (`sent.token` null) | `refreshAccessToken(apiBaseURL)` — marker-gated, as today. A true anonymous visitor short-circuits with no request, and there is nothing to clear because there is no token. A marker-holding visitor whose request raced `AuthProvider`'s mount refresh joins the coalesced attempt. |
 
+**No margin, and that is the whole point.** v12 asked whether the token had more
+than `SKEW` of life left, which quietly widened "safe to retry" to include tokens
+the *server still accepts* — a 30-second window in which a `change-password`
+rejection was replayed and double-counted. The condition is now a strict
+"already expired at `sentAt`", so `SKEW` plays no part in the 401 path at all;
+the constant survives only for follow-up #1, which introduces it when it needs it.
+
 Branch 2 is the replay guard, and it sits **ahead of every recovery branch**
 (branch 1 precedes it only because a dead `sid` makes recovery pointless).
+Because branches 3 and 4 sit behind it, they only ever see a request whose token
+was already dead — so the "a sibling rotated, reuse its token" retry is covered by
+the same proof, not by a separate argument.
 Ordering is load-bearing, not cosmetic: v2 had the guard last, and dropping the
 new "the token changed" branch in front of it would have replayed a
 `change-password` rejection — a 401 earned on its own merits — merely because a
@@ -558,19 +703,43 @@ recursion is structurally impossible.
 backend counts it again: `ErrAccountLocked` → `429 Too many failed attempts`. A
 user who mistypes twice would be locked out as though they had tried four times.
 
-Branch 2 removes it structurally: on that 401 the token is live and unexpired, so
-no refresh and no replay happen. Any future authenticated endpoint that uses 401
-for a body credential inherits the protection without being listed anywhere.
+Branch 2 removes it structurally, and the boundary has to be drawn exactly where
+the *server* draws it.
 
-**Why an expired token cannot double-count.** The mirror case — a
-`change-password` sent with a *wrong* password **and** an expired token — reaches
-branch 3 or 4 and is retried, so it is worth showing it is still safe. Since
-ADR-0020, `RequireAuth` rejects an expired bearer *before* the handler runs, so
-the first attempt never reaches `mapPasswordError` and no failed attempt is
-recorded. The retry is therefore the **first** time the handler sees it: one
-attempt made, one counted. The general invariant: a replay can only double-count a
-request that actually reached the handler, and a request only reaches the handler
-with a live token — which is exactly the case branch 2 passes through untouched.
+**The invariant.** A replay can only double-count a request that actually reached
+the handler. Since ADR-0020, `RequireAuth` rejects an expired bearer *before* the
+handler runs — but it accepts the token until the **instant** it expires, with no
+grace of its own. So the one condition that proves the handler never ran is
+"the token was already expired when the request left". Nothing weaker will do.
+
+**Why v12's margin was a hole, in numbers.** It treated a token as live only above
+`now + SKEW` (30 s). A `change-password` sent with **20 s** of life left:
+
+| | |
+| --- | --- |
+| Server | token still valid → `RequireAuth` accepts → handler runs → `ErrInvalidCredentials` → the failed attempt **is counted** → 401 |
+| Client (v12) | `expiresAt (sentAt + 20s) > sentAt + 30s` is **false** → not "live" → refresh → **retry** → the same wrong password is sent again and counted **twice** |
+
+Two mistypes would have tripped `ErrAccountLocked` (429) as though there had been
+four. The margin existed to absorb latency and clock error; §4.5 already removed
+the clock-error need, and latency was never a reason to widen a *safety* boundary.
+Removing it closes the class rather than narrowing it.
+
+**What this costs, stated plainly.** A token that was live at `sentAt` and expired
+*in flight* is not auto-recovered: the 401 is surfaced and the caller sees one
+failed request. It self-heals immediately — by the user's next action that token
+is expired at send, so the very next request refreshes and succeeds. The window is
+one request latency out of a whole TTL, and the alternative is guessing on the one
+question where a wrong guess locks an account.
+
+The same reasoning covers an **unknown** expiry (§4.5's fallback exhausted):
+unknown cannot prove the handler did not run, so it counts as live and passes
+through. This reverses the direction §4.5 gave before this round — "treat an
+unreadable expiry as expired" was chosen when the failure mode was a wasted
+refresh; under this rule the failure mode would be a replay, so it flips.
+
+Any future authenticated endpoint that answers 401 for a body credential inherits
+the protection without being listed anywhere.
 
 ### 4.5 Knowing whether the token had expired — duration, not wall clock
 
@@ -603,17 +772,20 @@ tolerant of it, and the failure mode §5.9 describes disappears instead of being
 bounded. `frontend-admin` derives its `tokenExpiry` the same way
 (`baseApi.ts:212`), so the two SPAs agree on the technique.
 
-Every path that installs a token supplies the duration — the backend already
-returns it on all of them (`auth_handler.go:23`, and `auth.ts` already parses it
-on login): `performRefresh` (§4.1), `login`, `mfaLoginVerify`, and
-`bootstrapFromRefreshCookie` through `performRefresh`.
+Every path that installs a token must supply the duration. **None does today** —
+the value reaches the API layer and is dropped one call short of the store — so
+this is a migration, itemised in §4.6, not a property the code already has.
 
 **Fallback, not a hard requirement.** Where `expiresIn` is missing — an older
 backend, a shape we have not met — fall back to `src/lib/jwtExp.ts`: base64url-decode
 the payload, read `exp`, return `null` on anything malformed, **no signature
 verification** (a scheduling hint, never a security decision; the backend stays
-the only authority). If that is unreadable too, treat the token as **expired**, so
-the failure mode is "one wasted refresh", not "stuck at 401".
+the only authority). If that is unreadable too, the expiry is `null` — and §4.3
+branch 2 treats an unknown expiry as **live**, so the request passes through
+without a retry. That direction is the opposite of what earlier revisions said,
+and the reason is §4.4: an unknown expiry cannot prove the handler never ran, and
+under a rule whose failure mode is a *replay* rather than a wasted refresh, "don't
+know" has to fall on the safe side.
 
 Two decoding details, both probed rather than assumed:
 
@@ -634,11 +806,14 @@ Note this is deliberately softer than `frontend-admin`, which treats a response
 without `expiresIn` as a failed refresh (`baseApi.ts:130`). Turning a valid
 rotation into a sign-out over a missing optional field is the wrong trade here.
 
-`SKEW` stays a named constant at **30 s**. Its job is now only to cover the gap
-between deciding and the server checking — latency, not clock error — and it
-doubles as the replay guard's width: only a token within 30 s of its end can be
-retried at all (§4.4). If §8's proactive rotation reuses it, it must stay
-**strictly below `MinAccessTokenTTL` (60 s)** per ADR-0020 D3; 30 s satisfies that.
+**There is no `SKEW` in this design.** Earlier revisions carried a 30 s margin;
+round 11 showed the margin *was* the replay hole (§4.4), and with the expiry
+derived from a duration there is nothing left for it to absorb. The 401 path
+compares `expiresAt <= sentAt` exactly. A `PROACTIVE_REFRESH_SKEW_MS` belongs to
+follow-up #1, which introduces it when it has a use for it — and must then hold
+ADR-0020 D3's invariant that it stays **strictly below `MinAccessTokenTTL`
+(60 s)**. Do not reintroduce it here: a margin on this comparison is, precisely,
+the bug this round removed.
 
 ### 4.6 Call-site migration
 
@@ -653,6 +828,41 @@ Bodies are re-sent from `init`, not from a consumed `Request` — every call sit
 passes a string or `undefined`. The helper documents that a streaming body is
 unsupported (there are none, and a stream cannot be replayed).
 
+### The token-lifetime migration (§4.5)
+
+`expiresAt` is only as good as its propagation, and today the duration dies one
+call short of the store. The API layer is already correct — `LoginResult` and
+`MfaLoginVerifyResult` both **declare and return** `expiresIn` — so no backend and
+no API-wrapper change is needed. The value is available at every call site and is
+simply dropped:
+
+| Site | Today | After |
+| ---- | ----- | ----- |
+| `tokenStore.setAccessToken` | `(token: string \| null)` | takes the lifetime alongside the token; records `expiresAt` (§4.5) |
+| `tokenStore.clearAccessToken` | `setAccessToken(null)` | unchanged in meaning — clears both fields |
+| `tokenStore.performRefresh` | installs `fresh` only | installs the pair from `body.expiresIn` (§4.1d) |
+| `authContext.AuthState.signIn` | `(token: string) => void` | carries the lifetime |
+| `AuthProvider.signIn` | `useCallback((next: string) => …)` | same signature change |
+| `LoginPage.complete(token)` | takes a bare string | takes the result, which already has `expiresIn` |
+| ↳ `LoginPage` password login | `complete(result.accessToken)` | passes the whole `LoginResult` |
+| ↳ `LoginPage` MFA challenge | `complete(result.accessToken)` | passes the whole `MfaLoginVerifyResult` |
+| `OAuthCallbackPage` MFA success | `signIn(result.accessToken)` | passes the lifetime too |
+
+`MfaChallenge`'s `onSuccess` prop already hands over the whole
+`MfaLoginVerifyResult`, so no component prop changes — the loss is entirely in the
+`.accessToken` projections at the two `signIn` calls.
+
+**One thing to fix rather than carry over.** `auth.ts`'s login mapper writes
+`expiresIn: body.expiresIn ?? 900` — it **fabricates** a fifteen-minute lifetime
+when the field is absent. Under §4.5 that is a lie the client would then act on: a
+deployment running a 60 s TTL would record 900 s and, by §4.3 branch 2, read every
+subsequent 401 as "not a token problem" for the rest of that quarter hour. It
+never fires against the current backend, which always sends the field, and an
+*unknown* lifetime lands on the same branch anyway — so this is not a correctness
+change today. It is an honesty one, and it matters for follow-up #2, whose
+proactive rotation would schedule against the fabricated number. Make it
+`undefined` (unknown) and let §4.5's fallback chain decide.
+
 `dsr.ts` throws a bare `Error("request failed (n)")` where the others throw the
 shared `ApiError` carrying `status` + `code`. **Unified here (O2 ruling), verified
 free:** `AccountDsrPage` has exactly two error branches, both `isError` with fixed
@@ -666,14 +876,36 @@ PR is the wrong place to change user-visible copy. §8 records it.
 
 ### 4.7 Documentation, same commit
 
-`frontend-client/CLAUDE.md` currently documents the gap (`82f25252`): its "Refresh
-choreography" section states that an expired token does *not* refresh, and names
-this fix. Rewrite it to the shipped behaviour — the §4.1 outcome table, the §4.3
-table, and why branch 3 exists. "How auth works" item 1 and the `credentials`
-convention bullet also name the helper.
+Four documents, and the list is longer than earlier revisions assumed because
+§4.9 makes this a backend change too.
+
+**`frontend-client/CLAUDE.md`** currently documents the gap (`82f25252`): its
+"Refresh choreography" section states that an expired token does *not* refresh, and
+names this fix. Rewrite it to the shipped behaviour — §4.1's outcome table, §4.3's
+branch table, and why **branch 2** is the replay guard. "How auth works" item 1 and
+the `credentials` convention bullet also name the helper.
+
+**`backend/internal/core/auth/CLAUDE.md`** — §4.9 adds `refresh_lookup_unavailable`
+and moves four error returns from 401 to 503. That is documented surface: the
+module contract must say which failures on the refresh path are authentication
+answers and which are outages.
+
+**`docs/site/architecture/authentication-flow.mdx`** — two edits. §4.9's status
+change belongs beside the existing rotation description (line 149's grace/409
+paragraph). And **line 226 carries the same false claim as ADR-0020 D2**: "A
+browser client therefore recovers from an expired access token with `401 → POST
+/v1/auth/{tier}/refresh-cookie → retry`. **Both SPAs implement it**" — then it
+substantiates only `frontend-admin`, because only `frontend-admin` does. This is
+the canonical published page, so unlike the ADR it is not a historical record; it
+is a reference that is wrong today and becomes right the moment this ships.
+
+**`docs/site/modules/core/auth.mdx`** — line 190 already explains why session
+enforcement answers 503 rather than 401; `refresh_lookup_unavailable` is the same
+argument applied to a sibling failure and belongs in the same place.
 
 Per the user's ruling of 2026-09-01, **ADR-0020 is not edited**: once this ships,
-D2's claim is simply true.
+D2's claim is simply true. The same reasoning is why line 226 above is corrected
+*with* the implementation rather than ahead of it.
 
 ### 4.8 Deleting the second 401 algorithm
 
@@ -724,6 +956,47 @@ one-line follow-up if that noise outweighs the convenience; it is deliberately n
 bundled into a bug-fix PR because a dependency removal propagates down the fork
 chain on its own schedule.
 
+### 4.9 Backend: classify infrastructure failures on the refresh path
+
+The one backend change in scope, and it is a classification fix, not a new
+feature: **an infrastructure failure must not be answered as an authentication
+failure.** ADR-0017 already decided this for session enforcement and gave it a
+503; the refresh path has four sibling sites that never got the same treatment
+(§1 defect C).
+
+In `RefreshTokensWithRiskAssessment` (`services/auth_service.go`), each of the
+four generic wraps becomes a sentinel that `writeRefreshErr` answers as **503**:
+
+| Site | Today | After |
+| ---- | ----- | ----- |
+| `refreshTokenRepo.GetByTokenAny` | `fmt.Errorf("failed to validate refresh token: %w")` → 401 | `ErrRefreshLookupUnavailable` → 503 |
+| the user lookup | `fmt.Errorf("user not found: %w")` → 401 | same sentinel → 503 |
+| `mintTokenPair` | `fmt.Errorf("failed to mint token pair: %w")` → 401 | same sentinel → 503 |
+| `refreshTokenRepo.RotateWithFamily` | `fmt.Errorf("failed to rotate refresh token: %w")` → 401 | same sentinel → 503 |
+
+The "user not found" wrap deserves naming: a store error there is reported with
+the words of a terminal condition, which is how an outage acquires the appearance
+of a deleted account. A genuine `nil` user stays `ErrInvalidRefreshToken` → 401;
+only the *error* return changes.
+
+`writeRefreshErr` gains one branch beside the `ErrSessionEnforcementUnavailable`
+one it already has, emitting 503 with a **distinct** code —
+`refresh_lookup_unavailable` — rather than reusing
+`session_enforcement_unavailable`. Both are 503 and both clients treat 503
+identically, so the distinction costs nothing on the wire and buys the thing
+ADR-0017 D4 argued for elsewhere: whoever reads the support ticket can tell which
+subsystem failed.
+
+**Why this is safe to ship on its own.** It is additive in the only direction that
+matters — a response that was 401 becomes 503 exactly when the server failed. Both
+in-tree SPAs already treat 503 as transient (`frontend-admin`'s `refreshOnce`
+returns `retry: true`; this SPA's `performRefresh` returns `unavailable`), so the
+change makes today's operators stop being logged out by Mongo blips **before** any
+client work lands. It is genuinely a fix on its own merits, not scaffolding.
+
+**Explicitly out of scope:** `RequireAuth`'s expired-bearer 401 (§3.D). That is a
+different code path, on every protected route rather than one endpoint. **O6.**
+
 ## 5. Edge cases
 
 1. **A delayed second 401, same tab (G8).** Requests A and B go out together with
@@ -741,8 +1014,10 @@ chain on its own schedule.
    the loser gets 409, retries once inside `performRefresh`, and lands. A double
    409 is `unavailable` — the request's original 401 surfaces, the session stays.
 4. **Grace window.** `RefreshRotationGrace` is 10 s: a cookie superseded moments
-   ago is still accepted. The 409 retry therefore almost always succeeds; the
-   double-409 path is the rare tail, and it fails safe.
+   ago is answered with a retry hint rather than a replay kill. For the sibling
+   race the 409 retry therefore almost always succeeds, because the successor is in
+   the jar; the double-409 path is the rare tail and fails safe. §5.12 covers the
+   case where the successor is in *nobody's* jar, which the grace cannot rescue.
 5. **`navigator.locks` is `null`, not absent, in happy-dom 20.9** (verified). Since
    `typeof null === "object"`, a guard written `typeof navigator.locks === "undefined"`
    would pass and then throw on `.request`. The guard must be `!locks?.request`.
@@ -770,8 +1045,8 @@ chain on its own schedule.
    *would* have been, because v4 stated it wrongly in both directions. Comparing
    the JWT's absolute `exp` against a client clock behind by X does **not** strand
    the user "until reload": the client's own clock passes `exp` too, so it starts
-   refreshing (X − SKEW) seconds late and then recovers on its own. But it is not
-   a one-off either — the window reopens **every TTL cycle**, so a badly set clock
+   refreshing X seconds late (less any margin, back when there was one) and then
+   recovers on its own. But it is not a one-off either — the window reopens **every TTL cycle**, so a badly set clock
    means an app that fails for minutes out of every fifteen. Deriving the expiry
    from `expiresIn` at receipt removes the class: both ends of the comparison come
    from the same clock and a constant offset cancels. What survives is a clock
@@ -791,7 +1066,40 @@ chain on its own schedule.
     branch 1 tests set membership rather than "has a code" (§3.C). The client SPA
     has no step-up flow yet, so the caller's own error handling is what the user
     sees; that is unchanged by this spec.
-12. **The response body is single-use, and so is the retry's.** Every branch that
+12. **A timeout can strand the rotation — and *where* it fires decides whether it
+    matters.** The browser applies `Set-Cookie` while processing response
+    **headers**, before `fetch` resolves and independently of whether our JS ever
+    reads the body. That splits the timeout into two very different cases:
+
+    - **Abort during the body read** (the common one now that §4.1c's timer spans
+      the body): the headers were processed, so **the successor cookie is already
+      in the jar**. The refresh is reported `unavailable`, the token and marker are
+      kept, and the *next* attempt presents the successor and succeeds. Harmless —
+      and it is the window round 13's fix moves aborts **into**.
+    - **Abort before any headers arrive**, or a response lost on the wire: the
+      server may have rotated anyway. The successor then exists only server-side,
+      and the jar holds a cookie that is already superseded. The next attempt gets
+      a 409 inside `RefreshRotationGrace` (10 s) — which cannot make progress,
+      because `benignRotationRetry`'s own comment says progress "still requires the
+      successor cookie, which only the legitimate client holds" — and once the
+      grace elapses, presenting it again is **replay detection**: the family is
+      revoked and the session really does end.
+
+    This residual is **inherited, not introduced**: ADR-0020's Consequences already
+    record that "a `/refresh-cookie` response lost client-side leaves the jar
+    holding the superseded cookie … after it, presenting that cookie is a replay by
+    design." The timeout adds one more way to reach it, and the client cannot
+    repair it — it has no way to learn a token it never received. What it does do
+    is fail safely at every step: `unavailable` keeps the session while there is
+    any hope, and the eventual `refresh_token_replay` 401 is an explicit rejection,
+    which §4.1's allowlist correctly treats as a sign-out.
+
+    Note also that `REFRESH_FETCH_TIMEOUT_MS` (10 s) and `RefreshRotationGrace`
+    (10 s) are **equal by coincidence, not by design**. Do not build on the idea
+    that a retry after a timeout lands inside the grace: it may not, and even when
+    it does, the grace cannot help a client that never received the successor.
+
+13. **The response body is single-use, and so is the retry's.** Every branch that
     returns "the original response" must return one whose body no caller has
     touched — including the paths that never inspect anything, since branch 1's
     inspection happens before the branching. Hence the clone is taken once, up
@@ -819,6 +1127,13 @@ MSW + `renderWithProviders`, matching the existing suite (193 tests, 15 files;
   `refreshAccessToken` and `refreshAfterUnauthorized` at once — since both now
   funnel through `performRefresh` and a regression that coalesced only within one
   entry point would otherwise pass;
+- **the inverted rule, one case per changed row** (§4.1, defect C) — each asserts
+  `unavailable` **and** that the token *and* marker are still there: **429** with a
+  `Retry-After`, **500**, **502**, **504**, **408**, a **404**, and a **2xx with no
+  token in the body**. Written as an `it.each` table so a future status is one row,
+  not a new test;
+- the mirror: **401 → `signed-out`, both cleared** — the allowlist's only member,
+  so the table above cannot silently become "nothing ever signs out";
 - **a fetch that never resolves → `unavailable` after `REFRESH_FETCH_TIMEOUT_MS`,
   with token *and* marker still present.** Deterministic under `vi.useFakeTimers()`
   **only** because §4.1c builds the signal from `AbortController` + `setTimeout`;
@@ -826,6 +1141,15 @@ MSW + `renderWithProviders`, matching the existing suite (193 tests, 15 files;
   aborting under the fake clock and either hangs or fails — which is the tripwire
   that keeps the divergence honest. Advance past the timeout with
   `vi.advanceTimersByTimeAsync`;
+- **a response whose headers arrive promptly but whose body stalls** → the refresh
+  still ends `unavailable` at `REFRESH_FETCH_TIMEOUT_MS`, token and marker kept.
+  This is the round-13 regression test and it must be written against a **streamed**
+  body (MSW supports a `ReadableStream` response), not a delayed whole response:
+  a delayed *response* is caught even by a timer cleared right after `await fetch`,
+  so that shape would pass against the bug;
+- **and the lock is released**: with a stubbed `navigator.locks`, a second refresh
+  queued behind the stalled one runs once the timeout fires rather than hanging —
+  the assertion that actually pins §4.1a's transitive bound;
 - the timer is **cleared** on a refresh that answers normally: after a successful
   refresh, advancing the fake clock past the timeout aborts nothing and produces
   no further request.
@@ -862,6 +1186,20 @@ MSW + `renderWithProviders`, matching the existing suite (193 tests, 15 files;
 - expired token → 401 → refresh **401** → token and marker cleared (G3);
 - **live token → 401 → no `/refresh-cookie` at all, response passed through**
   (G4 / §4.4 — the lockout-hazard regression test);
+- **the round-11 case, and it must be written with a token that is close to
+  expiry but not past it**: a `change-password` sent with **20 s** of remaining
+  life, answered 401 → **zero** `/refresh-cookie` requests and **exactly one**
+  request to `/change-password` for the whole call. A token with 20 minutes left
+  passes this test against the broken implementation too, so the fixture's
+  remaining life is the test: pick a value inside any plausible margin (20 s
+  against the 30 s that used to be there) and assert the remaining life in the
+  test itself, the way §6's base64url fixture asserts its own shape;
+- the boundary either side of it: `expiresAt === sentAt` → treated as expired →
+  refresh and retry; `expiresAt === sentAt + 1` → live → passed through. Pins that
+  the comparison is `<=` at the exact instant and carries no hidden margin;
+- **unknown expiry** (`expiresAt === null`, §4.5's fallback exhausted) on a POST →
+  passed through, **no** refresh. This is the case whose direction flipped in
+  round 11, so it needs a test that fails against the old direction;
 - 401 with `code: session_revoked` on a live token → cleared, no refresh;
 - the retry's 401 is returned and does not trigger a second refresh;
 - a parallel burst of three 401s produces exactly one `/refresh-cookie`.
@@ -879,7 +1217,7 @@ MSW + `renderWithProviders`, matching the existing suite (193 tests, 15 files;
 - a `FormData` body gets **no** `Content-Type` from the helper;
 - the retry carries the **new** bearer and no trace of the old one.
 
-**Body integrity (§5.12)** — the test the finding asks for, and it must assert on
+**Body integrity (§5.13)** — the test the finding asks for, and it must assert on
 the *caller's* view, not on `bodyUsed`:
 
 - a passed-through 401 (branch 2, live token) whose body carries `detail` and
@@ -932,6 +1270,24 @@ so "B's 401 comes back after the rotation" is a fact of the test, not a hope:
   landed mid-flight) → branch 4 with no marker → `signed-out` without a request;
   the original 401 surfaces and nothing is retried.
 
+**Lifetime propagation (§4.6)** — the migration's own tests, because a dropped
+`expiresIn` fails *silently*: the token still installs, and only the 401 path
+misbehaves, hours later.
+
+- after a **password login**, `getAccessTokenSnapshot().expiresAt` is set and
+  matches the `expiresIn` the login response carried — not `null`, and not a
+  fabricated 900;
+- the same after the **MFA challenge** path in `LoginPage`, and after
+  `OAuthCallbackPage`'s MFA success — the two `signIn` call sites that drop it
+  today, so both need their own case;
+- the same after a **refresh** (§4.1d);
+- a login response **without** `expiresIn` records an **unknown** expiry, not 900
+  (the `?? 900` fix) — and §4.3 branch 2 then passes a 401 through;
+- an end-to-end guard worth its weight: sign in, advance the fake clock past the
+  recorded lifetime, fire a request that 401s → the refresh **is** attempted. This
+  is the test that fails if any single call site in §4.6's table is missed, since
+  a dropped lifetime reads as "unknown" → "live" → no recovery.
+
 **Expiry reckoning (§4.5)** — `src/auth/tokenStore.test.ts`:
 
 - a refresh answering `expiresIn: 900` records `expiresAt ≈ Date.now() + 900_000`
@@ -983,6 +1339,21 @@ must then treat the token as expired:
   they pin the behaviour against a stricter runtime rather than catching today's
   bug, and the comment should say so, so nobody reads a green run as proof the
   alphabet is handled.
+
+**Backend (§4.9)** — Go tests beside the existing refresh-path ones, one per site,
+each injecting a repository/infrastructure error and asserting the **status**, not
+the message:
+
+- `GetByTokenAny` returns an error → **503** with `code: refresh_lookup_unavailable`;
+- the user lookup returns an error → **503** (not the 401 that "user not found"
+  produces today — the case most likely to be written wrongly, because the current
+  wording invites asserting a 401);
+- `mintTokenPair` fails → 503; `RotateWithFamily` fails → 503;
+- **the negatives, which are what stop this becoming a blanket 503**: a `nil` user,
+  a `nil` token document and an expired token document each still answer **401**,
+  and a superseded rotation still answers **409**. Regression-pin
+  `ErrSessionEnforcementUnavailable`'s existing 503 too, so the new branch is proven
+  to sit beside it rather than swallow it.
 
 **The deletion (§4.8)** cannot be asserted by a unit test — there is nothing left
 to call. It is verified the way an absence has to be:
@@ -1084,9 +1455,19 @@ step 5's "fixed" against.
 
 ## 7. Rollout and verification
 
-- Gate: `make -C /home/tore/orkestra ci-frontend-client`.
-- No backend change, no migration, no config. Forward and backward compatible with
-  any deployed backend; every status newly handled is one the backend already emits.
+- Gates: `make -C /home/tore/orkestra ci-frontend-client` **and** `ci-backend`
+  (§4.9 is Go).
+- **Ordering is a hard dependency, not a preference.** §4.1's `401 → signed-out`
+  row is only sound once §4.9 has moved infrastructure failures off 401. Shipping
+  the client half first would leave the Mongo-blip logout in place *and* strip the
+  accidental cover it has today — with no 401 recovery there is no refresh, so no
+  spurious sign-out from one. **§4.9 first, deployed, then the client work**, as
+  two PRs or as one PR whose commits land in that order.
+- §4.9 alone is a complete, shippable fix: both SPAs already treat 503 as
+  transient, so it stops operators being logged out by storage blips before any
+  client change exists.
+- No migration, no config. A client that does not know `refresh_lookup_unavailable`
+  sees a 503, which every current caller already handles.
 - ⚠️ The staging round-trip is **blocked** — `docker/.env` has
   `CLIENT_API_HOST=client-disabled.invalid`, so every client-tier call 401s
   regardless. Same blocker as PR 4 §7. Verification is dev-stack + suite until that
@@ -1105,31 +1486,45 @@ takes only `apiBaseURL`.
 goes through `baseApi` and is **not** in `AUTH_ENDPOINT_PATHS`, so a
 wrong-current-password 401 triggers the silent refresh and re-sends the attempt,
 double-counting toward the same lockout. It shares `mapPasswordError` with the
-client route. Own issue; the fix there is either §4.3's token-state gate or adding
-the path to the list.
+client route, and its hazard is **wider** than the one round 11 closed here: it
+has no token-state gate at all, so the replay is not limited to a window near
+expiry — every wrong-password 401 is re-sent. Own issue; the fix there is §4.3's
+"already expired at send" gate, adding the path to `AUTH_ENDPOINT_PATHS`, or
+follow-up #1, which removes the need for either.
 
 ## 8. Follow-ups (named, not started)
 
-1. **Proactive rotation for the client SPA** (ADR-0020 D3 parity) — refresh before
+1. **Backend: a distinct `access_token_expired` code** (§3.D) — the robust answer
+   to the replay hazard. `RequireAuth`'s expired-bearer 401 would carry it as a
+   top-level `code`, alongside the ones already there (`session_revoked`,
+   `step_up_required`, …), and §4.3 branch 2 would become "refresh iff the server
+   said the token expired" instead of an inference from our own reckoning. It
+   recovers the in-flight expiry §4.4 gives up, and closes `frontend-admin`'s
+   copy of the same hazard (§7) at the same time. Cross-tier and touching auth
+   middleware, so it deserves its own spec and its own tests rather than riding
+   along with a client fix.
+2. **Proactive rotation for the client SPA** (ADR-0020 D3 parity) — refresh before
    expiry instead of after a 401. Needs a trustworthy remaining-lifetime figure,
    which §4.5's `expiresAt` snapshot already provides — and provides *correctly*
-   under clock skew, which is what makes a proactive scheme safe to build on. If
-   it reuses `SKEW`, ADR-0020 D3's `SKEW < MinAccessTokenTTL` invariant applies.
-2. **Wake up `openapi-fetch`** — sharpen `openapi.gen.ts` against a real backend,
+   under clock skew, which is what makes a proactive scheme safe to build on. This
+   is what introduces `PROACTIVE_REFRESH_SKEW_MS`; ADR-0020 D3's
+   `SKEW < MinAccessTokenTTL` invariant applies to it, and it must not leak back
+   into the 401 comparison (§4.5).
+3. **Wake up `openapi-fetch`** — sharpen `openapi.gen.ts` against a real backend,
    re-add the typed client, and give it a middleware that **delegates to
    `authedFetch`'s policy** rather than restating it (§4.8 deleted the version
    that restated it, badly). Then migrate the wrappers and fold the two together.
-3. **Drop the `openapi-fetch` runtime dependency** if the vacuous Dependabot bumps
+4. **Drop the `openapi-fetch` runtime dependency** if the vacuous Dependabot bumps
    prove more annoying than the convenience of having it ready (§4.8).
-4. **`frontend-admin`'s change-password replay** (§7).
-5. **`AccountDsrPage`'s hard-coded English error copy** (§4.6) — two strings that
+5. **`frontend-admin`'s change-password replay** (§7) — subsumed by #1 if that lands first.
+6. **`AccountDsrPage`'s hard-coded English error copy** (§4.6) — two strings that
    bypass `t()` against this SPA's own i18n rule. Not touched here: a bug-fix PR
    should not change user-visible copy.
-6. **Align `frontend-admin`'s refresh timeout** with §4.1c's
+7. **Align `frontend-admin`'s refresh timeout** with §4.1c's
    `AbortController` + `setTimeout`. Its `AbortSignal.timeout` is not controllable
    by fake timers either, so any test it grows around `REFRESH_FETCH_TIMEOUT_MS`
    inherits the same problem; the mechanism is a drop-in swap.
-7. **`frontend-admin`'s 3-arg Web Lock test mock** — its own comment records that
+8. **`frontend-admin`'s 3-arg Web Lock test mock** — its own comment records that
    the existing test stays green while no longer exercising what it was written to
    exercise. Not this SPA's code, but the same primitive.
 
@@ -1148,6 +1543,13 @@ the path to the list.
   left is the plainer reason — the file is named for what it does, and
   `client.ts` goes back to being what it actually is, the API-base resolver.
   Follow-up #2 brings a typed client back **delegating to** this helper's policy.
+- **O6 (new — needs a ruling).** Round 12 withdrew N4 for the refresh path (§4.9),
+  so §3.D's `access_token_expired` on `RequireAuth` is now *available*. It would
+  turn §4.3 branch 2 from an inference into a fact, recover the in-flight expiry
+  §4.4 gives up, and close `frontend-admin`'s wider copy of the replay hazard
+  (§7). But it is a different code path — every protected route, not one endpoint
+  — so it is not in scope merely because the neighbouring file is open. **Pull it
+  into this work, or keep it as follow-up #1?**
 - **O5 — repairing the session marker.** ✅ **Ruled: keep the repair** (§4.1e). A
   successful refresh has proved a cookie exists, so the marker is factually true;
   the accepted cost is that a sibling tab's sign-out whose `POST /logout` failed
