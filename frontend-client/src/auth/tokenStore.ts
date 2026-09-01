@@ -320,8 +320,10 @@ export async function refreshAccessToken(
 // The marker is stamped FIRST, speculatively, so the next cold load and any
 // concurrent automatic refresh know a cookie exists; then the cookie is
 // presented REGARDLESS of whether that stamp succeeded. `ok` keeps the
-// marker; every `signed-out` shape clears it again; `unavailable` (503 or
-// transport failure) keeps it so the caller can offer a retry. Never rejects.
+// marker; `signed-out` — a 401, and ONLY a 401 — clears it again along with
+// the token; `unavailable`, the default for everything else in
+// performRefresh's table above, keeps both so the caller can offer a retry.
+// Never rejects.
 export async function bootstrapFromRefreshCookie(
   apiBase: string,
 ): Promise<RefreshOutcome> {
