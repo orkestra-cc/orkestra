@@ -195,14 +195,17 @@ func (m *AuthMiddleware) SetUserProvider(u iface.UserProvider) {
 	m.users = u
 }
 
-// RequireAuth is the bearer-only perimeter (ADR-0020, #317). A missing,
-// expired or invalid bearer is a plain 401: the refresh cookie is never
-// consulted here. Rotation happens only where a client explicitly asks
-// for it — POST /v1/auth/{tier}/refresh-cookie or /refresh — and the
-// read-only mint lives in GET /v1/auth/session; a client recovers from
-// an expired access token with 401 → refresh-cookie → retry. A
-// middleware that rotated on the caller's behalf raced that path and
-// signed users out mid-session.
+// RequireAuth is the bearer-only perimeter (ADR-0020, #317). A missing or
+// invalid bearer is a plain codeless 401; an EXPIRED one is a 401 carrying
+// code "access_token_expired" and WWW-Authenticate: Bearer
+// error="access_token_expired" (sendAccessTokenExpired), which is what tells
+// a client the request never reached its handler and a refresh-then-retry is
+// safe. Either way the refresh cookie is never consulted here. Rotation
+// happens only where a client explicitly asks for it — POST
+// /v1/auth/{tier}/refresh-cookie or /refresh — and the read-only mint lives
+// in GET /v1/auth/session; a client recovers from an expired access token
+// with 401 → refresh-cookie → retry. A middleware that rotated on the
+// caller's behalf raced that path and signed users out mid-session.
 func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := m.extractBearerToken(r)
