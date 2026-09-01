@@ -526,6 +526,51 @@ opportunistically while editing this file.
 > compiling and simply gets the generic wording. No extra round-trip.
 > Covered by `require_auth_test.go`'s `TestRequireAuth_SessionMaxAge_*`
 > trio, including the fallback for a reason-blind service.
+>
+> **The middleware's 401 codes, and the one a client may act on.**
+> `RequireAuth`'s credential-rejection path emits exactly three
+> top-level codes, all from `shared/middleware/auth.go`:
+> `session_revoked` and `session_max_age_reached` (above), and
+> **`access_token_expired`** — a well-formed, correctly signed token
+> that simply aged out (`sendAccessTokenExpired`, plus
+> `WWW-Authenticate: Bearer error="access_token_expired"`). (A fourth,
+> `step_up_required`, can come out of `RequireAuth` too, but from
+> *after* the credential was accepted: `setUserContext`'s
+> impersonation-bypass branch, `sendMFARequired`.) Every other
+> rejection on the credential path — missing bearer, malformed, forged
+> signature, wrong audience — keeps the **codeless** generic 401 it has
+> always had: `sendErrorResponse`
+> puts the `AppError`'s code in `errors[0].value`, and for an
+> `AuthenticationError` that is `INVALID_CREDENTIALS`, the same value a
+> wrong password produces, so it discriminates nothing. That is
+> deliberate — the codes are a small, closed set, not a per-branch
+> taxonomy.
+>
+> `access_token_expired` is the **only non-terminal one of the three**:
+> the other two say the session is gone and the client must clear and
+> re-authenticate, while this one says the credential aged out and the
+> sanctioned recovery (`401` → `POST /v1/auth/{tier}/refresh-cookie` →
+> retry, ADR-0020) will work — so it is the only code on this path a
+> client should answer by refreshing. It is also the client's proof that the
+> retry is *safe*: the middleware rejects before dispatch, so a request
+> answered with it provably never reached its handler and cannot have
+> consumed anything (the alternative — the client inferring expiry from
+> its own reckoning of the token's lifetime — cannot cover a token that
+> expired in flight, and a loose inference replays a rejected request
+> such as a wrong-current-password `change-password`). Two properties
+> keep it honest and must stay true: it has **exactly one emitter** in
+> `backend/`, and expiry is decided by `jwt.Parse` **before**
+> `validateTokenEnhanced`'s own token-type, issuer and audience checks
+> (`jwt_service.go`), so a wrong audience or a wrong token type can
+> never acquire it. Adding a second emitter, or moving the expiry
+> decision after those checks, silently breaks a client that refreshes
+> on it. Nothing about what is *accepted* changed when it shipped —
+> only what a rejection says about itself — and `RequireAuth` stays
+> bearer-only: it rotates nothing and sets no cookie. Covered by
+> `require_auth_test.go`'s `TestRequireAuth_ExpiredBearer_*`,
+> `TestRequireAuth_NonExpiredRejections_CarryNoExpiredCode` (the bound)
+> and `TestRequireAuth_RevokedSession_StillReportsRevokedNotExpired`
+> (the terminal code is not shadowed).
 
 > **Both SPAs treat the 503 as "retry later", never as a sign-out.**
 > `frontend-admin`'s `performRefresh` returns `{ok:false, retry:true}` and

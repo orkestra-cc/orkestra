@@ -215,7 +215,24 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 
 		claims, err := m.jwtService.ValidateAccessToken(token)
 		if err != nil {
-			if err == services.ErrTokenExpired || err == services.ErrInvalidToken {
+			// An EXPIRED token gets its own code. It is the one rejection that
+			// tells a client something actionable: the credential was well
+			// formed and correctly signed, it simply aged out, and the
+			// sanctioned recovery (POST /v1/auth/{tier}/refresh-cookie, then
+			// retry — ADR-0020) will work. Every other rejection here says
+			// "this token is not ours", where a refresh is at best wasted.
+			//
+			// It is also the boundary a client needs to retry SAFELY: this
+			// branch runs before dispatch, so a request rejected here provably
+			// never reached the handler and cannot have consumed anything.
+			// Without the code, frontend-client has to infer that from its own
+			// reckoning of the token's lifetime and must give up the token
+			// that expired in flight.
+			if err == services.ErrTokenExpired {
+				m.sendAccessTokenExpired(w)
+				return
+			}
+			if err == services.ErrInvalidToken {
 				m.sendErrorResponse(w, r, errors.AuthenticationError("authentication required").
 					WithOperation("require_auth").
 					Build())
@@ -289,6 +306,51 @@ func (m *AuthMiddleware) sendSessionRevoked(w http.ResponseWriter, r *http.Reque
 		"type":   "about:blank",
 		"errors": []map[string]any{{
 			"message":  title,
+			"location": "require_auth",
+			"value":    strings.ToUpper(code),
+		}},
+		"code": code,
+	})
+}
+
+// sendAccessTokenExpired emits the 401 for a well-formed, correctly signed
+// access token that has simply aged out.
+//
+// It is deliberately distinct from the generic `authentication required` 401,
+// which carries NO top-level code (sendErrorResponse puts appErr.Code in
+// errors[0].value, and for an AuthenticationError that value is
+// CodeInvalidCredentials — the same value a wrong password produces, so it
+// discriminates nothing). A client cannot otherwise tell "your token expired"
+// from "your credentials were wrong", and guessing wrong in one direction
+// replays a rejected request while guessing wrong in the other leaves a
+// working session broken until reload.
+//
+// The code means EXPIRED and nothing else, and it may only ever have ONE
+// emitter: validateTokenEnhanced maps jwt.ErrTokenExpired to
+// services.ErrTokenExpired straight off jwt.Parse, BEFORE its own token-type,
+// issuer and audience checks, so a wrong audience or a wrong token type can
+// never acquire this code — and a client that refreshes on it never refreshes
+// for a forged token.
+//
+// RequireAuth stays bearer-only (ADR-0020): this rejects, it does not rotate,
+// and it emits no Set-Cookie and no minted token. Recovery remains the
+// client's explicit POST to /v1/auth/{tier}/refresh-cookie.
+//
+// The request is deliberately not a parameter: nothing here reads it (the body
+// says only what the token's own state is), and sendPolicyUnavailable sets the
+// same precedent in this file.
+func (m *AuthMiddleware) sendAccessTokenExpired(w http.ResponseWriter) {
+	const code = "access_token_expired"
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("WWW-Authenticate", `Bearer error="`+code+`"`)
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status": http.StatusUnauthorized,
+		"title":  "access token expired",
+		"detail": "the access token has expired; refresh it and retry",
+		"type":   "about:blank",
+		"errors": []map[string]any{{
+			"message":  "access token expired",
 			"location": "require_auth",
 			"value":    strings.ToUpper(code),
 		}},
