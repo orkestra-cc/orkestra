@@ -47,6 +47,10 @@ must match them across the module boundary with `errors.Is`.
   found nothing, either because the key never existed or because it was
   shredded; callers branch on it without importing the `compliance`
   implementation.
+- `ErrUserNotFound` — the user module's `services.ErrUserNotFound` aliases it,
+  so auth's refresh path can classify a deleted account with `errors.Is`
+  without importing the user module: a 401 for an account that is gone, a 503
+  for a store it could not read.
 
 ## Reserved for a fork's addons
 

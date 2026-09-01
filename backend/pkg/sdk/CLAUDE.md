@@ -147,7 +147,10 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   consumers (the user module's client-user reset routes) must map them across
   the module boundary with `errors.Is`; message matching breaks on wrapped
   errors. `auth/services` aliases both, so each name is ONE identity. Same
-  pattern as `ErrKMSKeyNotFound` beside `KMSProvider`.
+  pattern as `ErrKMSKeyNotFound` beside `KMSProvider`. `iface.ErrUserNotFound`
+  follows the same pattern in the other direction: the user module's
+  `services.ErrUserNotFound` aliases it, so auth's refresh path can classify a
+  deleted account with `errors.Is` without importing the user module.
 - **Encryption helpers live here, not via `shared/utils`.** The SDK has
   its own `secrets.go` reading `OAUTH_TOKEN_ENCRYPTION_KEY` — the
   algorithm matches `internal/shared/utils.{Encrypt,Decrypt}OAuthToken`

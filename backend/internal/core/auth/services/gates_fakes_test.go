@@ -14,6 +14,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"testing"
@@ -50,6 +51,17 @@ type gateUserFake struct {
 	// getByEmailCalls counts GetUserByEmail — the lookup §4.4 forbids before
 	// the verified-email and auto-link-policy checks.
 	getByEmailCalls int
+	// getByIDErr, when set, is returned by GetUserByID instead of consulting the
+	// seeded map — the "Mongo is unreachable" input. Distinct from errNotFound on
+	// purpose: the whole point of §4.9 is that those two produce different
+	// statuses.
+	getByIDErr error
+}
+
+func (f *gateUserFake) setGetByIDErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.getByIDErr = err
 }
 
 func newGateUserFake() *gateUserFake {
@@ -70,6 +82,9 @@ func (f *gateUserFake) seed(u *iface.User) {
 func (f *gateUserFake) GetUserByID(_ context.Context, id string) (*iface.User, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.getByIDErr != nil {
+		return nil, f.getByIDErr
+	}
 	if u, ok := f.byUUID[id]; ok {
 		return u, nil
 	}
@@ -274,15 +289,12 @@ func (f *gateUserFake) AddOAuthLinkToUser(_ context.Context, userUUID string, li
 	return nil
 }
 
-// errNotFound mirrors the "not found" sentinel the user service returns
-// when an email/uuid is unknown. Callers in PasswordAuthService check
-// non-nil err to mean "user does not exist" — they don't introspect
-// the specific error type, so a plain error string is enough.
-var errNotFound = &fakeNotFoundErr{}
-
-type fakeNotFoundErr struct{}
-
-func (*fakeNotFoundErr) Error() string { return "user not found" }
+// errNotFound mirrors the "not found" sentinel the user service returns when an
+// email/uuid is unknown. It WRAPS iface.ErrUserNotFound because callers now
+// introspect it: RefreshTokensWithRiskAssessment must answer 401 for a deleted
+// account and 503 for an unreachable store, and a fake that returned a bare
+// error would make that test pass while production classified it the other way.
+var errNotFound = fmt.Errorf("fake user store: %w", iface.ErrUserNotFound)
 
 // gateRefreshRepo is an in-memory refresh-token repository. Light
 // enough that the gate tests never reach beyond CreateRefreshToken;
