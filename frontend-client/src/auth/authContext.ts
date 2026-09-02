@@ -5,6 +5,13 @@ import type { RefreshOutcome } from "@/auth/tokenStore";
 export interface AuthState {
   accessToken: string | null;
   isAuthenticated: boolean;
+  // True from mount until AuthProvider's one-shot bootstrap refresh has
+  // SETTLED — including the marker-less short-circuit, which settles it
+  // without a request. While it is true `isAuthenticated: false` means
+  // "not decided yet", not "signed out", and a consumer that acts on the
+  // difference (RequireAuth, LoginPage) must wait. It never goes back to
+  // true: signIn and signOut do not touch it.
+  isBootstrapping: boolean;
   // The lifetime travels WITH the token: the store derives the expiry from
   // the duration at receipt (§4.5), and a caller that drops it leaves the
   // store with an unknown expiry, which reads as "live", which disables the

@@ -2268,7 +2268,7 @@ fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
     code, no `SameSite=None`. The operator console is unaffected because it calls
     `localhost:3000` from port 8080: same host, different port, same site.
 11. **The client SPA's route guard redirects before the bootstrap resolves** —
-    **ruled in for this branch (batch 2)**. `RequireAuth` is synchronous and has no
+    **done in this branch (batch 2)**. `RequireAuth` is synchronous and has no
     in-flight state, and `AuthProvider` exposes no readiness flag, so on a cold load
     `token` is `null` and the **first render** returns
     `<Navigate to="/login?next=…" replace />` — before the mount effect's

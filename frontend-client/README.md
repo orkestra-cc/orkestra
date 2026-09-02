@@ -83,7 +83,7 @@ src/
 │   ├── sessionMarker.ts    # localStorage hint that a refresh cookie probably exists
 │   ├── useAuth.ts          # context hook
 │   ├── useMe.ts            # /me TanStack Query wrapper
-│   └── RequireAuth.tsx     # router guard with ?next= round-trip
+│   └── RequireAuth.tsx     # router guard: waits for the bootstrap, then the ?next= round-trip
 ├── components/             # Layout shell, language switcher, avatar, MfaChallenge
 ├── lib/                    # format helpers, avatar colour, safeNext, OAuth return-target + callback parser
 ├── locales/                # it.json, en.json — react-i18next bundles

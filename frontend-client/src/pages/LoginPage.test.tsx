@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 
 import { browserNavigation } from "@/api/auth";
 import { RequireAuth } from "@/auth/RequireAuth";
+import { setSessionMarker } from "@/auth/sessionMarker";
 import { getAccessTokenSnapshot } from "@/auth/tokenStore";
 import { OAUTH_RETURN_TO_KEY } from "@/lib/oauthReturnTo";
 import { LoginPage } from "@/pages/LoginPage";
@@ -71,6 +72,7 @@ const emailField = () => screen.queryByLabelText(/^email$/i);
 const START = url("/v1/auth/client/oauth/login");
 const LOGIN = url("/v1/auth/client/login");
 const PROVIDERS = url("/v1/auth/client/providers");
+const REFRESH = url("/v1/auth/client/refresh-cookie");
 const tokenBody = {
   success: true,
   accessToken: "at-1",
@@ -601,5 +603,48 @@ describe("LoginPage — the reported token lifetime reaches the store (§4.6)", 
     // deployment running a 60s TTL. "at-noexp" is not a JWT, so the fallback
     // chain ends in UNKNOWN, which is a fact the store knows how to handle.
     expect(getAccessTokenSnapshot().expiresAt).toBeNull();
+  });
+});
+
+// §8 #11 — /login is reachable with a live session: a returning user who
+// bookmarked it, and (before the guard learned to wait) anyone RequireAuth
+// bounced here mid-bootstrap. The page must forward them, through the SAME
+// gate the password path uses — sanitizeNext, then DEFAULT_POST_LOGIN.
+describe("LoginPage — an already-authenticated visitor is forwarded (§8 #11)", () => {
+  // A cold load with a valid refresh cookie: the marker makes AuthProvider's
+  // mount refresh fire, and the token lands while this page is on screen.
+  const bootWithCookie = () => {
+    setSessionMarker();
+    server.use(
+      clientPolicyHandler(),
+      providersHandler([]),
+      http.post(REFRESH, () =>
+        HttpResponse.json({
+          accessToken: "at-boot",
+          tokenType: "Bearer",
+          expiresIn: 900,
+        }),
+      ),
+    );
+  };
+
+  it("honours a safe ?next=, search string and all", async () => {
+    bootWithCookie();
+    renderLogin("/login?next=%2Faccount%2Fsecurity%3Fx%3D1");
+    expect(await screen.findByTestId("deeplink-location")).toHaveTextContent(
+      "/account/security?x=1",
+    );
+  });
+
+  it.each([
+    ["protocol-relative", "%2F%2Fevil.example"],
+    ["absolute", "https%3A%2F%2Fevil.example%2Fx"],
+    ["a scheme", "javascript%3Aalert(1)"],
+  ])("falls back to /account on %s ?next=", async (_label, raw) => {
+    bootWithCookie();
+    renderLogin(`/login?next=${raw}`);
+    expect(await screen.findByTestId("account-location")).toHaveTextContent(
+      "/account",
+    );
   });
 });
