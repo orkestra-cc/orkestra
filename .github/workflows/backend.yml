@@ -16,6 +16,13 @@ on:
       - '.mise.toml'
       - 'scripts/refresh-coverage-badge.sh'
       - 'scripts/commit-coverage-badge.sh'
+      # make backend-script-tests / backend-credential-fallbacks
+      - 'docker/.env.example'
+      - 'scripts/init.sh'
+      - 'scripts/env-file.sh'
+      - 'scripts/env-validate.sh'
+      - 'scripts/test-env-file.sh'
+      - 'scripts/test-env-validate.sh'
   push:
     branches: [dev, main]
     # Release tags (vX.Y.Z) build versioned images. paths filters do not
@@ -35,6 +42,13 @@ on:
       - '.mise.toml'
       - 'scripts/refresh-coverage-badge.sh'
       - 'scripts/commit-coverage-badge.sh'
+      # make backend-script-tests / backend-credential-fallbacks
+      - 'docker/.env.example'
+      - 'scripts/init.sh'
+      - 'scripts/env-file.sh'
+      - 'scripts/env-validate.sh'
+      - 'scripts/test-env-file.sh'
+      - 'scripts/test-env-validate.sh'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
