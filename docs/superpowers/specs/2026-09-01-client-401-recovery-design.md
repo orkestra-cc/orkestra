@@ -461,7 +461,7 @@ marker kept — but the retry is a *hope* there, not a guarantee, and the spec s
 not claim otherwise.
 
 **(c) Bound the fetch.** `REFRESH_FETCH_TIMEOUT_MS = 10_000`, the value
-`frontend-admin` settled on (`baseApi.ts:74`). A `/refresh-cookie` that accepts the
+`frontend-admin` settled on (`baseApi.ts:88`). A `/refresh-cookie` that accepts the
 connection and never answers would otherwise hang the **original request**, since
 §4.3 puts the refresh on its critical path — the failure this bound exists for.
 
@@ -933,7 +933,7 @@ installed. Both the write and the read are taken from the same clock, so a
 constant offset **cancels**: the reckoning is immune to clock skew rather than
 tolerant of it, and the failure mode §5.9 describes disappears instead of being
 bounded. `frontend-admin` derives its `tokenExpiry` the same way
-(`baseApi.ts:212`), so the two SPAs agree on the technique.
+(`baseApi.ts:226`), so the two SPAs agree on the technique.
 
 Every path that installs a token must supply the duration. **None does today** —
 the value reaches the API layer and is dropped one call short of the store — so
@@ -979,7 +979,7 @@ Two decoding details, both probed rather than assumed:
   the WHATWG forgiving-base64 algorithm does specify failure at length ≡ 1 mod 4.
 
 Note this is deliberately softer than `frontend-admin`, which treats a response
-without `expiresIn` as a failed refresh (`baseApi.ts:130`). Turning a valid
+without `expiresIn` as a failed refresh (`baseApi.ts:144`). Turning a valid
 rotation into a sign-out over a missing optional field is the wrong trade here.
 
 **There is no `SKEW` in this design.** Earlier revisions carried a 30 s margin;
@@ -2125,17 +2125,18 @@ is worth re-running at sync time rather than trusting this measurement:
 `grep -rn "from \"@/api/client\"" frontend-client/src` and confirm every hit
 takes only `apiBaseURL`.
 
-**Related defect, not fixed here.** `frontend-admin` has the same replay hazard and
-a wider one: its reactive branch (`baseApi.ts:462`) gates on two path tests — not
-an auth endpoint, not the session endpoint — and on nothing else. No token-state
-gate, no body inspection. So **every** 401 on a non-auth endpoint is refreshed and
-the original request re-sent, whatever the 401 was about. Four console routes answer
-401 as a **verdict on the request**, and none of them is in `AUTH_ENDPOINT_PATHS`:
+**The same defect in `frontend-admin` — closed in this branch (follow-up 5, §8
+#5), not left open.** The console carried the same replay hazard and a wider one:
+its reactive branch gated on two path tests — not an auth endpoint, not the
+session endpoint — and on nothing else. No token-state gate, no body inspection.
+**Every** 401 on a non-auth endpoint was refreshed and the original request
+re-sent, whatever the 401 was about, and four console routes answer 401 as a
+**verdict on the request** with none of them in `AUTH_ENDPOINT_PATHS`:
 
-| route | what the replay costs |
-| ----- | --------------------- |
-| `me/password-confirm` (`authApi.ts:474`) | the **provable** one: `ConfirmPasswordWithSecurity` calls `recordFailed` (`password_auth_service.go:1300`), so a replay double-counts the lockout budget under both the IP and the email key |
-| `change-password` (`authApi.ts:449`) | a second argon2id verify of the same wrong password and a second audit-relevant failure — but **no counter**: `ChangePassword` does not call `recordFailed` |
+| route | what the replay cost |
+| ----- | -------------------- |
+| `me/password-confirm` (`authApi.ts:475`) | the **provable** one: `ConfirmPasswordWithSecurity` calls `recordFailed` (`password_auth_service.go:1300`), so a replay double-counts the lockout budget under both the IP and the email key |
+| `change-password` (`authApi.ts:454`) | a second argon2id verify of the same wrong password and a second audit-relevant failure — but **no counter**: `ChangePassword` does not call `recordFailed` |
 | `mfa/verify`, `mfa/enroll/confirm` | a replayed TOTP burns the replay guard or consumes a backup code; enrolment confirmation burns one of `MFAMaxAttempts` (5), and the fifth deletes the challenge |
 | WebAuthn `*/finish` | a consumed challenge |
 
@@ -2144,29 +2145,49 @@ Earlier revisions of this paragraph put the lockout double-count on
 replayed too, and its harm is real, but it is not countable. Both routes share
 `mapPasswordError` with the client tier.
 
-**And the fix is not the one-liner this paragraph used to promise.** Gating the
-retry on `code === "access_token_expired"` alone would switch the console's
-reactive path off in almost every real case: `prepareHeaders` (`baseApi.ts:263-267`)
+**The fix was not the one-liner an earlier revision promised.** Gating the retry on
+`code === "access_token_expired"` alone would have switched the console's reactive
+path off in almost every real case: `prepareHeaders` (`baseApi.ts:298-305`)
 **withholds** the bearer once the console's own recorded expiry has passed, the
 request then arrives with no `Authorization` at all, `RequireAuth` takes its
 missing-token branch — and that 401 is **codeless**, because §4.10 emits the code
 only for a well-formed, correctly signed, *expired* bearer. The code therefore
 reaches the console only in the narrow expired-in-flight window, and ADR-0020 D3
 frames the reactive path as the fallback for a **failed proactive rotation**, which
-is exactly the shape that arrives without one. So the gate is §4.3's
-**disjunction**: refresh and replay only when the 401 body carries
-`code: access_token_expired` **or** the request went out without a live bearer by
-the console's own local-expiry predicate — the very condition `prepareHeaders`
-already evaluates, which makes the second disjunct a shared predicate rather than
-new machinery. Rollout is backend-first: §4.10 ships the code, and the second
-disjunct is what keeps the console recovering against a backend that has not.
+is exactly the shape that arrives without one. So what shipped is §4.3's
+**disjunction**, in `baseQueryWithRetry`'s reactive branch (`baseApi.ts:507`):
+refresh and replay only when the 401 body carries `code: access_token_expired`
+**or** the request went out without a live bearer — decided by `liveBearer()`
+(`baseApi.ts:279`), the one predicate `prepareHeaders` uses to withhold a bearer
+(`:301`), read from a snapshot captured before the fetch (`:383`) so a sibling
+tab's rotation or sign-out cannot rewrite the answer. Neither proof and the 401 is
+returned to the caller untouched — no refresh, no replay, no sign-out. Rollout was
+backend-first: §4.10 shipped the code, and the second disjunct is what keeps the
+console recovering against a backend that has not.
 
-Two replays at `:400-429` are **correct** and must survive any gate added at
-`:462` — `step_up_required` and `password_confirm_required` re-send `args`
-deliberately, after the user has re-authenticated. Adding the four routes to
-`AUTH_ENDPOINT_PATHS` remains the alternative and is worse: that is the
-hand-maintained allowlist which **already failed open once**, which is how this
-defect exists (§3.B). Own issue (N3, §8 #5).
+Two replays at `:445-473` are **correct** and survive the gate — `step_up_required`
+and `password_confirm_required` re-send `args` deliberately, after the user has
+re-authenticated, and both sit ahead of the branch.
+
+**And `AUTH_ENDPOINT_PATHS` turned out to be part of the guard, not merely loop
+avoidance.** The second disjunct reasons that a bearer-less request was rejected by
+`RequireAuth` before dispatch — true for a **protected** route, false for a
+**public** one, which runs its handler with no bearer by design. The console calls
+two public routes that answer 401 as a verdict and were not in the list:
+`mfa/webauthn/login/begin` and `.../finish` (`mfaApi.ts:295,307`;
+`WebAuthnHandler.RegisterPublicRoutes`), where `LoginFinish` calls
+`IncrementAttempts` *before* returning its 401 — so under the new gate a paused
+passkey login, whose store holds no access token, satisfied proof (b) and spent two
+of `MFAMaxAttempts` (5) per typo. One substring entry,
+`v1/auth/operator/mfa/webauthn/login/`, covers both halves of the ceremony; the
+TOTP twin `mfa/login/verify` was already listed. Adding the four **protected**
+verdict-401 routes to that allowlist remains the alternative to the gate, and
+remains worse: it is the hand-maintained list which **already failed open once**,
+which is how this defect existed (§3.B) — and it failed open the same way a second
+time, on the passkey pair, which is why the two mechanisms are documented together
+in `baseApi.ts`. N3 is discharged; the tests are in
+`frontend-admin/src/store/api/baseApi.replayGuard.test.ts` (6 cases) plus the
+fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
 
 ## 8. Follow-ups (named, not started)
 

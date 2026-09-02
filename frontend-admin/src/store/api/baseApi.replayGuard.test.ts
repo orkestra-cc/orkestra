@@ -51,7 +51,10 @@ const inMs = (ms: number) => new Date(Date.now() + ms).toISOString();
 // complete so the first-install gate is not what suppresses a refresh, a
 // real token so "was it cleared?" is a question, and the expiry left to the
 // caller because it IS proof (b).
-const seededStore = async (tokenExpiry: string) => {
+const seededStore = async (
+  tokenExpiry: string | null,
+  accessToken: string | null = 'seed-access-token'
+) => {
   const store = setupStore({
     auth: {
       user: null,
@@ -62,7 +65,7 @@ const seededStore = async (tokenExpiry: string) => {
       permissions: [],
       preferences: { theme: 'light', language: 'en', notifications: true },
       _isLoggingOut: false,
-      accessToken: 'seed-access-token',
+      accessToken,
       tokenExpiry
     }
   });
@@ -273,5 +276,94 @@ describe('reactive refresh replay guard', () => {
     expect(resourceAttempts).toBe(1);
     expect(refreshAttempts).toBe(0);
     expect((result.error as { status?: number } | undefined)?.status).toBe(401);
+  });
+
+  // A PUBLIC route breaks proof (b)'s reasoning: it runs its handler with no
+  // bearer, by design, so "no bearer was sent" proves nothing about whether
+  // the handler ran. The passkey login pair is exactly that shape — mounted
+  // by WebAuthnHandler.RegisterPublicRoutes, called while the store holds no
+  // access token (the login is paused mid-ceremony), and LoginFinish calls
+  // IncrementAttempts BEFORE returning its 401, so a replay spends two of
+  // MFAMaxAttempts (5) per typo. AUTH_ENDPOINT_PATHS is what keeps proof (b)
+  // sound: the public auth routes never reach the branch at all.
+  it('does not refresh or replay a failed passkey login assertion', async () => {
+    let finishAttempts = 0;
+    let refreshAttempts = 0;
+    server.use(
+      http.post('*/v1/auth/operator/mfa/webauthn/login/finish', () => {
+        finishAttempts += 1;
+        return HttpResponse.json(
+          {
+            title: 'Unauthorized',
+            status: 401,
+            detail: 'webauthn assertion failed'
+          },
+          { status: 401 }
+        );
+      }),
+      http.post('*/refresh-cookie', () => {
+        refreshAttempts += 1;
+        return HttpResponse.json(
+          { accessToken: 'fresh-token', expiresIn: 900 },
+          { status: 200 }
+        );
+      })
+    );
+
+    // A paused passkey login: password step done, no access token yet.
+    const store = await seededStore(null, null);
+    await expect(
+      store
+        .dispatch(
+          probeApi.endpoints.replayGuardPost.initiate(
+            '/v1/auth/operator/mfa/webauthn/login/finish'
+          )
+        )
+        .unwrap()
+    ).rejects.toMatchObject({ status: 401 });
+
+    expect(finishAttempts).toBe(1);
+    expect(refreshAttempts).toBe(0);
+  });
+
+  // The deliberate widening: proof (b) is "no live bearer went out", which
+  // includes "no token in the store at all" and not only "the local expiry
+  // had passed". On a PROTECTED route that is sound — RequireAuth rejects a
+  // bearer-less request before dispatch — and it is what recovers a request
+  // that raced the session bootstrap, or one fired after clearAccessToken()
+  // while the refresh cookie is still good. Pinned here so a later narrowing
+  // to "a token existed and had expired" cannot pass unnoticed.
+  it('refreshes and replays a protected route sent with no token at all', async () => {
+    const seenAuth: Array<string | null> = [];
+    let resourceAttempts = 0;
+    let refreshAttempts = 0;
+    server.use(
+      http.get('*/v1/some/resource', ({ request }) => {
+        resourceAttempts += 1;
+        seenAuth.push(request.headers.get('authorization'));
+        return resourceAttempts === 1
+          ? HttpResponse.json({}, { status: 401 })
+          : HttpResponse.json({ ok: true }, { status: 200 });
+      }),
+      http.post('*/refresh-cookie', () => {
+        refreshAttempts += 1;
+        return HttpResponse.json(
+          { accessToken: 'fresh-token', expiresIn: 900 },
+          { status: 200 }
+        );
+      })
+    );
+
+    const store = await seededStore(null, null);
+    const result = await store.dispatch(
+      probeApi.endpoints.replayGuardProbe.initiate('/v1/some/resource')
+    );
+
+    // No proactive attempt: tokenNeedsRefresh needs a token to want one.
+    expect(refreshAttempts).toBe(1);
+    expect(resourceAttempts).toBe(2);
+    expect(result.data).toEqual({ ok: true });
+    expect(seenAuth).toEqual([null, 'Bearer fresh-token']);
+    expect(store.getState().auth.accessToken).toBe('fresh-token');
   });
 });

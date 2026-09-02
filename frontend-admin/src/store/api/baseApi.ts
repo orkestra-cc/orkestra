@@ -26,13 +26,27 @@ export const setNavigateToLogin = (fn: (location?: string) => void) => {
 // and the correct UX is to fall through to the caller. ADR-0003 PR-D D-8
 // dropped the legacy un-prefixed paths; this dashboard targets the
 // operator tier, so all entries are mounted under /v1/auth/operator.
+//
+// This list is load-bearing for the 401 branch's proof (b) below, and not
+// only for loop avoidance: proof (b) reasons that a bearer-less request was
+// rejected by RequireAuth before dispatch, which holds for PROTECTED routes
+// and says nothing about the PUBLIC ones — those run their handler with no
+// bearer at all, by design, and some of them answer 401 as a verdict on the
+// request. Every public route this SPA calls that can answer 401 therefore
+// belongs here. The passkey login pair is the one that was missed: it is
+// mounted by WebAuthnHandler.RegisterPublicRoutes, the store holds no access
+// token during a paused login, and LoginFinish calls IncrementAttempts
+// BEFORE returning its 401 — so a replay spends two of MFAMaxAttempts (5)
+// per typo. Its TOTP twin (mfa/login/verify) was already here. One entry
+// covers both halves of the ceremony: the match is a substring test.
 const AUTH_ENDPOINT_PATHS = [
   'v1/auth/operator/login',
   'v1/auth/operator/logout',
   'v1/auth/operator/refresh',
   'v1/auth/operator/refresh-cookie',
   'v1/auth/operator/register',
-  'v1/auth/operator/mfa/login/verify'
+  'v1/auth/operator/mfa/login/verify',
+  'v1/auth/operator/mfa/webauthn/login/' // begin + finish
 ];
 
 function isAuthEndpoint(url: string): boolean {
@@ -257,7 +271,11 @@ function isTenantAgnostic(url: string): boolean {
 //
 // null also covers "no token at all", deliberately: a request that carries
 // no bearer is rejected by RequireAuth before dispatch exactly as an expired
-// one is, so in both cases the handler provably never ran.
+// one is, so on a PROTECTED route the handler provably never ran either way.
+// That argument stops at the route: a PUBLIC route runs its handler without
+// any bearer, so "no bearer sent" proves nothing there. Those routes are
+// excluded from the 401 branch by AUTH_ENDPOINT_PATHS above, which is what
+// keeps this reading of null sound — the two are one mechanism, not two.
 function liveBearer(state: RootState): string | null {
   const accessToken = state.auth?.accessToken;
   const tokenExpiry = state.auth?.tokenExpiry;
@@ -505,11 +523,14 @@ const baseQueryWithRetry: BaseQueryFn<
       //      that covers a token which was live when it left and expired in
       //      flight);
       //  (b) no live bearer went out at all, by prepareHeaders' own
-      //      predicate. RequireAuth rejects that before dispatch too. This
-      //      is the fallback ADR-0020 D3 assigns to this path — the
-      //      proactive rotation failed, so the dead bearer was withheld —
-      //      and it is what keeps the console recovering against a backend
-      //      that does not yet send (a): a missing-bearer 401 is codeless.
+      //      predicate. On a protected route RequireAuth rejects that
+      //      before dispatch too — and only the protected ones reach here,
+      //      because AUTH_ENDPOINT_PATHS excludes the public auth routes,
+      //      which run their handler bearer-less by design. This is the
+      //      fallback ADR-0020 D3 assigns to this path — the proactive
+      //      rotation failed, so the dead bearer was withheld — and it is
+      //      what keeps the console recovering against a backend that does
+      //      not yet send (a): a missing-bearer 401 is codeless.
       //
       // Neither proof: hand the 401 back untouched. No refresh, no replay,
       // and no sign-out either — a mistyped password is not a dead session.
