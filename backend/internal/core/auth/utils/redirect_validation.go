@@ -178,20 +178,18 @@ func isLocalhost(host string) bool {
 
 // validateLocalhostURI validates localhost URIs with additional security checks.
 //
-// KNOWN GAP, deliberately left alone: the "/auth/" prefix below predates the
-// /v1 mount, so it now REJECTS the four backend callbacks in
-// AllowedRedirectURIs above — the values this package itself ships as the
-// defaults. It is inert today: ValidateRedirectURI has no callers in
-// backend/ at all, and even if it had, a localhost URI is answered by this
-// function or by the explicit refusal above it and never reaches the
-// whitelist, so those four entries are documentation either way. Widening it
-// to accept "/v1/auth/" is a one-line change, but it widens a redirect
-// validator, so it is named here for whoever wires this up rather than done
-// as a side effect of a path fix (spec §8 #13).
+// Two prefixes are accepted, and both are load-bearing: "/v1/auth/" is where
+// the router actually mounts the four OAuth callbacks (RegisterOAuthRoutes),
+// and "/auth/" is the SPA's own callback route, which the allow-list carries
+// as http://localhost:8080/auth/callback. Accepting only "/auth/" — the state
+// this predates the /v1 mount in — rejected the very defaults this file ships
+// in AllowedRedirectURIs. The old `&& parsedURL.Path != "/auth/callback"`
+// second clause was dead: that path already satisfies the "/auth/" prefix.
 func validateLocalhostURI(parsedURL *url.URL) error {
-	// Ensure path is reasonable for OAuth callback
-	if !strings.HasPrefix(parsedURL.Path, "/auth/") && parsedURL.Path != "/auth/callback" {
-		return fmt.Errorf("localhost redirect URI must use /auth/ path prefix")
+	// Ensure path is reasonable for an OAuth callback: the mounted backend
+	// route, or the front-end callback route.
+	if !strings.HasPrefix(parsedURL.Path, "/auth/") && !strings.HasPrefix(parsedURL.Path, "/v1/auth/") {
+		return fmt.Errorf("localhost redirect URI must use /auth/ or /v1/auth/ path prefix")
 	}
 
 	// Prevent suspicious query parameters

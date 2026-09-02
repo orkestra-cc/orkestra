@@ -346,8 +346,13 @@ type codedError struct {
 }
 
 // writeCodedError writes one coded error envelope. It is the single place
-// this package builds that wire shape; every send* below is a thin wrapper
-// that names its own envelope and calls this.
+// AuthMiddleware builds that wire shape in THIS FILE; every send* below is a
+// thin wrapper that names its own envelope and calls this. It is NOT
+// package-wide: jwt_validator.go and audience.go still build four coded
+// envelopes inline, in shapes that differ from these ones (no errors[], and
+// in audience.go's case no status/title/detail/type either), so routing them
+// through this writer would change their wire output. They are enumerated in
+// the SCOPE note on TestCodedErrorEnvelopes_Golden.
 //
 // The output is byte-for-byte what the ten emitters wrote when each built
 // its own map — json.Encoder sorts map keys, so field order here is

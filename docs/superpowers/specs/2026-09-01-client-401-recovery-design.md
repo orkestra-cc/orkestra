@@ -2832,10 +2832,17 @@ returning outcomes.
       paths, selects the four in-scope allow-list entries by host rather than by
       index, and additionally asserts the two default sets agree with each other.
       `backend/README.md`'s two Google/Apple redirect-URI recipes carried the same
-      pre-`/v1` path and moved with them. Two things this did NOT touch, both
-      recorded in `b1b-report.md`: `docker/.env.example` already showed the `/v1`
-      path, and `validateLocalhostURI`'s `/auth/` path-prefix check — dormant, no
-      callers — now rejects the very defaults it is meant to bless. The list's three other entries are deliberately **not** in
+      pre-`/v1` path and moved with them. `docker/.env.example` already showed the
+      `/v1` path and needed no change. One further defect surfaced and was fixed in
+      the same branch's fix wave: `validateLocalhostURI` required an `/auth/` path
+      prefix, so the package's *own* four defaults failed the validator that sits
+      beside them. It now accepts `/auth/` **or** `/v1/auth/` — the first is the
+      SPA's callback route (`http://localhost:8080/auth/callback`, also in the
+      allow-list), the second is the mounted backend route — and the dead
+      `&& parsedURL.Path != "/auth/callback"` clause is gone.
+      `utils/redirect_validation_test.go` drives **every** entry of the default
+      allow-list through `ValidateRedirectURI` and keeps the refusal for an
+      off-`/auth/` localhost path. The list's three other entries are deliberately **not** in
       scope: `http://localhost:8080/auth/callback` is a front-end route and
       `com.orkestra://oauth/callback` and `com.orkestra.app://oauth/callback` are
       mobile deep links, none of which the Go router serves at all. This is the
@@ -3089,10 +3096,25 @@ returning outcomes.
     `SelfLinkOAuthFromCallback` returns `fmt.Errorf("self link: %w",
     iface.ErrUserNotFound)`. One behaviour did change, deliberately: a
     **look-alike** error (the same message, a different error value) is now a 500
-    rather than a 404. Nothing in-tree produces one — `user/services` translates
-    `repository.ErrUserNotFound` to the SDK sentinel at every one of its exits —
-    but it is one more place a fork's `iface.UserProvider` must return the sentinel
-    itself, and it is recorded as such in `auth/CLAUDE.md`. Also worth correcting
+    rather than a 404.
+
+    ⚠️ **That narrowing WAS reachable in-tree, and the fix wave closed it.** The
+    first version of this paragraph claimed `user/services` translates
+    `repository.ErrUserNotFound` to the SDK sentinel "at every one of its exits".
+    That was **false**: its *lookups* translated, but eight thin **delegations** —
+    `AddOAuthLinkToUser`, `RemoveOAuthLinkFromUser`, `SetPrimaryOAuthLink`,
+    `GetUserOAuthLinks`, `UpdateUserLastLogin`, `UpdatePasswordHash`,
+    `MarkEmailVerified` and `StartMFAGraceIfUnset` — returned the repository's own
+    value raw. `AdminUnlinkOAuth` and `SelfUnlinkOAuth` hand exactly that value to
+    the mappers, so a user soft-deleted between the read and the `$pull` answered
+    **404 before and 500 after** the compares moved. All eight now translate
+    through a shared `asUserNotFound` helper (`user/services/user_service.go`),
+    pinned by `TestDelegationsTranslateRepositoryNotFound` (one row per delegation)
+    and its outage bound, with auth's half in
+    `services/auth_service_unlink_race_test.go`. What remains is only what the
+    sentence should have said all along: it is one more place a fork's
+    `iface.UserProvider` must return the SDK sentinel itself, recorded as such in
+    `auth/CLAUDE.md`. Also worth correcting
     for the record: `SelfLinkOAuthFromCallback`'s only production consumer is
     `finishOAuthLinkRedirect`, which maps failures to an OAuth **redirect code**,
     not to a 404 — so the pairing protects the class (any future consumer that maps

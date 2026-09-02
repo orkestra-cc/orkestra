@@ -54,6 +54,10 @@ func TestOAuthRedirectDefaultsAreMountedRoutes(t *testing.T) {
 	} {
 		t.Setenv(k, "")
 	}
+	// Load() runs Validate(), which requires OAuth client credentials in a
+	// production-like env — pin the environment so the test asserts the
+	// compiled defaults regardless of the shell it runs in.
+	t.Setenv("ENV", "development")
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
