@@ -147,6 +147,8 @@ The grant mints `aud: "service"`. The operator host mux accepts the audience set
 
 Reads require `auth.service_accounts.read`. **Every mutation requires `auth.service_accounts.manage` plus a step-up MFA proof fresher than 5 minutes**, the same bar as every other secret-revealing admin mutation in this module. Revocation is deliberately not idempotent: revoking an already-revoked credential returns the same not-found outcome as revoking one that never existed, so there is no oracle distinguishing the two.
 
+The four `{id}` routes above gate on a directory read, and they **classify** it. An id the directory answers for and does not know — and a target that is a human user rather than a machine one — is **404 `service account not found`**, unchanged. A directory that could not be read at all is **503**, carrying `service_account_lookup_unavailable` in the response `detail`: an outage is not proof the account was deleted, and reporting it as one sends an operator hunting for a deletion that never happened. This is the same rule the refresh path applies to `refresh_lookup_unavailable`, one surface over.
+
 ### Operational caveats
 
 - **Disabling has bounded latency.** It stops new grants instantly, but a token minted just before remains cryptographically valid for up to the access-token TTL (default 15 minutes). This is accepted because permissions are never embedded in the token — the authz evaluator resolves them fresh per request, so unbinding roles or disabling the account changes its *authorization* immediately.
@@ -204,7 +206,8 @@ perfectly valid.
 
 The same argument covers the rotation itself. When the **rotation** path cannot
 *complete* — a cookie candidate cannot be looked up, the token store or the
-user store is unreachable, signing fails, or the rotating write fails —
+user store is unreachable, signing fails, the rotating write fails, or the
+server holds no verifying key to check the presented refresh token with —
 `POST /v1/auth/{tier}/refresh-cookie` and `POST /v1/auth/{tier}/refresh` answer
 **503 `refresh_lookup_unavailable`** rather than 401. It is a
 separate code from `session_enforcement_unavailable` only so the failing
@@ -219,7 +222,19 @@ own user lookup and its own signing call. That mint reads the store a *second*
 time, after the cookie has already been classified, so a blip opening between
 the two used to answer session bootstrap with a codeless 401: the one status a
 client reads as the end of the session. A genuinely deleted account still
-answers 401 there as well, so a dead session can still end.
+answers 401 there as well, so a dead session can still end. Every *other*
+validation failure at those endpoints — a malformed JWT, a bad signature, a
+wrong token type, a wrong audience, an expired refresh row — is a verdict on
+the credential and keeps its 401; only the server's own failures move.
+
+**Protected routes have their own version of the same rule.** If no verifying
+key is loaded, `RequireAuth` can check no bearer on any route on either tier,
+and it answers **503 `token_verification_unavailable`** instead of the codeless
+401 it used to give. No `WWW-Authenticate` accompanies it: the header names a
+scheme to retry with and there is none. A boot with no key material is not a
+blip — no client-side retry helps — so this is the server saying it cannot
+authenticate anyone, not that this session ended, and neither SPA clears
+anything on it. Nothing about what is *accepted* changes.
 
 ### Upgrading
 

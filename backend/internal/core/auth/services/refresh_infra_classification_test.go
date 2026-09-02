@@ -13,6 +13,7 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -283,5 +284,98 @@ func TestMintInfra_UserGenuinelyDeleted_IsInvalidToken(t *testing.T) {
 	}
 	if resp != nil {
 		t.Fatalf("resp = %+v, want nil", resp)
+	}
+}
+
+// ===== A missing VERIFYING key is not a bad token (spec §4.9 v22, §8 #15) =====
+//
+// The last three sites are a second route into the same misclassification.
+// validateTokenEnhanced returns ErrJWTKeysNotLoaded when no public key is
+// loaded, and all three service entry points opened by a ValidateRefreshToken
+// call used to fold EVERY validation failure into one opaque
+// "invalid refresh token" string — so /refresh, /refresh-cookie and /session
+// answered a server that cannot verify anything with the same codeless 401
+// they answer a dead session with. A boot with no key material is the server's
+// own failure: 503, and no client should read it as its session ending.
+//
+// breakVerifyingKey forces exactly that input, and the ordering inside
+// validateTokenEnhanced keeps the test honest: the sentinel is returned before
+// jwt.Parse runs, so the seeded row and the token below are genuinely valid.
+
+func TestKeysNotLoaded_Rotate_Is503(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+	raw, _ := env.issueAndSeedRefresh(user, "fam-keys-rotate")
+	env.breakVerifyingKey()
+
+	resp, err := env.auth.RefreshTokensWithRiskAssessment(context.Background(), raw, &authModels.SecurityContext{})
+	if !errors.Is(err, ErrRefreshLookupUnavailable) {
+		t.Fatalf("err = %v, want ErrRefreshLookupUnavailable — a server with no verifying key cannot authenticate ANYONE, and answering that 401 signs out every live session", err)
+	}
+	if !errors.Is(err, ErrJWTKeysNotLoaded) {
+		t.Fatalf("err = %v, want the underlying cause preserved — whoever reads the log needs to see it is the key material, not the store", err)
+	}
+	if resp != nil {
+		t.Fatalf("resp = %+v, want nil — nothing may be handed back for a token that could not be verified", resp)
+	}
+}
+
+func TestKeysNotLoaded_Peek_Is503(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+	raw, _ := env.issueAndSeedRefresh(user, "fam-keys-peek")
+	env.breakVerifyingKey()
+
+	doc, err := env.auth.PeekRefreshToken(context.Background(), raw)
+	if !errors.Is(err, ErrRefreshLookupUnavailable) {
+		t.Fatalf("err = %v, want ErrRefreshLookupUnavailable — the picker treats every other error as 'not a candidate', so an unverifiable cookie would silently become a 401", err)
+	}
+	if !errors.Is(err, ErrJWTKeysNotLoaded) {
+		t.Fatalf("err = %v, want the underlying cause preserved", err)
+	}
+	if doc != nil {
+		t.Fatalf("doc = %+v, want nil", doc)
+	}
+}
+
+func TestKeysNotLoaded_Mint_Is503(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+	raw, _ := env.issueAndSeedRefresh(user, "fam-keys-mint")
+	env.breakVerifyingKey()
+
+	resp, err := env.auth.MintAccessTokenFromRefresh(context.Background(), raw, &authModels.SecurityContext{})
+	if !errors.Is(err, ErrRefreshLookupUnavailable) {
+		t.Fatalf("err = %v, want ErrRefreshLookupUnavailable — this is the session-bootstrap path, and a codeless 401 there is the one status a client reads as the end of the session", err)
+	}
+	if !errors.Is(err, ErrJWTKeysNotLoaded) {
+		t.Fatalf("err = %v, want the underlying cause preserved", err)
+	}
+	if resp != nil {
+		t.Fatalf("resp = %+v, want nil", resp)
+	}
+}
+
+// The negative that stops the split becoming a blanket 503: every OTHER
+// validation failure is a verdict on the credential and keeps the wrap — and
+// the 401 — it has today. A garbage token with the keys perfectly loaded is
+// the plainest instance.
+func TestKeysNotLoaded_InvalidTokenAtRotation_Stays401(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+
+	_, err := env.auth.RefreshTokensWithRiskAssessment(context.Background(), "not-a-jwt", &authModels.SecurityContext{})
+	if err == nil {
+		t.Fatal("a malformed refresh token must be rejected")
+	}
+	if errors.Is(err, ErrRefreshLookupUnavailable) {
+		t.Fatalf("err = %v — a malformed token is a verdict, not an outage; 503 there means a dead session never ends", err)
+	}
+	if !strings.Contains(err.Error(), "invalid refresh token") {
+		t.Fatalf("err = %v, want the existing \"invalid refresh token\" wrap untouched", err)
 	}
 }

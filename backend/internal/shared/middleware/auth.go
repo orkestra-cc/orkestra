@@ -235,6 +235,21 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				m.sendAccessTokenExpired(w)
 				return
 			}
+			// No verifying key loaded is not a verdict on this token — it
+			// is this server admitting it cannot authenticate ANYONE until
+			// an operator fixes the key material. RequireAuth guards every
+			// protected route on both tiers, so the codeless 401 this used
+			// to fall through to told every client its session had ended.
+			// A boot-time state is not a blip: no client-side retry helps,
+			// which is exactly why the honest answer is a 503 rather than
+			// another 401 code. == rather than errors.Is because
+			// validateTokenEnhanced returns the sentinel unwrapped, like the
+			// two comparisons it joins, and because in this file `errors` is
+			// the shared errors package (see errors.TokenInvalidError below).
+			if err == services.ErrJWTKeysNotLoaded {
+				m.sendTokenVerificationUnavailable(w)
+				return
+			}
 			if err == services.ErrInvalidToken {
 				m.sendErrorResponse(w, r, errors.AuthenticationError("authentication required").
 					WithOperation("require_auth").
@@ -1271,6 +1286,32 @@ func (m *AuthMiddleware) sendPolicyUnavailable(w http.ResponseWriter) {
 		"detail": "the sign-in policy could not be evaluated; try again shortly",
 		"type":   "about:blank",
 		"code":   "auth.policy_unavailable",
+	})
+}
+
+// sendTokenVerificationUnavailable emits the 503 envelope for a server that
+// holds no verifying key, so no bearer on any protected route can be checked
+// (services.ErrJWTKeysNotLoaded). Modelled on sendPolicyUnavailable, the
+// middleware's other 503, down to omitting both WWW-Authenticate and errors[]:
+// the header names a scheme the caller should retry with and there is nothing
+// to retry with. The code is flat rather than dotted — every code this family
+// has added reads that way, and the model's punctuation is a lone survivor.
+//
+// Nothing about what is ACCEPTED changes: a server with no verifying key
+// accepted nothing before and accepts nothing now. Only the account it gives
+// of itself does. As with sendAccessTokenExpired, the request is deliberately
+// not a parameter — nothing here reads it — and the code must keep exactly
+// ONE emitter in backend/, or it stops meaning what it says.
+func (m *AuthMiddleware) sendTokenVerificationUnavailable(w http.ResponseWriter) {
+	const code = "token_verification_unavailable"
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status": http.StatusServiceUnavailable,
+		"title":  "token verification unavailable",
+		"detail": "access tokens cannot be verified right now; try again shortly",
+		"type":   "about:blank",
+		"code":   code,
 	})
 }
 

@@ -169,6 +169,16 @@ func (h *ServiceAccountAdminHandler) RevokeCredential(ctx context.Context, req *
 // (default 500 via Huma's fallback).
 func mapServiceAccountAdminError(err error) error {
 	switch {
+	// Ahead of the not-found arm on purpose: a directory the platform could
+	// not READ says nothing about whether the account exists, and answering
+	// it 404 sends an operator hunting for a deletion that never happened
+	// (spec §8 #17 — §4.9's class, one module over). huma's ErrorModel has no
+	// top-level code field, so the machine-readable token goes in `detail`,
+	// the shape avatar_handler.go already uses on a huma route.
+	case errors.Is(err, services.ErrServiceAccountLookupUnavailable):
+		return huma.NewError(http.StatusServiceUnavailable,
+			"service_account_lookup_unavailable",
+			&huma.ErrorDetail{Message: "the service-account directory could not be read; try again shortly"})
 	case errors.Is(err, services.ErrServiceAccountNotFound):
 		return huma.Error404NotFound("service account not found")
 	case errors.Is(err, repository.ErrServiceAccountCredentialNotFound):

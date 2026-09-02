@@ -470,7 +470,9 @@ candidate** (`PeekRefreshToken`'s lookup), **the rotation-race classifier
 could not read the family state** (`benignRotationRetry`'s `FamilyRevoked`, or
 the post-CAS re-read), **or the read-only mint behind the picker failed on one
 of its own three reads** (`MintAccessTokenFromRefresh`'s `GetByTokenAny`, its
-`GetUserByID`, its `GenerateAccessTokenForSessionWithAMR`). The race-classifier
+`GetUserByID`, its `GenerateAccessTokenForSessionWithAMR`), **or no verifying
+key was loaded at all** (`ErrJWTKeysNotLoaded` at the `ValidateRefreshToken`
+call that opens each of those three entry points). The race-classifier
 pair is the destructive case: both used to fold
 "could not read" into "revoked" and run `handleRefreshReplay`, so a store
 hiccup during a legitimate multi-tab race revoked the family the winner had
@@ -479,7 +481,7 @@ just renewed and signed every tab out. `benignRotationRetry` now returns
 503 **without** revoking. A replay verdict that *was* reached still answers 401
 even if its `RevokeFamily` fails: fail closed denies the current request, it
 does not invent a verdict and persist it.
-Before this, EIGHT of those ten sites were wrapped
+Before this, ELEVEN of those thirteen sites were wrapped
 generically and answered as a codeless 401, so a Mongo blip during a refresh
 reached the SPA as the same answer a dead refresh token produces and no
 client-side rule could separate them. The picker case is the one that
@@ -498,13 +500,15 @@ is never expired on this outcome (`clearRefreshCookieOnTerminalRefreshErr`
 is an allowlist), and `refreshFailureOutcome` logs it as
 `lookup_unavailable`, not `invalid_token`.
 
-**Scope, precisely:** the ten sites are the four infrastructure wraps inside
+**Scope, precisely:** the thirteen sites are the four infrastructure wraps inside
 `RefreshTokensWithRiskAssessment` (token lookup, user lookup, mint, rotating
 write), `PeekRefreshToken`'s lookup, the two race-classifier reads —
 `benignRotationRetry`'s `FamilyRevoked` and the post-CAS re-read in the
-`ErrTokenAlreadyRotated` branch — and the three inside
+`ErrTokenAlreadyRotated` branch — the three inside
 `MintAccessTokenFromRefresh` (its own `GetByTokenAny`, its `GetUserByID`, its
-`GenerateAccessTokenForSessionWithAMR`). So `POST /v1/auth/{tier}/refresh-cookie`,
+`GenerateAccessTokenForSessionWithAMR`), and the three `ValidateRefreshToken`
+calls that OPEN those same three entry points — for `ErrJWTKeysNotLoaded`
+only. So `POST /v1/auth/{tier}/refresh-cookie`,
 `POST /v1/auth/{tier}/refresh` **and** `GET /v1/auth/session` are each covered
 end to end. The rule the race-classifier pair
 encodes: **an unreadable family state answers 503 and revokes nothing;
@@ -527,6 +531,23 @@ wrapping it would break `writeRefreshErr`'s branch order (ADR-0017 owns it).
 error through `writeRefreshErr`, `refreshFailureOutcome` already logs it as
 `lookup_unavailable`, and the cookie-clear allowlist already excludes the
 sentinel.
+
+The last three (spec v22, follow-up 15) are a different route into the same
+misclassification and they need no handler change either. `ValidateRefreshToken`
+opens all three entry points, and each used to fold **every** validation
+failure into one `invalid refresh token` string — so a boot with no verifying
+key answered `/refresh`, `/refresh-cookie` and `/session` exactly the way a
+dead session is answered. Only `ErrJWTKeysNotLoaded` splits off to the
+sentinel: a malformed JWT, a bad signature, a wrong token type, a wrong
+audience and an expired refresh row are **verdicts** and keep their wrap and
+their 401, which is what stops the split from becoming a blanket 503. The
+signing sites need nothing — `GenerateEnhancedAccessToken` and its two
+siblings return the same sentinel, but their callers are the mint wraps
+already counted above. The test hook is `breakVerifyingKey()` in
+`refresh_orchestration_test.go`, the public-key twin of `breakSigningKey()`:
+`validateTokenEnhanced` returns before `jwt.Parse`, so a test seeds a
+perfectly valid refresh row and still gets the sentinel
+(`refresh_infra_classification_test.go`'s `TestKeysNotLoaded_*`).
 
 > **The same code is also emitted by `shared/middleware.AuthMiddleware`,
 > and that is the path that actually reaches a user.** The three refresh
@@ -569,6 +590,28 @@ sentinel.
 > (`shared/middleware/audience.go:102-108`), so `RequireAuth`'s codeless
 > 401 is only what a wrong audience would get on a router that mounted
 > `RequireAuth` alone.
+>
+> **A fourth code leaves the same branch and is deliberately NOT a 401.**
+> `ErrJWTKeysNotLoaded` — no verifying key loaded — used to fall through to
+> `errors.TokenInvalidError()`, so every protected route on both tiers
+> answered a boot misconfiguration with the codeless 401 above. It now gets
+> **503 `token_verification_unavailable`** from `sendTokenVerificationUnavailable`,
+> modelled on `sendPolicyUnavailable` (the middleware's other 503) down to
+> omitting both `WWW-Authenticate` and `errors[]` — the header names a scheme
+> to retry with and there is none. The status is the point: this is a
+> boot-time state, not a blip, so no client-side retry can help and no client
+> should read it as its own session ending; "the server cannot authenticate
+> anyone" is the true statement. The comparison is `==`, not `errors.Is`,
+> because `validateTokenEnhanced` returns the sentinel unwrapped exactly as it
+> returns `ErrTokenExpired` — and because in `auth.go` the identifier `errors`
+> is the **shared** `internal/shared/errors` package, so `errors.Is` there
+> would not compile. Nothing about what is *accepted* changed. Like
+> `access_token_expired`, it must keep **exactly one emitter** in `backend/`.
+> Covered by `require_auth_test.go`'s
+> `TestRequireAuth_KeysNotLoaded_Returns503TokenVerificationUnavailable` and
+> the bound `TestRequireAuth_VerifiableRejections_CarryNoUnavailableCode`. The
+> refresh path's half of the same fix is the three `ValidateRefreshToken`
+> sites above.
 >
 > `access_token_expired` is the **only non-terminal one of the three**:
 > the other two say the session is gone and the client must clear and
@@ -917,6 +960,26 @@ Invariants:
   (`shared/middleware/audience.go`); the client host mux is unchanged
   (`{client}` only) — service accounts act on the Tier-1 operator surface
   exclusively.
+- **The lifecycle gate classifies its directory read; it does not collapse
+  it.** `requireServiceAccount` (`services/service_account_service.go`) is the
+  first thing all four `{id}` lifecycle methods run, and it used to fold
+  **every** `iface.UserProvider.GetUserByID` error into
+  `ErrServiceAccountNotFound` → **404**, so a Mongo outage told an operator
+  their service account had been deleted. It now answers 404 only for
+  `iface.ErrUserNotFound` (the SDK sentinel `user/services.ErrUserNotFound`
+  aliases) and for a non-`service` or nil user; anything else becomes
+  `ErrServiceAccountLookupUnavailable`, wrapped `%w: %w` with the cause, which
+  `mapServiceAccountAdminError` answers with **503**
+  `service_account_lookup_unavailable` (the token lands in `detail` — huma's
+  `ErrorModel` has no top-level `code` field). This is
+  `ErrRefreshLookupUnavailable`'s class one module over; it is a follow-up
+  rather than part of that work only because it is not on the refresh path and
+  cannot sign anyone out. A fork's own `UserProvider` **must** return or wrap
+  `iface.ErrUserNotFound` for a deleted account, or every unknown id here
+  becomes a 503. Deliberately **not** folded in: the Grant path's own user
+  lookup still collapses both conditions into `ErrInvalidClientCredentials`
+  (401) so a caller cannot learn why it was rejected — changing that is a
+  security decision, not a classification one.
 - **Disabling an account stops new grants instantly; permissions still
   resolve per request.** `Grant` refuses a disabled account's credentials
   immediately. A token already minted before the disable remains valid for

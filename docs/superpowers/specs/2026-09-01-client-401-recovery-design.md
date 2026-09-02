@@ -2870,8 +2870,8 @@ returning outcomes.
     narrowed but not introduced by this branch — and **not** closed by batch 3's
     arm, which returns before the replay path and never reaches it. It stays named
     here.
-15. **`ErrJWTKeysNotLoaded` reaches the browser as a codeless 401** —
-    **ruled in for this branch (batch 3)**, in **both** halves: the refresh path is
+15. **`ErrJWTKeysNotLoaded` reaches the browser as a codeless 401** — ✅
+    **done in this branch (batch 3)**, in **both** halves: the refresh path is
     three new rows on §4.9's site table, and `RequireAuth` is the second arm §4.10
     now specifies.
     `validateTokenEnhanced` returns the sentinel when no public key is
@@ -2944,8 +2944,8 @@ returning outcomes.
     the moment a proxy changes the port or the scheme, and exactly the desync this
     rule would then report.
 
-17. **A service-account lookup answers a store failure as a 404** —
-    **ruled in for this branch (batch 3)**. `requireServiceAccount` is the gate
+17. **A service-account lookup answers a store failure as a 404** — ✅
+    **done in this branch (batch 3)**. `requireServiceAccount` is the gate
     every `ServiceAccountService` lifecycle method runs first, so that a human
     user's UUID can never be targeted by these endpoints. It collapses **every**
     error from `iface.UserProvider.GetUserByID` into `ErrServiceAccountNotFound`:

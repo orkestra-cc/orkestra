@@ -8,9 +8,12 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"reflect"
 	"testing"
+
+	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/auth/services"
@@ -26,6 +29,7 @@ func TestMapServiceAccountAdminError(t *testing.T) {
 		{services.ErrTooManyActiveCredentials, http.StatusConflict},
 		{services.ErrInvalidAccountName, http.StatusUnprocessableEntity},
 		{repository.ErrServiceAccountCredentialNotFound, http.StatusNotFound},
+		{services.ErrServiceAccountLookupUnavailable, http.StatusServiceUnavailable},
 	}
 	for _, c := range cases {
 		err := mapServiceAccountAdminError(c.in)
@@ -54,5 +58,35 @@ func TestServiceAccountUpdateNameHasMinLength(t *testing.T) {
 	}
 	if got := nameField.Tag.Get("minLength"); got != "1" {
 		t.Errorf(`Name field minLength tag = %q, want "1" — {"name":""} must 422, not silently no-op`, got)
+	}
+}
+
+// The 503 arm carries a machine-readable token, and it has to survive the
+// wrap the service applies (`%w: %w` with the underlying cause) — a mapping
+// that only matched the bare sentinel would answer a real outage with a 500.
+// Huma's ErrorModel has no top-level `code` field, so the token goes in
+// `detail`, the shape this tree already uses on huma routes
+// (user/handlers/avatar_handler.go's avatar_storage_unavailable).
+func TestMapServiceAccountAdminErrorLookupUnavailableCarriesCode(t *testing.T) {
+	wrapped := fmt.Errorf("service account lookup failed: %w: %w",
+		services.ErrServiceAccountLookupUnavailable, errors.New("mongo: no reachable servers"))
+
+	var model *huma.ErrorModel
+	if !errors.As(mapServiceAccountAdminError(wrapped), &model) {
+		t.Fatalf("map(%v) is not a *huma.ErrorModel", wrapped)
+	}
+	if model.Status != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503 — an unreadable directory is not a verdict on the account", model.Status)
+	}
+	if model.Detail != "service_account_lookup_unavailable" {
+		t.Errorf("detail = %q, want the machine-readable code", model.Detail)
+	}
+	// The not-found answer must be untouched by the split.
+	var nf *huma.ErrorModel
+	if !errors.As(mapServiceAccountAdminError(services.ErrServiceAccountNotFound), &nf) {
+		t.Fatal("not-found mapping is not a *huma.ErrorModel")
+	}
+	if nf.Status != http.StatusNotFound || nf.Detail != "service account not found" {
+		t.Errorf("not-found mapping = %d %q, want 404 \"service account not found\"", nf.Status, nf.Detail)
 	}
 }
