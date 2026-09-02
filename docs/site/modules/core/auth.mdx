@@ -161,9 +161,18 @@ a timeout at all.
 
 | Lifetime | Controlled by | Default | What it means |
 |---|---|---|---|
-| Access token | admin `accessTokenTTL` → `JWT_ACCESS_TOKEN_EXPIRY` → 15m | 15m | How long a minted access token is accepted. Range 1m–24h; longer values are clamped, because the Redis revocation denylist stores entries for 24h + 1min and a token must never outlive its own revocation entry. |
+| Access token | admin `accessTokenTTL` (the level that governs — `JWT_ACCESS_TOKEN_EXPIRY` is a fallback a seeded install never reaches) | 15m | How long a minted access token is accepted. Range 1m–24h; longer values are clamped, because the Redis revocation denylist stores entries for 24h + 1min and a token must never outlive its own revocation entry. |
 | Idle window | `JWT_REFRESH_TOKEN_EXPIRY` | 7d | **This is the idle timeout.** Rotation writes a fresh `now + this` on every refresh, so a session ends only after this long *without* activity — it is not a separate control. |
 | Absolute cap | admin `sessionAbsoluteTTL` | 30d (`720h`) | The maximum total age of a session, measured from login, independent of activity. Range 1h–89d; **clearing the field disables the cap.** |
+
+**Changing the access-token TTL.** Set `accessTokenTTL` at
+`/admin/modules/auth`, or `PATCH /v1/admin/modules/auth`. The environment
+variable `JWT_ACCESS_TOKEN_EXPIRY` is the documented fallback, but on a normal
+deployment it is never reached: the field is declared in the auth module's
+config schema with a `15m` default and **no** environment binding, so first boot
+seeds that value into `module_configs` and the config service returns the same
+default even for a field an operator has cleared — the admin value always wins.
+Setting the variable on its own changes nothing.
 
 Reaching the absolute cap is a **logout**, not a denial: the session's refresh
 tokens are revoked, the session document is marked inactive, and the session
