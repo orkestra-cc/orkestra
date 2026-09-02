@@ -99,8 +99,15 @@ services:
       # cross-ORIGIN and still preflighted (CLIENT_CORS_ORIGINS below).
       # Neither cookie knob can substitute: SameSite is computed from the
       # request's site, not the cookie's Domain, and COOKIE_SAME_SITE is
-      # read into config but never consumed. The operator console is not
-      # affected — it calls localhost:3000 from localhost:8080, same host.
+      # read into config but never consumed. The operator console is bound
+      # by the same condition and only its DEFAULT satisfies it: the SPA
+      # calls VITE_API_URL (below, default http://localhost:3000) with
+      # credentials:'include', so it is same-site only while its own origin
+      # agrees — both localhost (open it at http://localhost:8080), or both
+      # console.localhost (then set VITE_API_URL=http://console.localhost:3000
+      # and VITE_ADMIN_ALLOWED_HOSTS=console.localhost). Opening it at
+      # console.localhost:8080 against the default reproduces this bug on
+      # the operator tier. Not changed here — spec §8 follow-up #13.
       # The host mux matches a Host header with or without its port
       # (cmd/server/hostmux.go:54-68, :72-84), so the :3000 suffix is fine.
       CONSOLE_HOST: ${CONSOLE_HOST:-console.localhost:3000}

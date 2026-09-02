@@ -385,7 +385,7 @@ The backend serves three audiences from one Go binary, dispatched by `Host` head
 | `client` | `client.localhost:3000` | `api.orkestra.com` | Tier-2 client tenants — subscriptions, payments, future AI runtime (PR-E) |
 | `service` | *(internal docker network only)* | *(internal docker network only)* | AI sidecar `/v1/internal/*` — never published by ingress |
 
-The host mux ([cmd/server/hostmux.go](../backend/cmd/server/hostmux.go)) indexes each configured host in both its bare and its ported form and matches `r.Host` against either ([`hostmux.go:54-68`](../backend/cmd/server/hostmux.go), [`:72-84`](../backend/cmd/server/hostmux.go)), then dispatches to the matching audience's chi.Mux — so `CLIENT_API_HOST=client.localhost` and `client.localhost:3000` behave the same. Each mux mounts its own `RequireAudience` middleware ([shared/middleware/audience.go](../backend/internal/shared/middleware/audience.go)) so a token issued for the wrong audience is rejected before any handler runs (defense in depth above per-route RBAC).
+The host mux ([cmd/server/hostmux.go](../backend/cmd/server/hostmux.go)) indexes each configured host and, when it carries a port, its bare form too ([`hostmux.go:61-67`](../backend/cmd/server/hostmux.go)); on the request side it matches `r.Host` exactly, then bare ([`:75-84`](../backend/cmd/server/hostmux.go)). It then dispatches to the matching audience's chi.Mux — so `CLIENT_API_HOST=client.localhost` and `client.localhost:3000` behave the same. Each mux mounts its own `RequireAudience` middleware ([shared/middleware/audience.go](../backend/internal/shared/middleware/audience.go)) so a token issued for the wrong audience is rejected before any handler runs (defense in depth above per-route RBAC).
 
 **Dev fallthrough**: when `ENV=development` an unmatched Host falls through to the operator mux, so `curl http://localhost:3000` keeps working without `/etc/hosts` gymnastics. In staging/prod an unmatched Host returns 421 Misdirected Request — the canonical signal that an HTTP/1.1 request reached a server that doesn't serve it. This closes the door on host-header smuggling against the Tier-1 console.
 
@@ -418,8 +418,25 @@ not from the cookie's `Domain`) and `COOKIE_SAME_SITE` is unread (above).
 Staging and prod keep the three-host ADR-0003 split, because there the hosts *do*
 share a registrable domain — `app.orkestra.cc` and `staging-api.orkestra.cc` are
 both `orkestra.cc`, i.e. same-site. The rule is "same site", not "same host"; only
-`*.localhost` forces the hostnames to coincide. The operator console never hit
-this: it calls `localhost:3000` from `localhost:8080` — same host already.
+`*.localhost` forces the hostnames to coincide.
+
+**The operator console is bound by the same condition**, and only its shipped
+default satisfies it. It has no `OPERATOR_API_HOST`: the console SPA calls
+whatever `VITE_API_URL` says (`docker-compose.dev.yml:198`, default
+`http://localhost:3000`), with `credentials: 'include'` on every request
+(`frontend-admin/src/store/api/baseApi.ts:295-297`). Opened at
+`http://localhost:8080` — the shipped entry point, and the only hostname besides
+`127.0.0.1` in the console dev server's allow-list
+(`frontend-admin/vite.config.js:366-381`; `VITE_ADMIN_ALLOWED_HOSTS` is empty by
+default) — origin and API are both `localhost`, hence same site. Open that same
+console at `http://console.localhost:8080` while `VITE_API_URL` still points at
+`http://localhost:3000` and the operator tier reproduces this bug exactly:
+`POST /v1/auth/operator/refresh-cookie` becomes a cross-site credentialed
+request and drops the `SameSite=Lax` cookie. **Both on `localhost`, or both on
+`console.localhost` (which also needs `VITE_API_URL=http://console.localhost:3000`
+and `console.localhost` in `VITE_ADMIN_ALLOWED_HOSTS`) — never one of each.**
+Making the operator tier same-site by configuration the way the client tier now
+is has not been done: spec §8 follow-up #13.
 
 **Per-audience env vars** (compose passes these through to the backend):
 

@@ -30,7 +30,7 @@ const runtimeApiBase =
 const API_BASE = (
   runtimeApiBase ??
   import.meta.env.VITE_API_BASE ??
-  "http://api.localhost:3000"
+  "http://client.localhost:3000"
 ).replace(/\/$/, "");
 
 export const apiBaseURL = API_BASE;

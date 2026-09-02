@@ -35,7 +35,7 @@ docker compose -f docker-compose.dev.yml up -d
 Open:
 
 - **Demo SPA** — http://client.localhost:8081
-- Operator console — http://console.localhost:8080
+- Operator console — http://localhost:8080 (not `console.localhost:8080`: the console's origin has to be same-site with its `VITE_API_URL`, which defaults to `http://localhost:3000`)
 - Backend API — http://client.localhost:3000 (client surface) + http://console.localhost:3000 (operator)
 
 ## Tests

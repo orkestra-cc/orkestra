@@ -2301,6 +2301,22 @@ fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
     The docs now say which level governs and how to change it; the schema and the
     resolution order are **not** touched — that would be a behaviour change, and this
     is a note about what the code does.
+13. **The operator console is same-site only by default** — **named, not started.**
+    #10's fix gave the client tier a dedicated `CLIENT_API_HOST`; the operator tier
+    has no equivalent, so the console's origin and `VITE_API_URL` (default
+    `http://localhost:3000`, `docker-compose.dev.yml:198`) have to agree by
+    convention. They do at the shipped entry point `http://localhost:8080`, and they
+    do not the moment anyone opens the same console at `http://console.localhost:8080`
+    — every call carries `credentials: 'include'`
+    (`frontend-admin/src/store/api/baseApi.ts:295-297`), so
+    `POST /v1/auth/operator/refresh-cookie` becomes cross-site and drops the
+    `SameSite=Lax` cookie exactly as the client tier did. The operator OAuth recipe
+    has the tighter constraint: the `orkestra_oauth_state` cookie is host-only
+    (`oauth_state_binding.go:48-58`), so the login-POST host and the callback host
+    must match too, which `docs/site/operating/oauth-providers.mdx` and
+    `docs/Multi-Environment-Setup.md:489` do not agree on today. Batch-2 wave W4
+    recorded the condition in the docs under ruling F8 and changed **no**
+    operator-tier config.
 
 ## Open questions — all ruled 2026-09-01 (O6 last, in round 15)
 

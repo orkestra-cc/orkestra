@@ -1,9 +1,11 @@
 // Module-scoped in-memory access token. Stored outside React state so the
 // API client middleware can read it synchronously without dragging React
-// context into the fetch path. The refresh cookie is httpOnly and lives
-// on the API origin (Domain=api.localhost in dev, api.<env>.orkestra.cc
-// in staging/prod) — the SPA never sees it directly; it just calls the
-// refresh endpoint and stores the resulting access token here.
+// context into the fetch path. The refresh cookie is httpOnly and
+// host-only — no Domain attribute — so it lives on exactly the client API
+// host that minted it (client.localhost in dev, api.<env>.orkestra.cc in
+// staging/prod). It is SameSite=Lax, which is why that host must be
+// same-site with this SPA's own origin. The SPA never sees it directly;
+// it just calls the refresh endpoint and stores the access token here.
 
 import {
   clearSessionMarker,
