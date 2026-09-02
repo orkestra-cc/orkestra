@@ -215,7 +215,8 @@ func mapSelfAuthError(err error) error {
 	case errors.Is(err, services.ErrMFANotEnrolled):
 		return huma.Error400BadRequest("mfa is not enrolled — enroll a TOTP factor before regenerating backup codes")
 	}
-	if msg := err.Error(); msg == "user not found" {
+	// By identity, not by message — see mapAdminUserAuthError.
+	if errors.Is(err, iface.ErrUserNotFound) {
 		return huma.Error404NotFound("user not found")
 	}
 	return huma.Error500InternalServerError("self auth action failed", err)

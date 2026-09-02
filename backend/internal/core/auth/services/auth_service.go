@@ -803,7 +803,10 @@ func (s *authService) SelfLinkOAuthFromCallback(
 		return err
 	}
 	if user == nil {
-		return fmt.Errorf("user not found")
+		// A wrap of the SDK sentinel, not a fresh error carrying the same
+		// text: the handler mappers classify not-found with errors.Is, and
+		// a look-alike message is invisible to that.
+		return fmt.Errorf("self link: %w", iface.ErrUserNotFound)
 	}
 
 	providerID, _ := userInfo["provider_id"].(string)

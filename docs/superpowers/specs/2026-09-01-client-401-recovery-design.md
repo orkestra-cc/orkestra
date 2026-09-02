@@ -3033,7 +3033,9 @@ returning outcomes.
     rejected — so changing it is a security-shaped decision rather than a
     classification one, and it belongs in its own follow-up.
 18. **Cleanups** — **ruled in for this branch (batch 3)**, five of them, each small
-    and each already diagnosed:
+    and each already diagnosed. **(c) and (d), the two backend ones, are ✅ done in
+    this branch (batch 3);** (a) and (b) are frontend and land in their own waves,
+    and (e) is a config/doc alignment that has not been made yet:
 
     **(a) `handleOAuthCallback` and `useHandleOAuthCallbackMutation` are deleted**
     (`frontend-admin/src/store/api/authApi.ts`). Zero consumers — the definition and
@@ -3056,7 +3058,8 @@ returning outcomes.
     layout does not shift.
 
     **(c) Three `err.Error() == "user not found"` string compares become
-    `errors.Is(err, iface.ErrUserNotFound)`** — twice in
+    `errors.Is(err, iface.ErrUserNotFound)`** — ✅ **done in this branch
+    (batch 3)**. Twice in
     `handlers/admin_user_auth_handler.go` (the aggregator path and
     `mapAdminInviterError`) and once in `handlers/self_user_auth_handler.go`. They
     match today only because the sentinel's message is literally `"user not found"`
@@ -3069,8 +3072,25 @@ returning outcomes.
     `"notifications disabled — cannot send email"` compare beside it has the same
     shape and belongs in the same commit.
 
+    *As shipped:* all four compares are gone — the three not-found ones and the
+    notification one (`errors.Is(err, services.ErrNotificationDown)`) — and
+    `SelfLinkOAuthFromCallback` returns `fmt.Errorf("self link: %w",
+    iface.ErrUserNotFound)`. One behaviour did change, deliberately: a
+    **look-alike** error (the same message, a different error value) is now a 500
+    rather than a 404. Nothing in-tree produces one — `user/services` translates
+    `repository.ErrUserNotFound` to the SDK sentinel at every one of its exits —
+    but it is one more place a fork's `iface.UserProvider` must return the sentinel
+    itself, and it is recorded as such in `auth/CLAUDE.md`. Also worth correcting
+    for the record: `SelfLinkOAuthFromCallback`'s only production consumer is
+    `finishOAuthLinkRedirect`, which maps failures to an OAuth **redirect code**,
+    not to a 404 — so the pairing protects the class (any future consumer that maps
+    it, and the sentinel's meaning) rather than a 404 that exists today.
+
     **(d) A `writeCodedError` helper behind the nine hand-built coded envelopes in
-    `internal/shared/middleware/auth.go`, byte-identical output.** Nine, not the six
+    `internal/shared/middleware/auth.go`, byte-identical output.** ✅ **Done in this
+    branch (batch 3)** — and **ten**, not nine, as shipped: #15's
+    `sendTokenVerificationUnavailable` landed in batch 3's first commit and is the
+    tenth. Nine, not the six
     a first reading suggests and not the eight a second one does:
     `sendSessionRevoked`, `sendAccessTokenExpired`, `sendRiskStepUp`,
     `sendStepUpRequired`, `sendPasswordConfirmRequired`, `sendPolicyUnavailable`,
@@ -3094,6 +3114,19 @@ returning outcomes.
     §4.10's `sendAccessTokenExpired` and #15's new 503 go behind the same helper; the
     middleware tests that pin each envelope are what keep "byte-identical" honest,
     and none of them may be edited.
+
+    *As shipped:* `codedError` carries `status`, `code`, `title`, `detail`,
+    `scheme` (`schemeBearer` / `schemeMFA` / `""`), `item *codedErrorItem` and
+    `extra map[string]any`. The `errors[]` opt-out is the **zero value**, which is
+    the safe direction — a forgotten field omits the array rather than inventing
+    one — and the two emitters that omit it say so in a comment at their own call
+    site. The `WWW-Authenticate` error token is derived from `code`, which holds for
+    all seven challenging emitters and is pinned. Byte-identity is enforced by a new
+    `middleware/coded_error_golden_test.go`: eleven rows (ten emitters,
+    `sendSessionRevoked` twice for its two codes), each pinning status, the exact
+    header **set** (so an absent `WWW-Authenticate` stays absent) and the exact body
+    string — literals captured off the hand-built emitters before the helper
+    existed. No pre-existing middleware test was edited.
 
     **(e) The refresh-cookie name stops disagreeing.** **Two** values, across seven
     sources. Four say `orkestra_cookie`: the compiled default (`config.go`'s

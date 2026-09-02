@@ -22,6 +22,7 @@ import (
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
 	"github.com/orkestra/backend/internal/shared/errcode"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // statusOf extracts the HTTP status code from a Huma error or our
@@ -300,5 +301,122 @@ func TestAppendOTP_IdempotentOnExistingOTP(t *testing.T) {
 func TestCurrentSessionID_EmptyContextReturnsEmptyString(t *testing.T) {
 	if got := currentSessionID(context.Background()); got != "" {
 		t.Errorf("got %q, want \"\"", got)
+	}
+}
+
+// ===== not-found / notification-down classification (spec §8 #18(c)) =====
+//
+// The three admin/self mappers used to classify these two cases by
+// err.Error() == "<literal>". That matched only because the sentinels'
+// messages are literally those strings and the producers return them
+// unwrapped — so the next fmt.Errorf("...: %w", …) anywhere on the path
+// would have turned a 404 into a 500 (and a 503 into a 500) silently, with
+// no test to catch it. These tests present the sentinels WRAPPED, which is
+// exactly the input the string compare cannot see.
+
+// TestMappersClassifyWrappedUserNotFound is the regression test for the
+// three drop-ins: a wrapped iface.ErrUserNotFound must still be a 404.
+func TestMappersClassifyWrappedUserNotFound(t *testing.T) {
+	wrapped := fmt.Errorf("read auth methods: %w", iface.ErrUserNotFound)
+
+	cases := []struct {
+		name string
+		out  error
+	}{
+		{"mapAdminUserAuthError", mapAdminUserAuthError(wrapped)},
+		{"mapAdminInviterError", mapAdminInviterError(wrapped, "failed to send password reset email")},
+		{"mapSelfAuthError", mapSelfAuthError(wrapped)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := statusOf(t, tc.out); got != http.StatusNotFound {
+				t.Errorf("status = %d, want %d — a wrapped iface.ErrUserNotFound must classify as not-found", got, http.StatusNotFound)
+			}
+		})
+	}
+}
+
+// TestMappersClassifyBareUserNotFound is the other half: the shape that
+// already worked (the sentinel returned unwrapped, which is what
+// user/services does today) keeps answering 404. Together with the test
+// above it says the classification widened and nothing moved.
+func TestMappersClassifyBareUserNotFound(t *testing.T) {
+	cases := []struct {
+		name string
+		out  error
+	}{
+		{"mapAdminUserAuthError", mapAdminUserAuthError(iface.ErrUserNotFound)},
+		{"mapAdminInviterError", mapAdminInviterError(iface.ErrUserNotFound, "failed to send password reset email")},
+		{"mapSelfAuthError", mapSelfAuthError(iface.ErrUserNotFound)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := statusOf(t, tc.out); got != http.StatusNotFound {
+				t.Errorf("status = %d, want %d", got, http.StatusNotFound)
+			}
+		})
+	}
+}
+
+// TestMappersDoNotClassifyLookalikeNotFound is the bound. A different
+// module's own "user not found" error — same message, different identity —
+// is NOT the SDK sentinel and must now surface as a 500 rather than being
+// mistaken for one. This is the behaviour the string compare could not
+// express, and the only intentional change in the three mappers' outputs.
+func TestMappersDoNotClassifyLookalikeNotFound(t *testing.T) {
+	lookalike := errors.New("user not found")
+
+	cases := []struct {
+		name string
+		out  error
+	}{
+		{"mapAdminUserAuthError", mapAdminUserAuthError(lookalike)},
+		{"mapAdminInviterError", mapAdminInviterError(lookalike, "failed to send password reset email")},
+		{"mapSelfAuthError", mapSelfAuthError(lookalike)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := statusOf(t, tc.out); got != http.StatusInternalServerError {
+				t.Errorf("status = %d, want %d — only iface.ErrUserNotFound's identity may mean not-found", got, http.StatusInternalServerError)
+			}
+		})
+	}
+}
+
+// TestMapAdminInviterErrorClassifiesWrappedNotificationDown covers the
+// compare that sat beside the not-found one in mapAdminInviterError and
+// has the same shape: services.ErrNotificationDown, wrapped, must still be
+// the 503 that tells an operator the invite could not be delivered.
+func TestMapAdminInviterErrorClassifiesWrappedNotificationDown(t *testing.T) {
+	for _, in := range []error{
+		services.ErrNotificationDown,
+		fmt.Errorf("admin send invite: %w", services.ErrNotificationDown),
+	} {
+		out := mapAdminInviterError(in, "failed to send invite email")
+		if got := statusOf(t, out); got != http.StatusServiceUnavailable {
+			t.Errorf("map(%v) status = %d, want %d", in, got, http.StatusServiceUnavailable)
+		}
+	}
+}
+
+// TestMappersKeepUnrelatedErrorsAt500 is the negative that stops the three
+// mappers from becoming "everything is a 404".
+func TestMappersKeepUnrelatedErrorsAt500(t *testing.T) {
+	boom := errors.New("mongo: no reachable servers")
+
+	cases := []struct {
+		name string
+		out  error
+	}{
+		{"mapAdminUserAuthError", mapAdminUserAuthError(boom)},
+		{"mapAdminInviterError", mapAdminInviterError(boom, "failed to send password reset email")},
+		{"mapSelfAuthError", mapSelfAuthError(boom)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := statusOf(t, tc.out); got != http.StatusInternalServerError {
+				t.Errorf("status = %d, want %d", got, http.StatusInternalServerError)
+			}
+		})
 	}
 }

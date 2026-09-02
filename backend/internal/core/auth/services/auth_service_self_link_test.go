@@ -250,3 +250,41 @@ func TestSelfLinkOAuth_RejectsIncompleteUserInfo(t *testing.T) {
 		t.Fatalf("err = %v, want ErrOAuthLinkInvalidUserInfo", err)
 	}
 }
+
+// nilUserProviderFake answers GetUserByID with (nil, nil) — the one input
+// that reaches SelfLinkOAuthFromCallback's `user == nil` branch. A
+// conforming provider returns iface.ErrUserNotFound instead (the seeded
+// fake above does), so this shape has to be built deliberately.
+type nilUserProviderFake struct{ *adminUnlinkUserFake }
+
+func (nilUserProviderFake) GetUserByID(context.Context, string) (*iface.User, error) {
+	return nil, nil
+}
+
+// TestSelfLinkOAuth_NilUserReturnsTheSDKSentinel pins the pairing spec
+// §8 #18(c) requires: the handler mappers classify not-found with
+// errors.Is(err, iface.ErrUserNotFound), so a branch that returns a FRESH
+// fmt.Errorf("user not found") — a different error value that only matched
+// by message — is invisible to them. This branch must return the sentinel,
+// wrapped, and it must not go back to being a bare string.
+func TestSelfLinkOAuth_NilUserReturnsTheSDKSentinel(t *testing.T) {
+	t.Parallel()
+	svc := &authService{
+		userService:       nilUserProviderFake{newAdminUnlinkUserFake()},
+		oauthProviderRepo: newFakeOAuthProviderRepo(),
+	}
+
+	err := svc.SelfLinkOAuthFromCallback(
+		context.Background(),
+		"u-missing",
+		"google",
+		sampleUserInfo("g-123", "u@example.com"),
+		nil,
+	)
+	if err == nil {
+		t.Fatal("link with a nil user: err = nil, want the not-found sentinel")
+	}
+	if !errors.Is(err, iface.ErrUserNotFound) {
+		t.Fatalf("err = %v, want it to wrap iface.ErrUserNotFound", err)
+	}
+}

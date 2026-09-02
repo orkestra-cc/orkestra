@@ -639,6 +639,36 @@ perfectly valid refresh row and still gets the sentinel
 > and `TestRequireAuth_RevokedSession_StillReportsRevokedNotExpired`
 > (the terminal code is not shadowed).
 
+> **One writer builds every coded envelope.** All ten of the middleware's
+> coded errors — `sendSessionRevoked` (two codes), `sendAccessTokenExpired`,
+> `sendRiskStepUp`, `sendStepUpRequired`, `sendPasswordConfirmRequired`,
+> `sendPolicyUnavailable`, `sendTokenVerificationUnavailable`,
+> `sendMFAEnrollmentRequired`, `sendMFARequired` and
+> `sendCapabilityRequiredResponse` — now go through **`writeCodedError`** in
+> `shared/middleware/auth.go`, and each `send*` is a thin wrapper that names
+> its own envelope. Nothing about the wire changed: the golden table in
+> `middleware/coded_error_golden_test.go` pins every byte of every one of
+> them — status, the exact header set, and the exact body — against literals
+> captured off the hand-built emitters *before* the helper existed. Four
+> things vary and each is a field of `codedError`: **status** (401, 402, 403,
+> 503), **`scheme`** (`schemeBearer`, `schemeMFA`, or `""` for no
+> `WWW-Authenticate` — the header's `error=` token is always the `code`),
+> **`item`** (the single `errors[]` entry, or nil), and **`extra`**
+> (additional top-level fields: `maxAgeSeconds`; `riskScore` +
+> `riskThreshold`; `capability` + `tenantId`). Two rules the helper encodes:
+> `item`'s **`value` is a parameter, never derived from `code`** —
+> `sendRiskStepUp` emits `HIGH_RISK_SESSION` against a `step_up_required`
+> code, and one counter-example settles it; and the **zero value omits
+> `errors[]`**, so a forgotten field cannot invent one for
+> `sendPolicyUnavailable` or `sendTokenVerificationUnavailable`, where adding
+> it would be a wire change. `sendErrorResponse` is deliberately **not**
+> behind the helper: it routes through `errorManager` and emits no top-level
+> `code` at all, which is the distinction the whole section above rests on.
+> The two structural guards
+> (`TestAuthMiddleware_Fields_CannotReintroduceCookieRotation`,
+> `TestAuthGo_ContainsNoCookieRead`) are untouched — the helper adds no
+> struct field and reads no cookie.
+
 > **Both SPAs treat the 503 as "retry later", never as a sign-out.**
 > `frontend-admin`'s `performRefresh` returns `{ok:false, retry:true}` and
 > `frontend-client`'s `refreshAccessToken` returns
@@ -918,6 +948,8 @@ as the admin paths.
 - `POST .../send-password-reset` — proxies to `iface.AdminAuthInviter.AdminTriggerPasswordReset` on the operator-tier `*PasswordAuthService`. No step-up — the action emits a notification, it does not read or mutate a credential. `mapAdminInviterError` maps the per-surface method gate to **409** `auth.password_login_disabled` and an unestablishable policy to **503** `auth.policy_unavailable`. The client-user twin (`POST /v1/admin/client-users/{id}/send-password-reset`, user module `mapInviteErr`) answers identically, matching the **`iface`** sentinels (`iface.ErrPasswordLoginDisabled` / `iface.ErrAuthPolicyUnavailable`) with `errors.Is` — by identity, never by message, and the user module must not import `auth/services`. The auth package's `services.Err*` names are aliases of those same vars, so both halves are one identity.
 - `POST .../resend-verification` — same pattern via `AdminResendVerification`. Idempotent (200 with no action when already verified).
 - `DELETE .../oauth/{provider}` — backed by `AuthService.AdminUnlinkOAuth`. Service-layer safeguards: rejects `actorUUID == targetUUID` (`ErrAdminSelfAction` → 409 `self_action`) and rejects the operation when it would leave the user with no **usable** login method (`ErrLastCredentialRemoval` → 409 `last_credential`). The guard counts usable credentials, not active rows: `locked := targetUsable ∧ (¬passwordUsable ∨ PasswordHash == "") ∧ remainingUsable == 0`, where `targetUsable` is the target link being active **and** its provider usable, `remainingUsable` counts the other active links whose provider is usable, and `passwordUsable` is the strict per-surface `passwordLoginEnabled{Admin,Client}` read (break-glass invisible). Consequences: a link whose provider is disabled or structurally unconfigured is **removable** and never satisfies the guard on its own; a password hash the surface refuses does not rescue a sole usable link. Both `AdminUnlinkOAuth` and `SelfUnlinkOAuth` precompute usability for every active link through `usableProvidersForLinks` **before** mutating — it calls the `SetProviderUsability` seam (wired in `module.go` over `OAuthConfigResolver.OAuthWebProviderUsable`, one closure shared by both tier bundles). Missing wiring or any policy/provider-config uncertainty refuses with `ErrAuthPolicyUnavailable` → 503 `auth.policy_unavailable` rather than counting a link it cannot vouch for. Step-up gated because the action removes a credential.
+
+**Not-found is classified by identity, not by message.** `mapAdminUserAuthError`, `mapAdminInviterError` and `mapSelfAuthError` (`handlers/self_user_auth_handler.go`) match `errors.Is(err, iface.ErrUserNotFound)` — they used to compare `err.Error() == "user not found"`, which worked only because the sentinel's text is literally that and `user/services` returns it unwrapped, so the next `fmt.Errorf("...: %w", …)` anywhere on the path would have turned a 404 into a 500 with nothing to catch it. `mapAdminInviterError`'s neighbouring `"notifications disabled — cannot send email"` compare became `errors.Is(err, services.ErrNotificationDown)` in the same change. Two consequences worth knowing: `AuthService.SelfLinkOAuthFromCallback`'s nil-user branch had to stop returning a *fresh* `fmt.Errorf("user not found")` — a different error value that only ever matched by text — and now returns `fmt.Errorf("self link: %w", iface.ErrUserNotFound)`; and a **look-alike** error (same message, different identity) now surfaces as a 500 rather than a 404. That is the intended narrowing, and it is another place a fork's `iface.UserProvider` must return the SDK sentinel (the same obligation the refresh path and the service-account gate already place on it) rather than its own error with a matching message. Covered by `handlers/error_mapping_test.go`'s `TestMappersClassifyWrappedUserNotFound` / `…ClassifyBareUserNotFound` / `…DoNotClassifyLookalikeNotFound` / `…KeepUnrelatedErrorsAt500` and `TestMapAdminInviterErrorClassifiesWrappedNotificationDown`, plus `services/auth_service_self_link_test.go`'s `TestSelfLinkOAuth_NilUserReturnsTheSDKSentinel`.
 
 Each successful action emits three audit lanes in parallel: (1) `slog.Info("auth_security_event", event=…)` for log shipping; (2) one row into `auth_security_events` via `securityEventRepo.Insert` (the auth-private audit collection — Phase 2.1); (3) one row into `compliance_audit_events` via the compliance `iface.AuditSink` when the compliance addon is enabled (Phase 6 of the /admin/users hardening). The compliance lane is driven by `authEventComplianceAction` (`services/auth_service.go`), which maps the internal event-type strings (`admin_password_reset_sent`, `admin_verification_resent`, `admin_oauth_unlink`, `admin_mfa_reset`, plus `self_oauth_unlink` / `self_oauth_link` / `self_session_revoke[_all]`) onto the dotted compliance vocabulary (`auth.password.reset_requested` / `auth.email.verify_resend` / `auth.oauth.unlinked` / `auth.mfa.reset` / `auth.oauth.unlinked.self` / …). Unmapped event-types still hit slog + `auth_security_events` but don't get duplicated to compliance — adding an event to the SOC2 view is a deliberate opt-in via the mapping function.
 
