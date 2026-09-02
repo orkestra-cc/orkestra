@@ -59,6 +59,15 @@ type ServerConfig struct {
 	CORSOrigins []string // Allowed CORS origins (legacy single-host fallback)
 	MaxBodySize int64    // Maximum request body size in bytes (default 10MB)
 
+	// APIDocsEnabled controls whether /docs (Scalar UI) and /openapi.json
+	// are registered at all. Default: on in development, OFF in
+	// production-like environments. The OpenAPI document is a complete
+	// route inventory, and the docs page executes a third-party bundle on
+	// the API origin — the same origin that carries the HttpOnly refresh
+	// cookie — so an internet-reachable deployment must opt in explicitly
+	// (API_DOCS_ENABLED=true) and gate both paths at the edge when it does.
+	APIDocsEnabled bool
+
 	// TrustedProxyCount / TrustedProxyCIDRs describe the reverse proxies
 	// between the internet and this process, and are what makes
 	// X-Forwarded-For believable. See shared/middleware/realip.go.
@@ -246,12 +255,13 @@ func Load() (*Config, error) {
 	}
 
 	config.Server = ServerConfig{
-		Port:        getEnv("PORT", "3000"),
-		Environment: env,
-		LogLevel:    getEnv("LOG_LEVEL", "info"),
-		FrontendURL: getEnv("FRONTEND_URL", "http://localhost:8080"),
-		CORSOrigins: corsOrigins,
-		MaxBodySize: getEnvAsInt64("MAX_BODY_SIZE", 10*1024*1024), // Default 10MB
+		Port:           getEnv("PORT", "3000"),
+		Environment:    env,
+		LogLevel:       getEnv("LOG_LEVEL", "info"),
+		FrontendURL:    getEnv("FRONTEND_URL", "http://localhost:8080"),
+		CORSOrigins:    corsOrigins,
+		MaxBodySize:    getEnvAsInt64("MAX_BODY_SIZE", 10*1024*1024), // Default 10MB
+		APIDocsEnabled: getEnvAsBool("API_DOCS_ENABLED", defaultAPIDocsEnabled(env)),
 
 		TrustedProxyCount: getEnvAsInt("TRUSTED_PROXY_COUNT", 0),
 		TrustedProxyCIDRs: getEnvAsSlice("TRUSTED_PROXY_CIDRS", nil),
@@ -580,6 +590,14 @@ func derivedPublicURL(host string, secure bool) string {
 		scheme = "https"
 	}
 	return scheme + "://" + host
+}
+
+// defaultAPIDocsEnabled is the API_DOCS_ENABLED default: serve /docs and
+// /openapi.json only where the process is not internet-reachable by
+// design. Staging counts as production-like for the same reason the
+// dev-token endpoint treats it that way — it is reachable from outside.
+func defaultAPIDocsEnabled(env string) bool {
+	return env != "production" && env != "staging"
 }
 
 func getEnv(key, defaultValue string) string {

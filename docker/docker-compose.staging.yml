@@ -19,6 +19,7 @@ services:
     environment:
       ENV: staging
       PORT: 3000  # Internal port is always 3000, BACKEND_PORT is for host mapping only
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-}  # /docs + /openapi.json; default on in dev, off in staging/prod
 
       # Hot reload (AIR)
       AIR_BUILD_CMD: go build -o ./tmp/main ./cmd/server

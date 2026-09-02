@@ -40,6 +40,7 @@ services:
     environment:
       ENV: production
       PORT: 3000  # Internal port is always 3000, BACKEND_PORT is for host mapping only
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-}  # /docs + /openapi.json; default on in dev, off in staging/prod
 
       # MongoDB (internal port is always 27017, MONGO_PORT is for host mapping only)
       MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@${MONGO_HOST:-mongodb}:27017/${MONGO_DATABASE}?authSource=admin&replicaSet=rs0&directConnection=true

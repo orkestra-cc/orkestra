@@ -68,3 +68,51 @@ func TestStorageCORSOriginsHonorAnExplicitList(t *testing.T) {
 		t.Fatalf("explicit list ignored: %v", cfg.Storage.CORSAllowedOrigins)
 	}
 }
+
+// The OpenAPI document is a complete route inventory and the docs page runs a
+// third-party bundle on the API origin (the one carrying the HttpOnly refresh
+// cookie), so both are served by default only where the process is not
+// internet-reachable by design. Staging counts as production-like for the
+// same reason the dev-token endpoint treats it that way.
+func TestAPIDocsEnabled_DefaultsOffWhereInternetReachable(t *testing.T) {
+	for env, want := range map[string]bool{
+		"development": true,
+		"test":        true,
+		"":            true,
+		"staging":     false,
+		"production":  false,
+	} {
+		if got := defaultAPIDocsEnabled(env); got != want {
+			t.Errorf("defaultAPIDocsEnabled(%q) = %v, want %v", env, got, want)
+		}
+	}
+}
+
+// An explicit API_DOCS_ENABLED beats the environment default in both
+// directions: a production stack may opt in (and gate the paths at the
+// edge), a development stack may opt out.
+func TestAPIDocsEnabled_ExplicitValueWins(t *testing.T) {
+	t.Setenv("API_DOCS_ENABLED", "true")
+	if !getEnvAsBool("API_DOCS_ENABLED", defaultAPIDocsEnabled("production")) {
+		t.Error("API_DOCS_ENABLED=true must enable the docs on production")
+	}
+
+	t.Setenv("ENV", "development")
+	t.Setenv("API_DOCS_ENABLED", "false")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Server.APIDocsEnabled {
+		t.Error("API_DOCS_ENABLED=false must disable the docs in development")
+	}
+
+	t.Setenv("API_DOCS_ENABLED", "")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Server.APIDocsEnabled {
+		t.Error("unset API_DOCS_ENABLED must fall back to the development default (on)")
+	}
+}

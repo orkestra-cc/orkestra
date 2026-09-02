@@ -217,11 +217,12 @@ curl -fsS http://127.0.0.1:8080/config.js | grep apiUrl
 # Setup state — `completed: true` once the first administrator exists
 curl -fsS http://127.0.0.1:3000/v1/setup/status | jq .
 
-# OpenAPI spec count
+# OpenAPI spec count — only if you set API_DOCS_ENABLED=true; /openapi.json
+# and /docs are not registered when ENV=production (404 otherwise)
 curl -fsS http://127.0.0.1:3000/openapi.json | jq '.paths | keys | length'
 ```
 
-`scripts/devtoken.sh` is not an option here — `POST /dev/token` does not exist when `ENV=production` (see Step 6). Substitute `127.0.0.1` with `HOST_BIND_ADDRESS` if you set one.
+`scripts/devtoken.sh` is not an option here — `POST /dev/token` does not exist when `ENV=production` (see Step 6). `/docs` and `/openapi.json` are off for the same reason unless you opt in with `API_DOCS_ENABLED=true` and gate them at the edge. Substitute `127.0.0.1` with `HOST_BIND_ADDRESS` if you set one.
 
 If any of these fail, check `docker compose -f docker-compose.prod.yml --env-file .env logs backend --tail 100`.
 

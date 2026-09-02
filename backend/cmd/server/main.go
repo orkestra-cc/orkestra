@@ -582,9 +582,26 @@ func main() {
 	// serves the same probes as raw routes. Both /openapi.json endpoints
 	// still document /health + /ready via the operator registration.
 	registerHealthEndpoints(operatorAPI, db, redisClient)
-	registerDocsEndpoints(operatorMux, operatorAPI)
 	registerHealthProbes(clientMux, db, redisClient)
-	registerDocsEndpoints(clientMux, clientAPI)
+
+	// /docs + /openapi.json are on by default in development and OFF in
+	// production-like environments (API_DOCS_ENABLED). The document is a
+	// complete route inventory, and the docs page runs a third-party bundle
+	// on the API origin — the origin that holds the HttpOnly refresh cookie
+	// — so an internet-reachable deployment must opt in explicitly and gate
+	// both paths at the edge. OPENAPI_DUMP below is unaffected: it reads the
+	// in-memory document, not the route.
+	if cfg.Server.APIDocsEnabled {
+		if cfg.IsProductionLike() {
+			logger.Warn("API docs enabled on a production-like environment; gate /docs and /openapi.json at the edge",
+				slog.String("env", cfg.Server.Environment))
+		}
+		registerDocsEndpoints(operatorMux, operatorAPI)
+		registerDocsEndpoints(clientMux, clientAPI)
+	} else {
+		logger.Info("API docs disabled (/docs, /openapi.json); set API_DOCS_ENABLED=true to serve them",
+			slog.String("env", cfg.Server.Environment))
+	}
 
 	// OPENAPI_DUMP mode (used by `make openapi-dump`): after every module
 	// has been wired and its routes registered, serialize the OpenAPI

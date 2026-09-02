@@ -25,6 +25,7 @@ services:
     environment:
       ENV: development
       PORT: 3000  # Internal port is always 3000, BACKEND_PORT is for host mapping only
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-}  # /docs + /openapi.json; default on in dev, off in staging/prod
 
       # MongoDB
       # Credentials carry no fallback (see docker-compose.infra.yml): a stale
