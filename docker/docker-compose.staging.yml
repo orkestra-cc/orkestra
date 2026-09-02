@@ -187,8 +187,11 @@ services:
       STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-}
       STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
       STORAGE_BUCKET: ${STORAGE_BUCKET:-orkestra-avatars}
-      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-orkestra}
-      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-changeme-rustfs}
+      # Same contract as production: no literal fallback for the credentials —
+      # empty keys keep blob storage disabled (the backend logs it at boot)
+      # instead of silently authenticating as the RustFS root.
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-}
       STORAGE_FORCE_PATH_STYLE: ${STORAGE_FORCE_PATH_STYLE:-true}
       STORAGE_ENSURE_BUCKET: ${STORAGE_ENSURE_BUCKET:-true}
 

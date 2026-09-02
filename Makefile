@@ -150,7 +150,7 @@ frontend-client-clean:
 .PHONY: install install-hooks fmt ci-help
 .PHONY: ci ci-all ci-mcp ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 .PHONY: mcp-check mcp-test
-.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config
+.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks
 .PHONY: admin-lockcheck admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-lockcheck client-typecheck client-lint client-test client-build
 .PHONY: mobile-lockcheck
@@ -160,7 +160,7 @@ frontend-client-clean:
 BASE_REF ?= origin/dev
 SINCE := $(shell git merge-base HEAD $(BASE_REF) 2>/dev/null || echo HEAD~1)
 CI_CHANGED := $(shell { git diff --name-only $(SINCE)...HEAD 2>/dev/null; git diff --name-only 2>/dev/null; git diff --name-only --cached 2>/dev/null; } | sort -u)
-BACKEND_CHANGED := $(if $(filter backend/%,$(CI_CHANGED)),1,)
+BACKEND_CHANGED := $(if $(filter backend/% docker/docker-compose.% docker/.env.example docker/tests/%,$(CI_CHANGED)),1,)
 ADMIN_CHANGED   := $(if $(filter frontend-admin/%,$(CI_CHANGED)),1,)
 CLIENT_CHANGED  := $(if $(filter frontend-client/%,$(CI_CHANGED)),1,)
 MOBILE_CHANGED  := $(if $(filter mobile/%,$(CI_CHANGED)),1,)
@@ -267,7 +267,7 @@ mcp-test:
 
 # ---- Backend ----
 
-ci-backend: backend-mongo-config backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
+ci-backend: backend-mongo-config backend-credential-fallbacks backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
 	@echo "Backend CI: OK"
 
 # Static gate: the compose stacks and CI must all provide a transaction-capable
@@ -276,6 +276,12 @@ ci-backend: backend-mongo-config backend-lint backend-tenantscope backend-errqua
 # standalone mongod that failed only at setup-finalization time.
 backend-mongo-config:
 	@docker/tests/mongodb-replica-set.test.sh
+
+# Static gate: a credential never has a default. The bundled RustFS once fell
+# back to a literal root password printed in this repository — on a browser-
+# facing S3 API — and nothing said so.
+backend-credential-fallbacks:
+	@docker/tests/credential-fallbacks.test.sh
 
 # backend-openapi-check fails if the committed openapi/enterprise.json drifted
 # from the routes in the current source — same gate as policycoverage but for
