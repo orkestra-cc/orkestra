@@ -2005,9 +2005,14 @@ or by `PATCH /v1/admin/modules/auth`. `JWT_ACCESS_TOKEN_EXPIRY=60s` in `docker/.
 changes nothing, because the auth schema declares `accessTokenTTL` with `Default:
 "15m"` and no `EnvVar`, so the seed (and `GetValue`'s schema fallback) supplies
 `15m` and the admin value wins — §8 #12, measured that way during verification.
-**60 s is the floor**, not an arbitrary choice: the value is clamped up to
-`MinAccessTokenTTL` at the PATCH boundary and again at read/construction time
-(`b3fdefee`), so a `10s` silently behaves as 60 and makes the wait look broken.
+**60 s is the floor**, not an arbitrary choice — but the PATCH does not clamp to
+it: `1m` is the shortest value it accepts, and a `10s` is **refused with a 422
+naming the field** (`validateAuthDurations`, `config_validation.go:84-89`). The
+silent clamp *up* to 60 s belongs to the two levels that cannot surface a 422:
+`JWT_ACCESS_TOKEN_EXPIRY` through `NewJWTService` (`b3fdefee`), and a value written
+into the DB out of band through `clampPersistedDuration` on read. So a `10s` typed
+into the admin field fails loudly; a `10s` that reaches the service any other way
+behaves as 60 and makes the wait look broken.
 
 1. Sign in, wait past the TTL, act on `/account/security` → succeeds after exactly
    one `/refresh-cookie`.
@@ -2260,11 +2265,16 @@ defect exists (§3.B). Own issue (N3, §8 #5).
 12. **The access-token TTL is the admin key, not the env var** — docs only, done in
     this branch (batch 2). The auth module's `ConfigSchema` declares `accessTokenTTL`
     with `Default: "15m"` and **no `EnvVar`**, so first boot seeds `module_configs`
-    with `15m`, `GetValue` returns that same schema default whenever the key is
-    empty, and `AuthPolicyService.AccessTokenTTL` therefore never returns the `0`
-    that would let `jwtService` fall through to `JWT_ACCESS_TOKEN_EXPIRY`. The env
-    level is reachable only in a state the seed prevents — a missing or unreadable
-    `module_configs` document. Observed during verification: `JWT_ACCESS_TOKEN_EXPIRY=60s`
+    with `15m` and `GetValue` returns that same schema default whenever the key is
+    empty — `AuthPolicyService.AccessTokenTTL` then answers with a positive
+    duration and `jwtService` does not fall through to `JWT_ACCESS_TOKEN_EXPIRY`.
+    Two states still reach the env level, and an operator can produce neither
+    through the admin API: a missing or unreadable `module_configs` document, and a
+    **persisted value the parser rejects** — `clampPersistedDuration` returns its
+    `0` fallback, which is precisely the "warn, fall through to env" row of
+    `auth/CLAUDE.md`'s ADR-0017 D6 table, and reaching it takes an out-of-band
+    write because the PATCH validator refuses a malformed value. Observed during
+    verification: `JWT_ACCESS_TOKEN_EXPIRY=60s`
     changed nothing until `accessTokenTTL` was PATCHed to `1m`. ADR-0017 D5 repaired
     this chain one layer up and it re-formed one layer down, at the schema default.
     The docs now say which level governs and how to change it; the schema and the
