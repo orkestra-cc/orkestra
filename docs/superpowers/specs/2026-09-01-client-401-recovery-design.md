@@ -2188,7 +2188,7 @@ defect exists (§3.B). Own issue (N3, §8 #5).
    that restated it, badly). Then migrate the wrappers and fold the two together.
 4. **Drop the `openapi-fetch` runtime dependency** if the vacuous Dependabot bumps
    prove more annoying than the convenience of having it ready (§4.8).
-5. **`frontend-admin`'s reactive replay** (§7) — **ruled in for this branch
+5. **`frontend-admin`'s reactive replay** (§7) — **done in this branch
    (batch 2).** Not the one-liner an earlier revision promised: a strict
    `code === "access_token_expired"` gate would switch the console's reactive path
    off in almost every real case, because `prepareHeaders` withholds a locally

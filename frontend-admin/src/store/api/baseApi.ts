@@ -242,6 +242,29 @@ function isTenantAgnostic(url: string): boolean {
   );
 }
 
+// The one predicate that decides whether a request carries a bearer, and
+// therefore the one that says whether it could have reached its handler.
+// prepareHeaders below withholds the Authorization header once the console's
+// own recorded expiry has passed — RequireAuth is bearer-only (ADR-0020), so
+// a token we already know is dead buys nothing — and the 401 branch in
+// baseQueryWithRetry has to know exactly that fact to tell a rejected-before-
+// dispatch 401 from an endpoint's own verdict. Two copies of the rule could
+// drift apart and turn the replay guard into a fiction, so there is one
+// function and both call sites use it. Distinct from tokenNeedsRefresh
+// above: that one asks "will it expire soon" (with a skew), this one asks
+// "is it alive right now" (no margin), which is the only question
+// prepareHeaders and the 401 branch ever ask.
+//
+// null also covers "no token at all", deliberately: a request that carries
+// no bearer is rejected by RequireAuth before dispatch exactly as an expired
+// one is, so in both cases the handler provably never ran.
+function liveBearer(state: RootState): string | null {
+  const accessToken = state.auth?.accessToken;
+  const tokenExpiry = state.auth?.tokenExpiry;
+  if (!accessToken || !tokenExpiry) return null;
+  return new Date(tokenExpiry) > new Date() ? accessToken : null;
+}
+
 // Base fetch with cookies + Bearer token. Tenant context (X-Tenant-ID) is
 // injected by baseQueryWithRetry below, where we have access to the request
 // args and can decide whether the endpoint is tenant-scoped.
@@ -257,14 +280,9 @@ const baseQuery = fetchBaseQuery({
   prepareHeaders: (headers, { getState }) => {
     headers.set('Content-Type', 'application/json');
 
-    const state = getState() as RootState;
-    const accessToken = state.auth?.accessToken;
-
-    if (accessToken) {
-      const tokenExpiry = state.auth?.tokenExpiry;
-      if (tokenExpiry && new Date(tokenExpiry) > new Date()) {
-        headers.set('Authorization', `Bearer ${accessToken}`);
-      }
+    const bearer = liveBearer(getState() as RootState);
+    if (bearer) {
+      headers.set('Authorization', `Bearer ${bearer}`);
     }
 
     return headers;
@@ -336,6 +354,15 @@ const baseQueryWithRetry: BaseQueryFn<
       );
     }
   }
+
+  // Captured BEFORE the fetch, because the 401 branch below asks a question
+  // about the request that actually went out: did it carry a live bearer?
+  // Reading the store back after the 401 answers a different question — a
+  // sibling tab may have rotated or signed out in the meantime, and either
+  // way the answer would no longer describe the request the server saw.
+  // This is the same state prepareHeaders reads (no await between here and
+  // the fetch), so the two cannot disagree.
+  const sentBearer = liveBearer(api.getState() as RootState);
 
   let result = await baseQuery(args, api, extraOptions);
 
@@ -460,6 +487,37 @@ const baseQueryWithRetry: BaseQueryFn<
     // the user stays signed in for as long as the refresh token is valid
     // instead of being kicked out every access-token window.
     if (!isAuthEndpoint(requestUrl) && !isSessionEndpoint) {
+      // …but ONLY on proof the request never reached its handler, because
+      // the retry re-sends it and a request that ran once may have consumed
+      // something. Four console routes answer 401 as a verdict on the
+      // REQUEST and none of them is in AUTH_ENDPOINT_PATHS (that
+      // hand-maintained allowlist is what failed open here): a wrong
+      // current password on change-password, or on /me/password-confirm,
+      // where the replay double-counts the lockout budget because the
+      // service records the failure under both the IP and the email key; a
+      // wrong code on mfa/verify or mfa/enroll/confirm, which burns the TOTP
+      // replay guard, consumes a backup code, or spends one of five
+      // enrolment attempts.
+      //
+      // Two independent proofs, either sufficient on its own:
+      //  (a) the server says it rejected an EXPIRED bearer before dispatch
+      //      (access_token_expired — the strongest proof, and the only one
+      //      that covers a token which was live when it left and expired in
+      //      flight);
+      //  (b) no live bearer went out at all, by prepareHeaders' own
+      //      predicate. RequireAuth rejects that before dispatch too. This
+      //      is the fallback ADR-0020 D3 assigns to this path — the
+      //      proactive rotation failed, so the dead bearer was withheld —
+      //      and it is what keeps the console recovering against a backend
+      //      that does not yet send (a): a missing-bearer 401 is codeless.
+      //
+      // Neither proof: hand the 401 back untouched. No refresh, no replay,
+      // and no sign-out either — a mistyped password is not a dead session.
+      const handlerNeverRan =
+        errorData?.code === 'access_token_expired' || sentBearer === null;
+      if (!handlerNeverRan) {
+        return result;
+      }
       const refreshResult = await performRefresh(runtimeConfig.apiUrl);
       if (refreshResult.ok) {
         api.dispatch(

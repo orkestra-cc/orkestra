@@ -18,6 +18,22 @@ const probeApi = baseApi.injectEndpoints({
   overrideExisting: true
 });
 
+// Every 401 the probed resource answers below carries
+// `code: "access_token_expired"`. The reactive refresh only fires on proof
+// the request never reached its handler (baseApi.ts's `handlerNeverRan`):
+// that code, or a request that went out with no live bearer. These tests are
+// about what performRefresh does once the branch has been ENTERED, so the
+// fixture has to supply one of the two proofs — with the codeless `{}` body
+// they used to send and the live seeded token, the branch now returns the
+// 401 early and there is no rotation left to race. The other proof (seeding
+// an already-expired token) would additionally trip the PROACTIVE rotation
+// and rotate the seeded token before the 401 exists, which is a different
+// test. /refresh-cookie's own 401 (the "refresh is rejected" case) keeps its
+// bare body: that one is the refresh endpoint rejecting the cookie, not the
+// resource rejecting a bearer.
+const expired401 = () =>
+  HttpResponse.json({ code: 'access_token_expired' }, { status: 401 });
+
 // Same shape as the session-ended suite: setup marked complete so the
 // first-install gate cannot be what suppresses the refresh, and a non-null
 // starting token so "was it cleared?" is a real question.
@@ -69,7 +85,7 @@ describe('refresh rotation race', () => {
       http.get('*/v1/some/resource', () => {
         resourceAttempts += 1;
         return resourceAttempts === 1
-          ? HttpResponse.json({}, { status: 401 })
+          ? expired401()
           : HttpResponse.json({ ok: true }, { status: 200 });
       }),
       http.post('*/refresh-cookie', () => {
@@ -101,9 +117,7 @@ describe('refresh rotation race', () => {
   it('does not sign the user out when the race persists', async () => {
     let refreshAttempts = 0;
     server.use(
-      http.get('*/v1/some/resource', () =>
-        HttpResponse.json({}, { status: 401 })
-      ),
+      http.get('*/v1/some/resource', () => expired401()),
       http.post('*/refresh-cookie', () => {
         refreshAttempts += 1;
         return HttpResponse.json(
@@ -126,9 +140,7 @@ describe('refresh rotation race', () => {
   // must not become a way to ignore a genuinely dead refresh token.
   it('still clears the token when the refresh is rejected', async () => {
     server.use(
-      http.get('*/v1/some/resource', () =>
-        HttpResponse.json({}, { status: 401 })
-      ),
+      http.get('*/v1/some/resource', () => expired401()),
       http.post('*/refresh-cookie', () =>
         HttpResponse.json({}, { status: 401 })
       )
@@ -159,9 +171,7 @@ describe('refresh rotation race', () => {
       .mockImplementation(() => realTimeout(25));
 
     server.use(
-      http.get('*/v1/some/resource', () =>
-        HttpResponse.json({}, { status: 401 })
-      ),
+      http.get('*/v1/some/resource', () => expired401()),
       http.post('*/refresh-cookie', async () => {
         // Never resolves — the connection accepts and never answers.
         await delay('infinite');
@@ -195,11 +205,7 @@ describe('cross-tab refresh serialisation', () => {
       configurable: true
     });
 
-    server.use(
-      http.get('*/v1/some/resource', () =>
-        HttpResponse.json({}, { status: 401 })
-      )
-    );
+    server.use(http.get('*/v1/some/resource', () => expired401()));
 
     const store = await setupSeededStore();
     await store.dispatch(
@@ -222,9 +228,7 @@ describe('cross-tab refresh serialisation', () => {
     });
 
     server.use(
-      http.get('*/v1/some/resource', () =>
-        HttpResponse.json({}, { status: 401 })
-      ),
+      http.get('*/v1/some/resource', () => expired401()),
       http.post('*/refresh-cookie', () =>
         HttpResponse.json(
           { accessToken: 'locked-token', expiresIn: 900 },
