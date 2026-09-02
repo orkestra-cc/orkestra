@@ -2998,8 +2998,8 @@ returning outcomes.
     twin of the existing `breakSigningKey` — is new, and §4.9 says why the ordering
     inside `validateTokenEnhanced` makes it clean.
 16. **Existing dev checkouts need three `.env` keys migrated** — the note is
-    **done in this branch (batch 2)**, and the guard is
-    **ruled in for this branch (batch 3)**. A `docker/.env` written before #10
+    **done in this branch (batch 2)**, and the guard is ✅ **done in this branch
+    (batch 3)**. A `docker/.env` written before #10
     carries `CLIENT_API_HOST=api.localhost`,
     `CLIENT_API_URL=http://api.localhost:3000` and
     `CLIENT_FRONTEND_URL=http://localhost:8081`, and an existing `.env` value beats
@@ -3042,6 +3042,29 @@ returning outcomes.
     no such key at all and leans on the backend deriving one — right today, wrong
     the moment a proxy changes the port or the scheme, and exactly the desync this
     rule would then report.
+
+    *As shipped:* `check_same_site LABEL KEY…` in `scripts/env-validate.sh`
+    compares the hostnames of the keys that are **set** — an unset key is not
+    "empty", it is not checked — and returns non-zero on a disagreement, printing
+    each key beside the hostname it resolved to. It brings the two helpers this
+    entry names: `env_value`, the `grep` shape of the existing `ENV` read, and
+    `host_only`, which strips scheme, userinfo, path and port. Each mismatching
+    group adds one to `validate_env_file`'s existing `errors` counter, so the
+    script's exit code is unchanged in kind; the client remediation printed under
+    a failure is the three-key block from `docker/CLAUDE.md`. The deploy wiring
+    sits in `fullstack_execute_deploy`'s "Pre-deployment checks" — after
+    `check_docker_running`, ahead of the image build and every `docker compose`
+    call — and holds the validator's output back unless it fails, so a good
+    deploy stays readable. `wiz_urls` writes `CLIENT_API_URL` the way it writes
+    its neighbours (asked, with a default), defaulting to `CLIENT_API_HOST` under
+    `BACKEND_URL`'s scheme, so the wizard's own output satisfies the rule it is
+    validated against one section later. Eleven cases in
+    `scripts/test-orkestra-helpers.sh` pin both halves against a scratch `.env`
+    in a scratch project root — that the shipped `docker/.env.example` passes
+    unchanged, that the pre-#10 triple and a
+    `console.localhost:8080`/`localhost:3000` operator pairing both fail, and
+    that `fullstack_execute_deploy` with a stubbed `docker` aborts on a
+    cross-site file having made **zero** compose calls.
 
 17. **A service-account lookup answers a store failure as a 404** — ✅
     **done in this branch (batch 3)**. `requireServiceAccount` is the gate

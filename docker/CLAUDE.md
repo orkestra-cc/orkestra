@@ -438,9 +438,25 @@ CLIENT_API_URL=http://client.localhost:3000
 CLIENT_FRONTEND_URL=http://client.localhost:8081
 ```
 
-Nothing checks the pairing yet: a `scripts/env-validate.sh` rule asserting that the
-hostname of `CLIENT_API_HOST` equals the hostname of `CLIENT_FRONTEND_URL` is spec
-§8 follow-up #16.
+**`scripts/env-validate.sh` refuses the un-migrated pairing.** With scheme and
+port stripped, the hostnames of `CLIENT_API_HOST`, `CLIENT_API_URL` and
+`CLIENT_FRONTEND_URL` must agree — each key is compared only when it is set, and
+the port cannot take part because `.env.example` and the wizard write these hosts
+bare while the compose defaults write them ported. The operator twin is checked
+the same way: `VITE_API_URL` against `FRONTEND_URL`. Both groups are checked in
+**every** `ENV`, not only development — the same constraint holds in staging and
+production, where the hosts must share a registrable domain instead of being
+identical — and a mismatch is an **error**, not a warning, whose remediation is
+the three-key block above.
+
+It runs from two places, with deliberately different severities:
+`./orkestra.sh init` prints whatever the validator reported and carries on (the
+wizard user is still mid-file), while `./orkestra.sh deploy` runs it in
+**"Pre-deployment checks"** — ahead of the image build and every `docker compose`
+command — and **aborts**. `--yes` skips confirmation prompts, never this. The
+rule is pinned by `scripts/test-orkestra-helpers.sh`, which runs the validator
+against a scratch `.env` and drives the deploy preflight with a stubbed `docker`
+to prove it aborts having issued no compose command (spec §8 follow-up #16).
 
 **The operator console is bound by the same condition**, and only its shipped
 default satisfies it. It has no `OPERATOR_API_HOST`: the console SPA calls

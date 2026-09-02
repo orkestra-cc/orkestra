@@ -861,7 +861,7 @@ wiz_urls() {
     if [ "$env" = "development" ]; then
         ask_yes_no "Customize dev URLs? (defaults use localhost)" "n" || return 0
     fi
-    local backend frontend op_front cl_front console_host client_host ws
+    local backend frontend op_front cl_front console_host client_host ws client_scheme
     backend=$(ask_value 'Backend URL'                    "$(_wiz_default BACKEND_URL http://localhost:3000)")
     frontend=$(ask_value 'Frontend URL (operator)'       "$(_wiz_default FRONTEND_URL http://localhost:8080)")
     op_front=$(ask_value 'Operator frontend URL (email)' "$(_wiz_default OPERATOR_FRONTEND_URL "$frontend")")
@@ -875,6 +875,21 @@ wiz_urls() {
     env_set "$ENV_FILE" CLIENT_FRONTEND_URL "$cl_front"
     env_set "$ENV_FILE" CONSOLE_HOST "$console_host"
     env_set "$ENV_FILE" CLIENT_API_HOST "$client_host"
+
+    # The client API's public origin travels with its host. Writing only
+    # CLIENT_API_HOST leaves this key absent, so the backend derives an
+    # origin from the host (config.go's derivedPublicURL) — right until a
+    # proxy changes the port or the scheme, and exactly the desync
+    # scripts/env-validate.sh now reports (spec §8 #16). The default keeps
+    # the pairing same-site: same host as CLIENT_API_HOST, scheme from
+    # BACKEND_URL.
+    client_scheme=${backend%%:*}
+    case "$client_scheme" in
+        http | https) ;;
+        *) client_scheme=http ;;
+    esac
+    env_set "$ENV_FILE" CLIENT_API_URL \
+        "$(ask_value 'Client API URL' "$(_wiz_default CLIENT_API_URL "$client_scheme://$client_host")")"
 
     # Derived defaults (overridable): ws:// from http://, wss:// from https://.
     ws=${backend/http/ws}
@@ -1080,6 +1095,22 @@ fullstack_execute_deploy() {
     check_docker_running
     p_ok "Docker is running"
     ensure_jwt_keys_readable
+
+    # docker/.env is validated on every deploy, not only inside the `init`
+    # wizard: a cross-site client (or operator) layout boots a stack whose
+    # logins succeed and whose refreshes 401, which reads as an application
+    # bug rather than the config error it is (spec §8 #16). This is a HARD
+    # stop, ahead of every compose command — `--yes` skips confirmation
+    # prompts, never this. The wizard keeps warning instead of aborting:
+    # the user is still in the middle of writing the file there. Output is
+    # held back unless it fails, so a good deploy stays readable.
+    local env_validation
+    if env_validation=$(bash "$SCRIPT_DIR/scripts/env-validate.sh" 2>&1); then
+        p_ok "docker/.env validated"
+    else
+        printf '%s\n' "$env_validation"
+        die "docker/.env failed validation (above). Nothing was started — fix the file and re-run."
+    fi
     if [ "$ENV" = "production" ] && [ "$EUID" -eq 0 ]; then
         die "Do not run as root"
     fi
