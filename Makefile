@@ -168,7 +168,7 @@ frontend-client-clean:
 BASE_REF ?= origin/dev
 SINCE := $(shell git merge-base HEAD $(BASE_REF) 2>/dev/null || echo HEAD~1)
 CI_CHANGED := $(shell { git diff --name-only $(SINCE)...HEAD 2>/dev/null; git diff --name-only 2>/dev/null; git diff --name-only --cached 2>/dev/null; } | sort -u)
-BACKEND_CHANGED := $(if $(filter backend/% scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh docker/docker-compose.% docker/.env.example docker/tests/%,$(CI_CHANGED)),1,)
+BACKEND_CHANGED := $(if $(filter backend/% scripts/init.sh scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh docker/docker-compose.% docker/.env.example docker/tests/%,$(CI_CHANGED)),1,)
 ADMIN_CHANGED   := $(if $(filter frontend-admin/%,$(CI_CHANGED)),1,)
 CLIENT_CHANGED  := $(if $(filter frontend-client/%,$(CI_CHANGED)),1,)
 MOBILE_CHANGED  := $(if $(filter mobile/%,$(CI_CHANGED)),1,)
