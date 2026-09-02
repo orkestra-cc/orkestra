@@ -78,7 +78,7 @@ cd docker
 docker compose -f docker-compose.dev.yml --env-file .env up -d
 ```
 
-This builds `docker/Dockerfile.dev-backend` (public `golang:1.25.10-alpine`, AIR pre-baked — no registry auth) and boots the backend (AIR hot-reload) plus both frontends (Vite HMR). First boot takes ~30 s while it builds the image and runs `go mod download`; subsequent restarts are instant. A fork with a Chainguard subscription can swap the base image via the `GO_BASE` build-arg — see [dev-images](/architecture/dev-images).
+This builds `docker/Dockerfile.dev-backend` (public `golang:1.26.8-alpine`, AIR pre-baked — no registry auth) and boots the backend (AIR hot-reload) plus both frontends (Vite HMR). First boot takes ~30 s while it builds the image and runs `go mod download`; subsequent restarts are instant. A fork with a Chainguard subscription can swap the base image via the `GO_BASE` build-arg — see [dev-images](/architecture/dev-images).
 
 If you've pushed your own backend image to a registry, override `BACKEND_IMAGE_REPO` — see the README "Forking the image registry" section.
 

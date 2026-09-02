@@ -17,17 +17,17 @@ The old two-flavor split (`docker-compose.dev-public.yml` vs `docker-compose.dev
 `docker-compose.dev.yml` builds `docker/Dockerfile.dev-backend`:
 
 ```dockerfile
-ARG GO_BASE=golang:1.25.12-alpine
+ARG GO_BASE=golang:1.26.8-alpine
 FROM ${GO_BASE}
-ARG AIR_VERSION=v1.67.1
+ARG AIR_VERSION=v1.67.4
 RUN apk add --no-cache git build-base \
  && GOBIN=/usr/local/bin go install github.com/air-verse/air@${AIR_VERSION} \
  && rm -rf /root/.cache /go/pkg
 WORKDIR /app
 ```
 
-- **Default**: public `golang:1.25.12-alpine` from Docker Hub — no auth, fork-friendly. AIR is pre-baked so the container starts as a non-root user without a runtime `go install`.
-- **AIR is pinned, never `@latest`**: air v1.67.2+ declares `go 1.26.0` and fails to build on the Go 1.25.12 base under `GOTOOLCHAIN=local`. v1.67.1 is the last release on `go 1.25`. Bump `AIR_VERSION` together with `GO_BASE`.
+- **Default**: public `golang:1.26.8-alpine` from Docker Hub — no auth, fork-friendly. AIR is pre-baked so the container starts as a non-root user without a runtime `go install`.
+- **AIR is pinned, never `@latest`**: a release that raises its `go` directive above the base fails to build under `GOTOOLCHAIN=local` (air v1.67.2 did exactly that on Go 1.25). Bump `AIR_VERSION` together with `GO_BASE`.
 - **Frontends**: `node:24-alpine` (both the operator console and the Tier-2 client SPA).
 
 ## Chainguard override (optional)

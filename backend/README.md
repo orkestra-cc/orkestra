@@ -6,7 +6,7 @@ Monolithic Go backend server for orkestra with OAuth 2.1 authentication via Goog
 
 ## Prerequisites
 
-- Go 1.25.1+
+- Go 1.26.8+
 - MongoDB 8.2
 - Redis 8.2
 - Google OAuth credentials
