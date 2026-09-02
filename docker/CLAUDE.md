@@ -179,7 +179,7 @@ Vars **deleted as dead code** during the cleanup (do not re-add): `MODULES`, `BA
 | HTTPS Required | No | Yes | Yes |
 | Observability | Disabled | Enabled | Enabled |
 
-> **`COOKIE_SAME_SITE` is a dead key.** `config.go:325` reads it into
+> **`COOKIE_SAME_SITE` is a dead key.** `config.go:339` reads it into
 > `CookieConfig.SameSite` and nothing ever reads it back — every mint path writes
 > `http.SameSiteLaxMode` as a Go literal (`utils/http.go:62,77,127,150`,
 > `middleware/device.go:68`, `setup/routes.go:442`,
@@ -420,9 +420,31 @@ share a registrable domain — `app.orkestra.cc` and `staging-api.orkestra.cc` a
 both `orkestra.cc`, i.e. same-site. The rule is "same site", not "same host"; only
 `*.localhost` forces the hostnames to coincide.
 
+**Upgrading an existing dev checkout.** A `docker/.env` written before this change
+carries the previous triple — `CLIENT_API_HOST=api.localhost`,
+`CLIENT_API_URL=http://api.localhost:3000`,
+`CLIENT_FRONTEND_URL=http://localhost:8081` — and an existing `.env` value always
+wins over the compose default, so only the SPA moves: it is built with
+`VITE_CLIENT_API_BASE`, which is **not** in `.env.example` and therefore takes the
+new compose default `http://client.localhost:3000`, while the client mux is still
+listening on `api.localhost`. In dev that is not a connection error — the
+unmatched Host falls through to the operator mux (above), which mounts no
+`/v1/auth/client/*` routes, so every client-tier call answers **404**. Migrate the
+three keys by hand:
+
+```bash
+CLIENT_API_HOST=client.localhost
+CLIENT_API_URL=http://client.localhost:3000
+CLIENT_FRONTEND_URL=http://client.localhost:8081
+```
+
+Nothing checks the pairing yet: a `scripts/env-validate.sh` rule asserting that the
+hostname of `CLIENT_API_HOST` equals the hostname of `CLIENT_FRONTEND_URL` is spec
+§8 follow-up #16.
+
 **The operator console is bound by the same condition**, and only its shipped
 default satisfies it. It has no `OPERATOR_API_HOST`: the console SPA calls
-whatever `VITE_API_URL` says (`docker-compose.dev.yml:198`, default
+whatever `VITE_API_URL` says (`docker-compose.dev.yml:205`, default
 `http://localhost:3000`), with `credentials: 'include'` on every request
 (`frontend-admin/src/store/api/baseApi.ts:295-297`). Opened at
 `http://localhost:8080` — the shipped entry point, and the only hostname besides

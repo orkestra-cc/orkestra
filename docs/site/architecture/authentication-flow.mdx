@@ -213,7 +213,7 @@ The cookie's `Domain` attribute is per audience and **empty by default in every 
 | Operator (`console.*`)   | `OPERATOR_COOKIE_DOMAIN` — empty unless the operator sets it |
 | Client (client API host) | `CLIENT_COOKIE_DOMAIN` — empty unless the operator sets it   |
 
-An empty value means **no `Domain` attribute at all**: the cookie is host-only, scoped to exactly the host that minted it. That is deliberate (`config.go:467-474`) — a host-only cookie round-trips on `localhost`, on `*.localhost` **and** on a LAN IP, and an IP literal cannot be a cookie `Domain` in the first place. There is no legacy `COOKIE_DOMAIN` fallback: these two vars are the only inputs.
+An empty value means **no `Domain` attribute at all**: the cookie is host-only, scoped to exactly the host that minted it. That is deliberate (`defaultOperatorCookieDomain` / `defaultClientCookieDomain` in `config.go`) — a host-only cookie round-trips on `localhost`, on `*.localhost` **and** on a LAN IP, and an IP literal cannot be a cookie `Domain` in the first place. There is no legacy `COOKIE_DOMAIN` fallback: these two vars are the only inputs.
 
 :::warning
 Set either one explicitly only for a **cross-subdomain** deployment, where that tier's SPA and API sit on different hosts under a shared parent and must share one cookie. Empty is the safe default — it confines each tier's session to its minting host. What must never happen is a `Domain` wide enough to span both audiences.

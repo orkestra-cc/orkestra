@@ -16,13 +16,13 @@ Both surfaces issue session refresh cookies. **The cookies for each surface must
 - `OPERATOR_COOKIE_DOMAIN`
 - `CLIENT_COOKIE_DOMAIN`
 
-This page explains what goes wrong if you leave them on the legacy `COOKIE_DOMAIN` fallback, and what the right values look like for the common deployment shapes.
+This page explains what goes wrong if you point either of them at a domain the other tier's host also matches, and what the right values look like for the common deployment shapes.
 
 ## The threat model
 
 Without the per-audience split, a session cookie minted for one tier is sent by the browser to the other tier's hostname (if they share a parent domain). A few attack shapes this enables:
 
-1. **Stolen operator cookie used to query the client API.** An exfiltrated `console.example.com` refresh cookie hits `api.example.com` — both share `Domain=.example.com` if you set `COOKIE_DOMAIN=.example.com`. The `RequireAudience` middleware rejects the JWT because `aud=operator` doesn't match the client surface — but the cookie is exposed, the attacker can probe other audiences with it.
+1. **Stolen operator cookie used to query the client API.** An exfiltrated `console.example.com` refresh cookie hits `api.example.com` — both share `Domain=.example.com` if you set `OPERATOR_COOKIE_DOMAIN=.example.com` and `CLIENT_COOKIE_DOMAIN=.example.com`. The `RequireAudience` middleware rejects the JWT because `aud=operator` doesn't match the client surface — but the cookie is exposed, the attacker can probe other audiences with it.
 2. **Subdomain XSS escalates across tiers.** A Tier-2 client's app at `client.example.com` runs untrusted JS (per design — clients build their own UIs). If `client.example.com` shares a parent domain with the operator cookie, that JS reads the operator's refresh token.
 3. **Browser bug + permissive `Domain=` leaks across origins.** Browsers have had cookie-jar bugs before. Tightening the `Domain=` attribute is defence in depth — the smaller the blast radius, the less a bug costs.
 
@@ -41,10 +41,10 @@ COOKIE_SAME_SITE=lax
 ALLOW_LOCALHOST_REDIRECTS=true
 ```
 
-**Both domains are empty on purpose**, and that is the whole dev configuration. An empty value writes no `Domain` attribute at all, so each refresh cookie is host-only — scoped to exactly the host that minted it, which round-trips on `localhost`, on `*.localhost` and on a LAN IP for multi-device testing (an IP literal cannot be a cookie `Domain`). This is the shipped default in **every** environment (`config.go:467-474`), not a dev-only relaxation.
+**Both domains are empty on purpose**, and that is the whole dev configuration. An empty value writes no `Domain` attribute at all, so each refresh cookie is host-only — scoped to exactly the host that minted it, which round-trips on `localhost`, on `*.localhost` and on a LAN IP for multi-device testing (an IP literal cannot be a cookie `Domain`). This is the shipped default in **every** environment (`defaultOperatorCookieDomain` / `defaultClientCookieDomain` in `config.go`, both returning `""`), not a dev-only relaxation.
 
 :::note
-`COOKIE_DOMAIN` is **not read by the backend** — `OPERATOR_COOKIE_DOMAIN` and `CLIENT_COOKIE_DOMAIN` are the only inputs (`config.go:321-322`). The `COOKIE_DOMAIN` lines in the deployment examples further down are inert; purging them is a pending docs follow-up.
+`COOKIE_DOMAIN` is **not read by the backend** — `OPERATOR_COOKIE_DOMAIN` and `CLIENT_COOKIE_DOMAIN` are the only inputs (`config.go:335-336`). A `COOKIE_DOMAIN=` line carried over from an older deployment is inert; delete it rather than tuning it.
 :::
 
 `COOKIE_SAME_SITE` is read into config and **never consumed** — every cookie the backend mints writes `SameSite=Lax` literally, in every environment — so this key changes nothing and cannot be used to relax anything.
@@ -56,11 +56,9 @@ Add `/etc/hosts` entries (`127.0.0.1 console.localhost client.localhost`) if you
 The most common shape. Operator on `console.example.com`, clients on `api.example.com`.
 
 ```bash
-COOKIE_DOMAIN=               # leave empty — per-audience overrides cover everything
 OPERATOR_COOKIE_DOMAIN=console.example.com
 CLIENT_COOKIE_DOMAIN=api.example.com
 COOKIE_SECURE=true
-COOKIE_SAME_SITE=strict
 ALLOW_LOCALHOST_REDIRECTS=false
 ```
 
@@ -71,11 +69,9 @@ Each cookie is scoped to a single hostname (no leading dot, no parent-domain mat
 If your Tier-2 clients run on a different domain entirely (e.g. `orkestra-app.io`), use that.
 
 ```bash
-COOKIE_DOMAIN=
 OPERATOR_COOKIE_DOMAIN=console.example.com
 CLIENT_COOKIE_DOMAIN=api.orkestra-app.io
 COOKIE_SECURE=true
-COOKIE_SAME_SITE=strict
 ```
 
 Completely separate cookie jars in the browser. No cross-tier leakage is possible even if SameSite gets bypassed.
@@ -84,12 +80,11 @@ Completely separate cookie jars in the browser. No cross-tier leakage is possibl
 
 ```bash
 # ❌ shared parent domain — both cookies sent to both hosts.
-COOKIE_DOMAIN=.example.com
-OPERATOR_COOKIE_DOMAIN=
-CLIENT_COOKIE_DOMAIN=
+OPERATOR_COOKIE_DOMAIN=.example.com
+CLIENT_COOKIE_DOMAIN=.example.com
 ```
 
-If you set `COOKIE_DOMAIN=.example.com` and leave the audience-specific vars empty, both cookies fall back to the parent domain — defeating the host split.
+A `Domain` attribute matches the named domain **and every host under it**, so either value above puts that tier's refresh cookie on `console.example.com` *and* `api.example.com` — defeating the host split. Setting only one of them to `.example.com` is half the same defect. Leaving both **empty** is not the danger: an empty value writes no `Domain` at all and the cookie stays host-only. The danger is a value that spans both audiences.
 
 The validator in [`backend/internal/shared/config/config.go`](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/shared/config/config.go) doesn't currently reject this combination. **Treat it as a deployment-time review item** until a hard gate lands (tracked in the [ADR-0003 follow-ups](/adrs/three-audience-host-split)).
 
@@ -103,13 +98,13 @@ After deploying, inspect the cookies in a browser dev-tools session. Look at the
 
 ```text
 # Operator console:
-console.example.com → set-cookie: orkestra_cookie_refresh=...; Domain=console.example.com; Path=/; Secure; HttpOnly; SameSite=Strict
+console.example.com → set-cookie: orkestra_cookie_refresh=...; Domain=console.example.com; Path=/; Secure; HttpOnly; SameSite=Lax
 
 # Client API:
-api.example.com → set-cookie: orkestra_cookie_refresh=...; Domain=api.example.com; Path=/; Secure; HttpOnly; SameSite=Strict
+api.example.com → set-cookie: orkestra_cookie_refresh=...; Domain=api.example.com; Path=/; Secure; HttpOnly; SameSite=Lax
 ```
 
-If you see `Domain=.example.com` on either, the per-audience env vars aren't being read. Confirm with:
+`SameSite=Lax` is the expected value on both — the backend writes it literally and `COOKIE_SAME_SITE` cannot change it. If you see `Domain=.example.com` on either, that tier's variable holds the parent domain instead of the single hostname. Confirm with:
 
 ```bash
 docker exec orkestra-backend env | grep COOKIE_DOMAIN
