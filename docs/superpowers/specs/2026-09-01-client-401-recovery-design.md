@@ -8,6 +8,7 @@ _Related: [ADR-0020](../../adr/0020-bearer-only-require-auth.md), [ADR-0017](../
 
 | Rev | Date | Change |
 | --- | ---- | ------ |
+| v21 | 2026-09-02 | **Batch-2 final fix wave — docs truth, no design change.** #1's closing clause still said the console fix "is still #5 below, and N3 still stands" while #5 and §7 both record it as done: corrected to "that landed as #5 in batch 2". #10's "the operator console is unaffected" is qualified with "only at the shipped entry point (see #13)", which is what #13 actually says. Three citations re-derived against HEAD: `REFRESH_FETCH_TIMEOUT_MS` is `baseApi.ts:98`; the `tokenExpiry` derivation is the **write** site (`authSlice.ts:179-181`'s `setAccessToken`), not `baseApi.ts:226`, which is the comparison that reads it; `VITE_API_URL` is `docker-compose.dev.yml:205`. §8 gains **14** (the F6 residual: a live-bearer codeless 401 is un-recovered for up to `TTL − 30 s`; mitigation is refresh-**without**-replay), **15** (`ErrJWTKeysNotLoaded` answered as a codeless 401 on all three refresh endpoints — §4.9's class, boot-time rather than a blip) and **16** (existing dev checkouts need three `.env` keys migrated; the note lands in `docker/CLAUDE.md` with this wave, the `env-validate.sh` hostname-equality guard does not). |
 | v20 | 2026-09-02 | **Batch 2 amendment — the residual §4.9 named but never classified, plus three corrections the shipped code exposed.** (i) **`MintAccessTokenFromRefresh` joins §4.9.** The read-only mint that `GET /v1/auth/session` performs *after* the picker carries three generic wraps of its own — its `GetByTokenAny` (`auth_service.go:1673`), its `GetUserByID` (`:1690`) and `GenerateAccessTokenForSessionWithAMR` (`:1726`) — so a store failure opening between the picker's read and the mint's own answers Peek-OK → Mint-fail → codeless 401 on the console's boot path: v18's finding, one call later. The site table gains three rows and the count goes from seven to **ten**; the user lookup takes the same not-found-first split as the rotation's, because a blanket 503 there would strand a deleted account in the permanent loop R2 describes. **No handler change is needed** — `GetSessionHTTP` already hands the mint's error to `writeRefreshErr`, whose `ErrRefreshLookupUnavailable` branch answers 503 `refresh_lookup_unavailable`; `refreshFailureOutcome` already has the `lookup_unavailable` arm; and the cookie-clear allowlist already excludes the sentinel. (ii) **§6 claimed "no existing assertion is edited"** — two were, and they are one rule: a **2xx without a token** answers `unavailable` with the marker kept, where D15 made it `signed-out`. The third delayed-401 bullet asserted that a sign-out landing mid-flight refreshes nothing, which contradicts §4.3 4a's split on the **sent** bearer, and is replaced by the case that pins that split; and "unknown expiry → expired" survived from before round 11 in §4.5's list while §4.3 treats unknown as **live**. (iii) **§7's `frontend-admin` paragraph named the wrong endpoint and the wrong gate.** The provable lockout double-count is on `/me/password-confirm` (`recordFailed`, `password_auth_service.go:1300`), not `change-password`; and a strict `code === "access_token_expired"` gate would switch the console's reactive path off in almost every real case, because `prepareHeaders` withholds a locally expired bearer and the resulting 401 is codeless — so follow-up 5's gate is §4.3's **disjunction**. Also recorded: §4.3 4b is unreachable by construction and kept for symmetry; §4.1a's helper is `RefreshOutcome`-typed because a rejected lock *acquisition* is `unavailable`; §4.5 gains the clock-**ahead** residual on the `jwtExp` fallback path. §8 gains follow-ups **9-12** — 9, 10 and 11 are ruled in for batch 2 and land in the waves this amendment authorises; 12 is docs-only and lands with it. |
 | v19 | 2026-09-01 | **Plan review round 1, finding #2 — high, accepted and verified.** Two more infrastructure reads sit inside the rotation-race classification, and both fail *destructively*: `benignRotationRetry` turns a `FamilyRevoked` error into `false` (`auth_service.go:1718-1723`, with a comment saying it "keeps the pre-existing replay behaviour"), and the post-CAS re-read discards its own error (`:1541`). Both callers then run `handleRefreshReplay` → `RevokeFamily`. So a Mongo blip during a **legitimate multi-tab race** revokes the family the winner has just renewed — every tab signed out, which is precisely the outcome `ErrRefreshRotationRaced` exists to prevent, and strictly worse than the 401s of finding #1 because it is persisted. The plan's `RotateCASLoss_IsNotUnavailable` test consecrated a lost CAS as "never an outage" regardless of whether the family state was readable, contradicting G2 and, during a race, G6/G7. **Fixed in §4.9:** `benignRotationRetry` returns `(benign, err)`; a failed family read or a failed re-read answers 503 **without** calling `handleRefreshReplay`; replay fires only on a family state that was actually read. Fail-closed denies the *current request* — it does not convert an unavailability into a presumed revocation. |
 | v18 | 2026-09-01 | **Plan review round 1, finding #1 — blocking, accepted and verified.** §4.9 enumerated four infrastructure sites inside `RefreshTokensWithRiskAssessment`, but the browser's `/refresh-cookie` never reaches that function under an outage: `RefreshTokensHTTP` first classifies every cookie candidate through `PeekRefreshToken` (`auth_service.go:1578`), whose repository error is wrapped generically; `pickRefreshCandidate` discards **any** error as an invalid candidate (`auth_handler.go:1015-1018`); with no candidate left the handler synthesises `ErrInvalidRefreshToken` (`auth_handler.go:1459-1461`); `writeRefreshErr` answers 401; and §4.1's allowlist makes that 401 the one status that signs out. So defect C's headline scenario — Mongo unreachable during a cookie refresh — survived v17 intact, and §6's tests could not see it because they drove the service and `writeRefreshErr` directly, never `RefreshTokensHTTP`. **Fixed in §4.9:** `PeekRefreshToken` classifies the lookup with the same sentinel; the picker reports an infrastructure failure instead of swallowing it; all three cookie-iteration handlers answer 503 when no candidate is valid *and* a lookup failed — and **never fire the replay fallback** on that input, since an unclassifiable candidate may be the valid successor. §1 gains the fifth site, §6 gains picker unit tests and HTTP-level tests through the real handlers. |
@@ -461,7 +462,7 @@ marker kept — but the retry is a *hope* there, not a guarantee, and the spec s
 not claim otherwise.
 
 **(c) Bound the fetch.** `REFRESH_FETCH_TIMEOUT_MS = 10_000`, the value
-`frontend-admin` settled on (`baseApi.ts:88`). A `/refresh-cookie` that accepts the
+`frontend-admin` settled on (`baseApi.ts:98`). A `/refresh-cookie` that accepts the
 connection and never answers would otherwise hang the **original request**, since
 §4.3 puts the refresh on its critical path — the failure this bound exists for.
 
@@ -932,8 +933,11 @@ export function getAccessTokenSnapshot(): {
 installed. Both the write and the read are taken from the same clock, so a
 constant offset **cancels**: the reckoning is immune to clock skew rather than
 tolerant of it, and the failure mode §5.9 describes disappears instead of being
-bounded. `frontend-admin` derives its `tokenExpiry` the same way
-(`baseApi.ts:226`), so the two SPAs agree on the technique.
+bounded. `frontend-admin` derives its `tokenExpiry` the same way — in the
+`setAccessToken` reducer, `Date.now() + expiresIn * 1000` at the moment the token
+is installed (`frontend-admin/src/store/slices/authSlice.ts:179-181`), dispatched
+from `baseApi.ts` after every refresh — so the two SPAs agree on the technique.
+`baseApi.ts:226` is the *comparison*, and it reads that same snapshot.
 
 Every path that installs a token must supply the duration. **None does today** —
 the value reaches the API layer and is dropped one call short of the store — so
@@ -2194,8 +2198,8 @@ fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
 1. ~~**Backend: a distinct `access_token_expired` code**~~ — ✅ **done in this
    work** (O6 ruled in, round 15). It is §4.10. The number is kept rather than
    reclaimed so the cross-references in §4.5, §7 and elsewhere stay meaningful.
-   What it does **not** do is apply the resulting one-line fix to
-   `frontend-admin` — that is still #5 below, and N3 still stands.
+   What it does **not** do is apply the resulting fix to
+   `frontend-admin` — that landed as #5 in batch 2.
 2. **Proactive rotation for the client SPA** (ADR-0020 D3 parity) — refresh before
    expiry instead of after a 401. Needs a trustworthy remaining-lifetime figure,
    which §4.5's `expiresAt` snapshot already provides — and provides *correctly*
@@ -2266,7 +2270,8 @@ fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
     `CLIENT_API_HOST` / `CLIENT_API_URL` / `VITE_CLIENT_API_BASE` on
     `client.localhost:3000` — plus the docs that prescribe the broken triple. No
     code, no `SameSite=None`. The operator console is unaffected because it calls
-    `localhost:3000` from port 8080: same host, different port, same site.
+    `localhost:3000` from port 8080: same host, different port, same site — but
+    only at the shipped entry point (see #13).
 11. **The client SPA's route guard redirects before the bootstrap resolves** —
     **done in this branch (batch 2)**. `RequireAuth` is synchronous and has no
     in-flight state, and `AuthProvider` exposes no readiness flag, so on a cold load
@@ -2304,7 +2309,7 @@ fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
 13. **The operator console is same-site only by default** — **named, not started.**
     #10's fix gave the client tier a dedicated `CLIENT_API_HOST`; the operator tier
     has no equivalent, so the console's origin and `VITE_API_URL` (default
-    `http://localhost:3000`, `docker-compose.dev.yml:198`) have to agree by
+    `http://localhost:3000`, `docker-compose.dev.yml:205`) have to agree by
     convention. They do at the shipped entry point `http://localhost:8080`, and they
     do not the moment anyone opens the same console at `http://console.localhost:8080`
     — every call carries `credentials: 'include'`
@@ -2317,6 +2322,62 @@ fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
     `docs/Multi-Environment-Setup.md:489` do not agree on today. Batch-2 wave W4
     recorded the condition in the docs under ruling F8 and changed **no**
     operator-tier config.
+14. **A live-bearer codeless 401 strands the console for up to `TTL − 30 s`** —
+    **named, not started.** §4.3's gate is deliberate and stays: a 401 that carries
+    no terminal code on a request that *did* go out with a live bearer is a verdict
+    from the handler, and replaying it is the defect §7 closed. The residue is the
+    one input in that shape which is **not** a verdict — a JWT signing-key rotation
+    or a restart with new keys, after which every unexpired bearer validates as
+    plain "invalid" and `RequireAuth` answers a codeless 401
+    (`backend/internal/shared/middleware/auth.go:198-203`). Against that the console
+    now does nothing at all: no refresh, no toast, no sign-out, every request
+    failing silently until the *proactive* check fires at
+    `expiry − PROACTIVE_REFRESH_SKEW_MS`, i.e. up to `TTL − 30 s` — **≈ 14.5 min**
+    at the 15 m default and **30 s** at the `MinAccessTokenTTL` floor of 1 m
+    (`auth_duration_bounds.go:30`). A page reload recovers immediately, because
+    `/session` mints from the cookie. The mitigation is to run `performRefresh`
+    **without** the replay on that input: dispatch the new token and return the
+    original 401 untouched. The next request then carries a fresh bearer, so the
+    window collapses to one request, and a genuinely dead session reaches the
+    sign-out branch instead of failing quietly for a quarter of an hour. Cost: one
+    serialised rotation per verdict 401 — a wrong-password attempt would rotate the
+    refresh cookie, which is harmless. The adjacent case belongs with it: after a
+    proof-(b) refresh, a *replay* that itself 401s still falls through to
+    `clearAccessToken` + "Session expired" (`baseApi.ts:550-554` → `:562-563`,
+    `:573-582`), which is the same misreading of a verdict as a dead session,
+    narrowed but not introduced by this branch.
+15. **`ErrJWTKeysNotLoaded` reaches the browser as a codeless 401** — **named, not
+    started.** `validateTokenEnhanced` returns the sentinel when no public key is
+    loaded (`jwt_service.go:534-536`), and all three service entry points wrap
+    *every* validation failure into the same opaque string —
+    `RefreshTokensWithRiskAssessment` (`auth_service.go:1461-1464`),
+    `PeekRefreshToken` (`:1635-1637`) and `MintAccessTokenFromRefresh`
+    (`:1672-1675`). `writeRefreshErr`'s default arm is a 401 with **no** `code`
+    (`auth_handler.go:2049-2064`), so `/refresh`, `/refresh-cookie` and `/session`
+    all answer a boot misconfiguration the way they answer a dead session. That is
+    §4.9's class — infrastructure answered as an auth verdict — with the one
+    difference that kept it out of batch 2: this is a boot-time state, not a blip,
+    so every session is dead until an operator fixes the keys and no client-side
+    retry can help. Worth its own code (or a 503) so the answer says "the server
+    cannot authenticate anyone" rather than "your session is over".
+16. **Existing dev checkouts need three `.env` keys migrated** — the note is
+    **done in this branch (batch 2)**, the guard is **named, not started.** A
+    `docker/.env` written before #10 carries `CLIENT_API_HOST=api.localhost`,
+    `CLIENT_API_URL=http://api.localhost:3000` and
+    `CLIENT_FRONTEND_URL=http://localhost:8081`, and an existing `.env` value beats
+    a compose default — so only the SPA moves, because `VITE_CLIENT_API_BASE` is
+    not a key `.env.example` ships and therefore takes the new compose default
+    `http://client.localhost:3000` while the client mux still listens on
+    `api.localhost`. The failure is not a connection error and not the old cookie
+    bug: the unmatched Host hits the dev fallthrough (`cmd/server/hostmux.go:86-89`),
+    lands on the operator mux, which mounts no `/v1/auth/client/*` routes
+    (`auth/module.go:1722-1740`), and every client-tier call answers **404**. The
+    three keys to migrate are documented in `docker/CLAUDE.md` → "Client tier: the
+    SPA and the client API must be same-site". What is **not** done is the guard:
+    `scripts/env-validate.sh` should assert that the hostname of `CLIENT_API_HOST`
+    equals the hostname of `CLIENT_FRONTEND_URL` — a check that would also have
+    caught the `orkestra.sh` wizard defaults that wave W4 missed and the final fix
+    wave had to correct by hand.
 
 ## Open questions — all ruled 2026-09-01 (O6 last, in round 15)
 
