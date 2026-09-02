@@ -2623,8 +2623,8 @@ returning outcomes.
    reclaimed so the cross-references in §4.5, §7 and elsewhere stay meaningful.
    What it does **not** do is apply the resulting fix to
    `frontend-admin` — that landed as #5 in batch 2.
-2. **Proactive rotation for the client SPA** (ADR-0020 D3 parity) —
-   **ruled in for this branch (batch 3)**, and it is **§4.11**. Refresh before
+2. **Proactive rotation for the client SPA** (ADR-0020 D3 parity) — ✅ **done
+   in this branch (batch 3)**, and it is **§4.11**. Refresh before
    expiry instead of after a 401. It needs a trustworthy remaining-lifetime
    figure, which §4.5's `expiresAt` snapshot already provides — and provides
    *correctly* under clock skew, which is what makes a proactive scheme safe to
@@ -2633,6 +2633,21 @@ returning outcomes.
    into the 401 comparison (§4.3 branch 2, §4.5) — §4.11 states that as an
    invariant and pins it by reading the module's own source rather than by
    argument.
+
+   *As shipped:* `PROACTIVE_REFRESH_SKEW_MS = 30_000` is exported from
+   `frontend-client/src/api/authedFetch.ts` and used in exactly two places —
+   its declaration and the pre-send check between the snapshot and `doFetch`,
+   which re-snapshots after the awaited `refreshAccessToken`. The no-leak
+   invariant is pinned by `authedFetch.test.ts`'s source-level guard (a `?raw`
+   import of the module, comments stripped, cut at
+   `if (res.status !== 401) return res;`), which also re-asserts that branch
+   2's `sent.expiresAt !== null && sent.expiresAt <= sentAt` is unchanged. The
+   §6 fixture migration landed with it: eleven existing 401 cases answer their
+   first `/refresh-cookie` hit 503 so the proactive attempt is `unavailable`
+   and the case still exercises §4.3, and the two remaining cases whose seeds sat
+   inside the window either moved out of it (the live-token 401's `at-live`,
+   20 s → 300 s) or were re-counted (the boundary pin: 2 after the boundary
+   token, 3 after the `+1 ms` one).
 3. **Wake up `openapi-fetch`** — **resolved as #4.** The dependency and the
    generated stub go rather than stay warm, so there is nothing left to wake. If a
    typed client is ever wanted, it re-adds a pinned dependency in the same PR that
@@ -3088,9 +3103,9 @@ returning outcomes.
     rejected — so changing it is a security-shaped decision rather than a
     classification one, and it belongs in its own follow-up.
 18. **Cleanups** — **ruled in for this branch (batch 3)**, five of them, each small
-    and each already diagnosed. **(a), (c) and (d) are ✅ done in
-    this branch (batch 3);** (b) is frontend-client and lands in its own wave,
-    and (e) is a config/doc alignment that has not been made yet:
+    and each already diagnosed. **(a), (b), (c) and (d) are ✅ done
+    in this branch (batch 3);** (e) is a config/doc alignment that has not been
+    made yet:
 
     **(a) `handleOAuthCallback` and `useHandleOAuthCallbackMutation` are deleted**
     — ✅ **done in this branch (batch 3)**
@@ -3103,7 +3118,8 @@ returning outcomes.
     get a 405. It is the dormant, wrong second implementation §4.8 deleted on the
     client tier, one tier over.
 
-    **(b) `frontend-client/src/components/Layout.tsx` waits for the bootstrap.**
+    **(b) `frontend-client/src/components/Layout.tsx` waits for the
+    bootstrap** — ✅ **done in this branch (batch 3)**.
     `isAuthenticated` is `token !== null`, which is `false` for the whole cold-load
     window, so a signed-in user sees "Sign in / Sign up" flash in the header and the
     `enabled: !isAuthenticated` policy query fires a request that is pure waste for
@@ -3114,6 +3130,15 @@ returning outcomes.
     spinner: the window is one `/refresh-cookie` round-trip and a spinner in a header
     reads as breakage. The logo, the language switcher and the footer stay, so the
     layout does not shift.
+
+    *As shipped:* exactly those three lines, plus a `Layout.test.tsx` case —
+    "a cold load with a valid cookie never paints the anonymous header, and
+    never fires /policy" — that holds the `/refresh-cookie` answer behind a
+    gate, asserts the auth slot is empty at first paint **and** for the whole
+    in-flight window, and asserts `/policy` was hit **zero** times. The three
+    pre-existing CTA cases keep their assertions and gain a gated `/policy`
+    handler, because the bootstrap now sits in front of that query and a
+    first-paint assertion against an ungated MSW answer would be a race.
 
     **(c) Three `err.Error() == "user not found"` string compares become
     `errors.Is(err, iface.ErrUserNotFound)`** — ✅ **done in this branch

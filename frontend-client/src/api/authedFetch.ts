@@ -39,6 +39,17 @@ export const TERMINAL_CODES: ReadonlySet<string> = new Set([
 // terminal, so it is never a member of the set above.
 export const CODE_ACCESS_TOKEN_EXPIRED = "access_token_expired";
 
+// How long before a bearer's expiry authedFetch rotates it PROACTIVELY (§4.11).
+// This is a scheduling margin and it belongs to the pre-send check ONLY — see
+// the invariant note on branch 2 below, which compares with no margin at all.
+//
+// INVARIANT (ADR-0020 D3): strictly below the backend's MinAccessTokenTTL
+// (60 s, backend/internal/core/auth/services/auth_duration_bounds.go). At or
+// above the floor, a token minted at the minimum TTL is already inside this
+// window the moment it arrives, so every request would rotate again — a
+// refresh loop. 30 s leaves a floor-length token half its life of quiet.
+export const PROACTIVE_REFRESH_SKEW_MS = 30_000;
+
 // Reads a CLONE, never the response a caller will get. A body that is absent,
 // not JSON, or carries no top-level `code` simply yields null — the ordinary
 // case, not an error condition: the generic paths emit no top-level code,
@@ -121,7 +132,47 @@ export async function authedFetch(
   // Captured together, BEFORE the fetch: at 401 time the store's expiry may
   // already belong to a token a sibling installed, and `sentAt` is the instant
   // the whole decision below turns on.
-  const sent = getAccessTokenSnapshot();
+  let sent = getAccessTokenSnapshot();
+
+  // §4.11 — rotate BEFORE expiry, not only after a 401. Everything below is a
+  // RECOVERY: it costs a 401 round-trip and it may only fire on proof the
+  // request never reached its handler. A rotation taken here costs no
+  // round-trip and needs no proof, because there is no request to replay.
+  //
+  // No bearer → no attempt. An UNKNOWN expiry → no attempt either: unknown
+  // counts as LIVE everywhere in this design (branch 2, §4.5), and rotating on
+  // "we cannot tell" would rotate on every request made with a token whose
+  // lifetime was never learned — the refresh loop the D3 bound exists to
+  // prevent, arrived at from the other side.
+  //
+  // refreshAccessToken, NOT refreshAfterUnauthorized: a proactive rotation is
+  // automatic by definition, and the marker gate is a correct optimisation
+  // here rather than the hole branch 4a routes around — a visitor with no
+  // session has no `expiresAt` either, so this cannot fire for them at all.
+  // The one input where the gate bites is a live in-memory token with no
+  // marker; there the attempt is a no-op and that tab simply keeps the
+  // reactive path, which 4a is deliberately not gated for.
+  //
+  // The outcome is deliberately NOT inspected — each of the three is already
+  // handled where it is decided. `ok`: performRefresh installed the new token,
+  // so the re-snapshot picks it up. `unavailable`: token and marker untouched,
+  // the old bearer goes out and branch 2 owns whatever 401 follows.
+  // `signed-out`: performRefresh already cleared both (G3), so the request
+  // goes out anonymous and its 401 is passed through. The arm therefore
+  // introduces no state transition of its own.
+  //
+  // The RE-SNAPSHOT is load-bearing: `sent` and `sentAt` must describe the
+  // request that actually goes out, or branch 2 would judge a 401 against a
+  // token it never sent.
+  if (
+    sent.token !== null &&
+    sent.expiresAt !== null &&
+    sent.expiresAt - Date.now() < PROACTIVE_REFRESH_SKEW_MS
+  ) {
+    await refreshAccessToken(apiBaseURL);
+    sent = getAccessTokenSnapshot();
+  }
+
   const sentAt = Date.now();
   const res = await doFetch(path, init, sent.token);
   if (res.status !== 401) return res;

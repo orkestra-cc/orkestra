@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 
-import { authedFetch } from "@/api/authedFetch";
+import { authedFetch, PROACTIVE_REFRESH_SKEW_MS } from "@/api/authedFetch";
 import {
   clearSessionLocally,
   getAccessToken,
@@ -11,6 +11,9 @@ import {
 import { hasSessionMarker, setSessionMarker } from "@/auth/sessionMarker";
 import { url } from "@/test/handlers";
 import { server } from "@/test/server";
+// The module's own SOURCE TEXT, for the no-leak invariant at the bottom of this
+// file. Vite's `?raw` gives the file verbatim, before any transform.
+import authedFetchSource from "@/api/authedFetch.ts?raw";
 
 const REFRESH = url("/v1/auth/client/refresh-cookie");
 const THING = url("/v1/me/thing");
@@ -53,6 +56,18 @@ const seedExpiredToken = (token = "at-old") => {
   setSessionMarker();
   setAccessToken(token, -1); // expiresAt is already in the past
 };
+
+// §4.11 migration. The proactive arm rotates BEFORE the request whenever the
+// bearer it is about to send expires inside PROACTIVE_REFRESH_SKEW_MS — which
+// every seedExpiredToken() fixture does, by construction. Answering that FIRST
+// hit 503 makes the proactive attempt `unavailable`: token and marker survive,
+// the seeded token goes out, and the case below exercises §4.3 exactly as it
+// did before the arm existed — one /refresh-cookie hit higher. `respond` keeps
+// its original hit numbering, so the fixture bodies are unchanged.
+const proactiveUnavailableThen = (respond: (hit: number) => Response) =>
+  countRefresh((hit) =>
+    hit === 1 ? new HttpResponse(null, { status: 503 }) : respond(hit - 1),
+  );
 
 describe("authedFetch header merging (§4.2)", () => {
   it("sends headers given as a Headers instance", async () => {
@@ -174,7 +189,7 @@ describe("authedFetch header merging (§4.2)", () => {
 
 describe("authedFetch 401 recovery (§4.3)", () => {
   it("expired token → 401 → refresh → retry carries the NEW bearer", async () => {
-    const refresh = countRefresh(() =>
+    const refresh = proactiveUnavailableThen(() =>
       HttpResponse.json({ accessToken: "at-new", expiresIn: 900 }),
     );
     const rec = recordRequests((hit) =>
@@ -186,7 +201,7 @@ describe("authedFetch 401 recovery (§4.3)", () => {
 
     const res = await authedFetch("/v1/me/thing");
     expect(res.status).toBe(200);
-    expect(refresh.hits()).toBe(1);
+    expect(refresh.hits()).toBe(2); // the failed proactive attempt, then the rotation
     expect(rec.seen.length).toBe(2);
     expect(rec.header(0, "Authorization")).toBe("Bearer at-old");
     expect(rec.header(1, "Authorization")).toBe("Bearer at-new");
@@ -200,7 +215,7 @@ describe("authedFetch 401 recovery (§4.3)", () => {
   // client.ts middleware set `X-Retry: 1` and leaked the recovery to the
   // server, where nothing needed it.
   it("the retry re-sends the caller's body and adds no X-Retry header", async () => {
-    const refresh = countRefresh(() =>
+    const refresh = proactiveUnavailableThen(() =>
       HttpResponse.json({ accessToken: "at-new", expiresIn: 900 }),
     );
     const rec = recordRequests((hit) =>
@@ -215,7 +230,7 @@ describe("authedFetch 401 recovery (§4.3)", () => {
       body: JSON.stringify({ a: 1 }),
     });
     expect(res.status).toBe(200);
-    expect(refresh.hits()).toBe(1);
+    expect(refresh.hits()).toBe(2); // proactive 503, then the rotation
     expect(rec.seen.length).toBe(2);
     expect(await rec.seen[0].text()).toBe('{"a":1}');
     expect(await rec.seen[1].text()).toBe('{"a":1}');
@@ -230,9 +245,14 @@ describe("authedFetch 401 recovery (§4.3)", () => {
   // locked out as though they had tried four times.
   //
   // The fixture's remaining life IS the test: a token with 20 minutes left
-  // passes against the broken implementation too. 20s is inside any plausible
-  // margin — it is precisely the value the removed 30s SKEW would have
-  // mis-classified as "not live".
+  // passes against the broken implementation too. It used to be 20s — the
+  // value the removed 30s SKEW would have mis-classified as "not live" — and
+  // §4.11 is why it no longer can be: 20s is INSIDE
+  // PROACTIVE_REFRESH_SKEW_MS, so the arm would rotate before the request and
+  // this case would stop exercising branch 2 on a live bearer at all. 300s is
+  // outside the proactive window and still inside any plausible margin the 401
+  // comparison might grow. "Alive, so the handler ran" was always the
+  // load-bearing part, never the exact number.
   it("a live token's 401 is passed through — no refresh, no replay", async () => {
     const refresh = countRefresh(() => HttpResponse.json({ accessToken: "x" }));
     const rec = recordRequests(() => HttpResponse.json({ ok: true }));
@@ -246,12 +266,13 @@ describe("authedFetch 401 recovery (§4.3)", () => {
         );
       }),
     );
-    seedToken("at-live", 20);
-    // The fixture asserts its own premise: 20s of life, which the server still
-    // accepts, so the handler DID run and counted the failed attempt.
+    seedToken("at-live", 300);
+    // The fixture asserts its own premise: 300s of life, which the server
+    // still accepts, so the handler DID run and counted the failed attempt —
+    // and which is outside the proactive window, so nothing rotated first.
     const { expiresAt } = getAccessTokenSnapshot();
-    expect(expiresAt! - Date.now()).toBeGreaterThan(15_000);
-    expect(expiresAt! - Date.now()).toBeLessThan(25_000);
+    expect(expiresAt! - Date.now()).toBeGreaterThan(290_000);
+    expect(expiresAt! - Date.now()).toBeLessThan(310_000);
 
     const res = await authedFetch("/v1/auth/client/change-password", {
       method: "POST",
@@ -265,11 +286,20 @@ describe("authedFetch 401 recovery (§4.3)", () => {
 
   // Pins that the comparison is `<=` at the exact instant and carries no
   // hidden margin. A margin here IS the round-11 replay hole.
+  //
+  // Both halves are inside PROACTIVE_REFRESH_SKEW_MS by construction, so each
+  // now costs a proactive rotation of its own. The case keeps its shape by
+  // counting the two kinds APART: /refresh-cookie answers 503 on the ODD hits
+  // (the proactive attempts, which must change nothing) and 200 on the even
+  // one. The property is unchanged and now reads as a difference — the
+  // boundary token earns a REACTIVE rotation, the +1ms token earns none.
   it("expiresAt === sentAt counts as expired; sentAt + 1 counts as live", async () => {
     vi.useFakeTimers();
     try {
-      const refresh = countRefresh(() =>
-        HttpResponse.json({ accessToken: "at-new", expiresIn: 900 }),
+      const refresh = countRefresh((hit) =>
+        hit % 2 === 1
+          ? new HttpResponse(null, { status: 503 })
+          : HttpResponse.json({ accessToken: "at-new", expiresIn: 900 }),
       );
       recordRequests((hit) =>
         hit % 2 === 1
@@ -280,11 +310,13 @@ describe("authedFetch 401 recovery (§4.3)", () => {
 
       setAccessToken("at-boundary", 0); // expiresAt === Date.now()
       await authedFetch("/v1/me/thing");
-      expect(refresh.hits()).toBe(1);
+      // Its proactive attempt (503), then the 401-driven rotation.
+      expect(refresh.hits()).toBe(2);
 
       setAccessToken("at-live", 0.001); // expiresAt === Date.now() + 1ms
       await authedFetch("/v1/me/thing");
-      expect(refresh.hits()).toBe(1); // unchanged — passed through
+      // One more proactive attempt, and NO second rotation — passed through.
+      expect(refresh.hits()).toBe(3);
     } finally {
       vi.useRealTimers();
     }
@@ -382,7 +414,7 @@ describe("authedFetch 401 recovery (§4.3)", () => {
   );
 
   it("refresh 409 twice → original 401, marker and token KEPT (G7)", async () => {
-    const refresh = countRefresh(() =>
+    const refresh = proactiveUnavailableThen(() =>
       HttpResponse.json({ code: "refresh_rotation_raced" }, { status: 409 }),
     );
     recordRequests(() => new HttpResponse(null, { status: 401 }));
@@ -390,13 +422,13 @@ describe("authedFetch 401 recovery (§4.3)", () => {
 
     const res = await authedFetch("/v1/me/thing");
     expect(res.status).toBe(401);
-    expect(refresh.hits()).toBe(2);
+    expect(refresh.hits()).toBe(3); // the proactive 503, then 409 TWICE
     expect(getAccessToken()).toBe("at-old");
     expect(hasSessionMarker()).toBe(true);
   });
 
   it("refresh 401 → token and marker cleared so AuthProvider can re-render (G3)", async () => {
-    countRefresh(() => new HttpResponse(null, { status: 401 }));
+    proactiveUnavailableThen(() => new HttpResponse(null, { status: 401 }));
     recordRequests(() => new HttpResponse(null, { status: 401 }));
     seedExpiredToken("at-old");
 
@@ -437,8 +469,12 @@ describe("authedFetch 401 recovery (§4.3)", () => {
     expect(refresh.hits()).toBe(0);
   });
 
-  it("a burst of three 401s produces exactly one /refresh-cookie", async () => {
-    const refresh = countRefresh(() =>
+  // With the proactive attempt answered 503 the three concurrent calls
+  // coalesce TWICE — one proactive rotation shared by the burst, then one
+  // reactive rotation shared by the three 401s. The coalescing this case
+  // exists to pin is now pinned twice over.
+  it("a burst of three 401s produces exactly one reactive /refresh-cookie", async () => {
+    const refresh = proactiveUnavailableThen(() =>
       HttpResponse.json({ accessToken: "at-new", expiresIn: 900 }),
     );
     server.use(
@@ -456,7 +492,7 @@ describe("authedFetch 401 recovery (§4.3)", () => {
       authedFetch("/v1/me/thing"),
     ]);
     expect(all.map((r) => r.status)).toEqual([200, 200, 200]);
-    expect(refresh.hits()).toBe(1);
+    expect(refresh.hits()).toBe(2); // one proactive, one reactive — not five
   });
 });
 
@@ -537,7 +573,7 @@ describe("authedFetch terminal codes (§4.3 branch 1, §3.C)", () => {
   });
 
   it("a retry that 401s with a terminal code clears, with exactly one refresh and no second retry", async () => {
-    const refresh = countRefresh(() =>
+    const refresh = proactiveUnavailableThen(() =>
       HttpResponse.json({ accessToken: "at-new", expiresIn: 900 }),
     );
     // The FIRST 401 must be codeless, or branch 1 ends the call before a
@@ -551,7 +587,7 @@ describe("authedFetch terminal codes (§4.3 branch 1, §3.C)", () => {
 
     const res = await authedFetch("/v1/me/thing");
     expect(res.status).toBe(401);
-    expect(refresh.hits()).toBe(1);
+    expect(refresh.hits()).toBe(2); // the proactive 503, then ONE rotation
     expect(rec.seen.length).toBe(2); // original + ONE retry
     expect(getAccessToken()).toBeNull();
     expect(hasSessionMarker()).toBe(false);
@@ -563,7 +599,7 @@ describe("authedFetch terminal codes (§4.3 branch 1, §3.C)", () => {
   // and again. retryOnce is a single fetch: one rotation, one retry, then the
   // caller gets the 401 whatever it says.
   it("never fires a second refresh, even when the refreshed token is itself expired", async () => {
-    const refresh = countRefresh(() =>
+    const refresh = proactiveUnavailableThen(() =>
       HttpResponse.json({ accessToken: "at-new", expiresIn: -1 }),
     );
     const rec = recordRequests(() => new HttpResponse(null, { status: 401 }));
@@ -571,7 +607,7 @@ describe("authedFetch terminal codes (§4.3 branch 1, §3.C)", () => {
 
     const res = await authedFetch("/v1/me/thing");
     expect(res.status).toBe(401);
-    expect(refresh.hits()).toBe(1); // ONE rotation for the whole call
+    expect(refresh.hits()).toBe(2); // the proactive 503 + ONE rotation, no more
     expect(rec.seen.length).toBe(2); // original + exactly ONE retry
     expect(rec.header(1, "Authorization")).toBe("Bearer at-new");
   });
@@ -579,7 +615,7 @@ describe("authedFetch terminal codes (§4.3 branch 1, §3.C)", () => {
   // Guards against "any retry 401 means signed out", which would sign out the
   // §4.4 mirror case for mistyping a password.
   it("a retry that 401s with NO code changes nothing", async () => {
-    const refresh = countRefresh(() =>
+    const refresh = proactiveUnavailableThen(() =>
       HttpResponse.json({ accessToken: "at-new", expiresIn: 900 }),
     );
     const rec = recordRequests(() => new HttpResponse(null, { status: 401 }));
@@ -588,7 +624,7 @@ describe("authedFetch terminal codes (§4.3 branch 1, §3.C)", () => {
     const res = await authedFetch("/v1/me/thing");
     expect(res.status).toBe(401);
     expect(rec.seen.length).toBe(2);
-    expect(refresh.hits()).toBe(1); // never a SECOND refresh
+    expect(refresh.hits()).toBe(2); // the proactive 503, then never a SECOND rotation
     expect(getAccessToken()).toBe("at-new"); // the refresh's token survives
     expect(hasSessionMarker()).toBe(true);
   });
@@ -637,7 +673,7 @@ describe("authedFetch body integrity (§5.13)", () => {
   });
 
   it("a RETRIED 401 is still readable, terminal or not", async () => {
-    countRefresh(() =>
+    proactiveUnavailableThen(() =>
       HttpResponse.json({ accessToken: "at-new", expiresIn: 900 }),
     );
     // Codeless first, terminal on the retry — otherwise branch 1 short-circuits
@@ -684,7 +720,7 @@ describe("authedFetch body integrity (§5.13)", () => {
 // 401 that comes back even slightly later finds no in-flight promise to join.
 describe("a 401 answered after a sibling already rotated (§5.1, G8)", () => {
   it("takes branch 3: retries with the store's token and does NOT rotate again", async () => {
-    const refresh = countRefresh(() =>
+    const refresh = proactiveUnavailableThen(() =>
       HttpResponse.json({ accessToken: "at-new", expiresIn: 900 }),
     );
     let releaseB!: () => void;
@@ -715,7 +751,7 @@ describe("a 401 answered after a sibling already rotated (§5.1, G8)", () => {
     const resB = await b;
 
     expect(resB.status).toBe(200); // NOT the stale 401
-    expect(refresh.hits()).toBe(1); // NOT a second rotation
+    expect(refresh.hits()).toBe(2); // one proactive 503 + one rotation — B added neither
     expect(seen).toContain("B:Bearer at-new");
   });
 
@@ -751,7 +787,7 @@ describe("a 401 answered after a sibling already rotated (§5.1, G8)", () => {
   // the request left is proof a session existed. This is the case the brief's
   // "signed-out with no request" wording predates.
   it("a sign-out landing mid-flight still refreshes — the split is on the SENT bearer", async () => {
-    const refresh = countRefresh(() =>
+    const refresh = proactiveUnavailableThen(() =>
       HttpResponse.json({ accessToken: "at-new", expiresIn: 900 }),
     );
     const rec = recordRequests((hit) => {
@@ -766,7 +802,182 @@ describe("a 401 answered after a sibling already rotated (§5.1, G8)", () => {
     // Branch 3 is skipped (the store's token is null, not a DIFFERENT token),
     // so branch 4a runs on the strength of the sent bearer alone.
     expect(res.status).toBe(200);
-    expect(refresh.hits()).toBe(1);
+    expect(refresh.hits()).toBe(2); // the proactive 503, then the rotation
     expect(rec.header(1, "Authorization")).toBe("Bearer at-new");
+  });
+});
+
+// §4.11. The arm sits BEFORE the request, so it is the one piece of this file
+// that costs no 401 and needs no proof: there is no request to replay. Its
+// whole contract is "rotate when the bearer we are about to send expires
+// inside PROACTIVE_REFRESH_SKEW_MS, re-snapshot, send whatever the store then
+// holds" — and, negatively, that the skew never reaches the comparison below.
+describe("authedFetch proactive rotation (§4.11)", () => {
+  it("near expiry: one /refresh-cookie BEFORE the request, which carries the NEW bearer", async () => {
+    const order: string[] = [];
+    const refresh = countRefresh(() => {
+      order.push("refresh");
+      return HttpResponse.json({ accessToken: "at-new", expiresIn: 900 });
+    });
+    const rec = recordRequests(() => {
+      order.push("thing");
+      return HttpResponse.json({ ok: true });
+    });
+    seedToken("at-near", 20);
+
+    const res = await authedFetch("/v1/me/thing");
+    expect(res.status).toBe(200);
+    expect(refresh.hits()).toBe(1);
+    // The ordering IS the feature. A count alone would also pass against a
+    // reactive-only implementation that happened to rotate afterwards.
+    expect(order).toEqual(["refresh", "thing"]);
+    // Zero 401s, which is the whole point: no request is spent discovering an
+    // expiry the client already knew about.
+    expect(rec.seen.length).toBe(1);
+    expect(rec.header(0, "Authorization")).toBe("Bearer at-new");
+  });
+
+  it("far from expiry: no rotation, the seeded bearer goes out", async () => {
+    const refresh = countRefresh(() =>
+      HttpResponse.json({ accessToken: "at-new", expiresIn: 900 }),
+    );
+    const rec = recordRequests(() => HttpResponse.json({ ok: true }));
+    seedToken("at-1", 900);
+
+    const res = await authedFetch("/v1/me/thing");
+    expect(res.status).toBe(200);
+    expect(refresh.hits()).toBe(0);
+    expect(rec.header(0, "Authorization")).toBe("Bearer at-1");
+  });
+
+  // An UNKNOWN expiry counts as LIVE here for the same reason it does in
+  // branch 2: rotating on "we cannot tell" would rotate on every request made
+  // with a token whose lifetime was never learned — the refresh loop the D3
+  // bound exists to prevent, arrived at from the other side.
+  it("an UNKNOWN expiry does not rotate", async () => {
+    const refresh = countRefresh(() => HttpResponse.json({ accessToken: "x" }));
+    const rec = recordRequests(() => HttpResponse.json({ ok: true }));
+    setSessionMarker();
+    setAccessToken("opaque-not-a-jwt"); // no duration, unreadable exp
+    expect(getAccessTokenSnapshot().expiresAt).toBeNull();
+
+    await authedFetch("/v1/me/thing");
+    expect(refresh.hits()).toBe(0);
+    expect(rec.header(0, "Authorization")).toBe("Bearer opaque-not-a-jwt");
+  });
+
+  // The marker is deliberately STAMPED here: with no marker refreshAccessToken
+  // would short-circuit anyway, and the case would pass without the
+  // `sent.token !== null` guard ever being read.
+  it("no bearer at all: no rotation is even attempted", async () => {
+    const refresh = countRefresh(() => HttpResponse.json({ accessToken: "x" }));
+    const rec = recordRequests(() => HttpResponse.json({ ok: true }));
+    setSessionMarker(); // …but the store is empty
+
+    const res = await authedFetch("/v1/me/thing");
+    expect(res.status).toBe(200);
+    expect(refresh.hits()).toBe(0);
+    expect(rec.header(0, "Authorization")).toBeNull();
+  });
+
+  // `unavailable`: token and marker untouched (§4.1's allowlist), so the
+  // request goes out with the OLD bearer and §4.3 owns whatever 401 follows.
+  // A failed proactive rotation costs one round-trip and changes nothing else.
+  it("a proactive rotation that is `unavailable` sends the OLD bearer and changes nothing", async () => {
+    const refresh = countRefresh(() => new HttpResponse(null, { status: 503 }));
+    const rec = recordRequests(() => HttpResponse.json({ ok: true }));
+    seedToken("at-near", 20);
+
+    const res = await authedFetch("/v1/me/thing");
+    expect(res.status).toBe(200);
+    expect(refresh.hits()).toBe(1);
+    expect(rec.seen.length).toBe(1);
+    expect(rec.header(0, "Authorization")).toBe("Bearer at-near");
+    expect(getAccessToken()).toBe("at-near");
+    expect(hasSessionMarker()).toBe(true);
+  });
+
+  // The case that proves §4.11 cannot STRAND the 401 path: the rotation is
+  // attempted, fails, the dead bearer goes out anyway and branch 2's proof (2)
+  // recovers it exactly as it does without the arm.
+  it("already expired at send: a failed proactive attempt still leaves proof (2) to recover", async () => {
+    const order: string[] = [];
+    const refresh = countRefresh((hit) => {
+      order.push(`refresh#${hit}`);
+      return hit === 1
+        ? new HttpResponse(null, { status: 503 })
+        : HttpResponse.json({ accessToken: "at-new", expiresIn: 900 });
+    });
+    const rec = recordRequests((hit) => {
+      order.push(`thing#${hit}`);
+      return hit === 1
+        ? new HttpResponse(null, { status: 401 })
+        : HttpResponse.json({ ok: true });
+    });
+    seedExpiredToken("at-old");
+
+    const res = await authedFetch("/v1/me/thing");
+    expect(res.status).toBe(200);
+    expect(order).toEqual(["refresh#1", "thing#1", "refresh#2", "thing#2"]);
+    expect(refresh.hits()).toBe(2);
+    expect(rec.header(0, "Authorization")).toBe("Bearer at-old");
+    expect(rec.header(1, "Authorization")).toBe("Bearer at-new");
+  });
+
+  it("the skew stays strictly below the backend's MinAccessTokenTTL (ADR-0020 D3)", () => {
+    // 60_000 ms is MinAccessTokenTTL
+    // (backend/internal/core/auth/services/auth_duration_bounds.go:30). At or
+    // above that floor a token minted at the minimum TTL is ALREADY inside the
+    // window the moment it arrives, so every request would rotate again — a
+    // refresh loop.
+    expect(PROACTIVE_REFRESH_SKEW_MS).toBeLessThan(60_000);
+  });
+
+  // The behavioural twin of the bound above, and the one that actually fails
+  // if the constant is raised: a floor-length token keeps half its life quiet.
+  it("does not loop on a token minted at the backend minimum TTL (60s)", async () => {
+    const refresh = countRefresh(() =>
+      HttpResponse.json({ accessToken: "at-new", expiresIn: 60 }),
+    );
+    const rec = recordRequests(() => HttpResponse.json({ ok: true }));
+    seedToken("at-floor", 60);
+
+    await authedFetch("/v1/me/thing");
+    await authedFetch("/v1/me/thing");
+    expect(refresh.hits()).toBe(0);
+    expect(rec.header(0, "Authorization")).toBe("Bearer at-floor");
+    expect(rec.header(1, "Authorization")).toBe("Bearer at-floor");
+  });
+
+  // THE no-leak invariant, and it is asserted against the module's own SOURCE
+  // because a behavioural test cannot express it: the proactive predicate and
+  // branch 2's predicate agree on almost every input and differ only where the
+  // difference is the bug (a token with 20s of life is still accepted by the
+  // server, so the handler DID run — the round-11 replay hole). Two constants,
+  // two predicates, one file.
+  it("PROACTIVE_REFRESH_SKEW_MS never appears below the 401 line (§4.11 invariant)", () => {
+    // Comments are stripped so the prose above branch 2 — which discusses the
+    // skew at length — cannot make this test pass or fail.
+    const code = authedFetchSource
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+    const cut = code.indexOf("if (res.status !== 401) return res;");
+    expect(cut).toBeGreaterThan(-1);
+
+    const before = code.slice(0, cut);
+    const after = code.slice(cut);
+    expect(after).not.toContain("PROACTIVE_REFRESH_SKEW_MS");
+    // Exactly two uses above the line: the declaration and the pre-send check.
+    expect(before.match(/PROACTIVE_REFRESH_SKEW_MS/g)).toHaveLength(2);
+    expect(before).toContain(
+      "export const PROACTIVE_REFRESH_SKEW_MS = 30_000;",
+    );
+    expect(before).toMatch(
+      /sent\.expiresAt - Date\.now\(\) < PROACTIVE_REFRESH_SKEW_MS/,
+    );
+    // …and the margin-free comparison is byte-identical to what it was.
+    expect(after).toContain(
+      "sent.expiresAt !== null && sent.expiresAt <= sentAt",
+    );
   });
 });
