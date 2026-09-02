@@ -33,7 +33,7 @@ The companies that **run Orkestra** (one or more of "our" organizations). For ea
 
 | Layer              | Technology                                                         |
 | ------------------ | ------------------------------------------------------------------ |
-| **Backend**        | Go 1.25.13, Huma v2 (OpenAPI-first), 8 core modules, single Go module |
+| **Backend**        | Go 1.26.8, Huma v2 (OpenAPI-first), 8 core modules, single Go module |
 | **Frontend**       | React 19, TypeScript 5.9, Vite 8 (admin) / Vite 7 (client), Redux Toolkit, TanStack Table |
 | **Mobile**         | Flutter 3.44+, Dart, Riverpod                                      |
 | **Database**       | MongoDB 8.0, Redis 8.2                                             |

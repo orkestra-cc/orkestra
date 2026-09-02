@@ -47,7 +47,7 @@ The `replace` will retire once cross-cutting addon churn settles.
 go get github.com/orkestra-cc/orkestra-openapi-auth@latest
 ```
 
-Requires Go 1.25.11 or newer. Zero non-stdlib dependencies.
+Requires Go 1.26.8 or newer. Zero non-stdlib dependencies.
 
 ```go
 import "github.com/orkestra-cc/orkestra-openapi-auth"

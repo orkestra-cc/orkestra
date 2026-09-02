@@ -1,6 +1,6 @@
 module github.com/orkestra/backend
 
-go 1.25.13
+go 1.26.8
 
 // ADR-0006 (Phase 1): the SDK (pkg/sdk), the OpenAPI-auth helper
 // (internal/shared/openapiauth), and all addons (internal/addons/*)
@@ -38,7 +38,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.45.0
 	go.opentelemetry.io/otel/sdk/log v0.21.0
 	go.opentelemetry.io/otel/trace v1.45.0
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	golang.org/x/text v0.41.0
 	golang.org/x/tools v0.49.0
 )
