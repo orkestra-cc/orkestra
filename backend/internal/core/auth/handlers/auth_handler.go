@@ -1976,7 +1976,7 @@ func (h *AuthHandler) RegisterTierMountableRoutes(publicAPI huma.API, protectedA
 
 // writeRefreshErr writes the JSON error for a refresh-flow failure.
 //
-// Five outcomes are deliberately distinct:
+// Six outcomes are deliberately distinct:
 //   - 503 session_enforcement_unavailable — the cap could not be
 //     evaluated or applied because storage failed. NOT a 401: reporting
 //     an outage as an authentication failure would train clients to
@@ -1989,6 +1989,10 @@ func (h *AuthHandler) RegisterTierMountableRoutes(publicAPI huma.API, protectedA
 //     cookie candidate. Same 503 argument as its sibling above; a
 //     separate code only so the failing subsystem is legible in a
 //     support ticket.
+//   - 409 refresh_rotation_raced — a sibling rotation won the CAS inside
+//     RefreshRotationGrace against a healthy family, so the browser
+//     already holds the successor cookie and one retry lands. Kept off
+//     the 401 path, where every client reads the answer as a sign-out.
 //   - 401 session_max_age_reached — the session hit its configured
 //     maximum age and has been logged out. "Revoked" is inaccurate for a
 //     session that simply aged out, and the distinction matters to

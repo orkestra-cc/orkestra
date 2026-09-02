@@ -427,7 +427,7 @@ describe("authedFetch 401 recovery (§4.3)", () => {
     expect(rec.header(1, "Authorization")).toBe("Bearer at-new");
   });
 
-  it("no bearer and no marker (anonymous) → ZERO refresh requests (branch 4b)", async () => {
+  it("no bearer and no marker (anonymous) → ZERO refresh requests (branch 2 passes it through; 4b is unreachable)", async () => {
     const refresh = countRefresh(() => HttpResponse.json({ accessToken: "x" }));
     recordRequests(() => new HttpResponse(null, { status: 401 }));
     // no token, no marker

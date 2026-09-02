@@ -446,7 +446,7 @@ usable `CreatedAt` is **not** an anomaly — it has a perfectly good anchor,
 and counting it would poison the observation window.
 
 **The cap outcomes above, and the refresh-path outcomes beside them, surface
-as five distinct HTTP responses**
+as six distinct HTTP responses**
 (`writeRefreshErr`, called from all three refresh-flow handlers —
 `RefreshTokensWithHeaderHTTP`, `GetSessionHTTP`, `RefreshTokensHTTP`):
 `ErrSessionEnforcementUnavailable` is **503** `session_enforcement_unavailable`
@@ -456,6 +456,11 @@ valid, and the caller may retry once storage recovers.
 `ErrSessionMaxAgeReached` is **401** `session_max_age_reached` — distinct
 from `refresh_token_replay` because "revoked" is inaccurate for a session
 that simply aged out.
+`ErrRefreshRotationRaced` is **409** `refresh_rotation_raced` — a sibling
+tab won the CAS inside `RefreshRotationGrace` against a healthy family, so
+the browser already holds the successor cookie and one retry lands. It is
+kept off the 401 path precisely because every client reads a 401 there as
+a sign-out; the grace-window rule itself is under **Refresh tokens** below.
 
 `ErrRefreshLookupUnavailable` is **503** `refresh_lookup_unavailable` — the
 rotation could not be *completed* because infrastructure failed: the token
