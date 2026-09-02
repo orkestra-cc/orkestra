@@ -2815,7 +2815,9 @@ returning outcomes.
     - `frontend-admin/src/config/environment.ts`'s two code fallbacks, which say
       `console.localhost:3000` while the runtime config compose writes says
       `localhost:3000`. The code default stops disagreeing with the shipped one;
-    - the **compiled OAuth redirect defaults** — `internal/shared/config/config.go`'s
+    - the **compiled OAuth redirect defaults** — ✅ **done in this branch
+      (batch 3)**; the other three bullets of this entry are frontend/doc work and
+      stay open for their own waves. `internal/shared/config/config.go`'s
       four `OAUTH_*_REDIRECT_URL` fallbacks and the `AllowedRedirectURIs` list in
       `internal/core/auth/utils/redirect_validation.go`. Their host is already
       `localhost:3000`, which is right under A, but their **path is the pre-`/v1`
@@ -2823,7 +2825,17 @@ returning outcomes.
       handlers register `/v1/auth/oauth/{provider}/callback`. They gain the `/v1`,
       with a test scoped to **the eight OAuth-callback defaults** — `config.go`'s
       four and `AllowedRedirectURIs`' four — asserting each is a path the router
-      actually serves. The list's three other entries are deliberately **not** in
+      actually serves. *As shipped:*
+      `handlers/oauth_redirect_defaults_test.go`'s
+      `TestOAuthRedirectDefaultsAreMountedRoutes` walks the REAL registration
+      (`RegisterOAuthRoutes` through `chi.Walk`) rather than restating the four
+      paths, selects the four in-scope allow-list entries by host rather than by
+      index, and additionally asserts the two default sets agree with each other.
+      `backend/README.md`'s two Google/Apple redirect-URI recipes carried the same
+      pre-`/v1` path and moved with them. Two things this did NOT touch, both
+      recorded in `b1b-report.md`: `docker/.env.example` already showed the `/v1`
+      path, and `validateLocalhostURI`'s `/auth/` path-prefix check — dormant, no
+      callers — now rejects the very defaults it is meant to bless. The list's three other entries are deliberately **not** in
       scope: `http://localhost:8080/auth/callback` is a front-end route and
       `com.orkestra://oauth/callback` and `com.orkestra.app://oauth/callback` are
       mobile deep links, none of which the Go router serves at all. This is the

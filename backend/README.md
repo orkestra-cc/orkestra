@@ -37,7 +37,10 @@ Edit `.env` with your configuration:
 3. Enable Google+ API
 4. Create OAuth 2.0 credentials:
    - Application type: Web application
-   - Authorized redirect URI: `http://localhost:3000/auth/oauth/google/callback`
+   - Authorized redirect URI: `http://localhost:3000/v1/auth/oauth/google/callback`
+     (the mounted path, and the compiled `OAUTH_GOOGLE_REDIRECT_URL` default;
+     the host must be the same one the login POST goes to, because the
+     `orkestra_oauth_state` cookie is host-only)
 5. Copy Client ID and Client Secret to `.env`
 
 ### 3. Apple Sign In Setup (Optional)
@@ -45,7 +48,7 @@ Edit `.env` with your configuration:
 1. Register your app in Apple Developer account
 2. Create a Service ID for Sign In with Apple
 3. Generate a private key for Sign In with Apple
-4. Configure redirect URL: `http://localhost:3000/auth/oauth/apple/callback`
+4. Configure redirect URL: `http://localhost:3000/v1/auth/oauth/apple/callback`
 5. Add credentials to `.env`
 
 ### 4. Install Dependencies

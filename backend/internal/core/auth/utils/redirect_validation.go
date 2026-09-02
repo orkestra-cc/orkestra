@@ -25,10 +25,19 @@ func DefaultRedirectURIConfig() *RedirectURIConfig {
 func NewRedirectURIConfig(allowLocalhost bool) *RedirectURIConfig {
 	return &RedirectURIConfig{
 		AllowedRedirectURIs: []string{
-			"http://localhost:3000/auth/oauth/google/callback",
-			"http://localhost:3000/auth/oauth/apple/callback",
-			"http://localhost:3000/auth/oauth/discord/callback",
-			"http://localhost:3000/auth/oauth/github/callback",
+			// The four backend callbacks, on the path the router actually
+			// mounts (/v1/auth/oauth/{provider}/callback — see
+			// RegisterOAuthRoutes) and the host config.go defaults to. These
+			// four must stay in lockstep with config.go's four
+			// OAUTH_*_REDIRECT_URL fallbacks;
+			// TestOAuthRedirectDefaultsAreMountedRoutes checks both sets
+			// against the real router.
+			"http://localhost:3000/v1/auth/oauth/google/callback",
+			"http://localhost:3000/v1/auth/oauth/apple/callback",
+			"http://localhost:3000/v1/auth/oauth/discord/callback",
+			"http://localhost:3000/v1/auth/oauth/github/callback",
+			// The three entries below are NOT backend routes and are out of
+			// that rule's scope: a frontend route and two mobile deep links.
 			"http://localhost:8080/auth/callback", // Frontend dev server
 			// Mobile app deep links
 			"com.orkestra://oauth/callback",
@@ -167,7 +176,18 @@ func isLocalhost(host string) bool {
 	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
-// validateLocalhostURI validates localhost URIs with additional security checks
+// validateLocalhostURI validates localhost URIs with additional security checks.
+//
+// KNOWN GAP, deliberately left alone: the "/auth/" prefix below predates the
+// /v1 mount, so it now REJECTS the four backend callbacks in
+// AllowedRedirectURIs above — the values this package itself ships as the
+// defaults. It is inert today: ValidateRedirectURI has no callers in
+// backend/ at all, and even if it had, a localhost URI is answered by this
+// function or by the explicit refusal above it and never reaches the
+// whitelist, so those four entries are documentation either way. Widening it
+// to accept "/v1/auth/" is a one-line change, but it widens a redirect
+// validator, so it is named here for whoever wires this up rather than done
+// as a side effect of a path fix (spec §8 #13).
 func validateLocalhostURI(parsedURL *url.URL) error {
 	// Ensure path is reasonable for OAuth callback
 	if !strings.HasPrefix(parsedURL.Path, "/auth/") && parsedURL.Path != "/auth/callback" {

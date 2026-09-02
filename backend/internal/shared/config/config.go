@@ -338,10 +338,22 @@ func Load() (*Config, error) {
 			Secure:         getEnvAsBool("COOKIE_SECURE", false), // Default false for development
 			SameSite:       getEnv("COOKIE_SAME_SITE", "lax"),
 		},
+		// OAuth callback defaults. The path is the MOUNTED one —
+		// RegisterOAuthRoutes (core/auth/handlers/auth_handler.go) puts all
+		// four callbacks under /v1/auth/oauth/{provider}/callback, and the
+		// pre-/v1 path these defaults used to carry was served by nothing:
+		// an operator who took the default got a 404 from the IdP round-trip
+		// (spec §8 #13). The host stays localhost:3000, which is convention
+		// A — the orkestra_oauth_state cookie is host-only and SameSite=Lax,
+		// so the login-POST host and the callback host must be the SAME
+		// host, and localhost:3000 is what the shipped console talks to.
+		// utils.NewRedirectURIConfig's allow-list carries the same four
+		// strings; TestOAuthRedirectDefaultsAreMountedRoutes
+		// (core/auth/handlers) checks all eight against the real router.
 		Google: GoogleOAuthConfig{
 			ClientID:        getEnv("OAUTH_GOOGLE_CLIENT_ID", ""),
 			ClientSecret:    getEnv("OAUTH_GOOGLE_CLIENT_SECRET", ""),
-			RedirectURL:     getEnv("OAUTH_GOOGLE_REDIRECT_URL", "http://localhost:3000/auth/oauth/google/callback"),
+			RedirectURL:     getEnv("OAUTH_GOOGLE_REDIRECT_URL", "http://localhost:3000/v1/auth/oauth/google/callback"),
 			AndroidClientID: getEnv("OAUTH_GOOGLE_ANDROID_CLIENT_ID", ""),
 			IOSClientID:     getEnv("OAUTH_GOOGLE_IOS_CLIENT_ID", ""),
 		},
@@ -351,19 +363,19 @@ func Load() (*Config, error) {
 			KeyID:           getEnv("OAUTH_APPLE_KEY_ID", ""),
 			PrivateKey:      getEnv("OAUTH_APPLE_PRIVATE_KEY", ""),
 			PrivateKeyPath:  getEnv("OAUTH_APPLE_PRIVATE_KEY_PATH", ""),
-			RedirectURL:     getEnv("OAUTH_APPLE_REDIRECT_URL", "http://localhost:3000/auth/oauth/apple/callback"),
+			RedirectURL:     getEnv("OAUTH_APPLE_REDIRECT_URL", "http://localhost:3000/v1/auth/oauth/apple/callback"),
 			IOSClientID:     getEnv("OAUTH_APPLE_IOS_CLIENT_ID", ""),
 			AndroidClientID: getEnv("OAUTH_APPLE_ANDROID_CLIENT_ID", ""),
 		},
 		Discord: DiscordOAuthConfig{
 			ClientID:     getEnv("OAUTH_DISCORD_CLIENT_ID", ""),
 			ClientSecret: getEnv("OAUTH_DISCORD_CLIENT_SECRET", ""),
-			RedirectURL:  getEnv("OAUTH_DISCORD_REDIRECT_URL", "http://localhost:3000/auth/oauth/discord/callback"),
+			RedirectURL:  getEnv("OAUTH_DISCORD_REDIRECT_URL", "http://localhost:3000/v1/auth/oauth/discord/callback"),
 		},
 		GitHub: GitHubOAuthConfig{
 			ClientID:     getEnv("OAUTH_GITHUB_CLIENT_ID", ""),
 			ClientSecret: getEnv("OAUTH_GITHUB_CLIENT_SECRET", ""),
-			RedirectURL:  getEnv("OAUTH_GITHUB_REDIRECT_URL", "http://localhost:3000/auth/oauth/github/callback"),
+			RedirectURL:  getEnv("OAUTH_GITHUB_REDIRECT_URL", "http://localhost:3000/v1/auth/oauth/github/callback"),
 		},
 		AllowLocalhostRedirects:         getEnvAsBool("ALLOW_LOCALHOST_REDIRECTS", true), // Default true for development
 		OperatorPasswordLoginBreakGlass: getEnvAsBool("AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS", false),
