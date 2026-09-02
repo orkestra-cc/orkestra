@@ -761,11 +761,22 @@ resolve_stack_identity() {
     #     Falls back to "dev" when this clone has cut no release tag yet
     #     (a bare SHA would duplicate ORKESTRA_BUILD_COMMIT below).
     #   ORKESTRA_BUILD_COMMIT — short SHA of the deployed code (bucket B).
-    local clone_name clone_prefix clone_desc
+    #
+    # A caller-exported ORKESTRA_CLONE_VERSION wins over git describe. The
+    # post-release reconciliation pins the clean tag while dev already sits
+    # one changelog commit past it, where describe reports vX.Y.Z-1-g<sha>.
+    # docker/.env is never sourced into this shell, so its fallback entry
+    # cannot reach here — only an explicit export does.
+    local clone_name clone_prefix clone_desc have_git=false
     clone_name="${APP_NAME#orkestra-}"
     clone_prefix="${clone_name}-v"
     if command -v git > /dev/null 2>&1 \
         && git -C "$PROJECT_ROOT" rev-parse --git-dir > /dev/null 2>&1; then
+        have_git=true
+    fi
+    if [ -n "${ORKESTRA_CLONE_VERSION:-}" ]; then
+        : # pinned by the caller — keep it verbatim
+    elif [ "$have_git" = true ]; then
         clone_desc=$(git -C "$PROJECT_ROOT" describe --tags \
             --match "${clone_prefix}*" --dirty 2>/dev/null || true)
         if [ -n "$clone_desc" ]; then
@@ -774,9 +785,12 @@ resolve_stack_identity() {
         else
             ORKESTRA_CLONE_VERSION="dev"
         fi
-        ORKESTRA_BUILD_COMMIT=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo "")
     else
         ORKESTRA_CLONE_VERSION="dev"
+    fi
+    if [ "$have_git" = true ]; then
+        ORKESTRA_BUILD_COMMIT=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo "")
+    else
         ORKESTRA_BUILD_COMMIT=""
     fi
     export ORKESTRA_CLONE_VERSION ORKESTRA_BUILD_COMMIT
