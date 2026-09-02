@@ -428,12 +428,19 @@ describe("authedFetch 401 recovery (§4.3)", () => {
   });
 
   it("refresh 401 → token and marker cleared so AuthProvider can re-render (G3)", async () => {
-    proactiveUnavailableThen(() => new HttpResponse(null, { status: 401 }));
+    const refresh = proactiveUnavailableThen(
+      () => new HttpResponse(null, { status: 401 }),
+    );
     recordRequests(() => new HttpResponse(null, { status: 401 }));
     seedExpiredToken("at-old");
 
     const res = await authedFetch("/v1/me/thing");
     expect(res.status).toBe(401);
+    // The proactive 503 AND the reactive rotation. Without this the case
+    // still passes if someone drops the proactiveUnavailableThen wrapper —
+    // a bare 401 responder clears the token on the PROACTIVE arm, and the
+    // reactive §4.3 path this case exists to cover is never exercised.
+    expect(refresh.hits()).toBe(2);
     expect(getAccessToken()).toBeNull();
     expect(hasSessionMarker()).toBe(false);
   });
