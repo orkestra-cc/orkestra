@@ -44,8 +44,11 @@ Edit `.env` with your configuration:
    `/admin/modules/auth` after first login. What the backend actually sends
    Google is the auth module's **Redirect URL** field for the provider, so
    that field and the URI you registered above must match exactly;
-   `OAUTH_GOOGLE_REDIRECT_URL` only seeds it when the module config is first
-   created, and editing the variable on a running install changes nothing
+   `OAUTH_GOOGLE_REDIRECT_URL` only *seeds* that field, and it seeds it on
+   any boot at which the key is still absent — not just the first — so
+   setting the variable and restarting does take effect; once a value is
+   stored, the stored value wins and the variable is ignored, so change
+   it at `/admin/modules/auth`
 
 ### 3. Apple Sign In Setup (Optional)
 

@@ -93,7 +93,7 @@ See [ADR-0003 host split](/adrs/three-audience-host-split) for the full audience
 
 The redirect URI you registered with the OAuth provider doesn't match the one the backend sent. **The backend does not compute that URI** — it sends the auth module's stored **Redirect URL** for the provider, verbatim. So start every diagnosis in the same place: open `/admin/modules/auth`, expand the provider's group, and read the **Redirect URL** field. That string, character for character, is what must be registered with the IdP.
 
-`OAUTH_GOOGLE_REDIRECT_URL` and friends only *seed* that field when the module config is first created — on an install that already booted, editing the variable changes nothing. Change it in the admin UI. (An empty field is a different symptom: the web flow refuses the provider before it ever reaches the IdP.)
+`OAUTH_GOOGLE_REDIRECT_URL` and friends only *seed* that field, and they seed it on any boot at which the key is still absent — not just the first — so uncommenting one and recreating the container does take effect; once a value is stored, the stored value wins and the variable is ignored. Change it in the admin UI (or `PATCH /v1/admin/modules/auth`). (A field that resolves empty — nothing stored *and* no env var set — is a different symptom: the web flow refuses the provider before it ever reaches the IdP.)
 
 Two sub-cases, both read off that field:
 
