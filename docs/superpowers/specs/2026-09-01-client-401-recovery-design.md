@@ -827,7 +827,7 @@ sibling request happened to rotate in the meantime (§4.4).
 `refreshAccessToken` would have re-introduced the hole this split exists to close:
 its marker gate answers `signed-out` **without clearing anything**
 (`tokenStore.ts:117`), so a tab holding a live in-memory token but no marker —
-reachable two ways, §5.8 — would have been told "signed out", returned the raw
+reachable two ways, §5 item 7 — would have been told "signed out", returned the raw
 401, and then *kept* `isAuthenticated === true`, leaving the user in exactly
 defect A's broken state that this spec exists to end. Splitting on "did we send a
 bearer?" is the honest question: it preserves the anonymous optimisation for the
@@ -1561,8 +1561,15 @@ that is the moment to change all three comparisons together.
 
 `sendTokenVerificationUnavailable` is modelled on `sendPolicyUnavailable`, the
 middleware's one existing 503: `Content-Type`, `WriteHeader(503)`, and a body of
-`status` / `title` / `detail` / `type: "about:blank"` / a top-level
-`"code": "token_verification_unavailable"`. **No `WWW-Authenticate`** and **no
+`status` / `title` / `detail` / `type: "about:blank"` / a top-level `code`. The
+strings are `"title": "token verification unavailable"` and
+`"detail": "access tokens cannot be verified right now; try again shortly"`, and
+the code is `"token_verification_unavailable"` — **not** namespaced, where the
+model it copies uses the dotted `auth.policy_unavailable`. That divergence is
+deliberate: the dotted form is a lone survivor, and every code this work has added
+or read (`access_token_expired`, `refresh_lookup_unavailable`,
+`session_enforcement_unavailable`) is flat, so a new one joins the majority rather
+than the model's punctuation. **No `WWW-Authenticate`** and **no
 `errors[]`** — the header names a scheme the caller should retry with and there is
 nothing to retry with, and `sendPolicyUnavailable` omits both for the same reason.
 The "only one emitter" bound stated above for `access_token_expired` applies
@@ -1574,11 +1581,15 @@ accepted nothing before and accepts nothing now — only the account it gives of
 itself changes. `RequireAuth` stays bearer-only, the three `_NeverRotates` tests
 and the two AST reintroduction guards stay green untouched, and every other 401 the
 middleware emits keeps its exact body. Downstream, neither SPA needs a change to
-handle it: §4.1's outcome table is an allowlist in which **only 401** signs a user
-out, so the client SPA reads a 503 as `unavailable` and keeps its token, and the
-console's `baseApi` never reaches its 401 branch at all — a `>= 500` response
-raises the "Server error. Please try again later." toast (`baseApi.ts:598-599`)
-and nothing is cleared.
+handle it, and it is worth being exact about *which* rule does the work. This 503
+answers a **protected route**, not the refresh endpoint, so §4.1's outcome table —
+which classifies `/refresh-cookie`'s own response — is not what handles it:
+`authedFetch`'s `if (res.status !== 401) return res` hands it straight back to the
+caller, untouched, with token and marker intact. (§4.1's allowlist is the reason a
+503 *on the refresh endpoint* is `unavailable` rather than a sign-out; both rules
+point the same way, by different routes.) The console's `baseApi` likewise never
+reaches its 401 branch — a `>= 500` response raises the "Server error. Please try
+again later." toast (`baseApi.ts:598-599`) and nothing is cleared.
 
 **Not applied to `frontend-admin` by this section.** The console's own fix is
 §8 #5 and it landed in batch 2, in its own commits — and it is **not** the one-line
@@ -1633,7 +1644,8 @@ the marker gate is a correct optimisation here rather than the hole §4.3 4a rou
 around: a visitor with no session has no `expiresAt` either, so the branch cannot
 fire for them at all. The one input where the gate does bite is §5.8's tab — a live
 in-memory token with **no** marker, reachable through a throwing `localStorage` or
-a sibling's sign-out — and there the proactive attempt is simply a no-op, so that
+a sibling's sign-out (§5 item 7) — and there the proactive attempt is simply a
+no-op, so that
 tab keeps the reactive path it has today and branch 4a, which is deliberately *not*
 marker-gated, recovers it. One extra round-trip, never a wrong sign-out, which is
 the same trade §4.3's 4a/4b split already makes. `refreshAccessToken` never
@@ -2291,11 +2303,16 @@ sits:
   load-bearing part — "alive, so the handler ran" was — and twenty seconds is now
   inside the window;
 - **`"expiresAt === sentAt counts as expired; sentAt + 1 counts as live"`** is the
-  no-margin pin, and both of its halves are inside the window by construction. It
-  keeps its shape by counting the two kinds of rotation apart: `/refresh-cookie`
-  answers **503 on odd hits** (the proactive attempts) and 200 on the even one, so
-  the boundary token adds a **second** rotation and the `+1 ms` token adds
-  **none**. Same property, read as a difference;
+  no-margin pin, and both of its halves are inside the window by construction —
+  `at-boundary` expires at `Date.now()` and `at-live` at `Date.now() + 1 ms`, so
+  **each half now costs a proactive rotation of its own**. It keeps its shape by
+  counting the two kinds apart: `/refresh-cookie` answers **503 on odd hits** (the
+  proactive attempts) and 200 on the even one, and the totals are stated outright —
+  `refresh.hits()` is **2** after the boundary token (its proactive attempt, then
+  the 401-driven rotation) and **3** after the `+1 ms` token (one more proactive
+  attempt, and **no second** rotation). The property is unchanged and now reads as a
+  difference: the boundary token earns a reactive rotation, the `+1 ms` token earns
+  none;
 - **`"a burst of three 401s produces exactly one /refresh-cookie"` moves its title
   too.** With the proactive attempt answered 503 the three concurrent calls
   coalesce **twice** — one proactive rotation shared by the burst, then one
@@ -2523,7 +2540,9 @@ check fires at `expiry − PROACTIVE_REFRESH_SKEW_MS`. Batch 3 adds a third outc
 to the same `handlerNeverRan` decision, sitting between it and the existing replay
 path. Everything ahead of it is unchanged: the branch is reached only for a 401
 outside `AUTH_ENDPOINT_PATHS` and not on the session endpoint, and the
-terminal-code, step-up and password-confirm checks have already returned by then.
+terminal-code, step-up and password-confirm checks — and the first-install gate,
+`isOnSetupPath || !setupCompleted`, which returns the 401 as-is so a setup flow is
+never interrupted by a login redirect — have all already returned by then.
 
 | The 401, at that point | Action |
 | ---------------------- | ------ |
@@ -2538,7 +2557,10 @@ place the arm branches:
   the original 401. **No replay** — **G4** holds, and the request that earned the
   401 is never sent twice. The *next* request carries the fresh bearer, which is
   what collapses the window to a single request;
-- **`retry` or `raced`** → return the original 401, token and expiry untouched;
+- **`retry`** → return the original 401, token and expiry untouched. There is no
+  `raced` arm to write, and that is a fact about `performRefresh` rather than an
+  omission: a 409 is retried once inside the lock, and a second 409 is converted to
+  `{ ok: false, retry: true }` before it returns, so `raced` never escapes;
 - **a bare `{ ok: false }`** → the refresh itself was refused, which is the
   session's own death: `clearAccessToken()` and then the existing sign-out path
   below, exactly as the replay branch already does on the same outcome.
@@ -2568,6 +2590,12 @@ the cross-tab lock, so a burst costs one rotation, not one each.
   lost its bearer mid-flight`. `refreshAttempts` **0 → 1**, and the refresh
   fixture's `'must-not-be-fetched'` token becomes `'rotated-token'`, because it now
   is fetched. **`resourceAttempts` stays 1**, and the caller still receives the 401.
+  One honesty note the retitle has to carry: the fixture stubs a **200** refresh,
+  but the situation it names — a sibling tab signing out mid-flight — revokes the
+  refresh cookie in production, so the real `performRefresh` there answers a 401,
+  returns a bare `{ ok: false }`, and the arm falls through to the sign-out path.
+  The case asserts the **mechanism** (the arm fires once, replays nothing, and hands
+  the caller its 401), not that a sibling's sign-out leaves the session alive.
 
 Cases 2, 3 and 6 take the existing replay path and are untouched. Case 5 — the
 failed passkey assertion — is on a public route excluded by `AUTH_ENDPOINT_PATHS`
@@ -2610,7 +2638,9 @@ returning outcomes.
    which a bump gets closed, not the condition under which a dependency is kept.
    Five artefacts go, and they go together: `openapi-fetch` from `dependencies`,
    `openapi-typescript` from `devDependencies`, the `codegen` npm script,
-   `src/api/openapi.gen.ts` itself, and the prose —
+   `src/api/openapi.gen.ts` itself, and the prose — starting with
+   `src/api/client.ts`'s own header comment, whose closing clause states that
+   "`openapi.gen.ts` and the `openapi-fetch` dependency both stay", and then
    `frontend-client/README.md`'s stack bullet, its whole `## OpenAPI codegen`
    section and its layout tree, plus the `frontend-client/CLAUDE.md` regions
    that name them. Dropping the runtime dependency while keeping the generator
@@ -2792,8 +2822,13 @@ returning outcomes.
       `localhost:3000`, which is right under A, but their **path is the pre-`/v1`
       one** (`/auth/oauth/{provider}/callback`) and no such route is mounted: the
       handlers register `/v1/auth/oauth/{provider}/callback`. They gain the `/v1`,
-      with a test that asserts every compiled default is a path the router actually
-      serves — this is the tighter constraint the entry above names, because
+      with a test scoped to **the eight OAuth-callback defaults** — `config.go`'s
+      four and `AllowedRedirectURIs`' four — asserting each is a path the router
+      actually serves. The list's three other entries are deliberately **not** in
+      scope: `http://localhost:8080/auth/callback` is a front-end route and
+      `com.orkestra://oauth/callback` and `com.orkestra.app://oauth/callback` are
+      mobile deep links, none of which the Go router serves at all. This is the
+      tighter constraint the entry above names, because
       `orkestra_oauth_state` is host-only and `SameSite=Lax`, so the login-POST host
       and the callback host must be the **same host**, not merely the same site;
     - the ~18 documentation lines that prescribe `console.localhost` as the operator
@@ -2899,8 +2934,13 @@ returning outcomes.
     `orkestra.sh`'s `init` wizard — so a guard added to the script alone would fire
     only for someone regenerating their `.env`, which is precisely not the person it
     is for. It is wired into the **deploy preflight** as well, ahead of the compose
-    up, as a hard stop. And `wiz_urls` gains the write it is missing: it sets
-    `CLIENT_API_HOST` and never `CLIENT_API_URL`, so a wizard-generated `.env` has
+    up, as a hard stop — and the two call sites keep different severities on purpose
+    (Ruling G5): `init` renders any non-zero exit as `p_warn "Validation reported
+    issues (above)"` and carries on, which is right for a wizard the user is still
+    in the middle of, while `deploy` aborts. The script's own exit code is the same
+    in both; only the caller's reaction differs. And `wiz_urls` gains the write it
+    is missing: it sets `CLIENT_API_HOST` and never `CLIENT_API_URL`, so a
+    wizard-generated `.env` has
     no such key at all and leans on the backend deriving one — right today, wrong
     the moment a proxy changes the port or the scheme, and exactly the desync this
     rule would then report.
@@ -3049,18 +3089,20 @@ returning outcomes.
     helper that supplies one is making a **wire change** to that response. **Extra
     top-level fields**: none (×5), `maxAgeSeconds` (×2), `riskScore` +
     `riskThreshold` (×1), `capability` + `tenantId` (×1). `value` cannot be derived
-    from `code` — it is `strings.ToUpper(code)` in some cases and something else
-    entirely in `sendRiskStepUp` and `sendMFARequired` — so it stays a parameter too.
+    from `code` — every other emitter's `value` is `strings.ToUpper(code)`, but
+    `sendRiskStepUp`'s is `HIGH_RISK_SESSION` against a `step_up_required` code, and
+    one counter-example is enough — so it stays a parameter too.
     §4.10's `sendAccessTokenExpired` and #15's new 503 go behind the same helper; the
     middleware tests that pin each envelope are what keep "byte-identical" honest,
     and none of them may be edited.
 
-    **(e) The refresh-cookie name stops disagreeing three ways.** The compiled
-    default (`config.go`'s `COOKIE_NAME_REFRESH` fallback) and **all three** compose
-    files say `orkestra_cookie`; `docker/.env.example` says `orkestra_cookie_refresh`
-    and `docs/site/operating/cookie-hardening-cross-tier.mdx`'s two sample
-    `set-cookie` lines follow `.env.example`. Three of the four sources agree, so the
-    two that do not move to **`orkestra_cookie`**. The doc is only exposing a config
+    **(e) The refresh-cookie name stops disagreeing.** **Two** values, across seven
+    sources. Four say `orkestra_cookie`: the compiled default (`config.go`'s
+    `COOKIE_NAME_REFRESH` fallback) and all three compose files. Three say
+    `orkestra_cookie_refresh`: `docker/.env.example` and the two sample `set-cookie`
+    lines in `docs/site/operating/cookie-hardening-cross-tier.mdx`, which follow it.
+    The majority is also the one a stack gets when it relies on the compose default,
+    so the three move to **`orkestra_cookie`**. The doc is only exposing a config
     inconsistency; fixing the config is what makes the doc true.
 
 ## Open questions — all ruled 2026-09-01 (O6 last, in round 15)
