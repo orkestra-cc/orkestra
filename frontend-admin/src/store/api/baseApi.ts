@@ -377,10 +377,12 @@ function liveBearer(state: RootState): string | null {
 // args and can decide whether the endpoint is tenant-scoped.
 //
 // ADR-0003 PR-C: the operator dashboard targets the operator host
-// (`console.*`). The default below uses `console.localhost:3000` so a
-// fresh checkout boots against the operator mux directly; setups that
-// can't resolve `*.localhost` fall back to the host-mux's dev
-// fallthrough by setting VITE_BACKEND_URL=http://localhost:3000.
+// (`console.*` in staging/prod). In development it targets `localhost:3000`,
+// which the host mux's dev fallthrough serves off the operator mux — the
+// console's own origin is `localhost:8080`, and this request carries
+// `credentials: 'include'` against a `SameSite=Lax` refresh cookie, so the
+// two must be one site (spec §8 follow-up #13). Put the console on
+// `console.localhost` end to end if you prefer, but never one of each.
 const baseQuery = fetchBaseQuery({
   baseUrl: runtimeConfig.apiUrl,
   credentials: 'include',

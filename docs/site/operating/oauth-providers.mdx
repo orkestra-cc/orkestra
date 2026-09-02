@@ -63,11 +63,11 @@ See [`backend/internal/core/auth/CLAUDE.md`](https://github.com/orkestra-cc/orke
    - **Authorized JavaScript origins**:
      - `https://console.orkestra.com` (operator, prod)
      - `https://api.orkestra.com` (client, prod)
-     - `http://console.localhost:8080` (dev, operator)
+     - `http://localhost:8080` (dev, operator)
      - `http://client.localhost:8081` (dev, client)
    - **Authorized redirect URI** (one callback, on the **operator backend**, not the frontend):
      - `https://console.orkestra.com/v1/auth/oauth/google/callback`
-     - `http://console.localhost:3000/v1/auth/oauth/google/callback` (dev, operator)
+     - `http://localhost:3000/v1/auth/oauth/google/callback` (dev, operator)
    The signed OAuth `state` selects the operator or client auth service after this callback, so client-tier flows do not need a client-host callback URI.
 5. Click **Create**.
 6. Save the **Client ID** and **Client Secret** — paste them into `/admin/modules/auth` under the **Google** group (or set `OAUTH_GOOGLE_CLIENT_ID` / `OAUTH_GOOGLE_CLIENT_SECRET` as seed env vars on first boot).
@@ -166,7 +166,7 @@ Treat a suspected Apple `.p8` private-key exposure as an incident. In order:
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and create a **New Application**.
 2. Open **OAuth2 → General**. Add the single operator-host redirect:
    - `https://console.orkestra.com/v1/auth/oauth/discord/callback`
-   - `http://console.localhost:3000/v1/auth/oauth/discord/callback` (dev)
+   - `http://localhost:3000/v1/auth/oauth/discord/callback` (dev)
    The signed OAuth `state` dispatches client-tier flows after the callback; do not add a client-host callback.
 3. Click **Reset Secret** to generate a client secret.
 4. Save the **Client ID** and **Client Secret** — paste them into `/admin/modules/auth` under the **Discord** group (or `OAUTH_DISCORD_CLIENT_ID` / `OAUTH_DISCORD_CLIENT_SECRET`).
@@ -244,16 +244,16 @@ For the Flutter mobile app, update:
 
 ### Local development
 
-1. Ensure your backend is running and reachable as both `http://console.localhost:3000` (operator) and `http://client.localhost:3000` (client) — the host mux dispatches on `Host`. The client API shares the client SPA's hostname because the client-tier cookies are `SameSite=Lax` and sibling `*.localhost` labels are different sites; add entries to `/etc/hosts` if your resolver needs them:
+1. Ensure your backend is running and reachable as both `http://localhost:3000` (operator — an unmatched `Host` falls through to the operator mux in development) and `http://client.localhost:3000` (client) — the host mux dispatches on `Host`. The client API shares the client SPA's hostname because the client-tier cookies are `SameSite=Lax` and sibling `*.localhost` labels are different sites; add entries to `/etc/hosts` if your resolver needs them:
 
    ```text
-   127.0.0.1 console.localhost client.localhost
+   127.0.0.1 client.localhost
    ```
 
 2. Start the frontends — operator on `http://localhost:8080`, client SPA on `http://client.localhost:8081`. `http://localhost:8080` is the shipped operator entry point: it matches the default `VITE_API_URL=http://localhost:3000`, so the console's origin and its API are same-site, and it is the hostname the console's dev server allows out of the box.
 
-   For the **operator** OAuth walk-through in step 3, put the console on `console.localhost` end to end instead — origin `http://console.localhost:8080`, `VITE_API_URL=http://console.localhost:3000`, `console.localhost` in `VITE_ADMIN_ALLOWED_HOSTS`. The `orkestra_oauth_state` cookie is host-only and `SameSite=Lax` (`oauth_state_binding.go:48-58`), so the host that answers the login POST must be the host that answers the callback; and the console's origin must stay same-site with `VITE_API_URL` or the refresh cookie is lost the same way (spec §8 follow-up #13).
-3. From the operator login page, start Google OAuth through `POST /v1/auth/operator/oauth/login`. The browser follows the returned authorization URL to Google, then returns to `http://console.localhost:3000/v1/auth/oauth/google/callback`, the single operator-host callback.
+   Two host rules bind the **operator** OAuth walk-through in step 3, and the shipped `localhost` layout satisfies both. The `orkestra_oauth_state` cookie is host-only and `SameSite=Lax` (`oauth_state_binding.go:48-58`), so the host that answers the login POST must be the host that answers the callback — both are `localhost:3000` here, which is why the dev callback registered above is `http://localhost:3000/v1/auth/oauth/google/callback` and matches the backend's compiled default. And the console's origin must stay same-site with `VITE_API_URL` or the refresh cookie is lost the same way; `scripts/env-validate.sh` refuses a mixed pairing (spec §8 follow-up #13). Putting the console on `console.localhost` end to end works too — origin `http://console.localhost:8080`, `VITE_API_URL=http://console.localhost:3000`, `console.localhost` in `VITE_ADMIN_ALLOWED_HOSTS` — but then the registered callback has to move to `http://console.localhost:3000/...` with it, and `OAUTH_GOOGLE_REDIRECT_URL` has to say so.
+3. From the operator login page, start Google OAuth through `POST /v1/auth/operator/oauth/login`. The browser follows the returned authorization URL to Google, then returns to `http://localhost:3000/v1/auth/oauth/google/callback`, the single operator-host callback.
 4. Repeat from the client SPA (`http://client.localhost:8081/login`) — its provider buttons call `POST /v1/auth/client/oauth/login`. The signed state carries `tier=client`, so the same operator-host callback performs only the IdP half and relays the outcome to `http://client.localhost:3000/v1/auth/client/oauth/complete?relay=…` on the client API host, which verifies the browser binding against the state cookie it set at start, issues the `aud=client` session and the client-tier refresh cookie, and lands on `http://client.localhost:8081/auth/callback`, where the SPA adopts the cookie through `POST /v1/auth/client/refresh-cookie`.
 
 ### Production

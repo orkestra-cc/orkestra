@@ -328,7 +328,7 @@ mongod whose only symptom was a failure at setup-finalization time.
 | Service                  | Host port | Purpose                              | Features                                                       |
 | ------------------------ | --------- | ------------------------------------ | -------------------------------------------------------------- |
 | **backend**              | 3007      | Go API server                        | Hot reload (AIR), debug logs                                   |
-| **frontend-admin**             | 8087      | Operator console (Tier-1)            | Vite dev server, HMR; host `console.localhost`                 |
+| **frontend-admin**             | 8087      | Operator console (Tier-1)            | Vite dev server, HMR; host `localhost`; consumes the operator API on `localhost:3000` (same site — see below) |
 | **client-frontend**      | 8081      | Tier-2 client demo SPA               | Vite dev server, HMR; host `client.localhost`; consumes the client API on `client.localhost:3000` (same site — see below) |
 
 #### Staging (`docker-compose.staging.yml`)
@@ -473,8 +473,19 @@ console at `http://console.localhost:8080` while `VITE_API_URL` still points at
 request and drops the `SameSite=Lax` cookie. **Both on `localhost`, or both on
 `console.localhost` (which also needs `VITE_API_URL=http://console.localhost:3000`
 and `console.localhost` in `VITE_ADMIN_ALLOWED_HOSTS`) — never one of each.**
-Making the operator tier same-site by configuration the way the client tier now
-is has not been done: spec §8 follow-up #13.
+
+**The shipped convention is `localhost` end to end** (spec §8 follow-up #13): the
+console's origin (`FRONTEND_URL=http://localhost:8080`), the API its SPA calls
+(`VITE_API_URL=http://localhost:3000`), the code fallbacks in
+`frontend-admin/src/config/environment.ts` and `public/config.example.js`, and the
+compiled OAuth callback defaults (`http://localhost:3000/v1/auth/oauth/…`) all name
+one host, and `scripts/env-validate.sh` refuses a **mixed** pairing (either
+convention passes; one of each does not). It costs no env key, no allow-list entry
+and no host registration — `localhost:3000` reaches the operator mux through the
+dev fallthrough above. `CONSOLE_HOST` keeps its `console.localhost:3000` default
+and is what it has always been in practice, a staging/production knob: nothing
+stops a contributor putting the console on `console.localhost` end to end, but the
+docs, the defaults and the OAuth recipe all prescribe `localhost`.
 
 **Per-audience env vars** (compose passes these through to the backend):
 

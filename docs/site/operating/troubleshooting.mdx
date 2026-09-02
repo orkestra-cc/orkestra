@@ -93,7 +93,7 @@ See [ADR-0003 host split](/adrs/three-audience-host-split) for the full audience
 
 The redirect URI you registered with the OAuth provider doesn't match what the backend computed. Two sub-cases:
 
-1. **Wrong host registered.** Provider expects `http://console.localhost:3000/v1/auth/oauth/google/callback`, you registered `http://localhost:3000/...`. Re-register with the operator host.
+1. **Wrong host registered.** In development the backend computes `http://localhost:3000/v1/auth/oauth/google/callback` — the compiled default, and the operator host under the shipped `localhost` convention — so a callback registered on `console.localhost:3000` (or any other host) mismatches. Re-register with the host the backend actually answers the login POST on, or set `OAUTH_GOOGLE_REDIRECT_URL` to the host you registered.
 2. **HTTP vs HTTPS mismatch.** Production registers `https://...`, backend redirected with `http://...`. Set `BACKEND_URL=https://console.example.com` in `docker/.env`.
 
 See [OAuth Providers](./oauth-providers) for the per-provider walkthroughs.

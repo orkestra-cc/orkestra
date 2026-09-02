@@ -2851,8 +2851,8 @@ returning outcomes.
     The docs now say which level governs and how to change it; the schema and the
     resolution order are **not** touched — that would be a behaviour change, and this
     is a note about what the code does.
-13. **The operator console is same-site only by default** —
-    **ruled in for this branch (batch 3)**, as **convention A: `localhost` for both
+13. **The operator console is same-site only by default** — ✅ **done in this
+    branch (batch 3)**, as **convention A: `localhost` for both
     the console and its API.**
     #10's fix gave the client tier a dedicated `CLIENT_API_HOST`; the operator tier
     has no equivalent, so the console's origin and `VITE_API_URL` (default
@@ -2890,8 +2890,7 @@ returning outcomes.
       `console.localhost:3000` while the runtime config compose writes says
       `localhost:3000`. The code default stops disagreeing with the shipped one;
     - the **compiled OAuth redirect defaults** — ✅ **done in this branch
-      (batch 3)**; the other three bullets of this entry are frontend/doc work and
-      stay open for their own waves. `internal/shared/config/config.go`'s
+      (batch 3)**. `internal/shared/config/config.go`'s
       four `OAUTH_*_REDIRECT_URL` fallbacks and the `AllowedRedirectURIs` list in
       `internal/core/auth/utils/redirect_validation.go`. Their host is already
       `localhost:3000`, which is right under A, but their **path is the pre-`/v1`
@@ -2934,6 +2933,33 @@ returning outcomes.
     it already is in practice — a staging/production knob. Nothing stops a
     contributor putting the console on `console.localhost` end to end; A decides only
     what ships, what the docs prescribe, and what the compiled defaults agree with.
+
+    *As shipped:* the two code fallbacks and the template are `localhost:3000` /
+    `ws://localhost:3000/ws`, each carrying a comment that says why, so the next
+    reader does not "restore" the operator host; the two stale comments that
+    asserted the old default — `baseApi.ts`'s ADR-0003 PR-C note and
+    `test/handlers.ts`'s example — moved with them. No test pinned either fallback
+    and none was added: it is unreachable through the shipped runtime config, which
+    always supplies `apiUrl`. On the doc side the rule sentences keep stating the
+    rule (both `localhost` **or** both `console.localhost`, never one of each) and
+    now also name `localhost` as what ships; the OAuth recipe's dev JavaScript
+    origin, its three dev callback URLs, its `/etc/hosts` line and the
+    walk-through moved to `localhost`, with the login-POST-host = callback-host
+    sentence kept and the `console.localhost` layout retained as an explicit
+    alternative that has to move its registered callback with it;
+    `troubleshooting.mdx`'s `redirect_uri_mismatch` case, which had the two hosts
+    exactly backwards, now names what the backend actually computes.
+    `docs/Multi-Environment-Setup.md`'s dev row and Google recipe moved too —
+    including that recipe's dev **client** callback, which still said
+    `api.localhost` from before #10 and contradicted the table in the same file.
+    Two families of `console.localhost` mention are deliberately **not** changed:
+    `CONSOLE_HOST`'s own default wherever it is documented (`docker/CLAUDE.md`,
+    ADR-0003, `docker-compose.dev.yml`) — the paragraph above says it keeps that
+    value — and `docs/Authentication_flow.md:190`, which is about
+    `OPERATOR_COOKIE_DOMAIN` rather than the console origin, in the pre-migration
+    duplicate the root `CLAUDE.md` already marks as drifted (its claim of a
+    `console.localhost` dev default is separately false: `defaultOperatorCookieDomain`
+    returns `""`).
 14. **A live-bearer codeless 401 strands the console for up to `TTL − 30 s`** — ✅
     **done in this branch (batch 3)**; the contract is the third arm §7
     specifies, down to the two `baseApi.replayGuard.test.ts` assertions that flip
@@ -3155,9 +3181,8 @@ returning outcomes.
     rejected — so changing it is a security-shaped decision rather than a
     classification one, and it belongs in its own follow-up.
 18. **Cleanups** — **ruled in for this branch (batch 3)**, five of them, each small
-    and each already diagnosed. **(a), (b), (c) and (d) are ✅ done
-    in this branch (batch 3);** (e) is a config/doc alignment that has not been
-    made yet:
+    and each already diagnosed. **all five are ✅ done in this
+    branch (batch 3)**:
 
     **(a) `handleOAuthCallback` and `useHandleOAuthCallbackMutation` are deleted**
     — ✅ **done in this branch (batch 3)**
@@ -3286,6 +3311,15 @@ returning outcomes.
     The majority is also the one a stack gets when it relies on the compose default,
     so the three move to **`orkestra_cookie`**. The doc is only exposing a config
     inconsistency; fixing the config is what makes the doc true.
+
+    *As shipped:* exactly those three lines — `docker/.env.example`'s
+    `COOKIE_NAME_REFRESH` and the two sample `set-cookie` lines in
+    `cookie-hardening-cross-tier.mdx`. Nothing reads the name at build time and no
+    test pins it, so the edit is inert for any stack that sets the key explicitly;
+    what it fixes is the next `.env` copied from the example silently disagreeing
+    with all three compose files. A deployment whose `.env` still says
+    `orkestra_cookie_refresh` keeps that name and keeps working — the value is read
+    at boot — but every live session ends the day it adopts the new example.
 
 ## Open questions — all ruled 2026-09-01 (O6 last, in round 15)
 
