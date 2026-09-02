@@ -1642,16 +1642,15 @@ const res = await doFetch(path, init, sent.token);
 `refreshAfterUnauthorized`. A proactive rotation is automatic by definition, and
 the marker gate is a correct optimisation here rather than the hole §4.3 4a routes
 around: a visitor with no session has no `expiresAt` either, so the branch cannot
-fire for them at all. The one input where the gate does bite is §5.8's tab — a live
-in-memory token with **no** marker, reachable through a throwing `localStorage` or
-a sibling's sign-out (§5 item 7) — and there the proactive attempt is simply a
-no-op, so that
-tab keeps the reactive path it has today and branch 4a, which is deliberately *not*
-marker-gated, recovers it. One extra round-trip, never a wrong sign-out, which is
-the same trade §4.3's 4a/4b split already makes. `refreshAccessToken` never
-rejects, is coalesced in-tab, serialised across tabs by §4.1a's Web Lock and
-bounded by §4.1c's timeout; the arm inherits all four properties instead of
-restating any of them.
+fire for them at all. The one input where the gate does bite is §5 item 7's tab
+— a live in-memory token with **no** marker, reachable through a throwing
+`localStorage` or a sibling's sign-out — and there the proactive attempt is
+simply a no-op, so that tab keeps the reactive path it has today and branch 4a,
+which is deliberately *not* marker-gated, recovers it. One extra round-trip,
+never a wrong sign-out, which is the same trade §4.3's 4a/4b split already
+makes. `refreshAccessToken` never rejects, is coalesced in-tab, serialised
+across tabs by §4.1a's Web Lock and bounded by §4.1c's timeout; the arm inherits
+all four properties instead of restating any of them.
 
 The outcome is then **ignored**, and that is a design decision rather than a
 shortcut — each of the three is already handled where it is decided:
