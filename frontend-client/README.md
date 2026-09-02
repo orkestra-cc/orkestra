@@ -50,7 +50,7 @@ MSW runs with `onUnhandledRequest: 'error'`: stub every endpoint a component mou
 
 ## Typed API client
 
-There isn't one, on purpose. Every endpoint is a hand-typed wrapper in `src/api/<feature>.ts` — authenticated calls through `src/api/authedFetch.ts`, anonymous ones through `jsonFetch` in `src/api/auth.ts`. The OpenAPI type generator, the typed-client runtime that consumed its output, the `codegen` script and the committed types stub under `src/api/` all left with issue #325: nothing imported any of them, so the generated types typed nothing and the dependency's Dependabot bumps were vacuous by construction.
+There isn't one, on purpose. Every endpoint is a hand-typed wrapper in `src/api/<feature>.ts` — authenticated calls through `src/api/authedFetch.ts`, anonymous ones through `jsonFetch` in `src/api/auth.ts` (with one exception: `verifyEmail.ts` stays on a raw `fetch`). The OpenAPI type generator, the typed-client runtime that consumed its output, the `codegen` script and the committed types stub under `src/api/` all left with issue #325: nothing imported any of them, so the generated types typed nothing and the dependency's Dependabot bumps were vacuous by construction.
 
 If a typed client is ever wanted it re-adds a pinned dependency in the same PR that writes the middleware, against a freshly generated type rather than a stub — and that middleware must **delegate** to `authedFetch`'s 401 policy rather than restate it. See §8 #3 of [`docs/superpowers/specs/2026-09-01-client-401-recovery-design.md`](../docs/superpowers/specs/2026-09-01-client-401-recovery-design.md); the client #325 deleted is what a restatement looks like.
 

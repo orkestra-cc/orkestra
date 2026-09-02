@@ -38,10 +38,14 @@ Edit `.env` with your configuration:
 4. Create OAuth 2.0 credentials:
    - Application type: Web application
    - Authorized redirect URI: `http://localhost:3000/v1/auth/oauth/google/callback`
-     (the mounted path, and the compiled `OAUTH_GOOGLE_REDIRECT_URL` default;
-     the host must be the same one the login POST goes to, because the
-     `orkestra_oauth_state` cookie is host-only)
-5. Copy Client ID and Client Secret to `.env`
+     (the mounted path; the host must be the same one the login POST goes
+     to, because the `orkestra_oauth_state` cookie is host-only)
+5. Copy Client ID and Client Secret to `.env`, or set them at
+   `/admin/modules/auth` after first login. What the backend actually sends
+   Google is the auth module's **Redirect URL** field for the provider, so
+   that field and the URI you registered above must match exactly;
+   `OAUTH_GOOGLE_REDIRECT_URL` only seeds it when the module config is first
+   created, and editing the variable on a running install changes nothing
 
 ### 3. Apple Sign In Setup (Optional)
 

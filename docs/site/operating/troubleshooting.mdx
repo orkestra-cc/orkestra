@@ -91,10 +91,14 @@ See [ADR-0003 host split](/adrs/three-audience-host-split) for the full audience
 
 ### Symptom: OAuth callback returns `redirect_uri_mismatch`
 
-The redirect URI you registered with the OAuth provider doesn't match what the backend computed. Two sub-cases:
+The redirect URI you registered with the OAuth provider doesn't match the one the backend sent. **The backend does not compute that URI** — it sends the auth module's stored **Redirect URL** for the provider, verbatim. So start every diagnosis in the same place: open `/admin/modules/auth`, expand the provider's group, and read the **Redirect URL** field. That string, character for character, is what must be registered with the IdP.
 
-1. **Wrong host registered.** In development the backend computes `http://localhost:3000/v1/auth/oauth/google/callback` — the compiled default, and the operator host under the shipped `localhost` convention — so a callback registered on `console.localhost:3000` (or any other host) mismatches. Re-register with the host the backend actually answers the login POST on, or set `OAUTH_GOOGLE_REDIRECT_URL` to the host you registered.
-2. **HTTP vs HTTPS mismatch.** Production registers `https://...`, backend redirected with `http://...`. Set `BACKEND_URL=https://console.example.com` in `docker/.env`.
+`OAUTH_GOOGLE_REDIRECT_URL` and friends only *seed* that field when the module config is first created — on an install that already booted, editing the variable changes nothing. Change it in the admin UI. (An empty field is a different symptom: the web flow refuses the provider before it ever reaches the IdP.)
+
+Two sub-cases, both read off that field:
+
+1. **Wrong host.** Under the shipped `localhost` convention the field reads `http://localhost:3000/v1/auth/oauth/google/callback`, so a callback registered on `console.localhost:3000` (or any other host) mismatches. The host is not free: `orkestra_oauth_state` is host-only, so the callback host must equal the host that answers the login POST. Move both together, or re-register to match.
+2. **HTTP vs HTTPS.** Production registers `https://...` while the field still says `http://...`. Fix the scheme in the **Redirect URL** field — `BACKEND_URL` in `docker/.env` does not affect it (no backend code reads that variable).
 
 See [OAuth Providers](./oauth-providers) for the per-provider walkthroughs.
 
