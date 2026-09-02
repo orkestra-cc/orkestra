@@ -234,6 +234,15 @@ validate_env_file() {
             STORAGE_SECRET_KEY)
                 if [ -z "$value" ] && [ -z "$(env_value STORAGE_ACCESS_KEY)" ]; then
                     print_info "STORAGE_ACCESS_KEY and STORAGE_SECRET_KEY are empty — object storage disabled"
+                    # The bundled rustfs container still starts with the infra
+                    # stack, and docker-compose.infra.yml derives its root from
+                    # the STORAGE_* pair — with both empty it refuses to render
+                    # unless RUSTFS_ROOT_* provide a root of their own. Every
+                    # environment: the stack would not come up at all.
+                    if [ -z "$(env_value RUSTFS_ROOT_USER)" ] || [ -z "$(env_value RUSTFS_ROOT_PASSWORD)" ]; then
+                        print_error "object storage is disabled but the bundled rustfs container still starts — set RUSTFS_ROOT_USER and RUSTFS_ROOT_PASSWORD (openssl rand -hex 16) or docker-compose.infra.yml will not render"
+                        errors=$((errors + 1))
+                    fi
                     continue
                 fi
                 ;;
@@ -410,7 +419,8 @@ ${BLUE}Checks performed:${NC}
       ORKESTRA_KMS_MASTER_KEY, MONGO_ROOT_PASSWORD, REDIS_PASSWORD,
       STORAGE_SECRET_KEY, a set RUSTFS_ROOT_PASSWORD) is a real value: not a
       shipped placeholder, at least 16 characters. Error in staging and
-      production, warning in development.
+      production, warning in development. Object storage disabled (both
+      STORAGE_* keys empty) needs RUSTFS_ROOT_* for the bundled container.
     - No placeholder/development values in production
 
 ${BLUE}Switching Environments:${NC}

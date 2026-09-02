@@ -67,9 +67,14 @@ check "production: the refusal explains the length rule"   "yes" "$(saw 'REDIS_P
 check "production: a set RustFS root password is checked"  "1"   "$(run "${prod[@]}" RUSTFS_ROOT_PASSWORD=changeme-rustfs)"
 check "production: an unset RustFS root is not an error"   "0"   "$(run "${prod[@]}")"
 
-# --- object storage may be disabled outright: both keys empty ---
-check "production: storage disabled passes"                "0"   "$(run "${prod[@]}" STORAGE_ACCESS_KEY= STORAGE_SECRET_KEY=)"
+# --- object storage may be disabled outright: both keys empty — but the bundled
+# rustfs container still starts with the infra stack and needs a root of its own ---
+rustfs_root=(RUSTFS_ROOT_USER=rustfs-root "RUSTFS_ROOT_PASSWORD=${hex32}")
+check "production: storage disabled with a RustFS root passes" "0" "$(run "${prod[@]}" STORAGE_ACCESS_KEY= STORAGE_SECRET_KEY= "${rustfs_root[@]}")"
 check "production: storage disabled is reported"           "yes" "$(saw 'object storage disabled')"
+check "production: storage disabled without a RustFS root is refused" "1" "$(run "${prod[@]}" STORAGE_ACCESS_KEY= STORAGE_SECRET_KEY=)"
+check "production: the refusal names the RustFS root"      "yes" "$(saw 'set RUSTFS_ROOT_USER and RUSTFS_ROOT_PASSWORD')"
+check "development: storage disabled without a RustFS root is refused too" "1" "$(run STORAGE_ACCESS_KEY= STORAGE_SECRET_KEY=)"
 check "production: a key id with no secret is an error"    "1"   "$(run "${prod[@]}" STORAGE_SECRET_KEY=)"
 
 # --- staging is as strict as production ---
