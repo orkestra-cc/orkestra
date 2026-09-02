@@ -365,6 +365,25 @@ check "wiz_urls kept the host the user typed" \
 rm -rf "$ev_tmp"
 rm -f "$ev_out"
 
+# --- Clone-version pin: exported once by the caller, honored on every
+# resolution, never confused with the resolver's own previous export. ---
+pin_tmp="$(mktemp)"
+printf 'APP_NAME=orkestra-test\nENV=staging\n' > "$pin_tmp"
+old_env_file="$ENV_FILE"
+ENV_FILE="$pin_tmp"
+ENV=staging
+ORKESTRA_CLONE_VERSION_PIN="v9.9.9"
+resolve_stack_identity
+check "clone-version pin wins over git describe" "v9.9.9" "$ORKESTRA_CLONE_VERSION"
+ORKESTRA_CLONE_VERSION_PIN=""
+ORKESTRA_CLONE_VERSION="stale-from-previous-resolution"
+resolve_stack_identity
+check "re-resolution without a pin recomputes the clone version" "dev" "$ORKESTRA_CLONE_VERSION"
+check "build commit is derived from HEAD" "$(git rev-parse --short HEAD)" "$ORKESTRA_BUILD_COMMIT"
+unset ORKESTRA_CLONE_VERSION ORKESTRA_BUILD_COMMIT
+ENV_FILE="$old_env_file"
+rm -f "$pin_tmp"
+
 
 echo
 printf 'orkestra-helpers: %d passed, %d failed\n' "$pass" "$fail"
