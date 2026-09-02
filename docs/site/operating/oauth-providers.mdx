@@ -244,15 +244,15 @@ For the Flutter mobile app, update:
 
 ### Local development
 
-1. Ensure your backend is running and reachable as both `http://console.localhost:3000` (operator) and `http://api.localhost:3000` (client) — the host mux dispatches on `Host`. Add entries to `/etc/hosts` if needed:
+1. Ensure your backend is running and reachable as both `http://console.localhost:3000` (operator) and `http://client.localhost:3000` (client) — the host mux dispatches on `Host`. The client API shares the client SPA's hostname because the client-tier cookies are `SameSite=Lax` and sibling `*.localhost` labels are different sites; add entries to `/etc/hosts` if your resolver needs them:
 
    ```text
-   127.0.0.1 console.localhost api.localhost client.localhost
+   127.0.0.1 console.localhost client.localhost
    ```
 
 2. Start the frontends — operator on `http://console.localhost:8080`, client SPA on `http://client.localhost:8081`.
 3. From the operator login page, start Google OAuth through `POST /v1/auth/operator/oauth/login`. The browser follows the returned authorization URL to Google, then returns to `http://console.localhost:3000/v1/auth/oauth/google/callback`, the single operator-host callback.
-4. Repeat from the client SPA (`http://client.localhost:8081/login`) — its provider buttons call `POST /v1/auth/client/oauth/login`. The signed state carries `tier=client`, so the same operator-host callback performs only the IdP half and relays the outcome to `http://api.localhost:3000/v1/auth/client/oauth/complete?relay=…` on the client API host, which verifies the browser binding against the state cookie it set at start, issues the `aud=client` session and the client-tier refresh cookie, and lands on `http://client.localhost:8081/auth/callback`, where the SPA adopts the cookie through `POST /v1/auth/client/refresh-cookie`.
+4. Repeat from the client SPA (`http://client.localhost:8081/login`) — its provider buttons call `POST /v1/auth/client/oauth/login`. The signed state carries `tier=client`, so the same operator-host callback performs only the IdP half and relays the outcome to `http://client.localhost:3000/v1/auth/client/oauth/complete?relay=…` on the client API host, which verifies the browser binding against the state cookie it set at start, issues the `aud=client` session and the client-tier refresh cookie, and lands on `http://client.localhost:8081/auth/callback`, where the SPA adopts the cookie through `POST /v1/auth/client/refresh-cookie`.
 
 ### Production
 

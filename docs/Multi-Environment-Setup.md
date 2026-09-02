@@ -16,7 +16,7 @@ Per-audience host mapping (post-ADR-0003):
 
 | Environment | Operator console (Tier-1) | Client API (Tier-2) | Client app (Tier-2 SPA) | OAuth credentials | Database |
 |------------|---------------------------|---------------------|--------------------------|--------------------|----------|
-| **Development** | `console.localhost:3000` (backend) + `:8080` (Vite) | `api.localhost:3000` | `client.localhost:8081` | Shared dev creds (ConfigService) | Local Docker |
+| **Development** | `console.localhost:3000` (backend) + `:8080` (Vite) | `client.localhost:3000` (same site as the SPA — the client cookies are `SameSite=Lax`) | `client.localhost:8081` | Shared dev creds (ConfigService) | Local Docker |
 | **Staging** | `staging-console.orkestra.cc` | `staging-api.orkestra.cc` | `app.orkestra.cc` (HMR target) | Shared dev creds | Cloud/isolated |
 | **Production** | `console.orkestra.com` | `api.orkestra.com` | `orkestra.cc` (marketing) / `app.orkestra.cc` (Tier-2 SPA) | **Separate prod credentials** | Dedicated with HA |
 

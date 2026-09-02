@@ -67,7 +67,7 @@ RUN printf '#!/bin/sh\n\
 set -e\n\
 cat > /usr/share/nginx/html/config.js <<EOF\n\
 window.__ORKESTRA_CONFIG__ = {\n\
-  apiBase: "${ORKESTRA_API_BASE:-http://api.localhost:3000}",\n\
+  apiBase: "${ORKESTRA_API_BASE:-http://client.localhost:3000}",\n\
   stripePublishableKey: "${ORKESTRA_STRIPE_PUBLISHABLE_KEY:-}"\n\
 };\n\
 EOF\n\

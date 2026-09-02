@@ -2246,8 +2246,8 @@ fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
    precisely" block — including its explicit "do not fix it opportunistically",
    which this amendment is the authorisation to lift — and the `SEVEN sites`
    enumeration in `auth_service.go`'s sentinel comment.
-10. **The dev host layout cannot carry the client-tier cookies** — **ruled in for
-    this branch (batch 2)**; dev-only, and config-only. `client.localhost` and
+10. **The dev host layout cannot carry the client-tier cookies** — **done in this
+    branch (batch 2)**; dev-only, and config-only. `client.localhost` and
     `api.localhost` are **different sites** to Chromium: `localhost` is not in the
     Public Suffix List, so `SchemefulSite` falls back to `scheme://host` (ports are
     irrelevant to site). Every client-tier cookie is minted `SameSite=Lax` with an

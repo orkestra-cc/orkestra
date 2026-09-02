@@ -204,20 +204,30 @@ The mobile entry points are tier-aware just like the web ones, so a mobile clien
 
 ## 6. Refresh + cookie scope
 
-The refresh token is delivered as an `HttpOnly; Secure; SameSite=Lax` cookie on every successful auth response. The cookie's `Domain` attribute is **scoped to the audience**:
+The refresh token is delivered as an `HttpOnly; SameSite=Lax` cookie — plus `Secure` when `COOKIE_SECURE=true`, the staging/prod default and off in dev — on every successful auth response. `SameSite=Lax` is a Go literal in every mint path (`password_handler.go:411-424`, `utils/http.go:53-64`); `COOKIE_SAME_SITE` is read into config and never consumed, so **there is no configuration path to `SameSite=None`**.
 
-| Mux                    | `Set-Cookie: orkestra_cookie=...; Domain=`                       |
-| ---------------------- | ---------------------------------------------------------------- |
-| Operator (`console.*`) | `OPERATOR_COOKIE_DOMAIN` (default dev: `console.localhost`)      |
-| Client (`api.*`)       | `CLIENT_COOKIE_DOMAIN`   (default dev: `api.localhost`)          |
+The cookie's `Domain` attribute is per audience and **empty by default in every environment**:
 
-Empty per-tier values fall back to the legacy `COOKIE_DOMAIN` for single-host deployments.
+| Mux                      | `Set-Cookie: orkestra_cookie=...; Domain=`               |
+| ------------------------ | -------------------------------------------------------- |
+| Operator (`console.*`)   | `OPERATOR_COOKIE_DOMAIN` — empty unless the operator sets it |
+| Client (client API host) | `CLIENT_COOKIE_DOMAIN` — empty unless the operator sets it   |
+
+An empty value means **no `Domain` attribute at all**: the cookie is host-only, scoped to exactly the host that minted it. That is deliberate (`config.go:467-474`) — a host-only cookie round-trips on `localhost`, on `*.localhost` **and** on a LAN IP, and an IP literal cannot be a cookie `Domain` in the first place. There is no legacy `COOKIE_DOMAIN` fallback: these two vars are the only inputs.
 
 :::warning
-In production-like envs operators MUST set both explicitly — leaving them empty defeats the host split because the legacy `COOKIE_DOMAIN` spans both audiences.
+Set either one explicitly only for a **cross-subdomain** deployment, where that tier's SPA and API sit on different hosts under a shared parent and must share one cookie. Empty is the safe default — it confines each tier's session to its minting host. What must never happen is a `Domain` wide enough to span both audiences.
 :::
 
-Refresh cookies are scoped narrowly enough that the browser won't send a `console.*` refresh cookie on an `api.*` request and vice versa, so cross-audience replay is structurally impossible at the cookie layer in addition to being rejected at the JWT layer.
+:::danger
+**The client SPA and the client API must be same-site.** `SameSite=Lax` is evaluated against the *request's* site, never against the cookie's `Domain`, so no `CLIENT_COOKIE_DOMAIN` value can rescue a cross-site layout — a cross-site `fetch(..., {credentials: "include"})` neither sends the cookie nor accepts it from the response.
+
+`localhost` is not in the Public Suffix List, so a browser falls back to the whole host: `client.localhost` and `api.localhost` are **different sites**. The dev layout therefore serves the client SPA and the client API from one hostname — `http://client.localhost:8081` and `http://client.localhost:3000`. A **port is not part of a site**, so those are same-site while staying cross-*origin*: the CORS preflight and `Access-Control-Allow-Credentials` are still on the path, which is what `CLIENT_CORS_ORIGINS` exists for. The OAuth state cookie (`oauth_state_binding.go:56,71`) and the device cookie (`middleware/device.go:61-69`) are `SameSite=Lax` too, so a cross-site layout takes client-tier social login down with the refresh.
+
+Staging and prod keep the ADR-0003 three-host split unchanged, because there the hosts already share a registrable domain: `app.orkestra.cc` and `staging-api.orkestra.cc` are both `orkestra.cc`, hence same-site. **The rule is _same site_, not _same host_** — only `*.localhost`, which has no registrable domain, forces the dev hostnames to coincide. The operator console was never exposed to this: it calls `localhost:3000` from `localhost:8080`.
+:::
+
+Refresh cookies stay confined to their minting host, so the browser won't send a `console.*` refresh cookie to the client API host or vice versa — cross-audience replay is structurally impossible at the cookie layer in addition to being rejected at the JWT layer.
 
 ### Access-token expiry and refresh
 

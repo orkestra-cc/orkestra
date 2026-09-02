@@ -34,15 +34,22 @@ The audience JWT gate (`RequireAudience` middleware, see [shared/middleware/audi
 
 ```bash
 # docker/.env — what `make init` produces.
-COOKIE_DOMAIN=localhost
-OPERATOR_COOKIE_DOMAIN=console.localhost
-CLIENT_COOKIE_DOMAIN=api.localhost
+OPERATOR_COOKIE_DOMAIN=
+CLIENT_COOKIE_DOMAIN=
 COOKIE_SECURE=false
 COOKIE_SAME_SITE=lax
 ALLOW_LOCALHOST_REDIRECTS=true
 ```
 
-You'll need `/etc/hosts` entries (`127.0.0.1 console.localhost api.localhost client.localhost`) so the host mux can dispatch correctly. The browser treats `localhost` and `*.localhost` as the same eTLD+1 for the public-suffix list, so cookie scoping isn't enforced strictly — that's why dev is permissive. **Do not ship this configuration to production.**
+**Both domains are empty on purpose**, and that is the whole dev configuration. An empty value writes no `Domain` attribute at all, so each refresh cookie is host-only — scoped to exactly the host that minted it, which round-trips on `localhost`, on `*.localhost` and on a LAN IP for multi-device testing (an IP literal cannot be a cookie `Domain`). This is the shipped default in **every** environment (`config.go:467-474`), not a dev-only relaxation.
+
+:::note
+`COOKIE_DOMAIN` is **not read by the backend** — `OPERATOR_COOKIE_DOMAIN` and `CLIENT_COOKIE_DOMAIN` are the only inputs (`config.go:321-322`). The `COOKIE_DOMAIN` lines in the deployment examples further down are inert; purging them is a pending docs follow-up.
+:::
+
+`COOKIE_SAME_SITE` is read into config and **never consumed** — every cookie the backend mints writes `SameSite=Lax` literally, in every environment — so this key changes nothing and cannot be used to relax anything.
+
+Add `/etc/hosts` entries (`127.0.0.1 console.localhost client.localhost`) if your resolver does not answer `*.localhost` itself. Note that `localhost` is **not** in the Public Suffix List, so sibling `*.localhost` labels are *not* one site: `client.localhost` and `api.localhost` are different sites to a browser, and a `SameSite=Lax` cookie will not cross between them. That is why the dev client API answers on `client.localhost:3000`, the same hostname the client SPA is served on — see [Refresh + cookie scope](/architecture/authentication-flow#6-refresh--cookie-scope). **Do not ship this configuration to production.**
 
 ### Production — single domain, separate subdomains
 

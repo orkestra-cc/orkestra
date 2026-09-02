@@ -1,6 +1,6 @@
 # orkestra-client
 
-Tier-2 (external client) demo SPA. Consumes the ADR-0003 **client** API surface (`api.orkestra.com` / `api.localhost:3000`, JWT `aud=client`). Sibling to the operator console at [`/frontend-admin`](../frontend-admin) — separate cookie domain, separate OpenAPI surface, distinct visual language.
+Tier-2 (external client) demo SPA. Consumes the ADR-0003 **client** API surface (`api.orkestra.com` in prod / `client.localhost:3000` in dev, JWT `aud=client`). Sibling to the operator console at [`/frontend-admin`](../frontend-admin) — separate cookie domain, separate OpenAPI surface, distinct visual language.
 
 ## Stack
 
@@ -14,11 +14,13 @@ Tier-2 (external client) demo SPA. Consumes the ADR-0003 **client** API surface 
 
 ## Dev quickstart
 
-Both backend and the client SPA run in Docker. One prerequisite first — the **hosts file**, because cookie-domain isolation per ADR-0003 D-9 only works when the SPA and the API are on different `*.localhost` hostnames:
+Both backend and the client SPA run in Docker. Most resolvers answer `*.localhost` themselves; if yours does not, add the **hosts file** entries the dev stack uses:
 
 ```
-127.0.0.1 console.localhost api.localhost client.localhost
+127.0.0.1 console.localhost client.localhost
 ```
+
+**The SPA and the client API share `client.localhost` on purpose — do not split them onto `api.localhost`.** Every client-tier cookie (refresh, OAuth state, device) is minted `SameSite=Lax` with no `Domain`, and `localhost` is not in the Public Suffix List, so a browser treats `client.localhost` and `api.localhost` as different _sites_: a cross-site `fetch(..., {credentials: "include"})` neither stores nor sends those cookies, and client login succeeds while the very next refresh 401s. A port is not part of a site, so `:8081` (SPA) and `:3000` (API) are same-site while staying cross-origin — the CORS preflight is still on the path. In staging/prod the three-host ADR-0003 split stands, because there the hosts share a registrable domain (`app.orkestra.cc` + `staging-api.orkestra.cc` under `orkestra.cc`). The rule is _same site_, not _same host_.
 
 No payment keys are needed: `docker/.env` still carries a `VITE_STRIPE_PUBLISHABLE_KEY` slot that the compose files pass through into `/config.js`, but no base code reads it — it stays reserved for a fork that rebuilds the billing layer.
 
@@ -34,7 +36,7 @@ Open:
 
 - **Demo SPA** — http://client.localhost:8081
 - Operator console — http://console.localhost:8080
-- Backend API — http://api.localhost:3000 (client surface) + http://console.localhost:3000 (operator)
+- Backend API — http://client.localhost:3000 (client surface) + http://console.localhost:3000 (operator)
 
 ## Tests
 
@@ -53,11 +55,11 @@ The committed `src/api/openapi.gen.ts` is a stub. Regenerate against the live ba
 ```bash
 # from the host (backend must be running)
 cd frontend-client
-VITE_API_BASE=http://api.localhost:3000 npm run codegen
+VITE_API_BASE=http://client.localhost:3000 npm run codegen
 
 # or from inside the dev container (container name is stack-namespaced —
 # ${APP_NAME}-client-frontend-${ENV}; example below is orkestra/development)
-docker exec orkestra-client-frontend-development sh -c "VITE_API_BASE=http://api.localhost:3000 npm run codegen"
+docker exec orkestra-client-frontend-development sh -c "VITE_API_BASE=http://client.localhost:3000 npm run codegen"
 ```
 
 The result is a single `src/api/openapi.gen.ts`, and **nothing imports it today**: the `openapi-fetch` client that used to consume it in `src/api/client.ts` was deleted with issue #325 — it carried a second, wrong 401 algorithm that nothing routed through — and every authenticated call now goes through `src/api/authedFetch.ts`. The generated types and the `openapi-fetch` dependency both stay, for the typed client that will eventually replace the hand-typed wrappers; that client must **delegate** to `authedFetch`'s 401 policy rather than restate it. Commit the regenerated file — CI builds without a live backend, and committing keeps the type contract versioned alongside the SPA.

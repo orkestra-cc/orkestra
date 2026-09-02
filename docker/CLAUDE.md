@@ -173,11 +173,20 @@ Vars **deleted as dead code** during the cleanup (do not re-add): `MODULES`, `BA
 | Log Format | Text (pretty) | JSON | JSON |
 | Error Details | Exposed | Hidden | Hidden |
 | Cookie Secure | `false` | `true` | `true` |
-| Cookie SameSite | `lax` | `strict` | `strict` |
+| Cookie SameSite | `lax` | `lax` | `lax` |
 | Rate Limits | 1000/min | 60/min | 30/min |
 | Debug Mode | Enabled | Disabled | Disabled |
 | HTTPS Required | No | Yes | Yes |
 | Observability | Disabled | Enabled | Enabled |
+
+> **`COOKIE_SAME_SITE` is a dead key.** `config.go:325` reads it into
+> `CookieConfig.SameSite` and nothing ever reads it back — every mint path writes
+> `http.SameSiteLaxMode` as a Go literal (`utils/http.go:62,77,127,150`,
+> `middleware/device.go:68`, `setup/routes.go:442`,
+> `oauth_state_binding.go:56,71`, `password_handler.go:421`). So the SameSite row
+> above is `lax` in all three columns, and there is **no configuration path to
+> `SameSite=None`** without a code change. Do not reach for this key to fix a
+> cross-site cookie problem — fix the host layout instead (below).
 
 ---
 
@@ -320,7 +329,7 @@ mongod whose only symptom was a failure at setup-finalization time.
 | ------------------------ | --------- | ------------------------------------ | -------------------------------------------------------------- |
 | **backend**              | 3007      | Go API server                        | Hot reload (AIR), debug logs                                   |
 | **frontend-admin**             | 8087      | Operator console (Tier-1)            | Vite dev server, HMR; host `console.localhost`                 |
-| **client-frontend**      | 8081      | Tier-2 client demo SPA               | Vite dev server, HMR; host `client.localhost`; consumes `api.*`|
+| **client-frontend**      | 8081      | Tier-2 client demo SPA               | Vite dev server, HMR; host `client.localhost`; consumes the client API on `client.localhost:3000` (same site — see below) |
 
 #### Staging (`docker-compose.staging.yml`)
 
@@ -373,19 +382,51 @@ The backend serves three audiences from one Go binary, dispatched by `Host` head
 | Audience | Default host (dev) | Default host (prod) | Purpose |
 |---|---|---|---|
 | `operator` | `console.localhost:3000` | `console.orkestra.com` | Tier-1 operator dashboard — module admin, SDI/FatturaPA self-invoicing, dev tooling |
-| `client` | `api.localhost:3000` | `api.orkestra.com` | Tier-2 client tenants — subscriptions, payments, future AI runtime (PR-E) |
+| `client` | `client.localhost:3000` | `api.orkestra.com` | Tier-2 client tenants — subscriptions, payments, future AI runtime (PR-E) |
 | `service` | *(internal docker network only)* | *(internal docker network only)* | AI sidecar `/v1/internal/*` — never published by ingress |
 
-The host mux ([cmd/server/hostmux.go](../backend/cmd/server/hostmux.go)) strips the port from `r.Host` and dispatches to the matching audience's chi.Mux. Each mux mounts its own `RequireAudience` middleware ([shared/middleware/audience.go](../backend/internal/shared/middleware/audience.go)) so a token issued for the wrong audience is rejected before any handler runs (defense in depth above per-route RBAC).
+The host mux ([cmd/server/hostmux.go](../backend/cmd/server/hostmux.go)) indexes each configured host in both its bare and its ported form and matches `r.Host` against either ([`hostmux.go:54-68`](../backend/cmd/server/hostmux.go), [`:72-84`](../backend/cmd/server/hostmux.go)), then dispatches to the matching audience's chi.Mux — so `CLIENT_API_HOST=client.localhost` and `client.localhost:3000` behave the same. Each mux mounts its own `RequireAudience` middleware ([shared/middleware/audience.go](../backend/internal/shared/middleware/audience.go)) so a token issued for the wrong audience is rejected before any handler runs (defense in depth above per-route RBAC).
 
 **Dev fallthrough**: when `ENV=development` an unmatched Host falls through to the operator mux, so `curl http://localhost:3000` keeps working without `/etc/hosts` gymnastics. In staging/prod an unmatched Host returns 421 Misdirected Request — the canonical signal that an HTTP/1.1 request reached a server that doesn't serve it. This closes the door on host-header smuggling against the Tier-1 console.
+
+#### Client tier: the SPA and the client API must be same-site
+
+`CLIENT_API_HOST` is not a free choice. Every client-tier cookie the backend mints
+is `SameSite=Lax` with an **empty `Domain`** (host-only) — the refresh cookie
+(`password_handler.go:411-424`, `utils/http.go:53-64`), the OAuth state cookie
+(`oauth_state_binding.go:56,71`) and the device cookie
+(`middleware/device.go:61-69`). A `SameSite=Lax` cookie is neither stored from nor
+sent on a **cross-site** subresource request, and the client SPA reaches its API
+exclusively through `fetch(..., {credentials: "include"})`.
+
+`localhost` is not in the Public Suffix List, so Chromium's `SchemefulSite` falls
+back to `scheme://host`: `client.localhost` and `api.localhost` are **different
+sites**. The historical dev layout (SPA on `client.localhost:8081`, client API on
+`api.localhost:3000`) therefore could never carry them — measured on Chrome 151,
+client login succeeds and the refresh cookie is simply absent from the jar, so
+`POST /v1/auth/client/refresh-cookie` answers `401 No refresh token provided`.
+Moving only the API hostname to `client.localhost` makes the cookie appear.
+
+Hence the dev defaults: SPA `http://client.localhost:8081`, client API
+`http://client.localhost:3000`. **A port is not part of a site**, so the two share
+a site while staying cross-*origin* — the CORS preflight and
+`Access-Control-Allow-Credentials` are still on the path, which is what
+`CLIENT_CORS_ORIGINS` is for. Neither cookie knob is an alternative:
+`CLIENT_COOKIE_DOMAIN` cannot help (SameSite is computed from the request's site,
+not from the cookie's `Domain`) and `COOKIE_SAME_SITE` is unread (above).
+
+Staging and prod keep the three-host ADR-0003 split, because there the hosts *do*
+share a registrable domain — `app.orkestra.cc` and `staging-api.orkestra.cc` are
+both `orkestra.cc`, i.e. same-site. The rule is "same site", not "same host"; only
+`*.localhost` forces the hostnames to coincide. The operator console never hit
+this: it calls `localhost:3000` from `localhost:8080` — same host already.
 
 **Per-audience env vars** (compose passes these through to the backend):
 
 | Variable | Purpose | Default |
 |---|---|---|
 | `CONSOLE_HOST` | Hostname the operator mux answers on | `console.localhost:3000` (dev) / unset (prod, operator-set) |
-| `CLIENT_API_HOST` | Hostname the client mux answers on | `api.localhost:3000` (dev) / unset (prod) |
+| `CLIENT_API_HOST` | Hostname the client mux answers on. **Must be same-site with the client SPA's origin** — see "Client tier: the SPA and the client API must be same-site" above. | `client.localhost:3000` (dev) / unset (prod) |
 | `OPERATOR_CORS_ORIGINS` | CORS allowlist for operator mux | falls back to `CORS_ORIGINS` |
 | `CLIENT_CORS_ORIGINS` | CORS allowlist for client mux | falls back to `CORS_ORIGINS` |
 | `OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE` / `_BURST` | Per-audience throttling | falls back to `RATE_LIMIT_*` |
@@ -409,7 +450,7 @@ In production-like environments **set both `OPERATOR_COOKIE_DOMAIN` and `CLIENT_
 curl -i http://console.localhost:3000/health
 curl -i http://localhost:3000/health   # dev fallthrough → operator
 # Client surface (post-PR-D registers per-tier auth + onboarding/subscriptions/payments):
-curl -i http://api.localhost:3000/health
+curl -i http://client.localhost:3000/health
 # 421 in non-dev when Host doesn't match (run with ENV=staging):
 curl -i -H 'Host: example.com' http://localhost:3000/health
 
