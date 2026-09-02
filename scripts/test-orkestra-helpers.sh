@@ -315,6 +315,7 @@ check "env-validate: host case does not make a mismatch" "0" \
 # no prompt in front of it to skip).
 touch "$ev_tmp/docker/docker-compose.infra.yml" "$ev_tmp/docker/docker-compose.dev.yml"
 ev_deploy_log="$(mktemp)"
+ev_deploy_out="$(mktemp)"
 export EV_DEPLOY_LOG="$ev_deploy_log"
 ev_run CLIENT_API_HOST=api.localhost > /dev/null
 ev_deploy_status="$(
@@ -336,13 +337,31 @@ ev_deploy_status="$(
             return 0
         }
         fullstack_execute_deploy
-    ) > /dev/null 2>&1
+    ) > "$ev_deploy_out" 2>&1
     printf '%s' "$?"
 )"
 check "orkestra.sh deploy aborts on a cross-site docker/.env" "1" "$ev_deploy_status"
 check "orkestra.sh deploy runs no compose command when it aborts" "0" \
     "$(wc -l < "$ev_deploy_log" | tr -d ' ')"
-rm -f "$ev_deploy_log"
+# ...and that it aborted for THIS reason, not an unrelated earlier failure.
+check "orkestra.sh deploy names the validation as the reason" "yes" \
+    "$(grep -q 'failed validation' "$ev_deploy_out" && grep -q 'Nothing was started' "$ev_deploy_out" && printf yes || printf no)"
+rm -f "$ev_deploy_log" "$ev_deploy_out"
+
+# wiz_urls on a RE-RUN over a pre-#10 .env: the stored CLIENT_API_URL still
+# says api.localhost, so it must NOT come back as the default once the user
+# moves CLIENT_API_HOST to client.localhost and presses Enter through.
+ev_run CLIENT_API_HOST=api.localhost CLIENT_API_URL=http://api.localhost:3000 > /dev/null
+(
+    ENV_FILE="$ev_env"
+    HAS_GUM=false
+    # y = customize; 5 defaults; the new client host typed; 7 defaults.
+    printf 'y\n\n\n\n\n\nclient.localhost\n\n\n\n\n\n\n\n' | wiz_urls development
+) > /dev/null 2>&1
+check "wiz_urls rebuilds a stale CLIENT_API_URL from the new host" \
+    "http://client.localhost" "$(env_get "$ev_env" CLIENT_API_URL)"
+check "wiz_urls kept the host the user typed" \
+    "client.localhost" "$(env_get "$ev_env" CLIENT_API_HOST)"
 rm -rf "$ev_tmp"
 rm -f "$ev_out"
 

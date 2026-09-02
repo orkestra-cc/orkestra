@@ -3085,8 +3085,11 @@ returning outcomes.
     call — and holds the validator's output back unless it fails, so a good
     deploy stays readable. `wiz_urls` writes `CLIENT_API_URL` the way it writes
     its neighbours (asked, with a default), defaulting to `CLIENT_API_HOST` under
-    `BACKEND_URL`'s scheme, so the wizard's own output satisfies the rule it is
-    validated against one section later. Eleven cases in
+    `BACKEND_URL`'s scheme — and it offers a **stored** value back only while that
+    value's host still agrees with the `CLIENT_API_HOST` just chosen, so a re-run
+    over a pre-#10 `.env` migrates on Enter instead of handing back the cross-site
+    origin it is there to replace. The wizard's own output therefore satisfies the
+    rule it is validated against one section later. Eleven cases in
     `scripts/test-orkestra-helpers.sh` pin both halves against a scratch `.env`
     in a scratch project root — that the shipped `docker/.env.example` passes
     unchanged, that the pre-#10 triple and a

@@ -848,6 +848,15 @@ _wiz_default() {
     printf '%s' "${cur:-$2}"
 }
 
+# _wiz_hostname <url-or-host> — hostname only: scheme, userinfo, path and
+# port stripped, lowercased. Mirrors host_only() in scripts/env-validate.sh,
+# which is a standalone script this one runs rather than sources.
+_wiz_hostname() {
+    printf '%s' "$1" \
+        | sed -E 's#^[A-Za-z][A-Za-z0-9+.-]*://##; s#^[^/@]*@##; s#/.*$##; s#:[0-9]+$##' \
+        | tr '[:upper:]' '[:lower:]'
+}
+
 wiz_identity() {
     p_section "Identity & ports"
     env_set "$ENV_FILE" APP_NAME      "$(ask_value 'App name'      "$(_wiz_default APP_NAME orkestra)")"
@@ -861,7 +870,8 @@ wiz_urls() {
     if [ "$env" = "development" ]; then
         ask_yes_no "Customize dev URLs? (defaults use localhost)" "n" || return 0
     fi
-    local backend frontend op_front cl_front console_host client_host ws client_scheme
+    local backend frontend op_front cl_front console_host client_host ws
+    local client_scheme client_api_default stored_api_url
     backend=$(ask_value 'Backend URL'                    "$(_wiz_default BACKEND_URL http://localhost:3000)")
     frontend=$(ask_value 'Frontend URL (operator)'       "$(_wiz_default FRONTEND_URL http://localhost:8080)")
     op_front=$(ask_value 'Operator frontend URL (email)' "$(_wiz_default OPERATOR_FRONTEND_URL "$frontend")")
@@ -883,13 +893,24 @@ wiz_urls() {
     # scripts/env-validate.sh now reports (spec §8 #16). The default keeps
     # the pairing same-site: same host as CLIENT_API_HOST, scheme from
     # BACKEND_URL.
+    #
+    # A stored value is only offered back while its host still AGREES with
+    # the CLIENT_API_HOST just chosen. On a re-run over a pre-#10 .env the
+    # stored origin is http://api.localhost:3000, so a user who moves the
+    # host to client.localhost and presses Enter would otherwise keep the
+    # cross-site value — the migration this wizard is supposed to complete.
     client_scheme=${backend%%:*}
     case "$client_scheme" in
         http | https) ;;
         *) client_scheme=http ;;
     esac
-    env_set "$ENV_FILE" CLIENT_API_URL \
-        "$(ask_value 'Client API URL' "$(_wiz_default CLIENT_API_URL "$client_scheme://$client_host")")"
+    client_api_default="$client_scheme://$client_host"
+    stored_api_url=$(env_get "$ENV_FILE" CLIENT_API_URL)
+    if [ -n "$stored_api_url" ] &&
+        [ "$(_wiz_hostname "$stored_api_url")" = "$(_wiz_hostname "$client_host")" ]; then
+        client_api_default=$stored_api_url
+    fi
+    env_set "$ENV_FILE" CLIENT_API_URL "$(ask_value 'Client API URL' "$client_api_default")"
 
     # Derived defaults (overridable): ws:// from http://, wss:// from https://.
     ws=${backend/http/ws}

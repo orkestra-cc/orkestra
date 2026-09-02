@@ -133,9 +133,9 @@ ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
 ./orkestra.sh observability up
 ./orkestra.sh --help               # Full command surface
 
-# Validate environment files
-./scripts/env-validate.sh all      # Validate all
-./scripts/env-validate.sh staging  # Validate specific
+# Validate docker/.env — required keys, security settings, same-site pairings.
+# Takes no arguments (--help aside): the ENV= inside the file selects the rules.
+./scripts/env-validate.sh
 ```
 
 ### What belongs in `.env` / compose vs `/admin/modules`
