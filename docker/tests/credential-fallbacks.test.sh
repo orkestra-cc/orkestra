@@ -14,7 +14,8 @@
 #   2. docker/.env.example ships every secret as a REPLACE_WITH_RANDOM_HEX_*
 #      placeholder that scripts/init.sh fills, never as a value;
 #   3. the infra file derives the RustFS root from STORAGE_* and refuses to
-#      render without any storage credential at all.
+#      render without any storage credential at all, and Redis persists into
+#      its volume.
 #
 # Wired into `make ci-backend` next to mongodb-replica-set.test.sh.
 set -euo pipefail
@@ -65,6 +66,12 @@ grep -q 'RUSTFS_ACCESS_KEY: test-access' <<<"$rendered" \
   || fail "rustfs root key id is not derived from STORAGE_ACCESS_KEY"
 grep -q 'RUSTFS_SECRET_KEY: test-secret-key-0123' <<<"$rendered" \
   || fail "rustfs root secret is not derived from STORAGE_SECRET_KEY"
+# `config` renders the command as a YAML list, one token per line — join it.
+redis_cmd="$(env "${compose_env[@]}" docker compose -f docker/docker-compose.infra.yml config --format json \
+  | jq -r '.services.redis.command | join(" ")')"
+grep -q -- '--dir /data' <<<"$redis_cmd" \
+  || fail "redis does not persist into its volume (--dir /data missing from: $redis_cmd)"
+
 rendered="$(env "${compose_env[@]}" RUSTFS_ROOT_USER=rustfs-root RUSTFS_ROOT_PASSWORD=dedicated-root-secret \
   docker compose -f docker/docker-compose.infra.yml config)"
 grep -q 'RUSTFS_SECRET_KEY: dedicated-root-secret' <<<"$rendered" \

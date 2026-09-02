@@ -75,7 +75,11 @@ services:
       - ALL
     ports:
       - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is not set — run make init}
+    # --dir /data is load-bearing: overriding the image's command drops the
+    # entrypoint that passed it, and redis-server's own default is its cwd
+    # (`/`) — outside the volume, so every recreate started with an empty
+    # dataset and the volume below held nothing.
+    command: redis-server --dir /data --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is not set — run make init}
     volumes:
       - redis-data:/data
     healthcheck:
