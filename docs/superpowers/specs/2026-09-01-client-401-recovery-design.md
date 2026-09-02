@@ -1,6 +1,6 @@
 # Client-tier 401 recovery — design
 
-_Status: **RULED — v20.** Batch 2 amendment: §4.9 takes `MintAccessTokenFromRefresh`'s three sites (ten in all), §6 and §7 corrected, follow-ups 9-12 named._
+_Status: **RULED — v22.** Batch 3 amendment: new §4.11 (proactive rotation for the client SPA), §4.9 takes the three refresh-path validation sites (thirteen in all), §4.10 answers `ErrJWTKeysNotLoaded` with a 503, §7 gives the console refresh-without-replay, and §8's follow-ups 2, 4, 6, 7, 8, 13, 14, 15, 16, 17 and 18 are ruled in for it._
 _Issue: [#325](https://github.com/orkestra-cc/orkestra/issues/325)_
 _Related: [ADR-0020](../../adr/0020-bearer-only-require-auth.md), [ADR-0017](../../adr/0017-session-lifetime-and-token-retention.md), [ADR-0003](../../adr/0003-three-audience-host-split.md)_
 
@@ -8,6 +8,7 @@ _Related: [ADR-0020](../../adr/0020-bearer-only-require-auth.md), [ADR-0017](../
 
 | Rev | Date | Change |
 | --- | ---- | ------ |
+| v22 | 2026-09-02 | **Batch-3 amendment — the contracts the batch implements, and the four N3 sentences that outlived N3.** (i) **New §4.11: proactive rotation for the client SPA** (#2, ADR-0020 D3 parity). `PROACTIVE_REFRESH_SKEW_MS = 30_000` is exported from `authedFetch.ts`; `authedFetch` snapshots the store, rotates once through the marker-gated `refreshAccessToken` when the bearer it holds expires inside that window, **re-snapshots**, and sends whatever the store then holds. The outcome is deliberately not inspected — each of the three is already handled where it is decided — and the skew **never** enters §4.3 branch 2's margin-free comparison, which is stated as an invariant and pinned by reading the module's own source. The existing 401 suite migrates with it: a seed inside the window now rotates before the request, so those cases answer their proactive attempt 503 and count the two kinds of rotation apart. (ii) **§7 gains the console's refresh-without-replay** (#14). On a **codeless** 401 that went out with a live bearer the console runs `performRefresh` **once** and hands the caller the ORIGINAL 401 unchanged — no replay, so **G4** holds — collapsing a window of up to `TTL − 30 s` to a single request. The two `baseApi.replayGuard.test.ts` assertions that flip are named, and so are the two beside them that must not. (iii) **§4.9 takes the three `ErrJWTKeysNotLoaded` validation sites** (#15, first half): the `ValidateRefreshToken` call that opens `RefreshTokensWithRiskAssessment`, `PeekRefreshToken` and `MintAccessTokenFromRefresh` splits the sentinel off to 503 and leaves every other validation error exactly as it is. Ten sites become **thirteen**, the sentinel's own doc comment moves with them, and the test hook is a new `breakVerifyingKey` twin of `breakSigningKey`. (iv) **§4.10 gains the same sentinel's `RequireAuth` half** (#15, second half): a **503** carrying `token_verification_unavailable`, one emitter, modelled on `sendPolicyUnavailable` — because a boot with no verifying key is the server saying it cannot authenticate anyone, not that this session is over. (v) **The four N3 sentences are corrected.** §2's non-goal, N4's "still out" clause, §3.D's "what it buys" and §4.10's closing paragraph all still said N3 stands, and three of them still prescribed the one-line `code === "access_token_expired"` gate that §7 and §8 #5 record as refuted. N3 was discharged in batch 2; the sentences say so, and N4's boundary is restated for the batch-3 backend work. (vi) **§8**: #2, #4, #6, #7, #8, #13, #14, #15 and #16 are ruled in for batch 3, #3 is **resolved as #4**, and two entries are new — **#17**, the service-account gate that answers a store failure as a 404, and **#18**, the cleanups. (vii) **Three paragraphs that promised `openapi-fetch` a future are corrected** with it — N2's pointer, §4.8's "the dependency stays too" and O3's closing line all assumed follow-up #3, which #4 now supersedes — and §8's heading stops claiming its entries are "named, not started", which after this revision none of the eighteen is. |
 | v21 | 2026-09-02 | **Batch-2 final fix wave — docs truth, no design change.** #1's closing clause still said the console fix "is still #5 below, and N3 still stands" while #5 and §7 both record it as done: corrected to "that landed as #5 in batch 2". #10's "the operator console is unaffected" is qualified with "only at the shipped entry point (see #13)", which is what #13 actually says. Three citations re-derived against HEAD: `REFRESH_FETCH_TIMEOUT_MS` is `baseApi.ts:98`; the `tokenExpiry` derivation is the **write** site (`authSlice.ts:179-181`'s `setAccessToken`), not `baseApi.ts:226`, which is the comparison that reads it; `VITE_API_URL` is `docker-compose.dev.yml:205`. §8 gains **14** (the F6 residual: a live-bearer codeless 401 is un-recovered for up to `TTL − 30 s`; mitigation is refresh-**without**-replay), **15** (`ErrJWTKeysNotLoaded` answered as a codeless 401 on all three refresh endpoints — §4.9's class, boot-time rather than a blip) and **16** (existing dev checkouts need three `.env` keys migrated; the note lands in `docker/CLAUDE.md` with this wave, the `env-validate.sh` hostname-equality guard does not). |
 | v20 | 2026-09-02 | **Batch 2 amendment — the residual §4.9 named but never classified, plus three corrections the shipped code exposed.** (i) **`MintAccessTokenFromRefresh` joins §4.9.** The read-only mint that `GET /v1/auth/session` performs *after* the picker carries three generic wraps of its own — its `GetByTokenAny` (`auth_service.go:1673`), its `GetUserByID` (`:1690`) and `GenerateAccessTokenForSessionWithAMR` (`:1726`) — so a store failure opening between the picker's read and the mint's own answers Peek-OK → Mint-fail → codeless 401 on the console's boot path: v18's finding, one call later. The site table gains three rows and the count goes from seven to **ten**; the user lookup takes the same not-found-first split as the rotation's, because a blanket 503 there would strand a deleted account in the permanent loop R2 describes. **No handler change is needed** — `GetSessionHTTP` already hands the mint's error to `writeRefreshErr`, whose `ErrRefreshLookupUnavailable` branch answers 503 `refresh_lookup_unavailable`; `refreshFailureOutcome` already has the `lookup_unavailable` arm; and the cookie-clear allowlist already excludes the sentinel. (ii) **§6 claimed "no existing assertion is edited"** — two were, and they are one rule: a **2xx without a token** answers `unavailable` with the marker kept, where D15 made it `signed-out`. The third delayed-401 bullet asserted that a sign-out landing mid-flight refreshes nothing, which contradicts §4.3 4a's split on the **sent** bearer, and is replaced by the case that pins that split; and "unknown expiry → expired" survived from before round 11 in §4.5's list while §4.3 treats unknown as **live**. (iii) **§7's `frontend-admin` paragraph named the wrong endpoint and the wrong gate.** The provable lockout double-count is on `/me/password-confirm` (`recordFailed`, `password_auth_service.go:1300`), not `change-password`; and a strict `code === "access_token_expired"` gate would switch the console's reactive path off in almost every real case, because `prepareHeaders` withholds a locally expired bearer and the resulting 401 is codeless — so follow-up 5's gate is §4.3's **disjunction**. Also recorded: §4.3 4b is unreachable by construction and kept for symmetry; §4.1a's helper is `RefreshOutcome`-typed because a rejected lock *acquisition* is `unavailable`; §4.5 gains the clock-**ahead** residual on the `jwtExp` fallback path. §8 gains follow-ups **9-12** — 9, 10 and 11 are ruled in for batch 2 and land in the waves this amendment authorises; 12 is docs-only and lands with it. |
 | v19 | 2026-09-01 | **Plan review round 1, finding #2 — high, accepted and verified.** Two more infrastructure reads sit inside the rotation-race classification, and both fail *destructively*: `benignRotationRetry` turns a `FamilyRevoked` error into `false` (`auth_service.go:1718-1723`, with a comment saying it "keeps the pre-existing replay behaviour"), and the post-CAS re-read discards its own error (`:1541`). Both callers then run `handleRefreshReplay` → `RevokeFamily`. So a Mongo blip during a **legitimate multi-tab race** revokes the family the winner has just renewed — every tab signed out, which is precisely the outcome `ErrRefreshRotationRaced` exists to prevent, and strictly worse than the 401s of finding #1 because it is persisted. The plan's `RotateCASLoss_IsNotUnavailable` test consecrated a lost CAS as "never an outage" regardless of whether the family state was readable, contradicting G2 and, during a race, G6/G7. **Fixed in §4.9:** `benignRotationRetry` returns `(benign, err)`; a failed family read or a failed re-read answers 503 **without** calling `handleRefreshReplay`; replay fires only on a family state that was actually read. Fail-closed denies the *current request* — it does not convert an unavailability into a presumed revocation. |
@@ -257,9 +258,16 @@ rather than something the helper can be made clever about.
   the wrappers through `api` is unavailable, and this spec does not attempt it.
   The **dormant client and its middlewares are deleted** rather than left in place
   (§4.8) — keeping a second, unsafe 401 algorithm in the tree would contradict G5
-  and arm a trap for whoever first imports `api`. Follow-up #2 re-adds the client
-  wired to this spec's policy, which is three lines against a real generated type.
-- **N3 — Fixing `frontend-admin`.** §7 records a real defect found there; own PR.
+  and arm a trap for whoever first imports `api`. Re-adding the client wired to
+  this spec's policy was follow-up #3; batch 3 **resolves #3 as #4** and takes the
+  dependency and the generated stub with it, so a typed client — if one is ever
+  wanted — arrives with its own pinned dependency and a middleware that delegates
+  to §4.3 rather than finding materials lying around.
+- **N3 (discharged in batch 2) — fixing `frontend-admin`.** §7 records a real
+  defect found there, and this spec's own PR did not touch it. It shipped
+  separately, as §8 #5's own commits with its own tests — and **not** as the
+  one-line gate earlier revisions promised, but as §4.3's two-proof disjunction
+  (§7 says why). What is left of it is follow-up **#14**, ruled in for batch 3.
 - **N4 (withdrawn in round 12, widened in round 15) — backend work is in scope,
   and it is exactly two changes.** Earlier revisions forbade touching the backend.
   Defect C shows that G2 and G3 are then **unreachable**: four infrastructure
@@ -277,9 +285,15 @@ rather than something the helper can be made clever about.
      `services.ErrTokenExpired`), changes nothing about what is *accepted*, and
      leaves `RequireAuth` bearer-only.
 
-  Still out: anything else. In particular **N3 stands** — §4.10 makes
-  `frontend-admin`'s copy of the replay hazard (§7) a one-line fix, and
-  deliberately does not apply it.
+  Still out **of the batch this paragraph was written for**: anything else. The
+  boundary has since moved once more and only within the same class — batch 3
+  applies §4.9's classification to the three refresh-path validation sites and
+  §4.10's to `RequireAuth`, both for `ErrJWTKeysNotLoaded` (§8 #15), and to one
+  sibling outside the refresh path (§8 #17). **N3 no longer stands**: §4.10 was
+  expected to make `frontend-admin`'s copy of the replay hazard (§7) a one-line
+  fix and it did not — the console withholds a locally expired bearer, so the 401
+  that follows carries no code at all. What shipped there in batch 2 is §4.3's
+  disjunction.
 
 ## 3. Alternatives considered
 
@@ -373,9 +387,12 @@ bearer-only.
 
 **What it buys, concretely.** §4.4's one acknowledged cost — a token that was live
 at `sentAt` and expired *in flight* is not auto-recovered — is recovered whenever
-the server sends the code. And it makes `frontend-admin`'s wider copy of the same
-hazard (§7) a one-line fix. **It does not apply that fix**: N3 stands, and §8 #5
-records it.
+the server sends the code. It was also expected to make `frontend-admin`'s wider
+copy of the same hazard (§7) a one-line fix. **It did not, and this section
+applies no fix there**: `prepareHeaders` withholds a locally expired bearer, so the
+console's 401 usually arrives codeless and a strict gate on the code would have
+switched its recovery off in almost every real case. §8 #5 shipped §4.3's
+disjunction instead, in batch 2.
 
 **It does not replace §4.3 branch 2's client-side reckoning.** See §4.3: the two
 are OR-ed, because a client can reach a backend that has not shipped this — a
@@ -792,8 +809,9 @@ follow-up #2 needs them regardless.
 left, which quietly widened "safe to retry" to include tokens the *server still
 accepts* — a 30-second window in which a `change-password` rejection was replayed
 and double-counted. Proof (2) is a strict "already expired at `sentAt`", so `SKEW`
-plays no part in the 401 path at all; the constant belongs to follow-up **#2**,
-which introduces it when it has a use for it.
+plays no part in the 401 path at all; the constant belongs to follow-up **#2** —
+**§4.11**, which introduces it for a decision taken *before* the request goes out,
+and states as an invariant that it never comes back here.
 
 Branch 2 is the replay guard, and it sits **ahead of every recovery branch**
 (branch 1 precedes it only because a dead `sid` makes recovery pointless).
@@ -986,14 +1004,15 @@ Note this is deliberately softer than `frontend-admin`, which treats a response
 without `expiresIn` as a failed refresh (`baseApi.ts:144`). Turning a valid
 rotation into a sign-out over a missing optional field is the wrong trade here.
 
-**There is no `SKEW` in this design.** Earlier revisions carried a 30 s margin;
+**There is no `SKEW` in this comparison.** Earlier revisions carried a 30 s margin;
 round 11 showed the margin *was* the replay hole (§4.4), and with the expiry
 derived from a duration there is nothing left for it to absorb. The 401 path
-compares `expiresAt <= sentAt` exactly. A `PROACTIVE_REFRESH_SKEW_MS` belongs to
-follow-up **#2** (proactive rotation), which introduces it when it has a use for it
-— and must then hold ADR-0020 D3's invariant that it stays **strictly below
-`MinAccessTokenTTL` (60 s)**. Do not reintroduce it here: a margin on this
-comparison is, precisely, the bug round 11 removed.
+compares `expiresAt <= sentAt` exactly. `PROACTIVE_REFRESH_SKEW_MS` belongs to
+follow-up **#2** — **§4.11**, which asks a different question about a request that
+has not gone out yet, and which holds ADR-0020 D3's invariant that the constant
+stays **strictly below `MinAccessTokenTTL` (60 s)**. Do not reintroduce it here: a
+margin on this comparison is, precisely, the bug round 11 removed, and §4.11 pins
+its absence rather than trusting this paragraph.
 
 **§4.10 does not retire any of this section.** It is tempting to read "the server
 now tells us the token expired" as "the client no longer needs to know when its
@@ -1145,28 +1164,38 @@ same inherited dead code — and gaterei's `publicForms.ts` even carries a comme
 saying it is deliberately "NOT routed through the openapi-fetch client". Nobody
 loses anything.
 
-`openapi.gen.ts` **stays**: it is the committed codegen target the README
-documents, and follow-up #2 needs it. The `openapi-fetch` dependency stays too,
-for the same reason — with one honest consequence to accept: Dependabot will keep
-proposing bumps for a package nothing imports, and per this repo's own rule those
-are vacuous and should be closed rather than merged. Dropping the dependency is a
-one-line follow-up if that noise outweighs the convenience; it is deliberately not
-bundled into a bug-fix PR because a dependency removal propagates down the fork
-chain on its own schedule.
+`openapi.gen.ts` **stayed** when this section was written: it is the committed
+codegen target the README documents, and a future typed client would need it. The
+`openapi-fetch` dependency stayed too, for the same reason — with one honest
+consequence: Dependabot keeps proposing bumps for a package nothing imports, and
+per this repo's own rule those are vacuous and get closed rather than merged.
+
+**Batch 3 reverses that** (§8 #4, which resolves #3 with it). Vacuous by
+construction is the condition under which a dependency is *dropped*, not the
+condition under which it is kept — and keeping the generated types and the runtime
+package keeps the **materials** for exactly the second 401 algorithm this section
+deleted, with only prose telling the next person to delegate. The dependency, the
+`openapi-typescript` devDependency, the `codegen` script and the stub go together,
+because dropping the runtime package alone leaves a generator with no consumer.
+That it propagates down the fork chain on its own schedule is why it is its own
+wave and why #4 makes the both-ways dependency-set diff at the next sync a
+condition of the change rather than an afterthought.
 
 ### 4.9 Backend: classify infrastructure failures on the refresh path
 
 The first of the two backend changes in scope (§4.10 is the other), and it is a
 classification fix, not a new feature: **an infrastructure failure must not be
 answered as an authentication failure.** ADR-0017 already decided this for session
-enforcement and gave it a 503; the refresh path has ten sibling sites that never
-got the same treatment (§1 defect C).
+enforcement and gave it a 503; the refresh path has thirteen sibling sites that
+never got the same treatment (§1 defect C).
 
 Each generic wrap becomes a sentinel that `writeRefreshErr` answers as **503** —
 four inside `RefreshTokensWithRiskAssessment` (`services/auth_service.go`), one in
 the `PeekRefreshToken` classification that runs in front of it, two in the
-rotation-race classifier, and three in `MintAccessTokenFromRefresh`, the read-only
-mint `GET /v1/auth/session` performs after the picker:
+rotation-race classifier, three in `MintAccessTokenFromRefresh`, the read-only
+mint `GET /v1/auth/session` performs after the picker, and three at the
+`ValidateRefreshToken` call that opens each of those three functions (batch 3,
+§8 #15):
 
 | Site | Today | After |
 | ---- | ----- | ----- |
@@ -1180,6 +1209,9 @@ mint `GET /v1/auth/session` performs after the picker:
 | **`MintAccessTokenFromRefresh` → `GetByTokenAny`** (v20) | `fmt.Errorf("failed to look up refresh token: %w")` → 401 | same sentinel → 503 |
 | **`MintAccessTokenFromRefresh` → the user lookup** (v20) | `fmt.Errorf("user not found: %w")` → 401 for *both* a deleted account and an outage | **split**, exactly as the rotation's row: `iface.ErrUserNotFound` → `ErrInvalidRefreshToken` → 401; anything else → same sentinel → 503 |
 | **`MintAccessTokenFromRefresh` → `GenerateAccessTokenForSessionWithAMR`** (v20) | `fmt.Errorf("failed to mint access token: %w")` → 401 | same sentinel → 503 |
+| **`RefreshTokensWithRiskAssessment` → `ValidateRefreshToken`** (v22) | `fmt.Errorf("invalid refresh token: %w")` → 401 for **every** validation failure, a missing verifying key included | **split** — `ErrJWTKeysNotLoaded` → same sentinel → 503; every other validation error keeps today's wrap → 401 |
+| **`PeekRefreshToken` → `ValidateRefreshToken`** (v22) | same wrap, then swallowed by the picker → 401 | same split, and the 503 half is reported by the picker exactly as its `GetByTokenAny` row is |
+| **`MintAccessTokenFromRefresh` → `ValidateRefreshToken`** (v22) | same wrap → 401 on the session-bootstrap path | same split |
 
 **The user-lookup site needs more than a re-wrap, and R2 is why.** A store error
 there is reported with the words of a terminal condition, which is how an outage
@@ -1365,6 +1397,53 @@ is the same visible outcome as today's 401 with a truthful cause behind it. Maki
 the console *survive* the blip means giving `getSession`'s custom `queryFn` a retry
 arm; that is not required for the classification to be correct.
 
+**A missing verifying key is not a bad token (v22, §8 #15).** The last three rows
+are a different route to the same misclassification, and they are why the count
+moved a third time. `validateTokenEnhanced` returns `ErrJWTKeysNotLoaded` when
+`s.publicKey` is `nil`, and all three service entry points wrap **every**
+validation failure into one opaque string — so `/refresh`, `/refresh-cookie` and
+`/session` answer a server that cannot verify anything with the same codeless 401
+they answer a dead session with. The split is the narrowest one available, and it
+is the same shape at all three sites:
+
+```go
+claims, err := s.jwtService.ValidateRefreshToken(refreshToken)
+if err != nil {
+    if errors.Is(err, ErrJWTKeysNotLoaded) {
+        return nil, fmt.Errorf("refresh token validation unavailable: %w: %w",
+            ErrRefreshLookupUnavailable, err)
+    }
+    return nil, fmt.Errorf("invalid refresh token: %w", err)
+}
+```
+
+A malformed JWT, a bad signature, a wrong token type, a wrong audience and an
+expired refresh row all keep the wrap and the 401 they have today: those are
+verdicts, and this section's discipline is that only the server's own failures
+move. **No handler change** — `writeRefreshErr` already answers the sentinel with
+503 `refresh_lookup_unavailable`, `refreshFailureOutcome` already has the
+`lookup_unavailable` arm, and `clearRefreshCookieOnTerminalRefreshErr` is an
+allowlist that already excludes it. The **signing** sites need nothing either:
+`GenerateEnhancedAccessToken` and its two siblings return the same sentinel, but
+their callers are the mint wraps this table already classified, which
+`refresh_infra_classification_test.go` already pins. This is a validation-path-only
+gap, which is exactly why it survived batch 2.
+
+**The test hook does not exist yet, and it is eight lines.**
+`refresh_orchestration_test.go`'s `breakSigningKey()` nils `privateKey`, which
+reaches the mint sites and nothing else. Its public-key twin — `breakVerifyingKey()`,
+same package, same `*jwtService` type assertion, setting `svc.publicKey = nil` —
+is what forces the validation sites, and the ordering makes the test clean: with
+`publicKey` nil, `validateTokenEnhanced` returns before `jwt.Parse`, so a test can
+seed a perfectly valid refresh row and still get the sentinel back. That is the
+positive case at each of the three sites; the negative is a genuinely invalid token
+at the same site still answering 401.
+
+**The sentinel's own doc comment moves in the same commit.** `auth_service.go`
+enumerates the sites above `ErrRefreshLookupUnavailable` and says **TEN**. It says
+thirteen and names the three new ones — the same discipline §8 #9 applied when it
+struck `SEVEN`.
+
 **Why this is safe to ship on its own.** It is additive in the only direction that
 matters — a response that was 401 becomes 503 exactly when the server failed. Both
 in-tree SPAs already treat 503 as transient (`frontend-admin`'s `refreshOnce`
@@ -1385,7 +1464,7 @@ end is not an improvement on one that ends live sessions.
 
 **`RequireAuth`'s expired-bearer 401 is no longer out of scope** — O6 was ruled in
 on 2026-09-01 and it is §4.10. It remains a *separate* change with its own
-justification: this section changes the classification of ten error returns on the
+justification: this section changes the classification of thirteen error returns on the
 refresh path; that one splits an existing branch in middleware that answers every
 protected route.
 
@@ -1453,9 +1532,176 @@ the API's CORS `ExposedHeaders` (`cmd/server/middleware.go:103`) and this SPA is
 cross-origin to the API host. The client reads the **body**, on a clone, exactly as
 §4.3 specifies. Adding the header to that list is not in scope.
 
-**Not applied to `frontend-admin`.** N3 stands. This makes §7's replay hazard
-there a one-line fix — gate its retry on `code === "access_token_expired"` — and
-§8 #5 records it as its own PR.
+**Batch 3 adds a second arm to the same branch (§8 #15).** `validateTokenEnhanced`
+returns `ErrJWTKeysNotLoaded` when no verifying key is loaded, and that sentinel is
+neither `ErrTokenExpired` nor `ErrInvalidToken` — so it falls through to
+`errors.TokenInvalidError()` (`auth.go:244-247`) and **every protected route on
+both tiers** answers a boot misconfiguration with a codeless 401. That is §4.9's
+class one layer up, with one difference that decides the status: this is a
+boot-time state rather than a blip, so no client-side retry can help and no client
+should read it as its own session ending. `RequireAuth` gains one comparison ahead
+of the fall-through:
+
+```go
+if err == services.ErrJWTKeysNotLoaded {
+    m.sendTokenVerificationUnavailable(w)   // 503
+    return
+}
+```
+
+**`==`, not `errors.Is`, and that is not laziness.** `validateTokenEnhanced`
+returns the sentinel **unwrapped**, exactly as it returns `ErrTokenExpired`, so the
+new comparison is the same shape as the two it joins — and in this file the
+identifier `errors` is the **shared** `internal/shared/errors` package
+(`errors.TokenInvalidError()` a few lines below), with the standard library's
+`errors` not imported at all. Reaching for `errors.Is` here does not compile, and
+"fixing" that with an import alias would be a change to the file's conventions
+smuggled in by a one-line branch. If the sentinel ever starts arriving wrapped,
+that is the moment to change all three comparisons together.
+
+`sendTokenVerificationUnavailable` is modelled on `sendPolicyUnavailable`, the
+middleware's one existing 503: `Content-Type`, `WriteHeader(503)`, and a body of
+`status` / `title` / `detail` / `type: "about:blank"` / a top-level
+`"code": "token_verification_unavailable"`. **No `WWW-Authenticate`** and **no
+`errors[]`** — the header names a scheme the caller should retry with and there is
+nothing to retry with, and `sendPolicyUnavailable` omits both for the same reason.
+The "only one emitter" bound stated above for `access_token_expired` applies
+verbatim to this string too: if a second site ever writes it, it stops meaning what
+it says.
+
+**What does not change, again.** The accepted set: a server with no verifying key
+accepted nothing before and accepts nothing now — only the account it gives of
+itself changes. `RequireAuth` stays bearer-only, the three `_NeverRotates` tests
+and the two AST reintroduction guards stay green untouched, and every other 401 the
+middleware emits keeps its exact body. Downstream, neither SPA needs a change to
+handle it: §4.1's outcome table is an allowlist in which **only 401** signs a user
+out, so the client SPA reads a 503 as `unavailable` and keeps its token, and the
+console's `baseApi` never reaches its 401 branch at all — a `>= 500` response
+raises the "Server error. Please try again later." toast (`baseApi.ts:598-599`)
+and nothing is cleared.
+
+**Not applied to `frontend-admin` by this section.** The console's own fix is
+§8 #5 and it landed in batch 2, in its own commits — and it is **not** the one-line
+`code === "access_token_expired"` gate this paragraph once promised.
+`prepareHeaders` withholds a locally expired bearer, so the 401 that follows is
+codeless and that gate would have switched the console's reactive path off in
+almost every real case; what shipped is §4.3's two-proof disjunction (§7). Batch 3
+adds the one arm that disjunction deliberately left open, §8 #14.
+
+### 4.11 Client: rotate before expiry, not only after a 401 (§8 #2)
+
+Batch 3, and the last piece of ADR-0020 D3 parity the client tier is missing. §4.3
+is a **recovery**: it costs a 401 round-trip and it may only fire on proof that the
+request never reached its handler. A rotation taken *before* the request costs no
+round-trip and needs no proof, because there is no request to replay.
+
+**The constant, and why it is not the one §4.3 refuses to have.**
+
+```ts
+// src/api/authedFetch.ts, beside TERMINAL_CODES and CODE_ACCESS_TOKEN_EXPIRED.
+//
+// INVARIANT (ADR-0020 D3): strictly below the backend's MinAccessTokenTTL
+// (60 s, backend/internal/core/auth/services/auth_duration_bounds.go). At or
+// above the floor, a token minted at the minimum TTL is already inside this
+// window the moment it arrives, so every request would rotate again — a
+// refresh loop.
+export const PROACTIVE_REFRESH_SKEW_MS = 30_000;
+```
+
+**The arm.** It sits between the snapshot and `doFetch` — the two statements §4.3
+takes together — and it **re-snapshots**, because `sent` and `sentAt` have to
+describe the request that actually goes out:
+
+```ts
+let sent = getAccessTokenSnapshot();
+if (
+  sent.token !== null &&
+  sent.expiresAt !== null &&
+  sent.expiresAt - Date.now() < PROACTIVE_REFRESH_SKEW_MS
+) {
+  await refreshAccessToken(apiBaseURL);
+  sent = getAccessTokenSnapshot();
+}
+const sentAt = Date.now();
+const res = await doFetch(path, init, sent.token);
+```
+
+**Which refresh function, and why the outcome is not inspected.**
+`refreshAccessToken` — the marker-gated **automatic** path — not
+`refreshAfterUnauthorized`. A proactive rotation is automatic by definition, and
+the marker gate is a correct optimisation here rather than the hole §4.3 4a routes
+around: a visitor with no session has no `expiresAt` either, so the branch cannot
+fire for them at all. The one input where the gate does bite is §5.8's tab — a live
+in-memory token with **no** marker, reachable through a throwing `localStorage` or
+a sibling's sign-out — and there the proactive attempt is simply a no-op, so that
+tab keeps the reactive path it has today and branch 4a, which is deliberately *not*
+marker-gated, recovers it. One extra round-trip, never a wrong sign-out, which is
+the same trade §4.3's 4a/4b split already makes. `refreshAccessToken` never
+rejects, is coalesced in-tab, serialised across tabs by §4.1a's Web Lock and
+bounded by §4.1c's timeout; the arm inherits all four properties instead of
+restating any of them.
+
+The outcome is then **ignored**, and that is a design decision rather than a
+shortcut — each of the three is already handled where it is decided:
+
+- **`ok`** — `performRefresh` has already installed the new token in the store, so
+  the re-snapshot picks it up and the request carries the fresh bearer. There is
+  nothing for the arm to dispatch.
+- **`unavailable`** — token and marker untouched (§4.1's allowlist), so the request
+  goes out with the old bearer and §4.3 owns whatever 401 follows. A failed
+  proactive rotation costs one round-trip and changes nothing else.
+- **`signed-out`** — from `performRefresh` that means the refresh itself was
+  answered 401, and it has already cleared token **and** marker (**G3**); the
+  re-snapshot yields `null`, the request goes out anonymous and its 401 is passed
+  through by branch 2 — the same end state as a sign-out anywhere else. From
+  `refreshAccessToken`'s **marker gate** it means no marker was present and no
+  request was made: a no-op that clears nothing, which is exactly right for a
+  rotation nobody asked for.
+
+The arm therefore introduces **no state transition of its own**, which is the
+property that keeps §4.1's outcome table the single owner of the sign-out decision.
+
+**`expiresAt === null` is not a reason to rotate.** An unknown expiry counts as
+**live** everywhere in this design (§4.3 branch 2, §4.5), and it counts as live
+here too: rotating on "we cannot tell" would rotate on every request made with a
+token whose lifetime was never learned, which is the refresh loop the D3 bound
+exists to prevent, arrived at from the other side. No bearer at all is likewise no
+attempt.
+
+**The skew NEVER enters the 401 branch — invariant.** §4.3 branch 2's proof (2) is
+`sent.expiresAt <= sentAt` with **no margin**, and the margin is precisely the
+round-11 replay hole (v13): a token with 20 s of life is still accepted by the
+server, so the handler *did* run. Two constants, two predicates, one file — the
+discipline `baseApi.ts` documents for `tokenNeedsRefresh` versus `liveBearer`, and
+the reason those two must never be merged. It is pinned mechanically rather than
+argued: `PROACTIVE_REFRESH_SKEW_MS` appears in `authedFetch.ts` **only** in its own
+declaration and in the arm above — never below the `if (res.status !== 401) return
+res;` line — and a test asserts that by reading the module's own source and cutting
+it at that line. A behavioural test cannot express this one, because the two
+predicates agree on almost every input and differ only where the difference is the
+bug.
+
+**No endpoint exclusion list, deliberately.** `frontend-admin` excludes
+`AUTH_ENDPOINT_PATHS` and `/session` from its proactive check because its refresh
+goes through the same `baseQuery`. This SPA's does not: `performRefresh` calls
+`/v1/auth/client/refresh-cookie` with a raw `fetch` from `tokenStore`, and every
+`authedFetch` call site is a protected resource route. Recursion is structurally
+impossible, and the rule that keeps it so is already at the top of
+`authedFetch.ts` — the refresh endpoint is never called through this helper.
+
+**Rolling deploys are unaffected, and that is worth stating because §4.10 made it a
+question.** This arm asks the backend for nothing new: it is a client-side
+scheduling decision taken from a duration the client derived itself at receipt
+(§4.5). §4.3 branch 2's proof (2) still exists for a backend that has not shipped
+§4.10, and §4.11 neither strengthens nor weakens it.
+
+**What it costs.** Never more than one rotation per request. Over a session it
+normally *moves* a rotation earlier rather than adding one — the request that would
+have 401'd and then refreshed now refreshes and then succeeds. The one shape that
+genuinely costs an extra rotation is a session whose **last** request lands inside
+the window: it rotates a token nothing will use. That is the price of never
+spending a request to discover an expiry, and it is the same trade ADR-0020 D3 made
+for the console.
 
 ## 5. Edge cases
 
@@ -1996,6 +2242,74 @@ to call. It is verified the way an absence has to be:
   imports left behind in `client.ts`;
 - the full suite stays green, proving nothing was routing through it after all.
 
+**`src/api/authedFetch.test.ts` — proactive rotation (§4.11, batch 3).** A new
+`describe("authedFetch proactive rotation (§4.11)")` block, plus a migration of the
+existing 401 suite that is not optional — the arm sits *before* the request, so it
+changes what those cases send.
+
+New cases:
+
+- **near expiry** — `seedToken("at-near", 20)`: one `/refresh-cookie` **before** the
+  request, and the request's `Authorization` header carries the **new** bearer.
+  Zero 401s, which is the whole point: no request is spent discovering the expiry;
+- **far from expiry** — `seedToken("at-1", 900)`: no refresh, and the request
+  carries the seeded bearer;
+- **unknown expiry** — `setAccessToken("opaque-not-a-jwt")`, so `expiresAt === null`:
+  **no** refresh. Unknown is live here exactly as it is in §4.3 branch 2;
+- **no bearer** — an empty store: no refresh, no attempt;
+- **the proactive rotation is `unavailable`** — `/refresh-cookie` answers 503: the
+  request still goes out, with the **old** bearer, and token and marker both
+  survive;
+- **already expired at send** — `seedExpiredToken()` with the proactive attempt
+  answered 503: the request goes out with the dead bearer, 401s, and §4.3 branch
+  2's proof (2) recovers it exactly as it does today. This is the case that proves
+  §4.11 cannot strand the 401 path;
+- **the D3 bound** — `expect(PROACTIVE_REFRESH_SKEW_MS).toBeLessThan(60_000)` with
+  the comment naming `MinAccessTokenTTL`, plus the behavioural twin ADR-0020 D3
+  prescribes: a token installed with `expiresIn: 60` does not rotate on the next
+  request (`baseApi.proactiveRefresh.test.ts`'s "does not loop on a token minted at
+  the backend minimum TTL (60s)" is the model);
+- **the no-leak invariant** — the constant is referenced only above the
+  `if (res.status !== 401) return res;` line in `authedFetch.ts`, asserted by
+  reading the module's own source and cutting it there (§4.11 says why a
+  behavioural test cannot express it).
+
+Migration of the existing 401 cases, which follows mechanically from where the arm
+sits:
+
+- **a seed outside the window is untouched.** Every `seedToken(…, 900)` case, both
+  unknown-expiry cases and the no-token case keep their exact counts;
+- **a seed inside the window now rotates first.** Every `seedExpiredToken()` case
+  answers its **first** `/refresh-cookie` hit with a **503**, so the proactive
+  attempt is `unavailable`, the request goes out with the seeded token, and the
+  case exercises §4.3 exactly as before — with its `refresh.hits()` expectation
+  raised by one. `countRefresh`'s responder already receives the hit index, so this
+  is a fixture change, not a helper change;
+- **`"a live token's 401 is passed through — no refresh, no replay"` changes its
+  seed**, from `seedToken("at-live", 20)` to `seedToken("at-live", 300)`, and its
+  self-asserting premise from 15/25 s to 290/310 s. Twenty seconds was never the
+  load-bearing part — "alive, so the handler ran" was — and twenty seconds is now
+  inside the window;
+- **`"expiresAt === sentAt counts as expired; sentAt + 1 counts as live"`** is the
+  no-margin pin, and both of its halves are inside the window by construction. It
+  keeps its shape by counting the two kinds of rotation apart: `/refresh-cookie`
+  answers **503 on odd hits** (the proactive attempts) and 200 on the even one, so
+  the boundary token adds a **second** rotation and the `+1 ms` token adds
+  **none**. Same property, read as a difference;
+- **`"a burst of three 401s produces exactly one /refresh-cookie"` moves its title
+  too.** With the proactive attempt answered 503 the three concurrent calls
+  coalesce **twice** — one proactive rotation shared by the burst, then one
+  reactive rotation shared by the three 401s — so `refresh.hits()` is **2** and the
+  title becomes `a burst of three 401s produces exactly one reactive
+  /refresh-cookie`. The coalescing the case exists to pin is now pinned twice over,
+  which is the point rather than a dilution of it;
+- **`"expired token with NO marker still attempts the refresh (branch 4a)"` is
+  untouched, and it is worth knowing why**: the arm calls the marker-gated
+  `refreshAccessToken`, which answers `signed-out` from its gate **without making a
+  request and without clearing anything**, so the case reaches branch 4a with its
+  count unchanged. It is also the only existing case that exercises that gate from
+  the proactive side.
+
 **Regression:** `auth.test.ts`, `AuthProvider.test.tsx`, `OAuthCallbackPage.test.tsx`
 and `App.test.tsx` must stay green unmodified. If one needs editing, that is a
 signal the change is wider than this spec claims — raise it rather than adjust it.
@@ -2019,7 +2333,12 @@ into the admin field fails loudly; a `10s` that reaches the service any other wa
 behaves as 60 and makes the wait look broken.
 
 1. Sign in, wait past the TTL, act on `/account/security` → succeeds after exactly
-   one `/refresh-cookie`.
+   one `/refresh-cookie`. §4.11 changes this scenario's **shape**, not its outcome:
+   with proactive rotation in place the refresh *precedes* the request, so the
+   network panel shows **one `/refresh-cookie` and zero 401s** where today it shows
+   a 401, then the refresh, then the replay. Run it before and after that wave —
+   the disappearance of the 401 is the only directly observable evidence the arm is
+   live.
 2. Mistype the current password on change-password → **no** `/refresh-cookie`, and
    the attempt is sent once.
 3. Two tabs **reloaded** together past the TTL → neither is signed out. This
@@ -2193,26 +2512,115 @@ in `baseApi.ts`. N3 is discharged; the tests are in
 `frontend-admin/src/store/api/baseApi.replayGuard.test.ts` (6 cases) plus the
 fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
 
-## 8. Follow-ups (named, not started)
+**Batch 3 closes the window that gate deliberately leaves open (§8 #14).**
+Everything above describes what shipped: neither proof, and the 401 goes back
+untouched. That is right for a verdict and wrong for the one input in that shape
+which is not one — a JWT signing-key rotation, or a restart with new key material,
+after which every unexpired bearer validates as plain "invalid" and `RequireAuth`
+answers a **codeless** 401. Against that the console today does nothing at all: no
+refresh, no toast, no sign-out, every request failing silently until the proactive
+check fires at `expiry − PROACTIVE_REFRESH_SKEW_MS`. Batch 3 adds a third outcome
+to the same `handlerNeverRan` decision, sitting between it and the existing replay
+path. Everything ahead of it is unchanged: the branch is reached only for a 401
+outside `AUTH_ENDPOINT_PATHS` and not on the session endpoint, and the
+terminal-code, step-up and password-confirm checks have already returned by then.
+
+| The 401, at that point | Action |
+| ---------------------- | ------ |
+| `code === "access_token_expired"`, **or** no live bearer was sent (`sentBearer === null`) | unchanged — refresh **and** replay, the path §7 describes above |
+| a live bearer was sent **and** the body carries **no top-level code at all** (`errorData?.code === undefined`) | **NEW** — `performRefresh(runtimeConfig.apiUrl)` **once**, then return the **ORIGINAL 401 unchanged**. No replay |
+| a live bearer was sent and the body **does** carry a code | unchanged — return the original 401 untouched |
+
+The refresh outcome is handled in the console's own vocabulary, and it is the only
+place the arm branches:
+
+- **`ok`** → `api.dispatch(setAccessToken({ accessToken, expiresIn }))`, then return
+  the original 401. **No replay** — **G4** holds, and the request that earned the
+  401 is never sent twice. The *next* request carries the fresh bearer, which is
+  what collapses the window to a single request;
+- **`retry` or `raced`** → return the original 401, token and expiry untouched;
+- **a bare `{ ok: false }`** → the refresh itself was refused, which is the
+  session's own death: `clearAccessToken()` and then the existing sign-out path
+  below, exactly as the replay branch already does on the same outcome.
+
+**Codeless, not "anything but `access_token_expired`".** The narrower predicate is
+the correct one, and the difference is not hypothetical: a 401 that names itself
+has been explained by the server, and a new token minted from the same cookie
+cannot change the answer. `audience_mismatch` is the live example — a coded 401
+emitted by `RequireAudience`, unhandled by every branch ahead of this one, and
+carrying the same audience after any rotation.
+
+**What it costs.** One serialised rotation per verdict 401 — a mistyped current
+password now rotates the refresh cookie once. That is harmless: the cookie rotates
+by design, the family is untouched, and `performRefresh` coalesces in-tab and takes
+the cross-tab lock, so a burst costs one rotation, not one each.
+
+**The two assertions that flip, and the two beside them that must not**, both in
+`frontend-admin/src/store/api/baseApi.replayGuard.test.ts`:
+
+- case 1, `does not refresh or replay a wrong-current-password change-password 401`
+  → retitled `rotates once but does not replay a wrong-current-password
+  change-password 401`. `refreshAttempts` **0 → 1**, and the store's token
+  `'seed-access-token'` → `'fresh-token'`. **`changeAttempts` stays 1** — that is
+  the invariant #14 must preserve and the assertion that keeps it honest;
+- case 4, `passes a codeless 401 through when the store lost its bearer mid-flight`
+  → retitled `rotates once and still passes the codeless 401 through when the store
+  lost its bearer mid-flight`. `refreshAttempts` **0 → 1**, and the refresh
+  fixture's `'must-not-be-fetched'` token becomes `'rotated-token'`, because it now
+  is fetched. **`resourceAttempts` stays 1**, and the caller still receives the 401.
+
+Cases 2, 3 and 6 take the existing replay path and are untouched. Case 5 — the
+failed passkey assertion — is on a public route excluded by `AUTH_ENDPOINT_PATHS`
+and never reaches the branch at all, which is the same reason that allowlist is
+part of the guard rather than loop avoidance. The terminal-code, step-up and
+password-confirm checks all stay **ahead** of the new arm, and the arm itself must
+dispatch no `clearAccessToken()` and call no `navigateToLogin` on its own two
+returning outcomes.
+
+## 8. Follow-ups (each carries its own status)
 
 1. ~~**Backend: a distinct `access_token_expired` code**~~ — ✅ **done in this
    work** (O6 ruled in, round 15). It is §4.10. The number is kept rather than
    reclaimed so the cross-references in §4.5, §7 and elsewhere stay meaningful.
    What it does **not** do is apply the resulting fix to
    `frontend-admin` — that landed as #5 in batch 2.
-2. **Proactive rotation for the client SPA** (ADR-0020 D3 parity) — refresh before
-   expiry instead of after a 401. Needs a trustworthy remaining-lifetime figure,
-   which §4.5's `expiresAt` snapshot already provides — and provides *correctly*
-   under clock skew, which is what makes a proactive scheme safe to build on. This
-   is what introduces `PROACTIVE_REFRESH_SKEW_MS`; ADR-0020 D3's
+2. **Proactive rotation for the client SPA** (ADR-0020 D3 parity) —
+   **ruled in for this branch (batch 3)**, and it is **§4.11**. Refresh before
+   expiry instead of after a 401. It needs a trustworthy remaining-lifetime
+   figure, which §4.5's `expiresAt` snapshot already provides — and provides
+   *correctly* under clock skew, which is what makes a proactive scheme safe to
+   build on. This is what introduces `PROACTIVE_REFRESH_SKEW_MS`; ADR-0020 D3's
    `SKEW < MinAccessTokenTTL` invariant applies to it, and it must not leak back
-   into the 401 comparison (§4.5).
-3. **Wake up `openapi-fetch`** — sharpen `openapi.gen.ts` against a real backend,
-   re-add the typed client, and give it a middleware that **delegates to
-   `authedFetch`'s policy** rather than restating it (§4.8 deleted the version
-   that restated it, badly). Then migrate the wrappers and fold the two together.
-4. **Drop the `openapi-fetch` runtime dependency** if the vacuous Dependabot bumps
-   prove more annoying than the convenience of having it ready (§4.8).
+   into the 401 comparison (§4.3 branch 2, §4.5) — §4.11 states that as an
+   invariant and pins it by reading the module's own source rather than by
+   argument.
+3. **Wake up `openapi-fetch`** — **resolved as #4.** The dependency and the
+   generated stub go rather than stay warm, so there is nothing left to wake. If a
+   typed client is ever wanted, it re-adds a pinned dependency in the same PR that
+   writes the middleware, against a real generated type rather than a stub — and
+   that middleware must **delegate to `authedFetch`'s policy** rather than restate
+   it (§4.8 deleted the version that restated it, badly). Nothing about that is
+   made harder by #4; the only thing #3 was preserving was the *materials* for a
+   second 401 algorithm, which is what §4.8 argues against.
+4. **Drop the `openapi-fetch` runtime dependency** —
+   **ruled in for this branch (batch 3)**, and it subsumes #3. Nothing imports
+   it: `src/api/client.ts` is the API-base resolver and exports only
+   `apiBaseURL`, and `src/api/openapi.gen.ts` is a stub nothing reads — so its
+   Dependabot bumps are vacuous *by construction*, which is the condition under
+   which a bump gets closed, not the condition under which a dependency is kept.
+   Five artefacts go, and they go together: `openapi-fetch` from `dependencies`,
+   `openapi-typescript` from `devDependencies`, the `codegen` npm script,
+   `src/api/openapi.gen.ts` itself, and the prose —
+   `frontend-client/README.md`'s stack bullet, its whole `## OpenAPI codegen`
+   section and its layout tree, plus the `frontend-client/CLAUDE.md` regions
+   that name them. Dropping the runtime dependency while keeping the generator
+   leaves a generator with no consumer, which is the same trap one layer down.
+   **The fork-chain check is not optional:** all four forks still carry both
+   dependencies and still import them from `src/api/client.ts` — an
+   upstream-owned file none of them has edited, so the next sync replaces it and
+   the imports leave with it. Diff the dependency sets **both ways** at that
+   sync and treat `vite build` as load-bearing; a dropped dependency has passed
+   `tsc` and `eslint` and broken a build before.
 5. **`frontend-admin`'s reactive replay** (§7) — **done in this branch
    (batch 2).** Not the one-liner an earlier revision promised: a strict
    `code === "access_token_expired"` gate would switch the console's reactive path
@@ -2225,16 +2633,50 @@ fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
    `access_token_expired`, and every `{}`-bodied 401 in the four `baseApi.*.test.ts`
    files becomes a "must NOT refresh" assertion. Its own commits and its own tests
    rather than riding along. N3.
-6. **`AccountDsrPage`'s hard-coded English error copy** (§4.6) — two strings that
-   bypass `t()` against this SPA's own i18n rule. Not touched here: a bug-fix PR
-   should not change user-visible copy.
-7. **Align `frontend-admin`'s refresh timeout** with §4.1c's
-   `AbortController` + `setTimeout`. Its `AbortSignal.timeout` is not controllable
-   by fake timers either, so any test it grows around `REFRESH_FETCH_TIMEOUT_MS`
-   inherits the same problem; the mechanism is a drop-in swap.
-8. **`frontend-admin`'s 3-arg Web Lock test mock** — its own comment records that
-   the existing test stays green while no longer exercising what it was written to
-   exercise. Not this SPA's code, but the same primitive.
+6. **`AccountDsrPage`'s hard-coded English copy** (§4.6) —
+   **ruled in for this branch (batch 3)**, and it is larger than the two error
+   strings §4.6 noticed while reading the error path. The page has **no
+   `useTranslation` import and no `t()` call at all**, so every string on it is
+   hard-coded: the heading, the intro, both button labels and both pending
+   states, the reason placeholder, the submitted confirmation and the two
+   failure messages. The whole page moves behind `t()` under a new top-level
+   **`dsr`** key block in `src/locales/en.json` and `it.json` — a *key*, not an
+   i18next namespace: this SPA calls `useTranslation()` with no argument and has
+   one default namespace, unlike `frontend-admin`'s per-addon namespaces
+   (ADR-0007). `locales.test.ts` is a key-parity test, so a one-sided addition
+   fails CI: both locale files or neither.
+7. **Align `frontend-admin`'s refresh timeout** with §4.1c —
+   **ruled in for this branch (batch 3)**, and it is **both halves of the client
+   model, not the timer swap alone.** (a) `refreshOnce` bounds its fetch with
+   `AbortSignal.timeout(REFRESH_FETCH_TIMEOUT_MS)`; that becomes an
+   `AbortController` + `setTimeout`, with `clearTimeout` in a `finally` and nowhere
+   else. (b) `fetch` resolves on **headers**, so the timer has to span the body read
+   too: the `res.json()` promise is raced against an abort rejection, exactly as
+   `tokenStore.attemptRefresh` does. Without (b) a server that sends headers and
+   stalls the body holds the cross-tab Web Lock for as long as it stalls — the
+   defect v15 found in this spec's own §4.1c, still live in the console. The two
+   tests that monkey-patch the global today (`baseApi.proactiveRefresh.test.ts`'s
+   "sends the request anyway when /refresh-cookie never answers…" and
+   `baseApi.rotationRace.test.ts`'s "does not sign the user out when
+   /refresh-cookie never answers") lose their `vi.spyOn(AbortSignal, 'timeout')`
+   and their `mockRestore()`, and drive the timeout through a **test-only setter**
+   for the constant rather than through fake timers: `performRefresh` schedules its
+   own `setTimeout(…, 0)` and every `baseApi.*.test.ts` file drains it on a real
+   timer in `afterEach`, so a file-wide `vi.useFakeTimers()` hangs those drains. A
+   new case becomes expressible and should be added — headers sent, body stalled,
+   and the lock released.
+8. **`frontend-admin`'s Web Lock test mock** —
+   **ruled in for this branch (batch 3)**, as a hardening rather than a bug fix.
+   The call site and the mock are both **two-argument** today, so the test
+   passes for the right reason; what is wrong is that it would keep passing for
+   the wrong one. Its assertions read only the call count and the lock name, so
+   a switch to the three-argument `request(name, { signal }, callback)` overload
+   — which #7's sibling concern, bounding the lock, is exactly what would
+   motivate — binds the mock's callback parameter to the options object, throws
+   inside it, and has that throw swallowed by `performRefresh`'s own `.catch`.
+   The mock asserts **arity 2** and that the second argument is a **function**,
+   and the eight-line apology comment on `withRefreshLock` goes, replaced by one
+   line naming the test that now guards it.
 9. **`MintAccessTokenFromRefresh`'s three unclassified wraps** — **done in this
    branch (batch 2)**, and it is the §4.9 amendment above rather than a new
    section: three rows on the site table, the not-found-first split on its user
@@ -2306,7 +2748,9 @@ fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
     The docs now say which level governs and how to change it; the schema and the
     resolution order are **not** touched — that would be a behaviour change, and this
     is a note about what the code does.
-13. **The operator console is same-site only by default** — **named, not started.**
+13. **The operator console is same-site only by default** —
+    **ruled in for this branch (batch 3)**, as **convention A: `localhost` for both
+    the console and its API.**
     #10's fix gave the client tier a dedicated `CLIENT_API_HOST`; the operator tier
     has no equivalent, so the console's origin and `VITE_API_URL` (default
     `http://localhost:3000`, `docker-compose.dev.yml:205`) have to agree by
@@ -2322,8 +2766,52 @@ fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
     `docs/Multi-Environment-Setup.md:489` do not agree on today. Batch-2 wave W4
     recorded the condition in the docs under ruling F8 and changed **no**
     operator-tier config.
+
+    **Why A and not B.** Convention B — `console.localhost` end to end — would need
+    seven `.env` keys changed in two files, one of them a key `docker/.env.example`
+    does not ship at all, plus the Vite `allowedHosts` list, two compiled backend
+    defaults and a resolver entry on every contributor's box: an `.env` migration
+    for everyone, which is #16's failure mode one tier over. A needs **no** env key,
+    **no** allow-list entry and **no** backend registration — `localhost:3000`
+    already reaches the operator mux through the dev fallthrough in
+    `cmd/server/hostmux.go`, and `orkestra.sh`'s `wiz_urls` already writes a
+    convention-A pairing (`VITE_API_URL` defaults to `BACKEND_URL`, both
+    `localhost`). What A needs is four things that are **wrong today**, independently
+    of it:
+
+    - `frontend-admin/public/config.example.js`'s `apiUrl` / `wsUrl`, which hard-code
+      `console.localhost:3000` while the documented host-side `npm run dev` serves
+      the SPA on `localhost` — cross-site out of the box, for the one path the file
+      exists to support. Both become `localhost:3000` / `ws://localhost:3000/ws`;
+    - `frontend-admin/src/config/environment.ts`'s two code fallbacks, which say
+      `console.localhost:3000` while the runtime config compose writes says
+      `localhost:3000`. The code default stops disagreeing with the shipped one;
+    - the **compiled OAuth redirect defaults** — `internal/shared/config/config.go`'s
+      four `OAUTH_*_REDIRECT_URL` fallbacks and the `AllowedRedirectURIs` list in
+      `internal/core/auth/utils/redirect_validation.go`. Their host is already
+      `localhost:3000`, which is right under A, but their **path is the pre-`/v1`
+      one** (`/auth/oauth/{provider}/callback`) and no such route is mounted: the
+      handlers register `/v1/auth/oauth/{provider}/callback`. They gain the `/v1`,
+      with a test that asserts every compiled default is a path the router actually
+      serves — this is the tighter constraint the entry above names, because
+      `orkestra_oauth_state` is host-only and `SameSite=Lax`, so the login-POST host
+      and the callback host must be the **same host**, not merely the same site;
+    - the ~18 documentation lines that prescribe `console.localhost` as the operator
+      convention — the rule sentences in `docs/site/getting-started/installation.mdx`,
+      `docs/site/architecture/authentication-flow.mdx`, `docker/CLAUDE.md` and
+      `docs/site/operating/oauth-providers.mdx`, the OAuth origin/callback recipes in
+      that page and in `docs/site/operating/troubleshooting.mdx`, and the table row
+      in `docs/Multi-Environment-Setup.md`.
+
+    `CONSOLE_HOST` keeps its `console.localhost:3000` default and simply becomes what
+    it already is in practice — a staging/production knob. Nothing stops a
+    contributor putting the console on `console.localhost` end to end; A decides only
+    what ships, what the docs prescribe, and what the compiled defaults agree with.
 14. **A live-bearer codeless 401 strands the console for up to `TTL − 30 s`** —
-    **named, not started.** §4.3's gate is deliberate and stays: a 401 that carries
+    **ruled in for this branch (batch 3)**; the contract is the third arm §7
+    specifies, down to the two `baseApi.replayGuard.test.ts` assertions that flip
+    and the two beside them that must not. §4.3's gate is deliberate and stays:
+    a 401 that carries
     no terminal code on a request that *did* go out with a live bearer is a verdict
     from the handler, and replaying it is the defect §7 closed. The residue is the
     one input in that shape which is **not** a verdict — a JWT signing-key rotation
@@ -2345,9 +2833,14 @@ fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
     proof-(b) refresh, a *replay* that itself 401s still falls through to
     `clearAccessToken` + "Session expired" (`baseApi.ts:550-554` → `:562-563`,
     `:573-582`), which is the same misreading of a verdict as a dead session,
-    narrowed but not introduced by this branch.
-15. **`ErrJWTKeysNotLoaded` reaches the browser as a codeless 401** — **named, not
-    started.** `validateTokenEnhanced` returns the sentinel when no public key is
+    narrowed but not introduced by this branch — and **not** closed by batch 3's
+    arm, which returns before the replay path and never reaches it. It stays named
+    here.
+15. **`ErrJWTKeysNotLoaded` reaches the browser as a codeless 401** —
+    **ruled in for this branch (batch 3)**, in **both** halves: the refresh path is
+    three new rows on §4.9's site table, and `RequireAuth` is the second arm §4.10
+    now specifies.
+    `validateTokenEnhanced` returns the sentinel when no public key is
     loaded (`jwt_service.go:534-536`), and all three service entry points wrap
     *every* validation failure into the same opaque string —
     `RefreshTokensWithRiskAssessment` (`auth_service.go:1461-1464`),
@@ -2358,11 +2851,23 @@ fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
     §4.9's class — infrastructure answered as an auth verdict — with the one
     difference that kept it out of batch 2: this is a boot-time state, not a blip,
     so every session is dead until an operator fixes the keys and no client-side
-    retry can help. Worth its own code (or a 503) so the answer says "the server
-    cannot authenticate anyone" rather than "your session is over".
+    retry can help. That is exactly why the answer is a **503** rather than another
+    401 code: "the server cannot authenticate anyone" is the true statement, and
+    both SPAs already read 503 as transient-and-keep-the-token.
+
+    The refresh half is a three-way split at the one call each of those functions
+    opens with, and it needs **no handler change** — `writeRefreshErr` already
+    answers `ErrRefreshLookupUnavailable` with 503 `refresh_lookup_unavailable`.
+    The `RequireAuth` half is the one with reach, because it is what a browser hits
+    first and it covers every protected route on both tiers; §4.10 names its status,
+    its code, its single emitter and the envelope it copies. The **signing** sites
+    are already classified and are not touched. The test hook — a `breakVerifyingKey`
+    twin of the existing `breakSigningKey` — is new, and §4.9 says why the ordering
+    inside `validateTokenEnhanced` makes it clean.
 16. **Existing dev checkouts need three `.env` keys migrated** — the note is
-    **done in this branch (batch 2)**, the guard is **named, not started.** A
-    `docker/.env` written before #10 carries `CLIENT_API_HOST=api.localhost`,
+    **done in this branch (batch 2)**, and the guard is
+    **ruled in for this branch (batch 3)**. A `docker/.env` written before #10
+    carries `CLIENT_API_HOST=api.localhost`,
     `CLIENT_API_URL=http://api.localhost:3000` and
     `CLIENT_FRONTEND_URL=http://localhost:8081`, and an existing `.env` value beats
     a compose default — so only the SPA moves, because `VITE_CLIENT_API_BASE` is
@@ -2373,11 +2878,190 @@ fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
     lands on the operator mux, which mounts no `/v1/auth/client/*` routes
     (`auth/module.go:1722-1740`), and every client-tier call answers **404**. The
     three keys to migrate are documented in `docker/CLAUDE.md` → "Client tier: the
-    SPA and the client API must be same-site". What is **not** done is the guard:
-    `scripts/env-validate.sh` should assert that the hostname of `CLIENT_API_HOST`
-    equals the hostname of `CLIENT_FRONTEND_URL` — a check that would also have
-    caught the `orkestra.sh` wizard defaults that wave W4 missed and the final fix
-    wave had to correct by hand.
+    SPA and the client API must be same-site".
+
+    **The guard is two things, because either alone does nothing.** *The rule*, in
+    `scripts/env-validate.sh`: with scheme and port stripped,
+    `host(CLIENT_API_HOST)`, `host(CLIENT_API_URL)` and `host(CLIENT_FRONTEND_URL)`
+    must agree, and `host(VITE_API_URL)` must equal `host(FRONTEND_URL)` — the
+    operator twin, which convention A (#13) satisfies on the shipped
+    `docker/.env.example` unchanged. Each group is checked only when its keys are
+    **set**, in **every** `ENV` rather than under a `development` gate — the same
+    constraint is stated for staging and production in `.env.example` itself — and a
+    mismatch is an **error**, not a warning, carrying the three-key migration message
+    this entry documents. The script never sources `.env`; every read is a `grep`,
+    so the rule brings two small helpers of its own: a value extractor in the shape
+    of the existing `ENV` read, and a hostname extractor that strips scheme,
+    userinfo, path and **port**. The port stripping is load-bearing, not tidiness:
+    `.env.example` and the setup wizard write these hosts **bare** while the compose
+    defaults write them **ported**, and the host mux tolerates both.
+    *The wiring*: today `env-validate.sh` runs from exactly one place —
+    `orkestra.sh`'s `init` wizard — so a guard added to the script alone would fire
+    only for someone regenerating their `.env`, which is precisely not the person it
+    is for. It is wired into the **deploy preflight** as well, ahead of the compose
+    up, as a hard stop. And `wiz_urls` gains the write it is missing: it sets
+    `CLIENT_API_HOST` and never `CLIENT_API_URL`, so a wizard-generated `.env` has
+    no such key at all and leans on the backend deriving one — right today, wrong
+    the moment a proxy changes the port or the scheme, and exactly the desync this
+    rule would then report.
+
+17. **A service-account lookup answers a store failure as a 404** —
+    **ruled in for this branch (batch 3)**. `requireServiceAccount` is the gate
+    every `ServiceAccountService` lifecycle method runs first, so that a human
+    user's UUID can never be targeted by these endpoints. It collapses **every**
+    error from `iface.UserProvider.GetUserByID` into `ErrServiceAccountNotFound`:
+
+    ```go
+    user, err := s.users.GetUserByID(ctx, userID)
+    if err != nil || user.Kind != iface.UserKindService {
+        return nil, ErrServiceAccountNotFound
+    }
+    ```
+
+    `mapServiceAccountAdminError` answers that sentinel with
+    **404 `"service account not found"`**, so a Mongo outage tells an operator their
+    service account has been deleted. Four routes gate on it:
+    `GET /v1/admin/service-accounts/{id}`,
+    `PATCH /v1/admin/service-accounts/{id}`,
+    `POST /v1/admin/service-accounts/{id}/credentials` and
+    `DELETE /v1/admin/service-accounts/{id}/credentials/{credentialId}`.
+    It is §4.9's class exactly — an infrastructure failure reported as a verdict —
+    one module over, and it is a follow-up rather than part of §4.9 only because it
+    is not on the refresh path and cannot sign anyone out.
+
+    **The contract.** The gate classifies instead of collapsing, and the not-found
+    sentinel it classifies against is the SDK's own **`iface.ErrUserNotFound`** —
+    added by §4.9, and already what `user/services.ErrUserNotFound` aliases, so it is
+    what a conforming `UserProvider` returns for a deleted account:
+
+    ```go
+    // beside ErrServiceAccountNotFound in services/service_account_service.go
+    ErrServiceAccountLookupUnavailable = errors.New("service account lookup unavailable")
+
+    user, err := s.users.GetUserByID(ctx, userID)
+    if err != nil {
+        if errors.Is(err, iface.ErrUserNotFound) {
+            return nil, ErrServiceAccountNotFound
+        }
+        return nil, fmt.Errorf("service account lookup failed: %w: %w",
+            ErrServiceAccountLookupUnavailable, err)
+    }
+    if user == nil || user.Kind != iface.UserKindService {
+        return nil, ErrServiceAccountNotFound
+    }
+    ```
+
+    Both wrapped verbs, `%w: %w`, exactly as §4.9's sentinel requires of its own
+    sites, so the classification holds and the cause survives for whoever reads the
+    log. The `user == nil` test is written out rather than left to `||`'s
+    short-circuit: splitting the error arm off moves the `user.Kind` dereference into
+    a statement of its own, and a not-found is the right answer for that shape
+    anyway.
+
+    **At the handler**, one new arm in `mapServiceAccountAdminError`, ahead of its
+    `default`, in the shape this tree already uses for a machine-readable code on a
+    `huma.Register`ed route — `user/handlers/avatar_handler.go`'s
+    `huma.NewError(status, "<snake_case_code>", &huma.ErrorDetail{Message: …})`,
+    where the token lands in `detail`:
+
+    ```go
+    case errors.Is(err, services.ErrServiceAccountLookupUnavailable):
+        return huma.NewError(http.StatusServiceUnavailable,
+            "service_account_lookup_unavailable",
+            &huma.ErrorDetail{Message: "the service-account directory could not be read; try again shortly"})
+    ```
+
+    Huma's `ErrorModel` has no top-level `code` field, so `detail` is where the token
+    goes; the hand-built envelope `writeRefreshErr` and the middleware emitters use
+    is not available on a huma route, and giving this family one is not in scope.
+
+    **Tests, one each way.** Positive: `saUserFake.GetUserByID` returning a store
+    error makes all four lifecycle methods answer
+    `ErrServiceAccountLookupUnavailable`, and `TestMapServiceAccountAdminError` gains
+    the `{services.ErrServiceAccountLookupUnavailable, http.StatusServiceUnavailable}`
+    row. Negative: an **unknown id** still answers `ErrServiceAccountNotFound` — and
+    that case only holds once the fake's `errSAUserNotFound` wraps the sentinel
+    (`fmt.Errorf("service account test: user not found: %w", iface.ErrUserNotFound)`).
+    Today it is a free-standing `errors.New` whose identity nothing depends on; under
+    this split it becomes load-bearing, and leaving it alone would quietly turn every
+    unknown-id case into a 503. `TestLifecycleRefusesHumanTargets` seeds a real human
+    user, so its lookup *succeeds* and it keeps its 404 either way — which is the
+    check that the split did not move the human-target refusal.
+
+    **Named so it is not folded in by mistake:** the Grant path's own user lookup
+    collapses the same two conditions into `ErrInvalidClientCredentials` (401). That
+    collapse is deliberate — the grant refuses to let a caller learn *why* it was
+    rejected — so changing it is a security-shaped decision rather than a
+    classification one, and it belongs in its own follow-up.
+18. **Cleanups** — **ruled in for this branch (batch 3)**, five of them, each small
+    and each already diagnosed:
+
+    **(a) `handleOAuthCallback` and `useHandleOAuthCallbackMutation` are deleted**
+    (`frontend-admin/src/store/api/authApi.ts`). Zero consumers — the definition and
+    the exported hook name are the only two hits in the repo — and it is *wrong*,
+    not merely unused: it POSTs `v1/auth/oauth/{provider}/callback`, which the
+    backend mounts as a **GET** for Google, Discord and GitHub, so any caller would
+    get a 405. It is the dormant, wrong second implementation §4.8 deleted on the
+    client tier, one tier over.
+
+    **(b) `frontend-client/src/components/Layout.tsx` waits for the bootstrap.**
+    `isAuthenticated` is `token !== null`, which is `false` for the whole cold-load
+    window, so a signed-in user sees "Sign in / Sign up" flash in the header and the
+    `enabled: !isAuthenticated` policy query fires a request that is pure waste for
+    them — the #11 defect, in the header rather than the route guard. The flag
+    already exists: `AuthProvider` exposes `isBootstrapping` and `RequireAuth`
+    already consumes it. Three lines — read the flag, add `&& !isBootstrapping` to
+    the query gate, and render **nothing in the auth slot** while it is true. Not a
+    spinner: the window is one `/refresh-cookie` round-trip and a spinner in a header
+    reads as breakage. The logo, the language switcher and the footer stay, so the
+    layout does not shift.
+
+    **(c) Three `err.Error() == "user not found"` string compares become
+    `errors.Is(err, iface.ErrUserNotFound)`** — twice in
+    `handlers/admin_user_auth_handler.go` (the aggregator path and
+    `mapAdminInviterError`) and once in `handlers/self_user_auth_handler.go`. They
+    match today only because the sentinel's message is literally `"user not found"`
+    and `user_service` returns it unwrapped, so the next `fmt.Errorf("...: %w", …)`
+    anywhere on the path would silently turn a 404 into a 500. **Paired, in the same
+    commit**, with `auth_service.go`'s `SelfLinkOAuthFromCallback`, whose nil-user
+    path returns a *fresh* `fmt.Errorf("user not found")` — a different error value
+    that `errors.Is` does **not** match — so it must return the sentinel, or a wrap
+    of it, or that 404 regresses to a 500 the moment the compare goes. The identical
+    `"notifications disabled — cannot send email"` compare beside it has the same
+    shape and belongs in the same commit.
+
+    **(d) A `writeCodedError` helper behind the nine hand-built coded envelopes in
+    `internal/shared/middleware/auth.go`, byte-identical output.** Nine, not the six
+    a first reading suggests and not the eight a second one does:
+    `sendSessionRevoked`, `sendAccessTokenExpired`, `sendRiskStepUp`,
+    `sendStepUpRequired`, `sendPasswordConfirmRequired`, `sendPolicyUnavailable`,
+    `sendMFAEnrollmentRequired`, `sendMFARequired` and
+    `sendCapabilityRequiredResponse`. (`sendErrorResponse` is not one of them — it
+    routes through `errorManager` and emits **no** top-level `code` at all, which is
+    §3.C's whole point and must stay that way.) The invariant core is
+    `Content-Type`, `status`, `title`, `detail`, `type: "about:blank"` and `code`;
+    the variance is four-dimensional and every axis has to be a parameter.
+    **Status**: 401 (×6), 403 (×1), **402** (×1, the capability emitter), 503 (×1).
+    **Auth scheme**: `Bearer` (×4), `MFA` (×3), **absent** (×2 —
+    `sendPolicyUnavailable` and `sendCapabilityRequiredResponse`). **`errors[]`**:
+    present with a per-site `location` and `value` (×8), absent (×1,
+    `sendPolicyUnavailable`) — and the absence must be an explicit opt-out, because a
+    helper that supplies one is making a **wire change** to that response. **Extra
+    top-level fields**: none (×5), `maxAgeSeconds` (×2), `riskScore` +
+    `riskThreshold` (×1), `capability` + `tenantId` (×1). `value` cannot be derived
+    from `code` — it is `strings.ToUpper(code)` in some cases and something else
+    entirely in `sendRiskStepUp` and `sendMFARequired` — so it stays a parameter too.
+    §4.10's `sendAccessTokenExpired` and #15's new 503 go behind the same helper; the
+    middleware tests that pin each envelope are what keep "byte-identical" honest,
+    and none of them may be edited.
+
+    **(e) The refresh-cookie name stops disagreeing three ways.** The compiled
+    default (`config.go`'s `COOKIE_NAME_REFRESH` fallback) and **all three** compose
+    files say `orkestra_cookie`; `docker/.env.example` says `orkestra_cookie_refresh`
+    and `docs/site/operating/cookie-hardening-cross-tier.mdx`'s two sample
+    `set-cookie` lines follow `.env.example`. Three of the four sources agree, so the
+    two that do not move to **`orkestra_cookie`**. The doc is only exposing a config
+    inconsistency; fixing the config is what makes the doc true.
 
 ## Open questions — all ruled 2026-09-01 (O6 last, in round 15)
 
@@ -2393,7 +3077,9 @@ fixture audit of the four pre-existing `baseApi.*.test.ts` suites.
   client in `client.ts`; round 5 deleted that client outright (§4.8), so what is
   left is the plainer reason — the file is named for what it does, and
   `client.ts` goes back to being what it actually is, the API-base resolver.
-  Follow-up #2 brings a typed client back **delegating to** this helper's policy.
+  A typed client, if one ever comes back, **delegates to** this helper's policy —
+  and batch 3's #4 removed the dependency and the generated stub as well, so it
+  would arrive with its own pinned dependency rather than an inherited one.
 - **O6 — `access_token_expired` on `RequireAuth`.** ✅ **Ruled 2026-09-01: pull it
   in** (R1). It is **§4.10**. The blast-radius objection that deferred it through
   fourteen rounds was answered by reading the code rather than by re-weighing the
