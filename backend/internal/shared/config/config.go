@@ -338,18 +338,30 @@ func Load() (*Config, error) {
 			Secure:         getEnvAsBool("COOKIE_SECURE", false), // Default false for development
 			SameSite:       getEnv("COOKIE_SAME_SITE", "lax"),
 		},
-		// OAuth callback defaults. The path is the MOUNTED one —
+		// OAuth callback fallbacks. These are NOT the redirect_uri the IdP
+		// receives: nothing outside a test reads
+		// cfg.Auth.<Provider>.RedirectURL. The value the login POST sends and
+		// the callback exchanges on is the auth module config
+		// auth.<provider>RedirectURL, read per request by
+		// services.OAuthConfigResolver — seeded from the same
+		// OAUTH_*_REDIRECT_URL env var when one is exported, and empty when
+		// it is not (the field carries no schema Default, and
+		// docker/.env.example ships the keys commented out). An operator
+		// changes it at /admin/modules/auth, not here.
+		//
+		// They are kept honest anyway. The path is the MOUNTED one —
 		// RegisterOAuthRoutes (core/auth/handlers/auth_handler.go) puts all
 		// four callbacks under /v1/auth/oauth/{provider}/callback, and the
-		// pre-/v1 path these defaults used to carry was served by nothing:
-		// an operator who took the default got a 404 from the IdP round-trip
+		// pre-/v1 path these fallbacks used to carry was served by nothing
 		// (spec §8 #13). The host stays localhost:3000, which is convention
 		// A — the orkestra_oauth_state cookie is host-only and SameSite=Lax,
 		// so the login-POST host and the callback host must be the SAME
 		// host, and localhost:3000 is what the shipped console talks to.
 		// utils.NewRedirectURIConfig's allow-list carries the same four
 		// strings; TestOAuthRedirectDefaultsAreMountedRoutes
-		// (core/auth/handlers) checks all eight against the real router.
+		// (core/auth/handlers) checks all eight against the real router, so
+		// neither list can drift from the mount or from the other — the only
+		// guard there is, since no runtime read would surface a divergence.
 		Google: GoogleOAuthConfig{
 			ClientID:        getEnv("OAUTH_GOOGLE_CLIENT_ID", ""),
 			ClientSecret:    getEnv("OAUTH_GOOGLE_CLIENT_SECRET", ""),

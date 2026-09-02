@@ -185,6 +185,14 @@ func isLocalhost(host string) bool {
 // this predates the /v1 mount in — rejected the very defaults this file ships
 // in AllowedRedirectURIs. The old `&& parsedURL.Path != "/auth/callback"`
 // second clause was dead: that path already satisfies the "/auth/" prefix.
+//
+// KNOWN GAP (G7), unchanged by that widening: ValidateRedirectURI still has
+// no production caller. The OAuth flow takes its redirect_uri from the auth
+// module config (auth.<provider>RedirectURL, via
+// services.OAuthConfigResolver) and never validates it through this package,
+// so neither the widened prefix nor AllowedRedirectURIs carries any security
+// exposure today — they are documentation until someone wires a caller up,
+// which is the moment to re-read both.
 func validateLocalhostURI(parsedURL *url.URL) error {
 	// Ensure path is reasonable for an OAuth callback: the mounted backend
 	// route, or the front-end callback route.

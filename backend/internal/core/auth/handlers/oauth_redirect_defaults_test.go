@@ -24,12 +24,17 @@ const oauthRedirectDefaultHost = "localhost:3000"
 // internal/shared/config/config.go and the four backend entries in
 // utils.NewRedirectURIConfig's AllowedRedirectURIs.
 //
-// They used to point at /auth/oauth/{provider}/callback — the pre-/v1 path,
-// which the router serves at no method: RegisterOAuthRoutes mounts all four
-// callbacks under /v1/auth/oauth/{provider}/callback. An operator who took
-// the compiled default therefore registered a URL with the IdP that the
-// backend answers with a 404, and the failure only shows up at the end of a
-// real OAuth round-trip.
+// Neither set is on the OAuth path. The redirect_uri the flow actually
+// hands the IdP is the auth module config auth.<provider>RedirectURL
+// (services.OAuthConfigResolver); cfg.Auth.<Provider>.RedirectURL has no
+// reader outside this file, and ValidateRedirectURI — the only consumer the
+// allow-list would ever have — has no production caller. They are two
+// hand-maintained lists naming the mounted callback path, and they used to
+// name /auth/oauth/{provider}/callback — the pre-/v1 path, which the router
+// serves at no method: RegisterOAuthRoutes mounts all four callbacks under
+// /v1/auth/oauth/{provider}/callback. This test is the only thing that would
+// catch that drift again, precisely because no runtime read of either list
+// exists to fail loudly.
 //
 // The assertion is against the REAL registration function walked with
 // chi.Walk, not a second hand-written list of paths — a list would just be
@@ -44,7 +49,7 @@ const oauthRedirectDefaultHost = "localhost:3000"
 // host rather than by index, so the filter keeps meaning what it says if the
 // list is reordered.
 func TestOAuthRedirectDefaultsAreMountedRoutes(t *testing.T) {
-	// Empty means "unset" to getEnv, so this yields the compiled defaults
+	// Empty means "unset" to getEnv, so this yields the compiled fallbacks
 	// even in an environment that exports the real ones.
 	for _, k := range []string{
 		"OAUTH_GOOGLE_REDIRECT_URL",
@@ -56,7 +61,7 @@ func TestOAuthRedirectDefaultsAreMountedRoutes(t *testing.T) {
 	}
 	// Load() runs Validate(), which requires OAuth client credentials in a
 	// production-like env — pin the environment so the test asserts the
-	// compiled defaults regardless of the shell it runs in.
+	// compiled fallbacks regardless of the shell it runs in.
 	t.Setenv("ENV", "development")
 	cfg, err := config.Load()
 	if err != nil {
@@ -97,9 +102,9 @@ func TestOAuthRedirectDefaultsAreMountedRoutes(t *testing.T) {
 		})
 	}
 
-	// The two sets must also agree with each other: a redirect URL the
-	// config hands the IdP that the allow-list would refuse (or vice versa)
-	// is a split-brain that neither half's own assertions can see.
+	// The two sets must also agree with each other: a fallback the config
+	// carries that the allow-list would refuse (or vice versa) is a
+	// split-brain that neither half's own assertions can see.
 	cfgPaths := map[string]bool{}
 	for _, raw := range configured {
 		u, err := url.Parse(raw)

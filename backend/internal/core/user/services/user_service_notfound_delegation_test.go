@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/orkestra/backend/internal/core/user/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
@@ -52,6 +53,20 @@ func (notFoundRepo) UpdatePasswordHash(context.Context, string, string) error {
 func (notFoundRepo) MarkEmailVerified(context.Context, string) error {
 	return repository.ErrUserNotFound
 }
+func (notFoundRepo) SetMFAGraceStartedAt(context.Context, string, time.Time) error {
+	return repository.ErrUserNotFound
+}
+
+// graceStampRepo answers the LOOKUP with a live user so the
+// "StartMFAGraceIfUnset (stamp)" row reaches that method's second repository
+// call. notFoundRepo cannot: its GetByID fails first, so the row above it
+// covers only the lookup arm, and the stamp tail could go back to returning
+// the repository value unnoticed.
+type graceStampRepo struct{ *fakeUserRepo }
+
+func (graceStampRepo) SetMFAGraceStartedAt(context.Context, string, time.Time) error {
+	return repository.ErrUserNotFound
+}
 
 // TestDelegationsTranslateRepositoryNotFound covers every delegation that
 // used to hand the repository's own value to a caller outside this module.
@@ -60,6 +75,10 @@ func (notFoundRepo) MarkEmailVerified(context.Context, string) error {
 func TestDelegationsTranslateRepositoryNotFound(t *testing.T) {
 	svc := &userService{userRepo: notFoundRepo{newFakeUserRepo()}}
 	ctx := context.Background()
+
+	graceRepo := newFakeUserRepo()
+	graceRepo.seed(&iface.User{UUID: "u-1"}) // no grace stamp yet, so the tail runs
+	graceSvc := &userService{userRepo: graceStampRepo{graceRepo}}
 
 	cases := []struct {
 		name string
@@ -82,6 +101,8 @@ func TestDelegationsTranslateRepositoryNotFound(t *testing.T) {
 		{"UpdatePasswordHash", func() error { return svc.UpdatePasswordHash(ctx, "u-1", "argon2id$hash") }},
 		{"MarkEmailVerified", func() error { return svc.MarkEmailVerified(ctx, "u-1") }},
 		{"StartMFAGraceIfUnset", func() error { return svc.StartMFAGraceIfUnset(ctx, "u-1") }},
+		{"StartMFAGraceIfUnset (stamp)", func() error { return graceSvc.StartMFAGraceIfUnset(ctx, "u-1") }},
+		{"ResetMFAGrace", func() error { return svc.ResetMFAGrace(ctx, "u-1") }},
 	}
 
 	for _, tc := range cases {

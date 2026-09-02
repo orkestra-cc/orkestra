@@ -954,7 +954,7 @@ func (s *userService) StartMFAGraceIfUnset(ctx context.Context, userUUID string)
 	if user.MFAGraceStartedAt != nil && !user.MFAGraceStartedAt.IsZero() {
 		return nil
 	}
-	return s.userRepo.SetMFAGraceStartedAt(ctx, userUUID, time.Now())
+	return asUserNotFound(s.userRepo.SetMFAGraceStartedAt(ctx, userUUID, time.Now()))
 }
 
 // ResetMFAGrace unconditionally overwrites the grace timestamp with now.
@@ -964,7 +964,7 @@ func (s *userService) ResetMFAGrace(ctx context.Context, userUUID string) error 
 	if userUUID == "" {
 		return ErrInvalidInput
 	}
-	return s.userRepo.SetMFAGraceStartedAt(ctx, userUUID, time.Now())
+	return asUserNotFound(s.userRepo.SetMFAGraceStartedAt(ctx, userUUID, time.Now()))
 }
 
 // ClearMFAGrace removes the grace stamp after a successful enrollment.
