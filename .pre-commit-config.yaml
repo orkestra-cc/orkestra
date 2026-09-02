@@ -79,11 +79,7 @@ repos:
     hooks:
       - id: prettier
         files: ^(frontend-admin|frontend-client)/.*\.(ts|tsx|js|jsx|json|md|yml|yaml|css|scss)$
-        exclude: |
-          (?x)^(
-            (frontend-admin|frontend-client)/(dist|coverage|node_modules)/.*|
-            frontend-client/src/api/openapi\.gen\.ts
-          )$
+        exclude: ^(frontend-admin|frontend-client)/(dist|coverage|node_modules)/.*$
 
   # --- ESLint (local — needs each app's node_modules) ----------------------
   - repo: local

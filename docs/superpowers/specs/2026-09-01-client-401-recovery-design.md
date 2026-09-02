@@ -2648,16 +2648,17 @@ returning outcomes.
    inside the window either moved out of it (the live-token 401's `at-live`,
    20 s → 300 s) or were re-counted (the boundary pin: 2 after the boundary
    token, 3 after the `+1 ms` one).
-3. **Wake up `openapi-fetch`** — **resolved as #4.** The dependency and the
-   generated stub go rather than stay warm, so there is nothing left to wake. If a
+3. **Wake up `openapi-fetch`** — **resolved as #4**, which is ✅ **done in this
+   branch (batch 3)**. The dependency and the generated stub go rather than stay
+   warm, so there is nothing left to wake. If a
    typed client is ever wanted, it re-adds a pinned dependency in the same PR that
    writes the middleware, against a real generated type rather than a stub — and
    that middleware must **delegate to `authedFetch`'s policy** rather than restate
    it (§4.8 deleted the version that restated it, badly). Nothing about that is
    made harder by #4; the only thing #3 was preserving was the *materials* for a
    second 401 algorithm, which is what §4.8 argues against.
-4. **Drop the `openapi-fetch` runtime dependency** —
-   **ruled in for this branch (batch 3)**, and it subsumes #3. Nothing imports
+4. **Drop the `openapi-fetch` runtime dependency** — ✅ **done in this branch
+   (batch 3)**, and it subsumes #3. Nothing imports
    it: `src/api/client.ts` is the API-base resolver and exports only
    `apiBaseURL`, and `src/api/openapi.gen.ts` is a stub nothing reads — so its
    Dependabot bumps are vacuous *by construction*, which is the condition under
@@ -2677,6 +2678,20 @@ returning outcomes.
    the imports leave with it. Diff the dependency sets **both ways** at that
    sync and treat `vite build` as load-bearing; a dropped dependency has passed
    `tsc` and `eslint` and broken a build before.
+
+   *As shipped:* the five artefacts went, and three more the fact sheet had not
+   counted, each a reference to the deleted file rather than to the dependency —
+   `frontend-client/eslint.config.js`'s `ignores` entry, the prettier hook's
+   `exclude` in `.pre-commit-config.yaml`, and the `linguist-generated` line in
+   `.gitattributes`. Two source comments that promised a codegen run also went
+   (`src/api/avatar.ts`, `src/api/auth.ts`). `grep -rn` for `openapi-fetch`,
+   `openapi.gen` and `openapi-typescript` over `frontend-client` is now empty,
+   and `git grep` over the whole tree returns only this spec and its plan. The
+   relock removed **24** packages and added none: the two direct ones, their
+   `openapi-typescript-helpers` peer, and the Redocly toolchain reachable only
+   through the generator — no other version moved. The prose keeps one forward
+   pointer, in the README and in `client.ts`'s own header: a typed client
+   re-adds a pinned dependency in the PR that writes its delegating middleware.
 5. **`frontend-admin`'s reactive replay** (§7) — **done in this branch
    (batch 2).** Not the one-liner an earlier revision promised: a strict
    `code === "access_token_expired"` gate would switch the console's reactive path

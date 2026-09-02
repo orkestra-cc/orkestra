@@ -61,7 +61,6 @@ Dockerfile   text eol=lf
 go.sum                                  linguist-generated=true
 **/package-lock.json                    linguist-generated=true
 **/pubspec.lock                         linguist-generated=true
-frontend-client/src/api/openapi.gen.ts  linguist-generated=true
 docs/openapi/*.json                     linguist-generated=true
 
 # AI assistant configuration — kept in tool-mandated locations (Claude
