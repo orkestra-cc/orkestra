@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { http, HttpResponse, delay } from 'msw';
 import { server } from 'test/server';
 import { setupStore } from 'test/render';
-import { baseApi, PROACTIVE_REFRESH_SKEW_MS } from './baseApi';
+import {
+  baseApi,
+  PROACTIVE_REFRESH_SKEW_MS,
+  __setRefreshTimeoutForTests
+} from './baseApi';
 import { setupApi } from './setupApi';
 
 vi.mock('react-toastify', () => ({
@@ -92,7 +96,11 @@ describe('proactive refresh', () => {
 
   // performRefresh clears its in-flight promise on a macrotask; drain it
   // so the next test cannot reuse this test's already-resolved refresh.
+  // Restoring the refresh timeout here rather than at the end of the one
+  // test that shortens it keeps a failed assertion from leaking a 25 ms
+  // bound into every test after it.
   afterEach(async () => {
+    __setRefreshTimeoutForTests();
     await new Promise(resolve => setTimeout(resolve, 0));
   });
 
@@ -208,19 +216,16 @@ describe('proactive refresh', () => {
     expect(store.getState().auth.accessToken).toBe('seed-access-token');
   });
 
-  // refreshOnce bounds its fetch with AbortSignal.timeout(REFRESH_FETCH_TIMEOUT_MS)
-  // (baseApi.ts). Real timers only: AbortSignal.timeout schedules its own
-  // internal timer, not one vi.useFakeTimers() can see (verified against
-  // this Node/vitest pin — a fake-timer version of this test silently never
-  // fires). The AbortSignal.timeout spy below keeps the real wait short —
-  // it does not change the 10s constant, it only makes THIS timer fire fast
-  // — so the assertions below exercise the real timeout path in bounded
-  // wall-clock time.
+  // refreshOnce bounds its fetch with an AbortController whose timer runs for
+  // REFRESH_FETCH_TIMEOUT_MS (baseApi.ts). Real timers, and a test-only
+  // setter for the constant rather than a monkey-patched global: performRefresh
+  // schedules its own setTimeout(…, 0) to clear the in-flight promise, and
+  // every afterEach in these suites drains that on a REAL timer, so a
+  // file-wide vi.useFakeTimers() would hang the drains. Shortening the
+  // constant to 25 ms exercises the real timeout path in bounded wall-clock
+  // time without touching any platform object.
   it('sends the request anyway when /refresh-cookie never answers, and keeps the token', async () => {
-    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
-    const timeoutSpy = vi
-      .spyOn(AbortSignal, 'timeout')
-      .mockImplementation(() => realTimeout(25));
+    __setRefreshTimeoutForTests(25);
 
     const { seenAuth, counters } = arm();
     server.use(
@@ -247,7 +252,5 @@ describe('proactive refresh', () => {
     // refresh is still there afterwards.
     expect(store.getState().auth.accessToken).toBe('seed-access-token');
     expect(store.getState().auth.isAuthenticated).toBe(true);
-
-    timeoutSpy.mockRestore();
   });
 });

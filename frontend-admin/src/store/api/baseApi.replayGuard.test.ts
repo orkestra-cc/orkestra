@@ -22,7 +22,14 @@ import { setupApi } from './setupApi';
 //   (b) the request went out with no live bearer at all, by the same
 //       predicate prepareHeaders uses to withhold it (RequireAuth rejects
 //       that before dispatch too).
-// Neither proof: the 401 goes back to the caller untouched.
+// Neither proof: the 401 goes back to the caller untouched — and, when it
+// also carries no code at all, the console rotates ONCE on the way out
+// without replaying anything (§8 #14). A live bearer plus a codeless 401 is
+// almost always the handler's own verdict, but it is also exactly what a
+// JWT signing-key rotation looks like, and against that the console used to
+// do nothing at all until the proactive check fired. The rotation costs one
+// serialised refresh; the REPLAY is the part that costs a wrong-password
+// attempt, and that is what every "attempts stays 1" assertion below pins.
 vi.mock('react-toastify', () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn(), warn: vi.fn() }
 }));
@@ -96,7 +103,13 @@ describe('reactive refresh replay guard', () => {
   // re-sending it submits the same wrong password a second time: a second
   // argon2id verify, a second audit-relevant failure, and on its sibling
   // /me/password-confirm a second recordFailed against the lockout budget.
-  it('does not refresh or replay a wrong-current-password change-password 401', async () => {
+  //
+  // The RE-SEND is the whole defect, and `changeAttempts` staying 1 is the
+  // assertion that keeps that honest. The rotation beside it is the §8 #14
+  // arm doing its job: this 401 is indistinguishable, from the console's
+  // side, from the one a signing-key rotation produces, so it rotates once
+  // and hands the ORIGINAL 401 straight back.
+  it('rotates once but does not replay a wrong-current-password change-password 401', async () => {
     let changeAttempts = 0;
     let refreshAttempts = 0;
     server.use(
@@ -134,9 +147,11 @@ describe('reactive refresh replay guard', () => {
 
     // Sent once, and the caller's 401 is the server's own answer.
     expect(changeAttempts).toBe(1);
-    expect(refreshAttempts).toBe(0);
-    // A wrong password is not a dead session: the token survives.
-    expect(store.getState().auth.accessToken).toBe('seed-access-token');
+    // Rotated exactly once — coalesced, and never replayed.
+    expect(refreshAttempts).toBe(1);
+    // A wrong password is not a dead session: the arm installs the rotated
+    // bearer and clears nothing.
+    expect(store.getState().auth.accessToken).toBe('fresh-token');
   });
 
   // Proof (a): the server states it rejected an expired bearer before
@@ -245,7 +260,14 @@ describe('reactive refresh replay guard', () => {
   // rotation runs. Reading the store back at 401 time would find no live
   // bearer, conclude proof (b), and replay a request that DID reach its
   // handler; the send-time snapshot is what keeps that from happening.
-  it('passes a codeless 401 through when the store lost its bearer mid-flight', async () => {
+  //
+  // One honesty note the fixture cannot carry on its own: it stubs a 200
+  // refresh, but a sibling tab that really signed out has revoked the
+  // refresh cookie, so the production answer here is a 401 → the sign-out
+  // path (the case below this one). What this case pins is the MECHANISM —
+  // the arm fires once, replays nothing, and hands the caller its 401 — not
+  // a claim that a sibling's sign-out leaves the session alive.
+  it('rotates once and still passes the codeless 401 through when the store lost its bearer mid-flight', async () => {
     let resourceAttempts = 0;
     let refreshAttempts = 0;
     let siblingSignOut: (() => void) | null = null;
@@ -259,7 +281,7 @@ describe('reactive refresh replay guard', () => {
       http.post('*/refresh-cookie', () => {
         refreshAttempts += 1;
         return HttpResponse.json(
-          { accessToken: 'must-not-be-fetched', expiresIn: 900 },
+          { accessToken: 'rotated-token', expiresIn: 900 },
           { status: 200 }
         );
       })
@@ -273,9 +295,74 @@ describe('reactive refresh replay guard', () => {
       probeApi.endpoints.replayGuardProbe.initiate('/v1/some/resource')
     );
 
+    // Sent once. The rotation happens, the RE-SEND does not.
     expect(resourceAttempts).toBe(1);
-    expect(refreshAttempts).toBe(0);
+    expect(refreshAttempts).toBe(1);
     expect((result.error as { status?: number } | undefined)?.status).toBe(401);
+    expect(store.getState().auth.accessToken).toBe('rotated-token');
+  });
+
+  // The arm's third outcome. A 401 from /refresh-cookie is the refresh
+  // cookie itself being refused, which IS the session's own death — not an
+  // outage — so the arm falls through to the pre-existing sign-out path
+  // rather than returning quietly. Nothing is replayed on the way there:
+  // the resource is still only ever sent once.
+  it('signs out when the rotation on a codeless verdict 401 is itself refused', async () => {
+    let resourceAttempts = 0;
+    let refreshAttempts = 0;
+    server.use(
+      http.get('*/v1/some/resource', () => {
+        resourceAttempts += 1;
+        return HttpResponse.json({}, { status: 401 });
+      }),
+      http.post('*/refresh-cookie', () => {
+        refreshAttempts += 1;
+        return HttpResponse.json({}, { status: 401 });
+      })
+    );
+
+    const store = await seededStore(inMs(60_000));
+    const result = await store.dispatch(
+      probeApi.endpoints.replayGuardProbe.initiate('/v1/some/resource')
+    );
+
+    expect(resourceAttempts).toBe(1);
+    expect(refreshAttempts).toBe(1);
+    expect((result.error as { status?: number } | undefined)?.status).toBe(401);
+    expect(store.getState().auth.accessToken).toBeFalsy();
+  });
+
+  // The arm's second outcome. A 503 says the backend could not EVALUATE the
+  // session (ADR-0017), and an outage must never be read as a sign-out — the
+  // same rule the replay path's own `retry` arm follows. The original 401
+  // goes back untouched and the token stays exactly as it was, so the next
+  // request gets to try again.
+  it('keeps the token when the rotation on a codeless verdict 401 is unavailable', async () => {
+    let resourceAttempts = 0;
+    let refreshAttempts = 0;
+    server.use(
+      http.get('*/v1/some/resource', () => {
+        resourceAttempts += 1;
+        return HttpResponse.json({}, { status: 401 });
+      }),
+      http.post('*/refresh-cookie', () => {
+        refreshAttempts += 1;
+        return HttpResponse.json(
+          { code: 'session_enforcement_unavailable' },
+          { status: 503 }
+        );
+      })
+    );
+
+    const store = await seededStore(inMs(60_000));
+    const result = await store.dispatch(
+      probeApi.endpoints.replayGuardProbe.initiate('/v1/some/resource')
+    );
+
+    expect(resourceAttempts).toBe(1);
+    expect(refreshAttempts).toBe(1);
+    expect((result.error as { status?: number } | undefined)?.status).toBe(401);
+    expect(store.getState().auth.accessToken).toBe('seed-access-token');
   });
 
   // A PUBLIC route breaks proof (b)'s reasoning: it runs its handler with no

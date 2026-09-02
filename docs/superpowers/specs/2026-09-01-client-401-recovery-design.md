@@ -2674,8 +2674,8 @@ returning outcomes.
    one default namespace, unlike `frontend-admin`'s per-addon namespaces
    (ADR-0007). `locales.test.ts` is a key-parity test, so a one-sided addition
    fails CI: both locale files or neither.
-7. **Align `frontend-admin`'s refresh timeout** with §4.1c —
-   **ruled in for this branch (batch 3)**, and it is **both halves of the client
+7. **Align `frontend-admin`'s refresh timeout** with §4.1c — ✅ **done in this
+   branch (batch 3)**, **both halves of the client
    model, not the timer swap alone.** (a) `refreshOnce` bounds its fetch with
    `AbortSignal.timeout(REFRESH_FETCH_TIMEOUT_MS)`; that becomes an
    `AbortController` + `setTimeout`, with `clearTimeout` in a `finally` and nowhere
@@ -2693,9 +2693,17 @@ returning outcomes.
    own `setTimeout(…, 0)` and every `baseApi.*.test.ts` file drains it on a real
    timer in `afterEach`, so a file-wide `vi.useFakeTimers()` hangs those drains. A
    new case becomes expressible and should be added — headers sent, body stalled,
-   and the lock released.
-8. **`frontend-admin`'s Web Lock test mock** —
-   **ruled in for this branch (batch 3)**, as a hardening rather than a bug fix.
+   and the lock released. **As shipped:** the setter is
+   `__setRefreshTimeoutForTests(ms?)` (restoring the production value when called
+   with no argument, which is what both suites' `afterEach` now does), and the new
+   case is `releases the cross-tab lock when the headers arrive and the body
+   stalls` in `baseApi.rotationRace.test.ts` — it hung to the 5 s test timeout
+   before the body race existed. One addition the client model did not need: the
+   console re-reads `ctrl.signal.aborted` after the race, because an aborted body
+   stream can reject into the pre-catch and resolve `{}`, and a tokenless body on
+   this tier falls through to the bare `{ ok: false }` that signs the operator out.
+8. **`frontend-admin`'s Web Lock test mock** — ✅ **done in this branch
+   (batch 3)**, as a hardening rather than a bug fix.
    The call site and the mock are both **two-argument** today, so the test
    passes for the right reason; what is wrong is that it would keep passing for
    the wrong one. Its assertions read only the call count and the lock name, so
@@ -2705,7 +2713,12 @@ returning outcomes.
    inside it, and has that throw swallowed by `performRefresh`'s own `.catch`.
    The mock asserts **arity 2** and that the second argument is a **function**,
    and the eight-line apology comment on `withRefreshLock` goes, replaced by one
-   line naming the test that now guards it.
+   line naming the test that now guards it. **As shipped:** `toHaveLength(2)` is
+   the assertion that actually fails — verified against a temporary 3-arg call
+   ("expected […] to have a length of 2 but got 3") — while the mock's own
+   `typeof cb` throw only makes the reason legible, since `performRefresh`'s
+   `.catch` swallows it. A `refreshAttempts === 1` assertion beside it pins that
+   the run callback really executed inside the lock.
 9. **`MintAccessTokenFromRefresh`'s three unclassified wraps** — **done in this
    branch (batch 2)**, and it is the §4.9 amendment above rather than a new
    section: three rows on the site table, the not-found-first split on its user
@@ -2860,8 +2873,8 @@ returning outcomes.
     it already is in practice — a staging/production knob. Nothing stops a
     contributor putting the console on `console.localhost` end to end; A decides only
     what ships, what the docs prescribe, and what the compiled defaults agree with.
-14. **A live-bearer codeless 401 strands the console for up to `TTL − 30 s`** —
-    **ruled in for this branch (batch 3)**; the contract is the third arm §7
+14. **A live-bearer codeless 401 strands the console for up to `TTL − 30 s`** — ✅
+    **done in this branch (batch 3)**; the contract is the third arm §7
     specifies, down to the two `baseApi.replayGuard.test.ts` assertions that flip
     and the two beside them that must not. §4.3's gate is deliberate and stays:
     a 401 that carries
@@ -2871,8 +2884,8 @@ returning outcomes.
     or a restart with new keys, after which every unexpired bearer validates as
     plain "invalid" and `RequireAuth` answers a codeless 401
     (`backend/internal/shared/middleware/auth.go:198-203`). Against that the console
-    now does nothing at all: no refresh, no toast, no sign-out, every request
-    failing silently until the *proactive* check fires at
+    used to do nothing at all: no refresh, no toast, no sign-out, every request
+    failing silently until the *proactive* check fired at
     `expiry − PROACTIVE_REFRESH_SKEW_MS`, i.e. up to `TTL − 30 s` — **≈ 14.5 min**
     at the 15 m default and **30 s** at the `MinAccessTokenTTL` floor of 1 m
     (`auth_duration_bounds.go:30`). A page reload recovers immediately, because
@@ -2881,11 +2894,17 @@ returning outcomes.
     original 401 untouched. The next request then carries a fresh bearer, so the
     window collapses to one request, and a genuinely dead session reaches the
     sign-out branch instead of failing quietly for a quarter of an hour. Cost: one
-    serialised rotation per verdict 401 — a wrong-password attempt would rotate the
-    refresh cookie, which is harmless. The adjacent case belongs with it: after a
+    serialised rotation per verdict 401 — a wrong-password attempt now rotates the
+    refresh cookie, which is harmless. **As shipped:** the arm is a third outcome
+    of the same `handlerNeverRan` decision (`rotateWithoutReplay` in
+    `baseApi.ts`), sharing the existing `performRefresh` call and the existing
+    `clearAccessToken` exit so the bare-`{ ok: false }` sign-out is written once
+    rather than twice; the two flipped assertions and two new cases are in
+    `baseApi.replayGuard.test.ts` (8 cases). The adjacent case belongs with it:
+    after a
     proof-(b) refresh, a *replay* that itself 401s still falls through to
-    `clearAccessToken` + "Session expired" (`baseApi.ts:550-554` → `:562-563`,
-    `:573-582`), which is the same misreading of a verdict as a dead session,
+    `clearAccessToken` + "Session expired", which is the same misreading of a
+    verdict as a dead session,
     narrowed but not introduced by this branch — and **not** closed by batch 3's
     arm, which returns before the replay path and never reaches it. It stays named
     here.
@@ -3052,13 +3071,16 @@ returning outcomes.
     rejected — so changing it is a security-shaped decision rather than a
     classification one, and it belongs in its own follow-up.
 18. **Cleanups** — **ruled in for this branch (batch 3)**, five of them, each small
-    and each already diagnosed. **(c) and (d), the two backend ones, are ✅ done in
-    this branch (batch 3);** (a) and (b) are frontend and land in their own waves,
+    and each already diagnosed. **(a), (c) and (d) are ✅ done in
+    this branch (batch 3);** (b) is frontend-client and lands in its own wave,
     and (e) is a config/doc alignment that has not been made yet:
 
     **(a) `handleOAuthCallback` and `useHandleOAuthCallbackMutation` are deleted**
-    (`frontend-admin/src/store/api/authApi.ts`). Zero consumers — the definition and
-    the exported hook name are the only two hits in the repo — and it is *wrong*,
+    — ✅ **done in this branch (batch 3)**
+    (`frontend-admin/src/store/api/authApi.ts`; a comment at the deletion site
+    records why there is no callback mutation, and a repo-wide grep for both names
+    now returns zero hits outside this spec). Zero consumers — the definition and
+    the exported hook name were the only two hits in the repo — and it is *wrong*,
     not merely unused: it POSTs `v1/auth/oauth/{provider}/callback`, which the
     backend mounts as a **GET** for Google, Discord and GitHub, so any caller would
     get a 405. It is the dormant, wrong second implementation §4.8 deleted on the

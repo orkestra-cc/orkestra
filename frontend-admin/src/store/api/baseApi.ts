@@ -97,24 +97,41 @@ const REFRESH_LOCK_NAME = 'orkestra:auth-refresh';
 // below for why timing out must NOT be treated as a negative answer.
 export const REFRESH_FETCH_TIMEOUT_MS = 10_000;
 
+// The bound refreshOnce actually applies. Production never changes it; the
+// setter below is the ONLY writer, and it exists so the timeout tests can
+// exercise the real abort path in 25 ms of wall clock.
+let refreshFetchTimeoutMs: number = REFRESH_FETCH_TIMEOUT_MS;
+
+// TEST-ONLY, and not part of this module's production surface — nothing
+// outside `baseApi.*.test.ts` may call it. It replaces the two
+// `vi.spyOn(AbortSignal, 'timeout')` monkey-patches those suites used to
+// carry: an AbortController's timer is an ordinary `setTimeout`, so nothing
+// needs patching, but fake timers are still not an option here —
+// performRefresh schedules its own `setTimeout(…, 0)` and every suite drains
+// it on a real timer in `afterEach`, which a file-wide `vi.useFakeTimers()`
+// would hang. Called with no argument it restores the production value,
+// which is what those `afterEach` hooks do.
+export function __setRefreshTimeoutForTests(
+  ms: number = REFRESH_FETCH_TIMEOUT_MS
+): void {
+  refreshFetchTimeoutMs = ms;
+}
+
 // Web Locks is the only cross-tab primitive that releases automatically
 // when the holder navigates away or crashes, which a localStorage mutex
 // cannot promise. Where it is missing (non-secure context, jsdom under
 // test) we fall back to running unguarded: the backend's rotation grace
 // window still keeps a lost race from ending the session.
 //
-// NOT bounded with a timeout signal (unlike refreshOnce's fetch below).
-// Web Locks only supports that via the 3-argument overload —
-// `request(name, { signal }, callback)` — instead of the 2-argument form
-// used here, and switching shapes is not the "straightforward" case: the
-// existing `takes the cross-tab lock when Web Locks is available` test in
-// baseApi.rotationRace.test.ts mocks the 2-arg form, and a 3-arg call
-// against that mock doesn't fail the test (it only asserts the call count
-// and lock name) — it silently hands the mock's `cb` parameter the options
-// object instead of the run callback, throws inside it, and that throw is
-// swallowed by performRefresh's own `.catch`. The test stays green while
-// no longer exercising what it was written to exercise. Restructuring that
-// mock is a real fix, just not one to do as a drive-by here.
+// NOT bounded with a timeout signal (unlike refreshOnce's fetch below): Web
+// Locks only supports that via the 3-argument overload
+// `request(name, { signal }, callback)`, and the transitive bound is
+// refreshOnce's own abort, which now covers the body read too. The
+// two-argument shape here is pinned by `takes the cross-tab lock when Web
+// Locks is available` in baseApi.rotationRace.test.ts — it asserts arity 2
+// and that the second argument is the run callback, because a 3-arg call
+// would otherwise bind that mock's `cb` to the options object and have the
+// resulting throw swallowed by performRefresh's `.catch`.
 async function withRefreshLock<T>(run: () => Promise<T>): Promise<T> {
   const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
   if (!locks?.request) return run();
@@ -123,13 +140,40 @@ async function withRefreshLock<T>(run: () => Promise<T>): Promise<T> {
   return await locks.request(REFRESH_LOCK_NAME, run);
 }
 
+// A promise that rejects when the signal aborts and never resolves otherwise.
+// `fetch` resolves on HEADERS, and the body stream of a mocked or proxied
+// response does not always observe the request's abort signal, so the body
+// read is raced against the signal EXPLICITLY. The transitive bound on the
+// Web Lock must not depend on the platform propagating an abort into the
+// body: a server that sends headers and then stalls would otherwise hold the
+// lock — and the in-flight promise every other tab is awaiting — for as long
+// as it stalls. Nothing inspects the rejection value; it only unblocks the
+// race. The listener is per-attempt (a fresh controller each time) and
+// `once`, so nothing accumulates.
+function rejectOnAbort(signal: AbortSignal): Promise<never> {
+  return new Promise<never>((_, reject) => {
+    const fail = () => reject(new Error('refresh aborted'));
+    if (signal.aborted) {
+      fail();
+      return;
+    }
+    signal.addEventListener('abort', fail, { once: true });
+  });
+}
+
 async function refreshOnce(baseUrl: string): Promise<RefreshResult> {
+  // AbortController + setTimeout, NOT AbortSignal.timeout: the latter runs on
+  // an internal timer nothing in the test suite can shorten without patching
+  // a platform object, and it cannot be cancelled either, so every refresh
+  // left a live 10s timer behind it.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), refreshFetchTimeoutMs);
   try {
     const res = await fetch(`${baseUrl}/v1/auth/operator/refresh-cookie`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(REFRESH_FETCH_TIMEOUT_MS)
+      signal: ctrl.signal
     });
     // 503 session_enforcement_unavailable: transient, keep the token.
     if (res.status === 503) return { ok: false, retry: true } as const;
@@ -137,10 +181,25 @@ async function refreshOnce(baseUrl: string): Promise<RefreshResult> {
     // is intact. Our cookie jar already holds its successor.
     if (res.status === 409) return { ok: false, raced: true } as const;
     if (!res.ok) return { ok: false } as const;
-    const body = (await res.json()) as {
+    // The parse is neutralised BEFORE the race, so whichever promise loses
+    // cannot surface later as an unhandled rejection. Racing it against the
+    // signal is what makes the timer bound the READ as well as the headers.
+    const parsed = res.json().catch(() => ({}));
+    const body = (await Promise.race([parsed, rejectOnAbort(ctrl.signal)])) as {
       accessToken?: string;
       expiresIn?: number;
     };
+    // Once the abort has fired the two racers can settle in either order —
+    // an aborted body stream may reject and land in the pre-catch above,
+    // resolving `{}`. Reading the signal directly is what keeps the outcome
+    // deterministic, and it matters here in a way it does not on the client
+    // tier: a tokenless body falls through to the bare `{ ok: false }` one
+    // line down, which the 401 branch reads as a real negative answer and
+    // signs the operator out. A timed-out read is "no answer", so it must
+    // reach the `catch` and its transient outcome instead. No timer can fire
+    // between the await and this line — a macrotask cannot preempt a running
+    // microtask — so a body that arrived in time is never discarded here.
+    if (ctrl.signal.aborted) throw new Error('refresh aborted');
     if (!body.accessToken || !body.expiresIn) return { ok: false } as const;
     return {
       ok: true,
@@ -148,9 +207,9 @@ async function refreshOnce(baseUrl: string): Promise<RefreshResult> {
       expiresIn: body.expiresIn
     } as const;
   } catch {
-    // Nothing here distinguishes WHY the fetch threw — the
-    // AbortSignal.timeout above firing, a DNS failure, the tab going
-    // offline, a rejected promise from the network stack. What matters is
+    // Nothing here distinguishes WHY the attempt threw — the abort above
+    // firing (on the headers OR on the body read), a DNS failure, the tab
+    // going offline, a rejected promise from the network stack. What matters is
     // that we never got an answer at all. The naive "just add a timeout"
     // fix lands here and falls through to a bare `{ ok: false }`, which the
     // 401 branch in baseQueryWithRetry reads as a REAL negative answer and
@@ -163,6 +222,8 @@ async function refreshOnce(baseUrl: string): Promise<RefreshResult> {
     // above — keep the token, the caller (or the next proactive check)
     // tries again. Do not "simplify" this back to a bare `{ ok: false }`.
     return { ok: false, retry: true } as const;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -532,11 +593,39 @@ const baseQueryWithRetry: BaseQueryFn<
       //      what keeps the console recovering against a backend that does
       //      not yet send (a): a missing-bearer 401 is codeless.
       //
-      // Neither proof: hand the 401 back untouched. No refresh, no replay,
-      // and no sign-out either — a mistyped password is not a dead session.
+      // Neither proof: no replay. The request may have run, so re-sending it
+      // is the hazard this whole gate exists to remove — and a mistyped
+      // password is not a dead session, so there is no sign-out either.
       const handlerNeverRan =
         errorData?.code === 'access_token_expired' || sentBearer === null;
-      if (!handlerNeverRan) {
+
+      // …but "no replay" is not the same as "do nothing", and for ONE input
+      // in this shape doing nothing is wrong. A live bearer was sent and the
+      // 401 carries no top-level code at all: almost always the handler's own
+      // verdict, and also exactly what a JWT signing-key rotation (or a
+      // restart with new key material) produces — every unexpired bearer then
+      // validates as plain "invalid" and RequireAuth answers a CODELESS 401
+      // (shared/middleware/auth.go). Against that the console used to do
+      // nothing whatsoever: no refresh, no toast, no sign-out, every request
+      // failing silently until the proactive check fired at
+      // `expiry − PROACTIVE_REFRESH_SKEW_MS` — up to TTL − 30 s, ≈14.5 min at
+      // the 15-minute default. So rotate ONCE and return the ORIGINAL 401
+      // untouched: the next request carries the fresh bearer, which collapses
+      // the window to a single request, and a genuinely dead session reaches
+      // the sign-out branch below instead of failing quietly for a quarter of
+      // an hour. The cost is one serialised rotation per verdict 401 — a
+      // wrong password now rotates the refresh cookie, which is harmless: the
+      // family is untouched, and performRefresh coalesces in-tab and takes
+      // the cross-tab lock, so a burst costs one rotation and not one each.
+      //
+      // CODELESS, not "anything but access_token_expired". A 401 that names
+      // itself has been explained by the server, and a token minted from the
+      // same cookie cannot change the answer — `audience_mismatch` is the
+      // live example, emitted by RequireAudience, unhandled by every branch
+      // ahead of this one, and identical after any rotation.
+      const rotateWithoutReplay =
+        !handlerNeverRan && errorData?.code === undefined;
+      if (!handlerNeverRan && !rotateWithoutReplay) {
         return result;
       }
       const refreshResult = await performRefresh(runtimeConfig.apiUrl);
@@ -547,19 +636,30 @@ const baseQueryWithRetry: BaseQueryFn<
             expiresIn: refreshResult.expiresIn
           })
         );
+        if (rotateWithoutReplay) {
+          // The state is updated and that is the whole mitigation. The
+          // request that earned this 401 is never sent twice.
+          return result;
+        }
         result = await baseQuery(args, api, extraOptions);
         if (!result.error || result.error.status !== 401) {
           return result;
         }
         // Retry still returned 401 — fall through to the logout branch.
       } else if (refreshResult.retry) {
-        // 503: the server could not evaluate the session, which is not the
-        // same as the session being over. Surface the original error and
-        // keep the token — the next request will try again. Signing the
-        // user out here is the behaviour ADR-0017's 503 exists to prevent.
+        // 503, a 409 that survived its retry, or no answer at all: the server
+        // could not evaluate the session, which is not the same as the
+        // session being over. Surface the original error and keep the token —
+        // the next request will try again. Signing the user out here is the
+        // behaviour ADR-0017's 503 exists to prevent. (There is no `raced`
+        // arm to write: performRefresh retries a 409 once inside the lock and
+        // converts a second one to `retry` before returning, so `raced` never
+        // escapes it.)
         return result;
       }
-      // Refresh itself failed: drop the stale access token before redirecting.
+      // A bare `{ ok: false }` — the refresh cookie itself was refused, which
+      // IS the session's own death. Both arms above share this exit: drop the
+      // stale access token before redirecting.
       api.dispatch(clearAccessToken());
     }
 
