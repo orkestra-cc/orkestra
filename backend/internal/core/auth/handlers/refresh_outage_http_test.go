@@ -30,10 +30,20 @@ type outagePeekAuthService struct {
 	// peekErr answers every candidate identically; peekByValue, when set,
 	// answers per cookie value so a test can mix an unreadable candidate with
 	// a readable rotated sibling — the shape that used to fire replay.
-	peekErr      error
-	peekByValue  map[string]peekRow
+	peekErr     error
+	peekByValue map[string]peekRow
+	// mintErr, when set, replaces the default terminal ErrInvalidRefreshToken
+	// that MintAccessTokenFromRefresh returns. It is what produces the
+	// Peek-OK → Mint-fail shape: the picker classifies the cookie and the
+	// store goes away on the mint's OWN reads, which is a different site from
+	// the picker's and answers a different status.
+	mintErr      error
 	rotateCalled bool
 	mintCalled   bool
+}
+
+func (s *outagePeekAuthService) setMintErr(err error) {
+	s.mintErr = err
 }
 
 func (s *outagePeekAuthService) PeekRefreshToken(_ context.Context, raw string) (*models.RefreshTokenDoc, error) {
@@ -56,6 +66,9 @@ func (s *outagePeekAuthService) RefreshTokensWithRiskAssessment(context.Context,
 
 func (s *outagePeekAuthService) MintAccessTokenFromRefresh(context.Context, string, *models.SecurityContext) (*models.TokenResponse, error) {
 	s.mintCalled = true
+	if s.mintErr != nil {
+		return nil, s.mintErr
+	}
 	return nil, services.ErrInvalidRefreshToken
 }
 
@@ -102,6 +115,10 @@ func assertOutage503(t *testing.T, rec *httptest.ResponseRecorder) {
 }
 
 var errOutage = fmt.Errorf("mongo: no reachable servers: %w", services.ErrRefreshLookupUnavailable)
+
+// errMintOutage is what MintAccessTokenFromRefresh's own sites emit verbatim:
+// the sentinel first, the cause second, exactly as the production wrap.
+var errMintOutage = fmt.Errorf("token mint failed: %w: %w", services.ErrRefreshLookupUnavailable, errors.New("mongo: no reachable servers"))
 
 func TestRefreshTokensHTTP_CookieLookupOutage_Is503_NeverFiresReplay(t *testing.T) {
 	h, svc := outageHandler(errOutage)
@@ -164,5 +181,20 @@ func TestRefreshTokensHTTP_CookieInvalid_Still401(t *testing.T) {
 	}
 	if svc.rotateCalled {
 		t.Fatal("rotation reached with no valid candidate")
+	}
+}
+
+// The mint's own reads (spec §4.9 v20, follow-up 9). The picker classified the
+// cookie successfully and THEN the store went away: Peek-OK → Mint-fail. The
+// existing TestGetSessionHTTP_CookieLookupOutage_Is503 cannot see this shape —
+// it asserts mintCalled == false.
+func TestGetSessionHTTP_MintOutage_Is503(t *testing.T) {
+	h, svc := outageHandlerTable(map[string]peekRow{"good": {doc: freshDoc()}})
+	svc.setMintErr(errMintOutage)
+	rec := httptest.NewRecorder()
+	h.GetSessionHTTP(rec, withCookie(http.MethodGet, "/v1/auth/operator/session", "good"))
+	assertOutage503(t, rec)
+	if !svc.mintCalled {
+		t.Fatal("the mint was never reached — this test is meant to exercise the mint site, not the picker")
 	}
 }

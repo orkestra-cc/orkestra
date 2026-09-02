@@ -47,14 +47,20 @@ var (
 	// so the correct client response is to retry the refresh once.
 	// Translated to 409 refresh_rotation_raced at the handler boundary.
 	ErrRefreshRotationRaced = errors.New("refresh token superseded by a concurrent rotation — retry")
-	// ErrRefreshLookupUnavailable signals that the rotation could not be
-	// COMPLETED because infrastructure failed. SEVEN sites return it: the
-	// refresh-token lookup, the user lookup, the mint, the rotating write,
-	// PeekRefreshToken's lookup in the candidate picker that runs in FRONT of
-	// the rotation, and the two reads the rotation-race classifier makes —
-	// benignRotationRetry's FamilyRevoked and the post-CAS re-read. The last
-	// two are the destructive ones: before §4.9 they folded "could not read"
-	// into "revoked" and signed every tab out over a store hiccup.
+	// ErrRefreshLookupUnavailable signals that the refresh path could not be
+	// COMPLETED because infrastructure failed. TEN sites return it. Seven are
+	// on the rotation path: the refresh-token lookup, the user lookup, the
+	// mint, the rotating write, PeekRefreshToken's lookup in the candidate
+	// picker that runs in FRONT of the rotation, and the two reads the
+	// rotation-race classifier makes — benignRotationRetry's FamilyRevoked and
+	// the post-CAS re-read. Those last two are the destructive ones: before
+	// §4.9 they folded "could not read" into "revoked" and signed every tab
+	// out over a store hiccup. The other three are MintAccessTokenFromRefresh's
+	// own reads — its GetByTokenAny, its GetUserByID and its
+	// GenerateAccessTokenForSessionWithAMR — the read-only mint that
+	// GET /v1/auth/session performs after the picker. They are separate reads
+	// from the picker's, so a blip opening between the two answered session
+	// bootstrap with a codeless 401 until spec v20 classified them.
 	// It says nothing about whether the session is
 	// alive, so it must never be answered as an authentication failure:
 	// ADR-0017 gave session enforcement its own 503 precisely so a storage
@@ -1670,7 +1676,11 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 	hashedToken := utils.HashRefreshToken(refreshToken)
 	doc, err := s.refreshTokenRepo.GetByTokenAny(ctx, hashedToken)
 	if err != nil {
-		return nil, fmt.Errorf("failed to look up refresh token: %w", err)
+		// An unreachable store is not a verdict on the token. 503, not 401.
+		// This is a SECOND read: the picker already classified the cookie
+		// through PeekRefreshToken, so a blip opening between the two used to
+		// reach the browser as a sign-out on session bootstrap.
+		return nil, fmt.Errorf("refresh token lookup failed: %w: %w", ErrRefreshLookupUnavailable, err)
 	}
 	if doc == nil {
 		return nil, ErrInvalidRefreshToken
@@ -1685,9 +1695,21 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 		return nil, ErrInvalidRefreshToken
 	}
 
+	// Same split as the rotation path. A user that is genuinely GONE is
+	// terminal — 401, or the client holds a token for a deleted account
+	// forever. Anything else is the store being unreachable, and answering
+	// that 401 is how an outage acquires the appearance of a deleted account.
+	// The not-found branch is checked FIRST so the outage wrap can never
+	// re-classify a deletion.
 	userModel, err := s.userService.GetUserByID(ctx, claims.UserUUID)
 	if err != nil {
-		return nil, fmt.Errorf("user not found: %w", err)
+		if errors.Is(err, iface.ErrUserNotFound) {
+			return nil, ErrInvalidRefreshToken
+		}
+		return nil, fmt.Errorf("user lookup failed: %w: %w", ErrRefreshLookupUnavailable, err)
+	}
+	if userModel == nil {
+		return nil, ErrInvalidRefreshToken
 	}
 	user := convertUserModelToAuthModel(userModel)
 
@@ -1723,7 +1745,8 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 
 	access, err := s.jwtService.GenerateAccessTokenForSessionWithAMR(user, device, security, claims.AMR, claims.LastOTPAt)
 	if err != nil {
-		return nil, fmt.Errorf("failed to mint access token: %w", err)
+		// Signing is ours to get right; a failure here is not the caller's.
+		return nil, fmt.Errorf("token mint failed: %w: %w", ErrRefreshLookupUnavailable, err)
 	}
 
 	oauthProviders, _ := s.oauthProviderRepo.GetByUserUUID(ctx, user.UUID)

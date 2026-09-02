@@ -198,3 +198,90 @@ func TestRefreshInfra_PeekLookupFailure_IsUnavailable(t *testing.T) {
 		t.Fatalf("err = %v, want the underlying cause preserved", err)
 	}
 }
+
+// ===== The read-only mint (spec §4.9 v20, follow-up 9) =====
+//
+// GET /v1/auth/session does NOT rotate: after the picker classifies the
+// cookies it calls MintAccessTokenFromRefresh, which issues its own
+// GetByTokenAny, its own GetUserByID and its own signing call. Those three
+// were the residual generic wraps — Peek could succeed and the mint fail on
+// the very next read, and the browser was told 401. Same sentinel, same
+// not-found-first split, same negative.
+
+func TestMintInfra_TokenLookupFailure_IsUnavailable(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+	raw, _ := env.issueAndSeedRefresh(user, "fam-mint-lookup")
+	env.refresh.setGetByTokenAnyErr(errStoreDown)
+
+	resp, err := env.auth.MintAccessTokenFromRefresh(context.Background(), raw, &authModels.SecurityContext{})
+	if !errors.Is(err, ErrRefreshLookupUnavailable) {
+		t.Fatalf("err = %v, want ErrRefreshLookupUnavailable — the mint's own lookup is a second read, and a blip between Peek and here reached the browser as a sign-out", err)
+	}
+	if !errors.Is(err, errStoreDown) {
+		t.Fatalf("err = %v, want the underlying cause preserved", err)
+	}
+	if resp != nil {
+		t.Fatalf("resp = %+v, want nil — the mint must never hand back credentials it could not verify", resp)
+	}
+}
+
+func TestMintInfra_UserLookupFailure_IsUnavailable(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+	raw, _ := env.issueAndSeedRefresh(user, "fam-mint-user")
+	env.users.setGetByIDErr(errStoreDown)
+
+	resp, err := env.auth.MintAccessTokenFromRefresh(context.Background(), raw, &authModels.SecurityContext{})
+	if !errors.Is(err, ErrRefreshLookupUnavailable) {
+		t.Fatalf("err = %v, want ErrRefreshLookupUnavailable — 'user not found' is the wording that makes an outage read as a deleted account", err)
+	}
+	if !errors.Is(err, errStoreDown) {
+		t.Fatalf("err = %v, want the underlying cause preserved", err)
+	}
+	if resp != nil {
+		t.Fatalf("resp = %+v, want nil", resp)
+	}
+}
+
+func TestMintInfra_MintFailure_IsUnavailable(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+	raw, _ := env.issueAndSeedRefresh(user, "fam-mint-sign")
+	env.breakSigningKey()
+
+	resp, err := env.auth.MintAccessTokenFromRefresh(context.Background(), raw, &authModels.SecurityContext{})
+	if !errors.Is(err, ErrRefreshLookupUnavailable) {
+		t.Fatalf("err = %v, want ErrRefreshLookupUnavailable — a signing/key failure is ours, not the caller's", err)
+	}
+	if !errors.Is(err, ErrJWTKeysNotLoaded) {
+		t.Fatalf("err = %v, want the underlying mint failure preserved", err)
+	}
+	if resp != nil {
+		t.Fatalf("resp = %+v, want nil", resp)
+	}
+}
+
+// The negative the mint must not skip: R2's permanent-503 loop in the
+// bootstrap endpoint's own words. The user is deliberately NOT seeded, so the
+// fake's errNotFound — which already wraps iface.ErrUserNotFound — is what
+// classifies.
+func TestMintInfra_UserGenuinelyDeleted_IsInvalidToken(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	raw, _ := env.issueAndSeedRefresh(user, "fam-mint-deleted")
+
+	resp, err := env.auth.MintAccessTokenFromRefresh(context.Background(), raw, &authModels.SecurityContext{})
+	if !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("err = %v, want ErrInvalidRefreshToken — a deleted account answered 503 leaves the SPA retrying a session that is never coming back", err)
+	}
+	if errors.Is(err, ErrRefreshLookupUnavailable) {
+		t.Fatal("a deleted account must not be reported as an outage")
+	}
+	if resp != nil {
+		t.Fatalf("resp = %+v, want nil", resp)
+	}
+}

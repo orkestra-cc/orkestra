@@ -2210,8 +2210,8 @@ defect exists (§3.B). Own issue (N3, §8 #5).
 8. **`frontend-admin`'s 3-arg Web Lock test mock** — its own comment records that
    the existing test stays green while no longer exercising what it was written to
    exercise. Not this SPA's code, but the same primitive.
-9. **`MintAccessTokenFromRefresh`'s three unclassified wraps** — **ruled in for
-   this branch (batch 2)**, and it is the §4.9 amendment above rather than a new
+9. **`MintAccessTokenFromRefresh`'s three unclassified wraps** — **done in this
+   branch (batch 2)**, and it is the §4.9 amendment above rather than a new
    section: three rows on the site table, the not-found-first split on its user
    lookup, and the tests in §6. It gets a number even though it ships here because
    it never had one — the residual was tracked in prose, in four documents that

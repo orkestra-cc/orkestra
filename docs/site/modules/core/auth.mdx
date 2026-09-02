@@ -212,13 +212,14 @@ subsystem is legible in a support ticket; both are 503 and every client
 already treats 503 as transient. An account that has genuinely been deleted
 still answers 401 — otherwise a dead session could never end.
 
-The bootstrap endpoint `GET /v1/auth/session` shares only the first half of
-that. Its cookie-classification step answers 503 the same way, but the
-read-only mint it performs afterwards (`MintAccessTokenFromRefresh`) is not
-yet classified, so a store failure opening between that call's own lookup and
-its mint still answers a codeless 401. Closing that gap is a tracked
-follow-up; until then, do not read the paragraph above as covering the whole
-refresh surface.
+The bootstrap endpoint `GET /v1/auth/session` is covered end to end too. Its
+cookie-classification step answers 503, and so does the read-only mint it
+performs afterwards (`MintAccessTokenFromRefresh`) — its own token lookup, its
+own user lookup and its own signing call. That mint reads the store a *second*
+time, after the cookie has already been classified, so a blip opening between
+the two used to answer session bootstrap with a codeless 401: the one status a
+client reads as the end of the session. A genuinely deleted account still
+answers 401 there as well, so a dead session can still end.
 
 ### Upgrading
 

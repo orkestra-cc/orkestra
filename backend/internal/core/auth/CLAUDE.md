@@ -463,12 +463,15 @@ kept off the 401 path precisely because every client reads a 401 there as
 a sign-out; the grace-window rule itself is under **Refresh tokens** below.
 
 `ErrRefreshLookupUnavailable` is **503** `refresh_lookup_unavailable` — the
-rotation could not be *completed* because infrastructure failed: the token
+refresh path could not be *completed* because infrastructure failed: the token
 store or user store was unreachable, signing failed, the rotating write
 failed, **the picker in front of the rotation could not classify a cookie
-candidate** (`PeekRefreshToken`'s lookup), **or the rotation-race classifier
+candidate** (`PeekRefreshToken`'s lookup), **the rotation-race classifier
 could not read the family state** (`benignRotationRetry`'s `FamilyRevoked`, or
-the post-CAS re-read). That last one is the destructive case: both used to fold
+the post-CAS re-read), **or the read-only mint behind the picker failed on one
+of its own three reads** (`MintAccessTokenFromRefresh`'s `GetByTokenAny`, its
+`GetUserByID`, its `GenerateAccessTokenForSessionWithAMR`). The race-classifier
+pair is the destructive case: both used to fold
 "could not read" into "revoked" and run `handleRefreshReplay`, so a store
 hiccup during a legitimate multi-tab race revoked the family the winner had
 just renewed and signed every tab out. `benignRotationRetry` now returns
@@ -476,7 +479,7 @@ just renewed and signed every tab out. `benignRotationRetry` now returns
 503 **without** revoking. A replay verdict that *was* reached still answers 401
 even if its `RevokeFamily` fails: fail closed denies the current request, it
 does not invent a verdict and persist it.
-Before this, the FIRST FIVE of those infrastructure sites were wrapped
+Before this, EIGHT of those ten sites were wrapped
 generically and answered as a codeless 401, so a Mongo blip during a refresh
 reached the SPA as the same answer a dead refresh token produces and no
 client-side rule could separate them. The picker case is the one that
@@ -495,25 +498,35 @@ is never expired on this outcome (`clearRefreshCookieOnTerminalRefreshErr`
 is an allowlist), and `refreshFailureOutcome` logs it as
 `lookup_unavailable`, not `invalid_token`.
 
-**Scope, precisely:** the seven sites are the four infrastructure wraps inside
+**Scope, precisely:** the ten sites are the four infrastructure wraps inside
 `RefreshTokensWithRiskAssessment` (token lookup, user lookup, mint, rotating
-write), `PeekRefreshToken`'s lookup, and the two race-classifier reads —
+write), `PeekRefreshToken`'s lookup, the two race-classifier reads —
 `benignRotationRetry`'s `FamilyRevoked` and the post-CAS re-read in the
-`ErrTokenAlreadyRotated` branch. So `POST /v1/auth/{tier}/refresh-cookie` and
-`POST /v1/auth/{tier}/refresh` are covered end to end, and
-`GET /v1/auth/session` is covered only as far as the picker. The rule the last
-two encode: **an unreadable family state answers 503 and revokes nothing;
+`ErrTokenAlreadyRotated` branch — and the three inside
+`MintAccessTokenFromRefresh` (its own `GetByTokenAny`, its `GetUserByID`, its
+`GenerateAccessTokenForSessionWithAMR`). So `POST /v1/auth/{tier}/refresh-cookie`,
+`POST /v1/auth/{tier}/refresh` **and** `GET /v1/auth/session` are each covered
+end to end. The rule the race-classifier pair
+encodes: **an unreadable family state answers 503 and revokes nothing;
 replay may fire only on a family state that was actually read.** A readable
 state behaves exactly as before — inside the grace window against a healthy
 family it is `ErrRefreshRotationRaced` (409), outside it or against a revoked
-family it is `handleRefreshReplay` + 401. **`MintAccessTokenFromRefresh` is
-deliberately NOT classified** — it
-still carries three generic wraps (its own `GetByTokenAny`, its `GetUserByID`,
-and `GenerateAccessTokenForSessionWithAMR`), each of which becomes a codeless
-401. That path is reachable: Peek and Mint issue separate reads, so a blip
-opening between them gives Peek-OK → Mint-fail → 401 on session bootstrap.
-Extending §4.9 to cover it is a spec change, not a refactor — do not "fix" it
-opportunistically while editing this file.
+family it is `handleRefreshReplay` + 401.
+
+The mint's three were the residual, closed by spec v20 (follow-up 9). They are
+reachable precisely because Peek and Mint issue **separate** reads: a blip
+opening between them gave Peek-OK → Mint-fail → a codeless 401 on session
+bootstrap, which is the one status a client reads as the end of the session.
+Its user lookup carries the same not-found-first split as the rotation's, so a
+genuinely deleted account still ends the session with a 401 — a blanket 503
+there would strand it in a retry loop that never resolves. The absolute-cap
+return between them stays **unwrapped**: it propagates
+`ErrSessionMaxAgeReached` / `ErrSessionEnforcementUnavailable` verbatim and
+wrapping it would break `writeRefreshErr`'s branch order (ADR-0017 owns it).
+**No handler change was needed:** `GetSessionHTTP` already routes the mint's
+error through `writeRefreshErr`, `refreshFailureOutcome` already logs it as
+`lookup_unavailable`, and the cookie-clear allowlist already excludes the
+sentinel.
 
 > **The same code is also emitted by `shared/middleware.AuthMiddleware`,
 > and that is the path that actually reaches a user.** The three refresh
