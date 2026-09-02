@@ -2689,8 +2689,8 @@ returning outcomes.
    `access_token_expired`, and every `{}`-bodied 401 in the four `baseApi.*.test.ts`
    files becomes a "must NOT refresh" assertion. Its own commits and its own tests
    rather than riding along. N3.
-6. **`AccountDsrPage`'s hard-coded English copy** (§4.6) —
-   **ruled in for this branch (batch 3)**, and it is larger than the two error
+6. **`AccountDsrPage`'s hard-coded English copy** (§4.6) — ✅ **done in this
+   branch (batch 3)**, and it is larger than the two error
    strings §4.6 noticed while reading the error path. The page has **no
    `useTranslation` import and no `t()` call at all**, so every string on it is
    hard-coded: the heading, the intro, both button labels and both pending
@@ -2701,6 +2701,20 @@ returning outcomes.
    one default namespace, unlike `frontend-admin`'s per-addon namespaces
    (ADR-0007). `locales.test.ts` is a key-parity test, so a one-sided addition
    fails CI: both locale files or neither.
+
+   *As shipped:* fourteen keys under `dsr` — `title`, `subtitle`, and an
+   `export.*` / `erasure.*` pair each carrying `title`, `subtitle`, `submit`,
+   `submitting` and `error`, plus `erasure.reasonPlaceholder` and
+   `erasure.submitted` — modelled on the neighbouring `account.changePassword.*`
+   block, in both bundles. Markup, classes and roles are byte-identical; only the
+   text nodes and the `placeholder` attribute moved. The **one** English literal
+   deliberately left behind is the export filename `my-data-export.json`, which
+   the user's filesystem sees rather than reads, and the page's header comment
+   now says so. A new `AccountDsrPage.test.tsx` renders the page in each locale
+   against the bundles themselves (so a copy edit cannot silently break it) and
+   asserts no `dsr.` lookup key reaches the DOM; it restores `en` in an
+   `afterEach`, because `src/test/setup.ts` pins the language once in a
+   `beforeAll` and a file that switches it owns putting it back.
 7. **Align `frontend-admin`'s refresh timeout** with §4.1c — ✅ **done in this
    branch (batch 3)**, **both halves of the client
    model, not the timer swap alone.** (a) `refreshOnce` bounds its fetch with
