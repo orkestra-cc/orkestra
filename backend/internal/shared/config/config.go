@@ -454,9 +454,61 @@ func (c *Config) Validate() error {
 		if c.Auth.Google.ClientSecret == "" {
 			return fmt.Errorf("OAUTH_GOOGLE_CLIENT_SECRET is required in production")
 		}
+
+		// Object-storage credentials. On the bundled RustFS the backend's
+		// secret IS the store's root secret (docker-compose.infra.yml
+		// derives RUSTFS_SECRET_KEY from it) and the S3 API is browser-
+		// facing behind the proxy, so a placeholder or a trivially short
+		// value is a misconfiguration to refuse, not a choice to honour.
+		// Both keys empty is still allowed: that disables blob storage,
+		// and the boot log says so. scripts/env-validate.sh applies the
+		// same rule before a deploy; this is the last line of defense for
+		// anyone who runs the compose files by hand.
+		if c.Storage.AccessKey != "" || c.Storage.SecretKey != "" {
+			if reason := weakSecretReason(c.Storage.SecretKey); reason != "" {
+				return fmt.Errorf("STORAGE_SECRET_KEY %s in production/staging — generate one with `openssl rand -hex 16` (make init does) and keep RUSTFS_ROOT_PASSWORD in step unless the backend uses a scoped key", reason)
+			}
+		}
 	}
 
 	return nil
+}
+
+// placeholderSecretPrefixes and placeholderSecretExact are every literal that
+// docker/.env.example, the compose files or the bundled images have ever
+// shipped or defaulted to as a secret. Compared lower-cased. Mirrors
+// secret_is_placeholder in scripts/env-file.sh — keep the two in step.
+var placeholderSecretPrefixes = []string{
+	"changeme", "replace_with_", "generate", "your_", "placeholder", "example", "dev-", "dev_",
+}
+
+var placeholderSecretExact = map[string]bool{
+	"rustfsadmin": true, "minioadmin": true, "password": true, "secret": true, "admin": true,
+}
+
+// minSecretLength is what `openssl rand -hex 16` comfortably exceeds (32).
+const minSecretLength = 16
+
+// weakSecretReason reports why v is not an acceptable production secret —
+// "is empty", "is a placeholder", "is shorter than N characters" — or "" when
+// it is acceptable.
+func weakSecretReason(v string) string {
+	lower := strings.ToLower(strings.TrimSpace(v))
+	if lower == "" {
+		return "is empty"
+	}
+	if placeholderSecretExact[lower] {
+		return "is a placeholder"
+	}
+	for _, p := range placeholderSecretPrefixes {
+		if strings.HasPrefix(lower, p) {
+			return "is a placeholder"
+		}
+	}
+	if len(v) < minSecretLength {
+		return fmt.Sprintf("is shorter than %d characters", minSecretLength)
+	}
+	return ""
 }
 
 // printJWTWarning prints a prominent warning when JWT keys are not loaded

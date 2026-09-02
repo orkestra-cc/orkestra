@@ -18,6 +18,11 @@ compose_env=(
   MONGO_HOST=mongodb
   REDIS_HOST=redis
   REDIS_PASSWORD=test-redis-password
+  # Credentials carry no fallback in the compose files (credential-fallbacks
+  # .test.sh), so a render needs the storage pair the rustfs service derives
+  # its root from.
+  STORAGE_ACCESS_KEY=test-access
+  STORAGE_SECRET_KEY=test-secret-key-0123
   OTEL_EXPORTER_OTLP_ENDPOINT=
   SENTRY_DSN_FRONTEND=
   OAUTH_TOKEN_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef

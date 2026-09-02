@@ -931,24 +931,53 @@ wiz_security() {
     env_set "$ENV_FILE" CLIENT_COOKIE_DOMAIN   "$(ask_value 'Client cookie domain'   "$(_wiz_default CLIENT_COOKIE_DOMAIN "$(env_get "$ENV_FILE" CLIENT_API_HOST)")")"
 }
 
+# ensure_storage_secret — the bundled RustFS derives its ROOT pair from
+# STORAGE_ACCESS_KEY / STORAGE_SECRET_KEY (docker-compose.infra.yml), and its
+# S3 API is browser-facing behind the proxy, so a placeholder left in
+# docker/.env would be a public root password. Generate a real secret whenever
+# the current value is empty or one of the shipped literals; never touch a
+# real one (rotating it invalidates every presigned URL in flight).
+ensure_storage_secret() {
+    if secret_is_placeholder "$(env_get "$ENV_FILE" STORAGE_SECRET_KEY)"; then
+        env_set "$ENV_FILE" STORAGE_SECRET_KEY "$(openssl rand -hex 16)"
+        p_ok "Generated STORAGE_SECRET_KEY (it is also the bundled RustFS root secret)."
+    fi
+    [ -n "$(env_get "$ENV_FILE" STORAGE_ACCESS_KEY)" ] || env_set "$ENV_FILE" STORAGE_ACCESS_KEY orkestra
+}
+
 wiz_storage() {
     local env=$1
     p_section "Object storage"
     if [ "$env" != "production" ]; then
-        p_info "Using built-in RustFS defaults for $env (configurable later)."
+        p_info "Using built-in RustFS for $env (configurable later)."
+        ensure_storage_secret
         return 0
     fi
     if ask_yes_no "Use built-in RustFS for production? (No = managed S3)" "n"; then
-        p_info "Keeping RustFS storage defaults."
+        p_info "Keeping built-in RustFS."
+        ensure_storage_secret
         return 0
     fi
     env_set "$ENV_FILE" STORAGE_ENDPOINT   "$(ask_value 'S3 endpoint'   "$(_wiz_default STORAGE_ENDPOINT https://s3.amazonaws.com)")"
     env_set "$ENV_FILE" STORAGE_REGION     "$(ask_value 'S3 region'     "$(_wiz_default STORAGE_REGION us-east-1)")"
     env_set "$ENV_FILE" STORAGE_BUCKET     "$(ask_value 'S3 bucket'     "$(_wiz_default STORAGE_BUCKET orkestra-avatars)")"
     env_set "$ENV_FILE" STORAGE_ACCESS_KEY "$(ask_value 'S3 access key' "$(_wiz_default STORAGE_ACCESS_KEY '')")"
-    env_set "$ENV_FILE" STORAGE_SECRET_KEY "$(ask_value 'S3 secret key' "$(_wiz_default STORAGE_SECRET_KEY '')")"
+    # Enter keeps a configured secret, never a shipped placeholder.
+    local cur_secret
+    cur_secret=$(env_get "$ENV_FILE" STORAGE_SECRET_KEY)
+    secret_is_placeholder "$cur_secret" && cur_secret=""
+    env_set "$ENV_FILE" STORAGE_SECRET_KEY "$(ask_value 'S3 secret key' "$cur_secret")"
+    [ -n "$(env_get "$ENV_FILE" STORAGE_SECRET_KEY)" ] \
+        || p_warn "STORAGE_SECRET_KEY is empty — object storage stays disabled until it is set."
     env_set "$ENV_FILE" STORAGE_FORCE_PATH_STYLE false
     env_set "$ENV_FILE" STORAGE_ENSURE_BUCKET false
+    # The rustfs container still starts with the infra stack: give it a root
+    # of its own so it never inherits the cloud credentials above.
+    if secret_is_placeholder "$(env_get "$ENV_FILE" RUSTFS_ROOT_PASSWORD)"; then
+        env_set "$ENV_FILE" RUSTFS_ROOT_USER "rustfs-root"
+        env_set "$ENV_FILE" RUSTFS_ROOT_PASSWORD "$(openssl rand -hex 16)"
+        p_ok "Generated a dedicated RustFS root (RUSTFS_ROOT_USER / RUSTFS_ROOT_PASSWORD)."
+    fi
 }
 
 wiz_seeds() {

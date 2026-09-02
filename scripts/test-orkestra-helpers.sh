@@ -229,7 +229,7 @@ check "observability log picker uses the explicit service catalog" "6" "$obs_cat
 # developer's real one is never read. Same trick as the JWT generator above.
 ev_tmp="$(mktemp -d)"
 mkdir -p "$ev_tmp/scripts" "$ev_tmp/docker"
-cp "$DIR/env-validate.sh" "$ev_tmp/scripts/"
+cp "$DIR/env-validate.sh" "$DIR/env-file.sh" "$ev_tmp/scripts/"
 ev_env="$ev_tmp/docker/.env"
 ev_out="$(mktemp)"
 # ev_run KEY=VALUE... — shipped .env.example plus the overrides, validated;

@@ -111,6 +111,12 @@ Worth knowing what the failure looks like, because it is quiet: the preflight an
 
 At scale, point `STORAGE_ENDPOINT` at a managed S3, pre-provision the per-domain buckets, and set `STORAGE_ENSURE_BUCKET=false` (IAM rarely grants CreateBucket) with `STORAGE_FORCE_PATH_STYLE=false`. Add a per-bucket lifecycle rule to expire orphaned uncommitted uploads, plus your backup policy.
 
+**Credentials.** `make init` generates `STORAGE_SECRET_KEY`. On the bundled RustFS that value *is* the store's root secret: `docker-compose.infra.yml` derives the RustFS root pair from `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY`, so there is one pair to manage — set `RUSTFS_ROOT_USER` / `RUSTFS_ROOT_PASSWORD` only to give the store a root of its own, when the backend should not be it or talks to a managed S3. No compose file falls back to a literal for it, `scripts/env-validate.sh` refuses a placeholder or a secret shorter than 16 characters before a staging or production deploy, and the backend refuses to boot on one. The key id is not secret; it rides in every presigned URL.
+
+To rotate, change the pair, recreate the `rustfs` and `backend` containers, then delete the `blob:url:*` keys in Redis: the cached presigned download URLs are signed with the old key and would return 403 until they expire.
+
+For least privilege on the bundled store, RustFS answers the MinIO-compatible admin API. Create a backend user whose policy allows `s3:CreateBucket`, `s3:ListBucket`, `s3:GetBucketLocation`, `s3:GetBucketCORS` and `s3:PutBucketCORS` on `arn:aws:s3:::<prefix>-*` and `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on `arn:aws:s3:::<prefix>-*/*` (the backend provisions per-domain buckets and re-applies CORS on boot), point `STORAGE_*` at it and keep `RUSTFS_ROOT_*` for the root.
+
 :::note STORAGE_BUCKET is deprecated
 Superseded by `STORAGE_BUCKET_PREFIX` (default `orkestra`). The default bucket name is unchanged — prefix `orkestra` plus domain `avatars` — so there is no data move. A deployment that set a *custom* `STORAGE_BUCKET` must set the prefix instead; the backend logs a WARN on an ignored custom value.
 :::

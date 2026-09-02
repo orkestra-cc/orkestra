@@ -41,7 +41,10 @@ services:
       - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${MONGO_PORT:-27017}:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-changeme}
+      # A credential never carries a fallback in these files: an unset value
+      # must stop the stack, not quietly become the literal printed in a
+      # public repository. `make init` generates every one of them.
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD is not set — run make init}
       MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-orkestra}
     entrypoint: ["bash", "/opt/orkestra/replica-entrypoint.sh"]
     volumes:
@@ -72,7 +75,11 @@ services:
       - ALL
     ports:
       - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-changeme}
+    # --dir /data is load-bearing: overriding the image's command drops the
+    # entrypoint that passed it, and redis-server's own default is its cwd
+    # (`/`) — outside the volume, so every recreate started with an empty
+    # dataset and the volume below held nothing.
+    command: redis-server --dir /data --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is not set — run make init}
     volumes:
       - redis-data:/data
     healthcheck:
@@ -113,8 +120,16 @@ services:
       - "${HOST_BIND_ADDRESS:-127.0.0.1}:${RUSTFS_API_PORT:-9100}:9000"
       - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${RUSTFS_CONSOLE_PORT:-9101}:9001"
     environment:
-      RUSTFS_ROOT_USER: ${RUSTFS_ROOT_USER:-orkestra}
-      RUSTFS_ROOT_PASSWORD: ${RUSTFS_ROOT_PASSWORD:-changeme-rustfs}
+      # RustFS documents RUSTFS_ACCESS_KEY / RUSTFS_SECRET_KEY (the
+      # ROOT_USER / ROOT_PASSWORD spellings this file used to set are
+      # undocumented aliases). The root pair IS the backend's pair —
+      # STORAGE_ACCESS_KEY / STORAGE_SECRET_KEY — unless RUSTFS_ROOT_* override
+      # it (scoped backend user, or managed S3 whose credentials the RustFS
+      # container must not inherit). One pair to manage on the bundled
+      # single-node store, and no literal fallback: the S3 API is browser-
+      # facing behind the proxy, so an unset secret stops the stack instead.
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ROOT_USER:-${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY (or RUSTFS_ROOT_USER) is not set — run make init}}
+      RUSTFS_SECRET_KEY: ${RUSTFS_ROOT_PASSWORD:-${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY (or RUSTFS_ROOT_PASSWORD) is not set — run make init}}
     volumes:
       - rustfs-data:/data
     healthcheck:

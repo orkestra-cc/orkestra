@@ -27,10 +27,12 @@ services:
       PORT: 3000  # Internal port is always 3000, BACKEND_PORT is for host mapping only
 
       # MongoDB
-      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME:-admin}:${MONGO_ROOT_PASSWORD:-changeme}@${MONGO_HOST}:27017/${MONGO_DATABASE:-orkestra}?authSource=admin&replicaSet=rs0&directConnection=true
+      # Credentials carry no fallback (see docker-compose.infra.yml): a stale
+      # docker/.env fails here with the variable's name, not at first login.
+      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME:-admin}:${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD is not set — run make init}@${MONGO_HOST}:27017/${MONGO_DATABASE:-orkestra}?authSource=admin&replicaSet=rs0&directConnection=true
 
       # Redis (internal port is always 6379, REDIS_PORT is for host mapping only)
-      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@${REDIS_HOST}:6379/${REDIS_DB:-0}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is not set — run make init}@${REDIS_HOST}:6379/${REDIS_DB:-0}
 
       # JWT & Auth (RS256 asymmetric keys)
       JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH:-/app/keys/jwt-private.pem}
@@ -162,8 +164,13 @@ services:
       STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-}
       STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
       STORAGE_BUCKET: ${STORAGE_BUCKET:-orkestra-avatars}
-      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-orkestra}
-      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-changeme-rustfs}
+      # No literal fallback for the credentials: the bundled RustFS derives its
+      # ROOT pair from these (docker-compose.infra.yml), so a fallback here
+      # would be the root password of a browser-facing S3 API. `make init`
+      # generates STORAGE_SECRET_KEY; a dev checkout that predates it re-runs
+      # `make init --force` or sets the key by hand.
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY is not set — run make init}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY is not set — run make init}
       STORAGE_FORCE_PATH_STYLE: ${STORAGE_FORCE_PATH_STYLE:-true}
       STORAGE_ENSURE_BUCKET: ${STORAGE_ENSURE_BUCKET:-true}
 

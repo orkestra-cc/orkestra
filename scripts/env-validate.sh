@@ -21,6 +21,11 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 DOCKER_DIR="$PROJECT_ROOT/docker"
 ENV_FILE="$DOCKER_DIR/.env"
 
+# secret_is_placeholder / secret_is_weak live in env-file.sh so the setup
+# wizard, this validator and the tests share one definition.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/env-file.sh"
+
 print_info() { printf "${BLUE}i${NC} %s\n" "$1"; }
 print_success() { printf "${GREEN}v${NC} %s\n" "$1"; }
 print_error() { printf "${RED}x${NC} %s\n" "$1"; }
@@ -45,6 +50,24 @@ REQUIRED_VARS=(
 PRODUCTION_VARS=(
     "OAUTH_GOOGLE_CLIENT_ID"
     "OAUTH_GOOGLE_CLIENT_SECRET"
+)
+
+# Secrets that must be REAL values. A placeholder (see secret_is_placeholder in
+# env-file.sh) or a value shorter than 16 characters is an error in staging and
+# production and a warning in development. The bundled RustFS derives its root
+# pair from STORAGE_ACCESS_KEY / STORAGE_SECRET_KEY and its S3 API is
+# browser-facing behind the proxy, so a placeholder there is a public root
+# password — that is the case this list exists for. Object storage may be
+# disabled outright (both STORAGE_* keys empty); RUSTFS_ROOT_PASSWORD is only
+# checked when set.
+SECRET_VARS=(
+    "COOKIE_SECRET"
+    "OAUTH_TOKEN_ENCRYPTION_KEY"
+    "ORKESTRA_KMS_MASTER_KEY"
+    "MONGO_ROOT_PASSWORD"
+    "REDIS_PASSWORD"
+    "STORAGE_SECRET_KEY"
+    "RUSTFS_ROOT_PASSWORD"
 )
 
 # --- Same-site host pairings (spec §8 follow-up #16) ---------------------
@@ -201,6 +224,51 @@ validate_env_file() {
 
     echo ""
 
+    # Secret hygiene — see SECRET_VARS above.
+    print_info "Checking secret values..."
+    local strict=0 value reason
+    [[ "$env_name" == "staging" || "$env_name" == "production" ]] && strict=1
+    for var in "${SECRET_VARS[@]}"; do
+        value=$(env_value "$var")
+        case "$var" in
+            STORAGE_SECRET_KEY)
+                if [ -z "$value" ] && [ -z "$(env_value STORAGE_ACCESS_KEY)" ]; then
+                    print_info "STORAGE_ACCESS_KEY and STORAGE_SECRET_KEY are empty — object storage disabled"
+                    # The bundled rustfs container still starts with the infra
+                    # stack, and docker-compose.infra.yml derives its root from
+                    # the STORAGE_* pair — with both empty it refuses to render
+                    # unless RUSTFS_ROOT_* provide a root of their own. Every
+                    # environment: the stack would not come up at all.
+                    if [ -z "$(env_value RUSTFS_ROOT_USER)" ] || [ -z "$(env_value RUSTFS_ROOT_PASSWORD)" ]; then
+                        print_error "object storage is disabled but the bundled rustfs container still starts — set RUSTFS_ROOT_USER and RUSTFS_ROOT_PASSWORD (openssl rand -hex 16) or docker-compose.infra.yml will not render"
+                        errors=$((errors + 1))
+                    fi
+                    continue
+                fi
+                ;;
+            RUSTFS_ROOT_PASSWORD)
+                [ -z "$value" ] && continue
+                ;;
+        esac
+        if secret_is_placeholder "$value"; then
+            reason="is empty or a placeholder"
+        elif secret_is_weak "$value"; then
+            reason="is shorter than 16 characters"
+        else
+            print_success "$var is a real secret"
+            continue
+        fi
+        if [ "$strict" -eq 1 ]; then
+            print_error "$var $reason — generate one with: openssl rand -hex 16 (make init does this for a fresh checkout)"
+            errors=$((errors + 1))
+        else
+            print_warning "$var $reason — tolerated in development, refused in staging/production"
+            warnings=$((warnings + 1))
+        fi
+    done
+
+    echo ""
+
     # Same-site pairings — see site_of / check_same_site above (spec §8 #16).
     print_info "Checking same-site host pairings..."
     # An RFC 2606 `.invalid` client API host is how a deployment says it has
@@ -347,6 +415,12 @@ ${BLUE}Checks performed:${NC}
       VITE_API_URL / FRONTEND_URL. A .invalid CLIENT_API_HOST means the
       client tier is disabled and is not checked.
     - Security settings appropriate for the environment
+    - Every secret (COOKIE_SECRET, OAUTH_TOKEN_ENCRYPTION_KEY,
+      ORKESTRA_KMS_MASTER_KEY, MONGO_ROOT_PASSWORD, REDIS_PASSWORD,
+      STORAGE_SECRET_KEY, a set RUSTFS_ROOT_PASSWORD) is a real value: not a
+      shipped placeholder, at least 16 characters. Error in staging and
+      production, warning in development. Object storage disabled (both
+      STORAGE_* keys empty) needs RUSTFS_ROOT_* for the bundled container.
     - No placeholder/development values in production
 
 ${BLUE}Switching Environments:${NC}

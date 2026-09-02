@@ -317,8 +317,15 @@ backup_rustfs() {
   local out="$STAGE/data/rustfs"
   mkdir -p "$out"
   local endpoint="http://${RUSTFS_CONTAINER}:9000"
-  local access="${STORAGE_ACCESS_KEY:-${RUSTFS_ROOT_USER:-orkestra}}"
-  local secret="${STORAGE_SECRET_KEY:-${RUSTFS_ROOT_PASSWORD:-changeme-rustfs}}"
+  # Same precedence as docker-compose.infra.yml: an explicit RustFS root wins,
+  # else the backend's pair IS the root. No literal fallback — a missing pair
+  # is a config error, never a reason to try the literal the base once shipped.
+  local access="${RUSTFS_ROOT_USER:-${STORAGE_ACCESS_KEY:-}}"
+  local secret="${RUSTFS_ROOT_PASSWORD:-${STORAGE_SECRET_KEY:-}}"
+  if [ -z "$access" ] || [ -z "$secret" ]; then
+    err "rustfs: no storage credentials in docker/.env (STORAGE_ACCESS_KEY/STORAGE_SECRET_KEY, or RUSTFS_ROOT_USER/RUSTFS_ROOT_PASSWORD)"
+    return 1
+  fi
   local bucket="${STORAGE_BUCKET:-orkestra-avatars}"
 
   # List buckets so we capture everything, not just the default one.

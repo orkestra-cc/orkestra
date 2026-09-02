@@ -164,6 +164,10 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
   kms_key=$(openssl rand -hex 32)
   mongo_pw=$(openssl rand -hex 16)
   redis_pw=$(openssl rand -hex 16)
+  # Object-storage secret. On the bundled RustFS this IS the root secret
+  # (docker-compose.infra.yml derives RUSTFS_SECRET_KEY from it), and the
+  # S3 API is browser-facing behind a proxy, so it must never be a literal.
+  storage_secret=$(openssl rand -hex 16)
 
   tmp_env="${ENV_FILE}.tmp.$$"
   # sed delimiter `|` so the hex secrets don't collide with `/`.
@@ -173,6 +177,7 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
     -e "s|REPLACE_WITH_RANDOM_HEX_64_KMS_MASTER|${kms_key}|" \
     -e "s|REPLACE_WITH_RANDOM_HEX_32_MONGO_PASSWORD|${mongo_pw}|" \
     -e "s|REPLACE_WITH_RANDOM_HEX_32_REDIS_PASSWORD|${redis_pw}|" \
+    -e "s|REPLACE_WITH_RANDOM_HEX_32_STORAGE_SECRET|${storage_secret}|" \
     "$ENV_FILE" > "$tmp_env"
 
   # Sanity: every placeholder got replaced (otherwise the backend boot will
@@ -186,7 +191,7 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
 
   mv "$tmp_env" "$ENV_FILE"
   chmod 600 "$ENV_FILE"
-  ok "filled COOKIE_SECRET / OAUTH_TOKEN_ENCRYPTION_KEY / ORKESTRA_KMS_MASTER_KEY / MONGO_ROOT_PASSWORD / REDIS_PASSWORD"
+  ok "filled COOKIE_SECRET / OAUTH_TOKEN_ENCRYPTION_KEY / ORKESTRA_KMS_MASTER_KEY / MONGO_ROOT_PASSWORD / REDIS_PASSWORD / STORAGE_SECRET_KEY"
   muted "chmod 600 applied — .env now contains live secrets"
 
   # Seed a non-colliding port block so a second Orkestra stack on this host
