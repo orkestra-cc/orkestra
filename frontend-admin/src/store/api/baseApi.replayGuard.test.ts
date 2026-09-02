@@ -365,6 +365,106 @@ describe('reactive refresh replay guard', () => {
     expect(store.getState().auth.accessToken).toBe('seed-access-token');
   });
 
+  // ── The rotation the arm triggers is classified by an ALLOWLIST ──────────
+  //
+  // Only a 401 from /refresh-cookie is the credential being refused. Every
+  // other non-2xx says something about the SERVER and nothing about the
+  // session, so it keeps the token — which matters most here, on the #14 arm,
+  // because the 401 that triggered this rotation is a VERDICT (a mistyped
+  // password). Before the allowlist, a wrong password whose rotation happened
+  // to meet a rate limit or a 5xx signed the operator out: a wrong-current-
+  // password 401 could end a session, which it never could before the arm
+  // existed. /refresh-cookie sits under the router's GLOBAL rate limiter, so
+  // 429 is reachable on every refresh and a burst of tabs is what trips it.
+  it.each([
+    ['429 rate-limited', 429],
+    ['500 server error', 500]
+  ])(
+    'keeps the session when the verdict-401 rotation answers %s',
+    async (_label, status) => {
+      let changeAttempts = 0;
+      let refreshAttempts = 0;
+      server.use(
+        http.post('*/v1/auth/operator/change-password', () => {
+          changeAttempts += 1;
+          return HttpResponse.json(
+            {
+              title: 'Unauthorized',
+              status: 401,
+              detail: 'Invalid email or password'
+            },
+            { status: 401 }
+          );
+        }),
+        http.post('*/refresh-cookie', () => {
+          refreshAttempts += 1;
+          return HttpResponse.json({}, { status });
+        })
+      );
+
+      const store = await seededStore(inMs(60_000));
+      await expect(
+        store
+          .dispatch(
+            probeApi.endpoints.replayGuardPost.initiate(
+              '/v1/auth/operator/change-password'
+            )
+          )
+          .unwrap()
+      ).rejects.toMatchObject({ status: 401 });
+
+      // Still sent once, still not replayed, and still signed in.
+      expect(changeAttempts).toBe(1);
+      expect(refreshAttempts).toBe(1);
+      expect(store.getState().auth.accessToken).toBe('seed-access-token');
+    }
+  );
+
+  // A 2xx whose body cannot be read is a BROKEN RESPONSE, not a rejection: a
+  // captive portal or a proxy error page arrives as 200 text/html, and a
+  // connection dropped mid-body rejects the read. Neither has told us
+  // anything about the session, so neither may end it. This is the half of
+  // the allowlist that lives past the status line.
+  it('keeps the session when the verdict-401 rotation answers an unreadable 2xx', async () => {
+    let changeAttempts = 0;
+    let refreshAttempts = 0;
+    server.use(
+      http.post('*/v1/auth/operator/change-password', () => {
+        changeAttempts += 1;
+        return HttpResponse.json(
+          {
+            title: 'Unauthorized',
+            status: 401,
+            detail: 'Invalid email or password'
+          },
+          { status: 401 }
+        );
+      }),
+      http.post('*/refresh-cookie', () => {
+        refreshAttempts += 1;
+        // 200, but not JSON — res.json() rejects.
+        return HttpResponse.text('<html>captive portal</html>', {
+          status: 200
+        });
+      })
+    );
+
+    const store = await seededStore(inMs(60_000));
+    await expect(
+      store
+        .dispatch(
+          probeApi.endpoints.replayGuardPost.initiate(
+            '/v1/auth/operator/change-password'
+          )
+        )
+        .unwrap()
+    ).rejects.toMatchObject({ status: 401 });
+
+    expect(changeAttempts).toBe(1);
+    expect(refreshAttempts).toBe(1);
+    expect(store.getState().auth.accessToken).toBe('seed-access-token');
+  });
+
   // A PUBLIC route breaks proof (b)'s reasoning: it runs its handler with no
   // bearer, by design, so "no bearer was sent" proves nothing about whether
   // the handler ran. The passkey login pair is exactly that shape — mounted

@@ -70,14 +70,18 @@ function isAuthEndpoint(url: string): boolean {
 // the origin; the others then rotate in turn, each with the cookie its
 // predecessor left behind.
 //
-// `retry` is NOT the same answer as `ok: false`. A 503 from the refresh
-// endpoint means the backend could not *evaluate* the session — the session
-// enforcement path's durable store was unreachable — and ADR-0017 gives that
-// its own status precisely so a client does not treat it as a sign-out: an
-// outage "would train clients to discard a session that is still perfectly
-// valid." Collapsing it into `ok: false`, as this did, logged the user out
-// for the exact reason the 503 exists to prevent. A 409
-// refresh_rotation_raced carries the same "do not sign out" meaning.
+// `retry` is NOT the same answer as a bare `ok: false`, and which one an
+// attempt produces is decided by an ALLOWLIST in refreshOnce below: a bare
+// `ok: false` means the refresh cookie itself was REFUSED (a 401, and only a
+// 401), and it is the one outcome that ends the session. `retry` is
+// everything else — a 503, a 429, any other 4xx or 5xx, a transport failure,
+// the timeout, a twice-raced 409, and a 2xx whose body is unreadable or
+// carries no token. ADR-0017 gives the 503 its own status precisely so a
+// client does not treat it as a sign-out: an outage "would train clients to
+// discard a session that is still perfectly valid." That reasoning is not
+// specific to 503 — it holds for every answer that describes the server
+// rather than the credential, which is why the rule is an allowlist and not
+// a list of transient statuses to remember to extend.
 type RefreshResult =
   | { ok: true; accessToken: string; expiresIn: number }
   | { ok: false; retry?: boolean; raced?: boolean };
@@ -140,6 +144,9 @@ async function withRefreshLock<T>(run: () => Promise<T>): Promise<T> {
   return await locks.request(REFRESH_LOCK_NAME, run);
 }
 
+// models.TokenResponse, as far as this module cares about it.
+type RefreshBody = { accessToken?: string; expiresIn?: number };
+
 // A promise that rejects when the signal aborts and never resolves otherwise.
 // `fetch` resolves on HEADERS, and the body stream of a mocked or proxied
 // response does not always observe the request's abort signal, so the body
@@ -175,52 +182,73 @@ async function refreshOnce(baseUrl: string): Promise<RefreshResult> {
       headers: { 'Content-Type': 'application/json' },
       signal: ctrl.signal
     });
-    // 503 session_enforcement_unavailable: transient, keep the token.
-    if (res.status === 503) return { ok: false, retry: true } as const;
+    // The outcome rule is an ALLOWLIST, and the order below is the rule.
+    //
+    // 401 is the ONLY status that means "the credential I presented was
+    // refused" — the refresh cookie is gone, revoked, or was never valid, and
+    // that is the session's own death. Everything else that is not a usable
+    // 2xx says something about the SERVER and nothing about the session.
+    //
+    // A denylist is what this used to be, and it was wrong in a way no test
+    // caught: only 503 and 409 were transient, so 429, 408, 500, 502 and 504
+    // all fell through to the bare `{ ok: false }` the 401 branch reads as a
+    // real rejection. /refresh-cookie sits under the router's GLOBAL rate
+    // limiter, so 429 is reachable on every refresh and a burst of tabs is
+    // exactly what trips it — and once the #14 arm started rotating on
+    // verdict 401s, a mistyped password whose rotation met a rate limit could
+    // end a session that a mistyped password could never end before.
+    if (res.status === 401) return { ok: false } as const;
     // 409 refresh_rotation_raced: a sibling rotated first and the family
     // is intact. Our cookie jar already holds its successor.
     if (res.status === 409) return { ok: false, raced: true } as const;
-    if (!res.ok) return { ok: false } as const;
-    // The parse is neutralised BEFORE the race, so whichever promise loses
-    // cannot surface later as an unhandled rejection. Racing it against the
-    // signal is what makes the timer bound the READ as well as the headers.
-    const parsed = res.json().catch(() => ({}));
-    const body = (await Promise.race([parsed, rejectOnAbort(ctrl.signal)])) as {
-      accessToken?: string;
-      expiresIn?: number;
-    };
-    // Once the abort has fired the two racers can settle in either order —
-    // an aborted body stream may reject and land in the pre-catch above,
-    // resolving `{}`. Reading the signal directly is what keeps the outcome
-    // deterministic, and it matters here in a way it does not on the client
-    // tier: a tokenless body falls through to the bare `{ ok: false }` one
-    // line down, which the 401 branch reads as a real negative answer and
-    // signs the operator out. A timed-out read is "no answer", so it must
-    // reach the `catch` and its transient outcome instead. No timer can fire
-    // between the await and this line — a macrotask cannot preempt a running
-    // microtask — so a body that arrived in time is never discarded here.
-    if (ctrl.signal.aborted) throw new Error('refresh aborted');
-    if (!body.accessToken || !body.expiresIn) return { ok: false } as const;
+    // 503 session_enforcement_unavailable, 429, 408, any other 4xx or 5xx.
+    if (!res.ok) return { ok: false, retry: true } as const;
+    // The parse is settled into a DISCRIMINATED result before the race — a
+    // wrapper on success, `null` on any parse failure — so that whichever
+    // promise loses cannot surface later as an unhandled rejection AND an
+    // unreadable body stays distinguishable from an empty one. Racing it
+    // against the signal is what makes the timer bound the READ as well as
+    // the headers.
+    const parsed: Promise<{ body: RefreshBody } | null> = res.json().then(
+      (body: RefreshBody) => ({ body }),
+      () => null
+    );
+    const raced = await Promise.race([parsed, rejectOnAbort(ctrl.signal)]);
+    // Two ways to have no answer, and neither is a rejection. The abort may
+    // have fired (the racers can then settle in either order, so the signal
+    // is read directly rather than inferred from who won); or the body was
+    // unreadable — a connection dropped mid-read, an empty 200, a captive
+    // portal's HTML, a proxy error page served as 200. Both throw into the
+    // `catch` below and come back transient. No timer can fire between the
+    // await and this line — a macrotask cannot preempt a running microtask —
+    // so a body that arrived in time is never discarded here.
+    if (ctrl.signal.aborted || raced === null) {
+      throw new Error('refresh answer not readable');
+    }
+    const body = raced.body;
+    // A 2xx with no token is a BROKEN RESPONSE, which is the reason not to
+    // act on it: it has told us nothing about the session either.
+    if (!body.accessToken || !body.expiresIn)
+      return { ok: false, retry: true } as const;
     return {
       ok: true,
       accessToken: body.accessToken,
       expiresIn: body.expiresIn
     } as const;
   } catch {
-    // Nothing here distinguishes WHY the attempt threw — the abort above
-    // firing (on the headers OR on the body read), a DNS failure, the tab
-    // going offline, a rejected promise from the network stack. What matters is
-    // that we never got an answer at all. The naive "just add a timeout"
-    // fix lands here and falls through to a bare `{ ok: false }`, which the
-    // 401 branch in baseQueryWithRetry reads as a REAL negative answer and
-    // signs the user out (clearAccessToken + navigateToLogin) — turning
-    // "the network is slow" into "you are logged out", a worse bug than
-    // the hang it replaces. No answer is not the same as "no": per
-    // ADR-0017's 503 handling, a request whose outcome the client could
-    // not observe must not be read as a session that is over, so this
-    // returns the same transient `retry: true` outcome as the 503 branch
-    // above — keep the token, the caller (or the next proactive check)
-    // tries again. Do not "simplify" this back to a bare `{ ok: false }`.
+    // Nothing here distinguishes WHY the attempt threw — the abort firing
+    // (on the headers OR on the body read), an unreadable body, a DNS
+    // failure, the tab going offline, a rejected promise from the network
+    // stack. What matters is that we never got an answer at all. The naive
+    // "just add a timeout" fix lands here and falls through to a bare
+    // `{ ok: false }`, which the 401 branch in baseQueryWithRetry reads as a
+    // REAL negative answer and signs the user out (clearAccessToken +
+    // navigateToLogin) — turning "the network is slow" into "you are logged
+    // out", a worse bug than the hang it replaces. No answer is not the same
+    // as "no", so this returns the transient outcome, exactly as every
+    // non-401 status above does. Do not "simplify" this back to a bare
+    // `{ ok: false }` — that is the one outcome reserved for a refused
+    // credential.
     return { ok: false, retry: true } as const;
   } finally {
     clearTimeout(timer);

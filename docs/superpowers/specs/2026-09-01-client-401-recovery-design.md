@@ -2564,6 +2564,18 @@ place the arm branches:
   session's own death: `clearAccessToken()` and then the existing sign-out path
   below, exactly as the replay branch already does on the same outcome.
 
+**And the console's `refreshOnce` classifies that answer the way §4.1 does — an
+allowlist, not a denylist**: a **401** from `/refresh-cookie` is the only status
+that means the credential was refused and the only one that yields the bare
+`{ ok: false }`; a 409 keeps its single raced retry; and everything else is
+`retry` with the token kept — 503, 429, 408, any other 4xx or 5xx, a transport
+failure, the timeout, **and a 2xx whose body is unreadable or carries no
+token**. This is load-bearing precisely because of the arm above: it routes
+*verdict* 401s into the classifier, so while only 503 and 409 were treated as
+transient, a mistyped password whose rotation met the global rate limiter or a
+5xx ended the session — an outcome a mistyped password could never produce
+before the arm existed.
+
 **Codeless, not "anything but `access_token_expired`".** The narrower predicate is
 the correct one, and the difference is not hypothetical: a 401 that names itself
 has been explained by the server, and a new token minted from the same cookie
@@ -2698,10 +2710,15 @@ returning outcomes.
    with no argument, which is what both suites' `afterEach` now does), and the new
    case is `releases the cross-tab lock when the headers arrive and the body
    stalls` in `baseApi.rotationRace.test.ts` — it hung to the 5 s test timeout
-   before the body race existed. One addition the client model did not need: the
-   console re-reads `ctrl.signal.aborted` after the race, because an aborted body
-   stream can reject into the pre-catch and resolve `{}`, and a tokenless body on
-   this tier falls through to the bare `{ ok: false }` that signs the operator out.
+   before the body race existed. The body race is settled with a **discriminated**
+   pre-catch — `res.json().then(b => ({ body: b }), () => null)` — and the
+   post-race test is `ctrl.signal.aborted || raced === null`, so an *unreadable*
+   body stays distinguishable from an empty one; both throw into the `catch` and
+   come back `retry`. An `aborted`-only re-check was not enough and shipped
+   briefly: it swallowed every non-timeout parse failure into `{}`, which fell
+   through to the bare `{ ok: false }` that signs the operator out. The
+   underlying cause was that `refreshOnce` classified by denylist, fixed with it
+   — see the allowlist paragraph added to §7.
 8. **`frontend-admin`'s Web Lock test mock** — ✅ **done in this branch
    (batch 3)**, as a hardening rather than a bug fix.
    The call site and the mock are both **two-argument** today, so the test

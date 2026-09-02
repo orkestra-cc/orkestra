@@ -216,6 +216,40 @@ describe('proactive refresh', () => {
     expect(store.getState().auth.accessToken).toBe('seed-access-token');
   });
 
+  // The proactive and reactive paths share one in-flight promise, so the
+  // classifier's answer reaches BOTH. An already-expired token rotates
+  // proactively; the rate limiter refuses; prepareHeaders then withholds the
+  // dead bearer, the request arrives bearer-less, and RequireAuth answers a
+  // codeless 401 — proof (b), so the 401 branch asks for a refresh too and
+  // joins the same resolved attempt. Under the old denylist that shared
+  // answer was a bare `{ ok: false }`, which the 401 branch reads as a real
+  // rejection: a rate limit signed the operator out. The proactive caller
+  // itself only ever inspected `.ok`, so this coalescing is where the
+  // allowlist actually changes what the operator sees.
+  it('does not sign the user out when the proactive rotation is rate-limited', async () => {
+    const { counters } = arm();
+    server.use(
+      http.get('*/v1/burst/:n', () => {
+        counters.resource += 1;
+        return HttpResponse.json({}, { status: 401 });
+      }),
+      http.post('*/refresh-cookie', () => {
+        counters.refresh += 1;
+        return HttpResponse.json({ detail: 'slow down' }, { status: 429 });
+      })
+    );
+    const store = await seededStore(inMs(-1_000));
+
+    await store.dispatch(
+      probeApi.endpoints.proactiveProbe.initiate('/v1/burst/1')
+    );
+
+    expect(counters.refresh).toBe(1);
+    // Not signed out: a rate limit says nothing about the session.
+    expect(store.getState().auth.accessToken).toBe('seed-access-token');
+    expect(store.getState().auth.isAuthenticated).toBe(true);
+  });
+
   // refreshOnce bounds its fetch with an AbortController whose timer runs for
   // REFRESH_FETCH_TIMEOUT_MS (baseApi.ts). Real timers, and a test-only
   // setter for the constant rather than a monkey-patched global: performRefresh

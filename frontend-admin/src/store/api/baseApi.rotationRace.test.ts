@@ -157,6 +157,31 @@ describe('refresh rotation race', () => {
     expect(store.getState().auth.accessToken).toBeFalsy();
   });
 
+  // The same allowlist on the PROOF path (this suite's 401s all carry
+  // access_token_expired, so the reactive branch refreshes and replays).
+  // /refresh-cookie sits under the router's global rate limiter, so a burst
+  // of tabs crossing the TTL together is exactly what trips a 429 — and a
+  // rate limit is the server declining to answer, not the session ending.
+  // Before the classifier became an allowlist this signed the operator out.
+  it('does not sign the user out when the refresh is rate-limited', async () => {
+    let refreshAttempts = 0;
+    server.use(
+      http.get('*/v1/some/resource', () => expired401()),
+      http.post('*/refresh-cookie', () => {
+        refreshAttempts += 1;
+        return HttpResponse.json({ detail: 'slow down' }, { status: 429 });
+      })
+    );
+
+    const store = await setupSeededStore();
+    await store.dispatch(
+      probeApi.endpoints.raceProbe.initiate('/v1/some/resource')
+    );
+
+    expect(refreshAttempts).toBe(1);
+    expect(store.getState().auth.accessToken).toBe('seed-access-token');
+  });
+
   // This is the trap #317's follow-up brief calls out: refreshOnce's catch
   // used to return a bare `{ ok: false }`, and the 401 branch above treats
   // that as a REAL negative answer — clearAccessToken + navigateToLogin.
