@@ -133,9 +133,9 @@ ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
 ./orkestra.sh observability up
 ./orkestra.sh --help               # Full command surface
 
-# Validate environment files
-./scripts/env-validate.sh all      # Validate all
-./scripts/env-validate.sh staging  # Validate specific
+# Validate docker/.env — required keys, security settings, same-site pairings.
+# Takes no arguments (--help aside): the ENV= inside the file selects the rules.
+./scripts/env-validate.sh
 ```
 
 ### What belongs in `.env` / compose vs `/admin/modules`
@@ -328,7 +328,7 @@ mongod whose only symptom was a failure at setup-finalization time.
 | Service                  | Host port | Purpose                              | Features                                                       |
 | ------------------------ | --------- | ------------------------------------ | -------------------------------------------------------------- |
 | **backend**              | 3007      | Go API server                        | Hot reload (AIR), debug logs                                   |
-| **frontend-admin**             | 8087      | Operator console (Tier-1)            | Vite dev server, HMR; host `console.localhost`                 |
+| **frontend-admin**             | 8087      | Operator console (Tier-1)            | Vite dev server, HMR; host `localhost`; consumes the operator API on `localhost:3000` (same site — see below) |
 | **client-frontend**      | 8081      | Tier-2 client demo SPA               | Vite dev server, HMR; host `client.localhost`; consumes the client API on `client.localhost:3000` (same site — see below) |
 
 #### Staging (`docker-compose.staging.yml`)
@@ -438,9 +438,38 @@ CLIENT_API_URL=http://client.localhost:3000
 CLIENT_FRONTEND_URL=http://client.localhost:8081
 ```
 
-Nothing checks the pairing yet: a `scripts/env-validate.sh` rule asserting that the
-hostname of `CLIENT_API_HOST` equals the hostname of `CLIENT_FRONTEND_URL` is spec
-§8 follow-up #16.
+**`scripts/env-validate.sh` refuses the un-migrated pairing.** With scheme and
+port stripped and the hostname lowercased, `CLIENT_API_HOST`, `CLIENT_API_URL`
+and `CLIENT_FRONTEND_URL` must resolve to the same **site** — each key compared
+only when it is set. The operator twin is checked the same way: `VITE_API_URL`
+against `FRONTEND_URL`.
+
+"Site" is what a browser computes, because that is what decides whether the
+cookie survives. Under `*.localhost`, which has no Public Suffix List entry, the
+site is the **whole hostname** — `client.localhost` and `api.localhost` are
+different sites, and the dev hostnames must therefore be identical. Everywhere
+else it is the **last two labels**, so `staging.orkestra.cc` and
+`staging-api.orkestra.cc` are one site and a real deployment passes untouched.
+Those two labels are a deliberate eTLD+1 approximation: a shell script has no
+PSL, so a `co.uk`-style suffix under-reports and the check can miss a genuine
+cross-site pairing — it never invents one, which is the safe direction for
+something that hard-stops a deploy. Ports cannot take part, because
+`.env.example` and the wizard write these hosts bare while the compose defaults
+write them ported. A `CLIENT_API_HOST` under the RFC 2606 `.invalid` TLD is how a
+deployment says it has **no** client tier (staging uses
+`client-disabled.invalid`); the client pairing is then skipped with a note.
+
+Both groups are checked in **every** `ENV`, not only development, and a mismatch
+is an **error**, not a warning, whose remediation is the three-key block above.
+
+It runs from two places, with deliberately different severities:
+`./orkestra.sh init` prints whatever the validator reported and carries on (the
+wizard user is still mid-file), while `./orkestra.sh deploy` runs it in
+**"Pre-deployment checks"** — ahead of the image build and every `docker compose`
+command — and **aborts**. `--yes` skips confirmation prompts, never this. The
+rule is pinned by `scripts/test-orkestra-helpers.sh`, which runs the validator
+against a scratch `.env` and drives the deploy preflight with a stubbed `docker`
+to prove it aborts having issued no compose command (spec §8 follow-up #16).
 
 **The operator console is bound by the same condition**, and only its shipped
 default satisfies it. It has no `OPERATOR_API_HOST`: the console SPA calls
@@ -457,15 +486,26 @@ console at `http://console.localhost:8080` while `VITE_API_URL` still points at
 request and drops the `SameSite=Lax` cookie. **Both on `localhost`, or both on
 `console.localhost` (which also needs `VITE_API_URL=http://console.localhost:3000`
 and `console.localhost` in `VITE_ADMIN_ALLOWED_HOSTS`) — never one of each.**
-Making the operator tier same-site by configuration the way the client tier now
-is has not been done: spec §8 follow-up #13.
+
+**The shipped convention is `localhost` end to end** (spec §8 follow-up #13): the
+console's origin (`FRONTEND_URL=http://localhost:8080`), the API its SPA calls
+(`VITE_API_URL=http://localhost:3000`), the code fallbacks in
+`frontend-admin/src/config/environment.ts` and `public/config.example.js`, and the
+compiled OAuth callback defaults (`http://localhost:3000/v1/auth/oauth/…`) all name
+one host, and `scripts/env-validate.sh` refuses a **mixed** pairing (either
+convention passes; one of each does not). It costs no env key, no allow-list entry
+and no host registration — `localhost:3000` reaches the operator mux through the
+dev fallthrough above. `CONSOLE_HOST` keeps its `console.localhost:3000` default
+and is what it has always been in practice, a staging/production knob: nothing
+stops a contributor putting the console on `console.localhost` end to end, but the
+docs, the defaults and the OAuth recipe all prescribe `localhost`.
 
 **Per-audience env vars** (compose passes these through to the backend):
 
 | Variable | Purpose | Default |
 |---|---|---|
 | `CONSOLE_HOST` | Hostname the operator mux answers on | `console.localhost:3000` (dev) / unset (prod, operator-set) |
-| `CLIENT_API_HOST` | Hostname the client mux answers on. **Must be same-site with the client SPA's origin** — see "Client tier: the SPA and the client API must be same-site" above. | `client.localhost:3000` (dev) / unset (prod) |
+| `CLIENT_API_HOST` | Hostname the client mux answers on. **Must be same-site with the client SPA's origin** — see "Client tier: the SPA and the client API must be same-site" above. A host under the RFC 2606 `.invalid` TLD (e.g. `client-disabled.invalid`) disables the client tier: no Host can ever match it, and `env-validate` skips the pairing check. | `client.localhost:3000` (dev) / unset (prod) |
 | `OPERATOR_CORS_ORIGINS` | CORS allowlist for operator mux | falls back to `CORS_ORIGINS` |
 | `CLIENT_CORS_ORIGINS` | CORS allowlist for client mux | falls back to `CORS_ORIGINS` |
 | `OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE` / `_BURST` | Per-audience throttling | falls back to `RATE_LIMIT_*` |

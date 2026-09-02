@@ -107,7 +107,9 @@ services:
       # console.localhost (then set VITE_API_URL=http://console.localhost:3000
       # and VITE_ADMIN_ALLOWED_HOSTS=console.localhost). Opening it at
       # console.localhost:8080 against the default reproduces this bug on
-      # the operator tier. Not changed here — spec §8 follow-up #13.
+      # the operator tier. The shipped convention is localhost end to end
+      # (spec §8 follow-up #13) and scripts/env-validate.sh refuses a mixed
+      # FRONTEND_URL/VITE_API_URL pairing.
       # The host mux matches a Host header with or without its port
       # (cmd/server/hostmux.go:54-68, :72-84), so the :3000 suffix is fine.
       CONSOLE_HOST: ${CONSOLE_HOST:-console.localhost:3000}
@@ -268,7 +270,8 @@ services:
   # CLIENT_API_HOST above), so an api.* client API cannot carry them.
   #
   # Add to /etc/hosts if your resolver does not answer *.localhost itself:
-  #   127.0.0.1 console.localhost client.localhost
+  #   127.0.0.1 client.localhost
+  # (the operator console needs no entry — it is localhost end to end)
   client-frontend:
     image: node:24-alpine
     container_name: ${APP_NAME}-client-frontend-${ENV}

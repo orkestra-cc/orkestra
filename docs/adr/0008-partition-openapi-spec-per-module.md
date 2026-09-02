@@ -43,6 +43,8 @@ The dump partitions operations by owning module (D2) and writes:
 - **`backend/internal/addons/<name>/openapi.json`** — one fragment per addon, **co-located with the addon code** (not in a central `openapi/` dir). Fork-owned; upstream never has these paths, so they can never conflict.
 - **`backend/openapi/enterprise.json`** — the assembled core + all addon fragments. **Derived → `.gitignore`d**, regenerated on demand (`make openapi-assemble` / the dump), consumed by docs.orkestra.cc and client codegen.
 
+NOTE (2026-09-02, #325 batch 3): frontend-client's codegen script was removed; the assembled spec's remaining in-repo consumer is docs.orkestra.cc.
+
 Committed fragments keep reviewable per-module API diffs in PRs; the derived whole still exists for everything that needs a single spec — just never in git.
 
 ### D2 — Route→module attribution via an auto-stamped `x-orkestra-module` extension

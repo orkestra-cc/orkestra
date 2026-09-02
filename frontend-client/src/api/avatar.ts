@@ -2,8 +2,8 @@
 // the three /v1/me/avatar/* endpoints mounted by the backend user
 // module on the client API. Mirrors the operator-console
 // authApi.ts/AvatarSettings pattern but stays on this SPA's stack
-// (authedFetch + tokenStore, no RTK Query). Hand-typed for now —
-// codegen will pick these up after the next `npm run codegen`.
+// (authedFetch + tokenStore, no RTK Query). Hand-typed, like every
+// other wrapper here — the generated-client flow left with #325.
 
 import { authedFetch } from "@/api/authedFetch";
 import { readError, type ApiError, type MeResponse } from "@/api/auth";

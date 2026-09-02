@@ -48,19 +48,28 @@ var (
 	// Translated to 409 refresh_rotation_raced at the handler boundary.
 	ErrRefreshRotationRaced = errors.New("refresh token superseded by a concurrent rotation — retry")
 	// ErrRefreshLookupUnavailable signals that the refresh path could not be
-	// COMPLETED because infrastructure failed. TEN sites return it. Seven are
-	// on the rotation path: the refresh-token lookup, the user lookup, the
+	// COMPLETED because infrastructure failed. THIRTEEN sites return it.
+	// Seven are on the rotation path: the refresh-token lookup, the user lookup, the
 	// mint, the rotating write, PeekRefreshToken's lookup in the candidate
 	// picker that runs in FRONT of the rotation, and the two reads the
 	// rotation-race classifier makes — benignRotationRetry's FamilyRevoked and
 	// the post-CAS re-read. Those last two are the destructive ones: before
 	// §4.9 they folded "could not read" into "revoked" and signed every tab
-	// out over a store hiccup. The other three are MintAccessTokenFromRefresh's
+	// out over a store hiccup. Three more are MintAccessTokenFromRefresh's
 	// own reads — its GetByTokenAny, its GetUserByID and its
 	// GenerateAccessTokenForSessionWithAMR — the read-only mint that
 	// GET /v1/auth/session performs after the picker. They are separate reads
 	// from the picker's, so a blip opening between the two answered session
 	// bootstrap with a codeless 401 until spec v20 classified them.
+	// The last three are the ValidateRefreshToken call that OPENS each of
+	// those three functions — RefreshTokensWithRiskAssessment,
+	// PeekRefreshToken and MintAccessTokenFromRefresh — and only for
+	// ErrJWTKeysNotLoaded: a boot with no verifying key is the server saying
+	// it cannot authenticate anyone, not that this token is bad. Every other
+	// validation failure there (malformed JWT, bad signature, wrong token
+	// type, wrong audience) is a verdict and keeps its "invalid refresh
+	// token" wrap and its 401. Signing failures need nothing extra: they
+	// surface through the mint wraps already counted above.
 	// It says nothing about whether the session is
 	// alive, so it must never be answered as an authentication failure:
 	// ADR-0017 gave session enforcement its own 503 precisely so a storage
@@ -794,7 +803,10 @@ func (s *authService) SelfLinkOAuthFromCallback(
 		return err
 	}
 	if user == nil {
-		return fmt.Errorf("user not found")
+		// A wrap of the SDK sentinel, not a fresh error carrying the same
+		// text: the handler mappers classify not-found with errors.Is, and
+		// a look-alike message is invisible to that.
+		return fmt.Errorf("self link: %w", iface.ErrUserNotFound)
 	}
 
 	providerID, _ := userInfo["provider_id"].(string)
@@ -1460,6 +1472,14 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 	// 1. Validate JWT structure and extract claims.
 	claims, err := s.jwtService.ValidateRefreshToken(refreshToken)
 	if err != nil {
+		if errors.Is(err, ErrJWTKeysNotLoaded) {
+			// No verifying key loaded is the SERVER failing, not a verdict on
+			// this token: it cannot authenticate anyone until an operator
+			// fixes the key material. 503, so no client reads it as its own
+			// session ending. Every other validation failure below is a
+			// verdict and keeps its 401.
+			return nil, fmt.Errorf("refresh token validation unavailable: %w: %w", ErrRefreshLookupUnavailable, err)
+		}
 		return nil, fmt.Errorf("invalid refresh token: %w", err)
 	}
 
@@ -1633,6 +1653,13 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 // every candidate the browser sent before any mutating call.
 func (s *authService) PeekRefreshToken(ctx context.Context, refreshToken string) (*models.RefreshTokenDoc, error) {
 	if _, err := s.jwtService.ValidateRefreshToken(refreshToken); err != nil {
+		if errors.Is(err, ErrJWTKeysNotLoaded) {
+			// Same split as the rotation's: no verifying key is the server's
+			// failure, not a verdict. It matters doubly here — the picker
+			// treats every other Peek error as "not a candidate", so without
+			// the sentinel an unverifiable cookie is silently skipped.
+			return nil, fmt.Errorf("refresh token validation unavailable: %w: %w", ErrRefreshLookupUnavailable, err)
+		}
 		return nil, fmt.Errorf("invalid refresh token: %w", err)
 	}
 	hashedToken := utils.HashRefreshToken(refreshToken)
@@ -1671,6 +1698,13 @@ func (s *authService) PeekRefreshToken(ctx context.Context, refreshToken string)
 func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshToken string, securityCtx *models.SecurityContext) (*models.TokenResponse, error) {
 	claims, err := s.jwtService.ValidateRefreshToken(refreshToken)
 	if err != nil {
+		if errors.Is(err, ErrJWTKeysNotLoaded) {
+			// Same split as the rotation's: no verifying key is the server's
+			// failure, not a verdict. This is the session-bootstrap path, and
+			// a codeless 401 here is the one status a client reads as the end
+			// of its session.
+			return nil, fmt.Errorf("refresh token validation unavailable: %w: %w", ErrRefreshLookupUnavailable, err)
+		}
 		return nil, fmt.Errorf("invalid refresh token: %w", err)
 	}
 	hashedToken := utils.HashRefreshToken(refreshToken)

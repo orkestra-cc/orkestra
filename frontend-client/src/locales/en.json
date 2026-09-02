@@ -313,6 +313,26 @@
       "updateFailed": "Could not change your avatar source."
     }
   },
+  "dsr": {
+    "title": "Privacy & my data",
+    "subtitle": "Exercise your GDPR rights over the personal data we hold about you.",
+    "export": {
+      "title": "Download my data",
+      "subtitle": "Get a machine-readable copy of all personal data associated with your account (Art. 15 / 20).",
+      "submit": "Download my data",
+      "submitting": "Preparing…",
+      "error": "Export failed. Please try again."
+    },
+    "erasure": {
+      "title": "Request erasure",
+      "subtitle": "Ask us to erase your personal data (Art. 17). An operator reviews the request before it is carried out.",
+      "reasonPlaceholder": "Reason (optional)",
+      "submit": "Request erasure",
+      "submitting": "Submitting…",
+      "submitted": "Request submitted",
+      "error": "Could not submit the request."
+    }
+  },
   "loading": "Loading…",
   "error": {
     "generic": "Something went wrong. Please try again.",

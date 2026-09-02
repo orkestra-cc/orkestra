@@ -1,8 +1,7 @@
 // Authenticated client-tier auth surface. Wraps the per-tier paths
 // /v1/auth/client/{login, me, change-password, forgot-password,
 // reset-password, mfa/...}. Hand-typed against the backend handlers
-// in backend/internal/core/auth/handlers/{password,mfa,auth}_handler.go;
-// codegen can sharpen later.
+// in backend/internal/core/auth/handlers/{password,mfa,auth}_handler.go.
 //
 // Two request paths, and the split is DELIBERATE — do not "finish the job"
 // by merging them:

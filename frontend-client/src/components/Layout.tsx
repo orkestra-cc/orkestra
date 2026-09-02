@@ -10,7 +10,11 @@ import { useMe } from "@/auth/useMe";
 
 export function Layout() {
   const { t } = useTranslation();
-  const { isAuthenticated, signOut } = useAuth();
+  // isBootstrapping, not isAuthenticated alone: `token !== null` is false
+  // for the WHOLE cold-load window, so a returning user would otherwise see
+  // the anonymous header flash and pay for an anonymous-only /policy fetch
+  // (§8 #18b — the #11 defect, in the header rather than the route guard).
+  const { isAuthenticated, isBootstrapping, signOut } = useAuth();
   const { data: me } = useMe();
   const navigate = useNavigate();
   // Hide the prominent "Sign up" CTA when self-service registration or
@@ -18,11 +22,14 @@ export function Layout() {
   // form for a full-page notice in the off case, but most users discover
   // the route via the header. Same cache key used by /login, /signup and
   // /forgot-password, so all four surfaces share one fetch.
+  //
+  // Gated on the bootstrap too: this policy drives anonymous-only UI, and
+  // during the cold-load window we do not yet know the visitor is anonymous.
   const { data: policy } = useQuery({
     queryKey: ["authPolicy"],
     queryFn: fetchAuthPolicy,
     staleTime: 30_000,
-    enabled: !isAuthenticated,
+    enabled: !isBootstrapping && !isAuthenticated,
   });
   const registrationEnabled = policy?.registrationEnabled ?? true;
   const passwordOn = passwordLoginUsable(policy);
@@ -40,7 +47,11 @@ export function Layout() {
             {t("app.name")}
           </Link>
           <nav className="flex items-center gap-2">
-            {isAuthenticated ? (
+            {/* Nothing in the auth slot until the bootstrap settles — not a
+                spinner: the window is one /refresh-cookie round-trip and a
+                spinner in a header reads as breakage. The logo, the language
+                switcher and the footer stay, so the layout does not shift. */}
+            {isBootstrapping ? null : isAuthenticated ? (
               <>
                 <NavLink
                   to="/account"

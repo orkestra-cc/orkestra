@@ -848,6 +848,15 @@ _wiz_default() {
     printf '%s' "${cur:-$2}"
 }
 
+# _wiz_hostname <url-or-host> — hostname only: scheme, userinfo, path and
+# port stripped, lowercased. Mirrors host_only() in scripts/env-validate.sh,
+# which is a standalone script this one runs rather than sources.
+_wiz_hostname() {
+    printf '%s' "$1" \
+        | sed -E 's#^[A-Za-z][A-Za-z0-9+.-]*://##; s#^[^/@]*@##; s#/.*$##; s#:[0-9]+$##' \
+        | tr '[:upper:]' '[:lower:]'
+}
+
 wiz_identity() {
     p_section "Identity & ports"
     env_set "$ENV_FILE" APP_NAME      "$(ask_value 'App name'      "$(_wiz_default APP_NAME orkestra)")"
@@ -862,6 +871,7 @@ wiz_urls() {
         ask_yes_no "Customize dev URLs? (defaults use localhost)" "n" || return 0
     fi
     local backend frontend op_front cl_front console_host client_host ws
+    local client_scheme client_api_default stored_api_url
     backend=$(ask_value 'Backend URL'                    "$(_wiz_default BACKEND_URL http://localhost:3000)")
     frontend=$(ask_value 'Frontend URL (operator)'       "$(_wiz_default FRONTEND_URL http://localhost:8080)")
     op_front=$(ask_value 'Operator frontend URL (email)' "$(_wiz_default OPERATOR_FRONTEND_URL "$frontend")")
@@ -875,6 +885,32 @@ wiz_urls() {
     env_set "$ENV_FILE" CLIENT_FRONTEND_URL "$cl_front"
     env_set "$ENV_FILE" CONSOLE_HOST "$console_host"
     env_set "$ENV_FILE" CLIENT_API_HOST "$client_host"
+
+    # The client API's public origin travels with its host. Writing only
+    # CLIENT_API_HOST leaves this key absent, so the backend derives an
+    # origin from the host (config.go's derivedPublicURL) — right until a
+    # proxy changes the port or the scheme, and exactly the desync
+    # scripts/env-validate.sh now reports (spec §8 #16). The default keeps
+    # the pairing same-site: same host as CLIENT_API_HOST, scheme from
+    # BACKEND_URL.
+    #
+    # A stored value is only offered back while its host still AGREES with
+    # the CLIENT_API_HOST just chosen. On a re-run over a pre-#10 .env the
+    # stored origin is http://api.localhost:3000, so a user who moves the
+    # host to client.localhost and presses Enter would otherwise keep the
+    # cross-site value — the migration this wizard is supposed to complete.
+    client_scheme=${backend%%:*}
+    case "$client_scheme" in
+        http | https) ;;
+        *) client_scheme=http ;;
+    esac
+    client_api_default="$client_scheme://$client_host"
+    stored_api_url=$(env_get "$ENV_FILE" CLIENT_API_URL)
+    if [ -n "$stored_api_url" ] &&
+        [ "$(_wiz_hostname "$stored_api_url")" = "$(_wiz_hostname "$client_host")" ]; then
+        client_api_default=$stored_api_url
+    fi
+    env_set "$ENV_FILE" CLIENT_API_URL "$(ask_value 'Client API URL' "$client_api_default")"
 
     # Derived defaults (overridable): ws:// from http://, wss:// from https://.
     ws=${backend/http/ws}
@@ -1080,6 +1116,22 @@ fullstack_execute_deploy() {
     check_docker_running
     p_ok "Docker is running"
     ensure_jwt_keys_readable
+
+    # docker/.env is validated on every deploy, not only inside the `init`
+    # wizard: a cross-site client (or operator) layout boots a stack whose
+    # logins succeed and whose refreshes 401, which reads as an application
+    # bug rather than the config error it is (spec §8 #16). This is a HARD
+    # stop, ahead of every compose command — `--yes` skips confirmation
+    # prompts, never this. The wizard keeps warning instead of aborting:
+    # the user is still in the middle of writing the file there. Output is
+    # held back unless it fails, so a good deploy stays readable.
+    local env_validation
+    if env_validation=$(bash "$SCRIPT_DIR/scripts/env-validate.sh" 2>&1); then
+        p_ok "docker/.env validated"
+    else
+        printf '%s\n' "$env_validation"
+        die "docker/.env failed validation (above). Nothing was started — fix the file and re-run."
+    fi
     if [ "$ENV" = "production" ] && [ "$EUID" -eq 0 ]; then
         die "Do not run as root"
     fi

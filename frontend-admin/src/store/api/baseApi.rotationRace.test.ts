@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { http, HttpResponse, delay } from 'msw';
 import { server } from 'test/server';
 import { setupStore } from 'test/render';
-import { baseApi } from './baseApi';
+import { baseApi, __setRefreshTimeoutForTests } from './baseApi';
 import { setupApi } from './setupApi';
 
 vi.mock('react-toastify', () => ({
@@ -69,8 +69,11 @@ describe('refresh rotation race', () => {
 
   // performRefresh clears its module-level in-flight promise on a
   // macrotask. Without draining it here the next test reuses THIS test's
-  // already-resolved refresh and never hits the network.
+  // already-resolved refresh and never hits the network. The refresh
+  // timeout is restored here too, so a failed assertion in the test that
+  // shortens it cannot leak a 25 ms bound into the tests after it.
   afterEach(async () => {
+    __setRefreshTimeoutForTests();
     await new Promise(resolve => setTimeout(resolve, 0));
   });
 
@@ -154,21 +157,45 @@ describe('refresh rotation race', () => {
     expect(store.getState().auth.accessToken).toBeFalsy();
   });
 
+  // The same allowlist on the PROOF path (this suite's 401s all carry
+  // access_token_expired, so the reactive branch refreshes and replays).
+  // /refresh-cookie sits under the router's global rate limiter, so a burst
+  // of tabs crossing the TTL together is exactly what trips a 429 — and a
+  // rate limit is the server declining to answer, not the session ending.
+  // Before the classifier became an allowlist this signed the operator out.
+  it('does not sign the user out when the refresh is rate-limited', async () => {
+    let refreshAttempts = 0;
+    server.use(
+      http.get('*/v1/some/resource', () => expired401()),
+      http.post('*/refresh-cookie', () => {
+        refreshAttempts += 1;
+        return HttpResponse.json({ detail: 'slow down' }, { status: 429 });
+      })
+    );
+
+    const store = await setupSeededStore();
+    await store.dispatch(
+      probeApi.endpoints.raceProbe.initiate('/v1/some/resource')
+    );
+
+    expect(refreshAttempts).toBe(1);
+    expect(store.getState().auth.accessToken).toBe('seed-access-token');
+  });
+
   // This is the trap #317's follow-up brief calls out: refreshOnce's catch
   // used to return a bare `{ ok: false }`, and the 401 branch above treats
   // that as a REAL negative answer — clearAccessToken + navigateToLogin.
   // An aborted/timed-out fetch throws into that same catch, so a naive
-  // `AbortSignal.timeout` on its own would turn "the network is slow" into
-  // "you are signed out". Prove the fix: a /refresh-cookie that never
-  // answers must NOT clear the token, must NOT navigate to login, and must
-  // surface the original 401 as a transient (`retry: true`) outcome — the
-  // same shape as the 503/409 cases above, not the "still clears the
-  // token" case right above this one.
+  // timeout on its own would turn "the network is slow" into "you are
+  // signed out". Prove the fix: a /refresh-cookie that never answers must
+  // NOT clear the token, must NOT navigate to login, and must surface the
+  // original 401 as a transient (`retry: true`) outcome — the same shape as
+  // the 503/409 cases above, not the "still clears the token" case right
+  // above this one. The timeout is driven through the test-only setter, not
+  // by patching a platform object; see the proactive suite for why fake
+  // timers are not an option here.
   it('does not sign the user out when /refresh-cookie never answers', async () => {
-    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
-    const timeoutSpy = vi
-      .spyOn(AbortSignal, 'timeout')
-      .mockImplementation(() => realTimeout(25));
+    __setRefreshTimeoutForTests(25);
 
     server.use(
       http.get('*/v1/some/resource', () => expired401()),
@@ -186,14 +213,13 @@ describe('refresh rotation race', () => {
 
     // NOT signed out: the seeded token survives the timed-out refresh.
     expect(store.getState().auth.accessToken).toBe('seed-access-token');
-
-    timeoutSpy.mockRestore();
   });
 });
 
 describe('cross-tab refresh serialisation', () => {
   afterEach(async () => {
     Reflect.deleteProperty(navigator, 'locks');
+    __setRefreshTimeoutForTests();
     await new Promise(resolve => setTimeout(resolve, 0));
   });
 
@@ -218,23 +244,38 @@ describe('cross-tab refresh serialisation', () => {
   // The per-tab in-flight guard says nothing about other tabs, and every
   // tab's access token expires at the same instant. Web Locks is what makes
   // the rotation one-at-a-time for the whole origin.
+  //
+  // The ARITY is part of what this pins, not incidental. Web Locks offers a
+  // three-argument overload — request(name, { signal }, callback) — and a
+  // switch to it would bind `cb` below to the options object; `cb(null)`
+  // would throw, performRefresh's own `.catch` would swallow the throw, and
+  // a mock that only checked the call count and the lock name would stay
+  // green while exercising nothing. Hence the explicit shape check in the
+  // mock and the two assertions on the recorded call.
   it('takes the cross-tab lock when Web Locks is available', async () => {
-    const request = vi.fn((_name: string, cb: (lock: unknown) => unknown) =>
-      Promise.resolve(cb(null))
-    );
+    const request = vi.fn((_name: string, cb: unknown) => {
+      if (typeof cb !== 'function') {
+        throw new Error(
+          'withRefreshLock switched to the 3-arg overload; update this mock'
+        );
+      }
+      return Promise.resolve((cb as (lock: unknown) => unknown)(null));
+    });
     Object.defineProperty(navigator, 'locks', {
       value: { request },
       configurable: true
     });
 
+    let refreshAttempts = 0;
     server.use(
       http.get('*/v1/some/resource', () => expired401()),
-      http.post('*/refresh-cookie', () =>
-        HttpResponse.json(
+      http.post('*/refresh-cookie', () => {
+        refreshAttempts += 1;
+        return HttpResponse.json(
           { accessToken: 'locked-token', expiresIn: 900 },
           { status: 200 }
-        )
-      )
+        );
+      })
     );
 
     const store = await setupSeededStore();
@@ -243,6 +284,62 @@ describe('cross-tab refresh serialisation', () => {
     );
 
     expect(request).toHaveBeenCalledTimes(1);
+    // The mock's own throw is swallowed by performRefresh's `.catch`, so
+    // THIS is the assertion that actually fails when the call site changes
+    // shape — the guard inside the mock only makes the reason legible.
+    expect(request.mock.calls[0]).toHaveLength(2);
     expect(request.mock.calls[0][0]).toBe('orkestra:auth-refresh');
+    expect(typeof request.mock.calls[0][1]).toBe('function');
+    // And the run callback really ran inside the lock: a 3-arg call would
+    // throw before reaching the network and leave this at 0.
+    expect(refreshAttempts).toBe(1);
+  });
+
+  // `fetch` resolves on HEADERS. A timer cleared straight after that await
+  // therefore bounds almost nothing: a server that sends headers and then
+  // stalls the body holds the cross-tab lock — and with it every other tab's
+  // rotation — for as long as it stalls. refreshOnce races the body read
+  // against the abort for exactly this reason, which is also why clearTimeout
+  // lives in the `finally` and nowhere else. A stalled read is "no answer",
+  // so the outcome is transient and the token survives.
+  it('releases the cross-tab lock when the headers arrive and the body stalls', async () => {
+    __setRefreshTimeoutForTests(25);
+    let lockReleased = false;
+    const request = vi.fn(async (_name: string, cb: unknown) => {
+      const held = await (cb as (lock: unknown) => Promise<unknown>)(null);
+      lockReleased = true;
+      return held;
+    });
+    Object.defineProperty(navigator, 'locks', {
+      value: { request },
+      configurable: true
+    });
+
+    server.use(
+      http.get('*/v1/some/resource', () => expired401()),
+      http.post('*/refresh-cookie', () => {
+        // Headers land immediately; the body never arrives and the stream is
+        // never closed. This is the shape AbortSignal.timeout on the fetch
+        // alone could not express at all.
+        const stalledBody = new ReadableStream({
+          start() {
+            /* never enqueue, never close */
+          }
+        });
+        return new HttpResponse(stalledBody, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      })
+    );
+
+    const store = await setupSeededStore();
+    await store.dispatch(
+      probeApi.endpoints.raceProbe.initiate('/v1/some/resource')
+    );
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(lockReleased).toBe(true);
+    expect(store.getState().auth.accessToken).toBe('seed-access-token');
   });
 });

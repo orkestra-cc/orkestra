@@ -11,15 +11,13 @@
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "codegen": "openapi-typescript ${VITE_API_BASE:-http://client.localhost:3000}/openapi.json -o src/api/openapi.gen.ts"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@stripe/stripe-js": "^4.10.0",
     "@tanstack/react-query": "^5.62.0",
     "i18next": "^23.16.5",
     "i18next-browser-languagedetector": "^8.0.0",
-    "openapi-fetch": "^0.13.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-i18next": "^15.1.1",
@@ -41,7 +39,6 @@
     "globals": "^15.13.0",
     "happy-dom": "^20.9.0",
     "msw": "^2.14.6",
-    "openapi-typescript": "^7.4.4",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.16.0",

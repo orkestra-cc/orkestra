@@ -153,8 +153,19 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   deleted account with `errors.Is` without importing the user module. A
   `UserProvider` implementation — a fork's included — MUST return or wrap it
   when the user does not exist: any other error reads as "could not read the
-  store", so the refresh path answers 503 for a deleted account and the client
-  keeps its token and session marker forever.
+  store". Every in-tree consumer that classifies a lookup depends on it, so a
+  non-conforming implementation degrades all of them at once —
+  **the refresh path** (`auth/services/auth_service.go`
+  `RefreshTokensWithRiskAssessment` + `MintAccessTokenFromRefresh`, which
+  answer 503 instead of ending the session, leaving the client holding its
+  token and session marker forever), **the service-account gate**
+  (`auth/services/service_account_service.go` `requireServiceAccount`, which
+  then reports "directory unavailable" for an account that is genuinely
+  gone), and **the three handler mappers**
+  (`auth/handlers/admin_user_auth_handler.go` `mapAdminUserAuthError` and
+  `mapAdminInviterError`, `auth/handlers/self_user_auth_handler.go`
+  `mapSelfAuthError`, which turn a 404 into a 500). Every one of them
+  classifies by identity with `errors.Is` — never by message.
 - **Encryption helpers live here, not via `shared/utils`.** The SDK has
   its own `secrets.go` reading `OAUTH_TOKEN_ENCRYPTION_KEY` — the
   algorithm matches `internal/shared/utils.{Encrypt,Decrypt}OAuthToken`

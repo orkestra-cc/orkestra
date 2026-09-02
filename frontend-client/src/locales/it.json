@@ -313,6 +313,26 @@
       "updateFailed": "Impossibile cambiare l'origine dell'avatar."
     }
   },
+  "dsr": {
+    "title": "Privacy e i miei dati",
+    "subtitle": "Esercita i tuoi diritti GDPR sui dati personali che trattiamo su di te.",
+    "export": {
+      "title": "Scarica i miei dati",
+      "subtitle": "Ottieni una copia di tutti i dati personali associati al tuo account, in un formato leggibile da un dispositivo automatico (art. 15 / 20).",
+      "submit": "Scarica i miei dati",
+      "submitting": "Preparazione in corso…",
+      "error": "Esportazione non riuscita. Riprova."
+    },
+    "erasure": {
+      "title": "Richiedi la cancellazione",
+      "subtitle": "Chiedici di cancellare i tuoi dati personali (art. 17). Un operatore esamina la richiesta prima che venga eseguita.",
+      "reasonPlaceholder": "Motivo (facoltativo)",
+      "submit": "Richiedi la cancellazione",
+      "submitting": "Invio in corso…",
+      "submitted": "Richiesta inviata",
+      "error": "Impossibile inviare la richiesta."
+    }
+  },
   "loading": "Caricamento…",
   "error": {
     "generic": "Si è verificato un errore. Riprova.",

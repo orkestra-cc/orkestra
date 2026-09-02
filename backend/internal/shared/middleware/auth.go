@@ -235,6 +235,21 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				m.sendAccessTokenExpired(w)
 				return
 			}
+			// No verifying key loaded is not a verdict on this token — it
+			// is this server admitting it cannot authenticate ANYONE until
+			// an operator fixes the key material. RequireAuth guards every
+			// protected route on both tiers, so the codeless 401 this used
+			// to fall through to told every client its session had ended.
+			// A boot-time state is not a blip: no client-side retry helps,
+			// which is exactly why the honest answer is a 503 rather than
+			// another 401 code. == rather than errors.Is because
+			// validateTokenEnhanced returns the sentinel unwrapped, like the
+			// two comparisons it joins, and because in this file `errors` is
+			// the shared errors package (see errors.TokenInvalidError below).
+			if err == services.ErrJWTKeysNotLoaded {
+				m.sendTokenVerificationUnavailable(w)
+				return
+			}
 			if err == services.ErrInvalidToken {
 				m.sendErrorResponse(w, r, errors.AuthenticationError("authentication required").
 					WithOperation("require_auth").
@@ -278,6 +293,99 @@ func (m *AuthMiddleware) sessionRevocationState(r *http.Request, claims *models.
 	return revoked, ""
 }
 
+// schemeBearer and schemeMFA are the only two WWW-Authenticate schemes
+// this middleware challenges with. A coded envelope that names neither
+// sends no WWW-Authenticate at all — see codedError.scheme.
+const (
+	schemeBearer = "Bearer"
+	schemeMFA    = "MFA"
+)
+
+// codedErrorItem is the single errors[] entry a coded envelope carries.
+//
+// `value` is a parameter rather than something derived from the code: it is
+// strings.ToUpper(code) for every emitter but sendRiskStepUp, whose value is
+// HIGH_RISK_SESSION against a step_up_required code — and one counter-example
+// is enough to make derivation wrong.
+type codedErrorItem struct {
+	message  string
+	location string
+	value    string
+}
+
+// codedError describes one of this package's hand-built coded error
+// envelopes — the responses that carry a FLAT top-level `code`, which is
+// what a client branches on. sendErrorResponse is deliberately not one of
+// them: it routes through errorManager and emits no top-level code at all,
+// putting its value in errors[0].value instead, and moving it behind this
+// writer would be a wire change.
+//
+// The invariant core is Content-Type, status, title, detail,
+// type: "about:blank" and code. Everything that varies is a field here:
+//
+//   - status — 401, 402, 403 or 503;
+//   - scheme — schemeBearer, schemeMFA, or "" for no WWW-Authenticate.
+//     The header's error token is always the `code`, which is true of all
+//     seven challenging emitters and pinned by the golden test;
+//   - item — the single errors[] entry, or nil for the emitters that carry
+//     none. The zero value is the SAFE one: a caller that forgets the field
+//     omits errors[], it does not invent one. Adding an errors[] to a
+//     response that has none is a wire change (spec §8 #18(d)), so the two
+//     emitters that omit it say so at their call site;
+//   - extra — additional TOP-LEVEL body fields (maxAgeSeconds; riskScore +
+//     riskThreshold; capability + tenantId). Keys outside the invariant core
+//     only — a key that collides with one would overwrite it.
+type codedError struct {
+	status int
+	code   string
+	title  string
+	detail string
+	scheme string
+	item   *codedErrorItem
+	extra  map[string]any
+}
+
+// writeCodedError writes one coded error envelope. It is the single place
+// AuthMiddleware builds that wire shape in THIS FILE; every send* below is a
+// thin wrapper that names its own envelope and calls this. It is NOT
+// package-wide: jwt_validator.go and audience.go still build four coded
+// envelopes inline, in shapes that differ from these ones (no errors[], and
+// in audience.go's case no status/title/detail/type either), so routing them
+// through this writer would change their wire output. They are enumerated in
+// the SCOPE note on TestCodedErrorEnvelopes_Golden.
+//
+// The output is byte-for-byte what the ten emitters wrote when each built
+// its own map — json.Encoder sorts map keys, so field order here is
+// irrelevant, and Encode's trailing newline is part of the contract.
+// TestCodedErrorEnvelopes_Golden pins every byte against literals captured
+// before this helper existed.
+func writeCodedError(w http.ResponseWriter, e codedError) {
+	w.Header().Set("Content-Type", "application/json")
+	if e.scheme != "" {
+		w.Header().Set("WWW-Authenticate", e.scheme+` error="`+e.code+`"`)
+	}
+	w.WriteHeader(e.status)
+
+	body := map[string]any{
+		"status": e.status,
+		"title":  e.title,
+		"detail": e.detail,
+		"type":   "about:blank",
+		"code":   e.code,
+	}
+	if e.item != nil {
+		body["errors"] = []map[string]any{{
+			"message":  e.item.message,
+			"location": e.item.location,
+			"value":    e.item.value,
+		}}
+	}
+	for k, v := range e.extra {
+		body[k] = v
+	}
+	_ = json.NewEncoder(w).Encode(body)
+}
+
 // sendSessionRevoked emits the structured 401 that tells the client to
 // drop its access token and re-authenticate. The code is distinct from the
 // generic `authentication required` path so the frontend can choose a
@@ -299,20 +407,13 @@ func (m *AuthMiddleware) sendSessionRevoked(w http.ResponseWriter, r *http.Reque
 		title = "session maximum age reached"
 		detail = "this session reached its maximum age; please sign in again"
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("WWW-Authenticate", `Bearer error="`+code+`"`)
-	w.WriteHeader(http.StatusUnauthorized)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status": http.StatusUnauthorized,
-		"title":  title,
-		"detail": detail,
-		"type":   "about:blank",
-		"errors": []map[string]any{{
-			"message":  title,
-			"location": "require_auth",
-			"value":    strings.ToUpper(code),
-		}},
-		"code": code,
+	writeCodedError(w, codedError{
+		status: http.StatusUnauthorized,
+		code:   code,
+		title:  title,
+		detail: detail,
+		scheme: schemeBearer,
+		item:   &codedErrorItem{message: title, location: "require_auth", value: strings.ToUpper(code)},
 	})
 }
 
@@ -344,20 +445,13 @@ func (m *AuthMiddleware) sendSessionRevoked(w http.ResponseWriter, r *http.Reque
 // same precedent in this file.
 func (m *AuthMiddleware) sendAccessTokenExpired(w http.ResponseWriter) {
 	const code = "access_token_expired"
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("WWW-Authenticate", `Bearer error="`+code+`"`)
-	w.WriteHeader(http.StatusUnauthorized)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status": http.StatusUnauthorized,
-		"title":  "access token expired",
-		"detail": "the access token has expired; refresh it and retry",
-		"type":   "about:blank",
-		"errors": []map[string]any{{
-			"message":  "access token expired",
-			"location": "require_auth",
-			"value":    strings.ToUpper(code),
-		}},
-		"code": code,
+	writeCodedError(w, codedError{
+		status: http.StatusUnauthorized,
+		code:   code,
+		title:  "access token expired",
+		detail: "the access token has expired; refresh it and retry",
+		scheme: schemeBearer,
+		item:   &codedErrorItem{message: "access token expired", location: "require_auth", value: strings.ToUpper(code)},
 	})
 }
 
@@ -1176,22 +1270,14 @@ func (m *AuthMiddleware) RequireLowRisk(threshold float64) func(http.Handler) ht
 // reusing the string means risk-driven and freshness-driven step-ups
 // share the UI path.
 func (m *AuthMiddleware) sendRiskStepUp(w http.ResponseWriter, r *http.Request, threshold, score float64) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("WWW-Authenticate", `MFA error="step_up_required"`)
-	w.WriteHeader(http.StatusUnauthorized)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status": http.StatusUnauthorized,
-		"title":  "step-up authentication required",
-		"detail": "this action requires a fresh second-factor verification due to elevated session risk",
-		"type":   "about:blank",
-		"errors": []map[string]any{{
-			"message":  "step-up required — high risk session",
-			"location": "require_low_risk",
-			"value":    "HIGH_RISK_SESSION",
-		}},
-		"code":          "step_up_required",
-		"riskScore":     score,
-		"riskThreshold": threshold,
+	writeCodedError(w, codedError{
+		status: http.StatusUnauthorized,
+		code:   "step_up_required",
+		title:  "step-up authentication required",
+		detail: "this action requires a fresh second-factor verification due to elevated session risk",
+		scheme: schemeMFA,
+		item:   &codedErrorItem{message: "step-up required — high risk session", location: "require_low_risk", value: "HIGH_RISK_SESSION"},
+		extra:  map[string]any{"riskScore": score, "riskThreshold": threshold},
 	})
 }
 
@@ -1199,21 +1285,14 @@ func (m *AuthMiddleware) sendRiskStepUp(w http.ResponseWriter, r *http.Request, 
 // drive a re-MFA prompt. Mirrors sendMFARequired's shape so clients can
 // reuse most of the handler, branching only on the "code" field.
 func (m *AuthMiddleware) sendStepUpRequired(w http.ResponseWriter, r *http.Request, maxAge time.Duration) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("WWW-Authenticate", `MFA error="step_up_required"`)
-	w.WriteHeader(http.StatusUnauthorized)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status": http.StatusUnauthorized,
-		"title":  "step-up authentication required",
-		"detail": "this action requires a fresh second-factor verification",
-		"type":   "about:blank",
-		"errors": []map[string]any{{
-			"message":  "step-up required",
-			"location": "require_step_up",
-			"value":    "STEP_UP_REQUIRED",
-		}},
-		"code":          "step_up_required",
-		"maxAgeSeconds": int(maxAge.Seconds()),
+	writeCodedError(w, codedError{
+		status: http.StatusUnauthorized,
+		code:   "step_up_required",
+		title:  "step-up authentication required",
+		detail: "this action requires a fresh second-factor verification",
+		scheme: schemeMFA,
+		item:   &codedErrorItem{message: "step-up required", location: "require_step_up", value: "STEP_UP_REQUIRED"},
+		extra:  map[string]any{"maxAgeSeconds": int(maxAge.Seconds())},
 	})
 }
 
@@ -1240,21 +1319,14 @@ func amrSatisfiesMFA(amr []string) bool {
 // password reconfirm. Same outer shape as sendStepUpRequired so the
 // frontend's RTK Query base branch can switch on `code` alone.
 func (m *AuthMiddleware) sendPasswordConfirmRequired(w http.ResponseWriter, _ *http.Request, maxAge time.Duration) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("WWW-Authenticate", `Bearer error="password_confirm_required"`)
-	w.WriteHeader(http.StatusUnauthorized)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status": http.StatusUnauthorized,
-		"title":  "password reconfirm required",
-		"detail": "this action requires a fresh password reconfirm because no second factor is enrolled",
-		"type":   "about:blank",
-		"errors": []map[string]any{{
-			"message":  "password confirm required",
-			"location": "require_step_up",
-			"value":    "PASSWORD_CONFIRM_REQUIRED",
-		}},
-		"code":          "password_confirm_required",
-		"maxAgeSeconds": int(maxAge.Seconds()),
+	writeCodedError(w, codedError{
+		status: http.StatusUnauthorized,
+		code:   "password_confirm_required",
+		title:  "password reconfirm required",
+		detail: "this action requires a fresh password reconfirm because no second factor is enrolled",
+		scheme: schemeBearer,
+		item:   &codedErrorItem{message: "password confirm required", location: "require_step_up", value: "PASSWORD_CONFIRM_REQUIRED"},
+		extra:  map[string]any{"maxAgeSeconds": int(maxAge.Seconds())},
 	})
 }
 
@@ -1263,14 +1335,37 @@ func (m *AuthMiddleware) sendPasswordConfirmRequired(w http.ResponseWriter, _ *h
 // deliberately NOT one of the step-up prompts — the frontend must show
 // "try again shortly", not open a password modal or an enrollment nudge.
 func (m *AuthMiddleware) sendPolicyUnavailable(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusServiceUnavailable)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status": http.StatusServiceUnavailable,
-		"title":  "sign-in policy unavailable",
-		"detail": "the sign-in policy could not be evaluated; try again shortly",
-		"type":   "about:blank",
-		"code":   "auth.policy_unavailable",
+	// No scheme and no item, both deliberately: there is no credential to
+	// re-present, and adding an errors[] here would be a wire change.
+	writeCodedError(w, codedError{
+		status: http.StatusServiceUnavailable,
+		code:   "auth.policy_unavailable",
+		title:  "sign-in policy unavailable",
+		detail: "the sign-in policy could not be evaluated; try again shortly",
+	})
+}
+
+// sendTokenVerificationUnavailable emits the 503 envelope for a server that
+// holds no verifying key, so no bearer on any protected route can be checked
+// (services.ErrJWTKeysNotLoaded). Modelled on sendPolicyUnavailable, the
+// middleware's other 503, down to omitting both WWW-Authenticate and errors[]:
+// the header names a scheme the caller should retry with and there is nothing
+// to retry with. The code is flat rather than dotted — every code this family
+// has added reads that way, and the model's punctuation is a lone survivor.
+//
+// Nothing about what is ACCEPTED changes: a server with no verifying key
+// accepted nothing before and accepts nothing now. Only the account it gives
+// of itself does. As with sendAccessTokenExpired, the request is deliberately
+// not a parameter — nothing here reads it — and the code must keep exactly
+// ONE emitter in backend/, or it stops meaning what it says.
+func (m *AuthMiddleware) sendTokenVerificationUnavailable(w http.ResponseWriter) {
+	const code = "token_verification_unavailable"
+	// No scheme and no item, for the same reason as sendPolicyUnavailable.
+	writeCodedError(w, codedError{
+		status: http.StatusServiceUnavailable,
+		code:   code,
+		title:  "token verification unavailable",
+		detail: "access tokens cannot be verified right now; try again shortly",
 	})
 }
 
@@ -1279,20 +1374,13 @@ func (m *AuthMiddleware) sendPolicyUnavailable(w http.ResponseWriter) {
 // password_confirm_required so the frontend nudges to /user/settings
 // instead of opening the password modal.
 func (m *AuthMiddleware) sendMFAEnrollmentRequired(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("WWW-Authenticate", `Bearer error="mfa_enrollment_required"`)
-	w.WriteHeader(http.StatusForbidden)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status": http.StatusForbidden,
-		"title":  "mfa enrollment required",
-		"detail": "your role requires a second factor; enroll one before performing this action",
-		"type":   "about:blank",
-		"errors": []map[string]any{{
-			"message":  "mfa enrollment required",
-			"location": "require_step_up",
-			"value":    "MFA_ENROLLMENT_REQUIRED",
-		}},
-		"code": "mfa_enrollment_required",
+	writeCodedError(w, codedError{
+		status: http.StatusForbidden,
+		code:   "mfa_enrollment_required",
+		title:  "mfa enrollment required",
+		detail: "your role requires a second factor; enroll one before performing this action",
+		scheme: schemeBearer,
+		item:   &codedErrorItem{message: "mfa enrollment required", location: "require_step_up", value: "MFA_ENROLLMENT_REQUIRED"},
 	})
 }
 
@@ -1302,20 +1390,13 @@ func (m *AuthMiddleware) sendMFAEnrollmentRequired(w http.ResponseWriter, _ *htt
 // MFA modal regardless of whether the gate is session-MFA, freshness, or
 // risk-based.
 func (m *AuthMiddleware) sendMFARequired(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("WWW-Authenticate", `MFA error="step_up_required"`)
-	w.WriteHeader(http.StatusUnauthorized)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status": http.StatusUnauthorized,
-		"title":  "mfa required",
-		"detail": "this action requires a second authentication factor",
-		"type":   "about:blank",
-		"errors": []map[string]any{{
-			"message":  "mfa required",
-			"location": "require_mfa",
-			"value":    "STEP_UP_REQUIRED",
-		}},
-		"code": "step_up_required",
+	writeCodedError(w, codedError{
+		status: http.StatusUnauthorized,
+		code:   "step_up_required",
+		title:  "mfa required",
+		detail: "this action requires a second authentication factor",
+		scheme: schemeMFA,
+		item:   &codedErrorItem{message: "mfa required", location: "require_mfa", value: "STEP_UP_REQUIRED"},
 	})
 }
 
@@ -1353,20 +1434,14 @@ func (m *AuthMiddleware) sendErrorResponse(w http.ResponseWriter, r *http.Reques
 // the frontend can distinguish plan-feature misses from capability misses
 // and surface the right flow (catalog subscribe vs plan upgrade).
 func (m *AuthMiddleware) sendCapabilityRequiredResponse(w http.ResponseWriter, r *http.Request, capabilityID, tenantID string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusPaymentRequired)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": http.StatusPaymentRequired,
-		"title":  "capability required",
-		"detail": "tenant is not entitled to this capability",
-		"type":   "about:blank",
-		"errors": []map[string]interface{}{{
-			"message":  "capability required",
-			"location": "require_capability",
-			"value":    "CAPABILITY_REQUIRED",
-		}},
-		"capability": capabilityID,
-		"tenantId":   tenantID,
-		"code":       "capability_required",
+	// No scheme: 402 is a payment/entitlement verdict, not an
+	// authentication challenge, so there is nothing to re-present.
+	writeCodedError(w, codedError{
+		status: http.StatusPaymentRequired,
+		code:   "capability_required",
+		title:  "capability required",
+		detail: "tenant is not entitled to this capability",
+		item:   &codedErrorItem{message: "capability required", location: "require_capability", value: "CAPABILITY_REQUIRED"},
+		extra:  map[string]any{"capability": capabilityID, "tenantId": tenantID},
 	})
 }

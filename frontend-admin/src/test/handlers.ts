@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw';
 
 // Wildcard host so handlers match regardless of how baseApi resolves
-// VITE_BACKEND_URL (e.g. console.localhost:3000 in dev, anything in tests).
+// VITE_BACKEND_URL (e.g. localhost:3000 in dev, anything in tests).
 export const url = (path: string) => `*${path}`;
 
 // Per-test captured outbound request state — handlers stash request

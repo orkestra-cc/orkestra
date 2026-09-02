@@ -530,20 +530,14 @@ export const authApi = baseApi.injectEndpoints({
       })
     }),
 
-    // OAuth callback — single shared endpoint per provider, dispatched
-    // server-side to the correct tier via the signed-state JWT.
-    handleOAuthCallback: builder.mutation<
-      LoginResponse,
-      { code: string; state?: string; provider: string }
-    >({
-      query: ({ code, state, provider }) => ({
-        url: `v1/auth/oauth/${provider}/callback`,
-        method: 'POST',
-        body: { code, state }
-      }),
-      // Invalidate navigation to fetch role-filtered menu for new user
-      invalidatesTags: ['Auth', 'User', 'Navigation']
-    }),
+    // There is deliberately no OAuth-callback mutation here. The callback is
+    // a browser REDIRECT the backend owns end to end: it lands on
+    // SocialAuthCallback, which reads the closed `?success=…&provider=…`
+    // contract off the URL and bootstraps through GET /v1/auth/session. The
+    // mutation that used to sit at this spot POSTed
+    // `v1/auth/oauth/{provider}/callback`, which the backend mounts as a GET
+    // for Google, Discord and GitHub — so it had zero callers and would have
+    // 405'd if it ever gained one.
 
     // --- Self-service security center ---
 
@@ -780,7 +774,6 @@ export const {
   useConfirmPasswordMutation,
   useLogoutMutation,
   useInitiateOAuthMutation,
-  useHandleOAuthCallbackMutation,
   useGetSessionQuery,
   // Lazy query hooks for conditional fetching
   useLazyGetCurrentUserQuery,
