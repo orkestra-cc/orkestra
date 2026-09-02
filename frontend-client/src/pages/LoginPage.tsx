@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import {
   useMutation,
   useQuery,
@@ -52,7 +52,7 @@ const NOTICE_CLASS =
 
 export function LoginPage() {
   const { t } = useTranslation();
-  const { signIn } = useAuth();
+  const { signIn, isAuthenticated, isBootstrapping } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   // One redirect gate for both sign-in paths (lib/safeNext.ts): the deep
@@ -90,8 +90,11 @@ export function LoginPage() {
     staleTime: 30_000,
   });
 
-  function complete(token: string) {
-    signIn(token);
+  // Takes the whole result rather than `result.accessToken`: the lifetime is
+  // already on it, and the two `.accessToken` projections below are exactly
+  // where it used to be lost.
+  function complete(result: { accessToken: string; expiresIn?: number }) {
+    signIn(result.accessToken, result.expiresIn);
     navigate(destination, { replace: true });
   }
 
@@ -106,7 +109,7 @@ export function LoginPage() {
         });
         return;
       }
-      complete(result.accessToken);
+      complete(result);
     },
   });
 
@@ -114,6 +117,17 @@ export function LoginPage() {
     e.preventDefault();
     if (!email.trim() || !password) return;
     loginMutation.mutate();
+  }
+
+  // Already signed in: a returning visitor who bookmarked /login, or one
+  // the guard bounced here before it learned to wait (spec §8 #11). Same
+  // destination as complete() computes above — one gate, one fallback, so
+  // the cold-load redirect and the post-sign-in one cannot drift apart.
+  // `isBootstrapping` keeps this from firing on a half-decided session;
+  // by the time complete() runs it is long false, so the sign-in path is
+  // unaffected (its own navigate() still fires, to the same place).
+  if (isAuthenticated && !isBootstrapping) {
+    return <Navigate to={destination} replace />;
   }
 
   if (stage.name === "mfa") {
@@ -125,7 +139,7 @@ export function LoginPage() {
         <MfaChallenge
           mfaToken={stage.mfaToken}
           onCancel={() => setStage({ name: "credentials" })}
-          onSuccess={(result) => complete(result.accessToken)}
+          onSuccess={(result) => complete(result)}
         />
       </section>
     );

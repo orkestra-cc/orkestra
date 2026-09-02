@@ -21,7 +21,7 @@ const EnglishCopy = () => {
 };
 
 describe("test harness", () => {
-  it("renders through QueryClient + AuthProvider + MemoryRouter and guards a route", () => {
+  it("renders through QueryClient + AuthProvider + MemoryRouter and guards a route", async () => {
     renderWithProviders(
       <Routes>
         <Route
@@ -36,7 +36,11 @@ describe("test harness", () => {
       </Routes>,
       { routerEntries: ["/account/security"] },
     );
-    expect(screen.getByTestId("login-location")).toHaveTextContent(
+    // Asynchronous on purpose: the guard waits for AuthProvider's bootstrap
+    // to settle before it judges the session (§8 #11). For this marker-less
+    // visitor that is a single microtask — no request leaves — but it is
+    // still not the first commit, so the anchor cannot be a getBy.
+    expect(await screen.findByTestId("login-location")).toHaveTextContent(
       "/login?next=%2Faccount%2Fsecurity",
     );
     expect(screen.queryByTestId("secret-location")).toBeNull();

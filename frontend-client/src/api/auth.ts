@@ -4,17 +4,25 @@
 // in backend/internal/core/auth/handlers/{password,mfa,auth}_handler.go;
 // codegen can sharpen later.
 //
-// Authenticated calls use authedFetch which pulls the in-memory access
-// token from src/auth/tokenStore so AuthProvider doesn't need to wire
-// fetch headers manually. credentials:'include' is set on every call so
-// the httpOnly refresh cookie is attached cross-origin (Domain-scoped to
-// the API host per ADR-0003 D-9).
+// Two request paths, and the split is DELIBERATE — do not "finish the job"
+// by merging them:
+//   * authedFetch (src/api/authedFetch.ts) is the shared helper every
+//     bearer-carrying call in this SPA goes through. It attaches the token,
+//     sets credentials:'include' (the httpOnly refresh cookie is Domain-scoped
+//     to the API host per ADR-0003 D-9) and owns the ONLY 401 recovery.
+//   * jsonFetch, below, is the ANONYMOUS path and gains nothing from that
+//     recovery: a 401 from login, mfa/login/verify, register, forgot-password,
+//     reset-password, accept-invite, policy, providers or oauth/login means
+//     "those credentials are wrong" or "not signed in", never "the token
+//     expired". There is no token to refresh and nothing safe to replay.
+import { authedFetch } from "@/api/authedFetch";
 import { apiBaseURL } from "@/api/client";
-import { getAccessToken } from "@/auth/tokenStore";
 import { isOAuthProvider, type OAuthProviderName } from "@/lib/oauthProviders";
 import { stashOAuthReturnTo } from "@/lib/oauthReturnTo";
 
-interface ApiError extends Error {
+// Exported: dsr.ts throws the same shape rather than keeping a private copy.
+// Pages branch on `code`, so a second, drifting definition is a real hazard.
+export interface ApiError extends Error {
   status: number;
   code?: string;
 }
@@ -26,7 +34,10 @@ function err(message: string, status: number, code?: string): ApiError {
   return e;
 }
 
-async function readError(res: Response, fallback: string): Promise<ApiError> {
+export async function readError(
+  res: Response,
+  fallback: string,
+): Promise<ApiError> {
   const body = (await res.json().catch(() => ({}))) as {
     detail?: string;
     title?: string;
@@ -52,20 +63,6 @@ async function jsonFetch(path: string, init?: RequestInit): Promise<Response> {
       "Content-Type": "application/json",
       Accept: "application/json",
       ...(init?.headers ?? {}),
-    },
-  });
-}
-
-async function authedFetch(
-  path: string,
-  init?: RequestInit,
-): Promise<Response> {
-  const token = getAccessToken();
-  return jsonFetch(path, {
-    ...init,
-    headers: {
-      ...(init?.headers ?? {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
 }
@@ -174,7 +171,8 @@ export type LoginResult =
       kind: "token";
       accessToken: string;
       tokenType: string;
-      expiresIn: number;
+      // OPTIONAL, and deliberately so: see the mapping below.
+      expiresIn?: number;
       user?: LoginUser;
       mfaEnrollmentRequired?: boolean;
       mfaGraceExpiresAt?: string;
@@ -223,7 +221,13 @@ export async function login(input: LoginInput): Promise<LoginResult> {
     kind: "token",
     accessToken: body.accessToken,
     tokenType: body.tokenType ?? "Bearer",
-    expiresIn: body.expiresIn ?? 900,
+    // `expiresIn` is OPTIONAL on the wire. It used to default to 900, which
+    // FABRICATES a fifteen-minute lifetime the server never promised: on a
+    // deployment running a 60s TTL the store would then read every 401 as
+    // "not a token problem" for the rest of that quarter hour. An unknown
+    // lifetime is a fact the store knows how to handle (§4.5's fallback
+    // chain); a wrong one is not.
+    expiresIn: body.expiresIn,
     user: body.user,
     mfaEnrollmentRequired: body.mfaEnrollmentRequired,
     mfaGraceExpiresAt: body.mfaGraceExpiresAt,
@@ -242,7 +246,9 @@ export interface MfaLoginVerifyInput {
 export interface MfaLoginVerifyResult {
   accessToken: string;
   tokenType: string;
-  expiresIn: number;
+  // Optional for the same reason as LoginResult's: an absent lifetime must
+  // reach the store as "unknown", never as an invented number.
+  expiresIn?: number;
   user?: LoginUser;
 }
 
@@ -259,7 +265,7 @@ export async function mfaLoginVerify(
   const body = (await res.json()) as {
     accessToken: string;
     tokenType: string;
-    expiresIn: number;
+    expiresIn?: number;
     user?: LoginUser;
   };
   return body;

@@ -82,9 +82,37 @@ services:
       # don't need /etc/hosts entries; the host mux also has a dev
       # fallthrough that routes unmatched hosts to the operator mux,
       # so curl http://localhost:3000 still works.
+      #
+      # The client API answers on the SPA's OWN hostname (client.localhost),
+      # not on an api.* label of its own, and that is load-bearing rather
+      # than cosmetic. Every client-tier cookie is minted SameSite=Lax with
+      # an empty Domain — refresh (password_handler.go:411-424,
+      # utils/http.go:53-64), OAuth state (oauth_state_binding.go:56,71),
+      # device (middleware/device.go:61-69). `localhost` is not in the
+      # Public Suffix List, so Chromium's SchemefulSite falls back to
+      # scheme://host: client.localhost and api.localhost are different
+      # *sites*, and a cross-site fetch(..., {credentials:'include'}) from
+      # the SPA neither stores nor sends those cookies — client login
+      # succeeds and the very next refresh 401s. Ports are irrelevant to
+      # site, so serving the SPA on :8081 and the client API on :3000 under
+      # one hostname is exactly what fixes it; the call is still
+      # cross-ORIGIN and still preflighted (CLIENT_CORS_ORIGINS below).
+      # Neither cookie knob can substitute: SameSite is computed from the
+      # request's site, not the cookie's Domain, and COOKIE_SAME_SITE is
+      # read into config but never consumed. The operator console is bound
+      # by the same condition and only its DEFAULT satisfies it: the SPA
+      # calls VITE_API_URL (below, default http://localhost:3000) with
+      # credentials:'include', so it is same-site only while its own origin
+      # agrees — both localhost (open it at http://localhost:8080), or both
+      # console.localhost (then set VITE_API_URL=http://console.localhost:3000
+      # and VITE_ADMIN_ALLOWED_HOSTS=console.localhost). Opening it at
+      # console.localhost:8080 against the default reproduces this bug on
+      # the operator tier. Not changed here — spec §8 follow-up #13.
+      # The host mux matches a Host header with or without its port
+      # (cmd/server/hostmux.go:54-68, :72-84), so the :3000 suffix is fine.
       CONSOLE_HOST: ${CONSOLE_HOST:-console.localhost:3000}
-      CLIENT_API_HOST: ${CLIENT_API_HOST:-api.localhost:3000}
-      CLIENT_API_URL: ${CLIENT_API_URL:-http://api.localhost:3000}
+      CLIENT_API_HOST: ${CLIENT_API_HOST:-client.localhost:3000}
+      CLIENT_API_URL: ${CLIENT_API_URL:-http://client.localhost:3000}
       OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
       # Default CLIENT_CORS_ORIGINS allows the new Tier-2 demo SPA at
       # http://client.localhost:8081 (served by client-frontend).
@@ -232,12 +260,15 @@ services:
         npm install && npm run dev -- --host 0.0.0.0
 
   # Tier-2 (external client) demo SPA — consumes the ADR-0003 client API
-  # surface (api.localhost:3000, JWT aud=client). Sibling app to the
+  # surface (client.localhost:3000, JWT aud=client). Sibling app to the
   # operator console; lives at frontend-client/. Bind-mounts the source
-  # for hot reload, hits the backend at api.localhost from the browser.
+  # for hot reload, and hits the backend on the SAME hostname it is served
+  # on, one port over — the client-tier cookies are SameSite=Lax, and to
+  # a browser client.localhost and api.localhost are different sites (see
+  # CLIENT_API_HOST above), so an api.* client API cannot carry them.
   #
-  # Add to /etc/hosts for cookie-domain isolation to work end-to-end:
-  #   127.0.0.1 console.localhost api.localhost client.localhost
+  # Add to /etc/hosts if your resolver does not answer *.localhost itself:
+  #   127.0.0.1 console.localhost client.localhost
   client-frontend:
     image: node:24-alpine
     container_name: ${APP_NAME}-client-frontend-${ENV}
@@ -252,8 +283,11 @@ services:
     environment:
       NODE_ENV: development
       # The browser hits the backend directly, so this URL must resolve
-      # from the host (not from inside the container network).
-      VITE_API_BASE: ${VITE_CLIENT_API_BASE:-http://api.localhost:3000}
+      # from the host (not from inside the container network). Keep the
+      # hostname equal to the one the SPA is served on (client.localhost)
+      # or the SameSite=Lax client cookies are dropped — see
+      # CLIENT_API_HOST in the backend service above.
+      VITE_API_BASE: ${VITE_CLIENT_API_BASE:-http://client.localhost:3000}
       VITE_STRIPE_PUBLISHABLE_KEY: ${VITE_STRIPE_PUBLISHABLE_KEY:-}
       # Hostnames the Vite dev server accepts (DNS-rebinding defence).
       # Localhost is always allowed; add deployed hostnames here.

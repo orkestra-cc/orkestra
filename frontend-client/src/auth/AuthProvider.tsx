@@ -8,7 +8,7 @@ import {
 
 import {
   bootstrapFromRefreshCookie as bootstrapFromRefreshCookieStore,
-  clearAccessToken,
+  clearSessionLocally,
   getAccessToken,
   refreshAccessToken,
   setAccessToken,
@@ -16,7 +16,7 @@ import {
 } from "@/auth/tokenStore";
 import { apiBaseURL } from "@/api/client";
 import { AuthContext, type AuthState } from "@/auth/authContext";
-import { clearSessionMarker, setSessionMarker } from "@/auth/sessionMarker";
+import { setSessionMarker } from "@/auth/sessionMarker";
 
 interface AuthProviderProps {
   children: ReactNode;
@@ -30,6 +30,10 @@ interface AuthProviderProps {
 // provider only owns the lifecycle, not the UI.
 export function AuthProvider({ children }: AuthProviderProps) {
   const [token, setToken] = useState<string | null>(getAccessToken());
+  // The cold-load window, exposed so a consumer can tell "not decided yet"
+  // from "signed out" (spec §8 #11): on a fresh document the token store is
+  // empty and stays empty until the mount refresh below answers.
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
 
   useEffect(() => subscribe(setToken), []);
 
@@ -39,12 +43,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // catalog/signup pages don't fire a guaranteed-401 on every cold
     // load. Returning users — who have stamped the marker on a prior
     // signIn — get auto-rehydrated here.
-    void refreshAccessToken(apiBaseURL);
+    //
+    // `finally`, not `then`: every outcome ends the window — ok,
+    // signed-out, unavailable, and the marker-less short-circuit that
+    // never leaves. refreshAccessToken never rejects, so this is the one
+    // and only flip, and a `catch` here would be dead code.
+    void refreshAccessToken(apiBaseURL).finally(() =>
+      setIsBootstrapping(false),
+    );
   }, []);
 
-  const signIn = useCallback((next: string) => {
+  const signIn = useCallback((next: string, expiresInSeconds?: number) => {
     setSessionMarker();
-    setAccessToken(next);
+    setAccessToken(next, expiresInSeconds);
   }, []);
 
   const signOut = useCallback(async () => {
@@ -54,8 +65,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
         credentials: "include",
       });
     } finally {
-      clearSessionMarker();
-      clearAccessToken();
+      // The one sanctioned local clear (tokenStore.ts): marker AND token, in
+      // one place. Clearing them inline here is exactly how the deleted
+      // client.ts middleware drifted into clearing only the token and leaving
+      // a marker that short-circuited the next cold load.
+      clearSessionLocally();
     }
   }, []);
 
@@ -68,11 +82,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     () => ({
       accessToken: token,
       isAuthenticated: token !== null,
+      isBootstrapping,
       signIn,
       signOut,
       bootstrapFromRefreshCookie,
     }),
-    [token, signIn, signOut, bootstrapFromRefreshCookie],
+    [token, isBootstrapping, signIn, signOut, bootstrapFromRefreshCookie],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

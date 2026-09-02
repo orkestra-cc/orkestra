@@ -937,3 +937,114 @@ func TestRequireAuth_TamperedBearerWithRefreshCookie_Returns401_NeverRotates(t *
 	defer resp.Body.Close()
 	assertNoSilentRefresh(t, resp, dh)
 }
+
+// ===== §4.10: the expired bearer gets a code of its own =====
+
+// §3.D. The client is otherwise inferring, from its own reckoning of when the
+// token it sent expired, something the server knows for certain. Saying it
+// turns frontend-client's 401 branch from an inference into a fact and lets it
+// recover a token that expired IN FLIGHT — the one case the client-side rule
+// has to give up, because "already expired at send" is the only condition that
+// proves the handler never ran.
+func TestRequireAuth_ExpiredBearer_ReturnsAccessTokenExpiredCode(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	dh := &downstreamHandler{}
+	srv := httptest.NewServer(f.mw.RequireAuth(dh.handler()))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+f.mintExpiredAccessToken("u-expired"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", resp.StatusCode)
+	}
+	if dh.called {
+		t.Error("an expired bearer must NOT reach downstream — that is what makes a client retry safe")
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"code":"access_token_expired"`) {
+		t.Errorf("body = %s, want a top-level code access_token_expired", body)
+	}
+	if wa := resp.Header.Get("WWW-Authenticate"); wa != `Bearer error="access_token_expired"` {
+		t.Errorf("WWW-Authenticate = %q, want access_token_expired", wa)
+	}
+}
+
+// The bound on the new code: it must mean EXPIRED, nothing else. A client that
+// refreshes on it would otherwise refresh for a forged token, and — worse —
+// the same code on a wrong-credentials answer would re-arm the replay hazard
+// this whole design exists to close.
+func TestRequireAuth_NonExpiredRejections_CarryNoExpiredCode(t *testing.T) {
+	tok := func(f *requireAuthFixture) string {
+		valid := f.issueTokenForUser("u-tamper", "operator")
+		return valid[:len(valid)-8] + "AAAAAAAA"
+	}
+	cases := []struct {
+		name   string
+		bearer func(f *requireAuthFixture) string
+	}{
+		{"no bearer at all", func(*requireAuthFixture) string { return "" }},
+		{"malformed", func(*requireAuthFixture) string { return "not-a-jwt" }},
+		{"tampered signature", tok},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRequireAuthFixture(t)
+			dh := &downstreamHandler{}
+			srv := httptest.NewServer(f.mw.RequireAuth(dh.handler()))
+			defer srv.Close()
+
+			req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+			if b := tc.bearer(f); b != "" {
+				req.Header.Set("Authorization", "Bearer "+b)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Errorf("status = %d, want 401", resp.StatusCode)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			if strings.Contains(string(body), "access_token_expired") {
+				t.Errorf("body = %s — only an EXPIRED token may carry that code", body)
+			}
+		})
+	}
+}
+
+// A revoked session is terminal and keeps its own code: a token minted from the
+// same cookie would carry the same dead sid, so the client must clear rather
+// than refresh. The new branch must not shadow it.
+func TestRequireAuth_RevokedSession_StillReportsRevokedNotExpired(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	dh := &downstreamHandler{}
+	srv := httptest.NewServer(f.mw.RequireAuth(dh.handler()))
+	defer srv.Close()
+
+	tok := f.issueTokenWithSID("u-rev", "sess-rev-not-exp")
+	_ = f.revocation.Revoke(context.Background(), "sess-rev-not-exp", "logout")
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"code":"session_revoked"`) {
+		t.Errorf("body = %s, want session_revoked", body)
+	}
+	if strings.Contains(string(body), "access_token_expired") {
+		t.Errorf("body = %s — a revoked session must not invite a refresh", body)
+	}
+}

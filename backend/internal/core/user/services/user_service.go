@@ -19,7 +19,11 @@ import (
 )
 
 var (
-	ErrUserNotFound           = errors.New("user not found")
+	// Aliased to the SDK sentinel so consumers outside this module (auth's
+	// refresh path) can classify it with errors.Is without importing this
+	// package. Same value, same message — every existing return site and every
+	// `err == ErrUserNotFound` comparison is unaffected.
+	ErrUserNotFound           = iface.ErrUserNotFound
 	ErrUserAlreadyExists      = errors.New("user already exists")
 	ErrInvalidInput           = errors.New("invalid input")
 	ErrUnauthorized           = errors.New("unauthorized operation")
@@ -590,7 +594,7 @@ func (s *userService) GetUserByID(ctx context.Context, id string) (*iface.User, 
 
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
-		if err == repository.ErrUserNotFound {
+		if errors.Is(err, repository.ErrUserNotFound) {
 			return nil, ErrUserNotFound
 		}
 		return nil, fmt.Errorf("failed to get user by ID: %w", err)

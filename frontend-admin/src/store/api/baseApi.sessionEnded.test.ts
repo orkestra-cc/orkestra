@@ -141,6 +141,15 @@ describe('session_max_age_reached reaches the user', () => {
   });
 });
 
+// Both tests below make the resource answer `code: "access_token_expired"`.
+// The reactive refresh only fires on proof the request never reached its
+// handler (baseApi.ts's `handlerNeverRan`): that code, or a request sent
+// with no live bearer. Their previous `{ detail: 'expired' }` body carries
+// neither, so against the live seeded token the 401 branch would now return
+// early and no refresh would be attempted at all — one test would fail
+// outright and the other would pass without exercising anything. The code is
+// the honest fixture here: these are 401s on a protected resource whose
+// bearer the server rejected as expired, which is exactly what §4.10 emits.
 describe('503 from the refresh endpoint is not a sign-out', () => {
   beforeEach(async () => {
     toastError.mockClear();
@@ -161,7 +170,7 @@ describe('503 from the refresh endpoint is not a sign-out', () => {
   it('keeps the access token when the refresh endpoint answers 503', async () => {
     server.use(
       http.get('*/v1/some/resource', () =>
-        HttpResponse.json({ detail: 'expired' }, { status: 401 })
+        HttpResponse.json({ code: 'access_token_expired' }, { status: 401 })
       ),
       http.post('*/v1/auth/operator/refresh-cookie', () =>
         HttpResponse.json(
@@ -184,7 +193,7 @@ describe('503 from the refresh endpoint is not a sign-out', () => {
   it('still clears the access token when the refresh endpoint answers 401', async () => {
     server.use(
       http.get('*/v1/some/resource', () =>
-        HttpResponse.json({ detail: 'expired' }, { status: 401 })
+        HttpResponse.json({ code: 'access_token_expired' }, { status: 401 })
       ),
       http.post('*/v1/auth/operator/refresh-cookie', () =>
         HttpResponse.json({ detail: 'no cookie' }, { status: 401 })

@@ -7,6 +7,7 @@ import {
   fetchAuthPolicy,
   fetchOAuthProviders,
   initiateOAuthLogin,
+  login,
   passwordLoginUsable,
 } from "@/api/auth";
 import { OAUTH_RETURN_TO_KEY } from "@/lib/oauthReturnTo";
@@ -22,6 +23,7 @@ import { server } from "@/test/server";
 const POLICY = url("/v1/auth/client/policy");
 const PROVIDERS = url("/v1/auth/client/providers");
 const START = url("/v1/auth/client/oauth/login");
+const LOGIN = url("/v1/auth/client/login");
 
 describe("fetchAuthPolicy", () => {
   it("returns the wire fields, null included", async () => {
@@ -229,5 +231,47 @@ describe("initiateOAuthLogin", () => {
       status: 500,
     });
     expect(assign).not.toHaveBeenCalled();
+  });
+});
+
+describe("login — the reported lifetime is never invented", () => {
+  const credentials = { email: "a@b.c", password: "hunter22hunter22" };
+
+  it("passes a reported expiresIn through verbatim", async () => {
+    server.use(
+      http.post(LOGIN, () =>
+        HttpResponse.json({
+          success: true,
+          accessToken: "at-1",
+          tokenType: "Bearer",
+          expiresIn: 60,
+        }),
+      ),
+    );
+    await expect(login(credentials)).resolves.toEqual({
+      kind: "token",
+      accessToken: "at-1",
+      tokenType: "Bearer",
+      expiresIn: 60,
+    });
+  });
+
+  // `expiresIn` is OPTIONAL on the wire, and defaulting it to 900 FABRICATES a
+  // fifteen-minute lifetime the server never promised: on a deployment running
+  // a 60s TTL the store would then read every 401 as "not a token problem" for
+  // the rest of that quarter hour. toEqual ignores undefined properties on
+  // BOTH sides, so this passes only while the field really is absent — a 900
+  // would be an extra defined property and fail.
+  it("leaves expiresIn UNDEFINED when the body omits it — never 900", async () => {
+    server.use(
+      http.post(LOGIN, () =>
+        HttpResponse.json({ success: true, accessToken: "at-1" }),
+      ),
+    );
+    await expect(login(credentials)).resolves.toEqual({
+      kind: "token",
+      accessToken: "at-1",
+      tokenType: "Bearer",
+    });
   });
 });

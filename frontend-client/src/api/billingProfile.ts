@@ -11,8 +11,11 @@
 // BillingIdentityDTO. The `getBillingProfile` and `putBillingProfile`
 // function names are preserved for source-level compatibility with
 // callers that pre-flighted the legacy endpoint.
-import { apiBaseURL } from '@/api/client';
-import { getAccessToken } from '@/auth/tokenStore';
+import { authedFetch } from "@/api/authedFetch";
+// The shared error shape and reader. This module used to carry its own
+// `BillingProfileApiError` + `readError`, structurally identical and imported
+// by nobody — a third copy of a shape pages branch on by `code`.
+import { readError } from "@/api/auth";
 
 export interface BillingAddress {
   line1?: string;
@@ -43,44 +46,14 @@ export interface BillingIdentity {
   fatturaPA?: FatturaPAProfile;
 }
 
-export interface BillingProfileApiError extends Error {
-  status: number;
-  code?: string;
-}
-
-function err(message: string, status: number, code?: string): BillingProfileApiError {
-  const e = new Error(message) as BillingProfileApiError;
-  e.status = status;
-  if (code) e.code = code;
-  return e;
-}
-
-async function readError(res: Response, fallback: string): Promise<BillingProfileApiError> {
-  const body = (await res.json().catch(() => ({}))) as {
-    detail?: string;
-    title?: string;
-    code?: string;
-  };
-  return err(body.detail ?? body.title ?? fallback, res.status, body.code);
-}
-
-async function authedJson(path: string, init?: RequestInit): Promise<Response> {
-  const token = getAccessToken();
-  return fetch(`${apiBaseURL}${path}`, {
-    credentials: 'include',
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers ?? {}),
-    },
+export async function getBillingProfile(
+  signal?: AbortSignal,
+): Promise<BillingIdentity> {
+  const res = await authedFetch("/v1/me/billing-identity", {
+    method: "GET",
+    signal,
   });
-}
-
-export async function getBillingProfile(signal?: AbortSignal): Promise<BillingIdentity> {
-  const res = await authedJson('/v1/me/billing-identity', { method: 'GET', signal });
-  if (!res.ok) throw await readError(res, 'Failed to load billing identity');
+  if (!res.ok) throw await readError(res, "Failed to load billing identity");
   return (await res.json()) as BillingIdentity;
 }
 
@@ -96,20 +69,23 @@ export interface UpsertBillingProfileInput {
 export async function putBillingProfile(
   input: UpsertBillingProfileInput,
 ): Promise<BillingIdentity> {
-  const res = await authedJson('/v1/me/billing-identity', {
-    method: 'PATCH',
+  const res = await authedFetch("/v1/me/billing-identity", {
+    method: "PATCH",
     body: JSON.stringify(input),
   });
-  if (!res.ok) throw await readError(res, 'Failed to save billing identity');
+  if (!res.ok) throw await readError(res, "Failed to save billing identity");
   return (await res.json()) as BillingIdentity;
 }
 
-export async function setItalianBillable(enabled: boolean): Promise<BillingIdentity> {
-  const res = await authedJson('/v1/me/italian-billable', {
-    method: 'POST',
+export async function setItalianBillable(
+  enabled: boolean,
+): Promise<BillingIdentity> {
+  const res = await authedFetch("/v1/me/italian-billable", {
+    method: "POST",
     body: JSON.stringify({ enabled }),
   });
-  if (!res.ok) throw await readError(res, 'Failed to toggle Italian billable mode');
+  if (!res.ok)
+    throw await readError(res, "Failed to toggle Italian billable mode");
   return (await res.json()) as BillingIdentity;
 }
 
@@ -120,7 +96,9 @@ export async function setItalianBillable(enabled: boolean): Promise<BillingIdent
 // require country in that branch. The endpoint always returns a row (the
 // personal tenant is lazy-provisioned), so we infer "incomplete" from the
 // fields rather than from a 404.
-export function hasBillingProfile(p: BillingIdentity | null | undefined): boolean {
+export function hasBillingProfile(
+  p: BillingIdentity | null | undefined,
+): boolean {
   if (!p) return false;
   if (!p.billingAddress?.country?.trim()) return false;
   if (p.isCompany) {

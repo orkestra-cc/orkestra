@@ -114,7 +114,7 @@ export function OAuthCallbackPage() {
           mfaToken={outcome.challengeId}
           onCancel={() => navigate("/login", { replace: true })}
           onSuccess={(result) => {
-            signIn(result.accessToken);
+            signIn(result.accessToken, result.expiresIn);
             navigate(returnTo, { replace: true });
           }}
         />

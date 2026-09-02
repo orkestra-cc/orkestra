@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -126,5 +128,42 @@ func TestClearRefreshCookieOnTerminalRefreshErr(t *testing.T) {
 				t.Errorf("cookie cleared = %v, want %v", cleared, tc.wantClear)
 			}
 		})
+	}
+}
+
+// §4.9. The refresh-path outage code sits BESIDE session_enforcement_unavailable
+// rather than reusing it: both are 503 and every client treats 503 identically,
+// so the distinction costs nothing on the wire and buys the thing ADR-0017 D4
+// argued for — whoever reads the support ticket can tell which subsystem failed.
+// (The neighbouring branch keeping its own code is already pinned by
+// TestWriteRefreshErr_EnforcementUnavailableIs503 above.)
+func TestWriteRefreshErr_LookupUnavailable_Is503WithDistinctCode(t *testing.T) {
+	rec := httptest.NewRecorder()
+	// WRAPPED, never the bare sentinel: every emitting site returns
+	// `fmt.Errorf("...: %w: %w", ErrRefreshLookupUnavailable, err)`, so the
+	// bare sentinel is an input this handler never actually receives — and the
+	// internals sweep below cannot fail against it, because the sentinel's own
+	// message names no store. The wrap is what makes the sweep real.
+	writeRefreshErr(rec, fmt.Errorf("refresh token lookup failed: %w: %w",
+		services.ErrRefreshLookupUnavailable,
+		errors.New("mongo: no reachable servers")))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 — a 401 here is the Mongo-blip logout this change removes", rec.Code)
+	}
+	body := decodeBody(t, rec)
+	if body["code"] != "refresh_lookup_unavailable" {
+		t.Fatalf("code = %v, want refresh_lookup_unavailable", body["code"])
+	}
+	for _, v := range body {
+		if s, ok := v.(string); ok && strings.Contains(strings.ToLower(s), "mongo") {
+			t.Errorf("response leaks internals: %q", s)
+		}
+	}
+}
+
+func TestRefreshFailureOutcome_LookupUnavailable_IsNotInvalidToken(t *testing.T) {
+	if got := refreshFailureOutcome(services.ErrRefreshLookupUnavailable); got != "lookup_unavailable" {
+		t.Fatalf("refreshFailureOutcome = %q, want lookup_unavailable — logging an outage as invalid_token is the misreading this change removes", got)
 	}
 }

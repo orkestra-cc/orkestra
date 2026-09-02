@@ -6,6 +6,8 @@ import userEvent from "@testing-library/user-event";
 
 import { browserNavigation } from "@/api/auth";
 import { RequireAuth } from "@/auth/RequireAuth";
+import { setSessionMarker } from "@/auth/sessionMarker";
+import { getAccessTokenSnapshot } from "@/auth/tokenStore";
 import { OAUTH_RETURN_TO_KEY } from "@/lib/oauthReturnTo";
 import { LoginPage } from "@/pages/LoginPage";
 import {
@@ -70,6 +72,7 @@ const emailField = () => screen.queryByLabelText(/^email$/i);
 const START = url("/v1/auth/client/oauth/login");
 const LOGIN = url("/v1/auth/client/login");
 const PROVIDERS = url("/v1/auth/client/providers");
+const REFRESH = url("/v1/auth/client/refresh-cookie");
 const tokenBody = {
   success: true,
   accessToken: "at-1",
@@ -482,5 +485,166 @@ describe("LoginPage — OAuth start (spec §4.10)", () => {
     expect(
       await screen.findByText(/sign-in policy is temporarily unavailable/i),
     ).toBeInTheDocument();
+  });
+});
+
+// §4.6 — the lifetime the server reported must reach the store, on BOTH
+// sign-in paths. A dropped one fails silently: the token installs, the page
+// navigates, everything works, and only the 401 recovery misbehaves hours
+// later by reading an unknown expiry as "live". Each path therefore gets its
+// own case — the password case passes without the MFA one being fixed.
+describe("LoginPage — the reported token lifetime reaches the store (§4.6)", () => {
+  const signInWithPassword = async () => {
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText(/^email$/i), "a@b.c");
+    await user.type(screen.getByLabelText(/^password$/i), "hunter22hunter22");
+    await user.click(screen.getByRole("button", { name: /^sign in$/i }));
+  };
+
+  // The store stamps Date.now() + lifetime at install, so the recorded expiry
+  // must fall inside [before, after] + lifetime — a window as wide as the test
+  // itself, which is milliseconds. That excludes null (the lifetime was
+  // dropped) and the fabricated 900 by ten minutes.
+  const expectRecordedLifetime = (
+    before: number,
+    after: number,
+    seconds: number,
+  ) => {
+    const { expiresAt } = getAccessTokenSnapshot();
+    expect(expiresAt).not.toBeNull();
+    expect(expiresAt!).toBeGreaterThanOrEqual(before + seconds * 1000);
+    expect(expiresAt!).toBeLessThanOrEqual(after + seconds * 1000);
+  };
+
+  it("records the token lifetime the login response carried (§4.6)", async () => {
+    server.use(
+      clientPolicyHandler(),
+      providersHandler([]),
+      http.post(LOGIN, () =>
+        HttpResponse.json({
+          success: true,
+          accessToken: "at-login",
+          tokenType: "Bearer",
+          expiresIn: 300,
+        }),
+      ),
+    );
+    const before = Date.now();
+    renderLogin();
+    await signInWithPassword();
+    await waitFor(() =>
+      expect(getAccessTokenSnapshot().token).toBe("at-login"),
+    );
+    expectRecordedLifetime(before, Date.now(), 300);
+  });
+
+  it("records the lifetime from the MFA challenge path too", async () => {
+    server.use(
+      clientPolicyHandler(),
+      providersHandler([]),
+      http.post(LOGIN, () =>
+        HttpResponse.json({
+          success: true,
+          requiresMfa: true,
+          mfaToken: "ch-9",
+          webauthnAvailable: false,
+        }),
+      ),
+      http.post(
+        url("/v1/auth/client/mfa/login/verify"),
+        async ({ request }) => {
+          const body = (await request.json()) as { challengeId: string };
+          return body.challengeId === "ch-9"
+            ? HttpResponse.json({
+                success: true,
+                accessToken: "at-mfa",
+                tokenType: "Bearer",
+                expiresIn: 240,
+                sessionId: "s1",
+              })
+            : HttpResponse.json({ detail: "wrong challenge" }, { status: 401 });
+        },
+      ),
+    );
+    const before = Date.now();
+    renderLogin();
+    await signInWithPassword();
+    // login.mfa.prompt, en.json — the same challenge the regression case above
+    // drives; only the response body's lifetime differs.
+    expect(
+      await screen.findByText(/enter the 6-digit code/i),
+    ).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/verification code/i), "123456");
+    await user.click(screen.getByRole("button", { name: /^verify$/i }));
+    await waitFor(() => expect(getAccessTokenSnapshot().token).toBe("at-mfa"));
+    expectRecordedLifetime(before, Date.now(), 240);
+  });
+
+  it("records an UNKNOWN expiry when the login response omits expiresIn", async () => {
+    server.use(
+      clientPolicyHandler(),
+      providersHandler([]),
+      http.post(LOGIN, () =>
+        HttpResponse.json({
+          success: true,
+          accessToken: "at-noexp",
+          tokenType: "Bearer",
+        }),
+      ),
+    );
+    renderLogin();
+    await signInWithPassword();
+    await waitFor(() =>
+      expect(getAccessTokenSnapshot().token).toBe("at-noexp"),
+    );
+    // This is the `?? 900` fix. A fabricated 900 here would make §4.3 branch 2
+    // read every 401 as "not a token problem" for a quarter of an hour on a
+    // deployment running a 60s TTL. "at-noexp" is not a JWT, so the fallback
+    // chain ends in UNKNOWN, which is a fact the store knows how to handle.
+    expect(getAccessTokenSnapshot().expiresAt).toBeNull();
+  });
+});
+
+// §8 #11 — /login is reachable with a live session: a returning user who
+// bookmarked it, and (before the guard learned to wait) anyone RequireAuth
+// bounced here mid-bootstrap. The page must forward them, through the SAME
+// gate the password path uses — sanitizeNext, then DEFAULT_POST_LOGIN.
+describe("LoginPage — an already-authenticated visitor is forwarded (§8 #11)", () => {
+  // A cold load with a valid refresh cookie: the marker makes AuthProvider's
+  // mount refresh fire, and the token lands while this page is on screen.
+  const bootWithCookie = () => {
+    setSessionMarker();
+    server.use(
+      clientPolicyHandler(),
+      providersHandler([]),
+      http.post(REFRESH, () =>
+        HttpResponse.json({
+          accessToken: "at-boot",
+          tokenType: "Bearer",
+          expiresIn: 900,
+        }),
+      ),
+    );
+  };
+
+  it("honours a safe ?next=, search string and all", async () => {
+    bootWithCookie();
+    renderLogin("/login?next=%2Faccount%2Fsecurity%3Fx%3D1");
+    expect(await screen.findByTestId("deeplink-location")).toHaveTextContent(
+      "/account/security?x=1",
+    );
+  });
+
+  it.each([
+    ["protocol-relative", "%2F%2Fevil.example"],
+    ["absolute", "https%3A%2F%2Fevil.example%2Fx"],
+    ["a scheme", "javascript%3Aalert(1)"],
+  ])("falls back to /account on %s ?next=", async (_label, raw) => {
+    bootWithCookie();
+    renderLogin(`/login?next=${raw}`);
+    expect(await screen.findByTestId("account-location")).toHaveTextContent(
+      "/account",
+    );
   });
 });

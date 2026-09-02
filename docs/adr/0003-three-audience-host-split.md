@@ -58,6 +58,8 @@ Split the API surface into **three audiences**, each with its own JWT `aud` clai
 | `client` | `api.orkestra.com` | `api.localhost:3000` | `client` | Tier-2 client tenants — onboarding, subscriptions, payments (Phase E adds AI runtime) |
 | `service` | *(none — internal network only)* | *(internal docker network)* | `service` | Service-to-service AI sidecar (`/v1/internal/*`); not exposed by ingress |
 
+> **Amendment (2026-09-02):** the `client` row's **dev** host is superseded — the client API answers on `client.localhost:3000`, the client SPA's own hostname, because `client.localhost` and `api.localhost` are different *sites* to a browser and the `SameSite=Lax` client cookies cannot cross between them. See `docker/CLAUDE.md` → "Client tier: the SPA and the client API must be same-site". Prod hosts are unchanged.
+
 `service` continues to be reached via `AI_SERVICE_URL` (e.g. `http://orkestra-ai-dev:3100`) on the docker network. Ingress publishes only `console.*` and `api.*`.
 
 ### Module bucketing

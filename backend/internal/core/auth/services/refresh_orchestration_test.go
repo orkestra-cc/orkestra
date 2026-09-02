@@ -142,6 +142,19 @@ func seededUser() *iface.User {
 	return activeUser("alice@example.com", "x")
 }
 
+// breakSigningKey makes GenerateTokenPairWithAMR fail without touching any
+// repository, isolating the mint site from the store sites. A nil private key
+// is the same input production sees when the key material never loaded, and
+// the generator returns ErrJWTKeysNotLoaded rather than panicking.
+func (e *orchestrationEnv) breakSigningKey() {
+	e.t.Helper()
+	svc, ok := e.jwt.(*jwtService)
+	if !ok {
+		e.t.Fatalf("breakSigningKey: jwt is %T, not *jwtService", e.jwt)
+	}
+	svc.privateKey = nil
+}
+
 // ===== Happy path =====
 
 func TestRefreshTokensWithRiskAssessment_HappyPath_RotatesAndMintsNewPair(t *testing.T) {

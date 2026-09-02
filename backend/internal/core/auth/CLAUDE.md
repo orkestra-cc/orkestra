@@ -208,7 +208,7 @@ admin UI would show one value while a different one governed logins.
 
 | Input | `accessTokenTTL` | `passwordResetTokenTTL` |
 |---|---|---|
-| empty | unset: falls through to `JWT_ACCESS_TOKEN_EXPIRY`, then 15m | 30m default |
+| empty | unset **at the policy** — but `ModuleConfigService.GetValue` re-supplies the schema default `15m` for an empty key, so the env fallback below is not reached in practice (see the env-var table) | 30m default |
 | malformed or out-of-range PATCH | 422, not persisted | 422, not persisted |
 | malformed value already in DB | warn, fall through to env | warn, use 30m |
 | out of range already in DB | warn and clamp | warn and clamp |
@@ -445,7 +445,8 @@ that rule is to be tightened to fail-closed in the first minor release after
 usable `CreatedAt` is **not** an anomaly — it has a perfectly good anchor,
 and counting it would poison the observation window.
 
-**The three cap outcomes above surface as four distinct HTTP responses**
+**The cap outcomes above, and the refresh-path outcomes beside them, surface
+as six distinct HTTP responses**
 (`writeRefreshErr`, called from all three refresh-flow handlers —
 `RefreshTokensWithHeaderHTTP`, `GetSessionHTTP`, `RefreshTokensHTTP`):
 `ErrSessionEnforcementUnavailable` is **503** `session_enforcement_unavailable`
@@ -455,6 +456,77 @@ valid, and the caller may retry once storage recovers.
 `ErrSessionMaxAgeReached` is **401** `session_max_age_reached` — distinct
 from `refresh_token_replay` because "revoked" is inaccurate for a session
 that simply aged out.
+`ErrRefreshRotationRaced` is **409** `refresh_rotation_raced` — a sibling
+tab won the CAS inside `RefreshRotationGrace` against a healthy family, so
+the browser already holds the successor cookie and one retry lands. It is
+kept off the 401 path precisely because every client reads a 401 there as
+a sign-out; the grace-window rule itself is under **Refresh tokens** below.
+
+`ErrRefreshLookupUnavailable` is **503** `refresh_lookup_unavailable` — the
+refresh path could not be *completed* because infrastructure failed: the token
+store or user store was unreachable, signing failed, the rotating write
+failed, **the picker in front of the rotation could not classify a cookie
+candidate** (`PeekRefreshToken`'s lookup), **the rotation-race classifier
+could not read the family state** (`benignRotationRetry`'s `FamilyRevoked`, or
+the post-CAS re-read), **or the read-only mint behind the picker failed on one
+of its own three reads** (`MintAccessTokenFromRefresh`'s `GetByTokenAny`, its
+`GetUserByID`, its `GenerateAccessTokenForSessionWithAMR`). The race-classifier
+pair is the destructive case: both used to fold
+"could not read" into "revoked" and run `handleRefreshReplay`, so a store
+hiccup during a legitimate multi-tab race revoked the family the winner had
+just renewed and signed every tab out. `benignRotationRetry` now returns
+`(benign, err)` — three states, not two — and on the error both callers answer
+503 **without** revoking. A replay verdict that *was* reached still answers 401
+even if its `RevokeFamily` fails: fail closed denies the current request, it
+does not invent a verdict and persist it.
+Before this, EIGHT of those ten sites were wrapped
+generically and answered as a codeless 401, so a Mongo blip during a refresh
+reached the SPA as the same answer a dead refresh token produces and no
+client-side rule could separate them. The picker case is the one that
+actually answers a browser: the cookie handlers never reach the rotation
+until every candidate is classified, so `pickRefreshCandidate` now returns a
+lookup error as a third value, and on that input the handlers answer 503
+**and suppress the rotated-token replay fallback** — a candidate the store
+could not read may have been the valid successor, and revoking that family
+is the PR-D D-9 regression in a new shape. A user who is genuinely **gone**
+still answers 401 (`errors.Is(err, iface.ErrUserNotFound)`) — the
+distinction is what stops this becoming a blanket 503 that never lets a dead
+session end. Every emitting site wraps the sentinel *and* the underlying
+error (`fmt.Errorf("…: %w: %w", ErrRefreshLookupUnavailable, err)`) so the
+cause survives into the log while `errors.Is` still classifies. The cookie
+is never expired on this outcome (`clearRefreshCookieOnTerminalRefreshErr`
+is an allowlist), and `refreshFailureOutcome` logs it as
+`lookup_unavailable`, not `invalid_token`.
+
+**Scope, precisely:** the ten sites are the four infrastructure wraps inside
+`RefreshTokensWithRiskAssessment` (token lookup, user lookup, mint, rotating
+write), `PeekRefreshToken`'s lookup, the two race-classifier reads —
+`benignRotationRetry`'s `FamilyRevoked` and the post-CAS re-read in the
+`ErrTokenAlreadyRotated` branch — and the three inside
+`MintAccessTokenFromRefresh` (its own `GetByTokenAny`, its `GetUserByID`, its
+`GenerateAccessTokenForSessionWithAMR`). So `POST /v1/auth/{tier}/refresh-cookie`,
+`POST /v1/auth/{tier}/refresh` **and** `GET /v1/auth/session` are each covered
+end to end. The rule the race-classifier pair
+encodes: **an unreadable family state answers 503 and revokes nothing;
+replay may fire only on a family state that was actually read.** A readable
+state behaves exactly as before — inside the grace window against a healthy
+family it is `ErrRefreshRotationRaced` (409), outside it or against a revoked
+family it is `handleRefreshReplay` + 401.
+
+The mint's three were the residual, closed by spec v20 (follow-up 9). They are
+reachable precisely because Peek and Mint issue **separate** reads: a blip
+opening between them gave Peek-OK → Mint-fail → a codeless 401 on session
+bootstrap, which is the one status a client reads as the end of the session.
+Its user lookup carries the same not-found-first split as the rotation's, so a
+genuinely deleted account still ends the session with a 401 — a blanket 503
+there would strand it in a retry loop that never resolves. The absolute-cap
+return between them stays **unwrapped**: it propagates
+`ErrSessionMaxAgeReached` / `ErrSessionEnforcementUnavailable` verbatim and
+wrapping it would break `writeRefreshErr`'s branch order (ADR-0017 owns it).
+**No handler change was needed:** `GetSessionHTTP` already routes the mint's
+error through `writeRefreshErr`, `refreshFailureOutcome` already logs it as
+`lookup_unavailable`, and the cookie-clear allowlist already excludes the
+sentinel.
 
 > **The same code is also emitted by `shared/middleware.AuthMiddleware`,
 > and that is the path that actually reaches a user.** The three refresh
@@ -473,6 +545,56 @@ that simply aged out.
 > compiling and simply gets the generic wording. No extra round-trip.
 > Covered by `require_auth_test.go`'s `TestRequireAuth_SessionMaxAge_*`
 > trio, including the fallback for a reason-blind service.
+>
+> **The middleware's 401 codes, and the one a client may act on.**
+> `RequireAuth`'s credential-rejection path emits exactly three
+> top-level codes, all from `shared/middleware/auth.go`:
+> `session_revoked` and `session_max_age_reached` (above), and
+> **`access_token_expired`** — a well-formed, correctly signed token
+> that simply aged out (`sendAccessTokenExpired`, plus
+> `WWW-Authenticate: Bearer error="access_token_expired"`). (A fourth,
+> `step_up_required`, can come out of `RequireAuth` too, but from
+> *after* the credential was accepted: `setUserContext`'s
+> impersonation-bypass branch, `sendMFARequired`.) Every other
+> rejection on the credential path — missing bearer, malformed, forged
+> signature — keeps the **codeless** generic 401 it has
+> always had: `sendErrorResponse`
+> puts the `AppError`'s code in `errors[0].value`, and for an
+> `AuthenticationError` that is `INVALID_CREDENTIALS`, the same value a
+> wrong password produces, so it discriminates nothing. That is
+> deliberate — the codes are a small, closed set, not a per-branch
+> taxonomy. A **wrong-audience** token is not in that list: on every
+> mounted router `RequireAudience` runs in FRONT of `RequireAuth` and
+> answers it first with `401 audience_mismatch`
+> (`shared/middleware/audience.go:102-108`), so `RequireAuth`'s codeless
+> 401 is only what a wrong audience would get on a router that mounted
+> `RequireAuth` alone.
+>
+> `access_token_expired` is the **only non-terminal one of the three**:
+> the other two say the session is gone and the client must clear and
+> re-authenticate, while this one says the credential aged out and the
+> sanctioned recovery (`401` → `POST /v1/auth/{tier}/refresh-cookie` →
+> retry, ADR-0020) will work — so it is the only code on this path a
+> client should answer by refreshing. It is also the client's proof that the
+> retry is *safe*: the middleware rejects before dispatch, so a request
+> answered with it provably never reached its handler and cannot have
+> consumed anything (the alternative — the client inferring expiry from
+> its own reckoning of the token's lifetime — cannot cover a token that
+> expired in flight, and a loose inference replays a rejected request
+> such as a wrong-current-password `change-password`). Two properties
+> keep it honest and must stay true: it has **exactly one emitter** in
+> `backend/`, and expiry is decided by `jwt.Parse` **before**
+> `validateTokenEnhanced`'s own token-type, issuer and audience checks
+> (`jwt_service.go`), so a wrong audience or a wrong token type can
+> never acquire it. Adding a second emitter, or moving the expiry
+> decision after those checks, silently breaks a client that refreshes
+> on it. Nothing about what is *accepted* changed when it shipped —
+> only what a rejection says about itself — and `RequireAuth` stays
+> bearer-only: it rotates nothing and sets no cookie. Covered by
+> `require_auth_test.go`'s `TestRequireAuth_ExpiredBearer_*`,
+> `TestRequireAuth_NonExpiredRejections_CarryNoExpiredCode` (the bound)
+> and `TestRequireAuth_RevokedSession_StillReportsRevokedNotExpired`
+> (the terminal code is not shadowed).
 
 > **Both SPAs treat the 503 as "retry later", never as a sign-out.**
 > `frontend-admin`'s `performRefresh` returns `{ok:false, retry:true}` and
@@ -533,12 +655,12 @@ different things depending on where it was typed, and
 | `AUTH_JWT_PRIVATE_KEY` / `AUTH_JWT_PUBLIC_KEY` | RS256 key pair (paths or PEM) | — (required) |
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | Gate signup on successful verification | `true` in prod, `false` otherwise |
 | `AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS` | **Emergency only.** Read once at boot into `cfg.Auth.OperatorPasswordLoginBreakGlass` and handed to `AuthPolicyService.SetOperatorBreakGlass` by `module.go::Init`, which also logs a WARN on **every** boot while it is set. Rescues `POST /v1/auth/operator/login` (and the MFA/WebAuthn completion of a challenge that login created) when `passwordLoginEnabledAdmin` is `false` **or** unreadable — see "Login method invariant" and "Password-login gate verdicts" above. It opens nothing else: not registration, not forgot/reset, not password-confirm, not the unlink guard, not `AuthMethodsView`, not the client surface, and it never bypasses `loginEnabledAdmin` or the MFA / low-risk / RBAC gates on the config repair that follows. There is no unset path short of a restart. `docker/.env.example` carries the five-step drill. | `false` |
-| `JWT_ACCESS_TOKEN_EXPIRY` | Access-token TTL. **Level 2 of `admin accessTokenTTL → JWT_ACCESS_TOKEN_EXPIRY → 15m`.** Before ADR-0017 this level was unreachable — the policy substituted its 15m default for "unset" — so any deployment that set this by hand has been running on 15m regardless of the value. Repairing the chain activates their configured value, which may be longer than what they have actually been running: **diff this key against `docker/.env.example` before upgrading.** Effective values are clamped into `[MinAccessTokenTTL, MaxAccessTokenTTL]` (1m–24h) with a warning — below 1m the SPA's proactive refresh would rotate the token on every request (ADR-0020 D3, #317). | `15m` |
+| `JWT_ACCESS_TOKEN_EXPIRY` | Access-token TTL — **level 2 of `admin accessTokenTTL → JWT_ACCESS_TOKEN_EXPIRY → 15m`, and on a seeded install it is not the level that governs.** `accessTokenTTL` is declared in `ConfigSchema` with `Default: "15m"` and **no `EnvVar`**, so `buildInitialConfig` seeds it on first boot, `backfillSchemaKeys` back-fills it into older documents, and `GetValue`'s `schemaFallback` returns the same default even for a key an operator has cleared. `AuthPolicyService.AccessTokenTTL` therefore answers with a positive duration on any readable, parsable document — not the `0` that would let `accessTokenLifetime` fall through — and this variable is consulted only when the `module_configs` document is missing, unreadable, **or holding a value the parser rejects** — a malformed persisted value makes `clampPersistedDuration` return its `0` fallback, which is the "warn, fall through to env" row of the ADR-0017 D6 table above, and it needs an out-of-band write because the PATCH validator refuses a malformed value. **Change the TTL at `/admin/modules/auth` (or `PATCH /v1/admin/modules/auth`), not here** — a `60s` set here alone was observed to change nothing until the admin key was PATCHed to `1m`. ADR-0017 D5 repaired this chain at the policy layer, where the policy's own 15m default used to swallow "unset"; the schema default re-forms it one layer down. Documented, not changed: moving the default would alter the effective TTL of every seeded deployment. A value outside `[MinAccessTokenTTL, MaxAccessTokenTTL]` (1m–24h) is **refused with a 422** at the PATCH boundary (`validateAuthDurations`) and **clamped with a warning** at the two levels that cannot surface one — `clampPersistedDuration` on read, and `NewJWTService` for this variable — because below 1m the SPA's proactive refresh would rotate the token on every request (ADR-0020 D3, #317). | `15m` |
 | `JWT_REFRESH_TOKEN_EXPIRY` | Refresh-token TTL — and, because rotation writes `now + this` on every use, the **idle** timeout: this many days without a refresh ends the session. The absolute cap is the separate `sessionAbsoluteTTL`. The `refreshTTL <= 0 → 720h` guard in `NewJWTService` is unreachable through configuration. | `7d` |
 | `AUTH_DEVICE_TRUST_DURATION` | "Remember this device" trust-grant lifetime (`models.DeviceTrustDuration`), read via `parseDurationEnv` in `module.go`. Accepts the `d` suffix (`30d`); malformed or unset logs a warning and falls back to the default. | `30d` (720h) |
-| `COOKIE_NAME_REFRESH` / `COOKIE_SECURE` / `COOKIE_SAME_SITE` / `COOKIE_HTTP_ONLY` | Refresh-token cookie attributes shared across audiences. `COOKIE_NAME_REFRESH` names the cookie (the **only** cookie Orkestra sets — the SPA holds the access token in memory); defaults to `orkestra_cookie`. | set in `cfg.Auth.Cookie` |
-| `OPERATOR_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for tokens minted on the operator host (`console.*`). ADR-0003 PR-D D-9 — keep this distinct from `CLIENT_COOKIE_DOMAIN` so a session minted on one surface can't be replayed on the other. An empty value mints the cookie without a `Domain` attribute (scoped to the minting host). | `console.localhost` (dev) / empty (prod, operator-set) |
-| `CLIENT_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for tokens minted on the client host (`api.*`). | `api.localhost` (dev) / empty (prod, operator-set) |
+| `COOKIE_NAME_REFRESH` / `COOKIE_SECURE` / `COOKIE_SAME_SITE` / `COOKIE_HTTP_ONLY` | Refresh-token cookie attributes shared across audiences. `COOKIE_NAME_REFRESH` names the cookie (the **only** cookie Orkestra sets — the SPA holds the access token in memory); defaults to `orkestra_cookie`. **`COOKIE_SAME_SITE` is read into `cfg.Auth.Cookie.SameSite` (`config.go:339`) and never read back** — every mint path writes `http.SameSiteLaxMode` as a literal (`utils/http.go:62,77,127,150`, `middleware/device.go:68`, `setup/routes.go:442`, `oauth_state_binding.go:56,71`, `password_handler.go:421`), so there is no configuration path to `SameSite=None`. | set in `cfg.Auth.Cookie` |
+| `OPERATOR_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for tokens minted on the operator host (`console.*`). ADR-0003 PR-D D-9 — keep this distinct from `CLIENT_COOKIE_DOMAIN` so a session minted on one surface can't be replayed on the other. An empty value mints the cookie without a `Domain` attribute (scoped to the minting host), which is the default in **every** environment since `bdcbb7ab` (`defaultOperatorCookieDomain` / `defaultClientCookieDomain` in `config.go`) because a fixed `*.localhost` domain broke LAN-IP access. | **empty** (all envs; operator-set for a cross-subdomain deployment) |
+| `CLIENT_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for tokens minted on the client API host. Same empty default and same reasoning. **It is not a lever for a cross-site SPA/API layout**: the cookie is `SameSite=Lax`, and SameSite is computed from the request's site, never from the cookie's `Domain` — put the client SPA and the client API on the same site instead (in dev both are `client.localhost`; see `docker/CLAUDE.md` → "Client tier: the SPA and the client API must be same-site"). | **empty** (all envs; operator-set for a cross-subdomain deployment) |
 | `FRONTEND_URL` | Legacy single-host SPA origin. Used to build `verify-email` / `reset-password` links in transactional email and as the fallback when the per-tier values below are empty. | `http://localhost:8080` |
 | `OPERATOR_FRONTEND_URL` | Operator-tier SPA origin (`console.*`). Verification + reset links minted by the operator-tier `PasswordAuthService` use this host. Empty falls back to `FRONTEND_URL`. | empty |
 | `CLIENT_FRONTEND_URL` | Client-tier SPA origin (`app.*`). Set this so signups landing on the client API host get verify links pointing at the client SPA, not the operator console. Empty falls back to `FRONTEND_URL`. | empty |
@@ -846,7 +968,7 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 - **OAuth state is bound to the endpoint's provider, the tier, the link-mode pair and the browser, in that order after the signature.** `resolveStateForCallback(ctx, raw, provider)` runs signature/expiry → browser binding → atomic take → `tier` → `provider` (`stateInfo.Provider` must equal the callback's provider — a Google state presented to the Discord callback is a 400) → `mode`/`linkUserUUID`, every mismatch the same generic error, all before the IdP `error`, the code or any profile is read.
 - **The browser binding is verified where the cookie lives.** The signed state + one-shot row prove a callback belongs to a flow *we* started, not that it belongs to *this browser*: without a binding, login CSRF (an attacker-started flow finished by a victim's browser lands the victim in the attacker's session; in `mode=link` it attaches the victim's IdP identity to the attacker's account) is open. Both start endpoints therefore also drop the CSRF nonce into an HttpOnly `orkestra_oauth_state` cookie (SameSite=Lax — Strict would suppress the top-level redirect back from the IdP) and the callback requires the two to match (`handlers/oauth_state_binding.go`). `StartHost` is checked first: a cross-host callback is **deferred** whatever cookie the operator host holds (an unrelated operator flow's nonce must not block a client login); on the starting host the cookie is required and a mismatched or absent one, like a state with no `shost` claim, is rejected. The ADR-0003 tier split puts client-tier starts on `api.*` while every provider callback lands on `console.*`, so that cookie cannot reach the callback — such a callback is deferred, never accepted: the operator host does the IdP half only and hands the flow to `GET /v1/auth/client/oauth/complete` on the client API host through a one-shot relay record; the relay endpoint **requires** the cookie (`verifyRelayBinding`) and fails closed without it. The SPA must call the start endpoint with `credentials: 'include'` or the cookie is never stored — `frontend-admin`'s `socialAuthUtils.ts` and RTK `baseApi` both do.
 - **OAuth link reuse refreshes the cached `picture` URL.** Every successful OAuth callback updates two places on link reuse (`auth_service.go` ≈ line 1612): the provider doc's `metadata.picture` (drives `UserManagementResponse.Providers[].Avatar`) AND the embedded `User.OAuthLinks[i].OAuthData["picture"]` (drives `blob.ResolveAvatarURL` for `AvatarSource=oauth_*`) via the additive `iface.OAuthLinkDataUpdater` sub-interface. Without this, users who linked Google before the embedded-picture field existed would never see their avatar populate until they manually re-linked.
-- **Token lifetimes come from config, never from literals.** `JWTService.AccessTokenTTL(ctx)` resolves `admin accessTokenTTL → JWT_ACCESS_TOKEN_EXPIRY → 15m` — all three levels reachable since ADR-0017, with the effective value clamped to 24h so it can never outlive its revocation-denylist entry. `JWTService.RefreshTokenTTL()` resolves `JWT_REFRESH_TOKEN_EXPIRY → 7d` (the unreachable 720h zero-guard in `NewJWTService` is not a configured default). They drive every `expiresIn` in a response, the `expiresAt` on each persisted refresh row, and the `Max-Age` on every refresh cookie. Because rotation rewrites the refresh row's expiry on every use, the refresh TTL is the session's **idle** timeout, not its total lifetime; the total is bounded separately by `sessionAbsoluteTTL` (ADR-0017 D1). The lifetime deliberately kept separate from all three is `models.AuthSessionRetention` (90d): the session **document** is audit and device history that the risk scorer reads, and nothing authenticates off it.
+- **Token lifetimes come from config, never from literals.** `JWTService.AccessTokenTTL(ctx)` resolves `admin accessTokenTTL → JWT_ACCESS_TOKEN_EXPIRY → 15m`, with the effective value clamped into 1m–24h so it can never outlive its revocation-denylist entry. **In practice the first level always answers**, and the chain is documented rather than exercised: `accessTokenTTL` is a schema field with `Default: "15m"` and no `EnvVar`, so it is seeded on first boot and `GetValue` re-supplies that default even when the stored value is empty — the policy returns a positive duration and nothing falls through, so `JWT_ACCESS_TOKEN_EXPIRY` is reached only when the `module_configs` document is missing, unreadable, **or holding a value the parser rejects** (`clampPersistedDuration`'s `0` fallback — the D6 table's "malformed value already in DB" row, which takes an out-of-band write since the PATCH validator refuses one). Change the TTL at `/admin/modules/auth`; the env-var table above has the detail and the live observation. `JWTService.RefreshTokenTTL()` resolves `JWT_REFRESH_TOKEN_EXPIRY → 7d` (the unreachable 720h zero-guard in `NewJWTService` is not a configured default). They drive every `expiresIn` in a response, the `expiresAt` on each persisted refresh row, and the `Max-Age` on every refresh cookie. Because rotation rewrites the refresh row's expiry on every use, the refresh TTL is the session's **idle** timeout, not its total lifetime; the total is bounded separately by `sessionAbsoluteTTL` (ADR-0017 D1). The lifetime deliberately kept separate from all three is `models.AuthSessionRetention` (90d): the session **document** is audit and device history that the risk scorer reads, and nothing authenticates off it.
 - **The MFA attempt cap is an atomic counter.** `IncrementAttempts` moves a dedicated Redis key via `INCR` (`OAuthStateStore.Incr`), not a read-modify-write over the challenge JSON. With RMW, concurrent verifies all read the same value and wrote back the same value, so N parallel guesses cost one attempt — "5 tries" held only against a serial attacker. `Peek` reports the live counter; `Consume`/exhaustion/expiry delete challenge and counter together so a recycled id cannot inherit a spent budget. A counter that cannot be advanced fails closed (the challenge is destroyed).
 - **Account lockout reads the admin policy.** The branch that stamps `User.LockedUntil` uses `AuthPolicyService.LockoutThreshold`/`LockoutDuration`, the same values plumbed into the rate limiter. It previously compared against a hardcoded `5` with a hardcoded 15-minute window, so tightening `accountLockoutThreshold` moved the in-memory bucket but not the persisted lock.
 - **Password character classes are Unicode-aware.** `checkCharacterClasses` classifies with `unicode.IsUpper/IsLower/IsDigit/IsPunct/IsSymbol`. The old ASCII-range switch put *everything* non-`[A-Za-z0-9]` in the symbol bucket: a plain space satisfied `requireSymbol`, and `ПАРОЛЬ` / `passwörd` satisfied `requireSymbol` while satisfying neither `requireUpper` nor `requireLower`. Whitespace now counts as no class at all.

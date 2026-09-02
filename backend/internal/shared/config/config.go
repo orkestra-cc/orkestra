@@ -164,8 +164,9 @@ type CookieConfig struct {
 	// OperatorDomain scopes refresh-token cookies minted on the operator
 	// host (`console.*`) — set via `OPERATOR_COOKIE_DOMAIN`.
 	OperatorDomain string
-	// ClientDomain scopes refresh-token cookies minted on the client
-	// host (`api.*`) — set via `CLIENT_COOKIE_DOMAIN`.
+	// ClientDomain scopes refresh-token cookies minted on the client API
+	// host — set via `CLIENT_COOKIE_DOMAIN`. Empty by default (host-only),
+	// like OperatorDomain.
 	ClientDomain string
 	HttpOnly     bool
 	Secure       bool
@@ -233,7 +234,15 @@ func Load() (*Config, error) {
 	defaultClientHost := ""
 	if env == "development" {
 		defaultConsoleHost = "console.localhost:3000"
-		defaultClientHost = "api.localhost:3000"
+		// The client API answers on the client SPA's OWN hostname. Every
+		// client-tier cookie is SameSite=Lax with an empty Domain, and
+		// `localhost` is not a public suffix, so client.localhost and
+		// api.localhost are different *sites* to a browser: an api.* client
+		// API cannot store or send them. Ports play no part in a site, so
+		// the SPA on :8081 and the API on :3000 are same-site (and still
+		// cross-origin). See docker/CLAUDE.md, "Client tier: the SPA and
+		// the client API must be same-site".
+		defaultClientHost = "client.localhost:3000"
 	}
 
 	config.Server = ServerConfig{
@@ -312,12 +321,17 @@ func Load() (*Config, error) {
 		Cookie: CookieConfig{
 			Secret: getEnv("COOKIE_SECRET", "default-cookie-secret"),
 			Name:   getEnv("COOKIE_NAME_REFRESH", "orkestra_cookie"),
-			// ADR-0003 PR-D D-9: per-audience cookie domains. Dev defaults
-			// align with the per-audience host defaults above so the
-			// browser scopes refresh cookies to the matching subdomain
-			// without contributors having to set anything. Prod defaults
-			// are left empty — operators set them explicitly so a cookie is
-			// never minted with a domain that crosses both audiences.
+			// ADR-0003 PR-D D-9: per-audience cookie domains. BOTH default
+			// to "" in every environment since bdcbb7ab — see
+			// defaultOperatorCookieDomain / defaultClientCookieDomain below.
+			// An empty value writes no Domain attribute at all, so the
+			// cookie is host-only: scoped to whatever host minted it, which
+			// round-trips on localhost, on *.localhost and on a LAN IP.
+			// Operators set one explicitly only for a cross-subdomain
+			// deployment; a domain that crosses both audiences is the thing
+			// to avoid. Note these are NOT a lever for a cross-site
+			// SPA/API layout: SameSite is computed from the request's site,
+			// never from the cookie's Domain.
 			OperatorDomain: getEnv("OPERATOR_COOKIE_DOMAIN", defaultOperatorCookieDomain(env)),
 			ClientDomain:   getEnv("CLIENT_COOKIE_DOMAIN", defaultClientCookieDomain(env)),
 			HttpOnly:       getEnvAsBool("COOKIE_HTTP_ONLY", true),
@@ -469,7 +483,7 @@ func defaultOperatorCookieDomain(_ string) string {
 }
 
 // defaultClientCookieDomain mirrors defaultOperatorCookieDomain for the
-// client surface (api.*).
+// client API surface.
 func defaultClientCookieDomain(_ string) string {
 	return ""
 }

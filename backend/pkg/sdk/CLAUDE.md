@@ -142,12 +142,19 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
 - **Never add a required method to an existing `iface` interface.**
   Doing so breaks every external implementor at compile time. Add a new
   interface and have the registry probe with `module.GetTyped[T]`.
-- **Cross-module auth-policy sentinels** — `iface.ErrPasswordLoginDisabled` and
+- **Cross-module sentinels** — `iface.ErrPasswordLoginDisabled` and
   `iface.ErrAuthPolicyUnavailable` live beside `AdminAuthInviter` because its
   consumers (the user module's client-user reset routes) must map them across
   the module boundary with `errors.Is`; message matching breaks on wrapped
   errors. `auth/services` aliases both, so each name is ONE identity. Same
-  pattern as `ErrKMSKeyNotFound` beside `KMSProvider`.
+  pattern as `ErrKMSKeyNotFound` beside `KMSProvider`. `iface.ErrUserNotFound`
+  follows the same pattern in the other direction: the user module's
+  `services.ErrUserNotFound` aliases it, so auth's refresh path can classify a
+  deleted account with `errors.Is` without importing the user module. A
+  `UserProvider` implementation — a fork's included — MUST return or wrap it
+  when the user does not exist: any other error reads as "could not read the
+  store", so the refresh path answers 503 for a deleted account and the client
+  keeps its token and session marker forever.
 - **Encryption helpers live here, not via `shared/utils`.** The SDK has
   its own `secrets.go` reading `OAUTH_TOKEN_ENCRYPTION_KEY` — the
   algorithm matches `internal/shared/utils.{Encrypt,Decrypt}OAuthToken`

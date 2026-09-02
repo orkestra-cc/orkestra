@@ -247,6 +247,18 @@ var ErrPasswordLoginDisabled = errors.New("password login disabled for this surf
 // AdminAuthInviter consumers map it with errors.Is.
 var ErrAuthPolicyUnavailable = errors.New("auth policy unavailable")
 
+// ErrUserNotFound is the cross-module "this user does not exist" sentinel.
+//
+// It exists because a consumer outside the user module — auth's refresh path,
+// which must answer 401 for a deleted account and 503 for an unreachable store
+// — cannot import internal/core/user/services to compare against its sentinel,
+// and MUST NOT: reporting a storage outage as an authentication failure is
+// exactly what ADR-0017 gave session enforcement its own 503 to prevent.
+// user/services.ErrUserNotFound is an alias of this value, so every existing
+// `return nil, ErrUserNotFound` classifies through errors.Is with no other
+// change and no change to the message.
+var ErrUserNotFound = errors.New("user not found")
+
 // ---------------------------------------------------------------------------
 // PDFProvider — consumed by: billing
 // Only the methods billing's invoice service calls.

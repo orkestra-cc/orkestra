@@ -13,24 +13,24 @@ This app **does not** render anything operator-specific. Internal admin pages li
 
 ## Tier model recap
 
-This SPA only ever speaks to the **client** API audience (`api.localhost:3000` in dev, `api.orkestra.com` in prod, JWT `aud=client`). The split is enforced server-side by ADR-0003 PR-D D-8: cross-audience tokens get rejected with 401 `audience_mismatch`, and refresh cookies are scoped to `CLIENT_COOKIE_DOMAIN` so a session minted here cannot be replayed on `console.*`. See [`../docs/site/architecture/authentication-flow.mdx`](../docs/site/architecture/authentication-flow.mdx) for the wire-level walkthrough.
+This SPA only ever speaks to the **client** API audience (`client.localhost:3000` in dev, `api.orkestra.com` in prod, JWT `aud=client`). The split is enforced server-side by ADR-0003 PR-D D-8: cross-audience tokens get rejected with 401 `audience_mismatch`, and the client refresh cookie is host-only (empty `Domain` unless `CLIENT_COOKIE_DOMAIN` is set) so a session minted here cannot be replayed on `console.*`. **In dev the client API deliberately runs on the SPA's own hostname** — `client.localhost:3000`, not `api.localhost:3000` — because every client-tier cookie is `SameSite=Lax` and, `localhost` being absent from the Public Suffix List, `client.localhost` and `api.localhost` are different _sites_ to a browser; ports are not part of a site, so `:8081` → `:3000` is same-site and still cross-origin. Staging/prod keep the ADR-0003 three-host split because there the hosts share a registrable domain. See [`../docs/site/architecture/authentication-flow.mdx`](../docs/site/architecture/authentication-flow.mdx) for the wire-level walkthrough.
 
 ## Tech stack
 
-| Layer           | Choice                                                                                                                                           |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Framework       | React 19, React Router v8 (single `react-router` package — `react-router-dom` no longer exists)                                                  |
-| Build           | Vite 7                                                                                                                                           |
-| Language        | TypeScript 5.9 strict mode                                                                                                                       |
-| Styling         | Tailwind v4 (zero-config, design tokens in `src/index.css`) — **not** Bootstrap/Falcon                                                           |
-| Server state    | TanStack Query v5 — **not** RTK Query (the operator console uses RTK Query; this app intentionally diverges)                                     |
-| Client state    | React state + module-scoped stores (no Redux)                                                                                                    |
-| HTTP client     | Hand-typed `fetch` wrappers in `src/api/*`; the `openapi-fetch` client in `client.ts` is wired but **no module imports it yet**                  |
-| OpenAPI codegen | `openapi-typescript` against `${VITE_API_BASE}/openapi.json`                                                                                     |
-| i18n            | `react-i18next` (Italian default, English fallback) — wired from day 1                                                                           |
-| Auth            | In-memory access token + httpOnly refresh cookie (Domain-scoped to the API host)                                                                 |
-| Tests           | Vitest 4 + React Testing Library + MSW 2 on happy-dom — `npm test`; an unhandled request fails the run                                           |
-| Payments        | _(none in the base — the Stripe Checkout flow left with the addons. `@stripe/stripe-js` stays in `package.json` unimported, for the fork chain)_ |
+| Layer           | Choice                                                                                                                                                                      |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Framework       | React 19, React Router v8 (single `react-router` package — `react-router-dom` no longer exists)                                                                             |
+| Build           | Vite 7                                                                                                                                                                      |
+| Language        | TypeScript 5.9 strict mode                                                                                                                                                  |
+| Styling         | Tailwind v4 (zero-config, design tokens in `src/index.css`) — **not** Bootstrap/Falcon                                                                                      |
+| Server state    | TanStack Query v5 — **not** RTK Query (the operator console uses RTK Query; this app intentionally diverges)                                                                |
+| Client state    | React state + module-scoped stores (no Redux)                                                                                                                               |
+| HTTP client     | Hand-typed `fetch` wrappers in `src/api/*`, every authenticated call through the one `src/api/authedFetch.ts` helper; `openapi-fetch` is a dependency **nothing imports**   |
+| OpenAPI codegen | `openapi-typescript` against `${VITE_API_BASE}/openapi.json`                                                                                                                |
+| i18n            | `react-i18next` (Italian default, English fallback) — wired from day 1                                                                                                      |
+| Auth            | In-memory access token + httpOnly refresh cookie (host-only on the API host — no `Domain` attribute by default; `SameSite=Lax`, so the API must be same-site with this SPA) |
+| Tests           | Vitest 4 + React Testing Library + MSW 2 on happy-dom — `npm test`; an unhandled request fails the run                                                                      |
+| Payments        | _(none in the base — the Stripe Checkout flow left with the addons. `@stripe/stripe-js` stays in `package.json` unimported, for the fork chain)_                            |
 
 ## Directory layout
 
@@ -43,20 +43,22 @@ frontend-client/
 │   ├── index.css               # Tailwind v4 entry + @theme overrides
 │   ├── vite-env.d.ts
 │   ├── api/
-│   │   ├── client.ts           # apiBaseURL (the only export anyone imports) + a dormant openapi-fetch client
-│   │   ├── openapi.gen.ts      # Generated by `npm run codegen` (committed for CI)
-│   │   ├── auth.ts             # /v1/auth/client/{register,login,me,...,mfa/...,password recovery}
+│   │   ├── client.ts           # apiBaseURL — the base-URL resolver, and nothing else
+│   │   ├── authedFetch.ts      # THE authenticated request path + the only 401 recovery
+│   │   ├── openapi.gen.ts      # Generated by `npm run codegen` (committed for CI; nothing imports it)
+│   │   ├── auth.ts             # /v1/auth/client/{register,login,me,...,mfa/...,password recovery} + jsonFetch, the anonymous path
 │   │   ├── avatar.ts           # /v1/me/avatar/{presign-upload,commit,source} self-service
 │   │   ├── verifyEmail.ts      # /v1/auth/client/verify-email{,/resend}
+│   │   ├── dsr.ts              # /v1/me/dsr/{export,erasure-request} — GDPR Art. 15 / 17 self-service
 │   │   └── billingProfile.ts   # /v1/me/billing-identity (personal-tenant billing identity)
 │   ├── auth/
 │   │   ├── AuthProvider.tsx    # React context: in-memory access token + signIn/signOut
 │   │   ├── authContext.ts      # Context shape
 │   │   ├── useAuth.ts          # Context hook
 │   │   ├── useMe.ts            # /me TanStack Query wrapper, gated on isAuthenticated
-│   │   ├── tokenStore.ts       # Module-scoped token + coalesced refresh
+│   │   ├── tokenStore.ts       # Module-scoped token **and the moment it expires** + coalesced refresh
 │   │   ├── sessionMarker.ts    # localStorage hint — "we have a refresh cookie, try refreshing"
-│   │   └── RequireAuth.tsx     # Route guard with ?next= round-trip
+│   │   └── RequireAuth.tsx     # Route guard: waits for the bootstrap, then the ?next= round-trip
 │   ├── components/
 │   │   ├── Layout.tsx          # App shell — header (logo + nav + lang switcher), main, footer
 │   │   ├── LanguageSwitcher.tsx
@@ -87,31 +89,76 @@ frontend-client/
 
 ## How auth works
 
-Four moving parts:
+Five moving parts:
 
-1. **In-memory access token** — `src/auth/tokenStore.ts` holds the RS256 JWT in a module-scoped variable. Never localStorage, never sessionStorage. The token is read synchronously by `authedFetch` (`src/api/auth.ts`) on every authenticated call, so the React tree is never in the fetch path. The middleware in `client.ts` reads it the same way, but nothing routes through that client today.
-2. **httpOnly refresh cookie** — set by the backend at login on `Domain=api.localhost` (dev) or `Domain=api.orkestra.com` (prod). The SPA cannot read it directly; it only triggers `POST /v1/auth/client/refresh-cookie`, which mints a fresh access token. Per ADR-0003 PR-D D-9 the operator host (`console.*`) and client host (`api.*`) get distinct cookies — a token minted here cannot refresh on the operator console and vice versa.
-3. **Session marker** — a tiny `client.session=1` localStorage flag stamped on `signIn` and cleared on `signOut`/401. `refreshAccessToken` short-circuits when the marker is missing so anonymous visitors don't fire a guaranteed-401 on every cold load. `bootstrapFromRefreshCookie()` (on the auth context, implemented in `tokenStore.ts`) is the one place that stamps the marker _speculatively_: the OAuth callback page calls it to adopt the cookie the client-tier relay set on the API host, and it presents the cookie **whether or not the stamp succeeded** — a storage that throws must not turn a valid cookie into a sign-out. Both it and the automatic `refreshAccessToken` go through one unconditional `performRefresh`: `ok` installs the memory-only token; every signed-out shape (401, other non-2xx, a 200 with no token) clears marker and token; `unavailable` — a 503 **or a transport failure** — keeps both so the caller can retry. Neither function rejects.
+1. **In-memory access token** — `src/auth/tokenStore.ts` holds the RS256 JWT in a module-scoped variable, **together with the moment it expires**. Never localStorage, never sessionStorage. The expiry is derived from the `expiresIn` **duration** the server reported at receipt, not from the token's absolute `exp`: both ends of the eventual comparison then come from the same clock, so a badly set client clock cancels out instead of reopening a broken window every TTL cycle. Every path that installs a token must pass the lifetime alongside it (`setAccessToken(token, expiresInSeconds)`); a dropped one records an **unknown** expiry, which reads as "live" and silently disables the 401 recovery. A response without `expiresIn` falls back to `src/lib/jwtExp.ts` (no signature verification — a scheduling hint, never a security decision), and an unreadable one leaves the expiry unknown. Read the pair through `getAccessTokenSnapshot()`, never the two separately. The token is read synchronously by `authedFetch` (`src/api/authedFetch.ts`) on every authenticated call, so the React tree is never in the fetch path. That helper is the **single** authenticated path — `auth.ts`, `avatar.ts`, `billingProfile.ts` and `dsr.ts` all route through it — and it is the only reader of the store in the request path: the openapi-fetch client in `client.ts` that used to carry a second one was deleted along with both its middlewares (#325).
+2. **httpOnly refresh cookie** — set by the backend at login on the client API host, **host-only**: `CLIENT_COOKIE_DOMAIN` defaults to empty (`defaultClientCookieDomain` in `config.go`, since `bdcbb7ab`), so no `Domain` attribute is written and the cookie is scoped to whatever host minted it. It is `HttpOnly; SameSite=Lax` (`password_handler.go:411-424`, `utils/http.go:53-64`) — which is why the client API must be **same-site** with this SPA (`client.localhost:3000` in dev): a cross-site response cannot even store it. The SPA cannot read it directly; it only triggers `POST /v1/auth/client/refresh-cookie`, which mints a fresh access token. Per ADR-0003 PR-D D-9 the operator host (`console.*`) and the client API host get distinct cookies — a token minted here cannot refresh on the operator console and vice versa.
+3. **Session marker** — a tiny `client.session=1` localStorage flag stamped on `signIn` and cleared on `signOut`/401. `refreshAccessToken` short-circuits when the marker is missing so anonymous visitors don't fire a guaranteed-401 on every cold load. `bootstrapFromRefreshCookie()` (on the auth context, implemented in `tokenStore.ts`) is the one place that stamps the marker _speculatively_: the OAuth callback page calls it to adopt the cookie the client-tier relay set on the API host, and it presents the cookie **whether or not the stamp succeeded** — a storage that throws must not turn a valid cookie into a sign-out. Both it and the automatic `refreshAccessToken` go through one unconditional `performRefresh`, serialised across tabs by a Web Lock (`orkestra:auth-refresh`) and bounded by a 10 s `AbortController` timeout **per fetch** (so the lock is held for at most two, the 409 retry being a second attempt inside it): `ok` installs the memory-only token; **only a 401** clears marker and token; everything else — a 503, a 429, a twice-raced 409, any other non-2xx, a 2xx with no token, a transport failure, the timeout — is `unavailable` and keeps both so the caller can retry. Neither function rejects; see [Refresh choreography](#refresh-choreography) for the full table.
 4. **Public policy + OAuth start** — `fetchAuthPolicy()` (`GET /v1/auth/client/policy`) falls open on failure, and `passwordLoginUsable(policy)` is the **only** reader of `passwordLoginEnabled`: `undefined` (still loading) reads as usable, `false` **and** `null` read as off, so an SSO-only client surface hides the password UI instead of showing a form the backend refuses with 403 (spec §4.10, G5). `fetchOAuthProviders()` deliberately does **not** fall open — a 503, a network error or a body without a `providers` array is a retryable error state, never "no method"; only `{providers: []}` is empty. `initiateOAuthLogin(provider, next)` POSTs the allowlisted provider **with `credentials:'include'`** (the response sets the HttpOnly `orkestra_oauth_state` cookie the relay endpoint requires), stashes the validated `next` and leaves through `browserNavigation.assign` — the seam tests spy on. On the login page this means: nothing paints until `/policy` resolves; with the method on, the password form renders above an "or continue with" provider section; with it off (`false` or `null`) only the providers render, the forgot/sign-up links disappear, and a provider list that _resolved_ empty shows the no-sign-in-method notice — a provider-query error (503, network, malformed body) is a retryable alert, never that notice. The kill switch (`loginEnabled=false`) keeps the maintenance banner and hides the provider section.
+5. **Bootstrap readiness** — on a cold load `token === null` means two different things, "signed out" and "not decided yet", and the difference is a _fetch_ wide: the mount refresh in part 3 starts in a passive effect, i.e. strictly after the first commit. `AuthProvider` therefore publishes **`isBootstrapping`** on the auth context (`src/auth/authContext.ts`) — `true` from mount until that one-shot refresh has **settled** (`ok`, `signed-out`, `unavailable`, _and_ the marker-less short-circuit that never leaves), then false for the life of the provider; `signIn`/`signOut` do not touch it. **`RequireAuth` renders nothing while it is true** and only judges the session afterwards — unauthenticated → a `<Navigate replace>` to `/login?next=` + `encodeURIComponent(pathname + search)`, authenticated → the children. A synchronous guard redirected on the first commit, before the refresh had even left, and nothing navigated back: every reload / deep link / bookmark of `/account*` showed a returning user a login form under a signed-in header (spec §8 #11). **`LoginPage` closes the same loop from the other side**: an authenticated, settled visitor is forwarded to `sanitizeNext(?next=) ?? /account` — the very `destination` its own post-sign-in `complete()` navigates to, so a bookmarked `/login`, the guard's `?next=` round-trip and a password sign-in cannot drift apart. Any new consumer that branches on `isAuthenticated === false` owes the same wait.
 
 ### Refresh choreography
 
-A refresh happens in exactly **two** places today, and neither of them is a mid-session 401:
+A refresh happens in exactly **three** places, and the third one **is** a mid-session 401 — the recovery landed with #325, so a reader who remembers "this SPA does not refresh mid-session" is remembering the old behaviour:
 
 ```
 AuthProvider mounts   → tokenStore.refreshAccessToken(apiBaseURL)   # one-shot, no-op without the session marker
 /auth/callback        → bootstrapFromRefreshCookie()                # speculative: stamps the marker, then presents the cookie
-        → POST /v1/auth/client/refresh-cookie   (browser attaches the httpOnly cookie via credentials:'include')
-        → ok           → in-memory access token installed
-        → signed-out   → marker + token cleared
+authedFetch 401       → refreshAfterUnauthorized(apiBaseURL)        # the mid-session recovery: only on proof the handler
+                                                                    # never ran; marker gate skipped; retries once
+        → POST /v1/auth/client/refresh-cookie   (serialised across tabs by a Web Lock;
+                                                 10s per fetch; one 409 retry)
+        → ok           → in-memory access token + expiry installed
+        → signed-out   → marker + token cleared   (401 ONLY)
         → unavailable  → both kept, caller may retry
 ```
 
-Both go through one coalesced `performRefresh`, so concurrent callers share a single in-flight promise, and neither function rejects.
+> **`signed-out` is an allowlist of exactly one status.** Only a **401** clears anything — it is the one answer that means "the credential I presented was rejected". A **429** (the endpoint sits under the router's global rate limiter, and a burst of tabs rotating together is what trips it), a 408, any 5xx, any other 4xx, a 2xx with no token, a transport failure and the 10 s timeout are all `unavailable`: they say something about the server and nothing about the session, so the token _and_ the marker survive. A denylist here is how a Mongo blip became a logout. A **409 `refresh_rotation_raced`** is retried exactly once — the sibling that won the CAS left the successor cookie in the jar — and a second 409 is `unavailable`, never a sign-out.
+>
+> The Web Lock is deliberately **not** bounded with an `AbortSignal`; it is bounded _transitively_, because everything done while holding it happens inside a fetch timeout. The bound is **10 s per fetch**, and the lock is therefore held for at most **two** of them (2 × `REFRESH_FETCH_TIMEOUT_MS` = 20 s) — the single 409 retry is a second full attempt inside the same lock. The timer spans the fetch, the classification **and the body read** — `fetch` resolves on headers, so a `clearTimeout` placed right after the `await` would leave a stalled body holding the lock indefinitely. (The read is raced against the abort signal explicitly: a mocked or proxied body stream does not always observe the request's signal, and the bound must not depend on it.) Do not weaken the timeout: it is what makes the lock safe.
+>
+> A `navigator.locks.request` that **rejects** — the document is not fully active, an implementation that throws — is `unavailable` as well, and is never propagated: `AuthProvider` calls `void refreshAccessToken(...)` on mount, so a rejection escaping `performRefresh` would be an unhandled rejection. The catch is scoped to the acquisition; a throw from inside the lock callback still propagates.
 
-**An expired token on an ordinary call does _not_ silently refresh.** `client.ts` carries a `refreshMiddleware` that would refresh and retry once with an `X-Retry: 1` header — but every wrapper in `src/api/*` calls `fetch` directly and nothing imports the `api` client, so that middleware is dead code until something does. Today a 401 mid-session surfaces as a failed query, and the session is only rehydrated on the next mount-time refresh. Routing the wrappers through `api`, or lifting the retry into `authedFetch`, is the fix when this starts to bite — the middleware itself is written and tested.
+All **three** entry points above go through one coalesced `performRefresh`, so concurrent callers share a single in-flight promise, and none of the three rejects. The in-flight promise **wraps** the lock, so a second caller in the same tab shares the first one's answer instead of queueing behind the lock.
 
-A 503 or a network failure during a refresh is `unavailable`: the token is kept, because nothing is known about the session (ADR-0017). The `?next=` parameter on the login redirect carries the originally requested path so post-login the user lands where they were headed.
+The third of them, `refreshAfterUnauthorized(apiBase)`, is the authenticated-retry path, and as of this branch it is **wired**. It deliberately **skips the marker gate** and goes straight through `performRefresh`, so — unlike `refreshAccessToken`, whose gate returns `signed-out` while clearing nothing — every `signed-out` it yields clears **both** the token and the marker (G3), and an `ok` repairs a marker that was missing. It is for a 401 that answered a request which actually carried a bearer: a bearer in memory is proof a session existed, so the anonymous-visitor optimisation has no business vetoing a cookie that may still be valid. It too never rejects. Its one caller is `src/api/authedFetch.ts` — the one authenticated request path and, now that every `src/api/*` wrapper routes through it, the only 401 algorithm in this tree.
+
+**An expired access token on an authenticated call recovers silently.**
+Every authenticated request goes through `src/api/authedFetch.ts`, which
+attaches the bearer, sets `credentials:'include'`, and on a **401** decides
+in this order:
+
+| #   | Condition                                                                                                                                       | Action                                                                                                             |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 1   | the body carries a **terminal** top-level `code` (`session_revoked`, `session_max_age_reached`)                                                 | clear token **and** marker; no refresh, no retry — a token minted from the same cookie carries the same dead `sid` |
+| 2   | **no proof the handler never ran** — neither `code: access_token_expired` from the server nor a token that was already expired when it was sent | return the 401 **unchanged**: no refresh, no replay                                                                |
+| 3   | the store now holds a **different** token                                                                                                       | a sibling already rotated — retry once with it, no refresh                                                         |
+| 4   | otherwise                                                                                                                                       | refresh (un-gated when a bearer was sent, marker-gated when none was) and retry **once**                           |
+
+**Branch 2 is the replay guard and it sits ahead of every recovery branch.**
+`change-password` is an authenticated endpoint that answers **401** when the
+_current password in the body_ is wrong, and the backend counts the failed
+attempt: a blanket "401 → refresh → retry" re-sends it, so two mistypes trip
+the lockout as though there had been four. Recovery is therefore permitted
+only on proof the request never reached its handler — the server's own
+`access_token_expired` code, or a token that was **already expired at send**.
+There is deliberately **no margin**: a token with 20 s of life left is still
+accepted by the server, so the handler ran. An **unknown** expiry counts as
+live for the same reason. Any future authenticated endpoint that answers 401
+for a body credential inherits the protection without being listed anywhere.
+
+At most **one** retry per call. The retry's own 401 is inspected for terminal
+codes only — a codeless 401 there stays ambiguous, and clearing on it would
+sign out a user whose session is fine because they mistyped a password.
+Every body inspection reads a `res.clone()`: the caller's `readError`
+swallows the `TypeError` from a consumed body, so reading the original would
+degrade _silently_ into "fallback message, no code".
+
+`jsonFetch` (the **anonymous** path in `auth.ts`) is deliberately untouched —
+a 401 from `login`, `register`, `forgot-password`, `policy` or `providers`
+means "those credentials are wrong", never "the token expired".
+
+A 503 or a network failure during a refresh is `unavailable` — as is everything else in the table above except a 401: the token is kept, because nothing is known about the session (ADR-0017). The `?next=` parameter on the login redirect carries the originally requested path so post-login the user lands where they were headed.
 
 ### Fork reference: reading tenant memberships from the JWT
 
@@ -138,8 +185,10 @@ All server state goes through **TanStack Query v5**, not RTK Query. (The operato
 ```
 QueryClient (created once in main.tsx — retry: 1, staleTime: 30s)
   → useQuery / useMutation in pages
-    → hand-typed wrappers in src/api/* (jsonFetch / authedFetch)
-      → fetch with credentials:'include' + the in-memory bearer token
+    → hand-typed wrappers in src/api/* (auth, avatar, billingProfile, dsr)
+      → authedFetch (src/api/authedFetch.ts) — the in-memory bearer,
+        credentials:'include', and the one 401 recovery
+        (jsonFetch, in auth.ts, for the anonymous endpoints)
 ```
 
 Conventions:
@@ -149,13 +198,13 @@ Conventions:
 - **`enabled` gates auth-only queries**: `useMe` checks `isAuthenticated` before firing.
 - **Mutations call query invalidation explicitly**: there is no global tag system like RTK Query — invalidate `queryClient` keys by hand after a successful mutation.
 
-There is **no axios**. Every endpoint today is a hand-typed wrapper in `src/api/<feature>.ts` built on the `jsonFetch` / `authedFetch` helpers in `auth.ts`; `openapi-fetch` is available in `client.ts` for typed routes once codegen sharpens, but nothing imports it yet. Both paths share the same `apiBaseURL` constant and bearer-token plumbing — mirror `billingProfile.ts` for a simple read/write pair, `auth.ts` for a multi-flow module.
+There is **no axios**. Every endpoint today is a hand-typed wrapper in `src/api/<feature>.ts`: authenticated calls go through `authedFetch` (`src/api/authedFetch.ts`), anonymous ones through `jsonFetch` (`auth.ts`). `openapi-fetch` is still a dependency and `openapi.gen.ts` is still generated, but **nothing imports either** — the typed client that eventually consumes them must _delegate_ to `authedFetch`'s policy rather than restate it, because a second restatement is precisely what #325 deleted. Both paths share the same `apiBaseURL` constant — mirror `billingProfile.ts` for a simple read/write pair, `auth.ts` for a multi-flow module.
 
 ## How navigation works
 
 **Flat React Router table in `src/App.tsx`.** Unlike the operator console, this app does NOT consume `/v1/navigation` — there is no dynamic sidebar, no module catalog, no role-based menu rebuild. The route surface is small (home, signup, login, account/{profile,security,billing}, …) and each route is mounted explicitly.
 
-Auth-gated routes wrap their element in `<RequireAuth>`. Anonymous routes mount directly under `<Layout>`.
+Auth-gated routes wrap their element in `<RequireAuth>` — which renders nothing until the auth bootstrap has settled, and only then either the children or a `<Navigate>` to `/login?next=<pathname+search>` (see [How auth works](#how-auth-works)). Anonymous routes mount directly under `<Layout>`.
 
 Anonymous entry points are policy-aware: the header's Sign-up CTA, `/signup` and `/forgot-password` hide their password forms behind a notice when `passwordLoginUsable(policy)` is false for the client surface (the backend refuses those routes with 403 anyway), and the CTA also stays hidden when `registrationEnabled` is off. When the policy read fell open, the forgot-password form still renders the backend's answer mapped by code (`forgot.passwordDisabled`, `error.policyUnavailable`, `error.generic`) — never the raw detail. `/reset-password` and `/accept-invite` stay open — the backend keeps those routes open too (spec §4.3).
 
@@ -211,7 +260,7 @@ This is **different from the operator console** at `../frontend-admin`, which us
 
 ## Build & dev
 
-The SPA runs in a Docker container with Vite hot reload (service `client-frontend` in `docker-compose.dev.yml`; container name is stack-namespaced, `${APP_NAME}-client-frontend-${ENV}`). The host hits it at `http://client.localhost:8081`. See [`README.md`](README.md) for the full quickstart (hosts file, env vars, infra dependencies).
+The SPA runs in a Docker container with Vite hot reload (service `client-frontend` in `docker-compose.dev.yml`; container name is stack-namespaced, `${APP_NAME}-client-frontend-${ENV}`). The host hits it at `http://client.localhost:8081`, and it calls the client API at `http://client.localhost:3000` — same hostname, one port over, for the same-site reason above. See [`README.md`](README.md) for the full quickstart (hosts file, env vars, infra dependencies).
 
 Local commands you'll actually run from your editor:
 
@@ -247,7 +296,7 @@ The plugin also makes the missing-file case legible: when `config.js` is absent 
 
 1. **Backend first**. If the feature needs a new endpoint, add it to the relevant backend module (a core module, or a fork's `backend/internal/addons/<module>/`), declare the route on `ri.Client.ProtectedRouter` if it's a Tier-2 self-service endpoint, ship the backend PR.
 2. **Re-run codegen**: `npm run codegen` against the running backend so `src/api/openapi.gen.ts` picks up the new operation.
-3. **Add an API wrapper** in `src/api/<feature>.ts`. Hand-typed today, openapi-fetch typed once codegen sharpens — both patterns coexist; mirror the file closest to your shape (`billingProfile.ts` for self-service reads/writes, `auth.ts` for the heavy multi-flow modules).
+3. **Add an API wrapper** in `src/api/<feature>.ts`, hand-typed, calling `authedFetch` for anything that carries a bearer — a raw `fetch` silently opts the endpoint out of the 401 recovery. Mirror the file closest to your shape (`billingProfile.ts` for self-service reads/writes, `auth.ts` for the heavy multi-flow modules).
 4. **Add the page** in `src/pages/<Name>Page.tsx`. Co-locate any one-off helpers or components in the same file unless they're reused.
 5. **Wire the route** in `src/App.tsx`. Wrap in `<RequireAuth>` if the endpoint requires `aud=client` + a logged-in user.
 6. **Add i18n strings** to **both** `src/locales/{en,it}.json`. Lead with the IT translation since IT is the default locale.
@@ -259,7 +308,7 @@ The plugin also makes the missing-file case legible: when `config.js` is absent 
 
 - **Tailwind v4 utility classes only** — no inline `style={{ ... }}` for colors/spacing, no SCSS files, no CSS-in-JS. Custom design tokens go in `src/index.css` `@theme`.
 - **One page per route**, named `<Thing>Page.tsx`. No nested folders under `pages/` for now — the surface is small enough.
-- **`credentials: 'include'`** on every call that needs the session cookie. `jsonFetch` / `authedFetch` (`src/api/auth.ts`) set it for you; a raw `fetch` must set it itself. Two deliberate exceptions: `verifyEmail.ts` talks to anonymous endpoints and sends no cookie, and `avatar.ts`'s presigned PUT sets `credentials: 'omit'` so nothing leaks to the object store.
+- **`credentials: 'include'`** on every call that needs the session cookie. `authedFetch` (`src/api/authedFetch.ts`) forces it — a caller that passes `'omit'` gets `'include'` anyway — and `jsonFetch` (`src/api/auth.ts`) sets it for the anonymous endpoints; a raw `fetch` must set it itself. Two deliberate exceptions, and both are why those two calls stay off `authedFetch`: `verifyEmail.ts` talks to anonymous endpoints and sends no cookie, and `avatar.ts`'s `putAvatarBlob` PUTs to the presigned object-store URL with `credentials: 'omit'` so nothing of ours leaks to a foreign origin.
 - **Never persist the access token to storage**. In-memory only. The session marker in localStorage is _just a hint_ that a refresh cookie probably exists.
 - **Co-locate sub-components** next to the page that uses them. Promote to `src/components/` only on second use.
 - **Keep `src/components/` small**. The operator console has dozens of shared primitives because it's a 50-page admin app. This SPA has ~12 routes — most "shared" UI is one inline `<Field>` away from being co-located instead.

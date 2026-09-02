@@ -1,24 +1,26 @@
 # orkestra-client
 
-Tier-2 (external client) demo SPA. Consumes the ADR-0003 **client** API surface (`api.orkestra.com` / `api.localhost:3000`, JWT `aud=client`). Sibling to the operator console at [`/frontend-admin`](../frontend-admin) — separate cookie domain, separate OpenAPI surface, distinct visual language.
+Tier-2 (external client) demo SPA. Consumes the ADR-0003 **client** API surface (`api.orkestra.com` in prod / `client.localhost:3000` in dev, JWT `aud=client`). Sibling to the operator console at [`/frontend-admin`](../frontend-admin) — separate cookie domain, separate OpenAPI surface, distinct visual language.
 
 ## Stack
 
 - React 19 + TypeScript 5.9 (strict)
 - Vite 7 + Tailwind v4 (zero-config, design tokens in `src/index.css`)
 - React Router v8 + TanStack Query v5
-- `openapi-typescript` + `openapi-fetch` against `${VITE_API_BASE}/openapi.json`
+- `openapi-typescript` against `${VITE_API_BASE}/openapi.json`; `openapi-fetch` is installed but **not imported anywhere in the base** — see the codegen note below
 - `react-i18next` (Italian + English from day 1)
 - `@stripe/stripe-js` — installed but **not imported anywhere in the base**; kept because the fork chain's billing layer builds on it
 - Vitest 4 + React Testing Library + MSW (happy-dom) — `npm test`
 
 ## Dev quickstart
 
-Both backend and the client SPA run in Docker. One prerequisite first — the **hosts file**, because cookie-domain isolation per ADR-0003 D-9 only works when the SPA and the API are on different `*.localhost` hostnames:
+Both backend and the client SPA run in Docker. Most resolvers answer `*.localhost` themselves; if yours does not, add the **hosts file** entries the dev stack uses:
 
 ```
-127.0.0.1 console.localhost api.localhost client.localhost
+127.0.0.1 console.localhost client.localhost
 ```
+
+**The SPA and the client API share `client.localhost` on purpose — do not split them onto `api.localhost`.** Every client-tier cookie (refresh, OAuth state, device) is minted `SameSite=Lax` with no `Domain`, and `localhost` is not in the Public Suffix List, so a browser treats `client.localhost` and `api.localhost` as different _sites_: a cross-site `fetch(..., {credentials: "include"})` neither stores nor sends those cookies, and client login succeeds while the very next refresh 401s. A port is not part of a site, so `:8081` (SPA) and `:3000` (API) are same-site while staying cross-origin — the CORS preflight is still on the path. In staging/prod the three-host ADR-0003 split stands, because there the hosts share a registrable domain (`app.orkestra.cc` + `staging-api.orkestra.cc` under `orkestra.cc`). The rule is _same site_, not _same host_.
 
 No payment keys are needed: `docker/.env` still carries a `VITE_STRIPE_PUBLISHABLE_KEY` slot that the compose files pass through into `/config.js`, but no base code reads it — it stays reserved for a fork that rebuilds the billing layer.
 
@@ -33,8 +35,8 @@ docker compose -f docker-compose.dev.yml up -d
 Open:
 
 - **Demo SPA** — http://client.localhost:8081
-- Operator console — http://console.localhost:8080
-- Backend API — http://api.localhost:3000 (client surface) + http://console.localhost:3000 (operator)
+- Operator console — http://localhost:8080 (not `console.localhost:8080`: the console's origin has to be same-site with its `VITE_API_URL`, which defaults to `http://localhost:3000`)
+- Backend API — http://client.localhost:3000 (client surface) + http://console.localhost:3000 (operator)
 
 ## Tests
 
@@ -53,34 +55,35 @@ The committed `src/api/openapi.gen.ts` is a stub. Regenerate against the live ba
 ```bash
 # from the host (backend must be running)
 cd frontend-client
-VITE_API_BASE=http://api.localhost:3000 npm run codegen
+VITE_API_BASE=http://client.localhost:3000 npm run codegen
 
 # or from inside the dev container (container name is stack-namespaced —
 # ${APP_NAME}-client-frontend-${ENV}; example below is orkestra/development)
-docker exec orkestra-client-frontend-development sh -c "VITE_API_BASE=http://api.localhost:3000 npm run codegen"
+docker exec orkestra-client-frontend-development sh -c "VITE_API_BASE=http://client.localhost:3000 npm run codegen"
 ```
 
-The result is a single `src/api/openapi.gen.ts` consumed by `src/api/client.ts` via `openapi-fetch`. Commit the regenerated file — CI builds without a live backend, and committing keeps the type contract versioned alongside the SPA.
+The result is a single `src/api/openapi.gen.ts`, and **nothing imports it today**: the `openapi-fetch` client that used to consume it in `src/api/client.ts` was deleted with issue #325 — it carried a second, wrong 401 algorithm that nothing routed through — and every authenticated call now goes through `src/api/authedFetch.ts`. The generated types and the `openapi-fetch` dependency both stay, for the typed client that will eventually replace the hand-typed wrappers; that client must **delegate** to `authedFetch`'s 401 policy rather than restate it. Commit the regenerated file — CI builds without a live backend, and committing keeps the type contract versioned alongside the SPA.
 
 ## Layout
 
 ```
 src/
 ├── api/
-│   ├── client.ts           # apiBaseURL + an openapi-fetch client nothing imports yet
-│   ├── openapi.gen.ts      # generated by `npm run codegen`
-│   ├── auth.ts             # register, login, /me, password recovery, MFA, policy, OAuth providers + start
-│   ├── avatar.ts           # /v1/me/avatar/* self-service
+│   ├── client.ts           # apiBaseURL — the base-URL resolver, and nothing else
+│   ├── authedFetch.ts      # THE authenticated request path + the only 401 recovery
+│   ├── openapi.gen.ts      # generated by `npm run codegen` (nothing imports it today)
+│   ├── auth.ts             # register, login, /me, password recovery, MFA, policy, OAuth providers + start; jsonFetch, the anonymous path
+│   ├── avatar.ts           # /v1/me/avatar/* self-service (putAvatarBlob stays on raw fetch — presigned, credentials:'omit')
 │   ├── billingProfile.ts   # /v1/me/billing-identity
-│   ├── dsr.ts              # data-subject requests
-│   └── verifyEmail.ts      # /v1/auth/client/verify-email{,/resend}
+│   ├── dsr.ts              # /v1/me/dsr/{export,erasure-request} — GDPR Art. 15 / 17 self-service
+│   └── verifyEmail.ts      # /v1/auth/client/verify-email{,/resend} — anonymous, raw fetch
 ├── auth/
 │   ├── AuthProvider.tsx    # React context (in-memory access token, bootstrapFromRefreshCookie)
 │   ├── tokenStore.ts       # module-scoped token; one unconditional, coalesced refresh; cookie bootstrap
 │   ├── sessionMarker.ts    # localStorage hint that a refresh cookie probably exists
 │   ├── useAuth.ts          # context hook
 │   ├── useMe.ts            # /me TanStack Query wrapper
-│   └── RequireAuth.tsx     # router guard with ?next= round-trip
+│   └── RequireAuth.tsx     # router guard: waits for the bootstrap, then the ?next= round-trip
 ├── components/             # Layout shell, language switcher, avatar, MfaChallenge
 ├── lib/                    # format helpers, avatar colour, safeNext, OAuth return-target + callback parser
 ├── locales/                # it.json, en.json — react-i18next bundles

@@ -3,7 +3,7 @@
   "version": "0.10.0",
   "private": true,
   "type": "module",
-  "description": "Tier-2 (external client) demo SPA — consumes the ADR-0003 client API surface (api.orkestra.com / api.localhost:3000)",
+  "description": "Tier-2 (external client) demo SPA — consumes the ADR-0003 client API surface (api.orkestra.com in prod / client.localhost:3000 in dev)",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -12,7 +12,7 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "codegen": "openapi-typescript ${VITE_API_BASE:-http://api.localhost:3000}/openapi.json -o src/api/openapi.gen.ts"
+    "codegen": "openapi-typescript ${VITE_API_BASE:-http://client.localhost:3000}/openapi.json -o src/api/openapi.gen.ts"
   },
   "dependencies": {
     "@stripe/stripe-js": "^4.10.0",
