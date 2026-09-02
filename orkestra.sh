@@ -865,9 +865,9 @@ wiz_urls() {
     backend=$(ask_value 'Backend URL'                    "$(_wiz_default BACKEND_URL http://localhost:3000)")
     frontend=$(ask_value 'Frontend URL (operator)'       "$(_wiz_default FRONTEND_URL http://localhost:8080)")
     op_front=$(ask_value 'Operator frontend URL (email)' "$(_wiz_default OPERATOR_FRONTEND_URL "$frontend")")
-    cl_front=$(ask_value 'Client frontend URL'           "$(_wiz_default CLIENT_FRONTEND_URL http://localhost:8081)")
+    cl_front=$(ask_value 'Client frontend URL'           "$(_wiz_default CLIENT_FRONTEND_URL http://client.localhost:8081)")
     console_host=$(ask_value 'Console host'              "$(_wiz_default CONSOLE_HOST console.localhost)")
-    client_host=$(ask_value 'Client API host'           "$(_wiz_default CLIENT_API_HOST api.localhost)")
+    client_host=$(ask_value 'Client API host'           "$(_wiz_default CLIENT_API_HOST client.localhost)")
 
     env_set "$ENV_FILE" BACKEND_URL "$backend"
     env_set "$ENV_FILE" FRONTEND_URL "$frontend"
