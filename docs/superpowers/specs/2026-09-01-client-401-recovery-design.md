@@ -3041,9 +3041,10 @@ returning outcomes.
 
     **The guard is two things, because either alone does nothing.** *The rule*, in
     `scripts/env-validate.sh`: with scheme and port stripped,
-    `host(CLIENT_API_HOST)`, `host(CLIENT_API_URL)` and `host(CLIENT_FRONTEND_URL)`
-    must agree, and `host(VITE_API_URL)` must equal `host(FRONTEND_URL)` — the
-    operator twin, which convention A (#13) satisfies on the shipped
+    `CLIENT_API_HOST`, `CLIENT_API_URL` and `CLIENT_FRONTEND_URL`
+    must agree — as **sites**, not as hostnames (ruling **G10**, below: comparing
+    hostnames refuses every real deployment) — and `VITE_API_URL` must agree with
+    `FRONTEND_URL` — the operator twin, which convention A (#13) satisfies on the shipped
     `docker/.env.example` unchanged. Each group is checked only when its keys are
     **set**, in **every** `ENV` rather than under a `development` gate — the same
     constraint is stated for staging and production in `.env.example` itself — and a
@@ -3070,11 +3071,12 @@ returning outcomes.
     rule would then report.
 
     *As shipped:* `check_same_site LABEL KEY…` in `scripts/env-validate.sh`
-    compares the hostnames of the keys that are **set** — an unset key is not
+    compares the **sites** of the keys that are **set** — an unset key is not
     "empty", it is not checked — and returns non-zero on a disagreement, printing
-    each key beside the hostname it resolved to. It brings the two helpers this
-    entry names: `env_value`, the `grep` shape of the existing `ENV` read, and
-    `host_only`, which strips scheme, userinfo, path and port. Each mismatching
+    each key beside the hostname it resolved to, and its site too wherever the two
+    differ. It brings the two helpers this entry names: `env_value`, the `grep`
+    shape of the existing `ENV` read, and `host_only`, which strips scheme,
+    userinfo, path and port. Each mismatching
     group adds one to `validate_env_file`'s existing `errors` counter, so the
     script's exit code is unchanged in kind; the client remediation printed under
     a failure is the three-key block from `docker/CLAUDE.md`. The deploy wiring
@@ -3091,6 +3093,35 @@ returning outcomes.
     `console.localhost:8080`/`localhost:3000` operator pairing both fail, and
     that `fullstack_execute_deploy` with a stubbed `docker` aborts on a
     cross-site file having made **zero** compose calls.
+
+    **Ruling G10 — sites, not hosts.** The first cut of the comparator compared
+    hostnames, and a controller check against a live staging `docker/.env` caught
+    it before review: it called `FRONTEND_URL=https://staging.orkestra.cc` against
+    `VITE_API_URL=https://staging-api.orkestra.cc` cross-site, though both are
+    `orkestra.cc` and a browser agrees they are one site, and it flagged a
+    deliberately disabled client tier. With the deploy hard stop in front of it,
+    that would have aborted the next staging deploy — a guard against a
+    configuration bug becoming a configuration bug. `site_of HOST` therefore
+    lowercases and then answers: for `localhost` and `*.localhost`, the **whole
+    host**, because that TLD has no Public Suffix List entry and a browser falls
+    back to the full hostname — this is the dev trap the guard exists for, and it
+    keeps `client.localhost` ≠ `api.localhost` failing; for an IP literal or a
+    single-label host, itself; otherwise the **last two labels**. That last one is
+    a deliberate eTLD+1 approximation, stated in the code: with no PSL in a shell
+    script a `co.uk`-style suffix under-reports, so the check can miss a genuine
+    cross-site pairing but can never invent one — the safe direction for something
+    that stops a deploy. And a `CLIENT_API_HOST` under the RFC 2606 `.invalid` TLD
+    is how a deployment declares it has no client tier at all (staging's
+    `client-disabled.invalid`): the client pairing is skipped with an info line,
+    and the convention — undocumented until now — is recorded in
+    `docker/.env.example` and `docker/CLAUDE.md`'s per-audience table. Seven more
+    harness cases cover it: a staging-shaped and a production-shaped env pass, so
+    do sibling subdomains of one domain, a `.invalid` client host and a
+    case-different hostname, while two registrable domains and both dev traps
+    still fail. Re-run read-only against the live staging `.env` that produced the
+    report: the same-site block reports no error and the file passes with two
+    pre-existing warnings (`OAUTH_GOOGLE_CLIENT_ID`/`_SECRET` unset), so that
+    deploy proceeds.
 
 17. **A service-account lookup answers a store failure as a 404** — ✅
     **done in this branch (batch 3)**. `requireServiceAccount` is the gate

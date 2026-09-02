@@ -439,15 +439,28 @@ CLIENT_FRONTEND_URL=http://client.localhost:8081
 ```
 
 **`scripts/env-validate.sh` refuses the un-migrated pairing.** With scheme and
-port stripped, the hostnames of `CLIENT_API_HOST`, `CLIENT_API_URL` and
-`CLIENT_FRONTEND_URL` must agree — each key is compared only when it is set, and
-the port cannot take part because `.env.example` and the wizard write these hosts
-bare while the compose defaults write them ported. The operator twin is checked
-the same way: `VITE_API_URL` against `FRONTEND_URL`. Both groups are checked in
-**every** `ENV`, not only development — the same constraint holds in staging and
-production, where the hosts must share a registrable domain instead of being
-identical — and a mismatch is an **error**, not a warning, whose remediation is
-the three-key block above.
+port stripped and the hostname lowercased, `CLIENT_API_HOST`, `CLIENT_API_URL`
+and `CLIENT_FRONTEND_URL` must resolve to the same **site** — each key compared
+only when it is set. The operator twin is checked the same way: `VITE_API_URL`
+against `FRONTEND_URL`.
+
+"Site" is what a browser computes, because that is what decides whether the
+cookie survives. Under `*.localhost`, which has no Public Suffix List entry, the
+site is the **whole hostname** — `client.localhost` and `api.localhost` are
+different sites, and the dev hostnames must therefore be identical. Everywhere
+else it is the **last two labels**, so `staging.orkestra.cc` and
+`staging-api.orkestra.cc` are one site and a real deployment passes untouched.
+Those two labels are a deliberate eTLD+1 approximation: a shell script has no
+PSL, so a `co.uk`-style suffix under-reports and the check can miss a genuine
+cross-site pairing — it never invents one, which is the safe direction for
+something that hard-stops a deploy. Ports cannot take part, because
+`.env.example` and the wizard write these hosts bare while the compose defaults
+write them ported. A `CLIENT_API_HOST` under the RFC 2606 `.invalid` TLD is how a
+deployment says it has **no** client tier (staging uses
+`client-disabled.invalid`); the client pairing is then skipped with a note.
+
+Both groups are checked in **every** `ENV`, not only development, and a mismatch
+is an **error**, not a warning, whose remediation is the three-key block above.
 
 It runs from two places, with deliberately different severities:
 `./orkestra.sh init` prints whatever the validator reported and carries on (the
@@ -492,7 +505,7 @@ docs, the defaults and the OAuth recipe all prescribe `localhost`.
 | Variable | Purpose | Default |
 |---|---|---|
 | `CONSOLE_HOST` | Hostname the operator mux answers on | `console.localhost:3000` (dev) / unset (prod, operator-set) |
-| `CLIENT_API_HOST` | Hostname the client mux answers on. **Must be same-site with the client SPA's origin** — see "Client tier: the SPA and the client API must be same-site" above. | `client.localhost:3000` (dev) / unset (prod) |
+| `CLIENT_API_HOST` | Hostname the client mux answers on. **Must be same-site with the client SPA's origin** — see "Client tier: the SPA and the client API must be same-site" above. A host under the RFC 2606 `.invalid` TLD (e.g. `client-disabled.invalid`) disables the client tier: no Host can ever match it, and `env-validate` skips the pairing check. | `client.localhost:3000` (dev) / unset (prod) |
 | `OPERATOR_CORS_ORIGINS` | CORS allowlist for operator mux | falls back to `CORS_ORIGINS` |
 | `CLIENT_CORS_ORIGINS` | CORS allowlist for client mux | falls back to `CORS_ORIGINS` |
 | `OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE` / `_BURST` | Per-audience throttling | falls back to `RATE_LIMIT_*` |

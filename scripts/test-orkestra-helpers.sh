@@ -270,6 +270,46 @@ check "env-validate: the operator refusal names both keys" "yes" \
 # An unset key is not part of the comparison — only the keys that are set.
 check "env-validate: an empty CLIENT_API_URL is not compared" "0" "$(ev_run CLIENT_API_URL=)"
 
+# The rule is same SITE, not same host: a real deployment spreads a tier over
+# sibling subdomains of one registrable domain and must pass. ENV stays
+# development in these rows so the staging/production security checks (a
+# different part of the script) cannot decide the exit code.
+check "env-validate: a staging-shaped env is same-site" "0" \
+    "$(ev_run CLIENT_API_HOST=staging-api.orkestra.cc \
+        CLIENT_API_URL=https://staging-api.orkestra.cc \
+        CLIENT_FRONTEND_URL=https://app.orkestra.cc \
+        FRONTEND_URL=https://staging.orkestra.cc \
+        VITE_API_URL=https://staging-api.orkestra.cc)"
+check "env-validate: a production-shaped env is same-site" "0" \
+    "$(ev_run CLIENT_API_HOST=api.orkestra.cc \
+        CLIENT_API_URL=https://api.orkestra.cc \
+        CLIENT_FRONTEND_URL=https://app.orkestra.cc \
+        FRONTEND_URL=https://orkestra.cc \
+        VITE_API_URL=https://api.orkestra.cc)"
+# Same rule, one registrable domain apart.
+check "env-validate: sibling subdomains of one domain pass" "0" \
+    "$(ev_run CLIENT_API_HOST=a.example.com \
+        CLIENT_API_URL=https://a.example.com \
+        CLIENT_FRONTEND_URL=https://b.example.com)"
+check "env-validate: two registrable domains are refused" "1" \
+    "$(ev_run CLIENT_API_HOST=example.com \
+        CLIENT_API_URL=https://example.com \
+        CLIENT_FRONTEND_URL=https://example.org)"
+
+# A .invalid client API host (RFC 2606) is how a deployment says it has no
+# client tier — there is no pairing to check.
+check "env-validate: a .invalid client host skips the pairing" "0" \
+    "$(ev_run CLIENT_API_HOST=client-disabled.invalid \
+        CLIENT_FRONTEND_URL=https://app.orkestra.cc)"
+check "env-validate: the .invalid skip says so" "yes" \
+    "$(ev_saw 'Client tier disabled (CLIENT_API_HOST is a .invalid host) — pairing not checked')"
+
+# Hostnames are case-insensitive; the comparison lowercases before comparing.
+check "env-validate: host case does not make a mismatch" "0" \
+    "$(ev_run CLIENT_API_HOST=Client.LocalHost \
+        CLIENT_API_URL=http://client.localhost:3000 \
+        CLIENT_FRONTEND_URL=http://CLIENT.localhost:8081)"
+
 # The deploy preflight is the other half of the guard: a cross-site .env must
 # abort the deploy before any compose command runs, `--yes` included (there is
 # no prompt in front of it to skip).
