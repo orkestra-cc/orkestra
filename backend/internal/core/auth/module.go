@@ -101,6 +101,16 @@ type AuthModule struct {
 	sweepTiers  []sweepTier
 	sweepLease  *services.MaintenanceLease
 	logger      *slog.Logger
+
+	// mailDispatcher is the bounded worker pool that transactional auth
+	// mail (forgot-password, resend-verification) will be enqueued on
+	// instead of sent synchronously from the request goroutine — Task 8
+	// wires the first Enqueue callers; wired here but idle until then.
+	// Started/stopped alongside the token-sweep maintenance loop in
+	// maintenance.go — see that file's Start/Stop for why the dispatcher
+	// runs regardless of whether this replica has sweep tiers or won the
+	// sweep lease.
+	mailDispatcher *services.MailDispatcher
 }
 
 // NewModule constructs an AuthModule bound to the live application config.
@@ -924,6 +934,12 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		return fmt.Errorf("auth: Redis adapter lacks EVAL support")
 	}
 	attemptCounter := services.NewRedisAttemptCounter(scriptRedis, logger)
+	// Bounded dispatcher for transactional auth mail (D5). Constructed
+	// here so it exists before the tier bundles that hand it to
+	// PasswordAuthConfig; started/stopped by maintenance.go's Start/Stop
+	// alongside the token-sweep loop.
+	mailDispatcher := services.NewMailDispatcher(logger)
+	m.mailDispatcher = mailDispatcher
 	redisStore := services.NewRedisOAuthStateStore(atomicRedis)
 	oauthStateService := services.NewOAuthStateService(redisStore)
 	var oauthStateSecret []byte
@@ -1073,6 +1089,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		notifier:                 notifier,
 		rateLimiter:              rateLimiter,
 		attemptCounter:           attemptCounter,
+		mailDispatcher:           mailDispatcher,
 		geoResolver:              geoResolver,
 		velocityKmh:              velocityKmh,
 		frontendURL:              cfg.Server.FrontendURL,

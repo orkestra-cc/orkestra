@@ -83,22 +83,28 @@ type FirstAdminClaimer interface {
 
 // PasswordAuthConfig configures the password auth service.
 type PasswordAuthConfig struct {
-	UserService              iface.UserProvider
-	TenantProvider           iface.TenantProvider // required: drives RoleRequiresMFA check at login
-	PasswordService          PasswordService
-	JWTService               JWTService
-	EmailTokenRepo           repository.EmailTokenRepository
-	RefreshTokenRepo         repository.RefreshTokenRepository
-	AuthSessionRepo          repository.AuthSessionRepository
-	MFAFactorRepo            repository.MFAFactorRepository // required: decides partial vs full response
-	MFAChallengeService      MFAChallengeService            // required: mints login-continuation challenges
-	FirstAdminClaimer        FirstAdminClaimer              // required: atomic first-admin claim
-	RiskAssessment           RiskAssessmentService          // nil → session gets zero-score; mandatory in prod
-	DeviceTrust              DeviceTrustService             // nil → never skips MFA; Section C item #3
-	SuspiciousLoginNotifier  SuspiciousLoginNotifier        // nil → no email on high-risk login; Section C item #5
-	Notifier                 iface.NotificationSender
-	RateLimiter              *sharederrors.RateLimiter
-	AttemptCounter           AttemptCounter
+	UserService             iface.UserProvider
+	TenantProvider          iface.TenantProvider // required: drives RoleRequiresMFA check at login
+	PasswordService         PasswordService
+	JWTService              JWTService
+	EmailTokenRepo          repository.EmailTokenRepository
+	RefreshTokenRepo        repository.RefreshTokenRepository
+	AuthSessionRepo         repository.AuthSessionRepository
+	MFAFactorRepo           repository.MFAFactorRepository // required: decides partial vs full response
+	MFAChallengeService     MFAChallengeService            // required: mints login-continuation challenges
+	FirstAdminClaimer       FirstAdminClaimer              // required: atomic first-admin claim
+	RiskAssessment          RiskAssessmentService          // nil → session gets zero-score; mandatory in prod
+	DeviceTrust             DeviceTrustService             // nil → never skips MFA; Section C item #3
+	SuspiciousLoginNotifier SuspiciousLoginNotifier        // nil → no email on high-risk login; Section C item #5
+	Notifier                iface.NotificationSender
+	RateLimiter             *sharederrors.RateLimiter
+	AttemptCounter          AttemptCounter
+	// MailDispatcher is the bounded worker pool that, once Task 8 wires
+	// ForgotPassword/ResendVerification onto it, detaches those sends
+	// from the request that triggered them. Not yet consumed as of this
+	// commit — both flows still call SendTemplated synchronously. Nil is
+	// tolerated regardless; a nil dispatcher's Enqueue is a safe no-op.
+	MailDispatcher           *MailDispatcher
 	FrontendURL              string
 	RequireEmailVerification bool
 	AppName                  string
@@ -122,22 +128,28 @@ type PasswordAuthConfig struct {
 // PasswordAuthService handles the register / login / verify / reset / change
 // password flows. It complements the existing OAuth-focused AuthService.
 type PasswordAuthService struct {
-	userService              iface.UserProvider
-	tenantProvider           iface.TenantProvider
-	passwordService          PasswordService
-	jwtService               JWTService
-	emailTokenRepo           repository.EmailTokenRepository
-	refreshTokenRepo         repository.RefreshTokenRepository
-	authSessionRepo          repository.AuthSessionRepository
-	mfaFactorRepo            repository.MFAFactorRepository
-	mfaChallengeService      MFAChallengeService
-	firstAdminClaimer        FirstAdminClaimer
-	riskAssessment           RiskAssessmentService
-	deviceTrust              DeviceTrustService
-	suspiciousLoginNotifier  SuspiciousLoginNotifier
-	notifier                 iface.NotificationSender
-	rateLimiter              *sharederrors.RateLimiter
-	attempts                 AttemptCounter
+	userService             iface.UserProvider
+	tenantProvider          iface.TenantProvider
+	passwordService         PasswordService
+	jwtService              JWTService
+	emailTokenRepo          repository.EmailTokenRepository
+	refreshTokenRepo        repository.RefreshTokenRepository
+	authSessionRepo         repository.AuthSessionRepository
+	mfaFactorRepo           repository.MFAFactorRepository
+	mfaChallengeService     MFAChallengeService
+	firstAdminClaimer       FirstAdminClaimer
+	riskAssessment          RiskAssessmentService
+	deviceTrust             DeviceTrustService
+	suspiciousLoginNotifier SuspiciousLoginNotifier
+	notifier                iface.NotificationSender
+	rateLimiter             *sharederrors.RateLimiter
+	attempts                AttemptCounter
+	// mail is the bounded dispatcher for transactional auth mail (D5).
+	// Wired here but not yet consumed: ForgotPassword and
+	// ResendVerification still call SendTemplated synchronously — Task 8
+	// moves them onto mail.Enqueue. Nil-tolerant regardless, mirroring
+	// PasswordAuthConfig.MailDispatcher.
+	mail                     *MailDispatcher
 	frontendURL              string
 	requireEmailVerification bool
 	appName                  string
@@ -222,6 +234,7 @@ func NewPasswordAuthService(cfg PasswordAuthConfig) *PasswordAuthService {
 		notifier:                 cfg.Notifier,
 		rateLimiter:              cfg.RateLimiter,
 		attempts:                 cfg.AttemptCounter,
+		mail:                     cfg.MailDispatcher,
 		frontendURL:              cfg.FrontendURL,
 		requireEmailVerification: cfg.RequireEmailVerification,
 		appName:                  cfg.AppName,

@@ -74,7 +74,12 @@ type tierBundleDeps struct {
 	// attemptCounter is the Redis fixed-window counter behind every
 	// lockout and request cap. rateLimiter is on its way out (spec D8)
 	// and both are carried only while the callers migrate.
-	attemptCounter           services.AttemptCounter
+	attemptCounter services.AttemptCounter
+	// mailDispatcher is the bounded worker pool transactional auth mail
+	// will be enqueued on once Task 8 wires the first caller. Single
+	// instance shared by both tier bundles — the queue and worker
+	// bounds are process-wide, not per-tier.
+	mailDispatcher           *services.MailDispatcher
 	geoResolver              geoip.Resolver
 	velocityKmh              float64
 	frontendURL              string
@@ -174,6 +179,7 @@ func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 		Notifier:                 d.notifier,
 		RateLimiter:              d.rateLimiter,
 		AttemptCounter:           d.attemptCounter,
+		MailDispatcher:           d.mailDispatcher,
 		FrontendURL:              d.frontendURL,
 		RequireEmailVerification: d.requireEmailVerification,
 		AppName:                  d.appName,
