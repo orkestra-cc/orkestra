@@ -1253,6 +1253,10 @@ type ChangePasswordInput struct {
 	CurrentSID string
 	Current    string
 	New        string
+	// IP is the caller's resolved address, used for the attempt
+	// counters and the audit row. Empty skips the address scope (the
+	// counters' empty-key rule) rather than sharing a bucket.
+	IP string
 }
 
 // ChangePassword updates the password for an authenticated user who
@@ -1266,8 +1270,40 @@ func (s *PasswordAuthService) ChangePassword(ctx context.Context, in ChangePassw
 	if user.PasswordHash == "" {
 		return ErrInvalidCredentials
 	}
+	// This route verifies a password, so it is subject to the same
+	// lockout as login — otherwise it is the unthrottled back door
+	// around it (M-8). Durable lock first, then the counters.
+	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
+		s.dummyVerify(current)
+		return LockedAfter(time.Until(*user.LockedUntil))
+	}
+	if v, locked := s.peekLockout(ctx, in.IP, user.Email); locked {
+		s.dummyVerify(current)
+		return LockedAfter(v.RetryAfter)
+	}
 	ok, err := s.passwordService.Verify(current, user.PasswordHash)
 	if err != nil || !ok {
+		emailVerdict, counterAvailable := s.recordLoginFailure(ctx, in.IP, user.Email)
+		var lockUntil *time.Time
+		lock := emailVerdict.Locked
+		if !counterAvailable {
+			lock = user.FailedLoginCount+1 >= s.policy.LockoutThreshold(ctx)
+		}
+		if lock {
+			t := time.Now().Add(s.policy.LockoutDuration(ctx))
+			lockUntil = &t
+		}
+		_ = s.userService.RecordFailedLogin(ctx, user.UUID, lockUntil)
+		s.emitAudit(ctx, iface.AuditEvent{
+			ActorUserID:  user.UUID,
+			ActorEmail:   user.Email,
+			ActorType:    "user",
+			Action:       "auth.password.change_failed",
+			Outcome:      "failure",
+			IPAddress:    in.IP,
+			ResourceType: "user",
+			ResourceID:   user.UUID,
+		})
 		return ErrInvalidCredentials
 	}
 	if current == next {
@@ -1306,6 +1342,7 @@ func (s *PasswordAuthService) ChangePassword(ctx context.Context, in ChangePassw
 				slog.Int("sessions_revoked", revoked))
 		}
 	}
+	s.resetLoginFailures(ctx, user.Email)
 	s.emitAudit(ctx, iface.AuditEvent{
 		ActorUserID:  user.UUID,
 		ActorEmail:   user.Email,
@@ -1401,9 +1438,41 @@ func (s *PasswordAuthService) ConfirmPasswordWithSecurity(ctx context.Context, u
 			return nil, err
 		}
 	}
+	// This route verifies a password too, so it is subject to the same
+	// lockout as login and ChangePassword — otherwise it is the
+	// unthrottled back door around it (M-8). Durable lock first, then
+	// the counters.
+	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
+		s.dummyVerify(password)
+		return nil, LockedAfter(time.Until(*user.LockedUntil))
+	}
+	if v, locked := s.peekLockout(ctx, security.IPAddress, user.Email); locked {
+		s.dummyVerify(password)
+		return nil, LockedAfter(v.RetryAfter)
+	}
 	ok, err := s.passwordService.Verify(password, user.PasswordHash)
 	if err != nil || !ok {
-		s.recordFailed(ctx, security.IPAddress, user.Email)
+		emailVerdict, counterAvailable := s.recordLoginFailure(ctx, security.IPAddress, user.Email)
+		var lockUntil *time.Time
+		lock := emailVerdict.Locked
+		if !counterAvailable {
+			lock = user.FailedLoginCount+1 >= s.policy.LockoutThreshold(ctx)
+		}
+		if lock {
+			t := time.Now().Add(s.policy.LockoutDuration(ctx))
+			lockUntil = &t
+		}
+		_ = s.userService.RecordFailedLogin(ctx, user.UUID, lockUntil)
+		s.emitAudit(ctx, iface.AuditEvent{
+			ActorUserID:  user.UUID,
+			ActorEmail:   user.Email,
+			ActorType:    "user",
+			Action:       "auth.password.reconfirm_failed",
+			Outcome:      "failure",
+			IPAddress:    security.IPAddress,
+			ResourceType: "user",
+			ResourceID:   user.UUID,
+		})
 		return nil, ErrInvalidCredentials
 	}
 	// Mint the stepped-up token. amr is priorAMR ∪ {"reauth"} so the
@@ -1418,6 +1487,7 @@ func (s *PasswordAuthService) ConfirmPasswordWithSecurity(ctx context.Context, u
 	if err != nil {
 		return nil, err
 	}
+	s.resetLoginFailures(ctx, user.Email)
 	s.emitAudit(ctx, iface.AuditEvent{
 		ActorUserID:  user.UUID,
 		ActorEmail:   user.Email,
@@ -1456,34 +1526,6 @@ func mergeAMRWithReauth(prior []string) []string {
 }
 
 // --- internal helpers ---
-
-// recordFailed is the LEGACY shared in-memory bucket. Login no longer
-// calls it — it moved to the attempt counters below — and
-// ResendVerification has since moved to its own verify-email/verify-ip
-// request-cap scopes (overRequestCap/chargeRequestCap). Two writers
-// remain on it: this method (called only by ConfirmPasswordWithSecurity)
-// and ServiceAccountService's own recordFailed. Both write into the
-// SAME *sharederrors.RateLimiter instance — module.go constructs one
-// rateLimiter and wires it into both PasswordAuthConfig and
-// NewServiceAccountService — so the two share one lockout budget per
-// key, not two independent ones. The "ip:" write this method makes IS
-// read: ServiceAccountService.Grant's IsLockedOut("ip:"+IP) peeks the
-// identical bucket, so a failed ConfirmPasswordWithSecurity attempt
-// from an address counts toward that address's client-credentials
-// lockout. The "email:" write is NOT read anywhere in production —
-// ServiceAccountService only ever reads "ip:"/"client:" keys via
-// IsLockedOut, and nothing in this module calls IsBlocked any more —
-// so that half is a genuine dead write as of this commit.
-// ConfirmPasswordWithSecurity migrates off this call with its own
-// task; delete this once it does (ServiceAccountService's own
-// reader/writer pair on this limiter is a separate concern).
-func (s *PasswordAuthService) recordFailed(ctx context.Context, ip, email string) {
-	if s.rateLimiter == nil {
-		return
-	}
-	s.rateLimiter.RecordFailedAuth(ctx, "ip:"+ip)
-	s.rateLimiter.RecordFailedAuth(ctx, "email:"+email)
-}
 
 // accountLimit is the per-email / per-client pair. Read per call, so an
 // admin edit takes effect on the very next attempt — including one

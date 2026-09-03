@@ -282,6 +282,7 @@ func (h *PasswordAuthHandler) ChangePassword(ctx context.Context, req *ChangePas
 		CurrentSID: currentSessionID(ctx),
 		Current:    req.Body.CurrentPassword,
 		New:        req.Body.NewPassword,
+		IP:         clientIPFromCtx(ctx),
 	}); err != nil {
 		return nil, mapPasswordError(err)
 	}

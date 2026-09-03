@@ -1058,6 +1058,12 @@ func (g *gateAuditSink) byAction(action string) []iface.AuditEvent {
 	return out
 }
 
+// sawAction reports whether at least one event with this action was
+// emitted.
+func (g *gateAuditSink) sawAction(action string) bool {
+	return len(g.byAction(action)) > 0
+}
+
 // gateEmailTokenRepo is the minimal EmailTokenRepository the ForgotPassword
 // and AdminTriggerPasswordReset paths touch. Everything else panics.
 type gateEmailTokenRepo struct {
@@ -1095,6 +1101,12 @@ func (g *gateEmailTokenRepo) DeleteAllByUser(context.Context, string) (int64, er
 // correctTestPassword is the ONE password the fixtures seed. Anything
 // else handed to Login is a wrong password by construction.
 const correctTestPassword = "correct horse battery staple"
+
+// knownTestUserUUID is the fixed UUID the lockout fixture assigns to
+// "known@example.com" (instead of activeUser's random one) so a test
+// that only has a UUID to work with — ChangePassword,
+// ConfirmPasswordWithSecurity — can reach that seeded account directly.
+const knownTestUserUUID = "018f0000-0000-7000-8000-00000000b055"
 
 // countingPasswordService counts Verify calls while delegating every
 // method to a real argon2id PasswordService. The branch-cost test is
@@ -1166,7 +1178,9 @@ func newLockoutFixture(t *testing.T, threshold int) *lockoutFixture {
 	// One account per non-success branch of Login, in the order Login
 	// reaches them.
 	hash := lockoutPasswordHash(t, env.pwd)
-	env.users.seed(activeUser("known@example.com", hash))
+	known := activeUser("known@example.com", hash)
+	known.UUID = knownTestUserUUID
+	env.users.seed(known)
 
 	inactive := activeUser("inactive@example.com", hash)
 	inactive.IsActive = false
@@ -1207,6 +1221,14 @@ func newLockoutTestServiceWithUsers(t *testing.T, threshold int) (*PasswordAuthS
 	t.Helper()
 	f := newLockoutFixture(t, threshold)
 	return f.env.auth, f.users
+}
+
+// newLockoutTestServiceWithAudit exposes the fixture's gateAuditSink so a
+// test can assert a failure branch left the right row behind.
+func newLockoutTestServiceWithAudit(t *testing.T, threshold int) (*PasswordAuthService, *gateAuditSink) {
+	t.Helper()
+	f := newLockoutFixture(t, threshold)
+	return f.env.auth, f.env.audit
 }
 
 // newLockoutTestServiceWithFailingCounter drives the documented
