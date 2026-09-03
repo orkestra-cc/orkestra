@@ -26,13 +26,27 @@ export const setNavigateToLogin = (fn: (location?: string) => void) => {
 // and the correct UX is to fall through to the caller. ADR-0003 PR-D D-8
 // dropped the legacy un-prefixed paths; this dashboard targets the
 // operator tier, so all entries are mounted under /v1/auth/operator.
+//
+// This list is load-bearing for the 401 branch's proof (b) below, and not
+// only for loop avoidance: proof (b) reasons that a bearer-less request was
+// rejected by RequireAuth before dispatch, which holds for PROTECTED routes
+// and says nothing about the PUBLIC ones — those run their handler with no
+// bearer at all, by design, and some of them answer 401 as a verdict on the
+// request. Every public route this SPA calls that can answer 401 therefore
+// belongs here. The passkey login pair is the one that was missed: it is
+// mounted by WebAuthnHandler.RegisterPublicRoutes, the store holds no access
+// token during a paused login, and LoginFinish calls IncrementAttempts
+// BEFORE returning its 401 — so a replay spends two of MFAMaxAttempts (5)
+// per typo. Its TOTP twin (mfa/login/verify) was already here. One entry
+// covers both halves of the ceremony: the match is a substring test.
 const AUTH_ENDPOINT_PATHS = [
   'v1/auth/operator/login',
   'v1/auth/operator/logout',
   'v1/auth/operator/refresh',
   'v1/auth/operator/refresh-cookie',
   'v1/auth/operator/register',
-  'v1/auth/operator/mfa/login/verify'
+  'v1/auth/operator/mfa/login/verify',
+  'v1/auth/operator/mfa/webauthn/login/' // begin + finish
 ];
 
 function isAuthEndpoint(url: string): boolean {
@@ -56,14 +70,18 @@ function isAuthEndpoint(url: string): boolean {
 // the origin; the others then rotate in turn, each with the cookie its
 // predecessor left behind.
 //
-// `retry` is NOT the same answer as `ok: false`. A 503 from the refresh
-// endpoint means the backend could not *evaluate* the session — the session
-// enforcement path's durable store was unreachable — and ADR-0017 gives that
-// its own status precisely so a client does not treat it as a sign-out: an
-// outage "would train clients to discard a session that is still perfectly
-// valid." Collapsing it into `ok: false`, as this did, logged the user out
-// for the exact reason the 503 exists to prevent. A 409
-// refresh_rotation_raced carries the same "do not sign out" meaning.
+// `retry` is NOT the same answer as a bare `ok: false`, and which one an
+// attempt produces is decided by an ALLOWLIST in refreshOnce below: a bare
+// `ok: false` means the refresh cookie itself was REFUSED (a 401, and only a
+// 401), and it is the one outcome that ends the session. `retry` is
+// everything else — a 503, a 429, any other 4xx or 5xx, a transport failure,
+// the timeout, a twice-raced 409, and a 2xx whose body is unreadable or
+// carries no token. ADR-0017 gives the 503 its own status precisely so a
+// client does not treat it as a sign-out: an outage "would train clients to
+// discard a session that is still perfectly valid." That reasoning is not
+// specific to 503 — it holds for every answer that describes the server
+// rather than the credential, which is why the rule is an allowlist and not
+// a list of transient statuses to remember to extend.
 type RefreshResult =
   | { ok: true; accessToken: string; expiresIn: number }
   | { ok: false; retry?: boolean; raced?: boolean };
@@ -83,24 +101,41 @@ const REFRESH_LOCK_NAME = 'orkestra:auth-refresh';
 // below for why timing out must NOT be treated as a negative answer.
 export const REFRESH_FETCH_TIMEOUT_MS = 10_000;
 
+// The bound refreshOnce actually applies. Production never changes it; the
+// setter below is the ONLY writer, and it exists so the timeout tests can
+// exercise the real abort path in 25 ms of wall clock.
+let refreshFetchTimeoutMs: number = REFRESH_FETCH_TIMEOUT_MS;
+
+// TEST-ONLY, and not part of this module's production surface — nothing
+// outside `baseApi.*.test.ts` may call it. It replaces the two
+// `vi.spyOn(AbortSignal, 'timeout')` monkey-patches those suites used to
+// carry: an AbortController's timer is an ordinary `setTimeout`, so nothing
+// needs patching, but fake timers are still not an option here —
+// performRefresh schedules its own `setTimeout(…, 0)` and every suite drains
+// it on a real timer in `afterEach`, which a file-wide `vi.useFakeTimers()`
+// would hang. Called with no argument it restores the production value,
+// which is what those `afterEach` hooks do.
+export function __setRefreshTimeoutForTests(
+  ms: number = REFRESH_FETCH_TIMEOUT_MS
+): void {
+  refreshFetchTimeoutMs = ms;
+}
+
 // Web Locks is the only cross-tab primitive that releases automatically
 // when the holder navigates away or crashes, which a localStorage mutex
 // cannot promise. Where it is missing (non-secure context, jsdom under
 // test) we fall back to running unguarded: the backend's rotation grace
 // window still keeps a lost race from ending the session.
 //
-// NOT bounded with a timeout signal (unlike refreshOnce's fetch below).
-// Web Locks only supports that via the 3-argument overload —
-// `request(name, { signal }, callback)` — instead of the 2-argument form
-// used here, and switching shapes is not the "straightforward" case: the
-// existing `takes the cross-tab lock when Web Locks is available` test in
-// baseApi.rotationRace.test.ts mocks the 2-arg form, and a 3-arg call
-// against that mock doesn't fail the test (it only asserts the call count
-// and lock name) — it silently hands the mock's `cb` parameter the options
-// object instead of the run callback, throws inside it, and that throw is
-// swallowed by performRefresh's own `.catch`. The test stays green while
-// no longer exercising what it was written to exercise. Restructuring that
-// mock is a real fix, just not one to do as a drive-by here.
+// NOT bounded with a timeout signal (unlike refreshOnce's fetch below): Web
+// Locks only supports that via the 3-argument overload
+// `request(name, { signal }, callback)`, and the transitive bound is
+// refreshOnce's own abort, which now covers the body read too. The
+// two-argument shape here is pinned by `takes the cross-tab lock when Web
+// Locks is available` in baseApi.rotationRace.test.ts — it asserts arity 2
+// and that the second argument is the run callback, because a 3-arg call
+// would otherwise bind that mock's `cb` to the options object and have the
+// resulting throw swallowed by performRefresh's `.catch`.
 async function withRefreshLock<T>(run: () => Promise<T>): Promise<T> {
   const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
   if (!locks?.request) return run();
@@ -109,46 +144,114 @@ async function withRefreshLock<T>(run: () => Promise<T>): Promise<T> {
   return await locks.request(REFRESH_LOCK_NAME, run);
 }
 
+// models.TokenResponse, as far as this module cares about it.
+type RefreshBody = { accessToken?: string; expiresIn?: number };
+
+// A promise that rejects when the signal aborts and never resolves otherwise.
+// `fetch` resolves on HEADERS, and the body stream of a mocked or proxied
+// response does not always observe the request's abort signal, so the body
+// read is raced against the signal EXPLICITLY. The transitive bound on the
+// Web Lock must not depend on the platform propagating an abort into the
+// body: a server that sends headers and then stalls would otherwise hold the
+// lock — and the in-flight promise every other tab is awaiting — for as long
+// as it stalls. Nothing inspects the rejection value; it only unblocks the
+// race. The listener is per-attempt (a fresh controller each time) and
+// `once`, so nothing accumulates.
+function rejectOnAbort(signal: AbortSignal): Promise<never> {
+  return new Promise<never>((_, reject) => {
+    const fail = () => reject(new Error('refresh aborted'));
+    if (signal.aborted) {
+      fail();
+      return;
+    }
+    signal.addEventListener('abort', fail, { once: true });
+  });
+}
+
 async function refreshOnce(baseUrl: string): Promise<RefreshResult> {
+  // AbortController + setTimeout, NOT AbortSignal.timeout: the latter runs on
+  // an internal timer nothing in the test suite can shorten without patching
+  // a platform object, and it cannot be cancelled either, so every refresh
+  // left a live 10s timer behind it.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), refreshFetchTimeoutMs);
   try {
     const res = await fetch(`${baseUrl}/v1/auth/operator/refresh-cookie`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(REFRESH_FETCH_TIMEOUT_MS)
+      signal: ctrl.signal
     });
-    // 503 session_enforcement_unavailable: transient, keep the token.
-    if (res.status === 503) return { ok: false, retry: true } as const;
+    // The outcome rule is an ALLOWLIST, and the order below is the rule.
+    //
+    // 401 is the ONLY status that means "the credential I presented was
+    // refused" — the refresh cookie is gone, revoked, or was never valid, and
+    // that is the session's own death. Everything else that is not a usable
+    // 2xx says something about the SERVER and nothing about the session.
+    //
+    // A denylist is what this used to be, and it was wrong in a way no test
+    // caught: only 503 and 409 were transient, so 429, 408, 500, 502 and 504
+    // all fell through to the bare `{ ok: false }` the 401 branch reads as a
+    // real rejection. /refresh-cookie sits under the router's GLOBAL rate
+    // limiter, so 429 is reachable on every refresh and a burst of tabs is
+    // exactly what trips it — and once the #14 arm started rotating on
+    // verdict 401s, a mistyped password whose rotation met a rate limit could
+    // end a session that a mistyped password could never end before.
+    if (res.status === 401) return { ok: false } as const;
     // 409 refresh_rotation_raced: a sibling rotated first and the family
     // is intact. Our cookie jar already holds its successor.
     if (res.status === 409) return { ok: false, raced: true } as const;
-    if (!res.ok) return { ok: false } as const;
-    const body = (await res.json()) as {
-      accessToken?: string;
-      expiresIn?: number;
-    };
-    if (!body.accessToken || !body.expiresIn) return { ok: false } as const;
+    // 503 session_enforcement_unavailable, 429, 408, any other 4xx or 5xx.
+    if (!res.ok) return { ok: false, retry: true } as const;
+    // The parse is settled into a DISCRIMINATED result before the race — a
+    // wrapper on success, `null` on any parse failure — so that whichever
+    // promise loses cannot surface later as an unhandled rejection AND an
+    // unreadable body stays distinguishable from an empty one. Racing it
+    // against the signal is what makes the timer bound the READ as well as
+    // the headers.
+    const parsed: Promise<{ body: RefreshBody } | null> = res.json().then(
+      (body: RefreshBody) => ({ body }),
+      () => null
+    );
+    const raced = await Promise.race([parsed, rejectOnAbort(ctrl.signal)]);
+    // Two ways to have no answer, and neither is a rejection. The abort may
+    // have fired (the racers can then settle in either order, so the signal
+    // is read directly rather than inferred from who won); or the body was
+    // unreadable — a connection dropped mid-read, an empty 200, a captive
+    // portal's HTML, a proxy error page served as 200. Both throw into the
+    // `catch` below and come back transient. No timer can fire between the
+    // await and this line — a macrotask cannot preempt a running microtask —
+    // so a body that arrived in time is never discarded here.
+    if (ctrl.signal.aborted || raced === null) {
+      throw new Error('refresh answer not readable');
+    }
+    const body = raced.body;
+    // A 2xx with no token is a BROKEN RESPONSE, which is the reason not to
+    // act on it: it has told us nothing about the session either.
+    if (!body.accessToken || !body.expiresIn)
+      return { ok: false, retry: true } as const;
     return {
       ok: true,
       accessToken: body.accessToken,
       expiresIn: body.expiresIn
     } as const;
   } catch {
-    // Nothing here distinguishes WHY the fetch threw — the
-    // AbortSignal.timeout above firing, a DNS failure, the tab going
-    // offline, a rejected promise from the network stack. What matters is
-    // that we never got an answer at all. The naive "just add a timeout"
-    // fix lands here and falls through to a bare `{ ok: false }`, which the
-    // 401 branch in baseQueryWithRetry reads as a REAL negative answer and
-    // signs the user out (clearAccessToken + navigateToLogin) — turning
-    // "the network is slow" into "you are logged out", a worse bug than
-    // the hang it replaces. No answer is not the same as "no": per
-    // ADR-0017's 503 handling, a request whose outcome the client could
-    // not observe must not be read as a session that is over, so this
-    // returns the same transient `retry: true` outcome as the 503 branch
-    // above — keep the token, the caller (or the next proactive check)
-    // tries again. Do not "simplify" this back to a bare `{ ok: false }`.
+    // Nothing here distinguishes WHY the attempt threw — the abort firing
+    // (on the headers OR on the body read), an unreadable body, a DNS
+    // failure, the tab going offline, a rejected promise from the network
+    // stack. What matters is that we never got an answer at all. The naive
+    // "just add a timeout" fix lands here and falls through to a bare
+    // `{ ok: false }`, which the 401 branch in baseQueryWithRetry reads as a
+    // REAL negative answer and signs the user out (clearAccessToken +
+    // navigateToLogin) — turning "the network is slow" into "you are logged
+    // out", a worse bug than the hang it replaces. No answer is not the same
+    // as "no", so this returns the transient outcome, exactly as every
+    // non-401 status above does. Do not "simplify" this back to a bare
+    // `{ ok: false }` — that is the one outcome reserved for a refused
+    // credential.
     return { ok: false, retry: true } as const;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -242,29 +345,53 @@ function isTenantAgnostic(url: string): boolean {
   );
 }
 
+// The one predicate that decides whether a request carries a bearer, and
+// therefore the one that says whether it could have reached its handler.
+// prepareHeaders below withholds the Authorization header once the console's
+// own recorded expiry has passed — RequireAuth is bearer-only (ADR-0020), so
+// a token we already know is dead buys nothing — and the 401 branch in
+// baseQueryWithRetry has to know exactly that fact to tell a rejected-before-
+// dispatch 401 from an endpoint's own verdict. Two copies of the rule could
+// drift apart and turn the replay guard into a fiction, so there is one
+// function and both call sites use it. Distinct from tokenNeedsRefresh
+// above: that one asks "will it expire soon" (with a skew), this one asks
+// "is it alive right now" (no margin), which is the only question
+// prepareHeaders and the 401 branch ever ask.
+//
+// null also covers "no token at all", deliberately: a request that carries
+// no bearer is rejected by RequireAuth before dispatch exactly as an expired
+// one is, so on a PROTECTED route the handler provably never ran either way.
+// That argument stops at the route: a PUBLIC route runs its handler without
+// any bearer, so "no bearer sent" proves nothing there. Those routes are
+// excluded from the 401 branch by AUTH_ENDPOINT_PATHS above, which is what
+// keeps this reading of null sound — the two are one mechanism, not two.
+function liveBearer(state: RootState): string | null {
+  const accessToken = state.auth?.accessToken;
+  const tokenExpiry = state.auth?.tokenExpiry;
+  if (!accessToken || !tokenExpiry) return null;
+  return new Date(tokenExpiry) > new Date() ? accessToken : null;
+}
+
 // Base fetch with cookies + Bearer token. Tenant context (X-Tenant-ID) is
 // injected by baseQueryWithRetry below, where we have access to the request
 // args and can decide whether the endpoint is tenant-scoped.
 //
 // ADR-0003 PR-C: the operator dashboard targets the operator host
-// (`console.*`). The default below uses `console.localhost:3000` so a
-// fresh checkout boots against the operator mux directly; setups that
-// can't resolve `*.localhost` fall back to the host-mux's dev
-// fallthrough by setting VITE_BACKEND_URL=http://localhost:3000.
+// (`console.*` in staging/prod). In development it targets `localhost:3000`,
+// which the host mux's dev fallthrough serves off the operator mux — the
+// console's own origin is `localhost:8080`, and this request carries
+// `credentials: 'include'` against a `SameSite=Lax` refresh cookie, so the
+// two must be one site (spec §8 follow-up #13). Put the console on
+// `console.localhost` end to end if you prefer, but never one of each.
 const baseQuery = fetchBaseQuery({
   baseUrl: runtimeConfig.apiUrl,
   credentials: 'include',
   prepareHeaders: (headers, { getState }) => {
     headers.set('Content-Type', 'application/json');
 
-    const state = getState() as RootState;
-    const accessToken = state.auth?.accessToken;
-
-    if (accessToken) {
-      const tokenExpiry = state.auth?.tokenExpiry;
-      if (tokenExpiry && new Date(tokenExpiry) > new Date()) {
-        headers.set('Authorization', `Bearer ${accessToken}`);
-      }
+    const bearer = liveBearer(getState() as RootState);
+    if (bearer) {
+      headers.set('Authorization', `Bearer ${bearer}`);
     }
 
     return headers;
@@ -336,6 +463,15 @@ const baseQueryWithRetry: BaseQueryFn<
       );
     }
   }
+
+  // Captured BEFORE the fetch, because the 401 branch below asks a question
+  // about the request that actually went out: did it carry a live bearer?
+  // Reading the store back after the 401 answers a different question — a
+  // sibling tab may have rotated or signed out in the meantime, and either
+  // way the answer would no longer describe the request the server saw.
+  // This is the same state prepareHeaders reads (no await between here and
+  // the fetch), so the two cannot disagree.
+  const sentBearer = liveBearer(api.getState() as RootState);
 
   let result = await baseQuery(args, api, extraOptions);
 
@@ -460,6 +596,68 @@ const baseQueryWithRetry: BaseQueryFn<
     // the user stays signed in for as long as the refresh token is valid
     // instead of being kicked out every access-token window.
     if (!isAuthEndpoint(requestUrl) && !isSessionEndpoint) {
+      // …but ONLY on proof the request never reached its handler, because
+      // the retry re-sends it and a request that ran once may have consumed
+      // something. Four console routes answer 401 as a verdict on the
+      // REQUEST and none of them is in AUTH_ENDPOINT_PATHS (that
+      // hand-maintained allowlist is what failed open here): a wrong
+      // current password on change-password, or on /me/password-confirm,
+      // where the replay double-counts the lockout budget because the
+      // service records the failure under both the IP and the email key; a
+      // wrong code on mfa/verify or mfa/enroll/confirm, which burns the TOTP
+      // replay guard, consumes a backup code, or spends one of five
+      // enrolment attempts.
+      //
+      // Two independent proofs, either sufficient on its own:
+      //  (a) the server says it rejected an EXPIRED bearer before dispatch
+      //      (access_token_expired — the strongest proof, and the only one
+      //      that covers a token which was live when it left and expired in
+      //      flight);
+      //  (b) no live bearer went out at all, by prepareHeaders' own
+      //      predicate. On a protected route RequireAuth rejects that
+      //      before dispatch too — and only the protected ones reach here,
+      //      because AUTH_ENDPOINT_PATHS excludes the public auth routes,
+      //      which run their handler bearer-less by design. This is the
+      //      fallback ADR-0020 D3 assigns to this path — the proactive
+      //      rotation failed, so the dead bearer was withheld — and it is
+      //      what keeps the console recovering against a backend that does
+      //      not yet send (a): a missing-bearer 401 is codeless.
+      //
+      // Neither proof: no replay. The request may have run, so re-sending it
+      // is the hazard this whole gate exists to remove — and a mistyped
+      // password is not a dead session, so there is no sign-out either.
+      const handlerNeverRan =
+        errorData?.code === 'access_token_expired' || sentBearer === null;
+
+      // …but "no replay" is not the same as "do nothing", and for ONE input
+      // in this shape doing nothing is wrong. A live bearer was sent and the
+      // 401 carries no top-level code at all: almost always the handler's own
+      // verdict, and also exactly what a JWT signing-key rotation (or a
+      // restart with new key material) produces — every unexpired bearer then
+      // validates as plain "invalid" and RequireAuth answers a CODELESS 401
+      // (shared/middleware/auth.go). Against that the console used to do
+      // nothing whatsoever: no refresh, no toast, no sign-out, every request
+      // failing silently until the proactive check fired at
+      // `expiry − PROACTIVE_REFRESH_SKEW_MS` — up to TTL − 30 s, ≈14.5 min at
+      // the 15-minute default. So rotate ONCE and return the ORIGINAL 401
+      // untouched: the next request carries the fresh bearer, which collapses
+      // the window to a single request, and a genuinely dead session reaches
+      // the sign-out branch below instead of failing quietly for a quarter of
+      // an hour. The cost is one serialised rotation per verdict 401 — a
+      // wrong password now rotates the refresh cookie, which is harmless: the
+      // family is untouched, and performRefresh coalesces in-tab and takes
+      // the cross-tab lock, so a burst costs one rotation and not one each.
+      //
+      // CODELESS, not "anything but access_token_expired". A 401 that names
+      // itself has been explained by the server, and a token minted from the
+      // same cookie cannot change the answer — `audience_mismatch` is the
+      // live example, emitted by RequireAudience, unhandled by every branch
+      // ahead of this one, and identical after any rotation.
+      const rotateWithoutReplay =
+        !handlerNeverRan && errorData?.code === undefined;
+      if (!handlerNeverRan && !rotateWithoutReplay) {
+        return result;
+      }
       const refreshResult = await performRefresh(runtimeConfig.apiUrl);
       if (refreshResult.ok) {
         api.dispatch(
@@ -468,19 +666,30 @@ const baseQueryWithRetry: BaseQueryFn<
             expiresIn: refreshResult.expiresIn
           })
         );
+        if (rotateWithoutReplay) {
+          // The state is updated and that is the whole mitigation. The
+          // request that earned this 401 is never sent twice.
+          return result;
+        }
         result = await baseQuery(args, api, extraOptions);
         if (!result.error || result.error.status !== 401) {
           return result;
         }
         // Retry still returned 401 — fall through to the logout branch.
       } else if (refreshResult.retry) {
-        // 503: the server could not evaluate the session, which is not the
-        // same as the session being over. Surface the original error and
-        // keep the token — the next request will try again. Signing the
-        // user out here is the behaviour ADR-0017's 503 exists to prevent.
+        // 503, a 409 that survived its retry, or no answer at all: the server
+        // could not evaluate the session, which is not the same as the
+        // session being over. Surface the original error and keep the token —
+        // the next request will try again. Signing the user out here is the
+        // behaviour ADR-0017's 503 exists to prevent. (There is no `raced`
+        // arm to write: performRefresh retries a 409 once inside the lock and
+        // converts a second one to `retry` before returning, so `raced` never
+        // escapes it.)
         return result;
       }
-      // Refresh itself failed: drop the stale access token before redirecting.
+      // A bare `{ ok: false }` — the refresh cookie itself was refused, which
+      // IS the session's own death. Both arms above share this exit: drop the
+      // stale access token before redirecting.
       api.dispatch(clearAccessToken());
     }
 

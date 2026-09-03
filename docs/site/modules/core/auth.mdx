@@ -23,6 +23,80 @@ Almost every route is mirrored under `/v1/auth/operator/*` (Tier-1) and `/v1/aut
 
 Some surfaces exist on one tier only: session listing and OAuth link/unlink are operator-side self-service, while registration exists on both but is independently gated by config.
 
+Web OAuth is tier-aware end to end: a flow started on the client surface lands on the client SPA and a flow started on the console lands on the console, each under one closed callback contract (`success`/`provider`, an allowlisted `error` code, or an MFA continuation carried in the URL fragment) that never contains a token, an email or a user id. Because every provider redirects to the operator host and that host cannot set a client cookie, a client-tier login finishes through a single-use relay on the client API host, which also verifies that the browser completing the flow is the one that started it. A provider is offered to a surface only when its toggle is on **and** every field the flow needs is present; a defect on one provider removes that provider alone, while an unreadable auth document answers 503 everywhere so a configuration outage can never quietly widen access. An identity that has never been linked is matched to an existing account — or allowed to sign up — only with an address the identity provider itself marked verified.
+
+## SSO-only surface
+
+Either surface can be made **OAuth-only**: `passwordLoginEnabledAdmin` and
+`passwordLoginEnabledClient` (Login & Sessions, both default `true`) decide
+whether email/password is still an accepted way to sign in there. They are
+independent — the console can go SSO-only while the client app keeps
+passwords, or the reverse.
+
+**Turning one off is guarded so it cannot lock the surface out.** A config
+write that would leave a surface with nothing to sign in with is refused
+with **422 `auth.login_method_lockout`**, on every mutation path (an
+ordinary save, a save to a named environment, and activating an
+environment). There are exactly two ways to satisfy the guard for a
+surface: keep the password method enabled, **or** leave at least one
+OAuth provider both enabled for that surface *and* fully configured for
+it — client ID, redirect URL and secret; for Apple also team ID, key ID
+and a private key — **together with** "Auto-link OAuth provider to
+existing email account". Auto-link is part of the exit because it is what
+lets an account that was created with a password still be reached by its
+provider-verified email; without it, an SSO-only surface can be a closed
+door for everyone already registered. The guard reads the configuration
+you are about to save, not the one currently live, and it judges secret
+*presence* only — no secret value is involved.
+
+**The read is strict and fails closed.** The persisted value is parsed as
+a literal `true`/`false`; anything else — a malformed value, a missing
+`auth` config document, an unreachable store — answers **503
+`auth.policy_unavailable`** rather than assuming a default. An outage
+never re-opens a method an operator turned off, and it is never reported
+as a rejected password either.
+
+**What the switch blocks is new authentication, not existing access.**
+With it off for a surface, `login`, `register` and `forgot-password` on
+that surface answer **403 `auth.password_login_disabled`**; a login already
+paused for MFA cannot complete (the second factor is re-checked against
+the policy before it is even verified); an operator's *send password
+reset* for a user on that surface answers **409** rather than mailing a
+link for a method the surface refuses; step-up re-authentication stops
+offering the password-reconfirm fallback; and a password no longer counts
+as a credential when deciding whether unlinking an OAuth identity would
+strand the account. Two operator-only bootstrap paths stay open by
+design — the very first account on a fresh install, and the setup
+wizard's initial administrator — so a fresh install can never be
+unreachable. `reset-password`, `accept-invite`, `verify-email` and
+`change-password` also stay open: they redeem or replace a credential
+that already exists, and closing them would strand a reset already in
+flight.
+
+**Existing sessions are deliberately not revoked.** Flipping the switch
+changes what can authenticate *next*; anyone already signed in with a
+password stays signed in until their session ends normally. Revoking them
+is a separate, deliberate action. Two capabilities are named as
+follow-ups rather than shipped here: a "revoke every password-opened
+session on this surface" admin action (sessions already record the login
+method, so it is feasible), and consuming an invite token inside the
+OAuth callback so SSO-only clients need not lean on auto-link by email at
+all.
+
+The unauthenticated pages read the resulting state from `GET
+/v1/auth/{tier}/policy`, which carries `passwordLoginEnabled` for the
+surface, so the login page hides the password form instead of showing one
+that would 403 on submit. Both SPAs do this: the operator console renders
+its labelled emergency form only under break-glass, and the client SPA
+replaces the password form with the surface's usable OAuth providers (or a
+no-sign-in-method notice when none is configured).
+
+If the OAuth configuration then breaks on an SSO-only **console**, the
+operator break-glass restores password login for `POST
+/v1/auth/operator/login` alone, without reopening signups, resets or the
+client surface — see [Going SSO-only](/operating/oauth-providers#going-sso-only)
+for the procedure and the drill.
+
 ## Service accounts
 
 A machine caller — an integration, a CI job, a fork's own backend — authenticates with the OAuth2 **client-credentials** grant. Adopted in [ADR-0014](/adrs/service-accounts-client-credentials); operator console at `/admin/service-accounts`.
@@ -73,6 +147,8 @@ The grant mints `aud: "service"`. The operator host mux accepts the audience set
 
 Reads require `auth.service_accounts.read`. **Every mutation requires `auth.service_accounts.manage` plus a step-up MFA proof fresher than 5 minutes**, the same bar as every other secret-revealing admin mutation in this module. Revocation is deliberately not idempotent: revoking an already-revoked credential returns the same not-found outcome as revoking one that never existed, so there is no oracle distinguishing the two.
 
+The four `{id}` routes above gate on a directory read, and they **classify** it. An id the directory answers for and does not know — and a target that is a human user rather than a machine one — is **404 `service account not found`**, unchanged. A directory that could not be read at all is **503**, carrying `service_account_lookup_unavailable` in the response `detail`: an outage is not proof the account was deleted, and reporting it as one sends an operator hunting for a deletion that never happened. This is the same rule the refresh path applies to `refresh_lookup_unavailable`, one surface over.
+
 ### Operational caveats
 
 - **Disabling has bounded latency.** It stops new grants instantly, but a token minted just before remains cryptographically valid for up to the access-token TTL (default 15 minutes). This is accepted because permissions are never embedded in the token — the authz evaluator resolves them fresh per request, so unbinding roles or disabling the account changes its *authorization* immediately.
@@ -87,9 +163,18 @@ a timeout at all.
 
 | Lifetime | Controlled by | Default | What it means |
 |---|---|---|---|
-| Access token | admin `accessTokenTTL` → `JWT_ACCESS_TOKEN_EXPIRY` → 15m | 15m | How long a minted access token is accepted. Range 1m–24h; longer values are clamped, because the Redis revocation denylist stores entries for 24h + 1min and a token must never outlive its own revocation entry. |
+| Access token | admin `accessTokenTTL` (the level that governs — `JWT_ACCESS_TOKEN_EXPIRY` is a fallback a seeded install never reaches) | 15m | How long a minted access token is accepted. Range 1m–24h; longer values are clamped, because the Redis revocation denylist stores entries for 24h + 1min and a token must never outlive its own revocation entry. |
 | Idle window | `JWT_REFRESH_TOKEN_EXPIRY` | 7d | **This is the idle timeout.** Rotation writes a fresh `now + this` on every refresh, so a session ends only after this long *without* activity — it is not a separate control. |
 | Absolute cap | admin `sessionAbsoluteTTL` | 30d (`720h`) | The maximum total age of a session, measured from login, independent of activity. Range 1h–89d; **clearing the field disables the cap.** |
+
+**Changing the access-token TTL.** Set `accessTokenTTL` at
+`/admin/modules/auth`, or `PATCH /v1/admin/modules/auth`. The environment
+variable `JWT_ACCESS_TOKEN_EXPIRY` is the documented fallback, but on a normal
+deployment it is never reached: the field is declared in the auth module's
+config schema with a `15m` default and **no** environment binding, so first boot
+seeds that value into `module_configs` and the config service returns the same
+default even for a field an operator has cleared — the admin value always wins.
+Setting the variable on its own changes nothing.
 
 Reaching the absolute cap is a **logout**, not a denial: the session's refresh
 tokens are revoked, the session document is marked inactive, and the session
@@ -118,6 +203,38 @@ sign-out and a client must not treat it as one — both shipped SPAs keep the
 access token and retry on the next request. Reporting a storage outage as an
 authentication failure would train clients to discard sessions that are still
 perfectly valid.
+
+The same argument covers the rotation itself. When the **rotation** path cannot
+*complete* — a cookie candidate cannot be looked up, the token store or the
+user store is unreachable, signing fails, the rotating write fails, or the
+server holds no verifying key to check the presented refresh token with —
+`POST /v1/auth/{tier}/refresh-cookie` and `POST /v1/auth/{tier}/refresh` answer
+**503 `refresh_lookup_unavailable`** rather than 401. It is a
+separate code from `session_enforcement_unavailable` only so the failing
+subsystem is legible in a support ticket; both are 503 and every client
+already treats 503 as transient. An account that has genuinely been deleted
+still answers 401 — otherwise a dead session could never end.
+
+The bootstrap endpoint `GET /v1/auth/session` is covered end to end too. Its
+cookie-classification step answers 503, and so does the read-only mint it
+performs afterwards (`MintAccessTokenFromRefresh`) — its own token lookup, its
+own user lookup and its own signing call. That mint reads the store a *second*
+time, after the cookie has already been classified, so a blip opening between
+the two used to answer session bootstrap with a codeless 401: the one status a
+client reads as the end of the session. A genuinely deleted account still
+answers 401 there as well, so a dead session can still end. Every *other*
+validation failure at those endpoints — a malformed JWT, a bad signature, a
+wrong token type, a wrong audience, an expired refresh row — is a verdict on
+the credential and keeps its 401; only the server's own failures move.
+
+**Protected routes have their own version of the same rule.** If no verifying
+key is loaded, `RequireAuth` can check no bearer on any route on either tier,
+and it answers **503 `token_verification_unavailable`** instead of the codeless
+401 it used to give. No `WWW-Authenticate` accompanies it: the header names a
+scheme to retry with and there is none. A boot with no key material is not a
+blip — no client-side retry helps — so this is the server saying it cannot
+authenticate anyone, not that this session ended, and neither SPA clears
+anything on it. Nothing about what is *accepted* changes.
 
 ### Upgrading
 
@@ -168,7 +285,7 @@ Keys in the **system set** are granted by the `super_admin` / `administrator` / 
 
 ## Config
 
-auth is by far the largest configuration surface in the base — 63 fields at `/admin/modules/auth`, arranged into a group rail: **Registration**, **Login & Sessions**, **Password Policy**, **MFA**, **OAuth Providers** (with Google, Apple, GitHub, and Discord as child nodes), **Anti-abuse & Notifications**, and **Sessions & Account**. Fields are seeded from their `EnvVar` on first boot and owned by the ConfigService thereafter — see [Module configuration](/operating/module-configuration) and [OAuth providers](/operating/oauth-providers) for the operator walkthrough.
+auth is by far the largest configuration surface in the base — 65 fields at `/admin/modules/auth`, arranged into a group rail: **Registration**, **Login & Sessions**, **Password Policy**, **MFA**, **OAuth Providers** (with Google, Apple, GitHub, and Discord as child nodes), **Anti-abuse & Notifications**, and **Sessions & Account**. Fields are seeded from their `EnvVar` on first boot and owned by the ConfigService thereafter — see [Module configuration](/operating/module-configuration) and [OAuth providers](/operating/oauth-providers) for the operator walkthrough.
 
 The **Login & Sessions** group's `sessionAbsoluteTTL` is the admin-facing field behind the absolute cap — see [Session lifetime](#session-lifetime) above for what it does and enforces.
 

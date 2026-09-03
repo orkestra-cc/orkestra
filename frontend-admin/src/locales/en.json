@@ -203,7 +203,10 @@
       "registerTitle": "Create account",
       "registerSubtitle": "Get started with Orkestra in a minute.",
       "forgotTitle": "Reset password",
-      "resetTitle": "Choose a new password"
+      "resetTitle": "Choose a new password",
+      "loginNoMethod": "No sign-in method is currently available on this console. Contact an administrator.",
+      "passwordLoginDisabled": "Email/password sign-in is disabled on this surface. Use a configured sign-in provider, or contact an administrator.",
+      "passwordBreakGlassActive": "Emergency access mode — email/password sign-in is temporarily restored for operators only. Repair the sign-in provider configuration, then disable the override."
     },
     "email": "Email",
     "password": "Password",
@@ -341,12 +344,24 @@
       "callback": {
         "failureTitle": "Authentication failed",
         "redirectingToLogin": "Redirecting to the sign-in page...",
-        "oauthErrorPrefix": "OAuth error",
-        "genericFailure": "Authentication failed"
+        "verifying": "Completing sign-in...",
+        "sessionSignedOut": "Sign-in completed, but no session could be established. Please sign in again.",
+        "sessionUnavailable": "The server could not confirm your session right now. Try again in a moment.",
+        "retry": "Try again",
+        "backToLogin": "Back to sign-in",
+        "errors": {
+          "accessDenied": "Sign-in was cancelled at the identity provider.",
+          "signupDisabled": "Sign-up is currently invitation-only. Contact an administrator.",
+          "linkDisabled": "An account with this email already exists. Sign in and link the provider from your security settings.",
+          "emailUnverified": "The identity provider has not verified this email address, so it cannot be used to sign in.",
+          "providerUnavailable": "This sign-in provider is temporarily unavailable. Try again later.",
+          "loginFailed": "Authentication failed. Please try again."
+        }
       }
     },
     "errors": {
       "missingFields": "Please enter both email and password.",
+      "invalidEmail": "Enter a valid email address.",
       "fillRequiredFields": "Please fill in all required fields.",
       "passwordTooShort": "Password must be at least {{count}} characters.",
       "acceptTerms": "You must accept the terms to continue.",
@@ -541,6 +556,7 @@
         "passwordAgeKnown_one": "Password updated {{count}} day ago",
         "passwordAgeKnown_other": "Password updated {{count}} days ago",
         "passwordAgeUnknown": "Password update date unknown",
+        "passwordKeptNotice": "— sign-in with it is disabled on this surface",
         "oauthLinked": "Sign-in providers:"
       }
     },
@@ -1176,6 +1192,7 @@
     "passwordTab": {
       "title": "Change password",
       "ssoOnlyHint": "Your account uses a single sign-on provider only. Set a password here to add a second login method.",
+      "keptNotice": "Email/password sign-in is disabled on this surface; your stored password is retained for a later re-enable.",
       "labelCurrent": "Current password",
       "labelNew": "New password",
       "labelConfirm": "Confirm new password",
@@ -1260,6 +1277,7 @@
       "emptyHasMore": "Use the “Link a sign-in” button above to add one.",
       "emptyAllLinked": "All supported providers have been linked.",
       "onlyCredentialWarning": "This is your only login method. Unlinking it would lock you out — set a password first.",
+      "onlyCredentialWarningPasswordDisabled": "This is your only sign-in method accepted on this surface — email/password sign-in is disabled here, so unlinking it would lock you out. Link another provider first.",
       "colProvider": "Provider",
       "colEmail": "Email",
       "colLinked": "Linked",
@@ -1852,6 +1870,7 @@
       "passwordLastChanged": "Last changed {{date}}",
       "passwordOauthOnly": "No password set — user signs in via OAuth only.",
       "passwordSendResetButton": "Send password-reset email",
+      "resetBlockedPolicy": "Email/password sign-in is disabled on this user's surface — a reset link would mint a credential the surface refuses.",
       "emailTitle": "Email verification",
       "emailBadgeVerified": "Verified",
       "emailBadgeUnverified": "Unverified",
@@ -1882,6 +1901,7 @@
       "oauthLinkedAt": "linked {{date}}",
       "oauthBlockSelf": "You cannot unlink your own OAuth identity from the admin surface.",
       "oauthBlockOnlyCredential": "Send a password-reset first to keep the account accessible.",
+      "oauthBlockOnlyCredentialPasswordDisabled": "This is the only sign-in method this surface currently accepts — email/password sign-in is disabled here, so unlinking it would lock the user out. Re-enable password sign-in for this surface, or have the user link another provider, before unlinking.",
       "oauthActionsAria": "actions for {{provider}}",
       "oauthUnlinkMenuItem": "Unlink…",
       "unlinkConfirmTitle": "Unlink {{provider}}?",
@@ -2306,7 +2326,8 @@
       "running": "running",
       "failed": "failed",
       "disabled": "disabled",
-      "stopped": "stopped"
+      "stopped": "stopped",
+      "missing": "missing"
     },
     "filters": {
       "searchPlaceholder": "Search modules...",
@@ -2378,7 +2399,11 @@
         "switchEnvBody": "You have unsaved configuration changes. Switching to {{environment}} will discard them.",
         "switchEnvConfirm": "Discard and switch",
         "stay": "Stay",
-        "leave": "Leave"
+        "leave": "Leave",
+        "revisionConflict": "Another operator changed this module's configuration after you loaded it. Reload to review your edits against the latest values before saving.",
+        "reloadFailed": "Reloading the latest configuration failed. Try again before saving.",
+        "reloadDroppedEdits_one": "{{count}} of your edits belonged to an entry another operator removed and was discarded.",
+        "reloadDroppedEdits_other": "{{count}} of your edits belonged to entries another operator removed and were discarded."
       },
       "saveBar": {
         "changes_one": "{{count}} unsaved change",
@@ -2386,7 +2411,8 @@
         "perGroup": "{{group}} ({{count}})",
         "errors_one": "{{count}} field needs attention",
         "errors_other": "{{count}} fields need attention",
-        "goToError": "Go to {{group}}"
+        "goToError": "Go to {{group}}",
+        "reloadReview": "Reload & review"
       },
       "rail": {
         "overview": "Overview",
@@ -2447,6 +2473,7 @@
       }
     },
     "loadError": "Failed to load modules. Check your permissions.",
+    "missingConfig": "Configuration document missing — restore it or restart the backend.",
     "footer": {
       "total_one": "{{count}} module total",
       "total_other": "{{count}} modules total",
@@ -2745,14 +2772,32 @@
     },
     "compliance": {
       "groups": {
-        "soc2": { "label": "SOC2 evidence", "desc": "The SOC2 evidence page and API, off unless you pursue certification." },
-        "retention": { "label": "Retention & DSR", "desc": "How long anonymized tombstones and generated DSR exports are kept." }
+        "soc2": {
+          "label": "SOC2 evidence",
+          "desc": "The SOC2 evidence page and API, off unless you pursue certification."
+        },
+        "retention": {
+          "label": "Retention & DSR",
+          "desc": "How long anonymized tombstones and generated DSR exports are kept."
+        }
       },
       "fields": {
-        "soc2_enabled": { "label": "SOC2 evidence", "desc": "Expose the SOC2 evidence admin page and API. Off by default — enable only for deployments pursuing SOC2 certification." },
-        "auto_cleanup_enabled": { "label": "Retention auto-cleanup", "desc": "Run a daily job that hard-deletes anonymized user tombstones past the retention window. OFF by default — this is irreversible bulk deletion." },
-        "retention_years": { "label": "Retention years", "desc": "Years an anonymized tombstone is kept before auto-cleanup may hard-delete it." },
-        "export_retention_days": { "label": "Export retention (days)", "desc": "Days a generated DSR export stays downloadable before it expires." }
+        "soc2_enabled": {
+          "label": "SOC2 evidence",
+          "desc": "Expose the SOC2 evidence admin page and API. Off by default — enable only for deployments pursuing SOC2 certification."
+        },
+        "auto_cleanup_enabled": {
+          "label": "Retention auto-cleanup",
+          "desc": "Run a daily job that hard-deletes anonymized user tombstones past the retention window. OFF by default — this is irreversible bulk deletion."
+        },
+        "retention_years": {
+          "label": "Retention years",
+          "desc": "Years an anonymized tombstone is kept before auto-cleanup may hard-delete it."
+        },
+        "export_retention_days": {
+          "label": "Export retention (days)",
+          "desc": "Days a generated DSR export stays downloadable before it expires."
+        }
       }
     },
     "notification": {

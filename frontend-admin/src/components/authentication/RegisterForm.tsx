@@ -2,7 +2,11 @@ import { useState, FormEvent } from 'react';
 import { Alert, Button, Form } from 'react-bootstrap';
 import { Link, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { useGetAuthPolicyQuery, useRegisterMutation } from 'store/api/authApi';
+import {
+  passwordUiVisible,
+  useGetAuthPolicyQuery,
+  useRegisterMutation
+} from 'store/api/authApi';
 
 const RegisterForm = () => {
   const { t } = useTranslation();
@@ -64,6 +68,19 @@ const RegisterForm = () => {
     }
   };
 
+  // G5: signing up mints a password credential, so the whole surface is
+  // gated on the persisted method — a served false OR null closes it, and
+  // break-glass does NOT reopen it (that override restores operator login
+  // only, never credential creation). Direct navigation must not show a
+  // working form.
+  if (!passwordUiVisible(policy)) {
+    return (
+      <Alert variant="warning" className="mb-3">
+        {t('auth.pages.passwordLoginDisabled')}
+      </Alert>
+    );
+  }
+
   return (
     <Form onSubmit={handleSubmit}>
       {!registrationEnabled && (
@@ -82,7 +99,7 @@ const RegisterForm = () => {
         </Alert>
       )}
 
-      <Form.Group className="mb-3">
+      <Form.Group className="mb-3" controlId="register-full-name">
         <Form.Label>{t('auth.fullName')}</Form.Label>
         <Form.Control
           type="text"
@@ -93,7 +110,7 @@ const RegisterForm = () => {
         />
       </Form.Group>
 
-      <Form.Group className="mb-3">
+      <Form.Group className="mb-3" controlId="register-email">
         <Form.Label>{t('auth.email')}</Form.Label>
         <Form.Control
           type="email"
@@ -104,7 +121,7 @@ const RegisterForm = () => {
         />
       </Form.Group>
 
-      <Form.Group className="mb-3">
+      <Form.Group className="mb-3" controlId="register-password">
         <Form.Label>{t('auth.password')}</Form.Label>
         <Form.Control
           type="password"
@@ -119,7 +136,7 @@ const RegisterForm = () => {
         </Form.Text>
       </Form.Group>
 
-      <Form.Group className="mb-3">
+      <Form.Group className="mb-3" controlId="register-confirm-password">
         <Form.Label>{t('auth.confirmPassword')}</Form.Label>
         <Form.Control
           type="password"

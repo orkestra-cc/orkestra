@@ -4,6 +4,40 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.10.0] - 2026-08-29
+
+### ⚠️ Breaking Changes
+
+- **(auth)** Make RequireAuth bearer-only — drop the middleware silent refresh ([1872116](https://github.com/orkestra-cc/orkestra/commit/18721162169e70bda5f35c510d16c3f9b373603f))
+
+### Bug fixes
+
+- **(auth)** Address #317 review findings — structural rotation tripwire + doc fixes ([7769000](https://github.com/orkestra-cc/orkestra/commit/776900043db268f859b11bfd7070f22d123f2597))
+- **(frontend-admin)** Bound the proactive refresh fetch with a timeout ([43e432f](https://github.com/orkestra-cc/orkestra/commit/43e432f2f76e76eb56fd4d9ab7e07431c7edf624))
+- **(auth)** Enforce a floor on NewJWTService's access-token TTL ([b3fdefe](https://github.com/orkestra-cc/orkestra/commit/b3fdefee3652b160ec3a03c80b3d41931be82ee6))
+- **(frontend-admin)** Rotate the access token before it expires (#317) ([30beb96](https://github.com/orkestra-cc/orkestra/commit/30beb9684fa8664729bf69e6ee42cd8da3f9be8a))
+- **(docker)** Run bundled MongoDB as a single-node replica set ([1962a0e](https://github.com/orkestra-cc/orkestra/commit/1962a0e41c81f0335f64122445697be1e04247ff))
+- **(tenant)** Key the bootstrap queries on the validated org ([2ce8bb2](https://github.com/orkestra-cc/orkestra/commit/2ce8bb2e95aed58bf010eb55a788da836c0a2bd1))
+
+### Refactor
+
+- **(frontend-admin)** Delete the dormant third refresh caller ([25c85dc](https://github.com/orkestra-cc/orkestra/commit/25c85dc138cd9b7fffe8d5b2189cdfed42578174))
+
+### Documentation
+
+- **(auth)** Name both reintroduction guards and their residue; drop a dead guide ([d59812e](https://github.com/orkestra-cc/orkestra/commit/d59812e1c8c68011f170cb26ed3f2d776895113e))
+- **(auth)** Correct comments that outlived the middleware silent refresh ([9e8ac9d](https://github.com/orkestra-cc/orkestra/commit/9e8ac9d54470a30294a6683047cf79fe671e6dd3))
+- **(adr)** ADR-0020 — RequireAuth is bearer-only, rotation only via explicit refresh endpoints ([9b4cfb6](https://github.com/orkestra-cc/orkestra/commit/9b4cfb619818ad390e4d80413af953f175bac0c1))
+
+### Tests
+
+- **(auth)** Close mint-only gap in the #317 cookie-rotation guard ([f1b00f9](https://github.com/orkestra-cc/orkestra/commit/f1b00f9a36a2fec6991ac715ed5d17743a52bfae))
+- **(store)** Guard RTK Query endpoint-name uniqueness ([0dfc576](https://github.com/orkestra-cc/orkestra/commit/0dfc576c1ef6b611157b7a44cbab3b2cbd64e947))
+
+### Release
+
+- **(v0.10.0)** Promote dev ([e68e318](https://github.com/orkestra-cc/orkestra/commit/e68e3180caa5a4b3792a297a28bd1736ce69b758))
+
 ## [0.9.0] - 2026-08-26
 
 ### Features

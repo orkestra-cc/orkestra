@@ -199,7 +199,24 @@ type ForgotPasswordResponse struct {
 
 func (h *PasswordAuthHandler) ForgotPassword(ctx context.Context, req *ForgotPasswordRequest) (*ForgotPasswordResponse, error) {
 	ip := clientIPFromCtx(ctx)
-	_ = h.svc.ForgotPassword(ctx, req.Body.Email, ip)
+	// Spec §4.3: this endpoint propagates ONLY the two per-surface policy
+	// sentinels. They are decided before the user lookup, so neither can
+	// carry account information. The service swallows every
+	// account-specific outcome itself; enforcing the contract here as
+	// well means a future service-side error cannot turn the generic body
+	// into an enumeration oracle by answering differently for some
+	// addresses — anything else falls through to the same success body
+	// the pre-toggle handler always returned.
+	if err := h.svc.ForgotPassword(ctx, req.Body.Email, ip); err != nil {
+		if errors.Is(err, services.ErrPasswordLoginDisabled) ||
+			errors.Is(err, services.ErrAuthPolicyUnavailable) {
+			return nil, mapPasswordError(err)
+		}
+		// A bug or an infrastructure failure. Logged for an operator —
+		// never with the address, which is the thing being protected.
+		slog.Default().Warn("forgot password: unexpected service error, answering generically",
+			slog.String("error", err.Error()))
+	}
 	resp := &ForgotPasswordResponse{}
 	resp.Body.Success = true
 	resp.Body.Message = "If an account with that email exists, a password reset email has been sent."
@@ -432,6 +449,12 @@ func mapPasswordError(err error) error {
 	case errors.Is(err, services.ErrLoginDisabled):
 		return errcode.Forbidden(errcode.AuthLoginDisabled,
 			"Login is temporarily disabled for this surface. Contact an administrator.")
+	case errors.Is(err, services.ErrPasswordLoginDisabled):
+		return errcode.Forbidden(errcode.AuthPasswordLoginDisabled,
+			"Email/password sign-in is disabled on this surface. Use a configured sign-in provider, or contact an administrator.")
+	case errors.Is(err, services.ErrAuthPolicyUnavailable):
+		return errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
+			"Sign-in policy is temporarily unavailable; try again shortly.")
 	case errors.Is(err, services.ErrCountryBlocked):
 		return errcode.Forbidden(errcode.AuthCountryBlocked,
 			"Access from your country is not permitted.")

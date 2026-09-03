@@ -20,6 +20,77 @@ import (
 // interface so the MFA handler doesn't import the whole password service.
 type LoginTokenIssuer interface {
 	IssueLoginTokensForSession(ctx context.Context, user *iface.User, in services.LoginTokenContext, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error)
+	// EmitBreakGlassUsed records a rescued password authentication (spec
+	// §4.2). On the interface — not an optional assertion — so a fake
+	// cannot silently drop the audit contract.
+	EmitBreakGlassUsed(ctx context.Context, audience, userUUID, sessionID, ip string)
+}
+
+// passwordLoginDecider is the one-method slice of AuthPolicyService the
+// completion re-check consumes; tests inject a fake.
+type passwordLoginDecider interface {
+	PasswordLoginDecision(ctx context.Context, audience services.PolicyAudience) (services.PasswordAuthDecision, error)
+}
+
+// recheckPasswordChallenge enforces spec §4.3's pending-challenge rule on
+// both completion endpoints, BEFORE the factor is verified (a disabled
+// login must not burn attempt budget or probe factor state):
+//
+//   - challenge not password-sourced → untouched, (false, nil);
+//   - empty/unknown audience → pre-toggle in-flight challenge: consumed,
+//     401 (rollout waits one challenge TTL before exposing the switch);
+//   - decision error → 503 auth.policy_unavailable WITHOUT consuming, so
+//     a transient outage is retryable inside the original TTL;
+//   - !Allowed → atomically consumed, 403 auth.password_login_disabled;
+//   - Allowed → (BreakGlassUsed, nil); the one-winner Consume stays with
+//     the caller's existing flow.
+//
+// A nil decider on a password-sourced challenge is missing wiring — an
+// outage, never a pass (G4).
+func recheckPasswordChallenge(ctx context.Context, policy passwordLoginDecider, challenges services.MFAChallengeService, ch *services.MFAChallenge) (bool, error) {
+	if !passwordSourcedChallenge(ch) {
+		return false, nil
+	}
+	var audience services.PolicyAudience
+	switch ch.Audience {
+	case string(services.PolicyAudienceOperator):
+		audience = services.PolicyAudienceOperator
+	case string(services.PolicyAudienceClient):
+		audience = services.PolicyAudienceClient
+	default:
+		_, _ = challenges.Consume(ctx, ch.ID)
+		return false, huma.Error401Unauthorized("invalid or expired challenge")
+	}
+	if policy == nil {
+		return false, errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
+			"Sign-in policy is temporarily unavailable; try again shortly.")
+	}
+	decision, err := policy.PasswordLoginDecision(ctx, audience)
+	if err != nil {
+		return false, errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
+			"Sign-in policy is temporarily unavailable; try again shortly.")
+	}
+	if !decision.Allowed {
+		_, _ = challenges.Consume(ctx, ch.ID)
+		return false, errcode.Forbidden(errcode.AuthPasswordLoginDisabled,
+			"Email/password sign-in was disabled while this login was in flight. Start over with a configured sign-in provider.")
+	}
+	return decision.BreakGlassUsed, nil
+}
+
+// passwordSourcedChallenge reports whether the login challenge was minted
+// by a password login (either provenance marker; both are stamped today —
+// password_auth_service.go completeLogin, auth_service.go OAuth branch).
+func passwordSourcedChallenge(ch *services.MFAChallenge) bool {
+	if ch.LoginMethod == "password" {
+		return true
+	}
+	for _, v := range ch.SourceAMR {
+		if v == "pwd" {
+			return true
+		}
+	}
+	return false
 }
 
 // adminAuthRecorder is the narrow slice of AuthService MFAHandler needs
@@ -98,10 +169,25 @@ func (h *MFAHandler) SetDeviceTrust(dt services.DeviceTrustService) {
 
 // SetPolicy wires the admin-managed AuthPolicyService so the Status
 // endpoint reports the configured grace deadline (instead of the
-// hardcoded 7-day fallback) and honours the master mfaEnabled flag.
-// Optional — nil falls back to legacy hardcoded values.
+// hardcoded 7-day fallback), honours the master mfaEnabled flag, and lets
+// LoginVerify re-evaluate a password-sourced challenge's per-surface
+// policy at completion time (spec §4.3). Wired unconditionally in
+// module.go. Nil still falls back to the legacy hardcoded values for the
+// MFA-enabled / grace reads, but it makes every PASSWORD-SOURCED
+// completion fail closed with 503 auth.policy_unavailable — see decider
+// and recheckPasswordChallenge above.
 func (h *MFAHandler) SetPolicy(p *services.AuthPolicyService) {
 	h.policy = p
+}
+
+// decider adapts the handler's concrete policy pointer to the helper's
+// interface, mapping a nil pointer to a nil INTERFACE so missing wiring
+// takes the fail-closed 503 branch instead of a typed-nil surprise.
+func (h *MFAHandler) decider() passwordLoginDecider {
+	if h.policy == nil {
+		return nil
+	}
+	return h.policy
 }
 
 // --- Enrollment ---
@@ -482,6 +568,14 @@ func (h *MFAHandler) LoginVerify(ctx context.Context, req *MFALoginVerifyRequest
 		return nil, huma.Error401Unauthorized("invalid or expired challenge")
 	}
 
+	// Spec §4.3: a password-sourced challenge must still be allowed NOW
+	// (before the factor is verified, so a disabled login can neither
+	// burn attempt budget nor probe factor state — deviation 6).
+	rescued, err := recheckPasswordChallenge(ctx, h.decider(), h.challenges, ch)
+	if err != nil {
+		return nil, err
+	}
+
 	if req.Body.UseBackup {
 		if err := h.mfa.VerifyBackupCode(ctx, ch.UserUUID, req.Body.Code); err != nil {
 			_, _ = h.challenges.IncrementAttempts(ctx, req.Body.ChallengeID)
@@ -516,6 +610,13 @@ func (h *MFAHandler) LoginVerify(ctx context.Context, req *MFALoginVerifyRequest
 	}, amr, time.Now().Unix())
 	if err != nil {
 		return nil, huma.Error500InternalServerError("failed to mint login tokens")
+	}
+
+	// One rescued-login audit event per winning completion (spec §4.2):
+	// either the initial password check or this completion's decision
+	// used the break-glass. Only the Consume winner reaches this line.
+	if rescued || ch.BreakGlassUsed {
+		h.tokens.EmitBreakGlassUsed(ctx, ch.Audience, ch.UserUUID, ch.SessionID, ch.IPAddress)
 	}
 
 	// Section C item #3: if the user opted into "remember this device",

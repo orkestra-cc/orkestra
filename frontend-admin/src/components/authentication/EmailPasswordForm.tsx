@@ -1,15 +1,29 @@
-import { useState, FormEvent } from 'react';
+import { useState } from 'react';
 import { Alert, Button, Form } from 'react-bootstrap';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
+import { useForm } from 'react-hook-form';
+import { yupResolver } from '@hookform/resolvers/yup';
+import * as yup from 'yup';
 import { useAppDispatch } from 'store/hooks';
-import { useGetAuthPolicyQuery, useLoginMutation } from 'store/api/authApi';
+import {
+  passwordUiVisible,
+  useGetAuthPolicyQuery,
+  useLoginMutation
+} from 'store/api/authApi';
 import { login as loginAction } from 'store/slices/authSlice';
 import {
   DEFAULT_POST_LOGIN,
   locationToReturnTo,
   sanitizeReturnTo
 } from 'utils/returnTo';
+
+const schema = yup.object({
+  email: yup.string().email().required(),
+  password: yup.string().required()
+});
+
+type LoginFormData = yup.InferType<typeof schema>;
 
 const EmailPasswordForm = () => {
   const { t } = useTranslation();
@@ -22,27 +36,33 @@ const EmailPasswordForm = () => {
   const returnTo = sanitizeReturnTo(
     locationToReturnTo((location.state as { from?: unknown } | null)?.from)
   );
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
   const [login, { isLoading }] = useLoginMutation();
-  // Surface admin-managed kill switches — hide the signup CTA when
-  // self-service registration is off, show a maintenance banner when
-  // login itself is paused. Falls open (everything enabled) on error
-  // so a degraded /policy fetch doesn't block legitimate users.
+  const {
+    register,
+    handleSubmit,
+    formState: { errors }
+  } = useForm<LoginFormData>({ resolver: yupResolver(schema) });
+  // Surface admin-managed kill switches. The transport-failure fallback in
+  // authApi keeps everything enabled so a degraded /policy fetch doesn't
+  // block legitimate users; a SERVED false/null is honoured strictly.
   const { data: policy } = useGetAuthPolicyQuery();
   const loginEnabled = policy?.loginEnabled ?? true;
   const registrationEnabled = policy?.registrationEnabled ?? true;
+  const breakGlass = policy?.passwordLoginBreakGlassEffective ?? false;
+  const persistedOn = passwordUiVisible(policy);
 
-  const handleSubmit = async (event: FormEvent) => {
-    event.preventDefault();
+  // G5: persisted false/null hides the password UI entirely — the backend
+  // would 403 anyway; a sign-in page must not advertise a dead method.
+  // The ONE exception is the labelled emergency form under break-glass.
+  if (!persistedOn && !breakGlass) return null;
+
+  // Under break-glass with the persisted method off, this is an emergency
+  // surface: label it, and hide every credential-minting CTA.
+  const emergencyOnly = breakGlass && !persistedOn;
+
+  const onSubmit = handleSubmit(async ({ email, password }) => {
     setLocalError(null);
-
-    if (!email || !password) {
-      setLocalError(t('auth.errors.missingFields'));
-      return;
-    }
-
     try {
       const result = await login({ email, password }).unwrap();
 
@@ -81,10 +101,15 @@ const EmailPasswordForm = () => {
         setLocalError(anyErr?.data?.detail || t('auth.errors.unableToSignIn'));
       }
     }
-  };
+  });
 
   return (
-    <Form onSubmit={handleSubmit}>
+    <Form onSubmit={onSubmit} noValidate>
+      {emergencyOnly && (
+        <Alert variant="warning" className="mb-3">
+          {t('auth.pages.passwordBreakGlassActive')}
+        </Alert>
+      )}
       {!loginEnabled && (
         <Alert variant="warning" className="mb-3">
           {t('auth.loginDisabled')}
@@ -105,31 +130,37 @@ const EmailPasswordForm = () => {
         <Form.Label>{t('auth.email')}</Form.Label>
         <Form.Control
           type="email"
-          name="email"
           placeholder={t('auth.emailPlaceholder')}
-          value={email}
-          onChange={e => setEmail(e.target.value)}
           autoComplete="email"
-          required
+          isInvalid={!!errors.email}
+          {...register('email')}
         />
+        <Form.Control.Feedback type="invalid">
+          {errors.email?.type === 'email'
+            ? t('auth.errors.invalidEmail')
+            : t('auth.errors.missingFields')}
+        </Form.Control.Feedback>
       </Form.Group>
 
       <Form.Group className="mb-3" controlId="login-password">
         <div className="d-flex justify-content-between">
           <Form.Label>{t('auth.password')}</Form.Label>
-          <Link to="/forgot-password" className="fs-10">
-            {t('auth.forgotPassword')}
-          </Link>
+          {!emergencyOnly && (
+            <Link to="/forgot-password" className="fs-10">
+              {t('auth.forgotPassword')}
+            </Link>
+          )}
         </div>
         <Form.Control
           type="password"
-          name="password"
           placeholder={t('auth.passwordPlaceholder')}
-          value={password}
-          onChange={e => setPassword(e.target.value)}
           autoComplete="current-password"
-          required
+          isInvalid={!!errors.password}
+          {...register('password')}
         />
+        <Form.Control.Feedback type="invalid">
+          {t('auth.errors.missingFields')}
+        </Form.Control.Feedback>
       </Form.Group>
 
       <div className="d-grid mb-3">
@@ -143,7 +174,7 @@ const EmailPasswordForm = () => {
         </Button>
       </div>
 
-      {registrationEnabled && (
+      {registrationEnabled && !emergencyOnly && (
         <div className="text-center">
           <small className="text-muted">
             {t('auth.noAccount')}{' '}

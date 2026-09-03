@@ -231,6 +231,34 @@ type AdminAuthInviter interface {
 	AdminTriggerPasswordReset(ctx context.Context, userUUID string) error
 }
 
+// ErrPasswordLoginDisabled reports that the email/password method is
+// administratively disabled for the surface the target user signs in on
+// (auth module keys passwordLoginEnabled{Admin,Client}). Declared here —
+// not in the auth module — because AdminAuthInviter consumers in other
+// modules must map it across the module boundary with errors.Is: the
+// admin send-password-reset routes answer 409 with it. The auth module's
+// services package aliases it, so both names are one identity.
+var ErrPasswordLoginDisabled = errors.New("password login disabled for this surface")
+
+// ErrAuthPolicyUnavailable reports that a persisted sign-in policy — or
+// the auth config document it lives in — could not be read or parsed.
+// The decision fails closed (503 auth.policy_unavailable), never open.
+// Shares this file for the same reason as ErrPasswordLoginDisabled:
+// AdminAuthInviter consumers map it with errors.Is.
+var ErrAuthPolicyUnavailable = errors.New("auth policy unavailable")
+
+// ErrUserNotFound is the cross-module "this user does not exist" sentinel.
+//
+// It exists because a consumer outside the user module — auth's refresh path,
+// which must answer 401 for a deleted account and 503 for an unreachable store
+// — cannot import internal/core/user/services to compare against its sentinel,
+// and MUST NOT: reporting a storage outage as an authentication failure is
+// exactly what ADR-0017 gave session enforcement its own 503 to prevent.
+// user/services.ErrUserNotFound is an alias of this value, so every existing
+// `return nil, ErrUserNotFound` classifies through errors.Is with no other
+// change and no change to the message.
+var ErrUserNotFound = errors.New("user not found")
+
 // ---------------------------------------------------------------------------
 // PDFProvider — consumed by: billing
 // Only the methods billing's invoice service calls.

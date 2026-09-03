@@ -16,7 +16,7 @@ Per-audience host mapping (post-ADR-0003):
 
 | Environment | Operator console (Tier-1) | Client API (Tier-2) | Client app (Tier-2 SPA) | OAuth credentials | Database |
 |------------|---------------------------|---------------------|--------------------------|--------------------|----------|
-| **Development** | `console.localhost:3000` (backend) + `:8080` (Vite) | `api.localhost:3000` | `client.localhost:8081` | Shared dev creds (ConfigService) | Local Docker |
+| **Development** | `localhost:3000` (backend, via the dev host-mux fallthrough) + `:8080` (Vite — same site as the backend, since the operator refresh cookie is `SameSite=Lax`) | `client.localhost:3000` (same site as the SPA — the client cookies are `SameSite=Lax`) | `client.localhost:8081` | Shared dev creds (ConfigService) | Local Docker |
 | **Staging** | `staging-console.orkestra.cc` | `staging-api.orkestra.cc` | `app.orkestra.cc` (HMR target) | Shared dev creds | Cloud/isolated |
 | **Production** | `console.orkestra.com` | `api.orkestra.com` | `orkestra.cc` (marketing) / `app.orkestra.cc` (Tier-2 SPA) | **Separate prod credentials** | Dedicated with HA |
 
@@ -401,7 +401,7 @@ docker compose -f docker/environments/prod/docker-compose.yml up -d
 ```bash
 # Install required tools
 - Docker & Docker Compose
-- Go 1.25.1+
+- Go 1.26.8+
 - Node.js 18+
 - Git
 
@@ -485,8 +485,8 @@ orkestra/
 **Google Cloud Console:**
 1. Create OAuth 2.0 Client ID
 2. Add authorized redirect URIs (register all you intend to use):
-   - `http://console.localhost:3000/v1/auth/oauth/google/callback` (dev — operator)
-   - `http://api.localhost:3000/v1/auth/oauth/google/callback` (dev — client)
+   - `http://localhost:3000/v1/auth/oauth/google/callback` (dev — operator)
+   - `http://client.localhost:3000/v1/auth/oauth/google/callback` (dev — client)
    - `https://staging-console.orkestra.cc/v1/auth/oauth/google/callback` (staging — operator)
    - `https://staging-api.orkestra.cc/v1/auth/oauth/google/callback` (staging — client)
    - `https://console.orkestra.com/v1/auth/oauth/google/callback` (prod — operator)
@@ -497,7 +497,7 @@ orkestra/
 # .env.dev — seed values
 OAUTH_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 OAUTH_GOOGLE_CLIENT_SECRET=your-client-secret
-OAUTH_GOOGLE_REDIRECT_URL=http://console.localhost:3000/v1/auth/oauth/google/callback
+OAUTH_GOOGLE_REDIRECT_URL=http://localhost:3000/v1/auth/oauth/google/callback
 
 # .env.staging
 OAUTH_GOOGLE_REDIRECT_URL=https://staging-console.orkestra.cc/v1/auth/oauth/google/callback

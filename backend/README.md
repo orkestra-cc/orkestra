@@ -6,7 +6,7 @@ Monolithic Go backend server for orkestra with OAuth 2.1 authentication via Goog
 
 ## Prerequisites
 
-- Go 1.25.1+
+- Go 1.26.8+
 - MongoDB 8.2
 - Redis 8.2
 - Google OAuth credentials
@@ -37,15 +37,25 @@ Edit `.env` with your configuration:
 3. Enable Google+ API
 4. Create OAuth 2.0 credentials:
    - Application type: Web application
-   - Authorized redirect URI: `http://localhost:3000/auth/oauth/google/callback`
-5. Copy Client ID and Client Secret to `.env`
+   - Authorized redirect URI: `http://localhost:3000/v1/auth/oauth/google/callback`
+     (the mounted path; the host must be the same one the login POST goes
+     to, because the `orkestra_oauth_state` cookie is host-only)
+5. Copy Client ID and Client Secret to `.env`, or set them at
+   `/admin/modules/auth` after first login. What the backend actually sends
+   Google is the auth module's **Redirect URL** field for the provider, so
+   that field and the URI you registered above must match exactly;
+   `OAUTH_GOOGLE_REDIRECT_URL` only *seeds* that field, and it seeds it on
+   any boot at which the key is still absent — not just the first — so
+   setting the variable and restarting does take effect; once a value is
+   stored, the stored value wins and the variable is ignored, so change
+   it at `/admin/modules/auth`
 
 ### 3. Apple Sign In Setup (Optional)
 
 1. Register your app in Apple Developer account
 2. Create a Service ID for Sign In with Apple
 3. Generate a private key for Sign In with Apple
-4. Configure redirect URL: `http://localhost:3000/auth/oauth/apple/callback`
+4. Configure redirect URL: `http://localhost:3000/v1/auth/oauth/apple/callback`
 5. Add credentials to `.env`
 
 ### 4. Install Dependencies

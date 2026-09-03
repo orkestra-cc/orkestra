@@ -8,6 +8,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -21,7 +22,16 @@ import (
 
 // --- user fake -------------------------------------------------------
 
-var errSAUserNotFound = errors.New("service account test: user not found")
+// errSAUserNotFound stands in for what a conforming iface.UserProvider
+// returns for an account that is genuinely gone. It WRAPS the SDK sentinel
+// because requireServiceAccount now classifies against it (spec §8 #17):
+// with a free-standing error here, every unknown id would be answered as an
+// outage instead of a 404 — the exact inversion of the bug being fixed.
+var errSAUserNotFound = fmt.Errorf("service account test: user not found: %w", iface.ErrUserNotFound)
+
+// errSAStoreDown is the other half of the same split: an infrastructure
+// failure, which must NOT be answered as a verdict on the account.
+var errSAStoreDown = errors.New("mongo: no reachable servers")
 
 // saUserFake implements iface.UserProvider (fully, to satisfy the
 // interface) plus iface.ServiceAccountLister. Only the methods the
@@ -43,6 +53,17 @@ type saUserFake struct {
 	// failure.
 	createErr    error
 	skipRaceSeed bool
+	// getByIDErr, when set, makes GetUserByID fail with an infrastructure
+	// error instead of resolving the map — the input that used to reach an
+	// operator as "service account not found".
+	getByIDErr error
+}
+
+// setGetByIDErr breaks the directory read every lifecycle method gates on.
+func (f *saUserFake) setGetByIDErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.getByIDErr = err
 }
 
 func newSAUserFake() *saUserFake {
@@ -112,6 +133,9 @@ func (f *saUserFake) CreateUserWithPassword(_ context.Context, in *iface.CreateU
 func (f *saUserFake) GetUserByID(_ context.Context, id string) (*iface.User, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.getByIDErr != nil {
+		return nil, f.getByIDErr
+	}
 	if u, ok := f.byUUID[id]; ok {
 		return u, nil
 	}
@@ -794,5 +818,63 @@ func TestListAndGetDoNotEmitAuditEvents(t *testing.T) {
 	}
 	if len(eventRepo.events) != 0 {
 		t.Errorf("read paths must not persist security events, got %d", len(eventRepo.events))
+	}
+}
+
+// ===== §8 #17: the gate classifies, it no longer collapses =====
+//
+// requireServiceAccount is the gate all four lifecycle methods run first, and
+// it used to fold EVERY error from the user directory into
+// ErrServiceAccountNotFound — so a Mongo outage told an operator their service
+// account had been deleted. That is §4.9's class one module over: an
+// infrastructure failure reported as a verdict.
+
+func TestLifecycleClassifiesLookupOutage(t *testing.T) {
+	svc, users, _ := newSAService()
+	ctx := context.Background()
+	acct := seedServiceUser(users, "sa-outage@service.invalid", "Outage Bot")
+	users.setGetByIDErr(errSAStoreDown)
+
+	cases := []struct {
+		name string
+		call func() error
+	}{
+		{"GetAccount", func() error { _, err := svc.GetAccount(ctx, acct.UUID); return err }},
+		{"UpdateAccount", func() error {
+			active := true
+			_, err := svc.UpdateAccount(ctx, acct.UUID, nil, &active)
+			return err
+		}},
+		{"IssueCredential", func() error { _, err := svc.IssueCredential(ctx, acct.UUID, ""); return err }},
+		{"RevokeCredential", func() error { return svc.RevokeCredential(ctx, acct.UUID, "whatever") }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := c.call()
+			if !errors.Is(err, ErrServiceAccountLookupUnavailable) {
+				t.Fatalf("got %v, want ErrServiceAccountLookupUnavailable — a directory the platform could not read is not proof the account is gone", err)
+			}
+			if !errors.Is(err, errSAStoreDown) {
+				t.Fatalf("got %v, want the underlying cause preserved for whoever reads the log", err)
+			}
+			if errors.Is(err, ErrServiceAccountNotFound) {
+				t.Fatalf("got %v — an outage must not keep the 404 that sends an operator hunting for a deleted account", err)
+			}
+		})
+	}
+}
+
+// The negative that keeps the split honest: an id the directory answers for
+// and does not know is still a 404, exactly as before.
+func TestLifecycleUnknownIDStaysNotFound(t *testing.T) {
+	svc, users, _ := newSAService()
+	ctx := context.Background()
+	_ = users // the fake is deliberately empty: nothing is seeded
+
+	if _, err := svc.GetAccount(ctx, "no-such-account"); !errors.Is(err, ErrServiceAccountNotFound) {
+		t.Errorf("GetAccount(unknown): got %v, want ErrServiceAccountNotFound", err)
+	}
+	if _, err := svc.GetAccount(ctx, "no-such-account"); errors.Is(err, ErrServiceAccountLookupUnavailable) {
+		t.Error("an unknown id must not be reported as an outage — that would make every 404 a permanent retry")
 	}
 }

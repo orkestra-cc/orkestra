@@ -21,7 +21,6 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -77,45 +76,59 @@ func clearOAuthStateCookie(secure bool) string {
 // verifyOAuthStateBinding checks that the callback is being made by the
 // browser that started the flow.
 //
-// Fails closed everywhere binding is possible. The single exception is
-// the ADR-0003 tier split: the client surface starts flows on `api.*`
-// while every provider callback lands on `console.*` (one registered
-// redirect URI per provider), so a cookie set at start is simply not
-// sent to the callback host. That hop is identified by comparing the
-// signed StartHost claim against the callback's own host — a caller
-// cannot forge it, because the claim is inside the HMAC-signed state.
-//
-// A state with no StartHost at all fails closed: without it we cannot
-// distinguish "binding was impossible" from "binding was skipped", and
-// the only cost of rejecting is that flows in flight across the deploy
-// of this change ask the user to click sign-in again.
-func verifyOAuthStateBinding(r *http.Request, claims *services.OAuthStateClaims) error {
+// Three outcomes, decided in this order. A state with no StartHost is
+// rejected. A CROSS-HOST callback is (true, nil): DEFERRED — the ADR-0003
+// tier split puts client-tier starts on `api.*` while every provider
+// callback lands on `console.*`, so the cookie set at start cannot reach
+// this request and any cookie this host holds is irrelevant; the caller may
+// continue ONLY by handing the flow to the relay endpoint on the start host,
+// which requires that cookie (verifyRelayBinding). A SAME-HOST callback is
+// (false, nil) when the cookie matches — bound — and rejected when the
+// cookie is missing or names another flow. A cross-host callback is never
+// simply accepted: before v4.3 it was, which made the "exception" the client
+// tier's normal path and left login CSRF open there.
+func verifyOAuthStateBinding(r *http.Request, claims *services.OAuthStateClaims) (deferred bool, err error) {
 	if claims == nil || claims.CSRF == "" {
+		return false, ErrOAuthStateNotBound
+	}
+	if claims.StartHost == "" {
+		return false, fmt.Errorf("%w: state carries no start host", ErrOAuthStateNotBound)
+	}
+	// StartHost FIRST. A flow started on another host set its cookie there;
+	// whatever cookie THIS host holds (typically the nonce of an unrelated
+	// operator flow in the same browser) proves nothing about it and must
+	// neither bind nor block it — the relay endpoint on the start host is
+	// the only place that can decide.
+	if !sameHost(claims.StartHost, r.Host) {
+		return true, nil
+	}
+
+	cookie, cerr := r.Cookie(OAuthStateCookieName)
+	if cerr != nil || cookie.Value == "" {
+		return false, fmt.Errorf("%w: no state cookie presented on the starting host", ErrOAuthStateNotBound)
+	}
+	if subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(claims.CSRF)) == 1 {
+		return false, nil
+	}
+	// A cookie that names a different flow is the clearest signal there
+	// is: this browser started something else.
+	return false, fmt.Errorf("%w: state nonce does not match the browser's cookie", ErrOAuthStateNotBound)
+}
+
+// verifyRelayBinding is the relay endpoint's check: it runs on the host
+// that set the state cookie at start, so the cookie is REQUIRED and must
+// equal the relay record's nonce. Fails closed on every other shape.
+func verifyRelayBinding(r *http.Request, csrf string) error {
+	if csrf == "" {
 		return ErrOAuthStateNotBound
 	}
-
 	cookie, err := r.Cookie(OAuthStateCookieName)
-	if err == nil && cookie.Value != "" {
-		if subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(claims.CSRF)) == 1 {
-			return nil
-		}
-		// A cookie that names a different flow is the clearest signal
-		// there is: this browser started something else.
-		return fmt.Errorf("%w: state nonce does not match the browser's cookie", ErrOAuthStateNotBound)
+	if err != nil || cookie.Value == "" {
+		return fmt.Errorf("%w: no state cookie presented to the relay", ErrOAuthStateNotBound)
 	}
-
-	if claims.StartHost == "" {
-		return fmt.Errorf("%w: state carries no start host", ErrOAuthStateNotBound)
+	if subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(csrf)) != 1 {
+		return fmt.Errorf("%w: relay nonce does not match the browser's cookie", ErrOAuthStateNotBound)
 	}
-	if sameHost(claims.StartHost, r.Host) {
-		return fmt.Errorf("%w: no state cookie presented on the starting host", ErrOAuthStateNotBound)
-	}
-
-	// Cross-host tier split — binding is structurally impossible here.
-	slog.Default().Info("oauth callback accepted without browser binding (cross-host tier split)",
-		slog.String("start_host", claims.StartHost),
-		slog.String("callback_host", r.Host),
-		slog.String("tier", claims.Tier))
 	return nil
 }
 

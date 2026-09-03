@@ -85,6 +85,14 @@ redis-cli:
 	@echo "Connecting to Redis..."
 	docker exec -it orkestra-redis redis-cli -a $${REDIS_PASSWORD:-orkestra_redis_secure_2024}
 
+# Plain-bash tests for the env helpers and the validator's secret-hygiene
+# rules (scripts/test-env-file.sh, scripts/test-env-validate.sh). Part of
+# `make ci-backend`: the validator is what gates a staging/production deploy.
+backend-script-tests:
+	@bash -n scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh
+	@./scripts/test-env-file.sh
+	@./scripts/test-env-validate.sh
+
 # Backend (host toolchain escape hatches) --------------------------------
 #
 # The canonical dev loop runs the backend in Docker via AIR (see
@@ -150,9 +158,9 @@ frontend-client-clean:
 .PHONY: install install-hooks fmt ci-help
 .PHONY: ci ci-all ci-mcp ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 .PHONY: mcp-check mcp-test
-.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config
+.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks backend-script-tests
 .PHONY: admin-lockcheck admin-typecheck admin-lint admin-test admin-audit admin-build
-.PHONY: client-lockcheck client-typecheck client-lint client-build
+.PHONY: client-lockcheck client-typecheck client-lint client-test client-build
 .PHONY: mobile-lockcheck
 .PHONY: mobile-analyze mobile-test
 
@@ -160,7 +168,7 @@ frontend-client-clean:
 BASE_REF ?= origin/dev
 SINCE := $(shell git merge-base HEAD $(BASE_REF) 2>/dev/null || echo HEAD~1)
 CI_CHANGED := $(shell { git diff --name-only $(SINCE)...HEAD 2>/dev/null; git diff --name-only 2>/dev/null; git diff --name-only --cached 2>/dev/null; } | sort -u)
-BACKEND_CHANGED := $(if $(filter backend/%,$(CI_CHANGED)),1,)
+BACKEND_CHANGED := $(if $(filter backend/% scripts/init.sh scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh docker/docker-compose.% docker/.env.example docker/tests/%,$(CI_CHANGED)),1,)
 ADMIN_CHANGED   := $(if $(filter frontend-admin/%,$(CI_CHANGED)),1,)
 CLIENT_CHANGED  := $(if $(filter frontend-client/%,$(CI_CHANGED)),1,)
 MOBILE_CHANGED  := $(if $(filter mobile/%,$(CI_CHANGED)),1,)
@@ -267,7 +275,7 @@ mcp-test:
 
 # ---- Backend ----
 
-ci-backend: backend-mongo-config backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
+ci-backend: backend-script-tests backend-mongo-config backend-credential-fallbacks backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
 	@echo "Backend CI: OK"
 
 # Static gate: the compose stacks and CI must all provide a transaction-capable
@@ -276,6 +284,12 @@ ci-backend: backend-mongo-config backend-lint backend-tenantscope backend-errqua
 # standalone mongod that failed only at setup-finalization time.
 backend-mongo-config:
 	@docker/tests/mongodb-replica-set.test.sh
+
+# Static gate: a credential never has a default. The bundled RustFS once fell
+# back to a literal root password printed in this repository — on a browser-
+# facing S3 API — and nothing said so. Also pins Redis to its volume (--dir).
+backend-credential-fallbacks:
+	@docker/tests/credential-fallbacks.test.sh
 
 # backend-openapi-check fails if the committed openapi/enterprise.json drifted
 # from the routes in the current source — same gate as policycoverage but for
@@ -389,7 +403,7 @@ admin-build:
 
 # ---- Frontend Client ----
 
-ci-frontend-client: client-lockcheck client-typecheck client-lint client-build
+ci-frontend-client: client-lockcheck client-typecheck client-lint client-test client-build
 	@echo "Frontend-client CI: OK"
 
 client-lockcheck:
@@ -400,6 +414,9 @@ client-typecheck:
 
 client-lint:
 	@cd frontend-client && npm run lint -- --max-warnings 0
+
+client-test:
+	@cd frontend-client && npm test
 
 client-build:
 	@cd frontend-client && npm run build
@@ -444,7 +461,7 @@ ci-help:
 	@echo ""
 	@echo "  make ci-backend            - Backend CI (lint + tests + analyzers + vuln + coverage + build)"
 	@echo "  make ci-frontend-admin     - Admin SPA CI (lockfile + typecheck + lint + tests + build + audit)"
-	@echo "  make ci-frontend-client    - Client SPA CI (lockfile + typecheck + lint + build)"
+	@echo "  make ci-frontend-client    - Client SPA CI (lockfile + typecheck + lint + test + build)"
 	@echo "  make ci-mobile             - Flutter CI (lockfile + analyze + test)"
 	@echo "  make ci-mcp                - Shared Claude Code/Codex MCP config check"
 	@echo "  make mcp-check             - Verify project MCP definitions are in sync"

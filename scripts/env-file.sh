@@ -8,6 +8,8 @@
 #
 #   env_get <file> <key>          -> echoes current value ("" if absent)
 #   env_set <file> <key> <value>  -> upsert (uncomment / replace / append)
+#   secret_is_placeholder <value> -> 0 when VALUE is empty or a shipped literal
+#   secret_is_weak <value> [min]  -> 0 when placeholder OR shorter than MIN (16)
 #
 # env_set is awk-based (values routinely contain '/' and ':' — e.g. URLs — so a
 # sed delimiter would be fragile), writes atomically (temp + mv), and resets the
@@ -50,4 +52,33 @@ env_set() {
     ' "$file" > "$tmp"
     chmod 600 "$tmp"
     mv "$tmp" "$file"
+}
+
+# --- Secret hygiene ----------------------------------------------------------
+#
+# Shared by scripts/env-validate.sh (refuses these in staging/production and
+# warns in development), orkestra.sh's setup wizard (never keeps a placeholder
+# on Enter, generates a real value instead) and the tests. The list is every
+# literal that docker/.env.example, the compose files or the bundled images
+# have ever shipped or defaulted to — the bundled RustFS root was exactly one
+# of them, on a browser-facing S3 API. Case-insensitive. Keep it in step with
+# weakSecretReason in backend/internal/shared/config/config.go.
+
+# secret_is_placeholder VALUE — 0 when VALUE is empty or a known literal.
+secret_is_placeholder() {
+    local v
+    v=$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')
+    case "$v" in
+        ''|changeme*|replace_with_*|generate*|your_*|placeholder*|example*|dev-*|dev_*) return 0 ;;
+        rustfsadmin|minioadmin|password|secret|admin) return 0 ;;
+    esac
+    return 1
+}
+
+# secret_is_weak VALUE [MIN] — 0 when VALUE is a placeholder or shorter than
+# MIN characters (default 16: `openssl rand -hex 16` yields 32).
+secret_is_weak() {
+    local v=${1:-} min=${2:-16}
+    secret_is_placeholder "$v" && return 0
+    [ "${#v}" -lt "$min" ]
 }

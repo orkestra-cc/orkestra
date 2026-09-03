@@ -40,7 +40,7 @@ type HasConfigActivationValidator interface {
 
 `ValidateConfigActivation` runs inside `SetActiveEnvironment`, after confirming the target environment exists and strictly before the repository write that flips the active profile and marks `needsRestart: true`. Returning an error — typically a `*module.ConfigValidationError` — aborts the switch before that write, so a rejected activation leaves both the previously active profile and `needsRestart` untouched. `targetValues` is the target profile's non-secret configuration map; secrets are never passed to the hook.
 
-This is a separate seam from `HasConfigValidator` (the PATCH-time hook covered above): PATCH-time validation sees one merged profile as it is being edited, while activation validation judges an already-stored profile as a complete whole before it becomes active. A module can implement either, both, or neither. Modules that omit `HasConfigActivationValidator` keep today's validation-free activation exactly as before — this is the seam a tenant-provisioning-policy validator hooks into to refuse activating a profile whose policy is no longer satisfiable, without pkg/sdk knowing anything about tenants.
+This is a separate seam from `HasConfigValidator` (the PATCH-time hook covered above): PATCH-time validation sees one merged profile as it is being edited, while activation validation judges an already-stored profile as a complete whole before it becomes active. A module can implement either, both, or neither. Modules that omit `HasConfigActivationValidator` keep today's validation-free activation exactly as before — this is the seam a tenant-provisioning-policy validator hooks into to refuse activating a profile whose policy is no longer satisfiable, without pkg/sdk knowing anything about tenants. When a module implements `HasConfigSnapshotValidator`, that hook takes precedence on activation too and neither older hook is called — see [Snapshot validation](#snapshot-validation).
 
 ## Stable validation codes
 
@@ -66,6 +66,42 @@ When a validator — PATCH-time or activation-time — returns a `ConfigValidati
 ```
 
 Leaving `Code` empty keeps the pre-existing text-only `422 Unprocessable Entity` response, so an existing validator needs no changes to keep working. The mapping is applied uniformly across all three module-admin mutation surfaces — `PATCH /v1/admin/modules/{name}`, `PATCH /v1/admin/modules/{name}/environments/{env}`, and `PUT /v1/admin/modules/{name}/active-environment` — so a frontend can key off `code` the same way on any of them.
+
+## Snapshot validation
+
+A module that needs a cross-field rule involving secrets — "this OAuth provider is fully configured" — implements the optional `HasConfigSnapshotValidator` instead of the two hooks above:
+
+```go
+type ConfigValidationSnapshot struct {
+    Environment     string
+    Values          map[string]string // raw merged target; absent and "" are distinct
+    EffectiveValues map[string]string // runtime EnvVar/Default fallback applied
+    SecretPresent   map[string]bool   // per secret key: would a non-empty value be in force?
+}
+
+type HasConfigSnapshotValidator interface {
+    ValidateConfigSnapshot(ctx context.Context, snapshot ConfigValidationSnapshot) error
+}
+```
+
+It runs on every mutation surface with the exact profile that would become effective: the active profile merged with a `PATCH /v1/admin/modules/{name}`, the named profile merged with a `PATCH …/environments/{env}`, or the stored target of a `PUT …/active-environment`. `SecretPresent` is computed from the **target** profile's own stored secrets, the secrets submitted in the same request, and the schema's `EnvVar`/`Default` — never from another profile, and never as plaintext. A request may therefore save a provider secret and flip a dependent switch atomically, and an inactive profile is never judged with the active profile's credentials. Modules that keep `HasConfigValidator` / `HasConfigActivationValidator` are unaffected.
+
+## Request lanes
+
+`PATCH /v1/admin/modules/{name}` and `PATCH …/environments/{env}` carry `config` and `secrets` as two blocks, and the service refuses a key that does not belong where it was sent — a declared secret in `config`, a declared non-secret value or a record-list label in `secrets`, the SDK-owned roster key `<field>.__items` from either block, or any key the module does not declare — with **422** and the stable code `module.config_key_invalid`, naming the key. The check runs before validation, encryption or persistence, against the module's live schema, so a secret can never be written in plaintext through the wrong block. A module that declares no schema accepts anything, as before.
+
+The lane rule governs new writes; what a legacy or malformed document already holds is handled separately. Any key the live schema declares as a secret — a scalar `FieldSecret`, or a record-list element's secret sub-field — is stripped from every non-secret map the service reads or writes: the validation snapshot (and the older `ValidateConfig` / `ValidateConfigActivation` hooks, which are handed the same stripped map), the `configValues` of every admin response (`GET`/`PATCH /v1/admin/modules/{name}` and `…/environments/{env}`), and the merged map each mutation persists, so the next ordinary write repairs the document. The three paths that copy a whole map are stripped too: the boot backfill (which therefore also realigns a legacy mirror that still carries plaintext), the lazy legacy→profiles migration, and the map an activation publishes into the legacy mirror. Both blocks are additionally checked against the roster: an element key for a slug that is not a member — and, on the record-list route, not being created by the same request — is refused with **409** and `ErrUnknownSlug`, so an orphan value is never parked in the document and an orphan ciphertext is never left for a later `create` to adopt.
+
+## Atomic writes and optimistic concurrency
+
+Every module-config mutation is a single MongoDB `UpdateOne` guarded by the document's monotone `configRevision`: the service reads the document, validates the candidate, and writes profile values, secrets, the legacy mirror, `needsRestart` and `configRevision + 1` together — or nothing. A write that lost the race returns **409** with body code `module.config_revision_stale`; reload the document and review the diff before saving again. The operator console does exactly that ("Reload & review"). `needsRestart` is persisted in the same write from the module's `HotReloadConfig()` declaration, so a successful edit to a hot-reloadable module never leaves a stale restart hint; the one clear that still happens afterwards — an enable/disable that carried no cold config change — is itself guarded by the revision that request observed, so a config change that landed in between keeps the restart hint it earned. Switching the active profile is the same single guarded write: the target's values and secrets are published into the legacy mirror by the service (stripped, per the lane rule above) rather than copied server-side, which the revision guard makes safe because any concurrent write moves `configRevision` and the activation then matches nothing. Enabling and disabling are separate from all of this, and a module whose `Stop()` fails is **not** disabled: the flag is restored and the request answers **422**, because the module and its infrastructure are still running. A legacy document that predates environment profiles is migrated on first access through the same compare-and-swap discipline, and a read that cannot complete that migration fails rather than serving the unmigrated document.
+
+### Required documents
+
+Lazy self-healing (an admin read rebuilding a wiped document from schema defaults) is the default, but a deployment can mark modules whose document must **not** be rebuilt at runtime — Orkestra marks `auth`, because its per-surface password-login policy is read strictly and a rebuilt default would silently re-enable password sign-in. For a marked module a missing document is an outage: `GET /v1/admin/modules/{name}` and every mutation return **503**, `GET /v1/admin/modules` still lists every other module and shows the marked one as `"status": "missing"` with `"missing": true`. Restore the document, or fix the database and restart so boot seeding runs.
+
+A module that must decide something across several keys at once — the auth module's "is this OAuth provider enabled *and* structurally complete, and which secret do I build it from" — reads them through `ActiveConfigRequiredModule`, which returns one consistent, read-once view of the active profile with every stored secret decrypted up front. A secret that no longer decrypts fails that read as an outage instead of quietly substituting the environment-variable fallback the way single-key reads do.
+
 ## Repeatable fields (`recordList`)
 
 A module that needs an operator-managed **list of records** — several named
@@ -147,3 +183,7 @@ same field twice, a slug in both `create` and `remove`, or more than 50
 elements).
 
 A list is capped at **50** elements regardless of the field's `Max`.
+
+## Audit
+
+Every mutation through the admin API emits one audit event per actual result into the compliance trail — `module.config.updated`, `module.config.environment_activated`, `module.enabled`, `module.disabled` — carrying the acting user's UUID, tenant, IP and User-Agent, the key names the request submitted (and, for record lists, per-field created/removed counts), and the failure code when there is one. Values, secrets and slugs are never recorded. Emission is best-effort: a failed insert is logged and never rolls back the mutation, and the sink's own insert runs under a two-second timeout — the most latency an emit can add to the request.

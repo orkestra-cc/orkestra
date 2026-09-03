@@ -113,6 +113,13 @@ func (m *AuthModule) Name() string        { return "auth" }
 func (m *AuthModule) DisplayName() string { return "Authentication" }
 func (m *AuthModule) Description() string { return "OAuth 2.1, JWT, sessions, RBAC" }
 
+// HotReloadConfig declares what has always been true: AuthPolicyService and
+// the OAuth resolver read module config at request time, so a successful
+// config write is live immediately and must persist needsRestart=false in
+// the same atomic update (spec §4.1) instead of leaving a false restart
+// banner in the admin UI.
+func (m *AuthModule) HotReloadConfig() bool { return true }
+
 func (m *AuthModule) Dependencies() []string {
 	return []string{"user", "notification", "tenant", "authz"}
 }
@@ -399,6 +406,16 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		{
 			Key: "loginEnabledClient", Label: "Allow logins on client app", Group: "login",
 			Description: "When off, POST /v1/auth/client/login returns 403. Affects /v1/auth/client/* only.",
+			Type:        module.FieldBool, Default: "true",
+		},
+		{
+			Key: "passwordLoginEnabledAdmin", Label: "Allow email/password sign-in on operator console", Group: "login",
+			Description: "When off, the operator console accepts OAuth only: new password sign-ins, signups and reset requests on /v1/auth/operator/* are refused (403 auth.password_login_disabled), in-flight password logins cannot complete, and a password no longer counts as a credential for step-up re-authentication or OAuth-unlink checks. Sessions opened before the change are not revoked. Cannot be turned off unless at least one OAuth provider is fully configured for this surface and 'Auto-link OAuth provider to existing email account' is on.",
+			Type:        module.FieldBool, Default: "true",
+		},
+		{
+			Key: "passwordLoginEnabledClient", Label: "Allow email/password sign-in on client app", Group: "login",
+			Description: "When off, the client app accepts OAuth only: new password sign-ins, signups and reset requests on /v1/auth/client/* are refused (403 auth.password_login_disabled), in-flight password logins cannot complete, and a password no longer counts as a credential for step-up re-authentication or OAuth-unlink checks. Sessions opened before the change are not revoked. Cannot be turned off unless at least one OAuth provider is fully configured for this surface and 'Auto-link OAuth provider to existing email account' is on.",
 			Type:        module.FieldBool, Default: "true",
 		},
 		{
@@ -978,6 +995,15 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// instance — schema keys carry their own Admin/Client suffix so a
 	// single ConfigService read disambiguates by audience.
 	authPolicy := services.NewAuthPolicyService(deps.ConfigService)
+	// Operator-only break-glass (spec §4.2): read once at boot, handed to
+	// the ONE decision path allowed to see it. The WARN repeats on every
+	// boot while the variable is set so a forgotten override stays loud.
+	if cfg.Auth.OperatorPasswordLoginBreakGlass {
+		authPolicy.SetOperatorBreakGlass(true)
+		logger.Warn("auth: operator password-login BREAK-GLASS override is ACTIVE — " +
+			"persisted policy is bypassed for operator login (and its MFA continuation) only; " +
+			"repair the OAuth configuration, then unset AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS and restart")
+	}
 	// Hand the policy to the (already-constructed) shared password
 	// service so length / complexity / HIBP rules can be edited live
 	// at /admin/modules/auth without a restart.
@@ -1077,6 +1103,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	m.operatorAuthHandler.SetStateSecret(oauthStateSecret)
 	m.operatorAuthHandler.SetTier(services.AudienceOperator)
 	m.operatorAuthHandler.SetPolicy(authPolicy)
+	m.operatorAuthHandler.SetSPAURL(opDeps.frontendURL)
 	// Avatar pipeline: hand the blob store so /me + login + refresh +
 	// session-poll resolve uploaded avatars to a fresh presigned GET.
 	// Without this, oauth_*/uploaded users see initials in the navbar
@@ -1126,6 +1153,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 			cfg.Auth.Cookie.Secure,
 		)
 		m.operatorWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
+		m.operatorWebAuthnHandler.SetPolicy(authPolicy)
 		deps.Services.Register(module.ServiceWebAuthn, opBundle.webauthnSvc)
 	}
 
@@ -1243,6 +1271,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	m.clientAuthHandler.SetStateSecret(oauthStateSecret)
 	m.clientAuthHandler.SetTier(services.AudienceClient)
 	m.clientAuthHandler.SetPolicy(authPolicy)
+	m.clientAuthHandler.SetSPAURL(clDeps.frontendURL)
 	if store, ok := module.GetTyped[blob.Store](deps.Services, module.ServiceBlobStore); ok {
 		m.clientAuthHandler.SetBlobStore(store)
 		clBundle.authService.SetBlobStore(store)
@@ -1250,6 +1279,19 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	}
 	clBundle.authService.SetSessionRevocation(sessionRevocationSvc)
 	clBundle.passwordSvc.SetSessionRevocation(sessionRevocationSvc)
+
+	// §4.7: the unlink guards count usable links through the same strict
+	// one-read resolver the web flow uses; the closure keeps the resolver
+	// type out of the services package.
+	providerUsability := func(ctx context.Context, audience services.PolicyAudience, p iface.OAuthProvider) (bool, error) {
+		_, ok, err := oauthResolver.OAuthWebProviderUsable(ctx, audience, models.OAuthProvider(string(p)))
+		if err != nil {
+			return false, err
+		}
+		return ok, nil
+	}
+	opBundle.authService.SetProviderUsability(providerUsability)
+	clBundle.authService.SetProviderUsability(providerUsability)
 
 	m.clientMFAHandler = handlers.NewMFAHandler(
 		clBundle.mfaSvc,
@@ -1277,6 +1319,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 			cfg.Auth.Cookie.Secure,
 		)
 		m.clientWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
+		m.clientWebAuthnHandler.SetPolicy(authPolicy)
 	}
 
 	// ADR-0003 PR-D D-6: per-tier dispatcher map on the operator
@@ -1683,6 +1726,11 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 	if ri.ClientRouter != nil {
 		m.clientAuthHandler.RegisterTierMountableRoutes(ri.Client.PublicAPI, clientProtectedAPI, ri.ClientRouter, handlers.ClientMount)
 		m.clientAuthHandler.RegisterOAuthStartRoutes(ri.Client.PublicAPI, handlers.ClientMount)
+		// Client-tier web logins complete HERE (spec §4.10): the
+		// operator-host callback relays them because only this host can set
+		// the client refresh cookie and verify the state cookie it set at
+		// start.
+		m.clientAuthHandler.RegisterOAuthRelayRoute(ri.ClientRouter)
 	}
 	m.clientPasswordHandler.RegisterPublicRoutes(ri.Client.PublicAPI, handlers.ClientMount)
 	ri.Client.ProtectedRouter.Group(func(r chi.Router) {

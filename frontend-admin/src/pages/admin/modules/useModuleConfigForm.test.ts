@@ -232,6 +232,43 @@ describe('buildYupSchema', () => {
     expect((await validate(schema, { r: '' })).length).toBe(1);
   });
 
+  it('does NOT require a required secret the backend already stores', async () => {
+    // A stored secret is never echoed back — the input is deliberately reset
+    // to '' after save — so "empty" is the normal state of a configured
+    // secret. Flagging it contradicts the "Set" badge rendered from the very
+    // same secretStatus map (the operator sees "required" and "Set" at once)
+    // and inflates the save bar's error count. Mirrors unfilledRequiredKeys.
+    const schema = [field({ key: 's.secret', type: 'secret', required: true })];
+    const errs = async (
+      values: Record<string, string>,
+      ss?: Record<string, boolean>
+    ) => {
+      try {
+        await buildYupSchema(schema, buildFieldNames(schema), ss).validate(
+          values,
+          { abortEarly: false }
+        );
+        return [] as string[];
+      } catch (err) {
+        return (err as { errors: string[] }).errors;
+      }
+    };
+    // Stored on the backend: empty input is fine.
+    expect(await errs({ s_secret: '' }, { 's.secret': true })).toEqual([]);
+    // Not stored (fresh element, or status false): still required.
+    expect((await errs({ s_secret: '' }, { 's.secret': false })).length).toBe(
+      1
+    );
+    expect((await errs({ s_secret: '' })).length).toBe(1);
+    // A non-secret required field is unaffected by an unrelated status entry.
+    const plain = [field({ key: 'r', required: true })];
+    await expect(
+      buildYupSchema(plain, buildFieldNames(plain), { r: true }).validate({
+        r: ''
+      })
+    ).rejects.toBeTruthy();
+  });
+
   it('does NOT require a required field that is hidden', async () => {
     // The operator cannot see it, so demanding it makes the form unsavable
     // with no visible cause.

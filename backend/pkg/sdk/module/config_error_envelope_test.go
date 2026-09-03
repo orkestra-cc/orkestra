@@ -52,3 +52,11 @@ func TestMapConfigServiceError_OtherErrorUsesFallback(t *testing.T) {
 		t.Fatalf("fallback not applied: %v", err)
 	}
 }
+
+func TestMapConfigServiceError_StaleRevisionIs409WithCode(t *testing.T) {
+	err := mapConfigServiceError(fmt.Errorf("wrapped: %w", ErrRevisionStale), func(e error) error { return e })
+	typed, ok := err.(*configValidationHTTPError)
+	if !ok || typed.Status != http.StatusConflict || typed.Code != CodeConfigRevisionStale {
+		t.Fatalf("got %#v, want 409 envelope with %q", err, CodeConfigRevisionStale)
+	}
+}

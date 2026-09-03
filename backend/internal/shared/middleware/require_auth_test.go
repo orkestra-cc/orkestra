@@ -865,8 +865,17 @@ func (f *requireAuthFixture) mintExpiredAccessToken(userUUID string) string {
 // minted token leaking out through headers.
 func assertNoSilentRefresh(t *testing.T, resp *http.Response, dh *downstreamHandler) {
 	t.Helper()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", resp.StatusCode)
+	assertNoSilentRefreshWithStatus(t, resp, dh, http.StatusUnauthorized)
+}
+
+// assertNoSilentRefreshWithStatus is the same contract with the rejection
+// status as a parameter. §8 #15 adds the one rejection on this path that is
+// NOT a 401 — a boot with no verifying key answers 503 — and the
+// "never rotates, never dispatches" half of the guard is identical for it.
+func assertNoSilentRefreshWithStatus(t *testing.T, resp *http.Response, dh *downstreamHandler, wantStatus int) {
+	t.Helper()
+	if resp.StatusCode != wantStatus {
+		t.Errorf("status = %d, want %d", resp.StatusCode, wantStatus)
 	}
 	if dh.called {
 		t.Errorf("downstream handler must NOT be reached on the strength of a refresh cookie")
@@ -936,4 +945,236 @@ func TestRequireAuth_TamperedBearerWithRefreshCookie_Returns401_NeverRotates(t *
 	}
 	defer resp.Body.Close()
 	assertNoSilentRefresh(t, resp, dh)
+}
+
+// ===== §4.10: the expired bearer gets a code of its own =====
+
+// §3.D. The client is otherwise inferring, from its own reckoning of when the
+// token it sent expired, something the server knows for certain. Saying it
+// turns frontend-client's 401 branch from an inference into a fact and lets it
+// recover a token that expired IN FLIGHT — the one case the client-side rule
+// has to give up, because "already expired at send" is the only condition that
+// proves the handler never ran.
+func TestRequireAuth_ExpiredBearer_ReturnsAccessTokenExpiredCode(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	dh := &downstreamHandler{}
+	srv := httptest.NewServer(f.mw.RequireAuth(dh.handler()))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+f.mintExpiredAccessToken("u-expired"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", resp.StatusCode)
+	}
+	if dh.called {
+		t.Error("an expired bearer must NOT reach downstream — that is what makes a client retry safe")
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"code":"access_token_expired"`) {
+		t.Errorf("body = %s, want a top-level code access_token_expired", body)
+	}
+	if wa := resp.Header.Get("WWW-Authenticate"); wa != `Bearer error="access_token_expired"` {
+		t.Errorf("WWW-Authenticate = %q, want access_token_expired", wa)
+	}
+}
+
+// The bound on the new code: it must mean EXPIRED, nothing else. A client that
+// refreshes on it would otherwise refresh for a forged token, and — worse —
+// the same code on a wrong-credentials answer would re-arm the replay hazard
+// this whole design exists to close.
+func TestRequireAuth_NonExpiredRejections_CarryNoExpiredCode(t *testing.T) {
+	tok := func(f *requireAuthFixture) string {
+		valid := f.issueTokenForUser("u-tamper", "operator")
+		return valid[:len(valid)-8] + "AAAAAAAA"
+	}
+	cases := []struct {
+		name   string
+		bearer func(f *requireAuthFixture) string
+	}{
+		{"no bearer at all", func(*requireAuthFixture) string { return "" }},
+		{"malformed", func(*requireAuthFixture) string { return "not-a-jwt" }},
+		{"tampered signature", tok},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRequireAuthFixture(t)
+			dh := &downstreamHandler{}
+			srv := httptest.NewServer(f.mw.RequireAuth(dh.handler()))
+			defer srv.Close()
+
+			req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+			if b := tc.bearer(f); b != "" {
+				req.Header.Set("Authorization", "Bearer "+b)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Errorf("status = %d, want 401", resp.StatusCode)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			if strings.Contains(string(body), "access_token_expired") {
+				t.Errorf("body = %s — only an EXPIRED token may carry that code", body)
+			}
+		})
+	}
+}
+
+// A revoked session is terminal and keeps its own code: a token minted from the
+// same cookie would carry the same dead sid, so the client must clear rather
+// than refresh. The new branch must not shadow it.
+func TestRequireAuth_RevokedSession_StillReportsRevokedNotExpired(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	dh := &downstreamHandler{}
+	srv := httptest.NewServer(f.mw.RequireAuth(dh.handler()))
+	defer srv.Close()
+
+	tok := f.issueTokenWithSID("u-rev", "sess-rev-not-exp")
+	_ = f.revocation.Revoke(context.Background(), "sess-rev-not-exp", "logout")
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"code":"session_revoked"`) {
+		t.Errorf("body = %s, want session_revoked", body)
+	}
+	if strings.Contains(string(body), "access_token_expired") {
+		t.Errorf("body = %s — a revoked session must not invite a refresh", body)
+	}
+}
+
+// ===== §4.10 / §8 #15: no verifying key is the SERVER's failure, not yours =====
+
+// breakVerifyingKey rewires the fixture's middleware onto a JWT service built
+// with NO public key — the production input on a boot where the key material
+// never loaded. It is the middleware-side twin of the services package's
+// breakVerifyingKey: validateTokenEnhanced checks s.publicKey == nil and
+// returns ErrJWTKeysNotLoaded before jwt.Parse, so a perfectly valid,
+// freshly minted bearer still comes back unverifiable.
+//
+// f.jwt keeps its key PAIR so tests can still mint tokens and refresh
+// cookies; only the middleware's verifier is broken. The precondition below
+// is load-bearing twice over: it proves the rewiring reaches the branch under
+// test, and it proves the sentinel arrives UNWRAPPED — which is what licenses
+// RequireAuth to compare with ==, exactly as it does for ErrTokenExpired
+// (in that file the identifier `errors` is the shared errors package, so
+// errors.Is is not available without changing the file's conventions).
+func (f *requireAuthFixture) breakVerifyingKey() {
+	f.t.Helper()
+	keyless, err := services.NewJWTServiceWithAudience(
+		f.priv, nil, "test", services.AudienceOperator,
+		15*time.Minute, 7*24*time.Hour,
+	)
+	if err != nil {
+		f.t.Fatalf("NewJWTServiceWithAudience: %v", err)
+	}
+	probe := f.issueTokenForUser("u-keyless-probe", "operator")
+	if _, verr := keyless.ValidateAccessToken(probe); verr != services.ErrJWTKeysNotLoaded {
+		f.t.Fatalf("precondition: want a bare ErrJWTKeysNotLoaded from a verifier with no public key, got %v", verr)
+	}
+	mw := NewAuthMiddleware(keyless, sharederrors.NewManager(silentTestLogger(), false))
+	mw.SetSessionRevocation(f.revocation)
+	f.mw = mw
+}
+
+// The reach is what makes this worth a status of its own: RequireAuth guards
+// every protected route on both tiers, so before this the whole platform
+// answered a boot misconfiguration with the same codeless 401 it answers a
+// dead session with — and both SPAs would have signed every user out over it.
+// A boot-time state is not a blip: no client-side retry can help, so the true
+// statement is "the server cannot authenticate anyone", which is a 503.
+func TestRequireAuth_KeysNotLoaded_Returns503TokenVerificationUnavailable(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	tok := f.issueTokenForUser("u-keyless", "operator")
+	cookie := f.refreshCookie("u-keyless")
+	f.breakVerifyingKey()
+
+	dh := &downstreamHandler{}
+	srv := httptest.NewServer(f.mw.RequireAuth(dh.handler()))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	// The cookie is present precisely to show it is never consulted: this
+	// branch rejects, it does not rotate (ADR-0020).
+	req.AddCookie(cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	assertNoSilentRefreshWithStatus(t, resp, dh, http.StatusServiceUnavailable)
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"code":"token_verification_unavailable"`) {
+		t.Errorf("body = %s, want a top-level code token_verification_unavailable", body)
+	}
+	// No WWW-Authenticate: the header names a scheme the caller should retry
+	// with, and there is nothing to retry with — sendPolicyUnavailable, the
+	// 503 this copies, omits it for the same reason.
+	if wa := resp.Header.Get("WWW-Authenticate"); wa != "" {
+		t.Errorf("WWW-Authenticate = %q, want none on a 503 — there is no scheme to retry with", wa)
+	}
+}
+
+// The bound on the new code, the same discipline access_token_expired carries:
+// it must mean "this server cannot verify anything" and nothing else. A
+// rejection that IS a verdict on the credential keeps exactly the answer it
+// has today.
+func TestRequireAuth_VerifiableRejections_CarryNoUnavailableCode(t *testing.T) {
+	cases := []struct {
+		name       string
+		bearer     func(f *requireAuthFixture) string
+		wantInBody string
+	}{
+		{"expired keeps its own 401 code", func(f *requireAuthFixture) string {
+			return f.mintExpiredAccessToken("u-still-expired")
+		}, `"code":"access_token_expired"`},
+		{"tampered stays a codeless 401", func(f *requireAuthFixture) string {
+			valid := f.issueTokenForUser("u-still-tampered", "operator")
+			return valid[:len(valid)-8] + "AAAAAAAA"
+		}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRequireAuthFixture(t)
+			dh := &downstreamHandler{}
+			srv := httptest.NewServer(f.mw.RequireAuth(dh.handler()))
+			defer srv.Close()
+
+			req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+			req.Header.Set("Authorization", "Bearer "+tc.bearer(f))
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Errorf("status = %d, want 401 — only an unverifiable SERVER answers 503 here", resp.StatusCode)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			if strings.Contains(string(body), "token_verification_unavailable") {
+				t.Errorf("body = %s — only a missing verifying key may carry that code", body)
+			}
+			if tc.wantInBody != "" && !strings.Contains(string(body), tc.wantInBody) {
+				t.Errorf("body = %s, want %s untouched", body, tc.wantInBody)
+			}
+		})
+	}
 }

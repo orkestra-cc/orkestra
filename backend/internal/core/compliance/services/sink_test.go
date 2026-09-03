@@ -1,9 +1,19 @@
 package services
 
 import (
+	"bytes"
+	"context"
+	"log/slog"
+	"strings"
 	"testing"
+	"time"
+
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/orkestra/backend/internal/core/compliance/models"
+	"github.com/orkestra/backend/internal/core/compliance/repository"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // TestDefaultActorType pins the inference rule: if the caller omits ActorType,
@@ -52,5 +62,39 @@ func TestDefaultOutcome(t *testing.T) {
 	}
 	if got := defaultOutcome(models.OutcomeDenied); got != models.OutcomeDenied {
 		t.Fatalf("explicit denied should be preserved; got %q", got)
+	}
+}
+
+// TestEmit_InsertFailureWarnsWithActionResourceOutcome pins the best-effort
+// contract's one guarantee: a failed insert is visible in a structured WARN
+// that names the event — action, resource type/id, outcome — and never its
+// metadata payload.
+func TestEmit_InsertFailureWarnsWithActionResourceOutcome(t *testing.T) {
+	client, err := mongo.NewClient(options.Client().
+		ApplyURI("mongodb://127.0.0.1:1/").
+		SetServerSelectionTimeout(50 * time.Millisecond).
+		SetConnectTimeout(50 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("mongo.NewClient: %v", err)
+	}
+	// Deliberately NOT connected: the insert fails server selection.
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	sink := NewSink(repository.New(client.Database("unreachable")), logger)
+
+	sink.Emit(context.Background(), iface.AuditEvent{
+		Action: "module.config.updated", ResourceType: "module", ResourceID: "auth",
+		Outcome: "failure", TenantID: "t-1",
+		Metadata: map[string]any{"keys": []string{"passwordLoginEnabledAdmin"}, "code": "auth.login_method_lockout"},
+	})
+
+	out := buf.String()
+	for _, want := range []string{"level=WARN", "audit sink insert failed", "action=module.config.updated", "resourceType=module", "resourceId=auth", "outcome=failure"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("WARN missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "passwordLoginEnabledAdmin") || strings.Contains(out, "login_method_lockout") {
+		t.Errorf("WARN must not carry the metadata payload:\n%s", out)
 	}
 }

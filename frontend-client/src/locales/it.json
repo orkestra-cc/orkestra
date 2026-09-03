@@ -35,7 +35,8 @@
     "errorPasswordTooShort": "La password deve avere almeno 10 caratteri",
     "errorFullNameRequired": "Il nome è obbligatorio",
     "errorTermsRequired": "Devi accettare i termini per continuare",
-    "disabled": "La registrazione self-service è momentaneamente disabilitata. Contattaci se hai bisogno di un account."
+    "disabled": "La registrazione self-service è momentaneamente disabilitata. Contattaci se hai bisogno di un account.",
+    "passwordDisabled": "La registrazione con email e password è disabilitata qui. Accedi con uno dei provider disponibili."
   },
   "verify": {
     "title": "Verifica email",
@@ -61,6 +62,18 @@
     "forgot": "Password dimenticata?",
     "signupLink": "Crea un account",
     "disabled": "L'accesso è momentaneamente disabilitato da un amministratore. Riprova più tardi.",
+    "subtitleSso": "Continua con uno dei provider di accesso qui sotto.",
+    "noMethod": "Nessun metodo di accesso è al momento disponibile. Contatta un amministratore.",
+    "oauth": {
+      "divider": "oppure continua con",
+      "continueWith": "Continua con {{provider}}",
+      "redirecting": "Reindirizzamento a {{provider}}…",
+      "loading": "Caricamento delle opzioni di accesso…",
+      "loadError": "Impossibile caricare i provider di accesso.",
+      "retry": "Riprova",
+      "startFailed": "Impossibile avviare l'accesso con {{provider}}. Riprova.",
+      "providerDisabled": "L'accesso con {{provider}} non è disponibile su questa superficie. Contatta un amministratore."
+    },
     "mfa": {
       "prompt": "Inserisci il codice a 6 cifre del tuo autenticatore.",
       "code": "Codice di verifica",
@@ -79,6 +92,24 @@
       "resendDone": "Se l'indirizzo è registrato e non ancora verificato, ti abbiamo inviato una nuova email."
     }
   },
+  "oauth": {
+    "callback": {
+      "verifying": "Completamento dell'accesso…",
+      "failureTitle": "Accesso non riuscito",
+      "sessionSignedOut": "Accesso completato, ma non è stato possibile stabilire una sessione. Accedi di nuovo.",
+      "sessionUnavailable": "Il server non riesce a confermare la sessione in questo momento. Riprova tra poco.",
+      "retry": "Riprova",
+      "backToLogin": "Torna all'accesso",
+      "errors": {
+        "accessDenied": "L'accesso è stato annullato presso il provider di identità.",
+        "signupDisabled": "La registrazione è attualmente solo su invito. Contatta un amministratore.",
+        "linkDisabled": "Esiste già un account con questa email e il collegamento automatico è disattivato. Contatta un amministratore.",
+        "emailUnverified": "Il provider di identità non ha verificato questo indirizzo email, quindi non può essere usato per accedere.",
+        "providerUnavailable": "Questo provider di accesso non è al momento disponibile. Riprova più tardi.",
+        "loginFailed": "Accesso non riuscito. Riprova."
+      }
+    }
+  },
   "forgot": {
     "title": "Password dimenticata",
     "subtitle": "Inserisci la tua email e ti invieremo un link per reimpostare la password.",
@@ -87,7 +118,8 @@
     "submitting": "Invio in corso…",
     "successTitle": "Controlla la tua email",
     "successBody": "Se l'indirizzo è registrato, abbiamo inviato un link per reimpostare la password.",
-    "backToLogin": "Torna al login"
+    "backToLogin": "Torna al login",
+    "passwordDisabled": "L'accesso con password è disabilitato qui, quindi la password non può essere reimpostata. Accedi con uno dei provider disponibili o contatta un amministratore."
   },
   "reset": {
     "title": "Reimposta la password",
@@ -281,8 +313,29 @@
       "updateFailed": "Impossibile cambiare l'origine dell'avatar."
     }
   },
+  "dsr": {
+    "title": "Privacy e i miei dati",
+    "subtitle": "Esercita i tuoi diritti GDPR sui dati personali che trattiamo su di te.",
+    "export": {
+      "title": "Scarica i miei dati",
+      "subtitle": "Ottieni una copia di tutti i dati personali associati al tuo account, in un formato leggibile da un dispositivo automatico (art. 15 / 20).",
+      "submit": "Scarica i miei dati",
+      "submitting": "Preparazione in corso…",
+      "error": "Esportazione non riuscita. Riprova."
+    },
+    "erasure": {
+      "title": "Richiedi la cancellazione",
+      "subtitle": "Chiedici di cancellare i tuoi dati personali (art. 17). Un operatore esamina la richiesta prima che venga eseguita.",
+      "reasonPlaceholder": "Motivo (facoltativo)",
+      "submit": "Richiedi la cancellazione",
+      "submitting": "Invio in corso…",
+      "submitted": "Richiesta inviata",
+      "error": "Impossibile inviare la richiesta."
+    }
+  },
   "loading": "Caricamento…",
   "error": {
-    "generic": "Si è verificato un errore. Riprova."
+    "generic": "Si è verificato un errore. Riprova.",
+    "policyUnavailable": "La policy di accesso non è al momento disponibile. Riprova tra poco."
   }
 }

@@ -24,6 +24,17 @@ var (
 	ErrAccountAlreadyExists     = errors.New("service account already exists")
 	ErrServiceAccountNotFound   = errors.New("service account not found")
 	ErrTooManyActiveCredentials = errors.New("service account already has two active credentials")
+	// ErrServiceAccountLookupUnavailable signals that the service-account
+	// DIRECTORY could not be read, so the gate could not tell whether the
+	// target exists at all. It is ErrRefreshLookupUnavailable's sibling one
+	// module over (spec §4.9's class, §8 #17): an infrastructure failure
+	// reported as ErrServiceAccountNotFound tells an operator their account
+	// was deleted, which is a verdict the platform never actually reached.
+	// The one site that returns it wraps BOTH this sentinel and the cause
+	// (`fmt.Errorf("...: %w: %w", ErrServiceAccountLookupUnavailable, err)`),
+	// so errors.Is classifies while the cause survives into the log.
+	// Translated to 503 service_account_lookup_unavailable at the handler.
+	ErrServiceAccountLookupUnavailable = errors.New("service account lookup unavailable")
 )
 
 // Grant sentinels (Task 7). ErrInvalidClientCredentials is deliberately
@@ -240,9 +251,24 @@ func (s *ServiceAccountService) mintCredential(ctx context.Context, userUUID, la
 // requireServiceAccount loads the user and confirms it is a machine
 // principal. Every lifecycle method below gates on this first so a
 // human user's UUID can never be targeted by these endpoints.
+//
+// It CLASSIFIES the lookup rather than collapsing it (spec §8 #17). Only a
+// conforming UserProvider's not-found — iface.ErrUserNotFound, which
+// user/services.ErrUserNotFound aliases — is a verdict; anything else is the
+// directory failing, and answering that with a 404 tells an operator their
+// service account was deleted. The user == nil test is written out rather
+// than left to ||'s short-circuit, because splitting the error arm off moves
+// the user.Kind dereference into a statement of its own.
 func (s *ServiceAccountService) requireServiceAccount(ctx context.Context, userID string) (*iface.User, error) {
 	user, err := s.users.GetUserByID(ctx, userID)
-	if err != nil || user.Kind != iface.UserKindService {
+	if err != nil {
+		if errors.Is(err, iface.ErrUserNotFound) {
+			return nil, ErrServiceAccountNotFound
+		}
+		return nil, fmt.Errorf("service account lookup failed: %w: %w",
+			ErrServiceAccountLookupUnavailable, err)
+	}
+	if user == nil || user.Kind != iface.UserKindService {
 		return nil, ErrServiceAccountNotFound
 	}
 	return user, nil

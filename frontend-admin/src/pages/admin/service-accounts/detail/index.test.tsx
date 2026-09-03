@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { delay, http, HttpResponse } from 'msw';
+import { http, HttpResponse } from 'msw';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router';
@@ -47,6 +47,19 @@ const stubDetail = (body: ServiceAccountDetail = detail) => {
       HttpResponse.json(body)
     )
   );
+};
+
+// A PATCH the test holds open until it says so. The double-click tests
+// assert the in-flight guard (disabled={isUpdating}) while the request is
+// still pending; a fixed msw `delay(50)` for that window raced the click +
+// React scheduling under CPU load and flaked on `toBeDisabled`. Resolving
+// the response explicitly makes the window as long as the test needs.
+const heldResponse = () => {
+  let release!: () => void;
+  const held = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  return { held, release };
 };
 
 const renderPage = () =>
@@ -125,6 +138,7 @@ describe('ServiceAccountDetailPage', () => {
   it('does not double-fire the PATCH on a rapid double-click of the switch', async () => {
     stubDetail();
     let patchCount = 0;
+    const patch = heldResponse();
     server.use(
       http.patch(
         url('/v1/admin/service-accounts/sa-1'),
@@ -134,7 +148,7 @@ describe('ServiceAccountDetailPage', () => {
           // Keeps the mutation in flight across the second click so the
           // in-flight guard (disabled={isUpdating}) actually gets exercised
           // instead of the second click landing after the first resolved.
-          await delay(50);
+          await patch.held;
           return HttpResponse.json({ ...detail, isActive: false });
         }
       )
@@ -149,8 +163,9 @@ describe('ServiceAccountDetailPage', () => {
     expect(toggle).toBeDisabled();
     await user.click(toggle);
 
-    // Let the in-flight request resolve, then confirm only one PATCH ever
+    // Now let the request resolve, then confirm only one PATCH ever
     // reached the server.
+    patch.release();
     await waitFor(() => expect(toggle).not.toBeDisabled());
     expect(patchCount).toBe(1);
   });
@@ -187,6 +202,7 @@ describe('ServiceAccountDetailPage', () => {
   it('does not double-submit the rename PATCH on a rapid double-click of Save', async () => {
     stubDetail();
     let patchCount = 0;
+    const patch = heldResponse();
     server.use(
       http.patch(
         url('/v1/admin/service-accounts/sa-1'),
@@ -196,7 +212,7 @@ describe('ServiceAccountDetailPage', () => {
           // Mirrors the switch double-fire test: keep the mutation in
           // flight across the second click so the shared isUpdating guard
           // (disabled={isUpdating} on Save/Cancel) actually gets exercised.
-          await delay(50);
+          await patch.held;
           return HttpResponse.json({ ...detail, name: 'hermes-agent-2' });
         }
       )
@@ -217,8 +233,10 @@ describe('ServiceAccountDetailPage', () => {
     // Second click lands on an already-disabled Save — must be a no-op.
     await user.click(saveButton);
 
-    // The inline rename form closes on success — wait for that, then
-    // confirm only one PATCH ever reached the server.
+    // Now let the request resolve. The inline rename form closes on
+    // success — wait for that, then confirm only one PATCH ever reached
+    // the server.
+    patch.release();
     await waitFor(() =>
       expect(screen.queryByLabelText(/^name$/i)).not.toBeInTheDocument()
     );

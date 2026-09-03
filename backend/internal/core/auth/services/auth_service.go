@@ -47,6 +47,43 @@ var (
 	// so the correct client response is to retry the refresh once.
 	// Translated to 409 refresh_rotation_raced at the handler boundary.
 	ErrRefreshRotationRaced = errors.New("refresh token superseded by a concurrent rotation — retry")
+	// ErrRefreshLookupUnavailable signals that the refresh path could not be
+	// COMPLETED because infrastructure failed. THIRTEEN sites return it.
+	// Seven are on the rotation path: the refresh-token lookup, the user lookup, the
+	// mint, the rotating write, PeekRefreshToken's lookup in the candidate
+	// picker that runs in FRONT of the rotation, and the two reads the
+	// rotation-race classifier makes — benignRotationRetry's FamilyRevoked and
+	// the post-CAS re-read. Those last two are the destructive ones: before
+	// §4.9 they folded "could not read" into "revoked" and signed every tab
+	// out over a store hiccup. Three more are MintAccessTokenFromRefresh's
+	// own reads — its GetByTokenAny, its GetUserByID and its
+	// GenerateAccessTokenForSessionWithAMR — the read-only mint that
+	// GET /v1/auth/session performs after the picker. They are separate reads
+	// from the picker's, so a blip opening between the two answered session
+	// bootstrap with a codeless 401 until spec v20 classified them.
+	// The last three are the ValidateRefreshToken call that OPENS each of
+	// those three functions — RefreshTokensWithRiskAssessment,
+	// PeekRefreshToken and MintAccessTokenFromRefresh — and only for
+	// ErrJWTKeysNotLoaded: a boot with no verifying key is the server saying
+	// it cannot authenticate anyone, not that this token is bad. Every other
+	// validation failure there (malformed JWT, bad signature, wrong token
+	// type, wrong audience) is a verdict and keeps its "invalid refresh
+	// token" wrap and its 401. Signing failures need nothing extra: they
+	// surface through the mint wraps already counted above.
+	// It says nothing about whether the session is
+	// alive, so it must never be answered as an authentication failure:
+	// ADR-0017 gave session enforcement its own 503 precisely so a storage
+	// outage would not "train clients to discard a session that is still
+	// perfectly valid", and these are its siblings. Translated to
+	// 503 refresh_lookup_unavailable at the handler boundary — a code
+	// DISTINCT from session_enforcement_unavailable, because both clients
+	// treat 503 identically so the distinction is free on the wire and tells
+	// whoever reads the support ticket which subsystem failed.
+	//
+	// Every site that returns it wraps BOTH this sentinel and the underlying
+	// error (`fmt.Errorf("...: %w: %w", ErrRefreshLookupUnavailable, err)`),
+	// so classification holds and the cause survives for whoever logs.
+	ErrRefreshLookupUnavailable = errors.New("refresh path infrastructure unavailable")
 	// ErrOAuthSignupDisabled signals that an OAuth callback resolved to
 	// an unknown email but the audience-scoped oauthAllowSignup policy
 	// is off, so we refuse to provision a new account. Translated to
@@ -58,6 +95,11 @@ var (
 	// already authenticated. Translated to 403 oauth_link_disabled at
 	// the handler boundary.
 	ErrOAuthLinkDisabled = errors.New("oauth account linking by email is disabled")
+	// ErrOAuthEmailUnverified signals that an OAuth identity with no
+	// existing (provider, providerID) link arrived with an email the IdP
+	// did not mark verified. It is returned BEFORE the local email lookup,
+	// so the caller learns nothing about whether an account exists.
+	ErrOAuthEmailUnverified = errors.New("oauth provider did not verify the email")
 	// ErrLastCredentialRemoval signals that an admin tried to unlink an
 	// OAuth identity that would leave the target with no usable login
 	// method (no password set AND it was their only OAuth provider).
@@ -126,16 +168,17 @@ type AuthService interface {
 	// AdminUnlinkOAuth removes a linked OAuth identity from another
 	// user's account. Enforces two safeguards in addition to the route
 	// gate: rejects self-action (actorUUID == targetUUID) and rejects
-	// removing the user's only remaining credential (no password +
-	// single OAuth link). Both safeguards live here so any caller —
-	// HTTP handler, future CLI, internal job — gets the same checks.
+	// removing the user's only remaining USABLE credential (§4.7 — a
+	// password the surface refuses and a disabled/unconfigured provider
+	// are not ways in). Both safeguards live here so any caller — HTTP
+	// handler, future CLI, internal job — gets the same checks.
 	AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUID string, provider iface.OAuthProvider) error
 	// SelfUnlinkOAuth removes one OAuth identity from the caller's own
-	// account. Mirrors AdminUnlinkOAuth's last-credential safeguard so
-	// a user cannot accidentally remove their only login method, but
-	// drops the self-action check (self-action IS the point here). The
-	// HTTP handler is gated by RequireStepUp(5m) — credential removal
-	// demands a fresh MFA proof.
+	// account. Mirrors AdminUnlinkOAuth's last-usable-credential
+	// safeguard so a user cannot accidentally remove their only login
+	// method, but drops the self-action check (self-action IS the point
+	// here). The HTTP handler is gated by RequireStepUp(5m) —
+	// credential removal demands a fresh MFA proof.
 	SelfUnlinkOAuth(ctx context.Context, userUUID string, provider iface.OAuthProvider) error
 	// SelfLinkOAuthFromCallback binds a freshly-completed OAuth flow
 	// to an authenticated user. Called from the OAuth callback when
@@ -247,6 +290,13 @@ type AuthService interface {
 	// signature. Empty falls back to operator semantics.
 	SetAudience(a PolicyAudience)
 
+	// SetProviderUsability wires the per-audience "is this provider a
+	// usable web login method" resolver (§4.7): providerOn ∧ structurally
+	// configured against the active snapshot, without this package
+	// importing the resolver type. Unlink guards refuse with a policy
+	// error when it is missing — an uncertain link must not be counted.
+	SetProviderUsability(f func(ctx context.Context, audience PolicyAudience, provider iface.OAuthProvider) (bool, error))
+
 	// Enhanced OAuth callback handling with account linking
 	HandleOAuthCallbackWithLinking(ctx context.Context, provider models.OAuthProvider, userInfo map[string]interface{}, oauthTokens *models.OAuthProviderTokens, securityCtx *models.SecurityContext, deviceInfo *models.DeviceInfo) (*models.TokenResponse, error)
 }
@@ -296,6 +346,11 @@ type authService struct {
 	// signup gating can read the audience-scoped oauthAllowSignup
 	// policy without needing the caller to pass it explicitly.
 	audience PolicyAudience
+	// providerUsability answers "is this OAuth provider a usable web
+	// login method on this surface" for the unlink guards. Wired
+	// post-construction from module.go over the shared OAuth config
+	// resolver; nil means the guards refuse rather than guess.
+	providerUsability func(ctx context.Context, audience PolicyAudience, provider iface.OAuthProvider) (bool, error)
 	// sessionRevocation is the Redis-backed sid revocation store
 	// shared across all tiers. Wired post-construction via
 	// SetSessionRevocation; nil disables the in-flight access-token
@@ -350,6 +405,37 @@ func (s *authService) SetPolicy(p *AuthPolicyService) {
 // reads can fetch audience-scoped knobs.
 func (s *authService) SetAudience(a PolicyAudience) {
 	s.audience = a
+}
+
+// SetProviderUsability wires the per-audience provider-usability
+// resolver the unlink guards consult (§4.7).
+func (s *authService) SetProviderUsability(f func(ctx context.Context, audience PolicyAudience, provider iface.OAuthProvider) (bool, error)) {
+	s.providerUsability = f
+}
+
+// usableProvidersForLinks precomputes usability for every ACTIVE link's
+// provider before any mutation (§4.7). Any config read, decrypt or parse
+// error — or missing wiring — refuses with the policy sentinel rather
+// than counting an uncertain link.
+func (s *authService) usableProvidersForLinks(ctx context.Context, links []iface.OAuthLink) (map[iface.OAuthProvider]bool, error) {
+	if s.providerUsability == nil {
+		return nil, fmt.Errorf("%w: provider usability not wired", ErrAuthPolicyUnavailable)
+	}
+	out := make(map[iface.OAuthProvider]bool, len(links))
+	for _, link := range links {
+		if !link.IsActive {
+			continue
+		}
+		if _, seen := out[link.Provider]; seen {
+			continue
+		}
+		ok, err := s.providerUsability(ctx, s.audience, link.Provider)
+		if err != nil {
+			return nil, err
+		}
+		out[link.Provider] = ok
+	}
+	return out, nil
 }
 
 // SetSessionRevocation wires the Redis-backed sid revocation store.
@@ -537,9 +623,13 @@ func (s *authService) userHasEnrolledMFAFactor(ctx context.Context, userUUID str
 //  1. actorUUID != targetUUID — admins must not unlink their own
 //     identities through the admin path; the self-service flow exists
 //     for that and carries different audit semantics.
-//  2. Last-credential lockout — refuse when the target has no usable
-//     password AND this is their only OAuth link. The operator should
-//     send a password-reset first, then unlink.
+//  2. Last-credential lockout — refuse when removing a USABLE link
+//     would leave the target with no usable credential: no password the
+//     surface accepts, and no other link whose provider is enabled and
+//     structurally configured (§4.7). The operator should re-enable a
+//     method or send a password-reset first, then unlink. Any policy or
+//     provider-config uncertainty refuses with ErrAuthPolicyUnavailable
+//     rather than counting a link it cannot vouch for.
 //
 // The provider-specific subject ID is resolved from the target's
 // User.OAuthLinks rather than from the OAuth provider repo so this
@@ -564,7 +654,18 @@ func (s *authService) AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUI
 	if err != nil {
 		return err
 	}
-	providerID, locked, found := wouldLockOutOAuthUnlink(target, links, provider)
+	// §4.7: resolve what actually counts as a way in BEFORE mutating.
+	// Strict reads — break-glass never counts as a lasting credential,
+	// and any uncertainty refuses with 503 rather than guessing.
+	passwordUsable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+	if err != nil {
+		return err
+	}
+	usable, err := s.usableProvidersForLinks(ctx, links)
+	if err != nil {
+		return err
+	}
+	providerID, locked, found := wouldLockOutOAuthUnlink(target, links, provider, passwordUsable, usable)
 	if !found {
 		return ErrOAuthLinkNotFound
 	}
@@ -583,29 +684,40 @@ func (s *authService) AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUI
 }
 
 // wouldLockOutOAuthUnlink computes the shared lockout decision used by
-// AdminUnlinkOAuth and SelfUnlinkOAuth. Returns the matched providerID
-// (empty when no link is found), a `locked` flag set when removing the
-// link would leave the user with no usable credential (no password
-// AND single active OAuth link), and a `found` flag distinguishing
-// "provider not linked" (404) from a benign mismatch.
-func wouldLockOutOAuthUnlink(target *iface.User, links []iface.OAuthLink, provider iface.OAuthProvider) (providerID string, locked bool, found bool) {
+// AdminUnlinkOAuth and SelfUnlinkOAuth, counting USABLE credentials
+// (§4.7): a link whose provider is disabled or structurally incomplete
+// is not a way in, and neither is a password the surface refuses.
+//
+//	targetUsable    := target link IsActive ∧ usableProviders[provider]
+//	remainingUsable := count(other links: IsActive ∧ usableProviders[Provider])
+//	locked          := targetUsable ∧ (¬passwordUsable ∨ PasswordHash == "") ∧ remainingUsable == 0
+//
+// Removing an unusable target link is always allowed. found=false keeps
+// meaning "provider not linked" (404).
+func wouldLockOutOAuthUnlink(target *iface.User, links []iface.OAuthLink,
+	provider iface.OAuthProvider, passwordUsable bool,
+	usableProviders map[iface.OAuthProvider]bool) (providerID string, locked bool, found bool) {
 	if target == nil {
 		return "", false, false
 	}
-	activeCount := 0
+	targetActive := false
+	remainingUsable := 0
 	for _, link := range links {
-		if link.IsActive {
-			activeCount++
-		}
 		if link.Provider == provider && providerID == "" {
 			providerID = link.ProviderID
+			targetActive = link.IsActive
+			continue
+		}
+		if link.IsActive && usableProviders[link.Provider] {
+			remainingUsable++
 		}
 	}
 	found = providerID != ""
 	if !found {
 		return "", false, false
 	}
-	locked = target.PasswordHash == "" && activeCount <= 1
+	targetUsable := targetActive && usableProviders[provider]
+	locked = targetUsable && (!passwordUsable || target.PasswordHash == "") && remainingUsable == 0
 	return providerID, locked, true
 }
 
@@ -630,7 +742,18 @@ func (s *authService) SelfUnlinkOAuth(ctx context.Context, userUUID string, prov
 	if err != nil {
 		return err
 	}
-	providerID, locked, found := wouldLockOutOAuthUnlink(user, links, provider)
+	// §4.7: resolve what actually counts as a way in BEFORE mutating.
+	// Strict reads — break-glass never counts as a lasting credential,
+	// and any uncertainty refuses with 503 rather than guessing.
+	passwordUsable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+	if err != nil {
+		return err
+	}
+	usable, err := s.usableProvidersForLinks(ctx, links)
+	if err != nil {
+		return err
+	}
+	providerID, locked, found := wouldLockOutOAuthUnlink(user, links, provider, passwordUsable, usable)
 	if !found {
 		return ErrOAuthLinkNotFound
 	}
@@ -680,7 +803,10 @@ func (s *authService) SelfLinkOAuthFromCallback(
 		return err
 	}
 	if user == nil {
-		return fmt.Errorf("user not found")
+		// A wrap of the SDK sentinel, not a fresh error carrying the same
+		// text: the handler mappers classify not-found with errors.Is, and
+		// a look-alike message is invisible to that.
+		return fmt.Errorf("self link: %w", iface.ErrUserNotFound)
 	}
 
 	providerID, _ := userInfo["provider_id"].(string)
@@ -801,14 +927,23 @@ func (s *authService) GetUserAuthMethods(ctx context.Context, targetUUID string)
 		return nil, ErrOAuthLinkNotFound
 	}
 
+	// §4.8: presence and usability are different facts. The strict read
+	// fails the whole call (503) rather than guessing — an outage must
+	// not render an unlock the backend would refuse.
+	passwordUsable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+	if err != nil {
+		return nil, err
+	}
 	view := &models.AuthMethodsView{
-		HasUsablePassword: user.PasswordHash != "",
-		PasswordUpdatedAt: user.PasswordUpdatedAt,
-		EmailVerified:     user.EmailVerified,
-		LastLoginAt:       user.LastLogin,
-		MFAGraceStartedAt: user.MFAGraceStartedAt,
-		MFAFactors:        []models.MFAFactorView{},
-		OAuthProviders:    []models.OAuthProviderView{},
+		HasPasswordSet:         user.PasswordHash != "",
+		PasswordUsableForLogin: user.PasswordHash != "" && passwordUsable,
+		HasUsablePassword:      user.PasswordHash != "", // Deprecated alias of HasPasswordSet
+		PasswordUpdatedAt:      user.PasswordUpdatedAt,
+		EmailVerified:          user.EmailVerified,
+		LastLoginAt:            user.LastLogin,
+		MFAGraceStartedAt:      user.MFAGraceStartedAt,
+		MFAFactors:             []models.MFAFactorView{},
+		OAuthProviders:         []models.OAuthProviderView{},
 	}
 
 	// MFARequired starts from the role-only check — covers the system
@@ -1331,11 +1466,20 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 //  5. Mint a new access + refresh pair and persist the new row via
 //     RotateWithFamily, which atomically marks the old row rotated.
 //     A CAS failure means another caller beat us to the rotation —
-//     treat that as replay too.
+//     re-read to tell a race from a replay; an unreadable state is
+//     neither, and answers ErrRefreshLookupUnavailable without revoking.
 func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refreshToken string, securityCtx *models.SecurityContext) (*models.TokenResponse, error) {
 	// 1. Validate JWT structure and extract claims.
 	claims, err := s.jwtService.ValidateRefreshToken(refreshToken)
 	if err != nil {
+		if errors.Is(err, ErrJWTKeysNotLoaded) {
+			// No verifying key loaded is the SERVER failing, not a verdict on
+			// this token: it cannot authenticate anyone until an operator
+			// fixes the key material. 503, so no client reads it as its own
+			// session ending. Every other validation failure below is a
+			// verdict and keeps its 401.
+			return nil, fmt.Errorf("refresh token validation unavailable: %w: %w", ErrRefreshLookupUnavailable, err)
+		}
 		return nil, fmt.Errorf("invalid refresh token: %w", err)
 	}
 
@@ -1343,7 +1487,8 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 	hashedToken := utils.HashRefreshToken(refreshToken)
 	tokenDoc, err := s.refreshTokenRepo.GetByTokenAny(ctx, hashedToken)
 	if err != nil {
-		return nil, fmt.Errorf("failed to validate refresh token: %w", err)
+		// An unreachable store is not a verdict on the token. 503, not 401.
+		return nil, fmt.Errorf("refresh token lookup failed: %w: %w", ErrRefreshLookupUnavailable, err)
 	}
 	if tokenDoc == nil {
 		return nil, ErrInvalidRefreshToken
@@ -1355,10 +1500,19 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 	// 3+4. Already-revoked branches.
 	if tokenDoc.IsRevoked {
 		if tokenDoc.RevokedReason == models.RevokeReasonRotated {
-			// A sibling caller rotated this row between our read and
-			// theirs. Inside the grace window that is the multi-tab race,
-			// not an attack — answer "retry" and leave the family alone.
-			if s.benignRotationRetry(ctx, tokenDoc) {
+			// Three answers, not two. A sibling caller rotated this row
+			// between our read and theirs; inside the grace window against
+			// a healthy family that is the multi-tab race, not an attack —
+			// answer "retry" and leave the family alone. Against a revoked
+			// family or outside the window it is a replay. And if the
+			// family could not be READ, it is neither: answer 503 and touch
+			// nothing, because the sibling that won this race is holding a
+			// live successor that a revocation here would kill.
+			benign, err := s.benignRotationRetry(ctx, tokenDoc)
+			if err != nil {
+				return nil, err
+			}
+			if benign {
 				return nil, ErrRefreshRotationRaced
 			}
 			s.handleRefreshReplay(ctx, tokenDoc, securityCtx, "rotated_token_reused")
@@ -1367,10 +1521,21 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		return nil, ErrInvalidRefreshToken
 	}
 
-	// Load the user for JWT claim population.
+	// Load the user for JWT claim population. A user that is genuinely GONE is
+	// terminal — 401, or the client holds a token for a deleted account
+	// forever. Anything else is the store being unreachable, and answering
+	// that 401 is how an outage acquires the appearance of a deleted account.
+	// The not-found branch is checked FIRST so the outage wrap can never
+	// re-classify a deletion.
 	userModel, err := s.userService.GetUserByID(ctx, claims.UserUUID)
 	if err != nil {
-		return nil, fmt.Errorf("user not found: %w", err)
+		if errors.Is(err, iface.ErrUserNotFound) {
+			return nil, ErrInvalidRefreshToken
+		}
+		return nil, fmt.Errorf("user lookup failed: %w: %w", ErrRefreshLookupUnavailable, err)
+	}
+	if userModel == nil {
+		return nil, ErrInvalidRefreshToken
 	}
 	user := convertUserModelToAuthModel(userModel)
 
@@ -1408,7 +1573,8 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 
 	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, claims.AMR, claims.LastOTPAt)
 	if err != nil {
-		return nil, fmt.Errorf("failed to mint token pair: %w", err)
+		// Signing is ours to get right; a failure here is not the caller's.
+		return nil, fmt.Errorf("token mint failed: %w: %w", ErrRefreshLookupUnavailable, err)
 	}
 	newDoc := &models.RefreshTokenDoc{
 		UUID:         models.GenerateTimeOrderedUUID(),
@@ -1436,21 +1602,31 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		if errors.Is(err, repository.ErrTokenAlreadyRotated) {
 			// Concurrency: another caller rotated between our Get and our
 			// CAS, or the client retried. Re-read the row to tell the two
-			// apart — our stale copy still says isRevoked:false. A sibling
-			// that won the CAS within the grace window leaves a healthy
-			// family and gets "retry"; anything else is a replay and the
-			// family dies. This branch also covers the case where our own
-			// CAS succeeded but the family was revoked underneath us
-			// (RotateWithFamily reports that as ErrTokenAlreadyRotated
-			// too) — FamilyRevoked sees the fence and routes it to replay.
-			if current, rerr := s.refreshTokenRepo.GetByTokenAny(ctx, hashedToken); rerr == nil &&
-				s.benignRotationRetry(ctx, current) {
+			// apart — our stale copy still says isRevoked:false. The
+			// re-read's OWN failure is an outage, not evidence: answer 503
+			// before the family check, and never fire replay on it.
+			current, rerr := s.refreshTokenRepo.GetByTokenAny(ctx, hashedToken)
+			if rerr != nil {
+				return nil, fmt.Errorf("post-CAS re-read failed: %w: %w", ErrRefreshLookupUnavailable, rerr)
+			}
+			benign, berr := s.benignRotationRetry(ctx, current)
+			if berr != nil {
+				return nil, berr
+			}
+			if benign {
 				return nil, ErrRefreshRotationRaced
 			}
+			// A sibling that won the CAS within the grace window leaves a
+			// healthy family and gets "retry" above; anything else is a
+			// replay and the family dies. This also covers our own CAS
+			// having succeeded while the family was revoked underneath us
+			// (RotateWithFamily reports that as ErrTokenAlreadyRotated too)
+			// — FamilyRevoked sees the fence and routes it here.
 			s.handleRefreshReplay(ctx, tokenDoc, securityCtx, "rotation_cas_lost")
 			return nil, ErrRefreshTokenReplay
 		}
-		return nil, fmt.Errorf("failed to rotate refresh token: %w", err)
+		// Not the CAS sentinel: the write itself failed. An outage, not a verdict.
+		return nil, fmt.Errorf("refresh token rotation write failed: %w: %w", ErrRefreshLookupUnavailable, err)
 	}
 
 	// Refresh user OAuth provider list for the response (matches the
@@ -1477,12 +1653,22 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 // every candidate the browser sent before any mutating call.
 func (s *authService) PeekRefreshToken(ctx context.Context, refreshToken string) (*models.RefreshTokenDoc, error) {
 	if _, err := s.jwtService.ValidateRefreshToken(refreshToken); err != nil {
+		if errors.Is(err, ErrJWTKeysNotLoaded) {
+			// Same split as the rotation's: no verifying key is the server's
+			// failure, not a verdict. It matters doubly here — the picker
+			// treats every other Peek error as "not a candidate", so without
+			// the sentinel an unverifiable cookie is silently skipped.
+			return nil, fmt.Errorf("refresh token validation unavailable: %w: %w", ErrRefreshLookupUnavailable, err)
+		}
 		return nil, fmt.Errorf("invalid refresh token: %w", err)
 	}
 	hashedToken := utils.HashRefreshToken(refreshToken)
 	doc, err := s.refreshTokenRepo.GetByTokenAny(ctx, hashedToken)
 	if err != nil {
-		return nil, fmt.Errorf("failed to look up refresh token: %w", err)
+		// An unreachable store is NOT "not a candidate". The picker in front
+		// of the rotation reads this sentinel and answers 503; every other
+		// error from this function is an invalid candidate and is skipped.
+		return nil, fmt.Errorf("refresh token lookup failed: %w: %w", ErrRefreshLookupUnavailable, err)
 	}
 	if doc == nil {
 		return nil, ErrInvalidRefreshToken
@@ -1512,12 +1698,23 @@ func (s *authService) PeekRefreshToken(ctx context.Context, refreshToken string)
 func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshToken string, securityCtx *models.SecurityContext) (*models.TokenResponse, error) {
 	claims, err := s.jwtService.ValidateRefreshToken(refreshToken)
 	if err != nil {
+		if errors.Is(err, ErrJWTKeysNotLoaded) {
+			// Same split as the rotation's: no verifying key is the server's
+			// failure, not a verdict. This is the session-bootstrap path, and
+			// a codeless 401 here is the one status a client reads as the end
+			// of its session.
+			return nil, fmt.Errorf("refresh token validation unavailable: %w: %w", ErrRefreshLookupUnavailable, err)
+		}
 		return nil, fmt.Errorf("invalid refresh token: %w", err)
 	}
 	hashedToken := utils.HashRefreshToken(refreshToken)
 	doc, err := s.refreshTokenRepo.GetByTokenAny(ctx, hashedToken)
 	if err != nil {
-		return nil, fmt.Errorf("failed to look up refresh token: %w", err)
+		// An unreachable store is not a verdict on the token. 503, not 401.
+		// This is a SECOND read: the picker already classified the cookie
+		// through PeekRefreshToken, so a blip opening between the two used to
+		// reach the browser as a sign-out on session bootstrap.
+		return nil, fmt.Errorf("refresh token lookup failed: %w: %w", ErrRefreshLookupUnavailable, err)
 	}
 	if doc == nil {
 		return nil, ErrInvalidRefreshToken
@@ -1532,9 +1729,21 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 		return nil, ErrInvalidRefreshToken
 	}
 
+	// Same split as the rotation path. A user that is genuinely GONE is
+	// terminal — 401, or the client holds a token for a deleted account
+	// forever. Anything else is the store being unreachable, and answering
+	// that 401 is how an outage acquires the appearance of a deleted account.
+	// The not-found branch is checked FIRST so the outage wrap can never
+	// re-classify a deletion.
 	userModel, err := s.userService.GetUserByID(ctx, claims.UserUUID)
 	if err != nil {
-		return nil, fmt.Errorf("user not found: %w", err)
+		if errors.Is(err, iface.ErrUserNotFound) {
+			return nil, ErrInvalidRefreshToken
+		}
+		return nil, fmt.Errorf("user lookup failed: %w: %w", ErrRefreshLookupUnavailable, err)
+	}
+	if userModel == nil {
+		return nil, ErrInvalidRefreshToken
 	}
 	user := convertUserModelToAuthModel(userModel)
 
@@ -1570,7 +1779,8 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 
 	access, err := s.jwtService.GenerateAccessTokenForSessionWithAMR(user, device, security, claims.AMR, claims.LastOTPAt)
 	if err != nil {
-		return nil, fmt.Errorf("failed to mint access token: %w", err)
+		// Signing is ours to get right; a failure here is not the caller's.
+		return nil, fmt.Errorf("token mint failed: %w: %w", ErrRefreshLookupUnavailable, err)
 	}
 
 	oauthProviders, _ := s.oauthProviderRepo.GetByUserUUID(ctx, user.UUID)
@@ -1603,30 +1813,37 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 // once the family has been revoked, is detected exactly as before.
 const RefreshRotationGrace = 10 * time.Second
 
-// benignRotationRetry reports whether doc is a token a concurrent caller
-// rotated moments ago, with the family still intact — the multi-tab race
-// rather than a replay.
+// benignRotationRetry reports whether a rotated row presented inside the
+// grace window belongs to a HEALTHY family — the multi-tab race the 409
+// exists for — as opposed to a replay that already tripped detection or a
+// rotation that lost to a concurrent family revocation.
 //
 // The family check is what separates the two cases that both present a
 // row marked "rotated": a racing sibling runs against a healthy family,
 // while a replay that already tripped detection (or a rotation that lost
-// to a concurrent family revocation) runs against a revoked one. On a
-// read error we return false, which keeps the pre-existing replay
-// behaviour rather than inventing a new failure mode.
-func (s *authService) benignRotationRetry(ctx context.Context, doc *models.RefreshTokenDoc) bool {
+// to a concurrent family revocation) runs against a revoked one.
+//
+// The error return is the THIRD state: the family could not be read, so
+// neither "retry" nor "replay" is justified. A caller must answer 503 on it
+// and must NOT revoke. This used to return false here, with a log line
+// saying "treating rotation as replay" — and both callers then revoked the
+// family, so a store hiccup during a legitimate two-tab race signed every
+// tab out and killed the successor the winner had just minted. Fail closed
+// denies the CURRENT request; it does not invent a verdict and persist it.
+func (s *authService) benignRotationRetry(ctx context.Context, doc *models.RefreshTokenDoc) (bool, error) {
 	if doc == nil || !doc.IsRevoked || doc.RevokedReason != models.RevokeReasonRotated {
-		return false
+		return false, nil
 	}
 	if doc.RevokedAt == nil || time.Since(*doc.RevokedAt) > RefreshRotationGrace {
-		return false
+		return false, nil
 	}
 	revoked, err := s.refreshTokenRepo.FamilyRevoked(ctx, doc.FamilyID)
 	if err != nil {
-		slogDefault().WarnContext(ctx, "refresh: family-state read failed, treating rotation as replay",
+		slogDefault().WarnContext(ctx, "refresh: family-state read failed, answering unavailable",
 			"outcome", errorOutcome(err))
-		return false
+		return false, fmt.Errorf("family state read failed: %w: %w", ErrRefreshLookupUnavailable, err)
 	}
-	return !revoked
+	return !revoked, nil
 }
 
 func (s *authService) handleRefreshReplay(ctx context.Context, doc *models.RefreshTokenDoc, securityCtx *models.SecurityContext, kind string) {
@@ -1907,7 +2124,25 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 		}
 		user = userModel
 	} else {
-		// No existing provider - check if user exists by email
+		// No existing (provider, providerID) link. §4.4 — three things are
+		// decided BEFORE the local email lookup, in this order:
+		//
+		//  1. The IdP must vouch for the address. A false/missing/non-bool
+		//     email_verified is refused now, identically whether or not a
+		//     local account exists (no account-existence oracle), and
+		//     before either the auto-link or the signup branch.
+		//  2. The auto-link policy must be establishable. A read failure,
+		//     a missing auth document or a malformed value is an outage
+		//     (503) — evaluated before the lookup so it cannot depend on
+		//     account state either.
+		//  3. Only then the lookup, and the branch it selects.
+		if verified, _ := userInfo["email_verified"].(bool); !verified {
+			return nil, ErrOAuthEmailUnverified
+		}
+		autoLink, err := s.policy.OAuthAutoLinkByEmailEnabled(ctx)
+		if err != nil {
+			return nil, err
+		}
 		userResponse, err := s.userService.GetUserByEmail(ctx, email)
 		if err != nil {
 			// Signup gates. Two toggles must both allow the new account:
@@ -1949,17 +2184,15 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 				}
 			}
 
-			// Trust the IdP's email_verified claim — every provider
-			// (Google, Apple, GitHub, Discord) populates this in the
-			// userInfoMap from its own verified-email signal. Missing
-			// or false falls through to the standard verification flow.
-			emailVerified, _ := userInfo["email_verified"].(bool)
+			// The IdP verified the address (checked above), so the account
+			// lands verified: nobody is asked to confirm what the IdP just
+			// confirmed.
 			createInput := &iface.CreateUserInput{
 				UUID:          newUUID,
 				Email:         email,
 				FullName:      userInfo["name"].(string),
 				Role:          role,
-				EmailVerified: emailVerified,
+				EmailVerified: true,
 			}
 
 			userModel, err := s.userService.CreateUserFromOAuth(ctx, createInput)
@@ -1971,13 +2204,13 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			}
 			user = convertUserModelToAuthModel(userModel)
 		} else {
-			// Phase 10: oauthAutoLinkByEmail gate. The callback found an
-			// existing Orkestra account by email — auto-linking the
-			// OAuth provider to it is convenient but lets an attacker
-			// who controls a matching IdP email hijack a password
-			// account. When off, refuse here so account linking must
-			// happen from an authenticated settings page instead.
-			if s.policy != nil && !s.policy.OAuthAutoLinkByEmail(ctx) {
+			// oauthAutoLinkByEmail gate (read strictly above). The callback
+			// found an existing Orkestra account by a VERIFIED matching
+			// email — auto-linking is convenient but lets whoever controls
+			// a matching IdP identity enter a password account. When off,
+			// refuse here so linking happens from an authenticated
+			// settings page instead.
+			if !autoLink {
 				return nil, ErrOAuthLinkDisabled
 			}
 			user = convertUserResponseToAuthModel(userResponse)
@@ -2231,6 +2464,10 @@ func (s *authService) evaluateMFAForOAuth(ctx context.Context, user *iface.User,
 			SourceAMR:   []string{"oauth"},
 			LoginMethod: "oauth",
 			TrustLevel:  "medium",
+			// Stamped for parity with the password producer; the
+			// completion re-check skips OAuth-sourced challenges, and
+			// an OAuth login is never break-glass.
+			Audience: string(s.audience),
 		}
 		if deviceInfo != nil {
 			in.DeviceID = deviceInfo.DeviceID

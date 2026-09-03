@@ -106,7 +106,7 @@ Several pieces of state are written to MongoDB only during `InitAll`. If the col
 
 | Seed | Where | Lazy-heal? |
 |---|---|---|
-| `module_configs` documents | `pkg/sdk/module/config_service.go::SeedFromModules` | ✅ `GetConfig`/`GetAllConfigs` lazy-rebuild from the in-memory spec cache |
+| `module_configs` documents | `pkg/sdk/module/config_service.go::SeedFromModules` (+ schema-key backfill for existing documents) | ✅ `GetConfig`/`ListConfigs` lazy-rebuild from the in-memory spec cache — **except modules named in `RequirePersistedConfig` (in-tree: `auth`)**: after boot seeding, a missing `auth` document is an outage — `GetConfig("auth")` fails closed, `/admin/modules` renders a `missing` row, and the strict password-policy readers return 503 rather than a schema default. Recovery is restore-or-restart, never lazy re-seed. |
 | Permissions catalog + system roles | `registry.go:183-211` → `authz.RegisterPermissions` + `authz.SeedSystemRoles` | ✅ `authz.Service.ListRoles`/`ListPermissions` call `ensureSeeded` |
 | Notification templates | `notification` module's `Start` → `TemplateService.SeedDefaults` | ❌ templates re-seed only at next backend restart |
 | Mongo collection auto-creation + index build | registry's `ensureCollections` | ❌ collections are re-created only at next restart |

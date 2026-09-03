@@ -78,4 +78,33 @@ describe('LoginMfaVerify', () => {
       DEFAULT_POST_LOGIN
     );
   });
+
+  it('refuses an empty code client-side without calling the backend', async () => {
+    let calls = 0;
+    server.use(
+      http.post('*/v1/auth/operator/mfa/login/verify', () => {
+        calls++;
+        return HttpResponse.json({
+          success: true,
+          user: {
+            id: 'u-1',
+            email: 'op@example.com',
+            fullName: 'Op',
+            isActive: true,
+            roles: ['operator'],
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z'
+          }
+        });
+      })
+    );
+    renderMfa({ challengeId: 'challenge-abc' });
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: /verify and sign in/i }));
+    expect(
+      await screen.findByText(/enter the code shown in your authenticator app/i)
+    ).toBeInTheDocument();
+    expect(calls).toBe(0);
+  });
 });

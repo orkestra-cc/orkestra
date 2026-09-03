@@ -192,6 +192,9 @@ export interface AdminAuthOAuthProvider {
 }
 
 export interface AdminAuthMethods {
+  hasPasswordSet: boolean;
+  passwordUsableForLogin: boolean;
+  /** @deprecated alias of hasPasswordSet (NOT usability); removed after one release */
   hasUsablePassword: boolean;
   passwordUpdatedAt?: string;
   emailVerified: boolean;

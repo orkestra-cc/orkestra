@@ -104,7 +104,14 @@ const LinkedProvidersTab = () => {
     );
   }
 
-  const onlyCredential = !data?.hasUsablePassword && providers.length === 1;
+  const onlyCredential =
+    !data?.passwordUsableForLogin && providers.length === 1;
+  // The last-credential warning has two remedies depending on WHY the
+  // password can't back up this provider: a set-but-disabled password
+  // needs the surface's method re-enabled (setting one is impossible —
+  // one already exists), while no hash at all means "set a password".
+  const passwordSetButDisabled =
+    !!data?.hasPasswordSet && !data?.passwordUsableForLogin;
 
   const onStartLink = async (provider: OAuthProvider) => {
     setError(null);
@@ -242,7 +249,13 @@ const LinkedProvidersTab = () => {
             <>
               {onlyCredential && (
                 <Alert variant="warning" className="fs-10">
-                  {t('userSecurity.linkedProvidersTab.onlyCredentialWarning')}
+                  {passwordSetButDisabled
+                    ? t(
+                        'userSecurity.linkedProvidersTab.onlyCredentialWarningPasswordDisabled'
+                      )
+                    : t(
+                        'userSecurity.linkedProvidersTab.onlyCredentialWarning'
+                      )}
                 </Alert>
               )}
               <Table responsive size="sm" className="mb-0 align-middle">

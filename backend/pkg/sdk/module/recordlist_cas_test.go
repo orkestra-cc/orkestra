@@ -17,7 +17,7 @@ func TestCompareAndSwapEnvironmentRejectsAStaleRevision(t *testing.T) {
 
 	next := EnvironmentConfig{ConfigValues: map[string]string{"a": "2"}}
 
-	won, err := repo.CompareAndSwapEnvironment(context.Background(), "demo", "production", 3, next)
+	won, err := repo.CompareAndSwapEnvironment(context.Background(), "demo", "production", 3, next, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestCompareAndSwapEnvironmentRejectsAStaleRevision(t *testing.T) {
 		t.Fatal("a stale revision won the CAS")
 	}
 
-	won, err = repo.CompareAndSwapEnvironment(context.Background(), "demo", "production", 4, next)
+	won, err = repo.CompareAndSwapEnvironment(context.Background(), "demo", "production", 4, next, true)
 	if err != nil || !won {
 		t.Fatalf("current revision lost the CAS: won=%v err=%v", won, err)
 	}
@@ -47,7 +47,7 @@ func TestCompareAndSwapTreatsAbsentRevisionAsZero(t *testing.T) {
 		},
 	}
 	won, err := repo.CompareAndSwapEnvironment(context.Background(), "legacy", "production", 0,
-		EnvironmentConfig{ConfigValues: map[string]string{"a": "1"}})
+		EnvironmentConfig{ConfigValues: map[string]string{"a": "1"}}, true)
 	if err != nil || !won {
 		t.Fatalf("legacy document rejected an expected revision of 0: won=%v err=%v", won, err)
 	}

@@ -33,7 +33,7 @@ The companies that **run Orkestra** (one or more of "our" organizations). For ea
 
 | Layer              | Technology                                                         |
 | ------------------ | ------------------------------------------------------------------ |
-| **Backend**        | Go 1.25.13, Huma v2 (OpenAPI-first), 8 core modules, single Go module |
+| **Backend**        | Go 1.26.8, Huma v2 (OpenAPI-first), 8 core modules, single Go module |
 | **Frontend**       | React 19, TypeScript 5.9, Vite 8 (admin) / Vite 7 (client), Redux Toolkit, TanStack Table |
 | **Mobile**         | Flutter 3.44+, Dart, Riverpod                                      |
 | **Database**       | MongoDB 8.0, Redis 8.2                                             |
@@ -92,7 +92,7 @@ Load order (topologically sorted by `Dependencies()`): `user` → `notification`
 ### Other Modules
 
 - **[`/backend/pkg/sdk/`](backend/pkg/sdk/CLAUDE.md)** — The SDK contract package every module depends on (in-tree, part of the single backend Go module). See also [docs/onboarding/orkestra-sdk.md](docs/onboarding/orkestra-sdk.md) for the new-developer walkthrough.
-- **[`/frontend-admin/`](frontend-admin/CLAUDE.md)** — React 19 operator console / Tier-1 admin dashboard (port 8080, host `console.localhost`)
+- **[`/frontend-admin/`](frontend-admin/CLAUDE.md)** — React 19 operator console / Tier-1 admin dashboard (port 8080, host `localhost` — same site as the API on `localhost:3000`)
 - **[`/frontend-client/`](frontend-client/CLAUDE.md)** — React 19 Tier-2 client demo SPA — a thin login + account + billing-identity skeleton (the subscribe/transactions/payment flows left with the addons)
 - **[`/mobile/`](mobile/CLAUDE.md)** — Flutter cross-platform app
 - **[`/docker/`](docker/CLAUDE.md)** — Docker Compose configs (dev/staging/prod/infra)
@@ -113,7 +113,7 @@ docker compose -f docker-compose.infra.yml up -d
 docker compose -f docker-compose.dev.yml --env-file .env up -d
 
 # Backend API: http://localhost:3000
-# API Docs:    http://localhost:3000/docs
+# API Docs:    http://localhost:3000/docs   (development only unless API_DOCS_ENABLED=true)
 
 # Generate an administrator token for first login (run from project root):
 ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
@@ -159,13 +159,15 @@ docker exec orkestra-backend-development go build -o /app/tmp/main ./cmd/server/
 docker restart orkestra-backend-development
 ```
 
+The frontend has the mirror-image concern: `frontend-admin/vite.config.js` enables chokidar stat-polling **only when it detects a WSL kernel** (containers see the host kernel in `/proc/version`), because polling costs constant CPU and hundreds of MB of RSS per dev-server container while native Linux gets inotify through bind mounts for free. `CHOKIDAR_USEPOLLING=true|false` in `docker/.env` overrides the auto-detect in either direction — set `true` if hot reload misses edits; never re-hardcode `usePolling` in the config.
+
 ### CI/CD
 
 GitHub Actions workflows (`.github/workflows/`) run on PR and push to `dev`/`main` (except where noted below). Non-gating jobs — Docker image publish, coverage-badge refresh, the weekly security cron — additionally require the repo-level Actions variable **`CI_FULL=true`** (set on the public upstream and commons); a product fork defaults to minimal CI and opts in per repo, no file edits. **CI workflows invoke `make` targets from the repo root — local and CI cannot drift.** Run `make ci-help` for the full list.
 
 - `backend.yml` → `make ci-backend` (lint, tenantscope, policycoverage, piiscan, vuln, tests, build, openapi-check) + a single Docker image build on push
 - `frontend-admin.yml` → `make ci-frontend-admin` (typecheck, eslint, tests, audit, build)
-- `frontend-client.yml` → `make ci-frontend-client` (typecheck, eslint, build) — no tests yet
+- `frontend-client.yml` → `make ci-frontend-client` (typecheck, eslint, tests, build)
 - `mobile.yml` → `make ci-mobile` (flutter analyze, test)
 - `security.yml` — govulncheck + npm audit; runs on PR (jobs gated per changed area) + weekly cron, **no push trigger** — a push would re-scan the dependency set the PR just scanned
 - `ghcr-cleanup.yml` — weekly deletion of untagged GHCR image versions (private-repo package storage is billed); manifest-aware, safe with buildx provenance

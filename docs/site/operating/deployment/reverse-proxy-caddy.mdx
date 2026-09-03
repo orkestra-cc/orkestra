@@ -77,6 +77,8 @@ console.example.com {
         reverse_proxy localhost:3000
     }
     handle /openapi.json {
+        # Served by the backend only when API_DOCS_ENABLED=true (off by
+        # default in production) — 404 otherwise.
         reverse_proxy localhost:3000
     }
     handle /health /ready /metrics {

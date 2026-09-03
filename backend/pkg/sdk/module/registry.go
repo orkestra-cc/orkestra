@@ -156,6 +156,10 @@ func (r *ModuleRegistry) InitAll(deps *Dependencies) error {
 
 	// Phase 2.2: Seed module configs from ConfigSchema on first boot.
 	if r.configService != nil {
+		// Installed before seeding so the boot backfill (and every later
+		// write) persists needsRestart from the module's own declaration.
+		r.configService.SetHotReloadResolver(r.SupportsHotReload)
+
 		if err := r.configService.SeedFromModules(
 			context.Background(), r.modules,
 		); err != nil {

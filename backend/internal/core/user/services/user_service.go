@@ -19,7 +19,11 @@ import (
 )
 
 var (
-	ErrUserNotFound           = errors.New("user not found")
+	// Aliased to the SDK sentinel so consumers outside this module (auth's
+	// refresh path) can classify it with errors.Is without importing this
+	// package. Same value, same message — every existing return site and every
+	// `err == ErrUserNotFound` comparison is unaffected.
+	ErrUserNotFound           = iface.ErrUserNotFound
 	ErrUserAlreadyExists      = errors.New("user already exists")
 	ErrInvalidInput           = errors.New("invalid input")
 	ErrUnauthorized           = errors.New("unauthorized operation")
@@ -590,7 +594,7 @@ func (s *userService) GetUserByID(ctx context.Context, id string) (*iface.User, 
 
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
-		if err == repository.ErrUserNotFound {
+		if errors.Is(err, repository.ErrUserNotFound) {
 			return nil, ErrUserNotFound
 		}
 		return nil, fmt.Errorf("failed to get user by ID: %w", err)
@@ -718,13 +722,35 @@ func (s *userService) CreateUserFromOAuth(ctx context.Context, input *iface.Crea
 	return user, nil
 }
 
+// asUserNotFound maps the repository's OWN not-found value onto the SDK
+// sentinel and leaves every other error untouched.
+//
+// repository.ErrUserNotFound and iface.ErrUserNotFound are two DIFFERENT
+// error values that happen to carry the same message, "user not found". The
+// lookups on this service (GetUserByID and friends) have always translated;
+// the thin delegations below used to pass the repository value straight out,
+// which was invisible while consumers classified not-found by comparing
+// err.Error() — and became load-bearing the moment auth's handler mappers
+// moved to errors.Is(err, iface.ErrUserNotFound). The reachable case is an
+// unlink race: a user soft-deleted between AdminUnlinkOAuth's read and its
+// $pull, which answered 404 and would otherwise have started answering 500.
+//
+// Passing nil through returns nil, so a delegation can wrap its return
+// directly.
+func asUserNotFound(err error) error {
+	if errors.Is(err, repository.ErrUserNotFound) {
+		return ErrUserNotFound
+	}
+	return err
+}
+
 // AddOAuthLinkToUser adds an OAuth link to a user
 func (s *userService) AddOAuthLinkToUser(ctx context.Context, userUUID string, link iface.OAuthLink) error {
 	if userUUID == "" {
 		return ErrInvalidInput
 	}
 
-	return s.userRepo.AddOAuthLink(ctx, userUUID, link)
+	return asUserNotFound(s.userRepo.AddOAuthLink(ctx, userUUID, link))
 }
 
 // RemoveOAuthLinkFromUser removes an OAuth link from a user
@@ -733,7 +759,7 @@ func (s *userService) RemoveOAuthLinkFromUser(ctx context.Context, userUUID stri
 		return ErrInvalidInput
 	}
 
-	return s.userRepo.RemoveOAuthLink(ctx, userUUID, provider, providerID)
+	return asUserNotFound(s.userRepo.RemoveOAuthLink(ctx, userUUID, provider, providerID))
 }
 
 // SetPrimaryOAuthLink sets a specific OAuth link as primary
@@ -742,7 +768,7 @@ func (s *userService) SetPrimaryOAuthLink(ctx context.Context, userUUID string, 
 		return ErrInvalidInput
 	}
 
-	return s.userRepo.SetPrimaryOAuthLink(ctx, userUUID, provider, providerID)
+	return asUserNotFound(s.userRepo.SetPrimaryOAuthLink(ctx, userUUID, provider, providerID))
 }
 
 // UpdateOAuthLinkUsage updates the last used timestamp for an OAuth link
@@ -770,7 +796,11 @@ func (s *userService) GetUserOAuthLinks(ctx context.Context, userUUID string) ([
 		return nil, ErrInvalidInput
 	}
 
-	return s.userRepo.GetOAuthLinks(ctx, userUUID)
+	links, err := s.userRepo.GetOAuthLinks(ctx, userUUID)
+	if err != nil {
+		return nil, asUserNotFound(err)
+	}
+	return links, nil
 }
 
 // UpdateUserLastLogin updates the last login time for a user
@@ -779,7 +809,7 @@ func (s *userService) UpdateUserLastLogin(ctx context.Context, id string) error 
 		return ErrInvalidInput
 	}
 
-	return s.userRepo.UpdateLastLogin(ctx, id)
+	return asUserNotFound(s.userRepo.UpdateLastLogin(ctx, id))
 }
 
 // UpdateUserLastLoginByObjectID updates the last login time for a user by ObjectID
@@ -882,7 +912,7 @@ func (s *userService) UpdatePasswordHash(ctx context.Context, userUUID, hash str
 	if userUUID == "" || hash == "" {
 		return ErrInvalidInput
 	}
-	return s.userRepo.UpdatePasswordHash(ctx, userUUID, hash)
+	return asUserNotFound(s.userRepo.UpdatePasswordHash(ctx, userUUID, hash))
 }
 
 // MarkEmailVerified delegates to the repository.
@@ -890,7 +920,7 @@ func (s *userService) MarkEmailVerified(ctx context.Context, userUUID string) er
 	if userUUID == "" {
 		return ErrInvalidInput
 	}
-	return s.userRepo.MarkEmailVerified(ctx, userUUID)
+	return asUserNotFound(s.userRepo.MarkEmailVerified(ctx, userUUID))
 }
 
 // RecordFailedLogin delegates to the repository.
@@ -919,12 +949,12 @@ func (s *userService) StartMFAGraceIfUnset(ctx context.Context, userUUID string)
 	}
 	user, err := s.userRepo.GetByID(ctx, userUUID)
 	if err != nil {
-		return err
+		return asUserNotFound(err)
 	}
 	if user.MFAGraceStartedAt != nil && !user.MFAGraceStartedAt.IsZero() {
 		return nil
 	}
-	return s.userRepo.SetMFAGraceStartedAt(ctx, userUUID, time.Now())
+	return asUserNotFound(s.userRepo.SetMFAGraceStartedAt(ctx, userUUID, time.Now()))
 }
 
 // ResetMFAGrace unconditionally overwrites the grace timestamp with now.
@@ -934,7 +964,7 @@ func (s *userService) ResetMFAGrace(ctx context.Context, userUUID string) error 
 	if userUUID == "" {
 		return ErrInvalidInput
 	}
-	return s.userRepo.SetMFAGraceStartedAt(ctx, userUUID, time.Now())
+	return asUserNotFound(s.userRepo.SetMFAGraceStartedAt(ctx, userUUID, time.Now()))
 }
 
 // ClearMFAGrace removes the grace stamp after a successful enrollment.

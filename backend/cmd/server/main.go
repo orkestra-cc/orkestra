@@ -280,6 +280,24 @@ func main() {
 		log.Fatalf("Failed to initialize modules: %v", err)
 	}
 
+	// Boot seeding has run inside InitAll. From here on the documents of
+	// requiredPersistedModules must exist: GetConfig fails closed and the
+	// module list shows a `missing` row instead of lazily re-seeding them.
+	// This is also the boot gate for those modules: a missing document, or a
+	// seeding/backfill failure SeedFromModules recorded, aborts here rather
+	// than serving a strict policy reader an incomplete auth document.
+	//
+	// Its own short deadline, deliberately not the boot ctx above: that one
+	// is the infrastructure-connect budget and may be nearly spent after a
+	// slow first-boot Mongo race, and a healthy document must never be
+	// refused because THIS read timed out.
+	gateCtx, cancelGate := context.WithTimeout(context.Background(), 10*time.Second)
+	err = configService.RequirePersistedConfig(gateCtx, requiredPersistedModules...)
+	cancelGate()
+	if err != nil {
+		log.Fatalf("Required module config is not serviceable: %v", err)
+	}
+
 	// ADR-0005 Phase F — hot-swap the slog handler's resolver from
 	// the boot env-driven static snapshot to the DB-backed live
 	// resolver. Every existing module logger (clones produced by
@@ -331,10 +349,16 @@ func main() {
 	// MFA-enrollment lookup + auth policy reader feed RequireStepUp's
 	// no-factor branch. When the user has no factor: privileged roles
 	// get 403 mfa_enrollment_required; everyone else gets 401
-	// password_confirm_required so the frontend can collect a password
-	// reconfirm instead of asking for an MFA code that can't exist. All
-	// three setters are optional — when any is unwired, RequireStepUp
-	// falls back to today's "always emit step_up_required" behaviour.
+	// password_confirm_required — but only when the policy still accepts
+	// the password for that audience — so the frontend can collect a
+	// password reconfirm instead of asking for an MFA code that can't
+	// exist. SetMFAEnrollmentLookup and SetUserProvider are optional and
+	// degrade to the legacy "always emit step_up_required" path when
+	// unwired. SetStepUpPolicy is NOT: since PR 3 the no-factor branch
+	// must read passwordLoginEnabled{Admin,Client} before offering a
+	// reconfirm, so an unwired policy answers 503 auth.policy_unavailable
+	// there rather than guessing (an outage is never dressed up as a user
+	// obligation). RequireMFA's master-switch read stays nil-tolerant.
 	if lookup, ok := module.GetTyped[authMiddleware.MFAEnrollmentLookup](svcRegistry, module.ServiceMFAEnrollmentLookup); ok {
 		authMW.SetMFAEnrollmentLookup(lookup)
 	}
@@ -521,6 +545,9 @@ func main() {
 	// system permission; the MFA gate on the mutation group layers on top.
 	// Operator-only — module enable/disable is a Tier-1 operator concern.
 	moduleAdminHandler := module.NewModuleAdminHandler(configService, modRegistry)
+	if err := wireModuleAdminAudit(moduleAdminHandler, svcRegistry); err != nil {
+		log.Fatalf("Failed to wire module admin audit: %v", err)
+	}
 	operatorProtected.Group(func(r chi.Router) {
 		r.Use(authMW.RequireSystemPermission("system.modules.admin"))
 		adminAPI := humachi.New(r, apiConfig)
@@ -535,6 +562,10 @@ func main() {
 		// enablement or write secrets. Threshold is env-tunable so ops
 		// can widen the gate during staged rollouts.
 		r.Use(authMW.RequireLowRisk(riskStepUpThreshold()))
+		// The audit actor's User-Agent: Huma hands the handler a
+		// context.Context, not the *http.Request, so the header has to be
+		// stamped onto the context here.
+		r.Use(authMiddleware.RequestMeta)
 		adminAPI := humachi.New(r, apiConfig)
 		module.RegisterAdminModuleMutationRoutes(adminAPI, moduleAdminHandler)
 	})
@@ -551,9 +582,26 @@ func main() {
 	// serves the same probes as raw routes. Both /openapi.json endpoints
 	// still document /health + /ready via the operator registration.
 	registerHealthEndpoints(operatorAPI, db, redisClient)
-	registerDocsEndpoints(operatorMux, operatorAPI)
 	registerHealthProbes(clientMux, db, redisClient)
-	registerDocsEndpoints(clientMux, clientAPI)
+
+	// /docs + /openapi.json are on by default in development and OFF in
+	// production-like environments (API_DOCS_ENABLED). The document is a
+	// complete route inventory, and the docs page runs a third-party bundle
+	// on the API origin — the origin that holds the HttpOnly refresh cookie
+	// — so an internet-reachable deployment must opt in explicitly and gate
+	// both paths at the edge. OPENAPI_DUMP below is unaffected: it reads the
+	// in-memory document, not the route.
+	if cfg.Server.APIDocsEnabled {
+		if cfg.IsProductionLike() {
+			logger.Warn("API docs enabled on a production-like environment; gate /docs and /openapi.json at the edge",
+				slog.String("env", cfg.Server.Environment))
+		}
+		registerDocsEndpoints(operatorMux, operatorAPI)
+		registerDocsEndpoints(clientMux, clientAPI)
+	} else {
+		logger.Info("API docs disabled (/docs, /openapi.json); set API_DOCS_ENABLED=true to serve them",
+			slog.String("env", cfg.Server.Environment))
+	}
 
 	// OPENAPI_DUMP mode (used by `make openapi-dump`): after every module
 	// has been wired and its routes registered, serialize the OpenAPI

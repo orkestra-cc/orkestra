@@ -73,6 +73,18 @@ func (i *countingLoginTokenIssuer) IssueLoginTokensForSession(_ context.Context,
 	return &authModels.TokenResponse{AccessToken: "winner", TokenType: "Bearer", SessionID: in.SessionID}, nil
 }
 
+func (i *countingLoginTokenIssuer) EmitBreakGlassUsed(context.Context, string, string, string, string) {
+}
+
+// passwordLoginOnPolicy mirrors production wiring for these completion
+// fixtures: both handlers get a policy service, and it says password login
+// is on for the operator surface. Without one, a password-sourced challenge
+// fails closed at the spec §4.3 re-check (nil policy = outage), which is the
+// intended behaviour but not what these session-identity tests are about.
+func passwordLoginOnPolicy() *services.AuthPolicyService {
+	return services.NewAuthPolicyServiceForTest(map[string]string{"passwordLoginEnabledAdmin": "true"})
+}
+
 func (r *stepUpSessionRepo) GetDeviceSessionHistory(context.Context, string, string, int) ([]*authModels.AuthSessionDoc, error) {
 	return nil, nil
 }
@@ -204,6 +216,15 @@ func TestStepUpSessionIdentity_PasswordConfirmPreservesSID(t *testing.T) {
 		UserService:     &stepUpUsers{user: user},
 		PasswordService: passwords,
 		JWTService:      jwt,
+		// PR 3 §4.6: the reconfirm now reads the per-surface password
+		// policy, and an unreadable one is an outage (503) rather than a
+		// silent allow — so this fixture must carry the same Policy +
+		// Audience pair production wiring always supplies. Empty values =
+		// key absent = password login enabled, which is the state this
+		// test is about: a SUCCESSFUL reconfirm preserving the session
+		// identity.
+		Policy:   services.NewAuthPolicyServiceForTest(nil),
+		Audience: services.PolicyAudienceOperator,
 	})
 	h := NewPasswordAuthHandler(svc, "", "", false)
 	req := &PasswordConfirmRequest{}
@@ -340,11 +361,13 @@ func TestStepUpSessionIdentity_WebAuthnLoginCompletionPreservesPendingSID(t *tes
 		SourceAMR: []string{"pwd"},
 		DeviceID:  "device-pending",
 		Platform:  "web",
+		Audience:  "operator",
 	})
 	if err != nil {
 		t.Fatalf("BeginLogin: %v", err)
 	}
 	h := NewWebAuthnHandler(stepUpWebAuthn{}, challenges, jwt, &stepUpUsers{user: user}, tokens, "", "", false)
+	h.SetPolicy(passwordLoginOnPolicy())
 	req := &webAuthnLoginFinishRequest{}
 	req.Body.LoginChallengeID = loginChallenge.ID
 	req.Body.WebAuthnChallengeID = "webauthn-pending"
@@ -374,13 +397,14 @@ func TestMFALoginVerify_ConcurrentReplayMintsExactlyOnce(t *testing.T) {
 	user := &iface.User{UUID: "concurrent-user", Email: "concurrent@example.com", Role: "operator", IsActive: true}
 	challenges := services.NewMFAChallengeService(services.NewMemoryOAuthStateStore())
 	challenge, err := challenges.BeginLogin(context.Background(), services.LoginChallengeInput{
-		UserUUID: user.UUID, SessionID: "session-concurrent", SourceAMR: []string{"pwd"},
+		UserUUID: user.UUID, SessionID: "session-concurrent", SourceAMR: []string{"pwd"}, Audience: "operator",
 	})
 	if err != nil {
 		t.Fatalf("BeginLogin: %v", err)
 	}
 	issuer := &countingLoginTokenIssuer{}
 	h := NewMFAHandler(stepUpMFA{}, challenges, newStepUpJWT(t), &stepUpUsers{user: user}, issuer, "", "", false)
+	h.SetPolicy(passwordLoginOnPolicy())
 
 	const callers = 24
 	start := make(chan struct{})
@@ -432,7 +456,7 @@ func TestWebAuthnLoginFinish_OneCeremonyCannotCompleteDifferentPendingLogins(t *
 	pendingIDs := make([]string, 0, 2)
 	for _, sid := range []string{"pending-session-a", "pending-session-b"} {
 		challenge, err := challenges.BeginLogin(context.Background(), services.LoginChallengeInput{
-			UserUUID: user.UUID, SessionID: sid, SourceAMR: []string{"pwd"},
+			UserUUID: user.UUID, SessionID: sid, SourceAMR: []string{"pwd"}, Audience: "operator",
 		})
 		if err != nil {
 			t.Fatalf("BeginLogin(%s): %v", sid, err)
@@ -441,6 +465,7 @@ func TestWebAuthnLoginFinish_OneCeremonyCannotCompleteDifferentPendingLogins(t *
 	}
 	issuer := &countingLoginTokenIssuer{}
 	h := NewWebAuthnHandler(&oneWinnerWebAuthn{}, challenges, newStepUpJWT(t), &stepUpUsers{user: user}, issuer, "", "", false)
+	h.SetPolicy(passwordLoginOnPolicy())
 
 	start := make(chan struct{})
 	var successes atomic.Int32

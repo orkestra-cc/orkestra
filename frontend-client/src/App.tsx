@@ -5,6 +5,7 @@ import { HomePage } from "@/pages/HomePage";
 import { SignupPage } from "@/pages/SignupPage";
 import { VerifyEmailPage } from "@/pages/VerifyEmailPage";
 import { LoginPage } from "@/pages/LoginPage";
+import { OAuthCallbackPage } from "@/pages/OAuthCallbackPage";
 import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
 import { AcceptInvitePage } from "@/pages/AcceptInvitePage";
@@ -24,6 +25,7 @@ export function App() {
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/auth/callback" element={<OAuthCallbackPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/accept-invite" element={<AcceptInvitePage />} />

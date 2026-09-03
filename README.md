@@ -45,7 +45,7 @@ It runs on a **two-tier tenancy model**: Tier-1 operators manage staff and modul
 
 ## Architecture at a glance
 
-- **Backend.** Go 1.25, [Huma v2](https://huma.rocks) (OpenAPI-first), modular monolith, single Go module. 8 core modules always load; the optional-module catalog ships empty — a fork registers its own at `/admin/modules` (hot-reload, no restart). See [backend/CLAUDE.md](backend/CLAUDE.md).
+- **Backend.** Go 1.26, [Huma v2](https://huma.rocks) (OpenAPI-first), modular monolith, single Go module. 8 core modules always load; the optional-module catalog ships empty — a fork registers its own at `/admin/modules` (hot-reload, no restart). See [backend/CLAUDE.md](backend/CLAUDE.md).
 - **Frontend (admin).** React 19 + Vite 8 (rolldown) + TypeScript 5.9 strict. Navigation is fetched from `/v1/navigation` so the UI reflects whatever modules the backend has enabled. Cookie-based operator-audience auth. See [frontend-admin/CLAUDE.md](frontend-admin/CLAUDE.md).
 - **Frontend (client).** Tier-2 customer-facing SPA on the same React 19 + Vite 7 stack, separate cookie domain, separate audience JWT. See [frontend-client/CLAUDE.md](frontend-client/CLAUDE.md).
 - **Mobile.** Flutter 3.44 + Riverpod (early-stage).
@@ -92,7 +92,7 @@ docker push ghcr.io/your-org/orkestra/backend:latest
 
 The published image is produced by `.github/workflows/backend.yml` on every push to `dev` / `main` — a single build.
 
-The dev backend builds `docker/Dockerfile.dev-backend` (`golang:1.25.11-alpine`, AIR pre-baked) — no registry auth needed. A fork with a [Chainguard](https://www.chainguard.dev) subscription can swap the base image via the `GO_BASE` build-arg.
+The dev backend builds `docker/Dockerfile.dev-backend` (`golang:1.26.8-alpine`, AIR pre-baked) — no registry auth needed. A fork with a [Chainguard](https://www.chainguard.dev) subscription can swap the base image via the `GO_BASE` build-arg.
 
 ## Managing the stack
 
@@ -238,7 +238,7 @@ Every pull request runs through:
 - **Tenant-scoping analyzer.** Custom `tools/tenantscope` static check enforcing invariant #1 from ADR-0001: every MongoDB read/write in an addon must derive its filter from `shared/tenantrepo.Scope`.
 - **Policy coverage.** `tools/policycoverage` reconciles every declared permission against Cedar policies + route middleware, fails on uncovered drift.
 - **Tests.** `go test -race` with a Mongo + Redis service matrix and a 15 % coverage floor.
-- **Vulnerability check.** `govulncheck` against the latest Go 1.25.x stdlib + module deps, with an allowlist for upstream-unfixed Docker SDK CVEs.
+- **Vulnerability check.** `govulncheck` against the latest Go 1.26.x stdlib + module deps, with an allowlist for upstream-unfixed Docker SDK CVEs.
 - **Single binary build.** One build per push validates `cmd/server` compiles cleanly with every addon.
 - **Docker push.** On push to `dev` / `main`, the image is pushed to GHCR as `ghcr.io/orkestra-cc/orkestra/backend:latest` and `:<sha>`. On a release tag push (`vX.Y.Z`) all images additionally get version tags — `:vX.Y.Z`, `:X.Y.Z`, and the floating `:X.Y` — so a deploy can pin an exact release. Applies to all three images (`backend`, `frontend`, `frontend-client`).
 

@@ -14,24 +14,30 @@ import (
 // expressions without depending on whitespace or line wrapping.
 func TestAuthFlowLogsUseOnlyAllowlistedStructuredFields(t *testing.T) {
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "auth_handler.go", nil, 0)
-	if err != nil {
-		t.Fatalf("parse auth_handler.go: %v", err)
-	}
 	targets := map[string]bool{
 		"InitiateOAuthLogin": true, "InitiateOAuthLink": true,
-		"finishOAuthLinkRedirect": true, "resolveOAuthLinkRedirect": true,
-		"HandleGoogleCallbackHTTP": true, "HandleMobileGoogleAuth": true,
-		"HandleMobileAppleAuth": true, "RefreshTokens": true,
-		"RefreshTokensWithHeaderHTTP": true, "RefreshTokensHTTP": true,
+		"finishOAuthLinkRedirect": true, "completeOAuthCallback": true, "finishOAuthCompletion": true,
+		"HandleOAuthRelayCompleteHTTP": true, "writeCallbackRejection": true,
+		"HandleGoogleCallbackHTTP": true, "HandleDiscordCallbackHTTP": true,
+		"HandleAppleCallbackHTTP": true, "HandleGitHubCallbackHTTP": true,
+		"HandleMobileGoogleAuth": true, "HandleMobileAppleAuth": true,
+		"RefreshTokens": true, "RefreshTokensWithHeaderHTTP": true, "RefreshTokensHTTP": true,
 		"GetSessionHTTP": true, "LogoutHTTP": true,
+	}
+	var decls []ast.Decl
+	for _, name := range []string{"auth_handler.go", "oauth_callback_flow.go"} {
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		decls = append(decls, file.Decls...)
 	}
 	forbiddenKeys := map[string]bool{
 		"error": true, "sid": true, "userUUID": true, "sessionId": true,
 		"deviceId": true, "familyId": true, "ip": true,
 	}
 
-	for _, decl := range file.Decls {
+	for _, decl := range decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || !targets[fn.Name.Name] || fn.Body == nil {
 			continue

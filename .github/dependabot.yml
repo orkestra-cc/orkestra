@@ -22,6 +22,13 @@ updates:
       fortawesome:
         patterns:
           - '@fortawesome/*'
+      # Same lockstep rule, same reason: FullCalendar ships one version
+      # across @fullcalendar/react + the plugin packages, and a lone bump
+      # (react at 7 while daygrid/timegrid/list/interaction/bootstrap sit
+      # at 6) fails `tsc` — see the closed #214.
+      fullcalendar:
+        patterns:
+          - '@fullcalendar/*'
 
   - package-ecosystem: github-actions
     directory: /

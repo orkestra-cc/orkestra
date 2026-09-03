@@ -4,7 +4,7 @@ Single Go binary, single Go module. 8 core modules (always loaded) and an **empt
 
 ## Stack
 
-Go 1.25.13 | Huma v2 (OpenAPI-first) | MongoDB 8.0 | Redis 8.2 | Chi router | AIR hot-reload (Docker)
+Go 1.26.8 | Huma v2 (OpenAPI-first) | MongoDB 8.0 | Redis 8.2 | Chi router | AIR hot-reload (Docker)
 
 ## Module System
 
@@ -36,13 +36,13 @@ sub-interfaces, never as extra methods here. Prose reference:
 
 **Registration** (`cmd/server/catalog.go` + `catalog_<name>.go`): core modules (user → notification → tenant → authz → auth → navigation → logging → compliance) are always loaded — they live in `catalog.go`. The `optionalModules` map ships empty; a fork's optional module lives in its own `cmd/server/catalog_<name>.go` file and registers itself via `init()`. Every registered module compiles into the binary; runtime enable/disable is owned by the `module_configs` collection edited at `/admin/modules`. Optional modules are instantiated, initialized, and routed at boot — only enabled ones have `Start()` called. The admin API can enable/disable modules at runtime via `StartModule()`/`StopModule()` without restart. The registry topologically sorts by `Dependencies()` so producers init before consumers, auto-creates MongoDB collections with their declared indexes, seeds configs, collects nav items, and gates routes for disabled modules via `ModuleGate` middleware.
 
-**First-boot seeding**: on a fresh install, `ConfigService.SeedFromModules` creates the `module_configs` document from each module's `ConfigSchema().EnvVar` and `EnabledByDefault`. Subsequent boots ignore env defaults; admin-set values in `module_configs` are authoritative. (ADR-0006 removed the `ORKESTRA_PROFILE` minimal/full seeding — with an empty catalog there is nothing to pre-enable.) Documents for modules **no longer compiled into the binary** (addons a fork removed, or anything left over from the ADR-0006 core-only collapse on an upgraded environment) are treated as **orphans**: `GetAllConfigs` / `ModuleStatusJSON` filter them out of the admin listing so the `/admin/modules` UI only ever shows registered modules. The orphan documents are *not* deleted — they stay in the collection (recoverable, secrets intact); they are simply not served.
+**First-boot seeding**: on a fresh install, `ConfigService.SeedFromModules` creates the `module_configs` document from each module's `ConfigSchema().EnvVar` and `EnabledByDefault`. Subsequent boots ignore env defaults; admin-set values in `module_configs` are authoritative. Subsequent boots also **backfill** any schema key an existing document lacks (a key the schema gained after the document was created) with its `EnvVar`/`Default` **when that fallback is non-empty** — present values, explicit empty strings included, are never touched, and a key whose fallback is empty stays absent because absence is meaningful to `GetRawValue` readers (ADR-0017: an absent `sessionAbsoluteTTL` is the default cap, a present empty one disables it). The backfilled key names are logged at INFO. So a runtime read never has to guess a default for a key the document was created without. (ADR-0006 removed the `ORKESTRA_PROFILE` minimal/full seeding — with an empty catalog there is nothing to pre-enable.) Documents for modules **no longer compiled into the binary** (addons a fork removed, or anything left over from the ADR-0006 core-only collapse on an upgraded environment) are treated as **orphans**: `GetAllConfigs` / `ModuleStatusJSON` filter them out of the admin listing so the `/admin/modules` UI only ever shows registered modules. The orphan documents are *not* deleted — they stay in the collection (recoverable, secrets intact); they are simply not served.
 
 Container builds: `Dockerfile` produces a single image. CI builds once per push and publishes `ghcr.io/<repo>/backend:latest` and `ghcr.io/<repo>/backend:<sha>` — no profile matrix, no build tags.
 
 **Cross-module communication**: modules discover each other through the `ServiceRegistry` (typed key-value store). Consumer modules import interfaces from `pkg/sdk/iface/` — never import another module's `services/` or `repository/` package.
 
-**Runtime config**: `ModuleConfigService` stores module state in MongoDB (`module_configs` collection), cached in Redis (30s TTL). Secrets encrypted with AES-256-GCM. Each module supports named config environments (production/sandbox) stored as nested maps in the same document. Admin API at `GET/PATCH /v1/admin/modules`, with per-environment endpoints at `/v1/admin/modules/{name}/environments/{env}` and `PUT /v1/admin/modules/{name}/active-environment`.
+**Runtime config**: `ModuleConfigService` stores module state in MongoDB (`module_configs` collection), cached in Redis (30s TTL). Secrets encrypted with AES-256-GCM. Each module supports named config environments (production/sandbox) stored as nested maps in the same document. Admin API at `GET/PATCH /v1/admin/modules`, with per-environment endpoints at `/v1/admin/modules/{name}/environments/{env}` and `PUT /v1/admin/modules/{name}/active-environment`. Every mutation is a single compare-and-swap `UpdateOne` on `configRevision` (stale → `409 module.config_revision_stale`) validated on the target profile's snapshot, and is audited (`module.config.*`, key names only) through the compliance sink.
 
 **Module infrastructure containers** (extension seam, unused by the core base): a module that needs an external service can declare it via `InfraContainers() []InfraContainerSpec` on the `Module` interface, and `shared/container.Manager` will create/start it (via the Docker Go SDK over the host socket) before `Start()` and stop it after `Stop()`. No core module declares any, so ADR-0006 removed the `/var/run/docker.sock` mount + `CONTAINER_CONTROL_ENABLED` from the compose files. A fork that adds a module needing managed infra (the removed `agents`→`orkestra-hindsight` and `graph`→`orkestra-memgraph` worked this way) re-adds the socket mount and sets `CONTAINER_CONTROL_ENABLED=true`.
 
@@ -111,14 +111,16 @@ Users enable the module via the admin UI at `/admin/modules` (takes effect immed
 
 ## API Endpoints
 
-- **`/docs`** — Interactive API documentation (Scalar)
-- **`/openapi.json`** — Auto-generated OpenAPI 3.1 spec
+- **`/docs`** — Interactive API documentation (Scalar; bundle pinned by version + SRI, same-origin CSP). **Development only by default** — see `API_DOCS_ENABLED` below
+- **`/openapi.json`** — Auto-generated OpenAPI 3.1 spec. Same gate as `/docs`
 - **`/v1/admin/modules`** — Module management (administrator only)
 - **`/v1/admin/modules/{name}/environments/{env}`** — Per-environment config CRUD
 - **`/v1/admin/modules/{name}/active-environment`** — Switch active environment
 - **`/v1/admin/modules/health`** — Per-module health checks
 
 OpenAPI specs are auto-generated by Huma v2 — add endpoints with `huma.Register()` and they appear in `/docs` after restart.
+
+**`API_DOCS_ENABLED`** (`cmd/server/docs.go`, `shared/config`): `/docs` and `/openapi.json` are registered only when this is true — default `true` in `development`, `false` in `staging`/`production`. The document is a complete route inventory, and the docs page executes a third-party bundle on the API origin, which is the origin that carries the HttpOnly refresh cookie — so a production-like stack that opts in must also gate both paths at the edge (Cloudflare Access, IP allowlist). `make openapi-dump` / `OPENAPI_DUMP` read the in-memory document and are unaffected. The page's CSP allows exactly one script (the pinned Scalar bundle) and `connect-src 'self'`; bumping Scalar means updating `scalarScriptURL` and `scalarScriptSRI` together (recipe in the file), and `TestDocsPage_IsNotAScriptSinkOnTheAPIOrigin` fails on any loosening.
 
 ### Canonical spec for docs.orkestra.cc
 

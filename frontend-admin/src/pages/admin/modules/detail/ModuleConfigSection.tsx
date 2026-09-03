@@ -53,6 +53,8 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
     unfilledByGroup,
     error,
     success,
+    conflict,
+    reloadAndReview,
     clearError,
     onSave,
     handleDiscard
@@ -116,7 +118,12 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
           <Alert
             variant="danger"
             className="fs-10"
-            dismissible
+            // Not dismissible while the conflict is latched: Save is disabled
+            // and this banner is the only thing saying why. Dismissed, the
+            // operator is left with a greyed Save and a yellow button, and the
+            // plausible next move is Discard — which destroys the very draft
+            // (typed secret included) the latch exists to protect.
+            dismissible={!conflict}
             onClose={clearError}
           >
             {error}
@@ -170,6 +177,8 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
           errorCount={errorCount}
           errors={saveBarErrorsDisplay}
           saving={saving}
+          conflict={conflict}
+          onReload={reloadAndReview}
           onDiscard={handleDiscard}
           onSave={onSave}
         />

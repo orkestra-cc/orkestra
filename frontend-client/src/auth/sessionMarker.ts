@@ -5,14 +5,18 @@
 // page load." Anonymous visitors have no marker and skip the refresh
 // entirely, which avoids a guaranteed-401 round-trip on every cold load.
 //
-// Cleared on signOut, on a refresh that returns 401, and on any 4xx from
-// the refresh endpoint — never trust a stale marker to keep retrying.
+// Cleared on signOut and on an EXPLICIT REJECTION, never on an outage (§4.1):
+// a 401 — and only a 401 — from the refresh endpoint, or a 401 carrying a
+// terminal session code (session_revoked, session_max_age_reached) on an
+// authenticated request. A 429, a 5xx, a timeout or a 2xx without a token keep
+// the marker: none of them says anything about the session, and clearing it
+// there is STICKY — the next cold load short-circuits before even trying.
 
-const KEY = 'orkestra_client_session_marker';
+const KEY = "orkestra_client_session_marker";
 
 export function hasSessionMarker(): boolean {
   try {
-    return globalThis.localStorage?.getItem(KEY) === '1';
+    return globalThis.localStorage?.getItem(KEY) === "1";
   } catch {
     // localStorage can throw in private mode / SSR — treat as anonymous.
     return false;
@@ -21,7 +25,7 @@ export function hasSessionMarker(): boolean {
 
 export function setSessionMarker(): void {
   try {
-    globalThis.localStorage?.setItem(KEY, '1');
+    globalThis.localStorage?.setItem(KEY, "1");
   } catch {
     // best-effort — failure means future refreshes won't auto-fire,
     // which is acceptable degradation.

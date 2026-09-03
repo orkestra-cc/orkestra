@@ -16,7 +16,7 @@ echo 'eval "$(mise activate bash)"' >> ~/.bashrc
 exec $SHELL                 # reload the shell so the eval takes effect
 
 # 3. Provision the languages at the versions pinned in .mise.toml
-mise install                # Go 1.25.12, Node 24, Flutter 3.44, golangci-lint, pre-commit, ...
+mise install                # Go 1.26.8, Node 24, Flutter 3.44, golangci-lint, pre-commit, ...
 
 # 4. Bootstrap dependencies for the surface(s) you'll touch
 make install                # everything; or scope manually:
@@ -61,7 +61,7 @@ That parity is load-bearing on private forks, whose Actions runners are billing-
 | `make ci-all` | Every surface — what CI does on `dev`/`main` |
 | `make ci-backend` | Backend: lint, tenant-scope, policy-coverage, vuln, tests, coverage threshold, build, openapi-check |
 | `make ci-frontend-admin` | Admin SPA: lockfile sync, typecheck, lint, tests, audit, build |
-| `make ci-frontend-client` | Client SPA: lockfile sync, typecheck, lint, build |
+| `make ci-frontend-client` | Client SPA: lockfile sync, typecheck, lint, tests, build |
 | `make ci-mobile` | Flutter: lockfile sync, analyze, test |
 | `make admin-lockcheck` | Is a lockfile still able to satisfy its manifest? (also `client-`, `mobile-`) |
 | `make fmt` | Run every formatter in write mode (gofmt, prettier, dart format) |

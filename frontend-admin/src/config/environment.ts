@@ -90,16 +90,24 @@ function createConfig(): EnvironmentConfig {
   const runtime = readRuntime();
   const env = pickEnv(runtime.env ?? import.meta.env.VITE_ENV);
 
+  // The last-resort fallbacks are `localhost`, matching what compose writes
+  // into /config.js and what FRONTEND_URL serves the console on. Every call
+  // goes out with `credentials: 'include'` and the refresh cookie is
+  // `SameSite=Lax`, so the console's own origin and this URL must be one
+  // site; the operator tier has no OPERATOR_API_HOST to make that automatic,
+  // so the convention is `localhost` end to end (spec §8 follow-up #13).
+  // `localhost:3000` reaches the operator mux through the dev fallthrough in
+  // cmd/server/hostmux.go, so no host registration is needed for it.
   const apiUrl =
     pickString(
       runtime.apiUrl,
       import.meta.env.VITE_API_URL,
       import.meta.env.VITE_BACKEND_URL
-    ) ?? 'http://console.localhost:3000';
+    ) ?? 'http://localhost:3000';
 
   const wsUrl =
     pickString(runtime.wsUrl, import.meta.env.VITE_WS_URL) ??
-    'ws://console.localhost:3000/ws';
+    'ws://localhost:3000/ws';
 
   const debug =
     typeof runtime.debug === 'boolean'
