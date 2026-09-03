@@ -293,9 +293,12 @@ type RedisClient interface {
 	Get(ctx context.Context, key string) (string, error)
 	Del(ctx context.Context, keys ...string) error
 	Keys(ctx context.Context, pattern string) ([]string, error)
-	// Incr / Expire back the atomic counter primitive. Split rather than
-	// scripted because the only caller sets the TTL exactly once, on the
-	// increment that creates the key.
+	// Incr / Expire have no in-tree caller — RedisOAuthStateStore.Incr
+	// moved onto attemptScript (one EVAL, atomic with its TTL) so the
+	// MFA per-challenge cap can't orphan a counter with no expiry. Kept
+	// on the interface only because RedisClient is a contract a fork's
+	// own client type may implement or consume directly; removing a
+	// method from it is not an additive change.
 	Incr(ctx context.Context, key string) (int64, error)
 	Expire(ctx context.Context, key string, expiration time.Duration) error
 }
