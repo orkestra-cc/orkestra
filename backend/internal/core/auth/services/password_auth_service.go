@@ -620,7 +620,7 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "service_principal")
 		return nil, ErrInvalidCredentials
 	}
-	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
+	if retryAfter, locked := s.durableLockOrClear(ctx, user); locked {
 		s.dummyVerify(in.Password)
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "account_locked")
 		// Not recorded: a durable lock, like a counter lock, must not
@@ -639,20 +639,7 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		// Retry-After → 401), which is a spec decision, not an
 		// implementation one. See "Attempt counters (login lockout)" in
 		// the module CLAUDE.md before touching this.
-		return nil, LockedAfter(time.Until(*user.LockedUntil))
-	}
-	if user.LockedUntil != nil {
-		// The lock has EXPIRED. Clear the durable counter before the
-		// verify: the old code compared FailedLoginCount against the
-		// threshold without anything ever resetting it, so the first
-		// wrong password after an expiry re-locked the account at once.
-		if err := s.userService.ClearFailedLogins(ctx, user.UUID); err != nil && s.logger != nil {
-			s.logger.Warn("auth: failed to clear an expired account lock",
-				slog.String("user_uuid", user.UUID),
-				slog.String("error", err.Error()))
-		}
-		user.FailedLoginCount = 0
-		user.LockedUntil = nil
+		return nil, LockedAfter(retryAfter)
 	}
 	if user.PasswordHash == "" {
 		// Account exists but was created via OAuth — don't leak that fact.
@@ -664,23 +651,7 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 
 	ok, err := s.passwordService.Verify(in.Password, user.PasswordHash)
 	if err != nil || !ok {
-		emailVerdict, counterAvailable := s.recordLoginFailure(ctx, in.IP, email)
-
-		// The durable lock MIRRORS the counter. With a healthy Redis the
-		// two lock at the same attempt; with Redis down the durable rule
-		// alone still caps guessing against an existing account.
-		var lockUntil *time.Time
-		lock := emailVerdict.Locked
-		if !counterAvailable {
-			lock = user.FailedLoginCount+1 >= s.policy.LockoutThreshold(ctx)
-		}
-		if lock {
-			t := time.Now().Add(s.policy.LockoutDuration(ctx))
-			lockUntil = &t
-		}
-		// FailedLoginCount keeps being incremented for operator
-		// visibility even when the counter is the one deciding.
-		_ = s.userService.RecordFailedLogin(ctx, user.UUID, lockUntil)
+		s.recordVerifyFailure(ctx, in.IP, user)
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "bad_password")
 		return nil, ErrInvalidCredentials
 	}
@@ -1273,9 +1244,9 @@ func (s *PasswordAuthService) ChangePassword(ctx context.Context, in ChangePassw
 	// This route verifies a password, so it is subject to the same
 	// lockout as login — otherwise it is the unthrottled back door
 	// around it (M-8). Durable lock first, then the counters.
-	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
+	if retryAfter, locked := s.durableLockOrClear(ctx, user); locked {
 		s.dummyVerify(current)
-		return LockedAfter(time.Until(*user.LockedUntil))
+		return LockedAfter(retryAfter)
 	}
 	if v, locked := s.peekLockout(ctx, in.IP, user.Email); locked {
 		s.dummyVerify(current)
@@ -1283,17 +1254,7 @@ func (s *PasswordAuthService) ChangePassword(ctx context.Context, in ChangePassw
 	}
 	ok, err := s.passwordService.Verify(current, user.PasswordHash)
 	if err != nil || !ok {
-		emailVerdict, counterAvailable := s.recordLoginFailure(ctx, in.IP, user.Email)
-		var lockUntil *time.Time
-		lock := emailVerdict.Locked
-		if !counterAvailable {
-			lock = user.FailedLoginCount+1 >= s.policy.LockoutThreshold(ctx)
-		}
-		if lock {
-			t := time.Now().Add(s.policy.LockoutDuration(ctx))
-			lockUntil = &t
-		}
-		_ = s.userService.RecordFailedLogin(ctx, user.UUID, lockUntil)
+		s.recordVerifyFailure(ctx, in.IP, user)
 		s.emitAudit(ctx, iface.AuditEvent{
 			ActorUserID:  user.UUID,
 			ActorEmail:   user.Email,
@@ -1342,6 +1303,12 @@ func (s *PasswordAuthService) ChangePassword(ctx context.Context, in ChangePassw
 				slog.Int("sessions_revoked", revoked))
 		}
 	}
+	// Clear BOTH the durable counter and the counter-scope on success,
+	// exactly as Login does — resetLoginFailures alone leaves mistypes
+	// here accumulating in FailedLoginCount indefinitely, since only a
+	// subsequent LOGIN success (or a lock expiring) would otherwise
+	// clear it.
+	_ = s.userService.ClearFailedLogins(ctx, user.UUID)
 	s.resetLoginFailures(ctx, user.Email)
 	s.emitAudit(ctx, iface.AuditEvent{
 		ActorUserID:  user.UUID,
@@ -1442,9 +1409,9 @@ func (s *PasswordAuthService) ConfirmPasswordWithSecurity(ctx context.Context, u
 	// lockout as login and ChangePassword — otherwise it is the
 	// unthrottled back door around it (M-8). Durable lock first, then
 	// the counters.
-	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
+	if retryAfter, locked := s.durableLockOrClear(ctx, user); locked {
 		s.dummyVerify(password)
-		return nil, LockedAfter(time.Until(*user.LockedUntil))
+		return nil, LockedAfter(retryAfter)
 	}
 	if v, locked := s.peekLockout(ctx, security.IPAddress, user.Email); locked {
 		s.dummyVerify(password)
@@ -1452,17 +1419,7 @@ func (s *PasswordAuthService) ConfirmPasswordWithSecurity(ctx context.Context, u
 	}
 	ok, err := s.passwordService.Verify(password, user.PasswordHash)
 	if err != nil || !ok {
-		emailVerdict, counterAvailable := s.recordLoginFailure(ctx, security.IPAddress, user.Email)
-		var lockUntil *time.Time
-		lock := emailVerdict.Locked
-		if !counterAvailable {
-			lock = user.FailedLoginCount+1 >= s.policy.LockoutThreshold(ctx)
-		}
-		if lock {
-			t := time.Now().Add(s.policy.LockoutDuration(ctx))
-			lockUntil = &t
-		}
-		_ = s.userService.RecordFailedLogin(ctx, user.UUID, lockUntil)
+		s.recordVerifyFailure(ctx, security.IPAddress, user)
 		s.emitAudit(ctx, iface.AuditEvent{
 			ActorUserID:  user.UUID,
 			ActorEmail:   user.Email,
@@ -1487,6 +1444,9 @@ func (s *PasswordAuthService) ConfirmPasswordWithSecurity(ctx context.Context, u
 	if err != nil {
 		return nil, err
 	}
+	// Clear BOTH the durable counter and the counter-scope on success,
+	// exactly as Login does — see ChangePassword's identical comment.
+	_ = s.userService.ClearFailedLogins(ctx, user.UUID)
 	s.resetLoginFailures(ctx, user.Email)
 	s.emitAudit(ctx, iface.AuditEvent{
 		ActorUserID:  user.UUID,
@@ -1603,6 +1563,60 @@ func (s *PasswordAuthService) recordLoginFailure(ctx context.Context, ip, email 
 	_, _ = s.attempts.RecordFailure(ctx, AttemptKeyIP(ip), s.addressLimit(ctx))
 	v, err := s.attempts.RecordFailure(ctx, AttemptKeyEmail(s.audience, email), s.accountLimit(ctx))
 	return v, err == nil
+}
+
+// durableLockOrClear enforces the durable LockedUntil lock against an
+// already-loaded user and heals an EXPIRED one before the caller verifies
+// the password. Shared by Login, ChangePassword and
+// ConfirmPasswordWithSecurity — every route that verifies a password
+// against an already-resolved user runs this first.
+//
+// A LIVE lock returns (retryAfter, true) without touching anything — a
+// durable lock, like a counter lock, must not extend itself. Otherwise,
+// an EXPIRED lock is cleared (ClearFailedLogins, plus zeroing the
+// in-memory copy so the caller's own read of user.FailedLoginCount is
+// accurate) before the verify runs: leaving the stale count around
+// compares it against the threshold on the very next wrong password and
+// re-locks the account immediately, even though the lock had already
+// run out.
+func (s *PasswordAuthService) durableLockOrClear(ctx context.Context, user *iface.User) (time.Duration, bool) {
+	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
+		return time.Until(*user.LockedUntil), true
+	}
+	if user.LockedUntil != nil {
+		if err := s.userService.ClearFailedLogins(ctx, user.UUID); err != nil && s.logger != nil {
+			s.logger.Warn("auth: failed to clear an expired account lock",
+				slog.String("user_uuid", user.UUID),
+				slog.String("error", err.Error()))
+		}
+		user.FailedLoginCount = 0
+		user.LockedUntil = nil
+	}
+	return 0, false
+}
+
+// recordVerifyFailure charges a wrong-password attempt against the
+// email/IP attempt-counter scopes and mirrors the outcome onto the
+// durable LockedUntil lock — the shape Login, ChangePassword and
+// ConfirmPasswordWithSecurity all share on a failed verify. The durable
+// lock MIRRORS the counter: with a healthy Redis the two lock at the
+// same attempt; with Redis down the durable rule alone still caps
+// guessing against an existing account. FailedLoginCount keeps being
+// incremented for operator visibility even when the counter is the one
+// deciding. Callers still own their own audit emit — the three routes
+// emit different actions on a failure.
+func (s *PasswordAuthService) recordVerifyFailure(ctx context.Context, ip string, user *iface.User) {
+	emailVerdict, counterAvailable := s.recordLoginFailure(ctx, ip, user.Email)
+	var lockUntil *time.Time
+	lock := emailVerdict.Locked
+	if !counterAvailable {
+		lock = user.FailedLoginCount+1 >= s.policy.LockoutThreshold(ctx)
+	}
+	if lock {
+		t := time.Now().Add(s.policy.LockoutDuration(ctx))
+		lockUntil = &t
+	}
+	_ = s.userService.RecordFailedLogin(ctx, user.UUID, lockUntil)
 }
 
 // resetLoginFailures clears the EMAIL scope after a success. The address
