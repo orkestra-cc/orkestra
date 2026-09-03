@@ -5,10 +5,12 @@ package services
 // capacity, goroutine count, enqueue latency and drain behaviour.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -270,5 +272,136 @@ func TestMailDispatcher_EnqueueAfterStopIsSafe(t *testing.T) {
 	var never *MailDispatcher
 	if never.Enqueue(MailJob{}) {
 		t.Fatal("Enqueue on a nil dispatcher must be a safe no-op")
+	}
+}
+
+// A concurrent Stop must never let a racing Enqueue panic on a closed
+// channel. TestMailDispatcher_EnqueueAfterStopIsSafe above only proves
+// the SEQUENTIAL order (Stop returns, then Enqueue runs); this proves
+// the INTERLEAVING is safe too — Enqueue's "not stopped" check and its
+// send onto the channel must be one atomic section, not a check that
+// can go stale before the send runs. `go test -race` cannot catch a
+// regression here on its own: channel operations are self-synchronizing,
+// so an Enqueue racing a Stop's close is a logic race, not a data race,
+// and the detector has nothing to flag. Only a crash proves the bug is
+// gone, which is why this hammers the interleaving across many
+// iterations instead of asserting anything about which calls succeeded.
+func TestMailDispatcher_ConcurrentStopDoesNotPanicEnqueue(t *testing.T) {
+	const iterations = 200
+	const enqueuers = 20
+	const perEnqueuer = 25
+
+	for iter := 0; iter < iterations; iter++ {
+		// slog.DiscardHandler: this test's concern is the panic, not
+		// the drop log — TestMailDispatcher_DropWarningIsRateLimited
+		// covers that separately, and 200 fresh dispatcher instances
+		// each logging their first drop would otherwise flood the
+		// test output.
+		d := NewMailDispatcher(slog.New(slog.DiscardHandler))
+		d.Start()
+
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for i := 0; i < enqueuers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				for j := 0; j < perEnqueuer; j++ {
+					d.Enqueue(MailJob{TemplateID: "auth.reset_password", Send: func(context.Context) error { return nil }})
+				}
+			}()
+		}
+		// Release every enqueuer at once so they race Stop below,
+		// rather than serialising ahead of it by construction.
+		close(start)
+		d.Stop(context.Background())
+		wg.Wait()
+	}
+}
+
+// A Stop followed by a Start must resume REAL delivery — not merely
+// stop panicking while silently accepting and dropping everything
+// after. This is the module's own documented lifecycle invariant
+// (module.go: "so Start is idempotent, a stopped module can start
+// again, and no second ticker survives a hot enable/disable cycle")
+// that the registry's StartModule/StopModule hot toggle
+// (pkg/sdk/module/registry.go) relies on for every module, mail
+// dispatcher included.
+func TestMailDispatcher_RestartAfterStopResumesDelivery(t *testing.T) {
+	d := NewMailDispatcher(slog.Default())
+	d.Start()
+
+	var firstGen atomic.Int64
+	var wg1 sync.WaitGroup
+	wg1.Add(1)
+	if !d.Enqueue(MailJob{TemplateID: "auth.reset_password", Send: func(context.Context) error {
+		firstGen.Add(1)
+		wg1.Done()
+		return nil
+	}}) {
+		t.Fatal("first-generation enqueue must be accepted")
+	}
+	wg1.Wait()
+
+	d.Stop(context.Background())
+
+	// While stopped, Enqueue must be rejected — not silently accepted
+	// into a channel nothing will ever drain.
+	if d.Enqueue(MailJob{TemplateID: "auth.reset_password", Send: func(context.Context) error { return nil }}) {
+		t.Fatal("enqueue while stopped must be rejected")
+	}
+
+	d.Start()
+
+	var secondGen atomic.Int64
+	var wg2 sync.WaitGroup
+	wg2.Add(1)
+	if !d.Enqueue(MailJob{TemplateID: "auth.reset_password", Send: func(context.Context) error {
+		secondGen.Add(1)
+		wg2.Done()
+		return nil
+	}}) {
+		t.Fatal("enqueue after restart must be accepted")
+	}
+	wg2.Wait()
+	d.Stop(context.Background())
+
+	if firstGen.Load() != 1 || secondGen.Load() != 1 {
+		t.Fatalf("first-generation sent=%d, second-generation sent=%d; both must be 1 — a restart must deliver, not just accept",
+			firstGen.Load(), secondGen.Load())
+	}
+}
+
+// The drop WARN is throttled to at most one per mailDropWarningInterval
+// (1 minute) — mirroring the report()/attemptWarningInterval shape
+// attempt_counter.go already ships in this package, and the
+// session_revocation_service_test.go rate-limit-assertion pattern
+// (bytes.Buffer + a text handler + counting "level=WARN" occurrences).
+// Every drop still increments Dropped(); only the log line is
+// rate-limited, so a flood of drops — the exact scenario the
+// queue-full path exists to survive — produces one WARN, not one per
+// dropped request.
+func TestMailDispatcher_DropWarningIsRateLimited(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	// Deliberately never started: every Enqueue takes the
+	// "dispatcher_stopped" branch of recordDrop, which shares the same
+	// throttle state as the "queue_full" branch exercised elsewhere
+	// (TestMailDispatcher_NoGoroutinePerEnqueue's ~9,700 drops collapse
+	// to the same one line).
+	d := NewMailDispatcher(logger)
+
+	const drops = 5
+	for i := 0; i < drops; i++ {
+		if d.Enqueue(MailJob{TemplateID: "auth.reset_password", Send: func(context.Context) error { return nil }}) {
+			t.Fatal("enqueue on a never-started dispatcher must be rejected")
+		}
+	}
+	if got := d.Dropped(); got != drops {
+		t.Fatalf("dropped count = %d, want %d — every drop must be counted regardless of log throttling", got, drops)
+	}
+	if got := strings.Count(logs.String(), "level=WARN"); got != 1 {
+		t.Errorf("warning count = %d, want 1 within the rate-limit window", got)
 	}
 }
