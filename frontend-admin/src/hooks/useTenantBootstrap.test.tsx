@@ -141,6 +141,73 @@ describe('useTenantBootstrap', () => {
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe('org-b');
   });
 
+  // Both bootstrap queries take the org id in the PATH, and the backend's
+  // assertTenantScope (tenant/handlers/handler.go, authz/handlers/handler.go)
+  // 404s unless that path id equals the tenant the auth middleware resolved
+  // for the request. The middleware resolves it from X-Tenant-ID, and
+  // baseApi only stamps that header from a membership-VALIDATED
+  // `currentOrgId` — deliberately null until GET /v1/tenants lands.
+  //
+  // Firing these two off an optimistic localStorage hint therefore sends a
+  // path id the header cannot yet vouch for: the backend falls back to the
+  // token's acting tenant (the platform default), that differs from the
+  // operator's selected workspace, and both requests 404. Nothing retries
+  // them — the RTK Query cache key is the org id, which does not change when
+  // currentOrgId later settles on the same value, and the header is not part
+  // of the key — so tenant.permissions and tenant.features stay empty for the
+  // whole session. On this fork that silently hid the assistant launcher and
+  // the workspace switcher from every non-super_admin operator (super_admins
+  // are masked by the client-side '*' merge in useAuthRTK).
+  it('never sends a bootstrap request the tenant header cannot vouch for', async () => {
+    const scopedCalls: Array<{ path: string; tenant: string | null }> = [];
+    server.use(
+      http.get('*/v1/tenants', () => HttpResponse.json({ memberships })),
+      http.get('*/v1/tenants/:id/authz/me', ({ request, params }) => {
+        scopedCalls.push({
+          path: `authz/me:${params.id}`,
+          tenant: request.headers.get('X-Tenant-ID')
+        });
+        return HttpResponse.json({
+          tenantId: params.id,
+          permissions: ['*'],
+          systemRole: 'super_admin'
+        });
+      }),
+      http.get('*/v1/tenants/:id', ({ request, params }) => {
+        scopedCalls.push({
+          path: `org:${params.id}`,
+          tenant: request.headers.get('X-Tenant-ID')
+        });
+        return HttpResponse.json({ id: params.id, features: [] });
+      })
+    );
+    window.localStorage.setItem(STORAGE_KEY, 'org-b');
+
+    const { store } = renderWithProviders(<Probe />, {
+      preloadedState: {
+        auth: {
+          ...loadingAuth,
+          user,
+          isAuthenticated: true,
+          isLoading: false,
+          accessToken: 'tok'
+        }
+      }
+    });
+
+    await waitFor(() =>
+      expect(store.getState().tenant.permissions).toEqual(['*'])
+    );
+    await waitFor(() => expect(scopedCalls.length).toBeGreaterThanOrEqual(2));
+
+    // Every scoped call carried the header, and it named the same org as the
+    // path — the only combination assertTenantScope answers with a 200.
+    expect(scopedCalls.filter(c => c.tenant === null)).toEqual([]);
+    expect(scopedCalls.every(c => c.path.endsWith(c.tenant as string))).toBe(
+      true
+    );
+  });
+
   it('restores permissions after re-picking the current workspace', async () => {
     // The NineDotMenu pick sequence: stopImpersonation + setCurrentOrg +
     // invalidateTags. setCurrentOrg clears org-scoped permissions; the

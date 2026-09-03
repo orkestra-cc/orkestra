@@ -142,6 +142,35 @@ func seededUser() *iface.User {
 	return activeUser("alice@example.com", "x")
 }
 
+// breakSigningKey makes GenerateTokenPairWithAMR fail without touching any
+// repository, isolating the mint site from the store sites. A nil private key
+// is the same input production sees when the key material never loaded, and
+// the generator returns ErrJWTKeysNotLoaded rather than panicking.
+func (e *orchestrationEnv) breakSigningKey() {
+	e.t.Helper()
+	svc, ok := e.jwt.(*jwtService)
+	if !ok {
+		e.t.Fatalf("breakSigningKey: jwt is %T, not *jwtService", e.jwt)
+	}
+	svc.privateKey = nil
+}
+
+// breakVerifyingKey is breakSigningKey's public-key twin: it nils the
+// VERIFYING key, which is the production input when the key material never
+// loaded on a boot that still has to answer requests. validateTokenEnhanced
+// checks s.publicKey == nil and returns ErrJWTKeysNotLoaded BEFORE jwt.Parse,
+// so a test may seed a perfectly valid refresh row and still get the sentinel
+// back — that ordering is what isolates the three VALIDATION sites from the
+// mint sites breakSigningKey reaches.
+func (e *orchestrationEnv) breakVerifyingKey() {
+	e.t.Helper()
+	svc, ok := e.jwt.(*jwtService)
+	if !ok {
+		e.t.Fatalf("breakVerifyingKey: jwt is %T, not *jwtService", e.jwt)
+	}
+	svc.publicKey = nil
+}
+
 // ===== Happy path =====
 
 func TestRefreshTokensWithRiskAssessment_HappyPath_RotatesAndMintsNewPair(t *testing.T) {

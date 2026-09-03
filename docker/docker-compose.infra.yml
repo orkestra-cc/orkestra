@@ -19,6 +19,12 @@ services:
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
     restart: unless-stopped
+    # dockerd's inherited soft nofile limit is 1024 (new systemd default);
+    # mongod fasserts with EMFILE during recovery on a data dir this size.
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -35,16 +41,27 @@ services:
       - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${MONGO_PORT:-27017}:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-changeme}
+      # A credential never carries a fallback in these files: an unset value
+      # must stop the stack, not quietly become the literal printed in a
+      # public repository. `make init` generates every one of them.
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD is not set — run make init}
       MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-orkestra}
+    entrypoint: ["bash", "/opt/orkestra/replica-entrypoint.sh"]
     volumes:
       - mongodb-data:/data/db
       - mongodb-config:/data/configdb
+      - ./mongo-init/replica-entrypoint.sh:/opt/orkestra/replica-entrypoint.sh:ro
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
-      interval: 10s
+      # A ping is insufficient: the app uses MongoDB transactions, which a
+      # standalone mongod cannot serve. Initialize the single-node set once,
+      # then report healthy only after it is primary. directConnection=true
+      # lets both host tests and stack containers connect without depending on
+      # the member's advertised hostname.
+      test: ["CMD-SHELL", "mongosh --quiet --host localhost --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'try { if (db.hello().isWritablePrimary) { quit(0); } } catch (error) {} try { rs.initiate({_id: \"rs0\", members: [{_id: 0, host: \"mongodb:27017\"}]}); } catch (error) {} quit(1);'"]
+      interval: 2s
       timeout: 10s
-      retries: 5
+      retries: 30
+      start_period: 30s
 
   redis:
     image: redis/redis-stack-server:latest
@@ -58,7 +75,11 @@ services:
       - ALL
     ports:
       - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-changeme}
+    # --dir /data is load-bearing: overriding the image's command drops the
+    # entrypoint that passed it, and redis-server's own default is its cwd
+    # (`/`) — outside the volume, so every recreate started with an empty
+    # dataset and the volume below held nothing.
+    command: redis-server --dir /data --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is not set — run make init}
     volumes:
       - redis-data:/data
     healthcheck:
@@ -99,8 +120,16 @@ services:
       - "${HOST_BIND_ADDRESS:-127.0.0.1}:${RUSTFS_API_PORT:-9100}:9000"
       - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${RUSTFS_CONSOLE_PORT:-9101}:9001"
     environment:
-      RUSTFS_ROOT_USER: ${RUSTFS_ROOT_USER:-orkestra}
-      RUSTFS_ROOT_PASSWORD: ${RUSTFS_ROOT_PASSWORD:-changeme-rustfs}
+      # RustFS documents RUSTFS_ACCESS_KEY / RUSTFS_SECRET_KEY (the
+      # ROOT_USER / ROOT_PASSWORD spellings this file used to set are
+      # undocumented aliases). The root pair IS the backend's pair —
+      # STORAGE_ACCESS_KEY / STORAGE_SECRET_KEY — unless RUSTFS_ROOT_* override
+      # it (scoped backend user, or managed S3 whose credentials the RustFS
+      # container must not inherit). One pair to manage on the bundled
+      # single-node store, and no literal fallback: the S3 API is browser-
+      # facing behind the proxy, so an unset secret stops the stack instead.
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ROOT_USER:-${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY (or RUSTFS_ROOT_USER) is not set — run make init}}
+      RUSTFS_SECRET_KEY: ${RUSTFS_ROOT_PASSWORD:-${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY (or RUSTFS_ROOT_PASSWORD) is not set — run make init}}
     volumes:
       - rustfs-data:/data
     healthcheck:

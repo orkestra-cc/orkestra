@@ -14,9 +14,13 @@ Group=deploy
 # the user's supplementary groups unless we name them explicitly.
 SupplementaryGroups=docker
 WorkingDirectory=/opt/orkestra/docker
-# Same project name orkestra.sh derives (${APP_NAME}-${ENV}); without it
-# compose would name the project after the directory ("docker") and create a
-# second, empty set of volumes next to the ones the deploys use.
+# Same project name orkestra.sh derives: ${APP_NAME}-${ENV}, with APP_NAME
+# from docker/.env. "orkestra-production" assumes the default APP_NAME=orkestra;
+# a fork that sets APP_NAME=orkestra-acme must use orkestra-acme-production
+# here. Without it compose would name the project after the directory
+# ("docker"), and with a wrong value orkestra.sh deploy, backup.sh and
+# restore.sh would look at a different project: a second, empty set of
+# volumes next to the ones the deploys use, and RustFS missing from backups.
 Environment=COMPOSE_PROJECT_NAME=orkestra-production
 # --env-file feeds compose substitution; deliberately no EnvironmentFile= —
 # that would copy every secret in docker/.env into the unit's environment.

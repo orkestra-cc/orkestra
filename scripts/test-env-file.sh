@@ -58,6 +58,20 @@ check "lone leading quote kept"  '"unterminated'  "$(env_get "$tmp" LONEQ)"
 printf "QUOTED='/'\n" >> "$tmp"
 check "paired quotes stripped"   "/"              "$(env_get "$tmp" QUOTED)"
 
+# --- secret hygiene: the shipped literals are placeholders, real values are not ---
+is_placeholder() { secret_is_placeholder "$1" && printf yes || printf no; }
+is_weak()        { secret_is_weak "$@" && printf yes || printf no; }
+check "placeholder: empty"                  "yes" "$(is_placeholder '')"
+check "placeholder: changeme-rustfs"        "yes" "$(is_placeholder changeme-rustfs)"
+check "placeholder: unfilled REPLACE_WITH"  "yes" "$(is_placeholder REPLACE_WITH_RANDOM_HEX_32_STORAGE_SECRET)"
+check "placeholder: image default, any case" "yes" "$(is_placeholder RustFSAdmin)"
+check "placeholder: dev- prefixed literal"  "yes" "$(is_placeholder dev-jwt-secret-key-change-in-production)"
+check "placeholder: generated hex is not"   "no"  "$(is_placeholder 0123456789abcdef0123456789abcdef)"
+check "weak: short real value"              "yes" "$(is_weak abc123def456)"
+check "weak: exactly 16 characters passes"  "no"  "$(is_weak 0123456789abcdef)"
+check "weak: custom minimum"                "yes" "$(is_weak 0123456789abcdef 20)"
+check "weak: placeholder regardless of length" "yes" "$(is_weak REPLACE_WITH_RANDOM_HEX_32_STORAGE_SECRET)"
+
 echo
 printf 'env-file: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -432,8 +432,14 @@ restore_rustfs() {
     err "rustfs: bucket data missing at $src"; return 1
   fi
   local endpoint="http://${RUSTFS_CONTAINER}:9000"
-  local access="${STORAGE_ACCESS_KEY:-${RUSTFS_ROOT_USER:-orkestra}}"
-  local secret="${STORAGE_SECRET_KEY:-${RUSTFS_ROOT_PASSWORD:-changeme-rustfs}}"
+  # Same precedence as docker-compose.infra.yml (explicit root wins, else the
+  # backend's pair is the root); no literal fallback.
+  local access="${RUSTFS_ROOT_USER:-${STORAGE_ACCESS_KEY:-}}"
+  local secret="${RUSTFS_ROOT_PASSWORD:-${STORAGE_SECRET_KEY:-}}"
+  if [ -z "$access" ] || [ -z "$secret" ]; then
+    err "rustfs: no storage credentials in docker/.env (STORAGE_ACCESS_KEY/STORAGE_SECRET_KEY, or RUSTFS_ROOT_USER/RUSTFS_ROOT_PASSWORD)"
+    return 1
+  fi
   local region="${STORAGE_REGION:-us-east-1}"
 
   # Prefer the network the running container is actually on; fall back to the

@@ -23,7 +23,8 @@ const statusColors: Record<string, BadgeColor> = {
   running: 'success',
   failed: 'danger',
   disabled: 'secondary',
-  stopped: 'warning'
+  stopped: 'warning',
+  missing: 'danger'
 };
 
 type ModuleScope = 'core' | 'addons';
@@ -39,7 +40,8 @@ const healthDotColors: Record<string, string> = {
   failed: 'bg-danger',
   unhealthy: 'bg-danger',
   disabled: 'bg-400',
-  stopped: 'bg-warning'
+  stopped: 'bg-warning',
+  missing: 'bg-danger'
 };
 
 const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
@@ -218,6 +220,15 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
                             : mod.error}
                         </div>
                       )}
+                      {mod.missing && (
+                        <div
+                          className="text-danger fs-11 mt-1"
+                          role="status"
+                          data-testid={`module-missing-${mod.moduleName}`}
+                        >
+                          {t('adminModules.missingConfig')}
+                        </div>
+                      )}
                     </td>
                     <td>
                       <SubtleBadge bg="secondary" pill>
@@ -265,7 +276,9 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
                           to={`/admin/modules/${mod.moduleName}`}
                           className="text-600 px-1"
                           title={t('adminModules.actions.configure')}
-                          aria-label={`${t('adminModules.actions.configure')} ${mod.displayName}`}
+                          aria-label={`${t('adminModules.actions.configure')} ${
+                            mod.displayName
+                          }`}
                         >
                           <FontAwesomeIcon
                             icon={faChevronRight}

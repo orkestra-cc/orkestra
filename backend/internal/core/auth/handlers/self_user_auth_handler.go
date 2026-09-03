@@ -10,6 +10,7 @@ import (
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
@@ -198,6 +199,9 @@ func mapSelfAuthError(err error) error {
 		return nil
 	}
 	switch {
+	case errors.Is(err, services.ErrAuthPolicyUnavailable):
+		return errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
+			"Sign-in policy is temporarily unavailable; try again shortly.")
 	case errors.Is(err, services.ErrLastCredentialRemoval):
 		return huma.NewError(http.StatusConflict, "last_credential",
 			&huma.ErrorDetail{Message: "you have no other login method — set a password before unlinking this provider"})
@@ -211,7 +215,8 @@ func mapSelfAuthError(err error) error {
 	case errors.Is(err, services.ErrMFANotEnrolled):
 		return huma.Error400BadRequest("mfa is not enrolled — enroll a TOTP factor before regenerating backup codes")
 	}
-	if msg := err.Error(); msg == "user not found" {
+	// By identity, not by message — see mapAdminUserAuthError.
+	if errors.Is(err, iface.ErrUserNotFound) {
 		return huma.Error404NotFound("user not found")
 	}
 	return huma.Error500InternalServerError("self auth action failed", err)

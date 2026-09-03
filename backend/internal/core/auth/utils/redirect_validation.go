@@ -25,10 +25,19 @@ func DefaultRedirectURIConfig() *RedirectURIConfig {
 func NewRedirectURIConfig(allowLocalhost bool) *RedirectURIConfig {
 	return &RedirectURIConfig{
 		AllowedRedirectURIs: []string{
-			"http://localhost:3000/auth/oauth/google/callback",
-			"http://localhost:3000/auth/oauth/apple/callback",
-			"http://localhost:3000/auth/oauth/discord/callback",
-			"http://localhost:3000/auth/oauth/github/callback",
+			// The four backend callbacks, on the path the router actually
+			// mounts (/v1/auth/oauth/{provider}/callback — see
+			// RegisterOAuthRoutes) and the host config.go defaults to. These
+			// four must stay in lockstep with config.go's four
+			// OAUTH_*_REDIRECT_URL fallbacks;
+			// TestOAuthRedirectDefaultsAreMountedRoutes checks both sets
+			// against the real router.
+			"http://localhost:3000/v1/auth/oauth/google/callback",
+			"http://localhost:3000/v1/auth/oauth/apple/callback",
+			"http://localhost:3000/v1/auth/oauth/discord/callback",
+			"http://localhost:3000/v1/auth/oauth/github/callback",
+			// The three entries below are NOT backend routes and are out of
+			// that rule's scope: a frontend route and two mobile deep links.
 			"http://localhost:8080/auth/callback", // Frontend dev server
 			// Mobile app deep links
 			"com.orkestra://oauth/callback",
@@ -167,11 +176,28 @@ func isLocalhost(host string) bool {
 	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
-// validateLocalhostURI validates localhost URIs with additional security checks
+// validateLocalhostURI validates localhost URIs with additional security checks.
+//
+// Two prefixes are accepted, and both are load-bearing: "/v1/auth/" is where
+// the router actually mounts the four OAuth callbacks (RegisterOAuthRoutes),
+// and "/auth/" is the SPA's own callback route, which the allow-list carries
+// as http://localhost:8080/auth/callback. Accepting only "/auth/" — the state
+// this predates the /v1 mount in — rejected the very defaults this file ships
+// in AllowedRedirectURIs. The old `&& parsedURL.Path != "/auth/callback"`
+// second clause was dead: that path already satisfies the "/auth/" prefix.
+//
+// KNOWN GAP (G7), unchanged by that widening: ValidateRedirectURI still has
+// no production caller. The OAuth flow takes its redirect_uri from the auth
+// module config (auth.<provider>RedirectURL, via
+// services.OAuthConfigResolver) and never validates it through this package,
+// so neither the widened prefix nor AllowedRedirectURIs carries any security
+// exposure today — they are documentation until someone wires a caller up,
+// which is the moment to re-read both.
 func validateLocalhostURI(parsedURL *url.URL) error {
-	// Ensure path is reasonable for OAuth callback
-	if !strings.HasPrefix(parsedURL.Path, "/auth/") && parsedURL.Path != "/auth/callback" {
-		return fmt.Errorf("localhost redirect URI must use /auth/ path prefix")
+	// Ensure path is reasonable for an OAuth callback: the mounted backend
+	// route, or the front-end callback route.
+	if !strings.HasPrefix(parsedURL.Path, "/auth/") && !strings.HasPrefix(parsedURL.Path, "/v1/auth/") {
+		return fmt.Errorf("localhost redirect URI must use /auth/ or /v1/auth/ path prefix")
 	}
 
 	// Prevent suspicious query parameters

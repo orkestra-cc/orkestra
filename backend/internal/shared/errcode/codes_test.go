@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
+
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // goldenCodes is the wire-contract snapshot for every code declared in
@@ -39,6 +42,10 @@ var goldenCodes = map[string]string{
 	"AuthCountryBlocked":                 "auth.country_blocked",
 	"AuthPasswordConfirmUnavailable":     "auth.password_confirm_unavailable",
 	"AuthOAuthProviderDisabled":          "auth.oauth_provider_disabled",
+	"AuthPolicyUnavailable":              "auth.policy_unavailable",
+	"AuthOAuthEmailUnverified":           "auth.oauth_email_unverified",
+	"AuthPasswordLoginDisabled":          "auth.password_login_disabled",
+	"AuthLoginMethodLockout":             "auth.login_method_lockout",
 	"TenantSlugAlreadyInUse":             "tenant.slug_already_in_use",
 	"TenantProvisioningLocked":           "tenant.provisioning_locked",
 	"TenantInternalModeInvalid":          "tenant.internal_mode_invalid",
@@ -152,4 +159,17 @@ func parseCodeConsts(t *testing.T) map[string]string {
 		}
 	}
 	return out
+}
+
+// TestNoCollisionWithSDKOwnedCodes: pkg/sdk/module owns
+// module.config_revision_stale (it cannot import this package to share a
+// constant), so the whole "module." namespace is reserved to the SDK. A
+// constant here that reused it would give two different failures one wire
+// identity.
+func TestNoCollisionWithSDKOwnedCodes(t *testing.T) {
+	for name, value := range goldenCodes {
+		if value == module.CodeConfigRevisionStale || strings.HasPrefix(value, "module.") {
+			t.Errorf("%s = %q collides with the SDK-owned module.* namespace", name, value)
+		}
+	}
 }

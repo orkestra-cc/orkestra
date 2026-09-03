@@ -1,25 +1,22 @@
-import { apiBaseURL } from "@/api/client";
-import { getAccessToken } from "@/auth/tokenStore";
+import { readError } from "@/api/auth";
+import { authedFetch } from "@/api/authedFetch";
 
 // DSR self-service calls (GDPR Art. 15 / 17). These hit core compliance
-// endpoints that aren't in the generated openapi-fetch `paths` type, so they
-// use a small raw-fetch helper rather than the typed `api` client. The bearer
-// token + credentials mirror the typed client's middleware.
-
+// endpoints that are not in the generated `paths` type, so they are
+// hand-typed — but they go through the same authedFetch as every other
+// authenticated call, so they inherit the 401 recovery rather than
+// re-deriving it. The error shape is auth.ts's ApiError, imported rather
+// than copied: pages branch on `code`, and a private copy is how that drifts.
+//
+// /v1/me/dsr/export takes no body (its Huma handler declares `_ *struct{}`),
+// so nothing sets Content-Type for it — correctly: a content type without
+// content describes nothing.
 async function postJson<T>(path: string, body?: unknown): Promise<T> {
-  const token = getAccessToken();
-  const res = await fetch(`${apiBaseURL}${path}`, {
+  const res = await authedFetch(path, {
     method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) {
-    throw new Error(`request failed (${res.status})`);
-  }
+  if (!res.ok) throw await readError(res, "Request failed");
   return (await res.json()) as T;
 }
 

@@ -2,7 +2,7 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
-import { fetchAuthPolicy } from "@/api/auth";
+import { fetchAuthPolicy, passwordLoginUsable } from "@/api/auth";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { UserAvatar } from "@/components/UserAvatar";
 import { useAuth } from "@/auth/useAuth";
@@ -10,20 +10,29 @@ import { useMe } from "@/auth/useMe";
 
 export function Layout() {
   const { t } = useTranslation();
-  const { isAuthenticated, signOut } = useAuth();
+  // isBootstrapping, not isAuthenticated alone: `token !== null` is false
+  // for the WHOLE cold-load window, so a returning user would otherwise see
+  // the anonymous header flash and pay for an anonymous-only /policy fetch
+  // (§8 #18b — the #11 defect, in the header rather than the route guard).
+  const { isAuthenticated, isBootstrapping, signOut } = useAuth();
   const { data: me } = useMe();
   const navigate = useNavigate();
-  // Hide the prominent "Sign up" CTA when self-service registration is
-  // off — visiting /signup directly still renders a banner via the page
-  // itself, but most users discover the route via the header. Same
-  // cache key used by /login + /signup so all three share one fetch.
+  // Hide the prominent "Sign up" CTA when self-service registration or
+  // password sign-in is off — visiting /signup directly still swaps the
+  // form for a full-page notice in the off case, but most users discover
+  // the route via the header. Same cache key used by /login, /signup and
+  // /forgot-password, so all four surfaces share one fetch.
+  //
+  // Gated on the bootstrap too: this policy drives anonymous-only UI, and
+  // during the cold-load window we do not yet know the visitor is anonymous.
   const { data: policy } = useQuery({
     queryKey: ["authPolicy"],
     queryFn: fetchAuthPolicy,
     staleTime: 30_000,
-    enabled: !isAuthenticated,
+    enabled: !isBootstrapping && !isAuthenticated,
   });
   const registrationEnabled = policy?.registrationEnabled ?? true;
+  const passwordOn = passwordLoginUsable(policy);
 
   async function handleSignOut() {
     await signOut();
@@ -38,7 +47,11 @@ export function Layout() {
             {t("app.name")}
           </Link>
           <nav className="flex items-center gap-2">
-            {isAuthenticated ? (
+            {/* Nothing in the auth slot until the bootstrap settles — not a
+                spinner: the window is one /refresh-cookie round-trip and a
+                spinner in a header reads as breakage. The logo, the language
+                switcher and the footer stay, so the layout does not shift. */}
+            {isBootstrapping ? null : isAuthenticated ? (
               <>
                 <NavLink
                   to="/account"
@@ -70,7 +83,7 @@ export function Layout() {
                 >
                   {t("nav.signin")}
                 </Link>
-                {registrationEnabled && (
+                {registrationEnabled && passwordOn && (
                   <Link
                     to="/signup"
                     className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"

@@ -3,9 +3,12 @@ package module
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
+	"sort"
 	"time"
 )
 
@@ -22,6 +25,67 @@ type ModuleConfigService struct {
 	// runtime (dev DB wipe, accidental drop, etc.) without requiring a
 	// backend restart. Populated once at boot and then read-only.
 	knownModules map[string]Module
+
+	// hotReload answers "does this module re-read its config at request
+	// time" — installed by the registry from SupportsHotReload. Every
+	// config/environment/activation write persists needsRestart =
+	// !hotReload(name) in the same update as the values, so the flag can
+	// never diverge through a later best-effort clear. Nil means every
+	// write marks needsRestart (the pre-resolver behaviour).
+	hotReload func(name string) bool
+
+	// requiredPersisted names modules whose config document must exist for
+	// the rest of the process: after boot seeding, a missing document for
+	// one of them is an outage — GetConfig fails and the list shows a
+	// `missing` row — never a reason to rebuild it from schema defaults.
+	// The strict credential-policy readers in auth depend on this: a lazy
+	// re-seed from an admin page read would recreate a permissive default
+	// exactly when the reader had correctly observed the outage. Populated
+	// once by RequirePersistedConfig before traffic and read-only after.
+	requiredPersisted map[string]bool
+	requiredSealed    bool
+	// seedFailures records, per module, the last boot-seeding or backfill
+	// failure SeedFromModules logged (nil-free when everything succeeded).
+	// RequirePersistedConfig consults it: a required module whose seed
+	// failed must stop the boot, not serve a possibly incomplete document.
+	seedFailures map[string]error
+}
+
+// SetHotReloadResolver installs the registry's hot-reload answer. See the
+// hotReload field.
+func (s *ModuleConfigService) SetHotReloadResolver(fn func(name string) bool) { s.hotReload = fn }
+
+func (s *ModuleConfigService) needsRestartFor(name string) bool {
+	if s.hotReload == nil {
+		return true
+	}
+	return !s.hotReload(name)
+}
+
+// schemaFor returns the schema every mutation is judged against: the
+// registered module's live declaration when the module is known — the
+// binary is the source of truth, and the stored copy is only a boot-time
+// snapshot whose refresh may have failed — or the stored snapshot for a
+// document whose module is not registered with this service.
+func (s *ModuleConfigService) schemaFor(name string, doc *ModuleConfig) []ConfigField {
+	if m, ok := s.knownModules[name]; ok {
+		return ConfigSchemaOf(m)
+	}
+	return doc.ConfigSchema
+}
+
+// encryptAll encrypts every submitted secret; an empty plaintext encrypts to
+// "" (clearing the key), which GetSecret then reads as "fall back".
+func encryptAll(secrets map[string]string) (map[string]string, error) {
+	encrypted := make(map[string]string, len(secrets))
+	for k, v := range secrets {
+		enc, err := encryptSecret(v)
+		if err != nil {
+			return nil, fmt.Errorf("encrypt secret %q: %w", k, err)
+		}
+		encrypted[k] = enc
+	}
+	return encrypted, nil
 }
 
 const (
@@ -32,11 +96,13 @@ const (
 // NewModuleConfigService creates a new config service.
 func NewModuleConfigService(repo ConfigRepository, redis RedisClient, logger *slog.Logger) *ModuleConfigService {
 	return &ModuleConfigService{
-		repo:         repo,
-		redis:        redis,
-		logger:       logger,
-		coreModules:  make(map[string]bool),
-		knownModules: make(map[string]Module),
+		repo:              repo,
+		redis:             redis,
+		logger:            logger,
+		coreModules:       make(map[string]bool),
+		knownModules:      make(map[string]Module),
+		requiredPersisted: make(map[string]bool),
+		seedFailures:      make(map[string]error),
 	}
 }
 
@@ -131,6 +197,7 @@ func (s *ModuleConfigService) SeedFromModules(ctx context.Context, modules []Mod
 				slog.String("module", m.Name()),
 				slog.String("error", err.Error()),
 			)
+			s.seedFailures[m.Name()] = err
 			continue
 		}
 
@@ -144,14 +211,47 @@ func (s *ModuleConfigService) SeedFromModules(ctx context.Context, modules []Mod
 					slog.String("module", m.Name()),
 					slog.String("error", err.Error()),
 				)
+				// A stale stored schema is what the live-schema rule guards
+				// against; for a required module it is not a warning.
+				s.seedFailures[m.Name()] = err
 			}
-			// Clear needsRestart for loaded modules — this flag should only
-			// remain set for modules that are enabled in DB but not loaded.
-			if err := s.repo.ClearNeedsRestart(ctx, m.Name()); err != nil {
-				s.logger.Error("SeedFromModules: failed to clear needsRestart",
+			// Backfill: RefreshMetadata refreshes the SCHEMA but has never
+			// added the keys a schema gained after the document was created,
+			// so a runtime read of such a key had to guess a default. After
+			// this, every schema key with a non-empty fallback is present in
+			// the active profile and the legacy mirror, and the runtime, the
+			// validator and the admin UI all read the same document.
+			keys, wrote, err := s.backfillSchemaKeys(ctx, m, existing)
+			switch {
+			case err != nil:
+				// Recorded so RequirePersistedConfig can refuse to serve a
+				// required module whose document may be incomplete.
+				s.seedFailures[m.Name()] = err
+				s.logger.Error("SeedFromModules: failed to backfill schema keys",
 					slog.String("module", m.Name()),
 					slog.String("error", err.Error()),
 				)
+			case len(keys) > 0:
+				s.logger.Info("Module config backfilled with schema defaults",
+					slog.String("module", m.Name()),
+					slog.Any("keys", keys),
+				)
+			case wrote:
+				s.logger.Info("Module config legacy mirror realigned to the active profile",
+					slog.String("module", m.Name()),
+				)
+			}
+			// Clear needsRestart for loaded modules — this flag should only
+			// remain set for modules that are enabled in DB but not loaded. A
+			// backfill write already persisted needsRestart=false in its own
+			// update, so the second write is owed only when nothing was written.
+			if !wrote {
+				if err := s.repo.ClearNeedsRestart(ctx, m.Name()); err != nil {
+					s.logger.Error("SeedFromModules: failed to clear needsRestart",
+						slog.String("module", m.Name()),
+						slog.String("error", err.Error()),
+					)
+				}
 			}
 			continue
 		}
@@ -163,6 +263,7 @@ func (s *ModuleConfigService) SeedFromModules(ctx context.Context, modules []Mod
 				slog.String("module", m.Name()),
 				slog.String("error", err.Error()),
 			)
+			s.seedFailures[m.Name()] = err
 			continue
 		}
 
@@ -174,6 +275,180 @@ func (s *ModuleConfigService) SeedFromModules(ctx context.Context, modules []Mod
 	}
 
 	return nil
+}
+
+// backfillMaxAttempts bounds the boot backfill's compare-and-swap retry. A
+// lost race means a replica booted concurrently; re-reading and recomputing
+// converges in one step, and three is plenty.
+const backfillMaxAttempts = 3
+
+// backfillSchemaKeys writes every schema key that is absent from the ACTIVE
+// profile AND has a non-empty EnvVar/Default, then rewrites the legacy
+// mirror to exactly the resulting profile, in ONE compare-and-swap that
+// advances configRevision once. The profile is the source of truth (it is
+// what ActiveConfigValues serves to the runtime and the admin UI); the
+// mirror is never backfilled on its own, so a value present only in the
+// profile reaches the mirror as that value, not as a schema default, and a
+// mirror that had diverged is realigned. Secrets go through the same
+// encrypted path first-boot seeding uses, each encrypted ONCE so the profile
+// and the mirror carry identical ciphertext. Present profile keys, explicit
+// empty strings included, are never touched.
+//
+// Keys whose fallback is empty stay ABSENT on purpose: absence is meaningful
+// to GetRawValue readers (ADR-0017 D1 — an absent sessionAbsoluteTTL is the
+// default cap, a present "" is "cap disabled"), so inventing "" would
+// silently change policy. Record lists are schema-level constructs with
+// nothing to seed. A document with no profiles gets only its mirror
+// backfilled — the lazy migration copies it into the production profile
+// later.
+//
+// NeedsRestart is written false: seeding runs before any module's Init, so
+// every module reads the backfilled document and no restart is owed — the
+// hot-reload resolver governs post-boot edits, not this one. Writing it here
+// folds the ClearNeedsRestart that would otherwise follow into the same
+// update.
+//
+// A lost compare-and-swap means a concurrently booting replica wrote first;
+// the document is re-read and the missing set recomputed — that replica may
+// run an older binary whose schema knows fewer keys. Returns the sorted,
+// de-duplicated key names written; nil when nothing was missing (no write).
+func (s *ModuleConfigService) backfillSchemaKeys(ctx context.Context, m Module, doc *ModuleConfig) (keys []string, wrote bool, err error) {
+	schema := ConfigSchemaOf(m)
+	for attempt := 0; attempt < backfillMaxAttempts; attempt++ {
+		mut, added, write, err := s.buildBackfill(m, schema, doc)
+		if err != nil {
+			return nil, false, err
+		}
+		if !write {
+			return nil, false, nil
+		}
+		won, err := s.repo.CompareAndSwapConfig(ctx, m.Name(), mut)
+		if err != nil {
+			return nil, false, err
+		}
+		if won {
+			return added, true, nil
+		}
+		fresh, err := s.repo.FindByName(ctx, m.Name())
+		if err != nil {
+			return nil, false, err
+		}
+		if fresh == nil {
+			return nil, false, fmt.Errorf("module %q: document disappeared during backfill", m.Name())
+		}
+		doc = fresh
+	}
+	return nil, false, fmt.Errorf("module %q: %w (backfill)", m.Name(), ErrRevisionStale)
+}
+
+// buildBackfill computes the mutation for one document. Profiles are the
+// source of truth: the candidate is the ACTIVE profile plus its missing
+// defaults, and the legacy mirror is rewritten to exactly that candidate —
+// never backfilled on its own, which would hand a key present only in the
+// profile a schema default instead of the profile's value. A document with
+// no profiles (not yet migrated) backfills its mirror alone, and rewrites it
+// whenever the stripped candidate differs — not only when a schema key was
+// missing. Every secret is encrypted once. Returns the mutation, the keys
+// added to the profile (or mirror, for a legacy document), and whether
+// anything needs writing — a mirror that merely diverged from a complete
+// profile is realigned too.
+//
+// The candidate is seeded from nonSecretValues, never the raw map: a
+// document written before the lane rule can hold plaintext under a key the
+// schema declares as a secret, and a raw seed rewrote it into BOTH the
+// profile and the mirror on every boot. Stripping also makes a mirror that
+// still carries one differ from the candidate, so `mirrorDiverged` fires and
+// the mirror is repaired in the same write — that is the repair, not an
+// accident of the comparison.
+func (s *ModuleConfigService) buildBackfill(m Module, schema []ConfigField, doc *ModuleConfig) (mut ConfigMutation, added []string, write bool, err error) {
+	ciphertext := map[string]string{} // key → ciphertext, encrypted once per key
+	encryptOnce := func(f ConfigField, plain string) (string, error) {
+		if enc, ok := ciphertext[f.Key]; ok {
+			return enc, nil
+		}
+		enc, err := encryptSecret(plain)
+		if err != nil {
+			// NOT the first-boot posture (warn and skip). A backfill that
+			// silently omits a secret would report success and let the
+			// required-module gate serve an incomplete document.
+			return "", fmt.Errorf("encrypt backfilled secret %q: %w", f.Key, err)
+		}
+		ciphertext[f.Key] = enc
+		return enc, nil
+	}
+	mut = ConfigMutation{ExpectedRevision: doc.ConfigRevision, NeedsRestart: false}
+
+	if len(doc.Environments) == 0 {
+		values, secrets, keys, err := missingSchemaKeys(schema, nonSecretValues(schema, doc.ConfigValues), doc.EncryptedValues, encryptOnce)
+		if err != nil {
+			return mut, nil, false, err
+		}
+		// Same divergence rule as the profile branch below: a mirror that
+		// differs from the stripped candidate is rewritten even when nothing
+		// was MISSING — otherwise a legacy document whose only defect is
+		// plaintext under a secret key waits for the next operator save.
+		if len(keys) == 0 && maps.Equal(values, doc.ConfigValues) && maps.Equal(secrets, doc.EncryptedValues) {
+			return mut, nil, false, nil
+		}
+		mut.WriteLegacy, mut.LegacyValues, mut.LegacySecrets = true, values, secrets
+		sort.Strings(keys)
+		return mut, keys, true, nil
+	}
+
+	env := doc.ActiveEnv()
+	cur, ok := doc.Environments[env]
+	if !ok {
+		return mut, nil, false, nil
+	}
+	values, secrets, keys, err := missingSchemaKeys(schema, nonSecretValues(schema, cur.ConfigValues), cur.EncryptedValues, encryptOnce)
+	if err != nil {
+		return mut, nil, false, err
+	}
+	mirrorDiverged := !maps.Equal(doc.ConfigValues, values) || !maps.Equal(doc.EncryptedValues, secrets)
+	if len(keys) == 0 && !mirrorDiverged {
+		return mut, nil, false, nil
+	}
+	mut.Env, mut.EnvValues, mut.EnvSecrets, mut.EnvRevision = env, values, secrets, cur.Revision
+	mut.WriteLegacy, mut.LegacyValues, mut.LegacySecrets = true, values, secrets
+	sort.Strings(keys) // missingSchemaKeys adds each schema key at most once
+	return mut, keys, true, nil
+}
+
+// missingSchemaKeys returns copies of values/secrets with every absent
+// schema key whose EnvVar/Default is non-empty added, plus the keys added.
+// Secrets are obtained through encryptOnce so a key missing from both the
+// profile and the mirror is encrypted a single time; an encryption failure
+// is the caller's failure, never a silently skipped key.
+func missingSchemaKeys(schema []ConfigField, values, encrypted map[string]string, encryptOnce func(ConfigField, string) (string, error)) (map[string]string, map[string]string, []string, error) {
+	outValues := mergeStringMaps(values, nil)
+	outSecrets := mergeStringMaps(encrypted, nil)
+	var added []string
+	for _, f := range schema {
+		if f.Type == FieldRecordList {
+			continue
+		}
+		v := schemaFallbackValue(f)
+		if v == "" {
+			continue
+		}
+		if f.Type == FieldSecret {
+			if _, ok := outSecrets[f.Key]; ok {
+				continue
+			}
+			enc, err := encryptOnce(f, v)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			outSecrets[f.Key] = enc
+		} else {
+			if _, ok := outValues[f.Key]; ok {
+				continue
+			}
+			outValues[f.Key] = v
+		}
+		added = append(added, f.Key)
+	}
+	return outValues, outSecrets, added, nil
 }
 
 // buildInitialConfig constructs a ModuleConfig from a module's declarations
@@ -243,6 +518,59 @@ func (s *ModuleConfigService) buildInitialConfig(m Module) ModuleConfig {
 	}
 }
 
+var (
+	// ErrRequiredConfigMissing: a module marked by RequirePersistedConfig has
+	// no document. Recovery is restore the document, or fix Mongo and perform
+	// a controlled restart so boot seeding can run — never a lazy re-seed.
+	ErrRequiredConfigMissing = errors.New("module: required config document is missing")
+	// ErrRequiredSetSealed: RequirePersistedConfig was already called. The set
+	// is decided once before traffic; pass every name in that one call.
+	ErrRequiredSetSealed = errors.New("module: required persisted-config set is already sealed")
+)
+
+// RequirePersistedConfig marks modules whose config document must exist
+// from now on (see requiredPersisted), and is the BOOT GATE for them: it
+// refuses — so cmd/server can abort before serving traffic — when a named
+// module's document is missing or its boot seeding/backfill recorded a
+// failure. A required module is one whose strict readers may never be
+// handed an incomplete document; "log and continue" is not an option for
+// it. Call it ONCE, after boot seeding has run; a second call fails with
+// ErrRequiredSetSealed so the set cannot drift while the process serves.
+// A refused call seals nothing (the caller is about to exit).
+func (s *ModuleConfigService) RequirePersistedConfig(ctx context.Context, names ...string) error {
+	if s.requiredSealed {
+		return ErrRequiredSetSealed
+	}
+	for _, n := range names {
+		if err := s.seedFailures[n]; err != nil {
+			return fmt.Errorf("module %q: boot seeding failed, refusing to serve: %w", n, err)
+		}
+		doc, err := s.repo.FindByName(ctx, n)
+		if err != nil {
+			return fmt.Errorf("module %q: verify config document: %w", n, err)
+		}
+		if doc == nil {
+			return fmt.Errorf("%w: %q", ErrRequiredConfigMissing, n)
+		}
+	}
+	s.requiredSealed = true
+	for _, n := range names {
+		s.requiredPersisted[n] = true
+	}
+	return nil
+}
+
+// IsRequiredPersisted reports whether name was marked by RequirePersistedConfig.
+func (s *ModuleConfigService) IsRequiredPersisted(name string) bool { return s.requiredPersisted[name] }
+
+// ModuleConfigStatus is one row of ListConfigs: a present document, or a
+// required module whose document is missing (Config nil).
+type ModuleConfigStatus struct {
+	Name    string
+	Missing bool
+	Config  *ModuleConfig
+}
+
 // GetConfig retrieves the full config document for a module. Used by admin API.
 // If the module is registered but has no document in MongoDB (e.g. the
 // collection was dropped while the backend was running), the config is
@@ -255,82 +583,132 @@ func (s *ModuleConfigService) GetConfig(ctx context.Context, name string) (*Modu
 	}
 	if doc != nil {
 		if err := s.ensureEnvironments(ctx, doc); err != nil {
-			s.logger.Warn("GetConfig: failed to migrate environments",
-				slog.String("module", name), slog.String("error", err.Error()))
+			return nil, fmt.Errorf("module %q: migrate legacy config: %w", name, err)
 		}
 		return doc, nil
+	}
+	if s.requiredPersisted[name] {
+		s.logger.Error("GetConfig: required module config document is missing — restore it or restart",
+			slog.String("module", name))
+		return nil, fmt.Errorf("%w: %q", ErrRequiredConfigMissing, name)
 	}
 	return s.lazySeed(ctx, name)
 }
 
 // ensureEnvironments lazily migrates a legacy document (no Environments map)
-// by copying the top-level ConfigValues/EncryptedValues into a "production"
-// environment profile and creating an empty "sandbox" profile.
+// by copying the top-level maps into a "production" profile and creating an
+// empty "sandbox" profile, under a compare-and-swap. On success doc is
+// updated in memory to match what was written (profiles AND the advanced
+// configRevision). If another writer migrated or moved the document first,
+// doc is REPLACED by a fresh read so the caller judges its own write against
+// the current document rather than a stale legacy snapshot.
+//
+// The migrated profile is stripped of schema-secret keys a legacy mirror may
+// still carry in plaintext: copying the raw mirror would duplicate the leak
+// into the new production profile, where every later read and write would
+// carry it forward. nonSecretValues always returns a non-nil map, so the
+// nil-guard the raw copy needed is gone.
 func (s *ModuleConfigService) ensureEnvironments(ctx context.Context, doc *ModuleConfig) error {
 	if len(doc.Environments) > 0 {
 		return nil // already migrated
 	}
-
-	cv := doc.ConfigValues
-	if cv == nil {
-		cv = make(map[string]string)
-	}
+	cv := nonSecretValues(s.schemaFor(doc.ModuleName, doc), doc.ConfigValues)
 	ev := doc.EncryptedValues
 	if ev == nil {
 		ev = make(map[string]string)
 	}
-
-	if err := s.repo.MigrateToEnvironments(ctx, doc.ModuleName, cv, ev); err != nil {
+	won, err := s.repo.MigrateToEnvironments(ctx, doc.ModuleName, cv, ev, doc.ConfigRevision)
+	if err != nil {
 		return err
 	}
-
-	// Update in-memory doc so callers see the migration immediately.
-	now := time.Now()
-	doc.ActiveEnvironment = "production"
-	doc.Environments = map[string]EnvironmentConfig{
-		"production": {ConfigValues: cv, EncryptedValues: ev, UpdatedAt: now},
-		"sandbox":    {ConfigValues: make(map[string]string), EncryptedValues: make(map[string]string), UpdatedAt: now},
+	if won {
+		now := time.Now()
+		doc.ActiveEnvironment = "production"
+		doc.Environments = map[string]EnvironmentConfig{
+			"production": {ConfigValues: cv, EncryptedValues: ev, UpdatedAt: now},
+			"sandbox":    {ConfigValues: make(map[string]string), EncryptedValues: make(map[string]string), UpdatedAt: now},
+		}
+		doc.ConfigRevision++
+		return nil
 	}
+	fresh, err := s.repo.FindByName(ctx, doc.ModuleName)
+	if err != nil {
+		return err
+	}
+	if fresh == nil {
+		return fmt.Errorf("module %q not found", doc.ModuleName)
+	}
+	if len(fresh.Environments) == 0 {
+		// The revision moved without a migration (a legacy-only backfill
+		// landed). Retryable by the caller; never loop here.
+		return fmt.Errorf("module %q: %w (profile migration)", doc.ModuleName, ErrRevisionStale)
+	}
+	*doc = *fresh
 	return nil
 }
 
-// GetAllConfigs retrieves all module config documents. Used by admin API list endpoint.
-// If the DB is missing documents for modules we know about, they are lazily
-// rebuilt from each module's ConfigSchema so the admin UI never sees a
-// partially-seeded catalog after a live DB wipe.
-func (s *ModuleConfigService) GetAllConfigs(ctx context.Context) ([]ModuleConfig, error) {
+// ListConfigs returns one row per registered module: the document when it
+// exists (lazily migrated to profiles), a lazily re-seeded document for an
+// ordinary module that lost its document (dev DB wipe), and a `missing` row
+// for a REQUIRED module that lost its document. The required-missing case
+// never fails the whole list — the list is the page an operator repairs
+// from — and never re-seeds; a failed profile migration, being a write
+// failure, does fail it. Orphan documents (modules not compiled into this
+// binary) are dropped, non-destructively, as before.
+func (s *ModuleConfigService) ListConfigs(ctx context.Context) ([]ModuleConfigStatus, error) {
 	docs, err := s.repo.FindAll(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	// Drop orphan documents — modules no longer compiled into this binary
-	// (addons a fork removed, or the ADR-0006 core-only collapse). Their routes
-	// are gated/absent, so surfacing them in the admin UI is misleading. The
-	// documents are left in the collection (non-destructive); they are simply
-	// not returned. When knownModules is empty (service constructed without a
-	// boot seed, e.g. some tooling paths) there is no registry to filter
-	// against, so every document is returned unchanged.
 	var present map[string]bool
 	if len(s.knownModules) > 0 {
 		docs, present = filterKnown(docs, s.knownModules)
 	}
-
-	// Lazily migrate any kept documents without environments.
 	for i := range docs {
+		// A failed migration is a real write failure (the lost-race case is
+		// absorbed inside ensureEnvironments by re-reading); a read does not
+		// paper over it by serving the unmigrated document.
 		if err := s.ensureEnvironments(ctx, &docs[i]); err != nil {
-			s.logger.Warn("GetAllConfigs: failed to migrate environments",
-				slog.String("module", docs[i].ModuleName), slog.String("error", err.Error()))
+			return nil, fmt.Errorf("module %q: migrate legacy config: %w", docs[i].ModuleName, err)
 		}
 	}
-
-	// Lazy-seed any known module missing a document (e.g. after a dev DB wipe).
+	out := make([]ModuleConfigStatus, 0, len(docs)+len(s.knownModules))
+	for i := range docs {
+		out = append(out, ModuleConfigStatus{Name: docs[i].ModuleName, Config: &docs[i]})
+	}
+	names := make([]string, 0, len(s.knownModules))
 	for name := range s.knownModules {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
 		if present[name] {
 			continue
 		}
+		if s.requiredPersisted[name] {
+			s.logger.Error("ListConfigs: required module config document is missing — restore it or restart",
+				slog.String("module", name))
+			out = append(out, ModuleConfigStatus{Name: name, Missing: true})
+			continue
+		}
 		if seeded, err := s.lazySeed(ctx, name); err == nil && seeded != nil {
-			docs = append(docs, *seeded)
+			out = append(out, ModuleConfigStatus{Name: name, Config: seeded})
+		}
+	}
+	return out, nil
+}
+
+// GetAllConfigs is ListConfigs without the missing rows — the pre-existing
+// shape, kept for callers that only want documents.
+func (s *ModuleConfigService) GetAllConfigs(ctx context.Context) ([]ModuleConfig, error) {
+	statuses, err := s.ListConfigs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	docs := make([]ModuleConfig, 0, len(statuses))
+	for _, st := range statuses {
+		if st.Config != nil {
+			docs = append(docs, *st.Config)
 		}
 	}
 	return docs, nil
@@ -379,84 +757,102 @@ func (s *ModuleConfigService) lazySeed(ctx context.Context, name string) (*Modul
 	return s.repo.FindByName(ctx, name)
 }
 
-// validateModuleConfig runs the module's optional ValidateConfig hook
-// against exactly the non-secret values the update would persist.
-// Modules that are unknown to this service, or that omit the seam, are
-// accepted unchanged. ADR-0017 D6.
-func (s *ModuleConfigService) validateModuleConfig(ctx context.Context, name string, merged map[string]string) error {
-	m, ok := s.knownModules[name]
-	if !ok {
-		return nil
-	}
-	v, ok := m.(HasConfigValidator)
-	if !ok {
-		return nil
-	}
-	return v.ValidateConfig(ctx, merged)
+// UpdateConfig merges values and secrets into the ACTIVE environment profile
+// and mirrors the result into the legacy top-level fields, in one
+// compare-and-swap write. Keys not present in the call are preserved, never
+// wiped — a toggle flip carries no secrets and must not blank the module's
+// credentials.
+//
+// Profiles are the source of truth; the legacy maps are a compatibility
+// mirror. The merge, the validation snapshot and the write all use the
+// active profile, so a pre-existing divergence between profile and mirror
+// is repaired by the write rather than perpetuated. A legacy document with
+// no profiles completes its lazy migration first — itself a compare-and-swap
+// — so the revision the write is judged against is the migrated document's.
+//
+// The body lives in UpdateActiveConfig, which additionally reports the
+// profile it targeted; this signature is the one every caller outside the
+// admin handler uses and is unchanged.
+func (s *ModuleConfigService) UpdateConfig(ctx context.Context, name string, values map[string]string, secrets map[string]string) error {
+	_, err := s.UpdateActiveConfig(ctx, name, values, secrets)
+	return err
 }
 
-// UpdateConfig updates a module's config values and encrypted secrets for the
-// active environment, then invalidates the Redis cache for immediate propagation.
-// Also keeps the legacy top-level fields in sync for backward compatibility.
+// UpdateActiveConfig is UpdateConfig plus the one fact the caller cannot
+// derive: WHICH profile the write targeted. The handler's own pre-read is a
+// second read, and an activation landing between the two makes it name the
+// wrong profile — so the audit event takes the env from here, where the
+// document the write was judged against was read.
 //
-// Incoming values and secrets are MERGED into the module's stored config — keys
-// not present in the call are preserved, never wiped. Pass only the keys you
-// want to add or change. This guard is load-bearing: a config-only update
-// (e.g. flipping a feature toggle) carries no secrets, and replacing rather
-// than merging would blank out every encrypted secret the module holds.
-func (s *ModuleConfigService) UpdateConfig(ctx context.Context, name string, values map[string]string, secrets map[string]string) error {
-	// Load first: the module validator must see the merged document, and
-	// nothing may be encrypted or written before it has accepted it. The
-	// legacy top-level fields and the active environment can diverge, so
-	// each target is merged against its own existing maps below — the
-	// validator sees the legacy top-level merge, since that is the map the
-	// admin API has historically treated as the config of record.
-	existing, err := s.repo.FindByName(ctx, name)
+// env is returned as soon as it is determined, on the error paths too; "" only
+// when the document could not be read at all.
+func (s *ModuleConfigService) UpdateActiveConfig(ctx context.Context, name string, values map[string]string, secrets map[string]string) (string, error) {
+	doc, err := s.repo.FindByName(ctx, name)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if existing == nil {
-		return fmt.Errorf("module %q not found", name)
+	if doc == nil {
+		return "", fmt.Errorf("module %q not found", name)
+	}
+	env := doc.ActiveEnv()
+	// Lane refusal comes first: a request that is about to be refused with
+	// 422 must persist nothing, and ensureEnvironments below can commit a
+	// legacy-profile migration (and bump configRevision) on its own.
+	schema := s.schemaFor(name, doc)
+	if err := validateSubmittedKeys(schema, values, secrets); err != nil {
+		return env, err
+	}
+	// ensureEnvironments migrates under its own compare-and-swap and leaves
+	// doc current — profiles, activeEnvironment and configRevision — whether
+	// this call won the migration or re-read after another writer did.
+	if err := s.ensureEnvironments(ctx, doc); err != nil {
+		return env, err
+	}
+	env = doc.ActiveEnv()
+	cur, ok := doc.Environments[env]
+	if !ok {
+		return env, fmt.Errorf("environment %q not found for module %q", env, name)
+	}
+	// This surface changes no membership, so the STORED roster is the one the
+	// write is judged against: an element key for a slug outside it is
+	// refused rather than parked in the document.
+	if err := validateElementKeysInRoster(schema, cur.ConfigValues, values, secrets); err != nil {
+		return env, err
+	}
+	mergedValues := mergeStringMaps(cur.ConfigValues, values)
+	// A plaintext secret a legacy document still carries under a secret key
+	// is dropped here, so this write repairs it.
+	mergedValues = nonSecretValues(schema, mergedValues)
+
+	if err := s.validateCandidate(ctx, name, candidate{
+		schema: schema, env: env, values: mergedValues,
+		storedEncrypted: cur.EncryptedValues, submittedSecrets: secrets,
+	}); err != nil {
+		return env, err
 	}
 
-	mergedValues := mergeStringMaps(existing.ConfigValues, values)
-	if err := s.validateModuleConfig(ctx, name, mergedValues); err != nil {
-		return err
+	encrypted, err := encryptAll(secrets)
+	if err != nil {
+		return env, err
 	}
+	mergedSecrets := mergeStringMaps(cur.EncryptedValues, encrypted)
 
-	encrypted := make(map[string]string, len(secrets))
-	for k, v := range secrets {
-		enc, err := encryptSecret(v)
-		if err != nil {
-			return fmt.Errorf("encrypt secret %q: %w", k, err)
-		}
-		encrypted[k] = enc
+	won, err := s.repo.CompareAndSwapConfig(ctx, name, ConfigMutation{
+		ExpectedRevision: doc.ConfigRevision,
+		Env:              env, EnvValues: mergedValues, EnvSecrets: mergedSecrets, EnvRevision: cur.Revision,
+		WriteLegacy: true, LegacyValues: mergedValues, LegacySecrets: mergedSecrets,
+		NeedsRestart: s.needsRestartFor(name),
+	})
+	if err != nil {
+		return env, err
 	}
-
-	// Update legacy top-level fields for backward compat.
-	if err := s.repo.UpdateConfigValues(
-		ctx, name,
-		mergedValues,
-		mergeStringMaps(existing.EncryptedValues, encrypted),
-	); err != nil {
-		return err
+	if !won {
+		return env, ErrRevisionStale
 	}
-
-	// Also update the active environment if environments exist.
-	if len(existing.Environments) > 0 {
-		activeEnv := existing.ActiveEnv()
-		env := existing.Environments[activeEnv]
-		if err := s.repo.UpdateEnvironmentConfig(
-			ctx, name, activeEnv,
-			mergeStringMaps(env.ConfigValues, values),
-			mergeStringMaps(env.EncryptedValues, encrypted),
-		); err != nil {
-			s.logger.Warn("UpdateConfig: failed to update environment config",
-				slog.String("module", name), slog.String("env", activeEnv), slog.String("error", err.Error()))
-		}
-	}
-
-	return s.InvalidateCache(ctx, name)
+	// No cache invalidation: Redis caches only the enabled flag, which a
+	// config write does not change. The CAS is the commit; nothing after it
+	// may turn a committed write into a reported failure.
+	return env, nil
 }
 
 // mergeStringMaps returns a new map containing every key in base overlaid with
@@ -475,10 +871,13 @@ func mergeStringMaps(base, overlay map[string]string) map[string]string {
 	return out
 }
 
-// UpdateEnvironmentConfig updates config values and secrets for a specific
-// named environment. If updating the active environment, also syncs legacy fields.
+// UpdateEnvironmentConfig merges values and secrets into ONE named profile
+// in one compare-and-swap write. When that profile is the active one the
+// legacy mirror is synced in the same update; otherwise the mirror and the
+// active profile are untouched. The module's validation seam sees the
+// merged target profile — this surface must not be a bypass around the
+// active-config PATCH.
 func (s *ModuleConfigService) UpdateEnvironmentConfig(ctx context.Context, name, envName string, values map[string]string, secrets map[string]string) error {
-	// Ensure the module exists and has environments.
 	doc, err := s.GetConfig(ctx, name)
 	if err != nil {
 		return err
@@ -486,50 +885,68 @@ func (s *ModuleConfigService) UpdateEnvironmentConfig(ctx context.Context, name,
 	if doc == nil {
 		return fmt.Errorf("module %q not found", name)
 	}
-
-	// Verify environment exists.
-	if _, ok := doc.Environments[envName]; !ok {
+	cur, ok := doc.Environments[envName]
+	if !ok {
 		return fmt.Errorf("environment %q not found for module %q", envName, name)
 	}
+	schema := s.schemaFor(name, doc)
+	if err := validateSubmittedKeys(schema, values, secrets); err != nil {
+		return err
+	}
+	// This surface changes no membership either — same rule, same roster.
+	if err := validateElementKeysInRoster(schema, cur.ConfigValues, values, secrets); err != nil {
+		return err
+	}
+	mergedValues := mergeStringMaps(cur.ConfigValues, values)
+	// A plaintext secret a legacy document still carries under a secret key
+	// is dropped here, so this write repairs it.
+	mergedValues = nonSecretValues(schema, mergedValues)
 
-	// Merge with existing env values (don't wipe unset fields), then let the
-	// module's optional validator see the merged result before anything is
-	// encrypted or persisted. This is the named-environment PATCH surface;
-	// it must not be a bypass around the active-config PATCH's validation.
-	existingEnv := doc.Environments[envName]
-	mergedValues := mergeStringMaps(existingEnv.ConfigValues, values)
-	if err := s.validateModuleConfig(ctx, name, mergedValues); err != nil {
+	if err := s.validateCandidate(ctx, name, candidate{
+		schema: schema, env: envName, values: mergedValues,
+		storedEncrypted: cur.EncryptedValues, submittedSecrets: secrets,
+	}); err != nil {
 		return err
 	}
 
-	encrypted := make(map[string]string, len(secrets))
-	for k, v := range secrets {
-		enc, err := encryptSecret(v)
-		if err != nil {
-			return fmt.Errorf("encrypt secret %q: %w", k, err)
-		}
-		encrypted[k] = enc
-	}
-
-	mergedEncrypted := mergeStringMaps(existingEnv.EncryptedValues, encrypted)
-
-	if err := s.repo.UpdateEnvironmentConfig(ctx, name, envName, mergedValues, mergedEncrypted); err != nil {
+	encrypted, err := encryptAll(secrets)
+	if err != nil {
 		return err
 	}
+	mergedSecrets := mergeStringMaps(cur.EncryptedValues, encrypted)
 
-	// If this is the active environment, also sync legacy top-level fields.
+	mut := ConfigMutation{
+		ExpectedRevision: doc.ConfigRevision,
+		Env:              envName, EnvValues: mergedValues, EnvSecrets: mergedSecrets, EnvRevision: cur.Revision,
+		NeedsRestart: s.needsRestartFor(name),
+	}
 	if envName == doc.ActiveEnv() {
-		if err := s.repo.UpdateConfigValues(ctx, name, mergedValues, mergedEncrypted); err != nil {
-			s.logger.Warn("UpdateEnvironmentConfig: failed to sync legacy fields",
-				slog.String("module", name), slog.String("error", err.Error()))
-		}
+		mut.WriteLegacy, mut.LegacyValues, mut.LegacySecrets = true, mergedValues, mergedSecrets
 	}
-
-	return s.InvalidateCache(ctx, name)
+	won, err := s.repo.CompareAndSwapConfig(ctx, name, mut)
+	if err != nil {
+		return err
+	}
+	if !won {
+		return ErrRevisionStale
+	}
+	return nil
 }
 
-// SetActiveEnvironment switches the active environment for a module and syncs
-// the active environment's config to the legacy top-level fields.
+// SetActiveEnvironment switches the active profile in one compare-and-swap
+// update that also publishes the target's values and secrets into the legacy
+// mirror. The module's validation seam judges the stored target profile as a
+// whole — with the target's own secret presence, never the currently active
+// profile's — strictly before the write, so a refused activation leaves the
+// active name, the mirror and needsRestart exactly as they were.
+//
+// The mirror is copied CLIENT-side, from the read at revision r, because the
+// copy has to be stripped of any plaintext the stored profile still carries
+// under a schema-secret key — a server-side $ifNull copy would republish it.
+// That is safe only because the write is guarded by the same revision: a
+// concurrent write advances configRevision, so this activation matches
+// nothing and its snapshot can never win. When stripping removed something,
+// the profile itself is repaired in the same update.
 func (s *ModuleConfigService) SetActiveEnvironment(ctx context.Context, name, envName string) error {
 	doc, err := s.GetConfig(ctx, name)
 	if err != nil {
@@ -538,39 +955,41 @@ func (s *ModuleConfigService) SetActiveEnvironment(ctx context.Context, name, en
 	if doc == nil {
 		return fmt.Errorf("module %q not found", name)
 	}
-	if _, ok := doc.Environments[envName]; !ok {
+	target, ok := doc.Environments[envName]
+	if !ok {
 		return fmt.Errorf("environment %q not found for module %q", envName, name)
 	}
-
-	// Activation-time validation: the target profile as a whole, before any
-	// write. Mirrors validateModuleConfig's dispatch. It reads the profile
-	// from the `doc` snapshot deliberately — validating what the operator is
-	// activating — while the write below re-reads server-side; a profile
-	// mutated in between is caught by the next activation, not silently
-	// half-applied by this one.
-	cv := doc.Environments[envName].ConfigValues
-	if cv == nil {
-		cv = make(map[string]string)
+	schema := s.schemaFor(name, doc)
+	clean := nonSecretValues(schema, target.ConfigValues)
+	enc := target.EncryptedValues
+	if enc == nil {
+		enc = map[string]string{}
 	}
-	if m, ok := s.knownModules[name]; ok {
-		if v, ok := m.(HasConfigActivationValidator); ok {
-			if err := v.ValidateConfigActivation(ctx, cv); err != nil {
-				return err
-			}
-		}
-	}
-
-	// One write: the activation and the legacy-map sync are the same update,
-	// and the values copied are read server-side at execution time. Copying
-	// `doc` — a snapshot taken above — put back whatever a concurrent write
-	// had removed in between, secrets included. A failed sync is returned
-	// rather than logged: activeEnvironment pointing at a profile whose
-	// values were never copied is not a success.
-	if err := s.repo.ActivateEnvironment(ctx, name, envName); err != nil {
+	if err := s.validateCandidate(ctx, name, candidate{
+		schema: schema, env: envName, values: clean,
+		storedEncrypted: target.EncryptedValues, activation: true,
+	}); err != nil {
 		return err
 	}
-
-	return s.InvalidateCache(ctx, name)
+	mut := ConfigMutation{
+		ExpectedRevision: doc.ConfigRevision, Activate: envName,
+		WriteLegacy: true, LegacyValues: clean, LegacySecrets: enc,
+		NeedsRestart: s.needsRestartFor(name),
+	}
+	if len(clean) != len(target.ConfigValues) {
+		// Stripping removed a plaintext secret: repair the profile too, so
+		// the leak does not survive to be read by the runtime or echoed by
+		// the next GET.
+		mut.Env, mut.EnvValues, mut.EnvSecrets, mut.EnvRevision = envName, clean, enc, target.Revision
+	}
+	won, err := s.repo.CompareAndSwapConfig(ctx, name, mut)
+	if err != nil {
+		return err
+	}
+	if !won {
+		return ErrRevisionStale
+	}
+	return nil
 }
 
 // GetEnvironmentConfig retrieves config values and secret status for a specific environment.
@@ -617,7 +1036,10 @@ func (s *ModuleConfigService) GetEnvironmentConfig(ctx context.Context, name, en
 	return &env, secretStatus, nil
 }
 
-// UpdateEnabled toggles a module's enabled state and invalidates the cache.
+// UpdateEnabled persists a module's enabled state. The Redis-cached enabled
+// flag is invalidated best-effort: the persisted state is the truth, the
+// ModuleGate self-corrects within the 30-second cache TTL, and a Redis
+// hiccup must not report a committed write as a failure.
 func (s *ModuleConfigService) UpdateEnabled(ctx context.Context, name string, enabled bool) error {
 	if s.coreModules[name] {
 		return fmt.Errorf("cannot disable core module %q", name)
@@ -625,7 +1047,11 @@ func (s *ModuleConfigService) UpdateEnabled(ctx context.Context, name string, en
 	if err := s.repo.UpdateEnabled(ctx, name, enabled); err != nil {
 		return err
 	}
-	return s.InvalidateCache(ctx, name)
+	if err := s.InvalidateCache(ctx, name); err != nil {
+		s.logger.Warn("UpdateEnabled: failed to invalidate the enabled-flag cache; the gate converges within the cache TTL",
+			slog.String("module", name), slog.String("error", err.Error()))
+	}
+	return nil
 }
 
 // InvalidateCache removes the Redis cached enabled state for a module,
@@ -634,9 +1060,21 @@ func (s *ModuleConfigService) InvalidateCache(ctx context.Context, name string) 
 	return s.redis.Del(ctx, enabledCachePrefix+name)
 }
 
-// ClearNeedsRestart resets the needsRestart flag for a module.
+// ClearNeedsRestart resets the needsRestart flag for a module
+// unconditionally. It is for BOOT SEEDING only, where the process is the
+// only writer and the flag means "enabled in the DB but not loaded in this
+// process" — there is no concurrent request whose hint could be erased.
+// Every request-time clear goes through ClearNeedsRestartAt instead.
 func (s *ModuleConfigService) ClearNeedsRestart(ctx context.Context, name string) error {
 	return s.repo.ClearNeedsRestart(ctx, name)
+}
+
+// ClearNeedsRestartAt clears the flag only while the document is still at
+// the revision the caller observed, so an enable/disable cannot retract a
+// hint a concurrent config change earned. Returns false — not an error —
+// when the revision moved.
+func (s *ModuleConfigService) ClearNeedsRestartAt(ctx context.Context, name string, expectedRevision int64) (bool, error) {
+	return s.repo.ClearNeedsRestartAt(ctx, name, expectedRevision)
 }
 
 // --- Config value readers (used by modules in Init) ---
@@ -694,6 +1132,29 @@ func (s *ModuleConfigService) GetRawValue(ctx context.Context, moduleName, key s
 	v, ok := doc.ActiveConfigValues()[key]
 	return v, ok, nil
 }
+
+// GetRawValueRequiredModule is GetRawValue for a module whose document must
+// exist: the three outcomes are preserved, but a missing document is the
+// ERROR outcome (ErrRequiredConfigMissing), not "absent". It never calls
+// GetConfig's lazy-seed path. A caller governing credentials — auth's
+// per-surface password policy — reads through this so an outage can never
+// be mistaken for "the operator said nothing here" and fall back to a
+// permissive default. GetRawValue itself is unchanged: changing it would
+// alter SessionAbsoluteTTL's compatibility contract.
+func (s *ModuleConfigService) GetRawValueRequiredModule(ctx context.Context, moduleName, key string) (string, bool, error) {
+	doc, err := s.repo.FindByName(ctx, moduleName)
+	if err != nil {
+		return "", false, err
+	}
+	if doc == nil {
+		return "", false, fmt.Errorf("%w: %q", ErrRequiredConfigMissing, moduleName)
+	}
+	v, ok := doc.ActiveConfigValues()[key]
+	return v, ok, nil
+}
+
+// ActiveConfigRequiredModule (config_active_view.go) is the multi-key
+// counterpart: one read, every secret decrypt-checked, live-schema fallbacks.
 
 // GetSecret returns a decrypted secret config value for a module.
 // Lookup: active environment EncryptedValues (decrypt) → legacy EncryptedValues → env var → schema default → "".

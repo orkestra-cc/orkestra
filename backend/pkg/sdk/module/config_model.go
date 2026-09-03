@@ -39,6 +39,16 @@ type ModuleConfig struct {
 	CreatedAt       time.Time          `bson:"createdAt" json:"createdAt"`
 	UpdatedAt       time.Time          `bson:"updatedAt" json:"updatedAt"`
 
+	// ConfigRevision is the document-level optimistic-concurrency token.
+	// Every values/secrets or activation mutation reads it, filters its
+	// write on it and writes it back incremented, so two operators who each
+	// read a valid document cannot combine into an invalid one — the write
+	// skew a per-field invariant (PR 3's anti-lockout rule) would otherwise
+	// be exposed to. A document written before this field existed carries
+	// none; absent and 0 are the same value. updatedAt is deliberately NOT
+	// the token: BSON datetimes have millisecond precision.
+	ConfigRevision int64 `bson:"configRevision,omitempty" json:"configRevision"`
+
 	// Environment profiles — keyed by environment name (e.g. "production", "sandbox").
 	ActiveEnvironment string                       `bson:"activeEnvironment,omitempty" json:"activeEnvironment,omitempty"`
 	Environments      map[string]EnvironmentConfig `bson:"environments,omitempty" json:"-"`

@@ -7,6 +7,7 @@
 // `npm run dev` directly on the host — and it documents the shape the
 // SPA reads (window.__ORKESTRA_CONFIG__).
 window.__ORKESTRA_CONFIG__ = {
-  apiBase: "http://api.localhost:3000",
+  // Same-site with the SPA's own origin on purpose — see README.md.
+  apiBase: "http://client.localhost:3000",
   stripePublishableKey: "",
 };

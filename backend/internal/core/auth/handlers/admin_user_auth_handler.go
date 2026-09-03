@@ -12,6 +12,7 @@ import (
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -182,6 +183,9 @@ func mapAdminUserAuthError(err error) error {
 		return nil
 	}
 	switch {
+	case errors.Is(err, services.ErrAuthPolicyUnavailable):
+		return errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
+			"Sign-in policy is temporarily unavailable; try again shortly.")
 	case errors.Is(err, services.ErrLastCredentialRemoval):
 		return huma.NewError(http.StatusConflict, "last_credential",
 			&huma.ErrorDetail{Message: "user has no other login method — send a password reset first"})
@@ -191,10 +195,14 @@ func mapAdminUserAuthError(err error) error {
 	case errors.Is(err, services.ErrOAuthLinkNotFound):
 		return huma.Error404NotFound("provider not linked or user not found")
 	}
-	// Treat the generic "user not found" sentinel surfaced by the user
-	// service as 404 too — the inviter helper has its own mapping but
-	// the aggregator path uses GetUserByID directly.
-	if msg := err.Error(); msg == "user not found" {
+	// Treat the generic "user does not exist" sentinel surfaced by the
+	// user service as 404 too — the inviter helper has its own mapping
+	// but the aggregator path uses GetUserByID directly. Matched by
+	// IDENTITY, not by message: iface.ErrUserNotFound's text happens to
+	// be "user not found", and while user/services returns it unwrapped
+	// today, the next fmt.Errorf("...: %w", …) on the path would have
+	// turned this 404 into a 500 with nothing to catch it.
+	if errors.Is(err, iface.ErrUserNotFound) {
 		return huma.Error404NotFound("user not found")
 	}
 	return huma.Error500InternalServerError("admin auth action failed", err)
@@ -207,10 +215,18 @@ func mapAdminInviterError(err error, generic string) error {
 	if err == nil {
 		return nil
 	}
-	if msg := err.Error(); msg == "user not found" {
+	if errors.Is(err, services.ErrPasswordLoginDisabled) {
+		return errcode.Conflict(errcode.AuthPasswordLoginDisabled,
+			"Email/password sign-in is disabled on this user's surface; a reset link would mint a credential the surface refuses. Re-enable the method first.")
+	}
+	if errors.Is(err, services.ErrAuthPolicyUnavailable) {
+		return errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
+			"Sign-in policy is temporarily unavailable; try again shortly.")
+	}
+	if errors.Is(err, iface.ErrUserNotFound) {
 		return huma.Error404NotFound("user not found")
 	}
-	if msg := err.Error(); msg == "notifications disabled — cannot send email" {
+	if errors.Is(err, services.ErrNotificationDown) {
 		return huma.Error503ServiceUnavailable("notifications disabled")
 	}
 	return huma.Error500InternalServerError(generic, err)

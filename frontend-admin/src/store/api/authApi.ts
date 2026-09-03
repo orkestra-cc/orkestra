@@ -145,7 +145,19 @@ export interface AuthPolicy {
   registrationEnabled: boolean;
   loginEnabled: boolean;
   passwordMinLength: number;
+  // Persisted per-surface email/password policy. null is the emergency
+  // state: the store was unreadable while the operator break-glass is
+  // active. Only a literal true may render ordinary password UI.
+  passwordLoginEnabled: boolean | null;
+  // Operator surface only: render the labelled emergency login form.
+  passwordLoginBreakGlassEffective: boolean;
 }
+
+// Whether the persisted policy allows rendering password-credential UI.
+// A served null (emergency-unknown state) hides it — only the emergency
+// login form may render then, and only under the break-glass flag.
+export const passwordUiVisible = (policy: AuthPolicy | undefined): boolean =>
+  policy ? policy.passwordLoginEnabled === true : true;
 
 // --- Self-service security center ---
 // Mirrors authModels.AuthMethodsView and SessionInfo from the Go
@@ -176,6 +188,9 @@ export interface SelfAuthOAuthProvider {
 }
 
 export interface SelfAuthMethods {
+  hasPasswordSet: boolean;
+  passwordUsableForLogin: boolean;
+  /** @deprecated alias of hasPasswordSet (NOT usability); removed after one release */
   hasUsablePassword: boolean;
   passwordUpdatedAt?: string;
   emailVerified: boolean;
@@ -220,12 +235,16 @@ export const authApi = baseApi.injectEndpoints({
         if (result.error) {
           // Network failure / 404 → assume "everything enabled" so a
           // misconfigured deployment doesn't block legitimate users.
-          // The backend re-validates on submit anyway.
+          // The backend re-validates on submit anyway. This is a DISPLAY
+          // fail-open on transport failure only: a SERVED false/null is
+          // honoured strictly by passwordUiVisible above.
           return {
             data: {
               registrationEnabled: true,
               loginEnabled: true,
-              passwordMinLength: 10
+              passwordMinLength: 10,
+              passwordLoginEnabled: true,
+              passwordLoginBreakGlassEffective: false
             }
           };
         }
@@ -511,20 +530,14 @@ export const authApi = baseApi.injectEndpoints({
       })
     }),
 
-    // OAuth callback — single shared endpoint per provider, dispatched
-    // server-side to the correct tier via the signed-state JWT.
-    handleOAuthCallback: builder.mutation<
-      LoginResponse,
-      { code: string; state?: string; provider: string }
-    >({
-      query: ({ code, state, provider }) => ({
-        url: `v1/auth/oauth/${provider}/callback`,
-        method: 'POST',
-        body: { code, state }
-      }),
-      // Invalidate navigation to fetch role-filtered menu for new user
-      invalidatesTags: ['Auth', 'User', 'Navigation']
-    }),
+    // There is deliberately no OAuth-callback mutation here. The callback is
+    // a browser REDIRECT the backend owns end to end: it lands on
+    // SocialAuthCallback, which reads the closed `?success=…&provider=…`
+    // contract off the URL and bootstraps through GET /v1/auth/session. The
+    // mutation that used to sit at this spot POSTed
+    // `v1/auth/oauth/{provider}/callback`, which the backend mounts as a GET
+    // for Google, Discord and GitHub — so it had zero callers and would have
+    // 405'd if it ever gained one.
 
     // --- Self-service security center ---
 
@@ -718,12 +731,16 @@ export const authApi = baseApi.injectEndpoints({
         // the moment isAuthenticated flips true include the Authorization
         // header in their very first request. Doing it here — rather than
         // in a useEffect in useAuthRTK that runs after render — avoids a
-        // page-load race: without the token in Redux, those queries fire
-        // with no auth header, the backend's inline refresh-cookie
-        // rotation races across the concurrent middleware invocations, and
-        // the CAS-loss branch trips the family-replay guard. That revokes
-        // the entire session and bounces the user to /login on every
-        // page refresh.
+        // page-load race: without the token in Redux, those queries would
+        // fire with no auth header at all. The backend's RequireAuth is
+        // bearer-only (ADR-0020, #317) — it never reads the refresh cookie —
+        // so a bearer-less request is a plain 401. Without this dispatch,
+        // each of those queries would independently take that 401, then
+        // converge on the same serialised /refresh-cookie round-trip
+        // (performRefresh coalesces concurrent callers onto one in-flight
+        // promise, so it's one rotation, not one per query) before retrying
+        // — N pointless 401s and a rotation none of them needed, instead of
+        // going out already authenticated on their first try.
         if (sessionData && sessionData.accessToken) {
           api.dispatch(
             setAccessToken({
@@ -757,7 +774,6 @@ export const {
   useConfirmPasswordMutation,
   useLogoutMutation,
   useInitiateOAuthMutation,
-  useHandleOAuthCallbackMutation,
   useGetSessionQuery,
   // Lazy query hooks for conditional fetching
   useLazyGetCurrentUserQuery,

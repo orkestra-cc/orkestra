@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -10,14 +11,21 @@ import (
 )
 
 // newGetMethodsSvc wires a minimal *authService for the aggregator
-// tests. Only userService and (optionally) mfaFactorRepo are needed —
-// the policy reader is left nil so MFAGraceExpiresAt isn't populated;
+// tests. Only userService and (optionally) mfaFactorRepo are needed;
 // tenantProvider is left nil so the role-only RoleRequiresMFA branch
 // is exercised.
-func newGetMethodsSvc(fake *adminUnlinkUserFake, factors *fakeFactorRepo) *authService {
+//
+// policyValues seeds the per-surface method policy the §4.8 password
+// split reads: nil means "no keys set", which the compatibility rule
+// reads as password login ON, matching the pre-toggle behaviour. The
+// MFAGraceExpiresAt branch stays inert because the grace keys are
+// absent, not because the reader is nil.
+func newGetMethodsSvc(fake *adminUnlinkUserFake, factors *fakeFactorRepo, policyValues map[string]string) *authService {
 	return &authService{
 		userService:   fake,
 		mfaFactorRepo: factors,
+		policy:        &AuthPolicyService{cs: &stubReader{values: policyValues}},
+		audience:      PolicyAudienceOperator,
 	}
 }
 
@@ -35,7 +43,7 @@ func TestGetUserAuthMethods_PasswordOnly(t *testing.T) {
 		EmailVerified:     true,
 		LastLogin:         &last,
 	})
-	svc := newGetMethodsSvc(fake, newFakeFactorRepo())
+	svc := newGetMethodsSvc(fake, newFakeFactorRepo(), nil)
 
 	view, err := svc.GetUserAuthMethods(context.Background(), "u1")
 	if err != nil {
@@ -80,7 +88,7 @@ func TestGetUserAuthMethods_TOTPEnrolled(t *testing.T) {
 		LastUsedAt:        &used,
 		BackupCodesHashed: []string{"h1", "h2", "h3", "h4", "h5"},
 	})
-	svc := newGetMethodsSvc(fake, factors)
+	svc := newGetMethodsSvc(fake, factors, nil)
 
 	view, err := svc.GetUserAuthMethods(context.Background(), "u-totp")
 	if err != nil {
@@ -127,7 +135,7 @@ func TestGetUserAuthMethods_BothFactors(t *testing.T) {
 			{CredentialID: []byte{0x01, 0x02, 0x03}, Name: "MacBook Touch ID", CreatedAt: wAtCreated},
 		},
 	})
-	svc := newGetMethodsSvc(fake, factors)
+	svc := newGetMethodsSvc(fake, factors, nil)
 
 	view, err := svc.GetUserAuthMethods(context.Background(), "u-both")
 	if err != nil {
@@ -174,7 +182,7 @@ func TestGetUserAuthMethods_OAuthOnly(t *testing.T) {
 			{Provider: "github", ProviderID: "gh-1", Email: "u@x.com", IsActive: false}, // inactive — should be filtered out
 		},
 	})
-	svc := newGetMethodsSvc(fake, newFakeFactorRepo())
+	svc := newGetMethodsSvc(fake, newFakeFactorRepo(), nil)
 
 	view, err := svc.GetUserAuthMethods(context.Background(), "u-oauth")
 	if err != nil {
@@ -196,7 +204,7 @@ func TestGetUserAuthMethods_OAuthOnly(t *testing.T) {
 
 func TestGetUserAuthMethods_UnknownUser(t *testing.T) {
 	t.Parallel()
-	svc := newGetMethodsSvc(newAdminUnlinkUserFake(), newFakeFactorRepo())
+	svc := newGetMethodsSvc(newAdminUnlinkUserFake(), newFakeFactorRepo(), nil)
 	_, err := svc.GetUserAuthMethods(context.Background(), "missing")
 	if err == nil {
 		t.Errorf("expected error for unknown user")
@@ -205,9 +213,48 @@ func TestGetUserAuthMethods_UnknownUser(t *testing.T) {
 
 func TestGetUserAuthMethods_RejectsEmptyTarget(t *testing.T) {
 	t.Parallel()
-	svc := newGetMethodsSvc(newAdminUnlinkUserFake(), newFakeFactorRepo())
+	svc := newGetMethodsSvc(newAdminUnlinkUserFake(), newFakeFactorRepo(), nil)
 	_, err := svc.GetUserAuthMethods(context.Background(), "")
 	if err == nil {
 		t.Errorf("expected error for empty target")
+	}
+}
+
+// PR 3 §4.8: the view separates "hash present" from "method usable".
+func TestGetUserAuthMethods_PasswordSplit(t *testing.T) {
+	t.Parallel()
+	fake := newAdminUnlinkUserFake()
+	fake.seed(&iface.User{UUID: "u1", Email: "u1@example.com", Role: "operator", PasswordHash: "argon2id$..."})
+
+	on := newGetMethodsSvc(fake, newFakeFactorRepo(), nil)
+	view, err := on.GetUserAuthMethods(context.Background(), "u1")
+	if err != nil {
+		t.Fatalf("GetUserAuthMethods: %v", err)
+	}
+	if !view.HasPasswordSet || !view.PasswordUsableForLogin || !view.HasUsablePassword {
+		t.Fatalf("method on: want all three true, got %+v", view)
+	}
+
+	off := newGetMethodsSvc(fake, newFakeFactorRepo(), map[string]string{"passwordLoginEnabledAdmin": "false"})
+	view, err = off.GetUserAuthMethods(context.Background(), "u1")
+	if err != nil {
+		t.Fatalf("GetUserAuthMethods: %v", err)
+	}
+	if !view.HasPasswordSet || view.PasswordUsableForLogin {
+		t.Fatalf("method off: hash stays set, usable must be false, got %+v", view)
+	}
+	if !view.HasUsablePassword {
+		t.Fatal("deprecated alias must mirror hasPasswordSet, not usability")
+	}
+}
+
+func TestGetUserAuthMethods_PolicyOutageIs503Shaped(t *testing.T) {
+	t.Parallel()
+	fake := newAdminUnlinkUserFake()
+	fake.seed(&iface.User{UUID: "u1", Email: "u1@example.com", Role: "operator", PasswordHash: "argon2id$..."})
+	svc := newGetMethodsSvc(fake, newFakeFactorRepo(), nil)
+	svc.policy = &AuthPolicyService{cs: &stubReader{rawErr: errors.New("mongo down")}}
+	if _, err := svc.GetUserAuthMethods(context.Background(), "u1"); !errors.Is(err, ErrAuthPolicyUnavailable) {
+		t.Fatalf("want ErrAuthPolicyUnavailable, got %v", err)
 	}
 }

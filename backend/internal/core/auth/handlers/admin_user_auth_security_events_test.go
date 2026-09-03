@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 )
 
 // fakeEventRepo is the in-handler-test stand-in for SecurityEventRepository.
@@ -208,5 +211,50 @@ func TestGetSecurityEvents_RepoError_Surfaces500(t *testing.T) {
 	se, ok := err.(huma.StatusError)
 	if !ok || se.GetStatus() != 500 {
 		t.Errorf("want 500, got %v", err)
+	}
+}
+
+// PR 3 §4.3: the admin reset route refuses a method the target's surface
+// rejects (409) and reports an unanswerable policy as an outage (503).
+type fakeInviter struct{ err error }
+
+func (f fakeInviter) AdminSendInvite(context.Context, string, string) error   { return f.err }
+func (f fakeInviter) AdminResendVerification(context.Context, string) error   { return f.err }
+func (f fakeInviter) AdminTriggerPasswordReset(context.Context, string) error { return f.err }
+
+func TestSendPasswordReset_PasswordPolicyOutcomes(t *testing.T) {
+	ctx := context.Background()
+	req := &AdminSendPasswordResetRequest{UserID: "u1"}
+
+	h := NewAdminUserAuthHandler(nil, fakeInviter{err: services.ErrPasswordLoginDisabled}, nil)
+	_, err := h.SendPasswordReset(ctx, req)
+	assertStatusAndCode(t, err, 409, "auth.password_login_disabled")
+
+	h = NewAdminUserAuthHandler(nil, fakeInviter{err: fmt.Errorf("read passwordLoginEnabledAdmin: %w", services.ErrAuthPolicyUnavailable)}, nil)
+	_, err = h.SendPasswordReset(ctx, req)
+	assertStatusAndCode(t, err, 503, "auth.policy_unavailable")
+
+}
+
+// assertStatusAndCode asserts the HTTP status and, when wantCode is
+// non-empty, the stable body code of an errcode envelope. A wantCode of
+// "" accepts any body (the generic huma 401 has none).
+func assertStatusAndCode(t *testing.T, err error, wantStatus int, wantCode string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if got := statusOf(t, err); got != wantStatus {
+		t.Fatalf("status = %d, want %d", got, wantStatus)
+	}
+	if wantCode == "" {
+		return
+	}
+	var ec *errcode.Error
+	if !errors.As(err, &ec) {
+		t.Fatalf("want *errcode.Error, got %T (%v)", err, err)
+	}
+	if ec.Code != wantCode {
+		t.Fatalf("code = %q, want %q", ec.Code, wantCode)
 	}
 }

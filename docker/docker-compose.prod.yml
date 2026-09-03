@@ -40,9 +40,10 @@ services:
     environment:
       ENV: production
       PORT: 3000  # Internal port is always 3000, BACKEND_PORT is for host mapping only
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-}  # /docs + /openapi.json; default on in dev, off in staging/prod
 
       # MongoDB (internal port is always 27017, MONGO_PORT is for host mapping only)
-      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@${MONGO_HOST:-mongodb}:27017/${MONGO_DATABASE}?authSource=admin
+      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@${MONGO_HOST:-mongodb}:27017/${MONGO_DATABASE}?authSource=admin&replicaSet=rs0&directConnection=true
 
       # Redis (internal port is always 6379, REDIS_PORT is for host mapping only)
       REDIS_URL: redis://:${REDIS_PASSWORD}@${REDIS_HOST:-redis}:6379/${REDIS_DB:-0}
@@ -80,6 +81,7 @@ services:
       # The binary defaults this to true (dev convenience) and refuses to
       # boot in production with it set — so it must be passed explicitly.
       ALLOW_LOCALHOST_REDIRECTS: ${ALLOW_LOCALHOST_REDIRECTS:-false}
+      AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS: ${AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS:-false}
 
       # Google OAuth — config.Validate() refuses to boot a production binary
       # without a client id/secret, even though the live values are owned by
@@ -103,6 +105,7 @@ services:
       # hostnames behind the ingress.
       CONSOLE_HOST: ${CONSOLE_HOST:-console.orkestra.com}
       CLIENT_API_HOST: ${CLIENT_API_HOST:-api.orkestra.com}
+      CLIENT_API_URL: ${CLIENT_API_URL:-}
       OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
       CLIENT_CORS_ORIGINS: ${CLIENT_CORS_ORIGINS:-}
 
@@ -154,6 +157,16 @@ services:
       # behind a public proxy the SPA must reach; backend ops keep using
       # STORAGE_ENDPOINT (ADR-0011 dual-endpoint split). Empty = single-endpoint.
       STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-}
+      # Credentials + bucket knobs, same set staging forwards. No insecure
+      # fallback for the credentials in production: empty keys keep blob
+      # storage disabled (the backend logs it at boot) instead of silently
+      # authenticating with the RustFS defaults.
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-orkestra-avatars}
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-}
+      STORAGE_FORCE_PATH_STYLE: ${STORAGE_FORCE_PATH_STYLE:-true}
+      STORAGE_ENSURE_BUCKET: ${STORAGE_ENSURE_BUCKET:-true}
 
       # Module config (OAuth, SMTP, AI provider keys, per-module enable flags)
       # is owned by ConfigService and edited at /admin/modules. The module

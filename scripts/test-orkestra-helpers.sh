@@ -223,6 +223,168 @@ obs_catalog_count="$(
 check "observability log picker uses the explicit service catalog" "6" "$obs_catalog_count"
 
 
+# --- env-validate.sh: same-site host pairings (spec §8 follow-up #16) ---
+# The validator derives its ENV_FILE from its own location, so a copy in a
+# scratch PROJECT_ROOT is tested against a scratch docker/.env — the
+# developer's real one is never read. Same trick as the JWT generator above.
+ev_tmp="$(mktemp -d)"
+mkdir -p "$ev_tmp/scripts" "$ev_tmp/docker"
+cp "$DIR/env-validate.sh" "$DIR/env-file.sh" "$ev_tmp/scripts/"
+ev_env="$ev_tmp/docker/.env"
+ev_out="$(mktemp)"
+# ev_run KEY=VALUE... — shipped .env.example plus the overrides, validated;
+# echoes the exit status and leaves the output in $ev_out for assertions.
+ev_run() {
+    local kv
+    cp "$PROJECT_ROOT/docker/.env.example" "$ev_env"
+    for kv in "$@"; do env_set "$ev_env" "${kv%%=*}" "${kv#*=}"; done
+    bash "$ev_tmp/scripts/env-validate.sh" > "$ev_out" 2>&1
+    printf '%s' "$?"
+}
+ev_saw() { grep -q "$1" "$ev_out" && printf yes || printf no; }
+
+check "env-validate: the shipped .env.example is same-site" "0" "$(ev_run)"
+
+ev_status="$(ev_run CLIENT_API_HOST=api.localhost \
+    CLIENT_API_URL=http://api.localhost:3000 \
+    CLIENT_FRONTEND_URL=http://localhost:8081)"
+check "env-validate: the pre-#10 client triple is an error" "1" "$ev_status"
+# Hostnames only: the compare strips the scheme and the :3000 / :8081 ports.
+check "env-validate: the client refusal names all three keys" "yes" \
+    "$(ev_saw 'Client tier is cross-site: CLIENT_API_HOST=api.localhost, CLIENT_API_URL=api.localhost, CLIENT_FRONTEND_URL=localhost')"
+check "env-validate: the client refusal carries the migration keys" "yes" \
+    "$(ev_saw 'CLIENT_FRONTEND_URL=http://client.localhost:8081')"
+check "env-validate: the client refusal points at docker/CLAUDE.md" "yes" \
+    "$(ev_saw 'docker/CLAUDE.md')"
+
+check "env-validate: the migrated client triple passes" "0" \
+    "$(ev_run CLIENT_API_HOST=client.localhost \
+        CLIENT_API_URL=http://client.localhost:3000 \
+        CLIENT_FRONTEND_URL=http://client.localhost:8081)"
+
+ev_status="$(ev_run FRONTEND_URL=http://console.localhost:8080 VITE_API_URL=http://localhost:3000)"
+check "env-validate: a cross-site operator pairing is an error" "1" "$ev_status"
+check "env-validate: the operator refusal names both keys" "yes" \
+    "$(ev_saw 'Operator tier is cross-site: VITE_API_URL=localhost, FRONTEND_URL=console.localhost')"
+
+# An unset key is not part of the comparison — only the keys that are set.
+check "env-validate: an empty CLIENT_API_URL is not compared" "0" "$(ev_run CLIENT_API_URL=)"
+
+# The rule is same SITE, not same host: a real deployment spreads a tier over
+# sibling subdomains of one registrable domain and must pass. ENV stays
+# development in these rows so the staging/production security checks (a
+# different part of the script) cannot decide the exit code.
+check "env-validate: a staging-shaped env is same-site" "0" \
+    "$(ev_run CLIENT_API_HOST=staging-api.orkestra.cc \
+        CLIENT_API_URL=https://staging-api.orkestra.cc \
+        CLIENT_FRONTEND_URL=https://app.orkestra.cc \
+        FRONTEND_URL=https://staging.orkestra.cc \
+        VITE_API_URL=https://staging-api.orkestra.cc)"
+check "env-validate: a production-shaped env is same-site" "0" \
+    "$(ev_run CLIENT_API_HOST=api.orkestra.cc \
+        CLIENT_API_URL=https://api.orkestra.cc \
+        CLIENT_FRONTEND_URL=https://app.orkestra.cc \
+        FRONTEND_URL=https://orkestra.cc \
+        VITE_API_URL=https://api.orkestra.cc)"
+# Same rule, one registrable domain apart.
+check "env-validate: sibling subdomains of one domain pass" "0" \
+    "$(ev_run CLIENT_API_HOST=a.example.com \
+        CLIENT_API_URL=https://a.example.com \
+        CLIENT_FRONTEND_URL=https://b.example.com)"
+check "env-validate: two registrable domains are refused" "1" \
+    "$(ev_run CLIENT_API_HOST=example.com \
+        CLIENT_API_URL=https://example.com \
+        CLIENT_FRONTEND_URL=https://example.org)"
+
+# A .invalid client API host (RFC 2606) is how a deployment says it has no
+# client tier — there is no pairing to check.
+check "env-validate: a .invalid client host skips the pairing" "0" \
+    "$(ev_run CLIENT_API_HOST=client-disabled.invalid \
+        CLIENT_FRONTEND_URL=https://app.orkestra.cc)"
+check "env-validate: the .invalid skip says so" "yes" \
+    "$(ev_saw 'Client tier disabled (CLIENT_API_HOST is a .invalid host) — pairing not checked')"
+
+# Hostnames are case-insensitive; the comparison lowercases before comparing.
+check "env-validate: host case does not make a mismatch" "0" \
+    "$(ev_run CLIENT_API_HOST=Client.LocalHost \
+        CLIENT_API_URL=http://client.localhost:3000 \
+        CLIENT_FRONTEND_URL=http://CLIENT.localhost:8081)"
+
+# The deploy preflight is the other half of the guard: a cross-site .env must
+# abort the deploy before any compose command runs, `--yes` included (there is
+# no prompt in front of it to skip).
+touch "$ev_tmp/docker/docker-compose.infra.yml" "$ev_tmp/docker/docker-compose.dev.yml"
+ev_deploy_log="$(mktemp)"
+ev_deploy_out="$(mktemp)"
+export EV_DEPLOY_LOG="$ev_deploy_log"
+ev_run CLIENT_API_HOST=api.localhost > /dev/null
+ev_deploy_status="$(
+    (
+        SCRIPT_DIR="$ev_tmp"
+        ENV=development
+        DEPLOY_SCOPE=all
+        REBUILD_IMAGES=yes
+        BRANCH=any
+        SKIP_CONFIRMATION=yes
+        INFRA_COMPOSE="$ev_tmp/docker/docker-compose.infra.yml"
+        COMPOSE_FILE="$ev_tmp/docker/docker-compose.dev.yml"
+        ENV_FILE="$ev_env"
+        check_docker_running() { :; }
+        ensure_jwt_keys_readable() { :; }
+        docker() {
+            local IFS=' '
+            printf '%s\n' "docker $*" >> "$EV_DEPLOY_LOG"
+            return 0
+        }
+        fullstack_execute_deploy
+    ) > "$ev_deploy_out" 2>&1
+    printf '%s' "$?"
+)"
+check "orkestra.sh deploy aborts on a cross-site docker/.env" "1" "$ev_deploy_status"
+check "orkestra.sh deploy runs no compose command when it aborts" "0" \
+    "$(wc -l < "$ev_deploy_log" | tr -d ' ')"
+# ...and that it aborted for THIS reason, not an unrelated earlier failure.
+check "orkestra.sh deploy names the validation as the reason" "yes" \
+    "$(grep -q 'failed validation' "$ev_deploy_out" && grep -q 'Nothing was started' "$ev_deploy_out" && printf yes || printf no)"
+rm -f "$ev_deploy_log" "$ev_deploy_out"
+
+# wiz_urls on a RE-RUN over a pre-#10 .env: the stored CLIENT_API_URL still
+# says api.localhost, so it must NOT come back as the default once the user
+# moves CLIENT_API_HOST to client.localhost and presses Enter through.
+ev_run CLIENT_API_HOST=api.localhost CLIENT_API_URL=http://api.localhost:3000 > /dev/null
+(
+    ENV_FILE="$ev_env"
+    HAS_GUM=false
+    # y = customize; 5 defaults; the new client host typed; 7 defaults.
+    printf 'y\n\n\n\n\n\nclient.localhost\n\n\n\n\n\n\n\n' | wiz_urls development
+) > /dev/null 2>&1
+check "wiz_urls rebuilds a stale CLIENT_API_URL from the new host" \
+    "http://client.localhost" "$(env_get "$ev_env" CLIENT_API_URL)"
+check "wiz_urls kept the host the user typed" \
+    "client.localhost" "$(env_get "$ev_env" CLIENT_API_HOST)"
+rm -rf "$ev_tmp"
+rm -f "$ev_out"
+
+# --- Clone-version pin: exported once by the caller, honored on every
+# resolution, never confused with the resolver's own previous export. ---
+pin_tmp="$(mktemp)"
+printf 'APP_NAME=orkestra-test\nENV=staging\n' > "$pin_tmp"
+old_env_file="$ENV_FILE"
+ENV_FILE="$pin_tmp"
+ENV=staging
+ORKESTRA_CLONE_VERSION_PIN="v9.9.9"
+resolve_stack_identity
+check "clone-version pin wins over git describe" "v9.9.9" "$ORKESTRA_CLONE_VERSION"
+ORKESTRA_CLONE_VERSION_PIN=""
+ORKESTRA_CLONE_VERSION="stale-from-previous-resolution"
+resolve_stack_identity
+check "re-resolution without a pin recomputes the clone version" "dev" "$ORKESTRA_CLONE_VERSION"
+check "build commit is derived from HEAD" "$(git rev-parse --short HEAD)" "$ORKESTRA_BUILD_COMMIT"
+unset ORKESTRA_CLONE_VERSION ORKESTRA_BUILD_COMMIT
+ENV_FILE="$old_env_file"
+rm -f "$pin_tmp"
+
+
 echo
 printf 'orkestra-helpers: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

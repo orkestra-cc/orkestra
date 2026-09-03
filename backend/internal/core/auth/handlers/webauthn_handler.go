@@ -29,6 +29,7 @@ type WebAuthnHandler struct {
 	users         iface.UserProvider
 	tokens        LoginTokenIssuer
 	deviceTrust   services.DeviceTrustService // optional — Section C item #3
+	policy        *services.AuthPolicyService // optional — per-surface password policy for the completion re-check
 	cookieName    string
 	cookieDomain  string
 	cookieSecure  bool
@@ -67,6 +68,24 @@ func NewWebAuthnHandler(
 // inert. Section C item #3 of the 2026-04-24 auth roadmap.
 func (h *WebAuthnHandler) SetDeviceTrust(dt services.DeviceTrustService) {
 	h.deviceTrust = dt
+}
+
+// SetPolicy wires the admin-managed AuthPolicyService so LoginFinish can
+// re-evaluate a password-sourced challenge's per-surface policy at
+// completion time (spec §4.3). Wired unconditionally in module.go; nil
+// makes password-sourced completions fail closed (503).
+func (h *WebAuthnHandler) SetPolicy(p *services.AuthPolicyService) {
+	h.policy = p
+}
+
+// decider adapts the handler's concrete policy pointer to the re-check
+// helper's interface, mapping a nil pointer to a nil INTERFACE so missing
+// wiring takes the fail-closed 503 branch instead of a typed-nil surprise.
+func (h *WebAuthnHandler) decider() passwordLoginDecider {
+	if h.policy == nil {
+		return nil
+	}
+	return h.policy
 }
 
 // --- enroll ---
@@ -382,6 +401,13 @@ func (h *WebAuthnHandler) LoginFinish(ctx context.Context, req *webAuthnLoginFin
 		return nil, huma.Error401Unauthorized("invalid or expired login challenge")
 	}
 
+	// Spec §4.3: a password-sourced challenge must still be allowed NOW
+	// (before the assertion ceremony — deviation 6).
+	rescued, err := recheckPasswordChallenge(ctx, h.decider(), h.mfaChallenges, loginCh)
+	if err != nil {
+		return nil, err
+	}
+
 	user, err := h.users.GetUserByID(ctx, loginCh.UserUUID)
 	if err != nil || services.ValidateTokenEligibleUser(user) != nil {
 		return nil, huma.Error401Unauthorized("user not found")
@@ -409,6 +435,11 @@ func (h *WebAuthnHandler) LoginFinish(ctx context.Context, req *webAuthnLoginFin
 	}, amr, time.Now().Unix())
 	if err != nil {
 		return nil, huma.Error500InternalServerError("failed to mint login tokens")
+	}
+
+	// One rescued-login audit event per winning completion (spec §4.2).
+	if rescued || loginCh.BreakGlassUsed {
+		h.tokens.EmitBreakGlassUsed(ctx, loginCh.Audience, loginCh.UserUUID, loginCh.SessionID, loginCh.IPAddress)
 	}
 
 	// Section C item #3: if the user opted into "remember this device",

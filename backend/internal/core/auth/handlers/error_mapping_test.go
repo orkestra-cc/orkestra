@@ -9,14 +9,11 @@ package handlers
 // claim downstream middleware reads on every step-up check.
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -25,6 +22,7 @@ import (
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
 	"github.com/orkestra/backend/internal/shared/errcode"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // statusOf extracts the HTTP status code from a Huma error or our
@@ -58,6 +56,8 @@ func TestMapPasswordError_KnownCodes(t *testing.T) {
 		{"EmailDomainNotAllowed → 403 auth.email_domain_not_allowed", services.ErrEmailDomainNotAllowed, http.StatusForbidden, errcode.AuthEmailDomainNotAllowed},
 		{"LoginDisabled → 403 auth.login_disabled", services.ErrLoginDisabled, http.StatusForbidden, errcode.AuthLoginDisabled},
 		{"CountryBlocked → 403 auth.country_blocked", services.ErrCountryBlocked, http.StatusForbidden, errcode.AuthCountryBlocked},
+		{"password login disabled", services.ErrPasswordLoginDisabled, http.StatusForbidden, errcode.AuthPasswordLoginDisabled},
+		{"policy unavailable", services.ErrAuthPolicyUnavailable, http.StatusServiceUnavailable, errcode.AuthPolicyUnavailable},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -164,54 +164,28 @@ func TestErrorMapping_OAuthInvalidCredentialsStaysNeutral(t *testing.T) {
 	}
 }
 
-func TestErrorMapping_WriteOAuthCallbackErrorStaysNeutralAndSanitized(t *testing.T) {
-	var logs bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(previous) })
-
-	marker := "oauth-sensitive-marker"
-	for _, tc := range []struct {
-		name        string
-		err         error
-		wantStatus  int
-		wantBody    string
-		wantOutcome string
+func TestMapOAuthError_NewSentinels(t *testing.T) {
+	cases := []struct {
+		in       error
+		wantCode int
+		wantSlug string
 	}{
-		{
-			name:        "invalid credentials",
-			err:         fmt.Errorf("%s: %w", marker, services.ErrInvalidCredentials),
-			wantStatus:  http.StatusUnauthorized,
-			wantBody:    invalidOAuthAuthenticationDetail,
-			wantOutcome: "invalid_credentials",
-		},
-		{
-			name:        "internal error",
-			err:         errors.New(marker),
-			wantStatus:  http.StatusInternalServerError,
-			wantBody:    "Failed to process OAuth callback",
-			wantOutcome: "internal_error",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			logs.Reset()
-			rec := httptest.NewRecorder()
-			writeOAuthCallbackError(rec, authModels.OAuthProviderGoogle, tc.err)
-			if rec.Code != tc.wantStatus {
-				t.Fatalf("status = %d, want %d", rec.Code, tc.wantStatus)
+		{services.ErrOAuthEmailUnverified, http.StatusForbidden, errcode.AuthOAuthEmailUnverified},
+		{services.ErrAuthPolicyUnavailable, http.StatusServiceUnavailable, errcode.AuthPolicyUnavailable},
+		{services.ErrInvalidCredentials, http.StatusUnauthorized, ""},
+		{errors.New("anything else"), http.StatusInternalServerError, ""},
+	}
+	for _, tc := range cases {
+		err := mapOAuthError(tc.in)
+		if got := statusOf(t, err); got != tc.wantCode {
+			t.Errorf("%v → %d, want %d", tc.in, got, tc.wantCode)
+		}
+		if tc.wantSlug != "" {
+			var e *errcode.Error
+			if !errors.As(err, &e) || e.Code != tc.wantSlug {
+				t.Errorf("%v → %v, want code %s", tc.in, err, tc.wantSlug)
 			}
-			if body := rec.Body.String(); !strings.Contains(body, tc.wantBody) {
-				t.Fatalf("body = %q, want %q", body, tc.wantBody)
-			}
-			if strings.Contains(rec.Body.String(), marker) || strings.Contains(logs.String(), marker) {
-				t.Errorf("OAuth callback leaked marker in response/logs: body=%q logs=%q", rec.Body.String(), logs.String())
-			}
-			if !strings.Contains(logs.String(), `"msg":"oauth_authentication_failed"`) ||
-				!strings.Contains(logs.String(), `"provider":"google"`) ||
-				!strings.Contains(logs.String(), `"outcome":"`+tc.wantOutcome+`"`) {
-				t.Errorf("sanitized OAuth log = %q, want stable category/provider/outcome", logs.String())
-			}
-		})
+		}
 	}
 }
 
@@ -330,44 +304,119 @@ func TestCurrentSessionID_EmptyContextReturnsEmptyString(t *testing.T) {
 	}
 }
 
-// ===== oauthSignupDisabled =====
+// ===== not-found / notification-down classification (spec §8 #18(c)) =====
+//
+// The three admin/self mappers used to classify these two cases by
+// err.Error() == "<literal>". That matched only because the sentinels'
+// messages are literally those strings and the producers return them
+// unwrapped — so the next fmt.Errorf("...: %w", …) anywhere on the path
+// would have turned a 404 into a 500 (and a 503 into a 500) silently, with
+// no test to catch it. These tests present the sentinels WRAPPED, which is
+// exactly the input the string compare cannot see.
 
-func TestOAuthSignupDisabled_MatchesSentinel(t *testing.T) {
-	if !oauthSignupDisabled(services.ErrOAuthSignupDisabled) {
-		t.Errorf("must match the wrapped sentinel via errors.Is")
+// TestMappersClassifyWrappedUserNotFound is the regression test for the
+// three drop-ins: a wrapped iface.ErrUserNotFound must still be a 404.
+func TestMappersClassifyWrappedUserNotFound(t *testing.T) {
+	wrapped := fmt.Errorf("read auth methods: %w", iface.ErrUserNotFound)
+
+	cases := []struct {
+		name string
+		out  error
+	}{
+		{"mapAdminUserAuthError", mapAdminUserAuthError(wrapped)},
+		{"mapAdminInviterError", mapAdminInviterError(wrapped, "failed to send password reset email")},
+		{"mapSelfAuthError", mapSelfAuthError(wrapped)},
 	}
-	if oauthSignupDisabled(errors.New("some other error")) {
-		t.Errorf("must NOT match unrelated errors")
-	}
-	if oauthSignupDisabled(nil) {
-		t.Errorf("nil error must NOT match")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := statusOf(t, tc.out); got != http.StatusNotFound {
+				t.Errorf("status = %d, want %d — a wrapped iface.ErrUserNotFound must classify as not-found", got, http.StatusNotFound)
+			}
+		})
 	}
 }
 
-// ===== redirectOAuthSignupDisabled =====
-
-func TestRedirectOAuthSignupDisabled_BouncesToFrontendURL(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/cb", nil)
-	redirectOAuthSignupDisabled(rec, req, "https://app.example.com")
-	if rec.Code != http.StatusFound {
-		t.Errorf("status = %d, want 302", rec.Code)
+// TestMappersClassifyBareUserNotFound is the other half: the shape that
+// already worked (the sentinel returned unwrapped, which is what
+// user/services does today) keeps answering 404. Together with the test
+// above it says the classification widened and nothing moved.
+func TestMappersClassifyBareUserNotFound(t *testing.T) {
+	cases := []struct {
+		name string
+		out  error
+	}{
+		{"mapAdminUserAuthError", mapAdminUserAuthError(iface.ErrUserNotFound)},
+		{"mapAdminInviterError", mapAdminInviterError(iface.ErrUserNotFound, "failed to send password reset email")},
+		{"mapSelfAuthError", mapSelfAuthError(iface.ErrUserNotFound)},
 	}
-	loc := rec.Header().Get("Location")
-	want := "https://app.example.com/auth/callback?success=false&error=oauth_signup_disabled"
-	if loc != want {
-		t.Errorf("Location = %q, want %q", loc, want)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := statusOf(t, tc.out); got != http.StatusNotFound {
+				t.Errorf("status = %d, want %d", got, http.StatusNotFound)
+			}
+		})
 	}
 }
 
-func TestRedirectOAuthSignupDisabled_NoFrontendURLFallsTo403(t *testing.T) {
-	// When the frontend URL isn't configured we can't bounce the user
-	// usefully — fall back to a plain 403 so the operator sees the
-	// failure in their access log instead of a confusing 200.
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/cb", nil)
-	redirectOAuthSignupDisabled(rec, req, "")
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403", rec.Code)
+// TestMappersDoNotClassifyLookalikeNotFound is the bound. A different
+// module's own "user not found" error — same message, different identity —
+// is NOT the SDK sentinel and must now surface as a 500 rather than being
+// mistaken for one. This is the behaviour the string compare could not
+// express, and the only intentional change in the three mappers' outputs.
+func TestMappersDoNotClassifyLookalikeNotFound(t *testing.T) {
+	lookalike := errors.New("user not found")
+
+	cases := []struct {
+		name string
+		out  error
+	}{
+		{"mapAdminUserAuthError", mapAdminUserAuthError(lookalike)},
+		{"mapAdminInviterError", mapAdminInviterError(lookalike, "failed to send password reset email")},
+		{"mapSelfAuthError", mapSelfAuthError(lookalike)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := statusOf(t, tc.out); got != http.StatusInternalServerError {
+				t.Errorf("status = %d, want %d — only iface.ErrUserNotFound's identity may mean not-found", got, http.StatusInternalServerError)
+			}
+		})
+	}
+}
+
+// TestMapAdminInviterErrorClassifiesWrappedNotificationDown covers the
+// compare that sat beside the not-found one in mapAdminInviterError and
+// has the same shape: services.ErrNotificationDown, wrapped, must still be
+// the 503 that tells an operator the invite could not be delivered.
+func TestMapAdminInviterErrorClassifiesWrappedNotificationDown(t *testing.T) {
+	for _, in := range []error{
+		services.ErrNotificationDown,
+		fmt.Errorf("admin send invite: %w", services.ErrNotificationDown),
+	} {
+		out := mapAdminInviterError(in, "failed to send invite email")
+		if got := statusOf(t, out); got != http.StatusServiceUnavailable {
+			t.Errorf("map(%v) status = %d, want %d", in, got, http.StatusServiceUnavailable)
+		}
+	}
+}
+
+// TestMappersKeepUnrelatedErrorsAt500 is the negative that stops the three
+// mappers from becoming "everything is a 404".
+func TestMappersKeepUnrelatedErrorsAt500(t *testing.T) {
+	boom := errors.New("mongo: no reachable servers")
+
+	cases := []struct {
+		name string
+		out  error
+	}{
+		{"mapAdminUserAuthError", mapAdminUserAuthError(boom)},
+		{"mapAdminInviterError", mapAdminInviterError(boom, "failed to send password reset email")},
+		{"mapSelfAuthError", mapSelfAuthError(boom)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := statusOf(t, tc.out); got != http.StatusInternalServerError {
+				t.Errorf("status = %d, want %d", got, http.StatusInternalServerError)
+			}
+		})
 	}
 }

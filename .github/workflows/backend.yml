@@ -5,11 +5,24 @@ on:
     branches: [dev, main]
     paths:
       - 'backend/**'
+      - 'docker/docker-compose.infra.yml'
+      - 'docker/docker-compose.dev.yml'
+      - 'docker/docker-compose.staging.yml'
+      - 'docker/docker-compose.prod.yml'
+      - 'docker/mongo-init/**'
+      - 'docker/tests/**'
       - '.github/workflows/backend.yml'
       - 'Makefile'
       - '.mise.toml'
       - 'scripts/refresh-coverage-badge.sh'
       - 'scripts/commit-coverage-badge.sh'
+      # make backend-script-tests / backend-credential-fallbacks
+      - 'docker/.env.example'
+      - 'scripts/init.sh'
+      - 'scripts/env-file.sh'
+      - 'scripts/env-validate.sh'
+      - 'scripts/test-env-file.sh'
+      - 'scripts/test-env-validate.sh'
   push:
     branches: [dev, main]
     # Release tags (vX.Y.Z) build versioned images. paths filters do not
@@ -18,11 +31,24 @@ on:
       - 'v*'
     paths:
       - 'backend/**'
+      - 'docker/docker-compose.infra.yml'
+      - 'docker/docker-compose.dev.yml'
+      - 'docker/docker-compose.staging.yml'
+      - 'docker/docker-compose.prod.yml'
+      - 'docker/mongo-init/**'
+      - 'docker/tests/**'
       - '.github/workflows/backend.yml'
       - 'Makefile'
       - '.mise.toml'
       - 'scripts/refresh-coverage-badge.sh'
       - 'scripts/commit-coverage-badge.sh'
+      # make backend-script-tests / backend-credential-fallbacks
+      - 'docker/.env.example'
+      - 'scripts/init.sh'
+      - 'scripts/env-file.sh'
+      - 'scripts/env-validate.sh'
+      - 'scripts/test-env-file.sh'
+      - 'scripts/test-env-validate.sh'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -33,19 +59,49 @@ jobs:
     name: CI
     runs-on: ubuntu-latest
     env:
-      MONGO_URI: mongodb://localhost:27017
+      MONGO_URI: mongodb://localhost:27017/?replicaSet=rs0&directConnection=true
+      # Unlocks the MONGO_TEST_URI-guarded repository/integration tests that
+      # otherwise silently skip on every run.
+      MONGO_TEST_URI: mongodb://localhost:27017/?replicaSet=rs0&directConnection=true
       REDIS_URL: redis://localhost:6379
       # Consumed by `make ci-backend`'s coverage gate (Makefile: COVERAGE_THRESHOLD ?= 15).
       COVERAGE_THRESHOLD: 15
     services:
-      mongodb:
-        image: mongo:8.0
-        ports: ['27017:27017']
       redis:
         image: redis/redis-stack-server:latest
         ports: ['6379:6379']
     steps:
       - uses: actions/checkout@v7
+      # The app uses MongoDB transactions, which a standalone mongod cannot
+      # serve — so CI must run the same single-node replica set the compose
+      # stacks do. A `services:` block cannot pass mongod flags, hence the
+      # explicit `docker run`.
+      - name: Start transaction-capable MongoDB
+        run: |
+          docker run --detach --name mongodb --publish 27017:27017 \
+            mongo:8.0 --replSet rs0 --bind_ip_all
+          for attempt in {1..30}; do
+            if docker exec mongodb mongosh --quiet --eval 'db.runCommand({ping: 1}).ok' | grep -q '^1$'; then
+              break
+            fi
+            if [[ "$attempt" == 30 ]]; then
+              docker logs mongodb
+              exit 1
+            fi
+            sleep 1
+          done
+          docker exec mongodb mongosh --quiet --eval \
+            'rs.initiate({_id: "rs0", members: [{_id: 0, host: "localhost:27017"}]})'
+          for attempt in {1..30}; do
+            if docker exec mongodb mongosh --quiet --eval 'db.hello().isWritablePrimary' | grep -q '^true$'; then
+              exit 0
+            fi
+            if [[ "$attempt" == 30 ]]; then
+              docker logs mongodb
+              exit 1
+            fi
+            sleep 1
+          done
       - uses: jdx/mise-action@v4
         with:
           install: false

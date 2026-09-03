@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/pkg/sdk/module"
@@ -9,30 +10,33 @@ import (
 
 // OAuthConfigResolver builds a per-provider OAuthProviderConfig from the live
 // module_configs document so admin-panel edits take effect without a restart.
-// ModuleConfigService reads these values from MongoDB on each call; the resolver
-// intentionally keeps no process-local cache so edits are visible immediately.
+// It keeps no process-local cache. Two read paths coexist: Get /
+// RedirectURL / MobileAudience / ConfiguredProviders are the legacy per-key
+// reads the mobile ID-token endpoints still use; OAuthWebProviderUsable /
+// UsableWebProviders (oauth_provider_usability.go) are the strict, one-read
+// web path.
 type OAuthConfigResolver struct {
-	cs *module.ModuleConfigService
+	cs     activeConfigReader
+	logger *slog.Logger
+	probe  KeyFileProbe
 }
 
 // NewOAuthConfigResolver wires the resolver to the running ConfigService.
-// Passing a nil service is valid — every lookup will then return (nil, false),
-// which callers treat as "provider not configured".
+// Passing a nil service is valid — every legacy lookup then returns
+// (nil, false) and the strict path returns ErrAuthPolicyUnavailable.
 func NewOAuthConfigResolver(cs *module.ModuleConfigService) *OAuthConfigResolver {
-	return &OAuthConfigResolver{cs: cs}
+	r := &OAuthConfigResolver{logger: slog.Default(), probe: ReadableNonEmptyFile}
+	if cs != nil {
+		r.cs = cs
+	}
+	return r
 }
 
-// Get returns the current config for a provider, or (nil, false) if the
-// client ID has not been set. The bool is the "is this provider usable"
-// signal — handlers should fail fast with 4xx when it's false rather than
-// constructing a provider from empty strings.
-func (r *OAuthConfigResolver) Get(ctx context.Context, p models.OAuthProvider) (*OAuthProviderConfig, bool) {
-	if r == nil || r.cs == nil {
-		return nil, false
-	}
-	get := func(k string) string { return r.cs.GetValue(ctx, "auth", k) }
-	sec := func(k string) string { return r.cs.GetSecret(ctx, "auth", k) }
-
+// providerConfigFrom builds the OAuthProviderConfig for p from two accessor
+// functions — GetValue/GetSecret closures on the legacy path, the view's
+// Effective/Secret on the strict path — so both paths share one field map.
+// ok is false when the client ID is empty (the legacy "not configured").
+func providerConfigFrom(p models.OAuthProvider, get, sec func(string) string) (*OAuthProviderConfig, bool) {
 	switch p {
 	case models.OAuthProviderGoogle:
 		id := get("googleClientId")
@@ -49,7 +53,6 @@ func (r *OAuthConfigResolver) Get(ctx context.Context, p models.OAuthProvider) (
 				"ios_client_id":     get("googleIOSClientId"),
 			},
 		}, true
-
 	case models.OAuthProviderApple:
 		id := get("appleClientId")
 		if id == "" {
@@ -69,7 +72,6 @@ func (r *OAuthConfigResolver) Get(ctx context.Context, p models.OAuthProvider) (
 				"android_client_id": get("appleAndroidClientId"),
 			},
 		}, true
-
 	case models.OAuthProviderGitHub:
 		id := get("githubClientId")
 		if id == "" {
@@ -83,7 +85,6 @@ func (r *OAuthConfigResolver) Get(ctx context.Context, p models.OAuthProvider) (
 				"redirect_url": get("githubRedirectURL"),
 			},
 		}, true
-
 	case models.OAuthProviderDiscord:
 		id := get("discordClientId")
 		if id == "" {
@@ -99,6 +100,18 @@ func (r *OAuthConfigResolver) Get(ctx context.Context, p models.OAuthProvider) (
 		}, true
 	}
 	return nil, false
+}
+
+// Get returns the current config for a provider, or (nil, false) if the
+// client ID has not been set. Legacy per-key path (mobile). The web flow
+// must use OAuthWebProviderUsable.
+func (r *OAuthConfigResolver) Get(ctx context.Context, p models.OAuthProvider) (*OAuthProviderConfig, bool) {
+	if r == nil || r.cs == nil {
+		return nil, false
+	}
+	get := func(k string) string { return r.cs.GetValue(ctx, "auth", k) }
+	sec := func(k string) string { return r.cs.GetSecret(ctx, "auth", k) }
+	return providerConfigFrom(p, get, sec)
 }
 
 // RedirectURL returns the web callback URL for a provider. Prefer this over

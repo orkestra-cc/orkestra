@@ -56,8 +56,13 @@ func (s *AuditSink) Emit(ctx context.Context, in iface.AuditEvent) {
 	// does not abort the insert — audit writes must survive caller cancel.
 	_ = ctx
 	if err := s.repo.Insert(writeCtx, event); err != nil {
+		// Names the event, never its payload: Metadata may carry key names
+		// but must not be logged wholesale.
 		s.logger.Warn("audit sink insert failed",
 			slog.String("action", event.Action),
+			slog.String("resourceType", event.ResourceType),
+			slog.String("resourceId", event.ResourceID),
+			slog.String("outcome", event.Outcome),
 			slog.String("tenantId", event.TenantID),
 			slog.String("error", err.Error()),
 		)

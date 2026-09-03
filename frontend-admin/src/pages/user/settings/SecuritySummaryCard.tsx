@@ -134,7 +134,7 @@ const SecuritySummaryCard: React.FC = () => {
               </span>
             </li>
 
-            {authMethods?.hasUsablePassword && (
+            {authMethods?.hasPasswordSet && (
               <li className="mb-2 d-flex align-items-start gap-2">
                 <span
                   className="badge rounded-pill bg-secondary mt-1"
@@ -149,6 +149,11 @@ const SecuritySummaryCard: React.FC = () => {
                         })
                       : t('settings.security.summary.passwordAgeUnknown')}
                   </span>
+                  {authMethods?.passwordUsableForLogin === false && (
+                    <span className="text-muted ms-1">
+                      {t('settings.security.summary.passwordKeptNotice')}
+                    </span>
+                  )}
                 </span>
               </li>
             )}

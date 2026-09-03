@@ -56,6 +56,14 @@ func (mfaMasterSwitchOnPolicy) MFARequired(*iface.User, []authModels.OrgMembersh
 }
 func (mfaMasterSwitchOnPolicy) MFAEnabled(context.Context) bool { return true }
 
+// PasswordReauthAllowed satisfies the PR 3 addition to StepUpPolicy. These
+// routes exercise RequireMFA, not RequireStepUp, so the value is inert —
+// "allowed" is the neutral answer that keeps the gate under test the MFA
+// gate.
+func (mfaMasterSwitchOnPolicy) PasswordReauthAllowed(context.Context, string) (bool, error) {
+	return true, nil
+}
+
 // newAdminMFARouter wires the exact two-group split module.go applies to
 // the platform-admin tenant surface: RegisterAdminRoutes behind
 // RequireSystemPermission alone, RegisterAdminDestructiveRoutes behind

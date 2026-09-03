@@ -19,8 +19,6 @@ export * from './communication';
 export * from './management';
 
 // Redux hooks - individual exports (no index file)
-// Note: useAuth and useCurrentUser from ./redux/useAuth may conflict with auth hooks
-// Import them explicitly if needed: import { useAuth } from 'hooks/redux/useAuth'
 export {
   useKanban,
   useKanbanItems,

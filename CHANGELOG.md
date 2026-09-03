@@ -4,6 +4,244 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.10.0] - 2026-08-29
+
+### ⚠️ Breaking Changes
+
+- **(auth)** Make RequireAuth bearer-only — drop the middleware silent refresh ([1872116](https://github.com/orkestra-cc/orkestra/commit/18721162169e70bda5f35c510d16c3f9b373603f))
+
+### Bug fixes
+
+- **(auth)** Address #317 review findings — structural rotation tripwire + doc fixes ([7769000](https://github.com/orkestra-cc/orkestra/commit/776900043db268f859b11bfd7070f22d123f2597))
+- **(frontend-admin)** Bound the proactive refresh fetch with a timeout ([43e432f](https://github.com/orkestra-cc/orkestra/commit/43e432f2f76e76eb56fd4d9ab7e07431c7edf624))
+- **(auth)** Enforce a floor on NewJWTService's access-token TTL ([b3fdefe](https://github.com/orkestra-cc/orkestra/commit/b3fdefee3652b160ec3a03c80b3d41931be82ee6))
+- **(frontend-admin)** Rotate the access token before it expires (#317) ([30beb96](https://github.com/orkestra-cc/orkestra/commit/30beb9684fa8664729bf69e6ee42cd8da3f9be8a))
+- **(docker)** Run bundled MongoDB as a single-node replica set ([1962a0e](https://github.com/orkestra-cc/orkestra/commit/1962a0e41c81f0335f64122445697be1e04247ff))
+- **(tenant)** Key the bootstrap queries on the validated org ([2ce8bb2](https://github.com/orkestra-cc/orkestra/commit/2ce8bb2e95aed58bf010eb55a788da836c0a2bd1))
+
+### Refactor
+
+- **(frontend-admin)** Delete the dormant third refresh caller ([25c85dc](https://github.com/orkestra-cc/orkestra/commit/25c85dc138cd9b7fffe8d5b2189cdfed42578174))
+
+### Documentation
+
+- **(auth)** Name both reintroduction guards and their residue; drop a dead guide ([d59812e](https://github.com/orkestra-cc/orkestra/commit/d59812e1c8c68011f170cb26ed3f2d776895113e))
+- **(auth)** Correct comments that outlived the middleware silent refresh ([9e8ac9d](https://github.com/orkestra-cc/orkestra/commit/9e8ac9d54470a30294a6683047cf79fe671e6dd3))
+- **(adr)** ADR-0020 — RequireAuth is bearer-only, rotation only via explicit refresh endpoints ([9b4cfb6](https://github.com/orkestra-cc/orkestra/commit/9b4cfb619818ad390e4d80413af953f175bac0c1))
+
+### Tests
+
+- **(auth)** Close mint-only gap in the #317 cookie-rotation guard ([f1b00f9](https://github.com/orkestra-cc/orkestra/commit/f1b00f9a36a2fec6991ac715ed5d17743a52bfae))
+- **(store)** Guard RTK Query endpoint-name uniqueness ([0dfc576](https://github.com/orkestra-cc/orkestra/commit/0dfc576c1ef6b611157b7a44cbab3b2cbd64e947))
+
+### Release
+
+- **(v0.10.0)** Promote dev ([e68e318](https://github.com/orkestra-cc/orkestra/commit/e68e3180caa5a4b3792a297a28bd1736ce69b758))
+
+## [0.9.0] - 2026-08-26
+
+### Features
+
+- **(notification)** SenderSlug on the delivery log + sender filter (ADR-0019 PR 4) ([7d0b74a](https://github.com/orkestra-cc/orkestra/commit/7d0b74a9224c771156064451aa84d2a1f228b4f8))
+- **(notification)** Mailup driver — SendMessage over SMTP+ credentials, allowlisted success, bounded diagnostics (ADR-0019 PR 3) ([3430dcb](https://github.com/orkestra-cc/orkestra/commit/3430dcbaac2edfa05ca850b6c2bdc3e4874c5155))
+- **(notification)** Bounded vendor response reader ([23bda45](https://github.com/orkestra-cc/orkestra/commit/23bda45d155e1c99826434f39dc98f3bfa04021d))
+- **(frontend-admin)** I18n for the notification sender-profiles group and field (ADR-0019) ([5ecc37f](https://github.com/orkestra-cc/orkestra/commit/5ecc37f733046d9f1aef4bc12629c0d34fdaebf2))
+- **(notification)** Explicit sender on the test send with typed error codes (ADR-0019 PR 2) ([81b6c56](https://github.com/orkestra-cc/orkestra/commit/81b6c56bfcbaa4ab4e8ae45cae92dd798933e271))
+- **(auth)** Category-aware notification pre-flight on all eight guards; auth.* categories on verify/reset sends (ADR-0019 D7) ([7ba6683](https://github.com/orkestra-cc/orkestra/commit/7ba66833cd46e372faf9bd05728b5e3cc8adb3b2))
+- **(sdk)** Optional CategoryConfiguredChecker + IsConfiguredForCategory; notification answers per category (ADR-0019 D7) ([02c18b2](https://github.com/orkestra-cc/orkestra/commit/02c18b2db0e02adae8a5981d8a83d6f04b79933a))
+- **(notification)** Declare email.senders, validate the routing map at save and activation, read the roster from the same snapshot as the legacy keys (ADR-0019 PR 2) ([7ec9129](https://github.com/orkestra-cc/orkestra/commit/7ec9129ece1b6ac554d5fafed9b5b33303afa654))
+- **(notification)** Save-time sender validation scoped to the three roster states (ADR-0019 D5) ([474f289](https://github.com/orkestra-cc/orkestra/commit/474f289402c13bae8f035844ab369b24f8a1860b))
+- **(notification)** Resolve senders by most-specific category pattern; legacy keys carry mail until a profile routes (D6) ([bbf63d4](https://github.com/orkestra-cc/orkestra/commit/bbf63d4d1a4c0b2a208f33daae032533c07cc391))
+- **(notification)** Email.senders element schema and roster decoder ([4f4b438](https://github.com/orkestra-cc/orkestra/commit/4f4b43877957192d440d90a14b0344d5df90105a))
+- **(notification)** Sender category pattern grammar, normalization and precedence ([227f6ce](https://github.com/orkestra-cc/orkestra/commit/227f6ce4698f9cb034558000adcb000dac80ebbf))
+- **(errcode)** Notification.sender_* codes (ADR-0019) ([c25898c](https://github.com/orkestra-cc/orkestra/commit/c25898ccea3335ad5c5b138ce42836311920bc8d))
+- **(notification)** Noop driver behind the EmailDriver seam ([fe80299](https://github.com/orkestra-cc/orkestra/commit/fe8029981f99dd1e7fe79f379ff221aa2fa4f285))
+- **(notification)** Typed, peer-free send error contract rendered at the chokepoint (ADR-0019) ([782dbc8](https://github.com/orkestra-cc/orkestra/commit/782dbc8accef025d3bdcb7ed4fa028e5917c87c9))
+- **(notification)** SenderProfile and the EmailDriver contract (ADR-0019 PR 1) ([7f43ef3](https://github.com/orkestra-cc/orkestra/commit/7f43ef30a6addf1b75fe889aa0b2b43c36311be1))
+- **(sdk)** Enforce the record-list label rules and the creation binding ([250a849](https://github.com/orkestra-cc/orkestra/commit/250a849cc9cce3ea4af7115ddbe222dfa23f6576))
+- **(admin)** Send record-list membership as explicit intent ([84fe513](https://github.com/orkestra-cc/orkestra/commit/84fe51367aa1c09747e2077f5be03ec8d3b606ed))
+- **(admin)** Record-list element cards with staged delete ([a4132df](https://github.com/orkestra-cc/orkestra/commit/a4132df580c8ffefe6c2587a1eb1e468a1481ead))
+- **(admin)** Expand record-list schema against the roster ([85a0ae8](https://github.com/orkestra-cc/orkestra/commit/85a0ae8a7720f24af4eb29c5ef043aee2a92246a))
+- **(sdk)** Expose record-list mutations on the environment PATCH ([73a9b7d](https://github.com/orkestra-cc/orkestra/commit/73a9b7d99c1c6b65aaaaf7f6460f3234f597374a))
+- **(sdk)** Decode a record list into a Go slice ([087baf6](https://github.com/orkestra-cc/orkestra/commit/087baf6e3276dfff3b371ec50979a9b33a406f3e))
+- **(sdk)** Record-list mutation with reconcile, validate, CAS and retry ([8f70b5f](https://github.com/orkestra-cc/orkestra/commit/8f70b5faae50914f8e00908571462e93088fd506))
+- **(sdk)** Per-environment revision and a sub-document CAS ([bc4cf4e](https://github.com/orkestra-cc/orkestra/commit/bc4cf4e400e0d6c5b9b0f79016902000adde3827))
+- **(sdk)** Record-list roster and membership preconditions ([b535b03](https://github.com/orkestra-cc/orkestra/commit/b535b035ca05eda9181428225b78c06fbf8ce7e9))
+- **(sdk)** Record-list key composition with a bounded element prefix ([31dceec](https://github.com/orkestra-cc/orkestra/commit/31dceec3ed56a116f8ce7ed6b8eca5401a3c551c))
+- **(sdk)** Slug minting and label rules for record-list elements ([8acc3f9](https://github.com/orkestra-cc/orkestra/commit/8acc3f92d540af1d42f1143d6247286dd2dba43d))
+- **(sdk)** Validate record-list declarations at boot ([a63d636](https://github.com/orkestra-cc/orkestra/commit/a63d636bebb692968f86a17c10abc1956319ad71))
+- **(sdk)** Add the recordList field type and its item schema ([7adef02](https://github.com/orkestra-cc/orkestra/commit/7adef021273cd8d421fb0597ff8f148ec88e1257))
+- **(admin)** Platform-default badge, MFA transfer, guarded lifecycle UI ([ad67db9](https://github.com/orkestra-cc/orkestra/commit/ad67db9bb90e8042cdbd242ca67886a0a945aa82))
+- **(admin)** Mandatory finalization wizard with resume and recovery states ([72d20ea](https://github.com/orkestra-cc/orkestra/commit/72d20ea67af41e608d7ce2d6ea2348e71d4bab57))
+- **(admin)** Phase-aware SetupGate with retryable 503 state ([76fabbc](https://github.com/orkestra-cc/orkestra/commit/76fabbc02eb68985ee7e7b13bdb4aaa1566bc3bc))
+- **(admin)** Setup finalization api with ordered session re-mint ([634a075](https://github.com/orkestra-cc/orkestra/commit/634a0757e3ab6e2318bb69f02ffb1d49a0b19db7))
+- **(tenant)** Versioned setup reconciliation in Module.Start ([29e965e](https://github.com/orkestra-cc/orkestra/commit/29e965ee97c6c2644b9621fc5032aa2812bc5717))
+- **(devtoken)** Resolve the operational platform default ([a07f6b4](https://github.com/orkestra-cc/orkestra/commit/a07f6b4ce535e30a891ebe663d9f36f208c2cf8e))
+- **(auth)** Operator tenant fallback prefers the platform default for members ([d617ca6](https://github.com/orkestra-cc/orkestra/commit/d617ca6a40f2e429bb4a26ef6490cf7cb8029747))
+- **(setup)** Resumable authenticated finalization saga ([af0f14f](https://github.com/orkestra-cc/orkestra/commit/af0f14fae52d00fb2cbea9c72757128f460c0a3a))
+- **(setup)** Read-only finalizer access probe ([dc7060a](https://github.com/orkestra-cc/orkestra/commit/dc7060a542ce10e8183767dcfb4af4ad6e99da9c))
+- **(setup)** Split public and authenticated setup route registration ([0344527](https://github.com/orkestra-cc/orkestra/commit/0344527303f1d885c17c1642c4d0e7905a29d259))
+- **(setup)** Persistent three-phase status, fail-closed 503 ([93ef87b](https://github.com/orkestra-cc/orkestra/commit/93ef87bb96553fcd30bae39bffad87df197dcd78))
+- **(user)** Narrow user lifecycle state provider ([62df0a8](https://github.com/orkestra-cc/orkestra/commit/62df0a848f6190ef2bb572b28785b14c71b3d65a))
+- **(tenant)** EnsureSetupTenant reserved-UUID reconciliation seam ([5f01612](https://github.com/orkestra-cc/orkestra/commit/5f016129f67d5e19cbb94d53adde9e7a4812be76))
+- **(authz)** Idempotent owner-binding ensure behind unique compound index ([fb387ca](https://github.com/orkestra-cc/orkestra/commit/fb387caf450ffe887182ee563a91a4771c84d25d))
+- **(compliance)** Concurrent-idempotent LocalKMS.CreateKey ([c6508ee](https://github.com/orkestra-cc/orkestra/commit/c6508ee7d0309ac3fe6f07787685432ca8076455))
+- **(tenant)** Default transfer route, MFA split, derived isDefault ([82abb6f](https://github.com/orkestra-cc/orkestra/commit/82abb6fb9575a2d788398a084457dbac01d43546))
+- **(tenant)** Platform default assign/transfer with lifecycle guards ([6d2e1ad](https://github.com/orkestra-cc/orkestra/commit/6d2e1ad0ff99beb607ca5e63b8597d0de1f5e5a2))
+- **(tenant)** Tenant_defaults pointer with guarded transactions ([7652593](https://github.com/orkestra-cc/orkestra/commit/765259399bdc6de629007197a27abffdb570b467))
+- **(tenant)** Provisioning policy validated on all three module-config surfaces ([83c75cb](https://github.com/orkestra-cc/orkestra/commit/83c75cb5ef07af69c49ecb7b1faf00ce9ceb99a7))
+- **(tenant)** Tier-1 provisioning collapses to manual/single, fail-closed ([667221a](https://github.com/orkestra-cc/orkestra/commit/667221ad5e339042a7b80316afc7e69ca4b2a894))
+- **(tenant)** CountProvisioningSlotsByKind replaces CountActiveByKind ([d074e4f](https://github.com/orkestra-cc/orkestra/commit/d074e4fb9f965785753b1663f6e40834a35326c7))
+- **(server)** Register setup finalization store ([f8c8ceb](https://github.com/orkestra-cc/orkestra/commit/f8c8cebf0d45a28cc6a39e28d85b8e3252e20a54))
+- **(systeminit)** Setup_finalization record with CAS/lease FinalizationStore ([792343c](https://github.com/orkestra-cc/orkestra/commit/792343c357680257b8b7297e5740f2445134fe1a))
+- **(sdk)** Activation-time config validator hook ([a17745b](https://github.com/orkestra-cc/orkestra/commit/a17745bbcfd956952a76864cd2094b99ae89b856))
+- **(sdk)** Optional stable code on config validation errors ([a862f48](https://github.com/orkestra-cc/orkestra/commit/a862f48e6edea705f1e2a0f8b7eac42233b3807b))
+- **(frontend-admin)** Let the date layer format in a record's own zone ([c802599](https://github.com/orkestra-cc/orkestra/commit/c8025994101bf1256e350341b18eb991485a9e0e))
+- **(navigation)** Add module-owned global nav-action seam ([585c6f6](https://github.com/orkestra-cc/orkestra/commit/585c6f6e4b67471db05408be59b80cc4a2b1ad21))
+- **(modules)** Add a module-owned global overlay seam ([e83de10](https://github.com/orkestra-cc/orkestra/commit/e83de103cddc33881dc7ea4af0ed8e55e66ceb7a))
+- **(sdk)** Add CRMActivitySink for billing follow-up ([62500d1](https://github.com/orkestra-cc/orkestra/commit/62500d1bf26d70feae749f1b8ac834b81145884e))
+- **(ci)** Gate backend error quality from make, with today's backlog frozen ([695ffb0](https://github.com/orkestra-cc/orkestra/commit/695ffb0ab7b7c21c648690be547c154f1550ffcc))
+- **(errquality)** Add baseline and allow-comment suppression ([3acbe19](https://github.com/orkestra-cc/orkestra/commit/3acbe19cfc807e2325c6da16a1bb40cd385f3e30))
+- **(errquality)** Flag a client status returned from an error mapper's fallback ([4770c9f](https://github.com/orkestra-cc/orkestra/commit/4770c9f3b83274c06037dad7ea96f45c812cf9a5))
+- **(errquality)** Flag details that say nothing ([b1703d4](https://github.com/orkestra-cc/orkestra/commit/b1703d4972268a8b23b0432562a2343d4d4c887a))
+- **(errquality)** Add the analyzer skeleton and the raw-error rule ([162543c](https://github.com/orkestra-cc/orkestra/commit/162543cac455e310954025bd73b3038bd275d4ab))
+- **(errcode)** Add 5xx builders and the two auth availability codes ([75b62ba](https://github.com/orkestra-cc/orkestra/commit/75b62baa967dc99552fc7c118fe638e171c29c53))
+
+### Bug fixes
+
+- **(docker)** Make the production compose actually boot ([f368d12](https://github.com/orkestra-cc/orkestra/commit/f368d1230ebe480e92064cfec82fe44ab811835e))
+- **(docker)** Harden production app services and use named volumes ([e97057f](https://github.com/orkestra-cc/orkestra/commit/e97057f253e618e7c2014777a5419a82534d0bc1))
+- **(docker)** Bind infra ports to loopback and drop capabilities ([1c43d24](https://github.com/orkestra-cc/orkestra/commit/1c43d24f4329fdd6d190519c1f72b9850a398c33))
+- **(admin-modules)** Keep an out-of-range enum value visible and selected ([0a1b4a9](https://github.com/orkestra-cc/orkestra/commit/0a1b4a9b99a28806b746917e3d28fdc9287b624d))
+- **(systeminit)** Renew the stage lease by MatchedCount, not ModifiedCount ([c098b9b](https://github.com/orkestra-cc/orkestra/commit/c098b9bb310c4b5077ad2364205b20b2551397e5))
+- **(admin)** Exclude record lists from the completeness measures ([5b59630](https://github.com/orkestra-cc/orkestra/commit/5b5963054865f720c835c92fa1c72c68b1436a41))
+- **(sdk)** Report secret status for record-list elements ([fc753a8](https://github.com/orkestra-cc/orkestra/commit/fc753a8e595dcfcd7e547580c5c5fef49399a29a))
+- **(sdk)** Activate an environment in one atomic write ([8293aae](https://github.com/orkestra-cc/orkestra/commit/8293aae305bad4d65e7cd17e86ed3357b29ae6d0))
+- **(frontend-admin)** Forward data-testid through SubtleBadge ([2682d72](https://github.com/orkestra-cc/orkestra/commit/2682d72a9c16f583e378f3a264b86d1b9b246207))
+- **(tenant)** Stop reporting startup success on a lost reconcile lease ([27f1f96](https://github.com/orkestra-cc/orkestra/commit/27f1f96b842ac5240ba9cd0a9f8b95487a1b2bbb))
+- **(tenant)** Make the single-mode provisioning check atomic ([2cac3c1](https://github.com/orkestra-cc/orkestra/commit/2cac3c170f71fcd22058ddf396b4cb800308c435))
+- **(tenant)** Serialize the first default-tenant assignment ([674d7b7](https://github.com/orkestra-cc/orkestra/commit/674d7b768310ff722d58fcfb76c040265f9a82de))
+- **(tenant)** Persist why a tenant row was soft-deleted ([9035fc9](https://github.com/orkestra-cc/orkestra/commit/9035fc9bccb513ce8ca2d82b23c026d4ec8025a5))
+- **(setup)** Reject a whitespace-only tenant name at finalization ([ed60d88](https://github.com/orkestra-cc/orkestra/commit/ed60d88e5e4d0e937a845d5a362e6d32fc0a49d4))
+- **(authz)** Make binding dedup and re-grant expiry-aware ([848854b](https://github.com/orkestra-cc/orkestra/commit/848854b682cb754ac743eaa89f31f1f8ae452c04))
+- **(admin)** Correct three untrue tenant-lifecycle statements ([ff446df](https://github.com/orkestra-cc/orkestra/commit/ff446dfa0663d76783025729153a748be61e679f))
+- **(tenant)** Gate the delete/purge cascade behind the default guard ([254b556](https://github.com/orkestra-cc/orkestra/commit/254b55643c79817bb1b2a6a49dad2d02312e96e2))
+- **(setup)** Correct MFA scope overclaim and wizard role copy ([3707286](https://github.com/orkestra-cc/orkestra/commit/37072862257377f6c6e43abd7224cf53a167a35a))
+- **(admin)** Replace literal control bytes with escapes in returnTo's CONTROL_CHARS ([b92b12b](https://github.com/orkestra-cc/orkestra/commit/b92b12b7768bab8525012328a2f24e09ebdb6193))
+- **(sdk)** Core-module Start failure aborts startup ([1dff3f5](https://github.com/orkestra-cc/orkestra/commit/1dff3f52da9e7fe223dea4ad156d1671205baaad))
+- **(setup)** Restore the finalize Problem Details response, correct the tenant setup contract ([86780fd](https://github.com/orkestra-cc/orkestra/commit/86780fda611a841d9ed002b40c3845a4281c58e2))
+- **(authz)** Persist ExpiresAt on EnsureBinding's first insert ([fc814e0](https://github.com/orkestra-cc/orkestra/commit/fc814e067eda7117dfa98649f6b3a97f8a9bba3d))
+- **(tenant)** Stamp isDefault on memberDTO, fix admin-transfer op tag ([9ed3ed4](https://github.com/orkestra-cc/orkestra/commit/9ed3ed4214086840ac5d07a8bb0e168befbbeea0))
+- **(tenant)** Close AssignDefaultTenant check-then-act race ([2c148ba](https://github.com/orkestra-cc/orkestra/commit/2c148ba4f71abbf5755631c734a187b4fe2d4da3))
+- **(tenant)** Give Tier-2 lazy-provisioning lock its own detail; sync docs.orkestra.cc provisioning page ([eb09bd6](https://github.com/orkestra-cc/orkestra/commit/eb09bd634b7b768169b08b3f87389b81edf22a42))
+- **(tenant)** Drop forbidden active-tenant shorthand from single-mode gate comment ([54565db](https://github.com/orkestra-cc/orkestra/commit/54565dbcfd044a5e27f799acb8a0833d195b7efa))
+- **(frontend-admin)** Derive the switch gutter from the switch track ([ac64033](https://github.com/orkestra-cc/orkestra/commit/ac64033c5f20d740d5be4b53d2f0f8e3e4eeea19))
+- **(frontend-admin)** The SOC2 refresh button had no variant to render ([592163b](https://github.com/orkestra-cc/orkestra/commit/592163bc3609fbceecbf66c4031f81d9e9ae74bf))
+- **(tooling)** Let conventional-pre-commit accept the chain's merge type ([9759a04](https://github.com/orkestra-cc/orkestra/commit/9759a04ad4b6f090e3084c0de7f8483a515f2659))
+- **(core)** Embed tzdata and stop prefix-matching sibling nav leaves ([32bdb33](https://github.com/orkestra-cc/orkestra/commit/32bdb33914d6364f203c42ce6c39759e94d8816c))
+- **(tenant)** Preserve duplicate slug conflicts ([73910a2](https://github.com/orkestra-cc/orkestra/commit/73910a2ca5829e1ad01383911da1546e370445be))
+- **(authz)** Keep policy internals out of authorization errors ([8873fe4](https://github.com/orkestra-cc/orkestra/commit/8873fe4d80c375d4c3e87e4e3121a35457cbea1f))
+- **(tenant)** Keep service failures out of API details ([1b71e05](https://github.com/orkestra-cc/orkestra/commit/1b71e0573405991600f86107bbf24fce9990bb59))
+- **(auth)** Report configuration faults as server faults ([ac21992](https://github.com/orkestra-cc/orkestra/commit/ac21992f381ee3cbbbd7d34531a1d42418992ce8))
+- **(errquality)** Resolve identifiers R3's default: clause returns ([20d651d](https://github.com/orkestra-cc/orkestra/commit/20d651da08c119f266a1c0cb80d6d52a8553fdba))
+- **(errquality)** Narrow R3 to the value the default: clause actually returns ([29c1a41](https://github.com/orkestra-cc/orkestra/commit/29c1a41017432a75cee76ee822d7bbce1b2aeaa0))
+- **(errquality)** Normalize whitespace after punctuation trim in R2 ([2b9a57f](https://github.com/orkestra-cc/orkestra/commit/2b9a57f04ac8138a5958b2a2263a811227bc4c76))
+- **(frontend-admin)** Serialise refresh rotation across tabs ([5ececd1](https://github.com/orkestra-cc/orkestra/commit/5ececd1c1267f06992b4c2a19fc33053175014be))
+- **(auth)** Tolerate concurrent refresh rotation instead of revoking the family ([42a3db6](https://github.com/orkestra-cc/orkestra/commit/42a3db61fd8ded3c27387f32a89958ed7a13646b))
+- **(authz)** Raise a Cedar shadow divergence to Error in production ([5349582](https://github.com/orkestra-cc/orkestra/commit/5349582cb6b4732bd0363503dd52b5fbb2c603ed))
+- **(admin-ui)** Translate the session-cap field ADR-0017 left untranslated ([8065a9b](https://github.com/orkestra-cc/orkestra/commit/8065a9b936e62788cffdc561303dfe3e468906ca))
+- **(frontend-client)** Serve /config.js with no-store from the dev server ([63b53fe](https://github.com/orkestra-cc/orkestra/commit/63b53fe6ebc5a66046675f02f538bbf4bad2bac2))
+- **(frontend-admin)** Serve /config.js with no-store from the dev server ([3601c25](https://github.com/orkestra-cc/orkestra/commit/3601c2520e668b2248e2ac4eb39f347a1212bbf3))
+- **(server)** Register optional modules in a deterministic order ([e3bbc05](https://github.com/orkestra-cc/orkestra/commit/e3bbc057215c9f817c8fd791a5efebe6881122cc))
+- **(modules)** Prevent overview card clipping ([3eed3be](https://github.com/orkestra-cc/orkestra/commit/3eed3be43cfd2b9226f450960aadef0c11673802))
+- **(auth)** Preserve super-admin wildcard after refresh ([76b69ff](https://github.com/orkestra-cc/orkestra/commit/76b69ff6b12616cbd56de5b3e1f22ee1a829910b))
+
+### Style
+
+- **(frontend-admin)** Reformat a vendor-chunk list to satisfy eslint --fix ([260097a](https://github.com/orkestra-cc/orkestra/commit/260097a30ca194dfed73dd5d1664a1fe51375c77))
+
+### Reverts
+
+- **(errquality)** Back out R3's identifier resolution ([1981c23](https://github.com/orkestra-cc/orkestra/commit/1981c23a321d4a7b99092dfc76fdb923db7c0257))
+
+### Refactor
+
+- **(notification)** Retire emailService inside the smtp driver; route dispatchEmail through resolver → validate → driver (ADR-0019 PR 1) ([982ed11](https://github.com/orkestra-cc/orkestra/commit/982ed11264f44c14c1e9397f04be4017f52e86e3))
+- **(sdk)** Abstract the module config repository behind an interface ([cd7fc61](https://github.com/orkestra-cc/orkestra/commit/cd7fc61de26c92b6b3c3f75c0b2a79ed6f0cba48))
+- **(auth)** Rename JWT default-tenant concept to tenant fallback (wire dtid kept) ([481d5ec](https://github.com/orkestra-cc/orkestra/commit/481d5ecba3d39a8ae637865f39fc19aa1a5df67a))
+- **(tenant)** Extract absent-to-present creation primitive ([cd5461e](https://github.com/orkestra-cc/orkestra/commit/cd5461ea90c5cb647d127605dc94ccc522ddbc27))
+- **(systeminit)** Split first-admin sentinel, inline tenantscope allows ([a995cd7](https://github.com/orkestra-cc/orkestra/commit/a995cd780f7a8bbf62a0bc937e033616cef08554))
+
+### Documentation
+
+- **(site)** Notification sender profiles, routing, drivers and diagnostics (ADR-0019 PR 5) ([3f0b070](https://github.com/orkestra-cc/orkestra/commit/3f0b0705eb41f64c84748561e6a5378e936023dc))
+- **(adr-0019)** Record two plan gaps PR 1's execution surfaced ([a1f0768](https://github.com/orkestra-cc/orkestra/commit/a1f0768c6c0edaa7d039bf53f2e30787f5c49c82))
+- **(adr-0019)** Add the implementation plan ([280db46](https://github.com/orkestra-cc/orkestra/commit/280db46ee6f71db136bbe945715f2206e4bcea7b))
+- **(adr-0019)** Record the amendments the implementation plan surfaced ([98201b8](https://github.com/orkestra-cc/orkestra/commit/98201b8ae1f4bb5ef56b5c9f66b6eeeaec001f23))
+- **(adr-0019)** No string from a remote peer is persisted, SMTP included ([ba0b02a](https://github.com/orkestra-cc/orkestra/commit/ba0b02a71cd31c7e2fe7b17a78b6f1074a6dedf5))
+- **(adr-0019)** Bound the response read, not just what is stored ([2955bc4](https://github.com/orkestra-cc/orkestra/commit/2955bc464a1b74d791b7a7ef97a6a33b8cc380c2))
+- **(adr-0019)** Never persist vendor free text; assert the shape, not the absence ([2e0ba41](https://github.com/orkestra-cc/orkestra/commit/2e0ba411e6482ed151329f4aec25c1bf828d356d))
+- **(adr-0019)** Attribute the fix to the pre-flight, not to IsConfigured ([72f157c](https://github.com/orkestra-cc/orkestra/commit/72f157cecf80b4f1a924cb4460cefb03bdb3453b))
+- **(adr-0019)** Fix a double em dash left by the guard-count correction ([95d28c2](https://github.com/orkestra-cc/orkestra/commit/95d28c2eb03591b43785471bc5c7db386cb67acd))
+- **(adr-0019)** Never persist a vendor response body; bound and sanitize instead ([b4ab514](https://github.com/orkestra-cc/orkestra/commit/b4ab514993611a31b890a754bc700bdf9e7a92fa))
+- **(adr-0019)** State the MailUp success predicate instead of an ordering ([0e35ae5](https://github.com/orkestra-cc/orkestra/commit/0e35ae5fd8408969e17ed5e794faeb6e0a040ef7))
+- **(adr-0019)** EmailMessage gains Category only, not three fields ([4ee070a](https://github.com/orkestra-cc/orkestra/commit/4ee070ac0863c68422bedaa65d6fa65441656b76))
+- **(adr-0019)** Sync the ADR with four spec decisions it had not absorbed ([8ae66b3](https://github.com/orkestra-cc/orkestra/commit/8ae66b3cf04783223269ad0d7c5b3de6764637a8))
+- **(adr-0019)** Give every validation check an explicit scope ([249b7a1](https://github.com/orkestra-cc/orkestra/commit/249b7a15befe6b6e3645e7f35b1fc6d1828d6951))
+- **(adr-0019)** Retire two sentences the later decisions falsified ([aec9422](https://github.com/orkestra-cc/orkestra/commit/aec942297edc3319e601a1cf258b9edfa325c516))
+- **(adr-0019)** Restate precedence as longest-literal; the tie-break was unneeded ([fae43f5](https://github.com/orkestra-cc/orkestra/commit/fae43f50d032399a850b08aa149fe7117d840703))
+- **(adr-0019)** Carry category on EmailMessage so CampaignCode is implementable ([64fe631](https://github.com/orkestra-cc/orkestra/commit/64fe63133ce72b7beed8f836d26a08e98edd03b0))
+- **(adr-0019)** Scope from_address to the drivers that actually read it ([df66ea7](https://github.com/orkestra-cc/orkestra/commit/df66ea73d7f8d9067b120123ea2b100eabb01bd9))
+- **(adr-0019)** The auth guards are eight, not seven ([f7725d1](https://github.com/orkestra-cc/orkestra/commit/f7725d195287d525ae7d047094394577c485213f))
+- **(adr-0019)** Pin pattern grammar, move the test-send into PR 2, fix OpenAPI claims ([2b24108](https://github.com/orkestra-cc/orkestra/commit/2b24108bd141e98445e81d9df160cb048b2715d5))
+- **(adr-0019)** Correct the MailUp section — endpoint, auth, and webhooks ([b9df8ea](https://github.com/orkestra-cc/orkestra/commit/b9df8ea99b3fecd17b612637b240b03722d64277))
+- **(adr-0019)** Pin driver Validate so anonymous SMTP keeps working ([31ad29a](https://github.com/orkestra-cc/orkestra/commit/31ad29a7d6e8a3aaedd71450f3a6d160824a8d16))
+- **(adr-0019)** Make pre-flight checks category-aware (D7) ([8c9c4eb](https://github.com/orkestra-cc/orkestra/commit/8c9c4ebbb159a9a4139499563fd2ab4bf8e78091))
+- **(adr-0019)** Scope the routing rules to the states where a map exists ([e6e499d](https://github.com/orkestra-cc/orkestra/commit/e6e499d7c5ad5443472ab1d25ce1c38c2cc92186))
+- **(adr-0019)** Multi-sender email delivery — profiles, category routing, driver seam ([0589bf4](https://github.com/orkestra-cc/orkestra/commit/0589bf4688bbbba5afb346d9d82d1e4b39e2fbda))
+- **(deploy)** Document port exposure, firewall, systemd unit and off-site backups ([1deaa6d](https://github.com/orkestra-cc/orkestra/commit/1deaa6d96438c781e9834e29aca73a693450cf51))
+- Correct the stale Vite 7 references for frontend-admin ([c300036](https://github.com/orkestra-cc/orkestra/commit/c3000360eddd41227db9a5de9be8a332da3f9b53))
+- **(sdk)** Teach the addon surfaces that repeatable config exists ([fa1b663](https://github.com/orkestra-cc/orkestra/commit/fa1b66315a72e0e52b273da6343b3b9794213d64))
+- **(sdk)** Document repeatable config fields ([74ee580](https://github.com/orkestra-cc/orkestra/commit/74ee580f2ad850a53de7b3cec0101931f099c23c))
+- **(setup)** Document setup contract, add operator guide, drop dead locale keys ([6c4f1a4](https://github.com/orkestra-cc/orkestra/commit/6c4f1a44998020dd42f98401851df12d4488db6e))
+- **(auth)** Reword remaining default-tenant prose to tenant fallback ([ed5aaa7](https://github.com/orkestra-cc/orkestra/commit/ed5aaa7a3a84a39d12eb20c34f33543c14b7ab51))
+- **(setup)** Regenerate openapi spec for three-phase status ([2db3bbb](https://github.com/orkestra-cc/orkestra/commit/2db3bbb48a811761c05df1564d8f692ec831940e))
+- **(backend)** Update systeminit scope to include setup-finalization saga ([5ec6ed4](https://github.com/orkestra-cc/orkestra/commit/5ec6ed42dab95196c70dc8b4d7cee01af5a39766))
+- **(frontend-admin)** The button family is orkestra-*, not falcon-* ([f97f253](https://github.com/orkestra-cc/orkestra/commit/f97f253cbf628fa601ca7b6cfc64e1ece632284e))
+- **(plans)** Regenerate the OpenAPI spec in the authz burn-down too ([ce9b290](https://github.com/orkestra-cc/orkestra/commit/ce9b290683f8b9ab426abe7bc81d52b4694ed1f9))
+- **(plans)** Plan the errquality gate and the core error burn-down ([76b14ce](https://github.com/orkestra-cc/orkestra/commit/76b14ceb62b02939c0f94680486c3d52a3213518))
+- **(specs)** Design an analyzer-first sweep for backend error quality ([11b709d](https://github.com/orkestra-cc/orkestra/commit/11b709d027954501f7476c4e8f689c97e12ecb06))
+
+### Tests
+
+- **(notification)** Pin legacy flat-key compatibility under the driver seam ([c45601e](https://github.com/orkestra-cc/orkestra/commit/c45601e32bc6638cec70f84ae308f64530fd4972))
+- **(notification)** Pin today's MIME wire output as a golden before the driver refactor ([45c3cbb](https://github.com/orkestra-cc/orkestra/commit/45c3cbb62c59bdc39d5c23d4b05b22d14564d9c2))
+- **(admin)** Pin Retry-After to its header value, not the default ([ca0dfb8](https://github.com/orkestra-cc/orkestra/commit/ca0dfb86444a98f5a0af4153662660115c7411ba))
+- **(tenant)** Build the production tenant_defaults unique index in repository tests too ([f752d3e](https://github.com/orkestra-cc/orkestra/commit/f752d3ea80135ab43f4b0e852886e8aadd7053b4))
+
+### Dependencies
+
+- **(deps)** Bump @testing-library/jest-dom in /frontend-admin ([3c17be9](https://github.com/orkestra-cc/orkestra/commit/3c17be9e020fe130aa61ee0d70c9e48b6574b381))
+- **(deps)** Bump json_serializable from 6.11.2 to 6.14.1 in /mobile ([f4c1e95](https://github.com/orkestra-cc/orkestra/commit/f4c1e950db60e0aa4e7bd443c4762165cba7af28))
+- **(deps)** Bump dorny/paths-filter from 3 to 4 ([06296ed](https://github.com/orkestra-cc/orkestra/commit/06296edf8e4ca23a5a0eeca5a4fc0dd2e1e0f26c))
+
+### Chores
+
+- **(systemd)** Ship the production stack unit the deploy guide describes ([23d3100](https://github.com/orkestra-cc/orkestra/commit/23d3100e8b15b5f8c88dd85a96684d712b05fe94))
+- **(deps-dev)** Bump jsdom from 26.1.0 to 30.0.1 in /frontend-admin ([6d8320c](https://github.com/orkestra-cc/orkestra/commit/6d8320c3e5f0d2d6e491cefa5ab660def9f77bb5))
+- **(backend)** Regenerate the OpenAPI spec and realign the errquality baseline ([0590a29](https://github.com/orkestra-cc/orkestra/commit/0590a29ccd8cfbd34c53b060d9f871c4fc8dfeed))
+- **(frontend-admin)** Re-run prettier on vite.config.js and CLAUDE.md ([62bd6a8](https://github.com/orkestra-cc/orkestra/commit/62bd6a8db2803ac16eed51bcc62c6460b2b570da))
+- **(sync)** Absorb the v0.8.0 promotion merge into dev ([090976f](https://github.com/orkestra-cc/orkestra/commit/090976fd1409d2ee24d61185b3c5bd109c5b3e8a))
+
+### Merge
+
+- **(upstream)** Take dev's SDK record-list config work ([ac13809](https://github.com/orkestra-cc/orkestra/commit/ac138093f8728f65a7e5331394c143584ade33ce))
+- **(server)** Register optional modules in a deterministic order (#281) ([76bb0a8](https://github.com/orkestra-cc/orkestra/commit/76bb0a8f144499ff7a5746e130ed3eace57449aa))
+
+### Release
+
+- **(v0.9.0)** Promote dev ([49d1a05](https://github.com/orkestra-cc/orkestra/commit/49d1a05e3f93122f908f9d6945be8ddd884bf879))
+
 ## [0.8.0] - 2026-08-22
 
 ### ⚠️ Breaking Changes

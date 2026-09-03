@@ -166,6 +166,14 @@ ENV_FILE="$DOCKER_DIR/.env"
 # whichever app stack is up.
 OBSERVABILITY_COMPOSE="$DOCKER_DIR/docker-compose.observability.yml"
 
+# Clone-version pin. A caller may export ORKESTRA_CLONE_VERSION to override
+# git describe for the whole run (post-release reconciliation — see
+# resolve_stack_identity). Captured ONCE, at load time: the resolver exports
+# its own result, so re-resolving the stack identity later in the same
+# process (an env switch in the TUI, the helper test-suite) must not mistake
+# the previous resolution for a pin.
+ORKESTRA_CLONE_VERSION_PIN="${ORKESTRA_CLONE_VERSION:-}"
+
 # Active stack — "fullstack" or "" (at the main menu). ADR-0006 removed the
 # runtime-profile (minimal/full) path — there are no addons to pre-enable.
 PROFILE=""
@@ -761,11 +769,23 @@ resolve_stack_identity() {
     #     Falls back to "dev" when this clone has cut no release tag yet
     #     (a bare SHA would duplicate ORKESTRA_BUILD_COMMIT below).
     #   ORKESTRA_BUILD_COMMIT — short SHA of the deployed code (bucket B).
-    local clone_name clone_prefix clone_desc
+    #
+    # A caller-exported ORKESTRA_CLONE_VERSION (captured at load time into
+    # ORKESTRA_CLONE_VERSION_PIN) wins over git describe. The post-release
+    # reconciliation pins the clean tag while dev already sits one changelog
+    # commit past it, where describe reports vX.Y.Z-1-g<sha>. docker/.env is
+    # never sourced into this shell, so its fallback entry cannot reach here —
+    # only an explicit export does.
+    local clone_name clone_prefix clone_desc have_git=false
     clone_name="${APP_NAME#orkestra-}"
     clone_prefix="${clone_name}-v"
     if command -v git > /dev/null 2>&1 \
         && git -C "$PROJECT_ROOT" rev-parse --git-dir > /dev/null 2>&1; then
+        have_git=true
+    fi
+    if [ -n "${ORKESTRA_CLONE_VERSION_PIN:-}" ]; then
+        ORKESTRA_CLONE_VERSION="$ORKESTRA_CLONE_VERSION_PIN"
+    elif [ "$have_git" = true ]; then
         clone_desc=$(git -C "$PROJECT_ROOT" describe --tags \
             --match "${clone_prefix}*" --dirty 2>/dev/null || true)
         if [ -n "$clone_desc" ]; then
@@ -774,9 +794,12 @@ resolve_stack_identity() {
         else
             ORKESTRA_CLONE_VERSION="dev"
         fi
-        ORKESTRA_BUILD_COMMIT=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo "")
     else
         ORKESTRA_CLONE_VERSION="dev"
+    fi
+    if [ "$have_git" = true ]; then
+        ORKESTRA_BUILD_COMMIT=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo "")
+    else
         ORKESTRA_BUILD_COMMIT=""
     fi
     export ORKESTRA_CLONE_VERSION ORKESTRA_BUILD_COMMIT
@@ -848,6 +871,15 @@ _wiz_default() {
     printf '%s' "${cur:-$2}"
 }
 
+# _wiz_hostname <url-or-host> — hostname only: scheme, userinfo, path and
+# port stripped, lowercased. Mirrors host_only() in scripts/env-validate.sh,
+# which is a standalone script this one runs rather than sources.
+_wiz_hostname() {
+    printf '%s' "$1" \
+        | sed -E 's#^[A-Za-z][A-Za-z0-9+.-]*://##; s#^[^/@]*@##; s#/.*$##; s#:[0-9]+$##' \
+        | tr '[:upper:]' '[:lower:]'
+}
+
 wiz_identity() {
     p_section "Identity & ports"
     env_set "$ENV_FILE" APP_NAME      "$(ask_value 'App name'      "$(_wiz_default APP_NAME orkestra)")"
@@ -862,12 +894,13 @@ wiz_urls() {
         ask_yes_no "Customize dev URLs? (defaults use localhost)" "n" || return 0
     fi
     local backend frontend op_front cl_front console_host client_host ws
+    local client_scheme client_api_default stored_api_url
     backend=$(ask_value 'Backend URL'                    "$(_wiz_default BACKEND_URL http://localhost:3000)")
     frontend=$(ask_value 'Frontend URL (operator)'       "$(_wiz_default FRONTEND_URL http://localhost:8080)")
     op_front=$(ask_value 'Operator frontend URL (email)' "$(_wiz_default OPERATOR_FRONTEND_URL "$frontend")")
-    cl_front=$(ask_value 'Client frontend URL'           "$(_wiz_default CLIENT_FRONTEND_URL http://localhost:8081)")
+    cl_front=$(ask_value 'Client frontend URL'           "$(_wiz_default CLIENT_FRONTEND_URL http://client.localhost:8081)")
     console_host=$(ask_value 'Console host'              "$(_wiz_default CONSOLE_HOST console.localhost)")
-    client_host=$(ask_value 'Client API host'           "$(_wiz_default CLIENT_API_HOST api.localhost)")
+    client_host=$(ask_value 'Client API host'           "$(_wiz_default CLIENT_API_HOST client.localhost)")
 
     env_set "$ENV_FILE" BACKEND_URL "$backend"
     env_set "$ENV_FILE" FRONTEND_URL "$frontend"
@@ -875,6 +908,32 @@ wiz_urls() {
     env_set "$ENV_FILE" CLIENT_FRONTEND_URL "$cl_front"
     env_set "$ENV_FILE" CONSOLE_HOST "$console_host"
     env_set "$ENV_FILE" CLIENT_API_HOST "$client_host"
+
+    # The client API's public origin travels with its host. Writing only
+    # CLIENT_API_HOST leaves this key absent, so the backend derives an
+    # origin from the host (config.go's derivedPublicURL) — right until a
+    # proxy changes the port or the scheme, and exactly the desync
+    # scripts/env-validate.sh now reports (spec §8 #16). The default keeps
+    # the pairing same-site: same host as CLIENT_API_HOST, scheme from
+    # BACKEND_URL.
+    #
+    # A stored value is only offered back while its host still AGREES with
+    # the CLIENT_API_HOST just chosen. On a re-run over a pre-#10 .env the
+    # stored origin is http://api.localhost:3000, so a user who moves the
+    # host to client.localhost and presses Enter would otherwise keep the
+    # cross-site value — the migration this wizard is supposed to complete.
+    client_scheme=${backend%%:*}
+    case "$client_scheme" in
+        http | https) ;;
+        *) client_scheme=http ;;
+    esac
+    client_api_default="$client_scheme://$client_host"
+    stored_api_url=$(env_get "$ENV_FILE" CLIENT_API_URL)
+    if [ -n "$stored_api_url" ] &&
+        [ "$(_wiz_hostname "$stored_api_url")" = "$(_wiz_hostname "$client_host")" ]; then
+        client_api_default=$stored_api_url
+    fi
+    env_set "$ENV_FILE" CLIENT_API_URL "$(ask_value 'Client API URL' "$client_api_default")"
 
     # Derived defaults (overridable): ws:// from http://, wss:// from https://.
     ws=${backend/http/ws}
@@ -895,24 +954,53 @@ wiz_security() {
     env_set "$ENV_FILE" CLIENT_COOKIE_DOMAIN   "$(ask_value 'Client cookie domain'   "$(_wiz_default CLIENT_COOKIE_DOMAIN "$(env_get "$ENV_FILE" CLIENT_API_HOST)")")"
 }
 
+# ensure_storage_secret — the bundled RustFS derives its ROOT pair from
+# STORAGE_ACCESS_KEY / STORAGE_SECRET_KEY (docker-compose.infra.yml), and its
+# S3 API is browser-facing behind the proxy, so a placeholder left in
+# docker/.env would be a public root password. Generate a real secret whenever
+# the current value is empty or one of the shipped literals; never touch a
+# real one (rotating it invalidates every presigned URL in flight).
+ensure_storage_secret() {
+    if secret_is_placeholder "$(env_get "$ENV_FILE" STORAGE_SECRET_KEY)"; then
+        env_set "$ENV_FILE" STORAGE_SECRET_KEY "$(openssl rand -hex 16)"
+        p_ok "Generated STORAGE_SECRET_KEY (it is also the bundled RustFS root secret)."
+    fi
+    [ -n "$(env_get "$ENV_FILE" STORAGE_ACCESS_KEY)" ] || env_set "$ENV_FILE" STORAGE_ACCESS_KEY orkestra
+}
+
 wiz_storage() {
     local env=$1
     p_section "Object storage"
     if [ "$env" != "production" ]; then
-        p_info "Using built-in RustFS defaults for $env (configurable later)."
+        p_info "Using built-in RustFS for $env (configurable later)."
+        ensure_storage_secret
         return 0
     fi
     if ask_yes_no "Use built-in RustFS for production? (No = managed S3)" "n"; then
-        p_info "Keeping RustFS storage defaults."
+        p_info "Keeping built-in RustFS."
+        ensure_storage_secret
         return 0
     fi
     env_set "$ENV_FILE" STORAGE_ENDPOINT   "$(ask_value 'S3 endpoint'   "$(_wiz_default STORAGE_ENDPOINT https://s3.amazonaws.com)")"
     env_set "$ENV_FILE" STORAGE_REGION     "$(ask_value 'S3 region'     "$(_wiz_default STORAGE_REGION us-east-1)")"
     env_set "$ENV_FILE" STORAGE_BUCKET     "$(ask_value 'S3 bucket'     "$(_wiz_default STORAGE_BUCKET orkestra-avatars)")"
     env_set "$ENV_FILE" STORAGE_ACCESS_KEY "$(ask_value 'S3 access key' "$(_wiz_default STORAGE_ACCESS_KEY '')")"
-    env_set "$ENV_FILE" STORAGE_SECRET_KEY "$(ask_value 'S3 secret key' "$(_wiz_default STORAGE_SECRET_KEY '')")"
+    # Enter keeps a configured secret, never a shipped placeholder.
+    local cur_secret
+    cur_secret=$(env_get "$ENV_FILE" STORAGE_SECRET_KEY)
+    secret_is_placeholder "$cur_secret" && cur_secret=""
+    env_set "$ENV_FILE" STORAGE_SECRET_KEY "$(ask_value 'S3 secret key' "$cur_secret")"
+    [ -n "$(env_get "$ENV_FILE" STORAGE_SECRET_KEY)" ] \
+        || p_warn "STORAGE_SECRET_KEY is empty — object storage stays disabled until it is set."
     env_set "$ENV_FILE" STORAGE_FORCE_PATH_STYLE false
     env_set "$ENV_FILE" STORAGE_ENSURE_BUCKET false
+    # The rustfs container still starts with the infra stack: give it a root
+    # of its own so it never inherits the cloud credentials above.
+    if secret_is_placeholder "$(env_get "$ENV_FILE" RUSTFS_ROOT_PASSWORD)"; then
+        env_set "$ENV_FILE" RUSTFS_ROOT_USER "rustfs-root"
+        env_set "$ENV_FILE" RUSTFS_ROOT_PASSWORD "$(openssl rand -hex 16)"
+        p_ok "Generated a dedicated RustFS root (RUSTFS_ROOT_USER / RUSTFS_ROOT_PASSWORD)."
+    fi
 }
 
 wiz_seeds() {
@@ -1080,6 +1168,22 @@ fullstack_execute_deploy() {
     check_docker_running
     p_ok "Docker is running"
     ensure_jwt_keys_readable
+
+    # docker/.env is validated on every deploy, not only inside the `init`
+    # wizard: a cross-site client (or operator) layout boots a stack whose
+    # logins succeed and whose refreshes 401, which reads as an application
+    # bug rather than the config error it is (spec §8 #16). This is a HARD
+    # stop, ahead of every compose command — `--yes` skips confirmation
+    # prompts, never this. The wizard keeps warning instead of aborting:
+    # the user is still in the middle of writing the file there. Output is
+    # held back unless it fails, so a good deploy stays readable.
+    local env_validation
+    if env_validation=$(bash "$SCRIPT_DIR/scripts/env-validate.sh" 2>&1); then
+        p_ok "docker/.env validated"
+    else
+        printf '%s\n' "$env_validation"
+        die "docker/.env failed validation (above). Nothing was started — fix the file and re-run."
+    fi
     if [ "$ENV" = "production" ] && [ "$EUID" -eq 0 ]; then
         die "Do not run as root"
     fi
@@ -1287,9 +1391,13 @@ fullstack_execute_deploy() {
     # --- Smoke tests (production only) ---
     if [ "$ENV" = "production" ]; then
         p_section "Smoke tests"
-        local AUTH_STATUS DOCS_STATUS
-        AUTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${BACKEND_URL}/api/v1/auth/health" || echo "000")
-        [ "$AUTH_STATUS" = "200" ] && p_ok "Authentication endpoint healthy" || p_warn "Authentication endpoint returned: $AUTH_STATUS"
+        # /health is the backend liveness probe and reports its MongoDB/Redis
+        # checks; it is on the public-routes list so it answers without a JWT.
+        # (The old target, /api/v1/auth/health, never existed — routes have no
+        # /api prefix — and unknown paths get a 401 from the auth middleware.)
+        local HEALTH_STATUS DOCS_STATUS
+        HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${BACKEND_URL}/health" || echo "000")
+        [ "$HEALTH_STATUS" = "200" ] && p_ok "Backend health endpoint healthy" || p_warn "Backend health endpoint returned: $HEALTH_STATUS"
         DOCS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${BACKEND_URL}/docs" || echo "000")
         [ "$DOCS_STATUS" = "200" ] && p_ok "API documentation accessible" || p_warn "API documentation returned: $DOCS_STATUS"
     fi

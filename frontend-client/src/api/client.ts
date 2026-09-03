@@ -1,11 +1,22 @@
-import createClient, { type Middleware } from "openapi-fetch";
-
-import type { paths } from "@/api/openapi.gen";
-import {
-  getAccessToken,
-  refreshAccessToken,
-  clearAccessToken,
-} from "@/auth/tokenStore";
+// The API base-URL resolver, and nothing else.
+//
+// This file used to export a generated-types OpenAPI client `api` with a bearer
+// middleware and a 401 refresh-and-retry middleware. Nothing ever imported it,
+// and it was WRONG in five ways at once — it retried every 401 including a
+// wrong-password change-password, re-sent an already-consumed request body,
+// used the marker-gated refresh, cleared the token but not the session marker,
+// and inspected no error code. It read as the live request path (the docs said
+// so until 82f25252) while nothing routed through it, which is the trap #325
+// was born from, so it was deleted rather than left dormant.
+//
+// The live authenticated path is src/api/authedFetch.ts, and it is the ONLY
+// 401 algorithm in this tree. The generated-types stub that used to sit beside
+// this file, the typed-client runtime that would have consumed it and the
+// codegen script that produced it all left with it (§8 #4): nothing imported
+// any of them, so what they kept warm was not a typed client but the MATERIALS
+// for a second 401 algorithm. If one is ever wanted, it re-adds a pinned
+// dependency in the same PR that writes the middleware — and that middleware
+// must DELEGATE to authedFetch's policy rather than restate it.
 
 // Runtime config — see frontend-client/public/config.js + Dockerfile entrypoint.
 // VITE_API_BASE is consulted only as a build-time fallback for envs that don't
@@ -22,71 +33,7 @@ const runtimeApiBase =
 const API_BASE = (
   runtimeApiBase ??
   import.meta.env.VITE_API_BASE ??
-  "http://api.localhost:3000"
+  "http://client.localhost:3000"
 ).replace(/\/$/, "");
-
-// Bearer middleware — pulls the in-memory access token on every request.
-// The token store is module-scoped so React strict-mode double-mounts
-// don't mint a second copy.
-const authMiddleware: Middleware = {
-  onRequest({ request }) {
-    const token = getAccessToken();
-    if (token) {
-      request.headers.set("Authorization", `Bearer ${token}`);
-    }
-    return request;
-  },
-};
-
-// 401 silent-refresh middleware. When a request comes back 401 with the
-// access token expired, hit /v1/auth/client/refresh-cookie (which uses
-// the httpOnly refresh cookie set at login by the backend per ADR-0003
-// PR-D D-9) and retry the original request once. Two consecutive 401s
-// trigger logout — the SPA's auth context routes the user back to /login.
-//
-// A refresh that comes back 503 is the exception: the server could not
-// evaluate the session, which is not the same as the session being over.
-// Surfacing the original 401 without clearing the token leaves the user
-// signed in so the next request can retry. See RefreshOutcome in
-// tokenStore.ts and ADR-0017.
-const refreshMiddleware: Middleware = {
-  async onResponse({ request, response }) {
-    if (response.status !== 401 || request.headers.get("X-Retry") === "1") {
-      return response;
-    }
-    const outcome = await refreshAccessToken(API_BASE);
-    if (outcome.status === "unavailable") {
-      return response;
-    }
-    if (outcome.status !== "ok") {
-      clearAccessToken();
-      return response;
-    }
-    const retried = await fetch(request.url, {
-      method: request.method,
-      headers: (() => {
-        const h = new Headers(request.headers);
-        h.set("Authorization", `Bearer ${outcome.accessToken}`);
-        h.set("X-Retry", "1");
-        return h;
-      })(),
-      body: request.body,
-      credentials: "include",
-    });
-    return retried;
-  },
-};
-
-// `credentials: 'include'` is critical — the refresh cookie is httpOnly
-// and Domain-scoped to api.localhost (dev) / app.orkestra.cc (staging)
-// per ADR-0003 D-9, so the browser will only attach it when same-site
-// cookies are explicitly enabled on every request to the API origin.
-export const api = createClient<paths>({
-  baseUrl: API_BASE,
-  credentials: "include",
-});
-
-api.use(authMiddleware);
-api.use(refreshMiddleware);
 
 export const apiBaseURL = API_BASE;

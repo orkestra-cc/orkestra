@@ -145,9 +145,14 @@ func (s *jwtService) RefreshTokenTTL() time.Duration { return s.refreshExpiry }
 // accessTTL/refreshTTL are sourced from cfg.Auth.JWT (env vars
 // JWT_ACCESS_TOKEN_EXPIRY / JWT_REFRESH_TOKEN_EXPIRY). Zero or negative
 // values fall back to safe defaults so unit tests and any future caller
-// that doesn't care about TTL don't need to pass anything explicit.
-// accessTTL is additionally clamped from above: a value over
-// MaxAccessTokenTTL is capped rather than rejected (ADR-0017 D5).
+// that doesn't care about TTL don't need to pass anything explicit. A
+// positive accessTTL is additionally clamped into
+// [MinAccessTokenTTL, MaxAccessTokenTTL]: a value over MaxAccessTokenTTL
+// is capped rather than rejected (ADR-0017 D5), and a value under
+// MinAccessTokenTTL is raised rather than rejected — below a minute, the
+// SPA's proactive refresh (which fires inside a 30s skew of expiry) would
+// find every freshly minted token already due for renewal and rotate it
+// on every single request (ADR-0020 D3, #317).
 func NewJWTService(privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey, env string, accessTTL, refreshTTL time.Duration) JWTService {
 	if accessTTL <= 0 {
 		accessTTL = defaultAccessTokenTTL
@@ -163,6 +168,19 @@ func NewJWTService(privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey, env str
 			"value", accessTTL.String(),
 			"using", MaxAccessTokenTTL.String())
 		accessTTL = MaxAccessTokenTTL
+	}
+	if accessTTL < MinAccessTokenTTL {
+		// Below a minute the SPA's proactive refresh — which fires
+		// inside a 30s skew of the token's expiry — would find every
+		// freshly minted token already inside its refresh window, so
+		// every single request would rotate the token again. Clamp
+		// rather than reject for the same reason as the ceiling above:
+		// this level is fed by JWT_ACCESS_TOKEN_EXPIRY and by direct
+		// callers, neither of which can surface a 422. ADR-0020 D3, #317.
+		slogDefault().Warn("auth: access-token lifetime below minimum, clamping",
+			"value", accessTTL.String(),
+			"using", MinAccessTokenTTL.String())
+		accessTTL = MinAccessTokenTTL
 	}
 	// Unreachable through configuration: getEnvAsDuration never returns
 	// zero for JWT_REFRESH_TOKEN_EXPIRY (it falls back to the shipped

@@ -19,6 +19,7 @@ services:
     environment:
       ENV: staging
       PORT: 3000  # Internal port is always 3000, BACKEND_PORT is for host mapping only
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-}  # /docs + /openapi.json; default on in dev, off in staging/prod
 
       # Hot reload (AIR)
       AIR_BUILD_CMD: go build -o ./tmp/main ./cmd/server
@@ -34,7 +35,7 @@ services:
       PATH: "/app/.go-bin:/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
       # MongoDB (internal port is always 27017, MONGO_PORT is for host mapping only)
-      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@${MONGO_HOST:-mongodb}:27017/${MONGO_DATABASE}?authSource=admin
+      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@${MONGO_HOST:-mongodb}:27017/${MONGO_DATABASE}?authSource=admin&replicaSet=rs0&directConnection=true
 
       # Redis (internal port is always 6379, REDIS_PORT is for host mapping only)
       REDIS_URL: redis://:${REDIS_PASSWORD}@${REDIS_HOST:-redis}:6379/${REDIS_DB:-0}
@@ -79,6 +80,7 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-strict}
       ALLOW_LOCALHOST_REDIRECTS: ${ALLOW_LOCALHOST_REDIRECTS:-false}
+      AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS: ${AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS:-false}
 
       # URLs
       FRONTEND_URL: ${FRONTEND_URL:-https://staging.orkestra.cc}
@@ -102,6 +104,7 @@ services:
       # public traffic.
       CONSOLE_HOST: ${CONSOLE_HOST:-staging-console.orkestra.cc}
       CLIENT_API_HOST: ${CLIENT_API_HOST:-staging-api.orkestra.cc}
+      CLIENT_API_URL: ${CLIENT_API_URL:-}
       OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
       CLIENT_CORS_ORIGINS: ${CLIENT_CORS_ORIGINS:-}
 
@@ -185,8 +188,11 @@ services:
       STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-}
       STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
       STORAGE_BUCKET: ${STORAGE_BUCKET:-orkestra-avatars}
-      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-orkestra}
-      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-changeme-rustfs}
+      # Same contract as production: no literal fallback for the credentials —
+      # empty keys keep blob storage disabled (the backend logs it at boot)
+      # instead of silently authenticating as the RustFS root.
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-}
       STORAGE_FORCE_PATH_STYLE: ${STORAGE_FORCE_PATH_STYLE:-true}
       STORAGE_ENSURE_BUCKET: ${STORAGE_ENSURE_BUCKET:-true}
 
@@ -209,8 +215,9 @@ services:
     # firewall blocks the upstream — public resolvers (8.8.8.8, 1.1.1.1)
     # are not reachable on UDP/53 from this network.
     # AIR is pre-installed by the host into ./.go-bin/air via:
-    #   cd backend && GOBIN=$PWD/.go-bin go install github.com/air-verse/air@v1.67.1
-    # (pinned: v1.67.2+ requires go >= 1.26.0, the project is on Go 1.25.13)
+    #   cd backend && GOBIN=$PWD/.go-bin go install github.com/air-verse/air@v1.67.4
+    # (pinned, never @latest — keep in step with AIR_VERSION in
+    #  docker/Dockerfile.dev-backend and with the project's Go version)
     command: ["sh", "-c", "exec /app/.go-bin/air"]
     # Note: mongodb and redis are in docker-compose.infra.yml
     # Ensure infra is running: docker compose -f docker-compose.infra.yml up -d
@@ -242,6 +249,10 @@ services:
       VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3000}
       VITE_HMR_HOST: ${VITE_HMR_HOST:-staging.orkestra.cc}
       VITE_ALLOWED_HOSTS: ${VITE_ALLOWED_HOSTS:-}
+      # File-watcher override for the Vite dev server. Unset = auto-detect
+      # (polling only under a WSL kernel; inotify everywhere else). Set true
+      # if hot reload misses edits (repo on /mnt/c), false to force events.
+      CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-}
       # Host-computed app version surfaced in the SPA footer. orkestra.sh
       # exports this from `git describe`; the container has no git so
       # this passthrough is the only path. See docker-compose.dev.yml.

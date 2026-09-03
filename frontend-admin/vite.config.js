@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from 'vite';
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -38,6 +39,35 @@ const resolveAppVersion = () => {
   }
 };
 const APP_VERSION = resolveAppVersion();
+
+// File-watcher strategy. On native Linux, inotify events propagate through
+// Docker bind mounts, so the default event-based watcher is correct and
+// nearly free. Polling exists for the one setup where events never arrive —
+// the repo on /mnt/c under WSL2 — and it is expensive: with usePolling
+// chokidar stat()s every watched file each interval, which kept idle
+// dev-server containers at a double-digit CPU share and ~1 GB RSS.
+// Containers share the host kernel, so /proc/version identifies WSL even
+// from inside the container; that picks the default, and
+// CHOKIDAR_USEPOLLING=true|false (docker/.env passthrough) overrides it in
+// either direction. Any other value — including the empty string the
+// compose passthrough sends when unset — means auto-detect.
+const resolveWatchOptions = () => {
+  const override = process.env.CHOKIDAR_USEPOLLING;
+  let usePolling;
+  if (override === 'true' || override === 'false') {
+    usePolling = override === 'true';
+  } else {
+    try {
+      usePolling = readFileSync('/proc/version', 'utf8')
+        .toLowerCase()
+        .includes('microsoft');
+    } catch {
+      // No /proc (e.g. `npm run dev` on a macOS host): events work natively.
+      usePolling = false;
+    }
+  }
+  return usePolling ? { usePolling: true, interval: 300 } : {};
+};
 
 // LAN liveness probe for HAProxy / k8s. Vite's `server.middlewares` is
 // not a valid config key (the inline middleware that used to live there
@@ -356,10 +386,7 @@ export default ({ mode }) => {
             clientPort: 443
           }
         : true,
-      watch: {
-        usePolling: true,
-        interval: 300
-      }
+      watch: resolveWatchOptions()
     }
   });
 };

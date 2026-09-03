@@ -35,7 +35,8 @@
     "errorPasswordTooShort": "Password must be at least 10 characters",
     "errorFullNameRequired": "Name is required",
     "errorTermsRequired": "You must accept the terms to continue",
-    "disabled": "Self-service registration is currently disabled. Please contact us if you need an account."
+    "disabled": "Self-service registration is currently disabled. Please contact us if you need an account.",
+    "passwordDisabled": "Sign-up with email and password is disabled here. Sign in with one of the available providers instead."
   },
   "verify": {
     "title": "Verify email",
@@ -61,6 +62,18 @@
     "forgot": "Forgot password?",
     "signupLink": "Create an account",
     "disabled": "Login is temporarily disabled by an administrator. Please try again later.",
+    "subtitleSso": "Continue with one of the sign-in providers below.",
+    "noMethod": "No sign-in method is currently available. Contact an administrator.",
+    "oauth": {
+      "divider": "or continue with",
+      "continueWith": "Continue with {{provider}}",
+      "redirecting": "Redirecting to {{provider}}…",
+      "loading": "Loading sign-in options…",
+      "loadError": "Could not load the sign-in providers.",
+      "retry": "Try again",
+      "startFailed": "Could not start sign-in with {{provider}}. Please try again.",
+      "providerDisabled": "{{provider}} sign-in is not available on this surface. Contact an administrator."
+    },
     "mfa": {
       "prompt": "Enter the 6-digit code from your authenticator app.",
       "code": "Verification code",
@@ -79,6 +92,24 @@
       "resendDone": "If that address is registered and not yet verified, we've sent a new email."
     }
   },
+  "oauth": {
+    "callback": {
+      "verifying": "Completing sign-in…",
+      "failureTitle": "Sign-in failed",
+      "sessionSignedOut": "Sign-in completed, but no session could be established. Please sign in again.",
+      "sessionUnavailable": "The server could not confirm your session right now. Try again in a moment.",
+      "retry": "Try again",
+      "backToLogin": "Back to sign in",
+      "errors": {
+        "accessDenied": "Sign-in was cancelled at the identity provider.",
+        "signupDisabled": "Sign-up is currently invitation-only. Contact an administrator.",
+        "linkDisabled": "An account with this email already exists and automatic linking is off. Contact an administrator.",
+        "emailUnverified": "The identity provider has not verified this email address, so it cannot be used to sign in.",
+        "providerUnavailable": "This sign-in provider is temporarily unavailable. Try again later.",
+        "loginFailed": "Sign-in failed. Please try again."
+      }
+    }
+  },
   "forgot": {
     "title": "Forgot password",
     "subtitle": "Enter your email and we'll send you a link to reset your password.",
@@ -87,7 +118,8 @@
     "submitting": "Sending…",
     "successTitle": "Check your email",
     "successBody": "If that address is registered, we've sent a password reset link.",
-    "backToLogin": "Back to sign in"
+    "backToLogin": "Back to sign in",
+    "passwordDisabled": "Password sign-in is disabled here, so a password cannot be reset. Sign in with one of the available providers or contact an administrator."
   },
   "reset": {
     "title": "Reset password",
@@ -281,8 +313,29 @@
       "updateFailed": "Could not change your avatar source."
     }
   },
+  "dsr": {
+    "title": "Privacy & my data",
+    "subtitle": "Exercise your GDPR rights over the personal data we hold about you.",
+    "export": {
+      "title": "Download my data",
+      "subtitle": "Get a machine-readable copy of all personal data associated with your account (Art. 15 / 20).",
+      "submit": "Download my data",
+      "submitting": "Preparing…",
+      "error": "Export failed. Please try again."
+    },
+    "erasure": {
+      "title": "Request erasure",
+      "subtitle": "Ask us to erase your personal data (Art. 17). An operator reviews the request before it is carried out.",
+      "reasonPlaceholder": "Reason (optional)",
+      "submit": "Request erasure",
+      "submitting": "Submitting…",
+      "submitted": "Request submitted",
+      "error": "Could not submit the request."
+    }
+  },
   "loading": "Loading…",
   "error": {
-    "generic": "Something went wrong. Please try again."
+    "generic": "Something went wrong. Please try again.",
+    "policyUnavailable": "Sign-in policy is temporarily unavailable. Try again shortly."
   }
 }

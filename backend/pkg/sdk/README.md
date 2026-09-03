@@ -35,7 +35,7 @@ The SDK is intentionally narrow:
 go get github.com/orkestra-cc/orkestra-sdk@latest
 ```
 
-Requires Go 1.25 or newer.
+Requires Go 1.26 or newer.
 
 ```go
 import (

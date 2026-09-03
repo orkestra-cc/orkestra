@@ -1,29 +1,61 @@
 // Social OAuth utility functions for multiple providers
 
 import runtimeConfig from 'config/environment';
+import { sanitizeReturnTo } from 'utils/returnTo';
+
 interface SocialOAuthInitResponse {
   authUrl: string;
   state: string;
 }
 
-interface SocialOAuthCallbackResponse {
-  success: boolean;
-  user: {
-    id: string;
-    email: string;
-    fullName: string;
-    avatar: string;
-    role: string;
-    oauthProvider: string;
-  };
-}
-
 export type SocialProvider = 'google' | 'apple' | 'github' | 'discord';
 
 // sessionStorage key holding the deep link to return to after the OAuth
-// round-trip completes. Router state can't survive the redirect out to the IdP,
-// so we stash it here and SocialAuthCallback reads it back.
+// round-trip completes. Router state can't survive the redirect out to the
+// IdP, so it is stashed here as a `{target, createdAt}` record;
+// SocialAuthCallback takes-and-deletes it (in an effect, never during
+// render) on EVERY outcome and honours it only when it is younger than
+// OAUTH_RETURN_TO_TTL_MS and still passes sanitizeReturnTo (sessionStorage
+// is client-writable).
 export const OAUTH_RETURN_TO_KEY = 'oauth_return_to';
+export const OAUTH_RETURN_TO_TTL_MS = 10 * 60 * 1000;
+
+interface OAuthReturnRecord {
+  target: string;
+  createdAt: number;
+}
+
+export const stashOAuthReturnTo = (
+  target: string | null | undefined,
+  now: number = Date.now()
+): void => {
+  const safe = sanitizeReturnTo(target);
+  if (!safe) {
+    // Also clears any stale value from a previous, abandoned attempt.
+    sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
+    return;
+  }
+  const record: OAuthReturnRecord = { target: safe, createdAt: now };
+  sessionStorage.setItem(OAUTH_RETURN_TO_KEY, JSON.stringify(record));
+};
+
+/** Take-and-delete: the record is removed on every call, whatever its state. */
+export const takeOAuthReturnTo = (now: number = Date.now()): string | null => {
+  const raw = sessionStorage.getItem(OAUTH_RETURN_TO_KEY);
+  sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const { target, createdAt } = parsed as Partial<OAuthReturnRecord>;
+  if (typeof createdAt !== 'number' || !Number.isFinite(createdAt)) return null;
+  if (now < createdAt || now - createdAt > OAUTH_RETURN_TO_TTL_MS) return null;
+  return sanitizeReturnTo(target);
+};
 
 export const initiateSocialLogin = async (
   provider: SocialProvider,
@@ -37,9 +69,9 @@ export const initiateSocialLogin = async (
       );
     }
 
-    // Backend automatically determines the frontend redirect URL from:
-    // 1. Request Origin header + '/auth/callback'
-    // 2. Configured FRONTEND_URL + '/auth/callback' (fallback)
+    // The backend redirects to the SPA configured for this tier
+    // (OPERATOR_FRONTEND_URL → FRONTEND_URL); nothing about the destination
+    // is sent from here.
     const requestPayload = {
       provider: provider
     };
@@ -61,65 +93,9 @@ export const initiateSocialLogin = async (
 
     const data: SocialOAuthInitResponse = await response.json();
 
-    sessionStorage.setItem('oauth_state', data.state);
-    sessionStorage.setItem('oauth_provider', provider);
-    if (returnTo) {
-      sessionStorage.setItem(OAUTH_RETURN_TO_KEY, returnTo);
-    } else {
-      // Clear any stale value from a previous, abandoned attempt.
-      sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
-    }
+    stashOAuthReturnTo(returnTo);
 
     window.location.href = data.authUrl;
-  } catch (error) {
-    throw error;
-  }
-};
-
-export const handleSocialCallback = async (
-  code: string,
-  state: string,
-  backendUrl: string = runtimeConfig.apiUrl
-): Promise<SocialOAuthCallbackResponse> => {
-  try {
-    const storedState = sessionStorage.getItem('oauth_state');
-    const provider = sessionStorage.getItem('oauth_provider') as SocialProvider;
-
-    if (storedState !== state) {
-      throw new Error('Invalid OAuth state parameter');
-    }
-
-    if (!provider) {
-      throw new Error('OAuth provider not found in session storage');
-    }
-
-    const params = new URLSearchParams({
-      code,
-      state
-    });
-
-    const callbackUrl = `${backendUrl}/v1/auth/oauth/${provider}/callback?${params.toString()}`;
-
-    const response = await fetch(callbackUrl, {
-      method: 'GET',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`${provider} OAuth callback failed: ${response.status}`);
-    }
-
-    const data: SocialOAuthCallbackResponse = await response.json();
-
-    sessionStorage.removeItem('oauth_state');
-    sessionStorage.removeItem('oauth_provider');
-
-    // No token storage needed - using HttpOnly cookies exclusively
-
-    return data;
   } catch (error) {
     throw error;
   }
@@ -152,37 +128,8 @@ export const logoutSocial = async (
 
 export const clearSessionStorage = (): void => {
   // Clear OAuth session data only - no tokens stored in localStorage
+  // Legacy keys older builds wrote; swept so no transient OAuth material lingers.
   sessionStorage.removeItem('oauth_state');
   sessionStorage.removeItem('oauth_provider');
   sessionStorage.removeItem('logout_in_progress');
-};
-
-// Deprecated: No longer storing tokens in localStorage
-// Using HttpOnly cookies exclusively for authentication
-export const getStoredTokens = (): {
-  accessToken: string | null;
-  tokenType: string | null;
-  expiresIn: string | null;
-  userId: string | null;
-  email: string | null;
-} => {
-  console.warn(
-    'getStoredTokens is deprecated - using HttpOnly cookies for authentication'
-  );
-  return {
-    accessToken: null,
-    tokenType: null,
-    expiresIn: null,
-    userId: null,
-    email: null
-  };
-};
-
-// Deprecated: Cannot determine authentication status from localStorage
-// Use RTK Query auth hooks instead to check authentication via API calls
-export const isAuthenticated = (): boolean => {
-  console.warn(
-    'isAuthenticated is deprecated - use RTK Query auth hooks to check authentication status'
-  );
-  return false; // Cannot determine from client-side storage with HttpOnly cookies
 };

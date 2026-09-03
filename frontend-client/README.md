@@ -1,31 +1,28 @@
 # orkestra-client
 
-Tier-2 (external client) demo SPA. Consumes the ADR-0003 **client** API surface (`api.orkestra.com` / `api.localhost:3000`, JWT `aud=client`). Sibling to the operator console at [`/frontend-admin`](../frontend-admin) — separate cookie domain, separate OpenAPI surface, distinct visual language.
+Tier-2 (external client) demo SPA. Consumes the ADR-0003 **client** API surface (`api.orkestra.com` in prod / `client.localhost:3000` in dev, JWT `aud=client`). Sibling to the operator console at [`/frontend-admin`](../frontend-admin) — separate cookie domain, separate OpenAPI surface, distinct visual language.
 
 ## Stack
 
 - React 19 + TypeScript 5.9 (strict)
 - Vite 7 + Tailwind v4 (zero-config, design tokens in `src/index.css`)
-- React Router v7 + TanStack Query v5
-- `openapi-typescript` + `openapi-fetch` against `${VITE_API_BASE}/openapi.json`
+- React Router v8 + TanStack Query v5
+- No generated API client: every endpoint is a hand-typed `fetch` wrapper in `src/api/*` — the OpenAPI type generator, its runtime client and the `codegen` script were dropped with [#325](https://github.com/orkestra-cc/orkestra/issues/325) because nothing imported them (spec §8 #4)
 - `react-i18next` (Italian + English from day 1)
-- `@stripe/stripe-js` for hosted-Checkout redirects
+- `@stripe/stripe-js` — installed but **not imported anywhere in the base**; kept because the fork chain's billing layer builds on it
+- Vitest 4 + React Testing Library + MSW (happy-dom) — `npm test`
 
 ## Dev quickstart
 
-Both backend and the client SPA run in Docker. Two prerequisites first:
+Both backend and the client SPA run in Docker. Most resolvers answer `*.localhost` themselves; if yours does not, add the **hosts file** entries the dev stack uses:
 
-1. **Hosts file** — cookie-domain isolation per ADR-0003 D-9 only works when the SPA and the API are on different `*.localhost` hostnames:
+```
+127.0.0.1 console.localhost client.localhost
+```
 
-   ```
-   127.0.0.1 console.localhost api.localhost client.localhost
-   ```
+**The SPA and the client API share `client.localhost` on purpose — do not split them onto `api.localhost`.** Every client-tier cookie (refresh, OAuth state, device) is minted `SameSite=Lax` with no `Domain`, and `localhost` is not in the Public Suffix List, so a browser treats `client.localhost` and `api.localhost` as different _sites_: a cross-site `fetch(..., {credentials: "include"})` neither stores nor sends those cookies, and client login succeeds while the very next refresh 401s. A port is not part of a site, so `:8081` (SPA) and `:3000` (API) are same-site while staying cross-origin — the CORS preflight is still on the path. In staging/prod the three-host ADR-0003 split stands, because there the hosts share a registrable domain (`app.orkestra.cc` + `staging-api.orkestra.cc` under `orkestra.cc`). The rule is _same site_, not _same host_.
 
-2. **Stripe publishable key** — only needed if you plan to embed Stripe.js (Elements). Phase 4 uses **hosted** Stripe Checkout — the backend opens the session and the SPA redirects via `window.location.href`, so a publishable key is not required to subscribe. Set in `docker/.env` if/when Elements lands:
-
-   ```
-   VITE_STRIPE_PUBLISHABLE_KEY=pk_test_...
-   ```
+No payment keys are needed: `docker/.env` still carries a `VITE_STRIPE_PUBLISHABLE_KEY` slot that the compose files pass through into `/config.js`, but no base code reads it — it stays reserved for a fork that rebuilds the billing layer.
 
 Then bring the dev stack up:
 
@@ -38,51 +35,51 @@ docker compose -f docker-compose.dev.yml up -d
 Open:
 
 - **Demo SPA** — http://client.localhost:8081
-- Operator console — http://console.localhost:8080
-- Backend API — http://api.localhost:3000 (client surface) + http://console.localhost:3000 (operator)
+- Operator console — http://localhost:8080 (not `console.localhost:8080`: the console's origin has to be same-site with its `VITE_API_URL`, which defaults to `http://localhost:3000`)
+- Backend API — http://client.localhost:3000 (client surface) + http://console.localhost:3000 (operator)
 
-## OpenAPI codegen
-
-The committed `src/api/openapi.gen.ts` is a stub. Regenerate against the live backend whenever client routes change:
+## Tests
 
 ```bash
-# from the host (backend must be running)
 cd frontend-client
-VITE_API_BASE=http://api.localhost:3000 npm run codegen
-
-# or from inside the dev container (container name is stack-namespaced —
-# ${APP_NAME}-client-frontend-${ENV}; example below is orkestra/development)
-docker exec orkestra-client-frontend-development sh -c "VITE_API_BASE=http://api.localhost:3000 npm run codegen"
+npm test              # vitest run — what `make ci-frontend-client` runs between lint and build
+npm run test:watch
 ```
 
-The result is a single `src/api/openapi.gen.ts` consumed by `src/api/client.ts` via `openapi-fetch`. Commit the regenerated file — CI builds without a live backend, and committing keeps the type contract versioned alongside the SPA.
+MSW runs with `onUnhandledRequest: 'error'`: stub every endpoint a component mounts.
+
+## Typed API client
+
+There isn't one, on purpose. Every endpoint is a hand-typed wrapper in `src/api/<feature>.ts` — authenticated calls through `src/api/authedFetch.ts`, anonymous ones through `jsonFetch` in `src/api/auth.ts` (with one exception: `verifyEmail.ts` stays on a raw `fetch`). The OpenAPI type generator, the typed-client runtime that consumed its output, the `codegen` script and the committed types stub under `src/api/` all left with issue #325: nothing imported any of them, so the generated types typed nothing and the dependency's Dependabot bumps were vacuous by construction.
+
+If a typed client is ever wanted it re-adds a pinned dependency in the same PR that writes the middleware, against a freshly generated type rather than a stub — and that middleware must **delegate** to `authedFetch`'s 401 policy rather than restate it. See §8 #3 of [`docs/superpowers/specs/2026-09-01-client-401-recovery-design.md`](../docs/superpowers/specs/2026-09-01-client-401-recovery-design.md); the client #325 deleted is what a restatement looks like.
 
 ## Layout
 
 ```
 src/
 ├── api/
-│   ├── client.ts           # openapi-fetch wrapper, refresh-cookie 401 retry
-│   ├── openapi.gen.ts      # generated by `npm run codegen`
-│   ├── catalog.ts          # anonymous /v1/public/catalog/services
-│   ├── verifyEmail.ts      # /v1/auth/client/verify-email{,/resend}
-│   ├── auth.ts             # register, login, /me, password recovery, MFA
-│   ├── subscriptions.ts    # /v1/me/subscriptions self-service
-│   └── payments.ts         # /v1/me/payments/{,setup-}checkout-session
+│   ├── client.ts           # apiBaseURL — the base-URL resolver, and nothing else
+│   ├── authedFetch.ts      # THE authenticated request path + the only 401 recovery
+│   ├── auth.ts             # register, login, /me, password recovery, MFA, policy, OAuth providers + start; jsonFetch, the anonymous path
+│   ├── avatar.ts           # /v1/me/avatar/* self-service (putAvatarBlob stays on raw fetch — presigned, credentials:'omit')
+│   ├── billingProfile.ts   # /v1/me/billing-identity
+│   ├── dsr.ts              # /v1/me/dsr/{export,erasure-request} — GDPR Art. 15 / 17 self-service
+│   └── verifyEmail.ts      # /v1/auth/client/verify-email{,/resend} — anonymous, raw fetch
 ├── auth/
-│   ├── AuthProvider.tsx    # React context (in-memory access token)
-│   ├── tokenStore.ts       # module-scoped token + refresh coalescing
-│   ├── memberships.ts      # JWT mbr-claim decode + useOwnedTenants()
+│   ├── AuthProvider.tsx    # React context (in-memory access token, bootstrapFromRefreshCookie)
+│   ├── tokenStore.ts       # module-scoped token; one unconditional, coalesced refresh; cookie bootstrap
+│   ├── sessionMarker.ts    # localStorage hint that a refresh cookie probably exists
 │   ├── useAuth.ts          # context hook
 │   ├── useMe.ts            # /me TanStack Query wrapper
-│   └── RequireAuth.tsx     # router guard with ?next= round-trip
-├── components/             # Layout shell, language switcher
-├── lib/
-│   ├── stripe.ts           # lazy Stripe.js loader (reserved for future use)
-│   └── format.ts           # Intl currency + cycle helpers
+│   └── RequireAuth.tsx     # router guard: waits for the bootstrap, then the ?next= round-trip
+├── components/             # Layout shell, language switcher, avatar, MfaChallenge
+├── lib/                    # format helpers, avatar colour, safeNext, OAuth return-target + callback parser
 ├── locales/                # it.json, en.json — react-i18next bundles
-├── pages/                  # routed views (HomePage, CatalogPage, …)
+├── pages/                  # routed views (LoginPage, OAuthCallbackPage, AccountPage, …)
+├── test/                   # Vitest harness: setup, MSW server + handlers, renderWithProviders
 ├── App.tsx                 # router
+├── App.test.tsx            # the OAuth callback through the real route table
 ├── main.tsx                # entry: providers + render
 ├── i18n.ts                 # i18next bootstrap (IT default, EN fallback)
 └── index.css               # Tailwind v4 entry + @theme overrides
@@ -90,28 +87,27 @@ src/
 
 ## Roadmap (per the MVP plan)
 
-| Phase | Scope                                                                                                                                                                                                                                       | Status  |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| 1     | Scaffold (Vite + React + auth shell + i18n + Tailwind + dev container)                                                                                                                                                                      | ✅ done |
-| 2     | Anonymous catalog browse + signup + email verification                                                                                                                                                                                      | ✅ done |
-| 3     | Login / account / profile / password change / MFA enrol                                                                                                                                                                                     | ✅ done |
-| 4     | Self-subscribe + Stripe Checkout (setup mode) + return URL                                                                                                                                                                                  | ✅ done |
-| 5     | Account dashboard — subscriptions list + detail (invoices, activity, cancel/reactivate, pay-outstanding), transactions, payment methods. Polymorphic-owner aware; owner switcher renders only when the caller has at least one owned tenant | ✅ done |
+| Phase | Scope                                                                        | Status in the base                      |
+| ----- | ---------------------------------------------------------------------------- | --------------------------------------- |
+| 1     | Scaffold (Vite + React + auth shell + i18n + Tailwind + dev container)       | ✅ shipped                              |
+| 2     | Anonymous signup + email verification                                        | ✅ shipped                              |
+| 3     | Login / account / profile / password change / MFA enrol                      | ✅ shipped                              |
+| 3b    | Web OAuth login (Google / Apple / GitHub / Discord) through the client relay | ✅ shipped                              |
+| 4     | Self-subscribe + Stripe Checkout (setup mode) + return URL                   | ❌ removed by ADR-0006 — fork territory |
+| 5     | Subscriptions / transactions / payment-methods dashboard + owner switcher    | ❌ removed by ADR-0006 — fork territory |
 
-Phase E AI runtime endpoints (deferred per ADR-0003) stay stubbed — the dashboard renders "Open service" placeholders until those routes land.
+Phases 4–5 were built and then removed with the `subscriptions`/`payments` addons — as was phase 2's anonymous **catalog browse**, so the base's anonymous surface is home + signup + email verify. A fork rebuilding that layer can crib from the archived `orkestra-cc/orkestra-addon-{subscriptions,payments}` repos or from this repo's history before the ADR-0006 removal; `CLAUDE.md` keeps the design notes under its "Fork reference" headings.
+
+Web OAuth login for the client tier landed with the password-login toggle work (spec: `docs/superpowers/specs/2026-08-29-password-login-toggle-design.md` §4.10).
 
 ## Production build
 
 ```bash
-docker build \
-  --build-arg VITE_API_BASE=https://api.orkestra.cc \
-  --build-arg VITE_STRIPE_PUBLISHABLE_KEY=pk_live_... \
-  -t orkestra-client:staging \
-  frontend-client/
+docker build -t orkestra-client:staging frontend-client/
 ```
 
-Vite inlines the `VITE_*` build args at compile time, so each environment ships a separate image (staging at `app.orkestra.cc`, prod at `app.orkestra.com`).
+**One image serves every environment.** `VITE_API_BASE` is no longer a build arg (`ORKESTRA_VERSION` is the only one the `Dockerfile` declares): the nginx entrypoint regenerates `/config.js` from the container's `ORKESTRA_API_BASE` — plus the reserved `ORKESTRA_STRIPE_PUBLISHABLE_KEY` — at start-up, so staging (`app.orkestra.cc`) and prod (`app.orkestra.com`) run the same tag with different env. See "Runtime config" in [CLAUDE.md](CLAUDE.md).
 
-## Backend gaps closed by Phase 0
+## Backend routes this SPA needs
 
-The MVP relies on a small set of `/v1/me/*` self-service endpoints already mounted on the client surface (subscriptions, invoices, transactions, payment methods, Stripe Checkout). See `backend/internal/addons/{subscriptions,payments}/CLAUDE.md` for the route map. The OAuth metadata flow and email-verification routes were already in place prior to this app.
+Everything the base calls is already mounted on the client surface: `/v1/auth/client/*` (register, verify-email, login, OAuth start + relay completion, password recovery, MFA) and the `/v1/me/*` self-service slice (profile, avatar, billing identity, DSR). There is no `backend/internal/addons/` in the base — a fork adding a vertical mounts its own routes on `ri.Client.ProtectedRouter`; see "Adding a feature" in [CLAUDE.md](CLAUDE.md).

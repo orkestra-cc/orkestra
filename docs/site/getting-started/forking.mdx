@@ -39,7 +39,7 @@ make init
 `make init` (defined in the Makefile, implemented in [`scripts/init.sh`](https://github.com/orkestra-cc/orkestra/blob/main/scripts/init.sh)) is idempotent and does three things:
 
 1. Copies `docker/.env.example` → `docker/.env`.
-2. Fills five `REPLACE_WITH_RANDOM_HEX_*` placeholders with `openssl rand` output: `COOKIE_SECRET`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `ORKESTRA_KMS_MASTER_KEY`, `MONGO_ROOT_PASSWORD`, `REDIS_PASSWORD`.
+2. Fills six `REPLACE_WITH_RANDOM_HEX_*` placeholders with `openssl rand` output: `COOKIE_SECRET`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `ORKESTRA_KMS_MASTER_KEY`, `MONGO_ROOT_PASSWORD`, `REDIS_PASSWORD`, `STORAGE_SECRET_KEY` (the last one doubles as the bundled RustFS root secret — no compose file carries a fallback for it).
 3. Runs [`scripts/generate-jwt-keys.sh`](https://github.com/orkestra-cc/orkestra/blob/main/scripts/generate-jwt-keys.sh) to produce an RS256 key pair under `docker/keys/`.
 4. Creates the `orkestra-network` Docker bridge.
 
@@ -78,7 +78,7 @@ cd docker
 docker compose -f docker-compose.dev.yml --env-file .env up -d
 ```
 
-This builds `docker/Dockerfile.dev-backend` (public `golang:1.25.10-alpine`, AIR pre-baked — no registry auth) and boots the backend (AIR hot-reload) plus both frontends (Vite HMR). First boot takes ~30 s while it builds the image and runs `go mod download`; subsequent restarts are instant. A fork with a Chainguard subscription can swap the base image via the `GO_BASE` build-arg — see [dev-images](/architecture/dev-images).
+This builds `docker/Dockerfile.dev-backend` (public `golang:1.26.8-alpine`, AIR pre-baked — no registry auth) and boots the backend (AIR hot-reload) plus both frontends (Vite HMR). First boot takes ~30 s while it builds the image and runs `go mod download`; subsequent restarts are instant. A fork with a Chainguard subscription can swap the base image via the `GO_BASE` build-arg — see [dev-images](/architecture/dev-images).
 
 If you've pushed your own backend image to a registry, override `BACKEND_IMAGE_REPO` — see the README "Forking the image registry" section.
 

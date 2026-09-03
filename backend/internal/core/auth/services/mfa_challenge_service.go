@@ -66,6 +66,16 @@ type MFAChallenge struct {
 	RiskFactors []string `json:"riskFactors,omitempty"`
 	TrustLevel  string   `json:"trustLevel,omitempty"`
 	SourceAMR   []string `json:"sourceAmr,omitempty"`
+	// Audience names the surface the login challenge was minted for
+	// ("operator" | "client"). REQUIRED on post-toggle challenges: the
+	// completion re-check (spec §4.3) evaluates the per-surface password
+	// policy against it, and an empty/unknown value marks a pre-toggle
+	// in-flight challenge, which completion refuses and consumes.
+	Audience string `json:"audience,omitempty"`
+	// BreakGlassUsed records that the INITIAL password check was allowed
+	// by the operator break-glass rather than persisted policy. Audit
+	// context only — completion still requires a fresh decision.
+	BreakGlassUsed bool `json:"breakGlassUsed,omitempty"`
 }
 
 // LoginChallengeInput bundles the device + network context the login flow
@@ -87,6 +97,11 @@ type LoginChallengeInput struct {
 	RiskScore   float64
 	RiskFactors []string
 	TrustLevel  string
+	// Audience / BreakGlassUsed are stamped by the login producers so the
+	// completion re-check can re-evaluate the per-surface password policy
+	// (spec §4.3) and audit a rescued completion. See MFAChallenge.
+	Audience       string
+	BreakGlassUsed bool
 }
 
 // MFAChallengeService issues, looks up, and consumes short-lived challenges
@@ -163,6 +178,9 @@ func (s *mfaChallengeService) BeginLogin(ctx context.Context, in LoginChallengeI
 		RiskFactors: append([]string(nil), in.RiskFactors...),
 		TrustLevel:  in.TrustLevel,
 		SourceAMR:   append([]string(nil), in.SourceAMR...),
+
+		Audience:       in.Audience,
+		BreakGlassUsed: in.BreakGlassUsed,
 	}
 	payload, err := json.Marshal(ch)
 	if err != nil {

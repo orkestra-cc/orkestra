@@ -59,6 +59,15 @@ type ServerConfig struct {
 	CORSOrigins []string // Allowed CORS origins (legacy single-host fallback)
 	MaxBodySize int64    // Maximum request body size in bytes (default 10MB)
 
+	// APIDocsEnabled controls whether /docs (Scalar UI) and /openapi.json
+	// are registered at all. Default: on in development, OFF in
+	// production-like environments. The OpenAPI document is a complete
+	// route inventory, and the docs page executes a third-party bundle on
+	// the API origin — the same origin that carries the HttpOnly refresh
+	// cookie — so an internet-reachable deployment must opt in explicitly
+	// (API_DOCS_ENABLED=true) and gate both paths at the edge when it does.
+	APIDocsEnabled bool
+
 	// TrustedProxyCount / TrustedProxyCIDRs describe the reverse proxies
 	// between the internet and this process, and are what makes
 	// X-Forwarded-For believable. See shared/middleware/realip.go.
@@ -100,6 +109,12 @@ type AudienceConfig struct {
 	// signup on the client SPA gets a verify URL on the client host (not
 	// the operator console). Empty falls back to ServerConfig.FrontendURL.
 	FrontendURL string
+	// PublicURL is the public origin of this audience's API (scheme +
+	// host, no path). The auth module redirects a client-tier OAuth
+	// callback to `{Client.PublicURL}/v1/auth/client/oauth/complete` so
+	// the refresh cookie is set by the host that owns it. Read from
+	// CLIENT_API_URL; empty means no client surface.
+	PublicURL string
 }
 
 type DatabaseConfig struct {
@@ -129,6 +144,13 @@ type AuthConfig struct {
 	Discord                 DiscordOAuthConfig
 	GitHub                  GitHubOAuthConfig
 	AllowLocalhostRedirects bool // Allow localhost OAuth redirects (should be false in production)
+	// OperatorPasswordLoginBreakGlass mirrors AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS:
+	// a boot-time, operator-login-only override of passwordLoginEnabledAdmin
+	// (spec §4.2). It never opens client login, registration, resets,
+	// password-confirm or unlink decisions, and never bypasses the
+	// loginEnabledAdmin maintenance switch or the MFA/low-risk/RBAC gates
+	// on the subsequent config repair.
+	OperatorPasswordLoginBreakGlass bool
 }
 
 type JWTConfig struct {
@@ -151,8 +173,9 @@ type CookieConfig struct {
 	// OperatorDomain scopes refresh-token cookies minted on the operator
 	// host (`console.*`) — set via `OPERATOR_COOKIE_DOMAIN`.
 	OperatorDomain string
-	// ClientDomain scopes refresh-token cookies minted on the client
-	// host (`api.*`) — set via `CLIENT_COOKIE_DOMAIN`.
+	// ClientDomain scopes refresh-token cookies minted on the client API
+	// host — set via `CLIENT_COOKIE_DOMAIN`. Empty by default (host-only),
+	// like OperatorDomain.
 	ClientDomain string
 	HttpOnly     bool
 	Secure       bool
@@ -220,16 +243,25 @@ func Load() (*Config, error) {
 	defaultClientHost := ""
 	if env == "development" {
 		defaultConsoleHost = "console.localhost:3000"
-		defaultClientHost = "api.localhost:3000"
+		// The client API answers on the client SPA's OWN hostname. Every
+		// client-tier cookie is SameSite=Lax with an empty Domain, and
+		// `localhost` is not a public suffix, so client.localhost and
+		// api.localhost are different *sites* to a browser: an api.* client
+		// API cannot store or send them. Ports play no part in a site, so
+		// the SPA on :8081 and the API on :3000 are same-site (and still
+		// cross-origin). See docker/CLAUDE.md, "Client tier: the SPA and
+		// the client API must be same-site".
+		defaultClientHost = "client.localhost:3000"
 	}
 
 	config.Server = ServerConfig{
-		Port:        getEnv("PORT", "3000"),
-		Environment: env,
-		LogLevel:    getEnv("LOG_LEVEL", "info"),
-		FrontendURL: getEnv("FRONTEND_URL", "http://localhost:8080"),
-		CORSOrigins: corsOrigins,
-		MaxBodySize: getEnvAsInt64("MAX_BODY_SIZE", 10*1024*1024), // Default 10MB
+		Port:           getEnv("PORT", "3000"),
+		Environment:    env,
+		LogLevel:       getEnv("LOG_LEVEL", "info"),
+		FrontendURL:    getEnv("FRONTEND_URL", "http://localhost:8080"),
+		CORSOrigins:    corsOrigins,
+		MaxBodySize:    getEnvAsInt64("MAX_BODY_SIZE", 10*1024*1024), // Default 10MB
+		APIDocsEnabled: getEnvAsBool("API_DOCS_ENABLED", defaultAPIDocsEnabled(env)),
 
 		TrustedProxyCount: getEnvAsInt("TRUSTED_PROXY_COUNT", 0),
 		TrustedProxyCIDRs: getEnvAsSlice("TRUSTED_PROXY_CIDRS", nil),
@@ -252,6 +284,13 @@ func Load() (*Config, error) {
 			FrontendURL: getEnv("CLIENT_FRONTEND_URL", ""),
 		},
 	}
+
+	// CLIENT_API_URL is the client API's public origin — where the auth
+	// module relays a client-tier OAuth callback so the refresh cookie is
+	// set by the host that owns it (spec §4.10). Derived from
+	// CLIENT_API_HOST when unset: https in production-like environments,
+	// http in development. Empty when no client surface exists.
+	config.Server.Client.PublicURL = getEnv("CLIENT_API_URL", derivedPublicURL(config.Server.Client.Host, config.IsProductionLike()))
 
 	config.Database = DatabaseConfig{
 		MongoURI:        getEnv("MONGO_URI", "mongodb://localhost:27017/orkestra"),
@@ -292,22 +331,51 @@ func Load() (*Config, error) {
 		Cookie: CookieConfig{
 			Secret: getEnv("COOKIE_SECRET", "default-cookie-secret"),
 			Name:   getEnv("COOKIE_NAME_REFRESH", "orkestra_cookie"),
-			// ADR-0003 PR-D D-9: per-audience cookie domains. Dev defaults
-			// align with the per-audience host defaults above so the
-			// browser scopes refresh cookies to the matching subdomain
-			// without contributors having to set anything. Prod defaults
-			// are left empty — operators set them explicitly so a cookie is
-			// never minted with a domain that crosses both audiences.
+			// ADR-0003 PR-D D-9: per-audience cookie domains. BOTH default
+			// to "" in every environment since bdcbb7ab — see
+			// defaultOperatorCookieDomain / defaultClientCookieDomain below.
+			// An empty value writes no Domain attribute at all, so the
+			// cookie is host-only: scoped to whatever host minted it, which
+			// round-trips on localhost, on *.localhost and on a LAN IP.
+			// Operators set one explicitly only for a cross-subdomain
+			// deployment; a domain that crosses both audiences is the thing
+			// to avoid. Note these are NOT a lever for a cross-site
+			// SPA/API layout: SameSite is computed from the request's site,
+			// never from the cookie's Domain.
 			OperatorDomain: getEnv("OPERATOR_COOKIE_DOMAIN", defaultOperatorCookieDomain(env)),
 			ClientDomain:   getEnv("CLIENT_COOKIE_DOMAIN", defaultClientCookieDomain(env)),
 			HttpOnly:       getEnvAsBool("COOKIE_HTTP_ONLY", true),
 			Secure:         getEnvAsBool("COOKIE_SECURE", false), // Default false for development
 			SameSite:       getEnv("COOKIE_SAME_SITE", "lax"),
 		},
+		// OAuth callback fallbacks. These are NOT the redirect_uri the IdP
+		// receives: nothing outside a test reads
+		// cfg.Auth.<Provider>.RedirectURL. The value the login POST sends and
+		// the callback exchanges on is the auth module config
+		// auth.<provider>RedirectURL, read per request by
+		// services.OAuthConfigResolver — seeded from the same
+		// OAUTH_*_REDIRECT_URL env var when one is exported, and empty when
+		// it is not (the field carries no schema Default, and
+		// docker/.env.example ships the keys commented out). An operator
+		// changes it at /admin/modules/auth, not here.
+		//
+		// They are kept honest anyway. The path is the MOUNTED one —
+		// RegisterOAuthRoutes (core/auth/handlers/auth_handler.go) puts all
+		// four callbacks under /v1/auth/oauth/{provider}/callback, and the
+		// pre-/v1 path these fallbacks used to carry was served by nothing
+		// (spec §8 #13). The host stays localhost:3000, which is convention
+		// A — the orkestra_oauth_state cookie is host-only and SameSite=Lax,
+		// so the login-POST host and the callback host must be the SAME
+		// host, and localhost:3000 is what the shipped console talks to.
+		// utils.NewRedirectURIConfig's allow-list carries the same four
+		// strings; TestOAuthRedirectDefaultsAreMountedRoutes
+		// (core/auth/handlers) checks all eight against the real router, so
+		// neither list can drift from the mount or from the other — the only
+		// guard there is, since no runtime read would surface a divergence.
 		Google: GoogleOAuthConfig{
 			ClientID:        getEnv("OAUTH_GOOGLE_CLIENT_ID", ""),
 			ClientSecret:    getEnv("OAUTH_GOOGLE_CLIENT_SECRET", ""),
-			RedirectURL:     getEnv("OAUTH_GOOGLE_REDIRECT_URL", "http://localhost:3000/auth/oauth/google/callback"),
+			RedirectURL:     getEnv("OAUTH_GOOGLE_REDIRECT_URL", "http://localhost:3000/v1/auth/oauth/google/callback"),
 			AndroidClientID: getEnv("OAUTH_GOOGLE_ANDROID_CLIENT_ID", ""),
 			IOSClientID:     getEnv("OAUTH_GOOGLE_IOS_CLIENT_ID", ""),
 		},
@@ -317,21 +385,22 @@ func Load() (*Config, error) {
 			KeyID:           getEnv("OAUTH_APPLE_KEY_ID", ""),
 			PrivateKey:      getEnv("OAUTH_APPLE_PRIVATE_KEY", ""),
 			PrivateKeyPath:  getEnv("OAUTH_APPLE_PRIVATE_KEY_PATH", ""),
-			RedirectURL:     getEnv("OAUTH_APPLE_REDIRECT_URL", "http://localhost:3000/auth/oauth/apple/callback"),
+			RedirectURL:     getEnv("OAUTH_APPLE_REDIRECT_URL", "http://localhost:3000/v1/auth/oauth/apple/callback"),
 			IOSClientID:     getEnv("OAUTH_APPLE_IOS_CLIENT_ID", ""),
 			AndroidClientID: getEnv("OAUTH_APPLE_ANDROID_CLIENT_ID", ""),
 		},
 		Discord: DiscordOAuthConfig{
 			ClientID:     getEnv("OAUTH_DISCORD_CLIENT_ID", ""),
 			ClientSecret: getEnv("OAUTH_DISCORD_CLIENT_SECRET", ""),
-			RedirectURL:  getEnv("OAUTH_DISCORD_REDIRECT_URL", "http://localhost:3000/auth/oauth/discord/callback"),
+			RedirectURL:  getEnv("OAUTH_DISCORD_REDIRECT_URL", "http://localhost:3000/v1/auth/oauth/discord/callback"),
 		},
 		GitHub: GitHubOAuthConfig{
 			ClientID:     getEnv("OAUTH_GITHUB_CLIENT_ID", ""),
 			ClientSecret: getEnv("OAUTH_GITHUB_CLIENT_SECRET", ""),
-			RedirectURL:  getEnv("OAUTH_GITHUB_REDIRECT_URL", "http://localhost:3000/auth/oauth/github/callback"),
+			RedirectURL:  getEnv("OAUTH_GITHUB_REDIRECT_URL", "http://localhost:3000/v1/auth/oauth/github/callback"),
 		},
-		AllowLocalhostRedirects: getEnvAsBool("ALLOW_LOCALHOST_REDIRECTS", true), // Default true for development
+		AllowLocalhostRedirects:         getEnvAsBool("ALLOW_LOCALHOST_REDIRECTS", true), // Default true for development
+		OperatorPasswordLoginBreakGlass: getEnvAsBool("AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS", false),
 	}
 
 	config.Rate = RateLimitConfig{
@@ -395,9 +464,61 @@ func (c *Config) Validate() error {
 		if c.Auth.Google.ClientSecret == "" {
 			return fmt.Errorf("OAUTH_GOOGLE_CLIENT_SECRET is required in production")
 		}
+
+		// Object-storage credentials. On the bundled RustFS the backend's
+		// secret IS the store's root secret (docker-compose.infra.yml
+		// derives RUSTFS_SECRET_KEY from it) and the S3 API is browser-
+		// facing behind the proxy, so a placeholder or a trivially short
+		// value is a misconfiguration to refuse, not a choice to honour.
+		// Both keys empty is still allowed: that disables blob storage,
+		// and the boot log says so. scripts/env-validate.sh applies the
+		// same rule before a deploy; this is the last line of defense for
+		// anyone who runs the compose files by hand.
+		if c.Storage.AccessKey != "" || c.Storage.SecretKey != "" {
+			if reason := weakSecretReason(c.Storage.SecretKey); reason != "" {
+				return fmt.Errorf("STORAGE_SECRET_KEY %s in production/staging — generate one with `openssl rand -hex 16` (make init does) and keep RUSTFS_ROOT_PASSWORD in step unless the backend uses a scoped key", reason)
+			}
+		}
 	}
 
 	return nil
+}
+
+// placeholderSecretPrefixes and placeholderSecretExact are every literal that
+// docker/.env.example, the compose files or the bundled images have ever
+// shipped or defaulted to as a secret. Compared lower-cased. Mirrors
+// secret_is_placeholder in scripts/env-file.sh — keep the two in step.
+var placeholderSecretPrefixes = []string{
+	"changeme", "replace_with_", "generate", "your_", "placeholder", "example", "dev-", "dev_",
+}
+
+var placeholderSecretExact = map[string]bool{
+	"rustfsadmin": true, "minioadmin": true, "password": true, "secret": true, "admin": true,
+}
+
+// minSecretLength is what `openssl rand -hex 16` comfortably exceeds (32).
+const minSecretLength = 16
+
+// weakSecretReason reports why v is not an acceptable production secret —
+// "is empty", "is a placeholder", "is shorter than N characters" — or "" when
+// it is acceptable.
+func weakSecretReason(v string) string {
+	lower := strings.ToLower(strings.TrimSpace(v))
+	if lower == "" {
+		return "is empty"
+	}
+	if placeholderSecretExact[lower] {
+		return "is a placeholder"
+	}
+	for _, p := range placeholderSecretPrefixes {
+		if strings.HasPrefix(lower, p) {
+			return "is a placeholder"
+		}
+	}
+	if len(v) < minSecretLength {
+		return fmt.Sprintf("is shorter than %d characters", minSecretLength)
+	}
+	return ""
 }
 
 // printJWTWarning prints a prominent warning when JWT keys are not loaded
@@ -448,9 +569,35 @@ func defaultOperatorCookieDomain(_ string) string {
 }
 
 // defaultClientCookieDomain mirrors defaultOperatorCookieDomain for the
-// client surface (api.*).
+// client API surface.
 func defaultClientCookieDomain(_ string) string {
 	return ""
+}
+
+// derivedPublicURL builds "scheme://host" for an audience whose public
+// origin was not configured explicitly. The scheme follows the environment
+// (a production-like deployment terminates TLS in front of the API).
+func derivedPublicURL(host string, secure bool) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	if strings.Contains(host, "://") {
+		return strings.TrimRight(host, "/")
+	}
+	scheme := "http"
+	if secure {
+		scheme = "https"
+	}
+	return scheme + "://" + host
+}
+
+// defaultAPIDocsEnabled is the API_DOCS_ENABLED default: serve /docs and
+// /openapi.json only where the process is not internet-reachable by
+// design. Staging counts as production-like for the same reason the
+// dev-token endpoint treats it that way — it is reachable from outside.
+func defaultAPIDocsEnabled(env string) bool {
+	return env != "production" && env != "staging"
 }
 
 func getEnv(key, defaultValue string) string {

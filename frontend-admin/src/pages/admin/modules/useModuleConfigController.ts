@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useWatch, type UseFormReturn } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import type { ConfigField, ModuleConfig } from 'store/api/moduleApi';
 import {
+  CONFIG_REVISION_STALE,
+  moduleApi,
   useGetModuleEnvironmentQuery,
   useUpdateModuleEnvironmentMutation
 } from 'store/api/moduleApi';
+import { useAppDispatch } from 'store/hooks';
 import {
   buildGroupTree,
   flattenTree,
@@ -24,6 +27,11 @@ import {
   type PendingCreates
 } from './useModuleConfigForm';
 import { expandElement, labelKeyOf, rosterOf } from './recordList/expandSchema';
+import {
+  captureDraftFromDirty,
+  resolveDraft,
+  type DraftEntry
+} from './configDraft';
 import { useRosterReconciliation } from './recordList/useRosterReconciliation';
 import type { RecordListEditingContext } from './recordList/RecordListContext';
 import { buildSavePayload } from './recordList/buildSavePayload';
@@ -128,6 +136,32 @@ export interface ModuleConfigController {
   cancelDeletion: () => void;
   error: string | null;
   success: boolean;
+  /**
+   * True after a save lost the backend's compare-and-swap
+   * (`module.config_revision_stale`). Save stays disabled until a reload has
+   * SUCCEEDED: nothing is auto-retried, because a retry would re-send a
+   * typed secret and re-decide the change against a state the operator
+   * never saw.
+   */
+  conflict: boolean;
+  /**
+   * Refetches the environment baseline and re-applies ONLY the operator's
+   * dirty fields on top of it — non-secret edits (an intentional clear to
+   * '' included) and unsent non-empty secrets — so the diff is recomputed
+   * against what the server holds now. Fields the operator never touched
+   * adopt the other writer's values. Pending record-list membership —
+   * staged removals AND unsaved creates — is discarded on every successful
+   * reload, even when this profile's revision did not move (they were
+   * decided against a state the 409 says is gone). A failed refetch leaves
+   * the conflict latched.
+   *
+   * It also invalidates the module tag so the parent's module query
+   * refetches — an activation is one of the things that causes this
+   * conflict, and the `live` badge must not stay stale. A dirty field whose
+   * record-list element the other operator removed cannot be re-applied;
+   * those entries are counted and reported, never dropped in silence.
+   */
+  reloadAndReview: () => Promise<void>;
   clearError: () => void;
   onSave: () => Promise<void>;
   handleDiscard: () => void;
@@ -160,17 +194,38 @@ export const useModuleConfigController = (
   environment: string
 ): ModuleConfigController => {
   const { t } = useTranslation();
+  const dispatch = useAppDispatch();
 
-  const { data: envConfig, isLoading: envLoading } =
-    useGetModuleEnvironmentQuery(
-      { name: mod?.moduleName ?? '', environment },
-      { skip: !mod || !mod.availableEnvironments?.length }
-    );
+  const {
+    data: envConfig,
+    isLoading: envLoading,
+    refetch: refetchEnv
+  } = useGetModuleEnvironmentQuery(
+    { name: mod?.moduleName ?? '', environment },
+    { skip: !mod || !mod.availableEnvironments?.length }
+  );
   const [updateEnv, { isLoading: saving }] =
     useUpdateModuleEnvironmentMutation();
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  // The draft captured by reloadAndReview, consumed by the re-seed effect
+  // once the fresh baseline lands. A ref, not state: it must survive the
+  // render the refetch triggers without itself causing one. Tagged with the
+  // environment it belongs to so a switch mid-reload can never inject it
+  // into another profile.
+  const pendingDraft = useRef<{
+    environment: string;
+    entries: DraftEntry[];
+  } | null>(null);
+  // How many draft entries the last re-seed had to discard. A ref because
+  // the re-seed effect and `reloadAndReview`'s own continuation both write
+  // `error` and their order is not fixed — whichever runs second reads this
+  // and reports the same thing, so the notice cannot be lost to a race.
+  const droppedEntries = useRef(0);
+  const droppedEditsMessage = (count: number) =>
+    t('adminModules.detail.configCard.reloadDroppedEdits', { count });
 
   const schema = mod?.configSchema ?? EMPTY_SCHEMA;
   // The fetched environment wins once it has loaded; before that (or for a
@@ -189,18 +244,33 @@ export const useModuleConfigController = (
   // the reconciliation effect below can seed it into the form.
   const [pendingLabels, setPendingLabels] = useState<ConfigValues>({});
 
+  // Which secrets the backend already stores. Threaded into the form's
+  // resolver so a required-but-stored secret is not flagged as missing, and
+  // memoised because the resolver rebuild is keyed on its identity.
+  const secretStatus = useMemo(
+    () => envConfig?.secretStatus ?? mod?.secretStatus ?? {},
+    [envConfig?.secretStatus, mod?.secretStatus]
+  );
+
   const { form, defaults, fieldNames, expandedSchema } = useModuleConfigForm(
     schema,
     configSource,
-    created
+    created,
+    secretStatus
   );
 
-  // Re-seed the form whenever the server-known baseline changes: the
-  // initial environment fetch resolving, switching environments, or a
-  // fresh `mod.configValues` reference from the parent. Deliberately NOT
-  // keyed on `defaults`/`form` — both are recomputed every render, and
-  // depending on `defaults` would reset on every keystroke, discarding the
-  // very edits the sticky bar exists to accumulate across groups.
+  // Re-seed the form whenever the server-known baseline changes — keyed on
+  // `configSource`, which IS that baseline: the initial environment fetch
+  // resolving, switching environments, or (for a module with no
+  // environments) a fresh `mod.configValues` reference from the parent.
+  // Keying on `envConfig`/`mod.configValues` separately covered the same
+  // triggers plus one that is not a baseline change at all: refreshing the
+  // module snapshot while a profile is loaded (what `reloadAndReview` now
+  // does for the `live` badge) minted a new `mod.configValues` reference and
+  // reset the form under the operator's draft. Still deliberately NOT keyed
+  // on `defaults`/`form` — both are recomputed every render, and depending
+  // on `defaults` would reset on every keystroke, discarding the very edits
+  // the sticky bar exists to accumulate across groups.
   useEffect(() => {
     form.reset(defaults);
     // Pending membership belongs to the baseline that produced it. Carrying a
@@ -209,12 +279,36 @@ export const useModuleConfigController = (
     setCreated(EMPTY_CREATES);
     setStagedRemovals(EMPTY_CREATES);
     setPendingLabels({});
+    // Reload & review: put the operator's DIRTY fields back on top of the
+    // fresh baseline. A non-secret edit is re-applied only while it still
+    // differs from the new baseline — including an intentional clear to ''
+    // when the baseline is non-empty; an edit the other writer already made
+    // is no longer a change. A secret's baseline is always '' (never
+    // echoed), so a typed secret is always a change.
+    const draft = pendingDraft.current;
+    pendingDraft.current = null;
+    let dropped = 0;
+    if (draft && draft.environment === environment) {
+      // The roster was rebuilt from the fresh baseline, so each entry is
+      // resolved through the NEW name mapping by its immutable schema key —
+      // never by the name it carried before, which the reload may have
+      // reassigned to a colliding field of another element. A key with no
+      // name belongs to an element the other operator removed: `setValue`
+      // would write it into a field nothing renders and nothing saves, so
+      // the edit would disappear without a word. Counted and reported.
+      const resolved = resolveDraft(draft.entries, fieldNames, defaults);
+      dropped = resolved.dropped;
+      for (const [name, value] of resolved.apply) {
+        form.setValue(name, value, { shouldDirty: true });
+      }
+    }
     // The save alerts belong to the baseline that produced them. A "save
     // failed" banner from `production` still on screen after switching to
     // `sandbox` reads as a failure against the environment now displayed —
     // and a lingering success tick is just as misleading once the form
     // underneath has been re-seeded from a different source.
-    setError(null);
+    droppedEntries.current = dropped;
+    setError(dropped > 0 ? droppedEditsMessage(dropped) : null);
     setSuccess(false);
     // Validate the freshly seeded values once, right here. `mode: 'onChange'`
     // asks react-hook-form to validate a field when *that field* fires a
@@ -228,7 +322,7 @@ export const useModuleConfigController = (
     // values that need the same treatment, and gating on the same deps keeps
     // it from re-running per keystroke.
     void form.trigger();
-  }, [envConfig, mod?.configValues]);
+  }, [configSource]);
 
   // A roster that moves leaves react-hook-form holding registrations, errors
   // and values for elements that are gone, and holding nothing for ones that
@@ -251,8 +345,6 @@ export const useModuleConfigController = (
     [schema, mod?.configGroups]
   );
   const flatNodes = useMemo(() => flattenTree(groupTree), [groupTree]);
-
-  const secretStatus = envConfig?.secretStatus ?? mod?.secretStatus ?? {};
 
   // Live values for visibility (dependsOn can reference a field in a
   // different group than the one currently on screen) and for the save
@@ -424,6 +516,10 @@ export const useModuleConfigController = (
       setPendingDeletion(labels);
       return;
     }
+    // Belt and braces: the save bar already disables Save while a conflict is
+    // latched, so reaching here means some other path tried to submit against
+    // a baseline the operator has not reviewed.
+    if (conflict) return;
     setPendingDeletion(null);
     const formValues = form.getValues();
     // Diffed over the EXPANDED schema: an element's sub-fields are the
@@ -505,16 +601,27 @@ export const useModuleConfigController = (
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err: unknown) {
-      // A 409 here means the roster moved under the operator — another
-      // session added or removed an element between the fetch and this save.
-      // The backend's `detail` is accurate but written for an API client;
-      // this is the one failure with an action attached, so it gets a message
-      // that names it.
+      // Two different 409s land here and the body `code` is what tells them
+      // apart. The backend's `detail` is accurate but written for an API
+      // client, so each gets a message that names what happened — and only
+      // the stale-revision one has an action attached.
       const status =
         err && typeof err === 'object' && 'status' in err
           ? (err as { status?: number }).status
           : undefined;
+      const code =
+        err && typeof err === 'object' && 'data' in err
+          ? (err as { data?: { code?: string } }).data?.code
+          : undefined;
+      if (code === CONFIG_REVISION_STALE) {
+        // The document moved under this save — another operator, or a
+        // record-list write. Latch until a reload has succeeded.
+        setConflict(true);
+        setError(t('adminModules.detail.configCard.revisionConflict'));
+        return;
+      }
       if (status === 409) {
+        // Codeless 409: the record-list roster moved (slug exists / missing).
         setError(t('adminModules.recordList.conflict'));
         return;
       }
@@ -540,6 +647,115 @@ export const useModuleConfigController = (
     setPendingDeletion(null);
     setError(null);
     setSuccess(false);
+    setConflict(false);
+    pendingDraft.current = null;
+  };
+
+  // The dirty fields, re-keyed to schema keys by `captureDraftFromDirty` —
+  // see configDraft.ts for why the register name cannot survive a reload.
+  const captureDirtyDraft = (): DraftEntry[] =>
+    captureDraftFromDirty(
+      form.formState.dirtyFields as Readonly<Record<string, unknown>>,
+      form.getValues(),
+      fieldNames,
+      new Set(
+        expandedSchema
+          .filter(f => f.type === 'secret')
+          .map(f => fieldNameOf(fieldNames, f.key))
+      ),
+      // Fields of elements created in this session go with the membership
+      // change they belong to: the reload discards pending creates, so their
+      // values must not come back as orphan edits.
+      new Set(
+        schema
+          .filter(f => f.type === 'recordList')
+          .flatMap(f =>
+            (created[f.key] ?? []).flatMap(slug =>
+              expandElement(f, slug).map(leaf =>
+                fieldNameOf(fieldNames, leaf.key)
+              )
+            )
+          )
+      )
+    );
+
+  const reloadAndReview = async () => {
+    droppedEntries.current = 0;
+    pendingDraft.current = { environment, entries: captureDirtyDraft() };
+    try {
+      const fresh = await refetchEnv().unwrap();
+      // The profile is fresh now, but the module snapshot behind the `live`
+      // badge, the runtime status and `activeEnvironment` is a separate
+      // query — and an activation is one of the things that produces this
+      // very conflict, so it is exactly the stale view the operator must not
+      // review against. AWAITED, and before the latch is lifted: a failed
+      // module refetch that only invalidated a tag would leave the badge and
+      // `activeEnvironment` showing the pre-conflict world with Save enabled
+      // on top of it. The environment query's own tag (`${name}-env-${env}`)
+      // is untouched, so this adds no second profile request.
+      if (mod) {
+        // The list page is not what the operator is reviewing: its refetch
+        // stays fire-and-forget.
+        dispatch(
+          moduleApi.util.invalidateTags([{ type: 'Module', id: 'LIST' }])
+        );
+        const refresh = dispatch(
+          moduleApi.endpoints.getModule.initiate(mod.moduleName, {
+            forceRefetch: true
+          })
+        );
+        try {
+          await refresh.unwrap();
+        } finally {
+          // `initiate` adds a cache subscription of its own. The page's
+          // `useGetModuleQuery` owns that entry's lifetime; releasing ours
+          // here — on the throw too — keeps the reload from pinning it.
+          refresh.unsubscribe();
+        }
+      }
+      // Pending membership is discarded on EVERY successful reload, here and
+      // not only in the re-seed effect: a staged removal was decided against
+      // the state the operator saw, and the 409 says that state is gone —
+      // including when the refetch returns the same baseline reference (an
+      // activation, another profile's write, or a secrets-only save to this
+      // one), in which case the effect never runs at all.
+      setCreated(EMPTY_CREATES);
+      setStagedRemovals(EMPTY_CREATES);
+      setPendingLabels({});
+      setPendingDeletion(null);
+      if (fresh.configValues === configSource) {
+        // Same baseline reference ⇒ RTK Query kept the data (structural
+        // sharing) ⇒ the re-seed effect will not run. The form still holds
+        // the draft; nothing to re-apply.
+        //
+        // The test is identity, not `revision`: the two disagree exactly
+        // when another operator saved only SECRETS to this profile — the
+        // revision moves, the values do not, structural sharing keeps the
+        // reference. Keying on the revision there left the draft alive
+        // through a reload that never consumed it, and the next successful
+        // save re-seeded from a genuinely new baseline and re-applied it —
+        // a typed secret unconditionally — as a phantom unsaved change.
+        pendingDraft.current = null;
+      }
+      // Otherwise the baseline reference changes, the re-seed effect runs on
+      // the identity this branch just tested, and it consumes the draft —
+      // whichever of that render and this continuation comes first, the
+      // draft is applied exactly once.
+      setConflict(false);
+      // The re-seed effect may already have run and reported dropped edits;
+      // clearing unconditionally here would swallow that notice whenever
+      // this continuation happens to resume second.
+      setError(
+        droppedEntries.current > 0
+          ? droppedEditsMessage(droppedEntries.current)
+          : null
+      );
+    } catch {
+      pendingDraft.current = null;
+      setError(t('adminModules.detail.configCard.reloadFailed'));
+      // conflict stays true: Save must not be usable against a baseline the
+      // operator never got to review.
+    }
   };
 
   return {
@@ -568,6 +784,8 @@ export const useModuleConfigController = (
     cancelDeletion: () => setPendingDeletion(null),
     error,
     success,
+    conflict,
+    reloadAndReview,
     clearError: () => setError(null),
     onSave,
     handleDiscard

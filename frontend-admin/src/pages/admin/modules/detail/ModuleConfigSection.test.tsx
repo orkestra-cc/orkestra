@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, type HttpHandler } from 'msw';
 import { server } from 'test/server';
 import { url } from 'test/handlers';
 import { renderWithProviders } from 'test/render';
@@ -507,5 +507,360 @@ describe('ModuleConfigSection', () => {
       screen.queryByRole('button', { name: /Go to/ })
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/General \(/)).not.toBeInTheDocument();
+  });
+});
+
+describe('ModuleConfigSection revision conflict', () => {
+  // "Reload & review" refreshes the module snapshot as well as the profile,
+  // and awaits both — so every test that clicks it needs this handler even
+  // though `TestHost` takes `mod` as a prop and never fetches it itself.
+  const moduleGet = (mod: ModuleConfig) =>
+    http.get(url('/v1/admin/modules/:name'), () => HttpResponse.json(mod));
+
+  const envGet = (hits: { n: number }, configValues: Record<string, string>) =>
+    http.get(url('/v1/admin/modules/:name/environments/:env'), () => {
+      hits.n += 1;
+      return HttpResponse.json({
+        environment: 'production',
+        configValues,
+        secretStatus: {},
+        updatedAt: '',
+        revision: hits.n
+      });
+    });
+
+  it('latches on module.config_revision_stale, re-applies only the dirty draft, and reloads on demand without retrying', async () => {
+    const user = userEvent.setup();
+    const mod = moduleWith(
+      [
+        field({ key: 'a', label: 'Alpha' }),
+        field({ key: 'b', label: 'Beta' }),
+        field({ key: 'c', label: 'Gamma' }),
+        field({ key: 's', label: 'API Key', type: 'secret' })
+      ],
+      { availableEnvironments: ['production'] }
+    );
+    const hits = { n: 0 };
+    let patches = 0;
+    server.use(
+      moduleGet(mod),
+      envGet(hits, { a: 'server-old', b: 'b-old', c: 'c-old' }),
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), () => {
+        patches += 1;
+        return HttpResponse.json(
+          {
+            status: 409,
+            title: 'Conflict',
+            detail: 'moved',
+            code: 'module.config_revision_stale'
+          },
+          { status: 409 }
+        );
+      })
+    );
+
+    renderWithProviders(<TestHost mod={mod} />);
+    const alpha = await screen.findByLabelText('Alpha');
+    await waitFor(() => expect(alpha).toHaveValue('server-old'));
+    await user.clear(alpha);
+    await user.type(alpha, 'mine');
+    await user.clear(screen.getByLabelText('Gamma')); // an intentional clear to ''
+    await user.type(screen.getByLabelText('API Key'), 'unsent-secret');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    // The conflict copy, not the record-list one; Save disabled; Reload offered.
+    expect(
+      await screen.findByText(/changed this module's configuration/)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/changed this list/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    expect(patches).toBe(1);
+
+    // Meanwhile the other operator changed a, b (untouched here) and c
+    // (cleared here). Reload adopts their baseline and re-applies ONLY the
+    // fields this operator touched.
+    server.use(envGet(hits, { a: 'server-new', b: 'b-new', c: 'c-new' }));
+    await user.click(screen.getByRole('button', { name: 'Reload & review' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled()
+    );
+    expect(screen.getByLabelText('Alpha')).toHaveValue('mine'); // dirty: re-applied
+    expect(screen.getByLabelText('Beta')).toHaveValue('b-new'); // untouched: theirs, NOT reverted to b-old
+    expect(screen.getByLabelText('Gamma')).toHaveValue(''); // intentional clear survives
+    expect(screen.getByLabelText('API Key')).toHaveValue('unsent-secret'); // unsent secret kept in memory
+    expect(screen.getByText(/3 unsaved changes/)).toBeInTheDocument();
+    // Nothing was auto-submitted.
+    expect(patches).toBe(1);
+  });
+
+  it('keeps Save disabled and the conflict latched when the reload itself fails', async () => {
+    const user = userEvent.setup();
+    const mod = moduleWith([field({ key: 'a', label: 'Alpha' })], {
+      availableEnvironments: ['production']
+    });
+    const hits = { n: 0 };
+    server.use(
+      envGet(hits, { a: 'x' }),
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), () =>
+        HttpResponse.json(
+          {
+            status: 409,
+            title: 'Conflict',
+            detail: 'moved',
+            code: 'module.config_revision_stale'
+          },
+          { status: 409 }
+        )
+      )
+    );
+    renderWithProviders(<TestHost mod={mod} />);
+    const alpha = await screen.findByLabelText('Alpha');
+    await waitFor(() => expect(alpha).toHaveValue('x'));
+    await user.clear(alpha);
+    await user.type(alpha, 'y');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByRole('button', { name: 'Reload & review' });
+
+    server.use(
+      http.get(url('/v1/admin/modules/:name/environments/:env'), () =>
+        HttpResponse.json(
+          { status: 503, title: 'Service Unavailable', detail: 'down' },
+          { status: 503 }
+        )
+      )
+    );
+    await user.click(screen.getByRole('button', { name: 'Reload & review' }));
+    expect(
+      await screen.findByText(/Reloading the latest configuration failed/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Reload & review' })
+    ).toBeInTheDocument();
+    expect(alpha).toHaveValue('y'); // the draft is untouched
+  });
+
+  // The module snapshot — the `live` badge, the runtime status,
+  // `activeEnvironment` — is the other half of what the operator is asked to
+  // review. Lifting the latch while it is still the pre-conflict one invites
+  // a save decided against exactly the state the 409 said was gone, so the
+  // reload is not finished until BOTH halves have landed.
+  it('keeps Save disabled and the conflict latched when the module refetch fails', async () => {
+    const user = userEvent.setup();
+    const mod = moduleWith([field({ key: 'a', label: 'Alpha' })], {
+      availableEnvironments: ['production']
+    });
+    const hits = { n: 0 };
+    server.use(
+      envGet(hits, { a: 'x' }),
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), () =>
+        HttpResponse.json(
+          {
+            status: 409,
+            title: 'Conflict',
+            detail: 'moved',
+            code: 'module.config_revision_stale'
+          },
+          { status: 409 }
+        )
+      )
+    );
+    renderWithProviders(<TestHost mod={mod} />);
+    const alpha = await screen.findByLabelText('Alpha');
+    await waitFor(() => expect(alpha).toHaveValue('x'));
+    await user.clear(alpha);
+    await user.type(alpha, 'y');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByRole('button', { name: 'Reload & review' });
+
+    // The profile half succeeds and brings a genuinely new baseline; only the
+    // module snapshot fails.
+    let moduleHits = 0;
+    server.use(
+      envGet(hits, { a: 'theirs' }),
+      http.get(url('/v1/admin/modules/:name'), () => {
+        moduleHits += 1;
+        return HttpResponse.json(
+          { status: 503, title: 'Service Unavailable', detail: 'down' },
+          { status: 503 }
+        );
+      })
+    );
+    await user.click(screen.getByRole('button', { name: 'Reload & review' }));
+
+    expect(
+      await screen.findByText(/Reloading the latest configuration failed/)
+    ).toBeInTheDocument();
+    expect(moduleHits).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Reload & review' })
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the record-list wording for a codeless 409', async () => {
+    const user = userEvent.setup();
+    const mod = moduleWith([field({ key: 'a', label: 'Alpha' })], {
+      availableEnvironments: ['production']
+    });
+    server.use(
+      envGet({ n: 0 }, { a: 'x' }),
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), () =>
+        HttpResponse.json(
+          { status: 409, title: 'Conflict', detail: 'slug exists' },
+          { status: 409 }
+        )
+      )
+    );
+    renderWithProviders(<TestHost mod={mod} />);
+    const alpha = await screen.findByLabelText('Alpha');
+    await waitFor(() => expect(alpha).toHaveValue('x'));
+    await user.clear(alpha);
+    await user.type(alpha, 'y');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(await screen.findByText(/changed this list/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Reload & review' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('makes the conflict banner non-dismissible, while an ordinary error keeps its close button', async () => {
+    const user = userEvent.setup();
+    const mod = moduleWith([field({ key: 'a', label: 'Alpha' })], {
+      availableEnvironments: ['production']
+    });
+    // Dismissing the conflict banner would leave a greyed-out Save with
+    // nothing on screen saying why, and the plausible next move from there —
+    // Discard — destroys the very draft the latch exists to protect.
+    const saveAgainst = async (patch: HttpHandler) => {
+      server.use(envGet({ n: 0 }, { a: 'x' }), patch);
+      const view = renderWithProviders(<TestHost mod={mod} />);
+      const alpha = await screen.findByLabelText('Alpha');
+      await waitFor(() => expect(alpha).toHaveValue('x'));
+      await user.clear(alpha);
+      await user.type(alpha, 'y');
+      await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+      return view;
+    };
+
+    const latched = await saveAgainst(
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), () =>
+        HttpResponse.json(
+          {
+            status: 409,
+            title: 'Conflict',
+            detail: 'moved',
+            code: 'module.config_revision_stale'
+          },
+          { status: 409 }
+        )
+      )
+    );
+    await screen.findByRole('button', { name: 'Reload & review' });
+    expect(
+      screen.queryByRole('button', { name: /close/i })
+    ).not.toBeInTheDocument();
+    latched.unmount();
+
+    await saveAgainst(
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), () =>
+        HttpResponse.json(
+          { status: 409, title: 'Conflict', detail: 'slug exists' },
+          { status: 409 }
+        )
+      )
+    );
+    expect(
+      await screen.findByRole('button', { name: /close/i })
+    ).toBeInTheDocument();
+  });
+
+  // A reload whose profile revision moved but whose VALUES did not — the
+  // other operator saved only secrets to this profile. RTK Query's
+  // structural sharing keeps the `configValues` reference, so the re-seed
+  // effect (keyed on that reference) does not run; the draft must therefore
+  // be cleared here, or it outlives the reload and is re-applied on top of
+  // the operator's NEXT successful save. A typed secret is re-applied
+  // unconditionally, so it is the one that reappears as a phantom change.
+  it('clears the draft when the reload returns the same baseline reference', async () => {
+    const user = userEvent.setup();
+    const mod = moduleWith(
+      [
+        field({ key: 'a', label: 'Alpha' }),
+        field({ key: 's', label: 'API Key', type: 'secret' })
+      ],
+      { availableEnvironments: ['production'] }
+    );
+    // `configValues` is rebuilt per response on purpose: RTK Query compares
+    // by value, not by reference, so an equal payload still collapses onto
+    // the stored reference. That is the behaviour under test.
+    const env = { values: { a: 'x' } as Record<string, string>, revision: 1 };
+    let patchStatus = 409;
+    server.use(
+      moduleGet(mod),
+      http.get(url('/v1/admin/modules/:name/environments/:env'), () =>
+        HttpResponse.json({
+          environment: 'production',
+          configValues: { ...env.values },
+          secretStatus: {},
+          updatedAt: '',
+          revision: env.revision
+        })
+      ),
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), () =>
+        patchStatus === 409
+          ? HttpResponse.json(
+              {
+                status: 409,
+                title: 'Conflict',
+                detail: 'moved',
+                code: 'module.config_revision_stale'
+              },
+              { status: 409 }
+            )
+          : HttpResponse.json({
+              environment: 'production',
+              configValues: { ...env.values },
+              secretStatus: {},
+              updatedAt: '',
+              revision: env.revision
+            })
+      )
+    );
+
+    renderWithProviders(<TestHost mod={mod} />);
+    const alpha = await screen.findByLabelText('Alpha');
+    await waitFor(() => expect(alpha).toHaveValue('x'));
+    await user.clear(alpha);
+    await user.type(alpha, 'mine');
+    await user.type(screen.getByLabelText('API Key'), 'sekret');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByRole('button', { name: 'Reload & review' });
+
+    // Same values, moved revision.
+    env.revision = 2;
+    await user.click(screen.getByRole('button', { name: 'Reload & review' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled()
+    );
+    // No re-seed ran, so the form still holds the draft as typed.
+    expect(screen.getByLabelText('Alpha')).toHaveValue('mine');
+    expect(screen.getByLabelText('API Key')).toHaveValue('sekret');
+    expect(screen.getByText(/2 unsaved changes/)).toBeInTheDocument();
+
+    // The save lands. Its invalidation refetches a baseline that DOES differ,
+    // so the re-seed effect runs — and must find no draft waiting for it.
+    patchStatus = 200;
+    env.values = { a: 'mine' };
+    env.revision = 3;
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Save Changes' })
+      ).toBeDisabled()
+    );
+    expect(screen.getByLabelText('Alpha')).toHaveValue('mine');
+    expect(screen.getByLabelText('API Key')).toHaveValue('');
+    expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
   });
 });
