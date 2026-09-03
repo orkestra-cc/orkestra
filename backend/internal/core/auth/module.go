@@ -898,6 +898,17 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	if !ok {
 		return fmt.Errorf("auth: Redis adapter lacks atomic GETDEL support")
 	}
+	// EVAL is required for the same reason GETDEL is: the attempt
+	// counters are the only brute-force bound on every anonymous auth
+	// surface, and the script is what makes their count/TTL/healing
+	// atomic. A client that cannot run it would leave the platform with
+	// no lockout at all, which must be a boot failure, not a silent
+	// degradation.
+	scriptRedis, ok := deps.RedisAdapter.(services.ScriptRedisClient)
+	if !ok {
+		return fmt.Errorf("auth: Redis adapter lacks EVAL support")
+	}
+	attemptCounter := services.NewRedisAttemptCounter(scriptRedis, logger)
 	redisStore := services.NewRedisOAuthStateStore(atomicRedis)
 	oauthStateService := services.NewOAuthStateService(redisStore)
 	var oauthStateSecret []byte
@@ -1046,6 +1057,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		suspiciousLoginNotifier:  suspiciousLoginNotifierSvc,
 		notifier:                 notifier,
 		rateLimiter:              rateLimiter,
+		attemptCounter:           attemptCounter,
 		geoResolver:              geoResolver,
 		velocityKmh:              velocityKmh,
 		frontendURL:              cfg.Server.FrontendURL,

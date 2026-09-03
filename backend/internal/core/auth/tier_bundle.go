@@ -58,19 +58,23 @@ type authTierBundle struct {
 // provider that buildAuthTierBundle needs. Pulled into a struct so the
 // function signature stays manageable as PR-D's plumbing grows.
 type tierBundleDeps struct {
-	db                       *mongo.Database
-	logger                   *slog.Logger
-	tier                     audienceTier
-	userProvider             iface.UserProvider
-	tenantProvider           iface.TenantProvider
-	jwtService               services.JWTService
-	passwordService          services.PasswordService
-	mfaChallengeService      services.MFAChallengeService
-	firstAdminClaimer        services.FirstAdminClaimer
-	deviceTrust              services.DeviceTrustService
-	suspiciousLoginNotifier  services.SuspiciousLoginNotifier
-	notifier                 iface.NotificationSender
-	rateLimiter              *sharederrors.RateLimiter
+	db                      *mongo.Database
+	logger                  *slog.Logger
+	tier                    audienceTier
+	userProvider            iface.UserProvider
+	tenantProvider          iface.TenantProvider
+	jwtService              services.JWTService
+	passwordService         services.PasswordService
+	mfaChallengeService     services.MFAChallengeService
+	firstAdminClaimer       services.FirstAdminClaimer
+	deviceTrust             services.DeviceTrustService
+	suspiciousLoginNotifier services.SuspiciousLoginNotifier
+	notifier                iface.NotificationSender
+	rateLimiter             *sharederrors.RateLimiter
+	// attemptCounter is the Redis fixed-window counter behind every
+	// lockout and request cap. rateLimiter is on its way out (spec D8)
+	// and both are carried only while the callers migrate.
+	attemptCounter           services.AttemptCounter
 	geoResolver              geoip.Resolver
 	velocityKmh              float64
 	frontendURL              string
@@ -169,6 +173,7 @@ func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 		SuspiciousLoginNotifier:  d.suspiciousLoginNotifier,
 		Notifier:                 d.notifier,
 		RateLimiter:              d.rateLimiter,
+		AttemptCounter:           d.attemptCounter,
 		FrontendURL:              d.frontendURL,
 		RequireEmailVerification: d.requireEmailVerification,
 		AppName:                  d.appName,

@@ -98,6 +98,7 @@ type PasswordAuthConfig struct {
 	SuspiciousLoginNotifier  SuspiciousLoginNotifier        // nil → no email on high-risk login; Section C item #5
 	Notifier                 iface.NotificationSender
 	RateLimiter              *sharederrors.RateLimiter
+	AttemptCounter           AttemptCounter
 	FrontendURL              string
 	RequireEmailVerification bool
 	AppName                  string
@@ -136,6 +137,7 @@ type PasswordAuthService struct {
 	suspiciousLoginNotifier  SuspiciousLoginNotifier
 	notifier                 iface.NotificationSender
 	rateLimiter              *sharederrors.RateLimiter
+	attempts                 AttemptCounter
 	frontendURL              string
 	requireEmailVerification bool
 	appName                  string
@@ -219,6 +221,7 @@ func NewPasswordAuthService(cfg PasswordAuthConfig) *PasswordAuthService {
 		suspiciousLoginNotifier:  cfg.SuspiciousLoginNotifier,
 		notifier:                 cfg.Notifier,
 		rateLimiter:              cfg.RateLimiter,
+		attempts:                 cfg.AttemptCounter,
 		frontendURL:              cfg.FrontendURL,
 		requireEmailVerification: cfg.RequireEmailVerification,
 		appName:                  cfg.AppName,
