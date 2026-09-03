@@ -625,6 +625,20 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "account_locked")
 		// Not recorded: a durable lock, like a counter lock, must not
 		// extend itself.
+		//
+		// ⚠️ This branch is M-7's RESIDUAL oracle, known and deliberately
+		// left as-is. The counter window is fixed from the FIRST failure
+		// while LockedUntil is stamped at the THRESHOLD-th, so the
+		// durable lock outlives the counter key by however long the
+		// attacker took to reach the threshold. Once the key expires the
+		// peek passes, the lookup succeeds, and this 429 distinguishes a
+		// real account from the 401 an unknown email gets — with no
+		// record kept, so probing never exhausts it. Falling through to
+		// the unknown-email answer instead would close it but change the
+		// D9 wire contract for a legitimately locked-out user (429 +
+		// Retry-After → 401), which is a spec decision, not an
+		// implementation one. See "Attempt counters (login lockout)" in
+		// the module CLAUDE.md before touching this.
 		return nil, LockedAfter(time.Until(*user.LockedUntil))
 	}
 	if user.LockedUntil != nil {
@@ -1476,8 +1490,14 @@ func (s *PasswordAuthService) resetLoginFailures(ctx context.Context, email stri
 }
 
 // dummyVerify burns one argon2 verification so a branch that returns
-// early costs the same wall-clock time as a wrong password. Every
-// non-success branch of Login calls it.
+// early costs the same wall-clock time as a wrong password. Called by
+// every non-success branch of Login AFTER the lockout peek that does
+// not already run a real Verify — so not by the wrong-password branch,
+// which pays the genuine cost against the stored hash, and not by the
+// gates that run BEFORE the peek (empty input, the login kill switch,
+// the password-method gate, the geo block), which must leave the
+// counters and the audit trail untouched and so deliberately cost
+// nothing.
 func (s *PasswordAuthService) dummyVerify(password string) {
 	_, _ = s.passwordService.Verify(password, s.passwordService.DummyHash())
 }

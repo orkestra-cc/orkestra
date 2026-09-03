@@ -407,15 +407,17 @@ independent admin-managed pairs:
   429 `auth.too_many_attempts` with `Retry-After` and records nothing,
   because a lock that extends itself on every probe never expires under
   a running attack. `recordLoginFailure` charges both scopes only on a
-  **real** failure. Every non-success branch *after* the peek — counter
-  lock, unknown email, inactive account, service principal, no password
-  hash, durable lock, wrong password — first pays one `dummyVerify`
-  argon2 cost, so no branch is measurably cheaper than a wrong password.
-  (The gates that run *before* the peek — `loginEnabledAdmin/Client`,
-  the password-method gate, the geo block — pay nothing on purpose: they
-  must leave counters and audit trail untouched.) With the counter
-  available, a known and an unknown email therefore lock at the same
-  attempt, in the same window, with the same status.
+  **real** failure. Every non-success branch *after* the peek that does
+  not already run a real verify — counter lock, unknown email, inactive
+  account, service principal, no password hash, durable lock — pays one
+  `dummyVerify` argon2 cost; the wrong-password branch pays the genuine
+  `Verify` against the stored hash. So no branch is measurably cheaper
+  than a wrong password. (The gates that run *before* the peek — empty
+  input, `loginEnabledAdmin/Client`, the password-method gate, the geo
+  block — pay nothing on purpose: they must leave counters and audit
+  trail untouched.) With the counter available, a known and an unknown
+  email therefore lock at the same attempt, in the same window, with the
+  same status.
 - **They fail OPEN to the durable lock.** A `Locked` error reads as *not
   locked*; a `RecordFailure` error yields no verdict and the verify
   branch falls back to `User.FailedLoginCount+1 >= LockoutThreshold` for
@@ -423,6 +425,39 @@ independent admin-managed pairs:
   platform-wide login outage. The consequence to know: with the counter
   down, an **unknown** email is answered 401 throughout — there is no
   document to count against — while an existing account is still capped.
+- **⚠️ M-7 is narrowed, not closed: the durable lock outlives the
+  counter, and the gap is an account-existence oracle.** The counter
+  window is **fixed**, not sliding — `attemptScript` stamps the TTL on
+  the FIRST increment and never extends it — so the email key dies at
+  `t_first + window`. `User.LockedUntil` is stamped on the
+  **threshold-th** failure, so it dies at `t_threshold + window`. Since
+  `t_threshold >= t_first` the durable lock always outlives the counter
+  by exactly the interval the attacker spent reaching the threshold, and
+  that interval is **attacker-scheduled**:
+
+  | When | The attacker does | State |
+  |---|---|---|
+  | `t=0` | 4 wrong passwords for `victim@x.com` | email key expires at `t=15m` |
+  | `t=14m` | the 5th | counter locks; `LockedUntil = t=29m` |
+  | `t=15m01s` | one probe | counter key gone → the peek passes → `GetUserForAuth` **succeeds** → the durable-lock branch answers **429** |
+
+  The identical probe for an address with no account passes the peek,
+  fails the lookup and answers **401**. For ~14 minutes a single request
+  distinguishes the two — and because the durable-lock branch
+  deliberately records nothing (a lock must not extend itself), probing
+  never burns the window down. Every other property in this section
+  holds; this is the residual.
+
+  It is **known and deliberately unfixed here.** The obvious fix — make
+  a live `LockedUntil` fall through to the same answer an unknown email
+  gets — changes the D9 wire contract for a legitimately locked-out
+  user from 429 `auth.too_many_attempts` + `Retry-After` to a bare 401,
+  which reaches both SPAs, the docs and the sibling PRs. In this project
+  a contract change goes into the spec before execution, so it is
+  escalated to the spec owner rather than decided in an implementation
+  commit. Do not "tidy" the durable-lock branch into silence without
+  that decision, and do not read the rest of this section as claiming
+  the oracle is gone.
 - **The durable lock mirrors the counter, and an expired one is cleared
   *before* the verify.** `User.LockedUntil` is stamped from the same
   `LockoutThreshold`/`LockoutDuration` pair, so with a healthy Redis the
