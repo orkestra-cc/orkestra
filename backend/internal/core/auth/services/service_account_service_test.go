@@ -16,7 +16,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
-	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -435,7 +434,7 @@ func (f *saSecurityEventRepoFake) DeleteAllByUser(context.Context, string) (int6
 func newSAService() (*ServiceAccountService, *saUserFake, *saCredRepoFake) {
 	users := newSAUserFake()
 	creds := newSACredRepoFake()
-	svc := NewServiceAccountService(creds, users, users, &saHasherFake{}, saMinterFake{}, sharederrors.NewRateLimiter())
+	svc := NewServiceAccountService(creds, users, users, &saHasherFake{}, saMinterFake{}, NewMemoryAttemptCounter())
 	return svc, users, creds
 }
 

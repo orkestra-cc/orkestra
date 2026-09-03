@@ -67,8 +67,8 @@ func mapServiceTokenError(err error) error {
 	switch {
 	case errors.Is(err, services.ErrUnsupportedGrantType):
 		return huma.Error400BadRequest("unsupported grant type")
-	case errors.Is(err, services.ErrClientRateLimited):
-		return huma.Error429TooManyRequests("Too many failed attempts. Please try again later.")
+	case errors.Is(err, services.ErrClientRateLimited), errors.Is(err, services.ErrAccountLocked):
+		return lockoutError(services.RetryAfterFor(err))
 	case errors.Is(err, services.ErrInvalidClientCredentials):
 		return huma.Error401Unauthorized("invalid client credentials")
 	default:

@@ -14,7 +14,6 @@ import (
 
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
-	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
@@ -41,6 +40,17 @@ var (
 // used for every rejection reason (unknown clientId, revoked credential,
 // wrong secret, disabled account, non-service-account user) so a caller
 // can never distinguish which one applied from the error alone.
+//
+// ErrClientRateLimited keeps its own identity for callers that answer a
+// lockout with no Verdict to hand back (e.g. a caller that wants the
+// generic 429 without a live retry hint) — the handler still recognizes
+// it unwrapped. Grant's own lockout branch (spec §4.1 D7) always has a
+// Verdict in hand and returns LockedAfter(v.RetryAfter) instead, which
+// errors.Is-matches ErrAccountLocked, the same sentinel the password
+// login lockout uses — the two lockouts share one identity now. Both
+// ErrClientRateLimited and ErrAccountLocked map to the same 429 in
+// mapServiceTokenError; they are deliberately NOT unified into a single
+// errors.Is relationship.
 var (
 	ErrUnsupportedGrantType     = errors.New("unsupported grant type")
 	ErrInvalidClientCredentials = errors.New("invalid client credentials")
@@ -67,9 +77,11 @@ type ServiceAccountService struct {
 	lister iface.ServiceAccountLister
 	hasher PasswordService
 	minter ServiceTokenMinter
-	// limiter backs Grant's lockout check. Not consulted by any
-	// lifecycle (CRUD) method in this file.
-	limiter *sharederrors.RateLimiter
+	// counter backs Grant's lockout check (spec §4.1 D7 — service
+	// accounts share the same Redis attempt counters as the password
+	// login and reset/verify flows). Not consulted by any lifecycle
+	// (CRUD) method in this file.
+	counter AttemptCounter
 	// securityEventRepo persists the auth_security_events audit log for
 	// account mutations and failed grants — the same collection
 	// authService.recordAuthEvent (auth_service.go) writes to. Optional
@@ -98,7 +110,7 @@ func NewServiceAccountService(
 	lister iface.ServiceAccountLister,
 	hasher PasswordService,
 	minter ServiceTokenMinter,
-	limiter *sharederrors.RateLimiter,
+	counter AttemptCounter,
 ) *ServiceAccountService {
 	return &ServiceAccountService{
 		creds:   creds,
@@ -106,7 +118,7 @@ func NewServiceAccountService(
 		lister:  lister,
 		hasher:  hasher,
 		minter:  minter,
-		limiter: limiter,
+		counter: counter,
 	}
 }
 
@@ -709,28 +721,24 @@ type GrantResult struct {
 // response above. A successful grant does not emit a security event
 // (routine, high-frequency — mirrors the login site's judgment on
 // successful logins).
-//
-// The lockout pre-check uses IsLockedOut, not IsBlocked: IsBlocked's
-// underlying Check consumes a token on every call (even a successful
-// one), so gating every Grant on it would let back-to-back legitimate
-// calls lock themselves out. IsLockedOut peeks the same bucket without
-// consuming — only recordFailed's RecordFailedAuth below spends budget.
 func (s *ServiceAccountService) Grant(ctx context.Context, in GrantInput) (*GrantResult, error) {
 	if in.GrantType != "client_credentials" {
 		return nil, ErrUnsupportedGrantType
 	}
-	// Refresh the rate limiter's lockout config from the live admin
-	// policy so edits take effect on the next grant attempt without a
-	// restart — mirrors the login site (password_auth_service.go
-	// Login, ~:477-482). New buckets pick up the updated values
-	// immediately; already-running buckets ride out their existing
-	// window.
-	if s.policy != nil && s.limiter != nil {
-		s.limiter.SetAuthFailedConfig(s.policy.LockoutThreshold(ctx), s.policy.LockoutDuration(ctx))
-	}
-	if s.limiter != nil &&
-		(s.limiter.IsLockedOut(ctx, "ip:"+in.IP) || s.limiter.IsLockedOut(ctx, "client:"+in.ClientID)) {
-		return nil, ErrClientRateLimited
+	// The lockout pre-check PEEKS. The limiter this replaces had to
+	// expose a separate IsLockedOut for exactly this reason: its Check
+	// consumed a token on every call, so gating every Grant on it let
+	// back-to-back legitimate calls lock themselves out. Peeks are free
+	// by construction now.
+	if s.counter != nil {
+		accountLim := Limit{Threshold: s.policy.LockoutThreshold(ctx), Window: s.policy.LockoutDuration(ctx)}
+		addressLim := Limit{Threshold: s.policy.IPLockoutThreshold(ctx), Window: s.policy.IPLockoutDuration(ctx)}
+		if v, err := s.counter.Locked(ctx, AttemptKeyIP(in.IP), addressLim); err == nil && v.Locked {
+			return nil, LockedAfter(v.RetryAfter)
+		}
+		if v, err := s.counter.Locked(ctx, AttemptKeyClient(in.ClientID), accountLim); err == nil && v.Locked {
+			return nil, LockedAfter(v.RetryAfter)
+		}
 	}
 	cred, err := s.creds.GetByClientID(ctx, in.ClientID)
 	if err != nil {
@@ -780,14 +788,17 @@ func (s *ServiceAccountService) Grant(ctx context.Context, in GrantInput) (*Gran
 	return &GrantResult{AccessToken: token, ExpiresIn: int(s.minter.AccessTokenTTL(ctx).Seconds())}, nil
 }
 
-// recordFailed charges one failed attempt against both the caller's IP
+// recordFailed charges one failed attempt against the caller's address
 // and the targeted clientId, so a distributed attacker (many IPs, one
 // clientId) and a credential-stuffing attacker (one IP, many clientIds)
-// are both throttled.
+// are both throttled. A client ID IS an account and carries the account
+// pair; the address carries the looser address pair.
 func (s *ServiceAccountService) recordFailed(ctx context.Context, in GrantInput) {
-	if s.limiter == nil {
+	if s.counter == nil {
 		return
 	}
-	s.limiter.RecordFailedAuth(ctx, "ip:"+in.IP)
-	s.limiter.RecordFailedAuth(ctx, "client:"+in.ClientID)
+	_, _ = s.counter.RecordFailure(ctx, AttemptKeyIP(in.IP),
+		Limit{Threshold: s.policy.IPLockoutThreshold(ctx), Window: s.policy.IPLockoutDuration(ctx)})
+	_, _ = s.counter.RecordFailure(ctx, AttemptKeyClient(in.ClientID),
+		Limit{Threshold: s.policy.LockoutThreshold(ctx), Window: s.policy.LockoutDuration(ctx)})
 }

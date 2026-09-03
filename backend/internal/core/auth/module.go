@@ -408,12 +408,18 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		// Login & Sessions — per-surface kill switches + lockout policy.
 		// Read at request time by AuthPolicyService. Both pairs now feed
 		// the Redis attempt counters (services/attempt_counter.go): the
-		// account pair keys the `email` scope, the address pair the `ip`
-		// scope, and both are read per attempt against the LIVE threshold,
-		// so an admin edit takes effect on the very next attempt —
-		// including one already inside an open window. The other flows
-		// still on shared/errors.RateLimiter (resend-verification,
-		// password-confirm) do not read these keys.
+		// account pair keys the `email` scope (and, for the
+		// client-credentials grant, the `client` scope — spec §4.1 D7),
+		// the address pair the `ip` scope, and all are read per attempt
+		// against the LIVE threshold, so an admin edit takes effect on
+		// the very next attempt — including one already inside an open
+		// window. No auth flow reads or writes shared/errors.RateLimiter
+		// any more (grep for IsBlocked/IsLockedOut/RecordFailedAuth/
+		// SetAuthFailedConfig/.Check( over internal/core/auth turns up
+		// nothing): the service-account grant was the last consumer of
+		// the single instance module.go builds below, and this module
+		// only keeps building and threading it through as inert plumbing
+		// pending its removal.
 		{
 			Key: "loginEnabledAdmin", Label: "Allow logins on operator console", Group: "login",
 			Description: "When off, POST /v1/auth/operator/login returns 403. Use during maintenance to lock out the operator console without taking the backend offline.",
@@ -1250,7 +1256,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// ServiceTokenMinter requires, so it satisfies the minter seam
 	// structurally — no assertion needed.
 	m.serviceAccountService = services.NewServiceAccountService(
-		saCredRepo, operatorUser, saLister, passwordSvc, serviceJWT, rateLimiter)
+		saCredRepo, operatorUser, saLister, passwordSvc, serviceJWT, attemptCounter)
 	// securityEventRepo/authPolicy already exist in scope from the
 	// operator-tier wiring above — thread them into the service the
 	// same way the sibling AdminUserAuthHandler receives its deps (see
