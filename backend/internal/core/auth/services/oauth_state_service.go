@@ -300,11 +300,12 @@ type RedisClient interface {
 	Expire(ctx context.Context, key string, expiration time.Duration) error
 }
 
-// AtomicTakeRedisClient is the narrow extension required by the state store.
-// Other Redis consumers retain the smaller RedisClient contract.
+// AtomicTakeRedisClient is the narrow extension required by the state
+// store: GETDEL for one-winner takes, EVAL for the attempt script.
 type AtomicTakeRedisClient interface {
 	RedisClient
 	GetDel(ctx context.Context, key string) (string, error)
+	Eval(ctx context.Context, script string, keys []string, args ...interface{}) (interface{}, error)
 }
 
 // NewRedisOAuthStateStore creates a Redis-backed OAuth state store
@@ -338,17 +339,24 @@ func (r *RedisOAuthStateStore) Delete(ctx context.Context, key string) error {
 	return r.client.Del(ctx, key)
 }
 
-// Incr increments the counter and stamps the TTL on creation. A counter
-// without a TTL would outlive the flow it belongs to.
+// Incr increments the counter and stamps the TTL in ONE round trip,
+// through the same script the attempt counters use. The previous shape
+// sent INCR and EXPIRE separately and only on the creating call, so a
+// failure between them — or a key created by any other path — left a
+// counter with no expiry. For the MFA per-challenge cap that is a
+// budget a recycled challenge id inherits; for a lockout counter it
+// would be a permanent 429.
 func (r *RedisOAuthStateStore) Incr(ctx context.Context, key string, expiry time.Duration) (int64, error) {
-	n, err := r.client.Incr(ctx, key)
+	if expiry <= 0 {
+		expiry = MFAChallengeTTL
+	}
+	raw, err := r.client.Eval(ctx, attemptScript, []string{key}, expiry.Milliseconds(), "1")
 	if err != nil {
 		return 0, err
 	}
-	if n == 1 && expiry > 0 {
-		if err := r.client.Expire(ctx, key, expiry); err != nil {
-			return n, err
-		}
+	n, _, err := parseAttemptResult(raw)
+	if err != nil {
+		return 0, err
 	}
 	return n, nil
 }
