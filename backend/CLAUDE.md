@@ -153,6 +153,7 @@ Builders cover the common statuses (`BadRequest`, `Unauthorized`, `Forbidden`, `
 Examples:
 
 - `auth.email_in_use` — `POST /v1/users` rejected because the email is already registered (409). Worked example, in `user_handler.go`.
+- `auth.too_many_attempts` — 429; an attempt counter reached its threshold inside its window, or the account carries an unexpired durable lock. Always carries `Retry-After` (integer seconds, never below 1).
 - `billing.invoice_not_found` — SDI invoice UUID lookup miss (404). Future.
 - `authz.permission_denied` — Cedar policy refused the action (403). Future.
 

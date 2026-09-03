@@ -50,6 +50,27 @@ var (
 	ErrPasswordLoginDisabled = iface.ErrPasswordLoginDisabled
 )
 
+// lockedError carries the remaining life of the window alongside
+// ErrAccountLocked so the handler can render Retry-After without a
+// second Redis read. errors.Is(err, ErrAccountLocked) still matches.
+type lockedError struct{ retryAfter time.Duration }
+
+func (e *lockedError) Error() string        { return ErrAccountLocked.Error() }
+func (e *lockedError) Is(target error) bool { return target == ErrAccountLocked }
+
+// LockedAfter wraps ErrAccountLocked with a retry hint.
+func LockedAfter(d time.Duration) error { return &lockedError{retryAfter: d} }
+
+// RetryAfterFor extracts the retry hint from an error produced by
+// LockedAfter, or 0 when the error carries none.
+func RetryAfterFor(err error) time.Duration {
+	var le *lockedError
+	if stderrors.As(err, &le) {
+		return le.retryAfter
+	}
+	return 0
+}
+
 // FirstAdminClaimer is the contract the password auth service uses to
 // atomically reserve the platform's super_admin seat on a fresh install.
 // shared/systeminit.Repo satisfies it. Inlining the interface here keeps

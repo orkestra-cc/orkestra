@@ -25,6 +25,12 @@ type Error struct {
 	Title  string `json:"title,omitempty"`
 	Detail string `json:"detail"`
 	Code   string `json:"code,omitempty"`
+
+	// Headers are copied onto the HTTP response by Huma via the
+	// huma.HeadersError interface and are NEVER serialised into the
+	// body — the {status,title,detail,code} envelope is a frozen wire
+	// contract. Retry-After on a 429 is the motivating case.
+	Headers http.Header `json:"-"`
 }
 
 // Error implements the error interface using the human-readable
@@ -34,6 +40,28 @@ func (e *Error) Error() string { return e.Detail }
 // GetStatus implements huma.StatusError so Huma uses the configured
 // HTTP status instead of falling back to 500.
 func (e *Error) GetStatus() int { return e.Status }
+
+// GetHeaders implements huma.HeadersError. Returns a non-nil, possibly
+// empty Header so callers never have to nil-check.
+func (e *Error) GetHeaders() http.Header {
+	if e.Headers == nil {
+		return http.Header{}
+	}
+	return e.Headers
+}
+
+// WithHeader attaches one response header and returns the receiver so it
+// composes with the named builders:
+//
+//	errcode.TooManyRequests(errcode.AuthTooManyAttempts, detail).
+//	    WithHeader("Retry-After", "15")
+func (e *Error) WithHeader(k, v string) *Error {
+	if e.Headers == nil {
+		e.Headers = http.Header{}
+	}
+	e.Headers.Set(k, v)
+	return e
+}
 
 // New constructs an Error with an arbitrary status. Prefer the named
 // builders (Conflict, NotFound, …) at call sites — New exists for
@@ -62,6 +90,11 @@ func Conflict(code, detail string) *Error { return New(http.StatusConflict, code
 // that survived schema validation (business-rule violations).
 func UnprocessableEntity(code, detail string) *Error {
 	return New(http.StatusUnprocessableEntity, code, detail)
+}
+
+// TooManyRequests returns a 429 with the given code + detail.
+func TooManyRequests(code, detail string) *Error {
+	return New(http.StatusTooManyRequests, code, detail)
 }
 
 // ServiceUnavailable returns a 503 — the dependency or configuration a

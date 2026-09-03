@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -402,6 +404,29 @@ func clientIPFromCtx(ctx context.Context) string {
 	return ""
 }
 
+// lockoutRetryAfterFallback is what a lockout answers when the caller
+// could not supply a window remainder — the counter was unavailable and
+// the durable rule fired, or the sentinel arrived through a path that
+// does not carry a verdict. One minute is short enough to be a real
+// retry hint and long enough not to be an invitation to hot-loop.
+const lockoutRetryAfterFallback = time.Minute
+
+// lockoutError renders the single 429 answer every attempt-counter and
+// durable-lock branch returns. retryAfter is rounded UP to whole
+// seconds and floored at 1: a "Retry-After: 0" is worse than none.
+func lockoutError(retryAfter time.Duration) error {
+	if retryAfter <= 0 {
+		retryAfter = lockoutRetryAfterFallback
+	}
+	secs := int(math.Ceil(retryAfter.Seconds()))
+	if secs < 1 {
+		secs = 1
+	}
+	return errcode.TooManyRequests(errcode.AuthTooManyAttempts,
+		"Too many failed attempts. Please try again later.").
+		WithHeader("Retry-After", strconv.Itoa(secs))
+}
+
 // buildRefreshCookie assembles a Set-Cookie header value for the refresh
 // token cookie with secure defaults.
 // maxAgeSeconds must be the refresh token's own TTL — see
@@ -431,7 +456,7 @@ func mapPasswordError(err error) error {
 		return errcode.Forbidden(errcode.AuthEmailNotVerified,
 			"Email address not verified. Please check your inbox for the verification email.")
 	case errors.Is(err, services.ErrAccountLocked):
-		return huma.Error429TooManyRequests("Too many failed attempts. Please try again later.")
+		return lockoutError(services.RetryAfterFor(err))
 	case errors.Is(err, services.ErrUserInactive):
 		return huma.Error403Forbidden("Account is not active")
 	case errors.Is(err, services.ErrPasswordReused):
