@@ -122,8 +122,15 @@ container_running() {
 # The network the helper container must join is whatever the running rustfs
 # container is actually on — not the recomputed ${STACK}_default, which is
 # wrong whenever the stack was started under a custom COMPOSE_PROJECT_NAME.
+# A container can sit on several networks (a reverse proxy, an observability
+# overlay), so emit one name per line and keep the recomputed default when the
+# container is still attached to it.
 rustfs_network() {
-  docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$RUSTFS_CONTAINER" 2>/dev/null || true
+  local nets
+  nets="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' \
+          "$RUSTFS_CONTAINER" 2>/dev/null || true)"
+  if printf '%s\n' "$nets" | grep -qx "$NETWORK"; then printf '%s' "$NETWORK"; return; fi
+  printf '%s\n' "$nets" | grep -v '^$' | head -1
 }
 
 # ---------------------------------------------------------------------------
