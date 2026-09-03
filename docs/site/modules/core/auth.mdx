@@ -107,7 +107,7 @@ across every replica and survive a restart.
 | Email (independent per surface) | login, change-password, password-confirm | `accountLockoutThreshold` / `accountLockoutDuration` (5 / 15m) |
 | Source address (shared across both surfaces) | the same three, plus the service-account grant | `ipLockoutThreshold` / `ipLockoutDuration` (100 / 15m) |
 | Client ID | service-account grant | the account pair |
-| Reset / verification requests | forgot-password, resend-verification | 3 per address per 15m, 60 per source address |
+| Reset / verification requests | forgot-password, resend-verification | 3 per email address per 15m, 60 per source address per 15m |
 
 An address threshold **must** be at least the account threshold: an
 address that locks first would tell an attacker which accounts exist
@@ -120,10 +120,29 @@ exists and one that does not. A successful login clears the email
 counter; the address counter is left alone, so one correct sign-in
 cannot launder a credential-stuffing run.
 
-If Redis is unavailable the counters fail open and the durable
-per-account lock (`User.LockedUntil`) takes over, which still caps
-guessing against an existing account. `orkestra_auth_attempt_store_failures_total`
-is the signal that this is happening.
+The durable per-account lock (`User.LockedUntil`) runs alongside the
+counters rather than behind them: an account locks when either its
+counter window or its cumulative failure count reaches
+`accountLockoutThreshold`. That second rule is what caps an attacker
+slow enough to keep every window under the threshold, and it is what is
+left when Redis is unavailable and the counters fail open — a login
+outage is never the answer to a cache outage.
+`orkestra_auth_attempt_store_failures_total` is the signal that the
+counters are the ones that dropped out. A successful sign-in clears the
+cumulative count, and so does a lockout once it expires, so the count is
+a budget per lockout rather than a life sentence.
+
+The durable lock is also where the identical answer above stops, and
+that is a known residual rather than a closed hole: only the durable
+lock needs an account to exist, and it does not always lock or expire
+together with the counter. Whenever a live `User.LockedUntil` is reached
+with no counter lock in front of it — Redis down, the counter's fixed
+window already expired while the account's lock has not, or a slow
+attacker who never fills a single window — an email that exists gets the
+**429**, while an email that does not has no record to lock and gets a
+plain **401**. Closing it would change what a legitimately locked-out
+user is told (429 with `Retry-After` → a bare 401), so it is left to a
+deliberate contract decision rather than papered over.
 
 ## Service accounts
 

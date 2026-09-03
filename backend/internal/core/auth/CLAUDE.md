@@ -415,13 +415,18 @@ independent admin-managed pairs:
   than a wrong password. (The gates that run *before* the peek — empty
   input, `loginEnabledAdmin/Client`, the password-method gate, the geo
   block — pay nothing on purpose: they must leave counters and audit
-  trail untouched.) With the counter available, a known and an unknown
-  email therefore lock at the same attempt, in the same window, with the
-  same status.
+  trail untouched.) With the counter available and a burst of guesses, a
+  known and an unknown email therefore lock at the same attempt, in the
+  same window, with the same status. A run slow enough that no window
+  reaches the threshold is the exception, and it is M-7's residual, not
+  a second hole: only the known account has a cumulative
+  `FailedLoginCount` to lock on — see the two bullets below.
 - **They fail OPEN to the durable lock.** A `Locked` error reads as *not
-  locked*; a `RecordFailure` error yields no verdict and the verify
-  branch falls back to `User.FailedLoginCount+1 >= LockoutThreshold` for
-  that attempt. A fail-closed counter would turn a Redis outage into a
+  locked* and a `RecordFailure` error yields the zero verdict, so a
+  store outage leaves `User.FailedLoginCount+1 >= LockoutThreshold` — a
+  rule `recordVerifyFailure` evaluates on **every** failure, not only
+  this one (see the durable-lock bullet below) — as the only rule still
+  standing. A fail-closed counter would turn a Redis outage into a
   platform-wide login outage. The consequence to know: with the counter
   down, an **unknown** email is answered 401 throughout — there is no
   document to count against — while an existing account is still capped.
@@ -448,6 +453,14 @@ independent admin-managed pairs:
   never burns the window down. Every other property in this section
   holds; this is the residual.
 
+  The same gap has a **second shape with no expiry in it**: an attacker
+  pacing `threshold-1` guesses per window never locks the counter, but
+  the cumulative `FailedLoginCount` rule (durable-lock bullet below)
+  still locks the account, so the 429/401 split opens the same way. Both
+  shapes are the one hole — a live `LockedUntil` reachable with no
+  counter lock in front of it — and both close, or not, with the same
+  spec decision.
+
   It is **known and deliberately unfixed here.** The obvious fix — make
   a live `LockedUntil` fall through to the same answer an unknown email
   gets — changes the D9 wire contract for a legitimately locked-out
@@ -458,16 +471,27 @@ independent admin-managed pairs:
   commit. Do not "tidy" the durable-lock branch into silence without
   that decision, and do not read the rest of this section as claiming
   the oracle is gone.
-- **The durable lock mirrors the counter, and an expired one is cleared
+- **The durable lock ORs with the counter, and an expired one is cleared
   *before* the verify.** `User.LockedUntil` is stamped from the same
-  `LockoutThreshold`/`LockoutDuration` pair, so with a healthy Redis the
-  two lock on the same attempt. A `LockedUntil` already in the past runs
-  `ClearFailedLogins` and zeroes the in-memory copy before the password
-  is verified — otherwise the first wrong password after a lockout
-  expires compares a stale `FailedLoginCount` against the threshold and
-  re-locks the account immediately. `FailedLoginCount` keeps being
-  incremented for operator visibility even when the counter is the one
-  deciding. `durableLockOrClear` (the peek-and-heal half) and
+  `LockoutThreshold`/`LockoutDuration` pair, so with a healthy Redis and
+  a burst of guesses the two lock on the same attempt — which is what
+  keeps a known and an unknown email indistinguishable there. But
+  `recordVerifyFailure` evaluates **both** rules on every failure and
+  locks on either: the counter window is fixed, so on its own it only
+  catches a burst, and an attacker pacing `threshold-1` guesses per
+  window would otherwise run forever. The cumulative `FailedLoginCount`
+  is what ends that low-and-slow run, so it is a live rule and not a
+  counter-outage fallback — demoting it also leaves the count itself
+  growing unbounded on an attacked account, so that the first attempt
+  after a Redis blip locks it instantly. A `LockedUntil` already in the
+  past runs `ClearFailedLogins` and zeroes the in-memory copy before the
+  password is verified — otherwise the first wrong password after a
+  lockout expires compares a stale `FailedLoginCount` against the
+  threshold and re-locks the account immediately. That heal is also what
+  makes the unconditional cumulative check *correct*: an account gets a
+  fresh budget after each lockout rather than re-locking on every later
+  failure for the rest of its life. `durableLockOrClear` (the
+  peek-and-heal half) and
   `recordVerifyFailure` (the record-and-mirror half) are the two shared
   helpers behind this — `Login`, `ChangePassword` and
   `ConfirmPasswordWithSecurity` all call the same two, rather than each

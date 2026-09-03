@@ -25,7 +25,9 @@ func TestForgotPassword_OverEmailCapIssuesNothing(t *testing.T) {
 	}
 	issuedAfterCap := tokens.createCount()
 	invalidatedAfterCap := tokens.invalidateCount()
-	mailedAfterCap := mail.enqueued()
+	// Each in-cap request enqueues one send. Wait for all three to have
+	// STARTED before measuring, so the baseline below is a settled 3.
+	mail.waitForEnqueued(t, 3)
 
 	// The fourth is over the cap: generic success, and NOTHING happens.
 	if err := svc.ForgotPassword(ctx, "known@example.com", "203.0.113.20"); err != nil {
@@ -37,8 +39,11 @@ func TestForgotPassword_OverEmailCapIssuesNothing(t *testing.T) {
 	if tokens.invalidateCount() != invalidatedAfterCap {
 		t.Error("an over-cap request must not invalidate the victim's live token")
 	}
-	if mail.enqueued() != mailedAfterCap {
-		t.Error("an over-cap request must not send mail")
+	// A send queued by the over-cap request would push the count past
+	// the settled 3. This read is deliberately immediate: it can only
+	// under-report a violation, never invent one, so it cannot flake.
+	if got := mail.notifier.count(); got != 3 {
+		t.Errorf("an over-cap request must not send mail: %d sends started, want 3", got)
 	}
 }
 
@@ -72,9 +77,7 @@ func TestForgotPassword_DoesNotWaitOnDelivery(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
 		t.Fatalf("ForgotPassword took %v with a blocking sender; the send must be detached", elapsed)
 	}
-	if mail.enqueued() != 1 {
-		t.Fatalf("enqueued %d jobs, want 1", mail.enqueued())
-	}
+	mail.waitForEnqueued(t, 1)
 }
 
 // M-6: a verification resend is not a login failure and must never be
@@ -284,27 +287,35 @@ func newRecordingMail(t *testing.T, blockSend bool) *recordingMail {
 	return &recordingMail{dispatcher: d, notifier: n}
 }
 
-// enqueued reports how many sends the dispatcher's worker pool has
-// actually started. Enqueue itself is asynchronous (that is the whole
-// point of D5), so a check made immediately after ForgotPassword
-// returns needs a short, bounded wait rather than a race — this polls
-// for quiescence (two reads 5ms apart agreeing) capped at 200ms, well
-// under the per-test budget and short enough that the suite stays
-// fast. For the blocking-sender fixture, the counter is incremented
-// BEFORE the block, so this settles at 1 almost immediately even
-// though the send itself never completes.
-func (m *recordingMail) enqueued() int {
-	deadline := time.Now().Add(200 * time.Millisecond)
-	last := m.notifier.count()
-	for time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-		cur := m.notifier.count()
-		if cur == last {
-			return cur
+// waitForEnqueued blocks until the dispatcher's worker pool has started
+// exactly `want` sends, or fails the test after two seconds. Enqueue is
+// asynchronous (that is the whole point of D5), so a check made
+// immediately after ForgotPassword returns would race the worker.
+//
+// It waits for a KNOWN count rather than for quiescence: two reads
+// agreeing only means nothing moved between them, which is also true
+// before the first worker has run, so a quiescence poll can report a
+// settled 0 that is really "not started yet". The deadline is generous
+// because it is never reached on a healthy run — it exists to turn a
+// genuine failure into a message instead of a hang, so lengthening it
+// can only make the test more reliable, never less. For the
+// blocking-sender fixture the counter is incremented BEFORE the block,
+// so this returns as soon as the send starts even though it never
+// completes.
+func (m *recordingMail) waitForEnqueued(t *testing.T, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	var got int
+	for {
+		got = m.notifier.count()
+		if got == want {
+			return
 		}
-		last = cur
+		if time.Now().After(deadline) {
+			t.Fatalf("waited 2s for %d enqueued send(s), the dispatcher started %d", want, got)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
-	return last
 }
 
 // recordingNotifier is the iface.NotificationSender both ForgotPassword

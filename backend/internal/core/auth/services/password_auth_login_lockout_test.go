@@ -214,3 +214,53 @@ func TestLogin_EmptyIPSkipsTheAddressScope(t *testing.T) {
 		t.Fatalf("an empty IP produced a counter with count %d; it must produce none", v.Count)
 	}
 }
+
+// Low-and-slow: an attacker who paces guesses so the fixed-window
+// counter never reaches its threshold must still be capped by the
+// cumulative durable count. The counter window is fixed, not sliding,
+// so threshold-1 guesses per window is a rate that locks the counter at
+// no point ever — the durable FailedLoginCount is the only rule left
+// that ends the run.
+//
+// A fixed window that has rolled over is a key that is GONE, so the
+// pacing is modelled by deleting both scopes between attempts: every
+// Login below sees a pristine counter and a durable count one higher
+// than the last.
+func TestLogin_PacedFailuresStillHitTheCumulativeDurableCap(t *testing.T) {
+	f := newLockoutFixture(t, lockoutTestThreshold)
+	svc, users, counter := f.env.auth, f.users, f.counter
+	ctx := context.Background()
+	ip := "203.0.113.17"
+	emailKey := AttemptKeyEmail(PolicyAudienceOperator, "known@example.com")
+
+	for i := 0; i < lockoutTestThreshold; i++ {
+		if err := counter.Reset(ctx, emailKey); err != nil {
+			t.Fatalf("attempt %d: reset the email scope: %v", i+1, err)
+		}
+		if err := counter.Reset(ctx, AttemptKeyIP(ip)); err != nil {
+			t.Fatalf("attempt %d: reset the address scope: %v", i+1, err)
+		}
+		_, err := svc.Login(ctx, LoginInput{Email: "known@example.com", Password: "wrong", IP: ip})
+		if !errors.Is(err, ErrInvalidCredentials) {
+			t.Fatalf("attempt %d = %v, want ErrInvalidCredentials", i+1, err)
+		}
+	}
+
+	// The counter must NOT be the thing that locked, or this test would
+	// pass for the wrong reason.
+	v, err := counter.Locked(ctx, emailKey, Limit{Threshold: lockoutTestThreshold, Window: 15 * time.Minute})
+	if err != nil {
+		t.Fatalf("Locked: %v", err)
+	}
+	if v.Locked {
+		t.Fatalf("the paced run locked the counter (%+v); this test must exercise the durable rule", v)
+	}
+
+	if !users.lockedUntilSet("known@example.com") {
+		t.Fatalf("%d cumulative failures left the account unlocked while the counter was healthy — a paced attacker is then capped by neither rule", lockoutTestThreshold)
+	}
+	// And the next attempt is answered as a lockout, not a bare 401.
+	if _, err := svc.Login(ctx, LoginInput{Email: "known@example.com", Password: "wrong", IP: ip}); !errors.Is(err, ErrAccountLocked) {
+		t.Fatalf("attempt after the cumulative cap = %v, want ErrAccountLocked", err)
+	}
+}

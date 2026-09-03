@@ -1549,16 +1549,21 @@ func (s *PasswordAuthService) chargeRequestCap(ctx context.Context, ipKey, email
 }
 
 // recordLoginFailure charges one failure against the address and the
-// account. counterAvailable is false when the EMAIL scope could not be
-// recorded — that is the signal for the durable branch (D4) to fall
-// back to the FailedLoginCount rule for this attempt.
-func (s *PasswordAuthService) recordLoginFailure(ctx context.Context, ip, email string) (Verdict, bool) {
+// account, and returns the EMAIL scope's verdict. An unwired or
+// unavailable counter yields the ZERO verdict — not locked — which is
+// the fail-open posture of spec D1: the durable FailedLoginCount rule
+// in recordVerifyFailure is what still caps guessing while the store is
+// down.
+func (s *PasswordAuthService) recordLoginFailure(ctx context.Context, ip, email string) Verdict {
 	if s.attempts == nil {
-		return Verdict{}, false
+		return Verdict{}
 	}
 	_, _ = s.attempts.RecordFailure(ctx, AttemptKeyIP(ip), s.addressLimit(ctx))
 	v, err := s.attempts.RecordFailure(ctx, AttemptKeyEmail(s.audience, email), s.accountLimit(ctx))
-	return v, err == nil
+	if err != nil {
+		return Verdict{}
+	}
+	return v
 }
 
 // durableLockOrClear enforces the durable LockedUntil lock against an
@@ -1594,21 +1599,31 @@ func (s *PasswordAuthService) durableLockOrClear(ctx context.Context, user *ifac
 // recordVerifyFailure charges a wrong-password attempt against the
 // email/IP attempt-counter scopes and mirrors the outcome onto the
 // durable LockedUntil lock — the shape Login, ChangePassword and
-// ConfirmPasswordWithSecurity all share on a failed verify. The durable
-// lock MIRRORS the counter: with a healthy Redis the two lock at the
-// same attempt; with Redis down the durable rule alone still caps
-// guessing against an existing account. FailedLoginCount keeps being
-// incremented for operator visibility even when the counter is the one
-// deciding. Callers still own their own audit emit — the three routes
-// emit different actions on a failure.
+// ConfirmPasswordWithSecurity all share on a failed verify.
+//
+// The two rules are OR'd and BOTH are always evaluated. The counter
+// window is fixed, so on its own it only catches a burst: an attacker
+// pacing threshold-1 guesses per window never trips it, and can keep
+// that up indefinitely. The cumulative FailedLoginCount is what ends
+// that low-and-slow run, so it must not be demoted to a counter-outage
+// fallback — that leaves the paced attacker capped by neither rule, and
+// leaves the count itself growing unbounded until a Redis blip locks
+// the account on the first attempt after it. With a healthy store and a
+// burst, the two rules lock on the same attempt, which is what keeps a
+// known and an unknown email indistinguishable there.
+//
+// The unconditional cumulative check is correct only because
+// durableLockOrClear zeroes FailedLoginCount when a lock EXPIRES: an
+// account gets a fresh budget after every lockout instead of re-locking
+// on each later failure for the rest of its life. Callers still own
+// their own audit emit — the three routes emit different actions on a
+// failure.
 func (s *PasswordAuthService) recordVerifyFailure(ctx context.Context, ip string, user *iface.User) {
-	emailVerdict, counterAvailable := s.recordLoginFailure(ctx, ip, user.Email)
+	emailVerdict := s.recordLoginFailure(ctx, ip, user.Email)
 	var lockUntil *time.Time
-	lock := emailVerdict.Locked
-	if !counterAvailable {
-		lock = user.FailedLoginCount+1 >= s.policy.LockoutThreshold(ctx)
-	}
-	if lock {
+	// AuthPolicyService's readers are nil-receiver safe and answer with
+	// the shipped defaults, so an unwired policy needs no guard here.
+	if emailVerdict.Locked || user.FailedLoginCount+1 >= s.policy.LockoutThreshold(ctx) {
 		t := time.Now().Add(s.policy.LockoutDuration(ctx))
 		lockUntil = &t
 	}
