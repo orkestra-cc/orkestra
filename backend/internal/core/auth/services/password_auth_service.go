@@ -1460,13 +1460,23 @@ func mergeAMRWithReauth(prior []string) []string {
 // recordFailed is the LEGACY shared in-memory bucket. Login no longer
 // calls it — it moved to the attempt counters below — and
 // ResendVerification has since moved to its own verify-email/verify-ip
-// request-cap scopes (overRequestCap/chargeRequestCap). ResendVerification
-// was the last production reader of RateLimiter.IsBlocked in this
-// module (`grep -rn "IsBlocked(" internal/core/auth --include=*.go` outside
-// _test.go is empty), so the one remaining writer, ConfirmPasswordWithSecurity,
-// now records into a bucket NOTHING reads — a dead write, not a
-// protection, until its own task gives it a matching read (or removes
-// the write). Delete this once that task lands.
+// request-cap scopes (overRequestCap/chargeRequestCap). Two writers
+// remain on it: this method (called only by ConfirmPasswordWithSecurity)
+// and ServiceAccountService's own recordFailed. Both write into the
+// SAME *sharederrors.RateLimiter instance — module.go constructs one
+// rateLimiter and wires it into both PasswordAuthConfig and
+// NewServiceAccountService — so the two share one lockout budget per
+// key, not two independent ones. The "ip:" write this method makes IS
+// read: ServiceAccountService.Grant's IsLockedOut("ip:"+IP) peeks the
+// identical bucket, so a failed ConfirmPasswordWithSecurity attempt
+// from an address counts toward that address's client-credentials
+// lockout. The "email:" write is NOT read anywhere in production —
+// ServiceAccountService only ever reads "ip:"/"client:" keys via
+// IsLockedOut, and nothing in this module calls IsBlocked any more —
+// so that half is a genuine dead write as of this commit.
+// ConfirmPasswordWithSecurity migrates off this call with its own
+// task; delete this once it does (ServiceAccountService's own
+// reader/writer pair on this limiter is a separate concern).
 func (s *PasswordAuthService) recordFailed(ctx context.Context, ip, email string) {
 	if s.rateLimiter == nil {
 		return
