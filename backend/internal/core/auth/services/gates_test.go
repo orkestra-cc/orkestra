@@ -50,9 +50,16 @@ type gatesEnv struct {
 	audit       *gateAuditSink
 }
 
+// gatesOption tweaks the PasswordAuthConfig newGatesEnv assembles, just
+// before the service is built. The login-lockout fixtures use it to wire
+// an AttemptCounter and a Verify-counting PasswordService; every
+// pre-existing caller passes none and keeps the counter-less service,
+// which is exactly the documented fail-open path.
+type gatesOption func(*PasswordAuthConfig)
+
 // newGatesEnv assembles a wired PasswordAuthService against in-memory
 // fakes. policyValues seeds the auth-policy reader.
-func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]string, geoByIP map[string]string) *gatesEnv {
+func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]string, geoByIP map[string]string, opts ...gatesOption) *gatesEnv {
 	t.Helper()
 	// HIBP off for every env built here. ValidatePolicy hands the decision
 	// to the POLICY toggle as soon as a policy is wired (see
@@ -92,7 +99,7 @@ func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]
 		emailTokens:  &gateEmailTokenRepo{},
 		audit:        &gateAuditSink{},
 	}
-	env.auth = NewPasswordAuthService(PasswordAuthConfig{
+	authCfg := PasswordAuthConfig{
 		UserService:              env.users,
 		TenantProvider:           env.tenant,
 		PasswordService:          env.pwd,
@@ -112,7 +119,11 @@ func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]
 		Policy:                   policy,
 		Audience:                 audience,
 		GeoResolver:              env.geo,
-	})
+	}
+	for _, opt := range opts {
+		opt(&authCfg)
+	}
+	env.auth = NewPasswordAuthService(authCfg)
 	env.auth.SetAuditSink(env.audit)
 	t.Cleanup(env.rateLimiter.Close)
 	return env

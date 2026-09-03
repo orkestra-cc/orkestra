@@ -405,14 +405,14 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		},
 
 		// Login & Sessions — per-surface kill switches + lockout policy.
-		// Read at request time by AuthPolicyService. As of this commit the
-		// account pair alone is plumbed into shared/errors.RateLimiter via
-		// SetAuthFailedConfig before each login attempt (the address pair
-		// has no consumer yet — see AuthPolicyService.IPLockoutThreshold /
-		// IPLockoutDuration). Both pairs migrate to the Redis attempt
-		// counters (services/attempt_counter.go) once the login path is
-		// wired to them, at which point an admin edit takes effect on the
-		// very next attempt, including one already inside an open window.
+		// Read at request time by AuthPolicyService. Both pairs now feed
+		// the Redis attempt counters (services/attempt_counter.go): the
+		// account pair keys the `email` scope, the address pair the `ip`
+		// scope, and both are read per attempt against the LIVE threshold,
+		// so an admin edit takes effect on the very next attempt —
+		// including one already inside an open window. The other flows
+		// still on shared/errors.RateLimiter (resend-verification,
+		// password-confirm) do not read these keys.
 		{
 			Key: "loginEnabledAdmin", Label: "Allow logins on operator console", Group: "login",
 			Description: "When off, POST /v1/auth/operator/login returns 403. Use during maintenance to lock out the operator console without taking the backend offline.",

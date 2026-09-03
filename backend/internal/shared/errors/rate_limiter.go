@@ -170,9 +170,13 @@ func (rl *RateLimiter) RecordFailedAuth(ctx context.Context, identifier string) 
 
 // SetAuthFailedConfig replaces the "auth:failed" lockout configuration
 // at runtime so admin-managed values can drive the per-IP / per-email
-// brute-force guard. The auth module calls this on every login attempt
-// using the live AuthPolicyService values; the swap is cheap because
-// it only mutates a map entry. New token buckets pick up the new
+// brute-force guard. Password login no longer calls it — that lockout
+// moved to the auth module's Redis attempt counters, which compare
+// against the live threshold per attempt instead of freezing capacity
+// into a bucket; the remaining caller is the service-account
+// client-credentials grant, which calls it on every grant using the
+// live AuthPolicyService values. The swap is cheap because it only
+// mutates a map entry. New token buckets pick up the new
 // capacity / window immediately; already-allocated buckets keep their
 // current refill rate until they are evicted by the cleanup ticker (5
 // min). Threshold < 1 or window <= 0 is ignored to avoid a misedit

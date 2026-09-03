@@ -523,11 +523,12 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		return nil, ErrLoginDisabled
 	}
 
-	// Per-surface method gate (spec §4.3): sits before GetUserForAuth so
-	// lockout counters, the rate limiter and the audit trail see nothing
-	// and every email receives the identical response. Only the operator
-	// surface can be rescued by the boot-time break-glass; a nil policy
-	// or failed read is an outage (503), never a pass.
+	// Per-surface method gate (spec §4.3): sits before the lockout peek
+	// and before GetUserForAuth, so the attempt counters and the audit
+	// trail see nothing and every email receives the identical response.
+	// Only the operator surface can be rescued by the boot-time
+	// break-glass; a nil policy or failed read is an outage (503), never
+	// a pass.
 	decision, err := s.policy.PasswordLoginDecision(ctx, s.audience)
 	if err != nil {
 		return nil, err
@@ -536,8 +537,8 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		return nil, ErrPasswordLoginDisabled
 	}
 
-	// Geo block — checked before the rate-limiter and password lookup so
-	// a blocked country never spends a token from the per-IP bucket and
+	// Geo block — checked before the lockout peek and the password
+	// lookup so a blocked country never moves the per-IP counter and
 	// never lights up the audit log with a noisy rejected-login row.
 	// Skipped when the policy is unwired, the resolver is nil (geoip
 	// disabled), or the IP can't be resolved (private/loopback) — the
@@ -552,32 +553,22 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		}
 	}
 
-	// Refresh the rate limiter's lockout config from the live policy so
-	// admin edits take effect on the next login attempt without a
-	// restart. New buckets pick up the updated values immediately;
-	// already-running buckets ride out their existing window, which is
-	// fine — the next refill cycle reflects the new policy.
-	if s.policy != nil && s.rateLimiter != nil {
-		s.rateLimiter.SetAuthFailedConfig(
-			s.policy.LockoutThreshold(ctx),
-			s.policy.LockoutDuration(ctx),
-		)
-	}
-
-	// Combined IP + email bucket so that a single credential-stuffer rotating
-	// IPs still trips the per-account lock.
-	if s.rateLimiter != nil {
-		if s.rateLimiter.IsBlocked(ctx, "ip:"+in.IP) || s.rateLimiter.IsBlocked(ctx, "email:"+email) {
-			return nil, ErrAccountLocked
-		}
+	// Peek both scopes before touching the database. Nothing is
+	// recorded: a lock that extends itself on every probe never expires
+	// under a running attack. A store error reads as not locked — the
+	// counters fail open and the durable lock below is the second line.
+	if v, locked := s.peekLockout(ctx, in.IP, email); locked {
+		s.dummyVerify(in.Password)
+		s.emitLoginFailed(ctx, email, "", in.IP, "rate_limited")
+		return nil, LockedAfter(v.RetryAfter)
 	}
 
 	user, err := s.userService.GetUserForAuth(ctx, email)
 	if err != nil {
 		// Run Verify against a dummy hash to keep timing constant whether
 		// or not the user exists, foiling user enumeration via timing.
-		_, _ = s.passwordService.Verify(in.Password, s.passwordService.DummyHash())
-		s.recordFailed(ctx, in.IP, email)
+		s.dummyVerify(in.Password)
+		s.recordLoginFailure(ctx, in.IP, email)
 		s.emitLoginFailed(ctx, email, "", in.IP, "unknown_user")
 		return nil, ErrInvalidCredentials
 	}
@@ -616,43 +607,65 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 	}
 
 	if !user.IsActive {
-		s.recordFailed(ctx, in.IP, email)
+		s.dummyVerify(in.Password) // this branch used to be measurably cheaper
+		s.recordLoginFailure(ctx, in.IP, email)
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "user_inactive")
 		return nil, ErrInvalidCredentials
 	}
 	// Service principals authenticate only through the client-credentials
 	// grant; every interactive surface is closed by construction.
 	if user.Kind == iface.UserKindService {
-		s.recordFailed(ctx, in.IP, email)
+		s.dummyVerify(in.Password)
+		s.recordLoginFailure(ctx, in.IP, email)
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "service_principal")
 		return nil, ErrInvalidCredentials
 	}
 	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
+		s.dummyVerify(in.Password)
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "account_locked")
-		return nil, ErrAccountLocked
+		// Not recorded: a durable lock, like a counter lock, must not
+		// extend itself.
+		return nil, LockedAfter(time.Until(*user.LockedUntil))
+	}
+	if user.LockedUntil != nil {
+		// The lock has EXPIRED. Clear the durable counter before the
+		// verify: the old code compared FailedLoginCount against the
+		// threshold without anything ever resetting it, so the first
+		// wrong password after an expiry re-locked the account at once.
+		if err := s.userService.ClearFailedLogins(ctx, user.UUID); err != nil && s.logger != nil {
+			s.logger.Warn("auth: failed to clear an expired account lock",
+				slog.String("user_uuid", user.UUID),
+				slog.String("error", err.Error()))
+		}
+		user.FailedLoginCount = 0
+		user.LockedUntil = nil
 	}
 	if user.PasswordHash == "" {
 		// Account exists but was created via OAuth — don't leak that fact.
-		_, _ = s.passwordService.Verify(in.Password, s.passwordService.DummyHash())
-		s.recordFailed(ctx, in.IP, email)
+		s.dummyVerify(in.Password)
+		s.recordLoginFailure(ctx, in.IP, email)
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "no_password")
 		return nil, ErrInvalidCredentials
 	}
 
 	ok, err := s.passwordService.Verify(in.Password, user.PasswordHash)
 	if err != nil || !ok {
-		s.recordFailed(ctx, in.IP, email)
-		// Threshold and duration come from the admin-managed policy —
-		// the same values already plumbed into the rate limiter above.
-		// This branch used to compare against a hardcoded 5, so an
-		// operator who tightened accountLockoutThreshold got the new
-		// value on the in-memory bucket but the old one on the
-		// persisted User.LockedUntil.
+		emailVerdict, counterAvailable := s.recordLoginFailure(ctx, in.IP, email)
+
+		// The durable lock MIRRORS the counter. With a healthy Redis the
+		// two lock at the same attempt; with Redis down the durable rule
+		// alone still caps guessing against an existing account.
 		var lockUntil *time.Time
-		if user.FailedLoginCount+1 >= s.policy.LockoutThreshold(ctx) {
+		lock := emailVerdict.Locked
+		if !counterAvailable {
+			lock = user.FailedLoginCount+1 >= s.policy.LockoutThreshold(ctx)
+		}
+		if lock {
 			t := time.Now().Add(s.policy.LockoutDuration(ctx))
 			lockUntil = &t
 		}
+		// FailedLoginCount keeps being incremented for operator
+		// visibility even when the counter is the one deciding.
 		_ = s.userService.RecordFailedLogin(ctx, user.UUID, lockUntil)
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "bad_password")
 		return nil, ErrInvalidCredentials
@@ -670,8 +683,10 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		}
 	}
 
-	// Successful login: clear the failed counter.
+	// Successful login: clear the failed counters — the durable one and
+	// the email scope. The address scope is deliberately left alone.
 	_ = s.userService.ClearFailedLogins(ctx, user.UUID)
+	s.resetLoginFailures(ctx, email)
 
 	s.emitAudit(ctx, iface.AuditEvent{
 		ActorUserID: user.UUID,
@@ -1388,12 +1403,83 @@ func mergeAMRWithReauth(prior []string) []string {
 
 // --- internal helpers ---
 
+// recordFailed is the LEGACY shared in-memory bucket. Login no longer
+// calls it — it moved to the attempt counters below — and the two flows
+// still on it (ResendVerification, ConfirmPasswordWithSecurity) migrate
+// with their own tasks. Delete it once they do.
 func (s *PasswordAuthService) recordFailed(ctx context.Context, ip, email string) {
 	if s.rateLimiter == nil {
 		return
 	}
 	s.rateLimiter.RecordFailedAuth(ctx, "ip:"+ip)
 	s.rateLimiter.RecordFailedAuth(ctx, "email:"+email)
+}
+
+// accountLimit is the per-email / per-client pair. Read per call, so an
+// admin edit takes effect on the very next attempt — including one
+// inside an already-open window, since the threshold is compared live
+// (attempt_counter.go), not frozen into a bucket.
+func (s *PasswordAuthService) accountLimit(ctx context.Context) Limit {
+	return Limit{
+		Threshold: s.policy.LockoutThreshold(ctx),
+		Window:    s.policy.LockoutDuration(ctx),
+	}
+}
+
+// addressLimit is the per-IP pair, an order of magnitude looser: an
+// egress address is not an account (spec D2, edge case 31).
+func (s *PasswordAuthService) addressLimit(ctx context.Context) Limit {
+	return Limit{
+		Threshold: s.policy.IPLockoutThreshold(ctx),
+		Window:    s.policy.IPLockoutDuration(ctx),
+	}
+}
+
+// peekLockout reads both scopes WITHOUT moving either. A store error
+// reads as "not locked": the counters fail open and the durable lock is
+// the second line (spec D1). Returns the verdict that produced the lock
+// so the caller can render Retry-After.
+func (s *PasswordAuthService) peekLockout(ctx context.Context, ip, email string) (Verdict, bool) {
+	if s.attempts == nil {
+		return Verdict{}, false
+	}
+	if v, err := s.attempts.Locked(ctx, AttemptKeyIP(ip), s.addressLimit(ctx)); err == nil && v.Locked {
+		return v, true
+	}
+	if v, err := s.attempts.Locked(ctx, AttemptKeyEmail(s.audience, email), s.accountLimit(ctx)); err == nil && v.Locked {
+		return v, true
+	}
+	return Verdict{}, false
+}
+
+// recordLoginFailure charges one failure against the address and the
+// account. counterAvailable is false when the EMAIL scope could not be
+// recorded — that is the signal for the durable branch (D4) to fall
+// back to the FailedLoginCount rule for this attempt.
+func (s *PasswordAuthService) recordLoginFailure(ctx context.Context, ip, email string) (Verdict, bool) {
+	if s.attempts == nil {
+		return Verdict{}, false
+	}
+	_, _ = s.attempts.RecordFailure(ctx, AttemptKeyIP(ip), s.addressLimit(ctx))
+	v, err := s.attempts.RecordFailure(ctx, AttemptKeyEmail(s.audience, email), s.accountLimit(ctx))
+	return v, err == nil
+}
+
+// resetLoginFailures clears the EMAIL scope after a success. The address
+// scope is deliberately NOT reset: one correct login must not launder a
+// credential-stuffing run coming from the same address.
+func (s *PasswordAuthService) resetLoginFailures(ctx context.Context, email string) {
+	if s.attempts == nil {
+		return
+	}
+	_ = s.attempts.Reset(ctx, AttemptKeyEmail(s.audience, email))
+}
+
+// dummyVerify burns one argon2 verification so a branch that returns
+// early costs the same wall-clock time as a wrong password. Every
+// non-success branch of Login calls it.
+func (s *PasswordAuthService) dummyVerify(password string) {
+	_, _ = s.passwordService.Verify(password, s.passwordService.DummyHash())
 }
 
 func (s *PasswordAuthService) sendVerificationEmail(ctx context.Context, user *iface.User, ip string) error {
