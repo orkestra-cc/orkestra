@@ -1141,3 +1141,63 @@ func TestPasswordReauthAllowed_AdapterContract(t *testing.T) {
 		t.Fatal("break-glass must never count as a durable method")
 	}
 }
+
+// The IP scope carries its OWN pair, and it is much looser than the
+// account pair: an egress address is not an account. Five wrong
+// passwords among the hundreds of people behind one office NAT must not
+// lock the office out for fifteen minutes.
+func TestIPLockoutThreshold(t *testing.T) {
+	cases := []struct {
+		name string
+		val  string
+		want int
+	}{
+		{"absent", "", 100},
+		{"blank", "   ", 100},
+		{"malformed", "many", 100},
+		{"zero", "0", 100},
+		{"negative", "-4", 100},
+		{"valid", "250", 250},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newPolicy(map[string]string{"ipLockoutThreshold": tc.val})
+			if got := svc.IPLockoutThreshold(context.Background()); got != tc.want {
+				t.Errorf("IPLockoutThreshold = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIPLockoutDuration(t *testing.T) {
+	cases := []struct {
+		name string
+		val  string
+		want time.Duration
+	}{
+		{"absent", "", 15 * time.Minute},
+		{"malformed", "soon", 15 * time.Minute},
+		{"zero", "0s", 15 * time.Minute},
+		{"valid", "1h", time.Hour},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newPolicy(map[string]string{"ipLockoutDuration": tc.val})
+			if got := svc.IPLockoutDuration(context.Background()); got != tc.want {
+				t.Errorf("IPLockoutDuration = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A nil service / nil config service must answer the defaults, not
+// panic — the same nil-tolerance every other accessor has.
+func TestIPLockoutAccessors_NilTolerant(t *testing.T) {
+	var svc *AuthPolicyService
+	if got := svc.IPLockoutThreshold(context.Background()); got != 100 {
+		t.Errorf("threshold on nil service = %d, want 100", got)
+	}
+	if got := svc.IPLockoutDuration(context.Background()); got != 15*time.Minute {
+		t.Errorf("duration on nil service = %v, want 15m", got)
+	}
+}

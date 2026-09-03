@@ -105,6 +105,13 @@ const AuthLoginMethodLockout = "auth.login_method_lockout"
 // existence oracle, which is the defect (M-7) the counters close.
 const AuthTooManyAttempts = "auth.too_many_attempts"
 
+// AuthIPThresholdBelowAccount signals a refused module-config write:
+// ipLockoutThreshold must be >= accountLockoutThreshold. A source
+// address that locks BEFORE the account does turns a shared egress into
+// an existence oracle — the caller learns "an account is being attacked
+// behind this NAT" from the early 429.
+const AuthIPThresholdBelowAccount = "auth.ip_threshold_below_account"
+
 // --- tenant ---
 
 // TenantSlugAlreadyInUse signals that a tenant create or update would reuse an

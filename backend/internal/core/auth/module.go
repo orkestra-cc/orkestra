@@ -395,9 +395,11 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		},
 
 		// Login & Sessions — per-surface kill switches + lockout policy.
-		// Read at request time by AuthPolicyService; lockout values flow
-		// into shared/errors.RateLimiter via SetAuthFailedConfig before
-		// each login attempt so admin edits take effect on the next try.
+		// Read at request time by AuthPolicyService. The account pair and
+		// the address pair are read per attempt by the Redis attempt
+		// counters (services/attempt_counter.go), so an admin edit takes
+		// effect on the very next attempt, including one already inside
+		// an open window.
 		{
 			Key: "loginEnabledAdmin", Label: "Allow logins on operator console", Group: "login",
 			Description: "When off, POST /v1/auth/operator/login returns 403. Use during maintenance to lock out the operator console without taking the backend offline.",
@@ -426,6 +428,16 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		{
 			Key: "accountLockoutDuration", Label: "Lockout duration", Group: "login",
 			Description: "Go duration string (e.g. 15m, 1h) — how long an IP/email stays locked after exceeding the threshold. Default 15m.",
+			Type:        module.FieldDuration, Default: "15m",
+		},
+		{
+			Key: "ipLockoutThreshold", Label: "Failed attempts from one address before lockout", Group: "login",
+			Description: "Number of failed attempts from a single source address before that address is temporarily locked. Deliberately much higher than the per-account threshold — one office egress or VPN can be hundreds of people, and locking the address on five wrong passwords among them would take the whole office offline. Must be at least the per-account threshold. Default 100.",
+			Type:        module.FieldInt, Default: "100",
+		},
+		{
+			Key: "ipLockoutDuration", Label: "Address lockout duration", Group: "login",
+			Description: "Go duration string (e.g. 15m, 1h) — how long a source address stays locked after exceeding its threshold. Default 15m.",
 			Type:        module.FieldDuration, Default: "15m",
 		},
 		// Phase 3.1 — admin-managed token TTLs. Both are read live on

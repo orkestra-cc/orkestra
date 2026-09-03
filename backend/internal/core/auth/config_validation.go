@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,7 +59,57 @@ func (m *AuthModule) ValidateConfigSnapshot(_ context.Context, snap module.Confi
 	if err := validateAuthDurations(snap.Values); err != nil {
 		return err
 	}
+	if err := validateLockoutThresholdOrder(snap.Values); err != nil {
+		return err
+	}
 	return validateLoginMethodInvariant(snap, services.ReadableNonEmptyFile)
+}
+
+// validateLockoutThresholdOrder enforces
+// ipLockoutThreshold >= accountLockoutThreshold on the TARGET snapshot.
+//
+// Absent keys resolve to their schema defaults (5 and 100), so an
+// operator who never touched either passes. A malformed value is left
+// to the field-type check — mis-comparing it here would surface the
+// wrong error for the wrong field.
+func validateLockoutThresholdOrder(values map[string]string) error {
+	account, ok := snapshotInt(values, "accountLockoutThreshold", 5)
+	if !ok {
+		return nil
+	}
+	ip, ok := snapshotInt(values, "ipLockoutThreshold", 100)
+	if !ok {
+		return nil
+	}
+	if ip >= account {
+		return nil
+	}
+	return &module.ConfigValidationError{
+		Field: "ipLockoutThreshold",
+		Code:  errcode.AuthIPThresholdBelowAccount,
+		Message: fmt.Sprintf(
+			"must be at least the account threshold (%d): an address that locks before the account does turns a shared office or VPN egress into an oracle for which accounts exist behind it",
+			account),
+	}
+}
+
+// snapshotInt reads a positive integer from the snapshot. Returns
+// ok=false for a malformed or non-positive value so the caller skips
+// its rule rather than comparing against a guess.
+func snapshotInt(values map[string]string, key string, def int) (int, bool) {
+	raw, present := values[key]
+	if !present {
+		return def, true
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def, true
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, false
+	}
+	return n, true
 }
 
 // validateAuthDurations is the ValidateConfig loop verbatim: an empty value
