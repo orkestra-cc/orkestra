@@ -76,9 +76,9 @@ type tierBundleDeps struct {
 	// and both are carried only while the callers migrate.
 	attemptCounter services.AttemptCounter
 	// mailDispatcher is the bounded worker pool transactional auth mail
-	// will be enqueued on once Task 8 wires the first caller. Single
-	// instance shared by both tier bundles — the queue and worker
-	// bounds are process-wide, not per-tier.
+	// is enqueued on — ForgotPassword's reset-password send is its first
+	// caller. Single instance shared by both tier bundles — the queue
+	// and worker bounds are process-wide, not per-tier.
 	mailDispatcher           *services.MailDispatcher
 	geoResolver              geoip.Resolver
 	velocityKmh              float64

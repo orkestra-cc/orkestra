@@ -102,10 +102,11 @@ type AuthModule struct {
 	sweepLease  *services.MaintenanceLease
 	logger      *slog.Logger
 
-	// mailDispatcher is the bounded worker pool that transactional auth
-	// mail (forgot-password, resend-verification) will be enqueued on
-	// instead of sent synchronously from the request goroutine — Task 8
-	// wires the first Enqueue callers; wired here but idle until then.
+	// mailDispatcher is the bounded worker pool transactional auth mail
+	// is enqueued on instead of sent synchronously from the request
+	// goroutine. ForgotPassword's reset-password send is its first
+	// Enqueue caller; ResendVerification still sends synchronously (see
+	// PasswordAuthService.ResendVerification's doc comment for why).
 	// Started/stopped alongside the token-sweep maintenance loop in
 	// maintenance.go — see that file's Start/Stop for why the dispatcher
 	// runs regardless of whether this replica has sweep tiers or won the

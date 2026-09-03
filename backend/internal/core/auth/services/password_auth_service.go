@@ -99,11 +99,11 @@ type PasswordAuthConfig struct {
 	Notifier                iface.NotificationSender
 	RateLimiter             *sharederrors.RateLimiter
 	AttemptCounter          AttemptCounter
-	// MailDispatcher is the bounded worker pool that, once Task 8 wires
-	// ForgotPassword/ResendVerification onto it, detaches those sends
-	// from the request that triggered them. Not yet consumed as of this
-	// commit — both flows still call SendTemplated synchronously. Nil is
-	// tolerated regardless; a nil dispatcher's Enqueue is a safe no-op.
+	// MailDispatcher is the bounded worker pool that detaches
+	// ForgotPassword's reset-password send from the request that
+	// triggered it. ResendVerification stays synchronous (see its doc
+	// comment for why). Nil is tolerated regardless; a nil dispatcher's
+	// Enqueue is a safe no-op.
 	MailDispatcher           *MailDispatcher
 	FrontendURL              string
 	RequireEmailVerification bool
@@ -145,10 +145,10 @@ type PasswordAuthService struct {
 	rateLimiter             *sharederrors.RateLimiter
 	attempts                AttemptCounter
 	// mail is the bounded dispatcher for transactional auth mail (D5).
-	// Wired here but not yet consumed: ForgotPassword and
-	// ResendVerification still call SendTemplated synchronously — Task 8
-	// moves them onto mail.Enqueue. Nil-tolerant regardless, mirroring
-	// PasswordAuthConfig.MailDispatcher.
+	// ForgotPassword hands its reset-password send to mail.Enqueue so the
+	// response no longer waits on the relay; ResendVerification still
+	// sends synchronously (see its doc comment for why). Nil-tolerant
+	// regardless, mirroring PasswordAuthConfig.MailDispatcher.
 	mail                     *MailDispatcher
 	frontendURL              string
 	requireEmailVerification bool
@@ -1040,18 +1040,30 @@ func (s *PasswordAuthService) VerifyEmail(ctx context.Context, rawToken string) 
 
 // ResendVerification issues a new verification email.
 //
-// Always returns nil regardless of outcome so callers cannot distinguish
-// "address unknown", "already verified", "rate-limited", or "sent" — the
-// public-facing 200 response stays neutral. Rate limiting shares the
-// same per-IP and per-email buckets as Login/ForgotPassword so an
-// attacker can't bypass one surface by hitting another.
+// Answers nil for "address unknown", "already verified" and "over the
+// cap" alike, so callers cannot distinguish them — the public-facing
+// response stays neutral for those three outcomes. A delivery failure
+// from the synchronous send below is the one outcome that still
+// propagates as a non-nil error.
+//
+// It has its OWN request scopes. It used to pre-check IsBlocked on the
+// LOGIN scopes — and IsBlocked's underlying Check consumes a token on
+// every call — so an anonymous caller could pin any address at 429
+// indefinitely without ever failing an authentication (M-6). A
+// verification request is not a login failure and must never be able to
+// lock a login.
 func (s *PasswordAuthService) ResendVerification(ctx context.Context, email, ip string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
-	if s.rateLimiter != nil {
-		if s.rateLimiter.IsBlocked(ctx, "ip:"+ip) || s.rateLimiter.IsBlocked(ctx, "email:"+email) {
-			return nil
-		}
+	ipKey := AttemptKeyVerifyIP(ip)
+	emailKey := AttemptKeyVerifyEmail(s.audience, email)
+
+	if s.overRequestCap(ctx, ipKey, emailKey, VerifyRequestsPerIP, VerifyRequestsPerEmail) {
+		return nil
 	}
+	// Charged before the lookup: same cost for a known and an unknown
+	// address.
+	s.chargeRequestCap(ctx, ipKey, emailKey, VerifyRequestsPerIP, VerifyRequestsPerEmail)
+
 	user, err := s.userService.GetUserForAuth(ctx, email)
 	if err != nil {
 		return nil
@@ -1063,10 +1075,6 @@ func (s *PasswordAuthService) ResendVerification(ctx context.Context, email, ip 
 	if err := s.sendVerificationEmail(ctx, user, ip); err != nil {
 		return err
 	}
-	// Each successful send counts toward the shared limiter so a script
-	// spamming the endpoint from one IP / against one address trips the
-	// same lockout window that protects login.
-	s.recordFailed(ctx, ip, email)
 	return nil
 }
 
@@ -1076,9 +1084,18 @@ func (s *PasswordAuthService) ResendVerification(ctx context.Context, email, ip 
 // errors it returns (spec §4.3). Both come from the per-surface method
 // gate below, which is evaluated BEFORE the user lookup, so neither
 // depends on account state. Every account-specific outcome after that
-// gate — unknown address, inactive account, token-mint or delivery
-// failure — is swallowed and returns nil, and that is what makes the
-// endpoint's single generic response non-enumerable.
+// gate — over the request cap, unknown address, inactive account,
+// token-mint or delivery failure — is swallowed and returns nil, and
+// that is what makes the endpoint's single generic response
+// non-enumerable.
+//
+// The request cap (M-5) is its own reset-email/reset-ip pair, peeked
+// without consuming and charged BEFORE the user lookup so a known and
+// an unknown address cost the same (overRequestCap/chargeRequestCap).
+// Without it, every call invalidated the previous token with no
+// throttle, so an attacker could destroy a victim's live reset link at
+// will; over the cap this method now mints no token and invalidates
+// nothing.
 func (s *PasswordAuthService) ForgotPassword(ctx context.Context, email, ip string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
 
@@ -1094,6 +1111,16 @@ func (s *PasswordAuthService) ForgotPassword(ctx context.Context, email, ip stri
 	if !enabled {
 		return ErrPasswordLoginDisabled
 	}
+
+	ipKey := AttemptKeyResetIP(ip)
+	emailKey := AttemptKeyResetEmail(s.audience, email)
+	if s.overRequestCap(ctx, ipKey, emailKey, ResetRequestsPerIP, ResetRequestsPerEmail) {
+		// Generic success, no token, no mail — and, crucially, the
+		// victim's last valid token is NOT invalidated: an attacker's
+		// fourth request can no longer destroy a live reset link.
+		return nil
+	}
+	s.chargeRequestCap(ctx, ipKey, emailKey, ResetRequestsPerIP, ResetRequestsPerEmail)
 
 	user, err := s.userService.GetUserForAuth(ctx, email)
 	if err != nil || user == nil {
@@ -1122,13 +1149,18 @@ func (s *PasswordAuthService) ForgotPassword(ctx context.Context, email, ip stri
 		return nil
 	}
 
+	// Pre-flight (ADR-0019 D7): ask for the category this send is about
+	// to carry, not a coarse IsConfigured(ctx) — a sender routed by
+	// category can be up for one category and down for another. A
+	// negative answer here means the enqueue below is never made, so a
+	// definitely-unusable notifier never occupies a dispatcher slot.
 	if !iface.IsConfiguredForCategory(ctx, s.notifier, notifModels.CategoryAuthResetPassword) {
 		s.logger.Warn("forgot password: notifier not configured, cannot send email")
 		return nil
 	}
 
 	resetURL := s.frontendURL + "/reset-password?token=" + raw
-	_, err = s.notifier.SendTemplated(ctx, iface.TemplatedNotificationRequest{
+	req := iface.TemplatedNotificationRequest{
 		Channel:    "email",
 		Type:       "transactional",
 		Category:   notifModels.CategoryAuthResetPassword,
@@ -1147,10 +1179,18 @@ func (s *PasswordAuthService) ForgotPassword(ctx context.Context, email, ip stri
 			"SupportEmail": s.supportEmail,
 		},
 		IdempotencyKey: "reset:" + user.UUID + ":" + doc.UUID,
-	})
-	if err != nil {
-		s.logger.Warn("forgot password: failed to send email", slog.String("error", err.Error()))
 	}
+	// Detached: the handler must not wait on the relay, or its latency
+	// would depend on whether the account existed. A full queue drops
+	// the mail with a metric; the user retries inside the caps above.
+	notifier := s.notifier
+	s.mail.Enqueue(MailJob{
+		TemplateID: "auth.reset_password",
+		Send: func(sendCtx context.Context) error {
+			_, err := notifier.SendTemplated(sendCtx, req)
+			return err
+		},
+	})
 	return nil
 }
 
@@ -1418,9 +1458,11 @@ func mergeAMRWithReauth(prior []string) []string {
 // --- internal helpers ---
 
 // recordFailed is the LEGACY shared in-memory bucket. Login no longer
-// calls it — it moved to the attempt counters below — and the two flows
-// still on it (ResendVerification, ConfirmPasswordWithSecurity) migrate
-// with their own tasks. Delete it once they do.
+// calls it — it moved to the attempt counters below — and
+// ResendVerification has since moved to its own verify-email/verify-ip
+// request-cap scopes (overRequestCap/chargeRequestCap). The one flow
+// still on it, ConfirmPasswordWithSecurity, migrates with its own task.
+// Delete this once it does.
 func (s *PasswordAuthService) recordFailed(ctx context.Context, ip, email string) {
 	if s.rateLimiter == nil {
 		return
@@ -1464,6 +1506,34 @@ func (s *PasswordAuthService) peekLockout(ctx context.Context, ip, email string)
 		return v, true
 	}
 	return Verdict{}, false
+}
+
+// overRequestCap peeks both request scopes. A request cap is not a
+// lockout: it never produces an error, never records on the login
+// scopes, and the caller's answer stays the endpoint's single generic
+// success. A store error reads as "not over" (fail open, spec D1).
+func (s *PasswordAuthService) overRequestCap(ctx context.Context, ipKey, emailKey string, ipLimit, emailLimit Limit) bool {
+	if s.attempts == nil {
+		return false
+	}
+	if v, err := s.attempts.Locked(ctx, ipKey, ipLimit); err == nil && v.Locked {
+		return true
+	}
+	if v, err := s.attempts.Locked(ctx, emailKey, emailLimit); err == nil && v.Locked {
+		return true
+	}
+	return false
+}
+
+// chargeRequestCap records one accepted request on both scopes. Called
+// BEFORE the user lookup so the cost is identical for a known and an
+// unknown address.
+func (s *PasswordAuthService) chargeRequestCap(ctx context.Context, ipKey, emailKey string, ipLimit, emailLimit Limit) {
+	if s.attempts == nil {
+		return
+	}
+	_, _ = s.attempts.RecordFailure(ctx, ipKey, ipLimit)
+	_, _ = s.attempts.RecordFailure(ctx, emailKey, emailLimit)
 }
 
 // recordLoginFailure charges one failure against the address and the

@@ -472,12 +472,32 @@ independent admin-managed pairs:
   the email key; the address key is deliberately left alone, so one
   correct login cannot launder a credential-stuffing run coming from the
   same address.
-- **`Login` is the only consumer so far.** The named `Limit` values for
-  the reset / verification request caps (`ResetRequestsPerEmail` and
-  friends) and `MFAVerifyLimit` for the authenticated MFA-verify cap are
-  declared in `attempt_counter.go` but not yet wired to a caller; those
-  flows are still on the shared `RateLimiter`. `MemoryAttemptCounter` is
-  the no-Redis stand-in and ships in a non-`_test.go` file so handler
+- **`Login`, `ForgotPassword` and `ResendVerification` are the
+  consumers so far.** `ForgotPassword` and `ResendVerification` each
+  moved onto their OWN pair of scopes — `reset-email`/`reset-ip` and
+  `verify-email`/`verify-ip` (`AttemptKeyResetEmail`/`AttemptKeyResetIP`/
+  `AttemptKeyVerifyEmail`/`AttemptKeyVerifyIP`, the `ResetRequestsPer*`/
+  `VerifyRequestsPer*` limits) — via the shared
+  `overRequestCap`/`chargeRequestCap` helpers next to `peekLockout`:
+  peeked without consuming, and charged BEFORE the user lookup so a
+  known and an unknown address cost the same. Neither shares a scope
+  with `Login` or with the other. `ResendVerification` used to
+  pre-check `IsBlocked` on the LOGIN scopes, and `IsBlocked`'s
+  underlying `Check` consumes a token on every call — so an anonymous
+  caller could pin any address at 429 indefinitely without ever failing
+  an authentication (M-6); a verification request is not a login
+  failure and must never be able to lock one. `ForgotPassword` used to
+  invalidate the previous reset token on every call with no throttle,
+  letting an attacker destroy a victim's live reset link at will (M-5);
+  over the cap it now mints no token and invalidates nothing, behind
+  the same generic success. `ForgotPassword`'s send is handed to the
+  bounded `MailDispatcher` (D5) instead of sent inline, so the response
+  no longer waits on the relay; `ResendVerification` still sends
+  synchronously through `sendVerificationEmail` (see that method's own
+  doc comment). `MFAVerifyLimit` for the authenticated MFA-verify cap is
+  declared in `attempt_counter.go` but not yet wired to a caller; that
+  flow is still on the shared `RateLimiter` (PR B). `MemoryAttemptCounter`
+  is the no-Redis stand-in and ships in a non-`_test.go` file so handler
   tests in other packages can use it without a miniredis.
 
 #### Absolute session cap (ADR-0017 D1)
@@ -1178,7 +1198,7 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 - **Account lockout reads the admin policy.** The branch that stamps `User.LockedUntil` uses `AuthPolicyService.LockoutThreshold`/`LockoutDuration` — the same pair the `email` attempt scope is read against, so the durable lock and the counter lock at the same attempt. It previously compared against a hardcoded `5` with a hardcoded 15-minute window, so tightening `accountLockoutThreshold` moved the in-memory bucket but not the persisted lock.
 - **Password character classes are Unicode-aware.** `checkCharacterClasses` classifies with `unicode.IsUpper/IsLower/IsDigit/IsPunct/IsSymbol`. The old ASCII-range switch put *everything* non-`[A-Za-z0-9]` in the symbol bucket: a plain space satisfied `requireSymbol`, and `ПАРОЛЬ` / `passwörd` satisfied `requireSymbol` while satisfying neither `requireUpper` nor `requireLower`. Whitespace now counts as no class at all.
 - **`aud` must name an audience the platform issues.** `validateTokenEnhanced` rejects anything outside `{operator, client, service}` — it used to accept any non-empty string. It deliberately does **not** pin `aud` to the minting audience: one `AuthMiddleware` with one JWT service guards both muxes, so equality would lock out a whole tier. Pinning a request to its surface is `RequireAudience`'s job at the mux.
-- **Rate limiting** lives in `shared/errors.RateLimiter` and still backs `ResendVerification` and `ConfirmPasswordWithSecurity` (`recordFailed`). `Login` no longer uses it at all — its lockout is the `AttemptCounter` (see "Attempt counters" under Runtime configuration). The limiter's own defaults are hardcoded; tune them in `password_auth_service.go`, not in the handler.
+- **Rate limiting** lives in `shared/errors.RateLimiter` and still backs `ConfirmPasswordWithSecurity` (`recordFailed`). `Login` no longer uses it at all — its lockout is the `AttemptCounter` (see "Attempt counters" under Runtime configuration); `ForgotPassword` and `ResendVerification` moved to their own `AttemptCounter` request-cap scopes (`reset-*`/`verify-*`) in that same section. The limiter's own defaults are hardcoded; tune them in `password_auth_service.go`, not in the handler.
 - **Notification idempotency.** Verification and reset emails always carry an idempotency key like `verify:<userUUID>:<tokenUUID>` and `reset:<userUUID>:<tokenUUID>` so retries don't dispatch duplicates.
 - **Password policy.** Length bounds, complexity requirements, and the HIBP toggle are admin-managed via the Password Policy tab; defaults match the legacy hardcoded values (10..128 chars, no complexity, HIBP on). The service still rejects `"password has appeared in a known data breach"` — observed in dev when the initial admin used a common test string.
 
@@ -1198,7 +1218,7 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 - **Never embed permissions in the JWT.** If you find yourself wanting to, you need a faster `HasPermission` — not a fatter token. Revocation must be instant.
 - **Never call `notification.EmailSender.Send` directly.** Every auth-triggered email must go through `SendTemplated` with a `TemplateID` that exists in `notification/services/default_templates.go`.
 - **Never read `cfg.Auth.JWT.PrivateKey` outside the JWT service.** Key material stays inside one package.
-- **Never bypass the lockout on login / forgot-password endpoints.** `Login` must peek the attempt counters before the user lookup and record on every real failure; the flows still on `shared/errors.RateLimiter` must keep calling `recordFailed`. Between them they are the only protection against credential stuffing and reset-flood.
+- **Never bypass the lockout on login / forgot-password / resend-verification endpoints.** `Login` must peek the attempt counters before the user lookup and record on every real failure; `ForgotPassword` and `ResendVerification` must peek `overRequestCap` and charge `chargeRequestCap` BEFORE the user lookup; the one flow still on `shared/errors.RateLimiter` (`ConfirmPasswordWithSecurity`) must keep calling `recordFailed`. Between them they are the only protection against credential stuffing and reset-flood.
 - **When you add a new OAuth provider**, add its fields to `ConfigSchema()`, extend the switch in `oauth_config_resolver.go`, and wire the factory case in `services/oauth_provider_factory.go`. Never hardcode provider config inside a handler — everything flows through the resolver so admin edits are live.
 - **Never read `cfg.Auth.{Google,Apple,GitHub,Discord}` from handlers.** Those struct fields still load from env vars for backward compatibility, but OAuth config is owned by the resolver. Handlers must call `h.oauthResolver.Get/RedirectURL/MobileAudience` so the admin panel stays authoritative.
 - **Never build a `/auth/callback` or `/user/security` URL outside `handlers/oauth_callback_redirect.go`**, never put a token, an email or a user id in one, and never set a client-tier cookie from the operator host — relay instead. The structural scan and `oauth_callback_flow_test.go` are the guards.
