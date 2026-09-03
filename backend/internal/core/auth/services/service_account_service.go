@@ -41,16 +41,18 @@ var (
 // wrong secret, disabled account, non-service-account user) so a caller
 // can never distinguish which one applied from the error alone.
 //
-// ErrClientRateLimited keeps its own identity for callers that answer a
-// lockout with no Verdict to hand back (e.g. a caller that wants the
-// generic 429 without a live retry hint) — the handler still recognizes
-// it unwrapped. Grant's own lockout branch (spec §4.1 D7) always has a
-// Verdict in hand and returns LockedAfter(v.RetryAfter) instead, which
-// errors.Is-matches ErrAccountLocked, the same sentinel the password
-// login lockout uses — the two lockouts share one identity now. Both
-// ErrClientRateLimited and ErrAccountLocked map to the same 429 in
-// mapServiceTokenError; they are deliberately NOT unified into a single
-// errors.Is relationship.
+// ErrClientRateLimited has no producer left (spec §4.1 D7): Grant's own
+// lockout branch always has a live Verdict by the time it can answer —
+// a counter-store error must fail OPEN, so that path falls through to
+// the credential check instead of returning anything — and so it
+// answers LockedAfter(v.RetryAfter) instead, which errors.Is-matches
+// ErrAccountLocked, the same sentinel the password-login lockout uses.
+// The sentinel and its handler arm (mapServiceTokenError,
+// service_token_handler.go) are kept only for tolerance — pending the
+// shared limiter's removal in the next task — not because anything
+// still produces it. ErrClientRateLimited and ErrAccountLocked are
+// deliberately NOT unified into a single errors.Is relationship even
+// though both map to the same 429.
 var (
 	ErrUnsupportedGrantType     = errors.New("unsupported grant type")
 	ErrInvalidClientCredentials = errors.New("invalid client credentials")

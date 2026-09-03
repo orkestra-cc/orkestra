@@ -415,11 +415,12 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		// the very next attempt — including one already inside an open
 		// window. No auth flow reads or writes shared/errors.RateLimiter
 		// any more (grep for IsBlocked/IsLockedOut/RecordFailedAuth/
-		// SetAuthFailedConfig/.Check( over internal/core/auth turns up
-		// nothing): the service-account grant was the last consumer of
-		// the single instance module.go builds below, and this module
-		// only keeps building and threading it through as inert plumbing
-		// pending its removal.
+		// SetAuthFailedConfig/.Check( over NON-TEST code in
+		// internal/core/auth turns up nothing — the remaining hits are
+		// all in *_test.go): the service-account grant was the last
+		// consumer of the single instance module.go builds below, and
+		// this module only keeps building and threading it through as
+		// inert plumbing pending its removal.
 		{
 			Key: "loginEnabledAdmin", Label: "Allow logins on operator console", Group: "login",
 			Description: "When off, POST /v1/auth/operator/login returns 403. Use during maintenance to lock out the operator console without taking the backend offline.",
