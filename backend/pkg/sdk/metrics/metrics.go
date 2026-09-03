@@ -61,6 +61,19 @@
 //   - orkestra_auth_token_sweep_duration_seconds — wall time of one
 //     sweep batch.
 //
+// The auth attempt counters (spec 2026-09-03 §4.1 D10) add three more:
+//
+//   - orkestra_auth_attempt_store_failures_total — Redis attempt-counter
+//     operations that could not be answered, labelled by operation
+//     (peek / record / reset). Every one fails OPEN to the durable
+//     per-account lock, so this measures degraded throttling, not
+//     failed logins.
+//   - orkestra_auth_lockouts_total — increments that reached their
+//     threshold, labelled by scope (ip / email / client / reset-* /
+//     verify-* / mfa-verify). scope="ip" is the stuffing alert.
+//   - orkestra_auth_mail_dropped_total — transactional auth emails
+//     dropped by a full dispatcher queue, labelled by template id.
+//
 // ADR-0002 (docs/adr/0002-metrics-label-schema.md) freezes the label
 // schema. Adding labels requires a new ADR — Prometheus cardinality
 // explodes silently, and history breaks when labels change. The raw
@@ -96,6 +109,9 @@ type Collector struct {
 	sessionCapExpiries             prometheus.Counter
 	sessionCapEventFailures        prometheus.Counter
 	sessionAnchorAnomalies         *prometheus.CounterVec
+	attemptStoreFailures           *prometheus.CounterVec
+	authLockouts                   *prometheus.CounterVec
+	authMailDropped                *prometheus.CounterVec
 	tokenSweepDeleted              *prometheus.CounterVec
 	tokenSweepBacklog              *prometheus.GaugeVec
 	tokenSweepDuration             *prometheus.HistogramVec
@@ -214,6 +230,43 @@ func (c *Collector) buildMetrics() {
 		[]string{"kind"},
 	)
 
+	c.attemptStoreFailures = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "auth",
+			Name:      "attempt_store_failures_total",
+			Help:      "Count of Redis attempt-counter operations that could not be answered. Every one of these fails OPEN — the durable per-account lock is the second line — so a sustained non-zero rate means brute-force throttling is degraded, not that logins are failing.",
+		},
+		// operation is one of peek, record, reset; anything else
+		// collapses to unknown (ADR-0002 cardinality bound).
+		[]string{"operation"},
+	)
+
+	c.authLockouts = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "auth",
+			Name:      "lockouts_total",
+			Help:      "Count of attempt-counter increments that reached their threshold. scope=\"ip\" moving is the credential-stuffing signal worth alerting on; scope=\"email\" is ordinary user error at low rates.",
+		},
+		// scope is the closed set declared in attempt_counter.go;
+		// anything else collapses to unknown. NEVER the identifier
+		// itself — that would make every attacked address a time series.
+		[]string{"scope"},
+	)
+
+	c.authMailDropped = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "auth",
+			Name:      "mail_dropped_total",
+			Help:      "Count of transactional auth emails dropped because the bounded dispatcher's queue was full. A drop is a lost mail the user can re-request inside the per-address caps; a non-zero rate means the queue or the worker count is undersized.",
+		},
+		// template is the notification template id — a finite set
+		// declared in-tree; anything else collapses to unknown.
+		[]string{"template"},
+	)
+
 	c.tokenSweepDeleted = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "orkestra",
@@ -293,7 +346,7 @@ func (c *Collector) Register() error {
 	if !atomic.CompareAndSwapUint32(&c.registered, 0, 1) {
 		return nil
 	}
-	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.sessionAnchorAnomalies, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration} {
+	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.sessionAnchorAnomalies, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped} {
 		if err := c.registry.Register(m); err != nil {
 			// rollback so the caller can retry with a fresh collector
 			atomic.StoreUint32(&c.registered, 0)
@@ -406,6 +459,59 @@ func (c *Collector) RecordSessionAnchorAnomaly(kind string) {
 		kind = "unknown"
 	}
 	c.sessionAnchorAnomalies.WithLabelValues(kind).Inc()
+}
+
+// attemptStoreOperations / lockoutScopes / droppedTemplates are the
+// closed label sets. Anything outside them collapses to "unknown" so a
+// caller bug cannot turn an email address, an IP or a user UUID into a
+// Prometheus time series (ADR-0002).
+var (
+	attemptStoreOperations = map[string]struct{}{"peek": {}, "record": {}, "reset": {}}
+	lockoutScopes          = map[string]struct{}{
+		"ip": {}, "email": {}, "client": {},
+		"reset-email": {}, "reset-ip": {},
+		"verify-email": {}, "verify-ip": {},
+		"mfa-verify": {},
+	}
+	droppedTemplates = map[string]struct{}{
+		"auth.reset_password":   {},
+		"auth.verify_email":     {},
+		"auth.mfa_factor_added": {},
+	}
+)
+
+func collapse(v string, allowed map[string]struct{}) string {
+	if _, ok := allowed[v]; ok {
+		return v
+	}
+	return "unknown"
+}
+
+// RecordAuthAttemptStoreFailure counts one Redis attempt-counter
+// operation that could not be answered. The caller has already failed
+// open; this is the signal that throttling is degraded.
+func (c *Collector) RecordAuthAttemptStoreFailure(operation string) {
+	if c == nil || c.attemptStoreFailures == nil {
+		return
+	}
+	c.attemptStoreFailures.WithLabelValues(collapse(operation, attemptStoreOperations)).Inc()
+}
+
+// RecordAuthLockout counts one increment that reached its threshold.
+func (c *Collector) RecordAuthLockout(scope string) {
+	if c == nil || c.authLockouts == nil {
+		return
+	}
+	c.authLockouts.WithLabelValues(collapse(scope, lockoutScopes)).Inc()
+}
+
+// RecordAuthMailDropped counts one transactional auth email dropped by a
+// full dispatcher queue.
+func (c *Collector) RecordAuthMailDropped(template string) {
+	if c == nil || c.authMailDropped == nil {
+		return
+	}
+	c.authMailDropped.WithLabelValues(collapse(template, droppedTemplates)).Inc()
 }
 
 // normaliseTier keeps the sweep label set closed at {operator, client}.
