@@ -17,7 +17,6 @@ import (
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	notifModels "github.com/orkestra/backend/internal/core/notification/models"
 	"github.com/orkestra/backend/internal/shared/blob"
-	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/geoip"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
@@ -97,7 +96,6 @@ type PasswordAuthConfig struct {
 	DeviceTrust             DeviceTrustService             // nil → never skips MFA; Section C item #3
 	SuspiciousLoginNotifier SuspiciousLoginNotifier        // nil → no email on high-risk login; Section C item #5
 	Notifier                iface.NotificationSender
-	RateLimiter             *sharederrors.RateLimiter
 	AttemptCounter          AttemptCounter
 	// MailDispatcher is the bounded worker pool that detaches
 	// ForgotPassword's reset-password send from the request that
@@ -142,7 +140,6 @@ type PasswordAuthService struct {
 	deviceTrust             DeviceTrustService
 	suspiciousLoginNotifier SuspiciousLoginNotifier
 	notifier                iface.NotificationSender
-	rateLimiter             *sharederrors.RateLimiter
 	attempts                AttemptCounter
 	// mail is the bounded dispatcher for transactional auth mail (D5).
 	// ForgotPassword hands its reset-password send to mail.Enqueue so the
@@ -232,7 +229,6 @@ func NewPasswordAuthService(cfg PasswordAuthConfig) *PasswordAuthService {
 		deviceTrust:              cfg.DeviceTrust,
 		suspiciousLoginNotifier:  cfg.SuspiciousLoginNotifier,
 		notifier:                 cfg.Notifier,
-		rateLimiter:              cfg.RateLimiter,
 		attempts:                 cfg.AttemptCounter,
 		mail:                     cfg.MailDispatcher,
 		frontendURL:              cfg.FrontendURL,

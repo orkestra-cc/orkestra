@@ -48,9 +48,9 @@ var (
 // answers LockedAfter(v.RetryAfter) instead, which errors.Is-matches
 // ErrAccountLocked, the same sentinel the password-login lockout uses.
 // The sentinel and its handler arm (mapServiceTokenError,
-// service_token_handler.go) are kept only for tolerance — pending the
-// shared limiter's removal in the next task — not because anything
-// still produces it. ErrClientRateLimited and ErrAccountLocked are
+// service_token_handler.go) are kept only for tolerance — the shared
+// limiter's auth-facing surface is gone (H-1, Task 11) — not because
+// anything still produces it. ErrClientRateLimited and ErrAccountLocked are
 // deliberately NOT unified into a single errors.Is relationship even
 // though both map to the same 429.
 var (

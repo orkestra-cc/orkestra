@@ -21,7 +21,6 @@ import (
 	"github.com/orkestra/backend/internal/core/auth/services"
 	"github.com/orkestra/backend/internal/shared/blob"
 	"github.com/orkestra/backend/internal/shared/config"
-	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/geoip"
 	authMiddleware "github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/utils"
@@ -414,13 +413,11 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		// against the LIVE threshold, so an admin edit takes effect on
 		// the very next attempt — including one already inside an open
 		// window. No auth flow reads or writes shared/errors.RateLimiter
-		// any more: the service-account grant was the last consumer of
-		// the single instance module.go builds below. The only
-		// remaining non-test references to it are field declarations
-		// and assignments — tier_bundle.go:73,180, module.go:1006,
-		// password_auth_service.go:100,145,235 — with zero method
-		// calls; this module only keeps building and threading it
-		// through as inert plumbing pending its removal.
+		// any more (Task 10 moved the service-account grant, the last
+		// consumer, onto the same counters), and Task 11 (H-1) deleted
+		// the module's RateLimiter instance and every field that
+		// threaded it through — this module has no dependency on
+		// shared/errors.RateLimiter left at all.
 		{
 			Key: "loginEnabledAdmin", Label: "Allow logins on operator console", Group: "login",
 			Description: "When off, POST /v1/auth/operator/login returns 403. Use during maintenance to lock out the operator console without taking the backend offline.",
@@ -1003,8 +1000,6 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 			slog.String("error", securityEventErr.Error()))
 	}
 
-	rateLimiter := sharederrors.NewRateLimiter()
-
 	mfaIssuer := getEnvOrDefault("APP_NAME", "Orkestra")
 	geoResolver := geoip.FromEnv(logger)
 	velocityKmh := parseFloatEnv("AUTH_GEOIP_VELOCITY_THRESHOLD_KMH", services.DefaultImpossibleTravelVelocityKmh)
@@ -1095,7 +1090,6 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		deviceTrust:              deviceTrustSvc,
 		suspiciousLoginNotifier:  suspiciousLoginNotifierSvc,
 		notifier:                 notifier,
-		rateLimiter:              rateLimiter,
 		attemptCounter:           attemptCounter,
 		mailDispatcher:           mailDispatcher,
 		geoResolver:              geoResolver,

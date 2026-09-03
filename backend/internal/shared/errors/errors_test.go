@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"testing"
-	"time"
 )
 
 func TestAppError(t *testing.T) {
@@ -97,53 +96,26 @@ func TestRateLimiter(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Test rate limiting
-	result1 := rateLimiter.Check(ctx, "test-key", "auth:login")
+	// api:general: Capacity 100, RefillRate 10/s — the only config left
+	// after H-1's shrink (Task 11).
+	result1 := rateLimiter.Check(ctx, "test-key", "api:general")
 	if !result1.Allowed {
 		t.Error("First request should be allowed")
 	}
 
-	// Consume all tokens
-	for i := 0; i < 5; i++ {
-		rateLimiter.Check(ctx, "test-key", "auth:login")
+	// Consume the remaining 99 tokens.
+	for i := 0; i < 99; i++ {
+		rateLimiter.Check(ctx, "test-key", "api:general")
 	}
 
 	// Should be rate limited now
-	result2 := rateLimiter.Check(ctx, "test-key", "auth:login")
+	result2 := rateLimiter.Check(ctx, "test-key", "api:general")
 	if result2.Allowed {
 		t.Error("Request should be rate limited")
 	}
 
 	if result2.Remaining >= result1.Remaining {
 		t.Error("Remaining tokens should decrease")
-	}
-}
-
-func TestSetAuthFailedConfig(t *testing.T) {
-	rl := NewRateLimiter()
-	defer rl.Close()
-
-	// Tighten the lockout to a single attempt so the next IsBlocked call
-	// flips immediately. Window is generous so the bucket doesn't refill
-	// inside the test window.
-	rl.SetAuthFailedConfig(1, time.Hour)
-
-	ctx := context.Background()
-	if rl.IsBlocked(ctx, "fresh-id") {
-		t.Fatalf("first probe must be allowed")
-	}
-	if !rl.IsBlocked(ctx, "fresh-id") {
-		t.Fatalf("second probe must trip the new tighter lockout")
-	}
-
-	// Invalid config (threshold < 1) is a no-op — preserves the
-	// last-good config so a misedit can't lock everyone out.
-	rl.SetAuthFailedConfig(0, time.Hour)
-	rl.mu.RLock()
-	cfg := rl.configs["auth:failed"]
-	rl.mu.RUnlock()
-	if cfg.Capacity != 1 {
-		t.Fatalf("invalid threshold should not overwrite config; got capacity=%d", cfg.Capacity)
 	}
 }
 

@@ -14,7 +14,6 @@ import (
 	"github.com/pquerna/otp/totp"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -36,7 +35,6 @@ type gatesEnv struct {
 	sessions     *gateSessionRepo
 	geo          *gateGeoResolver
 	notifier     *gateNotifier
-	rateLimiter  *sharederrors.RateLimiter
 	pwd          PasswordService
 	jwt          JWTService
 	policy       *AuthPolicyService
@@ -89,7 +87,6 @@ func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]
 		sessions:     newGateSessionRepo(),
 		geo:          newGateGeoResolver(geoByIP),
 		notifier:     &gateNotifier{configured: true},
-		rateLimiter:  sharederrors.NewRateLimiter(),
 		pwd:          pwd,
 		jwt:          jwt,
 		policy:       policy,
@@ -111,7 +108,6 @@ func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]
 		MFAChallengeService:      nil,
 		FirstAdminClaimer:        env.claimer,
 		Notifier:                 env.notifier,
-		RateLimiter:              env.rateLimiter,
 		FrontendURL:              "https://app.example.com",
 		RequireEmailVerification: false,
 		AppName:                  "Orkestra",
@@ -125,7 +121,6 @@ func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]
 	}
 	env.auth = NewPasswordAuthService(authCfg)
 	env.auth.SetAuditSink(env.audit)
-	t.Cleanup(env.rateLimiter.Close)
 	return env
 }
 
@@ -956,10 +951,6 @@ func TestLogin_PasswordMethodGate(t *testing.T) {
 		_, err := env.auth.Login(context.Background(), LoginInput{Email: "who@example.com", Password: "pw", IP: "203.0.113.9"})
 		if !errors.Is(err, ErrPasswordLoginDisabled) {
 			t.Fatalf("want ErrPasswordLoginDisabled, got %v", err)
-		}
-		// Counters untouched: same email must still have its full budget.
-		if env.rateLimiter.IsBlocked(context.Background(), "email:who@example.com") {
-			t.Fatal("rate limiter must not tick on a policy refusal")
 		}
 	})
 	t.Run("other audience unaffected", func(t *testing.T) {

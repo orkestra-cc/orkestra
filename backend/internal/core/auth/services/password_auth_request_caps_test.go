@@ -80,19 +80,15 @@ func TestForgotPassword_DoesNotWaitOnDelivery(t *testing.T) {
 // M-6: a verification resend is not a login failure and must never be
 // able to lock a login.
 //
-// Two stores are checked, deliberately. The AttemptCounter assertions
-// (email/IP LOGIN scopes) are the brief's originally-specified check,
-// and they stay — but ResendVerification never wrote to those keys even
-// before this task's fix, so on their own they cannot regress: the
-// pre-fix code read/wrote `s.rateLimiter.IsBlocked/RecordFailedAuth`
-// with "ip:"/"email:" keys, a DIFFERENT store entirely
-// (shared/errors.RateLimiter, not the AttemptCounter). The RateLimiter
-// assertions below are the ones that actually pin M-6: they fail if
-// `recordFailed(ctx, ip, email)` is ever reintroduced into
-// ResendVerification, mirroring the existing precedent at
-// gates_test.go:961.
+// PasswordAuthService no longer holds a shared/errors.RateLimiter at
+// all (H-1, Task 11) — the pre-fix code's "ip:"/"email:" writes via
+// `s.rateLimiter.IsBlocked`/`RecordFailedAuth` went to a store that has
+// since been deleted outright, so "resend never touches the login
+// bucket" is enforced by construction: there is no bucket left for it
+// to touch. The assertions below pin what remains — the AttemptCounter
+// LOGIN scopes (email/IP) stay untouched by a resend.
 func TestResendVerification_NeverTouchesTheLoginScopes(t *testing.T) {
-	svc, _, _, env := newRequestCapFixture(t, false)
+	svc, _, _, _ := newRequestCapFixture(t, false)
 	counter := svc.attempts
 	ctx := context.Background()
 
@@ -107,16 +103,6 @@ func TestResendVerification_NeverTouchesTheLoginScopes(t *testing.T) {
 	ipV, _ := counter.Locked(ctx, AttemptKeyIP("203.0.113.23"), Limit{Threshold: 100, Window: time.Minute})
 	if ipV.Count != 0 {
 		t.Fatalf("login IP scope (AttemptCounter) = %d after 10 resends, want 0", ipV.Count)
-	}
-
-	// This is the store the OLD ResendVerification actually wrote to via
-	// recordFailed("ip:"+ip, "email:"+email). A regression that
-	// reintroduces that call must fail HERE.
-	if env.rateLimiter.IsBlocked(ctx, "email:known@example.com") {
-		t.Fatal("resend must not touch the shared RateLimiter's login email bucket")
-	}
-	if env.rateLimiter.IsBlocked(ctx, "ip:203.0.113.23") {
-		t.Fatal("resend must not touch the shared RateLimiter's login IP bucket")
 	}
 
 	// It DOES charge its own scope.
@@ -197,9 +183,8 @@ func newRequestCapTestServiceBlockingSender(t *testing.T) (*PasswordAuthService,
 }
 
 // newRequestCapFixture also returns the *gatesEnv so a test that needs
-// to reach a collaborator no thin wrapper exposes — e.g. the shared
-// RateLimiter, to pin M-6 against the store ResendVerification actually
-// used to write to — can call this directly instead.
+// to reach a collaborator no thin wrapper exposes (env.users, env.audit,
+// etc.) can call this directly instead.
 func newRequestCapFixture(t *testing.T, blockSend bool) (*PasswordAuthService, *recordingEmailTokenRepo, *recordingMail, *gatesEnv) {
 	t.Helper()
 
