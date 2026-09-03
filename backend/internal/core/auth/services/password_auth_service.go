@@ -1460,9 +1460,13 @@ func mergeAMRWithReauth(prior []string) []string {
 // recordFailed is the LEGACY shared in-memory bucket. Login no longer
 // calls it — it moved to the attempt counters below — and
 // ResendVerification has since moved to its own verify-email/verify-ip
-// request-cap scopes (overRequestCap/chargeRequestCap). The one flow
-// still on it, ConfirmPasswordWithSecurity, migrates with its own task.
-// Delete this once it does.
+// request-cap scopes (overRequestCap/chargeRequestCap). ResendVerification
+// was the last production reader of RateLimiter.IsBlocked in this
+// module (`grep -rn "IsBlocked(" internal/core/auth --include=*.go` outside
+// _test.go is empty), so the one remaining writer, ConfirmPasswordWithSecurity,
+// now records into a bucket NOTHING reads — a dead write, not a
+// protection, until its own task gives it a matching read (or removes
+// the write). Delete this once that task lands.
 func (s *PasswordAuthService) recordFailed(ctx context.Context, ip, email string) {
 	if s.rateLimiter == nil {
 		return
