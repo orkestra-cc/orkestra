@@ -30,11 +30,25 @@ func TestRateLimiter_ConcurrentCheckAndMiddlewareIsRaceFree(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
+				// Distinct key per goroutine: exercises concurrent
+				// rl.buckets creation through getBucket.
 				rl.Check(context.Background(), "ip:"+strconv.Itoa(i), "api:general")
+
+				// Shared key across every goroutine: the actual H-1
+				// regression target. Every goroutine's consume/remaining
+				// lands on the SAME TokenBucket, so an unlocked
+				// remaining() (or an unlocked consume) is observable by
+				// -race — a per-goroutine key never contends on
+				// tb.tokens at all.
+				rl.Check(context.Background(), "shared", "api:general")
 
 				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = "203.0.113." + strconv.Itoa(i%256) + ":1234"
 				handler.ServeHTTP(httptest.NewRecorder(), req)
+
+				sharedReq := httptest.NewRequest(http.MethodGet, "/", nil)
+				sharedReq.RemoteAddr = "203.0.113.99:1234"
+				handler.ServeHTTP(httptest.NewRecorder(), sharedReq)
 			}
 		}(i)
 	}
