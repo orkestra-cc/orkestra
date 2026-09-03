@@ -285,14 +285,64 @@ func TestValidateConfigSnapshot_IPThresholdDefaultsPass(t *testing.T) {
 	}
 }
 
-// A malformed value is not this rule's business — the field type
-// already rejects it — so the rule must skip rather than mis-compare.
-func TestValidateConfigSnapshot_IPThresholdMalformedSkipsRule(t *testing.T) {
+// A malformed ipLockoutThreshold resolves to its OWN 100 default — the
+// same fallback IPLockoutThreshold applies at read time — which still
+// clears the 5 account default, so this particular malformed input stays
+// accepted. It is NOT accepted because the rule "skips" on a bad value:
+// see the two tests below for why skipping would be wrong.
+func TestValidateConfigSnapshot_MalformedIPThresholdResolvesToDefault(t *testing.T) {
 	m := &AuthModule{}
 	if err := m.ValidateConfigSnapshot(context.Background(), module.ConfigValidationSnapshot{
 		Values: map[string]string{"ipLockoutThreshold": "lots", "accountLockoutThreshold": "5"},
 	}); err != nil {
-		t.Fatalf("a malformed value must not surface as the cross-field error: %v", err)
+		t.Fatalf("malformed ipLockoutThreshold resolves to the 100 default, which clears 5: %v", err)
+	}
+}
+
+// A present-but-degenerate accountLockoutThreshold ("0") resolves to the
+// 5 default at READ time (AuthPolicyService.LockoutThreshold never
+// rejects a bad value, it substitutes the default) — so the write-time
+// rule must judge the same resolved value, not skip because the raw
+// input looked invalid. Skipping here would accept a PATCH that reads
+// back as account=5, ip=3: exactly the oracle this rule exists to close.
+func TestValidateConfigSnapshot_RefusesWhenAccountThresholdIsDegenerate(t *testing.T) {
+	m := &AuthModule{}
+	err := m.ValidateConfigSnapshot(context.Background(), module.ConfigValidationSnapshot{
+		Values: map[string]string{
+			"accountLockoutThreshold": "0",
+			"ipLockoutThreshold":      "3",
+		},
+	})
+	var ve *module.ConfigValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want *module.ConfigValidationError (account resolves to 5, ip=3 is below it), got %v (%T)", err, err)
+	}
+	if ve.Code != errcode.AuthIPThresholdBelowAccount {
+		t.Errorf("Code = %q, want %q", ve.Code, errcode.AuthIPThresholdBelowAccount)
+	}
+}
+
+// Symmetric case: a degenerate ipLockoutThreshold resolves to its OWN
+// 100 default, which can still sit below an account threshold an
+// operator legitimately raised above 100. Skipping on the malformed
+// ipLockoutThreshold would silently accept exactly that oracle.
+func TestValidateConfigSnapshot_RefusesWhenIPThresholdIsDegenerate(t *testing.T) {
+	m := &AuthModule{}
+	err := m.ValidateConfigSnapshot(context.Background(), module.ConfigValidationSnapshot{
+		Values: map[string]string{
+			"accountLockoutThreshold": "150",
+			"ipLockoutThreshold":      "-2",
+		},
+	})
+	var ve *module.ConfigValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want *module.ConfigValidationError (ip resolves to 100, below account 150), got %v (%T)", err, err)
+	}
+	if ve.Field != "ipLockoutThreshold" {
+		t.Errorf("Field = %q, want ipLockoutThreshold", ve.Field)
+	}
+	if ve.Code != errcode.AuthIPThresholdBelowAccount {
+		t.Errorf("Code = %q, want %q", ve.Code, errcode.AuthIPThresholdBelowAccount)
 	}
 }
 
