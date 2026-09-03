@@ -117,7 +117,7 @@ Email tokens, device-trust grants, refresh-family replay fences, and sessions ha
 9. **Handlers**: OAuth, password, MFA, and WebAuthn handlers, each constructed twice (operator + client) and stamped with the matching tier's cookie domain at construction time (`cfg.Auth.Cookie.OperatorDomain` / `ClientDomain`; an empty value mints the cookie without a `Domain` attribute, scoped to the minting host). The shared `Cookie.Name` + `Cookie.Secure` are still process-scoped.
 10. **Register services** under `ServiceAuthService`, `ServiceJWTService`, `ServicePasswordService`, `ServicePasswordAuthService`, plus the per-tier keys (`ServiceOperator{AuthService,PasswordAuthService,JWTService}` / `ServiceClient{...}`) that audience-aware consumers (dev token generator, future tier-specific addons) request directly.
 
-`Start` / `Stop` are implemented in `maintenance.go` — they own the refresh-token retention sweep (see "Refresh-token retention is an elected, self-draining sweep" under Key invariants). `Start` **never returns an error**: `auth` is a core module, so `ModuleRegistry.StartAll` would hand that error to `main.go`'s `log.Fatalf` and a degraded Redis would refuse to boot the platform. Every recoverable condition — no lease, no tiers, Redis unreachable — returns nil and skips maintenance; leadership is acquired inside the goroutine, after `Start` has returned. `HealthCheck` still inherits from `BaseModule`.
+`Start` / `Stop` are implemented in `maintenance.go` — they own the refresh-token retention sweep (see "Refresh-token retention is an elected, self-draining sweep" under Key invariants) **and** the `MailDispatcher`'s worker pool (see "Mail dispatcher" under Runtime configuration below), unconditionally and ahead of the sweep's own lease/tier checks. `Start` **never returns an error**: `auth` is a core module, so `ModuleRegistry.StartAll` would hand that error to `main.go`'s `log.Fatalf` and a degraded Redis would refuse to boot the platform. Every recoverable condition — no lease, no tiers, Redis unreachable — returns nil and skips maintenance; leadership is acquired inside the goroutine, after `Start` has returned. `HealthCheck` still inherits from `BaseModule`.
 
 No seeding — there are no default accounts or default tokens. The first user is created by whichever external flow gets there first (setup wizard, OAuth signup, password register).
 
@@ -517,6 +517,72 @@ independent admin-managed pairs:
   surface is gone as of Task 11 (H-1). `MemoryAttemptCounter`
   is the no-Redis stand-in and ships in a non-`_test.go` file so handler
   tests in other packages can use it without a miniredis.
+
+#### Mail dispatcher (transactional auth mail)
+
+`services/mail_dispatcher.go`'s `MailDispatcher` (spec D5) is what
+`ForgotPassword` hands its password-reset send to instead of sending it
+inline — see "Attempt counters" above for why that matters to the
+request-cap timing. It is a bounded worker pool, not a queue with
+unlimited backpressure, and every one of its three bounds is a named
+constant in that file:
+
+- **Memory** — `MailQueueCapacity` (256) buffered jobs, no more.
+- **Concurrency** — `MailWorkers` (16) goroutines against the SMTP
+  relay, started fresh by every `Start()`.
+- **Request latency** — `Enqueue` never blocks and never spawns a
+  goroutine of its own. The whole check-then-send runs under one read
+  lock (`sync.RWMutex`), which is what keeps a concurrent `Stop` from
+  racing it onto a closed channel — see the type's doc comment for the
+  race this shape closes. This bound is a security property as much as
+  a performance one: `ForgotPassword` must cost the same wall-clock time
+  whether or not the address exists, and a blocking acquire would
+  reopen that gap for known addresses exactly when the queue is
+  contended.
+
+**A full queue, or a stopped dispatcher, DROPS the job — it never
+blocks and never errors back to the caller.** `Enqueue` returns `bool`
+only for tests; production callers do not branch on it, because a drop
+is a lost password-reset email the user recovers by asking again inside
+the D2 request caps (3 per address per 15m), not a failure the request
+needs to answer for. Every drop increments
+`orkestra_auth_mail_dropped_total`, labelled by template id (currently
+only `auth.reset_password` is ever enqueued; `auth.verify_email` and
+`auth.mfa_factor_added` share the closed label set for when a future
+caller adopts the same dispatcher), and logs one throttled WARN
+(`mailDropWarningInterval`, one line a minute) naming the reason
+(`queue_full` or `dispatcher_stopped`) and the request id — never the
+recipient address, which would make the log itself an enumeration
+oracle.
+
+**Operational alert:** `orkestra_auth_mail_dropped_total` moving at all
+means the queue or the worker count is undersized for the current send
+rate — alert on any sustained non-zero rate, not just on a threshold,
+since a healthy dispatcher drops nothing. Pair it with SMTP-relay
+latency/error metrics from the `notification` module: a slow or failing
+relay is the usual reason 16 workers fall behind and the queue fills.
+
+**Shutdown drains, it does not discard outright.** `Stop(ctx)` closes
+the current generation's queue and waits up to `mailDrainTimeout` (10s),
+or until `ctx` is done, for in-flight and already-queued jobs to finish;
+whichever hits first, it then marks the dispatcher stopped. A timeout
+or a cancelled context logs a WARN and abandons whatever is still
+queued — same recovery path as a drop, the D2 caps. Each detached send
+itself runs on `context.WithoutCancel(context.Background())` (the
+request that queued it is long gone by the time a worker picks it up)
+bounded by its own `mailJobTimeout` (60s), with a per-job `recover()` so
+one panicking send cannot take a worker down.
+
+**Restartable across a module disable/enable cycle.** `started` means
+"running since the last `Start`", not "`Start` has ever been called":
+`AuthModule.Start`/`Stop` (`maintenance.go`) call
+`m.mailDispatcher.Start()`/`Stop(ctx)` unconditionally — ahead of the
+refresh-token sweep's own lease/tier checks, since mail serves live
+requests regardless of whether this replica sweeps anything — so the
+registry's hot `StartModule`/`StopModule` cycle (`/admin/modules`)
+actually restarts delivery rather than leaving it off after the first
+disable: a `Start` after a `Stop` launches a fresh generation (a new
+queue, a new worker pool), never resuming the abandoned one.
 
 #### Absolute session cap (ADR-0017 D1)
 

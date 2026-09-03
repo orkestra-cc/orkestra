@@ -240,9 +240,9 @@ func TestGrantBadGrantType(t *testing.T) {
 // the threshold from the live policy on every call rather than from a
 // value stashed on the limiter. Grant's own lockout branch answers
 // LockedAfter(v.RetryAfter), which errors.Is-matches ErrAccountLocked
-// (the same sentinel identity Login's lockout uses), not the bare
-// ErrClientRateLimited a caller gets with no verdict in hand — see the
-// doc comment on ErrClientRateLimited.
+// (the same sentinel identity Login's lockout uses). ErrClientRateLimited
+// has no producer left in Grant — see its doc comment in
+// service_account_service.go.
 func TestGrantRateLimited(t *testing.T) {
 	svc, users, creds, _, _ := newSAServiceForGrant()
 	svc.SetPolicy(newPolicy(map[string]string{
