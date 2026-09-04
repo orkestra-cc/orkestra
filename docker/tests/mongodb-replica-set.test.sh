@@ -30,7 +30,14 @@ compose_env=(
   COOKIE_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 )
 
-infra="$(env "${compose_env[@]}" docker compose -f docker/docker-compose.infra.yml config)"
+# Docker Compose auto-loads docker/.env, which is untracked and per-machine.
+# Every value these assertions depend on is passed through the process
+# environment above, so pin the renders to an empty env file and keep the
+# result identical on CI and on a developer machine.
+empty_env="$(mktemp)"
+trap 'rm -f "$empty_env"' EXIT
+
+infra="$(env "${compose_env[@]}" docker compose --env-file "$empty_env" -f docker/docker-compose.infra.yml config)"
 grep -q '/opt/orkestra/replica-entrypoint.sh' <<<"$infra" || fail "compose does not install the replica entrypoint"
 grep -q -- '--replSet rs0' docker/mongo-init/replica-entrypoint.sh || fail "mongod does not enable rs0"
 grep -q -- '--keyFile' docker/mongo-init/replica-entrypoint.sh || fail "authenticated mongod has no internal key file"
@@ -38,7 +45,7 @@ grep -q 'rs.initiate' <<<"$infra" || fail "health check does not initialize rs0 
 grep -q 'isWritablePrimary' <<<"$infra" || fail "health check does not wait for a writable primary"
 
 for app_file in dev staging prod; do
-  rendered="$(env "${compose_env[@]}" docker compose \
+  rendered="$(env "${compose_env[@]}" docker compose --env-file "$empty_env" \
     -f docker/docker-compose.infra.yml \
     -f "docker/docker-compose.${app_file}.yml" config)"
   mongo_uri="$(awk '/MONGO_URI:/ { print; exit }' <<<"$rendered")"
