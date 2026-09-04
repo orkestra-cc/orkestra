@@ -726,8 +726,10 @@ func (h *MFAHandler) RegisterProtectedRoutes(api huma.API, mount RouteMount) {
 }
 
 // RegisterEnrolmentRoutes mounts the endpoints that CREATE or REPLACE a
-// second factor. The caller wires RequireEnrolmentProof(5m) around this API
-// instance — see auth/module.go. Both halves of the ceremony are gated, not
+// second factor. The caller wires the enrolment-proof gate around this API
+// instance — auth/module.go's enrolmentGate helper, which resolves it off the
+// surface's RoleMiddleware through module.EnrolmentProofGate and substitutes
+// an always-refuse middleware when that assertion fails. Both halves of the ceremony are gated, not
 // just the first: the factor set can change between begin and confirm, so a
 // begin that passed the gate must not license a confirm that would not.
 //

@@ -15,7 +15,7 @@ Every way a caller proves who it is: email/password (argon2id), OAuth 2.1, MFA, 
 - **MFA** — TOTP with backup codes, WebAuthn passkeys, the step-up gate (`RequireStepUp`) that catastrophic actions sit behind, and the enrolment proof gate (`RequireEnrolmentProof`) that every factor creation or replacement sits behind.
 - **Device trust** — per-surface trusted-device grants that let a known device skip the second factor.
 - **Service accounts** — OAuth2 client-credentials machine identities ([ADR-0014](/adrs/service-accounts-client-credentials)). See [below](#service-accounts).
-- **RBAC middleware** — `RequirePermission` / `RequireAudience` / `RequireStepUp` / `RequireEnrolmentProof`, satisfying the SDK's `RoleMiddleware` seam. The permission *decisions* belong to [authz](/modules/core/authz); auth only enforces them at the route.
+- **RBAC middleware** — `RequirePermission` / `RequireAudience` / `RequireStepUp`, satisfying the SDK's `RoleMiddleware` seam, plus `RequireEnrolmentProof` on the separate additive `module.EnrolmentProofGate` sub-interface. The permission *decisions* belong to [authz](/modules/core/authz); auth only enforces them at the route.
 
 ## Two surfaces, one module
 

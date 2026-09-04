@@ -583,8 +583,9 @@ func (h *WebAuthnHandler) RegisterProtectedRoutes(api huma.API, mount RouteMount
 }
 
 // RegisterEnrolmentRoutes mounts the two halves of passkey registration,
-// which ADD a credential. The caller wires RequireEnrolmentProof(5m) around
-// this API instance — see auth/module.go. Both halves are gated, mirroring
+// which ADD a credential. The caller wires the enrolment-proof gate around
+// this API instance — auth/module.go's enrolmentGate helper, the same
+// fail-closed resolution the TOTP ceremony uses. Both halves are gated, mirroring
 // the TOTP ceremony: the factor set can change between begin and finish.
 //
 // H-3: these lived in RegisterProtectedRoutes, under RequireGlobal() alone,
