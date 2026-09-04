@@ -168,7 +168,9 @@ Rendering uses Go's `text/template` for the subject and plain-text body, and `ht
 - `{{.PreferencesURL}}` — absolute URL to `/account/notifications`
 - `{{.AppName}}`, `{{.SupportEmail}}` — from module config, if not already provided by the caller
 
-Each system template documents its expected variables in the `variables` array of the seeded document. For `auth.verify_email`: `AppName`, `UserName`, `VerifyURL`, `ExpiresIn`, `SupportEmail`, `UnsubscribeURL`, `PreferencesURL`. For `auth.reset_password`: the same set plus `ResetURL` and `RequestIP`. For `auth.admin_invite`: `AppName`, `UserName`, `InviteURL`, `ExpiresIn`, `InviterName` (optional), `SupportEmail`, `UnsubscribeURL`, `PreferencesURL`.
+Each system template documents its expected variables in the `variables` array of the seeded document. For `auth.verify_email`: `AppName`, `UserName`, `VerifyURL`, `ExpiresIn`, `SupportEmail`, `UnsubscribeURL`, `PreferencesURL`. For `auth.reset_password`: the same set plus `ResetURL` and `RequestIP`. For `auth.admin_invite`: `AppName`, `UserName`, `InviteURL`, `ExpiresIn`, `InviterName` (optional), `SupportEmail`, `UnsubscribeURL`, `PreferencesURL`. For `auth.mfa_factor_added`: `AppName`, `UserName`, `FactorType` (`totp`|`passkey`), `Replaced` (bool), `RequestIP`, `At`, `SupportEmail`, `UnsubscribeURL`, `PreferencesURL`.
+
+`auth.mfa_factor_added` is the one seeded template whose **id is not its category**. Every other one doubles as its own category constant; this one is sent under `models.CategoryAuthSecurity` (`auth.security`) because the category is the routing family — sender-profile patterns like `auth.*` match it — while the template is one specific notice inside it. Both constants live in `models/collections.go`; use `models.TemplateAuthMFAFactorAdded` for the `TemplateID` and `models.CategoryAuthSecurity` for the `Category`, never one for the other.
 
 ## Preferences and transactional mail
 

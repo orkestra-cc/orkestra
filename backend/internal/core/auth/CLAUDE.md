@@ -570,10 +570,11 @@ only for tests; production callers do not branch on it, because a drop
 is a lost password-reset email the user recovers by asking again inside
 the D2 request caps (3 per address per 15m), not a failure the request
 needs to answer for. Every drop increments
-`orkestra_auth_mail_dropped_total`, labelled by template id (currently
-only `auth.reset_password` is ever enqueued; `auth.verify_email` and
-`auth.mfa_factor_added` share the closed label set for when a future
-caller adopts the same dispatcher), and logs one throttled WARN
+`orkestra_auth_mail_dropped_total`, labelled by template id
+(`auth.reset_password` from `ForgotPassword` and `auth.mfa_factor_added`
+from every second-factor addition are the two enqueued today;
+`auth.verify_email` shares the closed label set for when a future caller
+adopts the same dispatcher), and logs one throttled WARN
 (`mailDropWarningInterval`, one line a minute) naming the reason
 (`queue_full` or `dispatcher_stopped`) and the request id — never the
 recipient address, which would make the log itself an enumeration
@@ -1069,16 +1070,16 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 | PATCH | `/v1/auth/{tier}/me` | bearer | Self-service preference patch. Strictly allowlisted: `language` (BCP-47, oneof=en/it) and `fullName` (1..100 chars). Response mirrors GET /me so the SPA can replace its cached user document without an extra round-trip. Adding a new mutable preference requires extending `UpdateCurrentUserInput` AND honoring it in `UpdateCurrentUser` — the underlying SDK `UpdateUserInput` shape is wider but NOT pass-through |
 | POST | `/v1/auth/{tier}/change-password` | `RequireGlobal()` | Self-service password change |
 | POST | `/v1/auth/{tier}/mfa/enroll/begin` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Start TOTP enrollment — returns `{challengeId, secret, provisioningUri}` |
-| POST | `/v1/auth/{tier}/mfa/enroll/confirm` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Confirm enrollment with a TOTP code, receive 10 one-shot backup codes. Gated **as well as** `begin` — the factor set can change between the two halves |
+| POST | `/v1/auth/{tier}/mfa/enroll/confirm` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Confirm enrollment with a TOTP code, receive 10 one-shot backup codes. Gated **as well as** `begin` — the factor set can change between the two halves. When it **replaces** an existing TOTP secret it is a removal too, and carries a removal's consequences (D16); a first enrolment carries none. Either way it emits a security event and the `auth.mfa_factor_added` email |
 | GET | `/v1/auth/{tier}/me/mfa` | `RequireGlobal()` | Return `{status, type, backupCodesRemaining}` |
-| POST | `/v1/auth/{tier}/me/mfa/remove` | `RequireGlobal()` + `RequireStepUp(5m)` | Remove every enrolled factor (TOTP row + WebAuthn row, D15) — step-up middleware demands a <5min MFA proof; request body is empty |
+| POST | `/v1/auth/{tier}/me/mfa/remove` | `RequireGlobal()` + `RequireStepUp(5m)` | Remove every enrolled factor (TOTP row + WebAuthn row, D15) — step-up middleware demands a <5min MFA proof; request body is empty. Also bumps the MFA epoch, revokes every device-trust grant, and revokes every session but the caller's own (D16 — see "One rule for every credential change" below) |
 | POST | `/v1/auth/{tier}/mfa/verify` | `RequireGlobal()` | Verify TOTP or backup code; mint a stepped-up access token with `amr:["pwd","otp"]` + `last_otp_at=now` |
-| POST | `/v1/admin/users/{userId}/mfa/reset` | `RequireSystemPermission("system.users.mfa_reset")` + `RequireStepUp(5m)` | Admin: delete every MFA factor (TOTP row + WebAuthn row) an **operator** user holds and restart their enrollment grace — `RemoveFactor` (D15) no longer 404s a passkey-only target. Mounted on the operator host; targets `operator_mfa_factors` |
+| POST | `/v1/admin/users/{userId}/mfa/reset` | `RequireSystemPermission("system.users.mfa_reset")` + `RequireStepUp(5m)` | Admin: delete every MFA factor (TOTP row + WebAuthn row) an **operator** user holds, bump their MFA epoch, revoke their device trust, terminate **every** session they hold (no session is spared — the caller is not the target), and restart their enrollment grace — `RemoveFactor` (D15) no longer 404s a passkey-only target. Mounted on the operator host; targets `operator_mfa_factors`. A failed termination is recorded as `sessions_terminated: false` and does **not** fail the reset; a failed *removal* is now audited before the 500 |
 | POST | `/v1/admin/client-users/{userId}/mfa/reset` | same gates | Tier-aware companion of the above. Same operator-host mount, but routed through `clientMFAHandler` so the reset operates against `client_users` + `client_mfa_factors` |
 | POST | `/v1/auth/{tier}/mfa/webauthn/register/begin` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Begin enrolling a passkey — returns `{challengeId, publicKey}` (W3C `PublicKeyCredentialCreationOptions`) |
-| POST | `/v1/auth/{tier}/mfa/webauthn/register/finish` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Finish enrolling a passkey — body `{challengeId, name, attestationResponse}`, returns the public credential metadata. Gated as well as `begin`, same reason as the TOTP ceremony |
+| POST | `/v1/auth/{tier}/mfa/webauthn/register/finish` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Finish enrolling a passkey — body `{challengeId, name, attestationResponse}`, returns the public credential metadata. Gated as well as `begin`, same reason as the TOTP ceremony. An addition: the epoch does **not** move, but it emits `self_passkey_registered` and the `auth.mfa_factor_added` email |
 | GET | `/v1/auth/{tier}/me/mfa/webauthn/credentials` | `RequireGlobal()` | List the user's enrolled passkeys (id, name, transports, createdAt, lastUsedAt) |
-| DELETE | `/v1/auth/{tier}/me/mfa/webauthn/credentials/{credentialId}` | `RequireGlobal()` + `RequireStepUp(5m)` | Remove one passkey by base64url-encoded credential id |
+| DELETE | `/v1/auth/{tier}/me/mfa/webauthn/credentials/{credentialId}` | `RequireGlobal()` + `RequireStepUp(5m)` | Remove one passkey by base64url-encoded credential id. Carries the full removal rule (D16) on **every** removal, not only the last factor — see "One rule for every credential change" below. A 404 (no such credential) changes nothing and triggers none of it |
 | POST | `/v1/auth/{tier}/mfa/webauthn/verify/begin` | `RequireGlobal()` | Begin a step-up assertion using a passkey |
 | POST | `/v1/auth/{tier}/mfa/webauthn/verify/finish` | `RequireGlobal()` | Finish a step-up assertion; mints a stepped-up access token with `amr:[..., "otp", "webauthn"]` + `last_otp_at=now` |
 | GET | `/v1/auth/{tier}/me/auth-methods` | `RequireGlobal()` | Self-service: aggregate password / MFA / OAuth state of the calling user. Same `models.AuthMethodsView` shape the admin route returns. Drives the `/user/security` page header |
@@ -1130,7 +1131,7 @@ And a public endpoint that completes a login after a partial response:
   - **`auth_time` is written by exactly two mint sites** and by nothing else: `PasswordAuthService.issueTokensForSession` — the funnel behind password login, MFA login completion, passkey login completion, `IssueLoginTokens`/`IssueLoginTokensExternal` and `RegisterInitialAdmin` — and `AuthService.GenerateEnhancedTokenPair` (`auth_service.go`, an **exported** interface method — `HandleOAuthCallbackWithLinking` delegates to it, and grepping that method for `AuthTime` finds nothing). Every OAuth completion funnels through it: the web callback, the client-tier relay (`HandleOAuthRelayCompleteHTTP` → `finishOAuthCompletion` → `HandleOAuthCallbackWithLinking` → here) and the mobile Google/Apple ID-token logins. Its `now()` is unconditional, so a future caller that is *not* an interactive authentication would inherit a stamp it should not have. It is **carried unchanged**, never re-stamped, by refresh rotation, `MintAccessTokenFromRefresh`, `ConfirmPasswordWithSecurity` and both step-up mints: a refresh is not an authentication, and re-stamping would make freshness unfalsifiable for any client that refreshes on a timer. The carrier for the step-up trio is `handlers.currentSessionSecurity`, which copies the caller's `claims.AuthTime` into the `SecurityContext` it builds; the carrier across a refresh is the **refresh token itself** (`GenerateEnhancedRefreshToken` stamps it from the same `SecurityContext`), because the refresh row has no such column and the session row is only read when the absolute session cap happens to be enabled. It is deliberately **not** written by `GenerateAccessToken` / `buildTenantScopedClaims` — the client-credentials grant and the dev-token endpoint both mint through there, and a rolling freshness window on a machine token would satisfy an enrolment gate no interactive presence ever backed.
   - **`mfae` is stamped centrally**, in `GenerateEnhancedAccessToken`, off the `*iface.User` every mint already holds, and — because `buildTenantScopedClaims` is a **second** signer that does not route through it — stamped there as well, so the tenant-scoped dev-token path is not the one place the claim goes missing. Those are the only two sites. Both machine mints therefore carry `mfae`, because an epoch is a fact about the subject rather than a proof of presence, and neither carries `auth_time`. It must be the value current when the token was signed; nothing may re-read it at validation time, or the claim asserts nothing. `SecurityContext.AuthTime` is the transport for the first (the mint seams take a `SecurityContext`, not a claims struct, exactly as they do for `AMR`/`LastOTPAt`); `mfae` needs no transport.
   - `shared/middleware.parseClaims` — the sidecar validator, an independent parser — reads both under the same keys. Drift between the two parsers is how a gate ends up reading a claim the minter writes under a different name.
-  - **`auth_time` now has exactly one consumer: `RequireEnrolmentProof`'s no-factor branch** (see "Enrolment proof gate" below). Nothing else reads it, and **nothing yet consumes `mfae`** — the epoch resolver that will read it lands in a later task of the same PR, so every `mfae` "read by" above is still a future tense.
+  - **`auth_time` now has exactly one consumer: `RequireEnrolmentProof`'s no-factor branch** (see "Enrolment proof gate" below). Nothing else reads it. `mfae` now has a **writer** on the credential side — every removal and replacement bumps `User.MFAEpoch` (see "One rule for every credential change" below) — but still **no reader**: the per-request resolver that compares `claims.MFAEpoch` against the user's lands in a later task of the same PR. Until it does, a bumped epoch changes nothing a gate observes, and session revocation is doing all the work.
 - `JWTClaims.AMR` (RFC 8176) and `JWTClaims.LastOTPAt` are emitted `omitempty` so pre-Block-A tokens still validate. Password login sets `amr:["pwd"]`, OAuth `amr:["oauth"]`, MFA verify sets `amr:[source,"otp"]` + `last_otp_at=now`, and the password-confirm bypass sets `amr:[source,"reauth"]` + `last_otp_at=now`. The local `"reauth"` marker is accepted by both `amrSatisfiesMFA` (the session-long `RequireMFA` gate) and `amrSatisfiesStepUp` (the freshness gates, via `hasFreshSecondFactor`), so `RequireStepUp` and `RequireEnrolmentProof` treat it as a satisfied proof. The two predicates carry identical lists today; the split exists so narrowing the session-long one (audit finding M-1 — a password the caller already typed is a presence proof, not a second factor) cannot collaterally break the freshness gates. `ConfirmPassword` is the gatekeeper: it refuses to mint a `reauth` token for users with any enrolled factor, so the marker can never bypass MFA-required scenarios.
 - `RoleMiddleware.RequireMFA()` is applied to the routes whose abuse MFA exists to prevent: authz role + binding mutations (create/update/delete-role, create/delete-binding), tenant scoped mutations (update/delete-org, update-plan, remove-member, create-invite), and module config writes (`update-module`, `update-module-environment`, `set-active-environment`). Read paths stay open. **The gate honours the `mfaEnabled` master switch**: when MFA is globally off (`AuthPolicyService.MFAEnabled` → false) `RequireMFA()` passes through, mirroring `MFARequired`. Without this a never-enrolled operator on an MFA-off install is deadlocked — their password-only token (`amr=["pwd"]`) can never satisfy the gate, so they can't perform the very module/config writes (e.g. enabling an addon, configuring SMTP) needed to run the platform. The switch is read via the wired `StepUpPolicy` (nil-tolerant: when no policy is wired, the gate keeps its legacy unconditional behaviour). `RequireStepUp` is **not** relaxed this way — it keeps demanding a fresh proof and instead offers the `password_confirm_required` reauth fallback for no-factor users.
 - `RoleMiddleware.RequireStepUp(maxAge)` is a stricter variant applied to catastrophic / irreversible actions (currently `POST /v1/auth/me/mfa/remove`, `POST /v1/admin/users/{id}/mfa/reset`, the self-service OAuth link/unlink + session revoke/revoke-all, and backup-code regeneration). It checks both that `amr` contains an MFA-or-reauth marker AND that `last_otp_at` is within `maxAge` of now — a session-long MFA proof is not enough. The check itself lives in `hasFreshSecondFactor`, shared with `RequireEnrolmentProof` so the two freshness gates cannot drift. The middleware emits **four** distinct envelopes so the frontend can pick the right modal without a second round-trip:
@@ -1169,6 +1170,86 @@ And a public endpoint that completes a login after a partial response:
 - **Session revocation list** — Redis-backed set at `auth:revoked:session:<sid>` checked on every authenticated request by both `AuthMiddleware` and the lightweight public-key-only `JWTValidator` (both satisfy `module.RoleMiddleware`). Populated on logout + change-password; payload is the reason string for operator debugging. Entries auto-expire after a **fixed** 24h + 1min — the maximum access-token lifetime the platform permits, plus clock skew — never a value derived from the live `accessTokenTTL`. Sizing the entry from the current policy value strands tokens on both sides of a policy change: raising the TTL leaves long tokens uncovered, lowering it expires the entry while tokens minted under the old value are still valid. `NewJWTService` clamps every effective access-token lifetime to 24h so the window is always sufficient. ADR-0017 D5. Fails open on Redis errors — a degraded Redis must not lock every user out. Logout invalidates the current sid only; `allDevices=true` still relies on refresh-token revocation (per-user-generation counter is a follow-up).
 - **Grace countdown on `/v1/auth/me/mfa`** — response now carries `requiresMfa` + `graceExpiresAt` computed from the user record + JWT memberships, so the frontend banner/countdown can render without relying on the one-shot login response.
 - **WebAuthn / passkeys** — second-factor enrollment under `services/webauthn_service.go` + `handlers/webauthn_handler.go`. Library: `github.com/go-webauthn/webauthn`. Configuration: `WEBAUTHN_RP_ID` (eTLD+1 host, no scheme/port) + `WEBAUTHN_RP_ORIGINS` (comma-separated full URLs). Both env vars are optional — if either is missing the module derives them from `FRONTEND_URL` (eg. `http://localhost:8080` → `rpId=localhost`, `origins=[http://localhost:8080]`); if neither resolves, WebAuthn is disabled and the endpoints don't mount. Credentials live as an embedded `webauthnCredentials[]` array on the same `*_mfa_factors` row (one row per user with `type=webauthn`); the (userUuid,type) unique index naturally allows a user to enroll both TOTP and passkeys. Login/step-up via passkey sets `amr=[..., "otp", "webauthn"]` so existing step-up middleware accepts the proof. The partial login response carries `webauthnAvailable: bool` so the verify page can offer the passkey button alongside the code field.
+
+### One rule for every credential change (spec §4.2 D13, §4.3 D16)
+
+Removing or replacing a second factor used to leave every session
+MFA-satisfied: the `amr` markers live **in the token** until it expires, so
+the caller's own token kept passing `RequireMFA` for its whole lifetime
+(audit finding M-2). Four paths change a credential set, and all four now
+do the same four things — differing only in who the caller is:
+
+| Path | Epoch | Device trust | Sessions | Security event |
+|---|---|---|---|---|
+| self `POST /me/mfa/remove` | bump | revoke (`mfa_factor_removed`) | every one **but the caller's** | `self_mfa_removed` |
+| admin `POST /v1/admin/{users,client-users}/{id}/mfa/reset` | bump | revoke (`admin_mfa_reset`) | **every** one | `admin_mfa_reset` (the handler's own row) |
+| `POST /mfa/enroll/confirm` **that replaces** a TOTP row | bump | revoke (`mfa_factor_replaced`) | every one but the caller's | `self_mfa_factor_replaced` |
+| `DELETE /me/mfa/webauthn/credentials/{id}` — **any** passkey | bump | revoke (`mfa_factor_removed`) | every one but the caller's | `self_passkey_removed` |
+
+**Additions never bump the epoch.** A first TOTP enrolment
+(`self_mfa_enrolled`) and a passkey registration (`self_passkey_registered`)
+emit their event and their email and stop there: authority proven by a
+factor that still exists stays valid, and invalidating it would sign a user
+out for improving their own security.
+
+**Why the two mechanisms are both needed, and which one is load-bearing.**
+The epoch answers "is this token's MFA proof still backed by a factor the
+user holds?" on the caller's **current** token — the one no revocation can
+reach, and the one an attacker who just enrolled would be holding. Session
+revocation answers the different question of whether the *other* bearers of
+the account may keep using it. That is why a failed revocation is logged
+rather than surfaced (the security-critical half already happened) and why
+the admin reset still returns success with `sessions_terminated: false` in
+its audit row. ⚠️ **Until the per-request epoch resolver lands** (a later
+task of this same PR) nothing compares `claims.MFAEpoch` against the user's,
+so the bump is a durable write with no reader — session revocation is doing
+all the work in the meantime.
+
+**Passkey removal is uniform, not last-factor-only.** A removed credential
+is one the user no longer trusts — a lost or compromised device — and it may
+have *created* sessions through the passkey login flow. Neither the session
+document nor `amr` records which credential minted which session, so the
+rule cannot be narrower than "every other session". A DELETE that matched
+nothing changes no credential set and triggers none of it; otherwise any
+bearer could strip its own MFA authority by looping on an unknown id.
+
+**Where each half lives, and why.** The epoch bump, the device-trust revoke
+and the security event are in the services (`mfa_service.go`,
+`webauthn_service.go`); **session termination is on the handlers**
+(`MFAHandler.sessions` / `WebAuthnHandler.sessions`, typed
+`services.AuthService`, wired per tier in `module.go` from that tier's own
+`authService`). Two reasons it cannot be a service: `iface.SessionTerminator`
+declares only `TerminateAllSessionsByUUID` while three of the four paths need
+`RevokeAllUserSessionsExcept`, and neither service can learn the caller's
+session id — it lives on the request claims, reachable only through
+`middleware.GetSessionID(ctx)`. `ConfirmEnrollment` therefore **reports the
+replacement outward** (`(codes, replaced, err)`) and `EnrollConfirm` acts on
+it. The shared helper is `revokeSessionsExceptCurrent`
+(`handlers/credential_change_sessions.go`).
+
+**The epoch seam is optional and degrades, never fails.**
+`iface.MFAEpochBumper` is resolved per tier with `module.GetTyped` against
+`ServiceOperatorUserProvider` / `ServiceClientUserProvider`
+(`resolveMFAEpochBumper`, `module.go`). A fork's `iface.UserProvider` may
+predate it — that provider is additive-only by contract — so a missing
+implementation logs one WARN per tier at boot, the services log again on
+each removal that could not bump, and the platform falls back to session
+revocation alone: exactly what it had before the epoch existed. Refusing to
+boot, or refusing removals, would be strictly worse. A bump that *errors* is
+the same contract: the credential is already gone, and failing the caller
+would report a completed removal as not having happened.
+
+**Every change is announced.** Before this, only backup-code regeneration
+emitted anything at all, so an enrolment performed with a stolen bearer
+token was invisible. Additions (including a replacement, which adds a new
+secret) also send the `auth.mfa_factor_added` email — category
+`auth.security`, template id `auth.mfa_factor_added`, seeded EN + IT in
+`notification/services/default_templates.go`, data `AppName` / `UserName` /
+`FactorType` (`totp`|`passkey`) / `Replaced` / `RequestIP` / `At` /
+`SupportEmail`. It goes through the bounded `MailDispatcher`
+(`services.MailEnqueuer`), never inline, so a slow relay cannot add latency
+to an enrolment. Removals are not emailed: they already end every other
+session, which is louder.
 
 ### Self-service security surface
 
@@ -1217,7 +1298,7 @@ as the admin paths.
 
 **Not-found is classified by identity, not by message.** `mapAdminUserAuthError`, `mapAdminInviterError` and `mapSelfAuthError` (`handlers/self_user_auth_handler.go`) match `errors.Is(err, iface.ErrUserNotFound)` — they used to compare `err.Error() == "user not found"`, which worked only because the sentinel's text is literally that and `user/services` returns it unwrapped, so the next `fmt.Errorf("...: %w", …)` anywhere on the path would have turned a 404 into a 500 with nothing to catch it. `mapAdminInviterError`'s neighbouring `"notifications disabled — cannot send email"` compare became `errors.Is(err, services.ErrNotificationDown)` in the same change. Two consequences worth knowing: `AuthService.SelfLinkOAuthFromCallback`'s nil-user branch had to stop returning a *fresh* `fmt.Errorf("user not found")` — a different error value that only ever matched by text — and now returns `fmt.Errorf("self link: %w", iface.ErrUserNotFound)`; and a **look-alike** error (same message, different identity) now surfaces as a 500 rather than a 404. That is the intended narrowing — but it was **reachable in-tree**, and closing it was part of the same work: `user/services` translated `repository.ErrUserNotFound` (a *different* value with the same message) into the SDK sentinel on its **lookups** only, while eight thin **delegations** returned it raw. `AdminUnlinkOAuth` / `SelfUnlinkOAuth` pass `RemoveOAuthLinkFromUser`'s error straight to these mappers, so a user soft-deleted between the read and the `$pull` would have flipped from 404 to 500. Both the lookups **and** the delegations now translate (`asUserNotFound` in `user/services/user_service.go`), and these two auth methods are pinned to propagate the sentinel rather than rewrite it into an unlink verdict. What is left is a fork obligation: a fork's `iface.UserProvider` must return the SDK sentinel (the same obligation the refresh path and the service-account gate already place on it) rather than its own error with a matching message. Covered by `handlers/error_mapping_test.go`'s `TestMappersClassifyWrappedUserNotFound` / `…ClassifyBareUserNotFound` / `…DoNotClassifyLookalikeNotFound` / `…KeepUnrelatedErrorsAt500` and `TestMapAdminInviterErrorClassifiesWrappedNotificationDown`, plus `services/auth_service_self_link_test.go`'s `TestSelfLinkOAuth_NilUserReturnsTheSDKSentinel`, `services/auth_service_unlink_race_test.go`'s `TestUnlinkRace_*` (the two unlink methods propagate the sentinel; a store failure on the same write does not acquire it), and — in the user module — `user/services`' `TestDelegationsTranslateRepositoryNotFound` / `TestDelegationsLeaveOtherErrorsAlone`. The three modules cannot import one another's services packages, so the chain is established by composition rather than by one end-to-end test.
 
-Each successful action emits three audit lanes in parallel: (1) `slog.Info("auth_security_event", event=…)` for log shipping; (2) one row into `auth_security_events` via `securityEventRepo.Insert` (the auth-private audit collection — Phase 2.1); (3) one row into `compliance_audit_events` via the compliance `iface.AuditSink` when the compliance addon is enabled (Phase 6 of the /admin/users hardening). The compliance lane is driven by `authEventComplianceAction` (`services/auth_service.go`), which maps the internal event-type strings (`admin_password_reset_sent`, `admin_verification_resent`, `admin_oauth_unlink`, `admin_mfa_reset`, plus `self_oauth_unlink` / `self_oauth_link` / `self_session_revoke[_all]`) onto the dotted compliance vocabulary (`auth.password.reset_requested` / `auth.email.verify_resend` / `auth.oauth.unlinked` / `auth.mfa.reset` / `auth.oauth.unlinked.self` / …). Unmapped event-types still hit slog + `auth_security_events` but don't get duplicated to compliance — adding an event to the SOC2 view is a deliberate opt-in via the mapping function.
+Each successful action emits three audit lanes in parallel: (1) `slog.Info("auth_security_event", event=…)` for log shipping; (2) one row into `auth_security_events` via `securityEventRepo.Insert` (the auth-private audit collection — Phase 2.1); (3) one row into `compliance_audit_events` via the compliance `iface.AuditSink` when the compliance addon is enabled (Phase 6 of the /admin/users hardening). The compliance lane is driven by `authEventComplianceAction` (`services/auth_service.go`), which maps the internal event-type strings (`admin_password_reset_sent`, `admin_verification_resent`, `admin_oauth_unlink`, `admin_mfa_reset`, plus `self_oauth_unlink` / `self_oauth_link` / `self_session_revoke[_all]`, plus the five credential changes `self_mfa_enrolled` / `self_mfa_factor_replaced` / `self_passkey_registered` / `self_passkey_removed` / `self_mfa_removed`) onto the dotted compliance vocabulary (`auth.password.reset_requested` / `auth.email.verify_resend` / `auth.oauth.unlinked` / `auth.mfa.reset` / `auth.oauth.unlinked.self` / `auth.mfa.enrolled` / `auth.mfa.replaced` / `auth.mfa.passkey_registered` / `auth.mfa.passkey_removed` / `auth.mfa.removed` / …). Unmapped event-types still hit slog + `auth_security_events` but don't get duplicated to compliance — adding an event to the SOC2 view is a deliberate opt-in via the mapping function.
 
 ## Service accounts
 

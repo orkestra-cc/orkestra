@@ -22,3 +22,24 @@ func TestCoreTemplatesExistInEverySupportedLocale(t *testing.T) {
 		}
 	}
 }
+
+// TestAuthMFAFactorAddedTemplateIsSeeded pins the specific template spec
+// D13 requires. TestCoreTemplatesExistInEverySupportedLocale above only
+// checks that whatever IS in defaultTemplates covers every supported
+// locale, so it passes vacuously when a template is missing entirely.
+// SupportedLocales is ["en"], which makes the "it" block a convention
+// rather than a gated requirement — this asserts both, matching the six
+// EN/IT pairs default_templates.go already carries by hand.
+func TestAuthMFAFactorAddedTemplateIsSeeded(t *testing.T) {
+	locales := map[string]bool{}
+	for _, def := range defaultTemplates {
+		if def.TemplateID == models.TemplateAuthMFAFactorAdded {
+			locales[def.Locale] = true
+		}
+	}
+	for _, want := range []string{"en", "it"} {
+		if !locales[want] {
+			t.Errorf("template %s has no %s block", models.TemplateAuthMFAFactorAdded, want)
+		}
+	}
+}

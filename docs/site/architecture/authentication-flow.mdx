@@ -124,7 +124,7 @@ All access and refresh tokens are RS256-signed JWTs from the same key pair (`AUT
 - **`acting_tenant_id`** / **`acting_tenant_kind`** are the tenant (and its kind, `internal`/`external`) this specific token is minted to act in. For an operator-audience token they start out equal to `dtid`/its kind and can be overridden per-request by `X-Tenant-ID`; a client-portal token pins them for the token's whole lifetime.
 - **`amr`** (RFC 8176) records the authentication method(s) used. `pwd` for password login, `oauth` for OAuth, `otp` after MFA verification, `webauthn` after a passkey assertion, `reauth` after a successful password reconfirm via `/me/password-confirm`. `last_otp_at` lets `RequireStepUp(maxAge)` middleware demand a fresh MFA proof (or fresh reconfirm) for catastrophic actions.
 - **`auth_time`** (the OIDC name) is the unix time of the interactive authentication that created this session. **Written by** every session-creating mint — password login, MFA login completion, passkey login completion and the setup wizard's initial-admin mint (all one funnel), plus the OAuth callback (which is also where a client-tier relay completes). **Carried unchanged by** refresh rotation, the `/session` bootstrap mint, the MFA and passkey step-ups and `/me/password-confirm`: none of those is an authentication, so re-stamping would make freshness unfalsifiable. It is **never** written by the machine mints (the client-credentials grant, the dev-token endpoint) — a service principal proves no interactive presence. **Read by** exactly one consumer, the [enrolment proof gate](#enrolment-proof-gate)'s no-factor branch, which lets a user with no enrolled factor prove presence with a recent `auth_time`; nothing else reads it. Omitted when zero; absent on any token minted before it shipped, which reads as stale and costs such a user one re-login.
-- **`mfae`** is the value of the user's MFA epoch when the token was minted. **Written by** every access-token mint, read off the user record at signing time — including the machine mints (the client-credentials grant, the dev-token endpoint, and the tenant-scoped dev-token variant), since an epoch is a fact about the subject rather than a freshness proof. **Carried** by nothing: each mint re-reads the user, so a refreshed token carries the epoch current at refresh. **Will be read by** the MFA-marker check, which ignores a token's `amr`/`last_otp_at` once its epoch is behind the user's — so authority proven by a factor the user has since removed dies at once in every session, without waiting for a refresh. That check does not exist yet; today the claim is written and never consulted. Omitted when zero, and an absent claim reads as zero, which matches a user document that has no `mfaEpoch`.
+- **`mfae`** is the value of the user's MFA epoch when the token was minted. **Written by** every access-token mint, read off the user record at signing time — including the machine mints (the client-credentials grant, the dev-token endpoint, and the tenant-scoped dev-token variant), since an epoch is a fact about the subject rather than a freshness proof. **Carried** by nothing: each mint re-reads the user, so a refreshed token carries the epoch current at refresh. **Will be read by** the MFA-marker check, which ignores a token's `amr`/`last_otp_at` once its epoch is behind the user's — so authority proven by a factor the user has since removed dies at once in every session, without waiting for a refresh. The user-side counter now *moves*: every credential removal and replacement bumps it (see [Removing or replacing a factor](#removing-or-replacing-a-factor)). The check that reads it does not exist yet, so today the claim is written on both sides and consulted by nothing. Omitted when zero, and an absent claim reads as zero, which matches a user document that has no `mfaEpoch`.
 - **`sid`** is the canonical session UUID. One random UUID is created before either JWT is signed; the access JWT `sid`, refresh JWT `sid`, refresh-token row, session document, and token response match. Refresh rotation and MFA/WebAuthn completion preserve it. Logout / change-password add it to a Redis-backed revocation set so the access token stops working instantly without waiting for the TTL.
 
 ### Tenant resolution and the fallback claim
@@ -317,6 +317,53 @@ The `webauthn` factor row carries an embedded `webauthnCredentials[]` array (one
 Login / step-up via passkey sets `amr=[..., "otp", "webauthn"]` so `RequireStepUp` accepts the proof. The partial-login response carries `webauthnAvailable: bool` so the verify page can offer the passkey button alongside the TOTP code field. After a valid assertion, challenge consumption is atomic: invalid assertions may be retried within their attempt limit, while concurrent or replayed valid assertions have one winner.
 
 The current flow requires password login first, then offers passkey as the second factor. Full passwordless (discoverable / usernameless) login would need a `BeginDiscoverableLogin` entry point and is not built yet.
+
+### Removing or replacing a factor
+
+Four actions change a user's credential set, and all four now do the same
+four things — the only difference is who the caller is:
+
+| Action | MFA epoch | Device trust | Sessions ended | Security event |
+|---|---|---|---|---|
+| `POST /v1/auth/{tier}/me/mfa/remove` | bumped | all revoked | every one **but the caller's own** | `self_mfa_removed` |
+| `POST /v1/admin/{users,client-users}/{id}/mfa/reset` | bumped | all revoked | **every** one | `admin_mfa_reset` |
+| `POST /v1/auth/{tier}/mfa/enroll/confirm` **that replaces** a TOTP secret | bumped | all revoked | every one but the caller's own | `self_mfa_factor_replaced` |
+| `DELETE /v1/auth/{tier}/me/mfa/webauthn/credentials/{id}` — **any** passkey | bumped | all revoked | every one but the caller's own | `self_passkey_removed` |
+
+Additions do none of it. A first TOTP enrolment (`self_mfa_enrolled`) and a
+new passkey (`self_passkey_registered`) leave the epoch alone: authority
+proven by a factor the user still holds stays valid, and ending it would
+sign someone out for improving their own security.
+
+**Two mechanisms, because there are two questions.** Ending the *other*
+sessions is revocation's job. Ending the MFA authority of the caller's
+**current** token — which no revocation reaches, and which is the token an
+attacker who just enrolled would be holding — is the epoch's: the markers
+live in the token until it expires, so before this an MFA removal left every
+session, the caller's included, still MFA-satisfied. That is also why a
+failed revocation is logged rather than surfaced, and why an admin reset
+still succeeds with `sessions_terminated: false` recorded in its audit row:
+the security-critical half already happened. The reverse failure is not
+tolerated the same way — a *removal* that fails part-way now writes its own
+audit row before answering `500`, because a half-reset account is exactly
+what an operator needs to see.
+
+**Passkey removal is uniform, not last-factor-only.** A removed credential
+is one the user no longer trusts — a lost or compromised device — and it may
+have *created* sessions through the passkey login flow. Nothing records
+which credential minted which session, so the rule cannot be narrower than
+"every other session". A `DELETE` that matches no credential changes nothing
+and triggers none of it.
+
+**Every change is announced.** Before this, only backup-code regeneration
+emitted anything at all, so an enrolment performed with a stolen session was
+invisible to its victim. Each of the five events above reaches the audit
+trail, and every *addition* (a replacement included — it adds a new secret)
+also sends the `auth.mfa_factor_added` email, carrying the factor type, the
+request IP, the time, and whether it replaced an earlier factor. It is
+queued on the bounded mail dispatcher rather than sent inline, so a slow
+relay cannot add latency to an enrolment. Removals are not emailed — they
+already end every other session, which is a louder signal.
 
 ## 8. Session revocation
 

@@ -114,6 +114,15 @@ type MFAHandler struct {
 	deviceTrust  services.DeviceTrustService // optional — Section C item #3
 	policy       *services.AuthPolicyService // optional — admin-managed mfaEnabled + grace-window source
 	recorder     adminAuthRecorder           // optional — emits admin_mfa_reset to the audit pipeline
+	// sessions ends the sessions a credential change invalidated (spec
+	// §4.3 D16). Typed services.AuthService, not iface.SessionTerminator,
+	// because two of the three call sites need
+	// RevokeAllUserSessionsExcept and that interface declares only
+	// TerminateAllSessionsByUUID (ruling R5). Per tier: the operator
+	// handler gets the operator authService, the client handler the
+	// client one — same module, so this is not a cross-module import.
+	// Optional; nil degrades to "the epoch alone ends MFA authority".
+	sessions     services.AuthService
 	cookieName   string
 	cookieDomain string
 	cookieSecure bool
@@ -125,6 +134,13 @@ type MFAHandler struct {
 // constructed.
 func (h *MFAHandler) SetAuditRecorder(r adminAuthRecorder) {
 	h.recorder = r
+}
+
+// SetSessionTerminator wires the tier's own auth service so a credential
+// change can end the sessions it invalidated. See the struct field for why
+// the type is the full AuthService rather than iface.SessionTerminator.
+func (h *MFAHandler) SetSessionTerminator(s services.AuthService) {
+	h.sessions = s
 }
 
 // NewMFAHandler wires the dependencies. Cookie config is needed by the
@@ -239,9 +255,16 @@ func (h *MFAHandler) EnrollConfirm(ctx context.Context, req *MFAEnrollConfirmReq
 	if userUUID == "" {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
-	codes, err := h.mfa.ConfirmEnrollment(ctx, userUUID, req.Body.ChallengeID, req.Body.Code)
+	codes, replaced, err := h.mfa.ConfirmEnrollment(ctx, userUUID, req.Body.ChallengeID, req.Body.Code)
 	if err != nil {
 		return nil, mapMFAError(err)
+	}
+	// D16: a replacement destroyed the old secret, so it is a removal and
+	// carries a removal's consequences. A first enrolment invalidates
+	// nothing and revokes nothing. The service reports which happened —
+	// it cannot see the caller's sid to act on it itself.
+	if replaced {
+		revokeSessionsExceptCurrent(ctx, h.sessions, userUUID, "totp_factor_replaced")
 	}
 	resp := &MFAEnrollConfirmResponse{}
 	resp.Body.Success = true
@@ -342,10 +365,13 @@ func (h *MFAHandler) Remove(ctx context.Context, req *MFARemoveRequest) (*MFARem
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
 	// Freshness of the step-up is enforced by RequireStepUp middleware;
-	// the handler only performs the removal.
+	// the handler performs the removal and then ends what the removed
+	// factor authorised everywhere else (D16). The service already bumped
+	// the epoch, which is what closes the caller's OWN token.
 	if err := h.mfa.RemoveFactor(ctx, userUUID, userUUID); err != nil {
 		return nil, mapMFAError(err)
 	}
+	revokeSessionsExceptCurrent(ctx, h.sessions, userUUID, "self_mfa_removed")
 	resp := &MFARemoveResponse{}
 	resp.Body.Success = true
 	return resp, nil
@@ -483,11 +509,16 @@ type MFAAdminResetResponse struct {
 }
 
 // AdminReset removes every MFA factor another user holds (TOTP + WebAuthn,
-// D15) and starts a fresh grace window so they must re-enroll within the
-// policy deadline. Consumes the system.users.mfa_reset permission declared
-// by the auth module and is itself gated by RequireMFA — an admin can't
-// reset another user's MFA without having completed their own second
-// factor first.
+// D15), ends every session they hold, and starts a fresh grace window so
+// they must re-enroll within the policy deadline. Consumes the
+// system.users.mfa_reset permission declared by the auth module and is
+// itself gated by RequireMFA — an admin can't reset another user's MFA
+// without having completed their own second factor first.
+//
+// This is the one path that terminates ALL sessions rather than sparing
+// one: the caller is not the target, so there is no session of the
+// caller's to preserve, and an operator resetting someone's MFA is
+// recovering an account they have reason to believe is compromised.
 func (h *MFAHandler) AdminReset(ctx context.Context, req *MFAAdminResetRequest) (*MFAAdminResetResponse, error) {
 	actorUUID, _ := ctx.Value("userUUID").(string)
 	if actorUUID == "" {
@@ -501,8 +532,18 @@ func (h *MFAHandler) AdminReset(ctx context.Context, req *MFAAdminResetRequest) 
 	// delete fails, we don't want a half-applied state.
 	if err := h.mfa.RemoveFactor(ctx, req.UserID, actorUUID); err != nil {
 		if errors.Is(err, services.ErrMFANotEnrolled) {
+			// Nothing existed to reset, so nothing changed: a 404, and no
+			// audit row for a state change that did not happen.
 			return nil, huma.Error404NotFound("target user has no MFA factor to reset")
 		}
+		// R14: a removal can now fail PART-WAY (one factor row deleted,
+		// the other not), and this branch used to return 500 before the
+		// recorder ever ran — so the one outcome an operator most needs
+		// to see left no trace at all. Record it, then fail.
+		h.recordAdminReset(ctx, actorUUID, req.UserID, map[string]interface{}{
+			"outcome": "failed",
+			"error":   err.Error(),
+		})
 		return nil, huma.Error500InternalServerError("failed to reset MFA factor")
 	}
 	if err := h.users.ResetMFAGrace(ctx, req.UserID); err != nil {
@@ -511,15 +552,43 @@ func (h *MFAHandler) AdminReset(ctx context.Context, req *MFAAdminResetRequest) 
 		// We log via the mfa service on the delete path; nothing more here.
 		_ = err
 	}
-	// Audit pipeline: slog + auth_security_events + compliance via the
-	// AuthService recorder. Nil-tolerant — a build without the audit
-	// wiring still succeeds at the user-facing operation.
-	if h.recorder != nil {
-		h.recorder.RecordAdminAuthEvent(ctx, "admin_mfa_reset", actorUUID, req.UserID, nil)
+	// D16: RemoveFactor already bumped the target's MFA epoch, which ends
+	// the MFA authority of every token they hold — including ones already
+	// in flight. This ends the sessions themselves. A failure is recorded
+	// and NOT fatal: what survives it is ordinary session access, the same
+	// exposure as any degraded revocation, and telling the operator the
+	// reset failed would send them chasing a factor that is already gone.
+	terminated := false
+	switch {
+	case h.sessions == nil:
+		slog.Default().Warn("auth: session terminator not wired; admin MFA reset left the target's sessions signed in",
+			slog.String("target_uuid", req.UserID))
+	default:
+		if err := h.sessions.TerminateAllSessionsByUUID(ctx, req.UserID); err != nil {
+			slog.Default().Warn("auth: admin MFA reset could not terminate the target's sessions; their MFA authority ended anyway via the epoch",
+				slog.String("target_uuid", req.UserID),
+				slog.String("error", err.Error()))
+		} else {
+			terminated = true
+		}
 	}
+	h.recordAdminReset(ctx, actorUUID, req.UserID, map[string]interface{}{
+		"sessions_terminated": terminated,
+	})
 	resp := &MFAAdminResetResponse{}
 	resp.Body.Success = true
 	return resp, nil
+}
+
+// recordAdminReset writes one admin_mfa_reset row through the audit
+// pipeline: slog + auth_security_events + compliance via the AuthService
+// recorder. Nil-tolerant — a build without the audit wiring still succeeds
+// at the user-facing operation.
+func (h *MFAHandler) recordAdminReset(ctx context.Context, actorUUID, targetUUID string, fields map[string]interface{}) {
+	if h.recorder == nil {
+		return
+	}
+	h.recorder.RecordAdminAuthEvent(ctx, "admin_mfa_reset", actorUUID, targetUUID, fields)
 }
 
 // --- public login-verify (completes password/OAuth login after MFA) ---

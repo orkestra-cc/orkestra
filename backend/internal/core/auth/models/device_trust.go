@@ -52,6 +52,17 @@ const (
 	DeviceTrustRevokedOnMFARemove      = "mfa_factor_removed"
 	DeviceTrustRevokedOnAdminReset     = "admin_mfa_reset"
 	DeviceTrustRevokedReplaced         = "superseded_by_new_grant"
+	// DeviceTrustRevokedOnMFAReplace marks trust rows dropped because the
+	// user replaced their TOTP secret. A replacement is a removal of the
+	// old factor, so a trust row whose GrantedAMR still names it is
+	// annotated with a lie.
+	//
+	// Deliberately NOT DeviceTrustRevokedReplaced above: that one means
+	// "a newer trust grant for the same (user, device) superseded this
+	// row" (device_trust_repository.go) — a different trigger entirely.
+	// Reusing it would write a false reason onto an audit row, which is
+	// the one thing this constant set exists to prevent.
+	DeviceTrustRevokedOnMFAReplace = "mfa_factor_replaced"
 )
 
 // DeviceTrustAMR is the annotation stamped on the new token's amr claim

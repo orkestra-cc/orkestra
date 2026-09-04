@@ -1120,6 +1120,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	opDeps := commonTierDeps
 	opDeps.tier = tierOperator
 	opDeps.userProvider = operatorUser
+	opDeps.mfaEpochBumper = resolveMFAEpochBumper(deps.Services, module.ServiceOperatorUserProvider, logger, string(tierOperator))
 	opDeps.jwtService = operatorJWT
 	if cfg.Server.Operator.FrontendURL != "" {
 		opDeps.frontendURL = cfg.Server.Operator.FrontendURL
@@ -1187,6 +1188,10 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	m.operatorMFAHandler.SetDeviceTrust(deviceTrustSvc)
 	m.operatorMFAHandler.SetPolicy(authPolicy)
 	m.operatorMFAHandler.SetAuditRecorder(opBundle.authService)
+	// D16: a credential change ends the sessions it invalidated. Per
+	// tier — the operator handler gets the operator auth service, so a
+	// reset terminates operator_sessions rows and never a client's.
+	m.operatorMFAHandler.SetSessionTerminator(opBundle.authService)
 	if opBundle.webauthnSvc != nil {
 		m.operatorMFAHandler.SetWebAuthn(opBundle.webauthnSvc)
 		m.operatorWebAuthnHandler = handlers.NewWebAuthnHandler(
@@ -1201,6 +1206,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		)
 		m.operatorWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
 		m.operatorWebAuthnHandler.SetPolicy(authPolicy)
+		m.operatorWebAuthnHandler.SetSessionTerminator(opBundle.authService)
 		deps.Services.Register(module.ServiceWebAuthn, opBundle.webauthnSvc)
 	}
 
@@ -1288,6 +1294,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	clDeps := commonTierDeps
 	clDeps.tier = tierClient
 	clDeps.userProvider = clientUser
+	clDeps.mfaEpochBumper = resolveMFAEpochBumper(deps.Services, module.ServiceClientUserProvider, logger, string(tierClient))
 	clDeps.jwtService = clientJWT
 	if cfg.Server.Client.FrontendURL != "" {
 		clDeps.frontendURL = cfg.Server.Client.FrontendURL
@@ -1353,6 +1360,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	m.clientMFAHandler.SetDeviceTrust(deviceTrustSvc)
 	m.clientMFAHandler.SetPolicy(authPolicy)
 	m.clientMFAHandler.SetAuditRecorder(clBundle.authService)
+	m.clientMFAHandler.SetSessionTerminator(clBundle.authService)
 	if clBundle.webauthnSvc != nil {
 		m.clientMFAHandler.SetWebAuthn(clBundle.webauthnSvc)
 		m.clientWebAuthnHandler = handlers.NewWebAuthnHandler(
@@ -1367,6 +1375,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		)
 		m.clientWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
 		m.clientWebAuthnHandler.SetPolicy(authPolicy)
+		m.clientWebAuthnHandler.SetSessionTerminator(clBundle.authService)
 	}
 
 	// ADR-0003 PR-D D-6: per-tier dispatcher map on the operator
@@ -1629,6 +1638,37 @@ func enrolmentGate(logger *slog.Logger, surface string, mw module.RoleMiddleware
 		slog.String("interface", "module.EnrolmentProofGate"),
 	)
 	return authMiddleware.RefuseEnrolmentProof(maxAge)
+}
+
+// resolveMFAEpochBumper resolves the tier's user provider as an
+// iface.MFAEpochBumper (spec §4.3 D16). The seam is deliberately narrow and
+// deliberately OPTIONAL: iface.UserProvider is implemented by forks and
+// stays additive-only, so a fork's provider may simply not have the method.
+//
+// A missing implementation is NOT fatal and NOT a refusal — unlike the
+// enrolment gate above, whose absence must fail closed. The epoch is one of
+// two mechanisms that end a removed factor's authority; without it the
+// platform falls back to session revocation alone, which is exactly what it
+// had before the epoch existed. Refusing to boot, or refusing removals,
+// would be strictly worse than the pre-epoch behaviour.
+//
+// The WARN fires once per tier at wiring time so an operator learns about
+// it at boot; the services warn again on each removal that could not bump.
+func resolveMFAEpochBumper(reg *module.ServiceRegistry, key module.ServiceKey, logger *slog.Logger, tier string) iface.MFAEpochBumper {
+	bumper, ok := module.GetTyped[iface.MFAEpochBumper](reg, key)
+	if !ok || bumper == nil {
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("auth: user provider does not implement iface.MFAEpochBumper — "+
+			"removing an MFA factor will not end the MFA authority of tokens already issued; "+
+			"they keep their markers until they expire",
+			slog.String("tier", tier),
+			slog.String("service_key", string(key)),
+		)
+		return nil
+	}
+	return bumper
 }
 
 func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {

@@ -65,6 +65,14 @@ const (
 	ActionAuthMFAVerified        = "auth.mfa.verified"
 	ActionAuthMFARemoved         = "auth.mfa.removed"
 	ActionAuthMFAReset           = "auth.mfa.reset"
+	// The three credential changes the auth module started emitting with
+	// spec §4.2 D13. Declared here for the same reason as their four
+	// siblings above: this block is the vocabulary the emitter and the
+	// reader agree on. The emitter (authEventComplianceAction, auth
+	// module) writes the literals — it cannot import this package.
+	ActionAuthMFAReplaced          = "auth.mfa.replaced"
+	ActionAuthMFAPasskeyRegistered = "auth.mfa.passkey_registered"
+	ActionAuthMFAPasskeyRemoved    = "auth.mfa.passkey_removed"
 
 	// tenant.*
 	ActionTenantProvisioned = "tenant.lifecycle.provisioned"

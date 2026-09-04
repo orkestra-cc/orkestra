@@ -353,7 +353,7 @@ func TestEnrollmentAndVerify(t *testing.T) {
 		t.Fatalf("code: %v", err)
 	}
 
-	backupCodes, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin.ChallengeID, code)
+	backupCodes, _, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin.ChallengeID, code)
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestBackupCodeSingleUse(t *testing.T) {
 	user := &testUser{UUID: "u-2", Email: "bob@example.com"}
 	begin, _ := svc.BeginEnrollment(context.Background(), user.toUser())
 	code, _ := totp.GenerateCode(begin.SecretBase32, time.Now())
-	codes, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin.ChallengeID, code)
+	codes, _, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin.ChallengeID, code)
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
@@ -431,7 +431,7 @@ func TestEnrollmentIdempotentReset(t *testing.T) {
 	_, _ = svc.BeginEnrollment(context.Background(), user.toUser())
 	begin2, _ := svc.BeginEnrollment(context.Background(), user.toUser())
 	code, _ := totp.GenerateCode(begin2.SecretBase32, time.Now())
-	if _, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin2.ChallengeID, code); err != nil {
+	if _, _, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin2.ChallengeID, code); err != nil {
 		t.Fatalf("confirm on second begin: %v", err)
 	}
 }
@@ -450,7 +450,7 @@ func TestTOTPReplayRejected(t *testing.T) {
 	user := &testUser{UUID: "u-replay", Email: "r@example.com"}
 	begin, _ := svc.BeginEnrollment(context.Background(), user.toUser())
 	code, _ := totp.GenerateCode(begin.SecretBase32, time.Now())
-	if _, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin.ChallengeID, code); err != nil {
+	if _, _, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin.ChallengeID, code); err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
 

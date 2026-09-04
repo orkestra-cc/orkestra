@@ -2058,6 +2058,19 @@ func authEventComplianceAction(eventType string) string {
 		return "auth.oauth.unlinked"
 	case "admin_mfa_reset":
 		return "auth.mfa.reset"
+	// Every credential change, not just the admin reset (spec §4.2 D13).
+	// Before this, only backup-code regeneration emitted anything at all,
+	// so an enrolment performed with a stolen bearer token left no trace.
+	case "self_mfa_enrolled":
+		return "auth.mfa.enrolled"
+	case "self_mfa_factor_replaced":
+		return "auth.mfa.replaced"
+	case "self_passkey_registered":
+		return "auth.mfa.passkey_registered"
+	case "self_passkey_removed":
+		return "auth.mfa.passkey_removed"
+	case "self_mfa_removed":
+		return "auth.mfa.removed"
 	case "self_oauth_unlink":
 		return "auth.oauth.unlinked.self"
 	case "self_oauth_link":

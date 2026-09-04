@@ -294,6 +294,47 @@ You will still receive security-related emails.`,
 </html>`,
 	},
 	{
+		TemplateID:  models.TemplateAuthMFAFactorAdded,
+		Locale:      "en",
+		Subject:     "A second factor was added to your {{.AppName}} account",
+		Description: "Sent when a second factor is added to an account — a first TOTP enrolment, a TOTP replacement, or a new passkey. It is what makes an enrolment performed with a stolen session visible to the account holder.",
+		Variables:   []string{"AppName", "UserName", "FactorType", "Replaced", "RequestIP", "At", "SupportEmail", "UnsubscribeURL", "PreferencesURL"},
+		BodyText: `Hi {{.UserName}},
+
+{{if .Replaced}}The authenticator app on your {{.AppName}} account was replaced.{{else}}A new second factor was added to your {{.AppName}} account.{{end}}
+
+Type:  {{if eq .FactorType "passkey"}}Passkey{{else}}Authenticator app (TOTP){{end}}
+When:  {{.At}}
+From:  {{.RequestIP}}
+
+If this was you, no action is needed.{{if .Replaced}} Your previous authenticator has stopped working, and every other signed-in session was signed out.{{end}}
+
+If it was NOT you, someone else has access to your account: change your password now and contact {{.SupportEmail}}.
+
+— The {{.AppName}} team
+
+---
+This is a security notification and cannot be turned off.`,
+		BodyHTML: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>A second factor was added</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#333;">
+  <h2 style="color:#2c3e50;">{{if .Replaced}}Your authenticator was replaced{{else}}A second factor was added{{end}}</h2>
+  <p>Hi {{.UserName}},</p>
+  <p>{{if .Replaced}}The authenticator app on your {{.AppName}} account was replaced.{{else}}A new second factor was added to your {{.AppName}} account.{{end}}</p>
+  <table style="border-collapse:collapse;margin:24px 0;font-size:14px;">
+    <tr><td style="padding:4px 16px 4px 0;color:#6c757d;">Type</td><td style="padding:4px 0;">{{if eq .FactorType "passkey"}}Passkey{{else}}Authenticator app (TOTP){{end}}</td></tr>
+    <tr><td style="padding:4px 16px 4px 0;color:#6c757d;">When</td><td style="padding:4px 0;">{{.At}}</td></tr>
+    <tr><td style="padding:4px 16px 4px 0;color:#6c757d;">From</td><td style="padding:4px 0;">{{.RequestIP}}</td></tr>
+  </table>
+  <p style="color:#6c757d;font-size:14px;">If this was you, no action is needed.{{if .Replaced}} Your previous authenticator has stopped working, and every other signed-in session was signed out.{{end}}</p>
+  <p style="color:#b91c1c;font-size:14px;">If it was <strong>not</strong> you, someone else has access to your account: change your password now and contact <a href="mailto:{{.SupportEmail}}" style="color:#b91c1c;">{{.SupportEmail}}</a>.</p>
+  <hr style="border:none;border-top:1px solid #e0e0e0;margin:32px 0;">
+  <p style="color:#9ca3af;font-size:12px;">This is a security notification and cannot be turned off.</p>
+</body>
+</html>`,
+	},
+	{
 		TemplateID:  models.CategoryAuthVerifyEmail,
 		Locale:      "it",
 		Subject:     "Verifica il suo indirizzo email {{.AppName}}",
@@ -566,6 +607,47 @@ Continuerà comunque a ricevere le email relative alla sicurezza.`,
   <p style="color:#6c757d;font-size:14px;">Se non si aspettava questo invito, può ignorare questo messaggio in tutta sicurezza.</p>
   <hr style="border:none;border-top:1px solid #e0e0e0;margin:32px 0;">
   <p style="color:#9ca3af;font-size:12px;"><a href="{{.PreferencesURL}}" style="color:#9ca3af;">Gestisci le preferenze</a><br>Continuerà comunque a ricevere le email relative alla sicurezza.</p>
+</body>
+</html>`,
+	},
+	{
+		TemplateID:  models.TemplateAuthMFAFactorAdded,
+		Locale:      "it",
+		Subject:     "Un secondo fattore è stato aggiunto al suo account {{.AppName}}",
+		Description: "Sent when a second factor is added to an account — a first TOTP enrolment, a TOTP replacement, or a new passkey. It is what makes an enrolment performed with a stolen session visible to the account holder.",
+		Variables:   []string{"AppName", "UserName", "FactorType", "Replaced", "RequestIP", "At", "SupportEmail", "UnsubscribeURL", "PreferencesURL"},
+		BodyText: `Gentile {{.UserName}},
+
+{{if .Replaced}}L'app di autenticazione del suo account {{.AppName}} è stata sostituita.{{else}}Un nuovo secondo fattore è stato aggiunto al suo account {{.AppName}}.{{end}}
+
+Tipo:  {{if eq .FactorType "passkey"}}Passkey{{else}}App di autenticazione (TOTP){{end}}
+Data:  {{.At}}
+Da:    {{.RequestIP}}
+
+Se è stato lei, non deve fare nulla.{{if .Replaced}} L'autenticatore precedente non funziona più e tutte le altre sessioni attive sono state disconnesse.{{end}}
+
+Se NON è stato lei, qualcun altro ha accesso al suo account: cambi subito la password e contatti {{.SupportEmail}}.
+
+— Il team di {{.AppName}}
+
+---
+Questa è una notifica di sicurezza e non può essere disattivata.`,
+		BodyHTML: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Secondo fattore aggiunto</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#333;">
+  <h2 style="color:#2c3e50;">{{if .Replaced}}Il suo autenticatore è stato sostituito{{else}}Un secondo fattore è stato aggiunto{{end}}</h2>
+  <p>Gentile {{.UserName}},</p>
+  <p>{{if .Replaced}}L'app di autenticazione del suo account {{.AppName}} è stata sostituita.{{else}}Un nuovo secondo fattore è stato aggiunto al suo account {{.AppName}}.{{end}}</p>
+  <table style="border-collapse:collapse;margin:24px 0;font-size:14px;">
+    <tr><td style="padding:4px 16px 4px 0;color:#6c757d;">Tipo</td><td style="padding:4px 0;">{{if eq .FactorType "passkey"}}Passkey{{else}}App di autenticazione (TOTP){{end}}</td></tr>
+    <tr><td style="padding:4px 16px 4px 0;color:#6c757d;">Data</td><td style="padding:4px 0;">{{.At}}</td></tr>
+    <tr><td style="padding:4px 16px 4px 0;color:#6c757d;">Da</td><td style="padding:4px 0;">{{.RequestIP}}</td></tr>
+  </table>
+  <p style="color:#6c757d;font-size:14px;">Se è stato lei, non deve fare nulla.{{if .Replaced}} L'autenticatore precedente non funziona più e tutte le altre sessioni attive sono state disconnesse.{{end}}</p>
+  <p style="color:#b91c1c;font-size:14px;">Se <strong>non</strong> è stato lei, qualcun altro ha accesso al suo account: cambi subito la password e contatti <a href="mailto:{{.SupportEmail}}" style="color:#b91c1c;">{{.SupportEmail}}</a>.</p>
+  <hr style="border:none;border-top:1px solid #e0e0e0;margin:32px 0;">
+  <p style="color:#9ca3af;font-size:12px;">Questa è una notifica di sicurezza e non può essere disattivata.</p>
 </body>
 </html>`,
 	},

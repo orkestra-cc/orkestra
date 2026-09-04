@@ -563,7 +563,7 @@ func TestMFAEnrollment_RecoveryCodesCount_HonoursPolicy(t *testing.T) {
 			}
 			code := mustGenerateTOTPNow(t, begin.SecretBase32)
 
-			plain, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin.ChallengeID, code)
+			plain, _, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin.ChallengeID, code)
 			if err != nil {
 				t.Fatalf("ConfirmEnrollment: %v", err)
 			}

@@ -30,6 +30,11 @@ type WebAuthnHandler struct {
 	tokens        LoginTokenIssuer
 	deviceTrust   services.DeviceTrustService // optional — Section C item #3
 	policy        *services.AuthPolicyService // optional — per-surface password policy for the completion re-check
+	// sessions ends the sessions a removed passkey may have created
+	// (spec §4.3 D16). Same type and same reasoning as MFAHandler's
+	// field — see there. Optional; nil degrades to "the epoch alone ends
+	// MFA authority".
+	sessions      services.AuthService
 	cookieName    string
 	cookieDomain  string
 	cookieSecure  bool
@@ -68,6 +73,12 @@ func NewWebAuthnHandler(
 // inert. Section C item #3 of the 2026-04-24 auth roadmap.
 func (h *WebAuthnHandler) SetDeviceTrust(dt services.DeviceTrustService) {
 	h.deviceTrust = dt
+}
+
+// SetSessionTerminator wires the tier's own auth service so removing a
+// passkey can end the sessions it may have created.
+func (h *WebAuthnHandler) SetSessionTerminator(s services.AuthService) {
+	h.sessions = s
 }
 
 // SetPolicy wires the admin-managed AuthPolicyService so LoginFinish can
@@ -221,6 +232,13 @@ func (h *WebAuthnHandler) Remove(ctx context.Context, req *webAuthnRemoveRequest
 	if !removed {
 		return nil, huma.Error404NotFound("credential not found")
 	}
+	// D16, uniformly: EVERY passkey removal ends the caller's other
+	// sessions, not only the removal of their last factor. A removed
+	// credential is one the user no longer trusts, it may have created
+	// sessions through the passkey login flow, and nothing records which
+	// credential minted which session. The service already bumped the
+	// epoch, which is what closes the caller's own token.
+	revokeSessionsExceptCurrent(ctx, h.sessions, userUUID, "passkey_removed")
 	resp := &webAuthnRemoveResponse{}
 	resp.Body.Success = true
 	return resp, nil
