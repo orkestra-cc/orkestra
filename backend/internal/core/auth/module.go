@@ -21,7 +21,6 @@ import (
 	"github.com/orkestra/backend/internal/core/auth/services"
 	"github.com/orkestra/backend/internal/shared/blob"
 	"github.com/orkestra/backend/internal/shared/config"
-	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/geoip"
 	authMiddleware "github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/utils"
@@ -101,6 +100,17 @@ type AuthModule struct {
 	sweepTiers  []sweepTier
 	sweepLease  *services.MaintenanceLease
 	logger      *slog.Logger
+
+	// mailDispatcher is the bounded worker pool transactional auth mail
+	// is enqueued on instead of sent synchronously from the request
+	// goroutine. ForgotPassword's reset-password send is its first
+	// Enqueue caller; ResendVerification still sends synchronously (see
+	// PasswordAuthService.ResendVerification's doc comment for why).
+	// Started/stopped alongside the token-sweep maintenance loop in
+	// maintenance.go — see that file's Start/Stop for why the dispatcher
+	// runs regardless of whether this replica has sweep tiers or won the
+	// sweep lease.
+	mailDispatcher *services.MailDispatcher
 }
 
 // NewModule constructs an AuthModule bound to the live application config.
@@ -395,9 +405,19 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		},
 
 		// Login & Sessions — per-surface kill switches + lockout policy.
-		// Read at request time by AuthPolicyService; lockout values flow
-		// into shared/errors.RateLimiter via SetAuthFailedConfig before
-		// each login attempt so admin edits take effect on the next try.
+		// Read at request time by AuthPolicyService. Both pairs now feed
+		// the Redis attempt counters (services/attempt_counter.go): the
+		// account pair keys the `email` scope (and, for the
+		// client-credentials grant, the `client` scope — spec §4.1 D7),
+		// the address pair the `ip` scope, and all are read per attempt
+		// against the LIVE threshold, so an admin edit takes effect on
+		// the very next attempt — including one already inside an open
+		// window. No auth flow reads or writes shared/errors.RateLimiter
+		// any more (Task 10 moved the service-account grant, the last
+		// consumer, onto the same counters), and Task 11 (H-1) deleted
+		// the module's RateLimiter instance and every field that
+		// threaded it through — this module has no dependency on
+		// shared/errors.RateLimiter left at all.
 		{
 			Key: "loginEnabledAdmin", Label: "Allow logins on operator console", Group: "login",
 			Description: "When off, POST /v1/auth/operator/login returns 403. Use during maintenance to lock out the operator console without taking the backend offline.",
@@ -426,6 +446,16 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		{
 			Key: "accountLockoutDuration", Label: "Lockout duration", Group: "login",
 			Description: "Go duration string (e.g. 15m, 1h) — how long an IP/email stays locked after exceeding the threshold. Default 15m.",
+			Type:        module.FieldDuration, Default: "15m",
+		},
+		{
+			Key: "ipLockoutThreshold", Label: "Failed attempts from one address before lockout", Group: "login",
+			Description: "Number of failed attempts from a single source address before that address is temporarily locked. Deliberately much higher than the per-account threshold — one office egress or VPN can be hundreds of people, and locking the address on five wrong passwords among them would take the whole office offline. Must be at least the per-account threshold. Default 100.",
+			Type:        module.FieldInt, Default: "100",
+		},
+		{
+			Key: "ipLockoutDuration", Label: "Address lockout duration", Group: "login",
+			Description: "Go duration string (e.g. 15m, 1h) — how long a source address stays locked after exceeding its threshold. Default 15m.",
 			Type:        module.FieldDuration, Default: "15m",
 		},
 		// Phase 3.1 — admin-managed token TTLs. Both are read live on
@@ -898,6 +928,23 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	if !ok {
 		return fmt.Errorf("auth: Redis adapter lacks atomic GETDEL support")
 	}
+	// EVAL is required for the same reason GETDEL is: the attempt
+	// counters are the only brute-force bound on every anonymous auth
+	// surface, and the script is what makes their count/TTL/healing
+	// atomic. A client that cannot run it would leave the platform with
+	// no lockout at all, which must be a boot failure, not a silent
+	// degradation.
+	scriptRedis, ok := deps.RedisAdapter.(services.ScriptRedisClient)
+	if !ok {
+		return fmt.Errorf("auth: Redis adapter lacks EVAL support")
+	}
+	attemptCounter := services.NewRedisAttemptCounter(scriptRedis, logger)
+	// Bounded dispatcher for transactional auth mail (D5). Constructed
+	// here so it exists before the tier bundles that hand it to
+	// PasswordAuthConfig; started/stopped by maintenance.go's Start/Stop
+	// alongside the token-sweep loop.
+	mailDispatcher := services.NewMailDispatcher(logger)
+	m.mailDispatcher = mailDispatcher
 	redisStore := services.NewRedisOAuthStateStore(atomicRedis)
 	oauthStateService := services.NewOAuthStateService(redisStore)
 	var oauthStateSecret []byte
@@ -952,8 +999,6 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		logger.Warn("auth: security event service init failed; suspicious-login notifier disabled",
 			slog.String("error", securityEventErr.Error()))
 	}
-
-	rateLimiter := sharederrors.NewRateLimiter()
 
 	mfaIssuer := getEnvOrDefault("APP_NAME", "Orkestra")
 	geoResolver := geoip.FromEnv(logger)
@@ -1045,7 +1090,8 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		deviceTrust:              deviceTrustSvc,
 		suspiciousLoginNotifier:  suspiciousLoginNotifierSvc,
 		notifier:                 notifier,
-		rateLimiter:              rateLimiter,
+		attemptCounter:           attemptCounter,
+		mailDispatcher:           mailDispatcher,
 		geoResolver:              geoResolver,
 		velocityKmh:              velocityKmh,
 		frontendURL:              cfg.Server.FrontendURL,
@@ -1205,7 +1251,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// ServiceTokenMinter requires, so it satisfies the minter seam
 	// structurally — no assertion needed.
 	m.serviceAccountService = services.NewServiceAccountService(
-		saCredRepo, operatorUser, saLister, passwordSvc, serviceJWT, rateLimiter)
+		saCredRepo, operatorUser, saLister, passwordSvc, serviceJWT, attemptCounter)
 	// securityEventRepo/authPolicy already exist in scope from the
 	// operator-tier wiring above — thread them into the service the
 	// same way the sibling AdminUserAuthHandler receives its deps (see

@@ -8,7 +8,6 @@ import (
 	gowebauthn "github.com/go-webauthn/webauthn/webauthn"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/auth/services"
-	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/geoip"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -58,19 +57,28 @@ type authTierBundle struct {
 // provider that buildAuthTierBundle needs. Pulled into a struct so the
 // function signature stays manageable as PR-D's plumbing grows.
 type tierBundleDeps struct {
-	db                       *mongo.Database
-	logger                   *slog.Logger
-	tier                     audienceTier
-	userProvider             iface.UserProvider
-	tenantProvider           iface.TenantProvider
-	jwtService               services.JWTService
-	passwordService          services.PasswordService
-	mfaChallengeService      services.MFAChallengeService
-	firstAdminClaimer        services.FirstAdminClaimer
-	deviceTrust              services.DeviceTrustService
-	suspiciousLoginNotifier  services.SuspiciousLoginNotifier
-	notifier                 iface.NotificationSender
-	rateLimiter              *sharederrors.RateLimiter
+	db                      *mongo.Database
+	logger                  *slog.Logger
+	tier                    audienceTier
+	userProvider            iface.UserProvider
+	tenantProvider          iface.TenantProvider
+	jwtService              services.JWTService
+	passwordService         services.PasswordService
+	mfaChallengeService     services.MFAChallengeService
+	firstAdminClaimer       services.FirstAdminClaimer
+	deviceTrust             services.DeviceTrustService
+	suspiciousLoginNotifier services.SuspiciousLoginNotifier
+	notifier                iface.NotificationSender
+	// attemptCounter is the Redis fixed-window counter behind every
+	// lockout and request cap (spec D8). shared/errors.RateLimiter's
+	// auth-facing surface is gone (H-1, Task 11); this is the only
+	// counter left.
+	attemptCounter services.AttemptCounter
+	// mailDispatcher is the bounded worker pool transactional auth mail
+	// is enqueued on — ForgotPassword's reset-password send is its first
+	// caller. Single instance shared by both tier bundles — the queue
+	// and worker bounds are process-wide, not per-tier.
+	mailDispatcher           *services.MailDispatcher
 	geoResolver              geoip.Resolver
 	velocityKmh              float64
 	frontendURL              string
@@ -168,7 +176,8 @@ func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 		DeviceTrust:              d.deviceTrust,
 		SuspiciousLoginNotifier:  d.suspiciousLoginNotifier,
 		Notifier:                 d.notifier,
-		RateLimiter:              d.rateLimiter,
+		AttemptCounter:           d.attemptCounter,
+		MailDispatcher:           d.mailDispatcher,
 		FrontendURL:              d.frontendURL,
 		RequireEmailVerification: d.requireEmailVerification,
 		AppName:                  d.appName,

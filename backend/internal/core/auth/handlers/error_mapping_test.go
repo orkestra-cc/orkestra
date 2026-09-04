@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -47,7 +48,7 @@ func TestMapPasswordError_KnownCodes(t *testing.T) {
 	}{
 		{"InvalidCredentials → 401", services.ErrInvalidCredentials, http.StatusUnauthorized, ""},
 		{"EmailNotVerified → 403 auth.email_not_verified", services.ErrEmailNotVerified, http.StatusForbidden, errcode.AuthEmailNotVerified},
-		{"AccountLocked → 429", services.ErrAccountLocked, http.StatusTooManyRequests, ""},
+		{"AccountLocked → 429 auth.too_many_attempts", services.ErrAccountLocked, http.StatusTooManyRequests, errcode.AuthTooManyAttempts},
 		{"UserInactive → 403", services.ErrUserInactive, http.StatusForbidden, ""},
 		{"PasswordReused → 400", services.ErrPasswordReused, http.StatusBadRequest, ""},
 		{"NotificationDown → 503", services.ErrNotificationDown, http.StatusServiceUnavailable, ""},
@@ -75,6 +76,26 @@ func TestMapPasswordError_KnownCodes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A 429 with no Retry-After tells the caller to guess. Every lockout
+// answer carries one, and it is never below 1 second (a "come back in
+// 0 seconds" is an invitation to hot-loop).
+func TestMapPasswordError_AccountLockedCarriesRetryAfter(t *testing.T) {
+	err := mapPasswordError(services.ErrAccountLocked)
+
+	var ce *errcode.Error
+	if !errors.As(err, &ce) {
+		t.Fatalf("want *errcode.Error, got %T", err)
+	}
+	ra := ce.GetHeaders().Get("Retry-After")
+	if ra == "" {
+		t.Fatal("Retry-After missing")
+	}
+	n, convErr := strconv.Atoi(ra)
+	if convErr != nil || n < 1 {
+		t.Fatalf("Retry-After = %q, want an integer >= 1", ra)
 	}
 }
 

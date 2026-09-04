@@ -17,8 +17,14 @@ import (
 // or invalid. These match the values that were hardcoded before the
 // admin-managed Login & Sessions tab was introduced.
 const (
-	defaultLockoutThreshold      = 5
-	defaultLockoutDuration       = 15 * time.Minute
+	defaultLockoutThreshold = 5
+	defaultLockoutDuration  = 15 * time.Minute
+	// The IP pair is deliberately an order of magnitude looser than the
+	// account pair. An egress address is not an account: one corporate
+	// NAT or VPN carries hundreds of people, so the address threshold
+	// exists to catch a stuffing run, not ordinary user error.
+	defaultIPLockoutThreshold    = 100
+	defaultIPLockoutDuration     = 15 * time.Minute
 	defaultPasswordMinLength     = 10
 	defaultPasswordMaxLength     = 128
 	defaultBreachedPasswordCheck = true
@@ -410,6 +416,43 @@ func (s *AuthPolicyService) LockoutDuration(ctx context.Context) time.Duration {
 	d, ok := utils.ParseDuration(v)
 	if !ok || d <= 0 {
 		return defaultLockoutDuration
+	}
+	return d
+}
+
+// IPLockoutThreshold returns the number of failed attempts from one
+// source address before that address is locked. Falls back to 100 when
+// unset or invalid. Enforced >= LockoutThreshold at config-write time
+// (config_validation.go): an IP lock tighter than the account lock turns
+// a shared address into the account's existence oracle.
+func (s *AuthPolicyService) IPLockoutThreshold(ctx context.Context) int {
+	if s == nil || s.cs == nil {
+		return defaultIPLockoutThreshold
+	}
+	v := strings.TrimSpace(s.cs.GetValue(ctx, "auth", "ipLockoutThreshold"))
+	if v == "" {
+		return defaultIPLockoutThreshold
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return defaultIPLockoutThreshold
+	}
+	return n
+}
+
+// IPLockoutDuration returns how long a source address stays locked.
+// Falls back to 15m when unset or invalid.
+func (s *AuthPolicyService) IPLockoutDuration(ctx context.Context) time.Duration {
+	if s == nil || s.cs == nil {
+		return defaultIPLockoutDuration
+	}
+	v := strings.TrimSpace(s.cs.GetValue(ctx, "auth", "ipLockoutDuration"))
+	if v == "" {
+		return defaultIPLockoutDuration
+	}
+	d, ok := utils.ParseDuration(v)
+	if !ok || d <= 0 {
+		return defaultIPLockoutDuration
 	}
 	return d
 }

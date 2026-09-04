@@ -94,6 +94,24 @@ const AuthPasswordLoginDisabled = "auth.password_login_disabled"
 // every mutation surface. 422.
 const AuthLoginMethodLockout = "auth.login_method_lockout"
 
+// AuthTooManyAttempts signals that a per-IP, per-email or per-client
+// attempt counter reached its threshold inside its window, or that the
+// account carries a durable lock that has not yet expired. Always 429,
+// always accompanied by a Retry-After header carrying the remaining
+// life of the window (never below 1 second).
+//
+// It deliberately covers BOTH the unknown-address and the known-address
+// case: answering 429 for one and 401 for the other would be an
+// existence oracle, which is the defect (M-7) the counters close.
+const AuthTooManyAttempts = "auth.too_many_attempts"
+
+// AuthIPThresholdBelowAccount signals a refused module-config write:
+// ipLockoutThreshold must be >= accountLockoutThreshold. A source
+// address that locks BEFORE the account does turns a shared egress into
+// an existence oracle — the caller learns "an account is being attacked
+// behind this NAT" from the early 429.
+const AuthIPThresholdBelowAccount = "auth.ip_threshold_below_account"
+
 // --- tenant ---
 
 // TenantSlugAlreadyInUse signals that a tenant create or update would reuse an

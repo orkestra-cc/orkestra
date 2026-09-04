@@ -67,6 +67,11 @@ type sweepTier struct {
 // no tiers, Redis unreachable) skips maintenance and returns nil;
 // leadership is acquired inside the goroutine, after Start has returned.
 func (m *AuthModule) Start(ctx context.Context) error {
+	// The mail dispatcher is not maintenance: it serves live requests,
+	// so it starts regardless of whether this replica has sweep tiers
+	// or won the lease.
+	m.mailDispatcher.Start()
+
 	if len(m.sweepTiers) == 0 || m.sweepLease == nil {
 		// Nothing to sweep, or Redis did not satisfy the lease contract
 		// at Init. Maintenance is skipped; authentication is untouched.
@@ -105,6 +110,8 @@ func (m *AuthModule) Start(ctx context.Context) error {
 // scheduler lease so another replica can take over immediately rather
 // than after the lease TTL.
 func (m *AuthModule) Stop(ctx context.Context) error {
+	m.mailDispatcher.Stop(ctx)
+
 	m.lifecycleMu.Lock()
 	cancel := m.sweepCancel
 	done := m.sweepDone

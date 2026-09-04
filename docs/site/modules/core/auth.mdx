@@ -19,7 +19,7 @@ Every way a caller proves who it is: email/password (argon2id), OAuth 2.1, MFA, 
 
 ## Two surfaces, one module
 
-Almost every route is mirrored under `/v1/auth/operator/*` (Tier-1) and `/v1/auth/client/*` (Tier-2) — same handlers, different collections, cookie domains, and rate-limit policy. A token minted for one surface is rejected at the edge of the other with `401 audience_mismatch`, above and beyond per-route RBAC.
+Almost every route is mirrored under `/v1/auth/operator/*` (Tier-1) and `/v1/auth/client/*` (Tier-2) — same handlers, different collections, cookie domains, and [lockout](#lockout) accounting: the email scope is counted separately per surface, so an operator and a client account sharing an address lock independently, while the source-address scope is shared across both. A token minted for one surface is rejected at the edge of the other with `401 audience_mismatch`, above and beyond per-route RBAC.
 
 Some surfaces exist on one tier only: session listing and OAuth link/unlink are operator-side self-service, while registration exists on both but is independently gated by config.
 
@@ -97,6 +97,53 @@ operator break-glass restores password login for `POST
 client surface — see [Going SSO-only](/operating/oauth-providers#going-sso-only)
 for the procedure and the drill.
 
+## Lockout
+
+Failed attempts are counted in Redis in fixed windows, so the limits hold
+across every replica and survive a restart.
+
+| Scope | Counted on | Limit |
+|---|---|---|
+| Email (independent per surface) | login, change-password, password-confirm | `accountLockoutThreshold` / `accountLockoutDuration` (5 / 15m) |
+| Source address (shared across both surfaces) | the same three, plus the service-account grant | `ipLockoutThreshold` / `ipLockoutDuration` (100 / 15m) |
+| Client ID | service-account grant | the account pair |
+| Reset / verification requests | forgot-password, resend-verification | 3 per email address per 15m, 60 per source address per 15m |
+
+An address threshold **must** be at least the account threshold: an
+address that locks first would tell an attacker which accounts exist
+behind a shared office or VPN egress. The console refuses a lower value
+with **422** `auth.ip_threshold_below_account`.
+
+A locked scope answers **429** `auth.too_many_attempts` with a
+`Retry-After` header, and answers it identically for an address that
+exists and one that does not. A successful login clears the email
+counter; the address counter is left alone, so one correct sign-in
+cannot launder a credential-stuffing run.
+
+The durable per-account lock (`User.LockedUntil`) runs alongside the
+counters rather than behind them: an account locks when either its
+counter window or its cumulative failure count reaches
+`accountLockoutThreshold`. That second rule is what caps an attacker
+slow enough to keep every window under the threshold, and it is what is
+left when Redis is unavailable and the counters fail open — a login
+outage is never the answer to a cache outage.
+`orkestra_auth_attempt_store_failures_total` is the signal that the
+counters are the ones that dropped out. A successful sign-in clears the
+cumulative count, and so does a lockout once it expires, so the count is
+a budget per lockout rather than a life sentence.
+
+The durable lock is also where the identical answer above stops, and
+that is a known residual rather than a closed hole: only the durable
+lock needs an account to exist, and it does not always lock or expire
+together with the counter. Whenever a live `User.LockedUntil` is reached
+with no counter lock in front of it — Redis down, the counter's fixed
+window already expired while the account's lock has not, or a slow
+attacker who never fills a single window — an email that exists gets the
+**429**, while an email that does not has no record to lock and gets a
+plain **401**. Closing it would change what a legitimately locked-out
+user is told (429 with `Retry-After` → a bare 401), so it is left to a
+deliberate contract decision rather than papered over.
+
 ## Service accounts
 
 A machine caller — an integration, a CI job, a fork's own backend — authenticates with the OAuth2 **client-credentials** grant. Adopted in [ADR-0014](/adrs/service-accounts-client-credentials); operator console at `/admin/service-accounts`.
@@ -123,12 +170,12 @@ curl -X POST https://console.example.com/v1/auth/token \
 { "accessToken": "eyJhbGciOiJSUzI1NiIs...", "tokenType": "Bearer", "expiresIn": 900 }
 ```
 
-The endpoint is public and rate-limited. Two things to expect that differ from an off-the-shelf OAuth2 client:
+The endpoint is public and [locked out](#lockout) the same way login is. Two things to expect that differ from an off-the-shelf OAuth2 client:
 
 - **JSON, camelCase.** Not RFC 6749's form-encoded `grant_type`/`access_token` shape — the platform is JSON-first throughout. A stock OAuth2 library needs a thin adapter or a hand-rolled request.
 - **No refresh token.** The client credential is already a long-lived secret; a service account simply repeats the grant when its access token expires.
 
-Every rejection reason — unknown client ID, revoked credential, wrong secret, disabled account, a user that is not a service account — collapses into one indistinguishable error, and an unknown client ID still burns a dummy hash-verify so that path costs the same wall-clock time as a wrong secret. Failed attempts are throttled per source IP *and* per targeted client ID.
+Every rejection reason — unknown client ID, revoked credential, wrong secret, disabled account, a user that is not a service account — collapses into one indistinguishable error, and an unknown client ID still burns a dummy hash-verify so that path costs the same wall-clock time as a wrong secret. Failed attempts are throttled per source IP *and* per targeted client ID, through the same [lockout](#lockout) counters login uses.
 
 ### Audience
 

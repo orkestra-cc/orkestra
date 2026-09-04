@@ -12,7 +12,18 @@ import (
 	"github.com/orkestra/backend/internal/shared/utils"
 )
 
-// RateLimiter provides rate limiting functionality
+// RateLimiter is the per-IP request bound behind the api:general
+// middleware, and nothing else.
+//
+// It used to carry the auth lockout too, through a config map that
+// SetAuthFailedConfig rewrote on EVERY login and service-account grant
+// while Check, IsBlocked and IsLockedOut read it without a lock. A
+// concurrent map read and write is a fatal runtime error, so any
+// anonymous caller could stop the process (H-1). Lockout now lives in
+// the Redis attempt counters
+// (internal/core/auth/services/attempt_counter.go), which are shared
+// across replicas, honour the admin-managed window, and survive a
+// restart — none of which a per-process token bucket could do.
 type RateLimiter struct {
 	mu      sync.RWMutex
 	buckets map[string]*TokenBucket
@@ -66,173 +77,50 @@ func NewRateLimiter() *RateLimiter {
 
 // setDefaultConfigs sets up default rate limiting configurations
 func (rl *RateLimiter) setDefaultConfigs() {
-	// Authentication endpoints - more restrictive
-	rl.configs["auth:login"] = &RateLimitConfig{
-		Capacity:   5,
-		RefillRate: 1,
-		Window:     time.Minute,
-		MaxBurst:   2,
-	}
-
-	rl.configs["auth:refresh"] = &RateLimitConfig{
-		Capacity:   10,
-		RefillRate: 2,
-		Window:     time.Minute,
-		MaxBurst:   5,
-	}
-
-	// General API endpoints
+	// General API endpoints — the only surviving config (H-1: the
+	// auth-facing configs and their unlocked readers are gone).
 	rl.configs["api:general"] = &RateLimitConfig{
 		Capacity:   100,
 		RefillRate: 10,
 		Window:     time.Minute,
 		MaxBurst:   20,
 	}
-
-	// Security-sensitive operations
-	rl.configs["security:sensitive"] = &RateLimitConfig{
-		Capacity:   3,
-		RefillRate: 1,
-		Window:     time.Minute * 5,
-		MaxBurst:   1,
-	}
-
-	// Global rate limit per IP
-	rl.configs["global:ip"] = &RateLimitConfig{
-		Capacity:   1000,
-		RefillRate: 100,
-		Window:     time.Minute,
-		MaxBurst:   200,
-	}
-
-	// Failed authentication attempts
-	rl.configs["auth:failed"] = &RateLimitConfig{
-		Capacity:   3,
-		RefillRate: 1,
-		Window:     time.Minute * 15,
-		MaxBurst:   1,
-	}
 }
 
 // Check checks if a request should be rate limited
 func (rl *RateLimiter) Check(ctx context.Context, key string, configName string) *RateLimitResult {
-	config, exists := rl.configs[configName]
-	if !exists {
-		// If no config exists, default to general API limits
-		config = rl.configs["api:general"]
-	}
+	config := rl.configFor(configName)
 
 	bucketKey := fmt.Sprintf("%s:%s", configName, key)
 	bucket := rl.getBucket(bucketKey, config)
 
 	allowed := bucket.consume(1)
-	remaining := int(bucket.tokens)
+	// remaining is read under the bucket's own mutex: consume mutates
+	// tokens, and a second goroutine's consume races this read.
+	remaining := bucket.remaining()
 
 	result := &RateLimitResult{
 		Allowed:   allowed,
 		Remaining: remaining,
 		ResetTime: time.Now().Add(config.Window),
 	}
-
 	if !allowed {
 		result.RetryAfter = time.Duration(float64(time.Second) / float64(config.RefillRate))
 	}
-
 	return result
 }
 
-// CheckMultiple checks multiple rate limits for a single request
-func (rl *RateLimiter) CheckMultiple(ctx context.Context, checks []RateLimitCheck) *RateLimitResult {
-	var mostRestrictive *RateLimitResult
-
-	for _, check := range checks {
-		result := rl.Check(ctx, check.Key, check.ConfigName)
-
-		if !result.Allowed {
-			return result // Fail fast on first violation
-		}
-
-		// Track the most restrictive limit (lowest remaining)
-		if mostRestrictive == nil || result.Remaining < mostRestrictive.Remaining {
-			mostRestrictive = result
-		}
+// configFor resolves a config under the read lock, falling back to
+// api:general. One lookup, one lock acquisition — the previous shape
+// read the map twice, unlocked, and the fallback read could observe a
+// map mid-write.
+func (rl *RateLimiter) configFor(name string) *RateLimitConfig {
+	rl.mu.RLock()
+	defer rl.mu.RUnlock()
+	if c, ok := rl.configs[name]; ok {
+		return c
 	}
-
-	return mostRestrictive
-}
-
-// RecordFailedAuth records a failed authentication attempt
-func (rl *RateLimiter) RecordFailedAuth(ctx context.Context, identifier string) {
-	// Consume a token from the failed auth bucket
-	key := fmt.Sprintf("auth_failed:%s", identifier)
-	rl.Check(ctx, key, "auth:failed")
-}
-
-// SetAuthFailedConfig replaces the "auth:failed" lockout configuration
-// at runtime so admin-managed values can drive the per-IP / per-email
-// brute-force guard. The auth module calls this on every login attempt
-// using the live AuthPolicyService values; the swap is cheap because
-// it only mutates a map entry. New token buckets pick up the new
-// capacity / window immediately; already-allocated buckets keep their
-// current refill rate until they are evicted by the cleanup ticker (5
-// min). Threshold < 1 or window <= 0 is ignored to avoid a misedit
-// turning the limiter into a deny-all.
-func (rl *RateLimiter) SetAuthFailedConfig(threshold int, window time.Duration) {
-	if threshold < 1 || window <= 0 {
-		return
-	}
-	cfg := &RateLimitConfig{
-		Capacity:   threshold,
-		RefillRate: 1,
-		Window:     window,
-		MaxBurst:   1,
-	}
-	rl.mu.Lock()
-	rl.configs["auth:failed"] = cfg
-	rl.mu.Unlock()
-}
-
-// IsBlocked checks if an identifier is currently blocked due to failed attempts
-func (rl *RateLimiter) IsBlocked(ctx context.Context, identifier string) bool {
-	key := fmt.Sprintf("auth_failed:%s", identifier)
-	result := rl.Check(ctx, key, "auth:failed")
-	return !result.Allowed
-}
-
-// IsLockedOut reports whether an identifier is CURRENTLY locked out due
-// to prior failed attempts against the "auth:failed" bucket, WITHOUT
-// recording an attempt of its own.
-//
-// Contrast with IsBlocked: IsBlocked calls Check, and Check's
-// TokenBucket.consume deducts a token on every call — so IsBlocked
-// itself counts toward the very lockout it is checking for. A caller
-// that pre-checks IsBlocked before every request (successful or not)
-// can therefore trip its own lockout purely by asking, with no failure
-// ever recorded. IsLockedOut applies the identical elapsed-time refill
-// accounting against the same bucket/config, but only reads the
-// resulting token count (TokenBucket.peek) — it never mutates the
-// bucket. Calling IsLockedOut any number of times has no effect on
-// whether a subsequent legitimate attempt is allowed; only
-// RecordFailedAuth (or Check/IsBlocked) can push a bucket toward
-// lockout.
-//
-// This is an additive peek — IsBlocked, Check, RecordFailedAuth, and
-// their existing callers (e.g. the login path) are unchanged.
-func (rl *RateLimiter) IsLockedOut(ctx context.Context, identifier string) bool {
-	const configName = "auth:failed"
-	key := fmt.Sprintf("auth_failed:%s", identifier)
-
-	config, exists := rl.configs[configName]
-	if !exists {
-		// Mirrors Check's fallback; unreachable in practice since
-		// setDefaultConfigs always seeds "auth:failed".
-		config = rl.configs["api:general"]
-	}
-
-	bucketKey := fmt.Sprintf("%s:%s", configName, key)
-	bucket := rl.getBucket(bucketKey, config)
-
-	return !bucket.peek(1)
+	return rl.configs["api:general"]
 }
 
 // getBucket gets or creates a token bucket for the given key
@@ -285,20 +173,11 @@ func (tb *TokenBucket) consume(tokens float64) bool {
 	return false
 }
 
-// peek reports whether `tokens` would currently be available, applying
-// the same elapsed-time refill accounting as consume — but it never
-// subtracts from the bucket and never advances lastRefill. Purely
-// read-only: any number of peek calls leave the bucket exactly as a
-// caller who never called it at all would find it.
-func (tb *TokenBucket) peek(tokens float64) bool {
+// remaining reads the token count under the bucket's mutex.
+func (tb *TokenBucket) remaining() int {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
-
-	now := time.Now()
-	elapsed := now.Sub(tb.lastRefill).Seconds()
-	available := min(tb.capacity, tb.tokens+elapsed*tb.refillRate)
-
-	return available >= tokens
+	return int(tb.tokens)
 }
 
 // cleanup removes old buckets to prevent memory leaks
@@ -343,10 +222,11 @@ func (rl *RateLimiter) Middleware(configName string) func(http.Handler) http.Han
 			clientIP := getClientIP(r)
 
 			// Check rate limit
+			cfg := rl.configFor(configName)
 			result := rl.Check(r.Context(), clientIP, configName)
 
 			// Set rate limit headers
-			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(rl.configs[configName].Capacity))
+			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(cfg.Capacity))
 			w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(result.Remaining))
 			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(result.ResetTime.Unix(), 10))
 
@@ -355,8 +235,8 @@ func (rl *RateLimiter) Middleware(configName string) func(http.Handler) http.Han
 
 				// Create rate limit error
 				rateLimitErr := RateLimitError("rate limit exceeded").
-					WithDetail("limit", rl.configs[configName].Capacity).
-					WithDetail("window", rl.configs[configName].Window.String()).
+					WithDetail("limit", cfg.Capacity).
+					WithDetail("window", cfg.Window.String()).
 					WithDetail("retry_after", result.RetryAfter.String()).
 					WithCorrelationID(GetCorrelationID(r.Context())).
 					Build()
@@ -373,59 +253,7 @@ func (rl *RateLimiter) Middleware(configName string) func(http.Handler) http.Han
 	}
 }
 
-// AuthMiddleware returns middleware specifically for authentication endpoints
-func (rl *RateLimiter) AuthMiddleware() func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			clientIP := getClientIP(r)
-
-			// Check if IP is currently blocked due to failed auth attempts
-			if rl.IsBlocked(r.Context(), clientIP) {
-				securityErr := SecurityViolationError("too many failed authentication attempts").
-					WithDetail("ip", clientIP).
-					WithDetail("blocked_until", time.Now().Add(15*time.Minute)).
-					WithCorrelationID(GetCorrelationID(r.Context())).
-					Build()
-
-				humaErr := securityErr.ToHumaError()
-				w.WriteHeader(humaErr.GetStatus())
-				w.Write([]byte(humaErr.Error()))
-				return
-			}
-
-			// Apply general auth rate limiting
-			result := rl.Check(r.Context(), clientIP, "auth:login")
-
-			w.Header().Set("X-RateLimit-Limit", "5")
-			w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(result.Remaining))
-			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(result.ResetTime.Unix(), 10))
-
-			if !result.Allowed {
-				w.Header().Set("Retry-After", strconv.FormatInt(int64(result.RetryAfter.Seconds()), 10))
-
-				rateLimitErr := RateLimitError("authentication rate limit exceeded").
-					WithDetail("retry_after", result.RetryAfter.String()).
-					WithCorrelationID(GetCorrelationID(r.Context())).
-					Build()
-
-				humaErr := rateLimitErr.ToHumaError()
-				w.WriteHeader(humaErr.GetStatus())
-				w.Write([]byte(humaErr.Error()))
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 // Supporting types and functions
-
-// RateLimitCheck represents a single rate limit check
-type RateLimitCheck struct {
-	Key        string
-	ConfigName string
-}
 
 // getClientIP returns the address used as the rate-limit bucket key.
 //

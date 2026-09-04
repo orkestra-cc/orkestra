@@ -7,6 +7,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/orkestra/backend/internal/shared/database"
 )
 
 func TestMFAChallengeBeginAndConsume(t *testing.T) {
@@ -169,5 +174,36 @@ func TestBeginLogin_RoundTripsAudienceAndBreakGlass(t *testing.T) {
 	}
 	if got.Audience != "operator" || !got.BreakGlassUsed {
 		t.Fatalf("audience/break-glass must survive the JSON round-trip, got %+v", got)
+	}
+}
+
+// A counter key with no TTL is an orphan: the challenge expires, its id
+// space is reused, and the next holder inherits a spent budget. INCR +
+// EXPIRE as two commands leaves exactly that behind on a failure
+// between them; one script cannot.
+func TestIncrementAttempts_HealsCounterKeyWithoutTTL(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	store := NewRedisOAuthStateStore(database.NewRedisClientAdapter(client))
+	svc := NewMFAChallengeService(store)
+
+	ch, err := svc.Begin(context.Background(), "u-heal", MFAPurposeEnroll, "")
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+
+	// Simulate the orphan the two-command shape leaves behind.
+	counterKey := buildMFAAttemptsKey(ch.ID)
+	mr.Set(counterKey, "1")
+	if ttl := mr.TTL(counterKey); ttl != 0 {
+		t.Fatalf("precondition: TTL = %v, want none", ttl)
+	}
+
+	if _, err := svc.IncrementAttempts(context.Background(), ch.ID); err != nil {
+		t.Fatalf("IncrementAttempts: %v", err)
+	}
+	if mr.TTL(counterKey) <= 0 {
+		t.Fatal("the increment must stamp a TTL on an orphaned counter key")
 	}
 }

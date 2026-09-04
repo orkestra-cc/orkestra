@@ -25,7 +25,7 @@ Does not own user profile data (delegates to `iface.UserProvider`), org membersh
 | `handlers/admin_user_auth_handler.go` | Operator-side admin endpoints under `/v1/admin/users/{id}/...` — auth-methods aggregator, send-password-reset, resend-verification, oauth unlink. Inline error mapping translates the typed service errors to 404 / 409 with body codes |
 | `handlers/self_user_auth_handler.go` | Self-service endpoints under `/v1/auth/{tier}/me/...` — auth-methods aggregator, session list/revoke, OAuth self-unlink. Drives the operator-tier `/user/security` page; mirrors the admin handler's structure with self-action allowed |
 | `services/auth_service.go` | OAuth orchestration, provider linking, token pair issuance, auth-methods aggregator (`GetUserAuthMethods`), admin OAuth unlink (`AdminUnlinkOAuth`) + self-service unlink (`SelfUnlinkOAuth`) sharing a `wouldLockOutOAuthUnlink` lockout helper that counts **usable** credentials (`usableProvidersForLinks` + the `SetProviderUsability` seam), session list / revoke methods with three-step revocation (refresh tokens → session doc → Redis sid) |
-| `services/password_auth_service.go` | Password register/login/verify/reset/change, rate-limited |
+| `services/password_auth_service.go` | Password register/login/verify/reset/change; `Login`, `ChangePassword` and `ConfirmPasswordWithSecurity` all lock through the `AttemptCounter` scopes (see "Attempt counters" below) — this service has no `RateLimiter` dependency at all (H-1, Task 11) |
 | `services/password_service.go` | Argon2id hashing + policy validation |
 | `services/jwt_service.go` | RS256 JWT signing, validation, membership embedding |
 | `services/oauth_provider_factory.go` | Factory for Google / Apple / Discord / GitHub providers |
@@ -113,11 +113,11 @@ Email tokens, device-trust grants, refresh-family replay fences, and sessions ha
 5. **OAuth state service**: Redis-backed state/nonce store, 10-minute TTL.
 6. **Auth service**: the orchestrator for OAuth flows.
 7. **Password service**: argon2id hasher with HIBP policy validation (`services/password_service.go`).
-8. **Password auth service**: register/login/verify/reset/change flows, wired to the optional notification sender and a shared `RateLimiter`.
+8. **Password auth service**: register/login/verify/reset/change flows, wired to the optional notification sender and the Redis `AttemptCounter` — `Login`, `ChangePassword` and `ConfirmPasswordWithSecurity` all lock through it now. `PasswordAuthConfig` no longer carries a `RateLimiter` field — Task 11 (H-1) deleted `module.go`'s `rateLimiter` instance along with every field that threaded it through `tier_bundle.go` into this service; see "Attempt counters" below for what replaced it.
 9. **Handlers**: OAuth, password, MFA, and WebAuthn handlers, each constructed twice (operator + client) and stamped with the matching tier's cookie domain at construction time (`cfg.Auth.Cookie.OperatorDomain` / `ClientDomain`; an empty value mints the cookie without a `Domain` attribute, scoped to the minting host). The shared `Cookie.Name` + `Cookie.Secure` are still process-scoped.
 10. **Register services** under `ServiceAuthService`, `ServiceJWTService`, `ServicePasswordService`, `ServicePasswordAuthService`, plus the per-tier keys (`ServiceOperator{AuthService,PasswordAuthService,JWTService}` / `ServiceClient{...}`) that audience-aware consumers (dev token generator, future tier-specific addons) request directly.
 
-`Start` / `Stop` are implemented in `maintenance.go` — they own the refresh-token retention sweep (see "Refresh-token retention is an elected, self-draining sweep" under Key invariants). `Start` **never returns an error**: `auth` is a core module, so `ModuleRegistry.StartAll` would hand that error to `main.go`'s `log.Fatalf` and a degraded Redis would refuse to boot the platform. Every recoverable condition — no lease, no tiers, Redis unreachable — returns nil and skips maintenance; leadership is acquired inside the goroutine, after `Start` has returned. `HealthCheck` still inherits from `BaseModule`.
+`Start` / `Stop` are implemented in `maintenance.go` — they own the refresh-token retention sweep (see "Refresh-token retention is an elected, self-draining sweep" under Key invariants) **and** the `MailDispatcher`'s worker pool (see "Mail dispatcher" under Runtime configuration below), unconditionally and ahead of the sweep's own lease/tier checks. `Start` **never returns an error**: `auth` is a core module, so `ModuleRegistry.StartAll` would hand that error to `main.go`'s `log.Fatalf` and a degraded Redis would refuse to boot the platform. Every recoverable condition — no lease, no tiers, Redis unreachable — returns nil and skips maintenance; leadership is acquired inside the goroutine, after `Start` has returned. `HealthCheck` still inherits from `BaseModule`.
 
 No seeding — there are no default accounts or default tokens. The first user is created by whichever external flow gets there first (setup wizard, OAuth signup, password register).
 
@@ -130,7 +130,7 @@ OAuth provider settings are admin-managed through `ConfigSchema()` — stored in
 `auth` declares an 11-key group tree via `ConfigGroups()` — 7 top-level groups
 (`registration`, `login`, `password`, `mfa`, `oauth`, `antiabuse`, `sessions`) plus
 `oauth.google` / `oauth.apple` / `oauth.github` / `oauth.discord` nested under `oauth`
-(`Parent: "oauth"`). It is the largest configuration surface in the base — 65
+(`Parent: "oauth"`). It is the largest configuration surface in the base — 67
 `ConfigField` entries — and is the first (and so far only) module to actually render
 the settings page's sectioned rail rather than the plain-form degradation path. This is
 the shape a contributor adding a field to `ConfigSchema()` must keep valid:
@@ -182,7 +182,7 @@ ConfigService is missing).
 | Group | Keys | Effect |
 |---|---|---|
 | Registration | `registrationEnabledAdmin/Client`, `defaultRoleClient`, `allowedEmailDomainsAdmin/Client` | **`registrationEnabledAdmin/Client` both default to `false`** — a fresh install accepts no self-service signups until the super_admin opens them. `Register` returns 403 `auth.registration_disabled` / `auth.email_domain_not_allowed` per surface, and the OAuth callback's new-user branch returns `ErrOAuthSignupDisabled` (mapped to the `error=oauth_signup_disabled` callback redirect) when `registrationEnabledAdmin/Client=false` — both paths share the same umbrella kill switch. `defaultRoleClient` overrides the role assigned to a new Tier-2 signup (consulted by both the password and OAuth paths). Non-first operator-tier signups default to `guest` (lowest system role) on both paths so a fresh callback can't grant elevated privileges; the first-admin sentinel still upgrades the very first account to `super_admin`. The very first user on a fresh install bypasses the password Register's kill switch so a misconfigured flag can't lock everyone out — the OAuth path has no first-user bypass; operators bootstrap via password. |
-| Login & Sessions | `loginEnabledAdmin/Client`, `passwordLoginEnabledAdmin/Client`, `accountLockoutThreshold`, `accountLockoutDuration`, `sessionAbsoluteTTL` | `Login` returns 403 `auth.login_disabled` per surface; OAuth start endpoints (`InitiateOAuthLogin`, `HandleMobile{Google,Apple}Auth`) honour the same gate. The lockout pair is plumbed into `RateLimiter.SetAuthFailedConfig` on every login attempt — admin edits take effect on the next try. `accountLockoutDuration` (like `accessTokenTTL` / `passwordResetTokenTTL`) is parsed by `utils.ParseDuration`, so `30d` typed into the admin UI now works the same as it does in an env var. `sessionAbsoluteTTL` (ADR-0017 D1) caps total session age from login, independent of the refresh TTL's idle-timeout behaviour; resolved via `AuthPolicyService.SessionAbsoluteTTL` — see the dedicated section below. `passwordLoginEnabledAdmin/Client` (both default `true`, the password-login toggle) is read strictly via `services.StrictBool` on every password sign-in, signup and reset-request check on `/v1/auth/{tier}/*` (absent key → `true`; malformed → the read fails closed rather than silently defaulting), refusing with 403 `auth.password_login_disabled` when off, and 503 `auth.policy_unavailable` when the policy cannot be established. Which routes are gated, which stay open, and with what status, is owned by the "Password-login gate verdicts" section below — read the table there rather than a copy here. The boot-time `AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS` override rescues the **operator `Login` path and the MFA/WebAuthn completion of a challenge that login created** — never registration, never a reset, never the client surface — and a rescue emits exactly one `auth.policy.break_glass_used` audit event, from the direct full-token login OR from the winning completion, carrying audience, user UUID, session id and source IP (never a password, token or full email). A failed credential attempt under the override claims nothing. Turning either off is additionally guarded at config-write time — see the login-method invariant below — so it can never be flipped into a state with no usable sign-in method. One field pair per audience tier, unlike `sessionAbsoluteTTL` which is shared. |
+| Login & Sessions | `loginEnabledAdmin/Client`, `passwordLoginEnabledAdmin/Client`, `accountLockoutThreshold`, `accountLockoutDuration`, `ipLockoutThreshold`, `ipLockoutDuration`, `sessionAbsoluteTTL` | `Login` returns 403 `auth.login_disabled` per surface; OAuth start endpoints (`InitiateOAuthLogin`, `HandleMobile{Google,Apple}Auth`) honour the same gate. The lockout pair is the `email` scope's pair on the Redis `AttemptCounter` (see "Attempt counters" below), read per attempt against the LIVE threshold — so an admin edit takes effect on the very next attempt, including one already inside an open window. `accountLockoutDuration` (like `accessTokenTTL` / `passwordResetTokenTTL`) is parsed by `utils.ParseDuration`, so `30d` typed into the admin UI now works the same as it does in an env var. `ipLockoutThreshold` (default 100) / `ipLockoutDuration` (default 15m) are the `ip` scope's OWN pair — resolved via `AuthPolicyService.IPLockoutThreshold`/`IPLockoutDuration` — and are deliberately much looser than the account pair: an egress address is not an account, and one office or VPN NAT can be hundreds of people, so locking the address on five wrong passwords among them would take the whole office offline. `ValidateConfigSnapshot` refuses `ipLockoutThreshold` below `accountLockoutThreshold` with 422 `auth.ip_threshold_below_account` (absent keys resolve to their 5/100 defaults, which satisfy the rule) — an address that locks BEFORE the account does turns a shared egress into an oracle for which accounts exist behind it. `sessionAbsoluteTTL` (ADR-0017 D1) caps total session age from login, independent of the refresh TTL's idle-timeout behaviour; resolved via `AuthPolicyService.SessionAbsoluteTTL` — see the dedicated section below. `passwordLoginEnabledAdmin/Client` (both default `true`, the password-login toggle) is read strictly via `services.StrictBool` on every password sign-in, signup and reset-request check on `/v1/auth/{tier}/*` (absent key → `true`; malformed → the read fails closed rather than silently defaulting), refusing with 403 `auth.password_login_disabled` when off, and 503 `auth.policy_unavailable` when the policy cannot be established. Which routes are gated, which stay open, and with what status, is owned by the "Password-login gate verdicts" section below — read the table there rather than a copy here. The boot-time `AUTH_OPERATOR_PASSWORD_LOGIN_BREAK_GLASS` override rescues the **operator `Login` path and the MFA/WebAuthn completion of a challenge that login created** — never registration, never a reset, never the client surface — and a rescue emits exactly one `auth.policy.break_glass_used` audit event, from the direct full-token login OR from the winning completion, carrying audience, user UUID, session id and source IP (never a password, token or full email). A failed credential attempt under the override claims nothing. Turning either off is additionally guarded at config-write time — see the login-method invariant below — so it can never be flipped into a state with no usable sign-in method. One field pair per audience tier, unlike `sessionAbsoluteTTL` which is shared. |
 | Password Policy | `passwordMinLength`, `passwordMaxLength`, `passwordRequireUpper/Lower/Digit/Symbol`, `breachedPasswordCheck` | `passwordService.ValidatePolicy` reads the live policy on every signup / change-password / reset. Defaults match the legacy hardcoded values (10..128 chars, no complexity, HIBP on). New errors: `ErrPasswordMissing{Upper,Lower,Digit,Symbol}`. An inverted min/max range is swapped on read so a misedit can't reject every password. |
 | OAuth Providers | `{google,apple,github,discord}Enabled{Admin,Client}`, `oauthAllowSignup{Admin,Client}`, `oauthAutoLinkByEmail` | **All eight `{provider}Enabled{Admin,Client}` toggles default to `false`** — a fresh install exposes no social-login button until the super_admin both configures the provider's credentials AND flips its surface toggle on (a provider with no client ID is already filtered out regardless; the toggle is the explicit second gate). The **web** path (`/providers`, OAuth start, callback) reads the toggles strictly through `OAuthConfigResolver.OAuthWebProviderUsable` — absent → `false` (the schema default), malformed → that provider alone is unusable with a WARN naming the key — while the **mobile** ID-token endpoints keep the permissive `OAuthProviderEnabled` (absent → `true`) until the native flow gets its own decision. A disabled or incomplete provider answers 403 `auth.oauth_provider_disabled` on start; an unreadable auth document answers 503 `auth.policy_unavailable`. Credentials still live one-set-per-provider in the existing tabs. Phase 9: `oauthAllowSignup{Admin,Client}` (default true) is the OAuth-specific signup gate — checked **in addition to** `registrationEnabledAdmin/Client` on the Registration tab (both must allow). When either is off, the OAuth callback returns `ErrOAuthSignupDisabled` and redirects to `/auth/callback?success=false&error=oauth_signup_disabled` instead of creating the user. Phase 10: `oauthAutoLinkByEmail` (default true) gates auto-attaching a provider to an existing account whose email matches the IdP's **verified** address; read strictly by `OAuthAutoLinkByEmailEnabled` (absent → true; malformed/unreadable → 503 `auth.policy_unavailable` before any lookup). When off, the callback returns `ErrOAuthLinkDisabled` (`error=oauth_link_disabled`) and the user must initiate linking from authenticated settings. |
 | MFA | `mfaEnabled`, `mfaEnrollmentGraceDays`, `mfaRequiredForRoles`, `recoveryCodesCount` | `mfaEnabled` **defaults to `false`** — a fresh install's first account is `super_admin` (privileged), so seeding it `true` would block that operator from the config writes (e.g. SMTP) needed to finish setup with an MFA prompt for a factor they never enrolled. Operators turn it on **after** enrolling a second factor; otherwise privileged users hit the enrollment grace window on their next login. `mfaEnabled=false` short-circuits `MFARequired` to false (existing enrollments are not deleted; voluntary verification still works). `mfaEnrollmentGraceDays` overrides the legacy 7-day `MFAEnrollmentGraceWindow` constant — new value takes effect on the next login. Phase 9: `mfaRequiredForRoles` (stringList, lowercased on read) replaces the built-in privileged-role list when set. Empty falls back to the built-in (super_admin, administrator, org_owner, org_admin). The kill switch wins over both the built-in and the configured list. Phase 10: `recoveryCodesCount` overrides the legacy `BackupCodeCount` constant when in the safe range 1..50; out-of-range falls back to the legacy default 10. Read at enrollment-confirm time so admin edits take effect on the next user's enrollment. |
@@ -330,7 +330,7 @@ not make.
 
 | Route | Verdict | Accessor / notes |
 |---|---|---|
-| `POST /v1/auth/{tier}/login` | **403** `auth.password_login_disabled` | `PasswordLoginDecision`. Sits after the `loginEnabledAdmin/Client` kill switch and **before** `GetUserForAuth`, so lockout counters, the rate limiter and the audit trail see nothing and every email — known or unknown — gets the identical answer. Only the operator surface can be rescued |
+| `POST /v1/auth/{tier}/login` | **403** `auth.password_login_disabled` | `PasswordLoginDecision`. Sits after the `loginEnabledAdmin/Client` kill switch and **before** the lockout peek and `GetUserForAuth`, so the attempt counters and the audit trail see nothing and every email — known or unknown — gets the identical answer. Only the operator surface can be rescued |
 | `POST /v1/auth/{tier}/register` | **403** | Strict `PasswordLoginEnabled` — break-glass never opens registration. The **operator-only** first-user branch and `RegisterInitialAdmin` (setup wizard) are the two bootstrap exceptions: they are evaluated before the gate and read no policy at all. The client tier has no first-user bypass |
 | `POST /v1/auth/{tier}/forgot-password` | **403** | Strict `PasswordLoginEnabled`, evaluated **before** the user lookup, so no reset token is minted and the outcome cannot depend on account state. `ErrPasswordLoginDisabled` and `ErrAuthPolicyUnavailable` are the ONLY errors this service method propagates — every account-specific outcome stays swallowed behind the generic success body, so it is not an enumeration oracle. `PasswordAuthHandler.ForgotPassword` enforces the same contract independently: it maps those two sentinels and lets **any** other error fall through to the generic success body (logged at warn, never with the address), so a future service-side error cannot answer differently for some addresses |
 | `POST /v1/auth/{tier}/mfa/login/verify`, `POST /v1/auth/{tier}/mfa/webauthn/login/finish` | **403** when the challenge was password-sourced | `PasswordLoginDecision`, re-evaluated **before** the factor is verified. See "Completion re-check" under HTTP endpoints for the four outcomes (untouched / 403+consume / 503+retain / 401 on an empty audience) |
@@ -369,6 +369,244 @@ challenge's stamped `BreakGlassUsed` was a rescue. The row carries the
 audience, the user UUID, the session id and the source IP — never a
 password, a token or a full email. A failed credential attempt under the
 override claims nothing.
+
+#### Attempt counters (login lockout)
+
+`services/attempt_counter.go` is the module's single "N events per
+window" primitive, and `Login` is its first consumer. Two scopes, two
+independent admin-managed pairs:
+
+| Scope | Key | Limit pair | Built by |
+|---|---|---|---|
+| `email` | `auth:attempts:email:<audience>:<normalised email>` | `accountLockoutThreshold` / `accountLockoutDuration` (5 / 15m) | `AttemptKeyEmail(audience, email)`, `accountLimit(ctx)` |
+| `ip` | `auth:attempts:ip:<ip>` | `ipLockoutThreshold` / `ipLockoutDuration` (100 / 15m) | `AttemptKeyIP(ip)`, `addressLimit(ctx)` |
+
+- **The address pair is separate and an order of magnitude looser, on
+  purpose.** An egress address is not an account: a corporate NAT or VPN
+  carries hundreds of people, so locking the address on five wrong
+  passwords among them would take the whole office offline. Six failures
+  across six accounts from one office lock neither the accounts nor the
+  address. `ValidateConfigSnapshot` additionally refuses an
+  `ipLockoutThreshold` **below** `accountLockoutThreshold` — an address
+  that locks first turns a shared egress into an account-existence
+  oracle. An unresolvable client IP produces an **empty key**, which the
+  counter skips entirely rather than sharing one bucket among every such
+  caller.
+- **Both the peek and the increment run the same one-round-trip Lua
+  script** (`attemptScript`): count, PTTL and a conditional PEXPIRE
+  together, so a key can never be left without a TTL — the failure mode
+  of the two-command INCR-then-EXPIRE shape, which for a lockout counter
+  is a permanent 429 until someone runs `DEL` by hand. The **threshold
+  is not in the script**: `Verdict.Locked` is computed Go-side against
+  the pair read on *this* attempt, so lowering `accountLockoutThreshold`
+  mid-window locks immediately and raising it unlocks, with no capacity
+  frozen into the key.
+- **Order inside `Login`, and why it is the order.** `peekLockout`
+  (`Locked` on both scopes, **no increment**) runs *before*
+  `GetUserForAuth`; a locked scope answers `LockedAfter(retryAfter)` →
+  429 `auth.too_many_attempts` with `Retry-After` and records nothing,
+  because a lock that extends itself on every probe never expires under
+  a running attack. `recordLoginFailure` charges both scopes only on a
+  **real** failure. Every non-success branch *after* the peek that does
+  not already run a real verify — counter lock, unknown email, inactive
+  account, service principal, no password hash, durable lock — pays one
+  `dummyVerify` argon2 cost; the wrong-password branch pays the genuine
+  `Verify` against the stored hash. So no branch is measurably cheaper
+  than a wrong password. (The gates that run *before* the peek — empty
+  input, `loginEnabledAdmin/Client`, the password-method gate, the geo
+  block — pay nothing on purpose: they must leave counters and audit
+  trail untouched.) With the counter available and a burst of guesses, a
+  known and an unknown email therefore lock at the same attempt, in the
+  same window, with the same status. A run slow enough that no window
+  reaches the threshold is the exception, and it is M-7's residual, not
+  a second hole: only the known account has a cumulative
+  `FailedLoginCount` to lock on — see the two bullets below.
+- **They fail OPEN to the durable lock.** A `Locked` error reads as *not
+  locked* and a `RecordFailure` error yields the zero verdict, so a
+  store outage leaves `User.FailedLoginCount+1 >= LockoutThreshold` — a
+  rule `recordVerifyFailure` evaluates on **every** failure, not only
+  this one (see the durable-lock bullet below) — as the only rule still
+  standing. A fail-closed counter would turn a Redis outage into a
+  platform-wide login outage. The consequence to know: with the counter
+  down, an **unknown** email is answered 401 throughout — there is no
+  document to count against — while an existing account is still capped.
+- **⚠️ M-7 is narrowed, not closed: the durable lock outlives the
+  counter, and the gap is an account-existence oracle.** The counter
+  window is **fixed**, not sliding — `attemptScript` stamps the TTL on
+  the FIRST increment and never extends it — so the email key dies at
+  `t_first + window`. `User.LockedUntil` is stamped on the
+  **threshold-th** failure, so it dies at `t_threshold + window`. Since
+  `t_threshold >= t_first` the durable lock always outlives the counter
+  by exactly the interval the attacker spent reaching the threshold, and
+  that interval is **attacker-scheduled**:
+
+  | When | The attacker does | State |
+  |---|---|---|
+  | `t=0` | 4 wrong passwords for `victim@x.com` | email key expires at `t=15m` |
+  | `t=14m` | the 5th | counter locks; `LockedUntil = t=29m` |
+  | `t=15m01s` | one probe | counter key gone → the peek passes → `GetUserForAuth` **succeeds** → the durable-lock branch answers **429** |
+
+  The identical probe for an address with no account passes the peek,
+  fails the lookup and answers **401**. For ~14 minutes a single request
+  distinguishes the two — and because the durable-lock branch
+  deliberately records nothing (a lock must not extend itself), probing
+  never burns the window down. Every other property in this section
+  holds; this is the residual.
+
+  The same gap has a **second shape with no expiry in it**: an attacker
+  pacing `threshold-1` guesses per window never locks the counter, but
+  the cumulative `FailedLoginCount` rule (durable-lock bullet below)
+  still locks the account, so the 429/401 split opens the same way. Both
+  shapes are the one hole — a live `LockedUntil` reachable with no
+  counter lock in front of it — and both close, or not, with the same
+  spec decision.
+
+  It is **known and deliberately unfixed here.** The obvious fix — make
+  a live `LockedUntil` fall through to the same answer an unknown email
+  gets — changes the D9 wire contract for a legitimately locked-out
+  user from 429 `auth.too_many_attempts` + `Retry-After` to a bare 401,
+  which reaches both SPAs, the docs and the sibling PRs. In this project
+  a contract change goes into the spec before execution, so it is
+  escalated to the spec owner rather than decided in an implementation
+  commit. Do not "tidy" the durable-lock branch into silence without
+  that decision, and do not read the rest of this section as claiming
+  the oracle is gone.
+- **The durable lock ORs with the counter, and an expired one is cleared
+  *before* the verify.** `User.LockedUntil` is stamped from the same
+  `LockoutThreshold`/`LockoutDuration` pair, so with a healthy Redis and
+  a burst of guesses the two lock on the same attempt — which is what
+  keeps a known and an unknown email indistinguishable there. But
+  `recordVerifyFailure` evaluates **both** rules on every failure and
+  locks on either: the counter window is fixed, so on its own it only
+  catches a burst, and an attacker pacing `threshold-1` guesses per
+  window would otherwise run forever. The cumulative `FailedLoginCount`
+  is what ends that low-and-slow run, so it is a live rule and not a
+  counter-outage fallback — demoting it also leaves the count itself
+  growing unbounded on an attacked account, so that the first attempt
+  after a Redis blip locks it instantly. A `LockedUntil` already in the
+  past runs `ClearFailedLogins` and zeroes the in-memory copy before the
+  password is verified — otherwise the first wrong password after a
+  lockout expires compares a stale `FailedLoginCount` against the
+  threshold and re-locks the account immediately. That heal is also what
+  makes the unconditional cumulative check *correct*: an account gets a
+  fresh budget after each lockout rather than re-locking on every later
+  failure for the rest of its life. `durableLockOrClear` (the
+  peek-and-heal half) and
+  `recordVerifyFailure` (the record-and-mirror half) are the two shared
+  helpers behind this — `Login`, `ChangePassword` and
+  `ConfirmPasswordWithSecurity` all call the same two, rather than each
+  carrying its own copy. They were extracted after a review round found
+  `ChangePassword` and `ConfirmPasswordWithSecurity` had been given
+  copies that omitted the expired-lock heal — a caller with the durable
+  rule as its only remaining protection (counter store down) could
+  re-lock a legitimate user off a stale count on their very first
+  attempt after the lock's natural expiry. One shared implementation is
+  the guard against that drifting a third time.
+- **A success resets the EMAIL scope only.** `resetLoginFailures` deletes
+  the email key; the address key is deliberately left alone, so one
+  correct login cannot launder a credential-stuffing run coming from the
+  same address.
+- **`Login`, `ChangePassword`, `ConfirmPasswordWithSecurity`,
+  `ForgotPassword` and `ResendVerification` are the consumers so far.**
+  `ChangePassword` and `ConfirmPasswordWithSecurity` share `Login`'s own
+  `email`/`ip` pair verbatim — same `peekLockout`/`recordLoginFailure`/
+  `resetLoginFailures` calls, same durable-lock mirror — so a lock
+  earned on any one of the three is honoured by the other two (spec D6,
+  closes M-8: both used to verify a password with no throttle and no
+  audit trail at all). `ForgotPassword` and `ResendVerification` each
+  moved onto their OWN pair of scopes — `reset-email`/`reset-ip` and
+  `verify-email`/`verify-ip` (`AttemptKeyResetEmail`/`AttemptKeyResetIP`/
+  `AttemptKeyVerifyEmail`/`AttemptKeyVerifyIP`, the `ResetRequestsPer*`/
+  `VerifyRequestsPer*` limits) — via the shared
+  `overRequestCap`/`chargeRequestCap` helpers next to `peekLockout`:
+  peeked without consuming, and charged BEFORE the user lookup so a
+  known and an unknown address cost the same. Neither shares a scope
+  with `Login` or with the other. `ResendVerification` used to
+  pre-check `IsBlocked` on the LOGIN scopes, and `IsBlocked`'s
+  underlying `Check` consumes a token on every call — so an anonymous
+  caller could pin any address at 429 indefinitely without ever failing
+  an authentication (M-6); a verification request is not a login
+  failure and must never be able to lock one. `ForgotPassword` used to
+  invalidate the previous reset token on every call with no throttle,
+  letting an attacker destroy a victim's live reset link at will (M-5);
+  over the cap it now mints no token and invalidates nothing, behind
+  the same generic success. `ForgotPassword`'s send is handed to the
+  bounded `MailDispatcher` (D5) instead of sent inline, so the response
+  no longer waits on the relay; `ResendVerification` still sends
+  synchronously through `sendVerificationEmail` (see that method's own
+  doc comment). `MFAVerifyLimit` for the authenticated MFA-verify cap is
+  declared in `attempt_counter.go` but not yet wired to a caller
+  (deferred to PR B) — MFA verify has no request-cap throttle today; it
+  was never on the shared `RateLimiter` either, whose auth-facing
+  surface is gone as of Task 11 (H-1). `MemoryAttemptCounter`
+  is the no-Redis stand-in and ships in a non-`_test.go` file so handler
+  tests in other packages can use it without a miniredis.
+
+#### Mail dispatcher (transactional auth mail)
+
+`services/mail_dispatcher.go`'s `MailDispatcher` (spec D5) is what
+`ForgotPassword` hands its password-reset send to instead of sending it
+inline — see "Attempt counters" above for why that matters to the
+request-cap timing. It is a bounded worker pool, not a queue with
+unlimited backpressure, and every one of its three bounds is a named
+constant in that file:
+
+- **Memory** — `MailQueueCapacity` (256) buffered jobs, no more.
+- **Concurrency** — `MailWorkers` (16) goroutines against the SMTP
+  relay, started fresh by every `Start()`.
+- **Request latency** — `Enqueue` never blocks and never spawns a
+  goroutine of its own. The whole check-then-send runs under one read
+  lock (`sync.RWMutex`), which is what keeps a concurrent `Stop` from
+  racing it onto a closed channel — see the type's doc comment for the
+  race this shape closes. This bound is a security property as much as
+  a performance one: `ForgotPassword` must cost the same wall-clock time
+  whether or not the address exists, and a blocking acquire would
+  reopen that gap for known addresses exactly when the queue is
+  contended.
+
+**A full queue, or a stopped dispatcher, DROPS the job — it never
+blocks and never errors back to the caller.** `Enqueue` returns `bool`
+only for tests; production callers do not branch on it, because a drop
+is a lost password-reset email the user recovers by asking again inside
+the D2 request caps (3 per address per 15m), not a failure the request
+needs to answer for. Every drop increments
+`orkestra_auth_mail_dropped_total`, labelled by template id (currently
+only `auth.reset_password` is ever enqueued; `auth.verify_email` and
+`auth.mfa_factor_added` share the closed label set for when a future
+caller adopts the same dispatcher), and logs one throttled WARN
+(`mailDropWarningInterval`, one line a minute) naming the reason
+(`queue_full` or `dispatcher_stopped`) and the request id — never the
+recipient address, which would make the log itself an enumeration
+oracle.
+
+**Operational alert:** `orkestra_auth_mail_dropped_total` moving at all
+means the queue or the worker count is undersized for the current send
+rate — alert on any sustained non-zero rate, not just on a threshold,
+since a healthy dispatcher drops nothing. Pair it with SMTP-relay
+latency/error metrics from the `notification` module: a slow or failing
+relay is the usual reason 16 workers fall behind and the queue fills.
+
+**Shutdown drains, it does not discard outright.** `Stop(ctx)` closes
+the current generation's queue and waits up to `mailDrainTimeout` (10s),
+or until `ctx` is done, for in-flight and already-queued jobs to finish;
+whichever hits first, it then marks the dispatcher stopped. A timeout
+or a cancelled context logs a WARN and abandons whatever is still
+queued — same recovery path as a drop, the D2 caps. Each detached send
+itself runs on `context.WithoutCancel(context.Background())` (the
+request that queued it is long gone by the time a worker picks it up)
+bounded by its own `mailJobTimeout` (60s), with a per-job `recover()` so
+one panicking send cannot take a worker down.
+
+**Restartable across a module disable/enable cycle.** `started` means
+"running since the last `Start`", not "`Start` has ever been called":
+`AuthModule.Start`/`Stop` (`maintenance.go`) call
+`m.mailDispatcher.Start()`/`Stop(ctx)` unconditionally — ahead of the
+refresh-token sweep's own lease/tier checks, since mail serves live
+requests regardless of whether this replica sweeps anything — so the
+registry's hot `StartModule`/`StopModule` cycle (`/admin/modules`)
+actually restarts delivery rather than leaving it off after the first
+disable: a `Start` after a `Stop` launches a fresh generation (a new
+queue, a new worker pool), never resuming the abandoned one.
 
 #### Absolute session cap (ADR-0017 D1)
 
@@ -811,7 +1049,7 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 | GET | `/v1/auth/client/oauth/complete` | **Client host mux only.** The relay endpoint that completes a client-tier web login: takes the one-shot relay record, requires the state cookie this host set at start, sets the client refresh cookie, redirects to the client SPA. Not in OpenAPI |
 | GET | `/v1/auth/session` | Poll for session after OAuth redirect finishes |
 | POST | `/v1/auth/{tier}/register` | Email+password signup. Refuses with 403 `auth.password_login_disabled` when `passwordLoginEnabled{Admin,Client}` is off for **this** surface (strict read; the operator break-glass is invisible here — it never opens registration), and 503 `auth.policy_unavailable` when the policy cannot be established. The very first operator account and `RegisterInitialAdmin` (setup wizard) are the two bootstrap exceptions and bypass the method gate entirely, with no policy read at all |
-| POST | `/v1/auth/{tier}/login` | Email+password login. Refuses with 403 `auth.password_login_disabled` per surface, and 503 `auth.policy_unavailable` on an unestablishable policy (a nil policy is an outage, never a legacy allow). The gate sits **after** the `loginEnabledAdmin/Client` kill switch and **before** `GetUserForAuth`, so lockout counters, the rate limiter and the audit trail see nothing and every email — known or unknown — gets the identical answer. Operator-surface only, the boot-time break-glass converts a stored `false` or a failed read into a rescued login; a direct full-token success then emits the `auth.policy.break_glass_used` audit event (audience, user UUID, session id, source IP — never an email) |
+| POST | `/v1/auth/{tier}/login` | Email+password login. Refuses with 403 `auth.password_login_disabled` per surface, and 503 `auth.policy_unavailable` on an unestablishable policy (a nil policy is an outage, never a legacy allow). The gate sits **after** the `loginEnabledAdmin/Client` kill switch and **before** the lockout peek and `GetUserForAuth`, so the attempt counters and the audit trail see nothing and every email — known or unknown — gets the identical answer. Operator-surface only, the boot-time break-glass converts a stored `false` or a failed read into a rescued login; a direct full-token success then emits the `auth.policy.break_glass_used` audit event (audience, user UUID, session id, source IP — never an email) |
 | POST | `/v1/auth/{tier}/verify-email` | Consume a verification token |
 | POST | `/v1/auth/{tier}/verify-email/resend` | Request a new verification email |
 | POST | `/v1/auth/{tier}/forgot-password` | Send a password reset email. Gated the same strict way (403 `auth.password_login_disabled` / 503 `auth.policy_unavailable`), evaluated **before** the user lookup so the outcome cannot depend on account state, and no reset token is minted. Those two policy errors are the ONLY ones the service returns — every account-specific outcome stays swallowed behind the unchanged generic success body, so propagating them is not an enumeration oracle |
@@ -820,7 +1058,7 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 | POST | `/v1/auth/{tier}/refresh` | Refresh using a header-supplied refresh token |
 | POST | `/v1/auth/{tier}/refresh-cookie` | Refresh using the `Cookie:` header |
 | POST | `/v1/auth/{tier}/logout` | Revoke refresh cookie, invalidate session. Public route — identity comes from `resolveLogoutIdentity`, which requires a **signature-verified** refresh cookie whenever the request context is anonymous (see Key invariants) |
-| POST | `/v1/auth/token` | OAuth2 client-credentials grant for service accounts (machine principals). Un-prefixed — operator-tier only, no client-tier equivalent. `{grantType: client_credentials, clientId, clientSecret}` → `{accessToken, tokenType: Bearer, expiresIn}`, no refresh token. Rate-limited like login. See "Service accounts" below |
+| POST | `/v1/auth/token` | OAuth2 client-credentials grant for service accounts (machine principals). Un-prefixed — operator-tier only, no client-tier equivalent. `{grantType: client_credentials, clientId, clientSecret}` → `{accessToken, tokenType: Bearer, expiresIn}`, no refresh token. Lockout-capped by the same `AttemptCounter` login uses, on the `client`/`ip` scopes (spec §4.1 D7). See "Service accounts" below |
 
 ### Protected (bearer access token required)
 
@@ -899,7 +1137,7 @@ And a public endpoint that completes a login after a partial response:
 
   The branching is fed by `SetMFAEnrollmentLookup` (per-tier `MFAFactorRepository.FindByUserAndType` for TOTP + WebAuthn), `SetStepUpPolicy` (the live `*AuthPolicyService`), and `SetUserProvider` (so a stale role on the JWT doesn't shadow a fresh policy check). Wired in `cmd/server/main.go` post-InitAll. Any **enrollment-lookup** error fails closed to the legacy `step_up_required` path — a degraded Mongo must never silently weaken the gate; a **policy** error fails closed to the 503 above. `middleware.StepUpPolicy.PasswordReauthAllowed(ctx, audience string)` is the seam (`*AuthPolicyService.PasswordReauthAllowed` adapts strict `PasswordLoginEnabled` onto the middleware's string audience); its doc comment on the interface is the contract — there is no `middleware/CLAUDE.md`. The operator break-glass is **invisible** to it: a temporary override is not a durable login method, so it must not keep the password modal on offer.
 
-- **Password reconfirm endpoint** — `POST /v1/auth/{tier}/me/password-confirm` lives on `PasswordAuthHandler` (`handlers/password_handler.go`) and is mounted under `RequireGlobal()` only (no step-up gate; it's the bypass). The service-layer `PasswordAuthService.ConfirmPassword` refuses with `ErrPasswordConfirmUnavailable` → 409 `auth.password_confirm_unavailable` when the user has no password (pure-OAuth account), when the per-surface password method is disabled (`passwordLoginEnabled{Admin,Client}` = false — a credential the surface refuses cannot prove presence either, so it takes the *same* 409 branch as "no password hash"), or when the user has any MFA factor enrolled (defensive — a crafted direct call must not be able to downgrade an MFA-required user). The method-policy read is **strict**: the operator break-glass is invisible here, and a policy that cannot be read returns `ErrAuthPolicyUnavailable` → 503 `auth.policy_unavailable` via `mapPasswordError` rather than guessing. A `PasswordAuthService` built without `Policy`+`Audience` therefore 503s this endpoint — production wiring always supplies both, and a consumer-package test can use `services.NewAuthPolicyServiceForTest`. Audit: emits `auth.password.reconfirmed` on success.
+- **Password reconfirm endpoint** — `POST /v1/auth/{tier}/me/password-confirm` lives on `PasswordAuthHandler` (`handlers/password_handler.go`) and is mounted under `RequireGlobal()` only (no step-up gate; it's the bypass). The service-layer `PasswordAuthService.ConfirmPassword` refuses with `ErrPasswordConfirmUnavailable` → 409 `auth.password_confirm_unavailable` when the user has no password (pure-OAuth account), when the per-surface password method is disabled (`passwordLoginEnabled{Admin,Client}` = false — a credential the surface refuses cannot prove presence either, so it takes the *same* 409 branch as "no password hash"), or when the user has any MFA factor enrolled (defensive — a crafted direct call must not be able to downgrade an MFA-required user). The method-policy read is **strict**: the operator break-glass is invisible here, and a policy that cannot be read returns `ErrAuthPolicyUnavailable` → 503 `auth.policy_unavailable` via `mapPasswordError` rather than guessing. A `PasswordAuthService` built without `Policy`+`Audience` therefore 503s this endpoint — production wiring always supplies both, and a consumer-package test can use `services.NewAuthPolicyServiceForTest`. Like `Login` and `ChangePassword`, the password verify itself is now behind the `email`/`ip` attempt-counter lockout (spec D6, M-8) — a locked scope answers `LockedAfter` before the verify runs, and a wrong password charges the counters, mirrors the durable `LockedUntil` lock, and emits `auth.password.reconfirm_failed`. Audit: emits `auth.password.reconfirmed` on success (and resets the email scope), `auth.password.reconfirm_failed` on a wrong password.
 - **Session revocation list** — Redis-backed set at `auth:revoked:session:<sid>` checked on every authenticated request by both `AuthMiddleware` and the lightweight public-key-only `JWTValidator` (both satisfy `module.RoleMiddleware`). Populated on logout + change-password; payload is the reason string for operator debugging. Entries auto-expire after a **fixed** 24h + 1min — the maximum access-token lifetime the platform permits, plus clock skew — never a value derived from the live `accessTokenTTL`. Sizing the entry from the current policy value strands tokens on both sides of a policy change: raising the TTL leaves long tokens uncovered, lowering it expires the entry while tokens minted under the old value are still valid. `NewJWTService` clamps every effective access-token lifetime to 24h so the window is always sufficient. ADR-0017 D5. Fails open on Redis errors — a degraded Redis must not lock every user out. Logout invalidates the current sid only; `allDevices=true` still relies on refresh-token revocation (per-user-generation counter is a follow-up).
 - **Grace countdown on `/v1/auth/me/mfa`** — response now carries `requiresMfa` + `graceExpiresAt` computed from the user record + JWT memberships, so the frontend banner/countdown can render without relying on the one-shot login response.
 - **WebAuthn / passkeys** — second-factor enrollment under `services/webauthn_service.go` + `handlers/webauthn_handler.go`. Library: `github.com/go-webauthn/webauthn`. Configuration: `WEBAUTHN_RP_ID` (eTLD+1 host, no scheme/port) + `WEBAUTHN_RP_ORIGINS` (comma-separated full URLs). Both env vars are optional — if either is missing the module derives them from `FRONTEND_URL` (eg. `http://localhost:8080` → `rpId=localhost`, `origins=[http://localhost:8080]`); if neither resolves, WebAuthn is disabled and the endpoints don't mount. Credentials live as an embedded `webauthnCredentials[]` array on the same `*_mfa_factors` row (one row per user with `type=webauthn`); the (userUuid,type) unique index naturally allows a user to enroll both TOTP and passkeys. Login/step-up via passkey sets `amr=[..., "otp", "webauthn"]` so existing step-up middleware accepts the proof. The partial login response carries `webauthnAvailable: bool` so the verify page can offer the passkey button alongside the code field.
@@ -1053,7 +1291,7 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 - **Session bootstrap is read-only — rotation lives only in the explicit refresh endpoints (`/refresh-cookie`, `/refresh`).** `GET /v1/auth/session` (handler: `GetSessionHTTP`) MUST NOT rotate the refresh row. It calls `AuthService.MintAccessTokenFromRefresh` which validates the row (non-expired, non-revoked — any reason including `rotated` disqualifies) and mints an access token without touching the refresh row's state. The TokenResponse it returns carries an empty `RefreshToken`; the caller's existing cookie stays authoritative. The split exists because the SPA had TWO independent refresh paths (`useGetSessionQuery` → `/session` AND `baseQueryWithRetry`'s 401-handler → `/refresh-cookie`) and both used to rotate. When they fired concurrently (typical on app boot / tab focus / 401 race) one would win the rotation and the other would land with a now-rotated cookie, tripping replay detection on the legitimate session holder. Keeping rotation confined to the explicit refresh endpoints — and out of `/session` — means any number of `/session` calls can coexist idempotently. The `pickRefreshCandidate` helper is still useful here for the multi-cookie-from-domain-split case, but the rotated-fallback path is intentionally unused in `GetSessionHTTP` — read-only mint never fires replay. ⚠️ "Read-only" means **does not rotate**, which is the whole anti-replay claim — it does **not** mean side-effect-free. `MintAccessTokenFromRefresh` also enforces the absolute session cap (see "A session has a maximum age" below), and reaching the cap is a logout: a `/session` call can revoke the session's refresh rows, flip the session document inactive and denylist the sid. That is deliberate — a bootstrap-only client must not be able to hold a session open past the cap — and it is still not a rotation, so no `/session` call can ever invalidate a cookie another tab is about to present.
 - **`RequireAuth` is bearer-only — it never reads the refresh cookie, and rotation happens only through the explicit refresh endpoints (ADR-0020, #317).** `shared/middleware/auth.go` used to carry an *implicit* third refresh path: on any protected request whose bearer was missing/expired/invalid it called `RefreshTokensWithRiskAssessment`, wrote the successor cookie and returned the minted token in `X-New-Access-Token` / `X-Token-Refreshed`. It was not serialised, no client consumed those headers on ordinary responses (`frontend-admin` withholds an expired bearer, so *every* request after the access TTL rotated again), and a parallel burst had one winner and N−1 generic 401s whose `/refresh-cookie` retries could meet a superseded cookie — operators were signed out hours into a session. The branch, `SetAuthService` and `NewAuthMiddlewareWithConfig` are gone; the middleware answers a missing/expired/invalid bearer with a plain 401 and clients recover through `401 → refresh-cookie → retry`. `X-Token-Refreshed` left the contract; `X-New-Access-Token` survives **only** as `POST /v1/auth/{tier}/refresh`'s response channel (`RefreshTokensWithHeaderHTTP`) and stays CORS-exposed for it. `require_auth_test.go`'s three `*_NeverRotates` tests (cookie-only, expired bearer + cookie, tampered bearer + cookie) pin the *observable* contract — no `Set-Cookie`, no `X-New-Access-Token` — for a request built through the bearer-only middleware; they cannot by themselves catch the branch coming back, since a test built via `NewAuthMiddleware` never has a seam to wire in the first place. Two structural tests in the same file cover what the behavioural tests cannot, and each covers a different reintroduction shape — neither alone is the whole guard. `TestAuthMiddleware_Fields_CannotReintroduceCookieRotation` reflects over `AuthMiddleware`'s field names and fails the moment one is added or removed, so a resurrected `authService`/`cookieName`/`config` field trips it before any behaviour is written against it — but it says nothing about a rewrite that adds no field. `TestAuthGo_ContainsNoCookieRead` closes that specific gap: it parses `auth.go` with `go/ast` and fails if the file contains any `.Cookie(`/`.Cookies()` call, catching a **mint-only** rewrite — reading the refresh cookie and minting from the already-injected `jwtService` needs no new struct field, so the field-diff test alone would stay green while it happened. It is deliberately scoped to `auth.go`, not the whole package, because `device.go` legitimately reads the device-id cookie; the residual gap is a helper placed in a *different* file of the package, which neither test would catch — reviewers still carry that. Do **not** reintroduce a cookie branch here, not even a mint-only one: it keeps cookie-only auth on mutating routes and hides a refresh-row + user read behind every request from a client that ignores the header.
 - **Logout identity must be signature-verified.** `POST /v1/auth/{tier}/logout` is mounted on the **public** router (`module.go` → `ri.Router`), so no auth middleware ever populates `ctx["userUUID"]` and the refresh cookie is the only identity source for the overwhelming majority of calls. `handlers/auth_handler.go::resolveLogoutIdentity` is the single place that resolves it, and it uses `jwtService.ValidateRefreshToken` — **never** `ParseUnverifiedClaims`. The unverified parse is legitimate in the audience gate (cheap routing ahead of a real verifier) but catastrophic here: there is no verifier downstream, so an unverified claim would let an anonymous caller hand-roll a JWT naming any `userUUID` and drive `TerminateAllSessionsByUUID` against it (`allDevices=true`) — an unauthenticated forced-logout of any user whose UUID is known. The `deviceId` used for single-session termination comes from the same verified claims; the request body's `refreshToken` field is not consulted (no client populates it, and a body-supplied token carries no proof of ownership). An unresolvable request still clears the cookie and returns 200 — logout is idempotent and must not become an account-existence oracle. Regression tests: `handlers/logout_identity_test.go`.
-- **Client IP is never read from a request header in this module.** `utils.GetClientIP(r)` returns `r.RemoteAddr`, which `shared/middleware.RealIP` has already resolved under the deployment's trusted-proxy policy. This matters here because the login flow uses the IP for the rate-limit / lockout bucket (`"ip:"+in.IP`), the geo-block (`CountryBlocked`), the risk score, and every audit row — all of which were caller-controlled while `GetClientIP` trusted `X-Forwarded-For`. See [backend/CLAUDE.md](../../../CLAUDE.md#client-ip-resolution-trusted-proxies) for the policy and its env vars.
+- **Client IP is never read from a request header in this module.** `utils.GetClientIP(r)` returns `r.RemoteAddr`, which `shared/middleware.RealIP` has already resolved under the deployment's trusted-proxy policy. This matters here because the login flow uses the IP for the `ip` lockout scope (`AttemptKeyIP(in.IP)`), the geo-block (`CountryBlocked`), the risk score, and every audit row — all of which were caller-controlled while `GetClientIP` trusted `X-Forwarded-For`. See [backend/CLAUDE.md](../../../CLAUDE.md#client-ip-resolution-trusted-proxies) for the policy and its env vars.
 - **A deactivated account cannot refresh.** `RefreshTokensWithRiskAssessment` and `MintAccessTokenFromRefresh` both reject `user.IsActive == false` with `ErrInvalidRefreshToken`. `Login` has always checked this, but login is the one path an already-signed-in attacker never revisits — without the refresh-side check, disabling an account (offboarding, compromise response, the `inactiveAccountAutoDisableDays` sweep) had no effect until the refresh row expired, up to 7 days later. The user module additionally calls `iface.SessionTerminator` on deactivate/delete so existing sessions die immediately rather than after one access-token TTL; auth satisfies that interface via `AuthService.TerminateAllSessionsByUUID` under `ServiceAuthService` / `ServiceClientAuthService`.
 - **A credential change must close all four pathways.** `revokeSessionsAfterCredentialChange` (`password_auth_service.go`) is the single implementation behind both password flows. It revokes **refresh tokens**, terminates **session docs**, pushes every **sid into the Redis revocation set** (so access tokens already in flight die on their next request), and drops **device-trust grants** (so the holder of the old password stops skipping the MFA prompt). Closing only some of those is close to worthless: before this, `ResetPassword` — the recovery flow for a *compromised* account — revoked refresh tokens alone, leaving the attacker's access token, session doc, and MFA-skip grant intact. `ChangePassword` passes `CurrentSID` so the caller's own session survives (they just proved the current password; evicting them achieves nothing) and every other device is signed out; `ResetPassword` passes `""` so nothing is spared and a by-user refresh sweep runs on top. Still gated by `revokeSessionsOnPasswordChange` for the change path. ⚠️ The pre-fix behaviour was the exact inverse — the handler revoked the **caller's own** sid and left every other device running. Regression tests: `services/password_credential_revocation_test.go`.
 - **Device identity is server-minted, never header-derived.** `deviceId` used to be MD5(User-Agent | IP | Accept-* headers) for every browser — all caller-chosen inputs, so anyone replaying a victim's header signature *was* the victim's device as far as this system was concerned. It is now 32 random bytes issued in an HttpOnly `orkestra_did` cookie (`shared/middleware/device.go`), with `X-Device-ID` still honoured for native apps and the query-string source removed. The header-derived value survives only as `Fingerprint` — a **risk signal**, now SHA-256, never an identity and never the thing a trust decision is keyed on. ⚠️ **Device trust is currently unreachable end-to-end**: grants are only created from an OAuth-originated login challenge (`MarkTrusted` refuses an empty deviceId), grants are only consumed in `PasswordAuthService.completeLogin`, and the password handler never populates `LoginInput.DeviceID`. Wiring a device id into the password login path is the missing piece — do **not** add it without confirming the id is the cookie value, or the MFA-skip becomes reachable with a guessable key.
@@ -1064,11 +1302,11 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 - **The browser binding is verified where the cookie lives.** The signed state + one-shot row prove a callback belongs to a flow *we* started, not that it belongs to *this browser*: without a binding, login CSRF (an attacker-started flow finished by a victim's browser lands the victim in the attacker's session; in `mode=link` it attaches the victim's IdP identity to the attacker's account) is open. Both start endpoints therefore also drop the CSRF nonce into an HttpOnly `orkestra_oauth_state` cookie (SameSite=Lax — Strict would suppress the top-level redirect back from the IdP) and the callback requires the two to match (`handlers/oauth_state_binding.go`). `StartHost` is checked first: a cross-host callback is **deferred** whatever cookie the operator host holds (an unrelated operator flow's nonce must not block a client login); on the starting host the cookie is required and a mismatched or absent one, like a state with no `shost` claim, is rejected. The ADR-0003 tier split puts client-tier starts on `api.*` while every provider callback lands on `console.*`, so that cookie cannot reach the callback — such a callback is deferred, never accepted: the operator host does the IdP half only and hands the flow to `GET /v1/auth/client/oauth/complete` on the client API host through a one-shot relay record; the relay endpoint **requires** the cookie (`verifyRelayBinding`) and fails closed without it. The SPA must call the start endpoint with `credentials: 'include'` or the cookie is never stored — `frontend-admin`'s `socialAuthUtils.ts` and RTK `baseApi` both do.
 - **OAuth link reuse refreshes the cached `picture` URL.** Every successful OAuth callback updates two places on link reuse (`auth_service.go` ≈ line 1612): the provider doc's `metadata.picture` (drives `UserManagementResponse.Providers[].Avatar`) AND the embedded `User.OAuthLinks[i].OAuthData["picture"]` (drives `blob.ResolveAvatarURL` for `AvatarSource=oauth_*`) via the additive `iface.OAuthLinkDataUpdater` sub-interface. Without this, users who linked Google before the embedded-picture field existed would never see their avatar populate until they manually re-linked.
 - **Token lifetimes come from config, never from literals.** `JWTService.AccessTokenTTL(ctx)` resolves `admin accessTokenTTL → JWT_ACCESS_TOKEN_EXPIRY → 15m`, with the effective value clamped into 1m–24h so it can never outlive its revocation-denylist entry. **In practice the first level always answers**, and the chain is documented rather than exercised: `accessTokenTTL` is a schema field with `Default: "15m"` and no `EnvVar`, so it is seeded on first boot and `GetValue` re-supplies that default even when the stored value is empty — the policy returns a positive duration and nothing falls through, so `JWT_ACCESS_TOKEN_EXPIRY` is reached only when the `module_configs` document is missing, unreadable, **or holding a value the parser rejects** (`clampPersistedDuration`'s `0` fallback — the D6 table's "malformed value already in DB" row, which takes an out-of-band write since the PATCH validator refuses one). Change the TTL at `/admin/modules/auth`; the env-var table above has the detail and the live observation. `JWTService.RefreshTokenTTL()` resolves `JWT_REFRESH_TOKEN_EXPIRY → 7d` (the unreachable 720h zero-guard in `NewJWTService` is not a configured default). They drive every `expiresIn` in a response, the `expiresAt` on each persisted refresh row, and the `Max-Age` on every refresh cookie. Because rotation rewrites the refresh row's expiry on every use, the refresh TTL is the session's **idle** timeout, not its total lifetime; the total is bounded separately by `sessionAbsoluteTTL` (ADR-0017 D1). The lifetime deliberately kept separate from all three is `models.AuthSessionRetention` (90d): the session **document** is audit and device history that the risk scorer reads, and nothing authenticates off it.
-- **The MFA attempt cap is an atomic counter.** `IncrementAttempts` moves a dedicated Redis key via `INCR` (`OAuthStateStore.Incr`), not a read-modify-write over the challenge JSON. With RMW, concurrent verifies all read the same value and wrote back the same value, so N parallel guesses cost one attempt — "5 tries" held only against a serial attacker. `Peek` reports the live counter; `Consume`/exhaustion/expiry delete challenge and counter together so a recycled id cannot inherit a spent budget. A counter that cannot be advanced fails closed (the challenge is destroyed).
-- **Account lockout reads the admin policy.** The branch that stamps `User.LockedUntil` uses `AuthPolicyService.LockoutThreshold`/`LockoutDuration`, the same values plumbed into the rate limiter. It previously compared against a hardcoded `5` with a hardcoded 15-minute window, so tightening `accountLockoutThreshold` moved the in-memory bucket but not the persisted lock.
+- **The MFA attempt cap is an atomic counter.** `IncrementAttempts` moves a dedicated Redis key via `OAuthStateStore.Incr`, not a read-modify-write over the challenge JSON. With RMW, concurrent verifies all read the same value and wrote back the same value, so N parallel guesses cost one attempt — "5 tries" held only against a serial attacker. `Incr` runs the same one-round-trip Lua script the `AttemptCounter` primitive uses (`services/attempt_counter.go`'s `attemptScript`): INCR, PTTL and a conditional PEXPIRE in one `EVAL`, so count and TTL move together and a key found with no TTL — the orphan the old two-command INCR-then-EXPIRE shape could leave behind on a failure between them, or on a key some other path created — is healed on the next increment rather than living forever. `Peek` reports the live counter; `Consume`/exhaustion/expiry delete challenge and counter together so a recycled id cannot inherit a spent budget. A counter that cannot be advanced fails closed (the challenge is destroyed).
+- **Account lockout reads the admin policy.** The branch that stamps `User.LockedUntil` uses `AuthPolicyService.LockoutThreshold`/`LockoutDuration` — the same pair the `email` attempt scope is read against, so the durable lock and the counter lock at the same attempt. It previously compared against a hardcoded `5` with a hardcoded 15-minute window, so tightening `accountLockoutThreshold` moved the in-memory bucket but not the persisted lock.
 - **Password character classes are Unicode-aware.** `checkCharacterClasses` classifies with `unicode.IsUpper/IsLower/IsDigit/IsPunct/IsSymbol`. The old ASCII-range switch put *everything* non-`[A-Za-z0-9]` in the symbol bucket: a plain space satisfied `requireSymbol`, and `ПАРОЛЬ` / `passwörd` satisfied `requireSymbol` while satisfying neither `requireUpper` nor `requireLower`. Whitespace now counts as no class at all.
 - **`aud` must name an audience the platform issues.** `validateTokenEnhanced` rejects anything outside `{operator, client, service}` — it used to accept any non-empty string. It deliberately does **not** pin `aud` to the minting audience: one `AuthMiddleware` with one JWT service guards both muxes, so equality would lock out a whole tier. Pinning a request to its surface is `RequireAudience`'s job at the mux.
-- **Rate limiting** lives in `shared/errors.RateLimiter` and is shared across `Register`, `Login`, `ForgotPassword`, `VerifyEmailResend`. Current defaults are hardcoded — when you need to tune them, do it in `password_auth_service.go` and not in the handler.
+- **Rate limiting.** No auth flow reads or writes `shared/errors.RateLimiter` any more (Task 10, spec §4.1 D7; the type itself was shrunk to the `api:general` middleware only in Task 11, spec §4.1 D8, closing H-1): `ServiceAccountService`'s `Grant`/`recordFailed` was the last consumer before Task 10 — `Grant`'s lockout pre-check peeks `AttemptCounter` on `AttemptKeyIP`/`AttemptKeyClient` exactly like `Login`'s `email`/`ip` pair, and `recordFailed` charges the same two keys instead of calling the now-deleted `RecordFailedAuth`. `Grant`'s own lockout branch always has a live `Verdict`, so it answers `LockedAfter(v.RetryAfter)` — the same sentinel identity (`ErrAccountLocked`) the password-login lockout uses. The module's own `ErrClientRateLimited` has no producer left — a counter-store error must fail OPEN rather than answer anything — and is kept, with its `mapServiceTokenError` arm, only for tolerance now that the shared limiter's auth-facing surface is gone; `mapServiceTokenError` answers 429 `auth.too_many_attempts` on either. `module.go` no longer constructs a `RateLimiter` at all — `PasswordAuthConfig` has no `RateLimiter` field, and `SetAuthFailedConfig`/`IsBlocked`/`IsLockedOut`/`RecordFailedAuth`/`CheckMultiple`/`AuthMiddleware` and the five dead configs (`auth:login`, `auth:refresh`, `auth:failed`, `security:sensitive`, `global:ip`) are deleted from `shared/errors/rate_limiter.go` outright; the surviving `RateLimiter` serves only the per-IP `api:general` middleware mounted in `cmd/server/middleware.go`, and every remaining config/token read takes a lock (`configFor`, `TokenBucket.remaining`) — see `shared/errors/rate_limiter.go`'s type doc comment. `Login`, `ChangePassword`, `ConfirmPasswordWithSecurity` and the service-account grant all lock through the `AttemptCounter` (see "Attempt counters" under Runtime configuration); `ForgotPassword` and `ResendVerification` use their own `AttemptCounter` request-cap scopes (`reset-*`/`verify-*`) in that same section.
 - **Notification idempotency.** Verification and reset emails always carry an idempotency key like `verify:<userUUID>:<tokenUUID>` and `reset:<userUUID>:<tokenUUID>` so retries don't dispatch duplicates.
 - **Password policy.** Length bounds, complexity requirements, and the HIBP toggle are admin-managed via the Password Policy tab; defaults match the legacy hardcoded values (10..128 chars, no complexity, HIBP on). The service still rejects `"password has appeared in a known data breach"` — observed in dev when the initial admin used a common test string.
 
@@ -1088,7 +1326,7 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 - **Never embed permissions in the JWT.** If you find yourself wanting to, you need a faster `HasPermission` — not a fatter token. Revocation must be instant.
 - **Never call `notification.EmailSender.Send` directly.** Every auth-triggered email must go through `SendTemplated` with a `TemplateID` that exists in `notification/services/default_templates.go`.
 - **Never read `cfg.Auth.JWT.PrivateKey` outside the JWT service.** Key material stays inside one package.
-- **Never bypass the rate limiter on login / forgot-password endpoints.** The limiter is the only protection against credential stuffing and reset-flood.
+- **Never bypass the lockout on login / change-password / password-confirm / forgot-password / resend-verification endpoints.** `Login`, `ChangePassword` and `ConfirmPasswordWithSecurity` must all peek the attempt counters (`peekLockout`) — after the durable-lock check, before the verify — and record on every real failure (`recordLoginFailure` + the mirrored `LockedUntil` write), so a lock earned on one of the three is honoured by the other two; `ForgotPassword` and `ResendVerification` must peek `overRequestCap` and charge `chargeRequestCap` BEFORE the user lookup instead — together these are the only protection against credential stuffing, unthrottled password-guessing, and reset-flood.
 - **When you add a new OAuth provider**, add its fields to `ConfigSchema()`, extend the switch in `oauth_config_resolver.go`, and wire the factory case in `services/oauth_provider_factory.go`. Never hardcode provider config inside a handler — everything flows through the resolver so admin edits are live.
 - **Never read `cfg.Auth.{Google,Apple,GitHub,Discord}` from handlers.** Those struct fields still load from env vars for backward compatibility, but OAuth config is owned by the resolver. Handlers must call `h.oauthResolver.Get/RedirectURL/MobileAudience` so the admin panel stays authoritative.
 - **Never build a `/auth/callback` or `/user/security` URL outside `handlers/oauth_callback_redirect.go`**, never put a token, an email or a user id in one, and never set a client-tier cookie from the operator host — relay instead. The structural scan and `oauth_callback_flow_test.go` are the guards.
