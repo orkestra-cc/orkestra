@@ -238,7 +238,13 @@ services:
       start_period: 60s
 
   frontend-admin:
-    image: dhi.io/node:24-dev
+    # Pinned to a minor, like the backend's Go image above. `24-dev` floated,
+    # and the two staging frontends had already drifted apart on it —
+    # frontend-admin on v24.15.0 while client-frontend ran v24.16.0, from the
+    # same stack. Neither package.json declares an `engines` floor, so this
+    # cannot fail the build the way the Go drift did; what it buys is a
+    # reproducible, identical Node across both frontends.
+    image: ${NODE_STAGING_IMAGE:-dhi.io/node:24.16-dev}
     container_name: ${APP_NAME}-frontend-admin-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
@@ -320,7 +326,9 @@ services:
   # VITE_API_BASE must be reachable from the user's browser, not from
   # inside the container network.
   client-frontend:
-    image: node:24-alpine
+    # Same minor as frontend-admin above — public image, so a different
+    # variable; keep the two Node versions in step.
+    image: ${NODE_CLIENT_STAGING_IMAGE:-node:24.16-alpine}
     container_name: ${APP_NAME}-client-frontend-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
