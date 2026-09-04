@@ -1160,6 +1160,7 @@ func (r *mongoUserRepository) BumpMFAEpoch(ctx context.Context, userUUID string)
 	var out struct {
 		MFAEpoch int `bson:"mfaEpoch"`
 	}
+	//tenantscope:allow user collections (operator_users / client_users) are tier-scoped, not org-scoped.
 	err := r.collection.FindOneAndUpdate(ctx, filter, update, opts).Decode(&out)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {

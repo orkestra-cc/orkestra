@@ -150,6 +150,11 @@ type UserLifecycleStateProvider interface {
 // means the epoch never moves, so the platform degrades to the pre-epoch
 // behaviour — session revocation alone — which is why the removal paths log
 // at WARN when the seam is absent rather than failing.
+//
+// The interface and this contract exist now; the removal paths that
+// resolve and call it do not. Task 5 wires the auth module's
+// module.GetTyped resolution and the WARN-on-absent behaviour described
+// above.
 // ---------------------------------------------------------------------------
 
 type MFAEpochBumper interface {

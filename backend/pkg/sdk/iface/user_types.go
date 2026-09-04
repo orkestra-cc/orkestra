@@ -175,6 +175,10 @@ type User struct {
 	// Absent on every document written before this shipped, which reads
 	// as 0 and matches every pre-deploy token: the deploy downgrades
 	// nobody, and the first removal on such an account moves it to 1.
+	//
+	// This is the field and the storage contract only — nothing mints
+	// the "mfae" claim or bumps this value yet. Task 2 wires the
+	// mint-time read, Task 5 wires every removal path's call.
 	MFAEpoch int `bson:"mfaEpoch,omitempty" json:"-"`
 
 	// Status and metadata

@@ -34,15 +34,6 @@ func (r *fakeUserRepo) seedUser(t *testing.T, uuid string) string {
 	return uuid
 }
 
-// seedUserWithoutEpochField models a document written before mfaEpoch
-// existed on the schema. In this in-memory fake that is indistinguishable
-// from seedUser: MFAEpoch is simply left at its Go zero value, which is
-// exactly what a real BSON document missing the field would decode to.
-func (r *fakeUserRepo) seedUserWithoutEpochField(t *testing.T, uuid string) string {
-	t.Helper()
-	return r.seedUser(t, uuid)
-}
-
 // The epoch is what makes a factor removal take effect on the CALLER's
 // current token, without waiting for a refresh and without depending on
 // a revocation write succeeding. It must be monotone and it must start
@@ -76,21 +67,13 @@ func TestBumpMFAEpoch_IsMonotone(t *testing.T) {
 	}
 }
 
-// Every document written before this ships has no mfaEpoch. It must
-// read as 0 and match every pre-deploy token, so the deploy itself
-// downgrades nobody (edge case 12).
-func TestUser_MissingMFAEpochReadsAsZero(t *testing.T) {
-	svc, repo := newUserServiceForEpochTest(t)
-	uuid := repo.seedUserWithoutEpochField(t, "u-legacy")
-
-	user, err := svc.GetUserByID(context.Background(), uuid)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
-	if user.MFAEpoch != 0 {
-		t.Fatalf("MFAEpoch = %d for a legacy document, want 0", user.MFAEpoch)
-	}
-}
+// TestUser_MissingMFAEpochReadsAsZero (edge case 12: a pre-deploy
+// document has no mfaEpoch and must read as 0) is a bson round trip and
+// so belongs with the type, not the service —
+// pkg/sdk/iface/user_mfa_epoch_test.go's TestUserMFAEpoch_BSONRoundTrip.
+// A Go zero value asserted against a struct literal this package builds
+// itself proves nothing about the bson tag, which is the thing edge case
+// 12 actually depends on.
 
 func TestBumpMFAEpoch_UnknownUserIsAnError(t *testing.T) {
 	svc, _ := newUserServiceForEpochTest(t)
@@ -99,8 +82,8 @@ func TestBumpMFAEpoch_UnknownUserIsAnError(t *testing.T) {
 	}
 }
 
-// The seam is what the auth module resolves; a compile-time assertion is
-// cheaper than discovering the mismatch at boot.
-func TestUserService_ImplementsMFAEpochBumper(t *testing.T) {
-	var _ iface.MFAEpochBumper = (*userService)(nil)
-}
+// The seam iface.MFAEpochBumper is what the auth module resolves via
+// module.GetTyped. The compile-time assertion pinning userService to it
+// lives in the production file (user_service.go), right next to the
+// method — a duplicate here would only restate what the compiler already
+// enforces on every build.
