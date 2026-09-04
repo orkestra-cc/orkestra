@@ -4,7 +4,7 @@
 |---|---|
 | **Date** | 2026-09-03 |
 | **Last review** | — |
-| **Status** | v1.13 — PR A implemented and merged; D4 amended to match what shipped |
+| **Status** | v1.14 — PR A implemented and merged; D4 matches what shipped, M-7's residual stated in D3 |
 | **Scope** | `backend/internal/core/auth` (services, handlers, module wiring), `backend/internal/core/authz` (services, handlers, Cedar policies), `backend/internal/core/user` (role-change handlers), `backend/internal/shared/{middleware,errors,errcode,systeminit,database}`, `backend/pkg/sdk/iface` (one additive interface), `backend/migrations` (one new migration), `frontend-client` (MFA enrolment page), notification templates, `docs/site`, module `CLAUDE.md`s |
 | **Source** | Security audit of 2026-09-03 on `dev` @ `a242e6bd` — report: https://claude.ai/code/artifact/5e5c5406-19bd-4cb1-8cd1-86cd9440b245. Finding IDs below (H-n, M-n, L-n) are the report's |
 | **ADR** | None. Every SDK change is additive (§4.3 adds the `iface.MFAEpochBumper` sub-interface and one `iface.User` field, §4.6 adds `iface.AuthzCacheInvalidator`, §4.7 adds `iface.SystemRoleHolderFinder`; `module.RedisClient` is untouched). Lockout moves from an in-memory token bucket to Redis counters, which changes an operational property, not a contract: the two admin-managed keys keep their names and gain the meaning their UI text already promises |
@@ -159,6 +159,20 @@ D4 also now carries the M-7 residual, which the spec had nowhere else: D3
 claims the counter closes the 429-versus-401 oracle, which holds only while
 the counter is the thing answering. Closing the residual changes D9's wire
 contract, so it stays an open decision.
+
+v1.14 (2026-09-04) moves M-7's residual from D4 into D3, where the closure
+claim is made. v1.13 recorded the residual under D4 because that is where the
+paced-attacker route was introduced, which left D3 asserting "closes the
+429-versus-401 oracle" unqualified and the caveat two decisions further down.
+D3 now qualifies its own claim — closed while the counter answers, open
+whenever a durable lock outlives its window — and lists all three routes in.
+D4 keeps only the sentence about the route it adds. No behaviour is described
+differently; this is where the reader meets it. The same pass corrects D3
+step 6, which still specified the durable write taking a
+`counterAvailable := err == nil` flag: v1.13 replaced that mechanism with an
+unconditional OR, and `counterAvailable` no longer exists in the code —
+`recordLoginFailure` returns a bare `Verdict`, and an unavailable store
+yields a zero verdict that reads as not-locked.
 
 ## 1. Problem
 
@@ -430,9 +444,10 @@ service-account grant, as the single `ip:` bucket is today.
    in the past → `ClearFailedLogins` **before** verifying, closing the
    "one wrong password after expiry re-locks" defect (`:605-622` compares
    against a counter nothing ever resets, `user_repository.go:1055-1073`).
-6. Password verify. Failure → `RecordFailure(ip)` and `v, err :=
-   RecordFailure(email)`, then the durable write of D4 with
-   `counterAvailable := err == nil`, audit `bad_password`,
+6. Password verify. Failure → `RecordFailure(ip)` and `RecordFailure(email)`,
+   then the durable write of D4 — which ORs that verdict with the cumulative
+   rule and needs no availability flag, since an unavailable store yields a
+   zero `Verdict` that reads as not-locked — audit `bad_password`,
    `ErrInvalidCredentials`.
 7. Success → `ClearFailedLogins` (as today) **and** `Reset(email)`. The IP
    scope is not reset: one correct login must not launder a stuffing run.
@@ -441,7 +456,19 @@ service-account grant, as the single `ip:` bucket is today.
 `Retry-After` header (D9) on every route that can raise it. Both an unknown
 and a known email lock at the same attempt under the same window and answer
 the same 429, and every non-success branch pays the argon2 cost, which closes
-the 429-versus-401 oracle and the timing oracle (M-7, L-1).
+the timing oracle (L-1) outright and the 429-versus-401 oracle (M-7) **for as
+long as the counter is the thing answering**.
+
+That qualification is load-bearing, so it sits here rather than in a footnote:
+whenever a durable `LockedUntil` outlives its counter window, a known email
+answers 429 while an unknown one answers 401, and M-7 is open again for that
+interval. Three ways in — Redis down (the counter fails open and the durable
+rule answers alone), the fixed window expiring under a still-live lock, and a
+paced attacker who never fills a single window (D4). Closing it means a live
+durable lock answering like an unknown address, which changes D9's wire
+contract for a locked-out user, so it is an open decision rather than a
+defect. The residual is described in full in
+`backend/internal/core/auth/CLAUDE.md` and at the durable-lock branch itself.
 
 **D4 — The durable lock ORs with the counter (amended in v1.13).**
 `User.LockedUntil` is set when `RecordFailure(email)` returned
@@ -464,17 +491,9 @@ every later failure for life.
 
 So the two mechanisms lock at the same attempt for a *burst*; a slow run
 trips the durable rule alone; and with Redis down the durable rule still
-caps guessing against existing accounts.
-
-Consequence for M-7, recorded here because the spec has no other place for
-it: D3 above says the counter closes the 429-versus-401 oracle, and that is
-true only while the counter is the thing answering. Whenever a durable lock
-outlives its counter window — Redis down, the fixed window expired under a
-live lock, or now a paced attacker who never fills a single window — a known
-email answers 429 where an unknown one answers 401. The residual is
-described in full in `backend/internal/core/auth/CLAUDE.md` and at the
-durable-lock branch itself; closing it changes D9's wire contract, so it is
-an open decision, not a defect. Admin
+caps guessing against existing accounts. This adds the third route into M-7's
+residual that D3 lists: a paced attacker now earns a durable lock on an
+account that exists, without the counter ever having locked. Admin
 visibility and the setup of an admin "unlock" affordance stay as they are
 (§8).
 
