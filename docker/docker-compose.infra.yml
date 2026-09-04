@@ -14,7 +14,15 @@
 # few caps re-added are the ones each image's entrypoint actually needs.
 services:
   mongodb:
-    image: mongo:8.0
+    # Pinned to the patch, not the `8.0` line. That tag floats within the LTS
+    # series and had already drifted: it resolves to 8.0.29 today while every
+    # deployment runs 8.0.23 — and CI, which used the same floating tag, was
+    # therefore testing on a different patch than staging ran, with nothing
+    # saying so. Pinning freezes the deployed version; the 8.0.23 -> 8.0.29
+    # bump is six patch releases of fixes and is worth scheduling, but it is
+    # an upgrade decision on a stateful replica set, not a pin. Keep this in
+    # step with .github/workflows/backend.yml, which pins the same patch.
+    image: mongo:8.0.23
     container_name: ${APP_NAME}-mongodb-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
