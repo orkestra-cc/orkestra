@@ -701,25 +701,11 @@ func (h *MFAHandler) RegisterPublicRoutes(api huma.API, mount RouteMount) {
 	}, h.LoginVerify)
 }
 
+// RegisterProtectedRoutes mounts the MFA endpoints a plain bearer is
+// enough for: reading your own enrollment status, and verifying a code you
+// already hold a factor for. Creating or replacing a factor is NOT here —
+// see RegisterEnrolmentRoutes.
 func (h *MFAHandler) RegisterProtectedRoutes(api huma.API, mount RouteMount) {
-	huma.Register(api, huma.Operation{
-		OperationID: mount.OpIDPrefix + "mfa-enroll-begin",
-		Method:      http.MethodPost,
-		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/enroll/begin",
-		Summary:     "Begin MFA (TOTP) enrollment",
-		Tags:        []string{"Authentication", "MFA"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, h.EnrollBegin)
-
-	huma.Register(api, huma.Operation{
-		OperationID: mount.OpIDPrefix + "mfa-enroll-confirm",
-		Method:      http.MethodPost,
-		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/enroll/confirm",
-		Summary:     "Confirm MFA enrollment and receive backup codes",
-		Tags:        []string{"Authentication", "MFA"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, h.EnrollConfirm)
-
 	huma.Register(api, huma.Operation{
 		OperationID: mount.OpIDPrefix + "mfa-status",
 		Method:      http.MethodGet,
@@ -737,6 +723,36 @@ func (h *MFAHandler) RegisterProtectedRoutes(api huma.API, mount RouteMount) {
 		Tags:        []string{"Authentication", "MFA"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.Verify)
+}
+
+// RegisterEnrolmentRoutes mounts the endpoints that CREATE or REPLACE a
+// second factor. The caller wires RequireEnrolmentProof(5m) around this API
+// instance — see auth/module.go. Both halves of the ceremony are gated, not
+// just the first: the factor set can change between begin and confirm, so a
+// begin that passed the gate must not license a confirm that would not.
+//
+// H-2/H-3: these lived in RegisterProtectedRoutes, under RequireGlobal()
+// alone, which let a stolen session-only bearer replace the victim's TOTP
+// secret (EnrollConfirm deletes the existing factor after validating a code
+// for the NEW one) or add a passkey of its own.
+func (h *MFAHandler) RegisterEnrolmentRoutes(api huma.API, mount RouteMount) {
+	huma.Register(api, huma.Operation{
+		OperationID: mount.OpIDPrefix + "mfa-enroll-begin",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/enroll/begin",
+		Summary:     "Begin MFA (TOTP) enrollment",
+		Tags:        []string{"Authentication", "MFA"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.EnrollBegin)
+
+	huma.Register(api, huma.Operation{
+		OperationID: mount.OpIDPrefix + "mfa-enroll-confirm",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/enroll/confirm",
+		Summary:     "Confirm MFA enrollment and receive backup codes",
+		Tags:        []string{"Authentication", "MFA"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.EnrollConfirm)
 }
 
 // RegisterStepUpRoutes mounts endpoints that demand a *fresh* MFA proof.

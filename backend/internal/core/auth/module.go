@@ -1647,10 +1647,11 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		m.serviceAccountAdminHandler.RegisterManageRoutes(humachi.New(r, ri.APIConfig))
 	})
 
-	// Operator MFA endpoints split into four halves:
+	// Operator MFA endpoints split into five groups:
 	//   - public: /v1/auth/operator/mfa/login/verify completes an in-
 	//     flight login (caller has a challengeId, not yet a bearer).
-	//   - protected (no step-up): enroll / status / verify.
+	//   - protected (no step-up): status / verify.
+	//   - protected (enrolment proof): enroll begin + confirm.
 	//   - protected (step-up): /v1/auth/operator/me/mfa/remove —
 	//     dropping your own second factor is catastrophic, demand a
 	//     <5min OTP proof.
@@ -1662,6 +1663,14 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		r.Use(ri.Operator.AuthMW.RequireGlobal())
 		api := humachi.New(r, ri.APIConfig)
 		m.operatorMFAHandler.RegisterProtectedRoutes(api, handlers.OperatorMount)
+	})
+	// Enrolment CREATES or REPLACES a credential, so it demands a fresh
+	// proof of presence, not merely a valid bearer (H-2, H-3).
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
+		r.Use(ri.Operator.AuthMW.RequireEnrolmentProof(5 * time.Minute))
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorMFAHandler.RegisterEnrolmentRoutes(api, handlers.OperatorMount)
 	})
 	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(ri.Operator.AuthMW.RequireGlobal())
@@ -1732,14 +1741,21 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		m.operatorAuthHandler.RegisterOAuthLinkRoute(api, handlers.OperatorMount)
 	})
 
-	// Operator WebAuthn — public/protected/step-up halves mirror the
-	// TOTP layout. Nil handler means passkeys are disabled at boot.
+	// Operator WebAuthn — public/protected/enrolment/step-up halves
+	// mirror the TOTP layout. Nil handler means passkeys are disabled at
+	// boot.
 	if m.operatorWebAuthnHandler != nil {
 		m.operatorWebAuthnHandler.RegisterPublicRoutes(ri.Operator.PublicAPI, handlers.OperatorMount)
 		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 			r.Use(ri.Operator.AuthMW.RequireGlobal())
 			api := humachi.New(r, ri.APIConfig)
 			m.operatorWebAuthnHandler.RegisterProtectedRoutes(api, handlers.OperatorMount)
+		})
+		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Operator.AuthMW.RequireGlobal())
+			r.Use(ri.Operator.AuthMW.RequireEnrolmentProof(5 * time.Minute))
+			api := humachi.New(r, ri.APIConfig)
+			m.operatorWebAuthnHandler.RegisterEnrolmentRoutes(api, handlers.OperatorMount)
 		})
 		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 			r.Use(ri.Operator.AuthMW.RequireGlobal())
@@ -1792,6 +1808,12 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 	})
 	ri.Client.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(ri.Client.AuthMW.RequireGlobal())
+		r.Use(ri.Client.AuthMW.RequireEnrolmentProof(5 * time.Minute))
+		api := humachi.New(r, ri.APIConfig)
+		m.clientMFAHandler.RegisterEnrolmentRoutes(api, handlers.ClientMount)
+	})
+	ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Client.AuthMW.RequireGlobal())
 		r.Use(ri.Client.AuthMW.RequireStepUp(5 * time.Minute))
 		api := humachi.New(r, ri.APIConfig)
 		m.clientMFAHandler.RegisterStepUpRoutes(api, handlers.ClientMount)
@@ -1802,6 +1824,12 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 			r.Use(ri.Client.AuthMW.RequireGlobal())
 			api := humachi.New(r, ri.APIConfig)
 			m.clientWebAuthnHandler.RegisterProtectedRoutes(api, handlers.ClientMount)
+		})
+		ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Client.AuthMW.RequireGlobal())
+			r.Use(ri.Client.AuthMW.RequireEnrolmentProof(5 * time.Minute))
+			api := humachi.New(r, ri.APIConfig)
+			m.clientWebAuthnHandler.RegisterEnrolmentRoutes(api, handlers.ClientMount)
 		})
 		ri.Client.ProtectedRouter.Group(func(r chi.Router) {
 			r.Use(ri.Client.AuthMW.RequireGlobal())

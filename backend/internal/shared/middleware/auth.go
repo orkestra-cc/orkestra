@@ -1132,18 +1132,121 @@ func (m *AuthMiddleware) RequireStepUp(maxAge time.Duration) func(http.Handler) 
 					WithOperation("require_step_up").Build())
 				return
 			}
-			// Fresh proof — pass through. amrSatisfiesMFA also accepts the
+			// Fresh proof — pass through. The predicate accepts the
 			// "reauth" marker minted by the password-confirm endpoint; that
 			// endpoint refuses to issue a reauth token for users with an
 			// enrolled factor, so the marker can never be used to bypass
 			// MFA-required scenarios.
-			if amrSatisfiesMFA(claims.AMR) && claims.LastOTPAt > 0 &&
-				time.Since(time.Unix(claims.LastOTPAt, 0)) <= maxAge {
+			if m.hasFreshSecondFactor(r, claims, maxAge) {
 				next.ServeHTTP(w, r)
 				return
 			}
 			// No fresh proof. Branch on enrollment + policy.
 			m.dispatchStepUpFailure(w, r, claims, maxAge)
+		})
+	}
+}
+
+// hasFreshSecondFactor is RequireStepUp's freshness predicate, extracted
+// so RequireStepUp and RequireEnrolmentProof cannot drift apart: they ask
+// the same question ("did this caller present a second factor, or a
+// password reconfirm, inside maxAge") and must keep answering it the same
+// way.
+//
+// The request is a parameter although nothing here reads it yet: the
+// epoch-aware version resolves the caller's MFA authority off the context
+// built by setUserContext (R12) rather than trusting claims.AMR
+// literally, and threading it in now keeps that change to the body.
+func (m *AuthMiddleware) hasFreshSecondFactor(_ *http.Request, claims *models.JWTClaims, maxAge time.Duration) bool {
+	return amrSatisfiesStepUp(claims.AMR) && claims.LastOTPAt > 0 &&
+		time.Since(time.Unix(claims.LastOTPAt, 0)) <= maxAge
+}
+
+// RequireEnrolmentProof gates the four enrolment endpoints — TOTP enroll
+// begin/confirm and passkey register begin/finish — on a fresh proof of
+// presence.
+//
+// H-2 and H-3: these were mounted under RequireGlobal() alone, so a stolen
+// session-only bearer could register a passkey on the victim's account, or
+// REPLACE their TOTP secret (ConfirmEnrollment deletes the existing factor
+// after validating a code for the NEW one), and then own the account
+// outright.
+//
+// Two shapes of proof, because the two populations have different ones
+// available:
+//
+//   - a user WITH a factor proves presence exactly as RequireStepUp
+//     demands: a fresh second factor. There is one right answer for them,
+//     so this branch never emits password_confirm_required (they have
+//     something stronger) or mfa_enrollment_required (they are enrolled).
+//   - a user WITHOUT a factor proves it with a recent interactive login
+//     (auth_time within maxAge) or a fresh reauth. The answer when they
+//     cannot is reauthentication_required, NOT password_confirm_required:
+//     the users most in need of a first enrolment are MFA-obligated
+//     accounts inside their grace window, whom the reconfirm endpoint
+//     refuses (D19), and an OAuth-only account has no password to
+//     reconfirm. A re-login is the one answer that works for everyone, and
+//     both SPAs return the user to where they were.
+//
+// The lookup fails CLOSED: nil or erroring → step_up_required. A degraded
+// Mongo must never be the reason a factor can be added without proof.
+//
+// Unlike RequireMFA this gate deliberately does NOT consult the mfaEnabled
+// master switch. That switch exists to avoid a bootstrap deadlock — a
+// never-enrolled operator must still be able to perform the admin writes
+// that turn MFA on — and no such deadlock exists here: "did you prove
+// presence" is answerable, and meaningful, whether or not MFA is enforced.
+// The one cost is that a setup-wizard admin (amr ["pwd","reauth"],
+// last_otp_at=now) must enrol within maxAge of the wizard or re-login
+// first; they hold a password, so they can.
+//
+// Residual: the honest bound is a party holding the REFRESH COOKIE within
+// maxAge of the victim's own interactive login — MintAccessTokenFromRefresh
+// is reachable with that cookie alone and carries auth_time forward
+// unchanged. That is inherent to a refresh cookie being a session
+// credential, and no worse than any other session-bound action, but it is
+// wider than "a bearer stolen inside the window". D13's email and audit row
+// make an enrolment visible and the admin reset (D15/D16) recovers.
+func (m *AuthMiddleware) RequireEnrolmentProof(maxAge time.Duration) func(http.Handler) http.Handler {
+	if maxAge <= 0 {
+		maxAge = 5 * time.Minute
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := r.Context().Value(ctxClaims).(*models.JWTClaims)
+			if !ok || claims == nil {
+				m.sendErrorResponse(w, r, errors.AuthenticationError("authentication required").
+					WithOperation("require_enrolment_proof").Build())
+				return
+			}
+
+			if m.mfaEnrollment == nil {
+				m.sendStepUpRequired(w, r, maxAge)
+				return
+			}
+			hasFactor, err := m.mfaEnrollment(r.Context(), claims.Audience, claims.UserUUID)
+			if err != nil {
+				m.sendStepUpRequired(w, r, maxAge)
+				return
+			}
+
+			if m.hasFreshSecondFactor(r, claims, maxAge) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if hasFactor {
+				// One right answer for an enrolled user. A fresh auth_time
+				// is deliberately NOT accepted here: they have a stronger
+				// proof available and replacing a factor is the attack this
+				// gate exists to stop.
+				m.sendStepUpRequired(w, r, maxAge)
+				return
+			}
+			if claims.AuthTime > 0 && time.Since(time.Unix(claims.AuthTime, 0)) <= maxAge {
+				next.ServeHTTP(w, r)
+				return
+			}
+			m.sendReauthenticationRequired(w, r, maxAge, claims.AuthTime)
 		})
 	}
 }
@@ -1294,6 +1397,55 @@ func (m *AuthMiddleware) sendStepUpRequired(w http.ResponseWriter, r *http.Reque
 		item:   &codedErrorItem{message: "step-up required", location: "require_step_up", value: "STEP_UP_REQUIRED"},
 		extra:  map[string]any{"maxAgeSeconds": int(maxAge.Seconds())},
 	})
+}
+
+// sendReauthenticationRequired emits the 401 that tells a client "sign in
+// again, then come back". It is the no-factor branch of
+// RequireEnrolmentProof, and the only gate answer that every population
+// can actually satisfy: an MFA-obligated account inside its grace window
+// is refused by the password-reconfirm endpoint (D19), and an OAuth-only
+// account has no password to reconfirm at all.
+//
+// The body carries authTime so the SPA can say how stale the session is —
+// zero for a token minted before the claim shipped — and maxAgeSeconds so
+// it knows the bar it has to clear. The request is deliberately not a
+// parameter: nothing here reads it, as with sendPolicyUnavailable.
+func (m *AuthMiddleware) sendReauthenticationRequired(w http.ResponseWriter, _ *http.Request, maxAge time.Duration, authTime int64) {
+	writeCodedError(w, codedError{
+		status: http.StatusUnauthorized,
+		code:   "reauthentication_required",
+		title:  "reauthentication required",
+		detail: "adding a second factor requires a recent sign-in; please sign in again and retry",
+		scheme: schemeBearer,
+		item:   &codedErrorItem{message: "reauthentication required", location: "require_enrolment_proof", value: "REAUTHENTICATION_REQUIRED"},
+		extra: map[string]any{
+			"maxAgeSeconds": int(maxAge.Seconds()),
+			"authTime":      authTime,
+		},
+	})
+}
+
+// amrSatisfiesStepUp is amrSatisfiesMFA PLUS "reauth". Used by
+// RequireStepUp and RequireEnrolmentProof only, through
+// hasFreshSecondFactor.
+//
+// The two lists are identical TODAY — amrSatisfiesMFA still accepts
+// "reauth" — so this is a seam, not yet a behaviour change. The split
+// exists because "reauth", a fresh password reconfirm, is a presence proof
+// but NOT a second factor: letting it satisfy RequireMFA (which it does
+// today) means a session-long gate meant to demand a second factor accepts
+// a password the caller already typed once, which is audit finding M-1.
+// RequireStepUp is different — it asks "did you prove presence in the last
+// five minutes", and a reconfirm answers that. Narrowing amrSatisfiesMFA
+// is M-1's job; this function is what makes that narrowing possible
+// without collaterally breaking the freshness gates.
+func amrSatisfiesStepUp(amr []string) bool {
+	for _, v := range amr {
+		if v == "otp" || v == "webauthn" || v == "mfa" || v == "reauth" {
+			return true
+		}
+	}
+	return false
 }
 
 // amrSatisfiesMFA checks whether any second-factor method (or a fresh

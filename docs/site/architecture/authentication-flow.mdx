@@ -289,6 +289,21 @@ The enrollment branching is driven by `MFAEnrollmentLookup` (per-tier `MFAFactor
 
 One consequence worth naming: a **service account** hitting a step-up-gated route now receives that `503` rather than the old `401 password_confirm_required`. Machine principals carry no password hash, so neither answer ever succeeded — but the status code did change, and a definitive 4xx for principals that can never satisfy step-up is an open contract question rather than something to invent at the middleware. MFA completion rechecks eligibility and atomically consumes the challenge, so exactly one concurrent successful completion can mint the preserved pending SID.
 
+### Enrolment proof gate
+
+`RoleMiddleware.RequireEnrolmentProof(maxAge)` sits on the four endpoints that **create or replace** a second factor — TOTP `enroll/begin` + `enroll/confirm`, passkey `register/begin` + `register/finish`, on both tiers. Before it, those endpoints required only a valid bearer, so a stolen session-only token could attach a passkey to the victim's account, or *replace* their TOTP secret (confirming an enrolment deletes the existing factor after validating a code for the new one), and then own the account outright.
+
+Both halves of each ceremony are gated, not just the first: the factor set can change between `begin` and `confirm`/`finish`. Reading `/me/mfa`, verifying an existing factor and listing passkeys are unaffected — they do not add a credential.
+
+The proof it accepts depends on what the caller has:
+
+- **A caller who already holds a factor** must present a fresh one — exactly what `RequireStepUp` demands, sharing its predicate. There is one right answer for them, so this branch always answers `401 step_up_required`: never `password_confirm_required` (they hold something stronger), never `mfa_enrollment_required` (they are already enrolled).
+- **A caller who holds none** may instead show a recent interactive sign-in — the `auth_time` claim within `maxAge` — or a fresh password reconfirm. When they can show neither, the answer is a new **`401 reauthentication_required`** (`WWW-Authenticate: Bearer error="reauthentication_required"`, body carrying `maxAgeSeconds` and `authTime`), and both SPAs send the user back through sign-in and return them where they were. It is deliberately not `password_confirm_required`: the users most in need of a *first* enrolment are MFA-obligated accounts inside their grace window, whom the reconfirm endpoint refuses, and an OAuth-only account has no password to reconfirm.
+
+The gate **fails closed**: an unwired or erroring `MFAEnrollmentLookup` answers `step_up_required` for everyone, so a degraded database is never the reason a factor can be added without proof. Unlike `RequireMFA` it does **not** honour the `mfaEnabled` master switch — that switch exists to avoid a bootstrap deadlock, and none exists here, since a fresh login satisfies the no-factor branch.
+
+Two consequences worth naming. A token minted before this shipped carries no `auth_time`, reads as stale, and costs its holder one re-login — the failure mode of a missing claim is a re-authentication, never a bypass. And the four enrolment endpoints are **unreachable with a dev token**: dev tokens mint synthetic users with no `amr` and no `auth_time`, and a synthetic user cannot sign in again. Enrolment on a dev stack is exercised with a real login. Stamping `auth_time` on those mints was rejected because it is the same code path the service-account grant uses, and would give machine tokens a rolling window that satisfies this gate.
+
 ### TOTP details
 
 - Secrets AES-256-GCM-encrypted with `MFA_SECRET_ENCRYPTION_KEY` (falls back to `OAUTH_TOKEN_ENCRYPTION_KEY` for single-key dev setups). Backup codes argon2id-hashed via the password service.
@@ -335,6 +350,7 @@ Standard middleware:
 - `RequireSystemPermission("...")` — fine-grained permission check via authz
 - `RequireMFA()` — applied to authz role+binding mutations, tenant scoped mutations, module config writes; demands a recent `amr` containing an MFA marker
 - `RequireStepUp(maxAge)` — strict variant for catastrophic actions (see §7)
+- `RequireEnrolmentProof(maxAge)` — demands a fresh proof of presence before a second factor can be created or replaced (see §7)
 
 ## 10. Machine callers (service accounts)
 

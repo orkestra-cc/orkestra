@@ -17,11 +17,13 @@ import (
 // TestCodedErrorEnvelopes_Golden is the byte-level contract for every
 // hand-built coded error envelope AuthMiddleware writes in auth.go.
 //
-// There are TEN of them — the nine spec §8 #18(d) enumerates plus
-// sendTokenVerificationUnavailable, added by §4.10. sendErrorResponse, the
-// eleventh send* in auth.go, is deliberately NOT here: it routes through
-// errorManager and emits no top-level code at all (§3.C), and putting it
-// behind the same writer would be a wire change.
+// There are ELEVEN of them — the nine spec §8 #18(d) enumerates, plus
+// sendTokenVerificationUnavailable (added by §4.10) and
+// sendReauthenticationRequired (added by §4.2 D12, the no-factor branch of
+// RequireEnrolmentProof). sendErrorResponse, the twelfth send* in auth.go,
+// is deliberately NOT here: it routes through errorManager and emits no
+// top-level code at all (§3.C), and putting it behind the same writer
+// would be a wire change.
 //
 // SCOPE: auth.go, not the package. Four coded envelopes elsewhere in
 // internal/shared/middleware are built inline and are NOT pinned here, and
@@ -50,11 +52,13 @@ import (
 // the order the literals are written in, and Encode appends the trailing
 // newline.
 //
-// Every axis §8 #18(d) names is pinned: status (401 ×6, 403, 402, 503 ×2),
-// the WWW-Authenticate scheme (Bearer ×4, MFA ×3, absent ×3 — asserted as
-// an absent header, not an empty one), the errors[] array (present with a
-// per-site location + value ×8, absent ×2), and the extra top-level fields
-// (none ×5, maxAgeSeconds ×2, riskScore+riskThreshold ×1,
+// Every axis §8 #18(d) names is pinned. The tallies below count EMITTERS,
+// not rows — sendSessionRevoked contributes two rows and one tally entry:
+// status (401 ×7, 403 ×1, 402 ×1, 503 ×2), the WWW-Authenticate scheme
+// (Bearer ×5, MFA ×3, absent ×3 — asserted as an absent header, not an
+// empty one), the errors[] array (present with a per-site location + value
+// ×9, absent ×2), and the extra top-level fields (none ×6, maxAgeSeconds
+// ×2, maxAgeSeconds+authTime ×1, riskScore+riskThreshold ×1,
 // capability+tenantId ×1).
 //
 // If a change to an envelope is INTENDED, this test is the place the wire
@@ -70,6 +74,10 @@ func TestCodedErrorEnvelopes_Golden(t *testing.T) {
 	const (
 		ctJSON = "application/json"
 		maxAge = 300 * time.Second
+		// A fixed unix second so the reauthentication_required body is a
+		// literal, not a moving target. Any constant would do — this one
+		// is 2026-09-02T08:00:00Z.
+		goldenAuthTime = int64(1756800000)
 	)
 
 	cases := []struct {
@@ -142,6 +150,20 @@ func TestCodedErrorEnvelopes_Golden(t *testing.T) {
 				"Www-Authenticate": `Bearer error="password_confirm_required"`,
 			},
 			wantBody: `{"code":"password_confirm_required","detail":"this action requires a fresh password reconfirm because no second factor is enrolled","errors":[{"location":"require_step_up","message":"password confirm required","value":"PASSWORD_CONFIRM_REQUIRED"}],"maxAgeSeconds":300,"status":401,"title":"password reconfirm required","type":"about:blank"}` + "\n",
+		},
+		{
+			// The only emitter carrying TWO extra top-level fields on a
+			// challenge: maxAgeSeconds (the bar) and authTime (how stale
+			// the session is — 0 for a token minted before the claim
+			// shipped, which is a value the SPA must render, not an error).
+			name:       "sendReauthenticationRequired",
+			emit:       func(w http.ResponseWriter) { m.sendReauthenticationRequired(w, r, maxAge, goldenAuthTime) },
+			wantStatus: http.StatusUnauthorized,
+			wantHeaders: map[string]string{
+				"Content-Type":     ctJSON,
+				"Www-Authenticate": `Bearer error="reauthentication_required"`,
+			},
+			wantBody: `{"authTime":1756800000,"code":"reauthentication_required","detail":"adding a second factor requires a recent sign-in; please sign in again and retry","errors":[{"location":"require_enrolment_proof","message":"reauthentication required","value":"REAUTHENTICATION_REQUIRED"}],"maxAgeSeconds":300,"status":401,"title":"reauthentication required","type":"about:blank"}` + "\n",
 		},
 		{
 			// One of the two emitters with NO errors[] and no

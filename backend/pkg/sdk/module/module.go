@@ -599,6 +599,28 @@ type RoleMiddleware interface {
 	// to drive the user through /v1/auth/mfa/verify and retry.
 	RequireStepUp(maxAge time.Duration) func(http.Handler) http.Handler
 
+	// RequireEnrolmentProof blocks the request unless the caller proved
+	// presence within maxAge, where "presence" has two accepted shapes
+	// because the two populations have different ones available: a caller
+	// who already holds a second factor must present a fresh one (exactly
+	// what RequireStepUp demands, answered with code="step_up_required"),
+	// while a caller who holds none may instead show a recent interactive
+	// sign-in (the auth_time claim), and is answered with a 401
+	// code="reauthentication_required" when they cannot.
+	//
+	// Apply it to every endpoint that CREATES or REPLACES a credential —
+	// both halves of each ceremony, since the factor set can change
+	// between them. RequireStepUp is not a substitute: it answers
+	// password_confirm_required or mfa_enrollment_required on the
+	// no-factor branch, and neither is satisfiable by the population that
+	// most needs a first enrolment (an MFA-obligated account inside its
+	// grace window, or an OAuth-only account with no password).
+	//
+	// Implementations MUST fail closed when factor presence cannot be
+	// resolved: a degraded lookup answers step_up_required, never a
+	// pass-through.
+	RequireEnrolmentProof(maxAge time.Duration) func(http.Handler) http.Handler
+
 	// RequireLowRisk blocks the request when the current session's most
 	// recent risk score meets or exceeds threshold. Reuses the
 	// code="step_up_required" response envelope so the frontend's

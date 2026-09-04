@@ -550,25 +550,10 @@ func (h *WebAuthnHandler) RegisterPublicRoutes(api huma.API, mount RouteMount) {
 	}, h.LoginFinish)
 }
 
+// RegisterProtectedRoutes mounts the passkey endpoints a plain bearer is
+// enough for: listing your own credentials, and asserting one you already
+// hold. Enrolling a NEW passkey is not here — see RegisterEnrolmentRoutes.
 func (h *WebAuthnHandler) RegisterProtectedRoutes(api huma.API, mount RouteMount) {
-	huma.Register(api, huma.Operation{
-		OperationID: mount.OpIDPrefix + "mfa-webauthn-register-begin",
-		Method:      http.MethodPost,
-		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/webauthn/register/begin",
-		Summary:     "Begin enrolling a new passkey",
-		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, h.RegisterBegin)
-
-	huma.Register(api, huma.Operation{
-		OperationID: mount.OpIDPrefix + "mfa-webauthn-register-finish",
-		Method:      http.MethodPost,
-		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/webauthn/register/finish",
-		Summary:     "Finish enrolling a new passkey",
-		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, h.RegisterFinish)
-
 	huma.Register(api, huma.Operation{
 		OperationID: mount.OpIDPrefix + "mfa-webauthn-list",
 		Method:      http.MethodGet,
@@ -595,6 +580,34 @@ func (h *WebAuthnHandler) RegisterProtectedRoutes(api huma.API, mount RouteMount
 		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.VerifyFinish)
+}
+
+// RegisterEnrolmentRoutes mounts the two halves of passkey registration,
+// which ADD a credential. The caller wires RequireEnrolmentProof(5m) around
+// this API instance — see auth/module.go. Both halves are gated, mirroring
+// the TOTP ceremony: the factor set can change between begin and finish.
+//
+// H-3: these lived in RegisterProtectedRoutes, under RequireGlobal() alone,
+// so a stolen session-only bearer could attach a passkey of its own to the
+// victim's account and keep it after the session died.
+func (h *WebAuthnHandler) RegisterEnrolmentRoutes(api huma.API, mount RouteMount) {
+	huma.Register(api, huma.Operation{
+		OperationID: mount.OpIDPrefix + "mfa-webauthn-register-begin",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/webauthn/register/begin",
+		Summary:     "Begin enrolling a new passkey",
+		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.RegisterBegin)
+
+	huma.Register(api, huma.Operation{
+		OperationID: mount.OpIDPrefix + "mfa-webauthn-register-finish",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/webauthn/register/finish",
+		Summary:     "Finish enrolling a new passkey",
+		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.RegisterFinish)
 }
 
 // RegisterStepUpRoutes mounts the credential-removal endpoint, which
