@@ -105,10 +105,10 @@ spec:
     spec:
       containers:
       - name: redis
-        # Plain Redis, not the redis-stack-server the Compose stack ships.
-        # Orkestra uses core Redis commands only, so the module bundle is not
-        # required — which is why this tracks core Redis 8.2 while Compose
-        # sits on redis-stack-server 7.4 (that image lags core Redis).
+        # Matches the Compose stack, which also runs plain Redis 8.2. It used
+        # redis-stack-server until that image was found never to load a
+        # module — the command override drops the stack entrypoint — and
+        # Redis 8 folded those modules into core anyway.
         image: redis:8.2-alpine
         args:
         - sh

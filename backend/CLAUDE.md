@@ -4,7 +4,7 @@ Single Go binary, single Go module. 8 core modules (always loaded) and an **empt
 
 ## Stack
 
-Go 1.26.8 | Huma v2 (OpenAPI-first) | MongoDB 8.0 | Redis 7.4 (redis-stack-server) | Chi router | AIR hot-reload (Docker)
+Go 1.26.8 | Huma v2 (OpenAPI-first) | MongoDB 8.0 | Redis 8.2 | Chi router | AIR hot-reload (Docker)
 
 ## Module System
 

@@ -68,10 +68,9 @@ jobs:
       COVERAGE_THRESHOLD: 15
     services:
       redis:
-        # Same digest docker-compose.infra.yml pins. #351 pinned compose and
-        # left this floating, so CI tested against whatever `:latest` resolved
-        # to on the runner while the stacks were frozen — half a pin is skew.
-        image: redis/redis-stack-server@sha256:798ab84d9f266936b034ab11c4d04a2b8e4b441884c5aa7d17ac951eefdf742a
+        # Same image and patch docker-compose.infra.yml pins — CI must test
+        # the Redis the stacks run.
+        image: redis:8.2.9-alpine
         ports: ['6379:6379']
     steps:
       - uses: actions/checkout@v7
