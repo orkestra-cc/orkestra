@@ -276,56 +276,16 @@ func (r *fakeFactorRepo) failDeleteFor(t models.MFAFactorType) {
 	r.failTypes[t] = true
 }
 
-// fakeDeviceTrust is a minimal recording DeviceTrustService. RemoveFactor
-// only calls RevokeAllByUser, so that's the only method with real
-// behaviour; the rest exist to satisfy the interface.
-type fakeDeviceTrust struct {
-	mu      sync.Mutex
-	reasons []string
-}
-
-func (f *fakeDeviceTrust) MarkTrusted(context.Context, MarkTrustedInput) error { return nil }
-
-func (f *fakeDeviceTrust) IsTrusted(context.Context, string, string, string) (bool, *models.DeviceTrustDoc, error) {
-	return false, nil, nil
-}
-
-func (f *fakeDeviceTrust) ListActive(context.Context, string) ([]*models.DeviceTrustDoc, error) {
-	return nil, nil
-}
-
-func (f *fakeDeviceTrust) RevokeByDevice(context.Context, string, string, string) error { return nil }
-
-func (f *fakeDeviceTrust) RevokeAllByUser(_ context.Context, _ string, reason string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.reasons = append(f.reasons, reason)
-	return nil
-}
-
-func (f *fakeDeviceTrust) revokeCalls() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.reasons)
-}
-
-func (f *fakeDeviceTrust) lastReason() string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if len(f.reasons) == 0 {
-		return ""
-	}
-	return f.reasons[len(f.reasons)-1]
-}
-
 // newMFAServiceForTest builds an MFAService the same way every other test
 // in this file does (see TestEnrollmentAndVerify) — a fresh fakeFactorRepo,
 // in-memory challenge store, non-bcrypt PasswordService, and the
-// deterministic all-zero MFA_SECRET_ENCRYPTION_KEY — plus a fakeDeviceTrust
-// wired via SetDeviceTrust so RemoveFactor's revoke-once behaviour is
-// observable. Returns the service, the repo (for seeding/inspection), and
-// the device-trust fake (for revoke assertions).
-func newMFAServiceForTest(t *testing.T) (MFAService, *fakeFactorRepo, *fakeDeviceTrust) {
+// deterministic all-zero MFA_SECRET_ENCRYPTION_KEY — plus a
+// recordingDeviceTrust (gates_test.go — package services already has one
+// device-trust fake; extend it rather than adding a second) wired via
+// SetDeviceTrust so RemoveFactor's revoke-once behaviour is observable.
+// Returns the service, the repo (for seeding/inspection), and the
+// device-trust fake (for revoke assertions).
+func newMFAServiceForTest(t *testing.T) (MFAService, *fakeFactorRepo, *recordingDeviceTrust) {
 	t.Helper()
 	t.Setenv("MFA_SECRET_ENCRYPTION_KEY", hex32())
 
@@ -333,7 +293,7 @@ func newMFAServiceForTest(t *testing.T) (MFAService, *fakeFactorRepo, *fakeDevic
 	challenges := NewMFAChallengeService(NewMemoryOAuthStateStore())
 	pw := NewPasswordService(slog.Default(), false)
 	svc := NewMFAService(repo, challenges, pw, "Orkestra", slog.Default())
-	trust := &fakeDeviceTrust{}
+	trust := &recordingDeviceTrust{}
 	svc.SetDeviceTrust(trust)
 	return svc, repo, trust
 }
@@ -578,6 +538,9 @@ func TestRemoveFactor_TOTPOnlyUserStillSucceeds(t *testing.T) {
 	}
 }
 
+// Regression pin, not a TDD driver: already green pre-fix — neither row
+// ever existed, so even the old TOTP-only code returns ErrMFANotEnrolled
+// here. Kept as a boundary case alongside its siblings.
 func TestRemoveFactor_NoFactorsAtAllIsNotEnrolled(t *testing.T) {
 	svc, _, _ := newMFAServiceForTest(t)
 	if err := svc.RemoveFactor(context.Background(), "u-4", "u-4"); !errors.Is(err, ErrMFANotEnrolled) {
@@ -606,7 +569,12 @@ func TestRemoveFactor_EmptyWebAuthnRowIsNotAFactor(t *testing.T) {
 }
 
 // A partial failure must not report success: if one row deletes and the
-// other errors, the caller has to know the account is half-reset.
+// other errors, the caller has to know the account is half-reset. It's
+// not enough to check err != nil — an implementation that deleted
+// NOTHING and just errored would pass that check too, so this also
+// confirms the run really did leave a half-deleted account: the TOTP
+// row (deleted first, successfully) is gone, and the WebAuthn row
+// (whose delete failed) is still there.
 func TestRemoveFactor_PartialDeletionIsAnError(t *testing.T) {
 	svc, repo, _ := newMFAServiceForTest(t)
 	repo.seedTOTP(t, "u-6")
@@ -615,6 +583,34 @@ func TestRemoveFactor_PartialDeletionIsAnError(t *testing.T) {
 
 	if err := svc.RemoveFactor(context.Background(), "u-6", "u-6"); err == nil {
 		t.Fatal("a failed deletion of one row must surface as an error")
+	}
+	if repo.hasTOTP("u-6") {
+		t.Error("the TOTP row should already be gone")
+	}
+	if !repo.hasWebAuthn("u-6") {
+		t.Error("the failed delete must not have removed the row")
+	}
+}
+
+// The reverse case: the TOTP delete is attempted (and fails) before the
+// WebAuthn delete is ever attempted — RemoveFactor fails fast rather than
+// best-effort-both-then-join (see the "on the record, not to fix" note in
+// the task report), so a TOTP failure must leave the WebAuthn row
+// completely untouched, not merely undeleted.
+func TestRemoveFactor_PartialDeletionIsAnError_TOTPFailsFirst(t *testing.T) {
+	svc, repo, _ := newMFAServiceForTest(t)
+	repo.seedTOTP(t, "u-8")
+	repo.seedWebAuthn(t, "u-8", 1)
+	repo.failDeleteFor(models.MFAFactorTOTP)
+
+	if err := svc.RemoveFactor(context.Background(), "u-8", "u-8"); err == nil {
+		t.Fatal("a failed TOTP delete must surface as an error")
+	}
+	if !repo.hasTOTP("u-8") {
+		t.Error("the TOTP row's own delete failed — it must still be here")
+	}
+	if !repo.hasWebAuthn("u-8") {
+		t.Error("the WebAuthn row must be untouched — RemoveFactor fails fast on the TOTP error")
 	}
 }
 

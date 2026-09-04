@@ -482,11 +482,12 @@ type MFAAdminResetResponse struct {
 	}
 }
 
-// AdminReset removes another user's MFA factor and starts a fresh grace
-// window so they must re-enroll within the policy deadline. Consumes the
-// system.users.mfa_reset permission declared by the auth module and is
-// itself gated by RequireMFA — an admin can't reset another user's MFA
-// without having completed their own second factor first.
+// AdminReset removes every MFA factor another user holds (TOTP + WebAuthn,
+// D15) and starts a fresh grace window so they must re-enroll within the
+// policy deadline. Consumes the system.users.mfa_reset permission declared
+// by the auth module and is itself gated by RequireMFA — an admin can't
+// reset another user's MFA without having completed their own second
+// factor first.
 func (h *MFAHandler) AdminReset(ctx context.Context, req *MFAAdminResetRequest) (*MFAAdminResetResponse, error) {
 	actorUUID, _ := ctx.Value("userUUID").(string)
 	if actorUUID == "" {

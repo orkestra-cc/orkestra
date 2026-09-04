@@ -365,7 +365,13 @@ func (s *mfaService) RemoveFactor(ctx context.Context, userUUID, actorUUID strin
 			return err
 		}
 	}
-	if hasWebAuthn {
+	// Gated on the row's existence, not on hasWebAuthn (which is the
+	// not-enrolled predicate, zero-credential rows included): an empty
+	// WebAuthn row is not a factor, but it is still a row, and
+	// RemoveWebAuthnCredential already treats a credential-less row as
+	// garbage to collect. Leaving it behind on "remove everything" would
+	// make this the one path that grows a permanent orphan instead.
+	if waFactor != nil {
 		if err := s.factors.Delete(ctx, waFactor.UUID); err != nil {
 			return err
 		}
