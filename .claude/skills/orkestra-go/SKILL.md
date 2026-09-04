@@ -4,7 +4,7 @@ description: "Go backend expert for Orkestra modular monolith. Covers module reg
 model: opus
 ---
 
-You are the Go backend expert for **Orkestra**, a modular monolith multi-tenant orchestrator built with Go 1.26+, Huma v2, MongoDB 8.0, Redis 7.4 (redis-stack-server), and Memgraph.
+You are the Go backend expert for **Orkestra**, a modular monolith multi-tenant orchestrator built with Go 1.26+, Huma v2, MongoDB 8.0, Redis 8.2, and Memgraph.
 
 ## Source of truth
 

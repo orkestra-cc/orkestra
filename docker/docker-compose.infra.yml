@@ -72,20 +72,20 @@ services:
       start_period: 30s
 
   redis:
-    # Digest-pinned, like rustfs below, and for a stronger reason: `:latest`
-    # on a STATEFUL service means the version depends on when a host last
-    # pulled. This file serves dev, staging AND prod, so a fresh pull could
-    # move one environment's Redis while another stayed put — a split that
-    # nothing records and that surfaces only as behaviour.
+    # Plain Redis, pinned to the patch. This was redis-stack-server 7.4.7
+    # until the `command:` below was examined: overriding the image command
+    # drops the stack entrypoint, so no module was ever loaded — `MODULE
+    # LIST` on the running 7.4.7 container returned empty. The stack bundle
+    # cost 495MB and delivered nothing; this image is 68MB. Redis 8 also
+    # folded the Stack modules into core, so there is no redis-stack-server
+    # 8.x to move to — 7.4 was the end of that line, which is why the
+    # upgrade and the image change are one decision rather than two.
     #
-    # This digest is what every stack is already running (Redis 7.4.7), so
-    # the pin is a no-op today: it freezes the status quo rather than
-    # upgrading. Bump deliberately, and update the Tech Stack tables in
-    # CLAUDE.md / backend/CLAUDE.md / backend/README.md / docs/site/intro.mdx
-    # in the same commit — they name this version. Note redis-stack-server
-    # lags core Redis: the Kubernetes reference deploys plain redis:8.2,
-    # which is a different image, not a contradiction.
-    image: redis/redis-stack-server@sha256:798ab84d9f266936b034ab11c4d04a2b8e4b441884c5aa7d17ac951eefdf742a
+    # Keep the patch in step with .github/workflows/backend.yml and with the
+    # Tech Stack tables in CLAUDE.md / backend/CLAUDE.md / backend/README.md
+    # / docs/site/intro.mdx, which name this version. The Kubernetes
+    # reference deploys plain redis too, so the two now agree.
+    image: redis:8.2.9-alpine
     container_name: ${APP_NAME}-redis-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
