@@ -56,6 +56,9 @@ func (notFoundRepo) MarkEmailVerified(context.Context, string) error {
 func (notFoundRepo) SetMFAGraceStartedAt(context.Context, string, time.Time) error {
 	return repository.ErrUserNotFound
 }
+func (notFoundRepo) BumpMFAEpoch(context.Context, string) (int, error) {
+	return 0, repository.ErrUserNotFound
+}
 
 // graceStampRepo answers the LOOKUP with a live user so the
 // "StartMFAGraceIfUnset (stamp)" row reaches that method's second repository
@@ -103,6 +106,7 @@ func TestDelegationsTranslateRepositoryNotFound(t *testing.T) {
 		{"StartMFAGraceIfUnset", func() error { return svc.StartMFAGraceIfUnset(ctx, "u-1") }},
 		{"StartMFAGraceIfUnset (stamp)", func() error { return graceSvc.StartMFAGraceIfUnset(ctx, "u-1") }},
 		{"ResetMFAGrace", func() error { return svc.ResetMFAGrace(ctx, "u-1") }},
+		{"BumpMFAEpoch", func() error { _, err := svc.BumpMFAEpoch(ctx, "u-1"); return err }},
 	}
 
 	for _, tc := range cases {

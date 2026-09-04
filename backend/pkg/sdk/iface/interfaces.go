@@ -138,6 +138,27 @@ type UserLifecycleStateProvider interface {
 	UserLifecycleState(ctx context.Context, userUUID string) (UserLifecycleState, error)
 }
 
+// ---------------------------------------------------------------------------
+// MFAEpochBumper — consumed by: the auth module's MFA service and WebAuthn
+// service, on every credential removal or replacement. Narrow on purpose
+// (the UserLifecycleStateProvider precedent): UserProvider is implemented by
+// forks and stays additive-only, and this is one monotone counter, not
+// profile data.
+//
+// Resolve it with module.GetTyped against the tier's user provider
+// (ServiceOperatorUserProvider / ServiceClientUserProvider). A missing value
+// means the epoch never moves, so the platform degrades to the pre-epoch
+// behaviour — session revocation alone — which is why the removal paths log
+// at WARN when the seam is absent rather than failing.
+// ---------------------------------------------------------------------------
+
+type MFAEpochBumper interface {
+	// BumpMFAEpoch increments the user's MFA epoch and returns the new
+	// value. It is a single atomic $inc: concurrent removals converge and
+	// neither can observe the other's value as its own.
+	BumpMFAEpoch(ctx context.Context, userUUID string) (int, error)
+}
+
 // OAuthLinkDataUpdater is the additive sub-interface that lets the auth
 // module refresh the embedded OAuthLink.OAuthData map (typically the
 // cached `picture` URL) on every OAuth callback. Adding this method

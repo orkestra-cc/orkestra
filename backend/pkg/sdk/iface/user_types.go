@@ -162,6 +162,21 @@ type User struct {
 	// Nil = grace has not begun (and isn't yet relevant for this user).
 	MFAGraceStartedAt *time.Time `bson:"mfaGraceStartedAt,omitempty" json:"-"`
 
+	// MFAEpoch is bumped by every REMOVAL or REPLACEMENT of an MFA
+	// credential (TOTP removal, TOTP replacement, any passkey removal,
+	// admin reset) and never by an addition. Every access token carries
+	// the epoch it was minted under in the "mfae" claim; a request whose
+	// token epoch is behind this value has its MFA markers ignored, so
+	// authority proven by a factor the user no longer holds dies
+	// immediately in EVERY session — the caller's included — without
+	// waiting for a refresh and without depending on a revocation write
+	// succeeding.
+	//
+	// Absent on every document written before this shipped, which reads
+	// as 0 and matches every pre-deploy token: the deploy downgrades
+	// nobody, and the first removal on such an account moves it to 1.
+	MFAEpoch int `bson:"mfaEpoch,omitempty" json:"-"`
+
 	// Status and metadata
 	IsActive      bool       `bson:"isActive" json:"isActive"`
 	EmailVerified bool       `bson:"emailVerified" json:"emailVerified"`
