@@ -58,6 +58,27 @@ type SessionRiskLookup func(ctx context.Context, sessionID string) (float64, err
 // gate.
 type MFAEnrollmentLookup func(ctx context.Context, audience, userUUID string) (hasFactor bool, err error)
 
+// MFAEpochLookup resolves a user's CURRENT MFA epoch — the value every
+// access token records in its "mfae" claim at mint time. Comparing the two
+// is what makes a credential removal take effect on the caller's existing
+// token instead of at its next refresh (spec §4.3 D16).
+//
+// The audience argument is load-bearing, not decoration. One AuthMiddleware
+// instance serves both the operator and the client surface, so a lookup that
+// resolved a single user collection would miss every client-tier UUID and —
+// because the resolver fails closed — strip MFA authority from every
+// client-tier token on every request. The signature mirrors
+// MFAEnrollmentLookup for exactly that reason; wire it the same way, from
+// both tiers' user providers.
+//
+// A non-nil error means the epoch could not be established, INCLUDING "no
+// such user". Callers read that as "not current" and drop the MFA markers:
+// a degraded store must never be the reason a removed factor keeps its
+// authority. Leaving the lookup unwired is the one permissive case — it
+// restores the exact pre-epoch behaviour, so a deployment that has not
+// wired it is no weaker than it was before the epoch existed.
+type MFAEpochLookup func(ctx context.Context, audience, userUUID string) (epoch int, err error)
+
 // StepUpPolicy is the subset of *services.AuthPolicyService the middleware
 // needs to decide between password-reconfirm and mfa-enrollment-required
 // when the user has no factor. The interface is declared here (not in
@@ -99,6 +120,7 @@ type AuthMiddleware struct {
 	sessionRevocation services.SessionRevocationService
 	sessionRiskLookup SessionRiskLookup
 	mfaEnrollment     MFAEnrollmentLookup
+	mfaEpochLookup    MFAEpochLookup
 	stepUpPolicy      StepUpPolicy
 	users             iface.UserProvider
 	errorManager      *errors.Manager
@@ -175,6 +197,15 @@ func (m *AuthMiddleware) SetSessionRiskLookup(lookup SessionRiskLookup) {
 // behaviour (every step-up failure → step_up_required).
 func (m *AuthMiddleware) SetMFAEnrollmentLookup(lookup MFAEnrollmentLookup) {
 	m.mfaEnrollment = lookup
+}
+
+// SetMFAEpochLookup wires the per-tier MFA-epoch resolver that every gate
+// consuming an MFA marker reads through (spec §4.3 D16). Optional in the
+// sense that an unwired lookup restores the pre-epoch behaviour exactly —
+// but leaving it unwired means a removed factor's authority survives in
+// already-issued tokens until they expire, which is the whole of M-2.
+func (m *AuthMiddleware) SetMFAEpochLookup(lookup MFAEpochLookup) {
+	m.mfaEpochLookup = lookup
 }
 
 // SetStepUpPolicy wires the policy reader RequireStepUp uses to decide
@@ -470,6 +501,20 @@ func (m *AuthMiddleware) setUserContext(w http.ResponseWriter, r *http.Request, 
 	ctx = context.WithValue(ctx, ctxauth.KeySystemRole, claims.SystemRole)
 	ctx = context.WithValue(ctx, ctxClaims, claims)
 	ctx = context.WithValue(ctx, ctxTenantMemberships, claims.Memberships)
+	// Resolve the caller's MFA authority ONCE, here, where the request
+	// context is already being built (spec §4.3 D16). Every consumer —
+	// RequireMFA, RequireStepUp, the enrolment gate's factor branch, the
+	// impersonation bypass below, and Cedar's principal.mfa_enrolled —
+	// reads the stash rather than claims.AMR, so a route wearing several
+	// MFA-aware gates costs one lookup and they can never disagree.
+	//
+	// Resolving here rather than lazily inside each gate is what makes the
+	// impersonation bypass and IsMFAEnrolled work at all: the bypass is not
+	// a middleware and has no `next` to thread a derived request into, and
+	// IsMFAEnrolled is a package function reached from authz with a context
+	// and nothing else. A memo written by either would be invisible to the
+	// other.
+	ctx = context.WithValue(ctx, mfaAuthorityKey{}, mfaAuthority{amr: m.resolveMFAAuthority(ctx, claims)})
 	if ip := utils.GetClientIP(r); ip != "" {
 		ctx = context.WithValue(ctx, ctxauth.KeyClientIP, ip)
 	}
@@ -505,6 +550,76 @@ func (m *AuthMiddleware) setUserContext(w http.ResponseWriter, r *http.Request, 
 	}
 
 	next.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// mfaAuthorityKey is the context key setUserContext stashes the resolved
+// MFA authority under. A struct key rather than one of this file's string
+// consts: the value is a decision this middleware made, not a claim, and
+// nothing outside the package may forge or read it by name.
+type mfaAuthorityKey struct{}
+
+// mfaAuthority wraps the resolved marker slice so "resolved to nothing"
+// (every marker stripped) stays distinguishable from "never resolved" —
+// a bare nil []string in a context value cannot tell those apart, and the
+// two must behave differently.
+type mfaAuthority struct{ amr []string }
+
+// resolveMFAAuthority returns the subset of claims.AMR that is still backed
+// by a factor set the user actually holds.
+//
+// A token minted under MFA epoch N carries "mfae": N. When the user's
+// current epoch has moved past it — they removed a factor, replaced one, or
+// an admin reset them — every MFA marker on that token is authority derived
+// from a credential that no longer exists, so it is dropped. The removal
+// therefore takes effect on the CALLER's current token, immediately, without
+// waiting for a refresh and without depending on a revocation write
+// succeeding.
+//
+// Four properties matter, in this order:
+//
+//   - a token with no epoch-governed marker costs NO lookup. That is the
+//     common request path, and the epoch provably cannot change its answer.
+//   - an unwired lookup keeps every marker: the pre-epoch behaviour,
+//     unchanged. Spec §5 edge case 12 — the deploy itself downgrades nobody.
+//   - a lookup error (a store outage, or no such user) reads as "not
+//     current" and drops the markers. Fail closed.
+//   - absent claim and absent user field are both 0 and therefore match, so
+//     a pre-deploy token against a pre-deploy user document keeps its
+//     markers.
+//
+// Equality, not "behind": a token claiming an epoch the user has never
+// reached is as unbacked as one claiming an epoch they have left.
+func (m *AuthMiddleware) resolveMFAAuthority(ctx context.Context, claims *models.JWTClaims) []string {
+	if claims == nil {
+		return nil
+	}
+	if !models.HasEpochBoundAMR(claims.AMR) {
+		return claims.AMR
+	}
+	if m.mfaEpochLookup == nil {
+		return claims.AMR
+	}
+	current, err := m.mfaEpochLookup(ctx, claims.Audience, claims.UserUUID)
+	if err != nil || claims.MFAEpoch != current {
+		return models.WithoutEpochBoundAMR(claims.AMR)
+	}
+	return claims.AMR
+}
+
+// mfaAuthorityFrom returns the authority setUserContext resolved for this
+// request, falling back to the raw claims when nothing was stashed —
+// unauthenticated routes, and the many gate tests that seed ctxClaims
+// directly. The fallback is the same answer an unwired lookup gives, so a
+// caller can never tell "no epoch wiring" from "no perimeter", and neither
+// is a downgrade from the pre-epoch behaviour.
+func mfaAuthorityFrom(ctx context.Context, claims *models.JWTClaims) []string {
+	if a, ok := ctx.Value(mfaAuthorityKey{}).(mfaAuthority); ok {
+		return a.amr
+	}
+	if claims == nil {
+		return nil
+	}
+	return claims.AMR
 }
 
 // impersonationBypassDecision is the tri-state result tryImpersonationBypass
@@ -558,7 +673,12 @@ func (m *AuthMiddleware) tryImpersonationBypass(
 	}
 
 	personal := isPersonalTenant(target)
-	if personal && !amrSatisfiesMFA(claims.AMR) {
+	// Read through the resolver, never claims.AMR: impersonating a personal
+	// tenant is the most sensitive thing an operator does, so a marker whose
+	// factor has been removed must not open it. Note the second consequence
+	// of the strict predicate — a password reconfirm ("reauth") no longer
+	// admits an operator here; only a real second factor does.
+	if personal && !amrSatisfiesMFA(mfaAuthorityFrom(ctx, claims)) {
 		return ctx, target.Kind, impersonationBypassMFARequired
 	}
 
@@ -870,10 +990,21 @@ func GetAMR(ctx context.Context) ([]string, bool) {
 }
 
 // IsMFAEnrolled reports whether the active session was completed with a
-// verified second factor. One source of truth for both RequireMFA
-// middleware and Cedar's principal.mfa_enrolled attribute — drift here
-// would let policies gate on a signal that never fires.
+// verified second factor THAT THE USER STILL HOLDS. One source of truth for
+// both RequireMFA middleware and Cedar's principal.mfa_enrolled attribute —
+// drift here would let policies gate on a signal that never fires.
+//
+// It reads the authority setUserContext resolved, not the raw claim, so a
+// stale MFA epoch answers false to Cedar on every request — including the
+// ones that pass through no MFA-aware gate at all, which is where a
+// per-gate memo would have left the raw claim showing through. GetAMR
+// deliberately keeps returning the literal claim: it is the token's record
+// of how the session was authenticated, and the Cedar principal stamps it
+// as such.
 func IsMFAEnrolled(ctx context.Context) bool {
+	if a, ok := ctx.Value(mfaAuthorityKey{}).(mfaAuthority); ok {
+		return amrSatisfiesMFA(a.amr)
+	}
 	amr, ok := GetAMR(ctx)
 	if !ok {
 		return false
@@ -1087,7 +1218,7 @@ func (m *AuthMiddleware) RequireMFA() func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if !amrSatisfiesMFA(claims.AMR) {
+			if !amrSatisfiesMFA(mfaAuthorityFrom(r.Context(), claims)) {
 				m.sendMFARequired(w, r)
 				return
 			}
@@ -1155,12 +1286,13 @@ func (m *AuthMiddleware) RequireStepUp(maxAge time.Duration) func(http.Handler) 
 // password reconfirm, inside maxAge") and must keep answering it the same
 // way.
 //
-// The request is a parameter although nothing here reads it yet: the
-// epoch-aware version resolves the caller's MFA authority off the context
-// built by setUserContext (R12) rather than trusting claims.AMR
-// literally, and threading it in now keeps that change to the body.
-func (m *AuthMiddleware) hasFreshSecondFactor(_ *http.Request, claims *models.JWTClaims, maxAge time.Duration) bool {
-	return amrSatisfiesStepUp(claims.AMR) && claims.LastOTPAt > 0 &&
+// The request is what carries the resolved MFA authority: the predicate
+// reads the value setUserContext stashed on the context (R12) rather than
+// trusting claims.AMR literally, so a token whose second factor has since
+// been removed fails freshness even inside maxAge. "reauth" is unaffected —
+// the epoch governs MFA credentials, and a password reconfirm is not one.
+func (m *AuthMiddleware) hasFreshSecondFactor(r *http.Request, claims *models.JWTClaims, maxAge time.Duration) bool {
+	return amrSatisfiesStepUp(mfaAuthorityFrom(r.Context(), claims)) && claims.LastOTPAt > 0 &&
 		time.Since(time.Unix(claims.LastOTPAt, 0)) <= maxAge
 }
 
@@ -1477,41 +1609,44 @@ func (m *AuthMiddleware) sendReauthenticationRequired(w http.ResponseWriter, _ *
 // RequireStepUp and RequireEnrolmentProof only, through
 // hasFreshSecondFactor.
 //
-// The two lists are identical TODAY — amrSatisfiesMFA still accepts
-// "reauth" — so this is a seam, not yet a behaviour change. The split
-// exists because "reauth", a fresh password reconfirm, is a presence proof
-// but NOT a second factor: letting it satisfy RequireMFA (which it does
-// today) means a session-long gate meant to demand a second factor accepts
-// a password the caller already typed once, which is audit finding M-1.
-// RequireStepUp is different — it asks "did you prove presence in the last
-// five minutes", and a reconfirm answers that. Narrowing amrSatisfiesMFA
-// is M-1's job; this function is what makes that narrowing possible
-// without collaterally breaking the freshness gates.
+// The two lists now genuinely differ. "reauth", a fresh password
+// reconfirm, is a presence proof but NOT a second factor, and RequireStepUp
+// asks the question a reconfirm answers: "did you prove presence in the
+// last five minutes". RequireMFA asks a different one — "is there a second
+// factor on this session" — and accepting a password the caller had already
+// typed as the answer was audit finding M-1.
+//
+// Callers pass the resolved MFA authority (mfaAuthorityFrom), never
+// claims.AMR: a step-up satisfied by a removed factor is exactly what the
+// epoch exists to stop. "reauth" survives that resolution by construction —
+// the epoch governs MFA credentials, and a password is not one.
 func amrSatisfiesStepUp(amr []string) bool {
 	for _, v := range amr {
-		if v == "otp" || v == "webauthn" || v == "mfa" || v == "reauth" {
+		if models.IsSecondFactorAMR(v) || v == models.AMRReauth {
 			return true
 		}
 	}
 	return false
 }
 
-// amrSatisfiesMFA checks whether any second-factor method (or a fresh
-// password reconfirm) is recorded on the token. Method names follow
-// RFC 8176 with one local extension:
+// amrSatisfiesMFA reports a genuine SECOND FACTOR: "otp", "webauthn" or
+// "mfa", and nothing else.
 //
-//   - "reauth" — a fresh password reconfirm minted by the
-//     /v1/auth/{tier}/me/password-confirm endpoint. The endpoint refuses
-//     to mint a "reauth" token for a user with any MFA factor enrolled,
-//     so accepting it here cannot weaken the gate for an
-//     MFA-required user.
+// "reauth" is deliberately absent (M-1). A password reconfirm proves
+// presence, not a second factor, and accepting it here let a session-long
+// MFA gate be satisfied by a password the caller had already typed. The
+// argument that this was safe — the password-confirm endpoint refuses to
+// mint a "reauth" token for a user with any factor enrolled — only ever
+// covered the enrolled population; it said nothing about an operator with
+// no factor walking through RequireMFA, or through the personal-tenant
+// impersonation bypass, on a reconfirm alone. The sidecar
+// JWTValidator.RequireMFA has always used this strict list; the drift
+// closes here.
+//
+// Callers must read markers through mfaAuthorityFrom, never from
+// claims.AMR directly, so a stale MFA epoch reads as no marker.
 func amrSatisfiesMFA(amr []string) bool {
-	for _, v := range amr {
-		if v == "otp" || v == "webauthn" || v == "mfa" || v == "reauth" {
-			return true
-		}
-	}
-	return false
+	return models.HasSecondFactorAMR(amr)
 }
 
 // sendPasswordConfirmRequired emits the 401 envelope that tells the

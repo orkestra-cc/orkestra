@@ -692,20 +692,50 @@ func TestRequireEnrolmentProof_NilLookupFreshFactorPasses(t *testing.T) {
 	}
 }
 
-// M-4: amrSatisfiesStepUp and amrSatisfiesMFA hold identical literal marker
-// lists today \u2014 the split is a seam for M-1's later narrowing of the
-// session-long predicate, not a behaviour change. Until the marker set is
-// extracted to one place, this is what stops an edit to one list from
-// silently diverging from the other.
-func TestAMRPredicates_AgreeOnEveryMarker(t *testing.T) {
-	for _, amr := range [][]string{
-		nil, {}, {"pwd"}, {"oauth"}, {"otp"}, {"webauthn"}, {"mfa"}, {"reauth"},
-		{"device_trust"}, {"pwd", "otp"}, {"pwd", "reauth"}, {"oauth", "webauthn"},
+// M-1/M-4: the two predicates now differ on exactly one marker, "reauth",
+// and agree on every other. This replaces the seam-era test that asserted
+// they agreed everywhere: that one existed to catch an ACCIDENTAL
+// divergence while the lists were duplicated literals, and the divergence
+// it guarded against is the deliberate change M-1 asks for.
+//
+// The table is exhaustive over the marker vocabulary, so it also pins the
+// answers themselves \u2014 an edit to models.IsSecondFactorAMR that quietly
+// admitted device_trust, say, would fail here rather than only in an
+// integration test.
+func TestAMRPredicates_DifferOnlyOnReauth(t *testing.T) {
+	for _, tc := range []struct {
+		amr            []string
+		wantMFA        bool
+		wantStepUp     bool
+		wantEpochBound bool
+	}{
+		{nil, false, false, false},
+		{[]string{}, false, false, false},
+		{[]string{"pwd"}, false, false, false},
+		{[]string{"oauth"}, false, false, false},
+		{[]string{"otp"}, true, true, true},
+		{[]string{"webauthn"}, true, true, true},
+		{[]string{"mfa"}, true, true, true},
+		// The one divergence: a password reconfirm proves presence for a
+		// step-up but is not a second factor, and the MFA epoch does not
+		// govern it (a password is not an MFA credential).
+		{[]string{"reauth"}, false, true, false},
+		{[]string{"pwd", "reauth"}, false, true, false},
+		// device_trust is epoch-governed \u2014 the trust was granted on the
+		// strength of a factor \u2014 but never a second factor on its own.
+		{[]string{"device_trust"}, false, false, true},
+		{[]string{"pwd", "otp"}, true, true, true},
+		{[]string{"oauth", "webauthn"}, true, true, true},
+		{[]string{"pwd", "otp", "device_trust"}, true, true, true},
 	} {
-		if got, want := amrSatisfiesStepUp(amr), amrSatisfiesMFA(amr); got != want {
-			t.Errorf("amr %v: amrSatisfiesStepUp = %v, amrSatisfiesMFA = %v \u2014 "+
-				"the two lists have diverged; narrowing amrSatisfiesMFA (M-1) is a "+
-				"deliberate change that must update this test in the same commit", amr, got, want)
+		if got := amrSatisfiesMFA(tc.amr); got != tc.wantMFA {
+			t.Errorf("amr %v: amrSatisfiesMFA = %v, want %v", tc.amr, got, tc.wantMFA)
+		}
+		if got := amrSatisfiesStepUp(tc.amr); got != tc.wantStepUp {
+			t.Errorf("amr %v: amrSatisfiesStepUp = %v, want %v", tc.amr, got, tc.wantStepUp)
+		}
+		if got := authModels.HasEpochBoundAMR(tc.amr); got != tc.wantEpochBound {
+			t.Errorf("amr %v: HasEpochBoundAMR = %v, want %v", tc.amr, got, tc.wantEpochBound)
 		}
 	}
 }

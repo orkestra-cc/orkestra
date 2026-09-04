@@ -90,6 +90,7 @@ Constants live in `backend/pkg/sdk/module/services.go:13-32`. This is the table 
 | `ServiceSessionRevocation` | auth | `services.SessionRevocationService` | Redis-backed revoked-session set; consumed by middleware on every auth'd request |
 | `ServiceAuthService` / `ServiceClientAuthService` **as `iface.SessionTerminator`** | auth | `iface.SessionTerminator` | Consumed by the **user** module's deactivate / delete paths to end a revoked principal's sessions. Resolved *lazily at request time* — user initialises before auth, so it cannot be wired at Init. |
 | `ServiceMFAEnrollmentLookup` | auth | `middleware.MFAEnrollmentLookup` | Per-tier MFA-factor presence resolver; consumed by `RequireStepUp` to split step-up failures into MFA / password-reconfirm / enroll-first |
+| `ServiceMFAEpochLookup` | auth | `middleware.MFAEpochLookup` | Per-tier resolver for a user's current MFA epoch; consumed by `AuthMiddleware.setUserContext` to drop the MFA markers of a token minted before a credential removal. Built from **both** tiers' user providers — one middleware serves both host muxes, so a single-provider lookup would fail closed on every token of the other tier |
 | `ServiceOAuthProviderFactory` | auth | `*services.OAuthProviderFactory` | |
 | `ServiceOAuthStateService` | auth | `*services.OAuthStateService` | |
 | `ServiceOAuthProviderRepo` | auth | `*repository.OAuthProviderRepository` | |

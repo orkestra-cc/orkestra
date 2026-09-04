@@ -77,6 +77,16 @@ const (
 	// MFAFactorRepository instances. Value: middleware.MFAEnrollmentLookup.
 	ServiceMFAEnrollmentLookup ServiceKey = "auth.mfa_enrollment_lookup"
 
+	// ServiceMFAEpochLookup resolves a user's CURRENT MFA epoch, scoped to
+	// the tier that minted the caller's token. Consumed by AuthMiddleware to
+	// decide whether the MFA markers on an access token are still backed by
+	// a factor the user holds — a removal bumps the epoch, and every token
+	// minted before it loses its MFA authority on its next request. Wired by
+	// the auth module from BOTH tiers' user providers: one AuthMiddleware
+	// serves both surfaces, so a single-provider lookup would fail closed on
+	// every token of the other tier. Value: middleware.MFAEpochLookup.
+	ServiceMFAEpochLookup ServiceKey = "auth.mfa_epoch_lookup"
+
 	// ServiceWebAuthn is the W3C WebAuthn ceremony orchestrator (registration
 	// + assertion). Registered by the auth module when the deployment has
 	// configured an RP via WEBAUTHN_RP_ID + WEBAUTHN_RP_ORIGINS. Consumers

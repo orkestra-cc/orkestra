@@ -362,6 +362,16 @@ func main() {
 	if lookup, ok := module.GetTyped[authMiddleware.MFAEnrollmentLookup](svcRegistry, module.ServiceMFAEnrollmentLookup); ok {
 		authMW.SetMFAEnrollmentLookup(lookup)
 	}
+	// MFA-epoch lookup (spec §4.3 D16). Unlike the two setters below this is
+	// tier-DISPATCHING, not tier-agnostic: the auth module builds it from
+	// both tiers' user providers because this one middleware instance serves
+	// both host muxes. SetUserProvider below is the operator provider only —
+	// deliberately not reused here, since resolving a client UUID against
+	// operator_users would miss, fail closed, and strip MFA authority from
+	// every client-tier token.
+	if lookup, ok := module.GetTyped[authMiddleware.MFAEpochLookup](svcRegistry, module.ServiceMFAEpochLookup); ok {
+		authMW.SetMFAEpochLookup(lookup)
+	}
 	if policy, ok := module.GetTyped[*services.AuthPolicyService](svcRegistry, module.ServiceAuthPolicy); ok && policy != nil {
 		authMW.SetStepUpPolicy(policy)
 	}

@@ -1478,6 +1478,12 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	}
 	deps.Services.Register(module.ServiceMFAEnrollmentLookup, authMiddleware.MFAEnrollmentLookup(mfaEnrollmentLookup))
 
+	// MFA-epoch lookup (spec §4.3 D16): the reader that makes Task 5's
+	// epoch bumps mean something. Built from BOTH tiers' user providers —
+	// see newMFAEpochLookup for why passing one provider twice would be an
+	// outage rather than a bug.
+	deps.Services.Register(module.ServiceMFAEpochLookup, newMFAEpochLookup(operatorUser, clientUser))
+
 	// Register one PII producer per tier with the DSR registry. Each
 	// producer reports tier-correct collection names in the DSR audit
 	// row. The registry tolerates missing producers — a deployment
@@ -1669,6 +1675,44 @@ func resolveMFAEpochBumper(reg *module.ServiceRegistry, key module.ServiceKey, l
 		return nil
 	}
 	return bumper
+}
+
+// newMFAEpochLookup builds the tier-dispatching MFA-epoch resolver the
+// AuthMiddleware consults on every request whose token carries an MFA
+// marker (spec §4.3 D16).
+//
+// The tier dispatch is the whole substance of this function. main.go hands
+// ONE AuthMiddleware to both the operator and the client host mux, so a
+// resolver that consulted a single user collection would fail to find every
+// UUID belonging to the other tier — and because the middleware reads any
+// error as "not current", that miss would strip the MFA authority from
+// every one of that tier's tokens, on every request, permanently. The
+// audience claim picks the collection exactly as the MFA-enrollment lookup
+// does; an empty or unknown audience falls back to operator, today's
+// canonical tier, so a legacy single-aud token keeps working.
+//
+// A user the tier's provider cannot produce is an ERROR, never epoch 0:
+// answering 0 would silently grant a token whose "mfae" claim is absent —
+// which also reads as 0 — the authority of a matching epoch, turning a
+// failed lookup into a pass. The middleware fails closed on the error.
+func newMFAEpochLookup(operator, client iface.UserProvider) authMiddleware.MFAEpochLookup {
+	return func(ctx context.Context, audience, userUUID string) (int, error) {
+		provider := operator
+		if audience == services.AudienceClient {
+			provider = client
+		}
+		if provider == nil {
+			return 0, fmt.Errorf("auth: no user provider wired for audience %q", audience)
+		}
+		user, err := provider.GetUserByID(ctx, userUUID)
+		if err != nil {
+			return 0, err
+		}
+		if user == nil {
+			return 0, iface.ErrUserNotFound
+		}
+		return user.MFAEpoch, nil
+	}
 }
 
 func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {

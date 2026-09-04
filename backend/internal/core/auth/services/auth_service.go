@@ -1464,6 +1464,56 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 	return tokenResponse, nil
 }
 
+// carryAMR recomputes the authentication-method markers for a refreshed
+// token instead of copying them forward (spec §4.3 D17).
+//
+// Refresh used to hand claims.AMR and claims.LastOTPAt to the mint
+// verbatim, so a session whose factor had been removed would keep minting
+// MFA-satisfied tokens for as long as it lived — the second half of M-2.
+// The rules:
+//
+//   - "reauth" is ALWAYS dropped, whatever the epoch says. A password
+//     reconfirm is a five-minute proof of presence, never a property of
+//     the session, and a refresh is not a reconfirm.
+//   - the epoch-governed markers (otp, webauthn, mfa, device_trust)
+//     survive only when the token's epoch still matches the user's. Both
+//     refresh paths have already loaded the user, so this costs no extra
+//     read.
+//   - LastOTPAt is carried only when at least one of those markers
+//     survived. A freshness stamp with nothing to be fresh about is worse
+//     than no stamp: it is a timestamp a gate would believe.
+//   - the base markers (pwd, oauth) always survive. They describe how the
+//     session began, which a refresh does not change.
+//
+// Both call sites read `prior` off the REFRESH token's claims, which today
+// carry no amr at all (GenerateEnhancedRefreshToken omits it deliberately),
+// so on the shipped paths this returns an empty slice from an empty one and
+// changes no behaviour. That is the point: the invariant is stated in the
+// one place that mints from a refresh, so it holds the day a refresh token
+// does carry markers, instead of being rediscovered as a second M-2.
+func carryAMR(prior []string, priorLastOTPAt int64, tokenEpoch, userEpoch int) ([]string, int64) {
+	current := tokenEpoch == userEpoch
+	out := make([]string, 0, len(prior))
+	kept := false
+	for _, v := range prior {
+		switch {
+		case v == models.AMRReauth:
+			continue
+		case models.IsEpochBoundAMR(v):
+			if current {
+				out = append(out, v)
+				kept = true
+			}
+		default:
+			out = append(out, v)
+		}
+	}
+	if !kept {
+		return out, 0
+	}
+	return out, priorLastOTPAt
+}
+
 // RefreshTokensWithRiskAssessment rotates a refresh token atomically and
 // detects replay. Flow:
 //  1. JWT structural validation.
@@ -1586,7 +1636,11 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		return nil, err
 	}
 
-	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, claims.AMR, claims.LastOTPAt)
+	// Recompute rather than copy forward (D17). The mint itself stamps
+	// mfae from `user`, so the new token is issued under the CURRENT epoch
+	// and is never stale the moment it is signed.
+	amr, lastOTPAt := carryAMR(claims.AMR, claims.LastOTPAt, claims.MFAEpoch, user.MFAEpoch)
+	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, amr, lastOTPAt)
 	if err != nil {
 		// Signing is ours to get right; a failure here is not the caller's.
 		return nil, fmt.Errorf("token mint failed: %w: %w", ErrRefreshLookupUnavailable, err)
@@ -1794,7 +1848,11 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 		return nil, err
 	}
 
-	access, err := s.jwtService.GenerateAccessTokenForSessionWithAMR(user, device, security, claims.AMR, claims.LastOTPAt)
+	// Same recomputation as the rotation path (D17): /session mints without
+	// rotating, so a client that only ever calls it must not be the one path
+	// where a removed factor's markers live on.
+	amr, lastOTPAt := carryAMR(claims.AMR, claims.LastOTPAt, claims.MFAEpoch, user.MFAEpoch)
+	access, err := s.jwtService.GenerateAccessTokenForSessionWithAMR(user, device, security, amr, lastOTPAt)
 	if err != nil {
 		// Signing is ours to get right; a failure here is not the caller's.
 		return nil, fmt.Errorf("token mint failed: %w: %w", ErrRefreshLookupUnavailable, err)
