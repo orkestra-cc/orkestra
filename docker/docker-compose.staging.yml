@@ -7,7 +7,16 @@ services:
     # Behavior remains staging-like (cookie strict, JWT, URLs, rate limits)
     # but the binary is rebuilt on every save. Switch back to production
     # build by restoring the `build:` block + removing `command:` + bind mount.
-    image: dhi.io/golang:1
+    # Pinned to a minor, not the floating `:1`. A floating tag made this
+    # image whatever the host last pulled: on 2026-09-02 go.mod moved to
+    # 1.26.8 (869b470f) while a four-month-old local `:1` still carried
+    # 1.26.3, so AIR failed EVERY rebuild with "go.mod requires go >=
+    # 1.26.8 ... GOTOOLCHAIN=local" and staging silently served the last
+    # binary that built, for two days, health checks green throughout.
+    # Recreating the container does not help — the source predates the
+    # start, so AIR sees no change event and runs the stale binary.
+    # Keep this >= the `go` directive in backend/go.mod.
+    image: ${GO_STAGING_IMAGE:-dhi.io/golang:1.27}
     container_name: ${APP_NAME}-backend-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
