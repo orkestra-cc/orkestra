@@ -222,6 +222,17 @@ func parseClaims(m jwt.MapClaims) *authModels.JWTClaims {
 	if v, ok := m["last_otp_at"].(float64); ok {
 		c.LastOTPAt = int64(v)
 	}
+	// auth_time (D11) and mfae (D16). Mirrored from the auth module's
+	// jwt_service.mapToClaims — this parser is independent, and drift
+	// between the two is how a gate ends up reading a claim under a key
+	// the minter never writes. Absent leaves the zero value, which is
+	// what every pre-deploy token carries.
+	if v, ok := m["auth_time"].(float64); ok {
+		c.AuthTime = int64(v)
+	}
+	if v, ok := m["mfae"].(float64); ok {
+		c.MFAEpoch = int(v)
+	}
 	return c
 }
 

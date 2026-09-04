@@ -393,6 +393,12 @@ func currentSessionSecurity(ctx context.Context) (*authModels.DeviceInfo, *authM
 			RiskScore:   claims.RiskScore,
 			Fingerprint: claims.Fingerprint,
 			Timestamp:   time.Now(),
+			// Carried from the caller's token. Every re-mint fed by this
+			// seam — the MFA step-up, the passkey step-up and the
+			// password reconfirm — proves a factor against an EXISTING
+			// session; none of them creates one, so none may re-stamp
+			// auth_time.
+			AuthTime: claims.AuthTime,
 		}, true
 }
 

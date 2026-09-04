@@ -113,7 +113,9 @@ All access and refresh tokens are RS256-signed JWTs from the same key pair (`AUT
   "acting_tenant_id": "<tenant-fallback-uuid>",
   "acting_tenant_kind": "internal",
   "amr": ["pwd", "otp"],
-  "last_otp_at": 1730000800
+  "last_otp_at": 1730000800,
+  "auth_time": 1730000000,
+  "mfae": 3
 }
 ```
 
@@ -121,6 +123,8 @@ All access and refresh tokens are RS256-signed JWTs from the same key pair (`AUT
 - **`dtid`** ("default tenant id" — the pre-rename name) carries `TenantFallbackID`: the tenant this token falls back to when nothing more specific resolves the current tenant (see [Tenant resolution](#tenant-resolution-and-the-fallback-claim) below). The key stays `dtid` on the wire for backward compatibility with already-issued tokens; only the Go field was renamed.
 - **`acting_tenant_id`** / **`acting_tenant_kind`** are the tenant (and its kind, `internal`/`external`) this specific token is minted to act in. For an operator-audience token they start out equal to `dtid`/its kind and can be overridden per-request by `X-Tenant-ID`; a client-portal token pins them for the token's whole lifetime.
 - **`amr`** (RFC 8176) records the authentication method(s) used. `pwd` for password login, `oauth` for OAuth, `otp` after MFA verification, `webauthn` after a passkey assertion, `reauth` after a successful password reconfirm via `/me/password-confirm`. `last_otp_at` lets `RequireStepUp(maxAge)` middleware demand a fresh MFA proof (or fresh reconfirm) for catastrophic actions.
+- **`auth_time`** (the OIDC name) is the unix time of the interactive authentication that created this session. **Written by** every session-creating mint — password login, MFA login completion, passkey login completion and the setup wizard's initial-admin mint (all one funnel), plus the OAuth callback (which is also where a client-tier relay completes). **Carried unchanged by** refresh rotation, the `/session` bootstrap mint, the MFA and passkey step-ups and `/me/password-confirm`: none of those is an authentication, so re-stamping would make freshness unfalsifiable. It is **never** written by the machine mints (the client-credentials grant, the dev-token endpoint) — a service principal proves no interactive presence. **Read by** the first-factor enrolment gate, which lets a user with no enrolled factor prove presence with a recent `auth_time`. Omitted when zero; absent on any token minted before it shipped, which reads as stale and costs such a user one re-login.
+- **`mfae`** is the value of the user's MFA epoch when the token was minted. **Written by** every access-token mint, read off the user record at signing time — including the machine mints, since an epoch is a fact about the subject rather than a freshness proof. **Carried** by nothing: each mint re-reads the user, so a refreshed token carries the epoch current at refresh. **Read by** the MFA-marker check, which ignores a token's `amr`/`last_otp_at` once its epoch is behind the user's — so authority proven by a factor the user has since removed dies at once in every session, without waiting for a refresh. Omitted when zero, and an absent claim reads as zero, which matches a user document that has no `mfaEpoch`.
 - **`sid`** is the canonical session UUID. One random UUID is created before either JWT is signed; the access JWT `sid`, refresh JWT `sid`, refresh-token row, session document, and token response match. Refresh rotation and MFA/WebAuthn completion preserve it. Logout / change-password add it to a Redis-backed revocation set so the access token stops working instantly without waiting for the TTL.
 
 ### Tenant resolution and the fallback claim

@@ -1352,6 +1352,11 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 		SessionID: sessionID,
 		IPAddress: ipAddress,
 		Timestamp: now,
+		// The provider just authenticated the user interactively. This
+		// is also where the client-tier relay lands: the relay endpoint
+		// finishes through finishOAuthCompletion into this method, so
+		// there is no second OAuth mint to stamp.
+		AuthTime: now.Unix(),
 	}
 	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, []string{"oauth"}, 0)
 	if err != nil {
@@ -1563,6 +1568,10 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		SessionID: newSessionID,
 		IPAddress: nonEmpty(securityCtxIP(securityCtx), tokenDoc.IPAddress),
 		Timestamp: now,
+		// Carried, never re-stamped: a rotation is not an authentication.
+		// Re-stamping would make freshness unfalsifiable — a client that
+		// refreshes on a timer would look permanently just-authenticated.
+		AuthTime: claims.AuthTime,
 	}
 	// Absolute session cap. Placed after the row's revocation/expiry
 	// checks and before the mint, so a capped session never receives a
@@ -1769,6 +1778,8 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 		SessionID: doc.SessionUUID,
 		IPAddress: nonEmpty(securityCtxIP(securityCtx), doc.IPAddress),
 		Timestamp: time.Now(),
+		// Same rule as the rotation path: the session's origin, carried.
+		AuthTime: claims.AuthTime,
 	}
 	// The same cap on the non-rotating path. /session mints without
 	// rotating, so omitting this would let a client that calls only the

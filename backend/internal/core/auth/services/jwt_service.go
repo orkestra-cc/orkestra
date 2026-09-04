@@ -317,6 +317,18 @@ func (s *jwtService) GenerateEnhancedAccessToken(
 
 		AMR:       securityCtx.AMR,
 		LastOTPAt: securityCtx.LastOTPAt,
+		// auth_time comes from the caller: only a session-creating path
+		// knows it just authenticated somebody. Stamping now() here
+		// instead would give the machine mints below (the client-
+		// credentials grant and the dev-token endpoint both reach the
+		// signer through GenerateAccessToken) a rolling freshness window
+		// no interactive presence ever backed.
+		AuthTime: securityCtx.AuthTime,
+		// mfae is a fact about the SUBJECT, so it is read off the user
+		// every mint already holds, in this one place. It must be the
+		// value that was current when the token was signed — never
+		// re-read at validation time, or the claim would say nothing.
+		MFAEpoch: user.MFAEpoch,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, s.claimsToMap(claims))
@@ -434,6 +446,15 @@ func (s *jwtService) GenerateEnhancedRefreshToken(
 		SessionID:   securityCtx.SessionID,
 		DeviceID:    deviceInfo.DeviceID,
 		Fingerprint: deviceInfo.Fingerprint,
+		// The refresh token carries auth_time — unlike amr, which a
+		// refresh deliberately does not re-assert. It is the only
+		// durable record of the session's ORIGIN that the rotation and
+		// /session paths can read: the refresh row has no such column,
+		// and the auth-session row is only fetched when the absolute
+		// session cap happens to be enabled. Without it every refreshed
+		// token would report auth_time 0 and a user would be sent back
+		// to the login form on a timer.
+		AuthTime: securityCtx.AuthTime,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, s.claimsToMap(claims))
@@ -677,6 +698,15 @@ func (s *jwtService) claimsToMap(claims *models.JWTClaims) jwt.MapClaims {
 	if claims.LastOTPAt > 0 {
 		m["last_otp_at"] = claims.LastOTPAt
 	}
+	// Both omitted when zero: a pre-deploy token carries neither, and a
+	// freshly minted one writing a literal 0 would be indistinguishable
+	// from it in a log.
+	if claims.AuthTime > 0 {
+		m["auth_time"] = claims.AuthTime
+	}
+	if claims.MFAEpoch > 0 {
+		m["mfae"] = claims.MFAEpoch
+	}
 
 	return m
 }
@@ -710,6 +740,11 @@ func (s *jwtService) mapToClaims(m jwt.MapClaims) *models.JWTClaims {
 		claims.AMR = interfaceSliceToStringSlice(amr)
 	}
 	claims.LastOTPAt = int64(getFloatClaim(m, "last_otp_at"))
+	// Absent reads as zero for both: an absent mfae matches a user
+	// document that has no mfaEpoch (so the deploy downgrades nobody) and
+	// an absent auth_time reads as stale.
+	claims.AuthTime = int64(getFloatClaim(m, "auth_time"))
+	claims.MFAEpoch = int(getFloatClaim(m, "mfae"))
 	if mbrs, ok := m["mbr"].([]interface{}); ok {
 		claims.Memberships = make([]models.TenantMembership, 0, len(mbrs))
 		for _, raw := range mbrs {

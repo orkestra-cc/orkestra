@@ -43,6 +43,16 @@ type SecurityContext struct {
 	// LastOTPAt is the unix timestamp of the last successful OTP step.
 	// Drives step-up auth freshness checks (Block D).
 	LastOTPAt int64 `json:"lastOtpAt,omitempty" bson:"-"`
+	// AuthTime is the transport for the JWTClaims.AuthTime ("auth_time")
+	// claim, mirrored here for the same reason AMR and LastOTPAt are: the
+	// mint seams take a SecurityContext, not a claims struct, so a
+	// session-creating path has no other way to tell the signer WHEN the
+	// interactive authentication happened. Session-creating paths set it
+	// to now; the carrying paths (refresh, /session bootstrap, step-up,
+	// password reconfirm) copy the caller's value through unchanged.
+	// Zero means "not an interactive authentication" and is omitted from
+	// the token. Not persisted.
+	AuthTime int64 `json:"authTime,omitempty" bson:"-"`
 	// Fingerprint is the device fingerprint for the current request.
 	// Populated by the login/refresh path so the risk scorer can detect
 	// new_device_fingerprint without a separate parameter on every

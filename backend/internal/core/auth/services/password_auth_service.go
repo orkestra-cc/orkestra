@@ -1865,6 +1865,12 @@ func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *i
 		RiskFactors: append([]string(nil), in.RiskFactors...),
 		Fingerprint: in.Fingerprint,
 		Timestamp:   now,
+		// This function IS the interactive authentication for password
+		// login, MFA login completion, passkey login completion, the
+		// exported IssueLoginTokens(External) seam and the setup
+		// wizard's initial-admin mint — every one of them lands here, so
+		// auth_time is stamped once, here.
+		AuthTime: now.Unix(),
 	}
 	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, amr, lastOTPAt)
 	if err != nil {
