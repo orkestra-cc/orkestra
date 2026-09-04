@@ -65,6 +65,7 @@ const (
 	ActionAuthMFAVerified        = "auth.mfa.verified"
 	ActionAuthMFARemoved         = "auth.mfa.removed"
 	ActionAuthMFAReset           = "auth.mfa.reset"
+	ActionAuthMFAResetFailed     = "auth.mfa.reset_failed"
 	// The three credential changes the auth module started emitting with
 	// spec §4.2 D13. Declared here for the same reason as their four
 	// siblings above: this block is the vocabulary the emitter and the

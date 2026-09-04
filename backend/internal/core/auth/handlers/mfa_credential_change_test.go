@@ -72,13 +72,17 @@ func (s *recordingSessions) terminatedAll(userUUID string) int {
 // credChangeMFA is the MFAService slice the two changed handlers call.
 type credChangeMFA struct {
 	services.MFAService
-	removeErr error
-	replaced  bool
+	removeErr  error
+	replaced   bool
+	confirmErr error
 }
 
 func (m *credChangeMFA) RemoveFactor(context.Context, string, string) error { return m.removeErr }
 
 func (m *credChangeMFA) ConfirmEnrollment(context.Context, string, string, string) ([]string, bool, error) {
+	if m.confirmErr != nil {
+		return nil, m.replaced, m.confirmErr
+	}
 	return []string{"AAAA-BBBB"}, m.replaced, nil
 }
 
@@ -198,8 +202,24 @@ func TestAdminReset_FailureIsAudited(t *testing.T) {
 	if !ok {
 		t.Fatal("a failed reset must leave an audit row — it may have half-applied")
 	}
+	// A DISTINCT type, not admin_mfa_reset with a metadata flag:
+	// recordAuthEvent hardcodes the outcome to success for every auth
+	// event, so a failure filed under the success type is indexed as a
+	// successful reset and an evidence query never surfaces it.
+	if row.eventType != "admin_mfa_reset_failed" {
+		t.Fatalf("event type = %q, want admin_mfa_reset_failed", row.eventType)
+	}
 	if row.fields["outcome"] != "failed" {
 		t.Fatalf("metadata outcome = %v, want \"failed\"", row.fields["outcome"])
+	}
+	// Metadata reaches GET /v1/admin/audit-events, so it carries a
+	// classified kind and never the driver's own error text (which can
+	// echo namespaces, filter fragments and server addresses).
+	if row.fields["error_kind"] != "removal_failed" {
+		t.Fatalf("metadata error_kind = %v, want \"removal_failed\"", row.fields["error_kind"])
+	}
+	if _, present := row.fields["error"]; present {
+		t.Fatal("raw error text must not reach the audit metadata — it is serialised to an admin API response")
 	}
 	if sessions.terminatedAll("target-3") != 0 {
 		t.Fatal("a failed removal must not go on to terminate sessions")
@@ -339,5 +359,31 @@ func TestCredentialChange_UnwiredTerminatorDegrades(t *testing.T) {
 	}
 	if _, err := h.AdminReset(credChangeCtx("admin-1", "sid-admin"), &MFAAdminResetRequest{UserID: "target-9"}); err != nil {
 		t.Fatalf("AdminReset with no session terminator = %v, want nil", err)
+	}
+}
+
+// The service reports replaced=true alongside an error when the old secret
+// was destroyed but the new one failed to persist. Those sessions were
+// authorised by a factor that no longer exists, so they must still end —
+// checking `replaced` only after the error is mapped makes the value dead
+// on exactly the path that needs it most.
+func TestEnrollConfirm_FailedReplacementStillRevokes(t *testing.T) {
+	sessions := newRecordingSessions()
+	h, _ := newCredChangeMFAHandler(&credChangeMFA{
+		replaced:   true,
+		confirmErr: errors.New("persist failed"),
+	}, sessions)
+
+	req := &MFAEnrollConfirmRequest{}
+	req.Body.ChallengeID, req.Body.Code = "ch-1", "123456"
+	if _, err := h.EnrollConfirm(credChangeCtx("u-8", "sid-current"), req); err == nil {
+		t.Fatal("the enrolment failure must still surface to the caller")
+	}
+	sid, ok := sessions.revokedExceptFor("u-8")
+	if !ok {
+		t.Fatal("the destroyed secret's other sessions must end even though the enrolment failed")
+	}
+	if sid != "sid-current" {
+		t.Fatalf("revokedExcept = %q, want the caller's own sid", sid)
 	}
 }

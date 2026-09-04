@@ -298,7 +298,7 @@ You will still receive security-related emails.`,
 		Locale:      "en",
 		Subject:     "A second factor was added to your {{.AppName}} account",
 		Description: "Sent when a second factor is added to an account — a first TOTP enrolment, a TOTP replacement, or a new passkey. It is what makes an enrolment performed with a stolen session visible to the account holder.",
-		Variables:   []string{"AppName", "UserName", "FactorType", "Replaced", "RequestIP", "At", "SupportEmail", "UnsubscribeURL", "PreferencesURL"},
+		Variables:   []string{"AppName", "UserName", "FactorType", "Replaced", "RequestIP", "At", "SupportEmail"},
 		BodyText: `Hi {{.UserName}},
 
 {{if .Replaced}}The authenticator app on your {{.AppName}} account was replaced.{{else}}A new second factor was added to your {{.AppName}} account.{{end}}
@@ -615,7 +615,7 @@ Continuerà comunque a ricevere le email relative alla sicurezza.`,
 		Locale:      "it",
 		Subject:     "Un secondo fattore è stato aggiunto al suo account {{.AppName}}",
 		Description: "Sent when a second factor is added to an account — a first TOTP enrolment, a TOTP replacement, or a new passkey. It is what makes an enrolment performed with a stolen session visible to the account holder.",
-		Variables:   []string{"AppName", "UserName", "FactorType", "Replaced", "RequestIP", "At", "SupportEmail", "UnsubscribeURL", "PreferencesURL"},
+		Variables:   []string{"AppName", "UserName", "FactorType", "Replaced", "RequestIP", "At", "SupportEmail"},
 		BodyText: `Gentile {{.UserName}},
 
 {{if .Replaced}}L'app di autenticazione del suo account {{.AppName}} è stata sostituita.{{else}}Un nuovo secondo fattore è stato aggiunto al suo account {{.AppName}}.{{end}}

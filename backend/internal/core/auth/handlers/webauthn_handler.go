@@ -34,10 +34,10 @@ type WebAuthnHandler struct {
 	// (spec §4.3 D16). Same type and same reasoning as MFAHandler's
 	// field — see there. Optional; nil degrades to "the epoch alone ends
 	// MFA authority".
-	sessions      services.AuthService
-	cookieName    string
-	cookieDomain  string
-	cookieSecure  bool
+	sessions     services.AuthService
+	cookieName   string
+	cookieDomain string
+	cookieSecure bool
 }
 
 // NewWebAuthnHandler wires the dependencies. WebAuthnService may be nil

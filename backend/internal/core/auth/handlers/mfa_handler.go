@@ -105,15 +105,15 @@ type adminAuthRecorder interface {
 // under /v1/auth/mfa or /v1/auth/me/mfa and require an authenticated user
 // (no org context needed, so RequireGlobal() is the correct gate).
 type MFAHandler struct {
-	mfa          services.MFAService
-	challenges   services.MFAChallengeService
-	jwt          services.JWTService
-	users        iface.UserProvider
-	tokens       LoginTokenIssuer
-	webauthn     services.WebAuthnService    // optional — populated when WebAuthn is configured
-	deviceTrust  services.DeviceTrustService // optional — Section C item #3
-	policy       *services.AuthPolicyService // optional — admin-managed mfaEnabled + grace-window source
-	recorder     adminAuthRecorder           // optional — emits admin_mfa_reset to the audit pipeline
+	mfa         services.MFAService
+	challenges  services.MFAChallengeService
+	jwt         services.JWTService
+	users       iface.UserProvider
+	tokens      LoginTokenIssuer
+	webauthn    services.WebAuthnService    // optional — populated when WebAuthn is configured
+	deviceTrust services.DeviceTrustService // optional — Section C item #3
+	policy      *services.AuthPolicyService // optional — admin-managed mfaEnabled + grace-window source
+	recorder    adminAuthRecorder           // optional — emits admin_mfa_reset to the audit pipeline
 	// sessions ends the sessions a credential change invalidated (spec
 	// §4.3 D16). Typed services.AuthService, not iface.SessionTerminator,
 	// because two of the three call sites need
@@ -256,15 +256,22 @@ func (h *MFAHandler) EnrollConfirm(ctx context.Context, req *MFAEnrollConfirmReq
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
 	codes, replaced, err := h.mfa.ConfirmEnrollment(ctx, userUUID, req.Body.ChallengeID, req.Body.Code)
-	if err != nil {
-		return nil, mapMFAError(err)
-	}
 	// D16: a replacement destroyed the old secret, so it is a removal and
 	// carries a removal's consequences. A first enrolment invalidates
 	// nothing and revokes nothing. The service reports which happened —
 	// it cannot see the caller's sid to act on it itself.
+	//
+	// Checked BEFORE the error is mapped, and deliberately so: the service
+	// reports replaced=true alongside an error when the old secret was
+	// destroyed but the new one failed to persist. Those sessions were
+	// authorised by a factor that no longer exists whether or not the
+	// enrolment completed, so returning first would have made the
+	// `replaced` value dead on exactly the path that needs it most.
 	if replaced {
 		revokeSessionsExceptCurrent(ctx, h.sessions, userUUID, "totp_factor_replaced")
+	}
+	if err != nil {
+		return nil, mapMFAError(err)
 	}
 	resp := &MFAEnrollConfirmResponse{}
 	resp.Body.Success = true
@@ -540,9 +547,28 @@ func (h *MFAHandler) AdminReset(ctx context.Context, req *MFAAdminResetRequest) 
 		// the other not), and this branch used to return 500 before the
 		// recorder ever ran — so the one outcome an operator most needs
 		// to see left no trace at all. Record it, then fail.
-		h.recordAdminReset(ctx, actorUUID, req.UserID, map[string]interface{}{
-			"outcome": "failed",
-			"error":   err.Error(),
+		//
+		// A DISTINCT event type, not admin_mfa_reset with a metadata flag:
+		// recordAuthEvent hardcodes Success/Outcome to success for every
+		// auth event in the tree, so a failure filed under the success
+		// type is indexed as a successful reset and a SOC2 evidence query
+		// filtering on outcome would never surface it. Until that
+		// pipeline-wide defect is fixed, the type is the only field that
+		// can carry the truth.
+		//
+		// The metadata carries a CLASSIFIED kind, never err.Error(): this
+		// map is serialised to GET /v1/admin/audit-events, and an
+		// unbounded Mongo driver string can echo namespaces, filter
+		// fragments and server addresses into an API response. The detail
+		// goes to the log, which is where the other degradation paths in
+		// this package already put it.
+		slog.Default().Error("auth: admin MFA reset failed; the target account may be half-reset",
+			slog.String("target_uuid", req.UserID),
+			slog.String("actor_uuid", actorUUID),
+			slog.String("error", err.Error()))
+		h.recordAdminResetEvent(ctx, "admin_mfa_reset_failed", actorUUID, req.UserID, map[string]interface{}{
+			"outcome":    "failed",
+			"error_kind": "removal_failed",
 		})
 		return nil, huma.Error500InternalServerError("failed to reset MFA factor")
 	}
@@ -572,7 +598,7 @@ func (h *MFAHandler) AdminReset(ctx context.Context, req *MFAAdminResetRequest) 
 			terminated = true
 		}
 	}
-	h.recordAdminReset(ctx, actorUUID, req.UserID, map[string]interface{}{
+	h.recordAdminResetEvent(ctx, "admin_mfa_reset", actorUUID, req.UserID, map[string]interface{}{
 		"sessions_terminated": terminated,
 	})
 	resp := &MFAAdminResetResponse{}
@@ -580,15 +606,18 @@ func (h *MFAHandler) AdminReset(ctx context.Context, req *MFAAdminResetRequest) 
 	return resp, nil
 }
 
-// recordAdminReset writes one admin_mfa_reset row through the audit
-// pipeline: slog + auth_security_events + compliance via the AuthService
-// recorder. Nil-tolerant — a build without the audit wiring still succeeds
-// at the user-facing operation.
-func (h *MFAHandler) recordAdminReset(ctx context.Context, actorUUID, targetUUID string, fields map[string]interface{}) {
+// recordAdminResetEvent writes one row through the audit pipeline: slog +
+// auth_security_events + compliance via the AuthService recorder. eventType
+// is admin_mfa_reset or admin_mfa_reset_failed — see AdminReset's failure
+// branch for why the outcome has to live in the type. Nil-tolerant — a
+// build without the audit wiring still succeeds at the user-facing
+// operation. fields must carry classified values only; it is serialised to
+// GET /v1/admin/audit-events.
+func (h *MFAHandler) recordAdminResetEvent(ctx context.Context, eventType, actorUUID, targetUUID string, fields map[string]interface{}) {
 	if h.recorder == nil {
 		return
 	}
-	h.recorder.RecordAdminAuthEvent(ctx, "admin_mfa_reset", actorUUID, targetUUID, fields)
+	h.recorder.RecordAdminAuthEvent(ctx, eventType, actorUUID, targetUUID, fields)
 }
 
 // --- public login-verify (completes password/OAuth login after MFA) ---

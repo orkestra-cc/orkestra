@@ -2058,6 +2058,12 @@ func authEventComplianceAction(eventType string) string {
 		return "auth.oauth.unlinked"
 	case "admin_mfa_reset":
 		return "auth.mfa.reset"
+	// A failed reset gets its own action, not a metadata flag on the
+	// success one: recordAuthEvent hardcodes Outcome to "success" for
+	// every auth event, so an evidence query filtering on outcome cannot
+	// see the failure any other way.
+	case "admin_mfa_reset_failed":
+		return "auth.mfa.reset_failed"
 	// Every credential change, not just the admin reset (spec §4.2 D13).
 	// Before this, only backup-code regeneration emitted anything at all,
 	// so an enrolment performed with a stolen bearer token left no trace.

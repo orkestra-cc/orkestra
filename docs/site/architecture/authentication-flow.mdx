@@ -335,6 +335,15 @@ new passkey (`self_passkey_registered`) leave the epoch alone: authority
 proven by a factor the user still holds stays valid, and ending it would
 sign someone out for improving their own security.
 
+**The consequences follow the destruction, not the success of the request.**
+Both write paths can fail part-way — a replacement whose new secret fails to
+persist has still destroyed the old one, and an admin reset can delete the
+TOTP row and then fail on the passkey row. Both apply the epoch bump and the
+device-trust revoke anyway, and the replacement additionally reports itself
+outward so the caller's other sessions still end. If a credential was
+destroyed, its authority ends: success or not. A delete that itself failed
+destroyed nothing and changes nothing.
+
 **Two mechanisms, because there are two questions.** Ending the *other*
 sessions is revocation's job. Ending the MFA authority of the caller's
 **current** token — which no revocation reaches, and which is the token an
@@ -346,7 +355,12 @@ still succeeds with `sessions_terminated: false` recorded in its audit row:
 the security-critical half already happened. The reverse failure is not
 tolerated the same way — a *removal* that fails part-way now writes its own
 audit row before answering `500`, because a half-reset account is exactly
-what an operator needs to see.
+what an operator needs to see. That row is filed under a distinct event
+type, `auth.mfa.reset_failed`, rather than the success action with a
+metadata flag: every auth event in the tree currently records
+`outcome: success` unconditionally, so a failure filed under the success
+action would be indexed as a completed reset and an evidence query would
+never find it.
 
 **Passkey removal is uniform, not last-factor-only.** A removed credential
 is one the user no longer trusts — a lost or compromised device — and it may

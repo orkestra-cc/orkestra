@@ -396,3 +396,125 @@ func TestEpochBumper_FailureDoesNotFailTheRemoval(t *testing.T) {
 		t.Fatalf("RemoveFactor with a failing epoch bumper = %v, want nil", err)
 	}
 }
+
+// --- partial failures (fix round 1) --------------------------------------
+//
+// The consequences of a credential change follow the DESTRUCTION of a
+// credential, not the success of the whole call. Getting that ordering
+// wrong is M-2 surviving inside the fix for M-2: an account left with no
+// factor while every live token still carries amr:["pwd","otp"].
+
+// A replacement whose new secret never lands has still destroyed the old
+// one, so the epoch must have moved and device trust must be gone. It also
+// has to report replaced=true alongside the error, because that is the
+// only signal the handler has to end the caller's other sessions.
+func TestConfirmEnrollment_ReplacementThatFailsToPersistStillApplies(t *testing.T) {
+	svc, deps := newMFAServiceWithDeps(t)
+	deps.factors.seedTOTP(t, "u-10")
+
+	begin, err := svc.BeginEnrollment(context.Background(), &iface.User{UUID: "u-10", Email: "u10@example.com"})
+	if err != nil {
+		t.Fatalf("BeginEnrollment: %v", err)
+	}
+	code, err := totp.GenerateCode(begin.SecretBase32, time.Now())
+	if err != nil {
+		t.Fatalf("GenerateCode: %v", err)
+	}
+	deps.factors.failInsert = true
+
+	_, replaced, err := svc.ConfirmEnrollment(context.Background(), "u-10", begin.ChallengeID, code)
+	if err == nil {
+		t.Fatal("a failed persist must surface as an error")
+	}
+	if !replaced {
+		t.Fatal("the old secret was destroyed — the caller must be told so it can end the other sessions")
+	}
+	if deps.factors.hasTOTP("u-10") {
+		t.Fatal("precondition: the old row really was deleted")
+	}
+	if got := deps.epoch.bumpsFor("u-10"); got != 1 {
+		t.Fatalf("epoch bumped %d times, want 1 — the destruction happened whether or not the new row landed", got)
+	}
+	if got := deps.trust.lastReason(); got != models.DeviceTrustRevokedOnMFAReplace {
+		t.Fatalf("device-trust reason = %q, want %q", got, models.DeviceTrustRevokedOnMFAReplace)
+	}
+	if !deps.events.saw("self_mfa_factor_replaced") {
+		t.Fatalf("the destruction must be audited; saw %v", deps.events.types)
+	}
+	// The mail announces an ADDITION, and no new secret exists.
+	if deps.mail.enqueuedTemplate("auth.mfa_factor_added") {
+		t.Fatal("nothing was added — no factor-added mail")
+	}
+}
+
+// The mirror case: the delete itself failed, so nothing was destroyed and
+// nothing may be applied. Without this, the test above would pass against
+// an implementation that bumps unconditionally.
+func TestConfirmEnrollment_FailedDeleteAppliesNothing(t *testing.T) {
+	svc, deps := newMFAServiceWithDeps(t)
+	deps.factors.seedTOTP(t, "u-11")
+	deps.factors.failDeleteFor(models.MFAFactorTOTP)
+
+	begin, err := svc.BeginEnrollment(context.Background(), &iface.User{UUID: "u-11", Email: "u11@example.com"})
+	if err != nil {
+		t.Fatalf("BeginEnrollment: %v", err)
+	}
+	code, _ := totp.GenerateCode(begin.SecretBase32, time.Now())
+
+	_, replaced, err := svc.ConfirmEnrollment(context.Background(), "u-11", begin.ChallengeID, code)
+	if err == nil {
+		t.Fatal("a failed delete must surface as an error")
+	}
+	if replaced {
+		t.Fatal("nothing was replaced — the old row is still there")
+	}
+	if got := deps.epoch.bumpsFor("u-11"); got != 0 {
+		t.Fatalf("epoch bumped %d times, want 0", got)
+	}
+	if deps.trust.revokeCalls() != 0 {
+		t.Fatal("nothing was destroyed — device trust must be untouched")
+	}
+}
+
+// A half-completed removal: TOTP gone, WebAuthn delete failed. The caller
+// gets the error (the account IS half-reset and an operator must know), but
+// the destroyed TOTP factor's authority ends anyway. Before the fix this
+// returned with the epoch unmoved and every session fully MFA-authorised.
+func TestRemoveFactor_PartialDeletionStillAppliesConsequences(t *testing.T) {
+	svc, deps := newMFAServiceWithDeps(t)
+	deps.factors.seedTOTP(t, "target-9")
+	deps.factors.seedWebAuthn(t, "target-9", 1)
+	deps.factors.failDeleteFor(models.MFAFactorWebAuthn)
+
+	if err := svc.RemoveFactor(context.Background(), "target-9", "admin-1"); err == nil {
+		t.Fatal("a partial deletion must surface as an error")
+	}
+	if deps.factors.hasTOTP("target-9") {
+		t.Fatal("precondition: the TOTP row really was deleted")
+	}
+	if got := deps.epoch.bumpsFor("target-9"); got != 1 {
+		t.Fatalf("epoch bumped %d times, want 1 — a destroyed credential ends its own authority, success or not", got)
+	}
+	if got := deps.trust.lastReason(); got != models.DeviceTrustRevokedOnAdminReset {
+		t.Fatalf("device-trust reason = %q, want the admin-reset reason", got)
+	}
+}
+
+// The mirror case again: the FIRST delete failed, so nothing was destroyed.
+// RemoveFactor fails fast, and the WebAuthn row is never touched.
+func TestRemoveFactor_FirstDeleteFailureAppliesNothing(t *testing.T) {
+	svc, deps := newMFAServiceWithDeps(t)
+	deps.factors.seedTOTP(t, "u-12")
+	deps.factors.seedWebAuthn(t, "u-12", 1)
+	deps.factors.failDeleteFor(models.MFAFactorTOTP)
+
+	if err := svc.RemoveFactor(context.Background(), "u-12", "u-12"); err == nil {
+		t.Fatal("a failed delete must surface as an error")
+	}
+	if got := deps.epoch.bumpsFor("u-12"); got != 0 {
+		t.Fatalf("epoch bumped %d times, want 0 — nothing was destroyed", got)
+	}
+	if deps.trust.revokeCalls() != 0 {
+		t.Fatal("nothing was destroyed — device trust must be untouched")
+	}
+}

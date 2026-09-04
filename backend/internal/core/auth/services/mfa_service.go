@@ -172,6 +172,34 @@ func (s *mfaService) bumpEpoch(ctx context.Context, userUUID string) {
 	bumpMFAEpoch(ctx, s.epoch, s.logger, userUUID)
 }
 
+// applyRemovalConsequences is the pair of service-level halves every
+// credential destruction owes: end the MFA authority already minted into
+// live tokens, and drop the "remember this device" grants whose amr
+// annotation named the factor that just went away.
+//
+// It exists as one call rather than two so the removal path and the
+// replacement path cannot drift on which of them they remember to do —
+// and so a partial failure can apply both from a single deferred call.
+// Neither half can fail the caller: the credential is already gone, and
+// reporting a completed destruction as not having happened is worse than
+// either degradation (see bumpMFAEpoch).
+//
+// The third half of the rule — ending the caller's other sessions — is
+// the handler's, because only it can see which session the request
+// arrived on.
+func (s *mfaService) applyRemovalConsequences(ctx context.Context, userUUID, trustReason string) {
+	s.bumpEpoch(ctx, userUUID)
+	if s.deviceTrust == nil {
+		return
+	}
+	if err := s.deviceTrust.RevokeAllByUser(ctx, userUUID, trustReason); err != nil {
+		s.logger.Warn("device_trust: revoke after a credential removal failed",
+			slog.String("user_uuid", userUUID),
+			slog.String("reason", trustReason),
+			slog.String("error", err.Error()))
+	}
+}
+
 // NewMFAService builds the service. `issuer` ends up as the label prefix in
 // the TOTP provisioning URI — authenticator apps show it above the 6-digit
 // code so the user can tell which account a code is for.
@@ -264,20 +292,38 @@ func (s *mfaService) ConfirmEnrollment(ctx context.Context, userUUID, challengeI
 	// have duplicates in flight.
 	//
 	// A replacement is a REMOVAL of the old secret, so it carries the same
-	// consequences (§4.3 D16) — recorded here, applied below once the new
-	// row is safely persisted. RequireEnrolmentProof has already
-	// guaranteed a fresh proof of presence, so reaching this line is a
-	// deliberate act by the account holder.
+	// consequences (§4.3 D16) — and they are applied HERE, the instant the
+	// old row is gone, not after the new one is persisted. Three returns
+	// sit between this point and the Insert (encrypt, backup codes, the
+	// write itself); taking any of them with the consequences still
+	// pending would leave the account holding no TOTP factor while every
+	// live token still carried amr:["pwd","otp"], every device-trust grant
+	// stood, and no session had been revoked — M-2 surviving inside the
+	// fix for M-2. Worse, the caller's retry would find no existing row,
+	// report replaced=false, and never bump the epoch at all.
 	//
-	// A failed delete is now returned rather than swallowed: the unique
-	// index would reject the Insert below anyway, so continuing only
-	// trades a clear error for a confusing one.
+	// Over-bumping is harmless by construction: the counter is monotone
+	// and no ADDITION ever depends on its value, so the cost of a bump on
+	// a replacement that then fails to persist is one extra re-login.
+	//
+	// RequireEnrolmentProof has already guaranteed a fresh proof of
+	// presence, so reaching this line is a deliberate act by the account
+	// holder.
+	//
+	// A failed delete is returned rather than swallowed: the unique index
+	// would reject the Insert below anyway, so continuing only trades a
+	// clear error for a confusing one. Nothing was destroyed on that
+	// branch, so nothing is applied.
 	replaced := false
 	if existing, err := s.factors.FindByUserAndType(ctx, userUUID, models.MFAFactorTOTP); err == nil && existing != nil {
 		if err := s.factors.Delete(ctx, existing.UUID); err != nil {
 			return nil, false, fmt.Errorf("replace existing totp factor: %w", err)
 		}
 		replaced = true
+		s.applyRemovalConsequences(ctx, userUUID, models.DeviceTrustRevokedOnMFAReplace)
+		emitCredentialEvent(ctx, s.auditSink, s.logger, "self_mfa_factor_replaced", userUUID, map[string]interface{}{
+			"factorType": string(models.MFAFactorTOTP),
+		})
 	}
 
 	secretEnc, err := utils.EncryptMFASecret(ch.PendingSecret)
@@ -304,26 +350,17 @@ func (s *mfaService) ConfirmEnrollment(ctx context.Context, userUUID, challengeI
 		return nil, replaced, fmt.Errorf("persist mfa factor: %w", err)
 	}
 
-	// D13/D16: only the REPLACEMENT branch invalidates anything. A first
-	// enrolment is an addition — authority proven by a factor that still
-	// exists stays valid, so the epoch does not move and no trust grant
-	// becomes a lie.
-	eventType := "self_mfa_enrolled"
-	if replaced {
-		eventType = "self_mfa_factor_replaced"
-		s.bumpEpoch(ctx, userUUID)
-		if s.deviceTrust != nil {
-			if err := s.deviceTrust.RevokeAllByUser(ctx, userUUID, models.DeviceTrustRevokedOnMFAReplace); err != nil {
-				s.logger.Warn("device_trust: revoke on factor replacement failed",
-					slog.String("user_uuid", userUUID),
-					slog.String("error", err.Error()))
-			}
-		}
+	// D13/D16: only the REPLACEMENT branch invalidates anything, and it
+	// already did so above, at the moment of destruction. A first
+	// enrolment is a pure addition — authority proven by a factor that
+	// still exists stays valid, so the epoch does not move, no trust grant
+	// becomes a lie, and its event belongs here, after the new row is
+	// safely persisted: nothing happened until it was.
+	if !replaced {
+		emitCredentialEvent(ctx, s.auditSink, s.logger, "self_mfa_enrolled", userUUID, map[string]interface{}{
+			"factorType": string(models.MFAFactorTOTP),
+		})
 	}
-	emitCredentialEvent(ctx, s.auditSink, s.logger, eventType, userUUID, map[string]interface{}{
-		"factorType": string(models.MFAFactorTOTP),
-		"replaced":   replaced,
-	})
 	// Announced even on a replacement: the old secret is gone, but a NEW
 	// one now exists, and it is the addition an attacker would perform.
 	s.factorAdded.NotifyFactorAdded(ctx, userUUID, string(models.MFAFactorTOTP), replaced)
@@ -421,8 +458,14 @@ func (s *mfaService) VerifyBackupCode(ctx context.Context, userUUID, code string
 // Both rows are looked up before either is deleted, and a failure of
 // either delete is returned rather than swallowed: reporting success on
 // a half-reset account would tell an operator the target is recoverable
-// when it is not (a partial failure here surfaces as a 500 at the admin
-// handler today; a later task makes that path auditable).
+// when it is not (the admin handler audits that 500 and answers it).
+//
+// A partial failure still applies the removal consequences, because they
+// follow the DESTRUCTION of a credential, not the success of the whole
+// call. Returning the WebAuthn delete's error with the epoch unmoved
+// would leave a half-reset account — TOTP row gone, device trust intact,
+// every session live and fully MFA-authorised — which is the exact
+// scenario the admin path's failure audit row exists to make visible.
 func (s *mfaService) RemoveFactor(ctx context.Context, userUUID, actorUUID string) error {
 	totpFactor, err := s.factors.FindByUserAndType(ctx, userUUID, models.MFAFactorTOTP)
 	if err != nil && !errors.Is(err, repository.ErrMFAFactorNotFound) {
@@ -437,10 +480,38 @@ func (s *mfaService) RemoveFactor(ctx context.Context, userUUID, actorUUID strin
 		return ErrMFANotEnrolled
 	}
 
+	// Section C item #3: removing the MFA factor(s) also invalidates
+	// every "remember this device" grant the user holds. A trust row
+	// carries an amr annotation that claims a factor was verified —
+	// once that factor is gone, the annotation is a lie. User-initiated
+	// removal and admin reset both flow through here; the revoke reason
+	// distinguishes them (actorUUID != userUUID indicates admin). Resolved
+	// up front so the success path and the partial-failure path below
+	// cannot disagree about it.
+	reason := models.DeviceTrustRevokedOnMFARemove
+	if actorUUID != "" && actorUUID != userUUID {
+		reason = models.DeviceTrustRevokedOnAdminReset
+	}
+
+	// destroyed says whether any credential row is already gone. The
+	// deferred call is what makes the rule unconditional — if a credential
+	// was destroyed, the epoch moves and the trust grants go, success or
+	// not — and it fires exactly once per call regardless of how many rows
+	// were deleted, which is the property TestRemoveFactor_RevokesDeviceTrustOnce
+	// pins. Nothing deleted (either lookup failed, or the TOTP delete
+	// itself failed) means nothing to invalidate, so the flag stays false.
+	destroyed := false
+	defer func() {
+		if destroyed {
+			s.applyRemovalConsequences(ctx, userUUID, reason)
+		}
+	}()
+
 	if totpFactor != nil {
 		if err := s.factors.Delete(ctx, totpFactor.UUID); err != nil {
 			return err
 		}
+		destroyed = true
 	}
 	// Gated on the row's existence, not on hasWebAuthn (which is the
 	// not-enrolled predicate, zero-credential rows included): an empty
@@ -452,34 +523,9 @@ func (s *mfaService) RemoveFactor(ctx context.Context, userUUID, actorUUID strin
 		if err := s.factors.Delete(ctx, waFactor.UUID); err != nil {
 			return err
 		}
+		destroyed = true
 	}
 
-	// D16: the epoch is what ends the MFA authority already minted into
-	// live tokens — the caller's own included. Without it the markers sit
-	// in every issued token until it expires, so "remove my second
-	// factor" left every session still MFA-satisfied (M-2). Session
-	// revocation, the other half of the rule, is applied by the handler:
-	// only it can see which session the request arrived on.
-	s.bumpEpoch(ctx, userUUID)
-
-	// Section C item #3: removing the MFA factor(s) also invalidates
-	// every "remember this device" grant the user holds. A trust row
-	// carries an amr annotation that claims a factor was verified —
-	// once no factor remains, that annotation is a lie. User-initiated
-	// removal and admin reset both flow through here; the revoke reason
-	// distinguishes them (actorUUID != userUUID indicates admin), and
-	// it fires once per call regardless of how many rows were deleted.
-	if s.deviceTrust != nil {
-		reason := models.DeviceTrustRevokedOnMFARemove
-		if actorUUID != "" && actorUUID != userUUID {
-			reason = models.DeviceTrustRevokedOnAdminReset
-		}
-		if err := s.deviceTrust.RevokeAllByUser(ctx, userUUID, reason); err != nil {
-			s.logger.Warn("device_trust: revoke on factor removal failed",
-				slog.String("user_uuid", userUUID),
-				slog.String("error", err.Error()))
-		}
-	}
 	// D13: the SELF removal gets a self_mfa_removed row. The admin variant
 	// deliberately does not — the handler records admin_mfa_reset for it,
 	// and emitting both would file one reset twice in the audit timeline

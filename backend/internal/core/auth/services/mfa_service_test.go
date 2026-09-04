@@ -24,10 +24,15 @@ import (
 // failTypes marks factor types whose Delete call should fail — used by
 // TestRemoveFactor_PartialDeletionIsAnError to simulate one row deleting
 // successfully while the other errors.
+// failInsert makes Insert fail — used by the ConfirmEnrollment tests that
+// exercise a replacement whose new row never lands (the old secret is
+// already destroyed at that point, so the removal consequences must have
+// fired regardless).
 type fakeFactorRepo struct {
-	mu        sync.Mutex
-	byUser    map[string]*models.MFAFactorDoc
-	failTypes map[models.MFAFactorType]bool
+	mu         sync.Mutex
+	byUser     map[string]*models.MFAFactorDoc
+	failTypes  map[models.MFAFactorType]bool
+	failInsert bool
 }
 
 func newFakeFactorRepo() *fakeFactorRepo {
@@ -41,6 +46,9 @@ func (r *fakeFactorRepo) key(userUUID string, t models.MFAFactorType) string {
 func (r *fakeFactorRepo) Insert(_ context.Context, doc *models.MFAFactorDoc) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.failInsert {
+		return errors.New("fake insert failure")
+	}
 	r.byUser[r.key(doc.UserUUID, doc.Type)] = doc
 	return nil
 }

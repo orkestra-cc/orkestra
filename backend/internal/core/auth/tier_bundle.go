@@ -216,8 +216,18 @@ func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 	// visible to the account holder. Both are optional seams — see
 	// tierBundleDeps.mfaEpochBumper and NewFactorAddedNotifier.
 	mfaSvc.SetEpochBumper(d.mfaEpochBumper)
+	// A nil *MailDispatcher assigned straight to the interface parameter
+	// would be a typed nil — non-nil to the notifier's own guard, and
+	// Enqueue's nil-receiver check returns BEFORE recordDrop, so the mail
+	// would vanish with no metric and no WARN. Unreachable in the real
+	// wiring (module.go builds the dispatcher unconditionally), so this is
+	// the latent case made explicit where a reader looks for it.
+	var mailQueue services.MailEnqueuer
+	if d.mailDispatcher != nil {
+		mailQueue = d.mailDispatcher
+	}
 	factorAdded := services.NewFactorAddedNotifier(
-		d.notifier, d.mailDispatcher, d.userProvider, d.appName, d.supportEmail, d.logger)
+		d.notifier, mailQueue, d.userProvider, d.appName, d.supportEmail, d.logger)
 	mfaSvc.SetFactorAddedNotifier(factorAdded)
 
 	var webauthnSvc services.WebAuthnService

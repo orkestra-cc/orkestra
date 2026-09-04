@@ -1074,7 +1074,7 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 | GET | `/v1/auth/{tier}/me/mfa` | `RequireGlobal()` | Return `{status, type, backupCodesRemaining}` |
 | POST | `/v1/auth/{tier}/me/mfa/remove` | `RequireGlobal()` + `RequireStepUp(5m)` | Remove every enrolled factor (TOTP row + WebAuthn row, D15) — step-up middleware demands a <5min MFA proof; request body is empty. Also bumps the MFA epoch, revokes every device-trust grant, and revokes every session but the caller's own (D16 — see "One rule for every credential change" below) |
 | POST | `/v1/auth/{tier}/mfa/verify` | `RequireGlobal()` | Verify TOTP or backup code; mint a stepped-up access token with `amr:["pwd","otp"]` + `last_otp_at=now` |
-| POST | `/v1/admin/users/{userId}/mfa/reset` | `RequireSystemPermission("system.users.mfa_reset")` + `RequireStepUp(5m)` | Admin: delete every MFA factor (TOTP row + WebAuthn row) an **operator** user holds, bump their MFA epoch, revoke their device trust, terminate **every** session they hold (no session is spared — the caller is not the target), and restart their enrollment grace — `RemoveFactor` (D15) no longer 404s a passkey-only target. Mounted on the operator host; targets `operator_mfa_factors`. A failed termination is recorded as `sessions_terminated: false` and does **not** fail the reset; a failed *removal* is now audited before the 500 |
+| POST | `/v1/admin/users/{userId}/mfa/reset` | `RequireSystemPermission("system.users.mfa_reset")` + `RequireStepUp(5m)` | Admin: delete every MFA factor (TOTP row + WebAuthn row) an **operator** user holds, bump their MFA epoch, revoke their device trust, terminate **every** session they hold (no session is spared — the caller is not the target), and restart their enrollment grace — `RemoveFactor` (D15) no longer 404s a passkey-only target. Mounted on the operator host; targets `operator_mfa_factors`. A failed termination is recorded as `sessions_terminated: false` and does **not** fail the reset; a failed *removal* is audited as **`admin_mfa_reset_failed`** (→ `auth.mfa.reset_failed`) before the 500 — see "A failed reset is audited under its own event type" below |
 | POST | `/v1/admin/client-users/{userId}/mfa/reset` | same gates | Tier-aware companion of the above. Same operator-host mount, but routed through `clientMFAHandler` so the reset operates against `client_users` + `client_mfa_factors` |
 | POST | `/v1/auth/{tier}/mfa/webauthn/register/begin` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Begin enrolling a passkey — returns `{challengeId, publicKey}` (W3C `PublicKeyCredentialCreationOptions`) |
 | POST | `/v1/auth/{tier}/mfa/webauthn/register/finish` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Finish enrolling a passkey — body `{challengeId, name, attestationResponse}`, returns the public credential metadata. Gated as well as `begin`, same reason as the TOTP ceremony. An addition: the epoch does **not** move, but it emits `self_passkey_registered` and the `auth.mfa_factor_added` email |
@@ -1205,6 +1205,31 @@ task of this same PR) nothing compares `claims.MFAEpoch` against the user's,
 so the bump is a durable write with no reader — session revocation is doing
 all the work in the meantime.
 
+**The consequences follow the DESTRUCTION, not the success of the call.**
+Both write paths can fail part-way, and both apply the epoch bump and the
+device-trust revoke anyway:
+
+- `ConfirmEnrollment` deletes the old TOTP row and then has three ways to
+  fail before the new one lands (encrypt, backup codes, `Insert`). It
+  applies the consequences at the moment of deletion and **returns
+  `replaced=true` alongside the error**, which `EnrollConfirm` acts on
+  *before* it maps that error — otherwise the flag would be dead on exactly
+  the path that needs it, and the caller's retry would find no existing row,
+  report `replaced=false`, and never bump at all.
+- `RemoveFactor` tracks a `destroyed` flag across its two deletes and
+  applies the consequences from a `defer`, so returning the WebAuthn
+  delete's error cannot leave a half-reset account — TOTP gone, epoch
+  unmoved, trust intact, every session fully MFA-authorised — which is the
+  exact state the admin path's failure audit row exists to make visible.
+
+The rule, stated once: **if a credential was destroyed, the epoch moves and
+the trust grants go, success or not.** Over-bumping is harmless by
+construction (the counter is monotone, and no addition depends on its
+value), while under-bumping is M-2 all over again. A delete that itself
+failed destroyed nothing and therefore applies nothing —
+`applyRemovalConsequences` (`mfa_service.go`) is the single call both paths
+make, so they cannot drift on which halves they remember.
+
 **Passkey removal is uniform, not last-factor-only.** A removed credential
 is one the user no longer trusts — a lost or compromised device — and it may
 have *created* sessions through the passkey login flow. Neither the session
@@ -1238,6 +1263,24 @@ revocation alone: exactly what it had before the epoch existed. Refusing to
 boot, or refusing removals, would be strictly worse. A bump that *errors* is
 the same contract: the credential is already gone, and failing the caller
 would report a completed removal as not having happened.
+
+**A failed reset is audited under its own event type.** The failure branch
+emits **`admin_mfa_reset_failed`**, mapped by `authEventComplianceAction` to
+`auth.mfa.reset_failed`, rather than `admin_mfa_reset` with a metadata flag.
+The reason is a pre-existing pipeline defect, not a stylistic choice:
+`recordAuthEvent` (`auth_service.go`) hardcodes `Success: true` on the
+`auth_security_events` row **and** `Outcome: "success"` on the compliance
+`iface.AuditEvent`, so **no auth event in the tree can currently record a
+failure outcome**. A failure filed under the success type is therefore
+indexed as a successful reset, and a SOC2 evidence query — which filters on
+`Outcome`, not on a metadata key — would never surface the one row an
+operator most needs. Until that hardcoding is fixed (a residual owed to the
+spec owner, wider than this module), the **type** is the only field that can
+carry the truth. Its metadata carries a classified `error_kind`, never
+`err.Error()`: `Metadata` is serialised to `GET /v1/admin/audit-events`, and
+an unbounded Mongo driver string can echo namespaces, filter fragments and
+server addresses into an API response — the detail goes to `slog.Error`
+instead, the same split `revokeSessionsExceptCurrent` uses.
 
 **Every change is announced.** Before this, only backup-code regeneration
 emitted anything at all, so an enrolment performed with a stolen bearer
@@ -1298,7 +1341,7 @@ as the admin paths.
 
 **Not-found is classified by identity, not by message.** `mapAdminUserAuthError`, `mapAdminInviterError` and `mapSelfAuthError` (`handlers/self_user_auth_handler.go`) match `errors.Is(err, iface.ErrUserNotFound)` — they used to compare `err.Error() == "user not found"`, which worked only because the sentinel's text is literally that and `user/services` returns it unwrapped, so the next `fmt.Errorf("...: %w", …)` anywhere on the path would have turned a 404 into a 500 with nothing to catch it. `mapAdminInviterError`'s neighbouring `"notifications disabled — cannot send email"` compare became `errors.Is(err, services.ErrNotificationDown)` in the same change. Two consequences worth knowing: `AuthService.SelfLinkOAuthFromCallback`'s nil-user branch had to stop returning a *fresh* `fmt.Errorf("user not found")` — a different error value that only ever matched by text — and now returns `fmt.Errorf("self link: %w", iface.ErrUserNotFound)`; and a **look-alike** error (same message, different identity) now surfaces as a 500 rather than a 404. That is the intended narrowing — but it was **reachable in-tree**, and closing it was part of the same work: `user/services` translated `repository.ErrUserNotFound` (a *different* value with the same message) into the SDK sentinel on its **lookups** only, while eight thin **delegations** returned it raw. `AdminUnlinkOAuth` / `SelfUnlinkOAuth` pass `RemoveOAuthLinkFromUser`'s error straight to these mappers, so a user soft-deleted between the read and the `$pull` would have flipped from 404 to 500. Both the lookups **and** the delegations now translate (`asUserNotFound` in `user/services/user_service.go`), and these two auth methods are pinned to propagate the sentinel rather than rewrite it into an unlink verdict. What is left is a fork obligation: a fork's `iface.UserProvider` must return the SDK sentinel (the same obligation the refresh path and the service-account gate already place on it) rather than its own error with a matching message. Covered by `handlers/error_mapping_test.go`'s `TestMappersClassifyWrappedUserNotFound` / `…ClassifyBareUserNotFound` / `…DoNotClassifyLookalikeNotFound` / `…KeepUnrelatedErrorsAt500` and `TestMapAdminInviterErrorClassifiesWrappedNotificationDown`, plus `services/auth_service_self_link_test.go`'s `TestSelfLinkOAuth_NilUserReturnsTheSDKSentinel`, `services/auth_service_unlink_race_test.go`'s `TestUnlinkRace_*` (the two unlink methods propagate the sentinel; a store failure on the same write does not acquire it), and — in the user module — `user/services`' `TestDelegationsTranslateRepositoryNotFound` / `TestDelegationsLeaveOtherErrorsAlone`. The three modules cannot import one another's services packages, so the chain is established by composition rather than by one end-to-end test.
 
-Each successful action emits three audit lanes in parallel: (1) `slog.Info("auth_security_event", event=…)` for log shipping; (2) one row into `auth_security_events` via `securityEventRepo.Insert` (the auth-private audit collection — Phase 2.1); (3) one row into `compliance_audit_events` via the compliance `iface.AuditSink` when the compliance addon is enabled (Phase 6 of the /admin/users hardening). The compliance lane is driven by `authEventComplianceAction` (`services/auth_service.go`), which maps the internal event-type strings (`admin_password_reset_sent`, `admin_verification_resent`, `admin_oauth_unlink`, `admin_mfa_reset`, plus `self_oauth_unlink` / `self_oauth_link` / `self_session_revoke[_all]`, plus the five credential changes `self_mfa_enrolled` / `self_mfa_factor_replaced` / `self_passkey_registered` / `self_passkey_removed` / `self_mfa_removed`) onto the dotted compliance vocabulary (`auth.password.reset_requested` / `auth.email.verify_resend` / `auth.oauth.unlinked` / `auth.mfa.reset` / `auth.oauth.unlinked.self` / `auth.mfa.enrolled` / `auth.mfa.replaced` / `auth.mfa.passkey_registered` / `auth.mfa.passkey_removed` / `auth.mfa.removed` / …). Unmapped event-types still hit slog + `auth_security_events` but don't get duplicated to compliance — adding an event to the SOC2 view is a deliberate opt-in via the mapping function.
+Each successful action emits three audit lanes in parallel: (1) `slog.Info("auth_security_event", event=…)` for log shipping; (2) one row into `auth_security_events` via `securityEventRepo.Insert` (the auth-private audit collection — Phase 2.1); (3) one row into `compliance_audit_events` via the compliance `iface.AuditSink` when the compliance addon is enabled (Phase 6 of the /admin/users hardening). The compliance lane is driven by `authEventComplianceAction` (`services/auth_service.go`), which maps the internal event-type strings (`admin_password_reset_sent`, `admin_verification_resent`, `admin_oauth_unlink`, `admin_mfa_reset`, `admin_mfa_reset_failed`, plus `self_oauth_unlink` / `self_oauth_link` / `self_session_revoke[_all]`, plus the five credential changes `self_mfa_enrolled` / `self_mfa_factor_replaced` / `self_passkey_registered` / `self_passkey_removed` / `self_mfa_removed`) onto the dotted compliance vocabulary (`auth.password.reset_requested` / `auth.email.verify_resend` / `auth.oauth.unlinked` / `auth.mfa.reset` / `auth.mfa.reset_failed` / `auth.oauth.unlinked.self` / `auth.mfa.enrolled` / `auth.mfa.replaced` / `auth.mfa.passkey_registered` / `auth.mfa.passkey_removed` / `auth.mfa.removed` / …). Unmapped event-types still hit slog + `auth_security_events` but don't get duplicated to compliance — adding an event to the SOC2 view is a deliberate opt-in via the mapping function.
 
 ## Service accounts
 
