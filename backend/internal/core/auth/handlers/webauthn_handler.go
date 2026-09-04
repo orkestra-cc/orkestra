@@ -516,6 +516,16 @@ func decodeCredentialID(s string) ([]byte, error) {
 // alongside appendOTP so step-up tokens minted via passkey carry both
 // markers — "otp" satisfies the existing middleware check, "webauthn"
 // gives the audit trail enough fidelity to distinguish the factor.
+//
+// It appends only; it never strips. Both call sites are already clean of
+// stale epoch-governed markers when they reach it, by different routes,
+// and neither may stop being so:
+//
+//   - VerifyFinish passes priorAMRWithOTP(ctx), which strips them off the
+//     raw claim (see that helper for why).
+//   - LoginFinish passes appendOTP(loginCh.SourceAMR), and SourceAMR is
+//     stamped at login as exactly ["pwd"] or ["oauth"] — the login funnel
+//     is the only producer — so it structurally cannot carry one.
 func appendWebAuthn(source []string) []string {
 	for _, v := range source {
 		if v == "webauthn" {

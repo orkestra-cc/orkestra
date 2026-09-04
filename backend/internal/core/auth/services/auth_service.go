@@ -1491,6 +1491,14 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 // changes no behaviour. That is the point: the invariant is stated in the
 // one place that mints from a refresh, so it holds the day a refresh token
 // does carry markers, instead of being rediscovered as a second M-2.
+//
+// If that day comes, add "mfae" to the refresh token in the SAME change.
+// Adding amr without it leaves tokenEpoch at 0 for every refresh, so every
+// epoch-governed marker is dropped for any user whose epoch has ever moved.
+// That is the safe direction to fail — a user re-proves a factor they still
+// hold, rather than keeping authority for one they do not — but it is a
+// silent step-up prompt, not a no-op, so it should be a decision rather
+// than a surprise.
 func carryAMR(prior []string, priorLastOTPAt int64, tokenEpoch, userEpoch int) ([]string, int64) {
 	current := tokenEpoch == userEpoch
 	out := make([]string, 0, len(prior))

@@ -930,6 +930,12 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 			ctx = context.WithValue(ctx, ctxauth.KeySystemRole, claims.SystemRole)
 			ctx = context.WithValue(ctx, ctxClaims, claims)
 			ctx = context.WithValue(ctx, ctxTenantMemberships, claims.Memberships)
+			// Same stash setUserContext writes, for the same reason: a route
+			// wearing OptionalAuth resolves claims, so IsMFAEnrolled would
+			// otherwise fall back to GetAMR and report a stale-epoch token as
+			// mfa_enrolled=true to Cedar. Latent today — no registered route
+			// mounts OptionalAuth — but the next one to must not inherit it.
+			ctx = context.WithValue(ctx, mfaAuthorityKey{}, mfaAuthority{amr: m.resolveMFAAuthority(ctx, claims)})
 			if ip := utils.GetClientIP(r); ip != "" {
 				ctx = context.WithValue(ctx, ctxauth.KeyClientIP, ip)
 			}

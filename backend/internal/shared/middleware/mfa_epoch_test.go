@@ -452,3 +452,42 @@ func TestMFAEpoch_StripsDeviceTrustAlongsideItsFactor(t *testing.T) {
 		t.Fatal("a stale epoch must strip otp and device_trust together")
 	}
 }
+
+// Minor 3: OptionalAuth resolves claims, so it must resolve the MFA
+// authority too. Without the stash, IsMFAEnrolled falls back to GetAMR and
+// reports a stale-epoch token as mfa_enrolled=true to Cedar — D16's
+// unconditional-false property, lost on any route wearing this middleware.
+// Latent today (no registered route mounts it), which is exactly why it
+// needs a test: the next route to mount it would inherit the hole silently.
+//
+// Uses the real JWT service from the require_auth fixture, so the token is
+// validated the way OptionalAuth validates it rather than hand-planted.
+func TestOptionalAuth_ResolvesTheMFAAuthorityLikeSetUserContext(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	f.mw.SetMFAEpochLookup(operatorEpochs("u-1", 2).lookup()) // the user has moved on
+
+	user := &iface.User{UUID: "u-1", Email: "u-1@example.com", Role: "operator", MFAEpoch: 1}
+	token, err := f.jwt.GenerateEnhancedAccessToken(user,
+		&authModels.DeviceInfo{DeviceID: "dev-A"},
+		&authModels.SecurityContext{SessionID: "sess-A", AMR: []string{"pwd", "otp"}, LastOTPAt: time.Now().Unix()})
+	if err != nil {
+		t.Fatalf("GenerateEnhancedAccessToken: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/public-ish", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	var seen context.Context
+	f.mw.OptionalAuth(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen = r.Context()
+	})).ServeHTTP(httptest.NewRecorder(), req)
+
+	if seen == nil {
+		t.Fatal("OptionalAuth must run the handler for a valid bearer")
+	}
+	if _, ok := seen.Value(ctxClaims).(*authModels.JWTClaims); !ok {
+		t.Fatal("precondition: OptionalAuth must have stamped the claims")
+	}
+	if IsMFAEnrolled(seen) {
+		t.Fatal("a stale epoch must read false to Cedar on an OptionalAuth route too")
+	}
+}

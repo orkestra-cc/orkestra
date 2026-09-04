@@ -360,9 +360,28 @@ func (h *PasswordAuthHandler) PasswordConfirm(ctx context.Context, req *Password
 // priorAMRFromCtx pulls the caller's existing AMR off the JWT claims so
 // ConfirmPassword can build amr ∪ {"reauth"}. Empty slice when the token
 // has no amr (legacy dev tokens) — the service then defaults to ["pwd"].
+//
+// The epoch-governed markers are stripped first, and that is load-bearing
+// rather than defensive. This endpoint mints under the user's CURRENT
+// epoch with last_otp_at=now, so carrying a marker forward from the raw
+// claim would launder authority a removed factor no longer backs:
+//
+//	amr ["pwd","otp"] mfae 3 → user self-removes their factor (epoch → 4;
+//	D16 spares the caller's own session) → the next request correctly
+//	loses "otp" → one password reconfirm returns ["pwd","otp","reauth"] at
+//	mfae 4, which passes RequireMFA, RequireStepUp, the enrolment gate,
+//	Cedar's principal.mfa_enrolled and the personal-tenant impersonation
+//	bypass. That falsifies D16's headline property on the self-removal
+//	path.
+//
+// ConfirmPassword's own refusal does not cover it: it refuses callers with
+// an enrolled factor, and by this point the factor has just been deleted.
+// Stripping is independently correct anyway — a reauth token is minted
+// only for callers who hold no second factor, so it has no business
+// carrying a second-factor marker whatever the epoch says.
 func priorAMRFromCtx(ctx context.Context) []string {
 	if claims, ok := ctx.Value("claims").(*authModels.JWTClaims); ok && claims != nil {
-		return claims.AMR
+		return authModels.WithoutEpochBoundAMR(claims.AMR)
 	}
 	return nil
 }

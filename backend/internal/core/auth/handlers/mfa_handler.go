@@ -479,23 +479,35 @@ func (h *MFAHandler) Verify(ctx context.Context, req *MFAVerifyRequest) (*MFAVer
 	return resp, nil
 }
 
-// priorAMRWithOTP returns the caller's existing amr plus "otp", deduplicated.
+// priorAMRWithOTP returns the caller's existing amr, stripped of every
+// epoch-governed marker, plus "otp" — the factor this mint just verified.
 // When the prior token has no amr (dev tokens, tokens minted before Block A)
 // we default to ["pwd","otp"] so the resulting token still looks coherent.
 // The "claims" context key is populated by AuthMiddleware.setUserContext.
+//
+// The strip is the same rule priorAMRFromCtx applies, one door over: this
+// mint stamps the user's CURRENT epoch and last_otp_at=now, so any marker
+// copied from the raw claim is re-issued with fresh authority. The caller
+// has just proven a real factor, so the risk is narrower than the password
+// reconfirm's — but the laundered marker is a DIFFERENT one: a deleted
+// passkey's "webauthn" would otherwise survive a TOTP verify and come back
+// current. Carrying only what was actually verified keeps the claim an
+// honest record of this ceremony.
+//
+// "reauth" and the base markers survive: the epoch governs MFA
+// credentials, and neither a password reconfirm nor "how the session began"
+// is one.
 func priorAMRWithOTP(ctx context.Context) []string {
 	var prior []string
 	if claims, ok := ctx.Value("claims").(*authModels.JWTClaims); ok && claims != nil {
-		prior = claims.AMR
+		prior = authModels.WithoutEpochBoundAMR(claims.AMR)
 	}
 	if len(prior) == 0 {
 		prior = []string{"pwd"}
 	}
-	for _, v := range prior {
-		if v == "otp" {
-			return prior
-		}
-	}
+	// No dedup needed: the strip above removed "otp" if it was there, and
+	// both branches produce a fresh slice, so the append never writes
+	// through to the caller's claims.
 	return append(prior, "otp")
 }
 
