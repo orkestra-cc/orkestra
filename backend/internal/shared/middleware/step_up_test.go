@@ -463,8 +463,8 @@ func enrolmentLookupErr(err error) MFAEnrollmentLookup {
 // runEnrolmentGate builds a minimal AuthMiddleware, wires the given
 // enrolment lookup (nil = SetMFAEnrollmentLookup never called), seeds the
 // request context with claims, and drives RequireEnrolmentProof(maxAge)
-// around a handler that does nothing — so a pass-through leaves the
-// recorder on its default 200.
+// around a handler that writes 204 — so a pass case asserts a status the
+// downstream handler alone can produce, never the recorder's zero value.
 func runEnrolmentGate(t *testing.T, claims *authModels.JWTClaims, lookup MFAEnrollmentLookup, maxAge time.Duration) *httptest.ResponseRecorder {
 	t.Helper()
 	m := newTestMiddleware(&fakeAuthz{}, &fakeTenantProvider{}, nil)
@@ -477,7 +477,12 @@ func runEnrolmentGate(t *testing.T, claims *authModels.JWTClaims, lookup MFAEnro
 		req = req.WithContext(context.WithValue(req.Context(), ctxClaims, claims))
 	}
 	rec := httptest.NewRecorder()
-	m.RequireEnrolmentProof(maxAge)(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+	// 204, not the recorder's default 200: a gate that neither called next
+	// nor wrote anything would leave the zero value behind and satisfy a
+	// 200 assertion, so every pass case here asserts a status only the
+	// downstream handler can produce.
+	m.RequireEnrolmentProof(maxAge)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
 	})).ServeHTTP(rec, req)
 	return rec
 }
@@ -515,8 +520,8 @@ func TestRequireEnrolmentProof_WithFactorFreshProofPasses(t *testing.T) {
 		UserUUID: "u-1", AMR: []string{"pwd", "otp"}, LastOTPAt: time.Now().Unix(),
 	}
 	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(true), 5*time.Minute)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 — a fresh second factor is the proof", rec.Code)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 — a fresh second factor is the proof", rec.Code)
 	}
 }
 
@@ -554,8 +559,8 @@ func TestRequireEnrolmentProof_NoFactorFreshAuthTimePasses(t *testing.T) {
 		UserUUID: "u-1", AMR: []string{"pwd"}, AuthTime: time.Now().Add(-time.Minute).Unix(),
 	}
 	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(false), 5*time.Minute)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
 	}
 }
 
@@ -566,8 +571,8 @@ func TestRequireEnrolmentProof_NoFactorFreshReauthPasses(t *testing.T) {
 		UserUUID: "u-1", AMR: []string{"pwd", "reauth"}, LastOTPAt: time.Now().Unix(),
 	}
 	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(false), 5*time.Minute)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
 	}
 }
 
@@ -606,9 +611,14 @@ func TestRequireEnrolmentProof_DevTokenShapeIsReauth(t *testing.T) {
 }
 
 // FAIL CLOSED. A degraded Mongo must not let a factor be added without
-// proof, so an unavailable lookup answers step_up_required for
-// everyone: a user with a factor can satisfy it, a user without one
-// cannot enrol until it recovers.
+// proof, so an unavailable lookup refuses every caller who has not
+// ALREADY presented a fresh second factor, with step_up_required. That
+// answer is satisfiable: the proof it asks for lives in the signed token,
+// so an enrolled caller can step up and come back (the test below), while
+// a caller with no factor cannot enrol until the lookup recovers — spec
+// §5 edge case 9. auth_time is not accepted on this path, because
+// "is auth_time enough?" is only answerable once we know the caller has
+// no factor, and that is the very question the lookup failed.
 func TestRequireEnrolmentProof_LookupErrorFailsClosed(t *testing.T) {
 	claims := &authModels.JWTClaims{
 		UserUUID: "u-1", AMR: []string{"pwd"}, AuthTime: time.Now().Unix(),
@@ -650,7 +660,52 @@ func TestRequireEnrolmentProof_DefaultMaxAgeWhenZero(t *testing.T) {
 		UserUUID: "u-1", AMR: []string{"pwd"}, AuthTime: time.Now().Add(-2 * time.Minute).Unix(),
 	}
 	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(false), 0)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 — 2-min-old login under the default 5min window", rec.Code)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 — 2-min-old login under the default 5min window", rec.Code)
+	}
+}
+
+// The other half of edge case 9: the step_up_required an outage hands back
+// must be an answer the caller can actually act on. A caller who steps up
+// and retries carries the proof IN THE TOKEN, so the gate can honour it
+// without the lookup that is still down. Before the freshness check was
+// hoisted above the lookup, this returned step_up_required forever — a
+// challenge the caller had already satisfied.
+func TestRequireEnrolmentProof_LookupErrorFreshFactorPasses(t *testing.T) {
+	claims := &authModels.JWTClaims{
+		UserUUID: "u-1", AMR: []string{"pwd", "otp"}, LastOTPAt: time.Now().Unix(),
+	}
+	rec := runEnrolmentGate(t, claims, enrolmentLookupErr(errors.New("mongo down")), 5*time.Minute)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 \u2014 a fresh factor needs no lookup", rec.Code)
+	}
+}
+
+// Same, with the lookup never wired at all.
+func TestRequireEnrolmentProof_NilLookupFreshFactorPasses(t *testing.T) {
+	claims := &authModels.JWTClaims{
+		UserUUID: "u-1", AMR: []string{"pwd", "webauthn"}, LastOTPAt: time.Now().Unix(),
+	}
+	rec := runEnrolmentGate(t, claims, nil, 5*time.Minute)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+}
+
+// M-4: amrSatisfiesStepUp and amrSatisfiesMFA hold identical literal marker
+// lists today \u2014 the split is a seam for M-1's later narrowing of the
+// session-long predicate, not a behaviour change. Until the marker set is
+// extracted to one place, this is what stops an edit to one list from
+// silently diverging from the other.
+func TestAMRPredicates_AgreeOnEveryMarker(t *testing.T) {
+	for _, amr := range [][]string{
+		nil, {}, {"pwd"}, {"oauth"}, {"otp"}, {"webauthn"}, {"mfa"}, {"reauth"},
+		{"device_trust"}, {"pwd", "otp"}, {"pwd", "reauth"}, {"oauth", "webauthn"},
+	} {
+		if got, want := amrSatisfiesStepUp(amr), amrSatisfiesMFA(amr); got != want {
+			t.Errorf("amr %v: amrSatisfiesStepUp = %v, amrSatisfiesMFA = %v \u2014 "+
+				"the two lists have diverged; narrowing amrSatisfiesMFA (M-1) is a "+
+				"deliberate change that must update this test in the same commit", amr, got, want)
+		}
 	}
 }

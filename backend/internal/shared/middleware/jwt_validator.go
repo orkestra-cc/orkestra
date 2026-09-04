@@ -443,43 +443,6 @@ func (v *JWTValidator) RequireStepUp(maxAge time.Duration) func(http.Handler) ht
 	}
 }
 
-// RequireEnrolmentProof on the JWTValidator always blocks with
-// step_up_required (after the usual 401 for a request carrying no claims).
-// It is NOT a pass-through like RequireLowRisk: the sidecar has no access
-// to the monolith's mfa_factors collections, so it can never establish
-// whether the caller holds a factor — and that is precisely the state
-// AuthMiddleware.RequireEnrolmentProof treats as fail-closed
-// (`mfaEnrollment == nil` → step_up_required, unconditionally, without
-// consulting freshness). Mirroring that branch keeps the two
-// implementations honest: a credential must never be created on a surface
-// that cannot check what the caller already has. The sidecar hosts no
-// enrolment endpoints today; this exists so sidecar modules compile
-// against the same module.RoleMiddleware contract, and so that mounting
-// one there fails loudly rather than silently ungated.
-func (v *JWTValidator) RequireEnrolmentProof(maxAge time.Duration) func(http.Handler) http.Handler {
-	if maxAge <= 0 {
-		maxAge = 5 * time.Minute
-	}
-	return func(_ http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if claims, ok := r.Context().Value(ctxClaims).(*authModels.JWTClaims); !ok || claims == nil {
-				writeErr(w, http.StatusUnauthorized, "authentication required")
-				return
-			}
-			w.Header().Set("WWW-Authenticate", `MFA error="step_up_required"`)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"status":        http.StatusUnauthorized,
-				"title":         "step-up authentication required",
-				"detail":        "this action requires a fresh second-factor verification",
-				"code":          "step_up_required",
-				"maxAgeSeconds": int(maxAge.Seconds()),
-			})
-		})
-	}
-}
-
 // RequireInternalTenant and RequireExternalTenant on the JWTValidator are
 // implemented as no-op pass-throughs for the AI sidecar: the sidecar trusts
 // the monolith's kind enforcement on the public boundary and never performs

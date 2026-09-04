@@ -354,8 +354,10 @@ type codedError struct {
 // through this writer would change their wire output. They are enumerated in
 // the SCOPE note on TestCodedErrorEnvelopes_Golden.
 //
-// The output is byte-for-byte what the ten emitters wrote when each built
-// its own map — json.Encoder sorts map keys, so field order here is
+// The output is byte-for-byte what the ten emitters that existed at the
+// refactor wrote when each built its own map (there are eleven now —
+// sendReauthenticationRequired was written against this helper rather than
+// migrated onto it) — json.Encoder sorts map keys, so field order here is
 // irrelevant, and Encode's trailing newline is part of the contract.
 // TestCodedErrorEnvelopes_Golden pins every byte against literals captured
 // before this helper existed.
@@ -1189,7 +1191,12 @@ func (m *AuthMiddleware) hasFreshSecondFactor(_ *http.Request, claims *models.JW
 //     both SPAs return the user to where they were.
 //
 // The lookup fails CLOSED: nil or erroring → step_up_required. A degraded
-// Mongo must never be the reason a factor can be added without proof.
+// Mongo must never be the reason a factor can be added without proof. It
+// is consulted only AFTER the fresh-second-factor check, because that
+// proof is carried in the signed token and needs no database at all — so
+// the outage answer stays one an enrolled caller can actually satisfy by
+// stepping up (spec §5 edge case 9), while auth_time, which is only
+// acceptable for a caller with no factor, stays behind a successful read.
 //
 // Unlike RequireMFA this gate deliberately does NOT consult the mfaEnabled
 // master switch. That switch exists to avoid a bootstrap deadlock — a
@@ -1220,6 +1227,22 @@ func (m *AuthMiddleware) RequireEnrolmentProof(maxAge time.Duration) func(http.H
 				return
 			}
 
+			// The strong proof is carried IN THE TOKEN, so it needs no
+			// read and is checked before the read that can fail. On a
+			// healthy lookup this is behaviour-neutral — the branch below
+			// passes on this input regardless of hasFactor — and during an
+			// outage it is what makes the step_up_required answer
+			// satisfiable rather than a challenge the caller provably
+			// cannot act on (spec §5 edge case 9).
+			if m.hasFreshSecondFactor(r, claims, maxAge) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Everything past here needs to know whether a factor exists,
+			// because auth_time — the weaker proof — may only be accepted
+			// for a caller who has none. That question is unanswerable
+			// without the lookup, so an unwired or failing one refuses.
 			if m.mfaEnrollment == nil {
 				m.sendStepUpRequired(w, r, maxAge)
 				return
@@ -1230,10 +1253,6 @@ func (m *AuthMiddleware) RequireEnrolmentProof(maxAge time.Duration) func(http.H
 				return
 			}
 
-			if m.hasFreshSecondFactor(r, claims, maxAge) {
-				next.ServeHTTP(w, r)
-				return
-			}
 			if hasFactor {
 				// One right answer for an enrolled user. A fresh auth_time
 				// is deliberately NOT accepted here: they have a stronger
@@ -1247,6 +1266,35 @@ func (m *AuthMiddleware) RequireEnrolmentProof(maxAge time.Duration) func(http.H
 				return
 			}
 			m.sendReauthenticationRequired(w, r, maxAge, claims.AuthTime)
+		})
+	}
+}
+
+// RefuseEnrolmentProof is the fail-closed stand-in a caller mounts when its
+// module.RoleMiddleware does not implement module.EnrolmentProofGate. Every
+// request is refused with the same step_up_required envelope
+// sendStepUpRequired writes.
+//
+// A missing gate must not become an open enrolment endpoint: the whole
+// point of H-2/H-3 is that creating or replacing a second factor needs a
+// proof this middleware is the only thing that can check. Refusing is the
+// safe reading of "we cannot check", and it is the same answer the real
+// gate gives when factor presence is unresolvable.
+//
+// It delegates to sendStepUpRequired on a zero-value AuthMiddleware rather
+// than rebuilding the envelope, so the two can never drift: that method
+// reads nothing from its receiver (TestCodedErrorEnvelopes_Golden pins its
+// bytes off a zero value for the same reason). Keeping it here, in the
+// package that owns writeCodedError, is what stops a second hand-built
+// step_up_required envelope appearing in a consumer package.
+func RefuseEnrolmentProof(maxAge time.Duration) func(http.Handler) http.Handler {
+	if maxAge <= 0 {
+		maxAge = 5 * time.Minute
+	}
+	var m AuthMiddleware
+	return func(http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			m.sendStepUpRequired(w, r, maxAge)
 		})
 	}
 }

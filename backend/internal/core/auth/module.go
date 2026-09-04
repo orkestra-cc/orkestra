@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -1600,6 +1601,36 @@ func resolveWebAuthnRP(frontendURL string) (string, []string) {
 	return rpID, origins
 }
 
+// enrolmentGate resolves the enrolment-proof gate (H-2/H-3) off a surface's
+// RoleMiddleware, which is an interface value — so the gate arrives through
+// the additive module.EnrolmentProofGate sub-interface rather than a method
+// on RoleMiddleware itself, which would break every fork that implements
+// it (the iface.OAuthLinkDataUpdater / iface.MFAEpochBumper precedent).
+//
+// A failed assertion refuses every enrolment request instead of passing it
+// through: this gate is the only thing standing between a stolen
+// session-only bearer and a replaced second factor, so "we could not obtain
+// the gate" must not read as "no gate needed". It also logs at WARN here,
+// once per surface at wiring time, because a fork whose middleware lacks
+// the method should learn about it at boot rather than from a user's 401.
+//
+// Call it ONCE per surface and reuse the result across that surface's mount
+// sites, so the warning is not repeated per route group.
+func enrolmentGate(logger *slog.Logger, surface string, mw module.RoleMiddleware, maxAge time.Duration) func(http.Handler) http.Handler {
+	if gate, ok := mw.(module.EnrolmentProofGate); ok {
+		return gate.RequireEnrolmentProof(maxAge)
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Warn("auth: RoleMiddleware does not implement module.EnrolmentProofGate — "+
+		"MFA enrolment endpoints will refuse every caller with step_up_required",
+		slog.String("surface", surface),
+		slog.String("interface", "module.EnrolmentProofGate"),
+	)
+	return authMiddleware.RefuseEnrolmentProof(maxAge)
+}
+
 func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 	// ADR-0003 PR-D D-8: only audience-split mounts survive. The
 	// operator AuthHandler also owns the single shared OAuth callback
@@ -1647,6 +1678,11 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		m.serviceAccountAdminHandler.RegisterManageRoutes(humachi.New(r, ri.APIConfig))
 	})
 
+	// The enrolment-proof gate, resolved ONCE per surface so a fork whose
+	// middleware lacks module.EnrolmentProofGate gets one WARN, not one
+	// per route group. Reused by this surface's TOTP and passkey mounts.
+	operatorEnrolmentGate := enrolmentGate(m.logger, "operator", ri.Operator.AuthMW, 5*time.Minute)
+
 	// Operator MFA endpoints split into five groups:
 	//   - public: /v1/auth/operator/mfa/login/verify completes an in-
 	//     flight login (caller has a challengeId, not yet a bearer).
@@ -1668,7 +1704,7 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 	// proof of presence, not merely a valid bearer (H-2, H-3).
 	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(ri.Operator.AuthMW.RequireGlobal())
-		r.Use(ri.Operator.AuthMW.RequireEnrolmentProof(5 * time.Minute))
+		r.Use(operatorEnrolmentGate)
 		api := humachi.New(r, ri.APIConfig)
 		m.operatorMFAHandler.RegisterEnrolmentRoutes(api, handlers.OperatorMount)
 	})
@@ -1753,7 +1789,7 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		})
 		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 			r.Use(ri.Operator.AuthMW.RequireGlobal())
-			r.Use(ri.Operator.AuthMW.RequireEnrolmentProof(5 * time.Minute))
+			r.Use(operatorEnrolmentGate)
 			api := humachi.New(r, ri.APIConfig)
 			m.operatorWebAuthnHandler.RegisterEnrolmentRoutes(api, handlers.OperatorMount)
 		})
@@ -1785,6 +1821,7 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		return
 	}
 	clientProtectedAPI := humachi.New(ri.Client.ProtectedRouter, ri.APIConfig)
+	clientEnrolmentGate := enrolmentGate(m.logger, "client", ri.Client.AuthMW, 5*time.Minute)
 	if ri.ClientRouter != nil {
 		m.clientAuthHandler.RegisterTierMountableRoutes(ri.Client.PublicAPI, clientProtectedAPI, ri.ClientRouter, handlers.ClientMount)
 		m.clientAuthHandler.RegisterOAuthStartRoutes(ri.Client.PublicAPI, handlers.ClientMount)
@@ -1808,7 +1845,7 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 	})
 	ri.Client.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(ri.Client.AuthMW.RequireGlobal())
-		r.Use(ri.Client.AuthMW.RequireEnrolmentProof(5 * time.Minute))
+		r.Use(clientEnrolmentGate)
 		api := humachi.New(r, ri.APIConfig)
 		m.clientMFAHandler.RegisterEnrolmentRoutes(api, handlers.ClientMount)
 	})
@@ -1827,7 +1864,7 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		})
 		ri.Client.ProtectedRouter.Group(func(r chi.Router) {
 			r.Use(ri.Client.AuthMW.RequireGlobal())
-			r.Use(ri.Client.AuthMW.RequireEnrolmentProof(5 * time.Minute))
+			r.Use(clientEnrolmentGate)
 			api := humachi.New(r, ri.APIConfig)
 			m.clientWebAuthnHandler.RegisterEnrolmentRoutes(api, handlers.ClientMount)
 		})

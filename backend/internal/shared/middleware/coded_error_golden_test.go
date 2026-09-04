@@ -29,18 +29,28 @@ import (
 // internal/shared/middleware are built inline and are NOT pinned here, and
 // none of them goes through writeCodedError:
 //
-//   - jwt_validator.go:316 — 402 `capability_required`. Same code as
+//   - jwt_validator.go:333 — 402 `capability_required`. Same code as
 //     sendCapabilityRequiredResponse but a DIFFERENT shape: no `errors[]`
 //     and no `type`;
-//   - jwt_validator.go:383 — 401 `step_up_required`, `MFA` challenge, no
+//   - jwt_validator.go:398 — 401 `step_up_required`, `MFA` challenge, no
 //     `errors[]`, no `type`;
-//   - jwt_validator.go:421 — the same plus `maxAgeSeconds`;
-//   - audience.go:105 — 401 `audience_mismatch`, whose body is only
+//   - jwt_validator.go:436 — the same plus `maxAgeSeconds`;
+//   - audience.go:106 — 401 `audience_mismatch`, whose body is only
 //     {"error","code"} — no status/title/detail/type at all.
+//
+// (Those line numbers drift with the file; anchor on the codes, not the
+// numbers, and re-derive them when this list is next touched.)
 //
 // Migrating those is a wire change to each (they would gain fields), so it
 // is deliberately NOT part of this wave. Named here so "every emitter is
 // behind the helper" is never read wider than it is true.
+//
+// One NON-emitter also writes a pinned envelope: RefuseEnrolmentProof, the
+// fail-closed stand-in a consumer mounts when its RoleMiddleware does not
+// implement module.EnrolmentProofGate. It is not a `send*` method, so the
+// AST scan below does not see it — and it does not need to, because it
+// delegates to sendStepUpRequired rather than building anything, which is
+// exactly why it cannot drift from the row that pins those bytes.
 //
 // The table is a GOLDEN one in the strict sense: `wantBody` is the exact
 // byte string the pre-refactor emitters produced, captured off an
