@@ -4,7 +4,7 @@
 |---|---|
 | **Date** | 2026-09-03 |
 | **Last review** | — |
-| **Status** | v1.12 — draft for review (round 1 findings 1–5 + important 1–7 applied) |
+| **Status** | v1.13 — PR A implemented and merged; D4 amended to match what shipped |
 | **Scope** | `backend/internal/core/auth` (services, handlers, module wiring), `backend/internal/core/authz` (services, handlers, Cedar policies), `backend/internal/core/user` (role-change handlers), `backend/internal/shared/{middleware,errors,errcode,systeminit,database}`, `backend/pkg/sdk/iface` (one additive interface), `backend/migrations` (one new migration), `frontend-client` (MFA enrolment page), notification templates, `docs/site`, module `CLAUDE.md`s |
 | **Source** | Security audit of 2026-09-03 on `dev` @ `a242e6bd` — report: https://claude.ai/code/artifact/5e5c5406-19bd-4cb1-8cd1-86cd9440b245. Finding IDs below (H-n, M-n, L-n) are the report's |
 | **ADR** | None. Every SDK change is additive (§4.3 adds the `iface.MFAEpochBumper` sub-interface and one `iface.User` field, §4.6 adds `iface.AuthzCacheInvalidator`, §4.7 adds `iface.SystemRoleHolderFinder`; `module.RedisClient` is untouched). Lockout moves from an in-memory token bucket to Redis counters, which changes an operational property, not a contract: the two admin-managed keys keep their names and gain the meaning their UI text already promises |
@@ -143,6 +143,22 @@ workers started and stopped with the module, non-blocking enqueue that
 drops with a metric when the queue is full — and §6 tests the bound
 directly (concurrency, queue capacity, goroutine count, enqueue latency,
 drain on stop). D13 and edge case 7 follow.
+
+v1.13 (2026-09-04) amends D4 after PR A shipped. As written, D4 reached the
+durable `FailedLoginCount+1 >= threshold` rule only when the counter store
+errored, which made the fixed-window counter the sole decider whenever Redis
+was healthy — and a fixed window has no cumulative bound, so an attacker
+pacing `threshold-1` guesses per window was capped by neither mechanism. The
+pre-remediation code did cap that case, so this was a regression introduced
+by the move to counters and caught by the whole-branch review, not by any
+single task's diff. D4 now ORs the two rules and evaluates the durable one on
+every failure; the expired-lock clear in D3 is what makes an unconditional
+cumulative check safe. The amendment is recorded here rather than silently:
+the shipped code is the OR, and D4 as published described something else.
+D4 also now carries the M-7 residual, which the spec had nowhere else: D3
+claims the counter closes the 429-versus-401 oracle, which holds only while
+the counter is the thing answering. Closing the residual changes D9's wire
+contract, so it stays an open decision.
 
 ## 1. Problem
 
@@ -427,13 +443,38 @@ and a known email lock at the same attempt under the same window and answer
 the same 429, and every non-success branch pays the argon2 cost, which closes
 the 429-versus-401 oracle and the timing oracle (M-7, L-1).
 
-**D4 — The durable lock mirrors the counter.** `User.LockedUntil` is set when
-`RecordFailure(email)` returned `Verdict.Locked`, or — when it returned an
-error, i.e. the store was unavailable for this attempt — when
-`FailedLoginCount+1 >= threshold` (the current rule).
-`FailedLoginCount` keeps being incremented for operator visibility. So with
-a healthy Redis the two mechanisms lock at the same attempt; with Redis down
-the durable rule alone still caps guessing against existing accounts. Admin
+**D4 — The durable lock ORs with the counter (amended in v1.13).**
+`User.LockedUntil` is set when `RecordFailure(email)` returned
+`Verdict.Locked` **or** when `FailedLoginCount+1 >= threshold` — the two are
+ORed and the durable rule is evaluated on **every** failure, not only when
+the store was unavailable.
+
+`FailedLoginCount` is therefore load-bearing, not merely operator
+visibility: it is the **cumulative** cap. The counter is a *fixed* window
+stamped on the first failure of that window, so making it the sole decider
+while Redis is healthy would leave an attacker pacing `threshold-1` guesses
+per window bounded by nothing — the guarantee the pre-remediation code had,
+lost as a side effect of moving login onto the counter. ORed, the counter
+bounds bursts and the durable count bounds the long run.
+
+This is safe in a way the pre-remediation rule was not, because the
+expired-lock clear (D3) zeroes `FailedLoginCount` when a lock lapses: an
+account gets a fresh budget after each lockout instead of re-locking on
+every later failure for life.
+
+So the two mechanisms lock at the same attempt for a *burst*; a slow run
+trips the durable rule alone; and with Redis down the durable rule still
+caps guessing against existing accounts.
+
+Consequence for M-7, recorded here because the spec has no other place for
+it: D3 above says the counter closes the 429-versus-401 oracle, and that is
+true only while the counter is the thing answering. Whenever a durable lock
+outlives its counter window — Redis down, the fixed window expired under a
+live lock, or now a paced attacker who never fills a single window — a known
+email answers 429 where an unknown one answers 401. The residual is
+described in full in `backend/internal/core/auth/CLAUDE.md` and at the
+durable-lock branch itself; closing it changes D9's wire contract, so it is
+an open decision, not a defect. Admin
 visibility and the setup of an admin "unlock" affordance stay as they are
 (§8).
 
