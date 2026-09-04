@@ -64,7 +64,18 @@ services:
       start_period: 30s
 
   redis:
-    image: redis/redis-stack-server:latest
+    # Digest-pinned, like rustfs below, and for a stronger reason: `:latest`
+    # on a STATEFUL service means the version depends on when a host last
+    # pulled. This file serves dev, staging AND prod, so a fresh pull could
+    # move one environment's Redis while another stayed put — a split that
+    # nothing records and that surfaces only as behaviour.
+    #
+    # This digest is what every stack is already running (Redis 7.4.7), so
+    # the pin is a no-op today: it freezes the status quo rather than
+    # upgrading. Bump deliberately. Note the repo's Tech Stack table claims
+    # Redis 8.2 while every deployment runs 7.4.7 — see the PR that added
+    # this pin; resolving that is a version decision, not a pinning one.
+    image: redis/redis-stack-server@sha256:798ab84d9f266936b034ab11c4d04a2b8e4b441884c5aa7d17ac951eefdf742a
     container_name: ${APP_NAME}-redis-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
