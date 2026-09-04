@@ -81,6 +81,22 @@ services:
     # 8.x to move to — 7.4 was the end of that line, which is why the
     # upgrade and the image change are one decision rather than two.
     #
+    # SECURITY FLOOR: >= 8.2.6 (or >= 7.4.9 on the old line). Five 2026 CVEs
+    # — 2026-23479 and 2026-25243 (both CVSS 7.7, authenticated RCE via the
+    # unblock-client flow and via RESTORE), 2026-25588 / 2026-25589 (RESTORE
+    # with the TimeSeries and Bloom modules, which Redis 8 carries in core)
+    # and 2026-23631 (Lua UAF, replicas only) — are fixed in OSS/CE 6.2.22,
+    # 7.2.14, 7.4.9, 8.2.6, 8.4.3 and 8.6.3. The 7.4.7 this replaced sat
+    # BELOW that floor and carried the first two; loopback binding plus
+    # requirepass were what stood between them and an attacker.
+    # https://redis.io/blog/security-advisory-cve202623479-cve202625243-cve-2026-25588-cve202625589-cve-2026-23631/
+    #
+    # So: a pin is not a security posture. Pinning freezes the version, which
+    # is what makes a deploy reproducible AND what silently keeps a known-
+    # vulnerable build in service — 7.4.7 was pinned here by digest while
+    # 7.4.9 already carried the fixes. Re-check this floor when Redis
+    # publishes an advisory, not only when something breaks.
+    #
     # Keep the patch in step with .github/workflows/backend.yml and with the
     # Tech Stack tables in CLAUDE.md / backend/CLAUDE.md / backend/README.md
     # / docs/site/intro.mdx, which name this version. The Kubernetes
