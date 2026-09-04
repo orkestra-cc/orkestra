@@ -231,7 +231,19 @@ services:
     # Note: mongodb and redis are in docker-compose.infra.yml
     # Ensure infra is running: docker compose -f docker-compose.infra.yml up -d
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/3000 && echo 'OK'"]
+      # Two conditions, not one. The port check alone is what let a stale
+      # binary look healthy for two days: AIR runs with stop_on_error=false
+      # (backend/.air.toml), so a failed build leaves the LAST GOOD binary
+      # listening on 3000 and nothing says otherwise. That is exactly what
+      # happened when go.mod outgrew this image's toolchain — the container
+      # reported healthy while serving two-day-old code.
+      #
+      # AIR writes tmp/build-errors.log only on a FAILED build and leaves it
+      # untouched on success, so "the error log is newer than the binary"
+      # means the last build failed and what is running is stale. Self-
+      # clearing: the next successful build rewrites tmp/main and the
+      # container goes healthy again on its own.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/3000 && { [ ! -s /app/tmp/build-errors.log ] || [ /app/tmp/main -nt /app/tmp/build-errors.log ]; }"]
       interval: 30s
       timeout: 10s
       retries: 5
