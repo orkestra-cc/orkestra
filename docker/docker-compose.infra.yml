@@ -110,6 +110,31 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # The image's entrypoint fixes /data ownership and drops to the `redis`
+    # user, but only inside a guard that reads
+    # `id -u = 0 && has_cap setuid && has_cap setgid`. Under a bare
+    # `cap_drop: ALL` that guard is false, so the whole block is skipped:
+    # redis keeps running as ROOT and, with DAC_OVERRIDE also dropped, root
+    # no longer bypasses file permissions. A brand-new stack then crash-loops
+    # on the volume Docker seeds from the image (`/data` mode 755, owned by
+    # 999): `Can't open or create append-only dir appendonlydir: Permission
+    # denied`.
+    #
+    # Existing installs did not show it: their volume predates the move from
+    # redis-stack-server and is root-owned, so root wrote to /data as its
+    # owner. That is also why the failure only ever appears on a fresh clone.
+    #
+    # Re-adding these four is the same concession mongo makes above, and it
+    # is a net tightening rather than a loosening: the entrypoint hands off
+    # through setpriv with --inh-caps/--ambient-caps/--bounding-set all
+    # cleared, so redis ends up as uid 999 holding no capability — where
+    # today it runs as root. Verified on both volume shapes (fresh 999-owned
+    # and pre-existing root-owned): starts, and `docker top` reports 999.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
     ports:
       - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     # --dir /data is load-bearing: overriding the image's command drops the
