@@ -8,7 +8,7 @@ Monolithic Go backend server for orkestra with OAuth 2.1 authentication via Goog
 
 - Go 1.26.8+
 - MongoDB 8.2
-- Redis 8.2
+- Redis 7.4 (`redis/redis-stack-server`)
 - Google OAuth credentials
 - Apple Developer account for Sign In (optional)
 

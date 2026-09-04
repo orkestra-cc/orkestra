@@ -72,9 +72,11 @@ services:
     #
     # This digest is what every stack is already running (Redis 7.4.7), so
     # the pin is a no-op today: it freezes the status quo rather than
-    # upgrading. Bump deliberately. Note the repo's Tech Stack table claims
-    # Redis 8.2 while every deployment runs 7.4.7 — see the PR that added
-    # this pin; resolving that is a version decision, not a pinning one.
+    # upgrading. Bump deliberately, and update the Tech Stack tables in
+    # CLAUDE.md / backend/CLAUDE.md / backend/README.md / docs/site/intro.mdx
+    # in the same commit — they name this version. Note redis-stack-server
+    # lags core Redis: the Kubernetes reference deploys plain redis:8.2,
+    # which is a different image, not a contradiction.
     image: redis/redis-stack-server@sha256:798ab84d9f266936b034ab11c4d04a2b8e4b441884c5aa7d17ac951eefdf742a
     container_name: ${APP_NAME}-redis-${ENV}
     labels:
