@@ -27,6 +27,10 @@ func TestJWTValidator_ParsesAuthTimeAndMFAEpoch(t *testing.T) {
 // A token minted before this shipped carries neither claim. Both must read
 // as zero: an absent mfae matches a user document with no mfaEpoch (so the
 // deploy downgrades nobody) and an absent auth_time reads as stale.
+//
+// R17 — regression pin, not a TDD driver. Deleting the two parseClaims
+// branches it nominally covers leaves it green: the zero is Go's zero value,
+// not a statement here. Kept as a pin on the pre-deploy-token contract.
 func TestJWTValidator_AbsentAuthTimeAndMFAEpochReadAsZero(t *testing.T) {
 	c := parseClaims(jwt.MapClaims{"sub": "u-1"})
 	if c.AuthTime != 0 || c.MFAEpoch != 0 {

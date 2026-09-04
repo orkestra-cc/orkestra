@@ -861,6 +861,16 @@ func buildTenantScopedClaims(user *iface.User, tenantUUID, tenantKind string, ro
 		SessionID: fmt.Sprintf("session_%d", now.Unix()),
 		DeviceID:  "default",
 		Scope:     []string{"profile", "email", "api"},
+
+		// mfae, but deliberately NOT auth_time. The epoch is a fact
+		// about the subject and costs nothing here: these tokens carry
+		// no amr at all, so the epoch is never consulted — stamping it
+		// only keeps this mint from being the one place the claim goes
+		// missing. auth_time is the opposite: it is a proof of
+		// interactive presence, and this is the dev-token path, so
+		// stamping it would let a synthetic principal satisfy the
+		// first-factor enrolment gate. See GenerateEnhancedAccessToken.
+		MFAEpoch: user.MFAEpoch,
 	}
 }
 

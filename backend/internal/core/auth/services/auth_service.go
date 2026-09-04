@@ -1353,9 +1353,15 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 		IPAddress: ipAddress,
 		Timestamp: now,
 		// The provider just authenticated the user interactively. This
-		// is also where the client-tier relay lands: the relay endpoint
-		// finishes through finishOAuthCompletion into this method, so
-		// there is no second OAuth mint to stamp.
+		// stamp lives in GenerateEnhancedTokenPair — an EXPORTED
+		// interface method — and every OAuth completion funnels through
+		// it: HandleOAuthCallbackWithLinking delegates here, and so does
+		// the client-tier relay (HandleOAuthRelayCompleteHTTP →
+		// finishOAuthCompletion → that method), as do the mobile
+		// Google/Apple ID-token logins. So there is no second OAuth mint
+		// to stamp — but note that any FUTURE caller of this method
+		// inherits an unconditional now(), which is only correct for a
+		// caller that has genuinely just authenticated someone.
 		AuthTime: now.Unix(),
 	}
 	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, []string{"oauth"}, 0)

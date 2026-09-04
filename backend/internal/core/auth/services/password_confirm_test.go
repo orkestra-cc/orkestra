@@ -169,3 +169,45 @@ func TestConfirmPassword_PolicyOutageIs503Shaped(t *testing.T) {
 		t.Fatalf("want ErrAuthPolicyUnavailable, got %v", err)
 	}
 }
+
+// Spec D11: a password reconfirm PROVES A FACTOR, it does not create a
+// session, so the stepped-up token it mints must carry the session's
+// original auth_time — never now().
+//
+// This asserts the property at a real mint rather than at the seam that
+// feeds it. handlers.currentSessionSecurity is covered separately, but a
+// helper returning the right value proves nothing about a consumer that
+// overwrites it: `security.AuthTime = time.Now().Unix()` added to any of
+// the three step-up mints (this one, MFAHandler.Verify,
+// WebAuthnHandler.VerifyFinish) would ship green against the seam test
+// alone — and, once the first-factor enrolment gate lands, would hand a
+// no-factor user fresh proof of presence for an enrolment they never
+// interactively authenticated for.
+//
+// The two handler mints take their context from that same seam and pass
+// it through unmodified, so this is the funnel-level assertion for all
+// three.
+func TestConfirmPassword_CarriesTheSessionsAuthTimeUnchanged(t *testing.T) {
+	env := newGatesEnv(t, PolicyAudienceOperator, nil, nil)
+	u := env.hashedUser("alice@example.com", "correct-horse-battery")
+	origin := time.Now().Add(-2 * time.Hour).Unix()
+
+	res, err := env.auth.ConfirmPasswordWithSecurity(context.Background(), u.UUID, "correct-horse-battery",
+		[]string{"pwd"}, &models.DeviceInfo{DeviceID: "device-confirm"},
+		&models.SecurityContext{SessionID: "session-confirm", Timestamp: time.Now(), AuthTime: origin})
+	if err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+	claims, err := env.jwt.ValidateAccessToken(res.AccessToken)
+	if err != nil {
+		t.Fatalf("validate token: %v", err)
+	}
+	if claims.AuthTime != origin {
+		t.Fatalf("AuthTime = %d, want the session's original %d — a proven factor is not a new session", claims.AuthTime, origin)
+	}
+	// And the proof itself IS fresh: last_otp_at moves, auth_time does not.
+	// Without this the test would also pass if the mint dropped both.
+	if claims.LastOTPAt == 0 {
+		t.Error("LastOTPAt must still be stamped — the reconfirm is a fresh proof")
+	}
+}

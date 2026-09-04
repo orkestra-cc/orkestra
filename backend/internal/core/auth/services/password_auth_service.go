@@ -1346,6 +1346,15 @@ type ConfirmPasswordResult struct {
 // emit 401 (and the IP/email failure counters tick the same way as a
 // failed login). The 5-minute freshness window is enforced downstream
 // by RequireStepUp comparing last_otp_at — this method always stamps now.
+//
+// ⚠️ TEST-ONLY, and the reason is auth_time. The string arguments cannot
+// carry the caller's auth_time, so the SecurityContext built below has
+// none and the minted token carries auth_time: 0 — an origin-less token
+// whose holder reads as never having interactively authenticated. The
+// production path is ConfirmPasswordWithSecurity, reached from
+// PasswordAuthHandler with the context handlers.currentSessionSecurity
+// derived from the caller's own claims. There is no non-test caller
+// today; do not add one without threading auth_time through first.
 func (s *PasswordAuthService) ConfirmPassword(ctx context.Context, userUUID, password string, priorAMR []string, ip, sessionID, deviceID string) (*ConfirmPasswordResult, error) {
 	return s.ConfirmPasswordWithSecurity(ctx, userUUID, password, priorAMR,
 		&authModels.DeviceInfo{DeviceID: deviceID},

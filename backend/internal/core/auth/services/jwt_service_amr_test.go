@@ -171,6 +171,12 @@ func TestMapToClaims_ReadsAuthTimeAndMFAEpochAsJSONNumbers(t *testing.T) {
 // An absent claim reads as 0, which is what matches every pre-deploy token
 // against a user document that has no mfaEpoch either: the deploy downgrades
 // nobody, and the missing auth_time costs one re-login.
+//
+// R17 — regression pin, not a TDD driver. Deleting the two mapToClaims lines
+// this nominally covers leaves it green: the zero comes from Go's zero value,
+// not from any statement here. It is kept because the pre-deploy-token
+// contract is the property the whole omit-when-zero design rests on, and a
+// future reader who "optimises" absence into a sentinel should trip something.
 func TestMapToClaims_AbsentAuthTimeAndMFAEpochReadAsZero(t *testing.T) {
 	s := &jwtService{}
 	out := s.mapToClaims(jwt.MapClaims{"sub": "u-1"})
