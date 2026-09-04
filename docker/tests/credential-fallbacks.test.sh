@@ -53,6 +53,19 @@ grep -qE '^# ?RUSTFS_ROOT_PASSWORD=$' docker/.env.example \
   || fail "docker/.env.example must keep RUSTFS_ROOT_PASSWORD as an EMPTY commented stub"
 
 # 3. Rendering contract of the infra file.
+#
+# Docker Compose auto-loads the .env file sitting next to the compose file
+# (docker/.env). That file is untracked and per-machine, so it leaked into
+# every render below: CI has no docker/.env and the gate worked there, but on
+# any developer machine the final assertion — that the infra file REFUSES
+# without a storage credential — always found one in the local .env and failed
+# for a reason that has nothing to do with the repository. Pin every render to
+# an empty env file so this gate tests the compose files, not the machine.
+# Values the assertions need are passed through the process environment, which
+# takes precedence over an env file either way.
+empty_env="$(mktemp)"
+trap 'rm -f "$empty_env"' EXIT
+
 compose_env=(
   APP_NAME=orkestra-test
   ENV=development
@@ -61,24 +74,24 @@ compose_env=(
   STORAGE_ACCESS_KEY=test-access
   STORAGE_SECRET_KEY=test-secret-key-0123
 )
-rendered="$(env "${compose_env[@]}" docker compose -f docker/docker-compose.infra.yml config)"
+rendered="$(env "${compose_env[@]}" docker compose --env-file "$empty_env" -f docker/docker-compose.infra.yml config)"
 grep -q 'RUSTFS_ACCESS_KEY: test-access' <<<"$rendered" \
   || fail "rustfs root key id is not derived from STORAGE_ACCESS_KEY"
 grep -q 'RUSTFS_SECRET_KEY: test-secret-key-0123' <<<"$rendered" \
   || fail "rustfs root secret is not derived from STORAGE_SECRET_KEY"
 # `config` renders the command as a YAML list, one token per line — join it.
-redis_cmd="$(env "${compose_env[@]}" docker compose -f docker/docker-compose.infra.yml config --format json \
+redis_cmd="$(env "${compose_env[@]}" docker compose --env-file "$empty_env" -f docker/docker-compose.infra.yml config --format json \
   | jq -r '.services.redis.command | join(" ")')"
 grep -q -- '--dir /data' <<<"$redis_cmd" \
   || fail "redis does not persist into its volume (--dir /data missing from: $redis_cmd)"
 
 rendered="$(env "${compose_env[@]}" RUSTFS_ROOT_USER=rustfs-root RUSTFS_ROOT_PASSWORD=dedicated-root-secret \
-  docker compose -f docker/docker-compose.infra.yml config)"
+  docker compose --env-file "$empty_env" -f docker/docker-compose.infra.yml config)"
 grep -q 'RUSTFS_SECRET_KEY: dedicated-root-secret' <<<"$rendered" \
   || fail "an explicit RUSTFS_ROOT_PASSWORD does not override the STORAGE_* pair"
 
 if env APP_NAME=orkestra-test ENV=development MONGO_ROOT_PASSWORD=x REDIS_PASSWORD=y \
-     docker compose -f docker/docker-compose.infra.yml config >/dev/null 2>&1; then
+     docker compose --env-file "$empty_env" -f docker/docker-compose.infra.yml config >/dev/null 2>&1; then
   fail "the infra file renders with no storage credential at all — it must refuse"
 fi
 
