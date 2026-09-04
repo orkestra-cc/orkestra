@@ -330,23 +330,54 @@ func (s *mfaService) VerifyBackupCode(ctx context.Context, userUUID, code string
 	return ErrMFAInvalidCode
 }
 
+// RemoveFactor deletes EVERY MFA credential the user holds — the TOTP row
+// and the WebAuthn row — and returns ErrMFANotEnrolled only when neither
+// exists.
+//
+// It used to delete the TOTP row alone, which made "remove MFA" a lie for
+// anyone who also had a passkey and made the admin reset answer 404 for a
+// passkey-only target: an operator could not recover such an account at
+// all (D15). A WebAuthn row with no credentials is not a factor, matching
+// what MFAEnrollmentLookup (auth/module.go) already reports — the two
+// must agree since the enrolment gate consumes that lookup.
+//
+// Both rows are looked up before either is deleted, and a failure of
+// either delete is returned rather than swallowed: reporting success on
+// a half-reset account would tell an operator the target is recoverable
+// when it is not (a partial failure here surfaces as a 500 at the admin
+// handler today; a later task makes that path auditable).
 func (s *mfaService) RemoveFactor(ctx context.Context, userUUID, actorUUID string) error {
-	factor, err := s.factors.FindByUserAndType(ctx, userUUID, models.MFAFactorTOTP)
-	if err != nil {
-		if errors.Is(err, repository.ErrMFAFactorNotFound) {
-			return ErrMFANotEnrolled
+	totpFactor, err := s.factors.FindByUserAndType(ctx, userUUID, models.MFAFactorTOTP)
+	if err != nil && !errors.Is(err, repository.ErrMFAFactorNotFound) {
+		return err
+	}
+	waFactor, err := s.factors.FindByUserAndType(ctx, userUUID, models.MFAFactorWebAuthn)
+	if err != nil && !errors.Is(err, repository.ErrMFAFactorNotFound) {
+		return err
+	}
+	hasWebAuthn := waFactor != nil && len(waFactor.WebAuthnCredentials) > 0
+	if totpFactor == nil && !hasWebAuthn {
+		return ErrMFANotEnrolled
+	}
+
+	if totpFactor != nil {
+		if err := s.factors.Delete(ctx, totpFactor.UUID); err != nil {
+			return err
 		}
-		return err
 	}
-	if err := s.factors.Delete(ctx, factor.UUID); err != nil {
-		return err
+	if hasWebAuthn {
+		if err := s.factors.Delete(ctx, waFactor.UUID); err != nil {
+			return err
+		}
 	}
-	// Section C item #3: removing the MFA factor also invalidates every
-	// "remember this device" grant the user holds. A trust row carries
-	// an amr annotation that claims the factor was verified — once the
-	// factor is gone, that annotation is a lie. User-initiated removal
-	// and admin reset both flow through here; the revoke reason
-	// distinguishes them (actorUUID != userUUID indicates admin).
+
+	// Section C item #3: removing the MFA factor(s) also invalidates
+	// every "remember this device" grant the user holds. A trust row
+	// carries an amr annotation that claims a factor was verified —
+	// once no factor remains, that annotation is a lie. User-initiated
+	// removal and admin reset both flow through here; the revoke reason
+	// distinguishes them (actorUUID != userUUID indicates admin), and
+	// it fires once per call regardless of how many rows were deleted.
 	if s.deviceTrust != nil {
 		reason := models.DeviceTrustRevokedOnMFARemove
 		if actorUUID != "" && actorUUID != userUUID {
@@ -358,10 +389,11 @@ func (s *mfaService) RemoveFactor(ctx context.Context, userUUID, actorUUID strin
 				slog.String("error", err.Error()))
 		}
 	}
-	s.logger.Info("mfa factor removed",
+	s.logger.Info("mfa factors removed",
 		slog.String("userUUID", userUUID),
 		slog.String("actorUUID", actorUUID),
-		slog.String("factorUUID", factor.UUID),
+		slog.Bool("totp", totpFactor != nil),
+		slog.Bool("webauthn", hasWebAuthn),
 	)
 	return nil
 }
