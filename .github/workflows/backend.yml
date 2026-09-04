@@ -82,7 +82,7 @@ jobs:
       - name: Start transaction-capable MongoDB
         run: |
           docker run --detach --name mongodb --publish 27017:27017 \
-            mongo:8.0.23 --replSet rs0 --bind_ip_all
+            mongo:8.0.29 --replSet rs0 --bind_ip_all
           for attempt in {1..30}; do
             if docker exec mongodb mongosh --quiet --eval 'db.runCommand({ping: 1}).ok' | grep -q '^1$'; then
               break
