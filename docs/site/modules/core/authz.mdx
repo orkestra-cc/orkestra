@@ -108,6 +108,8 @@ One consequence to expect in practice: a role holding a permission from a module
 
 Every mutation is behind a step-up because each one grants or revokes effective permissions. Each also carries its own permission key (`authz.role.create`, `authz.role.update`, `authz.role.delete`, `authz.binding.create`, `authz.binding.delete`) rather than the read key.
 
+`PATCH .../roles/{roleId}` can also answer `403 authz.platform_admin_required` — see the system-role invariant below.
+
 Two of them can answer `503 authz.cache_unavailable`: editing a role in a way that takes no permission away, and creating a binding. Those are the mutations that *grant* access **and** can change a verdict somebody already holds. The ones that take access away never answer it, and creating a role never does either — a role with no bindings changes nobody's permissions. Read that by direction rather than by HTTP verb.
 
 ## Permissions it contributes
@@ -116,7 +118,7 @@ Two of them can answer `503 authz.cache_unavailable`: editing a role in a way th
 
 ## Invariants worth knowing
 
-- **System roles are immutable** on name, description, and permissions. Only the active flag can be toggled. The service is the authoritative gate, not the UI.
+- **System roles are immutable** on name, description, and permissions. Only the active flag can be toggled — and only by a platform administrator (`super_admin` or `administrator`), because every system role is a *global* catalog row: disabling one empties it for every holder on the platform, not just inside the tenant named in the path. A caller whose own system role says otherwise gets `403 authz.platform_admin_required`. The rule is about who the caller **is**, not what they hold: an `org_owner` holds exactly the permissions the `org_owner` row carries, so a "you must hold everything the role carries" rule would have let them disable it platform-wide. The service is the authoritative gate, not the UI.
 - **Seeding preserves UUIDs** — the seeder copies an existing role's UUID into the rewritten row, so bindings survive both reboots and lazy-heal runs.
 - **Deleting a role cascades its bindings**, so nothing is left pointing at a role that no longer exists.
 - **Deleting a tenant cascades too** — a post-delete hook removes that tenant's bindings and then retires the permission cache, best-effort and only when rows were actually removed. A failed retirement never fails the delete: the rows are gone, and reporting a failure would be a false signal for a cascade that succeeded. Without the hook, a re-used tenant UUID would inherit dangling grants. Global bindings are untouched: they carry platform roles that outlive any tenant.

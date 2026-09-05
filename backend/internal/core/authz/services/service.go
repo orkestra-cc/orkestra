@@ -29,6 +29,20 @@ import (
 // system role is still allowed.
 var ErrSystemRoleImmutable = errors.New("authz: system role name/description/permissions are immutable")
 
+// ErrPlatformAdminRequired is returned when UpdateRole is asked to change
+// a SYSTEM role's IsActive flag by a caller who is not a platform
+// administrator. A system role is global platform configuration — every
+// seeded catalog row, the org_* ones included, lives at tenantId="" — and
+// disabling one drops every permission it carries from every holder on the
+// platform, because the evaluator skips bindings whose role is inactive.
+//
+// The rule is about who the caller IS, not about what they hold: an
+// org_owner holds exactly the permissions the org_owner row carries, so a
+// cascade check ("the actor must hold everything the role carries") would
+// still let them disable org_owner platform-wide from inside their own
+// tenant. See assertPlatformAdmin.
+var ErrPlatformAdminRequired = errors.New("authz: only a platform administrator may enable or disable a system role")
+
 // ErrRoleInactive is returned when CreateBinding is called with a role that
 // has been disabled. Operators should re-enable the role before granting.
 var ErrRoleInactive = errors.New("authz: role is disabled")
@@ -120,6 +134,27 @@ var platformSystemRoleNames = map[string]struct{}{
 	"manager":       {},
 	"operator":      {},
 	"guest":         {},
+}
+
+// platformAdminRoles is the subset of platformSystemRoleNames whose
+// holders ADMINISTER the platform. The two sets answer different
+// questions and must not be conflated: platformSystemRoleNames says
+// which role NAMES are platform-scoped (guest is one of them), this one
+// says which of them may change global platform configuration.
+//
+// It is the same pair the rest of the platform already protects as its
+// administrator quorum — user/services CountActiveAdministrators and
+// user/handlers isPrivilegedSystemRole — so "who is an administrator
+// here" has one answer across modules.
+//
+// `developer` is deliberately excluded. Production seeds it read-only
+// (D9, mirrored by the GetEffectivePermissions shortcut), so admitting it
+// would hand a production developer a platform-wide WRITE that the
+// environment gate exists to deny — and the gate must not depend on
+// which environment the binary booted in.
+var platformAdminRoles = map[string]struct{}{
+	"super_admin":   {},
+	"administrator": {},
 }
 
 // isPlatformSystemRole reports whether the role is one of the 6 platform
@@ -1053,6 +1088,23 @@ func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID, actor stri
 		return nil, ErrSystemRoleImmutable
 	}
 
+	// IsActive is the one field a system row still exposes, and on a system
+	// row it is PLATFORM configuration: the guard above lets it through, and
+	// the tenant-scope guard never applied (a system role belongs to no
+	// tenant), so without this the {tenantId} in the path was decorative for
+	// this one field — an org_owner could disable `administrator` for the
+	// whole platform from inside their own tenant.
+	//
+	// Ordered after the immutability check on purpose: a patch that mixes an
+	// immutable field with IsActive is refused as immutable, the cheaper and
+	// more specific answer, and neither refusal leaks anything the other
+	// does not.
+	if existing.IsSystem && input.IsActive != nil {
+		if err := s.assertPlatformAdmin(ctx, actor); err != nil {
+			return nil, err
+		}
+	}
+
 	fields := bson.M{}
 	if input.Name != nil {
 		name := strings.TrimSpace(*input.Name)
@@ -1138,6 +1190,59 @@ func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID, actor stri
 	}
 
 	return s.repo.GetRoleByUUID(ctx, roleUUID)
+}
+
+// assertPlatformAdmin refuses an actor who is not a platform
+// administrator (ErrPlatformAdminRequired -> 403 authz.platform_admin_required).
+//
+// The actor's system role is read FROM THE DATABASE through s.userRoles —
+// never from the `srole` JWT claim. The claim can be a whole access-token
+// lifetime stale, which is precisely the window the role-change
+// propagation work (D28) exists to close; trusting it here would make it
+// authoritative again exactly where the database can contradict it. The
+// lookup the module wires keeps its own dev-token fallback for the
+// synthetic principals POST /dev/token mints, so the documented local and
+// staging flow still works.
+//
+// Two waivers and one fail-closed default:
+//
+//   - the literal "system" sentinel passes, as it does for the D21
+//     cascade: it marks a platform-issued, in-process write, and the
+//     handler maps a request that spells it to the empty actor so it can
+//     never be chosen by a token;
+//   - an empty actor is ErrGranterRequired (400), the same answer the
+//     role-write validator gives when there is nobody to check — this
+//     path never reaches that validator, so it has to say so itself;
+//   - anything else the lookup cannot answer — unwired, erroring, or a
+//     role outside platformAdminRoles — is refused. A caller whose role
+//     cannot be read is not a proven administrator.
+func (s *Service) assertPlatformAdmin(ctx context.Context, actor string) error {
+	if actor == granterSystem {
+		return nil
+	}
+	if actor == "" {
+		return ErrGranterRequired
+	}
+	if s.userRoles == nil {
+		if s.logger != nil {
+			s.logger.Error("authz: no system-role lookup wired; refusing the system-role toggle",
+				slog.String("actor", actor))
+		}
+		return ErrPlatformAdminRequired
+	}
+	role, err := s.userRoles(ctx, actor)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Error("authz: could not read the calling user's system role; refusing the system-role toggle",
+				slog.String("actor", actor),
+				slog.String("error", err.Error()))
+		}
+		return ErrPlatformAdminRequired
+	}
+	if _, ok := platformAdminRoles[role]; !ok {
+		return ErrPlatformAdminRequired
+	}
+	return nil
 }
 
 // GetRoleByName resolves a role by (tenantID, name). System roles use

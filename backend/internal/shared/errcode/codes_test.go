@@ -50,6 +50,7 @@ var goldenCodes = map[string]string{
 	"AuthIPThresholdBelowAccount":        "auth.ip_threshold_below_account",
 	"AuthzPermissionUnknown":             "authz.permission_unknown",
 	"AuthzSystemPermissionForbidden":     "authz.system_permission_forbidden",
+	"AuthzPlatformAdminRequired":         "authz.platform_admin_required",
 	"AuthzCacheUnavailable":              "authz.cache_unavailable",
 	"TenantSlugAlreadyInUse":             "tenant.slug_already_in_use",
 	"TenantProvisioningLocked":           "tenant.provisioning_locked",

@@ -87,6 +87,7 @@ func TestMapRoleWriteErrorPreservesKnownClientErrors(t *testing.T) {
 		{"unknown role", repository.ErrNotFound, 404, ""},
 		{"duplicate role name", repository.ErrRoleExists, 409, ""},
 		{"system role immutable", services.ErrSystemRoleImmutable, 403, ""},
+		{"system role toggle by a non-platform-admin", services.ErrPlatformAdminRequired, 403, errcode.AuthzPlatformAdminRequired},
 		{"blank name", services.ErrRoleNameRequired, 400, ""},
 		{"empty permission list", services.ErrRolePermissionsRequired, 400, ""},
 		{"missing actor", services.ErrGranterRequired, 400, ""},

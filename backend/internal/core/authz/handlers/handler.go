@@ -299,6 +299,9 @@ func mapRoleWriteError(ctx context.Context, operation string, err error) error {
 		return huma.Error409Conflict("a role with that name already exists in this tenant")
 	case errors.Is(err, services.ErrSystemRoleImmutable):
 		return huma.Error403Forbidden("system roles cannot be edited — only disabled")
+	case errors.Is(err, services.ErrPlatformAdminRequired):
+		return errcode.Forbidden(errcode.AuthzPlatformAdminRequired,
+			"System roles are platform-wide configuration: only a platform administrator can enable or disable one.")
 	case errors.Is(err, services.ErrRoleNameRequired):
 		return huma.Error400BadRequest("the role name cannot be empty")
 	case errors.Is(err, services.ErrRolePermissionsRequired):

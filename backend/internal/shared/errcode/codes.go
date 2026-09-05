@@ -132,6 +132,26 @@ const AuthzPermissionUnknown = "authz.permission_unknown"
 // offending key. 422.
 const AuthzSystemPermissionForbidden = "authz.system_permission_forbidden"
 
+// AuthzPlatformAdminRequired signals that a role patch tried to enable or
+// disable a SYSTEM role — a global catalog row, every one of them seeded at
+// tenantId="" — from a caller whose own system role does not administer the
+// platform (anything but super_admin or administrator).
+//
+// It is the one field a system role still exposes to an edit, and it is the
+// largest revocation the role editor can make: the evaluator skips bindings
+// whose role is inactive, so disabling `administrator` empties it for every
+// holder on the platform. The tenant-scope guard does not reach these rows
+// (they belong to no tenant), so before this code existed an org_owner —
+// org_owner and org_admin both carry authz.role.update — could do it from
+// inside their own tenant.
+//
+// Deliberately a question of WHO the caller is, not of what they hold: an
+// org_owner holds exactly the permissions the org_owner row carries, so a
+// cascade rule would have let them disable that row platform-wide. A caller
+// whose system role cannot be read is refused with this code too — an
+// unreadable role is not a proven administrator. 403.
+const AuthzPlatformAdminRequired = "authz.platform_admin_required"
+
 // AuthzCacheUnavailable signals that a permission GRANT was REFUSED
 // because the effective-permission cache could not be retired. A grant
 // retires the cached verdicts it invalidates before it writes; a counter
