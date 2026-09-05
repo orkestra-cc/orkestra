@@ -58,10 +58,12 @@ func GetUserEmail(ctx context.Context) (string, bool) {
 // Its remaining in-tree consumers fall into three groups, and only the
 // first is genuinely free of authorization weight:
 //
-//   - Non-authorising. Request logging and tenant baggage (observability)
-//     and the navigation menu's role filter (shaping — every route behind
-//     a menu entry re-checks permissions). A stale value costs a
-//     mislabelled log line or a menu entry that 403s when clicked.
+//   - Non-authorising. Request logging and tenant baggage (observability),
+//     the navigation menu's role filter (shaping — every route behind a
+//     menu entry re-checks permissions), and GET /v1/tenants/{id}/authz/me,
+//     which echoes the claim back in its response body without deciding
+//     anything with it. A stale value costs a mislabelled log line, a menu
+//     entry that 403s when clicked, or one stale field in a read.
 //   - Authorising, but triple-guarded. The dev-token fallbacks in
 //     internal/core/authz/module.go and internal/core/user/handlers read
 //     this claim to give a SYNTHETIC dev-token principal a role, because

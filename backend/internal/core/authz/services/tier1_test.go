@@ -211,9 +211,16 @@ func TestGetEffectivePermissions_GlobalBindingStillGrantsSystemKeys(t *testing.T
 // everything, everywhere, through a tenant-scoped binding. D21 already
 // classifies "*" and platform keys as ONE class — both are refused with
 // ErrSystemPermissionInCustomRole — so the evaluator treats them as one
-// class too. Nothing legitimate is lost: super_admin's wildcard arrives
-// through the systemRole shortcut, never through a binding, and
-// CreateBinding already refuses a platform role inside a tenant.
+// class too. Nothing legitimate is lost, and the reason needs stating
+// precisely because a looser version of it has been written wrong three
+// times: super_admin's wildcard reaches a principal TWO ways — the
+// systemRole shortcut, and a GLOBAL binding to the seeded "super_admin"
+// role, which SeedSystemRoles gives Permissions ["*"]. This filter is on
+// neither. The only accurate claim is that it never arrives through a
+// TENANT-SCOPED binding — and that is not an accident of the data:
+// validateBindingScope REQUIRES a platform role to be granted globally,
+// refusing it inside a tenant with ErrSystemRoleNotGrantableInTenant. So
+// the only thing this filter can drop is stale data, which is the point.
 func TestGetEffectivePermissions_TenantBindingCannotGrantTheWildcard(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
 	registerTestPermissions(t, svc,

@@ -9,9 +9,20 @@ The permission catalog, the seeded roles, org-scoped custom roles, role bindings
 
 ## Permissions are never in the JWT
 
-This is the single most important thing about the module. A token carries the user's global system role and their list of org memberships — **never their permissions**. Those are resolved per request, cached in Redis for 60 seconds, and invalidated on every binding or role change.
+This is the single most important thing about the module. A token carries the user's global system role and their list of org memberships — **never their permissions**. Those are resolved per request, cached in Redis for 60 seconds, and retired on every binding or role change.
 
 The consequence is that revocation is effectively instant. Unbinding a role or disabling an account changes what the caller can do on their *next request*, no matter how much life the bearer token has left. That property is what makes [service accounts](/modules/core/auth#service-accounts) safe to hand out, and it is why a token's remaining TTL is not a security parameter here.
+
+### How the cache is retired
+
+The cache key folds in two generation counters — one global, one per user — read together in a single `MGET` on every lookup. Retiring a set of verdicts is therefore one `INCR`: entries written under an older generation simply become unreachable and expire on their own TTL. Nothing has to *find* a key to invalidate it, which is what the earlier scan-and-delete had to do on the hot path — a scan that could partially fail, race a concurrent read repopulating the entry, and built its pattern out of a request body.
+
+The two directions of a permission change get opposite treatment, because a stale verdict does not mean the same thing in both:
+
+- After a **grant**, a stale verdict is a late *deny* — harmless. So a grant retires the cache **before** it writes, and if that cannot be done the change is refused entirely with `503 authz.cache_unavailable` and nothing is written. (A write that cannot change any existing verdict — creating a brand-new role, which nothing is bound to yet — retires nothing and is never refused.)
+- After a **revocation**, a stale verdict is a live *allow* — harmful. So a revocation writes **first** and retires afterwards, best-effort. Refusing it would leave the privilege granted indefinitely, where writing leaves it for at most the 60-second TTL. A failed retirement is logged and counted, never returned.
+
+A deployment with no Redis at all is not the failure case: there is no cached verdict to retire, so the retirement is a truthful no-op and mutations proceed.
 
 ## The catalog builds itself
 
@@ -59,12 +70,23 @@ A missing granter returns an error rather than silently waiving the cascade. The
 
 `CreateBinding` also starts the target's MFA enrollment grace clock when the granted role is a privileged one — idempotently, so repeated grants never reset a running clock.
 
+### Four rules on every custom-role permission list
+
+Creating or editing a custom role runs the same class of checks, for the same reason: without them the role editor is a way *around* the binding cascade — write any permission into a role you can edit, then bind yourself to it.
+
+1. The list must be non-empty after trimming and de-duplication.
+2. Every key must exist in the registered catalog — `422 authz.permission_unknown`, naming the key. A key no module declares can never be checked by anything.
+3. No key may be `*` or a platform-reserved (`System: true`) permission — `422 authz.system_permission_forbidden`, naming the key. This binds everyone, `super_admin` included: it is about what a *tenant role* may carry, not about what the actor may grant.
+4. The actor must already hold every key in the role's scope — `403`. Same rule, same helper, as the binding cascade.
+
+One consequence to expect in practice: a role holding a permission from a module that no longer exists can still be renamed or disabled, but its permission list cannot be saved until the stale key is dropped. Because the admin UI round-trips the whole list, adding a single permission to such a role returns a 422 naming a key the operator never typed.
+
 ### How a decision is made
 
 1. `super_admin` short-circuits with the wildcard.
 2. `administrator` and `developer` inherit every permission flagged `System: true` by any module.
 3. Otherwise: the union of every active binding for this user in this org, plus their global bindings.
-4. **System permissions require a global grant.** Trying to grant one inside an org silently never matches — the evaluator requires an empty org scope for them.
+4. **System permissions — and the wildcard — require a global grant.** A tenant-scoped binding never contributes either: the evaluator skips them on that branch. Keys already stored that way are *ignored*, not deleted — they stay on the role and role reads still show them. The global branch is deliberately unfiltered, because that is where a platform role legitimately conveys a platform key.
 
 ## Routes
 
@@ -80,7 +102,9 @@ A missing granter returns an error rather than silently waiving the cascade. The
 | POST | `/v1/tenants/{tenantId}/authz/bindings` | + MFA step-up |
 | DELETE | `/v1/tenants/{tenantId}/authz/bindings/{bindingId}` | + MFA step-up |
 
-Every mutation is behind a step-up because each one grants or revokes effective permissions.
+Every mutation is behind a step-up because each one grants or revokes effective permissions. Each also carries its own permission key (`authz.role.create`, `authz.role.update`, `authz.role.delete`, `authz.binding.create`, `authz.binding.delete`) rather than the read key.
+
+Two of them can answer `503 authz.cache_unavailable`: editing a role in a way that takes no permission away, and creating a binding. Those are the mutations that *grant* access **and** can change a verdict somebody already holds. The ones that take access away never answer it, and creating a role never does either — a role with no bindings changes nobody's permissions. Read that by direction rather than by HTTP verb.
 
 ## Permissions it contributes
 
@@ -91,7 +115,8 @@ Every mutation is behind a step-up because each one grants or revokes effective 
 - **System roles are immutable** on name, description, and permissions. Only the active flag can be toggled. The service is the authoritative gate, not the UI.
 - **Seeding preserves UUIDs** — the seeder copies an existing role's UUID into the rewritten row, so bindings survive both reboots and lazy-heal runs.
 - **Deleting a role cascades its bindings**, so nothing is left pointing at a role that no longer exists.
-- **Deleting a tenant cascades too** — a post-delete hook removes that tenant's bindings and flushes the permission cache. Without it, a re-used tenant UUID would inherit dangling grants. Global bindings are untouched: they carry platform roles that outlive any tenant.
+- **Deleting a tenant cascades too** — a post-delete hook removes that tenant's bindings and then retires the permission cache, best-effort and only when rows were actually removed. A failed retirement never fails the delete: the rows are gone, and reporting a failure would be a false signal for a cascade that succeeded. Without the hook, a re-used tenant UUID would inherit dangling grants. Global bindings are untouched: they carry platform roles that outlive any tenant.
+- **A tenant-role permit can never authorize a platform action.** A Cedar forbid (`system_actions.require_platform_role`) refuses every `system.*` action for a principal without a `super_admin` / `administrator` / `developer` system role — a single rule rather than a fix repeated per permit, so a tenant-role permit added later is covered without an edit. It is keyed on the permission's module, so it reaches the ten `system.`-prefixed keys; the other five platform-reserved keys are covered instead by the rule that a *global* check never stamps the caller's tenant roles onto the Cedar request. Both land in **shadow mode** — `CEDAR_ENFORCE_ACTIONS` is a separate operational step.
 - **Binding expiration is advisory, not a TTL.** Expired bindings are filtered out of reads but stay in the collection; the index is a plain one. A reaper is future work.
 
 :::note Not here

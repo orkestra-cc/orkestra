@@ -21,6 +21,7 @@ A representative slice, not the full list — read the package for the rest.
 | `TenantProvider` | `tenant` | authz, auth (JWT membership embedding), middleware |
 | `AccessProvider` | `tenant` | middleware (`RequireCapability`) |
 | `AuthzProvider` | `authz` | middleware (permission checks) |
+| `AuthzCacheInvalidator` | `authz` | user (retiring a principal's cached verdicts after a system-role change) |
 | `JWTProvider` / `TenantScopedTokenProvider` | `auth` | the dev-token endpoint, any custom auth integration |
 | `PasswordHasher` / `AdminAuthInviter` | `auth` | user (admin-direct Tier-2 flows) |
 | `ServiceAccountLister` | `auth` | user |
