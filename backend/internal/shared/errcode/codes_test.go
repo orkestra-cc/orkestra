@@ -48,6 +48,8 @@ var goldenCodes = map[string]string{
 	"AuthLoginMethodLockout":             "auth.login_method_lockout",
 	"AuthTooManyAttempts":                "auth.too_many_attempts",
 	"AuthIPThresholdBelowAccount":        "auth.ip_threshold_below_account",
+	"AuthzPermissionUnknown":             "authz.permission_unknown",
+	"AuthzSystemPermissionForbidden":     "authz.system_permission_forbidden",
 	"TenantSlugAlreadyInUse":             "tenant.slug_already_in_use",
 	"TenantProvisioningLocked":           "tenant.provisioning_locked",
 	"TenantInternalModeInvalid":          "tenant.internal_mode_invalid",

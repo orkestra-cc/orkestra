@@ -839,18 +839,30 @@ func (s *Service) SeedSystemRoles(ctx context.Context) error {
 
 // CreateRole builds a custom (non-system) role for one tenant.
 //
-// actor is the UUID of the caller on whose behalf the role is written, or
-// the granterSystem sentinel for seeding and other platform-issued calls.
-// It is threaded here ahead of the D21 permission validator, which bounds
-// what a custom role may carry by what its author already holds; until
-// that validator lands the parameter is accepted and not read.
+// actor is the UUID of the caller the role is written on behalf of. Its
+// effective permissions bound what the role may carry (D21): a role can
+// never grant more than its author already holds, the same rule
+// CreateBinding applies to a grant. The literal "system" is a sentinel
+// that waives that cascade for platform-issued writes; no in-tree caller
+// passes it today (SeedSystemRoles writes through the repository
+// directly), and this package's own tests are its only users. The
+// catalog and platform-key checks bind every caller, "system" included —
+// see validateCustomRolePermissions.
 func (s *Service) CreateRole(ctx context.Context, tenantID, actor string, input models.CreateRoleInput) (*models.Role, error) {
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return nil, ErrRoleNameRequired
+	}
+	perms, err := s.validateCustomRolePermissions(ctx, tenantID, actor, input.Permissions)
+	if err != nil {
+		return nil, err
+	}
 	role := &models.Role{
 		UUID:        uuid.NewString(),
 		TenantID:    tenantID,
-		Name:        input.Name,
+		Name:        name,
 		Description: input.Description,
-		Permissions: input.Permissions,
+		Permissions: perms,
 		IsSystem:    false,
 		IsActive:    true,
 	}
@@ -865,11 +877,12 @@ func (s *Service) CreateRole(ctx context.Context, tenantID, actor string, input 
 // only IsActive can be toggled on them. Custom roles accept all four.
 // The authz cache is flushed because permission membership may change.
 //
-// actor is the UUID of the caller on whose behalf the edit is written, or
-// the granterSystem sentinel for seeding and other platform-issued calls.
-// It is threaded here ahead of the D21 permission validator, which bounds
-// what a custom role may carry by what its editor already holds; until
-// that validator lands the parameter is accepted and not read.
+// actor is the UUID of the caller the edit is written on behalf of, and
+// bounds what the role may carry exactly as it does in CreateRole (D21).
+// A patch that does not supply Permissions is not validated against it,
+// so a role already holding a key no module declares any more can still
+// be renamed or disabled. The literal "system" waives the cascade for
+// platform-issued writes; no in-tree caller passes it today.
 func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID, actor string, input models.UpdateRoleInput) (*models.Role, error) {
 	existing, err := s.repo.GetRoleByUUID(ctx, roleUUID)
 	if err != nil {
@@ -894,7 +907,7 @@ func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID, actor stri
 	if input.Name != nil {
 		name := strings.TrimSpace(*input.Name)
 		if name == "" {
-			return nil, errors.New("authz: name cannot be empty")
+			return nil, ErrRoleNameRequired
 		}
 		fields["name"] = name
 	}
@@ -902,10 +915,14 @@ func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID, actor stri
 		fields["description"] = *input.Description
 	}
 	if input.Permissions != nil {
-		if len(input.Permissions) == 0 {
-			return nil, errors.New("authz: permissions cannot be empty")
+		// An IsActive-only (or name-only) patch never reaches here, so a
+		// role that already holds a stale key can still be disabled
+		// (edge case 13).
+		perms, err := s.validateCustomRolePermissions(ctx, tenantID, actor, input.Permissions)
+		if err != nil {
+			return nil, err
 		}
-		fields["permissions"] = input.Permissions
+		fields["permissions"] = perms
 	}
 	if input.IsActive != nil {
 		fields["isActive"] = *input.IsActive

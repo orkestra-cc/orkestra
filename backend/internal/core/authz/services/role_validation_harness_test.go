@@ -9,8 +9,10 @@ package services
 // here, because RegisterPermissions ends in repo.UpsertPermission and
 // would nil-panic the moment a test declares a permission.
 //
-// The validator itself is a later task; this file only makes the ground
-// it needs. See role_validation_test.go once that lands.
+// The validator's own cases live in role_validation_test.go; the
+// end-to-end H-4 probe and the administrator regression tests live in
+// tier1_crud_test.go, which uses the free functions below against a bare
+// newTier1Service pair rather than the wrapper.
 
 import (
 	"context"
@@ -107,10 +109,14 @@ func grantActorPermissions(t *testing.T, repo *fakeRepo, actor, tenantID string,
 // The embedded *Service means svc.validateCustomRolePermissions(…),
 // svc.RegisterPermissions(…) and svc.allPermissionSet all read exactly
 // as they would on a plain *Service.
+// It deliberately does NOT store the *testing.T: a wrapper method that
+// closed over the parent T would call Fatalf on it from a subtest's
+// goroutine, which Go forbids (FailNow from the wrong goroutine hangs or
+// mis-attributes the failure). Every helper takes the T of the test that
+// is actually running.
 type validationTestService struct {
 	*Service
 	repo *fakeRepo
-	t    *testing.T
 }
 
 // newValidationTestService stands up a Service over the in-memory repo
@@ -131,19 +137,19 @@ func newValidationTestServiceWithRole(t *testing.T, systemRole string, groups ..
 	t.Helper()
 	svc, repo := newTier1Service(t, staticRoleLookup(systemRole))
 	registerTestPermissions(t, svc, groups...)
-	return &validationTestService{Service: svc, repo: repo, t: t}
+	return &validationTestService{Service: svc, repo: repo}
 }
 
-// register declares further permission groups after construction.
-func (v *validationTestService) register(groups ...permSpecs) {
-	v.t.Helper()
-	registerTestPermissions(v.t, v.Service, groups...)
-}
-
-// grantActor gives actor the listed permissions inside tenantID.
-func (v *validationTestService) grantActor(actor, tenantID string, perms ...string) {
-	v.t.Helper()
-	grantActorPermissions(v.t, v.repo, actor, tenantID, perms...)
+// grantActor gives actor the listed permissions inside tenantID. Pass the
+// T of the running test — including inside a t.Run subtest.
+//
+// There is deliberately no post-construction `register` counterpart:
+// RegisterPermissions REPLACES cachedPermSpecs rather than appending, so
+// a second call would leave ensureSeeded able to replay only the last
+// group. Declare every group in the constructor instead.
+func (v *validationTestService) grantActor(t *testing.T, actor, tenantID string, perms ...string) {
+	t.Helper()
+	grantActorPermissions(t, v.repo, actor, tenantID, perms...)
 }
 
 // TestValidationHarness_RegistersPermissionsAndGrantsAnActor pins the two
@@ -164,7 +170,7 @@ func TestValidationHarness_RegistersPermissionsAndGrantsAnActor(t *testing.T) {
 		t.Error("a System key is ALSO in allPermissionSet — the sets are ordered checks, not a partition")
 	}
 
-	svc.grantActor("actor-1", "tenant-1", "tenant.read")
+	svc.grantActor(t, "actor-1", "tenant-1", "tenant.read")
 	got, err := svc.GetEffectivePermissions(context.Background(), "actor-1", "tenant-1")
 	if err != nil {
 		t.Fatalf("GetEffectivePermissions: %v", err)
@@ -174,7 +180,7 @@ func TestValidationHarness_RegistersPermissionsAndGrantsAnActor(t *testing.T) {
 	}
 
 	// A second grant unions rather than overwriting the first.
-	svc.grantActor("actor-1", "tenant-1", "tenant.delete")
+	svc.grantActor(t, "actor-1", "tenant-1", "tenant.delete")
 	got, err = svc.GetEffectivePermissions(context.Background(), "actor-1", "tenant-1")
 	if err != nil {
 		t.Fatalf("GetEffectivePermissions: %v", err)

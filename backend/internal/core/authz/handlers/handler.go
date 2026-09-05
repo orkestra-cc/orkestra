@@ -5,11 +5,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/orkestra/backend/internal/core/authz/models"
 	"github.com/orkestra/backend/internal/core/authz/repository"
 	"github.com/orkestra/backend/internal/core/authz/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
@@ -238,10 +240,9 @@ func (h *Handler) createRole(ctx context.Context, in *createRoleInput) (*roleOut
 	if err := assertTenantScope(ctx, in.TenantID); err != nil {
 		return nil, err
 	}
-	actor, _ := ctxauth.GetUserUUID(ctx)
-	role, err := h.svc.CreateRole(ctx, in.TenantID, actor, in.Body)
+	role, err := h.svc.CreateRole(ctx, in.TenantID, roleActor(ctx), in.Body)
 	if err != nil {
-		return nil, authzInternalError(ctx, "create the role", err)
+		return nil, mapRoleWriteError(ctx, "create the role", err)
 	}
 	return &roleOutput{Body: role}, nil
 }
@@ -250,19 +251,57 @@ func (h *Handler) updateRole(ctx context.Context, in *updateRoleInput) (*roleOut
 	if err := assertTenantScope(ctx, in.TenantID); err != nil {
 		return nil, err
 	}
-	actor, _ := ctxauth.GetUserUUID(ctx)
-	role, err := h.svc.UpdateRole(ctx, in.TenantID, in.Role, actor, in.Body)
+	role, err := h.svc.UpdateRole(ctx, in.TenantID, in.Role, roleActor(ctx), in.Body)
 	if err != nil {
-		switch {
-		case errors.Is(err, repository.ErrNotFound):
-			return nil, huma.Error404NotFound("role not found")
-		case errors.Is(err, services.ErrSystemRoleImmutable):
-			return nil, huma.Error403Forbidden("system roles cannot be edited — only disabled")
-		default:
-			return nil, authzInternalError(ctx, "update the role", err)
-		}
+		return nil, mapRoleWriteError(ctx, "update the role", err)
 	}
 	return &roleOutput{Body: role}, nil
+}
+
+// roleActor resolves the caller whose effective permissions bound a role
+// write (D21). The authz service treats the literal platform sentinel as
+// a waiver of the cascade, so a token subject that spelled it would
+// inherit that waiver over HTTP; it is mapped to the empty actor, which
+// the service refuses with ErrGranterRequired (400). Not reachable today
+// — subjects are uuid.NewString() — but the waiver must only ever be
+// chosen by in-process code, never named by a request.
+func roleActor(ctx context.Context) string {
+	actor, _ := ctxauth.GetUserUUID(ctx)
+	if services.IsReservedActor(actor) {
+		return ""
+	}
+	return actor
+}
+
+// mapRoleWriteError maps the failure modes createRole and updateRole
+// share. Both run any supplied permission list through the same D21
+// validator, so both answer with its sentinels; the not-found and
+// system-role rows are reachable from the update path only.
+func mapRoleWriteError(ctx context.Context, operation string, err error) error {
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		return huma.Error404NotFound("role not found")
+	case errors.Is(err, services.ErrSystemRoleImmutable):
+		return huma.Error403Forbidden("system roles cannot be edited — only disabled")
+	case errors.Is(err, services.ErrRoleNameRequired):
+		return huma.Error400BadRequest("the role name cannot be empty")
+	case errors.Is(err, services.ErrRolePermissionsRequired):
+		return huma.Error400BadRequest("a role must carry at least one permission")
+	case errors.Is(err, services.ErrGranterRequired):
+		return huma.Error400BadRequest("the acting user is required")
+	case errors.Is(err, services.ErrUnknownPermission):
+		key, _ := services.OffendingPermissionKey(err)
+		return errcode.UnprocessableEntity(errcode.AuthzPermissionUnknown,
+			"No module has registered the permission "+strconv.Quote(key)+", so no role may carry it.")
+	case errors.Is(err, services.ErrSystemPermissionInCustomRole):
+		key, _ := services.OffendingPermissionKey(err)
+		return errcode.UnprocessableEntity(errcode.AuthzSystemPermissionForbidden,
+			"The permission "+strconv.Quote(key)+" is platform-reserved and cannot be granted through a tenant role.")
+	case errors.Is(err, services.ErrInsufficientPermissionsToGrant):
+		return huma.Error403Forbidden("you cannot give a role permissions you do not hold yourself")
+	default:
+		return authzInternalError(ctx, operation, err)
+	}
 }
 
 func (h *Handler) deleteRole(ctx context.Context, in *deleteRoleInput) (*struct{}, error) {

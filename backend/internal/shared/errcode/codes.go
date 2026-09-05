@@ -112,6 +112,26 @@ const AuthTooManyAttempts = "auth.too_many_attempts"
 // behind this NAT" from the early 429.
 const AuthIPThresholdBelowAccount = "auth.ip_threshold_below_account"
 
+// --- authz ---
+
+// AuthzPermissionUnknown signals that a role create or update named a
+// permission key that no module has registered. The catalog is the union
+// of every module's Permissions(), collected once at boot; a key outside
+// it can never be checked by anything, so a role carrying it is at best
+// dead weight and at worst a typo hiding a real grant. The detail names
+// the offending key. 422.
+const AuthzPermissionUnknown = "authz.permission_unknown"
+
+// AuthzSystemPermissionForbidden signals that a role create or update
+// tried to put a platform-reserved key (or the wildcard "*") into a
+// tenant-scoped custom role. Platform permissions are granted through
+// platform system roles and global bindings only — a tenant role
+// carrying one would be an escalation path out of its own tenant. Binds
+// every caller, super_admin included: the wildcard governs what an ACTOR
+// may grant, not what a TENANT role may carry. The detail names the
+// offending key. 422.
+const AuthzSystemPermissionForbidden = "authz.system_permission_forbidden"
+
 // --- tenant ---
 
 // TenantSlugAlreadyInUse signals that a tenant create or update would reuse an
