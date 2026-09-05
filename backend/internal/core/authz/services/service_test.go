@@ -597,3 +597,63 @@ func TestShadowEvaluate_EnforceDoesNotOverrideTheRoleTableDeny(t *testing.T) {
 		t.Fatal("an org_owner must not obtain system.users.admin under enforce")
 	}
 }
+
+// ===== D24: global checks carry no tenant roles =====
+
+// TestShadowEvaluate_GlobalCheckStampsNoTenantRoles pins D24: a check with
+// no tenant (tenantID == "") must not stamp principal.tenant_roles, so a
+// membership role in whatever tenant the request happened to resolve
+// cannot be the reason a global action is permitted.
+//
+// The action is auth.service_accounts.manage rather than the more obvious
+// system.users.admin, and the choice is load-bearing. That key is
+// System: true (auth/module.go) and is gated by RequireSystemPermission —
+// so this is a real global check on a platform-reserved key — but its
+// action_module is "auth", which puts it OUTSIDE the reach of
+// system_actions.require_platform_role (that forbid keys on
+// action_module == "system"). On a system.* action the forbid would deny
+// the request whether or not the stamp happened, and the test would pass
+// against the unfixed evaluator, proving nothing about D24. Here the only
+// thing standing between an org_owner and a platform-reserved key is the
+// stamp itself.
+//
+// Before the fix: tenant_roles.org_owner.all_in_tenant matches (the
+// resource UID is Orkestra::Tenant even with an empty UUID) and Cedar
+// allows. After it: nothing matches and Cedar denies.
+func TestShadowEvaluate_GlobalCheckStampsNoTenantRoles(t *testing.T) {
+	svc, _ := newTestService(t, nil) // no platform role from the lookup
+	ctx := context.WithValue(context.Background(), ctxauth.KeyTenantRoles, []string{"org_owner"})
+
+	decision, ok := svc.shadowEvaluate(ctx, "u-1", "" /* global check */, "auth.service_accounts.manage", false)
+	if !ok {
+		t.Fatalf("evaluation should succeed, errors: %+v", decision.Errors)
+	}
+	if decision.MatchedPolicy == "tenant_roles.org_owner.all_in_tenant" {
+		t.Fatalf("a tenant-role permit matched a global check: %+v", decision)
+	}
+	if decision.Allowed {
+		t.Fatalf("a global check must not be allowed by a tenant role, got allow (matched=%q)", decision.MatchedPolicy)
+	}
+}
+
+// TestShadowEvaluate_TenantScopedCheckStillStampsThem is the narrowness
+// guard for D24: the gate is on tenantID, not a removal of the mechanism.
+// A tenant-scoped check must still stamp principal.tenant_roles, and
+// tenant_roles.org_owner.all_in_tenant must still be the policy that
+// permits it. This test is green before and after the D24 gate; it fails
+// against the over-broad variant that drops the stamp altogether.
+func TestShadowEvaluate_TenantScopedCheckStillStampsThem(t *testing.T) {
+	svc, _ := newTestService(t, nil) // no platform role from the lookup
+	ctx := context.WithValue(context.Background(), ctxauth.KeyTenantRoles, []string{"org_owner"})
+
+	decision, ok := svc.shadowEvaluate(ctx, "u-1", "tenant-1", "tenant.update", false)
+	if !ok {
+		t.Fatalf("evaluation should succeed, errors: %+v", decision.Errors)
+	}
+	if !decision.Allowed {
+		t.Fatalf("an org_owner must still be permitted inside their own tenant, got deny (matched=%q)", decision.MatchedPolicy)
+	}
+	if decision.MatchedPolicy != "tenant_roles.org_owner.all_in_tenant" {
+		t.Fatalf("expected the org_owner tenant permit to match, got %q", decision.MatchedPolicy)
+	}
+}

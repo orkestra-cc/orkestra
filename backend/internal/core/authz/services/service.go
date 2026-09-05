@@ -393,7 +393,18 @@ func (s *Service) shadowEvaluate(ctx context.Context, userUUID, tenantID, permis
 			systemRole = r
 		}
 	}
-	tenantRoles, _ := ctxauth.GetTenantRoles(ctx)
+	// Tenant roles belong to a TENANT-scoped decision. A global check
+	// (tenantID == "") is made by RequireSystemPermission and by the
+	// impersonation pre-check (middleware/auth.go), and for those a
+	// membership role in whatever tenant the request happened to resolve
+	// is not an input to the decision — stamping it is how a tenant
+	// permit came to fire on a platform action. Spec §4.5 D24, the
+	// second half of H-5 (the first half is system_actions.cedar's
+	// forbid, which only reaches keys whose module prefix is "system").
+	var tenantRoles []string
+	if tenantID != "" {
+		tenantRoles, _ = ctxauth.GetTenantRoles(ctx)
+	}
 	tenantKind := ctxauth.TenantKindFromContext(ctx)
 	if tenantKind == "" {
 		// Fall back to "internal" for global/pre-ADR-0001 calls so
