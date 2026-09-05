@@ -286,11 +286,28 @@ func (h *AdminClientUserHandler) UpdateClientUserAdmin(ctx context.Context, req 
 	// mint a client-tier super_admin, and could do it to themselves by
 	// proxy.
 	//
-	// Deliberately NOT ported from the operator tier: the
-	// last-administrator quorum. A client user is never a platform
-	// administrator, so demoting one can never leave the platform
-	// without one; running the quorum here would refuse legitimate
-	// demotions for a condition that cannot arise.
+	// TWO deliberate divergences from the operator PATCH. Both are
+	// choices, not omissions, and nothing else here differs:
+	//
+	//  1. The last-administrator quorum is not ported. A client user is
+	//     never a platform administrator, so demoting one can never leave
+	//     the platform without one; running the quorum here would refuse
+	//     legitimate demotions for a condition that cannot arise.
+	//
+	//  2. The target pre-read above stays `previous, _ :=`. The operator
+	//     PATCH refuses a role change whose pre-read failed with anything
+	//     other than ErrUserNotFound (500 user.role_lookup_unavailable),
+	//     because there a lost `previous` means the authz cache is not
+	//     retired and the old role's sessions are not ended. Neither
+	//     cascade exists on this tier, so that rationale does not carry.
+	//     The cost of not porting it is real but smaller and PRE-DATES
+	//     this change: a transient read failure lets the role change land
+	//     and then skips the `user.role.changed` audit row, which is
+	//     gated on `previous != nil` — the write happens, the SOC2 trail
+	//     misses it. Refusing the request is the wrong cure (it would
+	//     recreate M-13's shape); emitting the row with an unknown `from`
+	//     is the right one, and is on the follow-up list rather than in
+	//     this commit.
 	if req.Body.Role != "" {
 		callerRole, err := h.callerRole(ctx)
 		if err != nil {
@@ -401,13 +418,48 @@ func (h *AdminClientUserHandler) UpdateClientUserAdmin(ctx context.Context, req 
 		// here (M-13); this tier deliberately does not, and the audit row
 		// says so rather than implying otherwise.
 		//
-		// Latent, not exploitable today: a sweep of every `srole` reader
-		// found none on a client-audience surface — internal/shared/setup
-		// routes, the operator user handlers, navigation, the authz
-		// handler are all on the operator-protected mux, and the
-		// jwt_validator fallback fires only when no authz provider is
-		// wired. The day a client-audience surface enforces on `srole`,
-		// this becomes exploitable and the one-line fix is
+		// Latent, not exploitable today. This list is the instruction
+		// for deciding when that stops being true, so it is the whole
+		// set of `ctxauth.GetSystemRole` readers in the tree, each with
+		// what it does with the value. Re-run it with
+		// `grep -rn "ctxauth.GetSystemRole" --include='*.go' backend/`
+		// before trusting it; two of the entries below are recent.
+		//
+		// Runs on the CLIENT mux, so a stale claim does reach it — but
+		// neither reader authorises on it:
+		//   - middleware/request_logger.go — a log field. Mounted on the
+		//     root router (cmd/server/middleware.go), so every request.
+		//   - middleware/tenant_baggage.go — a span attribute. Mounted on
+		//     BOTH protected routers (cmd/server/main.go, the
+		//     operatorProtected and clientProtected `Use` lines).
+		//
+		// Operator mux only, so a client's claim never reaches them:
+		//   - navigation/handlers/navigation_handler.go — menu shaping.
+		//   - authz/handlers/handler.go — echoes the claim back in the
+		//     effective-permissions response body; the permissions
+		//     themselves come from GetEffectivePermissions, not from it.
+		//   (Both modules register on ri.Operator.ProtectedRouter only.)
+		//
+		// Authorises on the claim, and is why this residual is worth
+		// tracking at all — none is reachable by a client principal:
+		//   - authz/module.go — the dev-token fallback inside the
+		//     system-role lookup. Guarded by a non-production platform
+		//     AND a `dev-` UUID prefix, and the lookup itself runs
+		//     against the OPERATOR user service, which is also why a
+		//     client user's role is inert (see clientTierNoPropagation).
+		//   - user/handlers/user_handler.go, devTokenSystemRole — the
+		//     same carve-out for the tier guards, same three conditions.
+		//     callerRole in this file consults it too.
+		//   - middleware/jwt_validator.go (two sites) — authorises on the
+		//     claim alone, but NewJWTValidator has no non-test caller, so
+		//     nothing mounts it.
+		//
+		// NOT in the list any more, and deliberately: internal/shared/setup
+		// and the operator user handlers' tier guards both read the claim
+		// until D28 replaced it with a database read. Do not put them back.
+		//
+		// The day a client-audience surface enforces on `srole`, this
+		// becomes exploitable and the one-line fix is
 		// h.terminateSessions(ctx, req.ID) right here — at the cost of
 		// signing the user out on every role change.
 		//

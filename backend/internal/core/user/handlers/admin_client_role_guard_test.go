@@ -218,10 +218,13 @@ func TestUpdateClientUserAdmin_ActorRoleComesFromTheOperatorStoreNotTheClientSto
 func TestUpdateClientUserAdmin_RefusesEscalation(t *testing.T) {
 	t.Parallel()
 	h, clients, operators, sink := newClientAdminHarness(t)
-	operators.seed("client-actor", "administrator")
+	operators.seed("client-actor", "administrator") // the truth
 	clients.seed("client-target", "operator")
 
-	err := patchClientRole(t, h, operatorCtx("client-actor", "administrator"), "client-target", "super_admin")
+	// The claim says super_admin and the row says administrator, so this
+	// test also falls if the guard reverts to reading `srole` — a claim
+	// matching the row would leave it passing either way.
+	err := patchClientRole(t, h, operatorCtx("client-actor", "super_admin"), "client-target", "super_admin")
 
 	assertStatus(t, err, http.StatusForbidden)
 	assertErrCode(t, err, errcode.UserRoleEscalationForbidden)
