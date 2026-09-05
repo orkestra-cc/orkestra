@@ -1,15 +1,25 @@
 import { useState } from 'react';
-import { Alert, Button, Card, Modal, Spinner, Table } from 'react-bootstrap';
+import { Alert, Button, Modal, Spinner } from 'react-bootstrap';
+import { faBan, faLaptop } from '@fortawesome/free-solid-svg-icons';
+import type { CellContext, ColumnDef } from '@tanstack/react-table';
+import IconButton from 'components/common/IconButton';
+import { formatDate } from 'helpers/dateFormat';
 import { useTranslation } from 'react-i18next';
 import {
   useListTrustedDevicesQuery,
   useRevokeAllTrustedDevicesMutation,
-  useRevokeTrustedDeviceMutation
+  useRevokeTrustedDeviceMutation,
+  type TrustedDevice
 } from 'store/api/deviceTrustApi';
+import SecurityEmptyState from './SecurityEmptyState';
+import SecurityTable from './SecurityTable';
 
 // TrustedDevicesTab shows the "remember this device 30d" grants the
 // user holds. Each grant lets the user skip the MFA prompt on the
 // listed device for 30 days; revoking forces MFA on the next login.
+//
+// Same shell as the sessions pane: AdvanceTable, no card of its own, dates
+// through the console's single formatting layer.
 const TrustedDevicesTab = () => {
   const { t } = useTranslation();
   const { data, isLoading, isFetching } = useListTrustedDevicesQuery();
@@ -20,14 +30,6 @@ const TrustedDevicesTab = () => {
   const [showRevokeAll, setShowRevokeAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dash = t('userSecurity.trustedDevicesTab.dash');
-
-  if (isLoading) {
-    return (
-      <div className="text-center py-4">
-        <Spinner animation="border" size="sm" />
-      </div>
-    );
-  }
 
   const devices = data?.devices ?? [];
 
@@ -60,73 +62,107 @@ const TrustedDevicesTab = () => {
     }
   };
 
+  const columns: ColumnDef<TrustedDevice>[] = [
+    {
+      id: 'device',
+      accessorFn: d => d.deviceName || d.deviceId,
+      header: t('userSecurity.trustedDevicesTab.colDevice'),
+      cell: ({ row: { original } }: CellContext<TrustedDevice, unknown>) => (
+        <span className="fw-semibold text-900">
+          {original.deviceName || original.deviceId}
+        </span>
+      )
+    },
+    {
+      accessorKey: 'platform',
+      header: t('userSecurity.trustedDevicesTab.colPlatform'),
+      cell: ({ row: { original } }: CellContext<TrustedDevice, unknown>) => (
+        <span className="text-700">{original.platform || dash}</span>
+      )
+    },
+    {
+      accessorKey: 'trustedAt',
+      header: t('userSecurity.trustedDevicesTab.colTrustedSince'),
+      cell: ({ row: { original } }: CellContext<TrustedDevice, unknown>) => (
+        <span className="text-700">{formatDate(original.trustedAt)}</span>
+      )
+    },
+    {
+      accessorKey: 'trustedUntil',
+      header: t('userSecurity.trustedDevicesTab.colExpires'),
+      cell: ({ row: { original } }: CellContext<TrustedDevice, unknown>) => (
+        <span className="text-700">{formatDate(original.trustedUntil)}</span>
+      )
+    },
+    {
+      id: 'actions',
+      header: t('userSecurity.trustedDevicesTab.colActions'),
+      enableSorting: false,
+      meta: {
+        headerProps: { className: 'text-end' },
+        cellProps: { className: 'text-end' }
+      },
+      cell: ({ row: { original } }: CellContext<TrustedDevice, unknown>) => (
+        <IconButton
+          size="sm"
+          variant="outline-secondary"
+          icon={faBan}
+          onClick={() => onRevoke(original.deviceId)}
+          disabled={revokingOne || isFetching}
+        >
+          {t('userSecurity.trustedDevicesTab.rowRevoke')}
+        </IconButton>
+      )
+    }
+  ];
+
+  if (isLoading) {
+    return (
+      <div className="text-center py-4">
+        <Spinner animation="border" size="sm" />
+      </div>
+    );
+  }
+
   return (
     <>
-      <Card className="shadow-none border">
-        <Card.Header className="d-flex justify-content-between align-items-center flex-wrap gap-2">
-          <Card.Title as="h5" className="mb-0">
-            {t('userSecurity.trustedDevicesTab.title')}
-          </Card.Title>
-          <Button
-            variant="outline-danger"
-            size="sm"
-            onClick={() => setShowRevokeAll(true)}
-            disabled={devices.length === 0 || revokingAll}
-          >
-            {t('userSecurity.trustedDevicesTab.revokeAllButton')}
-          </Button>
-        </Card.Header>
-        <Card.Body>
-          {error && (
-            <Alert variant="danger" className="fs-10">
-              {error}
-            </Alert>
+      <div className="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <p className="fs-10 text-muted mb-0">
+          {t('userSecurity.trustedDevicesTab.intro')}
+        </p>
+        <IconButton
+          size="sm"
+          variant="outline-danger"
+          icon={faBan}
+          className="text-nowrap"
+          onClick={() => setShowRevokeAll(true)}
+          disabled={devices.length === 0 || revokingAll}
+        >
+          {t('userSecurity.trustedDevicesTab.revokeAllButton')}
+        </IconButton>
+      </div>
+
+      {error && (
+        <Alert variant="danger" className="fs-10">
+          {error}
+        </Alert>
+      )}
+
+      {devices.length === 0 ? (
+        <SecurityEmptyState
+          icon={faLaptop}
+          message={t('userSecurity.trustedDevicesTab.empty')}
+          hint={t('userSecurity.trustedDevicesTab.emptyHint')}
+        />
+      ) : (
+        <SecurityTable
+          data={devices}
+          columns={columns}
+          searchPlaceholder={t(
+            'userSecurity.trustedDevicesTab.searchPlaceholder'
           )}
-          {devices.length === 0 ? (
-            <p className="fs-10 text-muted mb-0">
-              {t('userSecurity.trustedDevicesTab.empty')}
-            </p>
-          ) : (
-            <Table responsive size="sm" className="mb-0 align-middle">
-              <thead>
-                <tr>
-                  <th>{t('userSecurity.trustedDevicesTab.colDevice')}</th>
-                  <th>{t('userSecurity.trustedDevicesTab.colPlatform')}</th>
-                  <th>{t('userSecurity.trustedDevicesTab.colTrustedSince')}</th>
-                  <th>{t('userSecurity.trustedDevicesTab.colExpires')}</th>
-                  <th className="text-end">
-                    {t('userSecurity.trustedDevicesTab.colActions')}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {devices.map(d => (
-                  <tr key={d.uuid}>
-                    <td>{d.deviceName || d.deviceId}</td>
-                    <td className="fs-10 text-muted">{d.platform || dash}</td>
-                    <td className="fs-10 text-muted">
-                      {new Date(d.trustedAt).toLocaleDateString()}
-                    </td>
-                    <td className="fs-10 text-muted">
-                      {new Date(d.trustedUntil).toLocaleDateString()}
-                    </td>
-                    <td className="text-end">
-                      <Button
-                        variant="outline-danger"
-                        size="sm"
-                        onClick={() => onRevoke(d.deviceId)}
-                        disabled={revokingOne || isFetching}
-                      >
-                        {t('userSecurity.trustedDevicesTab.rowRevoke')}
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          )}
-        </Card.Body>
-      </Card>
+        />
+      )}
 
       <Modal
         show={showRevokeAll}

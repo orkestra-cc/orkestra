@@ -1189,8 +1189,25 @@
       "devices": "Trusted devices",
       "backupCodes": "Backup codes"
     },
+    "stats": {
+      "mfaTitle": "Two-factor",
+      "mfaOn": "On",
+      "mfaOff": "Off",
+      "mfaMethodTotp": "Authenticator app",
+      "mfaMethodPasskeyOne": "1 passkey",
+      "mfaMethodPasskeyOther": "{{count}} passkeys",
+      "mfaSubtitleNone": "No second factor enrolled",
+      "mfaRequiredBadge": "Required",
+      "sessionsTitle": "Active sessions",
+      "sessionsSubtitle": "Signed-in browsers and devices",
+      "providersTitle": "Linked sign-ins",
+      "providersSubtitle": "External identity providers",
+      "devicesTitle": "Trusted devices",
+      "devicesSubtitle": "MFA skipped for 30 days"
+    },
     "passwordTab": {
       "title": "Change password",
+      "intro": "Choose a password you don’t use anywhere else. Changing it signs out your other sessions.",
       "ssoOnlyHint": "Your account uses a single sign-on provider only. Set a password here to add a second login method.",
       "keptNotice": "Email/password sign-in is disabled on this surface; your stored password is retained for a later re-enable.",
       "labelCurrent": "Current password",
@@ -1202,10 +1219,13 @@
       "successToast": "Password updated. Other sessions have been signed out.",
       "errorMismatch": "New password and confirmation do not match.",
       "errorTooShort": "New password must be at least {{count}} characters.",
+      "errorRequiredNew": "Enter a new password.",
+      "errorRequiredConfirm": "Confirm the new password.",
       "errorGeneric": "Failed to update password."
     },
     "backupCodesTab": {
       "title": "Backup codes",
+      "emptyNoEnrollment": "No backup codes yet",
       "noEnrollment": "Enroll an authenticator app first — backup codes are issued at enrollment and can only be regenerated for an enrolled factor.",
       "freshHeading": "New backup codes",
       "remainingOne": "You have <strong>{{count}}</strong> unused backup code. Each code works exactly once and is meant for emergency sign-in if you lose your authenticator.",
@@ -1230,8 +1250,11 @@
     },
     "sessionsTab": {
       "title": "Active sessions",
+      "intro": "Every browser and device currently signed in to your account.",
       "revokeAllButton": "Revoke all other sessions",
+      "searchPlaceholder": "Search sessions",
       "empty": "No active sessions.",
+      "emptyHint": "Sessions appear here as soon as you sign in on another browser or device.",
       "colDevice": "Device",
       "colIp": "IP",
       "colLastActive": "Last active",
@@ -1252,8 +1275,11 @@
     },
     "trustedDevicesTab": {
       "title": "Trusted devices",
+      "intro": "Devices allowed to skip the MFA prompt for 30 days. Revoking one forces MFA on its next sign-in.",
       "revokeAllButton": "Revoke all",
-      "empty": "No devices remembered. Trust grants expire after 30 days.",
+      "searchPlaceholder": "Search devices",
+      "empty": "No devices remembered.",
+      "emptyHint": "Choose “remember this device” at the MFA prompt to add one.",
       "colDevice": "Device",
       "colPlatform": "Platform",
       "colTrustedSince": "Trusted since",
@@ -1271,6 +1297,7 @@
     },
     "linkedProvidersTab": {
       "title": "Linked sign-in providers",
+      "intro": "Sign in with an external identity provider instead of, or alongside, your password.",
       "linkButton": "Link a sign-in",
       "linkButtonStarting": "Starting…",
       "emptyNoLinked": "No sign-in providers linked.",
