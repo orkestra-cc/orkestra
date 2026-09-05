@@ -35,6 +35,12 @@ type WebAuthnHandler struct {
 	// field — see there. Optional; nil degrades to "the epoch alone ends
 	// MFA authority".
 	sessions services.AuthService
+	// mfa answers one question and only one: does a TOTP factor still
+	// exist for this user? Removing a passkey restarts the enrolment
+	// grace clock only when it took the user's LAST factor, and this
+	// handler can see the passkey half of that answer but not the TOTP
+	// half. Optional; nil is handled in lastFactorGone.
+	mfa services.MFAService
 	// verifyAttempts + audience are the same outer cap MFAHandler carries
 	// (spec §4.3 D20) — see the field comment there. The passkey route
 	// needs it for a second reason: FinishAssertion's per-challenge
@@ -87,6 +93,13 @@ func (h *WebAuthnHandler) SetDeviceTrust(dt services.DeviceTrustService) {
 // passkey can end the sessions it may have created.
 func (h *WebAuthnHandler) SetSessionTerminator(s services.AuthService) {
 	h.sessions = s
+}
+
+// SetMFAStatusReader wires the tier's MFA service so a passkey removal can
+// tell whether a TOTP factor still survives it. Optional — see the `mfa`
+// field and lastFactorGone for what an unwired reader degrades to.
+func (h *WebAuthnHandler) SetMFAStatusReader(m services.MFAService) {
+	h.mfa = m
 }
 
 // SetVerifyAttemptCounter wires the outer passkey-verify cap and the
@@ -256,9 +269,44 @@ func (h *WebAuthnHandler) Remove(ctx context.Context, req *webAuthnRemoveRequest
 	// credential minted which session. The service already bumped the
 	// epoch, which is what closes the caller's own token.
 	revokeSessionsExceptCurrent(ctx, h.sessions, userUUID, "passkey_removed")
+	// The grace clock, unlike everything above, is NOT uniform: restarting
+	// it for a user who still holds a factor would silently move a deadline
+	// they are already meeting. Only the removal of the LAST factor turns
+	// this endpoint into the one-way door resetMFAGraceClock exists to
+	// prevent.
+	if h.lastFactorGone(ctx, userUUID) {
+		resetMFAGraceClock(ctx, h.users, userUUID, "last_passkey_removed")
+	}
 	resp := &webAuthnRemoveResponse{}
 	resp.Body.Success = true
 	return resp, nil
+}
+
+// lastFactorGone reports whether the removal just took the user's last
+// second factor. "Factor" is the same disjunction the login path uses to
+// decide whether a privileged user is enrolled at all
+// (PasswordAuthService.completeLogin): a surviving TOTP row OR at least one
+// surviving passkey. Both halves are re-read AFTER the delete, so the
+// answer is about the credential set the user is left with.
+//
+// It answers TRUE unless it can positively confirm a factor survives — an
+// unwired collaborator or a failing lookup counts as "gone". That is the
+// safe direction here and the opposite of the epoch resolver's: a needless
+// restart moves a countdown a user can see, while a missed one can cost a
+// sole administrator their account.
+func (h *WebAuthnHandler) lastFactorGone(ctx context.Context, userUUID string) bool {
+	if h.wa != nil {
+		if has, err := h.wa.HasCredentials(ctx, userUUID); err == nil && has {
+			return false
+		}
+	}
+	if h.mfa != nil {
+		if snap, err := h.mfa.Status(ctx, userUUID); err == nil && snap != nil &&
+			snap.Status == authModels.MFAStatusEnrolled {
+			return false
+		}
+	}
+	return true
 }
 
 // --- step-up verify (caller already authenticated) ---

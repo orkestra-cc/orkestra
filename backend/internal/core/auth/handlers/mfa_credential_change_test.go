@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
@@ -75,9 +76,19 @@ type credChangeMFA struct {
 	removeErr  error
 	replaced   bool
 	confirmErr error
+	// totpEnrolled is what Status reports. It is the TOTP half of the
+	// passkey path's "was that the last factor?" question.
+	totpEnrolled bool
 }
 
 func (m *credChangeMFA) RemoveFactor(context.Context, string, string) error { return m.removeErr }
+
+func (m *credChangeMFA) Status(context.Context, string) (*services.MFAStatusSnapshot, error) {
+	if m.totpEnrolled {
+		return &services.MFAStatusSnapshot{Status: authModels.MFAStatusEnrolled, Type: authModels.MFAFactorTOTP}, nil
+	}
+	return &services.MFAStatusSnapshot{Status: authModels.MFAStatusNotRequired}, nil
+}
 
 func (m *credChangeMFA) ConfirmEnrollment(context.Context, string, string, string) ([]string, bool, error) {
 	if m.confirmErr != nil {
@@ -91,16 +102,67 @@ type credChangeWebAuthn struct {
 	services.WebAuthnService
 	removed bool
 	err     error
+	// remaining is what HasCredentials reports AFTER the delete — the
+	// passkey half of "was that the last factor?".
+	remaining bool
 }
 
 func (w *credChangeWebAuthn) RemoveCredential(context.Context, string, []byte) (bool, error) {
 	return w.removed, w.err
 }
 
-// credChangeUsers answers the admin reset's grace restart.
-type credChangeUsers struct{ iface.UserProvider }
+func (w *credChangeWebAuthn) HasCredentials(context.Context, string) (bool, error) {
+	return w.remaining, nil
+}
 
-func (credChangeUsers) ResetMFAGrace(context.Context, string) error { return nil }
+// credChangeUsers is the user store the grace clock lives in. It models the
+// one field that matters — MFAGraceStartedAt — so a test can ask the real
+// policy predicate whether the user would still be refused at login, rather
+// than merely asserting that a method was called.
+type credChangeUsers struct {
+	iface.UserProvider
+	mu    sync.Mutex
+	users map[string]*iface.User
+	calls map[string]int
+}
+
+func newCredChangeUsers() *credChangeUsers {
+	return &credChangeUsers{users: map[string]*iface.User{}, calls: map[string]int{}}
+}
+
+// withGraceStartedAt seeds a privileged user whose enrolment grace clock
+// started at the given instant — for a long-standing administrator that is
+// their first-ever privileged login, which is why the window has lapsed.
+func (u *credChangeUsers) withGraceStartedAt(userUUID string, started time.Time) *iface.User {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	rec := &iface.User{UUID: userUUID, Role: services.SystemRoleAdministrator, MFAGraceStartedAt: &started}
+	u.users[userUUID] = rec
+	return rec
+}
+
+func (u *credChangeUsers) record(userUUID string) *iface.User {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.users[userUUID]
+}
+
+func (u *credChangeUsers) resetCalls(userUUID string) int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.calls[userUUID]
+}
+
+func (u *credChangeUsers) ResetMFAGrace(_ context.Context, userUUID string) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.calls[userUUID]++
+	now := time.Now()
+	if rec, ok := u.users[userUUID]; ok {
+		rec.MFAGraceStartedAt = &now
+	}
+	return nil
+}
 
 // recordedAdminEvent is one admin_mfa_reset audit row as the handler
 // produced it.
@@ -138,11 +200,16 @@ func credChangeCtx(userUUID, sid string) context.Context {
 }
 
 func newCredChangeMFAHandler(mfa services.MFAService, sessions services.AuthService) (*MFAHandler, *recordingAdminAudit) {
-	h := NewMFAHandler(mfa, nil, nil, credChangeUsers{}, nil, "cookie", "", false)
+	h, audit, _ := newCredChangeMFAHandlerWithUsers(mfa, sessions, newCredChangeUsers())
+	return h, audit
+}
+
+func newCredChangeMFAHandlerWithUsers(mfa services.MFAService, sessions services.AuthService, users *credChangeUsers) (*MFAHandler, *recordingAdminAudit, *credChangeUsers) {
+	h := NewMFAHandler(mfa, nil, nil, users, nil, "cookie", "", false)
 	audit := &recordingAdminAudit{}
 	h.SetAuditRecorder(audit)
 	h.SetSessionTerminator(sessions)
-	return h, audit
+	return h, audit, users
 }
 
 // --- admin reset ---------------------------------------------------------
@@ -221,8 +288,16 @@ func TestAdminReset_FailureIsAudited(t *testing.T) {
 	if _, present := row.fields["error"]; present {
 		t.Fatal("raw error text must not reach the audit metadata — it is serialised to an admin API response")
 	}
-	if sessions.terminatedAll("target-3") != 0 {
-		t.Fatal("a failed removal must not go on to terminate sessions")
+	// M-1: the consequences follow the DESTRUCTION, not the success of the
+	// call. A part-way removal (one factor row deleted, the other not) has
+	// already bumped the epoch via the service's defer; leaving the
+	// target's other sessions alive is the exact half-applied state this
+	// branch's audit row exists to make visible.
+	if sessions.terminatedAll("target-3") != 1 {
+		t.Fatalf("terminated %d times, want 1 — a part-way removal destroyed a credential, so the sessions it authorised must still end", sessions.terminatedAll("target-3"))
+	}
+	if row.fields["sessions_terminated"] != true {
+		t.Fatalf("metadata sessions_terminated = %v, want true", row.fields["sessions_terminated"])
 	}
 }
 
@@ -318,7 +393,7 @@ func TestEnrollConfirm_FirstEnrolmentRevokesNothing(t *testing.T) {
 
 func TestWebAuthnRemove_RevokesEveryOtherSession(t *testing.T) {
 	sessions := newRecordingSessions()
-	h := NewWebAuthnHandler(&credChangeWebAuthn{removed: true}, nil, nil, credChangeUsers{}, nil, "cookie", "", false)
+	h := NewWebAuthnHandler(&credChangeWebAuthn{removed: true}, nil, nil, newCredChangeUsers(), nil, "cookie", "", false)
 	h.SetSessionTerminator(sessions)
 
 	req := &webAuthnRemoveRequest{CredentialID: base64.RawURLEncoding.EncodeToString([]byte("cred-a"))}
@@ -338,7 +413,7 @@ func TestWebAuthnRemove_RevokesEveryOtherSession(t *testing.T) {
 // sign every other session out by looping on an unknown credential id.
 func TestWebAuthnRemove_UnknownCredentialRevokesNothing(t *testing.T) {
 	sessions := newRecordingSessions()
-	h := NewWebAuthnHandler(&credChangeWebAuthn{removed: false}, nil, nil, credChangeUsers{}, nil, "cookie", "", false)
+	h := NewWebAuthnHandler(&credChangeWebAuthn{removed: false}, nil, nil, newCredChangeUsers(), nil, "cookie", "", false)
 	h.SetSessionTerminator(sessions)
 
 	req := &webAuthnRemoveRequest{CredentialID: base64.RawURLEncoding.EncodeToString([]byte("nope"))}
@@ -385,5 +460,169 @@ func TestEnrollConfirm_FailedReplacementStillRevokes(t *testing.T) {
 	}
 	if sid != "sid-current" {
 		t.Fatalf("revokedExcept = %q, want the caller's own sid", sid)
+	}
+}
+
+// --- the enrolment grace clock (I-1) ---------------------------------------
+//
+// The branch that ends a removed factor's authority also made removal a
+// ONE-WAY DOOR for anyone whose role obliges MFA — every administrator, by
+// default. MFAGraceStartedAt is stamped at the first privileged login and
+// nothing ever clears it, so for a long-standing admin the window lapsed
+// long ago. Remove the last factor and the four ways back in close in
+// order: enroll/begin answers reauthentication_required once auth_time goes
+// stale, /me/password-confirm refuses an MFA-obliged caller (D19), the SPA
+// sends them to sign in again — and completeLogin refuses THAT with
+// mfa_enrollment_required, because they are privileged, factor-less, and
+// out of grace. A sole administrator never gets back in.
+//
+// These tests walk that sequence to the point where it used to close: they
+// remove the last factor and then ask the REAL policy predicate
+// completeLogin consults whether the login would still be refused.
+
+// graceGate is the predicate PasswordAuthService.completeLogin uses to
+// decide "privileged, no factor, grace expired -> 403". Built from the
+// production constructor with no config overrides, so it carries the
+// shipped 7-day window.
+func graceGate() *services.AuthPolicyService {
+	return services.NewAuthPolicyServiceForTest(nil)
+}
+
+func TestSelfRemove_RestartsTheGraceClockSoEnrolmentStaysReachable(t *testing.T) {
+	ctx := credChangeCtx("admin-sole", "sid-current")
+	users := newCredChangeUsers()
+	// A long-standing administrator: obliged to hold a factor, grace
+	// clock started at their first privileged login 90 days ago.
+	user := users.withGraceStartedAt("admin-sole", time.Now().Add(-90*24*time.Hour))
+	gate := graceGate()
+
+	if !gate.MFARequired(user, nil) {
+		t.Fatal("fixture is wrong: the user must be MFA-obliged for this lockout to exist")
+	}
+	if !gate.MFAGraceExpired(ctx, user, time.Now()) {
+		t.Fatal("fixture is wrong: the grace window must already have lapsed before the removal")
+	}
+
+	h, _, _ := newCredChangeMFAHandlerWithUsers(&credChangeMFA{}, newRecordingSessions(), users)
+	if _, err := h.Remove(ctx, &MFARemoveRequest{}); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	// The step that used to fail: their next sign-in.
+	if gate.MFAGraceExpired(ctx, users.record("admin-sole"), time.Now()) {
+		t.Fatal("removing the last factor left the grace window expired: the user\u2019s next login is refused with mfa_enrollment_required and enrolment is unreachable \u2014 for a sole administrator, permanently")
+	}
+}
+
+// The passkey DELETE removes ONE credential, so the clock restarts only
+// when that was the user's last factor. Restarting it for a user who still
+// holds one would silently move a deadline they are already meeting.
+func TestWebAuthnRemove_LastFactorRestartsTheGraceClock(t *testing.T) {
+	ctx := credChangeCtx("admin-passkey", "sid-current")
+	users := newCredChangeUsers()
+	users.withGraceStartedAt("admin-passkey", time.Now().Add(-90*24*time.Hour))
+
+	h := NewWebAuthnHandler(&credChangeWebAuthn{removed: true, remaining: false}, nil, nil, users, nil, "cookie", "", false)
+	h.SetSessionTerminator(newRecordingSessions())
+	h.SetMFAStatusReader(&credChangeMFA{totpEnrolled: false})
+
+	req := &webAuthnRemoveRequest{CredentialID: base64.RawURLEncoding.EncodeToString([]byte("cred-last"))}
+	if _, err := h.Remove(ctx, req); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if gate := graceGate(); gate.MFAGraceExpired(ctx, users.record("admin-passkey"), time.Now()) {
+		t.Fatal("removing the last passkey left the grace window expired \u2014 the same lockout as the self path")
+	}
+}
+
+func TestWebAuthnRemove_SurvivingTOTPLeavesTheGraceClockAlone(t *testing.T) {
+	ctx := credChangeCtx("admin-totp", "sid-current")
+	users := newCredChangeUsers()
+	started := time.Now().Add(-3 * 24 * time.Hour)
+	users.withGraceStartedAt("admin-totp", started)
+
+	h := NewWebAuthnHandler(&credChangeWebAuthn{removed: true, remaining: false}, nil, nil, users, nil, "cookie", "", false)
+	h.SetSessionTerminator(newRecordingSessions())
+	h.SetMFAStatusReader(&credChangeMFA{totpEnrolled: true})
+
+	req := &webAuthnRemoveRequest{CredentialID: base64.RawURLEncoding.EncodeToString([]byte("cred-a"))}
+	if _, err := h.Remove(ctx, req); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if users.resetCalls("admin-totp") != 0 {
+		t.Fatal("a TOTP factor survives the removal: restarting the clock would move a deadline the user is already meeting")
+	}
+	if got := users.record("admin-totp").MFAGraceStartedAt; got == nil || !got.Equal(started) {
+		t.Fatalf("MFAGraceStartedAt = %v, want it untouched at %v", got, started)
+	}
+}
+
+func TestWebAuthnRemove_SurvivingPasskeyLeavesTheGraceClockAlone(t *testing.T) {
+	ctx := credChangeCtx("admin-two-keys", "sid-current")
+	users := newCredChangeUsers()
+	users.withGraceStartedAt("admin-two-keys", time.Now().Add(-3*24*time.Hour))
+
+	h := NewWebAuthnHandler(&credChangeWebAuthn{removed: true, remaining: true}, nil, nil, users, nil, "cookie", "", false)
+	h.SetSessionTerminator(newRecordingSessions())
+	h.SetMFAStatusReader(&credChangeMFA{totpEnrolled: false})
+
+	req := &webAuthnRemoveRequest{CredentialID: base64.RawURLEncoding.EncodeToString([]byte("cred-a"))}
+	if _, err := h.Remove(ctx, req); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if users.resetCalls("admin-two-keys") != 0 {
+		t.Fatal("another passkey survives the removal \u2014 the clock must not restart")
+	}
+}
+
+// A DELETE that matched nothing changed no credential set, so it triggers
+// none of the consequences \u2014 otherwise any bearer could restart their own
+// grace clock by looping on an unknown credential id.
+func TestWebAuthnRemove_UnknownCredentialLeavesTheGraceClockAlone(t *testing.T) {
+	ctx := credChangeCtx("admin-nope", "sid-current")
+	users := newCredChangeUsers()
+	users.withGraceStartedAt("admin-nope", time.Now().Add(-90*24*time.Hour))
+
+	h := NewWebAuthnHandler(&credChangeWebAuthn{removed: false}, nil, nil, users, nil, "cookie", "", false)
+	h.SetSessionTerminator(newRecordingSessions())
+
+	req := &webAuthnRemoveRequest{CredentialID: base64.RawURLEncoding.EncodeToString([]byte("nope"))}
+	if _, err := h.Remove(ctx, req); err == nil {
+		t.Fatal("want 404")
+	}
+	if users.resetCalls("admin-nope") != 0 {
+		t.Fatal("nothing was removed \u2014 the grace clock must not restart")
+	}
+}
+
+// "Nothing to remove" destroyed nothing, so it changes nothing.
+func TestSelfRemove_NotEnrolledLeavesTheGraceClockAlone(t *testing.T) {
+	ctx := credChangeCtx("u-none", "sid-current")
+	users := newCredChangeUsers()
+	users.withGraceStartedAt("u-none", time.Now().Add(-90*24*time.Hour))
+	h, _, _ := newCredChangeMFAHandlerWithUsers(&credChangeMFA{removeErr: services.ErrMFANotEnrolled}, newRecordingSessions(), users)
+
+	if _, err := h.Remove(ctx, &MFARemoveRequest{}); err == nil {
+		t.Fatal("want an error")
+	}
+	if users.resetCalls("u-none") != 0 {
+		t.Fatal("nothing was removed \u2014 no consequence may be applied")
+	}
+}
+
+// The admin reset already restarted the clock on its success path. Its
+// FAILURE path is the only pass that can still stamp it: the operator's
+// retry answers 404 once the last factor row is gone.
+func TestAdminReset_FailedRemovalStillRestartsTheGraceClock(t *testing.T) {
+	ctx := credChangeCtx("admin-1", "sid-admin")
+	users := newCredChangeUsers()
+	users.withGraceStartedAt("target-half", time.Now().Add(-90*24*time.Hour))
+	h, _, _ := newCredChangeMFAHandlerWithUsers(&credChangeMFA{removeErr: errors.New("half deleted")}, newRecordingSessions(), users)
+
+	if _, err := h.AdminReset(ctx, &MFAAdminResetRequest{UserID: "target-half"}); err == nil {
+		t.Fatal("a failed removal must still surface as an error")
+	}
+	if users.resetCalls("target-half") != 1 {
+		t.Fatalf("ResetMFAGrace called %d times, want 1", users.resetCalls("target-half"))
 	}
 }

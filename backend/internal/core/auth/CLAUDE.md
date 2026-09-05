@@ -1112,14 +1112,14 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 | POST | `/v1/auth/{tier}/mfa/enroll/begin` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Start TOTP enrollment — returns `{challengeId, secret, provisioningUri}` |
 | POST | `/v1/auth/{tier}/mfa/enroll/confirm` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Confirm enrollment with a TOTP code, receive 10 one-shot backup codes. Gated **as well as** `begin` — the factor set can change between the two halves. When it **replaces** an existing TOTP secret it is a removal too, and carries a removal's consequences (D16); a first enrolment carries none. Either way it emits a security event and the `auth.mfa_factor_added` email |
 | GET | `/v1/auth/{tier}/me/mfa` | `RequireGlobal()` | Return `{status, type, backupCodesRemaining}` |
-| POST | `/v1/auth/{tier}/me/mfa/remove` | `RequireGlobal()` + `RequireStepUp(5m)` | Remove every enrolled factor (TOTP row + WebAuthn row, D15) — step-up middleware demands a <5min MFA proof; request body is empty. Also bumps the MFA epoch, revokes every device-trust grant, and revokes every session but the caller's own (D16 — see "One rule for every credential change" below) |
+| POST | `/v1/auth/{tier}/me/mfa/remove` | `RequireGlobal()` + `RequireStepUp(5m)` | Remove every enrolled factor (TOTP row + WebAuthn row, D15) — step-up middleware demands a <5min MFA proof; request body is empty. Also bumps the MFA epoch, revokes every device-trust grant, revokes every session but the caller’s own, and **restarts the enrolment grace clock** — without which an MFA-obliged caller could never enrol again (D16 — see "One rule for every credential change" below) |
 | POST | `/v1/auth/{tier}/mfa/verify` | `RequireGlobal()` | Verify TOTP or backup code; mint a stepped-up access token with `amr:["pwd","otp"]` + `last_otp_at=now`. Capped per (audience, user) by the `mfa-verify` attempt scope — 5 failures in 5 minutes answers 429 `auth.too_many_attempts` with `Retry-After` (D20); a backup-code attempt costs exactly one failure however many hashes it compares |
-| POST | `/v1/admin/users/{userId}/mfa/reset` | `RequireSystemPermission("system.users.mfa_reset")` + `RequireStepUp(5m)` | Admin: delete every MFA factor (TOTP row + WebAuthn row) an **operator** user holds, bump their MFA epoch, revoke their device trust, terminate **every** session they hold (no session is spared — the caller is not the target), and restart their enrollment grace — `RemoveFactor` (D15) no longer 404s a passkey-only target. Mounted on the operator host; targets `operator_mfa_factors`. A failed termination is recorded as `sessions_terminated: false` and does **not** fail the reset; a failed *removal* is audited as **`admin_mfa_reset_failed`** (→ `auth.mfa.reset_failed`) before the 500 — see "A failed reset is audited under its own event type" below |
+| POST | `/v1/admin/users/{userId}/mfa/reset` | `RequireSystemPermission("system.users.mfa_reset")` + `RequireStepUp(5m)` | Admin: delete every MFA factor (TOTP row + WebAuthn row) an **operator** user holds, bump their MFA epoch, revoke their device trust, terminate **every** session they hold (no session is spared — the caller is not the target), and restart their enrollment grace — `RemoveFactor` (D15) no longer 404s a passkey-only target. Mounted on the operator host; targets `operator_mfa_factors`. A failed termination is recorded as `sessions_terminated: false` and does **not** fail the reset; a failed *removal* is audited as **`admin_mfa_reset_failed`** (→ `auth.mfa.reset_failed`) before the 500 — and, because it may have destroyed one row of two, it still terminates the target’s sessions and still restarts their grace clock, so a 500 never leaves a half-reset account with live MFA-authorised sessions; see "A failed reset is audited under its own event type" below |
 | POST | `/v1/admin/client-users/{userId}/mfa/reset` | same gates | Tier-aware companion of the above. Same operator-host mount, but routed through `clientMFAHandler` so the reset operates against `client_users` + `client_mfa_factors` |
 | POST | `/v1/auth/{tier}/mfa/webauthn/register/begin` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Begin enrolling a passkey — returns `{challengeId, publicKey}` (W3C `PublicKeyCredentialCreationOptions`) |
 | POST | `/v1/auth/{tier}/mfa/webauthn/register/finish` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Finish enrolling a passkey — body `{challengeId, name, attestationResponse}`, returns the public credential metadata. Gated as well as `begin`, same reason as the TOTP ceremony. An addition: the epoch does **not** move, but it emits `self_passkey_registered` and the `auth.mfa_factor_added` email |
 | GET | `/v1/auth/{tier}/me/mfa/webauthn/credentials` | `RequireGlobal()` | List the user's enrolled passkeys (id, name, transports, createdAt, lastUsedAt) |
-| DELETE | `/v1/auth/{tier}/me/mfa/webauthn/credentials/{credentialId}` | `RequireGlobal()` + `RequireStepUp(5m)` | Remove one passkey by base64url-encoded credential id. Carries the full removal rule (D16) on **every** removal, not only the last factor — see "One rule for every credential change" below. A 404 (no such credential) changes nothing and triggers none of it |
+| DELETE | `/v1/auth/{tier}/me/mfa/webauthn/credentials/{credentialId}` | `RequireGlobal()` + `RequireStepUp(5m)` | Remove one passkey by base64url-encoded credential id. Carries the full removal rule (D16) on **every** removal, not only the last factor — with the enrolment grace clock as the sole exception: it restarts only when the removal took the user’s **last** factor (no surviving passkey, no TOTP row). See "One rule for every credential change" below. A 404 (no such credential) changes nothing and triggers none of it |
 | POST | `/v1/auth/{tier}/mfa/webauthn/verify/begin` | `RequireGlobal()` | Begin a step-up assertion using a passkey |
 | POST | `/v1/auth/{tier}/mfa/webauthn/verify/finish` | `RequireGlobal()` | Finish a step-up assertion; mints a stepped-up access token with `amr:[..., "otp", "webauthn"]` + `last_otp_at=now`. Under the same `mfa-verify` cap as the TOTP route (D20) — the outer bound the per-challenge counter is not, since `verify/begin` hands out a fresh challenge on demand |
 | GET | `/v1/auth/{tier}/me/auth-methods` | `RequireGlobal()` | Self-service: aggregate password / MFA / OAuth state of the calling user. Same `models.AuthMethodsView` shape the admin route returns. Drives the `/user/security` page header |
@@ -1217,14 +1217,42 @@ Removing or replacing a second factor used to leave every session
 MFA-satisfied: the `amr` markers live **in the token** until it expires, so
 the caller's own token kept passing `RequireMFA` for its whole lifetime
 (audit finding M-2). Four paths change a credential set, and all four now
-do the same four things — differing only in who the caller is:
+do the same things — differing only in who the caller is, and in the one
+consequence that is deliberately conditional (the grace clock):
 
-| Path | Epoch | Device trust | Sessions | Security event |
-|---|---|---|---|---|
-| self `POST /me/mfa/remove` | bump | revoke (`mfa_factor_removed`) | every one **but the caller's** | `self_mfa_removed` |
-| admin `POST /v1/admin/{users,client-users}/{id}/mfa/reset` | bump | revoke (`admin_mfa_reset`) | **every** one | `admin_mfa_reset` (the handler's own row) |
-| `POST /mfa/enroll/confirm` **that replaces** a TOTP row | bump | revoke (`mfa_factor_replaced`) | every one but the caller's | `self_mfa_factor_replaced` |
-| `DELETE /me/mfa/webauthn/credentials/{id}` — **any** passkey | bump | revoke (`mfa_factor_removed`) | every one but the caller's | `self_passkey_removed` |
+| Path | Epoch | Device trust | Sessions | Grace clock | Security event |
+|---|---|---|---|---|---|
+| self `POST /me/mfa/remove` | bump | revoke (`mfa_factor_removed`) | every one **but the caller's** | **restart** | `self_mfa_removed` |
+| admin `POST /v1/admin/{users,client-users}/{id}/mfa/reset` | bump | revoke (`admin_mfa_reset`) | **every** one | **restart** | `admin_mfa_reset` (the handler's own row) |
+| `POST /mfa/enroll/confirm` **that replaces** a TOTP row | bump | revoke (`mfa_factor_replaced`) | every one but the caller's | untouched — a factor still exists | `self_mfa_factor_replaced` |
+| `DELETE /me/mfa/webauthn/credentials/{id}` — **any** passkey | bump | revoke (`mfa_factor_removed`) | every one but the caller's | restart **only if it took the last factor** | `self_passkey_removed` |
+
+**Why the grace clock is in that table at all.** `MFAGraceStartedAt` is
+stamped at a privileged user's first login without a factor and **nothing in
+the tree ever clears it** (`ClearMFAGrace` has zero callers). So for a
+long-standing administrator the enrolment window lapsed months ago, and
+without a restart, removing their last factor is a **one-way door**:
+`enroll/begin` answers `reauthentication_required` once their `auth_time`
+goes stale, `/me/password-confirm` refuses an MFA-obliged caller (D19), and
+the fresh sign-in the SPA sends them to take is itself refused —
+"privileged, no factor, grace expired" → `mfa_enrollment_required`
+(`PasswordAuthService.completeLogin`). A **sole** administrator would have
+no way back in. `AdminReset` has always restarted the clock; the self paths
+never did, and now do (`resetMFAGraceClock`,
+`handlers/credential_change_sessions.go`).
+
+**The passkey path is the one that must ask first.** "Last factor" is the
+same disjunction `completeLogin` uses to decide whether a privileged user is
+enrolled at all — a surviving TOTP row **or** at least one surviving passkey
+— re-read *after* the delete (`WebAuthnHandler.lastFactorGone`, over
+`WebAuthnService.HasCredentials` + `MFAService.Status`, the latter wired per
+tier via `SetMFAStatusReader`). Restarting it for a user who still holds a
+factor would silently move a deadline they are already meeting. The
+predicate answers "gone" unless it can positively confirm a survivor: a
+needless restart moves a countdown, a missed one costs an administrator
+their account. Note this is the **opposite** fail-direction from the epoch
+resolver, which reads a failed lookup as "not current" — the two questions
+have opposite worst cases.
 
 **Additions never bump the epoch.** A first TOTP enrolment
 (`self_mfa_enrolled`) and a passkey registration (`self_passkey_registered`)
@@ -1250,7 +1278,14 @@ request context so several gates on one route cost one read, and a lookup
 error — including "no such user" — reads as **not current**: a degraded store
 must never be the reason a removed factor keeps its authority. An **unwired**
 lookup is the one permissive case and restores the exact pre-epoch behaviour,
-so a deployment that has not wired it is no weaker than it was before.
+so a deployment that has not wired it is no weaker than it was before — but
+it is **not silent**: `main.go` logs at **ERROR** when
+`ServiceMFAEpochLookup` is absent from the registry, naming the consequence.
+Louder than `resolveMFAEpochBumper`'s WARN on purpose: that one reports a
+fork's `iface.UserProvider` predating the seam, which is supported, while a
+missing *lookup* can only mean the auth module did not register the key it
+always registers — a wiring regression whose sole symptom would otherwise be
+that a removed factor keeps its authority, with every test still green.
 
 ⚠️ **The sidecar `JWTValidator` enforces no epoch** — a declared residual. Its
 `RequireMFA`/`RequireStepUp` read `claims.AMR` raw, because it never runs
@@ -1277,22 +1312,34 @@ device-trust revoke anyway:
   delete's error cannot leave a half-reset account — TOTP gone, epoch
   unmoved, trust intact, every session fully MFA-authorised — which is the
   exact state the admin path's failure audit row exists to make visible.
+- **The handler halves obey the same rule.** Both `MFAHandler.Remove` and
+  `MFAHandler.AdminReset` used to end sessions only on the *success* of
+  `RemoveFactor`, so a part-way failure bumped the epoch (correctly, via the
+  defer) and yet left every other session alive. They now branch on
+  `ErrMFANotEnrolled` alone — that is "nothing existed, so nothing was
+  destroyed" — and apply session termination *and* the grace restart on any
+  other outcome, before returning the error. The admin failure branch is in
+  fact the **only** pass that can still stamp the grace clock: the
+  operator's retry answers 404 once the last factor row is gone.
 
-The rule, stated once: **if a credential was destroyed, the epoch moves and
-the trust grants go, success or not.** Over-bumping is harmless by
+The rule, stated once: **if a credential was destroyed, the epoch moves, the
+trust grants go and the sessions end, success or not.** Over-bumping is harmless by
 construction (the counter is monotone, and no addition depends on its
 value), while under-bumping is M-2 all over again. A delete that itself
 failed destroyed nothing and therefore applies nothing —
 `applyRemovalConsequences` (`mfa_service.go`) is the single call both paths
 make, so they cannot drift on which halves they remember.
 
-**Passkey removal is uniform, not last-factor-only.** A removed credential
-is one the user no longer trusts — a lost or compromised device — and it may
-have *created* sessions through the passkey login flow. Neither the session
+**Passkey removal is uniform, not last-factor-only** — for the epoch, the
+trust revoke, the sessions and the event. A removed credential is one the
+user no longer trusts — a lost or compromised device — and it may have
+*created* sessions through the passkey login flow. Neither the session
 document nor `amr` records which credential minted which session, so the
-rule cannot be narrower than "every other session". A DELETE that matched
-nothing changes no credential set and triggers none of it; otherwise any
-bearer could strip its own MFA authority by looping on an unknown id.
+rule cannot be narrower than "every other session". **The grace clock is the
+single exception**, for the reason given above. A DELETE that matched
+nothing changes no credential set and triggers none of it — grace included;
+otherwise any bearer could strip its own MFA authority, or restart its own
+enrolment deadline, by looping on an unknown id.
 
 **Where each half lives, and why.** The epoch bump, the device-trust revoke
 and the security event are in the services (`mfa_service.go`,

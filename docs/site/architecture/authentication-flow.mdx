@@ -323,14 +323,26 @@ The current flow requires password login first, then offers passkey as the secon
 ### Removing or replacing a factor
 
 Four actions change a user's credential set, and all four now do the same
-four things — the only difference is who the caller is:
+things — the only differences are who the caller is, and the one consequence
+that is deliberately conditional:
 
-| Action | MFA epoch | Device trust | Sessions ended | Security event |
-|---|---|---|---|---|
-| `POST /v1/auth/{tier}/me/mfa/remove` | bumped | all revoked | every one **but the caller's own** | `self_mfa_removed` |
-| `POST /v1/admin/{users,client-users}/{id}/mfa/reset` | bumped | all revoked | **every** one | `admin_mfa_reset` |
-| `POST /v1/auth/{tier}/mfa/enroll/confirm` **that replaces** a TOTP secret | bumped | all revoked | every one but the caller's own | `self_mfa_factor_replaced` |
-| `DELETE /v1/auth/{tier}/me/mfa/webauthn/credentials/{id}` — **any** passkey | bumped | all revoked | every one but the caller's own | `self_passkey_removed` |
+| Action | MFA epoch | Device trust | Sessions ended | Enrolment grace | Security event |
+|---|---|---|---|---|---|
+| `POST /v1/auth/{tier}/me/mfa/remove` | bumped | all revoked | every one **but the caller's own** | **restarted** | `self_mfa_removed` |
+| `POST /v1/admin/{users,client-users}/{id}/mfa/reset` | bumped | all revoked | **every** one | **restarted** | `admin_mfa_reset` |
+| `POST /v1/auth/{tier}/mfa/enroll/confirm` **that replaces** a TOTP secret | bumped | all revoked | every one but the caller's own | untouched — a factor still exists | `self_mfa_factor_replaced` |
+| `DELETE /v1/auth/{tier}/me/mfa/webauthn/credentials/{id}` — **any** passkey | bumped | all revoked | every one but the caller's own | restarted **only if it was the last factor** | `self_passkey_removed` |
+
+**Why removal restarts the enrolment grace window.** The clock starts at a
+privileged user's first sign-in without a second factor and nothing ever
+clears it, so for a long-standing administrator it lapsed months ago.
+Removing their last factor without restarting it closes every way back in:
+enrolment demands a fresh proof they can no longer produce, the password
+reconfirm refuses an MFA-obliged caller, and the fresh sign-in they are sent
+to take is refused with `mfa_enrollment_required` — privileged, no factor,
+out of grace. A sole administrator would be locked out for good. The passkey
+route asks first, because it removes one credential of several: the clock
+restarts only when no passkey and no TOTP secret survive the delete.
 
 Additions do none of it. A first TOTP enrolment (`self_mfa_enrolled`) and a
 new passkey (`self_passkey_registered`) leave the epoch alone: authority
@@ -343,7 +355,8 @@ persist has still destroyed the old one, and an admin reset can delete the
 TOTP row and then fail on the passkey row. Both apply the epoch bump and the
 device-trust revoke anyway, and the replacement additionally reports itself
 outward so the caller's other sessions still end. If a credential was
-destroyed, its authority ends: success or not. A delete that itself failed
+destroyed, its authority ends: success or not — and so do the sessions it
+authorised, on both the self and the admin path. A delete that itself failed
 destroyed nothing and changes nothing.
 
 **Two mechanisms, because there are two questions.** Ending the *other*

@@ -397,10 +397,28 @@ func (h *MFAHandler) Remove(ctx context.Context, req *MFARemoveRequest) (*MFARem
 	// the handler performs the removal and then ends what the removed
 	// factor authorised everywhere else (D16). The service already bumped
 	// the epoch, which is what closes the caller's OWN token.
-	if err := h.mfa.RemoveFactor(ctx, userUUID, userUUID); err != nil {
+	err := h.mfa.RemoveFactor(ctx, userUUID, userUUID)
+	if errors.Is(err, services.ErrMFANotEnrolled) {
+		// Nothing existed, so nothing was destroyed: no consequences.
 		return nil, mapMFAError(err)
 	}
+	// Everything below follows the DESTRUCTION, not the success of the
+	// call — the same rule the service's own deferred epoch bump obeys.
+	// RemoveFactor deletes the TOTP row before the WebAuthn one, so any
+	// other error means at least one credential is already gone, and the
+	// sessions it authorised must end regardless.
+	//
+	// RemoveFactor removes EVERY factor (D15), so on the success path the
+	// caller is now factor-less: restart their enrolment grace window or
+	// an MFA-obliged user has just locked themselves out permanently — see
+	// resetMFAGraceClock. On the partial-failure path a factor may still
+	// survive and the restart is merely redundant; a needless restart
+	// moves a countdown, a missed one costs an administrator their account.
+	resetMFAGraceClock(ctx, h.users, userUUID, "self_mfa_removed")
 	revokeSessionsExceptCurrent(ctx, h.sessions, userUUID, "self_mfa_removed")
+	if err != nil {
+		return nil, mapMFAError(err)
+	}
 	resp := &MFARemoveResponse{}
 	resp.Body.Success = true
 	return resp, nil
@@ -583,10 +601,12 @@ type MFAAdminResetResponse struct {
 
 // AdminReset removes every MFA factor another user holds (TOTP + WebAuthn,
 // D15), ends every session they hold, and starts a fresh grace window so
-// they must re-enroll within the policy deadline. Consumes the
-// system.users.mfa_reset permission declared by the auth module and is
-// itself gated by RequireMFA — an admin can't reset another user's MFA
-// without having completed their own second factor first.
+// they must re-enroll within the policy deadline. The route is mounted
+// (auth/module.go) behind RequireSystemPermission("system.users.mfa_reset")
+// — the permission this module declares — plus RequireStepUp(5m), so the
+// caller must hold the permission AND have proved a second factor, or a
+// password reconfirm, within the last five minutes. It is NOT behind
+// RequireMFA: step-up is the stricter of the two and subsumes it.
 //
 // This is the one path that terminates ALL sessions rather than sparing
 // one: the caller is not the target, so there is no session of the
@@ -632,44 +652,58 @@ func (h *MFAHandler) AdminReset(ctx context.Context, req *MFAAdminResetRequest) 
 			slog.String("target_uuid", req.UserID),
 			slog.String("actor_uuid", actorUUID),
 			slog.String("error", err.Error()))
+		// The consequences follow the DESTRUCTION, not the success of the
+		// call — the rule the service's deferred epoch bump already obeys,
+		// and which the session half used to break. A part-way removal
+		// (one row deleted, the other not) bumped the epoch yet left every
+		// other session of the target's alive, which is exactly the state
+		// this branch exists to prevent. Restart the grace clock too: the
+		// operator's retry answers 404 once the last factor row is gone,
+		// so this is the only pass that can still stamp it.
+		resetMFAGraceClock(ctx, h.users, req.UserID, "admin_mfa_reset_failed")
+		terminated := h.terminateAllSessions(ctx, req.UserID)
 		h.recordAdminResetEvent(ctx, "admin_mfa_reset_failed", actorUUID, req.UserID, map[string]interface{}{
-			"outcome":    "failed",
-			"error_kind": "removal_failed",
+			"outcome":             "failed",
+			"error_kind":          "removal_failed",
+			"sessions_terminated": terminated,
 		})
 		return nil, huma.Error500InternalServerError("failed to reset MFA factor")
 	}
-	if err := h.users.ResetMFAGrace(ctx, req.UserID); err != nil {
-		// Grace stamp is best-effort — the factor is already gone, so the
-		// target will be gated by their next privileged login regardless.
-		// We log via the mfa service on the delete path; nothing more here.
-		_ = err
-	}
+	resetMFAGraceClock(ctx, h.users, req.UserID, "admin_mfa_reset")
 	// D16: RemoveFactor already bumped the target's MFA epoch, which ends
 	// the MFA authority of every token they hold — including ones already
 	// in flight. This ends the sessions themselves. A failure is recorded
 	// and NOT fatal: what survives it is ordinary session access, the same
 	// exposure as any degraded revocation, and telling the operator the
 	// reset failed would send them chasing a factor that is already gone.
-	terminated := false
-	switch {
-	case h.sessions == nil:
-		slog.Default().Warn("auth: session terminator not wired; admin MFA reset left the target's sessions signed in",
-			slog.String("target_uuid", req.UserID))
-	default:
-		if err := h.sessions.TerminateAllSessionsByUUID(ctx, req.UserID); err != nil {
-			slog.Default().Warn("auth: admin MFA reset could not terminate the target's sessions; their MFA authority ended anyway via the epoch",
-				slog.String("target_uuid", req.UserID),
-				slog.String("error", err.Error()))
-		} else {
-			terminated = true
-		}
-	}
+	terminated := h.terminateAllSessions(ctx, req.UserID)
 	h.recordAdminResetEvent(ctx, "admin_mfa_reset", actorUUID, req.UserID, map[string]interface{}{
 		"sessions_terminated": terminated,
 	})
 	resp := &MFAAdminResetResponse{}
 	resp.Body.Success = true
 	return resp, nil
+}
+
+// terminateAllSessions ends every session the target holds and reports
+// whether it succeeded, for the audit row. This is the one path that spares
+// nothing: the caller is not the target, so there is no session of the
+// caller's to preserve. Nil-tolerant and never fatal — the epoch already
+// ended the target's MFA authority, so what survives a failure here is
+// ordinary session access.
+func (h *MFAHandler) terminateAllSessions(ctx context.Context, targetUUID string) bool {
+	if h.sessions == nil {
+		slog.Default().Warn("auth: session terminator not wired; admin MFA reset left the target's sessions signed in",
+			slog.String("target_uuid", targetUUID))
+		return false
+	}
+	if err := h.sessions.TerminateAllSessionsByUUID(ctx, targetUUID); err != nil {
+		slog.Default().Warn("auth: admin MFA reset could not terminate the target's sessions; their MFA authority ended anyway via the epoch",
+			slog.String("target_uuid", targetUUID),
+			slog.String("error", err.Error()))
+		return false
+	}
+	return true
 }
 
 // recordAdminResetEvent writes one row through the audit pipeline: slog +

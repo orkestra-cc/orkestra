@@ -1212,6 +1212,10 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		m.operatorWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
 		m.operatorWebAuthnHandler.SetPolicy(authPolicy)
 		m.operatorWebAuthnHandler.SetSessionTerminator(opBundle.authService)
+		// The TOTP half of "was that the last factor?" — the passkey half
+		// the handler reads itself. Same tier as the passkey service, so a
+		// removal cannot consult the other tier's factor rows.
+		m.operatorWebAuthnHandler.SetMFAStatusReader(opBundle.mfaSvc)
 		m.operatorWebAuthnHandler.SetVerifyAttemptCounter(attemptCounter, opBundle.policyAudience)
 		deps.Services.Register(module.ServiceWebAuthn, opBundle.webauthnSvc)
 	}
@@ -1386,6 +1390,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		m.clientWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
 		m.clientWebAuthnHandler.SetPolicy(authPolicy)
 		m.clientWebAuthnHandler.SetSessionTerminator(clBundle.authService)
+		m.clientWebAuthnHandler.SetMFAStatusReader(clBundle.mfaSvc)
 		m.clientWebAuthnHandler.SetVerifyAttemptCounter(attemptCounter, clBundle.policyAudience)
 	}
 
