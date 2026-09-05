@@ -339,8 +339,10 @@ func TestSelfRemove_RevokesEveryOtherSession(t *testing.T) {
 	}
 }
 
-// A failed removal must not go on to revoke sessions — nothing changed.
-func TestSelfRemove_FailedRemovalRevokesNothing(t *testing.T) {
+// ErrMFANotEnrolled — and ONLY that error — means nothing existed, so
+// nothing was destroyed and no consequence may be applied. Every other
+// failure is covered by its sibling below.
+func TestSelfRemove_NotEnrolledRevokesNothing(t *testing.T) {
 	sessions := newRecordingSessions()
 	h, _ := newCredChangeMFAHandler(&credChangeMFA{removeErr: services.ErrMFANotEnrolled}, sessions)
 
@@ -349,6 +351,39 @@ func TestSelfRemove_FailedRemovalRevokesNothing(t *testing.T) {
 	}
 	if _, ok := sessions.revokedExceptFor("u-2"); ok {
 		t.Fatal("nothing was removed — no session may be revoked")
+	}
+}
+
+// The sibling, and the half the admin path already pinned: a removal that
+// fails for any OTHER reason may have destroyed a credential part-way
+// (RemoveFactor deletes the TOTP row before the WebAuthn one and applies
+// the epoch bump from a defer), so the sessions that credential authorised
+// must still end — and the grace clock must still restart, or the caller
+// can be left factor-less and locked out by a 500. Without this test the
+// self path silently regresses to success-gating while every other test in
+// the package stays green.
+func TestSelfRemove_PartialFailureStillAppliesTheConsequences(t *testing.T) {
+	ctx := credChangeCtx("u-partial", "sid-current")
+	users := newCredChangeUsers()
+	users.withGraceStartedAt("u-partial", time.Now().Add(-90*24*time.Hour))
+	sessions := newRecordingSessions()
+	h, _, _ := newCredChangeMFAHandlerWithUsers(&credChangeMFA{removeErr: errors.New("half deleted")}, sessions, users)
+
+	if _, err := h.Remove(ctx, &MFARemoveRequest{}); err == nil {
+		t.Fatal("the removal failure must still surface to the caller")
+	}
+	sid, ok := sessions.revokedExceptFor("u-partial")
+	if !ok {
+		t.Fatal("a part-way removal destroyed a credential: the sessions it authorised must still end")
+	}
+	if sid != "sid-current" {
+		t.Fatalf("revokedExcept = %q, want the caller's own sid", sid)
+	}
+	if users.resetCalls("u-partial") != 1 {
+		t.Fatalf("ResetMFAGrace called %d times, want 1 — a 500 must not leave the caller factor-less with a lapsed grace window", users.resetCalls("u-partial"))
+	}
+	if gate := graceGate(); gate.MFAGraceExpired(ctx, users.record("u-partial"), time.Now()) {
+		t.Fatal("the grace window is still expired after a part-way removal — the same lockout, reached through the failure path")
 	}
 }
 

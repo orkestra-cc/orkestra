@@ -1241,6 +1241,20 @@ no way back in. `AdminReset` has always restarted the clock; the self paths
 never did, and now do (`resetMFAGraceClock`,
 `handlers/credential_change_sessions.go`).
 
+⚠️ **A spec amendment to §4.3 D16 is OWED for this** — and it is the one on
+the list most likely to bite. D16 as written describes **four** unconditional
+consequences; the grace restart is a **fifth**, it applies only to the self
+paths, and on the passkey route it is the only consequence in the whole rule
+that is **conditional**. A future task briefed off the spec verbatim would
+implement the four, leave the clock alone, and **reintroduce this exact
+lockout** — silently, because nothing in the epoch's own test surface fails
+when it is missing. Two smaller amendments are owed alongside it: D16's "at
+destruction, not at success" wording has to name the **session** half (the
+services' epoch bump alone satisfied it, which is how both handlers kept
+success-gating their revocations), and D16 says nothing about what a
+**failed** admin reset owes the target, which is why `AdminReset`'s failure
+branch stamps the clock on its own authority. Full list in the PR body.
+
 **The passkey path is the one that must ask first.** "Last factor" is the
 same disjunction `completeLogin` uses to decide whether a privileged user is
 enrolled at all — a surviving TOTP row **or** at least one surviving passkey

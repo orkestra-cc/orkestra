@@ -657,9 +657,22 @@ func (h *MFAHandler) AdminReset(ctx context.Context, req *MFAAdminResetRequest) 
 		// and which the session half used to break. A part-way removal
 		// (one row deleted, the other not) bumped the epoch yet left every
 		// other session of the target's alive, which is exactly the state
-		// this branch exists to prevent. Restart the grace clock too: the
-		// operator's retry answers 404 once the last factor row is gone,
-		// so this is the only pass that can still stamp it.
+		// this branch exists to prevent.
+		//
+		// Restart the grace clock too. When the removal WAS part-way, this
+		// is the only pass that can still stamp it: the operator's retry
+		// finds no factor row left and answers 404, which by design applies
+		// no consequences at all. This branch is also reached when nothing
+		// was destroyed — RemoveFactor can fail on either of its two
+		// lookups, before any delete — so the stamp is not conditional on
+		// destruction the way the epoch bump is. That is deliberate and
+		// inert rather than merely tolerable: the clock is read only for a
+		// user who has NO factor, so restarting it for a target whose
+		// factors all survived changes nothing they will ever meet, while
+		// getting it wrong in the other direction is the lockout this whole
+		// helper exists to prevent. The handler cannot tell the two apart
+		// anyway — `destroyed` lives inside RemoveFactor and is not
+		// reported outward.
 		resetMFAGraceClock(ctx, h.users, req.UserID, "admin_mfa_reset_failed")
 		terminated := h.terminateAllSessions(ctx, req.UserID)
 		h.recordAdminResetEvent(ctx, "admin_mfa_reset_failed", actorUUID, req.UserID, map[string]interface{}{
