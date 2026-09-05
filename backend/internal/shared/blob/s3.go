@@ -116,13 +116,30 @@ func NewS3(ctx context.Context, cfg S3Config) (Store, error) {
 	// Endpoint, so browser-facing URLs point at the public host while the
 	// direct-op client stays on the internal endpoint. Presigning is offline
 	// (no network call), so constructing a second client here is cheap.
-	presignBase := client
-	if cfg.PublicEndpoint != "" && cfg.PublicEndpoint != cfg.Endpoint {
-		presignBase = s3.NewFromConfig(awsCfg, func(o *s3.Options) {
-			o.BaseEndpoint = aws.String(cfg.PublicEndpoint)
-			o.UsePathStyle = cfg.ForcePathStyle
-		})
+	//
+	// It is also a SEPARATE client for a second reason: response checksum
+	// validation must be off on it. Since aws-sdk-go-v2 defaults
+	// ResponseChecksumValidation to WhenSupported, a presigned GET carries
+	// `x-amz-checksum-mode` inside X-Amz-SignedHeaders — and a signed header
+	// is one the recipient MUST send. The recipients here are a browser
+	// opening the URL and a plain fetch of it; neither sends it, so the
+	// signature never matches and every presigned download answers 403
+	// SignatureDoesNotMatch. Response checksums are the caller's own
+	// integrity check, not an authorization control, so dropping them here
+	// costs nothing; keeping them makes presigned GETs unusable by the only
+	// clients they exist for. The direct-op client above keeps validation on,
+	// because it sends the header itself.
+	presignEndpoint := cfg.Endpoint
+	if cfg.PublicEndpoint != "" {
+		presignEndpoint = cfg.PublicEndpoint
 	}
+	presignBase := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+		if presignEndpoint != "" {
+			o.BaseEndpoint = aws.String(presignEndpoint)
+		}
+		o.UsePathStyle = cfg.ForcePathStyle
+		o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
+	})
 
 	s := &s3Store{
 		client:      client,
