@@ -776,13 +776,18 @@ func TestHasPermission_CacheHit_BypassesRepoLookup(t *testing.T) {
 	}
 }
 
-// ===== withGeneration (D27) =====
+// ===== the invalidation contract (D27, as amended by ruling P22) =====
 //
-// withGeneration is the invalidation CONTRACT: pre-invalidate → write →
-// post-invalidate. The pre step is a gate — a counter the store cannot
-// bump means the change's effect cannot be guaranteed, so nothing is
-// written. The post step retires a repopulation that landed during the
-// write; its failure is logged, counted, and non-fatal.
+// D27 splits by DIRECTION. A GRANT goes through withGeneration:
+// pre-invalidate → write → post-invalidate, where the pre step is a gate
+// and its failure refuses the write. A REVOCATION goes through
+// writeThenInvalidate: the row goes first and a failed bump is logged
+// and counted, never a refusal — a stale verdict after a grant is a
+// harmless DENY, after a revocation it is an ALLOW, and refusing the
+// revocation leaves the privilege held indefinitely instead of for the
+// 60s TTL. Platform-issued grants (granterSystem) take the revocation
+// shape too (P24): they are steps inside other modules' multi-step
+// flows, where a refusal half-finishes a tenant.
 
 // assertNoGenerationBump fails when either counter moved. A mutation
 // that was REFUSED must retire nothing: bumping before a request that is
@@ -825,9 +830,10 @@ func TestWithGeneration_PreInvalidationFailureRefusesTheWrite(t *testing.T) {
 	}
 }
 
-// The post step retires an entry repopulated by a concurrent read
-// between the pre-invalidation and the write — that read stored the OLD
-// verdict under the NEW generation.
+// The post step retires an entry repopulated by a read that started
+// before the pre-invalidation and resolved after the write — that read
+// stored the OLD verdict under the NEW generation. Complementary to the
+// read-side fix in GetEffectivePermissions, not a substitute for it.
 func TestWithGeneration_PostInvalidationRetiresARepopulation(t *testing.T) {
 	svc, _, _ := newCacheTestService(t, staticRoleLookup(""))
 	ctx := context.Background()
@@ -892,6 +898,88 @@ func TestWithGeneration_NilRedisRunsTheMutation(t *testing.T) {
 	}
 	if !written {
 		t.Fatal("the mutation must run when no cache is configured")
+	}
+}
+
+// writeThenInvalidate: no pre-bump at all, and a post-bump failure is
+// swallowed into logs and metrics rather than returned.
+func TestWriteThenInvalidate_DoesNotBumpBeforeTheWrite(t *testing.T) {
+	svc, _, mr := newCacheTestService(t, staticRoleLookup(""))
+	rec := recordCommands(t, mr)
+	sawBump := false
+
+	err := svc.writeThenInvalidate(context.Background(), globalScope(), func() error {
+		sawBump = rec.count("INCR") > 0
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("writeThenInvalidate: %v", err)
+	}
+	if sawBump {
+		t.Error("nothing may be retired before the write lands")
+	}
+	if got := rec.count("INCR"); got != 1 {
+		t.Errorf("INCR count = %d, want exactly the post-write bump", got)
+	}
+}
+
+func TestWriteThenInvalidate_FailedMutationRetiresNothing(t *testing.T) {
+	svc, _, mr := newCacheTestService(t, staticRoleLookup(""))
+	rec := recordCommands(t, mr)
+	sentinel := errors.New("write failed")
+
+	if err := svc.writeThenInvalidate(context.Background(), globalScope(), func() error {
+		return sentinel
+	}); !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v, want the mutation's own error", err)
+	}
+	assertNoGenerationBump(t, mr, rec)
+}
+
+func TestWriteThenInvalidate_BumpFailureIsNeverARefusal(t *testing.T) {
+	svc, _, mr := newCacheTestService(t, staticRoleLookup(""))
+	mr.Close()
+	written := false
+
+	if err := svc.writeThenInvalidate(context.Background(), globalScope(), func() error {
+		written = true
+		return nil
+	}); err != nil {
+		t.Fatalf("a bump failure must not fail a write that landed, got %v", err)
+	}
+	if !written {
+		t.Fatal("the mutation must have run")
+	}
+}
+
+func TestBindingGrantGeneration_SentinelSkipsTheGate(t *testing.T) {
+	// The actor split, at the seam itself: a real actor is gated (the
+	// mutation does not run when the store is down), the platform
+	// sentinel is not.
+	svc, _, mr := newCacheTestService(t, staticRoleLookup(""))
+	mr.Close()
+
+	gatedRan := false
+	err := svc.bindingGrantGeneration(context.Background(), "u-actor", userScope("u-1"), func() error {
+		gatedRan = true
+		return nil
+	})
+	if !errors.Is(err, ErrAuthzCacheUnavailable) {
+		t.Fatalf("a real actor's grant must be gated, got %v", err)
+	}
+	if gatedRan {
+		t.Error("the gated mutation must not have run")
+	}
+
+	systemRan := false
+	if err := svc.bindingGrantGeneration(context.Background(), granterSystem, userScope("u-1"), func() error {
+		systemRan = true
+		return nil
+	}); err != nil {
+		t.Fatalf("a platform-issued grant must not be gated, got %v", err)
+	}
+	if !systemRan {
+		t.Error("the platform-issued mutation must have run")
 	}
 }
 
@@ -990,7 +1078,8 @@ func TestDeleteRole_SystemRoleRefusalBumpsNothing(t *testing.T) {
 
 func TestCreateBinding_RefusedGrantBumpsNothing(t *testing.T) {
 	// The cascade rule refuses the grant (403). Nothing is written, so
-	// nothing may be retired.
+	// nothing may be retired. A real actor, so this is the gated path —
+	// hoisting the wrapper above validateBindingGrant fails here.
 	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
 	repo.seedRole("role-X", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
 	rec := recordCommands(t, mr)
@@ -1001,6 +1090,48 @@ func TestCreateBinding_RefusedGrantBumpsNothing(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInsufficientPermissionsToGrant) {
 		t.Fatalf("err = %v, want ErrInsufficientPermissionsToGrant", err)
+	}
+	assertNoGenerationBump(t, mr, rec)
+}
+
+// EnsureBinding's twin. Every TestEnsureBinding_*_Rejected runs on the
+// nil-Redis harness, where the bump short-circuits and a hoisted wrapper
+// stays invisible — this is the only test that pins EnsureBinding's wrap
+// position.
+func TestEnsureBinding_RefusedGrantBumpsNothing(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	repo.seedRole("role-X", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
+	rec := recordCommands(t, mr)
+
+	_, err := svc.EnsureBinding(context.Background(), "tenant-A", "granter-with-nothing", models.CreateBindingInput{
+		UserUUID: "u-target",
+		RoleUUID: "role-X",
+	})
+	if !errors.Is(err, ErrInsufficientPermissionsToGrant) {
+		t.Fatalf("err = %v, want ErrInsufficientPermissionsToGrant", err)
+	}
+	assertNoGenerationBump(t, mr, rec)
+	if len(repo.bindings) != 0 {
+		t.Errorf("bindings = %v, want none written", repo.bindings)
+	}
+}
+
+// The inactive-role refusal is reached before the cascade rule, so it
+// pins the wrap position against a hoist past EITHER guard.
+func TestEnsureBinding_InactiveRoleRefusalBumpsNothing(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup("super_admin"))
+	repo.seedRole("role-off", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
+	role := repo.roles["role-off"]
+	role.IsActive = false
+	repo.roles["role-off"] = role
+	rec := recordCommands(t, mr)
+
+	_, err := svc.EnsureBinding(context.Background(), "tenant-A", "granter", models.CreateBindingInput{
+		UserUUID: "u-target",
+		RoleUUID: "role-off",
+	})
+	if !errors.Is(err, ErrRoleInactive) {
+		t.Fatalf("err = %v, want ErrRoleInactive", err)
 	}
 	assertNoGenerationBump(t, mr, rec)
 }
@@ -1045,65 +1176,131 @@ func TestCreateBinding_CacheUnavailableRefusesTheGrant(t *testing.T) {
 	}
 }
 
-func TestDeleteRole_CacheUnavailableRefusesTheDelete(t *testing.T) {
+// ===== P22: a REVOCATION is never refused for a cache reason =====
+//
+// Refusing one leaves the privilege granted indefinitely; writing it
+// leaves a stale verdict for at most the 60s TTL — and with the store
+// down the cache is bypassed on reads, so the revocation takes effect at
+// once. Refusal is strictly worse in exactly the case the gate exists
+// to protect.
+
+func TestDeleteRole_CacheUnavailableStillDeletes(t *testing.T) {
 	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
 	repo.seedRole("role-c", "reader", false, []string{"billing.invoice.read"}, "tenant-A")
-	repo.seedBinding("b-1", "u-1", "tenant-A", "reader")
+	// seedBinding's 4th argument is the role UUID, not its name — the
+	// cascade matches on RoleUUID.
+	repo.seedBinding("b-1", "u-1", "tenant-A", "role-c")
 	mr.Close()
 
-	err := svc.DeleteRole(context.Background(), "tenant-A", "role-c")
-	if !errors.Is(err, ErrAuthzCacheUnavailable) {
-		t.Fatalf("err = %v, want ErrAuthzCacheUnavailable", err)
+	if err := svc.DeleteRole(context.Background(), "tenant-A", "role-c"); err != nil {
+		t.Fatalf("a revocation must not be refused over a cache, got %v", err)
 	}
-	if _, ok := repo.roles["role-c"]; !ok {
-		t.Error("the role must survive a refused delete")
+	if _, ok := repo.roles["role-c"]; ok {
+		t.Error("the role must be deleted even though the cache could not be retired")
 	}
-	if _, ok := repo.bindings["b-1"]; !ok {
-		t.Error("the binding cascade must not run when the delete is refused")
+	if _, ok := repo.bindings["b-1"]; ok {
+		t.Error("the binding cascade must still run")
 	}
 }
 
-// The cascade hooks learn how many rows they removed only from the write
-// itself, so the "if n > 0" guard (TestRemoveBindingsByTenant_NoMatch_
-// DoesNotFlush) leaves them with the post-write half alone. Its failure
-// is RETURNED — the tenant module's hooks propagate it — never logged
-// and swallowed.
-func TestRemoveBindingsByTenant_CacheUnavailableIsReported(t *testing.T) {
+func TestDeleteBinding_CacheUnavailableStillRevokes(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	repo.seedBinding("b-1", "u-1", "tenant-A", "role-X")
+	mr.Close()
+
+	if err := svc.DeleteBinding(context.Background(), "tenant-A", "b-1"); err != nil {
+		t.Fatalf("a revocation must not be refused over a cache, got %v", err)
+	}
+	if _, ok := repo.bindings["b-1"]; ok {
+		t.Error("the binding must be revoked even though the cache could not be retired")
+	}
+}
+
+// P24: the platform sentinel takes the revocation shape. CreateTenant
+// treats an error from EnsureBinding as a failed creation and
+// soft-deletes the tenant it just made; SetMemberRoles returns between
+// its unbind and its rebind. A transient INCR failure must do neither.
+func TestEnsureBinding_SystemGranterCacheUnavailableStillGrants(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	repo.seedRole("role-owner", "org_owner", true, []string{"tenant.read"}, "")
+	mr.Close()
+
+	out, err := svc.EnsureBinding(context.Background(), "tenant-A", granterSystem, models.CreateBindingInput{
+		UserUUID: "u-owner",
+		RoleUUID: "role-owner",
+	})
+	if err != nil {
+		t.Fatalf("a platform-issued grant must not be refused over a cache, got %v", err)
+	}
+	if out == nil {
+		t.Fatal("the binding row must be returned")
+	}
+	if len(repo.bindings) != 1 {
+		t.Errorf("bindings = %v, want the grant to have landed", repo.bindings)
+	}
+}
+
+func TestCreateBinding_SystemGranterCacheUnavailableStillGrants(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	repo.seedRole("role-owner", "org_owner", true, []string{"tenant.read"}, "")
+	mr.Close()
+
+	if _, err := svc.CreateBinding(context.Background(), "tenant-A", granterSystem, models.CreateBindingInput{
+		UserUUID: "u-owner",
+		RoleUUID: "role-owner",
+	}); err != nil {
+		t.Fatalf("a platform-issued grant must not be refused over a cache, got %v", err)
+	}
+	if len(repo.bindings) != 1 {
+		t.Errorf("bindings = %v, want the grant to have landed", repo.bindings)
+	}
+}
+
+// A cascade that removed rows and could not retire the cache must NOT
+// fail: tenant.SetMemberRoles calls the unbind hook and then re-binds
+// the new role, so an error here would leave the member unbound while
+// the membership denorm still says they hold the role. The tenant
+// delete's own hook would audit tenant.cascade.hook_failed for a
+// cascade that did its work.
+func TestRemoveBindingsByTenant_CacheUnavailableDoesNotFailTheCascade(t *testing.T) {
 	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
 	repo.seedBinding("b-A", "u-1", "tenant-A", "role")
 	mr.Close()
 
 	n, err := svc.RemoveBindingsByTenant(context.Background(), "tenant-A")
-	if !errors.Is(err, ErrAuthzCacheUnavailable) {
-		t.Fatalf("err = %v, want ErrAuthzCacheUnavailable", err)
+	if err != nil {
+		t.Fatalf("the cascade must not fail over a cache, got %v", err)
 	}
 	if n != 1 {
-		t.Errorf("n = %d, want the removal count to still be reported", n)
+		t.Errorf("n = %d, want 1", n)
+	}
+	if _, ok := repo.bindings["b-A"]; ok {
+		t.Error("the binding must still be removed")
 	}
 }
 
-func TestRemoveBindingsByUserAndTenant_CacheUnavailableIsReported(t *testing.T) {
+func TestRemoveBindingsByUserAndTenant_CacheUnavailableDoesNotFailTheUnbind(t *testing.T) {
 	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
 	repo.seedBinding("b-A", "u-1", "tenant-A", "role")
 	mr.Close()
 
 	n, err := svc.RemoveBindingsByUserAndTenant(context.Background(), "u-1", "tenant-A")
-	if !errors.Is(err, ErrAuthzCacheUnavailable) {
-		t.Fatalf("err = %v, want ErrAuthzCacheUnavailable", err)
+	if err != nil {
+		t.Fatalf("the unbind must not fail over a cache, got %v", err)
 	}
 	if n != 1 {
-		t.Errorf("n = %d, want the removal count to still be reported", n)
+		t.Errorf("n = %d, want 1", n)
+	}
+	if _, ok := repo.bindings["b-A"]; ok {
+		t.Error("the binding must still be removed")
 	}
 }
 
-// DeleteBinding has no pre-write guard of its own — the repository
-// discovers the miss — so the gate's pre-bump runs before the row is
-// known to exist, and an unmatched delete retires the cache once. The
-// residual is bounded: the caller already holds authz.binding.delete in
-// the resolved tenant (assertTenantScope pins path == resolved), and the
-// cost is a cold cache, never a wrong verdict. Pinned so a future reader
-// sees it is deliberate, not an oversight.
-func TestDeleteBinding_UnmatchedDeleteStillReturnsNotFound(t *testing.T) {
+// The write-then-report ordering makes a miss free: the repo reports
+// ErrNotFound, the closure returns it, and nothing is retired. Under the
+// gate this same request flushed every user's verdicts in every tenant
+// while writing nothing, at request rate.
+func TestDeleteBinding_UnmatchedDeleteRetiresNothing(t *testing.T) {
 	svc, _, mr := newCacheTestService(t, staticRoleLookup(""))
 	rec := recordCommands(t, mr)
 
@@ -1111,8 +1308,28 @@ func TestDeleteBinding_UnmatchedDeleteStillReturnsNotFound(t *testing.T) {
 	if !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("err = %v, want repository.ErrNotFound", err)
 	}
-	if got := rec.count("INCR"); got != 1 {
-		t.Errorf("INCR count = %d, want exactly the single pre-invalidation", got)
+	assertNoGenerationBump(t, mr, rec)
+}
+
+// The no-match twin of TestRemoveBindingsByTenant_NoMatch_DoesNotFlush,
+// for the sibling cascade. Without it, moving the bump above the "if
+// n > 0" guard in this method alone stays green.
+func TestRemoveBindingsByUserAndTenant_NoMatch_DoesNotFlush(t *testing.T) {
+	svc, _, mr := newCacheTestService(t, staticRoleLookup(""))
+	ctx := context.Background()
+	svc.cacheSet(ctx, "u-1", "tenant-X", []string{"keep"})
+	rec := recordCommands(t, mr)
+
+	n, err := svc.RemoveBindingsByUserAndTenant(ctx, "u-nobody", "tenant-NONEXISTENT")
+	if err != nil {
+		t.Fatalf("RemoveBindingsByUserAndTenant: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected 0 removed, got %d", n)
+	}
+	assertNoGenerationBump(t, mr, rec)
+	if _, ok := svc.cacheGet(ctx, "u-1", "tenant-X"); !ok {
+		t.Error("cache must NOT be retired when no bindings were removed")
 	}
 }
 

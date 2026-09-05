@@ -132,14 +132,20 @@ const AuthzPermissionUnknown = "authz.permission_unknown"
 // offending key. 422.
 const AuthzSystemPermissionForbidden = "authz.system_permission_forbidden"
 
-// AuthzCacheUnavailable signals that a role or binding change was
-// REFUSED because the effective-permission cache could not be retired.
-// Every such mutation retires the cached verdicts it invalidates before
-// it writes; a counter the store cannot bump means the change's effect
-// could not be guaranteed, so nothing was written and the caller may
-// retry once the cache store recovers. It is the server's own transient
-// fault, never the caller's request — 503, never a 4xx, and never the
-// codeless 500 the update path answered before.
+// AuthzCacheUnavailable signals that a permission GRANT was REFUSED
+// because the effective-permission cache could not be retired. A grant
+// retires the cached verdicts it invalidates before it writes; a counter
+// the store cannot bump means the change's effect could not be
+// guaranteed, so nothing was written and the caller may retry once the
+// cache store recovers. It is the server's own transient fault, never
+// the caller's request — 503, never a 4xx, and never the codeless 500
+// the role-update path answered before.
+//
+// REVOCATIONS never carry this code. A stale verdict after a grant is a
+// DENY (harmless, late); after a revocation it is an ALLOW, and refusing
+// the revocation would leave the privilege held indefinitely instead of
+// for at most the cache's 60s TTL. Revocations therefore write first and
+// report an invalidation failure through logs and metrics.
 //
 // A deployment with NO cache configured is a different thing entirely:
 // there are no cached verdicts to retire, so those mutations succeed and

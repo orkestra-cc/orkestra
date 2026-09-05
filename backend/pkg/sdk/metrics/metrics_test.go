@@ -361,3 +361,27 @@ func TestRecordAuthzCacheInvalidationFailure_IsUnlabelled(t *testing.T) {
 		t.Errorf("expected the unlabelled family in the exposition body, got:\n%s", body)
 	}
 }
+
+// TestRecordAuthzCacheInvalidationRefusal_IsItsOwnFamily keeps the two
+// D27 counters apart. A refusal means NOTHING was written and the caller
+// got a 503; a failure means the change landed and a stale verdict may
+// survive its TTL. Folding them into one series would make the louder
+// condition unalertable.
+func TestRecordAuthzCacheInvalidationRefusal_IsItsOwnFamily(t *testing.T) {
+	c := NewCollector()
+	if err := c.Register(); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	c.RecordAuthzCacheInvalidationRefusal()
+
+	if got := testutil.ToFloat64(c.authzCacheInvalidationRefusals); got != 1 {
+		t.Errorf("refusals = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(c.authzCacheInvalidationFailures); got != 0 {
+		t.Errorf("failures = %v, want 0 — a refusal is not a failure", got)
+	}
+	body := scrapeCollector(t, c)
+	if !strings.Contains(body, "orkestra_authz_cache_invalidation_refusals_total 1") {
+		t.Errorf("expected the unlabelled refusals family in the exposition body, got:\n%s", body)
+	}
+}

@@ -52,4 +52,5 @@ func TestNilCollectorRecordersAreSafe(t *testing.T) {
 	c.RecordSessionCapEventFailure()
 	c.RecordSessionAnchorAnomaly("missing")
 	c.RecordAuthzCacheInvalidationFailure()
+	c.RecordAuthzCacheInvalidationRefusal()
 }

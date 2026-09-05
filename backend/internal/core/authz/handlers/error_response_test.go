@@ -199,13 +199,14 @@ func TestRoleActorNeverAcceptsThePlatformSentinel(t *testing.T) {
 // console cannot classify.
 func TestCacheUnavailableIsA503OnEveryMutationMapper(t *testing.T) {
 	t.Parallel()
+	// Grants only. P22 forbids refusing a revocation over a cache, so
+	// the two delete mappers carry no 503 row — see
+	// TestDeleteMappersNeverAnswer503 below.
 	mappers := map[string]func(context.Context, error) error{
 		"role write": func(ctx context.Context, err error) error {
 			return mapRoleWriteError(ctx, "update the role", err)
 		},
-		"role delete":    mapRoleDeleteError,
 		"binding create": mapCreateBindingError,
-		"binding delete": mapBindingDeleteError,
 	}
 	for name, mapper := range mappers {
 		t.Run(name, func(t *testing.T) {
@@ -223,6 +224,30 @@ func TestCacheUnavailableIsA503OnEveryMutationMapper(t *testing.T) {
 			}
 			if strings.Contains(err.Error(), "authz:") {
 				t.Fatalf("service diagnostic reached the client: %q", err)
+			}
+		})
+	}
+}
+
+// A revocation is never refused over a cache (P22), so if the sentinel
+// ever reaches a delete mapper it means a delete path was wrongly put
+// behind the gate. It must NOT be quietly rendered as a 503 — that would
+// tell the caller their revocation did not happen.
+func TestDeleteMappersNeverAnswer503(t *testing.T) {
+	t.Parallel()
+	for name, mapper := range map[string]func(context.Context, error) error{
+		"role delete":    mapRoleDeleteError,
+		"binding delete": mapBindingDeleteError,
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := mapper(context.Background(), services.ErrAuthzCacheUnavailable)
+			se, ok := err.(huma.StatusError)
+			if !ok || se.GetStatus() != 500 {
+				t.Fatalf("want the opaque 500 fallback, got %T (%v)", err, err)
+			}
+			var coded *errcode.Error
+			if errors.As(err, &coded) && coded.Code == errcode.AuthzCacheUnavailable {
+				t.Fatal("a revocation must never be reported as refused for a cache reason")
 			}
 		})
 	}

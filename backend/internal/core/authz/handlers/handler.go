@@ -276,7 +276,11 @@ func roleActor(ctx context.Context) string {
 // mapRoleWriteError maps the failure modes createRole and updateRole
 // share. Both run any supplied permission list through the same D21
 // validator, so both answer with its sentinels; the not-found and
-// system-role rows are reachable from the update path only.
+// system-role rows are reachable from the update path only, and so is
+// the 503 — CreateRole is deliberately NOT wrapped in the cache gate
+// (a role with no bindings changes nobody's effective permissions), so
+// it can never produce ErrAuthzCacheUnavailable. Do not "fix" that by
+// wrapping CreateRole.
 func mapRoleWriteError(ctx context.Context, operation string, err error) error {
 	switch {
 	case errors.Is(err, repository.ErrNotFound):
@@ -304,13 +308,19 @@ func mapRoleWriteError(ctx context.Context, operation string, err error) error {
 	}
 }
 
-// cacheUnavailableError renders the D27 gate's refusal. A mutation that
-// changes effective permissions retires the cached verdicts it
-// invalidates BEFORE it writes; when that cannot be done the change is
-// not applied at all. That is a transient server-side condition the
-// caller should retry, not a request they can correct — so it is a 503
-// carrying a code the operator console can classify, never the codeless
-// 500 the update and delete paths used to fall through to.
+// cacheUnavailableError renders the D27 gate's refusal. A GRANT retires
+// the cached verdicts it invalidates BEFORE it writes; when that cannot
+// be done the change is not applied at all. That is a transient
+// server-side condition the caller should retry, not a request they can
+// correct — so it is a 503 carrying a code the operator console can
+// classify, never the codeless 500 the update path used to fall through
+// to.
+//
+// The detail is deliberately fixed and carries no cause: the service
+// logged the underlying store error and counted the refusal at the
+// point where it happened (withGeneration), which is the only place the
+// cause exists. Revocations never reach here — they write first and
+// report through those same logs and metrics (ruling P22).
 func cacheUnavailableError() error {
 	return errcode.ServiceUnavailable(errcode.AuthzCacheUnavailable,
 		"The permission cache could not be updated, so the change was not applied. Try again in a moment.")
@@ -342,14 +352,18 @@ func (h *Handler) deleteRole(ctx context.Context, in *deleteRoleInput) (*struct{
 
 // mapRoleDeleteError is deleteRole's mapper, extracted so the wire
 // contract is testable the way mapRoleWriteError's is.
+//
+// No cache row: a delete is a revocation, and P22 forbids refusing one
+// for a cache reason. DeleteRole writes first and reports an
+// invalidation failure through logs and metrics, so it never returns
+// ErrAuthzCacheUnavailable and this mapper must never learn to answer
+// 503 — that would mean the revocation had been refused.
 func mapRoleDeleteError(ctx context.Context, err error) error {
 	switch {
 	case errors.Is(err, repository.ErrNotFound):
 		return huma.Error404NotFound("role not found")
 	case errors.Is(err, services.ErrSystemRoleImmutable):
 		return huma.Error403Forbidden("system roles cannot be deleted")
-	case errors.Is(err, services.ErrAuthzCacheUnavailable):
-		return cacheUnavailableError()
 	default:
 		return authzInternalError(ctx, "delete the role", err)
 	}
@@ -412,13 +426,12 @@ func (h *Handler) deleteBinding(ctx context.Context, in *deleteBindingInput) (*s
 }
 
 // mapBindingDeleteError is deleteBinding's mapper, extracted for the
-// same reason as mapRoleDeleteError.
+// same reason as mapRoleDeleteError — and carrying no cache row for the
+// same reason: revoking a binding is never refused over a cache.
 func mapBindingDeleteError(ctx context.Context, err error) error {
 	switch {
 	case errors.Is(err, repository.ErrNotFound):
 		return huma.Error404NotFound("binding not found")
-	case errors.Is(err, services.ErrAuthzCacheUnavailable):
-		return cacheUnavailableError()
 	default:
 		return authzInternalError(ctx, "delete the role binding", err)
 	}
