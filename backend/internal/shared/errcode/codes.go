@@ -209,7 +209,8 @@ const UserRoleEscalationForbidden = "user.role_escalation_forbidden"
 // UserRoleLookupUnavailable signals that a role a guard on the admin user
 // routes had to read was unavailable, so the request could not be
 // reasoned about and was refused. Raised by the operator-tier routes
-// (/v1/admin/users) and, since spec §4.6 D29, by the client-tier PATCH
+// (POST /v1/users, PUT /v1/users/{id} — the operator tier is NOT under
+// /v1/admin) and, since spec §4.6 D29, by the client-tier PATCH
 // (/v1/admin/client-users/{id}) as well. Two lookups can raise it, both
 // on a patch that names a role:
 //

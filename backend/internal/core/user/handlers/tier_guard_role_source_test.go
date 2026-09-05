@@ -404,6 +404,51 @@ func TestUpdateUser_CallerRoleLookupFailureIsAudited(t *testing.T) {
 	}
 }
 
+// The sibling 500 on this path — the one raised when the TARGET's row
+// cannot be read — must land the same row. The two refusals are adjacent
+// and indistinguishable from outside; auditing one and not the other
+// would leave the trail showing half of them, and the half it hid was
+// the target one.
+func TestUpdateUser_TargetRoleLookupFailureIsAudited(t *testing.T) {
+	t.Parallel()
+	sink := &captureSink{}
+	svc := &fakeUserService{
+		sink: sink,
+		// The TARGET pre-read fails; the CALLER's row resolves fine, so
+		// nothing but this branch can produce the refusal.
+		getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+			return nil, errors.New("mongo: connection reset")
+		},
+		getUserByIDFn: func(_ context.Context, id string) (*iface.User, error) {
+			return &iface.User{UUID: id, Role: "super_admin"}, nil
+		},
+	}
+	h := NewUserHandler(svc)
+
+	err := h.updateAsDevToken("admin-1", "super_admin", "administrator")
+	if err == nil {
+		t.Fatal("expected a refusal")
+	}
+	assertErrCode(t, err, errcode.UserRoleLookupUnavailable)
+
+	ev := findAudit(sink, "user.update.refused")
+	if ev == nil {
+		t.Fatalf("no user.update.refused event; got %v", sink.events)
+	}
+	if got, _ := ev.Metadata["code"].(string); got != errcode.UserRoleLookupUnavailable {
+		t.Errorf("metadata.code = %q, want %q", got, errcode.UserRoleLookupUnavailable)
+	}
+	if got, _ := ev.Metadata["attempted"].(string); got != "role_assignment" {
+		t.Errorf("metadata.attempted = %q, want role_assignment — the guard could not tell whether it was an escalation", got)
+	}
+	if got, _ := ev.Metadata["from"].(string); got != "unknown" {
+		t.Errorf("metadata.from = %q, want \"unknown\" — the previous role is exactly what could not be read", got)
+	}
+	if ev.Outcome != "denied" {
+		t.Errorf("outcome = %q, want denied", ev.Outcome)
+	}
+}
+
 func TestCreateUser_CallerRoleLookupFailureIsAudited(t *testing.T) {
 	t.Parallel()
 	sink := &captureSink{}

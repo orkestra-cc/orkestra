@@ -342,6 +342,28 @@ func (h *UserHandler) UpdateUser(ctx context.Context, req *UpdateUserRequest) (*
 			slog.ErrorContext(ctx, "user: refusing a role change, the target's current role could not be read",
 				slog.String("user_uuid", req.ID),
 				slog.String("error", previousErr.Error()))
+			// Audited like every other refusal on this path. The two
+			// fail-closed 500s here are adjacent and indistinguishable
+			// from outside, so one of them auditing and the other not
+			// would leave a SOC2 trail that shows only half of them —
+			// and the half it hides is the one that refuses over the
+			// TARGET's row. `from` is "unknown", not "", because the
+			// previous role is precisely what could not be read.
+			h.emitAudit(ctx, iface.AuditEvent{
+				ActorUserID:  actorUUID,
+				ActorEmail:   actorEmail,
+				ActorType:    "user",
+				Action:       "user.update.refused",
+				ResourceType: "user",
+				ResourceID:   req.ID,
+				Outcome:      "denied",
+				Metadata: map[string]any{
+					"code":      errcode.UserRoleLookupUnavailable,
+					"attempted": "role_assignment",
+					"from":      "unknown",
+					"to":        req.Body.Role,
+				},
+			})
 			return nil, errcode.Internal(errcode.UserRoleLookupUnavailable,
 				"Could not read the user's current role. Retry shortly.")
 		}
