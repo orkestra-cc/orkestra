@@ -997,7 +997,9 @@ func (s *Service) CreateRole(ctx context.Context, tenantID, actor string, input 
 // UpdateRole applies a partial update to a role. System roles reject any
 // change to Name, Description, or Permissions with ErrSystemRoleImmutable —
 // only IsActive can be toggled on them. Custom roles accept all four.
-// The authz cache is flushed because permission membership may change.
+// The authz cache is retired because permission membership may change —
+// through the gate for a patch that only adds, write-then-report for one
+// that takes a permission away (P25; see the comment at the write).
 //
 // actor is the UUID of the caller the edit is written on behalf of, and
 // bounds what the role may carry exactly as it does in CreateRole (D21).
@@ -1036,6 +1038,7 @@ func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID, actor stri
 	if input.Description != nil {
 		fields["description"] = *input.Description
 	}
+	removesAccess := false
 	if input.Permissions != nil {
 		// An IsActive-only (or name-only) patch never reaches here, so a
 		// role that already holds a stale key can still be disabled
@@ -1045,6 +1048,9 @@ func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID, actor stri
 			return nil, err
 		}
 		fields["permissions"] = perms
+		// The direction of this patch (P25), from the two lists already
+		// in hand — no extra read.
+		removesAccess = !isPermissionSuperset(perms, existing.Permissions)
 	}
 	if input.IsActive != nil {
 		fields["isActive"] = *input.IsActive
@@ -1060,11 +1066,20 @@ func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID, actor stri
 	// remotely triggerable cache flush. globalScope because a role reaches
 	// its holders through bindings we would have to scan to enumerate.
 	//
-	// P22 keeps the role editor on the GATE: it is the surface where an
-	// operator authors a permission set and can retry, and the same patch
-	// can add and remove keys at once, so there is no direction to split
-	// on.
-	if err := s.withGeneration(ctx, globalScope(), func() error {
+	// P25: the role editor routes by direction like every other mutation,
+	// because a patch that drops a permission IS a revocation and the
+	// decision behind D27 is that removing access is never blocked by a
+	// cache wobble. A patch whose result is not a superset of the current
+	// set writes first; anything else — a pure addition, a rename, an
+	// isActive toggle — keeps the gate. A patch that both adds and removes
+	// counts as removing, which is the safe direction: a stale verdict then
+	// denies the ADDED keys (harmless, ≤60s) instead of keeping the removed
+	// ones live indefinitely.
+	write := s.withGeneration
+	if removesAccess {
+		write = s.writeThenInvalidate
+	}
+	if err := write(ctx, globalScope(), func() error {
 		return s.repo.UpdateRoleFields(ctx, roleUUID, fields)
 	}); err != nil {
 		return nil, err
@@ -1790,6 +1805,31 @@ func (s *Service) bindingGrantGeneration(ctx context.Context, grantedBy string, 
 }
 
 // --- helpers ---
+
+// isPermissionSuperset reports whether next covers every key in prev —
+// i.e. the patch takes nothing away. Used by UpdateRole to route a role
+// edit by direction (P25). Both lists are already in hand: prev is the
+// loaded role, next is the validator's cleaned output, so the test costs
+// no round trip.
+//
+// The wildcard needs no special case: "*" is refused in a custom role by
+// the D21 validator before this is reached, and a system role cannot
+// have its permissions patched at all.
+func isPermissionSuperset(next, prev []string) bool {
+	if len(prev) == 0 {
+		return true
+	}
+	have := make(map[string]struct{}, len(next))
+	for _, p := range next {
+		have[p] = struct{}{}
+	}
+	for _, p := range prev {
+		if _, ok := have[p]; !ok {
+			return false
+		}
+	}
+	return true
+}
 
 // validateBindingScope enforces the system/tenant separation rule:
 // platform system roles need global bindings; everything else (org_*,

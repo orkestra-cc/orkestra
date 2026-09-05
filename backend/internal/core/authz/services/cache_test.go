@@ -1138,7 +1138,15 @@ func TestEnsureBinding_InactiveRoleRefusalBumpsNothing(t *testing.T) {
 
 // ===== the gate: a cache that cannot be bumped refuses the write =====
 
-func TestUpdateRole_CacheUnavailableRefusesTheWrite(t *testing.T) {
+// ===== P25: the role editor routes by direction too =====
+//
+// A patch whose result is not a superset of the role's current set takes
+// a permission away, which is a revocation however it is spelled. The
+// decision behind D27 is that removing access is never blocked by a
+// cache wobble, so those patches write first. Pure additions, renames
+// and isActive toggles keep the gate.
+
+func TestUpdateRole_AddingAPermissionIsRefusedWhenTheCacheIsDown(t *testing.T) {
 	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
 	registerTestPermissions(t, svc, registered("billing.invoice.read", "billing.invoice.refund"))
 	repo.seedRole("role-c", "reader", false, []string{"billing.invoice.read"}, "tenant-A")
@@ -1156,6 +1164,93 @@ func TestUpdateRole_CacheUnavailableRefusesTheWrite(t *testing.T) {
 	}
 	if len(role.Permissions) != 1 {
 		t.Errorf("permissions = %v, want the write to have been refused", role.Permissions)
+	}
+}
+
+func TestUpdateRole_RemovingAPermissionSucceedsWhenTheCacheIsDown(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	registerTestPermissions(t, svc, registered("billing.invoice.read", "billing.invoice.refund"))
+	repo.seedRole("role-c", "reader", false,
+		[]string{"billing.invoice.read", "billing.invoice.refund"}, "tenant-A")
+	mr.Close()
+
+	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
+		Permissions: []string{"billing.invoice.read"},
+	})
+	if err != nil {
+		t.Fatalf("a patch that removes a permission must not be refused, got %v", err)
+	}
+	if len(updated.Permissions) != 1 {
+		t.Errorf("permissions = %v, want the refund key dropped", updated.Permissions)
+	}
+}
+
+// Both adds and removes: it removes at least one, so it writes. A stale
+// verdict then DENIES the added key for up to the TTL, which is
+// harmless; refusing would have kept the removed one live indefinitely.
+func TestUpdateRole_MixedPatchWritesBecauseItRemoves(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	registerTestPermissions(t, svc,
+		registered("billing.invoice.read", "billing.invoice.refund", "billing.invoice.send"))
+	repo.seedRole("role-c", "reader", false,
+		[]string{"billing.invoice.read", "billing.invoice.refund"}, "tenant-A")
+	mr.Close()
+
+	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
+		Permissions: []string{"billing.invoice.read", "billing.invoice.send"},
+	})
+	if err != nil {
+		t.Fatalf("a patch that removes anything must not be refused, got %v", err)
+	}
+	if len(updated.Permissions) != 2 {
+		t.Fatalf("permissions = %v, want two entries", updated.Permissions)
+	}
+	for _, p := range updated.Permissions {
+		if p == "billing.invoice.refund" {
+			t.Error("the removed key must be gone")
+		}
+	}
+}
+
+// An isActive-only patch touches no permission, so it is neither
+// direction and keeps the gate exactly as before P25.
+func TestUpdateRole_IsActiveOnlyPatchKeepsTheGate(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	repo.seedRole("role-c", "reader", false, []string{"billing.invoice.read"}, "tenant-A")
+	mr.Close()
+	inactive := false
+
+	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
+		IsActive: &inactive,
+	})
+	if !errors.Is(err, ErrAuthzCacheUnavailable) {
+		t.Fatalf("err = %v, want the gate to still apply", err)
+	}
+	if role := repo.roles["role-c"]; !role.IsActive {
+		t.Error("the toggle must not have been written")
+	}
+}
+
+func TestIsPermissionSuperset(t *testing.T) {
+	tests := []struct {
+		name       string
+		next, prev []string
+		want       bool
+	}{
+		{"identical", []string{"a", "b"}, []string{"a", "b"}, true},
+		{"reordered is still identical", []string{"b", "a"}, []string{"a", "b"}, true},
+		{"pure addition", []string{"a", "b"}, []string{"a"}, true},
+		{"from empty", []string{"a"}, nil, true},
+		{"pure removal", []string{"a"}, []string{"a", "b"}, false},
+		{"to empty is a removal", nil, []string{"a"}, false},
+		{"swap adds and removes", []string{"a", "c"}, []string{"a", "b"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isPermissionSuperset(tt.next, tt.prev); got != tt.want {
+				t.Errorf("isPermissionSuperset(%v, %v) = %v, want %v", tt.next, tt.prev, got, tt.want)
+			}
+		})
 	}
 }
 
