@@ -238,7 +238,8 @@ func (h *Handler) createRole(ctx context.Context, in *createRoleInput) (*roleOut
 	if err := assertTenantScope(ctx, in.TenantID); err != nil {
 		return nil, err
 	}
-	role, err := h.svc.CreateRole(ctx, in.TenantID, in.Body)
+	actor, _ := ctxauth.GetUserUUID(ctx)
+	role, err := h.svc.CreateRole(ctx, in.TenantID, actor, in.Body)
 	if err != nil {
 		return nil, authzInternalError(ctx, "create the role", err)
 	}
@@ -249,7 +250,8 @@ func (h *Handler) updateRole(ctx context.Context, in *updateRoleInput) (*roleOut
 	if err := assertTenantScope(ctx, in.TenantID); err != nil {
 		return nil, err
 	}
-	role, err := h.svc.UpdateRole(ctx, in.TenantID, in.Role, in.Body)
+	actor, _ := ctxauth.GetUserUUID(ctx)
+	role, err := h.svc.UpdateRole(ctx, in.TenantID, in.Role, actor, in.Body)
 	if err != nil {
 		switch {
 		case errors.Is(err, repository.ErrNotFound):

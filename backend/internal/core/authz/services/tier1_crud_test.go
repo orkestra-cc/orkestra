@@ -18,7 +18,11 @@ import (
 
 func TestCreateRole_PersistsCustomRole(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
-	role, err := svc.CreateRole(context.Background(), "tenant-A", models.CreateRoleInput{
+	// The keys this role carries must exist in the registered catalog:
+	// the D21 validator refuses a key nothing ever declared, and the
+	// granterSystem sentinel bypasses the cascade only, never the catalog.
+	registerTestPermissions(t, svc, registered("billing.invoice.read"))
+	role, err := svc.CreateRole(context.Background(), "tenant-A", granterSystem, models.CreateRoleInput{
 		Name:        "billing_reader",
 		Description: "read invoices",
 		Permissions: []string{"billing.invoice.read"},
@@ -51,7 +55,7 @@ func TestUpdateRole_SystemRoleNameImmutable(t *testing.T) {
 	repo.seedRole("role-sys", "administrator", true, []string{"*"}, "")
 
 	rename := "renamed"
-	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-sys", models.UpdateRoleInput{
+	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-sys", granterSystem, models.UpdateRoleInput{
 		Name: &rename,
 	})
 	if !errors.Is(err, ErrSystemRoleImmutable) {
@@ -69,7 +73,7 @@ func TestUpdateRole_SystemRoleIsActiveToggleAllowed(t *testing.T) {
 	repo.seedRole("role-sys", "administrator", true, []string{"*"}, "")
 
 	off := false
-	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-sys", models.UpdateRoleInput{
+	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-sys", granterSystem, models.UpdateRoleInput{
 		IsActive: &off,
 	})
 	if err != nil {
@@ -82,9 +86,12 @@ func TestUpdateRole_SystemRoleIsActiveToggleAllowed(t *testing.T) {
 
 func TestUpdateRole_CustomRolePermissionsUpdate(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
+	// See TestCreateRole_PersistsCustomRole: the written keys have to be
+	// in the catalog for the D21 validator to accept them.
+	registerTestPermissions(t, svc, registered("billing.invoice.read", "billing.invoice.create"))
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
 
-	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", models.UpdateRoleInput{
+	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
 		Permissions: []string{"billing.invoice.read", "billing.invoice.create"},
 	})
 	if err != nil {
@@ -99,7 +106,7 @@ func TestUpdateRole_EmptyPermissionsRejected(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
 
-	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", models.UpdateRoleInput{
+	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
 		Permissions: []string{},
 	})
 	if err == nil {
@@ -112,7 +119,7 @@ func TestUpdateRole_EmptyNameRejected(t *testing.T) {
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
 
 	blank := "   "
-	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", models.UpdateRoleInput{
+	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
 		Name: &blank,
 	})
 	if err == nil {
@@ -124,7 +131,7 @@ func TestUpdateRole_NoFieldsIsNoOp(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
 
-	got, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", models.UpdateRoleInput{})
+	got, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{})
 	if err != nil {
 		t.Fatalf("empty input must be a no-op, got %v", err)
 	}
@@ -296,7 +303,7 @@ func TestUpdateRole_CrossTenantRefused(t *testing.T) {
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
 
 	newName := "hijacked"
-	_, err := svc.UpdateRole(context.Background(), "tenant-B", "role-c", models.UpdateRoleInput{Name: &newName})
+	_, err := svc.UpdateRole(context.Background(), "tenant-B", "role-c", granterSystem, models.UpdateRoleInput{Name: &newName})
 	if !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for cross-tenant update, got %v", err)
 	}
@@ -438,8 +445,11 @@ func TestUpdateRole_FlushesPermissionCache(t *testing.T) {
 	// flushCache call short-circuits — this test just confirms the
 	// happy path doesn't panic and the role update lands.
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
+	// See TestCreateRole_PersistsCustomRole: the written keys have to be
+	// in the catalog for the D21 validator to accept them.
+	registerTestPermissions(t, svc, registered("billing.invoice.read", "billing.invoice.refund"))
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
-	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", models.UpdateRoleInput{
+	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
 		Permissions: []string{"billing.invoice.read", "billing.invoice.refund"},
 	})
 	if err != nil {

@@ -837,7 +837,14 @@ func (s *Service) SeedSystemRoles(ctx context.Context) error {
 
 // --- Role admin ---
 
-func (s *Service) CreateRole(ctx context.Context, tenantID string, input models.CreateRoleInput) (*models.Role, error) {
+// CreateRole builds a custom (non-system) role for one tenant.
+//
+// actor is the UUID of the caller on whose behalf the role is written, or
+// the granterSystem sentinel for seeding and other platform-issued calls.
+// It is threaded here ahead of the D21 permission validator, which bounds
+// what a custom role may carry by what its author already holds; until
+// that validator lands the parameter is accepted and not read.
+func (s *Service) CreateRole(ctx context.Context, tenantID, actor string, input models.CreateRoleInput) (*models.Role, error) {
 	role := &models.Role{
 		UUID:        uuid.NewString(),
 		TenantID:    tenantID,
@@ -857,7 +864,13 @@ func (s *Service) CreateRole(ctx context.Context, tenantID string, input models.
 // change to Name, Description, or Permissions with ErrSystemRoleImmutable —
 // only IsActive can be toggled on them. Custom roles accept all four.
 // The authz cache is flushed because permission membership may change.
-func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID string, input models.UpdateRoleInput) (*models.Role, error) {
+//
+// actor is the UUID of the caller on whose behalf the edit is written, or
+// the granterSystem sentinel for seeding and other platform-issued calls.
+// It is threaded here ahead of the D21 permission validator, which bounds
+// what a custom role may carry by what its editor already holds; until
+// that validator lands the parameter is accepted and not read.
+func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID, actor string, input models.UpdateRoleInput) (*models.Role, error) {
 	existing, err := s.repo.GetRoleByUUID(ctx, roleUUID)
 	if err != nil {
 		return nil, err
