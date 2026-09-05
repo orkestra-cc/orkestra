@@ -146,6 +146,130 @@ func TestHasPermission_InactiveRoleIsIgnored(t *testing.T) {
 	}
 }
 
+// ===== GetEffectivePermissions =====
+
+// Rule 4 (authz/CLAUDE.md): a tenant-scoped binding never grants a
+// platform permission. It was true incidentally — no seeded tenant role
+// carries one — which is not the same as enforced. Existing data can
+// carry a stale system key, and until the D21 validator landed anyone
+// able to edit a custom role could write one in.
+func TestGetEffectivePermissions_TenantBindingCannotGrantASystemKey(t *testing.T) {
+	svc, repo := newTier1Service(t, staticRoleLookup(""))
+	registerTestPermissions(t, svc,
+		registered("tenant.read"),
+		systemRegistered("system.users.admin"))
+
+	// A custom tenant role carrying a stale platform key — the shape D21
+	// now refuses to write, and that pre-D21 data can already hold.
+	grantActorPermissions(t, repo, "u-1", "tenant-1", "tenant.read", "system.users.admin")
+
+	perms, err := svc.GetEffectivePermissions(context.Background(), "u-1", "tenant-1")
+	if err != nil {
+		t.Fatalf("GetEffectivePermissions: %v", err)
+	}
+	if contains(perms, "system.users.admin") {
+		t.Errorf("a tenant-scoped binding must never contribute a platform permission, got %v", perms)
+	}
+	if !contains(perms, "tenant.read") {
+		t.Errorf("its ordinary permissions must still come through, got %v", perms)
+	}
+}
+
+// A GLOBAL binding is where a platform role legitimately grants a
+// platform key — that path is untouched. The seeded "administrator" role
+// carries every registered key (allKeys) and is reached through a global
+// binding, so filtering here would strip the operator console's own
+// permissions.
+func TestGetEffectivePermissions_GlobalBindingStillGrantsSystemKeys(t *testing.T) {
+	svc, repo := newTier1Service(t, staticRoleLookup(""))
+	registerTestPermissions(t, svc,
+		registered("tenant.read"),
+		systemRegistered("system.users.admin"))
+
+	// The production shape: a platform system role, bound globally
+	// (tenantID ""), carrying ordinary AND platform keys.
+	repo.seedRole("role-admin", "administrator", true,
+		[]string{"tenant.read", "system.users.admin"}, "")
+	repo.seedBinding("bind-admin", "u-1", "", "role-admin")
+
+	// Asked in a tenant context, so the tenant-scoped branch runs too and
+	// cannot be what supplies the key.
+	perms, err := svc.GetEffectivePermissions(context.Background(), "u-1", "tenant-1")
+	if err != nil {
+		t.Fatalf("GetEffectivePermissions: %v", err)
+	}
+	if !contains(perms, "system.users.admin") {
+		t.Errorf("a global binding must still grant platform keys, got %v", perms)
+	}
+	if !contains(perms, "tenant.read") {
+		t.Errorf("a global binding must still grant ordinary keys, got %v", perms)
+	}
+}
+
+// The wildcard is the maximal case of the same hazard: HasPermission
+// short-circuits on "*", so a stale tenant role carrying it would grant
+// everything, everywhere, through a tenant-scoped binding. D21 already
+// classifies "*" and platform keys as ONE class — both are refused with
+// ErrSystemPermissionInCustomRole — so the evaluator treats them as one
+// class too. Nothing legitimate is lost: super_admin's wildcard arrives
+// through the systemRole shortcut, never through a binding, and
+// CreateBinding already refuses a platform role inside a tenant.
+func TestGetEffectivePermissions_TenantBindingCannotGrantTheWildcard(t *testing.T) {
+	svc, repo := newTier1Service(t, staticRoleLookup(""))
+	registerTestPermissions(t, svc,
+		registered("tenant.read"),
+		systemRegistered("system.modules.admin"))
+
+	grantActorPermissions(t, repo, "u-1", "tenant-1", "tenant.read", "*")
+
+	perms, err := svc.GetEffectivePermissions(context.Background(), "u-1", "tenant-1")
+	if err != nil {
+		t.Fatalf("GetEffectivePermissions: %v", err)
+	}
+	if contains(perms, "*") {
+		t.Errorf("a tenant-scoped binding must never contribute the wildcard, got %v", perms)
+	}
+	if !contains(perms, "tenant.read") {
+		t.Errorf("its ordinary permissions must still come through, got %v", perms)
+	}
+
+	// The point of filtering it: nothing may ride in on the wildcard's
+	// short-circuit in HasPermission.
+	for _, p := range []string{"system.modules.admin", "tenant.delete", "anything.at.all"} {
+		ok, err := svc.HasPermission(context.Background(), "u-1", "tenant-1", p)
+		if err != nil {
+			t.Fatalf("HasPermission(%q): %v", p, err)
+		}
+		if ok {
+			t.Errorf("a stale tenant-scoped wildcard must not grant %q", p)
+		}
+	}
+}
+
+// The mirror of the above, pinning the two paths in OPPOSITE directions
+// so nobody later "simplifies" the global and tenant unions together: a
+// GLOBAL binding to a wildcard-carrying role still grants it. No seeded
+// role carries "*" today (super_admin gets it from the systemRole
+// shortcut), so this is a directional guard on the filter's scope rather
+// than a production shape.
+func TestGetEffectivePermissions_GlobalBindingStillGrantsTheWildcard(t *testing.T) {
+	svc, repo := newTier1Service(t, staticRoleLookup(""))
+	registerTestPermissions(t, svc, registered("tenant.read"))
+
+	repo.seedRole("role-wild", "wildcard_role", true, []string{"*"}, "")
+	repo.seedBinding("bind-wild", "u-1", "", "role-wild")
+
+	// Asked in a tenant context, so the tenant-scoped branch runs too and
+	// cannot be what supplies the wildcard.
+	perms, err := svc.GetEffectivePermissions(context.Background(), "u-1", "tenant-1")
+	if err != nil {
+		t.Fatalf("GetEffectivePermissions: %v", err)
+	}
+	if !contains(perms, "*") {
+		t.Errorf("a global binding must still grant the wildcard, got %v", perms)
+	}
+}
+
 // ===== CreateBinding =====
 
 func TestCreateBinding_HappyPath_TenantRoleInTenantScope(t *testing.T) {

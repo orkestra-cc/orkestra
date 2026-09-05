@@ -573,6 +573,23 @@ func actionSuffix(permission string) string {
 	return permission
 }
 
+// systemPermissionSnapshot copies the platform-reserved (System:true)
+// key set under a single read lock, so a caller can test membership
+// inside a loop that makes repository calls without holding s.mu across
+// I/O. Same reason classifyPermissionKeys takes the lock once: the set
+// is small (the union of every module's System permissions) and only
+// rewritten by RegisterPermissions at boot, so one copy per cache miss
+// is cheaper than a lock held across Mongo round trips.
+func (s *Service) systemPermissionSnapshot() map[string]struct{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string]struct{}, len(s.systemPermissionSet))
+	for k := range s.systemPermissionSet {
+		out[k] = struct{}{}
+	}
+	return out
+}
+
 func (s *Service) GetEffectivePermissions(ctx context.Context, userUUID, tenantID string) ([]string, error) {
 	if userUUID == "" {
 		return nil, errors.New("authz: userUUID required")
@@ -640,17 +657,51 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, userUUID, tenantI
 	}
 
 	// Union of tenant-scoped bindings.
+	//
+	// Platform-reserved keys are skipped here, which makes the documented
+	// evaluator rule 4 ("a tenant-scoped binding never grants a platform
+	// permission") enforced rather than incidental. It held only because
+	// no seeded tenant role carries a platform key, which is not a
+	// guarantee: existing data can carry a stale one, and until the D21
+	// validator landed anyone able to edit a custom role could write one
+	// in. Skipping the key here makes the ones already in the data inert.
+	//
+	// The wildcard is skipped for the same reason and as the same class:
+	// D21 refuses "*" and a platform key with one error, and "*" is the
+	// maximal case of the hazard, because HasPermission short-circuits on
+	// it. Nothing legitimate is lost — super_admin's wildcard comes from
+	// the systemRole shortcut above, never from a binding, and
+	// CreateBinding already refuses a platform role inside a tenant — so
+	// the only thing this can drop is stale data, which is the point.
+	//
+	// The GLOBAL branch above is deliberately NOT filtered: that is where
+	// a platform role legitimately grants a platform key — the seeded
+	// "administrator" role carries every registered key and is reached
+	// through a global binding — and filtering it would strip the
+	// operator console's own permissions. Closes the audit's L-9.
+	//
+	// The system-key set is snapshotted before the loop rather than read
+	// under s.mu inside it: the loop makes repository calls, and holding
+	// a lock across I/O is exactly what classifyPermissionKeys was
+	// extracted to avoid.
 	if tenantID != "" {
 		scoped, err := s.repo.ListActiveBindingsForUser(ctx, userUUID, tenantID)
 		if err != nil {
 			return nil, err
 		}
+		systemKeys := s.systemPermissionSnapshot()
 		for _, b := range scoped {
 			role, err := s.repo.GetRoleByUUID(ctx, b.RoleUUID)
 			if err != nil || !role.IsActive {
 				continue
 			}
 			for _, p := range role.Permissions {
+				if p == "*" {
+					continue
+				}
+				if _, isSystem := systemKeys[p]; isSystem {
+					continue
+				}
 				perms[p] = struct{}{}
 			}
 		}
