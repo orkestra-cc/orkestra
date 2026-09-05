@@ -120,6 +120,20 @@ container_running() {
   docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1"
 }
 
+# The network the helper container must join is whatever the running rustfs
+# container is actually on — not the recomputed ${STACK}_default, which is
+# wrong whenever the stack was started under a custom COMPOSE_PROJECT_NAME.
+# A container can sit on several networks (a reverse proxy, an observability
+# overlay), so emit one name per line and keep the recomputed default when the
+# container is still attached to it.
+rustfs_network() {
+  local nets
+  nets="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' \
+          "$RUSTFS_CONTAINER" 2>/dev/null || true)"
+  if printf '%s\n' "$nets" | grep -qx "$NETWORK"; then printf '%s' "$NETWORK"; return; fi
+  printf '%s\n' "$nets" | grep -v '^$' | head -1
+}
+
 available_components() {
   local out=()
   container_running "$MONGO_CONTAINER"   && out+=(mongodb)
@@ -328,9 +342,15 @@ backup_rustfs() {
   fi
   local bucket="${STORAGE_BUCKET:-orkestra-avatars}"
 
+  # Prefer the network the running container is actually on; fall back to the
+  # recomputed name only if inspection fails (container listed but no network).
+  local net
+  net="$(rustfs_network)"
+  [ -n "$net" ] || net="$NETWORK"
+
   # List buckets so we capture everything, not just the default one.
   local buckets
-  buckets="$(docker run --rm --network "$NETWORK" \
+  buckets="$(docker run --rm --network "$net" \
     -e AWS_ACCESS_KEY_ID="$access" \
     -e AWS_SECRET_ACCESS_KEY="$secret" \
     -e AWS_DEFAULT_REGION="${STORAGE_REGION:-us-east-1}" \
@@ -344,13 +364,16 @@ backup_rustfs() {
 
   for b in $buckets; do
     mkdir -p "$out/$b"
-    docker run --rm --network "$NETWORK" \
+    if ! docker run --rm --network "$net" \
       -e AWS_ACCESS_KEY_ID="$access" \
       -e AWS_SECRET_ACCESS_KEY="$secret" \
       -e AWS_DEFAULT_REGION="${STORAGE_REGION:-us-east-1}" \
       -v "$out/$b":/backup \
       amazon/aws-cli:latest \
-      --endpoint-url "$endpoint" s3 sync "s3://$b" /backup --only-show-errors
+      --endpoint-url "$endpoint" s3 sync "s3://$b" /backup --only-show-errors; then
+      err "rustfs: sync of bucket '$b' failed (network '$net': see error above)"
+      return 1
+    fi
     ok "rustfs: synced bucket '$b' ($(du -sh "$out/$b" | cut -f1))"
   done
 }

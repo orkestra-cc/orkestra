@@ -119,6 +119,20 @@ container_running() {
   docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1"
 }
 
+# The network the helper container must join is whatever the running rustfs
+# container is actually on — not the recomputed ${STACK}_default, which is
+# wrong whenever the stack was started under a custom COMPOSE_PROJECT_NAME.
+# A container can sit on several networks (a reverse proxy, an observability
+# overlay), so emit one name per line and keep the recomputed default when the
+# container is still attached to it.
+rustfs_network() {
+  local nets
+  nets="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' \
+          "$RUSTFS_CONTAINER" 2>/dev/null || true)"
+  if printf '%s\n' "$nets" | grep -qx "$NETWORK"; then printf '%s' "$NETWORK"; return; fi
+  printf '%s\n' "$nets" | grep -v '^$' | head -1
+}
+
 # ---------------------------------------------------------------------------
 # Resolve backup file (TUI when missing)
 # ---------------------------------------------------------------------------
@@ -428,6 +442,12 @@ restore_rustfs() {
   fi
   local region="${STORAGE_REGION:-us-east-1}"
 
+  # Prefer the network the running container is actually on; fall back to the
+  # recomputed name only if inspection fails (container listed but no network).
+  local net
+  net="$(rustfs_network)"
+  [ -n "$net" ] || net="$NETWORK"
+
   if [ "$DRY_RUN" = "yes" ]; then
     step "rustfs: [dry-run] would sync buckets to $endpoint"
     for d in "$src"/*/; do
@@ -439,7 +459,7 @@ restore_rustfs() {
       size="$(du -sh "$d" | cut -f1)"
       muted "  bucket '$b': $count file(s), $size — would create if missing + sync"
       # aws s3 sync --dryrun shows the per-object operations
-      docker run --rm --network "$NETWORK" \
+      docker run --rm --network "$net" \
         -e AWS_ACCESS_KEY_ID="$access" \
         -e AWS_SECRET_ACCESS_KEY="$secret" \
         -e AWS_DEFAULT_REGION="$region" \
@@ -457,20 +477,23 @@ restore_rustfs() {
     local b
     b="$(basename "$d")"
     # Best-effort bucket create (ignore "BucketAlreadyOwnedByYou" / "already exists")
-    docker run --rm --network "$NETWORK" \
+    docker run --rm --network "$net" \
       -e AWS_ACCESS_KEY_ID="$access" \
       -e AWS_SECRET_ACCESS_KEY="$secret" \
       -e AWS_DEFAULT_REGION="$region" \
       amazon/aws-cli:latest \
       --endpoint-url "$endpoint" s3 mb "s3://$b" 2>/dev/null || true
 
-    docker run --rm --network "$NETWORK" \
+    if ! docker run --rm --network "$net" \
       -e AWS_ACCESS_KEY_ID="$access" \
       -e AWS_SECRET_ACCESS_KEY="$secret" \
       -e AWS_DEFAULT_REGION="$region" \
       -v "$d":/backup:ro \
       amazon/aws-cli:latest \
-      --endpoint-url "$endpoint" s3 sync /backup "s3://$b" --only-show-errors
+      --endpoint-url "$endpoint" s3 sync /backup "s3://$b" --only-show-errors; then
+      err "rustfs: sync of bucket '$b' failed (network '$net': see error above)"
+      return 1
+    fi
     ok "rustfs: synced bucket '$b'"
   done
 }
