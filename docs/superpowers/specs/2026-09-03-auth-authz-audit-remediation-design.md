@@ -4,10 +4,10 @@
 |---|---|
 | **Date** | 2026-09-03 |
 | **Last review** | — |
-| **Status** | v1.15 — PRs A, B and C implemented and merged. D27 amended to split by direction after PR C's whole-branch review; D36 added for the system-role `isActive` guard PR C shipped |
-| **Scope** | `backend/internal/core/auth` (services, handlers, module wiring), `backend/internal/core/authz` (services, handlers, Cedar policies), `backend/internal/core/user` (role-change handlers), `backend/internal/shared/{middleware,errors,errcode,systeminit,database}`, `backend/pkg/sdk/iface` (one additive interface), `backend/migrations` (one new migration), `frontend-client` (MFA enrolment page), notification templates, `docs/site`, module `CLAUDE.md`s |
+| **Status** | v1.16 — PRs A, B and C implemented and merged. §4.12 (D37–D42) and §4.13 (D43–D46) are new and **unimplemented**: they close the two defects live verification on staging found after PR B merged — a factor-less privileged account locked out although no removal ever happened, and the codeless-401 rotation storm |
+| **Scope** | `backend/internal/core/auth` (services, handlers, module wiring), `backend/internal/core/authz` (services, handlers, Cedar policies), `backend/internal/core/user` (role-change handlers), `backend/internal/shared/{middleware,errors,errcode,systeminit,database}`, `backend/pkg/sdk/iface` (one additive interface), `backend/migrations` (one new migration), `frontend-client` (MFA enrolment page), notification templates, `docs/site`, module `CLAUDE.md`s. v1.16 adds `backend/tools/errquality` (one analyzer rule) and `frontend-admin` (login routing for an enrolment-only session) |
 | **Source** | Security audit of 2026-09-03 on `dev` @ `a242e6bd` — report: https://claude.ai/code/artifact/5e5c5406-19bd-4cb1-8cd1-86cd9440b245. Finding IDs below (H-n, M-n, L-n) are the report's |
-| **ADR** | None. Every SDK change is additive (§4.3 adds the `iface.MFAEpochBumper` sub-interface and one `iface.User` field, §4.6 adds `iface.AuthzCacheInvalidator`, §4.7 adds `iface.SystemRoleHolderFinder`; `module.RedisClient` is untouched). Lockout moves from an in-memory token bucket to Redis counters, which changes an operational property, not a contract: the two admin-managed keys keep their names and gain the meaning their UI text already promises |
+| **ADR** | None. Every SDK change is additive (§4.3 adds the `iface.MFAEpochBumper` sub-interface and one `iface.User` field, §4.6 adds `iface.AuthzCacheInvalidator`, §4.7 adds `iface.SystemRoleHolderFinder`; `module.RedisClient` is untouched). Lockout moves from an in-memory token bucket to Redis counters, which changes an operational property, not a contract: the two admin-managed keys keep their names and gain the meaning their UI text already promises. v1.16 stays additive too: one JWT claim (`enroll_only`), one `errcode` const family, one analyzer rule |
 
 ## 0. Revision log
 
@@ -209,6 +209,38 @@ that path at all — and its impact is availability, not escalation: the
 consult the role row, so a disabled `administrator` can always be re-enabled.
 The architect chose to close it inside PR C rather than file it.
 
+v1.16 (2026-09-05) adds two sections for defects that **live verification
+produced after PR B merged**. Neither is in the audit report; both were
+reproduced on staging against the built binary, and both are the kind that a
+review of the diff cannot find because each is about a path the diff does not
+touch.
+
+**§4.12 (D37–D42): the one-way door has a second way through.** I-1
+(`2e73be7c9`) closed the lockout for a *self-removal* by restarting the grace
+clock on the two removal paths. It cannot reach an account that was never
+enrolled at all: `MFAGraceStartedAt` is stamped at the first factor-less
+privileged login, `resetMFAGraceClock` fires only on a removal, and staging's
+`super_admin` — the sole privileged operator on that stack — held **zero
+factors and a clock 60 days old against a 7-day window**. It was locked out
+without any removal ever having happened, which is why I-1's fix did not
+apply and why the review that produced I-1 did not see it. The gate D11 built
+would have admitted the account (case 4 passes a factor-less caller on a
+fresh `auth_time`); it simply never obtained a session to present to it. D37
+stops `completeLogin` refusing the mint and issues an **enrolment-only
+session** instead: authority withheld, session granted.
+
+**§4.13 (D43–D46): the codeless-401 sweep is finished, then enforced.** PR B
+coded the MFA verdicts (`4cfa2531b`) after 26 wrong codes in 13 seconds
+produced 54 rotations and killed a refresh family. That fixed the handlers it
+touched and left **74 bare `huma.Error401Unauthorized` call sites** elsewhere
+with the same property. D43 sweeps them — they split 50/24 into pre-dispatch
+guards and verdicts, and only the verdicts are the hazard — and D45 adds
+`errquality` R4 so the convention `backend/CLAUDE.md` already states becomes a
+build failure rather than a thing reviewers must remember. D44 names the one
+401 that must **stay** codeless: `RequireAuth`'s rejection of an unparseable
+bearer, which is precisely what the console's rotation arm exists to recover
+from.
+
 ## 1. Problem
 
 The audit found the authentication and authorization stack sound in its
@@ -263,6 +295,11 @@ tokens: no nonce, no `iss`, `aud` skipped when config read fails).
 10. PKCE on every provider that accepts it; mobile ID tokens are bound to
     a server-issued challenge and a client-held verifier, single-use and
     issuer-checked (M-18, M-20).
+11. An obligation to enrol never becomes an inability to enrol: no sequence of
+    policy states leaves a privileged account with no route back that does
+    not depend on a second operator (v1.16, §4.12).
+12. A 401 that is a verdict on the request names itself, so no client can
+    mistake it for a dead credential (v1.16, §4.13).
 
 **Non-goals**
 
@@ -273,7 +310,11 @@ tokens: no nonce, no `iss`, `aud` skipped when config read fails).
 - Admin "unlock account" UI, CAPTCHA, progressive delays.
 - The remaining audit findings (M-4 invites, M-9 refresh `jti`, M-10..M-12,
   M-14..M-17 except the one guard in D29, M-19, every Low/Info). Listed in §8.
-- Changing `mfaEnabled`'s default or the grace-window model.
+- Changing `mfaEnabled`'s default, the length of the grace window, or what
+  starts and restarts its clock. v1.16 does change what the window's
+  **expiry** does — §4.12 makes it withhold authority rather than the session
+  — and D40 gives the clock the `ClearMFAGrace` caller the model always
+  implied. The window itself, its default and its trigger are untouched.
 
 ## 3. Alternatives considered
 
@@ -329,6 +370,41 @@ first in each block.
   user-module DTO changes.
 - Drop `user.oauthLinks`: touches user DTOs, DSR export, both SPAs.
 - Dual-write without repair: history stays inconsistent.
+
+### 3.5 Recovering a factor-less account past its deadline (D37)
+
+- **An enrolment-only session (chosen).** Grace expiry withholds authority,
+  not the session: login mints a short-lived access token that reaches the
+  enrolment mount and nothing else. It keeps the gate — a factor-less
+  privileged caller is never *exempted* — while giving the one population
+  that cannot use `AdminReset` a way back.
+- Exempt a user with zero factors from the gate: the shortest patch and the
+  wrong one. It reopens H-2 for exactly the accounts the gate was written
+  for, and is indistinguishable from "MFA is optional for anyone who never
+  enrolled".
+- Restart the grace clock on every factor-less login: the deadline then never
+  arrives and the window stops meaning anything.
+- Rely on `AdminReset` alone (today's behaviour): correct for every account
+  except the one that matters, the last privileged operator, who has nobody
+  to reset them.
+- A break-glass recovery token minted from the CLI: real operational value,
+  but a new credential class with its own storage, audit and revocation
+  story, to answer a question an existing gate already answers.
+
+### 3.6 Keeping every 401 named (D43, D45)
+
+- **Sweep, then enforce in `errquality` (chosen).** One rule in the analyzer
+  that already owns client-facing error quality, reusing its baseline, its
+  `//errquality:allow <reason>` escape and its slot in `make ci-backend`.
+  Forks inherit it with no action.
+- Sweep only: the rule was already written down in `backend/CLAUDE.md` and 74
+  sites accumulated under it. A convention that has already failed once is
+  not a control.
+- A new standalone analyzer: a second tool, baseline and make target for one
+  AST predicate.
+- Cap the rotation client-side instead: treats the symptom in one consumer
+  and leaves the backend free to emit codeless verdicts. Recorded as a
+  follow-up (§8), not chosen.
 
 ## 4. Design
 
@@ -1381,6 +1457,15 @@ sentences known to be wrong after this spec:
   store, index, unlink, auth-methods source); `:41, :766, :805-806` (PKCE,
   mobile nonce/iss); new sections: attempt counters, enrolment gate and the
   `auth_time` claim, refresh AMR recomputation, tombstones.
+- v1.16 (PR E): `auth/CLAUDE.md` gains the enrolment-only session — the
+  `enroll_only` claim, the derived allowlist and the fact that grace expiry
+  no longer refuses a login; the JWT claims table in
+  `authentication-flow.mdx` gains `enroll_only` beside `auth_time` and
+  `mfae`; `backend/CLAUDE.md`'s error-code contract records that R4 now
+  enforces the 401 rule it already states, **and that `RequireAuth`'s
+  codeless 401 is the deliberate exception** (D44); `tools/errquality/CLAUDE.md`
+  documents R4; the docs-site addon-authoring guide gains a paragraph so a
+  fork author meets R4 before CI does.
 - `authz/CLAUDE.md` — `:90` (stale gate heading), `:179` (cache key and
   invalidation are now generation-based), `:97, :146-153, :157-162,
   :177, :181, :204, :222` (cascade now covers role edits; rule 4 now
@@ -1403,6 +1488,219 @@ sentences known to be wrong after this spec:
 - Admin-UI field text at `auth/module.go:422-428` is now true and stays;
   the two new IP keys are documented in the `auth/CLAUDE.md` policy table
   ("Login & Sessions" row) and in `auth.mdx`.
+
+### 4.12 Grace expiry withholds authority, not the session (I-1 residual)
+
+I-1 restarts the grace clock on the two paths that *remove* a factor. The
+account that was never enrolled passes through neither. `MFAGraceStartedAt`
+is stamped at the first factor-less privileged login (`completeLogin`,
+`password_auth_service.go:841`) and nothing clears it, so a privileged
+user who never enrolled crosses the deadline and
+`completeLogin` answers `ErrMFAEnrollmentRequired` **before minting
+anything** (`:837`). Every route back in then needs a session that does not
+exist. `AdminReset` is the only exit and a sole `super_admin` has nobody to
+ask — the state staging was found in on 2026-09-05.
+
+The gate is not the problem. D11 case 4 already admits a factor-less caller
+on a fresh `auth_time`; the account never obtains a bearer to present. So the
+fix belongs upstream of the gate, and it changes what a lapsed deadline
+*means*: not "you may not log in" but "you may log in and do exactly one
+thing".
+
+**D37 — Grace expiry withholds authority, not the session.** The
+privileged / no-factor / grace-expired branch of `completeLogin` issues an
+enrolment-only session instead of returning `ErrMFAEnrollmentRequired`; the
+OAuth twin (`auth_service.go:2603`) takes the same branch. The response
+carries the existing `mfaEnrollmentRequired: true` plus a new
+`enrollmentOnly: true`, so a client can tell "you have a deadline" from "your
+deadline has passed". `ErrMFAEnrollmentRequired` survives only where D19 uses
+it (password-confirm, `password_auth_service.go:1438`);
+`password_handler.go:502`'s bare 403 mapping goes with its last login caller.
+
+Scope, decided with the architect: **grace-expired only**. A user inside an
+open window keeps today's behaviour — a full session, the flag, and the
+deadline. Withholding authority for the whole window is a stronger posture
+and is named as a follow-up (§8), not taken here.
+
+**D38 — An access token only: no refresh cookie, TTL equal to the enrolment
+gate's `maxAge`.** The enrolment mint creates no refresh token and no refresh
+family. Three properties follow, and they are the reason this shape was
+chosen over a normal short-lived pair:
+
+- there is nothing to rotate, so no path exists by which refreshing an
+  enrolment-only session yields a full one — the escalation this feature
+  would otherwise have to defend against cannot be expressed;
+- there is no family for the console's rotation arm to race, so §4.13's
+  defect cannot recur on the one flow added here;
+- TTL equal to D11's `maxAge` (5 minutes, `auth/module.go:1784` and `:1924`)
+  makes "session expired" and "proof stale" **the same event**, with one
+  message, instead of two clocks that lapse minutes apart and produce two
+  different errors for one situation.
+
+The TTL adds no constraint a user did not already face: D11 gates both
+`begin` and `confirm`, so a first enrolment already had to complete inside
+`maxAge`. Too slow means signing in again for a fresh five minutes — a loop
+that terminates, where today's behaviour is not a loop at all. The console's
+proactive refresh finds no cookie and does nothing; by the time it would
+matter the session is either upgraded (D40) or gone.
+
+**D39 — Deny by default in `RequireAuth`, allowlist derived from one list.**
+The claim is `enroll_only` (bool, omitted when false; `claimsToMap` /
+`mapToClaims`, `jwt_service.go:704,746`, beside `auth_time`). The enforcement
+point was chosen against the wiring, not assumed:
+
+- `RequireAuth` is a **router-level** middleware on `operatorProtected` and
+  `clientProtected` (`cmd/server/main.go:447,454`), so it runs before every
+  per-route gate. A context marker set by the enrolment group would arrive
+  too late to be read there.
+- `RequireGlobal()` is **not** universal — the admin MFA-reset group
+  (`auth/module.go:1818`) mounts under `RequireSystemPermission` alone — so
+  putting the check in `RequireGlobal` would leave holes, and adding it to
+  each per-route gate in turn is one omission away from a privileged
+  enrolment-only session.
+
+So the check lives in `RequireAuth`, which no protected route can bypass, and
+answers **403 `mfa_enrollment_required`** — the code both SPAs already switch
+on (ruling R8; it is the middleware's unprefixed envelope vocabulary, not an
+`errcode` const). The allowlist is *derived*, never hand-written:
+
+1. `handlers.EnrolmentPaths(mount)` becomes the single source of truth for
+   the four enrolment routes. `RegisterEnrolmentRoutes`
+   (`mfa_handler.go:1005`, `webauthn_handler.go:732`) registers from it and
+   `RequireAuth` allows from it, with a test asserting the registered
+   operation paths equal the list. A route added to the enrolment mount is
+   allowed automatically; one added anywhere else is denied automatically.
+2. Plus a support set of two, each with its reason in a comment: `GET
+   /v1/auth/{tier}/me` (the console's boot) and `GET /v1/auth/{tier}/me/mfa`
+   (the wizard reads factor status). Logout and refresh sit on the raw mux
+   outside `RequireAuth` and need nothing.
+
+A hand-maintained path allowlist is what failed open in the console
+(`AUTH_ENDPOINT_PATHS`, and its own comment says so). The derivation plus the
+drift test is the load-bearing half of this decision, not a nicety.
+
+**D40 — Enrolling completes the upgrade, and `ClearMFAGrace` gains its first
+caller.** A successful `ConfirmEnrollment` or `FinishRegistration` clears
+`MFAGraceStartedAt` and, when the caller held an enrolment-only session,
+mints a full pair with its refresh cookie. Clearing on **any** successful
+enrolment — not only this flow — is what makes the state machine coherent
+with I-1, which restarts the clock on removal: enrolled means no clock,
+factor-less means a clock running. This closes the open item that
+`ClearMFAGrace` has zero callers despite its doc comment; it is a
+consequence of the state machine, not a separate errand.
+
+**D41 — The trade-off, recorded rather than buried.** Today a grace-expired
+account is frozen to everyone, its attacker included. After D37 the password
+alone reaches an enrolment, and enrolling grants full access: a hard freeze
+is traded for a recoverable account. This is not a new exposure so much as a
+consistent one — an account *inside* its grace window already grants full
+admin access on the password alone for seven days, and D41 merely stops the
+posture inverting at the deadline. What makes abuse visible is unchanged and
+mandatory: D13's email on every factor addition, plus a
+`login_enrollment_only` security event so the operator timeline shows the
+unusual login shape rather than an ordinary sign-in. Device trust is neither
+consulted nor granted on this path — a trusted device must not skip an
+enrolment that has not happened.
+
+**D42 — SPAs.** Operator console: a login response with
+`enrollmentOnly: true` routes to the MFA wizard instead of the dashboard and
+the wizard suppresses the nav shell, since every other request will answer
+403. Nothing new is needed for expiry — `baseApi.ts:610` already turns
+`reauthentication_required` into a session clear plus a return to login with
+`next`, which is exactly right here. Client SPA: `MfaEnrolPage` is already
+the destination; it gains the same routing on `enrollmentOnly`.
+
+### 4.13 Every 401 names itself, and the analyzer keeps it that way
+
+PR B coded the MFA verdicts after the rotation storm (`4cfa2531b`) and left
+the property everywhere else. A bare `huma.Error401Unauthorized` is
+indistinguishable, to the console, from the signing-key rotation its third
+401 arm was written for, so each one costs a token rotation; enough of them
+in a burst race, trip reuse detection, and end the session.
+
+**D43 — The sweep, triaged.** The 74 bare call sites split **50 / 24** on one
+mechanical predicate: whether the detail is a pre-dispatch context guard
+(`"authentication required"`, `"not authenticated"`, `"Invalid
+authentication context"`) or a verdict on the request.
+
+The **50 guards are not the hazard**, and the reason is worth recording so
+nobody re-derives it under pressure: they fire only when the handler finds no
+claims in context, which on a route behind `RequireAuth` means `RequireAuth`
+already rejected before dispatch — so the console reaches them through proof
+(b), `sentBearer === null` → `handlerNeverRan` → replay, never the rotation
+arm. They are still coded, mechanically, through one new
+`errcode.AuthAuthenticationRequired` and `errcode.Unauthorized`: a code is
+correct whether or not the site is reachable, and it costs one pass.
+Converting them to 500 was considered — an unreachable state behind
+`RequireAuth` is a wiring bug, and R3's own philosophy says an error the
+handler cannot name is a server fault — and rejected: it needs per-site proof
+of unreachability across 50 call sites in seven packages, and some may sit on
+optional-auth mounts where the guard *is* reachable.
+
+The **24 verdicts** are the work:
+
+| n | today | code |
+|---|---|---|
+| 9 | `"user not found"` | `auth.session_user_missing` — the session's subject no longer resolves; the honest client action is sign-out, not rotation |
+| 4 | `"invalid or expired login challenge"` (WebAuthn) | the existing `AuthWebAuthnChallengeInvalid` |
+| 4 | `"invalid or expired challenge"` (MFA) | `auth.mfa_challenge_invalid` |
+| 3 | refresh: missing / invalid / replay | `auth.refresh_token_missing`, `auth.refresh_token_invalid`, `auth.refresh_token_replay` |
+| 2 | `"Invalid Google/Apple ID token"` | `auth.id_token_invalid`, provider in the detail |
+| 1 | `"invalid client credentials"` | `auth.client_credentials_invalid` |
+
+`auth_handler.go:303` returns a dynamic `response.humaDetail` and is read
+before it is assigned a code. Of these, `/mfa/verify` is the one the console
+reaches with a live bearer on a route **not** in `AUTH_ENDPOINT_PATHS` (the
+list holds `mfa/login/verify`, which does not match it), so
+`mfa_handler.go:585` is the closest surviving twin of the defect PR B fixed.
+
+**D44 — The one 401 that must stay codeless.** `RequireAuth`'s rejection of
+an unparseable bearer is deliberately codeless and is **out of scope for the
+sweep and for R4**. It is the signal the console's rotation arm was built
+for: after a key rotation or a restart with new key material every unexpired
+bearer validates as plain "invalid", and coding it would remove that recovery
+and silently restore the ≈14.5-minute window of quietly failing requests the
+arm exists to collapse. The backend already separates the two cases — expired
+is coded `access_token_expired`, invalid is not — and that asymmetry is
+load-bearing. R4 therefore scopes to `huma.Error401Unauthorized` call sites;
+the middleware's `errors.AuthenticationError(…)` → `sendErrorResponse`
+envelope path is excluded by construction, and §6 pins it with a test,
+because this is exactly the invariant a later well-meaning sweep breaks.
+
+**D45 — R4 extends `errquality`; it is not a new tool.** The analyzer already
+has the AST walk with a `report(pos, rule, msg)` seam
+(`tools/errquality/analyzer.go:152`), a `relpath:line:rule` baseline,
+`//errquality:allow <reason>` suppression that demands a written reason, a
+unit suite, and a slot in `make ci-backend`. R4 is one predicate on the
+callee:
+
+> **R4** — a 401 built with `huma.Error401Unauthorized` carries no code, so
+> the console cannot tell a verdict from a dead key. Build it with
+> `errcode.Unauthorized(code, detail)`.
+
+Two scope choices:
+
+- **401 only.** A bare 400 or 403 is a legibility problem, not a session
+  hazard — only 401 drives the rotation arm. Widening R4 to every status
+  would produce a baseline of hundreds and train contributors to append to
+  it, which is how a gate stops being a gate.
+- **Empty baseline for R4.** All 74 sites are fixed in the same PR, so there
+  is nothing to freeze. A site that must stay codeless takes an
+  `//errquality:allow` with a reason visible in review, never a baseline
+  line. The existing 15-line baseline keeps its R1/R3 entries untouched.
+
+**D46 — Forks inherit the gate.** `backend/CLAUDE.md` already mandates the
+`<module>.<situation>` convention; R4 turns it from documentation into a
+build failure, and a fork's addon handlers are covered because they run the
+same `make ci-backend`. The docs-site addon-authoring guide gains a
+paragraph, since a fork author writing a first handler will now meet R4.
+
+**Residual.** This closes the class inside anything that runs
+`make ci-backend`. A codeless 401 produced outside the analyzer's view — a
+reverse proxy, a gateway in front of the API — is not reachable by it. The
+client-side cap that would also cover those is recorded in §8 and was
+deliberately not taken: the console's arm is correct for what it was built
+for, and a codeless verdict 401 is a backend defect.
 
 ## 5. Edge cases
 
@@ -1540,6 +1838,40 @@ sentences known to be wrong after this spec:
     moves — a stuffing signal worth alerting on. An operator who knows their
     egress is large raises `ipLockoutThreshold`; the validator refuses to
     set it below the account threshold.
+32. **Enrolment-only session and the session cap (D38, ADR-0017).** It is a
+    session and counts against the absolute cap like any other. An operator
+    who burns the cap on repeated five-minute enrolment attempts evicts their
+    own oldest sessions, which is the cap behaving as designed; the enrolment
+    itself never fails for that reason because it needs only the session it
+    was just given.
+33. **A route added after this ships (D39).** Denied. The allowlist is
+    derived from `EnrolmentPaths`, so a new route is reachable by an
+    enrolment-only session only when it is added to the enrolment mount —
+    and the drift test fails if the two lists disagree. Fail-closed is the
+    correct direction here: the cost of a wrongly denied route is a 403 in
+    development, the cost of a wrongly allowed one is a privileged session
+    with no second factor.
+34. **The user is too slow (D38).** Access token and `auth_time` lapse
+    together, so `RequireAuth` and D11 cannot disagree about whether the
+    caller is still fresh. The console clears the session and returns to
+    login with `next`; signing in again yields another five minutes. This is
+    the interaction with the three coincident five-minute windows noted
+    against PR B: D38 collapses two of the three into one rather than adding
+    a fourth.
+35. **A token minted before D38.** It cannot carry `enroll_only`, reads as
+    false, and behaves exactly as today. Nothing existing changes meaning,
+    and there is no migration.
+36. **Somebody codes `RequireAuth`'s 401 (D44).** The console's rotation arm
+    stops firing, and a signing-key rotation or a restart with new key
+    material again leaves every unexpired bearer failing silently until the
+    proactive refresh fires — up to TTL − 30 s. §6 pins this with a test that
+    asserts the absence of a code, which is an unusual thing to assert and is
+    the point.
+37. **`errquality` R4 versus a legitimately codeless verdict.** There is no
+    such thing by construction — a verdict the server can state can be
+    named — but a site that cannot be fixed in the sweep takes
+    `//errquality:allow <reason>`, which puts the reason in the diff. The
+    baseline stays empty for R4 so that the escape hatch is the visible one.
 
 ## 6. Testing
 
@@ -1734,6 +2066,47 @@ for D14); `git diff --check`. New tests:
   health check is degraded and the callback answers
   `oauth_store_unavailable`; with it present the flow runs.
 
+**PR E — enrolment-only session and the 401 sweep**
+- `password_auth_service` (D37): privileged, no factor, grace **expired** →
+  a token response with `enrollmentOnly` and `mfaEnrollmentRequired` true, an
+  access token and **no refresh token**; grace **open** → today's full
+  session, unchanged (the test that would have caught a scope creep into
+  case 2); the OAuth twin in `auth_service` takes the same branch.
+- `jwt_service`: `enroll_only` round-trips through `claimsToMap` /
+  `mapToClaims` and is omitted when false; the sidecar `parseClaims` mirrors
+  it.
+- `RequireAuth` (D39): an `enroll_only` bearer on each of the four enrolment
+  paths passes; on `GET /me` and `GET /me/mfa` passes; on an admin route,
+  on a step-up route and on a route mounted with `RequireSystemPermission`
+  alone → 403 `mfa_enrollment_required`. The last of those is the case
+  `RequireGlobal` would have missed, so it is a named test, not a table row.
+- Drift test (D39): the operation paths `RegisterEnrolmentRoutes` registers
+  equal `EnrolmentPaths(mount)`, for both mounts. Mutation check — delete a
+  path from the list and the test must fail, not merely the allowlist shrink.
+- `mfa_service` / webauthn (D40): a successful confirm from an enrolment-only
+  session clears `MFAGraceStartedAt` and returns a full pair with a refresh
+  token; from an ordinary session it clears the stamp and mints nothing new.
+  A test asserts `ClearMFAGrace` is called, since "zero callers" is the defect
+  being closed.
+- End-to-end (D37→D40) against a factor-less user with a 60-day-old stamp,
+  the staging shape: login → enrolment-only session → `enroll/begin` +
+  `confirm` → full session, and the same user's second login is now an
+  ordinary one.
+- `errquality` (D45): a violating `huma.Error401Unauthorized` is reported
+  R4; `errcode.Unauthorized(code, detail)` is not; an `//errquality:allow`
+  above the call silences it; a baseline entry silences it; a 400 and a 403
+  built with the bare huma constructors are **not** reported, pinning the
+  401-only scope.
+- D44 invariant: `RequireAuth`'s response to an unparseable bearer carries no
+  top-level `code`. Asserting an absence is deliberate — it is the only thing
+  standing between a future sweep and the console's key-rotation recovery.
+- Handler tests for the four routes the console reaches with a live bearer:
+  each answers a code, and `mfa_handler.go:585` (`/mfa/verify`, absent from
+  `AUTH_ENDPOINT_PATHS`) is named explicitly.
+- `frontend-admin`: a login response with `enrollmentOnly` routes to the
+  wizard, not the dashboard; a 403 `mfa_enrollment_required` on any other
+  request during that session does not sign the user out.
+
 ## 7. Rollout and verification
 
 Five deliverables (PR D is two releases), each independently shippable, in
@@ -1746,6 +2119,7 @@ this order:
 | **C** | §4.4 (incl. D36), §4.5, §4.6 | — | Ran in parallel with B; **merged 2026-09-05** as upstream #365. Staging drill run against the built binary: a platform-key edit answers 422 `authz.system_permission_forbidden` naming the key, an unknown key 422 `authz.permission_unknown`, and an input carrying both reports the **unknown** one (the deliberate check order); with Redis stopped, a **grant** answers 503 `authz.cache_unavailable` and Mongo confirms nothing was written, while a **revocation** succeeds and Mongo confirms the binding is gone (D27 as amended in v1.15). Note the drill's own precondition: role mutations require an MFA step-up, and `POST /v1/auth/operator/mfa/verify` returns a **new** access token that must be used for the mutation |
 | **D1** (expand) | §4.7, §4.8 items 1, 3–8 (readers and writers, **no tombstone writes**), §4.9, §4.10 | migration 0010 exited zero on every environment **before** deploy — a conflict report stops the rollout until an operator names the keeper per identity | Login refuses a doc with `unlinkedAt`, listings exclude it, ownership-first writes, boot index check; the unlink routes keep today's `$pull`-only behaviour. Staging drill: seed one provider doc with `unlinkedAt` by hand → its sign-in answers `oauth_identity_unlinked` and it is absent from auth-methods; a normal unlink still behaves as today; PKCE and mobile drills as listed below |
 | **D2** (contract) | §4.8 item 2 and the revive/move rules of item 4 | D1 deployed and verified on **every** environment; rollback floor becomes D1 the moment the first tombstone exists | Unlink writes `unlinkedAt`. Staging drill: unlink Google, sign in with Google → `oauth_identity_unlinked`; re-link from Security → works; roll back to D1 on staging and confirm the unlinked identity is still refused |
+| **E** | §4.12, §4.13 | B (D11's gate is what the enrolment-only session presents itself to) | Independent of C and D. Staging drill, which is the exact state the defect was found in: take an operator with zero factors, set `mfaGraceStartedAt` 60 days back, sign in → an enrolment-only session, not a 403; any admin call on it → 403 `mfa_enrollment_required`; `enroll/confirm` → full session and the stamp cleared; sign in again → an ordinary login. Then 26 wrong MFA codes in 13 s against `/mfa/verify` → **zero** `/refresh-cookie` calls and the session survives, the measurement PR B's fix was verified with |
 
 PKCE and mobile drills (D1): PKCE round-trip per provider — Google and
 Discord must succeed; GitHub and Apple are exercised with `SupportsPKCE`
@@ -1764,6 +2138,8 @@ and the floors are:
 | Redis counters and generations (D1, D26) | unknown keys, ignored; the old in-memory limiter resumes | Safe; keys expire on their own TTL |
 | Sentinel backfill (D31) | a claimed sentinel | Safe; that is the state a fresh install has |
 | Mobile two-step (D35) | the one-step contract | Safe in-tree (no shipped caller); a shipped app must ship against D1 or later |
+| `enroll_only` claim (D38) | an unknown claim, ignored — so an enrolment-only token becomes an ordinary session for as long as it lives | Safe in practice: the token's TTL is five minutes and it carries no refresh cookie, so the exposure is bounded by the rollback window itself. The account reverts to locked out, which is the state that motivated §4.12 |
+| `errquality` R4 (D45) | nothing — an analyzer rule has no runtime | Safe; the coded 401s stay coded, which old clients read as any other coded 401 |
 
 The release notes of D2 name the floor; the promote playbook's pre-flight
 gains one line: "does the target environment hold tombstones? then the
@@ -1801,3 +2177,15 @@ From the audit, outside this spec's perimeter:
   without an admin reset).
 - Admin "unlock account" affordance (clears `LockedUntil` and the email
   scope) and a `sessions_terminated` badge in the admin user timeline.
+- **Withhold authority for the whole grace window**, not only past the
+  deadline (§4.12 D37 scope): a privileged account with no factor would never
+  hold a full session, and the window would mean "a deadline before the
+  account is disabled" rather than "seven days of unprotected admin access".
+  Considered and deferred with the architect when §4.12 was written.
+- **Cap the console's rotation arm** at one rotation per token generation
+  (§4.13 residual). D45 closes the class for anything built under
+  `make ci-backend`; the cap would also cover a codeless 401 from a proxy or
+  a gateway the analyzer cannot see.
+- **Audit the other consumers** the way the console was audited: the client
+  SPA's `authedFetch` and the Flutter client both interpret 401s, and neither
+  was examined when the rotation trap was found.
