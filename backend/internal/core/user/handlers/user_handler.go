@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -9,6 +10,7 @@ import (
 	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/metrics"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
@@ -60,18 +62,68 @@ func (h *UserHandler) SetServiceRegistry(reg *module.ServiceRegistry) {
 // request instead would report that the deactivation did not happen,
 // which is both wrong and more dangerous.
 func (h *UserHandler) terminateSessions(ctx context.Context, userUUID string) {
+	_ = h.terminateSessionsReporting(ctx, userUUID)
+}
+
+// terminateSessionsReporting is terminateSessions with the outcome
+// returned instead of dropped, for the caller that records it in an
+// audit row (the role-change branch, spec §4.6 D27). Identical
+// best-effort semantics — it never fails the request; false means only
+// "the sessions were not torn down here", which covers a terminator that
+// errored, one that is not wired, and a handler with no registry at all.
+func (h *UserHandler) terminateSessionsReporting(ctx context.Context, userUUID string) bool {
 	if h.services == nil || userUUID == "" {
-		return
+		return false
 	}
 	terminator, ok := module.GetTyped[iface.SessionTerminator](h.services, module.ServiceAuthService)
 	if !ok || terminator == nil {
-		return
+		return false
 	}
 	if err := terminator.TerminateAllSessionsByUUID(ctx, userUUID); err != nil {
 		slog.WarnContext(ctx, "user: could not terminate sessions after access revocation",
 			slog.String("user_uuid", userUUID),
 			slog.String("error", err.Error()))
+		return false
 	}
+	return true
+}
+
+// invalidateAuthz retires every authorization verdict cached for one
+// user, so the next decision recomputes from the role that was just
+// written instead of answering from the permission cache (M-13).
+//
+// Best-effort BY DESIGN, and the caller must not turn a failure into a
+// refusal (spec §4.6 D27 as amended — the rule splits by direction, and
+// a system-role change lands on the write-then-report side in both
+// directions):
+//
+//   - refusing a DEMOTION is M-13 itself, made permanent. The finding is
+//     "a demoted administrator keeps administrator verdicts"; answering
+//     503 leaves them an administrator indefinitely rather than for at
+//     most one cache TTL. And with the cache store down, reads bypass the
+//     cache entirely, so a written demotion takes effect immediately.
+//   - refusing a PROMOTION only delays a stale DENY, which is harmless.
+//
+// A missing invalidator is reported exactly like a failing one. That is
+// deliberately stricter than the "degrade quietly" note on
+// iface.AuthzCacheInvalidator, which addresses consumers that only READ
+// verdicts: here the audit row is what tells the operator whether the
+// change is live now or within the cache TTL, so "nothing was retired"
+// must not be recorded as success.
+func (h *UserHandler) invalidateAuthz(ctx context.Context, userUUID string) error {
+	if userUUID == "" {
+		return errors.New("user uuid required")
+	}
+	// Nil-checked before GetTyped: ServiceRegistry.Get locks the
+	// receiver, so a nil registry is a panic, not a miss.
+	if h.services == nil {
+		return errors.New("service registry unavailable")
+	}
+	inv, ok := module.GetTyped[iface.AuthzCacheInvalidator](h.services, module.ServiceAuthzProvider)
+	if !ok || inv == nil {
+		return errors.New("authz cache invalidator not registered")
+	}
+	return inv.InvalidateUserPermissions(ctx, userUUID)
 }
 
 // emitAudit forwards an event to the compliance audit sink if one was
@@ -309,13 +361,20 @@ func (h *UserHandler) UpdateUser(ctx context.Context, req *UpdateUserRequest) (*
 }
 
 // emitUpdateLifecycleEvents compares the pre-update snapshot to the
-// post-update result and emits one audit event per distinct lifecycle
-// delta. isActive flip → user.activated / user.deactivated. Role
-// change to a value other than the prior one → user.role.changed with
-// before/after in metadata. Profile-only patches (name, phone, etc.)
-// don't get a dedicated event today — they roll up under "no audit
-// event" by design; revisit when the operator UI grows a way to view
-// generic profile-edit history.
+// post-update result and, for each distinct lifecycle delta, carries out
+// whatever that delta obliges beyond the write and emits one audit
+// event. isActive flip → user.activated / user.deactivated, and a
+// deactivation ends the user's sessions. Role change to a value other
+// than the prior one → the authz cache is retired, the sessions minted
+// under the old role are ended, and user.role.changed records
+// before/after plus whether each of those two actually succeeded.
+// Profile-only patches (name, phone, etc.) don't get a dedicated event
+// today — they roll up under "no audit event" by design; revisit when the
+// operator UI grows a way to view generic profile-edit history.
+//
+// Everything here runs AFTER the write has landed and none of it can
+// fail the request: see invalidateAuthz for why a role change is never
+// refused in either direction (spec §4.6 D27 as amended, closing M-13).
 func (h *UserHandler) emitUpdateLifecycleEvents(
 	ctx context.Context,
 	actorUUID, actorEmail string,
@@ -326,6 +385,18 @@ func (h *UserHandler) emitUpdateLifecycleEvents(
 	if current == nil {
 		return
 	}
+	// endSessions is memoised so a patch that both deactivates and
+	// changes the role tears the sessions down once, and the audit row
+	// reports the outcome of that one attempt rather than a second.
+	var terminated *bool
+	endSessions := func() bool {
+		if terminated == nil {
+			ok := h.terminateSessionsReporting(ctx, current.ID)
+			terminated = &ok
+		}
+		return *terminated
+	}
+
 	if patch.IsActive != nil && (previous == nil || previous.IsActive != *patch.IsActive) {
 		action := "user.activated"
 		if !*patch.IsActive {
@@ -333,7 +404,7 @@ func (h *UserHandler) emitUpdateLifecycleEvents(
 			// Revoking the right to be signed in has to end the
 			// sessions that right produced — otherwise the account is
 			// "disabled" while its live bearers keep working.
-			h.terminateSessions(ctx, current.ID)
+			endSessions()
 		}
 		h.emitAudit(ctx, iface.AuditEvent{
 			ActorUserID:  actorUUID,
@@ -346,6 +417,25 @@ func (h *UserHandler) emitUpdateLifecycleEvents(
 		})
 	}
 	if patch.Role != "" && previous != nil && previous.Role != patch.Role {
+		// M-13. The new role is in the database, but two caches still
+		// answer with the old one: the authz permission cache (up to its
+		// own TTL) and the `srole` claim in every live access token (up
+		// to a whole token lifetime). Retire the first, end the sessions
+		// that carry the second.
+		cacheInvalidated := true
+		if err := h.invalidateAuthz(ctx, current.ID); err != nil {
+			cacheInvalidated = false
+			metrics.Default().RecordAuthzCacheInvalidationFailure()
+			slog.ErrorContext(ctx, "user: role changed but the authz cache was not retired; verdicts from the old role may survive up to the cache TTL",
+				slog.String("user_uuid", current.ID),
+				slog.String("from", previous.Role),
+				slog.String("to", patch.Role),
+				slog.String("error", err.Error()))
+		}
+		// Terminating on every change rather than on demotions alone
+		// keeps one invariant instead of two code paths, and makes a
+		// promotion visible immediately instead of at the next refresh.
+		sessionsTerminated := endSessions()
 		h.emitAudit(ctx, iface.AuditEvent{
 			ActorUserID:  actorUUID,
 			ActorEmail:   actorEmail,
@@ -357,6 +447,11 @@ func (h *UserHandler) emitUpdateLifecycleEvents(
 			Metadata: map[string]any{
 				"from": previous.Role,
 				"to":   patch.Role,
+				// The two flags are what makes "the change is live now"
+				// distinguishable from "the change is live within the
+				// cache TTL / the access-token lifetime" after the fact.
+				"cache_invalidated":   cacheInvalidated,
+				"sessions_terminated": sessionsTerminated,
 			},
 		})
 	}

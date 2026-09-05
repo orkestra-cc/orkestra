@@ -714,9 +714,21 @@ type AuthzProvider interface {
 //
 // A consumer that only READS verdicts may treat a missing value as
 // tolerable: the cached verdict expires on its own 60s TTL. A consumer that
-// MUTATES a role must not — a missing or failing invalidator means the
-// effect of the change cannot be guaranteed, and the change is refused
-// instead (D27).
+// MUTATES must not treat it as nothing — but what it does about it depends
+// on the DIRECTION of the mutation (D27 as amended):
+//
+//   - A mutation that GRANTS is gated: a stale verdict after it is a DENY,
+//     so refusing the write and asking the caller to retry costs only a
+//     delay. authz's own role/binding create+update paths work this way.
+//   - A mutation that REVOKES — a binding or role deletion, and a system-role
+//     change in either direction — is written first and the shortfall
+//     reported. A stale verdict after a revocation is an ALLOW, and refusing
+//     the write holds the privilege indefinitely where writing it holds it
+//     for at most the cache TTL. With the cache store fully down, reads
+//     bypass the cache anyway, so a written revocation takes effect at once.
+//
+// Either way the failure must be surfaced — logged, counted, and (for the
+// system-role change) recorded in the audit row — never swallowed.
 //
 // There are THREE cache states, not two, and only the middle one is an
 // error:
@@ -725,7 +737,8 @@ type AuthzProvider interface {
 //     retire, so InvalidateUserPermissions returns nil. That success is
 //     truthful, not a swallowed failure.
 //   - Cache configured but UNAVAILABLE (the counter cannot be bumped). This
-//     returns an error, and a mutating caller must refuse the change.
+//     returns an error, and a mutating caller must act on it per the
+//     direction rule above.
 //   - Cache configured but bypassed on THIS replica (the Redis client in use
 //     lacks the MGET the implementation needs). Reads and writes are skipped
 //     locally — every check resolves from the database — but the bump is
@@ -745,11 +758,13 @@ type AuthzCacheInvalidator interface {
 	// reader files its result under the generation it read the cache
 	// with, so a verdict computed before this call is born unreachable —
 	// but a reader that resolved the database across the call can still
-	// publish a stale entry. A caller that mutates permissions must
-	// therefore use the pre-write / write / post-write protocol (D27):
-	// invalidate, refuse the change if that fails, write, then
-	// invalidate again best-effort. A single bump is sufficient only
-	// when the caller is not itself the writer.
+	// publish a stale entry. A caller that GRANTS therefore uses the
+	// pre-write / write / post-write protocol (D27): invalidate, refuse
+	// the change if that fails, write, then invalidate again
+	// best-effort. A caller that REVOKES writes first and invalidates
+	// once, best-effort, because refusing a revocation is worse than
+	// applying it late. A single bump is sufficient only when the caller
+	// is not itself the writer.
 	InvalidateUserPermissions(ctx context.Context, userUUID string) error
 }
 

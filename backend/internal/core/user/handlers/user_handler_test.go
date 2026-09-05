@@ -202,12 +202,16 @@ func (f *fakeUserService) AuditSink() iface.AuditSink {
 // event in memory for test assertions. Goroutine-safe enough for the
 // sequential handler tests; if a future test fans out concurrent calls
 // it should wrap Emit in a mutex.
+// trace is optional (nil almost everywhere) and lets the role-change
+// tests pin where the audit row sits in the sequence.
 type captureSink struct {
 	events []iface.AuditEvent
+	trace  *callTrace
 }
 
 func (c *captureSink) Emit(_ context.Context, event iface.AuditEvent) {
 	c.events = append(c.events, event)
+	c.trace.add("audit")
 }
 
 // assertStatus pulls the status code out of a huma.StatusError. Fails
