@@ -290,18 +290,30 @@ func mapRoleWriteError(ctx context.Context, operation string, err error) error {
 	case errors.Is(err, services.ErrGranterRequired):
 		return huma.Error400BadRequest("the acting user is required")
 	case errors.Is(err, services.ErrUnknownPermission):
-		key, _ := services.OffendingPermissionKey(err)
 		return errcode.UnprocessableEntity(errcode.AuthzPermissionUnknown,
-			"No module has registered the permission "+strconv.Quote(key)+", so no role may carry it.")
+			offendingPermission(err)+" has not been registered by any module, so no role may carry it.")
 	case errors.Is(err, services.ErrSystemPermissionInCustomRole):
-		key, _ := services.OffendingPermissionKey(err)
 		return errcode.UnprocessableEntity(errcode.AuthzSystemPermissionForbidden,
-			"The permission "+strconv.Quote(key)+" is platform-reserved and cannot be granted through a tenant role.")
+			offendingPermission(err)+" is platform-reserved and cannot be granted through a tenant role.")
 	case errors.Is(err, services.ErrInsufficientPermissionsToGrant):
 		return huma.Error403Forbidden("you cannot give a role permissions you do not hold yourself")
 	default:
 		return authzInternalError(ctx, operation, err)
 	}
+}
+
+// offendingPermission renders the sentence subject for the two 422s: the
+// quoted key the validator refused, so the operator can see which entry
+// of their list is wrong without diffing. strconv.Quote also escapes
+// control characters — the key is caller-supplied, and the validator has
+// already bounded its length. Falls back to a neutral subject when the
+// error carries no key: every in-tree path wraps one, but a bare
+// sentinel must not render an empty pair of quotes.
+func offendingPermission(err error) string {
+	if key, ok := services.OffendingPermissionKey(err); ok {
+		return "The permission " + strconv.Quote(key)
+	}
+	return "That permission"
 }
 
 func (h *Handler) deleteRole(ctx context.Context, in *deleteRoleInput) (*struct{}, error) {

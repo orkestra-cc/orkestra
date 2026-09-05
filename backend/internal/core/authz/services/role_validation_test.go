@@ -14,6 +14,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
@@ -133,6 +134,25 @@ func TestValidateCustomRolePermissions_GranterSystemBypassesOnlyTheCascade(t *te
 	}
 }
 
+// The catalog check runs BEFORE the platform-key check on purpose: a key
+// nothing declared is reported as unknown, not as forbidden, because
+// "you typed a key that does not exist" and "that key is reserved" are
+// different corrections for the operator. Swapping the two blocks in
+// classifyPermissionKeys would silently change the answer for input
+// carrying BOTH, and no other test would notice.
+func TestValidateCustomRolePermissions_UnknownKeyBeatsSystemKey(t *testing.T) {
+	svc := newValidationTestService(t, systemRegistered("system.users.admin"))
+
+	_, err := svc.validateCustomRolePermissions(context.Background(), "tenant-1", "actor-1",
+		[]string{"system.users.admin", "tenant.obliterate"})
+	if !errors.Is(err, ErrUnknownPermission) {
+		t.Fatalf("err = %v, want ErrUnknownPermission — check 2 runs before check 3", err)
+	}
+	if key, _ := OffendingPermissionKey(err); key != "tenant.obliterate" {
+		t.Errorf("the error must name the unknown key, got %q", key)
+	}
+}
+
 // The key an error names is bounded: it is caller-supplied and the role
 // schema puts no length limit on a permission string, so an oversized
 // key must not travel back out through the handler's response detail.
@@ -150,6 +170,26 @@ func TestValidateCustomRolePermissions_BoundsTheKeyItEchoes(t *testing.T) {
 	}
 	if limit := maxEchoedPermissionKey + len("…"); len(key) > limit {
 		t.Errorf("echoed key is %d bytes; it must be truncated to at most %d", len(key), limit)
+	}
+}
+
+// …and it is cut on a rune boundary. A 3-byte rune does not divide the
+// 100-byte budget evenly, so a naive key[:100] lands mid-rune and leaves
+// invalid UTF-8 in the detail the handler renders.
+func TestValidateCustomRolePermissions_TruncatesOnARuneBoundary(t *testing.T) {
+	svc := newValidationTestService(t, registered("tenant.read"))
+	multibyte := strings.Repeat("あ", 200) // 3 bytes each; 100 % 3 != 0
+
+	_, err := svc.validateCustomRolePermissions(context.Background(), "tenant-1", "actor-1", []string{multibyte})
+	key, ok := OffendingPermissionKey(err)
+	if !ok {
+		t.Fatalf("err = %v, want a key-bearing ErrUnknownPermission", err)
+	}
+	if !utf8.ValidString(key) {
+		t.Errorf("truncated key is not valid UTF-8: %q", key)
+	}
+	if !strings.HasSuffix(key, "…") {
+		t.Errorf("a truncated key must still be marked as truncated, got %q", key)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/orkestra/backend/internal/core/authz/models"
 )
@@ -59,10 +60,22 @@ func (e *permissionKeyError) Error() string { return e.sentinel.Error() + ": " +
 func (e *permissionKeyError) Unwrap() error { return e.sentinel }
 
 // permissionKeyErrorf wraps sentinel with the offending key, truncated to
-// maxEchoedPermissionKey.
+// maxEchoedPermissionKey bytes on a RUNE boundary — a plain byte slice at
+// that offset can land mid-rune and leave invalid UTF-8 in the detail the
+// handler renders. Only a trailing partial rune is dropped (at most three
+// bytes); a key that was already invalid UTF-8 further in is left alone,
+// since eating backwards to fix it would consume the whole string.
 func permissionKeyErrorf(sentinel error, key string) error {
 	if len(key) > maxEchoedPermissionKey {
-		key = key[:maxEchoedPermissionKey] + "…"
+		cut := key[:maxEchoedPermissionKey]
+		for len(cut) > 0 {
+			r, size := utf8.DecodeLastRuneInString(cut)
+			if r != utf8.RuneError || size > 1 {
+				break
+			}
+			cut = cut[:len(cut)-1]
+		}
+		key = cut + "…"
 	}
 	return &permissionKeyError{sentinel: sentinel, key: key}
 }
