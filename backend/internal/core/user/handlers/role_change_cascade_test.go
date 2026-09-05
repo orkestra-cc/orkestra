@@ -197,6 +197,18 @@ func newUserStore(trace *callTrace) *userStore {
 			copied := *row
 			return &copied, nil
 		},
+		getUserByIDFn: func(_ context.Context, id string) (*iface.User, error) {
+			// The tier guards resolve the CALLER's role through this
+			// method (D28); it reads the same seeded rows so a test can
+			// demote the actor and see the guard follow.
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			row, ok := s.rows[id]
+			if !ok {
+				return nil, services.ErrUserNotFound
+			}
+			return &iface.User{UUID: row.ID, Role: row.Role}, nil
+		},
 		countActiveAdminsFn: func(context.Context, string) (int64, error) {
 			s.mu.Lock()
 			defer s.mu.Unlock()

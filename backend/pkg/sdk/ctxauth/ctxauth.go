@@ -55,11 +55,30 @@ func GetUserEmail(ctx context.Context) (string, bool) {
 // (internal/core/user/handlers) and the setup recovery gate
 // (internal/shared/setup) both do.
 //
-// Its remaining consumers are all non-authorising: request logging and
-// tenant baggage (observability), the navigation menu's role filter
-// (shaping — the routes behind each entry re-check permissions), and the
-// dev-token / impersonation fallbacks. A stale value there costs at most
-// a mislabelled log line or a menu entry that 403s when clicked.
+// Its remaining in-tree consumers fall into three groups, and only the
+// first is genuinely free of authorization weight:
+//
+//   - Non-authorising. Request logging and tenant baggage (observability)
+//     and the navigation menu's role filter (shaping — every route behind
+//     a menu entry re-checks permissions). A stale value costs a
+//     mislabelled log line or a menu entry that 403s when clicked.
+//   - Authorising, but triple-guarded. The dev-token fallbacks in
+//     internal/core/authz/module.go and internal/core/user/handlers read
+//     this claim to give a SYNTHETIC dev-token principal a role, because
+//     such a principal has no database row by design. Safe only because
+//     they additionally require a non-production(-like) deployment and the
+//     `dev-` UUID prefix that only POST /dev/token mints. Describe these
+//     as "authorising but guarded", never as non-authorising: it is the
+//     guards, not the call site, that carry the safety argument.
+//   - Authorising on the claim alone, and therefore NOT a pattern to copy:
+//     internal/shared/middleware/jwt_validator.go's RequireSystemPermission
+//     fallback and fallbackAllowedByRole, which admit
+//     super_admin|administrator|developer straight off `srole` when no
+//     authz provider is wired. Both are unreachable in this repository —
+//     NewJWTValidator has no non-test caller, so that AI-sidecar path is
+//     fork-only — but a fork that builds the sidecar inherits exactly the
+//     staleness D28 closed elsewhere, and should wire an AccessProvider
+//     rather than rely on the fallback.
 func GetSystemRole(ctx context.Context) (string, bool) {
 	v, ok := ctx.Value(KeySystemRole).(string)
 	return v, ok

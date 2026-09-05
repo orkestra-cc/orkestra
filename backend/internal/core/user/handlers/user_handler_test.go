@@ -22,6 +22,7 @@ import (
 type fakeUserService struct {
 	createUserFn             func(ctx context.Context, input *iface.CreateUserInput) (*iface.UserManagementResponse, error)
 	getUserFn                func(ctx context.Context, id string) (*iface.UserManagementResponse, error)
+	getUserByIDFn            func(ctx context.Context, id string) (*iface.User, error)
 	getUserByEmailFn         func(ctx context.Context, email string) (*iface.UserManagementResponse, error)
 	updateUserFn             func(ctx context.Context, id string, input *iface.UpdateUserInput) (*iface.UserManagementResponse, error)
 	deleteUserFn             func(ctx context.Context, id string) error
@@ -131,7 +132,13 @@ func (f *fakeUserService) SoftDeleteAndAliasEmail(ctx context.Context, id string
 func (f *fakeUserService) ValidateUserRole(context.Context, string, []string) error {
 	panic("unused: ValidateUserRole")
 }
-func (f *fakeUserService) GetUserByID(context.Context, string) (*iface.User, error) {
+func (f *fakeUserService) GetUserByID(ctx context.Context, id string) (*iface.User, error) {
+	// The tier guards resolve the CALLER's system role through this
+	// method (D28). A test that reaches it without opting in has a
+	// fixture gap, so the unset case stays a loud panic.
+	if f.getUserByIDFn != nil {
+		return f.getUserByIDFn(ctx, id)
+	}
 	panic("unused: GetUserByID")
 }
 func (f *fakeUserService) GetUserByObjectID(context.Context, primitive.ObjectID) (*iface.User, error) {
@@ -230,28 +237,40 @@ func assertStatus(t *testing.T, err error, want int) {
 	}
 }
 
-// adminCtx stamps a super_admin caller onto the context so the
-// role-escalation guard in CreateUser / UpdateUser doesn't gate test
-// cases that aren't exercising the guard itself. Mirror of what the
+// adminCtx stamps a caller identity onto the context, mirroring what the
 // real AuthMiddleware does on every request.
+//
+// The `srole` stamp is NOT what clears the role-escalation guard any
+// more: since D28 that guard reads the caller's row from the store, so a
+// case that assigns a role must also seed "test-admin" (getUserByIDFn, or
+// userStore.seed in the role-cascade harness). The claim is kept here
+// because the middleware genuinely sets it and non-authorising consumers
+// still read it.
 func adminCtx() context.Context {
 	ctx := context.WithValue(context.Background(), ctxauth.KeyUserUUID, "test-admin")
 	return context.WithValue(ctx, ctxauth.KeySystemRole, "super_admin")
 }
 
-// actorAnd builds a getUserFn that answers the CALLER's own id with a row
-// carrying actorRole, and every other id with target (nil target =
-// ErrUserNotFound).
+// callerRow builds a getUserByIDFn answering the CALLING user's own row
+// with the given system role — the lookup the tier guards perform since
+// D28 made the caller's role come from the database rather than `srole`.
 //
-// The role guards read the caller's role from the database, not from the
-// `srole` claim (D28), so a fixture returning one row for every id would
-// silently hand the actor the TARGET's role — several guard tests would
-// then pass for entirely the wrong reason.
-func actorAnd(actorUUID, actorRole string, target *iface.UserManagementResponse) func(context.Context, string) (*iface.UserManagementResponse, error) {
-	return func(_ context.Context, id string) (*iface.UserManagementResponse, error) {
-		if id == actorUUID {
-			return &iface.UserManagementResponse{ID: actorUUID, Role: actorRole, IsActive: true}, nil
-		}
+// Deliberately a different fake method from the target's pre-read
+// (getUserFn / GetUser): keeping the two lookups on separate methods is
+// what stops an id-blind fixture from silently handing the actor the
+// TARGET's role, which would let a service-account-guard test be
+// satisfied by the escalation guard's identical 403 and code.
+func callerRow(role string) func(context.Context, string) (*iface.User, error) {
+	return func(_ context.Context, id string) (*iface.User, error) {
+		return &iface.User{UUID: id, Role: role}, nil
+	}
+}
+
+// targetRow builds a getUserFn answering every id with target, or with
+// ErrUserNotFound when target is nil. Only the PATCH target is read
+// through this path, so answering id-blind is safe here.
+func targetRow(target *iface.UserManagementResponse) func(context.Context, string) (*iface.UserManagementResponse, error) {
+	return func(context.Context, string) (*iface.UserManagementResponse, error) {
 		if target == nil {
 			return nil, services.ErrUserNotFound
 		}
@@ -285,7 +304,7 @@ func TestCreateUserHandler(t *testing.T) {
 			t.Parallel()
 			svc := &fakeUserService{
 				// The caller's own role comes from the database (D28).
-				getUserFn: actorAnd("test-admin", "super_admin", nil),
+				getUserFn: targetRow(nil), getUserByIDFn: callerRow("super_admin"),
 				createUserFn: func(context.Context, *iface.CreateUserInput) (*iface.UserManagementResponse, error) {
 					return c.svcResp, c.svcErr
 				},
@@ -411,8 +430,7 @@ func TestUpdateUserHandler(t *testing.T) {
 	t.Run("demoting the last active admin refused", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			getUserFn: actorAnd("admin-1", "super_admin",
-				&iface.UserManagementResponse{ID: "u1", Role: "super_admin", IsActive: true}),
+			getUserFn: targetRow(&iface.UserManagementResponse{ID: "u1", Role: "super_admin", IsActive: true}), getUserByIDFn: callerRow("super_admin"),
 			countActiveAdminsFn: func(context.Context, string) (int64, error) { return 0, nil },
 		}
 		h := NewUserHandler(svc)
@@ -452,8 +470,7 @@ func TestUpdateUserHandler(t *testing.T) {
 	t.Run("promoting to administrator skips the guard", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			getUserFn: actorAnd("test-admin", "super_admin",
-				&iface.UserManagementResponse{ID: "u1", Kind: "", Role: "guest", IsActive: true}),
+			getUserFn: targetRow(&iface.UserManagementResponse{ID: "u1", Kind: "", Role: "guest", IsActive: true}), getUserByIDFn: callerRow("super_admin"),
 			updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
 				return &iface.UserManagementResponse{ID: "u1", Role: "administrator"}, nil
 			},
@@ -477,7 +494,7 @@ func TestUpdateUserHandler(t *testing.T) {
 		// No updateUserFn — handler must short-circuit BEFORE the
 		// service call. If it reaches the panicking fallback, the
 		// guard fired too late.
-		svc := &fakeUserService{getUserFn: actorAnd("admin-1", "administrator", nil)}
+		svc := &fakeUserService{getUserFn: targetRow(nil), getUserByIDFn: callerRow("administrator")}
 		h := NewUserHandler(svc)
 		ctx := context.WithValue(context.Background(), ctxauth.KeyUserUUID, "admin-1")
 		ctx = context.WithValue(ctx, ctxauth.KeySystemRole, "administrator")
@@ -492,8 +509,7 @@ func TestUpdateUserHandler(t *testing.T) {
 	t.Run("administrator can assign another administrator (equal tier)", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			getUserFn: actorAnd("admin-1", "administrator",
-				&iface.UserManagementResponse{ID: "u2", Role: "operator", IsActive: true}),
+			getUserFn: targetRow(&iface.UserManagementResponse{ID: "u2", Role: "operator", IsActive: true}), getUserByIDFn: callerRow("administrator"),
 			updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
 				return &iface.UserManagementResponse{ID: "u2", Role: "administrator"}, nil
 			},
@@ -511,7 +527,7 @@ func TestUpdateUserHandler(t *testing.T) {
 
 	t.Run("manager cannot promote to administrator", func(t *testing.T) {
 		t.Parallel()
-		svc := &fakeUserService{getUserFn: actorAnd("mgr-1", "manager", nil)}
+		svc := &fakeUserService{getUserFn: targetRow(nil), getUserByIDFn: callerRow("manager")}
 		h := NewUserHandler(svc)
 		ctx := context.WithValue(context.Background(), ctxauth.KeyUserUUID, "mgr-1")
 		ctx = context.WithValue(ctx, ctxauth.KeySystemRole, "manager")
@@ -523,12 +539,21 @@ func TestUpdateUserHandler(t *testing.T) {
 		assertErrCode(t, err, errcode.UserRoleEscalationForbidden)
 	})
 
-	t.Run("missing caller role refuses every role assignment", func(t *testing.T) {
+	t.Run("missing caller identity refuses every role assignment", func(t *testing.T) {
 		t.Parallel()
-		// Defensive fail-closed: a degraded middleware that forgets to
-		// stamp KeySystemRole must NOT let the request through. The
-		// canAssignRole tier ladder treats -1 (unknown) as below every
+		// Defensive fail-closed: a degraded gate that stamps NO caller
+		// identity must not let the request through. Since D28 the guard
+		// no longer reads KeySystemRole at all, so the degradation that
+		// matters is a missing KeyUserUUID: with no principal there is
+		// nothing to resolve a role for, callerRole reports the empty
+		// role, and canAssignRole's unknown tier (-1) sits below every
 		// real tier.
+		//
+		// A stamped UUID whose row cannot be read is a DIFFERENT
+		// degradation with a different answer — see the sibling case
+		// below. Keep them apart: they carry different status codes and
+		// different error codes, and one standing in for the other is how
+		// a guard test stops testing its guard.
 		svc := &fakeUserService{}
 		h := NewUserHandler(svc)
 		_, err := h.UpdateUser(context.Background(), &UpdateUserRequest{
@@ -537,6 +562,27 @@ func TestUpdateUserHandler(t *testing.T) {
 		})
 		assertStatus(t, err, 403)
 		assertErrCode(t, err, errcode.UserRoleEscalationForbidden)
+	})
+
+	t.Run("stamped caller identity with no row is a 500, not the 403", func(t *testing.T) {
+		t.Parallel()
+		// The sibling of the case above. A caller the gate DID identify,
+		// whose row the store does not hold, is not evidence of a low
+		// tier — it is evidence that the guard could not run. It must not
+		// borrow the escalation refusal's 403.
+		svc := &fakeUserService{
+			getUserByIDFn: func(context.Context, string) (*iface.User, error) {
+				return nil, services.ErrUserNotFound
+			},
+		}
+		h := NewUserHandler(svc)
+		ctx := context.WithValue(context.Background(), ctxauth.KeyUserUUID, "admin-1")
+		_, err := h.UpdateUser(ctx, &UpdateUserRequest{
+			ID:   "u2",
+			Body: iface.UpdateUserInput{Role: "guest"},
+		})
+		assertStatus(t, err, 500)
+		assertErrCode(t, err, errcode.UserRoleLookupUnavailable)
 	})
 
 	t.Run("profile-only patch with no role bypasses the role guard", func(t *testing.T) {
@@ -568,8 +614,7 @@ func TestUpdateUserHandlerServiceAccountGuard(t *testing.T) {
 		// No updateUserFn — handler must short-circuit BEFORE the service
 		// call. If it reaches the panicking fallback, the guard fired too late.
 		svc := &fakeUserService{
-			getUserFn: actorAnd("admin-1", "super_admin",
-				&iface.UserManagementResponse{ID: "svc1", Kind: iface.UserKindService, Role: "guest", IsActive: true}),
+			getUserFn: targetRow(&iface.UserManagementResponse{ID: "svc1", Kind: iface.UserKindService, Role: "guest", IsActive: true}), getUserByIDFn: callerRow("super_admin"),
 		}
 		h := NewUserHandler(svc)
 		ctx := context.WithValue(context.Background(), ctxauth.KeyUserUUID, "admin-1")
@@ -585,8 +630,7 @@ func TestUpdateUserHandlerServiceAccountGuard(t *testing.T) {
 	t.Run("service account cannot be assigned super_admin role", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			getUserFn: actorAnd("admin-1", "super_admin",
-				&iface.UserManagementResponse{ID: "svc2", Kind: iface.UserKindService, Role: "guest", IsActive: true}),
+			getUserFn: targetRow(&iface.UserManagementResponse{ID: "svc2", Kind: iface.UserKindService, Role: "guest", IsActive: true}), getUserByIDFn: callerRow("super_admin"),
 		}
 		h := NewUserHandler(svc)
 		ctx := context.WithValue(context.Background(), ctxauth.KeyUserUUID, "admin-1")
@@ -602,8 +646,7 @@ func TestUpdateUserHandlerServiceAccountGuard(t *testing.T) {
 	t.Run("service account can be assigned non-privileged role (guest)", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			getUserFn: actorAnd("admin-1", "super_admin",
-				&iface.UserManagementResponse{ID: "svc3", Kind: iface.UserKindService, Role: "operator", IsActive: true}),
+			getUserFn: targetRow(&iface.UserManagementResponse{ID: "svc3", Kind: iface.UserKindService, Role: "operator", IsActive: true}), getUserByIDFn: callerRow("super_admin"),
 			updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
 				return &iface.UserManagementResponse{ID: "svc3", Kind: iface.UserKindService, Role: "guest"}, nil
 			},
@@ -622,8 +665,7 @@ func TestUpdateUserHandlerServiceAccountGuard(t *testing.T) {
 	t.Run("human can still be assigned administrator role (no regression)", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			getUserFn: actorAnd("admin-1", "super_admin",
-				&iface.UserManagementResponse{ID: "u1", Kind: "", Role: "guest", IsActive: true}),
+			getUserFn: targetRow(&iface.UserManagementResponse{ID: "u1", Kind: "", Role: "guest", IsActive: true}), getUserByIDFn: callerRow("super_admin"),
 			updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
 				return &iface.UserManagementResponse{ID: "u1", Kind: "", Role: "administrator"}, nil
 			},
@@ -645,7 +687,7 @@ func TestUpdateUserHandlerServiceAccountGuard(t *testing.T) {
 		// resolves, so the request clears the role-escalation guard and
 		// lands on the service-account guard, which must refuse any
 		// privileged role even though it can't read the target's Kind.
-		svc := &fakeUserService{getUserFn: actorAnd("admin-1", "super_admin", nil)}
+		svc := &fakeUserService{getUserFn: targetRow(nil), getUserByIDFn: callerRow("super_admin")}
 		h := NewUserHandler(svc)
 		ctx := context.WithValue(context.Background(), ctxauth.KeyUserUUID, "admin-1")
 		ctx = context.WithValue(ctx, ctxauth.KeySystemRole, "super_admin")
@@ -814,11 +856,12 @@ func TestAdminLifecycleAuditEmits(t *testing.T) {
 
 	boolPtr := func(b bool) *bool { return &b }
 	actorCtx := func() context.Context {
-		// The handler reads ActorUserID + ActorEmail + system role from
-		// ctxauth; the real middleware stamps all three before the
-		// handler runs. Tests default to super_admin so the role-
-		// escalation guard never short-circuits the path under test —
-		// individual cases override the role when needed.
+		// The handler reads ActorUserID + ActorEmail from ctxauth; the
+		// real middleware stamps them before the handler runs. The
+		// `srole` stamp is kept because the middleware really does set
+		// it, but since D28 the role-escalation guard IGNORES it and
+		// reads the caller's row instead — a case that must clear that
+		// guard supplies getUserByIDFn, not a claim.
 		ctx := context.WithValue(context.Background(), ctxauth.KeyUserUUID, "admin-1")
 		ctx = context.WithValue(ctx, ctxauth.KeyUserEmail, "admin@example.com")
 		return context.WithValue(ctx, ctxauth.KeySystemRole, "super_admin")
@@ -951,6 +994,7 @@ func TestAdminLifecycleAuditEmits(t *testing.T) {
 			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
 				return &iface.UserManagementResponse{ID: "u1", Role: "administrator", IsActive: true}, nil
 			},
+			getUserByIDFn:       callerRow("super_admin"),
 			countActiveAdminsFn: func(context.Context, string) (int64, error) { return 1, nil },
 			updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
 				return &iface.UserManagementResponse{ID: "u1", Role: "operator", IsActive: true}, nil
@@ -980,6 +1024,10 @@ func TestAdminLifecycleAuditEmits(t *testing.T) {
 			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
 				return &iface.UserManagementResponse{ID: "u1", Role: "super_admin", IsActive: true}, nil
 			},
+			// The caller's own row, read separately since D28 — without
+			// it this case would be refused by the ESCALATION guard, not
+			// the last-admin quorum it exists to pin.
+			getUserByIDFn:       callerRow("super_admin"),
 			countActiveAdminsFn: func(context.Context, string) (int64, error) { return 0, nil },
 		}
 		h := NewUserHandler(svc)

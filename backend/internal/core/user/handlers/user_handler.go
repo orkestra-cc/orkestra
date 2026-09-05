@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/orkestra/backend/internal/core/user/services"
@@ -36,6 +37,12 @@ type UserHandler struct {
 	// yet when this module initialises. Optional — a nil registry means
 	// the optional collaborators simply aren't available.
 	services *module.ServiceRegistry
+	// platform classifies the deployment environment. Read only by the
+	// caller-role guard's synthetic dev-token exception, which must be
+	// inert anywhere production-like. Optional, and a nil platform is
+	// treated AS production-like — so an un-wired handler (every unit
+	// test) never opens the exception.
+	platform module.PlatformInfo
 }
 
 // NewUserHandler creates a new user handler
@@ -51,6 +58,14 @@ func NewUserHandler(userService services.UserService) *UserHandler {
 // Init; safe to leave unset in tests.
 func (h *UserHandler) SetServiceRegistry(reg *module.ServiceRegistry) {
 	h.services = reg
+}
+
+// SetPlatform wires the deployment's environment classification, which the
+// caller-role guard needs before it can honour the synthetic dev-token
+// exception. Called from the user module's Init; leaving it unset disables
+// the exception, which is the fail-closed default.
+func (h *UserHandler) SetPlatform(p module.PlatformInfo) {
+	h.platform = p
 }
 
 // terminateSessions best-effort evicts every session of a user whose
@@ -184,6 +199,25 @@ func (h *UserHandler) CreateUser(ctx context.Context, req *CreateUserRequest) (*
 	if req.Body.Role != "" {
 		callerRole, err := h.callerRole(ctx)
 		if err != nil {
+			// Every other refusal on this path lands an audit row, and
+			// SOC2 reads that trail to tell one denial from another. A
+			// 500 is still a denied privileged mutation: record it with
+			// its own code so "we refused you" and "we could not tell"
+			// are distinguishable after the fact.
+			h.emitAudit(ctx, iface.AuditEvent{
+				ActorUserID:  actorUUID,
+				ActorEmail:   actorEmail,
+				ActorType:    "user",
+				Action:       "user.create.refused",
+				ResourceType: "user",
+				Outcome:      "denied",
+				Metadata: map[string]any{
+					"code":      errcode.UserRoleLookupUnavailable,
+					"attempted": "role_assignment",
+					"to":        req.Body.Role,
+					"email":     req.Body.Email,
+				},
+			})
 			return nil, err
 		}
 		if !canAssignRole(callerRole, req.Body.Role) {
@@ -320,6 +354,21 @@ func (h *UserHandler) UpdateUser(ctx context.Context, req *UpdateUserRequest) (*
 		}
 		callerRole, err := h.callerRole(ctx)
 		if err != nil {
+			h.emitAudit(ctx, iface.AuditEvent{
+				ActorUserID:  actorUUID,
+				ActorEmail:   actorEmail,
+				ActorType:    "user",
+				Action:       "user.update.refused",
+				ResourceType: "user",
+				ResourceID:   req.ID,
+				Outcome:      "denied",
+				Metadata: map[string]any{
+					"code":      errcode.UserRoleLookupUnavailable,
+					"attempted": "role_assignment",
+					"from":      previousRole,
+					"to":        req.Body.Role,
+				},
+			})
 			return nil, err
 		}
 		if !canAssignRole(callerRole, req.Body.Role) {
@@ -663,6 +712,63 @@ func (h *UserHandler) checkLastAdminRemoval(ctx context.Context, targetID string
 	return errcode.Forbidden(errcode.UserLastAdminForbidden, "Refusing to remove the last active administrator")
 }
 
+// devTokenUUIDPrefix is the `sub` prefix POST /dev/token stamps on the
+// synthetic principals it mints. Pinned by value to devtoken's own format
+// string; a real user UUID never carries it (they come from
+// uuid.NewString()).
+const devTokenUUIDPrefix = "dev-"
+
+// devTokenSystemRoles is the set of roles a synthetic dev-token principal
+// may claim. Pinned by value to the set the authz evaluator's own
+// dev-token fallback accepts (internal/core/authz/module.go validDevRoles)
+// and to the six names systemRoleTier ranks.
+var devTokenSystemRoles = map[string]struct{}{
+	"super_admin": {}, "administrator": {}, "developer": {},
+	"manager": {}, "operator": {}, "guest": {},
+}
+
+// devTokenSystemRole answers the caller's role for a SYNTHETIC dev-token
+// principal — the one identity that legitimately has no database row.
+//
+// POST /dev/token mints `sub = dev-<role>-<unix>` without writing a user,
+// and that token is the documented local flow (the root CLAUDE.md Quick
+// Start, scripts/devtoken.sh). Resolving its role from the store misses by
+// construction, so D28's "a lookup miss is a 500" would take every
+// dev-token role assignment down.
+//
+// This is the carve-out the authz evaluator already makes for the same
+// identities (internal/core/authz/module.go, the UserSystemRoleLookup
+// closure), guarded the same way — THREE conditions, all of which must
+// hold:
+//
+//  1. the deployment is not production-like. Deliberately STRICTER than
+//     authz's IsProduction(): staging is internet-reachable, which is why
+//     POST /dev/token is itself gated on IsProductionLike(). A nil platform
+//     counts as production-like, so the exception is opt-in wiring, never a
+//     default;
+//  2. the UUID carries the `dev-` prefix the dev-token endpoint stamps;
+//  3. the `srole` claim names one of the six real system roles.
+//
+// Guard 1 is what makes trusting the claim in 3 safe: on staging and in
+// production this cannot return true whatever the token says, so no
+// reachable deployment lets a claim decide a role assignment.
+func devTokenSystemRole(ctx context.Context, platform module.PlatformInfo, actorUUID string) (string, bool) {
+	if platform == nil || platform.IsProductionLike() {
+		return "", false
+	}
+	if !strings.HasPrefix(actorUUID, devTokenUUIDPrefix) {
+		return "", false
+	}
+	role, ok := ctxauth.GetSystemRole(ctx)
+	if !ok {
+		return "", false
+	}
+	if _, valid := devTokenSystemRoles[role]; !valid {
+		return "", false
+	}
+	return role, true
+}
+
 // callerRole resolves the calling operator's system role from the
 // DATABASE — never from the `srole` JWT claim.
 //
@@ -674,32 +780,51 @@ func (h *UserHandler) checkLastAdminRemoval(ctx context.Context, targetID string
 // administrator would keep minting administrators until their last access
 // token expired. Spec §4.6 D28.
 //
-// Two outcomes, both fail-closed:
+// Outcomes, all fail-closed:
 //
 //   - No authenticated principal on the context (a degraded gate — these
 //     routes all sit behind RequireSystemPermission). There is no identity
 //     to resolve a role for, so the role is empty and canAssignRole's
 //     unknown tier (-1) refuses every assignment. That is a refusal of the
 //     caller's request, not a report of a broken database.
-//   - The lookup fails, or the row is absent. That is a 500
+//   - A synthetic dev-token principal in a non-production-like deployment
+//     resolves from the claim — see devTokenSystemRole for the three guards
+//     that make that safe and why nothing on staging or production can take
+//     the branch.
+//   - The row is absent, or the read failed. Both are a 500
 //     (user.role_lookup_unavailable), NEVER a fallback to the claim:
 //     falling back would make the claim authoritative again exactly when
-//     the database cannot contradict it.
+//     the database cannot contradict it. The two are DISTINGUISHED in the
+//     log — services.ErrUserNotFound is a true alias of
+//     iface.ErrUserNotFound and arrives unwrapped, so the handler can tell
+//     them apart — because they need different operator responses: a
+//     missing row is an identity defect, a failed read is an outage. They
+//     get the same wire answer because neither is evidence of any role.
 //
 // Only called on the guarded path (an assignment that actually names a
-// role), so an ordinary profile patch costs no extra read.
+// role), so an ordinary profile patch costs no extra read. GetUserByID
+// rather than GetUser: the guard needs one field, and GetUser additionally
+// runs the OAuth-link enrichment — a second collection read — to build a
+// response DTO this path throws away.
 func (h *UserHandler) callerRole(ctx context.Context) (string, error) {
 	actorUUID, _ := ctxauth.GetUserUUID(ctx)
 	if actorUUID == "" {
 		return "", nil
 	}
-	actor, err := h.userService.GetUser(ctx, actorUUID)
-	if err != nil || actor == nil {
-		slog.ErrorContext(ctx, "user: could not resolve the calling user's system role; refusing the role assignment",
+	if role, ok := devTokenSystemRole(ctx, h.platform, actorUUID); ok {
+		return role, nil
+	}
+	actor, err := h.userService.GetUserByID(ctx, actorUUID)
+	switch {
+	case errors.Is(err, services.ErrUserNotFound) || (err == nil && actor == nil):
+		slog.ErrorContext(ctx, "user: the calling user has no row; refusing the role assignment",
+			slog.String("actor_uuid", actorUUID))
+		return "", roleLookupUnavailable()
+	case err != nil:
+		slog.ErrorContext(ctx, "user: could not read the calling user's system role; refusing the role assignment",
 			slog.String("actor_uuid", actorUUID),
-			slog.Any("error", err))
-		return "", errcode.Internal(errcode.UserRoleLookupUnavailable,
-			"Could not resolve the calling user's role. Retry shortly.")
+			slog.String("error", err.Error()))
+		return "", roleLookupUnavailable()
 	}
 	return actor.Role, nil
 }

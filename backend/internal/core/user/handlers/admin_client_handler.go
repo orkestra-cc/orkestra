@@ -25,6 +25,18 @@ import (
 type AdminClientUserHandler struct {
 	clientUserService services.UserService
 	services          *module.ServiceRegistry
+	// platform classifies the deployment environment, for the caller-role
+	// guard's synthetic dev-token exception. Optional; a nil platform is
+	// treated as production-like, so the exception stays shut unless it is
+	// deliberately wired.
+	platform module.PlatformInfo
+}
+
+// SetPlatform wires the deployment's environment classification. Called
+// from the user module's Init; unset (tests) disables the dev-token
+// exception in callerRole, which is the fail-closed default.
+func (h *AdminClientUserHandler) SetPlatform(p module.PlatformInfo) {
+	h.platform = p
 }
 
 // NewAdminClientUserHandler wires the handler with the client-tier user
@@ -758,12 +770,23 @@ func mapInviteErr(err error, generic string) error {
 //     the claim: falling back would make the claim authoritative again
 //     exactly when the database cannot contradict it.
 //
+// The one exception is a synthetic dev-token principal in a
+// non-production-like deployment, which has no row anywhere by design —
+// see devTokenSystemRole for the three guards that keep it inert on
+// staging and in production.
+//
 // Only called on a patch that names a role, so an ordinary profile patch
 // costs no extra read.
 func (h *AdminClientUserHandler) callerRole(ctx context.Context) (string, error) {
 	actorUUID, _ := ctxauth.GetUserUUID(ctx)
 	if actorUUID == "" {
 		return "", nil
+	}
+	// A synthetic dev-token operator has no row in the operator store
+	// either, and POST/PATCH /v1/admin/client-users are part of the same
+	// documented local flow. Same three guards as the operator handler.
+	if role, ok := devTokenSystemRole(ctx, h.platform, actorUUID); ok {
+		return role, nil
 	}
 	if h.services == nil {
 		slog.ErrorContext(ctx, "user: no service registry on the client-admin handler; refusing the client role assignment",
