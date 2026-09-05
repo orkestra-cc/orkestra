@@ -65,6 +65,18 @@ The SDK is on the path to v1.0 publication. Until then:
   `Init`). New module capabilities go behind optional sub-interfaces in
   `module/module.go` — see the existing `HasConfigSchema`,
   `HasNavItems`, `Startable`, … pattern. Never widen `Module`.
+- **`module.RoleMiddleware` is implemented BY forks, so it is additive-only
+  too** — the same category as `iface.UserProvider`, not the same as
+  `RedisClient`. A fork that supplies its own route-gating middleware
+  satisfies this interface, so a new method on it breaks that fork at
+  compile time. New gates therefore arrive as their own sub-interface,
+  type-asserted off `APISurface.AuthMW`: `module.EnrolmentProofGate`
+  (`RequireEnrolmentProof`, spec §4.2 D11/D12) is the worked example.
+  ⚠️ **A failed assertion must fail closed, never pass through** — a gate
+  that is missing because a fork has not implemented it must refuse, and
+  the consumer should log once at wiring time so the fork learns at boot
+  rather than from a user's 401 (`auth/module.go`'s `enrolmentGate`
+  substitutes `middleware.RefuseEnrolmentProof` and does exactly that).
 - **`module.RedisClient` is provided TO modules, not implemented BY them.**
   It is the one SDK interface the backend satisfies on the consumer's
   behalf (`deps.RedisAdapter`), so widening it does not ripple out to

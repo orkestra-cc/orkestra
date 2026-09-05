@@ -260,8 +260,8 @@ Section B item #4 of the auth roadmap (2026-04-24) plumbs attribute-based signal
 | principal | `system_role`     | String       | user module, present when non-empty |
 | principal | `tenant_roles`    | Set<String>  | TenantMembership.Roles, present when non-empty |
 | principal | `capabilities`    | Set<String>  | AccessProvider.ListCapabilityIDs(TenantOwner(tenantUUID)), present when non-empty |
-| principal | `mfa_enrolled`    | Bool         | JWT `amr` claim → middleware.IsMFAEnrolled — always stamped |
-| principal | `amr`             | Set<String>  | JWT `amr` claim, present when non-empty |
+| principal | `mfa_enrolled`    | Bool         | `middleware.IsMFAEnrolled` — always stamped. Reads the **epoch-resolved** MFA authority, not the raw claim, so a marker whose factor the user has since removed reads `false` (spec §4.3 D16); `reauth` does not satisfy it either (D18/M-1 — a password reconfirm is presence, not a second factor). **This is the attribute a policy must gate MFA on.** |
+| principal | `amr`             | Set<String>  | JWT `amr` claim **verbatim**, present when non-empty (`middleware.GetAMR`). A record of how the session authenticated, deliberately **not** epoch-checked: it still lists a removed factor's marker. Never gate MFA authority on it — use `mfa_enrolled`. The same warning is on `policies/abac.cedar`, where policy authors meet it. |
 | resource  | `kind`            | String       | TenantProvider.GetTenant.Kind (internal/external) |
 | resource  | `status`          | String       | TenantProvider.GetTenant.Status (live since Commit A; was hardcoded "active" before) |
 | context   | `env`             | String       | deployment env |
