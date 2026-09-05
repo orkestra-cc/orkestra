@@ -74,6 +74,16 @@
 //   - orkestra_auth_mail_dropped_total — transactional auth emails
 //     dropped by a full dispatcher queue, labelled by template id.
 //
+// The authz invalidation contract (spec 2026-09-03 §4.6 D27) adds one:
+//
+//   - orkestra_authz_cache_invalidation_failures_total — permission-cache
+//     generation bumps that failed AFTER the write had landed, so a
+//     verdict cached during the write can be served until its 60s TTL
+//     expires. Unlabelled: the only dimensions available are the user
+//     UUID and the operation, and neither is bounded. The pre-write half
+//     is not counted here — it refuses the mutation and surfaces as a
+//     503, which the HTTP metrics already carry.
+//
 // ADR-0002 (docs/adr/0002-metrics-label-schema.md) freezes the label
 // schema. Adding labels requires a new ADR — Prometheus cardinality
 // explodes silently, and history breaks when labels change. The raw
@@ -113,6 +123,7 @@ type Collector struct {
 	authLockouts                   *prometheus.CounterVec
 	authMailDropped                *prometheus.CounterVec
 	tokenSweepDeleted              *prometheus.CounterVec
+	authzCacheInvalidationFailures prometheus.Counter
 	tokenSweepBacklog              *prometheus.GaugeVec
 	tokenSweepDuration             *prometheus.HistogramVec
 
@@ -299,6 +310,15 @@ func (c *Collector) buildMetrics() {
 		[]string{"tier"},
 	)
 
+	c.authzCacheInvalidationFailures = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "authz",
+			Name:      "cache_invalidation_failures_total",
+			Help:      "Count of permission-cache generation bumps that failed AFTER their write had landed, leaving a verdict cached during the write readable until its 60s TTL expires. Unlabelled by design (ADR-0002): the available dimensions are the user UUID and the operation, neither of which is bounded. A bump that fails BEFORE the write is not counted here — it refuses the mutation and answers 503.",
+		},
+	)
+
 	c.entitlementLag = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "orkestra",
@@ -346,7 +366,7 @@ func (c *Collector) Register() error {
 	if !atomic.CompareAndSwapUint32(&c.registered, 0, 1) {
 		return nil
 	}
-	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.sessionAnchorAnomalies, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped} {
+	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.sessionAnchorAnomalies, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped, c.authzCacheInvalidationFailures} {
 		if err := c.registry.Register(m); err != nil {
 			// rollback so the caller can retry with a fresh collector
 			atomic.StoreUint32(&c.registered, 0)
@@ -445,6 +465,19 @@ func (c *Collector) RecordSessionCapEventFailure() {
 		return
 	}
 	c.sessionCapEventFailures.Inc()
+}
+
+// RecordAuthzCacheInvalidationFailure counts one post-write
+// permission-cache invalidation that failed. The write has already
+// landed when this increments, so the failure is observational: a
+// verdict cached during the write survives until its own 60s TTL. A
+// non-zero rate means permission changes can be up to a minute late,
+// not that they were lost. Spec 2026-09-03 §4.6 D27.
+func (c *Collector) RecordAuthzCacheInvalidationFailure() {
+	if c == nil || c.authzCacheInvalidationFailures == nil {
+		return
+	}
+	c.authzCacheInvalidationFailures.Inc()
 }
 
 // RecordSessionAnchorAnomaly counts a refresh permitted because the cap

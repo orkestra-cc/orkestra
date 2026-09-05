@@ -297,9 +297,23 @@ func mapRoleWriteError(ctx context.Context, operation string, err error) error {
 			offendingPermission(err)+" is platform-reserved and cannot be granted through a tenant role.")
 	case errors.Is(err, services.ErrInsufficientPermissionsToGrant):
 		return huma.Error403Forbidden("you cannot give a role permissions you do not hold yourself")
+	case errors.Is(err, services.ErrAuthzCacheUnavailable):
+		return cacheUnavailableError()
 	default:
 		return authzInternalError(ctx, operation, err)
 	}
+}
+
+// cacheUnavailableError renders the D27 gate's refusal. A mutation that
+// changes effective permissions retires the cached verdicts it
+// invalidates BEFORE it writes; when that cannot be done the change is
+// not applied at all. That is a transient server-side condition the
+// caller should retry, not a request they can correct — so it is a 503
+// carrying a code the operator console can classify, never the codeless
+// 500 the update and delete paths used to fall through to.
+func cacheUnavailableError() error {
+	return errcode.ServiceUnavailable(errcode.AuthzCacheUnavailable,
+		"The permission cache could not be updated, so the change was not applied. Try again in a moment.")
 }
 
 // offendingPermission renders the sentence subject for the two 422s: the
@@ -321,16 +335,24 @@ func (h *Handler) deleteRole(ctx context.Context, in *deleteRoleInput) (*struct{
 		return nil, err
 	}
 	if err := h.svc.DeleteRole(ctx, in.TenantID, in.Role); err != nil {
-		switch {
-		case errors.Is(err, repository.ErrNotFound):
-			return nil, huma.Error404NotFound("role not found")
-		case errors.Is(err, services.ErrSystemRoleImmutable):
-			return nil, huma.Error403Forbidden("system roles cannot be deleted")
-		default:
-			return nil, authzInternalError(ctx, "delete the role", err)
-		}
+		return nil, mapRoleDeleteError(ctx, err)
 	}
 	return &struct{}{}, nil
+}
+
+// mapRoleDeleteError is deleteRole's mapper, extracted so the wire
+// contract is testable the way mapRoleWriteError's is.
+func mapRoleDeleteError(ctx context.Context, err error) error {
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		return huma.Error404NotFound("role not found")
+	case errors.Is(err, services.ErrSystemRoleImmutable):
+		return huma.Error403Forbidden("system roles cannot be deleted")
+	case errors.Is(err, services.ErrAuthzCacheUnavailable):
+		return cacheUnavailableError()
+	default:
+		return authzInternalError(ctx, "delete the role", err)
+	}
 }
 
 func (h *Handler) listBindings(ctx context.Context, in *listBindingsInput) (*bindingsOutput, error) {
@@ -372,6 +394,8 @@ func mapCreateBindingError(ctx context.Context, err error) error {
 		return huma.Error400BadRequest("the grantor is required")
 	case errors.Is(err, services.ErrBindingExists):
 		return huma.Error409Conflict("this role is already bound to the user in this tenant")
+	case errors.Is(err, services.ErrAuthzCacheUnavailable):
+		return cacheUnavailableError()
 	default:
 		return authzInternalError(ctx, "create the role binding", err)
 	}
@@ -382,12 +406,22 @@ func (h *Handler) deleteBinding(ctx context.Context, in *deleteBindingInput) (*s
 		return nil, err
 	}
 	if err := h.svc.DeleteBinding(ctx, in.TenantID, in.Binding); err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, huma.Error404NotFound("binding not found")
-		}
-		return nil, authzInternalError(ctx, "delete the role binding", err)
+		return nil, mapBindingDeleteError(ctx, err)
 	}
 	return &struct{}{}, nil
+}
+
+// mapBindingDeleteError is deleteBinding's mapper, extracted for the
+// same reason as mapRoleDeleteError.
+func mapBindingDeleteError(ctx context.Context, err error) error {
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		return huma.Error404NotFound("binding not found")
+	case errors.Is(err, services.ErrAuthzCacheUnavailable):
+		return cacheUnavailableError()
+	default:
+		return authzInternalError(ctx, "delete the role binding", err)
+	}
 }
 
 func (h *Handler) getEffective(ctx context.Context, in *effectiveInput) (*effectiveOutput, error) {

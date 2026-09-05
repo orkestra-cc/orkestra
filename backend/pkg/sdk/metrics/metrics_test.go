@@ -338,3 +338,26 @@ func TestCollector_Start_StopsCleanly(t *testing.T) {
 	// If Start leaked a goroutine, `go test -race` would eventually
 	// flag it. The smoke-test here is that the stop call returns.
 }
+
+// TestRecordAuthzCacheInvalidationFailure_IsUnlabelled pins the D27
+// counter's shape. It counts POST-WRITE invalidation failures only — the
+// pre-write half refuses the mutation and surfaces as a 503, which the
+// HTTP metrics already carry. Unlabelled by design (ADR-0002): the
+// dimensions available here are the user UUID and the operation, and
+// neither is bounded.
+func TestRecordAuthzCacheInvalidationFailure_IsUnlabelled(t *testing.T) {
+	c := NewCollector()
+	if err := c.Register(); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	c.RecordAuthzCacheInvalidationFailure()
+	c.RecordAuthzCacheInvalidationFailure()
+
+	if got := testutil.ToFloat64(c.authzCacheInvalidationFailures); got != 2 {
+		t.Errorf("authz cache invalidation failures = %v, want 2", got)
+	}
+	body := scrapeCollector(t, c)
+	if !strings.Contains(body, "orkestra_authz_cache_invalidation_failures_total 2") {
+		t.Errorf("expected the unlabelled family in the exposition body, got:\n%s", body)
+	}
+}

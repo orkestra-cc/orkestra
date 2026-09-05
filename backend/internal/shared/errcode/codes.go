@@ -132,6 +132,20 @@ const AuthzPermissionUnknown = "authz.permission_unknown"
 // offending key. 422.
 const AuthzSystemPermissionForbidden = "authz.system_permission_forbidden"
 
+// AuthzCacheUnavailable signals that a role or binding change was
+// REFUSED because the effective-permission cache could not be retired.
+// Every such mutation retires the cached verdicts it invalidates before
+// it writes; a counter the store cannot bump means the change's effect
+// could not be guaranteed, so nothing was written and the caller may
+// retry once the cache store recovers. It is the server's own transient
+// fault, never the caller's request — 503, never a 4xx, and never the
+// codeless 500 the update path answered before.
+//
+// A deployment with NO cache configured is a different thing entirely:
+// there are no cached verdicts to retire, so those mutations succeed and
+// this code is never emitted.
+const AuthzCacheUnavailable = "authz.cache_unavailable"
+
 // --- tenant ---
 
 // TenantSlugAlreadyInUse signals that a tenant create or update would reuse an

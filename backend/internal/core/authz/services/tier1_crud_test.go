@@ -383,7 +383,7 @@ func TestListBindings_FilteredByTenant(t *testing.T) {
 
 // ===== DeleteBinding =====
 
-func TestDeleteBinding_RemovesRowAndFlushesCache(t *testing.T) {
+func TestDeleteBinding_RemovesRow(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
 	repo.seedBinding("b-1", "u-1", "tenant-A", "role-X")
 
@@ -393,8 +393,10 @@ func TestDeleteBinding_RemovesRowAndFlushesCache(t *testing.T) {
 	if _, ok := repo.bindings["b-1"]; ok {
 		t.Errorf("binding b-1 must be removed from the fake")
 	}
-	// flushCache is a no-op when redis is nil — the test verifies the
-	// happy path doesn't panic and the repo write happens.
+	// Repo-level contract only: this harness leaves Redis nil, so the
+	// invalidation is a no-op here by construction. The cache half is
+	// asserted for real by TestDeleteBinding_FlushesEveryAuthzCache in
+	// cache_test.go — this name no longer promises it.
 }
 
 // ===== RemoveBindingsByTenant =====
@@ -444,16 +446,26 @@ func TestRemoveBindingsByTenant_NoMatches_ReturnsZero(t *testing.T) {
 // ===== UpdateRole flushes the perm cache =====
 
 func TestUpdateRole_FlushesPermissionCache(t *testing.T) {
-	// Smoke test: when permissions on a role change, the service
-	// flushes the effective-permission cache. With Redis nil the
-	// flushCache call short-circuits — this test just confirms the
-	// happy path doesn't panic and the role update lands.
-	svc, repo := newTier1Service(t, staticRoleLookup(""))
+	// A permission change on a role must retire every cached verdict:
+	// the role is reachable through any binding, so the affected user
+	// set is not enumerable and the whole cache goes.
+	//
+	// This used to run on newTier1Service, which leaves Redis nil — the
+	// invalidation short-circuited and the body asserted only that the
+	// role was written, so the name promised a flush the test never
+	// looked for. It now runs against miniredis and reads the cache.
+	svc, repo, _ := newCacheTestService(t, staticRoleLookup(""))
+	ctx := context.Background()
 	// See TestCreateRole_PersistsCustomRole: the written keys have to be
 	// in the catalog for the D21 validator to accept them.
 	registerTestPermissions(t, svc, registered("billing.invoice.read", "billing.invoice.refund"))
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
-	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
+	svc.cacheSet(ctx, "u-1", "tenant-A", []string{"billing.invoice.read"})
+	if _, ok := svc.cacheGet(ctx, "u-1", "tenant-A"); !ok {
+		t.Fatal("precondition: the cached verdict must be readable before the update")
+	}
+
+	updated, err := svc.UpdateRole(ctx, "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
 		Permissions: []string{"billing.invoice.read", "billing.invoice.refund"},
 	})
 	if err != nil {
@@ -461,6 +473,9 @@ func TestUpdateRole_FlushesPermissionCache(t *testing.T) {
 	}
 	if len(updated.Permissions) != 2 {
 		t.Errorf("post-update permissions = %v, want 2 entries", updated.Permissions)
+	}
+	if _, ok := svc.cacheGet(ctx, "u-1", "tenant-A"); ok {
+		t.Error("the cached verdict must be retired by the role update")
 	}
 }
 

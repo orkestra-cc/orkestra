@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -29,6 +30,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/orkestra/backend/internal/core/authz/models"
+	"github.com/orkestra/backend/internal/core/authz/repository"
 	"github.com/orkestra/backend/internal/shared/database"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
@@ -620,3 +622,345 @@ func TestHasPermission_CacheHit_BypassesRepoLookup(t *testing.T) {
 		t.Errorf("cached perm must be honoured without consulting the repo")
 	}
 }
+
+// ===== withGeneration (D27) =====
+//
+// withGeneration is the invalidation CONTRACT: pre-invalidate → write →
+// post-invalidate. The pre step is a gate — a counter the store cannot
+// bump means the change's effect cannot be guaranteed, so nothing is
+// written. The post step retires a repopulation that landed during the
+// write; its failure is logged, counted, and non-fatal.
+
+// assertNoGenerationBump fails when either counter moved. A mutation
+// that was REFUSED must retire nothing: bumping before a request that is
+// about to be rejected turns a 403/404 into a remotely triggerable cache
+// flush (ruling P9). Reads both the wire (no INCR crossed it) and the
+// store (no counter key exists), because the two can only disagree if
+// the recorder is wired wrong.
+func assertNoGenerationBump(t *testing.T, mr *miniredis.Miniredis, rec *cmdRecorder) {
+	t.Helper()
+	if n := rec.count("INCR"); n != 0 {
+		t.Errorf("a refused mutation issued %d INCR(s): %v", n, rec.log())
+	}
+	if mr.Exists(authzGlobalGenKey) {
+		t.Error("the global generation was bumped by a refused mutation")
+	}
+	for _, k := range mr.Keys() {
+		if strings.HasPrefix(k, authzUserGenPrefix) {
+			t.Errorf("per-user generation %q was bumped by a refused mutation", k)
+		}
+	}
+}
+
+func TestWithGeneration_PreInvalidationFailureRefusesTheWrite(t *testing.T) {
+	svc, _, mr := newCacheTestService(t, staticRoleLookup(""))
+	mr.Close()
+	written := false
+
+	err := svc.withGeneration(context.Background(), userScope("u-1"), func() error {
+		written = true
+		return nil
+	})
+	if err == nil {
+		t.Fatal("a pre-invalidation failure must refuse the mutation")
+	}
+	if !errors.Is(err, ErrAuthzCacheUnavailable) {
+		t.Errorf("err = %v, want it to wrap ErrAuthzCacheUnavailable", err)
+	}
+	if written {
+		t.Fatal("the mutation must not run when the pre-invalidation failed")
+	}
+}
+
+// The post step retires an entry repopulated by a concurrent read
+// between the pre-invalidation and the write — that read stored the OLD
+// verdict under the NEW generation.
+func TestWithGeneration_PostInvalidationRetiresARepopulation(t *testing.T) {
+	svc, _, _ := newCacheTestService(t, staticRoleLookup(""))
+	ctx := context.Background()
+
+	err := svc.withGeneration(ctx, userScope("u-1"), func() error {
+		// Stand in for the racing read that repopulates with the old answer.
+		svc.cacheSet(ctx, "u-1", "t-1", []string{"stale"})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("withGeneration: %v", err)
+	}
+	if _, ok := svc.cacheGet(ctx, "u-1", "t-1"); ok {
+		t.Fatal("the post-invalidation must retire an entry repopulated during the write")
+	}
+}
+
+// A post-invalidation failure is NOT fatal: the write already landed, so
+// refusing it after the fact would lie to the caller. The stale entry
+// dies within its own 60s TTL.
+func TestWithGeneration_PostInvalidationFailureIsNonFatal(t *testing.T) {
+	svc, _, mr := newCacheTestService(t, staticRoleLookup(""))
+	written := false
+
+	err := svc.withGeneration(context.Background(), globalScope(), func() error {
+		written = true
+		mr.Close() // the store dies between the write and the post step
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("a post-invalidation failure must not fail the mutation, got %v", err)
+	}
+	if !written {
+		t.Fatal("precondition: the mutation must have run")
+	}
+}
+
+func TestWithGeneration_MutationErrorPropagates(t *testing.T) {
+	svc, _, _ := newCacheTestService(t, staticRoleLookup(""))
+	sentinel := errors.New("write failed")
+	err := svc.withGeneration(context.Background(), userScope("u-1"), func() error {
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v, want the mutation's own error", err)
+	}
+	if errors.Is(err, ErrAuthzCacheUnavailable) {
+		t.Error("a mutation failure must not be reported as a cache failure")
+	}
+}
+
+// "No cache configured" is not "cache unavailable": with no Redis the
+// gate has nothing to guard, so the mutation must still run.
+func TestWithGeneration_NilRedisRunsTheMutation(t *testing.T) {
+	svc := &Service{}
+	written := false
+	if err := svc.withGeneration(context.Background(), globalScope(), func() error {
+		written = true
+		return nil
+	}); err != nil {
+		t.Fatalf("a nil Redis must not refuse the mutation, got %v", err)
+	}
+	if !written {
+		t.Fatal("the mutation must run when no cache is configured")
+	}
+}
+
+func TestWithGeneration_ScopeSelectsTheCounter(t *testing.T) {
+	svc, _, mr := newCacheTestService(t, staticRoleLookup(""))
+	ctx := context.Background()
+
+	if err := svc.withGeneration(ctx, userScope("u-1"), func() error { return nil }); err != nil {
+		t.Fatalf("withGeneration(user): %v", err)
+	}
+	if mr.Exists(authzGlobalGenKey) {
+		t.Error("a user-scoped mutation must not bump the global counter")
+	}
+	if got, _ := mr.Get(authzUserGenPrefix + "u-1"); got != "2" {
+		t.Errorf("user generation = %q, want \"2\" (pre + post)", got)
+	}
+
+	if err := svc.withGeneration(ctx, globalScope(), func() error { return nil }); err != nil {
+		t.Fatalf("withGeneration(global): %v", err)
+	}
+	if got, _ := mr.Get(authzGlobalGenKey); got != "2" {
+		t.Errorf("global generation = %q, want \"2\" (pre + post)", got)
+	}
+}
+
+// ===== P9: a REFUSED mutation retires nothing =====
+
+func TestUpdateRole_SystemRoleRefusalBumpsNothing(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	repo.seedRole("role-sys", "administrator", true, []string{"system.users.admin"}, "")
+	rec := recordCommands(t, mr)
+
+	_, err := svc.UpdateRole(context.Background(), "", "role-sys", granterSystem, models.UpdateRoleInput{
+		Name: strPtr("renamed"),
+	})
+	if !errors.Is(err, ErrSystemRoleImmutable) {
+		t.Fatalf("err = %v, want ErrSystemRoleImmutable", err)
+	}
+	assertNoGenerationBump(t, mr, rec)
+}
+
+func TestUpdateRole_CrossTenantRefusalBumpsNothing(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	registerTestPermissions(t, svc, registered("billing.invoice.read"))
+	repo.seedRole("role-b", "reader", false, []string{"billing.invoice.read"}, "tenant-B")
+	rec := recordCommands(t, mr)
+
+	// tenant-A asking to edit tenant-B's role: 404, and nothing retired.
+	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-b", granterSystem, models.UpdateRoleInput{
+		Permissions: []string{"billing.invoice.read"},
+	})
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("err = %v, want repository.ErrNotFound", err)
+	}
+	assertNoGenerationBump(t, mr, rec)
+}
+
+func TestUpdateRole_UnknownPermissionRefusalBumpsNothing(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	registerTestPermissions(t, svc, registered("billing.invoice.read"))
+	repo.seedRole("role-c", "reader", false, []string{"billing.invoice.read"}, "tenant-A")
+	rec := recordCommands(t, mr)
+
+	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
+		Permissions: []string{"billing.invoice.nope"},
+	})
+	if !errors.Is(err, ErrUnknownPermission) {
+		t.Fatalf("err = %v, want ErrUnknownPermission", err)
+	}
+	assertNoGenerationBump(t, mr, rec)
+}
+
+// A patch that changes no field never reaches the repo, so it must not
+// retire anything either.
+func TestUpdateRole_NoOpPatchBumpsNothing(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	repo.seedRole("role-c", "reader", false, []string{"billing.invoice.read"}, "tenant-A")
+	rec := recordCommands(t, mr)
+
+	if _, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{}); err != nil {
+		t.Fatalf("UpdateRole: %v", err)
+	}
+	assertNoGenerationBump(t, mr, rec)
+}
+
+func TestDeleteRole_SystemRoleRefusalBumpsNothing(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	repo.seedRole("role-sys", "administrator", true, []string{"system.users.admin"}, "")
+	rec := recordCommands(t, mr)
+
+	if err := svc.DeleteRole(context.Background(), "", "role-sys"); !errors.Is(err, ErrSystemRoleImmutable) {
+		t.Fatalf("err = %v, want ErrSystemRoleImmutable", err)
+	}
+	assertNoGenerationBump(t, mr, rec)
+}
+
+func TestCreateBinding_RefusedGrantBumpsNothing(t *testing.T) {
+	// The cascade rule refuses the grant (403). Nothing is written, so
+	// nothing may be retired.
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	repo.seedRole("role-X", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
+	rec := recordCommands(t, mr)
+
+	_, err := svc.CreateBinding(context.Background(), "tenant-A", "granter-with-nothing", models.CreateBindingInput{
+		UserUUID: "u-target",
+		RoleUUID: "role-X",
+	})
+	if !errors.Is(err, ErrInsufficientPermissionsToGrant) {
+		t.Fatalf("err = %v, want ErrInsufficientPermissionsToGrant", err)
+	}
+	assertNoGenerationBump(t, mr, rec)
+}
+
+// ===== the gate: a cache that cannot be bumped refuses the write =====
+
+func TestUpdateRole_CacheUnavailableRefusesTheWrite(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	registerTestPermissions(t, svc, registered("billing.invoice.read", "billing.invoice.refund"))
+	repo.seedRole("role-c", "reader", false, []string{"billing.invoice.read"}, "tenant-A")
+	mr.Close()
+
+	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
+		Permissions: []string{"billing.invoice.read", "billing.invoice.refund"},
+	})
+	if !errors.Is(err, ErrAuthzCacheUnavailable) {
+		t.Fatalf("err = %v, want ErrAuthzCacheUnavailable", err)
+	}
+	role, getErr := repo.GetRoleByUUID(context.Background(), "role-c")
+	if getErr != nil {
+		t.Fatalf("GetRoleByUUID: %v", getErr)
+	}
+	if len(role.Permissions) != 1 {
+		t.Errorf("permissions = %v, want the write to have been refused", role.Permissions)
+	}
+}
+
+func TestCreateBinding_CacheUnavailableRefusesTheGrant(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup("super_admin"))
+	repo.seedRole("role-X", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
+	mr.Close()
+
+	_, err := svc.CreateBinding(context.Background(), "tenant-A", "granter", models.CreateBindingInput{
+		UserUUID: "u-target",
+		RoleUUID: "role-X",
+	})
+	if !errors.Is(err, ErrAuthzCacheUnavailable) {
+		t.Fatalf("err = %v, want ErrAuthzCacheUnavailable", err)
+	}
+	if len(repo.bindings) != 0 {
+		t.Errorf("bindings = %v, want the grant to have been refused", repo.bindings)
+	}
+}
+
+func TestDeleteRole_CacheUnavailableRefusesTheDelete(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	repo.seedRole("role-c", "reader", false, []string{"billing.invoice.read"}, "tenant-A")
+	repo.seedBinding("b-1", "u-1", "tenant-A", "reader")
+	mr.Close()
+
+	err := svc.DeleteRole(context.Background(), "tenant-A", "role-c")
+	if !errors.Is(err, ErrAuthzCacheUnavailable) {
+		t.Fatalf("err = %v, want ErrAuthzCacheUnavailable", err)
+	}
+	if _, ok := repo.roles["role-c"]; !ok {
+		t.Error("the role must survive a refused delete")
+	}
+	if _, ok := repo.bindings["b-1"]; !ok {
+		t.Error("the binding cascade must not run when the delete is refused")
+	}
+}
+
+// The cascade hooks learn how many rows they removed only from the write
+// itself, so the "if n > 0" guard (TestRemoveBindingsByTenant_NoMatch_
+// DoesNotFlush) leaves them with the post-write half alone. Its failure
+// is RETURNED — the tenant module's hooks propagate it — never logged
+// and swallowed.
+func TestRemoveBindingsByTenant_CacheUnavailableIsReported(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	repo.seedBinding("b-A", "u-1", "tenant-A", "role")
+	mr.Close()
+
+	n, err := svc.RemoveBindingsByTenant(context.Background(), "tenant-A")
+	if !errors.Is(err, ErrAuthzCacheUnavailable) {
+		t.Fatalf("err = %v, want ErrAuthzCacheUnavailable", err)
+	}
+	if n != 1 {
+		t.Errorf("n = %d, want the removal count to still be reported", n)
+	}
+}
+
+func TestRemoveBindingsByUserAndTenant_CacheUnavailableIsReported(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	repo.seedBinding("b-A", "u-1", "tenant-A", "role")
+	mr.Close()
+
+	n, err := svc.RemoveBindingsByUserAndTenant(context.Background(), "u-1", "tenant-A")
+	if !errors.Is(err, ErrAuthzCacheUnavailable) {
+		t.Fatalf("err = %v, want ErrAuthzCacheUnavailable", err)
+	}
+	if n != 1 {
+		t.Errorf("n = %d, want the removal count to still be reported", n)
+	}
+}
+
+// DeleteBinding has no pre-write guard of its own — the repository
+// discovers the miss — so the gate's pre-bump runs before the row is
+// known to exist, and an unmatched delete retires the cache once. The
+// residual is bounded: the caller already holds authz.binding.delete in
+// the resolved tenant (assertTenantScope pins path == resolved), and the
+// cost is a cold cache, never a wrong verdict. Pinned so a future reader
+// sees it is deliberate, not an oversight.
+func TestDeleteBinding_UnmatchedDeleteStillReturnsNotFound(t *testing.T) {
+	svc, _, mr := newCacheTestService(t, staticRoleLookup(""))
+	rec := recordCommands(t, mr)
+
+	err := svc.DeleteBinding(context.Background(), "tenant-A", "b-nonexistent")
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("err = %v, want repository.ErrNotFound", err)
+	}
+	if got := rec.count("INCR"); got != 1 {
+		t.Errorf("INCR count = %d, want exactly the single pre-invalidation", got)
+	}
+}
+
+func strPtr(s string) *string { return &s }

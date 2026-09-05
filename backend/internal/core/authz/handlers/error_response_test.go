@@ -39,6 +39,7 @@ func TestMapCreateBindingErrorPreservesKnownClientErrors(t *testing.T) {
 		{"missing granter", services.ErrGranterRequired, 400},
 		{"unknown role", repository.ErrNotFound, 404},
 		{"binding exists", services.ErrBindingExists, 409},
+		{"cache unavailable", services.ErrAuthzCacheUnavailable, 503},
 	}
 
 	for _, tt := range tests {
@@ -90,6 +91,7 @@ func TestMapRoleWriteErrorPreservesKnownClientErrors(t *testing.T) {
 		{"unknown permission", services.ErrUnknownPermission, 422, errcode.AuthzPermissionUnknown},
 		{"platform key in a tenant role", services.ErrSystemPermissionInCustomRole, 422, errcode.AuthzSystemPermissionForbidden},
 		{"cascade refusal", services.ErrInsufficientPermissionsToGrant, 403, ""},
+		{"cache unavailable", services.ErrAuthzCacheUnavailable, 503, errcode.AuthzCacheUnavailable},
 	}
 
 	for _, tt := range tests {
@@ -181,6 +183,76 @@ func TestRoleActorNeverAcceptsThePlatformSentinel(t *testing.T) {
 			}
 			if got := roleActor(ctx); got != tt.want {
 				t.Fatalf("roleActor = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// --- the D27 cache gate (503, never a codeless 500) ---
+
+// TestCacheUnavailableIsA503OnEveryMutationMapper pins the wire contract
+// the operator console branches on. A mutation refused because the
+// permission cache could not be retired is a TRANSIENT server-side
+// condition — the caller should retry, not correct their request — so
+// every mapper answers 503 carrying authz.cache_unavailable. Before
+// this, the update/delete paths fell through to a codeless 500 the
+// console cannot classify.
+func TestCacheUnavailableIsA503OnEveryMutationMapper(t *testing.T) {
+	t.Parallel()
+	mappers := map[string]func(context.Context, error) error{
+		"role write": func(ctx context.Context, err error) error {
+			return mapRoleWriteError(ctx, "update the role", err)
+		},
+		"role delete":    mapRoleDeleteError,
+		"binding create": mapCreateBindingError,
+		"binding delete": mapBindingDeleteError,
+	}
+	for name, mapper := range mappers {
+		t.Run(name, func(t *testing.T) {
+			err := mapper(context.Background(), services.ErrAuthzCacheUnavailable)
+			se, ok := err.(huma.StatusError)
+			if !ok || se.GetStatus() != 503 {
+				t.Fatalf("want 503 huma.StatusError, got %T (%v)", err, err)
+			}
+			var coded *errcode.Error
+			if !errors.As(err, &coded) {
+				t.Fatalf("want *errcode.Error, got %T", err)
+			}
+			if coded.Code != errcode.AuthzCacheUnavailable {
+				t.Fatalf("code = %q, want %q", coded.Code, errcode.AuthzCacheUnavailable)
+			}
+			if strings.Contains(err.Error(), "authz:") {
+				t.Fatalf("service diagnostic reached the client: %q", err)
+			}
+		})
+	}
+}
+
+// The delete mappers keep their own rows: a missing row is still 404,
+// and an unrecognised failure is still an opaque 500.
+func TestMapDeleteErrorsPreserveTheirOwnRows(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		mapper func(context.Context, error) error
+		err    error
+		want   int
+	}{
+		{"role not found", mapRoleDeleteError, repository.ErrNotFound, 404},
+		{"system role", mapRoleDeleteError, services.ErrSystemRoleImmutable, 403},
+		{"role unknown failure", mapRoleDeleteError, errors.New("cedar evaluator: boom"), 500},
+		{"binding not found", mapBindingDeleteError, repository.ErrNotFound, 404},
+		{"binding unknown failure", mapBindingDeleteError, errors.New("cedar evaluator: boom"), 500},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.mapper(context.Background(), tt.err)
+			se, ok := err.(huma.StatusError)
+			if !ok || se.GetStatus() != tt.want {
+				t.Fatalf("want %d huma.StatusError, got %T (%v)", tt.want, err, err)
+			}
+			if strings.Contains(strings.ToLower(err.Error()), "cedar") {
+				t.Fatalf("policy-engine text reached the client: %q", err)
 			}
 		})
 	}

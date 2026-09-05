@@ -68,6 +68,21 @@ var ErrGranterRequired = errors.New("authz: granter is required")
 // semantics should call EnsureBinding instead.
 var ErrBindingExists = errors.New("authz: role already bound")
 
+// ErrAuthzCacheUnavailable is returned when a mutation that changes
+// effective permissions could not retire the verdicts it invalidates.
+//
+// Every such mutation bumps the cache generation BEFORE it writes (see
+// withGeneration): a counter the store cannot bump means the change's
+// effect cannot be guaranteed, so the change is refused and nothing is
+// written. Handlers answer 503 errcode.AuthzCacheUnavailable — the
+// caller's request was fine, the server's cache store was not, and the
+// retry is theirs to make.
+//
+// A deployment with no Redis wired never sees this: there are no cached
+// verdicts to retire, so the invalidation is a no-op success. "No cache
+// configured" is not "cache unavailable".
+var ErrAuthzCacheUnavailable = errors.New("authz: permission cache unavailable")
+
 // granterSystem is the sentinel value handlers pass when a binding is
 // platform-issued rather than user-initiated (e.g. the OwnerRoleBinder
 // hook in tenant.CreateTenant). System grants bypass the cascade check
@@ -1012,10 +1027,16 @@ func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID, actor stri
 		return existing, nil
 	}
 
-	if err := s.repo.UpdateRoleFields(ctx, roleUUID, fields); err != nil {
+	// The generation bump lands HERE, not at the top of the method: every
+	// refusal above (cross-tenant 404, system-role 403, the D21 validator's
+	// 422s) must retire nothing, or a request the service rejects becomes a
+	// remotely triggerable cache flush. globalScope because a role reaches
+	// its holders through bindings we would have to scan to enumerate.
+	if err := s.withGeneration(ctx, globalScope(), func() error {
+		return s.repo.UpdateRoleFields(ctx, roleUUID, fields)
+	}); err != nil {
 		return nil, err
 	}
-	s.logCacheBumpFailure(ctx, s.flushCache(ctx), "")
 
 	return s.repo.GetRoleByUUID(ctx, roleUUID)
 }
@@ -1095,20 +1116,22 @@ func (s *Service) DeleteRole(ctx context.Context, tenantID, roleUUID string) err
 	if existing.TenantID != tenantID {
 		return repository.ErrNotFound
 	}
-	removed, err := s.repo.DeleteBindingsByRoleUUID(ctx, roleUUID)
-	if err != nil {
-		return fmt.Errorf("cascade bindings: %w", err)
-	}
-	if removed > 0 && s.logger != nil {
-		s.logger.Info("authz: cascaded binding delete",
-			slog.String("role", existing.Name),
-			slog.Int64("bindings", removed))
-	}
-	if err := s.repo.DeleteRole(ctx, roleUUID); err != nil {
-		return err
-	}
-	s.logCacheBumpFailure(ctx, s.flushCache(ctx), "")
-	return nil
+	// Both guards above have run, so from here the method writes. The
+	// cascade delete and the role delete are one mutation for
+	// invalidation purposes — the cascade alone already changes effective
+	// permissions, so it must not run outside the gate.
+	return s.withGeneration(ctx, globalScope(), func() error {
+		removed, err := s.repo.DeleteBindingsByRoleUUID(ctx, roleUUID)
+		if err != nil {
+			return fmt.Errorf("cascade bindings: %w", err)
+		}
+		if removed > 0 && s.logger != nil {
+			s.logger.Info("authz: cascaded binding delete",
+				slog.String("role", existing.Name),
+				slog.Int64("bindings", removed))
+		}
+		return s.repo.DeleteRole(ctx, roleUUID)
+	})
 }
 
 func (s *Service) ListPermissions(ctx context.Context) ([]models.Permission, error) {
@@ -1158,15 +1181,17 @@ func (s *Service) validateBindingGrant(ctx context.Context, tenantID, grantedBy 
 	return role, nil
 }
 
-// afterBindingGrant runs the post-persist side effects shared by
-// CreateBinding and EnsureBinding: invalidate the target's cached effective
-// permissions, then — for a role that elevates privilege — eagerly start
-// their MFA enrollment grace clock. Safe to call unconditionally, including
-// on EnsureBinding's reused-existing-row path: cache invalidation is
-// idempotent, and StartMFAGraceIfUnset (per its name) no-ops once the clock
-// is already running, so a replayed ensure never resets it.
+// afterBindingGrant runs the post-persist side effect shared by
+// CreateBinding and EnsureBinding: for a role that elevates privilege,
+// eagerly start the target's MFA enrollment grace clock. Safe to call
+// unconditionally, including on EnsureBinding's reused-existing-row
+// path, because StartMFAGraceIfUnset (per its name) no-ops once the
+// clock is already running, so a replayed ensure never resets it.
+//
+// Cache invalidation is NOT here any more: it moved into the
+// withGeneration wrapper around each persist, so a cache that cannot be
+// retired refuses the grant instead of following it (D27).
 func (s *Service) afterBindingGrant(ctx context.Context, userUUID, roleName string) {
-	s.logCacheBumpFailure(ctx, s.InvalidateUserPermissions(ctx, userUUID), userUUID)
 	if s.startMFAGrace != nil && roleElevatesPrivilege(roleName) {
 		if err := s.startMFAGrace(ctx, userUUID); err != nil {
 			s.logger.Warn("authz: start MFA grace failed after binding",
@@ -1192,19 +1217,29 @@ func (s *Service) CreateBinding(ctx context.Context, tenantID, grantedBy string,
 		GrantedBy: grantedBy,
 		ExpiresAt: input.ExpiresAt,
 	}
-	if err := s.repo.CreateBinding(ctx, b); err != nil {
-		// authz_bindings now carries a unique (tenantId, userUUID, roleId)
-		// index (see this module's CLAUDE.md + the 0009 migration). A
-		// plain CreateBinding on a tuple that is already granted surfaces
-		// as E11000 here rather than silently doubling the row — mapped to
-		// a sentinel so the handler can answer 409 instead of leaking the
-		// raw duplicate-key error. An EXPIRED incumbent is not "already
-		// granted": the repository reaps it and retries, so this path is
-		// reached only for a live one. Callers that want the idempotent
-		// grant-or-return-existing behavior should call EnsureBinding.
-		if mongo.IsDuplicateKeyError(err) {
-			return nil, ErrBindingExists
+	// validateBindingGrant has already refused every grant it is going to
+	// refuse, so the wrapper opens here: a 403/404/409 from the validator
+	// retires nothing. userScope because a binding changes exactly one
+	// user's effective permissions — the per-user counter is what keeps
+	// one grant from costing every other user a cold cache.
+	if err := s.withGeneration(ctx, userScope(input.UserUUID), func() error {
+		if err := s.repo.CreateBinding(ctx, b); err != nil {
+			// authz_bindings now carries a unique (tenantId, userUUID, roleId)
+			// index (see this module's CLAUDE.md + the 0009 migration). A
+			// plain CreateBinding on a tuple that is already granted surfaces
+			// as E11000 here rather than silently doubling the row — mapped to
+			// a sentinel so the handler can answer 409 instead of leaking the
+			// raw duplicate-key error. An EXPIRED incumbent is not "already
+			// granted": the repository reaps it and retries, so this path is
+			// reached only for a live one. Callers that want the idempotent
+			// grant-or-return-existing behavior should call EnsureBinding.
+			if mongo.IsDuplicateKeyError(err) {
+				return ErrBindingExists
+			}
+			return err
 		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	s.afterBindingGrant(ctx, input.UserUUID, role.Name)
@@ -1236,8 +1271,17 @@ func (s *Service) EnsureBinding(ctx context.Context, tenantID, grantedBy string,
 		GrantedBy: grantedBy,
 		ExpiresAt: input.ExpiresAt,
 	}
-	out, err := s.repo.EnsureBinding(ctx, b)
-	if err != nil {
+	// Same placement as CreateBinding: after the shared validation, around
+	// the persist. The upsert may reuse an existing row rather than write
+	// one, and the bump runs either way — an INCR on a user's own counter
+	// is cheap, and a replay that skipped it could leave a verdict cached
+	// from before the original grant.
+	var out *models.Binding
+	if err := s.withGeneration(ctx, userScope(input.UserUUID), func() error {
+		var err error
+		out, err = s.repo.EnsureBinding(ctx, b)
+		return err
+	}); err != nil {
 		return nil, err
 	}
 	s.afterBindingGrant(ctx, input.UserUUID, role.Name)
@@ -1253,42 +1297,71 @@ func (s *Service) ListBindings(ctx context.Context, tenantID string) ([]models.B
 // a member of tenant A cannot revoke a binding in tenant B by UUID. Global /
 // system-role bindings (tenantId=="") are not tenant-manageable and never match
 // a non-empty tenant scope.
+//
+// The method has no pre-write guard of its own — the repository's
+// (uuid, tenantId) filter is what discovers a miss — so the gate's
+// pre-invalidation runs before the row is known to exist and an
+// unmatched revoke retires the cache once. That residual is bounded and
+// deliberate: reaching this call already requires authz.binding.delete
+// in the resolved tenant (the handler pins path == resolved tenant), and
+// the cost is a cold cache, never a wrong verdict. Trading it away would
+// mean either a second round trip per revoke or a revocation that can
+// land with its stale verdict still live, which is the defect D27 closes.
 func (s *Service) DeleteBinding(ctx context.Context, tenantID, uuid string) error {
-	if err := s.repo.DeleteBinding(ctx, tenantID, uuid); err != nil {
-		return err
-	}
-	s.logCacheBumpFailure(ctx, s.flushCache(ctx), "")
-	return nil
+	return s.withGeneration(ctx, globalScope(), func() error {
+		return s.repo.DeleteBinding(ctx, tenantID, uuid)
+	})
 }
 
 // RemoveBindingsByTenant drops every binding scoped to the given tenant
-// and flushes the effective-permission cache so any in-flight request can
+// and retires the effective-permission cache so any in-flight request can
 // no longer consult a cached entry pointing at a now-deleted tenant.
 // Called by the cascade hook the authz module registers on the tenant
 // service. Returns the number of bindings removed for audit purposes.
+//
+// This is the one shape withGeneration cannot take: how many rows the
+// cascade affects is known only from the write itself, and the "nothing
+// removed, nothing retired" guard below is a pinned contract
+// (TestRemoveBindingsByTenant_NoMatch_DoesNotFlush). So the pre-write
+// gate has nothing to refuse here and only the post-write half runs. Its
+// failure is RETURNED rather than logged and swallowed — the tenant
+// module's post-delete hook propagates it, and a caller told the cascade
+// succeeded while a revoked verdict is still served is exactly what D27
+// closes.
 func (s *Service) RemoveBindingsByTenant(ctx context.Context, tenantUUID string) (int64, error) {
 	n, err := s.repo.DeleteBindingsByTenant(ctx, tenantUUID)
 	if err != nil {
 		return 0, err
 	}
 	if n > 0 {
-		s.logCacheBumpFailure(ctx, s.flushCache(ctx), "")
+		if bumpErr := s.bumpGeneration(ctx, globalScope()); bumpErr != nil {
+			return n, fmt.Errorf("%w: %v", ErrAuthzCacheUnavailable, bumpErr)
+		}
 	}
 	return n, nil
 }
 
 // RemoveBindingsByUserAndTenant drops every binding for one (user, tenant)
-// pair and flushes the effective-permission cache. Wired into the tenant
+// pair and retires the effective-permission cache. Wired into the tenant
 // module's member-unbind hook (SetMemberUnbinder) so removing a member or
 // changing their tenant role never leaves a stale binding that keeps granting
 // the old role's permissions. Returns the number of bindings removed.
+//
+// Same shape and the same reason as RemoveBindingsByTenant above: the
+// count comes from the write, so only the post-write half runs and its
+// failure is returned. It keeps the global scope this method has always
+// used rather than narrowing to userScope(userUUID) — a narrowing is
+// available and cheaper, but it is a behaviour change no caller asked
+// for, so it belongs in its own commit.
 func (s *Service) RemoveBindingsByUserAndTenant(ctx context.Context, userUUID, tenantUUID string) (int64, error) {
 	n, err := s.repo.DeleteBindingsByUserAndTenant(ctx, userUUID, tenantUUID)
 	if err != nil {
 		return 0, err
 	}
 	if n > 0 {
-		s.logCacheBumpFailure(ctx, s.flushCache(ctx), "")
+		if bumpErr := s.bumpGeneration(ctx, globalScope()); bumpErr != nil {
+			return n, fmt.Errorf("%w: %v", ErrAuthzCacheUnavailable, bumpErr)
+		}
 	}
 	return n, nil
 }
@@ -1498,21 +1571,70 @@ func (s *Service) flushCache(ctx context.Context) error {
 	return nil
 }
 
-// logCacheBumpFailure records a generation bump that failed on a path
-// that is still best-effort. Preserves today's behaviour (the scan-based
-// invalidation swallowed every error) while making the failure visible.
-//
-// TODO(D27): these call sites become withGeneration, whose PRE step
-// is a gate — a counter the store cannot bump means the change's effect
-// cannot be guaranteed, so the mutation is refused with 503 rather than
-// written and logged. This helper goes away with them.
-func (s *Service) logCacheBumpFailure(ctx context.Context, err error, userUUID string) {
-	if err == nil || s.logger == nil {
-		return
+// --- The invalidation contract (D27) ---
+
+// generationScope names which counter a mutation retires: one user's, or
+// — when the affected user set is not cheaply enumerable — everyone's.
+type generationScope struct {
+	user string // "" means the global counter
+}
+
+// userScope retires one user's cached verdicts, in every tenant.
+func userScope(userUUID string) generationScope { return generationScope{user: userUUID} }
+
+// globalScope retires every user's cached verdicts. Used where the set
+// of affected users cannot be enumerated without a scan: a role's
+// permissions changed, a role was deleted, a binding was revoked.
+func globalScope() generationScope { return generationScope{} }
+
+// bumpGeneration retires the verdicts named by scope. The single seam
+// both halves of withGeneration go through, so a caller can never bump
+// one counter on the way in and the other on the way out.
+func (s *Service) bumpGeneration(ctx context.Context, scope generationScope) error {
+	if scope.user != "" {
+		return s.InvalidateUserPermissions(ctx, scope.user)
 	}
-	s.logger.ErrorContext(ctx, "authz: permission cache invalidation failed; a stale verdict may be served until its TTL expires",
-		slog.String("user_uuid", userUUID),
-		slog.String("error", err.Error()))
+	return s.flushCache(ctx)
+}
+
+// withGeneration wraps a mutation that changes effective permissions in
+// pre-invalidate → write → post-invalidate.
+//
+// The PRE step is a GATE: a generation the store cannot bump means the
+// change's effect cannot be guaranteed, so the change is REFUSED
+// (ErrAuthzCacheUnavailable, 503) and nothing is written. Redis being
+// unavailable already stops sessions, MFA challenges and OAuth state;
+// refusing a permission change in that state is consistent, and the
+// retry is the admin's. A deployment with no cache at all is not that
+// state — there the bump is a no-op success and the mutation proceeds.
+//
+// The POST step retires the only race left: a read that repopulated the
+// cache between the pre-invalidation and the write stored the OLD
+// verdict under the NEW generation. A failure there is logged and
+// counted but NOT fatal — the write has already landed, so reporting
+// failure would lie to the caller; the stale entry dies within its own
+// 60s TTL.
+//
+// Call it INSIDE the method, after that method's own validation, and
+// only on the path that actually writes. Wrapping a whole method bumps
+// the generation before its guards run, which turns a refused 403/404
+// request into a remotely triggerable cache flush.
+func (s *Service) withGeneration(ctx context.Context, scope generationScope, mutate func() error) error {
+	if err := s.bumpGeneration(ctx, scope); err != nil {
+		return fmt.Errorf("%w: %v", ErrAuthzCacheUnavailable, err)
+	}
+	if err := mutate(); err != nil {
+		return err
+	}
+	if err := s.bumpGeneration(ctx, scope); err != nil {
+		metrics.Default().RecordAuthzCacheInvalidationFailure()
+		if s.logger != nil {
+			s.logger.ErrorContext(ctx, "authz: post-write cache invalidation failed; a verdict cached during the write may survive up to its TTL",
+				slog.String("user_uuid", scope.user),
+				slog.String("error", err.Error()))
+		}
+	}
+	return nil
 }
 
 // --- helpers ---
