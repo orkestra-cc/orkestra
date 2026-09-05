@@ -206,10 +206,12 @@ const UserLastAdminForbidden = "user.last_admin_forbidden"
 // the same invariant. 403.
 const UserRoleEscalationForbidden = "user.role_escalation_forbidden"
 
-// UserRoleLookupUnavailable signals that a role a guard on the
-// operator-tier user routes had to read was unavailable, so the request
-// could not be reasoned about and was refused. Two lookups can raise it,
-// both on a patch that names a role:
+// UserRoleLookupUnavailable signals that a role a guard on the admin user
+// routes had to read was unavailable, so the request could not be
+// reasoned about and was refused. Raised by the operator-tier routes
+// (/v1/admin/users) and, since spec §4.6 D29, by the client-tier PATCH
+// (/v1/admin/client-users/{id}) as well. Two lookups can raise it, both
+// on a patch that names a role:
 //
 //   - The CALLING user's row, needed for the tier comparison. The guards
 //     take the caller's role from the database, not from the `srole` JWT
@@ -217,7 +219,10 @@ const UserRoleEscalationForbidden = "user.role_escalation_forbidden"
 //     lifetime stale, which is exactly the window the role-change
 //     propagation exists to close. Falling back to the claim here would
 //     make it authoritative again precisely when the database cannot
-//     contradict it.
+//     contradict it. On the client-tier PATCH that row is read from the
+//     OPERATOR provider — the actor of that route is an operator, the
+//     target a client user — and an unregistered provider raises this
+//     code too rather than letting the guard run on an empty role.
 //   - The TARGET's current role, needed to know whether the role actually
 //     changes. Only a change retires the authz permission cache and ends
 //     the sessions minted under the old role (§4.6 D27), so writing
