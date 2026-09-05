@@ -56,7 +56,13 @@ const MfaEnrollWizard = ({ show, onHide }: Props) => {
         setSecret(res.secret);
         setProvisioningUri(res.provisioningUri);
       })
-      .catch((err: { data?: { detail?: string } }) => {
+      .catch((err: { data?: { code?: string; detail?: string } }) => {
+        // reauthentication_required is not this dialog's to report. The base
+        // query has already cleared the session and sent the browser to the
+        // login form (store/api/baseApi.ts), so copy set here would paint one
+        // frame of a tree that is unmounting — and the honest message is on
+        // the login page, not in a modal the user is leaving. Let it through.
+        if (err?.data?.code === 'reauthentication_required') return;
         setError(err?.data?.detail ?? t('userMfa.enrollWizard.beginError'));
       });
   }, [show, begin, t]);
@@ -73,7 +79,17 @@ const MfaEnrollWizard = ({ show, onHide }: Props) => {
       setBackupCodes(res.backupCodes ?? []);
       setStep('backup');
     } catch (err: unknown) {
-      const anyErr = err as { status?: number; data?: { detail?: string } };
+      const anyErr = err as {
+        status?: number;
+        data?: { code?: string; detail?: string };
+      };
+      // Checked BEFORE the status test below, which flattens every 401 into
+      // "that code is incorrect" — a stale-session refusal reported as a
+      // mistyped TOTP would send the user back to their authenticator app
+      // forever. The redirect is already under way; say nothing.
+      if (anyErr?.data?.code === 'reauthentication_required') {
+        return;
+      }
       if (anyErr?.status === 401 || anyErr?.status === 400) {
         setError(t('userMfa.enrollWizard.confirmIncorrectError'));
       } else {

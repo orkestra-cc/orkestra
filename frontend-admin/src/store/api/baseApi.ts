@@ -11,6 +11,7 @@ import type { RootState } from '../index';
 import { setAccessToken, clearAccessToken } from '../slices/authSlice';
 import { requestStepUp } from '../stepUp';
 import { requestPasswordConfirm } from '../passwordConfirm';
+import { DEFAULT_POST_LOGIN, sanitizeReturnTo } from 'utils/returnTo';
 import runtimeConfig from 'config/environment';
 
 // Navigation helper - will be set by the auth provider
@@ -560,6 +561,43 @@ const baseQueryWithRetry: BaseQueryFn<
       const verified = await requestPasswordConfirm();
       if (verified) {
         return await baseQuery(args, api, extraOptions);
+      }
+      return result;
+    }
+
+    // Reauthentication required — the no-factor branch of the backend's
+    // RequireEnrolmentProof gate (spec §4.2 D14), emitted when a session is
+    // too old to add a *first* second factor.
+    //
+    // It is the third gate answer and the only one with no modal: a step-up
+    // needs a factor the caller does not have, and a password reconfirm is
+    // wrong for both an OAuth-only account (no password to reconfirm) and an
+    // MFA-obligated one inside its grace window (the reconfirm endpoint
+    // refuses those outright). A fresh sign-in is the one answer every
+    // population can give, so clear the session and send the operator to the
+    // login form with the page they were on.
+    //
+    // No `!isAuthEndpoint(requestUrl)` guard, unlike the two branches above.
+    // Theirs is not politeness: the modal they open calls an auth route, so
+    // that route's own 401 would re-open the modal. This branch opens
+    // nothing, issues no request and replays nothing — there is no loop to
+    // avoid, and an auth route that ever answered this code would want the
+    // same redirect anyway.
+    //
+    // The path is sanitised before it leaves. `window.location` is
+    // attacker-influenceable within the origin (history.pushState keeps the
+    // origin but not the shape), so without this the branch would hand a
+    // crafted destination to the login flow on every stale enrolment
+    // attempt. A rejected path degrades to DEFAULT_POST_LOGIN rather than to
+    // `undefined`, which AuthProvider would fill back in from
+    // `location.pathname` — the very value that was just rejected.
+    if (errorData?.code === 'reauthentication_required') {
+      api.dispatch(clearAccessToken());
+      if (navigateToLogin) {
+        navigateToLogin(
+          sanitizeReturnTo(window.location.pathname + window.location.search) ??
+            DEFAULT_POST_LOGIN
+        );
       }
       return result;
     }

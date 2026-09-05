@@ -78,8 +78,17 @@ const WebAuthnEnrollDialog = ({ show, onHide }: Props) => {
         name?: string;
         message?: string;
         status?: number;
-        data?: { detail?: string };
+        data?: { code?: string; detail?: string };
       };
+      // reauthentication_required is not this dialog's to report: the base
+      // query has already cleared the session and navigated to the login
+      // form. Checked ahead of the bare `status === 401` test below, which
+      // flattens every 401 into "attestation failed" — telling a user their
+      // authenticator misbehaved when the real answer is "sign in again".
+      if (anyErr?.data?.code === 'reauthentication_required') {
+        setBusy(false);
+        return;
+      }
       // DOMException from navigator.credentials.create — typically the
       // user cancelled the prompt or the authenticator timed out.
       if (anyErr?.name === 'NotAllowedError') {

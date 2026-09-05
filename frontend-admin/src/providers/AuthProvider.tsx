@@ -31,10 +31,19 @@ const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Clear any auth state
       dispatch(logoutAction());
 
-      // Navigate to login with the current path for redirect after login
+      // Navigate to login with the current path for redirect after login.
+      //
+      // `from` carries a router LOCATION, never a bare string. That is the
+      // shape ProtectedRoute stores (`state: { from: location }`) and the
+      // only shape `locationToReturnTo` accepts — a plain string is rejected
+      // there on purpose, and returnTo.test.ts pins it. Passing the string
+      // through gave the console two `state.from` shapes of which only one
+      // survived the read, so every interceptor-driven redirect silently
+      // lost its deep link and landed on DEFAULT_POST_LOGIN. One shape now.
+      // The value is still sanitised on read by every consumer.
       navigate('/login', {
         state: {
-          from: currentPath || location.pathname
+          from: currentPath ? { pathname: currentPath } : location
         },
         replace: true
       });
@@ -44,7 +53,7 @@ const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     // Cleanup on unmount
     return () => setNavigateToLogin(() => {});
-  }, [dispatch, navigate, location.pathname]);
+  }, [dispatch, navigate, location]);
 
   // Timeout to surface slow/unreachable auth checks. Reads the *current*
   // authStore via a ref — the mount-time closure would capture the initial
