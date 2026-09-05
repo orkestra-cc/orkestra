@@ -12,6 +12,7 @@
 //
 // A streaming body is unsupported: the retry re-sends from `init`, and a
 // stream cannot be replayed. No call site has one.
+import { browserNavigation } from "@/api/browserNavigation";
 import { apiBaseURL } from "@/api/client";
 import {
   clearSessionLocally,
@@ -19,6 +20,7 @@ import {
   refreshAccessToken,
   refreshAfterUnauthorized,
 } from "@/auth/tokenStore";
+import { sanitizeNext } from "@/lib/safeNext";
 
 // The CLOSED set of 401 codes that mean the session itself is over. It is a
 // MEMBERSHIP test and deliberately not a presence test: the middleware emits at
@@ -38,6 +40,12 @@ export const TERMINAL_CODES: ReadonlySet<string> = new Set([
 // flight, which our own reckoning cannot cover. It means the OPPOSITE of
 // terminal, so it is never a member of the set above.
 export const CODE_ACCESS_TOKEN_EXPIRED = "access_token_expired";
+
+// The no-factor branch of the backend's RequireEnrolmentProof gate (spec §4.2
+// D14): the session is not dead, it is merely too OLD to add a first second
+// factor. Deliberately NOT a member of TERMINAL_CODES — see the argument on
+// branch 1b below for why it still ends the local session.
+export const CODE_REAUTHENTICATION_REQUIRED = "reauthentication_required";
 
 // How long before a bearer's expiry authedFetch rotates it PROACTIVELY (§4.11).
 // This is a scheduling margin and it belongs to the pre-send check ONLY — see
@@ -187,6 +195,51 @@ export async function authedFetch(
   //    sid, so there is nothing to recover. No refresh, no retry.
   if (code !== null && TERMINAL_CODES.has(code)) {
     clearSessionLocally();
+    return res;
+  }
+
+  // 1b. Reauthentication required, and this is the deliberate exception the
+  //     comment on TERMINAL_CODES demands be argued rather than assumed.
+  //
+  //     That comment forbids `if (body.code) → clear` because four of the
+  //     middleware's 401 codes are refusals of an ACTION on a live session,
+  //     and signing a user out "for being asked to confirm a password" is
+  //     absurd. reauthentication_required is not one of those. It is not
+  //     "prove it's you again on this session" — it is "this session is too
+  //     old to add a second factor", and the ONLY thing that answers it is a
+  //     new interactive sign-in: a step-up needs a factor the caller does not
+  //     have, and a password reconfirm is refused for an MFA-obligated account
+  //     inside its grace window and impossible for an OAuth-only one.
+  //
+  //     So it does NOT join TERMINAL_CODES — the set means "the session is
+  //     over on the server", and this session is alive — but it does end the
+  //     session LOCALLY, for two concrete reasons rather than by analogy:
+  //       * LoginPage forwards an already-authenticated visitor straight to
+  //         its ?next= (LoginPage.tsx). Redirecting without clearing would
+  //         bounce the user back to the page that just refused them, forever.
+  //       * The session marker is what makes the cold load after this
+  //         full-page navigation attempt a silent refresh. A token minted from
+  //         the same refresh cookie carries auth_time FORWARD unchanged
+  //         (backend middleware/auth.go), so a silent restore would return the
+  //         user to the same refusal with no way to see it.
+  //     Clearing both is what makes the sign-in real, and the sign-in is what
+  //     mints the fresh auth_time the gate is asking for.
+  //
+  //     Placed ahead of the replay guard because a reauthentication_required
+  //     401 on a live token returns there untouched: the guard's question is
+  //     "may this be retried", and the answer here is "never — retrying does
+  //     not age a session backwards".
+  if (code === CODE_REAUTHENTICATION_REQUIRED) {
+    clearSessionLocally();
+    // Same ?next= convention RequireAuth stamps and LoginPage consumes, and
+    // the same gate: sanitizeNext is the SPA's single open-redirect guard, and
+    // window.location is influenceable within the origin.
+    const next = sanitizeNext(
+      window.location.pathname + window.location.search,
+    );
+    browserNavigation.assign(
+      next === null ? "/login" : `/login?next=${encodeURIComponent(next)}`,
+    );
     return res;
   }
 

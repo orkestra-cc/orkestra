@@ -77,6 +77,32 @@ check "production: the refusal names the RustFS root"      "yes" "$(saw 'set RUS
 check "development: storage disabled without a RustFS root is refused too" "1" "$(run STORAGE_ACCESS_KEY= STORAGE_SECRET_KEY=)"
 check "production: a key id with no secret is an error"    "1"   "$(run "${prod[@]}" STORAGE_SECRET_KEY=)"
 
+# --- the RustFS S3 API must stay reachable by the reverse proxy ----------
+# STORAGE_PUBLIC_ENDPOINT means the BROWSER PUTs presigned uploads to rustfs
+# through a proxy, but docker-compose.infra.yml publishes that port on
+# ${HOST_BIND_ADDRESS:-127.0.0.1}. A loopback (or unset) value leaves the S3
+# API reachable only from the docker host: presigned uploads 503 at the proxy
+# while every other service keeps working.
+pub=(STORAGE_PUBLIC_ENDPOINT=https://storage.example.com)
+# run_without KEY KV... — like run(), with KEY deleted from the .env after
+# the overrides, to cover the "variable absent, compose default applies" arm.
+run_without() {
+    local key=$1; shift
+    local kv
+    cp "$PROJECT_ROOT/docker/.env.example" "$env_file"
+    for kv in "$@"; do env_set "$env_file" "${kv%%=*}" "${kv#*=}"; done
+    sed -i "/^${key}=/d" "$env_file"
+    bash "$tmp/scripts/env-validate.sh" > "$out" 2>&1
+    printf '%s' "$?"
+}
+check "storage: a loopback bind with a public endpoint warns"  "0"   "$(run "${pub[@]}" HOST_BIND_ADDRESS=127.0.0.1)"
+check "storage: the warning names HOST_BIND_ADDRESS"           "yes" "$(saw 'HOST_BIND_ADDRESS')"
+check "storage: the warning names the presigned upload"        "yes" "$(saw 'presigned')"
+check "storage: an absent bind address warns the same way"     "yes" "$(run_without HOST_BIND_ADDRESS "${pub[@]}" > /dev/null; saw 'presigned')"
+check "storage: localhost counts as loopback"                  "yes" "$(run "${pub[@]}" HOST_BIND_ADDRESS=localhost > /dev/null; saw 'presigned')"
+check "storage: a routable bind address is silent"             "no"  "$(run "${pub[@]}" HOST_BIND_ADDRESS=0.0.0.0 > /dev/null; saw 'presigned')"
+check "storage: no public endpoint, loopback is fine"          "no"  "$(run HOST_BIND_ADDRESS=127.0.0.1 > /dev/null; saw 'presigned')"
+
 # --- staging is as strict as production ---
 check "staging: the shipped RustFS literal is refused"     "1"   "$(run "${prod[@]}" ENV=staging COOKIE_SAME_SITE=lax STORAGE_SECRET_KEY=changeme-rustfs)"
 

@@ -222,6 +222,17 @@ func parseClaims(m jwt.MapClaims) *authModels.JWTClaims {
 	if v, ok := m["last_otp_at"].(float64); ok {
 		c.LastOTPAt = int64(v)
 	}
+	// auth_time (D11) and mfae (D16). Mirrored from the auth module's
+	// jwt_service.mapToClaims — this parser is independent, and drift
+	// between the two is how a gate ends up reading a claim under a key
+	// the minter never writes. Absent leaves the zero value, which is
+	// what every pre-deploy token carries.
+	if v, ok := m["auth_time"].(float64); ok {
+		c.AuthTime = int64(v)
+	}
+	if v, ok := m["mfae"].(float64); ok {
+		c.MFAEpoch = int(v)
+	}
 	return c
 }
 
@@ -371,11 +382,15 @@ func (v *JWTValidator) RequireMFA() func(http.Handler) http.Handler {
 				writeErr(w, http.StatusUnauthorized, "authentication required")
 				return
 			}
-			for _, v := range claims.AMR {
-				if v == "otp" || v == "webauthn" || v == "mfa" {
-					next.ServeHTTP(w, r)
-					return
-				}
+			// The extracted set (auth/models), not a fourth literal list.
+			// Behaviour is unchanged: this validator has always used the
+			// strict second-factor list, and models.IsSecondFactorAMR is
+			// that same list. Deliberately NOT amrSatisfiesStepUp — the
+			// sidecar has never accepted "reauth" here, and widening it
+			// would be a behaviour change, not a refactor.
+			if authModels.HasSecondFactorAMR(claims.AMR) {
+				next.ServeHTTP(w, r)
+				return
 			}
 			w.Header().Set("WWW-Authenticate", `MFA error="step_up_required"`)
 			w.Header().Set("Content-Type", "application/json")
@@ -406,13 +421,13 @@ func (v *JWTValidator) RequireStepUp(maxAge time.Duration) func(http.Handler) ht
 				writeErr(w, http.StatusUnauthorized, "authentication required")
 				return
 			}
-			fresh := false
-			for _, a := range claims.AMR {
-				if a == "otp" || a == "webauthn" || a == "mfa" {
-					fresh = true
-					break
-				}
-			}
+			// Same extracted set, same deliberate strictness as RequireMFA
+			// above. Note both read the RAW claim: this validator does not
+			// go through setUserContext, so it has no resolved MFA
+			// authority to consult and enforces no epoch — a declared
+			// residual (NewJWTValidator has no caller in this repo; it
+			// exists so a fork's sidecar can satisfy module.RoleMiddleware).
+			fresh := authModels.HasSecondFactorAMR(claims.AMR)
 			if !fresh || claims.LastOTPAt == 0 ||
 				time.Since(time.Unix(claims.LastOTPAt, 0)) > maxAge {
 				w.Header().Set("WWW-Authenticate", `MFA error="step_up_required"`)

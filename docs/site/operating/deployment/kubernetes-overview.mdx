@@ -105,6 +105,10 @@ spec:
     spec:
       containers:
       - name: redis
+        # Matches the Compose stack, which also runs plain Redis 8.2. It used
+        # redis-stack-server until that image was found never to load a
+        # module — the command override drops the stack entrypoint — and
+        # Redis 8 folded those modules into core anyway.
         image: redis:8.2-alpine
         args:
         - sh

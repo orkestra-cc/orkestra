@@ -46,7 +46,7 @@ explicitly yet — the grep is the gate.
 | Package | Purpose | Stability |
 | --- | --- | --- |
 | `module/` | Module interface + 17 optional sub-interfaces, BaseModule, ModuleRegistry, ServiceRegistry, ConfigService, RouteInfo, RedisClient, secrets (AES-256-GCM helpers), `ConfigGroup`, `HasConfigGroups`. The boot kernel. | Required surface frozen at v1 |
-| `iface/` | Cross-module interfaces (UserProvider, TenantProvider, AuthzProvider, NotificationSender, JWTProvider, PDFProvider, AIModelProvider, RAGQueryProvider, AuditSink, SessionTerminator, BillingTenantProvider, PaymentProvider, …) + their DTOs (User, OAuthLink, Tenant, NotificationRequest, …). Includes `CategoryConfiguredChecker` (optional companion to `NotificationSender`, ADR-0019) + the `IsConfiguredForCategory` accessor, and the error **sentinels** a consumer must match across the module boundary (`ErrKMSKeyNotFound`, `ErrPasswordLoginDisabled`, `ErrAuthPolicyUnavailable`, …) — see the sentinel rule below. | Additive-only |
+| `iface/` | Cross-module interfaces (UserProvider, TenantProvider, AuthzProvider, NotificationSender, JWTProvider, PDFProvider, AIModelProvider, RAGQueryProvider, AuditSink, SessionTerminator, AuthzCacheInvalidator, BillingTenantProvider, PaymentProvider, …) + their DTOs (User, OAuthLink, Tenant, NotificationRequest, …). Includes `CategoryConfiguredChecker` (optional companion to `NotificationSender`, ADR-0019) + the `IsConfiguredForCategory` accessor, and the error **sentinels** a consumer must match across the module boundary (`ErrKMSKeyNotFound`, `ErrPasswordLoginDisabled`, `ErrAuthPolicyUnavailable`, …) — see the sentinel rule below. Narrow, additive sub-interfaces resolved by a type assertion or `module.GetTyped` against the tier's provider sit beside the wide providers rather than widening them: `UserLifecycleStateProvider` (lifecycle classification for the setup finalizer, resolved by a plain type assertion — `internal/shared/setup/service.go`'s `users.(iface.UserLifecycleStateProvider)`), `OAuthLinkDataUpdater` (refreshes the cached OAuth `picture` URL on link reuse, resolved by a plain type assertion — `internal/core/auth/services/auth_service.go`'s `s.userService.(iface.OAuthLinkDataUpdater)`), `MFAEpochBumper` (`BumpMFAEpoch` — increments `User.MFAEpoch`, the counter that invalidates MFA authority on every live token the instant a credential is removed or replaced, without waiting for a refresh; resolved via `module.GetTyped`), and `AuthzCacheInvalidator` (`InvalidateUserPermissions` — retires a user's cached authorization verdicts after a system-role change; resolved via `module.GetTyped` against `ServiceAuthzProvider`). | Additive-only |
 | `ctxauth/` | Request-context getters: `GetUserUUID`, `GetTenantID`, `GetTenantRoles`, `GetClientIP`, `IsImpersonating`, `TenantKindFromContext`. Plus the exported `Key*` string constants the backend AuthMiddleware writes against. | Frozen |
 | `modulegate/` | `ModuleGate(checker, name)` HTTP middleware (503 when disabled) + `ModuleEnabledChecker` interface. | Frozen |
 | `tenantrepo/` | Fail-closed Mongo query helpers (`Scope`, `MustScope`, `StampInsert`, `StampInsertM`, `ScopeAggregate`, `RequireInternalTenant`, `RequireExternalTenant`) + `ErrTenantScopeMissing` / `ErrTenantKindMismatch` sentinels. | Frozen |
@@ -65,15 +65,38 @@ The SDK is on the path to v1.0 publication. Until then:
   `Init`). New module capabilities go behind optional sub-interfaces in
   `module/module.go` — see the existing `HasConfigSchema`,
   `HasNavItems`, `Startable`, … pattern. Never widen `Module`.
-- **`module.RedisClient` is provided TO modules, not implemented BY them.**
-  It is the one SDK interface the backend satisfies on the consumer's
-  behalf (`deps.RedisAdapter`), so widening it does not ripple out to
-  module authors the way widening `iface.UserProvider` would. It gained
-  `Incr` + `Expire` for callers that cap attempts: a read-modify-write
-  counter over `Get`/`Set` loses concurrent increments, which silently
-  turns "N tries" into "N tries per serial caller". A fork that
-  substitutes its own `RedisClient` (a test double, typically) must add
-  the two methods.
+- **`module.RoleMiddleware` is implemented BY forks, so it is additive-only
+  too** — the same category as `iface.UserProvider`, and (since the
+  `RedisClient` correction below) the same category as `RedisClient` as
+  well. A fork that supplies its own route-gating middleware satisfies
+  this interface, so a new method on it breaks that fork at compile time.
+  New gates therefore arrive as their own sub-interface, type-asserted off
+  `APISurface.AuthMW`: `module.EnrolmentProofGate`
+  (`RequireEnrolmentProof`, spec §4.2 D11/D12) is the worked example.
+  ⚠️ **A failed assertion must fail closed, never pass through** — a gate
+  that is missing because a fork has not implemented it must refuse, and
+  the consumer should log once at wiring time so the fork learns at boot
+  rather than from a user's 401 (`auth/module.go`'s `enrolmentGate`
+  substitutes `middleware.RefuseEnrolmentProof` and does exactly that).
+- **`module.RedisClient` is provided TO modules, but it is still
+  implemented BY some of them.** The backend satisfies it on the
+  consumer's behalf (`deps.RedisAdapter`), and it historically gained
+  `Incr` + `Expire` that way — for callers that cap attempts, where a
+  read-modify-write counter over `Get`/`Set` loses concurrent increments
+  and silently turns "N tries" into "N tries per serial caller". **Do not
+  read that as licence to widen it again.** A fork's own client type (and
+  every in-tree and out-of-tree test double) implements this interface, so
+  a new method is a breaking change for all of them, and the compiler
+  reports it in the fork rather than here.
+  **The pattern to follow instead** is a narrow optional extension,
+  declared where it is consumed, type-asserted **once** at construction,
+  with a defined degraded behaviour when the assertion fails:
+  `auth/services.AtomicTakeRedisClient` (atomic take) and
+  `authz/services.MultiGetRedisClient` (`MGET`, added for the
+  generation-keyed permission cache — a client without it bypasses the
+  cache and resolves from Mongo, which is slower and never wrong). Add the
+  method to `database.RedisClientAdapter` so the real client has it; leave
+  the SDK interface alone.
 - **`module.ConfigRepository` is provided TO `ModuleConfigService`, not
   implemented BY modules** — the same category as `RedisClient`, and its own
   doc comment says so ("exactly what the service calls — no more"). It is

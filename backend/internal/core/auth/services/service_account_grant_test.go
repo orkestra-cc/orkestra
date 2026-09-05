@@ -4,31 +4,53 @@ package services
 // Reuses the fakes and helpers declared in service_account_service_test.go
 // (saUserFake, saCredRepoFake, saHasherFake, saMinterFake, seedServiceUser,
 // seedHumanUser). Each TestGrant* case builds its own service instance
-// (own fakes, own real *sharederrors.RateLimiter) via
-// newSAServiceForGrant so no case can trip another's lockout bucket.
+// (own fakes, own real *MemoryAttemptCounter) via newSAServiceForGrant so
+// no case can trip another's lockout bucket. Task 10 moved Grant off
+// *sharederrors.RateLimiter onto the same AttemptCounter Login uses.
 
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/orkestra/backend/internal/core/auth/models"
-	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // newSAServiceForGrant wires a fresh ServiceAccountService with its own
-// fakes and a real *sharederrors.RateLimiter (TestGrantRateLimited needs
-// the genuine token-bucket behavior, not a stub).
-func newSAServiceForGrant() (*ServiceAccountService, *saUserFake, *saCredRepoFake, *saHasherFake, *sharederrors.RateLimiter) {
+// fakes and a real *MemoryAttemptCounter (TestGrantRateLimited needs the
+// genuine peek/record behavior, not a stub).
+func newSAServiceForGrant() (*ServiceAccountService, *saUserFake, *saCredRepoFake, *saHasherFake, AttemptCounter) {
 	users := newSAUserFake()
 	creds := newSACredRepoFake()
 	hasher := &saHasherFake{}
-	limiter := sharederrors.NewRateLimiter()
-	svc := NewServiceAccountService(creds, users, users, hasher, saMinterFake{}, limiter)
-	return svc, users, creds, hasher, limiter
+	counter := NewMemoryAttemptCounter()
+	svc := NewServiceAccountService(creds, users, users, hasher, saMinterFake{}, counter)
+	return svc, users, creds, hasher, counter
+}
+
+// newGrantTestServiceWithCounter wires a fresh ServiceAccountService over
+// a real *MemoryAttemptCounter and an AuthPolicyService pinned to the
+// given account/address thresholds — the shape
+// TestGrant_ClientLocksBeforeTheAddress needs to drive the client and IP
+// scopes to different limits independently of the package-wide defaults.
+func newGrantTestServiceWithCounter(t *testing.T, accountThreshold, addressThreshold int) (*ServiceAccountService, AttemptCounter) {
+	t.Helper()
+	users := newSAUserFake()
+	creds := newSACredRepoFake()
+	hasher := &saHasherFake{}
+	counter := NewMemoryAttemptCounter()
+	svc := NewServiceAccountService(creds, users, users, hasher, saMinterFake{}, counter)
+	svc.SetPolicy(newPolicy(map[string]string{
+		"accountLockoutThreshold": strconv.Itoa(accountThreshold),
+		"accountLockoutDuration":  "1m",
+		"ipLockoutThreshold":      strconv.Itoa(addressThreshold),
+		"ipLockoutDuration":       "1m",
+	}))
+	return svc, counter
 }
 
 // seedGrantFixture seeds the shared happy-path fixture referenced by
@@ -212,9 +234,21 @@ func TestGrantBadGrantType(t *testing.T) {
 	}
 }
 
+// TestGrantRateLimited pins svc.SetPolicy to a threshold-1 account
+// lockout — the AttemptCounter equivalent of the old
+// limiter.SetAuthFailedConfig(1, time.Minute) — since Grant now reads
+// the threshold from the live policy on every call rather than from a
+// value stashed on the limiter. Grant's own lockout branch answers
+// LockedAfter(v.RetryAfter), which errors.Is-matches ErrAccountLocked
+// (the same sentinel identity Login's lockout uses). ErrClientRateLimited
+// has no producer left in Grant — see its doc comment in
+// service_account_service.go.
 func TestGrantRateLimited(t *testing.T) {
-	svc, users, creds, _, limiter := newSAServiceForGrant()
-	limiter.SetAuthFailedConfig(1, time.Minute)
+	svc, users, creds, _, _ := newSAServiceForGrant()
+	svc.SetPolicy(newPolicy(map[string]string{
+		"accountLockoutThreshold": "1",
+		"accountLockoutDuration":  "1m",
+	}))
 	ctx := context.Background()
 	seedGrantFixture(users, creds)
 
@@ -232,21 +266,11 @@ func TestGrantRateLimited(t *testing.T) {
 
 	good := base
 	good.ClientSecret = "good-secret"
-	if _, err := svc.Grant(ctx, good); !errors.Is(err, ErrClientRateLimited) {
-		t.Fatalf("Grant(correct secret, after lockout tripped): got %v, want ErrClientRateLimited", err)
+	if _, err := svc.Grant(ctx, good); !errors.Is(err, ErrAccountLocked) {
+		t.Fatalf("Grant(correct secret, after lockout tripped): got %v, want ErrAccountLocked", err)
 	}
 }
 
-// TestGrantSuccessiveSuccessesNotRateLimited is the regression case for
-// the timing/lockout bug the code review caught: Grant's pre-check used
-// to call IsBlocked, whose underlying Check consumes a bucket token on
-// every call — including successful ones. With a tight lockout
-// (threshold 1) that meant the second of two back-to-back *correct*
-// Grant calls spuriously returned ErrClientRateLimited, because the
-// first call's own pre-check (not a failure) had already spent the
-// budget. Grant now pre-checks via IsLockedOut, which peeks the same
-// bucket without consuming — this proves two consecutive legitimate
-// grants both succeed even under the tightest possible lockout config.
 // TestGrantWrongSecretEmitsFailedAuditEvent is Item 1's grant-failure
 // coverage: a rejected grant must emit a compliance-audit event carrying
 // the internal reason, mirroring emitLoginFailed's shape (compliance
@@ -331,10 +355,10 @@ func TestGrantDisabledAccountReasonGranularity(t *testing.T) {
 }
 
 // TestGrantRefreshesLockoutConfigFromPolicy is Item 4's coverage: Grant
-// must refresh the rate limiter's lockout config from the live
-// AuthPolicyService on every call, mirroring the login site. Without the
-// fix, the limiter keeps its 3-failure default and a single wrong-secret
-// attempt would not trip a threshold-1 lockout.
+// must read the lockout threshold from the live AuthPolicyService on
+// every call, mirroring the login site. Without that, the counter is
+// read against the 5-failure default and a single wrong-secret attempt
+// would not trip a threshold-1 lockout.
 func TestGrantRefreshesLockoutConfigFromPolicy(t *testing.T) {
 	svc, users, creds, _, _ := newSAServiceForGrant()
 	seedGrantFixture(users, creds)
@@ -351,14 +375,21 @@ func TestGrantRefreshesLockoutConfigFromPolicy(t *testing.T) {
 
 	good := wrong
 	good.ClientSecret = "good-secret"
-	if _, err := svc.Grant(ctx, good); !errors.Is(err, ErrClientRateLimited) {
-		t.Fatalf("Grant(correct secret, after policy-driven threshold-1 lockout): got %v, want ErrClientRateLimited", err)
+	if _, err := svc.Grant(ctx, good); !errors.Is(err, ErrAccountLocked) {
+		t.Fatalf("Grant(correct secret, after policy-driven threshold-1 lockout): got %v, want ErrAccountLocked", err)
 	}
 }
 
+// TestGrantSuccessiveSuccessesNotRateLimited stays green by
+// construction under the AttemptCounter: peeks never consume, so
+// back-to-back legitimate grants can no longer lock themselves out —
+// see the doc comment on the block above (Grant's lockout pre-check).
 func TestGrantSuccessiveSuccessesNotRateLimited(t *testing.T) {
-	svc, users, creds, _, limiter := newSAServiceForGrant()
-	limiter.SetAuthFailedConfig(1, time.Minute)
+	svc, users, creds, _, _ := newSAServiceForGrant()
+	svc.SetPolicy(newPolicy(map[string]string{
+		"accountLockoutThreshold": "1",
+		"accountLockoutDuration":  "1m",
+	}))
 	ctx := context.Background()
 	seedGrantFixture(users, creds)
 
@@ -375,4 +406,31 @@ func TestGrantSuccessiveSuccessesNotRateLimited(t *testing.T) {
 	if _, err := svc.Grant(ctx, in); err != nil {
 		t.Fatalf("Grant #2 (correct secret, immediately after #1): unexpected error: %v", err)
 	}
+}
+
+// A client ID IS an account, so it carries the account pair; the
+// address it grants from carries the much looser address pair. One
+// build server hammering with a bad secret must lock the CLIENT, not
+// every service account behind that egress.
+func TestGrant_ClientLocksBeforeTheAddress(t *testing.T) {
+	svc, counter := newGrantTestServiceWithCounter(t, 3 /* account */, 100 /* address */)
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		_, _ = svc.Grant(ctx, GrantInput{
+			GrantType: "client_credentials", ClientID: "svc-a", ClientSecret: "wrong", IP: "203.0.113.40",
+		})
+	}
+	if _, err := svc.Grant(ctx, GrantInput{
+		GrantType: "client_credentials", ClientID: "svc-a", ClientSecret: "wrong", IP: "203.0.113.40",
+	}); !errors.Is(err, ErrAccountLocked) {
+		t.Fatalf("client svc-a should be locked, got %v", err)
+	}
+	// A DIFFERENT client from the same address is unaffected.
+	if _, err := svc.Grant(ctx, GrantInput{
+		GrantType: "client_credentials", ClientID: "svc-b", ClientSecret: "wrong", IP: "203.0.113.40",
+	}); errors.Is(err, ErrAccountLocked) {
+		t.Fatal("a second client from the same address must not inherit the first one's lock")
+	}
+	_ = counter
 }

@@ -314,6 +314,41 @@ validate_env_file() {
 
     echo ""
 
+    # --- RustFS S3 API reachability ---------------------------------------
+    # STORAGE_PUBLIC_ENDPOINT is the host the BROWSER PUTs presigned uploads
+    # to, so the RustFS S3 port must be reachable by the reverse proxy in
+    # front of it. docker-compose.infra.yml publishes that port on
+    # ${HOST_BIND_ADDRESS:-127.0.0.1}: unset or loopback and the S3 API
+    # answers on the docker host only. Nothing else in the stack shows it —
+    # the app ports in docker-compose.dev.yml default to 0.0.0.0 — so the
+    # deployment looks healthy while every presigned upload dies at the proxy
+    # with the proxy's own 503 page (never an S3 error). Worse, the value is
+    # read when the container is CREATED, so an .env that predates the
+    # variable keeps working until rustfs is next recreated, for any reason.
+    local storage_public bind_addr
+    storage_public=$(env_value STORAGE_PUBLIC_ENDPOINT)
+    bind_addr=$(env_value HOST_BIND_ADDRESS)
+    if [ -n "$storage_public" ]; then
+        print_info "Checking object-storage reachability..."
+        case "$bind_addr" in
+            "" | 127.0.0.1 | localhost | ::1 | "[::1]")
+                print_warning "HOST_BIND_ADDRESS is ${bind_addr:-unset} while STORAGE_PUBLIC_ENDPOINT is set — presigned uploads will fail"
+                print_info "The browser PUTs presigned uploads to $storage_public, which a reverse proxy"
+                print_info "forwards to the RustFS S3 port. docker-compose.infra.yml publishes that port"
+                print_info "on \${HOST_BIND_ADDRESS:-127.0.0.1}, so a loopback value accepts the proxy's"
+                print_info "connection only when the proxy runs on this host. Set HOST_BIND_ADDRESS to the"
+                print_info "address the proxy reaches (0.0.0.0, or a specific private/VPN IP) — .env.example"
+                print_info "ships 0.0.0.0. Symptom when wrong: HTTP 503 from the proxy on upload, with the"
+                print_info "rest of the stack healthy."
+                warnings=$((warnings + 1))
+                ;;
+            *)
+                print_success "RustFS S3 API is published on $bind_addr for the reverse proxy"
+                ;;
+        esac
+        echo ""
+    fi
+
     # Check production-specific variables for staging/production
     if [[ "$env_name" == "staging" || "$env_name" == "production" ]]; then
         print_info "Checking production-specific variables..."

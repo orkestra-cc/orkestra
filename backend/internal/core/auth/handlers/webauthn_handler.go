@@ -30,9 +30,28 @@ type WebAuthnHandler struct {
 	tokens        LoginTokenIssuer
 	deviceTrust   services.DeviceTrustService // optional — Section C item #3
 	policy        *services.AuthPolicyService // optional — per-surface password policy for the completion re-check
-	cookieName    string
-	cookieDomain  string
-	cookieSecure  bool
+	// sessions ends the sessions a removed passkey may have created
+	// (spec §4.3 D16). Same type and same reasoning as MFAHandler's
+	// field — see there. Optional; nil degrades to "the epoch alone ends
+	// MFA authority".
+	sessions services.AuthService
+	// mfa answers one question and only one: does a TOTP factor still
+	// exist for this user? Removing a passkey restarts the enrolment
+	// grace clock only when it took the user's LAST factor, and this
+	// handler can see the passkey half of that answer but not the TOTP
+	// half. Optional; nil is handled in lastFactorGone.
+	mfa services.MFAService
+	// verifyAttempts + audience are the same outer cap MFAHandler carries
+	// (spec §4.3 D20) — see the field comment there. The passkey route
+	// needs it for a second reason: FinishAssertion's per-challenge
+	// counter bounds one challenge, and a caller can always start
+	// another, so without this the inner bound is not a cap on the caller
+	// at all. Set together by SetVerifyAttemptCounter; nil = uncapped.
+	verifyAttempts services.AttemptCounter
+	audience       services.PolicyAudience
+	cookieName     string
+	cookieDomain   string
+	cookieSecure   bool
 }
 
 // NewWebAuthnHandler wires the dependencies. WebAuthnService may be nil
@@ -68,6 +87,28 @@ func NewWebAuthnHandler(
 // inert. Section C item #3 of the 2026-04-24 auth roadmap.
 func (h *WebAuthnHandler) SetDeviceTrust(dt services.DeviceTrustService) {
 	h.deviceTrust = dt
+}
+
+// SetSessionTerminator wires the tier's own auth service so removing a
+// passkey can end the sessions it may have created.
+func (h *WebAuthnHandler) SetSessionTerminator(s services.AuthService) {
+	h.sessions = s
+}
+
+// SetMFAStatusReader wires the tier's MFA service so a passkey removal can
+// tell whether a TOTP factor still survives it. Optional — see the `mfa`
+// field and lastFactorGone for what an unwired reader degrades to.
+func (h *WebAuthnHandler) SetMFAStatusReader(m services.MFAService) {
+	h.mfa = m
+}
+
+// SetVerifyAttemptCounter wires the outer passkey-verify cap and the
+// audience its key is scoped to. Same pairing rule and same per-tier
+// wiring as MFAHandler's — see that method for why the two arguments
+// travel together.
+func (h *WebAuthnHandler) SetVerifyAttemptCounter(c services.AttemptCounter, audience services.PolicyAudience) {
+	h.verifyAttempts = c
+	h.audience = audience
 }
 
 // SetPolicy wires the admin-managed AuthPolicyService so LoginFinish can
@@ -221,9 +262,51 @@ func (h *WebAuthnHandler) Remove(ctx context.Context, req *webAuthnRemoveRequest
 	if !removed {
 		return nil, huma.Error404NotFound("credential not found")
 	}
+	// D16, uniformly: EVERY passkey removal ends the caller's other
+	// sessions, not only the removal of their last factor. A removed
+	// credential is one the user no longer trusts, it may have created
+	// sessions through the passkey login flow, and nothing records which
+	// credential minted which session. The service already bumped the
+	// epoch, which is what closes the caller's own token.
+	revokeSessionsExceptCurrent(ctx, h.sessions, userUUID, "passkey_removed")
+	// The grace clock, unlike everything above, is NOT uniform: restarting
+	// it for a user who still holds a factor would silently move a deadline
+	// they are already meeting. Only the removal of the LAST factor turns
+	// this endpoint into the one-way door resetMFAGraceClock exists to
+	// prevent.
+	if h.lastFactorGone(ctx, userUUID) {
+		resetMFAGraceClock(ctx, h.users, userUUID, "last_passkey_removed")
+	}
 	resp := &webAuthnRemoveResponse{}
 	resp.Body.Success = true
 	return resp, nil
+}
+
+// lastFactorGone reports whether the removal just took the user's last
+// second factor. "Factor" is the same disjunction the login path uses to
+// decide whether a privileged user is enrolled at all
+// (PasswordAuthService.completeLogin): a surviving TOTP row OR at least one
+// surviving passkey. Both halves are re-read AFTER the delete, so the
+// answer is about the credential set the user is left with.
+//
+// It answers TRUE unless it can positively confirm a factor survives — an
+// unwired collaborator or a failing lookup counts as "gone". That is the
+// safe direction here and the opposite of the epoch resolver's: a needless
+// restart moves a countdown a user can see, while a missed one can cost a
+// sole administrator their account.
+func (h *WebAuthnHandler) lastFactorGone(ctx context.Context, userUUID string) bool {
+	if h.wa != nil {
+		if has, err := h.wa.HasCredentials(ctx, userUUID); err == nil && has {
+			return false
+		}
+	}
+	if h.mfa != nil {
+		if snap, err := h.mfa.Status(ctx, userUUID); err == nil && snap != nil &&
+			snap.Status == authModels.MFAStatusEnrolled {
+			return false
+		}
+	}
+	return true
 }
 
 // --- step-up verify (caller already authenticated) ---
@@ -288,6 +371,19 @@ func (h *WebAuthnHandler) VerifyFinish(ctx context.Context, req *webAuthnVerifyF
 	if !ok {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
+	// Spec §4.3 D20 — the OUTER cap, peeked before anything costs a read.
+	// The per-challenge counter inside FinishAssertion stays as the inner
+	// bound; it bounds one challenge, and VerifyBegin hands out a new one
+	// on demand, so without this a caller could buy a fresh five-guess
+	// budget indefinitely. Placed ahead of the user lookup so a locked
+	// caller costs strictly less than an unlocked one. Fail-open on a
+	// counter error, as everywhere else in this module.
+	key := services.AttemptKeyMFAVerify(h.audience, userUUID)
+	if h.verifyAttempts != nil {
+		if v, err := h.verifyAttempts.Locked(ctx, key, services.MFAVerifyLimit); err == nil && v.Locked {
+			return nil, lockoutError(v.RetryAfter)
+		}
+	}
 	user, err := h.users.GetUserByID(ctx, userUUID)
 	if err != nil || services.ValidateTokenEligibleUser(user) != nil {
 		return nil, huma.Error401Unauthorized("user not found")
@@ -296,7 +392,33 @@ func (h *WebAuthnHandler) VerifyFinish(ctx context.Context, req *webAuthnVerifyF
 		return nil, huma.Error400BadRequest("assertionResponse is required")
 	}
 	if err := h.wa.FinishAssertion(ctx, user, req.Body.ChallengeID, services.MFAPurposeWebAuthnVerify, req.Body.AssertionResponse); err != nil {
+		// A rejected ASSERTION is the charge, and on this route that is
+		// ErrWebAuthnAssertion and nothing else: every wrong signature
+		// reaches the validator branch of FinishAssertion, which wraps
+		// the failure in that sentinel (and increments the challenge's
+		// own inner counter).
+		//
+		// ⚠️ ErrMFAInvalidCode is deliberately NOT charged here, unlike
+		// on the TOTP route where it IS the wrong-code sentinel. On the
+		// passkey route it means something else entirely: FinishAssertion
+		// returns it when `challenges.Peek` fails — and Peek collapses
+		// EVERY store error, a Redis outage included, into
+		// ErrMFAChallengeNotFound — or when `Consume` fails, which
+		// happens only AFTER the assertion has cryptographically
+		// succeeded. So charging it would let a degraded challenge store
+		// lock a legitimate user out at five tries, which is precisely
+		// what the counter's own fail-open contract exists to prevent
+		// (spec §5 edge case 2), and would charge a correct proof as a
+		// failure. "No credentials enrolled" and a purpose mismatch are
+		// likewise refusals rather than attempts. No wrong guess escapes:
+		// a lost, expired or spent challenge is not one.
+		if h.verifyAttempts != nil && errors.Is(err, services.ErrWebAuthnAssertion) {
+			_, _ = h.verifyAttempts.RecordFailure(ctx, key, services.MFAVerifyLimit)
+		}
 		return nil, mapWebAuthnError(err)
+	}
+	if h.verifyAttempts != nil {
+		_ = h.verifyAttempts.Reset(ctx, key)
 	}
 	amr := appendWebAuthn(priorAMRWithOTP(ctx))
 	token, err := h.jwt.GenerateAccessTokenForSessionWithAMR(user, device, security, amr, time.Now().Unix())
@@ -498,6 +620,16 @@ func decodeCredentialID(s string) ([]byte, error) {
 // alongside appendOTP so step-up tokens minted via passkey carry both
 // markers — "otp" satisfies the existing middleware check, "webauthn"
 // gives the audit trail enough fidelity to distinguish the factor.
+//
+// It appends only; it never strips. Both call sites are already clean of
+// stale epoch-governed markers when they reach it, by different routes,
+// and neither may stop being so:
+//
+//   - VerifyFinish passes priorAMRWithOTP(ctx), which strips them off the
+//     raw claim (see that helper for why).
+//   - LoginFinish passes appendOTP(loginCh.SourceAMR), and SourceAMR is
+//     stamped at login as exactly ["pwd"] or ["oauth"] — the login funnel
+//     is the only producer — so it structurally cannot carry one.
 func appendWebAuthn(source []string) []string {
 	for _, v := range source {
 		if v == "webauthn" {
@@ -512,14 +644,20 @@ func appendWebAuthn(source []string) []string {
 // frontend error handling stays uniform.
 func mapWebAuthnError(err error) error {
 	switch {
+	// Both 401 arms are VERDICTS and so name themselves — a codeless 401 is
+	// the one shape the operator console answers by rotating the refresh
+	// cookie instead of reading it (errcode/codes.go, AuthInvalidCredentials).
+	// They stay two DIFFERENT codes because they are two different
+	// situations: this one is a challenge that could not be read, the one
+	// below is a signature that did not validate.
 	case errors.Is(err, services.ErrMFAInvalidCode):
-		return huma.Error401Unauthorized("invalid webauthn challenge")
+		return errcode.Unauthorized(errcode.AuthWebAuthnChallengeInvalid, "invalid webauthn challenge")
 	case errors.Is(err, services.ErrMFAChallengeMismatch):
 		return huma.Error400BadRequest("challenge does not match requested action")
 	case errors.Is(err, services.ErrWebAuthnNoCredentials):
 		return huma.Error400BadRequest("no webauthn credentials enrolled for this user")
 	case errors.Is(err, services.ErrWebAuthnAssertion):
-		return huma.Error401Unauthorized("webauthn assertion failed")
+		return errcode.Unauthorized(errcode.AuthWebAuthnAssertionFailed, "webauthn assertion failed")
 	case errors.Is(err, services.ErrMFAMethodDisabled):
 		// Phase 3.6 — admin restricted passkeys via mfaMethods.
 		return huma.Error403Forbidden("mfa_method_disabled: webauthn is not allowed by policy")
@@ -550,25 +688,10 @@ func (h *WebAuthnHandler) RegisterPublicRoutes(api huma.API, mount RouteMount) {
 	}, h.LoginFinish)
 }
 
+// RegisterProtectedRoutes mounts the passkey endpoints a plain bearer is
+// enough for: listing your own credentials, and asserting one you already
+// hold. Enrolling a NEW passkey is not here — see RegisterEnrolmentRoutes.
 func (h *WebAuthnHandler) RegisterProtectedRoutes(api huma.API, mount RouteMount) {
-	huma.Register(api, huma.Operation{
-		OperationID: mount.OpIDPrefix + "mfa-webauthn-register-begin",
-		Method:      http.MethodPost,
-		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/webauthn/register/begin",
-		Summary:     "Begin enrolling a new passkey",
-		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, h.RegisterBegin)
-
-	huma.Register(api, huma.Operation{
-		OperationID: mount.OpIDPrefix + "mfa-webauthn-register-finish",
-		Method:      http.MethodPost,
-		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/webauthn/register/finish",
-		Summary:     "Finish enrolling a new passkey",
-		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, h.RegisterFinish)
-
 	huma.Register(api, huma.Operation{
 		OperationID: mount.OpIDPrefix + "mfa-webauthn-list",
 		Method:      http.MethodGet,
@@ -595,6 +718,35 @@ func (h *WebAuthnHandler) RegisterProtectedRoutes(api huma.API, mount RouteMount
 		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.VerifyFinish)
+}
+
+// RegisterEnrolmentRoutes mounts the two halves of passkey registration,
+// which ADD a credential. The caller wires the enrolment-proof gate around
+// this API instance — auth/module.go's enrolmentGate helper, the same
+// fail-closed resolution the TOTP ceremony uses. Both halves are gated, mirroring
+// the TOTP ceremony: the factor set can change between begin and finish.
+//
+// H-3: these lived in RegisterProtectedRoutes, under RequireGlobal() alone,
+// so a stolen session-only bearer could attach a passkey of its own to the
+// victim's account and keep it after the session died.
+func (h *WebAuthnHandler) RegisterEnrolmentRoutes(api huma.API, mount RouteMount) {
+	huma.Register(api, huma.Operation{
+		OperationID: mount.OpIDPrefix + "mfa-webauthn-register-begin",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/webauthn/register/begin",
+		Summary:     "Begin enrolling a new passkey",
+		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.RegisterBegin)
+
+	huma.Register(api, huma.Operation{
+		OperationID: mount.OpIDPrefix + "mfa-webauthn-register-finish",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/webauthn/register/finish",
+		Summary:     "Finish enrolling a new passkey",
+		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.RegisterFinish)
 }
 
 // RegisterStepUpRoutes mounts the credential-removal endpoint, which

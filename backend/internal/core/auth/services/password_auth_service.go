@@ -17,7 +17,6 @@ import (
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	notifModels "github.com/orkestra/backend/internal/core/notification/models"
 	"github.com/orkestra/backend/internal/shared/blob"
-	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/geoip"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
@@ -44,11 +43,41 @@ var (
 	// Translated to 409 auth.password_confirm_unavailable so the frontend
 	// can nudge the user to the MFA path or a fresh OAuth flow.
 	ErrPasswordConfirmUnavailable = stderrors.New("password reconfirm not available for this account")
+	// ErrPasswordConfirmEnrollmentRequired is returned by
+	// ConfirmPasswordWithSecurity when the caller's role OBLIGES a second
+	// factor and they have not enrolled one (spec §4.3 D19, M-1's second
+	// half). Distinct from ErrPasswordConfirmUnavailable, which covers a
+	// caller who cannot reconfirm; this one covers a caller who must not.
+	// The handler maps it to 403 with the middleware's own
+	// `mfa_enrollment_required` envelope code, so the SPA sees one code
+	// for one situation on both the gate and this endpoint.
+	ErrPasswordConfirmEnrollmentRequired = stderrors.New("mfa enrollment required before password reconfirm")
 	// ErrPasswordLoginDisabled is iface.ErrPasswordLoginDisabled (one
 	// identity across the AdminAuthInviter boundary); the per-surface
 	// method gates of spec §4.3 return it.
 	ErrPasswordLoginDisabled = iface.ErrPasswordLoginDisabled
 )
+
+// lockedError carries the remaining life of the window alongside
+// ErrAccountLocked so the handler can render Retry-After without a
+// second Redis read. errors.Is(err, ErrAccountLocked) still matches.
+type lockedError struct{ retryAfter time.Duration }
+
+func (e *lockedError) Error() string        { return ErrAccountLocked.Error() }
+func (e *lockedError) Is(target error) bool { return target == ErrAccountLocked }
+
+// LockedAfter wraps ErrAccountLocked with a retry hint.
+func LockedAfter(d time.Duration) error { return &lockedError{retryAfter: d} }
+
+// RetryAfterFor extracts the retry hint from an error produced by
+// LockedAfter, or 0 when the error carries none.
+func RetryAfterFor(err error) time.Duration {
+	var le *lockedError
+	if stderrors.As(err, &le) {
+		return le.retryAfter
+	}
+	return 0
+}
 
 // FirstAdminClaimer is the contract the password auth service uses to
 // atomically reserve the platform's super_admin seat on a fresh install.
@@ -62,21 +91,27 @@ type FirstAdminClaimer interface {
 
 // PasswordAuthConfig configures the password auth service.
 type PasswordAuthConfig struct {
-	UserService              iface.UserProvider
-	TenantProvider           iface.TenantProvider // required: drives RoleRequiresMFA check at login
-	PasswordService          PasswordService
-	JWTService               JWTService
-	EmailTokenRepo           repository.EmailTokenRepository
-	RefreshTokenRepo         repository.RefreshTokenRepository
-	AuthSessionRepo          repository.AuthSessionRepository
-	MFAFactorRepo            repository.MFAFactorRepository // required: decides partial vs full response
-	MFAChallengeService      MFAChallengeService            // required: mints login-continuation challenges
-	FirstAdminClaimer        FirstAdminClaimer              // required: atomic first-admin claim
-	RiskAssessment           RiskAssessmentService          // nil → session gets zero-score; mandatory in prod
-	DeviceTrust              DeviceTrustService             // nil → never skips MFA; Section C item #3
-	SuspiciousLoginNotifier  SuspiciousLoginNotifier        // nil → no email on high-risk login; Section C item #5
-	Notifier                 iface.NotificationSender
-	RateLimiter              *sharederrors.RateLimiter
+	UserService             iface.UserProvider
+	TenantProvider          iface.TenantProvider // required: drives RoleRequiresMFA check at login
+	PasswordService         PasswordService
+	JWTService              JWTService
+	EmailTokenRepo          repository.EmailTokenRepository
+	RefreshTokenRepo        repository.RefreshTokenRepository
+	AuthSessionRepo         repository.AuthSessionRepository
+	MFAFactorRepo           repository.MFAFactorRepository // required: decides partial vs full response
+	MFAChallengeService     MFAChallengeService            // required: mints login-continuation challenges
+	FirstAdminClaimer       FirstAdminClaimer              // required: atomic first-admin claim
+	RiskAssessment          RiskAssessmentService          // nil → session gets zero-score; mandatory in prod
+	DeviceTrust             DeviceTrustService             // nil → never skips MFA; Section C item #3
+	SuspiciousLoginNotifier SuspiciousLoginNotifier        // nil → no email on high-risk login; Section C item #5
+	Notifier                iface.NotificationSender
+	AttemptCounter          AttemptCounter
+	// MailDispatcher is the bounded worker pool that detaches
+	// ForgotPassword's reset-password send from the request that
+	// triggered it. ResendVerification stays synchronous (see its doc
+	// comment for why). Nil is tolerated regardless; a nil dispatcher's
+	// Enqueue is a safe no-op.
+	MailDispatcher           *MailDispatcher
 	FrontendURL              string
 	RequireEmailVerification bool
 	AppName                  string
@@ -100,21 +135,27 @@ type PasswordAuthConfig struct {
 // PasswordAuthService handles the register / login / verify / reset / change
 // password flows. It complements the existing OAuth-focused AuthService.
 type PasswordAuthService struct {
-	userService              iface.UserProvider
-	tenantProvider           iface.TenantProvider
-	passwordService          PasswordService
-	jwtService               JWTService
-	emailTokenRepo           repository.EmailTokenRepository
-	refreshTokenRepo         repository.RefreshTokenRepository
-	authSessionRepo          repository.AuthSessionRepository
-	mfaFactorRepo            repository.MFAFactorRepository
-	mfaChallengeService      MFAChallengeService
-	firstAdminClaimer        FirstAdminClaimer
-	riskAssessment           RiskAssessmentService
-	deviceTrust              DeviceTrustService
-	suspiciousLoginNotifier  SuspiciousLoginNotifier
-	notifier                 iface.NotificationSender
-	rateLimiter              *sharederrors.RateLimiter
+	userService             iface.UserProvider
+	tenantProvider          iface.TenantProvider
+	passwordService         PasswordService
+	jwtService              JWTService
+	emailTokenRepo          repository.EmailTokenRepository
+	refreshTokenRepo        repository.RefreshTokenRepository
+	authSessionRepo         repository.AuthSessionRepository
+	mfaFactorRepo           repository.MFAFactorRepository
+	mfaChallengeService     MFAChallengeService
+	firstAdminClaimer       FirstAdminClaimer
+	riskAssessment          RiskAssessmentService
+	deviceTrust             DeviceTrustService
+	suspiciousLoginNotifier SuspiciousLoginNotifier
+	notifier                iface.NotificationSender
+	attempts                AttemptCounter
+	// mail is the bounded dispatcher for transactional auth mail (D5).
+	// ForgotPassword hands its reset-password send to mail.Enqueue so the
+	// response no longer waits on the relay; ResendVerification still
+	// sends synchronously (see its doc comment for why). Nil-tolerant
+	// regardless, mirroring PasswordAuthConfig.MailDispatcher.
+	mail                     *MailDispatcher
 	frontendURL              string
 	requireEmailVerification bool
 	appName                  string
@@ -197,7 +238,8 @@ func NewPasswordAuthService(cfg PasswordAuthConfig) *PasswordAuthService {
 		deviceTrust:              cfg.DeviceTrust,
 		suspiciousLoginNotifier:  cfg.SuspiciousLoginNotifier,
 		notifier:                 cfg.Notifier,
-		rateLimiter:              cfg.RateLimiter,
+		attempts:                 cfg.AttemptCounter,
+		mail:                     cfg.MailDispatcher,
 		frontendURL:              cfg.FrontendURL,
 		requireEmailVerification: cfg.RequireEmailVerification,
 		appName:                  cfg.AppName,
@@ -486,11 +528,12 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		return nil, ErrLoginDisabled
 	}
 
-	// Per-surface method gate (spec §4.3): sits before GetUserForAuth so
-	// lockout counters, the rate limiter and the audit trail see nothing
-	// and every email receives the identical response. Only the operator
-	// surface can be rescued by the boot-time break-glass; a nil policy
-	// or failed read is an outage (503), never a pass.
+	// Per-surface method gate (spec §4.3): sits before the lockout peek
+	// and before GetUserForAuth, so the attempt counters and the audit
+	// trail see nothing and every email receives the identical response.
+	// Only the operator surface can be rescued by the boot-time
+	// break-glass; a nil policy or failed read is an outage (503), never
+	// a pass.
 	decision, err := s.policy.PasswordLoginDecision(ctx, s.audience)
 	if err != nil {
 		return nil, err
@@ -499,8 +542,8 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		return nil, ErrPasswordLoginDisabled
 	}
 
-	// Geo block — checked before the rate-limiter and password lookup so
-	// a blocked country never spends a token from the per-IP bucket and
+	// Geo block — checked before the lockout peek and the password
+	// lookup so a blocked country never moves the per-IP counter and
 	// never lights up the audit log with a noisy rejected-login row.
 	// Skipped when the policy is unwired, the resolver is nil (geoip
 	// disabled), or the IP can't be resolved (private/loopback) — the
@@ -515,32 +558,22 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		}
 	}
 
-	// Refresh the rate limiter's lockout config from the live policy so
-	// admin edits take effect on the next login attempt without a
-	// restart. New buckets pick up the updated values immediately;
-	// already-running buckets ride out their existing window, which is
-	// fine — the next refill cycle reflects the new policy.
-	if s.policy != nil && s.rateLimiter != nil {
-		s.rateLimiter.SetAuthFailedConfig(
-			s.policy.LockoutThreshold(ctx),
-			s.policy.LockoutDuration(ctx),
-		)
-	}
-
-	// Combined IP + email bucket so that a single credential-stuffer rotating
-	// IPs still trips the per-account lock.
-	if s.rateLimiter != nil {
-		if s.rateLimiter.IsBlocked(ctx, "ip:"+in.IP) || s.rateLimiter.IsBlocked(ctx, "email:"+email) {
-			return nil, ErrAccountLocked
-		}
+	// Peek both scopes before touching the database. Nothing is
+	// recorded: a lock that extends itself on every probe never expires
+	// under a running attack. A store error reads as not locked — the
+	// counters fail open and the durable lock below is the second line.
+	if v, locked := s.peekLockout(ctx, in.IP, email); locked {
+		s.dummyVerify(in.Password)
+		s.emitLoginFailed(ctx, email, "", in.IP, "rate_limited")
+		return nil, LockedAfter(v.RetryAfter)
 	}
 
 	user, err := s.userService.GetUserForAuth(ctx, email)
 	if err != nil {
 		// Run Verify against a dummy hash to keep timing constant whether
 		// or not the user exists, foiling user enumeration via timing.
-		_, _ = s.passwordService.Verify(in.Password, s.passwordService.DummyHash())
-		s.recordFailed(ctx, in.IP, email)
+		s.dummyVerify(in.Password)
+		s.recordLoginFailure(ctx, in.IP, email)
 		s.emitLoginFailed(ctx, email, "", in.IP, "unknown_user")
 		return nil, ErrInvalidCredentials
 	}
@@ -579,44 +612,51 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 	}
 
 	if !user.IsActive {
-		s.recordFailed(ctx, in.IP, email)
+		s.dummyVerify(in.Password) // this branch used to be measurably cheaper
+		s.recordLoginFailure(ctx, in.IP, email)
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "user_inactive")
 		return nil, ErrInvalidCredentials
 	}
 	// Service principals authenticate only through the client-credentials
 	// grant; every interactive surface is closed by construction.
 	if user.Kind == iface.UserKindService {
-		s.recordFailed(ctx, in.IP, email)
+		s.dummyVerify(in.Password)
+		s.recordLoginFailure(ctx, in.IP, email)
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "service_principal")
 		return nil, ErrInvalidCredentials
 	}
-	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
+	if retryAfter, locked := s.durableLockOrClear(ctx, user); locked {
+		s.dummyVerify(in.Password)
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "account_locked")
-		return nil, ErrAccountLocked
+		// Not recorded: a durable lock, like a counter lock, must not
+		// extend itself.
+		//
+		// ⚠️ This branch is M-7's RESIDUAL oracle, known and deliberately
+		// left as-is. The counter window is fixed from the FIRST failure
+		// while LockedUntil is stamped at the THRESHOLD-th, so the
+		// durable lock outlives the counter key by however long the
+		// attacker took to reach the threshold. Once the key expires the
+		// peek passes, the lookup succeeds, and this 429 distinguishes a
+		// real account from the 401 an unknown email gets — with no
+		// record kept, so probing never exhausts it. Falling through to
+		// the unknown-email answer instead would close it but change the
+		// D9 wire contract for a legitimately locked-out user (429 +
+		// Retry-After → 401), which is a spec decision, not an
+		// implementation one. See "Attempt counters (login lockout)" in
+		// the module CLAUDE.md before touching this.
+		return nil, LockedAfter(retryAfter)
 	}
 	if user.PasswordHash == "" {
 		// Account exists but was created via OAuth — don't leak that fact.
-		_, _ = s.passwordService.Verify(in.Password, s.passwordService.DummyHash())
-		s.recordFailed(ctx, in.IP, email)
+		s.dummyVerify(in.Password)
+		s.recordLoginFailure(ctx, in.IP, email)
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "no_password")
 		return nil, ErrInvalidCredentials
 	}
 
 	ok, err := s.passwordService.Verify(in.Password, user.PasswordHash)
 	if err != nil || !ok {
-		s.recordFailed(ctx, in.IP, email)
-		// Threshold and duration come from the admin-managed policy —
-		// the same values already plumbed into the rate limiter above.
-		// This branch used to compare against a hardcoded 5, so an
-		// operator who tightened accountLockoutThreshold got the new
-		// value on the in-memory bucket but the old one on the
-		// persisted User.LockedUntil.
-		var lockUntil *time.Time
-		if user.FailedLoginCount+1 >= s.policy.LockoutThreshold(ctx) {
-			t := time.Now().Add(s.policy.LockoutDuration(ctx))
-			lockUntil = &t
-		}
-		_ = s.userService.RecordFailedLogin(ctx, user.UUID, lockUntil)
+		s.recordVerifyFailure(ctx, in.IP, user)
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "bad_password")
 		return nil, ErrInvalidCredentials
 	}
@@ -633,8 +673,10 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		}
 	}
 
-	// Successful login: clear the failed counter.
+	// Successful login: clear the failed counters — the durable one and
+	// the email scope. The address scope is deliberately left alone.
 	_ = s.userService.ClearFailedLogins(ctx, user.UUID)
+	s.resetLoginFailures(ctx, email)
 
 	s.emitAudit(ctx, iface.AuditEvent{
 		ActorUserID: user.UUID,
@@ -974,18 +1016,30 @@ func (s *PasswordAuthService) VerifyEmail(ctx context.Context, rawToken string) 
 
 // ResendVerification issues a new verification email.
 //
-// Always returns nil regardless of outcome so callers cannot distinguish
-// "address unknown", "already verified", "rate-limited", or "sent" — the
-// public-facing 200 response stays neutral. Rate limiting shares the
-// same per-IP and per-email buckets as Login/ForgotPassword so an
-// attacker can't bypass one surface by hitting another.
+// Answers nil for "address unknown", "already verified" and "over the
+// cap" alike, so callers cannot distinguish them — the public-facing
+// response stays neutral for those three outcomes. A delivery failure
+// from the synchronous send below is the one outcome that still
+// propagates as a non-nil error.
+//
+// It has its OWN request scopes. It used to pre-check IsBlocked on the
+// LOGIN scopes — and IsBlocked's underlying Check consumes a token on
+// every call — so an anonymous caller could pin any address at 429
+// indefinitely without ever failing an authentication (M-6). A
+// verification request is not a login failure and must never be able to
+// lock a login.
 func (s *PasswordAuthService) ResendVerification(ctx context.Context, email, ip string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
-	if s.rateLimiter != nil {
-		if s.rateLimiter.IsBlocked(ctx, "ip:"+ip) || s.rateLimiter.IsBlocked(ctx, "email:"+email) {
-			return nil
-		}
+	ipKey := AttemptKeyVerifyIP(ip)
+	emailKey := AttemptKeyVerifyEmail(s.audience, email)
+
+	if s.overRequestCap(ctx, ipKey, emailKey, VerifyRequestsPerIP, VerifyRequestsPerEmail) {
+		return nil
 	}
+	// Charged before the lookup: same cost for a known and an unknown
+	// address.
+	s.chargeRequestCap(ctx, ipKey, emailKey, VerifyRequestsPerIP, VerifyRequestsPerEmail)
+
 	user, err := s.userService.GetUserForAuth(ctx, email)
 	if err != nil {
 		return nil
@@ -997,10 +1051,6 @@ func (s *PasswordAuthService) ResendVerification(ctx context.Context, email, ip 
 	if err := s.sendVerificationEmail(ctx, user, ip); err != nil {
 		return err
 	}
-	// Each successful send counts toward the shared limiter so a script
-	// spamming the endpoint from one IP / against one address trips the
-	// same lockout window that protects login.
-	s.recordFailed(ctx, ip, email)
 	return nil
 }
 
@@ -1010,9 +1060,18 @@ func (s *PasswordAuthService) ResendVerification(ctx context.Context, email, ip 
 // errors it returns (spec §4.3). Both come from the per-surface method
 // gate below, which is evaluated BEFORE the user lookup, so neither
 // depends on account state. Every account-specific outcome after that
-// gate — unknown address, inactive account, token-mint or delivery
-// failure — is swallowed and returns nil, and that is what makes the
-// endpoint's single generic response non-enumerable.
+// gate — over the request cap, unknown address, inactive account,
+// token-mint or delivery failure — is swallowed and returns nil, and
+// that is what makes the endpoint's single generic response
+// non-enumerable.
+//
+// The request cap (M-5) is its own reset-email/reset-ip pair, peeked
+// without consuming and charged BEFORE the user lookup so a known and
+// an unknown address cost the same (overRequestCap/chargeRequestCap).
+// Without it, every call invalidated the previous token with no
+// throttle, so an attacker could destroy a victim's live reset link at
+// will; over the cap this method now mints no token and invalidates
+// nothing.
 func (s *PasswordAuthService) ForgotPassword(ctx context.Context, email, ip string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
 
@@ -1028,6 +1087,16 @@ func (s *PasswordAuthService) ForgotPassword(ctx context.Context, email, ip stri
 	if !enabled {
 		return ErrPasswordLoginDisabled
 	}
+
+	ipKey := AttemptKeyResetIP(ip)
+	emailKey := AttemptKeyResetEmail(s.audience, email)
+	if s.overRequestCap(ctx, ipKey, emailKey, ResetRequestsPerIP, ResetRequestsPerEmail) {
+		// Generic success, no token, no mail — and, crucially, the
+		// victim's last valid token is NOT invalidated: an attacker's
+		// fourth request can no longer destroy a live reset link.
+		return nil
+	}
+	s.chargeRequestCap(ctx, ipKey, emailKey, ResetRequestsPerIP, ResetRequestsPerEmail)
 
 	user, err := s.userService.GetUserForAuth(ctx, email)
 	if err != nil || user == nil {
@@ -1056,13 +1125,18 @@ func (s *PasswordAuthService) ForgotPassword(ctx context.Context, email, ip stri
 		return nil
 	}
 
+	// Pre-flight (ADR-0019 D7): ask for the category this send is about
+	// to carry, not a coarse IsConfigured(ctx) — a sender routed by
+	// category can be up for one category and down for another. A
+	// negative answer here means the enqueue below is never made, so a
+	// definitely-unusable notifier never occupies a dispatcher slot.
 	if !iface.IsConfiguredForCategory(ctx, s.notifier, notifModels.CategoryAuthResetPassword) {
 		s.logger.Warn("forgot password: notifier not configured, cannot send email")
 		return nil
 	}
 
 	resetURL := s.frontendURL + "/reset-password?token=" + raw
-	_, err = s.notifier.SendTemplated(ctx, iface.TemplatedNotificationRequest{
+	req := iface.TemplatedNotificationRequest{
 		Channel:    "email",
 		Type:       "transactional",
 		Category:   notifModels.CategoryAuthResetPassword,
@@ -1081,10 +1155,18 @@ func (s *PasswordAuthService) ForgotPassword(ctx context.Context, email, ip stri
 			"SupportEmail": s.supportEmail,
 		},
 		IdempotencyKey: "reset:" + user.UUID + ":" + doc.UUID,
-	})
-	if err != nil {
-		s.logger.Warn("forgot password: failed to send email", slog.String("error", err.Error()))
 	}
+	// Detached: the handler must not wait on the relay, or its latency
+	// would depend on whether the account existed. A full queue drops
+	// the mail with a metric; the user retries inside the caps above.
+	notifier := s.notifier
+	s.mail.Enqueue(MailJob{
+		TemplateID: "auth.reset_password",
+		Send: func(sendCtx context.Context) error {
+			_, err := notifier.SendTemplated(sendCtx, req)
+			return err
+		},
+	})
 	return nil
 }
 
@@ -1147,6 +1229,10 @@ type ChangePasswordInput struct {
 	CurrentSID string
 	Current    string
 	New        string
+	// IP is the caller's resolved address, used for the attempt
+	// counters and the audit row. Empty skips the address scope (the
+	// counters' empty-key rule) rather than sharing a bucket.
+	IP string
 }
 
 // ChangePassword updates the password for an authenticated user who
@@ -1160,8 +1246,30 @@ func (s *PasswordAuthService) ChangePassword(ctx context.Context, in ChangePassw
 	if user.PasswordHash == "" {
 		return ErrInvalidCredentials
 	}
+	// This route verifies a password, so it is subject to the same
+	// lockout as login — otherwise it is the unthrottled back door
+	// around it (M-8). Durable lock first, then the counters.
+	if retryAfter, locked := s.durableLockOrClear(ctx, user); locked {
+		s.dummyVerify(current)
+		return LockedAfter(retryAfter)
+	}
+	if v, locked := s.peekLockout(ctx, in.IP, user.Email); locked {
+		s.dummyVerify(current)
+		return LockedAfter(v.RetryAfter)
+	}
 	ok, err := s.passwordService.Verify(current, user.PasswordHash)
 	if err != nil || !ok {
+		s.recordVerifyFailure(ctx, in.IP, user)
+		s.emitAudit(ctx, iface.AuditEvent{
+			ActorUserID:  user.UUID,
+			ActorEmail:   user.Email,
+			ActorType:    "user",
+			Action:       "auth.password.change_failed",
+			Outcome:      "failure",
+			IPAddress:    in.IP,
+			ResourceType: "user",
+			ResourceID:   user.UUID,
+		})
 		return ErrInvalidCredentials
 	}
 	if current == next {
@@ -1200,6 +1308,13 @@ func (s *PasswordAuthService) ChangePassword(ctx context.Context, in ChangePassw
 				slog.Int("sessions_revoked", revoked))
 		}
 	}
+	// Clear BOTH the durable counter and the counter-scope on success,
+	// exactly as Login does — resetLoginFailures alone leaves mistypes
+	// here accumulating in FailedLoginCount indefinitely, since only a
+	// subsequent LOGIN success (or a lock expiring) would otherwise
+	// clear it.
+	_ = s.userService.ClearFailedLogins(ctx, user.UUID)
+	s.resetLoginFailures(ctx, user.Email)
 	s.emitAudit(ctx, iface.AuditEvent{
 		ActorUserID:  user.UUID,
 		ActorEmail:   user.Email,
@@ -1240,6 +1355,15 @@ type ConfirmPasswordResult struct {
 // emit 401 (and the IP/email failure counters tick the same way as a
 // failed login). The 5-minute freshness window is enforced downstream
 // by RequireStepUp comparing last_otp_at — this method always stamps now.
+//
+// ⚠️ TEST-ONLY, and the reason is auth_time. The string arguments cannot
+// carry the caller's auth_time, so the SecurityContext built below has
+// none and the minted token carries auth_time: 0 — an origin-less token
+// whose holder reads as never having interactively authenticated. The
+// production path is ConfirmPasswordWithSecurity, reached from
+// PasswordAuthHandler with the context handlers.currentSessionSecurity
+// derived from the caller's own claims. There is no non-test caller
+// today; do not add one without threading auth_time through first.
 func (s *PasswordAuthService) ConfirmPassword(ctx context.Context, userUUID, password string, priorAMR []string, ip, sessionID, deviceID string) (*ConfirmPasswordResult, error) {
 	return s.ConfirmPasswordWithSecurity(ctx, userUUID, password, priorAMR,
 		&authModels.DeviceInfo{DeviceID: deviceID},
@@ -1295,9 +1419,49 @@ func (s *PasswordAuthService) ConfirmPasswordWithSecurity(ctx context.Context, u
 			return nil, err
 		}
 	}
+	// Spec §4.3 D19 — the OBLIGATION, not just the enrolment. The refusal
+	// above fires on a caller who HAS a stronger factor; it cannot fire on
+	// the caller this rule exists for, who has none yet. A user whose role
+	// REQUIRES a second factor must not be able to satisfy step-up with a
+	// password: minting `reauth` for them is exactly what the obligation
+	// exists to prevent, and it is what let an MFA-obligated account inside
+	// its grace window walk every freshness gate on a password alone (M-1).
+	//
+	// Memberships are resolved the way completeLogin resolves them for its
+	// own MFA decision — the same loadMembershipsAsAuthModel helper, whose
+	// []authModels.TenantMembership is what MFARequired's
+	// []authModels.OrgMembership parameter already is (models/token.go
+	// aliases the two), so there is no conversion and no second rule.
+	// MFARequired reads the mfaEnabled master switch first, so an install
+	// with MFA off obliges nobody and this refusal never fires there.
+	if s.policy.MFARequired(user, s.loadMembershipsAsAuthModel(ctx, user.UUID)) {
+		return nil, ErrPasswordConfirmEnrollmentRequired
+	}
+	// This route verifies a password too, so it is subject to the same
+	// lockout as login and ChangePassword — otherwise it is the
+	// unthrottled back door around it (M-8). Durable lock first, then
+	// the counters.
+	if retryAfter, locked := s.durableLockOrClear(ctx, user); locked {
+		s.dummyVerify(password)
+		return nil, LockedAfter(retryAfter)
+	}
+	if v, locked := s.peekLockout(ctx, security.IPAddress, user.Email); locked {
+		s.dummyVerify(password)
+		return nil, LockedAfter(v.RetryAfter)
+	}
 	ok, err := s.passwordService.Verify(password, user.PasswordHash)
 	if err != nil || !ok {
-		s.recordFailed(ctx, security.IPAddress, user.Email)
+		s.recordVerifyFailure(ctx, security.IPAddress, user)
+		s.emitAudit(ctx, iface.AuditEvent{
+			ActorUserID:  user.UUID,
+			ActorEmail:   user.Email,
+			ActorType:    "user",
+			Action:       "auth.password.reconfirm_failed",
+			Outcome:      "failure",
+			IPAddress:    security.IPAddress,
+			ResourceType: "user",
+			ResourceID:   user.UUID,
+		})
 		return nil, ErrInvalidCredentials
 	}
 	// Mint the stepped-up token. amr is priorAMR ∪ {"reauth"} so the
@@ -1312,6 +1476,10 @@ func (s *PasswordAuthService) ConfirmPasswordWithSecurity(ctx context.Context, u
 	if err != nil {
 		return nil, err
 	}
+	// Clear BOTH the durable counter and the counter-scope on success,
+	// exactly as Login does — see ChangePassword's identical comment.
+	_ = s.userService.ClearFailedLogins(ctx, user.UUID)
+	s.resetLoginFailures(ctx, user.Email)
 	s.emitAudit(ctx, iface.AuditEvent{
 		ActorUserID:  user.UUID,
 		ActorEmail:   user.Email,
@@ -1351,12 +1519,174 @@ func mergeAMRWithReauth(prior []string) []string {
 
 // --- internal helpers ---
 
-func (s *PasswordAuthService) recordFailed(ctx context.Context, ip, email string) {
-	if s.rateLimiter == nil {
+// accountLimit is the per-email / per-client pair. Read per call, so an
+// admin edit takes effect on the very next attempt — including one
+// inside an already-open window, since the threshold is compared live
+// (attempt_counter.go), not frozen into a bucket.
+func (s *PasswordAuthService) accountLimit(ctx context.Context) Limit {
+	return Limit{
+		Threshold: s.policy.LockoutThreshold(ctx),
+		Window:    s.policy.LockoutDuration(ctx),
+	}
+}
+
+// addressLimit is the per-IP pair, an order of magnitude looser: an
+// egress address is not an account (spec D2, edge case 31).
+func (s *PasswordAuthService) addressLimit(ctx context.Context) Limit {
+	return Limit{
+		Threshold: s.policy.IPLockoutThreshold(ctx),
+		Window:    s.policy.IPLockoutDuration(ctx),
+	}
+}
+
+// peekLockout reads both scopes WITHOUT moving either. A store error
+// reads as "not locked": the counters fail open and the durable lock is
+// the second line (spec D1). Returns the verdict that produced the lock
+// so the caller can render Retry-After.
+func (s *PasswordAuthService) peekLockout(ctx context.Context, ip, email string) (Verdict, bool) {
+	if s.attempts == nil {
+		return Verdict{}, false
+	}
+	if v, err := s.attempts.Locked(ctx, AttemptKeyIP(ip), s.addressLimit(ctx)); err == nil && v.Locked {
+		return v, true
+	}
+	if v, err := s.attempts.Locked(ctx, AttemptKeyEmail(s.audience, email), s.accountLimit(ctx)); err == nil && v.Locked {
+		return v, true
+	}
+	return Verdict{}, false
+}
+
+// overRequestCap peeks both request scopes. A request cap is not a
+// lockout: it never produces an error, never records on the login
+// scopes, and the caller's answer stays the endpoint's single generic
+// success. A store error reads as "not over" (fail open, spec D1).
+func (s *PasswordAuthService) overRequestCap(ctx context.Context, ipKey, emailKey string, ipLimit, emailLimit Limit) bool {
+	if s.attempts == nil {
+		return false
+	}
+	if v, err := s.attempts.Locked(ctx, ipKey, ipLimit); err == nil && v.Locked {
+		return true
+	}
+	if v, err := s.attempts.Locked(ctx, emailKey, emailLimit); err == nil && v.Locked {
+		return true
+	}
+	return false
+}
+
+// chargeRequestCap records one accepted request on both scopes. Called
+// BEFORE the user lookup so the cost is identical for a known and an
+// unknown address.
+func (s *PasswordAuthService) chargeRequestCap(ctx context.Context, ipKey, emailKey string, ipLimit, emailLimit Limit) {
+	if s.attempts == nil {
 		return
 	}
-	s.rateLimiter.RecordFailedAuth(ctx, "ip:"+ip)
-	s.rateLimiter.RecordFailedAuth(ctx, "email:"+email)
+	_, _ = s.attempts.RecordFailure(ctx, ipKey, ipLimit)
+	_, _ = s.attempts.RecordFailure(ctx, emailKey, emailLimit)
+}
+
+// recordLoginFailure charges one failure against the address and the
+// account, and returns the EMAIL scope's verdict. An unwired or
+// unavailable counter yields the ZERO verdict — not locked — which is
+// the fail-open posture of spec D1: the durable FailedLoginCount rule
+// in recordVerifyFailure is what still caps guessing while the store is
+// down.
+func (s *PasswordAuthService) recordLoginFailure(ctx context.Context, ip, email string) Verdict {
+	if s.attempts == nil {
+		return Verdict{}
+	}
+	_, _ = s.attempts.RecordFailure(ctx, AttemptKeyIP(ip), s.addressLimit(ctx))
+	v, err := s.attempts.RecordFailure(ctx, AttemptKeyEmail(s.audience, email), s.accountLimit(ctx))
+	if err != nil {
+		return Verdict{}
+	}
+	return v
+}
+
+// durableLockOrClear enforces the durable LockedUntil lock against an
+// already-loaded user and heals an EXPIRED one before the caller verifies
+// the password. Shared by Login, ChangePassword and
+// ConfirmPasswordWithSecurity — every route that verifies a password
+// against an already-resolved user runs this first.
+//
+// A LIVE lock returns (retryAfter, true) without touching anything — a
+// durable lock, like a counter lock, must not extend itself. Otherwise,
+// an EXPIRED lock is cleared (ClearFailedLogins, plus zeroing the
+// in-memory copy so the caller's own read of user.FailedLoginCount is
+// accurate) before the verify runs: leaving the stale count around
+// compares it against the threshold on the very next wrong password and
+// re-locks the account immediately, even though the lock had already
+// run out.
+func (s *PasswordAuthService) durableLockOrClear(ctx context.Context, user *iface.User) (time.Duration, bool) {
+	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
+		return time.Until(*user.LockedUntil), true
+	}
+	if user.LockedUntil != nil {
+		if err := s.userService.ClearFailedLogins(ctx, user.UUID); err != nil && s.logger != nil {
+			s.logger.Warn("auth: failed to clear an expired account lock",
+				slog.String("user_uuid", user.UUID),
+				slog.String("error", err.Error()))
+		}
+		user.FailedLoginCount = 0
+		user.LockedUntil = nil
+	}
+	return 0, false
+}
+
+// recordVerifyFailure charges a wrong-password attempt against the
+// email/IP attempt-counter scopes and mirrors the outcome onto the
+// durable LockedUntil lock — the shape Login, ChangePassword and
+// ConfirmPasswordWithSecurity all share on a failed verify.
+//
+// The two rules are OR'd and BOTH are always evaluated. The counter
+// window is fixed, so on its own it only catches a burst: an attacker
+// pacing threshold-1 guesses per window never trips it, and can keep
+// that up indefinitely. The cumulative FailedLoginCount is what ends
+// that low-and-slow run, so it must not be demoted to a counter-outage
+// fallback — that leaves the paced attacker capped by neither rule, and
+// leaves the count itself growing unbounded until a Redis blip locks
+// the account on the first attempt after it. With a healthy store and a
+// burst, the two rules lock on the same attempt, which is what keeps a
+// known and an unknown email indistinguishable there.
+//
+// The unconditional cumulative check is correct only because
+// durableLockOrClear zeroes FailedLoginCount when a lock EXPIRES: an
+// account gets a fresh budget after every lockout instead of re-locking
+// on each later failure for the rest of its life. Callers still own
+// their own audit emit — the three routes emit different actions on a
+// failure.
+func (s *PasswordAuthService) recordVerifyFailure(ctx context.Context, ip string, user *iface.User) {
+	emailVerdict := s.recordLoginFailure(ctx, ip, user.Email)
+	var lockUntil *time.Time
+	// AuthPolicyService's readers are nil-receiver safe and answer with
+	// the shipped defaults, so an unwired policy needs no guard here.
+	if emailVerdict.Locked || user.FailedLoginCount+1 >= s.policy.LockoutThreshold(ctx) {
+		t := time.Now().Add(s.policy.LockoutDuration(ctx))
+		lockUntil = &t
+	}
+	_ = s.userService.RecordFailedLogin(ctx, user.UUID, lockUntil)
+}
+
+// resetLoginFailures clears the EMAIL scope after a success. The address
+// scope is deliberately NOT reset: one correct login must not launder a
+// credential-stuffing run coming from the same address.
+func (s *PasswordAuthService) resetLoginFailures(ctx context.Context, email string) {
+	if s.attempts == nil {
+		return
+	}
+	_ = s.attempts.Reset(ctx, AttemptKeyEmail(s.audience, email))
+}
+
+// dummyVerify burns one argon2 verification so a branch that returns
+// early costs the same wall-clock time as a wrong password. Called by
+// every non-success branch of Login AFTER the lockout peek that does
+// not already run a real Verify — so not by the wrong-password branch,
+// which pays the genuine cost against the stored hash, and not by the
+// gates that run BEFORE the peek (empty input, the login kill switch,
+// the password-method gate, the geo block), which must leave the
+// counters and the audit trail untouched and so deliberately cost
+// nothing.
+func (s *PasswordAuthService) dummyVerify(password string) {
+	_, _ = s.passwordService.Verify(password, s.passwordService.DummyHash())
 }
 
 func (s *PasswordAuthService) sendVerificationEmail(ctx context.Context, user *iface.User, ip string) error {
@@ -1571,6 +1901,12 @@ func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *i
 		RiskFactors: append([]string(nil), in.RiskFactors...),
 		Fingerprint: in.Fingerprint,
 		Timestamp:   now,
+		// This function IS the interactive authentication for password
+		// login, MFA login completion, passkey login completion, the
+		// exported IssueLoginTokens(External) seam and the setup
+		// wizard's initial-admin mint — every one of them lands here, so
+		// auth_time is stamped once, here.
+		AuthTime: now.Unix(),
 	}
 	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, amr, lastOTPAt)
 	if err != nil {

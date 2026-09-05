@@ -148,11 +148,12 @@ return nil, errcode.Conflict(errcode.AuthEmailInUse, "Email already in use")
 // → 409 {"status":409,"title":"Conflict","detail":"Email already in use","code":"auth.email_in_use"}
 ```
 
-Builders cover the common statuses (`BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `UnprocessableEntity`, `ServiceUnavailable`, `Internal`); `errcode.New(status, code, detail)` exists for one-offs. Handlers not yet migrated keep returning `huma.ErrorXxx` text-only — the frontend falls back to `detail` when `code` is missing.
+Builders cover the common statuses (`BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `UnprocessableEntity`, `TooManyRequests`, `ServiceUnavailable`, `Internal`); `errcode.New(status, code, detail)` exists for one-offs. `TooManyRequests` is the one builder that composes with `WithHeader` in practice — a 429 without `Retry-After` gives the caller nothing to act on, so every emitter chains `.WithHeader("Retry-After", "<seconds>")`. Handlers not yet migrated keep returning `huma.ErrorXxx` text-only — the frontend falls back to `detail` when `code` is missing.
 
 Examples:
 
 - `auth.email_in_use` — `POST /v1/users` rejected because the email is already registered (409). Worked example, in `user_handler.go`.
+- `auth.too_many_attempts` — 429; an attempt counter reached its threshold inside its window, or the account carries an unexpired durable lock. Always carries `Retry-After` (integer seconds, never below 1).
 - `billing.invoice_not_found` — SDI invoice UUID lookup miss (404). Future.
 - `authz.permission_denied` — Cedar policy refused the action (403). Future.
 

@@ -23,17 +23,22 @@ import (
 )
 
 // recordingTerminator captures the users whose sessions were torn down.
+// trace is optional (nil in every test that only counts calls) and lets
+// the role-change tests pin where the teardown sits in the sequence.
 type recordingTerminator struct {
 	mu         sync.Mutex
 	terminated []string
 	err        error
+	trace      *callTrace
 }
 
 func (r *recordingTerminator) TerminateAllSessionsByUUID(_ context.Context, userUUID string) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.terminated = append(r.terminated, userUUID)
-	return r.err
+	err := r.err
+	r.mu.Unlock()
+	r.trace.add("terminate")
+	return err
 }
 
 func (r *recordingTerminator) list() []string {

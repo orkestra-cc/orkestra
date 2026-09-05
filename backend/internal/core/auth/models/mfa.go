@@ -9,8 +9,12 @@ import (
 // MFAFactorType enumerates the kinds of second-factor authentication supported.
 // A user may enroll one factor of each type; the unique (userUuid, type) index
 // on the collection enforces that. WebAuthn factors hold zero-or-many
-// credentials inside the doc — the doc's presence is the "factor exists"
-// signal, the credential array carries the per-authenticator state.
+// credentials inside the doc — a non-empty credential array is the "factor
+// exists" signal (a row can exist with zero credentials, e.g. transiently
+// while the last passkey is being removed, and that is not a factor; see
+// MFAEnrollmentLookup in auth/module.go and RemoveFactor in
+// services/mfa_service.go, which both key off len(credentials) > 0), the
+// credential array itself carries the per-authenticator state.
 type MFAFactorType string
 
 const (

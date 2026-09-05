@@ -362,6 +362,27 @@ func main() {
 	if lookup, ok := module.GetTyped[authMiddleware.MFAEnrollmentLookup](svcRegistry, module.ServiceMFAEnrollmentLookup); ok {
 		authMW.SetMFAEnrollmentLookup(lookup)
 	}
+	// MFA-epoch lookup (spec §4.3 D16). Unlike the two setters below this is
+	// tier-DISPATCHING, not tier-agnostic: the auth module builds it from
+	// both tiers' user providers because this one middleware instance serves
+	// both host muxes. SetUserProvider below is the operator provider only —
+	// deliberately not reused here, since resolving a client UUID against
+	// operator_users would miss, fail closed, and strip MFA authority from
+	// every client-tier token.
+	if lookup, ok := module.GetTyped[authMiddleware.MFAEpochLookup](svcRegistry, module.ServiceMFAEpochLookup); ok {
+		authMW.SetMFAEpochLookup(lookup)
+	} else {
+		// ERROR, not WARN, and louder than resolveMFAEpochBumper's: that
+		// one reports a fork's user provider predating the seam, which is
+		// a supported configuration. This one can only mean the auth
+		// module did not register the key it always registers — a wiring
+		// regression. It is silent by construction otherwise: the gate
+		// keeps passing, every test stays green, and the only symptom is
+		// that a removed factor's authority survives.
+		logger.Error("auth: MFA epoch lookup is not registered — MFA epoch not enforced; "+
+			"a removed factor's authority will survive on tokens already issued until they expire",
+			slog.String("service_key", string(module.ServiceMFAEpochLookup)))
+	}
 	if policy, ok := module.GetTyped[*services.AuthPolicyService](svcRegistry, module.ServiceAuthPolicy); ok && policy != nil {
 		authMW.SetStepUpPolicy(policy)
 	}

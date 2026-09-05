@@ -187,11 +187,15 @@ func TestSetupRouteMount_AudienceAndAuth(t *testing.T) {
 		},
 		{
 			// Task 5.4 implements FinalizationAccess for real: with the
-			// mount test's zero-value fakes (no coordinator record, an
-			// "administrator"-role caller), the binding is empty and the
-			// caller is not a super_admin, so the probe answers 200 with
-			// {canFinalize:false, canClaimRecovery:false,
+			// mount test's zero-value fakes the coordinator record is
+			// absent, so the binding is empty and the caller falls to the
+			// recovery check. Since D28 that check reads the caller's role
+			// from the STORE, not from the token — here stubUsers.role is
+			// the zero value, which is not super_admin — so the probe
+			// answers 200 with {canFinalize:false, canClaimRecovery:false,
 			// reason:"recovery_requires_super_admin"} rather than 501.
+			// (Setting stubUsers.role to "super_admin" flips this case;
+			// changing the token's role no longer does.)
 			name:       "operator token reaches finalization-access handler",
 			method:     http.MethodGet,
 			path:       "/v1/setup/finalization-access",
@@ -199,10 +203,11 @@ func TestSetupRouteMount_AudienceAndAuth(t *testing.T) {
 			wantStatus: http.StatusOK,
 		},
 		{
-			// Task 5.5 implements Finalize for real. The mount fixture's
-			// operator token carries role "administrator" and the fake
-			// store has no coordinator record, so the binding is empty and
-			// the caller may not claim recovery: the handler answers 403
+			// Task 5.5 implements Finalize for real. The fake store has no
+			// coordinator record, so the binding is empty and the caller
+			// falls to the recovery check, which since D28 reads the role
+			// from stubUsers (zero value, not super_admin) rather than from
+			// the token: the handler answers 403
 			// setup.recovery_requires_super_admin. What this case proves is
 			// unchanged — the request reached the handler rather than being
 			// stopped by the audience or auth gate.

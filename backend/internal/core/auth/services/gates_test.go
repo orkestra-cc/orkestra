@@ -14,7 +14,6 @@ import (
 	"github.com/pquerna/otp/totp"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -36,7 +35,6 @@ type gatesEnv struct {
 	sessions     *gateSessionRepo
 	geo          *gateGeoResolver
 	notifier     *gateNotifier
-	rateLimiter  *sharederrors.RateLimiter
 	pwd          PasswordService
 	jwt          JWTService
 	policy       *AuthPolicyService
@@ -50,9 +48,16 @@ type gatesEnv struct {
 	audit       *gateAuditSink
 }
 
+// gatesOption tweaks the PasswordAuthConfig newGatesEnv assembles, just
+// before the service is built. The login-lockout fixtures use it to wire
+// an AttemptCounter and a Verify-counting PasswordService; every
+// pre-existing caller passes none and keeps the counter-less service,
+// which is exactly the documented fail-open path.
+type gatesOption func(*PasswordAuthConfig)
+
 // newGatesEnv assembles a wired PasswordAuthService against in-memory
 // fakes. policyValues seeds the auth-policy reader.
-func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]string, geoByIP map[string]string) *gatesEnv {
+func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]string, geoByIP map[string]string, opts ...gatesOption) *gatesEnv {
 	t.Helper()
 	// HIBP off for every env built here. ValidatePolicy hands the decision
 	// to the POLICY toggle as soon as a policy is wired (see
@@ -82,7 +87,6 @@ func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]
 		sessions:     newGateSessionRepo(),
 		geo:          newGateGeoResolver(geoByIP),
 		notifier:     &gateNotifier{configured: true},
-		rateLimiter:  sharederrors.NewRateLimiter(),
 		pwd:          pwd,
 		jwt:          jwt,
 		policy:       policy,
@@ -92,7 +96,7 @@ func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]
 		emailTokens:  &gateEmailTokenRepo{},
 		audit:        &gateAuditSink{},
 	}
-	env.auth = NewPasswordAuthService(PasswordAuthConfig{
+	authCfg := PasswordAuthConfig{
 		UserService:              env.users,
 		TenantProvider:           env.tenant,
 		PasswordService:          env.pwd,
@@ -104,7 +108,6 @@ func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]
 		MFAChallengeService:      nil,
 		FirstAdminClaimer:        env.claimer,
 		Notifier:                 env.notifier,
-		RateLimiter:              env.rateLimiter,
 		FrontendURL:              "https://app.example.com",
 		RequireEmailVerification: false,
 		AppName:                  "Orkestra",
@@ -112,9 +115,12 @@ func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]
 		Policy:                   policy,
 		Audience:                 audience,
 		GeoResolver:              env.geo,
-	})
+	}
+	for _, opt := range opts {
+		opt(&authCfg)
+	}
+	env.auth = NewPasswordAuthService(authCfg)
 	env.auth.SetAuditSink(env.audit)
-	t.Cleanup(env.rateLimiter.Close)
 	return env
 }
 
@@ -388,8 +394,8 @@ func TestChangePassword_RevokeOnPasswordChangeOff_SkipsDeviceTrustRevoke(t *test
 	if err := env.auth.ChangePassword(context.Background(), ChangePasswordInput{UserUUID: u.UUID, Current: "correct-horse-battery", New: "new-correct-horse-pw"}); err != nil {
 		t.Fatalf("ChangePassword: %v", err)
 	}
-	if dt.revokeCalls != 0 {
-		t.Fatalf("toggle off must skip device-trust revoke, got %d calls", dt.revokeCalls)
+	if dt.revokeCalls() != 0 {
+		t.Fatalf("toggle off must skip device-trust revoke, got %d calls", dt.revokeCalls())
 	}
 }
 
@@ -402,8 +408,8 @@ func TestChangePassword_RevokeOnPasswordChangeOn_DefaultRevokes(t *testing.T) {
 	if err := env.auth.ChangePassword(context.Background(), ChangePasswordInput{UserUUID: u.UUID, Current: "correct-horse-battery", New: "new-correct-horse-pw"}); err != nil {
 		t.Fatalf("ChangePassword: %v", err)
 	}
-	if dt.revokeCalls != 1 {
-		t.Fatalf("default-on must call device-trust revoke exactly once, got %d", dt.revokeCalls)
+	if dt.revokeCalls() != 1 {
+		t.Fatalf("default-on must call device-trust revoke exactly once, got %d", dt.revokeCalls())
 	}
 }
 
@@ -422,9 +428,17 @@ func TestShouldRevokeOnPasswordChange_Accessor(t *testing.T) {
 
 // recordingDeviceTrust implements DeviceTrustService with just enough
 // to observe RevokeAllByUser calls. Other methods panic so a refactor
-// that starts to depend on them surfaces immediately.
+// that starts to depend on them surfaces immediately — this is why it's
+// the safer choice over a silently-permissive fake: if a later change
+// (e.g. RemoveFactor consulting IsTrusted) starts depending on one of
+// these, the test fails loudly instead of quietly lying.
+//
+// reasons records the reason string passed to every RevokeAllByUser
+// call, in order — revokeCalls() and lastReason() are read views over
+// it, used by the RemoveFactor tests in mfa_service_test.go as well as
+// the ChangePassword tests below.
 type recordingDeviceTrust struct {
-	revokeCalls int
+	reasons []string
 }
 
 func (r *recordingDeviceTrust) MarkTrusted(context.Context, MarkTrustedInput) error {
@@ -439,9 +453,21 @@ func (r *recordingDeviceTrust) ListActive(context.Context, string) ([]*authModel
 func (r *recordingDeviceTrust) RevokeByDevice(context.Context, string, string, string) error {
 	panic("not used")
 }
-func (r *recordingDeviceTrust) RevokeAllByUser(_ context.Context, _ string, _ string) error {
-	r.revokeCalls++
+func (r *recordingDeviceTrust) RevokeAllByUser(_ context.Context, _ string, reason string) error {
+	r.reasons = append(r.reasons, reason)
 	return nil
+}
+
+// revokeCalls reports how many times RevokeAllByUser was called.
+func (r *recordingDeviceTrust) revokeCalls() int { return len(r.reasons) }
+
+// lastReason returns the reason passed to the most recent RevokeAllByUser
+// call, or "" if it was never called.
+func (r *recordingDeviceTrust) lastReason() string {
+	if len(r.reasons) == 0 {
+		return ""
+	}
+	return r.reasons[len(r.reasons)-1]
 }
 
 // ===== New-device-login email gate =====
@@ -537,7 +563,7 @@ func TestMFAEnrollment_RecoveryCodesCount_HonoursPolicy(t *testing.T) {
 			}
 			code := mustGenerateTOTPNow(t, begin.SecretBase32)
 
-			plain, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin.ChallengeID, code)
+			plain, _, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin.ChallengeID, code)
 			if err != nil {
 				t.Fatalf("ConfirmEnrollment: %v", err)
 			}
@@ -945,10 +971,6 @@ func TestLogin_PasswordMethodGate(t *testing.T) {
 		_, err := env.auth.Login(context.Background(), LoginInput{Email: "who@example.com", Password: "pw", IP: "203.0.113.9"})
 		if !errors.Is(err, ErrPasswordLoginDisabled) {
 			t.Fatalf("want ErrPasswordLoginDisabled, got %v", err)
-		}
-		// Counters untouched: same email must still have its full budget.
-		if env.rateLimiter.IsBlocked(context.Background(), "email:who@example.com") {
-			t.Fatal("rate limiter must not tick on a policy refusal")
 		}
 	})
 	t.Run("other audience unaffected", func(t *testing.T) {

@@ -8,7 +8,6 @@ import (
 	gowebauthn "github.com/go-webauthn/webauthn/webauthn"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/auth/services"
-	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/geoip"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -52,25 +51,41 @@ type authTierBundle struct {
 	// gating semantics as the legacy module.go branch.
 	mfaSvc      services.MFAService
 	webauthnSvc services.WebAuthnService
+	// policyAudience is the services.PolicyAudience matching `tier`,
+	// computed once by the builder from the SAME value that selects the
+	// tier's repositories. Consumers that need to scope a per-audience key
+	// — the MFA-verify attempt cap (spec §4.3 D20) — read it from here
+	// rather than repeating the literal at each wiring site, so a handler
+	// can never be wired to its own repos and the other tier's key space.
+	policyAudience services.PolicyAudience
 }
 
 // tierBundleDeps carries the tier-shared singletons and per-tier user
 // provider that buildAuthTierBundle needs. Pulled into a struct so the
 // function signature stays manageable as PR-D's plumbing grows.
 type tierBundleDeps struct {
-	db                       *mongo.Database
-	logger                   *slog.Logger
-	tier                     audienceTier
-	userProvider             iface.UserProvider
-	tenantProvider           iface.TenantProvider
-	jwtService               services.JWTService
-	passwordService          services.PasswordService
-	mfaChallengeService      services.MFAChallengeService
-	firstAdminClaimer        services.FirstAdminClaimer
-	deviceTrust              services.DeviceTrustService
-	suspiciousLoginNotifier  services.SuspiciousLoginNotifier
-	notifier                 iface.NotificationSender
-	rateLimiter              *sharederrors.RateLimiter
+	db                      *mongo.Database
+	logger                  *slog.Logger
+	tier                    audienceTier
+	userProvider            iface.UserProvider
+	tenantProvider          iface.TenantProvider
+	jwtService              services.JWTService
+	passwordService         services.PasswordService
+	mfaChallengeService     services.MFAChallengeService
+	firstAdminClaimer       services.FirstAdminClaimer
+	deviceTrust             services.DeviceTrustService
+	suspiciousLoginNotifier services.SuspiciousLoginNotifier
+	notifier                iface.NotificationSender
+	// attemptCounter is the Redis fixed-window counter behind every
+	// lockout and request cap (spec D8). shared/errors.RateLimiter's
+	// auth-facing surface is gone (H-1, Task 11); this is the only
+	// counter left.
+	attemptCounter services.AttemptCounter
+	// mailDispatcher is the bounded worker pool transactional auth mail
+	// is enqueued on — ForgotPassword's reset-password send is its first
+	// caller. Single instance shared by both tier bundles — the queue
+	// and worker bounds are process-wide, not per-tier.
+	mailDispatcher           *services.MailDispatcher
 	geoResolver              geoip.Resolver
 	velocityKmh              float64
 	frontendURL              string
@@ -93,6 +108,16 @@ type tierBundleDeps struct {
 	// repository instance. Nil = the legacy no-op contract (events
 	// silently dropped; only the slog line survives).
 	securityEventRepo repository.SecurityEventRepository
+	// mfaEpochBumper moves User.MFAEpoch on every credential removal or
+	// replacement (spec §4.3 D16). Resolved per tier in module.go with
+	// module.GetTyped against that tier's user provider, so the operator
+	// bundle bumps operator_users and the client bundle client_users.
+	// Nil is legal and NOT fatal: a fork's user provider may predate
+	// iface.MFAEpochBumper, in which case the epoch never moves and the
+	// platform degrades to session revocation alone — what it had before
+	// the epoch existed. module.go logs the WARN once per tier at wiring
+	// time; the services log again on each unbumped removal.
+	mfaEpochBumper iface.MFAEpochBumper
 }
 
 // buildAuthTierBundle constructs the per-tier repos + RiskAssessment +
@@ -168,7 +193,8 @@ func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 		DeviceTrust:              d.deviceTrust,
 		SuspiciousLoginNotifier:  d.suspiciousLoginNotifier,
 		Notifier:                 d.notifier,
-		RateLimiter:              d.rateLimiter,
+		AttemptCounter:           d.attemptCounter,
+		MailDispatcher:           d.mailDispatcher,
 		FrontendURL:              d.frontendURL,
 		RequireEmailVerification: d.requireEmailVerification,
 		AppName:                  d.appName,
@@ -188,15 +214,43 @@ func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 	// the row lands in auth_security_events alongside the rest of the
 	// audit timeline. authSvc satisfies services.SecurityEventSink via
 	// its RecordSelfAuthEvent method.
-	if sink, ok := authSvc.(services.SecurityEventSink); ok {
+	sink, hasSink := authSvc.(services.SecurityEventSink)
+	if hasSink {
 		mfaSvc.SetAuditSink(sink)
 	}
+	// D16: the epoch is what ends the MFA authority already minted into
+	// live tokens; D13: the announcement is what makes a credential change
+	// visible to the account holder. Both are optional seams — see
+	// tierBundleDeps.mfaEpochBumper and NewFactorAddedNotifier.
+	mfaSvc.SetEpochBumper(d.mfaEpochBumper)
+	// A nil *MailDispatcher assigned straight to the interface parameter
+	// would be a typed nil — non-nil to the notifier's own guard, and
+	// Enqueue's nil-receiver check returns BEFORE recordDrop, so the mail
+	// would vanish with no metric and no WARN. Unreachable in the real
+	// wiring (module.go builds the dispatcher unconditionally), so this is
+	// the latent case made explicit where a reader looks for it.
+	var mailQueue services.MailEnqueuer
+	if d.mailDispatcher != nil {
+		mailQueue = d.mailDispatcher
+	}
+	factorAdded := services.NewFactorAddedNotifier(
+		d.notifier, mailQueue, d.userProvider, d.appName, d.supportEmail, d.logger)
+	mfaSvc.SetFactorAddedNotifier(factorAdded)
 
 	var webauthnSvc services.WebAuthnService
 	if d.webauthnRP != nil {
 		webauthnSvc = services.NewWebAuthnService(d.webauthnRP, mfaRepo, d.mfaChallengeService, d.logger)
 		// Phase 3.6: mfaMethods allow-list gates passkey enrollment.
 		webauthnSvc.SetPolicy(d.authPolicy)
+		// The same four credential-change seams the TOTP service gets:
+		// one rule for every removal or replacement means the two
+		// services must be wired identically, not similarly.
+		if hasSink {
+			webauthnSvc.SetAuditSink(sink)
+		}
+		webauthnSvc.SetEpochBumper(d.mfaEpochBumper)
+		webauthnSvc.SetDeviceTrust(d.deviceTrust)
+		webauthnSvc.SetFactorAddedNotifier(factorAdded)
 		// Mirror the legacy wiring: when WebAuthn is enabled the
 		// password/OAuth login services need to know whether a given
 		// user has any passkeys to surface "use passkey" on the
@@ -210,6 +264,7 @@ func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 
 	return &authTierBundle{
 		tier:              d.tier,
+		policyAudience:    policyAudienceForBundle,
 		authSessionRepo:   sessionRepo,
 		refreshTokenRepo:  refreshRepo,
 		oauthProviderRepo: oauthRepo,

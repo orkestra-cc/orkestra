@@ -28,6 +28,12 @@ const (
 
 var ErrNotFound = errors.New("authz: not found")
 
+// ErrRoleExists is returned by InsertRole when the (tenantId, name) pair
+// it was asked to insert is already taken. Surfaced from the collection's
+// unique compound index rather than from a read-then-write check, so two
+// callers racing the same name cannot both pass.
+var ErrRoleExists = errors.New("authz: a role with that name already exists in this tenant")
+
 type Repository struct {
 	db *mongo.Database
 }
@@ -82,6 +88,12 @@ func (r *Repository) ListAllPermissionKeys(ctx context.Context) ([]string, error
 
 // --- Roles ---
 
+// UpsertRole is the SEEDER's write: it is keyed on (tenantId, name), so
+// re-running SeedSystemRoles on every boot converges on one row per
+// system role instead of duplicating it. That key is also why it must
+// never serve role CREATION — a create whose name is already taken would
+// rewrite the incumbent's uuid and permissions in place, dangling every
+// binding that points at the old uuid. Use InsertRole for that.
 func (r *Repository) UpsertRole(ctx context.Context, role *models.Role) error {
 	role.UpdatedAt = time.Now()
 	if role.CreatedAt.IsZero() {
@@ -107,6 +119,32 @@ func (r *Repository) UpsertRole(ctx context.Context, role *models.Role) error {
 		},
 		options.Update().SetUpsert(true))
 	return err
+}
+
+// InsertRole inserts a brand-new role. Unlike UpsertRole it is not keyed
+// on anything: a name already taken in this tenant collides on the
+// collection's unique (tenantId, name) index and comes back as
+// ErrRoleExists, which the service maps to a 409. That is what makes
+// "a role this call created has no bindings" true rather than hopeful —
+// with the upsert, a create on a taken name silently rewrote the
+// existing role's uuid and permissions, stranding its bindings and
+// revoking its holders' access with no invalidation.
+//
+// The index does the work, so there is no read-then-write window: two
+// callers racing the same name produce one row and one 409, not two rows
+// or one overwrite.
+func (r *Repository) InsertRole(ctx context.Context, role *models.Role) error {
+	role.UpdatedAt = time.Now()
+	if role.CreatedAt.IsZero() {
+		role.CreatedAt = role.UpdatedAt
+	}
+	if _, err := r.db.Collection(CollRoles).InsertOne(ctx, role); err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return ErrRoleExists
+		}
+		return err
+	}
+	return nil
 }
 
 // UpdateRoleFields applies a partial update to an existing role. Used by the

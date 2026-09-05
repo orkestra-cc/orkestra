@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,7 +59,63 @@ func (m *AuthModule) ValidateConfigSnapshot(_ context.Context, snap module.Confi
 	if err := validateAuthDurations(snap.Values); err != nil {
 		return err
 	}
+	if err := validateLockoutThresholdOrder(snap.Values); err != nil {
+		return err
+	}
 	return validateLoginMethodInvariant(snap, services.ReadableNonEmptyFile)
+}
+
+// validateLockoutThresholdOrder enforces
+// ipLockoutThreshold >= accountLockoutThreshold on the TARGET snapshot.
+//
+// Both sides are resolved through snapshotInt exactly the way the runtime
+// accessors (AuthPolicyService.LockoutThreshold / IPLockoutThreshold)
+// resolve them: absent, blank, malformed or non-positive all fall back to
+// the schema default (5 / 100). That mirroring is load-bearing, not
+// cosmetic — the accessors never reject a bad value, they silently
+// substitute the default, so a rule that instead SKIPPED on a bad value
+// would let a PATCH like {"accountLockoutThreshold":"0",
+// "ipLockoutThreshold":"3"} through: the write looks unrelated to the
+// invariant, but at read time it resolves to account=5, ip=3 — the exact
+// oracle this rule exists to block. Comparing anything other than the
+// values the platform will actually enforce defeats the rule.
+func validateLockoutThresholdOrder(values map[string]string) error {
+	account := snapshotInt(values, "accountLockoutThreshold", 5)
+	ip := snapshotInt(values, "ipLockoutThreshold", 100)
+	if ip >= account {
+		return nil
+	}
+	return &module.ConfigValidationError{
+		Field: "ipLockoutThreshold",
+		Code:  errcode.AuthIPThresholdBelowAccount,
+		Message: fmt.Sprintf(
+			"must be at least the account threshold (%d): an address that locks before the account does turns a shared office or VPN egress into an oracle for which accounts exist behind it",
+			account),
+	}
+}
+
+// snapshotInt reads a positive integer from the snapshot, resolving to
+// def on every non-positive input: absent, blank, malformed, zero or
+// negative. This is deliberately the SAME fallback the runtime accessors
+// apply (LockoutThreshold, IPLockoutThreshold) — snapshotInt has no
+// "invalid, skip me" outcome of its own, because the accessors don't
+// have one either. A validator that treated a bad value as "unreadable,
+// ignore it" would be judging a state the runtime can never actually be
+// in.
+func snapshotInt(values map[string]string, key string, def int) int {
+	raw, present := values[key]
+	if !present {
+		return def
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return def
+	}
+	return n
 }
 
 // validateAuthDurations is the ValidateConfig loop verbatim: an empty value

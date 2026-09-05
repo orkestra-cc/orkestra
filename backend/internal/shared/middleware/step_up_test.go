@@ -434,3 +434,308 @@ func TestRequireMFA_NoPolicyFallsBackToLegacyGate(t *testing.T) {
 		t.Errorf("status = %d, want 401", status)
 	}
 }
+
+// --- RequireEnrolmentProof (H-2 / H-3) ---
+//
+// Enrolment was mounted under RequireGlobal() alone, so a stolen
+// session-only bearer could add a passkey on the victim's account — or
+// REPLACE their TOTP secret, since ConfirmEnrollment deletes the existing
+// factor after validating a code for the NEW one — and then own the
+// account outright. Every enrolment now demands a fresh proof.
+//
+// These helpers are a NEW family, deliberately not an extension of the
+// runStepUp* trio above: those return (downstreamRan, status, body) and
+// have many callers, while these assert on headers too and so need the
+// recorder itself.
+
+// enrolmentLookupFactor is the MFAEnrollmentLookup double that answers a
+// fixed "has a factor" verdict with no error.
+func enrolmentLookupFactor(hasFactor bool) MFAEnrollmentLookup {
+	return func(_ context.Context, _, _ string) (bool, error) { return hasFactor, nil }
+}
+
+// enrolmentLookupErr is the degraded-Mongo double: it answers an error,
+// which the gate must treat as "presence unknown" and fail closed on.
+func enrolmentLookupErr(err error) MFAEnrollmentLookup {
+	return func(_ context.Context, _, _ string) (bool, error) { return false, err }
+}
+
+// runEnrolmentGate builds a minimal AuthMiddleware, wires the given
+// enrolment lookup (nil = SetMFAEnrollmentLookup never called), seeds the
+// request context with claims, and drives RequireEnrolmentProof(maxAge)
+// around a handler that writes 204 — so a pass case asserts a status the
+// downstream handler alone can produce, never the recorder's zero value.
+func runEnrolmentGate(t *testing.T, claims *authModels.JWTClaims, lookup MFAEnrollmentLookup, maxAge time.Duration) *httptest.ResponseRecorder {
+	t.Helper()
+	m := newTestMiddleware(&fakeAuthz{}, &fakeTenantProvider{}, nil)
+	if lookup != nil {
+		m.SetMFAEnrollmentLookup(lookup)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/operator/mfa/enroll/begin", nil)
+	if claims != nil {
+		req = req.WithContext(context.WithValue(req.Context(), ctxClaims, claims))
+	}
+	rec := httptest.NewRecorder()
+	// 204, not the recorder's default 200: a gate that neither called next
+	// nor wrote anything would leave the zero value behind and satisfy a
+	// 200 assertion, so every pass case here asserts a status only the
+	// downstream handler can produce.
+	m.RequireEnrolmentProof(maxAge)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(rec, req)
+	return rec
+}
+
+// assertCodedError decodes the coded envelope and asserts status + the
+// flat top-level `code` a client branches on, returning the body so a
+// caller can assert the extra fields.
+func assertCodedError(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, wantCode string) map[string]any {
+	t.Helper()
+	if rec.Code != wantStatus {
+		t.Fatalf("status = %d, want %d (body %q)", rec.Code, wantStatus, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body %q: %v", rec.Body.String(), err)
+	}
+	if code, _ := body["code"].(string); code != wantCode {
+		t.Fatalf("body.code = %q, want %q", code, wantCode)
+	}
+	return body
+}
+
+func TestRequireEnrolmentProof_NoClaimsIs401(t *testing.T) {
+	rec := runEnrolmentGate(t, nil, enrolmentLookupFactor(false), 5*time.Minute)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+// A user WITH a factor has exactly one right answer: step_up_required.
+// Never password_confirm_required (they have a stronger factor), never
+// mfa_enrollment_required (they are already enrolled).
+func TestRequireEnrolmentProof_WithFactorFreshProofPasses(t *testing.T) {
+	claims := &authModels.JWTClaims{
+		UserUUID: "u-1", AMR: []string{"pwd", "otp"}, LastOTPAt: time.Now().Unix(),
+	}
+	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(true), 5*time.Minute)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 — a fresh second factor is the proof", rec.Code)
+	}
+}
+
+func TestRequireEnrolmentProof_WithFactorStaleProofIsStepUp(t *testing.T) {
+	claims := &authModels.JWTClaims{
+		UserUUID: "u-1", AMR: []string{"pwd", "otp"},
+		LastOTPAt: time.Now().Add(-10 * time.Minute).Unix(),
+	}
+	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(true), 5*time.Minute)
+	assertCodedError(t, rec, http.StatusUnauthorized, "step_up_required")
+}
+
+func TestRequireEnrolmentProof_WithFactorNoProofIsStepUp(t *testing.T) {
+	claims := &authModels.JWTClaims{UserUUID: "u-1", AMR: []string{"pwd"}}
+	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(true), 5*time.Minute)
+	assertCodedError(t, rec, http.StatusUnauthorized, "step_up_required")
+}
+
+// A user WITH a factor and a fresh auth_time is STILL step_up_required:
+// the recent login is not the proof their branch asks for, so auth_time
+// must not leak across the factor branch.
+func TestRequireEnrolmentProof_WithFactorFreshAuthTimeIsStillStepUp(t *testing.T) {
+	claims := &authModels.JWTClaims{
+		UserUUID: "u-1", AMR: []string{"pwd"}, AuthTime: time.Now().Unix(),
+	}
+	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(true), 5*time.Minute)
+	assertCodedError(t, rec, http.StatusUnauthorized, "step_up_required")
+}
+
+// A user WITHOUT a factor proves presence with a recent interactive
+// login. This is the branch that lets an MFA-obligated account in its
+// grace window enrol at all — password-confirm refuses those (D19).
+func TestRequireEnrolmentProof_NoFactorFreshAuthTimePasses(t *testing.T) {
+	claims := &authModels.JWTClaims{
+		UserUUID: "u-1", AMR: []string{"pwd"}, AuthTime: time.Now().Add(-time.Minute).Unix(),
+	}
+	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(false), 5*time.Minute)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+}
+
+// A fresh reauth (password reconfirm) is also a fresh proof, for the
+// users that endpoint still serves.
+func TestRequireEnrolmentProof_NoFactorFreshReauthPasses(t *testing.T) {
+	claims := &authModels.JWTClaims{
+		UserUUID: "u-1", AMR: []string{"pwd", "reauth"}, LastOTPAt: time.Now().Unix(),
+	}
+	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(false), 5*time.Minute)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+}
+
+func TestRequireEnrolmentProof_NoFactorStaleAuthTimeIsReauth(t *testing.T) {
+	authTime := time.Now().Add(-30 * time.Minute).Unix()
+	claims := &authModels.JWTClaims{UserUUID: "u-1", AMR: []string{"pwd"}, AuthTime: authTime}
+	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(false), 5*time.Minute)
+
+	body := assertCodedError(t, rec, http.StatusUnauthorized, "reauthentication_required")
+	if body["maxAgeSeconds"] != float64(300) {
+		t.Errorf("maxAgeSeconds = %v, want 300", body["maxAgeSeconds"])
+	}
+	if body["authTime"] != float64(authTime) {
+		t.Errorf("authTime = %v, want %d", body["authTime"], authTime)
+	}
+	if got := rec.Header().Get("WWW-Authenticate"); got != `Bearer error="reauthentication_required"` {
+		t.Errorf("WWW-Authenticate = %q", got)
+	}
+}
+
+// A token minted before this shipped has no auth_time. It reads as
+// stale and costs one re-login — safe by construction (edge case 9).
+func TestRequireEnrolmentProof_PreDeployTokenIsReauth(t *testing.T) {
+	claims := &authModels.JWTClaims{UserUUID: "u-1", AMR: []string{"pwd"}}
+	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(false), 5*time.Minute)
+	assertCodedError(t, rec, http.StatusUnauthorized, "reauthentication_required")
+}
+
+// A dev token is exactly the pre-deploy shape (no amr, no last_otp_at,
+// and by R3 no auth_time), so the four enrolment endpoints are
+// unreachable with one. Pinned so the consequence stays deliberate.
+func TestRequireEnrolmentProof_DevTokenShapeIsReauth(t *testing.T) {
+	claims := &authModels.JWTClaims{UserUUID: "u-1", SystemRole: "administrator"}
+	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(false), 5*time.Minute)
+	assertCodedError(t, rec, http.StatusUnauthorized, "reauthentication_required")
+}
+
+// FAIL CLOSED. A degraded Mongo must not let a factor be added without
+// proof, so an unavailable lookup refuses every caller who has not
+// ALREADY presented a fresh second factor, with step_up_required. That
+// answer is satisfiable: the proof it asks for lives in the signed token,
+// so an enrolled caller can step up and come back (the test below), while
+// a caller with no factor cannot enrol until the lookup recovers — spec
+// §5 edge case 9. auth_time is not accepted on this path, because
+// "is auth_time enough?" is only answerable once we know the caller has
+// no factor, and that is the very question the lookup failed.
+func TestRequireEnrolmentProof_LookupErrorFailsClosed(t *testing.T) {
+	claims := &authModels.JWTClaims{
+		UserUUID: "u-1", AMR: []string{"pwd"}, AuthTime: time.Now().Unix(),
+	}
+	rec := runEnrolmentGate(t, claims, enrolmentLookupErr(errors.New("mongo down")), 5*time.Minute)
+	assertCodedError(t, rec, http.StatusUnauthorized, "step_up_required")
+}
+
+func TestRequireEnrolmentProof_NilLookupFailsClosed(t *testing.T) {
+	claims := &authModels.JWTClaims{
+		UserUUID: "u-1", AMR: []string{"pwd"}, AuthTime: time.Now().Unix(),
+	}
+	rec := runEnrolmentGate(t, claims, nil, 5*time.Minute)
+	assertCodedError(t, rec, http.StatusUnauthorized, "step_up_required")
+}
+
+// The gate does NOT honour the mfaEnabled master switch, unlike
+// RequireMFA: asking "did you prove presence" is meaningful whether or
+// not MFA is enforced, and no bootstrap deadlock exists here (a fresh
+// login satisfies the no-factor branch).
+func TestRequireEnrolmentProof_MasterSwitchOffStillGates(t *testing.T) {
+	m := newTestMiddleware(&fakeAuthz{}, &fakeTenantProvider{}, nil)
+	m.SetMFAEnrollmentLookup(enrolmentLookupFactor(false))
+	m.SetStepUpPolicy(&fakeStepUpPolicy{mfaDisabled: true})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/operator/mfa/enroll/begin", nil)
+	req = req.WithContext(context.WithValue(req.Context(), ctxClaims,
+		&authModels.JWTClaims{UserUUID: "u-1", AMR: []string{"pwd"}}))
+	rec := httptest.NewRecorder()
+	m.RequireEnrolmentProof(5*time.Minute)(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+	})).ServeHTTP(rec, req)
+
+	assertCodedError(t, rec, http.StatusUnauthorized, "reauthentication_required")
+}
+
+// Zero maxAge defaults to 5 minutes, matching RequireStepUp.
+func TestRequireEnrolmentProof_DefaultMaxAgeWhenZero(t *testing.T) {
+	claims := &authModels.JWTClaims{
+		UserUUID: "u-1", AMR: []string{"pwd"}, AuthTime: time.Now().Add(-2 * time.Minute).Unix(),
+	}
+	rec := runEnrolmentGate(t, claims, enrolmentLookupFactor(false), 0)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 — 2-min-old login under the default 5min window", rec.Code)
+	}
+}
+
+// The other half of edge case 9: the step_up_required an outage hands back
+// must be an answer the caller can actually act on. A caller who steps up
+// and retries carries the proof IN THE TOKEN, so the gate can honour it
+// without the lookup that is still down. Before the freshness check was
+// hoisted above the lookup, this returned step_up_required forever — a
+// challenge the caller had already satisfied.
+func TestRequireEnrolmentProof_LookupErrorFreshFactorPasses(t *testing.T) {
+	claims := &authModels.JWTClaims{
+		UserUUID: "u-1", AMR: []string{"pwd", "otp"}, LastOTPAt: time.Now().Unix(),
+	}
+	rec := runEnrolmentGate(t, claims, enrolmentLookupErr(errors.New("mongo down")), 5*time.Minute)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 \u2014 a fresh factor needs no lookup", rec.Code)
+	}
+}
+
+// Same, with the lookup never wired at all.
+func TestRequireEnrolmentProof_NilLookupFreshFactorPasses(t *testing.T) {
+	claims := &authModels.JWTClaims{
+		UserUUID: "u-1", AMR: []string{"pwd", "webauthn"}, LastOTPAt: time.Now().Unix(),
+	}
+	rec := runEnrolmentGate(t, claims, nil, 5*time.Minute)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+}
+
+// M-1/M-4: the two predicates now differ on exactly one marker, "reauth",
+// and agree on every other. This replaces the seam-era test that asserted
+// they agreed everywhere: that one existed to catch an ACCIDENTAL
+// divergence while the lists were duplicated literals, and the divergence
+// it guarded against is the deliberate change M-1 asks for.
+//
+// The table is exhaustive over the marker vocabulary, so it also pins the
+// answers themselves \u2014 an edit to models.IsSecondFactorAMR that quietly
+// admitted device_trust, say, would fail here rather than only in an
+// integration test.
+func TestAMRPredicates_DifferOnlyOnReauth(t *testing.T) {
+	for _, tc := range []struct {
+		amr            []string
+		wantMFA        bool
+		wantStepUp     bool
+		wantEpochBound bool
+	}{
+		{nil, false, false, false},
+		{[]string{}, false, false, false},
+		{[]string{"pwd"}, false, false, false},
+		{[]string{"oauth"}, false, false, false},
+		{[]string{"otp"}, true, true, true},
+		{[]string{"webauthn"}, true, true, true},
+		{[]string{"mfa"}, true, true, true},
+		// The one divergence: a password reconfirm proves presence for a
+		// step-up but is not a second factor, and the MFA epoch does not
+		// govern it (a password is not an MFA credential).
+		{[]string{"reauth"}, false, true, false},
+		{[]string{"pwd", "reauth"}, false, true, false},
+		// device_trust is epoch-governed \u2014 the trust was granted on the
+		// strength of a factor \u2014 but never a second factor on its own.
+		{[]string{"device_trust"}, false, false, true},
+		{[]string{"pwd", "otp"}, true, true, true},
+		{[]string{"oauth", "webauthn"}, true, true, true},
+		{[]string{"pwd", "otp", "device_trust"}, true, true, true},
+	} {
+		if got := amrSatisfiesMFA(tc.amr); got != tc.wantMFA {
+			t.Errorf("amr %v: amrSatisfiesMFA = %v, want %v", tc.amr, got, tc.wantMFA)
+		}
+		if got := amrSatisfiesStepUp(tc.amr); got != tc.wantStepUp {
+			t.Errorf("amr %v: amrSatisfiesStepUp = %v, want %v", tc.amr, got, tc.wantStepUp)
+		}
+		if got := authModels.HasEpochBoundAMR(tc.amr); got != tc.wantEpochBound {
+			t.Errorf("amr %v: HasEpochBoundAMR = %v, want %v", tc.amr, got, tc.wantEpochBound)
+		}
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -56,6 +57,10 @@ type gateUserFake struct {
 	// purpose: the whole point of §4.9 is that those two produce different
 	// statuses.
 	getByIDErr error
+	// clearedFailedLogins records every ClearFailedLogins target so the
+	// expired-lock test can assert the CALL happened, not merely that
+	// the count reads zero.
+	clearedFailedLogins []string
 }
 
 func (f *gateUserFake) setGetByIDErr(err error) {
@@ -180,11 +185,55 @@ func (f *gateUserFake) RecordFailedLogin(_ context.Context, userUUID string, loc
 func (f *gateUserFake) ClearFailedLogins(_ context.Context, userUUID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.clearedFailedLogins = append(f.clearedFailedLogins, userUUID)
 	if u, ok := f.byUUID[userUUID]; ok {
 		u.FailedLoginCount = 0
 		u.LockedUntil = nil
 	}
 	return nil
+}
+
+// setExpiredLock puts an account in the state a lockout leaves behind
+// once its window has passed: LockedUntil in the past, FailedLoginCount
+// still at whatever produced the lock. Nothing resets that count on its
+// own, so it is the input the expired-lock test needs.
+func (f *gateUserFake) setExpiredLock(email string, failedCount int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u, ok := f.byEmail[email]
+	if !ok {
+		panic("setExpiredLock: no such seeded user " + email)
+	}
+	past := time.Now().Add(-time.Minute)
+	u.LockedUntil = &past
+	u.FailedLoginCount = failedCount
+}
+
+// lockedUntilSet reports whether the account carries a LIVE durable
+// lock. A LockedUntil already in the past is not a lock.
+func (f *gateUserFake) lockedUntilSet(email string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u, ok := f.byEmail[email]
+	return ok && u.LockedUntil != nil && time.Now().Before(*u.LockedUntil)
+}
+
+// failedLoginsCleared reports whether ClearFailedLogins was called for
+// the account. Observing the CALL rather than the resulting zero is
+// what distinguishes "cleared" from "never incremented".
+func (f *gateUserFake) failedLoginsCleared(email string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u, ok := f.byEmail[email]
+	if !ok {
+		return false
+	}
+	for _, id := range f.clearedFailedLogins {
+		if id == u.UUID {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *gateUserFake) UpdateUser(_ context.Context, id string, in *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
@@ -1009,6 +1058,12 @@ func (g *gateAuditSink) byAction(action string) []iface.AuditEvent {
 	return out
 }
 
+// sawAction reports whether at least one event with this action was
+// emitted.
+func (g *gateAuditSink) sawAction(action string) bool {
+	return len(g.byAction(action)) > 0
+}
+
 // gateEmailTokenRepo is the minimal EmailTokenRepository the ForgotPassword
 // and AdminTriggerPasswordReset paths touch. Everything else panics.
 type gateEmailTokenRepo struct {
@@ -1033,4 +1088,190 @@ func (g *gateEmailTokenRepo) InvalidateByUserAndPurpose(context.Context, string,
 }
 func (g *gateEmailTokenRepo) DeleteAllByUser(context.Context, string) (int64, error) {
 	panic("DeleteAllByUser not used in these tests")
+}
+
+// ===== login-lockout fixtures =====
+//
+// One builder behind every newLockoutTestService* constructor: a
+// gatesEnv with the attempt counter wired, a Verify-counting password
+// service, and one seeded account per non-success branch of Login. The
+// constructors are thin projections of it so each test names only the
+// handle it asserts on.
+
+// correctTestPassword is the ONE password the fixtures seed. Anything
+// else handed to Login is a wrong password by construction.
+const correctTestPassword = "correct horse battery staple"
+
+// knownTestUserUUID is the fixed UUID the lockout fixture assigns to
+// "known@example.com" (instead of activeUser's random one) so a test
+// that only has a UUID to work with — ChangePassword,
+// ConfirmPasswordWithSecurity — can reach that seeded account directly.
+const knownTestUserUUID = "018f0000-0000-7000-8000-00000000b055"
+
+// countingPasswordService counts Verify calls while delegating every
+// method to a real argon2id PasswordService. The branch-cost test is
+// about the actual verification, so a stub that skipped the KDF would
+// measure nothing — this wraps, it does not replace.
+type countingPasswordService struct {
+	PasswordService
+	mu       sync.Mutex
+	verifies int
+}
+
+func (c *countingPasswordService) Verify(plaintext, encoded string) (bool, error) {
+	c.mu.Lock()
+	c.verifies++
+	c.mu.Unlock()
+	return c.PasswordService.Verify(plaintext, encoded)
+}
+
+func (c *countingPasswordService) verifyCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.verifies
+}
+
+// argon2id at the production parameters costs tens of milliseconds, and
+// every fixture seeds the same literal — hash it once for the package.
+var (
+	lockoutHashOnce sync.Once
+	lockoutHash     string
+	lockoutHashErr  error
+)
+
+func lockoutPasswordHash(t *testing.T, pwd PasswordService) string {
+	t.Helper()
+	lockoutHashOnce.Do(func() { lockoutHash, lockoutHashErr = pwd.Hash(correctTestPassword) })
+	if lockoutHashErr != nil {
+		t.Fatalf("hash %q: %v", correctTestPassword, lockoutHashErr)
+	}
+	return lockoutHash
+}
+
+// lockoutFixture bundles the handles the lockout tests reach into.
+type lockoutFixture struct {
+	env     *gatesEnv
+	users   *gateUserFake
+	counter *MemoryAttemptCounter
+	pwd     *countingPasswordService
+}
+
+// newLockoutFixture wires an operator-audience service whose account
+// threshold is `threshold`. The ADDRESS pair is deliberately left at its
+// 100/15m defaults: the point of the separate scope is that it does not
+// move with the account threshold.
+func newLockoutFixture(t *testing.T, threshold int) *lockoutFixture {
+	t.Helper()
+	counter, ok := NewMemoryAttemptCounter().(*MemoryAttemptCounter)
+	if !ok {
+		t.Fatal("NewMemoryAttemptCounter no longer returns *MemoryAttemptCounter")
+	}
+	pwd := &countingPasswordService{}
+	env := newGatesEnv(t, PolicyAudienceOperator, map[string]string{
+		"accountLockoutThreshold": strconv.Itoa(threshold),
+	}, nil, func(cfg *PasswordAuthConfig) {
+		pwd.PasswordService = cfg.PasswordService
+		cfg.PasswordService = pwd
+		cfg.AttemptCounter = counter
+	})
+
+	// One account per non-success branch of Login, in the order Login
+	// reaches them.
+	hash := lockoutPasswordHash(t, env.pwd)
+	known := activeUser("known@example.com", hash)
+	known.UUID = knownTestUserUUID
+	env.users.seed(known)
+
+	inactive := activeUser("inactive@example.com", hash)
+	inactive.IsActive = false
+	env.users.seed(inactive)
+
+	principal := activeUser("svc@example.com", hash)
+	principal.Kind = iface.UserKindService
+	env.users.seed(principal)
+
+	env.users.seed(activeUser("oauthonly@example.com", ""))
+
+	locked := activeUser("locked@example.com", hash)
+	future := time.Now().Add(time.Hour)
+	locked.LockedUntil = &future
+	env.users.seed(locked)
+
+	return &lockoutFixture{env: env, users: env.users, counter: counter, pwd: pwd}
+}
+
+func newLockoutTestService(t *testing.T, threshold int) *PasswordAuthService {
+	t.Helper()
+	return newLockoutFixture(t, threshold).env.auth
+}
+
+func newLockoutTestServiceWithPassword(t *testing.T, threshold int) (*PasswordAuthService, *countingPasswordService) {
+	t.Helper()
+	f := newLockoutFixture(t, threshold)
+	return f.env.auth, f.pwd
+}
+
+func newLockoutTestServiceWithCounter(t *testing.T, threshold int) (*PasswordAuthService, *MemoryAttemptCounter) {
+	t.Helper()
+	f := newLockoutFixture(t, threshold)
+	return f.env.auth, f.counter
+}
+
+func newLockoutTestServiceWithUsers(t *testing.T, threshold int) (*PasswordAuthService, *gateUserFake) {
+	t.Helper()
+	f := newLockoutFixture(t, threshold)
+	return f.env.auth, f.users
+}
+
+// newLockoutTestServiceWithAudit exposes the fixture's gateAuditSink so a
+// test can assert a failure branch left the right row behind.
+func newLockoutTestServiceWithAudit(t *testing.T, threshold int) (*PasswordAuthService, *gateAuditSink) {
+	t.Helper()
+	f := newLockoutFixture(t, threshold)
+	return f.env.auth, f.env.audit
+}
+
+// newLockoutTestServiceWithFailingCounter drives the documented
+// fail-open path: every counter call reports the store is unavailable,
+// so only the durable FailedLoginCount rule is left.
+func newLockoutTestServiceWithFailingCounter(t *testing.T, threshold int) (*PasswordAuthService, *gateUserFake) {
+	t.Helper()
+	f := newLockoutFixture(t, threshold)
+	f.counter.FailWith(errors.New("attempt counter store unavailable"))
+	return f.env.auth, f.users
+}
+
+// sameSentinel reports whether two Login answers are the SAME answer.
+// errors.Is in either direction covers a sentinel against a sentinel or
+// against a wrapper of it. It does NOT cover two distinct lockedError
+// values — each carries its own Retry-After, and neither is the other's
+// target — yet those are the same answer on the wire, so both sides are
+// collapsed onto their login sentinel first.
+func sameSentinel(a, b error) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	if errors.Is(a, b) || errors.Is(b, a) {
+		return true
+	}
+	sa, sb := loginSentinel(a), loginSentinel(b)
+	return sa != nil && sa == sb
+}
+
+// loginSentinel maps a Login error onto the package sentinel that
+// decides its wire status, or nil when it is none of them.
+func loginSentinel(err error) error {
+	for _, sentinel := range []error{
+		ErrAccountLocked,
+		ErrInvalidCredentials,
+		ErrEmailNotVerified,
+		ErrLoginDisabled,
+		ErrPasswordLoginDisabled,
+		ErrCountryBlocked,
+	} {
+		if errors.Is(err, sentinel) {
+			return sentinel
+		}
+	}
+	return nil
 }

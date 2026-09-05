@@ -559,3 +559,187 @@ func TestNew_EnforceActionsTrimAndDrop(t *testing.T) {
 		t.Errorf("expected exactly 2 entries, got %d: %+v", len(svc.enforcedActions), svc.enforcedActions)
 	}
 }
+
+// TestShadowEvaluate_EnforceDoesNotOverrideTheRoleTableDeny is the H-5
+// probe, inverted: under enforce, a tenant-role permit must not override
+// the role table's deny on a platform-reserved action.
+//
+// The scenario is the real one. Every permit in tenant_roles.cedar is
+// written for a tenant RESOURCE with no constraint on the action, so it
+// fires on system.* actions too — and under CEDAR_ENFORCE_ACTIONS Cedar's
+// allow overrides the role table's deny, which is exactly how an
+// org_owner would come to hold system.users.admin.
+// system_actions.require_platform_role is what stops it.
+//
+// The positive control is load-bearing, not ceremony: HasPermission
+// returns the role-table verdict (false here) on EVERY failure mode —
+// enforce set misconfigured, engine nil, shadowEvaluate returning
+// ok=false — so "got false" on its own proves nothing about the forbid.
+// The control pins that in this exact fixture an enforced action really
+// does take Cedar's verdict over the role table's deny, and that the
+// org_owner permit really does fire. Only then does the deny in the
+// other two subtests mean what it claims.
+//
+// newTier1Service rather than newTestService: HasPermission goes through
+// GetEffectivePermissions, which reads the repo, and newTestService
+// leaves repo nil (nil-panic). The engine, the enforce set and a
+// readable logger are attached here because the tier-1 harness
+// deliberately runs without Cedar.
+func TestShadowEvaluate_EnforceDoesNotOverrideTheRoleTableDeny(t *testing.T) {
+	newSvc := func(t *testing.T, enforce string) (*Service, *bytes.Buffer) {
+		t.Helper()
+		svc, _ := newTier1Service(t, staticRoleLookup("")) // no platform role
+		eng, err := cedar.New("development")
+		if err != nil {
+			t.Fatalf("cedar engine: %v", err)
+		}
+		logBuf := &bytes.Buffer{}
+		svc.logger = slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		svc.cedarEngine = eng
+		svc.enforcedActions = map[string]struct{}{enforce: {}}
+		return svc, logBuf
+	}
+	orgOwnerCtx := func() context.Context {
+		return context.WithValue(context.Background(), ctxauth.KeyTenantRoles, []string{"org_owner"})
+	}
+
+	t.Run("positive control: enforce is live and the org_owner permit fires", func(t *testing.T) {
+		svc, logBuf := newSvc(t, "tenant.update")
+		// Role table denies (no bindings in the fake repo), Cedar allows
+		// via tenant_roles.org_owner.all_in_tenant. If the enforce path
+		// were dead this would come back false.
+		allowed, err := svc.HasPermission(orgOwnerCtx(), "u-1", "t-1", "tenant.update")
+		if err != nil {
+			t.Fatalf("HasPermission: %v", err)
+		}
+		if !allowed {
+			t.Fatalf("enforce path is not live: Cedar's allow did not override the role-table deny\nlog: %s", logBuf.String())
+		}
+		if !bytes.Contains(logBuf.Bytes(), []byte("enforce-mode override")) {
+			t.Errorf("expected an enforce-mode override line, got: %s", logBuf.String())
+		}
+	})
+
+	t.Run("tenant-scoped system action is forbidden", func(t *testing.T) {
+		// Same fixture as the control, only the action differs: the
+		// org_owner permit fires here too, and the forbid is the only
+		// thing that turns the outcome around.
+		svc, _ := newSvc(t, "system.users.admin")
+		ctx := orgOwnerCtx()
+
+		decision, ok := svc.shadowEvaluate(ctx, "u-1", "t-1", "system.users.admin", false)
+		if !ok {
+			t.Fatalf("Cedar evaluation should succeed, errors: %+v", decision.Errors)
+		}
+		if !decisionDecidedBy(decision, "system_actions.require_platform_role") {
+			t.Fatalf("the deny must come from the system-action forbid, reasons=%v allowed=%v", decision.Reasons, decision.Allowed)
+		}
+
+		allowed, err := svc.HasPermission(ctx, "u-1", "t-1", "system.users.admin")
+		if err != nil {
+			t.Fatalf("HasPermission: %v", err)
+		}
+		if allowed {
+			t.Fatal("an org_owner must not obtain system.users.admin under enforce")
+		}
+	})
+
+	t.Run("global system action is forbidden", func(t *testing.T) {
+		// The RequireSystemPermission shape: tenantID == "". D24 already
+		// stops the tenant roles being stamped on this path, so the
+		// permit cannot fire — but the forbid still names the deny, and
+		// that is what keeps this closed if the stamp ever comes back.
+		svc, _ := newSvc(t, "system.users.admin")
+		ctx := orgOwnerCtx()
+
+		decision, ok := svc.shadowEvaluate(ctx, "u-1", "", "system.users.admin", false)
+		if !ok {
+			t.Fatalf("Cedar evaluation should succeed, errors: %+v", decision.Errors)
+		}
+		if !decisionDecidedBy(decision, "system_actions.require_platform_role") {
+			t.Fatalf("the deny must come from the system-action forbid, reasons=%v allowed=%v", decision.Reasons, decision.Allowed)
+		}
+
+		allowed, err := svc.HasPermission(ctx, "u-1", "" /* global check */, "system.users.admin")
+		if err != nil {
+			t.Fatalf("HasPermission: %v", err)
+		}
+		if allowed {
+			t.Fatal("an org_owner must not obtain system.users.admin under enforce")
+		}
+	})
+}
+
+// decisionDecidedBy reports whether policyID is among the policies that
+// produced this decision. Assert with this rather than
+// `decision.MatchedPolicy == id`: MatchedPolicy is only Reasons[0], and
+// cedar-go leaves the order undefined when several policies match, so an
+// equality assertion over a multi-match decision is a coin flip.
+func decisionDecidedBy(d cedar.Decision, policyID string) bool {
+	for _, r := range d.Reasons {
+		if r == policyID {
+			return true
+		}
+	}
+	return false
+}
+
+// ===== D24: global checks carry no tenant roles =====
+
+// TestShadowEvaluate_GlobalCheckStampsNoTenantRoles pins D24: a check with
+// no tenant (tenantID == "") must not stamp principal.tenant_roles, so a
+// membership role in whatever tenant the request happened to resolve
+// cannot be the reason a global action is permitted.
+//
+// The action is auth.service_accounts.manage rather than the more obvious
+// system.users.admin, and the choice is load-bearing. That key is
+// System: true (auth/module.go) and is gated by RequireSystemPermission —
+// so this is a real global check on a platform-reserved key — but its
+// action_module is "auth", which puts it OUTSIDE the reach of
+// system_actions.require_platform_role (that forbid keys on
+// action_module == "system"). On a system.* action the forbid would deny
+// the request whether or not the stamp happened, and the test would pass
+// against the unfixed evaluator, proving nothing about D24. Here the only
+// thing standing between an org_owner and a platform-reserved key is the
+// stamp itself.
+//
+// Before the fix: tenant_roles.org_owner.all_in_tenant matches (the
+// resource UID is Orkestra::Tenant even with an empty UUID) and Cedar
+// allows. After it: nothing matches and Cedar denies.
+func TestShadowEvaluate_GlobalCheckStampsNoTenantRoles(t *testing.T) {
+	svc, _ := newTestService(t, nil) // no platform role from the lookup
+	ctx := context.WithValue(context.Background(), ctxauth.KeyTenantRoles, []string{"org_owner"})
+
+	decision, ok := svc.shadowEvaluate(ctx, "u-1", "" /* global check */, "auth.service_accounts.manage", false)
+	if !ok {
+		t.Fatalf("evaluation should succeed, errors: %+v", decision.Errors)
+	}
+	if decision.MatchedPolicy == "tenant_roles.org_owner.all_in_tenant" {
+		t.Fatalf("a tenant-role permit matched a global check: %+v", decision)
+	}
+	if decision.Allowed {
+		t.Fatalf("a global check must not be allowed by a tenant role, got allow (matched=%q)", decision.MatchedPolicy)
+	}
+}
+
+// TestShadowEvaluate_TenantScopedCheckStillStampsThem is the narrowness
+// guard for D24: the gate is on tenantID, not a removal of the mechanism.
+// A tenant-scoped check must still stamp principal.tenant_roles, and
+// tenant_roles.org_owner.all_in_tenant must still be the policy that
+// permits it. This test is green before and after the D24 gate; it fails
+// against the over-broad variant that drops the stamp altogether.
+func TestShadowEvaluate_TenantScopedCheckStillStampsThem(t *testing.T) {
+	svc, _ := newTestService(t, nil) // no platform role from the lookup
+	ctx := context.WithValue(context.Background(), ctxauth.KeyTenantRoles, []string{"org_owner"})
+
+	decision, ok := svc.shadowEvaluate(ctx, "u-1", "tenant-1", "tenant.update", false)
+	if !ok {
+		t.Fatalf("evaluation should succeed, errors: %+v", decision.Errors)
+	}
+	if !decision.Allowed {
+		t.Fatalf("an org_owner must still be permitted inside their own tenant, got deny (matched=%q)", decision.MatchedPolicy)
+	}
+	if decision.MatchedPolicy != "tenant_roles.org_owner.all_in_tenant" {
+		t.Fatalf("expected the org_owner tenant permit to match, got %q", decision.MatchedPolicy)
+	}
+}

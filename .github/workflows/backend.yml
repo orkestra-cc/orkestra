@@ -68,7 +68,9 @@ jobs:
       COVERAGE_THRESHOLD: 15
     services:
       redis:
-        image: redis/redis-stack-server:latest
+        # Same image and patch docker-compose.infra.yml pins — CI must test
+        # the Redis the stacks run.
+        image: redis:8.2.9-alpine
         ports: ['6379:6379']
     steps:
       - uses: actions/checkout@v7
@@ -79,7 +81,7 @@ jobs:
       - name: Start transaction-capable MongoDB
         run: |
           docker run --detach --name mongodb --publish 27017:27017 \
-            mongo:8.0 --replSet rs0 --bind_ip_all
+            mongo:8.0.29 --replSet rs0 --bind_ip_all
           for attempt in {1..30}; do
             if docker exec mongodb mongosh --quiet --eval 'db.runCommand({ping: 1}).ok' | grep -q '^1$'; then
               break

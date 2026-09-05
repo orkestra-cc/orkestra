@@ -89,6 +89,29 @@ type JWTClaims struct {
 	// LastOTPAt is the unix timestamp of the most recent successful OTP step.
 	// Used by RequireStepUp (Block D) to detect stale MFA proofs.
 	LastOTPAt int64 `json:"last_otp_at,omitempty"`
+
+	// AuthTime (OIDC "auth_time") is the unix time of the INTERACTIVE
+	// authentication that created this session. Stamped by every path
+	// that creates a session and by nothing else; a refresh carries it
+	// unchanged, because a refresh is not an authentication, and so do
+	// the password-confirm and step-up mints, which prove a factor
+	// rather than creating a session. The machine mints (client-
+	// credentials grant, dev token) never stamp it at all — a service
+	// principal proves no interactive presence.
+	//
+	// The enrolment gate reads it: a user with no factor proves presence
+	// for a first enrolment with a recent auth_time. Absent on every
+	// token minted before this shipped, which reads as stale and costs
+	// such a user one re-login.
+	AuthTime int64 `json:"auth_time,omitempty"`
+
+	// MFAEpoch (claim "mfae") is the value of User.MFAEpoch when this
+	// token was minted. Every request that CONSUMES an MFA marker
+	// compares it against the user's current epoch; behind means the
+	// markers are ignored, so authority proven by a removed factor dies
+	// at once in every session. Absent reads as 0, which matches every
+	// document that has no mfaEpoch.
+	MFAEpoch int `json:"mfae,omitempty"`
 }
 
 type RefreshTokenRequest struct {

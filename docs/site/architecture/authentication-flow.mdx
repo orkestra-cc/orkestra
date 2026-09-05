@@ -113,14 +113,19 @@ All access and refresh tokens are RS256-signed JWTs from the same key pair (`AUT
   "acting_tenant_id": "<tenant-fallback-uuid>",
   "acting_tenant_kind": "internal",
   "amr": ["pwd", "otp"],
-  "last_otp_at": 1730000800
+  "last_otp_at": 1730000800,
+  "auth_time": 1730000000,
+  "mfae": 3
 }
 ```
 
 - **`srole`** is the global system role (`super_admin` > `administrator` > `developer` > `manager` > `operator` > `guest`). Memberships carry org-scoped roles. **Permissions are not embedded** — they are resolved per-request by middleware via `authz.HasPermission`. (The wire-compact `mbr` claim's membership objects use `{tid, k, r}`, not the expanded `{orgId, orgName, orgSlug, roles}` shown above for readability.)
+  - **`srole` is a snapshot, not the authority.** It is stamped at issuance and can be a whole access-token lifetime out of date after a role change. Any guard that compares *role tiers* — who may assign which role, who may claim setup recovery — therefore reads the user's row from the store rather than the claim, and a lookup that cannot be performed fails the request rather than falling back to the claim. A role change also retires the target's cached permission verdicts and ends their sessions, which is what bounds the staleness for everything else.
 - **`dtid`** ("default tenant id" — the pre-rename name) carries `TenantFallbackID`: the tenant this token falls back to when nothing more specific resolves the current tenant (see [Tenant resolution](#tenant-resolution-and-the-fallback-claim) below). The key stays `dtid` on the wire for backward compatibility with already-issued tokens; only the Go field was renamed.
 - **`acting_tenant_id`** / **`acting_tenant_kind`** are the tenant (and its kind, `internal`/`external`) this specific token is minted to act in. For an operator-audience token they start out equal to `dtid`/its kind and can be overridden per-request by `X-Tenant-ID`; a client-portal token pins them for the token's whole lifetime.
-- **`amr`** (RFC 8176) records the authentication method(s) used. `pwd` for password login, `oauth` for OAuth, `otp` after MFA verification, `webauthn` after a passkey assertion, `reauth` after a successful password reconfirm via `/me/password-confirm`. `last_otp_at` lets `RequireStepUp(maxAge)` middleware demand a fresh MFA proof (or fresh reconfirm) for catastrophic actions.
+- **`amr`** (RFC 8176) records the authentication method(s) used. `pwd` for password login, `oauth` for OAuth, `otp` after MFA verification, `webauthn` after a passkey assertion, `reauth` after a successful password reconfirm via `/me/password-confirm`. `last_otp_at` lets `RequireStepUp(maxAge)` middleware demand a fresh MFA proof (or fresh reconfirm) for catastrophic actions. `reauth` proves **presence**, not a second factor: it satisfies the freshness gates (`RequireStepUp`, the enrolment gate) and is deliberately refused by the session-long `RequireMFA` gate, by Cedar's `principal.mfa_enrolled`, and by the personal-tenant impersonation bypass — those ask whether a second factor exists on the session, and a password the caller had already typed is not one. A refresh never carries `reauth` forward.
+- **`auth_time`** (the OIDC name) is the unix time of the interactive authentication that created this session. **Written by** every session-creating mint — password login, MFA login completion, passkey login completion and the setup wizard's initial-admin mint (all one funnel), plus the OAuth callback (which is also where a client-tier relay completes). **Carried unchanged by** refresh rotation, the `/session` bootstrap mint, the MFA and passkey step-ups and `/me/password-confirm`: none of those is an authentication, so re-stamping would make freshness unfalsifiable. It is **never** written by the machine mints (the client-credentials grant, the dev-token endpoint) — a service principal proves no interactive presence. **Read by** exactly one consumer, the [enrolment proof gate](#enrolment-proof-gate)'s no-factor branch, which lets a user with no enrolled factor prove presence with a recent `auth_time`; nothing else reads it. Omitted when zero; absent on any token minted before it shipped, which reads as stale and costs such a user one re-login.
+- **`mfae`** is the value of the user's MFA epoch when the token was minted. **Written by** every access-token mint, read off the user record at signing time — including the machine mints (the client-credentials grant, the dev-token endpoint, and the tenant-scoped dev-token variant), since an epoch is a fact about the subject rather than a freshness proof. **Carried** by nothing: each mint re-reads the user, so a refreshed token carries the epoch current at refresh. **Read by** the MFA-marker resolver, which drops a token's MFA markers as soon as its epoch stops matching the user's — so authority proven by a factor the user has since removed dies at once in every session, on the caller's own token, without waiting for a refresh and without depending on a revocation write succeeding. The user-side counter *moves* on every credential removal and replacement (see [Removing or replacing a factor](#removing-or-replacing-a-factor)), and both halves are now live. The resolver runs **once per request**, at the perimeter, and every consumer of an MFA marker reads its answer: the session-long `RequireMFA` gate, `RequireStepUp`, the enrolment gate's factor branch, the personal-tenant impersonation bypass, and Cedar's `principal.mfa_enrolled`. A token carrying no MFA marker costs no lookup at all, and a lookup that fails — a store outage, or no such user — reads as "not current" and drops the markers, never as a pass. The step-up mints hold up their end of the same rule: `/me/password-confirm`, `/mfa/verify` and the passkey `verify/finish` all re-issue under the user's current epoch, so each strips the epoch-governed markers off the caller's claim and stamps only the factor it actually verified — otherwise one password reconfirm after a factor removal would hand the marker straight back with fresh authority. Omitted when zero, and an absent claim reads as zero, which matches a user document that has no `mfaEpoch`.
 - **`sid`** is the canonical session UUID. One random UUID is created before either JWT is signed; the access JWT `sid`, refresh JWT `sid`, refresh-token row, session document, and token response match. Refresh rotation and MFA/WebAuthn completion preserve it. Logout / change-password add it to a Redis-backed revocation set so the access token stops working instantly without waiting for the TTL.
 
 ### Tenant resolution and the fallback claim
@@ -247,7 +252,7 @@ One such 401 gets more than a pass-through. When a live bearer *was* sent and th
 
 The console's `/refresh-cookie` attempt is bounded by a 10-second `AbortController`, and the bound covers the **body read**, not only the headers: `fetch` resolves on headers, so the JSON read is raced against the abort. Without that a server that sends headers and then stalls the body would hold the cross-tab Web Lock, and with it every other tab's rotation, for as long as it stalls. The console classifies the answer with the same **allowlist** the client tier uses: a 401 — and only a 401 — is the credential being refused and ends the session; a 409 keeps its single raced retry; and everything else keeps the token and retries later — 503, 429 (the endpoint sits under the global rate limiter), any other 4xx or 5xx, a transport failure, the timeout, and a 2xx whose body is unreadable or carries no token. An answer that describes the server has said nothing about the session.
 
-`frontend-client` implements the same recovery in `src/api/authedFetch.ts`: it too serialises rotation across tabs with a Web Lock, coalesces concurrent 401s onto one in-flight refresh, and tolerates one `409 refresh_rotation_raced` retry. **It rotates proactively too**, on the same 30 s skew and under the same `SKEW < MinAccessTokenTTL` bound: a request whose bearer expires inside that window awaits one rotation before it leaves, so an ordinary expiry costs a single `/refresh-cookie` and no 401 at all. That skew belongs to the pre-send check alone and never to the proof rule below, which carries no margin by design — a token with seconds of life left is still accepted by the server, so its handler ran. It differs in two deliberate ways. It **only** refreshes on proof the request never reached its handler — the `access_token_expired` code, or a token already expired when sent — because an unconditional retry re-sends a wrong-current-password `change-password` and double-counts it toward the lockout. And **the session ends only on an explicit rejection** — never on an outage. Two rejections qualify: a **401 from `/refresh-cookie`**, and a **401 on the authenticated request itself** (or on its retry) carrying a terminal top-level code, `session_revoked` or `session_max_age_reached`; the second clears the access token and the session marker and fires no refresh of its own — on the original response none has happened yet, and on a retry the rotation is already behind it (this call's own, or a sibling's, whose token the retry reused), so the terminal 401 ends the session without a second one. A token minted from the same cookie would carry the same dead `sid` anyway. Everything else keeps both — a 429 (the endpoint sits under the global rate limiter, and a burst of tabs is what trips it), a 5xx, a timeout, a transport failure, a twice-raced 409, or a 2xx without a token: they say something about the server and nothing about the session.
+`frontend-client` implements the same recovery in `src/api/authedFetch.ts`: it too serialises rotation across tabs with a Web Lock, coalesces concurrent 401s onto one in-flight refresh, and tolerates one `409 refresh_rotation_raced` retry. **It rotates proactively too**, on the same 30 s skew and under the same `SKEW < MinAccessTokenTTL` bound: a request whose bearer expires inside that window awaits one rotation before it leaves, so an ordinary expiry costs a single `/refresh-cookie` and no 401 at all. That skew belongs to the pre-send check alone and never to the proof rule below, which carries no margin by design — a token with seconds of life left is still accepted by the server, so its handler ran. It differs in two deliberate ways. It **only** refreshes on proof the request never reached its handler — the `access_token_expired` code, or a token already expired when sent — because an unconditional retry re-sends a wrong-current-password `change-password` and double-counts it toward the lockout. And **the session ends only on an explicit rejection** — never on an outage. Three rejections qualify, and two of them are the session's own death: a **401 from `/refresh-cookie`**, and a **401 on the authenticated request itself** (or on its retry) carrying a terminal top-level code, `session_revoked` or `session_max_age_reached`; the second clears the access token and the session marker and fires no refresh of its own — on the original response none has happened yet, and on a retry the rotation is already behind it (this call's own, or a sibling's, whose token the retry reused), so the terminal 401 ends the session without a second one. A token minted from the same cookie would carry the same dead `sid` anyway. The third is different in kind, and is the only one that also **navigates**: a **401 `reauthentication_required`**, the no-factor branch of the enrolment-proof gate described below. That session is *not* dead — the code is deliberately outside the terminal set — but the refusal is about its **age**, and the only thing that answers it is a new interactive sign-in, so the SPA clears the token and the marker and leaves for `/login?next=<the sanitised current path>`. Clearing is what makes that sign-in real: the login page forwards an already-authenticated visitor straight to its `?next=`, and a token minted from the same refresh cookie carries `auth_time` **forward unchanged**, so a surviving marker would silently restore the user to the same refusal. Everything else keeps both — a 429 (the endpoint sits under the global rate limiter, and a burst of tabs is what trips it), a 5xx, a timeout, a transport failure, a twice-raced 409, or a 2xx without a token: they say something about the server and nothing about the session.
 
 Every refresh path and the read-only session bootstrap reject inactive users; deactivation cannot extend a session.
 
@@ -272,18 +277,35 @@ A privileged user logging in without an MFA factor has `User.MFAGraceStartedAt` 
 
 ### Step-up gate
 
-`RoleMiddleware.RequireStepUp(maxAge)` is a stricter variant applied to catastrophic / irreversible actions (`POST /v1/auth/{tier}/me/mfa/remove`, `POST /v1/admin/users/{id}/mfa/reset`, self-service OAuth link/unlink, session revoke / revoke-all, backup-code regeneration). It checks both that `amr` contains an MFA-or-reauth marker **AND** that `last_otp_at` is within `maxAge` of now — a session-long MFA proof is not enough.
+`RoleMiddleware.RequireStepUp(maxAge)` is a stricter variant applied to catastrophic / irreversible actions (`POST /v1/auth/{tier}/me/mfa/remove`, `DELETE /v1/auth/{tier}/me/mfa/webauthn/credentials/{id}`, `POST /v1/admin/{users,client-users}/{id}/mfa/reset`, self-service OAuth link/unlink, session revoke / revoke-all, backup-code regeneration, and the service-account mutations). It checks both that the caller's **resolved MFA authority** contains an MFA-or-reauth marker **AND** that `last_otp_at` is within `maxAge` of now — a session-long MFA proof is not enough. "Resolved" is the `mfae` claim's doing: the check reads the authority the perimeter resolved for this request, not `amr` literally, so a second factor removed since the token was minted fails freshness even inside `maxAge`. `reauth` is unaffected — the epoch governs MFA credentials, and a password is not one.
 
 The middleware emits **four** distinct envelopes so the SPA can pick the right modal without a second round-trip:
 
-1. **`401 step_up_required`** — the user has at least one MFA factor enrolled; ask for an OTP / passkey. The global `StepUpModal` drives the user through `/v1/auth/{tier}/mfa/verify` (or WebAuthn assertion) and replays the original request.
-2. **`401 password_confirm_required`** — the user has **no** MFA factor enrolled, the policy doesn't require them to, **and** the password is still an accepted credential for the token's audience. The `PasswordConfirmModal` posts the password to `POST /v1/auth/{tier}/me/password-confirm`; the response mints a fresh access token with `amr += "reauth"` + `last_otp_at = now`, and `RequireStepUp` accepts the `"reauth"` marker on the replay.
+1. **`401 step_up_required`** — the user has at least one MFA factor enrolled; ask for an OTP / passkey. The global `StepUpModal` drives the user through `/v1/auth/{tier}/mfa/verify` (or WebAuthn assertion) and replays the original request. Both of those verification routes are capped per user, per surface — five failed attempts in five minutes answers `429 auth.too_many_attempts` with `Retry-After` (see [Lockout](/modules/core/auth#lockout)). That is the bound on the *caller*, and it is new on both routes: a passkey assertion already ran inside a challenge with its own five-attempt budget, but a caller could start a fresh challenge after every fifth guess — and `/mfa/verify` has no challenge at all, so authenticator codes and backup codes had no attempt bound of any kind. A refusal that was not a rejected credential — an expired challenge, a storage failure — costs nothing.
+2. **`401 password_confirm_required`** — the user has **no** MFA factor enrolled, the policy doesn't require them to, **and** the password is still an accepted credential for the token's audience. The `PasswordConfirmModal` posts the password to `POST /v1/auth/{tier}/me/password-confirm`; the response mints a fresh access token with `amr += "reauth"` + `last_otp_at = now`, and `RequireStepUp` accepts the `"reauth"` marker on the replay. **The endpoint re-checks the obligation itself**, and answers `403 mfa_enrollment_required` to a caller whose role requires a second factor. Its enrolled-factor refusal cannot catch them: that one fires on callers who already *hold* a factor, and the population the obligation exists for is precisely the one that holds none yet. The re-check is not redundant with the gate, because the two read the obligation from different places: the middleware passes the `mbr` claim frozen at mint (it re-reads the user, so a changed *system role* is honoured at once, but not a membership granted since), while the endpoint resolves memberships live. So a user granted `org_owner` after their token was minted is offered this modal by the gate and refused `403` here until their next refresh — the stricter and more current of the two answers wins, and the modal surfaces the server's `detail` rather than a dead end. It also catches a crafted direct call, which never passes the gate at all.
 3. **`403 mfa_enrollment_required`** — the user's role obligates MFA but they haven't enrolled, **or** the surface no longer accepts email/password (see [SSO-only surface](/modules/core/auth#sso-only-surface)) so no password reconfirm can be offered. No bypass — the SPA nudges them to enroll a factor first.
 4. **`503 auth.policy_unavailable`** — the password-method policy could not be evaluated on the no-factor branch. Retryable, and deliberately *not* a step-up prompt: an outage must never be dressed up as a user obligation or as a modal the user cannot satisfy.
 
 The enrollment branching is driven by `MFAEnrollmentLookup` (per-tier `MFAFactorRepository` lookups for TOTP + WebAuthn) and the live `AuthPolicyService.MFARequired` check. Any lookup error fails closed to `step_up_required` — a degraded Mongo must never silently weaken the gate; a *policy* error fails closed to the `503` above. The break-glass override is invisible here: a temporary emergency switch is not a durable login method, so it must never keep the password modal on offer.
 
 One consequence worth naming: a **service account** hitting a step-up-gated route now receives that `503` rather than the old `401 password_confirm_required`. Machine principals carry no password hash, so neither answer ever succeeded — but the status code did change, and a definitive 4xx for principals that can never satisfy step-up is an open contract question rather than something to invent at the middleware. MFA completion rechecks eligibility and atomically consumes the challenge, so exactly one concurrent successful completion can mint the preserved pending SID.
+
+### Enrolment proof gate
+
+`RequireEnrolmentProof(maxAge)` — carried by the additive `module.EnrolmentProofGate` sub-interface rather than by `RoleMiddleware` itself, so a fork's own middleware keeps compiling — sits on the four endpoints that **create or replace** a second factor — TOTP `enroll/begin` + `enroll/confirm`, passkey `register/begin` + `register/finish`, on both tiers. Before it, those endpoints required only a valid bearer, so a stolen session-only token could attach a passkey to the victim's account, or *replace* their TOTP secret (confirming an enrolment deletes the existing factor after validating a code for the new one), and then own the account outright.
+
+Both halves of each ceremony are gated, not just the first: the factor set can change between `begin` and `confirm`/`finish`. Reading `/me/mfa`, verifying an existing factor and listing passkeys are unaffected — they do not add a credential.
+
+The proof it accepts depends on what the caller has:
+
+- **A caller who already holds a factor** must present a fresh one — exactly what `RequireStepUp` demands, sharing its predicate. There is one right answer for them, so this branch always answers `401 step_up_required`: never `password_confirm_required` (they hold something stronger), never `mfa_enrollment_required` (they are already enrolled).
+- **A caller who holds none** may instead show a recent interactive sign-in — the `auth_time` claim within `maxAge` — or a fresh password reconfirm. When they can show neither, the answer is a new **`401 reauthentication_required`** (`WWW-Authenticate: Bearer error="reauthentication_required"`, body carrying `maxAgeSeconds` and `authTime`), and both SPAs send the user back through sign-in and return them where they were. It is deliberately not `password_confirm_required`: the users most in need of a *first* enrolment are MFA-obligated accounts inside their grace window, whom the reconfirm endpoint refuses, and an OAuth-only account has no password to reconfirm.
+
+"Send the user back through sign-in" means something slightly different on each surface, because each SPA keeps its **own** return-path convention rather than growing a second one. The operator console clears the access token and navigates to `/login` carrying the sanitised current path in `location.state.from` — the same channel `ProtectedRoute` uses, so one reader (`sanitizeReturnTo`) serves both. The client SPA clears the access token **and** the session marker and leaves for `/login?next=<sanitised path>` through `sanitizeNext` — the marker matters, because a token minted from the same refresh cookie carries `auth_time` forward unchanged and a silent restore would land the user back on the same refusal. Neither surface offers a modal, and the client SPA deliberately does not grow one: its enrolment page reads `/me/mfa` first and shows an already-enrolled user their state instead of a wizard, since *replacing* a factor answers `step_up_required` there and replacement on the client tier goes through an operator's admin reset.
+
+The gate **fails closed**: an unwired or erroring `MFAEnrollmentLookup` answers `step_up_required`, so a degraded database is never the reason a factor can be added without proof. The fresh-second-factor check runs *before* that lookup — it reads only the signed token — so the refusal stays one an enrolled caller can act on: they step up and the retry is honoured while the database is still down. `auth_time`, which is only acceptable for a caller with no factor, stays behind a successful read. Unlike `RequireMFA` the gate does **not** honour the `mfaEnabled` master switch — that switch exists to avoid a bootstrap deadlock, and none exists here, since a fresh login satisfies the no-factor branch.
+
+Two consequences worth naming. A token minted before this shipped carries no `auth_time`, reads as stale, and costs its holder one re-login — the failure mode of a missing claim is a re-authentication, never a bypass. And the four enrolment endpoints are **unreachable with a dev token**: dev tokens mint synthetic users with no `amr` and no `auth_time`, and a synthetic user cannot sign in again. Enrolment on a dev stack is exercised with a real login. Stamping `auth_time` on those mints was rejected because it is the same code path the service-account grant uses, and would give machine tokens a rolling window that satisfies this gate.
 
 ### TOTP details
 
@@ -298,6 +320,80 @@ The `webauthn` factor row carries an embedded `webauthnCredentials[]` array (one
 Login / step-up via passkey sets `amr=[..., "otp", "webauthn"]` so `RequireStepUp` accepts the proof. The partial-login response carries `webauthnAvailable: bool` so the verify page can offer the passkey button alongside the TOTP code field. After a valid assertion, challenge consumption is atomic: invalid assertions may be retried within their attempt limit, while concurrent or replayed valid assertions have one winner.
 
 The current flow requires password login first, then offers passkey as the second factor. Full passwordless (discoverable / usernameless) login would need a `BeginDiscoverableLogin` entry point and is not built yet.
+
+### Removing or replacing a factor
+
+Four actions change a user's credential set, and all four now do the same
+things — the only differences are who the caller is, and the one consequence
+that is deliberately conditional:
+
+| Action | MFA epoch | Device trust | Sessions ended | Enrolment grace | Security event |
+|---|---|---|---|---|---|
+| `POST /v1/auth/{tier}/me/mfa/remove` | bumped | all revoked | every one **but the caller's own** | **restarted** | `self_mfa_removed` |
+| `POST /v1/admin/{users,client-users}/{id}/mfa/reset` | bumped | all revoked | **every** one | **restarted** | `admin_mfa_reset` |
+| `POST /v1/auth/{tier}/mfa/enroll/confirm` **that replaces** a TOTP secret | bumped | all revoked | every one but the caller's own | untouched — a factor still exists | `self_mfa_factor_replaced` |
+| `DELETE /v1/auth/{tier}/me/mfa/webauthn/credentials/{id}` — **any** passkey | bumped | all revoked | every one but the caller's own | restarted **only if it was the last factor** | `self_passkey_removed` |
+
+**Why removal restarts the enrolment grace window.** The clock starts at a
+privileged user's first sign-in without a second factor and nothing ever
+clears it, so for a long-standing administrator it lapsed months ago.
+Removing their last factor without restarting it closes every way back in:
+enrolment demands a fresh proof they can no longer produce, the password
+reconfirm refuses an MFA-obliged caller, and the fresh sign-in they are sent
+to take is refused with `mfa_enrollment_required` — privileged, no factor,
+out of grace. A sole administrator would be locked out for good. The passkey
+route asks first, because it removes one credential of several: the clock
+restarts only when no passkey and no TOTP secret survive the delete.
+
+Additions do none of it. A first TOTP enrolment (`self_mfa_enrolled`) and a
+new passkey (`self_passkey_registered`) leave the epoch alone: authority
+proven by a factor the user still holds stays valid, and ending it would
+sign someone out for improving their own security.
+
+**The consequences follow the destruction, not the success of the request.**
+Both write paths can fail part-way — a replacement whose new secret fails to
+persist has still destroyed the old one, and an admin reset can delete the
+TOTP row and then fail on the passkey row. Both apply the epoch bump and the
+device-trust revoke anyway, and the replacement additionally reports itself
+outward so the caller's other sessions still end. If a credential was
+destroyed, its authority ends: success or not — and so do the sessions it
+authorised, on both the self and the admin path. A delete that itself failed
+destroyed nothing and changes nothing.
+
+**Two mechanisms, because there are two questions.** Ending the *other*
+sessions is revocation's job. Ending the MFA authority of the caller's
+**current** token — which no revocation reaches, and which is the token an
+attacker who just enrolled would be holding — is the epoch's: the markers
+live in the token until it expires, so before this an MFA removal left every
+session, the caller's included, still MFA-satisfied. That is also why a
+failed revocation is logged rather than surfaced, and why an admin reset
+still succeeds with `sessions_terminated: false` recorded in its audit row:
+the security-critical half already happened. The reverse failure is not
+tolerated the same way — a *removal* that fails part-way now writes its own
+audit row before answering `500`, because a half-reset account is exactly
+what an operator needs to see. That row is filed under a distinct event
+type, `auth.mfa.reset_failed`, rather than the success action with a
+metadata flag: every auth event in the tree currently records
+`outcome: success` unconditionally, so a failure filed under the success
+action would be indexed as a completed reset and an evidence query would
+never find it.
+
+**Passkey removal is uniform, not last-factor-only.** A removed credential
+is one the user no longer trusts — a lost or compromised device — and it may
+have *created* sessions through the passkey login flow. Nothing records
+which credential minted which session, so the rule cannot be narrower than
+"every other session". A `DELETE` that matches no credential changes nothing
+and triggers none of it.
+
+**Every change is announced.** Before this, only backup-code regeneration
+emitted anything at all, so an enrolment performed with a stolen session was
+invisible to its victim. Each of the five events above reaches the audit
+trail, and every *addition* (a replacement included — it adds a new secret)
+also sends the `auth.mfa_factor_added` email, carrying the factor type, the
+request IP, the time, and whether it replaced an earlier factor. It is
+queued on the bounded mail dispatcher rather than sent inline, so a slow
+relay cannot add latency to an enrolment. Removals are not emailed — they
+already end every other session, which is a louder signal.
 
 ## 8. Session revocation
 
@@ -331,6 +427,7 @@ Standard middleware:
 - `RequireSystemPermission("...")` — fine-grained permission check via authz
 - `RequireMFA()` — applied to authz role+binding mutations, tenant scoped mutations, module config writes; demands a recent `amr` containing an MFA marker
 - `RequireStepUp(maxAge)` — strict variant for catastrophic actions (see §7)
+- `RequireEnrolmentProof(maxAge)` — demands a fresh proof of presence before a second factor can be created or replaced (see §7). Reached through the additive `module.EnrolmentProofGate` sub-interface, so a fork's own `RoleMiddleware` keeps compiling; a middleware that does not implement it refuses every enrolment rather than passing it through
 
 ## 10. Machine callers (service accounts)
 

@@ -61,6 +61,35 @@
 //   - orkestra_auth_token_sweep_duration_seconds — wall time of one
 //     sweep batch.
 //
+// The auth attempt counters (spec 2026-09-03 §4.1 D10) add three more:
+//
+//   - orkestra_auth_attempt_store_failures_total — Redis attempt-counter
+//     operations that could not be answered, labelled by operation
+//     (peek / record / reset). Every one fails OPEN to the durable
+//     per-account lock, so this measures degraded throttling, not
+//     failed logins.
+//   - orkestra_auth_lockouts_total — increments that reached their
+//     threshold, labelled by scope (ip / email / client / reset-* /
+//     verify-* / mfa-verify / mfa-enroll). scope="ip" is the stuffing
+//     alert.
+//   - orkestra_auth_mail_dropped_total — transactional auth emails
+//     dropped by a full dispatcher queue, labelled by template id.
+//
+// The authz invalidation contract (spec 2026-09-03 §4.6 D27, as amended
+// by ruling P22) adds two, both unlabelled — the only dimensions
+// available are the user UUID and the operation, and neither is bounded:
+//
+//   - orkestra_authz_cache_invalidation_failures_total — permission-cache
+//     generation bumps that failed AFTER the write had landed, so a
+//     verdict cached around the write can be served until its 60s TTL
+//     expires. Every revocation and every platform-issued grant reports
+//     here; the change itself stood.
+//   - orkestra_authz_cache_invalidation_refusals_total — grants REFUSED
+//     because the cache could not be retired before the write. Nothing
+//     was written. A moving rate means operators cannot change
+//     permissions at all, which is a louder condition than the one
+//     above and deserves its own alert.
+//
 // ADR-0002 (docs/adr/0002-metrics-label-schema.md) freezes the label
 // schema. Adding labels requires a new ADR — Prometheus cardinality
 // explodes silently, and history breaks when labels change. The raw
@@ -96,7 +125,12 @@ type Collector struct {
 	sessionCapExpiries             prometheus.Counter
 	sessionCapEventFailures        prometheus.Counter
 	sessionAnchorAnomalies         *prometheus.CounterVec
+	attemptStoreFailures           *prometheus.CounterVec
+	authLockouts                   *prometheus.CounterVec
+	authMailDropped                *prometheus.CounterVec
 	tokenSweepDeleted              *prometheus.CounterVec
+	authzCacheInvalidationFailures prometheus.Counter
+	authzCacheInvalidationRefusals prometheus.Counter
 	tokenSweepBacklog              *prometheus.GaugeVec
 	tokenSweepDuration             *prometheus.HistogramVec
 
@@ -214,6 +248,43 @@ func (c *Collector) buildMetrics() {
 		[]string{"kind"},
 	)
 
+	c.attemptStoreFailures = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "auth",
+			Name:      "attempt_store_failures_total",
+			Help:      "Count of Redis attempt-counter operations that could not be answered. Every one of these fails OPEN — the durable per-account lock is the second line — so a sustained non-zero rate means brute-force throttling is degraded, not that logins are failing.",
+		},
+		// operation is one of peek, record, reset; anything else
+		// collapses to unknown (ADR-0002 cardinality bound).
+		[]string{"operation"},
+	)
+
+	c.authLockouts = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "auth",
+			Name:      "lockouts_total",
+			Help:      "Count of attempt-counter increments that reached their threshold. scope=\"ip\" moving is the credential-stuffing signal worth alerting on; scope=\"email\" is ordinary user error at low rates.",
+		},
+		// scope is the closed set declared in attempt_counter.go;
+		// anything else collapses to unknown. NEVER the identifier
+		// itself — that would make every attacked address a time series.
+		[]string{"scope"},
+	)
+
+	c.authMailDropped = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "auth",
+			Name:      "mail_dropped_total",
+			Help:      "Count of transactional auth emails dropped because the bounded dispatcher's queue was full. A drop is a lost mail the user can re-request inside the per-address caps; a non-zero rate means the queue or the worker count is undersized.",
+		},
+		// template is the notification template id — a finite set
+		// declared in-tree; anything else collapses to unknown.
+		[]string{"template"},
+	)
+
 	c.tokenSweepDeleted = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "orkestra",
@@ -244,6 +315,24 @@ func (c *Collector) buildMetrics() {
 			Buckets:   prometheus.DefBuckets,
 		},
 		[]string{"tier"},
+	)
+
+	c.authzCacheInvalidationFailures = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "authz",
+			Name:      "cache_invalidation_failures_total",
+			Help:      "Count of permission-cache generation bumps that failed AFTER their write had landed, leaving a verdict cached during the write readable until its 60s TTL expires. Unlabelled by design (ADR-0002): the available dimensions are the user UUID and the operation, neither of which is bounded. A bump that fails BEFORE the write is not counted here — it refuses the mutation and answers 503.",
+		},
+	)
+
+	c.authzCacheInvalidationRefusals = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "authz",
+			Name:      "cache_invalidation_refusals_total",
+			Help:      "Count of permission GRANTS refused because the effective-permission cache could not be retired before the write. Nothing was written; the caller got 503 authz.cache_unavailable and must retry. Unlabelled by design (ADR-0002). Distinct from cache_invalidation_failures_total, where the change did land.",
+		},
 	)
 
 	c.entitlementLag = prometheus.NewGaugeVec(
@@ -293,7 +382,7 @@ func (c *Collector) Register() error {
 	if !atomic.CompareAndSwapUint32(&c.registered, 0, 1) {
 		return nil
 	}
-	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.sessionAnchorAnomalies, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration} {
+	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.sessionAnchorAnomalies, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped, c.authzCacheInvalidationFailures, c.authzCacheInvalidationRefusals} {
 		if err := c.registry.Register(m); err != nil {
 			// rollback so the caller can retry with a fresh collector
 			atomic.StoreUint32(&c.registered, 0)
@@ -394,6 +483,30 @@ func (c *Collector) RecordSessionCapEventFailure() {
 	c.sessionCapEventFailures.Inc()
 }
 
+// RecordAuthzCacheInvalidationFailure counts one post-write
+// permission-cache invalidation that failed. The write has already
+// landed when this increments, so the failure is observational: a
+// verdict cached during the write survives until its own 60s TTL. A
+// non-zero rate means permission changes can be up to a minute late,
+// not that they were lost. Spec 2026-09-03 §4.6 D27.
+func (c *Collector) RecordAuthzCacheInvalidationFailure() {
+	if c == nil || c.authzCacheInvalidationFailures == nil {
+		return
+	}
+	c.authzCacheInvalidationFailures.Inc()
+}
+
+// RecordAuthzCacheInvalidationRefusal counts one permission grant turned
+// away because the cache could not be retired before the write. Nothing
+// was written when this increments — the caller was told to retry.
+// Spec 2026-09-03 §4.6 D27 / ruling P22.
+func (c *Collector) RecordAuthzCacheInvalidationRefusal() {
+	if c == nil || c.authzCacheInvalidationRefusals == nil {
+		return
+	}
+	c.authzCacheInvalidationRefusals.Inc()
+}
+
 // RecordSessionAnchorAnomaly counts a refresh permitted because the cap
 // could not read an anchor. kind is limited to "missing" and
 // "zero_timestamp"; anything else collapses to "unknown" so a caller bug
@@ -406,6 +519,59 @@ func (c *Collector) RecordSessionAnchorAnomaly(kind string) {
 		kind = "unknown"
 	}
 	c.sessionAnchorAnomalies.WithLabelValues(kind).Inc()
+}
+
+// attemptStoreOperations / lockoutScopes / droppedTemplates are the
+// closed label sets. Anything outside them collapses to "unknown" so a
+// caller bug cannot turn an email address, an IP or a user UUID into a
+// Prometheus time series (ADR-0002).
+var (
+	attemptStoreOperations = map[string]struct{}{"peek": {}, "record": {}, "reset": {}}
+	lockoutScopes          = map[string]struct{}{
+		"ip": {}, "email": {}, "client": {},
+		"reset-email": {}, "reset-ip": {},
+		"verify-email": {}, "verify-ip": {},
+		"mfa-verify": {}, "mfa-enroll": {},
+	}
+	droppedTemplates = map[string]struct{}{
+		"auth.reset_password":   {},
+		"auth.verify_email":     {},
+		"auth.mfa_factor_added": {},
+	}
+)
+
+func collapse(v string, allowed map[string]struct{}) string {
+	if _, ok := allowed[v]; ok {
+		return v
+	}
+	return "unknown"
+}
+
+// RecordAuthAttemptStoreFailure counts one Redis attempt-counter
+// operation that could not be answered. The caller has already failed
+// open; this is the signal that throttling is degraded.
+func (c *Collector) RecordAuthAttemptStoreFailure(operation string) {
+	if c == nil || c.attemptStoreFailures == nil {
+		return
+	}
+	c.attemptStoreFailures.WithLabelValues(collapse(operation, attemptStoreOperations)).Inc()
+}
+
+// RecordAuthLockout counts one increment that reached its threshold.
+func (c *Collector) RecordAuthLockout(scope string) {
+	if c == nil || c.authLockouts == nil {
+		return
+	}
+	c.authLockouts.WithLabelValues(collapse(scope, lockoutScopes)).Inc()
+}
+
+// RecordAuthMailDropped counts one transactional auth email dropped by a
+// full dispatcher queue.
+func (c *Collector) RecordAuthMailDropped(template string) {
+	if c == nil || c.authMailDropped == nil {
+		return
+	}
+	c.authMailDropped.WithLabelValues(collapse(template, droppedTemplates)).Inc()
 }
 
 // normaliseTier keeps the sweep label set closed at {operator, client}.

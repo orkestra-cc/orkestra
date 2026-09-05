@@ -15,6 +15,7 @@
 //     "those credentials are wrong" or "not signed in", never "the token
 //     expired". There is no token to refresh and nothing safe to replay.
 import { authedFetch } from "@/api/authedFetch";
+import { browserNavigation } from "@/api/browserNavigation";
 import { apiBaseURL } from "@/api/client";
 import { isOAuthProvider, type OAuthProviderName } from "@/lib/oauthProviders";
 import { stashOAuthReturnTo } from "@/lib/oauthReturnTo";
@@ -462,14 +463,14 @@ export async function fetchOAuthProviders(
   return out;
 }
 
-// browserNavigation is the one seam through which the SPA leaves for the
-// IdP — a plain object so tests can spy on `assign` without touching
-// window.location (not configurable under happy-dom / jsdom).
-export const browserNavigation = {
-  assign(url: string): void {
-    window.location.assign(url);
-  },
-};
+// browserNavigation — the seam through which the SPA leaves for the IdP, and
+// now also the one authedFetch uses to send a stale session back through
+// sign-in. It MOVED to api/browserNavigation.ts, a module that imports
+// nothing, because this file already imports authedFetch (top of file) and the
+// reverse import would close a cycle. Re-exported here because this is where
+// its callers and its test spies have always found it, and because a re-export
+// hands out the same object identity, so one `vi.spyOn` still covers both.
+export { browserNavigation };
 
 // initiateOAuthLogin starts a web OAuth login: POST {provider} to
 // /v1/auth/client/oauth/login — credentials:'include' is load-bearing,

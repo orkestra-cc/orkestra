@@ -191,6 +191,16 @@ func (r *fakeUserRepo) ClearMFAGraceStartedAt(_ context.Context, id string) erro
 	}
 	return nil
 }
+func (r *fakeUserRepo) BumpMFAEpoch(_ context.Context, id string) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[id]
+	if !ok {
+		return 0, repository.ErrUserNotFound
+	}
+	u.MFAEpoch++
+	return u.MFAEpoch, nil
+}
 
 func (r *fakeUserRepo) GetByOAuthID(_ context.Context, _ iface.OAuthProvider, _ string) (*iface.User, error) {
 	return nil, repository.ErrUserNotFound

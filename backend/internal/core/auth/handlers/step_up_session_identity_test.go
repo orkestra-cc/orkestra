@@ -28,6 +28,16 @@ func (u *stepUpUsers) GetUserByID(context.Context, string) (*iface.User, error) 
 
 func (u *stepUpUsers) UpdateUserLastLogin(context.Context, string) error { return nil }
 
+// ClearFailedLogins is now called on a successful ConfirmPasswordWithSecurity
+// (Task 9 fix round, Finding 2 — a success clears the durable counter too,
+// not just the AttemptCounter's email scope). This fixture only ever
+// embeds a nil iface.UserProvider for the methods it doesn't override, so
+// without this the success path in
+// TestStepUpSessionIdentity_PasswordConfirmPreservesSID panics on a nil
+// method value instead of exercising the session-identity assertion the
+// test is actually about.
+func (u *stepUpUsers) ClearFailedLogins(context.Context, string) error { return nil }
+
 type stepUpMFA struct{ services.MFAService }
 
 func (stepUpMFA) Verify(context.Context, string, string) error { return nil }
