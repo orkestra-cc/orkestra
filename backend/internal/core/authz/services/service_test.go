@@ -559,3 +559,41 @@ func TestNew_EnforceActionsTrimAndDrop(t *testing.T) {
 		t.Errorf("expected exactly 2 entries, got %d: %+v", len(svc.enforcedActions), svc.enforcedActions)
 	}
 }
+
+// TestShadowEvaluate_EnforceDoesNotOverrideTheRoleTableDeny is the H-5
+// probe, inverted: under enforce, a tenant-role permit must not override
+// the role table's deny on a platform-reserved action.
+//
+// The scenario is the real one. RequireSystemPermission calls
+// HasPermission with an EMPTY tenantID (middleware/auth.go), while the
+// JWT still carries the membership roles of whatever tenant the request
+// resolved — so shadowEvaluate stamps principal.tenant_roles on a global
+// check and tenant_roles.org_owner.all_in_tenant fires on
+// system.users.admin. With the action enforced, Cedar's allow would then
+// override the role table's deny and hand a tenant role a platform
+// permission. system_actions.cedar's forbid is what stops it.
+//
+// newTier1Service rather than newTestService: HasPermission goes through
+// GetEffectivePermissions, which reads the repo, and newTestService
+// leaves repo nil (nil-panic). The engine and the enforce set are
+// attached here because the tier-1 harness deliberately runs without
+// Cedar.
+func TestShadowEvaluate_EnforceDoesNotOverrideTheRoleTableDeny(t *testing.T) {
+	svc, _ := newTier1Service(t, staticRoleLookup("")) // no platform role
+	eng, err := cedar.New("development")
+	if err != nil {
+		t.Fatalf("cedar engine: %v", err)
+	}
+	svc.cedarEngine = eng
+	svc.enforcedActions = map[string]struct{}{"system.users.admin": {}}
+
+	ctx := context.WithValue(context.Background(), ctxauth.KeyTenantRoles, []string{"org_owner"})
+
+	allowed, err := svc.HasPermission(ctx, "u-1", "" /* global check */, "system.users.admin")
+	if err != nil {
+		t.Fatalf("HasPermission: %v", err)
+	}
+	if allowed {
+		t.Fatal("an org_owner must not obtain system.users.admin under enforce")
+	}
+}

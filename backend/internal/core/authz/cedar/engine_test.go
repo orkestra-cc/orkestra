@@ -22,10 +22,13 @@ func newTestEngine(t *testing.T, env string) *Engine {
 
 func TestPolicyLoadingNonEmpty(t *testing.T) {
 	e := newTestEngine(t, "development")
-	// platform.cedar has 4 policies, tenant_scope.cedar has 5,
-	// tenant_roles.cedar has 9 (4 legacy + 5 org_*), capability_grants.cedar
-	// has 1, abac.cedar has 2. Sanity check the count is in the expected
-	// range so silent drop-outs don't go unnoticed.
+	// Seven files, 28 policies at the time of writing:
+	// platform.cedar 4, tenant_scope.cedar 10, tenant_roles.cedar 9
+	// (4 legacy + 5 org_*), abac.cedar 2, capability_grants.cedar 1,
+	// service_accounts.cedar 1, system_actions.cedar 1. The assertion is
+	// deliberately a FLOOR, not an equality: it exists to catch a whole
+	// file silently dropping out of the embed, not to be re-tallied
+	// every time a policy is added.
 	if got := e.PolicyCount(); got < 18 {
 		t.Fatalf("policy count too low: got %d, want >= 18", got)
 	}
@@ -713,5 +716,120 @@ func TestCapabilityGrantForbidsWhenWrongCapabilityHeld(t *testing.T) {
 	})
 	if d.Allowed {
 		t.Fatalf("mismatched capability must be forbidden: %+v", d)
+	}
+}
+
+// ----- Platform-reserved system.* actions (PR C, spec D23 / audit H-5) -----
+
+// TestSystemActions_TenantRolesCannotHoldSystemActions: every permit in
+// tenant_roles.cedar is written for a tenant RESOURCE with no constraint
+// on the action, so on an internal tenant those permits fire on system.*
+// actions too. Under CEDAR_ENFORCE_ACTIONS that is how an org_owner — a
+// TENANT role — would come to hold system.users.admin. Cedar forbids
+// outrank permits, so system_actions.cedar closes every one of them,
+// present and future, with a single rule.
+//
+// SystemRole: "" is load-bearing here, not incidental: the engine stamps
+// system_role only when non-empty, so these principals carry NO
+// system_role attribute at all. The cases therefore also pin the `has`
+// guard — inverting it to `principal has system_role && …` would make
+// the forbid inert for exactly the principals it exists to stop.
+func TestSystemActions_TenantRolesCannotHoldSystemActions(t *testing.T) {
+	e := newTestEngine(t, "development")
+	r := Resource{TenantUUID: "t1", TenantKind: "internal", TenantStatus: "active"}
+
+	cases := []struct {
+		name        string
+		systemRole  string
+		tenantRoles []string
+		action      string
+	}{
+		{"org_owner + system.users.admin", "", []string{"org_owner"}, "system.users.admin"},
+		{"org_admin + system.modules.admin", "", []string{"org_admin"}, "system.modules.admin"},
+		{"legacy administrator tenant role", "", []string{"administrator"}, "system.users.admin"},
+		{"org_member", "", []string{"org_member"}, "system.users.admin"},
+		// A present-but-unprivileged system_role exercises the other
+		// branch of the guard: the attribute exists, its value is not
+		// one of the three platform roles.
+		{"operator system role + org_owner", "operator", []string{"org_owner"}, "system.users.admin"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := e.IsAuthorized(
+				Principal{UserUUID: "u1", SystemRole: tc.systemRole, TenantRoles: tc.tenantRoles},
+				tc.action, r,
+			)
+			if d.Allowed {
+				t.Fatalf("%s must be DENIED: a tenant role is not a platform role (matched=%q)", tc.action, d.MatchedPolicy)
+			}
+			if d.MatchedPolicy != "system_actions.require_platform_role" {
+				t.Errorf("expected the system-action forbid to be the reason, got %q", d.MatchedPolicy)
+			}
+			// An absent system_role attribute must not produce a Cedar
+			// evaluation error — the `has` guard short-circuits before
+			// the attribute is read.
+			if len(d.Errors) > 0 {
+				t.Errorf("forbid must not produce Cedar errors: %+v", d.Errors)
+			}
+		})
+	}
+}
+
+// TestSystemActions_PlatformRolesStillAllowed: the three platform system
+// roles keep their system actions. MFA is enrolled because
+// abac.require_mfa_for_admin_suffix independently forbids an admin-suffix
+// action for super_admin/administrator without a second factor — without
+// it this test would pass for the wrong reason.
+func TestSystemActions_PlatformRolesStillAllowed(t *testing.T) {
+	e := newTestEngine(t, "development")
+	r := Resource{TenantUUID: "t1", TenantKind: "internal", TenantStatus: "active"}
+
+	for _, role := range []string{"super_admin", "administrator", "developer"} {
+		t.Run(role, func(t *testing.T) {
+			d := e.IsAuthorized(
+				Principal{UserUUID: "u1", SystemRole: role, MFAEnrolled: true, AMR: []string{"pwd", "otp"}},
+				"system.users.admin", r,
+			)
+			if !d.Allowed {
+				t.Fatalf("%s must keep system.users.admin (matched=%q)", role, d.MatchedPolicy)
+			}
+		})
+	}
+}
+
+// TestSystemActions_DeveloperUnchangedInNonProd: developer stays in the
+// exempt set. The role table already bounds it to read-only in
+// production and platform.developer.prod_readonly mirrors that — the
+// forbid governs WHO may hold system actions, the permits govern WHICH.
+// Env is an engine construction parameter, hence a second engine.
+func TestSystemActions_DeveloperUnchangedInNonProd(t *testing.T) {
+	e := newTestEngine(t, "staging")
+	d := e.IsAuthorized(
+		Principal{UserUUID: "u1", SystemRole: "developer"},
+		"system.modules.admin",
+		Resource{TenantUUID: "t1", TenantKind: "internal", TenantStatus: "active"},
+	)
+	if !d.Allowed {
+		t.Fatalf("developer's non-prod behaviour is unchanged by this rule (matched=%q)", d.MatchedPolicy)
+	}
+}
+
+// TestSystemActions_NonSystemActionsUnaffected: the forbid keys on
+// context.action_module == "system", so an org_owner still owns its
+// tenant. The full Resource fixture matters — the engine adds the
+// resource entity only when TenantUUID != "", and the org_owner permit
+// requires `resource is Orkestra::Tenant`.
+func TestSystemActions_NonSystemActionsUnaffected(t *testing.T) {
+	e := newTestEngine(t, "development")
+	d := e.IsAuthorized(
+		Principal{UserUUID: "u1", TenantRoles: []string{"org_owner"}},
+		"tenant.update",
+		Resource{TenantUUID: "t1", TenantKind: "internal", TenantStatus: "active"},
+	)
+	if !d.Allowed {
+		t.Fatalf("the forbid must fire only on system.* actions (matched=%q)", d.MatchedPolicy)
+	}
+	if d.MatchedPolicy != "tenant_roles.org_owner.all_in_tenant" {
+		t.Errorf("expected the org_owner permit to be the reason, got %q", d.MatchedPolicy)
 	}
 }
