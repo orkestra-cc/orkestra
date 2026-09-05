@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -175,5 +176,56 @@ func TestEnsureBucketToleratesCORSRejection(t *testing.T) {
 	defer rec.mu.Unlock()
 	if rec.corsPuts == 0 {
 		t.Fatal("expected the policy to be attempted")
+	}
+}
+
+// TestPresignGetDoesNotSignChecksumMode pins the reason the presigner is a
+// separate client with response checksum validation turned off.
+//
+// aws-sdk-go-v2 defaults ResponseChecksumValidation to WhenSupported, which
+// puts `x-amz-checksum-mode` into a presigned GET's X-Amz-SignedHeaders — and
+// a signed header is one the recipient MUST send. The recipients here are a
+// browser opening the URL and a plain fetch of it; neither sends it, so the
+// signature never matches and every presigned download answers 403
+// SignatureDoesNotMatch. That is not hypothetical: it was observed live on a
+// real deployment, where every operator-facing download that had been working
+// began answering 403 after an SDK bump, with no code change of our own.
+//
+// Asserting on the exact header list is deliberate. A test that only checked
+// the URL parses, or that some signature exists, would have passed throughout
+// the outage.
+func TestPresignGetDoesNotSignChecksumMode(t *testing.T) {
+	st := newTestStore(t, "http://rustfs:9000", "")
+
+	for _, tc := range []struct {
+		name string
+		get  func() (string, error)
+	}{
+		{"PresignGet", func() (string, error) {
+			return st.PresignGet(context.Background(), "k/obj.pdf", time.Minute)
+		}},
+		{"PresignGetDownload", func() (string, error) {
+			return st.PresignGetDownload(context.Background(), "k/obj.pdf", "curriculum.pdf", time.Minute)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := tc.get()
+			if err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			u, err := url.Parse(raw)
+			if err != nil {
+				t.Fatalf("URL non valido: %v", err)
+			}
+			signed := u.Query().Get("X-Amz-SignedHeaders")
+			if strings.Contains(signed, "checksum") {
+				t.Fatalf("X-Amz-SignedHeaders = %q: un header che il destinatario non puo' inviare "+
+					"rende ogni download firmato un 403", signed)
+			}
+			if signed != "host" {
+				t.Fatalf("X-Amz-SignedHeaders = %q, atteso solo \"host\": ogni header in piu' "+
+					"e' un header che il browser deve inviare e non invia", signed)
+			}
+		})
 	}
 }
