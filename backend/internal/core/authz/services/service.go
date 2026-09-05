@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -141,10 +142,16 @@ type repoBackend interface {
 //     or by a global binding).
 //
 // Results are cached in Redis for 60 seconds per (userUUID, orgID) key and
-// invalidated when bindings or roles change.
+// invalidated when bindings or roles change. The cache key is
+// generation-keyed (see the Cache section below), so an invalidation is
+// one atomic INCR rather than a scan-and-delete.
 type Service struct {
-	repo               repoBackend
-	redis              module.RedisClient
+	repo  repoBackend
+	redis module.RedisClient
+	// mget is redis narrowed to the optional MGET extension, resolved
+	// once by setRedis. Nil when the configured client does not provide
+	// MGET, which disables the cache entirely (see MultiGetRedisClient).
+	mget               MultiGetRedisClient
 	logger             *slog.Logger
 	userRoles          UserSystemRoleLookup
 	startMFAGrace      MFAGraceStarter
@@ -256,7 +263,6 @@ func New(cfg Config) *Service {
 	}
 	s := &Service{
 		repo:                cfg.Repo,
-		redis:               cfg.Redis,
 		logger:              cfg.Logger,
 		userRoles:           cfg.LookupUser,
 		startMFAGrace:       cfg.StartMFAGrace,
@@ -267,6 +273,11 @@ func New(cfg Config) *Service {
 		systemPermissionSet: make(map[string]struct{}),
 		allPermissionSet:    make(map[string]struct{}),
 	}
+	// Wired through setRedis rather than the struct literal so the
+	// optional MGET extension is resolved exactly once, here, and a
+	// client that lacks it is reported at boot instead of silently on
+	// every request.
+	s.setRedis(cfg.Redis, cfg.Logger)
 	// Cedar shadow-mode engine. Failure to load the policies is a loud
 	// slog.Error but does not block construction — shadow mode is
 	// observability-only and must never turn a deployable binary into a
@@ -1004,7 +1015,7 @@ func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID, actor stri
 	if err := s.repo.UpdateRoleFields(ctx, roleUUID, fields); err != nil {
 		return nil, err
 	}
-	s.flushCache(ctx)
+	s.logCacheBumpFailure(ctx, s.flushCache(ctx), "")
 
 	return s.repo.GetRoleByUUID(ctx, roleUUID)
 }
@@ -1096,7 +1107,7 @@ func (s *Service) DeleteRole(ctx context.Context, tenantID, roleUUID string) err
 	if err := s.repo.DeleteRole(ctx, roleUUID); err != nil {
 		return err
 	}
-	s.flushCache(ctx)
+	s.logCacheBumpFailure(ctx, s.flushCache(ctx), "")
 	return nil
 }
 
@@ -1155,7 +1166,7 @@ func (s *Service) validateBindingGrant(ctx context.Context, tenantID, grantedBy 
 // idempotent, and StartMFAGraceIfUnset (per its name) no-ops once the clock
 // is already running, so a replayed ensure never resets it.
 func (s *Service) afterBindingGrant(ctx context.Context, userUUID, roleName string) {
-	s.cacheInvalidate(ctx, userUUID)
+	s.logCacheBumpFailure(ctx, s.InvalidateUserPermissions(ctx, userUUID), userUUID)
 	if s.startMFAGrace != nil && roleElevatesPrivilege(roleName) {
 		if err := s.startMFAGrace(ctx, userUUID); err != nil {
 			s.logger.Warn("authz: start MFA grace failed after binding",
@@ -1246,7 +1257,7 @@ func (s *Service) DeleteBinding(ctx context.Context, tenantID, uuid string) erro
 	if err := s.repo.DeleteBinding(ctx, tenantID, uuid); err != nil {
 		return err
 	}
-	s.flushCache(ctx)
+	s.logCacheBumpFailure(ctx, s.flushCache(ctx), "")
 	return nil
 }
 
@@ -1261,7 +1272,7 @@ func (s *Service) RemoveBindingsByTenant(ctx context.Context, tenantUUID string)
 		return 0, err
 	}
 	if n > 0 {
-		s.flushCache(ctx)
+		s.logCacheBumpFailure(ctx, s.flushCache(ctx), "")
 	}
 	return n, nil
 }
@@ -1277,36 +1288,148 @@ func (s *Service) RemoveBindingsByUserAndTenant(ctx context.Context, userUUID, t
 		return 0, err
 	}
 	if n > 0 {
-		s.flushCache(ctx)
+		s.logCacheBumpFailure(ctx, s.flushCache(ctx), "")
 	}
 	return n, nil
 }
 
-func (s *Service) flushCache(ctx context.Context) {
-	if s.redis == nil {
-		return
-	}
-	keys, err := s.redis.Keys(ctx, "authz:cache:*")
-	if err != nil || len(keys) == 0 {
-		return
-	}
-	_ = s.redis.Del(ctx, keys...)
+// --- Cache ---
+//
+// The key carries two generation counters — a global one and a per-user
+// one — so invalidation is a single atomic INCR rather than a KEYS scan
+// followed by a DEL.
+//
+// The scan version had four problems: it enumerated keys on the hot
+// path, it could partially fail leaving some verdicts live, it raced a
+// concurrent read that repopulated between the scan and the delete, and
+// its glob was built from a request body (the audit's L-11). An entry
+// written under an older generation simply becomes unreachable and dies
+// on its own 60s TTL — nothing has to find it to retire it.
+//
+// Both counters are read on EVERY cache read. Memoising them in the
+// process would defeat the whole mechanism: a replica holding a stale
+// generation would keep serving verdicts another replica already
+// retired.
+
+const (
+	// authzGlobalGenKey counts flushes that affect every user.
+	authzGlobalGenKey = "authz:gen"
+	// authzUserGenPrefix + userUUID counts flushes for one user.
+	authzUserGenPrefix = "authz:gen:"
+	// authzCacheTTL bounds both how long a live verdict is served and
+	// how long a retired entry lingers in Redis before expiring.
+	authzCacheTTL = 60 * time.Second
+)
+
+// MultiGetRedisClient is the narrow optional extension the
+// generation-keyed cache needs on top of module.RedisClient: one MGET
+// that reads both generation counters in a single round trip.
+//
+// It is deliberately NOT a new method on module.RedisClient.
+// module.RedisClient is an SDK contract a fork's own client type may
+// implement, so adding a method to it is a breaking change for every
+// fork. This mirrors AtomicTakeRedisClient in auth/services: declare
+// the extension where it is consumed, assert for it once at
+// construction, and degrade cleanly when a client does not have it.
+type MultiGetRedisClient interface {
+	module.RedisClient
+	MGet(ctx context.Context, keys ...string) ([]interface{}, error)
 }
 
-// --- Cache ---
+// setRedis wires the cache client and, once, resolves its optional MGET
+// extension. The assertion happens here rather than per call so the hot
+// path costs nothing, and so a client that lacks MGET is reported once
+// at boot instead of silently on every request.
+//
+// Without MGET the cache is bypassed entirely — no read and no write.
+// That is correct, only slower: every check resolves from MongoDB,
+// which is the fresh answer. Simulating MGET with two GETs is not an
+// option, because the two counters could then be read at two different
+// moments and compose a key that never existed.
+func (s *Service) setRedis(client module.RedisClient, logger *slog.Logger) {
+	s.redis = client
+	s.mget = nil
+	if client == nil {
+		return
+	}
+	mg, ok := client.(MultiGetRedisClient)
+	if !ok {
+		if logger != nil {
+			logger.Warn("authz: redis client has no MGet — the effective-permission cache is disabled and every check resolves from MongoDB",
+				slog.String("remedy", "implement MGet(ctx, keys ...string) ([]interface{}, error) on the client passed as authz Config.Redis"))
+		}
+		return
+	}
+	s.mget = mg
+}
 
-func (s *Service) cacheKey(userUUID, tenantID string) string {
+// generations reads both counters in ONE MGET. A failure — or a client
+// with no MGET at all — returns ok=false and the caller treats it as a
+// cache miss: going to Mongo is the fresh answer, so a degraded Redis
+// costs latency, never correctness.
+func (s *Service) generations(ctx context.Context, userUUID string) (global, user int64, ok bool) {
+	if s.redis == nil || s.mget == nil {
+		return 0, 0, false
+	}
+	vals, err := s.mget.MGet(ctx, authzGlobalGenKey, authzUserGenPrefix+userUUID)
+	if err != nil {
+		return 0, 0, false
+	}
+	return parseGen(vals, 0), parseGen(vals, 1), true
+}
+
+// parseGen reads one MGET slot as a counter. A missing key (nil slot)
+// or an unparseable value reads as generation 0 — the same value a
+// never-bumped counter has, so a fresh deployment and a corrupted
+// counter both simply mean "nothing retired yet".
+func parseGen(vals []interface{}, i int) int64 {
+	if i >= len(vals) || vals[i] == nil {
+		return 0
+	}
+	var raw string
+	switch v := vals[i].(type) {
+	case string:
+		raw = v
+	case []byte:
+		raw = string(v)
+	case int64:
+		return v
+	default:
+		return 0
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// cacheKeyAt composes the key for a known pair of generations.
+func cacheKeyAt(global, user int64, userUUID, tenantID string) string {
 	if tenantID == "" {
 		tenantID = "-"
 	}
-	return "authz:cache:" + userUUID + ":" + tenantID
+	return fmt.Sprintf("authz:cache:%d:%s:%d:%s", global, userUUID, user, tenantID)
+}
+
+// cacheKey folds both generations in. A missing counter reads as 0.
+// Used by tests and by callers that do not already hold the
+// generations; cacheGet and cacheSet read them once and call
+// cacheKeyAt so a single operation is one MGET plus one GET/SET.
+func (s *Service) cacheKey(ctx context.Context, userUUID, tenantID string) string {
+	g, u, _ := s.generations(ctx, userUUID)
+	return cacheKeyAt(g, u, userUUID, tenantID)
 }
 
 func (s *Service) cacheGet(ctx context.Context, userUUID, tenantID string) ([]string, bool) {
 	if s.redis == nil {
 		return nil, false
 	}
-	raw, err := s.redis.Get(ctx, s.cacheKey(userUUID, tenantID))
+	g, u, ok := s.generations(ctx, userUUID)
+	if !ok {
+		return nil, false
+	}
+	raw, err := s.redis.Get(ctx, cacheKeyAt(g, u, userUUID, tenantID))
 	if err != nil || raw == "" {
 		return nil, false
 	}
@@ -1321,22 +1444,75 @@ func (s *Service) cacheSet(ctx context.Context, userUUID, tenantID string, perms
 	if s.redis == nil {
 		return
 	}
+	g, u, ok := s.generations(ctx, userUUID)
+	if !ok {
+		// The generations could not be read, so there is no key this
+		// entry could be filed under that a reader would find. Writing
+		// under a guessed generation would publish a verdict nobody can
+		// retire; skip the write instead.
+		return
+	}
 	data, err := json.Marshal(perms)
 	if err != nil {
 		return
 	}
-	_ = s.redis.Set(ctx, s.cacheKey(userUUID, tenantID), string(data), 60*time.Second)
+	_ = s.redis.Set(ctx, cacheKeyAt(g, u, userUUID, tenantID), string(data), authzCacheTTL)
 }
 
-func (s *Service) cacheInvalidate(ctx context.Context, userUUID string) {
+// InvalidateUserPermissions implements iface.AuthzCacheInvalidator: one
+// atomic INCR of the user's generation. Every entry written under the
+// previous value becomes unreachable at once, in every tenant, with no
+// scan and no glob built from caller input.
+//
+// A nil Redis is a no-op SUCCESS: "no cache configured" is not "cache
+// unavailable" — there is no cached verdict to retire, so reporting
+// failure would refuse role edits on a deployment that never had the
+// hazard. A configured Redis that cannot be bumped DOES return an
+// error, and the caller decides what that means (D27).
+//
+// The bump is issued whenever a client is configured, including when
+// that client has no MGET and this replica therefore bypasses the
+// cache: the counter is shared state, and a replica that does have MGET
+// must see the bump.
+func (s *Service) InvalidateUserPermissions(ctx context.Context, userUUID string) error {
 	if s.redis == nil {
+		return nil
+	}
+	if _, err := s.redis.Incr(ctx, authzUserGenPrefix+userUUID); err != nil {
+		return fmt.Errorf("authz: invalidate user permissions: %w", err)
+	}
+	return nil
+}
+
+// flushCache retires EVERY user's entries with one INCR of the global
+// generation. Used by role update/delete, binding delete and the tenant
+// cascades, where the set of affected users is not enumerable cheaply.
+// Same nil-Redis contract as InvalidateUserPermissions.
+func (s *Service) flushCache(ctx context.Context) error {
+	if s.redis == nil {
+		return nil
+	}
+	if _, err := s.redis.Incr(ctx, authzGlobalGenKey); err != nil {
+		return fmt.Errorf("authz: flush cache: %w", err)
+	}
+	return nil
+}
+
+// logCacheBumpFailure records a generation bump that failed on a path
+// that is still best-effort. Preserves today's behaviour (the scan-based
+// invalidation swallowed every error) while making the failure visible.
+//
+// TODO(D27): these call sites become withGeneration, whose PRE step
+// is a gate — a counter the store cannot bump means the change's effect
+// cannot be guaranteed, so the mutation is refused with 503 rather than
+// written and logged. This helper goes away with them.
+func (s *Service) logCacheBumpFailure(ctx context.Context, err error, userUUID string) {
+	if err == nil || s.logger == nil {
 		return
 	}
-	keys, err := s.redis.Keys(ctx, "authz:cache:"+userUUID+":*")
-	if err != nil || len(keys) == 0 {
-		return
-	}
-	_ = s.redis.Del(ctx, keys...)
+	s.logger.ErrorContext(ctx, "authz: permission cache invalidation failed; a stale verdict may be served until its TTL expires",
+		slog.String("user_uuid", userUUID),
+		slog.String("error", err.Error()))
 }
 
 // --- helpers ---

@@ -700,6 +700,38 @@ type AuthzProvider interface {
 }
 
 // ---------------------------------------------------------------------------
+// AuthzCacheInvalidator — consumed by: the user module after a system-role
+// change, and any module that mutates what a user is allowed to do without
+// going through authz's own role/binding endpoints.
+//
+// Narrow and separate from AuthzProvider on purpose: AuthzProvider is
+// implemented by forks, so it stays additive-only, and a consumer that only
+// needs to retire a cached verdict should not have to satisfy the whole
+// evaluator.
+//
+// Resolve it with module.GetTyped against ServiceAuthzProvider — the stored
+// value's dynamic type is the authz service, which implements both.
+//
+// A consumer that only READS verdicts may treat a missing value as
+// tolerable: the cached verdict expires on its own 60s TTL. A consumer that
+// MUTATES a role must not — a missing or failing invalidator means the
+// effect of the change cannot be guaranteed, and the change is refused
+// instead (D27).
+//
+// "No cache configured" is NOT "cache unavailable". A deployment with no
+// Redis wired has no cached verdict to retire, so InvalidateUserPermissions
+// returns nil there; that success is truthful, not a swallowed failure. Only
+// a configured cache that cannot be bumped returns an error.
+// ---------------------------------------------------------------------------
+
+type AuthzCacheInvalidator interface {
+	// InvalidateUserPermissions retires every cached verdict for one
+	// user, in every tenant, atomically. Returns an error the caller is
+	// expected to act on.
+	InvalidateUserPermissions(ctx context.Context, userUUID string) error
+}
+
+// ---------------------------------------------------------------------------
 // PaymentProvider — consumed by: subscriptions
 //
 // Façade over one or more payment gateways (Stripe in v1, PayPal later).
