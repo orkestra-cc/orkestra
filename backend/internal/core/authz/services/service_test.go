@@ -564,38 +564,124 @@ func TestNew_EnforceActionsTrimAndDrop(t *testing.T) {
 // probe, inverted: under enforce, a tenant-role permit must not override
 // the role table's deny on a platform-reserved action.
 //
-// The scenario is the real one. RequireSystemPermission calls
-// HasPermission with an EMPTY tenantID (middleware/auth.go), while the
-// JWT still carries the membership roles of whatever tenant the request
-// resolved — so shadowEvaluate stamps principal.tenant_roles on a global
-// check and tenant_roles.org_owner.all_in_tenant fires on
-// system.users.admin. With the action enforced, Cedar's allow would then
-// override the role table's deny and hand a tenant role a platform
-// permission. system_actions.cedar's forbid is what stops it.
+// The scenario is the real one. Every permit in tenant_roles.cedar is
+// written for a tenant RESOURCE with no constraint on the action, so it
+// fires on system.* actions too — and under CEDAR_ENFORCE_ACTIONS Cedar's
+// allow overrides the role table's deny, which is exactly how an
+// org_owner would come to hold system.users.admin.
+// system_actions.require_platform_role is what stops it.
+//
+// The positive control is load-bearing, not ceremony: HasPermission
+// returns the role-table verdict (false here) on EVERY failure mode —
+// enforce set misconfigured, engine nil, shadowEvaluate returning
+// ok=false — so "got false" on its own proves nothing about the forbid.
+// The control pins that in this exact fixture an enforced action really
+// does take Cedar's verdict over the role table's deny, and that the
+// org_owner permit really does fire. Only then does the deny in the
+// other two subtests mean what it claims.
 //
 // newTier1Service rather than newTestService: HasPermission goes through
 // GetEffectivePermissions, which reads the repo, and newTestService
-// leaves repo nil (nil-panic). The engine and the enforce set are
-// attached here because the tier-1 harness deliberately runs without
-// Cedar.
+// leaves repo nil (nil-panic). The engine, the enforce set and a
+// readable logger are attached here because the tier-1 harness
+// deliberately runs without Cedar.
 func TestShadowEvaluate_EnforceDoesNotOverrideTheRoleTableDeny(t *testing.T) {
-	svc, _ := newTier1Service(t, staticRoleLookup("")) // no platform role
-	eng, err := cedar.New("development")
-	if err != nil {
-		t.Fatalf("cedar engine: %v", err)
+	newSvc := func(t *testing.T, enforce string) (*Service, *bytes.Buffer) {
+		t.Helper()
+		svc, _ := newTier1Service(t, staticRoleLookup("")) // no platform role
+		eng, err := cedar.New("development")
+		if err != nil {
+			t.Fatalf("cedar engine: %v", err)
+		}
+		logBuf := &bytes.Buffer{}
+		svc.logger = slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		svc.cedarEngine = eng
+		svc.enforcedActions = map[string]struct{}{enforce: {}}
+		return svc, logBuf
 	}
-	svc.cedarEngine = eng
-	svc.enforcedActions = map[string]struct{}{"system.users.admin": {}}
+	orgOwnerCtx := func() context.Context {
+		return context.WithValue(context.Background(), ctxauth.KeyTenantRoles, []string{"org_owner"})
+	}
 
-	ctx := context.WithValue(context.Background(), ctxauth.KeyTenantRoles, []string{"org_owner"})
+	t.Run("positive control: enforce is live and the org_owner permit fires", func(t *testing.T) {
+		svc, logBuf := newSvc(t, "tenant.update")
+		// Role table denies (no bindings in the fake repo), Cedar allows
+		// via tenant_roles.org_owner.all_in_tenant. If the enforce path
+		// were dead this would come back false.
+		allowed, err := svc.HasPermission(orgOwnerCtx(), "u-1", "t-1", "tenant.update")
+		if err != nil {
+			t.Fatalf("HasPermission: %v", err)
+		}
+		if !allowed {
+			t.Fatalf("enforce path is not live: Cedar's allow did not override the role-table deny\nlog: %s", logBuf.String())
+		}
+		if !bytes.Contains(logBuf.Bytes(), []byte("enforce-mode override")) {
+			t.Errorf("expected an enforce-mode override line, got: %s", logBuf.String())
+		}
+	})
 
-	allowed, err := svc.HasPermission(ctx, "u-1", "" /* global check */, "system.users.admin")
-	if err != nil {
-		t.Fatalf("HasPermission: %v", err)
+	t.Run("tenant-scoped system action is forbidden", func(t *testing.T) {
+		// Same fixture as the control, only the action differs: the
+		// org_owner permit fires here too, and the forbid is the only
+		// thing that turns the outcome around.
+		svc, _ := newSvc(t, "system.users.admin")
+		ctx := orgOwnerCtx()
+
+		decision, ok := svc.shadowEvaluate(ctx, "u-1", "t-1", "system.users.admin", false)
+		if !ok {
+			t.Fatalf("Cedar evaluation should succeed, errors: %+v", decision.Errors)
+		}
+		if !decisionDecidedBy(decision, "system_actions.require_platform_role") {
+			t.Fatalf("the deny must come from the system-action forbid, reasons=%v allowed=%v", decision.Reasons, decision.Allowed)
+		}
+
+		allowed, err := svc.HasPermission(ctx, "u-1", "t-1", "system.users.admin")
+		if err != nil {
+			t.Fatalf("HasPermission: %v", err)
+		}
+		if allowed {
+			t.Fatal("an org_owner must not obtain system.users.admin under enforce")
+		}
+	})
+
+	t.Run("global system action is forbidden", func(t *testing.T) {
+		// The RequireSystemPermission shape: tenantID == "". D24 already
+		// stops the tenant roles being stamped on this path, so the
+		// permit cannot fire — but the forbid still names the deny, and
+		// that is what keeps this closed if the stamp ever comes back.
+		svc, _ := newSvc(t, "system.users.admin")
+		ctx := orgOwnerCtx()
+
+		decision, ok := svc.shadowEvaluate(ctx, "u-1", "", "system.users.admin", false)
+		if !ok {
+			t.Fatalf("Cedar evaluation should succeed, errors: %+v", decision.Errors)
+		}
+		if !decisionDecidedBy(decision, "system_actions.require_platform_role") {
+			t.Fatalf("the deny must come from the system-action forbid, reasons=%v allowed=%v", decision.Reasons, decision.Allowed)
+		}
+
+		allowed, err := svc.HasPermission(ctx, "u-1", "" /* global check */, "system.users.admin")
+		if err != nil {
+			t.Fatalf("HasPermission: %v", err)
+		}
+		if allowed {
+			t.Fatal("an org_owner must not obtain system.users.admin under enforce")
+		}
+	})
+}
+
+// decisionDecidedBy reports whether policyID is among the policies that
+// produced this decision. Assert with this rather than
+// `decision.MatchedPolicy == id`: MatchedPolicy is only Reasons[0], and
+// cedar-go leaves the order undefined when several policies match, so an
+// equality assertion over a multi-match decision is a coin flip.
+func decisionDecidedBy(d cedar.Decision, policyID string) bool {
+	for _, r := range d.Reasons {
+		if r == policyID {
+			return true
+		}
 	}
-	if allowed {
-		t.Fatal("an org_owner must not obtain system.users.admin under enforce")
-	}
+	return false
 }
 
 // ===== D24: global checks carry no tenant roles =====

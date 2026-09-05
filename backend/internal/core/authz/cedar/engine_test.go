@@ -20,6 +20,24 @@ func newTestEngine(t *testing.T, env string) *Engine {
 	return e
 }
 
+// decidedBy reports whether policyID is among the policies that produced
+// this decision.
+//
+// Assert with this, never with `d.MatchedPolicy == id`. MatchedPolicy is
+// only Reasons[0] (engine.go), and cedar-go does not define an order when
+// more than one policy matches a request — so an equality assertion over a
+// multi-match decision is a coin flip, and a regression that adds a second
+// match silently degrades the guard to a 50% catch rate instead of failing.
+// Membership is order-insensitive and keeps the assertion's strength.
+func decidedBy(d Decision, policyID string) bool {
+	for _, r := range d.Reasons {
+		if r == policyID {
+			return true
+		}
+	}
+	return false
+}
+
 func TestPolicyLoadingNonEmpty(t *testing.T) {
 	e := newTestEngine(t, "development")
 	// Seven files, 28 policies at the time of writing:
@@ -613,13 +631,22 @@ func TestABACRequireMFAForAdminSuffix_IgnoresNonPrivilegedRole(t *testing.T) {
 		"system.users.admin",
 		Resource{TenantUUID: "t", TenantKind: "internal", TenantStatus: "active"},
 	)
-	// operator doesn't have system.users.admin via any permit, so the
-	// result is deny — but it must NOT be via abac.require_mfa_for_admin_suffix.
+	// operator reaches system.users.admin through no permit, and since
+	// system_actions.cedar landed the deny is stated outright by
+	// system_actions.require_platform_role — either way it must NOT be
+	// via abac.require_mfa_for_admin_suffix.
+	//
+	// The assertion is membership in Reasons, not equality on
+	// MatchedPolicy: with a second forbid now matching this request,
+	// equality would let the very regression this test exists to catch —
+	// widening the MFA rule to all principals — pass whenever cedar-go
+	// happened to order the other forbid first. Measured at review: 3 of
+	// 6 runs. Membership fails it every time.
 	if d.Allowed {
 		t.Fatalf("operator should not reach system.users.admin: %+v", d)
 	}
-	if d.MatchedPolicy == "abac.require_mfa_for_admin_suffix" {
-		t.Errorf("non-privileged role must not trip the MFA forbid, got matched=%q", d.MatchedPolicy)
+	if decidedBy(d, "abac.require_mfa_for_admin_suffix") {
+		t.Errorf("non-privileged role must not trip the MFA forbid, reasons=%v", d.Reasons)
 	}
 }
 
@@ -762,8 +789,8 @@ func TestSystemActions_TenantRolesCannotHoldSystemActions(t *testing.T) {
 			if d.Allowed {
 				t.Fatalf("%s must be DENIED: a tenant role is not a platform role (matched=%q)", tc.action, d.MatchedPolicy)
 			}
-			if d.MatchedPolicy != "system_actions.require_platform_role" {
-				t.Errorf("expected the system-action forbid to be the reason, got %q", d.MatchedPolicy)
+			if !decidedBy(d, "system_actions.require_platform_role") {
+				t.Errorf("expected the system-action forbid among the reasons, got %v", d.Reasons)
 			}
 			// An absent system_role attribute must not produce a Cedar
 			// evaluation error — the `has` guard short-circuits before
@@ -829,7 +856,7 @@ func TestSystemActions_NonSystemActionsUnaffected(t *testing.T) {
 	if !d.Allowed {
 		t.Fatalf("the forbid must fire only on system.* actions (matched=%q)", d.MatchedPolicy)
 	}
-	if d.MatchedPolicy != "tenant_roles.org_owner.all_in_tenant" {
-		t.Errorf("expected the org_owner permit to be the reason, got %q", d.MatchedPolicy)
+	if !decidedBy(d, "tenant_roles.org_owner.all_in_tenant") {
+		t.Errorf("expected the org_owner permit among the reasons, got %v", d.Reasons)
 	}
 }

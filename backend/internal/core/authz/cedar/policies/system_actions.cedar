@@ -18,11 +18,28 @@
 // The rule keys on context.action_module — the substring before the first
 // "." in the permission key, stamped on every request by the engine —
 // while the platform reservation itself is the System: true flag on the
-// PermissionSpec. The two coincide exactly for all ten system.* keys in
-// the tree today, and every one of them is gated only by
-// RequireSystemPermission. A fork that flags a key System: true under a
-// different module prefix is not covered here (conservative: no false
-// denial); a fork that puts a non-System key under "system." would be.
+// PermissionSpec. Those two are NOT the same set, today, in this tree.
+// Fifteen keys are declared System: true. Ten carry the "system." prefix
+// and are covered by this rule. The other five are not:
+//
+//   auth.service_accounts.read     gated by RequireSystemPermission
+//   auth.service_accounts.manage   gated by RequireSystemPermission
+//   notification.log.read          gated by RequireSystemPermission
+//   notification.template.manage   declared, gates no route
+//   notification.test              declared, gates no route
+//
+// The first three are platform-reserved and live, and this forbid does
+// not reach them. What closes them is D24, not this rule:
+// RequireSystemPermission checks with an empty tenantID, and
+// shadowEvaluate no longer stamps the caller's tenant_roles on a check
+// with no tenant — so no tenant-role permit can fire on them in the
+// first place. The last two are a pre-existing catalog artefact,
+// unrelated to PR C.
+//
+// Keying this rule on the System: true flag instead of the module prefix
+// would require the flag on the request context (a context.action_is_system
+// stamped by shadowEvaluate). That is a change to D23 itself and is
+// recorded as a follow-up for the spec owner — do not reach for it here.
 //
 // Landing this rule does NOT flip CEDAR_ENFORCE_ACTIONS: on an unenforced
 // action the deny is observable as shadow-mode divergence telemetry and
