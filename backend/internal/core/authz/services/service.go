@@ -658,21 +658,28 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, userUUID, tenantI
 
 	// Union of tenant-scoped bindings.
 	//
-	// Platform-reserved keys are skipped here, which makes the documented
-	// evaluator rule 4 ("a tenant-scoped binding never grants a platform
-	// permission") enforced rather than incidental. It held only because
-	// no seeded tenant role carries a platform key, which is not a
-	// guarantee: existing data can carry a stale one, and until the D21
-	// validator landed anyone able to edit a custom role could write one
-	// in. Skipping the key here makes the ones already in the data inert.
+	// Platform-reserved keys are skipped here, which makes evaluator
+	// rule 4 in authz/CLAUDE.md — System:true permissions require a
+	// GLOBAL grant (by system role, or by a binding with an empty
+	// orgID), never a per-org binding — enforced rather than incidental.
+	// It held only because no seeded tenant role carries a platform key,
+	// which is not a guarantee: existing data can carry a stale one, and
+	// until the D21 validator landed anyone able to edit a custom role
+	// could write one in. Skipping the key here makes the ones already in
+	// the data inert; they stay stored, and role reads still show them.
 	//
 	// The wildcard is skipped for the same reason and as the same class:
 	// D21 refuses "*" and a platform key with one error, and "*" is the
 	// maximal case of the hazard, because HasPermission short-circuits on
-	// it. Nothing legitimate is lost — super_admin's wildcard comes from
-	// the systemRole shortcut above, never from a binding, and
-	// CreateBinding already refuses a platform role inside a tenant — so
-	// the only thing this can drop is stale data, which is the point.
+	// it. Nothing legitimate is lost. A super_admin's wildcard reaches a
+	// principal two ways, and this filter is on neither: the systemRole
+	// shortcut above, and a GLOBAL binding to the seeded "super_admin"
+	// role (which carries Permissions ["*"]) — validateBindingScope in
+	// fact REQUIRES a platform role to be granted globally, refusing it
+	// inside a tenant with ErrSystemRoleNotGrantableInTenant. So a
+	// tenant-scoped binding conveying "*" is a shape the write path
+	// already rejects, and the only thing this can drop is stale data,
+	// which is the point.
 	//
 	// The GLOBAL branch above is deliberately NOT filtered: that is where
 	// a platform role legitimately grants a platform key — the seeded

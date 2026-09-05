@@ -87,8 +87,15 @@ var validationTestSeq atomic.Int64
 // grantActorPermissions gives actor the listed permissions inside
 // tenantID, the way production does it: a custom role carrying them plus
 // a binding onto the actor. GetEffectivePermissions therefore returns
-// them, which is what the cascade check reads. Pass "*" to model a
-// super_admin-equivalent wildcard holder.
+// them, which is what the cascade check reads.
+//
+// Pass tenantID "" for a GLOBAL binding — and note that platform-reserved
+// keys and "*" are conveyed ONLY that way. D22 strips both out of the
+// effective set when the binding is tenant-scoped, so granting them at a
+// tenantID silently leaves the actor holding nothing: to model a
+// super_admin-equivalent wildcard holder, grant "*" globally (which is
+// also what validateBindingScope requires of a platform role), or pin the
+// caller's system role with newValidationTestServiceWithRole.
 //
 // Usable with a bare `svc, repo := newTier1Service(t, staticRoleLookup(""))`
 // pair as well as through the wrapper below.

@@ -248,15 +248,21 @@ func TestGetEffectivePermissions_TenantBindingCannotGrantTheWildcard(t *testing.
 
 // The mirror of the above, pinning the two paths in OPPOSITE directions
 // so nobody later "simplifies" the global and tenant unions together: a
-// GLOBAL binding to a wildcard-carrying role still grants it. No seeded
-// role carries "*" today (super_admin gets it from the systemRole
-// shortcut), so this is a directional guard on the filter's scope rather
-// than a production shape.
+// GLOBAL binding to a wildcard-carrying role still grants it.
+//
+// This is the sanctioned production shape, not a hypothetical. The
+// seeded "super_admin" role carries Permissions ["*"] and IsSystem
+// (SeedSystemRoles), and validateBindingScope REQUIRES a platform role
+// to be granted through a global binding — a tenant-scoped one is
+// refused with ErrSystemRoleNotGrantableInTenant. So this guard protects
+// the real super_admin-via-binding path: filter the global loop and an
+// actual super_admin loses the wildcard. (The systemRole shortcut is a
+// second, independent route to the same "*", which is why the loss would
+// not be universal — and so all the easier to miss.)
 func TestGetEffectivePermissions_GlobalBindingStillGrantsTheWildcard(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
-	registerTestPermissions(t, svc, registered("tenant.read"))
 
-	repo.seedRole("role-wild", "wildcard_role", true, []string{"*"}, "")
+	repo.seedRole("role-wild", "super_admin", true, []string{"*"}, "")
 	repo.seedBinding("bind-wild", "u-1", "", "role-wild")
 
 	// Asked in a tenant context, so the tenant-scoped branch runs too and

@@ -98,9 +98,28 @@ func TestValidateCustomRolePermissions_RefusesAKeyTheActorLacks(t *testing.T) {
 // Edge case 14: a super_admin's wildcard covers everything in the
 // CASCADE, but the catalog and system-key checks still apply — a
 // super_admin cannot put system.users.admin into a TENANT role either.
+//
+// The wildcard is granted through a GLOBAL binding, which is how a
+// platform role reaches a principal in production: the seeded
+// "super_admin" role carries Permissions ["*"] and validateBindingScope
+// REQUIRES a platform role to be granted globally
+// (ErrSystemRoleNotGrantableInTenant otherwise). A tenant-scoped "*"
+// grant would not do — D22 strips it out of the effective set — so this
+// fixture used to leave the actor holding nothing at all, and the test
+// passed only because check 3 fires before check 4.
+//
+// The first assertion is the positive control that keeps the fixture
+// load-bearing: it fails with ErrInsufficientPermissionsToGrant if the
+// grant above stops conveying the wildcard, so the test cannot silently
+// go hollow again.
 func TestValidateCustomRolePermissions_WildcardActorStillCannotAddASystemKey(t *testing.T) {
 	svc := newValidationTestService(t, registered("tenant.read"), systemRegistered("system.users.admin"))
-	svc.grantActor(t, "actor-1", "tenant-1", "*")
+	svc.grantActor(t, "actor-1", "", "*")
+
+	if _, err := svc.validateCustomRolePermissions(context.Background(), "tenant-1", "actor-1",
+		[]string{"tenant.read"}); err != nil {
+		t.Fatalf("the actor must really hold the wildcard — cascade rejected an ordinary key: %v", err)
+	}
 
 	if _, err := svc.validateCustomRolePermissions(context.Background(), "tenant-1", "actor-1",
 		[]string{"system.users.admin"}); !errors.Is(err, ErrSystemPermissionInCustomRole) {
@@ -137,8 +156,11 @@ func TestValidateCustomRolePermissions_GranterSystemBypassesOnlyTheCascade(t *te
 // The catalog check runs BEFORE the platform-key check on purpose: a key
 // nothing declared is reported as unknown, not as forbidden, because
 // "you typed a key that does not exist" and "that key is reserved" are
-// different corrections for the operator. Swapping the two blocks in
-// classifyPermissionKeys would silently change the answer for input
+// different corrections for the operator. The order lives in the two
+// sequential `if`s in validateCustomRolePermissions that consult
+// classifyPermissionKeys' results — NOT in classifyPermissionKeys
+// itself, whose two loops are independent and both run unconditionally.
+// Swapping those two `if`s would silently change the answer for input
 // carrying BOTH, and no other test would notice.
 func TestValidateCustomRolePermissions_UnknownKeyBeatsSystemKey(t *testing.T) {
 	svc := newValidationTestService(t, systemRegistered("system.users.admin"))
