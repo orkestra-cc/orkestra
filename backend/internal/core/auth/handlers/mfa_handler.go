@@ -160,6 +160,12 @@ func (h *MFAHandler) SetSessionTerminator(s services.AuthService) {
 // carry the same UUID. module.go wires each tier's handler from that tier's
 // own bundle audience, which is derived from the same `tier` value that
 // picks the tier's collections.
+//
+// One counter SERVICE, two independent BUDGETS: this setter also arms
+// `EnrollConfirm`, which keys into the `mfa-enroll` scope rather than
+// `mfa-verify` so a fumbled enrolment can never close the step-up door a
+// re-enrolment has to walk through (see MFAEnrollLimit). Nothing extra
+// needs wiring in module.go — the split lives in the key, not the field.
 func (h *MFAHandler) SetVerifyAttemptCounter(c services.AttemptCounter, audience services.PolicyAudience) {
 	h.verifyAttempts = c
 	h.audience = audience
@@ -277,6 +283,28 @@ func (h *MFAHandler) EnrollConfirm(ctx context.Context, req *MFAEnrollConfirmReq
 	if userUUID == "" {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
+
+	// D20 capped `/mfa/verify` and `/mfa/webauthn/verify/finish` and missed
+	// this route, which had no cap of its own at all. `MFAMaxAttempts`
+	// bounds ONE challenge and then destroys it — after which every further
+	// attempt fails the challenge lookup instead of stopping, so the route
+	// answered 26 times in 13 seconds during the 2026-09-04 incident. This
+	// is the outer bound, per (audience, user), across challenges: after it
+	// a sixth attempt costs a Redis read and nothing more.
+	//
+	// The key is the ENROLMENT scope, never AttemptKeyMFAVerify — see
+	// MFAEnrollLimit for why sharing the step-up budget would be a circular
+	// lockout. Same peek-charge-reset shape as Verify above: peek first so
+	// a locked caller is refused before the service is touched and so a
+	// lock cannot extend itself on every probe, and fail OPEN on a counter
+	// error, which is the AttemptCounter contract everywhere in this module.
+	key := services.AttemptKeyMFAEnroll(h.audience, userUUID)
+	if h.verifyAttempts != nil {
+		if v, err := h.verifyAttempts.Locked(ctx, key, services.MFAEnrollLimit); err == nil && v.Locked {
+			return nil, lockoutError(v.RetryAfter)
+		}
+	}
+
 	codes, replaced, err := h.mfa.ConfirmEnrollment(ctx, userUUID, req.Body.ChallengeID, req.Body.Code)
 	// D16: a replacement destroyed the old secret, so it is a removal and
 	// carries a removal's consequences. A first enrolment invalidates
@@ -293,7 +321,27 @@ func (h *MFAHandler) EnrollConfirm(ctx context.Context, req *MFAEnrollConfirmReq
 		revokeSessionsExceptCurrent(ctx, h.sessions, userUUID, "totp_factor_replaced")
 	}
 	if err != nil {
+		// Only a REJECTED CODE is charged, and on this route the sentinel
+		// alone is not enough to identify one: `ConfirmEnrollment` answers
+		// with ErrMFAInvalidCode both when `validateTOTP` refuses the code
+		// AND when the challenge could not be read. The second case
+		// swallows every store failure, so charging it would let a
+		// degraded Redis spend the user's enrolment budget — the exact
+		// trade the counter's fail-open contract exists to refuse, and the
+		// defect already fixed on the passkey route. The service tags that
+		// branch with ErrMFAChallengeNotFound so this line can tell the two
+		// apart; a challenge mismatch, a wrapped persistence failure and
+		// ErrMFAMethodDisabled are refusals rather than guesses and are not
+		// charged either.
+		if h.verifyAttempts != nil &&
+			errors.Is(err, services.ErrMFAInvalidCode) &&
+			!errors.Is(err, services.ErrMFAChallengeNotFound) {
+			_, _ = h.verifyAttempts.RecordFailure(ctx, key, services.MFAEnrollLimit)
+		}
 		return nil, mapMFAError(err)
+	}
+	if h.verifyAttempts != nil {
+		_ = h.verifyAttempts.Reset(ctx, key)
 	}
 	resp := &MFAEnrollConfirmResponse{}
 	resp.Body.Success = true
@@ -879,8 +927,13 @@ func appendOTP(source []string) []string {
 
 func mapMFAError(err error) error {
 	switch {
+	// A VERDICT 401, so it names itself. A codeless 401 is the one shape
+	// the operator console reads as a signing-key rotation rather than an
+	// answer, and it responds by rotating the refresh cookie — which turned
+	// a burst of mistyped codes into a dead session (see the block comment
+	// above AuthInvalidCredentials in internal/shared/errcode/codes.go).
 	case errors.Is(err, services.ErrMFAInvalidCode):
-		return huma.Error401Unauthorized("invalid mfa code")
+		return errcode.Unauthorized(errcode.AuthMFACodeInvalid, "invalid mfa code")
 	case errors.Is(err, services.ErrMFAChallengeMismatch):
 		return huma.Error400BadRequest("challenge does not match requested action")
 	case errors.Is(err, services.ErrMFANotEnrolled):

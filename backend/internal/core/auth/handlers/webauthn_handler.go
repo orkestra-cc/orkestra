@@ -644,14 +644,20 @@ func appendWebAuthn(source []string) []string {
 // frontend error handling stays uniform.
 func mapWebAuthnError(err error) error {
 	switch {
+	// Both 401 arms are VERDICTS and so name themselves — a codeless 401 is
+	// the one shape the operator console answers by rotating the refresh
+	// cookie instead of reading it (errcode/codes.go, AuthInvalidCredentials).
+	// They stay two DIFFERENT codes because they are two different
+	// situations: this one is a challenge that could not be read, the one
+	// below is a signature that did not validate.
 	case errors.Is(err, services.ErrMFAInvalidCode):
-		return huma.Error401Unauthorized("invalid webauthn challenge")
+		return errcode.Unauthorized(errcode.AuthWebAuthnChallengeInvalid, "invalid webauthn challenge")
 	case errors.Is(err, services.ErrMFAChallengeMismatch):
 		return huma.Error400BadRequest("challenge does not match requested action")
 	case errors.Is(err, services.ErrWebAuthnNoCredentials):
 		return huma.Error400BadRequest("no webauthn credentials enrolled for this user")
 	case errors.Is(err, services.ErrWebAuthnAssertion):
-		return huma.Error401Unauthorized("webauthn assertion failed")
+		return errcode.Unauthorized(errcode.AuthWebAuthnAssertionFailed, "webauthn assertion failed")
 	case errors.Is(err, services.ErrMFAMethodDisabled):
 		// Phase 3.6 — admin restricted passkeys via mfaMethods.
 		return huma.Error403Forbidden("mfa_method_disabled: webauthn is not allowed by policy")

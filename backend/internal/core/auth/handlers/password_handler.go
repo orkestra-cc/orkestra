@@ -342,7 +342,10 @@ func (h *PasswordAuthHandler) PasswordConfirm(ctx context.Context, req *Password
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrInvalidCredentials):
-			return nil, huma.Error401Unauthorized("Invalid password")
+			// A VERDICT 401 on a route the console calls with a live
+			// bearer, so it names itself — see the block comment above
+			// AuthInvalidCredentials in internal/shared/errcode/codes.go.
+			return nil, errcode.Unauthorized(errcode.AuthInvalidCredentials, "Invalid password")
 		case errors.Is(err, services.ErrPasswordConfirmUnavailable):
 			return nil, errcode.Conflict(errcode.AuthPasswordConfirmUnavailable,
 				"This account cannot reconfirm with a password — use MFA or reauthenticate via OAuth.")
@@ -476,8 +479,15 @@ func buildRefreshCookie(name, value, domain string, secure bool, maxAgeSeconds i
 
 func mapPasswordError(err error) error {
 	switch {
+	// A VERDICT 401 — it names itself for the same reason the MFA and
+	// passkey verdicts do (errcode/codes.go, AuthInvalidCredentials). The
+	// detail stays the one neutral sentence both the unknown-address and
+	// the wrong-password branch answer with, and so does the code: one
+	// situation, one identity, no existence oracle. Reached from `Login`
+	// (a public route the console excludes from that arm anyway) and from
+	// `change-password`, which is the one that was rotating.
 	case errors.Is(err, services.ErrInvalidCredentials):
-		return huma.Error401Unauthorized("Invalid email or password")
+		return errcode.Unauthorized(errcode.AuthInvalidCredentials, "Invalid email or password")
 	case errors.Is(err, services.ErrEmailNotVerified):
 		return errcode.Forbidden(errcode.AuthEmailNotVerified,
 			"Email address not verified. Please check your inbox for the verification email.")

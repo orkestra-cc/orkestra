@@ -695,9 +695,20 @@ const baseQueryWithRetry: BaseQueryFn<
       // the window to a single request, and a genuinely dead session reaches
       // the sign-out branch below instead of failing quietly for a quarter of
       // an hour. The cost is one serialised rotation per verdict 401 — a
-      // wrong password now rotates the refresh cookie, which is harmless: the
-      // family is untouched, and performRefresh coalesces in-tab and takes
-      // the cross-tab lock, so a burst costs one rotation and not one each.
+      // wrong password now rotates the refresh cookie.
+      //
+      // ⚠️ That cost was originally written down as "harmless: the family is
+      // untouched, and performRefresh coalesces, so a burst costs one
+      // rotation and not one each". Staging falsified the second half on
+      // 2026-09-04: performRefresh SERIALISES rotations, it does not collapse
+      // them, so 26 mistyped MFA codes in 13 seconds produced 26 codeless
+      // 401s, 44 `409 refresh_rotation_raced` answers, 8 rotations, and then
+      // reuse detection killed the session. The per-rotation claim is true
+      // and beside the point — the races are the harm. The real fix was on
+      // the backend: every verdict 401 now carries a code
+      // (backend/internal/shared/errcode/codes.go), so those routes take the
+      // coded branch above and never reach this one. This arm remains for
+      // what it was written for, the signing-key rotation.
       //
       // CODELESS, not "anything but access_token_expired". A 401 that names
       // itself has been explained by the server, and a token minted from the

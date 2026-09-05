@@ -102,6 +102,7 @@ const (
 	ScopeVerifyEmail = "verify-email"
 	ScopeVerifyIP    = "verify-ip"
 	ScopeMFAVerify   = "mfa-verify"
+	ScopeMFAEnroll   = "mfa-enroll"
 )
 
 const attemptKeyPrefix = "auth:attempts:"
@@ -124,6 +125,20 @@ var (
 // MFAVerifyLimit is the authenticated MFA-verify cap (spec D20). Defined
 // here in PR A; wired to the handlers in PR B.
 var MFAVerifyLimit = Limit{Threshold: MFAMaxAttempts, Window: MFAChallengeTTL}
+
+// MFAEnrollLimit bounds `/mfa/enroll/confirm`. Same threshold and same
+// window as MFAVerifyLimit — five attempts per challenge lifetime is the
+// same judgement in both places, and there is no reason for the numbers to
+// differ — but deliberately a SEPARATE budget on a SEPARATE key.
+//
+// 🔴 Do not collapse the two onto AttemptKeyMFAVerify. If a failed
+// ENROLMENT spent the STEP-UP budget, a user fumbling their enrolment
+// codes would lock themselves out of step-up — and step-up is precisely
+// what a user who already holds a factor must pass in order to re-enrol.
+// That is a circular lockout, the third this branch would have had to fix.
+// The budgets stay independent so exhausting one can never close the door
+// the other opens.
+var MFAEnrollLimit = Limit{Threshold: MFAMaxAttempts, Window: MFAChallengeTTL}
 
 // normaliseEmail applies the SAME normalisation Login does
 // (password_auth_service.go: strings.ToLower(strings.TrimSpace(...))),
@@ -184,11 +199,22 @@ func AttemptKeyClient(clientID string) string {
 // AttemptKeyMFAVerify is per audience and per user UUID (never per
 // email: the caller is already authenticated).
 func AttemptKeyMFAVerify(aud PolicyAudience, userUUID string) string {
+	return mfaUserKey(ScopeMFAVerify, aud, userUUID)
+}
+
+// AttemptKeyMFAEnroll is the ENROLMENT sibling of AttemptKeyMFAVerify —
+// same shape, different scope segment, so the two counters never touch.
+// See MFAEnrollLimit for why that separation is load-bearing.
+func AttemptKeyMFAEnroll(aud PolicyAudience, userUUID string) string {
+	return mfaUserKey(ScopeMFAEnroll, aud, userUUID)
+}
+
+func mfaUserKey(scope string, aud PolicyAudience, userUUID string) string {
 	userUUID = strings.TrimSpace(userUUID)
 	if userUUID == "" {
 		return ""
 	}
-	return attemptKeyPrefix + ScopeMFAVerify + ":" + string(aud) + ":" + userUUID
+	return attemptKeyPrefix + scope + ":" + string(aud) + ":" + userUUID
 }
 
 // ScopeOfKey recovers the scope label from a key so the metric does not

@@ -105,6 +105,48 @@ const AuthLoginMethodLockout = "auth.login_method_lockout"
 // existence oracle, which is the defect (M-7) the counters close.
 const AuthTooManyAttempts = "auth.too_many_attempts"
 
+// The four codes below all ride on a 401, and the reason they exist is
+// the same for each: a 401 that carries NO top-level code is the one
+// 401 shape the operator console does not read as a verdict. Its error
+// interceptor (`baseQueryWithRetry`, frontend-admin/CLAUDE.md) treats a
+// codeless 401 as a JWT signing-key rotation — after which every
+// unexpired bearer validates as plain "invalid" — and answers it by
+// running `performRefresh` once. So a *verdict* 401 that stays codeless
+// rotates the caller's refresh cookie on every wrong credential; typed
+// quickly they race, and the family's reuse detection eventually kills
+// the session. That is not theoretical: on 2026-09-04 an operator
+// mistyping enrolment codes produced 26 codeless 401s in 13 seconds, 44
+// `409 refresh_rotation_raced` answers, and a dead session.
+//
+// The rule that follows: **a 401 a handler returns as a verdict on a
+// credential the caller submitted must name itself.** A 401 about the
+// BEARER (missing, expired, or a user row that no longer exists) is not
+// one of these — that one really is the session's own state, and the
+// console's rotation is the right answer to it.
+
+// AuthInvalidCredentials signals that a submitted password was rejected:
+// at login (unknown address or wrong password — deliberately one code
+// for both, never an existence oracle) and at the authenticated
+// reconfirm (`/me/password-confirm`, `change-password`). 401.
+const AuthInvalidCredentials = "auth.invalid_credentials"
+
+// AuthMFACodeInvalid signals that a submitted TOTP or backup code was
+// rejected, or that the challenge it named is gone. The two are one code
+// on purpose: `mfaService` answers both with `ErrMFAInvalidCode`, and
+// telling a caller which of the two happened tells an attacker whether a
+// challenge is still live. 401.
+const AuthMFACodeInvalid = "auth.mfa_code_invalid"
+
+// AuthWebAuthnChallengeInvalid signals that the passkey ceremony's
+// challenge could not be read — lost, expired, spent, or its store is
+// unreachable (`challenges.Peek` collapses all four). It is NOT a
+// rejected assertion; see AuthWebAuthnAssertionFailed for that. 401.
+const AuthWebAuthnChallengeInvalid = "auth.webauthn_challenge_invalid"
+
+// AuthWebAuthnAssertionFailed signals that the authenticator's signed
+// assertion (or registration attestation) did not validate. 401.
+const AuthWebAuthnAssertionFailed = "auth.webauthn_assertion_failed"
+
 // AuthIPThresholdBelowAccount signals a refused module-config write:
 // ipLockoutThreshold must be >= accountLockoutThreshold. A source
 // address that locks BEFORE the account does turns a shared egress into

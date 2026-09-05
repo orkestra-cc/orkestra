@@ -581,6 +581,51 @@ independent admin-managed pairs:
   handler wired with the client audience would silently share one lockout
   scope across both tiers. A nil counter leaves the routes uncapped, which
   is the pre-D20 behaviour a fork inherits if it never wires one.
+- **`MFAHandler.EnrollConfirm` is the eighth consumer, on its own
+  `mfa-enroll` scope.** Key `auth:attempts:mfa-enroll:<audience>:<userUUID>`
+  (`AttemptKeyMFAEnroll`), limit `MFAEnrollLimit` — the same
+  `MFAMaxAttempts` (5) per `MFAChallengeTTL` (5m) pair as `MFAVerifyLimit`,
+  because it is the same judgement, on a **separate key**. D20 capped the
+  two verify routes and missed this one, whose only bound was the
+  per-challenge counter — and that one *destroys* the challenge at five, so
+  every attempt after the fifth failed the challenge lookup and answered
+  again rather than stopping. On 2026-09-04 that let an operator's mistyped
+  codes produce 26 answers in 13 seconds. Same peek-charge-reset shape as
+  `Verify`: peek before the service is touched (a locked caller answers 429
+  `auth.too_many_attempts` with `Retry-After` through the shared
+  `lockoutError`), charge one failure per request, `Reset` on success, fail
+  OPEN on a counter error. It reuses the counter and audience
+  `SetVerifyAttemptCounter` already wires — the split is in the key, not in
+  a second field, so `module.go` needs nothing new.
+  🔴 **Never collapse this onto `AttemptKeyMFAVerify`.** If a failed
+  *enrolment* spent the *step-up* budget, a user fumbling their enrolment
+  codes would lock themselves out of step-up — and step-up is exactly what a
+  user who already holds a factor must pass in order to re-enrol. That is a
+  circular lockout, the class this branch has already had to fix twice
+  (removal-locks-out-an-obliged-user, and the reconfirm refusal); the two
+  budgets stay independent so exhausting one can never close the door the
+  other opens. `TestMFAEnrollAndVerifyBudgetsAreIndependent` asserts both
+  directions. ⚠️ **The charge cannot key off the sentinel alone here.**
+  `ConfirmEnrollment` answers `ErrMFAInvalidCode` both for a wrong code and
+  for a challenge it could not read — and `Peek` collapses every store
+  failure, a Redis outage included, into that second case. So the service
+  tags the lookup branch with `ErrMFAChallengeNotFound` alongside
+  `ErrMFAInvalidCode` (the wire answer is unchanged — the caller must not be
+  able to tell a lost challenge from a wrong code), and the handler charges
+  only `ErrMFAInvalidCode ∧ ¬ErrMFAChallengeNotFound`. Charging the lookup
+  branch would let a degraded store spend a user's enrolment budget, which
+  is the same defect already fixed one door over on the passkey route.
+  ⚠️ **`WebAuthnHandler.RegisterFinish` is deliberately NOT capped.** It has
+  the same *structural* shape — no outer bound, and `register/begin` hands
+  out a fresh challenge on demand — but nothing there is guessed: the
+  attestation is produced by an authenticator over a server-issued
+  challenge, so there is no secret to search for, and a failure is a
+  hardware or user-verification hiccup rather than a typo (a human cannot
+  produce a 26-request burst of them). Capping it would risk locking an
+  MFA-obliged user out of adding their only factor over five authenticator
+  quirks, for no security gain. If that judgement is ever revisited, give it
+  a **third** key — sharing `mfa-enroll` would mean a fumbled TOTP enrolment
+  blocks the passkey fallback, which is the circular lockout again.
 
 #### Mail dispatcher (transactional auth mail)
 
@@ -1110,7 +1155,7 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 | PATCH | `/v1/auth/{tier}/me` | bearer | Self-service preference patch. Strictly allowlisted: `language` (BCP-47, oneof=en/it) and `fullName` (1..100 chars). Response mirrors GET /me so the SPA can replace its cached user document without an extra round-trip. Adding a new mutable preference requires extending `UpdateCurrentUserInput` AND honoring it in `UpdateCurrentUser` — the underlying SDK `UpdateUserInput` shape is wider but NOT pass-through |
 | POST | `/v1/auth/{tier}/change-password` | `RequireGlobal()` | Self-service password change |
 | POST | `/v1/auth/{tier}/mfa/enroll/begin` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Start TOTP enrollment — returns `{challengeId, secret, provisioningUri}` |
-| POST | `/v1/auth/{tier}/mfa/enroll/confirm` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Confirm enrollment with a TOTP code, receive 10 one-shot backup codes. Gated **as well as** `begin` — the factor set can change between the two halves. When it **replaces** an existing TOTP secret it is a removal too, and carries a removal's consequences (D16); a first enrolment carries none. Either way it emits a security event and the `auth.mfa_factor_added` email |
+| POST | `/v1/auth/{tier}/mfa/enroll/confirm` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Confirm enrollment with a TOTP code, receive 10 one-shot backup codes. Gated **as well as** `begin` — the factor set can change between the two halves. When it **replaces** an existing TOTP secret it is a removal too, and carries a removal's consequences (D16); a first enrolment carries none. Either way it emits a security event and the `auth.mfa_factor_added` email. Capped per (audience, user) by the **`mfa-enroll`** attempt scope — its own budget, never the step-up one — so 5 rejected codes in 5 minutes answer 429 `auth.too_many_attempts` with `Retry-After`; a wrong code answers 401 `auth.mfa_code_invalid` |
 | GET | `/v1/auth/{tier}/me/mfa` | `RequireGlobal()` | Return `{status, type, backupCodesRemaining}` |
 | POST | `/v1/auth/{tier}/me/mfa/remove` | `RequireGlobal()` + `RequireStepUp(5m)` | Remove every enrolled factor (TOTP row + WebAuthn row, D15) — step-up middleware demands a <5min MFA proof; request body is empty. Also bumps the MFA epoch, revokes every device-trust grant, revokes every session but the caller’s own, and **restarts the enrolment grace clock** — without which an MFA-obliged caller could never enrol again (D16 — see "One rule for every credential change" below) |
 | POST | `/v1/auth/{tier}/mfa/verify` | `RequireGlobal()` | Verify TOTP or backup code; mint a stepped-up access token with `amr:["pwd","otp"]` + `last_otp_at=now`. Capped per (audience, user) by the `mfa-verify` attempt scope — 5 failures in 5 minutes answers 429 `auth.too_many_attempts` with `Retry-After` (D20); a backup-code attempt costs exactly one failure however many hashes it compares |
@@ -1598,6 +1643,7 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 - **Never call `notification.EmailSender.Send` directly.** Every auth-triggered email must go through `SendTemplated` with a `TemplateID` that exists in `notification/services/default_templates.go`.
 - **Never read `cfg.Auth.JWT.PrivateKey` outside the JWT service.** Key material stays inside one package.
 - **Never bypass the lockout on login / change-password / password-confirm / forgot-password / resend-verification endpoints.** `Login`, `ChangePassword` and `ConfirmPasswordWithSecurity` must all peek the attempt counters (`peekLockout`) — after the durable-lock check, before the verify — and record on every real failure (`recordLoginFailure` + the mirrored `LockedUntil` write), so a lock earned on one of the three is honoured by the other two; `ForgotPassword` and `ResendVerification` must peek `overRequestCap` and charge `chargeRequestCap` BEFORE the user lookup instead — together these are the only protection against credential stuffing, unthrottled password-guessing, and reset-flood.
+- **Never answer a submitted credential with a codeless 401.** A 401 that is the handler's *verdict* on something the caller sent — a wrong TOTP or backup code, a rejected assertion, a wrong password — must carry an `errcode` (`auth.mfa_code_invalid`, `auth.webauthn_challenge_invalid`, `auth.webauthn_assertion_failed`, `auth.invalid_credentials`). The operator console reads a **codeless** 401 as the one 401 that is not a verdict — a JWT signing-key rotation, after which every unexpired bearer validates as plain "invalid" — and answers it by rotating the refresh cookie once (`frontend-admin/CLAUDE.md`, `baseQueryWithRetry`). So a codeless verdict rotates the session on every wrong credential; typed quickly they race, and the family's reuse detection kills the session. That is the 2026-09-04 incident: 26 codeless 401s in 13 seconds, 44 `409 refresh_rotation_raced`, then a dead session. The block comment above `AuthInvalidCredentials` in `internal/shared/errcode/codes.go` is the canonical statement. **A 401 about the BEARER stays codeless on purpose** — "authentication required", "user not found", a missing or forged token: those really are the session's own state, and a rotation is the right answer to them.
 - **When you add a new OAuth provider**, add its fields to `ConfigSchema()`, extend the switch in `oauth_config_resolver.go`, and wire the factory case in `services/oauth_provider_factory.go`. Never hardcode provider config inside a handler — everything flows through the resolver so admin edits are live.
 - **Never read `cfg.Auth.{Google,Apple,GitHub,Discord}` from handlers.** Those struct fields still load from env vars for backward compatibility, but OAuth config is owned by the resolver. Handlers must call `h.oauthResolver.Get/RedirectURL/MobileAudience` so the admin panel stays authoritative.
 - **Never build a `/auth/callback` or `/user/security` URL outside `handlers/oauth_callback_redirect.go`**, never put a token, an email or a user id in one, and never set a client-tier cookie from the operator host — relay instead. The structural scan and `oauth_callback_flow_test.go` are the guards.

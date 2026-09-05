@@ -272,7 +272,19 @@ func (s *mfaService) ConfirmEnrollment(ctx context.Context, userUUID, challengeI
 	// Peek before consuming so we don't destroy a valid challenge on a typo.
 	ch, err := s.challenges.Peek(ctx, challengeID)
 	if err != nil {
-		return nil, false, ErrMFAInvalidCode
+		// The CALLER still sees ErrMFAInvalidCode, and must: a lost,
+		// expired, spent or unreadable challenge has to be
+		// indistinguishable on the wire from a wrong code, or the answer
+		// becomes a liveness oracle for challenge IDs.
+		//
+		// ErrMFAChallengeNotFound rides along for the HANDLER, which has a
+		// question the caller may not ask: "was that a guess?" `Peek`
+		// collapses EVERY store failure — a Redis outage included — into
+		// ErrMFAChallengeNotFound, so an enrolment cap that charged this
+		// branch would let a degraded store spend a user's budget. That is
+		// the same defect the passkey route already had to fix one door
+		// over (see VerifyFinish's charge comment).
+		return nil, false, fmt.Errorf("%w: %w", ErrMFAInvalidCode, ErrMFAChallengeNotFound)
 	}
 	if ch.UserUUID != userUUID || ch.Purpose != MFAPurposeEnroll {
 		return nil, false, ErrMFAChallengeMismatch
