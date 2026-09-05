@@ -700,6 +700,110 @@ type AuthzProvider interface {
 }
 
 // ---------------------------------------------------------------------------
+// AuthzCacheInvalidator — consumed by: the user module after a system-role
+// change, and any module that mutates what a user is allowed to do without
+// going through authz's own role/binding endpoints.
+//
+// Narrow and separate from AuthzProvider on purpose: AuthzProvider is
+// implemented by forks, so it stays additive-only, and a consumer that only
+// needs to retire a cached verdict should not have to satisfy the whole
+// evaluator.
+//
+// Resolve it with module.GetTyped against ServiceAuthzProvider — the stored
+// value's dynamic type is the authz service, which implements both.
+//
+// A consumer that only READS verdicts may treat a missing value as
+// tolerable: the cached verdict expires on its own 60s TTL. A consumer that
+// MUTATES must not treat it as nothing — but what it does about it depends
+// on the DIRECTION of the mutation (D27 as amended):
+//
+//   - A mutation that GRANTS may be gated: a stale verdict after it is a
+//     DENY, so refusing the write and asking the caller to retry costs only
+//     a delay.
+//   - A mutation that REVOKES is written first and the shortfall reported.
+//     A stale verdict after a revocation is an ALLOW, and refusing the write
+//     holds the privilege indefinitely where writing it holds it for at most
+//     the cache TTL. With the cache store fully down, reads bypass the cache
+//     anyway, so a written revocation takes effect at once.
+//
+// The base does NOT apply one uniform shape — the direction is decided per
+// call site, and authz's own service is the worked example (three seams,
+// all going through one bump helper):
+//
+//   - `withGeneration` — the gate. Used by `UpdateRole` for a patch that
+//     only ADDS access (a permission set that is a superset of the current
+//     one, or isActive:true) and by `CreateBinding`/`EnsureBinding` when a
+//     real actor is the granter.
+//   - `writeThenInvalidate` — write, then invalidate best-effort. Used by
+//     `DeleteRole`, `DeleteBinding`, both tenant cascades, by `UpdateRole`
+//     when the patch removes any key OR sets isActive:false, and by a
+//     platform-issued binding grant (granter "system"), where a refusal
+//     would abort a tenant flow midway rather than reach an operator who
+//     could retry.
+//   - `bindingGrantGeneration` — the one seam that picks between the two, so
+//     `CreateBinding` and `EnsureBinding` cannot drift apart.
+//
+// DISABLING a role is a revocation, not a neutral toggle: the evaluator
+// drops every permission of an inactive role, from every holder, so
+// isActive:false takes the second shape. The permission set-difference
+// cannot see that — the stored list does not change — which is why it is
+// tested for explicitly. Enabling one is the granting direction.
+//
+// Two writes bump nothing at all, in either shape: `CreateRole` (a role it
+// creates has no bindings, and the unique (tenantId, name) index keeps that
+// true by refusing a taken name with a 409) and an `UpdateRole` patch that
+// only touches name/description (the cache stores permission keys, which
+// such a patch cannot move).
+//
+// The user module's system-role change is `writeThenInvalidate`-shaped and
+// is never refused in either direction: refusing a demotion would keep the
+// old role's verdicts alive indefinitely instead of for at most the TTL.
+//
+// Whatever the shape, the failure must be surfaced — logged, counted, and
+// (for the system-role change) recorded in the audit row — never swallowed.
+//
+// There are THREE cache states, not two, and only the middle one is an
+// error:
+//
+//   - No cache configured (no Redis wired). There is no cached verdict to
+//     retire, so InvalidateUserPermissions returns nil. That success is
+//     truthful, not a swallowed failure.
+//   - Cache configured but UNAVAILABLE (the counter cannot be bumped). This
+//     returns an error, and a mutating caller must act on it per the
+//     direction rule above.
+//   - Cache configured but bypassed on THIS replica (the Redis client in use
+//     lacks the MGET the implementation needs). Reads and writes are skipped
+//     locally — every check resolves from the database — but the bump is
+//     still issued, because a peer replica that does have MGET holds entries
+//     this mutation must retire, and no replica can know what its peers use.
+//
+// ---------------------------------------------------------------------------
+
+type AuthzCacheInvalidator interface {
+	// InvalidateUserPermissions retires, in one atomic operation, every
+	// verdict cached for one user in every tenant BEFORE the call
+	// returns. Returns an error the caller is expected to act on.
+	//
+	// It does NOT, on its own, cover a verdict a concurrent reader
+	// computed before the call and writes back after it. The
+	// implementation closes the deterministic half of that race — a
+	// reader files its result under the generation it read the cache
+	// with, so a verdict computed before this call is born unreachable —
+	// but a reader that resolved the database across the call can still
+	// publish a stale entry. A caller that GRANTS closes that window
+	// with the pre-write / write / post-write protocol (D27):
+	// invalidate, refuse the change if that fails, write, then
+	// invalidate again best-effort. A caller that REVOKES writes first
+	// and invalidates once, best-effort, because refusing a revocation
+	// is worse than applying it late; the window is then bounded by the
+	// cache TTL instead of closed. A caller whose write cannot change
+	// any existing verdict (authz `CreateRole`, or a role rename) needs
+	// neither. A single bump is sufficient only when the caller is not
+	// itself the writer.
+	InvalidateUserPermissions(ctx context.Context, userUUID string) error
+}
+
+// ---------------------------------------------------------------------------
 // PaymentProvider — consumed by: subscriptions
 //
 // Façade over one or more payment gateways (Stripe in v1, PayPal later).

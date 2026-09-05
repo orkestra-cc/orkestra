@@ -74,6 +74,21 @@
 //   - orkestra_auth_mail_dropped_total — transactional auth emails
 //     dropped by a full dispatcher queue, labelled by template id.
 //
+// The authz invalidation contract (spec 2026-09-03 §4.6 D27, as amended
+// by ruling P22) adds two, both unlabelled — the only dimensions
+// available are the user UUID and the operation, and neither is bounded:
+//
+//   - orkestra_authz_cache_invalidation_failures_total — permission-cache
+//     generation bumps that failed AFTER the write had landed, so a
+//     verdict cached around the write can be served until its 60s TTL
+//     expires. Every revocation and every platform-issued grant reports
+//     here; the change itself stood.
+//   - orkestra_authz_cache_invalidation_refusals_total — grants REFUSED
+//     because the cache could not be retired before the write. Nothing
+//     was written. A moving rate means operators cannot change
+//     permissions at all, which is a louder condition than the one
+//     above and deserves its own alert.
+//
 // ADR-0002 (docs/adr/0002-metrics-label-schema.md) freezes the label
 // schema. Adding labels requires a new ADR — Prometheus cardinality
 // explodes silently, and history breaks when labels change. The raw
@@ -113,6 +128,8 @@ type Collector struct {
 	authLockouts                   *prometheus.CounterVec
 	authMailDropped                *prometheus.CounterVec
 	tokenSweepDeleted              *prometheus.CounterVec
+	authzCacheInvalidationFailures prometheus.Counter
+	authzCacheInvalidationRefusals prometheus.Counter
 	tokenSweepBacklog              *prometheus.GaugeVec
 	tokenSweepDuration             *prometheus.HistogramVec
 
@@ -299,6 +316,24 @@ func (c *Collector) buildMetrics() {
 		[]string{"tier"},
 	)
 
+	c.authzCacheInvalidationFailures = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "authz",
+			Name:      "cache_invalidation_failures_total",
+			Help:      "Count of permission-cache generation bumps that failed AFTER their write had landed, leaving a verdict cached during the write readable until its 60s TTL expires. Unlabelled by design (ADR-0002): the available dimensions are the user UUID and the operation, neither of which is bounded. A bump that fails BEFORE the write is not counted here — it refuses the mutation and answers 503.",
+		},
+	)
+
+	c.authzCacheInvalidationRefusals = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "authz",
+			Name:      "cache_invalidation_refusals_total",
+			Help:      "Count of permission GRANTS refused because the effective-permission cache could not be retired before the write. Nothing was written; the caller got 503 authz.cache_unavailable and must retry. Unlabelled by design (ADR-0002). Distinct from cache_invalidation_failures_total, where the change did land.",
+		},
+	)
+
 	c.entitlementLag = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "orkestra",
@@ -346,7 +381,7 @@ func (c *Collector) Register() error {
 	if !atomic.CompareAndSwapUint32(&c.registered, 0, 1) {
 		return nil
 	}
-	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.sessionAnchorAnomalies, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped} {
+	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.sessionAnchorAnomalies, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped, c.authzCacheInvalidationFailures, c.authzCacheInvalidationRefusals} {
 		if err := c.registry.Register(m); err != nil {
 			// rollback so the caller can retry with a fresh collector
 			atomic.StoreUint32(&c.registered, 0)
@@ -445,6 +480,30 @@ func (c *Collector) RecordSessionCapEventFailure() {
 		return
 	}
 	c.sessionCapEventFailures.Inc()
+}
+
+// RecordAuthzCacheInvalidationFailure counts one post-write
+// permission-cache invalidation that failed. The write has already
+// landed when this increments, so the failure is observational: a
+// verdict cached during the write survives until its own 60s TTL. A
+// non-zero rate means permission changes can be up to a minute late,
+// not that they were lost. Spec 2026-09-03 §4.6 D27.
+func (c *Collector) RecordAuthzCacheInvalidationFailure() {
+	if c == nil || c.authzCacheInvalidationFailures == nil {
+		return
+	}
+	c.authzCacheInvalidationFailures.Inc()
+}
+
+// RecordAuthzCacheInvalidationRefusal counts one permission grant turned
+// away because the cache could not be retired before the write. Nothing
+// was written when this increments — the caller was told to retry.
+// Spec 2026-09-03 §4.6 D27 / ruling P22.
+func (c *Collector) RecordAuthzCacheInvalidationRefusal() {
+	if c == nil || c.authzCacheInvalidationRefusals == nil {
+		return
+	}
+	c.authzCacheInvalidationRefusals.Inc()
 }
 
 // RecordSessionAnchorAnomaly counts a refresh permitted because the cap

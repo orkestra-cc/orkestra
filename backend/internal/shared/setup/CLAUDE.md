@@ -90,8 +90,24 @@ Rules:
 
 - usable binding → only that UUID may finalize;
 - empty binding, or missing/deleted/inactive → an authenticated **active
-  `super_admin`** may claim recovery, nobody else;
-- a lookup error is never a lifecycle class and never opens recovery;
+  `super_admin`** may claim recovery, nobody else. That role is read from
+  the **user store** (`iface.UserProvider.GetUserByID`), never from the
+  `srole` claim (D28): the claim can be a whole access-token lifetime
+  stale, and this is the gate that hands an operator the power to seize an
+  in-progress binding. A caller row that is *absent* is a fact, not a
+  failure — it reports the empty role, which is not `super_admin`, so
+  recovery is refused cleanly, mirroring `userLifecycleState`'s treatment
+  of a missing user;
+- **no lookup error is ever an authorization outcome** — neither a
+  lifecycle-class lookup nor the role lookup. Both fail closed through the
+  error return (503 `setup.finalizer_state_unavailable`), and neither ever
+  degrades to the claim: falling back would make the claim authoritative
+  again precisely when the database cannot contradict it;
+- the role check runs **before** the caller's own lifecycle lookup, so a
+  non-`super_admin` never triggers one. That ordering is a privacy
+  property, and it survives the role now coming from the database —
+  reading your own role tells you nothing your token did not already
+  carry;
 - the claim is a CAS on the previously observed `(adminUUID, revision)`. A
   loser re-evaluates access **once** rather than overwriting the winner;
 - a legacy install can reach "may claim recovery" with **no record at

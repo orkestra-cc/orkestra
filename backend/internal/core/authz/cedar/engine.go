@@ -40,8 +40,21 @@ const (
 // Decision is the result of an authorization evaluation — a thin wrapper
 // around cedar.Decision so callers don't import the upstream package.
 type Decision struct {
-	Allowed       bool
-	MatchedPolicy string // the @id of the first matching policy, empty if forbid or no match
+	Allowed bool
+	// MatchedPolicy is the @id of the FIRST policy in Reasons — and
+	// "first" is a Cedar-internal ordering, not a stable contract.
+	//
+	// It is populated for a FORBID as well as a permit: a denial names the
+	// forbid that produced it, which is what makes a forbid assertable in
+	// a test. (It is empty only when nothing matched at all.) Do not
+	// reintroduce the older "empty if forbid" claim — it was false, and a
+	// test written to it passes for the wrong reason.
+	//
+	// Because the ordering is Cedar's, a test that needs to know a
+	// specific policy fired must assert MEMBERSHIP in Reasons, never
+	// equality against Reasons[0] or against this field, whenever more
+	// than one policy can match the same request.
+	MatchedPolicy string
 	Reasons       []string
 	Errors        []string
 }

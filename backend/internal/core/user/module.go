@@ -102,7 +102,15 @@ func (m *UserModule) Init(deps *module.Dependencies) error {
 	// request time — deactivate / delete use it to end the target's
 	// sessions instead of leaving live bearers behind.
 	m.handler.SetServiceRegistry(deps.Services)
+	// The caller-role guards (D28) resolve the acting operator from the
+	// store. A synthetic dev-token principal has no row by design, so the
+	// guards need the environment classification to decide whether that
+	// documented local flow may fall back to the token's own claim — see
+	// handlers.devTokenSystemRole. Wiring it is what opens the exception;
+	// an un-wired handler keeps it shut.
+	m.handler.SetPlatform(deps.Platform)
 	m.adminClientHandler = handlers.NewAdminClientUserHandler(clientSvc, deps.Services)
+	m.adminClientHandler.SetPlatform(deps.Platform)
 	deps.Services.Register(module.ServiceUserService, canonical)
 
 	// Wire the blob store into both per-tier services so uploaded

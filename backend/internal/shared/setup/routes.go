@@ -126,7 +126,6 @@ func (h *Handler) FinalizationAccess(ctx context.Context, _ *struct{}) (*Finaliz
 	if !ok || userUUID == "" {
 		return nil, huma.Error401Unauthorized("not authenticated")
 	}
-	systemRole, _ := ctxauth.GetSystemRole(ctx)
 
 	st, err := h.svc.Status(ctx)
 	if err != nil {
@@ -136,7 +135,7 @@ func (h *Handler) FinalizationAccess(ctx context.Context, _ *struct{}) (*Finaliz
 		return nil, errcode.Conflict(errcode.SetupAlreadyCompleted, "Setup is already complete.")
 	}
 
-	access, _, err := h.svc.evaluateAccess(ctx, userUUID, systemRole)
+	access, _, err := h.svc.evaluateAccess(ctx, userUUID)
 	if err != nil {
 		return nil, finalizerStateUnavailable()
 	}
@@ -202,7 +201,6 @@ func (h *Handler) Finalize(ctx context.Context, req *FinalizeRequest) (*finalize
 	if !ok || userUUID == "" {
 		return nil, huma.Error401Unauthorized("not authenticated")
 	}
-	systemRole, _ := ctxauth.GetSystemRole(ctx)
 
 	if req.Body.AllowAdditionalInternalTenants == nil {
 		// Defense in depth: the schema marks this required, so Huma
@@ -212,7 +210,7 @@ func (h *Handler) Finalize(ctx context.Context, req *FinalizeRequest) (*finalize
 		return nil, huma.Error422UnprocessableEntity("allowAdditionalInternalTenants is required and must be true or false.")
 	}
 
-	res, err := h.svc.Finalize(ctx, userUUID, systemRole, FinalizeInput{
+	res, err := h.svc.Finalize(ctx, userUUID, FinalizeInput{
 		TenantName:                     req.Body.TenantName,
 		TenantSlug:                     req.Body.TenantSlug,
 		AllowAdditionalInternalTenants: *req.Body.AllowAdditionalInternalTenants,

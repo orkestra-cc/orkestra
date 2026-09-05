@@ -8,6 +8,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/orkestra/backend/internal/core/user/services"
 	"github.com/orkestra/backend/internal/shared/errcode"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
@@ -24,6 +25,18 @@ import (
 type AdminClientUserHandler struct {
 	clientUserService services.UserService
 	services          *module.ServiceRegistry
+	// platform classifies the deployment environment, for the caller-role
+	// guard's synthetic dev-token exception. Optional; a nil platform is
+	// treated as production-like, so the exception stays shut unless it is
+	// deliberately wired.
+	platform module.PlatformInfo
+}
+
+// SetPlatform wires the deployment's environment classification. Called
+// from the user module's Init; unset (tests) disables the dev-token
+// exception in callerRole, which is the fail-closed default.
+func (h *AdminClientUserHandler) SetPlatform(p module.PlatformInfo) {
+	h.platform = p
 }
 
 // NewAdminClientUserHandler wires the handler with the client-tier user
@@ -35,6 +48,27 @@ func NewAdminClientUserHandler(clientUserService services.UserService, services 
 		services:          services,
 	}
 }
+
+// clientTierNoPropagation is the value the client tier stamps into the
+// `propagation` metadata key of a `user.role.changed` audit row.
+//
+// The operator tier carries two booleans on that action — cache_invalidated
+// and sessions_terminated (M-13). One action name must not have two
+// metadata contracts, so the client tier emits the same two keys. Both are
+// literally false here: nothing is invalidated and no session is ended.
+// This key says WHY, so a reader never mistakes a client-tier `false` for
+// the operator tier's "we tried and it failed":
+//
+//   - No authz cache entry exists to retire. The authz module resolves its
+//     system-role lookup from module.ServiceUserService, which is the
+//     OPERATOR user service; client users live in a separate repository and
+//     collection under ServiceClientUserProvider, so a client UUID never
+//     resolves and a client user's Role never enters GetEffectivePermissions.
+//     (Not because a client user cannot hold a platform role — they can, and
+//     the value does reach their JWT `srole`. It is inert, not absent.)
+//   - No session is ended, and that half is a genuine RESIDUAL rather than a
+//     non-event: see the comment on the role branch in UpdateClientUserAdmin.
+const clientTierNoPropagation = "not_applicable_client_tier"
 
 // emitAudit mirrors UserHandler.emitAudit but probes the client-tier
 // service. Nil sink, missing capability, or compliance addon disabled →
@@ -245,6 +279,91 @@ func (h *AdminClientUserHandler) UpdateClientUserAdmin(ctx context.Context, req 
 	// failure is non-fatal; the patch flow surfaces its own 404 below.
 	previous, _ := h.clientUserService.GetUser(ctx, req.ID)
 
+	// D29 / M-17. Role guards, mirroring the operator-tier PATCH. This
+	// endpoint ran none at all, and its body accepts the whole platform
+	// role enum (super_admin … guest) — a value that does reach the
+	// user's JWT `srole`. Without these, an operator of any tier could
+	// mint a client-tier super_admin, and could do it to themselves by
+	// proxy.
+	//
+	// TWO deliberate divergences from the operator PATCH. Both are
+	// choices, not omissions, and nothing else here differs:
+	//
+	//  1. The last-administrator quorum is not ported. A client user is
+	//     never a platform administrator, so demoting one can never leave
+	//     the platform without one; running the quorum here would refuse
+	//     legitimate demotions for a condition that cannot arise.
+	//
+	//  2. The target pre-read above stays `previous, _ :=`. The operator
+	//     PATCH refuses a role change whose pre-read failed with anything
+	//     other than ErrUserNotFound (500 user.role_lookup_unavailable),
+	//     because there a lost `previous` means the authz cache is not
+	//     retired and the old role's sessions are not ended. Neither
+	//     cascade exists on this tier, so that rationale does not carry.
+	//     The cost of not porting it is real but smaller and PRE-DATES
+	//     this change: a transient read failure lets the role change land
+	//     and then skips the `user.role.changed` audit row, which is
+	//     gated on `previous != nil` — the write happens, the SOC2 trail
+	//     misses it. Refusing the request is the wrong cure (it would
+	//     recreate M-13's shape); emitting the row with an unknown `from`
+	//     is the right one, and is on the follow-up list rather than in
+	//     this commit.
+	if req.Body.Role != "" {
+		callerRole, err := h.callerRole(ctx)
+		if err != nil {
+			return nil, err
+		}
+		// The target's current role, for the refusal metadata. Empty when
+		// the pre-read found nothing — the request then falls through to
+		// UpdateUser's clean 404.
+		previousRole := ""
+		if previous != nil {
+			previousRole = previous.Role
+		}
+		if !canAssignRole(callerRole, req.Body.Role) {
+			h.emitAudit(ctx, iface.AuditEvent{
+				ActorUserID:  actorUUID,
+				ActorEmail:   actorEmail,
+				ActorType:    "user",
+				Action:       "user.update.refused",
+				ResourceType: "client_user",
+				ResourceID:   req.ID,
+				Outcome:      "denied",
+				Metadata: map[string]any{
+					"code":      errcode.UserRoleEscalationForbidden,
+					"attempted": "role_escalation",
+					"from":      previousRole,
+					"to":        req.Body.Role,
+				},
+			})
+			return nil, errcode.Forbidden(errcode.UserRoleEscalationForbidden,
+				"You cannot assign a role higher than your own")
+		}
+		// Privileged-role guard for machine principals, same fail-closed
+		// shape as the operator tier: an unreadable target must not let a
+		// privileged role land on a service account. Non-privileged
+		// assignments with a nil pre-read fall through — UpdateUser
+		// surfaces its own 404/500 below.
+		if (previous == nil && isPrivilegedSystemRole(req.Body.Role)) || (previous != nil && !serviceAccountRoleAllowed(previous.Kind, req.Body.Role)) {
+			h.emitAudit(ctx, iface.AuditEvent{
+				ActorUserID:  actorUUID,
+				ActorEmail:   actorEmail,
+				ActorType:    "user",
+				Action:       "user.update.refused",
+				ResourceType: "client_user",
+				ResourceID:   req.ID,
+				Outcome:      "denied",
+				Metadata: map[string]any{
+					"code":      errcode.UserRoleEscalationForbidden,
+					"attempted": "service_account_privileged_role",
+					"to":        req.Body.Role,
+				},
+			})
+			return nil, errcode.Forbidden(errcode.UserRoleEscalationForbidden,
+				"Service accounts cannot hold privileged system roles")
+		}
+	}
+
 	input := &iface.UpdateUserInput{
 		FullName: req.Body.FullName,
 		Username: req.Body.Username,
@@ -293,6 +412,61 @@ func (h *AdminClientUserHandler) UpdateClientUserAdmin(ctx context.Context, req 
 		})
 	}
 	if input.Role != "" && previous != nil && previous.Role != input.Role {
+		// KNOWN RESIDUAL — a client role change ends NO session, so the
+		// old `srole` stays live in every already-issued access token for
+		// a full token lifetime. The operator tier terminates sessions
+		// here (M-13); this tier deliberately does not, and the audit row
+		// says so rather than implying otherwise.
+		//
+		// Latent, not exploitable today. This list is the instruction
+		// for deciding when that stops being true, so it is the whole
+		// set of `ctxauth.GetSystemRole` readers in the tree, each with
+		// what it does with the value. Re-run it with
+		// `grep -rn "ctxauth.GetSystemRole" --include='*.go' backend/`
+		// before trusting it; two of the entries below are recent.
+		//
+		// Runs on the CLIENT mux, so a stale claim does reach it — but
+		// neither reader authorises on it:
+		//   - middleware/request_logger.go — a log field. Mounted on the
+		//     root router (cmd/server/middleware.go), so every request.
+		//   - middleware/tenant_baggage.go — a span attribute. Mounted on
+		//     BOTH protected routers (cmd/server/main.go, the
+		//     operatorProtected and clientProtected `Use` lines).
+		//
+		// Operator mux only, so a client's claim never reaches them:
+		//   - navigation/handlers/navigation_handler.go — menu shaping.
+		//   - authz/handlers/handler.go — echoes the claim back in the
+		//     effective-permissions response body; the permissions
+		//     themselves come from GetEffectivePermissions, not from it.
+		//   (Both modules register on ri.Operator.ProtectedRouter only.)
+		//
+		// Authorises on the claim, and is why this residual is worth
+		// tracking at all — none is reachable by a client principal:
+		//   - authz/module.go — the dev-token fallback inside the
+		//     system-role lookup. Guarded by a non-production platform
+		//     AND a `dev-` UUID prefix, and the lookup itself runs
+		//     against the OPERATOR user service, which is also why a
+		//     client user's role is inert (see clientTierNoPropagation).
+		//   - user/handlers/user_handler.go, devTokenSystemRole — the
+		//     same carve-out for the tier guards, same three conditions.
+		//     callerRole in this file consults it too.
+		//   - middleware/jwt_validator.go (two sites) — authorises on the
+		//     claim alone, but NewJWTValidator has no non-test caller, so
+		//     nothing mounts it.
+		//
+		// NOT in the list any more, and deliberately: internal/shared/setup
+		// and the operator user handlers' tier guards both read the claim
+		// until D28 replaced it with a database read. Do not put them back.
+		//
+		// The day a client-audience surface enforces on `srole`, this
+		// becomes exploitable and the one-line fix is
+		// h.terminateSessions(ctx, req.ID) right here — at the cost of
+		// signing the user out on every role change.
+		//
+		// The cache half needs nothing: the authz module resolves its
+		// system-role lookup from the OPERATOR user service, so a client
+		// UUID never resolves and a client Role never enters
+		// GetEffectivePermissions. Inert, not absent.
 		h.emitAudit(ctx, iface.AuditEvent{
 			ActorUserID:  actorUUID,
 			ActorEmail:   actorEmail,
@@ -304,6 +478,15 @@ func (h *AdminClientUserHandler) UpdateClientUserAdmin(ctx context.Context, req 
 			Metadata: map[string]any{
 				"from": previous.Role,
 				"to":   input.Role,
+				// One action name, one metadata contract: the operator
+				// tier stamps these two, so this tier stamps them too.
+				// Both are literally accurate — neither happened — and a
+				// consumer that reads only the booleans gets the
+				// pessimistic answer, never an optimistic one.
+				// `propagation` carries the reason; see the const.
+				"cache_invalidated":   false,
+				"sessions_terminated": false,
+				"propagation":         clientTierNoPropagation,
 			},
 		})
 	}
@@ -375,6 +558,12 @@ type CreateClientUserAdminResponse struct {
 // the password against the live policy, then inserts the new client_users
 // row with EmailVerified=true so the new user can log in immediately.
 func (h *AdminClientUserHandler) CreateClientUserAdmin(ctx context.Context, req *CreateClientUserAdminRequest) (*CreateClientUserAdminResponse, error) {
+	// Before the hasher lookup: authorisation must not depend on a
+	// dependency being up, and an argon2id hash is deliberately expensive
+	// — never pay for it on a request we are going to refuse.
+	if err := h.guardCreateRole(ctx, req.Body.Role, req.Body.Email); err != nil {
+		return nil, err
+	}
 	hasher, ok := module.GetTyped[iface.PasswordHasher](h.services, module.ServicePasswordService)
 	if !ok || hasher == nil {
 		return nil, huma.Error503ServiceUnavailable("Password service unavailable")
@@ -454,6 +643,11 @@ type InviteClientUserAdminResponse struct {
 // stays false — those fields are populated when the recipient redeems
 // the invite via /v1/auth/client/accept-invite.
 func (h *AdminClientUserHandler) InviteClientUserAdmin(ctx context.Context, req *InviteClientUserAdminRequest) (*InviteClientUserAdminResponse, error) {
+	// Before the auth lookup, so a role escalation is refused as a 403
+	// rather than masked by the 503 a degraded auth module would return.
+	if err := h.guardCreateRole(ctx, req.Body.Role, req.Body.Email); err != nil {
+		return nil, err
+	}
 	auth, ok := h.inviteAuthOps()
 	if !ok || auth == nil {
 		return nil, huma.Error503ServiceUnavailable("Auth service unavailable — cannot send invite")
@@ -597,6 +791,134 @@ func mapInviteErr(err error, generic string) error {
 		return huma.Error503ServiceUnavailable("Notifications disabled", err)
 	}
 	return huma.Error500InternalServerError(generic, err)
+}
+
+// callerRole resolves the CALLING OPERATOR's system role from the
+// database — never from the `srole` JWT claim (spec §4.6 D28). The claim
+// can be a whole access-token lifetime stale, which is exactly the window
+// the role-change propagation exists to close.
+//
+// Which store answers is load-bearing, not cosmetic. The actor of this
+// operator route is an OPERATOR; the target is a client user. They live
+// in different collections behind different services, so the caller is
+// resolved from module.ServiceOperatorUserProvider — the same lazy
+// registry lookup terminateSessions uses — and never from
+// h.clientUserService, which holds client-tier rows only. Looking the
+// actor up there would miss on every real request, and D28's "a lookup
+// failure is a 500" would then take the whole endpoint down.
+//
+// Three outcomes, all fail-closed:
+//
+//   - No authenticated principal on the context. There is no identity to
+//     resolve, so the role is empty and canAssignRole's unknown tier (-1)
+//     refuses every assignment. A degraded gate is a refusal of this
+//     request, not a report of a broken database — same call the operator
+//     handler makes.
+//   - The operator provider is not registered. The user module registers
+//     it unconditionally before it constructs this handler, so this is a
+//     "cannot happen" — but a guard that cannot read its input must
+//     refuse rather than sail past. 500.
+//   - The lookup fails, or the row is absent. 500, NEVER a fallback to
+//     the claim: falling back would make the claim authoritative again
+//     exactly when the database cannot contradict it.
+//
+// The one exception is a synthetic dev-token principal in a
+// non-production-like deployment, which has no row anywhere by design —
+// see devTokenSystemRole for the three guards that keep it inert on
+// staging and in production.
+//
+// Only called on a patch that names a role, so an ordinary profile patch
+// costs no extra read.
+func (h *AdminClientUserHandler) callerRole(ctx context.Context) (string, error) {
+	actorUUID, _ := ctxauth.GetUserUUID(ctx)
+	if actorUUID == "" {
+		return "", nil
+	}
+	// A synthetic dev-token operator has no row in the operator store
+	// either, and POST/PATCH /v1/admin/client-users are part of the same
+	// documented local flow. Same three guards as the operator handler.
+	if role, ok := devTokenSystemRole(ctx, h.platform, actorUUID); ok {
+		return role, nil
+	}
+	if h.services == nil {
+		slog.ErrorContext(ctx, "user: no service registry on the client-admin handler; refusing the client role assignment",
+			slog.String("actor_uuid", actorUUID))
+		return "", roleLookupUnavailable()
+	}
+	operators, ok := module.GetTyped[iface.UserProvider](h.services, module.ServiceOperatorUserProvider)
+	if !ok || operators == nil {
+		slog.ErrorContext(ctx, "user: operator user provider is not registered; refusing the client role assignment",
+			slog.String("actor_uuid", actorUUID))
+		return "", roleLookupUnavailable()
+	}
+	actor, err := operators.GetUserByID(ctx, actorUUID)
+	if err != nil || actor == nil {
+		slog.ErrorContext(ctx, "user: could not resolve the calling operator's system role; refusing the client role assignment",
+			slog.String("actor_uuid", actorUUID),
+			slog.Any("error", err))
+		return "", roleLookupUnavailable()
+	}
+	return actor.Role, nil
+}
+
+// roleLookupUnavailable is the one 500 every failed caller-role lookup
+// returns. Named rather than repeated so the three fail-closed branches
+// above cannot drift apart, and deliberately carrying no detail about
+// which of them fired — the operator log lines carry that, the client
+// gets a retryable code and nothing about the platform's wiring.
+func roleLookupUnavailable() error {
+	return errcode.Internal(errcode.UserRoleLookupUnavailable,
+		"Could not resolve the calling user's role. Retry shortly.")
+}
+
+// guardCreateRole is the role-assignment guard shared by the two client
+// creation paths, CreateClientUserAdmin and InviteClientUserAdmin (ruling
+// P32). Both bodies carry the same required
+// `oneof=super_admin … guest` field, and a guard on the PATCH alone would
+// be bypassable in one step: create — or invite — the user at the role
+// you were refused, instead of patching them into it. M-17 would stay
+// reachable while the finding was retired.
+//
+// Mirrors the operator tier's CreateUser exactly, including the
+// `user.create.refused` audit row (with `resourceType="client_user"`) and
+// the message. Shared between the two callers rather than copied so they
+// cannot drift.
+//
+// serviceAccountRoleAllowed is deliberately absent, and structurally so
+// rather than by oversight: iface.CreateUserInput.Kind is `json:"-"` and
+// neither caller sets it, so a create can only ever produce a human
+// principal — the guard could not fire and no test could falsify it. The
+// operator tier makes the same call. TestClientAdminCreatePathsNeverMintAServiceAccount
+// pins the premise, so if Kind ever becomes reachable from either body
+// that test fails and this guard must grow the second half.
+func (h *AdminClientUserHandler) guardCreateRole(ctx context.Context, role, email string) error {
+	if role == "" {
+		return nil
+	}
+	callerRole, err := h.callerRole(ctx)
+	if err != nil {
+		return err
+	}
+	if canAssignRole(callerRole, role) {
+		return nil
+	}
+	actorUUID, actorEmail := actorFromCtx(ctx)
+	h.emitAudit(ctx, iface.AuditEvent{
+		ActorUserID:  actorUUID,
+		ActorEmail:   actorEmail,
+		ActorType:    "user",
+		Action:       "user.create.refused",
+		ResourceType: "client_user",
+		Outcome:      "denied",
+		Metadata: map[string]any{
+			"code":      errcode.UserRoleEscalationForbidden,
+			"attempted": "role_escalation",
+			"to":        role,
+			"email":     email,
+		},
+	})
+	return errcode.Forbidden(errcode.UserRoleEscalationForbidden,
+		"You cannot create a user with a role higher than your own")
 }
 
 // terminateSessions best-effort evicts every session of a client user

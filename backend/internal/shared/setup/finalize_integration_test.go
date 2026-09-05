@@ -91,6 +91,7 @@ type liveFixture struct {
 	tenants *blockingTenants
 	cfg     *fakeModuleConfig
 	audit   *fakeAudit
+	users   *fakeLifecycleUsers
 	log     *callLog
 }
 
@@ -98,8 +99,13 @@ func newLiveFixture(t *testing.T, store *systeminit.Repo, admins ...string) live
 	t.Helper()
 	log := &callLog{}
 	states := map[string]iface.UserLifecycleState{}
+	roles := map[string]string{}
 	for _, a := range admins {
 		states[a] = iface.UserLifecycleActive
+		// The recovery gate reads the caller's role from the database
+		// (D28); seeded here rather than at the call sites because two
+		// of these tests call Finalize from concurrent goroutines.
+		roles[a] = roleSuperAdmin
 	}
 	tenants := &blockingTenants{
 		fakeTenants: fakeTenants{log: log},
@@ -108,9 +114,9 @@ func newLiveFixture(t *testing.T, store *systeminit.Repo, admins ...string) live
 	}
 	cfg := &fakeModuleConfig{log: log}
 	audit := &fakeAudit{}
-	users := &fakeLifecycleUsers{count: 1, states: states}
+	users := &fakeLifecycleUsers{count: 1, states: states, roles: roles}
 	svc := NewService(users, &stubAdmin{}, store, cfg, tenants, audit, discardLogger())
-	return liveFixture{svc: svc, store: store, tenants: tenants, cfg: cfg, audit: audit, log: log}
+	return liveFixture{svc: svc, store: store, tenants: tenants, cfg: cfg, audit: audit, users: users, log: log}
 }
 
 // TestFinalizeIntegration_ConcurrentIdenticalConvergesOnOneWinner races two
@@ -138,7 +144,7 @@ func TestFinalizeIntegration_ConcurrentIdenticalConvergesOnOneWinner(t *testing.
 	wgDone.Add(1)
 	go func() {
 		defer wgDone.Done()
-		winner, winErr = fx.svc.Finalize(ctx, "admin-1", "super_admin", payload)
+		winner, winErr = fx.svc.Finalize(ctx, "admin-1", payload)
 	}()
 
 	// The winner is now parked inside stage 2 holding a live lease.
@@ -148,7 +154,7 @@ func TestFinalizeIntegration_ConcurrentIdenticalConvergesOnOneWinner(t *testing.
 		t.Fatal("winner never reached the tenant stage")
 	}
 
-	if _, err := fx.svc.Finalize(ctx, "admin-1", "super_admin", payload); !errors.Is(err, ErrFinalizationInProgress) {
+	if _, err := fx.svc.Finalize(ctx, "admin-1", payload); !errors.Is(err, ErrFinalizationInProgress) {
 		close(fx.tenants.release)
 		wgDone.Wait()
 		t.Fatalf("concurrent identical finalization = %v, want ErrFinalizationInProgress", err)
@@ -188,7 +194,7 @@ func TestFinalizeIntegration_ConcurrentIdenticalConvergesOnOneWinner(t *testing.
 	}
 
 	// The 202 loser can now replay and receive the persisted snapshot.
-	replay, err := fx.svc.Finalize(ctx, "admin-1", "super_admin", payload)
+	replay, err := fx.svc.Finalize(ctx, "admin-1", payload)
 	if err != nil {
 		t.Fatalf("post-completion replay: %v", err)
 	}
@@ -223,7 +229,7 @@ func TestFinalizeIntegration_ConcurrentDifferentPayloadsOneStableConflict(t *tes
 	wgDone.Add(1)
 	go func() {
 		defer wgDone.Done()
-		_, winErr = fx.svc.Finalize(ctx, "admin-1", "super_admin", reserved)
+		_, winErr = fx.svc.Finalize(ctx, "admin-1", reserved)
 	}()
 
 	select {
@@ -234,7 +240,7 @@ func TestFinalizeIntegration_ConcurrentDifferentPayloadsOneStableConflict(t *tes
 
 	// While the first request is mid-saga, the different payload must be
 	// refused as already-started — not reserved a second time.
-	if _, err := fx.svc.Finalize(ctx, "admin-1", "super_admin", other); !errors.Is(err, ErrFinalizationAlreadyStarted) {
+	if _, err := fx.svc.Finalize(ctx, "admin-1", other); !errors.Is(err, ErrFinalizationAlreadyStarted) {
 		close(fx.tenants.release)
 		wgDone.Wait()
 		t.Fatalf("different payload mid-saga = %v, want ErrFinalizationAlreadyStarted", err)
@@ -260,7 +266,7 @@ func TestFinalizeIntegration_ConcurrentDifferentPayloadsOneStableConflict(t *tes
 	// Stability: the losing payload keeps getting the same conflict, twice
 	// in a row, now that setup is complete.
 	for i := 0; i < 2; i++ {
-		if _, err := fx.svc.Finalize(ctx, "admin-1", "super_admin", other); !errors.Is(err, ErrFinalizationAlreadyCompleted) {
+		if _, err := fx.svc.Finalize(ctx, "admin-1", other); !errors.Is(err, ErrFinalizationAlreadyCompleted) {
 			t.Fatalf("attempt %d with the losing payload = %v, want ErrFinalizationAlreadyCompleted", i+1, err)
 		}
 	}
@@ -307,7 +313,7 @@ func TestFinalizeIntegration_ExpiredLeaseResumesSameStageSameRevision(t *testing
 	}
 
 	// While the lease is live, a new request must not execute anything.
-	if _, err := fx.svc.Finalize(ctx, "admin-1", "super_admin", payload); !errors.Is(err, ErrFinalizationInProgress) {
+	if _, err := fx.svc.Finalize(ctx, "admin-1", payload); !errors.Is(err, ErrFinalizationInProgress) {
 		t.Fatalf("request under a live foreign lease = %v, want ErrFinalizationInProgress", err)
 	}
 	if entries := fx.log.only("config.", "tenants."); len(entries) != 0 {
@@ -324,7 +330,7 @@ func TestFinalizeIntegration_ExpiredLeaseResumesSameStageSameRevision(t *testing
 	// Wait the lease out, then resume.
 	time.Sleep(400 * time.Millisecond)
 
-	res, err := fx.svc.Finalize(ctx, "admin-1", "super_admin", payload)
+	res, err := fx.svc.Finalize(ctx, "admin-1", payload)
 	if err != nil {
 		t.Fatalf("resume after lease expiry: %v", err)
 	}

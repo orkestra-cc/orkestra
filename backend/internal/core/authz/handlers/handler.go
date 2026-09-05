@@ -5,11 +5,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/orkestra/backend/internal/core/authz/models"
 	"github.com/orkestra/backend/internal/core/authz/repository"
 	"github.com/orkestra/backend/internal/core/authz/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
@@ -238,9 +240,9 @@ func (h *Handler) createRole(ctx context.Context, in *createRoleInput) (*roleOut
 	if err := assertTenantScope(ctx, in.TenantID); err != nil {
 		return nil, err
 	}
-	role, err := h.svc.CreateRole(ctx, in.TenantID, in.Body)
+	role, err := h.svc.CreateRole(ctx, in.TenantID, roleActor(ctx), in.Body)
 	if err != nil {
-		return nil, authzInternalError(ctx, "create the role", err)
+		return nil, mapRoleWriteError(ctx, "create the role", err)
 	}
 	return &roleOutput{Body: role}, nil
 }
@@ -249,18 +251,108 @@ func (h *Handler) updateRole(ctx context.Context, in *updateRoleInput) (*roleOut
 	if err := assertTenantScope(ctx, in.TenantID); err != nil {
 		return nil, err
 	}
-	role, err := h.svc.UpdateRole(ctx, in.TenantID, in.Role, in.Body)
+	role, err := h.svc.UpdateRole(ctx, in.TenantID, in.Role, roleActor(ctx), in.Body)
 	if err != nil {
-		switch {
-		case errors.Is(err, repository.ErrNotFound):
-			return nil, huma.Error404NotFound("role not found")
-		case errors.Is(err, services.ErrSystemRoleImmutable):
-			return nil, huma.Error403Forbidden("system roles cannot be edited — only disabled")
-		default:
-			return nil, authzInternalError(ctx, "update the role", err)
-		}
+		return nil, mapRoleWriteError(ctx, "update the role", err)
 	}
 	return &roleOutput{Body: role}, nil
+}
+
+// roleActor resolves the caller whose effective permissions bound a role
+// write (D21). The authz service treats the literal platform sentinel as
+// a waiver of the cascade, so a token subject that spelled it would
+// inherit that waiver over HTTP; it is mapped to the empty actor, which
+// the service refuses with ErrGranterRequired (400). Not reachable today
+// — subjects are uuid.NewString() — but the waiver must only ever be
+// chosen by in-process code, never named by a request.
+func roleActor(ctx context.Context) string {
+	actor, _ := ctxauth.GetUserUUID(ctx)
+	if services.IsReservedActor(actor) {
+		return ""
+	}
+	return actor
+}
+
+// mapRoleWriteError maps the failure modes createRole and updateRole
+// share. Both run any supplied permission list through the same D21
+// validator, so both answer with its sentinels; the not-found and
+// system-role rows are reachable from the update path only, and so is
+// the 503 — CreateRole is deliberately NOT wrapped in the cache gate
+// (a role it creates has no bindings, so it changes nobody's effective
+// permissions), so it can never produce ErrAuthzCacheUnavailable. Do not
+// "fix" that by wrapping CreateRole.
+//
+// That premise is enforced, not assumed: CreateRole inserts against the
+// unique (tenantId, name) index, so a name already taken is the 409
+// below rather than an in-place rewrite of the incumbent role.
+//
+// The 409 row is reachable from the create path only. Renaming a custom
+// role INTO a taken name also violates that index, but it does so inside
+// UpdateRoleFields, whose duplicate-key error is not translated and so
+// still falls through to the codeless 500 below — pre-existing, recorded
+// as a follow-up, and deliberately not widened here.
+func mapRoleWriteError(ctx context.Context, operation string, err error) error {
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		return huma.Error404NotFound("role not found")
+	case errors.Is(err, repository.ErrRoleExists):
+		return huma.Error409Conflict("a role with that name already exists in this tenant")
+	case errors.Is(err, services.ErrSystemRoleImmutable):
+		return huma.Error403Forbidden("system roles cannot be edited — only disabled")
+	case errors.Is(err, services.ErrPlatformAdminRequired):
+		return errcode.Forbidden(errcode.AuthzPlatformAdminRequired,
+			"System roles are platform-wide configuration: only a platform administrator can enable or disable one.")
+	case errors.Is(err, services.ErrRoleNameRequired):
+		return huma.Error400BadRequest("the role name cannot be empty")
+	case errors.Is(err, services.ErrRolePermissionsRequired):
+		return huma.Error400BadRequest("a role must carry at least one permission")
+	case errors.Is(err, services.ErrGranterRequired):
+		return huma.Error400BadRequest("the acting user is required")
+	case errors.Is(err, services.ErrUnknownPermission):
+		return errcode.UnprocessableEntity(errcode.AuthzPermissionUnknown,
+			offendingPermission(err)+" has not been registered by any module, so no role may carry it.")
+	case errors.Is(err, services.ErrSystemPermissionInCustomRole):
+		return errcode.UnprocessableEntity(errcode.AuthzSystemPermissionForbidden,
+			offendingPermission(err)+" is platform-reserved and cannot be granted through a tenant role.")
+	case errors.Is(err, services.ErrInsufficientPermissionsToGrant):
+		return huma.Error403Forbidden("you cannot give a role permissions you do not hold yourself")
+	case errors.Is(err, services.ErrAuthzCacheUnavailable):
+		return cacheUnavailableError()
+	default:
+		return authzInternalError(ctx, operation, err)
+	}
+}
+
+// cacheUnavailableError renders the D27 gate's refusal. A GRANT retires
+// the cached verdicts it invalidates BEFORE it writes; when that cannot
+// be done the change is not applied at all. That is a transient
+// server-side condition the caller should retry, not a request they can
+// correct — so it is a 503 carrying a code the operator console can
+// classify, never the codeless 500 the update path used to fall through
+// to.
+//
+// The detail is deliberately fixed and carries no cause: the service
+// logged the underlying store error and counted the refusal at the
+// point where it happened (withGeneration), which is the only place the
+// cause exists. Revocations never reach here — they write first and
+// report through those same logs and metrics (ruling P22).
+func cacheUnavailableError() error {
+	return errcode.ServiceUnavailable(errcode.AuthzCacheUnavailable,
+		"The permission cache could not be updated, so the change was not applied. Try again in a moment.")
+}
+
+// offendingPermission renders the sentence subject for the two 422s: the
+// quoted key the validator refused, so the operator can see which entry
+// of their list is wrong without diffing. strconv.Quote also escapes
+// control characters — the key is caller-supplied, and the validator has
+// already bounded its length. Falls back to a neutral subject when the
+// error carries no key: every in-tree path wraps one, but a bare
+// sentinel must not render an empty pair of quotes.
+func offendingPermission(err error) string {
+	if key, ok := services.OffendingPermissionKey(err); ok {
+		return "The permission " + strconv.Quote(key)
+	}
+	return "That permission"
 }
 
 func (h *Handler) deleteRole(ctx context.Context, in *deleteRoleInput) (*struct{}, error) {
@@ -268,16 +360,28 @@ func (h *Handler) deleteRole(ctx context.Context, in *deleteRoleInput) (*struct{
 		return nil, err
 	}
 	if err := h.svc.DeleteRole(ctx, in.TenantID, in.Role); err != nil {
-		switch {
-		case errors.Is(err, repository.ErrNotFound):
-			return nil, huma.Error404NotFound("role not found")
-		case errors.Is(err, services.ErrSystemRoleImmutable):
-			return nil, huma.Error403Forbidden("system roles cannot be deleted")
-		default:
-			return nil, authzInternalError(ctx, "delete the role", err)
-		}
+		return nil, mapRoleDeleteError(ctx, err)
 	}
 	return &struct{}{}, nil
+}
+
+// mapRoleDeleteError is deleteRole's mapper, extracted so the wire
+// contract is testable the way mapRoleWriteError's is.
+//
+// No cache row: a delete is a revocation, and P22 forbids refusing one
+// for a cache reason. DeleteRole writes first and reports an
+// invalidation failure through logs and metrics, so it never returns
+// ErrAuthzCacheUnavailable and this mapper must never learn to answer
+// 503 — that would mean the revocation had been refused.
+func mapRoleDeleteError(ctx context.Context, err error) error {
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		return huma.Error404NotFound("role not found")
+	case errors.Is(err, services.ErrSystemRoleImmutable):
+		return huma.Error403Forbidden("system roles cannot be deleted")
+	default:
+		return authzInternalError(ctx, "delete the role", err)
+	}
 }
 
 func (h *Handler) listBindings(ctx context.Context, in *listBindingsInput) (*bindingsOutput, error) {
@@ -317,8 +421,12 @@ func mapCreateBindingError(ctx context.Context, err error) error {
 		return huma.Error403Forbidden("you cannot grant a role with permissions you do not hold")
 	case errors.Is(err, services.ErrGranterRequired):
 		return huma.Error400BadRequest("the grantor is required")
+	case errors.Is(err, services.ErrBindingUserRequired):
+		return huma.Error400BadRequest("the user to grant the role to is required")
 	case errors.Is(err, services.ErrBindingExists):
 		return huma.Error409Conflict("this role is already bound to the user in this tenant")
+	case errors.Is(err, services.ErrAuthzCacheUnavailable):
+		return cacheUnavailableError()
 	default:
 		return authzInternalError(ctx, "create the role binding", err)
 	}
@@ -329,12 +437,21 @@ func (h *Handler) deleteBinding(ctx context.Context, in *deleteBindingInput) (*s
 		return nil, err
 	}
 	if err := h.svc.DeleteBinding(ctx, in.TenantID, in.Binding); err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, huma.Error404NotFound("binding not found")
-		}
-		return nil, authzInternalError(ctx, "delete the role binding", err)
+		return nil, mapBindingDeleteError(ctx, err)
 	}
 	return &struct{}{}, nil
+}
+
+// mapBindingDeleteError is deleteBinding's mapper, extracted for the
+// same reason as mapRoleDeleteError — and carrying no cache row for the
+// same reason: revoking a binding is never refused over a cache.
+func mapBindingDeleteError(ctx context.Context, err error) error {
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		return huma.Error404NotFound("binding not found")
+	default:
+		return authzInternalError(ctx, "delete the role binding", err)
+	}
 }
 
 func (h *Handler) getEffective(ctx context.Context, in *effectiveInput) (*effectiveOutput, error) {
