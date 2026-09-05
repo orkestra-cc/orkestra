@@ -296,10 +296,11 @@ func TestInvalidateUserPermissions_RetiresOnlyThatUser(t *testing.T) {
 	}
 }
 
-func TestInvalidateUserPermissions_NoOpWhenUserHasNoEntries(t *testing.T) {
+func TestInvalidateUserPermissions_BumpsEvenWithNothingCached(t *testing.T) {
 	svc, _, _ := newCacheTestService(t, staticRoleLookup(""))
-	// A user with nothing cached still bumps cleanly — no scan means
-	// there is no "nothing to delete" branch to get wrong.
+	// The bump is unconditional: with no scan there is no "nothing to
+	// delete" branch to get wrong, and no cheap way to know there was
+	// nothing cached in the first place. It must simply succeed.
 	if err := svc.InvalidateUserPermissions(context.Background(), "u-never-cached"); err != nil {
 		t.Errorf("InvalidateUserPermissions: %v", err)
 	}
@@ -438,7 +439,7 @@ func (n noMGetRedis) Expire(ctx context.Context, key string, expiration time.Dur
 	return n.inner.Expire(ctx, key, expiration)
 }
 
-func TestCache_ClientWithoutMGetBypassesTheCacheEntirely(t *testing.T) {
+func TestCache_ClientWithoutMGetSkipsReadsAndWritesButStillBumps(t *testing.T) {
 	// Without MGET the two generations cannot be read in one round trip,
 	// and two GETs could compose a key from two different moments. The
 	// contract is to bypass the cache — no read, no write — so every
@@ -475,6 +476,158 @@ func TestCache_ClientWithoutMGetBypassesTheCacheEntirely(t *testing.T) {
 
 func TestService_ImplementsAuthzCacheInvalidator(t *testing.T) {
 	var _ iface.AuthzCacheInvalidator = (*Service)(nil)
+}
+
+// errMGetRedis is a client whose MGET fails while every other command
+// still works: a transient timeout, a cluster MOVED, an ACL that covers
+// GET but not MGET. Closing the whole server cannot express this — and
+// a test that closes the server passes even if generations wrongly
+// reported ok=true on an MGET error, because the follow-up GET fails
+// too. This fake is what makes that mutation fail.
+type errMGetRedis struct{ *database.RedisClientAdapter }
+
+func (errMGetRedis) MGet(context.Context, ...string) ([]interface{}, error) {
+	return nil, errors.New("MGET unavailable")
+}
+
+func TestCacheGet_UnreadableGenerationsAreAMissEvenWhenGetWorks(t *testing.T) {
+	// The hazard: a user sitting at generation (0, N) whose MGET fails
+	// while GET still works. If the failure read as generation (0, 0)
+	// the lookup would resolve to the RETIRED gen-0 key — which is still
+	// physically in Redis, because retired entries are never deleted —
+	// and serve a revoked verdict. It has to be a miss.
+	mr, adapter := startMiniredis(t)
+	svc := &Service{
+		repo:                newFakeRepo(),
+		logger:              testLogger(t),
+		userRoles:           staticRoleLookup(""),
+		systemPermissionSet: make(map[string]struct{}),
+		allPermissionSet:    make(map[string]struct{}),
+	}
+	svc.setRedis(adapter, testLogger(t))
+	ctx := context.Background()
+
+	svc.cacheSet(ctx, "u-1", "t-1", []string{"revoked.perm"})
+	retiredKey := svc.cacheKey(ctx, "u-1", "t-1")
+	if err := svc.InvalidateUserPermissions(ctx, "u-1"); err != nil {
+		t.Fatalf("invalidate: %v", err)
+	}
+	// Fixture check: the retired entry is still physically present, so
+	// a wrong generation really can reach it.
+	if !mr.Exists(retiredKey) {
+		t.Fatal("precondition: the retired entry must still be in Redis")
+	}
+
+	svc.setRedis(errMGetRedis{adapter}, testLogger(t))
+	if got, ok := svc.cacheGet(ctx, "u-1", "t-1"); ok {
+		t.Fatalf("an unreadable generation resolved to the retired key and served %v", got)
+	}
+}
+
+func TestCacheGet_IsOneMGetAndOneGet(t *testing.T) {
+	// The single round trip is the premise of the whole
+	// MultiGetRedisClient / setRedis apparatus: two GETs in place of the
+	// MGET could read the global and the per-user counter at two
+	// different moments and compose a key that never existed. Without
+	// this assertion that substitution leaves the suite green.
+	svc, _, mr := newCacheTestService(t, staticRoleLookup(""))
+	ctx := context.Background()
+	svc.cacheSet(ctx, "u-1", "t-1", []string{"a"})
+	rec := recordCommands(t, mr)
+	rec.reset()
+
+	if _, ok := svc.cacheGet(ctx, "u-1", "t-1"); !ok {
+		t.Fatal("precondition: the entry must be readable")
+	}
+	if got := rec.count("MGET"); got != 1 {
+		t.Errorf("MGET count = %d, want exactly 1: %v", got, rec.log())
+	}
+	if got := rec.count("GET"); got != 1 {
+		t.Errorf("GET count = %d, want exactly 1 — two GETs would mean the counters were read separately: %v", got, rec.log())
+	}
+	if got := rec.count("KEYS"); got != 0 {
+		t.Errorf("a KEYS scan was issued: %v", rec.log())
+	}
+}
+
+// ===== the lost-invalidation race =====
+
+// An INCR that lands while a reader is between its generation read and
+// its write-back must not be republished by that reader. The reader
+// computed its verdict BEFORE the bump; if it writes under the
+// generation current at WRITE time, the pre-bump verdict becomes the
+// live entry and is served for the full 60s TTL — the invalidation is
+// lost even though the INCR succeeded.
+//
+// The fix is to compose the write key from the SAME generation pair the
+// read used, so such an entry is born dead rather than born stale.
+func TestGetEffectivePermissions_ConcurrentInvalidationIsNotRepublished(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	ctx := context.Background()
+	repo.seedRole("role-A", "reader", false, []string{"old.perm"}, "t-A")
+	repo.seedBinding("bind-A", "u-1", "t-A", "role-A")
+
+	// Fire the invalidation exactly once, on the reader's GET: that is
+	// after it has read the generations and before it writes its verdict
+	// back — the precise window the race lives in. The pre-hook runs
+	// with no miniredis lock held, so calling back in is safe.
+	var once sync.Once
+	mr.Server().SetPreHook(func(_ *server.Peer, cmd string, _ ...string) bool {
+		if strings.ToUpper(cmd) == "GET" {
+			once.Do(func() {
+				if err := svc.InvalidateUserPermissions(ctx, "u-1"); err != nil {
+					t.Errorf("mid-flight invalidate: %v", err)
+				}
+			})
+		}
+		return false
+	})
+
+	perms, err := svc.GetEffectivePermissions(ctx, "u-1", "t-A")
+	if err != nil {
+		t.Fatalf("GetEffectivePermissions: %v", err)
+	}
+	if len(perms) != 1 || perms[0] != "old.perm" {
+		t.Fatalf("fixture: perms = %v, want [old.perm]", perms)
+	}
+
+	if got, ok := svc.cacheGet(ctx, "u-1", "t-A"); ok {
+		t.Fatalf("LOST INVALIDATION: the pre-bump verdict %v is readable after the INCR and would be served for the full TTL", got)
+	}
+}
+
+func TestGetEffectivePermissions_ReadsTheGenerationsOncePerCall(t *testing.T) {
+	// A second MGET on the miss path is exactly the lost-invalidation
+	// window above: it means the write key came from a later read of the
+	// counters than the read key did. The miss path is MGET, GET, SET.
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	ctx := context.Background()
+	repo.seedRole("role-A", "reader", false, []string{"a.read"}, "t-A")
+	repo.seedBinding("bind-A", "u-1", "t-A", "role-A")
+	rec := recordCommands(t, mr)
+	rec.reset()
+
+	if _, err := svc.GetEffectivePermissions(ctx, "u-1", "t-A"); err != nil {
+		t.Fatalf("GetEffectivePermissions: %v", err)
+	}
+	if got := rec.count("MGET"); got != 1 {
+		t.Errorf("MGET count = %d on the miss path, want exactly 1: %v", got, rec.log())
+	}
+	if got := rec.count("SET"); got != 1 {
+		t.Errorf("SET count = %d, want exactly 1: %v", got, rec.log())
+	}
+
+	// The hit path reads the counters once too, and writes nothing.
+	rec.reset()
+	if _, err := svc.GetEffectivePermissions(ctx, "u-1", "t-A"); err != nil {
+		t.Fatalf("GetEffectivePermissions (hit): %v", err)
+	}
+	if got := rec.count("MGET"); got != 1 {
+		t.Errorf("MGET count = %d on the hit path, want exactly 1: %v", got, rec.log())
+	}
+	if got := rec.count("SET"); got != 0 {
+		t.Errorf("the hit path must not write: %v", rec.log())
+	}
 }
 
 // ===== End-to-end: HasPermission writes to cache =====

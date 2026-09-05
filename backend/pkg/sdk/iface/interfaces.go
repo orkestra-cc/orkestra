@@ -718,16 +718,38 @@ type AuthzProvider interface {
 // effect of the change cannot be guaranteed, and the change is refused
 // instead (D27).
 //
-// "No cache configured" is NOT "cache unavailable". A deployment with no
-// Redis wired has no cached verdict to retire, so InvalidateUserPermissions
-// returns nil there; that success is truthful, not a swallowed failure. Only
-// a configured cache that cannot be bumped returns an error.
+// There are THREE cache states, not two, and only the middle one is an
+// error:
+//
+//   - No cache configured (no Redis wired). There is no cached verdict to
+//     retire, so InvalidateUserPermissions returns nil. That success is
+//     truthful, not a swallowed failure.
+//   - Cache configured but UNAVAILABLE (the counter cannot be bumped). This
+//     returns an error, and a mutating caller must refuse the change.
+//   - Cache configured but bypassed on THIS replica (the Redis client in use
+//     lacks the MGET the implementation needs). Reads and writes are skipped
+//     locally — every check resolves from the database — but the bump is
+//     still issued, because a peer replica that does have MGET holds entries
+//     this mutation must retire, and no replica can know what its peers use.
+//
 // ---------------------------------------------------------------------------
 
 type AuthzCacheInvalidator interface {
-	// InvalidateUserPermissions retires every cached verdict for one
-	// user, in every tenant, atomically. Returns an error the caller is
-	// expected to act on.
+	// InvalidateUserPermissions retires, in one atomic operation, every
+	// verdict cached for one user in every tenant BEFORE the call
+	// returns. Returns an error the caller is expected to act on.
+	//
+	// It does NOT, on its own, cover a verdict a concurrent reader
+	// computed before the call and writes back after it. The
+	// implementation closes the deterministic half of that race — a
+	// reader files its result under the generation it read the cache
+	// with, so a verdict computed before this call is born unreachable —
+	// but a reader that resolved the database across the call can still
+	// publish a stale entry. A caller that mutates permissions must
+	// therefore use the pre-write / write / post-write protocol (D27):
+	// invalidate, refuse the change if that fails, write, then
+	// invalidate again best-effort. A single bump is sufficient only
+	// when the caller is not itself the writer.
 	InvalidateUserPermissions(ctx context.Context, userUUID string) error
 }
 

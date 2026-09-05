@@ -632,8 +632,27 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, userUUID, tenantI
 		return nil, errors.New("authz: userUUID required")
 	}
 
-	if cached, ok := s.cacheGet(ctx, userUUID, tenantID); ok {
-		return cached, nil
+	// Read both generation counters ONCE and compose the read key and
+	// the write key at the bottom of this function from the SAME pair.
+	//
+	// Re-reading them at write time is the lost-invalidation window: a
+	// verdict computed BEFORE a concurrent INCR would be filed under the
+	// generation current AFTER it, republishing the pre-bump answer as
+	// the live entry for the full TTL. Writing under the older pair is
+	// strictly safe — if nothing was invalidated the key is still
+	// current, and if something was, the entry is born dead instead of
+	// born stale.
+	//
+	// This closes the "the reader read the generations before the bump"
+	// class deterministically. It does NOT close "the reader read after
+	// the pre-bump but resolved Mongo before the write" — that one is
+	// withGeneration's post-write bump (D27), which is best-effort. The
+	// two are complementary, not alternatives.
+	g, u, genOK := s.generations(ctx, userUUID)
+	if genOK {
+		if cached, ok := s.cacheGetAt(ctx, g, u, userUUID, tenantID); ok {
+			return cached, nil
+		}
 	}
 
 	systemRole := ""
@@ -755,7 +774,9 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, userUUID, tenantI
 	for k := range perms {
 		out = append(out, k)
 	}
-	s.cacheSet(ctx, userUUID, tenantID, out)
+	if genOK {
+		s.cacheSetAt(ctx, g, u, userUUID, tenantID, out)
+	}
 	return out, nil
 }
 
@@ -1494,15 +1515,15 @@ func (s *Service) cacheKey(ctx context.Context, userUUID, tenantID string) strin
 	return cacheKeyAt(g, u, userUUID, tenantID)
 }
 
-func (s *Service) cacheGet(ctx context.Context, userUUID, tenantID string) ([]string, bool) {
+// cacheGetAt and cacheSetAt take a generation pair the caller already
+// holds. GetEffectivePermissions reads the pair once and uses these two,
+// so its read key and its write key come from the same instant — see the
+// comment at the top of that function for why that matters.
+func (s *Service) cacheGetAt(ctx context.Context, global, user int64, userUUID, tenantID string) ([]string, bool) {
 	if s.redis == nil {
 		return nil, false
 	}
-	g, u, ok := s.generations(ctx, userUUID)
-	if !ok {
-		return nil, false
-	}
-	raw, err := s.redis.Get(ctx, cacheKeyAt(g, u, userUUID, tenantID))
+	raw, err := s.redis.Get(ctx, cacheKeyAt(global, user, userUUID, tenantID))
 	if err != nil || raw == "" {
 		return nil, false
 	}
@@ -1513,10 +1534,28 @@ func (s *Service) cacheGet(ctx context.Context, userUUID, tenantID string) ([]st
 	return out, true
 }
 
-func (s *Service) cacheSet(ctx context.Context, userUUID, tenantID string, perms []string) {
+func (s *Service) cacheSetAt(ctx context.Context, global, user int64, userUUID, tenantID string, perms []string) {
 	if s.redis == nil {
 		return
 	}
+	data, err := json.Marshal(perms)
+	if err != nil {
+		return
+	}
+	_ = s.redis.Set(ctx, cacheKeyAt(global, user, userUUID, tenantID), string(data), authzCacheTTL)
+}
+
+// cacheGet and cacheSet read the generations themselves. Convenience
+// forms for callers that hold no pair; the hot path uses the *At forms.
+func (s *Service) cacheGet(ctx context.Context, userUUID, tenantID string) ([]string, bool) {
+	g, u, ok := s.generations(ctx, userUUID)
+	if !ok {
+		return nil, false
+	}
+	return s.cacheGetAt(ctx, g, u, userUUID, tenantID)
+}
+
+func (s *Service) cacheSet(ctx context.Context, userUUID, tenantID string, perms []string) {
 	g, u, ok := s.generations(ctx, userUUID)
 	if !ok {
 		// The generations could not be read, so there is no key this
@@ -1525,11 +1564,7 @@ func (s *Service) cacheSet(ctx context.Context, userUUID, tenantID string, perms
 		// retire; skip the write instead.
 		return
 	}
-	data, err := json.Marshal(perms)
-	if err != nil {
-		return
-	}
-	_ = s.redis.Set(ctx, cacheKeyAt(g, u, userUUID, tenantID), string(data), authzCacheTTL)
+	s.cacheSetAt(ctx, g, u, userUUID, tenantID, perms)
 }
 
 // InvalidateUserPermissions implements iface.AuthzCacheInvalidator: one
@@ -1537,16 +1572,25 @@ func (s *Service) cacheSet(ctx context.Context, userUUID, tenantID string, perms
 // previous value becomes unreachable at once, in every tenant, with no
 // scan and no glob built from caller input.
 //
+// It retires everything cached BEFORE the call. It does not by itself
+// cover a reader that is mid-flight across it: GetEffectivePermissions
+// files its result under the generation pair it read the cache with, so
+// a verdict computed before this bump is born unreachable — but a reader
+// that resolved Mongo across the bump can still publish a stale entry.
+// That residue is what withGeneration's post-write bump exists for. The
+// two mechanisms are complementary: this one is deterministic for the
+// readers it covers, the post-write bump is best-effort for the rest.
+//
 // A nil Redis is a no-op SUCCESS: "no cache configured" is not "cache
 // unavailable" — there is no cached verdict to retire, so reporting
 // failure would refuse role edits on a deployment that never had the
 // hazard. A configured Redis that cannot be bumped DOES return an
 // error, and the caller decides what that means (D27).
 //
-// The bump is issued whenever a client is configured, including when
-// that client has no MGET and this replica therefore bypasses the
-// cache: the counter is shared state, and a replica that does have MGET
-// must see the bump.
+// There is a third state between those two: a client with no MGET, where
+// this replica bypasses the cache but a peer replica may not. The bump is
+// issued there too — the counter is shared state, and no replica can know
+// what its peers are running.
 func (s *Service) InvalidateUserPermissions(ctx context.Context, userUUID string) error {
 	if s.redis == nil {
 		return nil
@@ -1629,8 +1673,14 @@ func (s *Service) withGeneration(ctx context.Context, scope generationScope, mut
 	if err := s.bumpGeneration(ctx, scope); err != nil {
 		metrics.Default().RecordAuthzCacheInvalidationFailure()
 		if s.logger != nil {
+			// globalScope carries no user, so name the scope rather
+			// than emitting an empty user_uuid attribute.
+			scopeAttr := slog.String("scope", "global")
+			if scope.user != "" {
+				scopeAttr = slog.String("user_uuid", scope.user)
+			}
 			s.logger.ErrorContext(ctx, "authz: post-write cache invalidation failed; a verdict cached during the write may survive up to its TTL",
-				slog.String("user_uuid", scope.user),
+				scopeAttr,
 				slog.String("error", err.Error()))
 		}
 	}
