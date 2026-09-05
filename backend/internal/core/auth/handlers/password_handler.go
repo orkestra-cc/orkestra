@@ -342,7 +342,10 @@ func (h *PasswordAuthHandler) PasswordConfirm(ctx context.Context, req *Password
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrInvalidCredentials):
-			return nil, huma.Error401Unauthorized("Invalid password")
+			// A VERDICT 401 on a route the console calls with a live
+			// bearer, so it names itself — see the block comment above
+			// AuthInvalidCredentials in internal/shared/errcode/codes.go.
+			return nil, errcode.Unauthorized(errcode.AuthInvalidCredentials, "Invalid password")
 		case errors.Is(err, services.ErrPasswordConfirmUnavailable):
 			return nil, errcode.Conflict(errcode.AuthPasswordConfirmUnavailable,
 				"This account cannot reconfirm with a password — use MFA or reauthenticate via OAuth.")
@@ -360,9 +363,28 @@ func (h *PasswordAuthHandler) PasswordConfirm(ctx context.Context, req *Password
 // priorAMRFromCtx pulls the caller's existing AMR off the JWT claims so
 // ConfirmPassword can build amr ∪ {"reauth"}. Empty slice when the token
 // has no amr (legacy dev tokens) — the service then defaults to ["pwd"].
+//
+// The epoch-governed markers are stripped first, and that is load-bearing
+// rather than defensive. This endpoint mints under the user's CURRENT
+// epoch with last_otp_at=now, so carrying a marker forward from the raw
+// claim would launder authority a removed factor no longer backs:
+//
+//	amr ["pwd","otp"] mfae 3 → user self-removes their factor (epoch → 4;
+//	D16 spares the caller's own session) → the next request correctly
+//	loses "otp" → one password reconfirm returns ["pwd","otp","reauth"] at
+//	mfae 4, which passes RequireMFA, RequireStepUp, the enrolment gate,
+//	Cedar's principal.mfa_enrolled and the personal-tenant impersonation
+//	bypass. That falsifies D16's headline property on the self-removal
+//	path.
+//
+// ConfirmPassword's own refusal does not cover it: it refuses callers with
+// an enrolled factor, and by this point the factor has just been deleted.
+// Stripping is independently correct anyway — a reauth token is minted
+// only for callers who hold no second factor, so it has no business
+// carrying a second-factor marker whatever the epoch says.
 func priorAMRFromCtx(ctx context.Context) []string {
 	if claims, ok := ctx.Value("claims").(*authModels.JWTClaims); ok && claims != nil {
-		return claims.AMR
+		return authModels.WithoutEpochBoundAMR(claims.AMR)
 	}
 	return nil
 }
@@ -393,6 +415,12 @@ func currentSessionSecurity(ctx context.Context) (*authModels.DeviceInfo, *authM
 			RiskScore:   claims.RiskScore,
 			Fingerprint: claims.Fingerprint,
 			Timestamp:   time.Now(),
+			// Carried from the caller's token. Every re-mint fed by this
+			// seam — the MFA step-up, the passkey step-up and the
+			// password reconfirm — proves a factor against an EXISTING
+			// session; none of them creates one, so none may re-stamp
+			// auth_time.
+			AuthTime: claims.AuthTime,
 		}, true
 }
 
@@ -451,8 +479,15 @@ func buildRefreshCookie(name, value, domain string, secure bool, maxAgeSeconds i
 
 func mapPasswordError(err error) error {
 	switch {
+	// A VERDICT 401 — it names itself for the same reason the MFA and
+	// passkey verdicts do (errcode/codes.go, AuthInvalidCredentials). The
+	// detail stays the one neutral sentence both the unknown-address and
+	// the wrong-password branch answer with, and so does the code: one
+	// situation, one identity, no existence oracle. Reached from `Login`
+	// (a public route the console excludes from that arm anyway) and from
+	// `change-password`, which is the one that was rotating.
 	case errors.Is(err, services.ErrInvalidCredentials):
-		return huma.Error401Unauthorized("Invalid email or password")
+		return errcode.Unauthorized(errcode.AuthInvalidCredentials, "Invalid email or password")
 	case errors.Is(err, services.ErrEmailNotVerified):
 		return errcode.Forbidden(errcode.AuthEmailNotVerified,
 			"Email address not verified. Please check your inbox for the verification email.")
@@ -466,6 +501,17 @@ func mapPasswordError(err error) error {
 		return huma.Error503ServiceUnavailable("Email delivery is not configured — signups are temporarily unavailable. Please contact an administrator.")
 	case errors.Is(err, services.ErrMFAEnrollmentRequired):
 		return huma.Error403Forbidden("MFA enrollment required — the grace period for this account has expired. Please complete MFA setup via an admin before signing in.")
+	// Spec §4.3 D19. The code is the middleware's own unprefixed
+	// `mfa_enrollment_required` envelope code, NOT an errcode const
+	// (ruling R8): `internal/shared/errcode/codes.go` is the
+	// `<module>.<situation>` namespace pinned by an AST golden, and this
+	// value belongs to a different vocabulary — the one
+	// AuthMiddleware.sendMFAEnrollmentRequired already emits, which both
+	// SPAs already switch on. One situation, one code, whether the caller
+	// meets it at the gate or at this endpoint.
+	case errors.Is(err, services.ErrPasswordConfirmEnrollmentRequired):
+		return errcode.Forbidden("mfa_enrollment_required",
+			"Your role requires a second factor; enroll one before performing this action.")
 	case errors.Is(err, services.ErrRegistrationDisabled):
 		return errcode.Forbidden(errcode.AuthRegistrationDisabled,
 			"Self-service registration is disabled for this surface. Contact an administrator.")

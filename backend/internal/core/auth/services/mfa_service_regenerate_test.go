@@ -23,7 +23,7 @@ func TestRegenerateBackupCodes_ReplacesAtomically(t *testing.T) {
 	user := &testUser{UUID: "u-regen", Email: "regen@example.com"}
 	begin, _ := svc.BeginEnrollment(context.Background(), user.toUser())
 	code, _ := totp.GenerateCode(begin.SecretBase32, time.Now())
-	original, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin.ChallengeID, code)
+	original, _, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin.ChallengeID, code)
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}

@@ -1352,6 +1352,17 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 		SessionID: sessionID,
 		IPAddress: ipAddress,
 		Timestamp: now,
+		// The provider just authenticated the user interactively. This
+		// stamp lives in GenerateEnhancedTokenPair — an EXPORTED
+		// interface method — and every OAuth completion funnels through
+		// it: HandleOAuthCallbackWithLinking delegates here, and so does
+		// the client-tier relay (HandleOAuthRelayCompleteHTTP →
+		// finishOAuthCompletion → that method), as do the mobile
+		// Google/Apple ID-token logins. So there is no second OAuth mint
+		// to stamp — but note that any FUTURE caller of this method
+		// inherits an unconditional now(), which is only correct for a
+		// caller that has genuinely just authenticated someone.
+		AuthTime: now.Unix(),
 	}
 	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, []string{"oauth"}, 0)
 	if err != nil {
@@ -1451,6 +1462,64 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 	}
 
 	return tokenResponse, nil
+}
+
+// carryAMR recomputes the authentication-method markers for a refreshed
+// token instead of copying them forward (spec §4.3 D17).
+//
+// Refresh used to hand claims.AMR and claims.LastOTPAt to the mint
+// verbatim, so a session whose factor had been removed would keep minting
+// MFA-satisfied tokens for as long as it lived — the second half of M-2.
+// The rules:
+//
+//   - "reauth" is ALWAYS dropped, whatever the epoch says. A password
+//     reconfirm is a five-minute proof of presence, never a property of
+//     the session, and a refresh is not a reconfirm.
+//   - the epoch-governed markers (otp, webauthn, mfa, device_trust)
+//     survive only when the token's epoch still matches the user's. Both
+//     refresh paths have already loaded the user, so this costs no extra
+//     read.
+//   - LastOTPAt is carried only when at least one of those markers
+//     survived. A freshness stamp with nothing to be fresh about is worse
+//     than no stamp: it is a timestamp a gate would believe.
+//   - the base markers (pwd, oauth) always survive. They describe how the
+//     session began, which a refresh does not change.
+//
+// Both call sites read `prior` off the REFRESH token's claims, which today
+// carry no amr at all (GenerateEnhancedRefreshToken omits it deliberately),
+// so on the shipped paths this returns an empty slice from an empty one and
+// changes no behaviour. That is the point: the invariant is stated in the
+// one place that mints from a refresh, so it holds the day a refresh token
+// does carry markers, instead of being rediscovered as a second M-2.
+//
+// If that day comes, add "mfae" to the refresh token in the SAME change.
+// Adding amr without it leaves tokenEpoch at 0 for every refresh, so every
+// epoch-governed marker is dropped for any user whose epoch has ever moved.
+// That is the safe direction to fail — a user re-proves a factor they still
+// hold, rather than keeping authority for one they do not — but it is a
+// silent step-up prompt, not a no-op, so it should be a decision rather
+// than a surprise.
+func carryAMR(prior []string, priorLastOTPAt int64, tokenEpoch, userEpoch int) ([]string, int64) {
+	current := tokenEpoch == userEpoch
+	out := make([]string, 0, len(prior))
+	kept := false
+	for _, v := range prior {
+		switch {
+		case v == models.AMRReauth:
+			continue
+		case models.IsEpochBoundAMR(v):
+			if current {
+				out = append(out, v)
+				kept = true
+			}
+		default:
+			out = append(out, v)
+		}
+	}
+	if !kept {
+		return out, 0
+	}
+	return out, priorLastOTPAt
 }
 
 // RefreshTokensWithRiskAssessment rotates a refresh token atomically and
@@ -1563,6 +1632,10 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		SessionID: newSessionID,
 		IPAddress: nonEmpty(securityCtxIP(securityCtx), tokenDoc.IPAddress),
 		Timestamp: now,
+		// Carried, never re-stamped: a rotation is not an authentication.
+		// Re-stamping would make freshness unfalsifiable — a client that
+		// refreshes on a timer would look permanently just-authenticated.
+		AuthTime: claims.AuthTime,
 	}
 	// Absolute session cap. Placed after the row's revocation/expiry
 	// checks and before the mint, so a capped session never receives a
@@ -1571,7 +1644,11 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		return nil, err
 	}
 
-	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, claims.AMR, claims.LastOTPAt)
+	// Recompute rather than copy forward (D17). The mint itself stamps
+	// mfae from `user`, so the new token is issued under the CURRENT epoch
+	// and is never stale the moment it is signed.
+	amr, lastOTPAt := carryAMR(claims.AMR, claims.LastOTPAt, claims.MFAEpoch, user.MFAEpoch)
+	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, amr, lastOTPAt)
 	if err != nil {
 		// Signing is ours to get right; a failure here is not the caller's.
 		return nil, fmt.Errorf("token mint failed: %w: %w", ErrRefreshLookupUnavailable, err)
@@ -1769,6 +1846,8 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 		SessionID: doc.SessionUUID,
 		IPAddress: nonEmpty(securityCtxIP(securityCtx), doc.IPAddress),
 		Timestamp: time.Now(),
+		// Same rule as the rotation path: the session's origin, carried.
+		AuthTime: claims.AuthTime,
 	}
 	// The same cap on the non-rotating path. /session mints without
 	// rotating, so omitting this would let a client that calls only the
@@ -1777,7 +1856,11 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 		return nil, err
 	}
 
-	access, err := s.jwtService.GenerateAccessTokenForSessionWithAMR(user, device, security, claims.AMR, claims.LastOTPAt)
+	// Same recomputation as the rotation path (D17): /session mints without
+	// rotating, so a client that only ever calls it must not be the one path
+	// where a removed factor's markers live on.
+	amr, lastOTPAt := carryAMR(claims.AMR, claims.LastOTPAt, claims.MFAEpoch, user.MFAEpoch)
+	access, err := s.jwtService.GenerateAccessTokenForSessionWithAMR(user, device, security, amr, lastOTPAt)
 	if err != nil {
 		// Signing is ours to get right; a failure here is not the caller's.
 		return nil, fmt.Errorf("token mint failed: %w: %w", ErrRefreshLookupUnavailable, err)
@@ -2041,6 +2124,25 @@ func authEventComplianceAction(eventType string) string {
 		return "auth.oauth.unlinked"
 	case "admin_mfa_reset":
 		return "auth.mfa.reset"
+	// A failed reset gets its own action, not a metadata flag on the
+	// success one: recordAuthEvent hardcodes Outcome to "success" for
+	// every auth event, so an evidence query filtering on outcome cannot
+	// see the failure any other way.
+	case "admin_mfa_reset_failed":
+		return "auth.mfa.reset_failed"
+	// Every credential change, not just the admin reset (spec §4.2 D13).
+	// Before this, only backup-code regeneration emitted anything at all,
+	// so an enrolment performed with a stolen bearer token left no trace.
+	case "self_mfa_enrolled":
+		return "auth.mfa.enrolled"
+	case "self_mfa_factor_replaced":
+		return "auth.mfa.replaced"
+	case "self_passkey_registered":
+		return "auth.mfa.passkey_registered"
+	case "self_passkey_removed":
+		return "auth.mfa.passkey_removed"
+	case "self_mfa_removed":
+		return "auth.mfa.removed"
 	case "self_oauth_unlink":
 		return "auth.oauth.unlinked.self"
 	case "self_oauth_link":

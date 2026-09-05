@@ -204,6 +204,10 @@
     "enrol": {
       "title": "Configura la 2FA",
       "subtitle": "Tre passaggi: avvia, scansiona, conferma. Conserva i codici di backup in un luogo sicuro.",
+      "checking": "Verifica della configurazione attuale…",
+      "alreadyTitle": "La 2FA è già configurata",
+      "alreadyBody": "Questo account ha già un'app di autenticazione registrata, quindi qui non c'è nulla da configurare. Per sostituirla, chiedi a un amministratore di reimpostare la 2FA sul tuo account: potrai poi registrarne una nuova.",
+      "alreadyBack": "Torna alle impostazioni di sicurezza",
       "step1": "Avvia la procedura per generare un nuovo segreto.",
       "start": "Avvia configurazione",
       "starting": "Avvio…",

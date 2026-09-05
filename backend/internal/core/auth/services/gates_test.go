@@ -394,8 +394,8 @@ func TestChangePassword_RevokeOnPasswordChangeOff_SkipsDeviceTrustRevoke(t *test
 	if err := env.auth.ChangePassword(context.Background(), ChangePasswordInput{UserUUID: u.UUID, Current: "correct-horse-battery", New: "new-correct-horse-pw"}); err != nil {
 		t.Fatalf("ChangePassword: %v", err)
 	}
-	if dt.revokeCalls != 0 {
-		t.Fatalf("toggle off must skip device-trust revoke, got %d calls", dt.revokeCalls)
+	if dt.revokeCalls() != 0 {
+		t.Fatalf("toggle off must skip device-trust revoke, got %d calls", dt.revokeCalls())
 	}
 }
 
@@ -408,8 +408,8 @@ func TestChangePassword_RevokeOnPasswordChangeOn_DefaultRevokes(t *testing.T) {
 	if err := env.auth.ChangePassword(context.Background(), ChangePasswordInput{UserUUID: u.UUID, Current: "correct-horse-battery", New: "new-correct-horse-pw"}); err != nil {
 		t.Fatalf("ChangePassword: %v", err)
 	}
-	if dt.revokeCalls != 1 {
-		t.Fatalf("default-on must call device-trust revoke exactly once, got %d", dt.revokeCalls)
+	if dt.revokeCalls() != 1 {
+		t.Fatalf("default-on must call device-trust revoke exactly once, got %d", dt.revokeCalls())
 	}
 }
 
@@ -428,9 +428,17 @@ func TestShouldRevokeOnPasswordChange_Accessor(t *testing.T) {
 
 // recordingDeviceTrust implements DeviceTrustService with just enough
 // to observe RevokeAllByUser calls. Other methods panic so a refactor
-// that starts to depend on them surfaces immediately.
+// that starts to depend on them surfaces immediately — this is why it's
+// the safer choice over a silently-permissive fake: if a later change
+// (e.g. RemoveFactor consulting IsTrusted) starts depending on one of
+// these, the test fails loudly instead of quietly lying.
+//
+// reasons records the reason string passed to every RevokeAllByUser
+// call, in order — revokeCalls() and lastReason() are read views over
+// it, used by the RemoveFactor tests in mfa_service_test.go as well as
+// the ChangePassword tests below.
 type recordingDeviceTrust struct {
-	revokeCalls int
+	reasons []string
 }
 
 func (r *recordingDeviceTrust) MarkTrusted(context.Context, MarkTrustedInput) error {
@@ -445,9 +453,21 @@ func (r *recordingDeviceTrust) ListActive(context.Context, string) ([]*authModel
 func (r *recordingDeviceTrust) RevokeByDevice(context.Context, string, string, string) error {
 	panic("not used")
 }
-func (r *recordingDeviceTrust) RevokeAllByUser(_ context.Context, _ string, _ string) error {
-	r.revokeCalls++
+func (r *recordingDeviceTrust) RevokeAllByUser(_ context.Context, _ string, reason string) error {
+	r.reasons = append(r.reasons, reason)
 	return nil
+}
+
+// revokeCalls reports how many times RevokeAllByUser was called.
+func (r *recordingDeviceTrust) revokeCalls() int { return len(r.reasons) }
+
+// lastReason returns the reason passed to the most recent RevokeAllByUser
+// call, or "" if it was never called.
+func (r *recordingDeviceTrust) lastReason() string {
+	if len(r.reasons) == 0 {
+		return ""
+	}
+	return r.reasons[len(r.reasons)-1]
 }
 
 // ===== New-device-login email gate =====
@@ -543,7 +563,7 @@ func TestMFAEnrollment_RecoveryCodesCount_HonoursPolicy(t *testing.T) {
 			}
 			code := mustGenerateTOTPNow(t, begin.SecretBase32)
 
-			plain, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin.ChallengeID, code)
+			plain, _, err := svc.ConfirmEnrollment(context.Background(), user.UUID, begin.ChallengeID, code)
 			if err != nil {
 				t.Fatalf("ConfirmEnrollment: %v", err)
 			}

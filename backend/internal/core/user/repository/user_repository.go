@@ -69,6 +69,13 @@ type UserRepository interface {
 	SetMFAGraceStartedAt(ctx context.Context, userUUID string, when time.Time) error
 	ClearMFAGraceStartedAt(ctx context.Context, userUUID string) error
 
+	// BumpMFAEpoch increments mfaEpoch and returns the new value. Called
+	// by the auth module's MFA/WebAuthn services on every credential
+	// removal or replacement (never on addition) — see iface.User.MFAEpoch
+	// and iface.MFAEpochBumper for why. Returns ErrUserNotFound if no
+	// live row matches.
+	BumpMFAEpoch(ctx context.Context, userUUID string) (int, error)
+
 	// ListByKind returns live (not soft-deleted) users whose Kind matches —
 	// used by the admin service-account listing surface. kind is compared
 	// verbatim; pass iface.UserKindService to list machine principals.
@@ -1131,6 +1138,37 @@ func (r *mongoUserRepository) ClearMFAGraceStartedAt(ctx context.Context, userUU
 		return fmt.Errorf("clear mfa grace: %w", err)
 	}
 	return nil
+}
+
+// BumpMFAEpoch increments mfaEpoch and returns the new value in one
+// round trip (FindOneAndUpdate with ReturnDocument: After). A read-then-
+// write would let two concurrent removals both write the same value,
+// which would leave one of the two removals' tokens still valid.
+func (r *mongoUserRepository) BumpMFAEpoch(ctx context.Context, userUUID string) (int, error) {
+	filter := bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+	}
+	update := bson.M{
+		"$inc": bson.M{"mfaEpoch": 1},
+		"$set": bson.M{"updatedAt": time.Now()},
+	}
+	opts := options.FindOneAndUpdate().
+		SetReturnDocument(options.After).
+		SetProjection(bson.M{"mfaEpoch": 1})
+
+	var out struct {
+		MFAEpoch int `bson:"mfaEpoch"`
+	}
+	//tenantscope:allow user collections (operator_users / client_users) are tier-scoped, not org-scoped.
+	err := r.collection.FindOneAndUpdate(ctx, filter, update, opts).Decode(&out)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return 0, ErrUserNotFound
+		}
+		return 0, fmt.Errorf("failed to bump mfa epoch: %w", err)
+	}
+	return out.MFAEpoch, nil
 }
 
 // SetAvatarSource persists the user's avatar source preference and the

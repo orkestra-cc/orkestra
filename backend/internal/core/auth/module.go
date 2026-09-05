@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -1119,6 +1120,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	opDeps := commonTierDeps
 	opDeps.tier = tierOperator
 	opDeps.userProvider = operatorUser
+	opDeps.mfaEpochBumper = resolveMFAEpochBumper(deps.Services, module.ServiceOperatorUserProvider, logger, string(tierOperator))
 	opDeps.jwtService = operatorJWT
 	if cfg.Server.Operator.FrontendURL != "" {
 		opDeps.frontendURL = cfg.Server.Operator.FrontendURL
@@ -1186,6 +1188,15 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	m.operatorMFAHandler.SetDeviceTrust(deviceTrustSvc)
 	m.operatorMFAHandler.SetPolicy(authPolicy)
 	m.operatorMFAHandler.SetAuditRecorder(opBundle.authService)
+	// D16: a credential change ends the sessions it invalidated. Per
+	// tier — the operator handler gets the operator auth service, so a
+	// reset terminates operator_sessions rows and never a client's.
+	m.operatorMFAHandler.SetSessionTerminator(opBundle.authService)
+	// D20: the outer attempt cap on the authenticated verify routes. The
+	// audience comes off the bundle, which derived it from the same `tier`
+	// that picked the operator repositories — so this handler's lockout
+	// key space cannot drift onto the client tier's.
+	m.operatorMFAHandler.SetVerifyAttemptCounter(attemptCounter, opBundle.policyAudience)
 	if opBundle.webauthnSvc != nil {
 		m.operatorMFAHandler.SetWebAuthn(opBundle.webauthnSvc)
 		m.operatorWebAuthnHandler = handlers.NewWebAuthnHandler(
@@ -1200,6 +1211,12 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		)
 		m.operatorWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
 		m.operatorWebAuthnHandler.SetPolicy(authPolicy)
+		m.operatorWebAuthnHandler.SetSessionTerminator(opBundle.authService)
+		// The TOTP half of "was that the last factor?" — the passkey half
+		// the handler reads itself. Same tier as the passkey service, so a
+		// removal cannot consult the other tier's factor rows.
+		m.operatorWebAuthnHandler.SetMFAStatusReader(opBundle.mfaSvc)
+		m.operatorWebAuthnHandler.SetVerifyAttemptCounter(attemptCounter, opBundle.policyAudience)
 		deps.Services.Register(module.ServiceWebAuthn, opBundle.webauthnSvc)
 	}
 
@@ -1287,6 +1304,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	clDeps := commonTierDeps
 	clDeps.tier = tierClient
 	clDeps.userProvider = clientUser
+	clDeps.mfaEpochBumper = resolveMFAEpochBumper(deps.Services, module.ServiceClientUserProvider, logger, string(tierClient))
 	clDeps.jwtService = clientJWT
 	if cfg.Server.Client.FrontendURL != "" {
 		clDeps.frontendURL = cfg.Server.Client.FrontendURL
@@ -1352,6 +1370,11 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	m.clientMFAHandler.SetDeviceTrust(deviceTrustSvc)
 	m.clientMFAHandler.SetPolicy(authPolicy)
 	m.clientMFAHandler.SetAuditRecorder(clBundle.authService)
+	m.clientMFAHandler.SetSessionTerminator(clBundle.authService)
+	// Same cap, the client bundle's own audience — a separate key space
+	// from the operator handler above, so the two tiers lock independently
+	// even for a user UUID that exists on both.
+	m.clientMFAHandler.SetVerifyAttemptCounter(attemptCounter, clBundle.policyAudience)
 	if clBundle.webauthnSvc != nil {
 		m.clientMFAHandler.SetWebAuthn(clBundle.webauthnSvc)
 		m.clientWebAuthnHandler = handlers.NewWebAuthnHandler(
@@ -1366,6 +1389,9 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		)
 		m.clientWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
 		m.clientWebAuthnHandler.SetPolicy(authPolicy)
+		m.clientWebAuthnHandler.SetSessionTerminator(clBundle.authService)
+		m.clientWebAuthnHandler.SetMFAStatusReader(clBundle.mfaSvc)
+		m.clientWebAuthnHandler.SetVerifyAttemptCounter(attemptCounter, clBundle.policyAudience)
 	}
 
 	// ADR-0003 PR-D D-6: per-tier dispatcher map on the operator
@@ -1467,6 +1493,12 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		return false, nil
 	}
 	deps.Services.Register(module.ServiceMFAEnrollmentLookup, authMiddleware.MFAEnrollmentLookup(mfaEnrollmentLookup))
+
+	// MFA-epoch lookup (spec §4.3 D16): the reader that makes Task 5's
+	// epoch bumps mean something. Built from BOTH tiers' user providers —
+	// see newMFAEpochLookup for why passing one provider twice would be an
+	// outage rather than a bug.
+	deps.Services.Register(module.ServiceMFAEpochLookup, newMFAEpochLookup(operatorUser, clientUser))
 
 	// Register one PII producer per tier with the DSR registry. Each
 	// producer reports tier-correct collection names in the DSR audit
@@ -1600,6 +1632,105 @@ func resolveWebAuthnRP(frontendURL string) (string, []string) {
 	return rpID, origins
 }
 
+// enrolmentGate resolves the enrolment-proof gate (H-2/H-3) off a surface's
+// RoleMiddleware, which is an interface value — so the gate arrives through
+// the additive module.EnrolmentProofGate sub-interface rather than a method
+// on RoleMiddleware itself, which would break every fork that implements
+// it (the iface.OAuthLinkDataUpdater / iface.MFAEpochBumper precedent).
+//
+// A failed assertion refuses every enrolment request instead of passing it
+// through: this gate is the only thing standing between a stolen
+// session-only bearer and a replaced second factor, so "we could not obtain
+// the gate" must not read as "no gate needed". It also logs at WARN here,
+// once per surface at wiring time, because a fork whose middleware lacks
+// the method should learn about it at boot rather than from a user's 401.
+//
+// Call it ONCE per surface and reuse the result across that surface's mount
+// sites, so the warning is not repeated per route group.
+func enrolmentGate(logger *slog.Logger, surface string, mw module.RoleMiddleware, maxAge time.Duration) func(http.Handler) http.Handler {
+	if gate, ok := mw.(module.EnrolmentProofGate); ok {
+		return gate.RequireEnrolmentProof(maxAge)
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Warn("auth: RoleMiddleware does not implement module.EnrolmentProofGate — "+
+		"MFA enrolment endpoints will refuse every caller with step_up_required",
+		slog.String("surface", surface),
+		slog.String("interface", "module.EnrolmentProofGate"),
+	)
+	return authMiddleware.RefuseEnrolmentProof(maxAge)
+}
+
+// resolveMFAEpochBumper resolves the tier's user provider as an
+// iface.MFAEpochBumper (spec §4.3 D16). The seam is deliberately narrow and
+// deliberately OPTIONAL: iface.UserProvider is implemented by forks and
+// stays additive-only, so a fork's provider may simply not have the method.
+//
+// A missing implementation is NOT fatal and NOT a refusal — unlike the
+// enrolment gate above, whose absence must fail closed. The epoch is one of
+// two mechanisms that end a removed factor's authority; without it the
+// platform falls back to session revocation alone, which is exactly what it
+// had before the epoch existed. Refusing to boot, or refusing removals,
+// would be strictly worse than the pre-epoch behaviour.
+//
+// The WARN fires once per tier at wiring time so an operator learns about
+// it at boot; the services warn again on each removal that could not bump.
+func resolveMFAEpochBumper(reg *module.ServiceRegistry, key module.ServiceKey, logger *slog.Logger, tier string) iface.MFAEpochBumper {
+	bumper, ok := module.GetTyped[iface.MFAEpochBumper](reg, key)
+	if !ok || bumper == nil {
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("auth: user provider does not implement iface.MFAEpochBumper — "+
+			"removing an MFA factor will not end the MFA authority of tokens already issued; "+
+			"they keep their markers until they expire",
+			slog.String("tier", tier),
+			slog.String("service_key", string(key)),
+		)
+		return nil
+	}
+	return bumper
+}
+
+// newMFAEpochLookup builds the tier-dispatching MFA-epoch resolver the
+// AuthMiddleware consults on every request whose token carries an MFA
+// marker (spec §4.3 D16).
+//
+// The tier dispatch is the whole substance of this function. main.go hands
+// ONE AuthMiddleware to both the operator and the client host mux, so a
+// resolver that consulted a single user collection would fail to find every
+// UUID belonging to the other tier — and because the middleware reads any
+// error as "not current", that miss would strip the MFA authority from
+// every one of that tier's tokens, on every request, permanently. The
+// audience claim picks the collection exactly as the MFA-enrollment lookup
+// does; an empty or unknown audience falls back to operator, today's
+// canonical tier, so a legacy single-aud token keeps working.
+//
+// A user the tier's provider cannot produce is an ERROR, never epoch 0:
+// answering 0 would silently grant a token whose "mfae" claim is absent —
+// which also reads as 0 — the authority of a matching epoch, turning a
+// failed lookup into a pass. The middleware fails closed on the error.
+func newMFAEpochLookup(operator, client iface.UserProvider) authMiddleware.MFAEpochLookup {
+	return func(ctx context.Context, audience, userUUID string) (int, error) {
+		provider := operator
+		if audience == services.AudienceClient {
+			provider = client
+		}
+		if provider == nil {
+			return 0, fmt.Errorf("auth: no user provider wired for audience %q", audience)
+		}
+		user, err := provider.GetUserByID(ctx, userUUID)
+		if err != nil {
+			return 0, err
+		}
+		if user == nil {
+			return 0, iface.ErrUserNotFound
+		}
+		return user.MFAEpoch, nil
+	}
+}
+
 func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 	// ADR-0003 PR-D D-8: only audience-split mounts survive. The
 	// operator AuthHandler also owns the single shared OAuth callback
@@ -1647,10 +1778,16 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		m.serviceAccountAdminHandler.RegisterManageRoutes(humachi.New(r, ri.APIConfig))
 	})
 
-	// Operator MFA endpoints split into four halves:
+	// The enrolment-proof gate, resolved ONCE per surface so a fork whose
+	// middleware lacks module.EnrolmentProofGate gets one WARN, not one
+	// per route group. Reused by this surface's TOTP and passkey mounts.
+	operatorEnrolmentGate := enrolmentGate(m.logger, "operator", ri.Operator.AuthMW, 5*time.Minute)
+
+	// Operator MFA endpoints split into five groups:
 	//   - public: /v1/auth/operator/mfa/login/verify completes an in-
 	//     flight login (caller has a challengeId, not yet a bearer).
-	//   - protected (no step-up): enroll / status / verify.
+	//   - protected (no step-up): status / verify.
+	//   - protected (enrolment proof): enroll begin + confirm.
 	//   - protected (step-up): /v1/auth/operator/me/mfa/remove —
 	//     dropping your own second factor is catastrophic, demand a
 	//     <5min OTP proof.
@@ -1662,6 +1799,14 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		r.Use(ri.Operator.AuthMW.RequireGlobal())
 		api := humachi.New(r, ri.APIConfig)
 		m.operatorMFAHandler.RegisterProtectedRoutes(api, handlers.OperatorMount)
+	})
+	// Enrolment CREATES or REPLACES a credential, so it demands a fresh
+	// proof of presence, not merely a valid bearer (H-2, H-3).
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
+		r.Use(operatorEnrolmentGate)
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorMFAHandler.RegisterEnrolmentRoutes(api, handlers.OperatorMount)
 	})
 	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(ri.Operator.AuthMW.RequireGlobal())
@@ -1732,14 +1877,21 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		m.operatorAuthHandler.RegisterOAuthLinkRoute(api, handlers.OperatorMount)
 	})
 
-	// Operator WebAuthn — public/protected/step-up halves mirror the
-	// TOTP layout. Nil handler means passkeys are disabled at boot.
+	// Operator WebAuthn — public/protected/enrolment/step-up halves
+	// mirror the TOTP layout. Nil handler means passkeys are disabled at
+	// boot.
 	if m.operatorWebAuthnHandler != nil {
 		m.operatorWebAuthnHandler.RegisterPublicRoutes(ri.Operator.PublicAPI, handlers.OperatorMount)
 		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 			r.Use(ri.Operator.AuthMW.RequireGlobal())
 			api := humachi.New(r, ri.APIConfig)
 			m.operatorWebAuthnHandler.RegisterProtectedRoutes(api, handlers.OperatorMount)
+		})
+		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Operator.AuthMW.RequireGlobal())
+			r.Use(operatorEnrolmentGate)
+			api := humachi.New(r, ri.APIConfig)
+			m.operatorWebAuthnHandler.RegisterEnrolmentRoutes(api, handlers.OperatorMount)
 		})
 		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 			r.Use(ri.Operator.AuthMW.RequireGlobal())
@@ -1769,6 +1921,7 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		return
 	}
 	clientProtectedAPI := humachi.New(ri.Client.ProtectedRouter, ri.APIConfig)
+	clientEnrolmentGate := enrolmentGate(m.logger, "client", ri.Client.AuthMW, 5*time.Minute)
 	if ri.ClientRouter != nil {
 		m.clientAuthHandler.RegisterTierMountableRoutes(ri.Client.PublicAPI, clientProtectedAPI, ri.ClientRouter, handlers.ClientMount)
 		m.clientAuthHandler.RegisterOAuthStartRoutes(ri.Client.PublicAPI, handlers.ClientMount)
@@ -1792,6 +1945,12 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 	})
 	ri.Client.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(ri.Client.AuthMW.RequireGlobal())
+		r.Use(clientEnrolmentGate)
+		api := humachi.New(r, ri.APIConfig)
+		m.clientMFAHandler.RegisterEnrolmentRoutes(api, handlers.ClientMount)
+	})
+	ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Client.AuthMW.RequireGlobal())
 		r.Use(ri.Client.AuthMW.RequireStepUp(5 * time.Minute))
 		api := humachi.New(r, ri.APIConfig)
 		m.clientMFAHandler.RegisterStepUpRoutes(api, handlers.ClientMount)
@@ -1802,6 +1961,12 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 			r.Use(ri.Client.AuthMW.RequireGlobal())
 			api := humachi.New(r, ri.APIConfig)
 			m.clientWebAuthnHandler.RegisterProtectedRoutes(api, handlers.ClientMount)
+		})
+		ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Client.AuthMW.RequireGlobal())
+			r.Use(clientEnrolmentGate)
+			api := humachi.New(r, ri.APIConfig)
+			m.clientWebAuthnHandler.RegisterEnrolmentRoutes(api, handlers.ClientMount)
 		})
 		ri.Client.ProtectedRouter.Group(func(r chi.Router) {
 			r.Use(ri.Client.AuthMW.RequireGlobal())

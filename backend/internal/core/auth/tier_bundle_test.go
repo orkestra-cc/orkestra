@@ -3,6 +3,7 @@ package auth
 import (
 	"testing"
 
+	"github.com/orkestra/backend/internal/core/auth/services"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -65,6 +66,21 @@ func TestBuildAuthTierBundlePicksMatchingConstructors(t *testing.T) {
 			}
 			if bundle.webauthnSvc != nil {
 				t.Error("webauthnSvc should be nil when webauthnRP dep is nil")
+			}
+			// D20: the bundle's PolicyAudience is what module.go hands to
+			// SetVerifyAttemptCounter on that tier's MFA + WebAuthn
+			// handlers, and AttemptKeyMFAVerify puts it in the lockout
+			// key. Deriving it here — from the same `tier` that selected
+			// the repos above — is what makes "the operator handler is
+			// wired with the operator audience" structural rather than a
+			// literal repeated at four wiring sites. Get it wrong and the
+			// two tiers silently share one lockout scope.
+			wantAudience := services.PolicyAudienceOperator
+			if tier == tierClient {
+				wantAudience = services.PolicyAudienceClient
+			}
+			if bundle.policyAudience != wantAudience {
+				t.Errorf("policyAudience = %q, want %q", bundle.policyAudience, wantAudience)
 			}
 		})
 	}

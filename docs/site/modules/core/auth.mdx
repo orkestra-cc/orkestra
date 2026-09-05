@@ -12,10 +12,10 @@ Every way a caller proves who it is: email/password (argon2id), OAuth 2.1, MFA, 
 - **Email + password** — argon2id in PHC format (OWASP 2025 params), transparent rehash on login when the stored hash is weaker than the current default.
 - **OAuth 2.1** — Google, Apple, GitHub, and Discord, each independently enable-able per surface, with a web flow and a mobile flow.
 - **Tokens and sessions** — RS256 access + refresh JWTs from one key pair, refresh rotation with family replay detection, and a Redis-backed revocation set so logout kills an access token instantly rather than waiting out its TTL.
-- **MFA** — TOTP with backup codes, WebAuthn passkeys, and the step-up gate (`RequireStepUp`) that catastrophic actions sit behind.
+- **MFA** — TOTP with backup codes, WebAuthn passkeys, the step-up gate (`RequireStepUp`) that catastrophic actions sit behind, and the [enrolment proof gate](/architecture/authentication-flow#enrolment-proof-gate) (`RequireEnrolmentProof`) that every factor creation or replacement sits behind. Removing or replacing a factor moves the user's **MFA epoch**, which ends the MFA authority of every token they hold — the caller's own included — on its next request; see [Removing or replacing a factor](/architecture/authentication-flow#removing-or-replacing-a-factor).
 - **Device trust** — per-surface trusted-device grants that let a known device skip the second factor.
 - **Service accounts** — OAuth2 client-credentials machine identities ([ADR-0014](/adrs/service-accounts-client-credentials)). See [below](#service-accounts).
-- **RBAC middleware** — `RequirePermission` / `RequireAudience` / `RequireStepUp`, satisfying the SDK's `RoleMiddleware` seam. The permission *decisions* belong to [authz](/modules/core/authz); auth only enforces them at the route.
+- **RBAC middleware** — `RequirePermission` / `RequireAudience` / `RequireStepUp`, satisfying the SDK's `RoleMiddleware` seam, plus `RequireEnrolmentProof` on the separate additive `module.EnrolmentProofGate` sub-interface. The permission *decisions* belong to [authz](/modules/core/authz); auth only enforces them at the route.
 
 ## Two surfaces, one module
 
@@ -108,6 +108,7 @@ across every replica and survive a restart.
 | Source address (shared across both surfaces) | the same three, plus the service-account grant | `ipLockoutThreshold` / `ipLockoutDuration` (100 / 15m) |
 | Client ID | service-account grant | the account pair |
 | Reset / verification requests | forgot-password, resend-verification | 3 per email address per 15m, 60 per source address per 15m |
+| MFA verify (per user, independent per surface) | the authenticated `mfa/verify` and passkey `verify/finish` routes | 5 failures per 5m |
 
 An address threshold **must** be at least the account threshold: an
 address that locks first would tell an attacker which accounts exist
@@ -119,6 +120,19 @@ A locked scope answers **429** `auth.too_many_attempts` with a
 exists and one that does not. A successful login clears the email
 counter; the address counter is left alone, so one correct sign-in
 cannot launder a credential-stuffing run.
+
+The MFA-verify scope is keyed on the user rather than an address — the
+caller is already signed in — and it is the *outer* bound on second-factor
+guessing. A passkey assertion runs inside a challenge that has its own
+five-attempt budget, but a caller can always start another challenge, so
+that inner bound never capped the caller; the authenticator-code route has
+no challenge at all and so had no bound whatsoever. One request costs at
+most one failure, including a backup-code attempt, which compares the
+submitted code against every stored code before rejecting it. A successful
+verification clears the counter; anything that was not a rejected
+credential — no factor enrolled, an expired or already-spent challenge, a
+storage failure — costs nothing, so one subsystem's degradation can never
+spend a legitimate user's budget in another.
 
 The durable per-account lock (`User.LockedUntil`) runs alongside the
 counters rather than behind them: an account locks when either its

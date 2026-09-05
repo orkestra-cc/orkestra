@@ -625,6 +625,39 @@ type RoleMiddleware interface {
 	RequireExternalTenant() func(http.Handler) http.Handler
 }
 
+// EnrolmentProofGate is the additive sub-interface that carries the
+// enrolment-proof gate (audit findings H-2/H-3, spec §4.2 D11/D12).
+//
+// It is a sub-interface rather than a method on RoleMiddleware for the
+// reason iface.OAuthLinkDataUpdater and iface.MFAEpochBumper are: adding a
+// method to an interface a fork implements breaks every external
+// implementor, and pkg/sdk/module is at least as fork-facing as
+// pkg/sdk/iface. Consumers type-assert an APISurface.AuthMW against this and
+// mount the result.
+//
+// A failed assertion is NOT a pass-through. The gate exists to stop a
+// session-only bearer from creating or replacing a second factor, so a
+// consumer that cannot obtain it must refuse the request — see
+// auth/module.go's enrolmentGate helper, which substitutes an
+// always-step_up_required middleware and logs at WARN once at wiring time,
+// so a fork missing the implementation learns at boot rather than from a
+// user's 401.
+//
+// Contract for an implementor: block the request unless the caller proved
+// presence within maxAge, where "presence" has two accepted shapes because
+// the two populations have different ones available. A caller who already
+// holds a second factor must present a fresh one (answered with
+// code="step_up_required"); a caller who holds none may instead show a
+// recent interactive sign-in (the auth_time claim), and is answered with a
+// 401 code="reauthentication_required" when they cannot. Factor presence
+// that cannot be resolved must fail CLOSED to step_up_required — never a
+// pass-through — and the freshness check, which reads only the signed
+// token, must be evaluated before any lookup that can fail, so the refusal
+// stays one an enrolled caller can actually satisfy.
+type EnrolmentProofGate interface {
+	RequireEnrolmentProof(maxAge time.Duration) func(http.Handler) http.Handler
+}
+
 // Audience identifies which class of consumer an API surface serves. Per
 // ADR-0003, Orkestra splits its HTTP surface into three audiences — operator
 // (Tier-1 internal console), client (Tier-2 external clients), and service

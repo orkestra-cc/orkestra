@@ -54,7 +54,7 @@ export default function MfaEnrollmentBanner() {
               : t('banner.mfa.required')}
         </span>
       </span>
-      <Link to="/user/settings" className="btn btn-sm btn-dark">
+      <Link to="/user/security?tab=mfa" className="btn btn-sm btn-dark">
         {t('banner.mfa.setUp')}
       </Link>
     </div>

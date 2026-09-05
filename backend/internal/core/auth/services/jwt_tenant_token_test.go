@@ -102,3 +102,29 @@ func TestMapToClaims_LegacyDtidPopulatesTenantFallbackID(t *testing.T) {
 			claims.TenantFallbackID, "org-legacy", "dtid")
 	}
 }
+
+// TestBuildTenantScopedClaims_NoAuthTimeButCarriesMFAEpoch is the second arm
+// of the machine-mint exclusion tripwire — the first is
+// TestAuthTime_NotStampedByTheMachineMints, which covers GenerateAccessToken.
+// Ruling R3 excludes auth_time from BOTH signers, and this is the one the
+// dev-token endpoint takes by default whenever a tenant resolves
+// (devtoken.go's GenerateAccessTokenForTenant branch), so leaving it
+// uncovered would leave the exclusion half-guarded exactly where it is most
+// likely to be violated.
+//
+// mfae is the opposite call and is asserted here as present: it proves
+// nothing on its own and is only ever consulted for a token that already
+// carries an MFA marker, which these never do.
+func TestBuildTenantScopedClaims_NoAuthTimeButCarriesMFAEpoch(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	u := &iface.User{UUID: "dev-1", Email: "x@orkestra.dev", Role: "administrator", MFAEpoch: 6}
+
+	c := buildTenantScopedClaims(u, "org-acme", "", []string{"administrator"}, now, time.Hour, "orkestra", "operator")
+
+	if c.AuthTime != 0 {
+		t.Errorf("AuthTime = %d, want 0 — a synthetic dev-token principal proves no interactive presence, and a freshness window here would satisfy the first-factor enrolment gate", c.AuthTime)
+	}
+	if c.MFAEpoch != 6 {
+		t.Errorf("MFAEpoch = %d, want 6 — the epoch is a fact about the subject and must not go missing on this mint", c.MFAEpoch)
+	}
+}

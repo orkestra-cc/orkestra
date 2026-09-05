@@ -1095,3 +1095,23 @@ func (s *userService) UserLifecycleState(ctx context.Context, userUUID string) (
 // iface.UserLifecycleStateProvider. shared/setup type-asserts against
 // this interface rather than the wide iface.UserProvider (Task 5.5).
 var _ iface.UserLifecycleStateProvider = (*userService)(nil)
+
+// BumpMFAEpoch implements iface.MFAEpochBumper — a thin delegation like
+// the other single-field mutators, so the not-found translation applies
+// the same way: repository.ErrUserNotFound must never cross this module
+// boundary raw (see asUserNotFound's doc and this module's CLAUDE.md).
+func (s *userService) BumpMFAEpoch(ctx context.Context, userUUID string) (int, error) {
+	if userUUID == "" {
+		return 0, ErrInvalidInput
+	}
+	epoch, err := s.userRepo.BumpMFAEpoch(ctx, userUUID)
+	if err != nil {
+		return 0, asUserNotFound(err)
+	}
+	return epoch, nil
+}
+
+// Compile-time proof the auth module's module.GetTyped resolution will
+// succeed. A missing method would otherwise surface as a silent
+// "seam absent" WARN at the first factor removal.
+var _ iface.MFAEpochBumper = (*userService)(nil)

@@ -3,8 +3,16 @@
 // Section B item #4 of the 2026-04-24 auth roadmap (Commit C). Uses the
 // ABAC attributes plumbed by Commits A–B:
 //
-//   principal.mfa_enrolled  : Bool (always stamped by the engine)
-//   principal.amr           : Set<String> (optional)
+//   principal.mfa_enrolled  : Bool (always stamped by the engine; honours
+//                             the MFA epoch, so a marker whose factor the
+//                             user has since removed reads as false)
+//   principal.amr           : Set<String> (optional) — the RAW claim, a
+//                             record of how the session authenticated. It
+//                             is NOT epoch-checked and it still lists a
+//                             removed factor's marker, so a policy that
+//                             grants on it grants on authority the
+//                             platform has disowned. For MFA authority use
+//                             principal.mfa_enrolled.
 //   resource.status         : String (threaded from real tenant status)
 //   context.hour_utc        : Long
 //   context.weekday         : String

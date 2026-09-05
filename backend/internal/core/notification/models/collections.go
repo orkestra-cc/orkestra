@@ -44,6 +44,25 @@ const (
 	// where they pick a password; redemption marks the email verified.
 	// Transactional.
 	CategoryAuthAdminInvite = "auth.admin_invite"
+	// CategoryAuthSecurity is the routing/preference category for
+	// account-security notices that are not tied to a single login event
+	// — today only the second-factor change notice below. Transactional.
+	CategoryAuthSecurity = "auth.security"
+)
+
+// Template IDs that do NOT share their category's name. Every category
+// above doubles as the id of the template it seeds; this one does not,
+// because the category is the routing family ("account security") while the
+// template is one specific notice inside it. Kept as its own constant so
+// the two never get confused at a call site.
+const (
+	// TemplateAuthMFAFactorAdded announces that a second factor was added
+	// to an account — a first TOTP enrolment, a TOTP replacement, or a new
+	// passkey (auth spec §4.2 D13). It is what makes an enrolment
+	// performed with a stolen bearer token visible to the account holder.
+	// Data: AppName, UserName, FactorType ("totp"|"passkey"), Replaced
+	// (bool), RequestIP, At, SupportEmail.
+	TemplateAuthMFAFactorAdded = "auth.mfa_factor_added"
 )
 
 // Notification types — drives whether preferences are honoured.

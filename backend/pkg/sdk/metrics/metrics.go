@@ -70,7 +70,8 @@
 //     failed logins.
 //   - orkestra_auth_lockouts_total — increments that reached their
 //     threshold, labelled by scope (ip / email / client / reset-* /
-//     verify-* / mfa-verify). scope="ip" is the stuffing alert.
+//     verify-* / mfa-verify / mfa-enroll). scope="ip" is the stuffing
+//     alert.
 //   - orkestra_auth_mail_dropped_total — transactional auth emails
 //     dropped by a full dispatcher queue, labelled by template id.
 //
@@ -530,7 +531,7 @@ var (
 		"ip": {}, "email": {}, "client": {},
 		"reset-email": {}, "reset-ip": {},
 		"verify-email": {}, "verify-ip": {},
-		"mfa-verify": {},
+		"mfa-verify": {}, "mfa-enroll": {},
 	}
 	droppedTemplates = map[string]struct{}{
 		"auth.reset_password":   {},

@@ -633,14 +633,21 @@ var _ iface.TenantProvider = stubTenant{}
 func TestAuthMiddleware_Fields_CannotReintroduceCookieRotation(t *testing.T) {
 	// Keep in sync with the field list in auth.go's AuthMiddleware struct.
 	expectedFields := map[string]struct{}{
-		"jwtService":             {},
-		"tenant":                 {},
-		"access":                 {},
-		"authz":                  {},
-		"auditSink":              {},
-		"sessionRevocation":      {},
-		"sessionRiskLookup":      {},
-		"mfaEnrollment":          {},
+		"jwtService":        {},
+		"tenant":            {},
+		"access":            {},
+		"authz":             {},
+		"auditSink":         {},
+		"sessionRevocation": {},
+		"sessionRiskLookup": {},
+		"mfaEnrollment":     {},
+		// mfaEpochLookup (spec §4.3 D16) satisfies the bar this tripwire
+		// sets: it is a read-only func(ctx, audience, userUUID) (int,
+		// error) over the user document's mfaEpoch. It carries no auth
+		// service, no config struct and no cookie name, reads no header,
+		// and mints nothing — RequireAuth gains no way through it to
+		// touch the refresh cookie.
+		"mfaEpochLookup":         {},
 		"stepUpPolicy":           {},
 		"users":                  {},
 		"errorManager":           {},

@@ -11,6 +11,7 @@ import type { RootState } from '../index';
 import { setAccessToken, clearAccessToken } from '../slices/authSlice';
 import { requestStepUp } from '../stepUp';
 import { requestPasswordConfirm } from '../passwordConfirm';
+import { DEFAULT_POST_LOGIN, sanitizeReturnTo } from 'utils/returnTo';
 import runtimeConfig from 'config/environment';
 
 // Navigation helper - will be set by the auth provider
@@ -19,6 +20,22 @@ let navigateToLogin: ((location?: string) => void) | null = null;
 export const setNavigateToLogin = (fn: (location?: string) => void) => {
   navigateToLogin = fn;
 };
+
+// The page the operator is on, as the login flow needs to receive it: pathname
+// AND search. One helper because all four navigateToLogin call sites below owe
+// the same answer, and three of them used to pass the pathname alone. That was
+// invisible for as long as AuthProvider stored `state.from` as a string and
+// locationToReturnTo dropped it — every one of these redirects landed on
+// DEFAULT_POST_LOGIN regardless. Now that the callback stores a Location and
+// the deep link survives, the difference is user-visible: a revoked session
+// would return to /admin/modules having silently lost ?tab=addons.
+//
+// The hash is deliberately absent. It never reaches the server, react-router
+// does not use it for routing in this SPA, and sanitizeReturnTo's checks are
+// written against path + query — carrying it would add a value no consumer
+// reads and one more shape for the sanitiser to reason about.
+const currentPath = (): string =>
+  window.location.pathname + window.location.search;
 
 // Endpoints for which a 401 must NOT trigger a silent refresh attempt —
 // either because they *are* the refresh/login/logout endpoints (retrying
@@ -522,7 +539,7 @@ const baseQueryWithRetry: BaseQueryFn<
         });
       }
       if (navigateToLogin) {
-        navigateToLogin(window.location.pathname);
+        navigateToLogin(currentPath());
       }
       return result;
     }
@@ -560,6 +577,40 @@ const baseQueryWithRetry: BaseQueryFn<
       const verified = await requestPasswordConfirm();
       if (verified) {
         return await baseQuery(args, api, extraOptions);
+      }
+      return result;
+    }
+
+    // Reauthentication required — the no-factor branch of the backend's
+    // RequireEnrolmentProof gate (spec §4.2 D14), emitted when a session is
+    // too old to add a *first* second factor.
+    //
+    // It is the third gate answer and the only one with no modal: a step-up
+    // needs a factor the caller does not have, and a password reconfirm is
+    // wrong for both an OAuth-only account (no password to reconfirm) and an
+    // MFA-obligated one inside its grace window (the reconfirm endpoint
+    // refuses those outright). A fresh sign-in is the one answer every
+    // population can give, so clear the session and send the operator to the
+    // login form with the page they were on.
+    //
+    // No `!isAuthEndpoint(requestUrl)` guard, unlike the two branches above.
+    // Theirs is not politeness: the modal they open calls an auth route, so
+    // that route's own 401 would re-open the modal. This branch opens
+    // nothing, issues no request and replays nothing — there is no loop to
+    // avoid, and an auth route that ever answered this code would want the
+    // same redirect anyway.
+    //
+    // The path is sanitised before it leaves. `window.location` is
+    // attacker-influenceable within the origin (history.pushState keeps the
+    // origin but not the shape), so without this the branch would hand a
+    // crafted destination to the login flow on every stale enrolment
+    // attempt. A rejected path degrades to DEFAULT_POST_LOGIN rather than to
+    // `undefined`, which AuthProvider would fill back in from
+    // `location.pathname` — the very value that was just rejected.
+    if (errorData?.code === 'reauthentication_required') {
+      api.dispatch(clearAccessToken());
+      if (navigateToLogin) {
+        navigateToLogin(sanitizeReturnTo(currentPath()) ?? DEFAULT_POST_LOGIN);
       }
       return result;
     }
@@ -644,9 +695,20 @@ const baseQueryWithRetry: BaseQueryFn<
       // the window to a single request, and a genuinely dead session reaches
       // the sign-out branch below instead of failing quietly for a quarter of
       // an hour. The cost is one serialised rotation per verdict 401 — a
-      // wrong password now rotates the refresh cookie, which is harmless: the
-      // family is untouched, and performRefresh coalesces in-tab and takes
-      // the cross-tab lock, so a burst costs one rotation and not one each.
+      // wrong password now rotates the refresh cookie.
+      //
+      // ⚠️ That cost was originally written down as "harmless: the family is
+      // untouched, and performRefresh coalesces, so a burst costs one
+      // rotation and not one each". Staging falsified the second half on
+      // 2026-09-04: performRefresh SERIALISES rotations, it does not collapse
+      // them, so 26 mistyped MFA codes in 13 seconds produced 26 codeless
+      // 401s, 44 `409 refresh_rotation_raced` answers, 8 rotations, and then
+      // reuse detection killed the session. The per-rotation claim is true
+      // and beside the point — the races are the harm. The real fix was on
+      // the backend: every verdict 401 now carries a code
+      // (backend/internal/shared/errcode/codes.go), so those routes take the
+      // coded branch above and never reach this one. This arm remains for
+      // what it was written for, the signing-key rotation.
       //
       // CODELESS, not "anything but access_token_expired". A 401 that names
       // itself has been explained by the server, and a token minted from the
@@ -696,7 +758,7 @@ const baseQueryWithRetry: BaseQueryFn<
     // If session endpoint returns 401, redirect to login immediately
     if (isSessionEndpoint && navigateToLogin) {
       console.log('🔐 Session endpoint returned 401 - redirecting to login');
-      navigateToLogin(window.location.pathname);
+      navigateToLogin(currentPath());
       return result; // Return early to avoid showing toast
     }
 
@@ -707,7 +769,7 @@ const baseQueryWithRetry: BaseQueryFn<
         autoClose: 5000
       });
       if (navigateToLogin) {
-        navigateToLogin(window.location.pathname);
+        navigateToLogin(currentPath());
       }
     }
   }

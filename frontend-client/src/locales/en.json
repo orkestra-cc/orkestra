@@ -204,6 +204,10 @@
     "enrol": {
       "title": "Set up two-factor",
       "subtitle": "Three steps: start, scan, confirm. Save the backup codes somewhere safe.",
+      "checking": "Checking your current setup…",
+      "alreadyTitle": "Two-factor is already set up",
+      "alreadyBody": "This account already has an authenticator enrolled, so there is nothing to set up here. To replace it, ask an administrator to reset two-factor on your account — you can then enrol a new authenticator.",
+      "alreadyBack": "Back to security settings",
       "step1": "Start the flow to generate a fresh secret.",
       "start": "Start setup",
       "starting": "Starting…",

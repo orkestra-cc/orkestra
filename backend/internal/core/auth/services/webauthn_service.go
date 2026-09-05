@@ -53,6 +53,22 @@ type WebAuthnService interface {
 	// mfaMethods allow-list gates passkey enrollment alongside TOTP.
 	// Phase 3.6 of the auth-policy roadmap.
 	SetPolicy(p *AuthPolicyService)
+	// SetAuditSink wires the persistent audit sink so passkey
+	// registration and removal emit auth_security_events rows — the same
+	// seam mfaService has had since Phase 2.2. Nil falls back to the
+	// slog-only lane.
+	SetAuditSink(sink SecurityEventSink)
+	// SetEpochBumper wires the MFA epoch counter (spec §4.3 D16).
+	// Optional and degrading; see MFAService.SetEpochBumper for why.
+	SetEpochBumper(b iface.MFAEpochBumper)
+	// SetDeviceTrust wires the "remember this device" service so removing
+	// a passkey also drops the trust grants whose amr annotation may name
+	// it. Nothing records which credential earned which grant, so the
+	// revoke cannot be narrower than "all of this user's". Optional.
+	SetDeviceTrust(dt DeviceTrustService)
+	// SetFactorAddedNotifier wires the "a second factor was added to your
+	// account" email. Optional — nil sends nothing.
+	SetFactorAddedNotifier(n *FactorAddedNotifier)
 }
 
 type webAuthnService struct {
@@ -68,11 +84,30 @@ type webAuthnService struct {
 	// allow-list. Phase 3.6 — nil keeps the pre-policy "all methods
 	// allowed" behaviour so existing tests don't have to wire it.
 	policy *AuthPolicyService
+	// The credential-change seams (spec §4.2 D13, §4.3 D16). All
+	// optional; each degrades to "that half of the rule does not
+	// happen", never to a failed request.
+	auditSink   SecurityEventSink
+	epoch       iface.MFAEpochBumper
+	deviceTrust DeviceTrustService
+	factorAdded *FactorAddedNotifier
 }
 
 // SetPolicy wires the admin-managed AuthPolicyService so the
 // mfaMethods allow-list gates passkey enrollment in addition to TOTP.
 func (s *webAuthnService) SetPolicy(p *AuthPolicyService) { s.policy = p }
+
+// SetAuditSink wires the optional persistent audit sink.
+func (s *webAuthnService) SetAuditSink(sink SecurityEventSink) { s.auditSink = sink }
+
+// SetEpochBumper wires the optional MFA epoch counter.
+func (s *webAuthnService) SetEpochBumper(b iface.MFAEpochBumper) { s.epoch = b }
+
+// SetDeviceTrust wires the optional device-trust service.
+func (s *webAuthnService) SetDeviceTrust(dt DeviceTrustService) { s.deviceTrust = dt }
+
+// SetFactorAddedNotifier wires the optional factor-added email.
+func (s *webAuthnService) SetFactorAddedNotifier(n *FactorAddedNotifier) { s.factorAdded = n }
 
 // NewWebAuthnService builds the orchestrator. The supplied *webauthn.WebAuthn
 // must already be configured with the deployment's RP ID + origins; pass nil
@@ -201,6 +236,17 @@ func (s *webAuthnService) FinishRegistration(ctx context.Context, user *iface.Us
 	if err := s.factors.AppendWebAuthnCredential(ctx, user.UUID, stored); err != nil {
 		return nil, fmt.Errorf("persist webauthn credential: %w", err)
 	}
+
+	// D13: an ADDITION. The epoch deliberately does not move — authority
+	// proven by a factor that still exists stays valid — but it is
+	// audited and announced, because registering a passkey with a stolen
+	// bearer token is exactly the silent takeover this notice exists to
+	// expose.
+	emitCredentialEvent(ctx, s.auditSink, s.logger, "self_passkey_registered", user.UUID, map[string]interface{}{
+		"factorType":     "passkey",
+		"credentialName": name,
+	})
+	s.factorAdded.NotifyFactorAdded(ctx, user.UUID, "passkey", false)
 
 	s.logger.Info("webauthn credential registered",
 		slog.String("userUUID", user.UUID),
@@ -350,18 +396,47 @@ func (s *webAuthnService) ListCredentials(ctx context.Context, userUUID string) 
 	return s.loadCredentials(ctx, userUUID)
 }
 
+// RemoveCredential deletes one passkey and applies the credential-removal
+// rule (spec §4.3 D16) to EVERY removal, not only the last factor: a
+// removed credential is one the user no longer trusts — a lost or
+// compromised device — and it may have CREATED sessions through the passkey
+// login flow. Neither the session document nor `amr` records which
+// credential minted which session, so the rule cannot be narrower.
+//
+// The epoch and the device-trust revoke are applied here; ending the
+// caller's other sessions is the handler's half (it alone sees the sid).
+// A DELETE that matched nothing changes no credential set and so triggers
+// none of it — otherwise any bearer could strip its own MFA authority by
+// looping on an unknown credential id.
 func (s *webAuthnService) RemoveCredential(ctx context.Context, userUUID string, credentialID []byte) (bool, error) {
 	removed, err := s.factors.RemoveWebAuthnCredential(ctx, userUUID, credentialID)
 	if err != nil {
 		return false, err
 	}
 	if removed {
+		s.bumpEpoch(ctx, userUUID)
+		if s.deviceTrust != nil {
+			if err := s.deviceTrust.RevokeAllByUser(ctx, userUUID, authModels.DeviceTrustRevokedOnMFARemove); err != nil {
+				s.logger.Warn("device_trust: revoke on passkey removal failed",
+					slog.String("user_uuid", userUUID),
+					slog.String("error", err.Error()))
+			}
+		}
+		emitCredentialEvent(ctx, s.auditSink, s.logger, "self_passkey_removed", userUUID, map[string]interface{}{
+			"factorType": "passkey",
+		})
 		s.logger.Info("webauthn credential removed",
 			slog.String("userUUID", userUUID),
 			slog.Int("credentialIDLen", len(credentialID)),
 		)
 	}
 	return removed, nil
+}
+
+// bumpEpoch moves the user's MFA epoch. Shared implementation with
+// mfaService so the two cannot drift on the degradation contract.
+func (s *webAuthnService) bumpEpoch(ctx context.Context, userUUID string) {
+	bumpMFAEpoch(ctx, s.epoch, s.logger, userUUID)
 }
 
 func (s *webAuthnService) HasCredentials(ctx context.Context, userUUID string) (bool, error) {

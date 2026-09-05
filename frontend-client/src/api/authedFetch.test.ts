@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 
 import { authedFetch, PROACTIVE_REFRESH_SKEW_MS } from "@/api/authedFetch";
+import { browserNavigation } from "@/api/auth";
 import {
   clearSessionLocally,
   getAccessToken,
@@ -986,5 +987,92 @@ describe("authedFetch proactive rotation (§4.11)", () => {
     expect(after).toContain(
       "sent.expiresAt !== null && sent.expiresAt <= sentAt",
     );
+  });
+});
+
+// The client SPA has no step-up modal and is deliberately not growing one
+// (spec §4.2 D14). reauthentication_required is therefore the one 401 code
+// this wrapper answers with a NAVIGATION: everything else it can either
+// recover from or hand back to the caller.
+describe("authedFetch reauthentication_required (§4.2 D14, branch 1b)", () => {
+  afterEach(() => {
+    window.history.pushState({}, "", "/");
+  });
+
+  it("clears the session and leaves for /login with a sanitised next", async () => {
+    // Imported from @/api/auth on purpose: the seam moved to its own module to
+    // break an import cycle, and this asserts the re-export still hands out
+    // the same object the wrapper calls.
+    const assign = vi
+      .spyOn(browserNavigation, "assign")
+      .mockImplementation(() => {});
+    window.history.pushState({}, "", "/account/security/mfa");
+    const refresh = countRefresh(() => HttpResponse.json({ accessToken: "x" }));
+    const rec = recordRequests(() =>
+      HttpResponse.json(
+        { code: "reauthentication_required", maxAgeSeconds: 300, authTime: 0 },
+        { status: 401 },
+      ),
+    );
+    seedToken("at-live", 900);
+
+    const res = await authedFetch("/v1/me/thing");
+
+    expect(res.status).toBe(401);
+    expect(assign).toHaveBeenCalledWith(
+      "/login?next=%2Faccount%2Fsecurity%2Fmfa",
+    );
+    // BOTH halves. The marker is what makes the cold load after this
+    // navigation attempt a silent refresh, and a token minted from the same
+    // cookie carries the same stale auth_time — the user would land back on
+    // the refusal with nothing to do about it.
+    expect(getAccessToken()).toBeNull();
+    expect(hasSessionMarker()).toBe(false);
+    // No rotation and no replay: neither ages a session backwards.
+    expect(refresh.hits()).toBe(0);
+    expect(rec.seen.length).toBe(1);
+  });
+
+  // sanitizeNext is the SPA's single open-redirect gate, and it also refuses
+  // the auth routes — a next pointing at /login would loop the user back into
+  // the page they were sent to.
+  it.each([
+    ["an encoded protocol-relative leader", "/%2fevil.example.com/steal"],
+    ["the login route itself", "/login"],
+  ])("falls back to a bare /login for %s", async (_label, path) => {
+    const assign = vi
+      .spyOn(browserNavigation, "assign")
+      .mockImplementation(() => {});
+    window.history.pushState({}, "", path);
+    recordRequests(() =>
+      HttpResponse.json({ code: "reauthentication_required" }, { status: 401 }),
+    );
+    seedToken("at-live", 900);
+
+    await authedFetch("/v1/me/thing");
+
+    expect(assign).toHaveBeenCalledWith("/login");
+  });
+
+  // The sibling gate answer keeps its existing behaviour: the page renders it
+  // as inline error copy, and nothing navigates. An enrolled client user
+  // REPLACING a factor gets this code, and MfaEnrolPage keeps them off that
+  // path by reading /me/mfa first.
+  it("does not navigate on step_up_required", async () => {
+    const assign = vi
+      .spyOn(browserNavigation, "assign")
+      .mockImplementation(() => {});
+    window.history.pushState({}, "", "/account/security/mfa");
+    recordRequests(() =>
+      HttpResponse.json({ code: "step_up_required" }, { status: 401 }),
+    );
+    seedToken("at-live", 900);
+
+    const res = await authedFetch("/v1/me/thing");
+
+    expect(res.status).toBe(401);
+    expect(assign).not.toHaveBeenCalled();
+    expect(getAccessToken()).toBe("at-live");
+    expect(hasSessionMarker()).toBe(true);
   });
 });
