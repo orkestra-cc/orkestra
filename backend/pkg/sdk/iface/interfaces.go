@@ -717,18 +717,40 @@ type AuthzProvider interface {
 // MUTATES must not treat it as nothing — but what it does about it depends
 // on the DIRECTION of the mutation (D27 as amended):
 //
-//   - A mutation that GRANTS is gated: a stale verdict after it is a DENY,
-//     so refusing the write and asking the caller to retry costs only a
-//     delay. authz's own role/binding create+update paths work this way.
-//   - A mutation that REVOKES — a binding or role deletion, and a system-role
-//     change in either direction — is written first and the shortfall
-//     reported. A stale verdict after a revocation is an ALLOW, and refusing
-//     the write holds the privilege indefinitely where writing it holds it
-//     for at most the cache TTL. With the cache store fully down, reads
-//     bypass the cache anyway, so a written revocation takes effect at once.
+//   - A mutation that GRANTS may be gated: a stale verdict after it is a
+//     DENY, so refusing the write and asking the caller to retry costs only
+//     a delay.
+//   - A mutation that REVOKES is written first and the shortfall reported.
+//     A stale verdict after a revocation is an ALLOW, and refusing the write
+//     holds the privilege indefinitely where writing it holds it for at most
+//     the cache TTL. With the cache store fully down, reads bypass the cache
+//     anyway, so a written revocation takes effect at once.
 //
-// Either way the failure must be surfaced — logged, counted, and (for the
-// system-role change) recorded in the audit row — never swallowed.
+// The base does NOT apply one uniform shape — the direction is decided per
+// call site, and authz's own service is the worked example (three seams,
+// all going through one bump helper):
+//
+//   - `withGeneration` — the gate. Used by `UpdateRole` for a patch whose
+//     permission set is a superset of the current one (a pure addition, a
+//     rename, an isActive toggle) and by `CreateBinding`/`EnsureBinding`
+//     when a real actor is the granter.
+//   - `writeThenInvalidate` — write, then invalidate best-effort. Used by
+//     `DeleteRole`, `DeleteBinding`, both tenant cascades, by `UpdateRole`
+//     when the patch removes any key, and by a platform-issued binding grant
+//     (granter "system"), where a refusal would abort a tenant flow midway
+//     rather than reach an operator who could retry.
+//   - `bindingGrantGeneration` — the one seam that picks between the two, so
+//     `CreateBinding` and `EnsureBinding` cannot drift apart.
+//
+// `CreateRole` issues no bump at all, in either shape: a brand-new role has
+// no bindings, so it changes nobody's effective permissions.
+//
+// The user module's system-role change is `writeThenInvalidate`-shaped and
+// is never refused in either direction: refusing a demotion would keep the
+// old role's verdicts alive indefinitely instead of for at most the TTL.
+//
+// Whatever the shape, the failure must be surfaced — logged, counted, and
+// (for the system-role change) recorded in the audit row — never swallowed.
 //
 // There are THREE cache states, not two, and only the middle one is an
 // error:
@@ -758,13 +780,15 @@ type AuthzCacheInvalidator interface {
 	// reader files its result under the generation it read the cache
 	// with, so a verdict computed before this call is born unreachable —
 	// but a reader that resolved the database across the call can still
-	// publish a stale entry. A caller that GRANTS therefore uses the
-	// pre-write / write / post-write protocol (D27): invalidate, refuse
-	// the change if that fails, write, then invalidate again
-	// best-effort. A caller that REVOKES writes first and invalidates
-	// once, best-effort, because refusing a revocation is worse than
-	// applying it late. A single bump is sufficient only when the caller
-	// is not itself the writer.
+	// publish a stale entry. A caller that GRANTS closes that window
+	// with the pre-write / write / post-write protocol (D27):
+	// invalidate, refuse the change if that fails, write, then
+	// invalidate again best-effort. A caller that REVOKES writes first
+	// and invalidates once, best-effort, because refusing a revocation
+	// is worse than applying it late; the window is then bounded by the
+	// cache TTL instead of closed. A caller whose write cannot change
+	// any existing verdict (authz `CreateRole`) needs neither. A single
+	// bump is sufficient only when the caller is not itself the writer.
 	InvalidateUserPermissions(ctx context.Context, userUUID string) error
 }
 

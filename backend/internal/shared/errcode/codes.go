@@ -206,14 +206,26 @@ const UserLastAdminForbidden = "user.last_admin_forbidden"
 // the same invariant. 403.
 const UserRoleEscalationForbidden = "user.role_escalation_forbidden"
 
-// UserRoleLookupUnavailable signals that the operator-tier role guards
-// could not read the CALLING user's row, so the tier comparison could
-// not be made. The guards take the caller's role from the database, not
-// from the `srole` JWT claim (spec §4.6 D28): the claim can be a whole
-// access-token lifetime stale, which is exactly the window the
-// role-change propagation exists to close. Falling back to the claim
-// here would make it authoritative again precisely when the database
-// cannot contradict it, so the request fails closed instead. 500.
+// UserRoleLookupUnavailable signals that a role a guard on the
+// operator-tier user routes had to read was unavailable, so the request
+// could not be reasoned about and was refused. Two lookups can raise it,
+// both on a patch that names a role:
+//
+//   - The CALLING user's row, needed for the tier comparison. The guards
+//     take the caller's role from the database, not from the `srole` JWT
+//     claim (spec §4.6 D28): the claim can be a whole access-token
+//     lifetime stale, which is exactly the window the role-change
+//     propagation exists to close. Falling back to the claim here would
+//     make it authoritative again precisely when the database cannot
+//     contradict it.
+//   - The TARGET's current role, needed to know whether the role actually
+//     changes. Only a change retires the authz permission cache and ends
+//     the sessions minted under the old role (§4.6 D27), so writing
+//     through an unreadable pre-read would apply the new role while
+//     silently skipping both. A "no such user" is not this case — nothing
+//     is written, and the request gets its ordinary 404.
+//
+// Either way the request fails closed. 500.
 const UserRoleLookupUnavailable = "user.role_lookup_unavailable"
 
 // --- marketing ---

@@ -7,10 +7,13 @@ package handlers
 // to the 60s permission-cache TTL plus a whole access-token lifetime of
 // stale `srole`.
 //
-// The role branch now does what the deactivate branch does, in the one
-// order that is safe in BOTH directions: write, then best-effort
-// invalidate, then terminate the sessions minted under the old role,
-// then audit what was actually achieved.
+// The role branch now does what the deactivate branch does, with the one
+// ordering that is load-bearing: the WRITE comes first, and the
+// best-effort invalidation, the teardown of the sessions minted under
+// the old role and the audit row all follow it. (For a role-only patch
+// that reads write → invalidate → terminate → audit; a patch that also
+// deactivates ends the sessions in the isActive branch, so the middle
+// two swap. Both are correct — see emitUpdateLifecycleEvents.)
 //
 // There is deliberately NO refusal. A role change is never made safer by
 // refusing it: a refused DEMOTION recreates M-13 exactly — the demoted
@@ -22,10 +25,12 @@ package handlers
 import (
 	"context"
 	"errors"
+	"net/http"
 	"sync"
 	"testing"
 
 	"github.com/orkestra/backend/internal/core/user/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
@@ -137,6 +142,12 @@ type userStore struct {
 	rows    map[string]*iface.UserManagementResponse
 	updates int
 	admins  int64 // what CountActiveAdministrators reports
+	// readErr, when set, makes GetUser fail for this id only — the
+	// transient store failure the pre-read must not write through.
+	// Scoped to one id so the CALLER's own row still resolves (D28
+	// reads it from the database too) and the test is about the target.
+	readErrID string
+	readErr   error
 
 	trace *callTrace
 }
@@ -151,6 +162,9 @@ func newUserStore(trace *callTrace) *userStore {
 		getUserFn: func(_ context.Context, id string) (*iface.UserManagementResponse, error) {
 			s.mu.Lock()
 			defer s.mu.Unlock()
+			if s.readErr != nil && id == s.readErrID {
+				return nil, s.readErr
+			}
 			row, ok := s.rows[id]
 			if !ok {
 				// Loud, never silent. An unseeded id would otherwise
@@ -212,6 +226,14 @@ func (s *userStore) roleOf(uuid string) string {
 		return ""
 	}
 	return row.Role
+}
+
+// failReadsFor makes GetUser return err for exactly one id.
+func (s *userStore) failReadsFor(uuid string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.readErrID = uuid
+	s.readErr = err
 }
 
 func (s *userStore) updateCalls() int {
@@ -442,10 +464,13 @@ func TestUpdateUser_RoleChangeRetiresCacheThenSessionsThenAudits(t *testing.T) {
 		t.Errorf("from/to = %v/%v, want administrator/operator", ev.Metadata["from"], ev.Metadata["to"])
 	}
 
-	// The order is the mechanism, not an accident: invalidating BEFORE
-	// the write would retire verdicts computed from the old role and
-	// then leave the write free to be cached again from a concurrent
-	// read.
+	// The write coming FIRST is the mechanism, not an accident:
+	// invalidating before it would retire verdicts computed from the old
+	// role and then leave the write free to be cached again from a
+	// concurrent read. The tail is this order only for a role-ONLY patch
+	// — a patch that also deactivates ends the sessions in the isActive
+	// branch, i.e. before the invalidation. Both are correct; only
+	// "write first" is invariant.
 	assertOrder(t, hn.trace, "write", "invalidate", "terminate", "audit")
 }
 
@@ -666,5 +691,105 @@ func TestUpdateUser_DeactivationWithRoleChangeTerminatesOnce(t *testing.T) {
 	}
 	if !metaBool(t, hn.roleChangedEvent(t), "sessions_terminated") {
 		t.Error("sessions_terminated must report the one teardown that happened")
+	}
+}
+
+// The cascade rides on the pre-read: `previous` is what decides whether
+// the role actually CHANGED, and only a change retires the authz cache
+// and ends the sessions. A pre-read that fails transiently while the
+// write succeeds would therefore apply the new role with neither effect
+// and no audit row — M-13 silently reopened for that request. The
+// handler must refuse instead of writing blind.
+func TestUpdateUser_RolePatchRefusesWhenThePreReadFails(t *testing.T) {
+	hn := newRoleChangeHarness(t)
+	hn.users.seed("u-1", "administrator")
+	hn.requireSeeded(t, "u-1", "administrator")
+	hn.users.failReadsFor("u-1", errors.New("mongo: connection reset"))
+
+	err := hn.update(t, "u-1", iface.UpdateUserInput{Role: "operator"})
+	assertStatus(t, err, http.StatusInternalServerError)
+	assertErrCode(t, err, errcode.UserRoleLookupUnavailable)
+
+	if got := hn.users.updateCalls(); got != 0 {
+		t.Fatalf("UpdateUser called %d times, want 0 — nothing may be written blind", got)
+	}
+	if got := hn.users.roleOf("u-1"); got != "administrator" {
+		t.Fatalf("role = %q, want the seeded role untouched", got)
+	}
+	if got := hn.invalidator.total(); got != 0 {
+		t.Errorf("a refused request must retire nothing, got %d invalidations", got)
+	}
+	if got := hn.terminations("u-1"); got != 0 {
+		t.Errorf("a refused request must end no session, got %d terminations", got)
+	}
+}
+
+// A "no such user" pre-read is NOT that case: nothing will be written,
+// so no security effect can be lost, and the 404 the write produces is
+// the honest answer. Pins the carve-out.
+func TestUpdateUser_RolePatchOnAMissingUserStill404s(t *testing.T) {
+	hn := newRoleChangeHarness(t)
+	// "u-1" is deliberately never seeded, so the store answers
+	// services.ErrUserNotFound.
+	if got := hn.users.roleOf("u-1"); got != "" {
+		t.Fatalf("fixture: u-1 must not exist, got role %q", got)
+	}
+
+	err := hn.update(t, "u-1", iface.UpdateUserInput{Role: "operator"})
+	assertStatus(t, err, http.StatusNotFound)
+}
+
+// A patch with no Role cannot lose a security effect to a failed
+// pre-read — the deactivate branch tolerates a nil snapshot by design —
+// so a profile edit must NOT be made more fragile by the guard above.
+func TestUpdateUser_NonRolePatchSurvivesAFailedPreRead(t *testing.T) {
+	hn := newRoleChangeHarness(t)
+	hn.users.seed("u-1", "administrator")
+	hn.requireSeeded(t, "u-1", "administrator")
+	hn.users.failReadsFor("u-1", errors.New("mongo: connection reset"))
+
+	if err := hn.update(t, "u-1", iface.UpdateUserInput{FullName: "New Name"}); err != nil {
+		t.Fatalf("a rename must survive a pre-read failure: %v", err)
+	}
+	if got := hn.users.updateCalls(); got != 1 {
+		t.Fatalf("UpdateUser called %d times, want 1", got)
+	}
+}
+
+// invalidateAuthz classifies its two failure modes apart, and the audit
+// flag is false for both — so nothing else observes the difference. Only
+// the log line and the failure counter do, and a future edit that
+// collapsed the two would report a genuine cache outage as "nothing to
+// retire" (or move the counter for a deployment that has no cache at
+// all). This is where that classification is pinned.
+func TestInvalidateAuthz_SeparatesUnwiredFromFailed(t *testing.T) {
+	storeDown := errors.New("redis down")
+
+	cases := []struct {
+		name        string
+		opts        []harnessOpt
+		wantUnwired bool
+		wantErr     bool
+	}{
+		{name: "no registry", opts: []harnessOpt{withoutRegistry()}, wantUnwired: true, wantErr: true},
+		{name: "authz provider unregistered", opts: []harnessOpt{withoutInvalidator()}, wantUnwired: true, wantErr: true},
+		{name: "provider is not an invalidator", opts: []harnessOpt{withBareAuthzProvider()}, wantUnwired: true, wantErr: true},
+		// Wired, and the bump failed. This one must NOT read as unwired:
+		// a cached verdict from the old role really can survive.
+		{name: "wired but the bump failed", opts: []harnessOpt{withInvalidationFailure(storeDown)}, wantUnwired: false, wantErr: true},
+		{name: "wired and retired", opts: nil},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			hn := newRoleChangeHarness(t, c.opts...)
+			err := hn.h.invalidateAuthz(context.Background(), "u-1")
+			if c.wantErr != (err != nil) {
+				t.Fatalf("err = %v, wantErr = %v", err, c.wantErr)
+			}
+			if got := errors.Is(err, errAuthzInvalidatorUnwired); got != c.wantUnwired {
+				t.Fatalf("errors.Is(%v, errAuthzInvalidatorUnwired) = %v, want %v", err, got, c.wantUnwired)
+			}
+		})
 	}
 }
