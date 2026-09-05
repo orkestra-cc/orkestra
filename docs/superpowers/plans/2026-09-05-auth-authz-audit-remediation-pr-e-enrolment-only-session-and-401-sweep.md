@@ -46,7 +46,7 @@ Anchors in this plan were verified against `origin/dev` @ `38c8c9b4e` on 2026-09
 
 ## Declared deviations from the spec (read before executing)
 
-1. 🔴 **D40's "mints a full pair" is NOT implemented. A successful enrolment clears the grace stamp and the user signs in again.** The spec says `enroll/confirm` from an enrolment-only session returns a full token pair. Implementing that produces a session shape the login path can never produce — **an enrolled user holding `amr: ["pwd"]`** — because the user has just created a factor they have not used. `RequireMFA()` gates the authz role routes (`authz/module.go:325,331,337,343,349`) and the tenant routes (`tenant/module.go:359,365`), so that session would answer `mfa_required` on exactly the pages an administrator needs, i.e. a console that looks signed in and is half broken. The alternatives are worse: synthesising an MFA marker the user never proved would be a lie in the token. Signing in again is one extra login, it produces a consistent session, and it verifies the freshly enrolled factor at the only moment when failing is cheap — the backup codes are still on screen. **The SPA must display and acknowledge the backup codes before it signs the user out** (Task 6). If the architect rejects this deviation, D40 needs the token-issuer wiring and a ruling on what `amr` such a pair carries; nothing else in the plan changes.
+1. ✅ **RESOLVED — no longer a deviation. The architect approved it on 2026-09-05 and the spec was amended, so D40 now says what this plan does.** Kept in this slot because the reasoning is what the tests defend, and a reader who removes those tests should have to read it first. The draft D40 had `enroll/confirm` return a full token pair; that pair would carry **`amr: ["pwd"]` for a user who now holds a factor they have never used**, a session shape the login path can never produce. `RequireMFA()` gates the authz role routes (`authz/module.go:325,331,337,343,349`) and the tenant routes (`tenant/module.go:359,365`), so it would answer `mfa_required` on exactly the pages an administrator needs — signed in, and unable to work. Synthesising an MFA marker the user never proved would be worse. Instead the stamp is cleared, nothing is minted, and the user signs in with the factor they just made, which also exercises it while the backup codes are still on screen. **The SPA must display and acknowledge the backup codes before signing the user out** (Task 6) — the codes are shown once.
 2. **`MFAEnrolmentProofMaxAge` is a new exported constant** in `internal/core/auth/services/mfa_policy.go`, next to `MFAEnrollmentGraceWindow`. The spec cites the gate's `maxAge` as `5*time.Minute` at two literals (`auth/module.go:1784` and `:1924`); D38 needs the same value inside `password_auth_service`, and a third literal would be the drift the spec warns about elsewhere. Both mount sites are changed to use the constant.
 3. **The access-token lifetime override rides on `SecurityContext`,** as `Lifetime time.Duration` (zero = the policy default), beside `AMR`, `LastOTPAt` and `AuthTime`. The spec names the TTL but not the seam; `SecurityContext` is already the documented transport for per-mint claim data ("the mint seams take a SecurityContext, not a claims struct"), so this follows the established pattern rather than adding a JWTService method.
 4. **The R4 baseline is populated in Task 8 and deleted in Task 10.** The spec says R4 ships with an empty baseline, and it does — at the end of the PR. Freezing the 74 known sites when the rule lands means the rule is live against *new* code for the whole sweep, which is the repo's own stated pattern for `errquality`. Task 10's final step asserts no `:R4` line survives.
@@ -1068,7 +1068,7 @@ The enrolment screen must **suppress the navigation shell**: every other request
 
 - [ ] **Step 5: Finish the flow honestly**
 
-After a successful `enroll/confirm` **in an enrolment-only session** (deviation 1): show the backup codes, require an explicit acknowledgement, then clear the session and navigate to `/login` with a message along the lines of "Second factor enrolled. Sign in with it to continue." Do **not** skip the acknowledgement — the backup codes are shown once and the sign-out would discard them.
+After a successful `enroll/confirm` **in an enrolment-only session** (spec §4.12 D40 + D42): show the backup codes, require an explicit acknowledgement, then clear the session and navigate to `/login` with a message along the lines of "Second factor enrolled. Sign in with it to continue." Do **not** skip the acknowledgement — the backup codes are shown once and the sign-out would discard them.
 
 An ordinary session's enrolment is unchanged: no sign-out, no redirect.
 
@@ -1094,10 +1094,10 @@ operator straight to enrolment with the nav shell suppressed, because every
 other request answers 403 mfa_enrollment_required by design. A 403 is not a
 sign-out and a test fences that.
 
-Per the plan's deviation 1, a successful enrolment does not mint a full
-pair: the wizard shows the backup codes, waits for acknowledgement, then
-sends the user to sign in with the factor they just created — which is also
-the cheapest possible moment to discover a mis-scanned secret.
+Per D40, a successful enrolment does not mint a full pair: the wizard shows
+the backup codes, waits for acknowledgement, then sends the user to sign in
+with the factor they just created — which is also the cheapest possible
+moment to discover a mis-scanned secret.
 
 Claude-Session: https://claude.ai/code/session_0155Lt3QwR9zX15oGNKrn1T1
 ```
@@ -1510,6 +1510,6 @@ Claude-Session: https://claude.ai/code/session_0155Lt3QwR9zX15oGNKrn1T1
 
 ## Self-review notes (done; recorded so a reviewer can check the same things)
 
-- **Spec coverage.** D37 → Task 3 (+4 for OAuth); D38 → Tasks 1, 3; D39 → Task 2; D40 → Task 5 *with deviation 1 on the "full pair" half*; D41 → Tasks 3, 5; D42 → Tasks 6, 7; D43 → Tasks 9, 10; D44 → Task 10 step 6 (+ the R4 scope in Task 8); D45 → Task 8; D46 → Task 10 step 7. Edge cases 32–37: 32 (session doc created in both branches, Task 3 step 4), 33 (Task 2 drift test), 34 (Task 1 lifetime override), 35 (Task 1 omitted-when-false test), 36 (Task 10 step 6), 37 (Task 8 allow-comment test).
+- **Spec coverage.** D37 → Task 3 (+4 for OAuth); D38 → Tasks 1, 3; D39 → Task 2; D40 → Task 5 (the spec's amended form: clear the stamp, mint nothing) + Task 6 for its SPA half; D41 → Tasks 3, 5; D42 → Tasks 6, 7; D43 → Tasks 9, 10; D44 → Task 10 step 6 (+ the R4 scope in Task 8); D45 → Task 8; D46 → Task 10 step 7. Edge cases 32–37: 32 (session doc created in both branches, Task 3 step 4), 33 (Task 2 drift test), 34 (Task 1 lifetime override), 35 (Task 1 omitted-when-false test), 36 (Task 10 step 6), 37 (Task 8 allow-comment test).
 - **Type consistency.** `EnrollOnly` is the Go field on both `JWTClaims` and `SecurityContext`; `enroll_only` is the JWT claim; `EnrolmentOnly` is the `LoginTokenContext` field and the plan's prose spelling; `EnrollmentOnly` / `enrollmentOnly` is the API response field and the TypeScript name. The mixed spelling is deliberate — Go claim structs in this repo use `Enroll…`, the spec prose uses "enrolment" — but it is exactly the kind of thing that drifts, so every occurrence above is intentional and should be checked, not normalised on sight.
 - **Known open question for the pre-flight scan:** whether `internal/shared/middleware` may import `internal/core/auth/handlers` for `EnrolmentPaths` without an import cycle (Task 2 step 8 carries the fallback), and whether Task 4's mint belongs in `evaluateMFAForOAuth` or at its caller.

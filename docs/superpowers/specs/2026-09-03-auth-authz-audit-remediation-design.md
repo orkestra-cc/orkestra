@@ -229,6 +229,16 @@ fresh `auth_time`); it simply never obtained a session to present to it. D37
 stops `completeLogin` refusing the mint and issues an **enrolment-only
 session** instead: authority withheld, session granted.
 
+**D40 was amended before v1.16 shipped.** The draft had a successful
+enrolment mint a full token pair. Writing the implementation plan against the
+tree showed that pair would carry `amr: ["pwd"]` for a user who now holds an
+unused factor, and `RequireMFA()` gates the authz and tenant routes — the
+session would look signed in and refuse an administrator's actual work. D40
+now clears the grace stamp and stops there; the user signs in with the factor
+they just created, and D42 makes the SPAs take a backup-code acknowledgement
+before that sign-out. The amendment costs one login and buys a consistent
+session plus an early test of the new factor.
+
 **§4.13 (D43–D46): the codeless-401 sweep is finished, then enforced.** PR B
 coded the MFA verdicts (`4cfa2531b`) after 26 wrong codes in 13 seconds
 produced 54 rotations and killed a refresh family. That fixed the handlers it
@@ -387,6 +397,12 @@ first in each block.
 - Rely on `AdminReset` alone (today's behaviour): correct for every account
   except the one that matters, the last privileged operator, who has nobody
   to reset them.
+- Mint a full pair at `enroll/confirm` (the v1.16 draft, struck after the
+  implementation plan was reviewed): it hands an enrolled user a session
+  carrying `amr: ["pwd"]`, which `RequireMFA()` refuses on the authz and
+  tenant routes. The session looks signed in and cannot do an
+  administrator's work, and the only way to make it whole is to synthesise
+  a factor proof that never happened.
 - A break-glass recovery token minted from the CLI: real operational value,
   but a new credential class with its own storage, audit and revocation
   story, to answer a question an existing gate already answers.
@@ -1458,8 +1474,9 @@ sentences known to be wrong after this spec:
   mobile nonce/iss); new sections: attempt counters, enrolment gate and the
   `auth_time` claim, refresh AMR recomputation, tombstones.
 - v1.16 (PR E): `auth/CLAUDE.md` gains the enrolment-only session — the
-  `enroll_only` claim, the derived allowlist and the fact that grace expiry
-  no longer refuses a login; the JWT claims table in
+  `enroll_only` claim, the derived allowlist, the fact that grace expiry
+  no longer refuses a login, and **why a successful enrolment does not mint a
+  full pair**; the JWT claims table in
   `authentication-flow.mdx` gains `enroll_only` beside `auth_time` and
   `mfae`; `backend/CLAUDE.md`'s error-code contract records that R4 now
   enforces the 401 rule it already states, **and that `RequireAuth`'s
@@ -1542,7 +1559,7 @@ The TTL adds no constraint a user did not already face: D11 gates both
 `maxAge`. Too slow means signing in again for a fresh five minutes — a loop
 that terminates, where today's behaviour is not a loop at all. The console's
 proactive refresh finds no cookie and does nothing; by the time it would
-matter the session is either upgraded (D40) or gone.
+matter the session has either done its one job (D40) or lapsed.
 
 **D39 — Deny by default in `RequireAuth`, allowlist derived from one list.**
 The claim is `enroll_only` (bool, omitted when false; `claimsToMap` /
@@ -1579,10 +1596,27 @@ A hand-maintained path allowlist is what failed open in the console
 (`AUTH_ENDPOINT_PATHS`, and its own comment says so). The derivation plus the
 drift test is the load-bearing half of this decision, not a nicety.
 
-**D40 — Enrolling completes the upgrade, and `ClearMFAGrace` gains its first
-caller.** A successful `ConfirmEnrollment` or `FinishRegistration` clears
-`MFAGraceStartedAt` and, when the caller held an enrolment-only session,
-mints a full pair with its refresh cookie. Clearing on **any** successful
+**D40 — Enrolling clears the clock; the user then signs in with what they
+just made.** A successful `ConfirmEnrollment` or `FinishRegistration` clears
+`MFAGraceStartedAt`. It does **not** mint a full pair, and the reason is not
+economy: a pair minted here would carry `amr: ["pwd"]` for a user who now
+holds a factor they have never used, which is a session shape the login path
+can never produce. `RequireMFA()` gates the authz role routes
+(`authz/module.go:325,331,337,343,349`) and the tenant routes
+(`tenant/module.go:359,365`), so that session answers `mfa_required` on
+exactly the pages an administrator needs — a console that looks signed in and
+is half broken. Synthesising an MFA marker the user never proved would be
+worse: a lie in the token.
+
+So the enrolment-only session simply runs out, and the user signs in again —
+now down the ordinary MFA path, because they have a factor. The cost is one
+login. The gain, beyond a consistent session, is that the new factor is
+exercised at the only moment when its failure is cheap: **the SPA must show
+the backup codes and take an explicit acknowledgement before it signs the
+user out** (D42), so a mis-scanned TOTP secret is discovered while the
+recovery codes are still on screen rather than at the next sign-in.
+
+Clearing on **any** successful
 enrolment — not only this flow — is what makes the state machine coherent
 with I-1, which restarts the clock on removal: enrolled means no clock,
 factor-less means a clock running. This closes the open item that
@@ -1609,6 +1643,15 @@ the wizard suppresses the nav shell, since every other request will answer
 `reauthentication_required` into a session clear plus a return to login with
 `next`, which is exactly right here. Client SPA: `MfaEnrolPage` is already
 the destination; it gains the same routing on `enrollmentOnly`.
+
+Both SPAs own the second half of D40. After a successful confirm **in an
+enrolment-only session** they render the backup codes, wait for an explicit
+acknowledgement, then clear the session and return the user to login with
+"second factor enrolled — sign in with it to continue". The acknowledgement
+is not politeness: the codes are shown once, and a sign-out that discarded
+them would hand the user a new lockout in place of the one this section
+closes. An ordinary session's enrolment is untouched — no sign-out, no
+redirect.
 
 ### 4.13 Every 401 names itself, and the analyzer keeps it that way
 
@@ -2083,15 +2126,19 @@ for D14); `git diff --check`. New tests:
 - Drift test (D39): the operation paths `RegisterEnrolmentRoutes` registers
   equal `EnrolmentPaths(mount)`, for both mounts. Mutation check — delete a
   path from the list and the test must fail, not merely the allowlist shrink.
-- `mfa_service` / webauthn (D40): a successful confirm from an enrolment-only
-  session clears `MFAGraceStartedAt` and returns a full pair with a refresh
-  token; from an ordinary session it clears the stamp and mints nothing new.
-  A test asserts `ClearMFAGrace` is called, since "zero callers" is the defect
-  being closed.
+- `mfa_service` / webauthn (D40): a successful confirm clears
+  `MFAGraceStartedAt` and mints nothing, from either kind of session; a
+  **failed** confirm leaves the stamp, which is the test that stops a wrong
+  code from handing out a fresh deadline. A test asserts `ClearMFAGrace` is
+  called, since "zero callers" is the defect being closed. A test also
+  asserts no refresh token is minted on this path — the absence is the
+  invariant.
 - End-to-end (D37→D40) against a factor-less user with a 60-day-old stamp,
   the staging shape: login → enrolment-only session → `enroll/begin` +
-  `confirm` → full session, and the same user's second login is now an
-  ordinary one.
+  `confirm` → the stamp is gone and no new token is minted; the same user's
+  second login is an ordinary MFA login, completed with the factor the first
+  session created. That last step is the one that proves the loop closes —
+  everything before it can pass while leaving the account still stuck.
 - `errquality` (D45): a violating `huma.Error401Unauthorized` is reported
   R4; `errcode.Unauthorized(code, detail)` is not; an `//errquality:allow`
   above the call silences it; a baseline entry silences it; a 400 and a 403
@@ -2119,7 +2166,7 @@ this order:
 | **C** | §4.4 (incl. D36), §4.5, §4.6 | — | Ran in parallel with B; **merged 2026-09-05** as upstream #365. Staging drill run against the built binary: a platform-key edit answers 422 `authz.system_permission_forbidden` naming the key, an unknown key 422 `authz.permission_unknown`, and an input carrying both reports the **unknown** one (the deliberate check order); with Redis stopped, a **grant** answers 503 `authz.cache_unavailable` and Mongo confirms nothing was written, while a **revocation** succeeds and Mongo confirms the binding is gone (D27 as amended in v1.15). Note the drill's own precondition: role mutations require an MFA step-up, and `POST /v1/auth/operator/mfa/verify` returns a **new** access token that must be used for the mutation |
 | **D1** (expand) | §4.7, §4.8 items 1, 3–8 (readers and writers, **no tombstone writes**), §4.9, §4.10 | migration 0010 exited zero on every environment **before** deploy — a conflict report stops the rollout until an operator names the keeper per identity | Login refuses a doc with `unlinkedAt`, listings exclude it, ownership-first writes, boot index check; the unlink routes keep today's `$pull`-only behaviour. Staging drill: seed one provider doc with `unlinkedAt` by hand → its sign-in answers `oauth_identity_unlinked` and it is absent from auth-methods; a normal unlink still behaves as today; PKCE and mobile drills as listed below |
 | **D2** (contract) | §4.8 item 2 and the revive/move rules of item 4 | D1 deployed and verified on **every** environment; rollback floor becomes D1 the moment the first tombstone exists | Unlink writes `unlinkedAt`. Staging drill: unlink Google, sign in with Google → `oauth_identity_unlinked`; re-link from Security → works; roll back to D1 on staging and confirm the unlinked identity is still refused |
-| **E** | §4.12, §4.13 | B (D11's gate is what the enrolment-only session presents itself to) | Independent of C and D. Staging drill, which is the exact state the defect was found in: take an operator with zero factors, set `mfaGraceStartedAt` 60 days back, sign in → an enrolment-only session, not a 403; any admin call on it → 403 `mfa_enrollment_required`; `enroll/confirm` → full session and the stamp cleared; sign in again → an ordinary login. Then 26 wrong MFA codes in 13 s against `/mfa/verify` → **zero** `/refresh-cookie` calls and the session survives, the measurement PR B's fix was verified with |
+| **E** | §4.12, §4.13 | B (D11's gate is what the enrolment-only session presents itself to) | Independent of C and D. Staging drill, which is the exact state the defect was found in: take an operator with zero factors, set `mfaGraceStartedAt` 60 days back, sign in → an enrolment-only session, not a 403; any admin call on it → 403 `mfa_enrollment_required`; `enroll/confirm` → backup codes, acknowledgement, then a sign-out with the stamp cleared in Mongo; sign in again → an ordinary MFA login, and this time it is the factor that was just enrolled. Then 26 wrong MFA codes in 13 s against `/mfa/verify` → **zero** `/refresh-cookie` calls and the session survives, the measurement PR B's fix was verified with |
 
 PKCE and mobile drills (D1): PKCE round-trip per provider — Google and
 Discord must succeed; GitHub and Apple are exercised with `SupportsPKCE`
