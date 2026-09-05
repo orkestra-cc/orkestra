@@ -37,6 +37,7 @@ func TestMapCreateBindingErrorPreservesKnownClientErrors(t *testing.T) {
 		{"tenant role globally", services.ErrTenantRoleNotGrantableGlobally, 400},
 		{"insufficient grant permissions", services.ErrInsufficientPermissionsToGrant, 403},
 		{"missing granter", services.ErrGranterRequired, 400},
+		{"missing target user", services.ErrBindingUserRequired, 400},
 		{"unknown role", repository.ErrNotFound, 404},
 		{"binding exists", services.ErrBindingExists, 409},
 		{"cache unavailable", services.ErrAuthzCacheUnavailable, 503},
@@ -84,6 +85,7 @@ func TestMapRoleWriteErrorPreservesKnownClientErrors(t *testing.T) {
 		wantCode string
 	}{
 		{"unknown role", repository.ErrNotFound, 404, ""},
+		{"duplicate role name", repository.ErrRoleExists, 409, ""},
 		{"system role immutable", services.ErrSystemRoleImmutable, 403, ""},
 		{"blank name", services.ErrRoleNameRequired, 400, ""},
 		{"empty permission list", services.ErrRolePermissionsRequired, 400, ""},

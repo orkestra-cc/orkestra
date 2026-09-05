@@ -278,13 +278,25 @@ func roleActor(ctx context.Context) string {
 // validator, so both answer with its sentinels; the not-found and
 // system-role rows are reachable from the update path only, and so is
 // the 503 — CreateRole is deliberately NOT wrapped in the cache gate
-// (a role with no bindings changes nobody's effective permissions), so
-// it can never produce ErrAuthzCacheUnavailable. Do not "fix" that by
-// wrapping CreateRole.
+// (a role it creates has no bindings, so it changes nobody's effective
+// permissions), so it can never produce ErrAuthzCacheUnavailable. Do not
+// "fix" that by wrapping CreateRole.
+//
+// That premise is enforced, not assumed: CreateRole inserts against the
+// unique (tenantId, name) index, so a name already taken is the 409
+// below rather than an in-place rewrite of the incumbent role.
+//
+// The 409 row is reachable from the create path only. Renaming a custom
+// role INTO a taken name also violates that index, but it does so inside
+// UpdateRoleFields, whose duplicate-key error is not translated and so
+// still falls through to the codeless 500 below — pre-existing, recorded
+// as a follow-up, and deliberately not widened here.
 func mapRoleWriteError(ctx context.Context, operation string, err error) error {
 	switch {
 	case errors.Is(err, repository.ErrNotFound):
 		return huma.Error404NotFound("role not found")
+	case errors.Is(err, repository.ErrRoleExists):
+		return huma.Error409Conflict("a role with that name already exists in this tenant")
 	case errors.Is(err, services.ErrSystemRoleImmutable):
 		return huma.Error403Forbidden("system roles cannot be edited — only disabled")
 	case errors.Is(err, services.ErrRoleNameRequired):
@@ -406,6 +418,8 @@ func mapCreateBindingError(ctx context.Context, err error) error {
 		return huma.Error403Forbidden("you cannot grant a role with permissions you do not hold")
 	case errors.Is(err, services.ErrGranterRequired):
 		return huma.Error400BadRequest("the grantor is required")
+	case errors.Is(err, services.ErrBindingUserRequired):
+		return huma.Error400BadRequest("the user to grant the role to is required")
 	case errors.Is(err, services.ErrBindingExists):
 		return huma.Error409Conflict("this role is already bound to the user in this tenant")
 	case errors.Is(err, services.ErrAuthzCacheUnavailable):

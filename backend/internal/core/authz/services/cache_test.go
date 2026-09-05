@@ -1212,22 +1212,190 @@ func TestUpdateRole_MixedPatchWritesBecauseItRemoves(t *testing.T) {
 	}
 }
 
-// An isActive-only patch touches no permission, so it is neither
-// direction and keeps the gate exactly as before P25.
-func TestUpdateRole_IsActiveOnlyPatchKeepsTheGate(t *testing.T) {
+// DISABLING a role is the largest revocation UpdateRole can perform: the
+// evaluator skips every binding whose role is inactive, so the patch
+// drops every permission the role carries from every holder — and from
+// every holder on the platform for a system row. It therefore takes the
+// write-then-report shape and is never refused for a cache reason.
+//
+// This inverts what ruling P25 originally pinned. P25 classified an
+// isActive-only patch as "neither direction" and left it on the gate,
+// which produced the exact inversion P22 exists to prevent: with the
+// store down the operator could not disable the role, and every holder
+// kept the access indefinitely. The console's RolesTable.onToggleActive
+// sends precisely this patch.
+func TestUpdateRole_DisablingARoleIsNotRefusedWhenTheCacheIsDown(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	registerTestPermissions(t, svc, registered("billing.invoice.refund"))
+	repo.seedRole("role-c", "refunder", false, []string{"billing.invoice.refund"}, "tenant-A")
+	repo.seedBinding("b-1", "holder", "tenant-A", "role-c")
+	ctx := context.Background()
+	if ok, _ := svc.HasPermission(ctx, "holder", "tenant-A", "billing.invoice.refund"); !ok {
+		t.Fatal("precondition: the holder must hold the permission through the active role")
+	}
+	mr.Close()
+
+	inactive := false
+	if _, err := svc.UpdateRole(ctx, "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
+		IsActive: &inactive,
+	}); err != nil {
+		t.Fatalf("disabling a role must not be refused over a cache, got %v", err)
+	}
+	if repo.roles["role-c"].IsActive {
+		t.Fatal("the disable must have been written")
+	}
+	// The store is down, so reads bypass the cache: this is the live
+	// answer, and it is what the refusal used to prevent.
+	if ok, _ := svc.HasPermission(ctx, "holder", "tenant-A", "billing.invoice.refund"); ok {
+		t.Error("the holder kept the permission after the role was disabled")
+	}
+}
+
+// ...and the other direction keeps the gate. Re-ENABLING a role hands
+// every holder its permissions back, which is a grant: a stale verdict
+// after it is a harmless late deny, so a cache that cannot be retired
+// refuses the change rather than letting it land unannounced.
+func TestUpdateRole_EnablingARoleIsRefusedWhenTheCacheIsDown(t *testing.T) {
 	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
 	repo.seedRole("role-c", "reader", false, []string{"billing.invoice.read"}, "tenant-A")
+	// seedRole only ever seeds an ACTIVE role; the enable has to have
+	// something to enable or the write assertion below is vacuous.
+	disabled := repo.roles["role-c"]
+	disabled.IsActive = false
+	repo.roles["role-c"] = disabled
 	mr.Close()
-	inactive := false
 
+	active := true
 	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
-		IsActive: &inactive,
+		IsActive: &active,
 	})
 	if !errors.Is(err, ErrAuthzCacheUnavailable) {
-		t.Fatalf("err = %v, want the gate to still apply", err)
+		t.Fatalf("err = %v, want the gate to refuse the enable", err)
 	}
-	if role := repo.roles["role-c"]; !role.IsActive {
-		t.Error("the toggle must not have been written")
+	if repo.roles["role-c"].IsActive {
+		t.Error("the enable must not have been written")
+	}
+}
+
+// A patch that can change no verdict retires nothing at all. The cache
+// stores permission KEYS — GetEffectivePermissions is the only writer —
+// and nothing in the evaluator reads a role's name or description, so a
+// rename used to cost every user on the platform two cold-cache waves
+// for a change none of them could observe.
+func TestUpdateRole_NameOrDescriptionOnlyPatchRetiresNothing(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup(""))
+	repo.seedRole("role-c", "reader", false, []string{"billing.invoice.read"}, "tenant-A")
+	rec := recordCommands(t, mr)
+	ctx := context.Background()
+
+	description := "the read-only role"
+	if _, err := svc.UpdateRole(ctx, "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
+		Description: &description,
+	}); err != nil {
+		t.Fatalf("UpdateRole(description): %v", err)
+	}
+	// Asserting the write landed is what keeps this from passing for the
+	// reason TestUpdateRole_NoOpPatchBumpsNothing already covers.
+	if got := repo.roles["role-c"].Description; got != description {
+		t.Fatalf("description = %q, want it written", got)
+	}
+	assertNoGenerationBump(t, mr, rec)
+
+	rec.reset()
+	if _, err := svc.UpdateRole(ctx, "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
+		Name: strPtr("renamed"),
+	}); err != nil {
+		t.Fatalf("UpdateRole(name): %v", err)
+	}
+	if got := repo.roles["role-c"].Name; got != "renamed" {
+		t.Fatalf("name = %q, want it written", got)
+	}
+	assertNoGenerationBump(t, mr, rec)
+}
+
+// ===== a grant must name a user =====
+//
+// userScope("") used to be byte-identical to globalScope(), so a grant
+// whose userUUID was empty retired EVERY user's verdicts, persisted a
+// binding against no user, and — on the repeat, which the unique index
+// turns into a 409 — flushed the platform again while writing nothing.
+// Any authz.binding.create holder could drive that at request rate. Both
+// halves are closed: the validator refuses the grant, and bumpGeneration
+// refuses an empty user scope rather than widening it.
+
+func TestCreateBinding_EmptyUserUUIDIsRefusedAndRetiresNothing(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup("super_admin"))
+	repo.seedRole("role-X", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
+	ctx := context.Background()
+	svc.cacheSet(ctx, "bystander", "tenant-Z", []string{"anything.read"})
+	if _, ok := svc.cacheGet(ctx, "bystander", "tenant-Z"); !ok {
+		t.Fatal("precondition: the bystander's verdict must be cached")
+	}
+	rec := recordCommands(t, mr)
+
+	// Whitespace, not "": the schema carries `required` with no
+	// minLength, and the `validate:` tag on the field is decorative.
+	_, err := svc.CreateBinding(ctx, "tenant-A", "granter", models.CreateBindingInput{
+		UserUUID: "   ",
+		RoleUUID: "role-X",
+	})
+	if !errors.Is(err, ErrBindingUserRequired) {
+		t.Fatalf("err = %v, want ErrBindingUserRequired", err)
+	}
+	if len(repo.bindings) != 0 {
+		t.Errorf("bindings = %v, want nothing persisted", repo.bindings)
+	}
+	assertNoGenerationBump(t, mr, rec)
+	if _, ok := svc.cacheGet(ctx, "bystander", "tenant-Z"); !ok {
+		t.Error("an unrelated user's cached verdict was retired by a refused grant")
+	}
+}
+
+func TestEnsureBinding_EmptyUserUUIDIsRefusedAndRetiresNothing(t *testing.T) {
+	svc, repo, mr := newCacheTestService(t, staticRoleLookup("super_admin"))
+	repo.seedRole("role-X", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
+	rec := recordCommands(t, mr)
+
+	// The platform sentinel too: it waives the cascade, never the target.
+	_, err := svc.EnsureBinding(context.Background(), "tenant-A", granterSystem, models.CreateBindingInput{
+		UserUUID: "",
+		RoleUUID: "role-X",
+	})
+	if !errors.Is(err, ErrBindingUserRequired) {
+		t.Fatalf("err = %v, want ErrBindingUserRequired", err)
+	}
+	if len(repo.bindings) != 0 {
+		t.Errorf("bindings = %v, want nothing persisted", repo.bindings)
+	}
+	assertNoGenerationBump(t, mr, rec)
+}
+
+// The guard behind the guard: even if a future call site forwards an
+// unvalidated id, an empty user scope must never widen to a global
+// flush. Only globalScope() widens, and it has to be asked for.
+func TestBumpGeneration_EmptyUserScopeIsRefusedNotWidened(t *testing.T) {
+	svc, _, mr := newCacheTestService(t, staticRoleLookup(""))
+	ctx := context.Background()
+	rec := recordCommands(t, mr)
+
+	if err := svc.bumpGeneration(ctx, userScope("")); !errors.Is(err, errEmptyUserScope) {
+		t.Fatalf("bumpGeneration(userScope(\"\")) = %v, want errEmptyUserScope", err)
+	}
+	assertNoGenerationBump(t, mr, rec)
+
+	// The zero value is the same case — it is no longer "global".
+	if err := svc.bumpGeneration(ctx, generationScope{}); !errors.Is(err, errEmptyUserScope) {
+		t.Fatalf("bumpGeneration(zero value) = %v, want errEmptyUserScope", err)
+	}
+	assertNoGenerationBump(t, mr, rec)
+
+	// ...and globalScope() still retires everyone, so the guard has not
+	// simply disabled the global counter.
+	if err := svc.bumpGeneration(ctx, globalScope()); err != nil {
+		t.Fatalf("bumpGeneration(globalScope()): %v", err)
+	}
+	if got, _ := mr.Get(authzGlobalGenKey); got != "1" {
+		t.Errorf("global generation = %q, want \"1\"", got)
 	}
 }
 

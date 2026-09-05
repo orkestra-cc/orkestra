@@ -19,10 +19,14 @@ The cache key folds in two generation counters — one global, one per user — 
 
 The two directions of a permission change get opposite treatment, because a stale verdict does not mean the same thing in both:
 
-- After a **grant**, a stale verdict is a late *deny* — harmless. So a grant retires the cache **before** it writes, and if that cannot be done the change is refused entirely with `503 authz.cache_unavailable` and nothing is written. (A write that cannot change any existing verdict — creating a brand-new role, which nothing is bound to yet — retires nothing and is never refused.)
+- After a **grant**, a stale verdict is a late *deny* — harmless. So a grant retires the cache **before** it writes, and if that cannot be done the change is refused entirely with `503 authz.cache_unavailable` and nothing is written.
 - After a **revocation**, a stale verdict is a live *allow* — harmful. So a revocation writes **first** and retires afterwards, best-effort. Refusing it would leave the privilege granted indefinitely, where writing leaves it for at most the 60-second TTL. A failed retirement is logged and counted, never returned.
 
-A deployment with no Redis at all is not the failure case: there is no cached verdict to retire, so the retirement is a truthful no-op and mutations proceed.
+Which side a role edit falls on is decided by what the edit can do, not by which field it touches. Adding a permission grants; dropping one revokes; and **disabling a role revokes too** — the evaluator ignores an inactive role entirely, so switching one off takes its permissions away from every holder at once. Re-enabling it is a grant again.
+
+A third case retires nothing at all, because it cannot move a verdict: creating a brand-new role, which nothing is bound to yet, and renaming or re-describing an existing one, which changes no permission. Role creation earns that guarantee rather than assuming it — a role name is unique within its tenant, so a create naming a role that already exists is answered with `409 Conflict` instead of quietly rewriting it.
+
+A deployment with no Redis at all is not the failure case: there is no cached verdict to retire, so the retirement is a truthful no-op and mutations proceed. A deployment whose Redis *evicts* keys is a different matter — the generation counters carry no expiry, and an evicted counter would bring retired verdicts back — so the instance backing authz must run without an `allkeys-*` eviction policy. The bundled stack already does.
 
 ## The catalog builds itself
 

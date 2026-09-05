@@ -48,6 +48,54 @@ func TestCreateRole_PersistsCustomRole(t *testing.T) {
 	}
 }
 
+// CreateRole refuses a name already taken in the tenant, and leaves the
+// incumbent exactly as it was.
+//
+// It used to write through UpsertRole, which is keyed on
+// (tenantId, name): a create naming an existing role REWROTE it — the
+// incumbent's uuid and permissions were replaced in place, so every
+// binding pointing at the old uuid dangled permanently and its holders
+// lost that access with no error and no cache invalidation. A caller
+// holding only authz.role.create could therefore neuter or rewrite any
+// role in the tenant by name, a power the catalog reserves to
+// authz.role.update / authz.role.delete.
+func TestCreateRole_DuplicateNameIsRefusedAndLeavesTheIncumbentIntact(t *testing.T) {
+	svc, repo := newTier1Service(t, staticRoleLookup("super_admin"))
+	registerTestPermissions(t, svc, registered("tenant.read", "tenant.update"))
+	ctx := context.Background()
+
+	first, err := svc.CreateRole(ctx, "tenant-1", "sa-1", models.CreateRoleInput{
+		Name:        "editors",
+		Permissions: []string{"tenant.read", "tenant.update"},
+	})
+	if err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+
+	_, err = svc.CreateRole(ctx, "tenant-1", "sa-1", models.CreateRoleInput{
+		Name:        "editors",
+		Permissions: []string{"tenant.read"},
+	})
+	if !errors.Is(err, repository.ErrRoleExists) {
+		t.Fatalf("err = %v, want repository.ErrRoleExists", err)
+	}
+	incumbent, ok := repo.roles[first.UUID]
+	if !ok {
+		t.Fatal("the incumbent's uuid no longer resolves — every binding on it now dangles")
+	}
+	if len(incumbent.Permissions) != 2 {
+		t.Errorf("permissions = %v, want the incumbent's own list untouched", incumbent.Permissions)
+	}
+
+	// The name is reserved within its tenant only.
+	if _, err := svc.CreateRole(ctx, "tenant-2", "sa-1", models.CreateRoleInput{
+		Name:        "editors",
+		Permissions: []string{"tenant.read"},
+	}); err != nil {
+		t.Fatalf("another tenant must still be able to use the name: %v", err)
+	}
+}
+
 // ===== UpdateRole =====
 
 func TestUpdateRole_SystemRoleNameImmutable(t *testing.T) {

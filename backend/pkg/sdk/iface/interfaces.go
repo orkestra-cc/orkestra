@@ -730,20 +730,30 @@ type AuthzProvider interface {
 // call site, and authz's own service is the worked example (three seams,
 // all going through one bump helper):
 //
-//   - `withGeneration` — the gate. Used by `UpdateRole` for a patch whose
-//     permission set is a superset of the current one (a pure addition, a
-//     rename, an isActive toggle) and by `CreateBinding`/`EnsureBinding`
-//     when a real actor is the granter.
+//   - `withGeneration` — the gate. Used by `UpdateRole` for a patch that
+//     only ADDS access (a permission set that is a superset of the current
+//     one, or isActive:true) and by `CreateBinding`/`EnsureBinding` when a
+//     real actor is the granter.
 //   - `writeThenInvalidate` — write, then invalidate best-effort. Used by
 //     `DeleteRole`, `DeleteBinding`, both tenant cascades, by `UpdateRole`
-//     when the patch removes any key, and by a platform-issued binding grant
-//     (granter "system"), where a refusal would abort a tenant flow midway
-//     rather than reach an operator who could retry.
+//     when the patch removes any key OR sets isActive:false, and by a
+//     platform-issued binding grant (granter "system"), where a refusal
+//     would abort a tenant flow midway rather than reach an operator who
+//     could retry.
 //   - `bindingGrantGeneration` — the one seam that picks between the two, so
 //     `CreateBinding` and `EnsureBinding` cannot drift apart.
 //
-// `CreateRole` issues no bump at all, in either shape: a brand-new role has
-// no bindings, so it changes nobody's effective permissions.
+// DISABLING a role is a revocation, not a neutral toggle: the evaluator
+// drops every permission of an inactive role, from every holder, so
+// isActive:false takes the second shape. The permission set-difference
+// cannot see that — the stored list does not change — which is why it is
+// tested for explicitly. Enabling one is the granting direction.
+//
+// Two writes bump nothing at all, in either shape: `CreateRole` (a role it
+// creates has no bindings, and the unique (tenantId, name) index keeps that
+// true by refusing a taken name with a 409) and an `UpdateRole` patch that
+// only touches name/description (the cache stores permission keys, which
+// such a patch cannot move).
 //
 // The user module's system-role change is `writeThenInvalidate`-shaped and
 // is never refused in either direction: refusing a demotion would keep the
@@ -787,8 +797,9 @@ type AuthzCacheInvalidator interface {
 	// and invalidates once, best-effort, because refusing a revocation
 	// is worse than applying it late; the window is then bounded by the
 	// cache TTL instead of closed. A caller whose write cannot change
-	// any existing verdict (authz `CreateRole`) needs neither. A single
-	// bump is sufficient only when the caller is not itself the writer.
+	// any existing verdict (authz `CreateRole`, or a role rename) needs
+	// neither. A single bump is sufficient only when the caller is not
+	// itself the writer.
 	InvalidateUserPermissions(ctx context.Context, userUUID string) error
 }
 

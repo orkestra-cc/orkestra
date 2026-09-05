@@ -60,6 +60,19 @@ var ErrInsufficientPermissionsToGrant = errors.New("authz: caller cannot grant a
 // silently waive the check.
 var ErrGranterRequired = errors.New("authz: granter is required")
 
+// ErrBindingUserRequired is returned when a grant names no target user
+// — an empty or whitespace-only CreateBindingInput.UserUUID.
+//
+// The `validate:"required"` tag on that field is decorative: nothing in
+// this module invokes go-playground/validator, and Huma builds the
+// request schema from its own tags, so the generated property is
+// `required` with no `minLength` and {"userUUID": ""} reaches the
+// service. Refusing it here is what keeps a binding row from being
+// persisted against no user, and what keeps userScope from being handed
+// an empty user (see bumpGeneration, which refuses that outright rather
+// than widening it to a platform-wide flush).
+var ErrBindingUserRequired = errors.New("authz: binding target user is required")
+
 // ErrBindingExists is returned when CreateBinding targets a
 // (tenantID, userUUID, roleID) tuple that already has a binding — surfaced
 // from the authz_bindings unique compound index (see this module's
@@ -131,6 +144,7 @@ type repoBackend interface {
 	ListPermissions(ctx context.Context) ([]models.Permission, error)
 	ListAllPermissionKeys(ctx context.Context) ([]string, error)
 	UpsertRole(ctx context.Context, role *models.Role) error
+	InsertRole(ctx context.Context, role *models.Role) error
 	UpdateRoleFields(ctx context.Context, uuid string, fields bson.M) error
 	GetRoleByName(ctx context.Context, tenantID, name string) (*models.Role, error)
 	GetRoleByUUID(ctx context.Context, uuid string) (*models.Role, error)
@@ -961,6 +975,15 @@ func (s *Service) SeedSystemRoles(ctx context.Context) error {
 
 // CreateRole builds a custom (non-system) role for one tenant.
 //
+// The name must be free within the tenant: it goes in through
+// InsertRole, whose unique (tenantId, name) index answers a collision
+// with repository.ErrRoleExists -> 409. It used to go in through
+// UpsertRole, which is keyed on that same pair — so a create naming an
+// existing role REWROTE it, moving its uuid and permissions and leaving
+// every binding on the old uuid dangling, with no invalidation and no
+// error. That handed anyone holding only authz.role.create the power the
+// catalog reserves to authz.role.update / authz.role.delete.
+//
 // actor is the UUID of the caller the role is written on behalf of. Its
 // effective permissions bound what the role may carry (D21): a role can
 // never grant more than its author already holds, the same rule
@@ -988,7 +1011,7 @@ func (s *Service) CreateRole(ctx context.Context, tenantID, actor string, input 
 		IsSystem:    false,
 		IsActive:    true,
 	}
-	if err := s.repo.UpsertRole(ctx, role); err != nil {
+	if err := s.repo.InsertRole(ctx, role); err != nil {
 		return nil, err
 	}
 	return role, nil
@@ -997,9 +1020,12 @@ func (s *Service) CreateRole(ctx context.Context, tenantID, actor string, input 
 // UpdateRole applies a partial update to a role. System roles reject any
 // change to Name, Description, or Permissions with ErrSystemRoleImmutable —
 // only IsActive can be toggled on them. Custom roles accept all four.
-// The authz cache is retired because permission membership may change —
-// through the gate for a patch that only adds, write-then-report for one
-// that takes a permission away (P25; see the comment at the write).
+//
+// How the cache is retired depends on what the patch can do to a
+// verdict (P25, as corrected by the whole-branch review — see the
+// comment at the write): a patch that takes access away writes first and
+// reports, one that only adds keeps the gate, and one that can change no
+// verdict at all retires nothing.
 //
 // actor is the UUID of the caller the edit is written on behalf of, and
 // bounds what the role may carry exactly as it does in CreateRole (D21).
@@ -1054,6 +1080,17 @@ func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID, actor stri
 	}
 	if input.IsActive != nil {
 		fields["isActive"] = *input.IsActive
+		// DISABLING a role is a revocation, and the largest one this
+		// method can perform: the evaluator skips every binding whose
+		// role is inactive (see GetEffectivePermissions), so the patch
+		// drops EVERY permission the role carries from EVERY holder —
+		// and for a system row, from every holder on the platform. The
+		// permission set-difference above cannot see that, because the
+		// stored list does not change. ENABLING one is the granting
+		// direction and keeps the gate.
+		if !*input.IsActive {
+			removesAccess = true
+		}
 	}
 
 	if len(fields) == 0 {
@@ -1069,20 +1106,35 @@ func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID, actor stri
 	// P25: the role editor routes by direction like every other mutation,
 	// because a patch that drops a permission IS a revocation and the
 	// decision behind D27 is that removing access is never blocked by a
-	// cache wobble. A patch whose result is not a superset of the current
-	// set writes first; anything else — a pure addition, a rename, an
-	// isActive toggle — keeps the gate. A patch that both adds and removes
-	// counts as removing, which is the safe direction: a stale verdict then
-	// denies the ADDED keys (harmless, ≤60s) instead of keeping the removed
-	// ones live indefinitely.
-	write := s.withGeneration
-	if removesAccess {
-		write = s.writeThenInvalidate
+	// cache wobble. A patch that both adds and removes counts as removing,
+	// which is the safe direction: a stale verdict then denies the ADDED
+	// keys (harmless, <=60s) instead of keeping the removed ones live
+	// indefinitely.
+	//
+	// Three shapes, not two:
+	//
+	//   - REMOVES access — a permission set that is not a superset of the
+	//     current one, or isActive:false — writes first and reports.
+	//   - ADDS access — a pure addition, or isActive:true — keeps the gate.
+	//   - Can change NO verdict — a rename or a new description, and
+	//     nothing else — retires nothing at all. The cache stores
+	//     permission KEYS (GetEffectivePermissions is what writes it) and
+	//     nothing in the evaluator reads a role's name, so retiring on
+	//     these was two platform-wide flushes for a patch that could not
+	//     move a single verdict.
+	touchesVerdicts := input.Permissions != nil || input.IsActive != nil
+	mutate := func() error { return s.repo.UpdateRoleFields(ctx, roleUUID, fields) }
+	var werr error
+	switch {
+	case !touchesVerdicts:
+		werr = mutate()
+	case removesAccess:
+		werr = s.writeThenInvalidate(ctx, globalScope(), mutate)
+	default:
+		werr = s.withGeneration(ctx, globalScope(), mutate)
 	}
-	if err := write(ctx, globalScope(), func() error {
-		return s.repo.UpdateRoleFields(ctx, roleUUID, fields)
-	}); err != nil {
-		return nil, err
+	if werr != nil {
+		return nil, werr
 	}
 
 	return s.repo.GetRoleByUUID(ctx, roleUUID)
@@ -1199,6 +1251,17 @@ func (s *Service) ListPermissions(ctx context.Context) ([]models.Permission, err
 // (for non-"system" granters) the permission cascade rule. Extracted so the
 // two entry points can never drift apart on what a grant must satisfy.
 func (s *Service) validateBindingGrant(ctx context.Context, tenantID, grantedBy string, input models.CreateBindingInput) (*models.Role, error) {
+	// A grant with no target is not a grant. First, before the role
+	// lookup, so a body the service will refuse cannot probe which role
+	// UUIDs exist — and, more importantly, before anything downstream
+	// derives a cache scope from it: userScope("") used to be
+	// indistinguishable from globalScope(), so an empty userUUID turned
+	// one grant into a platform-wide cache flush at request rate. Both
+	// halves of that are closed — this guard, and bumpGeneration
+	// refusing an empty user scope instead of widening it.
+	if strings.TrimSpace(input.UserUUID) == "" {
+		return nil, ErrBindingUserRequired
+	}
 	role, err := s.repo.GetRoleByUUID(ctx, input.RoleUUID)
 	if err != nil {
 		return nil, err
@@ -1656,35 +1719,60 @@ func (s *Service) flushCache(ctx context.Context) error {
 
 // generationScope names which counter a mutation retires: one user's, or
 // — when the affected user set is not cheaply enumerable — everyone's.
+//
+// The global flag is what makes the two states DISTINCT rather than
+// "an empty user means everyone". Under the old shape userScope("") was
+// byte-identical to globalScope(), so any call site that forwarded an
+// unvalidated user id silently escalated one user's retirement into a
+// platform-wide flush — reachable at request rate, and found in exactly
+// that form on CreateBinding/EnsureBinding. With the flag, the zero
+// value names NO counter and bumpGeneration refuses it; widening can
+// only ever be asked for explicitly, by calling globalScope().
 type generationScope struct {
-	user string // "" means the global counter
+	user   string // the user whose counter to retire; empty unless global
+	global bool   // set only by globalScope()
 }
 
-// userScope retires one user's cached verdicts, in every tenant.
+// userScope retires one user's cached verdicts, in every tenant. An
+// empty userUUID is NOT a global flush — it is a scope that names no
+// counter, and bumpGeneration returns errEmptyUserScope for it.
 func userScope(userUUID string) generationScope { return generationScope{user: userUUID} }
 
 // globalScope retires every user's cached verdicts. Used where the set
 // of affected users cannot be enumerated without a scan: a role's
 // permissions changed, a role was deleted, a binding was revoked.
-func globalScope() generationScope { return generationScope{} }
+func globalScope() generationScope { return generationScope{global: true} }
+
+// errEmptyUserScope is the programming-error guard behind userScope. It
+// is not reachable through any handler — validateBindingGrant refuses an
+// empty target before a scope is ever built — and exists so that if a
+// future call site forwards an unvalidated id, the failure is a REFUSED
+// mutation rather than a silent platform-wide flush. Through
+// withGeneration it becomes the gate's refusal (nothing is written);
+// through invalidateAfterWrite it is logged and counted. Both are safe:
+// neither retires anything.
+var errEmptyUserScope = errors.New("authz: generation scope names no user and is not global")
 
 // bumpGeneration retires the verdicts named by scope. The single seam
 // every invalidation goes through, so a caller can never bump one
 // counter on the way in and the other on the way out.
 func (s *Service) bumpGeneration(ctx context.Context, scope generationScope) error {
-	if scope.user != "" {
-		return s.InvalidateUserPermissions(ctx, scope.user)
+	if scope.global {
+		return s.flushCache(ctx)
 	}
-	return s.flushCache(ctx)
+	if scope.user == "" {
+		return errEmptyUserScope
+	}
+	return s.InvalidateUserPermissions(ctx, scope.user)
 }
 
 // scopeAttr names the scope in a log line. globalScope carries no user,
 // so it must not emit an empty user_uuid.
 func scopeAttr(scope generationScope) slog.Attr {
-	if scope.user != "" {
-		return slog.String("user_uuid", scope.user)
+	if scope.global {
+		return slog.String("scope", "global")
 	}
-	return slog.String("scope", "global")
+	return slog.String("user_uuid", scope.user)
 }
 
 // D27 (as amended by ruling P22) splits mutations by DIRECTION, because
