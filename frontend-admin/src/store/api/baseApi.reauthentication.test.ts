@@ -156,3 +156,25 @@ describe('reauthentication_required drives a re-login, not a modal', () => {
     expect(store.getState().auth.accessToken).toBe('seed-access-token');
   });
 });
+
+// The return path is one answer, not four. Three of these call sites passed
+// window.location.pathname alone, which was invisible while AuthProvider
+// stored `state.from` as a string and locationToReturnTo dropped it — every
+// interceptor redirect landed on DEFAULT_POST_LOGIN regardless. Making the
+// deep link survive is what made the omission user-visible: a revoked session
+// would return to /admin/modules having silently lost ?tab=addons.
+describe('every interceptor redirect carries the same current path', () => {
+  it.each([
+    ['session_revoked', 'session_revoked'],
+    ['session_max_age_reached', 'session_max_age_reached'],
+    ['reauthentication_required', 'reauthentication_required']
+  ])('keeps the query string on %s', async (_label, code) => {
+    window.history.pushState({}, '', '/admin/modules?tab=addons');
+    respondWith({ code });
+    const store = await setupSeededStore();
+
+    await store.dispatch(mfaApi.endpoints.enrollMfaBegin.initiate());
+
+    expect(navigate).toHaveBeenCalledWith('/admin/modules?tab=addons');
+  });
+});

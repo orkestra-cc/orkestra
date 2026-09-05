@@ -21,6 +21,22 @@ export const setNavigateToLogin = (fn: (location?: string) => void) => {
   navigateToLogin = fn;
 };
 
+// The page the operator is on, as the login flow needs to receive it: pathname
+// AND search. One helper because all four navigateToLogin call sites below owe
+// the same answer, and three of them used to pass the pathname alone. That was
+// invisible for as long as AuthProvider stored `state.from` as a string and
+// locationToReturnTo dropped it — every one of these redirects landed on
+// DEFAULT_POST_LOGIN regardless. Now that the callback stores a Location and
+// the deep link survives, the difference is user-visible: a revoked session
+// would return to /admin/modules having silently lost ?tab=addons.
+//
+// The hash is deliberately absent. It never reaches the server, react-router
+// does not use it for routing in this SPA, and sanitizeReturnTo's checks are
+// written against path + query — carrying it would add a value no consumer
+// reads and one more shape for the sanitiser to reason about.
+const currentPath = (): string =>
+  window.location.pathname + window.location.search;
+
 // Endpoints for which a 401 must NOT trigger a silent refresh attempt —
 // either because they *are* the refresh/login/logout endpoints (retrying
 // would loop) or because a 401 here already means "user is not signed in"
@@ -523,7 +539,7 @@ const baseQueryWithRetry: BaseQueryFn<
         });
       }
       if (navigateToLogin) {
-        navigateToLogin(window.location.pathname);
+        navigateToLogin(currentPath());
       }
       return result;
     }
@@ -594,10 +610,7 @@ const baseQueryWithRetry: BaseQueryFn<
     if (errorData?.code === 'reauthentication_required') {
       api.dispatch(clearAccessToken());
       if (navigateToLogin) {
-        navigateToLogin(
-          sanitizeReturnTo(window.location.pathname + window.location.search) ??
-            DEFAULT_POST_LOGIN
-        );
+        navigateToLogin(sanitizeReturnTo(currentPath()) ?? DEFAULT_POST_LOGIN);
       }
       return result;
     }
@@ -734,7 +747,7 @@ const baseQueryWithRetry: BaseQueryFn<
     // If session endpoint returns 401, redirect to login immediately
     if (isSessionEndpoint && navigateToLogin) {
       console.log('🔐 Session endpoint returned 401 - redirecting to login');
-      navigateToLogin(window.location.pathname);
+      navigateToLogin(currentPath());
       return result; // Return early to avoid showing toast
     }
 
@@ -745,7 +758,7 @@ const baseQueryWithRetry: BaseQueryFn<
         autoClose: 5000
       });
       if (navigateToLogin) {
-        navigateToLogin(window.location.pathname);
+        navigateToLogin(currentPath());
       }
     }
   }

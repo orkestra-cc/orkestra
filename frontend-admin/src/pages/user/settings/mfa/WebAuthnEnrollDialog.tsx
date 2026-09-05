@@ -81,10 +81,18 @@ const WebAuthnEnrollDialog = ({ show, onHide }: Props) => {
         data?: { code?: string; detail?: string };
       };
       // reauthentication_required is not this dialog's to report: the base
-      // query has already cleared the session and navigated to the login
-      // form. Checked ahead of the bare `status === 401` test below, which
-      // flattens every 401 into "attestation failed" — telling a user their
-      // authenticator misbehaved when the real answer is "sign in again".
+      // query has already cleared the session and asked the router for the
+      // login form. Checked ahead of the bare `status === 401` test below,
+      // which flattens every 401 into "attestation failed" — telling a user
+      // their authenticator misbehaved when the real answer is "sign in
+      // again".
+      //
+      // Returning early is safe whether this `catch` runs before or after
+      // React commits that navigation; the ordering does not decide it. What
+      // does: unlike its TOTP twin this dialog's spinner is `busy`, which is
+      // COMPONENT-owned rather than RTK-owned, so the early return has to
+      // clear it explicitly — exactly as every other arm of this catch does.
+      // No `error` is set, so there is no stale copy to flash.
       if (anyErr?.data?.code === 'reauthentication_required') {
         setBusy(false);
         return;

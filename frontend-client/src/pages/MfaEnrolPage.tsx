@@ -4,6 +4,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 
 import {
+  apiErrorCode,
   getMfaStatus,
   mfaEnrollBegin,
   mfaEnrollConfirm,
@@ -11,6 +12,17 @@ import {
   type MfaEnrollConfirm,
   type MfaStatus,
 } from '@/api/auth';
+
+// A reauthentication_required 401 is already being answered underneath us:
+// authedFetch cleared the session and started a FULL-DOCUMENT navigation to
+// /login (browserNavigation.assign, branch 1b). Rendering the error copy on
+// top of that would explain a page the user is being taken off — and a
+// document navigation is noticeably slower than the operator console's router
+// transition, where the two enrolment dialogs suppress the same copy for the
+// same reason. Suppressing here is the deliberate matching decision, not an
+// oversight: the honest message is on the login page.
+const leavingForSignIn = (error: unknown): boolean =>
+  apiErrorCode(error) === 'reauthentication_required';
 
 // Three-step enrolment: begin (POST → secret + otpauth URI) → user
 // scans/types into authenticator → confirm (POST {challengeId, code}
@@ -94,7 +106,7 @@ export function MfaEnrolPage() {
       {!status.isPending && !alreadyEnrolled && stage.kind === 'idle' && (
         <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
           <p className="mb-6 text-sm text-slate-700">{t('mfa.enrol.step1')}</p>
-          {begin.isError && (
+          {begin.isError && !leavingForSignIn(begin.error) && (
             <p className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
               {begin.error.message}
             </p>
@@ -214,7 +226,9 @@ function ConfirmStage({ data, onSuccess }: ConfirmStageProps) {
             className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base tracking-widest focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
           />
         </div>
-        {confirm.isError && (
+        {/* Same suppression as the idle stage: enroll/confirm sits behind the
+            same enrolment-proof gate, so it can answer with the same code. */}
+        {confirm.isError && !leavingForSignIn(confirm.error) && (
           <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
             {confirm.error.message}
           </p>

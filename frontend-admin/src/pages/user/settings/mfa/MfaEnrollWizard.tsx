@@ -58,10 +58,16 @@ const MfaEnrollWizard = ({ show, onHide }: Props) => {
       })
       .catch((err: { data?: { code?: string; detail?: string } }) => {
         // reauthentication_required is not this dialog's to report. The base
-        // query has already cleared the session and sent the browser to the
-        // login form (store/api/baseApi.ts), so copy set here would paint one
-        // frame of a tree that is unmounting — and the honest message is on
-        // the login page, not in a modal the user is leaving. Let it through.
+        // query has already cleared the session and asked the router for the
+        // login form (store/api/baseApi.ts), and the honest message belongs
+        // there rather than in a modal the user is leaving.
+        //
+        // Returning early is safe whether this `catch` runs BEFORE or AFTER
+        // React commits that navigation, and the safety is structural rather
+        // than a race we happen to win: `beginLoading` belongs to RTK Query
+        // and resets when the mutation settles, so nothing is left spinning,
+        // and no `error` is set, so there is no stale copy to flash. Do not
+        // reason about the commit ordering here — it does not decide this.
         if (err?.data?.code === 'reauthentication_required') return;
         setError(err?.data?.detail ?? t('userMfa.enrollWizard.beginError'));
       });
@@ -86,7 +92,9 @@ const MfaEnrollWizard = ({ show, onHide }: Props) => {
       // Checked BEFORE the status test below, which flattens every 401 into
       // "that code is incorrect" — a stale-session refusal reported as a
       // mistyped TOTP would send the user back to their authenticator app
-      // forever. The redirect is already under way; say nothing.
+      // forever. Say nothing instead; `confirmLoading` is RTK-owned like its
+      // twin above, and `setError(null)` already ran at the top of this
+      // handler, so returning leaves neither a spinner nor stale copy.
       if (anyErr?.data?.code === 'reauthentication_required') {
         return;
       }

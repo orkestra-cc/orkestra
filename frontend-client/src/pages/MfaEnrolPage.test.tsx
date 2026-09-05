@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
+import { browserNavigation } from "@/api/auth";
 import en from "@/locales/en.json";
 import { MfaEnrolPage } from "@/pages/MfaEnrolPage";
 import { url } from "@/test/handlers";
@@ -79,5 +81,45 @@ describe("MfaEnrolPage reads /me/mfa before offering a wizard (§4.2 D14)", () =
       await screen.findByRole("button", { name: en.mfa.enrol.start }),
     ).toBeEnabled();
     expect(screen.queryByText(en.mfa.enrol.alreadyTitle)).toBeNull();
+  });
+});
+
+// The console suppresses the same copy in both enrolment dialogs, and there
+// the transition is a router navigation. Here it is a FULL-DOCUMENT
+// `window.location.assign`, which takes noticeably longer — so rendering
+// "MFA enrolment failed to start" would explain, at length, a page the user
+// is already being taken off. Suppressed deliberately; the honest message is
+// on the login page.
+describe("MfaEnrolPage suppresses copy for a 401 that is already leaving", () => {
+  it("renders no alert when enroll/begin answers reauthentication_required", async () => {
+    const assign = vi
+      .spyOn(browserNavigation, "assign")
+      .mockImplementation(() => {});
+    statusHandler({ status: "not_required" });
+    server.use(
+      http.post(url("/v1/auth/client/mfa/enroll/begin"), () =>
+        HttpResponse.json(
+          {
+            code: "reauthentication_required",
+            detail: "adding a second factor requires a recent sign-in",
+            maxAgeSeconds: 300,
+            authTime: 0,
+          },
+          { status: 401 },
+        ),
+      ),
+    );
+
+    renderWithProviders(<MfaEnrolPage />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: en.mfa.enrol.start }),
+    );
+
+    // The wrapper really did take the branch — otherwise the absence
+    // assertion below would pass for the wrong reason.
+    await waitFor(() =>
+      expect(assign).toHaveBeenCalledWith(expect.stringContaining("/login")),
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
