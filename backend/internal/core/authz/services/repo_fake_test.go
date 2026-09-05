@@ -64,14 +64,43 @@ func (r *fakeRepo) ListAllPermissionKeys(_ context.Context) ([]string, error) {
 	return out, nil
 }
 
+// UpsertRole mirrors Repository.UpsertRole, which is keyed on
+// (tenantId, name): an upsert naming a row that already exists REPLACES
+// it, and the incumbent's uuid disappears along with it. The fake stores
+// by uuid, so it has to delete the colliding row explicitly — without
+// that it silently kept both, which is how a create-shaped upsert could
+// strand a role's bindings on the real repository while the whole suite
+// stayed green. Only the seeder calls this now; creation goes through
+// InsertRole.
 func (r *fakeRepo) UpsertRole(_ context.Context, role *models.Role) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if role.UUID == "" {
 		return errors.New("fakeRepo.UpsertRole: UUID required")
 	}
-	// Mirror repository semantics: if a role with the same (tenantId, name)
-	// exists, preserve its UUID. Caller seeds with the existing UUID.
+	for uuid, existing := range r.roles {
+		if existing.TenantID == role.TenantID && existing.Name == role.Name && uuid != role.UUID {
+			delete(r.roles, uuid)
+		}
+	}
+	r.roles[role.UUID] = *role
+	return nil
+}
+
+// InsertRole mirrors Repository.InsertRole: the unique (tenantId, name)
+// index refuses a name already taken in the tenant rather than rewriting
+// the incumbent.
+func (r *fakeRepo) InsertRole(_ context.Context, role *models.Role) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if role.UUID == "" {
+		return errors.New("fakeRepo.InsertRole: UUID required")
+	}
+	for _, existing := range r.roles {
+		if existing.TenantID == role.TenantID && existing.Name == role.Name {
+			return repository.ErrRoleExists
+		}
+	}
 	r.roles[role.UUID] = *role
 	return nil
 }

@@ -12,16 +12,26 @@ import (
 )
 
 // stubUsers satisfies iface.UserProvider by embedding a nil interface —
-// any method other than the overridden GetUserCount panics. This keeps the
+// any method other than the two overridden below panics. This keeps the
 // fake scoped to exactly what the setup service actually calls.
 type stubUsers struct {
 	iface.UserProvider
 	count    int64
 	countErr error
+	// role is what GetUserByID reports for every UUID; the recovery gate
+	// reads the caller's system role from the database rather than the
+	// `srole` claim (D28). The zero value is "no role", which refuses
+	// recovery — the right default for a stub that no authorization test
+	// configures.
+	role string
 }
 
 func (s *stubUsers) GetUserCount(_ context.Context, _ *iface.UserFilters) (int64, error) {
 	return s.count, s.countErr
+}
+
+func (s *stubUsers) GetUserByID(_ context.Context, id string) (*iface.User, error) {
+	return &iface.User{UUID: id, Role: s.role}, nil
 }
 
 // stubAdmin records the last RegisterInitialAdmin call and returns whatever

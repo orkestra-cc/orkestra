@@ -40,7 +40,8 @@ func TestFinalize_BlankTenantName_Rejected(t *testing.T) {
 
 			in := testInput(true)
 			in.TenantName = tc.in
-			_, err := fx.svc.Finalize(context.Background(), "admin-1", "super_admin", in)
+			fx.users.withRoles("admin-1", "super_admin")
+			_, err := fx.svc.Finalize(context.Background(), "admin-1", in)
 			if !errors.Is(err, ErrFinalizationTenantNameRequired) {
 				t.Fatalf("Finalize(tenantName=%q) = %v, want ErrFinalizationTenantNameRequired", tc.in, err)
 			}
@@ -68,7 +69,8 @@ func TestFinalize_BlankTenantSlug_Rejected(t *testing.T) {
 
 	in := testInput(true)
 	in.TenantSlug = "   "
-	if _, err := fx.svc.Finalize(context.Background(), "admin-1", "super_admin", in); !errors.Is(err, ErrFinalizationTenantSlugRequired) {
+	fx.users.withRoles("admin-1", "super_admin")
+	if _, err := fx.svc.Finalize(context.Background(), "admin-1", in); !errors.Is(err, ErrFinalizationTenantSlugRequired) {
 		t.Fatalf("Finalize(blank slug) = %v, want ErrFinalizationTenantSlugRequired", err)
 	}
 }
@@ -84,7 +86,8 @@ func TestFinalize_NamePreservedWhenOnlyPadded(t *testing.T) {
 
 	in := testInput(true)
 	in.TenantName = "  \t Acme   Corp \n "
-	res, err := fx.svc.Finalize(context.Background(), "admin-1", "super_admin", in)
+	fx.users.withRoles("admin-1", "super_admin")
+	res, err := fx.svc.Finalize(context.Background(), "admin-1", in)
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}

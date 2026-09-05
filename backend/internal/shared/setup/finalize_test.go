@@ -551,7 +551,8 @@ func TestFinalize_FreshReservation_RunsAllStagesInOrder(t *testing.T) {
 		map[string]iface.UserLifecycleState{"admin-1": iface.UserLifecycleActive},
 	)
 
-	res, err := fx.svc.Finalize(context.Background(), "admin-1", "super_admin", testInput(true))
+	fx.users.withRoles("admin-1", "super_admin")
+	res, err := fx.svc.Finalize(context.Background(), "admin-1", testInput(true))
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
@@ -635,7 +636,8 @@ func TestFinalize_SingleMode_PersistsSingle(t *testing.T) {
 		map[string]iface.UserLifecycleState{"admin-1": iface.UserLifecycleActive},
 	)
 
-	res, err := fx.svc.Finalize(context.Background(), "admin-1", "super_admin", testInput(false))
+	fx.users.withRoles("admin-1", "super_admin")
+	res, err := fx.svc.Finalize(context.Background(), "admin-1", testInput(false))
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
@@ -661,7 +663,8 @@ func TestFinalize_MatchingHashLiveLease_ReturnsInProgress(t *testing.T) {
 		map[string]iface.UserLifecycleState{"admin-1": iface.UserLifecycleActive},
 	)
 
-	_, err := fx.svc.Finalize(context.Background(), "admin-1", "super_admin", testInput(true))
+	fx.users.withRoles("admin-1", "super_admin")
+	_, err := fx.svc.Finalize(context.Background(), "admin-1", testInput(true))
 	if !errors.Is(err, ErrFinalizationInProgress) {
 		t.Fatalf("err = %v, want ErrFinalizationInProgress", err)
 	}
@@ -688,7 +691,8 @@ func TestFinalize_MatchingHashExpiredLease_ResumesFromRecordStage(t *testing.T) 
 		map[string]iface.UserLifecycleState{"admin-1": iface.UserLifecycleActive},
 	)
 
-	res, err := fx.svc.Finalize(context.Background(), "admin-1", "super_admin", testInput(true))
+	fx.users.withRoles("admin-1", "super_admin")
+	res, err := fx.svc.Finalize(context.Background(), "admin-1", testInput(true))
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
@@ -723,7 +727,8 @@ func TestFinalize_DifferentHashWhileReserved_AlreadyStarted(t *testing.T) {
 		map[string]iface.UserLifecycleState{"admin-1": iface.UserLifecycleActive},
 	)
 
-	_, err := fx.svc.Finalize(context.Background(), "admin-1", "super_admin", testInput(true))
+	fx.users.withRoles("admin-1", "super_admin")
+	_, err := fx.svc.Finalize(context.Background(), "admin-1", testInput(true))
 	if !errors.Is(err, ErrFinalizationAlreadyStarted) {
 		t.Fatalf("err = %v, want ErrFinalizationAlreadyStarted", err)
 	}
@@ -750,7 +755,8 @@ func TestFinalize_CompleteMatchingHash_ReplaysSnapshot(t *testing.T) {
 		map[string]iface.UserLifecycleState{"admin-1": iface.UserLifecycleActive},
 	)
 
-	res, err := fx.svc.Finalize(context.Background(), "admin-1", "super_admin", testInput(true))
+	fx.users.withRoles("admin-1", "super_admin")
+	res, err := fx.svc.Finalize(context.Background(), "admin-1", testInput(true))
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
@@ -784,7 +790,8 @@ func TestFinalize_CompleteDifferentHash_AlreadyCompleted(t *testing.T) {
 		map[string]iface.UserLifecycleState{"admin-1": iface.UserLifecycleActive},
 	)
 
-	_, err := fx.svc.Finalize(context.Background(), "admin-1", "super_admin", testInput(true))
+	fx.users.withRoles("admin-1", "super_admin")
+	_, err := fx.svc.Finalize(context.Background(), "admin-1", testInput(true))
 	if !errors.Is(err, ErrFinalizationAlreadyCompleted) {
 		t.Fatalf("err = %v, want ErrFinalizationAlreadyCompleted", err)
 	}
@@ -803,11 +810,13 @@ func TestFinalize_CompletedByMigrationNoHash_AlreadyCompleted(t *testing.T) {
 
 	// An installation completed by migration has no client request hash,
 	// so no payload can ever match it.
-	_, err := fx.svc.Finalize(context.Background(), "admin-1", "super_admin", testInput(true))
+	fx.users.withRoles("admin-1", "super_admin")
+	_, err := fx.svc.Finalize(context.Background(), "admin-1", testInput(true))
 	if !errors.Is(err, ErrFinalizationAlreadyCompleted) {
 		t.Fatalf("err = %v, want ErrFinalizationAlreadyCompleted", err)
 	}
-	_, err = fx.svc.Finalize(context.Background(), "admin-1", "super_admin", testInput(false))
+	fx.users.withRoles("admin-1", "super_admin")
+	_, err = fx.svc.Finalize(context.Background(), "admin-1", testInput(false))
 	if !errors.Is(err, ErrFinalizationAlreadyCompleted) {
 		t.Fatalf("err = %v, want ErrFinalizationAlreadyCompleted", err)
 	}
@@ -827,7 +836,8 @@ func TestFinalize_CompleteMatchingHashButUnauthorizedCaller_AlreadyCompleted(t *
 	// Only the AUTHORIZED replay receives the snapshot; anybody else is
 	// told the truth that setup is finished, without confirming that
 	// their payload matched.
-	_, err := fx.svc.Finalize(context.Background(), "admin-2", "super_admin", testInput(true))
+	fx.users.withRoles("admin-2", "super_admin")
+	_, err := fx.svc.Finalize(context.Background(), "admin-2", testInput(true))
 	if !errors.Is(err, ErrFinalizationAlreadyCompleted) {
 		t.Fatalf("err = %v, want ErrFinalizationAlreadyCompleted", err)
 	}
@@ -841,7 +851,8 @@ func TestFinalize_BoundToAnotherAdmin_Forbidden(t *testing.T) {
 		map[string]iface.UserLifecycleState{"admin-1": iface.UserLifecycleActive},
 	)
 
-	_, err := fx.svc.Finalize(context.Background(), "admin-2", "super_admin", testInput(true))
+	fx.users.withRoles("admin-2", "super_admin")
+	_, err := fx.svc.Finalize(context.Background(), "admin-2", testInput(true))
 	if !errors.Is(err, ErrFinalizerBoundToAnotherAdmin) {
 		t.Fatalf("err = %v, want ErrFinalizerBoundToAnotherAdmin", err)
 	}
@@ -856,7 +867,8 @@ func TestFinalize_UnusableBindingLowerRole_RecoveryRequiresSuperAdmin(t *testing
 		map[string]iface.UserLifecycleState{"ghost": iface.UserLifecycleDeleted, "admin-2": iface.UserLifecycleActive},
 	)
 
-	_, err := fx.svc.Finalize(context.Background(), "admin-2", "administrator", testInput(true))
+	fx.users.withRoles("admin-2", "administrator")
+	_, err := fx.svc.Finalize(context.Background(), "admin-2", testInput(true))
 	if !errors.Is(err, ErrRecoveryRequiresSuperAdmin) {
 		t.Fatalf("err = %v, want ErrRecoveryRequiresSuperAdmin", err)
 	}
@@ -882,7 +894,8 @@ func TestFinalize_UnusableBindingActiveSuperAdmin_ClaimsRecoveryAndAudits(t *tes
 				map[string]iface.UserLifecycleState{tc.bound: tc.boundState, "sa-1": iface.UserLifecycleActive},
 			)
 
-			res, err := fx.svc.Finalize(context.Background(), "sa-1", "super_admin", testInput(true))
+			fx.users.withRoles("sa-1", "super_admin")
+			res, err := fx.svc.Finalize(context.Background(), "sa-1", testInput(true))
 			if err != nil {
 				t.Fatalf("Finalize: %v", err)
 			}
@@ -936,7 +949,8 @@ func TestFinalize_EmptyBindingSuperAdmin_RecoversWithMissingReasonAndNoPreviousU
 		map[string]iface.UserLifecycleState{"sa-1": iface.UserLifecycleActive},
 	)
 
-	if _, err := fx.svc.Finalize(context.Background(), "sa-1", "super_admin", testInput(true)); err != nil {
+	fx.users.withRoles("sa-1", "super_admin")
+	if _, err := fx.svc.Finalize(context.Background(), "sa-1", testInput(true)); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
 	events := fx.audit.byAction("setup.finalizer.recovered")
@@ -958,7 +972,8 @@ func TestFinalize_NoCoordinatorRecordSuperAdmin_CreatesThenClaims(t *testing.T) 
 	// path must cope with there being nothing to CAS against yet.
 	fx := newSagaFixture(nil, map[string]iface.UserLifecycleState{"sa-1": iface.UserLifecycleActive})
 
-	res, err := fx.svc.Finalize(context.Background(), "sa-1", "super_admin", testInput(false))
+	fx.users.withRoles("sa-1", "super_admin")
+	res, err := fx.svc.Finalize(context.Background(), "sa-1", testInput(false))
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
@@ -996,7 +1011,8 @@ func TestFinalize_RecoveryCASLost_ReEvaluatesOnce(t *testing.T) {
 	fx.store.rec.Revision = 4
 	fx.users.states["ghost"] = iface.UserLifecycleDeleted
 
-	_, err := fx.svc.Finalize(context.Background(), "sa-1", "super_admin", testInput(true))
+	fx.users.withRoles("sa-1", "super_admin")
+	_, err := fx.svc.Finalize(context.Background(), "sa-1", testInput(true))
 	if !errors.Is(err, ErrFinalizerBoundToAnotherAdmin) {
 		t.Fatalf("err = %v, want ErrFinalizerBoundToAnotherAdmin", err)
 	}
@@ -1024,7 +1040,8 @@ func TestFinalize_BindingStolenBeforeReservation_IsForbiddenNotConflict(t *testi
 		rec.Revision++
 	}
 
-	_, err := fx.svc.Finalize(context.Background(), "admin-1", "super_admin", testInput(true))
+	fx.users.withRoles("admin-1", "super_admin")
+	_, err := fx.svc.Finalize(context.Background(), "admin-1", testInput(true))
 	if !errors.Is(err, ErrFinalizerBoundToAnotherAdmin) {
 		t.Fatalf("err = %v, want ErrFinalizerBoundToAnotherAdmin", err)
 	}
@@ -1043,7 +1060,8 @@ func TestFinalize_LifecycleLookupError_UnavailableAndNoClaim(t *testing.T) {
 	)
 	fx.users.err = errors.New("mongo down")
 
-	_, err := fx.svc.Finalize(context.Background(), "sa-1", "super_admin", testInput(true))
+	fx.users.withRoles("sa-1", "super_admin")
+	_, err := fx.svc.Finalize(context.Background(), "sa-1", testInput(true))
 	if !errors.Is(err, ErrFinalizerStateUnavailable) {
 		t.Fatalf("err = %v, want ErrFinalizerStateUnavailable", err)
 	}
@@ -1059,7 +1077,8 @@ func TestFinalize_CoordinatorReadError_Unavailable(t *testing.T) {
 	fx := newSagaFixture(nil, map[string]iface.UserLifecycleState{"admin-1": iface.UserLifecycleActive})
 	fx.store.getErr = errors.New("mongo down")
 
-	_, err := fx.svc.Finalize(context.Background(), "admin-1", "super_admin", testInput(true))
+	fx.users.withRoles("admin-1", "super_admin")
+	_, err := fx.svc.Finalize(context.Background(), "admin-1", testInput(true))
 	if !errors.Is(err, ErrFinalizerStateUnavailable) {
 		t.Fatalf("err = %v, want ErrFinalizerStateUnavailable", err)
 	}
@@ -1074,7 +1093,8 @@ func TestFinalize_StageFailure_DoesNotAdvanceOrComplete(t *testing.T) {
 	)
 	fx.tenants.ensureErr = errors.New("kms unavailable")
 
-	_, err := fx.svc.Finalize(context.Background(), "admin-1", "super_admin", testInput(true))
+	fx.users.withRoles("admin-1", "super_admin")
+	_, err := fx.svc.Finalize(context.Background(), "admin-1", testInput(true))
 	if err == nil {
 		t.Fatal("expected an error when the tenant stage fails")
 	}
@@ -1107,7 +1127,8 @@ func TestFinalize_ConfigStageFailure_LeavesStageOne(t *testing.T) {
 	)
 	fx.cfg.updateErr = errors.New("module config write failed")
 
-	if _, err := fx.svc.Finalize(context.Background(), "admin-1", "super_admin", testInput(true)); err == nil {
+	fx.users.withRoles("admin-1", "super_admin")
+	if _, err := fx.svc.Finalize(context.Background(), "admin-1", testInput(true)); err == nil {
 		t.Fatal("expected an error when the config stage fails")
 	}
 	rec := fx.store.snapshotRecord()

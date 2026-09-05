@@ -298,6 +298,11 @@ const roleSuperAdmin = "super_admin"
 // would let any operator wait out a transient database blip and then claim
 // an in-progress setup.
 //
+// The caller's system role is read from the DATABASE (callerSystemRole),
+// not from the `srole` claim: the claim can be a whole access-token
+// lifetime stale, and this is the gate that hands an operator the power to
+// seize an in-progress binding. Spec §4.6 D28.
+//
 // Logic: a nil record or empty rec.AdminUUID is treated as an empty
 // binding (a legacy record from before this feature existed). When the
 // binding is non-empty, its lifecycle state is resolved once; `active`
@@ -305,8 +310,8 @@ const roleSuperAdmin = "super_admin"
 // admin, otherwise they're told the binding belongs to someone else.
 // Every other state (and an empty binding) falls through to the recovery
 // check: the caller must be an authenticated, active super_admin.
-func (s *Service) evaluateAccess(ctx context.Context, callerUUID, callerSystemRole string) (FinalizationAccess, *systeminit.FinalizationRecord, error) {
-	access, rec, _, err := s.evaluateAccessDetailed(ctx, callerUUID, callerSystemRole)
+func (s *Service) evaluateAccess(ctx context.Context, callerUUID string) (FinalizationAccess, *systeminit.FinalizationRecord, error) {
+	access, rec, _, err := s.evaluateAccessDetailed(ctx, callerUUID)
 	return access, rec, err
 }
 
@@ -331,7 +336,7 @@ const (
 //
 // The returned reason is meaningful only when the caller may claim
 // recovery; it is empty otherwise.
-func (s *Service) evaluateAccessDetailed(ctx context.Context, callerUUID, callerSystemRole string) (FinalizationAccess, *systeminit.FinalizationRecord, string, error) {
+func (s *Service) evaluateAccessDetailed(ctx context.Context, callerUUID string) (FinalizationAccess, *systeminit.FinalizationRecord, string, error) {
 	rec, err := s.store.Get(ctx)
 	if err != nil {
 		return FinalizationAccess{}, nil, "", fmt.Errorf("setup: read finalization coordinator: %w", err)
@@ -363,8 +368,15 @@ func (s *Service) evaluateAccessDetailed(ctx context.Context, callerUUID, caller
 	// Binding is empty, or the bound administrator is unusable: only an
 	// authenticated, active super_admin may claim recovery. The role check
 	// runs first so a non-super_admin caller never triggers a lifecycle
-	// lookup on themselves.
-	if callerSystemRole != roleSuperAdmin {
+	// lookup on themselves — that ordering is the privacy property, and it
+	// survives the role now coming from the database: the caller's own
+	// user row is not the bound administrator's, and reading your own role
+	// tells you nothing you did not already carry in your token.
+	callerRole, err := s.callerSystemRole(ctx, callerUUID)
+	if err != nil {
+		return FinalizationAccess{}, nil, "", err
+	}
+	if callerRole != roleSuperAdmin {
 		return FinalizationAccess{Reason: reasonRecoveryRequiresSuperAdmin}, rec, "", nil
 	}
 	callerState, err := s.userLifecycleState(ctx, callerUUID)
@@ -390,6 +402,34 @@ func lifecycleRecoveryReason(state iface.UserLifecycleState) string {
 	default:
 		return recoveryReasonMissing
 	}
+}
+
+// callerSystemRole resolves the caller's global system role from the
+// user store — the authoritative copy — rather than from the `srole` JWT
+// claim the request carries.
+//
+// A missing row is a FACT, not a failure: it reports the empty role, which
+// is not roleSuperAdmin, so recovery is refused cleanly. That mirrors
+// userLifecycleState, where a missing user is iface.UserLifecycleMissing
+// rather than an error. Every OTHER error fails closed through the error
+// return, exactly like a lifecycle lookup failure, and never degrades to
+// the claim — falling back would make the claim authoritative again
+// precisely when the database cannot contradict it.
+func (s *Service) callerSystemRole(ctx context.Context, callerUUID string) (string, error) {
+	if callerUUID == "" {
+		return "", nil
+	}
+	user, err := s.users.GetUserByID(ctx, callerUUID)
+	if err != nil {
+		if errors.Is(err, iface.ErrUserNotFound) {
+			return "", nil
+		}
+		return "", fmt.Errorf("setup: resolve caller system role: %w", err)
+	}
+	if user == nil {
+		return "", nil
+	}
+	return user.Role, nil
 }
 
 // userLifecycleState resolves userUUID's lifecycle class through the

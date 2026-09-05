@@ -239,9 +239,11 @@ func normalizeFinalize(name, slug string, allow bool) (n, sl, mode, hash string)
 //	| complete        | different/missing hash    | ErrFinalizationAlreadyCompleted   |
 //
 // Authorization comes from evaluateAccessDetailed — the same read-only
-// seam GET /v1/setup/finalization-access uses — and this method adds the
-// atomic claim the probe deliberately does not perform.
-func (s *Service) Finalize(ctx context.Context, callerUUID, callerSystemRole string, in FinalizeInput) (*FinalizeResult, error) {
+// seam GET /v1/setup/finalization-access uses, which reads the caller's
+// system role from the database rather than the `srole` claim (D28) — and
+// this method adds the atomic claim the probe deliberately does not
+// perform.
+func (s *Service) Finalize(ctx context.Context, callerUUID string, in FinalizeInput) (*FinalizeResult, error) {
 	if callerUUID == "" {
 		// The handler rejects an unauthenticated request first; this is
 		// the belt-and-braces path for a non-HTTP caller.
@@ -271,7 +273,7 @@ func (s *Service) Finalize(ctx context.Context, callerUUID, callerSystemRole str
 			reason string
 			err    error
 		)
-		access, rec, reason, err = s.evaluateAccessDetailed(ctx, callerUUID, callerSystemRole)
+		access, rec, reason, err = s.evaluateAccessDetailed(ctx, callerUUID)
 		if err != nil {
 			return nil, unavailable(err)
 		}

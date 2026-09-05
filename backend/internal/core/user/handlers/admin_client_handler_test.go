@@ -310,8 +310,8 @@ func TestCreateClientUserAdmin_NoHasher(t *testing.T) {
 	t.Parallel()
 	// PasswordHasher not registered → 503. We don't even need a UserService
 	// behaviour because the early-exit fires before reaching it.
-	h, _ := newAdminHandler(&fakeUserService{})
-	_, err := h.CreateClientUserAdmin(context.Background(), &CreateClientUserAdminRequest{
+	h, reg := newAdminHandler(&fakeUserService{})
+	_, err := h.CreateClientUserAdmin(authorisedOperator(reg), &CreateClientUserAdminRequest{
 		Body: CreateClientUserAdminBody{
 			Email: "a@b.c", FullName: "x", Role: "operator", Password: "Hunter2!Hunter2!",
 		},
@@ -327,7 +327,7 @@ func TestCreateClientUserAdmin_PolicyFailure(t *testing.T) {
 			return errors.New("password too short")
 		},
 	})
-	_, err := h.CreateClientUserAdmin(context.Background(), &CreateClientUserAdminRequest{
+	_, err := h.CreateClientUserAdmin(authorisedOperator(reg), &CreateClientUserAdminRequest{
 		Body: CreateClientUserAdminBody{Email: "a@b.c", FullName: "x", Role: "operator", Password: "short"},
 	})
 	assertStatus(t, err, 400)
@@ -339,7 +339,7 @@ func TestCreateClientUserAdmin_HashFailure(t *testing.T) {
 	reg.Register(module.ServicePasswordService, &fakePasswordHasher{
 		hashFn: func(string) (string, error) { return "", errors.New("entropy gone") },
 	})
-	_, err := h.CreateClientUserAdmin(context.Background(), &CreateClientUserAdminRequest{
+	_, err := h.CreateClientUserAdmin(authorisedOperator(reg), &CreateClientUserAdminRequest{
 		Body: CreateClientUserAdminBody{Email: "a@b.c", FullName: "x", Role: "operator", Password: "Hunter2!Hunter2!"},
 	})
 	assertStatus(t, err, 500)
@@ -367,7 +367,7 @@ func TestCreateClientUserAdmin_ServiceErrors(t *testing.T) {
 			}
 			h, reg := newAdminHandler(svc)
 			reg.Register(module.ServicePasswordService, &fakePasswordHasher{})
-			_, err := h.CreateClientUserAdmin(context.Background(), &CreateClientUserAdminRequest{
+			_, err := h.CreateClientUserAdmin(authorisedOperator(reg), &CreateClientUserAdminRequest{
 				Body: CreateClientUserAdminBody{
 					Email: "a@b.c", FullName: "x", Role: "operator", Password: "Hunter2!Hunter2!",
 				},
@@ -400,7 +400,7 @@ func TestCreateClientUserAdmin_Happy(t *testing.T) {
 	}
 	h, reg := newAdminHandler(svc)
 	reg.Register(module.ServicePasswordService, &fakePasswordHasher{})
-	resp, err := h.CreateClientUserAdmin(context.Background(), &CreateClientUserAdminRequest{
+	resp, err := h.CreateClientUserAdmin(authorisedOperator(reg), &CreateClientUserAdminRequest{
 		Body: CreateClientUserAdminBody{
 			Email: "a@b.c", FullName: "x", Role: "operator", Password: "Hunter2!Hunter2!",
 		},
@@ -431,7 +431,7 @@ func TestCreateClientUserAdmin_MarkVerifiedFailureIsBestEffort(t *testing.T) {
 	}
 	h, reg := newAdminHandler(svc)
 	reg.Register(module.ServicePasswordService, &fakePasswordHasher{})
-	resp, err := h.CreateClientUserAdmin(context.Background(), &CreateClientUserAdminRequest{
+	resp, err := h.CreateClientUserAdmin(authorisedOperator(reg), &CreateClientUserAdminRequest{
 		Body: CreateClientUserAdminBody{
 			Email: "a@b.c", FullName: "x", Role: "operator", Password: "Hunter2!Hunter2!",
 		},
@@ -446,8 +446,8 @@ func TestCreateClientUserAdmin_MarkVerifiedFailureIsBestEffort(t *testing.T) {
 
 func TestInviteClientUserAdmin_NoAuth(t *testing.T) {
 	t.Parallel()
-	h, _ := newAdminHandler(&fakeUserService{})
-	_, err := h.InviteClientUserAdmin(context.Background(), &InviteClientUserAdminRequest{
+	h, reg := newAdminHandler(&fakeUserService{})
+	_, err := h.InviteClientUserAdmin(authorisedOperator(reg), &InviteClientUserAdminRequest{
 		Body: InviteClientUserAdminBody{Email: "a@b.c", FullName: "x", Role: "operator"},
 	})
 	assertStatus(t, err, 503)
@@ -474,7 +474,7 @@ func TestInviteClientUserAdmin_Happy(t *testing.T) {
 			return nil
 		},
 	})
-	resp, err := h.InviteClientUserAdmin(context.Background(), &InviteClientUserAdminRequest{
+	resp, err := h.InviteClientUserAdmin(authorisedOperator(reg), &InviteClientUserAdminRequest{
 		Body: InviteClientUserAdminBody{
 			Email: "a@b.c", FullName: "x", Role: "operator", InviterName: "Operator Bob",
 		},
@@ -512,7 +512,7 @@ func TestInviteClientUserAdmin_CreateErrors(t *testing.T) {
 			}
 			h, reg := newAdminHandler(svc)
 			reg.Register(module.ServiceClientPasswordAuthService, &fakeAdminAuthInviter{})
-			_, err := h.InviteClientUserAdmin(context.Background(), &InviteClientUserAdminRequest{
+			_, err := h.InviteClientUserAdmin(authorisedOperator(reg), &InviteClientUserAdminRequest{
 				Body: InviteClientUserAdminBody{Email: "a@b.c", FullName: "x", Role: "operator"},
 			})
 			assertStatus(t, err, c.wantStatus)
@@ -534,7 +534,7 @@ func TestInviteClientUserAdmin_SendFailureIs502(t *testing.T) {
 	reg.Register(module.ServiceClientPasswordAuthService, &fakeAdminAuthInviter{
 		sendInviteFn: func(context.Context, string, string) error { return errors.New("smtp down") },
 	})
-	_, err := h.InviteClientUserAdmin(context.Background(), &InviteClientUserAdminRequest{
+	_, err := h.InviteClientUserAdmin(authorisedOperator(reg), &InviteClientUserAdminRequest{
 		Body: InviteClientUserAdminBody{Email: "a@b.c", FullName: "x", Role: "operator"},
 	})
 	assertStatus(t, err, 502)

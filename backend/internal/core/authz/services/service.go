@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,20 @@ import (
 // name, description, or permissions of a system role. Toggling IsActive on a
 // system role is still allowed.
 var ErrSystemRoleImmutable = errors.New("authz: system role name/description/permissions are immutable")
+
+// ErrPlatformAdminRequired is returned when UpdateRole is asked to change
+// a SYSTEM role's IsActive flag by a caller who is not a platform
+// administrator. A system role is global platform configuration — every
+// seeded catalog row, the org_* ones included, lives at tenantId="" — and
+// disabling one drops every permission it carries from every holder on the
+// platform, because the evaluator skips bindings whose role is inactive.
+//
+// The rule is about who the caller IS, not about what they hold: an
+// org_owner holds exactly the permissions the org_owner row carries, so a
+// cascade check ("the actor must hold everything the role carries") would
+// still let them disable org_owner platform-wide from inside their own
+// tenant. See assertPlatformAdmin.
+var ErrPlatformAdminRequired = errors.New("authz: only a platform administrator may enable or disable a system role")
 
 // ErrRoleInactive is returned when CreateBinding is called with a role that
 // has been disabled. Operators should re-enable the role before granting.
@@ -59,6 +74,19 @@ var ErrInsufficientPermissionsToGrant = errors.New("authz: caller cannot grant a
 // silently waive the check.
 var ErrGranterRequired = errors.New("authz: granter is required")
 
+// ErrBindingUserRequired is returned when a grant names no target user
+// — an empty or whitespace-only CreateBindingInput.UserUUID.
+//
+// The `validate:"required"` tag on that field is decorative: nothing in
+// this module invokes go-playground/validator, and Huma builds the
+// request schema from its own tags, so the generated property is
+// `required` with no `minLength` and {"userUUID": ""} reaches the
+// service. Refusing it here is what keeps a binding row from being
+// persisted against no user, and what keeps userScope from being handed
+// an empty user (see bumpGeneration, which refuses that outright rather
+// than widening it to a platform-wide flush).
+var ErrBindingUserRequired = errors.New("authz: binding target user is required")
+
 // ErrBindingExists is returned when CreateBinding targets a
 // (tenantID, userUUID, roleID) tuple that already has a binding — surfaced
 // from the authz_bindings unique compound index (see this module's
@@ -66,6 +94,27 @@ var ErrGranterRequired = errors.New("authz: granter is required")
 // Callers that want "grant if absent, otherwise return the existing row"
 // semantics should call EnsureBinding instead.
 var ErrBindingExists = errors.New("authz: role already bound")
+
+// ErrAuthzCacheUnavailable is returned when a GRANT was refused because
+// the effective-permission cache could not be retired.
+//
+// A grant bumps the cache generation BEFORE it writes (see
+// withGeneration): a counter the store cannot bump means the change's
+// effect cannot be guaranteed, so the change is refused and nothing is
+// written. Handlers answer 503 errcode.AuthzCacheUnavailable — the
+// caller's request was fine, the server's cache store was not, and the
+// retry is theirs to make.
+//
+// REVOCATIONS never return this (D27 as amended by P22). They write
+// first and report the invalidation failure through logs and metrics,
+// because a refused revocation leaves the privilege granted
+// indefinitely while a written one leaves a stale verdict for at most
+// the 60s TTL. Neither do platform-issued grants (P24).
+//
+// A deployment with no Redis wired never sees this: there are no cached
+// verdicts to retire, so the invalidation is a no-op success. "No cache
+// configured" is not "cache unavailable".
+var ErrAuthzCacheUnavailable = errors.New("authz: permission cache unavailable")
 
 // granterSystem is the sentinel value handlers pass when a binding is
 // platform-issued rather than user-initiated (e.g. the OwnerRoleBinder
@@ -85,6 +134,27 @@ var platformSystemRoleNames = map[string]struct{}{
 	"manager":       {},
 	"operator":      {},
 	"guest":         {},
+}
+
+// platformAdminRoles is the subset of platformSystemRoleNames whose
+// holders ADMINISTER the platform. The two sets answer different
+// questions and must not be conflated: platformSystemRoleNames says
+// which role NAMES are platform-scoped (guest is one of them), this one
+// says which of them may change global platform configuration.
+//
+// It is the same pair the rest of the platform already protects as its
+// administrator quorum — user/services CountActiveAdministrators and
+// user/handlers isPrivilegedSystemRole — so "who is an administrator
+// here" has one answer across modules.
+//
+// `developer` is deliberately excluded. Production seeds it read-only
+// (D9, mirrored by the GetEffectivePermissions shortcut), so admitting it
+// would hand a production developer a platform-wide WRITE that the
+// environment gate exists to deny — and the gate must not depend on
+// which environment the binary booted in.
+var platformAdminRoles = map[string]struct{}{
+	"super_admin":   {},
+	"administrator": {},
 }
 
 // isPlatformSystemRole reports whether the role is one of the 6 platform
@@ -109,6 +179,7 @@ type repoBackend interface {
 	ListPermissions(ctx context.Context) ([]models.Permission, error)
 	ListAllPermissionKeys(ctx context.Context) ([]string, error)
 	UpsertRole(ctx context.Context, role *models.Role) error
+	InsertRole(ctx context.Context, role *models.Role) error
 	UpdateRoleFields(ctx context.Context, uuid string, fields bson.M) error
 	GetRoleByName(ctx context.Context, tenantID, name string) (*models.Role, error)
 	GetRoleByUUID(ctx context.Context, uuid string) (*models.Role, error)
@@ -141,10 +212,16 @@ type repoBackend interface {
 //     or by a global binding).
 //
 // Results are cached in Redis for 60 seconds per (userUUID, orgID) key and
-// invalidated when bindings or roles change.
+// invalidated when bindings or roles change. The cache key is
+// generation-keyed (see the Cache section below), so an invalidation is
+// one atomic INCR rather than a scan-and-delete.
 type Service struct {
-	repo               repoBackend
-	redis              module.RedisClient
+	repo  repoBackend
+	redis module.RedisClient
+	// mget is redis narrowed to the optional MGET extension, resolved
+	// once by setRedis. Nil when the configured client does not provide
+	// MGET, which disables the cache entirely (see MultiGetRedisClient).
+	mget               MultiGetRedisClient
 	logger             *slog.Logger
 	userRoles          UserSystemRoleLookup
 	startMFAGrace      MFAGraceStarter
@@ -256,7 +333,6 @@ func New(cfg Config) *Service {
 	}
 	s := &Service{
 		repo:                cfg.Repo,
-		redis:               cfg.Redis,
 		logger:              cfg.Logger,
 		userRoles:           cfg.LookupUser,
 		startMFAGrace:       cfg.StartMFAGrace,
@@ -267,6 +343,11 @@ func New(cfg Config) *Service {
 		systemPermissionSet: make(map[string]struct{}),
 		allPermissionSet:    make(map[string]struct{}),
 	}
+	// Wired through setRedis rather than the struct literal so the
+	// optional MGET extension is resolved exactly once, here, and a
+	// client that lacks it is reported at boot instead of silently on
+	// every request.
+	s.setRedis(cfg.Redis, cfg.Logger)
 	// Cedar shadow-mode engine. Failure to load the policies is a loud
 	// slog.Error but does not block construction — shadow mode is
 	// observability-only and must never turn a deployable binary into a
@@ -393,7 +474,18 @@ func (s *Service) shadowEvaluate(ctx context.Context, userUUID, tenantID, permis
 			systemRole = r
 		}
 	}
-	tenantRoles, _ := ctxauth.GetTenantRoles(ctx)
+	// Tenant roles belong to a TENANT-scoped decision. A global check
+	// (tenantID == "") is made by RequireSystemPermission and by the
+	// impersonation pre-check (middleware/auth.go), and for those a
+	// membership role in whatever tenant the request happened to resolve
+	// is not an input to the decision — stamping it is how a tenant
+	// permit came to fire on a platform action. Spec §4.5 D24, the
+	// second half of H-5 (the first half is system_actions.cedar's
+	// forbid, which only reaches keys whose module prefix is "system").
+	var tenantRoles []string
+	if tenantID != "" {
+		tenantRoles, _ = ctxauth.GetTenantRoles(ctx)
+	}
 	tenantKind := ctxauth.TenantKindFromContext(ctx)
 	if tenantKind == "" {
 		// Fall back to "internal" for global/pre-ADR-0001 calls so
@@ -573,13 +665,49 @@ func actionSuffix(permission string) string {
 	return permission
 }
 
+// systemPermissionSnapshot copies the platform-reserved (System:true)
+// key set under a single read lock, so a caller can test membership
+// inside a loop that makes repository calls without holding s.mu across
+// I/O. Same reason classifyPermissionKeys takes the lock once: the set
+// is small (the union of every module's System permissions) and only
+// rewritten by RegisterPermissions at boot, so one copy per cache miss
+// is cheaper than a lock held across Mongo round trips.
+func (s *Service) systemPermissionSnapshot() map[string]struct{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string]struct{}, len(s.systemPermissionSet))
+	for k := range s.systemPermissionSet {
+		out[k] = struct{}{}
+	}
+	return out
+}
+
 func (s *Service) GetEffectivePermissions(ctx context.Context, userUUID, tenantID string) ([]string, error) {
 	if userUUID == "" {
 		return nil, errors.New("authz: userUUID required")
 	}
 
-	if cached, ok := s.cacheGet(ctx, userUUID, tenantID); ok {
-		return cached, nil
+	// Read both generation counters ONCE and compose the read key and
+	// the write key at the bottom of this function from the SAME pair.
+	//
+	// Re-reading them at write time is the lost-invalidation window: a
+	// verdict computed BEFORE a concurrent INCR would be filed under the
+	// generation current AFTER it, republishing the pre-bump answer as
+	// the live entry for the full TTL. Writing under the older pair is
+	// strictly safe — if nothing was invalidated the key is still
+	// current, and if something was, the entry is born dead instead of
+	// born stale.
+	//
+	// This closes the "the reader read the generations before the bump"
+	// class deterministically. It does NOT close "the reader read after
+	// the pre-bump but resolved Mongo before the write" — that one is
+	// withGeneration's post-write bump (D27), which is best-effort. The
+	// two are complementary, not alternatives.
+	g, u, genOK := s.generations(ctx, userUUID)
+	if genOK {
+		if cached, ok := s.cacheGetAt(ctx, g, u, userUUID, tenantID); ok {
+			return cached, nil
+		}
 	}
 
 	systemRole := ""
@@ -640,17 +768,58 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, userUUID, tenantI
 	}
 
 	// Union of tenant-scoped bindings.
+	//
+	// Platform-reserved keys are skipped here, which makes evaluator
+	// rule 4 in authz/CLAUDE.md — System:true permissions require a
+	// GLOBAL grant (by system role, or by a binding with an empty
+	// orgID), never a per-org binding — enforced rather than incidental.
+	// It held only because no seeded tenant role carries a platform key,
+	// which is not a guarantee: existing data can carry a stale one, and
+	// until the D21 validator landed anyone able to edit a custom role
+	// could write one in. Skipping the key here makes the ones already in
+	// the data inert; they stay stored, and role reads still show them.
+	//
+	// The wildcard is skipped for the same reason and as the same class:
+	// D21 refuses "*" and a platform key with one error, and "*" is the
+	// maximal case of the hazard, because HasPermission short-circuits on
+	// it. Nothing legitimate is lost. A super_admin's wildcard reaches a
+	// principal two ways, and this filter is on neither: the systemRole
+	// shortcut above, and a GLOBAL binding to the seeded "super_admin"
+	// role (which carries Permissions ["*"]) — validateBindingScope in
+	// fact REQUIRES a platform role to be granted globally, refusing it
+	// inside a tenant with ErrSystemRoleNotGrantableInTenant. So a
+	// tenant-scoped binding conveying "*" is a shape the write path
+	// already rejects, and the only thing this can drop is stale data,
+	// which is the point.
+	//
+	// The GLOBAL branch above is deliberately NOT filtered: that is where
+	// a platform role legitimately grants a platform key — the seeded
+	// "administrator" role carries every registered key and is reached
+	// through a global binding — and filtering it would strip the
+	// operator console's own permissions. Closes the audit's L-9.
+	//
+	// The system-key set is snapshotted before the loop rather than read
+	// under s.mu inside it: the loop makes repository calls, and holding
+	// a lock across I/O is exactly what classifyPermissionKeys was
+	// extracted to avoid.
 	if tenantID != "" {
 		scoped, err := s.repo.ListActiveBindingsForUser(ctx, userUUID, tenantID)
 		if err != nil {
 			return nil, err
 		}
+		systemKeys := s.systemPermissionSnapshot()
 		for _, b := range scoped {
 			role, err := s.repo.GetRoleByUUID(ctx, b.RoleUUID)
 			if err != nil || !role.IsActive {
 				continue
 			}
 			for _, p := range role.Permissions {
+				if p == "*" {
+					continue
+				}
+				if _, isSystem := systemKeys[p]; isSystem {
+					continue
+				}
 				perms[p] = struct{}{}
 			}
 		}
@@ -660,7 +829,9 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, userUUID, tenantI
 	for k := range perms {
 		out = append(out, k)
 	}
-	s.cacheSet(ctx, userUUID, tenantID, out)
+	if genOK {
+		s.cacheSetAt(ctx, g, u, userUUID, tenantID, out)
+	}
 	return out, nil
 }
 
@@ -837,17 +1008,45 @@ func (s *Service) SeedSystemRoles(ctx context.Context) error {
 
 // --- Role admin ---
 
-func (s *Service) CreateRole(ctx context.Context, tenantID string, input models.CreateRoleInput) (*models.Role, error) {
+// CreateRole builds a custom (non-system) role for one tenant.
+//
+// The name must be free within the tenant: it goes in through
+// InsertRole, whose unique (tenantId, name) index answers a collision
+// with repository.ErrRoleExists -> 409. It used to go in through
+// UpsertRole, which is keyed on that same pair — so a create naming an
+// existing role REWROTE it, moving its uuid and permissions and leaving
+// every binding on the old uuid dangling, with no invalidation and no
+// error. That handed anyone holding only authz.role.create the power the
+// catalog reserves to authz.role.update / authz.role.delete.
+//
+// actor is the UUID of the caller the role is written on behalf of. Its
+// effective permissions bound what the role may carry (D21): a role can
+// never grant more than its author already holds, the same rule
+// CreateBinding applies to a grant. The literal "system" is a sentinel
+// that waives that cascade for platform-issued writes; no in-tree caller
+// passes it today (SeedSystemRoles writes through the repository
+// directly), and this package's own tests are its only users. The
+// catalog and platform-key checks bind every caller, "system" included —
+// see validateCustomRolePermissions.
+func (s *Service) CreateRole(ctx context.Context, tenantID, actor string, input models.CreateRoleInput) (*models.Role, error) {
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return nil, ErrRoleNameRequired
+	}
+	perms, err := s.validateCustomRolePermissions(ctx, tenantID, actor, input.Permissions)
+	if err != nil {
+		return nil, err
+	}
 	role := &models.Role{
 		UUID:        uuid.NewString(),
 		TenantID:    tenantID,
-		Name:        input.Name,
+		Name:        name,
 		Description: input.Description,
-		Permissions: input.Permissions,
+		Permissions: perms,
 		IsSystem:    false,
 		IsActive:    true,
 	}
-	if err := s.repo.UpsertRole(ctx, role); err != nil {
+	if err := s.repo.InsertRole(ctx, role); err != nil {
 		return nil, err
 	}
 	return role, nil
@@ -856,8 +1055,20 @@ func (s *Service) CreateRole(ctx context.Context, tenantID string, input models.
 // UpdateRole applies a partial update to a role. System roles reject any
 // change to Name, Description, or Permissions with ErrSystemRoleImmutable —
 // only IsActive can be toggled on them. Custom roles accept all four.
-// The authz cache is flushed because permission membership may change.
-func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID string, input models.UpdateRoleInput) (*models.Role, error) {
+//
+// How the cache is retired depends on what the patch can do to a
+// verdict (P25, as corrected by the whole-branch review — see the
+// comment at the write): a patch that takes access away writes first and
+// reports, one that only adds keeps the gate, and one that can change no
+// verdict at all retires nothing.
+//
+// actor is the UUID of the caller the edit is written on behalf of, and
+// bounds what the role may carry exactly as it does in CreateRole (D21).
+// A patch that does not supply Permissions is not validated against it,
+// so a role already holding a key no module declares any more can still
+// be renamed or disabled. The literal "system" waives the cascade for
+// platform-issued writes; no in-tree caller passes it today.
+func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID, actor string, input models.UpdateRoleInput) (*models.Role, error) {
 	existing, err := s.repo.GetRoleByUUID(ctx, roleUUID)
 	if err != nil {
 		return nil, err
@@ -877,37 +1088,161 @@ func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID string, inp
 		return nil, ErrSystemRoleImmutable
 	}
 
+	// IsActive is the one field a system row still exposes, and on a system
+	// row it is PLATFORM configuration: the guard above lets it through, and
+	// the tenant-scope guard never applied (a system role belongs to no
+	// tenant), so without this the {tenantId} in the path was decorative for
+	// this one field — an org_owner could disable `administrator` for the
+	// whole platform from inside their own tenant.
+	//
+	// Ordered after the immutability check on purpose: a patch that mixes an
+	// immutable field with IsActive is refused as immutable, the cheaper and
+	// more specific answer, and neither refusal leaks anything the other
+	// does not.
+	if existing.IsSystem && input.IsActive != nil {
+		if err := s.assertPlatformAdmin(ctx, actor); err != nil {
+			return nil, err
+		}
+	}
+
 	fields := bson.M{}
 	if input.Name != nil {
 		name := strings.TrimSpace(*input.Name)
 		if name == "" {
-			return nil, errors.New("authz: name cannot be empty")
+			return nil, ErrRoleNameRequired
 		}
 		fields["name"] = name
 	}
 	if input.Description != nil {
 		fields["description"] = *input.Description
 	}
+	removesAccess := false
 	if input.Permissions != nil {
-		if len(input.Permissions) == 0 {
-			return nil, errors.New("authz: permissions cannot be empty")
+		// An IsActive-only (or name-only) patch never reaches here, so a
+		// role that already holds a stale key can still be disabled
+		// (edge case 13).
+		perms, err := s.validateCustomRolePermissions(ctx, tenantID, actor, input.Permissions)
+		if err != nil {
+			return nil, err
 		}
-		fields["permissions"] = input.Permissions
+		fields["permissions"] = perms
+		// The direction of this patch (P25), from the two lists already
+		// in hand — no extra read.
+		removesAccess = !isPermissionSuperset(perms, existing.Permissions)
 	}
 	if input.IsActive != nil {
 		fields["isActive"] = *input.IsActive
+		// DISABLING a role is a revocation, and the largest one this
+		// method can perform: the evaluator skips every binding whose
+		// role is inactive (see GetEffectivePermissions), so the patch
+		// drops EVERY permission the role carries from EVERY holder —
+		// and for a system row, from every holder on the platform. The
+		// permission set-difference above cannot see that, because the
+		// stored list does not change. ENABLING one is the granting
+		// direction and keeps the gate.
+		if !*input.IsActive {
+			removesAccess = true
+		}
 	}
 
 	if len(fields) == 0 {
 		return existing, nil
 	}
 
-	if err := s.repo.UpdateRoleFields(ctx, roleUUID, fields); err != nil {
-		return nil, err
+	// The generation bump lands HERE, not at the top of the method: every
+	// refusal above (cross-tenant 404, system-role 403, the D21 validator's
+	// 422s) must retire nothing, or a request the service rejects becomes a
+	// remotely triggerable cache flush. globalScope because a role reaches
+	// its holders through bindings we would have to scan to enumerate.
+	//
+	// P25: the role editor routes by direction like every other mutation,
+	// because a patch that drops a permission IS a revocation and the
+	// decision behind D27 is that removing access is never blocked by a
+	// cache wobble. A patch that both adds and removes counts as removing,
+	// which is the safe direction: a stale verdict then denies the ADDED
+	// keys (harmless, <=60s) instead of keeping the removed ones live
+	// indefinitely.
+	//
+	// Three shapes, not two:
+	//
+	//   - REMOVES access — a permission set that is not a superset of the
+	//     current one, or isActive:false — writes first and reports.
+	//   - ADDS access — a pure addition, or isActive:true — keeps the gate.
+	//   - Can change NO verdict — a rename or a new description, and
+	//     nothing else — retires nothing at all. The cache stores
+	//     permission KEYS (GetEffectivePermissions is what writes it) and
+	//     nothing in the evaluator reads a role's name, so retiring on
+	//     these was two platform-wide flushes for a patch that could not
+	//     move a single verdict.
+	touchesVerdicts := input.Permissions != nil || input.IsActive != nil
+	mutate := func() error { return s.repo.UpdateRoleFields(ctx, roleUUID, fields) }
+	var werr error
+	switch {
+	case !touchesVerdicts:
+		werr = mutate()
+	case removesAccess:
+		werr = s.writeThenInvalidate(ctx, globalScope(), mutate)
+	default:
+		werr = s.withGeneration(ctx, globalScope(), mutate)
 	}
-	s.flushCache(ctx)
+	if werr != nil {
+		return nil, werr
+	}
 
 	return s.repo.GetRoleByUUID(ctx, roleUUID)
+}
+
+// assertPlatformAdmin refuses an actor who is not a platform
+// administrator (ErrPlatformAdminRequired -> 403 authz.platform_admin_required).
+//
+// The actor's system role is read FROM THE DATABASE through s.userRoles —
+// never from the `srole` JWT claim. The claim can be a whole access-token
+// lifetime stale, which is precisely the window the role-change
+// propagation work (D28) exists to close; trusting it here would make it
+// authoritative again exactly where the database can contradict it. The
+// lookup the module wires keeps its own dev-token fallback for the
+// synthetic principals POST /dev/token mints, so the documented local and
+// staging flow still works.
+//
+// Two waivers and one fail-closed default:
+//
+//   - the literal "system" sentinel passes, as it does for the D21
+//     cascade: it marks a platform-issued, in-process write, and the
+//     handler maps a request that spells it to the empty actor so it can
+//     never be chosen by a token;
+//   - an empty actor is ErrGranterRequired (400), the same answer the
+//     role-write validator gives when there is nobody to check — this
+//     path never reaches that validator, so it has to say so itself;
+//   - anything else the lookup cannot answer — unwired, erroring, or a
+//     role outside platformAdminRoles — is refused. A caller whose role
+//     cannot be read is not a proven administrator.
+func (s *Service) assertPlatformAdmin(ctx context.Context, actor string) error {
+	if actor == granterSystem {
+		return nil
+	}
+	if actor == "" {
+		return ErrGranterRequired
+	}
+	if s.userRoles == nil {
+		if s.logger != nil {
+			s.logger.Error("authz: no system-role lookup wired; refusing the system-role toggle",
+				slog.String("actor", actor))
+		}
+		return ErrPlatformAdminRequired
+	}
+	role, err := s.userRoles(ctx, actor)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Error("authz: could not read the calling user's system role; refusing the system-role toggle",
+				slog.String("actor", actor),
+				slog.String("error", err.Error()))
+		}
+		return ErrPlatformAdminRequired
+	}
+	if _, ok := platformAdminRoles[role]; !ok {
+		return ErrPlatformAdminRequired
+	}
+	return nil
 }
 
 // GetRoleByName resolves a role by (tenantID, name). System roles use
@@ -985,20 +1320,24 @@ func (s *Service) DeleteRole(ctx context.Context, tenantID, roleUUID string) err
 	if existing.TenantID != tenantID {
 		return repository.ErrNotFound
 	}
-	removed, err := s.repo.DeleteBindingsByRoleUUID(ctx, roleUUID)
-	if err != nil {
-		return fmt.Errorf("cascade bindings: %w", err)
-	}
-	if removed > 0 && s.logger != nil {
-		s.logger.Info("authz: cascaded binding delete",
-			slog.String("role", existing.Name),
-			slog.Int64("bindings", removed))
-	}
-	if err := s.repo.DeleteRole(ctx, roleUUID); err != nil {
-		return err
-	}
-	s.flushCache(ctx)
-	return nil
+	// A role delete is a REVOCATION: every binding pointing at it goes
+	// with it. Write-then-report, never a refusal (D27 as amended by
+	// P22) — refusing would leave the role and its grants live
+	// indefinitely, where writing leaves a stale verdict for at most the
+	// 60s TTL. The cascade delete and the role delete are one mutation
+	// for invalidation purposes, so both sit inside the closure.
+	return s.writeThenInvalidate(ctx, globalScope(), func() error {
+		removed, err := s.repo.DeleteBindingsByRoleUUID(ctx, roleUUID)
+		if err != nil {
+			return fmt.Errorf("cascade bindings: %w", err)
+		}
+		if removed > 0 && s.logger != nil {
+			s.logger.Info("authz: cascaded binding delete",
+				slog.String("role", existing.Name),
+				slog.Int64("bindings", removed))
+		}
+		return s.repo.DeleteRole(ctx, roleUUID)
+	})
 }
 
 func (s *Service) ListPermissions(ctx context.Context) ([]models.Permission, error) {
@@ -1017,6 +1356,17 @@ func (s *Service) ListPermissions(ctx context.Context) ([]models.Permission, err
 // (for non-"system" granters) the permission cascade rule. Extracted so the
 // two entry points can never drift apart on what a grant must satisfy.
 func (s *Service) validateBindingGrant(ctx context.Context, tenantID, grantedBy string, input models.CreateBindingInput) (*models.Role, error) {
+	// A grant with no target is not a grant. First, before the role
+	// lookup, so a body the service will refuse cannot probe which role
+	// UUIDs exist — and, more importantly, before anything downstream
+	// derives a cache scope from it: userScope("") used to be
+	// indistinguishable from globalScope(), so an empty userUUID turned
+	// one grant into a platform-wide cache flush at request rate. Both
+	// halves of that are closed — this guard, and bumpGeneration
+	// refusing an empty user scope instead of widening it.
+	if strings.TrimSpace(input.UserUUID) == "" {
+		return nil, ErrBindingUserRequired
+	}
 	role, err := s.repo.GetRoleByUUID(ctx, input.RoleUUID)
 	if err != nil {
 		return nil, err
@@ -1048,15 +1398,17 @@ func (s *Service) validateBindingGrant(ctx context.Context, tenantID, grantedBy 
 	return role, nil
 }
 
-// afterBindingGrant runs the post-persist side effects shared by
-// CreateBinding and EnsureBinding: invalidate the target's cached effective
-// permissions, then — for a role that elevates privilege — eagerly start
-// their MFA enrollment grace clock. Safe to call unconditionally, including
-// on EnsureBinding's reused-existing-row path: cache invalidation is
-// idempotent, and StartMFAGraceIfUnset (per its name) no-ops once the clock
-// is already running, so a replayed ensure never resets it.
+// afterBindingGrant runs the post-persist side effect shared by
+// CreateBinding and EnsureBinding: for a role that elevates privilege,
+// eagerly start the target's MFA enrollment grace clock. Safe to call
+// unconditionally, including on EnsureBinding's reused-existing-row
+// path, because StartMFAGraceIfUnset (per its name) no-ops once the
+// clock is already running, so a replayed ensure never resets it.
+//
+// Cache invalidation is NOT here any more: it moved into the
+// withGeneration wrapper around each persist, so a cache that cannot be
+// retired refuses the grant instead of following it (D27).
 func (s *Service) afterBindingGrant(ctx context.Context, userUUID, roleName string) {
-	s.cacheInvalidate(ctx, userUUID)
 	if s.startMFAGrace != nil && roleElevatesPrivilege(roleName) {
 		if err := s.startMFAGrace(ctx, userUUID); err != nil {
 			s.logger.Warn("authz: start MFA grace failed after binding",
@@ -1082,19 +1434,36 @@ func (s *Service) CreateBinding(ctx context.Context, tenantID, grantedBy string,
 		GrantedBy: grantedBy,
 		ExpiresAt: input.ExpiresAt,
 	}
-	if err := s.repo.CreateBinding(ctx, b); err != nil {
-		// authz_bindings now carries a unique (tenantId, userUUID, roleId)
-		// index (see this module's CLAUDE.md + the 0009 migration). A
-		// plain CreateBinding on a tuple that is already granted surfaces
-		// as E11000 here rather than silently doubling the row — mapped to
-		// a sentinel so the handler can answer 409 instead of leaking the
-		// raw duplicate-key error. An EXPIRED incumbent is not "already
-		// granted": the repository reaps it and retries, so this path is
-		// reached only for a live one. Callers that want the idempotent
-		// grant-or-return-existing behavior should call EnsureBinding.
-		if mongo.IsDuplicateKeyError(err) {
-			return nil, ErrBindingExists
+	// validateBindingGrant has already refused every grant it is going to
+	// refuse, so the wrapper opens here: a 403/404/409 from the validator
+	// retires nothing. userScope because a binding changes exactly one
+	// user's effective permissions — the per-user counter is what keeps
+	// one grant from costing every other user a cold cache. A grant is
+	// gated unless the platform issued it (P24).
+	//
+	// The duplicate-grant path below bumps before it discovers the
+	// duplicate: the gate cannot know the tuple is taken until the insert
+	// answers. The cost is one retirement of that user's own verdicts for
+	// a request that wrote nothing — self-inflicted at worst, since the
+	// caller had to already hold the grant they are replaying.
+	if err := s.bindingGrantGeneration(ctx, grantedBy, userScope(input.UserUUID), func() error {
+		if err := s.repo.CreateBinding(ctx, b); err != nil {
+			// authz_bindings now carries a unique (tenantId, userUUID, roleId)
+			// index (see this module's CLAUDE.md + the 0009 migration). A
+			// plain CreateBinding on a tuple that is already granted surfaces
+			// as E11000 here rather than silently doubling the row — mapped to
+			// a sentinel so the handler can answer 409 instead of leaking the
+			// raw duplicate-key error. An EXPIRED incumbent is not "already
+			// granted": the repository reaps it and retries, so this path is
+			// reached only for a live one. Callers that want the idempotent
+			// grant-or-return-existing behavior should call EnsureBinding.
+			if mongo.IsDuplicateKeyError(err) {
+				return ErrBindingExists
+			}
+			return err
 		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	s.afterBindingGrant(ctx, input.UserUUID, role.Name)
@@ -1126,8 +1495,22 @@ func (s *Service) EnsureBinding(ctx context.Context, tenantID, grantedBy string,
 		GrantedBy: grantedBy,
 		ExpiresAt: input.ExpiresAt,
 	}
-	out, err := s.repo.EnsureBinding(ctx, b)
-	if err != nil {
+	// Same placement and the same actor split as CreateBinding: after the
+	// shared validation, around the persist. The upsert may reuse an
+	// existing row rather than write one, and the bump runs either way —
+	// an INCR on a user's own counter is cheap, and a replay that skipped
+	// it could leave a verdict cached from before the original grant.
+	//
+	// The OwnerRoleBinder hook reaches this with grantedBy == "system", so
+	// it takes the write-then-report shape: CreateTenant treats an error
+	// from here as a failed creation and soft-deletes the tenant it just
+	// made, and a transient INCR failure must not do that (P24).
+	var out *models.Binding
+	if err := s.bindingGrantGeneration(ctx, grantedBy, userScope(input.UserUUID), func() error {
+		var err error
+		out, err = s.repo.EnsureBinding(ctx, b)
+		return err
+	}); err != nil {
 		return nil, err
 	}
 	s.afterBindingGrant(ctx, input.UserUUID, role.Name)
@@ -1143,71 +1526,209 @@ func (s *Service) ListBindings(ctx context.Context, tenantID string) ([]models.B
 // a member of tenant A cannot revoke a binding in tenant B by UUID. Global /
 // system-role bindings (tenantId=="") are not tenant-manageable and never match
 // a non-empty tenant scope.
+//
+// A revocation, so write-then-report (D27 as amended by P22): the row
+// goes first and the retirement follows. That ordering is also what
+// keeps a miss free — the repo reports ErrNotFound, the closure returns
+// it, and nothing is retired, so a caller cannot flush every user's
+// verdicts by revoking UUIDs that do not exist.
 func (s *Service) DeleteBinding(ctx context.Context, tenantID, uuid string) error {
-	if err := s.repo.DeleteBinding(ctx, tenantID, uuid); err != nil {
-		return err
-	}
-	s.flushCache(ctx)
-	return nil
+	return s.writeThenInvalidate(ctx, globalScope(), func() error {
+		return s.repo.DeleteBinding(ctx, tenantID, uuid)
+	})
 }
 
 // RemoveBindingsByTenant drops every binding scoped to the given tenant
-// and flushes the effective-permission cache so any in-flight request can
+// and retires the effective-permission cache so any in-flight request can
 // no longer consult a cached entry pointing at a now-deleted tenant.
 // Called by the cascade hook the authz module registers on the tenant
 // service. Returns the number of bindings removed for audit purposes.
+//
+// A cascade is a revocation, so it takes the write-then-report shape,
+// and it could not take the gate's even if the direction argument did
+// not settle it: how many rows the cascade affects is known only from
+// the write, and the "nothing removed, nothing retired" guard below is a
+// pinned contract (TestRemoveBindingsByTenant_NoMatch_DoesNotFlush).
+//
+// The bump failure is NOT returned. The post-delete hook that calls this
+// runs inside the tenant module's delete flow; an error there is audited
+// as tenant.cascade.hook_failed, which would be a false signal for a
+// cascade that did remove its rows and only failed to retire a cache.
 func (s *Service) RemoveBindingsByTenant(ctx context.Context, tenantUUID string) (int64, error) {
 	n, err := s.repo.DeleteBindingsByTenant(ctx, tenantUUID)
 	if err != nil {
 		return 0, err
 	}
 	if n > 0 {
-		s.flushCache(ctx)
+		s.invalidateAfterWrite(ctx, globalScope())
 	}
 	return n, nil
 }
 
 // RemoveBindingsByUserAndTenant drops every binding for one (user, tenant)
-// pair and flushes the effective-permission cache. Wired into the tenant
+// pair and retires the effective-permission cache. Wired into the tenant
 // module's member-unbind hook (SetMemberUnbinder) so removing a member or
 // changing their tenant role never leaves a stale binding that keeps granting
 // the old role's permissions. Returns the number of bindings removed.
+//
+// Same shape and the same reasons as RemoveBindingsByTenant above, with
+// one more: tenant.SetMemberRoles calls this and then re-binds the new
+// role. Returning a cache error here would abort between the two, and
+// the member would be left unbound while the membership denorm still
+// says they hold the role.
+//
+// It keeps the global scope this method has always used rather than
+// narrowing to userScope(userUUID) — a narrowing is available and
+// cheaper, but it is a behaviour change no caller asked for, so it
+// belongs in its own commit.
 func (s *Service) RemoveBindingsByUserAndTenant(ctx context.Context, userUUID, tenantUUID string) (int64, error) {
 	n, err := s.repo.DeleteBindingsByUserAndTenant(ctx, userUUID, tenantUUID)
 	if err != nil {
 		return 0, err
 	}
 	if n > 0 {
-		s.flushCache(ctx)
+		s.invalidateAfterWrite(ctx, globalScope())
 	}
 	return n, nil
 }
 
-func (s *Service) flushCache(ctx context.Context) {
-	if s.redis == nil {
-		return
-	}
-	keys, err := s.redis.Keys(ctx, "authz:cache:*")
-	if err != nil || len(keys) == 0 {
-		return
-	}
-	_ = s.redis.Del(ctx, keys...)
+// --- Cache ---
+//
+// The key carries two generation counters — a global one and a per-user
+// one — so invalidation is a single atomic INCR rather than a KEYS scan
+// followed by a DEL.
+//
+// The scan version had four problems: it enumerated keys on the hot
+// path, it could partially fail leaving some verdicts live, it raced a
+// concurrent read that repopulated between the scan and the delete, and
+// its glob was built from a request body (the audit's L-11). An entry
+// written under an older generation simply becomes unreachable and dies
+// on its own 60s TTL — nothing has to find it to retire it.
+//
+// Both counters are read on EVERY cache read. Memoising them in the
+// process would defeat the whole mechanism: a replica holding a stale
+// generation would keep serving verdicts another replica already
+// retired.
+
+const (
+	// authzGlobalGenKey counts flushes that affect every user.
+	authzGlobalGenKey = "authz:gen"
+	// authzUserGenPrefix + userUUID counts flushes for one user.
+	authzUserGenPrefix = "authz:gen:"
+	// authzCacheTTL bounds both how long a live verdict is served and
+	// how long a retired entry lingers in Redis before expiring.
+	authzCacheTTL = 60 * time.Second
+)
+
+// MultiGetRedisClient is the narrow optional extension the
+// generation-keyed cache needs on top of module.RedisClient: one MGET
+// that reads both generation counters in a single round trip.
+//
+// It is deliberately NOT a new method on module.RedisClient.
+// module.RedisClient is an SDK contract a fork's own client type may
+// implement, so adding a method to it is a breaking change for every
+// fork. This mirrors AtomicTakeRedisClient in auth/services: declare
+// the extension where it is consumed, assert for it once at
+// construction, and degrade cleanly when a client does not have it.
+type MultiGetRedisClient interface {
+	module.RedisClient
+	MGet(ctx context.Context, keys ...string) ([]interface{}, error)
 }
 
-// --- Cache ---
+// setRedis wires the cache client and, once, resolves its optional MGET
+// extension. The assertion happens here rather than per call so the hot
+// path costs nothing, and so a client that lacks MGET is reported once
+// at boot instead of silently on every request.
+//
+// Without MGET the cache is bypassed entirely — no read and no write.
+// That is correct, only slower: every check resolves from MongoDB,
+// which is the fresh answer. Simulating MGET with two GETs is not an
+// option, because the two counters could then be read at two different
+// moments and compose a key that never existed.
+func (s *Service) setRedis(client module.RedisClient, logger *slog.Logger) {
+	s.redis = client
+	s.mget = nil
+	if client == nil {
+		return
+	}
+	mg, ok := client.(MultiGetRedisClient)
+	if !ok {
+		if logger != nil {
+			logger.Warn("authz: redis client has no MGet — the effective-permission cache is disabled and every check resolves from MongoDB",
+				slog.String("remedy", "implement MGet(ctx, keys ...string) ([]interface{}, error) on the client passed as authz Config.Redis"))
+		}
+		return
+	}
+	s.mget = mg
+}
 
-func (s *Service) cacheKey(userUUID, tenantID string) string {
+// generations reads both counters in ONE MGET. A failure — or a client
+// with no MGET at all — returns ok=false and the caller treats it as a
+// cache miss: going to Mongo is the fresh answer, so a degraded Redis
+// costs latency, never correctness.
+func (s *Service) generations(ctx context.Context, userUUID string) (global, user int64, ok bool) {
+	if s.redis == nil || s.mget == nil {
+		return 0, 0, false
+	}
+	vals, err := s.mget.MGet(ctx, authzGlobalGenKey, authzUserGenPrefix+userUUID)
+	if err != nil {
+		return 0, 0, false
+	}
+	return parseGen(vals, 0), parseGen(vals, 1), true
+}
+
+// parseGen reads one MGET slot as a counter. A missing key (nil slot)
+// or an unparseable value reads as generation 0 — the same value a
+// never-bumped counter has, so a fresh deployment and a corrupted
+// counter both simply mean "nothing retired yet".
+func parseGen(vals []interface{}, i int) int64 {
+	if i >= len(vals) || vals[i] == nil {
+		return 0
+	}
+	var raw string
+	switch v := vals[i].(type) {
+	case string:
+		raw = v
+	case []byte:
+		raw = string(v)
+	case int64:
+		return v
+	default:
+		return 0
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// cacheKeyAt composes the key for a known pair of generations.
+func cacheKeyAt(global, user int64, userUUID, tenantID string) string {
 	if tenantID == "" {
 		tenantID = "-"
 	}
-	return "authz:cache:" + userUUID + ":" + tenantID
+	return fmt.Sprintf("authz:cache:%d:%s:%d:%s", global, userUUID, user, tenantID)
 }
 
-func (s *Service) cacheGet(ctx context.Context, userUUID, tenantID string) ([]string, bool) {
+// cacheKey folds both generations in. A missing counter reads as 0.
+// Used by tests and by callers that do not already hold the
+// generations; cacheGet and cacheSet read them once and call
+// cacheKeyAt so a single operation is one MGET plus one GET/SET.
+func (s *Service) cacheKey(ctx context.Context, userUUID, tenantID string) string {
+	g, u, _ := s.generations(ctx, userUUID)
+	return cacheKeyAt(g, u, userUUID, tenantID)
+}
+
+// cacheGetAt and cacheSetAt take a generation pair the caller already
+// holds. GetEffectivePermissions reads the pair once and uses these two,
+// so its read key and its write key come from the same instant — see the
+// comment at the top of that function for why that matters.
+func (s *Service) cacheGetAt(ctx context.Context, global, user int64, userUUID, tenantID string) ([]string, bool) {
 	if s.redis == nil {
 		return nil, false
 	}
-	raw, err := s.redis.Get(ctx, s.cacheKey(userUUID, tenantID))
+	raw, err := s.redis.Get(ctx, cacheKeyAt(global, user, userUUID, tenantID))
 	if err != nil || raw == "" {
 		return nil, false
 	}
@@ -1218,7 +1739,7 @@ func (s *Service) cacheGet(ctx context.Context, userUUID, tenantID string) ([]st
 	return out, true
 }
 
-func (s *Service) cacheSet(ctx context.Context, userUUID, tenantID string, perms []string) {
+func (s *Service) cacheSetAt(ctx context.Context, global, user int64, userUUID, tenantID string, perms []string) {
 	if s.redis == nil {
 		return
 	}
@@ -1226,21 +1747,282 @@ func (s *Service) cacheSet(ctx context.Context, userUUID, tenantID string, perms
 	if err != nil {
 		return
 	}
-	_ = s.redis.Set(ctx, s.cacheKey(userUUID, tenantID), string(data), 60*time.Second)
+	_ = s.redis.Set(ctx, cacheKeyAt(global, user, userUUID, tenantID), string(data), authzCacheTTL)
 }
 
-func (s *Service) cacheInvalidate(ctx context.Context, userUUID string) {
+// cacheGet and cacheSet read the generations themselves. Convenience
+// forms for callers that hold no pair; the hot path uses the *At forms.
+func (s *Service) cacheGet(ctx context.Context, userUUID, tenantID string) ([]string, bool) {
+	g, u, ok := s.generations(ctx, userUUID)
+	if !ok {
+		return nil, false
+	}
+	return s.cacheGetAt(ctx, g, u, userUUID, tenantID)
+}
+
+func (s *Service) cacheSet(ctx context.Context, userUUID, tenantID string, perms []string) {
+	g, u, ok := s.generations(ctx, userUUID)
+	if !ok {
+		// The generations could not be read, so there is no key this
+		// entry could be filed under that a reader would find. Writing
+		// under a guessed generation would publish a verdict nobody can
+		// retire; skip the write instead.
+		return
+	}
+	s.cacheSetAt(ctx, g, u, userUUID, tenantID, perms)
+}
+
+// InvalidateUserPermissions implements iface.AuthzCacheInvalidator: one
+// atomic INCR of the user's generation. Every entry written under the
+// previous value becomes unreachable at once, in every tenant, with no
+// scan and no glob built from caller input.
+//
+// It retires everything cached BEFORE the call. It does not by itself
+// cover a reader that is mid-flight across it: GetEffectivePermissions
+// files its result under the generation pair it read the cache with, so
+// a verdict computed before this bump is born unreachable — but a reader
+// that resolved Mongo across the bump can still publish a stale entry.
+// That residue is what withGeneration's post-write bump exists for. The
+// two mechanisms are complementary: this one is deterministic for the
+// readers it covers, the post-write bump is best-effort for the rest.
+//
+// A nil Redis is a no-op SUCCESS: "no cache configured" is not "cache
+// unavailable" — there is no cached verdict to retire, so reporting
+// failure would refuse role edits on a deployment that never had the
+// hazard. A configured Redis that cannot be bumped DOES return an
+// error, and the caller decides what that means (D27).
+//
+// There is a third state between those two: a client with no MGET, where
+// this replica bypasses the cache but a peer replica may not. The bump is
+// issued there too — the counter is shared state, and no replica can know
+// what its peers are running.
+func (s *Service) InvalidateUserPermissions(ctx context.Context, userUUID string) error {
 	if s.redis == nil {
+		return nil
+	}
+	if _, err := s.redis.Incr(ctx, authzUserGenPrefix+userUUID); err != nil {
+		return fmt.Errorf("authz: invalidate user permissions: %w", err)
+	}
+	return nil
+}
+
+// flushCache retires EVERY user's entries with one INCR of the global
+// generation. Used by role update/delete, binding delete and the tenant
+// cascades, where the set of affected users is not enumerable cheaply.
+// Same nil-Redis contract as InvalidateUserPermissions.
+func (s *Service) flushCache(ctx context.Context) error {
+	if s.redis == nil {
+		return nil
+	}
+	if _, err := s.redis.Incr(ctx, authzGlobalGenKey); err != nil {
+		return fmt.Errorf("authz: flush cache: %w", err)
+	}
+	return nil
+}
+
+// --- The invalidation contract (D27) ---
+
+// generationScope names which counter a mutation retires: one user's, or
+// — when the affected user set is not cheaply enumerable — everyone's.
+//
+// The global flag is what makes the two states DISTINCT rather than
+// "an empty user means everyone". Under the old shape userScope("") was
+// byte-identical to globalScope(), so any call site that forwarded an
+// unvalidated user id silently escalated one user's retirement into a
+// platform-wide flush — reachable at request rate, and found in exactly
+// that form on CreateBinding/EnsureBinding. With the flag, the zero
+// value names NO counter and bumpGeneration refuses it; widening can
+// only ever be asked for explicitly, by calling globalScope().
+type generationScope struct {
+	user   string // the user whose counter to retire; empty unless global
+	global bool   // set only by globalScope()
+}
+
+// userScope retires one user's cached verdicts, in every tenant. An
+// empty userUUID is NOT a global flush — it is a scope that names no
+// counter, and bumpGeneration returns errEmptyUserScope for it.
+func userScope(userUUID string) generationScope { return generationScope{user: userUUID} }
+
+// globalScope retires every user's cached verdicts. Used where the set
+// of affected users cannot be enumerated without a scan: a role's
+// permissions changed, a role was deleted, a binding was revoked.
+func globalScope() generationScope { return generationScope{global: true} }
+
+// errEmptyUserScope is the programming-error guard behind userScope. It
+// is not reachable through any handler — validateBindingGrant refuses an
+// empty target before a scope is ever built — and exists so that if a
+// future call site forwards an unvalidated id, the failure is a REFUSED
+// mutation rather than a silent platform-wide flush. Through
+// withGeneration it becomes the gate's refusal (nothing is written);
+// through invalidateAfterWrite it is logged and counted. Both are safe:
+// neither retires anything.
+var errEmptyUserScope = errors.New("authz: generation scope names no user and is not global")
+
+// bumpGeneration retires the verdicts named by scope. The single seam
+// every invalidation goes through, so a caller can never bump one
+// counter on the way in and the other on the way out.
+func (s *Service) bumpGeneration(ctx context.Context, scope generationScope) error {
+	if scope.global {
+		return s.flushCache(ctx)
+	}
+	if scope.user == "" {
+		return errEmptyUserScope
+	}
+	return s.InvalidateUserPermissions(ctx, scope.user)
+}
+
+// scopeAttr names the scope in a log line. globalScope carries no user,
+// so it must not emit an empty user_uuid.
+func scopeAttr(scope generationScope) slog.Attr {
+	if scope.global {
+		return slog.String("scope", "global")
+	}
+	return slog.String("user_uuid", scope.user)
+}
+
+// D27 (as amended by ruling P22) splits mutations by DIRECTION, because
+// a stale verdict does not mean the same thing in both:
+//
+//   - after a GRANT it is a DENY. The new privilege is late, never
+//     wrongly held, so refusing the write costs nothing but a retry.
+//   - after a REVOCATION it is an ALLOW. Refusing leaves the privilege
+//     granted INDEFINITELY, where writing leaves it for at most the 60s
+//     TTL — and with Redis fully down the cache is bypassed on reads, so
+//     a written revocation takes effect immediately. Refusal is strictly
+//     worse in exactly the case the gate was meant to protect.
+//
+// So grants go through withGeneration (gate), revocations and cascades
+// through writeThenInvalidate (write-then-report). Platform-issued
+// grants — the granterSystem sentinel — take the second shape too
+// (ruling P24): they are internal steps of other modules' multi-step
+// flows, and refusing one leaves a tenant half-created or a member
+// unbound from a role their membership denorm still shows.
+
+// invalidateAfterWrite retires the verdicts a write has ALREADY made
+// stale. The failure is logged and counted, never returned: the row is
+// gone (or written), so failing the call would report an outcome that
+// did not happen and invite a retry of a change that already landed.
+// This is the "surfaced, never a refusal" half of D27.
+func (s *Service) invalidateAfterWrite(ctx context.Context, scope generationScope) {
+	err := s.bumpGeneration(ctx, scope)
+	if err == nil {
 		return
 	}
-	keys, err := s.redis.Keys(ctx, "authz:cache:"+userUUID+":*")
-	if err != nil || len(keys) == 0 {
-		return
+	metrics.Default().RecordAuthzCacheInvalidationFailure()
+	if s.logger != nil {
+		s.logger.ErrorContext(ctx, "authz: post-write cache invalidation failed; a verdict already cached may survive up to its TTL",
+			scopeAttr(scope),
+			slog.String("error", err.Error()))
 	}
-	_ = s.redis.Del(ctx, keys...)
+}
+
+// withGeneration wraps a GRANT in pre-invalidate → write →
+// post-invalidate.
+//
+// The PRE step is a GATE: a generation the store cannot bump means the
+// change's effect cannot be guaranteed, so the change is REFUSED
+// (ErrAuthzCacheUnavailable, 503) and nothing is written. Redis being
+// unavailable already stops sessions, MFA challenges and OAuth state;
+// refusing a new grant in that state is consistent, and the retry is the
+// admin's. A deployment with no cache at all is not that state — there
+// the bump is a no-op success and the mutation proceeds.
+//
+// The POST step covers the race the pre-bump cannot: a read that started
+// before the pre-invalidation and resolved Mongo after the write
+// publishes the OLD verdict under the NEW generation. It is complementary
+// to the read-side fix in GetEffectivePermissions (which files a verdict
+// under the generation pair it READ with, so readers that crossed the
+// bump earlier are covered deterministically), not a substitute for it.
+// Its failure is logged and counted but NOT fatal: the write has landed.
+//
+// Call it INSIDE the method, after that method's own validation, and
+// only on the path that actually writes. Wrapping a whole method bumps
+// the generation before its guards run, which turns a refused 403/404
+// request into a remotely triggerable cache flush.
+//
+// Cost, stated honestly: a successful gated mutation issues TWO bumps.
+// Under userScope that is two INCRs on one user's counter. Under
+// globalScope it is two platform-wide retirements — the post-bump throws
+// away whatever the fleet repopulated in the window, so one role edit
+// costs two repopulation waves, not one extra round trip. UpdateRole is
+// the only globalScope gate left after P22.
+func (s *Service) withGeneration(ctx context.Context, scope generationScope, mutate func() error) error {
+	if err := s.bumpGeneration(ctx, scope); err != nil {
+		// The refusal is the operator-visible event: permission changes
+		// are being turned away. Log and count it here, where the cause
+		// exists — the handler renders a fixed 503 detail and has none.
+		metrics.Default().RecordAuthzCacheInvalidationRefusal()
+		if s.logger != nil {
+			s.logger.ErrorContext(ctx, "authz: refusing a permission grant — the effective-permission cache could not be retired, so the change was not written",
+				scopeAttr(scope),
+				slog.String("error", err.Error()))
+		}
+		return fmt.Errorf("%w: %v", ErrAuthzCacheUnavailable, err)
+	}
+	if err := mutate(); err != nil {
+		return err
+	}
+	s.invalidateAfterWrite(ctx, scope)
+	return nil
+}
+
+// writeThenInvalidate wraps a REVOCATION (or a platform-issued grant):
+// write first, then retire. A bump failure never refuses the write — see
+// the direction argument above — it is logged and counted by
+// invalidateAfterWrite and the caller is told the truth, which is that
+// the change landed.
+//
+// It also removes a hazard the gate has here: with the bump first, a
+// revocation that matches nothing still retires the cache, so a 404 with
+// no write behind it would flush every user's verdicts at request rate.
+// Writing first means only a real hit invalidates.
+func (s *Service) writeThenInvalidate(ctx context.Context, scope generationScope, mutate func() error) error {
+	if err := mutate(); err != nil {
+		return err
+	}
+	s.invalidateAfterWrite(ctx, scope)
+	return nil
+}
+
+// bindingGrantGeneration picks the shape a binding grant takes. A grant
+// requested by a real actor is gated; one issued by the platform
+// sentinel is not (ruling P24) — those are internal steps of the tenant
+// module's own flows (CreateTenant's owner binding, SetMemberRoles'
+// rebind), and a refusal there does not surface as a 503 to anyone. It
+// surfaces as a half-finished tenant.
+func (s *Service) bindingGrantGeneration(ctx context.Context, grantedBy string, scope generationScope, mutate func() error) error {
+	if grantedBy == granterSystem {
+		return s.writeThenInvalidate(ctx, scope, mutate)
+	}
+	return s.withGeneration(ctx, scope, mutate)
 }
 
 // --- helpers ---
+
+// isPermissionSuperset reports whether next covers every key in prev —
+// i.e. the patch takes nothing away. Used by UpdateRole to route a role
+// edit by direction (P25). Both lists are already in hand: prev is the
+// loaded role, next is the validator's cleaned output, so the test costs
+// no round trip.
+//
+// The wildcard needs no special case: "*" is refused in a custom role by
+// the D21 validator before this is reached, and a system role cannot
+// have its permissions patched at all.
+func isPermissionSuperset(next, prev []string) bool {
+	if len(prev) == 0 {
+		return true
+	}
+	have := make(map[string]struct{}, len(next))
+	for _, p := range next {
+		have[p] = struct{}{}
+	}
+	for _, p := range prev {
+		if _, ok := have[p]; !ok {
+			return false
+		}
+	}
+	return true
+}
 
 // validateBindingScope enforces the system/tenant separation rule:
 // platform system roles need global bindings; everything else (org_*,

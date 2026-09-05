@@ -140,6 +140,26 @@ func (r *RedisClientAdapter) Expire(ctx context.Context, key string, expiration 
 	return r.client.Expire(ctx, key, expiration).Err()
 }
 
+// MGet reads several keys in ONE round trip. The authz effective-
+// permission cache needs it to read its global and its per-user
+// generation counter together: two separate GETs could observe the two
+// counters at two different moments and compose a cache key that never
+// existed. Missing keys come back as nil entries in the slice, not as
+// an error.
+//
+// Deliberately NOT on module.RedisClient: that interface is an SDK
+// contract forks implement, and adding a method to it breaks every one
+// of them. Consumers type-assert for this method through their own
+// narrow optional interface (see authz/services.MultiGetRedisClient,
+// and the AtomicTakeRedisClient precedent in auth/services).
+func (r *RedisClientAdapter) MGet(ctx context.Context, keys ...string) ([]interface{}, error) {
+	result := r.client.MGet(ctx, keys...)
+	if result.Err() != nil {
+		return nil, result.Err()
+	}
+	return result.Val(), nil
+}
+
 // Keys implements the RedisClient interface
 func (r *RedisClientAdapter) Keys(ctx context.Context, pattern string) ([]string, error) {
 	result := r.client.Keys(ctx, pattern)

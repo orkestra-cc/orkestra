@@ -154,6 +154,66 @@ const AuthWebAuthnAssertionFailed = "auth.webauthn_assertion_failed"
 // behind this NAT" from the early 429.
 const AuthIPThresholdBelowAccount = "auth.ip_threshold_below_account"
 
+// --- authz ---
+
+// AuthzPermissionUnknown signals that a role create or update named a
+// permission key that no module has registered. The catalog is the union
+// of every module's Permissions(), collected once at boot; a key outside
+// it can never be checked by anything, so a role carrying it is at best
+// dead weight and at worst a typo hiding a real grant. The detail names
+// the offending key. 422.
+const AuthzPermissionUnknown = "authz.permission_unknown"
+
+// AuthzSystemPermissionForbidden signals that a role create or update
+// tried to put a platform-reserved key (or the wildcard "*") into a
+// tenant-scoped custom role. Platform permissions are granted through
+// platform system roles and global bindings only — a tenant role
+// carrying one would be an escalation path out of its own tenant. Binds
+// every caller, super_admin included: the wildcard governs what an ACTOR
+// may grant, not what a TENANT role may carry. The detail names the
+// offending key. 422.
+const AuthzSystemPermissionForbidden = "authz.system_permission_forbidden"
+
+// AuthzPlatformAdminRequired signals that a role patch tried to enable or
+// disable a SYSTEM role — a global catalog row, every one of them seeded at
+// tenantId="" — from a caller whose own system role does not administer the
+// platform (anything but super_admin or administrator).
+//
+// It is the one field a system role still exposes to an edit, and it is the
+// largest revocation the role editor can make: the evaluator skips bindings
+// whose role is inactive, so disabling `administrator` empties it for every
+// holder on the platform. The tenant-scope guard does not reach these rows
+// (they belong to no tenant), so before this code existed an org_owner —
+// org_owner and org_admin both carry authz.role.update — could do it from
+// inside their own tenant.
+//
+// Deliberately a question of WHO the caller is, not of what they hold: an
+// org_owner holds exactly the permissions the org_owner row carries, so a
+// cascade rule would have let them disable that row platform-wide. A caller
+// whose system role cannot be read is refused with this code too — an
+// unreadable role is not a proven administrator. 403.
+const AuthzPlatformAdminRequired = "authz.platform_admin_required"
+
+// AuthzCacheUnavailable signals that a permission GRANT was REFUSED
+// because the effective-permission cache could not be retired. A grant
+// retires the cached verdicts it invalidates before it writes; a counter
+// the store cannot bump means the change's effect could not be
+// guaranteed, so nothing was written and the caller may retry once the
+// cache store recovers. It is the server's own transient fault, never
+// the caller's request — 503, never a 4xx, and never the codeless 500
+// the role-update path answered before.
+//
+// REVOCATIONS never carry this code. A stale verdict after a grant is a
+// DENY (harmless, late); after a revocation it is an ALLOW, and refusing
+// the revocation would leave the privilege held indefinitely instead of
+// for at most the cache's 60s TTL. Revocations therefore write first and
+// report an invalidation failure through logs and metrics.
+//
+// A deployment with NO cache configured is a different thing entirely:
+// there are no cached verdicts to retire, so those mutations succeed and
+// this code is never emitted.
+const AuthzCacheUnavailable = "authz.cache_unavailable"
+
 // --- tenant ---
 
 // TenantSlugAlreadyInUse signals that a tenant create or update would reuse an
@@ -207,6 +267,34 @@ const UserLastAdminForbidden = "user.last_admin_forbidden"
 // it's not a binding; this guard is the user module's own version of
 // the same invariant. 403.
 const UserRoleEscalationForbidden = "user.role_escalation_forbidden"
+
+// UserRoleLookupUnavailable signals that a role a guard on the admin user
+// routes had to read was unavailable, so the request could not be
+// reasoned about and was refused. Raised by the operator-tier routes
+// (POST /v1/users, PUT /v1/users/{id} — the operator tier is NOT under
+// /v1/admin) and, since spec §4.6 D29, by the client-tier PATCH
+// (/v1/admin/client-users/{id}) as well. Two lookups can raise it, both
+// on a patch that names a role:
+//
+//   - The CALLING user's row, needed for the tier comparison. The guards
+//     take the caller's role from the database, not from the `srole` JWT
+//     claim (spec §4.6 D28): the claim can be a whole access-token
+//     lifetime stale, which is exactly the window the role-change
+//     propagation exists to close. Falling back to the claim here would
+//     make it authoritative again precisely when the database cannot
+//     contradict it. On the client-tier PATCH that row is read from the
+//     OPERATOR provider — the actor of that route is an operator, the
+//     target a client user — and an unregistered provider raises this
+//     code too rather than letting the guard run on an empty role.
+//   - The TARGET's current role, needed to know whether the role actually
+//     changes. Only a change retires the authz permission cache and ends
+//     the sessions minted under the old role (§4.6 D27), so writing
+//     through an unreadable pre-read would apply the new role while
+//     silently skipping both. A "no such user" is not this case — nothing
+//     is written, and the request gets its ordinary 404.
+//
+// Either way the request fails closed. 500.
+const UserRoleLookupUnavailable = "user.role_lookup_unavailable"
 
 // --- marketing ---
 

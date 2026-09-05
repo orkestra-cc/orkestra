@@ -18,7 +18,11 @@ import (
 
 func TestCreateRole_PersistsCustomRole(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
-	role, err := svc.CreateRole(context.Background(), "tenant-A", models.CreateRoleInput{
+	// The keys this role carries must exist in the registered catalog:
+	// the D21 validator refuses a key nothing ever declared, and the
+	// granterSystem sentinel bypasses the cascade only, never the catalog.
+	registerTestPermissions(t, svc, registered("billing.invoice.read"))
+	role, err := svc.CreateRole(context.Background(), "tenant-A", granterSystem, models.CreateRoleInput{
 		Name:        "billing_reader",
 		Description: "read invoices",
 		Permissions: []string{"billing.invoice.read"},
@@ -44,6 +48,54 @@ func TestCreateRole_PersistsCustomRole(t *testing.T) {
 	}
 }
 
+// CreateRole refuses a name already taken in the tenant, and leaves the
+// incumbent exactly as it was.
+//
+// It used to write through UpsertRole, which is keyed on
+// (tenantId, name): a create naming an existing role REWROTE it — the
+// incumbent's uuid and permissions were replaced in place, so every
+// binding pointing at the old uuid dangled permanently and its holders
+// lost that access with no error and no cache invalidation. A caller
+// holding only authz.role.create could therefore neuter or rewrite any
+// role in the tenant by name, a power the catalog reserves to
+// authz.role.update / authz.role.delete.
+func TestCreateRole_DuplicateNameIsRefusedAndLeavesTheIncumbentIntact(t *testing.T) {
+	svc, repo := newTier1Service(t, staticRoleLookup("super_admin"))
+	registerTestPermissions(t, svc, registered("tenant.read", "tenant.update"))
+	ctx := context.Background()
+
+	first, err := svc.CreateRole(ctx, "tenant-1", "sa-1", models.CreateRoleInput{
+		Name:        "editors",
+		Permissions: []string{"tenant.read", "tenant.update"},
+	})
+	if err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+
+	_, err = svc.CreateRole(ctx, "tenant-1", "sa-1", models.CreateRoleInput{
+		Name:        "editors",
+		Permissions: []string{"tenant.read"},
+	})
+	if !errors.Is(err, repository.ErrRoleExists) {
+		t.Fatalf("err = %v, want repository.ErrRoleExists", err)
+	}
+	incumbent, ok := repo.roles[first.UUID]
+	if !ok {
+		t.Fatal("the incumbent's uuid no longer resolves — every binding on it now dangles")
+	}
+	if len(incumbent.Permissions) != 2 {
+		t.Errorf("permissions = %v, want the incumbent's own list untouched", incumbent.Permissions)
+	}
+
+	// The name is reserved within its tenant only.
+	if _, err := svc.CreateRole(ctx, "tenant-2", "sa-1", models.CreateRoleInput{
+		Name:        "editors",
+		Permissions: []string{"tenant.read"},
+	}); err != nil {
+		t.Fatalf("another tenant must still be able to use the name: %v", err)
+	}
+}
+
 // ===== UpdateRole =====
 
 func TestUpdateRole_SystemRoleNameImmutable(t *testing.T) {
@@ -51,7 +103,7 @@ func TestUpdateRole_SystemRoleNameImmutable(t *testing.T) {
 	repo.seedRole("role-sys", "administrator", true, []string{"*"}, "")
 
 	rename := "renamed"
-	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-sys", models.UpdateRoleInput{
+	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-sys", granterSystem, models.UpdateRoleInput{
 		Name: &rename,
 	})
 	if !errors.Is(err, ErrSystemRoleImmutable) {
@@ -69,7 +121,7 @@ func TestUpdateRole_SystemRoleIsActiveToggleAllowed(t *testing.T) {
 	repo.seedRole("role-sys", "administrator", true, []string{"*"}, "")
 
 	off := false
-	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-sys", models.UpdateRoleInput{
+	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-sys", granterSystem, models.UpdateRoleInput{
 		IsActive: &off,
 	})
 	if err != nil {
@@ -82,9 +134,12 @@ func TestUpdateRole_SystemRoleIsActiveToggleAllowed(t *testing.T) {
 
 func TestUpdateRole_CustomRolePermissionsUpdate(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
+	// See TestCreateRole_PersistsCustomRole: the written keys have to be
+	// in the catalog for the D21 validator to accept them.
+	registerTestPermissions(t, svc, registered("billing.invoice.read", "billing.invoice.create"))
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
 
-	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", models.UpdateRoleInput{
+	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
 		Permissions: []string{"billing.invoice.read", "billing.invoice.create"},
 	})
 	if err != nil {
@@ -99,11 +154,13 @@ func TestUpdateRole_EmptyPermissionsRejected(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
 
-	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", models.UpdateRoleInput{
+	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
 		Permissions: []string{},
 	})
-	if err == nil {
-		t.Fatalf("empty permissions array must be rejected")
+	// Named, not just non-nil: this used to be a bare errors.New, which the
+	// handler could only answer as a 500 (D21).
+	if !errors.Is(err, ErrRolePermissionsRequired) {
+		t.Fatalf("err = %v, want ErrRolePermissionsRequired", err)
 	}
 }
 
@@ -112,11 +169,13 @@ func TestUpdateRole_EmptyNameRejected(t *testing.T) {
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
 
 	blank := "   "
-	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", models.UpdateRoleInput{
+	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
 		Name: &blank,
 	})
-	if err == nil {
-		t.Fatalf("whitespace-only name must be rejected")
+	// Named, not just non-nil: the other bare errors.New that surfaced as a
+	// 500 before D21.
+	if !errors.Is(err, ErrRoleNameRequired) {
+		t.Fatalf("err = %v, want ErrRoleNameRequired", err)
 	}
 }
 
@@ -124,7 +183,7 @@ func TestUpdateRole_NoFieldsIsNoOp(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
 
-	got, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", models.UpdateRoleInput{})
+	got, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{})
 	if err != nil {
 		t.Fatalf("empty input must be a no-op, got %v", err)
 	}
@@ -296,7 +355,7 @@ func TestUpdateRole_CrossTenantRefused(t *testing.T) {
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
 
 	newName := "hijacked"
-	_, err := svc.UpdateRole(context.Background(), "tenant-B", "role-c", models.UpdateRoleInput{Name: &newName})
+	_, err := svc.UpdateRole(context.Background(), "tenant-B", "role-c", granterSystem, models.UpdateRoleInput{Name: &newName})
 	if !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for cross-tenant update, got %v", err)
 	}
@@ -372,7 +431,7 @@ func TestListBindings_FilteredByTenant(t *testing.T) {
 
 // ===== DeleteBinding =====
 
-func TestDeleteBinding_RemovesRowAndFlushesCache(t *testing.T) {
+func TestDeleteBinding_RemovesRow(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
 	repo.seedBinding("b-1", "u-1", "tenant-A", "role-X")
 
@@ -382,8 +441,10 @@ func TestDeleteBinding_RemovesRowAndFlushesCache(t *testing.T) {
 	if _, ok := repo.bindings["b-1"]; ok {
 		t.Errorf("binding b-1 must be removed from the fake")
 	}
-	// flushCache is a no-op when redis is nil — the test verifies the
-	// happy path doesn't panic and the repo write happens.
+	// Repo-level contract only: this harness leaves Redis nil, so the
+	// invalidation is a no-op here by construction. The cache half is
+	// asserted for real by TestDeleteBinding_FlushesEveryAuthzCache in
+	// cache_test.go — this name no longer promises it.
 }
 
 // ===== RemoveBindingsByTenant =====
@@ -433,13 +494,26 @@ func TestRemoveBindingsByTenant_NoMatches_ReturnsZero(t *testing.T) {
 // ===== UpdateRole flushes the perm cache =====
 
 func TestUpdateRole_FlushesPermissionCache(t *testing.T) {
-	// Smoke test: when permissions on a role change, the service
-	// flushes the effective-permission cache. With Redis nil the
-	// flushCache call short-circuits — this test just confirms the
-	// happy path doesn't panic and the role update lands.
-	svc, repo := newTier1Service(t, staticRoleLookup(""))
+	// A permission change on a role must retire every cached verdict:
+	// the role is reachable through any binding, so the affected user
+	// set is not enumerable and the whole cache goes.
+	//
+	// This used to run on newTier1Service, which leaves Redis nil — the
+	// invalidation short-circuited and the body asserted only that the
+	// role was written, so the name promised a flush the test never
+	// looked for. It now runs against miniredis and reads the cache.
+	svc, repo, _ := newCacheTestService(t, staticRoleLookup(""))
+	ctx := context.Background()
+	// See TestCreateRole_PersistsCustomRole: the written keys have to be
+	// in the catalog for the D21 validator to accept them.
+	registerTestPermissions(t, svc, registered("billing.invoice.read", "billing.invoice.refund"))
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
-	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", models.UpdateRoleInput{
+	svc.cacheSet(ctx, "u-1", "tenant-A", []string{"billing.invoice.read"})
+	if _, ok := svc.cacheGet(ctx, "u-1", "tenant-A"); !ok {
+		t.Fatal("precondition: the cached verdict must be readable before the update")
+	}
+
+	updated, err := svc.UpdateRole(ctx, "tenant-A", "role-c", granterSystem, models.UpdateRoleInput{
 		Permissions: []string{"billing.invoice.read", "billing.invoice.refund"},
 	})
 	if err != nil {
@@ -447,5 +521,200 @@ func TestUpdateRole_FlushesPermissionCache(t *testing.T) {
 	}
 	if len(updated.Permissions) != 2 {
 		t.Errorf("post-update permissions = %v, want 2 entries", updated.Permissions)
+	}
+	if _, ok := svc.cacheGet(ctx, "u-1", "tenant-A"); ok {
+		t.Error("the cached verdict must be retired by the role update")
+	}
+}
+
+// ===== D21: custom-role permission validation (H-4) =====
+
+// TestH4Probe_CannotEscalateACustomRoleAfterBinding is the audit's H-4
+// probe, inverted. The original ran create → bind → update-with-a-key-the
+// -actor-lacks and succeeded, because UpdateRole wrote `permissions`
+// verbatim: bindings had a cascade check, roles did not, so the role
+// editor was the way around it. It must now fail at the update.
+func TestH4Probe_CannotEscalateACustomRoleAfterBinding(t *testing.T) {
+	svc, repo := newTier1Service(t, staticRoleLookup(""))
+	registerTestPermissions(t, svc, registered("tenant.read", "tenant.delete"))
+	grantActorPermissions(t, repo, "actor-1", "tenant-1", "tenant.read")
+	ctx := context.Background()
+
+	role, err := svc.CreateRole(ctx, "tenant-1", "actor-1", models.CreateRoleInput{
+		Name:        "harmless",
+		Permissions: []string{"tenant.read"},
+	})
+	if err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+	if _, err := svc.CreateBinding(ctx, "tenant-1", "actor-1", models.CreateBindingInput{
+		UserUUID: "actor-1",
+		RoleUUID: role.UUID,
+	}); err != nil {
+		t.Fatalf("CreateBinding: %v", err)
+	}
+
+	_, err = svc.UpdateRole(ctx, "tenant-1", role.UUID, "actor-1", models.UpdateRoleInput{
+		Permissions: []string{"tenant.read", "tenant.delete"},
+	})
+	if !errors.Is(err, ErrInsufficientPermissionsToGrant) {
+		t.Fatalf("the probe must fail at the update, got %v", err)
+	}
+	if got := repo.roles[role.UUID]; len(got.Permissions) != 1 {
+		t.Errorf("the refused update must not have been persisted, got %v", got.Permissions)
+	}
+}
+
+// TestUpdateRole_IsActiveOnlyPatchSkipsValidation is edge case 13: the
+// validator runs only when a permission list is actually supplied, so a
+// role that already carries a key no module declares any more can still
+// be disabled. Without this, a stale key would make the role
+// un-deactivatable — the opposite of what an operator needs.
+func TestUpdateRole_IsActiveOnlyPatchSkipsValidation(t *testing.T) {
+	svc, repo := newTier1Service(t, staticRoleLookup(""))
+	// Deliberately NOT registered: the residue of a removed module.
+	repo.seedRole("role-stale", "legacy", false, []string{"tenant.obliterate"}, "tenant-1")
+
+	active := false
+	updated, err := svc.UpdateRole(context.Background(), "tenant-1", "role-stale", "actor-1",
+		models.UpdateRoleInput{IsActive: &active})
+	if err != nil {
+		t.Fatalf("disabling a role with a stale key must still work: %v", err)
+	}
+	if updated.IsActive {
+		t.Error("the role must be disabled")
+	}
+}
+
+// CreateRole gained the same empty-name guard UpdateRole has. The schema's
+// min=1 stops "" at the edge but not "   ".
+func TestCreateRole_EmptyNameIsARoleNameError(t *testing.T) {
+	svc, _ := newTier1Service(t, staticRoleLookup(""))
+	registerTestPermissions(t, svc, registered("tenant.read"))
+
+	_, err := svc.CreateRole(context.Background(), "tenant-1", granterSystem, models.CreateRoleInput{
+		Name:        "   ",
+		Permissions: []string{"tenant.read"},
+	})
+	if !errors.Is(err, ErrRoleNameRequired) {
+		t.Fatalf("err = %v, want ErrRoleNameRequired", err)
+	}
+}
+
+// ===== D21 must NOT close the role editor to platform administrators =====
+//
+// Ruling P3'. A pre-flight finding claimed the D21 cascade would lock a
+// platform administrator out of the custom-role editor. It does not: the
+// editor is reached through RequirePermission("authz.role.create"), which
+// resolves through the SAME GetEffectivePermissions the cascade consults,
+// and the seeded `administrator` role carries every registered key. The
+// three tests below exist to keep that door open. If one of them goes
+// red, the fix is NOT to weaken the validator — it means the H-4 fix and
+// the administrator's reach genuinely conflict and someone has to rule.
+
+// seedAdministratorShapedActor gives actor the permission set a platform
+// administrator actually holds on a live install: the `srole` shortcut
+// PLUS a GLOBAL binding (tenantId "") to the seeded `administrator` role,
+// whose permission list is allKeys — every registered key, ordinary and
+// System:true alike. The global binding is the half that carries the
+// ordinary keys; the shortcut alone carries only the System ones.
+func seedAdministratorShapedActor(t *testing.T, repo *fakeRepo, actor string, allKeys ...string) {
+	t.Helper()
+	repo.seedRole("role-administrator", "administrator", true, allKeys, "")
+	repo.seedBinding("bind-administrator", actor, "", "role-administrator")
+}
+
+func newAdministratorFixture(t *testing.T) (*Service, *fakeRepo) {
+	t.Helper()
+	svc, repo := newTier1Service(t, staticRoleLookup("administrator"))
+	registerTestPermissions(t, svc,
+		registered("tenant.read", "tenant.update", "authz.role.create", "authz.role.update"),
+		systemRegistered("system.users.admin"))
+	seedAdministratorShapedActor(t, repo, "admin-1",
+		"tenant.read", "tenant.update", "authz.role.create", "authz.role.update", "system.users.admin")
+	return svc, repo
+}
+
+// The architect's requirement, pinned: an administrator-shaped actor can
+// still author AND edit a custom role carrying ordinary tenant
+// permissions after D21.
+func TestCreateAndUpdateRole_AdministratorKeepsTheRoleEditorOpen(t *testing.T) {
+	svc, _ := newAdministratorFixture(t)
+	ctx := context.Background()
+
+	role, err := svc.CreateRole(ctx, "tenant-1", "admin-1", models.CreateRoleInput{
+		Name:        "support",
+		Permissions: []string{"tenant.read", "tenant.update"},
+	})
+	if err != nil {
+		t.Fatalf("an administrator must still be able to author a custom role: %v", err)
+	}
+	if len(role.Permissions) != 2 {
+		t.Errorf("permissions = %v, want both keys", role.Permissions)
+	}
+
+	updated, err := svc.UpdateRole(ctx, "tenant-1", role.UUID, "admin-1", models.UpdateRoleInput{
+		Permissions: []string{"tenant.read"},
+	})
+	if err != nil {
+		t.Fatalf("an administrator must still be able to edit a custom role: %v", err)
+	}
+	if len(updated.Permissions) != 1 {
+		t.Errorf("permissions = %v, want the narrowed list", updated.Permissions)
+	}
+}
+
+// …and the door stays shut where it must: check 3 binds everyone. The
+// actor genuinely HOLDS system.users.admin here (both through the srole
+// shortcut and through the global binding), so this refusal is the
+// platform-key rule, not the cascade.
+func TestCreateRole_AdministratorStillCannotPutAPlatformKeyInATenantRole(t *testing.T) {
+	svc, _ := newAdministratorFixture(t)
+	ctx := context.Background()
+
+	if _, err := svc.CreateRole(ctx, "tenant-1", "admin-1", models.CreateRoleInput{
+		Name:        "escalator",
+		Permissions: []string{"tenant.read", "system.users.admin"},
+	}); !errors.Is(err, ErrSystemPermissionInCustomRole) {
+		t.Fatalf("err = %v, want ErrSystemPermissionInCustomRole", err)
+	}
+
+	if _, err := svc.CreateRole(ctx, "tenant-1", "admin-1", models.CreateRoleInput{
+		Name:        "wildcard",
+		Permissions: []string{"*"},
+	}); !errors.Is(err, ErrSystemPermissionInCustomRole) {
+		t.Fatalf("err = %v, want ErrSystemPermissionInCustomRole for the wildcard", err)
+	}
+}
+
+// A super_admin is unaffected: the wildcard covers the cascade, so every
+// ordinary key is authorable — and the platform-key rule still binds them
+// too, because it is about what a TENANT role may carry, not about what
+// the actor may grant.
+func TestCreateRole_SuperAdminWildcardIsUnaffected(t *testing.T) {
+	svc, _ := newTier1Service(t, staticRoleLookup("super_admin"))
+	registerTestPermissions(t, svc,
+		registered("tenant.read", "tenant.update"),
+		systemRegistered("system.users.admin"))
+	ctx := context.Background()
+
+	role, err := svc.CreateRole(ctx, "tenant-1", "sa-1", models.CreateRoleInput{
+		Name:        "anything",
+		Permissions: []string{"tenant.read", "tenant.update"},
+	})
+	if err != nil {
+		t.Fatalf("a super_admin must be able to author any ordinary custom role: %v", err)
+	}
+	if _, err := svc.UpdateRole(ctx, "tenant-1", role.UUID, "sa-1", models.UpdateRoleInput{
+		Permissions: []string{"tenant.read"},
+	}); err != nil {
+		t.Fatalf("a super_admin must be able to edit it: %v", err)
+	}
+
+	if _, err := svc.CreateRole(ctx, "tenant-1", "sa-1", models.CreateRoleInput{
+		Name:        "escalator",
+		Permissions: []string{"system.users.admin"},
+	}); !errors.Is(err, ErrSystemPermissionInCustomRole) {
+		t.Fatalf("err = %v, want ErrSystemPermissionInCustomRole even for a super_admin", err)
 	}
 }

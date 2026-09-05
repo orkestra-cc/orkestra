@@ -43,7 +43,44 @@ func GetUserEmail(ctx context.Context) (string, bool) {
 }
 
 // GetSystemRole extracts the user's global system role
-// (super_admin / administrator / developer / manager / operator / guest).
+// (super_admin / administrator / developer / manager / operator / guest)
+// from the request's `srole` JWT claim.
+//
+// NOT an authorization source. The claim is minted at login and is
+// therefore up to one access-token lifetime stale — a role changed since
+// then is not reflected here, which is precisely the window the
+// role-change propagation exists to close (spec §4.6 D27/D28). Any guard
+// that decides what a caller may *do* with their role must read it from
+// the database instead; the operator-tier role guards
+// (internal/core/user/handlers) and the setup recovery gate
+// (internal/shared/setup) both do.
+//
+// Its remaining in-tree consumers fall into three groups, and only the
+// first is genuinely free of authorization weight:
+//
+//   - Non-authorising. Request logging and tenant baggage (observability),
+//     the navigation menu's role filter (shaping — every route behind a
+//     menu entry re-checks permissions), and GET /v1/tenants/{id}/authz/me,
+//     which echoes the claim back in its response body without deciding
+//     anything with it. A stale value costs a mislabelled log line, a menu
+//     entry that 403s when clicked, or one stale field in a read.
+//   - Authorising, but triple-guarded. The dev-token fallbacks in
+//     internal/core/authz/module.go and internal/core/user/handlers read
+//     this claim to give a SYNTHETIC dev-token principal a role, because
+//     such a principal has no database row by design. Safe only because
+//     they additionally require a non-production(-like) deployment and the
+//     `dev-` UUID prefix that only POST /dev/token mints. Describe these
+//     as "authorising but guarded", never as non-authorising: it is the
+//     guards, not the call site, that carry the safety argument.
+//   - Authorising on the claim alone, and therefore NOT a pattern to copy:
+//     internal/shared/middleware/jwt_validator.go's RequireSystemPermission
+//     fallback and fallbackAllowedByRole, which admit
+//     super_admin|administrator|developer straight off `srole` when no
+//     authz provider is wired. Both are unreachable in this repository —
+//     NewJWTValidator has no non-test caller, so that AI-sidecar path is
+//     fork-only — but a fork that builds the sidecar inherits exactly the
+//     staleness D28 closed elsewhere, and should wire an AccessProvider
+//     rather than rely on the fallback.
 func GetSystemRole(ctx context.Context) (string, bool) {
 	v, ok := ctx.Value(KeySystemRole).(string)
 	return v, ok
