@@ -496,12 +496,15 @@ func (h *MFAHandler) Verify(ctx context.Context, req *MFAVerifyRequest) (*MFAVer
 		// returns a single ErrMFAInvalidCode, so charging per comparison
 		// would lock a user out on their first backup-code attempt.
 		//
-		// Only a rejected CREDENTIAL is charged. "Not enrolled", "method
-		// disabled" and a wrapped store error are refusals, not guesses —
-		// charging them would let a degraded backend, or an account with
-		// no factor, burn its own budget without an attacker ever trying
-		// a code. Every wrong-code branch in mfaService returns
-		// ErrMFAInvalidCode, so nothing that IS a guess escapes this.
+		// Only a rejected CREDENTIAL is charged. "Not enrolled" and a
+		// wrapped store error are refusals, not guesses — charging them
+		// would let a degraded backend, or an account with no factor,
+		// burn its own budget without an attacker ever trying a code.
+		// Every wrong-code branch in mfaService returns ErrMFAInvalidCode
+		// (step mismatch, replay, a lost CAS race, empty input), so
+		// nothing that IS a guess escapes this. ErrMFAMethodDisabled is
+		// not in the picture at all: only BeginEnrollment produces it,
+		// never Verify or VerifyBackupCode.
 		if h.verifyAttempts != nil && errors.Is(verifyErr, services.ErrMFAInvalidCode) {
 			_, _ = h.verifyAttempts.RecordFailure(ctx, key, services.MFAVerifyLimit)
 		}

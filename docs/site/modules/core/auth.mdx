@@ -123,15 +123,16 @@ cannot launder a credential-stuffing run.
 
 The MFA-verify scope is keyed on the user rather than an address — the
 caller is already signed in — and it is the *outer* bound on second-factor
-guessing. Each MFA challenge has its own five-attempt budget and is
-destroyed when it runs out, but a caller can always start another
-challenge, so that inner bound alone never capped the caller. One request
-costs at most one failure, including a backup-code attempt, which compares
-the submitted code against every stored code before rejecting it. A
-successful verification clears the counter; a refusal that was not a
-rejected credential — no factor enrolled, a factor type policy disallows,
-a storage failure — costs nothing, so a degraded backend cannot spend a
-legitimate user's budget.
+guessing. A passkey assertion runs inside a challenge that has its own
+five-attempt budget, but a caller can always start another challenge, so
+that inner bound never capped the caller; the authenticator-code route has
+no challenge at all and so had no bound whatsoever. One request costs at
+most one failure, including a backup-code attempt, which compares the
+submitted code against every stored code before rejecting it. A successful
+verification clears the counter; anything that was not a rejected
+credential — no factor enrolled, an expired or already-spent challenge, a
+storage failure — costs nothing, so one subsystem's degradation can never
+spend a legitimate user's budget in another.
 
 The durable per-account lock (`User.LockedUntil`) runs alongside the
 counters rather than behind them: an account locks when either its

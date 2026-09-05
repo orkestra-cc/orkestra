@@ -344,14 +344,27 @@ func (h *WebAuthnHandler) VerifyFinish(ctx context.Context, req *webAuthnVerifyF
 		return nil, huma.Error400BadRequest("assertionResponse is required")
 	}
 	if err := h.wa.FinishAssertion(ctx, user, req.Body.ChallengeID, services.MFAPurposeWebAuthnVerify, req.Body.AssertionResponse); err != nil {
-		// A rejected ASSERTION is the charge — the signature did not
-		// verify (ErrWebAuthnAssertion) or the challenge was spent /
-		// exhausted (ErrMFAInvalidCode). "No credentials enrolled", a
-		// purpose mismatch, a disabled method and a wrapped store error
-		// are refusals rather than attempts, and charging them would let
-		// a degraded backend spend a legitimate user's budget.
-		if h.verifyAttempts != nil &&
-			(errors.Is(err, services.ErrWebAuthnAssertion) || errors.Is(err, services.ErrMFAInvalidCode)) {
+		// A rejected ASSERTION is the charge, and on this route that is
+		// ErrWebAuthnAssertion and nothing else: every wrong signature
+		// reaches the validator branch of FinishAssertion, which wraps
+		// the failure in that sentinel (and increments the challenge's
+		// own inner counter).
+		//
+		// ⚠️ ErrMFAInvalidCode is deliberately NOT charged here, unlike
+		// on the TOTP route where it IS the wrong-code sentinel. On the
+		// passkey route it means something else entirely: FinishAssertion
+		// returns it when `challenges.Peek` fails — and Peek collapses
+		// EVERY store error, a Redis outage included, into
+		// ErrMFAChallengeNotFound — or when `Consume` fails, which
+		// happens only AFTER the assertion has cryptographically
+		// succeeded. So charging it would let a degraded challenge store
+		// lock a legitimate user out at five tries, which is precisely
+		// what the counter's own fail-open contract exists to prevent
+		// (spec §5 edge case 2), and would charge a correct proof as a
+		// failure. "No credentials enrolled" and a purpose mismatch are
+		// likewise refusals rather than attempts. No wrong guess escapes:
+		// a lost, expired or spent challenge is not one.
+		if h.verifyAttempts != nil && errors.Is(err, services.ErrWebAuthnAssertion) {
 			_, _ = h.verifyAttempts.RecordFailure(ctx, key, services.MFAVerifyLimit)
 		}
 		return nil, mapWebAuthnError(err)

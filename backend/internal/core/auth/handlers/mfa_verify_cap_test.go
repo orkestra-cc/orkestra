@@ -17,9 +17,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	gowebauthn "github.com/go-webauthn/webauthn/webauthn"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
@@ -378,6 +383,71 @@ func TestWebAuthnVerifyFinish_SuccessResetsTheCounter(t *testing.T) {
 	if got := countFor(t, counter, key); got != 0 {
 		t.Fatalf("count = %d after a success, want 0", got)
 	}
+}
+
+// Fix round 1, Important 1. On the passkey route ErrMFAInvalidCode is NOT
+// the wrong-assertion sentinel — FinishAssertion returns it when
+// `challenges.Peek` fails, and Peek collapses every store error (a Redis
+// outage included) into ErrMFAChallengeNotFound. Charging it made one
+// store's degradation spend the user's lockout budget in the other, which
+// is exactly what the attempt counter's own fail-open contract exists to
+// prevent (spec §5 edge case 2).
+//
+// The fixture fakes only the STORE, so the whole chain under test is real
+// production code: store.Get errors → mfaChallengeService.Peek →
+// ErrMFAChallengeNotFound → webAuthnService.FinishAssertion →
+// ErrMFAInvalidCode → the handler. A fake WebAuthnService returning the
+// sentinel directly would have asserted the handler's arm without proving
+// the sentinel is what a store outage actually produces.
+func TestWebAuthnVerifyFinish_ChallengeStoreOutageCostsNothing(t *testing.T) {
+	rp, err := gowebauthn.New(&gowebauthn.Config{
+		RPID:          "localhost",
+		RPDisplayName: "Orkestra",
+		RPOrigins:     []string{"http://localhost:8080"},
+	})
+	if err != nil {
+		t.Fatalf("webauthn.New: %v", err)
+	}
+	user := &iface.User{UUID: "capped-user", Email: "capped@example.com", Role: "operator", IsActive: true}
+	wa := services.NewWebAuthnService(rp, nil,
+		services.NewMFAChallengeService(&downChallengeStore{}), silentTestLogger())
+	h := NewWebAuthnHandler(wa, nil, newStepUpJWT(t), &stepUpUsers{user: user}, nil, "", "", false)
+	counter := services.NewMemoryAttemptCounter()
+	h.SetVerifyAttemptCounter(counter, services.PolicyAudienceOperator)
+
+	// Well past the threshold: a charged outage would lock at five.
+	for i := 0; i < services.MFAMaxAttempts+3; i++ {
+		if code := callVerifyFinish(t, h, user.UUID); code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d = %d, want 401 — a store outage must never answer 429", i+1, code)
+		}
+	}
+	key := services.AttemptKeyMFAVerify(services.PolicyAudienceOperator, user.UUID)
+	if got := countFor(t, counter, key); got != 0 {
+		t.Fatalf("count = %d, want 0 — a challenge-store outage is not a guess", got)
+	}
+}
+
+// downChallengeStore is a services.OAuthStateStore whose reads always fail,
+// standing in for an unreachable Redis. Only Get is exercised by Peek.
+type downChallengeStore struct{}
+
+func (downChallengeStore) Set(context.Context, string, []byte, time.Duration) error {
+	return errStoreDown
+}
+func (downChallengeStore) Get(context.Context, string) ([]byte, error) {
+	return nil, errStoreDown
+}
+func (downChallengeStore) Take(context.Context, string) ([]byte, error) { return nil, errStoreDown }
+func (downChallengeStore) Delete(context.Context, string) error         { return errStoreDown }
+func (downChallengeStore) DeleteByPattern(context.Context, string) error {
+	return errStoreDown
+}
+func (downChallengeStore) Incr(context.Context, string, time.Duration) (int64, error) {
+	return 0, errStoreDown
+}
+
+func silentTestLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 // A locked caller is refused BEFORE the user lookup and before the
