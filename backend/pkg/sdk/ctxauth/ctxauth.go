@@ -43,7 +43,23 @@ func GetUserEmail(ctx context.Context) (string, bool) {
 }
 
 // GetSystemRole extracts the user's global system role
-// (super_admin / administrator / developer / manager / operator / guest).
+// (super_admin / administrator / developer / manager / operator / guest)
+// from the request's `srole` JWT claim.
+//
+// NOT an authorization source. The claim is minted at login and is
+// therefore up to one access-token lifetime stale — a role changed since
+// then is not reflected here, which is precisely the window the
+// role-change propagation exists to close (spec §4.6 D27/D28). Any guard
+// that decides what a caller may *do* with their role must read it from
+// the database instead; the operator-tier role guards
+// (internal/core/user/handlers) and the setup recovery gate
+// (internal/shared/setup) both do.
+//
+// Its remaining consumers are all non-authorising: request logging and
+// tenant baggage (observability), the navigation menu's role filter
+// (shaping — the routes behind each entry re-check permissions), and the
+// dev-token / impersonation fallbacks. A stale value there costs at most
+// a mislabelled log line or a menu entry that 403s when clicked.
 func GetSystemRole(ctx context.Context) (string, bool) {
 	v, ok := ctx.Value(KeySystemRole).(string)
 	return v, ok

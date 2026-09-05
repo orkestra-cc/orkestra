@@ -282,6 +282,9 @@ func newRoleChangeHarness(t *testing.T, opts ...harnessOpt) *roleChangeHarness {
 
 	trace := &callTrace{}
 	users := newUserStore(trace)
+	// The role guards read the CALLER's role from the database (D28), so
+	// the actor adminCtx() signs as needs a row of its own.
+	users.seed("test-admin", "super_admin")
 	sink := &captureSink{trace: trace}
 	users.svc.sink = sink
 

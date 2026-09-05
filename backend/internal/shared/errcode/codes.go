@@ -206,6 +206,16 @@ const UserLastAdminForbidden = "user.last_admin_forbidden"
 // the same invariant. 403.
 const UserRoleEscalationForbidden = "user.role_escalation_forbidden"
 
+// UserRoleLookupUnavailable signals that the operator-tier role guards
+// could not read the CALLING user's row, so the tier comparison could
+// not be made. The guards take the caller's role from the database, not
+// from the `srole` JWT claim (spec §4.6 D28): the claim can be a whole
+// access-token lifetime stale, which is exactly the window the
+// role-change propagation exists to close. Falling back to the claim
+// here would make it authoritative again precisely when the database
+// cannot contradict it, so the request fails closed instead. 500.
+const UserRoleLookupUnavailable = "user.role_lookup_unavailable"
+
 // --- marketing ---
 
 // MarketingCardCodeCollision signals that the card-emit path

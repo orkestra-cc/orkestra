@@ -167,27 +167,33 @@ type CreateUserResponse struct {
 
 // CreateUser handles POST /api/users. The role-escalation guard from
 // UpdateUser applies symmetrically here — an administrator can't seed
-// a fresh super_admin via the create path either.
+// a fresh super_admin via the create path either, and the caller's own
+// role for that comparison is read from the database (see callerRole).
 func (h *UserHandler) CreateUser(ctx context.Context, req *CreateUserRequest) (*CreateUserResponse, error) {
 	actorUUID, actorEmail := actorFromCtx(ctx)
-	callerRole, _ := ctxauth.GetSystemRole(ctx)
-	if req.Body.Role != "" && !canAssignRole(callerRole, req.Body.Role) {
-		h.emitAudit(ctx, iface.AuditEvent{
-			ActorUserID:  actorUUID,
-			ActorEmail:   actorEmail,
-			ActorType:    "user",
-			Action:       "user.create.refused",
-			ResourceType: "user",
-			Outcome:      "denied",
-			Metadata: map[string]any{
-				"code":      errcode.UserRoleEscalationForbidden,
-				"attempted": "role_escalation",
-				"to":        req.Body.Role,
-				"email":     req.Body.Email,
-			},
-		})
-		return nil, errcode.Forbidden(errcode.UserRoleEscalationForbidden,
-			"You cannot create a user with a role higher than your own")
+	if req.Body.Role != "" {
+		callerRole, err := h.callerRole(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !canAssignRole(callerRole, req.Body.Role) {
+			h.emitAudit(ctx, iface.AuditEvent{
+				ActorUserID:  actorUUID,
+				ActorEmail:   actorEmail,
+				ActorType:    "user",
+				Action:       "user.create.refused",
+				ResourceType: "user",
+				Outcome:      "denied",
+				Metadata: map[string]any{
+					"code":      errcode.UserRoleEscalationForbidden,
+					"attempted": "role_escalation",
+					"to":        req.Body.Role,
+					"email":     req.Body.Email,
+				},
+			})
+			return nil, errcode.Forbidden(errcode.UserRoleEscalationForbidden,
+				"You cannot create a user with a role higher than your own")
+		}
 	}
 
 	user, err := h.userService.CreateUser(ctx, &req.Body)
@@ -245,7 +251,8 @@ type UpdateUserResponse struct {
 
 // UpdateUser handles PUT /api/users/{id}. Three independent guards
 // protect privileged state from being mutated by an under-privileged
-// caller: (1) **role escalation** — the caller's own system role must
+// caller: (1) **role escalation** — the caller's own system role, read
+// from the database rather than the `srole` claim (D28), must
 // be at least as high in the tier ladder as any role they assign
 // (super_admin > administrator > developer > manager > operator >
 // guest); the cascade rule on authz.CreateBinding does not cover the
@@ -260,7 +267,6 @@ type UpdateUserResponse struct {
 // SOC2 trail sees both successes and denials.
 func (h *UserHandler) UpdateUser(ctx context.Context, req *UpdateUserRequest) (*UpdateUserResponse, error) {
 	actorUUID, actorEmail := actorFromCtx(ctx)
-	callerRole, _ := ctxauth.GetSystemRole(ctx)
 
 	// Snapshot the pre-change state so we can compute lifecycle deltas
 	// after a successful update AND so the role-escalation guard can
@@ -279,6 +285,10 @@ func (h *UserHandler) UpdateUser(ctx context.Context, req *UpdateUserRequest) (*
 		previousRole := ""
 		if previous != nil {
 			previousRole = previous.Role
+		}
+		callerRole, err := h.callerRole(ctx)
+		if err != nil {
+			return nil, err
 		}
 		if !canAssignRole(callerRole, req.Body.Role) {
 			h.emitAudit(ctx, iface.AuditEvent{
@@ -603,6 +613,47 @@ func (h *UserHandler) checkLastAdminRemoval(ctx context.Context, targetID string
 	return errcode.Forbidden(errcode.UserLastAdminForbidden, "Refusing to remove the last active administrator")
 }
 
+// callerRole resolves the calling operator's system role from the
+// DATABASE — never from the `srole` JWT claim.
+//
+// The claim can be up to one access-token lifetime stale. That window is
+// exactly what the role-change propagation closes (emitUpdateLifecycleEvents
+// retires the authz cache and ends the sessions minted under the old
+// role), so reading `srole` in the guard that decides whether a caller may
+// assign a role would put the same hole straight back: a demoted
+// administrator would keep minting administrators until their last access
+// token expired. Spec §4.6 D28.
+//
+// Two outcomes, both fail-closed:
+//
+//   - No authenticated principal on the context (a degraded gate — these
+//     routes all sit behind RequireSystemPermission). There is no identity
+//     to resolve a role for, so the role is empty and canAssignRole's
+//     unknown tier (-1) refuses every assignment. That is a refusal of the
+//     caller's request, not a report of a broken database.
+//   - The lookup fails, or the row is absent. That is a 500
+//     (user.role_lookup_unavailable), NEVER a fallback to the claim:
+//     falling back would make the claim authoritative again exactly when
+//     the database cannot contradict it.
+//
+// Only called on the guarded path (an assignment that actually names a
+// role), so an ordinary profile patch costs no extra read.
+func (h *UserHandler) callerRole(ctx context.Context) (string, error) {
+	actorUUID, _ := ctxauth.GetUserUUID(ctx)
+	if actorUUID == "" {
+		return "", nil
+	}
+	actor, err := h.userService.GetUser(ctx, actorUUID)
+	if err != nil || actor == nil {
+		slog.ErrorContext(ctx, "user: could not resolve the calling user's system role; refusing the role assignment",
+			slog.String("actor_uuid", actorUUID),
+			slog.Any("error", err))
+		return "", errcode.Internal(errcode.UserRoleLookupUnavailable,
+			"Could not resolve the calling user's role. Retry shortly.")
+	}
+	return actor.Role, nil
+}
+
 // systemRoleTier ranks the six platform system roles from highest
 // (super_admin = 5) to lowest (guest = 0). canAssignRole compares the
 // caller's tier to the requested role's tier so an administrator
@@ -638,7 +689,11 @@ func systemRoleTier(role string) int {
 // targetRole. Equal-tier assignments are allowed (an administrator can
 // assign another user to administrator) — the prohibition is only on
 // strict elevation. An unknown caller tier (-1) refuses every
-// assignment so a misconfigured JWT cannot bypass the check.
+// assignment, which is what makes the empty role callerRole returns for
+// an unidentifiable principal fail closed.
+//
+// callerRole is the value the DATABASE holds for the caller — see
+// (*UserHandler).callerRole. Never pass the `srole` claim here.
 func canAssignRole(callerRole, targetRole string) bool {
 	caller := systemRoleTier(callerRole)
 	target := systemRoleTier(targetRole)

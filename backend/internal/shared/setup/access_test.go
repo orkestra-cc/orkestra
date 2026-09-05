@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -28,16 +29,54 @@ import (
 )
 
 // fakeLifecycleUsers is the fake lifecycle-capable UserProvider used across
-// this file. `calls` records every UUID looked up (in order) so tests can
-// assert evaluateAccess's short-circuit behavior (e.g. it must never
-// consult a non-super_admin caller's own lifecycle state).
+// this file. `calls` records every UUID whose LIFECYCLE was looked up (in
+// order) so tests can assert evaluateAccess's short-circuit behavior (e.g.
+// it must never consult a non-super_admin caller's own lifecycle state).
+//
+// `roles` backs the separate GetUserByID lookup the recovery gate uses to
+// read the caller's system role from the database instead of the `srole`
+// claim (D28). It is recorded in `roleCalls`, deliberately NOT in `calls`:
+// the privacy property those assertions pin is about the caller's
+// LIFECYCLE, which is still never consulted for a non-super_admin.
 type fakeLifecycleUsers struct {
 	iface.UserProvider
-	count    int64
-	countErr error
-	states   map[string]iface.UserLifecycleState
-	err      error
-	calls    []string
+	count     int64
+	countErr  error
+	states    map[string]iface.UserLifecycleState
+	err       error
+	calls     []string
+	roles     map[string]string
+	roleErr   error
+	roleCalls []string
+}
+
+// GetUserByID answers the database role lookup. An unseeded id is a LOUD
+// error rather than an empty role: a test that forgot to seed the caller
+// must fail, not silently exercise the "not a super_admin" branch. Tests
+// that want the genuine "this user no longer exists" semantic set
+// roleErr = iface.ErrUserNotFound, which is what the real provider
+// returns.
+func (f *fakeLifecycleUsers) GetUserByID(_ context.Context, id string) (*iface.User, error) {
+	f.roleCalls = append(f.roleCalls, id)
+	if f.roleErr != nil {
+		return nil, f.roleErr
+	}
+	role, ok := f.roles[id]
+	if !ok {
+		return nil, fmt.Errorf("fakeLifecycleUsers: no user seeded for %q", id)
+	}
+	return &iface.User{UUID: id, Role: role}, nil
+}
+
+// withRoles seeds the database system role for one or more UUIDs.
+func (f *fakeLifecycleUsers) withRoles(pairs ...string) *fakeLifecycleUsers {
+	if f.roles == nil {
+		f.roles = map[string]string{}
+	}
+	for i := 0; i+1 < len(pairs); i += 2 {
+		f.roles[pairs[i]] = pairs[i+1]
+	}
+	return f
 }
 
 func (f *fakeLifecycleUsers) GetUserCount(_ context.Context, _ *iface.UserFilters) (int64, error) {
@@ -89,7 +128,7 @@ func TestEvaluateAccess_BoundEqualsCallerActive_CanFinalize(t *testing.T) {
 	store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{AdminUUID: "admin-1", Revision: 3}}
 	svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
-	access, rec, err := svc.evaluateAccess(context.Background(), "admin-1", "administrator")
+	access, rec, err := svc.evaluateAccess(context.Background(), "admin-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -117,7 +156,7 @@ func TestEvaluateAccess_BoundDiffersFromCallerActive_BoundToAnotherAdmin(t *test
 	store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{AdminUUID: "admin-1"}}
 	svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
-	access, _, err := svc.evaluateAccess(context.Background(), "someone-else", "administrator")
+	access, _, err := svc.evaluateAccess(context.Background(), "someone-else")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -153,14 +192,15 @@ func TestEvaluateAccess_UnusableBinding_ActiveSuperAdmin_CanClaimRecovery(t *tes
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
-			users := &fakeLifecycleUsers{states: map[string]iface.UserLifecycleState{"super-1": iface.UserLifecycleActive}}
+			users := (&fakeLifecycleUsers{states: map[string]iface.UserLifecycleState{"super-1": iface.UserLifecycleActive}}).
+				withRoles("super-1", "super_admin")
 			if c.rec != nil && c.rec.AdminUUID != "" {
 				users.states[c.rec.AdminUUID] = c.boundState
 			}
 			store := &fakeFinalizationStore{rec: c.rec}
 			svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
-			access, _, err := svc.evaluateAccess(context.Background(), "super-1", "super_admin")
+			access, _, err := svc.evaluateAccess(context.Background(), "super-1")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -196,14 +236,15 @@ func TestEvaluateAccess_UnusableBinding_LowerRole_RecoveryRequiresSuperAdmin(t *
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
-			users := &fakeLifecycleUsers{states: map[string]iface.UserLifecycleState{}}
+			users := (&fakeLifecycleUsers{states: map[string]iface.UserLifecycleState{}}).
+				withRoles("caller-1", "administrator")
 			if c.rec != nil && c.rec.AdminUUID != "" {
 				users.states[c.rec.AdminUUID] = c.boundState
 			}
 			store := &fakeFinalizationStore{rec: c.rec}
 			svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
-			access, _, err := svc.evaluateAccess(context.Background(), "caller-1", "administrator")
+			access, _, err := svc.evaluateAccess(context.Background(), "caller-1")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -235,7 +276,7 @@ func TestEvaluateAccess_LifecycleLookupError_NeverGrantsRecovery(t *testing.T) {
 		store := &fakeFinalizationStore{rec: &systeminit.FinalizationRecord{AdminUUID: "admin-1"}}
 		svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
-		access, rec, err := svc.evaluateAccess(context.Background(), "admin-1", "super_admin")
+		access, rec, err := svc.evaluateAccess(context.Background(), "admin-1")
 		if err == nil {
 			t.Fatalf("expected error, got nil (access=%+v)", access)
 		}
@@ -251,11 +292,11 @@ func TestEvaluateAccess_LifecycleLookupError_NeverGrantsRecovery(t *testing.T) {
 	})
 
 	t.Run("caller lifecycle lookup error during recovery check", func(t *testing.T) {
-		users := &fakeLifecycleUsers{err: lookupErr}
+		users := (&fakeLifecycleUsers{err: lookupErr}).withRoles("super-1", "super_admin")
 		store := &fakeFinalizationStore{rec: nil} // empty binding
 		svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
-		access, _, err := svc.evaluateAccess(context.Background(), "super-1", "super_admin")
+		access, _, err := svc.evaluateAccess(context.Background(), "super-1")
 		if err == nil {
 			t.Fatalf("expected error, got nil (access=%+v)", access)
 		}
@@ -269,7 +310,7 @@ func TestEvaluateAccess_LifecycleLookupError_NeverGrantsRecovery(t *testing.T) {
 		store := &fakeFinalizationStore{getErr: lookupErr}
 		svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
-		access, _, err := svc.evaluateAccess(context.Background(), "super-1", "super_admin")
+		access, _, err := svc.evaluateAccess(context.Background(), "super-1")
 		if err == nil {
 			t.Fatalf("expected error, got nil")
 		}
@@ -312,11 +353,11 @@ func TestEvaluateAccess_NeverMutatesStore(t *testing.T) {
 	for _, sc := range scenarios {
 		sc := sc
 		t.Run(sc.name, func(t *testing.T) {
-			users := &fakeLifecycleUsers{states: sc.states}
+			users := (&fakeLifecycleUsers{states: sc.states}).withRoles(sc.callerUUID, sc.callerRole)
 			store := &fakeFinalizationStore{rec: sc.rec}
 			svc := NewService(users, &stubAdmin{}, store, nil, nil, nil, discardLogger())
 
-			if _, _, err := svc.evaluateAccess(context.Background(), sc.callerUUID, sc.callerRole); err != nil {
+			if _, _, err := svc.evaluateAccess(context.Background(), sc.callerUUID); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if store.mutatorCalls != 0 {
