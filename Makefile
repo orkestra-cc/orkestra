@@ -340,11 +340,30 @@ backend-piiscan:
 
 # Reads OSV IDs (one per line, '#'-comments) from backend/.vulncheck-allowlist.txt.
 # Fails only if a reachable vulnerability is NOT on the allowlist.
+#
+# The scan's exit status is load-bearing. With -format=json govulncheck returns
+# 0 whether or not it finds anything -- the findings live in the JSON, not the
+# status -- so a non-zero status means the scan itself did not run. Discarding
+# it made a dead scanner indistinguishable from a clean report: no findings to
+# parse, "Reachable vulnerability IDs: <none>", target passes. That is exactly
+# what happens when govulncheck is built against a different Go than the one on
+# PATH: it fails to load packages and writes nothing but its config header.
 backend-vulncheck:
 	@cd backend && { \
 	  set +e; \
 	  govulncheck -format=json ./... > /tmp/govuln.json; \
+	  scan_status=$$?; \
 	  set -e; \
+	  if [ $$scan_status -ne 0 ]; then \
+	    echo "::error::govulncheck exited $$scan_status -- the scan did not run, so its silence proves nothing."; \
+	    echo "  On a Go version mismatch, rebuild it against the Go on PATH:"; \
+	    echo "    go install golang.org/x/vuln/cmd/govulncheck@latest"; \
+	    exit 1; \
+	  fi; \
+	  if ! jq -e -s 'any(.[]; has("progress"))' /tmp/govuln.json > /dev/null; then \
+	    echo "::error::govulncheck exited 0 but logged no scan progress -- refusing to read its output as a clean result."; \
+	    exit 1; \
+	  fi; \
 	  govulncheck ./... || true; \
 	  reachable_ids=$$(jq -r 'select(.finding != null and (.finding.trace | length) > 0) | .finding.osv' /tmp/govuln.json | sort -u); \
 	  echo "Reachable vulnerability IDs: $${reachable_ids:-<none>}"; \
