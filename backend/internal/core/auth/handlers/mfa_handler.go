@@ -122,10 +122,19 @@ type MFAHandler struct {
 	// handler gets the operator authService, the client handler the
 	// client one — same module, so this is not a cross-module import.
 	// Optional; nil degrades to "the epoch alone ends MFA authority".
-	sessions     services.AuthService
-	cookieName   string
-	cookieDomain string
-	cookieSecure bool
+	sessions services.AuthService
+	// verifyAttempts + audience are the OUTER attempt cap on the
+	// authenticated verify route (spec §4.3 D20, M-3). The per-challenge
+	// counter inside MFAChallengeService bounds ONE challenge; this bounds
+	// the caller, per (audience, user), across challenges. Both fields are
+	// set together by SetVerifyAttemptCounter so the key can never be built
+	// for the wrong tier. Optional: a nil counter leaves the route uncapped,
+	// which is what it was before D20.
+	verifyAttempts services.AttemptCounter
+	audience       services.PolicyAudience
+	cookieName     string
+	cookieDomain   string
+	cookieSecure   bool
 }
 
 // SetAuditRecorder wires the admin-auth event recorder. Mirrors the
@@ -141,6 +150,19 @@ func (h *MFAHandler) SetAuditRecorder(r adminAuthRecorder) {
 // the type is the full AuthService rather than iface.SessionTerminator.
 func (h *MFAHandler) SetSessionTerminator(s services.AuthService) {
 	h.sessions = s
+}
+
+// SetVerifyAttemptCounter wires the outer MFA-verify cap and the audience
+// its key is scoped to (spec §4.3 D20). The two arrive together on purpose:
+// AttemptKeyMFAVerify puts the audience in the key, so an operator handler
+// wired with the client audience would share one lockout scope across both
+// tiers — locking an operator would lock the client account that happens to
+// carry the same UUID. module.go wires each tier's handler from that tier's
+// own bundle audience, which is derived from the same `tier` value that
+// picks the tier's collections.
+func (h *MFAHandler) SetVerifyAttemptCounter(c services.AttemptCounter, audience services.PolicyAudience) {
+	h.verifyAttempts = c
+	h.audience = audience
 }
 
 // NewMFAHandler wires the dependencies. Cookie config is needed by the
@@ -450,14 +472,43 @@ func (h *MFAHandler) Verify(ctx context.Context, req *MFAVerifyRequest) (*MFAVer
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
 
+	// Spec §4.3 D20 — peek BEFORE verifying, so a locked caller costs a
+	// Redis read and nothing more, and so a lock cannot extend itself on
+	// every probe. A counter error reads as "not locked": the whole
+	// AttemptCounter contract is fail-open (attempt_counter.go), because a
+	// Redis outage must not take step-up down for every user at once.
+	key := services.AttemptKeyMFAVerify(h.audience, userUUID)
+	if h.verifyAttempts != nil {
+		if v, err := h.verifyAttempts.Locked(ctx, key, services.MFAVerifyLimit); err == nil && v.Locked {
+			return nil, lockoutError(v.RetryAfter)
+		}
+	}
+
+	var verifyErr error
 	if req.Body.UseBackup {
-		if err := h.mfa.VerifyBackupCode(ctx, userUUID, req.Body.Code); err != nil {
-			return nil, mapMFAError(err)
-		}
+		verifyErr = h.mfa.VerifyBackupCode(ctx, userUUID, req.Body.Code)
 	} else {
-		if err := h.mfa.Verify(ctx, userUUID, req.Body.Code); err != nil {
-			return nil, mapMFAError(err)
+		verifyErr = h.mfa.Verify(ctx, userUUID, req.Body.Code)
+	}
+	if verifyErr != nil {
+		// ONE failure per REQUEST, whatever the verification compared
+		// internally: VerifyBackupCode walks the whole hashed list and
+		// returns a single ErrMFAInvalidCode, so charging per comparison
+		// would lock a user out on their first backup-code attempt.
+		//
+		// Only a rejected CREDENTIAL is charged. "Not enrolled", "method
+		// disabled" and a wrapped store error are refusals, not guesses —
+		// charging them would let a degraded backend, or an account with
+		// no factor, burn its own budget without an attacker ever trying
+		// a code. Every wrong-code branch in mfaService returns
+		// ErrMFAInvalidCode, so nothing that IS a guess escapes this.
+		if h.verifyAttempts != nil && errors.Is(verifyErr, services.ErrMFAInvalidCode) {
+			_, _ = h.verifyAttempts.RecordFailure(ctx, key, services.MFAVerifyLimit)
 		}
+		return nil, mapMFAError(verifyErr)
+	}
+	if h.verifyAttempts != nil {
+		_ = h.verifyAttempts.Reset(ctx, key)
 	}
 
 	user, err := h.users.GetUserByID(ctx, userUUID)

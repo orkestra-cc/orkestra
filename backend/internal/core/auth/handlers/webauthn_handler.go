@@ -34,10 +34,18 @@ type WebAuthnHandler struct {
 	// (spec §4.3 D16). Same type and same reasoning as MFAHandler's
 	// field — see there. Optional; nil degrades to "the epoch alone ends
 	// MFA authority".
-	sessions     services.AuthService
-	cookieName   string
-	cookieDomain string
-	cookieSecure bool
+	sessions services.AuthService
+	// verifyAttempts + audience are the same outer cap MFAHandler carries
+	// (spec §4.3 D20) — see the field comment there. The passkey route
+	// needs it for a second reason: FinishAssertion's per-challenge
+	// counter bounds one challenge, and a caller can always start
+	// another, so without this the inner bound is not a cap on the caller
+	// at all. Set together by SetVerifyAttemptCounter; nil = uncapped.
+	verifyAttempts services.AttemptCounter
+	audience       services.PolicyAudience
+	cookieName     string
+	cookieDomain   string
+	cookieSecure   bool
 }
 
 // NewWebAuthnHandler wires the dependencies. WebAuthnService may be nil
@@ -79,6 +87,15 @@ func (h *WebAuthnHandler) SetDeviceTrust(dt services.DeviceTrustService) {
 // passkey can end the sessions it may have created.
 func (h *WebAuthnHandler) SetSessionTerminator(s services.AuthService) {
 	h.sessions = s
+}
+
+// SetVerifyAttemptCounter wires the outer passkey-verify cap and the
+// audience its key is scoped to. Same pairing rule and same per-tier
+// wiring as MFAHandler's — see that method for why the two arguments
+// travel together.
+func (h *WebAuthnHandler) SetVerifyAttemptCounter(c services.AttemptCounter, audience services.PolicyAudience) {
+	h.verifyAttempts = c
+	h.audience = audience
 }
 
 // SetPolicy wires the admin-managed AuthPolicyService so LoginFinish can
@@ -306,6 +323,19 @@ func (h *WebAuthnHandler) VerifyFinish(ctx context.Context, req *webAuthnVerifyF
 	if !ok {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
+	// Spec §4.3 D20 — the OUTER cap, peeked before anything costs a read.
+	// The per-challenge counter inside FinishAssertion stays as the inner
+	// bound; it bounds one challenge, and VerifyBegin hands out a new one
+	// on demand, so without this a caller could buy a fresh five-guess
+	// budget indefinitely. Placed ahead of the user lookup so a locked
+	// caller costs strictly less than an unlocked one. Fail-open on a
+	// counter error, as everywhere else in this module.
+	key := services.AttemptKeyMFAVerify(h.audience, userUUID)
+	if h.verifyAttempts != nil {
+		if v, err := h.verifyAttempts.Locked(ctx, key, services.MFAVerifyLimit); err == nil && v.Locked {
+			return nil, lockoutError(v.RetryAfter)
+		}
+	}
 	user, err := h.users.GetUserByID(ctx, userUUID)
 	if err != nil || services.ValidateTokenEligibleUser(user) != nil {
 		return nil, huma.Error401Unauthorized("user not found")
@@ -314,7 +344,20 @@ func (h *WebAuthnHandler) VerifyFinish(ctx context.Context, req *webAuthnVerifyF
 		return nil, huma.Error400BadRequest("assertionResponse is required")
 	}
 	if err := h.wa.FinishAssertion(ctx, user, req.Body.ChallengeID, services.MFAPurposeWebAuthnVerify, req.Body.AssertionResponse); err != nil {
+		// A rejected ASSERTION is the charge — the signature did not
+		// verify (ErrWebAuthnAssertion) or the challenge was spent /
+		// exhausted (ErrMFAInvalidCode). "No credentials enrolled", a
+		// purpose mismatch, a disabled method and a wrapped store error
+		// are refusals rather than attempts, and charging them would let
+		// a degraded backend spend a legitimate user's budget.
+		if h.verifyAttempts != nil &&
+			(errors.Is(err, services.ErrWebAuthnAssertion) || errors.Is(err, services.ErrMFAInvalidCode)) {
+			_, _ = h.verifyAttempts.RecordFailure(ctx, key, services.MFAVerifyLimit)
+		}
 		return nil, mapWebAuthnError(err)
+	}
+	if h.verifyAttempts != nil {
+		_ = h.verifyAttempts.Reset(ctx, key)
 	}
 	amr := appendWebAuthn(priorAMRWithOTP(ctx))
 	token, err := h.jwt.GenerateAccessTokenForSessionWithAMR(user, device, security, amr, time.Now().Unix())

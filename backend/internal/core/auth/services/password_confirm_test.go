@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // Tests for PasswordAuthService.ConfirmPassword — the reauth bypass used
@@ -209,5 +210,96 @@ func TestConfirmPassword_CarriesTheSessionsAuthTimeUnchanged(t *testing.T) {
 	// Without this the test would also pass if the mint dropped both.
 	if claims.LastOTPAt == 0 {
 		t.Error("LastOTPAt must still be stamped — the reconfirm is a fresh proof")
+	}
+}
+
+// M-1's second half (spec §4.3 D19). The enrolled-factor refusal above
+// catches a user who HAS a stronger factor. It cannot catch the user this
+// obligation exists for: one whose role REQUIRES a second factor and who
+// has not enrolled one yet. Before D19 that user could mint a `reauth`
+// token and satisfy every freshness gate with a password alone — exactly
+// what the obligation is there to prevent.
+//
+// gateTenantProvider returns no memberships, so this case is the
+// system-role half of the decision; the membership half is the next test.
+func TestConfirmPassword_RefusesAnMFAObligatedUser(t *testing.T) {
+	env := newGatesEnv(t, PolicyAudienceOperator, nil, nil)
+	u := env.hashedUser("admin@example.com", "correct-horse-battery")
+	u.Role = SystemRoleAdministrator // the fake stores the pointer
+
+	_, err := env.auth.ConfirmPasswordWithSecurity(context.Background(), u.UUID, "correct-horse-battery",
+		[]string{"pwd"}, &models.DeviceInfo{}, &models.SecurityContext{SessionID: "sid-1", Timestamp: time.Now()})
+	if !stderrors.Is(err, ErrPasswordConfirmEnrollmentRequired) {
+		t.Fatalf("err = %v, want ErrPasswordConfirmEnrollmentRequired", err)
+	}
+}
+
+// obligatedByMembership is the tenant provider for the half of the
+// decision the system role cannot make: a plain `operator` who holds
+// org_owner in some tenant is MFA-obligated through that membership.
+// D19 says memberships are resolved the way completeLogin resolves them
+// — through loadMembershipsAsAuthModel — and this is the test that fails
+// if the refusal reads the system role alone.
+type obligatedByMembership struct{ gateTenantProvider }
+
+func (obligatedByMembership) ListUserMemberships(context.Context, string) ([]iface.TenantMembership, error) {
+	return []iface.TenantMembership{{
+		TenantUUID: "tenant-1",
+		TenantKind: "internal",
+		Roles:      []string{OrgRoleOwner},
+	}}, nil
+}
+
+func TestConfirmPassword_RefusesAUserObligatedByAMembership(t *testing.T) {
+	env := newGatesEnv(t, PolicyAudienceOperator, nil, nil)
+	env.auth.tenantProvider = obligatedByMembership{}
+	u := env.hashedUser("owner@example.com", "correct-horse-battery")
+	if u.Role == SystemRoleAdministrator {
+		t.Fatal("fixture drift: this case must be obligated by the MEMBERSHIP, not the system role")
+	}
+
+	_, err := env.auth.ConfirmPasswordWithSecurity(context.Background(), u.UUID, "correct-horse-battery",
+		[]string{"pwd"}, &models.DeviceInfo{}, &models.SecurityContext{SessionID: "sid-1", Timestamp: time.Now()})
+	if !stderrors.Is(err, ErrPasswordConfirmEnrollmentRequired) {
+		t.Fatalf("err = %v, want ErrPasswordConfirmEnrollmentRequired", err)
+	}
+}
+
+// The other side of D19: the endpoint's whole population is non-obligated
+// password users, and they must still be served. A refusal that fired for
+// everyone would close the only step-up path those users have.
+//
+// ⚠️ BOUND, not a TDD driver — green before D19 existed. It fails only if
+// the refusal is later widened past the obligation. Ruling R17.
+func TestConfirmPassword_StillServesANonObligatedUser(t *testing.T) {
+	env := newGatesEnv(t, PolicyAudienceOperator, nil, nil)
+	u := env.hashedUser("plain@example.com", "correct-horse-battery")
+
+	res, err := env.auth.ConfirmPasswordWithSecurity(context.Background(), u.UUID, "correct-horse-battery",
+		[]string{"pwd"}, &models.DeviceInfo{}, &models.SecurityContext{SessionID: "sid-1", Timestamp: time.Now()})
+	if err != nil {
+		t.Fatalf("a non-obligated password user must still be served: %v", err)
+	}
+	if res == nil || res.AccessToken == "" {
+		t.Fatal("expected a stepped-up access token")
+	}
+}
+
+// The master switch is part of "obliged": MFARequired reads mfaEnabled
+// first, so on an install with MFA off nobody is obligated and the
+// reconfirm keeps working for an administrator too. Without this, turning
+// MFA off would lock every admin out of step-up on a no-factor install.
+//
+// ⚠️ BOUND, not a TDD driver — green before D19 existed, and the reason it
+// is here is that the obvious wrong implementation (RoleRequiresMFA
+// directly, bypassing the policy) would turn it red. Ruling R17.
+func TestConfirmPassword_MFADisabledLeavesTheAdminServed(t *testing.T) {
+	env := newGatesEnv(t, PolicyAudienceOperator, map[string]string{"mfaEnabled": "false"}, nil)
+	u := env.hashedUser("admin@example.com", "correct-horse-battery")
+	u.Role = SystemRoleAdministrator
+
+	if _, err := env.auth.ConfirmPasswordWithSecurity(context.Background(), u.UUID, "correct-horse-battery",
+		[]string{"pwd"}, &models.DeviceInfo{}, &models.SecurityContext{SessionID: "sid-1", Timestamp: time.Now()}); err != nil {
+		t.Fatalf("mfaEnabled=false means nobody is obligated: %v", err)
 	}
 }

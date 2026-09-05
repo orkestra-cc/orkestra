@@ -53,6 +53,11 @@ func TestMapPasswordError_KnownCodes(t *testing.T) {
 		{"PasswordReused → 400", services.ErrPasswordReused, http.StatusBadRequest, ""},
 		{"NotificationDown → 503", services.ErrNotificationDown, http.StatusServiceUnavailable, ""},
 		{"MFAEnrollmentRequired → 403", services.ErrMFAEnrollmentRequired, http.StatusForbidden, ""},
+		// D19: the reconfirm's own refusal for an MFA-OBLIGATED caller.
+		// The code is the middleware's unprefixed envelope code, not an
+		// errcode const (ruling R8) — the SPA switches on one value for
+		// one situation, and it already handles this one.
+		{"PasswordConfirmEnrollmentRequired → 403 mfa_enrollment_required", services.ErrPasswordConfirmEnrollmentRequired, http.StatusForbidden, "mfa_enrollment_required"},
 		{"RegistrationDisabled → 403 auth.registration_disabled", services.ErrRegistrationDisabled, http.StatusForbidden, errcode.AuthRegistrationDisabled},
 		{"EmailDomainNotAllowed → 403 auth.email_domain_not_allowed", services.ErrEmailDomainNotAllowed, http.StatusForbidden, errcode.AuthEmailDomainNotAllowed},
 		{"LoginDisabled → 403 auth.login_disabled", services.ErrLoginDisabled, http.StatusForbidden, errcode.AuthLoginDisabled},

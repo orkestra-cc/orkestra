@@ -491,6 +491,17 @@ func mapPasswordError(err error) error {
 		return huma.Error503ServiceUnavailable("Email delivery is not configured — signups are temporarily unavailable. Please contact an administrator.")
 	case errors.Is(err, services.ErrMFAEnrollmentRequired):
 		return huma.Error403Forbidden("MFA enrollment required — the grace period for this account has expired. Please complete MFA setup via an admin before signing in.")
+	// Spec §4.3 D19. The code is the middleware's own unprefixed
+	// `mfa_enrollment_required` envelope code, NOT an errcode const
+	// (ruling R8): `internal/shared/errcode/codes.go` is the
+	// `<module>.<situation>` namespace pinned by an AST golden, and this
+	// value belongs to a different vocabulary — the one
+	// AuthMiddleware.sendMFAEnrollmentRequired already emits, which both
+	// SPAs already switch on. One situation, one code, whether the caller
+	// meets it at the gate or at this endpoint.
+	case errors.Is(err, services.ErrPasswordConfirmEnrollmentRequired):
+		return errcode.Forbidden("mfa_enrollment_required",
+			"Your role requires a second factor; enroll one before performing this action.")
 	case errors.Is(err, services.ErrRegistrationDisabled):
 		return errcode.Forbidden(errcode.AuthRegistrationDisabled,
 			"Self-service registration is disabled for this surface. Contact an administrator.")

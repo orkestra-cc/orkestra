@@ -108,6 +108,7 @@ across every replica and survive a restart.
 | Source address (shared across both surfaces) | the same three, plus the service-account grant | `ipLockoutThreshold` / `ipLockoutDuration` (100 / 15m) |
 | Client ID | service-account grant | the account pair |
 | Reset / verification requests | forgot-password, resend-verification | 3 per email address per 15m, 60 per source address per 15m |
+| MFA verify (per user, independent per surface) | the authenticated `mfa/verify` and passkey `verify/finish` routes | 5 failures per 5m |
 
 An address threshold **must** be at least the account threshold: an
 address that locks first would tell an attacker which accounts exist
@@ -119,6 +120,18 @@ A locked scope answers **429** `auth.too_many_attempts` with a
 exists and one that does not. A successful login clears the email
 counter; the address counter is left alone, so one correct sign-in
 cannot launder a credential-stuffing run.
+
+The MFA-verify scope is keyed on the user rather than an address — the
+caller is already signed in — and it is the *outer* bound on second-factor
+guessing. Each MFA challenge has its own five-attempt budget and is
+destroyed when it runs out, but a caller can always start another
+challenge, so that inner bound alone never capped the caller. One request
+costs at most one failure, including a backup-code attempt, which compares
+the submitted code against every stored code before rejecting it. A
+successful verification clears the counter; a refusal that was not a
+rejected credential — no factor enrolled, a factor type policy disallows,
+a storage failure — costs nothing, so a degraded backend cannot spend a
+legitimate user's budget.
 
 The durable per-account lock (`User.LockedUntil`) runs alongside the
 counters rather than behind them: an account locks when either its

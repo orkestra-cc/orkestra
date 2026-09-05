@@ -1192,6 +1192,11 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// tier — the operator handler gets the operator auth service, so a
 	// reset terminates operator_sessions rows and never a client's.
 	m.operatorMFAHandler.SetSessionTerminator(opBundle.authService)
+	// D20: the outer attempt cap on the authenticated verify routes. The
+	// audience comes off the bundle, which derived it from the same `tier`
+	// that picked the operator repositories — so this handler's lockout
+	// key space cannot drift onto the client tier's.
+	m.operatorMFAHandler.SetVerifyAttemptCounter(attemptCounter, opBundle.policyAudience)
 	if opBundle.webauthnSvc != nil {
 		m.operatorMFAHandler.SetWebAuthn(opBundle.webauthnSvc)
 		m.operatorWebAuthnHandler = handlers.NewWebAuthnHandler(
@@ -1207,6 +1212,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		m.operatorWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
 		m.operatorWebAuthnHandler.SetPolicy(authPolicy)
 		m.operatorWebAuthnHandler.SetSessionTerminator(opBundle.authService)
+		m.operatorWebAuthnHandler.SetVerifyAttemptCounter(attemptCounter, opBundle.policyAudience)
 		deps.Services.Register(module.ServiceWebAuthn, opBundle.webauthnSvc)
 	}
 
@@ -1361,6 +1367,10 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	m.clientMFAHandler.SetPolicy(authPolicy)
 	m.clientMFAHandler.SetAuditRecorder(clBundle.authService)
 	m.clientMFAHandler.SetSessionTerminator(clBundle.authService)
+	// Same cap, the client bundle's own audience — a separate key space
+	// from the operator handler above, so the two tiers lock independently
+	// even for a user UUID that exists on both.
+	m.clientMFAHandler.SetVerifyAttemptCounter(attemptCounter, clBundle.policyAudience)
 	if clBundle.webauthnSvc != nil {
 		m.clientMFAHandler.SetWebAuthn(clBundle.webauthnSvc)
 		m.clientWebAuthnHandler = handlers.NewWebAuthnHandler(
@@ -1376,6 +1386,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		m.clientWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
 		m.clientWebAuthnHandler.SetPolicy(authPolicy)
 		m.clientWebAuthnHandler.SetSessionTerminator(clBundle.authService)
+		m.clientWebAuthnHandler.SetVerifyAttemptCounter(attemptCounter, clBundle.policyAudience)
 	}
 
 	// ADR-0003 PR-D D-6: per-tier dispatcher map on the operator

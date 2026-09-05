@@ -43,6 +43,15 @@ var (
 	// Translated to 409 auth.password_confirm_unavailable so the frontend
 	// can nudge the user to the MFA path or a fresh OAuth flow.
 	ErrPasswordConfirmUnavailable = stderrors.New("password reconfirm not available for this account")
+	// ErrPasswordConfirmEnrollmentRequired is returned by
+	// ConfirmPasswordWithSecurity when the caller's role OBLIGES a second
+	// factor and they have not enrolled one (spec §4.3 D19, M-1's second
+	// half). Distinct from ErrPasswordConfirmUnavailable, which covers a
+	// caller who cannot reconfirm; this one covers a caller who must not.
+	// The handler maps it to 403 with the middleware's own
+	// `mfa_enrollment_required` envelope code, so the SPA sees one code
+	// for one situation on both the gate and this endpoint.
+	ErrPasswordConfirmEnrollmentRequired = stderrors.New("mfa enrollment required before password reconfirm")
 	// ErrPasswordLoginDisabled is iface.ErrPasswordLoginDisabled (one
 	// identity across the AdminAuthInviter boundary); the per-surface
 	// method gates of spec §4.3 return it.
@@ -1409,6 +1418,24 @@ func (s *PasswordAuthService) ConfirmPasswordWithSecurity(ctx context.Context, u
 		} else if err != nil && !stderrors.Is(err, repository.ErrMFAFactorNotFound) {
 			return nil, err
 		}
+	}
+	// Spec §4.3 D19 — the OBLIGATION, not just the enrolment. The refusal
+	// above fires on a caller who HAS a stronger factor; it cannot fire on
+	// the caller this rule exists for, who has none yet. A user whose role
+	// REQUIRES a second factor must not be able to satisfy step-up with a
+	// password: minting `reauth` for them is exactly what the obligation
+	// exists to prevent, and it is what let an MFA-obligated account inside
+	// its grace window walk every freshness gate on a password alone (M-1).
+	//
+	// Memberships are resolved the way completeLogin resolves them for its
+	// own MFA decision — the same loadMembershipsAsAuthModel helper, whose
+	// []authModels.TenantMembership is what MFARequired's
+	// []authModels.OrgMembership parameter already is (models/token.go
+	// aliases the two), so there is no conversion and no second rule.
+	// MFARequired reads the mfaEnabled master switch first, so an install
+	// with MFA off obliges nobody and this refusal never fires there.
+	if s.policy.MFARequired(user, s.loadMembershipsAsAuthModel(ctx, user.UUID)) {
+		return nil, ErrPasswordConfirmEnrollmentRequired
 	}
 	// This route verifies a password too, so it is subject to the same
 	// lockout as login and ChangePassword — otherwise it is the

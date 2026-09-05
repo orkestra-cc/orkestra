@@ -51,6 +51,13 @@ type authTierBundle struct {
 	// gating semantics as the legacy module.go branch.
 	mfaSvc      services.MFAService
 	webauthnSvc services.WebAuthnService
+	// policyAudience is the services.PolicyAudience matching `tier`,
+	// computed once by the builder from the SAME value that selects the
+	// tier's repositories. Consumers that need to scope a per-audience key
+	// — the MFA-verify attempt cap (spec §4.3 D20) — read it from here
+	// rather than repeating the literal at each wiring site, so a handler
+	// can never be wired to its own repos and the other tier's key space.
+	policyAudience services.PolicyAudience
 }
 
 // tierBundleDeps carries the tier-shared singletons and per-tier user
@@ -257,6 +264,7 @@ func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 
 	return &authTierBundle{
 		tier:              d.tier,
+		policyAudience:    policyAudienceForBundle,
 		authSessionRepo:   sessionRepo,
 		refreshTokenRepo:  refreshRepo,
 		oauthProviderRepo: oauthRepo,
