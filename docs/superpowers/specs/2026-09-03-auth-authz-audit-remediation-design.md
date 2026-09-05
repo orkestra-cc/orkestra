@@ -4,7 +4,7 @@
 |---|---|
 | **Date** | 2026-09-03 |
 | **Last review** | — |
-| **Status** | v1.14 — PR A implemented and merged; D4 matches what shipped, M-7's residual stated in D3 |
+| **Status** | v1.15 — PRs A, B and C implemented and merged. D27 amended to split by direction after PR C's whole-branch review; D36 added for the system-role `isActive` guard PR C shipped |
 | **Scope** | `backend/internal/core/auth` (services, handlers, module wiring), `backend/internal/core/authz` (services, handlers, Cedar policies), `backend/internal/core/user` (role-change handlers), `backend/internal/shared/{middleware,errors,errcode,systeminit,database}`, `backend/pkg/sdk/iface` (one additive interface), `backend/migrations` (one new migration), `frontend-client` (MFA enrolment page), notification templates, `docs/site`, module `CLAUDE.md`s |
 | **Source** | Security audit of 2026-09-03 on `dev` @ `a242e6bd` — report: https://claude.ai/code/artifact/5e5c5406-19bd-4cb1-8cd1-86cd9440b245. Finding IDs below (H-n, M-n, L-n) are the report's |
 | **ADR** | None. Every SDK change is additive (§4.3 adds the `iface.MFAEpochBumper` sub-interface and one `iface.User` field, §4.6 adds `iface.AuthzCacheInvalidator`, §4.7 adds `iface.SystemRoleHolderFinder`; `module.RedisClient` is untouched). Lockout moves from an in-memory token bucket to Redis counters, which changes an operational property, not a contract: the two admin-managed keys keep their names and gain the meaning their UI text already promises |
@@ -87,11 +87,15 @@ promised a role change "on the next request" while D26/D27 made cache
 invalidation and session termination best-effort with a 60 s fallback. The
 authz cache becomes generation-keyed (per-user and global counters folded
 into the key, invalidation = one atomic `INCR`, no `KEYS` scan — closing
-L-11), and every role or binding mutation runs pre-invalidate → write →
-post-invalidate: a pre-invalidation Redis cannot perform refuses the change
-with 503, the post step retires any entry repopulated during the write.
-Goal 6 is restated to exactly that, with the sub-second residual named in
-D27 and edge cases 29–30; §6 adds the generation and ordering tests.
+L-11), and every role or binding mutation invalidates around its write.
+**The gate splits by direction (v1.15):** a mutation that can only *grant*
+access pre-invalidates and refuses with 503 when it cannot; one that *removes*
+access — a role change either way, a delete, a cascade, an `IsActive: false`,
+any `granterSystem` grant — writes first and reports a failed invalidation
+instead of refusing, because refusing a revocation leaves the privilege live
+indefinitely where writing it leaves a stale allow for at most the TTL.
+Goal 6 is restated to exactly that, with the residual named in D27 and edge
+cases 29–30; §6 adds the generation and ordering tests.
 
 v1.7 (2026-09-03) answers review round 1, important finding 2: v1's mobile
 nonce travelled with the ID token, so whoever exfiltrated the token had the
@@ -173,6 +177,37 @@ step 6, which still specified the durable write taking a
 unconditional OR, and `counterAvailable` no longer exists in the code —
 `recordLoginFailure` returns a bare `Verdict`, and an unavailable store
 yields a zero verdict that reads as not-locked.
+
+v1.15 (2026-09-05) records two decisions taken while PR C was executing, both
+of which change what the spec asks for rather than merely how it is described.
+
+**D27 splits by direction.** As written, D27 refused *any* permission mutation
+whose pre-invalidation failed. For a grant that is fail-closed and costs a
+retry; for a **revocation** it inverts — a 503 leaves the privilege granted
+indefinitely, where writing it leaves a stale allow for at most the 60 s TTL.
+The inversion is sharper than it first looks: when Redis is fully down the
+generation read fails, the cache is bypassed on every read, and a written
+revocation therefore takes effect **immediately** — so refusing it is strictly
+worse in exactly the case the gate was meant to protect. The asymmetry that
+settles it: after a mutation, a stale cached verdict is a **deny** for a grant
+(harmless) and an **allow** for a revocation (harmful). Grants keep the gate;
+privilege-reducing mutations write, invalidate best-effort, and report. The
+role change of D27 itself is one of them — refusing a demotion recreates M-13,
+the finding D27 exists to close — so it is never refused, and
+`user.role_change_unavailable` was consequently never declared. The
+`granterSystem` path is also exempt: gating it made `CreateTenant` soft-delete
+the tenant it had just created, and `SetMemberRoles` leave a member unbound
+between unbind and rebind.
+
+**D36 is new.** PR C's whole-branch review found that any tenant's `org_owner`
+or `org_admin` could disable a *platform* system role for the whole platform,
+because `UpdateRole` skips its tenant-scope guard for `IsSystem` rows while
+still accepting `IsActive`, and `authz.role.update` is not a `System`
+permission. It pre-dates this spec and this PR — `origin/dev` had no gate on
+that path at all — and its impact is availability, not escalation: the
+`super_admin` and `administrator` shortcuts in `GetEffectivePermissions` never
+consult the role row, so a disabled `administrator` can always be re-enabled.
+The architect chose to close it inside PR C rather than file it.
 
 ## 1. Problem
 
@@ -853,11 +888,57 @@ and `ensureSeeded` replays the cached specs; the spec relies on that and the
 test in §6 asserts it. `DeleteRole` is unchanged (already scoped and
 cascade-free by design: deleting a role removes access).
 
+(Who may *disable* a role, as opposed to what a role may carry, is D36.)
+
 **D22 — Tenant-scoped bindings never contribute platform permissions.**
 `GetEffectivePermissions` skips keys in `systemPermissionSet` when unioning
 tenant-scoped bindings (`service.go:642-657`). This makes the documented
 evaluator rule 4 (`authz/CLAUDE.md:204`) true instead of incidental, and
 closes the audit's L-9 at zero cost. Global bindings are untouched.
+
+**D36 — Only a platform administrator may disable a platform system role
+(added v1.15).** `UpdateRole` refuses a change to an `IsSystem` row's
+`IsActive` unless the caller's own system role — read from the **database**
+via the service's `UserSystemRoleLookup`, never the `srole` claim, which D28
+exists to stop trusting — is `super_admin` or `administrator`. Refusal is
+403 `authz.platform_admin_required`. Custom roles are untouched: their
+existing tenant-scope guard already covers them.
+
+The hole this closes pre-dates the spec. `UpdateRole` skips its tenant-scope
+guard for `IsSystem` rows — correctly, since system roles are global platform
+config with `tenantId == ""` — and the immutability guard below it blocks only
+`Name`, `Description` and `Permissions`, so `IsActive` passed through. But
+`authz.role.update` is **not** a `System` permission, and `org_owner` is seeded
+with every non-system key, so an internal-tenant `org_owner` holds it (22
+permissions on the reference deployment; `org_admin` 18). `assertTenantScope`
+compares the path `{tenantId}` against the caller's own resolved tenant, so
+calling it on **their own** tenant passes; `ListRoles` returns system roles to
+every tenant, so the UUIDs are discoverable through the API the console already
+calls, and the console renders system roles with the same toggle as custom
+ones. `PATCH /v1/tenants/{their-own}/authz/roles/{administrator-uuid}` with
+`{"isActive": false}` therefore disabled `administrator` — or `org_owner` — for
+the whole platform, because the evaluator drops every permission of an inactive
+role.
+
+Two things bound it. The impact is **availability, not escalation and not a
+lockout**: `GetEffectivePermissions` gives `super_admin` a hard-coded `"*"` and
+`administrator` the whole `systemPermissionSet` from a `switch systemRole` that
+never consults the role row, so a disabled `administrator` can always be
+re-enabled. And PR C did not make it more reachable — `origin/dev` writes
+unconditionally with a best-effort flush and no gate at all.
+
+**A cascade check would not have worked.** `org_owner` holds exactly the
+`org_owner` role's permission set, so "the actor must hold everything the role
+carries" still permits an `org_owner` to disable `org_owner` platform-wide. The
+property that matters is not what the caller holds but **who the caller is**:
+system roles are global platform configuration.
+
+`developer` is deliberately outside the allowed set. D9 bounds it to read-only
+in production, and an authorization gate must not vary by environment.
+
+Residual, not closed here: the operator console still renders the toggle to
+tenant admins, who now meet the 403 at click time. Hiding it for `isSystem`
+rows is UI-only.
 
 ### 4.5 Cedar: system actions require a platform role (H-5)
 
@@ -944,39 +1025,60 @@ stored value (`iface.AuthzProvider(m.svc)`, `authz/module.go:228`) to `T`,
 which succeeds because the dynamic type is `*Service`. `pkg/sdk/CLAUDE.md`
 records the interface as additive; no versioning exception is needed.
 
-**D27 — The role branch does what the deactivate branch does, in an order
-that cannot leave a stale verdict.** `UpdateUser` (`user_handler.go:209-309`)
-and the client-user PATCH (`admin_client_handler.go:242-267`) wrap a role
-change as follows (v1.6):
+**D27 — The role branch does what the deactivate branch does, and the
+invalidation gate splits by direction (amended v1.15).** `UpdateUser`
+(`user_handler.go`) and the client-user PATCH (`admin_client_handler.go`) wrap
+a role change as:
 
-1. **Pre-invalidate**: `InvalidateUserPermissions` (one `INCR`). Failure →
-   the change is **refused** with 503 `user.role_change_unavailable` (new
-   errcode) and nothing is written: a change whose effect cannot be
-   guaranteed is not applied. An invalidator absent from the registry is
-   treated the same way for role changes — the "degrade, do not fail" note
-   on the interface applies to consumers that only *read* verdicts.
-2. Write the role (`userService.UpdateUser`).
-3. **Post-invalidate**: `INCR` again. This retires the only race left: a
-   request that repopulated the cache between steps 1 and 2 wrote the *old*
-   role under the *new* generation. A failure here is logged at ERROR,
-   counted (`orkestra_authz_cache_invalidation_failures_total`) and recorded
-   in the audit row (`cache_invalidated: false`); the change stands.
-4. `terminateSessions` (best-effort, exactly as deactivation does today,
-   `:62-75`), `sessions_terminated` in the audit row; the existing
-   `user.role.changed` event carries both flags.
+1. Write the role (`userService.UpdateUser`).
+2. **Invalidate** — `InvalidateUserPermissions` (one `INCR`). Best-effort: a
+   failure is logged at ERROR, counted
+   (`orkestra_authz_cache_invalidation_failures_total`) and recorded in the
+   audit row as `cache_invalidated: false`. **The change stands.**
+3. `terminateSessions` — unconditional on a role change, in both directions,
+   and reported as `sessions_terminated`; the `user.role.changed` event carries
+   both flags.
 
-Residual: a stale verdict outlives the change, for at most 60 s, only when
-Redis accepted step 1, served a repopulating read inside the milliseconds
-before step 2, and then refused step 3 — a partial failure in a sub-second
-window, not an operating mode. The same pre/write/post shape wraps every
-authz mutation that changes effective permissions (`UpdateRole`,
-`DeleteRole`, `CreateBinding`/`EnsureBinding`, `DeleteBinding`, the tenant
-cascades) through one service-side helper, `withGeneration(ctx, scope,
-mutate)`, so the cascade-checked role edits of D21 carry the same guarantee;
-a refused pre-invalidation there is 503 `authz.cache_unavailable`. Redis
-being unavailable already stops sessions, MFA challenges and OAuth state;
-refusing a permission change in that state is consistent, and the retry is
-the admin's.
+A role change is **never refused** for a cache reason. v1.6 specified a
+pre-invalidation gate answering 503 `user.role_change_unavailable`; that
+errcode was consequently never declared. Refusing a **demotion** recreates
+M-13 — the very finding this decision closes — by leaving the demoted
+administrator an administrator indefinitely instead of for at most the 60 s
+TTL; refusing a **promotion** only delays a harmless stale deny. Neither
+direction is made safer by refusing.
+
+The same reasoning governs the service-side helper. Every authz mutation that
+changes effective permissions goes through one of three shapes:
+
+| Mutation | Shape |
+|---|---|
+| `CreateRole`; `UpdateRole` whose new permission set is a **superset** of the old (or touches no permissions); `CreateBinding` / `EnsureBinding` with a real actor | **Gate** — pre-invalidate, and on failure refuse 503 `authz.cache_unavailable` writing nothing |
+| `DeleteRole`, `DeleteBinding`, the two tenant cascades, any grant issued by the `granterSystem` sentinel, and `UpdateRole` whose patch **removes** a permission **or sets `IsActive: false`** | **Write-then-report** — write, then invalidate best-effort; a failure is logged and counted, never a refusal |
+| `CreateRole` | issues no bump at all: a brand-new role has no bindings, so it can change no existing verdict |
+
+The asymmetry is the whole argument: after a mutation a stale cached verdict is
+a **deny** for a grant, which costs a retry, and an **allow** for a revocation,
+which is the thing the cache exists to retire. And when Redis is fully
+unavailable the generation read fails, `cacheGet` bypasses the cache, and every
+verdict resolves from Mongo — so a written revocation takes effect at once,
+while a refused one never takes effect at all.
+
+`IsActive: false` counts as removing access: the evaluator drops **every**
+permission of an inactive role, for every holder, and platform-wide for a
+system role. `IsActive: true` is a grant and keeps the gate.
+
+The `granterSystem` exemption is not a convenience. Gating it made
+`CreateTenant` soft-delete the tenant it had just created when an `INCR` failed
+mid-provisioning, and left `SetMemberRoles` returning between `unbindMember`
+and `bindOwner` with the member unbound while the membership denorm still said
+otherwise — three individually correct mechanisms combining into a new failure
+state.
+
+Residual: a reader that resolves Mongo across the whole write window can still
+publish a stale entry, bounded by the 60 s TTL. The read-side fix — one
+generation pair read per `GetEffectivePermissions`, used for both the read key
+and the write key — closes the narrower race where a verdict computed *before*
+a bump was republished *after* it. The two are complementary, not alternatives.
 
 **D28 — Tier guards read the database.** `canAssignRole`'s caller role
 (`user_handler.go:121, 211`) comes from `h.userService.GetUser(ctx, actorUUID)`;
@@ -1411,14 +1513,26 @@ sentences known to be wrong after this spec:
     is deleted and the signup runs again from scratch. A claimed sentinel
     with no user behind it is the same window the password path has
     (`firstadmin.go:13-21`) and is unchanged by this spec.
-29. **Redis refuses the pre-invalidation (D27).** The role change, or the
-    authz mutation, answers 503 and nothing is written; the admin retries
-    once Redis is back. Consistent with every other Redis-dependent write
-    on the platform.
-30. **Pre-invalidation succeeds, post-invalidation fails (D27).** Only a
-    cache entry written in the sub-second window between the two can carry
-    the old verdict; it dies within 60 s; ERROR log, metric and audit
-    metadata say so. This window is the whole residual behind goal 6.
+29. **Redis refuses the invalidation (D27, amended v1.15).** What happens
+    depends on the direction. A **grant** — `CreateRole`, an `UpdateRole`
+    that only adds or flips `IsActive: true`, a real-actor
+    `CreateBinding`/`EnsureBinding` — answers 503
+    `authz.cache_unavailable` and writes nothing; the admin retries once
+    Redis is back. A **revocation** — a role change in either direction, a
+    delete, a tenant cascade, an `UpdateRole` that removes a permission or
+    sets `IsActive: false`, any `granterSystem` grant — is **written**, the
+    invalidation is attempted best-effort, and its failure is logged,
+    counted and reported (`cache_invalidated: false`). Refusing a revocation
+    would leave the privilege in place indefinitely; writing it leaves a
+    stale allow for at most the 60 s TTL, and none at all when Redis is
+    fully down, since the cache is then bypassed on every read.
+30. **The invalidation is attempted and fails (D27).** Only a cache entry
+    written in the window around the write can carry the old verdict; it
+    dies within 60 s; ERROR log, metric and audit metadata say so. This
+    window is the whole residual behind goal 6. On the gated (grant) paths
+    a pre-invalidation runs first, so the window is the sub-second gap
+    between the two bumps; on the write-then-report paths it is the write
+    itself.
 31. **Shared egress (D2).** An office NAT produces wrong passwords from many
     people; each *account* still locks at 5 per window, the *address* only at
     100. When the address does trip, every login through it answers 429 with
@@ -1551,12 +1665,17 @@ for D14); `git diff --check`. New tests:
   generation is not read after the bump; the global flush retires every
   user's entries; an `MGET` failure reads as a miss; retired entries expire
   on their own TTL.
-- Role-change ordering (D27): pre-invalidate failure → 503 and
-  `UpdateUser` never called; post-invalidate failure → change persisted,
-  audit `cache_invalidated: false`, metric incremented; a repopulation
-  injected between pre-invalidate and write is retired by the post step
-  (hook on the fake invalidator); the same three cases for `UpdateRole`
-  through `withGeneration`.
+- Role-change ordering (D27, amended v1.15): an invalidation failure — and a
+  missing invalidator — still **apply** the change, terminate sessions and
+  record `cache_invalidated: false` with the metric incremented; the trace is
+  asserted as an ordered sequence (write → invalidate → terminate → audit),
+  not as four counts. For `UpdateRole` through the service helper, both
+  directions are pinned on disjoint tests: a patch that removes a permission
+  or sets `IsActive: false` **succeeds** with the store down, one that only
+  adds is **refused** 503 `authz.cache_unavailable`, and a description-only
+  patch retires nothing. A refused mutation must bump no generation — asserted
+  on the wire (`INCR` count) and in the store (no counter key), for every
+  wrapped method including `EnsureBinding`.
 - `user/handlers`: role change calls the invalidator and the terminator
   (extend `recordingTerminator` with a recording invalidator); lookup failure
   in `canAssignRole` → 500; client PATCH refuses escalation (D29);
@@ -1624,7 +1743,7 @@ this order:
 |---|---|---|---|
 | **A** | §4.1 | — | First: removes an anonymous DoS. Verify on staging: 6 wrong passwords from one IP → 429 with `Retry-After`; known and unknown email identical; forgot-password 4× → third mail is the last; `orkestra_auth_lockouts_total` moves |
 | **B** | §4.2, §4.3 | A (D20 uses the counters) | Staging drill: enrol TOTP, call `enroll/begin` again with a plain session → `step_up_required`; admin reset → target's other tab is signed out; passkey-only reset succeeds |
-| **C** | §4.4, §4.5, §4.6 | — | Can run in parallel with B. Staging drill: the H-4 probe sequence against the API returns 403 at the update; demote a test admin → their session ends |
+| **C** | §4.4 (incl. D36), §4.5, §4.6 | — | Ran in parallel with B; **merged 2026-09-05** as upstream #365. Staging drill run against the built binary: a platform-key edit answers 422 `authz.system_permission_forbidden` naming the key, an unknown key 422 `authz.permission_unknown`, and an input carrying both reports the **unknown** one (the deliberate check order); with Redis stopped, a **grant** answers 503 `authz.cache_unavailable` and Mongo confirms nothing was written, while a **revocation** succeeds and Mongo confirms the binding is gone (D27 as amended in v1.15). Note the drill's own precondition: role mutations require an MFA step-up, and `POST /v1/auth/operator/mfa/verify` returns a **new** access token that must be used for the mutation |
 | **D1** (expand) | §4.7, §4.8 items 1, 3–8 (readers and writers, **no tombstone writes**), §4.9, §4.10 | migration 0010 exited zero on every environment **before** deploy — a conflict report stops the rollout until an operator names the keeper per identity | Login refuses a doc with `unlinkedAt`, listings exclude it, ownership-first writes, boot index check; the unlink routes keep today's `$pull`-only behaviour. Staging drill: seed one provider doc with `unlinkedAt` by hand → its sign-in answers `oauth_identity_unlinked` and it is absent from auth-methods; a normal unlink still behaves as today; PKCE and mobile drills as listed below |
 | **D2** (contract) | §4.8 item 2 and the revive/move rules of item 4 | D1 deployed and verified on **every** environment; rollback floor becomes D1 the moment the first tombstone exists | Unlink writes `unlinkedAt`. Staging drill: unlink Google, sign in with Google → `oauth_identity_unlinked`; re-link from Security → works; roll back to D1 on staging and confirm the unlinked identity is still refused |
 
