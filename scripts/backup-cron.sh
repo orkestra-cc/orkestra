@@ -15,24 +15,45 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
+MIN_KEEP="${BACKUP_MIN_KEEP:-3}"
 LOG="$REPO_ROOT/backups/backup-cron.log"
 mkdir -p "$REPO_ROOT/backups"
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"; }
+
+# Validate both knobs before anything can delete a file. Bash arithmetic
+# resolves an unknown identifier to 0, so an unvalidated BACKUP_MIN_KEEP=abc
+# silently becomes "keep zero" — the retention floor disappears exactly when
+# someone thought they were configuring it. Refuse instead of guessing.
+for _var in RETENTION_DAYS MIN_KEEP; do
+  case "${!_var}" in
+    *[!0-9]* | "")
+      log "FAILED: BACKUP_${_var} must be a non-negative integer, got: '${!_var}'"
+      exit 2 ;;
+  esac
+done
+unset _var
 
 # Any unexpected failure must land in the log, not vanish into cron's void.
 trap 'log "FAILED: unexpected error at line $LINENO (exit $?)"' ERR
 
 log "=== backup run starting ==="
 
-if ! NO_COLOR=1 ./backup.sh --yes all >> "$LOG" 2>&1; then
+# Have backup.sh name the archive it produced. Picking "the newest tarball in
+# backups/" instead would let a concurrent or hand-started backup slip in
+# between the run and the check, so this wrapper would verify — and vouch for —
+# an archive it did not create, while its own went unchecked.
+PATH_FILE="$(mktemp)"
+trap 'rm -f "$PATH_FILE"' EXIT
+
+if ! NO_COLOR=1 ORKESTRA_BACKUP_PATH_FILE="$PATH_FILE" ./backup.sh --yes all >> "$LOG" 2>&1; then
   log "FAILED: backup.sh exited non-zero — no usable backup was written"
   exit 1
 fi
 
-LATEST=$(ls -t backups/orkestra-backup-*.tar.gz 2>/dev/null | head -1) || true
-if [ -z "$LATEST" ]; then
-  log "FAILED: backup.sh reported success but produced no tarball"
+LATEST="$(cat "$PATH_FILE")"
+if [ -z "$LATEST" ] || [ ! -f "$LATEST" ]; then
+  log "FAILED: backup.sh reported success but named no tarball we can find"
   exit 1
 fi
 
@@ -69,7 +90,7 @@ log "OK: $LATEST ($(du -h "$LATEST" | cut -f1)) components=$COMPONENTS"
 # aggressively) could still legitimately have zero recent-enough backups and
 # lose everything older in one pass. MIN_KEEP guarantees at least that many
 # backups survive regardless of age, on top of the age-based rule.
-MIN_KEEP="${BACKUP_MIN_KEEP:-3}"
+# MIN_KEEP is read and validated at the top, with RETENTION_DAYS.
 
 mapfile -t ALL_SORTED < <(find "$REPO_ROOT/backups" -maxdepth 1 -name 'orkestra-backup-*.tar.gz' -printf '%T@ %p\n' | sort -n | cut -d' ' -f2-)
 TOTAL=${#ALL_SORTED[@]}

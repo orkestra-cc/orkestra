@@ -374,19 +374,45 @@ backup_redis() {
 
   muted "redis dir=$r_dir dbfilename=$r_rdb appenddirname=${r_aofdir:-<none>}"
 
+  # Every `docker cp` below is checked. The file was confirmed present inside
+  # the container one line earlier, so a failed copy is a real capture failure,
+  # never an absent-by-design file — and it must fail the component rather than
+  # fall through to the existence check at the end, which a *sibling* artifact
+  # can satisfy on its behalf (a failed RDB copy passing because the AOF landed).
+  #
+  # Checking is not optional here: this function runs under the dispatcher's
+  # `backup_redis && INCLUDED+=(...) || true`, and that `&&`/`||` context
+  # disables set -e for the whole body. An unchecked `docker cp` sails straight
+  # past a failure.
+
   # RDB
   if [ -n "$r_rdb" ] && docker exec "$REDIS_CONTAINER" test -f "$r_dir/$r_rdb" 2>/dev/null; then
-    docker cp "$REDIS_CONTAINER:$r_dir/$r_rdb" "$out/dump.rdb"
+    if ! docker cp "$REDIS_CONTAINER:$r_dir/$r_rdb" "$out/dump.rdb"; then
+      err "redis: failed to copy $r_dir/$r_rdb out of the container"; return 1
+    fi
+    if [ ! -s "$out/dump.rdb" ]; then
+      err "redis: copied $r_rdb but it is empty"; return 1
+    fi
   fi
 
   # AOF (Redis 7+: directory). Older: single appendonly.aof file.
   if [ -n "$r_aofdir" ] && docker exec "$REDIS_CONTAINER" test -d "$r_dir/$r_aofdir" 2>/dev/null; then
     # Only copy if non-empty (AOF may be configured but unused).
     if [ -n "$(docker exec "$REDIS_CONTAINER" ls -A "$r_dir/$r_aofdir" 2>/dev/null)" ]; then
-      docker cp "$REDIS_CONTAINER:$r_dir/$r_aofdir" "$out/appendonlydir"
+      if ! docker cp "$REDIS_CONTAINER:$r_dir/$r_aofdir" "$out/appendonlydir"; then
+        err "redis: failed to copy the AOF directory $r_dir/$r_aofdir out of the container"; return 1
+      fi
+      if [ -z "$(ls -A "$out/appendonlydir" 2>/dev/null)" ]; then
+        err "redis: copied the AOF directory but it came out empty"; return 1
+      fi
     fi
   elif [ -n "$r_aoffile" ] && docker exec "$REDIS_CONTAINER" test -f "$r_dir/$r_aoffile" 2>/dev/null; then
-    docker cp "$REDIS_CONTAINER:$r_dir/$r_aoffile" "$out/appendonly.aof"
+    if ! docker cp "$REDIS_CONTAINER:$r_dir/$r_aoffile" "$out/appendonly.aof"; then
+      err "redis: failed to copy $r_dir/$r_aoffile out of the container"; return 1
+    fi
+    if [ ! -s "$out/appendonly.aof" ]; then
+      err "redis: copied $r_aoffile but it is empty"; return 1
+    fi
   fi
 
   # Record the live dir so restore can put files back in the right place.
@@ -611,6 +637,15 @@ tar czf "$OUTPUT_PATH" -C "$STAGE/data" .
 # OUTPUT_PATH landed somewhere with an inherited ACL/default-mode that
 # ignores umask (e.g. a directory with a POSIX default ACL).
 chmod 600 "$OUTPUT_PATH"
+
+# Machine-readable handoff for a scheduled wrapper. Naming the artifact this run
+# produced lets the caller verify exactly that file, instead of inferring "the
+# newest tarball in backups/" and racing a concurrent or hand-started backup —
+# which is how a scheduled run ends up verifying, and vouching for, somebody
+# else's archive. Written only here, after the tarball exists and is locked down.
+if [ -n "${ORKESTRA_BACKUP_PATH_FILE:-}" ]; then
+  printf '%s\n' "$OUTPUT_PATH" > "$ORKESTRA_BACKUP_PATH_FILE"
+fi
 SIZE="$(du -h "$OUTPUT_PATH" | cut -f1)"
 ok "wrote $OUTPUT_PATH ($SIZE)"
 muted "components included: ${INCLUDED[*]}"

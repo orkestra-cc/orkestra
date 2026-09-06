@@ -65,10 +65,15 @@ esac
 STUB
 chmod +x "$TMP/bin/docker"
 
+# Self-contained: prefer the real docker/.env when present, fall back to the
+# tracked example so this test also runs on a fresh checkout and in CI. Every
+# docker call is stubbed, so no real credential is ever used — depending on a
+# gitignored file was an accident of where this test was written, not a need.
+SRC_ENV="docker/.env"; [ -f "$SRC_ENV" ] || SRC_ENV="docker/.env.example"
 FAKE_ENV="$TMP/.env"
 sed -e "s/^APP_NAME=.*/APP_NAME=${FAKE_APP_NAME}/" \
     -e "s/^ENV=.*/ENV=${FAKE_ENV_NAME}/" \
-    docker/.env > "$FAKE_ENV"
+    "$SRC_ENV" > "$FAKE_ENV"
 
 out=$(PATH="$TMP/bin:$PATH" ORKESTRA_ENV_FILE="$FAKE_ENV" ./backup.sh --yes --components rustfs --output "$TMP/out.tar.gz" 2>&1)
 rc=$?

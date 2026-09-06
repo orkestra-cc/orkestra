@@ -164,7 +164,8 @@ Neither `./backup.sh` nor `scripts/backup-cron.sh` schedules itself. Nothing in 
 - Runs `./backup.sh --yes all` (every component, no prompts).
 - **Verifies the result rather than trusting the exit code** — re-opens the produced tarball, confirms the manifest lists all four components, and confirms the Mongo archive has real bytes, so a future regression in `backup.sh` can't turn the schedule back into a silent no-op.
 - Applies `chmod 600` to the tarball (belt-and-braces on top of `backup.sh`'s own `umask 077` + `chmod 600`).
-- Prunes tarballs older than `BACKUP_RETENTION_DAYS` (default 30) — but always keeps at least `BACKUP_MIN_KEEP` (default 3) of them regardless of age, so an infrequently-running or freshly-scheduled host can never prune its way down to zero backups in one pass.
+- Prunes tarballs older than `BACKUP_RETENTION_DAYS` (default 30) — but always keeps at least `BACKUP_MIN_KEEP` (default 3) of them regardless of age, so an infrequently-running or freshly-scheduled host can never prune its way down to zero backups in one pass. Both are validated as non-negative integers before anything is deleted (exit 2 otherwise): bash resolves an unknown identifier to 0 in arithmetic, so an unvalidated `BACKUP_MIN_KEEP=on` would quietly mean *keep none* — the floor vanishing at exactly the moment someone thought they were setting it.
+- Verifies the archive **this run** produced, not whichever tarball in `backups/` happens to be newest, so a concurrent or hand-started backup cannot end up being the one the schedule checks and vouches for.
 - Logs every run, pass or fail, to `backups/backup-cron.log`.
 
 Install it as a `cron.d` stanza — this is the actual stanza this project uses, adjust the run-as user and the repo path for your deployment:
