@@ -62,6 +62,23 @@ describe('SessionsTab', () => {
     expect(otherRow.querySelector('button')).not.toBeDisabled();
   });
 
+  // The pane moved from raw <table> markup to the console's AdvanceTable
+  // shell, so the search box is new behaviour worth pinning: sessions grow
+  // without bound and filtering is the only way through a long list.
+  it('filters rows through the AdvanceTable search box', async () => {
+    server.use(mySessionsHandler(sampleSessions));
+    renderWithProviders(<SessionsTab />);
+    const user = userEvent.setup();
+
+    await screen.findByText(/current device/i);
+    await user.type(screen.getByPlaceholderText(/search sessions/i), 'iPhone');
+
+    await waitFor(() => {
+      expect(screen.queryByText(/current device/i)).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/iphone/i)).toBeInTheDocument();
+  });
+
   it('revokes a non-current session and removes its row from the list', async () => {
     let calls = 0;
     server.use(

@@ -146,7 +146,7 @@ Dark mode keeps the pre-retune Falcon palette as literals: canvas **#0b1727**, c
 ### Hierarchy
 - **Display / h1** (500, 2.488rem = fs-4): page titles, rare.
 - **Headline / h2** (500, 2.074rem = fs-5): section heads.
-- **Title / h4–h5** (500, 1.44rem–1.2rem): card and panel titles (`card-title` inherits heading color).
+- **Title / h4–h5** (500, 1.44rem–1.2rem): card and panel titles. `.card-title` takes the theme-aware heading ink (`$card-title-color: var(--#{$prefix}heading-color)`), the same token a plain `<h5>` in an `OrkestraCardHeader` resolves to. It must never be pinned to a `$gray-*` literal: Bootstrap emits `--#{$prefix}card-title-color` as a **component-level** var with no dark counterpart, so the light `$headings-color` it used to hold painted every `<Card.Title>` `#252c36` on the `#121e2d` dark card — 1.1:1, a heading that was simply not on screen.
 - **Body** (400, 1rem, Open Sans): default prose and form text, `gray-700`.
 - **Label / dense UI** (400, 0.833rem = fs-10): table cells, badges, metadata — the workhorse size of every data surface.
 
@@ -189,6 +189,7 @@ Component philosophy: **quiet precision**. Clean white surfaces, discreet shadow
 - **Background:** white (`quaternary-bg`) on the `gray-200` canvas; dark mode #121e2d (frozen).
 - **Shadow Strategy:** the ambient card shadow, one level, always.
 - **Internal Padding:** 1.25rem vertical; headers via `OrkestraCardHeader`, bodies via `OrkestraCardBody` / `SectionCard`.
+- **One card level inside a tabbed surface.** The `card-header-tabs` strip already names the pane it opens, so a tab pane carries no card of its own — a second bordered card inside the tab body is double chrome repeating a label the strip just showed. Panes go straight to their toolbar, table, or form; a pane that genuinely holds two or more distinct sub-surfaces (`/user/security`'s Two-factor pane: authenticator app + passkeys) uses `SectionCard` for each, never one wrapper around the whole pane.
 
 ### Data tables (AdvanceTable)
 - Always `AdvanceTable` + `useAdvanceTable` + `AdvanceTableProvider` — never raw `<table>` for production lists.

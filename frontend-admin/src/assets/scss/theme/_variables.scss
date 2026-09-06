@@ -287,7 +287,17 @@ $card-cap-padding-y: $spacer !default;
 $card-cap-padding-x: 1.25rem !default;
 $card-bg: $white !default;
 $card-bg-dark: tint-color(#0b1727, 2.9%) !default;
-$card-title-color: $headings-color !default;
+// Bootstrap emits this as a component-level `--#{$prefix}card-title-color` on
+// `.card` and gives it NO dark counterpart, so the light literal
+// `$headings-color` (#252c36) painted every `<Card.Title>` in dark mode too —
+// 1.1:1 on the #121e2d card, i.e. text that is simply not on screen (the
+// /user/security panes and /admin/modules were rendering invisible headings).
+// Point it at the theme-aware heading token instead — the same ink a plain
+// `<h5>` inside `OrkestraCardHeader` already resolves to — so light stays
+// byte-identical and dark recovers its #d8e2ef. A dark-only correction of a
+// light literal that leaked past the freeze, in the spirit of the
+// `$headings-color` note in _variables-dark.scss.
+$card-title-color: var(--#{$prefix}heading-color) !default;
 // scss-docs-end card-variables
 
 // Accordion

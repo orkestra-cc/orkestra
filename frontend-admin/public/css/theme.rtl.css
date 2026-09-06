@@ -5483,7 +5483,7 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-card-spacer-y: 1.25rem;
   --orkestra-card-spacer-x: 1.25rem;
   --orkestra-card-title-spacer-y: 0.5rem;
-  --orkestra-card-title-color: #252c36;
+  --orkestra-card-title-color: var(--orkestra-heading-color);
   --orkestra-card-subtitle-color: ;
   --orkestra-card-border-width: 0px;
   --orkestra-card-border-color: rgba(var(--orkestra-emphasis-color-rgb), 0.125);
