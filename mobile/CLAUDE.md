@@ -101,6 +101,15 @@ mobile/
 - **Navigation**: none yet — `MaterialApp` only. `go_router` was declared but never imported, so it was dropped; reintroduce it at the current version when routing is actually written.
 - **Code Generation**: Freezed, JSON Serializable
 
+**`pubspec.lock` is bound to the pinned SDK, and Dependabot does not know that.** Six of its entries — `matcher`,
+`meta`, `test`, `test_api`, `test_core`, `vector_math` — are resolved by the Flutter SDK itself, so their versions
+follow the `flutter` pin in the repo-root `.mise.toml` (currently `3.44`), not the latest on pub.dev. A Dependabot
+bump regenerates the whole lock under *its* toolchain and happily writes newer versions of those six; the next
+`make mobile-lockcheck` then fails with `Unable to satisfy pubspec.yaml using pubspec.lock`, and the failure looks
+like it belongs to whatever branch happened to touch a `mobile/` file. The cure is always the same: run
+`flutter pub get` with the pinned SDK and commit the lock it produces — the diff will be those six going *down*.
+Never "fix" it by loosening a constraint in `pubspec.yaml`.
+
 ## Quick Start
 
 ### Prerequisites
