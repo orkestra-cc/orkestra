@@ -79,6 +79,94 @@ describe('SessionsTab', () => {
     expect(screen.getByText(/iphone/i)).toBeInTheDocument();
   });
 
+  // The global filter matches cell VALUES, not rendered text, so a date column
+  // accessored on the raw ISO string is searchable only by a string the
+  // operator never sees — on staging, typing the "10:0" printed in the cell
+  // matched nothing while the UTC "08:0" behind it returned that very row.
+  //
+  // Search on the MONTH NAME, not the time: the runner is UTC, where a
+  // rendered "10:00" is byte-identical to the ISO "10:00" behind it and the
+  // bug is invisible. A month name appears in the rendered cell and never in
+  // an ISO string, in any locale or zone.
+  it('matches the date text the operator can actually see', async () => {
+    server.use(
+      mySessionsHandler({
+        sessions: [
+          // BOTH date cells of a row must share a month: the global filter
+          // spans every cell, so an August row still holding a May
+          // "Last active" would match a search for "May".
+          {
+            ...sampleSessions.sessions[0],
+            lastActivity: '2026-05-10T10:00:00Z',
+            createdAt: '2026-05-10T09:00:00Z'
+          },
+          {
+            ...sampleSessions.sessions[1],
+            lastActivity: '2026-08-09T15:00:00Z',
+            createdAt: '2026-08-09T14:00:00Z'
+          }
+        ],
+        activeCount: 2
+      })
+    );
+    renderWithProviders(<SessionsTab />);
+    const user = userEvent.setup();
+
+    const currentRow = (await screen.findByText(/current device/i)).closest(
+      'tr'
+    )!;
+    // 4th cell = "Started". Take whatever month token this locale renders.
+    const month = currentRow
+      .querySelectorAll('td')[3]
+      .textContent!.match(/[A-Za-z]{3,}/)![0];
+
+    await user.type(screen.getByPlaceholderText(/search sessions/i), month);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/iphone/i)).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/current device/i)).toBeInTheDocument();
+  });
+
+  it('sorts the date column chronologically, not lexicographically', async () => {
+    // Sep 2026 is OLDER than Jan 2027 but sorts AFTER it as text ("J" < "S"),
+    // so the two orders disagree and a formatted-string comparator flips them.
+    // (A Dec/Jan pair would not: there the two orders happen to agree, and the
+    // test would pass with the comparator removed.)
+    server.use(
+      mySessionsHandler({
+        sessions: [
+          {
+            ...sampleSessions.sessions[0],
+            sessionId: 's-sep',
+            deviceName: 'Older Box',
+            isCurrent: false,
+            createdAt: '2026-09-05T10:00:00Z'
+          },
+          {
+            ...sampleSessions.sessions[1],
+            sessionId: 's-jan',
+            deviceName: 'Newer Box',
+            createdAt: '2027-01-05T10:00:00Z'
+          }
+        ],
+        activeCount: 2
+      })
+    );
+    renderWithProviders(<SessionsTab />);
+    const user = userEvent.setup();
+
+    await screen.findByText(/older box/i);
+    await user.click(screen.getByText(/^started$/i));
+
+    await waitFor(() => {
+      const names = [...document.querySelectorAll('tbody tr')].map(r =>
+        r.querySelector('td')!.textContent!.trim()
+      );
+      expect(names).toEqual(['Older Box', 'Newer Box']);
+    });
+  });
+
   it('revokes a non-current session and removes its row from the list', async () => {
     let calls = 0;
     server.use(

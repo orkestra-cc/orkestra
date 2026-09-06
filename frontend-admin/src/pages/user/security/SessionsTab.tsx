@@ -16,7 +16,7 @@ import {
   type SelfSessionInfo
 } from 'store/api/authApi';
 import SecurityEmptyState from './SecurityEmptyState';
-import SecurityTable from './SecurityTable';
+import SecurityTable, { byTimestamp } from './SecurityTable';
 
 // Format a session row's friendly device label. The backend stores
 // device name + platform separately so we can present whichever is
@@ -128,7 +128,10 @@ const SessionsTab = () => {
       )
     },
     {
-      accessorKey: 'lastActivity',
+      id: 'lastActivity',
+      // Formatted accessor + timestamp comparator — see byTimestamp.
+      accessorFn: s => formatDateTime(s.lastActivity),
+      sortingFn: byTimestamp<SelfSessionInfo>(s => s.lastActivity),
       header: t('userSecurity.sessionsTab.colLastActive'),
       cell: ({ row: { original } }: CellContext<SelfSessionInfo, unknown>) => (
         <span className="text-700">
@@ -137,7 +140,9 @@ const SessionsTab = () => {
       )
     },
     {
-      accessorKey: 'createdAt',
+      id: 'createdAt',
+      accessorFn: s => formatDate(s.createdAt),
+      sortingFn: byTimestamp<SelfSessionInfo>(s => s.createdAt),
       header: t('userSecurity.sessionsTab.colStarted'),
       cell: ({ row: { original } }: CellContext<SelfSessionInfo, unknown>) => (
         <span className="text-700">{formatDate(original.createdAt)}</span>
