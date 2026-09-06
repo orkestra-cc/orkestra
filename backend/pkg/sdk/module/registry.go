@@ -688,7 +688,11 @@ func (r *ModuleRegistry) CollectNavItems() []NavItemSpec {
 // --- Collection auto-setup ---
 
 // ensureCollections creates MongoDB collections and indexes declared by all registered modules.
-// Errors are logged as warnings — collection creation is idempotent and non-fatal.
+// Most failures are logged as warnings — collection creation is idempotent and non-fatal.
+// An index-spec conflict (a live index whose definition no longer matches the
+// declared spec) is logged as an ERROR instead: ensureCollection is create-only,
+// so the conflict is never self-healing and needs an operator-run reconcile
+// migration — see isIndexSpecConflict below.
 func (r *ModuleRegistry) ensureCollections(db *mongo.Database) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -696,6 +700,14 @@ func (r *ModuleRegistry) ensureCollections(db *mongo.Database) error {
 	for _, m := range r.modules {
 		for _, coll := range CollectionsOf(m) {
 			if err := ensureCollection(ctx, db, coll, m.Name(), r.logger); err != nil {
+				if isIndexSpecConflict(err) {
+					r.logger.Error("Index spec drift — database index does not match the declared spec; it will NOT be corrected automatically. Run a reconcile migration (see docs/migrations/)",
+						slog.String("module", m.Name()),
+						slog.String("collection", coll.Name),
+						slog.String("error", err.Error()),
+					)
+					continue
+				}
 				r.logger.Warn("Failed to ensure collection",
 					slog.String("module", m.Name()),
 					slog.String("collection", coll.Name),
@@ -814,6 +826,21 @@ func isCollectionAlreadyExists(err error) bool {
 	var cmdErr mongo.CommandError
 	if errors.As(err, &cmdErr) {
 		return cmdErr.Code == 48
+	}
+	return false
+}
+
+// indexKeySpecsConflict is the server code for "an index with this name
+// already exists with a different specification". It means the declared Go
+// spec and the provisioned database have drifted apart — ensureCollection
+// cannot fix it (index modification requires an explicit drop), so it must be
+// surfaced loudly rather than logged as routine noise.
+const indexKeySpecsConflict = 86
+
+func isIndexSpecConflict(err error) bool {
+	var ce mongo.CommandError
+	if errors.As(err, &ce) {
+		return ce.Code == indexKeySpecsConflict
 	}
 	return false
 }
