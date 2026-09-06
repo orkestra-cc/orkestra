@@ -1,4 +1,3 @@
-
 import { Button, Card } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import PageHeader from 'components/common/PageHeader';
@@ -60,9 +59,9 @@ const NavbarDoubleTop = () => {
               React-Bootstrap Navbar{' '}
             </a>
             responsive behaviors and all other behavior they support. The
-            dropdown menu display onClick by default on react-bootstrap. Orkestra
-            navbar top dropdown menu display on hover. To achieve this behavior,
-            we use react <code>onMouseOver</code> Event and{' '}
+            dropdown menu display onClick by default on react-bootstrap.
+            Orkestra navbar top dropdown menu display on hover. To achieve this
+            behavior, we use react <code>onMouseOver</code> Event and{' '}
             <code>onMouseLeave</code> event at{' '}
             <code>src/components/navbar/NavbarDropdown.js</code> jsx tag.
           </p>
@@ -72,11 +71,11 @@ const NavbarDoubleTop = () => {
         <OrkestraCardHeader title="Color Schemes" light={false} />
         <Card.Body className="bg-body-tertiary">
           <p>
-            Changing the color of Orkestra Navbar Double Top is very easy. Orkestra
-            uses React-Bootstrap's default <code> variant='light' </code> for
-            navabr component. You can use other background-color utilitie with{' '}
-            <code>bg</code> prop to update the Navbar. Learn more about
-            React-Bootstrap Navbar{' '}
+            Changing the color of Orkestra Navbar Double Top is very easy.
+            Orkestra uses React-Bootstrap's default{' '}
+            <code> variant='light' </code> for navabr component. You can use
+            other background-color utilitie with <code>bg</code> prop to update
+            the Navbar. Learn more about React-Bootstrap Navbar{' '}
             <a
               href={`${reactBootstrapDocsUrl}/docs/components/navbar/#navbars-colors`}
               target="_blank"

@@ -1,4 +1,3 @@
-
 import { Button, Row, Col, ListGroup } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -11,7 +10,7 @@ registerLocale('es', es);
 
 const timeCode = `function DatepickerExample() {
   const [date, setDate] = useState(null);
-  
+
   return (
     <DatePicker
       popperPlacement='bottom-start'
@@ -29,7 +28,7 @@ const timeCode = `function DatepickerExample() {
 
 const dateCode = `function DatePickerExample() {
   const [date, setDate] = useState(null);
-  
+
   return (
 
     <DatePicker
@@ -45,7 +44,7 @@ const dateCode = `function DatePickerExample() {
 
 const dateTimeCode = `function DatePickerExample() {
   const [date, setDate] = useState(null);
-  
+
   return (
     <DatePicker
     popperPlacement='bottom-start'
@@ -64,7 +63,7 @@ const dateTimeCode = `function DatePickerExample() {
 
 const formatCode = `function DatepickerExample() {
   const [date, setDate] = useState(null);
-  
+
   return (
     <DatePicker
       popperPlacement='bottom-start'
@@ -133,7 +132,7 @@ const predefinedRangesCode = `function DatepickerExample() {
     const today = new Date();
     const lastSunday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay() - 7);
     const lastSaturday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay() - 1);
-  
+
     setStartDate(lastSunday);
     setEndDate(lastSaturday);
   };
@@ -208,7 +207,7 @@ registerLocale('es', es)
 
 const LocalizationCode = `function DatepickerExample() {
   const [date, setDate] = useState(null);
-  
+
   return (
     <DatePicker
       popperPlacement='bottom-start'
@@ -231,7 +230,8 @@ const DatePickerExample = () => (
     >
       <Button
         href="https://github.com/Hacker0x01/react-datepicker"
-        target="_blank" rel="noopener noreferrer"
+        target="_blank"
+        rel="noopener noreferrer"
         variant="link"
         size="sm"
         className="ps-0"

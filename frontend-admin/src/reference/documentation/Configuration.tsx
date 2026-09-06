@@ -1,4 +1,3 @@
-
 import { Card, Table } from 'react-bootstrap';
 import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import OrkestraEditor from 'components/common/OrkestraEditor';
@@ -26,8 +25,8 @@ const Configuration = () => (
   <>
     <PageHeader title="Setting up configuration" className="mb-3">
       <p className="mt-2 mb-0">
-        Orkestra-React has a global configuration system. You can change the theme
-        settings with a single global javascript object.
+        Orkestra-React has a global configuration system. You can change the
+        theme settings with a single global javascript object.
       </p>
     </PageHeader>
 

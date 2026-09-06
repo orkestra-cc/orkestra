@@ -1,4 +1,3 @@
-
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -328,7 +327,10 @@ const FormValidation = () => (
     </OrkestraComponentCard>
 
     <OrkestraComponentCard>
-      <OrkestraComponentCard.Header title="Input group validation" light={false}>
+      <OrkestraComponentCard.Header
+        title="Input group validation"
+        light={false}
+      >
         <p className="mt-2 mb-0">
           To properly show rounded corners in an <code>&lt;InputGroup&gt;</code>{' '}
           with validation, the <code>&lt;InputGroup&gt;</code> requires the{' '}

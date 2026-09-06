@@ -1,4 +1,3 @@
-
 import partnerList from 'data/partner/partnerList';
 import Section from 'components/common/Section';
 import { Row, Col, Image, ImageProps } from 'react-bootstrap';

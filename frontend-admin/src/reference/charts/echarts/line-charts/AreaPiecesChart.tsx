@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import dayjs from 'dayjs';
 
@@ -126,7 +125,7 @@ const chartCode = `function ChartOptions() {
     ],
     grid: { right: 20, left: 5, bottom: 5, top: 8, containLabel: true }
   });
-  
+
   return (
     <ReactEchart
       echarts={echarts}

@@ -70,5 +70,4 @@ const ChatContentBody = ({ thread }: ChatContentBodyProps) => {
   );
 };
 
-
 export default ChatContentBody;

@@ -1,4 +1,3 @@
-
 import Hero from './Hero';
 import NavbarStandard from './NavbarStandard';
 import Partners from './Partners';

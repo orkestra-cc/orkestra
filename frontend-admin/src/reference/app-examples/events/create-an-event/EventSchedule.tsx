@@ -42,7 +42,11 @@ const EventSchedule = ({ register, setValue }: EventScheduleProps) => {
   const handleRemoveItem = (index: number) => {
     setItems(items.filter((_item, ind) => index !== ind));
   };
-  const handleChange = (id: number, name: string, value: string | Date | null) => {
+  const handleChange = (
+    id: number,
+    name: string,
+    value: string | Date | null
+  ) => {
     const newItems = [...items];
     const updatedItem = { ...newItems[id], [name]: value };
     setItems([

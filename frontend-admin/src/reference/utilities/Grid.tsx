@@ -1,4 +1,3 @@
-
 import { Button, Tab } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -203,7 +202,10 @@ const Grid = () => (
             <code>Container</code> as fluid until the specified breakpoint.
           </p>
         </OrkestraComponentCard.Header>
-        <OrkestraComponentCard.Body code={fluidBreakpointsCode} language="jsx" />
+        <OrkestraComponentCard.Body
+          code={fluidBreakpointsCode}
+          language="jsx"
+        />
       </Tab.Container>
     </OrkestraComponentCard>
 

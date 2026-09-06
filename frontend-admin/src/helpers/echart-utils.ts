@@ -40,7 +40,7 @@ export const tooltipFormatter = (
     paramsArray.forEach((el: TooltipParam) => {
       tooltipItem =
         tooltipItem +
-        `<div class='ms-1'> 
+        `<div class='ms-1'>
       <h6 class="text-700">
       <div class="dot me-1 fs-11 d-inline-block" style="background-color:${
         el.borderColor ? el.borderColor : el.color

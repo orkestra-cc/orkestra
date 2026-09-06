@@ -3,6 +3,7 @@ import { faClipboardList } from '@fortawesome/free-solid-svg-icons';
 import type { CellContext, ColumnDef } from '@tanstack/react-table';
 import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
+import { byTimestamp } from 'components/common/advance-table/sorting';
 import {
   useListAuditEventsQuery,
   type AuditEvent
@@ -18,7 +19,12 @@ const AuditEventsTab = () => {
 
   const columns: ColumnDef<AuditEvent>[] = [
     {
-      accessorKey: 'timestamp',
+      id: 'timestamp',
+      // Formatted accessor + timestamp comparator — see byTimestamp. Search
+      // matched the raw ISO string, so the time printed in this cell found
+      // nothing while the UTC time behind it returned that very row.
+      accessorFn: e => formatDateTime(e.timestamp),
+      sortingFn: byTimestamp<AuditEvent>(e => e.timestamp),
       header: t('adminCompliance.audit.columns.time'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<AuditEvent, unknown>) =>

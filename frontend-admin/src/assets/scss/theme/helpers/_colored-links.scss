@@ -1,7 +1,13 @@
 @each $color, $value in $grays {
   .link-#{$color} {
-    color: RGBA(var(--#{$prefix}gray-#{$color}-rgb), var(--#{$prefix}link-opacity, 1));
-    text-decoration-color: RGBA(var(--#{$prefix}gray-#{$color}-rgb), var(--#{$prefix}link-underline-opacity, 1));
+    color: RGBA(
+      var(--#{$prefix}gray-#{$color}-rgb),
+      var(--#{$prefix}link-opacity, 1)
+    );
+    text-decoration-color: RGBA(
+      var(--#{$prefix}gray-#{$color}-rgb),
+      var(--#{$prefix}link-underline-opacity, 1)
+    );
 
     @if $link-shade-percentage != 0 {
       &:hover,

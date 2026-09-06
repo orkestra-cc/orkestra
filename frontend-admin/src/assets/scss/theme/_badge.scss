@@ -16,6 +16,6 @@
 
 @each $color, $value in $theme-colors {
   .badge-subtle-#{$color} {
-    @include badge-subtle-variant($color)
+    @include badge-subtle-variant($color);
   }
 }

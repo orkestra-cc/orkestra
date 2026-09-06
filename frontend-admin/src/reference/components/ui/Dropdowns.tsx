@@ -1,4 +1,3 @@
-
 import { Button, Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -299,7 +298,10 @@ const Dropdowns = () => (
       </Col>
       <Col lg={6}>
         <OrkestraComponentCard>
-          <OrkestraComponentCard.Header title="Dropwdown Button" light={false} />
+          <OrkestraComponentCard.Header
+            title="Dropwdown Button"
+            light={false}
+          />
           <OrkestraComponentCard.Body code={dropdownBtnCode} language="jsx" />
         </OrkestraComponentCard>
       </Col>
@@ -365,19 +367,28 @@ const Dropdowns = () => (
           or <code>end</code> for the various breakpoints.
         </p>
       </OrkestraComponentCard.Header>
-      <OrkestraComponentCard.Body code={responsiveAlignmentCode} language="jsx" />
+      <OrkestraComponentCard.Body
+        code={responsiveAlignmentCode}
+        language="jsx"
+      />
     </OrkestraComponentCard>
 
     <Row className="g-lg-3">
       <Col lg={6}>
         <OrkestraComponentCard>
-          <OrkestraComponentCard.Header title="Dropwdown Headers" light={false} />
+          <OrkestraComponentCard.Header
+            title="Dropwdown Headers"
+            light={false}
+          />
           <OrkestraComponentCard.Body code={headerCode} language="jsx" />
         </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
         <OrkestraComponentCard>
-          <OrkestraComponentCard.Header title="Dropwdown Divider" light={false} />
+          <OrkestraComponentCard.Header
+            title="Dropwdown Divider"
+            light={false}
+          />
           <OrkestraComponentCard.Body code={dividerCode} language="jsx" />
         </OrkestraComponentCard>
       </Col>

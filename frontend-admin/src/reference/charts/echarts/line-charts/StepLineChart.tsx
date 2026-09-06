@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { LineChart } from 'echarts/charts';
@@ -49,7 +48,7 @@ const chartCode = `function ChartOptions() {
     'November',
     'December'
   ];
-  
+
   const getOption = () => ({
     color: [
       getThemeColor('danger'),

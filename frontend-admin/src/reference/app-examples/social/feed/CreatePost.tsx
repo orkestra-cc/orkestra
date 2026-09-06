@@ -1,4 +1,3 @@
-
 import { Card } from 'react-bootstrap';
 import Flex from 'components/common/Flex';
 import Avatar from 'components/common/Avatar';

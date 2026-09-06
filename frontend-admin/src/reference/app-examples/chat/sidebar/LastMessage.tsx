@@ -1,4 +1,3 @@
-
 import { users } from 'data/dashboard/default';
 import createMarkup from 'helpers/createMarkup';
 
@@ -20,7 +19,9 @@ interface LastMessageProps {
 }
 
 const LastMessage = ({ lastMessage, thread }: LastMessageProps) => {
-  const user = users.find(({ id }: { id: number }) => id === lastMessage?.senderUserId);
+  const user = users.find(
+    ({ id }: { id: number }) => id === lastMessage?.senderUserId
+  );
   const name = user?.name.split(' ');
 
   if (!lastMessage) {
@@ -51,7 +52,9 @@ const LastMessage = ({ lastMessage, thread }: LastMessageProps) => {
     <div
       className="chat-contact-content"
       dangerouslySetInnerHTML={createMarkup(
-        Array.isArray(lastMassagePreview) ? lastMassagePreview.join('') : lastMassagePreview
+        Array.isArray(lastMassagePreview)
+          ? lastMassagePreview.join('')
+          : lastMassagePreview
       )}
     />
   );

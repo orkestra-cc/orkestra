@@ -1,4 +1,3 @@
-
 import { Card } from 'react-bootstrap';
 import { Link } from 'react-router';
 import React from 'react';

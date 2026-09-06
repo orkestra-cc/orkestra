@@ -7,6 +7,7 @@ The role-based navigation system has been successfully integrated with the `v1/a
 ## 🔄 Key Integration Changes
 
 ### 1. **API Integration** (`hooks/auth/useAuth.ts`)
+
 - Updated `AuthStatus` interface to include `role?: string` field
 - Modified `checkAuthStatus()` to extract `role` from API response:
   ```typescript
@@ -14,16 +15,19 @@ The role-based navigation system has been successfully integrated with the `v1/a
   ```
 
 ### 2. **Role Extraction** (`utils/roleUtils.ts`)
+
 - Enhanced `extractUserRole()` function to prioritize API role field:
   ```typescript
-  const role = authData?.role ||           // Direct API field (primary)
-               authData?.user_role ||      // Backup
-               authData?.user?.role ||     // Nested
-               authData?.data?.role;       // Deep nested
+  const role =
+    authData?.role || // Direct API field (primary)
+    authData?.user_role || // Backup
+    authData?.user?.role || // Nested
+    authData?.data?.role; // Deep nested
   ```
 - Added development warnings for debugging role extraction issues
 
 ### 3. **Navigation Hook Updates** (`hooks/useRoleBasedNavigation.ts`)
+
 - Switched from Redux auth to TanStack Query auth (`useCurrentUser`)
 - Updated dependencies to remove Redux-specific functions
 - Added placeholder permission functions (ready for future enhancement)
@@ -31,28 +35,32 @@ The role-based navigation system has been successfully integrated with the `v1/a
 ## 🎯 Current Role-Based Access
 
 ### Production Route Groups
+
 - **Operations** (`operator`+): Dashboard, tasks, calendar, profile
 - **Management** (`manager`+): Task management, team oversight, reports
 - **Administration** (`administrator`+): Fleet management, analytics, business reports
 - **System Administration** (`super_admin`): User management, system settings
 
 ### Development Tools (Development Environment Only)
+
 - **Development Routes**: Component library, forms, modules (based on role)
 
 ## 🔧 API Endpoint Integration
 
 ### Expected API Response Format
+
 ```json
 {
   "isActive": true,
   "id": "user_id",
   "fullName": "User Name",
-  "role": "manager",
+  "role": "manager"
   // ... other fields
 }
 ```
 
 ### Supported Role Values
+
 - `"super_admin"` - Full system access
 - `"administrator"` - Business operations
 - `"manager"` - Team management
@@ -61,7 +69,9 @@ The role-based navigation system has been successfully integrated with the `v1/a
 ## 🧪 Testing & Debugging
 
 ### Browser Console
+
 In development, the system logs warnings for:
+
 - Invalid role values
 - Role extraction failures
 - Authentication state changes
@@ -84,12 +94,14 @@ In development, the system logs warnings for:
 ## 📋 Next Steps
 
 ### Optional Enhancements
+
 1. **Permission System**: Extend to support granular permissions in addition to roles
 2. **Role Caching**: Add role caching for better performance
 3. **Audit Logging**: Log role-based access attempts
 4. **Dynamic Roles**: Support for runtime role changes without re-authentication
 
 ### Backend Considerations
+
 1. Ensure `/v1/auth/me` always returns the `role` field
 2. Validate role values match the expected hierarchy
 3. Consider adding permission arrays for future granular control
@@ -100,16 +112,19 @@ In development, the system logs warnings for:
 ### Common Issues
 
 **Navigation not filtering:**
+
 - Check if `role` field is present in API response
 - Verify role value matches expected hierarchy
 - Use Auth Debugger to inspect raw API data
 
 **Role extraction failing:**
+
 - Check browser console for warnings
 - Verify API response structure
 - Test with different user roles
 
 **Empty navigation:**
+
 - Ensure user is authenticated
 - Check if role restrictions are too strict
 - Verify route group configurations

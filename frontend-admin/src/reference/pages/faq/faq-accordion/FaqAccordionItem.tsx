@@ -1,4 +1,3 @@
-
 import { Accordion, Card } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import classNames from 'classnames';
@@ -17,7 +16,11 @@ interface FaqAccordionItemProps {
   isLast?: boolean;
 }
 
-const FaqAccordionItem: React.FC<FaqAccordionItemProps> = ({ faq, isFirst, isLast }) => {
+const FaqAccordionItem: React.FC<FaqAccordionItemProps> = ({
+  faq,
+  isFirst,
+  isLast
+}) => {
   return (
     <Card
       className={classNames('shadow-none', {

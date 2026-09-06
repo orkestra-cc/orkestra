@@ -1,4 +1,3 @@
-
 // E-commerce components are not available
 // import BillingCard from 'features/e-commerce/billing/BillingCard';
 // import ShoppingCart from 'features/e-commerce/cart/ShoppingCart';
@@ -22,7 +21,9 @@ const ECommerceWidgets = () => {
         <Col xs={12}>
           <Card>
             <Card.Body>
-              <p className="text-muted">E-commerce components are not available in this version.</p>
+              <p className="text-muted">
+                E-commerce components are not available in this version.
+              </p>
             </Card.Body>
           </Card>
         </Col>

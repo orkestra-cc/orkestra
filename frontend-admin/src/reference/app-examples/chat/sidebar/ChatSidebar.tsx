@@ -1,4 +1,3 @@
-
 import { Nav } from 'react-bootstrap';
 import ChatThread from './ChatThread';
 import SimpleBar from 'simplebar-react';

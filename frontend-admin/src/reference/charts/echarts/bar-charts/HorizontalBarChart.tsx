@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { BarChart } from 'echarts/charts';
@@ -128,7 +127,10 @@ const chartCode = `function ChartOptions() {
 const HorizontalBarChart = () => {
   return (
     <OrkestraComponentCard className="h-100">
-      <OrkestraComponentCard.Header title="Horizontal bar chart" light={false} />
+      <OrkestraComponentCard.Header
+        title="Horizontal bar chart"
+        light={false}
+      />
       <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"

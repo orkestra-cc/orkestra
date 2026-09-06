@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { PieChart } from 'echarts/charts';
@@ -91,7 +90,7 @@ const chartCode = `function ChartOptions() {
       }
     }
   ];
-  
+
   const getOption = () => ({
     title: [
       {
@@ -158,7 +157,7 @@ const chartCode = `function ChartOptions() {
           series: [{ radius: '60%' }]
         });
     }
-  
+
     useEffect(() => {
       window.addEventListener('resize', updateDimensions, { passive: true });
       return () => window.removeEventListener('resize', updateDimensions);

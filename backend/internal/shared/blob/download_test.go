@@ -4,9 +4,9 @@ import "testing"
 
 func TestContentDispositionAttachment(t *testing.T) {
 	cases := []struct {
-		name  string
-		in    string
-		want  string
+		name string
+		in   string
+		want string
 	}{
 		{
 			name: "plain ascii with spaces",

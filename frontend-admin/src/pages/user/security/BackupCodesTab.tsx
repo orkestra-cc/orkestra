@@ -1,15 +1,20 @@
 import { useState } from 'react';
-import { Alert, Button, Card, Modal, Spinner } from 'react-bootstrap';
+import { Alert, Button, Col, Modal, Row, Spinner } from 'react-bootstrap';
+import { faArrowsRotate, faLifeRing } from '@fortawesome/free-solid-svg-icons';
+import IconButton from 'components/common/IconButton';
 import { Trans, useTranslation } from 'react-i18next';
 import { useGetSelfAuthMethodsQuery } from 'store/api/authApi';
 import { useRegenerateBackupCodesMutation } from 'store/api/mfaApi';
 import BackupCodesDisplay from './BackupCodesDisplay';
+import SecurityEmptyState from './SecurityEmptyState';
 
 // BackupCodesTab shows how many backup codes the user has left and
 // exposes a "Regenerate" affordance. Regenerating destroys the old
 // list immediately — the request is gated server-side by
 // RequireStepUp(5m), and the global StepUpModal handles the replay
 // when the freshness gate fires.
+//
+// No card of its own: the tab strip above names this pane.
 const BackupCodesTab = () => {
   const { t } = useTranslation();
   const { data, isLoading } = useGetSelfAuthMethodsQuery();
@@ -53,59 +58,57 @@ const BackupCodesTab = () => {
     );
   }
 
+  if (!enrolled) {
+    return (
+      <SecurityEmptyState
+        icon={faLifeRing}
+        message={t('userSecurity.backupCodesTab.emptyNoEnrollment')}
+        hint={t('userSecurity.backupCodesTab.noEnrollment')}
+      />
+    );
+  }
+
   return (
     <>
-      <Card className="shadow-none border">
-        <Card.Header>
-          <Card.Title as="h5" className="mb-0">
-            {t('userSecurity.backupCodesTab.title')}
-          </Card.Title>
-        </Card.Header>
-        <Card.Body>
-          {!enrolled ? (
-            <Alert variant="info" className="fs-10 mb-0">
-              {t('userSecurity.backupCodesTab.noEnrollment')}
+      <Row>
+        <Col lg={7} xxl={6}>
+          {error && (
+            <Alert variant="danger" className="fs-10">
+              {error}
             </Alert>
+          )}
+          {freshCodes ? (
+            <BackupCodesDisplay
+              codes={freshCodes}
+              ackRequired
+              onDone={() => setFreshCodes(null)}
+              heading={t('userSecurity.backupCodesTab.freshHeading')}
+            />
           ) : (
             <>
-              {error && (
-                <Alert variant="danger" className="fs-10">
-                  {error}
-                </Alert>
-              )}
-              {freshCodes ? (
-                <BackupCodesDisplay
-                  codes={freshCodes}
-                  ackRequired
-                  onDone={() => setFreshCodes(null)}
-                  heading={t('userSecurity.backupCodesTab.freshHeading')}
+              <p className="fs-10 mb-3">
+                <Trans
+                  i18nKey={
+                    remaining === 1
+                      ? 'userSecurity.backupCodesTab.remainingOne'
+                      : 'userSecurity.backupCodesTab.remainingOther'
+                  }
+                  values={{ count: remaining }}
+                  components={{ strong: <strong /> }}
                 />
-              ) : (
-                <>
-                  <p className="fs-10 mb-3">
-                    <Trans
-                      i18nKey={
-                        remaining === 1
-                          ? 'userSecurity.backupCodesTab.remainingOne'
-                          : 'userSecurity.backupCodesTab.remainingOther'
-                      }
-                      values={{ count: remaining }}
-                      components={{ strong: <strong /> }}
-                    />
-                  </p>
-                  <Button
-                    variant="outline-primary"
-                    onClick={() => setShowConfirm(true)}
-                    disabled={regenerating}
-                  >
-                    {t('userSecurity.backupCodesTab.regenerateButton')}
-                  </Button>
-                </>
-              )}
+              </p>
+              <IconButton
+                variant="outline-primary"
+                icon={faArrowsRotate}
+                onClick={() => setShowConfirm(true)}
+                disabled={regenerating}
+              >
+                {t('userSecurity.backupCodesTab.regenerateButton')}
+              </IconButton>
             </>
           )}
-        </Card.Body>
-      </Card>
+        </Col>
+      </Row>
 
       <Modal show={showConfirm} onHide={() => setShowConfirm(false)} centered>
         <Modal.Header closeButton>

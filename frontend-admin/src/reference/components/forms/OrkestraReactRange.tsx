@@ -1,4 +1,3 @@
-
 import { Range, getTrackBackground } from 'react-range';
 import { useAppContext } from 'providers/AppProvider';
 
@@ -34,7 +33,13 @@ const OrkestraReactRange = ({
     getThemeColor
   } = useAppContext();
 
-  const Track = ({ props: properties, children }: { props: any; children: React.ReactNode }) => (
+  const Track = ({
+    props: properties,
+    children
+  }: {
+    props: any;
+    children: React.ReactNode;
+  }) => (
     <div
       key={properties.key}
       onMouseDown={properties.onMouseDown}
@@ -71,7 +76,15 @@ const OrkestraReactRange = ({
     </div>
   );
 
-  const Thumb = ({ props: properties, isDragged, index }: { props: any; isDragged: boolean; index: number }) => (
+  const Thumb = ({
+    props: properties,
+    isDragged,
+    index
+  }: {
+    props: any;
+    isDragged: boolean;
+    index: number;
+  }) => (
     <div
       {...properties}
       key={properties.key}
@@ -85,14 +98,18 @@ const OrkestraReactRange = ({
           (alwaysShowTooltip || isDragged) && 'show'
         }`}
       >
-        {tipFormatter
-          ? tipFormatter(values[index])
-          : values[index].toFixed(1)}
+        {tipFormatter ? tipFormatter(values[index]) : values[index].toFixed(1)}
       </div>
     </div>
   );
 
-  const Mark = ({ props: properties, index }: { props: any; index: number }) => {
+  const Mark = ({
+    props: properties,
+    index
+  }: {
+    props: any;
+    index: number;
+  }) => {
     return (
       <div
         {...properties}
@@ -108,8 +125,8 @@ const OrkestraReactRange = ({
                 ? getThemeColor(variant)
                 : getThemeColor('gray-300')
               : index * step > values[0] && index * step < values[1]
-              ? getThemeColor(variant)
-              : getThemeColor('gray-300')
+                ? getThemeColor(variant)
+                : getThemeColor('gray-300')
         }}
       ></div>
     );

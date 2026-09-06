@@ -1,4 +1,3 @@
-
 import { useAppContext } from 'providers/AppProvider';
 import { Modal } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -54,7 +53,12 @@ const getCircleStackIcon = (icon: IconProp, transform?: string) => (
   </span>
 );
 
-const EventModalMediaContent = ({ icon, heading, content, children }: EventModalMediaContentProps) => (
+const EventModalMediaContent = ({
+  icon,
+  heading,
+  content,
+  children
+}: EventModalMediaContentProps) => (
   <Flex className="mt-3">
     {getCircleStackIcon(icon)}
     <div className="flex-1">

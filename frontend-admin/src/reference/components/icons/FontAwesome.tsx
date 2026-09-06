@@ -1,4 +1,3 @@
-
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -8,7 +7,7 @@ import OrkestraEditor from 'components/common/OrkestraEditor';
 const addIconCode = `import { library } from '@fortawesome/fontawesome-svg-core'
 import { faGulp } from '@fortawesome/free-brands-svg-icons' // module
 import { faCheckSquare, faHome } from '@fortawesome/free-solid-svg-icons' // module
- 
+
 library.add(faGulp, faCheckSquare, faHome)`;
 
 const individualAddIconCode = `import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
@@ -62,7 +61,11 @@ const FontAwesome = () => (
           you can explicitly import icons into each component for individual
           use.
         </p>
-        <OrkestraEditor code={individualAddIconCode} language="jsx" hidePreview />
+        <OrkestraEditor
+          code={individualAddIconCode}
+          language="jsx"
+          hidePreview
+        />
 
         <p className="mb-0 mt-3">
           For better understanding you can visit{' '}

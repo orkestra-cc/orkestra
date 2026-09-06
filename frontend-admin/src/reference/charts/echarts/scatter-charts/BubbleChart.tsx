@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { ScatterChart } from 'echarts/charts';
@@ -172,7 +171,7 @@ const chartCode = `function ChartOptions() {
       containLabel: true
     }
     });
-    
+
     return (
       <ReactEchart
         echarts={echarts}

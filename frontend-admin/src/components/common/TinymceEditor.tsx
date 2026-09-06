@@ -51,7 +51,7 @@ const TinymceEditor = ({
             }
             .tox-tbtn{
               background-color: red;
-            }  
+            }
             `,
           statusbar: false,
           plugins: 'link image lists table media directionality',

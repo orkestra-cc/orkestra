@@ -1,4 +1,3 @@
-
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { useAppContext } from 'providers/AppProvider';
 import bg1 from 'assets/img/generic/bg-1.jpg';

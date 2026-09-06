@@ -122,7 +122,7 @@ const chartCode = `function ChartOptions() {
       containLabel: true
     }
     });
-    
+
     return (
       <ReactEchart
         echarts={echarts}

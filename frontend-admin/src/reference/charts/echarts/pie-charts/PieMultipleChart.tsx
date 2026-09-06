@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { PieChart } from 'echarts/charts';
@@ -70,7 +69,7 @@ const chartCode = `function ChartOptions() {
       }
     }
   ];
-  
+
   let data2 = [
     {
       value: 1048,
@@ -165,13 +164,13 @@ const chartCode = `function ChartOptions() {
         chartRef.current.getEchartsInstance().setOption({
           series: [smallRadius, smallRadius]
         });
-      } 
+      }
       else
         chartRef.current.getEchartsInstance().setOption({
           series: [defaultRadius, defaultRadius]
         });
     }
-  
+
     useEffect(() => {
       window.addEventListener('resize', updateDimensions, { passive: true });
       return () => window.removeEventListener('resize', updateDimensions);

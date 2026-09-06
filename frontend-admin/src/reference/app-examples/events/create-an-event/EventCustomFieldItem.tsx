@@ -29,7 +29,10 @@ interface EventCustomFieldItemProps {
 
 const CustomButton = ({ handleRemove, id }: CustomButtonProps) => {
   return (
-    <div id={String(id)} className="position-absolute end-0 top-0 z-1 hover-actions">
+    <div
+      id={String(id)}
+      className="position-absolute end-0 top-0 z-1 hover-actions"
+    >
       <Button
         size="sm"
         variant="link"
@@ -228,7 +231,14 @@ const EventCustomFieldItem = ({
                 setTime(newDate);
                 setValue(`customField${index}`, newDate);
               }}
-              customInput={<DateInputWrapper formControlProps={{ placeholder: 'H:i', ...register(`customField${index}`) }} />}
+              customInput={
+                <DateInputWrapper
+                  formControlProps={{
+                    placeholder: 'H:i',
+                    ...register(`customField${index}`)
+                  }}
+                />
+              }
             />
           </Form.Group>
         );
@@ -248,7 +258,14 @@ const EventCustomFieldItem = ({
                 setDate(newDate);
                 setValue(`customField${index}`, newDate);
               }}
-              customInput={<DateInputWrapper formControlProps={{ placeholder: 'd/m/y', ...register(`customField${index}`) }} />}
+              customInput={
+                <DateInputWrapper
+                  formControlProps={{
+                    placeholder: 'd/m/y',
+                    ...register(`customField${index}`)
+                  }}
+                />
+              }
             />
           </Form.Group>
         );

@@ -1,4 +1,3 @@
-
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -7,7 +6,7 @@ import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 
-const calenderCode = `function fullCalendarExample() {  
+const calenderCode = `function fullCalendarExample() {
   return (
     <FullCalendar
       plugins={[ dayGridPlugin,timeGridPlugin ]}
@@ -31,7 +30,8 @@ const Figures = () => (
     >
       <Button
         href={`https://fullcalendar.io/docs/react`}
-        target="_blank" rel="noopener noreferrer"
+        target="_blank"
+        rel="noopener noreferrer"
         variant="link"
         size="sm"
         className="ps-0"

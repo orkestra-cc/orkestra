@@ -1,4 +1,3 @@
-
 import { getPastDates, rgbaColor } from 'helpers/utils';
 import { BarChart } from 'echarts/charts';
 import {

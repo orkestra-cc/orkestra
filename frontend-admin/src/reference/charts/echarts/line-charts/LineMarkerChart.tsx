@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { LineChart } from 'echarts/charts';
 import {
@@ -29,7 +28,7 @@ echarts.use([
 const chartCode = `function ChartOptions() {
   const { getThemeColor } = useAppContext();
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-  
+
   const months = [
     'January',
     'February',
@@ -44,7 +43,7 @@ const chartCode = `function ChartOptions() {
     'November',
     'December'
   ];
-  
+
   const getOption = () => ({
     color: [
       getThemeColor('primary'),
@@ -203,7 +202,7 @@ const chartCode = `function ChartOptions() {
     ],
     grid: { right: '8%', left: '5%', bottom: '10%', top: '15%' }
   });
-  
+
   return (
     <ReactEchart
       echarts={echarts}

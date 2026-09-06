@@ -4,13 +4,24 @@ import {
   Alert,
   Button,
   ButtonGroup,
-  Card,
   Dropdown,
   Modal,
-  Spinner,
-  Table
+  Spinner
 } from 'react-bootstrap';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { IconProp } from '@fortawesome/fontawesome-svg-core';
+import { faLink, faLinkSlash } from '@fortawesome/free-solid-svg-icons';
+import {
+  faApple,
+  faDiscord,
+  faGithub,
+  faGoogle
+} from '@fortawesome/free-brands-svg-icons';
+import type { CellContext, ColumnDef } from '@tanstack/react-table';
+import IconButton from 'components/common/IconButton';
+import { byTimestamp } from 'components/common/advance-table/sorting';
 import SubtleBadge from 'components/common/SubtleBadge';
+import { formatDate } from 'helpers/dateFormat';
 import { useTranslation } from 'react-i18next';
 import {
   useGetSelfAuthMethodsQuery,
@@ -19,6 +30,8 @@ import {
   type OAuthProvider,
   type SelfAuthOAuthProvider
 } from 'store/api/authApi';
+import SecurityEmptyState from './SecurityEmptyState';
+import SecurityTable from './SecurityTable';
 
 // Provider brand names — proper nouns, intentionally not translated.
 const PROVIDER_LABELS: Record<OAuthProvider, string> = {
@@ -26,6 +39,16 @@ const PROVIDER_LABELS: Record<OAuthProvider, string> = {
   apple: 'Apple',
   github: 'GitHub',
   discord: 'Discord'
+};
+
+// Brand glyphs render in the neutral ink, not in each vendor's brand hex:
+// components never carry hex values (DESIGN.md, The Utility-Class Rule), and
+// the provider's name beside the mark already carries the identity.
+const PROVIDER_ICONS: Record<OAuthProvider, IconProp> = {
+  google: faGoogle,
+  apple: faApple,
+  github: faGithub,
+  discord: faDiscord
 };
 
 const ALL_PROVIDERS: OAuthProvider[] = ['google', 'apple', 'github', 'discord'];
@@ -46,6 +69,10 @@ function isKnownFailure(code: string | undefined): code is LinkFailureCode {
 // and exposes a per-row Unlink action. The unlink endpoint is gated
 // server-side by RequireStepUp(5m); the global StepUpModal pauses
 // the request, drives the user through /mfa/verify, and replays.
+//
+// The list runs through SecurityTable in `compact` mode: the four supported
+// IdPs are the hard ceiling on row count, so search and pagination would be
+// chrome that never earns its line.
 const LinkedProvidersTab = () => {
   const { t } = useTranslation();
   const { data, isLoading, isFetching, refetch } = useGetSelfAuthMethodsQuery();
@@ -95,14 +122,6 @@ const LinkedProvidersTab = () => {
     const linked = new Set(providers.map(p => p.provider));
     return ALL_PROVIDERS.filter(p => !linked.has(p));
   }, [providers]);
-
-  if (isLoading) {
-    return (
-      <div className="text-center py-4">
-        <Spinner animation="border" size="sm" />
-      </div>
-    );
-  }
 
   const onlyCredential =
     !data?.passwordUsableForLogin && providers.length === 1;
@@ -174,134 +193,178 @@ const LinkedProvidersTab = () => {
     }
   };
 
+  const columns: ColumnDef<SelfAuthOAuthProvider>[] = [
+    {
+      accessorKey: 'provider',
+      header: t('userSecurity.linkedProvidersTab.colProvider'),
+      cell: ({
+        row: { original }
+      }: CellContext<SelfAuthOAuthProvider, unknown>) => (
+        <>
+          <FontAwesomeIcon
+            icon={PROVIDER_ICONS[original.provider]}
+            className="me-2 text-700"
+          />
+          <span className="fw-semibold text-900">
+            {PROVIDER_LABELS[original.provider]}
+          </span>
+          {original.isPrimary && (
+            <SubtleBadge bg="primary" pill className="ms-2 fs-11 fw-normal">
+              {t('userSecurity.linkedProvidersTab.primaryBadge')}
+            </SubtleBadge>
+          )}
+        </>
+      )
+    },
+    {
+      accessorKey: 'email',
+      header: t('userSecurity.linkedProvidersTab.colEmail'),
+      cell: ({
+        row: { original }
+      }: CellContext<SelfAuthOAuthProvider, unknown>) => (
+        <span className="text-700">{original.email}</span>
+      )
+    },
+    {
+      id: 'linkedAt',
+      // Formatted accessor + timestamp comparator — see byTimestamp. This
+      // table is compact (no search box) today; keeping the idiom uniform is
+      // what stops flipping that flag from reintroducing the bug.
+      accessorFn: p => formatDate(p.linkedAt),
+      sortingFn: byTimestamp<SelfAuthOAuthProvider>(p => p.linkedAt),
+      header: t('userSecurity.linkedProvidersTab.colLinked'),
+      cell: ({
+        row: { original }
+      }: CellContext<SelfAuthOAuthProvider, unknown>) => (
+        <span className="text-700">{formatDate(original.linkedAt)}</span>
+      )
+    },
+    {
+      id: 'actions',
+      header: t('userSecurity.linkedProvidersTab.colActions'),
+      enableSorting: false,
+      meta: {
+        headerProps: { className: 'text-end' },
+        cellProps: { className: 'text-end' }
+      },
+      cell: ({
+        row: { original }
+      }: CellContext<SelfAuthOAuthProvider, unknown>) => (
+        <IconButton
+          size="sm"
+          variant="outline-secondary"
+          icon={faLinkSlash}
+          disabled={onlyCredential || isFetching}
+          onClick={() => setTarget(original)}
+        >
+          {t('userSecurity.linkedProvidersTab.rowUnlink')}
+        </IconButton>
+      )
+    }
+  ];
+
+  if (isLoading) {
+    return (
+      <div className="text-center py-4">
+        <Spinner animation="border" size="sm" />
+      </div>
+    );
+  }
+
   return (
     <>
-      <Card className="shadow-none border">
-        <Card.Header className="d-flex justify-content-between align-items-center flex-wrap gap-2">
-          <Card.Title as="h5" className="mb-0">
-            {t('userSecurity.linkedProvidersTab.title')}
-          </Card.Title>
-          {availableProviders.length > 0 && (
-            <Dropdown as={ButtonGroup}>
-              <Dropdown.Toggle
-                variant="outline-primary"
-                size="sm"
-                disabled={linkPending}
-              >
-                {linkPending
-                  ? t('userSecurity.linkedProvidersTab.linkButtonStarting')
-                  : t('userSecurity.linkedProvidersTab.linkButton')}
-              </Dropdown.Toggle>
-              <Dropdown.Menu align="end">
-                {availableProviders.map(p => (
-                  <Dropdown.Item key={p} onClick={() => onStartLink(p)}>
-                    {PROVIDER_LABELS[p]}
-                  </Dropdown.Item>
-                ))}
-              </Dropdown.Menu>
-            </Dropdown>
-          )}
-        </Card.Header>
-        <Card.Body>
-          {linkBanner?.kind === 'success' && (
-            <Alert
-              variant="success"
-              dismissible
-              onClose={() => setLinkBanner(null)}
-              className="fs-10"
+      <div className="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <p className="fs-10 text-muted mb-0">
+          {t('userSecurity.linkedProvidersTab.intro')}
+        </p>
+        {availableProviders.length > 0 && (
+          <Dropdown as={ButtonGroup}>
+            <Dropdown.Toggle
+              variant="outline-primary"
+              size="sm"
+              className="text-nowrap"
+              disabled={linkPending}
             >
-              {linkBanner.provider
-                ? t('userSecurity.linkedProvidersTab.bannerSuccessProvider', {
-                    provider:
-                      PROVIDER_LABELS[linkBanner.provider as OAuthProvider] ??
-                      linkBanner.provider
-                  })
-                : t('userSecurity.linkedProvidersTab.bannerSuccessGeneric')}
-            </Alert>
-          )}
-          {linkBanner?.kind === 'failed' && (
-            <Alert
-              variant="danger"
-              dismissible
-              onClose={() => setLinkBanner(null)}
-              className="fs-10"
-            >
-              {isKnownFailure(linkBanner.code)
+              <FontAwesomeIcon icon={faLink} className="me-1" />
+              {linkPending
+                ? t('userSecurity.linkedProvidersTab.linkButtonStarting')
+                : t('userSecurity.linkedProvidersTab.linkButton')}
+            </Dropdown.Toggle>
+            <Dropdown.Menu align="end">
+              {availableProviders.map(p => (
+                <Dropdown.Item key={p} onClick={() => onStartLink(p)}>
+                  <FontAwesomeIcon
+                    icon={PROVIDER_ICONS[p]}
+                    className="me-2 text-700"
+                  />
+                  {PROVIDER_LABELS[p]}
+                </Dropdown.Item>
+              ))}
+            </Dropdown.Menu>
+          </Dropdown>
+        )}
+      </div>
+
+      {linkBanner?.kind === 'success' && (
+        <Alert
+          variant="success"
+          dismissible
+          onClose={() => setLinkBanner(null)}
+          className="fs-10"
+        >
+          {linkBanner.provider
+            ? t('userSecurity.linkedProvidersTab.bannerSuccessProvider', {
+                provider:
+                  PROVIDER_LABELS[linkBanner.provider as OAuthProvider] ??
+                  linkBanner.provider
+              })
+            : t('userSecurity.linkedProvidersTab.bannerSuccessGeneric')}
+        </Alert>
+      )}
+      {linkBanner?.kind === 'failed' && (
+        <Alert
+          variant="danger"
+          dismissible
+          onClose={() => setLinkBanner(null)}
+          className="fs-10"
+        >
+          {isKnownFailure(linkBanner.code)
+            ? t(
+                `userSecurity.linkedProvidersTab.linkFailures.${linkBanner.code}`
+              )
+            : t('userSecurity.linkedProvidersTab.bannerFailureGeneric')}
+        </Alert>
+      )}
+      {error && (
+        <Alert variant="danger" className="fs-10">
+          {error}
+        </Alert>
+      )}
+
+      {providers.length === 0 ? (
+        <SecurityEmptyState
+          icon={faLink}
+          message={t('userSecurity.linkedProvidersTab.emptyNoLinked')}
+          hint={
+            availableProviders.length > 0
+              ? t('userSecurity.linkedProvidersTab.emptyHasMore')
+              : t('userSecurity.linkedProvidersTab.emptyAllLinked')
+          }
+        />
+      ) : (
+        <>
+          {onlyCredential && (
+            <Alert variant="warning" className="fs-10">
+              {passwordSetButDisabled
                 ? t(
-                    `userSecurity.linkedProvidersTab.linkFailures.${linkBanner.code}`
+                    'userSecurity.linkedProvidersTab.onlyCredentialWarningPasswordDisabled'
                   )
-                : t('userSecurity.linkedProvidersTab.bannerFailureGeneric')}
+                : t('userSecurity.linkedProvidersTab.onlyCredentialWarning')}
             </Alert>
           )}
-          {error && (
-            <Alert variant="danger" className="fs-10">
-              {error}
-            </Alert>
-          )}
-          {providers.length === 0 ? (
-            <p className="fs-10 text-muted mb-0">
-              {t('userSecurity.linkedProvidersTab.emptyNoLinked')}{' '}
-              {availableProviders.length > 0
-                ? t('userSecurity.linkedProvidersTab.emptyHasMore')
-                : t('userSecurity.linkedProvidersTab.emptyAllLinked')}
-            </p>
-          ) : (
-            <>
-              {onlyCredential && (
-                <Alert variant="warning" className="fs-10">
-                  {passwordSetButDisabled
-                    ? t(
-                        'userSecurity.linkedProvidersTab.onlyCredentialWarningPasswordDisabled'
-                      )
-                    : t(
-                        'userSecurity.linkedProvidersTab.onlyCredentialWarning'
-                      )}
-                </Alert>
-              )}
-              <Table responsive size="sm" className="mb-0 align-middle">
-                <thead>
-                  <tr>
-                    <th>{t('userSecurity.linkedProvidersTab.colProvider')}</th>
-                    <th>{t('userSecurity.linkedProvidersTab.colEmail')}</th>
-                    <th>{t('userSecurity.linkedProvidersTab.colLinked')}</th>
-                    <th className="text-end">
-                      {t('userSecurity.linkedProvidersTab.colActions')}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {providers.map(p => (
-                    <tr key={p.provider}>
-                      <td>
-                        {PROVIDER_LABELS[p.provider]}
-                        {p.isPrimary && (
-                          <SubtleBadge bg="primary" className="ms-2">
-                            {t('userSecurity.linkedProvidersTab.primaryBadge')}
-                          </SubtleBadge>
-                        )}
-                      </td>
-                      <td className="fs-10">{p.email}</td>
-                      <td className="fs-10 text-muted">
-                        {new Date(p.linkedAt).toLocaleDateString()}
-                      </td>
-                      <td className="text-end">
-                        <Button
-                          variant="outline-danger"
-                          size="sm"
-                          disabled={onlyCredential || isFetching}
-                          onClick={() => setTarget(p)}
-                        >
-                          {t('userSecurity.linkedProvidersTab.rowUnlink')}
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </>
-          )}
-        </Card.Body>
-      </Card>
+          <SecurityTable data={providers} columns={columns} compact />
+        </>
+      )}
 
       <Modal show={!!target} onHide={() => setTarget(null)} centered>
         <Modal.Header closeButton>

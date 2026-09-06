@@ -1,4 +1,11 @@
-import { useState, useEffect, ChangeEvent, FormEvent, Dispatch, SetStateAction } from 'react';
+import {
+  useState,
+  useEffect,
+  ChangeEvent,
+  FormEvent,
+  Dispatch,
+  SetStateAction
+} from 'react';
 import { Button, Form, Modal } from 'react-bootstrap';
 import { v4 as uuid } from 'uuid';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -56,9 +63,14 @@ const AddScheduleModal = ({
     setIsOpenScheduleModal(!isOpenScheduleModal);
   };
 
-  const handleChange = ({ target }: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+  const handleChange = ({
+    target
+  }: ChangeEvent<
+    HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+  >) => {
     const name = target.name;
-    const value = name === 'allDay' ? (target as HTMLInputElement).checked : target.value;
+    const value =
+      name === 'allDay' ? (target as HTMLInputElement).checked : target.value;
     setFormData({ ...formData, [name]: value });
   };
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -193,6 +205,5 @@ const AddScheduleModal = ({
     </Modal>
   );
 };
-
 
 export default AddScheduleModal;

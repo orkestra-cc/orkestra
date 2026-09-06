@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { PieChart } from 'echarts/charts';
@@ -25,7 +24,7 @@ echarts.use([
 const chartCode = `function ChartOptions() {
   const { getThemeColor } = useAppContext();
   const chartRef = useRef(null);
-  
+
   const getOption = () => ({
     legend: {
       orient: 'vertical',
@@ -106,7 +105,7 @@ const chartCode = `function ChartOptions() {
     });
 
     //------- Responsive on window resize -------
-    
+
     const updateDimensions = () => {
       if (window.innerWidth < 530) {
         chartRef.current.getEchartsInstance().setOption({
@@ -116,7 +115,7 @@ const chartCode = `function ChartOptions() {
             }
           ]
         });
-      } 
+      }
       else
         chartRef.current.getEchartsInstance().setOption({
           series: [
@@ -126,7 +125,7 @@ const chartCode = `function ChartOptions() {
           ]
         });
     }
-  
+
     useEffect(() => {
       window.addEventListener('resize', updateDimensions, { passive: true });
       return () => window.removeEventListener('resize', updateDimensions);

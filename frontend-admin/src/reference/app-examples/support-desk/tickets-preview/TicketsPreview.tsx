@@ -1,4 +1,3 @@
-
 import { Col, Row } from 'react-bootstrap';
 import Conversation from './Conversation';
 import PropertiesFilteringForm from './PropertiesFilteringForm';

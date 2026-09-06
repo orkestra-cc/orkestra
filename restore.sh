@@ -34,6 +34,13 @@ ENV_FILE="$DOCKER_DIR/.env"
 KEYS_DIR="$DOCKER_DIR/keys"
 BACKUPS_DIR="$REPO_ROOT/backups"
 
+# Pinned deliberately, not floating on :latest. backup.sh's --require gate turns
+# a failed capture into a hard failure, so a surprise from an unattended `docker
+# pull` — a broken release, or a Docker Hub rate limit on an anonymous pull —
+# would take the whole nightly backup down rather than degrade it. Bumping this
+# is a decision, taken with the stack in front of you.
+AWS_CLI_IMAGE="${ORKESTRA_AWS_CLI_IMAGE:-amazon/aws-cli:2.36.29}"
+
 # Container/network names are stack-namespaced (${APP_NAME}-<svc>-${ENV} and
 # ${APP_NAME}-${ENV}_default) — resolved below, once docker/.env is sourced.
 MONGO_CONTAINER=""
@@ -444,7 +451,7 @@ restore_rustfs() {
         -e AWS_SECRET_ACCESS_KEY="$secret" \
         -e AWS_DEFAULT_REGION="$region" \
         -v "$d":/backup:ro \
-        amazon/aws-cli:latest \
+        "$AWS_CLI_IMAGE" \
         --endpoint-url "$endpoint" s3 sync /backup "s3://$b" --dryrun 2>&1 \
         | sed 's/^/      /' | head -20
     done
@@ -461,7 +468,7 @@ restore_rustfs() {
       -e AWS_ACCESS_KEY_ID="$access" \
       -e AWS_SECRET_ACCESS_KEY="$secret" \
       -e AWS_DEFAULT_REGION="$region" \
-      amazon/aws-cli:latest \
+      "$AWS_CLI_IMAGE" \
       --endpoint-url "$endpoint" s3 mb "s3://$b" 2>/dev/null || true
 
     docker run --rm --network "$NETWORK" \
@@ -469,7 +476,7 @@ restore_rustfs() {
       -e AWS_SECRET_ACCESS_KEY="$secret" \
       -e AWS_DEFAULT_REGION="$region" \
       -v "$d":/backup:ro \
-      amazon/aws-cli:latest \
+      "$AWS_CLI_IMAGE" \
       --endpoint-url "$endpoint" s3 sync /backup "s3://$b" --only-show-errors
     ok "rustfs: synced bucket '$b'"
   done

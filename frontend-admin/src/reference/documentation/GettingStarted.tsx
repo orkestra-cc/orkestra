@@ -36,8 +36,8 @@ const GettingStarted = () => (
                 original Orkestra theme{' '}
               </a>
               . This doc will guide you to understand how{' '}
-              <strong>Orkestra-React</strong> theme is organized, basics of how to
-              customize, and how to compile from the source code if you want.
+              <strong>Orkestra-React</strong> theme is organized, basics of how
+              to customize, and how to compile from the source code if you want.
             </p>
           </Card.Body>
         </Card>
@@ -107,8 +107,8 @@ const GettingStarted = () => (
           <li>
             Run <code>npm i</code>
             <br />
-            This command will download all the necessary dependencies for orkestra
-            in the <code>node_modules</code> directory.
+            This command will download all the necessary dependencies for
+            orkestra in the <code>node_modules</code> directory.
           </li>
           <li>
             Run <code>npm run dev</code>. A local web server will start at{' '}

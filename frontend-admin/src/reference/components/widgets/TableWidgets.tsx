@@ -1,4 +1,3 @@
-
 import { Card, Col, Row } from 'react-bootstrap';
 import WidgetSectionTitle from './WidgetSectionTitle';
 // E-commerce components are not available

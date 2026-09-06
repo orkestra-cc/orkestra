@@ -22,7 +22,10 @@ echarts.use([
   LegendComponent
 ]);
 
-const getOption = (getThemeColor: (color: string) => string, isDark: boolean) => ({
+const getOption = (
+  getThemeColor: (color: string) => string,
+  isDark: boolean
+) => ({
   color: [
     getThemeColor('primary'),
     isDark ? '#235FAD' : '#6AA2EC',
@@ -166,6 +169,5 @@ const TicketVolumeChart = ({ data: _data, ref }: TicketVolumeChartProps) => {
     />
   );
 };
-
 
 export default TicketVolumeChart;

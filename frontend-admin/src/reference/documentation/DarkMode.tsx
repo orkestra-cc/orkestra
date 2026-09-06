@@ -132,7 +132,7 @@ const darkModeExampleCode = `function DarkModeExample(){
               }
             />
           </Dropdown.Toggle>
-    
+
           <Dropdown.Menu className="dropdown-caret py-0 mt-2">
             <div className="bg-white rounded-2 py-2 dark__bg-1000">
               {themeVariants.map(colorMode => (
@@ -171,9 +171,9 @@ const DarkMode = () => (
   <>
     <PageHeader title="Dark Mode" className="mb-3">
       <p className="mt-2 mb-0">
-        It’s effortless to switch Dark Mode in Orkestra-React. You can enable Dark
-        Mode by default or create a Dark/Light switch if you want. To set the
-        default mode "Dark", please see the{' '}
+        It’s effortless to switch Dark Mode in Orkestra-React. You can enable
+        Dark Mode by default or create a Dark/Light switch if you want. To set
+        the default mode "Dark", please see the{' '}
         <Link to={paths.configuration}>configuration page</Link>.
       </p>
     </PageHeader>

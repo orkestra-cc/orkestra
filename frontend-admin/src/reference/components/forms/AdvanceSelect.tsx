@@ -1,4 +1,3 @@
-
 import { Button, Form } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -119,7 +118,8 @@ const Placeholder = () => (
     >
       <Button
         href="https://react-select.com/home"
-        target="_blank" rel="noopener noreferrer"
+        target="_blank"
+        rel="noopener noreferrer"
         variant="link"
         size="sm"
         className="ps-0"

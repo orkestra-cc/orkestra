@@ -1,4 +1,3 @@
-
 import { Button, Tab, Alert } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -77,7 +76,7 @@ render(<Example />)`;
 
 const dismissCodeOne = `function AlertDismissibleExample() {
   const [show, setShow] = useState(true);
-  
+
   if (show) {
     return (
       <Alert variant="danger" onClose={() => setShow(false)} dismissible>

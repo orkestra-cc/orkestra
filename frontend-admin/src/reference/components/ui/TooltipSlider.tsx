@@ -74,7 +74,11 @@ interface TooltipSliderProps {
   [key: string]: any;
 }
 
-const TooltipSlider = ({ tipFormatter, tipProps, ...props }: TooltipSliderProps) => {
+const TooltipSlider = ({
+  tipFormatter,
+  tipProps,
+  ...props
+}: TooltipSliderProps) => {
   const tipHandleRender = (node: React.ReactElement, handleProps: any) => {
     return (
       <HandleTooltip

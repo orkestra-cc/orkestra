@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import dayjs from 'dayjs';
 
@@ -157,7 +156,7 @@ const chartCode = `function ChartOptions() {
       }
     ],
     grid: { right: '3%', left: '10%', bottom: '10%', top: '10%' }
-  }); 
+  });
 
   return (
     <ReactEchart

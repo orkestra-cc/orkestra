@@ -211,7 +211,10 @@ const Toasts = () => (
             wrapping element so they can easily stack.
           </p>
         </OrkestraComponentCard.Header>
-        <OrkestraComponentCard.Body code={placementStackedCode} language="jsx" />
+        <OrkestraComponentCard.Body
+          code={placementStackedCode}
+          language="jsx"
+        />
       </Tab.Container>
     </OrkestraComponentCard>
 

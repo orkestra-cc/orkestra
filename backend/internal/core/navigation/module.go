@@ -84,4 +84,3 @@ func (m *NavigationModule) RegisterRoutes(ri *module.RouteInfo) {
 		RegisterAdminRoutes(adminAPI, m.adminHandler)
 	})
 }
-

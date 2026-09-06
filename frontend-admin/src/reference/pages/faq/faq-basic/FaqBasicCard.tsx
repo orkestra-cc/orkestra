@@ -1,4 +1,3 @@
-
 import { Button, Card } from 'react-bootstrap';
 import FaqBasicItem from './FaqBasicItem';
 import Flex from 'components/common/Flex';
@@ -18,7 +17,12 @@ interface FaqBasicCardProps {
   bodyClass?: string;
 }
 
-const FaqBasicCard: React.FC<FaqBasicCardProps> = ({ faqs, header, headerText, bodyClass }) => {
+const FaqBasicCard: React.FC<FaqBasicCardProps> = ({
+  faqs,
+  header,
+  headerText,
+  bodyClass
+}) => {
   return (
     <Card className="mb-3">
       {header && (
