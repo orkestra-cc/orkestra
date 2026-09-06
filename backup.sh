@@ -342,9 +342,14 @@ backup_rustfs() {
     buckets="$bucket"
   fi
 
+  # Run the sync as the invoking user: the image defaults to root, which leaves
+  # root-owned files in $STAGE that a non-root caller cannot delete on EXIT
+  # (and that end up root-owned inside the tarball). aws-cli needs a writable
+  # HOME for its cache, so point it at the container's /tmp.
   for b in $buckets; do
     mkdir -p "$out/$b"
     docker run --rm --network "$NETWORK" \
+      --user "$(id -u):$(id -g)" -e HOME=/tmp \
       -e AWS_ACCESS_KEY_ID="$access" \
       -e AWS_SECRET_ACCESS_KEY="$secret" \
       -e AWS_DEFAULT_REGION="${STORAGE_REGION:-us-east-1}" \
