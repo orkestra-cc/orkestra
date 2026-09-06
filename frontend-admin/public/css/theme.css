@@ -19335,10 +19335,13 @@ label {
 }
 
 pre,
-code,
 kbd,
 samp {
   font-size: 0.8333333333rem;
+}
+
+code {
+  font-size: inherit;
 }
 
 [type=email],

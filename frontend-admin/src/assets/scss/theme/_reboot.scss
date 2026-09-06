@@ -71,16 +71,26 @@ label {
 }
 
 // On-scale (The On-Scale Rule): `$font-size-sm` (0.875rem = 14px) is not a
-// step of the 1.2-ratio `$font-sizes` scale, and an absolute size here also
-// overrode Bootstrap's own `code` rule — so an inline `<code>` rendered at
-// 14px inside an fs-11 (11.11px) metadata line, larger than the sentence
-// carrying it (the org slug on /user/dashboard's Groups panel). Same pinning
-// as `$input-font-size-sm` and `$navbar-vertical-link-font-size`.
+// step of the 1.2-ratio `$font-sizes` scale. Same pinning as
+// `$input-font-size-sm` and `$navbar-vertical-link-font-size` — but only for
+// the BLOCK forms, which set their own register the way a table does.
 pre,
-code,
 kbd,
 samp {
   font-size: map-get($font-sizes, 10);
+}
+
+// Inline `<code>` takes its context's step instead of a fixed one, because
+// any absolute size here is wrong in some context by construction: at 14px,
+// and then at fs-10, the org slug on /user/dashboard's Groups panel rendered
+// LARGER than the fs-11 metadata line carrying it. Inheriting is still
+// on-scale — it lands on whatever step the surrounding text is on — and it
+// is the only rule under which a run of inline code can never outweigh its
+// own sentence. Note this must not be folded back into the block selector
+// above: `inherit` there would take the reference showcases' `<pre>` code
+// samples from fs-10 to the 1rem body step.
+code {
+  font-size: inherit;
 }
 
 [type='email'],
