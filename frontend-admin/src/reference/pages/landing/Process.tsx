@@ -1,4 +1,3 @@
-
 import classNames from 'classnames';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Row, Col, Image } from 'react-bootstrap';

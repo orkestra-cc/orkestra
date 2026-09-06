@@ -1,4 +1,3 @@
-
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -33,10 +32,10 @@ const exampleCode = `<div className="d-flex justify-content-center flex-wrap gap
         <Placeholder xs={6} />
       </Placeholder>
       <Placeholder as={Card.Text} animation="glow">
-        <Placeholder xs={7} /> 
-        <Placeholder xs={4} /> 
+        <Placeholder xs={7} />
         <Placeholder xs={4} />
-        <Placeholder xs={6} /> 
+        <Placeholder xs={4} />
+        <Placeholder xs={6} />
         <Placeholder xs={8} />
       </Placeholder>
       <Placeholder.Button variant="primary" xs={6} />

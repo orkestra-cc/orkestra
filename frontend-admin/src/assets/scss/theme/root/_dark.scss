@@ -62,8 +62,8 @@
     //
     // Box Shadows
     //
-    --#{$prefix}box-shadow: 0 7px 14px 0 rgba(3, 12, 51, 0.15),
-      0 3px 6px 0 rgba(0, 0, 0, 0.2);
+    --#{$prefix}box-shadow:
+      0 7px 14px 0 rgba(3, 12, 51, 0.15), 0 3px 6px 0 rgba(0, 0, 0, 0.2);
     --#{$prefix}box-shadow-sm: 0 0.125rem 0.25rem rgba($black, 0.075);
     --#{$prefix}box-shadow-lg: 0 1rem 4rem rgba($black, 0.175);
     --#{$prefix}box-shadow-inset: inset 0 1px 2px rgba($black, 0.075);
@@ -110,8 +110,8 @@
     // Reveal Button
     //
     --#{$prefix}btn-reveal-focus-bg: #{shade-color(#0b1727, 10%)};
-    --#{$prefix}btn-reveal-hover-shadow: 0px 1px 2px 0px rgba(0, 0, 0, 0.8),
-      0px 1px 1.5px 0px rgba(0, 0, 0, 0.7),
+    --#{$prefix}btn-reveal-hover-shadow:
+      0px 1px 2px 0px rgba(0, 0, 0, 0.8), 0px 1px 1.5px 0px rgba(0, 0, 0, 0.7),
       0px 2px 5px 0px rgba(43, 45, 80, 0.4),
       0px 0px 0px 1px rgba(255, 255, 255, 0.06);
     --#{$prefix}btn-reveal-focus-border-color: #{shade-color(#0b1727, 12.5%)};
@@ -119,16 +119,22 @@
     //
     // Orkestra Button
     //
-    --#{$prefix}btn-orkestra-box-shadow: 0 0 0 1px rgba(0, 8, 19, 0.3),
-      0 2px 5px 0 rgba(0, 13, 33, 0.5), 0 1px 1.5px 0 rgba(0, 8, 1, 0.48),
-      0 1px 2px 0 rgba(0, 8, 1, 0.4);
-    --#{$prefix}btn-orkestra-hover-box-shadow: 0 0 0 1px rgba(0, 8, 19, 0.3),
-      0 3px 7px 0 rgba(0, 13, 33, 0.8), 0 1px 1.5px 0 #000801,
-      0 1px 2px 0 #000801;
+    --#{$prefix}btn-orkestra-box-shadow:
+      0 0 0 1px rgba(0, 8, 19, 0.3), 0 2px 5px 0 rgba(0, 13, 33, 0.5),
+      0 1px 1.5px 0 rgba(0, 8, 1, 0.48), 0 1px 2px 0 rgba(0, 8, 1, 0.4);
+    --#{$prefix}btn-orkestra-hover-box-shadow:
+      0 0 0 1px rgba(0, 8, 19, 0.3), 0 3px 7px 0 rgba(0, 13, 33, 0.8),
+      0 1px 1.5px 0 #000801, 0 1px 2px 0 #000801;
 
     --#{$prefix}btn-orkestra-default-hover-color: #{shift-color(#b6c1d2, -17%)};
-    --#{$prefix}btn-orkestra-default-active-background: #{shade-color(#0b1727, 10%)};
-    --#{$prefix}btn-orkestra-default-active-border: #{shift-color(#b6c1d2, -17%)};
+    --#{$prefix}btn-orkestra-default-active-background: #{shade-color(
+        #0b1727,
+        10%
+      )};
+    --#{$prefix}btn-orkestra-default-active-border: #{shift-color(
+        #b6c1d2,
+        -17%
+      )};
 
     //
     // Avarar
@@ -219,8 +225,8 @@
     //
     // Showcase page
     //
-    --#{$prefix}setting-toggle-shadow: 0 -7px 14px 0 rgba(3, 12, 51, 0.15),
-      0 3px 6px 0 rgba(0, 0, 0, 0.2);
+    --#{$prefix}setting-toggle-shadow:
+      0 -7px 14px 0 rgba(3, 12, 51, 0.15), 0 3px 6px 0 rgba(0, 0, 0, 0.2);
 
     //
     // Scrollbar

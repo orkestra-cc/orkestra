@@ -1,6 +1,14 @@
 import { useState } from 'react';
-import { Alert, Button, Card, Modal, Spinner, Table } from 'react-bootstrap';
+import { Alert, Button, Modal, Spinner } from 'react-bootstrap';
+import {
+  faDesktop,
+  faRightFromBracket
+} from '@fortawesome/free-solid-svg-icons';
+import type { CellContext, ColumnDef } from '@tanstack/react-table';
+import IconButton from 'components/common/IconButton';
+import { byTimestamp } from 'components/common/advance-table/sorting';
 import SubtleBadge from 'components/common/SubtleBadge';
+import { formatDate, formatDateTime } from 'helpers/dateFormat';
 import { useTranslation } from 'react-i18next';
 import {
   useGetMySessionsQuery,
@@ -8,6 +16,8 @@ import {
   useRevokeSessionMutation,
   type SelfSessionInfo
 } from 'store/api/authApi';
+import SecurityEmptyState from './SecurityEmptyState';
+import SecurityTable from './SecurityTable';
 
 // Format a session row's friendly device label. The backend stores
 // device name + platform separately so we can present whichever is
@@ -25,6 +35,10 @@ function deviceLabel(s: SelfSessionInfo): string {
 // graying the button is the better UX. Revoke-all only fires after a
 // confirmation modal because the action terminates work in other
 // browsers / tabs.
+//
+// The list goes through the console's AdvanceTable shell (search, sort,
+// pagination) rather than raw <table> markup, and the pane carries no card of
+// its own — the tab strip above already names it.
 const SessionsTab = () => {
   const { t } = useTranslation();
   const { data, isLoading, isFetching } = useGetMySessionsQuery();
@@ -33,15 +47,6 @@ const SessionsTab = () => {
     useRevokeAllSessionsMutation();
   const [showRevokeAll, setShowRevokeAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const dash = t('userSecurity.sessionsTab.dash');
-
-  if (isLoading) {
-    return (
-      <div className="text-center py-4">
-        <Spinner animation="border" size="sm" />
-      </div>
-    );
-  }
 
   const sessions = data?.sessions ?? [];
   const otherCount = sessions.filter(s => !s.isCurrent).length;
@@ -98,80 +103,121 @@ const SessionsTab = () => {
     }
   };
 
+  const columns: ColumnDef<SelfSessionInfo>[] = [
+    {
+      id: 'device',
+      accessorFn: deviceLabel,
+      header: t('userSecurity.sessionsTab.colDevice'),
+      cell: ({ row: { original } }: CellContext<SelfSessionInfo, unknown>) => (
+        <>
+          <span className="fw-semibold text-900">{deviceLabel(original)}</span>
+          {original.isCurrent && (
+            <SubtleBadge bg="success" pill className="ms-2 fs-11 fw-normal">
+              {t('userSecurity.sessionsTab.currentBadge')}
+            </SubtleBadge>
+          )}
+        </>
+      )
+    },
+    {
+      accessorKey: 'ipAddress',
+      header: t('userSecurity.sessionsTab.colIp'),
+      cell: ({ row: { original } }: CellContext<SelfSessionInfo, unknown>) => (
+        <span className="text-700">
+          {original.ipAddress || t('userSecurity.sessionsTab.dash')}
+        </span>
+      )
+    },
+    {
+      id: 'lastActivity',
+      // Formatted accessor + timestamp comparator — see byTimestamp.
+      accessorFn: s => formatDateTime(s.lastActivity),
+      sortingFn: byTimestamp<SelfSessionInfo>(s => s.lastActivity),
+      header: t('userSecurity.sessionsTab.colLastActive'),
+      cell: ({ row: { original } }: CellContext<SelfSessionInfo, unknown>) => (
+        <span className="text-700">
+          {formatDateTime(original.lastActivity)}
+        </span>
+      )
+    },
+    {
+      id: 'createdAt',
+      accessorFn: s => formatDate(s.createdAt),
+      sortingFn: byTimestamp<SelfSessionInfo>(s => s.createdAt),
+      header: t('userSecurity.sessionsTab.colStarted'),
+      cell: ({ row: { original } }: CellContext<SelfSessionInfo, unknown>) => (
+        <span className="text-700">{formatDate(original.createdAt)}</span>
+      )
+    },
+    {
+      id: 'actions',
+      header: t('userSecurity.sessionsTab.colActions'),
+      enableSorting: false,
+      meta: {
+        headerProps: { className: 'text-end' },
+        cellProps: { className: 'text-end' }
+      },
+      cell: ({ row: { original } }: CellContext<SelfSessionInfo, unknown>) => (
+        <IconButton
+          size="sm"
+          variant="outline-secondary"
+          icon={faRightFromBracket}
+          disabled={original.isCurrent || revokingOne || isFetching}
+          onClick={() => onRevokeOne(original)}
+        >
+          {t('userSecurity.sessionsTab.rowRevoke')}
+        </IconButton>
+      )
+    }
+  ];
+
+  if (isLoading) {
+    return (
+      <div className="text-center py-4">
+        <Spinner animation="border" size="sm" />
+      </div>
+    );
+  }
+
   return (
     <>
-      <Card className="shadow-none border">
-        <Card.Header className="d-flex justify-content-between align-items-center flex-wrap gap-2">
-          <Card.Title as="h5" className="mb-0">
-            {t('userSecurity.sessionsTab.title')}
-          </Card.Title>
-          <Button
-            variant="outline-danger"
-            size="sm"
-            onClick={() => setShowRevokeAll(true)}
-            disabled={otherCount === 0 || revokingAll}
-          >
-            {t('userSecurity.sessionsTab.revokeAllButton')}
-          </Button>
-        </Card.Header>
-        <Card.Body>
-          {error && (
-            <Alert variant="danger" className="fs-10">
-              {error}
-            </Alert>
-          )}
-          {sessions.length === 0 ? (
-            <p className="fs-10 text-muted mb-0">
-              {t('userSecurity.sessionsTab.empty')}
-            </p>
-          ) : (
-            <Table responsive size="sm" className="mb-0 align-middle">
-              <thead>
-                <tr>
-                  <th>{t('userSecurity.sessionsTab.colDevice')}</th>
-                  <th>{t('userSecurity.sessionsTab.colIp')}</th>
-                  <th>{t('userSecurity.sessionsTab.colLastActive')}</th>
-                  <th>{t('userSecurity.sessionsTab.colStarted')}</th>
-                  <th className="text-end">
-                    {t('userSecurity.sessionsTab.colActions')}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {sessions.map(s => (
-                  <tr key={s.sessionId}>
-                    <td>
-                      {deviceLabel(s)}
-                      {s.isCurrent && (
-                        <SubtleBadge bg="success" className="ms-2">
-                          {t('userSecurity.sessionsTab.currentBadge')}
-                        </SubtleBadge>
-                      )}
-                    </td>
-                    <td className="fs-10 text-muted">{s.ipAddress || dash}</td>
-                    <td className="fs-10 text-muted">
-                      {new Date(s.lastActivity).toLocaleString()}
-                    </td>
-                    <td className="fs-10 text-muted">
-                      {new Date(s.createdAt).toLocaleDateString()}
-                    </td>
-                    <td className="text-end">
-                      <Button
-                        variant="outline-danger"
-                        size="sm"
-                        disabled={s.isCurrent || revokingOne || isFetching}
-                        onClick={() => onRevokeOne(s)}
-                      >
-                        {t('userSecurity.sessionsTab.rowRevoke')}
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          )}
-        </Card.Body>
-      </Card>
+      <div className="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <p className="fs-10 text-muted mb-0">
+          {t('userSecurity.sessionsTab.intro')}
+        </p>
+        {/* Bulk sign-out is the destructive action of this pane, so it — and
+            not the per-row button — is the one that carries the danger hue. */}
+        <IconButton
+          size="sm"
+          variant="outline-danger"
+          icon={faRightFromBracket}
+          className="text-nowrap"
+          onClick={() => setShowRevokeAll(true)}
+          disabled={otherCount === 0 || revokingAll}
+        >
+          {t('userSecurity.sessionsTab.revokeAllButton')}
+        </IconButton>
+      </div>
+
+      {error && (
+        <Alert variant="danger" className="fs-10">
+          {error}
+        </Alert>
+      )}
+
+      {sessions.length === 0 ? (
+        <SecurityEmptyState
+          icon={faDesktop}
+          message={t('userSecurity.sessionsTab.empty')}
+          hint={t('userSecurity.sessionsTab.emptyHint')}
+        />
+      ) : (
+        <SecurityTable
+          data={sessions}
+          columns={columns}
+          searchPlaceholder={t('userSecurity.sessionsTab.searchPlaceholder')}
+        />
+      )}
 
       <Modal
         show={showRevokeAll}

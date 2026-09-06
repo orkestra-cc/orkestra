@@ -1,4 +1,3 @@
-
 import PageHeader from 'components/common/PageHeader';
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
@@ -138,7 +137,10 @@ const Typography = () => (
           use the associated HTML element.
         </p>
       </OrkestraComponentCard.Header>
-      <OrkestraComponentCard.Body code={headingWithClassesCode} language="jsx" />
+      <OrkestraComponentCard.Body
+        code={headingWithClassesCode}
+        language="jsx"
+      />
     </OrkestraComponentCard>
 
     <OrkestraComponentCard>
@@ -148,7 +150,10 @@ const Typography = () => (
           heading text
         </p>
       </OrkestraComponentCard.Header>
-      <OrkestraComponentCard.Body code={customizingHeadingCode} language="jsx" />
+      <OrkestraComponentCard.Body
+        code={customizingHeadingCode}
+        language="jsx"
+      />
     </OrkestraComponentCard>
 
     <OrkestraComponentCard>

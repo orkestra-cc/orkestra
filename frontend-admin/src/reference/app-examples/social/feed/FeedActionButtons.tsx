@@ -83,5 +83,4 @@ const FeedActionButtons = ({ id, reactions }: FeedActionButtonsProps) => {
   );
 };
 
-
 export default FeedActionButtons;

@@ -1,7 +1,12 @@
 import Flex from 'components/common/Flex';
 import MultiSelect from 'components/common/MultiSelect';
 import { Button, Card, Form } from 'react-bootstrap';
-import { Controller, Control, UseFormRegister, FieldValues } from 'react-hook-form';
+import {
+  Controller,
+  Control,
+  UseFormRegister,
+  FieldValues
+} from 'react-hook-form';
 
 interface EventOtherInfoProps {
   register: UseFormRegister<FieldValues>;

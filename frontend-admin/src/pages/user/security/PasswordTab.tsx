@@ -1,6 +1,11 @@
-import { useState, FormEvent } from 'react';
-import { Alert, Button, Card, Form, Spinner } from 'react-bootstrap';
+import { useMemo } from 'react';
+import { Alert, Button, Col, Form, Row, Spinner } from 'react-bootstrap';
+import { useForm } from 'react-hook-form';
+import { yupResolver } from '@hookform/resolvers/yup';
+import * as yup from 'yup';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'react-toastify';
 import {
   passwordUiVisible,
   useChangePasswordMutation,
@@ -8,23 +13,43 @@ import {
 } from 'store/api/authApi';
 import { useGetSelfAuthMethodsQuery } from 'store/api/authApi';
 
+// The schema depends on the live password policy, so it is built per
+// `minLength` rather than declared as a module constant.
+const makeSchema = (minLength: number, t: TFunction) =>
+  yup.object({
+    oldPassword: yup.string().defined().default(''),
+    newPassword: yup
+      .string()
+      .required(t('userSecurity.passwordTab.errorRequiredNew'))
+      .min(
+        minLength,
+        t('userSecurity.passwordTab.errorTooShort', { count: minLength })
+      ),
+    confirmPassword: yup
+      .string()
+      .required(t('userSecurity.passwordTab.errorRequiredConfirm'))
+      .oneOf(
+        [yup.ref('newPassword')],
+        t('userSecurity.passwordTab.errorMismatch')
+      )
+  });
+
+type PasswordForm = yup.InferType<ReturnType<typeof makeSchema>>;
+
 // PasswordTab implements the self-service password-change flow that
 // the legacy /user/settings::ChangePassword card stubbed out. Wired
 // to the existing /v1/auth/operator/change-password mutation; the
 // backend enforces the current admin-managed password policy
 // (min/max length, complexity, HIBP) — we display the minimum length
 // up-front so the user knows what they're targeting.
+//
+// The pane carries no card of its own: the tab strip above already names
+// this section (same rule the /admin/compliance panes follow).
 const PasswordTab = () => {
   const { t } = useTranslation();
   const { data: policy } = useGetAuthPolicyQuery();
   const { data: authMethods } = useGetSelfAuthMethodsQuery();
   const [changePassword, { isLoading }] = useChangePasswordMutation();
-
-  const [oldPassword, setOldPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [success, setSuccess] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const minLength = policy?.passwordMinLength ?? 10;
   const hasPassword = authMethods?.hasPasswordSet ?? true;
@@ -32,50 +57,51 @@ const PasswordTab = () => {
     authMethods?.hasPasswordSet &&
     authMethods?.passwordUsableForLogin === false;
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setSuccess(null);
-    if (newPassword !== confirmPassword) {
-      setError(t('userSecurity.passwordTab.errorMismatch'));
-      return;
-    }
-    if (newPassword.length < minLength) {
-      setError(
-        t('userSecurity.passwordTab.errorTooShort', { count: minLength })
-      );
-      return;
-    }
+  // Rebuilt when the policy query resolves — `minLength` is the only moving
+  // part; the mismatch and required rules are static.
+  const schema = useMemo(() => makeSchema(minLength, t), [minLength, t]);
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setError,
+    clearErrors,
+    formState: { errors }
+  } = useForm<PasswordForm>({
+    resolver: yupResolver(schema),
+    defaultValues: { oldPassword: '', newPassword: '', confirmPassword: '' }
+  });
+
+  const onSubmit = async (values: PasswordForm) => {
+    clearErrors('root');
     try {
       await changePassword({
-        currentPassword: oldPassword,
-        newPassword
+        currentPassword: values.oldPassword,
+        newPassword: values.newPassword
       }).unwrap();
-      setSuccess(t('userSecurity.passwordTab.successToast'));
-      setOldPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
+      toast.success(t('userSecurity.passwordTab.successToast'));
+      reset();
     } catch (err: unknown) {
       const data = (err as { data?: { detail?: string; title?: string } })
         ?.data;
-      setError(
-        data?.detail ||
+      setError('root', {
+        message:
+          data?.detail ||
           data?.title ||
           t('userSecurity.passwordTab.errorGeneric')
-      );
+      });
     }
   };
 
   return (
-    <Card className="shadow-none border">
-      <Card.Header>
-        <Card.Title as="h5" className="mb-0">
-          {t('userSecurity.passwordTab.title')}
-        </Card.Title>
-      </Card.Header>
-      <Card.Body>
+    <Row>
+      {/* A password field has no reason to be 1000px wide — the console's
+          forms sit in a constrained column so the label/field pairing stays
+          scannable at operator widths. */}
+      <Col lg={7} xxl={6}>
         {passwordKeptButUnusable && (
-          <Alert variant="info" className="mb-3">
+          <Alert variant="info" className="fs-10">
             {t('userSecurity.passwordTab.keptNotice')}
           </Alert>
         )}
@@ -84,17 +110,15 @@ const PasswordTab = () => {
             {t('userSecurity.passwordTab.ssoOnlyHint')}
           </Alert>
         )}
-        {success && (
-          <Alert variant="success" className="fs-10">
-            {success}
-          </Alert>
-        )}
-        {error && (
+        {errors.root && (
           <Alert variant="danger" className="fs-10">
-            {error}
+            {errors.root.message}
           </Alert>
         )}
-        <Form onSubmit={handleSubmit} noValidate>
+        <p className="fs-10 text-muted mb-3">
+          {t('userSecurity.passwordTab.intro')}
+        </p>
+        <Form onSubmit={handleSubmit(onSubmit)} noValidate>
           <Form.Group className="mb-3" controlId="self-old-password">
             <Form.Label>
               {t('userSecurity.passwordTab.labelCurrent')}
@@ -102,10 +126,9 @@ const PasswordTab = () => {
             <Form.Control
               type="password"
               autoComplete="current-password"
-              value={oldPassword}
-              onChange={e => setOldPassword(e.target.value)}
               required={hasPassword}
               disabled={isLoading}
+              {...register('oldPassword')}
             />
           </Form.Group>
           <Form.Group className="mb-3" controlId="self-new-password">
@@ -113,12 +136,14 @@ const PasswordTab = () => {
             <Form.Control
               type="password"
               autoComplete="new-password"
-              value={newPassword}
-              onChange={e => setNewPassword(e.target.value)}
               required
               disabled={isLoading}
-              minLength={minLength}
+              isInvalid={!!errors.newPassword}
+              {...register('newPassword')}
             />
+            <Form.Control.Feedback type="invalid">
+              {errors.newPassword?.message}
+            </Form.Control.Feedback>
             <Form.Text className="text-muted">
               {t('userSecurity.passwordTab.minLengthHelp', {
                 count: minLength
@@ -132,14 +157,17 @@ const PasswordTab = () => {
             <Form.Control
               type="password"
               autoComplete="new-password"
-              value={confirmPassword}
-              onChange={e => setConfirmPassword(e.target.value)}
               required
               disabled={isLoading}
-              minLength={minLength}
+              isInvalid={!!errors.confirmPassword}
+              {...register('confirmPassword')}
             />
+            <Form.Control.Feedback type="invalid">
+              {errors.confirmPassword?.message}
+            </Form.Control.Feedback>
           </Form.Group>
-          <Button type="submit" disabled={isLoading}>
+          {/* The one primary action of this pane — solid Orkestra Blue. */}
+          <Button type="submit" variant="primary" disabled={isLoading}>
             {isLoading ? (
               <>
                 <Spinner animation="border" size="sm" className="me-2" />
@@ -150,8 +178,8 @@ const PasswordTab = () => {
             )}
           </Button>
         </Form>
-      </Card.Body>
-    </Card>
+      </Col>
+    </Row>
   );
 };
 

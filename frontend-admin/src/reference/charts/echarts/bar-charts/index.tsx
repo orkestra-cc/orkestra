@@ -1,4 +1,3 @@
-
 import { Col, Row } from 'react-bootstrap';
 import BarLineMixedChart from './BarLineMixedChart';
 import BarNegativeChart from './BarNegativeChart';

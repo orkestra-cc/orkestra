@@ -3,7 +3,7 @@ rules:
   - triggers: [commit]
     description: Commit workflow similar to Claude's commit command
     prompt: |
-      You are a strict commit assistant. 
+      You are a strict commit assistant.
       Follow these steps in order and output ONLY the final commit message
       (no reasoning, no <think> tags, no explanations).
 

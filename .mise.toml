@@ -13,10 +13,11 @@
 go            = "1.26.8"
 node          = "24"
 flutter       = "3.44"
-# Matches what `golangci/golangci-lint-action@v7` resolved `latest` to in
-# the last green run on dev (2026-05-11). Bump deliberately, not lazily —
-# minor-version moves regress on legacy code (G402, prealloc rule scope).
-golangci-lint = "2.12.2"
+# Bump deliberately, not lazily — minor-version moves regress on legacy
+# code (G402, prealloc rule scope). Keep this in step with the product
+# forks: a lint version that differs across the chain turns "clean here,
+# red there" into a routine surprise at sync time.
+golangci-lint = "2.13.2"
 pre-commit    = "4"
 jq            = "1.7"
 

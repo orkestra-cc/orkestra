@@ -1,4 +1,3 @@
-
 import createMarkup from 'helpers/createMarkup';
 import Section from 'components/common/Section';
 import IconGroup from 'components/common/icon/IconGroup';
@@ -68,7 +67,6 @@ const FooterBlogList: React.FC<FooterBlogListProps> = ({ list }) => (
     ))}
   </ul>
 );
-
 
 const FooterStandard: React.FC = () => {
   const scrollToTop = () => {

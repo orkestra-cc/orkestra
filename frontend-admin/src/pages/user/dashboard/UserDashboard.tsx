@@ -73,18 +73,34 @@ const UserDashboard = () => {
         className="mb-3"
       />
 
+      {/* xl, not lg, for the 4-up break — same as /admin/tenants and
+          /admin/modules/logging. At lg the four tiles are 186px wide, which is
+          under what the tile's own type scale needs: every two-word title
+          wrapped onto a second line. */}
       <Row className="g-3 mb-3">
-        <Col md={6} lg={3}>
+        <Col md={6} xl={3}>
           <StatCard
             title={t('userDashboard.stats.sessions.title')}
             value={sessions.data?.activeCount ?? 0}
             icon={faDesktop}
             color="primary"
-            subtitle={sessions.data?.currentDevice}
+            subtitle={
+              sessions.data?.currentDevice && (
+                // The device label is a free-form string from the session
+                // record, so it gets one line and an ellipsis rather than
+                // wrapping the tile taller than its neighbours.
+                <span
+                  className="d-block text-truncate"
+                  title={sessions.data.currentDevice}
+                >
+                  {sessions.data.currentDevice}
+                </span>
+              )
+            }
             loading={sessions.isLoading}
           />
         </Col>
-        <Col md={6} lg={3}>
+        <Col md={6} xl={3}>
           <StatCard
             title={t('userDashboard.stats.devices.title')}
             value={devices.data?.devices?.length ?? 0}
@@ -93,7 +109,7 @@ const UserDashboard = () => {
             loading={devices.isLoading}
           />
         </Col>
-        <Col md={6} lg={3}>
+        <Col md={6} xl={3}>
           <StatCard
             title={t('userDashboard.stats.mfa.title')}
             value={
@@ -115,7 +131,7 @@ const UserDashboard = () => {
             loading={mfa.isLoading}
           />
         </Col>
-        <Col md={6} lg={3}>
+        <Col md={6} xl={3}>
           <StatCard
             title={t('userDashboard.stats.orgs.title')}
             value={orgs.data?.memberships?.length ?? 0}

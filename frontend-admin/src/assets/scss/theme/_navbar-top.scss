@@ -18,7 +18,27 @@
   z-index: 1020;
   background-image: none;
   min-height: $top-nav-height;
+  // The bar is a flex row of three fixed-width things (burger, brand image,
+  // icon rail) with no shrinkable member, so below ~400px their sum simply
+  // ran off the screen: at 375px the icon rail ended at x=397 in a 375px
+  // viewport, taking the whole document into horizontal scroll on every page.
+  // The brand is the one that yields — it is a 2961px-wide asset rendered at
+  // 160, so scaling it costs nothing visually (130px at 375, still sharp),
+  // while the icons are hit targets that must not shrink. `min-width: 0` is
+  // the load-bearing half: a flex item's default `min-width: auto` floors it
+  // at the image's intrinsic width, so `max-width: 100%` alone does nothing.
+  .navbar-brand {
+    min-width: 0;
+    img {
+      max-width: 100%;
+      height: auto;
+    }
+  }
   .navbar-nav-icons {
+    // Never squeezed: this rail is variable-width by design — a fork's addons
+    // add their own actions to it through ModuleGlobalNavActions — so the
+    // overflow it has to survive is not a fixed 22px.
+    flex-shrink: 0;
     .dropdown-menu {
       position: absolute;
     }

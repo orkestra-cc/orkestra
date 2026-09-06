@@ -1,4 +1,3 @@
-
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -174,7 +173,11 @@ const Offcanvas = () => (
           </li>
         </ul>
       </OrkestraComponentCard.Header>
-      <OrkestraComponentCard.Body code={placementCode} language="jsx" noInline />
+      <OrkestraComponentCard.Body
+        code={placementCode}
+        language="jsx"
+        noInline
+      />
     </OrkestraComponentCard>
 
     <OrkestraComponentCard>

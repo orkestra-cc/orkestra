@@ -79,11 +79,13 @@ const CreatePostForm = () => {
               className="px-1 shadow-none"
             >
               <FontAwesomeIcon
-                icon={classNames({
-                  users: privacy === 'friends',
-                  lock: privacy === 'private',
-                  'globe-americas': privacy === 'public'
-                }) as IconName}
+                icon={
+                  classNames({
+                    users: privacy === 'friends',
+                    lock: privacy === 'private',
+                    'globe-americas': privacy === 'public'
+                  }) as IconName
+                }
               />
             </Dropdown.Toggle>
             <Dropdown.Menu className="py-2" align="end">

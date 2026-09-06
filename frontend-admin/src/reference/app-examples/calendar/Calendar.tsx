@@ -46,11 +46,16 @@ const Calendar: React.FC = () => {
   const [title, setTitle] = useState<string>('');
   const [calendarApi, setCalendarApi] = useState<any>({});
   const [currentFilter, setCurrentFilter] = useState<string>('Month View');
-  const [isOpenScheduleModal, setIsOpenScheduleModal] = useState<boolean>(false);
+  const [isOpenScheduleModal, setIsOpenScheduleModal] =
+    useState<boolean>(false);
   const [isOpenEventModal, setIsOpenEventModal] = useState<boolean>(false);
   const [modalEventContent, setModalEventContent] = useState<any>({});
-  const [scheduleStartDate, setScheduleStartDate] = useState<Date | null | undefined>();
-  const [scheduleEndDate, setScheduleEndDate] = useState<Date | null | undefined>();
+  const [scheduleStartDate, setScheduleStartDate] = useState<
+    Date | null | undefined
+  >();
+  const [scheduleEndDate, setScheduleEndDate] = useState<
+    Date | null | undefined
+  >();
 
   const eventList = (events as CalendarEvent[]).reduce(
     (acc: CalendarEvent[], event: CalendarEvent) =>
@@ -77,7 +82,8 @@ const Calendar: React.FC = () => {
     }
   };
 
-  const [initialEvents, setInitialEvents] = useState<CalendarEvent[]>(eventList);
+  const [initialEvents, setInitialEvents] =
+    useState<CalendarEvent[]>(eventList);
   const viewName = [
     'Month View',
     'Week View',

@@ -1,4 +1,3 @@
-
 import { activities } from 'data/kanban';
 import Flex from 'components/common/Flex';
 import { Link } from 'react-router';

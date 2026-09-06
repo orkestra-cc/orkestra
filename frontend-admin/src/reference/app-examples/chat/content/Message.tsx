@@ -1,4 +1,3 @@
-
 import { Row, Col, Image } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { IconProp } from '@fortawesome/fontawesome-svg-core';
@@ -32,7 +31,13 @@ interface MessageProps {
   isGroup?: boolean;
 }
 
-const Message: React.FC<MessageProps> = ({ message, senderUserId, status = '', time, isGroup = false }) => {
+const Message: React.FC<MessageProps> = ({
+  message,
+  senderUserId,
+  status = '',
+  time,
+  isGroup = false
+}) => {
   const user = users.find(({ id }: { id: number }) => id === senderUserId);
   const name = user?.name.split(' ')[0];
   const isLeft = senderUserId !== 3;
@@ -77,29 +82,33 @@ const Message: React.FC<MessageProps> = ({ message, senderUserId, status = '', t
                     }}
                   />
                 )}
-                <OrkestraLightBoxGallery images={(message as ChatMessage).attachments || []}>
+                <OrkestraLightBoxGallery
+                  images={(message as ChatMessage).attachments || []}
+                >
                   {(setImgIndex: (index: number) => void) => (
                     <Row className="mx-n1">
-                      {((message as ChatMessage).attachments || []).map((img: string, index: number) => {
-                        return (
-                          <Col
-                            xs={6}
-                            md={4}
-                            className="px-1"
-                            style={{ minWidth: 50 }}
-                            key={index}
-                          >
-                            <Image
-                              fluid
-                              rounded
-                              className="mb-2 cursor-pointer"
-                              src={img}
-                              alt=""
-                              onClick={() => setImgIndex(index)}
-                            />
-                          </Col>
-                        );
-                      })}
+                      {((message as ChatMessage).attachments || []).map(
+                        (img: string, index: number) => {
+                          return (
+                            <Col
+                              xs={6}
+                              md={4}
+                              className="px-1"
+                              style={{ minWidth: 50 }}
+                              key={index}
+                            >
+                              <Image
+                                fluid
+                                rounded
+                                className="mb-2 cursor-pointer"
+                                src={img}
+                                alt=""
+                                onClick={() => setImgIndex(index)}
+                              />
+                            </Col>
+                          );
+                        }
+                      )}
                     </Row>
                   )}
                 </OrkestraLightBoxGallery>
@@ -112,16 +121,21 @@ const Message: React.FC<MessageProps> = ({ message, senderUserId, status = '', t
                     'bg-primary text-white': !isLeft
                   })}
                 >
-                  {(typeof message === 'string' || (isMessageObject && (message as ChatMessage).text)) && (
+                  {(typeof message === 'string' ||
+                    (isMessageObject && (message as ChatMessage).text)) && (
                     <p
                       className="mb-0"
                       dangerouslySetInnerHTML={createMarkup(
-                        isMessageObject ? (message as ChatMessage).text || '' : (message as string)
+                        isMessageObject
+                          ? (message as ChatMessage).text || ''
+                          : (message as string)
                       )}
                     />
                   )}
                   {isMessageObject && (message as ChatMessage).attachment && (
-                    <OrkestraLightBox image={(message as ChatMessage).attachment!}>
+                    <OrkestraLightBox
+                      image={(message as ChatMessage).attachment!}
+                    >
                       <Image
                         fluid
                         rounded

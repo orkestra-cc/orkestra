@@ -1,4 +1,3 @@
-
 import { Card } from 'react-bootstrap';
 import { Link } from 'react-router';
 import React from 'react';
@@ -73,11 +72,11 @@ const Rules: React.FC<RulesProps> = ({ ref }) => {
         <h6>Reporting abuse</h6>
         <p className="mb-0 ps-3">
           If you think anyone is violating any of these Terms, please{' '}
-          <a href="mailto:support@orkestra.cc">notify us</a> immediately. If
-          you received spam you think came from a orkestra user, we want to{' '}
-          <a href="mailto:support@orkestra.cc">hear about it</a>. If you
-          think anyone has posted material that violates any copyrights, then
-          you may <a href="mailto:support@orkestra.cc">notify us</a>
+          <a href="mailto:support@orkestra.cc">notify us</a> immediately. If you
+          received spam you think came from a orkestra user, we want to{' '}
+          <a href="mailto:support@orkestra.cc">hear about it</a>. If you think
+          anyone has posted material that violates any copyrights, then you may{' '}
+          <a href="mailto:support@orkestra.cc">notify us</a>
         </p>
         <hr className="my-4" />
         <h6>SES and third-party providers</h6>
@@ -91,10 +90,10 @@ const Rules: React.FC<RulesProps> = ({ ref }) => {
             agreement between you and Amazon Web Services.
           </li>
           <li>
-            orkestra facilitates integration with a number of third party services
-            which you can use in relation to your account or your Contents
-            (“Third Party Service”), although we make no warranty as to any
-            ongoing support for any third party service. We make no
+            orkestra facilitates integration with a number of third party
+            services which you can use in relation to your account or your
+            Contents (“Third Party Service”), although we make no warranty as to
+            any ongoing support for any third party service. We make no
             representation or commitment and shall have no liability or
             obligation whatsoever in relation to the content or use of, or
             correspondence with, any Third Party Service. Any contract entered

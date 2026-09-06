@@ -1,4 +1,3 @@
-
 import { Button, Card } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import vibrantImg from 'assets/img/generic/vibrant.png';
@@ -61,11 +60,11 @@ const SpinnersExample = () => {
         ></OrkestraComponentCard.Header>
         <OrkestraComponentCard.Body>
           <p>
-            You can control the default collapsing behavior of Orkestra's vertical
-            navigation - whether it will show up with the collapsed or expanded
-            state when the page loads. First clear your browser's localstorage
-            then from your project directory go to, <code>src/config.js</code>{' '}
-            and set
+            You can control the default collapsing behavior of Orkestra's
+            vertical navigation - whether it will show up with the collapsed or
+            expanded state when the page loads. First clear your browser's
+            localstorage then from your project directory go to,{' '}
+            <code>src/config.js</code> and set
             <code> isNavbarVerticalCollapsed: false </code> of{' '}
             <code>settings</code> object.
           </p>
@@ -500,7 +499,15 @@ const SpinnersExample = () => {
 
 export default SpinnersExample;
 
-const VariableValue = ({ title, description, code }: { title: string; description: string; code: string }) => {
+const VariableValue = ({
+  title,
+  description,
+  code
+}: {
+  title: string;
+  description: string;
+  code: string;
+}) => {
   return (
     <div className="mb-4">
       <h6 className="fs-9">{title}</h6>

@@ -1,4 +1,3 @@
-
 import PageHeader from 'components/common/PageHeader';
 import { Card } from 'react-bootstrap';
 import OrkestraEditor from 'components/common/OrkestraEditor';
@@ -28,13 +27,18 @@ const MigrationToVite = () => {
           className="mb-3"
         />
       </Card.Header>
-      <Card.Body className="" id='v4.8.0'>
+      <Card.Body className="" id="v4.8.0">
         <div className="mb-3">
           <h5 className="mb-2" id="pre-requisites">
-            <FontAwesomeIcon icon={faCircleExclamation} className='me-2 text-warning' />
+            <FontAwesomeIcon
+              icon={faCircleExclamation}
+              className="me-2 text-warning"
+            />
             Prerequisites
           </h5>
-          <p className='mb-2'>Before you begin, ensure you have the following installed :</p>
+          <p className="mb-2">
+            Before you begin, ensure you have the following installed :
+          </p>
           <ul>
             <li>
               <code>Node.js (v16 or later)</code>
@@ -48,7 +52,7 @@ const MigrationToVite = () => {
           <h5 className="mb-2" id="remove-dependencies">
             Step 1: Remove CRA and webpack dependencies
           </h5>
-          <p className='mb-2'>
+          <p className="mb-2">
             Remove the existing CRA setup and Webpack dependencies. Run the
             following command:
           </p>
@@ -68,7 +72,7 @@ const MigrationToVite = () => {
           <h5 className="mb-2" id="install-vite">
             Step 3: Install Vite and related dependencies
           </h5>
-          <p className='mb-2'>
+          <p className="mb-2">
             Install Vite and its related dependencies, along with the
             compile-scss dependencies, to compile SCSS into CSS by running the
             following command:
@@ -80,11 +84,11 @@ const MigrationToVite = () => {
           <h5 className="mb-2" id="edit-scripts">
             Step 4: Edit scripts on <code>package.json</code>
           </h5>
-          <p className='mb-2'>
+          <p className="mb-2">
             Now add the following scripts in the <code>package.json</code> file:
           </p>
           <OrkestraEditor code={jsonScriptCode} language="json" hidePreview />
-          <p className='mb-2'>
+          <p className="mb-2">
             Remove this scripts from the <code>package.json</code> file
           </p>
           <OrkestraEditor
@@ -108,7 +112,7 @@ const MigrationToVite = () => {
           <h5 className="mb-2" id="configure-vite-config">
             Step 6: Configure <code>vite.config.js</code>
           </h5>
-          <p className='mb-2'>
+          <p className="mb-2">
             Next, configure the <code>vite.config.js</code> file located at the
             root of your project. This file serves as Vite's main configuration
             file and includes settings for plugins, the development server, and
@@ -121,7 +125,7 @@ const MigrationToVite = () => {
           <h5 className="mb-2" id="add-compile-scss">
             Step 7: Add <code>compile-scss</code> file
           </h5>
-          <p className='mb-2'>
+          <p className="mb-2">
             Now create a file named <code>compile-scss.js</code> at the root of
             your project. This file is responsible for compiling SCSS files into
             CSS. Below is a sample code snippet for the{' '}
@@ -133,7 +137,7 @@ const MigrationToVite = () => {
           <h5 className="mb-2" id="renaming-js-files">
             Step 8: Renaming <code>.js</code> files to <code>.jsx</code>
           </h5>
-          <p className='mb-2'>
+          <p className="mb-2">
             To align with React and Vite best practices (especially for JSX
             syntax support), we are migrating all relevant <code>.js</code>{' '}
             files containing JSX code to <code>.jsx</code> extension. Follow the
@@ -145,8 +149,7 @@ const MigrationToVite = () => {
               <p>
                 We have created a script <code>renameJsToJsx.js</code> that
                 automatically renames <code>.js</code> files to{' '}
-                <code>.jsx</code>{' '}
-                for the provided folder path.
+                <code>.jsx</code> for the provided folder path.
               </p>
               <OrkestraEditor
                 code={renameJsToJsxCode}
@@ -239,7 +242,7 @@ const MigrationToVite = () => {
           <h5 className="mb-2" id="edit-useToggleStyle">
             Step 10: Edit <code>useToggleStyle</code> file
           </h5>
-          <p className='mb-2'>
+          <p className="mb-2">
             Now, edit the <code>useToggleStyle.jsx</code> file located in the{' '}
             <code>src/hooks</code> folder. This file is used to toggle the
             application's style. Below is a sample of the{' '}
@@ -252,7 +255,7 @@ const MigrationToVite = () => {
           <h5 className="mb-2" id="update-environment">
             Step 11: Update environment variables
           </h5>
-          <p className='mb-2'>
+          <p className="mb-2">
             Next, migrate the environment variables from{' '}
             <code>process.env</code> to<code>import.meta.env</code> in the
             following components:
@@ -277,7 +280,7 @@ const MigrationToVite = () => {
           <h5 className="mb-2" id="update-bootstrap-import">
             Step 12: Update the Bootstrap Imports
           </h5>
-          <p className='mb-2'>
+          <p className="mb-2">
             Now, Update the Bootstrap imports in your SCSS files. Replace the
             following import statement:
           </p>
@@ -303,7 +306,9 @@ const MigrationToVite = () => {
           <h5 className="mb-2" id="update-css-imports">
             Step 13: Update the css imports
           </h5>
-          <p className='mb-2'>Now update the css imports in the corresponding files:</p>
+          <p className="mb-2">
+            Now update the css imports in the corresponding files:
+          </p>
           <ul>
             <li>
               <code>import 'simplebar-react/dist/simplebar.min.css'</code> in{' '}
@@ -321,7 +326,7 @@ const MigrationToVite = () => {
           <h5 className="mb-2" id="run-application">
             Step 14: Run the application
           </h5>
-          <p className='mb-2'>
+          <p className="mb-2">
             Now run the following command to run the application. It will the
             code in the <code>localhost:3000</code>
           </p>
@@ -329,7 +334,7 @@ const MigrationToVite = () => {
         </div>
       </Card.Body>
     </Card>
-  )
-}
+  );
+};
 
-export default MigrationToVite
+export default MigrationToVite;

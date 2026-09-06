@@ -7,3 +7,8 @@
 # chore(repo): normalize line endings to LF — replaces .gitattributes with
 # a comprehensive ruleset and runs `git add --renormalize .`. Whitespace-only.
 0bb7b6c72b68ecd071231a79c5826df9d3b68e11
+
+# chore(repo): put an end to the drift the hooks recreated on every push —
+# trailing whitespace, final newlines, prettier 3.9.6, eslint --fix, gofmt and
+# the regenerated public/css across 356 files. Formatting only, no behaviour change.
+70989dc1bb8ab246a9efe3f24e037f28f23c016f

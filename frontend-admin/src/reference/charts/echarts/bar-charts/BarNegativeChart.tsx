@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { BarChart } from 'echarts/charts';
@@ -98,7 +97,7 @@ const chartCode = `function ChartOptions() {
       }
     ]
   });
-    
+
     return (
       <ReactEchart
         echarts={echarts}

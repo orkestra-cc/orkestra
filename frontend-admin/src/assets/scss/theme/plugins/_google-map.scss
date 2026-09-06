@@ -5,14 +5,15 @@
   color: inherit !important;
 }
 
-[data-bs-theme="dark"] {
-  .gm-control-active:focus>img:nth-child(2), .gm-control-active:hover>img:nth-child(2){
+[data-bs-theme='dark'] {
+  .gm-control-active:focus > img:nth-child(2),
+  .gm-control-active:hover > img:nth-child(2) {
     display: none !important;
   }
-  .gm-control-active:focus>img:nth-child(1), 
-  .gm-control-active:hover>img:nth-child(1), 
-  .gm-control-active:active>img:nth-child(1), 
-  .gm-control-active:disabled>img:nth-child(1){
+  .gm-control-active:focus > img:nth-child(1),
+  .gm-control-active:hover > img:nth-child(1),
+  .gm-control-active:active > img:nth-child(1),
+  .gm-control-active:disabled > img:nth-child(1) {
     display: block !important;
   }
 }

@@ -63,11 +63,22 @@ const StatCard = ({
         can show has nowhere to send the operator — otherwise scatters its
         icons across three heights. */}
     <Card.Body className="d-flex justify-content-between">
-      <div className="d-flex flex-column">
+      {/* min-w-0 because a flex item's default `min-width: auto` floors it at
+          its own min-content width: the title's longest word (plus, when a
+          ribbon is present, the padding that clears it) then pushed the icon
+          column right out of the card, where the card's own overflow-hidden
+          sliced it off. Measured on /user/dashboard at 992-1199px, where the
+          tile is 186px wide: 191px of content in a 186px box. */}
+      <div className="d-flex flex-column min-w-0">
         {/* .h6/.h3 utility classes, not heading tags: a KPI tile's title
             and value are data, and real headings here skipped levels in
             every page outline they appeared in. */}
-        <div className="h6 text-muted mb-1 pe-4">{title}</div>
+        {/* pe-4 only when a ribbon actually occupies the corner — unconditional
+            it cost every tile 1.8rem of title width it had no reason to give
+            up, wrapping two-word titles onto a second line in a narrow tile. */}
+        <div className={classNames('h6 text-muted mb-1', { 'pe-4': badge })}>
+          {title}
+        </div>
         <div className="h3 mb-0 fw-bold text-900">
           {loading ? <Spinner animation="border" size="sm" /> : value}
         </div>
@@ -81,7 +92,7 @@ const StatCard = ({
           at 48px in a saturated status hue it was the loudest thing in an
           Operate tile — louder than the datum it labels. The ribbon owns
           the top-right corner, so the icon stays bottom-right. */}
-      <div className={`text-${color} align-self-end ms-2`}>
+      <div className={`text-${color} align-self-end ms-2 flex-shrink-0`}>
         <FontAwesomeIcon icon={icon} size="2x" className="opacity-50" />
       </div>
     </Card.Body>

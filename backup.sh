@@ -16,9 +16,27 @@
 #   ./backup.sh --components mongodb,redis       # subset
 #   ./backup.sh --output /tmp/snap.tar.gz        # custom output path
 #   ./backup.sh --yes all                        # no prompts (CI / cron)
+#   ./backup.sh --require mongodb,redis          # fail (exit 3) if any listed
+#                                                 # component is unavailable or
+#                                                 # fails to capture, instead of
+#                                                 # silently downgrading to a
+#                                                 # partial backup
 #   ./backup.sh --help
+#
+# `all` implies `--require mongodb,redis,rustfs,secrets` unless you pass your
+# own --require explicitly — a bare `all` must mean every component or fail,
+# never "every component that happened to be up".
 
 set -Eeuo pipefail
+
+# The tarball this script produces carries docker/.env (DB passwords, the KMS
+# master key) and docker/keys/* (the RS256 JWT private key). A restrictive
+# umask here is the single point that guarantees every file and directory
+# this script creates — the backups/ dir, the tarball itself, the staging
+# dir — comes out non-group/world-readable regardless of the ambient shell's
+# umask (a host running 0002 would otherwise leave a fresh tarball
+# world-readable, -rw-rw-r--, until something later chmod's it explicitly).
+umask 077
 
 # ---------------------------------------------------------------------------
 # Paths and constants
@@ -26,9 +44,16 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$SCRIPT_DIR"
 DOCKER_DIR="$REPO_ROOT/docker"
-ENV_FILE="$DOCKER_DIR/.env"
+ENV_FILE="${ORKESTRA_ENV_FILE:-$DOCKER_DIR/.env}"
 KEYS_DIR="$DOCKER_DIR/keys"
 BACKUPS_DIR="$REPO_ROOT/backups"
+
+# Pinned deliberately, not floating on :latest. backup.sh's --require gate turns
+# a failed capture into a hard failure, so a surprise from an unattended `docker
+# pull` — a broken release, or a Docker Hub rate limit on an anonymous pull —
+# would take the whole nightly backup down rather than degrade it. Bumping this
+# is a decision, taken with the stack in front of you.
+AWS_CLI_IMAGE="${ORKESTRA_AWS_CLI_IMAGE:-amazon/aws-cli:2.36.29}"
 
 # Container/network names are stack-namespaced (${APP_NAME}-<svc>-${ENV} and
 # ${APP_NAME}-${ENV}_default) — resolved below, once docker/.env is sourced.
@@ -64,6 +89,7 @@ COMPONENTS_CSV=""
 OUTPUT_PATH=""
 MODE_ALL=no
 SHOW_HELP=no
+REQUIRE_CSV=""
 
 print_help() {
   awk '/^# backup\.sh/{f=1} f && !/^#/{exit} f' "$0" | sed 's/^# \{0,1\}//'
@@ -78,6 +104,8 @@ while [ $# -gt 0 ]; do
     --components=*)      COMPONENTS_CSV="${1#*=}"; shift ;;
     -o|--output)         OUTPUT_PATH="$2"; shift 2 ;;
     --output=*)          OUTPUT_PATH="${1#*=}"; shift ;;
+    --require)           REQUIRE_CSV="$2"; shift 2 ;;
+    --require=*)         REQUIRE_CSV="${1#*=}"; shift ;;
     all)                 MODE_ALL=yes; shift ;;
     -h|--help)           SHOW_HELP=yes; shift ;;
     --)                  shift; while [ $# -gt 0 ]; do POSITIONAL+=("$1"); shift; done ;;
@@ -101,8 +129,14 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
+# Remember any caller-supplied overrides, source the env file, then restore
+# them — a multi-stack host must be able to target one stack per invocation.
+_cli_app_name="${APP_NAME:-}"
+_cli_env="${ENV:-}"
 # shellcheck disable=SC1090
 set -a; . "$ENV_FILE"; set +a
+[ -n "$_cli_app_name" ] && APP_NAME="$_cli_app_name"
+[ -n "$_cli_env" ] && ENV="$_cli_env"
 ENV_NAME="${ENV:-development}"
 
 # Every stack is one Compose project named ${APP_NAME}-${ENV}; containers are
@@ -199,12 +233,42 @@ for c in "${SELECTED[@]}"; do
   esac
 done
 
+# `all` means every component, not "every component that happens to be up".
+# Without this, a stack rename or a stopped container silently downgrades the
+# run to secrets-only and still exits 0 — see backups/ 2026-07-12.
+if [ -z "$REQUIRE_CSV" ] && [ "$MODE_ALL" = "yes" ]; then
+  REQUIRE_CSV="mongodb,redis,rustfs,secrets"
+fi
+
+REQUIRED=()
+if [ -n "$REQUIRE_CSV" ]; then
+  IFS=',' read -r -a REQUIRED <<< "$REQUIRE_CSV"
+  missing=()
+  for want in "${REQUIRED[@]}"; do
+    found=no
+    for have in "${SELECTED[@]}"; do [ "$have" = "$want" ] && found=yes && break; done
+    [ "$found" = "no" ] && missing+=("$want")
+  done
+  if [ ${#missing[@]} -gt 0 ]; then
+    err "required component(s) unavailable: ${missing[*]}"
+    err "expected containers: ${MONGO_CONTAINER}, ${REDIS_CONTAINER}, ${RUSTFS_CONTAINER}"
+    err "refusing to write a partial backup — start the stack, or pass an explicit --components subset"
+    exit 3
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # Prepare output
 # ---------------------------------------------------------------------------
 TIMESTAMP="$(date -u +%Y%m%d-%H%M%S)"
 if [ -z "$OUTPUT_PATH" ]; then
   mkdir -p "$BACKUPS_DIR"
+  # mkdir -p is a no-op on a directory that already exists, so it won't
+  # tighten permissions left over from before `umask 077` was introduced
+  # (this host's backups/ was drwxrwxr-x under the ambient 0002 umask) —
+  # chmod it explicitly every run rather than relying on it having been
+  # created correctly once.
+  chmod 700 "$BACKUPS_DIR"
   OUTPUT_PATH="$BACKUPS_DIR/orkestra-backup-${ENV_NAME}-${TIMESTAMP}.tar.gz"
 fi
 
@@ -245,12 +309,25 @@ backup_mongodb() {
   # Scope to the application DB only — skips mongo's admin/local/config
   # system DBs and the throwaway orkestra_openapi_dump sandbox that
   # `make openapi-dump` creates to serialize the OpenAPI schema.
-  docker exec -i "$MONGO_CONTAINER" \
+  # Checked explicitly (not left as the function's implicit last-command
+  # status): backup_mongodb is invoked as `backup_mongodb && ... || true`,
+  # and under `set -e` a failing command that isn't the last one in a
+  # function called from an &&/|| list is silently swallowed — mongodump
+  # would fail (e.g. stale MONGO_ROOT_PASSWORD) but the function would still
+  # fall through to `ok` and report success with a 0-byte archive.
+  if ! docker exec -i "$MONGO_CONTAINER" \
     mongodump --username "$user" --password "$pass" \
               --authenticationDatabase admin \
               --db "$db" \
               --archive --gzip \
-    > "$out/mongo.archive.gz"
+    > "$out/mongo.archive.gz"; then
+    err "mongodb: mongodump failed (bad credentials, unreachable db, disk full?) — see output above"
+    return 1
+  fi
+  if [ ! -s "$out/mongo.archive.gz" ]; then
+    err "mongodb: mongodump produced an empty archive"
+    return 1
+  fi
   # Stash the DB name alongside the archive so restore knows where to put it.
   printf '%s\n' "$db" > "$out/database.txt"
   ok "mongodb: $(du -h "$out/mongo.archive.gz" | cut -f1) → mongodb/mongo.archive.gz (db=$db)"
@@ -270,7 +347,20 @@ backup_redis() {
   local -a redis_exec=(docker exec -e "REDISCLI_AUTH=$pass" "$REDIS_CONTAINER" redis-cli --no-auth-warning)
 
   # Synchronous SAVE so any RDB-enabled deployments have a current snapshot.
-  "${redis_exec[@]}" SAVE >/dev/null
+  # Checked explicitly against the reply text, not the process exit status:
+  # confirmed empirically that `redis-cli` exits 0 even on a WRONGPASS/NOAUTH
+  # reply (the connection and the CLI invocation "succeeded"; only the
+  # in-band Redis reply signals the failure). A successful SAVE's only
+  # reply is the literal string "OK". Checking this matters because a
+  # *stale* dump.rdb from a previous successful save could still be sitting
+  # on disk and pass the file-exists check below, masking today's failure
+  # with yesterday's data.
+  local save_out
+  save_out="$("${redis_exec[@]}" SAVE 2>&1)"
+  if [ "$save_out" != "OK" ]; then
+    err "redis: SAVE did not return OK: $save_out"
+    return 1
+  fi
 
   # Ask the live server where it actually writes persistence (the running
   # config can differ from defaults — e.g. redis-stack-server in our infra
@@ -284,19 +374,45 @@ backup_redis() {
 
   muted "redis dir=$r_dir dbfilename=$r_rdb appenddirname=${r_aofdir:-<none>}"
 
+  # Every `docker cp` below is checked. The file was confirmed present inside
+  # the container one line earlier, so a failed copy is a real capture failure,
+  # never an absent-by-design file — and it must fail the component rather than
+  # fall through to the existence check at the end, which a *sibling* artifact
+  # can satisfy on its behalf (a failed RDB copy passing because the AOF landed).
+  #
+  # Checking is not optional here: this function runs under the dispatcher's
+  # `backup_redis && INCLUDED+=(...) || true`, and that `&&`/`||` context
+  # disables set -e for the whole body. An unchecked `docker cp` sails straight
+  # past a failure.
+
   # RDB
   if [ -n "$r_rdb" ] && docker exec "$REDIS_CONTAINER" test -f "$r_dir/$r_rdb" 2>/dev/null; then
-    docker cp "$REDIS_CONTAINER:$r_dir/$r_rdb" "$out/dump.rdb"
+    if ! docker cp "$REDIS_CONTAINER:$r_dir/$r_rdb" "$out/dump.rdb"; then
+      err "redis: failed to copy $r_dir/$r_rdb out of the container"; return 1
+    fi
+    if [ ! -s "$out/dump.rdb" ]; then
+      err "redis: copied $r_rdb but it is empty"; return 1
+    fi
   fi
 
   # AOF (Redis 7+: directory). Older: single appendonly.aof file.
   if [ -n "$r_aofdir" ] && docker exec "$REDIS_CONTAINER" test -d "$r_dir/$r_aofdir" 2>/dev/null; then
     # Only copy if non-empty (AOF may be configured but unused).
     if [ -n "$(docker exec "$REDIS_CONTAINER" ls -A "$r_dir/$r_aofdir" 2>/dev/null)" ]; then
-      docker cp "$REDIS_CONTAINER:$r_dir/$r_aofdir" "$out/appendonlydir"
+      if ! docker cp "$REDIS_CONTAINER:$r_dir/$r_aofdir" "$out/appendonlydir"; then
+        err "redis: failed to copy the AOF directory $r_dir/$r_aofdir out of the container"; return 1
+      fi
+      if [ -z "$(ls -A "$out/appendonlydir" 2>/dev/null)" ]; then
+        err "redis: copied the AOF directory but it came out empty"; return 1
+      fi
     fi
   elif [ -n "$r_aoffile" ] && docker exec "$REDIS_CONTAINER" test -f "$r_dir/$r_aoffile" 2>/dev/null; then
-    docker cp "$REDIS_CONTAINER:$r_dir/$r_aoffile" "$out/appendonly.aof"
+    if ! docker cp "$REDIS_CONTAINER:$r_dir/$r_aoffile" "$out/appendonly.aof"; then
+      err "redis: failed to copy $r_dir/$r_aoffile out of the container"; return 1
+    fi
+    if [ ! -s "$out/appendonly.aof" ]; then
+      err "redis: copied $r_aoffile but it is empty"; return 1
+    fi
   fi
 
   # Record the live dir so restore can put files back in the right place.
@@ -328,45 +444,130 @@ backup_rustfs() {
   fi
   local bucket="${STORAGE_BUCKET:-orkestra-avatars}"
 
-  # List buckets so we capture everything, not just the default one.
-  local buckets
+  # List buckets so we capture everything, not just the default one. The
+  # list-buckets exit status is checked explicitly now (previously folded
+  # into `|| echo "$bucket"`) so a genuine list-buckets *failure* (endpoint
+  # unreachable, bad credentials — a real problem, worth surfacing if the
+  # fallback sync below also fails) can be told apart from a list-buckets
+  # *success* that legitimately found none (see below).
+  local buckets list_rc=0
   buckets="$(docker run --rm --network "$NETWORK" \
     -e AWS_ACCESS_KEY_ID="$access" \
     -e AWS_SECRET_ACCESS_KEY="$secret" \
     -e AWS_DEFAULT_REGION="${STORAGE_REGION:-us-east-1}" \
-    amazon/aws-cli:latest \
-    --endpoint-url "$endpoint" s3api list-buckets --query 'Buckets[].Name' --output text 2>/dev/null || echo "$bucket")"
+    "$AWS_CLI_IMAGE" \
+    --endpoint-url "$endpoint" s3api list-buckets --query 'Buckets[].Name' --output text 2>/dev/null)" || list_rc=$?
 
-  if [ -z "$buckets" ]; then
-    warn "rustfs: no buckets returned from list-buckets, falling back to STORAGE_BUCKET=$bucket"
+  if [ "$list_rc" -ne 0 ]; then
+    # list-buckets itself failed. Unchanged from before this fix: fall back
+    # to the single configured default bucket and let the sync loop below
+    # decide — deliberately NOT adding an existence pre-check here, because
+    # a failed HEAD (bucket missing) and a failed HEAD (bad credentials /
+    # no permission) return the same non-zero exit status and can't be told
+    # apart without parsing AWS's error text. Since we couldn't even list
+    # buckets, we have no independent signal that credentials are good, so
+    # the safer default is to attempt the sync and let a real failure
+    # surface via the existing sync_failed check below (this exact path —
+    # bad STORAGE_SECRET_KEY — is what tests/backup/test_rustfs_capture_failure.sh
+    # exercises).
+    warn "rustfs: list-buckets failed (endpoint unreachable or bad credentials?) — will attempt the configured default bucket only: $bucket"
     buckets="$bucket"
+  elif [ -z "$buckets" ]; then
+    # list-buckets *succeeded* and genuinely found none. Per-domain buckets
+    # are provisioned lazily on first use, not guaranteed to exist at boot
+    # (backend/internal/shared/config/config.go:346 STORAGE_ENSURE_BUCKET;
+    # docker/.env.example:298-299) — a fresh or lightly-used install can
+    # legitimately have zero buckets. That is a successful, empty capture,
+    # not a failure: forcing a sync against a bucket nothing ever created
+    # would always fail with NoSuchBucket and take an otherwise-good
+    # mongodb/redis/secrets backup down with it (backup.sh's post-execution
+    # --require check trusts INCLUDED, and would drop the whole run to a
+    # hard failure over a bucket that was simply never provisioned).
+    ok "rustfs: no buckets exist yet on this install — nothing to capture"
+    return 0
   fi
 
+  # A bucket that's merely absent never reaches this loop when list-buckets
+  # itself succeeded — `buckets` came straight from a live listing, so every
+  # `$b` here is a bucket rustfs itself says exists right now, and a sync
+  # failure always means real data in a real bucket wasn't captured. In the
+  # list-buckets-failed fallback case (single default bucket, unconfirmed)
+  # a NoSuchBucket-style sync failure is indistinguishable from a real
+  # credentials/connectivity failure — both correctly fail the component;
+  # see the comment above.
+  local sync_failed=no synced_any=no
   for b in $buckets; do
     mkdir -p "$out/$b"
-    docker run --rm --network "$NETWORK" \
+    # Checked explicitly: confirmed empirically (bad credentials against the
+    # live endpoint) that aws-cli's own exit status DOES propagate through
+    # `docker run` on a sync failure — unlike redis-cli's in-band error
+    # reporting, this one behaves as expected, but it still can't be left
+    # unchecked as the loop's last statement under set -e's &&/|| exemption.
+    # Run the sync as the invoking user: the image defaults to root, which leaves
+    # root-owned files in $STAGE that a non-root caller cannot delete on EXIT
+    # (and that end up root-owned inside the tarball). aws-cli needs a writable
+    # HOME for its cache, so point it at the container's /tmp.
+    if docker run --rm --network "$NETWORK" \
+      --user "$(id -u):$(id -g)" -e HOME=/tmp \
       -e AWS_ACCESS_KEY_ID="$access" \
       -e AWS_SECRET_ACCESS_KEY="$secret" \
       -e AWS_DEFAULT_REGION="${STORAGE_REGION:-us-east-1}" \
       -v "$out/$b":/backup \
-      amazon/aws-cli:latest \
-      --endpoint-url "$endpoint" s3 sync "s3://$b" /backup --only-show-errors
-    ok "rustfs: synced bucket '$b' ($(du -sh "$out/$b" | cut -f1))"
+      "$AWS_CLI_IMAGE" \
+      --endpoint-url "$endpoint" s3 sync "s3://$b" /backup --only-show-errors; then
+      ok "rustfs: synced bucket '$b' ($(du -sh "$out/$b" | cut -f1))"
+      synced_any=yes
+    else
+      err "rustfs: failed to sync bucket '$b' — see aws-cli output above"
+      sync_failed=yes
+    fi
   done
+
+  if [ "$sync_failed" = "yes" ]; then
+    err "rustfs: one or more buckets failed to sync — refusing to report this component as captured"
+    return 1
+  fi
+
+  if [ "$synced_any" = "no" ]; then
+    ok "rustfs: no existing buckets found to sync — nothing to capture"
+  fi
 }
 
 backup_secrets() {
   step "secrets: copying docker/.env and docker/keys/*"
   local out="$STAGE/data/secrets"
   mkdir -p "$out"
-  if [ -f "$ENV_FILE" ]; then
-    cp -a "$ENV_FILE" "$out/.env"
-    chmod 600 "$out/.env"
+
+  # docker/.env is mandatory (the script already refused to start without it
+  # — see the check near the top — but that was minutes/hours before this
+  # runs in a cron context, so re-check rather than assume). A copy/chmod
+  # failure here (disk full, permissions) must not fall through unchecked.
+  if [ ! -f "$ENV_FILE" ]; then
+    err "secrets: $ENV_FILE is missing"
+    return 1
   fi
+  if ! cp -a "$ENV_FILE" "$out/.env"; then
+    err "secrets: failed to copy $ENV_FILE"
+    return 1
+  fi
+  if ! chmod 600 "$out/.env"; then
+    err "secrets: failed to chmod $out/.env"
+    return 1
+  fi
+
+  # docker/keys/* is optional — a fresh install may not have generated keys
+  # yet, and that absence is not a failure. But once the directory exists,
+  # a copy failure is exactly as serious as the mandatory .env case above.
   if [ -d "$KEYS_DIR" ]; then
-    cp -a "$KEYS_DIR" "$out/keys"
+    if ! cp -a "$KEYS_DIR" "$out/keys"; then
+      err "secrets: failed to copy $KEYS_DIR"
+      return 1
+    fi
     chmod -R go-rwx "$out/keys" 2>/dev/null || true
+  else
+    muted "secrets: $KEYS_DIR not present, skipping (optional)"
   fi
+
   ok "secrets: $(du -sh "$out" | cut -f1) → secrets/"
   warn "secrets bundle contains JWT keys and DB passwords — store the resulting tarball securely"
 }
@@ -387,6 +588,28 @@ done
 if [ ${#INCLUDED[@]} -eq 0 ]; then
   err "no components were backed up successfully"
   exit 1
+fi
+
+# The pre-execution --require check above only proves a container was
+# reachable at selection time; it can't see a capture that starts and then
+# fails (bad credentials, disk full, mongodump erroring out, ...) — that
+# failure is swallowed into a plain skip by the `backup_X && INCLUDED+=(...)
+# || true` idiom below. Re-check REQUIRED against what actually landed in
+# INCLUDED so a required component's capture failure is a hard error too,
+# and is distinguishable in cron logs from "the stack was down".
+if [ ${#REQUIRED[@]} -gt 0 ]; then
+  captured_missing=()
+  for want in "${REQUIRED[@]}"; do
+    found=no
+    for have in "${INCLUDED[@]}"; do [ "$have" = "$want" ] && found=yes && break; done
+    [ "$found" = "no" ] && captured_missing+=("$want")
+  done
+  if [ ${#captured_missing[@]} -gt 0 ]; then
+    err "required component(s) failed to capture: ${captured_missing[*]}"
+    err "the container(s) were present at selection time, but the backup step itself did not succeed — see the errors/warnings above"
+    err "refusing to report success on a partial backup"
+    exit 3
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -410,6 +633,19 @@ fi
 
 step "Creating tarball"
 tar czf "$OUTPUT_PATH" -C "$STAGE/data" .
+# Belt and braces on top of `umask 077` above: guarantee the mode even if
+# OUTPUT_PATH landed somewhere with an inherited ACL/default-mode that
+# ignores umask (e.g. a directory with a POSIX default ACL).
+chmod 600 "$OUTPUT_PATH"
+
+# Machine-readable handoff for a scheduled wrapper. Naming the artifact this run
+# produced lets the caller verify exactly that file, instead of inferring "the
+# newest tarball in backups/" and racing a concurrent or hand-started backup —
+# which is how a scheduled run ends up verifying, and vouching for, somebody
+# else's archive. Written only here, after the tarball exists and is locked down.
+if [ -n "${ORKESTRA_BACKUP_PATH_FILE:-}" ]; then
+  printf '%s\n' "$OUTPUT_PATH" > "$ORKESTRA_BACKUP_PATH_FILE"
+fi
 SIZE="$(du -h "$OUTPUT_PATH" | cut -f1)"
 ok "wrote $OUTPUT_PATH ($SIZE)"
 muted "components included: ${INCLUDED[*]}"

@@ -1,4 +1,3 @@
-
 import { CloseButton, Col, Modal, Row, Dropdown } from 'react-bootstrap';
 import Background from 'components/common/Background';
 import { Link } from 'react-router';
@@ -14,7 +13,10 @@ import { useKanbanContext } from 'providers/KanbanProvider';
 import ModalSidebar from './ModalSidebar';
 
 const KanbanModal = () => {
-  const kanbanModal = useKanbanContext().kanbanModal || { show: false, modalContent: {} };
+  const kanbanModal = useKanbanContext().kanbanModal || {
+    show: false,
+    modalContent: {}
+  };
   const toggleKanbanModal = useKanbanContext().toggleKanbanModal;
 
   const handleClose = () => {
@@ -56,7 +58,13 @@ const KanbanModal = () => {
         <div className="p-4">
           <Row>
             <Col lg={9}>
-              <ModalMediaContent title="Reviewers" icon="user" transform="" headingClass="" headingContent={null}>
+              <ModalMediaContent
+                title="Reviewers"
+                icon="user"
+                transform=""
+                headingClass=""
+                headingContent={null}
+              >
                 <GroupMember
                   users={members}
                   addMember
@@ -66,11 +74,23 @@ const KanbanModal = () => {
                 />
               </ModalMediaContent>
 
-              <ModalMediaContent title="Labels" icon="tag" transform="" headingClass="" headingContent={null}>
+              <ModalMediaContent
+                title="Labels"
+                icon="tag"
+                transform=""
+                headingClass=""
+                headingContent={null}
+              >
                 <ModalLabelContent />
               </ModalMediaContent>
 
-              <ModalMediaContent title="Description" icon="align-left" transform="" headingClass="" headingContent={null}>
+              <ModalMediaContent
+                title="Description"
+                icon="align-left"
+                transform=""
+                headingClass=""
+                headingContent={null}
+              >
                 <p className="text-word-break fs-10">
                   The illustration must match to the contrast of the theme. The
                   illustraion must described the concept of the design. To know

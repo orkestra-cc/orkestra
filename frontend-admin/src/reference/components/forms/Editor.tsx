@@ -1,4 +1,3 @@
-
 import { Button, Form } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -90,7 +89,7 @@ const Editor = () => (
       <OrkestraComponentCard.Body>
         <OrkestraEditor
           code={`
-            <TinymceEditor 
+            <TinymceEditor
               tinymceScriptSrc="/tinymce/tinymce.min.js" // remove tinymceScriptSrc if you use tiny cloud
               init={{
                 ....

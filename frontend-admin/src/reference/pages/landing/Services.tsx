@@ -1,4 +1,3 @@
-
 import { Row, Col } from 'react-bootstrap';
 import className from 'classnames';
 import serviceList from 'data/feature/serviceList';

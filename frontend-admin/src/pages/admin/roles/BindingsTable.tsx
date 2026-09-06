@@ -6,6 +6,8 @@ import { toast } from 'react-toastify';
 import { ColumnDef } from '@tanstack/react-table';
 import SubtleBadge from 'components/common/SubtleBadge';
 import AdvanceTable from 'components/common/advance-table/AdvanceTable';
+import { byTimestamp } from 'components/common/advance-table/sorting';
+import { formatDateTime } from 'helpers/dateFormat';
 import AdvanceTableFooter from 'components/common/advance-table/AdvanceTableFooter';
 import useAdvanceTable from 'hooks/ui/useAdvanceTable';
 import AdvanceTableProvider from 'providers/AdvanceTableProvider';
@@ -78,12 +80,21 @@ const BindingsTable: React.FC<Props> = ({ tenantId }) => {
         )
       },
       {
-        accessorKey: 'grantedAt',
+        id: 'grantedAt',
+        // Formatted accessor + timestamp comparator — see byTimestamp.
+        //
+        // The comparator is live (this table sorts); the FORMATTED accessor is
+        // not observable until this table grows a search box, which is the
+        // point of doing it now — adding one then is a one-line change that is
+        // already correct rather than one that ships the search bug with it.
+        // No test can pin that half here, so don't read its absence as a gap.
+        accessorFn: b => formatDateTime(b.grantedAt),
+        sortingFn: byTimestamp<Binding>(b => b.grantedAt),
         header: t('adminRoles.bindingsTable.colGranted'),
         meta: { cellProps: { className: 'text-muted small' } },
         cell: ({ row: { original } }) => (
           <>
-            {new Date(original.grantedAt).toLocaleString()}
+            {formatDateTime(original.grantedAt)}
             {original.grantedBy && (
               <div>
                 {t('adminRoles.bindingsTable.grantedByLine', {
@@ -95,12 +106,19 @@ const BindingsTable: React.FC<Props> = ({ tenantId }) => {
         )
       },
       {
-        accessorKey: 'expiresAt',
+        id: 'expiresAt',
+        // A never-expiring binding keeps returning `undefined`, not the
+        // "Never" label the cell prints: TanStack short-circuits on undefined
+        // via `sortUndefined` BEFORE the comparator runs, so leaving it
+        // undefined is what preserves where those rows sort today.
+        accessorFn: b =>
+          b.expiresAt ? formatDateTime(b.expiresAt) : undefined,
+        sortingFn: byTimestamp<Binding>(b => b.expiresAt ?? undefined),
         header: t('adminRoles.bindingsTable.colExpires'),
         cell: ({ row: { original } }) =>
           original.expiresAt ? (
             <span className="text-warning small">
-              {new Date(original.expiresAt).toLocaleString()}
+              {formatDateTime(original.expiresAt)}
             </span>
           ) : (
             <span className="text-muted small">

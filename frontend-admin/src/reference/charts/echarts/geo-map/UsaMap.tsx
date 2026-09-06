@@ -1,4 +1,3 @@
-
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import usa from 'assets/json/usa.json';
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
@@ -33,10 +32,10 @@ echarts.use([
 const chartCode = `function ChartOptions() {
   const { getThemeColor } = useAppContext();
   const chartRef = useRef(null);
-  
+
   const tooltipFormatter = params =>
   '<strong>' + params.data.name + ':</strong>' + params.data.value;
-  
+
   const data = [
     { name: 'Alabama', value: 4822023 },
     { name: 'Alaska', value: 731449 },
@@ -146,7 +145,7 @@ const chartCode = `function ChartOptions() {
             show: true,
             color: '#fff'
           },
-  
+
           itemStyle: {
             areaColor: getThemeColor('warning')
           }

@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { BarChart, LineChart } from 'echarts/charts';
@@ -160,7 +159,7 @@ const chartCode = `function ChartOptions() {
       containLabel: true
     }
   });
-  
+
   const zoomSize = 6;
   const onEvents = {
     click: params => {
@@ -172,7 +171,7 @@ const chartCode = `function ChartOptions() {
       });
     }
   };
-  
+
   return (
     <ReactEchart
       echarts={echarts}

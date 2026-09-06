@@ -1,4 +1,3 @@
-
 import { Row, Col } from 'react-bootstrap';
 
 interface SectionHeaderProps {
@@ -7,7 +6,11 @@ interface SectionHeaderProps {
   [key: string]: any;
 }
 
-const SectionHeader: React.FC<SectionHeaderProps> = ({ title, subtitle, ...rest }) => {
+const SectionHeader: React.FC<SectionHeaderProps> = ({
+  title,
+  subtitle,
+  ...rest
+}) => {
   return (
     <Row className="justify-content-center text-center" {...rest}>
       <Col lg={8} xl={7} xxl={6} className="col-xxl-6">

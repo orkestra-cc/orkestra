@@ -23,6 +23,7 @@ import classNames from 'classnames';
 import SubtleBadge from 'components/common/SubtleBadge';
 import IconButton from 'components/common/IconButton';
 import AdvanceTable from 'components/common/advance-table/AdvanceTable';
+import { byTimestamp } from 'components/common/advance-table/sorting';
 import useAdvanceTable from 'hooks/ui/useAdvanceTable';
 import AdvanceTableProvider from 'providers/AdvanceTableProvider';
 import { formatDate, formatDateTime } from 'helpers/dateFormat';
@@ -193,12 +194,28 @@ const ServiceAccountDetailPage: React.FC = () => {
         )
       },
       {
-        accessorKey: 'createdAt',
+        id: 'createdAt',
+        // Formatted accessor + timestamp comparator — see byTimestamp.
+        //
+        // Both are INERT on this table today: it is built with
+        // `sortable: false` and ships no search box, so neither half has an
+        // observable effect and no test can exercise them. They are here so
+        // that turning either on is a one-line change that is already
+        // correct, rather than one that silently ships the search bug.
+        accessorFn: c => formatDate(c.createdAt),
+        sortingFn: byTimestamp<ServiceAccountCredential>(c => c.createdAt),
         header: t('adminServiceAccounts.detail.columns.createdAt'),
         cell: ({ row: { original } }) => formatDate(original.createdAt)
       },
       {
-        accessorKey: 'lastUsedAt',
+        id: 'lastUsedAt',
+        // A never-used credential keeps returning `undefined`, not the em dash
+        // the cell prints: TanStack short-circuits on undefined via
+        // `sortUndefined` BEFORE the comparator runs, so leaving it undefined
+        // is what preserves where those rows sort today.
+        accessorFn: c =>
+          c.lastUsedAt ? formatDateTime(c.lastUsedAt) : undefined,
+        sortingFn: byTimestamp<ServiceAccountCredential>(c => c.lastUsedAt),
         header: t('adminServiceAccounts.detail.columns.lastUsedAt'),
         cell: ({ row: { original } }) => formatDateTime(original.lastUsedAt)
       },

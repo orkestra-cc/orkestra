@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { ScatterChart } from 'echarts/charts';
@@ -234,7 +233,7 @@ const chartCode = `function ChartOptions() {
       }
     ]
     });
-    
+
     return (
       <ReactEchart
         echarts={echarts}
@@ -248,7 +247,10 @@ const chartCode = `function ChartOptions() {
 const QuartetScatterChart = () => {
   return (
     <OrkestraComponentCard className="h-100">
-      <OrkestraComponentCard.Header title="Quartet scatter chart" light={false} />
+      <OrkestraComponentCard.Header
+        title="Quartet scatter chart"
+        light={false}
+      />
       <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"

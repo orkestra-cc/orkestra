@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { useTranslation } from 'react-i18next';
+import { useState, type FormEvent } from "react";
+import { Link, useNavigate } from "react-router";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 import {
   apiErrorCode,
@@ -11,7 +11,7 @@ import {
   type MfaEnrollBegin,
   type MfaEnrollConfirm,
   type MfaStatus,
-} from '@/api/auth';
+} from "@/api/auth";
 
 // A reauthentication_required 401 is already being answered underneath us:
 // authedFetch cleared the session and started a FULL-DOCUMENT navigation to
@@ -22,7 +22,7 @@ import {
 // same reason. Suppressing here is the deliberate matching decision, not an
 // oversight: the honest message is on the login page.
 const leavingForSignIn = (error: unknown): boolean =>
-  apiErrorCode(error) === 'reauthentication_required';
+  apiErrorCode(error) === "reauthentication_required";
 
 // Three-step enrolment: begin (POST → secret + otpauth URI) → user
 // scans/types into authenticator → confirm (POST {challengeId, code}
@@ -30,14 +30,14 @@ const leavingForSignIn = (error: unknown): boolean =>
 // by removing+re-enrolling the factor, so we make the user copy them
 // before navigating away.
 type Stage =
-  | { kind: 'idle' }
-  | { kind: 'pending'; data: MfaEnrollBegin }
-  | { kind: 'done'; backupCodes: string[] };
+  | { kind: "idle" }
+  | { kind: "pending"; data: MfaEnrollBegin }
+  | { kind: "done"; backupCodes: string[] };
 
 export function MfaEnrolPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [stage, setStage] = useState<Stage>({ kind: 'idle' });
+  const [stage, setStage] = useState<Stage>({ kind: "idle" });
 
   // Read the current factor before offering to create one. An enrolled user
   // who reaches this page is REPLACING a factor, and the backend's
@@ -54,16 +54,16 @@ export function MfaEnrolPage() {
   // read is UX, not enforcement — the gate is the backend's — and a status
   // endpoint blip must never be what stops a first enrolment.
   const status = useQuery<MfaStatus>({
-    queryKey: ['mfa-status'],
+    queryKey: ["mfa-status"],
     queryFn: ({ signal }) => getMfaStatus(signal),
     staleTime: 30_000,
     retry: false,
   });
-  const alreadyEnrolled = status.data?.status === 'enrolled';
+  const alreadyEnrolled = status.data?.status === "enrolled";
 
   const begin = useMutation<MfaEnrollBegin, Error, void>({
     mutationFn: () => mfaEnrollBegin(),
-    onSuccess: (data) => setStage({ kind: 'pending', data }),
+    onSuccess: (data) => setStage({ kind: "pending", data }),
   });
 
   return (
@@ -73,14 +73,16 @@ export function MfaEnrolPage() {
           to="/account/security"
           className="mb-4 inline-block text-sm text-slate-600 hover:underline"
         >
-          ← {t('account.security.title')}
+          ← {t("account.security.title")}
         </Link>
-        <h1 className="text-3xl font-semibold tracking-tight">{t('mfa.enrol.title')}</h1>
-        <p className="mt-2 text-slate-600">{t('mfa.enrol.subtitle')}</p>
+        <h1 className="text-3xl font-semibold tracking-tight">
+          {t("mfa.enrol.title")}
+        </h1>
+        <p className="mt-2 text-slate-600">{t("mfa.enrol.subtitle")}</p>
       </header>
 
       {status.isPending && (
-        <p className="text-sm text-slate-500">{t('mfa.enrol.checking')}</p>
+        <p className="text-sm text-slate-500">{t("mfa.enrol.checking")}</p>
       )}
 
       {!status.isPending && alreadyEnrolled && (
@@ -89,25 +91,28 @@ export function MfaEnrolPage() {
           role="status"
         >
           <h2 className="mb-2 text-lg font-semibold text-slate-900">
-            {t('mfa.enrol.alreadyTitle')}
+            {t("mfa.enrol.alreadyTitle")}
           </h2>
           <p className="mb-6 text-sm text-slate-700">
-            {t('mfa.enrol.alreadyBody')}
+            {t("mfa.enrol.alreadyBody")}
           </p>
           <Link
             to="/account/security"
             className="inline-flex items-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
           >
-            {t('mfa.enrol.alreadyBack')}
+            {t("mfa.enrol.alreadyBack")}
           </Link>
         </div>
       )}
 
-      {!status.isPending && !alreadyEnrolled && stage.kind === 'idle' && (
+      {!status.isPending && !alreadyEnrolled && stage.kind === "idle" && (
         <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="mb-6 text-sm text-slate-700">{t('mfa.enrol.step1')}</p>
+          <p className="mb-6 text-sm text-slate-700">{t("mfa.enrol.step1")}</p>
           {begin.isError && !leavingForSignIn(begin.error) && (
-            <p className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+            <p
+              className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
+              role="alert"
+            >
               {begin.error.message}
             </p>
           )}
@@ -117,22 +122,24 @@ export function MfaEnrolPage() {
             disabled={begin.isPending}
             className="inline-flex items-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
           >
-            {begin.isPending ? t('mfa.enrol.starting') : t('mfa.enrol.start')}
+            {begin.isPending ? t("mfa.enrol.starting") : t("mfa.enrol.start")}
           </button>
         </div>
       )}
 
-      {stage.kind === 'pending' && (
+      {stage.kind === "pending" && (
         <ConfirmStage
           data={stage.data}
-          onSuccess={(res) => setStage({ kind: 'done', backupCodes: res.backupCodes })}
+          onSuccess={(res) =>
+            setStage({ kind: "done", backupCodes: res.backupCodes })
+          }
         />
       )}
 
-      {stage.kind === 'done' && (
+      {stage.kind === "done" && (
         <BackupCodesPanel
           codes={stage.backupCodes}
-          onContinue={() => navigate('/account/security', { replace: true })}
+          onContinue={() => navigate("/account/security", { replace: true })}
         />
       )}
     </section>
@@ -146,7 +153,7 @@ interface ConfirmStageProps {
 
 function ConfirmStage({ data, onSuccess }: ConfirmStageProps) {
   const { t } = useTranslation();
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState("");
   const [copied, setCopied] = useState(false);
 
   const confirm = useMutation<MfaEnrollConfirm, Error, void>({
@@ -175,12 +182,16 @@ function ConfirmStage({ data, onSuccess }: ConfirmStageProps) {
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="mb-3 text-lg font-semibold text-slate-900">{t('mfa.enrol.step2')}</h2>
-        <p className="mb-4 text-sm text-slate-600">{t('mfa.enrol.scanInstructions')}</p>
+        <h2 className="mb-3 text-lg font-semibold text-slate-900">
+          {t("mfa.enrol.step2")}
+        </h2>
+        <p className="mb-4 text-sm text-slate-600">
+          {t("mfa.enrol.scanInstructions")}
+        </p>
 
         <div className="mb-4">
           <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-500">
-            {t('mfa.enrol.secret')}
+            {t("mfa.enrol.secret")}
           </p>
           <div className="flex items-center gap-2">
             <code className="flex-1 break-all rounded-md bg-slate-100 px-3 py-2 font-mono text-sm">
@@ -191,13 +202,15 @@ function ConfirmStage({ data, onSuccess }: ConfirmStageProps) {
               onClick={copySecret}
               className="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
             >
-              {copied ? t('mfa.enrol.copied') : t('mfa.enrol.copy')}
+              {copied ? t("mfa.enrol.copied") : t("mfa.enrol.copy")}
             </button>
           </div>
         </div>
 
         <details className="text-sm text-slate-600">
-          <summary className="cursor-pointer underline">{t('mfa.enrol.uriToggle')}</summary>
+          <summary className="cursor-pointer underline">
+            {t("mfa.enrol.uriToggle")}
+          </summary>
           <code className="mt-2 block break-all rounded-md bg-slate-100 px-3 py-2 font-mono text-xs">
             {data.provisioningUri}
           </code>
@@ -209,10 +222,15 @@ function ConfirmStage({ data, onSuccess }: ConfirmStageProps) {
         className="space-y-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
         noValidate
       >
-        <h2 className="text-lg font-semibold text-slate-900">{t('mfa.enrol.step3')}</h2>
+        <h2 className="text-lg font-semibold text-slate-900">
+          {t("mfa.enrol.step3")}
+        </h2>
         <div>
-          <label htmlFor="code" className="mb-1 block text-sm font-medium text-slate-700">
-            {t('mfa.enrol.codeLabel')}
+          <label
+            htmlFor="code"
+            className="mb-1 block text-sm font-medium text-slate-700"
+          >
+            {t("mfa.enrol.codeLabel")}
           </label>
           <input
             id="code"
@@ -229,7 +247,10 @@ function ConfirmStage({ data, onSuccess }: ConfirmStageProps) {
         {/* Same suppression as the idle stage: enroll/confirm sits behind the
             same enrolment-proof gate, so it can answer with the same code. */}
         {confirm.isError && !leavingForSignIn(confirm.error) && (
-          <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+          <p
+            className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
+            role="alert"
+          >
             {confirm.error.message}
           </p>
         )}
@@ -238,7 +259,9 @@ function ConfirmStage({ data, onSuccess }: ConfirmStageProps) {
           disabled={confirm.isPending}
           className="inline-flex items-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
         >
-          {confirm.isPending ? t('mfa.enrol.confirming') : t('mfa.enrol.confirm')}
+          {confirm.isPending
+            ? t("mfa.enrol.confirming")
+            : t("mfa.enrol.confirm")}
         </button>
       </form>
     </div>
@@ -256,18 +279,18 @@ function BackupCodesPanel({ codes, onContinue }: BackupCodesProps) {
 
   async function copyAll() {
     try {
-      await navigator.clipboard.writeText(codes.join('\n'));
+      await navigator.clipboard.writeText(codes.join("\n"));
     } catch {
       // best-effort; codes are visible above for hand-copy.
     }
   }
 
   function downloadTxt() {
-    const blob = new Blob([codes.join('\n') + '\n'], { type: 'text/plain' });
+    const blob = new Blob([codes.join("\n") + "\n"], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
-    a.download = 'orkestra-backup-codes.txt';
+    a.download = "orkestra-backup-codes.txt";
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -275,9 +298,11 @@ function BackupCodesPanel({ codes, onContinue }: BackupCodesProps) {
   return (
     <article className="rounded-lg border border-emerald-200 bg-emerald-50 p-6">
       <h2 className="mb-2 text-lg font-semibold text-emerald-900">
-        {t('mfa.enrol.backupTitle')}
+        {t("mfa.enrol.backupTitle")}
       </h2>
-      <p className="mb-6 text-sm text-emerald-800">{t('mfa.enrol.backupSubtitle')}</p>
+      <p className="mb-6 text-sm text-emerald-800">
+        {t("mfa.enrol.backupSubtitle")}
+      </p>
 
       <ul className="mb-6 grid grid-cols-2 gap-2 rounded-md bg-white p-4 font-mono text-sm">
         {codes.map((code) => (
@@ -293,14 +318,14 @@ function BackupCodesPanel({ codes, onContinue }: BackupCodesProps) {
           onClick={copyAll}
           className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
         >
-          {t('mfa.enrol.backupCopy')}
+          {t("mfa.enrol.backupCopy")}
         </button>
         <button
           type="button"
           onClick={downloadTxt}
           className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
         >
-          {t('mfa.enrol.backupDownload')}
+          {t("mfa.enrol.backupDownload")}
         </button>
       </div>
 
@@ -311,7 +336,7 @@ function BackupCodesPanel({ codes, onContinue }: BackupCodesProps) {
           onChange={(e) => setAcknowledged(e.target.checked)}
           className="mt-0.5 h-4 w-4 rounded border-emerald-300 text-emerald-700 focus:ring-emerald-500"
         />
-        {t('mfa.enrol.backupAcknowledge')}
+        {t("mfa.enrol.backupAcknowledge")}
       </label>
 
       <button
@@ -320,7 +345,7 @@ function BackupCodesPanel({ codes, onContinue }: BackupCodesProps) {
         disabled={!acknowledged}
         className="inline-flex items-center rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
       >
-        {t('mfa.enrol.backupContinue')}
+        {t("mfa.enrol.backupContinue")}
       </button>
     </article>
   );

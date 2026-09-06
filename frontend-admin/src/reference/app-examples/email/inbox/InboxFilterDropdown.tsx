@@ -10,7 +10,11 @@ interface InboxFilterDropdownItemProps {
   onClick?: () => void;
 }
 
-const InboxFilterDropdownItem = ({ active, children, ...rest }: InboxFilterDropdownItemProps) => (
+const InboxFilterDropdownItem = ({
+  active,
+  children,
+  ...rest
+}: InboxFilterDropdownItemProps) => (
   <Dropdown.Item
     href="#!"
     as={Flex}
@@ -33,7 +37,9 @@ const InboxFilterDropdown = () => {
     config: { isRTL }
   } = useAppContext();
 
-  const handleSelect = (filter: 'all' | 'unread' | 'star' | 'attachments' | 'archive' | 'snooze') => {
+  const handleSelect = (
+    filter: 'all' | 'unread' | 'star' | 'attachments' | 'archive' | 'snooze'
+  ) => {
     emailDispatch({
       type: 'FILTER',
       payload: filter

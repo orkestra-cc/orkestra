@@ -1,4 +1,3 @@
-
 import { Row, Col, Dropdown, Button } from 'react-bootstrap';
 import IconButton from 'components/common/IconButton';
 import { members } from 'data/kanban';

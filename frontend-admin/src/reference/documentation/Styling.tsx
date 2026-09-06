@@ -2,12 +2,11 @@ import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import OrkestraEditor from 'components/common/OrkestraEditor';
 import PageHeader from 'components/common/PageHeader';
 
-
 const style = `
 //*-----------------------------------------------
 //|   Theme Colors
 //-----------------------------------------------*/
-$primary: $blue !default; 
+$primary: $blue !default;
 $secondary: $gray-600 !default;
 $success: $green !default;
 $info: $cyan !default;

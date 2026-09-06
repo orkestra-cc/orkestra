@@ -12,7 +12,12 @@ interface ItemButtonProps {
   onClick?: () => void;
 }
 
-const ItemButton = ({ tootltip, icon, className, onClick }: ItemButtonProps) => {
+const ItemButton = ({
+  tootltip,
+  icon,
+  className,
+  onClick
+}: ItemButtonProps) => {
   return (
     <OverlayTrigger
       overlay={
@@ -60,7 +65,11 @@ const EmailDetailHeader = () => {
             icon={'envelope' as IconProp}
             className="ms-1 ms-sm-2"
           />
-          <ItemButton tootltip="Snooze" icon={'clock' as IconProp} className="ms-1 ms-sm-2" />
+          <ItemButton
+            tootltip="Snooze"
+            icon={'clock' as IconProp}
+            className="ms-1 ms-sm-2"
+          />
           <ItemButton
             tootltip="Print"
             icon={'print' as IconProp}

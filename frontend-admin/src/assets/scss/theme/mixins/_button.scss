@@ -2,7 +2,8 @@
 /*                                Orkestra Button                               */
 /* -------------------------------------------------------------------------- */
 @mixin orkestra-button-variant($color) {
-  &, &.show {
+  &,
+  &.show {
     color: var(--#{$prefix}btn-orkestra-#{$color}-color);
     background-color: var(--#{$prefix}btn-orkestra-background);
     border-color: var(--#{$prefix}btn-orkestra-background);
@@ -32,8 +33,8 @@
     color: var(--#{$prefix}btn-orkestra-#{$color}-active-color);
   }
 
-  .btn-check:checked+&,
-  :not(.btn-check)+&:active,
+  .btn-check:checked + &,
+  :not(.btn-check) + &:active,
   &:first-child:active,
   &.active {
     color: var(--#{$prefix}btn-orkestra-#{$color}-color);

@@ -42,14 +42,22 @@ import {
  */
 const DefaultDashboardWithQuery: React.FC = () => {
   // Fetch multiple dashboard data sources
-  const { data: dashboardData, isLoading, hasError, refetch } = useDefaultDashboard('30d');
+  const {
+    data: dashboardData,
+    isLoading,
+    hasError,
+    refetch
+  } = useDefaultDashboard('30d');
 
   // Additional specific queries for other components
   const bestSellingProducts = useBestSellingProducts(8);
 
   if (isLoading) {
     return (
-      <div className="d-flex justify-content-center align-items-center" style={{ minHeight: '400px' }}>
+      <div
+        className="d-flex justify-content-center align-items-center"
+        style={{ minHeight: '400px' }}
+      >
         <div className="text-center">
           <Spinner animation="border" className="mb-3" />
           <p className="text-muted">Loading dashboard data...</p>
@@ -115,7 +123,9 @@ const DefaultDashboardWithQuery: React.FC = () => {
 
       <Row className="g-3 mb-3">
         <Col lg={7} xl={8}>
-          <BestSellingProducts products={bestSellingProducts.data ?? products} />
+          <BestSellingProducts
+            products={bestSellingProducts.data ?? products}
+          />
         </Col>
         <Col lg={5} xl={4}>
           <SharedFiles files={files} className="h-lg-100" />

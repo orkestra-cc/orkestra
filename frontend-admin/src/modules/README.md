@@ -18,19 +18,19 @@ That layout is **already aligned** with the backend addon structure in `backend/
 
 The frontend folder names match the backend addon names. When the backend ships a module, the frontend directory of the same name is where its UI lives.
 
-| Backend addon (`backend/internal/addons/`) | Frontend pages (`frontend/src/pages/`) | API slice (`frontend/src/store/api/`) |
-|---|---|---|
-| `billing` | `billing/{customers,suppliers,invoices,dashboard,notifications}` | `billingApi.ts` |
-| `documents` | `(used internally by billing)` | `documentsApi.ts` |
-| `company` | `company/{lookup,search}` | `companyApi.ts` |
-| `graph` | `graph/` | `graphApi.ts` |
-| `aimodels` | `ai/` | `aiModelsApi.ts` |
-| `rag` | `ai/` | `ragApi.ts` |
-| `agents` | `ai/` | `agentsApi.ts` |
-| `sales` | `sales/{jobs,prospect,reports,settings,skills}` | `salesApi.ts` |
-| core: `auth` | `(handled by AuthProvider + components/authentication/)` | `authApi.ts` |
-| core: `user` | `user/`, `admin/` | `userApi.ts`, `managementApi.ts` |
-| core: `navigation` | `(handled by useRoleBasedNavigation hook)` | `navigationApi.ts` |
+| Backend addon (`backend/internal/addons/`) | Frontend pages (`frontend/src/pages/`)                           | API slice (`frontend/src/store/api/`) |
+| ------------------------------------------ | ---------------------------------------------------------------- | ------------------------------------- |
+| `billing`                                  | `billing/{customers,suppliers,invoices,dashboard,notifications}` | `billingApi.ts`                       |
+| `documents`                                | `(used internally by billing)`                                   | `documentsApi.ts`                     |
+| `company`                                  | `company/{lookup,search}`                                        | `companyApi.ts`                       |
+| `graph`                                    | `graph/`                                                         | `graphApi.ts`                         |
+| `aimodels`                                 | `ai/`                                                            | `aiModelsApi.ts`                      |
+| `rag`                                      | `ai/`                                                            | `ragApi.ts`                           |
+| `agents`                                   | `ai/`                                                            | `agentsApi.ts`                        |
+| `sales`                                    | `sales/{jobs,prospect,reports,settings,skills}`                  | `salesApi.ts`                         |
+| core: `auth`                               | `(handled by AuthProvider + components/authentication/)`         | `authApi.ts`                          |
+| core: `user`                               | `user/`, `admin/`                                                | `userApi.ts`, `managementApi.ts`      |
+| core: `navigation`                         | `(handled by useRoleBasedNavigation hook)`                       | `navigationApi.ts`                    |
 
 ## Where to look for what
 

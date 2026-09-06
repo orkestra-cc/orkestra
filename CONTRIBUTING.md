@@ -39,7 +39,30 @@ go version && node --version && flutter --version
 
 If `pre-commit: command not found` after `mise install`, you skipped step 2 — activate mise in your current shell with `eval "$(mise activate bash)"` and re-try.
 
-Optional but recommended — make `git blame` skip the line-ending-normalization commit:
+A stale tool on `PATH` is worse than a missing one, because it answers. `make backend-lint` therefore refuses to
+run when the `golangci-lint` it finds is not the version `.mise.toml` pins — different versions genuinely
+disagree about findings (2.12.2 reported three `deferInLoop` hits on lines the pinned 2.13.2 accepts, because it
+ignored their `//nolint:gocritic` directives), and a phantom failure sends you editing correct code. If the guard
+fires, fix the toolchain with `mise install golangci-lint`; never chase the diff it reports.
+
+The hooks deliberately **skip generated and vendored artifacts** — the sass output under
+`frontend-admin/public/css/`, the vendored theme assets and lottie/geo JSON, and the coverage badges the CI bot
+writes. A fixer that "corrects" one of those fights the tool that regenerates it, and the drift comes straight
+back. The list lives in the top-level `exclude:` of `.pre-commit-config.yaml` — add a path there, with the
+reason, rather than committing a reformatted artifact. Careful: a hook's own `exclude` **replaces** the
+top-level one instead of adding to it, so a path that must be invisible to `prettier` has to be listed in that
+hook's `exclude` too.
+
+Prettier runs from `frontend-admin/node_modules` on purpose, not from a pinned pre-commit mirror. The mirror
+shipped a different prettier than the apps install, and the two disagreed on union-type formatting: the mirror
+expanded, the `prettier/prettier` rule inside eslint collapsed, and every run undid the previous one. One
+version, one outcome. If you bump prettier in `frontend-admin/package.json`, nothing else needs touching.
+
+Worth knowing: when you push a branch that has no counterpart on the remote yet, pre-commit has no range to
+diff and runs over the **whole tree**, not just your commits. If it starts "fixing" files you never touched,
+that is what happened — the drift is pre-existing, and it belongs in its own commit, not buried in yours.
+
+Optional but recommended — make `git blame` skip the whitespace-only commits:
 
 ```bash
 git config blame.ignoreRevsFile .git-blame-ignore-revs

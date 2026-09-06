@@ -1,4 +1,3 @@
-
 import { Col, Row } from 'react-bootstrap';
 import EventDetailAside from './EventDetailAside';
 import EventDetailContent from './EventDetailContent';

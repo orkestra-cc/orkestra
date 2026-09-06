@@ -3,15 +3,17 @@
 /* -------------------------------------------------------------------------- */
 
 // Firefox fixed
-.firefox{
-  .dropcap:first-letter{ margin-top: 0.175em; }
+.firefox {
+  .dropcap:first-letter {
+    margin-top: 0.175em;
+  }
   .card-notification .scrollbar-overlay {
-    min-height:19rem;
+    min-height: 19rem;
   }
 }
 
-.chrome{
-  .btn-close{
+.chrome {
+  .btn-close {
     background-clip: unset;
   }
 }

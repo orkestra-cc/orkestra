@@ -1,4 +1,3 @@
-
 import Flex from 'components/common/Flex';
 import classNames from 'classnames';
 import Avatar from 'components/common/Avatar';
@@ -28,7 +27,8 @@ const ChatThread = ({ thread, index }: ChatThreadProps) => {
   const user = getUser(thread);
   const message = messages.find(({ id }) => id === thread.messagesId);
   const content = Array.isArray(message?.content) ? message.content : [];
-  const lastMessage = content.length > 0 ? content[content.length - 1] : undefined;
+  const lastMessage =
+    content.length > 0 ? content[content.length - 1] : undefined;
 
   const getStatusIcon = (): IconProp => {
     if (!lastMessage || !('status' in lastMessage)) return 'check' as IconProp;
@@ -51,7 +51,11 @@ const ChatThread = ({ thread, index }: ChatThreadProps) => {
         <ChatSidebarDropdownAction />
       </div>
       <Flex>
-        <Avatar className={'status' in user ? user.status : undefined} src={user.avatarSrc} size="xl" />
+        <Avatar
+          className={'status' in user ? user.status : undefined}
+          src={user.avatarSrc}
+          size="xl"
+        />
         <div className="flex-1 chat-contact-body ms-2 d-md-none d-lg-block">
           <Flex justifyContent="between">
             <h6 className="mb-0 chat-contact-title">{user.name}</h6>
@@ -64,18 +68,20 @@ const ChatThread = ({ thread, index }: ChatThreadProps) => {
             <div className="chat-contact-content pe-3">
               <LastMessage lastMessage={lastMessage as any} thread={thread} />
               <div className="position-absolute bottom-0 end-0 hover-hide">
-                {!!lastMessage && 'status' in lastMessage && (lastMessage as any).status && (
-                  <FontAwesomeIcon
-                    icon={getStatusIcon()}
-                    transform="shrink-5 down-4"
-                    className={classNames({
-                      'text-success': (lastMessage as any).status === 'seen',
-                      'text-400':
-                        (lastMessage as any).status === 'delivered' ||
-                        (lastMessage as any).status === 'sent'
-                    })}
-                  />
-                )}
+                {!!lastMessage &&
+                  'status' in lastMessage &&
+                  (lastMessage as any).status && (
+                    <FontAwesomeIcon
+                      icon={getStatusIcon()}
+                      transform="shrink-5 down-4"
+                      className={classNames({
+                        'text-success': (lastMessage as any).status === 'seen',
+                        'text-400':
+                          (lastMessage as any).status === 'delivered' ||
+                          (lastMessage as any).status === 'sent'
+                      })}
+                    />
+                  )}
               </div>
             </div>
           </div>

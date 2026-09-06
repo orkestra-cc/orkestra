@@ -33,12 +33,12 @@ const tooltipFormatter = (params: TooltipParams) => {
       <div class="card-body py-2">
         <h6 class="text-600 fw-normal">
           <span class="dot me-1 d-inline-block bg-primary"></span>
-          Revenue: 
+          Revenue:
           <span class="fw-medium">$${params[0].data}</span>
         </h6>
-        <h6 class="text-600 mb-0 fw-normal"> 
+        <h6 class="text-600 mb-0 fw-normal">
           <span class="dot me-1 d-inline-block bg-warning"></span>
-          Revenue Goal: 
+          Revenue Goal:
           <span class="fw-medium">$${params[1].data}</span>
         </h6>
       </div>

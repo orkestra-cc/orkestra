@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Button, Card, ListGroup, Spinner } from 'react-bootstrap';
+import { Button, ListGroup, Spinner } from 'react-bootstrap';
+import SectionCard from 'components/common/SectionCard';
 import SubtleBadge from 'components/common/SubtleBadge';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faShieldHalved, faKey } from '@fortawesome/free-solid-svg-icons';
+import { formatDate } from 'helpers/dateFormat';
 import { useTranslation } from 'react-i18next';
 import {
   useGetMfaStatusQuery,
@@ -37,19 +38,14 @@ const MfaSettings = () => {
 
   return (
     <>
-      <Card className="mb-3">
-        <Card.Header className="bg-body-tertiary">
-          <div className="d-flex align-items-center">
-            <FontAwesomeIcon
-              icon={faShieldHalved}
-              className="me-2 text-primary"
-            />
-            <Card.Title as="h5" className="mb-0">
-              {t('userMfa.settings.totp.cardTitle')}
-            </Card.Title>
-          </div>
-        </Card.Header>
-        <Card.Body>
+      {/* SectionCard is the console's titled-panel primitive — the tinted
+          header with an icon + h5 this used to hand-roll, minus the
+          `<Card.Title>` whose Bootstrap color var had no dark counterpart. */}
+      <div className="mb-3">
+        <SectionCard
+          icon={faShieldHalved}
+          title={t('userMfa.settings.totp.cardTitle')}
+        >
           {isLoading ? (
             <div className="text-center py-3">
               <Spinner size="sm" />
@@ -107,8 +103,8 @@ const MfaSettings = () => {
               </Button>
             </div>
           )}
-        </Card.Body>
-      </Card>
+        </SectionCard>
+      </div>
 
       <PasskeysCard
         count={webauthnCount}
@@ -177,68 +173,60 @@ const PasskeysCard = ({
   };
 
   return (
-    <Card className="mb-3">
-      <Card.Header className="bg-body-tertiary">
-        <div className="d-flex align-items-center">
-          <FontAwesomeIcon icon={faKey} className="me-2 text-primary" />
-          <Card.Title as="h5" className="mb-0">
-            {t('userMfa.settings.passkeys.cardTitle')}
-          </Card.Title>
-        </div>
-      </Card.Header>
-      <Card.Body>
-        {!supports && (
-          <p className="fs-10 text-muted mb-3">
-            {t('userMfa.settings.passkeys.unsupported')}
-          </p>
-        )}
-        {count === 0 ? (
-          <p className="fs-10 text-muted mb-3">
-            {t('userMfa.settings.passkeys.introEmpty')}
-          </p>
-        ) : (
-          <ListGroup variant="flush" className="mb-3">
-            {(list?.credentials ?? []).map(c => (
-              <ListGroup.Item
-                key={c.credentialId}
-                className="px-0 d-flex justify-content-between align-items-center"
-              >
-                <div>
-                  <div className="fw-semibold">{c.name}</div>
-                  <div className="text-muted fs-10">
-                    {t('userMfa.settings.passkeys.addedAt', {
-                      date: new Date(c.createdAt).toLocaleDateString()
+    // No trailing margin: this is the last panel in the tab pane, and a
+    // bottom margin here left a dead band under the card.
+    <SectionCard icon={faKey} title={t('userMfa.settings.passkeys.cardTitle')}>
+      {!supports && (
+        <p className="fs-10 text-muted mb-3">
+          {t('userMfa.settings.passkeys.unsupported')}
+        </p>
+      )}
+      {count === 0 ? (
+        <p className="fs-10 text-muted mb-3">
+          {t('userMfa.settings.passkeys.introEmpty')}
+        </p>
+      ) : (
+        <ListGroup variant="flush" className="mb-3">
+          {(list?.credentials ?? []).map(c => (
+            <ListGroup.Item
+              key={c.credentialId}
+              className="px-0 d-flex justify-content-between align-items-center"
+            >
+              <div>
+                <div className="fw-semibold">{c.name}</div>
+                <div className="text-muted fs-10">
+                  {t('userMfa.settings.passkeys.addedAt', {
+                    date: formatDate(c.createdAt)
+                  })}
+                  {c.lastUsedAt &&
+                    t('userMfa.settings.passkeys.lastUsedSuffix', {
+                      date: formatDate(c.lastUsedAt)
                     })}
-                    {c.lastUsedAt &&
-                      t('userMfa.settings.passkeys.lastUsedSuffix', {
-                        date: new Date(c.lastUsedAt).toLocaleDateString()
-                      })}
-                    {c.cloneWarning &&
-                      t('userMfa.settings.passkeys.cloneWarningSuffix')}
-                  </div>
+                  {c.cloneWarning &&
+                    t('userMfa.settings.passkeys.cloneWarningSuffix')}
                 </div>
-                <Button
-                  variant="outline-danger"
-                  size="sm"
-                  disabled={removing}
-                  onClick={() => handleRemove(c.credentialId)}
-                >
-                  {t('userMfa.settings.passkeys.removeButton')}
-                </Button>
-              </ListGroup.Item>
-            ))}
-          </ListGroup>
-        )}
-        <Button
-          variant={count === 0 ? 'primary' : 'outline-primary'}
-          size="sm"
-          disabled={!supports}
-          onClick={onEnroll}
-        >
-          {t('userMfa.settings.passkeys.addButton')}
-        </Button>
-      </Card.Body>
-    </Card>
+              </div>
+              <Button
+                variant="outline-danger"
+                size="sm"
+                disabled={removing}
+                onClick={() => handleRemove(c.credentialId)}
+              >
+                {t('userMfa.settings.passkeys.removeButton')}
+              </Button>
+            </ListGroup.Item>
+          ))}
+        </ListGroup>
+      )}
+      <Button
+        variant={count === 0 ? 'primary' : 'outline-primary'}
+        size="sm"
+        disabled={!supports}
+        onClick={onEnroll}
+      >
+        {t('userMfa.settings.passkeys.addButton')}
+      </Button>
+    </SectionCard>
   );
 };
 

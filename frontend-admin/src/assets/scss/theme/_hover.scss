@@ -97,7 +97,7 @@ a[href] {
   @each $color, $value in $grays {
     &-#{$color} {
       &:hover {
-        color:  var(--#{$prefix}gray-#{$color}) !important;
+        color: var(--#{$prefix}gray-#{$color}) !important;
       }
     }
   }
