@@ -151,23 +151,107 @@ describe('CompliancePage', () => {
     expect(screen.getByText('u-hold-1')).toBeInTheDocument();
   });
 
+  // Same guard for the erasure tab's own date column. The three compliance
+  // date columns were edited independently, so covering one instance would
+  // leave a typo in either of the other two invisible.
+  it('filters erasure requests by the date text the operator can see', async () => {
+    stubReads({
+      erasure: {
+        items: [
+          { ...erasureRequests.items[0], requestedAt: '2026-06-01T10:00:00Z' },
+          {
+            ...erasureRequests.items[0],
+            uuid: 'er-2',
+            userUuid: 'u-erase-2',
+            requestedAt: '2026-11-02T10:00:00Z'
+          }
+        ]
+      }
+    });
+    renderWithProviders(<CompliancePage />);
+    const user = userEvent.setup();
+
+    const firstRow = (await screen.findByText('u-erase-1')).closest('tr')!;
+    const month = [...firstRow.querySelectorAll('td')]
+      .map(td => td.textContent ?? '')
+      .find(txt => /[A-Za-z]{3,}\s*\d{2},/.test(txt))!
+      .match(/[A-Za-z]{3,}/)![0];
+
+    await user.type(
+      screen.getByPlaceholderText(/search by subject or reason/i),
+      month
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText('u-erase-2')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('u-erase-1')).toBeInTheDocument();
+  });
+
+  it('sorts erasure requests chronologically, not lexicographically', async () => {
+    // Sep 2026 is OLDER than Jan 2027 but sorts AFTER it as text, so the two
+    // orders disagree and a formatted-string comparator flips them.
+    //
+    // The fixture is fed NEWEST-FIRST, the reverse of the expected result: a
+    // comparator that returns 0 for every pair — which is what pointing
+    // byTimestamp at a non-date field produces, since new Date('pending') is
+    // NaN and falls to 0 — leaves the input order untouched, and would pass
+    // silently against a fixture already in sorted order.
+    stubReads({
+      erasure: {
+        items: [
+          {
+            ...erasureRequests.items[0],
+            uuid: 'er-jan',
+            userUuid: 'u-newer-req',
+            requestedAt: '2027-01-05T10:00:00Z'
+          },
+          {
+            ...erasureRequests.items[0],
+            uuid: 'er-sep',
+            userUuid: 'u-older-req',
+            requestedAt: '2026-09-05T10:00:00Z'
+          }
+        ]
+      }
+    });
+    renderWithProviders(<CompliancePage />);
+    const user = userEvent.setup();
+
+    await screen.findByText('u-older-req');
+    const header = screen
+      .getAllByText(/^requested$/i)
+      .find(el => el.tagName === 'TH')!;
+    await user.click(header);
+
+    await waitFor(() => {
+      const body = screen.getByText('u-older-req').closest('tbody')!;
+      const subjects = [...body.querySelectorAll('tr')].map(r =>
+        r.querySelector('td')!.textContent!.trim()
+      );
+      expect(subjects).toEqual(['u-older-req', 'u-newer-req']);
+    });
+  });
+
   it('sorts legal holds chronologically, not lexicographically', async () => {
     // Sep 2026 is OLDER than Jan 2027 but sorts AFTER it as text ("J" < "S"),
     // so the two orders disagree and a formatted-string comparator flips them.
+    // Fed newest-first so a no-op comparator cannot pass — see the erasure
+    // twin above for why that matters.
     stubReads({
       holds: {
         items: [
           {
             ...legalHolds.items[0],
-            uuid: 'lh-sep',
-            userUuid: 'u-older',
-            placedAt: '2026-09-05T10:00:00Z'
-          },
-          {
-            ...legalHolds.items[0],
             uuid: 'lh-jan',
             userUuid: 'u-newer',
             placedAt: '2027-01-05T10:00:00Z'
+          },
+          {
+            ...legalHolds.items[0],
+            uuid: 'lh-sep',
+            userUuid: 'u-older',
+            placedAt: '2026-09-05T10:00:00Z'
           }
         ]
       }
