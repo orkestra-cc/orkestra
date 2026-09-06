@@ -19,6 +19,7 @@ import {
 } from '@fortawesome/free-brands-svg-icons';
 import type { CellContext, ColumnDef } from '@tanstack/react-table';
 import IconButton from 'components/common/IconButton';
+import { byTimestamp } from 'components/common/advance-table/sorting';
 import SubtleBadge from 'components/common/SubtleBadge';
 import { formatDate } from 'helpers/dateFormat';
 import { useTranslation } from 'react-i18next';
@@ -30,7 +31,7 @@ import {
   type SelfAuthOAuthProvider
 } from 'store/api/authApi';
 import SecurityEmptyState from './SecurityEmptyState';
-import SecurityTable, { byTimestamp } from './SecurityTable';
+import SecurityTable from './SecurityTable';
 
 // Provider brand names — proper nouns, intentionally not translated.
 const PROVIDER_LABELS: Record<OAuthProvider, string> = {

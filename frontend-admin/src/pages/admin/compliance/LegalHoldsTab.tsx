@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import IconButton from 'components/common/IconButton';
 import SubtleBadge from 'components/common/SubtleBadge';
+import { byTimestamp } from 'components/common/advance-table/sorting';
 import {
   useListLegalHoldsQuery,
   usePlaceLegalHoldMutation,
@@ -87,7 +88,10 @@ const LegalHoldsTab = () => {
       )
     },
     {
-      accessorKey: 'placedAt',
+      id: 'placedAt',
+      // Formatted accessor + timestamp comparator — see byTimestamp.
+      accessorFn: h => formatDateTime(h.placedAt),
+      sortingFn: byTimestamp<LegalHold>(h => h.placedAt),
       header: t('adminCompliance.holds.columns.placed'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<LegalHold, unknown>) =>

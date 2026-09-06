@@ -6,6 +6,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import type { CellContext, ColumnDef } from '@tanstack/react-table';
 import IconButton from 'components/common/IconButton';
+import { byTimestamp } from 'components/common/advance-table/sorting';
 import SubtleBadge from 'components/common/SubtleBadge';
 import { formatDate, formatDateTime } from 'helpers/dateFormat';
 import { useTranslation } from 'react-i18next';
@@ -16,7 +17,7 @@ import {
   type SelfSessionInfo
 } from 'store/api/authApi';
 import SecurityEmptyState from './SecurityEmptyState';
-import SecurityTable, { byTimestamp } from './SecurityTable';
+import SecurityTable from './SecurityTable';
 
 // Format a session row's friendly device label. The backend stores
 // device name + platform separately so we can present whichever is
