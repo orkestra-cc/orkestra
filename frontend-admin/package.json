@@ -19,7 +19,7 @@
     "@fullcalendar/daygrid": "^6.1.21",
     "@fullcalendar/interaction": "^6.1.18",
     "@fullcalendar/list": "^6.1.21",
-    "@fullcalendar/react": "^6.1.18",
+    "@fullcalendar/react": "^7.0.2",
     "@fullcalendar/timegrid": "^6.1.18",
     "@hookform/resolvers": "^5.4.0",
     "@react-leaflet/core": "^3.0.0",
