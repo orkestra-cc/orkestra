@@ -157,6 +157,41 @@ The bundled scripts are the right default for dev, staging, and single-VM produc
 - **You want fine-grained cron retention** (e.g. hourly snapshots × 24h + daily × 30 + monthly × 12 — the bundled scripts produce one timestamped file per run; everything else is your job).
 - **You're running Orkestra on a host where Docker isn't available** (the bundled scripts assume `docker`).
 
+## Scheduled backups
+
+Neither `./backup.sh` nor `scripts/backup-cron.sh` schedules itself. Nothing in this repo creates a cron entry, a systemd timer, or a compose sidecar — a fresh checkout runs no backups at all until an operator installs one. Don't improvise a bare `mongodump` cron job for this (see the [manual recipes](#manual-recipes) below for when that's actually the right tool) — `scripts/backup-cron.sh` already exists for exactly this purpose:
+
+- Runs `./backup.sh --yes all` (every component, no prompts).
+- **Verifies the result rather than trusting the exit code** — re-opens the produced tarball, confirms the manifest lists all four components, and confirms the Mongo archive has real bytes, so a future regression in `backup.sh` can't turn the schedule back into a silent no-op.
+- Applies `chmod 600` to the tarball (belt-and-braces on top of `backup.sh`'s own `umask 077` + `chmod 600`).
+- Prunes tarballs older than `BACKUP_RETENTION_DAYS` (default 30) — but always keeps at least `BACKUP_MIN_KEEP` (default 3) of them regardless of age, so an infrequently-running or freshly-scheduled host can never prune its way down to zero backups in one pass.
+- Logs every run, pass or fail, to `backups/backup-cron.log`.
+
+Install it as a `cron.d` stanza — this is the actual stanza this project uses, adjust the run-as user and the repo path for your deployment:
+
+```cron
+# /etc/cron.d/orkestra-<clone>-backup
+# Orkestra nightly backup — 03:00 UTC.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+0 3 * * * <deploy-user> /path/to/orkestra/scripts/backup-cron.sh
+```
+
+```bash
+sudo chmod 644 /etc/cron.d/orkestra-<clone>-backup
+```
+
+Run it as the same non-root user that has Docker socket access and owns the repo checkout — not root. `cron` itself is not guaranteed to be installed or running on a fresh VM; check both before assuming the schedule will actually fire:
+
+```bash
+sudo apt-get update && sudo apt-get install -y cron
+sudo systemctl enable --now cron
+sudo grep -R orkestra /etc/cron.d/
+systemctl is-active cron
+```
+
+The manual `mongodump` recipe directly below is the fallback for hosts where Docker isn't available at all — both `./backup.sh` and `scripts/backup-cron.sh` assume `docker` is present and do not work without it.
+
 ## Manual recipes
 
 :::note Two scripts named `backup.sh`
@@ -330,9 +365,17 @@ Easiest path: spin up a staging stack, restore the latest production backup into
 
 - **Encryption key rotation** — if you've rotated `OAUTH_TOKEN_ENCRYPTION_KEY` since the dump was taken, the restore is useless without the old key. Keep a key archive separate from the DB backup.
 - **Schema migrations** — Orkestra's collection schemas evolve. Restoring a 6-month-old dump into a current binary may produce documents whose shape the current code rejects. The `make backend-test` suite + `docker compose -f docker-compose.prod.yml --env-file .env up -d` smoke is the test.
-- **Index recreation** — `--drop` removes indexes too. The module registry's `ensureCollection` recreates the declared indexes on next boot, but background index builds take time on large collections — expect slow queries for a few minutes post-restore.
+- **Index recreation** — `--drop` removes indexes too. The module registry's `ensureCollection` recreates the declared indexes on next boot, but background index builds take time on large collections — expect slow queries for a few minutes post-restore. Note the recreation only works because `--drop` left nothing behind: `ensureCollection` is **create-only**, so if an index survives with a specification that no longer matches its Go declaration, it is never repaired — boot logs an error and moves on. See `docs/migrations/` in this repo for the reconcile-and-recreate runbook that closes a drift like that.
 
 Document the runbook on whatever wiki / Notion / GDoc your ops team reads. The dry-run is no good if no one knows where the dump archives live when the production VM is on fire.
+
+### Drill log
+
+| Date | Stack | Archive | Result |
+| --- | --- | --- | --- |
+| _(none recorded)_ | | | Add one row per drill: what was restored, into what, and what you compared against. |
+
+Restoring into a renamed namespace rather than over the live database is the safer shape for a drill and is what the table above is for — it exercises the archive end-to-end without putting the running stack at risk. It does **not** exercise `--drop` semantics or a full stack boot against restored data, so it is a floor, not a substitute for the staging-stack drill described above.
 
 ## What `--drop` does NOT touch
 
