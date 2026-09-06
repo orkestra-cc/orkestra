@@ -3,6 +3,7 @@ import { Alert, Button, Modal, Spinner } from 'react-bootstrap';
 import { faBan, faLaptop } from '@fortawesome/free-solid-svg-icons';
 import type { CellContext, ColumnDef } from '@tanstack/react-table';
 import IconButton from 'components/common/IconButton';
+import { byTimestamp } from 'components/common/advance-table/sorting';
 import { formatDate } from 'helpers/dateFormat';
 import { useTranslation } from 'react-i18next';
 import {
@@ -12,7 +13,7 @@ import {
   type TrustedDevice
 } from 'store/api/deviceTrustApi';
 import SecurityEmptyState from './SecurityEmptyState';
-import SecurityTable, { byTimestamp } from './SecurityTable';
+import SecurityTable from './SecurityTable';
 
 // TrustedDevicesTab shows the "remember this device 30d" grants the
 // user holds. Each grant lets the user skip the MFA prompt on the

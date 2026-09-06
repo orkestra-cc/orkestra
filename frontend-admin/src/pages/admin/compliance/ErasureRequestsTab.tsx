@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import IconButton from 'components/common/IconButton';
 import SubtleBadge from 'components/common/SubtleBadge';
+import { byTimestamp } from 'components/common/advance-table/sorting';
 import {
   useExecuteErasureRequestMutation,
   useListErasureRequestsQuery,
@@ -70,7 +71,10 @@ const ErasureRequestsTab = () => {
       )
     },
     {
-      accessorKey: 'requestedAt',
+      id: 'requestedAt',
+      // Formatted accessor + timestamp comparator — see byTimestamp.
+      accessorFn: r => formatDateTime(r.requestedAt),
+      sortingFn: byTimestamp<ErasureRequest>(r => r.requestedAt),
       header: t('adminCompliance.erasure.columns.requested'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<ErasureRequest, unknown>) =>
