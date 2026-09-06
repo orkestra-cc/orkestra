@@ -39,6 +39,12 @@ go version && node --version && flutter --version
 
 If `pre-commit: command not found` after `mise install`, you skipped step 2 — activate mise in your current shell with `eval "$(mise activate bash)"` and re-try.
 
+A stale tool on `PATH` is worse than a missing one, because it answers. `make backend-lint` therefore refuses to
+run when the `golangci-lint` it finds is not the version `.mise.toml` pins — different versions genuinely
+disagree about findings (2.12.2 reported three `deferInLoop` hits on lines the pinned 2.13.2 accepts, because it
+ignored their `//nolint:gocritic` directives), and a phantom failure sends you editing correct code. If the guard
+fires, fix the toolchain with `mise install golangci-lint`; never chase the diff it reports.
+
 The hooks deliberately **skip generated and vendored artifacts** — the sass output under
 `frontend-admin/public/css/`, the vendored theme assets and lottie/geo JSON, and the coverage badges the CI bot
 writes. A fixer that "corrects" one of those fights the tool that regenerates it, and the drift comes straight

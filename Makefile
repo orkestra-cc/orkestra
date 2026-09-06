@@ -299,7 +299,23 @@ backend-credential-fallbacks:
 backend-openapi-check:
 	@cd backend && $(MAKE) openapi-check
 
+# The pinned golangci-lint is the one CI runs — `.mise.toml` is the single
+# source of truth and the workflow does `mise install golangci-lint` before
+# calling this target. A stale copy first on PATH silently changes the verdict
+# rather than failing: 2.12.2 reported three `deferInLoop` hits on lines the
+# pinned 2.13.2 accepts, because it did not honour their `//nolint:gocritic`
+# directives. That reads as a real regression and sends you editing correct
+# code. So the mismatch is refused up front, with the fix, instead of lying.
+GOLANGCI_PINNED := $(shell sed -n 's/^golangci-lint *= *"\(.*\)"/\1/p' .mise.toml)
+GOLANGCI_ACTUAL := $(shell golangci-lint version 2>/dev/null | sed -n 's/.*has version \([0-9.]*\).*/\1/p')
+
 backend-lint:
+	@if [ -n "$(GOLANGCI_PINNED)" ] && [ "$(GOLANGCI_ACTUAL)" != "$(GOLANGCI_PINNED)" ]; then \
+	  echo "✗ golangci-lint on PATH is '$(GOLANGCI_ACTUAL)', but .mise.toml pins $(GOLANGCI_PINNED)."; \
+	  echo "  Different versions disagree on real findings — fix the toolchain, don't chase the diff:"; \
+	    echo "    mise install golangci-lint"; \
+	  exit 1; \
+	fi
 	@cd backend && golangci-lint run --config=.golangci.yml
 
 # `-race` requires cgo. CI runners have CGO_ENABLED=1 by default, but the
