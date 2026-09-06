@@ -1203,7 +1203,9 @@
       "providersTitle": "Linked sign-ins",
       "providersSubtitle": "External identity providers",
       "devicesTitle": "Trusted devices",
-      "devicesSubtitle": "MFA skipped for 30 days"
+      "devicesSubtitle": "MFA skipped for 30 days",
+      "unavailable": "Couldn’t load — retry in a moment",
+      "dash": "—"
     },
     "passwordTab": {
       "title": "Change password",

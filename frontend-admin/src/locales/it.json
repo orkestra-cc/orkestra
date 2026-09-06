@@ -1203,7 +1203,9 @@
       "providersTitle": "Accessi collegati",
       "providersSubtitle": "Provider di identità esterni",
       "devicesTitle": "Dispositivi attendibili",
-      "devicesSubtitle": "MFA saltata per 30 giorni"
+      "devicesSubtitle": "MFA saltata per 30 giorni",
+      "unavailable": "Caricamento non riuscito — riprova tra poco",
+      "dash": "—"
     },
     "passwordTab": {
       "title": "Cambia password",

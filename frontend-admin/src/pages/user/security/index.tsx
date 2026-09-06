@@ -91,6 +91,15 @@ const SecurityPage = () => {
   const providerCount = authMethods.data?.oauthProviders?.length ?? 0;
   const trustedCount = trusted.data?.devices?.length ?? 0;
 
+  // A query that FAILED is not a zero, and on a security page that distinction
+  // is the whole point: `?? 0` alone would render a transient /auth-methods
+  // error as an authoritative "Two-factor: Off" over a warning accent, telling
+  // someone their account is unprotected when it is not. An errored tile shows
+  // an em dash and says so, and never takes an accent or a ribbon — those are
+  // claims about state, and a failed request has made no claim.
+  const dash = t('userSecurity.stats.dash');
+  const unavailable = t('userSecurity.stats.unavailable');
+
   const onTabChange = (key: string | null) => {
     const next = readTab(key);
     const sp = new URLSearchParams(searchParams);
@@ -118,21 +127,31 @@ const SecurityPage = () => {
         <Col md={6} lg={3}>
           <StatCard
             title={t('userSecurity.stats.mfaTitle')}
-            value={t(
-              hasMfa ? 'userSecurity.stats.mfaOn' : 'userSecurity.stats.mfaOff'
-            )}
+            value={
+              authMethods.isError
+                ? dash
+                : t(
+                    hasMfa
+                      ? 'userSecurity.stats.mfaOn'
+                      : 'userSecurity.stats.mfaOff'
+                  )
+            }
             icon={faShieldHalved}
-            color={hasMfa ? 'success' : 'warning'}
+            color={
+              authMethods.isError ? 'secondary' : hasMfa ? 'success' : 'warning'
+            }
             // Accent only when the state earns it — an account WITH a second
             // factor is the resting state, not an event.
-            accent={hasMfa ? undefined : 'warning'}
+            accent={!authMethods.isError && !hasMfa ? 'warning' : undefined}
             subtitle={
-              mfaMethods.length > 0
-                ? mfaMethods.join(' · ')
-                : t('userSecurity.stats.mfaSubtitleNone')
+              authMethods.isError
+                ? unavailable
+                : mfaMethods.length > 0
+                  ? mfaMethods.join(' · ')
+                  : t('userSecurity.stats.mfaSubtitleNone')
             }
             badge={
-              !hasMfa && mfaRequired
+              !authMethods.isError && !hasMfa && mfaRequired
                 ? { text: t('userSecurity.stats.mfaRequiredBadge') }
                 : undefined
             }
@@ -142,30 +161,42 @@ const SecurityPage = () => {
         <Col md={6} lg={3}>
           <StatCard
             title={t('userSecurity.stats.sessionsTitle')}
-            value={sessionCount}
+            value={sessions.isError ? dash : sessionCount}
             icon={faDesktop}
-            color="info"
-            subtitle={t('userSecurity.stats.sessionsSubtitle')}
+            color={sessions.isError ? 'secondary' : 'info'}
+            subtitle={
+              sessions.isError
+                ? unavailable
+                : t('userSecurity.stats.sessionsSubtitle')
+            }
             loading={sessions.isLoading}
           />
         </Col>
         <Col md={6} lg={3}>
           <StatCard
             title={t('userSecurity.stats.providersTitle')}
-            value={providerCount}
+            value={authMethods.isError ? dash : providerCount}
             icon={faLink}
-            color="primary"
-            subtitle={t('userSecurity.stats.providersSubtitle')}
+            color={authMethods.isError ? 'secondary' : 'primary'}
+            subtitle={
+              authMethods.isError
+                ? unavailable
+                : t('userSecurity.stats.providersSubtitle')
+            }
             loading={authMethods.isLoading}
           />
         </Col>
         <Col md={6} lg={3}>
           <StatCard
             title={t('userSecurity.stats.devicesTitle')}
-            value={trustedCount}
+            value={trusted.isError ? dash : trustedCount}
             icon={faLaptop}
             color="secondary"
-            subtitle={t('userSecurity.stats.devicesSubtitle')}
+            subtitle={
+              trusted.isError
+                ? unavailable
+                : t('userSecurity.stats.devicesSubtitle')
+            }
             loading={trusted.isLoading}
           />
         </Col>
