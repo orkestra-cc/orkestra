@@ -50,11 +50,13 @@ const FeedCardHeader = ({
               <p className="mb-0 fs-10">
                 {time} • {location} •{' '}
                 <FontAwesomeIcon
-                  icon={classNames({
-                    users: privacy === 'friends',
-                    lock: privacy === 'private',
-                    'globe-americas': privacy === 'public'
-                  }) as IconName}
+                  icon={
+                    classNames({
+                      users: privacy === 'friends',
+                      lock: privacy === 'private',
+                      'globe-americas': privacy === 'public'
+                    }) as IconName
+                  }
                 />
               </p>
             </div>

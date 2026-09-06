@@ -46,7 +46,7 @@
       .dark__text-#{$color} {
         color: $value !important;
       }
-      .dark__bg-card-dark{
+      .dark__bg-card-dark {
         background-color: $card-bg-dark !important;
       }
     }
@@ -56,7 +56,7 @@
         --#{$prefix}bg-opacity: #{$value} !important;
       }
     }
- 
+
     ::selection {
       background-color: var(--#{$prefix}warning);
     }

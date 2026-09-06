@@ -1,4 +1,3 @@
-
 import PageHeader from 'components/common/PageHeader';
 import { Alert, Card } from 'react-bootstrap';
 import Flex from 'components/common/Flex';
@@ -18,11 +17,10 @@ const Changelog = () => (
             <FontAwesomeIcon icon="exclamation-triangle" className="fs-6" />
             <div className="ms-3 flex-1">
               <h4 className="alert-heading">Before you update!</h4>
-              Backup your files and read the changelog before updating Orkestra on
-              your project. If you come across with any problems with Orkestra
-              template during the update, feel free to contact us at{' '}
-              <a href="mailto:support@orkestra.cc">support@orkestra.cc</a>
-              .
+              Backup your files and read the changelog before updating Orkestra
+              on your project. If you come across with any problems with
+              Orkestra template during the update, feel free to contact us at{' '}
+              <a href="mailto:support@orkestra.cc">support@orkestra.cc</a>.
             </div>
           </Flex>
         </Alert>

@@ -11,7 +11,7 @@ func TestServiceAccountRoleAllowed(t *testing.T) {
 		kind, role string
 		want       bool
 	}{
-		{"", "super_admin", true},                       // humans: existing rules apply
+		{"", "super_admin", true}, // humans: existing rules apply
 		{iface.UserKindService, "guest", true},
 		{iface.UserKindService, "operator", true},
 		{iface.UserKindService, "administrator", false}, // machines never privileged

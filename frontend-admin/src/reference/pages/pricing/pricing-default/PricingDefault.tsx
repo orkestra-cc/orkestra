@@ -70,7 +70,10 @@ const PricingDefault: React.FC = () => {
               </Col>
             ) : (
               pricing.map((pricingPlan: PricingPlan) => (
-                <PricingDefaultCard key={pricingPlan.id} pricing={pricingPlan} />
+                <PricingDefaultCard
+                  key={pricingPlan.id}
+                  pricing={pricingPlan}
+                />
               ))
             )}
             <Col xs={12} className="text-center">

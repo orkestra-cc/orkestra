@@ -1,4 +1,3 @@
-
 import { Col, Row } from 'react-bootstrap';
 import BasicLineChart from './BasicLineChart';
 import BasicAreaLineChart from './BasicAreaLineChart';

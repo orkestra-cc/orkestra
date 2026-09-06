@@ -70,7 +70,14 @@ const EventScheduleItem = ({
                 handleChange(index, 'startDate', newDate);
                 setValue(`ScheduleStartDate${index}`, newDate);
               }}
-              customInput={<DateInputWrapper formControlProps={{ placeholder: 'd/m/y', ...register(`ScheduleStartDate${index}`) }} />}
+              customInput={
+                <DateInputWrapper
+                  formControlProps={{
+                    placeholder: 'd/m/y',
+                    ...register(`ScheduleStartDate${index}`)
+                  }}
+                />
+              }
             />
           </Form.Group>
         </Col>
@@ -89,7 +96,14 @@ const EventScheduleItem = ({
                 handleChange(index, 'startTime', newDate);
                 setValue(`ScheduleStartTime${index}`, newDate);
               }}
-              customInput={<DateInputWrapper formControlProps={{ placeholder: 'H:i', ...register(`ScheduleStartTime${index}`) }} />}
+              customInput={
+                <DateInputWrapper
+                  formControlProps={{
+                    placeholder: 'H:i',
+                    ...register(`ScheduleStartTime${index}`)
+                  }}
+                />
+              }
             />
           </Form.Group>
         </Col>
@@ -103,7 +117,14 @@ const EventScheduleItem = ({
                 handleChange(index, 'endDate', newDate);
                 setValue(`ScheduleEndDate${index}`, newDate);
               }}
-              customInput={<DateInputWrapper formControlProps={{ placeholder: 'd/m/y', ...register(`ScheduleEndDate${index}`) }} />}
+              customInput={
+                <DateInputWrapper
+                  formControlProps={{
+                    placeholder: 'd/m/y',
+                    ...register(`ScheduleEndDate${index}`)
+                  }}
+                />
+              }
             />
           </Form.Group>
         </Col>
@@ -121,7 +142,14 @@ const EventScheduleItem = ({
                 handleChange(index, 'endTime', newDate);
                 setValue(`ScheduleEndTime${index}`, newDate);
               }}
-              customInput={<DateInputWrapper formControlProps={{ placeholder: 'H:i', ...register(`ScheduleEndTime${index}`) }} />}
+              customInput={
+                <DateInputWrapper
+                  formControlProps={{
+                    placeholder: 'H:i',
+                    ...register(`ScheduleEndTime${index}`)
+                  }}
+                />
+              }
             />
           </Form.Group>
         </Col>

@@ -8,7 +8,11 @@ interface KanbanColumnHeaderProps {
   itemCount: number;
 }
 
-const KanbanColumnHeader = ({ id, title, itemCount }: KanbanColumnHeaderProps) => {
+const KanbanColumnHeader = ({
+  id,
+  title,
+  itemCount
+}: KanbanColumnHeaderProps) => {
   const { removeKanbanColumn } = useKanbanContext();
 
   const handleRemoveColumn = () => {

@@ -1,4 +1,3 @@
-
 import { Col, Row } from 'react-bootstrap';
 import BasicHeatmapChart from './BasicHeatmapChart';
 import HeatmapSingleSeriesChart from './HeatmapSingleSeriesChart';

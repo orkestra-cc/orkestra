@@ -1,4 +1,3 @@
-
 import { Row, Col } from 'react-bootstrap';
 import Section from 'components/common/Section';
 import Slider from 'react-slick';
@@ -47,9 +46,11 @@ const Testimonial: React.FC = () => (
       <Col xs={10} lg={9} xl={8}>
         <Slider {...settings}>
           {isIterableArray(testimonials) &&
-            (testimonials as TestimonialItemProps[]).map((testimonial, index) => (
-              <TestimonialItem {...testimonial} key={index} />
-            ))}
+            (testimonials as TestimonialItemProps[]).map(
+              (testimonial, index) => (
+                <TestimonialItem {...testimonial} key={index} />
+              )
+            )}
         </Slider>
       </Col>
     </Row>

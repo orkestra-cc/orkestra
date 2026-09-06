@@ -54,7 +54,6 @@ const MessageTextArea = () => {
     setPreviewEmoji(false);
   };
 
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const date = new Date();
@@ -136,7 +135,6 @@ const MessageTextArea = () => {
             emojiStyle={'google' as EmojiStyle}
             width={354}
             height={435}
-
           />
         </div>
       )}
@@ -154,6 +152,5 @@ const MessageTextArea = () => {
     </Form>
   );
 };
-
 
 export default MessageTextArea;

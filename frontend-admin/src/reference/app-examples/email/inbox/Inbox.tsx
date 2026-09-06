@@ -1,4 +1,3 @@
-
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { IconName } from '@fortawesome/fontawesome-svg-core';
 import Flex from 'components/common/Flex';
@@ -32,7 +31,11 @@ interface InboxTitleProps {
   [key: string]: any;
 }
 
-const InboxTitle: React.FC<InboxTitleProps> = ({ className, children, ...rest }) => (
+const InboxTitle: React.FC<InboxTitleProps> = ({
+  className,
+  children,
+  ...rest
+}) => (
   <h5
     className={classNames(
       className,
@@ -97,7 +100,9 @@ const InboxElement: React.FC = () => {
     toggleIsAllSelected
   } = useBulkSelect(emailIds);
 
-  const handleActionButtonClick = (type: 'ARCHIVE' | 'DELETE' | 'READ' | 'SNOOZE') => {
+  const handleActionButtonClick = (
+    type: 'ARCHIVE' | 'DELETE' | 'READ' | 'SNOOZE'
+  ) => {
     emailDispatch({
       type,
       payload: selectedItems

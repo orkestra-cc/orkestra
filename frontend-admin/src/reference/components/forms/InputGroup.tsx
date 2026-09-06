@@ -1,4 +1,3 @@
-
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -319,7 +318,10 @@ const InputGroup = () => (
         title="Buttons with Dropdowns"
         light={false}
       />
-      <OrkestraComponentCard.Body code={buttonsWithDropdowsCode} language="jsx" />
+      <OrkestraComponentCard.Body
+        code={buttonsWithDropdowsCode}
+        language="jsx"
+      />
     </OrkestraComponentCard>
 
     <OrkestraComponentCard noGuttersBottom>

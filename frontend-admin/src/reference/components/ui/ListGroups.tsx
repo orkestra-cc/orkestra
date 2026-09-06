@@ -1,4 +1,3 @@
-
 import { Button, Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -132,7 +131,7 @@ const linkCode = `<ListGroup>
   <ListGroup.Item className='p-3 p-sm-4' data-bs-theme="light" as={Link} to='#!' action active>
     <Flex justifyContent="between">
       <h5 className="mb-1 text-white">List group · Bootstrap</h5>
-      
+
       <small>3 days ago</small>
     </Flex>
     <p className="mb-1">

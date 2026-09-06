@@ -27,7 +27,12 @@ interface ActionButtonProps {
   variant?: string;
 }
 
-const ActionButton = ({ tooltip, icon, handleClick, variant = 'tertiary' }: ActionButtonProps) => (
+const ActionButton = ({
+  tooltip,
+  icon,
+  handleClick,
+  variant = 'tertiary'
+}: ActionButtonProps) => (
   <OverlayTrigger
     overlay={<Tooltip style={{ position: 'fixed' }}>{tooltip}</Tooltip>}
   >
@@ -57,7 +62,11 @@ interface InboxRowProps {
   toggleSelectedItem: (id: number | string) => void;
 }
 
-const InboxRow = ({ email, isSelectedItem, toggleSelectedItem }: InboxRowProps) => {
+const InboxRow = ({
+  email,
+  isSelectedItem,
+  toggleSelectedItem
+}: InboxRowProps) => {
   const {
     id,
     img,
@@ -75,7 +84,9 @@ const InboxRow = ({ email, isSelectedItem, toggleSelectedItem }: InboxRowProps) 
 
   const [marked, setMarked] = useState(star);
 
-  const handleActionButtonClick = (type: 'ARCHIVE' | 'DELETE' | 'READ' | 'SNOOZE') => {
+  const handleActionButtonClick = (
+    type: 'ARCHIVE' | 'DELETE' | 'READ' | 'SNOOZE'
+  ) => {
     emailDispatch({
       type,
       payload: [id]
@@ -100,11 +111,11 @@ const InboxRow = ({ email, isSelectedItem, toggleSelectedItem }: InboxRowProps) 
     }
 
     toast.success(
-      <div className="flex-1 py-2">
-        Conversation marked as {action}
-      </div>, {
-      theme: 'colored'
-    });
+      <div className="flex-1 py-2">Conversation marked as {action}</div>,
+      {
+        theme: 'colored'
+      }
+    );
   };
 
   return (

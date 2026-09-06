@@ -102,7 +102,11 @@ const ThreadInfo = ({ thread }: ThreadInfoProps) => {
             alignItems="center"
             className="position-relative p-3 border-bottom hover-actions-trigger"
           >
-            <Avatar className={'status' in user ? user.status : undefined} size="xl" src={user.avatarSrc} />
+            <Avatar
+              className={'status' in user ? user.status : undefined}
+              size="xl"
+              src={user.avatarSrc}
+            />
             <Flex className="ms-2 flex-between-center flex-1">
               <h6 className="mb-0">
                 <Link
@@ -268,6 +272,5 @@ const ThreadInfo = ({ thread }: ThreadInfoProps) => {
     </div>
   );
 };
-
 
 export default ThreadInfo;

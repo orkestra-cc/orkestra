@@ -17,7 +17,7 @@ const ChatTab: React.FC = () => {
 
   const handleSelect = (e: string | null) => {
     if (!e) return;
-    
+
     setHideSidebar(false);
     setIsOpenThreadInfo(false);
     const thread = threads.find(thread => thread.id === parseInt(e));

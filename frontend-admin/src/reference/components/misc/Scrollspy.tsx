@@ -153,7 +153,12 @@ export default Scrollspy;
 
 function ScrollspyExample() {
   const [sections] = useState(['Home', 'Profile', 'Messages', 'Settings']);
-  const sectionRefs = [useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null)];
+  const sectionRefs = [
+    useRef<HTMLDivElement>(null),
+    useRef<HTMLDivElement>(null),
+    useRef<HTMLDivElement>(null),
+    useRef<HTMLDivElement>(null)
+  ];
 
   const activeSection = useScrollSpy({
     sectionElementRefs: sectionRefs as any,

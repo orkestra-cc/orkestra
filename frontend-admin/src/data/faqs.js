@@ -152,7 +152,7 @@ export const faqDoc = [
   {
     id: 8,
     title: 'How to compile SCSS files with Orkestra React?',
-    description: `<p class="mb-0">To compile scss files in Orkestra react run npm run <code>build:css</code> from your terminal, or you can watch the scss files by running npm run <code>watch:css</code> to a separate terminal. 
+    description: `<p class="mb-0">To compile scss files in Orkestra react run npm run <code>build:css</code> from your terminal, or you can watch the scss files by running npm run <code>watch:css</code> to a separate terminal.
     Check the link below to have a look on the styling documentation in Orkestra React <a target='_blank' href='//${homepage}/documentation/styling'> ${homepage}/documentation/styling</a>
     </p>`
   },
@@ -170,9 +170,9 @@ export const faqDoc = [
   {
     id: 10,
     title: 'Can I use Orkestra React with Next.js?',
-    description: `<p>Yes, Orkestra React is compatible with Next.js. We provide a starter 
+    description: `<p>Yes, Orkestra React is compatible with Next.js. We provide a starter
     version for Next.js (App Router) with basic navigation and layout setups. If you want
-     the starter version, please reach out to us with your purchase ID at 
+     the starter version, please reach out to us with your purchase ID at
      <a href="mailto:support@orkestra.cc">support@orkestra.cc</a>.
      </p>
     `

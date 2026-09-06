@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { BarChart } from 'echarts/charts';

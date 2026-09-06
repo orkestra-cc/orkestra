@@ -1,10 +1,7 @@
-
 import MigrationSidebar from './MigrationSidebar';
 import { Row, Col } from 'react-bootstrap';
 import MigrationToVite from './MigrationToVite';
 import MigrationToNineteen from './MigrationToNineteen';
-
-
 
 const Migration = () => (
   <Row className="g-3">

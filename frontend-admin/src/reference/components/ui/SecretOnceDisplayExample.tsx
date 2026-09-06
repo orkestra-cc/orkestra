@@ -74,8 +74,8 @@ const SecretOnceDisplayExample = () => {
       <OrkestraComponentCard>
         <OrkestraComponentCard.Header title="Basic usage" light={false}>
           <p className="mb-0">
-            <code>ack</code>/<code>onAckChange</code> are fully controlled —
-            the component never tracks acknowledgement internally.
+            <code>ack</code>/<code>onAckChange</code> are fully controlled — the
+            component never tracks acknowledgement internally.
           </p>
         </OrkestraComponentCard.Header>
         <OrkestraComponentCard.Body
@@ -92,8 +92,8 @@ const SecretOnceDisplayExample = () => {
         >
           <p className="mb-0">
             Pass <code>secondaryLabel</code>/<code>secondaryValue</code> for a
-            companion field (e.g. a client ID) rendered above the secret —
-            also copyable on its own.
+            companion field (e.g. a client ID) rendered above the secret — also
+            copyable on its own.
           </p>
         </OrkestraComponentCard.Header>
         <OrkestraComponentCard.Body
@@ -110,9 +110,9 @@ const SecretOnceDisplayExample = () => {
         >
           <p className="mb-0">
             The caller reads back its own <code>ack</code> state to disable a
-            confirm button until the operator has acknowledged saving the
-            secret — the same shape as{' '}
-            <code>MfaEnrollWizard</code>'s close-blocked-until-ack modal.
+            confirm button until the operator has acknowledged saving the secret
+            — the same shape as <code>MfaEnrollWizard</code>'s
+            close-blocked-until-ack modal.
           </p>
         </OrkestraComponentCard.Header>
         <OrkestraComponentCard.Body

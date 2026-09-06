@@ -17,8 +17,13 @@ const NavbarStandard: React.FC = () => {
   const [navbarCollapsed, setNavbarCollapsed] = useState(true);
 
   useEffect(() => {
-    window.addEventListener('scroll', handleNavbarTransparency, { passive: true } as AddEventListenerOptions);
-    return () => window.removeEventListener('scroll', handleNavbarTransparency, { passive: true } as EventListenerOptions);
+    window.addEventListener('scroll', handleNavbarTransparency, {
+      passive: true
+    } as AddEventListenerOptions);
+    return () =>
+      window.removeEventListener('scroll', handleNavbarTransparency, {
+        passive: true
+      } as EventListenerOptions);
   }, []);
 
   return (

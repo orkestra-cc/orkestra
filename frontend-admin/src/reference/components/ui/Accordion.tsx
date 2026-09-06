@@ -1,4 +1,3 @@
-
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
@@ -97,7 +96,7 @@ function CustomToggle({ children, eventKey }) {
   const decoratedOnClick = useAccordionButton(eventKey)
   return (
     <Button
-      variant='orkestra-primary' 
+      variant='orkestra-primary'
       onClick={decoratedOnClick}
     >
       {children}

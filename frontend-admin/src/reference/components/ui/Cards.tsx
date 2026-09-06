@@ -177,7 +177,8 @@ const Card = () => {
       >
         <Button
           href={`${reactBootstrapDocsUrl}/components/cards/`}
-          target="_blank" rel="noopener noreferrer"
+          target="_blank"
+          rel="noopener noreferrer"
           variant="link"
           size="sm"
           className="ps-0"
@@ -200,7 +201,10 @@ const Card = () => {
         </Col>
         <Col lg={6}>
           <OrkestraComponentCard className="h-100">
-            <OrkestraComponentCard.Header title="Card with image" light={false} />
+            <OrkestraComponentCard.Header
+              title="Card with image"
+              light={false}
+            />
             <OrkestraComponentCard.Body
               code={cardWithImageCode}
               language="jsx"

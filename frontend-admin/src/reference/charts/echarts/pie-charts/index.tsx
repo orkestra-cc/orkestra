@@ -1,4 +1,3 @@
-
 import { Col, Row } from 'react-bootstrap';
 import DoughnutChart from './DoughnutChart';
 import DoughnutRoundedChart from './DoughnutRoundedChart';

@@ -1,4 +1,3 @@
-
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -14,7 +13,7 @@ const exampleCode = `
 const minmaxCode = `
 <>
   <Form.Label>Example Range</Form.Label>
-  <Form.Range 
+  <Form.Range
     min='0'
     max='5'
   />
@@ -23,7 +22,7 @@ const minmaxCode = `
 const stepsCode = `
 <>
   <Form.Label>Example Range</Form.Label>
-  <Form.Range 
+  <Form.Range
     min='0'
     max='5'
     step="0.5"

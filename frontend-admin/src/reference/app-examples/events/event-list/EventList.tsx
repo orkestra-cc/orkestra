@@ -1,4 +1,3 @@
-
 import { Card, Col, Row, Form } from 'react-bootstrap';
 import events from 'data/events/events';
 import Event from './Event';

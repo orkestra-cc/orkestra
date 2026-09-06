@@ -1,4 +1,3 @@
-
 import { Card, Col, Row, Spinner } from 'react-bootstrap';
 import PricingAltHeader from './PricingAltHeader';
 import { Link } from 'react-router';

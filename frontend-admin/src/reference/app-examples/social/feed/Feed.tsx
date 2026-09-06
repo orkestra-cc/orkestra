@@ -1,4 +1,3 @@
-
 import { Col, Row } from 'react-bootstrap';
 import events from 'data/events/events';
 import BirthdayNotice from './BirthdatNotice';

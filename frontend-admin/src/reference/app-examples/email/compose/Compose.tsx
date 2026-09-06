@@ -142,7 +142,9 @@ const Compose = ({ setShowForm, title, bodyClassName }: ComposeProps) => {
                 type="file"
                 multiple
                 className="d-none"
-                onChange={(e) => handleAddAttachment((e.target as HTMLInputElement).files)}
+                onChange={e =>
+                  handleAddAttachment((e.target as HTMLInputElement).files)
+                }
               />
               <OverlayTrigger
                 overlay={
@@ -170,7 +172,9 @@ const Compose = ({ setShowForm, title, bodyClassName }: ComposeProps) => {
                 className="d-none"
                 accept="image/*"
                 multiple
-                onChange={(e) => handleAddAttachment((e.target as HTMLInputElement).files)}
+                onChange={e =>
+                  handleAddAttachment((e.target as HTMLInputElement).files)
+                }
               />
               <OverlayTrigger
                 overlay={

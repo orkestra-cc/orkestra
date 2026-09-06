@@ -231,28 +231,23 @@ $utilities: map_merge(
       local-vars: (
         'bg-opacity': 1
       ),
-      values:
-        map-merge(
+      values: map-merge(
           $utilities-bg-colors,
           (
             'transparent': transparent,
-            'body-secondary':
-              rgba(
+            'body-secondary': rgba(
                 var(--#{$prefix}secondary-bg-rgb),
                 var(--#{$prefix}bg-opacity)
               ),
-            'body-tertiary':
-              rgba(
+            'body-tertiary': rgba(
                 var(--#{$prefix}tertiary-bg-rgb),
                 var(--#{$prefix}bg-opacity)
               ),
-            'body-emphasis':
-              rgba(
+            'body-emphasis': rgba(
                 var(--#{$prefix}emphasis-bg-rgb),
                 var(--#{$prefix}bg-opacity)
               ),
-            'body-quaternary':
-              rgba(
+            'body-quaternary': rgba(
                 var(--#{$prefix}quaternary-bg-rgb),
                 var(--#{$prefix}bg-opacity)
               )

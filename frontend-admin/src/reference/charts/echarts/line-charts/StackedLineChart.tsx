@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { LineChart } from 'echarts/charts';
 import {
@@ -160,7 +159,7 @@ const chartCode = `function ChartOptions() {
     ],
     grid: { right: 10, left: 5, bottom: 5, top: 8, containLabel: true }
   });
-  
+
   return (
     <ReactEchart
       echarts={echarts}

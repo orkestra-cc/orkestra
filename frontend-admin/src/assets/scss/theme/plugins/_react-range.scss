@@ -65,7 +65,7 @@
       font-weight: $font-weight-normal;
       @include border-radius($tooltip-border-radius);
 
-      html[data-bs-theme="dark"] &  {
+      html[data-bs-theme='dark'] & {
         background: map-get($dark-grays, '200');
         color: $white;
       }

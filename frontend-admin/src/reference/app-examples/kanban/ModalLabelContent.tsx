@@ -1,4 +1,3 @@
-
 import { labels } from 'data/kanban';
 import Flex from 'components/common/Flex';
 import SubtleBadge from 'components/common/SubtleBadge';
@@ -19,7 +18,11 @@ const ModalLabelContent = () => {
   return (
     <Flex>
       {(labels as Label[]).slice(0, 3).map((label: Label) => (
-        <SubtleBadge bg={label.type as any} className="me-1 py-2" key={label.text}>
+        <SubtleBadge
+          bg={label.type as any}
+          className="me-1 py-2"
+          key={label.text}
+        >
           {label.text}
         </SubtleBadge>
       ))}

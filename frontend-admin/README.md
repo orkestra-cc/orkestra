@@ -5,8 +5,9 @@ A comprehensive, feature-rich admin dashboard template built with React 19 and B
 ## ✨ Features
 
 ### 🎛️ Multiple Dashboard Types
+
 - **Default Dashboard** - General business metrics and analytics
-- **Analytics Dashboard** - Web traffic and user behavior insights  
+- **Analytics Dashboard** - Web traffic and user behavior insights
 - **CRM Dashboard** - Sales pipeline and customer relationship management
 - **E-commerce Dashboard** - Product catalog and sales analytics
 - **LMS Dashboard** - Learning management and course tracking
@@ -15,6 +16,7 @@ A comprehensive, feature-rich admin dashboard template built with React 19 and B
 - **Support Desk** - Help desk and ticket management system
 
 ### 🚀 Complete Application Suite
+
 - **📅 Calendar** - Event scheduling with FullCalendar integration
 - **💬 Chat** - Real-time messaging system with thread management
 - **📧 Email** - Full-featured email client with inbox and compose
@@ -25,6 +27,7 @@ A comprehensive, feature-rich admin dashboard template built with React 19 and B
 - **🎫 Support System** - Comprehensive help desk and customer support
 
 ### 🎨 Modern UI Components
+
 - **100+ Components** - Comprehensive Bootstrap 5 component library
 - **Interactive Charts** - ECharts, Chart.js, and D3.js integrations
 - **Advanced Tables** - Sortable, searchable, and paginated data tables
@@ -33,6 +36,7 @@ A comprehensive, feature-rich admin dashboard template built with React 19 and B
 - **Date & Time** - Advanced date pickers and calendar components
 
 ### 🌟 Theme & Layout Options
+
 - **Light/Dark/Auto Themes** - Complete theming system with auto-detection
 - **RTL Support** - Right-to-left language compatibility
 - **9 Layout Variations** - Vertical nav, top nav, combo nav, and more
@@ -42,6 +46,7 @@ A comprehensive, feature-rich admin dashboard template built with React 19 and B
 ## 🛠️ Technology Stack
 
 ### Core Technologies
+
 - **React 19.1.0** - Latest React with functional components and hooks
 - **Vite 8** (rolldown) - Lightning-fast build tool and development server
 - **React Bootstrap 2.10.10** - Bootstrap components for React
@@ -49,6 +54,7 @@ A comprehensive, feature-rich admin dashboard template built with React 19 and B
 - **React Router 7.7.0** - Declarative routing for React
 
 ### Key Libraries
+
 - **Charts**: ECharts, Chart.js, D3.js for data visualization
 - **Forms**: React Hook Form + Yup for form handling and validation
 - **Maps**: Google Maps API and Leaflet for mapping
@@ -58,6 +64,7 @@ A comprehensive, feature-rich admin dashboard template built with React 19 and B
 - **Icons**: FontAwesome and React Icons
 
 ### SCSS Customization
+
 Override default styles in `src/assets/scss/_user-variables.scss`:
 
 ```scss
@@ -73,14 +80,16 @@ $navbar-padding-y: 1rem;
 ## 📱 Responsive Design
 
 React Orkestra is built with a mobile-first approach:
+
 - **Mobile** (< 576px) - Optimized mobile experience
-- **Tablet** (≥ 576px) - Touch-friendly tablet interface  
+- **Tablet** (≥ 576px) - Touch-friendly tablet interface
 - **Desktop** (≥ 768px) - Full desktop functionality
 - **Large Desktop** (≥ 1200px) - Enhanced large screen experience
 
 ## 📚 Documentation
 
 For detailed documentation, visit the `/documentation` section in the application, which includes:
+
 - Component showcase with live examples
 - Configuration guides
 - Styling guidelines

@@ -1,4 +1,3 @@
-
 import WeeklySales from 'components/dashboards/default/WeeklySales';
 import { Row, Col } from 'react-bootstrap';
 import {

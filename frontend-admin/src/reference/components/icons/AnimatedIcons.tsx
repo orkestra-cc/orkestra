@@ -49,7 +49,7 @@ const loadingCode = `function Animated (){
 };`;
 
 const featuredAnimationCode = `function Animated (){
-  
+
   return (
     <Row className="align-items-center">
       <Col lg={4} className="d-flex justify-content-center">

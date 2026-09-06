@@ -1,4 +1,3 @@
-
 import { Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
@@ -177,8 +176,8 @@ const Background = () => {
                         color === 'light'
                           ? 'text-black'
                           : color === 'dark'
-                          ? 'text-light'
-                          : `text-${color}`
+                            ? 'text-light'
+                            : `text-${color}`
                       }
                     >
                       .bg-{color}-subtle

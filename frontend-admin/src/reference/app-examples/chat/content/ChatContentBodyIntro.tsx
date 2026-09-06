@@ -1,4 +1,3 @@
-
 import { Link } from 'react-router';
 import Avatar from 'components/common/Avatar';
 import Flex from 'components/common/Flex';

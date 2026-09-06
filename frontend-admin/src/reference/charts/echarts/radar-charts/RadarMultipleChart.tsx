@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { RadarChart } from 'echarts/charts';
@@ -33,8 +32,8 @@ function tooltipFormatter(params: any) {
   return `<strong > ${params.name} </strong>
   <div class="fs-10 text-600">
     <strong >${indicators[params.seriesIndex][0]}</strong>: ${
-    params.value[0]
-  }  <br>
+      params.value[0]
+    }  <br>
     <strong>${indicators[num][1]}</strong>: ${params.value[1]}  <br>
     <strong>${indicators[num][2]}</strong>: ${params.value[2]}  <br>
     <strong>${indicators[num][3]}</strong>: ${params.value[3]}  <br>
@@ -231,7 +230,7 @@ const chartCode = `function ChartOptions() {
   });
 
     //------- Responsive on window resize -------
-    
+
     const updateDimensions = () => {
       chartRef.current.getEchartsInstance().setOption({
         radar: getCenter().map(item => ({
@@ -239,7 +238,7 @@ const chartCode = `function ChartOptions() {
         }))
       });
     }
-  
+
     useEffect(() => {
       window.addEventListener('resize', updateDimensions, { passive: true });
       return () => window.removeEventListener('resize', updateDimensions);
@@ -264,7 +263,10 @@ const chartCode = `function ChartOptions() {
 const RadarMultipleChart = () => {
   return (
     <OrkestraComponentCard dir="ltr">
-      <OrkestraComponentCard.Header title="Radar multiple chart" light={false} />
+      <OrkestraComponentCard.Header
+        title="Radar multiple chart"
+        light={false}
+      />
       <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"

@@ -5,13 +5,24 @@ import KanbanModal from './KanbanModal';
 import IconButton from 'components/common/IconButton';
 import Bowser from 'bowser';
 import { useKanbanContext } from 'providers/KanbanProvider';
-import { DndContext, closestCorners, DragOverlay, DragStartEvent, DragOverEvent, DragEndEvent, UniqueIdentifier } from '@dnd-kit/core';
+import {
+  DndContext,
+  closestCorners,
+  DragOverlay,
+  DragStartEvent,
+  DragOverEvent,
+  DragEndEvent,
+  UniqueIdentifier
+} from '@dnd-kit/core';
 
 import { useGetDndSensor } from 'hooks/ui/useGetDndSensor';
 
 import { arrayMove } from '@dnd-kit/sortable';
 import TaskCard from './TaskCard';
-import type { KanbanItem, TaskCard as TaskCardType } from 'reducers/kanbanReducer';
+import type {
+  KanbanItem,
+  TaskCard as TaskCardType
+} from 'reducers/kanbanReducer';
 
 interface ListData {
   title?: string;
@@ -69,7 +80,8 @@ const KanbanContainer = () => {
 
   const findColumn = (id: UniqueIdentifier) => {
     return kanbanItems.find(
-      (col: KanbanItem) => col.items.some((item: TaskCardType) => item.id === id) || col.id === id
+      (col: KanbanItem) =>
+        col.items.some((item: TaskCardType) => item.id === id) || col.id === id
     );
   };
 
@@ -125,10 +137,16 @@ const KanbanContainer = () => {
     if (!activeColumnId || !overColumnId) return;
 
     if (activeColumnId === overColumnId) {
-      const column = kanbanItems.find((col: KanbanItem) => col.id === activeColumnId);
+      const column = kanbanItems.find(
+        (col: KanbanItem) => col.id === activeColumnId
+      );
       if (!column) return;
-      const oldIndex = column.items.findIndex((item: TaskCardType) => item.id === active.id);
-      const newIndex = column.items.findIndex((item: TaskCardType) => item.id === over.id);
+      const oldIndex = column.items.findIndex(
+        (item: TaskCardType) => item.id === active.id
+      );
+      const newIndex = column.items.findIndex(
+        (item: TaskCardType) => item.id === over.id
+      );
 
       if (oldIndex < 0 || newIndex < 0) return;
 
@@ -136,11 +154,17 @@ const KanbanContainer = () => {
 
       updateSingleColumn(column.id.toString(), reorderedItems);
     } else {
-      const sourceColumn = kanbanItems.find((col: KanbanItem) => col.id === activeColumnId);
-      const destColumn = kanbanItems.find((col: KanbanItem) => col.id === overColumnId);
+      const sourceColumn = kanbanItems.find(
+        (col: KanbanItem) => col.id === activeColumnId
+      );
+      const destColumn = kanbanItems.find(
+        (col: KanbanItem) => col.id === overColumnId
+      );
       if (!sourceColumn || !destColumn) return;
 
-      const activeTask = sourceColumn.items.find((item: TaskCardType) => item.id === active.id);
+      const activeTask = sourceColumn.items.find(
+        (item: TaskCardType) => item.id === active.id
+      );
       if (!activeTask) return;
 
       const updatedSourceItems = sourceColumn.items.filter(

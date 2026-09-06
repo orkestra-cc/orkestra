@@ -1,4 +1,3 @@
-
 import FeedCardHeader from './FeedCardHeader';
 import { Card } from 'react-bootstrap';
 import FeedCardContent from './FeedCardContent';

@@ -12,7 +12,13 @@ interface FeedEventProps {
   eventImg?: string;
 }
 
-const FeedEvent = ({ title, calender, author, regFee, eventImg }: FeedEventProps) => (
+const FeedEvent = ({
+  title,
+  calender,
+  author,
+  regFee,
+  eventImg
+}: FeedEventProps) => (
   <Card className="p-0 shadow-none">
     {!!eventImg && <img className="card-img-top" src={eventImg} alt="" />}
     <Card.Body className="overflow-hidden">

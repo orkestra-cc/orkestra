@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
-import { getMe, type MeResponse } from '@/api/auth';
-import { useAuth } from '@/auth/useAuth';
+import { useQuery } from "@tanstack/react-query";
+import { getMe, type MeResponse } from "@/api/auth";
+import { useAuth } from "@/auth/useAuth";
 
 // Hook for the authenticated user profile. Disabled when no access
 // token is in memory so anonymous pages don't fire a guaranteed-401.
@@ -9,7 +9,7 @@ import { useAuth } from '@/auth/useAuth';
 export function useMe() {
   const { isAuthenticated } = useAuth();
   return useQuery<MeResponse>({
-    queryKey: ['me'],
+    queryKey: ["me"],
     queryFn: ({ signal }) => getMe(signal),
     enabled: isAuthenticated,
     staleTime: 60_000,

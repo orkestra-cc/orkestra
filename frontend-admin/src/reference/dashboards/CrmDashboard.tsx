@@ -1,4 +1,3 @@
-
 import { Col, Row } from 'react-bootstrap';
 import CrmStats from 'components/dashboards/crm/CrmStats';
 import DealForecastBar from 'components/dashboards/crm/DealForecastBar';

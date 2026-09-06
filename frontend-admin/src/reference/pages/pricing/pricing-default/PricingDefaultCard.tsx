@@ -1,4 +1,3 @@
-
 import { Col, Button } from 'react-bootstrap';
 import classNames from 'classnames';
 import { Link } from 'react-router';
@@ -48,7 +47,9 @@ const PricingDefaultCard: React.FC<PricingDefaultCardProps> = ({
       className={classNames('border-top border-bottom', {
         'dark__bg-1000 px-4 px-lg-0': isFeatured
       })}
-      style={{ backgroundColor: isFeatured ? 'rgba(115, 255, 236, 0.18)' : undefined }}
+      style={{
+        backgroundColor: isFeatured ? 'rgba(115, 255, 236, 0.18)' : undefined
+      }}
     >
       <div className="h100">
         <div className="text-center p-4">

@@ -1,4 +1,3 @@
-
 import { Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import Avatar, { AvatarGroup } from 'components/common/Avatar';
@@ -9,30 +8,30 @@ import user3 from 'assets/img/team/3.jpg';
 
 const circularCode = `<Avatar
   src={user1}
-  rounded="circle" 
-  size="4xl" 
+  rounded="circle"
+  size="4xl"
 />`;
 
 const squareCode = `<Avatar
-  src={user2} 
-  rounded="0" 
-  size="4xl"  
+  src={user2}
+  rounded="0"
+  size="4xl"
 />`;
 
 const softCode = `<Avatar
   src={user3}
   rounded="soft"
-  size="4xl"  
+  size="4xl"
 />`;
 
 const contentCode = `<Avatar
-  size="4xl" 
+  size="4xl"
   name="12+"
   isExact
 />`;
 
 const nameCode = `<Avatar
-  size="4xl" 
+  size="4xl"
   name="Emma Watson"
 />`;
 

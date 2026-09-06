@@ -1,4 +1,3 @@
-
 import { Button, Card, Form } from 'react-bootstrap';
 
 const TicketFilteringForm = () => {

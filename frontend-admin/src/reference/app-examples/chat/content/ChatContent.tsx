@@ -1,4 +1,3 @@
-
 import { Tab } from 'react-bootstrap';
 import ChatContentHeader from './ChatContentHeader';
 import threads from 'data/chat/threads';

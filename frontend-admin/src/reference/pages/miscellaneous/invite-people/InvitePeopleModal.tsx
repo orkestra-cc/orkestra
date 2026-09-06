@@ -7,7 +7,10 @@ interface InvitePeopleModalProps {
   setShow: (show: boolean) => void;
 }
 
-const InvitePeopleModal: React.FC<InvitePeopleModalProps> = ({ show, setShow }) => {
+const InvitePeopleModal: React.FC<InvitePeopleModalProps> = ({
+  show,
+  setShow
+}) => {
   const [copyLinkText] = useState('https://orkestra.cc/invited');
   const copyRef = useRef<HTMLInputElement>(null);
 
