@@ -12,7 +12,7 @@ import {
   type TrustedDevice
 } from 'store/api/deviceTrustApi';
 import SecurityEmptyState from './SecurityEmptyState';
-import SecurityTable from './SecurityTable';
+import SecurityTable, { byTimestamp } from './SecurityTable';
 
 // TrustedDevicesTab shows the "remember this device 30d" grants the
 // user holds. Each grant lets the user skip the MFA prompt on the
@@ -81,14 +81,19 @@ const TrustedDevicesTab = () => {
       )
     },
     {
-      accessorKey: 'trustedAt',
+      id: 'trustedAt',
+      // Formatted accessor + timestamp comparator — see byTimestamp.
+      accessorFn: d => formatDate(d.trustedAt),
+      sortingFn: byTimestamp<TrustedDevice>(d => d.trustedAt),
       header: t('userSecurity.trustedDevicesTab.colTrustedSince'),
       cell: ({ row: { original } }: CellContext<TrustedDevice, unknown>) => (
         <span className="text-700">{formatDate(original.trustedAt)}</span>
       )
     },
     {
-      accessorKey: 'trustedUntil',
+      id: 'trustedUntil',
+      accessorFn: d => formatDate(d.trustedUntil),
+      sortingFn: byTimestamp<TrustedDevice>(d => d.trustedUntil),
       header: t('userSecurity.trustedDevicesTab.colExpires'),
       cell: ({ row: { original } }: CellContext<TrustedDevice, unknown>) => (
         <span className="text-700">{formatDate(original.trustedUntil)}</span>

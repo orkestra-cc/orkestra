@@ -30,7 +30,7 @@ import {
   type SelfAuthOAuthProvider
 } from 'store/api/authApi';
 import SecurityEmptyState from './SecurityEmptyState';
-import SecurityTable from './SecurityTable';
+import SecurityTable, { byTimestamp } from './SecurityTable';
 
 // Provider brand names — proper nouns, intentionally not translated.
 const PROVIDER_LABELS: Record<OAuthProvider, string> = {
@@ -225,7 +225,12 @@ const LinkedProvidersTab = () => {
       )
     },
     {
-      accessorKey: 'linkedAt',
+      id: 'linkedAt',
+      // Formatted accessor + timestamp comparator — see byTimestamp. This
+      // table is compact (no search box) today; keeping the idiom uniform is
+      // what stops flipping that flag from reintroducing the bug.
+      accessorFn: p => formatDate(p.linkedAt),
+      sortingFn: byTimestamp<SelfAuthOAuthProvider>(p => p.linkedAt),
       header: t('userSecurity.linkedProvidersTab.colLinked'),
       cell: ({
         row: { original }

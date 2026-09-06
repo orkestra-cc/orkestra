@@ -1,5 +1,5 @@
 import { Col, Row } from 'react-bootstrap';
-import { ColumnDef } from '@tanstack/react-table';
+import { ColumnDef, Row as TableRow } from '@tanstack/react-table';
 import AdvanceTable from 'components/common/advance-table/AdvanceTable';
 import AdvanceTableFooter from 'components/common/advance-table/AdvanceTableFooter';
 import AdvanceTableSearchBox from 'components/common/advance-table/AdvanceTableSearchBox';
@@ -21,6 +21,24 @@ interface SecurityTableProps<T> {
   // never earns its line.
   compact?: boolean;
 }
+
+// Sort a date column on its underlying timestamp.
+//
+// `useAdvanceTable`'s global filter matches on cell VALUES (`cell.getValue()`),
+// not on rendered text, so a date column whose accessor returns the raw ISO
+// string is searchable only by a string the operator can never see: on staging,
+// typing the "10:0" printed in the cell matched nothing, while "08:0" — the UTC
+// time behind it — returned that very row. Date columns therefore accessor the
+// FORMATTED text, which makes search match what is on screen, and sort through
+// this comparator so order stays chronological instead of going lexicographic
+// on the formatted string ("Sep" before "Oct", "01" before "31 Dec").
+export const byTimestamp =
+  <T,>(pick: (row: T) => string | undefined) =>
+  (a: TableRow<T>, b: TableRow<T>) => {
+    const ta = new Date(pick(a.original) ?? 0).getTime() || 0;
+    const tb = new Date(pick(b.original) ?? 0).getTime() || 0;
+    return ta - tb;
+  };
 
 const SecurityTable = <T,>({
   data,
