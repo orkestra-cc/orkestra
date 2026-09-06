@@ -81,7 +81,11 @@ describe('SecurityPage summary row', () => {
     );
     renderWithProviders(<SecurityPage />);
 
-    await screen.findByText(/signed-in browsers and devices|couldn’t load/i);
+    // Anchor on the ERROR copy, not on an alternation that includes the
+    // healthy subtitle: the tile renders that subtitle while the query is
+    // still in flight, so the alternation resolves on first paint and the
+    // assertions below would race a tile that is merely loading.
+    await screen.findByText(/couldn’t load/i);
     // "active sessions" also appears in the page subtitle — take the match
     // that actually sits inside a KPI tile.
     const sessionsTile = screen
