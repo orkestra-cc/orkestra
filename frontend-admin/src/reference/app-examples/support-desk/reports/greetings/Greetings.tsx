@@ -1,4 +1,3 @@
-
 import { Card, Col, Row } from 'react-bootstrap';
 import greetingsImg from 'assets/img/illustrations/reports-greeting.png';
 import GreetingsDate from './GreetingDate';

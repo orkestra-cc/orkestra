@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { rgbaColor } from 'helpers/utils';
@@ -55,7 +54,7 @@ const chartCode = `function ChartOptions() {
     'November',
     'December'
   ];
-  
+
   const data = [1272, 1301, 1402, 1216, 1086, 1236, 1219, 1330, 1367, 1416, 1297, 1204];
 
   const getOption = () => ({
@@ -163,7 +162,10 @@ const chartCode = `function ChartOptions() {
 const BasicAreaLineChart = () => {
   return (
     <OrkestraComponentCard>
-      <OrkestraComponentCard.Header title="Basic area line chart" light={false} />
+      <OrkestraComponentCard.Header
+        title="Basic area line chart"
+        light={false}
+      />
       <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"

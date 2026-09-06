@@ -1,4 +1,3 @@
-
 import { Button, Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -282,7 +281,10 @@ const Modals = () => (
             title="Custom Close Button"
             light={false}
           />
-          <OrkestraComponentCard.Body code={customCloseBtnCode} language="jsx" />
+          <OrkestraComponentCard.Body
+            code={customCloseBtnCode}
+            language="jsx"
+          />
         </OrkestraComponentCard>
       </Col>
     </Row>

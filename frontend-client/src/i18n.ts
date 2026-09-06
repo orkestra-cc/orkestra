@@ -1,9 +1,9 @@
-import i18n from 'i18next';
-import LanguageDetector from 'i18next-browser-languagedetector';
-import { initReactI18next } from 'react-i18next';
+import i18n from "i18next";
+import LanguageDetector from "i18next-browser-languagedetector";
+import { initReactI18next } from "react-i18next";
 
-import en from '@/locales/en.json';
-import it from '@/locales/it.json';
+import en from "@/locales/en.json";
+import it from "@/locales/it.json";
 
 // react-i18next bootstrap. Italian is the default; English is the fallback
 // so a missing key never renders as a raw lookup string. Detection order is
@@ -19,14 +19,14 @@ void i18n
       en: { translation: en },
       it: { translation: it },
     },
-    fallbackLng: 'en',
-    supportedLngs: ['it', 'en'],
+    fallbackLng: "en",
+    supportedLngs: ["it", "en"],
     interpolation: { escapeValue: false },
     detection: {
-      order: ['querystring', 'cookie', 'navigator', 'htmlTag'],
-      caches: ['cookie'],
-      lookupQuerystring: 'lang',
-      lookupCookie: 'orkestra_client_lang',
+      order: ["querystring", "cookie", "navigator", "htmlTag"],
+      caches: ["cookie"],
+      lookupQuerystring: "lang",
+      lookupCookie: "orkestra_client_lang",
       cookieMinutes: 60 * 24 * 30,
     },
   });

@@ -1,4 +1,3 @@
-
 import { Col, Row } from 'react-bootstrap';
 import BasicScatterChart from './BasicScatterCharr';
 import BubbleChart from './BubbleChart';

@@ -68,9 +68,9 @@
   --#{$prefix}btn-reveal-color: #{$gray-600};
   --#{$prefix}btn-reveal-hover-color: #{$gray-700};
   --#{$prefix}btn-reveal-focus-bg: #{shade-color($white, 10%)};
-  --#{$prefix}btn-reveal-hover-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1),
-    0 2px 5px 0 rgba(43, 45, 80, 0.08), 0 1px 1.5px 0 rgba(0, 0, 0, 0.07),
-    0 1px 2px 0 rgba(0, 0, 0, 0.08);
+  --#{$prefix}btn-reveal-hover-shadow:
+    0 0 0 1px rgba(43, 45, 80, 0.1), 0 2px 5px 0 rgba(43, 45, 80, 0.08),
+    0 1px 1.5px 0 rgba(0, 0, 0, 0.07), 0 1px 2px 0 rgba(0, 0, 0, 0.08);
   --#{$prefix}btn-reveal-focus-border-color: #{shade-color($white, 12.5%)};
 
   //
@@ -83,7 +83,10 @@
 
   --#{$prefix}btn-orkestra-default-color: var(--#{$prefix}gray-800);
   --#{$prefix}btn-orkestra-default-hover-color: #{shift-color($gray-800, 17%)};
-  --#{$prefix}btn-orkestra-default-active-background: #{shade-color($white, 10%)};
+  --#{$prefix}btn-orkestra-default-active-background: #{shade-color(
+      $white,
+      10%
+    )};
   --#{$prefix}btn-orkestra-default-active-border: #{shift-color($gray-800, 17%)};
   --#{$prefix}btn-active-border-color: transparent;
 
@@ -101,7 +104,10 @@
         $value,
         -80%
       )};
-    --#{$prefix}btn-orkestra-#{$color}-active-color: #{shift-color($value, 17%)};
+    --#{$prefix}btn-orkestra-#{$color}-active-color: #{shift-color(
+        $value,
+        17%
+      )};
   }
 
   // Need To Work
@@ -229,10 +235,18 @@
 
   --#{$prefix}line-chart-gradient: #{linear-gradient(-45deg, #014ba7, #0183d0)};
   --#{$prefix}card-gradient: #{linear-gradient(-45deg, $link-color, $primary)};
-  --#{$prefix}progress-gradient: #{linear-gradient(-45deg, $link-color, $primary)};
+  --#{$prefix}progress-gradient: #{linear-gradient(
+      -45deg,
+      $link-color,
+      $primary
+    )};
   --#{$prefix}bg-circle-shape: none;
   --#{$prefix}bg-circle-shape-bg: #{$primary};
-  --#{$prefix}modal-shape-header: #{linear-gradient(-45deg, $link-color, $primary)};
+  --#{$prefix}modal-shape-header: #{linear-gradient(
+      -45deg,
+      $link-color,
+      $primary
+    )};
   --#{$prefix}modal-shape-header-bg: #{$primary};
 
   //
@@ -322,8 +336,8 @@
   //
   // Showcase page
   //
-  --#{$prefix}setting-toggle-shadow: #{0 -7px 14px 0 rgba(65, 69, 88, 0.1),
-    0 3px 6px 0 rgba(0, 0, 0, 0.07)};
+  --#{$prefix}setting-toggle-shadow:
+    #{0 -7px 14px 0 rgba(65, 69, 88, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07)};
 
   //
   // Scrollbar
@@ -334,7 +348,9 @@
   //
   // Orkestra pill
   //
-  --#{$prefix}nav-pills-orkestra-active-bg-color: var(--#{$prefix}quaternary-bg);
+  --#{$prefix}nav-pills-orkestra-active-bg-color: var(
+    --#{$prefix}quaternary-bg
+  );
 
   //
   // Custom disabled button

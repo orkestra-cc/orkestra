@@ -68,7 +68,14 @@ const EventDetails = ({ register, setValue }: EventDetailsProps) => {
                   handleChange('startDate', newDate);
                   setValue('startDate', newDate);
                 }}
-                customInput={<DateInputWrapper formControlProps={{ placeholder: 'dd/mm/yyyy', ...register('startDate') }} />}
+                customInput={
+                  <DateInputWrapper
+                    formControlProps={{
+                      placeholder: 'dd/mm/yyyy',
+                      ...register('startDate')
+                    }}
+                  />
+                }
               />
             </Form.Group>
           </Col>
@@ -86,7 +93,14 @@ const EventDetails = ({ register, setValue }: EventDetailsProps) => {
                   handleChange('startTime', newDate);
                   setValue('startTime', newDate);
                 }}
-                customInput={<DateInputWrapper formControlProps={{ placeholder: 'H:i', ...register('startTime') }} />}
+                customInput={
+                  <DateInputWrapper
+                    formControlProps={{
+                      placeholder: 'H:i',
+                      ...register('startTime')
+                    }}
+                  />
+                }
               />
             </Form.Group>
           </Col>
@@ -100,7 +114,14 @@ const EventDetails = ({ register, setValue }: EventDetailsProps) => {
                   handleChange('endDate', newDate);
                   setValue('endDate', newDate);
                 }}
-                customInput={<DateInputWrapper formControlProps={{ placeholder: 'dd/mm/yyyy', ...register('endDate') }} />}
+                customInput={
+                  <DateInputWrapper
+                    formControlProps={{
+                      placeholder: 'dd/mm/yyyy',
+                      ...register('endDate')
+                    }}
+                  />
+                }
               />
             </Form.Group>
           </Col>
@@ -119,7 +140,14 @@ const EventDetails = ({ register, setValue }: EventDetailsProps) => {
                   handleChange('endTime', newDate);
                   setValue('endTime', newDate);
                 }}
-                customInput={<DateInputWrapper formControlProps={{ placeholder: 'H:i', ...register('endTime') }} />}
+                customInput={
+                  <DateInputWrapper
+                    formControlProps={{
+                      placeholder: 'H:i',
+                      ...register('endTime')
+                    }}
+                  />
+                }
               />
             </Form.Group>
           </Col>
@@ -132,7 +160,14 @@ const EventDetails = ({ register, setValue }: EventDetailsProps) => {
                   handleChange('regDate', newDate);
                   setValue('regDate', newDate);
                 }}
-                customInput={<DateInputWrapper formControlProps={{ placeholder: 'dd/mm/yyyy', ...register('regDate') }} />}
+                customInput={
+                  <DateInputWrapper
+                    formControlProps={{
+                      placeholder: 'dd/mm/yyyy',
+                      ...register('regDate')
+                    }}
+                  />
+                }
               />
             </Form.Group>
           </Col>

@@ -1,4 +1,3 @@
-
 import { Card, Col, Button, Row } from 'react-bootstrap';
 
 const EventHeader = () => {

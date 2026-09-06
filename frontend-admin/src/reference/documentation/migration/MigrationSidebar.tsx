@@ -79,7 +79,11 @@ const navItems = [
           { id: '5', to: 'install-vite', name: 'Install Vite' },
           { id: '6', to: 'edit-scripts', name: 'Edit Package.json' },
           { id: '7', to: 'update-env', name: 'Update .env file' },
-          { id: '8', to: 'configure-vite-config', name: 'configure Vite Config' },
+          {
+            id: '8',
+            to: 'configure-vite-config',
+            name: 'configure Vite Config'
+          },
           { id: '9', to: 'add-compile-scss', name: 'Add Compile SCSS' },
           {
             id: '10',

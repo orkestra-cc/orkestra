@@ -59,7 +59,8 @@
 // *edge*, not a frame: the full 4px four-side border made every zero-count
 // compliance tile shout in amber and crimson.
 .stat-card {
-  border-left: 4px solid var(--#{$prefix}stat-card-accent, var(--#{$prefix}gray-300));
+  border-left: 4px solid
+    var(--#{$prefix}stat-card-accent, var(--#{$prefix}gray-300));
 }
 
 // Base hue = the raw status colour (this is what dark keeps: 8-9:1 there

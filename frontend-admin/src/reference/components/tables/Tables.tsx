@@ -796,7 +796,8 @@ const Tables = () => (
             className="border-bottom"
           >
             <p className="mt-2 mb-0">
-              Use <code>Table</code> component for basic bootstrap table with action buttons.
+              Use <code>Table</code> component for basic bootstrap table with
+              action buttons.
             </p>
           </OrkestraComponentCard.Header>
           <OrkestraComponentCard.Body
@@ -815,7 +816,8 @@ const Tables = () => (
             className="border-bottom"
           >
             <p className="mt-2 mb-0">
-              Use <code>striped</code> prop with <code>CardDropdown</code> for action menus.
+              Use <code>striped</code> prop with <code>CardDropdown</code> for
+              action menus.
             </p>
           </OrkestraComponentCard.Header>
           <OrkestraComponentCard.Body
@@ -837,9 +839,10 @@ const Tables = () => (
             className="border-bottom"
           >
             <p className="mt-2 mb-0">
-              Use <code>hover-actions-trigger</code> class to show actions on row
-              hover. The actions stay keyboard-reachable: <code>:focus-within</code>{' '}
-              reveals them when you Tab into the row's buttons.
+              Use <code>hover-actions-trigger</code> class to show actions on
+              row hover. The actions stay keyboard-reachable:{' '}
+              <code>:focus-within</code> reveals them when you Tab into the
+              row's buttons.
             </p>
           </OrkestraComponentCard.Header>
           <OrkestraComponentCard.Body
@@ -859,14 +862,21 @@ const Tables = () => (
             className="border-bottom"
           >
             <p className="mt-2 mb-0">
-              Use <code>responsive</code> prop with Avatar and SubtleBadge components.
+              Use <code>responsive</code> prop with Avatar and SubtleBadge
+              components.
             </p>
           </OrkestraComponentCard.Header>
           <OrkestraComponentCard.Body
             code={responsiveTableCode}
             language="jsx"
             scope={{
-              team4, team2, team13, Avatar, FontAwesomeIcon, SubtleBadge, Table
+              team4,
+              team2,
+              team13,
+              Avatar,
+              FontAwesomeIcon,
+              SubtleBadge,
+              Table
             }}
             noLight
             className="p-0"
@@ -887,11 +897,17 @@ const Tables = () => (
     </p>
 
     <OrkestraComponentCard className="mb-3">
-      <OrkestraComponentCard.Header title="Basic AdvanceTable Setup" light={false} />
+      <OrkestraComponentCard.Header
+        title="Basic AdvanceTable Setup"
+        light={false}
+      />
       <OrkestraComponentCard.Body
         code={advanceTableBasicCode}
         scope={{
-          useAdvanceTable, AdvanceTableProvider, AdvanceTable, AdvanceTableFooter
+          useAdvanceTable,
+          AdvanceTableProvider,
+          AdvanceTable,
+          AdvanceTableFooter
         }}
         language="jsx"
         noInline
@@ -904,8 +920,8 @@ const Tables = () => (
       Pagination
     </h4>
     <p className="text-muted mb-3">
-      Two pagination styles: <code>AdvanceTableFooter</code> (prev/next with row info)
-      or <code>AdvanceTablePagination</code> (numbered pages).
+      Two pagination styles: <code>AdvanceTableFooter</code> (prev/next with row
+      info) or <code>AdvanceTablePagination</code> (numbered pages).
     </p>
 
     <OrkestraComponentCard className="mb-3">
@@ -913,7 +929,10 @@ const Tables = () => (
       <OrkestraComponentCard.Body
         code={paginationNumberingCode}
         scope={{
-          useAdvanceTable, AdvanceTableProvider, AdvanceTable, AdvanceTablePagination
+          useAdvanceTable,
+          AdvanceTableProvider,
+          AdvanceTable,
+          AdvanceTablePagination
         }}
         language="jsx"
         noInline
@@ -926,8 +945,9 @@ const Tables = () => (
       Search & Filtering
     </h4>
     <p className="text-muted mb-3">
-      Use <code>AdvanceTableSearchBox</code> for global search across all columns.
-      For column-specific filters, use <code>setColumnFilters</code> from context.
+      Use <code>AdvanceTableSearchBox</code> for global search across all
+      columns. For column-specific filters, use <code>setColumnFilters</code>{' '}
+      from context.
     </p>
 
     <OrkestraComponentCard className="mb-3">
@@ -939,8 +959,13 @@ const Tables = () => (
       <OrkestraComponentCard.Body
         code={searchableTableCode}
         scope={{
-          useAdvanceTable, AdvanceTableProvider, AdvanceTable, AdvanceTableFooter,
-          AdvanceTableSearchBox, Row, Col
+          useAdvanceTable,
+          AdvanceTableProvider,
+          AdvanceTable,
+          AdvanceTableFooter,
+          AdvanceTableSearchBox,
+          Row,
+          Col
         }}
         language="jsx"
         noInline
@@ -953,8 +978,8 @@ const Tables = () => (
       Row Selection & Bulk Actions
     </h4>
     <p className="text-muted mb-3">
-      Enable <code>selection: true</code> to add checkbox column.
-      Use <code>getSelectedRowModel()</code> to access selected rows.
+      Enable <code>selection: true</code> to add checkbox column. Use{' '}
+      <code>getSelectedRowModel()</code> to access selected rows.
     </p>
 
     <OrkestraComponentCard className="mb-3">
@@ -966,8 +991,16 @@ const Tables = () => (
       <OrkestraComponentCard.Body
         code={selectionCode}
         scope={{
-          useAdvanceTable, AdvanceTableProvider, AdvanceTable, AdvanceTableFooter,
-          useAdvanceTableContext, IconButton, Row, Col, Form, Button
+          useAdvanceTable,
+          AdvanceTableProvider,
+          AdvanceTable,
+          AdvanceTableFooter,
+          useAdvanceTableContext,
+          IconButton,
+          Row,
+          Col,
+          Form,
+          Button
         }}
         language="jsx"
         noInline
@@ -980,8 +1013,8 @@ const Tables = () => (
       Custom Cell Rendering
     </h4>
     <p className="text-muted mb-3">
-      Use the <code>cell</code> property in column definitions to render custom components
-      like Avatars, Badges, Dropdowns, and formatted dates.
+      Use the <code>cell</code> property in column definitions to render custom
+      components like Avatars, Badges, Dropdowns, and formatted dates.
     </p>
 
     <OrkestraComponentCard className="mb-3">
@@ -993,9 +1026,16 @@ const Tables = () => (
       <OrkestraComponentCard.Body
         code={customCellCode}
         scope={{
-          useAdvanceTable, AdvanceTableProvider, AdvanceTable,
-          Avatar, SubtleBadge, FontAwesomeIcon, Dropdown,
-          team2, team4, team13
+          useAdvanceTable,
+          AdvanceTableProvider,
+          AdvanceTable,
+          Avatar,
+          SubtleBadge,
+          FontAwesomeIcon,
+          Dropdown,
+          team2,
+          team4,
+          team13
         }}
         language="jsx"
         noInline
@@ -1008,9 +1048,9 @@ const Tables = () => (
       Production Patterns
     </h4>
     <p className="text-muted mb-3">
-      Complete table header pattern with search, filters, conditional bulk actions,
-      and CSV export — as used in production by the admin Users table
-      (<code>src/pages/admin/users/UserTable.tsx</code>).
+      Complete table header pattern with search, filters, conditional bulk
+      actions, and CSV export — as used in production by the admin Users table (
+      <code>src/pages/admin/users/UserTable.tsx</code>).
     </p>
 
     <OrkestraComponentCard className="mb-3" defaultTab="code">
@@ -1021,8 +1061,9 @@ const Tables = () => (
         noPreview
       >
         <p className="mt-2 mb-0">
-          Production-ready header with search, filter dropdown, and conditional actions.
-          See <code>src/pages/admin/users/UserTableHeader.tsx</code> for complete implementation.
+          Production-ready header with search, filter dropdown, and conditional
+          actions. See <code>src/pages/admin/users/UserTableHeader.tsx</code>{' '}
+          for complete implementation.
         </p>
       </OrkestraComponentCard.Header>
       <OrkestraComponentCard.Body

@@ -1,4 +1,3 @@
-
 import { Button, Form, Modal } from 'react-bootstrap';
 import OrkestraCloseButton from 'components/common/OrkestraCloseButton';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -9,7 +8,10 @@ interface AskQuestionModalProps {
   handleClose: () => void;
 }
 
-const AskQuestionModal: React.FC<AskQuestionModalProps> = ({ show, handleClose }) => (
+const AskQuestionModal: React.FC<AskQuestionModalProps> = ({
+  show,
+  handleClose
+}) => (
   <Modal show={show} onHide={handleClose} contentClassName="border-0">
     <Modal.Header
       className="bg-card-gradient border-bottom-0"

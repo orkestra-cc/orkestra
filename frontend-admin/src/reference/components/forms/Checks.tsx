@@ -1,4 +1,3 @@
-
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -7,18 +6,18 @@ import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const checksExampleCode = `
 <>
-  <Form.Check 
+  <Form.Check
     type='checkbox'
     id='defaultCheckbox'
     label='Default Checkbox'
   />
-  <Form.Check 
+  <Form.Check
     type='checkbox'
     id='checkedCheckbox'
     label='Checked Checkbox'
     defaultChecked
   />
-  <Form.Check 
+  <Form.Check
     type='checkbox'
     id='disabledCheckbox'
     label='Disabled Checkbox'
@@ -28,20 +27,20 @@ const checksExampleCode = `
 `;
 const radioExampleCode = `
 <>
-  <Form.Check 
+  <Form.Check
     type='radio'
     id='defaultRadio'
     label='Default Radios'
     name='radio'
   />
-  <Form.Check 
+  <Form.Check
     type='radio'
     id='checkedRadio'
     label='Default Checked Radios'
     defaultChecked
     name='radio'
   />
-  <Form.Check 
+  <Form.Check
     type='radio'
     id='disabledRadio'
     label='Disabled Radio'
@@ -52,24 +51,24 @@ const radioExampleCode = `
 `;
 const switchesCode = `
 <>
-  <Form.Check 
+  <Form.Check
     type='switch'
     id='defaultSwitch'
     label='Default switch checkbox input'
   />
-  <Form.Check 
+  <Form.Check
     type='switch'
     id='checkedSwitch'
     label='Checked switch checkbox input'
     defaultChecked
   />
-  <Form.Check 
+  <Form.Check
     type='switch'
     id='defaultDisableSwitch'
     label='Default switch checkbox input'
-    disabled 
+    disabled
   />
-  <Form.Check 
+  <Form.Check
     type='switch'
     id='checkedDisableSwitch'
     label='Checked switch checkbox input'
@@ -87,14 +86,14 @@ const inlineCheckboxCode = `
     label='Item 1'
   />
   <Form.Check
-    inline 
+    inline
     type='checkbox'
     id='item2Check'
     label='Item 2'
     defaultChecked
   />
   <Form.Check
-    inline 
+    inline
     type='checkbox'
     id='item3Check'
     label='Item 3'
@@ -112,7 +111,7 @@ const inlineRadioCode = `
     name='inline-radio'
   />
   <Form.Check
-    inline 
+    inline
     type='radio'
     id='item2Radio'
     label='Item 2'
@@ -120,7 +119,7 @@ const inlineRadioCode = `
     name='inline-radio'
   />
   <Form.Check
-    inline 
+    inline
     type='radio'
     id='item3Radio'
     label='Item 3'

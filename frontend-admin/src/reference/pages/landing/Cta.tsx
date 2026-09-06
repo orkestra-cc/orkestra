@@ -1,4 +1,3 @@
-
 import { Row, Col, Button } from 'react-bootstrap';
 import bg2 from 'assets/img/generic/bg-2.jpg';
 import Section from 'components/common/Section';

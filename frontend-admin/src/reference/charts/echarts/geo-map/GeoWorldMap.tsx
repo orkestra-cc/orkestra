@@ -1,4 +1,3 @@
-
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import world from 'assets/json/world.json';
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
@@ -45,7 +44,7 @@ const tooltipFormatter = params =>
   ':</strong>' +
   ((params.data.value / total) * 100).toFixed(2) +
   '%';
-  
+
   const data = [
     { name: 'Afghanistan', value: 28397.812 },
     { name: 'Angola', value: 19549.124 },
@@ -293,7 +292,7 @@ const tooltipFormatter = params =>
         type: 'restore'
       });
     };
-    
+
     return (
       <>
       <div className="position-absolute z-index-2" style={{ right: '16px' }}>
@@ -313,7 +312,7 @@ const tooltipFormatter = params =>
           style={{ height: '25rem' }}
           ref={chartRef}
         />
-      </>  
+      </>
     );
   }
 `;

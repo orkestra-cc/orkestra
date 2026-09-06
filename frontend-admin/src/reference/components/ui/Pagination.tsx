@@ -1,4 +1,3 @@
-
 import { Button, Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -48,7 +47,7 @@ const moreOptionsCode = `
   <Pagination.First />
   <Pagination.Prev />
   <Pagination.Item>{1}</Pagination.Item>
-  
+
   <Pagination.Item active>{2}</Pagination.Item>
   <Pagination.Item>{3}</Pagination.Item>
   <Pagination.Item>{4}</Pagination.Item>
@@ -81,13 +80,19 @@ const Pagin = () => (
     <Row className="mb-3 g-3">
       <Col lg={6}>
         <OrkestraComponentCard noGuttersBottom>
-          <OrkestraComponentCard.Header title="Example with text" light={false} />
+          <OrkestraComponentCard.Header
+            title="Example with text"
+            light={false}
+          />
           <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
         </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
         <OrkestraComponentCard noGuttersBottom>
-          <OrkestraComponentCard.Header title="Example with Icon" light={false} />
+          <OrkestraComponentCard.Header
+            title="Example with Icon"
+            light={false}
+          />
           <OrkestraComponentCard.Body code={iconExampleCode} language="jsx" />
         </OrkestraComponentCard>
       </Col>

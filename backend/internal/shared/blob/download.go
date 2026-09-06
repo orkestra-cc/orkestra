@@ -21,7 +21,7 @@ type ObjectDownloadPresigner interface {
 
 // contentDispositionAttachment builds an RFC 6266 Content-Disposition value that
 // makes a browser save the response as an attachment named filename. It emits an
-// ASCII-sanitized `filename="..."` fallback plus a UTF-8 `filename*=UTF-8''...`
+// ASCII-sanitized `filename="..."` fallback plus a UTF-8 `filename*=UTF-8”...`
 // (RFC 5987 percent-encoded) variant, so accented names (Italian, etc.) survive
 // on modern browsers while legacy clients still get a safe ASCII name. Returns
 // "" for a blank filename (the caller then presigns without a disposition).
@@ -44,7 +44,7 @@ func contentDispositionAttachment(filename string) string {
 }
 
 // rfc5987Encode percent-encodes s's UTF-8 bytes per RFC 5987 (the value form for
-// `filename*=UTF-8''`): attr-chars pass through, every other byte becomes %XX.
+// `filename*=UTF-8”`): attr-chars pass through, every other byte becomes %XX.
 func rfc5987Encode(s string) string {
 	const hex = "0123456789ABCDEF"
 	var b strings.Builder

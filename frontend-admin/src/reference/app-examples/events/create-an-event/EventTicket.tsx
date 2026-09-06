@@ -16,7 +16,11 @@ interface TicketRowProps {
   price: number;
   checked?: boolean;
   id: number;
-  handleChange: (id: number, name: string, value: string | number | boolean) => void;
+  handleChange: (
+    id: number,
+    name: string,
+    value: string | number | boolean
+  ) => void;
   handleRemove: (id: number) => void;
 }
 
@@ -84,7 +88,11 @@ const EventTicket = () => {
   ]);
 
   // Change Ticket
-  const changeTicket = (id: number, name: string, value: string | number | boolean) => {
+  const changeTicket = (
+    id: number,
+    name: string,
+    value: string | number | boolean
+  ) => {
     const updatedTickets =
       name === 'checked'
         ? tickets.map(ticket => ({ ...ticket, checked: false }))

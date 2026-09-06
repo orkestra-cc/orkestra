@@ -1,4 +1,3 @@
-
 import className from 'classnames';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Card } from 'react-bootstrap';
@@ -20,7 +19,14 @@ interface CardServiceProps {
   children?: React.ReactNode;
 }
 
-const CardService: React.FC<CardServiceProps> = ({ media, icon, color, title, description, children }) => {
+const CardService: React.FC<CardServiceProps> = ({
+  media,
+  icon,
+  color,
+  title,
+  description,
+  children
+}) => {
   const iconProp = media?.icon || icon;
   const iconColor = media?.color || color;
   const iconClassName = media?.className;

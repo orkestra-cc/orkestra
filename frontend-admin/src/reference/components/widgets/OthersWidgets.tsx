@@ -1,4 +1,3 @@
-
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import WidgetSectionTitle from './WidgetSectionTitle';
 // import BillingHeader from 'features/e-commerce/billing/BillingHeader';
@@ -55,7 +54,9 @@ const OthersWidgets = () => {
           {/* <GreetingCard notifications={notifications} /> */}
           <Card>
             <Card.Body>
-              <p className="text-muted">E-commerce greeting card component is not available.</p>
+              <p className="text-muted">
+                E-commerce greeting card component is not available.
+              </p>
             </Card.Body>
           </Card>
         </Col>
@@ -121,7 +122,9 @@ const OthersWidgets = () => {
           <Card className="h-lg-100">
             <Card.Body className="p-4 p-sm-5 text-center">
               {/* <LogoutContent /> */}
-              <p className="text-muted">Logout content component is not available.</p>
+              <p className="text-muted">
+                Logout content component is not available.
+              </p>
             </Card.Body>
           </Card>
         </Col>
@@ -129,7 +132,9 @@ const OthersWidgets = () => {
           <Card className="h-lg-100">
             <Card.Body className="p-4 p-sm-5 text-center">
               {/* <ConfirmMailContent email="xyz@abc.com" /> */}
-              <p className="text-muted">Confirm mail content component is not available.</p>
+              <p className="text-muted">
+                Confirm mail content component is not available.
+              </p>
             </Card.Body>
           </Card>
         </Col>

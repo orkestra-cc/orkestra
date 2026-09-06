@@ -356,7 +356,6 @@ const treeviewItems = [
   }
 ];`;
 
-
 const objectCode = `{
   name: 'public',
   id: '1',
@@ -366,9 +365,9 @@ const objectCode = `{
       id: '2',
       children: [
         {
-          name: 'orkestra.png', 
+          name: 'orkestra.png',
           id: '3' // Every item should have an unique id
-          icon: 'image', 
+          icon: 'image',
           iconClass: 'text-success',
         },
         // ..
@@ -411,7 +410,10 @@ const TreeviewExample = () => {
       />
 
       <Card className="mb-3">
-        <OrkestraComponentCard.Header title="Treeview Item Structure" noPreview />
+        <OrkestraComponentCard.Header
+          title="Treeview Item Structure"
+          noPreview
+        />
         <Card.Body className="pt-0">
           <OrkestraEditor code={objectCode} language="jsx" hidePreview />
         </Card.Body>

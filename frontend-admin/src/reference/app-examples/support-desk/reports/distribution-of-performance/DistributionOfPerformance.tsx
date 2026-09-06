@@ -1,4 +1,3 @@
-
 import CardDropdown from 'components/common/CardDropdown';
 import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import { Button, Card, Col, Form, Row } from 'react-bootstrap';
@@ -36,7 +35,12 @@ const DistributionOfPerformance = () => {
             </Form.Select>
           </Col>
           <Col xs="auto">
-            <Button variant="orkestra-default" size="sm" as={Link as any} to="#!">
+            <Button
+              variant="orkestra-default"
+              size="sm"
+              as={Link as any}
+              to="#!"
+            >
               View All
             </Button>
           </Col>

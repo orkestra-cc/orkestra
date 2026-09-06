@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { PieChart } from 'echarts/charts';
@@ -24,7 +23,7 @@ echarts.use([
 
 const chartCode = `function ChartOptions() {
   const { getThemeColor } = useAppContext();
-  
+
   const getOption = () => ({
     legend: {
       left: 'left',
@@ -97,7 +96,7 @@ const chartCode = `function ChartOptions() {
       }
     }
     });
-    
+
     return (
       <ReactEchart
         echarts={echarts}

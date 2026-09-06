@@ -155,7 +155,6 @@ const Mail = ({ message, index }: MailProps) => {
   );
 };
 
-
 const Conversation = () => {
   const [showForm, setShowForm] = useState(false);
   return (

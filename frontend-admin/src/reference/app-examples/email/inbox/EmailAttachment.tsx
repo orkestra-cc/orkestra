@@ -47,7 +47,7 @@ const EmailAttachment = ({ attachment }: EmailAttachmentProps) => {
         <Lightbox
           slides={[{ src }]}
           open={isOpen}
-          styles={{ container: {zIndex: 999999} }}
+          styles={{ container: { zIndex: 999999 } }}
           close={() => setIsOpen(false)}
         />
       )}

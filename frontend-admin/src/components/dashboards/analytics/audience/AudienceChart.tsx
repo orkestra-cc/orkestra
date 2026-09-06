@@ -47,12 +47,12 @@ const getOptions = (getThemeColor: ThemeColorGetter, data: number[][]) => ({
         ((params[0].value - params[1].value) / params[1].value) * 100;
       const perTemp = `
         <div class="d-flex align-items-center ms-2">
-          <h6 class="fs-11 mb-0 ms-1 fw-semibold"> 
+          <h6 class="fs-11 mb-0 ms-1 fw-semibold">
             <span style="color:${
               percentage < 0
                 ? getThemeColor('danger')
                 : getThemeColor('success')
-            };">${percentage < 0 ? '&#9660' : '&#9650'}</span> 
+            };">${percentage < 0 ? '&#9660' : '&#9650'}</span>
             ${Math.abs(percentage).toFixed(2)} %</h6>
         </div>
       `;

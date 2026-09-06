@@ -1,15 +1,15 @@
-import { useTranslation } from 'react-i18next';
+import { useTranslation } from "react-i18next";
 
-const SUPPORTED = ['it', 'en'] as const;
+const SUPPORTED = ["it", "en"] as const;
 type Lang = (typeof SUPPORTED)[number];
 
 export function LanguageSwitcher() {
   const { i18n, t } = useTranslation();
-  const current = (i18n.resolvedLanguage ?? 'it') as Lang;
+  const current = (i18n.resolvedLanguage ?? "it") as Lang;
 
   return (
     <label className="ml-2 flex items-center gap-2 text-sm text-slate-600">
-      <span className="sr-only">{t('lang.switch')}</span>
+      <span className="sr-only">{t("lang.switch")}</span>
       <select
         value={current}
         onChange={(e) => void i18n.changeLanguage(e.target.value)}

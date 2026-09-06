@@ -1,4 +1,3 @@
-
 import { Col, Row } from 'react-bootstrap';
 import BasicCandlestickChart from './BasicCandlestickChart';
 import CandlestickMixedChart from './CandlestickMixedChart';

@@ -1,4 +1,3 @@
-
 import { Button, Card, Col, Row } from 'react-bootstrap';
 import { Link } from 'react-router';
 import editing from 'assets/img/icons/spot-illustrations/21.png';

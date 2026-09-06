@@ -1,4 +1,3 @@
-
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -222,7 +221,7 @@ const horizontalSizingCode = `
       <Form.Control size="lg" type="email" placeholder="Large text" />
     </Col>
   </Row>
-  
+
 </>
 `;
 

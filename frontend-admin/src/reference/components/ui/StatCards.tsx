@@ -244,10 +244,10 @@ const StatCards = () => {
         >
           <p className="mb-0">
             The 4px left edge is the tile's status channel and is{' '}
-            <strong>neutral at rest</strong>. Pass <code>accent</code> only
-            when the metric's current state earns it — a non-zero pending
-            counter, a degraded health check. Status colors mean status: never
-            use the accent as category identity.
+            <strong>neutral at rest</strong>. Pass <code>accent</code> only when
+            the metric's current state earns it — a non-zero pending counter, a
+            degraded health check. Status colors mean status: never use the
+            accent as category identity.
           </p>
         </OrkestraComponentCard.Header>
         <OrkestraComponentCard.Body
@@ -298,16 +298,13 @@ const StatCards = () => {
       </OrkestraComponentCard>
 
       <OrkestraComponentCard>
-        <OrkestraComponentCard.Header
-          title="Drill-down footer"
-          light={false}
-        >
+        <OrkestraComponentCard.Header title="Drill-down footer" light={false}>
           <p className="mb-0">
             Pass <code>footer</code> for a link to the page the metric counts.
             It is pinned to the bottom of the text column, so a row of tiles
-            shares one link line however tall their values and subtitles run.
-            A tile whose metric has no page to drill into simply omits it —
-            never point one at a list the rows provably are not in.
+            shares one link line however tall their values and subtitles run. A
+            tile whose metric has no page to drill into simply omits it — never
+            point one at a list the rows provably are not in.
           </p>
         </OrkestraComponentCard.Header>
         <OrkestraComponentCard.Body
@@ -332,19 +329,19 @@ const StatCards = () => {
           <p className="mb-0">
             <code>StatCardPair</code> carries a pair of figures an operator
             reads <em>against each other</em> — issued vs received, granted vs
-            revoked. Two unrelated metrics belong in two{' '}
-            <code>StatCard</code>s instead, where each gets its own accent edge
-            and ribbon. It shares this tile's visual language so the two sit in
-            one KPI row without reading as different components, and it drops
-            the large icon entirely: each half carries its own, and a third
-            would be the tallest thing in the card.
+            revoked. Two unrelated metrics belong in two <code>StatCard</code>s
+            instead, where each gets its own accent edge and ribbon. It shares
+            this tile's visual language so the two sit in one KPI row without
+            reading as different components, and it drops the large icon
+            entirely: each half carries its own, and a third would be the
+            tallest thing in the card.
           </p>
           <p className="mb-0 mt-2">
             One deliberate divergence: the corner ribbon is a{' '}
-            <strong>card-level</strong> element, so a two-metric card would
-            need two of them overlapping in the same corner. A half raises its
-            flag as an inline pill instead — if a metric needs the ribbon's
-            weight, it needs its own <code>StatCard</code>.
+            <strong>card-level</strong> element, so a two-metric card would need
+            two of them overlapping in the same corner. A half raises its flag
+            as an inline pill instead — if a metric needs the ribbon's weight,
+            it needs its own <code>StatCard</code>.
           </p>
         </OrkestraComponentCard.Header>
         <OrkestraComponentCard.Body

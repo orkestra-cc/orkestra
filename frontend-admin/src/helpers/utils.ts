@@ -403,7 +403,7 @@ export const tooltipFormatter = (params: TooltipParam[]): string => {
   params.forEach((el: TooltipParam) => {
     tooltipItem =
       tooltipItem +
-      `<div class='ms-1'> 
+      `<div class='ms-1'>
         <h6 class="text-700"><span class="fas fa-circle me-1 fs-11" style="color:${
           el.borderColor ? el.borderColor : el.color
         }"></span>

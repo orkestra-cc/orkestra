@@ -18,7 +18,7 @@ export default [
         'Component: <code>src/components/doc-components/MigrationToVite</code>',
         'src/data/migration.js',
         'Scss: <code>src/assets/scss/theme/plugins/_emoji-picker.scss</code>',
-        'Scss: <code>src/assets/scss/theme/plugins/_lightbox.scss</code>',
+        'Scss: <code>src/assets/scss/theme/plugins/_lightbox.scss</code>'
       ],
       Update: [
         'Plugin: React updated to <code>v19</code>.',
@@ -32,7 +32,7 @@ export default [
         'Plugin: Removed <code>react-18-image-lightbox</code>',
         'Plugin: Removed <code>react-text-mask</code>',
         'Component: <code>src/components/doc-components/EmojiMart</code> to <code>src/components/doc-components/EmojiPicker.jsx</code>',
-        'Scss: Removed <code>src/assets/scss/theme/plugins/_emoji-mart.scss</code>.',
+        'Scss: Removed <code>src/assets/scss/theme/plugins/_emoji-mart.scss</code>.'
       ],
       Fix: ['Minor bugs.']
     }
@@ -190,7 +190,7 @@ export default [
           <li><code>src/routes/siteMaps.js</code></li>
           <li><code>src/Main.js</code> has been replaced by <code>src/providers/AppProvider.js</code></li>
         </ul>`,
-        `SCSS: 
+        `SCSS:
           <ul>
             <li><code>src/assets/scss/theme/plugins/_react-datepicker.scss</code></li>
             <li><code>src/assets/scss/theme/plugins/_toastify.scss</code></li>
@@ -631,7 +631,6 @@ export default [
       Migration: {
         New: ['<code>src/components/documentation/Faq.js</code>'],
         Update: [
-          
           '<code>src/helpers/initFA.js</code>',
           '<code>src/hooks/useToggleStyle.js</code>',
           '<code>src/reducers/configReducer.js</code>',
@@ -1286,7 +1285,7 @@ export default [
           '<code> src/components/navbar/top/SearchBox.js </code>',
           '<code> src/components/navbar/vertical/NavbarVerticalMenuItem.js</code>',
           '<code> src/components/pages/ComingSoon.js </code>',
-          
+
           '<code> src/components/bootstrap-components/FormValidation.js </code>',
           '<code> src/helpers/initFA.js </code>',
           '<code> src/assets/scss/_bootstrap.scss </code>',

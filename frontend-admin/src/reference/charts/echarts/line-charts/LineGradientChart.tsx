@@ -1,4 +1,3 @@
-
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import dayjs from 'dayjs';
 
@@ -79,7 +78,7 @@ const chartCode = `function ChartOptions() {
     ['2021-07-23', 55],
     ['2021-07-24', 60]
   ];
-  
+
   const dateList = data.map(function (item) {
     return item[0];
   });
@@ -87,7 +86,7 @@ const chartCode = `function ChartOptions() {
   const valueList = data.map(function (item) {
     return item[1];
   });
-  
+
   const getOption = () => ({
     visualMap: {
         show: false,

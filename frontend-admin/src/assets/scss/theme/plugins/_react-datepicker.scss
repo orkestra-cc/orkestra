@@ -128,9 +128,9 @@
       &--in-range,
       &--in-selecting-range {
         &:not(
-            .react-datepicker__day--range-start,
-            .react-datepicker__day--range-end
-          ) {
+          .react-datepicker__day--range-start,
+          .react-datepicker__day--range-end
+        ) {
           color: var(--#{$prefix}gray-500);
           background-color: var(--#{$prefix}gray-200);
         }
@@ -171,10 +171,10 @@
       }
       &:hover {
         &:not(
-            .react-datepicker__day--selected,
-            .react-datepicker__day--range-start,
-            .react-datepicker__day--range-end
-          ) {
+          .react-datepicker__day--selected,
+          .react-datepicker__day--range-start,
+          .react-datepicker__day--range-end
+        ) {
           background-color: var(--#{$prefix}gray-200) !important;
         }
       }

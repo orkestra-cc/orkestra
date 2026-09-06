@@ -16,7 +16,7 @@
   z-index: 1;
   background-color: var(--#{$prefix}quaternary-bg) !important;
   border: 1px solid var(--#{$prefix}border-color) !important;
-  .epr-header{
+  .epr-header {
     padding: 12px 12px 0px !important;
 
     .epr-search-container {
@@ -30,11 +30,11 @@
         font-family: $font-family-sans-serif !important;
         border-radius: var(--#{$prefix}border-radius-pill) !important;
 
-        &::placeholder{
+        &::placeholder {
           color: $input-placeholder-color !important;
         }
       }
-      .epr-icn-search{
+      .epr-icn-search {
         background-image: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NDAgNjQwIj48IS0tIUZvbnQgQXdlc29tZSBGcmVlIHY3LjAuMCBieSBAZm9udGF3ZXNvbWUgLSBodHRwczovL2ZvbnRhd2Vzb21lLmNvbSBMaWNlbnNlIC0gaHR0cHM6Ly9mb250YXdlc29tZS5jb20vbGljZW5zZS9mcmVlIENvcHlyaWdodCAyMDI1IEZvbnRpY29ucywgSW5jLi0tPjxwYXRoIGZpbGw9IiNiNmMxZDIiIGQ9Ik00ODAgMjcyQzQ4MCAzMTcuOSA0NjUuMSAzNjAuMyA0NDAgMzk0LjdMNTY2LjYgNTIxLjRDNTc5LjEgNTMzLjkgNTc5LjEgNTU0LjIgNTY2LjYgNTY2LjdDNTU0LjEgNTc5LjIgNTMzLjggNTc5LjIgNTIxLjMgNTY2LjdMMzk0LjcgNDQwQzM2MC4zIDQ2NS4xIDMxNy45IDQ4MCAyNzIgNDgwQzE1Ny4xIDQ4MCA2NCAzODYuOSA2NCAyNzJDNjQgMTU3LjEgMTU3LjEgNjQgMjcyIDY0QzM4Ni45IDY0IDQ4MCAxNTcuMSA0ODAgMjcyek0yNzIgNDE2QzM1MS41IDQxNiA0MTYgMzUxLjUgNDE2IDI3MkM0MTYgMTkyLjUgMzUxLjUgMTI4IDI3MiAxMjhDMTkyLjUgMTI4IDEyOCAxOTIuNSAxMjggMjcyQzEyOCAzNTEuNSAxOTIuNSA0MTYgMjcyIDQxNnoiLz48L3N2Zz4=') !important;
         background-size: 16px !important;
         left: 0.9rem !important;
@@ -42,28 +42,33 @@
         height: 16px !important;
       }
     }
-    .epr-category-nav{
+    .epr-category-nav {
       padding-top: 12px !important;
       padding-bottom: 12px !important;
     }
   }
-  .epr-body{
+  .epr-body {
     padding-left: 12px !important;
-    padding-right: 12px !important; 
-    .epr-emoji-list{
-      .epr-emoji-category{
-        .epr-emoji-category-label{
+    padding-right: 12px !important;
+    .epr-emoji-list {
+      .epr-emoji-category {
+        .epr-emoji-category-label {
           --epr-category-label-height: auto !important;
           --epr-category-label-padding: 6px !important;
-          --epr-category-label-text-color: var(--#{$prefix}secondary-color) !important;
-          --epr-category-label-bg-color: rgba(var(--#{$prefix}secondary-color), 0.9) !important;
+          --epr-category-label-text-color: var(
+            --#{$prefix}secondary-color
+          ) !important;
+          --epr-category-label-bg-color: rgba(
+            var(--#{$prefix}secondary-color),
+            0.9
+          ) !important;
 
           font-size: 15px !important;
           backdrop-filter: blur(4px) !important;
           font-family: $font-family-sans-serif !important;
           font-weight: $font-weight-medium !important;
         }
-        .epr-emoji-category-content{
+        .epr-emoji-category-content {
           margin: 0 !important;
         }
       }

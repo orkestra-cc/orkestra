@@ -29,7 +29,7 @@ echarts.use([
 const chartCode = `function chartOptions(){
   const { getThemeColor } = useAppContext();
   const chartRef = useRef(null);
-  
+
   const randomData = () => {
     now = new Date(+now + oneDay);
     value = value + Math.random() * 21 - 10;
@@ -117,7 +117,7 @@ const chartCode = `function chartOptions(){
     ],
     grid: { right: 5, left: '7%', bottom: '10%', top: '5%' }
   });
-  
+
   useEffect(() => {
       const interval = setInterval(function () {
         if (chartRef.current?.getEchartsInstance) {

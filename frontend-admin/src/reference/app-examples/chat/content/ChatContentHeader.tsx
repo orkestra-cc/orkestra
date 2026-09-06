@@ -1,4 +1,3 @@
-
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Button, Col, Row, OverlayTrigger, Tooltip } from 'react-bootstrap';
 import Flex from 'components/common/Flex';
@@ -18,7 +17,10 @@ interface ChatContentHeaderProps {
   setHideSidebar: (hide: boolean) => void;
 }
 
-const ChatContentHeader = ({ thread, setHideSidebar }: ChatContentHeaderProps) => {
+const ChatContentHeader = ({
+  thread,
+  setHideSidebar
+}: ChatContentHeaderProps) => {
   const { getUser, isOpenThreadInfo, setIsOpenThreadInfo } = useChatContext();
   const user = getUser(thread);
 

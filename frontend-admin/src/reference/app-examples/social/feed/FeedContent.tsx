@@ -1,4 +1,3 @@
-
 import { useFeedContext } from 'providers/FeedProvider';
 import CreatePost from './CreatePost';
 import FeedCard from './FeedCard';

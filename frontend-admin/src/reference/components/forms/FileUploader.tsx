@@ -373,10 +373,11 @@ const FileUploadValidation = () => {
       setValue('uploadedFiles', acceptedFiles);
       setFiles([
         ...files,
-        ...acceptedFiles.map(file =>
-          Object.assign(file, {
-            preview: URL.createObjectURL(file)
-          }) as FileWithPreview
+        ...acceptedFiles.map(
+          file =>
+            Object.assign(file, {
+              preview: URL.createObjectURL(file)
+            }) as FileWithPreview
         )
       ]);
     }

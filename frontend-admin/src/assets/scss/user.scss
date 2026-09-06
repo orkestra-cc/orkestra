@@ -15,7 +15,7 @@
   background-color: $eve-online;
   border-color: $eve-online;
   color: $white;
-  
+
   &:hover,
   &:focus,
   &:active {
@@ -23,7 +23,7 @@
     border-color: darken($eve-online, 10%);
     color: $white;
   }
-  
+
   &:disabled {
     background-color: $eve-online;
     border-color: $eve-online;

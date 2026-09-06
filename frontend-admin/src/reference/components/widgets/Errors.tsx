@@ -1,4 +1,3 @@
-
 import WidgetSectionTitle from './WidgetSectionTitle';
 import { Col, Row } from 'react-bootstrap';
 import Error404 from 'components/errors/Error404';

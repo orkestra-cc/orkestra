@@ -1,4 +1,3 @@
-
 import { Button, Col } from 'react-bootstrap';
 import Flex from 'components/common/Flex';
 import classNames from 'classnames';

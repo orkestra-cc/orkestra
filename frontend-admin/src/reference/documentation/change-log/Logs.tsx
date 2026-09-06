@@ -1,4 +1,3 @@
-
 import { Alert, Card } from 'react-bootstrap';
 import changeLogs from './changelogs';
 import createMarkup from 'helpers/createMarkup';
@@ -78,19 +77,21 @@ const Logs = ({
               </strong>
             </h5>
             <ul className="ps-3">
-              {Object.entries(logs[value] as Record<string, string[]>).map((entry, i) => (
-                <li key={i}>
-                  <h6>{entry[0]}</h6>
-                  <ul>
-                    {(entry[1] as string[]).map((mv: string, mi: number) => (
-                      <li
-                        dangerouslySetInnerHTML={{ __html: mv }}
-                        key={entry[0] + i + mi}
-                      />
-                    ))}
-                  </ul>
-                </li>
-              ))}
+              {Object.entries(logs[value] as Record<string, string[]>).map(
+                (entry, i) => (
+                  <li key={i}>
+                    <h6>{entry[0]}</h6>
+                    <ul>
+                      {(entry[1] as string[]).map((mv: string, mi: number) => (
+                        <li
+                          dangerouslySetInnerHTML={{ __html: mv }}
+                          key={entry[0] + i + mi}
+                        />
+                      ))}
+                    </ul>
+                  </li>
+                )
+              )}
             </ul>
           </div>
         ) : (

@@ -1,4 +1,3 @@
-
 import { Card } from 'react-bootstrap';
 import activities from 'data/activities';
 import Notification from 'components/notification/Notification';

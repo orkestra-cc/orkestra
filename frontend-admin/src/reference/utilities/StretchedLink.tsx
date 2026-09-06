@@ -1,4 +1,3 @@
-
 import PageHeader from 'components/common/PageHeader';
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import generic1 from 'assets/img/generic/1.jpg';
@@ -43,7 +42,7 @@ const containingBlockCode = `
     <Card.Text  className="card-text bg-body-tertiary" style={{transform: 'rotate(0)'}}>
       This
       <Link className="text-warning stretched-link" to="#!">
-        stretched link 
+        stretched link
       </Link>
       {' '}
         will only be spread over the <code>p</code>-tag, because a transform is applied to it.

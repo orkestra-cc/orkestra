@@ -9,7 +9,11 @@ interface BirthdayNoticeProps {
   className?: string;
 }
 
-const BirthdayNotice = ({ name, profileLink, className }: BirthdayNoticeProps) => {
+const BirthdayNotice = ({
+  name,
+  profileLink,
+  className
+}: BirthdayNoticeProps) => {
   return (
     <Card className={className}>
       <Card.Body className="fs-10">

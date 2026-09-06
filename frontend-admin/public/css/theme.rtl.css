@@ -238,9 +238,9 @@
   --orkestra-btn-reveal-color: #68707c;
   --orkestra-btn-reveal-hover-color: #454c58;
   --orkestra-btn-reveal-focus-bg: rgb(90%, 90%, 90%);
-  --orkestra-btn-reveal-hover-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1),
-    0 2px 5px 0 rgba(43, 45, 80, 0.08), 0 1px 1.5px 0 rgba(0, 0, 0, 0.07),
-    0 1px 2px 0 rgba(0, 0, 0, 0.08);
+  --orkestra-btn-reveal-hover-shadow:
+    0 0 0 1px rgba(43, 45, 80, 0.1), 0 2px 5px 0 rgba(43, 45, 80, 0.08),
+    0 1px 1.5px 0 rgba(0, 0, 0, 0.07), 0 1px 2px 0 rgba(0, 0, 0, 0.08);
   --orkestra-btn-reveal-focus-border-color: rgb(87.5%, 87.5%, 87.5%);
   --orkestra-btn-orkestra-background: var(--orkestra-quaternary-bg);
   --orkestra-btn-disabled-color: #333a45;
@@ -387,10 +387,13 @@
   --orkestra-card-span-img-bg: var(--orkestra-quaternary-bg);
   --orkestra-card-span-img-box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
   --orkestra-card-span-img-hover-box-shadow: 0 1rem 4rem rgba(0, 0, 0, 0.175);
-  --orkestra-setting-toggle-shadow: 0 -7px 14px 0 rgba(65, 69, 88, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07);
+  --orkestra-setting-toggle-shadow:
+    0 -7px 14px 0 rgba(65, 69, 88, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07);
   --orkestra-scrollbar-bg: rgba(188, 195, 204, 0.55);
   --orkestra-simplebar-bg: #bcc3cc;
-  --orkestra-nav-pills-orkestra-active-bg-color: var(--orkestra-quaternary-bg);
+  --orkestra-nav-pills-orkestra-active-bg-color: var(
+    --orkestra-quaternary-bg
+  );
   --orkestra-btn-disabled-custom-background: rgba(249, 250, 251, 0.55);
   --orkestra-btn-disabled-custom-color: rgba(15, 20, 28, 0.3);
   --orkestra-dropdown-bg-global: #fff;
@@ -583,8 +586,8 @@
   --orkestra-quaternary-bg-rgb: 11, 23, 39;
   --orkestra-emphasis-bg: rgb(7.088627451%, 11.6580392157%, 17.7505882353%);
   --orkestra-emphasis-bg-rgb: 18, 30, 45;
-  --orkestra-box-shadow: 0 7px 14px 0 rgba(3, 12, 51, 0.15),
-    0 3px 6px 0 rgba(0, 0, 0, 0.2);
+  --orkestra-box-shadow:
+    0 7px 14px 0 rgba(3, 12, 51, 0.15), 0 3px 6px 0 rgba(0, 0, 0, 0.2);
   --orkestra-box-shadow-sm: 0 0.125rem 0.25rem rgba($black, 0.075);
   --orkestra-box-shadow-lg: 0 1rem 4rem rgba($black, 0.175);
   --orkestra-box-shadow-inset: inset 0 1px 2px rgba($black, 0.075);
@@ -601,17 +604,17 @@
   --orkestra-navbar-vertical-card-hr-color: rgba(255, 255, 255, 0.08);
   --orkestra-navbar-vertical-card-bg-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%);
   --orkestra-btn-reveal-focus-bg: rgb(3.8823529412%, 8.1176470588%, 13.7647058824%);
-  --orkestra-btn-reveal-hover-shadow: 0px 1px 2px 0px rgba(0, 0, 0, 0.8),
-    0px 1px 1.5px 0px rgba(0, 0, 0, 0.7),
+  --orkestra-btn-reveal-hover-shadow:
+    0px 1px 2px 0px rgba(0, 0, 0, 0.8), 0px 1px 1.5px 0px rgba(0, 0, 0, 0.7),
     0px 2px 5px 0px rgba(43, 45, 80, 0.4),
     0px 0px 0px 1px rgba(255, 255, 255, 0.06);
   --orkestra-btn-reveal-focus-border-color: rgb(3.7745098039%, 7.8921568627%, 13.3823529412%);
-  --orkestra-btn-orkestra-box-shadow: 0 0 0 1px rgba(0, 8, 19, 0.3),
-    0 2px 5px 0 rgba(0, 13, 33, 0.5), 0 1px 1.5px 0 rgba(0, 8, 1, 0.48),
-    0 1px 2px 0 rgba(0, 8, 1, 0.4);
-  --orkestra-btn-orkestra-hover-box-shadow: 0 0 0 1px rgba(0, 8, 19, 0.3),
-    0 3px 7px 0 rgba(0, 13, 33, 0.8), 0 1px 1.5px 0 #000801,
-    0 1px 2px 0 #000801;
+  --orkestra-btn-orkestra-box-shadow:
+    0 0 0 1px rgba(0, 8, 19, 0.3), 0 2px 5px 0 rgba(0, 13, 33, 0.5),
+    0 1px 1.5px 0 rgba(0, 8, 1, 0.48), 0 1px 2px 0 rgba(0, 8, 1, 0.4);
+  --orkestra-btn-orkestra-hover-box-shadow:
+    0 0 0 1px rgba(0, 8, 19, 0.3), 0 3px 7px 0 rgba(0, 13, 33, 0.8),
+    0 1px 1.5px 0 #000801, 0 1px 2px 0 #000801;
   --orkestra-btn-orkestra-default-hover-color: rgb(76.2392156863%, 79.8196078431%, 85.3529411765%);
   --orkestra-btn-orkestra-default-active-background: rgb(3.8823529412%, 8.1176470588%, 13.7647058824%);
   --orkestra-btn-orkestra-default-active-border: rgb(76.2392156863%, 79.8196078431%, 85.3529411765%);
@@ -656,8 +659,8 @@
   --orkestra-bg-choices-close-button: #4d5969;
   --orkestra-thumbnail-bg-global: #232e3c;
   --orkestra-card-span-img-hover-box-shadow: var(--orkestra-box-shadow);
-  --orkestra-setting-toggle-shadow: 0 -7px 14px 0 rgba(3, 12, 51, 0.15),
-    0 3px 6px 0 rgba(0, 0, 0, 0.2);
+  --orkestra-setting-toggle-shadow:
+    0 -7px 14px 0 rgba(3, 12, 51, 0.15), 0 3px 6px 0 rgba(0, 0, 0, 0.2);
   --orkestra-scrollbar-bg: rgba(52, 64, 80, 0.6);
   --orkestra-btn-disabled-custom-background: rgba(11, 23, 39, 0.65);
   --orkestra-btn-disabled-custom-color: rgba(255, 255, 255, 0.2);
@@ -22233,7 +22236,8 @@ html[dir*=rtl] .tox-toolbar__primary {
   color: inherit !important;
 }
 
-[data-bs-theme=dark] .gm-control-active:focus > img:nth-child(2), [data-bs-theme=dark] .gm-control-active:hover > img:nth-child(2) {
+[data-bs-theme=dark] .gm-control-active:focus > img:nth-child(2),
+[data-bs-theme=dark] .gm-control-active:hover > img:nth-child(2) {
   display: none !important;
 }
 [data-bs-theme=dark] .gm-control-active:focus > img:nth-child(1),
@@ -22385,8 +22389,13 @@ html[data-bs-theme=dark] .orkestra-react-range .orkestra-react-range-thumb .orke
 .EmojiPickerReact .epr-body .epr-emoji-list .epr-emoji-category .epr-emoji-category-label {
   --epr-category-label-height: auto !important;
   --epr-category-label-padding: 6px !important;
-  --epr-category-label-text-color: var(--orkestra-secondary-color) !important;
-  --epr-category-label-bg-color: rgba(var(--orkestra-secondary-color), 0.9) !important;
+  --epr-category-label-text-color: var(
+    --orkestra-secondary-color
+  ) !important;
+  --epr-category-label-bg-color: rgba(
+    var(--orkestra-secondary-color),
+    0.9
+  ) !important;
   font-size: 15px !important;
   backdrop-filter: blur(4px) !important;
   font-family: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol" !important;
@@ -22454,7 +22463,8 @@ td .dropdown-toggle:after, td .dropdown-toggle:before {
 /*-----------------------------------------------
 |   Headers
 -----------------------------------------------*/
-h5, .h5 {
+h5,
+.h5 {
   margin-bottom: 0.25rem;
 }
 

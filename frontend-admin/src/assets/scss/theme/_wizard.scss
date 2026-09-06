@@ -26,10 +26,10 @@
       .nav-item-circle {
         background-color: var(--#{$prefix}primary) !important;
         color: #fff;
-        border-color: var(--#{$prefix}primary) 
+        border-color: var(--#{$prefix}primary);
       }
       &:not(.nav-pills .active) {
-        color: var(--#{$prefix}primary) 
+        color: var(--#{$prefix}primary);
       }
     }
     &.done {

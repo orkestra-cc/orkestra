@@ -1,4 +1,3 @@
-
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -98,7 +97,8 @@ const Popovers = () => (
     >
       <Button
         href={`${reactBootstrapDocsUrl}/docs/components/overlays/#popovers`}
-        target="_blank" rel="noopener noreferrer"
+        target="_blank"
+        rel="noopener noreferrer"
         variant="link"
         size="sm"
         className="ps-0"
@@ -166,7 +166,10 @@ const Popovers = () => (
           conflict with your Overlay's.
         </p>
       </OrkestraComponentCard.Header>
-      <OrkestraComponentCard.Body code={changingContainersCode} language="jsx" />
+      <OrkestraComponentCard.Body
+        code={changingContainersCode}
+        language="jsx"
+      />
     </OrkestraComponentCard>
   </>
 );

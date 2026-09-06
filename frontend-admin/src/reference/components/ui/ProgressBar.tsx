@@ -1,4 +1,3 @@
-
 import { Button, Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -64,7 +63,8 @@ const Progress = () => (
     >
       <Button
         href={`${reactBootstrapDocsUrl}/components/progress/`}
-        target="_blank" rel="noopener noreferrer"
+        target="_blank"
+        rel="noopener noreferrer"
         variant="link"
         size="sm"
         className="ps-0"

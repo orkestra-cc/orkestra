@@ -242,6 +242,10 @@ The `tsc` step in `build` enforces strict mode — TypeScript errors fail the bu
 
 **Dev-server file watcher** — `vite.config.js`'s `resolveWatchOptions()` enables chokidar stat-polling (300 ms) only when `/proc/version` shows a WSL kernel, where inotify events from a `/mnt/c` bind mount never arrive; everywhere else the default event watcher runs, because polling this tree (~1.4k files) kept idle containers at a double-digit CPU share and ~1 GB RSS. `CHOKIDAR_USEPOLLING=true|false` (passed through by the dev/staging compose files from `docker/.env`) overrides the auto-detect in either direction. Don't hardcode `usePolling` back into the config.
 
+**SCSS → `public/css` is written by the dev server, into your working tree.** `compile-scss.js` is a Vite plugin (registered in `vite.config.js`) that compiles `src/assets/scss/theme.scss` with `sass` (`style: 'expanded'`) plus an `rtlcss` pass, and writes `public/css/theme.css` and `public/css/theme.rtl.css` **on server boot and on every `.scss` change**. Those two files are tracked, and every dev and staging container bind-mounts this directory and runs `npm run dev` — so any git operation that touches a `.scss` file (a checkout, a merge, a sync) makes them go dirty a second or two later, with no command of yours to blame. That is the whole explanation for "unrelated theme.css noise" appearing out of nowhere, and for why it never reproduces under `pre-commit run`, `git commit` or `make ci`: none of those touch `.scss`, so the watcher never fires.
+
+Two rules follow. **Commit those files exactly as the compiler emits them** — if the committed bytes differ from `sass` + `rtlcss` output, the watcher recreates the diff forever, which is what happened while prettier was allowed to reformat them. And **never let a formatter near `public/css/`**: it is excluded from every pre-commit hook for this reason. To regenerate by hand, boot the dev server, or run `sass.compileAsync` + `rtlcss` with the plugin's options and append the trailing newline the plugin adds.
+
 ## Testing
 
 Vitest + React Testing Library + happy-dom + MSW. The infra lives in `src/test/`:

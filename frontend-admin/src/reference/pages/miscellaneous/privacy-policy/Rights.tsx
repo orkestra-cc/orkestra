@@ -1,4 +1,3 @@
-
 import { Card } from 'react-bootstrap';
 import React from 'react';
 
@@ -21,8 +20,8 @@ const Rights: React.FC<RightsProps> = ({ ref }) => {
           trade secrets, and copyrights). No rights are granted to you under
           these Terms other than as expressly set forth in these Terms. You will
           respect our proprietary rights. “orkestra” and the “orkestra” logo are
-          trademarks belonging to Orkestra, Inc. You are not authorized by us
-          to use our trademarks or brand assets without prior permission.
+          trademarks belonging to Orkestra, Inc. You are not authorized by us to
+          use our trademarks or brand assets without prior permission.
         </p>
         <hr className="my-4" />
         <h6>Proprietary rights owned by you</h6>

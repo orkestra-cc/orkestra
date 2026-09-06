@@ -24,7 +24,12 @@ interface AttachmentItemProps {
   index: number;
 }
 
-const AttachmentItem = ({ setImgIndex, attachment, isLast, index }: AttachmentItemProps) => {
+const AttachmentItem = ({
+  setImgIndex,
+  attachment,
+  isLast,
+  index
+}: AttachmentItemProps) => {
   const [nestedModal, setNestedModal] = useState(false);
 
   return (
@@ -132,15 +137,17 @@ const ModalAttachmentContent = () => {
       <OrkestraLightBoxGallery images={images}>
         {(setImgIndex: (index: number) => void) => (
           <>
-            {(attachments as Attachment[]).map((attachment: Attachment, index: number) => (
-              <AttachmentItem
-                setImgIndex={setImgIndex}
-                key={attachment.id}
-                attachment={attachment}
-                index={index}
-                isLast={attachments.length - 1 === index}
-              />
-            ))}
+            {(attachments as Attachment[]).map(
+              (attachment: Attachment, index: number) => (
+                <AttachmentItem
+                  setImgIndex={setImgIndex}
+                  key={attachment.id}
+                  attachment={attachment}
+                  index={index}
+                  isLast={attachments.length - 1 === index}
+                />
+              )
+            )}
           </>
         )}
       </OrkestraLightBoxGallery>

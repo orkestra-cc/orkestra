@@ -7,25 +7,25 @@ import { reactBootstrapDocsUrl } from 'helpers/utils';
 import { Button } from 'react-bootstrap';
 
 const SubtleBadgesCode = `<div>
-  <SubtleBadge bg='primary' className='me-2'>Primary</SubtleBadge> 
-  <SubtleBadge bg='secondary' className='me-2'>Secondary</SubtleBadge> 
-  <SubtleBadge bg='success' className='me-2'>Success</SubtleBadge> 
-  <SubtleBadge bg='info' className='me-2'>Info</SubtleBadge> 
-  <SubtleBadge bg='warning' className='me-2'>Warning</SubtleBadge> 
-  <SubtleBadge bg='danger' className='me-2'>Danger</SubtleBadge> 
-  <SubtleBadge bg='light' className='me-2'>Light</SubtleBadge> 
-  <SubtleBadge bg='dark' className='me-2'>Dark</SubtleBadge> 
+  <SubtleBadge bg='primary' className='me-2'>Primary</SubtleBadge>
+  <SubtleBadge bg='secondary' className='me-2'>Secondary</SubtleBadge>
+  <SubtleBadge bg='success' className='me-2'>Success</SubtleBadge>
+  <SubtleBadge bg='info' className='me-2'>Info</SubtleBadge>
+  <SubtleBadge bg='warning' className='me-2'>Warning</SubtleBadge>
+  <SubtleBadge bg='danger' className='me-2'>Danger</SubtleBadge>
+  <SubtleBadge bg='light' className='me-2'>Light</SubtleBadge>
+  <SubtleBadge bg='dark' className='me-2'>Dark</SubtleBadge>
 </div>`;
 
 const subtlePillBadgesCode = `<div>
-  <SubtleBadge pill bg='primary' className='me-2'>Primary</SubtleBadge> 
-  <SubtleBadge pill bg='secondary' className='me-2'>Secondary</SubtleBadge> 
-  <SubtleBadge pill bg='success' className='me-2'>Success</SubtleBadge> 
-  <SubtleBadge pill bg='info' className='me-2'>Info</SubtleBadge> 
-  <SubtleBadge pill bg='warning' className='me-2'>Warning</SubtleBadge> 
-  <SubtleBadge pill bg='danger' className='me-2'>Danger</SubtleBadge> 
-  <SubtleBadge pill bg='light' className='me-2'>Light</SubtleBadge> 
-  <SubtleBadge pill bg='dark' className='me-2'>Dark</SubtleBadge> 
+  <SubtleBadge pill bg='primary' className='me-2'>Primary</SubtleBadge>
+  <SubtleBadge pill bg='secondary' className='me-2'>Secondary</SubtleBadge>
+  <SubtleBadge pill bg='success' className='me-2'>Success</SubtleBadge>
+  <SubtleBadge pill bg='info' className='me-2'>Info</SubtleBadge>
+  <SubtleBadge pill bg='warning' className='me-2'>Warning</SubtleBadge>
+  <SubtleBadge pill bg='danger' className='me-2'>Danger</SubtleBadge>
+  <SubtleBadge pill bg='light' className='me-2'>Light</SubtleBadge>
+  <SubtleBadge pill bg='dark' className='me-2'>Dark</SubtleBadge>
 </div>`;
 
 const solidPillBagesCode = `<div>
@@ -56,9 +56,9 @@ const solidPillBagesCode = `<div>
 </div>`;
 
 const solidBagesCode = `<div>
-  <Badge bg="primary" className="me-2">Primary</Badge> 
+  <Badge bg="primary" className="me-2">Primary</Badge>
   <Badge bg="secondary" className="me-2">Secondary</Badge>
-  <Badge bg="success" className="me-2">Success</Badge> 
+  <Badge bg="success" className="me-2">Success</Badge>
   <Badge bg="danger" className="me-2">Danger</Badge>
   <Badge bg="warning" text="dark" className="me-2">
     Warning

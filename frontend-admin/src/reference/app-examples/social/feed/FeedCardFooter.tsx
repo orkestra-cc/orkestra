@@ -46,7 +46,10 @@ const FeedCardFooter = ({
 
     feed.details.reactions.comment = true;
     feed.details.comments = [newComment, ...comments];
-    feedDispatch({ type: 'UPDATE', payload: { id: typeof id === 'string' ? parseInt(id, 10) : id, feed } });
+    feedDispatch({
+      type: 'UPDATE',
+      payload: { id: typeof id === 'string' ? parseInt(id, 10) : id, feed }
+    });
     setComment('');
   };
 

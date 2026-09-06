@@ -1,4 +1,3 @@
-
 import Flex from 'components/common/Flex';
 import { members, comments } from 'data/kanban';
 import Avatar from 'components/common/Avatar';

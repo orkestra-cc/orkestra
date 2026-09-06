@@ -170,9 +170,9 @@ const draggableCode = `DraggableComponent = () => {
   };
 
   return (
-    <DndContext 
-      sensors={sensor} 
-      collisionDetection={closestCorners} 
+    <DndContext
+      sensors={sensor}
+      collisionDetection={closestCorners}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
@@ -182,13 +182,13 @@ const draggableCode = `DraggableComponent = () => {
           draggableData.map(column => (
             <Col lg={6} key={column.id}>
               <div className="kanban-items-container border bg-white dark__bg-1000 rounded-2 py-3 mb-3">
-                <SortableContext 
-                  items={column.contents.map(item => item.id)} 
+                <SortableContext
+                  items={column.contents.map(item => item.id)}
                   strategy={verticalListSortingStrategy}
                 >
                   {
-                    column.contents.map(content => 
-                      <SortableItem 
+                    column.contents.map(content =>
+                      <SortableItem
                         columnId={column.id}
                         id={content.id}
                         key={content.id}
@@ -206,13 +206,13 @@ const draggableCode = `DraggableComponent = () => {
                   }
                 </SortableContext>
               </div>
-            </Col>  
+            </Col>
           ))
         }
       </Row>
       <DragOverlay>
         {
-          activeTask && 
+          activeTask &&
              <Card className="mb-3 kanban-item shadow-sm dark__bg-1100">
                 <Card.Body>
                   <p className="fs-10 fw-medium font-sans-serif mb-0">
@@ -273,7 +273,8 @@ const DraggableExample = () => (
     >
       <Button
         href={`https://dndkit.com/`}
-        target="_blank" rel="noopener noreferrer"
+        target="_blank"
+        rel="noopener noreferrer"
         variant="link"
         size="sm"
         className="ps-0"

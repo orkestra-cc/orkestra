@@ -65,8 +65,8 @@ const CookieNoticeExample = () => {
       <OrkestraComponentCard>
         <OrkestraComponentCard.Header title="Example" light={false}>
           <p className="mb-0 mt-2">
-            Orkestra React's Cookie Notice uses React-Bootstrap's "Toast" feature
-            to show the notice content. <code>.notice </code>class is
+            Orkestra React's Cookie Notice uses React-Bootstrap's "Toast"
+            feature to show the notice content. <code>.notice </code>class is
             responsible for showing the notice as a popup. You can pass any
             React-Bootstrap's "Toast" props to <code>CookieNotice</code>{' '}
             component. See{' '}
