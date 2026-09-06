@@ -7,6 +7,7 @@ import PageHeader from 'components/common/PageHeader';
 import SubtleBadge from 'components/common/SubtleBadge';
 import IconButton from 'components/common/IconButton';
 import AdvanceTable from 'components/common/advance-table/AdvanceTable';
+import { byTimestamp } from 'components/common/advance-table/sorting';
 import AdvanceTableFooter from 'components/common/advance-table/AdvanceTableFooter';
 import useAdvanceTable from 'hooks/ui/useAdvanceTable';
 import AdvanceTableProvider from 'providers/AdvanceTableProvider';
@@ -58,7 +59,12 @@ const ServiceAccountsPage: React.FC = () => {
         header: t('adminServiceAccounts.columns.activeCredentials')
       },
       {
-        accessorKey: 'createdAt',
+        id: 'createdAt',
+        // Formatted accessor + timestamp comparator — see byTimestamp. This
+        // table has no search box today; keeping the idiom uniform is what
+        // stops adding one from shipping the bug with it.
+        accessorFn: a => formatDate(a.createdAt),
+        sortingFn: byTimestamp<ServiceAccount>(a => a.createdAt),
         header: t('adminServiceAccounts.columns.createdAt'),
         cell: ({ row: { original } }) => formatDate(original.createdAt)
       }

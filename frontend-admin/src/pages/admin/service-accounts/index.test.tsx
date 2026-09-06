@@ -77,6 +77,42 @@ describe('ServiceAccountsPage', () => {
     expect(secondRow).toHaveTextContent('Inactive');
   });
 
+  // The date column accessors the FORMATTED text so a search box added later
+  // matches what the operator sees; that makes its own comparator the only
+  // thing keeping the order chronological. Sep 2026 is OLDER than Jan 2027 but
+  // sorts AFTER it as text, and the fixture is fed NEWEST-FIRST so a
+  // comparator that returns 0 for every pair — what aiming byTimestamp at a
+  // non-date field produces — cannot pass by leaving the input untouched.
+  it('sorts the Created column chronologically, not lexicographically', async () => {
+    stubList([
+      {
+        ...accounts[0],
+        id: 'sa-jan',
+        name: 'newer-acct',
+        createdAt: '2027-01-05T10:00:00Z'
+      },
+      {
+        ...accounts[1],
+        id: 'sa-sep',
+        name: 'older-acct',
+        createdAt: '2026-09-05T10:00:00Z'
+      }
+    ]);
+    renderPage();
+    const user = userEvent.setup();
+
+    await screen.findByText('older-acct');
+    await user.click(screen.getByText(/^created$/i));
+
+    await waitFor(() => {
+      const names = [...document.querySelectorAll('tbody tr')]
+        .map(r => r.textContent ?? '')
+        .filter(txt => /-acct/.test(txt))
+        .map(txt => (txt.match(/(older|newer)-acct/) ?? [''])[0]);
+      expect(names).toEqual(['older-acct', 'newer-acct']);
+    });
+  });
+
   it('renders an empty state when the list is empty', async () => {
     stubList([]);
     renderPage();
