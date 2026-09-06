@@ -29,9 +29,12 @@ const OperatorMembershipsCard: React.FC = () => {
 
   return (
     <Card>
+      {/* No titleTag override: OrkestraCardHeader's h5 default is the panel
+          title step (DESIGN.md "Title / h4-h5"), and this was the console's
+          only card headed at h6 — beside SectionCard on /user/dashboard the
+          two panels sat a full 6px apart on the type ramp. */}
       <OrkestraCardHeader
         light
-        titleTag="h6"
         title={
           <span className="d-flex align-items-center gap-2 text-700">
             <FontAwesomeIcon icon="layer-group" className="text-primary" />

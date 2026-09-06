@@ -19338,7 +19338,7 @@ pre,
 code,
 kbd,
 samp {
-  font-size: 0.875rem;
+  font-size: 0.8333333333rem;
 }
 
 [type=email],
@@ -24482,6 +24482,16 @@ h5,
   z-index: 1020;
   background-image: none;
   min-height: var(--orkestra-top-nav-height);
+}
+.navbar-top .navbar-brand {
+  min-width: 0;
+}
+.navbar-top .navbar-brand img {
+  max-width: 100%;
+  height: auto;
+}
+.navbar-top .navbar-nav-icons {
+  flex-shrink: 0;
 }
 .navbar-top .navbar-nav-icons .dropdown-menu {
   position: absolute;

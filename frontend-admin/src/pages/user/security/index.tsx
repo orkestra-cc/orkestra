@@ -123,8 +123,12 @@ const SecurityPage = () => {
         </Card.Body>
       </Card>
 
+      {/* xl, not lg, for the 4-up break — same as /user/dashboard (the page
+          that links here) and /admin/tenants. At lg the four tiles are 186px
+          wide, under what the tile's own type scale needs: three of these four
+          titles wrapped onto a second line. */}
       <Row className="g-3 mb-3">
-        <Col md={6} lg={3}>
+        <Col md={6} xl={3}>
           <StatCard
             title={t('userSecurity.stats.mfaTitle')}
             value={
@@ -158,7 +162,7 @@ const SecurityPage = () => {
             loading={authMethods.isLoading}
           />
         </Col>
-        <Col md={6} lg={3}>
+        <Col md={6} xl={3}>
           <StatCard
             title={t('userSecurity.stats.sessionsTitle')}
             value={sessions.isError ? dash : sessionCount}
@@ -172,7 +176,7 @@ const SecurityPage = () => {
             loading={sessions.isLoading}
           />
         </Col>
-        <Col md={6} lg={3}>
+        <Col md={6} xl={3}>
           <StatCard
             title={t('userSecurity.stats.providersTitle')}
             value={authMethods.isError ? dash : providerCount}
@@ -186,7 +190,7 @@ const SecurityPage = () => {
             loading={authMethods.isLoading}
           />
         </Col>
-        <Col md={6} lg={3}>
+        <Col md={6} xl={3}>
           <StatCard
             title={t('userSecurity.stats.devicesTitle')}
             value={trusted.isError ? dash : trustedCount}

@@ -70,11 +70,17 @@ label {
   margin-bottom: map-get($spacers, 2);
 }
 
+// On-scale (The On-Scale Rule): `$font-size-sm` (0.875rem = 14px) is not a
+// step of the 1.2-ratio `$font-sizes` scale, and an absolute size here also
+// overrode Bootstrap's own `code` rule — so an inline `<code>` rendered at
+// 14px inside an fs-11 (11.11px) metadata line, larger than the sentence
+// carrying it (the org slug on /user/dashboard's Groups panel). Same pinning
+// as `$input-font-size-sm` and `$navbar-vertical-link-font-size`.
 pre,
 code,
 kbd,
 samp {
-  font-size: $font-size-sm;
+  font-size: map-get($font-sizes, 10);
 }
 
 [type='email'],
