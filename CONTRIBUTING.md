@@ -2,6 +2,14 @@
 
 Thanks for considering a contribution. Orkestra is a Go + React + Flutter monorepo, but **you only need the toolchains for the surface you're touching** — a backend-only PR doesn't require Node, a frontend-only PR doesn't require Go.
 
+For operators maintaining commons and product repositories, the
+[development stack and delivery workflow](docs/onboarding/development-stack.md)
+records the selected private Forgejo + Worktrunk target, per-codebase development
+VMs, hotfix propagation, workspace cleanup, and delivery design. Public upstream
+remains on GitHub; selecting Forgejo for private work does not migrate this repo.
+Its operational rollout is tracked separately from the existing contributor
+setup below.
+
 ## Quick start
 
 ```bash
