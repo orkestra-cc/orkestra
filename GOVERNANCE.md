@@ -126,6 +126,6 @@ If/when the project transitions away from a single-maintainer model (technical s
 
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — practical contributor guide (setup, PR checklist, conventions)
 - [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — Contributor Covenant 2.1
-- [`ROADMAP.md`](ROADMAP.md) — what we're working on next
+- [GitHub Issues](https://github.com/orkestra-cc/orkestra/issues) — current work and feature proposals
 - [`docs/adr/`](docs/adr/) — Architecture Decision Records
 - [`SECURITY.md`](SECURITY.md) — security disclosure policy
