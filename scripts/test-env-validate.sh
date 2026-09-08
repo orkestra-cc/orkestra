@@ -123,6 +123,17 @@ check "storage: no public endpoint, loopback is fine"          "no"  "$(run HOST
 # --- staging is as strict as production ---
 check "staging: the shipped RustFS literal is refused"     "1"   "$(run "${prod[@]}" ENV=staging COOKIE_SAME_SITE=lax STORAGE_SECRET_KEY=changeme-rustfs)"
 
+# --- the storage public endpoint must be https in staging/production -----
+# Browsers — and, for public cover images, anonymous visitors — fetch
+# presigned URLs from STORAGE_PUBLIC_ENDPOINT. Plain HTTP there is a
+# cleartext signed URL and mixed content on every HTTPS site embedding it.
+check "production: a plain-http public endpoint is refused"    "1"   "$(run "${prod[@]}" STORAGE_PUBLIC_ENDPOINT=http://storage.example.com)"
+check "production: the error names STORAGE_PUBLIC_ENDPOINT"    "yes" "$(saw 'STORAGE_PUBLIC_ENDPOINT must be an https')"
+check "production: an https public endpoint passes"            "0"   "$(run "${prod[@]}" STORAGE_PUBLIC_ENDPOINT=https://storage.example.com)"
+check "production: an unset public endpoint passes"            "0"   "$(run_without STORAGE_PUBLIC_ENDPOINT "${prod[@]}")"
+check "staging: a plain-http public endpoint is refused"       "1"   "$(run "${prod[@]}" ENV=staging STORAGE_PUBLIC_ENDPOINT=http://storage.example.com)"
+check "development: a plain-http public endpoint is tolerated" "0"   "$(run STORAGE_PUBLIC_ENDPOINT=http://localhost:9100)"
+
 echo
 printf 'env-validate: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
