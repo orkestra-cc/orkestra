@@ -257,3 +257,25 @@ func TestCachedGetEntryRoundTrips(t *testing.T) {
 		}
 	}
 }
+
+// CachedConfig.CacheBuffer was validated by NewCached and then dropped on
+// the floor — PresignGet subtracted a hardcoded 10 minutes, so configuring
+// any other buffer silently did nothing. Both production call sites happen
+// to pass 10m, which is why nothing had noticed.
+func TestCacheEntryTTLHonoursTheConfiguredBuffer(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	store := NewCached(&recordingStore{}, rdb, CachedConfig{
+		SignedGetTTL: time.Hour,
+		CacheBuffer:  45 * time.Minute, // deliberately not the old hardcoded 10m
+		KeyPrefix:    "blob:url:test:",
+	})
+	if _, err := store.PresignGet(context.Background(), "k", time.Hour); err != nil {
+		t.Fatalf("presign: %v", err)
+	}
+	if got := mr.TTL("blob:url:test:k"); got != 15*time.Minute {
+		t.Fatalf("cache entry TTL = %s, want 15m (1h signed − 45m buffer)", got)
+	}
+}

@@ -36,6 +36,7 @@ type CachedStore struct {
 	redis   *redis.Client
 	cacheFn func(key string) string
 	getTTL  time.Duration
+	buffer  time.Duration
 }
 
 // CachedConfig configures CachedStore. Defaults: SignedGetTTL = 60min,
@@ -76,6 +77,7 @@ func NewCached(inner Store, rdb *redis.Client, cfg CachedConfig) Store {
 		redis:   rdb,
 		cacheFn: func(key string) string { return prefix + key },
 		getTTL:  cfg.SignedGetTTL,
+		buffer:  cfg.CacheBuffer,
 	}
 }
 
@@ -115,7 +117,7 @@ func (c *CachedStore) PresignGet(ctx context.Context, key string, ttl time.Durat
 	if err != nil {
 		return "", err
 	}
-	cacheTTL := ttl - 10*time.Minute
+	cacheTTL := ttl - c.buffer
 	if cacheTTL <= 0 {
 		cacheTTL = ttl / 2
 	}
