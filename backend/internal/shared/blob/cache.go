@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -17,6 +19,16 @@ import (
 // CachedStore on Delete and by the user module's avatar mutation
 // paths via InvalidateGet.
 //
+// A cached entry records the TTL its URL was signed for, because two
+// callers may presign the SAME key at different TTLs (a long-lived
+// operator preview and a short-lived public redirect, say). Reusing the
+// longer signature for the shorter caller would silently extend that
+// caller's revocation window, so PresignGet reuses an entry only when it
+// does not outlive what was asked for. The TTL lives in the VALUE, not
+// the cache key: one object key still maps to exactly one entry, so
+// Put, Delete and InvalidateGet stay single-DEL operations and the cache
+// never has to enumerate keys to invalidate.
+//
 // PresignPut and Exists are pass-through — only PresignGet benefits
 // from caching, the rest mutate or HEAD and must hit the origin.
 type CachedStore struct {
@@ -24,6 +36,7 @@ type CachedStore struct {
 	redis   *redis.Client
 	cacheFn func(key string) string
 	getTTL  time.Duration
+	buffer  time.Duration
 }
 
 // CachedConfig configures CachedStore. Defaults: SignedGetTTL = 60min,
@@ -64,6 +77,7 @@ func NewCached(inner Store, rdb *redis.Client, cfg CachedConfig) Store {
 		redis:   rdb,
 		cacheFn: func(key string) string { return prefix + key },
 		getTTL:  cfg.SignedGetTTL,
+		buffer:  cfg.CacheBuffer,
 	}
 }
 
@@ -87,8 +101,14 @@ func (c *CachedStore) PresignGet(ctx context.Context, key string, ttl time.Durat
 		ttl = c.getTTL
 	}
 	cacheKey := c.cacheFn(key)
-	if cached, err := c.redis.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
-		return cached, nil
+	if raw, err := c.redis.Get(ctx, cacheKey).Result(); err == nil && raw != "" {
+		// Reuse only a URL that does not outlive what this caller asked
+		// for. A longer-signed entry would hand this caller a URL that
+		// stays valid past its own revocation window; a shorter one is
+		// always safe — the caller simply re-presigns sooner.
+		if cachedTTL, cachedURL, ok := decodeCachedGet(raw); ok && cachedTTL <= ttl {
+			return cachedURL, nil
+		}
 	} else if err != nil && !errors.Is(err, redis.Nil) {
 		// Degrade to direct presign on a Redis fault. The URL will
 		// still work; the SPA will just refresh more often than ideal.
@@ -97,17 +117,43 @@ func (c *CachedStore) PresignGet(ctx context.Context, key string, ttl time.Durat
 	if err != nil {
 		return "", err
 	}
-	cacheTTL := ttl - 10*time.Minute
+	cacheTTL := ttl - c.buffer
 	if cacheTTL <= 0 {
 		cacheTTL = ttl / 2
 	}
 	if cacheTTL > 0 {
-		if setErr := c.redis.Set(ctx, cacheKey, url, cacheTTL).Err(); setErr != nil {
+		// Overwrite unconditionally rather than leave a longer entry in
+		// place: the cache converges on the shortest TTL any caller asks
+		// for, which is safe for every caller and still yields a stable
+		// URL for the SPA's <img> tag.
+		if setErr := c.redis.Set(ctx, cacheKey, encodeCachedGet(ttl, url), cacheTTL).Err(); setErr != nil {
 			// Silent — the next call will just re-presign.
 			_ = setErr
 		}
 	}
 	return url, nil
+}
+
+// encodeCachedGet renders a cache entry: the TTL the URL was signed for,
+// then the URL. Nanoseconds keep the round-trip exact.
+func encodeCachedGet(ttl time.Duration, url string) string {
+	return strconv.FormatInt(int64(ttl), 10) + "|" + url
+}
+
+// decodeCachedGet splits an entry written by encodeCachedGet. ok is false
+// for anything else — including a bare URL written by an older build,
+// which the caller then re-presigns and overwrites, so the cache
+// self-heals within one entry lifetime rather than needing a flush.
+func decodeCachedGet(raw string) (ttl time.Duration, url string, ok bool) {
+	sep := strings.IndexByte(raw, '|')
+	if sep <= 0 {
+		return 0, "", false
+	}
+	n, err := strconv.ParseInt(raw[:sep], 10, 64)
+	if err != nil || n <= 0 {
+		return 0, "", false
+	}
+	return time.Duration(n), raw[sep+1:], true
 }
 
 // PresignGetDownload delegates to the inner store's download-presign capability
