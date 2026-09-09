@@ -81,8 +81,26 @@ label {
   // padding-start and the input's negative margin from the same rem value —
   // overriding width here left the em-based gutter too narrow and the label
   // touched the track.
+  // The forced 1.5rem track also has to be re-centred on the label: Bootstrap's
+  // default `margin-top: .25em` was derived for the original em-sized input, so
+  // against the 1.45rem `.form-check-label` line-height it left every labelled
+  // switch in the console sitting 2.8px low. Giving the label the SAME
+  // line-height as the track height and zeroing the margin makes both boxes
+  // 1.5rem tall from the same baseline, so they centre exactly — and they stay
+  // centred if the target-size floor above is ever changed.
   .form-check-input {
     height: 1.5rem;
+    margin-top: 0;
+  }
+  // `vertical-align: top` is load-bearing, not cosmetic: the input is floated so
+  // it sits at the container's content top, while the label is an inline-block
+  // aligned to the LINE BOX baseline. The label's font (fs-10) is smaller than
+  // the wrapper's 16px strut, so baseline alignment pushed its box down a
+  // further 1.6px. Top-aligning both boxes, at equal 1.5rem height, is what
+  // actually makes the centres coincide.
+  .form-check-label {
+    line-height: 1.5rem;
+    vertical-align: top;
   }
 }
 
