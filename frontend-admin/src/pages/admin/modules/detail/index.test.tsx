@@ -484,3 +484,24 @@ describe('ModuleDetailPage sections', () => {
     );
   });
 });
+
+describe('ModuleDetailPage restart hint', () => {
+  beforeEach(() => stubAll());
+
+  it('shows the restart strip while the stored config is ahead of the running module', async () => {
+    // The backend sets the flag on every config write to a module that reads
+    // its config only at Init and clears it at the next boot. The API always
+    // carried it; nothing on the page used to render it, so a saved value
+    // the field itself says is "read at startup" looked applied when it was
+    // not.
+    stubAll({ ...demoModule, needsRestart: true });
+    renderAt('');
+    expect(await screen.findByText(/Restart required/)).toBeInTheDocument();
+  });
+
+  it('shows no restart strip once the running module matches its stored config', async () => {
+    renderAt('');
+    await screen.findByRole('button', { name: /Overview/ });
+    expect(screen.queryByText(/Restart required/)).not.toBeInTheDocument();
+  });
+});

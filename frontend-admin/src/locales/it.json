@@ -2397,6 +2397,10 @@
       "back": "Torna ai moduli",
       "initErrorLabel": "Errore di inizializzazione:",
       "managedInfra": "Infrastruttura gestita:",
+      "restartRequired": {
+        "title": "Riavvio necessario:",
+        "body": "la configurazione è stata salvata, ma questo modulo la legge solo all'avvio. Il modulo in esecuzione mantiene i valori precedenti finché il backend non viene riavviato."
+      },
       "environmentLabel": "Ambiente:",
       "activeBadge": "attivo",
       "setAsActive": "Imposta come attivo",
