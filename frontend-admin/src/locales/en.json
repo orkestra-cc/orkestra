@@ -2397,6 +2397,10 @@
       "back": "Back to Modules",
       "initErrorLabel": "Init Error:",
       "managedInfra": "Managed infrastructure:",
+      "restartRequired": {
+        "title": "Restart required:",
+        "body": "the configuration has been saved, but this module reads it only at startup. The running module keeps the previous values until the backend is restarted."
+      },
       "environmentLabel": "Environment:",
       "activeBadge": "active",
       "setAsActive": "Set as Active",
