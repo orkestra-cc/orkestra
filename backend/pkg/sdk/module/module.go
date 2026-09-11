@@ -539,6 +539,21 @@ func (d *Dependencies) GetConfigInt(module, key string, fallback int) int {
 	return n
 }
 
+// GetConfigInt64 returns an int64 config value with fallback. Mirrors
+// GetConfigInt for callers whose value can exceed the platform int range
+// (e.g. a byte-size ceiling stored as a config string).
+func (d *Dependencies) GetConfigInt64(module, key string, fallback int64) int64 {
+	v := d.GetConfig(module, key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
 // GetConfigDuration returns a time.Duration config value with fallback.
 func (d *Dependencies) GetConfigDuration(module, key string, fallback time.Duration) time.Duration {
 	v := d.GetConfig(module, key)

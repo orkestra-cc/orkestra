@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // CachedStore wraps a Store with a Redis-backed presigned-GET cache.
@@ -81,8 +83,8 @@ func NewCached(inner Store, rdb *redis.Client, cfg CachedConfig) Store {
 	}
 }
 
-func (c *CachedStore) PresignPut(ctx context.Context, key, contentType string, ttl time.Duration) (*PresignedPut, error) {
-	return c.inner.PresignPut(ctx, key, contentType, ttl)
+func (c *CachedStore) PresignPut(ctx context.Context, key, contentType string, sizeBytes int64, ttl time.Duration) (*PresignedPut, error) {
+	return c.inner.PresignPut(ctx, key, contentType, sizeBytes, ttl)
 }
 
 // Put is a pass-through that also drops any cached presigned-GET URL
@@ -195,4 +197,20 @@ func (c *CachedStore) InvalidateGet(ctx context.Context, key string) error {
 		return fmt.Errorf("blob: cache invalidate: %w", err)
 	}
 	return nil
+}
+
+func (c *CachedStore) Stat(ctx context.Context, key string) (iface.ObjectStat, error) {
+	insp, ok := c.inner.(iface.ObjectInspector)
+	if !ok {
+		return iface.ObjectStat{}, errors.New("blob: underlying store cannot inspect objects")
+	}
+	return insp.Stat(ctx, key)
+}
+
+func (c *CachedStore) GetRange(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error) {
+	insp, ok := c.inner.(iface.ObjectInspector)
+	if !ok {
+		return nil, errors.New("blob: underlying store cannot inspect objects")
+	}
+	return insp.GetRange(ctx, key, offset, length)
 }
