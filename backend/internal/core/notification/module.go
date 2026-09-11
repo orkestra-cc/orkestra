@@ -149,10 +149,11 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 }
 
 // ConfigGroups upgrades /admin/modules/notification from one flat card to the
-// full-page rail. Three sections: Delivery (how mail leaves the platform),
-// Sender (the addresses recipients see), Branding (values injected into every
-// templated email). The SMTP connection settings live under Delivery and are
-// hidden until the provider is set to smtp.
+// full-page rail. Four sections: Delivery (how mail leaves the platform),
+// Sender profiles (the record list, ADR-0019), Sender (the addresses
+// recipients see), Branding (values injected into every templated email).
+// The SMTP connection settings live under Delivery and are hidden until the
+// provider is set to smtp.
 func (m *NotificationModule) ConfigGroups() []module.ConfigGroup {
 	return []module.ConfigGroup{
 		{Key: "delivery", Label: "Delivery", Order: 1,
