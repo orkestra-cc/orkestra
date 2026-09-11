@@ -15404,6 +15404,58 @@
         "tags": [
           "Notifications"
         ]
+      },
+      "post": {
+        "operationId": "notifications-unsubscribe-post",
+        "parameters": [
+          {
+            "description": "Unsubscribe token; read from the query string first",
+            "explode": false,
+            "in": "query",
+            "name": "token",
+            "schema": {
+              "description": "Unsubscribe token; read from the query string first",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "contentMediaType": "application/octet-stream",
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnsubscribeResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Consume an unsubscribe token (RFC 8058 one-click)",
+        "tags": [
+          "Notifications"
+        ]
       }
     },
     "/v1/setup/admin": {
