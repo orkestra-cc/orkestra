@@ -138,15 +138,29 @@ them with `errors.Is` **without importing `internal/core/notification`**:
 - `ErrSenderNotFound` — grammar-valid slug, no matching profile.
 - `ErrSenderNotEligible` — profile exists, `Type ∉ AllowedTypes`.
 - `ErrSenderNotConfigured` — profile exists and is eligible, but its driver is
-  unregistered or its required fields are incomplete.
+  unregistered or its required fields are incomplete (see the exception below:
+  dispatch reaches this condition without reaching this sentinel).
 - `ErrNoSenderForCategory` — empty `Sender` (category routing) resolves to no
   profile at all.
 - `ErrSenderUnavailable` — the directory/config plane itself could not be read.
   Distinct from every error above, none of which was actually evaluated.
 
-The module's own sentinels stay unexported from this seam: the explicit-sender
-arm of dispatch maps its internal error to one of these six before failing, so
-the value a consumer sees across the module boundary is always one it can name.
+The explicit-sender arm of dispatch maps its internal errors onto these six
+for the steps it owns — slug grammar, lookup, and eligibility — so a consumer
+outside the module can name what went wrong without importing it.
+
+**The mapping stops at the driver check, and this ADR does not claim
+otherwise.** When a named profile is eligible but its driver is unregistered or
+its required fields are incomplete, dispatch fails carrying the module's *own*
+sentinel rather than `ErrSenderNotConfigured`, so a consumer's `errors.Is`
+against all six returns false. The condition is still diagnosable and still
+pre-flightable: the delivery row records a bounded reason
+(`err=not_configured missing=…`, `err=unknown_driver`), and `PreflightDelivery`
+(D6) *does* answer that case as `ErrSenderNotConfigured`. It is simply not
+nameable from the send's own error. Closing that is a change to the dispatch
+error mapping, not to this decision; until it lands, a consumer that must
+distinguish an incomplete profile from any other send failure pre-flights for
+it rather than reading the send error.
 
 How a consumer projects these onto its own error codes and HTTP statuses is the
 consumer's decision. This ADR fixes the sentinel set that such a mapping is
@@ -312,10 +326,13 @@ providers is a process the operator runs, not a behavior the platform enforces.
   already records, for a decision that belongs on the calling object rather
   than in `notification`'s config.
 - **A second `ServiceKey` for the directory** instead of an optional companion
-  asserted off `ServiceNotificationSender`. Rejected for the reason ADR-0019 D7
-  gives for `CategoryConfiguredChecker`: a second key is a second thing to
-  register, a second thing to miss, and a second failure mode for a capability
-  that is a narrowing of one object, not a different object.
+  asserted off `ServiceNotificationSender`. ADR-0019 D7 chose the companion
+  idiom for `CategoryConfiguredChecker` as the house way to extend a frozen
+  contract, and that precedent is why the shape was reached for first; the
+  argument against a second key is our own. A key is a thing to register and a
+  thing to miss, and this capability is a narrowing of an object the registry
+  already holds, not a different object — giving it its own key would invent a
+  second way for the same service to come back absent.
 - **Fingerprint or version snapshot for mid-send sender identity** (D7).
   Rejected as YAGNI against the current requirement; recorded as the named
   revisit point rather than silently decided in a worker implementation.

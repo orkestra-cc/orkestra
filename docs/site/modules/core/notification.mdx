@@ -64,7 +64,6 @@ The choice is re-checked at delivery, never taken on trust: slug grammar, the pr
 Sender profiles are installation-global, and `allowed_types` makes a profile visible — label and `From:` address — to every internal tenant that can send campaigns. If your deployment has several internal tenants that must not see each other's sending identities, leave `allowed_types` empty on those profiles until per-tenant scoping ships; routing-only profiles are unaffected.
 :::
 
-
 ## Templates
 
 System templates ship as Go string constants and are seeded into MongoDB on `Start()`. After that **the database is the source of truth**. An admin overrides one with `PUT /v1/notifications/templates/{templateId}`, which flips `isSystem` to `false`; deleting the override reseeds the original on the next start.

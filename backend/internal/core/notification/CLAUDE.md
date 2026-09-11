@@ -234,7 +234,6 @@ multi-internal-tenant deployment that needs identity segregation MUST NOT set
 `allowed_tenants` follow-up lands; leaving it empty keeps the profile reachable
 only through category routing, which is today's behavior.
 
-
 ## Templates
 
 System templates live as Go string constants in `services/default_templates.go`. On first boot they are seeded into the DB; afterwards the DB is the source of truth. Admins can override them via `PUT /v1/notifications/templates/{id}` which flips `isSystem` to `false`. Deleting an override with `DELETE` calls `SeedDefaults` again and the default comes back.

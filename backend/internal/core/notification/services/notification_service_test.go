@@ -1030,12 +1030,12 @@ type panicSink struct{}
 func (panicSink) OnMarketingUnsubscribe(_ context.Context, _, _, _ string) { panic("sink boom") }
 
 // ---------------------------------------------------------------------------
-// NotificationTemplatePort tests
+// Template read/write capability tests
 // ---------------------------------------------------------------------------
 
 // newTestNotificationService returns a *NotificationService wired with the
-// in-memory fakes (store-backed fakeTemplateService) for testing the
-// UpsertTemplate / GetTemplate port.
+// in-memory fakes (store-backed fakeTemplateService) for testing
+// UpsertTemplate / GetTemplate.
 func newTestNotificationService(t *testing.T) *NotificationService {
 	t.Helper()
 	k := newKit(Options{DefaultLocale: "it"})
@@ -1198,8 +1198,8 @@ func TestNotificationService_Dispatch_ExplicitSender_UnknownSlug(t *testing.T) {
 	if doc.AttemptedSenderSlug != "ghost" {
 		t.Fatalf("AttemptedSenderSlug = %q, want ghost", doc.AttemptedSenderSlug)
 	}
-	// The sentinel a CRM-side consumer matches. It cannot import this
-	// package, so the iface sentinel is the ONLY thing it can key on: the
+	// The sentinel a consumer outside this module matches. It cannot import
+	// this package, so the iface sentinel is the ONLY thing it can key on: the
 	// resolver's local ErrSenderNotFound must be mapped before it leaves
 	// the chokepoint, exactly as PreflightDelivery maps it.
 	if !errors.Is(err, iface.ErrSenderNotFound) {
