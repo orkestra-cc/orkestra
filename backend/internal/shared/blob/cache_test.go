@@ -33,7 +33,7 @@ type recordingStore struct {
 	presignErr  error
 }
 
-func (r *recordingStore) PresignPut(context.Context, string, string, time.Duration) (*PresignedPut, error) {
+func (r *recordingStore) PresignPut(context.Context, string, string, int64, time.Duration) (*PresignedPut, error) {
 	return &PresignedPut{}, nil
 }
 func (r *recordingStore) Put(_ context.Context, key, _ string, _ io.Reader) error {

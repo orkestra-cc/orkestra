@@ -15,8 +15,8 @@ type uploadFakeStore struct {
 	deleted []string
 }
 
-func (f *uploadFakeStore) PresignPut(_ context.Context, key, _ string, _ time.Duration) (*iface.PresignedPut, error) {
-	return &iface.PresignedPut{URL: "http://s3/" + key, Key: key}, nil
+func (f *uploadFakeStore) PresignPut(_ context.Context, key, _ string, sizeBytes int64, _ time.Duration) (*iface.PresignedPut, error) {
+	return &iface.PresignedPut{URL: "http://s3/" + key, Key: key, SizeBytes: sizeBytes}, nil
 }
 func (f *uploadFakeStore) Put(context.Context, string, string, io.Reader) error { return nil }
 func (f *uploadFakeStore) PresignGet(context.Context, string, time.Duration) (string, error) {
@@ -94,7 +94,7 @@ func TestCommitScopeAndExistence(t *testing.T) {
 // value so the fallback path is observable.
 type downloadCapableStore struct{ captured string }
 
-func (*downloadCapableStore) PresignPut(context.Context, string, string, time.Duration) (*iface.PresignedPut, error) {
+func (*downloadCapableStore) PresignPut(context.Context, string, string, int64, time.Duration) (*iface.PresignedPut, error) {
 	return nil, nil
 }
 func (*downloadCapableStore) Put(context.Context, string, string, io.Reader) error { return nil }

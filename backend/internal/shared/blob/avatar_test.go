@@ -17,7 +17,7 @@ type fakeStore struct {
 	presignErr error
 }
 
-func (f *fakeStore) PresignPut(context.Context, string, string, time.Duration) (*PresignedPut, error) {
+func (f *fakeStore) PresignPut(context.Context, string, string, int64, time.Duration) (*PresignedPut, error) {
 	return nil, errors.New("not used")
 }
 func (f *fakeStore) PresignGet(_ context.Context, _ string, _ time.Duration) (string, error) {

@@ -18,7 +18,7 @@ type fakeAvatarStore struct {
 	present map[string]bool
 }
 
-func (f *fakeAvatarStore) PresignPut(_ context.Context, key, _ string, _ time.Duration) (*iface.PresignedPut, error) {
+func (f *fakeAvatarStore) PresignPut(_ context.Context, key, _ string, _ int64, _ time.Duration) (*iface.PresignedPut, error) {
 	return &iface.PresignedPut{URL: "http://s3/" + key, Key: key}, nil
 }
 func (f *fakeAvatarStore) Put(context.Context, string, string, io.Reader) error { return nil }
