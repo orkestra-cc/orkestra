@@ -476,6 +476,34 @@ func IsConfiguredForCategory(ctx context.Context, s NotificationSender, category
 	return s.IsConfigured(ctx)
 }
 
+// SenderInfo is the identity-only view of one configured sender profile
+// (ADR-0021 D6). Slug, Label, Provider, FromAddress — never a secret, host,
+// or username: a caller listing eligible senders for a UI picker must not
+// receive anything from the transport side of a profile.
+type SenderInfo struct {
+	Slug, Label, Provider, FromAddress string
+	Ready                              bool // preflight passes now
+}
+
+// SenderDirectory is an OPTIONAL companion to NotificationSender (ADR-0021
+// D6), mirroring the CategoryConfiguredChecker idiom above: asserted from
+// the same registered ServiceNotificationSender object, no new ServiceKey.
+type SenderDirectory interface {
+	// ListEligibleSenders returns every profile whose allowed_types contains
+	// typ, with Ready computed per profile. Identity only — no secrets,
+	// hosts, usernames. A directory read that cannot reach configuration
+	// returns ErrSenderUnavailable, never an empty list.
+	ListEligibleSenders(ctx context.Context, typ string) ([]SenderInfo, error)
+
+	// PreflightDelivery preflights the whole delivery path a send would
+	// take:
+	//   sender == "": category routing — Resolve(category, typ) → usable
+	//                 driver (ErrNoSenderForCategory when nothing routes it);
+	//   sender != "": grammar → BySlug → allowed_types → usable driver.
+	// Returns nil or one of the Err* sentinels above.
+	PreflightDelivery(ctx context.Context, sender, category, typ string) error
+}
+
 // ---------------------------------------------------------------------------
 // TenantProvider — consumed by: authz, auth (JWT issuance), middleware,
 // every data module via the tenantrepo helper.

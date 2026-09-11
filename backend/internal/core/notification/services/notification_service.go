@@ -440,6 +440,106 @@ func (s *NotificationService) Drivers() *DriverRegistry { return s.drivers }
 // Resolver exposes the sender resolver.
 func (s *NotificationService) Resolver() SenderResolver { return s.resolver }
 
+// ---- SenderDirectory (ADR-0021 D6) -----------------------------------------
+//
+// NotificationService satisfies iface.SenderDirectory directly: it is the
+// exact object registered under module.ServiceNotificationSender
+// (notification/module.go), so a caller type-asserting the registered
+// service off the ServiceRegistry gets these methods for free — the same
+// companion-interface idiom CategoryConfiguredChecker already uses.
+
+// mapResolveErr maps the local errors Resolve/Default can return to the
+// iface sentinel a caller of PreflightDelivery's default arm is allowed to
+// match on. Anything other than ErrNoSenderForCategory — today only
+// ErrSenderConfigUnavailable — means the question itself could not be
+// answered, not that a specific sender choice failed.
+func mapResolveErr(err error) error {
+	if errors.Is(err, ErrNoSenderForCategory) {
+		return iface.ErrNoSenderForCategory
+	}
+	return iface.ErrSenderUnavailable
+}
+
+// mapBySlugErr is mapResolveErr's counterpart for the explicit arm.
+func mapBySlugErr(err error) error {
+	if errors.Is(err, ErrSenderNotFound) {
+		return iface.ErrSenderNotFound
+	}
+	return iface.ErrSenderUnavailable
+}
+
+// preflightFail wraps sentinel with a bounded, describeSendError-rendered
+// reason so the returned error is errors.Is-able against sentinel while
+// carrying no secret, host, or username (same allowlisted renderer the
+// dispatch chokepoint's failed-send diagnostic uses).
+func preflightFail(profile SenderProfile, sentinel error) error {
+	return fmt.Errorf("%w: %s", sentinel, describeSendError(profile, sentinel))
+}
+
+// ListEligibleSenders lists every profile whose AllowedTypes contains typ,
+// Ready computed by running it through the same usableDriver check the
+// dispatch chokepoint uses. Identity only on the returned SenderInfo — no
+// secret, host, or username ever crosses this boundary.
+func (s *NotificationService) ListEligibleSenders(ctx context.Context, typ string) ([]iface.SenderInfo, error) {
+	all, err := s.resolver.All(ctx)
+	if err != nil {
+		return nil, preflightFail(SenderProfile{}, iface.ErrSenderUnavailable)
+	}
+	out := make([]iface.SenderInfo, 0, len(all))
+	for _, p := range all {
+		if !typeAllowed(p, typ) {
+			continue
+		}
+		_, driverErr := s.usableDriver(p)
+		out = append(out, iface.SenderInfo{
+			Slug:        p.Slug,
+			Label:       p.Label,
+			Provider:    p.Provider,
+			FromAddress: p.FromAddress,
+			Ready:       driverErr == nil,
+		})
+	}
+	return out, nil
+}
+
+// PreflightDelivery preflights the whole delivery path a send with these
+// parameters would take (ADR-0021 D6):
+//
+//	sender == "": category routing — Resolve(category, typ) → usable driver;
+//	sender != "": grammar → BySlug → allowed_types → usable driver.
+//
+// Returns nil or one of the iface Err* sentinels. Every failure is wrapped
+// errors.Is-ably around its sentinel with a bounded, secret-free reason.
+func (s *NotificationService) PreflightDelivery(ctx context.Context, sender, category, typ string) error {
+	tenantID, _ := ctxauth.GetTenantID(ctx)
+
+	if sender == "" {
+		profile, err := s.resolver.Resolve(ctx, ResolveInput{Category: category, Type: typ, TenantID: tenantID})
+		if err != nil {
+			return preflightFail(SenderProfile{}, mapResolveErr(err))
+		}
+		if _, err := s.usableDriver(profile); err != nil {
+			return preflightFail(profile, iface.ErrSenderNotConfigured)
+		}
+		return nil
+	}
+
+	if !module.ValidSlug(sender) {
+		return preflightFail(SenderProfile{}, iface.ErrSenderInvalid)
+	}
+	profile, err := s.resolver.BySlug(ctx, sender)
+	if err != nil {
+		return preflightFail(SenderProfile{}, mapBySlugErr(err))
+	}
+	if !typeAllowed(profile, typ) {
+		return preflightFail(profile, iface.ErrSenderNotEligible)
+	}
+	if _, err := s.usableDriver(profile); err != nil {
+		return preflightFail(profile, iface.ErrSenderNotConfigured)
+	}
+	return nil
+}
+
 // TestSendInput is one operator-initiated test message.
 type TestSendInput struct {
 	To       string

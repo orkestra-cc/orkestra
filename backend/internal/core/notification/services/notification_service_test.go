@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -189,7 +190,9 @@ type fakeResolver struct {
 	profile     SenderProfile
 	err         error
 	inputs      []ResolveInput
-	bySlugCalls int // records lookups so a test can assert the guard short-circuited
+	bySlugCalls int             // records lookups so a test can assert the guard short-circuited
+	all         []SenderProfile // All's return value when set; nil falls back to [profile]
+	allCalls    int
 }
 
 // On error the fake returns the ZERO profile, as senderResolver does: a
@@ -219,6 +222,20 @@ func (f *fakeResolver) BySlug(_ context.Context, slug string) (SenderProfile, er
 		return SenderProfile{}, ErrSenderNotFound
 	}
 	return f.profile, nil
+}
+
+// All defaults to [f.profile] — a single-profile roster is what every
+// existing kit fixture already models. Tests exercising ListEligibleSenders
+// over a multi-profile roster set f.all directly.
+func (f *fakeResolver) All(context.Context) ([]SenderProfile, error) {
+	f.allCalls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.all != nil {
+		return f.all, nil
+	}
+	return []SenderProfile{f.profile}, nil
 }
 
 // ---- helpers ------------------------------------------------------------
@@ -1270,5 +1287,183 @@ func TestNotificationService_Dispatch_OptedOut_ValidSender_SuppressedBeforeResol
 	doc := k.logRepo.created[0]
 	if doc.AttemptedSenderSlug != "" {
 		t.Fatalf("AttemptedSenderSlug = %q, want empty (never reached resolution)", doc.AttemptedSenderSlug)
+	}
+}
+
+// ---- ADR-0021 D6: SenderDirectory companion --------------------------------
+
+func TestNotificationService_ListEligibleSenders_FiltersByAllowedTypeAndReady(t *testing.T) {
+	noop := &fakeDriver{name: "noop"}
+	broken := &fakeDriver{name: "smtp", requires: []ProfileRequirement{{Key: SubSMTPPassword, Secret: true}}}
+	resolver := &fakeResolver{all: []SenderProfile{
+		{Slug: "camp-mkt", Label: "Campaigns", Provider: "noop", FromAddress: "camp@x.example", AllowedTypes: []string{models.TypeMarketing}},
+		{Slug: "camp-broken", Label: "Broken", Provider: "smtp", FromAddress: "broken@x.example", AllowedTypes: []string{models.TypeMarketing}, SMTPHost: "h"},
+		{Slug: "txn-only", Label: "Txn", Provider: "noop", AllowedTypes: []string{models.TypeTransactional}},
+		{Slug: "draft", Label: "Draft", Provider: "noop"}, // no AllowedTypes at all
+	}}
+	svc := NewNotificationService(newFakeNotifRepo(), &fakeTemplateService{}, &fakePrefService{can: true}, &fakeUnsubService{},
+		resolver, NewDriverRegistry(noop, broken), discardLogger(), Options{})
+
+	got, err := svc.ListEligibleSenders(context.Background(), models.TypeMarketing)
+	if err != nil {
+		t.Fatalf("ListEligibleSenders: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d senders, want 2 (txn-only and draft must be filtered): %+v", len(got), got)
+	}
+	if got[0].Slug != "camp-mkt" || !got[0].Ready {
+		t.Fatalf("got[0] = %+v, want camp-mkt Ready=true", got[0])
+	}
+	if got[0].Label != "Campaigns" || got[0].Provider != "noop" || got[0].FromAddress != "camp@x.example" {
+		t.Fatalf("got[0] identity fields = %+v", got[0])
+	}
+	if got[1].Slug != "camp-broken" || got[1].Ready {
+		t.Fatalf("got[1] = %+v, want camp-broken Ready=false (missing SMTPPassword)", got[1])
+	}
+}
+
+func TestNotificationService_ListEligibleSenders_NoSecretHostUsernameInOutput(t *testing.T) {
+	profile := fullyPopulatedProfile("camp", []string{models.TypeMarketing})
+	resolver := &fakeResolver{all: []SenderProfile{profile}}
+	driver := &fakeDriver{name: "smtp"} // no Requires(): Ready is unaffected either way
+	svc := NewNotificationService(newFakeNotifRepo(), &fakeTemplateService{}, &fakePrefService{can: true}, &fakeUnsubService{},
+		resolver, NewDriverRegistry(driver), discardLogger(), Options{})
+
+	got, err := svc.ListEligibleSenders(context.Background(), models.TypeMarketing)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("ListEligibleSenders = %+v, %v", got, err)
+	}
+	blob, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	secrets := []string{
+		"sentinel-replyto-zz9@example.com", "sentinel-host-zz9.example.net", "sentinel-username-zz9",
+		"sentinel-password-zz9", "sentinel-mailupuser-zz9", "sentinel-mailupsecret-zz9", "2525", "starttls",
+	}
+	for _, s := range secrets {
+		if strings.Contains(string(blob), s) {
+			t.Fatalf("marshalled SenderInfo leaks transport identity %q: %s", s, blob)
+		}
+	}
+	// Identity fields ARE expected to be present — this pins the assertion
+	// above to something real: FromAddress is on the public shape.
+	if !strings.Contains(string(blob), "sentinel-from-zz9@example.com") {
+		t.Fatalf("expected FromAddress to survive marshalling: %s", blob)
+	}
+}
+
+func TestNotificationService_ListEligibleSenders_ConfigUnavailable_NeverEmptyList(t *testing.T) {
+	resolver := &fakeResolver{err: ErrSenderConfigUnavailable}
+	svc := NewNotificationService(newFakeNotifRepo(), &fakeTemplateService{}, &fakePrefService{can: true}, &fakeUnsubService{},
+		resolver, NewDriverRegistry(&fakeDriver{name: "noop"}), discardLogger(), Options{})
+
+	got, err := svc.ListEligibleSenders(context.Background(), models.TypeMarketing)
+	if !errors.Is(err, iface.ErrSenderUnavailable) {
+		t.Fatalf("err = %v, want iface.ErrSenderUnavailable", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got = %+v, want empty/nil on error — never a silent empty-list success", got)
+	}
+}
+
+// ---- PreflightDelivery: explicit arm ---------------------------------------
+
+func TestNotificationService_PreflightDelivery_ExplicitSender_Eligible_ReturnsNil(t *testing.T) {
+	k := newKit(Options{})
+	k.resolver.profile = SenderProfile{Slug: "camp", Provider: "noop", AllowedTypes: []string{models.TypeMarketing}}
+	err := k.svc.PreflightDelivery(context.Background(), "camp", "marketing", models.TypeMarketing)
+	if err != nil {
+		t.Fatalf("PreflightDelivery: %v", err)
+	}
+	if k.resolver.bySlugCalls != 1 {
+		t.Fatalf("BySlug calls = %d, want 1", k.resolver.bySlugCalls)
+	}
+}
+
+func TestNotificationService_PreflightDelivery_ExplicitSender_Malformed_NoResolverLookup(t *testing.T) {
+	k := newKit(Options{})
+	err := k.svc.PreflightDelivery(context.Background(), "Bad Slug!", "marketing", models.TypeMarketing)
+	if !errors.Is(err, iface.ErrSenderInvalid) {
+		t.Fatalf("err = %v, want iface.ErrSenderInvalid", err)
+	}
+	if k.resolver.bySlugCalls != 0 {
+		t.Fatalf("BySlug must not be called for a malformed slug, got %d calls", k.resolver.bySlugCalls)
+	}
+	if len(k.resolver.inputs) != 0 {
+		t.Fatalf("Resolve must not be called for a malformed slug, got %d calls", len(k.resolver.inputs))
+	}
+}
+
+func TestNotificationService_PreflightDelivery_ExplicitSender_NotFound(t *testing.T) {
+	k := newKit(Options{})
+	k.resolver.profile = SenderProfile{Slug: "camp", Provider: "noop", AllowedTypes: []string{models.TypeMarketing}}
+	err := k.svc.PreflightDelivery(context.Background(), "ghost", "marketing", models.TypeMarketing)
+	if !errors.Is(err, iface.ErrSenderNotFound) {
+		t.Fatalf("err = %v, want iface.ErrSenderNotFound", err)
+	}
+}
+
+func TestNotificationService_PreflightDelivery_ExplicitSender_NotEligible(t *testing.T) {
+	k := newKit(Options{})
+	k.resolver.profile = SenderProfile{Slug: "camp", Provider: "noop", AllowedTypes: []string{models.TypeTransactional}}
+	err := k.svc.PreflightDelivery(context.Background(), "camp", "marketing", models.TypeMarketing)
+	if !errors.Is(err, iface.ErrSenderNotEligible) {
+		t.Fatalf("err = %v, want iface.ErrSenderNotEligible", err)
+	}
+}
+
+func TestNotificationService_PreflightDelivery_ExplicitSender_NotConfigured(t *testing.T) {
+	k := newKit(Options{})
+	k.driver.requires = []ProfileRequirement{{Key: SubSMTPHost}}
+	k.resolver.profile = SenderProfile{Slug: "camp", Provider: "noop", AllowedTypes: []string{models.TypeMarketing}} // no SMTPHost
+	err := k.svc.PreflightDelivery(context.Background(), "camp", "marketing", models.TypeMarketing)
+	if !errors.Is(err, iface.ErrSenderNotConfigured) {
+		t.Fatalf("err = %v, want iface.ErrSenderNotConfigured", err)
+	}
+}
+
+func TestNotificationService_PreflightDelivery_ExplicitSender_Unavailable(t *testing.T) {
+	k := newKit(Options{})
+	k.resolver.err = ErrSenderConfigUnavailable
+	err := k.svc.PreflightDelivery(context.Background(), "camp", "marketing", models.TypeMarketing)
+	if !errors.Is(err, iface.ErrSenderUnavailable) {
+		t.Fatalf("err = %v, want iface.ErrSenderUnavailable", err)
+	}
+}
+
+// ---- PreflightDelivery: default arm (category routing) --------------------
+
+func TestNotificationService_PreflightDelivery_DefaultArm_Routed_ReturnsNil(t *testing.T) {
+	k := newKit(Options{})
+	k.resolver.profile = SenderProfile{Slug: "default", Provider: "noop", Categories: []string{"*"}}
+	err := k.svc.PreflightDelivery(context.Background(), "", "marketing", models.TypeMarketing)
+	if err != nil {
+		t.Fatalf("PreflightDelivery: %v", err)
+	}
+	if len(k.resolver.inputs) != 1 || k.resolver.inputs[0].Category != "marketing" || k.resolver.inputs[0].Type != models.TypeMarketing {
+		t.Fatalf("resolver input = %+v", k.resolver.inputs)
+	}
+	if k.resolver.bySlugCalls != 0 {
+		t.Fatalf("BySlug must not be called for the default arm, got %d calls", k.resolver.bySlugCalls)
+	}
+}
+
+func TestNotificationService_PreflightDelivery_DefaultArm_NothingRoutes(t *testing.T) {
+	k := newKit(Options{})
+	k.resolver.err = ErrNoSenderForCategory
+	err := k.svc.PreflightDelivery(context.Background(), "", "unrouted.category", models.TypeMarketing)
+	if !errors.Is(err, iface.ErrNoSenderForCategory) {
+		t.Fatalf("err = %v, want iface.ErrNoSenderForCategory", err)
+	}
+}
+
+func TestNotificationService_PreflightDelivery_DefaultArm_RoutedButNotConfigured(t *testing.T) {
+	k := newKit(Options{})
+	k.driver.requires = []ProfileRequirement{{Key: SubSMTPHost}}
+	k.resolver.profile = SenderProfile{Slug: "default", Provider: "noop", Categories: []string{"*"}} // no SMTPHost
+	err := k.svc.PreflightDelivery(context.Background(), "", "marketing", models.TypeMarketing)
+	if !errors.Is(err, iface.ErrSenderNotConfigured) {
+		t.Fatalf("err = %v, want iface.ErrSenderNotConfigured", err)
 	}
 }
