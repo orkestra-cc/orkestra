@@ -31,6 +31,7 @@ var goldenCodes = map[string]string{
 	"NotificationSenderUnknownDriver":    "notification.sender_unknown_driver",
 	"NotificationSenderIncomplete":       "notification.sender_incomplete",
 	"NotificationSenderNotFound":         "notification.sender_not_found",
+	"NotificationSenderBadAllowedType":   "notification.sender_bad_allowed_type",
 	"NotificationSendFailed":             "notification.send_failed",
 	"AuthEmailInUse":                     "auth.email_in_use",
 	"AuthJWTNotConfigured":               "auth.jwt_not_configured",

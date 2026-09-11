@@ -426,6 +426,10 @@ const NotificationSenderIncomplete = "notification.sender_incomplete"
 // in the roster. 404.
 const NotificationSenderNotFound = "notification.sender_not_found"
 
+// NotificationSenderBadAllowedType: a sender profile's allowed_types names
+// a value outside {marketing, transactional}. 422.
+const NotificationSenderBadAllowedType = "notification.sender_bad_allowed_type"
+
 // NotificationSendFailed: the sender's transport or vendor refused a test
 // message. The detail carries the bounded diagnostic, never vendor text. 502.
 const NotificationSendFailed = "notification.send_failed"
