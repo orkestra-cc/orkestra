@@ -41,6 +41,7 @@ Declared in `module.go::Collections()` and auto-created on boot:
 | `notification_preferences`          | compound `userUuid+category+channel` unique       | — |
 | `notification_suppressions`         | `address` unique                                  | — |
 | `notification_unsubscribe_tokens`   | `uuid` unique, `tokenHash` unique                 | 30 days on `expiresAt` |
+| `notification_marketing_optouts`    | `address` unique                                  | **none — an opt-out never expires** |
 
 ## Lifecycle
 
@@ -314,6 +315,73 @@ before transport — **without this core module importing it** (the same
 The typical implementation injects an open-pixel and rewrites click links for
 consenting recipients of marketing mail. The base ships **no** rewriter; the seam
 is inert until one is registered.
+
+## Unsubscribe consume sequence
+
+`UnsubscribeService.Consume(ctx, raw)` is the ordered, crash-safe replacement for
+the old read → apply → mark-used → fire sequence. It is deliberately **not** a
+transaction: each step is placed so that a crash right after it leaves a state the
+recipient's next click heals.
+
+1. **Record the durable opt-out** (`notification_marketing_optouts`, idempotent
+   upsert, keyed by the address on the token). Crash here and the opt-out is a
+   fact while the token is still unused, so a second click replays the same
+   upsert. If this write fails, **nothing else runs** — the token is left unspent
+   rather than burned for nothing.
+2. **Claim the token atomically** — `ClaimToken` is a single `FindOneAndUpdate` on
+   `{tokenHash, usedAt: nil, expiresAt > now}` that stamps `usedAt` **and** raises
+   the pending flags for everything below it: `sinkPending` always, `prefPending`
+   when the caller says the token names a user. Two concurrent one-click POSTs
+   therefore produce exactly one consume; the loser gets `(nil, nil)`, which is not
+   an error. A used, expired or unknown token takes the same path — the opt-out is
+   already recorded, so `Consume` returns without error.
+3. **Apply the preference** (`notification_preferences`), only when the token
+   carries a `userUuid`. Success calls `ClearPrefPending`.
+4. **Fire the sink** inline (`FireMarketingUnsubscribe`). Success calls
+   `ClearSinkPending`.
+
+Steps 3 and 4 may fail without failing the request, because the fact that actually
+stops the mail is already durable. The flags go up **at the claim, before the work
+runs** — not on failure — because a process that dies between the claim and the
+write has no failure to react to and no later moment at which it could mark
+anything; only the success lowers a flag, since one left up after a success would be
+retried forever. `Attempts` / `DeadLetteredAt` on the token belong to that
+reconciler.
+
+**Two branches deliberately leave work that nothing will pick up**, and the rule
+above does not cover them, because neither one ever claimed the token:
+
+- `ClaimToken` itself failing, and
+- a token that is expired or already used (the claim returns `(nil, nil)`).
+
+Both write the opt-out row — with a `sourceTokenUuid` pointing at a token that was
+never claimed — and then return generic success without a preference write, a sink
+fire, or a pending flag. This is an accepted limit, not an oversight: core stops
+sending to that address either way, so the recipient is protected; what can lag is a
+downstream consent store, for a link clicked after the token's 30-day TTL (or during
+a database blip). A recipient's second click heals the first branch only if they
+happen to click twice, which is not a mechanism. Whether the reconciler grows a
+sweep over opt-out rows whose source token was never claimed is its own decision.
+
+The error contract is narrow on purpose: **`Consume` returns an error only when the
+durable opt-out could not be written** (`ErrOptoutNotRecorded` — including an
+unwired opt-out seam, which fails closed, and a token row carrying no address,
+since `Upsert` reports success for an empty address without writing). Everything
+else is a `nil` error, because the public response is generic either way. Nothing
+in the sequence logs the raw token or a full address — the token's **uuid** is the
+only identifier that reaches a log line. Every message that can carry an address back
+— a driver error quoting the document or filter it failed on, a sink's error quoting
+the address core just handed it, a sink's panic value — goes through `scrubAddress`
+before it is logged or returned.
+
+`Consume`'s collaborators are wired in `Init` through `NewUnsubscribeService`'s
+options (`WithOptouts`, `WithPreferences`, `WithUnsubscribeSink`,
+`WithUnsubscribeLogger`); the sink is a function rather than an interface because
+the notification service takes the unsubscribe service as a constructor argument,
+so the reference can only be resolved at call time.
+
+`ConsumeToken` + `MarkUsed` still exist for the current HTTP handler, which has not
+been rewired onto `Consume` yet.
 
 ## Unsubscribe context seam (module extension point)
 

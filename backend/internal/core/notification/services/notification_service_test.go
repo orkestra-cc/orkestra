@@ -1,10 +1,12 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -169,6 +171,8 @@ func (f *fakeUnsubService) ConsumeToken(_ context.Context, _ string) (*models.Un
 }
 
 func (f *fakeUnsubService) MarkUsed(_ context.Context, _ string) error { return nil }
+
+func (f *fakeUnsubService) Consume(_ context.Context, _ string) error { return nil }
 
 type fakeDriver struct {
 	name     string
@@ -1062,6 +1066,41 @@ func TestFireMarketingUnsubscribe_PanicSink_BecomesAnError(t *testing.T) {
 type panicSink struct{}
 
 func (panicSink) OnMarketingUnsubscribe(_ context.Context, _, _, _ string) error { panic("sink boom") }
+
+// addressPanicSink panics with the address core just handed it — the shape a
+// real sink's crash takes when it interpolates what it was working on.
+type addressPanicSink struct{}
+
+func (addressPanicSink) OnMarketingUnsubscribe(_ context.Context, address, _, _ string) error {
+	panic("contact sync exploded for " + address)
+}
+
+func TestFireMarketingUnsubscribe_PanicValueIsScrubbedOfTheAddress(t *testing.T) {
+	// The recovered value goes to two places — a log line and the error the
+	// caller then logs in turn — so a panic carrying the address would leak
+	// it twice over. "Never log a full address" has no best-effort tier.
+	var buf bytes.Buffer
+	svc := NewNotificationService(newFakeNotifRepo(), &fakeTemplateService{}, &fakePrefService{can: true},
+		&fakeUnsubService{},
+		&fakeResolver{profile: SenderProfile{Slug: "default", Provider: "noop", Categories: []string{"*"}}},
+		NewDriverRegistry(&fakeDriver{name: "noop"}),
+		slog.New(slog.NewTextHandler(&buf, nil)), Options{})
+	svc.SetMarketingUnsubscribeSink(addressPanicSink{})
+
+	err := svc.FireMarketingUnsubscribe(context.Background(), "ada@example.test", "marketing", "ref-9")
+	if err == nil {
+		t.Fatal("a panicking sink must surface as an error")
+	}
+	if strings.Contains(err.Error(), "ada@example.test") {
+		t.Fatalf("the address must not ride out in the error: %v", err)
+	}
+	if strings.Contains(buf.String(), "ada@example.test") {
+		t.Fatalf("the address must not reach the log: %s", buf.String())
+	}
+	if !strings.Contains(err.Error(), "[address]") {
+		t.Fatalf("the panic value should still be reported, scrubbed: %v", err)
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Template read/write capability tests

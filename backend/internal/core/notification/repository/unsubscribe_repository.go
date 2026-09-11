@@ -8,6 +8,7 @@ import (
 	"github.com/orkestra/backend/internal/core/notification/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // UnsubscribeRepository stores hashed unsubscribe tokens.
@@ -17,6 +18,16 @@ type UnsubscribeRepository interface {
 	Create(ctx context.Context, doc *models.UnsubscribeTokenDoc) error
 	GetByHash(ctx context.Context, hash string) (*models.UnsubscribeTokenDoc, error)
 	MarkUsed(ctx context.Context, hash string) error
+
+	// ClaimToken is the consuming read: it decides, atomically, which of two
+	// concurrent clicks gets to consume the token, and marks the work that
+	// consume still owes afterwards.
+	ClaimToken(ctx context.Context, hash string, now time.Time, hasUser bool) (*models.UnsubscribeTokenDoc, error)
+
+	// ClearSinkPending / ClearPrefPending record that work the claim marked
+	// is now done, so the reconciler stops picking it up.
+	ClearSinkPending(ctx context.Context, hash string) error
+	ClearPrefPending(ctx context.Context, hash string) error
 }
 
 type unsubscribeRepository struct {
@@ -39,6 +50,7 @@ func (r *unsubscribeRepository) Create(ctx context.Context, doc *models.Unsubscr
 
 func (r *unsubscribeRepository) GetByHash(ctx context.Context, hash string) (*models.UnsubscribeTokenDoc, error) {
 	var doc models.UnsubscribeTokenDoc
+	//tenantscope:allow system: an unsubscribe token is keyed by its own hash and arrives from an anonymous mail client following a link — there is no tenant in the request context, and scoping this read by one would make a valid unsubscribe look unknown
 	err := r.coll.FindOne(ctx, bson.M{"tokenHash": hash}).Decode(&doc)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return nil, ErrNotFound
@@ -51,9 +63,72 @@ func (r *unsubscribeRepository) GetByHash(ctx context.Context, hash string) (*mo
 
 func (r *unsubscribeRepository) MarkUsed(ctx context.Context, hash string) error {
 	now := time.Now()
+	//tenantscope:allow system: same scope as GetByHash — the row is addressed by the token hash an anonymous recipient presented, and carries no tenant
 	_, err := r.coll.UpdateOne(ctx,
 		bson.M{"tokenHash": hash},
 		bson.M{"$set": bson.M{"usedAt": now}},
+	)
+	return err
+}
+
+// ClaimToken consumes a token atomically. The filter is the whole guard: a
+// token already used, expired, or unknown does not match, and the caller
+// gets (nil, nil) — never an error it might be tempted to treat as a
+// failure. Two concurrent one-click POSTs therefore produce exactly one
+// consume, and the loser still answers the recipient generically.
+//
+// The claim raises the pending flags in the SAME write that stamps usedAt,
+// which is the only way the work downstream of it survives a crash: a
+// process that dies between the claim and the sink call — or between the
+// claim and the preference write — has no failure to react to, so there is
+// no later moment at which it could mark anything. sinkPending always goes
+// up; prefPending goes up only when hasUser says the token names a user and
+// there is therefore a preference row to write. Consume lowers each one as
+// its work completes.
+func (r *unsubscribeRepository) ClaimToken(ctx context.Context, hash string, now time.Time, hasUser bool) (*models.UnsubscribeTokenDoc, error) {
+	if hash == "" {
+		return nil, nil
+	}
+	set := bson.M{"usedAt": now, "sinkPending": true}
+	if hasUser {
+		set["prefPending"] = true
+	}
+	//tenantscope:allow system: an unsubscribe token is keyed by its own hash and arrives from an anonymous mail client following a link — there is no tenant in the request context, and scoping the claim by one would make a valid one-click unsubscribe fail
+	res := r.coll.FindOneAndUpdate(ctx,
+		bson.M{"tokenHash": hash, "usedAt": nil, "expiresAt": bson.M{"$gt": now}},
+		bson.M{"$set": set},
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	)
+	var doc models.UnsubscribeTokenDoc
+	if err := res.Decode(&doc); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &doc, nil
+}
+
+// ClearSinkPending records that the sink accepted the opt-out. Leaving the
+// flag up after a success would make the reconciler retry it forever, which
+// is as much a bug as losing a failure.
+func (r *unsubscribeRepository) ClearSinkPending(ctx context.Context, hash string) error {
+	//tenantscope:allow system: same scope as ClaimToken — the row is addressed by the token hash an anonymous recipient presented, and carries no tenant
+	_, err := r.coll.UpdateOne(ctx,
+		bson.M{"tokenHash": hash},
+		bson.M{"$unset": bson.M{"sinkPending": ""}},
+	)
+	return err
+}
+
+// ClearPrefPending records that the preference row was written. Same reason
+// as its sibling: the claim raised the flag before the work ran, so only the
+// success can lower it.
+func (r *unsubscribeRepository) ClearPrefPending(ctx context.Context, hash string) error {
+	//tenantscope:allow system: same scope as ClaimToken — the row is addressed by the token hash an anonymous recipient presented, and carries no tenant
+	_, err := r.coll.UpdateOne(ctx,
+		bson.M{"tokenHash": hash},
+		bson.M{"$unset": bson.M{"prefPending": ""}},
 	)
 	return err
 }

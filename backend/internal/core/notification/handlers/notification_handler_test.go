@@ -75,6 +75,8 @@ func (f *htUnsubService) ConsumeToken(_ context.Context, _ string) (*models.Unsu
 }
 func (f *htUnsubService) MarkUsed(_ context.Context, _ string) error { return nil }
 
+func (f *htUnsubService) Consume(_ context.Context, _ string) error { return nil }
+
 // htDriver accepts everything, behind a resolver answering with one noop
 // profile — the ADR-0019 shape that replaced the single email sender.
 type htDriver struct{}

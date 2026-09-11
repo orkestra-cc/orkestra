@@ -15,8 +15,10 @@ type fakeUnsubRepo struct {
 	createErr error
 	getErr    error
 	markErr   error
+	claimErr  error
 	createN   int
 	markN     int
+	claimN    int
 }
 
 func newFakeUnsubRepo() *fakeUnsubRepo {
@@ -55,6 +57,39 @@ func (f *fakeUnsubRepo) MarkUsed(_ context.Context, hash string) error {
 	}
 	now := time.Now()
 	doc.UsedAt = &now
+	return nil
+}
+
+// ClaimToken mirrors the repository's CAS: only an unused, unexpired token
+// matches, and the winner comes back stamped with the pending flags for the
+// work that still has to happen.
+func (f *fakeUnsubRepo) ClaimToken(_ context.Context, hash string, now time.Time, hasUser bool) (*models.UnsubscribeTokenDoc, error) {
+	f.claimN++
+	if f.claimErr != nil {
+		return nil, f.claimErr
+	}
+	doc, ok := f.docs[hash]
+	if !ok || doc.UsedAt != nil || !doc.ExpiresAt.After(now) {
+		return nil, nil
+	}
+	doc.UsedAt = &now
+	doc.SinkPending = true
+	doc.PrefPending = hasUser
+	cp := *doc
+	return &cp, nil
+}
+
+func (f *fakeUnsubRepo) ClearSinkPending(_ context.Context, hash string) error {
+	if doc, ok := f.docs[hash]; ok {
+		doc.SinkPending = false
+	}
+	return nil
+}
+
+func (f *fakeUnsubRepo) ClearPrefPending(_ context.Context, hash string) error {
+	if doc, ok := f.docs[hash]; ok {
+		doc.PrefPending = false
+	}
 	return nil
 }
 

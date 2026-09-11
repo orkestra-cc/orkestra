@@ -54,4 +54,12 @@ func TestInit_WiresTheOptoutSeam(t *testing.T) {
 	if m.svc.Optouts() == nil {
 		t.Fatal("Init must leave the opt-out seam wired (non-nil); a nil seam fails every marketing send closed")
 	}
+
+	// Same guard for the consume path, and just as cheap: an empty token
+	// returns before any query, but only AFTER the opt-out seam is checked
+	// — so a nil error here means Init wired it, and an error means every
+	// one-click unsubscribe would refuse.
+	if err := m.svc.UnsubscribeService().Consume(context.Background(), ""); err != nil {
+		t.Fatalf("Init must leave the unsubscribe consume seam wired: %v", err)
+	}
 }

@@ -1506,10 +1506,10 @@ type EmailTrackingRewriterSetter interface {
 }
 
 // MarketingUnsubscribeSink receives the durable fact that an address opted
-// out, so a consumer (a CRM, a campaign tool) can mirror it into its own
-// consent store and attribute it (via the opaque context the producer set on
-// the send). Wired via MarketingUnsubscribeSinkSetter — core notification
-// never imports the module that implements it.
+// out, so a consumer can mirror it into its own consent store and attribute
+// it (via the opaque context the producer set on the send). Wired via
+// MarketingUnsubscribeSinkSetter — core notification never imports the
+// module that implements it.
 //
 // It returns an error on purpose: the core retries a failed sink through
 // its reconciler, and a sink that swallowed its own failures made that

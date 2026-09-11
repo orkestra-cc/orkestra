@@ -709,8 +709,12 @@ func (s *NotificationService) FireMarketingUnsubscribe(ctx context.Context, addr
 	}
 	defer func() {
 		if r := recover(); r != nil {
-			s.logger.Warn("notification: unsubscribe sink panicked", slog.Any("recover", r))
-			err = fmt.Errorf("notification: unsubscribe sink panicked: %v", r)
+			// Scrubbed on both paths: the panic value comes from a sink
+			// core just handed this address to, and it ends up in a log
+			// line AND in the error the caller logs in turn.
+			reason := scrubAddress(fmt.Sprintf("%v", r), address)
+			s.logger.Warn("notification: unsubscribe sink panicked", slog.String("recover", reason))
+			err = fmt.Errorf("notification: unsubscribe sink panicked: %s", reason)
 		}
 	}()
 	return s.unsubscribeSink.OnMarketingUnsubscribe(ctx, address, category, refContext)

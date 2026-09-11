@@ -2,6 +2,7 @@ package notification
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -183,7 +184,23 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 
 	tmplService := services.NewTemplateService(tmplRepo, deps.Logger)
 	prefService := services.NewPreferenceService(prefRepo)
-	unsubService := services.NewUnsubscribeService(unsubRepo)
+	unsubService := services.NewUnsubscribeService(unsubRepo,
+		services.WithOptouts(optoutRepo),
+		services.WithPreferences(prefService),
+		services.WithUnsubscribeLogger(deps.Logger),
+		// The sink lives on the notification service, which takes this
+		// service as a constructor argument — so the reference is resolved
+		// at call time rather than at wiring time. Consume only ever runs
+		// from an HTTP route, long after Init returned and m.svc was
+		// assigned; the guard is there so an unfinished boot would leave
+		// sinkPending up for the reconciler instead of panicking.
+		services.WithUnsubscribeSink(func(ctx context.Context, address, category, refContext string) error {
+			if m.svc == nil {
+				return errors.New("notification: service not initialised")
+			}
+			return m.svc.FireMarketingUnsubscribe(ctx, address, category, refContext)
+		}),
+	)
 
 	// One document read per send: values and secrets of the active
 	// environment come from the same snapshot (D4), and admin UI changes

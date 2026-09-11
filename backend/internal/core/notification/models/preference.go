@@ -32,4 +32,14 @@ type UnsubscribeTokenDoc struct {
 	CreatedAt time.Time          `bson:"createdAt" json:"createdAt"`
 	ExpiresAt time.Time          `bson:"expiresAt" json:"expiresAt"`
 	UsedAt    *time.Time         `bson:"usedAt,omitempty" json:"usedAt,omitempty"`
+
+	// SinkPending / PrefPending record what still has to be replayed after
+	// the token was claimed. They exist because the consume sequence is
+	// deliberately NOT a transaction: the durable opt-out lands first, and
+	// everything downstream of it is retried by the reconciler instead of
+	// being rolled back.
+	SinkPending    bool       `bson:"sinkPending,omitempty" json:"-"`
+	PrefPending    bool       `bson:"prefPending,omitempty" json:"-"`
+	Attempts       int        `bson:"attempts,omitempty" json:"-"`
+	DeadLetteredAt *time.Time `bson:"deadLetteredAt,omitempty" json:"-"`
 }
