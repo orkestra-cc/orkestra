@@ -253,6 +253,7 @@ func (h *NotificationHandler) Unsubscribe(ctx context.Context, req *unsubscribeR
 		_ = h.svc.PreferenceService().Set(ctx, doc.UserUUID, category, models.ChannelEmail, false)
 	}
 	_ = h.svc.UnsubscribeService().MarkUsed(ctx, req.Token)
+	h.svc.FireMarketingUnsubscribe(ctx, doc.Address, category, doc.Context)
 
 	resp := &unsubscribeResponse{}
 	resp.Body.Success = true

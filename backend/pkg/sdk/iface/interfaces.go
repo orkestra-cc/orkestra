@@ -366,6 +366,14 @@ type NotificationRequest struct {
 	BodyHTML       string
 	IdempotencyKey string
 	Metadata       map[string]any
+	// TrackingContactRef is an opaque per-recipient reference an email-tracking
+	// rewriter (wired via EmailTrackingRewriterSetter) can use to attribute
+	// engagement. Core gives it no meaning; ignored when no rewriter is wired.
+	TrackingContactRef string
+	// UnsubscribeContext is an opaque producer context stored on the unsubscribe
+	// token and handed back to a MarketingUnsubscribeSink on consume (e.g. a
+	// campaign/run ref for per-campaign unsubscribe attribution). Ignored by core.
+	UnsubscribeContext string
 }
 
 type TemplatedNotificationRequest struct {
@@ -378,6 +386,14 @@ type TemplatedNotificationRequest struct {
 	Data           map[string]any
 	IdempotencyKey string
 	Metadata       map[string]any
+	// TrackingContactRef is an opaque per-recipient reference an email-tracking
+	// rewriter (wired via EmailTrackingRewriterSetter) can use to attribute
+	// engagement. Core gives it no meaning; ignored when no rewriter is wired.
+	TrackingContactRef string
+	// UnsubscribeContext is an opaque producer context stored on the unsubscribe
+	// token and handed back to a MarketingUnsubscribeSink on consume (e.g. a
+	// campaign/run ref for per-campaign unsubscribe attribution). Ignored by core.
+	UnsubscribeContext string
 }
 
 type NotificationResult struct {
@@ -1398,4 +1414,54 @@ type CRMActivityInput struct {
 // billing notifier gets to make. No match = log and return nil.
 type CRMActivitySink interface {
 	RecordActivity(ctx context.Context, in CRMActivityInput) error
+}
+
+// OutboundEmail is the input an EmailTrackingRewriter receives: the rendered
+// HTML, the recipient address, the per-send message id (used as a nonce), and
+// the opaque ContactRef the producer set on the request.
+type OutboundEmail struct {
+	BodyHTML         string
+	RecipientAddress string
+	MessageUUID      string
+	ContactRef       string
+}
+
+// EmailTrackingRewriter rewrites a fully-rendered outbound HTML email body just
+// before transport — e.g. to inject an open-tracking pixel and rewrite links.
+// Returns the (possibly) modified HTML. Wired post-construction via
+// EmailTrackingRewriterSetter so core notification never imports the addon that
+// implements it (the AuditSink/KMSProvider precedent).
+type EmailTrackingRewriter interface {
+	RewriteOutboundEmail(ctx context.Context, in OutboundEmail) string
+}
+
+// EmailTrackingRewriterSetter is implemented by the notification service so an
+// addon can push its rewriter in at boot, probed via
+// module.GetTyped[iface.EmailTrackingRewriterSetter].
+type EmailTrackingRewriterSetter interface {
+	SetEmailTrackingRewriter(EmailTrackingRewriter)
+}
+
+// MarketingUnsubscribeSink is fired (best-effort) when an unsubscribe token is
+// consumed, so an addon can mirror the opt-out into its own consent store and
+// attribute it (via the opaque context the producer set on the send). Wired via
+// MarketingUnsubscribeSinkSetter — core notification never imports the addon.
+type MarketingUnsubscribeSink interface {
+	OnMarketingUnsubscribe(ctx context.Context, address, category, refContext string)
+}
+
+// MarketingUnsubscribeSinkSetter is implemented by the notification service so an
+// addon can push its sink in at boot, probed via
+// module.GetTyped[iface.MarketingUnsubscribeSinkSetter] on ServiceNotificationSender.
+type MarketingUnsubscribeSinkSetter interface {
+	SetMarketingUnsubscribeSink(MarketingUnsubscribeSink)
+}
+
+// TemplateView is a read projection of a notification template (campaign preview).
+type TemplateView struct {
+	TemplateID string
+	Locale     string
+	Subject    string
+	BodyHTML   string
+	BodyText   string
 }

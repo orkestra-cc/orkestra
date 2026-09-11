@@ -39,6 +39,10 @@ type NotificationService struct {
 	drivers      *DriverRegistry
 	logger       *slog.Logger
 	opts         Options
+	// Nil by default. An addon pushes its implementation in at boot through
+	// the setters below; the base ships neither.
+	emailRewriter   iface.EmailTrackingRewriter
+	unsubscribeSink iface.MarketingUnsubscribeSink
 }
 
 func NewNotificationService(
@@ -143,13 +147,14 @@ func (s *NotificationService) Send(ctx context.Context, req iface.NotificationRe
 
 	recipient := req.Recipients[0]
 	return s.dispatchEmail(ctx, dispatchInput{
-		Category:       req.Category,
-		Type:           req.Type,
-		Recipient:      recipient,
-		Subject:        req.Subject,
-		BodyText:       req.Body,
-		BodyHTML:       req.BodyHTML,
-		IdempotencyKey: req.IdempotencyKey,
+		Category:           req.Category,
+		Type:               req.Type,
+		Recipient:          recipient,
+		Subject:            req.Subject,
+		BodyText:           req.Body,
+		BodyHTML:           req.BodyHTML,
+		IdempotencyKey:     req.IdempotencyKey,
+		TrackingContactRef: req.TrackingContactRef,
 	})
 }
 
@@ -198,7 +203,7 @@ func (s *NotificationService) SendTemplated(ctx context.Context, req iface.Templ
 		data["SupportEmail"] = s.opts.SupportEmail
 	}
 
-	unsubToken, err := s.unsubService.IssueToken(ctx, recipient.UserUUID, recipient.Address, req.Category)
+	unsubToken, err := s.unsubService.IssueToken(ctx, recipient.UserUUID, recipient.Address, req.Category, req.UnsubscribeContext)
 	if err != nil {
 		s.logger.Warn("notification: failed to issue unsubscribe token", slog.String("error", err.Error()))
 	}
@@ -211,26 +216,28 @@ func (s *NotificationService) SendTemplated(ctx context.Context, req iface.Templ
 	}
 
 	return s.dispatchEmail(ctx, dispatchInput{
-		Category:       req.Category,
-		Type:           req.Type,
-		Recipient:      recipient,
-		Subject:        rendered.Subject,
-		BodyText:       rendered.BodyText,
-		BodyHTML:       rendered.BodyHTML,
-		TemplateID:     tmpl.TemplateID,
-		IdempotencyKey: req.IdempotencyKey,
+		Category:           req.Category,
+		Type:               req.Type,
+		Recipient:          recipient,
+		Subject:            rendered.Subject,
+		BodyText:           rendered.BodyText,
+		BodyHTML:           rendered.BodyHTML,
+		TemplateID:         tmpl.TemplateID,
+		IdempotencyKey:     req.IdempotencyKey,
+		TrackingContactRef: req.TrackingContactRef,
 	})
 }
 
 type dispatchInput struct {
-	Category       string
-	Type           string
-	Recipient      iface.Recipient
-	Subject        string
-	BodyText       string
-	BodyHTML       string
-	TemplateID     string
-	IdempotencyKey string
+	Category           string
+	Type               string
+	Recipient          iface.Recipient
+	Subject            string
+	BodyText           string
+	BodyHTML           string
+	TemplateID         string
+	IdempotencyKey     string
+	TrackingContactRef string
 }
 
 func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInput) (*iface.NotificationResult, error) {
@@ -259,6 +266,28 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 		return &iface.NotificationResult{ID: logDoc.UUID, Status: logDoc.Status}, nil
 	}
 
+	// An addon-provided rewriter may inject open-pixel + click trackers into
+	// the rendered HTML just before transport. nil rewriter / empty ref / non-HTML
+	// → unchanged. Best-effort: a panic must never break the send.
+	bodyHTML := in.BodyHTML
+	if s.emailRewriter != nil && bodyHTML != "" && in.TrackingContactRef != "" {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Warn("notification: email rewriter panicked", slog.Any("recover", r))
+				}
+			}()
+			if res := s.emailRewriter.RewriteOutboundEmail(ctx, iface.OutboundEmail{
+				BodyHTML:         bodyHTML,
+				RecipientAddress: in.Recipient.Address,
+				MessageUUID:      logDoc.UUID,
+				ContactRef:       in.TrackingContactRef,
+			}); res != "" {
+				bodyHTML = res
+			}
+		}()
+	}
+
 	// Resolve → validate → send. Every failure before the driver is
 	// fail-closed (D5) and still writes a failed log row, so the delivery
 	// log answers which profile failed and why.
@@ -279,7 +308,7 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 		ToName:   in.Recipient.Name,
 		Subject:  in.Subject,
 		BodyText: in.BodyText,
-		BodyHTML: in.BodyHTML,
+		BodyHTML: bodyHTML, // the addon-rewritten body when a rewriter is wired
 		Category: in.Category,
 	})
 	if sendErr != nil {
@@ -425,6 +454,60 @@ func (s *NotificationService) SendTest(ctx context.Context, in TestSendInput) (T
 		return res, de
 	}
 	return res, nil
+}
+
+// SetEmailTrackingRewriter wires an addon-provided rewriter that injects email
+// open/click tracking into rendered HTML just before transport. nil → no-op.
+func (s *NotificationService) SetEmailTrackingRewriter(r iface.EmailTrackingRewriter) {
+	s.emailRewriter = r
+}
+
+// SetMarketingUnsubscribeSink wires an addon-provided sink fired when a marketing
+// unsubscribe is consumed (nil by default → no-op).
+func (s *NotificationService) SetMarketingUnsubscribeSink(sink iface.MarketingUnsubscribeSink) {
+	s.unsubscribeSink = sink
+}
+
+// UpsertTemplate stores or replaces an operator-managed notification template
+// (e.g. a campaign template) via the template service. IsSystem is always false
+// (campaign templates are operator content, not system defaults); Channel is
+// always email. An empty locale falls back to the configured DefaultLocale.
+func (s *NotificationService) UpsertTemplate(ctx context.Context, templateID, locale, subject, bodyHTML, bodyText string) error {
+	if locale == "" {
+		locale = s.opts.DefaultLocale
+	}
+	return s.tmplService.Upsert(ctx, &models.TemplateDoc{
+		TemplateID: templateID, Locale: locale, Channel: models.ChannelEmail,
+		Subject: subject, BodyHTML: bodyHTML, BodyText: bodyText, IsSystem: false,
+	})
+}
+
+// GetTemplate fetches a notification template by (templateID, locale). An empty
+// locale falls back to the configured DefaultLocale. Returns ErrTemplateNotFound
+// (from the template service) when no matching row exists.
+func (s *NotificationService) GetTemplate(ctx context.Context, templateID, locale string) (*iface.TemplateView, error) {
+	if locale == "" {
+		locale = s.opts.DefaultLocale
+	}
+	doc, err := s.tmplService.Get(ctx, templateID, locale)
+	if err != nil {
+		return nil, err
+	}
+	return &iface.TemplateView{TemplateID: doc.TemplateID, Locale: doc.Locale, Subject: doc.Subject, BodyHTML: doc.BodyHTML, BodyText: doc.BodyText}, nil
+}
+
+// FireMarketingUnsubscribe invokes the sink best-effort (recover-guarded). Called
+// by the unsubscribe handler after a token is consumed + marked used.
+func (s *NotificationService) FireMarketingUnsubscribe(ctx context.Context, address, category, refContext string) {
+	if s.unsubscribeSink == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Warn("notification: unsubscribe sink panicked", slog.Any("recover", r))
+		}
+	}()
+	s.unsubscribeSink.OnMarketingUnsubscribe(ctx, address, category, refContext)
 }
 
 // NormalizeAddress lowercases and trims an email address.

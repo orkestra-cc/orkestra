@@ -216,6 +216,80 @@ SendTemplated(ctx, TemplatedNotificationRequest) (*NotificationResult, error)
 
 Get the service via `module.GetTyped[iface.NotificationSender](deps.Services, module.ServiceNotificationSender)`. Auth treats it as optional — if the lookup returns `(nil, false)`, the auth module still works but signup returns `503` when `AUTH_REQUIRE_EMAIL_VERIFICATION=true`.
 
+## Email-tracking rewriter seam (module extension point)
+
+`*NotificationService` exposes a nil-by-default **`iface.EmailTrackingRewriter`**
+seam so an optional module can rewrite the rendered HTML of an outbound email just
+before transport — **without this core module importing it** (the same
+`SetAuditSink`/`SetKMSProvider` setter precedent the compliance module uses).
+
+- `iface.EmailTrackingRewriter.RewriteOutboundEmail(ctx, OutboundEmail) string`
+  receives the rendered `BodyHTML`, the recipient address, the per-send
+  `MessageUUID` (= the delivery-log `logDoc.UUID`), and an **opaque** `ContactRef`
+  the producer set on the request; it returns the (possibly) modified HTML.
+- `NotificationRequest` and `TemplatedNotificationRequest` carry an optional
+  `TrackingContactRef string` — opaque to core; ignored when no rewriter is wired.
+- `SetEmailTrackingRewriter(r)` wires the rewriter post-construction (satisfying
+  `iface.EmailTrackingRewriterSetter`). `dispatchEmail` invokes it **only when** a
+  rewriter is set **and** the body is HTML **and** the ref is non-empty, inside a
+  `recover()` guard — so a nil rewriter / empty ref / a panicking rewriter all
+  leave the sent body byte-identical to the un-rewritten path.
+
+The typical implementation injects an open-pixel and rewrites click links for
+consenting recipients of marketing mail. The base ships **no** rewriter; the seam
+is inert until one is registered.
+
+## Unsubscribe context seam (module extension point)
+
+`NotificationRequest` and `TemplatedNotificationRequest` carry an optional opaque
+`UnsubscribeContext string` — ignored by core, passed through to the unsubscribe
+token store. `UnsubscribeTokenDoc` gained a matching `Context string` (omitempty).
+`UnsubscribeService.IssueToken` accepts `context string` and stores it on the doc at
+mint; on consume the handler hands `doc.Context` to the
+`MarketingUnsubscribeSink` (see below). The field is opaque to core: a producer
+encodes whatever attribution payload it needs (e.g. a reference carrying the
+contact, campaign and run ids) and decodes it in its own sink impl. Same
+`SetAuditSink`/`SetKMSProvider` / email-tracking-rewriter precedent: core stores and
+forwards an opaque string; the producer owns the codec. URL length is unaffected — the
+context lives server-side on the token doc, not in the unsubscribe link.
+
+## Marketing unsubscribe sink seam (module extension point)
+
+`pkg/sdk/iface` gains `MarketingUnsubscribeSink` + `MarketingUnsubscribeSinkSetter`:
+
+```go
+type MarketingUnsubscribeSink interface {
+    OnMarketingUnsubscribe(ctx context.Context, address, category, context string)
+}
+```
+
+`*NotificationService` exposes `SetMarketingUnsubscribeSink(s)` (satisfying
+`MarketingUnsubscribeSinkSetter`). The public unsubscribe handler fires
+`sink.OnMarketingUnsubscribe(ctx, address, category, doc.Context)` **best-effort,
+`recover()`-guarded**, immediately after a token is successfully consumed — so a
+panicking sink can never break an unsubscribe. The gate for whether a given category
+warrants a marketing consent revocation lives in the sink's impl, not in a
+category-string test in core. The base ships **no** sink; the seam is inert until a
+module registers one — the intended use is mirroring the opt-out into a consent
+store and attributing it to the run that sent the mail.
+
+## Template read/write capability
+
+`*NotificationService` also exposes `UpsertTemplate(ctx, templateID, locale, subject,
+bodyHTML, bodyText) error` and `GetTemplate(ctx, templateID, locale) (*iface.TemplateView,
+error)`, wrapping `TemplateService.Upsert` / `TemplateService.Get`. An empty locale
+falls back to the configured `app.default_locale`, and an upsert always writes
+`IsSystem: false` — operator content, never a system default.
+
+There is **no** separate service key: the concrete service is already registered
+under `module.ServiceNotificationSender`, so a consumer resolves that key and
+**type-asserts** to an interface it declares itself — the same "resolve
+`ServiceNotificationSender`, then narrow to the capability you need" pattern the
+rewriter and unsubscribe-sink seams use. `iface.TemplateView` is the read
+projection (`TemplateID`, `Locale`, `Subject`, `BodyHTML`, `BodyText`). This lets a
+module compose and preview notification templates without importing this module's
+`services/` package.
+
 ## What's NOT in this module
 
 - SMS, push, webhook channels — interface is designed for them, no implementations yet

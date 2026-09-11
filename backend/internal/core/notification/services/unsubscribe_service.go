@@ -21,8 +21,10 @@ var ErrUnsubscribeTokenInvalid = errors.New("notification: unsubscribe token inv
 type UnsubscribeService interface {
 	// IssueToken creates a new unsubscribe token bound to an email address
 	// (and optionally a user + category) and returns the raw token string
-	// to embed in the unsubscribe URL.
-	IssueToken(ctx context.Context, userUUID, address, category string) (string, error)
+	// to embed in the unsubscribe URL. context is an opaque producer string
+	// (e.g. a campaign/run ref) stored on the token and handed back to a
+	// MarketingUnsubscribeSink on consume; pass "" when not needed.
+	IssueToken(ctx context.Context, userUUID, address, category, context string) (string, error)
 
 	// ConsumeToken verifies a raw token and returns the stored document.
 	// The caller is expected to apply the preference change (or
@@ -45,7 +47,7 @@ func NewUnsubscribeService(repo repository.UnsubscribeRepository) UnsubscribeSer
 	}
 }
 
-func (s *unsubscribeService) IssueToken(ctx context.Context, userUUID, address, category string) (string, error) {
+func (s *unsubscribeService) IssueToken(ctx context.Context, userUUID, address, category, context string) (string, error) {
 	raw, err := generateRandomToken(32)
 	if err != nil {
 		return "", err
@@ -56,6 +58,7 @@ func (s *unsubscribeService) IssueToken(ctx context.Context, userUUID, address, 
 		UserUUID:  userUUID,
 		Address:   address,
 		Category:  category,
+		Context:   context,
 		CreatedAt: time.Now(),
 		ExpiresAt: time.Now().Add(s.ttl),
 	}
