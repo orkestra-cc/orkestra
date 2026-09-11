@@ -292,6 +292,15 @@ func TestDispatch_MarketingWithABaseNoHeaderCanBeBuiltOn(t *testing.T) {
 		// A path relocates "/v1/notifications/..." to somewhere that is
 		// not this API's actual route.
 		{"existing path", "https://api.example/some/path"},
+		// Userinfo parses as a perfectly ordinary URL with an empty path,
+		// query and fragment, so without an explicit check it classifies
+		// as usable — and the credentials would then be copied verbatim
+		// into the List-Unsubscribe header of every marketing message and
+		// sit in recipients' mailboxes indefinitely. The waived arm below
+		// is the one that proves it: the send goes out and the header is
+		// absent, so nothing carries the credentials onto the wire.
+		{"credentials in the base URL", "https://user:pass@api.example"},
+		{"username-only userinfo", "https://user@api.example"},
 		// TrimSuffix only ever strips ONE trailing slash; a double slash
 		// must be caught before that point or it survives into the header
 		// as "//v1/...".

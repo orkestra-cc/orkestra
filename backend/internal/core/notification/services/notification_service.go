@@ -719,12 +719,14 @@ const (
 	// nothing else) — build the header.
 	baseURLUsable baseURLStatus = iota
 	// baseURLNotConfigured: empty, missing an https scheme, missing a host,
-	// or carrying a path/query/fragment beyond a bare origin. All of these
-	// are "nothing usable set up yet", not an attack — the send proceeds
-	// without the header. Task 8 (require_one_click_unsubscribe) is what
-	// stops a marketing sender profile from reaching this state in a
-	// properly configured deployment; this package does not refuse the
-	// send over it.
+	// carrying userinfo, or carrying a path/query/fragment beyond a bare
+	// origin. All of these are "nothing usable is set up yet", not an
+	// attack. What happens next depends on require_one_click_unsubscribe,
+	// which is ON by default: with the requirement in force the dispatch
+	// chokepoint REFUSES the send, because a marketing message with no
+	// unsubscribe header is exactly what the requirement exists to prevent.
+	// Only when an operator has explicitly waived it does the send proceed
+	// without the header.
 	baseURLNotConfigured
 	// baseURLUnsafe: the value contains an embedded CR or LF — the classic
 	// header-injection vector — or an unescaped '<' or '>'. dispatchEmail
@@ -739,8 +741,20 @@ const (
 // is only meaningful when status == baseURLUsable.
 //
 // Beyond the https-scheme-with-a-host check, this also rejects anything
-// carrying a path, query string, or fragment. Any of those would produce a
-// syntactically legal but functionally dead one-click link: with a query
+// carrying userinfo, a path, a query string, or a fragment.
+//
+// Userinfo is the one of those that is not merely useless but harmful:
+// "https://user:pass@api.example" parses as a perfectly ordinary URL with an
+// empty path, query and fragment, so without this check it would classify as
+// usable and those credentials would be copied verbatim into the
+// List-Unsubscribe header of every marketing message — landing in recipients'
+// mailboxes, and in every mail archive and scanner they pass through, for as
+// long as the mail is kept. There is also no legitimate reason for an
+// operator to put them there: nothing about this API's public base origin
+// needs URL-embedded credentials.
+//
+// The other three would produce a syntactically legal but functionally dead
+// one-click link: with a query
 // string already present, appending "?token=..." glues a second "?" onto
 // the URL — not a new query parameter, just more characters swallowed into
 // the existing one — so the raw token never lands where a mail client's
@@ -774,7 +788,7 @@ func oneClickBase(raw string) (base string, status baseURLStatus) {
 	if err != nil || u.Scheme != "https" || u.Host == "" {
 		return "", baseURLNotConfigured
 	}
-	if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+	if u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
 		return "", baseURLNotConfigured
 	}
 	return strings.TrimSuffix(trimmed, "/"), baseURLUsable
