@@ -279,18 +279,15 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 	supportEmail := deps.GetConfig("notification", "app.support_email")
 	// The one-click requirement, the base URL the header is built on, and
 	// the optional hosted unsubscribe page URL the footer link is built on
-	// are NOT captured here. All three are read per MARKETING send through
+	// are NOT captured here. All three are read per send through
 	// m.livePolicy (services.OneClickPolicy), because this module declares
 	// HotReloadConfig() == true: a config write leaves no restart-required
 	// flag, and this admin surface has no per-field way to say that one
 	// field in the "delivery" group is the exception. An operator who
 	// switches require_one_click_unsubscribe ON must see marketing start
 	// being refused immediately; an operator who sets the page URL must see
-	// the very next marketing templated send's footer point at it — neither
-	// after the next restart. A transactional send never calls m.livePolicy
-	// at all — it is the hottest path in the module — so its footer link,
-	// where its template renders one, uses the static (always empty here)
-	// Options.UnsubscribePageURL fallback instead of the live value.
+	// the very next templated send's footer point at it — neither after the
+	// next restart.
 	m.configService = deps.ConfigService
 
 	// Template lookup is exact on (templateID, locale) with no fallback, so a

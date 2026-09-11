@@ -63,10 +63,7 @@ type OneClickPolicy struct {
 	// hosted unsubscribe page is configured: this field is consulted only
 	// by NotificationService.SendTemplated, to build the FOOTER link a
 	// person clicks, never the header a mail client's one-click button
-	// POSTs to — and, like the rest of this struct, only for a MARKETING
-	// send; a transactional one never resolves this struct at all and
-	// builds its footer from the static Options.UnsubscribePageURL field
-	// instead.
+	// POSTs to.
 	UnsubscribePageURL string
 }
 
