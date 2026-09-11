@@ -528,6 +528,22 @@ func TestUnsubscribePost_EmptyTokenValue_Returns200Generic(t *testing.T) {
 	}
 }
 
+// TestUnsubscribeGet_EmptyTokenValue_Returns200Generic is the GET
+// counterpart of TestUnsubscribePost_EmptyTokenValue_Returns200Generic: both
+// routes bind the token query parameter through the same tag, so an empty
+// value must be swallowed the same way on either verb.
+func TestUnsubscribeGet_EmptyTokenValue_Returns200Generic(t *testing.T) {
+	api, _ := newUnsubscribeTestAPI(t, map[string]string{"valid": "ada@example.test"})
+	want := api.Get("/v1/notifications/unsubscribe?token=valid")
+	got := api.Get("/v1/notifications/unsubscribe?token=")
+	if got.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for an empty token value (%s)", got.Code, got.Body.String())
+	}
+	if got.Body.String() != want.Body.String() {
+		t.Fatalf("an empty token value must answer exactly like a valid token:\nempty: %q\nvalid: %q", got.Body.String(), want.Body.String())
+	}
+}
+
 // TestUnsubscribePost_DuplicateTokenQueryParam_UsesFirstValue: Huma's query
 // parser (queryparam.Get) scans left to right and returns the first match,
 // so ?token=a&token=b resolves to "a" — silently, not a validation error.
@@ -536,6 +552,20 @@ func TestUnsubscribePost_EmptyTokenValue_Returns200Generic(t *testing.T) {
 func TestUnsubscribePost_DuplicateTokenQueryParam_UsesFirstValue(t *testing.T) {
 	api, optouts := newUnsubscribeTestAPI(t, map[string]string{"valid": "ada@example.test"})
 	resp := api.Post("/v1/notifications/unsubscribe?token=valid&token=garbage-second-value")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", resp.Code, resp.Body.String())
+	}
+	if !optouts.has("ada@example.test") {
+		t.Fatal("the first token in a duplicated query parameter must be the one consumed")
+	}
+}
+
+// TestUnsubscribeGet_DuplicateTokenQueryParam_UsesFirstValue is the GET
+// counterpart: both routes bind token the same way, so the same
+// first-value-wins resolution must hold here too.
+func TestUnsubscribeGet_DuplicateTokenQueryParam_UsesFirstValue(t *testing.T) {
+	api, optouts := newUnsubscribeTestAPI(t, map[string]string{"valid": "ada@example.test"})
+	resp := api.Get("/v1/notifications/unsubscribe?token=valid&token=garbage-second-value")
 	if resp.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (%s)", resp.Code, resp.Body.String())
 	}

@@ -51,12 +51,14 @@ func (m *NotificationModule) ValidateConfigActivation(_ context.Context, target 
 // like "not configured": the footer falls back to the API link, never a
 // stale or broken page URL.
 //
-// Cost is one config read per marketing send for the one-click decision
-// (Waived + PublicAPIBaseURL), and — since UnsubscribePageURL rides on this
-// same struct — one additional read per TEMPLATED send of ANY type, because
-// the footer link this field feeds renders on transactional templates too.
-// A non-templated Send never calls this at all, matching the sender
-// resolver's snapshot cost model.
+// Cost is one config read per marketing send — templated or not — for the
+// one-click decision (Waived + PublicAPIBaseURL) and, since it rides on the
+// same struct, the hosted unsubscribe page URL a marketing templated send's
+// footer feeds from. A transactional send, templated or not, never calls
+// this at all: it is the hottest path in the module, and its footer link
+// (where the template renders one) falls back to the static
+// Options.UnsubscribePageURL field instead, matching the sender resolver's
+// snapshot cost model.
 func (m *NotificationModule) livePolicy(ctx context.Context) services.OneClickPolicy {
 	var values map[string]string
 	if m.configService != nil {

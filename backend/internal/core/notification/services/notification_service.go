@@ -40,6 +40,11 @@ type Options struct {
 	// gone. Empty by default; a marketing send never emits a malformed or
 	// relative header over it — see oneClickBase for exactly what happens
 	// when this is empty, non-https, or unsafe.
+	//
+	// Like OneClickWaived below, this field is consulted only when
+	// OneClickSource is nil: in production the live source resolves this
+	// value on every marketing decision, and this one stays a fallback for
+	// services built directly (e.g. most tests in this package).
 	PublicAPIBaseURL string
 
 	// UnsubscribePageURL is the optional hosted page a PERSON reaches by
@@ -57,21 +62,24 @@ type Options struct {
 	// oneClickBase applies to PublicAPIBaseURL — or it is treated as if it
 	// were empty: a clean fallback to the API link, never a broken page URL,
 	// and never a reason to refuse the send. That last point matters because
-	// this value feeds every templated send's footer, transactional included
-	// (see SendTemplated), so a typo in this optional, cosmetic field must
-	// never be able to stop a password-reset email from going out.
+	// this feeds every templated send's footer, transactional included (see
+	// SendTemplated), so a typo in this optional, cosmetic field must never
+	// be able to stop a password-reset email from going out.
 	//
-	// This field is consulted only as the FALLBACK oneClickPolicy uses when
-	// OneClickSource is nil (services built directly, e.g. most tests in
-	// this package). In production it is not captured at Init at all — like
-	// PublicAPIBaseURL, it hot-reloads through OneClickSource/livePolicy,
-	// because its two immediate neighbours in the "delivery" config group
-	// (public_api_base_url, require_one_click_unsubscribe) already hot-reload
-	// and this module's admin surface has no per-field way to tell an
-	// operator that one field in the group is the exception: a value
-	// captured at Init would leave someone who just set this seeing a 200
-	// and a footer that keeps pointing at the old destination, with nothing
-	// anywhere saying why.
+	// A MARKETING templated send reads this live, through
+	// OneClickSource/livePolicy, for the same reason PublicAPIBaseURL does:
+	// this module declares HotReloadConfig() == true, and an operator who
+	// just set the page URL must see the very next marketing send's footer
+	// point at it, not the one after a restart. A TRANSACTIONAL templated
+	// send reads this field directly instead — the field is consulted here
+	// exactly the way it is everywhere else in this struct when
+	// OneClickSource is nil — because transactional mail (address
+	// verification, password reset) is the hottest path in the module, and
+	// it must not pay a live config read for a cosmetic footer link the way
+	// it already does not pay one for the one-click header. In production
+	// this field is never populated at Init, so a transactional footer
+	// always falls back to the plain API link; only a marketing send's
+	// footer can ever point at a configured hosted page.
 	UnsubscribePageURL string
 
 	// OneClickWaived is the INVERSE of the require_one_click_unsubscribe
@@ -307,12 +315,22 @@ func (s *NotificationService) SendTemplated(ctx context.Context, req iface.Templ
 		// category is a fixed, non-secret routing string.
 		s.logger.Warn("notification: failed to issue unsubscribe token", slog.String("category", req.Category))
 	}
-	// The live policy read (not s.opts.UnsubscribePageURL directly) is what
-	// makes the footer link hot-reload: unrelated to marketing admissibility
-	// — this runs for every templated send, transactional included — but it
-	// shares oneClickPolicy's plumbing so an operator who sets this field
-	// sees the very next send pick it up, with no restart.
-	data["UnsubscribeURL"] = s.unsubscribeURL(s.oneClickPolicy(ctx).UnsubscribePageURL, unsubToken)
+	// The live policy read is what makes the footer link hot-reload — an
+	// operator who sets unsubscribe_page_url sees the very next MARKETING
+	// send pick it up, with no restart — but it is the same read
+	// oneClickPreflight and ListEligibleSenders already pay for only on the
+	// marketing path, and a transactional send (address verification,
+	// password reset: the hottest path in this module) must not pay it
+	// either, exactly like it never reads the policy for the header below.
+	// A transactional send falls back to the static Options field instead —
+	// the same fallback oneClickPolicy itself uses when no live source is
+	// wired — which never blocks the send and never renders a broken link;
+	// it just does not hot-reload for this one send type.
+	pageURL := s.opts.UnsubscribePageURL
+	if req.Type == models.TypeMarketing {
+		pageURL = s.oneClickPolicy(ctx).UnsubscribePageURL
+	}
+	data["UnsubscribeURL"] = s.unsubscribeURL(pageURL, unsubToken)
 	data["PreferencesURL"] = s.buildURL("/account/notifications")
 
 	rendered, err := s.tmplService.Render(tmpl, data)

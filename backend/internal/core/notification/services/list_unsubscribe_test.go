@@ -536,14 +536,16 @@ func TestSendTemplated_UnsubscribeURLFallsBackCleanlyOnAMalformedPageURL(t *test
 	}
 }
 
-// The footer link must hot-reload too, for the same reason the one-click
+// A MARKETING footer link must hot-reload, for the same reason the one-click
 // requirement does (see TestDispatch_TheRequirementIsReadPerSendNotCapturedAtStartup
 // in preflight_unsubscribe_test.go, which this test mirrors): this module
 // declares HotReloadConfig() == true, and its admin surface has no
 // per-field way to say unsubscribe_page_url is the one exception in its
 // group. A value captured at Init would leave an operator who just set it
-// seeing a 200 with the footer still pointing at the old destination, with
-// nothing anywhere saying why.
+// seeing a 200 with a marketing footer still pointing at the old
+// destination, with nothing anywhere saying why. (The transactional half of
+// this trade is TestSendTemplated_TransactionalUnsubscribeURLNeverReadsTheLiveSource
+// below: it must NOT hot-reload, because it must not pay the read at all.)
 func TestSendTemplated_UnsubscribeURLIsReadPerSendNotCapturedAtStartup(t *testing.T) {
 	// Starts with no page configured.
 	policy := OneClickPolicy{PublicAPIBaseURL: "https://api.example"}
@@ -570,7 +572,7 @@ func TestSendTemplated_UnsubscribeURLIsReadPerSendNotCapturedAtStartup(t *testin
 		t.Helper()
 		if _, err := svc.SendTemplated(context.Background(), iface.TemplatedNotificationRequest{
 			TemplateID: "tpl",
-			Type:       models.TypeTransactional,
+			Type:       models.TypeMarketing,
 			Recipients: []iface.Recipient{{Address: "ada@example.test"}},
 		}); err != nil {
 			t.Fatalf("SendTemplated: %v", err)
@@ -588,13 +590,62 @@ func TestSendTemplated_UnsubscribeURLIsReadPerSendNotCapturedAtStartup(t *testin
 		t.Fatalf("before configuring a page: Subject = %q, want prefix %q", driver.last.Subject, wantNoPage)
 	}
 
-	// 2. The operator sets the page URL. The very next templated send must
-	//    render the new footer, with no restart.
+	// 2. The operator sets the page URL. The very next marketing templated
+	//    send must render the new footer, with no restart.
 	policy = OneClickPolicy{PublicAPIBaseURL: "https://api.example", UnsubscribePageURL: "https://public.example"}
 	send()
 	wantPage := "[unsub=https://public.example/u#raw-token] "
 	if !strings.HasPrefix(driver.last.Subject, wantPage) {
 		t.Fatalf("after configuring a page: Subject = %q, want prefix %q", driver.last.Subject, wantPage)
+	}
+}
+
+// TestSendTemplated_TransactionalUnsubscribeURLNeverReadsTheLiveSource is the
+// transactional counterpart to the marketing test above: address
+// verification and password reset are the hottest path in the module, so
+// their footer link — where a template renders one — must never pay for the
+// live one-click policy read, exactly like the header they never carry. It
+// renders from the static Options.UnsubscribePageURL field instead, which is
+// deterministic and unaffected by whatever a live source would answer — a
+// live source deliberately wired to answer something ELSE is the proof.
+func TestSendTemplated_TransactionalUnsubscribeURLNeverReadsTheLiveSource(t *testing.T) {
+	driver := &headerDriverCapture{}
+	unsub := &fakeUnsubService{token: "raw-token"}
+	tmpl := &fakeTemplateService{
+		tmpl:     &models.TemplateDoc{TemplateID: "tpl", Locale: "en"},
+		rendered: &Rendered{Subject: "rendered", BodyText: "txt", BodyHTML: "<p>html</p>"},
+	}
+	resolver := &fakeResolver{profile: SenderProfile{Slug: "default", Provider: "capture", Categories: []string{"*"}}}
+	reads := 0
+	svc := NewNotificationService(
+		newFakeNotifRepo(), tmpl, &fakePrefService{can: true}, unsub,
+		resolver, NewDriverRegistry(driver), discardLogger(),
+		Options{
+			// What a transactional send must render.
+			UnsubscribePageURL: "https://static.example",
+			// A live source answering something else, that a transactional
+			// send must never even call.
+			OneClickSource: func(context.Context) OneClickPolicy {
+				reads++
+				return OneClickPolicy{PublicAPIBaseURL: "https://api.example", UnsubscribePageURL: "https://live.example"}
+			},
+		},
+	)
+	svc.SetOptouts(&fakeOptouts{})
+
+	if _, err := svc.SendTemplated(context.Background(), iface.TemplatedNotificationRequest{
+		TemplateID: "tpl",
+		Type:       models.TypeTransactional,
+		Recipients: []iface.Recipient{{Address: "ada@example.test"}},
+	}); err != nil {
+		t.Fatalf("SendTemplated: %v", err)
+	}
+	if reads != 0 {
+		t.Fatalf("a transactional templated send must never read the live one-click policy, got %d reads", reads)
+	}
+	wantSubject := "[unsub=https://static.example/u#raw-token] rendered"
+	if driver.last.Subject != wantSubject {
+		t.Fatalf("Subject = %q, want %q: the static fallback must decide, never the live source", driver.last.Subject, wantSubject)
 	}
 }
 

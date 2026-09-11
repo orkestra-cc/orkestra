@@ -423,12 +423,17 @@ func TestPreflightAndDirectory_ObserveAPolicyChangeWithoutARestart(t *testing.T)
 }
 
 // A transactional send must not pay for the policy read at all — the rule is
-// marketing-only, and the source is where a config read would happen.
+// marketing-only, and the source is where a config read would happen. Send,
+// SendTemplated and PreflightDelivery are the three entry points a
+// transactional message can go through, so all three are exercised against
+// the same read counter.
 func TestDispatch_TransactionalNeverReadsTheOneClickPolicy(t *testing.T) {
 	reads := 0
 	d := &deafDriver{}
 	svc := NewNotificationService(
-		newFakeNotifRepo(), &fakeTemplateService{}, &fakePrefService{can: true},
+		newFakeNotifRepo(),
+		&fakeTemplateService{tmpl: &models.TemplateDoc{TemplateID: "tpl", Locale: "en"}},
+		&fakePrefService{can: true},
 		&fakeUnsubService{token: "raw-token"},
 		&fakeResolver{profile: SenderProfile{Slug: "camp", Provider: "deaf", Categories: []string{"*"}}},
 		NewDriverRegistry(d), discardLogger(),
@@ -441,6 +446,13 @@ func TestDispatch_TransactionalNeverReadsTheOneClickPolicy(t *testing.T) {
 
 	if _, err := svc.Send(context.Background(), transactionalTo("ada@example.test")); err != nil {
 		t.Fatalf("Send: %v", err)
+	}
+	if _, err := svc.SendTemplated(context.Background(), iface.TemplatedNotificationRequest{
+		TemplateID: "tpl",
+		Type:       models.TypeTransactional,
+		Recipients: []iface.Recipient{{Address: "ada@example.test"}},
+	}); err != nil {
+		t.Fatalf("SendTemplated: %v", err)
 	}
 	if err := svc.PreflightDelivery(context.Background(), "", "auth.verify_email", models.TypeTransactional); err != nil {
 		t.Fatalf("PreflightDelivery: %v", err)
