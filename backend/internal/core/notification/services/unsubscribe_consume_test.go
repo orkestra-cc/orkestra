@@ -130,6 +130,16 @@ func (f *consumeTokenStore) ClearPrefPending(context.Context, string) error {
 	return nil
 }
 
+// The reconciler's three methods. Consume never calls them; the reconciler's
+// own fixture models them.
+func (f *consumeTokenStore) ListPending(context.Context, time.Time, int) ([]models.UnsubscribeTokenDoc, error) {
+	return nil, nil
+}
+
+func (f *consumeTokenStore) RecordFailedAttempt(context.Context, string, time.Time) error { return nil }
+
+func (f *consumeTokenStore) MarkDeadLettered(context.Context, string, time.Time) error { return nil }
+
 // consumePrefs is the preference seam.
 type consumePrefs struct {
 	err     error

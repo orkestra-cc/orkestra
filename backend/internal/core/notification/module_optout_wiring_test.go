@@ -63,3 +63,36 @@ func TestInit_WiresTheOptoutSeam(t *testing.T) {
 		t.Fatalf("Init must leave the unsubscribe consume seam wired: %v", err)
 	}
 }
+
+// TestInit_WiresTheReconciler pins the other half of the consume design. The
+// sequence marks what it could not finish on the token (sinkPending /
+// prefPending) instead of rolling it back, so a module that boots without the
+// reconciler does not fail loudly — it just stops replaying, and the marks
+// become litter. Same cheap shape as the test above: no query runs.
+//
+// Stop is called before any Start on purpose: the module can be disabled at
+// runtime, and a Stop that arrives first must be a no-op rather than a panic.
+func TestInit_WiresTheReconciler(t *testing.T) {
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://127.0.0.1:1"))
+	if err != nil {
+		t.Fatalf("mongo.Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
+
+	m := NewModule()
+	deps := &module.Dependencies{
+		DB:       client.Database("notification_reconciler_wiring_test"),
+		Services: module.NewServiceRegistry(),
+		Platform: fakePlatform{},
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	if err := m.Init(deps); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if m.reconciler == nil {
+		t.Fatal("Init must build the reconciler: without it the pending flags are never replayed")
+	}
+	if err := m.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop before Start: %v", err)
+	}
+}

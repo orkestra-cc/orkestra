@@ -38,8 +38,13 @@ type UnsubscribeTokenDoc struct {
 	// deliberately NOT a transaction: the durable opt-out lands first, and
 	// everything downstream of it is retried by the reconciler instead of
 	// being rolled back.
-	SinkPending    bool       `bson:"sinkPending,omitempty" json:"-"`
-	PrefPending    bool       `bson:"prefPending,omitempty" json:"-"`
-	Attempts       int        `bson:"attempts,omitempty" json:"-"`
+	SinkPending bool `bson:"sinkPending,omitempty" json:"-"`
+	PrefPending bool `bson:"prefPending,omitempty" json:"-"`
+	Attempts    int  `bson:"attempts,omitempty" json:"-"`
+	// NextAttemptAt is when the reconciler may try this row again. It is what
+	// makes the backoff part of the SCAN rather than a decision taken after
+	// the rows are already in memory: every row the query returns is due, so
+	// every row the reconciler sees is one it acts on. Absent means "now".
+	NextAttemptAt  *time.Time `bson:"nextAttemptAt,omitempty" json:"-"`
 	DeadLetteredAt *time.Time `bson:"deadLetteredAt,omitempty" json:"-"`
 }

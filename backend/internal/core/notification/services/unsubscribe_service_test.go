@@ -93,6 +93,17 @@ func (f *fakeUnsubRepo) ClearPrefPending(_ context.Context, hash string) error {
 	return nil
 }
 
+// The reconciler's three methods. This fixture is about IssueToken and the
+// consume sequence, so they are inert here — optout_reconciler_test.go has a
+// store that models them.
+func (f *fakeUnsubRepo) ListPending(context.Context, time.Time, int) ([]models.UnsubscribeTokenDoc, error) {
+	return nil, nil
+}
+
+func (f *fakeUnsubRepo) RecordFailedAttempt(context.Context, string, time.Time) error { return nil }
+
+func (f *fakeUnsubRepo) MarkDeadLettered(context.Context, string, time.Time) error { return nil }
+
 func TestUnsubscribeService_IssueToken_StoresHashAndReturnsRaw(t *testing.T) {
 	repo := newFakeUnsubRepo()
 	svc := NewUnsubscribeService(repo)

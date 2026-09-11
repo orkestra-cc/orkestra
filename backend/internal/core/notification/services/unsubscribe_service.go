@@ -66,6 +66,16 @@ type UnsubscribeService interface {
 // resolved at call time.
 type MarketingUnsubscribeFirer func(ctx context.Context, address, category, refContext string) error
 
+// OnMarketingUnsubscribe makes a firer usable wherever an
+// iface.MarketingUnsubscribeSink is expected — the reconciler's seam — so the
+// live path and the replay path go through the same
+// FireMarketingUnsubscribe, and therefore through the same nil-sink and
+// panic guards. Without this the reconciler would need its own copy of them,
+// and two copies of a guard drift.
+func (f MarketingUnsubscribeFirer) OnMarketingUnsubscribe(ctx context.Context, address, category, refContext string) error {
+	return f(ctx, address, category, refContext)
+}
+
 // UnsubscribeOption wires one of the collaborators Consume needs. IssueToken
 // and the token bookkeeping need none of them, which is why they are options
 // rather than constructor parameters.

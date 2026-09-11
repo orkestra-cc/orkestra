@@ -360,8 +360,27 @@ fire, or a pending flag. This is an accepted limit, not an oversight: core stops
 sending to that address either way, so the recipient is protected; what can lag is a
 downstream consent store, for a link clicked after the token's 30-day TTL (or during
 a database blip). A recipient's second click heals the first branch only if they
-happen to click twice, which is not a mechanism. Whether the reconciler grows a
-sweep over opt-out rows whose source token was never claimed is its own decision.
+happen to click twice, which is not a mechanism.
+
+**The reconciler deliberately does NOT sweep these rows** (decided when it was
+built; see "Unsubscribe reconciler" below). The reason is that the opt-out
+collection records no marker for "this row still owes downstream work", so a sweep
+has no candidate set to narrow to:
+
+- Opt-out rows are permanent and unsuppressed by design, while token rows TTL at 30
+  days. Past that window a sweep cannot tell "the sink never ran" from "the sink ran
+  and the token aged out", so it would re-fire every historical opt-out on every
+  pass — an unbounded, growing stream of downstream writes leaning entirely on the
+  sink's idempotence to be harmless. Relying on that silently is not the same as
+  saying so.
+- Inside the window the sweep would have to claim the token to avoid double-firing
+  one that was already consumed, which means the only branch it could actually heal
+  is the rare `ClaimToken` error — an expired token never claims, and an
+  already-used one fired on its first click.
+- The right fix, if a fork needs it, is a pending marker written on the **opt-out
+  row** by the same upsert that creates it, lowered when the mirror succeeds. That
+  changes the opt-out collection's contract, so it is a spec decision, not something
+  the reconciler can bolt on.
 
 The error contract is narrow on purpose: **`Consume` returns an error only when the
 durable opt-out could not be written** (`ErrOptoutNotRecorded` — including an
@@ -382,6 +401,91 @@ so the reference can only be resolved at call time.
 
 `ConsumeToken` + `MarkUsed` still exist for the current HTTP handler, which has not
 been rewired onto `Consume` yet.
+
+## Unsubscribe reconciler
+
+`services.OptoutReconciler` (`services/optout_reconciler.go`) is what makes the
+pending flags mean something. Consume marks what it could not finish rather than
+rolling it back, so without this job the marks are litter. It is wired in `Init`
+next to the other services, started in the module's `Start` and stopped in its
+`Stop`; `module_optout_wiring_test.go` guards that wiring, because a missing
+reconciler fails silently — nothing errors, replays just stop.
+
+- `RunOnce(ctx) (ReconcileStats, error)` replays one bounded batch. It returns an
+  error **only** when the scan itself failed: one row that cannot be replayed is
+  that row's problem and must not abort the pass for the rest.
+- `Start(ctx)` / `Stop()` run it on a ticker (default one minute, matching the
+  first backoff step). Both are idempotent: a second `Start` is a no-op (a second
+  loop would double every downstream call) and `Stop` is safe before any `Start`
+  and safe twice. `Stop` closes the channel and nothing else — **the running state
+  is cleared in the loop's own `defer`**, so a `Stop` that raced the goroutine's
+  scheduling cannot mark a live loop as stopped and leave the reconciler
+  unstartable for the rest of the process.
+- `Now` is injectable, so the backoff is asserted by reading the instant a row was
+  deferred to, never by sleeping.
+
+### The state machine
+
+Two rules shape every branch, and both are the kind a passing test suite can hide:
+
+1. **Every row the scan returns makes progress (a flag comes down) or moves toward
+   the budget (`attempts` grows).** A row that could come back and be left exactly
+   as it was is an infinite loop costing a downstream system one call per tick.
+   This is why a *failed* `ClearSinkPending` counts as a failed attempt: the work
+   succeeded but the row will be scanned again, so the replay is not free.
+2. **A flag comes down only when the thing it marks actually succeeded** — anything
+   else is consent core recorded and silently dropped. The two flags are
+   independent: a written preference says nothing about the sink, and a row can owe
+   both.
+
+| Row | Outcome | After the pass |
+|---|---|---|
+| `sinkPending` | sink accepted | `sinkPending` unset; `attempts` unchanged |
+| `sinkPending` | sink failed (attempt < 8) | flag stays up, `attempts`+1, `nextAttemptAt` = now + backoff |
+| `sinkPending` | sink failed, 8th attempt | `deadLetteredAt` set, **both flags cleared**, `error` log |
+| `sinkPending` | no sink registered (the base ships none) | `sinkPending` unset on the first pass — nothing to mirror |
+| `prefPending` | preference written | `prefPending` unset; `attempts` unchanged |
+| `prefPending` | preference failed, or no preference service wired | flag stays up, `attempts`+1 (undone work, not absent work) |
+| `prefPending` with no `userUuid` | malformed — nothing to write | `prefPending` unset, no budget spent |
+| both | preference ok, sink failed | `prefPending` unset, `sinkPending` up, `attempts`+1 |
+| no address | cannot ever succeed | dead-lettered immediately, `error` log |
+| nothing pending, or `deadLetteredAt` set | — | never returned by the scan at all |
+
+`ReconcileMaxAttempts = 8`, backoff doubling from one minute and capped at two
+hours — roughly two hours of retrying before a row is given up on. **Dead-lettering
+clears the pending flags**; that is load-bearing, not tidiness, since a
+dead-lettered row that stayed pending is a row the scan returns for ever.
+
+### The scan
+
+`UnsubscribeRepository.ListPending(ctx, now, limit)` returns claimed tokens that
+still owe work, are not dead-lettered, and are **due now** — the backoff lives in
+the query, so every row the reconciler sees is one it acts on. Two clauses match
+documents where the field is absent (both are `omitempty`): `deadLetteredAt`
+`$exists: false`, and `nextAttemptAt` `$not: {$gt: now}` ("not scheduled for
+later", true for a row that has never failed).
+
+`RecordFailedAttempt` (`$inc` on `attempts`, so two hosts cannot lose one between
+them, plus the new `nextAttemptAt`) and `MarkDeadLettered` are the only other
+writes. Both are addressed by `tokenHash`, like every other method here.
+
+`UnsubscribeTokenDoc.NextAttemptAt` is the field that lets the backoff be a query
+rather than an in-memory skip. Two **partial** indexes on the token collection
+(`module.go` `Collections()`) cover the two `$or` branches — partial rather than
+sparse because a completed flag is `$unset`, so a settled row leaves the index
+entirely, and the ticker never reads 30 days of tokens to find the few pending
+ones. The scan is deliberately **unsorted**: the `$or` plans as two index scans
+merged, which no single index can order, so a sort would be an in-memory sort over
+the whole pending set — precisely when that set is a backlog after an outage. Each
+branch already returns its rows oldest-due-first, since `nextAttemptAt` is the
+second key of its index.
+
+The reconciler fires the sink through the same `FireMarketingUnsubscribe` firer the
+live path uses (`MarketingUnsubscribeFirer` carries an `OnMarketingUnsubscribe`
+method for exactly this), so both paths share one set of nil-sink and panic guards
+rather than two copies that drift. Nothing it logs carries the raw token, the token
+hash or a full address: the token **uuid** identifies the row, and every message
+that might quote a recipient goes through `scrubAddress` first.
 
 ## Unsubscribe context seam (module extension point)
 

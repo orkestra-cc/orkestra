@@ -43,9 +43,20 @@ func newTestUnsubscribeRepo(t *testing.T) (*unsubscribeRepository, func()) {
 	// The unique tokenHash index is what a claim races against in
 	// production, so the test stands it up rather than proving atomicity
 	// against a laxer schema than the real one.
+	//
+	// The two partial indexes are here for a correctness reason, not a speed
+	// one: they index ONLY the rows that still owe work, so a scan run
+	// against them proves the pending flags are written the way the index
+	// expects. A flag set to false instead of removed would leave the row in
+	// the index for ever; a flag written under another name would take the
+	// row out of the scan entirely. Neither shows up without them.
 	if _, err := repo.coll.Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{Keys: bson.D{{Key: "uuid", Value: 1}}, Options: options.Index().SetUnique(true)},
 		{Keys: bson.D{{Key: "tokenHash", Value: 1}}, Options: options.Index().SetUnique(true)},
+		{Keys: bson.D{{Key: "sinkPending", Value: 1}, {Key: "nextAttemptAt", Value: 1}},
+			Options: options.Index().SetPartialFilterExpression(bson.M{"sinkPending": true})},
+		{Keys: bson.D{{Key: "prefPending", Value: 1}, {Key: "nextAttemptAt", Value: 1}},
+			Options: options.Index().SetPartialFilterExpression(bson.M{"prefPending": true})},
 	}); err != nil {
 		t.Fatalf("create notification_unsubscribe_tokens indexes: %v", err)
 	}

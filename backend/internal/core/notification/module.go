@@ -17,9 +17,10 @@ import (
 
 type NotificationModule struct {
 	module.BaseModule
-	svc     *services.NotificationService
-	drivers *services.DriverRegistry
-	handler *handlers.NotificationHandler
+	svc        *services.NotificationService
+	drivers    *services.DriverRegistry
+	handler    *handlers.NotificationHandler
+	reconciler *services.OptoutReconciler
 }
 
 func NewModule() *NotificationModule { return &NotificationModule{} }
@@ -93,6 +94,23 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 				{Keys: map[string]int{"uuid": 1}, Unique: true},
 				{Keys: map[string]int{"tokenHash": 1}, Unique: true},
 				{Keys: map[string]int{"expiresAt": 1}, TTL: day30},
+				// The reconciler's scan (repository.ListPending) runs on a
+				// ticker for the life of the process, so it must not read a
+				// collection that holds 30 days of tokens to find the few
+				// rows that still owe work. Partial rather than sparse: these
+				// index ONLY the pending rows, and a flag is $unset — not set
+				// to false — when its work completes, so a settled row leaves
+				// the index. Two indexes because the scan is an $or and each
+				// branch needs one of its own; nextAttemptAt is the second
+				// key so each branch comes back oldest-due-first.
+				{OrderedKeys: []module.IndexKey{
+					{Field: "sinkPending", Direction: 1},
+					{Field: "nextAttemptAt", Direction: 1},
+				}, PartialFilter: map[string]any{"sinkPending": true}},
+				{OrderedKeys: []module.IndexKey{
+					{Field: "prefPending", Direction: 1},
+					{Field: "nextAttemptAt", Direction: 1},
+				}, PartialFilter: map[string]any{"prefPending": true}},
 			},
 		},
 		// ADR-0003 PR-B: tier-split unsubscribe tokens. Same shape as
@@ -184,23 +202,39 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 
 	tmplService := services.NewTemplateService(tmplRepo, deps.Logger)
 	prefService := services.NewPreferenceService(prefRepo)
+
+	// The sink lives on the notification service, which takes the unsubscribe
+	// service as a constructor argument — so the reference is resolved at call
+	// time rather than at wiring time. Consume only ever runs from an HTTP
+	// route and the reconciler only from its ticker, both long after Init
+	// returned and m.svc was assigned; the guard is there so an unfinished
+	// boot would leave sinkPending up for the reconciler instead of panicking.
+	// One firer serves both paths, so they share the nil-sink and panic
+	// guards inside FireMarketingUnsubscribe.
+	fireSink := services.MarketingUnsubscribeFirer(func(ctx context.Context, address, category, refContext string) error {
+		if m.svc == nil {
+			return errors.New("notification: service not initialised")
+		}
+		return m.svc.FireMarketingUnsubscribe(ctx, address, category, refContext)
+	})
+
 	unsubService := services.NewUnsubscribeService(unsubRepo,
 		services.WithOptouts(optoutRepo),
 		services.WithPreferences(prefService),
 		services.WithUnsubscribeLogger(deps.Logger),
-		// The sink lives on the notification service, which takes this
-		// service as a constructor argument — so the reference is resolved
-		// at call time rather than at wiring time. Consume only ever runs
-		// from an HTTP route, long after Init returned and m.svc was
-		// assigned; the guard is there so an unfinished boot would leave
-		// sinkPending up for the reconciler instead of panicking.
-		services.WithUnsubscribeSink(func(ctx context.Context, address, category, refContext string) error {
-			if m.svc == nil {
-				return errors.New("notification: service not initialised")
-			}
-			return m.svc.FireMarketingUnsubscribe(ctx, address, category, refContext)
-		}),
+		services.WithUnsubscribeSink(fireSink),
 	)
+
+	// The reconciler replays what a live consume could not finish: the
+	// preference row and the sink call, marked on the token by the claim.
+	// Started in Start() and stopped in Stop() so a runtime disable takes the
+	// ticker down with the module.
+	m.reconciler = services.NewOptoutReconciler(services.OptoutReconcilerDeps{
+		Tokens: unsubRepo,
+		Prefs:  prefService,
+		Sink:   fireSink,
+		Logger: deps.Logger,
+	})
 
 	// One document read per send: values and secrets of the active
 	// environment come from the same snapshot (D4), and admin UI changes
@@ -266,10 +300,22 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 }
 
 func (m *NotificationModule) Start(ctx context.Context) error {
+	if m.reconciler != nil {
+		// The pending flags are only worth writing if something replays them.
+		m.reconciler.Start(ctx)
+	}
 	if m.svc == nil {
 		return nil
 	}
 	return m.svc.TemplateService().SeedDefaults(ctx)
+}
+
+// Stop halts the reconciler ticker on module disable / host shutdown.
+func (m *NotificationModule) Stop(_ context.Context) error {
+	if m.reconciler != nil {
+		m.reconciler.Stop()
+	}
+	return nil
 }
 
 func (m *NotificationModule) RegisterRoutes(ri *module.RouteInfo) {
