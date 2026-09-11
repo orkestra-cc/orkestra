@@ -313,7 +313,16 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 		}
 		logDoc.AttemptedSenderSlug = in.Sender
 		profile, err = s.resolver.BySlug(ctx, in.Sender)
-		if err == nil && !typeAllowed(profile, in.Type) {
+		switch {
+		case err != nil:
+			// The resolver speaks this package's sentinels; everything the
+			// explicit-sender arm reports must speak iface's, exactly as
+			// PreflightDelivery does. Without this a slug deleted between
+			// pre-flight and send (ADR-0021 D7's mid-run profile deletion)
+			// reached the log as the err=unknown catch-all and matched no
+			// sentinel a consumer outside this module can name.
+			err = mapBySlugErr(err)
+		case !typeAllowed(profile, in.Type):
 			err = iface.ErrSenderNotEligible
 		}
 	} else {
@@ -358,13 +367,15 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 var ErrSendFailed = errors.New("notification: send failed")
 
 // trustedSentinels are the only errors a caller may test with errors.Is.
-// The two ADR-0021 iface sentinels are trusted alongside the pre-existing
-// local ones: iface.ErrSenderInvalid/ErrSenderNotEligible are the only
-// failure modes the explicit-Sender path can raise that no local sentinel
-// already names.
+// The local ones serve callers inside this module (the SendTest handler);
+// the iface ones serve every consumer that cannot import this package and
+// so has no way to name a local sentinel — which is the whole point of the
+// ADR-0021 seam. The explicit-Sender arm therefore maps BySlug's local
+// error through mapBySlugErr before failing, and both of that mapper's
+// outputs must be trusted here or the mapping is invisible to errors.Is.
 var trustedSentinels = []error{
 	ErrNoSenderForCategory, ErrSenderConfigUnavailable, ErrSenderNotFound, ErrUnknownDriver, ErrSenderNotConfigured,
-	iface.ErrSenderInvalid, iface.ErrSenderNotEligible,
+	iface.ErrSenderInvalid, iface.ErrSenderNotEligible, iface.ErrSenderNotFound, iface.ErrSenderUnavailable,
 }
 
 // DispatchError is the only error dispatchEmail and SendTest return. Error()

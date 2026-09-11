@@ -1198,6 +1198,18 @@ func TestNotificationService_Dispatch_ExplicitSender_UnknownSlug(t *testing.T) {
 	if doc.AttemptedSenderSlug != "ghost" {
 		t.Fatalf("AttemptedSenderSlug = %q, want ghost", doc.AttemptedSenderSlug)
 	}
+	// The sentinel a CRM-side consumer matches. It cannot import this
+	// package, so the iface sentinel is the ONLY thing it can key on: the
+	// resolver's local ErrSenderNotFound must be mapped before it leaves
+	// the chokepoint, exactly as PreflightDelivery maps it.
+	if !errors.Is(err, iface.ErrSenderNotFound) {
+		t.Fatalf("err = %v, want errors.Is iface.ErrSenderNotFound", err)
+	}
+	// ...and the delivery row must name the cause, not fall through to the
+	// unknown-shape bucket reserved for errors nothing recognises.
+	if !strings.Contains(doc.Error, "err=sender_not_found") {
+		t.Fatalf("doc.Error = %q, want it to carry err=sender_not_found", doc.Error)
+	}
 }
 
 func TestNotificationService_Dispatch_ExplicitSender_MalformedNeverReachesResolver(t *testing.T) {
