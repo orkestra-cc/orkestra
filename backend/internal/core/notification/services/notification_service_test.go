@@ -146,17 +146,18 @@ func (f *fakePrefService) List(_ context.Context, _ string) ([]*models.Preferenc
 func (f *fakePrefService) Set(_ context.Context, _, _, _ string, _ bool) error { return nil }
 
 type fakeUnsubService struct {
-	token     string
-	tokenErr  error
-	issueN    int
-	lastUser  string
-	lastAddr  string
-	lastCateg string
+	token       string
+	tokenErr    error
+	issueN      int
+	lastUser    string
+	lastAddr    string
+	lastCateg   string
+	lastContext string // the opaque producer-context 5th argument to IssueToken
 }
 
-func (f *fakeUnsubService) IssueToken(_ context.Context, user, addr, category, _ string) (string, error) {
+func (f *fakeUnsubService) IssueToken(_ context.Context, user, addr, category, ctxArg string) (string, error) {
 	f.issueN++
-	f.lastUser, f.lastAddr, f.lastCateg = user, addr, category
+	f.lastUser, f.lastAddr, f.lastCateg, f.lastContext = user, addr, category, ctxArg
 	if f.tokenErr != nil {
 		return "", f.tokenErr
 	}

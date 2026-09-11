@@ -174,6 +174,8 @@ func (m *NotificationModule) ConfigSchema() []module.ConfigField {
 		{Key: "email.smtp.username", Label: "SMTP username", Group: "delivery", Type: module.FieldString, DependsOn: smtpOnly, EnvVar: "SMTP_USERNAME"},
 		{Key: "email.smtp.password", Label: "SMTP password", Group: "delivery", Type: module.FieldSecret, DependsOn: smtpOnly, EnvVar: "SMTP_PASSWORD"},
 		{Key: "email.smtp.tls_mode", Label: "TLS mode", Group: "delivery", Type: module.FieldEnum, Options: []string{"starttls", "tls", "none"}, Default: "starttls", DependsOn: smtpOnly, EnvVar: "SMTP_TLS_MODE"},
+		{Key: "public_api_base_url", Label: "Public API base URL", Group: "delivery", Type: module.FieldString, EnvVar: "NOTIFICATION_PUBLIC_API_BASE_URL",
+			Description: "The API's own https origin (e.g. https://api.example.com), used only to build the RFC 8058 List-Unsubscribe header on marketing mail. Not derived automatically: PlatformInfo exposes the frontend origin, not the API's, and a request's Host header cannot be trusted for a URL that will sit in a recipient's mailbox for months. Empty by default — marketing mail sends without the one-click header until this is set (a properly configured deployment sets require_one_click_unsubscribe to refuse that instead)."},
 		{Key: "email.from_address", Label: "From address", Group: "sender", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_FROM"},
 		{Key: "email.from_name", Label: "From name", Group: "sender", Type: module.FieldString, Default: "Orkestra", EnvVar: "NOTIFICATION_EMAIL_FROM_NAME"},
 		{Key: "email.reply_to", Label: "Reply-To address", Group: "sender", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_REPLY_TO"},
@@ -264,6 +266,7 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 		appName = "Orkestra"
 	}
 	supportEmail := deps.GetConfig("notification", "app.support_email")
+	publicAPIBaseURL := deps.GetConfig("notification", "public_api_base_url")
 
 	// Template lookup is exact on (templateID, locale) with no fallback, so a
 	// default naming a locale without seeded templates fails every send that
@@ -283,10 +286,11 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 		m.drivers,
 		deps.Logger,
 		services.Options{
-			AppName:       appName,
-			SupportEmail:  supportEmail,
-			URLBuilder:    urlBuilder,
-			DefaultLocale: defaultLocale,
+			AppName:          appName,
+			SupportEmail:     supportEmail,
+			URLBuilder:       urlBuilder,
+			DefaultLocale:    defaultLocale,
+			PublicAPIBaseURL: publicAPIBaseURL,
 		},
 	)
 	m.svc.SetOptouts(optoutRepo)

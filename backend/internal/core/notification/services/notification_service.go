@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"time"
 
@@ -27,6 +28,19 @@ type Options struct {
 	URLBuilder     URLBuilder
 	DefaultLocale  string
 	IdempotencyTTL time.Duration
+
+	// PublicAPIBaseURL is the origin the RFC 8058 List-Unsubscribe header
+	// points recipients' mail clients back to (dispatchEmail appends
+	// "/v1/notifications/unsubscribe?token=..."). It is a config field
+	// rather than something derived, because nothing else the module has
+	// access to can safely stand in for it: PlatformInfo.FrontendURL()
+	// names the frontend, not the API's own origin, and a request's Host
+	// header is not a source to trust for a URL that will sit in a
+	// recipient's mailbox for months after the request that triggered it is
+	// gone. Empty by default; a marketing send never emits a malformed or
+	// relative header over it — see oneClickBase for exactly what happens
+	// when this is empty, non-https, or unsafe.
+	PublicAPIBaseURL string
 }
 
 // NotificationService orchestrates preferences, templates, delivery and
@@ -176,6 +190,11 @@ func (s *NotificationService) Send(ctx context.Context, req iface.NotificationRe
 		IdempotencyKey:     req.IdempotencyKey,
 		TrackingContactRef: req.TrackingContactRef,
 		Sender:             req.Sender,
+		// Send never pre-issues an unsubscribe token (there is no template
+		// footer to put it in), so dispatchEmail mints one itself for a
+		// marketing send — with this context attached, exactly like
+		// SendTemplated's footer token carries req.UnsubscribeContext.
+		UnsubscribeContext: req.UnsubscribeContext,
 	})
 }
 
@@ -226,7 +245,11 @@ func (s *NotificationService) SendTemplated(ctx context.Context, req iface.Templ
 
 	unsubToken, err := s.unsubService.IssueToken(ctx, recipient.UserUUID, recipient.Address, req.Category, req.UnsubscribeContext)
 	if err != nil {
-		s.logger.Warn("notification: failed to issue unsubscribe token", slog.String("error", err.Error()))
+		// err is a raw repository error and may embed document field
+		// values — never logged, same guarantee dispatchEmail's own
+		// token-issuance failure gives via ErrUnsubscribeTokenUnavailable.
+		// category is a fixed, non-secret routing string.
+		s.logger.Warn("notification: failed to issue unsubscribe token", slog.String("category", req.Category))
 	}
 	data["UnsubscribeURL"] = s.buildURL(fmt.Sprintf("/notifications/unsubscribe?token=%s", unsubToken))
 	data["PreferencesURL"] = s.buildURL("/account/notifications")
@@ -247,6 +270,12 @@ func (s *NotificationService) SendTemplated(ctx context.Context, req iface.Templ
 		IdempotencyKey:     req.IdempotencyKey,
 		TrackingContactRef: req.TrackingContactRef,
 		Sender:             req.Sender,
+		UnsubscribeContext: req.UnsubscribeContext,
+		// unsubToken is the raw token already minted above for
+		// {{.UnsubscribeURL}} (possibly "" if that issuance failed).
+		// dispatchEmail reuses it for the marketing List-Unsubscribe header
+		// instead of minting a second token for the same send.
+		UnsubscribeToken: unsubToken,
 	})
 }
 
@@ -263,6 +292,16 @@ type dispatchInput struct {
 	// Sender optionally names the sender profile (slug) that must carry this
 	// send (ADR-0021). Empty takes today's category-routed path unchanged.
 	Sender string
+	// UnsubscribeContext is the opaque producer context passed to IssueToken
+	// when dispatchEmail must mint an unsubscribe token itself (i.e.
+	// UnsubscribeToken below is empty). Ignored otherwise.
+	UnsubscribeContext string
+	// UnsubscribeToken carries a raw token the caller already issued for
+	// {{.UnsubscribeURL}} (SendTemplated), so dispatchEmail's marketing
+	// List-Unsubscribe header reuses it instead of minting a second token
+	// for the same send. Empty for Send (which never pre-issues one) or
+	// when the caller's own issuance failed.
+	UnsubscribeToken string
 }
 
 func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInput) (*iface.NotificationResult, error) {
@@ -381,6 +420,63 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 		return s.failSend(ctx, logDoc, profile, err)
 	}
 
+	// RFC 8058 one-click unsubscribe headers — marketing only. This is the
+	// single chokepoint both Send and SendTemplated funnel through, which is
+	// the whole point: a header built in one entry point and not the other
+	// would be a marketing path that silently ships without an unsubscribe.
+	// A transactional message (verification, password reset, ...) never
+	// reaches this branch, so it can never carry one — an unsubscribe
+	// header on a password-reset email would invite someone to unsubscribe
+	// from their own account security.
+	var headers map[string]string
+	if in.Type == models.TypeMarketing {
+		base, status := oneClickBase(s.opts.PublicAPIBaseURL)
+		switch status {
+		case baseURLUsable:
+			token := in.UnsubscribeToken
+			if token == "" {
+				// SendTemplated already issued a token for
+				// {{.UnsubscribeURL}} on every templated send and threads
+				// it through as UnsubscribeToken; Send (no template) never
+				// does. Either way this mints at most one token for this
+				// send.
+				token, err = s.unsubService.IssueToken(ctx, in.Recipient.UserUUID, in.Recipient.Address, in.Category, in.UnsubscribeContext)
+				if err != nil {
+					return s.failSend(ctx, logDoc, profile, ErrUnsubscribeTokenUnavailable)
+				}
+			}
+			headers = map[string]string{
+				"List-Unsubscribe":      "<" + base + "/v1/notifications/unsubscribe?token=" + token + ">",
+				"List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+			}
+		case baseURLNotConfigured:
+			// Empty, missing an https scheme/host, or carrying a
+			// path/query/fragment: simply "no one-click header can be
+			// built yet". This send is NOT refused — that is Task 8's job
+			// (require_one_click_unsubscribe), enforced at profile save
+			// time and via IsConfiguredFor, so a properly configured
+			// deployment never reaches this branch for a marketing
+			// profile. Until then, do not invent a fallback origin and do
+			// not ship a malformed or relative URL — just send without the
+			// header, exactly like a driver that cannot place headers on
+			// the wire at all.
+		default: // baseURLUnsafe, and — fail safe — any future status this
+			// switch does not yet know about. An embedded CR/LF is a
+			// header-injection attempt (or a mangled paste) in
+			// operator-typed config, not merely "not configured yet". This
+			// task has no save-time validation hook to refuse it there, so
+			// refusing the send is the backstop: silently stripping the
+			// newline could turn a malicious value into something that
+			// looks innocuous, and silently omitting the header (like the
+			// "not configured" case above) would hide a misconfiguration
+			// worth surfacing loudly. Making this the default rather than
+			// an explicit baseURLUnsafe case means a status this switch
+			// was not updated for refuses the send instead of silently
+			// falling through to baseURLUsable's old zero-value default.
+			return s.failSend(ctx, logDoc, profile, iface.ErrSenderInvalid)
+		}
+	}
+
 	sendErr := driver.Send(ctx, profile, EmailMessage{
 		To:       in.Recipient.Address,
 		ToName:   in.Recipient.Name,
@@ -388,6 +484,7 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 		BodyText: in.BodyText,
 		BodyHTML: bodyHTML, // the addon-rewritten body when a rewriter is wired
 		Category: in.Category,
+		Headers:  headers, // nil outside marketing — never on transactional mail
 	})
 	if sendErr != nil {
 		return s.failSend(ctx, logDoc, profile, sendErr)
@@ -415,6 +512,14 @@ var ErrSendFailed = errors.New("notification: send failed")
 // the send was refused rather than risked.
 var ErrOptoutLookupUnavailable = errors.New("notification: marketing opt-out lookup unavailable")
 
+// ErrUnsubscribeTokenUnavailable: a marketing send needed a one-click
+// unsubscribe token (for the List-Unsubscribe header) and IssueToken could
+// not mint one. Distinct from iface.ErrSenderInvalid: the sender profile
+// itself is fine here, it is the token store that is unavailable — the same
+// distinction ErrOptoutLookupUnavailable already draws for the opt-out
+// lookup.
+var ErrUnsubscribeTokenUnavailable = errors.New("notification: unsubscribe token unavailable")
+
 // trustedSentinels are the only errors a caller may test with errors.Is.
 // The local ones serve callers inside this module (the SendTest handler);
 // the iface ones serve every consumer that cannot import this package and
@@ -425,7 +530,7 @@ var ErrOptoutLookupUnavailable = errors.New("notification: marketing opt-out loo
 var trustedSentinels = []error{
 	ErrNoSenderForCategory, ErrSenderConfigUnavailable, ErrSenderNotFound, ErrUnknownDriver, ErrSenderNotConfigured,
 	iface.ErrSenderInvalid, iface.ErrSenderNotEligible, iface.ErrSenderNotFound, iface.ErrSenderUnavailable,
-	ErrOptoutLookupUnavailable,
+	ErrOptoutLookupUnavailable, ErrUnsubscribeTokenUnavailable,
 }
 
 // DispatchError is the only error dispatchEmail and SendTest return. Error()
@@ -474,6 +579,65 @@ func (s *NotificationService) failSend(ctx context.Context, logDoc *models.Notif
 		Provider: profile.Provider,
 		Error:    de.Reason,
 	}, de
+}
+
+// baseURLStatus classifies public_api_base_url for building the RFC 8058
+// List-Unsubscribe header. The two non-usable outcomes get different
+// treatment at the call site — see oneClickBase.
+type baseURLStatus int
+
+const (
+	// baseURLUsable: base is a safe, bare https origin (scheme + host,
+	// nothing else) — build the header.
+	baseURLUsable baseURLStatus = iota
+	// baseURLNotConfigured: empty, missing an https scheme, missing a host,
+	// or carrying a path/query/fragment beyond a bare origin. All of these
+	// are "nothing usable set up yet", not an attack — the send proceeds
+	// without the header. Task 8 (require_one_click_unsubscribe) is what
+	// stops a marketing sender profile from reaching this state in a
+	// properly configured deployment; this package does not refuse the
+	// send over it.
+	baseURLNotConfigured
+	// baseURLUnsafe: the value contains an embedded CR or LF — the classic
+	// header-injection vector. dispatchEmail refuses the send rather than
+	// risk it.
+	baseURLUnsafe
+)
+
+// oneClickBase validates and normalizes public_api_base_url for use inside
+// an RFC 8058 List-Unsubscribe header. A single trailing slash is stripped
+// so the built URL never doubles up ".../v1/...". base is only meaningful
+// when status == baseURLUsable.
+//
+// Beyond the https-scheme-with-a-host check, this also rejects anything
+// carrying a path, query string, or fragment. Any of those would produce a
+// syntactically legal but functionally dead one-click link: with a query
+// string already present, appending "?token=..." glues a second "?" onto
+// the URL — not a new query parameter, just more characters swallowed into
+// the existing one — so the raw token never lands where a mail client's
+// one-click handler parses a "token" parameter from; a path relocates
+// "/v1/notifications/..." to somewhere that is not this API's route. Either
+// way the header would be well-formed enough to ship and useless enough to
+// never work. url.Parse (rather than another substring check) is what
+// catches a double trailing slash too: "https://api.example//" parses with
+// Path "//", which TrimSuffix's single-slash strip would otherwise miss,
+// yielding a doubled "//v1/".
+func oneClickBase(raw string) (base string, status baseURLStatus) {
+	trimmed := strings.TrimSpace(raw)
+	if strings.ContainsAny(trimmed, "\r\n") {
+		return "", baseURLUnsafe
+	}
+	if trimmed == "" {
+		return "", baseURLNotConfigured
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return "", baseURLNotConfigured
+	}
+	if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return "", baseURLNotConfigured
+	}
+	return strings.TrimSuffix(trimmed, "/"), baseURLUsable
 }
 
 func (s *NotificationService) buildURL(path string) string {
