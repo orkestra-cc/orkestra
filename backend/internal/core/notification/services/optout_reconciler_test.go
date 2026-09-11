@@ -926,7 +926,13 @@ func TestReconciler_StartTwiceRunsOneLoop(t *testing.T) {
 	}
 }
 
-func TestReconciler_CancelledContextStopsTheLoop(t *testing.T) {
+// A module Start can arrive on an HTTP REQUEST context — the admin
+// enable/disable endpoint calls StartModule with the request's own ctx — and
+// that context is cancelled the moment the request completes. A background
+// ticker that died with it would be a reconciler that silently never runs, so
+// Start detaches the context it hands the loop. Stop is what ends the loop,
+// and only Stop.
+func TestReconciler_CancellingTheStartContextDoesNotStopTheLoop(t *testing.T) {
 	store := newReconcileStore()
 	ctx, cancel := context.WithCancel(context.Background())
 	r := NewOptoutReconciler(OptoutReconcilerDeps{Tokens: store, Now: fixedNow, Interval: time.Millisecond})
@@ -934,11 +940,20 @@ func TestReconciler_CancelledContextStopsTheLoop(t *testing.T) {
 	if !waitFor(func() bool { return store.scans() > 0 }) {
 		t.Fatal("the ticker never ran a pass")
 	}
+
 	cancel()
-	if !waitFor(func() bool { return !r.isRunning() }) {
-		t.Fatal("a cancelled host context must bring the loop down")
+	settled := store.scans()
+	if !waitFor(func() bool { return store.scans() > settled }) {
+		t.Fatal("the loop must outlive the context it was started on")
 	}
-	r.Stop() // still safe after the loop exited on its own
+	if !r.isRunning() {
+		t.Fatal("a cancelled start context must not bring the loop down")
+	}
+
+	r.Stop()
+	if !waitFor(func() bool { return !r.isRunning() }) {
+		t.Fatal("Stop must bring the loop down")
+	}
 }
 
 // TestReconciler_StartWaitsOutARaceWithAFinishingStop reproduces, without

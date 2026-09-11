@@ -363,7 +363,18 @@ func reconcileBackoff(attempts int) time.Duration {
 // the previous generation to finish — via its `done` channel — rather than
 // reading its still-`true` `running` flag as "already started" and silently
 // declining to launch a new one.
+//
+// The context handed to the loop is detached from the caller's cancellation
+// (context.WithoutCancel, the same idiom the auth module's maintenance sweep
+// uses). A module Start can arrive on an HTTP REQUEST context — the admin
+// enable/disable endpoint calls StartModule with the request's own ctx — and
+// a background ticker that dies when that request completes would be a
+// reconciler that silently never runs. This module is always-on so today no
+// caller can actually trip it, but Start/Stop here is the shape a fork's
+// module copies, and the version worth copying is the one that survives its
+// caller. Stop, not the caller's context, is what ends the loop.
 func (r *OptoutReconciler) Start(ctx context.Context) {
+	ctx = context.WithoutCancel(ctx)
 	for {
 		r.mu.Lock()
 		if r.running {
@@ -426,6 +437,10 @@ func (r *OptoutReconciler) loop(ctx context.Context, stop <-chan struct{}, done 
 		case <-stop:
 			return
 		case <-ctx.Done():
+			// Unreachable from Start, which detaches the caller's
+			// cancellation (see its doc comment). Kept as the backstop for a
+			// loop launched any other way, so a genuinely cancellable context
+			// is still honoured rather than ignored.
 			return
 		case <-ticker.C:
 			// Background context: the host's ctx cancels the loop above, but

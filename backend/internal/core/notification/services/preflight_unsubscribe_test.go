@@ -422,9 +422,15 @@ func TestPreflightAndDirectory_ObserveAPolicyChangeWithoutARestart(t *testing.T)
 	}
 }
 
-// A transactional send must not pay for the policy read at all — the rule is
-// marketing-only, and the source is where a config read would happen.
-func TestDispatch_TransactionalNeverReadsTheOneClickPolicy(t *testing.T) {
+// Neither a non-templated transactional Send nor a transactional
+// PreflightDelivery pays for the policy read — the one-click rule is
+// marketing-only, and OneClickSource is where a config read would happen.
+//
+// This is deliberately not a claim about every transactional path.
+// SendTemplated DOES read the policy for a transactional message, on purpose:
+// the same struct carries UnsubscribePageURL, which the footer link renders on
+// transactional templates too. See livePolicy's cost model.
+func TestDispatch_TransactionalSendAndPreflightNeverReadTheOneClickPolicy(t *testing.T) {
 	reads := 0
 	d := &deafDriver{}
 	svc := NewNotificationService(

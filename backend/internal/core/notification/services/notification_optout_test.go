@@ -27,10 +27,16 @@ func (f *fakeOptouts) IsOptedOut(_ context.Context, address, _ string) (bool, er
 // newOptoutTestService reuses newKit's skeleton (resolver, driver, logRepo,
 // prefService) and wires the given fake opt-out repository via SetOptouts,
 // exactly the way module.go wires the real one.
-func newOptoutTestService(t *testing.T, optouts *fakeOptouts) (*NotificationService, *fakeDriver) {
+func newOptoutTestKit(t *testing.T, optouts *fakeOptouts) *kit {
 	t.Helper()
 	k := newKit(Options{})
 	k.svc.SetOptouts(optouts)
+	return k
+}
+
+func newOptoutTestService(t *testing.T, optouts *fakeOptouts) (*NotificationService, *fakeDriver) {
+	t.Helper()
+	k := newOptoutTestKit(t, optouts)
 	return k.svc, k.driver
 }
 
@@ -53,17 +59,27 @@ func transactionalTo(addr string) iface.NotificationRequest {
 }
 
 func TestDispatch_MarketingToAnOptedOutAddressIsSuppressed(t *testing.T) {
-	svc, driver := newOptoutTestService(t, &fakeOptouts{optedOut: map[string]bool{"ada@example.test": true}})
+	k := newOptoutTestKit(t, &fakeOptouts{optedOut: map[string]bool{"ada@example.test": true}})
 
-	res, err := svc.Send(context.Background(), marketingTo("ada@example.test"))
+	res, err := k.svc.Send(context.Background(), marketingTo("ada@example.test"))
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 	if res.Status != models.StatusSuppressed {
 		t.Fatalf("expected suppressed, got %q", res.Status)
 	}
-	if driver.sends != 0 {
+	if k.driver.sends != 0 {
 		t.Fatal("an opted-out address must not reach the driver")
+	}
+	// The delivery-log row is the only place an operator can tell a
+	// suppressed-by-opt-out send apart from a suppressed-by-preference or
+	// suppressed-by-suppression-list one, so the marker is part of the
+	// contract, not an implementation detail.
+	if len(k.logRepo.created) != 1 {
+		t.Fatalf("want exactly one delivery-log row, got %d", len(k.logRepo.created))
+	}
+	if got := k.logRepo.created[0].Error; got != "marketing_optout" {
+		t.Fatalf("delivery-log Error = %q, want marketing_optout", got)
 	}
 }
 

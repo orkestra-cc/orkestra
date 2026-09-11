@@ -116,8 +116,8 @@ func TestMongo_ClaimTokenRefusesUsedAndExpired(t *testing.T) {
 	ctx := context.Background()
 	used := time.Now()
 	seed := []*models.UnsubscribeTokenDoc{
-		{UUID: "u1", TokenHash: "used", Address: "a@x.it", CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour), UsedAt: &used},
-		{UUID: "u2", TokenHash: "expired", Address: "b@x.it", CreatedAt: time.Now().Add(-2 * time.Hour), ExpiresAt: time.Now().Add(-time.Hour)},
+		{UUID: "u1", TokenHash: "used", Address: "a@example.test", CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour), UsedAt: &used},
+		{UUID: "u2", TokenHash: "expired", Address: "b@example.test", CreatedAt: time.Now().Add(-2 * time.Hour), ExpiresAt: time.Now().Add(-time.Hour)},
 	}
 	for _, d := range seed {
 		if err := repo.Create(ctx, d); err != nil {
@@ -185,8 +185,8 @@ func TestMongo_ClaimTokenRaisesPrefPendingOnlyForAUserToken(t *testing.T) {
 	defer done()
 	ctx := context.Background()
 	seed := []*models.UnsubscribeTokenDoc{
-		{UUID: "u1", TokenHash: "with-user", Address: "a@x.it", UserUUID: "user-1", CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)},
-		{UUID: "u2", TokenHash: "no-user", Address: "b@x.it", CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)},
+		{UUID: "u1", TokenHash: "with-user", Address: "a@example.test", UserUUID: "user-1", CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)},
+		{UUID: "u2", TokenHash: "no-user", Address: "b@example.test", CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)},
 	}
 	for _, d := range seed {
 		if err := repo.Create(ctx, d); err != nil {

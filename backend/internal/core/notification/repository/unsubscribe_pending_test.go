@@ -42,12 +42,12 @@ func TestMongo_ListPendingReturnsOnlyDueUnfinishedRows(t *testing.T) {
 	due := now.Add(-time.Minute)
 	deadLettered := now.Add(-time.Minute)
 
-	seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: "settled", TokenHash: "settled", Address: "a@x.it", UsedAt: &used})
-	seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: "sink", TokenHash: "sink", Address: "b@x.it", UsedAt: &used, SinkPending: true})
-	seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: "pref", TokenHash: "pref", Address: "c@x.it", UsedAt: &used, PrefPending: true})
-	seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: "retried", TokenHash: "retried", Address: "d@x.it", UsedAt: &used, SinkPending: true, Attempts: 2, NextAttemptAt: &due})
-	seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: "deferred", TokenHash: "deferred", Address: "e@x.it", UsedAt: &used, SinkPending: true, Attempts: 3, NextAttemptAt: &deferred})
-	seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: "dead", TokenHash: "dead", Address: "f@x.it", UsedAt: &used, SinkPending: true, DeadLetteredAt: &deadLettered})
+	seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: "settled", TokenHash: "settled", Address: "a@example.test", UsedAt: &used})
+	seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: "sink", TokenHash: "sink", Address: "b@example.test", UsedAt: &used, SinkPending: true})
+	seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: "pref", TokenHash: "pref", Address: "c@example.test", UsedAt: &used, PrefPending: true})
+	seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: "retried", TokenHash: "retried", Address: "d@example.test", UsedAt: &used, SinkPending: true, Attempts: 2, NextAttemptAt: &due})
+	seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: "deferred", TokenHash: "deferred", Address: "e@example.test", UsedAt: &used, SinkPending: true, Attempts: 3, NextAttemptAt: &deferred})
+	seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: "dead", TokenHash: "dead", Address: "f@example.test", UsedAt: &used, SinkPending: true, DeadLetteredAt: &deadLettered})
 
 	rows, err := repo.ListPending(ctx, now, 100)
 	if err != nil {
@@ -82,7 +82,7 @@ func TestMongo_ListPendingRespectsTheLimit(t *testing.T) {
 	now := time.Now()
 	used := now.Add(-time.Hour)
 	for _, id := range []string{"u1", "u2", "u3"} {
-		seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: id, TokenHash: id, Address: id + "@x.it", UsedAt: &used, SinkPending: true})
+		seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: id, TokenHash: id, Address: id + "@example.test", UsedAt: &used, SinkPending: true})
 	}
 	rows, err := repo.ListPending(ctx, now, 2)
 	if err != nil {
@@ -99,7 +99,7 @@ func TestMongo_RecordFailedAttemptCountsAndDefers(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	used := now.Add(-time.Hour)
-	seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: "u1", TokenHash: "h1", Address: "a@x.it", UsedAt: &used, SinkPending: true})
+	seedToken(t, repo, &models.UnsubscribeTokenDoc{UUID: "u1", TokenHash: "h1", Address: "a@example.test", UsedAt: &used, SinkPending: true})
 
 	retryAt := now.Add(2 * time.Minute)
 	if err := repo.RecordFailedAttempt(ctx, "h1", retryAt); err != nil {
@@ -156,7 +156,7 @@ func TestMongo_MarkDeadLetteredEndsTheRow(t *testing.T) {
 	used := now.Add(-time.Hour)
 	deferred := now.Add(-time.Minute)
 	seedToken(t, repo, &models.UnsubscribeTokenDoc{
-		UUID: "u1", TokenHash: "h1", Address: "a@x.it", UsedAt: &used,
+		UUID: "u1", TokenHash: "h1", Address: "a@example.test", UsedAt: &used,
 		SinkPending: true, PrefPending: true, Attempts: 7, NextAttemptAt: &deferred,
 	})
 
