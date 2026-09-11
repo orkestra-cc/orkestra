@@ -434,7 +434,11 @@ type NotificationSender interface {
 // seam.
 var (
 	// ErrSenderInvalid: the Sender slug fails grammar or the length bound,
-	// before any profile lookup is attempted.
+	// before any profile lookup is attempted — or the profile that would
+	// carry the send is not admissible for it at all. The second case exists
+	// for one rule today: a marketing send whose sender cannot carry an RFC
+	// 8058 one-click unsubscribe, which the notification module refuses
+	// rather than delivers, at save time and again at dispatch.
 	ErrSenderInvalid = errors.New("sender slug malformed")
 	// ErrSenderNotFound: a grammar-valid slug names no configured profile.
 	ErrSenderNotFound = errors.New("sender profile not found")
@@ -458,6 +462,13 @@ var (
 // single boolean is wrong in both directions for a caller about to send one
 // category; this answers for that category. A sender that does not
 // implement it keeps working — IsConfiguredForCategory falls back.
+//
+// It answers about the CATEGORY axis only, and there is no type axis in the
+// question: a true here does not promise that a MARKETING send of that
+// category would go out, because a marketing send additionally has to be
+// able to carry a one-click unsubscribe. A caller guarding a marketing send
+// must ask SenderDirectory.PreflightDelivery, which takes the send type,
+// rather than treating this boolean as a pre-send guard.
 type CategoryConfiguredChecker interface {
 	IsConfiguredFor(ctx context.Context, category string) bool
 }

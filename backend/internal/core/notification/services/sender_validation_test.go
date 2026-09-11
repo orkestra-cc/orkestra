@@ -21,6 +21,12 @@ func profileValues(order []string, elems map[string]map[string]string) map[strin
 
 func validationDrivers() *DriverRegistry { return NewDriverRegistry(CoreDrivers(nil)...) }
 
+// waivedOneClick is the posture the cases in this file were written under:
+// their subject is routing, completeness and allowed_types grammar, and the
+// one-click unsubscribe rule has its own file (preflight_unsubscribe_test.go).
+// Waiving it here keeps each test about the rule it was written for.
+func waivedOneClick() OneClickPolicy { return OneClickPolicy{Waived: true} }
+
 func TestValidateSenderConfig_ThreeStates(t *testing.T) {
 	smtpOK := map[string]string{SubProvider: "smtp", SubFromAddress: "f@x", SubSMTPHost: "h", SubSMTPPort: "25"}
 	cases := []struct {
@@ -74,7 +80,7 @@ func TestValidateSenderConfig_ThreeStates(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := ValidateSenderConfig(c.values, validationDrivers())
+			err := ValidateSenderConfig(c.values, validationDrivers(), waivedOneClick())
 			if c.wantCode == "" {
 				if err != nil {
 					t.Fatalf("want nil, got %v", err)
@@ -110,7 +116,7 @@ func TestValidateSenderConfig_AllowedTypesBadValue(t *testing.T) {
 	values := profileValues([]string{"a"}, map[string]map[string]string{
 		"a": {SubProvider: "noop", SubAllowedTypes: "newsletter"},
 	})
-	err := ValidateSenderConfig(values, validationDrivers())
+	err := ValidateSenderConfig(values, validationDrivers(), waivedOneClick())
 	var ve *module.ConfigValidationError
 	if !errors.As(err, &ve) {
 		t.Fatalf("want *ConfigValidationError, got %v", err)
@@ -127,7 +133,7 @@ func TestValidateSenderConfig_AllowedTypesMakesProfileLoadBearing(t *testing.T) 
 	incomplete := profileValues([]string{"a"}, map[string]map[string]string{
 		"a": {SubProvider: "mailup", SubAllowedTypes: "marketing", SubFromAddress: "f@x"},
 	})
-	err := ValidateSenderConfig(incomplete, validationDrivers())
+	err := ValidateSenderConfig(incomplete, validationDrivers(), waivedOneClick())
 	var ve *module.ConfigValidationError
 	if !errors.As(err, &ve) {
 		t.Fatalf("want *ConfigValidationError, got %v", err)
@@ -139,7 +145,7 @@ func TestValidateSenderConfig_AllowedTypesMakesProfileLoadBearing(t *testing.T) 
 	complete := profileValues([]string{"a"}, map[string]map[string]string{
 		"a": {SubProvider: "mailup", SubAllowedTypes: "marketing", SubFromAddress: "f@x", SubMailUpUser: "s1_2"},
 	})
-	if err := ValidateSenderConfig(complete, validationDrivers()); err != nil {
+	if err := ValidateSenderConfig(complete, validationDrivers(), waivedOneClick()); err != nil {
 		t.Fatalf("complete transport must save, got %v", err)
 	}
 }
@@ -148,7 +154,7 @@ func TestValidateSenderConfig_AllowedTypesMakesProfileLoadBearing(t *testing.T) 
 // patterns — a draft, even an incomplete one, saves.
 func TestValidateSenderConfig_PureDraftIsNotLoadBearing(t *testing.T) {
 	values := profileValues([]string{"a"}, map[string]map[string]string{"a": {SubProvider: "mailup"}})
-	if err := ValidateSenderConfig(values, validationDrivers()); err != nil {
+	if err := ValidateSenderConfig(values, validationDrivers(), waivedOneClick()); err != nil {
 		t.Fatalf("a pure draft must save regardless of completeness, got %v", err)
 	}
 }
@@ -159,7 +165,7 @@ func TestValidateSenderConfig_PureDraftIsNotLoadBearing(t *testing.T) {
 // legacy flat-key mail still carries every category.
 func TestValidateSenderConfig_SelectableAloneDoesNotRequireDefault(t *testing.T) {
 	values := profileValues([]string{"a"}, map[string]map[string]string{"a": {SubProvider: "noop", SubAllowedTypes: "marketing"}})
-	if err := ValidateSenderConfig(values, validationDrivers()); err != nil {
+	if err := ValidateSenderConfig(values, validationDrivers(), waivedOneClick()); err != nil {
 		t.Fatalf("a selectable-only profile must not require a default pattern, got %v", err)
 	}
 }
@@ -175,7 +181,7 @@ func TestValidateSenderConfig_SelectableAloneSkipsPatternRules(t *testing.T) {
 		"a": {SubProvider: "noop", SubAllowedTypes: "marketing"},
 		"b": {SubProvider: "noop", SubAllowedTypes: "marketing"},
 	})
-	if err := ValidateSenderConfig(values, validationDrivers()); err != nil {
+	if err := ValidateSenderConfig(values, validationDrivers(), waivedOneClick()); err != nil {
 		t.Fatalf("pattern grammar/duplicate/default rules must not apply to pattern-less selectable profiles, got %v", err)
 	}
 }
@@ -186,7 +192,7 @@ func TestValidateSenderConfig_SelectableAloneSkipsPatternRules(t *testing.T) {
 func TestValidateSenderConfig_IsSecretBlind(t *testing.T) {
 	secretDriver := &reqDriver{name: "vendor", reqs: []ProfileRequirement{{Key: SubFromAddress}, {Key: SubSMTPPassword, Secret: true}}}
 	values := profileValues([]string{"a"}, map[string]map[string]string{"a": {SubProvider: "vendor", SubCategories: "*", SubFromAddress: "f@x"}})
-	if err := ValidateSenderConfig(values, NewDriverRegistry(secretDriver)); err != nil {
+	if err := ValidateSenderConfig(values, NewDriverRegistry(secretDriver), waivedOneClick()); err != nil {
 		t.Fatalf("the save-time gate cannot see secrets and must not reject on one: %v", err)
 	}
 }

@@ -41,6 +41,30 @@ type Options struct {
 	// relative header over it — see oneClickBase for exactly what happens
 	// when this is empty, non-https, or unsafe.
 	PublicAPIBaseURL string
+
+	// OneClickWaived is the INVERSE of the require_one_click_unsubscribe
+	// config field, stored inverted so this struct's zero value fails
+	// closed: an Options built without a thought for the requirement
+	// requires one-click, rather than quietly letting marketing out without
+	// an unsubscribe header. Consulted only when OneClickSource is nil.
+	OneClickWaived bool
+
+	// OneClickSource, when set, is read on every marketing decision instead
+	// of the two fields above, and is how the requirement actually
+	// hot-reloads. It must be a source, not a captured value: this module
+	// declares HotReloadConfig() == true, so the config service records no
+	// restart-required flag, and an operator who switches
+	// require_one_click_unsubscribe ON would otherwise keep sending
+	// marketing with no unsubscribe header until the next restart, with
+	// nothing anywhere saying so. A captured value is stale in the
+	// fail-OPEN direction, which is the one direction this whole rule
+	// exists to prevent.
+	//
+	// It is consulted only on the marketing path, so a transactional send
+	// never pays for it. A source that cannot read configuration must
+	// return the fail-closed policy (the requirement in force), never the
+	// zero value of whatever it failed to read.
+	OneClickSource func(ctx context.Context) OneClickPolicy
 }
 
 // NotificationService orchestrates preferences, templates, delivery and
@@ -430,7 +454,32 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 	// from their own account security.
 	var headers map[string]string
 	if in.Type == models.TypeMarketing {
-		base, status := oneClickBase(s.opts.PublicAPIBaseURL)
+		// One read, reused for the base URL below: the header must be built
+		// on the same origin the admissibility check just judged, or a
+		// config write landing between the two would make them disagree.
+		policy := s.oneClickPolicy(ctx)
+		base, status := oneClickBase(policy.PublicAPIBaseURL)
+		// The backstop for everything the save-time gate cannot reach: a
+		// profile stored before that gate existed, a profile whose driver
+		// lost the capability in an upgrade, a base URL a deployment
+		// cleared, and — the structural one — a marketing send that arrived
+		// through CATEGORY routing, where no allowed_types declaration told
+		// the save-time rule that marketing would ever come this way.
+		//
+		// A refusal, not a warning. A marketing message delivered without a
+		// one-click unsubscribe is the exact failure the requirement exists
+		// to prevent, and it cannot be undone once the message is in a
+		// mailbox; a message withheld can be sent five minutes later. The
+		// operator who turns require_one_click_unsubscribe off takes that
+		// trade knowingly and this branch stands aside.
+		//
+		// baseURLUnsafe is excluded because it keeps its own, louder
+		// refusal below: an embedded CR/LF is a header-injection attempt in
+		// operator-typed config, not a missing setting, and the delivery log
+		// should say so.
+		if status != baseURLUnsafe && policy.gap(driver.Capabilities()) != oneClickSatisfied {
+			return s.failSend(ctx, logDoc, profile, ErrOneClickUnsubscribeUnavailable)
+		}
 		switch status {
 		case baseURLUsable:
 			token := in.UnsubscribeToken
@@ -451,15 +500,14 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 			}
 		case baseURLNotConfigured:
 			// Empty, missing an https scheme/host, or carrying a
-			// path/query/fragment: simply "no one-click header can be
-			// built yet". This send is NOT refused — that is Task 8's job
-			// (require_one_click_unsubscribe), enforced at profile save
-			// time and via IsConfiguredFor, so a properly configured
-			// deployment never reaches this branch for a marketing
-			// profile. Until then, do not invent a fallback origin and do
-			// not ship a malformed or relative URL — just send without the
-			// header, exactly like a driver that cannot place headers on
-			// the wire at all.
+			// path/query/fragment: no one-click header can be built. With
+			// the requirement on, the guard above already refused this
+			// send, so reaching here means an operator turned
+			// require_one_click_unsubscribe off and accepted marketing
+			// without an unsubscribe header. Even then, do not invent a
+			// fallback origin and do not ship a malformed or relative URL —
+			// send without the header, exactly like a driver that cannot
+			// place headers on the wire at all.
 		default: // baseURLUnsafe, and — fail safe — any future status this
 			// switch does not yet know about. An embedded CR/LF is a
 			// header-injection attempt (or a mangled paste) in
@@ -519,6 +567,40 @@ var ErrOptoutLookupUnavailable = errors.New("notification: marketing opt-out loo
 // distinction ErrOptoutLookupUnavailable already draws for the opt-out
 // lookup.
 var ErrUnsubscribeTokenUnavailable = errors.New("notification: unsubscribe token unavailable")
+
+// ErrOneClickUnsubscribeUnavailable: a marketing message would have gone out
+// with no RFC 8058 one-click unsubscribe — the driver cannot put the headers
+// on the wire, or there is no public API base URL to point them at — while
+// require_one_click_unsubscribe is on.
+//
+// It WRAPS iface.ErrSenderInvalid rather than standing beside it, for two
+// reasons at once: every consumer outside this module matches the iface
+// sentinel it already knows (and newDispatchError therefore records
+// iface.ErrSenderInvalid as the DispatchError's sentinel, unchanged), while
+// describeSendError still gives this cause a bounded reason of its own so the
+// delivery log does not read like a malformed sender slug.
+//
+// The wrap order puts THIS message first and the sentinel's second. %w
+// renders the wrapped error's text where the verb sits, so the other order
+// made preflightFail produce "sender slug malformed: one-click unsubscribe
+// cannot be guaranteed: ..." — leading a reader with a malformed slug that
+// does not exist. errors.Is is unaffected by the order.
+var ErrOneClickUnsubscribeUnavailable = fmt.Errorf("one-click unsubscribe cannot be guaranteed for this marketing send: %w", iface.ErrSenderInvalid)
+
+// oneClickPolicy answers what the requirement is RIGHT NOW. It prefers the
+// configured source — see Options.OneClickSource for why a value captured at
+// Init is not acceptable here — and falls back to the static fields for a
+// service built without one (every test that does not exercise reloading).
+//
+// It shares OneClickPolicy.gap with the save-time gate, so the two agree on
+// what "one-click is guaranteed" means. They deliberately do NOT agree on
+// scope: see the dispatch chokepoint's own comment, and oneClickAdmissible's.
+func (s *NotificationService) oneClickPolicy(ctx context.Context) OneClickPolicy {
+	if s.opts.OneClickSource != nil {
+		return s.opts.OneClickSource(ctx)
+	}
+	return OneClickPolicy{Waived: s.opts.OneClickWaived, PublicAPIBaseURL: s.opts.PublicAPIBaseURL}
+}
 
 // trustedSentinels are the only errors a caller may test with errors.Is.
 // The local ones serve callers inside this module (the SendTest handler);
@@ -714,18 +796,33 @@ func (s *NotificationService) ListEligibleSenders(ctx context.Context, typ strin
 	if err != nil {
 		return nil, preflightFail(SenderProfile{}, iface.ErrSenderUnavailable)
 	}
+	// Read outside the loop: one policy read per call, not one per profile,
+	// and every profile in one answer is judged against the same policy.
+	marketing := typ == models.TypeMarketing
+	var policy OneClickPolicy
+	if marketing {
+		policy = s.oneClickPolicy(ctx)
+	}
 	out := make([]iface.SenderInfo, 0, len(all))
 	for _, p := range all {
 		if !typeAllowed(p, typ) {
 			continue
 		}
-		_, driverErr := s.usableDriver(p)
+		d, driverErr := s.usableDriver(p)
+		// Ready must mean "a send of THIS type through this profile would go
+		// out now". For marketing that includes the one-click requirement,
+		// or a picker would offer a campaign a sender the chokepoint is
+		// about to refuse.
+		ready := driverErr == nil
+		if ready && marketing {
+			ready = policy.gap(d.Capabilities()) == oneClickSatisfied
+		}
 		out = append(out, iface.SenderInfo{
 			Slug:        p.Slug,
 			Label:       p.Label,
 			Provider:    p.Provider,
 			FromAddress: p.FromAddress,
-			Ready:       driverErr == nil,
+			Ready:       ready,
 		})
 	}
 	return out, nil
@@ -747,10 +844,11 @@ func (s *NotificationService) PreflightDelivery(ctx context.Context, sender, cat
 		if err != nil {
 			return preflightFail(SenderProfile{}, mapResolveErr(err))
 		}
-		if _, err := s.usableDriver(profile); err != nil {
+		d, err := s.usableDriver(profile)
+		if err != nil {
 			return preflightFail(profile, iface.ErrSenderNotConfigured)
 		}
-		return nil
+		return s.oneClickPreflight(ctx, profile, d, typ)
 	}
 
 	if !module.ValidSlug(sender) {
@@ -763,8 +861,23 @@ func (s *NotificationService) PreflightDelivery(ctx context.Context, sender, cat
 	if !typeAllowed(profile, typ) {
 		return preflightFail(profile, iface.ErrSenderNotEligible)
 	}
-	if _, err := s.usableDriver(profile); err != nil {
+	d, err := s.usableDriver(profile)
+	if err != nil {
 		return preflightFail(profile, iface.ErrSenderNotConfigured)
+	}
+	return s.oneClickPreflight(ctx, profile, d, typ)
+}
+
+// oneClickPreflight is the last step of both PreflightDelivery arms: a
+// preflight that passed while the chokepoint would refuse is worse than no
+// preflight at all, so the same policy that gates the send gates the answer.
+// Transactional work returns before the policy is even read.
+func (s *NotificationService) oneClickPreflight(ctx context.Context, profile SenderProfile, d EmailDriver, typ string) error {
+	if typ != models.TypeMarketing {
+		return nil
+	}
+	if s.oneClickPolicy(ctx).gap(d.Capabilities()) != oneClickSatisfied {
+		return preflightFail(profile, ErrOneClickUnsubscribeUnavailable)
 	}
 	return nil
 }

@@ -919,11 +919,15 @@ func TestNotificationService_Dispatch_StampsSenderSlug(t *testing.T) {
 // seamSvc builds a service with one noop driver and a fixed default profile —
 // the shape these extension-seam tests need now that ADR-0019 replaced the
 // single EmailSender with a resolver plus a driver registry.
+// The marketing sends below are about the tracking rewriter, so the service
+// is given a base URL the one-click unsubscribe header can be built on —
+// satisfying the requirement rather than waiving it, which would make these
+// tests silently stop covering the configured path.
 func seamSvc() (*NotificationService, *fakeDriver) {
 	d := &fakeDriver{name: "noop"}
 	r := &fakeResolver{profile: SenderProfile{Slug: "default", Provider: "noop", Categories: []string{"*"}}}
 	return NewNotificationService(newFakeNotifRepo(), &fakeTemplateService{}, &fakePrefService{can: true},
-		&fakeUnsubService{}, r, NewDriverRegistry(d), discardLogger(), Options{}), d
+		&fakeUnsubService{}, r, NewDriverRegistry(d), discardLogger(), Options{PublicAPIBaseURL: "https://api.example"}), d
 }
 
 // lastBodyHTML returns the BodyHTML of the last email handed to the driver,
@@ -1388,8 +1392,10 @@ func TestNotificationService_ListEligibleSenders_FiltersByAllowedTypeAndReady(t 
 		{Slug: "txn-only", Label: "Txn", Provider: "noop", AllowedTypes: []string{models.TypeTransactional}},
 		{Slug: "draft", Label: "Draft", Provider: "noop"}, // no AllowedTypes at all
 	}}
+	// A base URL the header can be built on: Ready is then about the driver
+	// and the profile, which is what this test is for.
 	svc := NewNotificationService(newFakeNotifRepo(), &fakeTemplateService{}, &fakePrefService{can: true}, &fakeUnsubService{},
-		resolver, NewDriverRegistry(noop, broken), discardLogger(), Options{})
+		resolver, NewDriverRegistry(noop, broken), discardLogger(), Options{PublicAPIBaseURL: "https://api.example"})
 
 	got, err := svc.ListEligibleSenders(context.Background(), models.TypeMarketing)
 	if err != nil {
@@ -1457,7 +1463,7 @@ func TestNotificationService_ListEligibleSenders_ConfigUnavailable_NeverEmptyLis
 // ---- PreflightDelivery: explicit arm ---------------------------------------
 
 func TestNotificationService_PreflightDelivery_ExplicitSender_Eligible_ReturnsNil(t *testing.T) {
-	k := newKit(Options{})
+	k := newKit(Options{PublicAPIBaseURL: "https://api.example"}) // marketing preflight also needs one-click to be satisfiable
 	k.resolver.profile = SenderProfile{Slug: "camp", Provider: "noop", AllowedTypes: []string{models.TypeMarketing}}
 	err := k.svc.PreflightDelivery(context.Background(), "camp", "marketing", models.TypeMarketing)
 	if err != nil {
@@ -1522,7 +1528,7 @@ func TestNotificationService_PreflightDelivery_ExplicitSender_Unavailable(t *tes
 // ---- PreflightDelivery: default arm (category routing) --------------------
 
 func TestNotificationService_PreflightDelivery_DefaultArm_Routed_ReturnsNil(t *testing.T) {
-	k := newKit(Options{})
+	k := newKit(Options{PublicAPIBaseURL: "https://api.example"}) // marketing preflight also needs one-click to be satisfiable
 	k.resolver.profile = SenderProfile{Slug: "default", Provider: "noop", Categories: []string{"*"}}
 	err := k.svc.PreflightDelivery(context.Background(), "", "marketing", models.TypeMarketing)
 	if err != nil {

@@ -21,6 +21,12 @@ type NotificationModule struct {
 	drivers    *services.DriverRegistry
 	handler    *handlers.NotificationHandler
 	reconciler *services.OptoutReconciler
+
+	// configService is kept for livePolicy (config_validation.go), which
+	// re-reads the one-click requirement on every marketing send rather
+	// than trusting a value captured here in Init. nil outside a wired boot,
+	// which livePolicy treats as an unreadable config: fail closed.
+	configService *module.ModuleConfigService
 }
 
 func NewModule() *NotificationModule { return &NotificationModule{} }
@@ -174,8 +180,11 @@ func (m *NotificationModule) ConfigSchema() []module.ConfigField {
 		{Key: "email.smtp.username", Label: "SMTP username", Group: "delivery", Type: module.FieldString, DependsOn: smtpOnly, EnvVar: "SMTP_USERNAME"},
 		{Key: "email.smtp.password", Label: "SMTP password", Group: "delivery", Type: module.FieldSecret, DependsOn: smtpOnly, EnvVar: "SMTP_PASSWORD"},
 		{Key: "email.smtp.tls_mode", Label: "TLS mode", Group: "delivery", Type: module.FieldEnum, Options: []string{"starttls", "tls", "none"}, Default: "starttls", DependsOn: smtpOnly, EnvVar: "SMTP_TLS_MODE"},
-		{Key: "public_api_base_url", Label: "Public API base URL", Group: "delivery", Type: module.FieldString, EnvVar: "NOTIFICATION_PUBLIC_API_BASE_URL",
-			Description: "The API's own https origin (e.g. https://api.example.com), used only to build the RFC 8058 List-Unsubscribe header on marketing mail. Not derived automatically: PlatformInfo exposes the frontend origin, not the API's, and a request's Host header cannot be trusted for a URL that will sit in a recipient's mailbox for months. Empty by default — marketing mail sends without the one-click header until this is set (a properly configured deployment sets require_one_click_unsubscribe to refuse that instead)."},
+		{Key: services.PublicAPIBaseURLField, Label: "Public API base URL", Group: "delivery", Type: module.FieldString, EnvVar: "NOTIFICATION_PUBLIC_API_BASE_URL",
+			Description: "The API's own https origin (e.g. https://api.example.com), used only to build the RFC 8058 List-Unsubscribe header on marketing mail. Not derived automatically: PlatformInfo exposes the frontend origin, not the API's, and a request's Host header cannot be trusted for a URL that will sit in a recipient's mailbox for months. Empty by default. While it is empty AND \"Require one-click unsubscribe\" below is on — both are the defaults — no marketing sender profile can be saved and no marketing message is sent; turning that requirement off instead sends marketing with no unsubscribe header."},
+		{Key: requireOneClickKey, Label: "Require one-click unsubscribe", Group: "delivery", Type: module.FieldBool, Default: "true", EnvVar: "NOTIFICATION_REQUIRE_ONE_CLICK_UNSUBSCRIBE",
+			Description: "On by default. While it is on, a sender profile may be used for marketing only if its provider can add the RFC 8058 one-click unsubscribe headers and the public API base URL above is set — and a marketing message that would leave without them is refused instead of sent. " +
+				"Turning this off does not simply skip a check: marketing email will then be delivered WITHOUT a one-click unsubscribe. Large mailbox providers require one from bulk senders and penalise domains that omit it, and giving recipients an easy way to withdraw consent is a legal requirement for commercial email in several jurisdictions, so turn it off only if you meet that obligation another way."},
 		{Key: "email.from_address", Label: "From address", Group: "sender", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_FROM"},
 		{Key: "email.from_name", Label: "From name", Group: "sender", Type: module.FieldString, Default: "Orkestra", EnvVar: "NOTIFICATION_EMAIL_FROM_NAME"},
 		{Key: "email.reply_to", Label: "Reply-To address", Group: "sender", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_REPLY_TO"},
@@ -266,7 +275,13 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 		appName = "Orkestra"
 	}
 	supportEmail := deps.GetConfig("notification", "app.support_email")
-	publicAPIBaseURL := deps.GetConfig("notification", "public_api_base_url")
+	// The one-click requirement and the base URL the header is built on are
+	// NOT captured here. They are read per marketing send through
+	// m.livePolicy, because this module declares HotReloadConfig() == true:
+	// a config write leaves no restart-required flag, so an operator who
+	// switches require_one_click_unsubscribe ON must see marketing start
+	// being refused immediately, not after the next restart.
+	m.configService = deps.ConfigService
 
 	// Template lookup is exact on (templateID, locale) with no fallback, so a
 	// default naming a locale without seeded templates fails every send that
@@ -286,11 +301,11 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 		m.drivers,
 		deps.Logger,
 		services.Options{
-			AppName:          appName,
-			SupportEmail:     supportEmail,
-			URLBuilder:       urlBuilder,
-			DefaultLocale:    defaultLocale,
-			PublicAPIBaseURL: publicAPIBaseURL,
+			AppName:        appName,
+			SupportEmail:   supportEmail,
+			URLBuilder:     urlBuilder,
+			DefaultLocale:  defaultLocale,
+			OneClickSource: m.livePolicy,
 		},
 	)
 	m.svc.SetOptouts(optoutRepo)

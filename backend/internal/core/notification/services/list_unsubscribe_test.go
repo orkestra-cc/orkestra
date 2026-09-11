@@ -33,11 +33,12 @@ func (d *headerDriverCapture) Send(_ context.Context, _ SenderProfile, msg Email
 	return nil
 }
 
-// newHeaderKit builds a NotificationService whose driver only records what
-// dispatchEmail decided to send it, with public_api_base_url set to base.
-// unsub and tmpl are returned so a test can inspect issuance counts and
-// exercise the templated path.
-func newHeaderKit(t *testing.T, base string) (svc *NotificationService, driver *headerDriverCapture, unsub *fakeUnsubService, tmpl *fakeTemplateService) {
+// newHeaderKitWithPolicy builds a NotificationService whose driver only
+// records what dispatchEmail decided to send it, with public_api_base_url set
+// to base and the one-click unsubscribe requirement on or waived. unsub and
+// tmpl are returned so a test can inspect issuance counts and exercise the
+// templated path.
+func newHeaderKitWithPolicy(t *testing.T, base string, waived bool) (svc *NotificationService, driver *headerDriverCapture, unsub *fakeUnsubService, tmpl *fakeTemplateService) {
 	t.Helper()
 	driver = &headerDriverCapture{}
 	unsub = &fakeUnsubService{token: "raw-token"}
@@ -46,10 +47,16 @@ func newHeaderKit(t *testing.T, base string) (svc *NotificationService, driver *
 	svc = NewNotificationService(
 		newFakeNotifRepo(), tmpl, &fakePrefService{can: true}, unsub,
 		resolver, NewDriverRegistry(driver), discardLogger(),
-		Options{PublicAPIBaseURL: base},
+		Options{PublicAPIBaseURL: base, OneClickWaived: waived},
 	)
 	svc.SetOptouts(&fakeOptouts{}) // neutral: nobody opted out — these tests are about headers, not opt-outs
 	return svc, driver, unsub, tmpl
+}
+
+// newHeaderKit is the default posture: the requirement in force.
+func newHeaderKit(t *testing.T, base string) (*NotificationService, *headerDriverCapture, *fakeUnsubService, *fakeTemplateService) {
+	t.Helper()
+	return newHeaderKitWithPolicy(t, base, false)
 }
 
 // newHeaderTestService is the two-collaborator shape the header tests below
@@ -57,6 +64,14 @@ func newHeaderKit(t *testing.T, base string) (svc *NotificationService, driver *
 func newHeaderTestService(t *testing.T, base string) (*NotificationService, *headerDriverCapture) {
 	t.Helper()
 	svc, driver, _, _ := newHeaderKit(t, base)
+	return svc, driver
+}
+
+// newWaivedHeaderTestService is the same, for the tests that need the posture
+// of an operator who turned require_one_click_unsubscribe off.
+func newWaivedHeaderTestService(t *testing.T, base string) (*NotificationService, *headerDriverCapture) {
+	t.Helper()
+	svc, driver, _, _ := newHeaderKitWithPolicy(t, base, true)
 	return svc, driver
 }
 
@@ -244,17 +259,21 @@ func TestSendTemplated_TokenIssuanceFailureDoesNotLogTheRawRepositoryError(t *te
 	}
 }
 
-// A marketing send must never emit a malformed or unsafe header. For a base
-// that is simply not configured (empty, or missing an https scheme), Task 7
-// does not refuse the send — that is Task 8's job (require_one_click_unsubscribe,
-// enforced at save time and via IsConfiguredFor); here the header is just
-// omitted, same as it would be for a driver that cannot place headers on
-// the wire at all. An embedded CRLF is different: it is a header-injection
-// attempt in operator-typed config, and this task owns refusing that send
-// outright (see the task report for why refuse-to-send was chosen over
-// refuse-to-save).
+// A marketing send must never emit a malformed or unsafe header. What happens
+// to the SEND depends on the requirement, and both postures are pinned below:
+//
+//   - require_one_click_unsubscribe ON (the default): a base nothing can be
+//     built on is exactly the state the preflight exists to prevent, so the
+//     send is refused rather than delivered with no way to unsubscribe.
+//   - OFF: the operator accepted that consequence knowingly, so the send goes
+//     out — still without a malformed or relative header, exactly as it would
+//     for a driver that cannot place headers on the wire at all.
+//
+// An embedded CRLF is refused in either posture; it is a header-injection
+// attempt in operator-typed config rather than a missing setting, and it
+// keeps its own test below.
 
-func TestDispatch_MarketingSendsWithoutAHeaderWhenBaseIsNotConfigured(t *testing.T) {
+func TestDispatch_MarketingWithABaseNoHeaderCanBeBuiltOn(t *testing.T) {
 	cases := []struct {
 		name string
 		base string
@@ -280,37 +299,67 @@ func TestDispatch_MarketingSendsWithoutAHeaderWhenBaseIsNotConfigured(t *testing
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			svc, driver := newHeaderTestService(t, c.base)
+			t.Run("requirement on: the send is refused", func(t *testing.T) {
+				svc, driver := newHeaderTestService(t, c.base)
 
-			res, err := svc.Send(context.Background(), marketingTo("ada@example.test"))
-			if err != nil {
-				t.Fatalf("Send: %v", err)
-			}
-			if res.Status != models.StatusSent {
-				t.Fatalf("status = %q, want sent", res.Status)
-			}
-			if driver.sends != 1 {
-				t.Fatalf("expected the send to go through, got %d driver sends", driver.sends)
-			}
-			if driver.last.Headers["List-Unsubscribe"] != "" || driver.last.Headers["List-Unsubscribe-Post"] != "" {
-				t.Fatalf("an unconfigured base must not produce a malformed or relative header: %v", driver.last.Headers)
-			}
+				res, err := svc.Send(context.Background(), marketingTo("ada@example.test"))
+				if !errors.Is(err, iface.ErrSenderInvalid) {
+					t.Fatalf("want iface.ErrSenderInvalid, got %v", err)
+				}
+				if res != nil && res.Status == models.StatusSent {
+					t.Fatal("the send must never be recorded as sent")
+				}
+				if driver.sends != 0 {
+					t.Fatalf("the driver must not be reached, got %d sends", driver.sends)
+				}
+			})
+			t.Run("requirement waived: the send goes out, still without a header", func(t *testing.T) {
+				svc, driver := newWaivedHeaderTestService(t, c.base)
+
+				res, err := svc.Send(context.Background(), marketingTo("ada@example.test"))
+				if err != nil {
+					t.Fatalf("Send: %v", err)
+				}
+				if res.Status != models.StatusSent {
+					t.Fatalf("status = %q, want sent", res.Status)
+				}
+				if driver.sends != 1 {
+					t.Fatalf("expected the send to go through, got %d driver sends", driver.sends)
+				}
+				if driver.last.Headers["List-Unsubscribe"] != "" || driver.last.Headers["List-Unsubscribe-Post"] != "" {
+					t.Fatalf("an unconfigured base must not produce a malformed or relative header: %v", driver.last.Headers)
+				}
+			})
 		})
 	}
 }
 
 func TestDispatch_MarketingRefusesToSendWithAnEmbeddedCRLF(t *testing.T) {
-	svc, driver := newHeaderTestService(t, "https://api.example\r\nX-Injected: 1")
+	const injected = "https://api.example\r\nX-Injected: 1"
+	// Refused in BOTH postures: waiving the one-click requirement accepts
+	// marketing without an unsubscribe header, not a header-injection
+	// attempt in operator-typed config.
+	for _, tc := range []struct {
+		name string
+		svc  func() (*NotificationService, *headerDriverCapture)
+	}{
+		{"requirement on", func() (*NotificationService, *headerDriverCapture) { return newHeaderTestService(t, injected) }},
+		{"requirement waived", func() (*NotificationService, *headerDriverCapture) { return newWaivedHeaderTestService(t, injected) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, driver := tc.svc()
 
-	_, err := svc.Send(context.Background(), marketingTo("ada@example.test"))
-	if err == nil {
-		t.Fatal("expected the send to be refused")
-	}
-	if !errors.Is(err, iface.ErrSenderInvalid) {
-		t.Fatalf("expected iface.ErrSenderInvalid, got %v", err)
-	}
-	if driver.sends != 0 {
-		t.Fatal("the driver must never be reached when the configured base carries a header-injection attempt")
+			_, err := svc.Send(context.Background(), marketingTo("ada@example.test"))
+			if err == nil {
+				t.Fatal("expected the send to be refused")
+			}
+			if !errors.Is(err, iface.ErrSenderInvalid) {
+				t.Fatalf("expected iface.ErrSenderInvalid, got %v", err)
+			}
+			if driver.sends != 0 {
+				t.Fatal("the driver must never be reached when the configured base carries a header-injection attempt")
+			}
+		})
 	}
 }
 
