@@ -345,13 +345,13 @@ func TestBuildMIME_WritesHeadersAfterSubject(t *testing.T) {
 	iLU := strings.Index(out, "List-Unsubscribe: ")
 	iBody := strings.Index(out, "corpo")
 	if iSubject < 0 || iLU < 0 || iBody < 0 {
-		t.Fatalf("MIME incompleto:\n%s", out)
+		t.Fatalf("incomplete MIME message:\n%s", out)
 	}
 	if !(iSubject < iLU && iLU < iBody) {
-		t.Fatalf("gli header vanno dopo Subject e prima del corpo:\n%s", out)
+		t.Fatalf("the headers must sit after Subject and before the body:\n%s", out)
 	}
 	if !strings.Contains(out, "List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n") {
-		t.Fatalf("header POST assente o senza CRLF:\n%s", out)
+		t.Fatalf("the List-Unsubscribe-Post header is missing or not CRLF-terminated:\n%s", out)
 	}
 }
 
@@ -359,6 +359,6 @@ func TestBuildMIME_WithoutHeadersIsUnchanged(t *testing.T) {
 	msg := EmailMessage{To: "ada@example.test", Subject: "Ciao", BodyText: "corpo"}
 	out := buildMIMEMessageAt(SenderProfile{FromAddress: "no-reply@example.test"}, msg, time.Unix(0, 0))
 	if strings.Contains(out, "List-Unsubscribe") {
-		t.Fatal("nessun header va inventato quando la mappa è vuota")
+		t.Fatal("no header may be invented when the map is empty")
 	}
 }

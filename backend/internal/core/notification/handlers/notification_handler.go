@@ -244,9 +244,11 @@ type unsubscribeRequest struct {
 //
 // Declaring RawBody does make Huma require a *non-empty* body by default
 // (op.RequestBody.Required is forced true whenever the field is present) —
-// RegisterPublicRoutes turns that back off after registering the operation,
-// because RFC 8058 does not require it and the brief forbids rejecting a
-// bodyless POST. See the comment there.
+// RegisterPublicRoutes turns that back off after registering the operation.
+// RFC 8058 does not require a request body, and a proxy or link scanner
+// forwarding the request can send Content-Length: 0; rejecting a bodyless
+// POST would fail to unsubscribe someone who asked to be unsubscribed, and
+// do it silently. See the comment there.
 type unsubscribePostRequest struct {
 	Token   string `query:"token" doc:"Unsubscribe token; read from the query string first"`
 	RawBody []byte `doc:"Opaque provider body, ignored except as a fallback JSON {\"token\":...} source"`
@@ -440,8 +442,11 @@ func (h *NotificationHandler) RegisterPublicRoutes(api huma.API) {
 	// (processInputType forces op.RequestBody.Required = true whenever the
 	// field is present, with no struct tag to opt out — see
 	// unsubscribePostRequest's doc comment). RFC 8058 compliant providers
-	// always send a body, but the brief requires a bodyless POST with a
-	// valid ?token= to succeed too, so this turns Required back off.
+	// always send a body, but the RFC does not require one, and a proxy or
+	// link scanner forwarding the request can send Content-Length: 0. A 400
+	// there would silently fail to unsubscribe someone who asked to be
+	// unsubscribed, so a bodyless POST with a valid ?token= must succeed and
+	// this turns Required back off.
 	//
 	// This is not reaching into an unexported internal: huma.Register
 	// stores this exact *Operation under api.OpenAPI().Paths[path].Post (via
