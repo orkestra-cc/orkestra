@@ -455,6 +455,53 @@ func TestReconciler_ClearFailureCountsTowardTheBudget(t *testing.T) {
 	}
 }
 
+func TestReconciler_FailedDeferralWriteIsNotCountedAsARetry(t *testing.T) {
+	// The row could not actually be deferred — RecordFailedAttempt itself
+	// failed — so it must not be reported as a retry: the pass log is the
+	// only operator-visible signal for what a pass really did, and this row
+	// did not move at all.
+	store := newReconcileStore(
+		models.UnsubscribeTokenDoc{UUID: "u1", Address: "ada@example.test", SinkPending: true},
+	)
+	store.recordErr = errors.New("write concern not satisfied")
+	r := NewOptoutReconciler(OptoutReconcilerDeps{
+		Tokens: store,
+		Sink:   &failingSink{err: errors.New("sink still down")},
+		Now:    fixedNow,
+	})
+
+	stats, err := r.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if stats.Retried != 0 || stats.DeadLettered != 0 {
+		t.Fatalf("stats = %+v, want neither counter moved: the row was not deferred", stats)
+	}
+}
+
+func TestReconciler_DeadLetterFallbackFailureCountsNeitherStat(t *testing.T) {
+	// Both the dead-letter write and its deferral fallback fail: the row is
+	// untouched, so it must be reported as neither a retry nor a dead letter.
+	store := newReconcileStore(
+		models.UnsubscribeTokenDoc{UUID: "u1", Address: "ada@example.test", SinkPending: true, Attempts: ReconcileMaxAttempts - 1},
+	)
+	store.deadLetterErr = errors.New("write concern not satisfied")
+	store.recordErr = errors.New("write concern not satisfied")
+	r := NewOptoutReconciler(OptoutReconcilerDeps{
+		Tokens: store,
+		Sink:   &failingSink{err: errors.New("sink still down")},
+		Now:    fixedNow,
+	})
+
+	stats, err := r.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if stats.Retried != 0 || stats.DeadLettered != 0 {
+		t.Fatalf("stats = %+v, want neither counter moved: neither write landed", stats)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The preference flag — the same machine, independently
 // ---------------------------------------------------------------------------
@@ -659,12 +706,19 @@ func TestReconciler_DeadLetterWriteFailureStillDefersTheRow(t *testing.T) {
 		Now:    fixedNow,
 	})
 
-	if _, err := r.RunOnce(context.Background()); err != nil {
+	stats, err := r.RunOnce(context.Background())
+	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 	got := store.byUUID("u1")
 	if got.NextAttemptAt == nil || !got.NextAttemptAt.After(fixedNow()) {
 		t.Fatalf("a row that could not be closed must still be deferred: %+v", got)
+	}
+	// The row was not closed, so it must not be reported as a dead letter —
+	// and it WAS deferred by the fallback write, so that has to be visible in
+	// the pass stats the same way an ordinary retry is, not silently dropped.
+	if stats.DeadLettered != 0 || stats.Retried != 1 {
+		t.Fatalf("stats = %+v, want zero dead letters and one retry", stats)
 	}
 }
 
@@ -885,6 +939,60 @@ func TestReconciler_CancelledContextStopsTheLoop(t *testing.T) {
 		t.Fatal("a cancelled host context must bring the loop down")
 	}
 	r.Stop() // still safe after the loop exited on its own
+}
+
+// TestReconciler_StartWaitsOutARaceWithAFinishingStop reproduces, without
+// relying on goroutine scheduling, the exact window a fast Stop followed by a
+// Start can land in: `stopped` is set and the stop channel is closed, but the
+// loop goroutine's own defer — the only place `running` is cleared — has not
+// run yet. A Start arriving here must wait for that generation's `done`
+// channel rather than reading the still-`true` `running` flag as "already
+// started" and silently declining to launch a replacement.
+func TestReconciler_StartWaitsOutARaceWithAFinishingStop(t *testing.T) {
+	store := newReconcileStore()
+	r := NewOptoutReconciler(OptoutReconcilerDeps{Tokens: store, Now: fixedNow, Interval: time.Millisecond})
+
+	// Hand-place the reconciler in the race window itself, rather than
+	// hoping a real Start/Stop pair lands in it.
+	done := make(chan struct{})
+	r.mu.Lock()
+	r.stopCh = make(chan struct{})
+	r.done = done
+	r.stopped = true
+	r.running = true
+	r.mu.Unlock()
+
+	started := make(chan struct{})
+	go func() {
+		r.Start(context.Background())
+		close(started)
+	}()
+
+	select {
+	case <-started:
+		t.Fatal("Start returned before the previous generation actually finished")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	// Let the "previous generation" finish, the way the loop's own defer
+	// would: clear the fields, then close done.
+	r.mu.Lock()
+	r.running, r.stopCh, r.stopped, r.done = false, nil, false, nil
+	r.mu.Unlock()
+	close(done)
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("Start never returned after the previous generation's done channel closed")
+	}
+	defer r.Stop()
+	if !waitFor(func() bool { return r.isRunning() }) {
+		t.Fatal("Start must bring a fresh generation up once the previous one is gone")
+	}
+	if !waitFor(func() bool { return store.scans() > 0 }) {
+		t.Fatal("the new generation's ticker never ran a pass")
+	}
 }
 
 // waitFor polls a condition for up to a second. The reconciler's loop runs on

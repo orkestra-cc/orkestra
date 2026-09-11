@@ -108,6 +108,7 @@ type OptoutReconciler struct {
 
 	mu      sync.Mutex
 	stopCh  chan struct{}
+	done    chan struct{}
 	stopped bool
 	running bool
 }
@@ -289,9 +290,13 @@ func (r *OptoutReconciler) recordFailure(ctx context.Context, doc *models.Unsubs
 		return
 	}
 	if err := r.tokens.RecordFailedAttempt(ctx, doc.TokenHash, now.Add(reconcileBackoff(attempts))); err != nil {
+		// The row was NOT deferred — the write that would have done it
+		// failed — so it must not count as a retry: the pass log is the only
+		// operator-visible signal for what a pass actually did.
 		r.logger.Warn("notification: could not record a failed unsubscribe replay",
 			slog.String("tokenUuid", doc.UUID),
 			slog.String("error", scrubAddress(err.Error(), doc.Address)))
+		return
 	}
 	stats.Retried++
 }
@@ -315,10 +320,18 @@ func (r *OptoutReconciler) deadLetter(ctx context.Context, doc *models.Unsubscri
 			slog.String("tokenUuid", doc.UUID),
 			slog.String("error", scrubAddress(err.Error(), doc.Address)))
 		if err := r.tokens.RecordFailedAttempt(ctx, doc.TokenHash, now.Add(reconcileBackoff(doc.Attempts+1))); err != nil {
+			// Neither write landed: the row is untouched, so nothing here
+			// counts as progress.
 			r.logger.Warn("notification: could not defer an unsubscribe row either",
 				slog.String("tokenUuid", doc.UUID),
 				slog.String("error", scrubAddress(err.Error(), doc.Address)))
+			return
 		}
+		// The row could not be closed but was at least deferred — that is
+		// the same outcome recordFailure's ordinary path counts, so it is
+		// counted the same way; the pass log is the only operator-visible
+		// signal for what actually happened to a dead-letter candidate.
+		stats.Retried++
 		return
 	}
 	stats.DeadLettered++
@@ -342,18 +355,37 @@ func reconcileBackoff(attempts int) time.Duration {
 	return d
 }
 
-// Start launches the ticker. Calling it twice is a no-op: a second loop would
-// double every downstream call.
+// Start launches the ticker. Calling it twice while a loop is genuinely
+// active is a no-op: a second loop would double every downstream call.
+//
+// A Start that lands in the narrow window between a Stop closing its stop
+// channel and that generation's loop goroutine actually exiting waits for
+// the previous generation to finish — via its `done` channel — rather than
+// reading its still-`true` `running` flag as "already started" and silently
+// declining to launch a new one.
 func (r *OptoutReconciler) Start(ctx context.Context) {
-	r.mu.Lock()
-	if r.running {
+	for {
+		r.mu.Lock()
+		if r.running {
+			if !r.stopped {
+				// A loop is genuinely active; Start is idempotent.
+				r.mu.Unlock()
+				return
+			}
+			prevDone := r.done
+			r.mu.Unlock()
+			if prevDone != nil {
+				<-prevDone
+			}
+			continue
+		}
+		stop := make(chan struct{})
+		done := make(chan struct{})
+		r.stopCh, r.done, r.stopped, r.running = stop, done, false, true
 		r.mu.Unlock()
+		go r.loop(ctx, stop, done)
 		return
 	}
-	stop := make(chan struct{})
-	r.stopCh, r.stopped, r.running = stop, false, true
-	r.mu.Unlock()
-	go r.loop(ctx, stop)
 }
 
 // Stop halts the ticker. It is idempotent and safe before Start — the module
@@ -376,13 +408,16 @@ func (r *OptoutReconciler) Stop() {
 	close(r.stopCh)
 }
 
-func (r *OptoutReconciler) loop(ctx context.Context, stop <-chan struct{}) {
+func (r *OptoutReconciler) loop(ctx context.Context, stop <-chan struct{}, done chan struct{}) {
 	// The running state is cleared here, when the goroutine is actually gone,
-	// so a later Start knows it is free to launch one.
+	// so a later Start knows it is free to launch one. `done` is closed last,
+	// after the fields are reset, so a Start blocked on it always sees a
+	// clean slate the moment it wakes up.
 	defer func() {
 		r.mu.Lock()
-		r.running, r.stopCh, r.stopped = false, nil, false
+		r.running, r.stopCh, r.stopped, r.done = false, nil, false, nil
 		r.mu.Unlock()
+		close(done)
 	}()
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
