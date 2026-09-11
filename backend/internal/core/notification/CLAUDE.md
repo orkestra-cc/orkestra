@@ -444,11 +444,16 @@ so the reference can only be resolved at call time.
 
 Both HTTP endpoints (`GET` and the RFC 8058 `POST`, `handlers/notification_handler.go`)
 call `Consume` through the same `consumeUnsubscribe` helper — neither reads the token
-document or orchestrates the preference/sink calls itself any more. `ConsumeToken` +
-`MarkUsed` remain on `UnsubscribeService` (and are still exercised by
-`services/unsubscribe_service_test.go`) but nothing in production code calls them any
-longer: `Consume` spends the token itself through `repository.ClaimToken`, not through
-the service-level `ConsumeToken`/`MarkUsed` pair.
+document or orchestrates the preference/sink calls itself any more. `Consume` spends the
+token itself through `repository.ClaimToken`. The earlier `ConsumeToken` + `MarkUsed`
+pair (on `UnsubscribeService`, and `MarkUsed` on `UnsubscribeRepository`) was **removed**
+rather than left in place: it had no production callers left, and its doc comment told a
+caller to apply the preference change and then call `MarkUsed` — a sequence that skips
+the durable opt-out, the pending flags and the reconciler, i.e. exactly the pre-branch
+behaviour this design replaced. A dead orchestration API that documents the wrong order
+is a trap, not a convenience. Nothing outside this repository could depend on it:
+`internal/core/notification/...` is unimportable beyond `github.com/orkestra/backend`,
+and neither type is re-exported through `pkg/sdk/iface` or the `ServiceRegistry`.
 
 **Residual limit: a write-side outage during `Consume` is a real-vs-fake-token oracle.**
 An unknown token short-circuits before any write (`GetByHash` misses, `Consume` returns

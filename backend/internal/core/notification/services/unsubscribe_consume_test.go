@@ -90,8 +90,6 @@ func (f *consumeTokenStore) GetByHash(_ context.Context, _ string) (*models.Unsu
 	return &cp, nil
 }
 
-func (f *consumeTokenStore) MarkUsed(context.Context, string) error { return nil }
-
 // ClaimToken mirrors the repository: the winner is stamped, and the flags for
 // the work that still has to happen go up in the same write.
 func (f *consumeTokenStore) ClaimToken(_ context.Context, _ string, now time.Time, hasUser bool) (*models.UnsubscribeTokenDoc, error) {

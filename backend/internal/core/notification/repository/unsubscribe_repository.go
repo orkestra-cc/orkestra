@@ -17,7 +17,6 @@ import (
 type UnsubscribeRepository interface {
 	Create(ctx context.Context, doc *models.UnsubscribeTokenDoc) error
 	GetByHash(ctx context.Context, hash string) (*models.UnsubscribeTokenDoc, error)
-	MarkUsed(ctx context.Context, hash string) error
 
 	// ClaimToken is the consuming read: it decides, atomically, which of two
 	// concurrent clicks gets to consume the token, and marks the work that
@@ -75,16 +74,6 @@ func (r *unsubscribeRepository) GetByHash(ctx context.Context, hash string) (*mo
 		return nil, err
 	}
 	return &doc, nil
-}
-
-func (r *unsubscribeRepository) MarkUsed(ctx context.Context, hash string) error {
-	now := time.Now()
-	//tenantscope:allow system: same scope as GetByHash — the row is addressed by the token hash an anonymous recipient presented, and carries no tenant
-	_, err := r.coll.UpdateOne(ctx,
-		bson.M{"tokenHash": hash},
-		bson.M{"$set": bson.M{"usedAt": now}},
-	)
-	return err
 }
 
 // ClaimToken consumes a token atomically. The filter is the whole guard: a

@@ -167,12 +167,6 @@ func (f *fakeUnsubService) IssueToken(_ context.Context, user, addr, category, c
 	return f.token, nil
 }
 
-func (f *fakeUnsubService) ConsumeToken(_ context.Context, _ string) (*models.UnsubscribeTokenDoc, error) {
-	return nil, nil
-}
-
-func (f *fakeUnsubService) MarkUsed(_ context.Context, _ string) error { return nil }
-
 func (f *fakeUnsubService) Consume(_ context.Context, _ string) error { return nil }
 
 type fakeDriver struct {

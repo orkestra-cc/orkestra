@@ -94,9 +94,9 @@ func newHandlerTestSvc(unsubSvc services.UnsubscribeService) *services.Notificat
 // Tests
 // ---------------------------------------------------------------------------
 //
-// The handler no longer orchestrates ConsumeToken + PreferenceService.Set +
-// MarkUsed + FireMarketingUnsubscribe itself — that sequence now lives in
-// services.UnsubscribeService.Consume (see unsubscribe_service.go) and is
+// The handler no longer orchestrates a read + PreferenceService.Set + a
+// mark-used write + FireMarketingUnsubscribe itself — that sequence now lives
+// in services.UnsubscribeService.Consume (see unsubscribe_service.go) and is
 // exhaustively covered there (unsubscribe_consume_test.go). What belongs at
 // this layer — that both endpoints call Consume, answer generically for
 // every token state, and surface a real Consume failure rather than

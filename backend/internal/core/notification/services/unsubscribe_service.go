@@ -35,14 +35,6 @@ type UnsubscribeService interface {
 	// MarketingUnsubscribeSink on consume; pass "" when not needed.
 	IssueToken(ctx context.Context, userUUID, address, category, context string) (string, error)
 
-	// ConsumeToken verifies a raw token and returns the stored document.
-	// The caller is expected to apply the preference change (or
-	// suppression) and then call MarkUsed.
-	ConsumeToken(ctx context.Context, raw string) (*models.UnsubscribeTokenDoc, error)
-
-	// MarkUsed flags the token as consumed.
-	MarkUsed(ctx context.Context, raw string) error
-
 	// Consume applies a raw unsubscribe token in one ordered, crash-safe
 	// sequence: the durable opt-out is recorded first, the token is then
 	// claimed atomically, and only afterwards are the preference row and
@@ -152,27 +144,6 @@ func (s *unsubscribeService) IssueToken(ctx context.Context, userUUID, address, 
 		return "", err
 	}
 	return raw, nil
-}
-
-func (s *unsubscribeService) ConsumeToken(ctx context.Context, raw string) (*models.UnsubscribeTokenDoc, error) {
-	if raw == "" {
-		return nil, ErrUnsubscribeTokenInvalid
-	}
-	doc, err := s.repo.GetByHash(ctx, hashToken(raw))
-	if err != nil {
-		return nil, ErrUnsubscribeTokenInvalid
-	}
-	if doc.UsedAt != nil {
-		return nil, ErrUnsubscribeTokenInvalid
-	}
-	if time.Now().After(doc.ExpiresAt) {
-		return nil, ErrUnsubscribeTokenInvalid
-	}
-	return doc, nil
-}
-
-func (s *unsubscribeService) MarkUsed(ctx context.Context, raw string) error {
-	return s.repo.MarkUsed(ctx, hashToken(raw))
 }
 
 // Consume is the ordered sequence behind a one-click unsubscribe. It is

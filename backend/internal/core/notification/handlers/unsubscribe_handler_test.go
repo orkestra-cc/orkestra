@@ -68,8 +68,6 @@ func (r *unsubTestRepo) GetByHash(_ context.Context, hash string) (*models.Unsub
 	return &cp, nil
 }
 
-func (r *unsubTestRepo) MarkUsed(context.Context, string) error { return nil }
-
 // ClaimToken mirrors the real repository's filter: a doc already used or
 // past its expiry does not match, and the caller gets (nil, nil) rather than
 // an error.
@@ -385,10 +383,10 @@ func TestUnsubscribeGet_RecordsOptout(t *testing.T) {
 
 // assertNoInternalDetailLeaked fails the test if body — a response reaching
 // an anonymous caller — contains the seeded token's internal UUID or the
-// address it was issued for. This is what pins finding 1 of the fix-round-1
-// review: a public 500 must not echo Consume's error text, which can carry
-// exactly these two things (see unsubscribe_service.go's Consume doc
-// comment and consumeUnsubscribe's).
+// address it was issued for. These routes are public and unauthenticated, so
+// a 500 must not echo Consume's error text, which can carry exactly those
+// two things (see unsubscribe_service.go's Consume doc comment and
+// consumeUnsubscribe's).
 func assertNoInternalDetailLeaked(t *testing.T, body string) {
 	t.Helper()
 	if strings.Contains(body, "uuid-valid") {
@@ -450,15 +448,16 @@ func TestUnsubscribeRoutes_ArePublic(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Edge cases named in the brief and in fix-round-1 review
+// Edge cases: requests that are valid but do not look like the happy path
 // ---------------------------------------------------------------------------
 
-// TestUnsubscribePost_EmptyBody_StillAccepted pins finding 2 of fix-round-1
-// review: declaring a RawBody field makes Huma require a non-empty body by
-// default, which would silently break a provider, proxy or link-scanner
-// that sends Content-Length: 0 with a perfectly valid ?token=. Before the
-// fix this returned 400 "request body is required"; RegisterPublicRoutes
-// now turns RequestBody.Required back off after registering the operation.
+// TestUnsubscribePost_EmptyBody_StillAccepted: RFC 8058 does not require a
+// request body, and declaring a RawBody field makes Huma require a non-empty
+// one by default — which would silently break a provider, proxy or link
+// scanner that sends Content-Length: 0 with a perfectly valid ?token=, and
+// leave someone subscribed who asked not to be. Without the fix this returns
+// 400 "request body is required"; RegisterPublicRoutes turns
+// RequestBody.Required back off after registering the operation.
 func TestUnsubscribePost_EmptyBody_StillAccepted(t *testing.T) {
 	api, optouts := newUnsubscribeTestAPI(t, map[string]string{"valid": "ada@example.test"})
 	resp := api.PostBody("/v1/notifications/unsubscribe?token=valid", "", nil)
