@@ -64,19 +64,19 @@ func TestMongo_OptoutUpsertIsIdempotent(t *testing.T) {
 
 	doc := models.MarketingOptoutDoc{Address: "ada@example.test", Category: "marketing", At: time.Unix(100, 0), SourceTokenUUID: "t1"}
 	if err := repo.Upsert(ctx, doc); err != nil {
-		t.Fatalf("primo upsert: %v", err)
+		t.Fatalf("first upsert: %v", err)
 	}
-	// Una seconda chiamata è ciò che accade dopo un crash fra il passo 1 e il
-	// passo 2: non deve fallire, e non deve creare un secondo documento.
+	// A second call is what happens after a crash between step 1 and step 2:
+	// it must not fail, and it must not create a second document.
 	doc.SourceTokenUUID = "t2"
 	doc.At = time.Unix(200, 0)
 	if err := repo.Upsert(ctx, doc); err != nil {
-		t.Fatalf("secondo upsert: %v", err)
+		t.Fatalf("second upsert: %v", err)
 	}
 	//tenantscope:allow system: test assertion against the platform-global opt-out collection, same scope as the repository it exercises
 	n, err := repo.col().CountDocuments(ctx, map[string]any{"address": "ada@example.test"})
 	if err != nil || n != 1 {
-		t.Fatalf("atteso un solo documento per indirizzo, n=%d err=%v", n, err)
+		t.Fatalf("expected exactly one document per address, n=%d err=%v", n, err)
 	}
 }
 
@@ -92,9 +92,9 @@ func TestMongo_IsOptedOut(t *testing.T) {
 		addr string
 		want bool
 	}{
-		{"indirizzo che ha rinunciato", "ada@example.test", true},
-		{"altro indirizzo", "grace@example.test", false},
-		{"maiuscole e spazi: stesso indirizzo", "  Ada@Example.TEST  ", true},
+		{"opted-out address", "ada@example.test", true},
+		{"different address", "grace@example.test", false},
+		{"uppercase and spacing: same address", "  Ada@Example.TEST  ", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := repo.IsOptedOut(ctx, tc.addr, "marketing")
@@ -102,7 +102,7 @@ func TestMongo_IsOptedOut(t *testing.T) {
 				t.Fatalf("IsOptedOut: %v", err)
 			}
 			if got != tc.want {
-				t.Fatalf("IsOptedOut(%q) = %v, atteso %v", tc.addr, got, tc.want)
+				t.Fatalf("IsOptedOut(%q) = %v, want %v", tc.addr, got, tc.want)
 			}
 		})
 	}
