@@ -56,9 +56,9 @@ func TestNotificationConfigValidation_BothHooksAgree(t *testing.T) {
 // --- one-click unsubscribe (require_one_click_unsubscribe) -----------------
 
 // The field's Description is the only place an operator is told what turning
-// the requirement off actually accepts. There is no module-level warning
-// channel in the SDK to say it anywhere else (see the task report), so this
-// pins the wording that matters rather than merely the field's existence.
+// the requirement off actually accepts: the SDK has no module-level warning
+// channel that could say it anywhere else in the admin UI. So this pins the
+// wording that matters rather than merely the field's existence.
 func TestConfigSchema_RequireOneClickUnsubscribeIsOnByDefaultAndSaysWhatOffMeans(t *testing.T) {
 	var f *module.ConfigField
 	for i, c := range (&NotificationModule{}).ConfigSchema() {
@@ -123,5 +123,61 @@ func TestValidateConfig_ExplicitlyWaivedRequirementAdmits(t *testing.T) {
 
 	if err := m.ValidateConfig(context.Background(), values); err != nil {
 		t.Fatalf("an operator who turned the requirement off takes the consequence knowingly: %v", err)
+	}
+}
+
+// The waiver is the one direction that cannot be allowed to happen by
+// accident, so it is spelled explicitly and everything else keeps the
+// requirement on. In particular "TRUE" and "on" — which the platform's
+// ordinary GetConfigBool parsing resolves to false — must NOT waive.
+func TestOneClickWaived_OnlyExplicitlyFalseValuesWaive(t *testing.T) {
+	for _, v := range []string{"false", "FALSE", "False", " false ", "0", "no", "NO"} {
+		if !oneClickWaived(v) {
+			t.Errorf("%q is an operator saying off; it must waive", v)
+		}
+	}
+	for _, v := range []string{"true", "TRUE", "True", "1", "yes", "on", "enabled", "treu", "", "   "} {
+		if oneClickWaived(v) {
+			t.Errorf("%q must leave the requirement in force, not waive it", v)
+		}
+	}
+}
+
+// The same rule through the save gate, which is where an operator actually
+// meets it. Before the inversion a stored "TRUE" waived the requirement and
+// this profile — marketing on a driver that cannot place the headers — was
+// admitted, silently, with the compliance rule off.
+func TestValidateConfig_UnrecognisedRequirementValuesStillRequireOneClick(t *testing.T) {
+	for _, v := range []string{"TRUE", "True", "on", "enabled", "treu"} {
+		m := NewModule()
+		values := marketingOnMailUp()
+		values["public_api_base_url"] = "https://api.example"
+		values[requireOneClickKey] = v
+
+		var ve *module.ConfigValidationError
+		if err := m.ValidateConfig(context.Background(), values); !errors.As(err, &ve) ||
+			ve.Code != errcode.NotificationSenderDriverNoOneClick {
+			t.Errorf("%q: want sender_driver_no_one_click, got %v", v, err)
+		}
+		if err := m.ValidateConfigActivation(context.Background(), values); !errors.As(err, &ve) ||
+			ve.Code != errcode.NotificationSenderDriverNoOneClick {
+			t.Errorf("%q: activation: want sender_driver_no_one_click, got %v", v, err)
+		}
+	}
+}
+
+// And the waiver itself keeps working through every spelling of "off" the
+// parser accepts, so the inversion did not trade one silent failure for a
+// save an operator cannot make.
+func TestValidateConfig_EveryFalseSpellingWaivesTheRequirement(t *testing.T) {
+	for _, v := range []string{"false", "FALSE", "0", "no"} {
+		m := NewModule()
+		values := marketingOnMailUp()
+		values["public_api_base_url"] = "https://api.example"
+		values[requireOneClickKey] = v
+
+		if err := m.ValidateConfig(context.Background(), values); err != nil {
+			t.Errorf("%q turns the requirement off; the save must be admitted: %v", v, err)
+		}
 	}
 }

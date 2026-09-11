@@ -78,8 +78,10 @@ func (m *NotificationModule) livePolicy(ctx context.Context) services.OneClickPo
 // rule it was added for.
 //
 // Waived is the inverse of the field, and only an explicit, recognisably
-// true value keeps the requirement on — so anything unparseable, like the
-// empty string, lands on "required" rather than "off".
+// FALSE value turns the requirement off — so anything unparseable, like a
+// typo or the empty string, lands on "required" rather than "off". See
+// oneClickWaived for why this one key does not use the platform's ordinary
+// boolean parsing.
 //
 // UnsubscribePageURL has no such inversion or admissibility rule of its
 // own — effectiveValue's ordinary stored→EnvVar→Default resolution is
@@ -89,7 +91,7 @@ func (m *NotificationModule) livePolicy(ctx context.Context) services.OneClickPo
 // falls back to the API link.
 func (m *NotificationModule) oneClickPolicy(values map[string]string) services.OneClickPolicy {
 	return services.OneClickPolicy{
-		Waived:             !configTrue(m.effectiveValue(values, requireOneClickKey)),
+		Waived:             oneClickWaived(m.effectiveValue(values, requireOneClickKey)),
 		PublicAPIBaseURL:   m.effectiveValue(values, services.PublicAPIBaseURLField),
 		UnsubscribePageURL: m.effectiveValue(values, services.UnsubscribePageURLField),
 	}
@@ -118,10 +120,29 @@ func (m *NotificationModule) effectiveValue(values map[string]string, key string
 	return ""
 }
 
-// configTrue mirrors module.Dependencies.GetConfigBool's parsing so a value
-// the runtime reads as true is not read as false here, and vice versa.
-func configTrue(v string) bool {
-	return v == "true" || v == "1" || v == "yes"
+// oneClickWaived reports whether a stored require_one_click_unsubscribe
+// value turns the RFC 8058 requirement OFF.
+//
+// It deliberately does NOT mirror module.Dependencies.GetConfigBool, which
+// tests for a recognisably TRUE value ("true", "1", "yes") and resolves
+// everything else — "TRUE", "True", "on", "enabled", a typo — to false. For
+// every other boolean on the platform that fallback is harmless: an
+// unrecognised value leaves a feature off. Here "off" is the single outcome
+// this whole requirement exists to prevent, because it means marketing
+// leaves the building with no unsubscribe header, and a message already in
+// a mailbox cannot be recalled. So the test is inverted: only an explicitly
+// false-looking value waives the requirement, and anything else — a
+// recognisably true value, an unrecognised one, or the empty string — keeps
+// it in force. The false-looking set is the one the rest of the codebase
+// already uses for config booleans (see readBool in the auth module), read
+// case-insensitively because an operator who types "FALSE" into the admin
+// form has plainly said off.
+func oneClickWaived(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "0", "no":
+		return true
+	}
+	return false
 }
 
 // driverRegistry returns the registry Init built, or a default one for a
