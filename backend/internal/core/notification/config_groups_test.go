@@ -3,6 +3,7 @@ package notification
 import (
 	"testing"
 
+	"github.com/orkestra/backend/internal/core/notification/models"
 	"github.com/orkestra/backend/internal/core/notification/services"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
@@ -73,6 +74,36 @@ func TestSMTPHost_RequiredWhenVisible(t *testing.T) {
 				t.Errorf("field %q must not be Required", f.Key)
 			}
 		}
+	}
+}
+
+// The default locale is the fallback for every caller that names none —
+// including a bulk sender that forwards a per-record Locale field which is
+// frequently empty. Hard-coding it to a non-English value made every such
+// send resolve a template that does not exist, so the default is English
+// and an Italian deployment opts in through config.
+func TestDefaultLocaleIsConfigurableAndDefaultsToEnglish(t *testing.T) {
+	var found bool
+	for _, f := range (&NotificationModule{}).ConfigSchema() {
+		if f.Key != "app.default_locale" {
+			continue
+		}
+		found = true
+		if f.Default != "en" {
+			t.Errorf("app.default_locale Default = %q, want en", f.Default)
+		}
+		if f.EnvVar != "NOTIFICATION_DEFAULT_LOCALE" {
+			t.Errorf("app.default_locale EnvVar = %q, want NOTIFICATION_DEFAULT_LOCALE", f.EnvVar)
+		}
+		if f.Type != module.FieldEnum {
+			t.Errorf("app.default_locale Type = %v, want FieldEnum", f.Type)
+		}
+		if len(f.Options) != len(models.SupportedLocales) {
+			t.Errorf("app.default_locale Options = %v, want %v", f.Options, models.SupportedLocales)
+		}
+	}
+	if !found {
+		t.Fatal("no app.default_locale field declared — the locale would be hard-coded again")
 	}
 }
 

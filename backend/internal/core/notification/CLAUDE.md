@@ -69,8 +69,11 @@ All settings live in the `module_configs` collection under the `notification` mo
 | `email.smtp.tls_mode`         | `SMTP_TLS_MODE`                | `starttls` (options: `starttls`, `tls`, `none`) |
 | `app.name`                    | `APP_NAME`                     | `Orkestra` |
 | `app.support_email`           | `SUPPORT_EMAIL`                | —         |
+| `app.default_locale`          | `NOTIFICATION_DEFAULT_LOCALE`  | `en` (options: `en`, `it`) |
 
-`/admin/modules/notification` renders as a three-group rail declared via `ConfigGroups()`: **Delivery** (`email.provider` + the five `email.smtp.*` fields), **Sender** (`email.from_address`, `email.from_name`, `email.reply_to`), **Branding & templates** (`app.name`, `app.support_email`). `email.provider` and `email.smtp.tls_mode` are `FieldEnum` — selects, not free text. The five `email.smtp.*` fields carry `DependsOn: email.provider in [smtp]`, so a default `noop` install shows **one** visible Delivery field (`Email provider`) until it's switched to `smtp`, which reveals the SMTP connection settings.
+`app.default_locale` is the fallback for callers that pass no `Locale` — it must name a locale that has seeded templates, because `Get(templateID, locale)` has no fallback and a miss only logs. Callers that resolve a locale per recipient and pass it explicitly are unaffected by it.
+
+`/admin/modules/notification` renders as a three-group rail declared via `ConfigGroups()`: **Delivery** (`email.provider` + the five `email.smtp.*` fields), **Sender** (`email.from_address`, `email.from_name`, `email.reply_to`), **Branding & templates** (`app.name`, `app.support_email`, `app.default_locale`). `email.provider`, `email.smtp.tls_mode` and `app.default_locale` are `FieldEnum` — selects, not free text. The five `email.smtp.*` fields carry `DependsOn: email.provider in [smtp]`, so a default `noop` install shows **one** visible Delivery field (`Email provider`) until it's switched to `smtp`, which reveals the SMTP connection settings.
 
 The `noop` provider logs rendered mail to the backend stdout instead of dialing an SMTP server — use it in dev and CI. The module reports `IsConfigured() = true` for `noop` so consumers can still make send calls without failing.
 
