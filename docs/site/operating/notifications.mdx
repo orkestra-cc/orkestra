@@ -41,6 +41,29 @@ A profile that is selectable but routes nothing is a supported, deliberate shape
 
 Leave `allowed_types` empty on a profile you only want routing to reach. It is not a switch that improves a sender; it is a permission that also makes the profile's label and `From:` address visible to everyone who can send a campaign.
 
+### Marketing needs a one-click unsubscribe first
+
+**On a fresh install, the save above is refused with a 422.** Adding `marketing` to a profile's `Explicitly selectable for` returns `notification.public_base_url_missing`, and nothing is wrong with the profile. Marketing mail must carry the RFC 8058 `List-Unsubscribe` headers, those headers have to name a URL, and **Public API base URL** (`public_api_base_url`, under **Delivery**) is empty by default while **Require one-click unsubscribe** (`require_one_click_unsubscribe`) is on by default. A profile that cannot carry the headers is not admitted for marketing.
+
+Set **Public API base URL** to the bare `https://` origin this API answers on from the public internet — scheme and host only. A path, a query string, a fragment, a trailing `//`, plain `http`, or embedded `user:pass@` credentials are all treated as *not set*, because none of them can produce a working unsubscribe link (and credentials there would be copied into every marketing message). Save it, then save the profile again.
+
+The sibling refusal is `notification.sender_driver_no_one_click`: the base URL is fine, but the profile's **Provider** is a driver that cannot guarantee the headers reach the wire. Pick a driver that can, drop `marketing` from that profile's send types, or accept the trade below.
+
+**Turning the requirement off is a real trade.** With **Require one-click unsubscribe** off, the profile saves and marketing goes out *without* an unsubscribe header. Large mailbox providers require one-click unsubscribe from bulk senders and penalise domains that omit it, and several jurisdictions require an easy withdrawal mechanism for commercial email. The field turns off only on `false`, `0` or `no` (any capitalisation). Any other value — including `on`, `enabled`, or a typo — leaves the requirement in force. That asymmetry is deliberate: this is not a setting that should switch itself off by accident, and a message already delivered without an unsubscribe header cannot be recalled.
+
+**The same rule applies at send time, not only at save time.** A profile that carries mail only through category patterns declares no send type, so there is nothing for the save-time check to see — but if a marketing message is ever routed to it, the check runs again at the moment of the send and the message is refused rather than delivered without an unsubscribe header.
+
+### What a link scanner costs you
+
+A recipient who clicks the unsubscribe link in a footer is recorded as an **address-level opt-out from all marketing**. So is anything else that follows that link: a corporate link scanner, an anti-malware proxy, or a mail client prefetching URLs the moment the message arrives. No human has to be involved.
+
+That record does not expire, **nothing in the admin console removes it**, and a data-erasure request deliberately preserves it (deleting the fact that an address asked to stop would let the next campaign mail it again). There is no operator path to reverse an opt-out today — an endpoint to remove one is the natural next step, and until it exists the state is final.
+
+Two things reduce the exposure, neither of which is a fix:
+
+- Set **Unsubscribe page URL** (`unsubscribe_page_url`) to a page you host. The footer then links there instead of straight at the API, and the page must **not** call the API when it loads — only when a visitor presses a button. A page that unsubscribes on load reproduces the problem exactly.
+- Read a sudden cluster of opt-outs from a single recipient domain as a scanner rather than as churn, and check it against the delivery log before drawing conclusions about a campaign.
+
 **Nothing is silently rerouted.** If a category matches no profile, or its profile is incomplete, the send **fails** and the delivery log row says why (`sender=campaigns driver=mailup err=not_configured missing=mailup_user`). Falling back to the default would push promotional mail through the transactional sender — the thing this feature exists to prevent.
 
 ## TLS mode
@@ -94,6 +117,7 @@ Work down this list in order:
 5. **Then look at SPF/DKIM and the provider's own log.** By this point the problem is usually at the relay, not in Orkestra.
 6. **With several profiles, check which one carried it.** `senderSlug` on the row tells you; a category that rode the default when you expected `crm.*` means the pattern is misspelled — a pattern with no dot matches exactly, and `crm.*` never matches the bare `crm`.
 7. **If a campaign named its sender, check `attemptedSenderSlug`.** On a row that failed the sender check this field holds the slug the send asked for, next to the reason: `err=sender_not_found` (no such profile — usually renamed or deleted out from under a campaign), `err=sender_not_eligible` (the profile exists but `marketing` is not in its `Explicitly selectable for` list), `err=not_configured missing=<fields>` (eligible, but its driver is missing the named non-secret fields — or a secret, in which case the profile looks complete on the settings page and only the send says otherwise), and `err=unknown_driver` (its **Provider** names a driver this build does not have). The last two carry `driver=<provider>` as well, and they are reported the same way whether the sender was named explicitly or reached by routing — the completeness check is the same one. An `attemptedSenderSlug` of `invalid` (with `err=sender_invalid`) means the slug was malformed rather than merely wrong — it is a constant marker, deliberately not the input echoed back. A campaign left on the default sender records no slug at all and fails with `err=no_sender_for_category` when nothing routes `marketing`.
+8. **On a marketing send, three reasons are about unsubscribe, not about the sender.** `err=one_click_unavailable` — the message would have gone out with no RFC 8058 unsubscribe header while **Require one-click unsubscribe** is on, because the profile's driver cannot add the headers or **Public API base URL** is unset or is not a bare `https` origin; this is the refusal described under "Marketing needs a one-click unsubscribe first" above, arriving at send time. `err=optout_lookup_unavailable` — the opt-out list could not be read, so the send was withheld rather than risked; the address may or may not have opted out, and the check is deliberately fail-closed. `err=unsubscribe_token_unavailable` — the opt-out list answered, but the one-time token the header needs could not be issued. The last two are database faults, not configuration: retry once the database is healthy. A message *suppressed* because the address really did opt out is not a failure at all — it is a `suppressed` row whose reason reads `marketing_optout`.
 
 :::note Scope
 Email only. The interface was designed for SMS, push, and webhooks, but none are implemented. Sends are synchronous — there is no queue. No marketing automation, segmentation, or A/B testing; no bounce or complaint ingestion; DKIM signing is the relay's job.
