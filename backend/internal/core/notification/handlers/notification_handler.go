@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -231,6 +232,28 @@ type unsubscribeRequest struct {
 	Token string `query:"token"`
 }
 
+// unsubscribePostRequest is what RFC 8058 §3.2 one-click POST carries. Mail
+// providers vary in the content type they send (application/x-www-form-
+// urlencoded, multipart/form-data, …) and the RFC guarantees only that the
+// body contains the literal "List-Unsubscribe=One-Click" — nothing this
+// handler needs to parse. RawBody is declared instead of a typed Body field
+// so Huma captures the bytes verbatim without inspecting Content-Type; with
+// no separate Body field there is no schema, so the shape of the bytes is
+// never validated. The body is never read past the best-effort JSON
+// fallback in tokenFromJSONBody, and is otherwise discarded.
+//
+// Declaring RawBody does make Huma require a *non-empty* body by default
+// (op.RequestBody.Required is forced true whenever the field is present) —
+// RegisterPublicRoutes turns that back off after registering the operation.
+// RFC 8058 does not require a request body, and a proxy or link scanner
+// forwarding the request can send Content-Length: 0; rejecting a bodyless
+// POST would fail to unsubscribe someone who asked to be unsubscribed, and
+// do it silently. See the comment there.
+type unsubscribePostRequest struct {
+	Token   string `query:"token" doc:"Unsubscribe token; read from the query string first"`
+	RawBody []byte `doc:"Opaque provider body, ignored except as a fallback JSON {\"token\":...} source"`
+}
+
 type unsubscribeResponse struct {
 	Body struct {
 		Success bool   `json:"success"`
@@ -238,27 +261,69 @@ type unsubscribeResponse struct {
 	}
 }
 
-func (h *NotificationHandler) Unsubscribe(ctx context.Context, req *unsubscribeRequest) (*unsubscribeResponse, error) {
-	doc, err := h.svc.UnsubscribeService().ConsumeToken(ctx, req.Token)
-	if err != nil {
-		return nil, huma.Error400BadRequest("invalid or expired token", err)
+// tokenFromJSONBody best-effort extracts a "token" field from a JSON body.
+// It is a fallback for a caller that posts {"token": "..."} directly rather
+// than putting the token in the query string. A mail provider's own body
+// (form-urlencoded or multipart, carrying "List-Unsubscribe=One-Click") is
+// not JSON, so this simply fails to unmarshal and returns "" — that is not
+// an error condition, since the query string is the primary source and the
+// body is optional either way.
+func tokenFromJSONBody(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
 	}
-	// If a category is set, opt out of just that category; otherwise opt out
-	// of all marketing for this user.
-	category := doc.Category
-	if category == "" {
-		category = "marketing"
+	var body struct {
+		Token string `json:"token"`
 	}
-	if doc.UserUUID != "" {
-		_ = h.svc.PreferenceService().Set(ctx, doc.UserUUID, category, models.ChannelEmail, false)
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return ""
 	}
-	_ = h.svc.UnsubscribeService().MarkUsed(ctx, req.Token)
-	h.svc.FireMarketingUnsubscribe(ctx, doc.Address, category, doc.Context)
+	return body.Token
+}
 
+// consumeUnsubscribe runs the one sequence both the GET and the POST
+// endpoint answer through: services.UnsubscribeService.Consume. The
+// response is generic by construction — Consume returns a nil error for an
+// unknown, expired or already-used token (see its doc comment), so every
+// token state reaches the same success reply below. The one case that does
+// NOT reach it is ErrOptoutNotRecorded: a real failure to write the durable
+// opt-out, which must not be reported as a successful unsubscribe.
+//
+// The error is deliberately NOT passed to huma.Error500InternalServerError:
+// this route is public and unauthenticated, and Huma serializes an errs
+// argument's Error() text verbatim into the response body. Consume's error
+// can carry a token UUID or an unscrubbed repository error; neither may
+// reach an anonymous caller. Consume has already logged the detail
+// server-side (see its doc comment), so nothing is lost by not repeating it
+// here — the admin endpoints elsewhere in this file that do pass err are
+// all behind RBAC and are not a precedent for a public route.
+func (h *NotificationHandler) consumeUnsubscribe(ctx context.Context, token string) (*unsubscribeResponse, error) {
+	if err := h.svc.UnsubscribeService().Consume(ctx, token); err != nil {
+		return nil, huma.Error500InternalServerError("the opt-out could not be recorded")
+	}
 	resp := &unsubscribeResponse{}
 	resp.Body.Success = true
 	resp.Body.Message = "You have been unsubscribed. Security-related emails will still be delivered."
 	return resp, nil
+}
+
+// Unsubscribe handles the pre-existing GET link mail clients already have
+// in delivered messages: same public endpoint, same generic answer,
+// now driven through the same Consume sequence the POST endpoint uses.
+func (h *NotificationHandler) Unsubscribe(ctx context.Context, req *unsubscribeRequest) (*unsubscribeResponse, error) {
+	return h.consumeUnsubscribe(ctx, req.Token)
+}
+
+// UnsubscribePost handles RFC 8058 one-click: a mail provider POSTs here
+// with a body of "List-Unsubscribe=One-Click" and no session of any kind.
+// The token is read from the query string (the URL the provider was given
+// in List-Unsubscribe) and, only if absent there, from a JSON body.
+func (h *NotificationHandler) UnsubscribePost(ctx context.Context, req *unsubscribePostRequest) (*unsubscribeResponse, error) {
+	token := req.Token
+	if token == "" {
+		token = tokenFromJSONBody(req.RawBody)
+	}
+	return h.consumeUnsubscribe(ctx, token)
 }
 
 // RegisterAdminRoutes registers the admin-only endpoints (delivery log,
@@ -342,7 +407,10 @@ func (h *NotificationHandler) RegisterUserRoutes(api huma.API) {
 	}, h.UpdateMyPreference)
 }
 
-// RegisterPublicRoutes registers the public unsubscribe endpoint.
+// RegisterPublicRoutes registers the public unsubscribe endpoints: the GET
+// link already delivered in mail footers, and the RFC 8058 one-click POST
+// mail providers call directly. Neither carries a Security requirement —
+// both are reached by an anonymous mail client, never a signed-in user.
 func (h *NotificationHandler) RegisterPublicRoutes(api huma.API) {
 	huma.Register(api, huma.Operation{
 		OperationID: "notifications-unsubscribe",
@@ -351,4 +419,40 @@ func (h *NotificationHandler) RegisterPublicRoutes(api huma.API) {
 		Summary:     "Consume an unsubscribe token",
 		Tags:        []string{"Notifications"},
 	}, h.Unsubscribe)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "notifications-unsubscribe-post",
+		Method:      http.MethodPost,
+		Path:        "/v1/notifications/unsubscribe",
+		Summary:     "Consume an unsubscribe token (RFC 8058 one-click)",
+		Tags:        []string{"Notifications"},
+		// 4096 is far above anything RFC 8058 §3.2 describes (the body is
+		// just "List-Unsubscribe=One-Click", plus whatever a provider pads
+		// it with). Without these, declaring RawBody skips Huma's own
+		// per-operation defaults (ensureMaxBodyBytes / ensureBodyReadTimeout
+		// only run on the typed Body branch), so this public, unauthenticated
+		// route would otherwise be the only one in the codebase buffering up
+		// to the server-wide 10MB default instead of the 1MB every other
+		// route gets, with no per-request read deadline either.
+		MaxBodyBytes:    4096,
+		BodyReadTimeout: 5 * time.Second,
+	}, h.UnsubscribePost)
+
+	// Declaring a RawBody field makes Huma require a *non-empty* body
+	// (processInputType forces op.RequestBody.Required = true whenever the
+	// field is present, with no struct tag to opt out — see
+	// unsubscribePostRequest's doc comment). RFC 8058 compliant providers
+	// always send a body, but the RFC does not require one, and a proxy or
+	// link scanner forwarding the request can send Content-Length: 0. A 400
+	// there would silently fail to unsubscribe someone who asked to be
+	// unsubscribed, so a bodyless POST with a valid ?token= must succeed and
+	// this turns Required back off.
+	//
+	// This is not reaching into an unexported internal: huma.Register
+	// stores this exact *Operation under api.OpenAPI().Paths[path].Post (via
+	// oapi.AddOperation) and the running handler closure copies its fields
+	// from that same pointer on every request, so mutating it through the
+	// documented api.OpenAPI() accessor after Register returns changes what
+	// the live handler sees.
+	api.OpenAPI().Paths["/v1/notifications/unsubscribe"].Post.RequestBody.Required = false
 }

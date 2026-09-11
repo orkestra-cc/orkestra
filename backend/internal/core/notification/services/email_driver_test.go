@@ -15,6 +15,9 @@ type reqDriver struct {
 
 func (d *reqDriver) Name() string                   { return d.name }
 func (d *reqDriver) Requires() []ProfileRequirement { return d.reqs }
+func (d *reqDriver) Capabilities() DriverCapabilities {
+	return DriverCapabilities{ListUnsubscribeHeaders: true}
+}
 func (d *reqDriver) Send(context.Context, SenderProfile, EmailMessage) error {
 	return nil
 }

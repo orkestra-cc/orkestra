@@ -433,3 +433,15 @@ const NotificationSenderBadAllowedType = "notification.sender_bad_allowed_type"
 // NotificationSendFailed: the sender's transport or vendor refused a test
 // message. The detail carries the bounded diagnostic, never vendor text. 502.
 const NotificationSendFailed = "notification.send_failed"
+
+// NotificationSenderDriverNoOneClick: a sender profile declares marketing in
+// its allowed_types but its provider cannot put the RFC 8058 one-click
+// unsubscribe headers on the wire, while require_one_click_unsubscribe is
+// on. 422.
+const NotificationSenderDriverNoOneClick = "notification.sender_driver_no_one_click"
+
+// NotificationPublicBaseURLMissing: a sender profile declares marketing in
+// its allowed_types but public_api_base_url is unset (or is not a bare https
+// origin), so no one-click unsubscribe link can be built, while
+// require_one_click_unsubscribe is on. 422.
+const NotificationPublicBaseURLMissing = "notification.public_base_url_missing"

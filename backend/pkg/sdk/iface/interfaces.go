@@ -467,7 +467,11 @@ type NotificationSender interface {
 // seam.
 var (
 	// ErrSenderInvalid: the Sender slug fails grammar or the length bound,
-	// before any profile lookup is attempted.
+	// before any profile lookup is attempted — or the profile that would
+	// carry the send is not admissible for it at all. The second case exists
+	// for one rule today: a marketing send whose sender cannot carry an RFC
+	// 8058 one-click unsubscribe, which the notification module refuses
+	// rather than delivers, at save time and again at dispatch.
 	ErrSenderInvalid = errors.New("sender slug malformed")
 	// ErrSenderNotFound: a grammar-valid slug names no configured profile.
 	ErrSenderNotFound = errors.New("sender profile not found")
@@ -491,6 +495,13 @@ var (
 // single boolean is wrong in both directions for a caller about to send one
 // category; this answers for that category. A sender that does not
 // implement it keeps working — IsConfiguredForCategory falls back.
+//
+// It answers about the CATEGORY axis only, and there is no type axis in the
+// question: a true here does not promise that a MARKETING send of that
+// category would go out, because a marketing send additionally has to be
+// able to carry a one-click unsubscribe. A caller guarding a marketing send
+// must ask SenderDirectory.PreflightDelivery, which takes the send type,
+// rather than treating this boolean as a pre-send guard.
 type CategoryConfiguredChecker interface {
 	IsConfiguredFor(ctx context.Context, category string) bool
 }
@@ -1538,12 +1549,18 @@ type EmailTrackingRewriterSetter interface {
 	SetEmailTrackingRewriter(EmailTrackingRewriter)
 }
 
-// MarketingUnsubscribeSink is fired (best-effort) when an unsubscribe token is
-// consumed, so an addon can mirror the opt-out into its own consent store and
-// attribute it (via the opaque context the producer set on the send). Wired via
-// MarketingUnsubscribeSinkSetter — core notification never imports the addon.
+// MarketingUnsubscribeSink receives the durable fact that an address opted
+// out, so a consumer can mirror it into its own consent store and attribute
+// it (via the opaque context the producer set on the send). Wired via
+// MarketingUnsubscribeSinkSetter — core notification never imports the
+// module that implements it.
+//
+// It returns an error on purpose: the core retries a failed sink through
+// its reconciler, and a sink that swallowed its own failures made that
+// impossible — the opt-out would be durable in core and silently missing
+// downstream.
 type MarketingUnsubscribeSink interface {
-	OnMarketingUnsubscribe(ctx context.Context, address, category, refContext string)
+	OnMarketingUnsubscribe(ctx context.Context, address, category, refContext string) error
 }
 
 // MarketingUnsubscribeSinkSetter is implemented by the notification service so an

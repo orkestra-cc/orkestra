@@ -16,6 +16,12 @@ const (
 	// authoritative at PR-B boundary.
 	NotificationOperatorUnsubscribeTokensCollect = "operator_unsubscribe_tokens"
 	NotificationClientUnsubscribeTokensCollect   = "client_unsubscribe_tokens"
+
+	// NotificationMarketingOptoutsCollection is the durable, address-keyed
+	// record of "this address asked us to stop receiving marketing". It is
+	// deliberately separate from NotificationSuppressionsCollection, which
+	// blocks every notification (transactional included).
+	NotificationMarketingOptoutsCollection = "notification_marketing_optouts"
 )
 
 // Notification categories used for preference lookup and template IDs.

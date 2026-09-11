@@ -2,6 +2,7 @@ package notification
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -16,9 +17,16 @@ import (
 
 type NotificationModule struct {
 	module.BaseModule
-	svc     *services.NotificationService
-	drivers *services.DriverRegistry
-	handler *handlers.NotificationHandler
+	svc        *services.NotificationService
+	drivers    *services.DriverRegistry
+	handler    *handlers.NotificationHandler
+	reconciler *services.OptoutReconciler
+
+	// configService is kept for livePolicy (config_validation.go), which
+	// re-reads the one-click requirement on every marketing send rather
+	// than trusting a value captured here in Init. nil outside a wired boot,
+	// which livePolicy treats as an unreadable config: fail closed.
+	configService *module.ModuleConfigService
 }
 
 func NewModule() *NotificationModule { return &NotificationModule{} }
@@ -92,6 +100,23 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 				{Keys: map[string]int{"uuid": 1}, Unique: true},
 				{Keys: map[string]int{"tokenHash": 1}, Unique: true},
 				{Keys: map[string]int{"expiresAt": 1}, TTL: day30},
+				// The reconciler's scan (repository.ListPending) runs on a
+				// ticker for the life of the process, so it must not read a
+				// collection that holds 30 days of tokens to find the few
+				// rows that still owe work. Partial rather than sparse: these
+				// index ONLY the pending rows, and a flag is $unset — not set
+				// to false — when its work completes, so a settled row leaves
+				// the index. Two indexes because the scan is an $or and each
+				// branch needs one of its own; nextAttemptAt is the second
+				// key so each branch comes back oldest-due-first.
+				{OrderedKeys: []module.IndexKey{
+					{Field: "sinkPending", Direction: 1},
+					{Field: "nextAttemptAt", Direction: 1},
+				}, PartialFilter: map[string]any{"sinkPending": true}},
+				{OrderedKeys: []module.IndexKey{
+					{Field: "prefPending", Direction: 1},
+					{Field: "nextAttemptAt", Direction: 1},
+				}, PartialFilter: map[string]any{"prefPending": true}},
 			},
 		},
 		// ADR-0003 PR-B: tier-split unsubscribe tokens. Same shape as
@@ -112,14 +137,23 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 				{Keys: map[string]int{"expiresAt": 1}, TTL: day30},
 			},
 		},
+		{Name: models.NotificationMarketingOptoutsCollection, Indexes: []module.IndexSpec{
+			// One opt-out per address, enforced here. Under concurrency this
+			// index is what makes two racing upserts land on one document —
+			// Upsert (repository/optout_repository.go) swallows the loser's
+			// resulting duplicate-key error, which is what makes the call
+			// itself idempotent, not just the stored state.
+			{OrderedKeys: []module.IndexKey{{Field: "address", Direction: 1}}, Unique: true},
+		}},
 	}
 }
 
 // ConfigGroups upgrades /admin/modules/notification from one flat card to the
-// full-page rail. Three sections: Delivery (how mail leaves the platform),
-// Sender (the addresses recipients see), Branding (values injected into every
-// templated email). The SMTP connection settings live under Delivery and are
-// hidden until the provider is set to smtp.
+// full-page rail. Four sections: Delivery (how mail leaves the platform),
+// Sender profiles (the record list, ADR-0019), Sender (the addresses
+// recipients see), Branding (values injected into every templated email).
+// The SMTP connection settings live under Delivery and are hidden until the
+// provider is set to smtp.
 func (m *NotificationModule) ConfigGroups() []module.ConfigGroup {
 	return []module.ConfigGroup{
 		{Key: "delivery", Label: "Delivery", Order: 1,
@@ -147,6 +181,13 @@ func (m *NotificationModule) ConfigSchema() []module.ConfigField {
 		{Key: "email.smtp.username", Label: "SMTP username", Group: "delivery", Type: module.FieldString, DependsOn: smtpOnly, EnvVar: "SMTP_USERNAME"},
 		{Key: "email.smtp.password", Label: "SMTP password", Group: "delivery", Type: module.FieldSecret, DependsOn: smtpOnly, EnvVar: "SMTP_PASSWORD"},
 		{Key: "email.smtp.tls_mode", Label: "TLS mode", Group: "delivery", Type: module.FieldEnum, Options: []string{"starttls", "tls", "none"}, Default: "starttls", DependsOn: smtpOnly, EnvVar: "SMTP_TLS_MODE"},
+		{Key: services.PublicAPIBaseURLField, Label: "Public API base URL", Group: "delivery", Type: module.FieldString, EnvVar: "NOTIFICATION_PUBLIC_API_BASE_URL",
+			Description: "The API's own https origin (e.g. https://api.example.com), used only to build the RFC 8058 List-Unsubscribe header on marketing mail. Not derived automatically: PlatformInfo exposes the frontend origin, not the API's, and a request's Host header cannot be trusted for a URL that will sit in a recipient's mailbox for months. Empty by default. While it is empty AND \"Require one-click unsubscribe\" below is on — both are the defaults — no marketing sender profile can be saved and no marketing message is sent; turning that requirement off instead sends marketing with no unsubscribe header."},
+		{Key: services.UnsubscribePageURLField, Label: "Hosted unsubscribe page URL", Group: "delivery", Type: module.FieldString, EnvVar: "NOTIFICATION_UNSUBSCRIBE_PAGE_URL",
+			Description: "Optional. The public API base URL above is for the mail client's own one-click button — there is no browser involved, so it is never a page a person can look at. Set this to a hosted page's own https origin (e.g. https://unsubscribe.example.com) to give the footer link in every templated email's footer somewhere a human actually clicks: a sentence explaining what is about to happen, and a button pressed deliberately. This repository does not build that page — a deployment that sets this must provide one, and it must (1) read the single-use token from the URL FRAGMENT, never the query string, so it never reaches the page's access logs, a proxy in front of it, or a Referer header it might leak onward; (2) never call the API automatically on page load — the token is single-use and mail scanners follow links the moment a message arrives; and (3) POST to /v1/notifications/unsubscribe only when the visitor presses a button. Empty by default, in which case the footer link stays the direct API GET link it has always been. A value that is not a bare https origin (no path, query string, or fragment) is treated the same as empty — a clean fallback rather than a broken link — and never blocks a send: this footer renders on transactional templates too."},
+		{Key: requireOneClickKey, Label: "Require one-click unsubscribe", Group: "delivery", Type: module.FieldBool, Default: "true", EnvVar: "NOTIFICATION_REQUIRE_ONE_CLICK_UNSUBSCRIBE",
+			Description: "On by default. While it is on, a sender profile may be used for marketing only if its provider can add the RFC 8058 one-click unsubscribe headers and the public API base URL above is set — and a marketing message that would leave without them is refused instead of sent. " +
+				"Turning this off does not simply skip a check: marketing email will then be delivered WITHOUT a one-click unsubscribe. Large mailbox providers require one from bulk senders and penalise domains that omit it, and giving recipients an easy way to withdraw consent is a legal requirement for commercial email in several jurisdictions, so turn it off only if you meet that obligation another way."},
 		{Key: "email.from_address", Label: "From address", Group: "sender", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_FROM"},
 		{Key: "email.from_name", Label: "From name", Group: "sender", Type: module.FieldString, Default: "Orkestra", EnvVar: "NOTIFICATION_EMAIL_FROM_NAME"},
 		{Key: "email.reply_to", Label: "Reply-To address", Group: "sender", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_REPLY_TO"},
@@ -164,6 +205,7 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 	tmplRepo := repository.NewTemplateRepository(deps.DB)
 	prefRepo := repository.NewPreferenceRepository(deps.DB)
 	unsubRepo := repository.NewUnsubscribeRepository(deps.DB)
+	optoutRepo := repository.NewMarketingOptoutRepository(deps.DB)
 
 	// Register the notification PII producer with the DSR registry (created in
 	// main.go before InitAll) so the compliance DSR pipeline exports / erases a
@@ -174,7 +216,39 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 
 	tmplService := services.NewTemplateService(tmplRepo, deps.Logger)
 	prefService := services.NewPreferenceService(prefRepo)
-	unsubService := services.NewUnsubscribeService(unsubRepo)
+
+	// The sink lives on the notification service, which takes the unsubscribe
+	// service as a constructor argument — so the reference is resolved at call
+	// time rather than at wiring time. Consume only ever runs from an HTTP
+	// route and the reconciler only from its ticker, both long after Init
+	// returned and m.svc was assigned; the guard is there so an unfinished
+	// boot would leave sinkPending up for the reconciler instead of panicking.
+	// One firer serves both paths, so they share the nil-sink and panic
+	// guards inside FireMarketingUnsubscribe.
+	fireSink := services.MarketingUnsubscribeFirer(func(ctx context.Context, address, category, refContext string) error {
+		if m.svc == nil {
+			return errors.New("notification: service not initialised")
+		}
+		return m.svc.FireMarketingUnsubscribe(ctx, address, category, refContext)
+	})
+
+	unsubService := services.NewUnsubscribeService(unsubRepo,
+		services.WithOptouts(optoutRepo),
+		services.WithPreferences(prefService),
+		services.WithUnsubscribeLogger(deps.Logger),
+		services.WithUnsubscribeSink(fireSink),
+	)
+
+	// The reconciler replays what a live consume could not finish: the
+	// preference row and the sink call, marked on the token by the claim.
+	// Started in Start() and stopped in Stop() so a runtime disable takes the
+	// ticker down with the module.
+	m.reconciler = services.NewOptoutReconciler(services.OptoutReconcilerDeps{
+		Tokens: unsubRepo,
+		Prefs:  prefService,
+		Sink:   fireSink,
+		Logger: deps.Logger,
+	})
 
 	// One document read per send: values and secrets of the active
 	// environment come from the same snapshot (D4), and admin UI changes
@@ -204,6 +278,18 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 		appName = "Orkestra"
 	}
 	supportEmail := deps.GetConfig("notification", "app.support_email")
+	// The one-click requirement, the base URL the header is built on, and
+	// the optional hosted unsubscribe page URL the footer link is built on
+	// are NOT captured here. All three are read per send through
+	// m.livePolicy (services.OneClickPolicy), because this module declares
+	// HotReloadConfig() == true: a config write leaves no restart-required
+	// flag, and this admin surface has no per-field way to say that one
+	// field in the "delivery" group is the exception. An operator who
+	// switches require_one_click_unsubscribe ON must see marketing start
+	// being refused immediately; an operator who sets the page URL must see
+	// the very next templated send's footer point at it — neither after the
+	// next restart.
+	m.configService = deps.ConfigService
 
 	// Template lookup is exact on (templateID, locale) with no fallback, so a
 	// default naming a locale without seeded templates fails every send that
@@ -223,12 +309,14 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 		m.drivers,
 		deps.Logger,
 		services.Options{
-			AppName:       appName,
-			SupportEmail:  supportEmail,
-			URLBuilder:    urlBuilder,
-			DefaultLocale: defaultLocale,
+			AppName:        appName,
+			SupportEmail:   supportEmail,
+			URLBuilder:     urlBuilder,
+			DefaultLocale:  defaultLocale,
+			OneClickSource: m.livePolicy,
 		},
 	)
+	m.svc.SetOptouts(optoutRepo)
 
 	m.handler = handlers.NewNotificationHandler(m.svc)
 
@@ -239,10 +327,22 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 }
 
 func (m *NotificationModule) Start(ctx context.Context) error {
+	if m.reconciler != nil {
+		// The pending flags are only worth writing if something replays them.
+		m.reconciler.Start(ctx)
+	}
 	if m.svc == nil {
 		return nil
 	}
 	return m.svc.TemplateService().SeedDefaults(ctx)
+}
+
+// Stop halts the reconciler ticker on module disable / host shutdown.
+func (m *NotificationModule) Stop(_ context.Context) error {
+	if m.reconciler != nil {
+		m.reconciler.Stop()
+	}
+	return nil
 }
 
 func (m *NotificationModule) RegisterRoutes(ri *module.RouteInfo) {

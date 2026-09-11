@@ -107,8 +107,6 @@ internal/core/notification/repository/template_repository.go:110:CountDocuments
 internal/core/notification/repository/template_repository.go:41:FindOne
 internal/core/notification/repository/template_repository.go:53:Find
 internal/core/notification/repository/template_repository.go:78:UpdateOne
-internal/core/notification/repository/unsubscribe_repository.go:42:FindOne
-internal/core/notification/repository/unsubscribe_repository.go:54:UpdateOne
 internal/core/tenant/repository/entitlements.go:108:UpdateOne
 internal/core/tenant/repository/entitlements.go:44:FindOne
 internal/core/tenant/repository/entitlements.go:68:CountDocuments

@@ -1,10 +1,12 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -144,17 +146,18 @@ func (f *fakePrefService) List(_ context.Context, _ string) ([]*models.Preferenc
 func (f *fakePrefService) Set(_ context.Context, _, _, _ string, _ bool) error { return nil }
 
 type fakeUnsubService struct {
-	token     string
-	tokenErr  error
-	issueN    int
-	lastUser  string
-	lastAddr  string
-	lastCateg string
+	token       string
+	tokenErr    error
+	issueN      int
+	lastUser    string
+	lastAddr    string
+	lastCateg   string
+	lastContext string // the opaque producer-context 5th argument to IssueToken
 }
 
-func (f *fakeUnsubService) IssueToken(_ context.Context, user, addr, category, _ string) (string, error) {
+func (f *fakeUnsubService) IssueToken(_ context.Context, user, addr, category, ctxArg string) (string, error) {
 	f.issueN++
-	f.lastUser, f.lastAddr, f.lastCateg = user, addr, category
+	f.lastUser, f.lastAddr, f.lastCateg, f.lastContext = user, addr, category, ctxArg
 	if f.tokenErr != nil {
 		return "", f.tokenErr
 	}
@@ -164,11 +167,7 @@ func (f *fakeUnsubService) IssueToken(_ context.Context, user, addr, category, _
 	return f.token, nil
 }
 
-func (f *fakeUnsubService) ConsumeToken(_ context.Context, _ string) (*models.UnsubscribeTokenDoc, error) {
-	return nil, nil
-}
-
-func (f *fakeUnsubService) MarkUsed(_ context.Context, _ string) error { return nil }
+func (f *fakeUnsubService) Consume(_ context.Context, _ string) error { return nil }
 
 type fakeDriver struct {
 	name     string
@@ -176,11 +175,16 @@ type fakeDriver struct {
 	sendErr  error
 	sent     []EmailMessage
 	profiles []SenderProfile // the profile handed to each Send
+	sends    int             // count-only convenience alongside sent, for tests that just assert "did it reach the driver"
 }
 
 func (f *fakeDriver) Name() string                   { return f.name }
 func (f *fakeDriver) Requires() []ProfileRequirement { return f.requires }
+func (f *fakeDriver) Capabilities() DriverCapabilities {
+	return DriverCapabilities{ListUnsubscribeHeaders: true}
+}
 func (f *fakeDriver) Send(_ context.Context, p SenderProfile, msg EmailMessage) error {
+	f.sends++
 	f.sent = append(f.sent, msg)
 	f.profiles = append(f.profiles, p)
 	return f.sendErr
@@ -909,11 +913,15 @@ func TestNotificationService_Dispatch_StampsSenderSlug(t *testing.T) {
 // seamSvc builds a service with one noop driver and a fixed default profile —
 // the shape these extension-seam tests need now that ADR-0019 replaced the
 // single EmailSender with a resolver plus a driver registry.
+// The marketing sends below are about the tracking rewriter, so the service
+// is given a base URL the one-click unsubscribe header can be built on —
+// satisfying the requirement rather than waiving it, which would make these
+// tests silently stop covering the configured path.
 func seamSvc() (*NotificationService, *fakeDriver) {
 	d := &fakeDriver{name: "noop"}
 	r := &fakeResolver{profile: SenderProfile{Slug: "default", Provider: "noop", Categories: []string{"*"}}}
 	return NewNotificationService(newFakeNotifRepo(), &fakeTemplateService{}, &fakePrefService{can: true},
-		&fakeUnsubService{}, r, NewDriverRegistry(d), discardLogger(), Options{}), d
+		&fakeUnsubService{}, r, NewDriverRegistry(d), discardLogger(), Options{PublicAPIBaseURL: "https://api.example"}), d
 }
 
 // lastBodyHTML returns the BodyHTML of the last email handed to the driver,
@@ -934,6 +942,7 @@ func (f rewriterFunc) RewriteOutboundEmail(ctx context.Context, in iface.Outboun
 
 func TestDispatchEmailAppliesRewriterWhenRefSet(t *testing.T) {
 	svc, sender := seamSvc()
+	svc.SetOptouts(&fakeOptouts{}) // neutral: nobody has opted out — this test is about the rewriter, not opt-outs
 	svc.SetEmailTrackingRewriter(rewriterFunc(func(_ context.Context, in iface.OutboundEmail) string {
 		if in.ContactRef == "" {
 			return in.BodyHTML
@@ -956,12 +965,14 @@ func TestDispatchEmailAppliesRewriterWhenRefSet(t *testing.T) {
 func TestDispatchEmailUnchangedWhenNoRewriterOrNoRef(t *testing.T) {
 	// no rewriter set
 	svc, sender := seamSvc()
+	svc.SetOptouts(&fakeOptouts{}) // neutral: nobody has opted out — this test is about the rewriter, not opt-outs
 	_, _ = svc.Send(context.Background(), iface.NotificationRequest{Type: "marketing", Recipients: []iface.Recipient{{Address: "a@b.c"}}, BodyHTML: "<p>hi</p>", TrackingContactRef: "ref-1"})
 	if got := sender.lastBodyHTML(); got != "<p>hi</p>" {
 		t.Fatalf("no rewriter → unchanged; got %q", got)
 	}
 	// rewriter set but empty ref
 	svc2, sender2 := seamSvc()
+	svc2.SetOptouts(&fakeOptouts{}) // neutral: nobody has opted out — this test is about the rewriter, not opt-outs
 	svc2.SetEmailTrackingRewriter(rewriterFunc(func(_ context.Context, in iface.OutboundEmail) string { return "MUTATED" }))
 	_, _ = svc2.Send(context.Background(), iface.NotificationRequest{Type: "marketing", Recipients: []iface.Recipient{{Address: "a@b.c"}}, BodyHTML: "<p>hi</p>"})
 	if got := sender2.lastBodyHTML(); got != "<p>hi</p>" {
@@ -971,6 +982,7 @@ func TestDispatchEmailUnchangedWhenNoRewriterOrNoRef(t *testing.T) {
 
 func TestDispatchEmailRewriterPanicIsSafe(t *testing.T) {
 	svc, sender := seamSvc()
+	svc.SetOptouts(&fakeOptouts{}) // neutral: nobody has opted out — this test is about the rewriter, not opt-outs
 	svc.SetEmailTrackingRewriter(rewriterFunc(func(_ context.Context, _ iface.OutboundEmail) string { panic("boom") }))
 	if _, err := svc.Send(context.Background(), iface.NotificationRequest{Type: "marketing", Recipients: []iface.Recipient{{Address: "a@b.c"}}, BodyHTML: "<p>hi</p>", TrackingContactRef: "ref-1"}); err != nil {
 		t.Fatalf("panic must not fail the send: %v", err)
@@ -987,17 +999,21 @@ func TestDispatchEmailRewriterPanicIsSafe(t *testing.T) {
 type capturingSink struct {
 	addr, cat, refCtx string
 	n                 int
+	err               error
 }
 
-func (c *capturingSink) OnMarketingUnsubscribe(_ context.Context, a, cat, cx string) {
+func (c *capturingSink) OnMarketingUnsubscribe(_ context.Context, a, cat, cx string) error {
 	c.addr, c.cat, c.refCtx, c.n = a, cat, cx, c.n+1
+	return c.err
 }
 
 func TestFireMarketingUnsubscribe_SinkReceivesArgs(t *testing.T) {
 	svc, _ := seamSvc()
 	sink := &capturingSink{}
 	svc.SetMarketingUnsubscribeSink(sink)
-	svc.FireMarketingUnsubscribe(context.Background(), "x@y.com", "marketing", "ref-9")
+	if err := svc.FireMarketingUnsubscribe(context.Background(), "x@y.com", "marketing", "ref-9"); err != nil {
+		t.Fatalf("FireMarketingUnsubscribe: %v", err)
+	}
 	if sink.n != 1 {
 		t.Fatalf("sink called %d times, want 1", sink.n)
 	}
@@ -1014,20 +1030,76 @@ func TestFireMarketingUnsubscribe_SinkReceivesArgs(t *testing.T) {
 
 func TestFireMarketingUnsubscribe_NilSink_IsNoOp(t *testing.T) {
 	svc, _ := seamSvc()
-	// no sink set — must not panic
-	svc.FireMarketingUnsubscribe(context.Background(), "x@y.com", "marketing", "ref-9")
+	// No sink set. That is not a failure: the base ships no sink, and
+	// "nothing to mirror" must not read as "the mirror failed", or the
+	// caller would keep an opt-out marked pending forever.
+	if err := svc.FireMarketingUnsubscribe(context.Background(), "x@y.com", "marketing", "ref-9"); err != nil {
+		t.Fatalf("a nil sink is not a failure, got %v", err)
+	}
 }
 
-func TestFireMarketingUnsubscribe_PanicSink_IsRecovered(t *testing.T) {
+func TestFireMarketingUnsubscribe_SinkErrorReachesTheCaller(t *testing.T) {
+	// The whole point of the error return: the caller decides whether the
+	// opt-out still has to be replayed downstream, so a failure it never
+	// hears about is the one bug this signature exists to prevent.
+	svc, _ := seamSvc()
+	boom := errors.New("sink down")
+	svc.SetMarketingUnsubscribeSink(&capturingSink{err: boom})
+	err := svc.FireMarketingUnsubscribe(context.Background(), "x@y.com", "marketing", "ref-9")
+	if !errors.Is(err, boom) {
+		t.Fatalf("want the sink's error, got %v", err)
+	}
+}
+
+func TestFireMarketingUnsubscribe_PanicSink_BecomesAnError(t *testing.T) {
+	// Recovered, so one bad sink cannot take the request down — but
+	// reported, because a swallowed panic is an unmirrored opt-out nobody
+	// ever retries.
 	svc, _ := seamSvc()
 	svc.SetMarketingUnsubscribeSink(panicSink{})
-	// must not propagate the panic
-	svc.FireMarketingUnsubscribe(context.Background(), "x@y.com", "marketing", "ref-9")
+	if err := svc.FireMarketingUnsubscribe(context.Background(), "x@y.com", "marketing", "ref-9"); err == nil {
+		t.Fatal("a panicking sink must surface as an error, not as success")
+	}
 }
 
 type panicSink struct{}
 
-func (panicSink) OnMarketingUnsubscribe(_ context.Context, _, _, _ string) { panic("sink boom") }
+func (panicSink) OnMarketingUnsubscribe(_ context.Context, _, _, _ string) error { panic("sink boom") }
+
+// addressPanicSink panics with the address core just handed it — the shape a
+// real sink's crash takes when it interpolates what it was working on.
+type addressPanicSink struct{}
+
+func (addressPanicSink) OnMarketingUnsubscribe(_ context.Context, address, _, _ string) error {
+	panic("contact sync exploded for " + address)
+}
+
+func TestFireMarketingUnsubscribe_PanicValueIsScrubbedOfTheAddress(t *testing.T) {
+	// The recovered value goes to two places — a log line and the error the
+	// caller then logs in turn — so a panic carrying the address would leak
+	// it twice over. "Never log a full address" has no best-effort tier.
+	var buf bytes.Buffer
+	svc := NewNotificationService(newFakeNotifRepo(), &fakeTemplateService{}, &fakePrefService{can: true},
+		&fakeUnsubService{},
+		&fakeResolver{profile: SenderProfile{Slug: "default", Provider: "noop", Categories: []string{"*"}}},
+		NewDriverRegistry(&fakeDriver{name: "noop"}),
+		slog.New(slog.NewTextHandler(&buf, nil)), Options{})
+	svc.SetMarketingUnsubscribeSink(addressPanicSink{})
+
+	err := svc.FireMarketingUnsubscribe(context.Background(), "ada@example.test", "marketing", "ref-9")
+	if err == nil {
+		t.Fatal("a panicking sink must surface as an error")
+	}
+	if strings.Contains(err.Error(), "ada@example.test") {
+		t.Fatalf("the address must not ride out in the error: %v", err)
+	}
+	if strings.Contains(buf.String(), "ada@example.test") {
+		t.Fatalf("the address must not reach the log: %s", buf.String())
+	}
+	if !strings.Contains(err.Error(), "[address]") {
+		t.Fatalf("the panic value should still be reported, scrubbed: %v", err)
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Template read/write capability tests
@@ -1140,6 +1212,7 @@ func TestNotificationService_Dispatch_ExplicitSender_EligibleSlugSends(t *testin
 
 func TestNotificationService_Dispatch_ExplicitSender_IneligibleType_ErrorFreeOfSecrets(t *testing.T) {
 	k := newKit(Options{})
+	k.svc.SetOptouts(&fakeOptouts{}) // neutral: nobody has opted out — this test is about sender eligibility, not opt-outs
 	k.resolver.profile = fullyPopulatedProfile("camp", []string{models.TypeTransactional})
 	res, err := k.svc.Send(context.Background(), iface.NotificationRequest{
 		Type:       models.TypeMarketing, // profile only allows transactional
@@ -1313,8 +1386,10 @@ func TestNotificationService_ListEligibleSenders_FiltersByAllowedTypeAndReady(t 
 		{Slug: "txn-only", Label: "Txn", Provider: "noop", AllowedTypes: []string{models.TypeTransactional}},
 		{Slug: "draft", Label: "Draft", Provider: "noop"}, // no AllowedTypes at all
 	}}
+	// A base URL the header can be built on: Ready is then about the driver
+	// and the profile, which is what this test is for.
 	svc := NewNotificationService(newFakeNotifRepo(), &fakeTemplateService{}, &fakePrefService{can: true}, &fakeUnsubService{},
-		resolver, NewDriverRegistry(noop, broken), discardLogger(), Options{})
+		resolver, NewDriverRegistry(noop, broken), discardLogger(), Options{PublicAPIBaseURL: "https://api.example"})
 
 	got, err := svc.ListEligibleSenders(context.Background(), models.TypeMarketing)
 	if err != nil {
@@ -1382,7 +1457,7 @@ func TestNotificationService_ListEligibleSenders_ConfigUnavailable_NeverEmptyLis
 // ---- PreflightDelivery: explicit arm ---------------------------------------
 
 func TestNotificationService_PreflightDelivery_ExplicitSender_Eligible_ReturnsNil(t *testing.T) {
-	k := newKit(Options{})
+	k := newKit(Options{PublicAPIBaseURL: "https://api.example"}) // marketing preflight also needs one-click to be satisfiable
 	k.resolver.profile = SenderProfile{Slug: "camp", Provider: "noop", AllowedTypes: []string{models.TypeMarketing}}
 	err := k.svc.PreflightDelivery(context.Background(), "camp", "marketing", models.TypeMarketing)
 	if err != nil {
@@ -1447,7 +1522,7 @@ func TestNotificationService_PreflightDelivery_ExplicitSender_Unavailable(t *tes
 // ---- PreflightDelivery: default arm (category routing) --------------------
 
 func TestNotificationService_PreflightDelivery_DefaultArm_Routed_ReturnsNil(t *testing.T) {
-	k := newKit(Options{})
+	k := newKit(Options{PublicAPIBaseURL: "https://api.example"}) // marketing preflight also needs one-click to be satisfiable
 	k.resolver.profile = SenderProfile{Slug: "default", Provider: "noop", Categories: []string{"*"}}
 	err := k.svc.PreflightDelivery(context.Background(), "", "marketing", models.TypeMarketing)
 	if err != nil {

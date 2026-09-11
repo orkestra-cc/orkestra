@@ -41,13 +41,18 @@ Declared in `module.go::Collections()` and auto-created on boot:
 | `notification_preferences`          | compound `userUuid+category+channel` unique       | — |
 | `notification_suppressions`         | `address` unique                                  | — |
 | `notification_unsubscribe_tokens`   | `uuid` unique, `tokenHash` unique                 | 30 days on `expiresAt` |
+| `operator_unsubscribe_tokens`       | same shape as above                               | 30 days on `expiresAt` |
+| `client_unsubscribe_tokens`         | same shape as above                               | 30 days on `expiresAt` |
+| `notification_marketing_optouts`    | `address` unique                                  | **none — an opt-out never expires** |
+
+`operator_unsubscribe_tokens` and `client_unsubscribe_tokens` are ADR-0003 PR-B placeholders for a future tier-split cutover — declared and indexed so the migration has nothing to create later, but nothing in this module (or this branch's one-click work) reads or writes either one today; `notification_unsubscribe_tokens` stays the sole authoritative token collection until that cutover.
 
 ## Lifecycle
 
 - **Init**: constructs repositories, builds the `SnapshotLoader` over `ConfigService.GetConfig` (**one** document read per send, so values and secrets always come from the same active environment — see [ADR-0019](../../../../docs/adr/0019-notification-multi-sender.md) D4 — while admin UI changes still propagate without a restart), registers the core drivers (`noop`, `smtp`) and the resolver, wires the `NotificationService` and registers it as `ServiceNotificationSender`.
 - **Start**: calls `TemplateService.SeedDefaults(ctx)` which inserts every `auth.*` system template (`verify_email`, `reset_password`, `suspicious_login`, `new_device_login`, `admin_suspicious_login`, `admin_invite`) into the DB if they are missing. Source strings live in `services/default_templates.go` as Go constants.
 - **Stop / HealthCheck**: inherit base no-op from `BaseModule`.
-- **GDPR/DSR** (`services/pii_producer.go`): registers an `iface.PIIProducer` (subject `"notification"`) on `ServicePIIProducerRegistry` at Init. Exports the subject's delivered-message history (`notification_messages`) + per-category delivery preferences (`notification_preferences`); purge deletes both under **either** erase mode. Suppressions are keyed by email address (not `userUUID`), so they ride the auth/email erasure path rather than this producer. Consumed by the [compliance module](../compliance/CLAUDE.md)'s DSR pipeline (ADR-0009).
+- **GDPR/DSR** (`services/pii_producer.go`): registers an `iface.PIIProducer` (subject `"notification"`) on `ServicePIIProducerRegistry` at Init. Exports the subject's delivered-message history (`notification_messages`) + per-category delivery preferences (`notification_preferences`); purge deletes both under **either** erase mode. Suppressions are keyed by email address (not `userUUID`), so they ride the auth/email erasure path rather than this producer. Consumed by the [compliance module](../compliance/CLAUDE.md)'s DSR pipeline (ADR-0009). **`notification_marketing_optouts` is address-keyed the same way, and nothing in this codebase erases it on any DSR request, under either erase mode.** This is a position, not an oversight: the opt-out is retained past erasure **by design**, the same reasoning that already applies to a suppression row — deleting the fact that an address asked to stop receiving marketing would let a future marketing send to that same address go out again, exactly the outcome the opt-out exists to prevent. `pii_producer.go`'s own doc comment now names both — suppressions and the marketing opt-out — as the module's address-keyed exclusions from this producer, with the same "retained by design" reasoning stated briefly there and pointing back at this section for the fuller argument.
 
 ## Settings (loaded lazily per send)
 
@@ -67,13 +72,20 @@ All settings live in the `module_configs` collection under the `notification` mo
 | `email.smtp.username`         | `SMTP_USERNAME`                | —         |
 | `email.smtp.password`         | `SMTP_PASSWORD` *(secret)*     | —         |
 | `email.smtp.tls_mode`         | `SMTP_TLS_MODE`                | `starttls` (options: `starttls`, `tls`, `none`) |
+| `public_api_base_url`         | `NOTIFICATION_PUBLIC_API_BASE_URL` | — *(bare https origin; marketing refused without it — see below)* |
+| `unsubscribe_page_url`        | `NOTIFICATION_UNSUBSCRIBE_PAGE_URL` | — *(optional; falls back cleanly to the API link — see below)* |
+| `require_one_click_unsubscribe` | `NOTIFICATION_REQUIRE_ONE_CLICK_UNSUBSCRIBE` | `true` |
 | `app.name`                    | `APP_NAME`                     | `Orkestra` |
 | `app.support_email`           | `SUPPORT_EMAIL`                | —         |
 | `app.default_locale`          | `NOTIFICATION_DEFAULT_LOCALE`  | `en` (options: `en`, `it`) |
 
 `app.default_locale` is the fallback for callers that pass no `Locale` — it must name a locale that has seeded templates, because `Get(templateID, locale)` has no fallback and a miss only logs. Callers that resolve a locale per recipient and pass it explicitly are unaffected by it.
 
-`/admin/modules/notification` renders as a three-group rail declared via `ConfigGroups()`: **Delivery** (`email.provider` + the five `email.smtp.*` fields), **Sender** (`email.from_address`, `email.from_name`, `email.reply_to`), **Branding & templates** (`app.name`, `app.support_email`, `app.default_locale`). `email.provider`, `email.smtp.tls_mode` and `app.default_locale` are `FieldEnum` — selects, not free text. The five `email.smtp.*` fields carry `DependsOn: email.provider in [smtp]`, so a default `noop` install shows **one** visible Delivery field (`Email provider`) until it's switched to `smtp`, which reveals the SMTP connection settings.
+`public_api_base_url`, `unsubscribe_page_url` and `require_one_click_unsubscribe` are the exception to "loaded lazily per send": they are not captured into `NotificationService.Options` at `Init` at all. `module.go` wires `Options.OneClickSource` to `m.livePolicy`, which re-reads `OneClickPolicy` (`services/sender_validation.go`) fresh on every marketing decision instead of a value snapshotted once — this module declares `HotReloadConfig() == true`, and an operator who flips the requirement on, or edits either URL, must see the very next marketing send honor it, never the next restart. See "Marketing opt-out and RFC 8058 one-click unsubscribe" below for what each field does.
+
+**That read is not cached.** `ModuleConfigService.GetConfig` goes to MongoDB on every call — `pkg/sdk/module/config_service.go` caches only the module's *enabled flag* in Redis (30s TTL), never the config document. So `livePolicy` costs one Mongo read per marketing decision, plus one per TEMPLATED send of any type (`UnsubscribePageURL` rides the same struct and the footer link renders on transactional templates too). A non-templated transactional `Send` pays nothing. This is the same cost model the sender snapshot already has, and it is the price of `HotReloadConfig() == true`: an operator who flips the requirement on must be honored by the very next send, not the next restart.
+
+`/admin/modules/notification` renders as a **four**-group rail declared via `ConfigGroups()` (`module.go`): **Delivery** (`email.provider`, the five `email.smtp.*` fields, and the three RFC 8058 one-click fields — `public_api_base_url`, `unsubscribe_page_url`, `require_one_click_unsubscribe`, see "Marketing opt-out and RFC 8058 one-click unsubscribe" below), **Sender profiles** (`email.senders`, the record list — see "Sender profiles and drivers" below), **Sender** (`email.from_address`, `email.from_name`, `email.reply_to`), **Branding & templates** (`app.name`, `app.support_email`, `app.default_locale`). `email.provider`, `email.smtp.tls_mode` and `app.default_locale` are `FieldEnum` — selects, not free text. The five `email.smtp.*` fields carry `DependsOn: email.provider in [smtp]`, so a default `noop` install shows **one** visible Delivery field (`Email provider`) until it's switched to `smtp`, which reveals the SMTP connection settings.
 
 The `noop` provider logs rendered mail to the backend stdout instead of dialing an SMTP server — use it in dev and CI. The module reports `IsConfigured() = true` for `noop` so consumers can still make send calls without failing.
 
@@ -265,6 +277,7 @@ Registered in three groups with different middleware:
 ### Public (no auth)
 
 - `GET /v1/notifications/unsubscribe?token=<raw>` — consumes an unsubscribe token and opts the user out of the bound category (or `marketing` if the token has no category). Always returns a generic success message.
+- `POST /v1/notifications/unsubscribe` — RFC 8058 §3.2 one-click: the body a mail provider POSTs (`List-Unsubscribe=One-Click`, any content type) is captured via a Huma `RawBody []byte` field and never parsed — only `?token=` (or, failing that, a `{"token":...}` JSON body) matters. Same handler code path as the GET (`consumeUnsubscribe` in `handlers/notification_handler.go`), so the same generic answer. `RegisterPublicRoutes` explicitly sets `MaxBodyBytes: 4096` and `BodyReadTimeout: 5s` on this operation and turns `RequestBody.Required` back off after registering it — declaring `RawBody` opts a route out of Huma's own per-operation defaults (`ensureMaxBodyBytes`/`ensureBodyReadTimeout` only run on the typed `Body` branch) and forces a non-empty body by default, neither of which is what a public, unauthenticated, RFC-governed endpoint should inherit silently.
 
 ### User (`guest`+ role)
 
@@ -274,7 +287,7 @@ Registered in three groups with different middleware:
 ### Admin (`administrator` role)
 
 - `GET /v1/notifications` — paginated delivery log; filters: `category`, `status`, `sender` (profile slug). Every row carries `provider` and `senderSlug`, so *which* profile sent or refused a message is answerable per row.
-- `POST /v1/notifications/test` — `{to, subject?, bodyText?, sender?}`; `sender` names a profile slug (default: the `*` profile). Bypasses preferences, idempotency and the delivery log. 404 `notification.sender_not_found`, 422 `notification.sender_incomplete` (driver unknown or a required field — secret included — missing), 502 `notification.send_failed` with the bounded diagnostic. This is the only way to prove a profile whose gap is a secret.
+- `POST /v1/notifications/test` — `{to, subject?, bodyText?, sender?}`; `sender` names a profile slug (default: the `*` profile). Bypasses preferences, idempotency, the durable marketing opt-out and the delivery log — it calls the driver directly, so an address on `notification_marketing_optouts` still receives a test send. 404 `notification.sender_not_found`, 422 `notification.sender_incomplete` (driver unknown or a required field — secret included — missing), 502 `notification.send_failed` with the bounded diagnostic. This is the only way to prove a profile whose gap is a secret.
 - `GET /v1/notifications/templates` — list all templates
 - `GET /v1/notifications/templates/{templateId}?locale=en` — fetch a single template
 - `PUT /v1/notifications/templates/{templateId}` — override a template (sets `isSystem=false`)
@@ -315,6 +328,241 @@ The typical implementation injects an open-pixel and rewrites click links for
 consenting recipients of marketing mail. The base ships **no** rewriter; the seam
 is inert until one is registered.
 
+## Marketing opt-out and RFC 8058 one-click unsubscribe
+
+`notification_marketing_optouts` (`models.MarketingOptoutDoc`, `repository/optout_repository.go`) is **not** the suppression list. `notification_suppressions` blocks *every* notification to an address, transactional included, and is populated manually until a bounce/complaint webhook exists (see "What's NOT in this module"). `notification_preferences` is per-user, per-category, and consulted for marketing only. `notification_marketing_optouts` sits between them: address-keyed like suppression, but it blocks **only marketing** — the RFC 8058 fact that "this address does not want commercial mail," not "this recipient does not want anything from us." It carries no TTL: an opt-out does not expire, and nothing in this module removes one.
+
+**The consult is fail-closed, deliberately.** `dispatchEmail` calls `s.optouts.IsOptedOut(address, category)` only when `Type == models.TypeMarketing` — a transactional send never pays the lookup and can never be blocked by it. Within that branch, an unwired seam (`s.optouts == nil`, i.e. before `SetOptouts` ran) and a lookup error both refuse the send (`ErrOptoutLookupUnavailable`), exactly like a positive opt-out result would, rather than defaulting to "send." A nil repository reads as "ignore consent," never as "no opt-outs exist" — an email withheld on a false positive costs far less than one delivered against a real opt-out.
+
+**RFC 8058 headers are built at one chokepoint.** `dispatchEmail` is the only place that constructs `List-Unsubscribe` and `List-Unsubscribe-Post`, downstream of both `Send` and `SendTemplated` — a header built in one entry point and not the other would be a marketing path that silently ships with no unsubscribe. Both headers always point at this API's own `POST /v1/notifications/unsubscribe` (built from `public_api_base_url`), **never** at `unsubscribe_page_url` — the one-click button is a mail client's own automatic action, with no browser and no human in the loop, so there is nothing on a hosted page for it to reach. `unsubscribe_page_url` is exclusively for `{{.UnsubscribeURL}}`, the link a person clicks in a template's footer (`unsubscribeURL` in `notification_service.go`), and rides the raw token in the URL **fragment** (`<page>/u#<token>`) rather than the query string, so it never reaches the page's access logs, a proxy, or a `Referer` header. A page a fork hosts there must not call the API on load — the token is single-use and mail scanners follow links the moment a message arrives — and must POST to `/v1/notifications/unsubscribe` only when a visitor presses a button; this repository does not build that page (see the docs-site operator guide for the contract a fork's page must honor).
+
+**A link prefetch now costs a permanent opt-out, and nothing in this module can undo one.** The default footer link — with `unsubscribe_page_url` unset — is the API's own `GET /v1/notifications/unsubscribe?token=…`, and that `GET` runs the *same* `Consume` sequence as the RFC 8058 `POST` (the design requires it: a person who clicks the footer link must actually be unsubscribed). A corporate link scanner, a mail-client prefetch, or an anti-malware proxy that follows links the moment a message arrives therefore writes a `notification_marketing_optouts` row for that address — with no human involved. That row has no TTL, nothing in this module removes it, and DSR erasure deliberately preserves it (see the GDPR/DSR note above). Before this work the same prefetch cost a per-user `notification_preferences` row an operator could flip back; now it costs a durable, address-level block on all marketing with **no operator path to reverse it** — not through the admin API, not through the console.
+
+This is a known, accepted consequence of the specified `GET` behaviour, not a defect to be fixed by weakening it, and it is written down here so an operator does not first learn about it from a customer asking why they stopped receiving mail. The natural follow-up is an **admin endpoint that removes a marketing opt-out row** (administrator-only, audited, address-keyed) so a false positive can be undone deliberately; the repository already exposes the collection, so it is a handler and a permission rather than a redesign. Until that exists, the only remedies are operational: prefer `unsubscribe_page_url` (a hosted page that does NOT call the API on load — the token is single-use and scanners follow links immediately — and POSTs only on a real button press), and treat a sudden cluster of opt-outs from one recipient domain as a scanner, not as churn.
+
+**A driver's capability is a promise, not an acceptance.** `EmailDriver.Capabilities().ListUnsubscribeHeaders` answers whether the driver *guarantees* the two headers reach the wire, not whether it merely accepts them. `noop` and `smtp` report `true` (`smtp` writes the MIME message itself, so it controls every header it emits). `mailup` reports `false`: it converts `EmailMessage.Headers` into its API payload's `ExtendedHeaders` field, but the vendor's own docs say only approved headers are honored, so accepting the field is not proof of delivering it — and RFC 8058 additionally requires the headers be covered by the DKIM signature, which no automated test in this repository can prove (see the docs-site DKIM release gate). Flipping `mailUpDriver.Capabilities()` to `true` is the outcome of a release-gate test against a real mailbox, never a config field an operator can set.
+
+**The preflight is fail-closed, and on by default.** `require_one_click_unsubscribe` defaults to `true`. While it is on, `ValidateSenderConfig`'s `oneClickAdmissible` (`services/sender_validation.go`) refuses to *save* a profile whose `allowed_types` includes `marketing` unless its driver's capability and a usable `public_api_base_url` together satisfy `OneClickPolicy.gap` — the same gate `dispatchEmail` applies at send time, so the two agree on what "one-click is guaranteed" means. Turning the requirement off does not merely skip a check: marketing then sends **without** an unsubscribe header, a trade an operator takes explicitly.
+
+**Save and dispatch do not judge the same thing, and the asymmetry is deliberate.** The save-time gate can only judge `allowed_types` — the one declaration that says "marketing may be sent through this profile by explicit selection" (ADR-0021). A category *pattern* (`auth.*`, `crm.*`, `*`) carries no type, so no save-time rule can tell which pattern-routed profile a marketing send will land on. `dispatchEmail` judges the **send**, not the profile, so a routing-only profile with an empty `allowed_types` saves cleanly and still has every category-routed marketing message through it refused if the gap check fails at send time. A profile passing validation never implies its marketing sends are admissible — those are answered by different checks at different times, and nothing in this module should be read as saying save and send agree.
+
+**Two known error-mapping gaps this branch did not fix.** `iface.ErrSenderNotConfigured` and `iface.ErrNoSenderForCategory` are unreachable from `Send`/`SendTemplated` — and this is an *absence*, not a race `Send`/`SendTemplated` loses. `trustedSentinels` (`notification_service.go:658-661`) lists the module-local `ErrNoSenderForCategory` and `ErrSenderNotConfigured`, plus four `iface` sentinels (`ErrSenderInvalid`, `ErrSenderNotEligible`, `ErrSenderNotFound`, `ErrSenderUnavailable`) — but `iface.ErrSenderNotConfigured` and `iface.ErrNoSenderForCategory` are simply **not members of that slice, at any position**. `newDispatchError` can only ever set `DispatchError.sentinel` to a value drawn from `trustedSentinels`, so `errors.Is(err, iface.ErrSenderNotConfigured)` or `errors.Is(err, iface.ErrNoSenderForCategory)` can never be true for a `Send`/`SendTemplated` failure, whatever local sentinel the dispatch arm actually produced — there is no local-vs-`iface` ordering to fix, because the `iface` pair was never a candidate.
+
+`PreflightDelivery` reaches the two differently from each other, and not both through a mapper. Its default (category-routing) arm's `Resolve` failure goes through `mapResolveErr`, which *can* return `iface.ErrNoSenderForCategory` — so that one sentinel is reachable, but only from `PreflightDelivery`, never from `Send`/`SendTemplated`. `iface.ErrSenderNotConfigured` is reachable from `PreflightDelivery` too, but not via any mapper: both of its arms hardcode it as a literal argument the moment `usableDriver` fails — `preflightFail(profile, iface.ErrSenderNotConfigured)` at `notification_service.go:933-934` (default arm) and `:950-951` (explicit arm). `mapResolveErr` and `mapBySlugErr` never produce `iface.ErrSenderNotConfigured` themselves.
+
+This is pre-existing behavior this branch inherited and deliberately left alone to keep this branch's scope to the one-click work, not a general sentinel-mapping cleanup.
+
+A follow-up that wants `Send`/`SendTemplated` to honor these two `iface` sentinels must clear a precondition `newDispatchError`'s own loop imposes: `trustedSentinels` has to gain `iface.ErrSenderNotConfigured` and `iface.ErrNoSenderForCategory` as members, because the loop can only ever select a value it finds **inside that slice** by `errors.Is`. Mapping the raw error before it reaches `failSend`, without also adding the mapped-to value to `trustedSentinels`, leaves the loop unable to match it — the error falls through to the generic `ErrSendFailed` fallback instead, which is the outcome this paragraph is warning about, not a fix for it.
+
+That addition is necessary but does not by itself decide how the change should behave. `iface.ErrSenderNotConfigured`/`iface.ErrNoSenderForCategory` are plain `errors.New` values (`pkg/sdk/iface/interfaces.go`) with no `Unwrap` link to their local namesakes `ErrSenderNotConfigured`/`ErrNoSenderForCategory`, so `errors.Is` treats the two families as unrelated: whichever single value the dispatch arm hands to `failSend` decides which family matches, never both — unless the error is deliberately built to satisfy `errors.Is` against both, the way `notification_service.go`'s own `ErrOneClickUnsubscribeUnavailable` already wraps `iface.ErrSenderInvalid` via `%w` so both match. A follow-up therefore has an open decision to make, which this document does not make for it: keep the local sentinel matchable on `Send`/`SendTemplated` alongside the new `iface` one (which means the dispatch arm's error must be built to carry both, not merely swapped for the `iface` value), or accept that matching the local sentinel on these two causes, from the dispatch path specifically, is deliberately given up in exchange for the `iface` one. That question is live, not academic: `trustedSentinels` is the same slice `SendTest`'s own error handling shares, and `handlers/notification_handler.go:90` matches the local `ErrNoSenderForCategory`/`ErrSenderNotConfigured` today to choose the admin test-send endpoint's response — a fix confined to `dispatchEmail`'s own error-producing arms (as opposed to also changing how `SendTest` builds its errors) leaves that consumer's behavior unaffected either way, so it does not settle the question above; it only shows the question has a real, currently-working consumer on one side of it.
+
+**`SendTemplated` mints an unsubscribe token on every templated send, unconditionally.** `IssueToken` runs before any type check — including for a transactional template like `auth.mfa_factor_added` that never renders `{{.UnsubscribeURL}}` in its body (see "Templates" above). This predates this branch and is not something it introduced; it means every templated send, marketing or not, writes one `notification_unsubscribe_tokens` row even when nothing will ever read it back.
+
+## Unsubscribe consume sequence
+
+`UnsubscribeService.Consume(ctx, raw)` is the ordered, crash-safe replacement for
+the old read → apply → mark-used → fire sequence. It is deliberately **not** a
+transaction: each step is placed so that a crash right after it leaves a state the
+recipient's next click heals.
+
+1. **Record the durable opt-out** (`notification_marketing_optouts`, idempotent
+   upsert, keyed by the address on the token). Crash here and the opt-out is a
+   fact while the token is still unused, so a second click replays the same
+   upsert. If this write fails, **nothing else runs** — the token is left unspent
+   rather than burned for nothing.
+2. **Claim the token atomically** — `ClaimToken` is a single `FindOneAndUpdate` on
+   `{tokenHash, usedAt: nil, expiresAt > now}` that stamps `usedAt` **and** raises
+   the pending flags for everything below it: `sinkPending` always, `prefPending`
+   when the caller says the token names a user. Two concurrent one-click POSTs
+   therefore produce exactly one consume; the loser gets `(nil, nil)`, which is not
+   an error. A used, expired or unknown token takes the same path — the opt-out is
+   already recorded, so `Consume` returns without error.
+3. **Apply the preference** (`notification_preferences`), only when the token
+   carries a `userUuid`. Success calls `ClearPrefPending`.
+4. **Fire the sink** inline (`FireMarketingUnsubscribe`). Success calls
+   `ClearSinkPending`.
+
+Steps 3 and 4 may fail without failing the request, because the fact that actually
+stops the mail is already durable. The flags go up **at the claim, before the work
+runs** — not on failure — because a process that dies between the claim and the
+write has no failure to react to and no later moment at which it could mark
+anything; only the success lowers a flag, since one left up after a success would be
+retried forever. `Attempts` / `DeadLetteredAt` on the token belong to that
+reconciler.
+
+**Two branches deliberately leave work that nothing will pick up**, and the rule
+above does not cover them, because neither one ever claimed the token:
+
+- `ClaimToken` itself failing, and
+- a token that is expired or already used (the claim returns `(nil, nil)`).
+
+Both write the opt-out row — with a `sourceTokenUuid` pointing at a token that was
+never claimed — and then return generic success without a preference write, a sink
+fire, or a pending flag. This is an accepted limit, not an oversight: core stops
+sending to that address either way, so the recipient is protected; what can lag is a
+downstream consent store, for a link clicked after the token's 30-day TTL (or during
+a database blip). A recipient's second click heals the first branch only if they
+happen to click twice, which is not a mechanism.
+
+**The reconciler deliberately does NOT sweep these rows today** — a deferred
+decision, not a closed one; see "Unsubscribe reconciler" below. The obstacle is
+that the opt-out collection records no marker for "this row still owes downstream
+work", so a sweep starting from the opt-out side has no candidate set of its own to
+narrow to:
+
+- Token rows TTL at 30 days while opt-out rows are permanent, which looks like it
+  makes "the sink never ran" indistinguishable from "the sink ran and the token
+  aged out" — and left unbounded, it would. But bound the sweep to opt-out rows
+  whose `at` is inside a recent window shorter than the token TTL, and the source
+  token row is guaranteed to still exist for every row the sweep considers.
+  `usedAt` absent on that still-live token is itself proof the claim never
+  succeeded downstream, so firing now is provably a first fire, not a re-fire of
+  history — both objections fall to the same bound.
+- What the bound does not remove: the sweep still has to walk from token rows and
+  correlate back via `sourceTokenUuid`, since the opt-out row itself carries
+  nothing to filter or join on, and it still has to claim the token before firing
+  to avoid double-firing the rare row whose claim actually succeeded despite the
+  earlier error — which is the only branch a sweep like this could heal; an expired
+  token never claims, and an already-used one already fired on its first click.
+- The actual fix, if a fork needs this closed rather than deferred, is a pending
+  marker written on the **opt-out row** by the same upsert that creates it, lowered
+  when the mirror succeeds. That belongs to the opt-out collection's own contract,
+  so it is a spec decision the reconciler cannot bolt on by itself — which is why
+  this stays deferred.
+
+The error contract is narrow on purpose: **`Consume` returns an error only when the
+durable opt-out could not be written** (`ErrOptoutNotRecorded` — including an
+unwired opt-out seam, which fails closed, and a token row carrying no address,
+since `Upsert` reports success for an empty address without writing). Everything
+else is a `nil` error, because the public response is generic either way. Nothing
+in the sequence logs the raw token or a full address — the token's **uuid** is the
+only identifier that reaches a log line. Every message that can carry an address back
+— a driver error quoting the document or filter it failed on, a preference-service
+error quoting the row it was asked to update, a sink's error quoting the address
+core just handed it, a sink's panic value — goes through `scrubAddress` before it is
+logged or returned.
+
+`Consume`'s collaborators are wired in `Init` through `NewUnsubscribeService`'s
+options (`WithOptouts`, `WithPreferences`, `WithUnsubscribeSink`,
+`WithUnsubscribeLogger`); the sink is a function rather than an interface because
+the notification service takes the unsubscribe service as a constructor argument,
+so the reference can only be resolved at call time.
+
+Both HTTP endpoints (`GET` and the RFC 8058 `POST`, `handlers/notification_handler.go`)
+call `Consume` through the same `consumeUnsubscribe` helper — neither reads the token
+document or orchestrates the preference/sink calls itself any more. `Consume` spends the
+token itself through `repository.ClaimToken`. The earlier `ConsumeToken` + `MarkUsed`
+pair (on `UnsubscribeService`, and `MarkUsed` on `UnsubscribeRepository`) was **removed**
+rather than left in place: it had no production callers left, and its doc comment told a
+caller to apply the preference change and then call `MarkUsed` — a sequence that skips
+the durable opt-out, the pending flags and the reconciler, i.e. exactly the pre-branch
+behaviour this design replaced. A dead orchestration API that documents the wrong order
+is a trap, not a convenience. Nothing outside this repository could depend on it:
+`internal/core/notification/...` is unimportable beyond `github.com/orkestra/backend`,
+and neither type is re-exported through `pkg/sdk/iface` or the `ServiceRegistry`.
+
+**Residual limit: a write-side outage during `Consume` is a real-vs-fake-token oracle.**
+An unknown token short-circuits before any write (`GetByHash` misses, `Consume` returns
+immediately) and answers 200; a valid, already-used or expired token reaches the opt-out
+`Upsert` and — only while the write path itself is failing — answers 500 instead. So for
+the duration of a database outage on the opt-out collection, the response code splits
+tokens that were ever issued from tokens that never existed. This is deliberate, not an
+oversight: the alternative is flattening a failed write to 200, which the endpoint must
+not do (a database that cannot record an opt-out must not report success — see the error
+contract above). Two things keep this out of "the disclosure the whole endpoint exists to
+prevent": it is not attacker-inducible (nobody chooses when the opt-out write is failing),
+and even a successful probe during an outage learns only "a token you already hold was
+issued at some point" — never an address, and never anything about a token nobody handed
+the prober. The 500 body itself carries none of `Consume`'s error text (see
+`handlers/notification_handler.go`'s `consumeUnsubscribe` — a public, unauthenticated
+route must not echo an internal error, e.g. a token UUID, to an anonymous caller), so the
+only channel is the status code, not the body.
+
+## Unsubscribe reconciler
+
+`services.OptoutReconciler` (`services/optout_reconciler.go`) is what makes the
+pending flags mean something. Consume marks what it could not finish rather than
+rolling it back, so without this job the marks are litter. It is wired in `Init`
+next to the other services, started in the module's `Start` and stopped in its
+`Stop`; `module_optout_wiring_test.go` guards that wiring, because a missing
+reconciler fails silently — nothing errors, replays just stop.
+
+- `RunOnce(ctx) (ReconcileStats, error)` replays one bounded batch. It returns an
+  error **only** when the scan itself failed: one row that cannot be replayed is
+  that row's problem and must not abort the pass for the rest.
+- `Start(ctx)` / `Stop()` run it on a ticker (default one minute, matching the
+  first backoff step). Both are idempotent: a second `Start` is a no-op (a second
+  loop would double every downstream call) and `Stop` is safe before any `Start`
+  and safe twice. `Stop` closes the channel and nothing else — **the running state
+  is cleared in the loop's own `defer`**, so a `Stop` that raced the goroutine's
+  scheduling cannot mark a live loop as stopped and leave the reconciler
+  unstartable for the rest of the process.
+- `Now` is injectable, so the backoff is asserted by reading the instant a row was
+  deferred to, never by sleeping.
+
+### The state machine
+
+Two rules shape every branch, and both are the kind a passing test suite can hide:
+
+1. **Every row the scan returns makes progress (a flag comes down) or moves toward
+   the budget (`attempts` grows).** A row that could come back and be left exactly
+   as it was is an infinite loop costing a downstream system one call per tick.
+   This is why a *failed* `ClearSinkPending` counts as a failed attempt: the work
+   succeeded but the row will be scanned again, so the replay is not free.
+2. **A flag comes down only when the thing it marks actually succeeded** — anything
+   else is consent core recorded and silently dropped. The two flags are
+   independent: a written preference says nothing about the sink, and a row can owe
+   both.
+
+| Row | Outcome | After the pass |
+|---|---|---|
+| `sinkPending` | sink accepted | `sinkPending` unset; `attempts` unchanged |
+| `sinkPending` | sink failed (attempt < 8) | flag stays up, `attempts`+1, `nextAttemptAt` = now + backoff |
+| `sinkPending` | sink failed, 8th attempt | `deadLetteredAt` set, **both flags cleared**, `error` log |
+| `sinkPending` | no sink registered (the base ships none) | `sinkPending` unset on the first pass — nothing to mirror |
+| `prefPending` | preference written | `prefPending` unset; `attempts` unchanged |
+| `prefPending` | preference failed, or no preference service wired | flag stays up, `attempts`+1 (undone work, not absent work) |
+| `prefPending` with no `userUuid` | malformed — nothing to write | `prefPending` unset, no budget spent |
+| both | preference ok, sink failed | `prefPending` unset, `sinkPending` up, `attempts`+1 |
+| no address | cannot ever succeed | dead-lettered immediately, `error` log |
+| nothing pending, or `deadLetteredAt` set | — | never returned by the scan at all |
+
+`ReconcileMaxAttempts = 8`, backoff doubling from one minute and capped at two
+hours — roughly two hours of retrying before a row is given up on. **Dead-lettering
+clears the pending flags**; that is load-bearing, not tidiness, since a
+dead-lettered row that stayed pending is a row the scan returns for ever.
+
+### The scan
+
+`UnsubscribeRepository.ListPending(ctx, now, limit)` returns claimed tokens that
+still owe work, are not dead-lettered, and are **due now** — the backoff lives in
+the query, so every row the reconciler sees is one it acts on. Two clauses match
+documents where the field is absent (both are `omitempty`): `deadLetteredAt`
+`$exists: false`, and `nextAttemptAt` `$not: {$gt: now}` ("not scheduled for
+later", true for a row that has never failed).
+
+`RecordFailedAttempt` (`$inc` on `attempts`, so two hosts cannot lose one between
+them, plus the new `nextAttemptAt`) and `MarkDeadLettered` are the only other
+writes. Both are addressed by `tokenHash`, like every other method here.
+
+`UnsubscribeTokenDoc.NextAttemptAt` is the field that lets the backoff be a query
+rather than an in-memory skip. Two **partial** indexes on the token collection
+(`module.go` `Collections()`) cover the two `$or` branches — partial rather than
+sparse because a completed flag is `$unset`, so a settled row leaves the index
+entirely, and the ticker never reads 30 days of tokens to find the few pending
+ones. The scan is deliberately **unsorted**: the `$or` plans as two index scans
+merged, which no single index can order, so a sort would be an in-memory sort over
+the whole pending set — precisely when that set is a backlog after an outage. Each
+branch already returns its rows oldest-due-first, since `nextAttemptAt` is the
+second key of its index.
+
+The reconciler fires the sink through the same `FireMarketingUnsubscribe` firer the
+live path uses (`MarketingUnsubscribeFirer` carries an `OnMarketingUnsubscribe`
+method for exactly this), so both paths share one set of nil-sink and panic guards
+rather than two copies that drift. Nothing it logs carries the raw token, the token
+hash or a full address: the token **uuid** identifies the row, and every message
+that might quote a recipient goes through `scrubAddress` first.
+
 ## Unsubscribe context seam (module extension point)
 
 `NotificationRequest` and `TemplatedNotificationRequest` carry an optional opaque
@@ -335,15 +583,18 @@ context lives server-side on the token doc, not in the unsubscribe link.
 
 ```go
 type MarketingUnsubscribeSink interface {
-    OnMarketingUnsubscribe(ctx context.Context, address, category, context string)
+    OnMarketingUnsubscribe(ctx context.Context, address, category, context string) error
 }
 ```
 
 `*NotificationService` exposes `SetMarketingUnsubscribeSink(s)` (satisfying
-`MarketingUnsubscribeSinkSetter`). The public unsubscribe handler fires
-`sink.OnMarketingUnsubscribe(ctx, address, category, doc.Context)` **best-effort,
-`recover()`-guarded**, immediately after a token is successfully consumed — so a
-panicking sink can never break an unsubscribe. The gate for whether a given category
+`MarketingUnsubscribeSinkSetter`) and `FireMarketingUnsubscribe(ctx, address,
+category, refContext) error`, which invokes the sink `recover()`-guarded and
+**reports the outcome**: a nil sink is `nil` ("nothing to mirror"), a returned
+error is passed through, and a panic is recovered *and* converted into an error
+rather than swallowed. A panicking sink therefore still cannot break an
+unsubscribe, but its failure is no longer invisible — the caller needs it to
+decide whether the opt-out must be replayed downstream. The gate for whether a given category
 warrants a marketing consent revocation lives in the sink's impl, not in a
 category-string test in core. The base ships **no** sink; the seam is inert until a
 module registers one — the intended use is mirroring the opt-out into a consent

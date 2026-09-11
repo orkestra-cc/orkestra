@@ -17,14 +17,14 @@ To send real mail, switch `email.provider` to `smtp` at `/admin/modules/notifica
 
 ## Config
 
-Eleven flat keys — seeded from env vars on first boot and owned by the ConfigService afterwards — plus one record list. `/admin/modules/notification` renders them as a four-group rail:
+Fifteen flat keys — seeded from env vars on first boot and owned by the ConfigService afterwards — plus one record list. `/admin/modules/notification` renders them as a four-group rail:
 
 | Group | Keys |
 |---|---|
-| **Delivery** | `email.provider` plus the five `email.smtp.*` fields — the **default transport**, used while no sender profile routes a category |
+| **Delivery** | `email.provider` plus the five `email.smtp.*` fields (the **default transport**, used while no sender profile routes a category) and the three RFC 8058 one-click unsubscribe fields — `public_api_base_url`, `unsubscribe_page_url`, `require_one_click_unsubscribe` (see below) |
 | **Sender profiles** | `email.senders` — a repeatable list of senders, each with its own transport and identity ([ADR-0019](/adrs/notification-multi-sender)) |
 | **Sender** | `email.from_address`, `email.from_name`, `email.reply_to` — the identity of the default transport |
-| **Branding & templates** | `app.name`, `app.support_email` |
+| **Branding & templates** | `app.name`, `app.support_email`, `app.default_locale` |
 
 The SMTP fields carry a `DependsOn` on `email.provider`, so a default `noop` install shows **one** visible Delivery field until you switch the provider — the connection settings appear only once they can matter. `email.smtp.password` and every profile's secret are `FieldSecret`: AES-256-GCM at rest, never read from plain env after bootstrap.
 
@@ -78,6 +78,47 @@ This is deliberate rather than an oversight: verification and password-reset mai
 
 **Setting the type correctly is the caller's job.** Mail the user cannot opt out of — auth flows, invoices, legal notices — must set `transactional`. Anything else must set `marketing`, or preferences are silently not honored.
 
+## RFC 8058 one-click unsubscribe
+
+Marketing mail carries two extra headers a recipient's mail client can act on without opening the message — `List-Unsubscribe` and `List-Unsubscribe-Post`. A transactional message never carries them and can never be affected by them. Clicking (or the mail client's own one-click action) records a durable, address-level "stop sending marketing to this address" fact, separate from the per-category preference described above and separate from the address-level suppression list that blocks everything: this one blocks marketing only, and never expires.
+
+Three config fields, all in the **Delivery** group, govern it:
+
+| Field | Default | What it does |
+|---|---|---|
+| `public_api_base_url` | empty | This API's own `https` origin (e.g. `https://api.example.com`). The `List-Unsubscribe` header is built from it — nothing else this module has access to (the frontend origin, a request's `Host` header) can safely stand in for a URL that will sit in a recipient's mailbox for months. |
+| `require_one_click_unsubscribe` | `true` | While on, a sender profile may carry marketing only if its driver can add both headers **and** `public_api_base_url` is set; a marketing send that would otherwise leave without them is refused instead of sent. |
+| `unsubscribe_page_url` | empty | Optional and unrelated to the two headers above: the link inside `{{.UnsubscribeURL}}` in a templated email's *footer* — the one a person clicks, not what a mail client's automatic one-click button POSTs to. Left empty, the footer keeps linking straight to the API's own `GET` endpoint. |
+
+:::danger Upgrading a live installation
+`require_one_click_unsubscribe` is `true` and `public_api_base_url` is empty by default. **If you upgrade to this behavior with `public_api_base_url` still unset, every marketing send starts being refused** — this is the fail-closed design working as specified, not a bug, but it means a campaign scheduled for right after the upgrade will not go out silently swapped for something worse; it simply will not go out. Set `public_api_base_url` before your next marketing send. A refusal from this cause shows up in the delivery log (`GET /v1/notifications`) as a `failed` row whose `error` column reads `sender=<slug> err=one_click_unavailable` — that string is how you tell this failure apart from an unrelated sender misconfiguration.
+
+**To confirm the fix took effect:** saving `public_api_base_url` is itself a check — the save is refused (`422`) if any sender profile whose `Explicitly selectable for` includes `marketing` still can't satisfy the requirement, so a successful save already proves those profiles clear. That save-time check cannot see a profile that only carries marketing through category routing rather than explicit selection (see below), so also send one real marketing message afterward and confirm its row in `GET /v1/notifications` reads `sent`, not `failed` with `err=one_click_unavailable`.
+:::
+
+**A sender profile passing validation is not a promise its marketing will send.** The save-time check judges a profile's `Explicitly selectable for` (`allowed_types`) — the one declaration that says an operator may pick this profile by name for marketing. A profile that only carries mail through a category pattern (`auth.*`, `crm.*`, `*`) declares no type at save time, so there is nothing there for that check to see. If a marketing message ever reaches that profile through category routing, the same one-click requirement is still enforced — at the moment of the send, not at the moment the profile was saved — and is refused there if it fails. A routing-only profile can therefore save cleanly today and still refuse marketing tomorrow if it is ever routed one.
+
+**Turning the requirement off is a real trade, not a formality.** With it off, a sender profile becomes admissible for marketing even when nothing can add the unsubscribe headers, and marketing then sends without them rather than being refused. Large mailbox providers require one-click unsubscribe from bulk senders and penalize domains that omit it, and several jurisdictions require an easy withdrawal mechanism for commercial email — turn this off only if another mechanism already meets that obligation for you.
+
+### The DKIM gate — a release step, not a merge step
+
+RFC 8058 also requires both headers to be covered by the sending domain's DKIM signature, or a mailbox provider may ignore the one-click button entirely. No automated test can prove that — it depends on how the relay in front of a given driver actually signs outgoing mail. Run this once per driver you use in production, before relying on one-click unsubscribe for that driver:
+
+1. Send a real marketing message through the driver to a test mailbox you control.
+2. Open the delivered message's raw source and find the `DKIM-Signature` header.
+3. Check its `h=` field — the list of signed header names — includes both `list-unsubscribe` and `list-unsubscribe-post`:
+
+   ```
+   grep -i '^DKIM-Signature' raw-message.eml
+   # h=from:to:subject:date:message-id:list-unsubscribe:list-unsubscribe-post:...
+   ```
+
+What the result means depends on which driver you tested:
+
+- For a driver whose capability is currently declared unsupported in code (in the base install, `mailup`), a passing test is what justifies a maintainer changing that driver's source to declare the capability supported — a code change, never a setting you can toggle from the admin UI. The constant exists because a vendor API accepting the headers is not the same as its relay delivering and signing them.
+- For a driver whose capability is already declared supported (`smtp`) against your own relay, a signature that does *not* cover both headers means the relay is misconfigured, not this module — the capability describes what this module hands the relay, not what the relay does with it. Fix the relay.
+- `noop` never sends anything, so there is nothing to test for it.
+
 ## Idempotency
 
 Every send accepts an idempotency key. Before dispatching, the orchestrator looks for a row with the same key created within the last hour and, if it finds one, returns the prior result unchanged — no duplicate send, no duplicate log row. Auth uses keys shaped like `verify:<user-uuid>:<token-uuid>`, so a retry is safe by construction. Supplying a key is the caller's responsibility and the only protection against duplicate sends.
@@ -86,7 +127,7 @@ Every send accepts an idempotency key. Before dispatching, the orchestrator look
 
 | Surface | Paths | Gate |
 |---|---|---|
-| Public | `GET /v1/notifications/unsubscribe` | none — consumes a token, always returns a generic success |
+| Public | `GET /v1/notifications/unsubscribe`, `POST /v1/notifications/unsubscribe` | none — both consume a token and always return a generic success; the `POST` is the RFC 8058 one-click endpoint a mail client's own button calls, body ignored beyond `?token=` |
 | User | `GET` / `PUT /v1/notifications/preferences` | `guest`+ |
 | Admin | `GET /v1/notifications` (delivery log; filters `category`, `status`, `sender`), `POST /v1/notifications/test` (`{to, sender?}` — proves one profile end to end), and the four `…/templates` operations | `administrator` |
 
@@ -94,11 +135,13 @@ Every send accepts an idempotency key. Before dispatching, the orchestrator look
 
 ## Storage
 
-Five collections: `notification_messages` (90-day TTL), `notification_templates`, `notification_preferences`, `notification_suppressions`, and `notification_unsubscribe_tokens` (30-day TTL).
+Eight collections: `notification_messages` (90-day TTL), `notification_templates`, `notification_preferences`, `notification_suppressions`, `notification_unsubscribe_tokens` (30-day TTL), and `notification_marketing_optouts` (no TTL — an opt-out never expires; see "RFC 8058 one-click unsubscribe" above). The remaining two, `operator_unsubscribe_tokens` and `client_unsubscribe_tokens`, are declared placeholders for a future tier-split cutover (ADR-0003 PR-B) — indexed on boot but not yet read or written by anything, including this one-click work.
 
 ## GDPR
 
 Registers an `iface.PIIProducer` for the subject `notification`. Export returns the delivered-message history plus per-category preferences; erasure deletes both under either mode. Suppressions are keyed by email address rather than user UUID, so they ride the auth/email erasure path instead of this producer.
+
+**The marketing opt-out is retained past erasure, by design.** `notification_marketing_optouts` is address-keyed the same way suppressions are, and nothing in this platform deletes it for any data-subject request, under either erase mode. This is deliberate, for the same reason a suppression record survives too: deleting the fact that an address asked to stop receiving marketing would let a future marketing send to that same address go out again — exactly what the opt-out exists to prevent. Erasing your data does not opt you back in.
 
 :::note Not in this module
 No SMS, push, or webhook implementations. No async queue — every send is synchronous, though `NotificationResult.Status` reserves `queued` for a future upgrade. No marketing automation, segmentation, or A/B testing. No bounce or complaint ingestion: suppressions are added manually until the SMTP provider offers a webhook. DKIM signing is the relay's job.

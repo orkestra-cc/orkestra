@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/smtp"
 	"net/textproto"
+	"sort"
 	"strings"
 	"time"
 )
@@ -54,6 +55,12 @@ func (d *smtpDriver) Name() string { return "smtp" }
 // configuration (D3/D6); sendSMTP authenticates only when a username is set.
 func (d *smtpDriver) Requires() []ProfileRequirement {
 	return []ProfileRequirement{{Key: SubSMTPHost}, {Key: SubSMTPPort}, {Key: SubFromAddress}}
+}
+
+// Capabilities: smtp writes the MIME itself, so it can guarantee
+// List-Unsubscribe / List-Unsubscribe-Post reach the wire.
+func (d *smtpDriver) Capabilities() DriverCapabilities {
+	return DriverCapabilities{ListUnsubscribeHeaders: true}
 }
 
 func (d *smtpDriver) Send(ctx context.Context, p SenderProfile, msg EmailMessage) error {
@@ -168,6 +175,22 @@ func buildMIMEMessageAt(p SenderProfile, msg EmailMessage, now time.Time) string
 	fmt.Fprintf(&b, "From: %s\r\n", from)
 	fmt.Fprintf(&b, "To: %s\r\n", to)
 	fmt.Fprintf(&b, "Subject: %s\r\n", msg.Subject)
+	// Keys are sorted before writing: a non-deterministic MIME makes tests
+	// flaky and DKIM signatures painful to diagnose. Entries that are not
+	// safe to write are dropped — see safeExtraHeader.
+	if len(msg.Headers) > 0 {
+		keys := make([]string, 0, len(msg.Headers))
+		for k := range msg.Headers {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if !safeExtraHeader(k, msg.Headers[k]) {
+				continue
+			}
+			fmt.Fprintf(&b, "%s: %s\r\n", k, msg.Headers[k])
+		}
+	}
 	if p.ReplyTo != "" {
 		fmt.Fprintf(&b, "Reply-To: %s\r\n", p.ReplyTo)
 	}
@@ -198,6 +221,56 @@ func buildMIMEMessageAt(p SenderProfile, msg EmailMessage, now time.Time) string
 	}
 
 	return b.String()
+}
+
+// reservedMIMEHeaders are the fields buildMIMEMessageAt writes itself, keyed
+// lower-case because header names are case-insensitive (RFC 5322 §1.2.2).
+// Content-Transfer-Encoding is on the list because the single-part branch
+// writes it at the top level, not only inside a multipart part.
+var reservedMIMEHeaders = map[string]struct{}{
+	"from": {}, "to": {}, "subject": {}, "reply-to": {}, "date": {},
+	"mime-version": {}, "content-type": {}, "content-transfer-encoding": {},
+}
+
+// safeExtraHeader reports whether one caller-supplied EmailMessage.Headers
+// entry may be written into the MIME. This is defence in depth, not a live
+// hole: the only thing that populates that map today is the dispatch
+// chokepoint's RFC 8058 pair, and oneClickBase already refuses a base URL
+// carrying CR, LF or an angle bracket. But this builder is what actually puts
+// bytes on the wire, and the map reaches it through a public struct field —
+// so the check belongs here, where a future producer of that map cannot miss
+// it, rather than only at today's one producer.
+//
+// Three ways an entry is refused, all of them silently (this function has no
+// logger, and a dropped header must never be able to fail a send):
+//
+//   - CR or LF in the key OR the value. This is the classic header-injection
+//     vector: one embedded CRLF turns a single field into two, or ends the
+//     header block early and promotes the rest into the body. Dropping also
+//     refuses a legitimately folded value (RFC 5322 §2.2.3 folds on CRLF +
+//     whitespace), which is the right trade: nothing in this module produces
+//     one, and a folded header lost is a cosmetic failure while an injected
+//     one is not.
+//   - An empty or whitespace-only key, which would emit ": value" — a
+//     malformed field that a strict parser may take as the end of the header
+//     block.
+//   - A key naming a field this builder already writes. A second Subject: or
+//     Content-Type: line is resolved inconsistently by MTAs, filters and DKIM
+//     verifiers, which is exactly how a message is made to look like it says
+//     something it does not.
+//
+// An empty VALUE is allowed through: "X-Foo:" with an empty field body is
+// well-formed, it cannot terminate the header block, and refusing it would be
+// this function inventing a rule about content rather than about safety.
+func safeExtraHeader(key, value string) bool {
+	if strings.ContainsAny(key, "\r\n") || strings.ContainsAny(value, "\r\n") {
+		return false
+	}
+	if strings.TrimSpace(key) == "" {
+		return false
+	}
+	_, reserved := reservedMIMEHeaders[strings.ToLower(strings.TrimSpace(key))]
+	return !reserved
 }
 
 // encodeQuotedPrintable encodes s with RFC 2045 quoted-printable so that

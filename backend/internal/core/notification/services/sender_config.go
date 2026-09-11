@@ -30,7 +30,7 @@ func SenderItems() []module.ConfigItemField {
 		{Key: SubCategories, Label: "Categories", Type: module.FieldStringList, Placeholder: "auth.*, *",
 			Description: "Routing patterns this profile serves: an exact category (auth.verify_email), a prefix (auth.*), or * for the default. Leave empty to keep the profile as a draft that receives no mail."},
 		{Key: SubAllowedTypes, Label: "Explicitly selectable for", Type: module.FieldStringList, Placeholder: "marketing",
-			Description: "Send types that may name this profile directly (e.g. a marketing campaign picking its sender). Empty = never selectable by callers; pattern routing and the admin test send are unaffected. Allowed values: marketing, transactional. Declaring one makes the profile load-bearing: its transport fields are validated like a routed profile's."},
+			Description: "Send types that may name this profile directly (e.g. a marketing campaign picking its sender). Empty = never selectable by callers; pattern routing and the admin test send are unaffected. Allowed values: marketing, transactional. Declaring one makes the profile load-bearing: its transport fields are validated like a routed profile's. Declaring marketing additionally requires a provider that can add the one-click unsubscribe headers, and a public API base URL to point them at."},
 		{Key: SubFromAddress, Label: "From address", Type: module.FieldString, Required: true, DependsOn: identity},
 		{Key: SubFromName, Label: "From name", Type: module.FieldString, DependsOn: identity},
 		{Key: SubReplyTo, Label: "Reply-To address", Type: module.FieldString, DependsOn: identity},
