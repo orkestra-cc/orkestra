@@ -13,6 +13,7 @@ import (
 	"github.com/orkestra/backend/internal/core/notification/repository"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // URLBuilder renders the absolute URLs used inside templates.
@@ -39,6 +40,10 @@ type NotificationService struct {
 	drivers      *DriverRegistry
 	logger       *slog.Logger
 	opts         Options
+	// Nil by default. An addon pushes its implementation in at boot through
+	// the setters below; the base ships neither.
+	emailRewriter   iface.EmailTrackingRewriter
+	unsubscribeSink iface.MarketingUnsubscribeSink
 }
 
 func NewNotificationService(
@@ -143,13 +148,15 @@ func (s *NotificationService) Send(ctx context.Context, req iface.NotificationRe
 
 	recipient := req.Recipients[0]
 	return s.dispatchEmail(ctx, dispatchInput{
-		Category:       req.Category,
-		Type:           req.Type,
-		Recipient:      recipient,
-		Subject:        req.Subject,
-		BodyText:       req.Body,
-		BodyHTML:       req.BodyHTML,
-		IdempotencyKey: req.IdempotencyKey,
+		Category:           req.Category,
+		Type:               req.Type,
+		Recipient:          recipient,
+		Subject:            req.Subject,
+		BodyText:           req.Body,
+		BodyHTML:           req.BodyHTML,
+		IdempotencyKey:     req.IdempotencyKey,
+		TrackingContactRef: req.TrackingContactRef,
+		Sender:             req.Sender,
 	})
 }
 
@@ -198,7 +205,7 @@ func (s *NotificationService) SendTemplated(ctx context.Context, req iface.Templ
 		data["SupportEmail"] = s.opts.SupportEmail
 	}
 
-	unsubToken, err := s.unsubService.IssueToken(ctx, recipient.UserUUID, recipient.Address, req.Category)
+	unsubToken, err := s.unsubService.IssueToken(ctx, recipient.UserUUID, recipient.Address, req.Category, req.UnsubscribeContext)
 	if err != nil {
 		s.logger.Warn("notification: failed to issue unsubscribe token", slog.String("error", err.Error()))
 	}
@@ -211,26 +218,32 @@ func (s *NotificationService) SendTemplated(ctx context.Context, req iface.Templ
 	}
 
 	return s.dispatchEmail(ctx, dispatchInput{
-		Category:       req.Category,
-		Type:           req.Type,
-		Recipient:      recipient,
-		Subject:        rendered.Subject,
-		BodyText:       rendered.BodyText,
-		BodyHTML:       rendered.BodyHTML,
-		TemplateID:     tmpl.TemplateID,
-		IdempotencyKey: req.IdempotencyKey,
+		Category:           req.Category,
+		Type:               req.Type,
+		Recipient:          recipient,
+		Subject:            rendered.Subject,
+		BodyText:           rendered.BodyText,
+		BodyHTML:           rendered.BodyHTML,
+		TemplateID:         tmpl.TemplateID,
+		IdempotencyKey:     req.IdempotencyKey,
+		TrackingContactRef: req.TrackingContactRef,
+		Sender:             req.Sender,
 	})
 }
 
 type dispatchInput struct {
-	Category       string
-	Type           string
-	Recipient      iface.Recipient
-	Subject        string
-	BodyText       string
-	BodyHTML       string
-	TemplateID     string
-	IdempotencyKey string
+	Category           string
+	Type               string
+	Recipient          iface.Recipient
+	Subject            string
+	BodyText           string
+	BodyHTML           string
+	TemplateID         string
+	IdempotencyKey     string
+	TrackingContactRef string
+	// Sender optionally names the sender profile (slug) that must carry this
+	// send (ADR-0021). Empty takes today's category-routed path unchanged.
+	Sender string
 }
 
 func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInput) (*iface.NotificationResult, error) {
@@ -259,13 +272,62 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 		return &iface.NotificationResult{ID: logDoc.UUID, Status: logDoc.Status}, nil
 	}
 
+	// An addon-provided rewriter may inject open-pixel + click trackers into
+	// the rendered HTML just before transport. nil rewriter / empty ref / non-HTML
+	// → unchanged. Best-effort: a panic must never break the send.
+	bodyHTML := in.BodyHTML
+	if s.emailRewriter != nil && bodyHTML != "" && in.TrackingContactRef != "" {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Warn("notification: email rewriter panicked", slog.Any("recover", r))
+				}
+			}()
+			if res := s.emailRewriter.RewriteOutboundEmail(ctx, iface.OutboundEmail{
+				BodyHTML:         bodyHTML,
+				RecipientAddress: in.Recipient.Address,
+				MessageUUID:      logDoc.UUID,
+				ContactRef:       in.TrackingContactRef,
+			}); res != "" {
+				bodyHTML = res
+			}
+		}()
+	}
+
 	// Resolve → validate → send. Every failure before the driver is
 	// fail-closed (D5) and still writes a failed log row, so the delivery
 	// log answers which profile failed and why.
 	// TenantID rides to the resolver (D4) so per-tenant routing later needs
 	// no change at this chokepoint; the resolver ignores it today.
+	//
+	// An explicit Sender (ADR-0021) bypasses category routing and is
+	// re-enforced here regardless of how the caller obtained the slug:
+	// grammar/length guard → BySlug → Type ∈ AllowedTypes. Any step failing
+	// writes the failed row through the same bounded-error contract.
 	tenantID, _ := ctxauth.GetTenantID(ctx)
-	profile, err := s.resolver.Resolve(ctx, ResolveInput{Category: in.Category, Type: in.Type, TenantID: tenantID})
+	var profile SenderProfile
+	if in.Sender != "" {
+		if !module.ValidSlug(in.Sender) { // already exported; enforces MaxSlugLength(64) + grammar
+			logDoc.AttemptedSenderSlug = "invalid"
+			return s.failSend(ctx, logDoc, SenderProfile{}, iface.ErrSenderInvalid)
+		}
+		logDoc.AttemptedSenderSlug = in.Sender
+		profile, err = s.resolver.BySlug(ctx, in.Sender)
+		switch {
+		case err != nil:
+			// The resolver speaks this package's sentinels; everything the
+			// explicit-sender arm reports must speak iface's, exactly as
+			// PreflightDelivery does. Without this a slug deleted between
+			// pre-flight and send (ADR-0021 D7's mid-run profile deletion)
+			// reached the log as the err=unknown catch-all and matched no
+			// sentinel a consumer outside this module can name.
+			err = mapBySlugErr(err)
+		case !typeAllowed(profile, in.Type):
+			err = iface.ErrSenderNotEligible
+		}
+	} else {
+		profile, err = s.resolver.Resolve(ctx, ResolveInput{Category: in.Category, Type: in.Type, TenantID: tenantID})
+	}
 	if err != nil {
 		return s.failSend(ctx, logDoc, profile, err)
 	}
@@ -279,7 +341,7 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 		ToName:   in.Recipient.Name,
 		Subject:  in.Subject,
 		BodyText: in.BodyText,
-		BodyHTML: in.BodyHTML,
+		BodyHTML: bodyHTML, // the addon-rewritten body when a rewriter is wired
 		Category: in.Category,
 	})
 	if sendErr != nil {
@@ -305,7 +367,16 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 var ErrSendFailed = errors.New("notification: send failed")
 
 // trustedSentinels are the only errors a caller may test with errors.Is.
-var trustedSentinels = []error{ErrNoSenderForCategory, ErrSenderConfigUnavailable, ErrSenderNotFound, ErrUnknownDriver, ErrSenderNotConfigured}
+// The local ones serve callers inside this module (the SendTest handler);
+// the iface ones serve every consumer that cannot import this package and
+// so has no way to name a local sentinel — which is the whole point of the
+// ADR-0021 seam. The explicit-Sender arm therefore maps BySlug's local
+// error through mapBySlugErr before failing, and both of that mapper's
+// outputs must be trusted here or the mapping is invisible to errors.Is.
+var trustedSentinels = []error{
+	ErrNoSenderForCategory, ErrSenderConfigUnavailable, ErrSenderNotFound, ErrUnknownDriver, ErrSenderNotConfigured,
+	iface.ErrSenderInvalid, iface.ErrSenderNotEligible, iface.ErrSenderNotFound, iface.ErrSenderUnavailable,
+}
 
 // DispatchError is the only error dispatchEmail and SendTest return. Error()
 // is the sanitized reason (the same string the delivery log stores). Is
@@ -380,6 +451,106 @@ func (s *NotificationService) Drivers() *DriverRegistry { return s.drivers }
 // Resolver exposes the sender resolver.
 func (s *NotificationService) Resolver() SenderResolver { return s.resolver }
 
+// ---- SenderDirectory (ADR-0021 D6) -----------------------------------------
+//
+// NotificationService satisfies iface.SenderDirectory directly: it is the
+// exact object registered under module.ServiceNotificationSender
+// (notification/module.go), so a caller type-asserting the registered
+// service off the ServiceRegistry gets these methods for free — the same
+// companion-interface idiom CategoryConfiguredChecker already uses.
+
+// mapResolveErr maps the local errors Resolve/Default can return to the
+// iface sentinel a caller of PreflightDelivery's default arm is allowed to
+// match on. Anything other than ErrNoSenderForCategory — today only
+// ErrSenderConfigUnavailable — means the question itself could not be
+// answered, not that a specific sender choice failed.
+func mapResolveErr(err error) error {
+	if errors.Is(err, ErrNoSenderForCategory) {
+		return iface.ErrNoSenderForCategory
+	}
+	return iface.ErrSenderUnavailable
+}
+
+// mapBySlugErr is mapResolveErr's counterpart for the explicit arm.
+func mapBySlugErr(err error) error {
+	if errors.Is(err, ErrSenderNotFound) {
+		return iface.ErrSenderNotFound
+	}
+	return iface.ErrSenderUnavailable
+}
+
+// preflightFail wraps sentinel with a bounded, describeSendError-rendered
+// reason so the returned error is errors.Is-able against sentinel while
+// carrying no secret, host, or username (same allowlisted renderer the
+// dispatch chokepoint's failed-send diagnostic uses).
+func preflightFail(profile SenderProfile, sentinel error) error {
+	return fmt.Errorf("%w: %s", sentinel, describeSendError(profile, sentinel))
+}
+
+// ListEligibleSenders lists every profile whose AllowedTypes contains typ,
+// Ready computed by running it through the same usableDriver check the
+// dispatch chokepoint uses. Identity only on the returned SenderInfo — no
+// secret, host, or username ever crosses this boundary.
+func (s *NotificationService) ListEligibleSenders(ctx context.Context, typ string) ([]iface.SenderInfo, error) {
+	all, err := s.resolver.All(ctx)
+	if err != nil {
+		return nil, preflightFail(SenderProfile{}, iface.ErrSenderUnavailable)
+	}
+	out := make([]iface.SenderInfo, 0, len(all))
+	for _, p := range all {
+		if !typeAllowed(p, typ) {
+			continue
+		}
+		_, driverErr := s.usableDriver(p)
+		out = append(out, iface.SenderInfo{
+			Slug:        p.Slug,
+			Label:       p.Label,
+			Provider:    p.Provider,
+			FromAddress: p.FromAddress,
+			Ready:       driverErr == nil,
+		})
+	}
+	return out, nil
+}
+
+// PreflightDelivery preflights the whole delivery path a send with these
+// parameters would take (ADR-0021 D6):
+//
+//	sender == "": category routing — Resolve(category, typ) → usable driver;
+//	sender != "": grammar → BySlug → allowed_types → usable driver.
+//
+// Returns nil or one of the iface Err* sentinels. Every failure is wrapped
+// errors.Is-ably around its sentinel with a bounded, secret-free reason.
+func (s *NotificationService) PreflightDelivery(ctx context.Context, sender, category, typ string) error {
+	tenantID, _ := ctxauth.GetTenantID(ctx)
+
+	if sender == "" {
+		profile, err := s.resolver.Resolve(ctx, ResolveInput{Category: category, Type: typ, TenantID: tenantID})
+		if err != nil {
+			return preflightFail(SenderProfile{}, mapResolveErr(err))
+		}
+		if _, err := s.usableDriver(profile); err != nil {
+			return preflightFail(profile, iface.ErrSenderNotConfigured)
+		}
+		return nil
+	}
+
+	if !module.ValidSlug(sender) {
+		return preflightFail(SenderProfile{}, iface.ErrSenderInvalid)
+	}
+	profile, err := s.resolver.BySlug(ctx, sender)
+	if err != nil {
+		return preflightFail(SenderProfile{}, mapBySlugErr(err))
+	}
+	if !typeAllowed(profile, typ) {
+		return preflightFail(profile, iface.ErrSenderNotEligible)
+	}
+	if _, err := s.usableDriver(profile); err != nil {
+		return preflightFail(profile, iface.ErrSenderNotConfigured)
+	}
+	return nil
+}
+
 // TestSendInput is one operator-initiated test message.
 type TestSendInput struct {
 	To       string
@@ -425,6 +596,60 @@ func (s *NotificationService) SendTest(ctx context.Context, in TestSendInput) (T
 		return res, de
 	}
 	return res, nil
+}
+
+// SetEmailTrackingRewriter wires an addon-provided rewriter that injects email
+// open/click tracking into rendered HTML just before transport. nil → no-op.
+func (s *NotificationService) SetEmailTrackingRewriter(r iface.EmailTrackingRewriter) {
+	s.emailRewriter = r
+}
+
+// SetMarketingUnsubscribeSink wires an addon-provided sink fired when a marketing
+// unsubscribe is consumed (nil by default → no-op).
+func (s *NotificationService) SetMarketingUnsubscribeSink(sink iface.MarketingUnsubscribeSink) {
+	s.unsubscribeSink = sink
+}
+
+// UpsertTemplate stores or replaces an operator-managed notification template
+// (e.g. a campaign template) via the template service. IsSystem is always false
+// (campaign templates are operator content, not system defaults); Channel is
+// always email. An empty locale falls back to the configured DefaultLocale.
+func (s *NotificationService) UpsertTemplate(ctx context.Context, templateID, locale, subject, bodyHTML, bodyText string) error {
+	if locale == "" {
+		locale = s.opts.DefaultLocale
+	}
+	return s.tmplService.Upsert(ctx, &models.TemplateDoc{
+		TemplateID: templateID, Locale: locale, Channel: models.ChannelEmail,
+		Subject: subject, BodyHTML: bodyHTML, BodyText: bodyText, IsSystem: false,
+	})
+}
+
+// GetTemplate fetches a notification template by (templateID, locale). An empty
+// locale falls back to the configured DefaultLocale. Returns ErrTemplateNotFound
+// (from the template service) when no matching row exists.
+func (s *NotificationService) GetTemplate(ctx context.Context, templateID, locale string) (*iface.TemplateView, error) {
+	if locale == "" {
+		locale = s.opts.DefaultLocale
+	}
+	doc, err := s.tmplService.Get(ctx, templateID, locale)
+	if err != nil {
+		return nil, err
+	}
+	return &iface.TemplateView{TemplateID: doc.TemplateID, Locale: doc.Locale, Subject: doc.Subject, BodyHTML: doc.BodyHTML, BodyText: doc.BodyText}, nil
+}
+
+// FireMarketingUnsubscribe invokes the sink best-effort (recover-guarded). Called
+// by the unsubscribe handler after a token is consumed + marked used.
+func (s *NotificationService) FireMarketingUnsubscribe(ctx context.Context, address, category, refContext string) {
+	if s.unsubscribeSink == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Warn("notification: unsubscribe sink panicked", slog.Any("recover", r))
+		}
+	}()
+	s.unsubscribeSink.OnMarketingUnsubscribe(ctx, address, category, refContext)
 }
 
 // NormalizeAddress lowercases and trims an email address.

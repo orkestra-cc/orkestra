@@ -6,10 +6,11 @@ import "strconv"
 // (ADR-0019 D2). PR 2 decodes it from the email.senders record list; while
 // the roster is empty it is synthesized from the flat legacy keys (D6).
 type SenderProfile struct {
-	Slug       string   // element key segment; LegacySlug for the legacy profile
-	Label      string   // operator display name
-	Provider   string   // driver name: "noop" | "smtp" (| "mailup", PR 3)
-	Categories []string // normalized routing patterns; "*" marks the default
+	Slug         string   // element key segment; LegacySlug for the legacy profile
+	Label        string   // operator display name
+	Provider     string   // driver name: "noop" | "smtp" (| "mailup", PR 3)
+	Categories   []string // normalized routing patterns; "*" marks the default
+	AllowedTypes []string // send types that may name this profile explicitly (ADR-0021 D2): subset of {marketing, transactional}; empty = never selectable by slug
 
 	FromAddress string
 	FromName    string
@@ -31,6 +32,7 @@ type SenderProfile struct {
 const (
 	SubProvider     = "provider"
 	SubCategories   = "categories"
+	SubAllowedTypes = "allowed_types"
 	SubFromAddress  = "from_address"
 	SubFromName     = "from_name"
 	SubReplyTo      = "reply_to"
@@ -110,6 +112,21 @@ func (p *SenderProfile) setField(key, v string) {
 	case SubMailUpSecret:
 		p.MailUpSecret = v
 	}
+}
+
+// typeAllowed reports whether p may be named directly (by slug) for a send
+// of type typ (ADR-0021 D2/D3): typ must appear in p.AllowedTypes. Empty
+// AllowedTypes means the profile is not explicitly selectable at all — it
+// can still carry pattern-routed sends, but no caller may name it by slug.
+// Package-level and profile-first so both the dispatch chokepoint and the
+// SenderDirectory companion (PR 3) share one definition of eligibility.
+func typeAllowed(p SenderProfile, typ string) bool {
+	for _, t := range p.AllowedTypes {
+		if t == typ {
+			return true
+		}
+	}
+	return false
 }
 
 // LegacyProfile stamps the identity of the profile synthesized from the

@@ -10,6 +10,8 @@ import (
 	"net"
 	"regexp"
 	"strings"
+
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // SendError is the only error shape a driver may return for a transport or
@@ -211,6 +213,21 @@ func describeSendError(p SenderProfile, err error) string {
 		out = prefix + " err=config_unavailable"
 	case errors.Is(err, ErrUnknownDriver):
 		out = prefix + " driver=" + safeToken(p.Provider) + " err=unknown_driver"
+	// ADR-0021: bounded reasons for the six iface sentinels an explicit
+	// Sender (or a SenderDirectory preflight) can surface. Only the slug
+	// prefix and a fixed token are ever included — never a transport field.
+	case errors.Is(err, iface.ErrSenderInvalid):
+		out = prefix + " err=sender_invalid"
+	case errors.Is(err, iface.ErrSenderNotFound):
+		out = prefix + " err=sender_not_found"
+	case errors.Is(err, iface.ErrSenderNotEligible):
+		out = prefix + " err=sender_not_eligible"
+	case errors.Is(err, iface.ErrSenderNotConfigured):
+		out = prefix + " err=sender_not_configured"
+	case errors.Is(err, iface.ErrNoSenderForCategory):
+		out = prefix + " err=no_sender_for_category"
+	case errors.Is(err, iface.ErrSenderUnavailable):
+		out = prefix + " err=sender_unavailable"
 	case errors.As(err, &inc):
 		out = prefix + " driver=" + safeToken(p.Provider) + " err=not_configured missing=" + safeTokens(inc.Missing)
 	case errors.As(err, &se):

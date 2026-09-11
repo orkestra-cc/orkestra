@@ -29,6 +29,8 @@ func SenderItems() []module.ConfigItemField {
 		{Key: SubProvider, Label: "Provider", Type: module.FieldEnum, Options: []string{"noop", "smtp", "mailup"}, Required: true, Default: "noop"},
 		{Key: SubCategories, Label: "Categories", Type: module.FieldStringList, Placeholder: "auth.*, *",
 			Description: "Routing patterns this profile serves: an exact category (auth.verify_email), a prefix (auth.*), or * for the default. Leave empty to keep the profile as a draft that receives no mail."},
+		{Key: SubAllowedTypes, Label: "Explicitly selectable for", Type: module.FieldStringList, Placeholder: "marketing",
+			Description: "Send types that may name this profile directly (e.g. a marketing campaign picking its sender). Empty = never selectable by callers; pattern routing and the admin test send are unaffected. Allowed values: marketing, transactional. Declaring one makes the profile load-bearing: its transport fields are validated like a routed profile's."},
 		{Key: SubFromAddress, Label: "From address", Type: module.FieldString, Required: true, DependsOn: identity},
 		{Key: SubFromName, Label: "From name", Type: module.FieldString, DependsOn: identity},
 		{Key: SubReplyTo, Label: "Reply-To address", Type: module.FieldString, DependsOn: identity},
@@ -83,6 +85,8 @@ func DecodeSenderProfiles(values, encrypted map[string]string) ([]SenderProfile,
 			switch it.Key {
 			case SubCategories:
 				p.Categories = NormalizePatterns(strings.Split(v, ","))
+			case SubAllowedTypes:
+				p.AllowedTypes = NormalizePatterns(strings.Split(v, ","))
 			case SubProvider:
 				p.setField(it.Key, strings.ToLower(v))
 			default:

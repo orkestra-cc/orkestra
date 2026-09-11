@@ -33,6 +33,14 @@ Reputation is scored per domain and per IP, and vendors enforce the split contra
 
 A profile with no patterns is a **draft** — it receives nothing and is not validated beyond pattern grammar, so you can prepare a sender before routing traffic to it. Once any profile declares a pattern, exactly one must declare `*`; saving is refused otherwise (`notification.sender_no_default`).
 
+### Several senders for the same workload
+
+Step 2 gives campaigns *a* sender. If you need **more than one** — an events sender and a newsletter sender on different domains, say — do not give them competing patterns and do not add a pattern per campaign. Instead fill in **`Explicitly selectable for`** (`allowed_types`) with `marketing` on each, and leave their patterns empty. They then appear in the campaign editor's sender picker, and the campaign's author chooses per campaign.
+
+A profile that is selectable but routes nothing is a supported, deliberate shape: it intercepts no category, so it cannot steal the mail your `*` profile carries. The "exactly one `*`" rule is a routing rule and does not apply to it. What *does* apply is completeness — a selectable profile with an unknown provider or a missing non-secret field is refused at save, same as a routing one.
+
+Leave `allowed_types` empty on a profile you only want routing to reach. It is not a switch that improves a sender; it is a permission that also makes the profile's label and `From:` address visible to everyone who can send a campaign.
+
 **Nothing is silently rerouted.** If a category matches no profile, or its profile is incomplete, the send **fails** and the delivery log row says why (`sender=campaigns driver=mailup err=not_configured missing=mailup_user`). Falling back to the default would push promotional mail through the transactional sender — the thing this feature exists to prevent.
 
 ## TLS mode
@@ -85,6 +93,7 @@ Work down this list in order:
 4. **Was it deduplicated?** Every send carries an idempotency key, and a repeat within the hour returns the earlier result instead of sending again. Two clicks on "resend" produce one email, on purpose.
 5. **Then look at SPF/DKIM and the provider's own log.** By this point the problem is usually at the relay, not in Orkestra.
 6. **With several profiles, check which one carried it.** `senderSlug` on the row tells you; a category that rode the default when you expected `crm.*` means the pattern is misspelled — a pattern with no dot matches exactly, and `crm.*` never matches the bare `crm`.
+7. **If a campaign named its sender, check `attemptedSenderSlug`.** On a row that failed the sender check this field holds the slug the send asked for, next to the reason: `err=sender_not_found` (no such profile — usually renamed or deleted out from under a campaign), `err=sender_not_eligible` (the profile exists but `marketing` is not in its `Explicitly selectable for` list), `err=not_configured missing=<fields>` (eligible, but its driver is missing the named non-secret fields — or a secret, in which case the profile looks complete on the settings page and only the send says otherwise), and `err=unknown_driver` (its **Provider** names a driver this build does not have). The last two carry `driver=<provider>` as well, and they are reported the same way whether the sender was named explicitly or reached by routing — the completeness check is the same one. An `attemptedSenderSlug` of `invalid` (with `err=sender_invalid`) means the slug was malformed rather than merely wrong — it is a constant marker, deliberately not the input echoed back. A campaign left on the default sender records no slug at all and fails with `err=no_sender_for_category` when nothing routes `marketing`.
 
 :::note Scope
 Email only. The interface was designed for SMS, push, and webhooks, but none are implemented. Sends are synchronous — there is no queue. No marketing automation, segmentation, or A/B testing; no bounce or complaint ingestion; DKIM signing is the relay's job.

@@ -28,6 +28,7 @@ type UnsubscribeTokenDoc struct {
 	UserUUID  string             `bson:"userUuid,omitempty" json:"userUuid,omitempty"`
 	Address   string             `bson:"address" json:"address"`
 	Category  string             `bson:"category,omitempty" json:"category,omitempty"` // empty = all marketing
+	Context   string             `bson:"context,omitempty" json:"-"`                   // opaque producer context (campaign/run ref); handed to MarketingUnsubscribeSink on consume
 	CreatedAt time.Time          `bson:"createdAt" json:"createdAt"`
 	ExpiresAt time.Time          `bson:"expiresAt" json:"expiresAt"`
 	UsedAt    *time.Time         `bson:"usedAt,omitempty" json:"usedAt,omitempty"`

@@ -366,6 +366,19 @@ type NotificationRequest struct {
 	BodyHTML       string
 	IdempotencyKey string
 	Metadata       map[string]any
+	// TrackingContactRef is an opaque per-recipient reference an email-tracking
+	// rewriter (wired via EmailTrackingRewriterSetter) can use to attribute
+	// engagement. Core gives it no meaning; ignored when no rewriter is wired.
+	TrackingContactRef string
+	// UnsubscribeContext is an opaque producer context stored on the unsubscribe
+	// token and handed back to a MarketingUnsubscribeSink on consume (e.g. a
+	// campaign/run ref for per-campaign unsubscribe attribution). Ignored by core.
+	UnsubscribeContext string
+	// Sender optionally names the sender profile (slug) that must carry this
+	// message, bypassing category routing — allowed only when the profile's
+	// allowed_types contains this request's Type (ADR-0021). Unknown,
+	// ineligible, or malformed slugs fail the send; there is no fallback.
+	Sender string
 }
 
 type TemplatedNotificationRequest struct {
@@ -378,6 +391,19 @@ type TemplatedNotificationRequest struct {
 	Data           map[string]any
 	IdempotencyKey string
 	Metadata       map[string]any
+	// TrackingContactRef is an opaque per-recipient reference an email-tracking
+	// rewriter (wired via EmailTrackingRewriterSetter) can use to attribute
+	// engagement. Core gives it no meaning; ignored when no rewriter is wired.
+	TrackingContactRef string
+	// UnsubscribeContext is an opaque producer context stored on the unsubscribe
+	// token and handed back to a MarketingUnsubscribeSink on consume (e.g. a
+	// campaign/run ref for per-campaign unsubscribe attribution). Ignored by core.
+	UnsubscribeContext string
+	// Sender optionally names the sender profile (slug) that must carry this
+	// message, bypassing category routing — allowed only when the profile's
+	// allowed_types contains this request's Type (ADR-0021). Unknown,
+	// ineligible, or malformed slugs fail the send; there is no fallback.
+	Sender string
 }
 
 type NotificationResult struct {
@@ -402,6 +428,31 @@ type NotificationSender interface {
 	SendTemplated(ctx context.Context, req TemplatedNotificationRequest) (*NotificationResult, error)
 }
 
+// Sentinel errors for explicit sender-profile selection (ADR-0021). Every
+// consumer of Sender maps THESE via errors.Is, never a notification-internal
+// error — the notification module's own sentinels stay unexported from this
+// seam.
+var (
+	// ErrSenderInvalid: the Sender slug fails grammar or the length bound,
+	// before any profile lookup is attempted.
+	ErrSenderInvalid = errors.New("sender slug malformed")
+	// ErrSenderNotFound: a grammar-valid slug names no configured profile.
+	ErrSenderNotFound = errors.New("sender profile not found")
+	// ErrSenderNotEligible: the profile exists but its allowed_types does not
+	// contain the request's Type.
+	ErrSenderNotEligible = errors.New("sender profile not eligible for this send type")
+	// ErrSenderNotConfigured: the profile is eligible but its driver is
+	// unregistered or its required fields are incomplete.
+	ErrSenderNotConfigured = errors.New("sender profile not configured")
+	// ErrNoSenderForCategory: Sender was empty (category routing) and no
+	// profile pattern matches the category.
+	ErrNoSenderForCategory = errors.New("no sender profile routes this category")
+	// ErrSenderUnavailable: the sender configuration/directory plane itself
+	// could not be read — distinct from every error above, none of which was
+	// actually evaluated.
+	ErrSenderUnavailable = errors.New("sender configuration unavailable")
+)
+
 // CategoryConfiguredChecker is an OPTIONAL companion to NotificationSender
 // (ADR-0019 D7). With sender profiles routed by category, IsConfigured's
 // single boolean is wrong in both directions for a caller about to send one
@@ -423,6 +474,34 @@ func IsConfiguredForCategory(ctx context.Context, s NotificationSender, category
 		return c.IsConfiguredFor(ctx, category)
 	}
 	return s.IsConfigured(ctx)
+}
+
+// SenderInfo is the identity-only view of one configured sender profile
+// (ADR-0021 D6). Slug, Label, Provider, FromAddress — never a secret, host,
+// or username: a caller listing eligible senders for a UI picker must not
+// receive anything from the transport side of a profile.
+type SenderInfo struct {
+	Slug, Label, Provider, FromAddress string
+	Ready                              bool // preflight passes now
+}
+
+// SenderDirectory is an OPTIONAL companion to NotificationSender (ADR-0021
+// D6), mirroring the CategoryConfiguredChecker idiom above: asserted from
+// the same registered ServiceNotificationSender object, no new ServiceKey.
+type SenderDirectory interface {
+	// ListEligibleSenders returns every profile whose allowed_types contains
+	// typ, with Ready computed per profile. Identity only — no secrets,
+	// hosts, usernames. A directory read that cannot reach configuration
+	// returns ErrSenderUnavailable, never an empty list.
+	ListEligibleSenders(ctx context.Context, typ string) ([]SenderInfo, error)
+
+	// PreflightDelivery preflights the whole delivery path a send would
+	// take:
+	//   sender == "": category routing — Resolve(category, typ) → usable
+	//                 driver (ErrNoSenderForCategory when nothing routes it);
+	//   sender != "": grammar → BySlug → allowed_types → usable driver.
+	// Returns nil or one of the Err* sentinels above.
+	PreflightDelivery(ctx context.Context, sender, category, typ string) error
 }
 
 // ---------------------------------------------------------------------------
@@ -1398,4 +1477,54 @@ type CRMActivityInput struct {
 // billing notifier gets to make. No match = log and return nil.
 type CRMActivitySink interface {
 	RecordActivity(ctx context.Context, in CRMActivityInput) error
+}
+
+// OutboundEmail is the input an EmailTrackingRewriter receives: the rendered
+// HTML, the recipient address, the per-send message id (used as a nonce), and
+// the opaque ContactRef the producer set on the request.
+type OutboundEmail struct {
+	BodyHTML         string
+	RecipientAddress string
+	MessageUUID      string
+	ContactRef       string
+}
+
+// EmailTrackingRewriter rewrites a fully-rendered outbound HTML email body just
+// before transport — e.g. to inject an open-tracking pixel and rewrite links.
+// Returns the (possibly) modified HTML. Wired post-construction via
+// EmailTrackingRewriterSetter so core notification never imports the addon that
+// implements it (the AuditSink/KMSProvider precedent).
+type EmailTrackingRewriter interface {
+	RewriteOutboundEmail(ctx context.Context, in OutboundEmail) string
+}
+
+// EmailTrackingRewriterSetter is implemented by the notification service so an
+// addon can push its rewriter in at boot, probed via
+// module.GetTyped[iface.EmailTrackingRewriterSetter].
+type EmailTrackingRewriterSetter interface {
+	SetEmailTrackingRewriter(EmailTrackingRewriter)
+}
+
+// MarketingUnsubscribeSink is fired (best-effort) when an unsubscribe token is
+// consumed, so an addon can mirror the opt-out into its own consent store and
+// attribute it (via the opaque context the producer set on the send). Wired via
+// MarketingUnsubscribeSinkSetter — core notification never imports the addon.
+type MarketingUnsubscribeSink interface {
+	OnMarketingUnsubscribe(ctx context.Context, address, category, refContext string)
+}
+
+// MarketingUnsubscribeSinkSetter is implemented by the notification service so an
+// addon can push its sink in at boot, probed via
+// module.GetTyped[iface.MarketingUnsubscribeSinkSetter] on ServiceNotificationSender.
+type MarketingUnsubscribeSinkSetter interface {
+	SetMarketingUnsubscribeSink(MarketingUnsubscribeSink)
+}
+
+// TemplateView is a read projection of a notification template (campaign preview).
+type TemplateView struct {
+	TemplateID string
+	Locale     string
+	Subject    string
+	BodyHTML   string
+	BodyText   string
 }

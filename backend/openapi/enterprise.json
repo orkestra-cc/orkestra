@@ -4502,6 +4502,9 @@
       "NotificationDoc": {
         "additionalProperties": false,
         "properties": {
+          "attemptedSenderSlug": {
+            "type": "string"
+          },
           "category": {
             "type": "string"
           },
