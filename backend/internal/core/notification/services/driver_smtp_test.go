@@ -362,3 +362,95 @@ func TestBuildMIME_WithoutHeadersIsUnchanged(t *testing.T) {
 		t.Fatal("no header may be invented when the map is empty")
 	}
 }
+
+// An empty header VALUE is well-formed ("X-Foo:" with an empty field body)
+// and must not be mistaken for the blank line that ends the header block —
+// the body has to survive it.
+func TestBuildMIME_EmptyHeaderValueKeepsTheMessageWellFormed(t *testing.T) {
+	msg := EmailMessage{
+		To: "ada@example.test", Subject: "Ciao", BodyText: "corpo",
+		Headers: map[string]string{"List-Unsubscribe": ""},
+	}
+	out := buildMIMEMessageAt(SenderProfile{FromAddress: "no-reply@example.test"}, msg, time.Unix(0, 0))
+
+	if !strings.Contains(out, "List-Unsubscribe: \r\n") {
+		t.Fatalf("an empty value must still be written as an empty field body:\n%s", out)
+	}
+	iLU := strings.Index(out, "List-Unsubscribe: ")
+	iDate := strings.Index(out, "Date: ")
+	iBody := strings.Index(out, "corpo")
+	if iDate < iLU || iBody < iDate {
+		t.Fatalf("an empty value must not end the header block early:\n%s", out)
+	}
+}
+
+// A caller-supplied entry naming a field the builder writes itself is
+// dropped: two Subject: or Content-Type: lines are resolved inconsistently by
+// MTAs, filters and DKIM verifiers, which is how a message is made to look
+// like it says something it does not. Matching is case-insensitive, because
+// header names are.
+func TestBuildMIME_ReservedHeaderKeysAreDropped(t *testing.T) {
+	msg := EmailMessage{
+		To: "ada@example.test", Subject: "real subject", BodyText: "corpo",
+		Headers: map[string]string{
+			"Subject":                   "forged subject",
+			"from":                      "attacker@example.test",
+			"MIME-Version":              "9.9",
+			"Content-Type":              "text/html; charset=\"utf-8\"",
+			"Content-Transfer-Encoding": "base64",
+			"Date":                      "Tue, 1 Jan 1980 00:00:00 +0000",
+			"To":                        "someone-else@example.test",
+			"Reply-To":                  "attacker@example.test",
+			"List-Unsubscribe":          "<https://api.example/v1/notifications/unsubscribe?token=abc>",
+		},
+	}
+	out := buildMIMEMessageAt(SenderProfile{FromAddress: "no-reply@example.test"}, msg, time.Unix(0, 0))
+
+	for _, forged := range []string{"forged subject", "attacker@example.test", "9.9", "base64", "1980", "someone-else@example.test"} {
+		if strings.Contains(out, forged) {
+			t.Fatalf("a reserved header key must not reach the wire (%q):\n%s", forged, out)
+		}
+	}
+	for _, name := range []string{"Subject: ", "From: ", "To: ", "Date: ", "MIME-Version: ", "Content-Type: "} {
+		if n := strings.Count(out, "\r\n"+name) + boolToInt(strings.HasPrefix(out, name)); n != 1 {
+			t.Fatalf("%q must appear exactly once, got %d:\n%s", name, n, out)
+		}
+	}
+	// The one entry that is not reserved still gets through.
+	if !strings.Contains(out, "List-Unsubscribe: <https://api.example/v1/notifications/unsubscribe?token=abc>\r\n") {
+		t.Fatalf("a legitimate header must survive the guard:\n%s", out)
+	}
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// Defence in depth for the injection vector itself. oneClickBase already
+// refuses a base URL carrying CR/LF, so nothing in this module can produce
+// such an entry today — but the builder is what puts bytes on the wire, and
+// EmailMessage.Headers is a public field.
+func TestBuildMIME_HeaderEntriesCarryingCRLFAreDropped(t *testing.T) {
+	msg := EmailMessage{
+		To: "ada@example.test", Subject: "Ciao", BodyText: "corpo",
+		Headers: map[string]string{
+			"X-Evil\r\nBcc": "someone@example.test",
+			"X-Also-Evil":   "ok\r\nBcc: someone-else@example.test",
+			"  ":            "blank key",
+			"X-Fine":        "kept",
+		},
+	}
+	out := buildMIMEMessageAt(SenderProfile{FromAddress: "no-reply@example.test"}, msg, time.Unix(0, 0))
+
+	for _, leaked := range []string{"Bcc", "someone@example.test", "someone-else@example.test", "blank key"} {
+		if strings.Contains(out, leaked) {
+			t.Fatalf("an unsafe header entry reached the wire (%q):\n%s", leaked, out)
+		}
+	}
+	if !strings.Contains(out, "X-Fine: kept\r\n") {
+		t.Fatalf("a safe entry alongside unsafe ones must still be written:\n%s", out)
+	}
+}
