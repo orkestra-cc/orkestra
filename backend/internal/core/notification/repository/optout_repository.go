@@ -53,6 +53,18 @@ func (r *marketingOptoutRepo) Upsert(ctx context.Context, doc models.MarketingOp
 		},
 		options.Update().SetUpsert(true),
 	)
+	if err != nil && mongo.IsDuplicateKeyError(err) {
+		// The unique address index (module.go's Collections()) means this
+		// UpdateOne+$setOnInsert+upsert does not converge silently under
+		// concurrency: two callers racing the same address can both miss
+		// the filter and both attempt the insert, and the loser lands here
+		// with E11000. That loser's desired state — an opt-out document
+		// exists for this address — is already true, because the winner
+		// just created it. Treat it as success: the public one-click
+		// unsubscribe endpoint built on this must render its generic
+		// response, never a 5xx, on a race it did nothing wrong to cause.
+		return nil
+	}
 	return err
 }
 

@@ -936,6 +936,7 @@ func (f rewriterFunc) RewriteOutboundEmail(ctx context.Context, in iface.Outboun
 
 func TestDispatchEmailAppliesRewriterWhenRefSet(t *testing.T) {
 	svc, sender := seamSvc()
+	svc.SetOptouts(&fakeOptouts{}) // neutral: nobody has opted out — this test is about the rewriter, not opt-outs
 	svc.SetEmailTrackingRewriter(rewriterFunc(func(_ context.Context, in iface.OutboundEmail) string {
 		if in.ContactRef == "" {
 			return in.BodyHTML
@@ -958,12 +959,14 @@ func TestDispatchEmailAppliesRewriterWhenRefSet(t *testing.T) {
 func TestDispatchEmailUnchangedWhenNoRewriterOrNoRef(t *testing.T) {
 	// no rewriter set
 	svc, sender := seamSvc()
+	svc.SetOptouts(&fakeOptouts{}) // neutral: nobody has opted out — this test is about the rewriter, not opt-outs
 	_, _ = svc.Send(context.Background(), iface.NotificationRequest{Type: "marketing", Recipients: []iface.Recipient{{Address: "a@b.c"}}, BodyHTML: "<p>hi</p>", TrackingContactRef: "ref-1"})
 	if got := sender.lastBodyHTML(); got != "<p>hi</p>" {
 		t.Fatalf("no rewriter → unchanged; got %q", got)
 	}
 	// rewriter set but empty ref
 	svc2, sender2 := seamSvc()
+	svc2.SetOptouts(&fakeOptouts{}) // neutral: nobody has opted out — this test is about the rewriter, not opt-outs
 	svc2.SetEmailTrackingRewriter(rewriterFunc(func(_ context.Context, in iface.OutboundEmail) string { return "MUTATED" }))
 	_, _ = svc2.Send(context.Background(), iface.NotificationRequest{Type: "marketing", Recipients: []iface.Recipient{{Address: "a@b.c"}}, BodyHTML: "<p>hi</p>"})
 	if got := sender2.lastBodyHTML(); got != "<p>hi</p>" {
@@ -973,6 +976,7 @@ func TestDispatchEmailUnchangedWhenNoRewriterOrNoRef(t *testing.T) {
 
 func TestDispatchEmailRewriterPanicIsSafe(t *testing.T) {
 	svc, sender := seamSvc()
+	svc.SetOptouts(&fakeOptouts{}) // neutral: nobody has opted out — this test is about the rewriter, not opt-outs
 	svc.SetEmailTrackingRewriter(rewriterFunc(func(_ context.Context, _ iface.OutboundEmail) string { panic("boom") }))
 	if _, err := svc.Send(context.Background(), iface.NotificationRequest{Type: "marketing", Recipients: []iface.Recipient{{Address: "a@b.c"}}, BodyHTML: "<p>hi</p>", TrackingContactRef: "ref-1"}); err != nil {
 		t.Fatalf("panic must not fail the send: %v", err)
@@ -1142,6 +1146,7 @@ func TestNotificationService_Dispatch_ExplicitSender_EligibleSlugSends(t *testin
 
 func TestNotificationService_Dispatch_ExplicitSender_IneligibleType_ErrorFreeOfSecrets(t *testing.T) {
 	k := newKit(Options{})
+	k.svc.SetOptouts(&fakeOptouts{}) // neutral: nobody has opted out — this test is about sender eligibility, not opt-outs
 	k.resolver.profile = fullyPopulatedProfile("camp", []string{models.TypeTransactional})
 	res, err := k.svc.Send(context.Background(), iface.NotificationRequest{
 		Type:       models.TypeMarketing, // profile only allows transactional

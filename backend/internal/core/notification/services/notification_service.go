@@ -46,11 +46,13 @@ type NotificationService struct {
 	emailRewriter   iface.EmailTrackingRewriter
 	unsubscribeSink iface.MarketingUnsubscribeSink
 
-	// optouts is nil until SetOptouts wires it — the same nil-safe seam
-	// pattern the platform uses for the audit sink / KMS provider setters
-	// (see e.g. auth's PasswordAuthService.SetAuditSink). Left nil,
-	// dispatchEmail skips the opt-out check entirely, which keeps every
-	// call site built before this feature compiling and behaving as before.
+	// optouts is nil until SetOptouts wires it — the same post-construction
+	// setter shape the platform uses for the audit sink / KMS provider
+	// setters (see e.g. auth's PasswordAuthService.SetAuditSink), but NOT
+	// the same nil semantics: a nil audit sink means "no audit rows", while
+	// a nil opt-out seam would mean "ignore consent" if dispatchEmail let it
+	// through. It does not — see the fail-closed branch there. Transactional
+	// sends never touch this field regardless of whether it is wired.
 	optouts repository.MarketingOptoutRepository
 }
 
@@ -86,8 +88,10 @@ func NewNotificationService(
 }
 
 // SetOptouts wires the durable marketing opt-out repository
-// post-construction. Left nil (the default), dispatchEmail never consults
-// it and marketing sends behave exactly as before this feature existed.
+// post-construction. Left nil (the default), a marketing send fails closed
+// with ErrOptoutLookupUnavailable rather than skipping the check — an
+// unwired seam must never read as "no opt-outs exist". Transactional sends
+// are unaffected either way.
 func (s *NotificationService) SetOptouts(o repository.MarketingOptoutRepository) {
 	s.optouts = o
 }
@@ -293,8 +297,14 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 	//
 	// Fail-closed on purpose. If we cannot tell whether this address opted
 	// out, we do not send: an email withheld costs far less than one
-	// delivered to someone who asked us to stop.
-	if in.Type == models.TypeMarketing && s.optouts != nil {
+	// delivered to someone who asked us to stop. That includes the seam
+	// itself being unwired (s.optouts == nil): a nil opt-out repository is
+	// not "no check", it is "ignore consent", so it takes the same refusal
+	// path as a lookup error rather than silently letting marketing through.
+	if in.Type == models.TypeMarketing {
+		if s.optouts == nil {
+			return s.failSend(ctx, logDoc, SenderProfile{}, ErrOptoutLookupUnavailable)
+		}
 		optedOut, err := s.optouts.IsOptedOut(ctx, in.Recipient.Address, in.Category)
 		if err != nil {
 			return s.failSend(ctx, logDoc, SenderProfile{}, ErrOptoutLookupUnavailable)
@@ -490,6 +500,10 @@ func (s *NotificationService) Drivers() *DriverRegistry { return s.drivers }
 
 // Resolver exposes the sender resolver.
 func (s *NotificationService) Resolver() SenderResolver { return s.resolver }
+
+// Optouts exposes the marketing opt-out repository (tests, and module.go's
+// own wiring assertion — see notification package's Init wiring test).
+func (s *NotificationService) Optouts() repository.MarketingOptoutRepository { return s.optouts }
 
 // ---- SenderDirectory (ADR-0021 D6) -----------------------------------------
 //

@@ -113,8 +113,11 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 			},
 		},
 		{Name: models.NotificationMarketingOptoutsCollection, Indexes: []module.IndexSpec{
-			// One opt-out per address. Uniqueness is what makes the upsert
-			// idempotent under concurrency, not just under replay.
+			// One opt-out per address, enforced here. Under concurrency this
+			// index is what makes two racing upserts land on one document —
+			// Upsert (repository/optout_repository.go) swallows the loser's
+			// resulting duplicate-key error, which is what makes the call
+			// itself idempotent, not just the stored state.
 			{OrderedKeys: []module.IndexKey{{Field: "address", Direction: 1}}, Unique: true},
 		}},
 	}
