@@ -395,4 +395,5 @@ module compose and preview notification templates without importing this module'
 - [Root CLAUDE.md](../../../../CLAUDE.md) — module map and architecture
 - [`pkg/sdk/iface/interfaces.go`](../../../pkg/sdk/iface/interfaces.go) — `NotificationSender` + `SenderDirectory` interface definitions and the sender sentinels
 - [ADR-0019](../../../../docs/adr/0019-notification-multi-sender.md) — sender profiles, category routing, the driver seam
+- [ADR-0021](../../../../docs/adr/0021-explicit-sender-selection.md) — explicit sender selection under operator policy
 - [`docs/site/architecture/authentication-flow.mdx`](../../../../docs/site/architecture/authentication-flow.mdx) — how auth consumes this module

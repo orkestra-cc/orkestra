@@ -52,7 +52,7 @@ Three drivers ship in the base: `noop`, `smtp` (an unauthenticated internal rela
 
 ## Picking a sender explicitly
 
-Routing answers *which sender serves marketing mail*. It cannot answer *which of the three marketing senders this particular campaign should use* — and an installation with an events sender and a newsletter sender on different domains needs that second answer. A caller may therefore name a profile by slug, but only where the operator has allowed it.
+Routing answers *which sender serves marketing mail*. It cannot answer *which of the three marketing senders this particular campaign should use* — and an installation with an events sender and a newsletter sender on different domains needs that second answer. Since [ADR-0021](/adrs/explicit-sender-selection) a caller may name a profile by slug, but only where the operator has allowed it.
 
 **`Explicitly selectable for`** (`allowed_types`) is that permission, declared per profile and limited to `marketing` and `transactional`. Leave it empty — as every profile starts, and every profile that predates the feature — and the profile is **routing-only**: it carries the categories its patterns match and nothing may pick it by name. Fill it in and the profile becomes selectable for those send types, and is held to the same save-time completeness check a routing profile gets: a selectable profile with an unknown provider or a missing non-secret field is refused (`notification.sender_incomplete`), because a profile something can actually reach must be sound either way.
 
