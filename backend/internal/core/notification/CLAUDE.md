@@ -266,6 +266,7 @@ Registered in three groups with different middleware:
 ### Public (no auth)
 
 - `GET /v1/notifications/unsubscribe?token=<raw>` — consumes an unsubscribe token and opts the user out of the bound category (or `marketing` if the token has no category). Always returns a generic success message.
+- `POST /v1/notifications/unsubscribe` — RFC 8058 §3.2 one-click: the body a mail provider POSTs (`List-Unsubscribe=One-Click`, any content type) is captured via a Huma `RawBody []byte` field and never parsed — only `?token=` (or, failing that, a `{"token":...}` JSON body) matters. Same handler code path as the GET (`consumeUnsubscribe` in `handlers/notification_handler.go`), so the same generic answer. `RegisterPublicRoutes` explicitly sets `MaxBodyBytes: 4096` and `BodyReadTimeout: 5s` on this operation and turns `RequestBody.Required` back off after registering it — declaring `RawBody` opts a route out of Huma's own per-operation defaults (`ensureMaxBodyBytes`/`ensureBodyReadTimeout` only run on the typed `Body` branch) and forces a non-empty body by default, neither of which is what a public, unauthenticated, RFC-governed endpoint should inherit silently.
 
 ### User (`guest`+ role)
 
@@ -399,8 +400,30 @@ options (`WithOptouts`, `WithPreferences`, `WithUnsubscribeSink`,
 the notification service takes the unsubscribe service as a constructor argument,
 so the reference can only be resolved at call time.
 
-`ConsumeToken` + `MarkUsed` still exist for the current HTTP handler, which has not
-been rewired onto `Consume` yet.
+Both HTTP endpoints (`GET` and the RFC 8058 `POST`, `handlers/notification_handler.go`)
+call `Consume` through the same `consumeUnsubscribe` helper — neither reads the token
+document or orchestrates the preference/sink calls itself any more. `ConsumeToken` +
+`MarkUsed` remain on `UnsubscribeService` (and are still exercised by
+`services/unsubscribe_service_test.go`) but nothing in production code calls them any
+longer: `Consume` spends the token itself through `repository.ClaimToken`, not through
+the service-level `ConsumeToken`/`MarkUsed` pair.
+
+**Residual limit: a write-side outage during `Consume` is a real-vs-fake-token oracle.**
+An unknown token short-circuits before any write (`GetByHash` misses, `Consume` returns
+immediately) and answers 200; a valid, already-used or expired token reaches the opt-out
+`Upsert` and — only while the write path itself is failing — answers 500 instead. So for
+the duration of a database outage on the opt-out collection, the response code splits
+tokens that were ever issued from tokens that never existed. This is deliberate, not an
+oversight: the alternative is flattening a failed write to 200, which the endpoint must
+not do (a database that cannot record an opt-out must not report success — see the error
+contract above). Two things keep this out of "the disclosure the whole endpoint exists to
+prevent": it is not attacker-inducible (nobody chooses when the opt-out write is failing),
+and even a successful probe during an outage learns only "a token you already hold was
+issued at some point" — never an address, and never anything about a token nobody handed
+the prober. The 500 body itself carries none of `Consume`'s error text (see
+`handlers/notification_handler.go`'s `consumeUnsubscribe` — a public, unauthenticated
+route must not echo an internal error, e.g. a token UUID, to an anonymous caller), so the
+only channel is the status code, not the body.
 
 ## Unsubscribe reconciler
 

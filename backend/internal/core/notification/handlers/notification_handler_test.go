@@ -62,21 +62,6 @@ func (htPrefService) List(_ context.Context, _ string) ([]*models.PreferenceDoc,
 }
 func (htPrefService) Set(_ context.Context, _, _, _ string, _ bool) error { return nil }
 
-type htUnsubService struct {
-	doc    *models.UnsubscribeTokenDoc
-	docErr error
-}
-
-func (f *htUnsubService) IssueToken(_ context.Context, _, _, _, _ string) (string, error) {
-	return "raw", nil
-}
-func (f *htUnsubService) ConsumeToken(_ context.Context, _ string) (*models.UnsubscribeTokenDoc, error) {
-	return f.doc, f.docErr
-}
-func (f *htUnsubService) MarkUsed(_ context.Context, _ string) error { return nil }
-
-func (f *htUnsubService) Consume(_ context.Context, _ string) error { return nil }
-
 // htDriver accepts everything, behind a resolver answering with one noop
 // profile — the ADR-0019 shape that replaced the single email sender.
 type htDriver struct{}
@@ -88,18 +73,6 @@ func (htDriver) Send(context.Context, services.SenderProfile, services.EmailMess
 }
 func (htDriver) Capabilities() services.DriverCapabilities {
 	return services.DriverCapabilities{ListUnsubscribeHeaders: true}
-}
-
-// htCapturingSink records the arguments passed to OnMarketingUnsubscribe.
-type htCapturingSink struct {
-	addr, cat, refCtx string
-	n                 int
-	err               error
-}
-
-func (c *htCapturingSink) OnMarketingUnsubscribe(_ context.Context, a, cat, cx string) error {
-	c.addr, c.cat, c.refCtx, c.n = a, cat, cx, c.n+1
-	return c.err
 }
 
 func newHandlerTestSvc(unsubSvc services.UnsubscribeService) *services.NotificationService {
@@ -120,96 +93,14 @@ func newHandlerTestSvc(unsubSvc services.UnsubscribeService) *services.Notificat
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-
-func TestUnsubscribeHandler_FiresSink(t *testing.T) {
-	unsubSvc := &htUnsubService{
-		doc: &models.UnsubscribeTokenDoc{
-			Address:  "x@y.com",
-			Category: "marketing",
-			Context:  "ref-9",
-		},
-	}
-	svc := newHandlerTestSvc(unsubSvc)
-	sink := &htCapturingSink{}
-	svc.SetMarketingUnsubscribeSink(sink)
-	h := NewNotificationHandler(svc)
-
-	_, err := h.Unsubscribe(context.Background(), &unsubscribeRequest{Token: "any-token"})
-	if err != nil {
-		t.Fatalf("Unsubscribe: %v", err)
-	}
-	if sink.n != 1 {
-		t.Fatalf("sink called %d times, want 1", sink.n)
-	}
-	if sink.addr != "x@y.com" {
-		t.Fatalf("addr = %q, want x@y.com", sink.addr)
-	}
-	if sink.cat != "marketing" {
-		t.Fatalf("cat = %q, want marketing", sink.cat)
-	}
-	if sink.refCtx != "ref-9" {
-		t.Fatalf("refCtx = %q, want ref-9", sink.refCtx)
-	}
-}
-
-func TestUnsubscribeHandler_NilSink_IsNoOp(t *testing.T) {
-	// No sink wired — Unsubscribe must complete without panic.
-	unsubSvc := &htUnsubService{
-		doc: &models.UnsubscribeTokenDoc{Address: "a@b.com", Category: "marketing"},
-	}
-	svc := newHandlerTestSvc(unsubSvc)
-	h := NewNotificationHandler(svc)
-	if _, err := h.Unsubscribe(context.Background(), &unsubscribeRequest{Token: "tok"}); err != nil {
-		t.Fatalf("Unsubscribe with nil sink: %v", err)
-	}
-}
-
-func TestUnsubscribeHandler_SinkFailureDoesNotFailTheRecipient(t *testing.T) {
-	// A consumer that is down is not the recipient's problem: the answer
-	// stays the same generic success. What the failure must NOT do is
-	// disappear — that is what the sink's error return is for, and what the
-	// consume sequence acts on.
-	unsubSvc := &htUnsubService{
-		doc: &models.UnsubscribeTokenDoc{Address: "a@b.com", Category: "marketing"},
-	}
-	svc := newHandlerTestSvc(unsubSvc)
-	sink := &htCapturingSink{err: errors.New("sink down")}
-	svc.SetMarketingUnsubscribeSink(sink)
-	h := NewNotificationHandler(svc)
-
-	if _, err := h.Unsubscribe(context.Background(), &unsubscribeRequest{Token: "tok"}); err != nil {
-		t.Fatalf("a failing sink must not fail the unsubscribe: %v", err)
-	}
-	if sink.n != 1 {
-		t.Fatalf("sink called %d times, want 1", sink.n)
-	}
-}
-
-func TestUnsubscribeHandler_DefaultsEmptyCategoryToMarketing(t *testing.T) {
-	// If the token doc carries an empty Category, the handler defaults to
-	// "marketing" and the sink must receive that defaulted value.
-	unsubSvc := &htUnsubService{
-		doc: &models.UnsubscribeTokenDoc{
-			Address:  "z@z.com",
-			Category: "", // intentionally empty
-			Context:  "ctx-42",
-		},
-	}
-	svc := newHandlerTestSvc(unsubSvc)
-	sink := &htCapturingSink{}
-	svc.SetMarketingUnsubscribeSink(sink)
-	h := NewNotificationHandler(svc)
-
-	if _, err := h.Unsubscribe(context.Background(), &unsubscribeRequest{Token: "tok2"}); err != nil {
-		t.Fatalf("Unsubscribe: %v", err)
-	}
-	if sink.cat != "marketing" {
-		t.Fatalf("cat = %q after default, want marketing", sink.cat)
-	}
-	if sink.refCtx != "ctx-42" {
-		t.Fatalf("refCtx = %q, want ctx-42", sink.refCtx)
-	}
-}
+//
+// The handler no longer orchestrates ConsumeToken + PreferenceService.Set +
+// MarkUsed + FireMarketingUnsubscribe itself — that sequence now lives in
+// services.UnsubscribeService.Consume (see unsubscribe_service.go) and is
+// exhaustively covered there (unsubscribe_consume_test.go). What belongs at
+// this layer — that both endpoints call Consume, answer generically for
+// every token state, and surface a real Consume failure rather than
+// flattening it to success — is covered by unsubscribe_handler_test.go.
 
 const hostileSecret = "s3cr=t hunter2"
 
