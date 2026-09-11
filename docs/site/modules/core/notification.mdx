@@ -50,6 +50,21 @@ Three drivers ship in the base: `noop`, `smtp` (an unauthenticated internal rela
 
 **Delivery-log errors are bounded.** No string produced by a remote peer is ever stored: an SMTP rejection keeps only `smtp op=auth code=535`, a MailUp refusal `http=200 status=error code=5` — the server's text is dropped because a relay can echo the `AUTH` argument, and MailUp carries its credentials in the request body. Every row also carries `provider` and `senderSlug`, so "which sender failed" is answerable per message.
 
+## Picking a sender explicitly
+
+Routing answers *which sender serves marketing mail*. It cannot answer *which of the three marketing senders this particular campaign should use* — and an installation with an events sender and a newsletter sender on different domains needs that second answer. A caller may therefore name a profile by slug, but only where the operator has allowed it.
+
+**`Explicitly selectable for`** (`allowed_types`) is that permission, declared per profile and limited to `marketing` and `transactional`. Leave it empty — as every profile starts, and every profile that predates the feature — and the profile is **routing-only**: it carries the categories its patterns match and nothing may pick it by name. Fill it in and the profile becomes selectable for those send types, and is held to the same save-time completeness check a routing profile gets: a selectable profile with an unknown provider or a missing non-secret field is refused (`notification.sender_incomplete`), because a profile something can actually reach must be sound either way.
+
+A profile can be **selectable without routing anything** — `allowed_types: marketing`, no patterns. That is the useful shape for a second campaign sender: it never intercepts a category, it just becomes available in the picker. The rule that exactly one profile must declare `*` is a *routing* rule, so a roster like this does not trip it.
+
+The choice is re-checked at delivery, never taken on trust: slug grammar, the profile exists, the send's type is in its `allowed_types`, its driver is usable. A caller that pre-flighted and then went stale gets the same refusal as one that never checked. Failed rows also record `attemptedSenderSlug` — the slug as given, or the constant `invalid` when the input was malformed rather than merely wrong.
+
+:::warning Multi-tenant deployments
+Sender profiles are installation-global, and `allowed_types` makes a profile visible — label and `From:` address — to every internal tenant that can send campaigns. If your deployment has several internal tenants that must not see each other's sending identities, leave `allowed_types` empty on those profiles until per-tenant scoping ships; routing-only profiles are unaffected.
+:::
+
+
 ## Templates
 
 System templates ship as Go string constants and are seeded into MongoDB on `Start()`. After that **the database is the source of truth**. An admin overrides one with `PUT /v1/notifications/templates/{templateId}`, which flips `isSystem` to `false`; deleting the override reseeds the original on the next start.
