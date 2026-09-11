@@ -112,6 +112,11 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 				{Keys: map[string]int{"expiresAt": 1}, TTL: day30},
 			},
 		},
+		{Name: models.NotificationMarketingOptoutsCollection, Indexes: []module.IndexSpec{
+			// One opt-out per address. Uniqueness is what makes the upsert
+			// idempotent under concurrency, not just under replay.
+			{OrderedKeys: []module.IndexKey{{Field: "address", Direction: 1}}, Unique: true},
+		}},
 	}
 }
 
@@ -164,6 +169,7 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 	tmplRepo := repository.NewTemplateRepository(deps.DB)
 	prefRepo := repository.NewPreferenceRepository(deps.DB)
 	unsubRepo := repository.NewUnsubscribeRepository(deps.DB)
+	optoutRepo := repository.NewMarketingOptoutRepository(deps.DB)
 
 	// Register the notification PII producer with the DSR registry (created in
 	// main.go before InitAll) so the compliance DSR pipeline exports / erases a
@@ -229,6 +235,7 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 			DefaultLocale: defaultLocale,
 		},
 	)
+	m.svc.SetOptouts(optoutRepo)
 
 	m.handler = handlers.NewNotificationHandler(m.svc)
 

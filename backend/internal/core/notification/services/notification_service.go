@@ -40,10 +40,18 @@ type NotificationService struct {
 	drivers      *DriverRegistry
 	logger       *slog.Logger
 	opts         Options
+
 	// Nil by default. An addon pushes its implementation in at boot through
 	// the setters below; the base ships neither.
 	emailRewriter   iface.EmailTrackingRewriter
 	unsubscribeSink iface.MarketingUnsubscribeSink
+
+	// optouts is nil until SetOptouts wires it — the same nil-safe seam
+	// pattern the platform uses for the audit sink / KMS provider setters
+	// (see e.g. auth's PasswordAuthService.SetAuditSink). Left nil,
+	// dispatchEmail skips the opt-out check entirely, which keeps every
+	// call site built before this feature compiling and behaving as before.
+	optouts repository.MarketingOptoutRepository
 }
 
 func NewNotificationService(
@@ -75,6 +83,13 @@ func NewNotificationService(
 		logger:       logger,
 		opts:         opts,
 	}
+}
+
+// SetOptouts wires the durable marketing opt-out repository
+// post-construction. Left nil (the default), dispatchEmail never consults
+// it and marketing sends behave exactly as before this feature existed.
+func (s *NotificationService) SetOptouts(o repository.MarketingOptoutRepository) {
+	s.optouts = o
 }
 
 // IsConfigured keeps its pre-ADR-0019 meaning: the default ("*") profile
@@ -272,6 +287,26 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 		return &iface.NotificationResult{ID: logDoc.UUID, Status: logDoc.Status}, nil
 	}
 
+	// Durable opt-out (RFC 8058 one-click). This is checked for marketing
+	// only: a transactional message is not something a recipient can opt out
+	// of, and must not even pay the lookup.
+	//
+	// Fail-closed on purpose. If we cannot tell whether this address opted
+	// out, we do not send: an email withheld costs far less than one
+	// delivered to someone who asked us to stop.
+	if in.Type == models.TypeMarketing && s.optouts != nil {
+		optedOut, err := s.optouts.IsOptedOut(ctx, in.Recipient.Address, in.Category)
+		if err != nil {
+			return s.failSend(ctx, logDoc, SenderProfile{}, ErrOptoutLookupUnavailable)
+		}
+		if optedOut {
+			logDoc.Status = models.StatusSuppressed
+			logDoc.Error = "marketing_optout"
+			_ = s.logRepo.Create(ctx, logDoc)
+			return &iface.NotificationResult{ID: logDoc.UUID, Status: logDoc.Status}, nil
+		}
+	}
+
 	// An addon-provided rewriter may inject open-pixel + click trackers into
 	// the rendered HTML just before transport. nil rewriter / empty ref / non-HTML
 	// → unchanged. Best-effort: a panic must never break the send.
@@ -366,6 +401,10 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 // the bounded diagnostic; the driver's own error is never in the chain.
 var ErrSendFailed = errors.New("notification: send failed")
 
+// ErrOptoutLookupUnavailable: the durable opt-out list could not be read, so
+// the send was refused rather than risked.
+var ErrOptoutLookupUnavailable = errors.New("notification: marketing opt-out lookup unavailable")
+
 // trustedSentinels are the only errors a caller may test with errors.Is.
 // The local ones serve callers inside this module (the SendTest handler);
 // the iface ones serve every consumer that cannot import this package and
@@ -376,6 +415,7 @@ var ErrSendFailed = errors.New("notification: send failed")
 var trustedSentinels = []error{
 	ErrNoSenderForCategory, ErrSenderConfigUnavailable, ErrSenderNotFound, ErrUnknownDriver, ErrSenderNotConfigured,
 	iface.ErrSenderInvalid, iface.ErrSenderNotEligible, iface.ErrSenderNotFound, iface.ErrSenderUnavailable,
+	ErrOptoutLookupUnavailable,
 }
 
 // DispatchError is the only error dispatchEmail and SendTest return. Error()

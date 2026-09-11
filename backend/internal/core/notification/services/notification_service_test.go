@@ -176,11 +176,13 @@ type fakeDriver struct {
 	sendErr  error
 	sent     []EmailMessage
 	profiles []SenderProfile // the profile handed to each Send
+	sends    int             // count-only convenience alongside sent, for tests that just assert "did it reach the driver"
 }
 
 func (f *fakeDriver) Name() string                   { return f.name }
 func (f *fakeDriver) Requires() []ProfileRequirement { return f.requires }
 func (f *fakeDriver) Send(_ context.Context, p SenderProfile, msg EmailMessage) error {
+	f.sends++
 	f.sent = append(f.sent, msg)
 	f.profiles = append(f.profiles, p)
 	return f.sendErr
