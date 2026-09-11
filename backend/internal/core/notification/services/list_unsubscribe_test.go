@@ -378,3 +378,294 @@ func TestDispatch_MarketingRefusesToSendWhenTokenIssuanceFails(t *testing.T) {
 		t.Fatal("the driver must never be reached without a valid unsubscribe token")
 	}
 }
+
+// A literal '<' or '>' in the configured base is absorbed into url.Parse's
+// Host with no error and no path/query/fragment — the same shape oneClickBase
+// otherwise treats as usable — yet a '>' would prematurely close the
+// angle-bracket delimiter RFC 8058 requires around the header value, and a
+// '<' would open a second one where none belongs. Refused in BOTH postures,
+// exactly like the embedded-CRLF case above: this is operator-typed config
+// carrying header-syntax-breaking characters, not a missing setting.
+func TestDispatch_MarketingRefusesToSendWithAnEmbeddedAngleBracket(t *testing.T) {
+	const injected = "https://api.example>evil"
+	for _, tc := range []struct {
+		name string
+		svc  func() (*NotificationService, *headerDriverCapture)
+	}{
+		{"requirement on", func() (*NotificationService, *headerDriverCapture) { return newHeaderTestService(t, injected) }},
+		{"requirement waived", func() (*NotificationService, *headerDriverCapture) { return newWaivedHeaderTestService(t, injected) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, driver := tc.svc()
+
+			_, err := svc.Send(context.Background(), marketingTo("ada@example.test"))
+			if err == nil {
+				t.Fatal("expected the send to be refused")
+			}
+			if !errors.Is(err, iface.ErrSenderInvalid) {
+				t.Fatalf("expected iface.ErrSenderInvalid, got %v", err)
+			}
+			if driver.sends != 0 {
+				t.Fatal("the driver must never be reached when the configured base carries an unescaped angle bracket")
+			}
+		})
+	}
+}
+
+// ---- unsubscribe_page_url: the footer link a person clicks ---------------
+//
+// There are two different affordances in a marketing email, and these tests
+// keep them straight. The List-Unsubscribe header is for the mail client's
+// own one-click button — there is no browser involved, so it must always
+// name the API's POST endpoint, never a page. The footer link is for a
+// person who scrolls down and clicks; when a hosted page is configured, that
+// link — {{.UnsubscribeURL}} in a template's footer — points there instead,
+// with the raw token in the URL fragment so it never reaches the page's
+// access logs.
+
+// newHeaderKitWithPage is newHeaderKit's sibling: same shape, but also wires
+// unsubscribe_page_url so a test can inspect what {{.UnsubscribeURL}} became.
+func newHeaderKitWithPage(t *testing.T, apiBase, pageURL string) (svc *NotificationService, driver *headerDriverCapture, unsub *fakeUnsubService, tmpl *fakeTemplateService) {
+	t.Helper()
+	driver = &headerDriverCapture{}
+	unsub = &fakeUnsubService{token: "raw-token"}
+	tmpl = &fakeTemplateService{}
+	resolver := &fakeResolver{profile: SenderProfile{Slug: "default", Provider: "capture", Categories: []string{"*"}}}
+	svc = NewNotificationService(
+		newFakeNotifRepo(), tmpl, &fakePrefService{can: true}, unsub,
+		resolver, NewDriverRegistry(driver), discardLogger(),
+		Options{PublicAPIBaseURL: apiBase, UnsubscribePageURL: pageURL},
+	)
+	svc.SetOptouts(&fakeOptouts{})
+	return svc, driver, unsub, tmpl
+}
+
+func TestSendTemplated_UnsubscribeURLPointsAtTheHostedPageWithTokenInFragmentWhenConfigured(t *testing.T) {
+	cases := []struct {
+		name string
+		page string
+	}{
+		{"bare origin", "https://public.example"},
+		{"a single trailing slash normalizes rather than doubling up", "https://public.example/"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			svc, driver, _, tmpl := newHeaderKitWithPage(t, "https://api.example", c.page)
+			tmpl.tmpl = &models.TemplateDoc{TemplateID: "tpl", Locale: "en"}
+			tmpl.rendered = &Rendered{Subject: "rendered", BodyText: "txt", BodyHTML: "<p>html</p>"}
+
+			_, err := svc.SendTemplated(context.Background(), iface.TemplatedNotificationRequest{
+				TemplateID: "tpl",
+				Type:       models.TypeTransactional,
+				Recipients: []iface.Recipient{{Address: "ada@example.test"}},
+			})
+			if err != nil {
+				t.Fatalf("SendTemplated: %v", err)
+			}
+			wantSubject := "[unsub=https://public.example/u#raw-token] rendered"
+			if driver.last.Subject != wantSubject {
+				t.Fatalf("UnsubscribeURL = %q, want %q", driver.last.Subject, wantSubject)
+			}
+		})
+	}
+}
+
+func TestSendTemplated_UnsubscribeURLStaysTheAPIEndpointWithoutAPageConfigured(t *testing.T) {
+	svc, driver, _, tmpl := newHeaderKitWithPage(t, "https://api.example", "")
+	tmpl.tmpl = &models.TemplateDoc{TemplateID: "tpl", Locale: "en"}
+	tmpl.rendered = &Rendered{Subject: "rendered", BodyText: "txt", BodyHTML: "<p>html</p>"}
+
+	_, err := svc.SendTemplated(context.Background(), iface.TemplatedNotificationRequest{
+		TemplateID: "tpl",
+		Type:       models.TypeTransactional,
+		Recipients: []iface.Recipient{{Address: "ada@example.test"}},
+	})
+	if err != nil {
+		t.Fatalf("SendTemplated: %v", err)
+	}
+	wantSubject := "[unsub=/notifications/unsubscribe?token=raw-token] rendered"
+	if driver.last.Subject != wantSubject {
+		t.Fatalf("UnsubscribeURL without a configured page = %q, want %q", driver.last.Subject, wantSubject)
+	}
+}
+
+// A page URL that is not a bare https origin can never work as a link — a
+// query string would swallow the fragment, a path would relocate the page
+// under a route it does not own, and an embedded CRLF or angle bracket is
+// operator-typed config that must not slip through unexamined. All of these
+// fall back to the plain API link — a clean omission, not a dead page link —
+// and, crucially, none of them may ever block the send: this footer renders
+// on transactional templates too, and a typo in an optional cosmetic field
+// must never be able to stop a password-reset email from going out.
+func TestSendTemplated_UnsubscribeURLFallsBackCleanlyOnAMalformedPageURL(t *testing.T) {
+	cases := []struct {
+		name string
+		page string
+	}{
+		{"path", "https://public.example/some/path"},
+		{"query string", "https://public.example?x=1"},
+		{"fragment", "https://public.example#already-has-one"},
+		{"double trailing slash", "https://public.example//"},
+		{"not https", "http://public.example"},
+		{"embedded CRLF", "https://public.example\r\nX-Injected: 1"},
+		{"embedded angle bracket", "https://public.example>evil"},
+		{"whitespace only", "   "},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			svc, driver, _, tmpl := newHeaderKitWithPage(t, "https://api.example", c.page)
+			tmpl.tmpl = &models.TemplateDoc{TemplateID: "tpl", Locale: "en"}
+			tmpl.rendered = &Rendered{Subject: "rendered", BodyText: "txt", BodyHTML: "<p>html</p>"}
+
+			res, err := svc.SendTemplated(context.Background(), iface.TemplatedNotificationRequest{
+				TemplateID: "tpl",
+				Type:       models.TypeTransactional,
+				Recipients: []iface.Recipient{{Address: "ada@example.test"}},
+			})
+			if err != nil {
+				t.Fatalf("SendTemplated: %v", err)
+			}
+			if res.Status != models.StatusSent {
+				t.Fatalf("a malformed unsubscribe_page_url must never block the send, got status %q", res.Status)
+			}
+			wantSubject := "[unsub=/notifications/unsubscribe?token=raw-token] rendered"
+			if driver.last.Subject != wantSubject {
+				t.Fatalf("a malformed unsubscribe_page_url must fall back to the API link rather than ship a broken one, got %q", driver.last.Subject)
+			}
+		})
+	}
+}
+
+// The footer link must hot-reload too, for the same reason the one-click
+// requirement does (see TestDispatch_TheRequirementIsReadPerSendNotCapturedAtStartup
+// in preflight_unsubscribe_test.go, which this test mirrors): this module
+// declares HotReloadConfig() == true, and its admin surface has no
+// per-field way to say unsubscribe_page_url is the one exception in its
+// group. A value captured at Init would leave an operator who just set it
+// seeing a 200 with the footer still pointing at the old destination, with
+// nothing anywhere saying why.
+func TestSendTemplated_UnsubscribeURLIsReadPerSendNotCapturedAtStartup(t *testing.T) {
+	// Starts with no page configured.
+	policy := OneClickPolicy{PublicAPIBaseURL: "https://api.example"}
+	driver := &headerDriverCapture{}
+	unsub := &fakeUnsubService{token: "raw-token"}
+	tmpl := &fakeTemplateService{
+		tmpl:     &models.TemplateDoc{TemplateID: "tpl", Locale: "en"},
+		rendered: &Rendered{Subject: "rendered", BodyText: "txt", BodyHTML: "<p>html</p>"},
+	}
+	resolver := &fakeResolver{profile: SenderProfile{Slug: "default", Provider: "capture", Categories: []string{"*"}}}
+	svc := NewNotificationService(
+		newFakeNotifRepo(), tmpl, &fakePrefService{can: true}, unsub,
+		resolver, NewDriverRegistry(driver), discardLogger(),
+		Options{
+			// Deliberately contradicting the source: a stale static value
+			// must never win over the live one.
+			UnsubscribePageURL: "https://stale.example",
+			OneClickSource:     func(context.Context) OneClickPolicy { return policy },
+		},
+	)
+	svc.SetOptouts(&fakeOptouts{})
+
+	send := func() {
+		t.Helper()
+		if _, err := svc.SendTemplated(context.Background(), iface.TemplatedNotificationRequest{
+			TemplateID: "tpl",
+			Type:       models.TypeTransactional,
+			Recipients: []iface.Recipient{{Address: "ada@example.test"}},
+		}); err != nil {
+			t.Fatalf("SendTemplated: %v", err)
+		}
+	}
+
+	// 1. No page configured yet: the footer stays the API link, proving the
+	//    live source — not the stale static Options field — decided.
+	// (fakeTemplateService.Render prepends onto f.rendered.Subject on every
+	// call, so HasPrefix — not an exact match — is what a second send below
+	// can still assert against.)
+	send()
+	wantNoPage := "[unsub=/notifications/unsubscribe?token=raw-token] "
+	if !strings.HasPrefix(driver.last.Subject, wantNoPage) {
+		t.Fatalf("before configuring a page: Subject = %q, want prefix %q", driver.last.Subject, wantNoPage)
+	}
+
+	// 2. The operator sets the page URL. The very next templated send must
+	//    render the new footer, with no restart.
+	policy = OneClickPolicy{PublicAPIBaseURL: "https://api.example", UnsubscribePageURL: "https://public.example"}
+	send()
+	wantPage := "[unsub=https://public.example/u#raw-token] "
+	if !strings.HasPrefix(driver.last.Subject, wantPage) {
+		t.Fatalf("after configuring a page: Subject = %q, want prefix %q", driver.last.Subject, wantPage)
+	}
+}
+
+// footerCaptureTemplateService embeds the shared template fake (for Get and
+// friends) but renders UnsubscribeURL directly into the message body instead
+// of just the subject — the shared fake's embed-into-subject trick is enough
+// for the tests above, but the test below inspects the body, which is where
+// a human actually reads the footer link from.
+type footerCaptureTemplateService struct {
+	*fakeTemplateService
+}
+
+func (f *footerCaptureTemplateService) Render(_ *models.TemplateDoc, data map[string]any) (*Rendered, error) {
+	u, _ := data["UnsubscribeURL"].(string)
+	return &Rendered{Subject: "S", BodyText: "Unsubscribe: " + u, BodyHTML: "<p>Unsubscribe: " + u + "</p>"}, nil
+}
+
+// pageFooterService fronts SendTemplated behind Send's exact signature: the
+// footer link only exists on the templated path (Send has no template to
+// carry a footer in), so this lets the test below issue what reads like an
+// ordinary marketing Send call while actually exercising the path that
+// renders {{.UnsubscribeURL}}.
+type pageFooterService struct {
+	*NotificationService
+	templateID string
+}
+
+func (p *pageFooterService) Send(ctx context.Context, req iface.NotificationRequest) (*iface.NotificationResult, error) {
+	return p.SendTemplated(ctx, iface.TemplatedNotificationRequest{
+		TemplateID: p.templateID,
+		Type:       req.Type,
+		Recipients: req.Recipients,
+	})
+}
+
+// newHeaderTestServiceWithPage builds a service with both the API base URL
+// (what the header is built on) and a hosted unsubscribe page URL (what the
+// footer link is built on) configured, so a test can prove the two never
+// point at the same place.
+func newHeaderTestServiceWithPage(t *testing.T, apiBase, pageURL string) (*pageFooterService, *headerDriverCapture) {
+	t.Helper()
+	driver := &headerDriverCapture{}
+	unsub := &fakeUnsubService{token: "raw-token"}
+	tmpl := &footerCaptureTemplateService{fakeTemplateService: &fakeTemplateService{tmpl: &models.TemplateDoc{TemplateID: "tpl", Locale: "en"}}}
+	resolver := &fakeResolver{profile: SenderProfile{Slug: "default", Provider: "capture", Categories: []string{"*"}}}
+	svc := NewNotificationService(
+		newFakeNotifRepo(), tmpl, &fakePrefService{can: true}, unsub,
+		resolver, NewDriverRegistry(driver), discardLogger(),
+		Options{PublicAPIBaseURL: apiBase, UnsubscribePageURL: pageURL},
+	)
+	svc.SetOptouts(&fakeOptouts{})
+	return &pageFooterService{NotificationService: svc, templateID: "tpl"}, driver
+}
+
+func TestHeaderAlwaysPointsAtTheAPIEvenWhenAPageIsConfigured(t *testing.T) {
+	svc, driver := newHeaderTestServiceWithPage(t, "https://api.example", "https://public.example")
+
+	if _, err := svc.Send(context.Background(), marketingTo("ada@example.test")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	lu := driver.last.Headers["List-Unsubscribe"]
+	if strings.Contains(lu, "public.example") {
+		t.Fatalf("the header must never point at the page: the one-click flow has no browser. %q", lu)
+	}
+	if !strings.Contains(lu, "api.example/v1/notifications/unsubscribe") {
+		t.Fatalf("the header must point at the API's POST endpoint, got %q", lu)
+	}
+	// The page, on the other hand, is exactly what a person clicking from the
+	// footer sees, and the token reaches it in the fragment so it never ends
+	// up in the page's access logs.
+	if !strings.Contains(driver.last.BodyText+driver.last.BodyHTML, "https://public.example/u#") {
+		t.Fatal("the footer must point at the page, with the token in the fragment")
+	}
+}

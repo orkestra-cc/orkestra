@@ -46,9 +46,17 @@ func (m *NotificationModule) ValidateConfigActivation(_ context.Context, target 
 // A read that fails yields an empty map, which oneClickPolicy resolves
 // through the schema fallback to the "true" default: unreadable
 // configuration means the requirement is in force, never that it is off.
+// UnsubscribePageURL resolves the same way — empty on an unreadable
+// configuration, which NotificationService.unsubscribeURL treats exactly
+// like "not configured": the footer falls back to the API link, never a
+// stale or broken page URL.
 //
-// Cost is one config read per marketing send, matching what the sender
-// resolver's snapshot already does; a transactional send never calls this.
+// Cost is one config read per marketing send for the one-click decision
+// (Waived + PublicAPIBaseURL), and — since UnsubscribePageURL rides on this
+// same struct — one additional read per TEMPLATED send of ANY type, because
+// the footer link this field feeds renders on transactional templates too.
+// A non-templated Send never calls this at all, matching the sender
+// resolver's snapshot cost model.
 func (m *NotificationModule) livePolicy(ctx context.Context) services.OneClickPolicy {
 	var values map[string]string
 	if m.configService != nil {
@@ -59,22 +67,31 @@ func (m *NotificationModule) livePolicy(ctx context.Context) services.OneClickPo
 	return m.oneClickPolicy(values)
 }
 
-// oneClickPolicy reads the one-click unsubscribe requirement out of a
-// config map the way the RUNTIME reads it — the same function serves the
-// save-time validator and livePolicy above, so validation and dispatch
-// cannot resolve the same two keys differently. Refusing a save over a base
-// URL the deployment supplies through NOTIFICATION_PUBLIC_API_BASE_URL would
-// be a false alarm, and treating an absent require_one_click_unsubscribe as
+// oneClickPolicy reads the one-click unsubscribe requirement — and, riding
+// along on the same struct, the optional hosted unsubscribe page URL — out
+// of a config map the way the RUNTIME reads it. The same function serves
+// the save-time validator and livePolicy above, so validation and dispatch
+// cannot resolve the same keys differently. Refusing a save over a base URL
+// the deployment supplies through NOTIFICATION_PUBLIC_API_BASE_URL would be
+// a false alarm, and treating an absent require_one_click_unsubscribe as
 // "off" would let a document written before the field existed slip past the
 // rule it was added for.
 //
 // Waived is the inverse of the field, and only an explicit, recognisably
 // true value keeps the requirement on — so anything unparseable, like the
 // empty string, lands on "required" rather than "off".
+//
+// UnsubscribePageURL has no such inversion or admissibility rule of its
+// own — effectiveValue's ordinary stored→EnvVar→Default resolution is
+// enough, because NotificationService.unsubscribeURL already treats
+// anything that is not a bare https origin (including empty, and including
+// a value that is whitespace-only after TrimSpace) as "not configured" and
+// falls back to the API link.
 func (m *NotificationModule) oneClickPolicy(values map[string]string) services.OneClickPolicy {
 	return services.OneClickPolicy{
-		Waived:           !configTrue(m.effectiveValue(values, requireOneClickKey)),
-		PublicAPIBaseURL: m.effectiveValue(values, services.PublicAPIBaseURLField),
+		Waived:             !configTrue(m.effectiveValue(values, requireOneClickKey)),
+		PublicAPIBaseURL:   m.effectiveValue(values, services.PublicAPIBaseURLField),
+		UnsubscribePageURL: m.effectiveValue(values, services.UnsubscribePageURLField),
 	}
 }
 

@@ -182,6 +182,8 @@ func (m *NotificationModule) ConfigSchema() []module.ConfigField {
 		{Key: "email.smtp.tls_mode", Label: "TLS mode", Group: "delivery", Type: module.FieldEnum, Options: []string{"starttls", "tls", "none"}, Default: "starttls", DependsOn: smtpOnly, EnvVar: "SMTP_TLS_MODE"},
 		{Key: services.PublicAPIBaseURLField, Label: "Public API base URL", Group: "delivery", Type: module.FieldString, EnvVar: "NOTIFICATION_PUBLIC_API_BASE_URL",
 			Description: "The API's own https origin (e.g. https://api.example.com), used only to build the RFC 8058 List-Unsubscribe header on marketing mail. Not derived automatically: PlatformInfo exposes the frontend origin, not the API's, and a request's Host header cannot be trusted for a URL that will sit in a recipient's mailbox for months. Empty by default. While it is empty AND \"Require one-click unsubscribe\" below is on — both are the defaults — no marketing sender profile can be saved and no marketing message is sent; turning that requirement off instead sends marketing with no unsubscribe header."},
+		{Key: services.UnsubscribePageURLField, Label: "Hosted unsubscribe page URL", Group: "delivery", Type: module.FieldString, EnvVar: "NOTIFICATION_UNSUBSCRIBE_PAGE_URL",
+			Description: "Optional. The public API base URL above is for the mail client's own one-click button — there is no browser involved, so it is never a page a person can look at. Set this to a hosted page's own https origin (e.g. https://unsubscribe.example.com) to give the footer link in every templated email's footer somewhere a human actually clicks: a sentence explaining what is about to happen, and a button pressed deliberately. This repository does not build that page — a deployment that sets this must provide one, and it must (1) read the single-use token from the URL FRAGMENT, never the query string, so it never reaches the page's access logs, a proxy in front of it, or a Referer header it might leak onward; (2) never call the API automatically on page load — the token is single-use and mail scanners follow links the moment a message arrives; and (3) POST to /v1/notifications/unsubscribe only when the visitor presses a button. Empty by default, in which case the footer link stays the direct API GET link it has always been. A value that is not a bare https origin (no path, query string, or fragment) is treated the same as empty — a clean fallback rather than a broken link — and never blocks a send: this footer renders on transactional templates too."},
 		{Key: requireOneClickKey, Label: "Require one-click unsubscribe", Group: "delivery", Type: module.FieldBool, Default: "true", EnvVar: "NOTIFICATION_REQUIRE_ONE_CLICK_UNSUBSCRIBE",
 			Description: "On by default. While it is on, a sender profile may be used for marketing only if its provider can add the RFC 8058 one-click unsubscribe headers and the public API base URL above is set — and a marketing message that would leave without them is refused instead of sent. " +
 				"Turning this off does not simply skip a check: marketing email will then be delivered WITHOUT a one-click unsubscribe. Large mailbox providers require one from bulk senders and penalise domains that omit it, and giving recipients an easy way to withdraw consent is a legal requirement for commercial email in several jurisdictions, so turn it off only if you meet that obligation another way."},
@@ -275,12 +277,17 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 		appName = "Orkestra"
 	}
 	supportEmail := deps.GetConfig("notification", "app.support_email")
-	// The one-click requirement and the base URL the header is built on are
-	// NOT captured here. They are read per marketing send through
-	// m.livePolicy, because this module declares HotReloadConfig() == true:
-	// a config write leaves no restart-required flag, so an operator who
+	// The one-click requirement, the base URL the header is built on, and
+	// the optional hosted unsubscribe page URL the footer link is built on
+	// are NOT captured here. All three are read per send through
+	// m.livePolicy (services.OneClickPolicy), because this module declares
+	// HotReloadConfig() == true: a config write leaves no restart-required
+	// flag, and this admin surface has no per-field way to say that one
+	// field in the "delivery" group is the exception. An operator who
 	// switches require_one_click_unsubscribe ON must see marketing start
-	// being refused immediately, not after the next restart.
+	// being refused immediately; an operator who sets the page URL must see
+	// the very next templated send's footer point at it — neither after the
+	// next restart.
 	m.configService = deps.ConfigService
 
 	// Template lookup is exact on (templateID, locale) with no fallback, so a

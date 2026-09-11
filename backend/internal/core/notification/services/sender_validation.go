@@ -20,6 +20,15 @@ var allowedSendTypes = map[string]bool{"marketing": true, "transactional": true}
 // from, and module.go declares it — one spelling, two readers.
 const PublicAPIBaseURLField = "public_api_base_url"
 
+// UnsubscribePageURLField is the module-level config key naming the optional
+// hosted page a person reaches by clicking the unsubscribe link in an
+// email's footer — as opposed to PublicAPIBaseURLField above, which only a
+// mail client's own automatic one-click button ever talks to. module.go
+// declares it in ConfigSchema; NotificationService.Options.UnsubscribePageURL
+// carries the resolved value through to SendTemplated's
+// {{.UnsubscribeURL}} footer.
+const UnsubscribePageURLField = "unsubscribe_page_url"
+
 // OneClickPolicy is the RFC 8058 one-click unsubscribe requirement as one
 // value. The save-time gate and the dispatch chokepoint share it, so they
 // agree on what "one-click is guaranteed" MEANS — but not on what they apply
@@ -45,6 +54,17 @@ const PublicAPIBaseURLField = "public_api_base_url"
 type OneClickPolicy struct {
 	Waived           bool
 	PublicAPIBaseURL string
+
+	// UnsubscribePageURL rides along on this same struct purely so it
+	// hot-reloads through the same mechanism as the two fields above
+	// (module.go's livePolicy, read fresh on every call rather than
+	// captured at Init) — it plays NO part in gap() or oneClickAdmissible()
+	// below. The RFC 8058 header those compute is unrelated to whether a
+	// hosted unsubscribe page is configured: this field is consulted only
+	// by NotificationService.SendTemplated, to build the FOOTER link a
+	// person clicks, never the header a mail client's one-click button
+	// POSTs to.
+	UnsubscribePageURL string
 }
 
 // oneClickGap names what stops a marketing message from carrying a one-click

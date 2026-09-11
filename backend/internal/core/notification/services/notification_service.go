@@ -42,6 +42,38 @@ type Options struct {
 	// when this is empty, non-https, or unsafe.
 	PublicAPIBaseURL string
 
+	// UnsubscribePageURL is the optional hosted page a PERSON reaches by
+	// clicking the unsubscribe link in an email's footer — the
+	// {{.UnsubscribeURL}} template variable SendTemplated computes. This is
+	// deliberately a different field from PublicAPIBaseURL above: that one is
+	// for the mail client's own automatic one-click POST, where there is no
+	// browser and no human in the loop; this one is for a person who scrolls
+	// to the bottom and clicks, and who deserves a page — a sentence
+	// explaining what is about to happen, and a button pressed deliberately.
+	//
+	// Empty by default, in which case {{.UnsubscribeURL}} stays exactly what
+	// it has always been: the direct API GET link built by buildURL. When
+	// set, it must validate as a bare https origin — the same rule
+	// oneClickBase applies to PublicAPIBaseURL — or it is treated as if it
+	// were empty: a clean fallback to the API link, never a broken page URL,
+	// and never a reason to refuse the send. That last point matters because
+	// this value feeds every templated send's footer, transactional included
+	// (see SendTemplated), so a typo in this optional, cosmetic field must
+	// never be able to stop a password-reset email from going out.
+	//
+	// This field is consulted only as the FALLBACK oneClickPolicy uses when
+	// OneClickSource is nil (services built directly, e.g. most tests in
+	// this package). In production it is not captured at Init at all — like
+	// PublicAPIBaseURL, it hot-reloads through OneClickSource/livePolicy,
+	// because its two immediate neighbours in the "delivery" config group
+	// (public_api_base_url, require_one_click_unsubscribe) already hot-reload
+	// and this module's admin surface has no per-field way to tell an
+	// operator that one field in the group is the exception: a value
+	// captured at Init would leave someone who just set this seeing a 200
+	// and a footer that keeps pointing at the old destination, with nothing
+	// anywhere saying why.
+	UnsubscribePageURL string
+
 	// OneClickWaived is the INVERSE of the require_one_click_unsubscribe
 	// config field, stored inverted so this struct's zero value fails
 	// closed: an Options built without a thought for the requirement
@@ -275,7 +307,12 @@ func (s *NotificationService) SendTemplated(ctx context.Context, req iface.Templ
 		// category is a fixed, non-secret routing string.
 		s.logger.Warn("notification: failed to issue unsubscribe token", slog.String("category", req.Category))
 	}
-	data["UnsubscribeURL"] = s.buildURL(fmt.Sprintf("/notifications/unsubscribe?token=%s", unsubToken))
+	// The live policy read (not s.opts.UnsubscribePageURL directly) is what
+	// makes the footer link hot-reload: unrelated to marketing admissibility
+	// — this runs for every templated send, transactional included — but it
+	// shares oneClickPolicy's plumbing so an operator who sets this field
+	// sees the very next send pick it up, with no restart.
+	data["UnsubscribeURL"] = s.unsubscribeURL(s.oneClickPolicy(ctx).UnsubscribePageURL, unsubToken)
 	data["PreferencesURL"] = s.buildURL("/account/notifications")
 
 	rendered, err := s.tmplService.Render(tmpl, data)
@@ -599,7 +636,11 @@ func (s *NotificationService) oneClickPolicy(ctx context.Context) OneClickPolicy
 	if s.opts.OneClickSource != nil {
 		return s.opts.OneClickSource(ctx)
 	}
-	return OneClickPolicy{Waived: s.opts.OneClickWaived, PublicAPIBaseURL: s.opts.PublicAPIBaseURL}
+	return OneClickPolicy{
+		Waived:             s.opts.OneClickWaived,
+		PublicAPIBaseURL:   s.opts.PublicAPIBaseURL,
+		UnsubscribePageURL: s.opts.UnsubscribePageURL,
+	}
 }
 
 // trustedSentinels are the only errors a caller may test with errors.Is.
@@ -681,15 +722,16 @@ const (
 	// send over it.
 	baseURLNotConfigured
 	// baseURLUnsafe: the value contains an embedded CR or LF — the classic
-	// header-injection vector. dispatchEmail refuses the send rather than
-	// risk it.
+	// header-injection vector — or an unescaped '<' or '>'. dispatchEmail
+	// refuses the send rather than risk it.
 	baseURLUnsafe
 )
 
-// oneClickBase validates and normalizes public_api_base_url for use inside
-// an RFC 8058 List-Unsubscribe header. A single trailing slash is stripped
-// so the built URL never doubles up ".../v1/...". base is only meaningful
-// when status == baseURLUsable.
+// oneClickBase validates and normalizes public_api_base_url (and, reusing
+// the exact same rule, unsubscribe_page_url) for use inside an RFC 8058
+// List-Unsubscribe header or a footer link. A single trailing slash is
+// stripped so the built URL never doubles up ".../v1/..." or "/u#...". base
+// is only meaningful when status == baseURLUsable.
 //
 // Beyond the https-scheme-with-a-host check, this also rejects anything
 // carrying a path, query string, or fragment. Any of those would produce a
@@ -704,9 +746,20 @@ const (
 // catches a double trailing slash too: "https://api.example//" parses with
 // Path "//", which TrimSuffix's single-slash strip would otherwise miss,
 // yielding a doubled "//v1/".
+//
+// A literal '<' or '>' is rejected up front, before url.Parse ever sees it:
+// appended straight onto the host (e.g. "https://api.example>evil") it is
+// absorbed into u.Host with no error and an empty path/query/fragment — the
+// exact shape this function otherwise calls usable — yet RFC 8058 requires
+// the header value be wrapped in angle brackets, so a stray '>' in the base
+// would prematurely close that delimiter and a stray '<' would open a second
+// one where none belongs. Grouped with the CR/LF check because it is the
+// same class of problem: operator-typed config carrying syntax-breaking
+// characters for the exact wire format this value is going to be embedded
+// in, not merely "not configured yet".
 func oneClickBase(raw string) (base string, status baseURLStatus) {
 	trimmed := strings.TrimSpace(raw)
-	if strings.ContainsAny(trimmed, "\r\n") {
+	if strings.ContainsAny(trimmed, "\r\n<>") {
 		return "", baseURLUnsafe
 	}
 	if trimmed == "" {
@@ -727,6 +780,33 @@ func (s *NotificationService) buildURL(path string) string {
 		return path
 	}
 	return s.opts.URLBuilder(path)
+}
+
+// unsubscribeURL is the value SendTemplated puts behind {{.UnsubscribeURL}}
+// in a template's footer — the link a PERSON clicks, never the
+// List-Unsubscribe header a mail client's one-click button POSTs to (that
+// one is built at the dispatch chokepoint in dispatchEmail, always against
+// OneClickPolicy.PublicAPIBaseURL, never against pageURL below). pageURL is
+// passed in rather than read off s.opts directly because the caller reads it
+// live through oneClickPolicy — the same hot-reload path PublicAPIBaseURL
+// already uses — so a value this function itself resolved from a stale
+// Options snapshot could never happen by construction.
+//
+// With no hosted page configured, or one that does not validate as a bare
+// https origin, this stays the direct API GET link it has always been —
+// oneClickBase applies the exact same rule here it applies to
+// PublicAPIBaseURL, so an operator typo in either field is either used
+// cleanly or quietly treated as not set, never shipped as a broken link.
+//
+// With a page configured, the raw token rides in the URL FRAGMENT
+// ("<page>/u#<token>"), not the query string: a fragment is never sent to a
+// server, so it never reaches the page's access logs, any proxy in front of
+// it, or a Referer header the page might leak it through.
+func (s *NotificationService) unsubscribeURL(pageURL, token string) string {
+	if base, status := oneClickBase(pageURL); status == baseURLUsable {
+		return base + "/u#" + token
+	}
+	return s.buildURL(fmt.Sprintf("/notifications/unsubscribe?token=%s", token))
 }
 
 // TemplateService exposes the template service for admin endpoints.
