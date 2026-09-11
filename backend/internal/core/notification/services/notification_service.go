@@ -13,6 +13,7 @@ import (
 	"github.com/orkestra/backend/internal/core/notification/repository"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // URLBuilder renders the absolute URLs used inside templates.
@@ -155,6 +156,7 @@ func (s *NotificationService) Send(ctx context.Context, req iface.NotificationRe
 		BodyHTML:           req.BodyHTML,
 		IdempotencyKey:     req.IdempotencyKey,
 		TrackingContactRef: req.TrackingContactRef,
+		Sender:             req.Sender,
 	})
 }
 
@@ -225,6 +227,7 @@ func (s *NotificationService) SendTemplated(ctx context.Context, req iface.Templ
 		TemplateID:         tmpl.TemplateID,
 		IdempotencyKey:     req.IdempotencyKey,
 		TrackingContactRef: req.TrackingContactRef,
+		Sender:             req.Sender,
 	})
 }
 
@@ -238,6 +241,9 @@ type dispatchInput struct {
 	TemplateID         string
 	IdempotencyKey     string
 	TrackingContactRef string
+	// Sender optionally names the sender profile (slug) that must carry this
+	// send (ADR-0021). Empty takes today's category-routed path unchanged.
+	Sender string
 }
 
 func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInput) (*iface.NotificationResult, error) {
@@ -293,8 +299,26 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 	// log answers which profile failed and why.
 	// TenantID rides to the resolver (D4) so per-tenant routing later needs
 	// no change at this chokepoint; the resolver ignores it today.
+	//
+	// An explicit Sender (ADR-0021) bypasses category routing and is
+	// re-enforced here regardless of how the caller obtained the slug:
+	// grammar/length guard → BySlug → Type ∈ AllowedTypes. Any step failing
+	// writes the failed row through the same bounded-error contract.
 	tenantID, _ := ctxauth.GetTenantID(ctx)
-	profile, err := s.resolver.Resolve(ctx, ResolveInput{Category: in.Category, Type: in.Type, TenantID: tenantID})
+	var profile SenderProfile
+	if in.Sender != "" {
+		if !module.ValidSlug(in.Sender) { // already exported; enforces MaxSlugLength(64) + grammar
+			logDoc.AttemptedSenderSlug = "invalid"
+			return s.failSend(ctx, logDoc, SenderProfile{}, iface.ErrSenderInvalid)
+		}
+		logDoc.AttemptedSenderSlug = in.Sender
+		profile, err = s.resolver.BySlug(ctx, in.Sender)
+		if err == nil && !typeAllowed(profile, in.Type) {
+			err = iface.ErrSenderNotEligible
+		}
+	} else {
+		profile, err = s.resolver.Resolve(ctx, ResolveInput{Category: in.Category, Type: in.Type, TenantID: tenantID})
+	}
 	if err != nil {
 		return s.failSend(ctx, logDoc, profile, err)
 	}
@@ -334,7 +358,14 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 var ErrSendFailed = errors.New("notification: send failed")
 
 // trustedSentinels are the only errors a caller may test with errors.Is.
-var trustedSentinels = []error{ErrNoSenderForCategory, ErrSenderConfigUnavailable, ErrSenderNotFound, ErrUnknownDriver, ErrSenderNotConfigured}
+// The two ADR-0021 iface sentinels are trusted alongside the pre-existing
+// local ones: iface.ErrSenderInvalid/ErrSenderNotEligible are the only
+// failure modes the explicit-Sender path can raise that no local sentinel
+// already names.
+var trustedSentinels = []error{
+	ErrNoSenderForCategory, ErrSenderConfigUnavailable, ErrSenderNotFound, ErrUnknownDriver, ErrSenderNotConfigured,
+	iface.ErrSenderInvalid, iface.ErrSenderNotEligible,
+}
 
 // DispatchError is the only error dispatchEmail and SendTest return. Error()
 // is the sanitized reason (the same string the delivery log stores). Is

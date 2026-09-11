@@ -186,9 +186,10 @@ func (f *fakeDriver) Send(_ context.Context, p SenderProfile, msg EmailMessage) 
 }
 
 type fakeResolver struct {
-	profile SenderProfile
-	err     error
-	inputs  []ResolveInput
+	profile     SenderProfile
+	err         error
+	inputs      []ResolveInput
+	bySlugCalls int // records lookups so a test can assert the guard short-circuited
 }
 
 // On error the fake returns the ZERO profile, as senderResolver does: a
@@ -210,6 +211,7 @@ func (f *fakeResolver) Default(context.Context) (SenderProfile, error) {
 }
 
 func (f *fakeResolver) BySlug(_ context.Context, slug string) (SenderProfile, error) {
+	f.bySlugCalls++
 	if f.err != nil {
 		return SenderProfile{}, f.err
 	}
@@ -1055,5 +1057,218 @@ func TestTemplatePortLocaleDefault(t *testing.T) {
 	}
 	if v.Locale != "it" {
 		t.Fatalf("Locale = %q, want it", v.Locale)
+	}
+}
+
+// ---- ADR-0021: explicit Sender at dispatch --------------------------------
+
+// fullyPopulatedProfile returns a profile with every transport field set to
+// a distinctive, greppable sentinel value, so a test asserting that a
+// persisted diagnostic never leaks transport identity has something real to
+// catch.
+func fullyPopulatedProfile(slug string, allowedTypes []string) SenderProfile {
+	return SenderProfile{
+		Slug:         slug,
+		Label:        "sentinel-label-zz9",
+		Provider:     "smtp",
+		Categories:   []string{"*"},
+		AllowedTypes: allowedTypes,
+		FromAddress:  "sentinel-from-zz9@example.com",
+		FromName:     "sentinel-fromname-zz9",
+		ReplyTo:      "sentinel-replyto-zz9@example.com",
+		SMTPHost:     "sentinel-host-zz9.example.net",
+		SMTPPort:     2525,
+		SMTPUsername: "sentinel-username-zz9",
+		SMTPPassword: "sentinel-password-zz9",
+		SMTPTLSMode:  "starttls",
+		MailUpUser:   "sentinel-mailupuser-zz9",
+		MailUpSecret: "sentinel-mailupsecret-zz9",
+	}
+}
+
+func TestNotificationService_Dispatch_ExplicitSender_EligibleSlugSends(t *testing.T) {
+	k := newKit(Options{})
+	k.resolver.profile = SenderProfile{Slug: "camp", Provider: "noop", Categories: []string{"*"}, AllowedTypes: []string{models.TypeTransactional}}
+	res, err := k.svc.Send(context.Background(), iface.NotificationRequest{
+		Type:       models.TypeTransactional,
+		Category:   "crm.campaign",
+		Recipients: []iface.Recipient{{Address: "a@example.com"}},
+		Subject:    "S",
+		Body:       "B",
+		Sender:     "camp",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if res.Status != models.StatusSent {
+		t.Fatalf("status = %q, want sent", res.Status)
+	}
+	if len(k.logRepo.created) != 1 {
+		t.Fatalf("expected one log row, got %d", len(k.logRepo.created))
+	}
+	doc := k.logRepo.created[0]
+	if doc.SenderSlug != "camp" {
+		t.Fatalf("SenderSlug = %q, want camp", doc.SenderSlug)
+	}
+	if doc.AttemptedSenderSlug != "camp" {
+		t.Fatalf("AttemptedSenderSlug = %q, want camp", doc.AttemptedSenderSlug)
+	}
+	if k.resolver.bySlugCalls != 1 {
+		t.Fatalf("BySlug calls = %d, want 1", k.resolver.bySlugCalls)
+	}
+	if len(k.resolver.inputs) != 0 {
+		t.Fatalf("category-routed Resolve must not be called when Sender is set, got %d calls", len(k.resolver.inputs))
+	}
+}
+
+func TestNotificationService_Dispatch_ExplicitSender_IneligibleType_ErrorFreeOfSecrets(t *testing.T) {
+	k := newKit(Options{})
+	k.resolver.profile = fullyPopulatedProfile("camp", []string{models.TypeTransactional})
+	res, err := k.svc.Send(context.Background(), iface.NotificationRequest{
+		Type:       models.TypeMarketing, // profile only allows transactional
+		Category:   "crm.campaign",
+		Recipients: []iface.Recipient{{Address: "a@example.com"}},
+		Subject:    "S",
+		Body:       "B",
+		Sender:     "camp",
+	})
+	if !errors.Is(err, iface.ErrSenderNotEligible) || !errors.Is(err, ErrSendFailed) {
+		t.Fatalf("err = %v, want iface.ErrSenderNotEligible + ErrSendFailed", err)
+	}
+	if res == nil || res.Status != models.StatusFailed {
+		t.Fatalf("res = %+v", res)
+	}
+	if len(k.logRepo.created) != 1 {
+		t.Fatalf("expected one log row, got %d", len(k.logRepo.created))
+	}
+	doc := k.logRepo.created[0]
+	if doc.AttemptedSenderSlug != "camp" {
+		t.Fatalf("AttemptedSenderSlug = %q, want camp", doc.AttemptedSenderSlug)
+	}
+	secrets := []string{
+		"sentinel-from-zz9@example.com", "sentinel-fromname-zz9", "sentinel-replyto-zz9@example.com",
+		"sentinel-host-zz9.example.net", "sentinel-username-zz9", "sentinel-password-zz9",
+		"sentinel-mailupuser-zz9", "sentinel-mailupsecret-zz9", "2525",
+	}
+	for _, s := range secrets {
+		if strings.Contains(doc.Error, s) {
+			t.Fatalf("persisted Error leaks transport identity %q: %q", s, doc.Error)
+		}
+	}
+}
+
+func TestNotificationService_Dispatch_ExplicitSender_UnknownSlug(t *testing.T) {
+	k := newKit(Options{})
+	k.resolver.profile = SenderProfile{Slug: "camp", Provider: "noop", Categories: []string{"*"}, AllowedTypes: []string{models.TypeTransactional}}
+	res, err := k.svc.Send(context.Background(), iface.NotificationRequest{
+		Type:       models.TypeTransactional,
+		Category:   "crm.campaign",
+		Recipients: []iface.Recipient{{Address: "a@example.com"}},
+		Subject:    "S",
+		Body:       "B",
+		Sender:     "ghost",
+	})
+	if err == nil {
+		t.Fatal("expected an error for an unknown slug")
+	}
+	if res == nil || res.Status != models.StatusFailed {
+		t.Fatalf("res = %+v", res)
+	}
+	doc := k.logRepo.created[0]
+	if doc.SenderSlug != "" {
+		t.Fatalf("SenderSlug = %q, want empty", doc.SenderSlug)
+	}
+	if doc.AttemptedSenderSlug != "ghost" {
+		t.Fatalf("AttemptedSenderSlug = %q, want ghost", doc.AttemptedSenderSlug)
+	}
+}
+
+func TestNotificationService_Dispatch_ExplicitSender_MalformedNeverReachesResolver(t *testing.T) {
+	cases := []string{"Bad Slug!", strings.Repeat("a", 65), " camp "}
+	for _, raw := range cases {
+		t.Run(raw, func(t *testing.T) {
+			k := newKit(Options{})
+			res, err := k.svc.Send(context.Background(), iface.NotificationRequest{
+				Type:       models.TypeTransactional,
+				Category:   "crm.campaign",
+				Recipients: []iface.Recipient{{Address: "a@example.com"}},
+				Subject:    "S",
+				Body:       "B",
+				Sender:     raw,
+			})
+			if !errors.Is(err, iface.ErrSenderInvalid) || !errors.Is(err, ErrSendFailed) {
+				t.Fatalf("err = %v, want iface.ErrSenderInvalid + ErrSendFailed", err)
+			}
+			if res == nil || res.Status != models.StatusFailed {
+				t.Fatalf("res = %+v", res)
+			}
+			if k.resolver.bySlugCalls != 0 {
+				t.Fatalf("BySlug must not be called for a malformed slug, got %d calls", k.resolver.bySlugCalls)
+			}
+			if len(k.resolver.inputs) != 0 {
+				t.Fatalf("Resolve must not be called for a malformed slug, got %d calls", len(k.resolver.inputs))
+			}
+			if len(k.logRepo.created) != 1 {
+				t.Fatalf("expected one log row, got %d", len(k.logRepo.created))
+			}
+			doc := k.logRepo.created[0]
+			if doc.AttemptedSenderSlug != "invalid" {
+				t.Fatalf("AttemptedSenderSlug = %q, want the constant marker %q", doc.AttemptedSenderSlug, "invalid")
+			}
+			if strings.Contains(doc.Error, raw) || strings.Contains(doc.AttemptedSenderSlug, raw) || strings.Contains(doc.SenderSlug, raw) {
+				t.Fatalf("raw malformed slug %q leaked into the persisted row: %+v", raw, doc)
+			}
+		})
+	}
+}
+
+func TestNotificationService_Dispatch_EmptySender_ResolvePathUnchanged(t *testing.T) {
+	k := newKit(Options{})
+	res, err := sendOne(t, k)
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if res.Status != models.StatusSent {
+		t.Fatalf("status = %q, want sent", res.Status)
+	}
+	if len(k.resolver.inputs) != 1 {
+		t.Fatalf("Resolve must be called once for an empty Sender, got %d", len(k.resolver.inputs))
+	}
+	if k.resolver.bySlugCalls != 0 {
+		t.Fatalf("BySlug must not be called for an empty Sender, got %d", k.resolver.bySlugCalls)
+	}
+	doc := k.logRepo.created[0]
+	if doc.AttemptedSenderSlug != "" {
+		t.Fatalf("AttemptedSenderSlug = %q, want empty", doc.AttemptedSenderSlug)
+	}
+}
+
+func TestNotificationService_Dispatch_OptedOut_ValidSender_SuppressedBeforeResolution(t *testing.T) {
+	k := newKit(Options{})
+	k.pref.can = false
+	k.resolver.profile = SenderProfile{Slug: "camp", Provider: "noop", Categories: []string{"*"}, AllowedTypes: []string{models.TypeTransactional}}
+	res, err := k.svc.Send(context.Background(), iface.NotificationRequest{
+		Type:       models.TypeTransactional,
+		Category:   "crm.campaign",
+		Recipients: []iface.Recipient{{Address: "a@example.com"}},
+		Subject:    "S",
+		Body:       "B",
+		Sender:     "camp",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if res.Status != models.StatusSuppressed {
+		t.Fatalf("status = %q, want suppressed", res.Status)
+	}
+	if k.pref.calledN != 1 {
+		t.Fatalf("preference check must still run, calledN = %d", k.pref.calledN)
+	}
+	if k.resolver.bySlugCalls != 0 || len(k.resolver.inputs) != 0 {
+		t.Fatalf("resolution must not run once suppressed: bySlugCalls=%d, resolveInputs=%d", k.resolver.bySlugCalls, len(k.resolver.inputs))
+	}
+	doc := k.logRepo.created[0]
+	if doc.AttemptedSenderSlug != "" {
+		t.Fatalf("AttemptedSenderSlug = %q, want empty (never reached resolution)", doc.AttemptedSenderSlug)
 	}
 }

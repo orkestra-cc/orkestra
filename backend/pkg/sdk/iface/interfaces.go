@@ -374,6 +374,11 @@ type NotificationRequest struct {
 	// token and handed back to a MarketingUnsubscribeSink on consume (e.g. a
 	// campaign/run ref for per-campaign unsubscribe attribution). Ignored by core.
 	UnsubscribeContext string
+	// Sender optionally names the sender profile (slug) that must carry this
+	// message, bypassing category routing — allowed only when the profile's
+	// allowed_types contains this request's Type (ADR-0021). Unknown,
+	// ineligible, or malformed slugs fail the send; there is no fallback.
+	Sender string
 }
 
 type TemplatedNotificationRequest struct {
@@ -394,6 +399,11 @@ type TemplatedNotificationRequest struct {
 	// token and handed back to a MarketingUnsubscribeSink on consume (e.g. a
 	// campaign/run ref for per-campaign unsubscribe attribution). Ignored by core.
 	UnsubscribeContext string
+	// Sender optionally names the sender profile (slug) that must carry this
+	// message, bypassing category routing — allowed only when the profile's
+	// allowed_types contains this request's Type (ADR-0021). Unknown,
+	// ineligible, or malformed slugs fail the send; there is no fallback.
+	Sender string
 }
 
 type NotificationResult struct {
@@ -417,6 +427,31 @@ type NotificationSender interface {
 	// unsubscribe variables, and dispatches it.
 	SendTemplated(ctx context.Context, req TemplatedNotificationRequest) (*NotificationResult, error)
 }
+
+// Sentinel errors for explicit sender-profile selection (ADR-0021). Every
+// consumer of Sender maps THESE via errors.Is, never a notification-internal
+// error — the notification module's own sentinels stay unexported from this
+// seam.
+var (
+	// ErrSenderInvalid: the Sender slug fails grammar or the length bound,
+	// before any profile lookup is attempted.
+	ErrSenderInvalid = errors.New("sender slug malformed")
+	// ErrSenderNotFound: a grammar-valid slug names no configured profile.
+	ErrSenderNotFound = errors.New("sender profile not found")
+	// ErrSenderNotEligible: the profile exists but its allowed_types does not
+	// contain the request's Type.
+	ErrSenderNotEligible = errors.New("sender profile not eligible for this send type")
+	// ErrSenderNotConfigured: the profile is eligible but its driver is
+	// unregistered or its required fields are incomplete.
+	ErrSenderNotConfigured = errors.New("sender profile not configured")
+	// ErrNoSenderForCategory: Sender was empty (category routing) and no
+	// profile pattern matches the category.
+	ErrNoSenderForCategory = errors.New("no sender profile routes this category")
+	// ErrSenderUnavailable: the sender configuration/directory plane itself
+	// could not be read — distinct from every error above, none of which was
+	// actually evaluated.
+	ErrSenderUnavailable = errors.New("sender configuration unavailable")
+)
 
 // CategoryConfiguredChecker is an OPTIONAL companion to NotificationSender
 // (ADR-0019 D7). With sender profiles routed by category, IsConfigured's

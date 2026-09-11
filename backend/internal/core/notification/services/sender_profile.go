@@ -114,6 +114,21 @@ func (p *SenderProfile) setField(key, v string) {
 	}
 }
 
+// typeAllowed reports whether p may be named directly (by slug) for a send
+// of type typ (ADR-0021 D2/D3): typ must appear in p.AllowedTypes. Empty
+// AllowedTypes means the profile is not explicitly selectable at all — it
+// can still carry pattern-routed sends, but no caller may name it by slug.
+// Package-level and profile-first so both the dispatch chokepoint and the
+// SenderDirectory companion (PR 3) share one definition of eligibility.
+func typeAllowed(p SenderProfile, typ string) bool {
+	for _, t := range p.AllowedTypes {
+		if t == typ {
+			return true
+		}
+	}
+	return false
+}
+
 // LegacyProfile stamps the identity of the profile synthesized from the
 // flat keys: LegacySlug, the "*" pattern, and — the one normalization —
 // an empty provider reads as noop, which is how Send has always treated it.
