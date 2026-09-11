@@ -84,6 +84,9 @@ func (htDriver) Requires() []services.ProfileRequirement { return nil }
 func (htDriver) Send(context.Context, services.SenderProfile, services.EmailMessage) error {
 	return nil
 }
+func (htDriver) Capabilities() services.DriverCapabilities {
+	return services.DriverCapabilities{ListUnsubscribeHeaders: true}
+}
 
 // htCapturingSink records the arguments passed to OnMarketingUnsubscribe.
 type htCapturingSink struct {
@@ -191,6 +194,9 @@ type hostileDriver struct{}
 
 func (hostileDriver) Name() string                            { return "hostile" }
 func (hostileDriver) Requires() []services.ProfileRequirement { return nil }
+func (hostileDriver) Capabilities() services.DriverCapabilities {
+	return services.DriverCapabilities{ListUnsubscribeHeaders: true}
+}
 func (hostileDriver) Send(context.Context, services.SenderProfile, services.EmailMessage) error {
 	return fmt.Errorf("vendor response: 401 user=s12345_67 secret=%s <html>", hostileSecret)
 }

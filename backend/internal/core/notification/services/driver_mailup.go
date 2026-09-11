@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -28,15 +29,24 @@ const mailUpTimeout = 30 * time.Second
 // TestMailUpDriver_RequestShapeAndSuccess, and moves neither the success
 // predicate nor the error contract.
 type mailUpRequest struct {
-	User     mailUpUser      `json:"User"`
-	Subject  string          `json:"Subject"`
-	Html     mailUpHTML      `json:"Html"`
-	Text     string          `json:"Text"`
-	From     mailUpAddress   `json:"From"`
-	To       []mailUpAddress `json:"To"`
-	ReplyTo  string          `json:"ReplyTo,omitempty"`
-	CharSet  string          `json:"CharSet"`
-	XSmtpAPI mailUpXSmtpAPI  `json:"XSmtpAPI"`
+	User            mailUpUser             `json:"User"`
+	Subject         string                 `json:"Subject"`
+	Html            mailUpHTML             `json:"Html"`
+	Text            string                 `json:"Text"`
+	From            mailUpAddress          `json:"From"`
+	To              []mailUpAddress        `json:"To"`
+	ReplyTo         string                 `json:"ReplyTo,omitempty"`
+	CharSet         string                 `json:"CharSet"`
+	XSmtpAPI        mailUpXSmtpAPI         `json:"XSmtpAPI"`
+	ExtendedHeaders []mailUpExtendedHeader `json:"ExtendedHeaders,omitempty"`
+}
+
+// mailUpExtendedHeader is one name/value pair MailUp's SendMessage accepts
+// as an extra header. Accepting it is not the same as putting it on the
+// wire — see mailUpDriver.Capabilities.
+type mailUpExtendedHeader struct {
+	N string `json:"N"`
+	V string `json:"V"`
 }
 
 type mailUpUser struct {
@@ -97,20 +107,50 @@ func (d *mailUpDriver) Requires() []ProfileRequirement {
 	return []ProfileRequirement{{Key: SubFromAddress}, {Key: SubMailUpUser}, {Key: SubMailUpSecret, Secret: true}}
 }
 
+// Capabilities: false until a real send proves otherwise. MailUp's
+// documentation says it adds only approved headers, so accepting our
+// ExtendedHeaders is not the same as delivering them — and RFC 8058
+// additionally needs them covered by the DKIM signature. Flipping this
+// constant is the outcome of the release gate's test, not a configuration
+// an operator can set.
+func (d *mailUpDriver) Capabilities() DriverCapabilities {
+	return DriverCapabilities{ListUnsubscribeHeaders: false}
+}
+
+// mailUpExtendedHeadersFrom converts EmailMessage.Headers into MailUp's
+// ExtendedHeaders shape, keys sorted for a deterministic payload — the same
+// reason buildMIMEMessageAt sorts before writing.
+func mailUpExtendedHeadersFrom(headers map[string]string) []mailUpExtendedHeader {
+	if len(headers) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(headers))
+	for k := range headers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]mailUpExtendedHeader, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, mailUpExtendedHeader{N: k, V: headers[k]})
+	}
+	return out
+}
+
 func (d *mailUpDriver) Send(ctx context.Context, p SenderProfile, msg EmailMessage) error {
 	if err := ValidateProfile(d, p, RuntimeView); err != nil {
 		return err
 	}
 	payload := mailUpRequest{
-		User:     mailUpUser{Username: p.MailUpUser, Secret: p.MailUpSecret},
-		Subject:  msg.Subject,
-		Html:     mailUpHTML{Body: msg.BodyHTML},
-		Text:     msg.BodyText,
-		From:     mailUpAddress{Name: p.FromName, Email: p.FromAddress},
-		To:       []mailUpAddress{{Name: msg.ToName, Email: msg.To}},
-		ReplyTo:  p.ReplyTo,
-		CharSet:  "utf-8",
-		XSmtpAPI: mailUpXSmtpAPI{CampaignCode: msg.Category},
+		User:            mailUpUser{Username: p.MailUpUser, Secret: p.MailUpSecret},
+		Subject:         msg.Subject,
+		Html:            mailUpHTML{Body: msg.BodyHTML},
+		Text:            msg.BodyText,
+		From:            mailUpAddress{Name: p.FromName, Email: p.FromAddress},
+		To:              []mailUpAddress{{Name: msg.ToName, Email: msg.To}},
+		ReplyTo:         p.ReplyTo,
+		CharSet:         "utf-8",
+		XSmtpAPI:        mailUpXSmtpAPI{CampaignCode: msg.Category},
+		ExtendedHeaders: mailUpExtendedHeadersFrom(msg.Headers),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

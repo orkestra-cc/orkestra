@@ -181,6 +181,9 @@ type fakeDriver struct {
 
 func (f *fakeDriver) Name() string                   { return f.name }
 func (f *fakeDriver) Requires() []ProfileRequirement { return f.requires }
+func (f *fakeDriver) Capabilities() DriverCapabilities {
+	return DriverCapabilities{ListUnsubscribeHeaders: true}
+}
 func (f *fakeDriver) Send(_ context.Context, p SenderProfile, msg EmailMessage) error {
 	f.sends++
 	f.sent = append(f.sent, msg)

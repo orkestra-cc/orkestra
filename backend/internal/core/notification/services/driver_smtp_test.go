@@ -322,3 +322,43 @@ func TestSMTPDriver_HungServerIsKindTimeout(t *testing.T) {
 		t.Fatalf("Go error string leaked: %q", err.Error())
 	}
 }
+
+// TestSMTPDriver_Capabilities: smtp writes the MIME itself, so it can
+// guarantee List-Unsubscribe reaches the wire.
+func TestSMTPDriver_Capabilities(t *testing.T) {
+	if !NewSMTPDriver(nil).Capabilities().ListUnsubscribeHeaders {
+		t.Fatal("smtp writes its own MIME and must report ListUnsubscribeHeaders=true")
+	}
+}
+
+func TestBuildMIME_WritesHeadersAfterSubject(t *testing.T) {
+	msg := EmailMessage{
+		To: "ada@example.test", Subject: "Ciao", BodyText: "corpo",
+		Headers: map[string]string{
+			"List-Unsubscribe":      "<https://api.example/v1/notifications/unsubscribe?token=abc>",
+			"List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+		},
+	}
+	out := buildMIMEMessageAt(SenderProfile{FromAddress: "no-reply@example.test"}, msg, time.Unix(0, 0))
+
+	iSubject := strings.Index(out, "Subject: ")
+	iLU := strings.Index(out, "List-Unsubscribe: ")
+	iBody := strings.Index(out, "corpo")
+	if iSubject < 0 || iLU < 0 || iBody < 0 {
+		t.Fatalf("MIME incompleto:\n%s", out)
+	}
+	if !(iSubject < iLU && iLU < iBody) {
+		t.Fatalf("gli header vanno dopo Subject e prima del corpo:\n%s", out)
+	}
+	if !strings.Contains(out, "List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n") {
+		t.Fatalf("header POST assente o senza CRLF:\n%s", out)
+	}
+}
+
+func TestBuildMIME_WithoutHeadersIsUnchanged(t *testing.T) {
+	msg := EmailMessage{To: "ada@example.test", Subject: "Ciao", BodyText: "corpo"}
+	out := buildMIMEMessageAt(SenderProfile{FromAddress: "no-reply@example.test"}, msg, time.Unix(0, 0))
+	if strings.Contains(out, "List-Unsubscribe") {
+		t.Fatal("nessun header va inventato quando la mappa è vuota")
+	}
+}

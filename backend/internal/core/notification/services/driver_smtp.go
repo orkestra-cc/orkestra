@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/smtp"
 	"net/textproto"
+	"sort"
 	"strings"
 	"time"
 )
@@ -54,6 +55,12 @@ func (d *smtpDriver) Name() string { return "smtp" }
 // configuration (D3/D6); sendSMTP authenticates only when a username is set.
 func (d *smtpDriver) Requires() []ProfileRequirement {
 	return []ProfileRequirement{{Key: SubSMTPHost}, {Key: SubSMTPPort}, {Key: SubFromAddress}}
+}
+
+// Capabilities: smtp writes the MIME itself, so it can guarantee
+// List-Unsubscribe / List-Unsubscribe-Post reach the wire.
+func (d *smtpDriver) Capabilities() DriverCapabilities {
+	return DriverCapabilities{ListUnsubscribeHeaders: true}
 }
 
 func (d *smtpDriver) Send(ctx context.Context, p SenderProfile, msg EmailMessage) error {
@@ -168,6 +175,18 @@ func buildMIMEMessageAt(p SenderProfile, msg EmailMessage, now time.Time) string
 	fmt.Fprintf(&b, "From: %s\r\n", from)
 	fmt.Fprintf(&b, "To: %s\r\n", to)
 	fmt.Fprintf(&b, "Subject: %s\r\n", msg.Subject)
+	// Keys are sorted before writing: a non-deterministic MIME makes tests
+	// flaky and DKIM signatures painful to diagnose.
+	if len(msg.Headers) > 0 {
+		keys := make([]string, 0, len(msg.Headers))
+		for k := range msg.Headers {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(&b, "%s: %s\r\n", k, msg.Headers[k])
+		}
+	}
 	if p.ReplyTo != "" {
 		fmt.Fprintf(&b, "Reply-To: %s\r\n", p.ReplyTo)
 	}
