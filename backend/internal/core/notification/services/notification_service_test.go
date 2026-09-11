@@ -996,17 +996,21 @@ func TestDispatchEmailRewriterPanicIsSafe(t *testing.T) {
 type capturingSink struct {
 	addr, cat, refCtx string
 	n                 int
+	err               error
 }
 
-func (c *capturingSink) OnMarketingUnsubscribe(_ context.Context, a, cat, cx string) {
+func (c *capturingSink) OnMarketingUnsubscribe(_ context.Context, a, cat, cx string) error {
 	c.addr, c.cat, c.refCtx, c.n = a, cat, cx, c.n+1
+	return c.err
 }
 
 func TestFireMarketingUnsubscribe_SinkReceivesArgs(t *testing.T) {
 	svc, _ := seamSvc()
 	sink := &capturingSink{}
 	svc.SetMarketingUnsubscribeSink(sink)
-	svc.FireMarketingUnsubscribe(context.Background(), "x@y.com", "marketing", "ref-9")
+	if err := svc.FireMarketingUnsubscribe(context.Background(), "x@y.com", "marketing", "ref-9"); err != nil {
+		t.Fatalf("FireMarketingUnsubscribe: %v", err)
+	}
 	if sink.n != 1 {
 		t.Fatalf("sink called %d times, want 1", sink.n)
 	}
@@ -1023,20 +1027,41 @@ func TestFireMarketingUnsubscribe_SinkReceivesArgs(t *testing.T) {
 
 func TestFireMarketingUnsubscribe_NilSink_IsNoOp(t *testing.T) {
 	svc, _ := seamSvc()
-	// no sink set — must not panic
-	svc.FireMarketingUnsubscribe(context.Background(), "x@y.com", "marketing", "ref-9")
+	// No sink set. That is not a failure: the base ships no sink, and
+	// "nothing to mirror" must not read as "the mirror failed", or the
+	// caller would keep an opt-out marked pending forever.
+	if err := svc.FireMarketingUnsubscribe(context.Background(), "x@y.com", "marketing", "ref-9"); err != nil {
+		t.Fatalf("a nil sink is not a failure, got %v", err)
+	}
 }
 
-func TestFireMarketingUnsubscribe_PanicSink_IsRecovered(t *testing.T) {
+func TestFireMarketingUnsubscribe_SinkErrorReachesTheCaller(t *testing.T) {
+	// The whole point of the error return: the caller decides whether the
+	// opt-out still has to be replayed downstream, so a failure it never
+	// hears about is the one bug this signature exists to prevent.
+	svc, _ := seamSvc()
+	boom := errors.New("sink down")
+	svc.SetMarketingUnsubscribeSink(&capturingSink{err: boom})
+	err := svc.FireMarketingUnsubscribe(context.Background(), "x@y.com", "marketing", "ref-9")
+	if !errors.Is(err, boom) {
+		t.Fatalf("want the sink's error, got %v", err)
+	}
+}
+
+func TestFireMarketingUnsubscribe_PanicSink_BecomesAnError(t *testing.T) {
+	// Recovered, so one bad sink cannot take the request down — but
+	// reported, because a swallowed panic is an unmirrored opt-out nobody
+	// ever retries.
 	svc, _ := seamSvc()
 	svc.SetMarketingUnsubscribeSink(panicSink{})
-	// must not propagate the panic
-	svc.FireMarketingUnsubscribe(context.Background(), "x@y.com", "marketing", "ref-9")
+	if err := svc.FireMarketingUnsubscribe(context.Background(), "x@y.com", "marketing", "ref-9"); err == nil {
+		t.Fatal("a panicking sink must surface as an error, not as success")
+	}
 }
 
 type panicSink struct{}
 
-func (panicSink) OnMarketingUnsubscribe(_ context.Context, _, _, _ string) { panic("sink boom") }
+func (panicSink) OnMarketingUnsubscribe(_ context.Context, _, _, _ string) error { panic("sink boom") }
 
 // ---------------------------------------------------------------------------
 // Template read/write capability tests

@@ -692,18 +692,28 @@ func (s *NotificationService) GetTemplate(ctx context.Context, templateID, local
 	return &iface.TemplateView{TemplateID: doc.TemplateID, Locale: doc.Locale, Subject: doc.Subject, BodyHTML: doc.BodyHTML, BodyText: doc.BodyText}, nil
 }
 
-// FireMarketingUnsubscribe invokes the sink best-effort (recover-guarded). Called
-// by the unsubscribe handler after a token is consumed + marked used.
-func (s *NotificationService) FireMarketingUnsubscribe(ctx context.Context, address, category, refContext string) {
+// FireMarketingUnsubscribe invokes the sink and reports what happened, so the
+// caller can mark an opt-out that did not reach its consumer for replay.
+//
+// A nil sink returns nil: the base ships none, and "there is nothing to
+// mirror" must not read as "the mirror failed", or a consume would stay
+// pending forever waiting for a consumer that does not exist.
+//
+// A panicking sink is recovered — one bad consumer cannot take an
+// unsubscribe request down — but it is converted into an error rather than
+// swallowed. Swallowing it is precisely what made a failed mirror
+// unrecoverable before this signature returned an error.
+func (s *NotificationService) FireMarketingUnsubscribe(ctx context.Context, address, category, refContext string) (err error) {
 	if s.unsubscribeSink == nil {
-		return
+		return nil
 	}
 	defer func() {
 		if r := recover(); r != nil {
 			s.logger.Warn("notification: unsubscribe sink panicked", slog.Any("recover", r))
+			err = fmt.Errorf("notification: unsubscribe sink panicked: %v", r)
 		}
 	}()
-	s.unsubscribeSink.OnMarketingUnsubscribe(ctx, address, category, refContext)
+	return s.unsubscribeSink.OnMarketingUnsubscribe(ctx, address, category, refContext)
 }
 
 // NormalizeAddress lowercases and trims an email address.

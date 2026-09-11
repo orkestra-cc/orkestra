@@ -92,10 +92,12 @@ func (htDriver) Capabilities() services.DriverCapabilities {
 type htCapturingSink struct {
 	addr, cat, refCtx string
 	n                 int
+	err               error
 }
 
-func (c *htCapturingSink) OnMarketingUnsubscribe(_ context.Context, a, cat, cx string) {
+func (c *htCapturingSink) OnMarketingUnsubscribe(_ context.Context, a, cat, cx string) error {
 	c.addr, c.cat, c.refCtx, c.n = a, cat, cx, c.n+1
+	return c.err
 }
 
 func newHandlerTestSvc(unsubSvc services.UnsubscribeService) *services.NotificationService {
@@ -157,6 +159,27 @@ func TestUnsubscribeHandler_NilSink_IsNoOp(t *testing.T) {
 	h := NewNotificationHandler(svc)
 	if _, err := h.Unsubscribe(context.Background(), &unsubscribeRequest{Token: "tok"}); err != nil {
 		t.Fatalf("Unsubscribe with nil sink: %v", err)
+	}
+}
+
+func TestUnsubscribeHandler_SinkFailureDoesNotFailTheRecipient(t *testing.T) {
+	// A consumer that is down is not the recipient's problem: the answer
+	// stays the same generic success. What the failure must NOT do is
+	// disappear — that is what the sink's error return is for, and what the
+	// consume sequence acts on.
+	unsubSvc := &htUnsubService{
+		doc: &models.UnsubscribeTokenDoc{Address: "a@b.com", Category: "marketing"},
+	}
+	svc := newHandlerTestSvc(unsubSvc)
+	sink := &htCapturingSink{err: errors.New("sink down")}
+	svc.SetMarketingUnsubscribeSink(sink)
+	h := NewNotificationHandler(svc)
+
+	if _, err := h.Unsubscribe(context.Background(), &unsubscribeRequest{Token: "tok"}); err != nil {
+		t.Fatalf("a failing sink must not fail the unsubscribe: %v", err)
+	}
+	if sink.n != 1 {
+		t.Fatalf("sink called %d times, want 1", sink.n)
 	}
 }
 

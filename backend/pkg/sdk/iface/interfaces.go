@@ -1505,12 +1505,18 @@ type EmailTrackingRewriterSetter interface {
 	SetEmailTrackingRewriter(EmailTrackingRewriter)
 }
 
-// MarketingUnsubscribeSink is fired (best-effort) when an unsubscribe token is
-// consumed, so an addon can mirror the opt-out into its own consent store and
-// attribute it (via the opaque context the producer set on the send). Wired via
-// MarketingUnsubscribeSinkSetter — core notification never imports the addon.
+// MarketingUnsubscribeSink receives the durable fact that an address opted
+// out, so a consumer (a CRM, a campaign tool) can mirror it into its own
+// consent store and attribute it (via the opaque context the producer set on
+// the send). Wired via MarketingUnsubscribeSinkSetter — core notification
+// never imports the module that implements it.
+//
+// It returns an error on purpose: the core retries a failed sink through
+// its reconciler, and a sink that swallowed its own failures made that
+// impossible — the opt-out would be durable in core and silently missing
+// downstream.
 type MarketingUnsubscribeSink interface {
-	OnMarketingUnsubscribe(ctx context.Context, address, category, refContext string)
+	OnMarketingUnsubscribe(ctx context.Context, address, category, refContext string) error
 }
 
 // MarketingUnsubscribeSinkSetter is implemented by the notification service so an

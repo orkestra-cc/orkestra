@@ -253,7 +253,11 @@ func (h *NotificationHandler) Unsubscribe(ctx context.Context, req *unsubscribeR
 		_ = h.svc.PreferenceService().Set(ctx, doc.UserUUID, category, models.ChannelEmail, false)
 	}
 	_ = h.svc.UnsubscribeService().MarkUsed(ctx, req.Token)
-	h.svc.FireMarketingUnsubscribe(ctx, doc.Address, category, doc.Context)
+	// Discarded here on purpose: this handler has no way to replay a failed
+	// sink, and the recipient's answer is generic either way. Acting on the
+	// error is the job of the ordered consume sequence that supersedes this
+	// read-apply-mark-fire flow.
+	_ = h.svc.FireMarketingUnsubscribe(ctx, doc.Address, category, doc.Context)
 
 	resp := &unsubscribeResponse{}
 	resp.Body.Success = true

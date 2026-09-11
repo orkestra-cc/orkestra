@@ -335,15 +335,18 @@ context lives server-side on the token doc, not in the unsubscribe link.
 
 ```go
 type MarketingUnsubscribeSink interface {
-    OnMarketingUnsubscribe(ctx context.Context, address, category, context string)
+    OnMarketingUnsubscribe(ctx context.Context, address, category, context string) error
 }
 ```
 
 `*NotificationService` exposes `SetMarketingUnsubscribeSink(s)` (satisfying
-`MarketingUnsubscribeSinkSetter`). The public unsubscribe handler fires
-`sink.OnMarketingUnsubscribe(ctx, address, category, doc.Context)` **best-effort,
-`recover()`-guarded**, immediately after a token is successfully consumed — so a
-panicking sink can never break an unsubscribe. The gate for whether a given category
+`MarketingUnsubscribeSinkSetter`) and `FireMarketingUnsubscribe(ctx, address,
+category, refContext) error`, which invokes the sink `recover()`-guarded and
+**reports the outcome**: a nil sink is `nil` ("nothing to mirror"), a returned
+error is passed through, and a panic is recovered *and* converted into an error
+rather than swallowed. A panicking sink therefore still cannot break an
+unsubscribe, but its failure is no longer invisible — the caller needs it to
+decide whether the opt-out must be replayed downstream. The gate for whether a given category
 warrants a marketing consent revocation lives in the sink's impl, not in a
 category-string test in core. The base ships **no** sink; the seam is inert until a
 module registers one — the intended use is mirroring the opt-out into a consent
