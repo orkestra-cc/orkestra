@@ -363,25 +363,31 @@ downstream consent store, for a link clicked after the token's 30-day TTL (or du
 a database blip). A recipient's second click heals the first branch only if they
 happen to click twice, which is not a mechanism.
 
-**The reconciler deliberately does NOT sweep these rows** (decided when it was
-built; see "Unsubscribe reconciler" below). The reason is that the opt-out
-collection records no marker for "this row still owes downstream work", so a sweep
-has no candidate set to narrow to:
+**The reconciler deliberately does NOT sweep these rows today** — a deferred
+decision, not a closed one; see "Unsubscribe reconciler" below. The obstacle is
+that the opt-out collection records no marker for "this row still owes downstream
+work", so a sweep starting from the opt-out side has no candidate set of its own to
+narrow to:
 
-- Opt-out rows are permanent and unsuppressed by design, while token rows TTL at 30
-  days. Past that window a sweep cannot tell "the sink never ran" from "the sink ran
-  and the token aged out", so it would re-fire every historical opt-out on every
-  pass — an unbounded, growing stream of downstream writes leaning entirely on the
-  sink's idempotence to be harmless. Relying on that silently is not the same as
-  saying so.
-- Inside the window the sweep would have to claim the token to avoid double-firing
-  one that was already consumed, which means the only branch it could actually heal
-  is the rare `ClaimToken` error — an expired token never claims, and an
-  already-used one fired on its first click.
-- The right fix, if a fork needs it, is a pending marker written on the **opt-out
-  row** by the same upsert that creates it, lowered when the mirror succeeds. That
-  changes the opt-out collection's contract, so it is a spec decision, not something
-  the reconciler can bolt on.
+- Token rows TTL at 30 days while opt-out rows are permanent, which looks like it
+  makes "the sink never ran" indistinguishable from "the sink ran and the token
+  aged out" — and left unbounded, it would. But bound the sweep to opt-out rows
+  whose `at` is inside a recent window shorter than the token TTL, and the source
+  token row is guaranteed to still exist for every row the sweep considers.
+  `usedAt` absent on that still-live token is itself proof the claim never
+  succeeded downstream, so firing now is provably a first fire, not a re-fire of
+  history — both objections fall to the same bound.
+- What the bound does not remove: the sweep still has to walk from token rows and
+  correlate back via `sourceTokenUuid`, since the opt-out row itself carries
+  nothing to filter or join on, and it still has to claim the token before firing
+  to avoid double-firing the rare row whose claim actually succeeded despite the
+  earlier error — which is the only branch a sweep like this could heal; an expired
+  token never claims, and an already-used one already fired on its first click.
+- The actual fix, if a fork needs this closed rather than deferred, is a pending
+  marker written on the **opt-out row** by the same upsert that creates it, lowered
+  when the mirror succeeds. That belongs to the opt-out collection's own contract,
+  so it is a spec decision the reconciler cannot bolt on by itself — which is why
+  this stays deferred.
 
 The error contract is narrow on purpose: **`Consume` returns an error only when the
 durable opt-out could not be written** (`ErrOptoutNotRecorded` — including an
@@ -390,9 +396,10 @@ since `Upsert` reports success for an empty address without writing). Everything
 else is a `nil` error, because the public response is generic either way. Nothing
 in the sequence logs the raw token or a full address — the token's **uuid** is the
 only identifier that reaches a log line. Every message that can carry an address back
-— a driver error quoting the document or filter it failed on, a sink's error quoting
-the address core just handed it, a sink's panic value — goes through `scrubAddress`
-before it is logged or returned.
+— a driver error quoting the document or filter it failed on, a preference-service
+error quoting the row it was asked to update, a sink's error quoting the address
+core just handed it, a sink's panic value — goes through `scrubAddress` before it is
+logged or returned.
 
 `Consume`'s collaborators are wired in `Init` through `NewUnsubscribeService`'s
 options (`WithOptouts`, `WithPreferences`, `WithUnsubscribeSink`,

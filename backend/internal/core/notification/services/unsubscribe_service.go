@@ -269,9 +269,11 @@ func (s *unsubscribeService) Consume(ctx context.Context, raw string) error {
 	if err != nil {
 		// The opt-out is already durable, which is what the recipient asked
 		// for, so this is not their failure. The token stays unclaimed and a
-		// replay heals the rest.
+		// replay heals the rest. Scrubbed like every other write error here:
+		// a MongoDB write error quotes the document it failed on, and this
+		// document carries the address.
 		s.logger.Warn("notification: claiming the unsubscribe token failed",
-			slog.String("tokenUuid", doc.UUID), slog.String("error", err.Error()))
+			slog.String("tokenUuid", doc.UUID), slog.String("error", scrubAddress(err.Error(), doc.Address)))
 		return nil
 	}
 	if claimed == nil {
@@ -290,7 +292,7 @@ func (s *unsubscribeService) Consume(ctx context.Context, raw string) error {
 				slog.String("tokenUuid", claimed.UUID),
 				slog.String("error", scrubAddress(err.Error(), claimed.Address)))
 		} else {
-			s.clearPending(ctx, s.repo.ClearPrefPending, hash, claimed.UUID, "prefPending")
+			s.clearPending(ctx, s.repo.ClearPrefPending, hash, claimed.UUID, claimed.Address, "prefPending")
 		}
 	}
 
@@ -300,7 +302,7 @@ func (s *unsubscribeService) Consume(ctx context.Context, raw string) error {
 		// No consumer is registered (the base ships none): there is nothing
 		// to mirror, and leaving the flag up would have the reconciler
 		// retrying against a sink that does not exist.
-		s.clearPending(ctx, s.repo.ClearSinkPending, hash, claimed.UUID, "sinkPending")
+		s.clearPending(ctx, s.repo.ClearSinkPending, hash, claimed.UUID, claimed.Address, "sinkPending")
 		return nil
 	}
 	if err := s.fireSink(ctx, claimed.Address, category, claimed.Context); err != nil {
@@ -312,7 +314,7 @@ func (s *unsubscribeService) Consume(ctx context.Context, raw string) error {
 			slog.String("error", scrubAddress(err.Error(), claimed.Address)))
 		return nil
 	}
-	s.clearPending(ctx, s.repo.ClearSinkPending, hash, claimed.UUID, "sinkPending")
+	s.clearPending(ctx, s.repo.ClearSinkPending, hash, claimed.UUID, claimed.Address, "sinkPending")
 	return nil
 }
 
@@ -328,11 +330,14 @@ func (s *unsubscribeService) applyPreference(ctx context.Context, doc *models.Un
 // behind it is done. A failure here is safe in the direction that matters —
 // the reconciler replays work that is idempotent — so it is logged, not
 // returned.
-func (s *unsubscribeService) clearPending(ctx context.Context, clear func(context.Context, string) error, hash, tokenUUID, flag string) {
+func (s *unsubscribeService) clearPending(ctx context.Context, clear func(context.Context, string) error, hash, tokenUUID, address, flag string) {
 	if err := clear(ctx, hash); err != nil {
+		// Scrubbed like every other write error here: a MongoDB write error
+		// quotes the document it failed on, and this document carries the
+		// address.
 		s.logger.Warn("notification: could not lower a pending flag after its work succeeded",
 			slog.String("tokenUuid", tokenUUID), slog.String("flag", flag),
-			slog.String("error", err.Error()))
+			slog.String("error", scrubAddress(err.Error(), address)))
 	}
 }
 

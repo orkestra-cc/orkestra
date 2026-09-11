@@ -75,6 +75,11 @@ func (r *marketingOptoutRepo) IsOptedOut(ctx context.Context, address, category 
 	if addr == "" {
 		return false, nil
 	}
+	// category is deliberately not part of the filter: any opt-out row for
+	// this address suppresses ALL marketing, not just the category it was
+	// recorded under. There is no per-category opt-out UI yet, so the send
+	// path passing a real category here must not be read as evidence that
+	// this call scopes by it.
 	filter := bson.M{"address": addr}
 	//tenantscope:allow system: same reason as Upsert — an opt-out is a platform-wide fact, not a tenant one
 	n, err := r.col().CountDocuments(ctx, filter)
