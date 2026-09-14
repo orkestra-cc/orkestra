@@ -142,6 +142,7 @@ export interface AppPaths {
   advanceSelect: string;
   datePicker: string;
   editor: string;
+  markdownField: string;
   emojiButton: string;
   fileUploader: string;
   inputMask: string;
@@ -329,6 +330,7 @@ export interface AppPaths {
   refFormsAdvanceSelect: string;
   refFormsDatePicker: string;
   refFormsEditor: string;
+  refFormsMarkdownField: string;
   refFormsEmojiButton: string;
   refFormsFileUploader: string;
   refFormsInputMask: string;
@@ -472,6 +474,7 @@ const paths: AppPaths = {
   advanceSelect: `/${rootPaths.formsRoot}/${rootPaths.advanceFormsRoot}/advance-select`,
   datePicker: `/${rootPaths.formsRoot}/${rootPaths.advanceFormsRoot}/date-picker`,
   editor: `/${rootPaths.formsRoot}/${rootPaths.advanceFormsRoot}/editor`,
+  markdownField: `/${rootPaths.formsRoot}/${rootPaths.advanceFormsRoot}/markdown-field`,
   emojiButton: `/${rootPaths.formsRoot}/${rootPaths.advanceFormsRoot}/emoji-button`,
   fileUploader: `/${rootPaths.formsRoot}/${rootPaths.advanceFormsRoot}/file-uploader`,
   inputMask: `/${rootPaths.formsRoot}/${rootPaths.advanceFormsRoot}/input-mask`,
@@ -660,6 +663,7 @@ const paths: AppPaths = {
   refFormsAdvanceSelect: `/${rootPaths.referenceRoot}/forms/advance/advance-select`,
   refFormsDatePicker: `/${rootPaths.referenceRoot}/forms/advance/date-picker`,
   refFormsEditor: `/${rootPaths.referenceRoot}/forms/advance/editor`,
+  refFormsMarkdownField: `/${rootPaths.referenceRoot}/forms/advance/markdown-field`,
   refFormsEmojiButton: `/${rootPaths.referenceRoot}/forms/advance/emoji-button`,
   refFormsFileUploader: `/${rootPaths.referenceRoot}/forms/advance/file-uploader`,
   refFormsInputMask: `/${rootPaths.referenceRoot}/forms/advance/input-mask`,

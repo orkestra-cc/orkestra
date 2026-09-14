@@ -9,6 +9,19 @@
       "copy": "Copia",
       "copied": "Copiato",
       "ackLabel": "Ho salvato questo valore in un posto sicuro."
+    },
+    "markdownField": {
+      "toolbar": "Formattazione",
+      "write": "Scrivi",
+      "preview": "Anteprima",
+      "empty": "Ancora niente da mostrare.",
+      "hint": "Markdown supportato: **grassetto**, _corsivo_, titoli, link ed elenchi.",
+      "bold": "Grassetto",
+      "italic": "Corsivo",
+      "heading": "Titolo",
+      "link": "Link",
+      "list": "Elenco puntato",
+      "quote": "Citazione"
     }
   },
   "nav": {

@@ -9,6 +9,19 @@
       "copy": "Copy",
       "copied": "Copied",
       "ackLabel": "I have saved this value somewhere safe."
+    },
+    "markdownField": {
+      "toolbar": "Formatting",
+      "write": "Write",
+      "preview": "Preview",
+      "empty": "Nothing to preview yet.",
+      "hint": "Markdown is supported: **bold**, _italic_, headings, links and lists.",
+      "bold": "Bold",
+      "italic": "Italic",
+      "heading": "Heading",
+      "link": "Link",
+      "list": "Bullet list",
+      "quote": "Quote"
     }
   },
   "nav": {

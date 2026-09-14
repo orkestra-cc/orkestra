@@ -442,6 +442,11 @@ export const modulesRoutes: RouteGroup = {
               active: true
             },
             {
+              name: 'Markdown Field',
+              to: paths.refFormsMarkdownField,
+              active: true
+            },
+            {
               name: 'Emoji button',
               to: paths.refFormsEmojiButton,
               active: true
@@ -1400,6 +1405,11 @@ export const referenceRoutes: RouteGroup = {
             },
             { name: 'Date Picker', to: paths.refFormsDatePicker, active: true },
             { name: 'Editor', to: paths.refFormsEditor, active: true },
+            {
+              name: 'Markdown Field',
+              to: paths.refFormsMarkdownField,
+              active: true
+            },
             {
               name: 'Emoji Button',
               to: paths.refFormsEmojiButton,
