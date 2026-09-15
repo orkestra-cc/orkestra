@@ -3028,5 +3028,17 @@
     "selectAllRows": "Seleziona tutte le righe",
     "selectRow": "Seleziona riga",
     "moreActions": "Altre azioni"
+  },
+  "bulk": {
+    "selection": {
+      "count": "{{count}} selezionate",
+      "dropped": "{{count}} selezionate non sono più in coda.",
+      "acknowledgeDropped": "Ho capito"
+    },
+    "summary": "{{ok}} riuscite, {{failed}} fallite.",
+    "retryFailed": "Riprova le fallite",
+    "errors": {
+      "generic": "Operazione non riuscita."
+    }
   }
 }
