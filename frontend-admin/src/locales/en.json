@@ -3028,5 +3028,17 @@
     "selectAllRows": "Select all rows",
     "selectRow": "Select row",
     "moreActions": "More actions"
+  },
+  "bulk": {
+    "selection": {
+      "count": "{{count}} selected",
+      "dropped": "{{count}} selected rows are no longer in the queue.",
+      "acknowledgeDropped": "Got it"
+    },
+    "summary": "{{ok}} succeeded, {{failed}} failed.",
+    "retryFailed": "Retry failed",
+    "errors": {
+      "generic": "The operation failed."
+    }
   }
 }
