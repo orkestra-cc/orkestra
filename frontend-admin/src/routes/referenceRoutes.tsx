@@ -26,6 +26,9 @@ const CalendarExample = lazy(
 );
 const Cards = lazy(() => import('reference/components/ui/Cards'));
 const StatCards = lazy(() => import('reference/components/ui/StatCards'));
+const ExportFormatMenus = lazy(
+  () => import('reference/components/ui/ExportFormatMenus')
+);
 const SecretOnceDisplayExample = lazy(
   () => import('reference/components/ui/SecretOnceDisplayExample')
 );
@@ -577,6 +580,10 @@ export function getReferenceRoutes(): RouteObject[] {
         { path: paths.cards, element: <Cards /> },
         { path: paths.statCards, element: <StatCards /> },
         {
+          path: paths.exportFormatMenu,
+          element: <ExportFormatMenus />
+        },
+        {
           path: paths.secretOnceDisplay,
           element: <SecretOnceDisplayExample />
         },
@@ -873,6 +880,10 @@ export function getReferenceRoutes(): RouteObject[] {
             },
             { path: 'cards', element: <Cards /> },
             { path: 'stat-cards', element: <StatCards /> },
+            {
+              path: 'export-format-menu',
+              element: <ExportFormatMenus />
+            },
             {
               path: 'secret-once-display',
               element: <SecretOnceDisplayExample />

@@ -644,6 +644,11 @@ export const modulesRoutes: RouteGroup = {
           active: true
         },
         {
+          name: 'Export Format Menu',
+          to: paths.refComponentsExportFormatMenu,
+          active: true
+        },
+        {
           name: 'Secret Once Display',
           to: paths.refComponentsSecretOnceDisplay,
           active: true
@@ -1259,6 +1264,11 @@ export const referenceRoutes: RouteGroup = {
         { name: 'Calendar', to: paths.refComponentsCalendar, active: true },
         { name: 'Cards', to: paths.refComponentsCards, active: true },
         { name: 'Stat Cards', to: paths.refComponentsStatCards, active: true },
+        {
+          name: 'Export Format Menu',
+          to: paths.refComponentsExportFormatMenu,
+          active: true
+        },
         {
           name: 'Secret Once Display',
           to: paths.refComponentsSecretOnceDisplay,
