@@ -30,6 +30,12 @@ dist/
 # Air temporary files
 *.log
 
+# JWT key mountpoint — the directory is TRACKED (see keys/.gitkeep) because it
+# is the host-side target of the nested `./keys:/app/keys` bind mount; anything
+# that may land in it is not.
+keys/*
+!keys/.gitkeep
+
 # Environment files
 .env
 .env.local

@@ -209,6 +209,19 @@ When asked to build a UI, look for an existing solution in this order:
 4. **`src/components/dashboards/`** — reusable dashboard widgets (WeeklySales, ActiveUsers, ...).
 5. **`react-bootstrap`** — raw primitives for layout (Row, Col, Card, Button, Form).
 
+A raw `<Table>` is the sanctioned shape for a short table inside a card or a
+modal (a production **list** is still `AdvanceTable`), but it starts at the
+theme's 1rem body size, while every table in this console reads at `fs-10` —
+DESIGN.md's «Data tables» register. The split is deliberate ("forms stay at
+1rem even where tables are fs-10"), so a table that forgets the class does
+not look slightly off: it becomes the largest text on the surface, set bigger
+than the data it exists to let the operator compare. `src/pages/tableDensity.test.ts`
+scans `src/pages/` and fails on any raw `<Table>` whose className carries
+neither `fs-10` nor `fs-11` — the file's own header explains why the scope
+stops at pages. Header band and ink are the theme's, painted on `th`: a
+`bg-100` / `bg-200` / `table-light` on the `thead` is inert in both themes
+(measured), so don't add one.
+
 Only build a new component if none of the above fits. New components used by exactly one page live next to that page (`src/pages/<module>/<feature>/MyHelper.tsx`). Promote to `components/common/` only when a second page needs it.
 
 ## State management
