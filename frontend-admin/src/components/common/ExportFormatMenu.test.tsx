@@ -69,8 +69,17 @@ describe('ExportFormatMenu', () => {
     );
   });
 
-  it('resets busy to the menu label even when onExport rejects', async () => {
+  it('resets busy to the menu label even when onExport rejects, logging the rejection instead of swallowing it silently', async () => {
+    // The primitive logs a rejecting onExport (import.meta.env.DEV is true
+    // under Vitest) so a caller that forgot its own error handling leaves a
+    // trace — assert on the spy rather than let it print, so test output
+    // stays pristine while still proving the signal actually fires.
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => {});
+
     let reject!: (err: unknown) => void;
+    const rejectionError = new Error('export failed');
     const onExport = vi.fn(
       () =>
         new Promise<void>((_resolve, r) => {
@@ -90,9 +99,17 @@ describe('ExportFormatMenu', () => {
       screen.getByRole('button', { name: 'Esportazione…' })
     ).toBeDisabled();
 
-    reject(new Error('export failed'));
+    reject(rejectionError);
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Esporta' })).toBeEnabled()
     );
+
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining('[ExportFormatMenu]'),
+      rejectionError
+    );
+
+    consoleError.mockRestore();
   });
 });

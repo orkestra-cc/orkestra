@@ -43,9 +43,17 @@ const ExportFormatMenu: React.FC<ExportFormatMenuProps> = ({
     setBusy(true);
     try {
       await onExport(scope, format);
-    } catch {
-      // The caller owns the error (toast copy differs per use/error code);
-      // this primitive only needs `busy` to reset in `finally` below.
+    } catch (err) {
+      // The caller owns the error (toast copy differs per use/error code) —
+      // this primitive only needs `busy` to reset, in `finally` below. But a
+      // silent catch here means a caller that forgot its own error handling
+      // leaves no trace anywhere: log it so the mistake stays discoverable.
+      if (import.meta.env.DEV) {
+        console.error(
+          '[ExportFormatMenu] onExport rejected — callers own their own error handling',
+          err
+        );
+      }
     } finally {
       setBusy(false);
     }
