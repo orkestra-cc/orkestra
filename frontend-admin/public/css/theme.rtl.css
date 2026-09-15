@@ -21856,6 +21856,20 @@ canvas.chartjs-responsive {
 .react-select--sm .react-select__indicator {
   padding: 0.1875rem !important;
 }
+.react-select--sm .react-select__option {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.react-select--sm .react-select__multi-value {
+  max-width: 100%;
+  min-width: 0;
+}
+.react-select--sm .react-select__multi-value__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /*-----------------------------------------------
 |   Tinymce

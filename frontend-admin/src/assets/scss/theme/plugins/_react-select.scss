@@ -140,4 +140,29 @@
   .react-select__indicator {
     padding: $input-padding-y-sm !important;
   }
+
+  // Un'opzione di un `select` reale è spesso una frase intera. In un
+  // controllo a larghezza fissa (la riga «Campi» del tab Iscrizioni) quel
+  // testo, reso grezzo, allarga il menu e — una volta selezionato — produce
+  // un chip che va a capo e alza il controllo di due o tre righe. Qui il
+  // testo si tronca su una riga sola in ENTRAMBI i posti; il testo completo
+  // resta disponibile via `title` (lo mette il chiamante con
+  // `formatOptionLabel`). Ambito: solo il modificatore `--sm`, così ogni
+  // altro consumatore di MultiSelect resta byte-identico.
+  .react-select__option {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .react-select__multi-value {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .react-select__multi-value__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
