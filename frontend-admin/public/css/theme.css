@@ -21867,6 +21867,36 @@ canvas.chartjs-responsive {
   color: var(--orkestra-black) !important;
 }
 
+.react-select--sm {
+  font-size: 0.8333333333rem;
+  width: 100%;
+}
+.react-select--sm .react-select__control {
+  min-height: calc(1.5em + 0.375rem + calc(var(--orkestra-border-width) * 2)) !important;
+  padding-left: 0.75rem;
+}
+.react-select--sm .react-select__value-container.react-select__value-container--has-value {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.react-select--sm .react-select__indicator {
+  padding: 0.1875rem !important;
+}
+.react-select--sm .react-select__option {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.react-select--sm .react-select__multi-value {
+  max-width: 100%;
+  min-width: 0;
+}
+.react-select--sm .react-select__multi-value__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /*-----------------------------------------------
 |   Tinymce
 -----------------------------------------------*/

@@ -101,3 +101,68 @@
   background-color: var(--#{$prefix}primary) !important;
   color: var(--#{$prefix}black) !important;
 }
+
+// react-select--sm: size parity with Bootstrap's `.form-control-sm`, so a
+// MultiSelect can sit next to a `size="sm"` Form.Control/DatePicker in the
+// same toolbar row without a visible height/font-size mismatch (opt-in via
+// `MultiSelect`'s `size="sm"` prop — see components/common/MultiSelect.tsx).
+// Every value below is one of the theme's own `-sm` input tokens, the same
+// ones `.form-control-sm` itself resolves to (node_modules/bootstrap/scss/
+// forms/_form-control.scss) — never a literal px/hex, so this modifier tracks
+// the theme if those tokens ever move.
+.react-select--sm {
+  font-size: $input-font-size-sm;
+  // Unlike `.form-control`/`.form-select`, react-select's own container has
+  // no intrinsic `width: 100%` — without this, two sm selects given the same
+  // `maxWidth` wrapper (the "equal-width 200px" Campi row) render at
+  // DIFFERENT widths, each shrunk to its own placeholder's intrinsic content
+  // width. This makes a `style={{ maxWidth: N }}` wrapper behave exactly
+  // like it does for a native Form.Select/Form.Control at the same N.
+  width: 100%;
+
+  .react-select__control {
+    min-height: $input-height-sm !important;
+    padding-left: $input-padding-x-sm;
+  }
+
+  .react-select__value-container.react-select__value-container--has-value {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  // Default react-select indicator padding (8px, its own theme.spacing.baseUnit
+  // * 2) plus the 20px dropdown-chevron svg is what makes the *unsized*
+  // control ~37px tall — taller than `.form-control-sm`'s 28px even with
+  // min-height forced, because the indicator's own content still exceeds it.
+  // $input-padding-y-sm mirrors the vertical rhythm `.form-control-sm` itself
+  // uses, so `2 * $input-padding-y-sm + 20px` lands the indicator's content
+  // box inside the sm control height instead of stretching it.
+  .react-select__indicator {
+    padding: $input-padding-y-sm !important;
+  }
+
+  // Un'opzione di un `select` reale è spesso una frase intera. In un
+  // controllo a larghezza fissa (la riga «Campi» del tab Iscrizioni) quel
+  // testo, reso grezzo, allarga il menu e — una volta selezionato — produce
+  // un chip che va a capo e alza il controllo di due o tre righe. Qui il
+  // testo si tronca su una riga sola in ENTRAMBI i posti; il testo completo
+  // resta disponibile via `title` (lo mette il chiamante con
+  // `formatOptionLabel`). Ambito: solo il modificatore `--sm`, così ogni
+  // altro consumatore di MultiSelect resta byte-identico.
+  .react-select__option {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .react-select__multi-value {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .react-select__multi-value__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
