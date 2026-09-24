@@ -37,7 +37,7 @@ Declared in `module.go::Collections()` and auto-created on boot:
 | Collection                          | Indexes                                           | TTL  |
 | ----------------------------------- | ------------------------------------------------- | ---- |
 | `notification_messages`             | `uuid` unique, `recipientUserUuid`, `category`, `idempotencyKey`, `senderSlug` (sparse) | 90 days on `createdAt` |
-| `notification_templates`            | `uuid` unique, compound `templateId+locale` unique | — |
+| `notification_templates`            | `uuid` unique, compound `ownerTenantId+templateId+locale` unique | — |
 | `notification_preferences`          | compound `userUuid+category+channel` unique       | — |
 | `notification_suppressions`         | `address` unique                                  | — |
 | `notification_unsubscribe_tokens`   | `uuid` unique, `tokenHash` unique                 | 30 days on `expiresAt` |
@@ -602,11 +602,50 @@ store and attributing it to the run that sent the mail.
 
 ## Template read/write capability
 
-`*NotificationService` also exposes `UpsertTemplate(ctx, templateID, locale, subject,
-bodyHTML, bodyText) error` and `GetTemplate(ctx, templateID, locale) (*iface.TemplateView,
-error)`, wrapping `TemplateService.Upsert` / `TemplateService.Get`. An empty locale
-falls back to the configured `app.default_locale`, and an upsert always writes
-`IsSystem: false` — operator content, never a system default.
+`*NotificationService` also exposes `CreateTemplate` / `UpsertTemplate` / `GetTemplate` /
+`DeleteTemplatesByPrefix`, wrapping `TemplateService`'s `CreateOwned` / `UpsertOwned` /
+`GetOwned` / `DeleteOwnedByPrefix` — together "the template port" below. An empty locale falls back to the configured
+`app.default_locale`, and a write always sets `IsSystem: false` — operator content,
+never a system default.
+
+**The tenant in the ctx is the owner.** There is no "global" mode: a ctx with no
+tenant yields `iface.ErrTemplateOwnerRequired` on every method, because an
+ownerless document lands in the system scope, where every tenant and the
+operator template admin can read it. `CreateTemplate` is insert-only
+(`iface.ErrTemplateExists` on a collision).
+
+**One id grammar, `^[a-z]+(:[a-z0-9-]+)*:[0-9a-f-]{36}$`, governs both ends** —
+the id you write (`CreateTemplate`, `UpsertTemplate`) and the prefix you delete
+by — with `iface.ErrTemplateIDInvalid` on a miss. Ending in a UUID keeps a
+delete from sweeping a whole family; enforcing it on the **write** is what makes
+"every owned row is deletable" an invariant, because `DeleteTemplatesByPrefix`
+is the only way to remove an owned template (the admin surface is system-only
+and there is no single-document owned delete), so an id it cannot name would be
+an undeletable row — a retention/erasure hazard beside the compliance module's
+DSR duties. The delete check lives both at the port (it is a port contract) and
+in the repository (defence in depth).
+
+Every port sentinel lives in `iface` (`ErrTemplateOwnerRequired`,
+`ErrTemplateExists`, `ErrTemplateIDInvalid`, `ErrTemplateNotFound`), never in
+this module's `services` package — the same rule ADR-0021 set for the sender
+family, so a consumer can classify a failure without importing core.
+
+**`GetTemplate` reads ONLY the ctx tenant's own documents** — a system template
+is *not* reachable through the port. The single place the two scopes meet is
+`TemplateService.Resolve(ctx, owner, templateID, locale)`, used exclusively by
+`SendTemplated`: the owner's own snapshot first, then the system template. So a
+send of `auth.verify_email` works for every tenant (and for a ctx with no
+tenant), while a per-tenant snapshot shadows no **other** tenant's document and
+**does** override the system template of the same id for its own tenant — the
+per-tenant override a consuming module builds on. A repository error that is not
+"not found" is returned as-is rather than falling back, so a transient store
+failure can never deliver the wrong body. A consumer that previews a core
+`auth.*` template through `GetTemplate` therefore gets "template not found"; its
+**sends** are unaffected.
+
+`TemplateService`'s unqualified methods (`Get` / `List` / `Upsert` / `Delete`) are
+the SYSTEM surface the operator template admin drives and never see an owned
+document; the `*Owned` ones are the per-tenant surface behind the port.
 
 There is **no** separate service key: the concrete service is already registered
 under `module.ServiceNotificationSender`, so a consumer resolves that key and

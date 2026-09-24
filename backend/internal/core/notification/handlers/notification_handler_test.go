@@ -52,6 +52,20 @@ func (htTmplService) Render(_ *models.TemplateDoc, _ map[string]any) (*services.
 	return &services.Rendered{}, nil
 }
 
+// Owner-scoped surface: inert here — these handler tests drive the SYSTEM
+// template admin, which never reaches it.
+func (htTmplService) Resolve(_ context.Context, _, _, _ string) (*models.TemplateDoc, error) {
+	return nil, nil
+}
+func (htTmplService) GetOwned(_ context.Context, _, _, _ string) (*models.TemplateDoc, error) {
+	return nil, nil
+}
+func (htTmplService) CreateOwned(_ context.Context, _ *models.TemplateDoc) error { return nil }
+func (htTmplService) UpsertOwned(_ context.Context, _ *models.TemplateDoc) error { return nil }
+func (htTmplService) DeleteOwnedByPrefix(_ context.Context, _, _ string) (int64, error) {
+	return 0, nil
+}
+
 type htPrefService struct{}
 
 func (htPrefService) CanDeliver(_ context.Context, _, _, _, _ string) (bool, error) {

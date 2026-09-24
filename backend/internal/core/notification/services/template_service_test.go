@@ -24,8 +24,12 @@ type fakeTemplateRepo struct {
 	deleteErr error
 	getErr    error
 	listErr   error
-	upserts   []*models.TemplateDoc
-	deletes   []string
+	// getOwnedErr, when non-nil, fails GetOwned — the transient-store branch
+	// Resolve must NOT swallow by falling through to the system template.
+	getOwnedErr error
+	upserts     []*models.TemplateDoc
+	deletes     []string
+	owned       map[string]*models.TemplateDoc // by owner/templateId/locale
 }
 
 func newFakeTemplateRepo() *fakeTemplateRepo {
@@ -101,6 +105,76 @@ func (f *fakeTemplateRepo) ExistsSystemTemplate(_ context.Context, id, locale st
 		return false, f.existsErr
 	}
 	return f.exists[tplKey(id, locale)], nil
+}
+
+// --- tenant-owned surface ---------------------------------------------------
+//
+// The fake's `docs` map is the SYSTEM store (ownerTenantId ""); owned
+// documents live in `owned`, keyed owner/templateId/locale, so the system
+// methods above can never see them — the isolation the Mongo-backed repo gets
+// from its filter. Only the owner guards are reproduced here; the prefix
+// grammar of DeleteOwnedByPrefix is the real repository's own invariant and is
+// covered by its Mongo integration test.
+
+func ownedKey(owner, id, locale string) string { return owner + "/" + id + "/" + locale }
+
+func (f *fakeTemplateRepo) ownedStore() map[string]*models.TemplateDoc {
+	if f.owned == nil {
+		f.owned = map[string]*models.TemplateDoc{}
+	}
+	return f.owned
+}
+
+func (f *fakeTemplateRepo) GetOwned(_ context.Context, owner, id, locale string) (*models.TemplateDoc, error) {
+	if f.getOwnedErr != nil {
+		return nil, f.getOwnedErr
+	}
+	if owner == "" {
+		return nil, repository.ErrNotFound
+	}
+	if d, ok := f.ownedStore()[ownedKey(owner, id, locale)]; ok {
+		return d, nil
+	}
+	return nil, repository.ErrNotFound
+}
+
+func (f *fakeTemplateRepo) Create(_ context.Context, doc *models.TemplateDoc) error {
+	if doc.OwnerTenantID == "" {
+		return errors.New("notification: Create requires an owner")
+	}
+	key := ownedKey(doc.OwnerTenantID, doc.TemplateID, doc.Locale)
+	if _, ok := f.ownedStore()[key]; ok {
+		return repository.ErrExists
+	}
+	cp := *doc
+	f.ownedStore()[key] = &cp
+	return nil
+}
+
+func (f *fakeTemplateRepo) UpsertOwned(_ context.Context, doc *models.TemplateDoc) error {
+	if doc.OwnerTenantID == "" {
+		return errors.New("notification: UpsertOwned requires an owner")
+	}
+	cp := *doc
+	f.ownedStore()[ownedKey(doc.OwnerTenantID, doc.TemplateID, doc.Locale)] = &cp
+	return nil
+}
+
+func (f *fakeTemplateRepo) DeleteOwnedByPrefix(_ context.Context, owner, prefix string) (int64, error) {
+	if owner == "" {
+		return 0, errors.New("notification: DeleteOwnedByPrefix requires an owner")
+	}
+	var n int64
+	for key, d := range f.ownedStore() {
+		if d.OwnerTenantID != owner {
+			continue
+		}
+		if d.TemplateID == prefix || strings.HasPrefix(d.TemplateID, prefix+":") {
+			delete(f.ownedStore(), key)
+			n++
+		}
+	}
+	return n, nil
 }
 
 func TestTemplateService_Render_RendersAllThreeBodies(t *testing.T) {
@@ -196,6 +270,80 @@ func TestTemplateService_Get_OtherRepoErrorPassesThrough(t *testing.T) {
 	_, err := svc.Get(context.Background(), "id", "en")
 	if err == nil || errors.Is(err, ErrTemplateNotFound) {
 		t.Fatalf("expected raw repo error, got %v", err)
+	}
+}
+
+// ---- Resolve: the send-time owner→system cascade --------------------------
+//
+// These run against the REAL templateService (NewTemplateService + the repo
+// fake), not the orchestrator's fakeTemplateService double, so the ORDER of
+// the two lookups is pinned here rather than reimplemented by a test double.
+// Swapping the two lookups in Resolve turns the first two red.
+
+// resolveKit stages the same (id, locale) in BOTH scopes so a test can say
+// which one Resolve picked.
+func resolveKit(t *testing.T) (*templateService, *fakeTemplateRepo, *models.TemplateDoc, *models.TemplateDoc) {
+	t.Helper()
+	svc, repo := newTestTemplateService(t)
+	sys := &models.TemplateDoc{TemplateID: "auth.verify_email", Locale: "en", Subject: "sys", IsSystem: true}
+	own := &models.TemplateDoc{OwnerTenantID: "A", TemplateID: "auth.verify_email", Locale: "en", Subject: "owned"}
+	repo.docs[tplKey("auth.verify_email", "en")] = sys
+	return svc, repo, sys, own
+}
+
+func TestTemplateService_Resolve_OwnedWinsOverSystem(t *testing.T) {
+	svc, repo, _, own := resolveKit(t)
+	repo.ownedStore()[ownedKey("A", "auth.verify_email", "en")] = own
+
+	got, err := svc.Resolve(context.Background(), "A", "auth.verify_email", "en")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != own {
+		t.Fatalf("Resolve must prefer the owner's document, got %+v", got)
+	}
+}
+
+func TestTemplateService_Resolve_OwnedMissFallsBackToSystem(t *testing.T) {
+	svc, _, sys, _ := resolveKit(t) // nothing staged in the owned store
+
+	got, err := svc.Resolve(context.Background(), "A", "auth.verify_email", "en")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != sys {
+		t.Fatalf("an owned miss must fall back to the system template, got %+v", got)
+	}
+}
+
+func TestTemplateService_Resolve_EmptyOwnerGoesStraightToSystem(t *testing.T) {
+	svc, repo, sys, own := resolveKit(t)
+	// Stage an owned document too: with no owner it must be unreachable.
+	repo.ownedStore()[ownedKey("A", "auth.verify_email", "en")] = own
+
+	got, err := svc.Resolve(context.Background(), "", "auth.verify_email", "en")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != sys {
+		t.Fatalf("an empty owner must resolve the system template, got %+v", got)
+	}
+}
+
+// A repository failure on the owned lookup must NOT degrade into "no owned
+// document, use the system one": that would deliver a different body than the
+// tenant configured, silently, on a transient Mongo error.
+func TestTemplateService_Resolve_OwnedRepoErrorDoesNotFallBackToSystem(t *testing.T) {
+	svc, repo, _, _ := resolveKit(t) // the system template IS staged
+	boom := errors.New("boom")
+	repo.getOwnedErr = boom
+
+	got, err := svc.Resolve(context.Background(), "A", "auth.verify_email", "en")
+	if got != nil {
+		t.Fatalf("a store failure must not yield a template, got %+v", got)
+	}
+	if !errors.Is(err, boom) {
+		t.Fatalf("the repository error must pass through, got %v", err)
 	}
 }
 
@@ -324,5 +472,27 @@ func TestTemplateService_SeedDefaults_UpsertErrorPropagates(t *testing.T) {
 	repo.upsertErr = errors.New("write failed")
 	if err := svc.SeedDefaults(context.Background()); err == nil {
 		t.Fatalf("expected error from Upsert")
+	}
+}
+
+func TestRenderKeepsOutlookConditionals(t *testing.T) {
+	svc := NewTemplateService(nil, discardLogger())
+	doc := &models.TemplateDoc{
+		Subject:  "Hi {{.Name}}",
+		BodyText: "Hi {{.Name}}",
+		BodyHTML: `<body><!--[if mso]><v:roundrect href="{{.URL}}"><center>Go</center></v:roundrect><![endif]--><a href="{{.URL}}">Go</a></body>`,
+	}
+	r, err := svc.Render(doc, map[string]any{"Name": "Mario", "URL": "https://x.example/a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.BodyHTML, `<!--[if mso]><v:roundrect href="https://x.example/a">`) {
+		t.Fatalf("conditional dropped or unrendered: %s", r.BodyHTML)
+	}
+	if !strings.HasSuffix(r.BodyHTML, `<a href="https://x.example/a">Go</a></body>`) {
+		t.Fatalf("body altered: %s", r.BodyHTML)
+	}
+	if r.Subject != "Hi Mario" {
+		t.Fatalf("subject: %q", r.Subject)
 	}
 }

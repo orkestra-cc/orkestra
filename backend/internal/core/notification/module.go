@@ -73,6 +73,7 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 			Indexes: []module.IndexSpec{
 				{Keys: map[string]int{"uuid": 1}, Unique: true},
 				{OrderedKeys: []module.IndexKey{
+					{Field: "ownerTenantId", Direction: 1},
 					{Field: "templateId", Direction: 1},
 					{Field: "locale", Direction: 1},
 				}, Unique: true},

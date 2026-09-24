@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -285,7 +286,13 @@ func (s *NotificationService) SendTemplated(ctx context.Context, req iface.Templ
 	if locale == "" {
 		locale = s.opts.DefaultLocale
 	}
-	tmpl, err := s.tmplService.Get(ctx, req.TemplateID, locale)
+	// Owner first, then system: a tenant's own template (e.g. a per-send
+	// snapshot a consuming module wrote) shadows no OTHER tenant's document, and
+	// overrides the system template of the same id for its own tenant. The
+	// system templates stay deliverable for every tenant — including a send
+	// with no tenant in ctx (boot-time and public flows).
+	tenantID, _ := ctxauth.GetTenantID(ctx)
+	tmpl, err := s.tmplService.Resolve(ctx, tenantID, req.TemplateID, locale)
 	if err != nil {
 		return nil, fmt.Errorf("notification: load template %s: %w", req.TemplateID, err)
 	}
@@ -1040,32 +1047,131 @@ func (s *NotificationService) SetMarketingUnsubscribeSink(sink iface.MarketingUn
 	s.unsubscribeSink = sink
 }
 
-// UpsertTemplate stores or replaces an operator-managed notification template
-// (e.g. a campaign template) via the template service. IsSystem is always false
-// (campaign templates are operator content, not system defaults); Channel is
-// always email. An empty locale falls back to the configured DefaultLocale.
-func (s *NotificationService) UpsertTemplate(ctx context.Context, templateID, locale, subject, bodyHTML, bodyText string) error {
+// --- owner-scoped template port -------------------------------------------
+//
+// CreateTemplate, UpsertTemplate, GetTemplate and DeleteTemplatesByPrefix form
+// the template port a consuming module reaches by type-asserting the resolved
+// ServiceNotificationSender to an interface it declares itself. Every method
+// below is confined to the tenant in the ctx. The port has no
+// "global" mode: a snapshot written without an owner would land in the system
+// scope, where every tenant and the operator template admin can read it.
+
+// templateIDRe is the grammar the port accepts for a template id on a write
+// AND for a delete prefix: a lowercase head, optional segments, and a full
+// UUID at the end — "digest:<uuid>", "preview:test:<uuid>:<uuid>".
+//
+// One grammar governs both ends on purpose. DeleteTemplatesByPrefix is the
+// ONLY way to remove an owned template (the admin surface is system-only and
+// there is no single-document owned delete), so an id the delete grammar
+// cannot name is a row no surface can ever remove — a retention and erasure
+// hazard next to a compliance module with DSR duties. Refusing it at write
+// time turns "every owned row is deletable" from a convention into an
+// invariant, and a future caller that wants a different id shape has to
+// widen the delete grammar with it.
+//
+// Ending in a UUID is also what keeps a delete from sweeping a whole family.
+// The repository enforces the same grammar on the delete; the duplication is
+// deliberate — it is a PORT contract (a consumer must get the same refusal
+// whatever the store is), and the repository check is defence in depth for a
+// caller that reaches the repository directly.
+var templateIDRe = regexp.MustCompile(`^[a-z]+(:[a-z0-9-]+)*:[0-9a-f-]{36}$`)
+
+// ownerFromCtx resolves the template owner. There is no fallback on purpose:
+// an ownerless write is a cross-tenant leak, so it fails loudly.
+func ownerFromCtx(ctx context.Context) (string, error) {
+	owner, ok := ctxauth.GetTenantID(ctx)
+	if !ok || owner == "" {
+		return "", iface.ErrTemplateOwnerRequired
+	}
+	return owner, nil
+}
+
+// CreateTemplate inserts a template owned by the ctx tenant and never
+// overwrites: an existing (owner, templateID, locale) yields
+// iface.ErrTemplateExists. IsSystem is always false (module-written content
+// is not a system default); Channel is always email. An empty locale falls back to the
+// configured DefaultLocale.
+func (s *NotificationService) CreateTemplate(ctx context.Context, templateID, locale, subject, bodyHTML, bodyText string) error {
+	owner, err := ownerFromCtx(ctx)
+	if err != nil {
+		return err
+	}
+	if !templateIDRe.MatchString(templateID) {
+		return iface.ErrTemplateIDInvalid
+	}
 	if locale == "" {
 		locale = s.opts.DefaultLocale
 	}
-	return s.tmplService.Upsert(ctx, &models.TemplateDoc{
-		TemplateID: templateID, Locale: locale, Channel: models.ChannelEmail,
+	err = s.tmplService.CreateOwned(ctx, &models.TemplateDoc{
+		OwnerTenantID: owner, TemplateID: templateID, Locale: locale, Channel: models.ChannelEmail,
+		Subject: subject, BodyHTML: bodyHTML, BodyText: bodyText, IsSystem: false,
+	})
+	if errors.Is(err, repository.ErrExists) {
+		return iface.ErrTemplateExists
+	}
+	return err
+}
+
+// UpsertTemplate stores or replaces a template owned by the ctx tenant (e.g. a
+// per-send snapshot). IsSystem is always false; Channel is always email. An
+// empty locale falls back to the configured DefaultLocale.
+func (s *NotificationService) UpsertTemplate(ctx context.Context, templateID, locale, subject, bodyHTML, bodyText string) error {
+	owner, err := ownerFromCtx(ctx)
+	if err != nil {
+		return err
+	}
+	if !templateIDRe.MatchString(templateID) {
+		return iface.ErrTemplateIDInvalid
+	}
+	if locale == "" {
+		locale = s.opts.DefaultLocale
+	}
+	return s.tmplService.UpsertOwned(ctx, &models.TemplateDoc{
+		OwnerTenantID: owner, TemplateID: templateID, Locale: locale, Channel: models.ChannelEmail,
 		Subject: subject, BodyHTML: bodyHTML, BodyText: bodyText, IsSystem: false,
 	})
 }
 
-// GetTemplate fetches a notification template by (templateID, locale). An empty
-// locale falls back to the configured DefaultLocale. Returns ErrTemplateNotFound
-// (from the template service) when no matching row exists.
+// GetTemplate returns ONLY the ctx tenant's own document: system templates
+// are not reachable through the port. A consumer that previews a system
+// template this way gets a miss; its sends are unaffected (SendTemplated
+// resolves owner, then system).
+//
+// An empty locale falls back to the configured DefaultLocale; a miss is
+// iface.ErrTemplateNotFound.
 func (s *NotificationService) GetTemplate(ctx context.Context, templateID, locale string) (*iface.TemplateView, error) {
+	owner, err := ownerFromCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if locale == "" {
 		locale = s.opts.DefaultLocale
 	}
-	doc, err := s.tmplService.Get(ctx, templateID, locale)
+	doc, err := s.tmplService.GetOwned(ctx, owner, templateID, locale)
+	if errors.Is(err, ErrTemplateNotFound) {
+		// The port's sentinels are iface's: a consumer cannot import this
+		// package to classify one (ADR-0021's rule for the sender family).
+		return nil, iface.ErrTemplateNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
 	return &iface.TemplateView{TemplateID: doc.TemplateID, Locale: doc.Locale, Subject: doc.Subject, BodyHTML: doc.BodyHTML, BodyText: doc.BodyText}, nil
+}
+
+// DeleteTemplatesByPrefix removes the ctx tenant's templates whose id is the
+// prefix or starts with prefix+":". It never reaches another tenant's rows,
+// and never the system ones.
+func (s *NotificationService) DeleteTemplatesByPrefix(ctx context.Context, prefix string) (int, error) {
+	owner, err := ownerFromCtx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if !templateIDRe.MatchString(prefix) {
+		return 0, iface.ErrTemplateIDInvalid
+	}
+	n, err := s.tmplService.DeleteOwnedByPrefix(ctx, owner, prefix)
+	return int(n), err
 }
 
 // FireMarketingUnsubscribe invokes the sink and reports what happened, so the
