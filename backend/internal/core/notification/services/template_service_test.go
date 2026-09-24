@@ -326,3 +326,25 @@ func TestTemplateService_SeedDefaults_UpsertErrorPropagates(t *testing.T) {
 		t.Fatalf("expected error from Upsert")
 	}
 }
+
+func TestRenderKeepsOutlookConditionals(t *testing.T) {
+	svc := NewTemplateService(nil, discardLogger())
+	doc := &models.TemplateDoc{
+		Subject:  "Hi {{.Name}}",
+		BodyText: "Hi {{.Name}}",
+		BodyHTML: `<body><!--[if mso]><v:roundrect href="{{.URL}}"><center>Go</center></v:roundrect><![endif]--><a href="{{.URL}}">Go</a></body>`,
+	}
+	r, err := svc.Render(doc, map[string]any{"Name": "Mario", "URL": "https://x.example/a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.BodyHTML, `<!--[if mso]><v:roundrect href="https://x.example/a">`) {
+		t.Fatalf("conditional dropped or unrendered: %s", r.BodyHTML)
+	}
+	if !strings.HasSuffix(r.BodyHTML, `<a href="https://x.example/a">Go</a></body>`) {
+		t.Fatalf("body altered: %s", r.BodyHTML)
+	}
+	if r.Subject != "Hi Mario" {
+		t.Fatalf("subject: %q", r.Subject)
+	}
+}

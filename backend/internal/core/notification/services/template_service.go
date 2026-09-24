@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/orkestra/backend/internal/core/notification/models"
 	"github.com/orkestra/backend/internal/core/notification/repository"
+	"github.com/orkestra/backend/internal/shared/emailhtml"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
@@ -182,7 +183,10 @@ func renderText(name, body string, data map[string]any) (string, error) {
 }
 
 func renderHTML(name, body string, data map[string]any) (string, error) {
-	t, err := template.New(name).Parse(body)
+	// html/template strips HTML comments: protect the Outlook conditional
+	// delimiters (and ordinary comments) across Parse/Execute. See
+	// internal/shared/emailhtml.
+	t, err := template.New(name).Parse(emailhtml.ProtectComments(body))
 	if err != nil {
 		return "", err
 	}
@@ -190,5 +194,5 @@ func renderHTML(name, body string, data map[string]any) (string, error) {
 	if err := t.Execute(&buf, data); err != nil {
 		return "", err
 	}
-	return buf.String(), nil
+	return emailhtml.RestoreComments(buf.String()), nil
 }
