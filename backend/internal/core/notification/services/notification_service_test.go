@@ -61,7 +61,15 @@ func (f *fakeNotifRepo) GetByUUID(_ context.Context, _ string) (*models.Notifica
 type fakeTemplateService struct {
 	// store is an in-memory map populated by Upsert and read by Get when
 	// neither tmpl nor getErr is explicitly set. Key: templateID+"/"+locale.
-	store   map[string]*models.TemplateDoc
+	// It is the SYSTEM store: the owner-scoped methods never touch it, the
+	// same isolation the real repository gets from its ownerTenantId filter.
+	store map[string]*models.TemplateDoc
+	// owned holds the per-tenant snapshots. Key: owner+"/"+templateID+"/"+locale.
+	owned map[string]*models.TemplateDoc
+	// system is the explicit system-template map Resolve falls back to, so a
+	// test can stage a system template without disturbing store/tmpl/getErr.
+	// Key: templateID+"/"+locale.
+	system  map[string]*models.TemplateDoc
 	tmpl    *models.TemplateDoc
 	getErr  error
 	getCall struct {
@@ -69,6 +77,9 @@ type fakeTemplateService struct {
 	}
 	renderErr error
 	rendered  *Rendered
+	// renderedFor records the document Render was last called with, so a test
+	// can assert WHICH template the orchestrator resolved.
+	renderedFor *models.TemplateDoc
 }
 
 func (f *fakeTemplateService) SeedDefaults(_ context.Context) error { return nil }
@@ -111,7 +122,68 @@ func (f *fakeTemplateService) Upsert(_ context.Context, doc *models.TemplateDoc)
 
 func (f *fakeTemplateService) Delete(_ context.Context, _ string, _ string) error { return nil }
 
-func (f *fakeTemplateService) Render(_ *models.TemplateDoc, data map[string]any) (*Rendered, error) {
+// ---- owner-scoped surface ------------------------------------------------
+//
+// Resolve is the cascade SendTemplated uses: the ctx tenant's own snapshot
+// first, then the system template. GetOwned/CreateOwned/UpsertOwned/
+// DeleteOwnedByPrefix only ever see `owned`, never `store`.
+
+func (f *fakeTemplateService) Resolve(ctx context.Context, owner, id, locale string) (*models.TemplateDoc, error) {
+	if owner != "" {
+		if d, ok := f.owned[owner+"/"+id+"/"+locale]; ok {
+			return d, nil
+		}
+	}
+	if d, ok := f.system[id+"/"+locale]; ok {
+		return d, nil
+	}
+	return f.Get(ctx, id, locale) // legacy behaviour of the fake (store/tmpl/getErr)
+}
+
+func (f *fakeTemplateService) GetOwned(_ context.Context, owner, id, locale string) (*models.TemplateDoc, error) {
+	if d, ok := f.owned[owner+"/"+id+"/"+locale]; ok {
+		return d, nil
+	}
+	return nil, ErrTemplateNotFound
+}
+
+func (f *fakeTemplateService) CreateOwned(_ context.Context, d *models.TemplateDoc) error {
+	k := d.OwnerTenantID + "/" + d.TemplateID + "/" + d.Locale
+	if _, ok := f.owned[k]; ok {
+		return repository.ErrExists
+	}
+	if f.owned == nil {
+		f.owned = map[string]*models.TemplateDoc{}
+	}
+	f.owned[k] = d
+	return nil
+}
+
+func (f *fakeTemplateService) UpsertOwned(_ context.Context, d *models.TemplateDoc) error {
+	if f.owned == nil {
+		f.owned = map[string]*models.TemplateDoc{}
+	}
+	f.owned[d.OwnerTenantID+"/"+d.TemplateID+"/"+d.Locale] = d
+	return nil
+}
+
+// DeleteOwnedByPrefix does NOT reproduce the prefix grammar: that check lives
+// at the port boundary (NotificationService.DeleteTemplatesByPrefix) and in
+// the real repository, and the tests here exercise the former through the
+// service.
+func (f *fakeTemplateService) DeleteOwnedByPrefix(_ context.Context, owner, prefix string) (int64, error) {
+	var n int64
+	for k := range f.owned {
+		if strings.HasPrefix(k, owner+"/"+prefix) {
+			delete(f.owned, k)
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (f *fakeTemplateService) Render(doc *models.TemplateDoc, data map[string]any) (*Rendered, error) {
+	f.renderedFor = doc
 	if f.renderErr != nil {
 		return nil, f.renderErr
 	}
@@ -1114,12 +1186,22 @@ func newTestNotificationService(t *testing.T) *NotificationService {
 	return k.svc
 }
 
+// The port is owner-scoped: every call below carries a tenant in the ctx, and
+// every id obeys the `<segment>(:<segment>)*:<uuid>` grammar. The ownerless
+// and malformed-id variants are covered in template_port_owner_test.go.
+
+const (
+	portTemplateX = "digest:0f0e0d0c-0b0a-4908-8706-050403020001"
+	portTemplateY = "digest:0f0e0d0c-0b0a-4908-8706-050403020002"
+)
+
 func TestTemplatePortRoundTrip(t *testing.T) {
 	svc := newTestNotificationService(t)
-	if err := svc.UpsertTemplate(context.Background(), "campaign:x", "it", "Ciao {{.firstName}}", "<p>Hi</p>", "Hi"); err != nil {
+	ctx := tenantCtx("t1")
+	if err := svc.UpsertTemplate(ctx, portTemplateX, "it", "Ciao {{.firstName}}", "<p>Hi</p>", "Hi"); err != nil {
 		t.Fatal(err)
 	}
-	v, err := svc.GetTemplate(context.Background(), "campaign:x", "it")
+	v, err := svc.GetTemplate(ctx, portTemplateX, "it")
 	if err != nil || v.Subject != "Ciao {{.firstName}}" || v.BodyHTML != "<p>Hi</p>" {
 		t.Fatalf("got %+v err %v", v, err)
 	}
@@ -1127,20 +1209,21 @@ func TestTemplatePortRoundTrip(t *testing.T) {
 
 func TestTemplatePortGetNotFound(t *testing.T) {
 	svc := newTestNotificationService(t)
-	_, err := svc.GetTemplate(context.Background(), "campaign:missing", "it")
-	if !errors.Is(err, ErrTemplateNotFound) {
-		t.Fatalf("expected ErrTemplateNotFound, got %v", err)
+	_, err := svc.GetTemplate(tenantCtx("t1"), "digest:0f0e0d0c-0b0a-4908-8706-050403020003", "it")
+	if !errors.Is(err, iface.ErrTemplateNotFound) {
+		t.Fatalf("expected iface.ErrTemplateNotFound, got %v", err)
 	}
 }
 
 func TestTemplatePortLocaleDefault(t *testing.T) {
 	// Upsert with empty locale → defaults to svc's DefaultLocale ("it").
 	svc := newTestNotificationService(t)
-	if err := svc.UpsertTemplate(context.Background(), "campaign:y", "", "Subj", "<p>body</p>", "body"); err != nil {
+	ctx := tenantCtx("t1")
+	if err := svc.UpsertTemplate(ctx, portTemplateY, "", "Subj", "<p>body</p>", "body"); err != nil {
 		t.Fatal(err)
 	}
 	// Get with empty locale should also resolve to "it".
-	v, err := svc.GetTemplate(context.Background(), "campaign:y", "")
+	v, err := svc.GetTemplate(ctx, portTemplateY, "")
 	if err != nil {
 		t.Fatalf("GetTemplate: %v", err)
 	}

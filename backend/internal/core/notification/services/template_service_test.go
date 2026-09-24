@@ -24,9 +24,12 @@ type fakeTemplateRepo struct {
 	deleteErr error
 	getErr    error
 	listErr   error
-	upserts   []*models.TemplateDoc
-	deletes   []string
-	owned     map[string]*models.TemplateDoc // by owner/templateId/locale
+	// getOwnedErr, when non-nil, fails GetOwned — the transient-store branch
+	// Resolve must NOT swallow by falling through to the system template.
+	getOwnedErr error
+	upserts     []*models.TemplateDoc
+	deletes     []string
+	owned       map[string]*models.TemplateDoc // by owner/templateId/locale
 }
 
 func newFakeTemplateRepo() *fakeTemplateRepo {
@@ -123,6 +126,9 @@ func (f *fakeTemplateRepo) ownedStore() map[string]*models.TemplateDoc {
 }
 
 func (f *fakeTemplateRepo) GetOwned(_ context.Context, owner, id, locale string) (*models.TemplateDoc, error) {
+	if f.getOwnedErr != nil {
+		return nil, f.getOwnedErr
+	}
 	if owner == "" {
 		return nil, repository.ErrNotFound
 	}
@@ -264,6 +270,80 @@ func TestTemplateService_Get_OtherRepoErrorPassesThrough(t *testing.T) {
 	_, err := svc.Get(context.Background(), "id", "en")
 	if err == nil || errors.Is(err, ErrTemplateNotFound) {
 		t.Fatalf("expected raw repo error, got %v", err)
+	}
+}
+
+// ---- Resolve: the send-time owner→system cascade --------------------------
+//
+// These run against the REAL templateService (NewTemplateService + the repo
+// fake), not the orchestrator's fakeTemplateService double, so the ORDER of
+// the two lookups is pinned here rather than reimplemented by a test double.
+// Swapping the two lookups in Resolve turns the first two red.
+
+// resolveKit stages the same (id, locale) in BOTH scopes so a test can say
+// which one Resolve picked.
+func resolveKit(t *testing.T) (*templateService, *fakeTemplateRepo, *models.TemplateDoc, *models.TemplateDoc) {
+	t.Helper()
+	svc, repo := newTestTemplateService(t)
+	sys := &models.TemplateDoc{TemplateID: "auth.verify_email", Locale: "en", Subject: "sys", IsSystem: true}
+	own := &models.TemplateDoc{OwnerTenantID: "A", TemplateID: "auth.verify_email", Locale: "en", Subject: "owned"}
+	repo.docs[tplKey("auth.verify_email", "en")] = sys
+	return svc, repo, sys, own
+}
+
+func TestTemplateService_Resolve_OwnedWinsOverSystem(t *testing.T) {
+	svc, repo, _, own := resolveKit(t)
+	repo.ownedStore()[ownedKey("A", "auth.verify_email", "en")] = own
+
+	got, err := svc.Resolve(context.Background(), "A", "auth.verify_email", "en")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != own {
+		t.Fatalf("Resolve must prefer the owner's document, got %+v", got)
+	}
+}
+
+func TestTemplateService_Resolve_OwnedMissFallsBackToSystem(t *testing.T) {
+	svc, _, sys, _ := resolveKit(t) // nothing staged in the owned store
+
+	got, err := svc.Resolve(context.Background(), "A", "auth.verify_email", "en")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != sys {
+		t.Fatalf("an owned miss must fall back to the system template, got %+v", got)
+	}
+}
+
+func TestTemplateService_Resolve_EmptyOwnerGoesStraightToSystem(t *testing.T) {
+	svc, repo, sys, own := resolveKit(t)
+	// Stage an owned document too: with no owner it must be unreachable.
+	repo.ownedStore()[ownedKey("A", "auth.verify_email", "en")] = own
+
+	got, err := svc.Resolve(context.Background(), "", "auth.verify_email", "en")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != sys {
+		t.Fatalf("an empty owner must resolve the system template, got %+v", got)
+	}
+}
+
+// A repository failure on the owned lookup must NOT degrade into "no owned
+// document, use the system one": that would deliver a different body than the
+// tenant configured, silently, on a transient Mongo error.
+func TestTemplateService_Resolve_OwnedRepoErrorDoesNotFallBackToSystem(t *testing.T) {
+	svc, repo, _, _ := resolveKit(t) // the system template IS staged
+	boom := errors.New("boom")
+	repo.getOwnedErr = boom
+
+	got, err := svc.Resolve(context.Background(), "A", "auth.verify_email", "en")
+	if got != nil {
+		t.Fatalf("a store failure must not yield a template, got %+v", got)
+	}
+	if !errors.Is(err, boom) {
+		t.Fatalf("the repository error must pass through, got %v", err)
 	}
 }
 

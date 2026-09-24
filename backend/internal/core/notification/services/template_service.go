@@ -28,6 +28,13 @@ type Rendered struct {
 
 // TemplateService resolves templates by ID + locale, seeds system defaults,
 // and renders the template body with the provided data map.
+//
+// It has two families of methods. The unqualified ones (Get/List/Upsert/
+// Delete) are the SYSTEM surface the operator template admin drives — they
+// only ever see documents with no owner. The *Owned ones are the per-tenant
+// surface behind the notification service's template port. Resolve is the single place
+// the two meet: owner first, then system, and it is used ONLY by
+// SendTemplated.
 type TemplateService interface {
 	SeedDefaults(ctx context.Context) error
 	SeedModuleTemplates(ctx context.Context, specs []module.NotificationTemplateSpec) error
@@ -36,6 +43,12 @@ type TemplateService interface {
 	Upsert(ctx context.Context, doc *models.TemplateDoc) error
 	Delete(ctx context.Context, templateID, locale string) error
 	Render(tmpl *models.TemplateDoc, data map[string]any) (*Rendered, error)
+
+	Resolve(ctx context.Context, owner, templateID, locale string) (*models.TemplateDoc, error)
+	GetOwned(ctx context.Context, owner, templateID, locale string) (*models.TemplateDoc, error)
+	CreateOwned(ctx context.Context, doc *models.TemplateDoc) error
+	UpsertOwned(ctx context.Context, doc *models.TemplateDoc) error
+	DeleteOwnedByPrefix(ctx context.Context, owner, prefix string) (int64, error)
 }
 
 type templateService struct {
@@ -137,6 +150,61 @@ func (s *templateService) Upsert(ctx context.Context, doc *models.TemplateDoc) e
 
 func (s *templateService) Delete(ctx context.Context, templateID, locale string) error {
 	return s.repo.DeleteByID(ctx, templateID, locale)
+}
+
+// ---- owner-scoped surface (behind the template port) ---------------------
+
+// Resolve is the send-time lookup: the owner's own snapshot wins, and a miss
+// falls back to the system template. This is the ONLY read that crosses from
+// one scope to the other — an owned document shadows no OTHER tenant's
+// document, and DOES override the system template of the same id for its own
+// tenant (the per-tenant override a consuming module builds on), while a system
+// template (auth.verify_email, …) stays deliverable for every tenant. An empty
+// owner skips straight to the system lookup.
+//
+// A repository error that is not ErrNotFound is returned as-is: falling back
+// to the system template on a transient store failure would silently deliver
+// the wrong body.
+func (s *templateService) Resolve(ctx context.Context, owner, templateID, locale string) (*models.TemplateDoc, error) {
+	if owner != "" {
+		doc, err := s.repo.GetOwned(ctx, owner, templateID, locale)
+		if err == nil {
+			return doc, nil
+		}
+		if !errors.Is(err, repository.ErrNotFound) {
+			return nil, err
+		}
+	}
+	return s.Get(ctx, templateID, locale)
+}
+
+// GetOwned reads ONLY the owner's document — no system fallback.
+func (s *templateService) GetOwned(ctx context.Context, owner, templateID, locale string) (*models.TemplateDoc, error) {
+	doc, err := s.repo.GetOwned(ctx, owner, templateID, locale)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, ErrTemplateNotFound
+	}
+	return doc, err
+}
+
+// CreateOwned inserts the owner's template; the repository turns a collision
+// on (ownerTenantId, templateId, locale) into repository.ErrExists.
+func (s *templateService) CreateOwned(ctx context.Context, doc *models.TemplateDoc) error {
+	if doc.Channel == "" {
+		doc.Channel = models.ChannelEmail
+	}
+	return s.repo.Create(ctx, doc)
+}
+
+func (s *templateService) UpsertOwned(ctx context.Context, doc *models.TemplateDoc) error {
+	if doc.Channel == "" {
+		doc.Channel = models.ChannelEmail
+	}
+	return s.repo.UpsertOwned(ctx, doc)
+}
+
+func (s *templateService) DeleteOwnedByPrefix(ctx context.Context, owner, prefix string) (int64, error) {
+	return s.repo.DeleteOwnedByPrefix(ctx, owner, prefix)
 }
 
 // Render applies the template body against the data map. The subject and

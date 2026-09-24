@@ -1578,3 +1578,28 @@ type TemplateView struct {
 	BodyHTML   string
 	BodyText   string
 }
+
+// Template sentinels returned by the notification service's owner-scoped
+// template methods. A consumer maps them with errors.Is; the service never
+// leaks a notification-internal or repository error type across the boundary
+// — the same rule the sender family above follows (ADR-0021).
+var (
+	// ErrTemplateOwnerRequired is returned by every owner-scoped template
+	// method called with a context that carries no tenant. There is no
+	// "global" mode on purpose: a template written without an owner would be
+	// readable by every tenant.
+	ErrTemplateOwnerRequired = errors.New("notification: template owner required (no tenant in ctx)")
+	// ErrTemplateExists is returned by CreateTemplate when the ctx tenant
+	// already owns (templateID, locale). Create never overwrites.
+	ErrTemplateExists = errors.New("notification: template exists")
+	// ErrTemplateIDInvalid is returned when a template id (on a write) or a
+	// delete prefix does not match `<segment>(:<segment>)*:<uuid>`. One
+	// grammar governs both ends on purpose: DeleteTemplatesByPrefix is the
+	// only way to remove an owned template, so an id it could not name would
+	// be a row no surface can ever delete.
+	ErrTemplateIDInvalid = errors.New("notification: template id must be <segment>(:<segment>)*:<uuid>")
+	// ErrTemplateNotFound is returned by GetTemplate when the ctx tenant owns
+	// no such (templateID, locale). A system template of that id does not
+	// satisfy the read: only SendTemplated falls back to system templates.
+	ErrTemplateNotFound = errors.New("notification: template not found")
+)

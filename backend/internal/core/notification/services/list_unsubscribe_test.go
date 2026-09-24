@@ -42,7 +42,9 @@ func newHeaderKitWithPolicy(t *testing.T, base string, waived bool) (svc *Notifi
 	t.Helper()
 	driver = &headerDriverCapture{}
 	unsub = &fakeUnsubService{token: "raw-token"}
-	tmpl = &fakeTemplateService{}
+	// system is pre-allocated so a test can stage a system template for the
+	// SendTemplated cascade without first upserting one.
+	tmpl = &fakeTemplateService{system: map[string]*models.TemplateDoc{}}
 	resolver := &fakeResolver{profile: SenderProfile{Slug: "default", Provider: "capture", Categories: []string{"*"}}}
 	svc = NewNotificationService(
 		newFakeNotifRepo(), tmpl, &fakePrefService{can: true}, unsub,
