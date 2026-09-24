@@ -6126,6 +6126,9 @@
           "locale": {
             "type": "string"
           },
+          "ownerTenantId": {
+            "type": "string"
+          },
           "subject": {
             "type": "string"
           },

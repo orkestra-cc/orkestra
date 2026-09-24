@@ -37,7 +37,7 @@ Declared in `module.go::Collections()` and auto-created on boot:
 | Collection                          | Indexes                                           | TTL  |
 | ----------------------------------- | ------------------------------------------------- | ---- |
 | `notification_messages`             | `uuid` unique, `recipientUserUuid`, `category`, `idempotencyKey`, `senderSlug` (sparse) | 90 days on `createdAt` |
-| `notification_templates`            | `uuid` unique, compound `templateId+locale` unique | — |
+| `notification_templates`            | `uuid` unique, compound `ownerTenantId+templateId+locale` unique | — |
 | `notification_preferences`          | compound `userUuid+category+channel` unique       | — |
 | `notification_suppressions`         | `address` unique                                  | — |
 | `notification_unsubscribe_tokens`   | `uuid` unique, `tokenHash` unique                 | 30 days on `expiresAt` |

@@ -26,6 +26,7 @@ type fakeTemplateRepo struct {
 	listErr   error
 	upserts   []*models.TemplateDoc
 	deletes   []string
+	owned     map[string]*models.TemplateDoc // by owner/templateId/locale
 }
 
 func newFakeTemplateRepo() *fakeTemplateRepo {
@@ -101,6 +102,73 @@ func (f *fakeTemplateRepo) ExistsSystemTemplate(_ context.Context, id, locale st
 		return false, f.existsErr
 	}
 	return f.exists[tplKey(id, locale)], nil
+}
+
+// --- tenant-owned surface ---------------------------------------------------
+//
+// The fake's `docs` map is the SYSTEM store (ownerTenantId ""); owned
+// documents live in `owned`, keyed owner/templateId/locale, so the system
+// methods above can never see them — the isolation the Mongo-backed repo gets
+// from its filter. Only the owner guards are reproduced here; the prefix
+// grammar of DeleteOwnedByPrefix is the real repository's own invariant and is
+// covered by its Mongo integration test.
+
+func ownedKey(owner, id, locale string) string { return owner + "/" + id + "/" + locale }
+
+func (f *fakeTemplateRepo) ownedStore() map[string]*models.TemplateDoc {
+	if f.owned == nil {
+		f.owned = map[string]*models.TemplateDoc{}
+	}
+	return f.owned
+}
+
+func (f *fakeTemplateRepo) GetOwned(_ context.Context, owner, id, locale string) (*models.TemplateDoc, error) {
+	if owner == "" {
+		return nil, repository.ErrNotFound
+	}
+	if d, ok := f.ownedStore()[ownedKey(owner, id, locale)]; ok {
+		return d, nil
+	}
+	return nil, repository.ErrNotFound
+}
+
+func (f *fakeTemplateRepo) Create(_ context.Context, doc *models.TemplateDoc) error {
+	if doc.OwnerTenantID == "" {
+		return errors.New("notification: Create requires an owner")
+	}
+	key := ownedKey(doc.OwnerTenantID, doc.TemplateID, doc.Locale)
+	if _, ok := f.ownedStore()[key]; ok {
+		return repository.ErrExists
+	}
+	cp := *doc
+	f.ownedStore()[key] = &cp
+	return nil
+}
+
+func (f *fakeTemplateRepo) UpsertOwned(_ context.Context, doc *models.TemplateDoc) error {
+	if doc.OwnerTenantID == "" {
+		return errors.New("notification: UpsertOwned requires an owner")
+	}
+	cp := *doc
+	f.ownedStore()[ownedKey(doc.OwnerTenantID, doc.TemplateID, doc.Locale)] = &cp
+	return nil
+}
+
+func (f *fakeTemplateRepo) DeleteOwnedByPrefix(_ context.Context, owner, prefix string) (int64, error) {
+	if owner == "" {
+		return 0, errors.New("notification: DeleteOwnedByPrefix requires an owner")
+	}
+	var n int64
+	for key, d := range f.ownedStore() {
+		if d.OwnerTenantID != owner {
+			continue
+		}
+		if d.TemplateID == prefix || strings.HasPrefix(d.TemplateID, prefix+":") {
+			delete(f.ownedStore(), key)
+			n++
+		}
+	}
+	return n, nil
 }
 
 func TestTemplateService_Render_RendersAllThreeBodies(t *testing.T) {
