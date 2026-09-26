@@ -19,19 +19,25 @@ type ObjectDownloadPresigner interface {
 	PresignGetDownload(ctx context.Context, key, downloadAs string, ttl time.Duration) (string, error)
 }
 
-// contentDispositionAttachment builds an RFC 6266 Content-Disposition value that
+// ContentDispositionAttachment builds an RFC 6266 Content-Disposition value that
 // makes a browser save the response as an attachment named filename. It emits an
 // ASCII-sanitized `filename="..."` fallback plus a UTF-8 `filename*=UTF-8”...`
 // (RFC 5987 percent-encoded) variant, so accented names (Italian, etc.) survive
 // on modern browsers while legacy clients still get a safe ASCII name. Returns
 // "" for a blank filename (the caller then presigns without a disposition).
-func contentDispositionAttachment(filename string) string {
+func ContentDispositionAttachment(filename string) string {
 	filename = strings.TrimSpace(filename)
 	if filename == "" {
 		return ""
 	}
-	// ASCII fallback: keep printable ASCII, replace quotes/backslash/control/
-	// non-ASCII with '_' so the quoted-string is always well-formed.
+	return fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, ASCIIFilenameFallback(filename), RFC5987Encode(filename))
+}
+
+// ASCIIFilenameFallback is the legacy `filename="..."` form of filename: printable
+// ASCII is kept, quotes/backslash/control/non-ASCII become '_' so the
+// quoted-string is always well-formed. Exported so the SMTP MIME builder writes
+// the same Content-Disposition parameters as the HTTP download path.
+func ASCIIFilenameFallback(filename string) string {
 	var ascii strings.Builder
 	for _, r := range filename {
 		if r < 0x20 || r > 0x7e || r == '"' || r == '\\' {
@@ -40,12 +46,13 @@ func contentDispositionAttachment(filename string) string {
 			ascii.WriteRune(r)
 		}
 	}
-	return fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, ascii.String(), rfc5987Encode(filename))
+	return ascii.String()
 }
 
-// rfc5987Encode percent-encodes s's UTF-8 bytes per RFC 5987 (the value form for
-// `filename*=UTF-8”`): attr-chars pass through, every other byte becomes %XX.
-func rfc5987Encode(s string) string {
+// RFC5987Encode percent-encodes s's UTF-8 bytes per RFC 5987 (the value form for
+// `filename*=UTF-8”`, also RFC 2231 in MIME): attr-chars pass through, every
+// other byte becomes %XX.
+func RFC5987Encode(s string) string {
 	const hex = "0123456789ABCDEF"
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
