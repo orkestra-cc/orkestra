@@ -21,14 +21,23 @@ var ErrAttachmentRejected = errors.New("attachment rejected")
 
 var allowedAttachmentTypes = map[string]bool{"application/pdf": true}
 
+// Bounds of SanitizeAttachmentFilename, in runes.
+const (
+	maxAttachmentStemRunes = 150
+	// maxAttachmentExtRunes caps what counts as an extension (dot excluded):
+	// a longer dotted tail is part of the stem, so the stem cap bounds it.
+	maxAttachmentExtRunes = 10
+)
+
 // SanitizeAttachmentFilename keeps a display name safe for MIME headers and
-// vendor payloads: base name only, no control chars or quotes, ≤150 runes of
-// stem, extension kept.
+// vendor payloads: base name only, no control chars, no Unicode format
+// characters (bidi overrides, zero-width joiners), no quotes, ≤150 runes of
+// stem, and an extension of ≤10 runes kept.
 func SanitizeAttachmentFilename(name string) string {
 	name = path.Base(strings.ReplaceAll(name, `\`, "/"))
 	var b strings.Builder
 	for _, r := range name {
-		if unicode.IsControl(r) || r == '"' || r == ':' || r == '/' {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '"' || r == ':' || r == '/' {
 			continue
 		}
 		b.WriteRune(r)
@@ -38,9 +47,12 @@ func SanitizeAttachmentFilename(name string) string {
 		return "attachment.pdf"
 	}
 	ext := path.Ext(clean)
+	if len([]rune(ext))-1 > maxAttachmentExtRunes {
+		ext = ""
+	}
 	stem := []rune(strings.TrimSuffix(clean, ext))
-	if len(stem) > 150 {
-		stem = stem[:150]
+	if len(stem) > maxAttachmentStemRunes {
+		stem = stem[:maxAttachmentStemRunes]
 	}
 	return string(stem) + ext
 }
