@@ -168,11 +168,21 @@ services:
       STORAGE_FORCE_PATH_STYLE: ${STORAGE_FORCE_PATH_STYLE:-true}
       STORAGE_ENSURE_BUCKET: ${STORAGE_ENSURE_BUCKET:-true}
 
+      # PDF renderer (Gotenberg sidecar, docker-compose.infra.yml) — reached
+      # over pdf-net (see the `networks:` key on this service below). Empty
+      # PDF_RENDERER_URL disables PDF features; they degrade, never fail.
+      PDF_RENDERER_URL: ${PDF_RENDERER_URL:-http://gotenberg:3000}
+      PDF_RENDERER_USER: ${PDF_RENDERER_USER:-orkestra}
+      PDF_RENDERER_PASSWORD: ${PDF_RENDERER_PASSWORD:-}
+
       # Module config (OAuth, SMTP, AI provider keys, per-module enable flags)
       # is owned by ConfigService and edited at /admin/modules. The module
       # ConfigSchema EnvVar fields seed those values from the host environment
       # ONLY on first boot of a brand-new install — after that the
       # module_configs document is authoritative.
+    networks:
+      - default
+      - pdf-net
     # Named volumes, not ./backend/* binds: a bind under docker/ shows up as
     # root-owned untracked files in the checkout (and dies with a `git clean`).
     # The Dockerfile pre-creates both mount points world-writable so a
@@ -252,3 +262,7 @@ volumes:
     driver: local
   backend-logs:
     driver: local
+
+networks:
+  pdf-net:
+    internal: true
