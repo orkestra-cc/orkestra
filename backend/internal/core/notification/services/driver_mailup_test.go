@@ -103,6 +103,58 @@ func TestMailUpDriver_OmitsExtendedHeadersWhenNoneSet(t *testing.T) {
 	}
 }
 
+// TestMailUpDriver_TextOnlyBodyOmitsHtmlKey guards against regressing to an
+// empty-but-present Html part: a text-only message (e.g. SendTest's
+// EmailMessage{To, Subject, BodyText} with no HTML) must not put an Html key
+// on the wire at all, or MailUp serves clients an empty HTML alternative next
+// to the real Text part and the recipient sees a blank email.
+func TestMailUpDriver_TextOnlyBodyOmitsHtmlKey(t *testing.T) {
+	var raw map[string]json.RawMessage
+	d, _ := mailUpServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"Status":"done","Code":"0"}`))
+	})
+	err := d.Send(context.Background(), mailUpProfile(), EmailMessage{
+		To: "alice@example.com", Subject: "Hi", BodyText: "plain text only",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if _, present := raw["Html"]; present {
+		t.Fatalf("Html key must be omitted from the payload for a text-only message, got: %v", raw)
+	}
+	var text string
+	if err := json.Unmarshal(raw["Text"], &text); err != nil || text != "plain text only" {
+		t.Fatalf("Text = %s, err=%v, want %q", raw["Text"], err, "plain text only")
+	}
+}
+
+// TestMailUpDriver_HTMLBodyIncludesHtmlKey is the symmetric case: when the
+// message carries an HTML body, the Html key must still be sent with that
+// body, unchanged from before the omitempty fix.
+func TestMailUpDriver_HTMLBodyIncludesHtmlKey(t *testing.T) {
+	var raw map[string]json.RawMessage
+	d, _ := mailUpServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"Status":"done","Code":"0"}`))
+	})
+	err := d.Send(context.Background(), mailUpProfile(), EmailMessage{
+		To: "alice@example.com", Subject: "Hi", BodyHTML: "<p>html</p>",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if _, present := raw["Html"]; !present {
+		t.Fatalf("Html key must be present when the message carries an HTML body, got: %v", raw)
+	}
+	var html mailUpHTML
+	if err := json.Unmarshal(raw["Html"], &html); err != nil || html.Body != "<p>html</p>" {
+		t.Fatalf("Html.Body = %+v, err=%v, want Body=%q", html, err, "<p>html</p>")
+	}
+}
+
 func TestMailUpDriver_RequestShapeAndSuccess(t *testing.T) {
 	var got mailUpRequest
 	var method, path, ctype, auth string
