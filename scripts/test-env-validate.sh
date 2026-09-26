@@ -78,6 +78,22 @@ check "production: the refusal names the RustFS root"      "yes" "$(saw 'set RUS
 check "development: storage disabled without a RustFS root is refused too" "1" "$(run STORAGE_ACCESS_KEY= STORAGE_SECRET_KEY=)"
 check "production: a key id with no secret is an error"    "1"   "$(run "${prod[@]}" STORAGE_SECRET_KEY=)"
 
+# --- PDF_RENDERER_PASSWORD gates the gotenberg sidecar, which always starts
+# with the infra stack — docker-compose.infra.yml's
+# `${PDF_RENDERER_PASSWORD:?...}` is unconditional on the gotenberg service,
+# even when PDF_RENDERER_URL is empty (that only disables the *backend's*
+# use of PDF features — orkestra.sh Task A4b starts gotenberg with every
+# infra deploy regardless). A URL-gated skip here let a "PDF disabled"
+# stack pass validation and then fail `docker compose up -d` for ALL of
+# infra, not just gotenberg. Checked unconditionally now, same as every
+# other datastore secret. ---
+check "production: PDF_RENDERER_PASSWORD is required even with PDF disabled" "1" \
+    "$(run "${prod[@]}" PDF_RENDERER_URL= PDF_RENDERER_PASSWORD=)"
+check "production: the refusal names PDF_RENDERER_PASSWORD"                  "yes" \
+    "$(saw 'PDF_RENDERER_PASSWORD is empty or a placeholder')"
+check "development: an empty PDF_RENDERER_URL still warns about the password" "yes" \
+    "$(run PDF_RENDERER_URL= PDF_RENDERER_PASSWORD= > /dev/null; saw 'PDF_RENDERER_PASSWORD is empty or a placeholder')"
+
 # --- the RustFS S3 API must stay reachable by the reverse proxy ----------
 # STORAGE_PUBLIC_ENDPOINT means the BROWSER PUTs presigned uploads to rustfs
 # through a proxy, but docker-compose.infra.yml publishes that port on
