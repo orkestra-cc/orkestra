@@ -240,8 +240,11 @@ func (d *mailUpDriver) Send(ctx context.Context, p SenderProfile, msg EmailMessa
 		// or any 200 carrying an error envelope, is not (it may be an
 		// unrelated rejection, and a 200 error envelope has no HTTP status
 		// to key off). Coarse by necessity, same trade as the SMTP driver's
-		// 552/554 classification.
-		if len(msg.Attachments) > 0 && resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		// 552/554 classification. 401/403 (credentials), 408 (timeout) and
+		// 429 (throttling) are operational conditions, not a verdict on the
+		// attachment: the caller treats ErrAttachmentRejected as final, so
+		// those keep their normal classification and stay retryable.
+		if len(msg.Attachments) > 0 && mailUpAttachmentRejectionStatus(resp.StatusCode) {
 			return fmt.Errorf("%w: %w", ErrAttachmentRejected, envErr)
 		}
 		return envErr
@@ -252,4 +255,18 @@ func (d *mailUpDriver) Send(ctx context.Context, p SenderProfile, msg EmailMessa
 		slog.String("provider", "mailup"),
 	)
 	return nil
+}
+
+// mailUpAttachmentRejectionStatus reports whether an HTTP status on a send
+// that carried attachments may be read as a rejection of the attachment:
+// any 4xx except the auth, timeout and throttling statuses.
+func mailUpAttachmentRejectionStatus(status int) bool {
+	if status < 400 || status >= 500 {
+		return false
+	}
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return false
+	}
+	return true
 }
