@@ -49,6 +49,28 @@ for f in docker-compose.dev.yml docker-compose.staging.yml docker-compose.prod.y
     || { echo "FAIL: $f + infra: merged pdf-net is not internal: true"; fail=1; }
   [ "$(jq -c '.services.gotenberg.networks | keys' <<<"$combined")" = '["pdf-net"]' ] \
     || { echo "FAIL: $f + infra: gotenberg networks = $(jq -c '.services.gotenberg.networks|keys' <<<"$combined")"; fail=1; }
+
+  # PDF_RENDERER_URL: unset → the sidecar default; explicitly empty → empty
+  # (PDF features disabled, as docker/.env.example documents). A `:-`
+  # default would silently turn the empty value back into the sidecar URL.
+  url_default=$(jq -r '.services.backend.environment.PDF_RENDERER_URL' <<<"$standalone")
+  [ "$url_default" = "http://gotenberg:3000" ] \
+    || { echo "FAIL: $f PDF_RENDERER_URL unset renders '$url_default', want the sidecar default"; fail=1; }
+  empty_env=$(mktemp)
+  { cat "$env_file"; echo "PDF_RENDERER_URL="; } > "$empty_env"
+  url_empty=$(docker compose --env-file "$empty_env" -f "$f" config --format json | jq -r '.services.backend.environment.PDF_RENDERER_URL')
+  rm -f "$empty_env"
+  [ -z "$url_empty" ] \
+    || { echo "FAIL: $f PDF_RENDERER_URL= renders '$url_empty', want empty (disable)"; fail=1; }
 done
+
+# Fail-closed: the infra file refuses to render without PDF_RENDERER_PASSWORD
+# (Gotenberg basic auth must never come up with an empty password).
+nopw_env=$(mktemp)
+grep -v '^PDF_RENDERER_PASSWORD=' "$env_file" > "$nopw_env"
+if docker compose --env-file "$nopw_env" -f docker-compose.infra.yml config >/dev/null 2>&1; then
+  echo "FAIL: infra compose renders without PDF_RENDERER_PASSWORD (must fail closed)"; fail=1
+fi
+rm -f "$nopw_env"
 [ "$fail" = 0 ] && echo "ok: gotenberg hardening present"
 exit "$fail"

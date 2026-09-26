@@ -171,7 +171,7 @@ services:
       # PDF renderer (Gotenberg sidecar, docker-compose.infra.yml) — reached
       # over pdf-net (see the `networks:` key on this service below). Empty
       # PDF_RENDERER_URL disables PDF features; they degrade, never fail.
-      PDF_RENDERER_URL: ${PDF_RENDERER_URL:-http://gotenberg:3000}
+      PDF_RENDERER_URL: ${PDF_RENDERER_URL-http://gotenberg:3000}
       PDF_RENDERER_USER: ${PDF_RENDERER_USER:-orkestra}
       PDF_RENDERER_PASSWORD: ${PDF_RENDERER_PASSWORD:-}
 
