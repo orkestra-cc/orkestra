@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"regexp"
 	"sort"
@@ -40,7 +41,7 @@ func (d *noopDriver) Requires() []ProfileRequirement { return nil }
 // it is asked to guarantee about what reaches a recipient — there is no
 // recipient, and so no way to drop a header on the way to one.
 func (d *noopDriver) Capabilities() DriverCapabilities {
-	return DriverCapabilities{ListUnsubscribeHeaders: true}
+	return DriverCapabilities{ListUnsubscribeHeaders: true, Attachments: true}
 }
 
 func (d *noopDriver) Send(_ context.Context, _ SenderProfile, msg EmailMessage) error {
@@ -63,6 +64,14 @@ func (d *noopDriver) Send(_ context.Context, _ SenderProfile, msg EmailMessage) 
 		}
 		sort.Strings(keys)
 		d.logger.Debug("notification.email headers", slog.Any("headerNames", keys))
+	}
+	// Metadata only — name, type, size. The content never reaches a log.
+	if len(msg.Attachments) > 0 {
+		names := make([]string, 0, len(msg.Attachments))
+		for _, a := range msg.Attachments {
+			names = append(names, fmt.Sprintf("%s (%s, %d B)", a.Filename, a.ContentType, len(a.Data)))
+		}
+		d.logger.Info("notification.email noop attachments", slog.Any("attachments", names))
 	}
 	return nil
 }

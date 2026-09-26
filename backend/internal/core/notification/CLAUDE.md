@@ -270,6 +270,12 @@ This is deliberate: verification and password-reset mail are required for the pr
 
 Every `Send` and `SendTemplated` call accepts an `IdempotencyKey`. Before dispatching, the orchestrator looks up the `notifications` collection for a row with the same key created within the last hour (configurable via `Options.IdempotencyTTL`). If found, the prior result is returned unchanged — no duplicate send, no duplicate log row. Auth uses keys like `verify:<user_uuid>:<token_uuid>` and `reset:<user_uuid>:<token_uuid>` so retries are safe.
 
+## Attachments and `failureReason`
+
+`iface.NotificationRequest.Attachments` is honored by `Send` only (`SendTemplated` ignores it). `dispatchEmail` runs them through `prepareAttachments` (`services/attachments.go`) **after** the preference and marketing opt-out checks — a suppressed recipient is logged `suppressed`, never `failed` — and **before** the sender is resolved: only `application/pdf`, total ≤ `MaxAttachmentBytes` (5 MiB **raw**, pre-base64), filename re-sanitized by `SanitizeAttachmentFilename` (base name, no control chars / `"` / `:`, stem ≤ 150 runes). A driver whose `Capabilities().Attachments` is false fails the send closed instead of dropping the files. The row keeps only `attachments[]{filename,contentType,sizeBytes}` — never the bytes; the noop driver logs the same metadata.
+
+Every refusal — pre-driver, or a driver returning `ErrAttachmentRejected` (bare, or as the `Cause` of a `SendError`) — sets `failureReason: "attachment_rejected"` (`iface.FailureAttachmentRejected`) on the row and on `NotificationResult.FailureReason`. The persisted `error` stays bounded: `err=attachment_rejected`, except that a typed `SendError` keeps its own diagnostic (`code=552`). The idempotent replay of `Send` and `SendTemplated` returns `FailureReason` from the stored row, so a consumer keys its reaction on it rather than on the fresh-send error (which a replay does not return).
+
 ## HTTP endpoints
 
 Registered in three groups with different middleware:

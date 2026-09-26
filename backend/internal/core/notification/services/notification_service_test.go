@@ -248,12 +248,15 @@ type fakeDriver struct {
 	sent     []EmailMessage
 	profiles []SenderProfile // the profile handed to each Send
 	sends    int             // count-only convenience alongside sent, for tests that just assert "did it reach the driver"
+	// noAttachments makes the driver report Capabilities().Attachments=false;
+	// the zero value keeps every existing fixture attachment-capable.
+	noAttachments bool
 }
 
 func (f *fakeDriver) Name() string                   { return f.name }
 func (f *fakeDriver) Requires() []ProfileRequirement { return f.requires }
 func (f *fakeDriver) Capabilities() DriverCapabilities {
-	return DriverCapabilities{ListUnsubscribeHeaders: true}
+	return DriverCapabilities{ListUnsubscribeHeaders: true, Attachments: !f.noAttachments}
 }
 func (f *fakeDriver) Send(_ context.Context, p SenderProfile, msg EmailMessage) error {
 	f.sends++
@@ -1635,5 +1638,183 @@ func TestNotificationService_PreflightDelivery_DefaultArm_RoutedButNotConfigured
 	err := k.svc.PreflightDelivery(context.Background(), "", "marketing", models.TypeMarketing)
 	if !errors.Is(err, iface.ErrSenderNotConfigured) {
 		t.Fatalf("err = %v, want iface.ErrSenderNotConfigured", err)
+	}
+}
+
+// ---- attachments (forms PDF copy, Task A5) -------------------------------
+
+// Attachment tests reuse the package kit (newKit / fakeDriver / fakeResolver):
+// the kit's default profile is slug "default" on the "noop" fake driver.
+
+func ctx() context.Context { return context.Background() }
+
+func reqWith(atts ...iface.Attachment) iface.NotificationRequest {
+	return iface.NotificationRequest{
+		Channel: "email", Type: models.TypeTransactional, Category: "forms.registration_approved",
+		Recipients: []iface.Recipient{{Address: "a@example.com"}}, Subject: "s", Body: "b",
+		IdempotencyKey: "k1",
+		Attachments:    atts,
+	}
+}
+
+func TestSend_AttachmentOverLimit_RejectedBeforeDriver(t *testing.T) {
+	k := newKit(Options{})
+	big := make([]byte, MaxAttachmentBytes+1)
+	res, err := k.svc.Send(ctx(), reqWith(iface.Attachment{Filename: "r.pdf", ContentType: "application/pdf", Data: big}))
+	if err == nil || res == nil || res.Status != "failed" || res.FailureReason != iface.FailureAttachmentRejected {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if k.driver.sends != 0 {
+		t.Fatal("driver must not be contacted for an oversized attachment")
+	}
+	if len(k.logRepo.created) != 1 || k.logRepo.created[0].FailureReason != iface.FailureAttachmentRejected {
+		t.Fatalf("the failed row with failureReason must be written: %+v", k.logRepo.created)
+	}
+}
+
+// Exactly at the cap is allowed: the limit is "≤ 5 MB raw".
+func TestSend_AttachmentAtLimit_Delivered(t *testing.T) {
+	k := newKit(Options{})
+	res, err := k.svc.Send(ctx(), reqWith(iface.Attachment{Filename: "r.pdf", ContentType: "application/pdf", Data: make([]byte, MaxAttachmentBytes)}))
+	if err != nil || res.Status != models.StatusSent || k.driver.sends != 1 {
+		t.Fatalf("res=%+v err=%v sends=%d", res, err, k.driver.sends)
+	}
+}
+
+func TestSend_AttachmentTypeNotAllowed_Rejected(t *testing.T) {
+	k := newKit(Options{})
+	res, _ := k.svc.Send(ctx(), reqWith(iface.Attachment{Filename: "x.exe", ContentType: "application/octet-stream", Data: []byte("x")}))
+	if res.FailureReason != iface.FailureAttachmentRejected {
+		t.Fatalf("res = %+v", res)
+	}
+	if k.driver.sends != 0 {
+		t.Fatal("driver must not be contacted for a disallowed attachment type")
+	}
+}
+
+func TestSend_Replay_ReturnsFailureReason(t *testing.T) {
+	k := newKit(Options{})
+	k.logRepo.existing = &models.NotificationDoc{UUID: "u1", Status: models.StatusFailed,
+		Provider: "smtp", Error: "smtp data rejected code=552", FailureReason: iface.FailureAttachmentRejected}
+	res, err := k.svc.Send(ctx(), reqWith(iface.Attachment{Filename: "r.pdf", ContentType: "application/pdf", Data: []byte("%PDF-")}))
+	if err != nil {
+		t.Fatalf("replay keeps today's nil error: %v", err)
+	}
+	if res.Status != "failed" || res.FailureReason != iface.FailureAttachmentRejected || k.driver.sends != 0 {
+		t.Fatalf("res=%+v calls=%d", res, k.driver.sends)
+	}
+}
+
+func TestSendTemplated_Replay_ReturnsFailureReason(t *testing.T) {
+	k := newKit(Options{})
+	k.logRepo.existing = &models.NotificationDoc{UUID: "u1", Status: models.StatusFailed, FailureReason: iface.FailureAttachmentRejected}
+	res, err := k.svc.SendTemplated(ctx(), iface.TemplatedNotificationRequest{
+		Type: models.TypeTransactional, Category: "forms.x", TemplateID: "t", IdempotencyKey: "k1",
+		Recipients: []iface.Recipient{{Address: "a@example.com"}},
+	})
+	if err != nil || res.FailureReason != iface.FailureAttachmentRejected {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+}
+
+func TestSend_DriverAttachmentRejection_Classified(t *testing.T) {
+	k := newKit(Options{})
+	k.driver.sendErr = fmt.Errorf("%w: smtp 552", ErrAttachmentRejected)
+	res, err := k.svc.Send(ctx(), reqWith(iface.Attachment{Filename: "r.pdf", ContentType: "application/pdf", Data: []byte("%PDF-")}))
+	if err == nil || res.FailureReason != iface.FailureAttachmentRejected || k.logRepo.created[0].FailureReason != iface.FailureAttachmentRejected {
+		t.Fatalf("res=%+v err=%v rows=%+v", res, err, k.logRepo.created)
+	}
+	// The bounded token, never the driver's text ("smtp 552").
+	if got := k.logRepo.created[0].Error; got != "sender=default err=attachment_rejected" {
+		t.Fatalf("persisted error = %q", got)
+	}
+}
+
+// A typed SendError (SMTP 552) whose cause is ErrAttachmentRejected keeps
+// its code-bearing diagnostic, but is still classified attachment_rejected.
+func TestSend_DriverSendErrorAttachmentRejection_KeepsCodeAndClassifies(t *testing.T) {
+	k := newKit(Options{})
+	k.driver.sendErr = rejectionError("noop", "data", 552, ErrAttachmentRejected)
+	res, _ := k.svc.Send(ctx(), reqWith(iface.Attachment{Filename: "r.pdf", ContentType: "application/pdf", Data: []byte("%PDF-")}))
+	row := k.logRepo.created[0]
+	if row.Error != "sender=default noop op=data code=552" || row.FailureReason != iface.FailureAttachmentRejected || res.FailureReason != iface.FailureAttachmentRejected {
+		t.Fatalf("row=%+v res=%+v", row, res)
+	}
+}
+
+// A pre-driver rejection persists the bounded err=attachment_rejected token
+// (no profile resolved yet → sender=-) and never the size or the type text.
+func TestSend_PreDriverAttachmentRejection_PersistsBoundedToken(t *testing.T) {
+	k := newKit(Options{})
+	res, _ := k.svc.Send(ctx(), reqWith(iface.Attachment{Filename: "x.exe", ContentType: "application/octet-stream", Data: []byte("x")}))
+	if got := k.logRepo.created[0].Error; got != "sender=- err=attachment_rejected" || res.Error != got {
+		t.Fatalf("persisted error = %q, result error = %q", got, res.Error)
+	}
+	if k.resolver.inputs != nil {
+		t.Fatal("a rejected attachment must fail before the sender is resolved")
+	}
+}
+
+// A suppressed recipient is logged "suppressed", not failed/attachment_rejected:
+// attachment validation runs after the preference and opt-out checks.
+func TestSend_SuppressedRecipient_WinsOverAttachmentRejection(t *testing.T) {
+	t.Run("preference", func(t *testing.T) {
+		k := newKit(Options{})
+		k.pref.can = false
+		res, err := k.svc.Send(ctx(), reqWith(iface.Attachment{Filename: "x.exe", ContentType: "application/octet-stream", Data: []byte("x")}))
+		if err != nil || res.Status != models.StatusSuppressed || res.FailureReason != "" {
+			t.Fatalf("res=%+v err=%v", res, err)
+		}
+		if row := k.logRepo.created[0]; row.Status != models.StatusSuppressed || row.FailureReason != "" {
+			t.Fatalf("row=%+v", row)
+		}
+	})
+	t.Run("marketing opt-out", func(t *testing.T) {
+		k := newKit(Options{})
+		k.svc.SetOptouts(&fakeOptouts{optedOut: map[string]bool{"a@example.com": true}})
+		req := reqWith(iface.Attachment{Filename: "x.exe", ContentType: "application/octet-stream", Data: []byte("x")})
+		req.Type = models.TypeMarketing
+		res, err := k.svc.Send(ctx(), req)
+		if err != nil || res.Status != models.StatusSuppressed || res.FailureReason != "" {
+			t.Fatalf("res=%+v err=%v", res, err)
+		}
+	})
+}
+
+func TestSend_DriverWithoutAttachmentCapability_Rejected(t *testing.T) {
+	k := newKit(Options{})
+	k.driver.noAttachments = true
+	res, err := k.svc.Send(ctx(), reqWith(iface.Attachment{Filename: "r.pdf", ContentType: "application/pdf", Data: []byte("%PDF-")}))
+	if err == nil || res.FailureReason != iface.FailureAttachmentRejected || k.driver.sends != 0 {
+		t.Fatalf("res=%+v err=%v sends=%d", res, err, k.driver.sends)
+	}
+	if got := k.logRepo.created[0].Error; got != "sender=default err=attachment_rejected" {
+		t.Fatalf("persisted error = %q", got)
+	}
+}
+
+// Without attachments an attachment-less driver keeps working unchanged.
+func TestSend_NoAttachments_DriverWithoutCapabilityStillSends(t *testing.T) {
+	k := newKit(Options{})
+	k.driver.noAttachments = true
+	res, err := k.svc.Send(ctx(), reqWith())
+	if err != nil || res.Status != models.StatusSent || len(k.logRepo.created[0].Attachments) != 0 {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+}
+
+func TestSend_Attachments_PassedToDriver_MetaPersistedNoBytes(t *testing.T) {
+	k := newKit(Options{})
+	_, err := k.svc.Send(ctx(), reqWith(iface.Attachment{Filename: "../evil\r\n.pdf", ContentType: "application/pdf", Data: []byte("%PDF-1")}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := k.driver.sent[len(k.driver.sent)-1]
+	if len(last.Attachments) != 1 || last.Attachments[0].Filename != "evil.pdf" || string(last.Attachments[0].Data) != "%PDF-1" {
+		t.Fatalf("driver got %+v", last.Attachments)
+	}
+	row := k.logRepo.created[0]
+	if len(row.Attachments) != 1 || row.Attachments[0].SizeBytes != 6 || row.Attachments[0].Filename != "evil.pdf" || row.Attachments[0].ContentType != "application/pdf" {
+		t.Fatalf("meta = %+v", row.Attachments)
 	}
 }

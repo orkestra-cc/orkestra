@@ -238,6 +238,9 @@ func (s *NotificationService) Send(ctx context.Context, req iface.NotificationRe
 			Status:   existing.Status,
 			Provider: existing.Provider,
 			Error:    existing.Error,
+			// Replayed so a caller keys its own reaction on the classified
+			// cause, not on today's fresh-send typed error (nil on replay).
+			FailureReason: existing.FailureReason,
 		}, nil
 	}
 
@@ -257,6 +260,7 @@ func (s *NotificationService) Send(ctx context.Context, req iface.NotificationRe
 		// marketing send — with this context attached, exactly like
 		// SendTemplated's footer token carries req.UnsubscribeContext.
 		UnsubscribeContext: req.UnsubscribeContext,
+		Attachments:        req.Attachments,
 	})
 }
 
@@ -279,6 +283,9 @@ func (s *NotificationService) SendTemplated(ctx context.Context, req iface.Templ
 			Status:   existing.Status,
 			Provider: existing.Provider,
 			Error:    existing.Error,
+			// Replayed so a caller keys its own reaction on the classified
+			// cause, not on today's fresh-send typed error (nil on replay).
+			FailureReason: existing.FailureReason,
 		}, nil
 	}
 
@@ -375,6 +382,9 @@ type dispatchInput struct {
 	// for the same send. Empty for Send (which never pre-issues one) or
 	// when the caller's own issuance failed.
 	UnsubscribeToken string
+	// Attachments are the caller's files, unvalidated: dispatchEmail runs
+	// them through prepareAttachments after the suppression checks.
+	Attachments []iface.Attachment
 }
 
 func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInput) (*iface.NotificationResult, error) {
@@ -427,6 +437,17 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 			_ = s.logRepo.Create(ctx, logDoc)
 			return &iface.NotificationResult{ID: logDoc.UUID, Status: logDoc.Status}, nil
 		}
+	}
+
+	// Attachments are validated only now, after the preference and opt-out
+	// checks: a suppressed recipient is logged "suppressed", never
+	// failed/attachment_rejected. Still before the sender is resolved, so an
+	// oversized or disallowed file never reaches any driver. Only metadata
+	// lands on the row — never the bytes.
+	atts, meta, aerr := prepareAttachments(in.Attachments)
+	logDoc.Attachments = meta
+	if aerr != nil {
+		return s.failSend(ctx, logDoc, SenderProfile{}, aerr)
 	}
 
 	// An addon-provided rewriter may inject open-pixel + click trackers into
@@ -491,6 +512,10 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 	driver, err := s.usableDriver(profile)
 	if err != nil {
 		return s.failSend(ctx, logDoc, profile, err)
+	}
+	// Fail closed rather than let a driver drop the files silently.
+	if len(atts) > 0 && !driver.Capabilities().Attachments {
+		return s.failSend(ctx, logDoc, profile, fmt.Errorf("%w: driver %s cannot carry attachments", ErrAttachmentRejected, driver.Name()))
 	}
 
 	// RFC 8058 one-click unsubscribe headers — marketing only. This is the
@@ -575,13 +600,14 @@ func (s *NotificationService) dispatchEmail(ctx context.Context, in dispatchInpu
 	}
 
 	sendErr := driver.Send(ctx, profile, EmailMessage{
-		To:       in.Recipient.Address,
-		ToName:   in.Recipient.Name,
-		Subject:  in.Subject,
-		BodyText: in.BodyText,
-		BodyHTML: bodyHTML, // the addon-rewritten body when a rewriter is wired
-		Category: in.Category,
-		Headers:  headers, // nil outside marketing — never on transactional mail
+		To:          in.Recipient.Address,
+		ToName:      in.Recipient.Name,
+		Subject:     in.Subject,
+		BodyText:    in.BodyText,
+		BodyHTML:    bodyHTML, // the addon-rewritten body when a rewriter is wired
+		Category:    in.Category,
+		Headers:     headers, // nil outside marketing — never on transactional mail
+		Attachments: atts,
 	})
 	if sendErr != nil {
 		return s.failSend(ctx, logDoc, profile, sendErr)
@@ -703,16 +729,22 @@ func (s *NotificationService) failSend(ctx context.Context, logDoc *models.Notif
 	logDoc.Provider = profile.Provider
 	logDoc.SenderSlug = profile.Slug // empty when no profile resolved
 	logDoc.Error = de.Reason
+	// The classified cause rides beside the bounded Error so the idempotent
+	// replay can return it (NotificationResult.FailureReason).
+	if errors.Is(err, ErrAttachmentRejected) {
+		logDoc.FailureReason = iface.FailureAttachmentRejected
+	}
 	_ = s.logRepo.Create(ctx, logDoc)
 	s.logger.Warn("notification: send failed",
 		slog.String("category", logDoc.Category),
 		slog.String("reason", de.Reason),
 	)
 	return &iface.NotificationResult{
-		ID:       logDoc.UUID,
-		Status:   logDoc.Status,
-		Provider: profile.Provider,
-		Error:    de.Reason,
+		ID:            logDoc.UUID,
+		Status:        logDoc.Status,
+		Provider:      profile.Provider,
+		Error:         de.Reason,
+		FailureReason: logDoc.FailureReason,
 	}, de
 }
 

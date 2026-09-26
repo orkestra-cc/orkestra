@@ -29,6 +29,19 @@ type NotificationDoc struct {
 	IdempotencyKey      string     `bson:"idempotencyKey,omitempty" json:"idempotencyKey,omitempty"`
 	CreatedAt           time.Time  `bson:"createdAt" json:"createdAt"`
 	SentAt              *time.Time `bson:"sentAt,omitempty" json:"sentAt,omitempty"`
+	// Attachments records only metadata of the files sent — never bytes.
+	Attachments []AttachmentMeta `bson:"attachments,omitempty" json:"attachments,omitempty"`
+	// FailureReason classifies a failed row (iface.FailureAttachmentRejected);
+	// returned again by the idempotent replay.
+	FailureReason string `bson:"failureReason,omitempty" json:"failureReason,omitempty"`
+}
+
+// AttachmentMeta is what the delivery log keeps of an attachment: its
+// sanitized name, media type and raw size. The content is never persisted.
+type AttachmentMeta struct {
+	Filename    string `bson:"filename" json:"filename"`
+	ContentType string `bson:"contentType" json:"contentType"`
+	SizeBytes   int    `bson:"sizeBytes" json:"sizeBytes"`
 }
 
 // SuppressionDoc is a recipient that must not receive any notifications
