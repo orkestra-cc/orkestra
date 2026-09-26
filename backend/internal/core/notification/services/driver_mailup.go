@@ -31,8 +31,8 @@ const mailUpTimeout = 30 * time.Second
 type mailUpRequest struct {
 	User            mailUpUser             `json:"User"`
 	Subject         string                 `json:"Subject"`
-	Html            mailUpHTML             `json:"Html"`
-	Text            string                 `json:"Text"`
+	Html            *mailUpHTML            `json:"Html,omitempty"`
+	Text            string                 `json:"Text,omitempty"`
 	From            mailUpAddress          `json:"From"`
 	To              []mailUpAddress        `json:"To"`
 	ReplyTo         string                 `json:"ReplyTo,omitempty"`
@@ -143,7 +143,6 @@ func (d *mailUpDriver) Send(ctx context.Context, p SenderProfile, msg EmailMessa
 	payload := mailUpRequest{
 		User:            mailUpUser{Username: p.MailUpUser, Secret: p.MailUpSecret},
 		Subject:         msg.Subject,
-		Html:            mailUpHTML{Body: msg.BodyHTML},
 		Text:            msg.BodyText,
 		From:            mailUpAddress{Name: p.FromName, Email: p.FromAddress},
 		To:              []mailUpAddress{{Name: msg.ToName, Email: msg.To}},
@@ -151,6 +150,13 @@ func (d *mailUpDriver) Send(ctx context.Context, p SenderProfile, msg EmailMessa
 		CharSet:         "utf-8",
 		XSmtpAPI:        mailUpXSmtpAPI{CampaignCode: msg.Category},
 		ExtendedHeaders: mailUpExtendedHeadersFrom(msg.Headers),
+	}
+	// Only send the Html part when there is an HTML body: an empty-but-present
+	// Html:{"Body":""} gives mail clients an empty HTML alternative to render
+	// next to Text, which for a text-only message (e.g. SendTest) shows the
+	// recipient a blank email instead of the plain-text content.
+	if msg.BodyHTML != "" {
+		payload.Html = &mailUpHTML{Body: msg.BodyHTML}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
