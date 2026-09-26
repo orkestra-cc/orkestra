@@ -86,7 +86,7 @@ in_scope() {
         backend) [ "$1" = "backend" ] ;;
         frontend-admin) [ "$1" = "frontend-admin" ] ;;
         frontend-admin+backend) [ "$1" = "backend" ] || [ "$1" = "frontend-admin" ] ;;
-        infra) case "$1" in mongodb|redis|rustfs) return 0 ;; *) return 1 ;; esac ;;
+        infra) case "$1" in mongodb|redis|rustfs|gotenberg) return 0 ;; *) return 1 ;; esac ;;
         *) return 0 ;;
     esac
 }
@@ -196,6 +196,7 @@ check_app client-frontend "$CLIENT_PORT" optional
 check_infra mongodb
 check_infra redis
 check_infra rustfs
+check_infra gotenberg
 
 if [ "$FAILURES" -gt 0 ]; then
     p_err "$FAILURES in-scope service(s) unhealthy"
