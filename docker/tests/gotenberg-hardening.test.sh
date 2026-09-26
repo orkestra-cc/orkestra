@@ -32,8 +32,23 @@ gblock=$(docker compose --env-file "$env_file" -f docker-compose.infra.yml confi
 [ "$(jq '.ports // [] | length' <<<"$gblock")" = "0" ] || { echo "FAIL: gotenberg publishes ports"; fail=1; }
 [ "$(jq -c '.networks | keys' <<<"$gblock")" = '["pdf-net"]' ] || { echo "FAIL: gotenberg networks = $(jq -c '.networks|keys' <<<"$gblock")"; fail=1; }
 for f in docker-compose.dev.yml docker-compose.staging.yml docker-compose.prod.yml; do
-  b=$(docker compose --env-file "$env_file" -f "$f" config --format json | jq '.services.backend')
+  standalone=$(docker compose --env-file "$env_file" -f "$f" config --format json)
+  b=$(jq '.services.backend' <<<"$standalone")
   [ "$(jq -c '.networks | keys' <<<"$b")" = '["default","pdf-net"]' ] || { echo "FAIL: $f backend networks = $(jq -c '.networks|keys' <<<"$b")"; fail=1; }
+  [ "$(jq -r '.networks."pdf-net".internal' <<<"$standalone")" = "true" ] \
+    || { echo "FAIL: $f pdf-net is not internal: true (standalone render)"; fail=1; }
+
+  # Combined render — this is how orkestra.sh actually deploys (infra file,
+  # then the app file). Compose merges same-named networks across -f files
+  # by union of keys, so an app file that forgets `internal: true` silently
+  # drops it from the merged network even though the standalone render above
+  # still had it, and gotenberg (only ever declared in the infra file) must
+  # still end up on pdf-net alone.
+  combined=$(docker compose --env-file "$env_file" -f docker-compose.infra.yml -f "$f" config --format json)
+  [ "$(jq -r '.networks."pdf-net".internal' <<<"$combined")" = "true" ] \
+    || { echo "FAIL: $f + infra: merged pdf-net is not internal: true"; fail=1; }
+  [ "$(jq -c '.services.gotenberg.networks | keys' <<<"$combined")" = '["pdf-net"]' ] \
+    || { echo "FAIL: $f + infra: gotenberg networks = $(jq -c '.services.gotenberg.networks|keys' <<<"$combined")"; fail=1; }
 done
 [ "$fail" = 0 ] && echo "ok: gotenberg hardening present"
 exit "$fail"
