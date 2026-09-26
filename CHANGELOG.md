@@ -4,6 +4,104 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.12.0] - 2026-09-26
+
+### Features
+
+- **(notification)** Owner-scoped template port on NotificationService ([83f1e27](https://github.com/orkestra-cc/orkestra/commit/83f1e27f38b0b6c72213c0dcd029d2cc2e97b9fa))
+- **(notification)** Per-tenant ownership of notification templates ([2eac239](https://github.com/orkestra-cc/orkestra/commit/2eac2397f67943d02e60e218d4d3c2378a4dcf5a))
+- **(notification)** Keep Outlook conditional comments in rendered HTML ([8b5e9c1](https://github.com/orkestra-cc/orkestra/commit/8b5e9c1f3098e8f794b0b3b1c3e1c6c6e977e004))
+- **(emailhtml)** Round-trip HTML comments through html/template ([a1765ac](https://github.com/orkestra-cc/orkestra/commit/a1765ac2e20646f0dcd70be52eb28c0fab28be97))
+- **(frontend-admin)** Truncate long options in the `sm` MultiSelect ([f2c4ae5](https://github.com/orkestra-cc/orkestra/commit/f2c4ae5438874a4fea432308ec58014ac4d2792c))
+- **(frontend-admin)** `sm` size for MultiSelect, aligned with Bootstrap controls ([e73ed2e](https://github.com/orkestra-cc/orkestra/commit/e73ed2efeb9915c9598a66bb00a36d7bc39aadcf))
+- **(frontend-admin)** ExportFormatMenu, a shared multi-scope primitive ([ef30579](https://github.com/orkestra-cc/orkestra/commit/ef305796ed98c17e5a076826a6d276f16616869e))
+- **(frontend-admin)** Shared bulk-action primitives for polled, server-paginated queues ([41e5c65](https://github.com/orkestra-cc/orkestra/commit/41e5c65b2cb4fec21c3bd0df5b059bf927afe8d8))
+- **(frontend-admin)** MarkdownField primitive — textarea + mini-toolbar + preview (#402) ([54909fe](https://github.com/orkestra-cc/orkestra/commit/54909fe64ae9564b6e541a490a28a270fde8bab9))
+- **(notification)** Optional hosted unsubscribe page for the footer link ([5942ad1](https://github.com/orkestra-cc/orkestra/commit/5942ad14f7104fca35ea491cb6f4a68773e4551f))
+- **(notification)** Refuse marketing on a driver that cannot do one-click ([ab6c8f9](https://github.com/orkestra-cc/orkestra/commit/ab6c8f901b93aea2cebd0e99f94b05725234eb3e))
+- **(notification)** Emit RFC 8058 headers at the dispatch chokepoint ([5cda396](https://github.com/orkestra-cc/orkestra/commit/5cda3960a85e109eb6673ad412beb780f91f281f))
+- **(notification)** RFC 8058 one-click POST endpoint, generic by construction ([1b1f8f6](https://github.com/orkestra-cc/orkestra/commit/1b1f8f693ad8c59a73b80307466af6e3a30bb159))
+- **(notification)** Reconcile unsubscribe side effects with a bounded retry budget ([31b75e9](https://github.com/orkestra-cc/orkestra/commit/31b75e9dec792c1fed0ea8d0151948ad87f0d36a))
+- **(notification)** Atomic token claim and a crash-safe unsubscribe sequence ([58bc7bb](https://github.com/orkestra-cc/orkestra/commit/58bc7bb6abae14b59e733560b849f41b7f68b565))
+- **(sdk)** MarketingUnsubscribeSink reports failure so core can retry it ([438c3a3](https://github.com/orkestra-cc/orkestra/commit/438c3a32dfd0fdf56e2337a044e087ef3676cf09))
+- **(notification)** Per-driver header capability, honestly reported ([28ccb0e](https://github.com/orkestra-cc/orkestra/commit/28ccb0e8f77d880bcbc304231617f24bdf2f9004))
+- **(notification)** Durable marketing opt-out, checked fail-closed on every send ([8ec95b4](https://github.com/orkestra-cc/orkestra/commit/8ec95b4932c49db2aa3d22d7b0e5483d5b1337bb))
+- **(sdk)** The object-store contract signs the upload length and can inspect (#401) ([2822941](https://github.com/orkestra-cc/orkestra/commit/282294190e730c27097cf0dd666d205e340bd44e))
+- **(notification)** SenderDirectory companion — PreflightDelivery + readiness ([c717d78](https://github.com/orkestra-cc/orkestra/commit/c717d7899373b57fede739e8aeafff139a237ce5))
+- **(notification)** Policy-enforced explicit Sender with attempted-slug logging (ADR-0021) ([b997bb3](https://github.com/orkestra-cc/orkestra/commit/b997bb35110e6859109cc8148d954eae8db8ed2d))
+- **(notification)** Allowed_types selectability policy with save-time completeness ([d0f7214](https://github.com/orkestra-cc/orkestra/commit/d0f7214cef2f154d67b80739701c24d21ca7a8c8))
+- **(notification)** Declare Italian as a supported template locale ([45211fb](https://github.com/orkestra-cc/orkestra/commit/45211fbd874ff2f751fde7bf81d52fe0772bd04e))
+- **(notification)** Nil-by-default extension seams for tracking and unsubscribe ([0e96f70](https://github.com/orkestra-cc/orkestra/commit/0e96f70c43f7a3ec835ef40f2d1812ceff5ecd0d))
+- **(frontend-admin)** Optional getRowId on useAdvanceTable (#398) ([46e118b](https://github.com/orkestra-cc/orkestra/commit/46e118b1478dc90a1ad1020137a060ae6d69e8cf))
+
+### Bug fixes
+
+- **(notification)** Omit the empty Html part in MailUp sends so text-only mail is not blank ([c0b3e77](https://github.com/orkestra-cc/orkestra/commit/c0b3e77a3f9e33de49cce3998daf86a5166a8390))
+- **(deps)** Grpc 1.83.1 → 1.83.2 (GO-2026-6443) ([ffb4bb4](https://github.com/orkestra-cc/orkestra/commit/ffb4bb4b67dd440ab4e63ca5b1ce214dbd1d9001))
+- **(frontend-admin)** ExportFormatMenu logs a rejected onExport instead of swallowing it ([40eaf25](https://github.com/orkestra-cc/orkestra/commit/40eaf250bd9b98b8060594675ff43fe7147dff74))
+- **(docker)** Track backend/keys so no git command can take the mountpoint away ([43e4c37](https://github.com/orkestra-cc/orkestra/commit/43e4c3798595d335e08839d2ebb1956d23be75c1))
+- **(notification)** Detach the reconciler loop from its start context ([8fb875d](https://github.com/orkestra-cc/orkestra/commit/8fb875d0c05f337d64c7028d2310163dc0d520f5))
+- **(notification)** Validate the header map the MIME builder writes ([b447939](https://github.com/orkestra-cc/orkestra/commit/b447939dbb1ffa9465e750d1ddd130b791fa4baa))
+- **(notification)** Reject credentials in the public API base URL ([1b6c7e5](https://github.com/orkestra-cc/orkestra/commit/1b6c7e5024ad6899e43794298263f3b97bd8c35a))
+- **(notification)** Waive one-click only on an explicitly false value ([bb99858](https://github.com/orkestra-cc/orkestra/commit/bb9985812f8c95fa4e2f987510b08058ab0a6d4f))
+- **(notification)** Close a reconciler Start/Stop race and fix pass stats ([0990c2b](https://github.com/orkestra-cc/orkestra/commit/0990c2bdd77c92215d288d06bb09f736f53eacf7))
+- **(notification)** Scrub the address on every unsubscribe write error ([7b473c2](https://github.com/orkestra-cc/orkestra/commit/7b473c2305019af6694cb3d98d801f5561767201))
+- **(notification)** Swallow racing opt-out inserts and fail closed on a nil opt-out seam ([ce3a56b](https://github.com/orkestra-cc/orkestra/commit/ce3a56beddea7eb92cfb0c9bfa7d7cfafd13a5c8))
+- **(notification)** Map BySlug's local sentinel to iface at the dispatch chokepoint ([e26dfb4](https://github.com/orkestra-cc/orkestra/commit/e26dfb47bbea686cd4443982d3decd82c33c780a))
+- **(frontend-admin)** Show a restart-required strip on the module detail page (#387) ([1966f0e](https://github.com/orkestra-cc/orkestra/commit/1966f0e1a3189c7af73abdce71c7abb5736c46bb))
+- **(frontend-admin)** Bump js-yaml to 4.3.2 to clear the last high advisory (#386) ([87826dd](https://github.com/orkestra-cc/orkestra/commit/87826ddae602284da10a576f4ed987d31643cc1c))
+- **(frontend-admin)** Bump @xmldom/xmldom to 0.8.15 to clear the audit gate (#385) ([7e65c88](https://github.com/orkestra-cc/orkestra/commit/7e65c880b82f09b688b8bea6b0aa2b5ab336bf55))
+- **(frontend-admin)** Centre a switch on its label, not 2.8px below it (#384) ([0fa9933](https://github.com/orkestra-cc/orkestra/commit/0fa993382451d0b8a9a5c746168546e63842ba8b))
+- **(blob)** Honour CachedConfig.CacheBuffer instead of a hardcoded 10m ([3b305b5](https://github.com/orkestra-cc/orkestra/commit/3b305b51237ad30a8e67370a8354e00f81ad877b))
+- **(blob)** Never serve a presigned GET signed for longer than requested ([f207ba9](https://github.com/orkestra-cc/orkestra/commit/f207ba93f928f45382f01a2e0ac45b575d944cd3))
+
+### Reverts
+
+- **(notification)** Keep SendTemplated's one-click policy read universal ([7a07f84](https://github.com/orkestra-cc/orkestra/commit/7a07f84476d6fd98027786bbaddf23cf11566c76))
+
+### Performance
+
+- **(notification)** Stop SendTemplated reading the one-click policy for transactional mail ([1632d7e](https://github.com/orkestra-cc/orkestra/commit/1632d7eb995ed071a112e8a798165fd775b9c257))
+
+### Refactor
+
+- **(notification)** Remove the dead unsubscribe orchestration pair ([50546b0](https://github.com/orkestra-cc/orkestra/commit/50546b0305ee9a363d7dbc3724aba312d6f0ad70))
+
+### Documentation
+
+- **(notification)** Document the prefetch cost and update the operator guide ([8d61a6f](https://github.com/orkestra-cc/orkestra/commit/8d61a6fdbde50a20854082102889db68ab50b705))
+- **(notification)** State the real reason instead of naming an internal doc ([f249abf](https://github.com/orkestra-cc/orkestra/commit/f249abf3c1c03313a5103a18e5931597ba623b6e))
+- **(notification)** Fix round 3 — executable sentinel-mapping recipe, stale cross-reference ([dc2882a](https://github.com/orkestra-cc/orkestra/commit/dc2882a0710018a96ad3073eb73a1a000c03faaa))
+- **(notification)** Fix two stale Go comments the review flagged ([96dc5f9](https://github.com/orkestra-cc/orkestra/commit/96dc5f9e2ad4582706d8e594f531554578246f3b))
+- **(notification)** Fix four review-round errors in the one-click docs ([95e64d9](https://github.com/orkestra-cc/orkestra/commit/95e64d9f6464ecf1368742b37028b0f42cb1ff05))
+- **(notification)** One-click unsubscribe contract, operator guide, regenerated spec ([e0115b6](https://github.com/orkestra-cc/orkestra/commit/e0115b6f535d414e6f3cf6bbad43079073c3890c))
+- **(notification)** Correct two prose claims the code does not support ([a843303](https://github.com/orkestra-cc/orkestra/commit/a8433037b2b957fa878d6201a2599986fd371add))
+- **(adr)** ADR-0021 — explicit per-send sender selection under operator policy ([8a1b510](https://github.com/orkestra-cc/orkestra/commit/8a1b510b80c54ce46a99f657797b8de5dd1a6763))
+- **(notification)** Explicit sender selection in the core contracts and the docs site ([6a95695](https://github.com/orkestra-cc/orkestra/commit/6a956959bdf61ff022684042a750bcea163e3058))
+- Simplify project README ([2621c9f](https://github.com/orkestra-cc/orkestra/commit/2621c9f9cb742143b402c7b38a59564caf1666b6))
+- **(onboarding)** Record the private development stack and delivery workflow ([ba77bb6](https://github.com/orkestra-cc/orkestra/commit/ba77bb6de7e3027dbb343c61459c930f1912aff2))
+
+### Tests
+
+- **(frontend-admin)** Guard the type size of raw <Table> on pages ([4f492ba](https://github.com/orkestra-cc/orkestra/commit/4f492ba68a1fe4fd26647d72572616dd252bef6f))
+- **(notification)** Translate remaining Italian test prose to English ([5e390e6](https://github.com/orkestra-cc/orkestra/commit/5e390e678c65570e74e20ff8f17b16f06c1f21d7))
+- **(notification)** Lock the default template locale to config, not a constant ([6f91eb8](https://github.com/orkestra-cc/orkestra/commit/6f91eb8e0112293e7b2b1a7c325376e1feba56f4))
+
+### Dependencies
+
+- **(deps)** Upgrade RustFS 1.0.0-beta.4 -> 1.0.0 (GA) ([858a0f9](https://github.com/orkestra-cc/orkestra/commit/858a0f9d26c6c48d34264fa44aca08cad115ed54))
+- **(deps)** Upgrade MongoDB 8.0.29 -> 8.0.32, Redis 8.2.9 -> 8.2.10 ([e9e26c3](https://github.com/orkestra-cc/orkestra/commit/e9e26c3a42eef77ae7ab99d4dcea66de15e1265c))
+
+### Chores
+
+- **(openapi)** Regenerate the spec for NotificationDoc.attemptedSenderSlug ([05f98b0](https://github.com/orkestra-cc/orkestra/commit/05f98b08c817d2dfb5d7a98bb88d1b85ac326a87))
+- **(sync)** Absorb main after the #382 promotion ([cba3b0b](https://github.com/orkestra-cc/orkestra/commit/cba3b0b272d6066bd09aee068197c8eb9c5a05a2))
+- **(sync)** Absorb main after the v0.11.0 promotion ([32e13a7](https://github.com/orkestra-cc/orkestra/commit/32e13a71b83fa0b4d8a0a038baf637d0f7d8fdac))
+
+### Release
+
+- **(v0.12.0)** Promote dev ([3d1b407](https://github.com/orkestra-cc/orkestra/commit/3d1b4073dcae05e0740e6bc7494f1615a419b6c1))
+
 ## [0.11.0] - 2026-09-06
 
 ### ⚠️ Breaking Changes
