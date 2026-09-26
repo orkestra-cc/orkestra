@@ -467,8 +467,11 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   Check}` to the slice passed to `ModuleAdminHandler.SetPlatformChecks`, which
   `GET /v1/admin/modules/health` reports under the response's `platform` array
   (`PlatformHealthStatus{Name,Status,Error}`) alongside the per-module rows —
-  `Error` text stays terse (`"pdf renderer unavailable: status 503"`), never a
-  wrapped upstream body. A fork adding another sidecar-backed capability no
+  on a failed check `Error` is always the fixed word `"unreachable"`
+  (`ModuleAdminHandler.HealthCheck` hardcodes `st.Status, st.Error = "down",
+  "unreachable"`), never the underlying Go error text or an upstream status
+  code — a `PlatformCheck.Check`'s returned `error` decides up/down only and
+  is never itself surfaced. A fork adding another sidecar-backed capability no
   module owns follows the same recipe: a `Service<Foo>` key here, a
   `register<Foo>(reg, cfg, logger) []module.PlatformCheck` helper in
   `cmd/server`, and — only if it matters operationally — a `PlatformCheck`

@@ -817,8 +817,10 @@ docker exec orkestra-redis-development redis-cli ping
 
 # Check Gotenberg health (PDF renderer sidecar) — no published port, pdf-net only
 docker exec orkestra-gotenberg-development curl -fsS http://localhost:3000/health
-# or, live reachability as the backend sees it:
-curl http://localhost:3000/v1/admin/modules/health | jq '.platform'
+# or, live reachability as the backend sees it (admin-only route — mint a dev
+# token first, see scripts/devtoken.sh):
+T=$(ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator --quiet)
+curl -H "Authorization: Bearer $T" http://localhost:3000/v1/admin/modules/health | jq '.platform'
 
 # Check application health endpoints
 curl http://localhost:3000/health  # Backend health
