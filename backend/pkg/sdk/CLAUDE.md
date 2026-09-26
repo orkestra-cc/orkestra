@@ -46,7 +46,8 @@ explicitly yet — the grep is the gate.
 | Package | Purpose | Stability |
 | --- | --- | --- |
 | `module/` | Module interface + 17 optional sub-interfaces, BaseModule, ModuleRegistry, ServiceRegistry, ConfigService, RouteInfo, RedisClient, secrets (AES-256-GCM helpers), `ConfigGroup`, `HasConfigGroups`. The boot kernel. | Required surface frozen at v1 |
-| `iface/` | Cross-module interfaces (UserProvider, TenantProvider, AuthzProvider, NotificationSender, JWTProvider, PDFProvider, AIModelProvider, RAGQueryProvider, AuditSink, SessionTerminator, AuthzCacheInvalidator, BillingTenantProvider, PaymentProvider, …) + their DTOs (User, OAuthLink, Tenant, NotificationRequest, …). Includes `CategoryConfiguredChecker` (optional companion to `NotificationSender`, ADR-0019) + the `IsConfiguredForCategory` accessor, `SenderDirectory` + `SenderInfo` (a second optional companion asserted off the same registered object, ADR-0021), and the error **sentinels** a consumer must match across the module boundary (`ErrKMSKeyNotFound`, `ErrPasswordLoginDisabled`, `ErrAuthPolicyUnavailable`, the six `ErrSender*` sender-selection sentinels, …) — see the sentinel rule below. Narrow, additive sub-interfaces resolved by a type assertion or `module.GetTyped` against the tier's provider sit beside the wide providers rather than widening them: `UserLifecycleStateProvider` (lifecycle classification for the setup finalizer, resolved by a plain type assertion — `internal/shared/setup/service.go`'s `users.(iface.UserLifecycleStateProvider)`), `OAuthLinkDataUpdater` (refreshes the cached OAuth `picture` URL on link reuse, resolved by a plain type assertion — `internal/core/auth/services/auth_service.go`'s `s.userService.(iface.OAuthLinkDataUpdater)`), `MFAEpochBumper` (`BumpMFAEpoch` — increments `User.MFAEpoch`, the counter that invalidates MFA authority on every live token the instant a credential is removed or replaced, without waiting for a refresh; resolved via `module.GetTyped`), and `AuthzCacheInvalidator` (`InvalidateUserPermissions` — retires a user's cached authorization verdicts after a system-role change; resolved via `module.GetTyped` against `ServiceAuthzProvider`). | Additive-only |
+| `iface/` | Cross-module interfaces (UserProvider, TenantProvider, AuthzProvider, NotificationSender, JWTProvider, PDFProvider, AIModelProvider, RAGQueryProvider, AuditSink, SessionTerminator, AuthzCacheInvalidator, BillingTenantProvider, PaymentProvider, …) + their DTOs (User, OAuthLink, Tenant, NotificationRequest, …). Includes `CategoryConfiguredChecker` (optional companion to `NotificationSender`, ADR-0019) + the `IsConfiguredForCategory` accessor, `SenderDirectory` + `SenderInfo` (a second optional companion asserted off the same registered object, ADR-0021), `PDFRenderer` (`RenderHTML(ctx, HTMLDocument) ([]byte, error)` — an optional platform service, not a `PDFProvider` implementation; see the platform-service rule below) with its `HTMLDocument`/`PaperSpec` DTOs and `ErrPDFRendererUnavailable`/`ErrPDFRenderFailed`/`ErrPDFTooLarge` sentinels, `Attachment` (`Filename`, `ContentType`, `Data []byte` — raw bytes, never base64) consumed by `NotificationRequest.Attachments`, and the `FailureAttachmentRejected` classification string surfaced on `NotificationResult.FailureReason`, and the error **sentinels** a consumer must match across the module boundary (`ErrKMSKeyNotFound`, `ErrPasswordLoginDisabled`, `ErrAuthPolicyUnavailable`, the six `ErrSender*` sender-selection sentinels, …) — see the sentinel rule below. Narrow, additive sub-interfaces resolved by a type assertion or `module.GetTyped` against the tier's provider sit beside the wide providers rather than widening them: `UserLifecycleStateProvider` (lifecycle classification for the setup finalizer, resolved by a plain type assertion — `internal/shared/setup/service.go`'s `users.(iface.UserLifecycleStateProvider)`), `OAuthLinkDataUpdater` (refreshes the cached OAuth `picture` URL on link reuse, resolved by a plain type assertion — `internal/core/auth/services/auth_service.go`'s `s.userService.(iface.OAuthLinkDataUpdater)`), `MFAEpochBumper` (`BumpMFAEpoch` — increments `User.MFAEpoch`, the counter that invalidates MFA authority on every live token the instant a credential is removed or replaced, without waiting for a refresh; resolved via `module.GetTyped`), and `AuthzCacheInvalidator` (`InvalidateUserPermissions` — retires a user's cached authorization verdicts after a system-role change; resolved via `module.GetTyped` against `ServiceAuthzProvider`). | Additive-only |
+| `pdf/gotenberg/` | `iface.PDFRenderer` backed by a Gotenberg 8 sidecar (Chromium HTML→PDF route) over HTTP Basic Auth. Bounded concurrency, a hard response-size cap, and a `%PDF-` magic-byte check on the reply; never retries — the caller decides. No `internal/` import, so a fork can vendor it standalone. | Additive-only |
 | `ctxauth/` | Request-context getters: `GetUserUUID`, `GetTenantID`, `GetTenantRoles`, `GetClientIP`, `IsImpersonating`, `TenantKindFromContext`. Plus the exported `Key*` string constants the backend AuthMiddleware writes against. | Frozen |
 | `modulegate/` | `ModuleGate(checker, name)` HTTP middleware (503 when disabled) + `ModuleEnabledChecker` interface. | Frozen |
 | `tenantrepo/` | Fail-closed Mongo query helpers (`Scope`, `MustScope`, `StampInsert`, `StampInsertM`, `ScopeAggregate`, `RequireInternalTenant`, `RequireExternalTenant`) + `ErrTenantScopeMissing` / `ErrTenantKindMismatch` sentinels. | Frozen |
@@ -449,6 +450,29 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   result. Metadata is key names (schema-derived, bounded), `code`, `env`,
   `requestId` — never values. A panicking sink is recovered and WARNed; the
   HTTP result never changes because of the sink.
+- **A `system.*` `ServiceKey` is an optional *platform* service — registered
+  once by `cmd/server/main.go`, not by any module's `Init`/`Start`.**
+  `ServicePDFRenderer` follows the same shape as the earlier
+  `ServiceObjectStoreProvider`: main.go builds the concrete implementation
+  from process config (for the PDF renderer, `pkg/sdk/pdf/gotenberg.Client`
+  from `PDF_RENDERER_URL`/`_USER`/`_PASSWORD`) and calls
+  `ServiceRegistry.Register` unconditionally when configured — even if the
+  sidecar is unreachable at boot, since reachability can change without a
+  restart. A consumer resolves it per call with
+  `module.GetTyped[iface.PDFRenderer](reg, module.ServicePDFRenderer)` and
+  degrades when the second return is `false` (empty URL ⇒ never registered)
+  or the call itself returns `iface.ErrPDFRendererUnavailable` — never at
+  boot, never by panicking. When a platform service's live reachability is
+  operationally interesting, main.go also appends a `module.PlatformCheck{Name,
+  Check}` to the slice passed to `ModuleAdminHandler.SetPlatformChecks`, which
+  `GET /v1/admin/modules/health` reports under the response's `platform` array
+  (`PlatformHealthStatus{Name,Status,Error}`) alongside the per-module rows —
+  `Error` text stays terse (`"pdf renderer unavailable: status 503"`), never a
+  wrapped upstream body. A fork adding another sidecar-backed capability no
+  module owns follows the same recipe: a `Service<Foo>` key here, a
+  `register<Foo>(reg, cfg, logger) []module.PlatformCheck` helper in
+  `cmd/server`, and — only if it matters operationally — a `PlatformCheck`
+  appended alongside the others.
 
 ## CI
 

@@ -29,10 +29,28 @@ A representative slice, not the full list — read the package for the rest.
 | `PIIProducer` | `user`, `auth`, `tenant`, `authz`, `notification` | compliance (the GDPR DSR pipeline) |
 | `KMSProvider` | `compliance` | per-tenant envelope encryption and crypto-shred |
 | [`ObjectStore` / `ObjectStoreProvider`](/sdk/object-storage) | the platform's blob provider | user (avatars), and any module storing uploads |
+| `PDFRenderer` | the platform's PDF renderer (a Gotenberg sidecar, wired by the server binary as an optional service — not by a core module) | any module compositing a printable document (e.g. a receipt) |
 
 `AuditSinkSetter` and `KMSProviderSetter` are the setter seams on core services: nil by default, so a fork can wire its own audit or key-management implementation the way the core compliance module does.
 
 `KMSProvider.CreateKey` is idempotent under concurrency, not just for sequential callers: two calls racing to create a key for the same `tenantUUID` must both return the single winning `keyID`, never mint two DEKs for one tenant. The in-tree `compliance` implementation backs this with the collection's unique `tenantUuid` index plus a duplicate-key reread; any other implementation of `KMSProvider` (a remote HTTP-backed client, say) must uphold the same guarantee, since a resumable operation (like tenant provisioning) may call `CreateKey` more than once for the same tenant.
+
+### `PDFRenderer` — an optional platform service, not a module
+
+`PDFRenderer.RenderHTML(ctx, HTMLDocument) ([]byte, error)` turns one self-contained HTML page (`HTMLDocument.HTML` plus a `HTMLDocument.Assets` map of any files the page references — the implementation never fetches remote resources) into PDF bytes, at the geometry described by `HTMLDocument.Paper` (`PaperSpec` — size, orientation, margins; zero value is A4 with 15&nbsp;mm margins). Unlike the interfaces above, nothing in the base **implements** it as a module: `cmd/server/main.go` registers a Gotenberg-backed client under `module.ServicePDFRenderer` only when `PDF_RENDERER_URL` is configured, and registers it even when the sidecar is unreachable at boot, since a consumer resolves it **per call** —
+
+```go
+renderer, ok := module.GetTyped[iface.PDFRenderer](deps.Services, module.ServicePDFRenderer)
+if !ok {
+    // no renderer configured — degrade (e.g. skip the PDF attachment)
+}
+```
+
+— and degrades on `iface.ErrPDFRendererUnavailable` (absent, unreachable, timed out, 5xx), `iface.ErrPDFRenderFailed` (the sidecar refused the document, or its reply wasn't a PDF), or `iface.ErrPDFTooLarge` (over the renderer's own byte cap), rather than failing at boot. Its liveness is also surfaced operationally: `GET /v1/admin/modules/health` reports it in the response's `platform` array, independent of any module's own health.
+
+### Notification attachments
+
+`NotificationRequest.Attachments` (`Send` only — `SendTemplated` ignores it) carries `[]iface.Attachment{Filename, ContentType, Data []byte}`, raw bytes never base64. The notification module enforces the limits (raw size cap, `application/pdf` only, filename sanitization) and a driver without attachment support fails the send rather than silently dropping the files; see [notification](/modules/core/notification) for the delivery-side contract. When a send fails for that reason, `NotificationResult.FailureReason` carries the `iface.FailureAttachmentRejected` string — returned by a fresh send and by an idempotent replay alike, so a caller never needs to inspect a driver-specific error to react to it.
 
 ## Error sentinels
 
@@ -62,6 +80,8 @@ must match them across the module boundary with `errors.Is`.
 [ADR-0006](/adrs/collapse-to-core-only-base) collapsed the base to core-only, but kept the interfaces the removed verticals used. Nothing in the base implements these — they are the shape a fork's addon satisfies so it plugs into the same seam:
 
 `PDFProvider` · `GraphProvider` · `AIModelProvider` · `RAGQueryProvider` · `PaymentProvider` · `SubscriptionReconciler` · `SelfServiceCheckoutPlanner` · `BillingTenantProvider` · `ClientSelfDeletionGate`
+
+Do not confuse `PDFProvider` with `PDFRenderer` above: `PDFProvider` is the wider, module-shaped generate/store/retrieve contract a fork's own documents addon can choose to implement; `PDFRenderer` is the narrow, core-wired HTML→PDF conversion service described above, with no storage or template concerns of its own.
 
 ## Why the indirection
 
