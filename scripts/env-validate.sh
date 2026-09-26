@@ -68,6 +68,7 @@ SECRET_VARS=(
     "REDIS_PASSWORD"
     "STORAGE_SECRET_KEY"
     "RUSTFS_ROOT_PASSWORD"
+    "PDF_RENDERER_PASSWORD"
 )
 
 # --- Same-site host pairings (spec §8 follow-up #16) ---------------------
@@ -248,6 +249,12 @@ validate_env_file() {
                 ;;
             RUSTFS_ROOT_PASSWORD)
                 [ -z "$value" ] && continue
+                ;;
+            PDF_RENDERER_PASSWORD)
+                if [ -z "$(env_value PDF_RENDERER_URL)" ]; then
+                    print_info "PDF_RENDERER_URL is empty — PDF renderer disabled"
+                    continue
+                fi
                 ;;
         esac
         if secret_is_placeholder "$value"; then

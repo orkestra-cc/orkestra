@@ -15,11 +15,31 @@ import (
 
 // ModuleAdminHandler provides Huma-compatible handlers for the admin module API.
 type ModuleAdminHandler struct {
-	configService *ModuleConfigService
-	registry      *ModuleRegistry
-	auditSink     iface.AuditSink
-	actorResolver func(context.Context) AdminActor
+	configService  *ModuleConfigService
+	registry       *ModuleRegistry
+	auditSink      iface.AuditSink
+	actorResolver  func(context.Context) AdminActor
+	platformChecks []PlatformCheck
 }
+
+// PlatformCheck is a non-module dependency shown by the modules health
+// endpoint (e.g. the PDF renderer). Check's error text is never exposed.
+type PlatformCheck struct {
+	Name  string
+	Check func(context.Context) error
+}
+
+// PlatformHealthStatus is the API representation of a single PlatformCheck
+// result.
+type PlatformHealthStatus struct {
+	Name   string `json:"name"`
+	Status string `json:"status"` // "up" | "down"
+	Error  string `json:"error,omitempty"`
+}
+
+// SetPlatformChecks wires the non-module platform checks HealthCheck
+// reports under Body.Platform.
+func (h *ModuleAdminHandler) SetPlatformChecks(c []PlatformCheck) { h.platformChecks = c }
 
 // NewModuleAdminHandler creates a new admin handler.
 func NewModuleAdminHandler(cs *ModuleConfigService, registry *ModuleRegistry) *ModuleAdminHandler {
@@ -63,8 +83,9 @@ type UpdateModuleOutput struct {
 // ModuleHealthOutput is the response for GET /v1/admin/modules/health.
 type ModuleHealthOutput struct {
 	Body struct {
-		Modules   []ModuleHealthStatus `json:"modules"`
-		CheckedAt string               `json:"checkedAt"`
+		Modules   []ModuleHealthStatus   `json:"modules"`
+		CheckedAt string                 `json:"checkedAt"`
+		Platform  []PlatformHealthStatus `json:"platform,omitempty"`
 	}
 }
 
@@ -502,15 +523,19 @@ func (h *ModuleAdminHandler) HealthCheck(ctx context.Context, _ *struct{}) (*Mod
 		}
 	}
 
-	return &ModuleHealthOutput{
-		Body: struct {
-			Modules   []ModuleHealthStatus `json:"modules"`
-			CheckedAt string               `json:"checkedAt"`
-		}{
-			Modules:   statuses,
-			CheckedAt: time.Now().UTC().Format(time.RFC3339),
-		},
-	}, nil
+	out := &ModuleHealthOutput{}
+	out.Body.Modules = statuses
+	out.Body.CheckedAt = time.Now().UTC().Format(time.RFC3339)
+
+	for _, pc := range h.platformChecks {
+		st := PlatformHealthStatus{Name: pc.Name, Status: "up"}
+		if err := pc.Check(ctx); err != nil {
+			st.Status, st.Error = "down", "unreachable"
+		}
+		out.Body.Platform = append(out.Body.Platform, st)
+	}
+
+	return out, nil
 }
 
 // --- Environment Handlers ---

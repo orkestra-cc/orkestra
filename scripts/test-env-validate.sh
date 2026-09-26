@@ -49,6 +49,7 @@ prod=(
     "MONGO_ROOT_PASSWORD=${hex32}"
     "REDIS_PASSWORD=${hex32}"
     "STORAGE_SECRET_KEY=${hex32}"
+    "PDF_RENDERER_PASSWORD=${hex32}"
 )
 
 # --- development: the shipped placeholders are tolerated, but named ---

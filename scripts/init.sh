@@ -168,6 +168,10 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
   # (docker-compose.infra.yml derives RUSTFS_SECRET_KEY from it), and the
   # S3 API is browser-facing behind a proxy, so it must never be a literal.
   storage_secret=$(openssl rand -hex 16)
+  # PDF renderer (Gotenberg sidecar) basic-auth password. The container has
+  # no published port and no network egress, but a shipped literal here
+  # would still be a public secret in the git history.
+  pdf_secret=$(openssl rand -hex 16)
 
   tmp_env="${ENV_FILE}.tmp.$$"
   # sed delimiter `|` so the hex secrets don't collide with `/`.
@@ -178,6 +182,7 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
     -e "s|REPLACE_WITH_RANDOM_HEX_32_MONGO_PASSWORD|${mongo_pw}|" \
     -e "s|REPLACE_WITH_RANDOM_HEX_32_REDIS_PASSWORD|${redis_pw}|" \
     -e "s|REPLACE_WITH_RANDOM_HEX_32_STORAGE_SECRET|${storage_secret}|" \
+    -e "s|REPLACE_WITH_RANDOM_HEX_32_PDF_RENDERER_SECRET|${pdf_secret}|" \
     "$ENV_FILE" > "$tmp_env"
 
   # Sanity: every placeholder got replaced (otherwise the backend boot will
@@ -191,7 +196,7 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
 
   mv "$tmp_env" "$ENV_FILE"
   chmod 600 "$ENV_FILE"
-  ok "filled COOKIE_SECRET / OAUTH_TOKEN_ENCRYPTION_KEY / ORKESTRA_KMS_MASTER_KEY / MONGO_ROOT_PASSWORD / REDIS_PASSWORD / STORAGE_SECRET_KEY"
+  ok "filled COOKIE_SECRET / OAUTH_TOKEN_ENCRYPTION_KEY / ORKESTRA_KMS_MASTER_KEY / MONGO_ROOT_PASSWORD / REDIS_PASSWORD / STORAGE_SECRET_KEY / PDF_RENDERER_PASSWORD"
   muted "chmod 600 applied — .env now contains live secrets"
 
   # Seed a non-colliding port block so a second Orkestra stack on this host
