@@ -166,3 +166,59 @@ func TestSenderResolver_DefaultAndBySlug(t *testing.T) {
 		t.Fatalf("want ErrSenderNotFound on an empty roster, got %v", err)
 	}
 }
+
+// TestSenderResolver_All_RosterIncludesDrafts: All returns the whole roster
+// in order — including a draft that routes nothing (no Categories) and one
+// that is not explicitly selectable (no AllowedTypes). It is the
+// SenderDirectory companion's data source (ADR-0021 D6); filtering by
+// eligibility is the caller's job, not All's.
+func TestSenderResolver_All_RosterIncludesDrafts(t *testing.T) {
+	roster := rosterCfg(
+		SenderProfile{Slug: "auth", Provider: "smtp", Categories: []string{"auth.*"}, AllowedTypes: []string{"transactional"}},
+		SenderProfile{Slug: "fallback", Provider: "noop", Categories: []string{"*"}},
+		SenderProfile{Slug: "draft", Provider: "ses"}, // no patterns, no allowed types
+	)
+	r := NewSenderResolver(fixedLoader(roster))
+	got, err := r.All(context.Background())
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	want := []string{"auth", "fallback", "draft"}
+	if len(got) != len(want) {
+		t.Fatalf("All = %d profiles, want %d: %+v", len(got), len(want), got)
+	}
+	for i, slug := range want {
+		if got[i].Slug != slug {
+			t.Fatalf("All[%d].Slug = %q, want %q (order must be preserved)", i, got[i].Slug, slug)
+		}
+	}
+}
+
+// TestSenderResolver_All_EmptyRosterReturnsLegacy: never an empty slice —
+// with no roster, All reports the synthesized legacy profile, exactly like
+// Resolve/Default/BySlug already do for an empty roster (D6).
+func TestSenderResolver_All_EmptyRosterReturnsLegacy(t *testing.T) {
+	legacy := LegacyProfile(SenderProfile{Provider: "smtp", SMTPHost: "h", SMTPPort: 25, FromAddress: "f"})
+	r := NewSenderResolver(fixedLoader(SenderConfig{Legacy: legacy}))
+	got, err := r.All(context.Background())
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if len(got) != 1 || got[0].Slug != LegacySlug {
+		t.Fatalf("All on an empty roster = %+v, want [legacy]", got)
+	}
+}
+
+// TestSenderResolver_All_ConfigErrorFailsClosed: a config read failure is an
+// error, never an empty slice — a caller must be able to tell "nothing
+// configured" from "the question could not be answered".
+func TestSenderResolver_All_ConfigErrorFailsClosed(t *testing.T) {
+	r := NewSenderResolver(fixedLoader(SenderConfig{Err: errors.New("mongo down"), Legacy: LegacyProfile(SenderProfile{})}))
+	got, err := r.All(context.Background())
+	if !errors.Is(err, ErrSenderConfigUnavailable) {
+		t.Fatalf("want ErrSenderConfigUnavailable, got %v", err)
+	}
+	if got != nil {
+		t.Fatalf("All on config error = %+v, want nil", got)
+	}
+}

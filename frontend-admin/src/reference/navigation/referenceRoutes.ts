@@ -442,6 +442,11 @@ export const modulesRoutes: RouteGroup = {
               active: true
             },
             {
+              name: 'Markdown Field',
+              to: paths.refFormsMarkdownField,
+              active: true
+            },
+            {
               name: 'Emoji button',
               to: paths.refFormsEmojiButton,
               active: true
@@ -636,6 +641,11 @@ export const modulesRoutes: RouteGroup = {
         {
           name: 'Stat Cards',
           to: paths.refComponentsStatCards,
+          active: true
+        },
+        {
+          name: 'Export Format Menu',
+          to: paths.refComponentsExportFormatMenu,
           active: true
         },
         {
@@ -1255,6 +1265,11 @@ export const referenceRoutes: RouteGroup = {
         { name: 'Cards', to: paths.refComponentsCards, active: true },
         { name: 'Stat Cards', to: paths.refComponentsStatCards, active: true },
         {
+          name: 'Export Format Menu',
+          to: paths.refComponentsExportFormatMenu,
+          active: true
+        },
+        {
           name: 'Secret Once Display',
           to: paths.refComponentsSecretOnceDisplay,
           active: true
@@ -1400,6 +1415,11 @@ export const referenceRoutes: RouteGroup = {
             },
             { name: 'Date Picker', to: paths.refFormsDatePicker, active: true },
             { name: 'Editor', to: paths.refFormsEditor, active: true },
+            {
+              name: 'Markdown Field',
+              to: paths.refFormsMarkdownField,
+              active: true
+            },
             {
               name: 'Emoji Button',
               to: paths.refFormsEmojiButton,

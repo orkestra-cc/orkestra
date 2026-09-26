@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 type timeoutErr struct{}
@@ -130,6 +132,18 @@ func TestDescribeSendError_Shapes(t *testing.T) {
 		{"deadline", p, context.DeadlineExceeded, "sender=esp-campagne err=timeout"},
 		{"canceled", p, context.Canceled, "sender=esp-campagne err=canceled"},
 		{"unknown text is dropped", p, errors.New("mailgun: user=s1_2 secret=hunter2"), "sender=esp-campagne err=unknown"},
+		// The two sentinels the one-click work introduced. Both used to land
+		// in the catch-all, so the delivery log could not tell "we withheld
+		// marketing because we could not verify consent" from "we could not
+		// mint an unsubscribe token" — the two failures an operator most
+		// needs to tell apart.
+		{"opt-out lookup unavailable", p, ErrOptoutLookupUnavailable, "sender=esp-campagne err=optout_lookup_unavailable"},
+		{"unsubscribe token unavailable", p, ErrUnsubscribeTokenUnavailable, "sender=esp-campagne err=unsubscribe_token_unavailable"},
+		// A marketing send refused because one-click cannot be guaranteed is
+		// an ErrSenderInvalid to every consumer, but must not read in the log
+		// like a malformed sender slug.
+		{"one-click unavailable", p, ErrOneClickUnsubscribeUnavailable, "sender=esp-campagne err=one_click_unavailable"},
+		{"a malformed slug still reads as one", p, iface.ErrSenderInvalid, "sender=esp-campagne err=sender_invalid"},
 	}
 	for _, c := range cases {
 		if got := describeSendError(c.p, c.err); got != c.want {

@@ -106,6 +106,12 @@ interface UseAdvanceTableOptions<T> {
   // the query. Pass the controlled `globalFilter` through `state`.
   manualFiltering?: boolean;
   onGlobalFilterChange?: OnChangeFn<string>;
+  // Identità delle righe. Senza questa opzione TanStack indicizza le righe per
+  // posizione, e una selezione multipla su una tabella che fa polling o
+  // pagina lato server scivolerebbe sulla riga sbagliata quando l'ordine
+  // cambia. Passala con la chiave stabile del dato (un id, un uuid).
+  // Omettendola il comportamento resta identico a prima.
+  getRowId?: (row: T, index: number, parent?: Row<T>) => string;
 }
 
 const useAdvanceTable = <T,>({
@@ -124,7 +130,8 @@ const useAdvanceTable = <T,>({
   state: controlledState,
   onPaginationChange,
   manualFiltering,
-  onGlobalFilterChange
+  onGlobalFilterChange,
+  getRowId
 }: UseAdvanceTableOptions<T>) => {
   const state: Partial<TableState> = {
     // `pagination: false` means "one page containing every row". Derive the
@@ -183,7 +190,8 @@ const useAdvanceTable = <T,>({
     ...(onPaginationChange ? { onPaginationChange } : {}),
     ...(manualFiltering ? { manualFiltering: true } : {}),
     ...(onGlobalFilterChange ? { onGlobalFilterChange } : {}),
-    ...(controlledState ? { state: controlledState } : {})
+    ...(controlledState ? { state: controlledState } : {}),
+    ...(getRowId ? { getRowId } : {})
   });
 
   // `autoResetPageIndex: false` above is deliberate — a sort or a filter must

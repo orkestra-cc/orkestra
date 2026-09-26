@@ -20,10 +20,15 @@ type NotificationDoc struct {
 	Status            string             `bson:"status" json:"status"`
 	Provider          string             `bson:"provider,omitempty" json:"provider,omitempty"`
 	SenderSlug        string             `bson:"senderSlug,omitempty" json:"senderSlug,omitempty"`
-	Error             string             `bson:"error,omitempty" json:"error,omitempty"`
-	IdempotencyKey    string             `bson:"idempotencyKey,omitempty" json:"idempotencyKey,omitempty"`
-	CreatedAt         time.Time          `bson:"createdAt" json:"createdAt"`
-	SentAt            *time.Time         `bson:"sentAt,omitempty" json:"sentAt,omitempty"`
+	// AttemptedSenderSlug records what an explicit Sender request tried to
+	// name (ADR-0021 D4): the validated slug verbatim when it passes the
+	// grammar/length guard, or the constant marker "invalid" when it does
+	// not — never the raw input, never a hash. Empty when Sender was empty.
+	AttemptedSenderSlug string     `bson:"attemptedSenderSlug,omitempty" json:"attemptedSenderSlug,omitempty"`
+	Error               string     `bson:"error,omitempty" json:"error,omitempty"`
+	IdempotencyKey      string     `bson:"idempotencyKey,omitempty" json:"idempotencyKey,omitempty"`
+	CreatedAt           time.Time  `bson:"createdAt" json:"createdAt"`
+	SentAt              *time.Time `bson:"sentAt,omitempty" json:"sentAt,omitempty"`
 }
 
 // SuppressionDoc is a recipient that must not receive any notifications

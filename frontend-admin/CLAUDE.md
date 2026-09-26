@@ -205,9 +205,22 @@ When asked to build a UI, look for an existing solution in this order:
 
 1. **`src/reference/app-examples/`** — full Orkestra implementations of common apps (calendar, chat, email, kanban, social, support-desk, events). Copy and adapt — don't reinvent.
 2. **`src/reference/components/`** — 60+ Orkestra component samples (forms, tables, navigation, media, charts).
-3. **`src/components/common/`** — UI primitives that the app's pages already use (Avatar, UserAvatar, Card, Flex, IconButton, PageHeader, AdvanceTable, OrkestraDropzone, ...). For user identities ALWAYS prefer `<UserAvatar user={...}>` over raw `<Avatar src={url}>` — UserAvatar handles the backend's `avatarSource` semantics (resolved URL when present, initials over a deterministic per-user color from `helpers/avatarColor.ts` otherwise).
+3. **`src/components/common/`** — UI primitives that the app's pages already use (Avatar, UserAvatar, Card, Flex, IconButton, PageHeader, AdvanceTable, OrkestraDropzone, ...). For user identities ALWAYS prefer `<UserAvatar user={...}>` over raw `<Avatar src={url}>` — UserAvatar handles the backend's `avatarSource` semantics (resolved URL when present, initials over a deterministic per-user color from `helpers/avatarColor.ts` otherwise). For a long free-text field whose consumer renders Markdown (event descriptions, public copy) use `MarkdownField` (`components/common/MarkdownField`, controlled — wire it through react-hook-form's `Controller`): toolbar + Write/Preview, with the preview going through `react-markdown` **without** `rehype-raw` (raw HTML is never mounted) and **with** `remark-breaks` (a single newline is a line break) — a public renderer of the same text must apply both rules; showcase at `src/reference/components/forms/MarkdownField.tsx`.
 4. **`src/components/dashboards/`** — reusable dashboard widgets (WeeklySales, ActiveUsers, ...).
 5. **`react-bootstrap`** — raw primitives for layout (Row, Col, Card, Button, Form).
+
+A raw `<Table>` is the sanctioned shape for a short table inside a card or a
+modal (a production **list** is still `AdvanceTable`), but it starts at the
+theme's 1rem body size, while every table in this console reads at `fs-10` —
+DESIGN.md's «Data tables» register. The split is deliberate ("forms stay at
+1rem even where tables are fs-10"), so a table that forgets the class does
+not look slightly off: it becomes the largest text on the surface, set bigger
+than the data it exists to let the operator compare. `src/pages/tableDensity.test.ts`
+scans `src/pages/` and fails on any raw `<Table>` whose className carries
+neither `fs-10` nor `fs-11` — the file's own header explains why the scope
+stops at pages. Header band and ink are the theme's, painted on `th`: a
+`bg-100` / `bg-200` / `table-light` on the `thead` is inert in both themes
+(measured), so don't add one.
 
 Only build a new component if none of the above fits. New components used by exactly one page live next to that page (`src/pages/<module>/<feature>/MyHelper.tsx`). Promote to `components/common/` only when a second page needs it.
 

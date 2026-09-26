@@ -9,6 +9,19 @@
       "copy": "Copy",
       "copied": "Copied",
       "ackLabel": "I have saved this value somewhere safe."
+    },
+    "markdownField": {
+      "toolbar": "Formatting",
+      "write": "Write",
+      "preview": "Preview",
+      "empty": "Nothing to preview yet.",
+      "hint": "Markdown is supported: **bold**, _italic_, headings, links and lists.",
+      "bold": "Bold",
+      "italic": "Italic",
+      "heading": "Heading",
+      "link": "Link",
+      "list": "Bullet list",
+      "quote": "Quote"
     }
   },
   "nav": {
@@ -2397,6 +2410,10 @@
       "back": "Back to Modules",
       "initErrorLabel": "Init Error:",
       "managedInfra": "Managed infrastructure:",
+      "restartRequired": {
+        "title": "Restart required:",
+        "body": "the configuration has been saved, but this module reads it only at startup. The running module keeps the previous values until the backend is restarted."
+      },
       "environmentLabel": "Environment:",
       "activeBadge": "active",
       "setAsActive": "Set as Active",
@@ -3011,5 +3028,17 @@
     "selectAllRows": "Select all rows",
     "selectRow": "Select row",
     "moreActions": "More actions"
+  },
+  "bulk": {
+    "selection": {
+      "count": "{{count}} selected",
+      "dropped": "{{count}} selected rows are no longer in the queue.",
+      "acknowledgeDropped": "Got it"
+    },
+    "summary": "{{ok}} succeeded, {{failed}} failed.",
+    "retryFailed": "Retry failed",
+    "errors": {
+      "generic": "The operation failed."
+    }
   }
 }

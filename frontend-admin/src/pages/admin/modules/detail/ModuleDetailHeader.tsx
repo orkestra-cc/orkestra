@@ -1,7 +1,10 @@
 import { Alert, Form, Spinner } from 'react-bootstrap';
 import { Link } from 'react-router';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowLeft } from '@fortawesome/free-solid-svg-icons';
+import {
+  faArrowLeft,
+  faTriangleExclamation
+} from '@fortawesome/free-solid-svg-icons';
 import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
@@ -123,6 +126,26 @@ const ModuleDetailHeader: React.FC<ModuleDetailHeaderProps> = ({
       {mod.status === 'failed' && mod.error && (
         <Alert variant="danger" className="mt-2 py-2 fs-10 mb-0">
           <strong>{t('adminModules.detail.initErrorLabel')}</strong> {mod.error}
+        </Alert>
+      )}
+
+      {/* The backend raises `needsRestart` on the config document whenever a
+          write lands on a module that reads its config only at Init — a
+          saved profile, an environment activation, a toggle — and clears it
+          at the next boot. Until this strip existed the flag reached the
+          browser and stopped there: an operator who saved a value the
+          field's own description says is "read at startup" got a green
+          "saved" and a module still running the old value, with nothing on
+          screen to explain the gap. The header renders in both page layouts,
+          so the strip is on every section rather than only where the field
+          was edited. */}
+      {mod.needsRestart && (
+        <Alert variant="warning" className="mt-2 py-2 fs-10 mb-0 d-flex gap-2">
+          <FontAwesomeIcon icon={faTriangleExclamation} className="mt-1" />
+          <span>
+            <strong>{t('adminModules.detail.restartRequired.title')}</strong>{' '}
+            {t('adminModules.detail.restartRequired.body')}
+          </span>
         </Alert>
       )}
 

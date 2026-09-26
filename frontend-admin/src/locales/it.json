@@ -9,6 +9,19 @@
       "copy": "Copia",
       "copied": "Copiato",
       "ackLabel": "Ho salvato questo valore in un posto sicuro."
+    },
+    "markdownField": {
+      "toolbar": "Formattazione",
+      "write": "Scrivi",
+      "preview": "Anteprima",
+      "empty": "Ancora niente da mostrare.",
+      "hint": "Markdown supportato: **grassetto**, _corsivo_, titoli, link ed elenchi.",
+      "bold": "Grassetto",
+      "italic": "Corsivo",
+      "heading": "Titolo",
+      "link": "Link",
+      "list": "Elenco puntato",
+      "quote": "Citazione"
     }
   },
   "nav": {
@@ -2397,6 +2410,10 @@
       "back": "Torna ai moduli",
       "initErrorLabel": "Errore di inizializzazione:",
       "managedInfra": "Infrastruttura gestita:",
+      "restartRequired": {
+        "title": "Riavvio necessario:",
+        "body": "la configurazione è stata salvata, ma questo modulo la legge solo all'avvio. Il modulo in esecuzione mantiene i valori precedenti finché il backend non viene riavviato."
+      },
       "environmentLabel": "Ambiente:",
       "activeBadge": "attivo",
       "setAsActive": "Imposta come attivo",
@@ -3011,5 +3028,17 @@
     "selectAllRows": "Seleziona tutte le righe",
     "selectRow": "Seleziona riga",
     "moreActions": "Altre azioni"
+  },
+  "bulk": {
+    "selection": {
+      "count": "{{count}} selezionate",
+      "dropped": "{{count}} selezionate non sono più in coda.",
+      "acknowledgeDropped": "Ho capito"
+    },
+    "summary": "{{ok}} riuscite, {{failed}} fallite.",
+    "retryFailed": "Riprova le fallite",
+    "errors": {
+      "generic": "Operazione non riuscita."
+    }
   }
 }

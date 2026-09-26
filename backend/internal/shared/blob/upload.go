@@ -71,7 +71,7 @@ func (c *UploadController) Presign(ctx context.Context, scope UploadScope, conte
 		return nil, ErrTooLarge
 	}
 	key := c.cfg.KeyBuilder(scope, ext)
-	return c.cfg.Store.PresignPut(ctx, key, ct, c.cfg.PresignTTL)
+	return c.cfg.Store.PresignPut(ctx, key, ct, sizeBytes, c.cfg.PresignTTL)
 }
 
 // scopePrefix is the leading path segment(s) a caller's keys must share.

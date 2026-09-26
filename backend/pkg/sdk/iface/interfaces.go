@@ -30,15 +30,20 @@ type PresignedPut struct {
 	URL       string
 	Headers   map[string]string
 	Key       string
+	SizeBytes int64 // dimensione firmata: il PUT deve avere esattamente questa lunghezza
 	ExpiresAt time.Time
 }
 
 // ObjectStore is a bucket-pinned S3-compatible object-storage handle.
 // Implementations are safe for concurrent use.
 type ObjectStore interface {
-	// PresignPut mints a URL the client PUTs to directly; the signer pins
-	// the content-type. Size limits are the caller's responsibility.
-	PresignPut(ctx context.Context, key, contentType string, ttl time.Duration) (*PresignedPut, error)
+	// PresignPut mints a URL the client PUTs to directly. The signer pins
+	// BOTH the content-type and the exact content-length, so a client cannot
+	// write more (or fewer) bytes than sizeBytes: the storage rejects any
+	// other length with 403 SignatureDoesNotMatch. Content-Length is
+	// deliberately absent from PresignedPut.Headers — a browser sets it from
+	// the body and scripts are not allowed to set it.
+	PresignPut(ctx context.Context, key, contentType string, sizeBytes int64, ttl time.Duration) (*PresignedPut, error)
 	// Put streams a server-assembled payload to the backend, bypassing the
 	// presigned dance. Overwrites an existing key.
 	Put(ctx context.Context, key, contentType string, body io.Reader) error
@@ -55,6 +60,34 @@ type ObjectStore interface {
 // (e.g. "avatars", "crm-photos"). One connection, many buckets.
 type ObjectStoreProvider interface {
 	Bucket(domain string) (ObjectStore, error)
+}
+
+// ObjectStat is the metadata a stored object carries.
+type ObjectStat struct {
+	SizeBytes   int64
+	ContentType string
+	// ETag is the storage's own fingerprint of the CURRENT bytes at the key.
+	// It exists so a consumer can pin the exact object it verified and detect
+	// a later overwrite: a presigned PUT URL stays valid for its whole TTL and
+	// pins only length and content-type (the payload hash is
+	// UNSIGNED-PAYLOAD), so the same URL can rewrite the key with different
+	// bytes of the same length after a verification has already passed.
+	// Comparing a recorded ETag against a fresh Stat is what turns that into a
+	// detectable event. Empty when the backend does not report one — a
+	// consumer must then degrade, never assume "unchanged".
+	ETag string
+}
+
+// ObjectInspector reads back a stored object's metadata and a byte range of
+// its content. It is an OPTIONAL capability, obtained with a type assert on
+// an ObjectStore — the same shape as blob.ObjectDownloadPresigner. A consumer
+// that needs it and does not find it must fail closed (503), never accept
+// unverified content.
+type ObjectInspector interface {
+	Stat(ctx context.Context, key string) (ObjectStat, error)
+	// GetRange returns length bytes starting at offset. A length that runs
+	// past the end returns what exists without erroring.
+	GetRange(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -366,6 +399,19 @@ type NotificationRequest struct {
 	BodyHTML       string
 	IdempotencyKey string
 	Metadata       map[string]any
+	// TrackingContactRef is an opaque per-recipient reference an email-tracking
+	// rewriter (wired via EmailTrackingRewriterSetter) can use to attribute
+	// engagement. Core gives it no meaning; ignored when no rewriter is wired.
+	TrackingContactRef string
+	// UnsubscribeContext is an opaque producer context stored on the unsubscribe
+	// token and handed back to a MarketingUnsubscribeSink on consume (e.g. a
+	// campaign/run ref for per-campaign unsubscribe attribution). Ignored by core.
+	UnsubscribeContext string
+	// Sender optionally names the sender profile (slug) that must carry this
+	// message, bypassing category routing — allowed only when the profile's
+	// allowed_types contains this request's Type (ADR-0021). Unknown,
+	// ineligible, or malformed slugs fail the send; there is no fallback.
+	Sender string
 }
 
 type TemplatedNotificationRequest struct {
@@ -378,6 +424,19 @@ type TemplatedNotificationRequest struct {
 	Data           map[string]any
 	IdempotencyKey string
 	Metadata       map[string]any
+	// TrackingContactRef is an opaque per-recipient reference an email-tracking
+	// rewriter (wired via EmailTrackingRewriterSetter) can use to attribute
+	// engagement. Core gives it no meaning; ignored when no rewriter is wired.
+	TrackingContactRef string
+	// UnsubscribeContext is an opaque producer context stored on the unsubscribe
+	// token and handed back to a MarketingUnsubscribeSink on consume (e.g. a
+	// campaign/run ref for per-campaign unsubscribe attribution). Ignored by core.
+	UnsubscribeContext string
+	// Sender optionally names the sender profile (slug) that must carry this
+	// message, bypassing category routing — allowed only when the profile's
+	// allowed_types contains this request's Type (ADR-0021). Unknown,
+	// ineligible, or malformed slugs fail the send; there is no fallback.
+	Sender string
 }
 
 type NotificationResult struct {
@@ -402,11 +461,47 @@ type NotificationSender interface {
 	SendTemplated(ctx context.Context, req TemplatedNotificationRequest) (*NotificationResult, error)
 }
 
+// Sentinel errors for explicit sender-profile selection (ADR-0021). Every
+// consumer of Sender maps THESE via errors.Is, never a notification-internal
+// error — the notification module's own sentinels stay unexported from this
+// seam.
+var (
+	// ErrSenderInvalid: the Sender slug fails grammar or the length bound,
+	// before any profile lookup is attempted — or the profile that would
+	// carry the send is not admissible for it at all. The second case exists
+	// for one rule today: a marketing send whose sender cannot carry an RFC
+	// 8058 one-click unsubscribe, which the notification module refuses
+	// rather than delivers, at save time and again at dispatch.
+	ErrSenderInvalid = errors.New("sender slug malformed")
+	// ErrSenderNotFound: a grammar-valid slug names no configured profile.
+	ErrSenderNotFound = errors.New("sender profile not found")
+	// ErrSenderNotEligible: the profile exists but its allowed_types does not
+	// contain the request's Type.
+	ErrSenderNotEligible = errors.New("sender profile not eligible for this send type")
+	// ErrSenderNotConfigured: the profile is eligible but its driver is
+	// unregistered or its required fields are incomplete.
+	ErrSenderNotConfigured = errors.New("sender profile not configured")
+	// ErrNoSenderForCategory: Sender was empty (category routing) and no
+	// profile pattern matches the category.
+	ErrNoSenderForCategory = errors.New("no sender profile routes this category")
+	// ErrSenderUnavailable: the sender configuration/directory plane itself
+	// could not be read — distinct from every error above, none of which was
+	// actually evaluated.
+	ErrSenderUnavailable = errors.New("sender configuration unavailable")
+)
+
 // CategoryConfiguredChecker is an OPTIONAL companion to NotificationSender
 // (ADR-0019 D7). With sender profiles routed by category, IsConfigured's
 // single boolean is wrong in both directions for a caller about to send one
 // category; this answers for that category. A sender that does not
 // implement it keeps working — IsConfiguredForCategory falls back.
+//
+// It answers about the CATEGORY axis only, and there is no type axis in the
+// question: a true here does not promise that a MARKETING send of that
+// category would go out, because a marketing send additionally has to be
+// able to carry a one-click unsubscribe. A caller guarding a marketing send
+// must ask SenderDirectory.PreflightDelivery, which takes the send type,
+// rather than treating this boolean as a pre-send guard.
 type CategoryConfiguredChecker interface {
 	IsConfiguredFor(ctx context.Context, category string) bool
 }
@@ -423,6 +518,34 @@ func IsConfiguredForCategory(ctx context.Context, s NotificationSender, category
 		return c.IsConfiguredFor(ctx, category)
 	}
 	return s.IsConfigured(ctx)
+}
+
+// SenderInfo is the identity-only view of one configured sender profile
+// (ADR-0021 D6). Slug, Label, Provider, FromAddress — never a secret, host,
+// or username: a caller listing eligible senders for a UI picker must not
+// receive anything from the transport side of a profile.
+type SenderInfo struct {
+	Slug, Label, Provider, FromAddress string
+	Ready                              bool // preflight passes now
+}
+
+// SenderDirectory is an OPTIONAL companion to NotificationSender (ADR-0021
+// D6), mirroring the CategoryConfiguredChecker idiom above: asserted from
+// the same registered ServiceNotificationSender object, no new ServiceKey.
+type SenderDirectory interface {
+	// ListEligibleSenders returns every profile whose allowed_types contains
+	// typ, with Ready computed per profile. Identity only — no secrets,
+	// hosts, usernames. A directory read that cannot reach configuration
+	// returns ErrSenderUnavailable, never an empty list.
+	ListEligibleSenders(ctx context.Context, typ string) ([]SenderInfo, error)
+
+	// PreflightDelivery preflights the whole delivery path a send would
+	// take:
+	//   sender == "": category routing — Resolve(category, typ) → usable
+	//                 driver (ErrNoSenderForCategory when nothing routes it);
+	//   sender != "": grammar → BySlug → allowed_types → usable driver.
+	// Returns nil or one of the Err* sentinels above.
+	PreflightDelivery(ctx context.Context, sender, category, typ string) error
 }
 
 // ---------------------------------------------------------------------------
@@ -1399,3 +1522,84 @@ type CRMActivityInput struct {
 type CRMActivitySink interface {
 	RecordActivity(ctx context.Context, in CRMActivityInput) error
 }
+
+// OutboundEmail is the input an EmailTrackingRewriter receives: the rendered
+// HTML, the recipient address, the per-send message id (used as a nonce), and
+// the opaque ContactRef the producer set on the request.
+type OutboundEmail struct {
+	BodyHTML         string
+	RecipientAddress string
+	MessageUUID      string
+	ContactRef       string
+}
+
+// EmailTrackingRewriter rewrites a fully-rendered outbound HTML email body just
+// before transport — e.g. to inject an open-tracking pixel and rewrite links.
+// Returns the (possibly) modified HTML. Wired post-construction via
+// EmailTrackingRewriterSetter so core notification never imports the addon that
+// implements it (the AuditSink/KMSProvider precedent).
+type EmailTrackingRewriter interface {
+	RewriteOutboundEmail(ctx context.Context, in OutboundEmail) string
+}
+
+// EmailTrackingRewriterSetter is implemented by the notification service so an
+// addon can push its rewriter in at boot, probed via
+// module.GetTyped[iface.EmailTrackingRewriterSetter].
+type EmailTrackingRewriterSetter interface {
+	SetEmailTrackingRewriter(EmailTrackingRewriter)
+}
+
+// MarketingUnsubscribeSink receives the durable fact that an address opted
+// out, so a consumer can mirror it into its own consent store and attribute
+// it (via the opaque context the producer set on the send). Wired via
+// MarketingUnsubscribeSinkSetter — core notification never imports the
+// module that implements it.
+//
+// It returns an error on purpose: the core retries a failed sink through
+// its reconciler, and a sink that swallowed its own failures made that
+// impossible — the opt-out would be durable in core and silently missing
+// downstream.
+type MarketingUnsubscribeSink interface {
+	OnMarketingUnsubscribe(ctx context.Context, address, category, refContext string) error
+}
+
+// MarketingUnsubscribeSinkSetter is implemented by the notification service so an
+// addon can push its sink in at boot, probed via
+// module.GetTyped[iface.MarketingUnsubscribeSinkSetter] on ServiceNotificationSender.
+type MarketingUnsubscribeSinkSetter interface {
+	SetMarketingUnsubscribeSink(MarketingUnsubscribeSink)
+}
+
+// TemplateView is a read projection of a notification template (campaign preview).
+type TemplateView struct {
+	TemplateID string
+	Locale     string
+	Subject    string
+	BodyHTML   string
+	BodyText   string
+}
+
+// Template sentinels returned by the notification service's owner-scoped
+// template methods. A consumer maps them with errors.Is; the service never
+// leaks a notification-internal or repository error type across the boundary
+// — the same rule the sender family above follows (ADR-0021).
+var (
+	// ErrTemplateOwnerRequired is returned by every owner-scoped template
+	// method called with a context that carries no tenant. There is no
+	// "global" mode on purpose: a template written without an owner would be
+	// readable by every tenant.
+	ErrTemplateOwnerRequired = errors.New("notification: template owner required (no tenant in ctx)")
+	// ErrTemplateExists is returned by CreateTemplate when the ctx tenant
+	// already owns (templateID, locale). Create never overwrites.
+	ErrTemplateExists = errors.New("notification: template exists")
+	// ErrTemplateIDInvalid is returned when a template id (on a write) or a
+	// delete prefix does not match `<segment>(:<segment>)*:<uuid>`. One
+	// grammar governs both ends on purpose: DeleteTemplatesByPrefix is the
+	// only way to remove an owned template, so an id it could not name would
+	// be a row no surface can ever delete.
+	ErrTemplateIDInvalid = errors.New("notification: template id must be <segment>(:<segment>)*:<uuid>")
+	// ErrTemplateNotFound is returned by GetTemplate when the ctx tenant owns
+	// no such (templateID, locale). A system template of that id does not
+	// satisfy the read: only SendTemplated falls back to system templates.
+	ErrTemplateNotFound = errors.New("notification: template not found")
+)

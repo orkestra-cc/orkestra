@@ -37,6 +37,12 @@ type EmailMessage struct {
 	// exists at the chokepoint and is what MailUp's CampaignCode needs; the
 	// smtp and noop drivers ignore it.
 	Category string
+
+	// Headers carries extra message headers (e.g. RFC 8058's
+	// List-Unsubscribe / List-Unsubscribe-Post) for the driver to place on
+	// the wire in its own idiom. Building these is not this type's job —
+	// it only carries what the chokepoint decided to send.
+	Headers map[string]string
 }
 
 // ProfileRequirement names one sub-field a driver cannot send without.
@@ -52,6 +58,15 @@ type EmailDriver interface {
 	// so the save-time gate and the runtime check cannot drift.
 	Requires() []ProfileRequirement
 	Send(ctx context.Context, p SenderProfile, msg EmailMessage) error
+	// Capabilities reports what this driver can guarantee about a send.
+	Capabilities() DriverCapabilities
+}
+
+// Capabilities reports what this driver can guarantee. ListUnsubscribeHeaders
+// means the driver actually puts List-Unsubscribe and List-Unsubscribe-Post
+// on the wire — not that it accepts them and may drop them silently.
+type DriverCapabilities struct {
+	ListUnsubscribeHeaders bool
 }
 
 // RequirementView selects which requirements ValidateProfile enforces.

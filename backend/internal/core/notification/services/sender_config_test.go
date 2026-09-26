@@ -83,14 +83,28 @@ func TestDecodeSenderProfiles_StaleEnumValueIsPreservedNotRejected(t *testing.T)
 	}
 }
 
+func TestDecodeSenderProfiles_AllowedTypes(t *testing.T) {
+	values := map[string]string{
+		"email.senders.__items":            "camp",
+		"email.senders.camp.__label":       "Camp",
+		"email.senders.camp.provider":      "noop",
+		"email.senders.camp.allowed_types": "marketing",
+	}
+	got, err := DecodeSenderProfiles(values, nil)
+	if err != nil || len(got) != 1 || len(got[0].AllowedTypes) != 1 || got[0].AllowedTypes[0] != "marketing" {
+		t.Fatalf("got %+v err %v", got, err)
+	}
+}
+
 func TestSenderItems_DeclarationIsValid(t *testing.T) {
 	field := module.ConfigField{Key: SendersField, Label: "Sender profiles", Type: module.FieldRecordList, Items: SenderItems()}
 	if err := module.ValidateConfigDeclarations([]module.ConfigField{field}, nil); err != nil {
 		t.Fatal(err)
 	}
-	// Every sub-field key is one SenderProfile.Field understands (or categories).
+	// Every sub-field key is one SenderProfile.Field understands (or the
+	// non-scalar list fields, categories and allowed_types).
 	for _, it := range SenderItems() {
-		if it.Key == SubCategories {
+		if it.Key == SubCategories || it.Key == SubAllowedTypes {
 			continue
 		}
 		var p SenderProfile

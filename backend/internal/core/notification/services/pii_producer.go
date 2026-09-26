@@ -14,8 +14,12 @@ import (
 // subject's delivered-message history (notification_messages) and per-category
 // delivery preferences (notification_preferences). Suppressions are keyed by
 // email address, not userUUID, so they ride the auth/email erasure path rather
-// than this producer. Queries hit the collections directly (the module owns
-// them) and are deliberately cross-tenant by data-subject.
+// than this producer. notification_marketing_optouts is a second address-keyed
+// exclusion, and it is retained past erasure by design, the same reasoning a
+// suppression record carries: erasing it would let marketing resume to an
+// address that asked it to stop (see the module's CLAUDE.md GDPR/DSR entry).
+// Queries hit the collections directly (the module owns them) and are
+// deliberately cross-tenant by data-subject.
 type piiProducer struct {
 	db *mongo.Database
 }
