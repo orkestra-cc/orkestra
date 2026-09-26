@@ -22,6 +22,7 @@ Durable, dated records of architectural decisions that shape Orkestra. One file 
 | [0017](0017-session-lifetime-and-token-retention.md) | Absolute session lifetime, single-sourced token TTL, and auth retention | Accepted | 2026-08-21 |
 | [0019](0019-notification-multi-sender.md) | Multi-sender email delivery (sender profiles, category routing, driver seam) | Accepted | 2026-08-26 |
 | [0020](0020-bearer-only-require-auth.md) | RequireAuth is bearer-only; refresh-token rotation only through explicit refresh endpoints | Accepted | 2026-08-29 |
+| [0021](0021-explicit-sender-selection.md) | Explicit per-send sender selection under operator policy | Accepted | 2026-09-11 |
 
 ## Numbering across the fork chain
 
@@ -31,7 +32,7 @@ top of the ones it inherits, so a number this index skips is not free — it has
 been claimed downstream, and reusing it here would collide on the next sync.
 
 Before allocating a number, check the highest number in use across the chain, not
-just the highest in this table. Gaps here (0013, 0015, 0016) are downstream ADRs
+just the highest in this table. Gaps here (0013, 0015, 0016, 0018) are downstream ADRs
 that upstream never sees.
 
 ## Format

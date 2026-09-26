@@ -142,6 +142,7 @@ export interface AppPaths {
   advanceSelect: string;
   datePicker: string;
   editor: string;
+  markdownField: string;
   emojiButton: string;
   fileUploader: string;
   inputMask: string;
@@ -174,6 +175,7 @@ export interface AppPaths {
   calendarExample: string;
   cards: string;
   statCards: string;
+  exportFormatMenu: string;
   secretOnceDisplay: string;
   bootstrapCarousel: string;
   slickCarousel: string;
@@ -282,6 +284,7 @@ export interface AppPaths {
   refComponentsCalendar: string;
   refComponentsCards: string;
   refComponentsStatCards: string;
+  refComponentsExportFormatMenu: string;
   refComponentsSecretOnceDisplay: string;
   refComponentsCarouselBootstrap: string;
   refComponentsCarouselSlick: string;
@@ -329,6 +332,7 @@ export interface AppPaths {
   refFormsAdvanceSelect: string;
   refFormsDatePicker: string;
   refFormsEditor: string;
+  refFormsMarkdownField: string;
   refFormsEmojiButton: string;
   refFormsFileUploader: string;
   refFormsInputMask: string;
@@ -472,6 +476,7 @@ const paths: AppPaths = {
   advanceSelect: `/${rootPaths.formsRoot}/${rootPaths.advanceFormsRoot}/advance-select`,
   datePicker: `/${rootPaths.formsRoot}/${rootPaths.advanceFormsRoot}/date-picker`,
   editor: `/${rootPaths.formsRoot}/${rootPaths.advanceFormsRoot}/editor`,
+  markdownField: `/${rootPaths.formsRoot}/${rootPaths.advanceFormsRoot}/markdown-field`,
   emojiButton: `/${rootPaths.formsRoot}/${rootPaths.advanceFormsRoot}/emoji-button`,
   fileUploader: `/${rootPaths.formsRoot}/${rootPaths.advanceFormsRoot}/file-uploader`,
   inputMask: `/${rootPaths.formsRoot}/${rootPaths.advanceFormsRoot}/input-mask`,
@@ -504,6 +509,7 @@ const paths: AppPaths = {
   calendarExample: `/${rootPaths.componentsRoot}/calendar`,
   cards: `/${rootPaths.componentsRoot}/cards`,
   statCards: `/${rootPaths.componentsRoot}/stat-cards`,
+  exportFormatMenu: `/${rootPaths.componentsRoot}/export-format-menu`,
   secretOnceDisplay: `/${rootPaths.componentsRoot}/secret-once-display`,
   bootstrapCarousel: `/${rootPaths.componentsRoot}/${rootPaths.carouselRoot}/bootstrap`,
   slickCarousel: `/${rootPaths.componentsRoot}/${rootPaths.carouselRoot}/slick`,
@@ -613,6 +619,7 @@ const paths: AppPaths = {
   refComponentsCalendar: `/${rootPaths.referenceRoot}/components/calendar`,
   refComponentsCards: `/${rootPaths.referenceRoot}/components/cards`,
   refComponentsStatCards: `/${rootPaths.referenceRoot}/components/stat-cards`,
+  refComponentsExportFormatMenu: `/${rootPaths.referenceRoot}/components/export-format-menu`,
   refComponentsSecretOnceDisplay: `/${rootPaths.referenceRoot}/components/secret-once-display`,
   refComponentsCarouselBootstrap: `/${rootPaths.referenceRoot}/components/carousel/bootstrap`,
   refComponentsCarouselSlick: `/${rootPaths.referenceRoot}/components/carousel/slick`,
@@ -660,6 +667,7 @@ const paths: AppPaths = {
   refFormsAdvanceSelect: `/${rootPaths.referenceRoot}/forms/advance/advance-select`,
   refFormsDatePicker: `/${rootPaths.referenceRoot}/forms/advance/date-picker`,
   refFormsEditor: `/${rootPaths.referenceRoot}/forms/advance/editor`,
+  refFormsMarkdownField: `/${rootPaths.referenceRoot}/forms/advance/markdown-field`,
   refFormsEmojiButton: `/${rootPaths.referenceRoot}/forms/advance/emoji-button`,
   refFormsFileUploader: `/${rootPaths.referenceRoot}/forms/advance/file-uploader`,
   refFormsInputMask: `/${rootPaths.referenceRoot}/forms/advance/input-mask`,

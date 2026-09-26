@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -14,6 +15,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	smithy "github.com/aws/smithy-go"
+
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // isNotFound returns true for the 404 / NoSuchKey / NotFound family
@@ -120,15 +123,15 @@ func NewS3(ctx context.Context, cfg S3Config) (Store, error) {
 	// It is also a SEPARATE client for a second reason: response checksum
 	// validation must be off on it. Since aws-sdk-go-v2 defaults
 	// ResponseChecksumValidation to WhenSupported, a presigned GET carries
-	// `x-amz-checksum-mode` inside X-Amz-SignedHeaders — and a signed header
-	// is one the recipient MUST send. The recipients here are a browser
-	// opening the URL and a plain fetch of it; neither sends it, so the
-	// signature never matches and every presigned download answers 403
+	// `x-amz-checksum-mode` inside X-Amz-SignedHeaders — a header the
+	// recipient is then required to send. A browser opening the URL, or any
+	// plain fetch of it, sends no such header, so the signature never
+	// matches and EVERY presigned download answers 403
 	// SignatureDoesNotMatch. Response checksums are the caller's own
 	// integrity check, not an authorization control, so dropping them here
 	// costs nothing; keeping them makes presigned GETs unusable by the only
-	// clients they exist for. The direct-op client above keeps validation on,
-	// because it sends the header itself.
+	// clients they exist for. The direct-op client above keeps validation
+	// on, because it sends the header itself.
 	presignEndpoint := cfg.Endpoint
 	if cfg.PublicEndpoint != "" {
 		presignEndpoint = cfg.PublicEndpoint
@@ -222,20 +225,24 @@ func (s *s3Store) applyCORS(ctx context.Context) {
 	}
 }
 
-func (s *s3Store) PresignPut(ctx context.Context, key, contentType string, ttl time.Duration) (*PresignedPut, error) {
+func (s *s3Store) PresignPut(ctx context.Context, key, contentType string, sizeBytes int64, ttl time.Duration) (*PresignedPut, error) {
 	if key == "" {
 		return nil, errors.New("blob: key is required")
 	}
 	if contentType == "" {
 		return nil, errors.New("blob: contentType is required")
 	}
+	if sizeBytes <= 0 {
+		return nil, errors.New("blob: sizeBytes must be positive")
+	}
 	if ttl <= 0 {
 		ttl = 10 * time.Minute
 	}
 	in := &s3.PutObjectInput{
-		Bucket:      aws.String(s.bucket),
-		Key:         aws.String(key),
-		ContentType: aws.String(contentType),
+		Bucket:        aws.String(s.bucket),
+		Key:           aws.String(key),
+		ContentType:   aws.String(contentType),
+		ContentLength: aws.Int64(sizeBytes),
 	}
 	req, err := s.presigner.PresignPutObject(ctx, in, func(opts *s3.PresignOptions) {
 		opts.Expires = ttl
@@ -250,6 +257,7 @@ func (s *s3Store) PresignPut(ctx context.Context, key, contentType string, ttl t
 		URL:       req.URL,
 		Headers:   headers,
 		Key:       key,
+		SizeBytes: sizeBytes,
 		ExpiresAt: time.Now().Add(ttl),
 	}, nil
 }
@@ -358,4 +366,36 @@ func (s *s3Store) Exists(ctx context.Context, key string) (bool, error) {
 		return false, nil
 	}
 	return false, fmt.Errorf("blob: head %q: %w", key, err)
+}
+
+func (s *s3Store) Stat(ctx context.Context, key string) (iface.ObjectStat, error) {
+	out, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(s.bucket), Key: aws.String(key),
+	})
+	if err != nil {
+		return iface.ObjectStat{}, fmt.Errorf("blob: stat: %w", err)
+	}
+	return iface.ObjectStat{
+		SizeBytes:   aws.ToInt64(out.ContentLength),
+		ContentType: aws.ToString(out.ContentType),
+		// S3 quotes the ETag ("\"d41d8…\""). The quotes are part of the HTTP
+		// header grammar, not of the identity, and a stored value round-trips
+		// more cleanly without them — the comparison is symmetric either way
+		// because both sides come from this same call.
+		ETag: strings.Trim(aws.ToString(out.ETag), `"`),
+	}, nil
+}
+
+func (s *s3Store) GetRange(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error) {
+	if length <= 0 {
+		return nil, errors.New("blob: length must be positive")
+	}
+	rng := fmt.Sprintf("bytes=%d-%d", offset, offset+length-1)
+	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket), Key: aws.String(key), Range: aws.String(rng),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("blob: get range: %w", err)
+	}
+	return out.Body, nil
 }

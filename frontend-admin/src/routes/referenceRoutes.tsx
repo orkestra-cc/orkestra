@@ -26,6 +26,9 @@ const CalendarExample = lazy(
 );
 const Cards = lazy(() => import('reference/components/ui/Cards'));
 const StatCards = lazy(() => import('reference/components/ui/StatCards'));
+const ExportFormatMenus = lazy(
+  () => import('reference/components/ui/ExportFormatMenus')
+);
 const SecretOnceDisplayExample = lazy(
   () => import('reference/components/ui/SecretOnceDisplayExample')
 );
@@ -186,6 +189,7 @@ import Inbox from 'reference/app-examples/email/inbox/Inbox';
 import Rating from 'reference/components/forms/Rating';
 import AdvanceSelect from 'reference/components/forms/AdvanceSelect';
 import Editor from 'reference/components/forms/Editor';
+import MarkdownFieldShowcase from 'reference/components/forms/MarkdownField';
 import Chat from 'reference/app-examples/chat/Chat';
 import DraggableExample from 'reference/components/misc/DraggableExample';
 import HowToUse from 'reference/charts/echarts/HowToUse';
@@ -380,6 +384,7 @@ export function getReferenceRoutes(): RouteObject[] {
             { path: paths.advanceSelect, element: <AdvanceSelect /> },
             { path: paths.datePicker, element: <DatePicker /> },
             { path: paths.editor, element: <Editor /> },
+            { path: paths.markdownField, element: <MarkdownFieldShowcase /> },
             { path: paths.emojiButton, element: <EmojiPickerExample /> },
             { path: paths.fileUploader, element: <FileUploader /> },
             { path: paths.inputMask, element: <InputMaskExample /> },
@@ -574,6 +579,10 @@ export function getReferenceRoutes(): RouteObject[] {
         },
         { path: paths.cards, element: <Cards /> },
         { path: paths.statCards, element: <StatCards /> },
+        {
+          path: paths.exportFormatMenu,
+          element: <ExportFormatMenus />
+        },
         {
           path: paths.secretOnceDisplay,
           element: <SecretOnceDisplayExample />
@@ -872,6 +881,10 @@ export function getReferenceRoutes(): RouteObject[] {
             { path: 'cards', element: <Cards /> },
             { path: 'stat-cards', element: <StatCards /> },
             {
+              path: 'export-format-menu',
+              element: <ExportFormatMenus />
+            },
+            {
               path: 'secret-once-display',
               element: <SecretOnceDisplayExample />
             },
@@ -953,6 +966,7 @@ export function getReferenceRoutes(): RouteObject[] {
                 { path: 'advance-select', element: <AdvanceSelect /> },
                 { path: 'date-picker', element: <DatePicker /> },
                 { path: 'editor', element: <Editor /> },
+                { path: 'markdown-field', element: <MarkdownFieldShowcase /> },
                 { path: 'emoji-button', element: <EmojiPickerExample /> },
                 { path: 'file-uploader', element: <FileUploader /> },
                 { path: 'input-mask', element: <InputMaskExample /> },

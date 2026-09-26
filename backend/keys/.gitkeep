@@ -1,0 +1,22 @@
+# Do not delete this file, and do not delete this directory.
+#
+# It is not a placeholder for keys: the JWT signing keys live in `docker/keys/`
+# and are mounted here. `docker-compose.{dev,staging}.yml` bind-mounts
+# `../backend:/app` AND, nested inside it, `./keys:/app/keys` — so THIS
+# directory is the host-side mountpoint of that second mount.
+#
+# Docker creates it at container-create time, empty and untracked, which made it
+# invisible to `git status` (git does not track empty directories) and fair game
+# for anything that cleans untracked paths: `git clean -fd`, `git stash -u`, an
+# editor's "clean workspace". Remove it while the stack is up and the nested
+# mount is torn down inside the running container's namespace — `docker inspect`
+# still lists the mount, because it reads the config, but `/app/keys` is gone.
+#
+# The backend then keeps serving until its next restart (AIR rebuilds within
+# minutes) and comes back with `JWT KEYS NOT LOADED - AUTHENTICATION WILL NOT
+# WORK!`: `/health` and `/v1/auth/operator/{policy,providers}` still answer 200
+# while `GET /v1/auth/session` answers 503, because only the session path needs
+# to sign. A `docker restart` does not fix it — the mount is re-applied only
+# when the container is recreated (`up -d --force-recreate backend`).
+#
+# Tracking this file pins the mountpoint so no git operation can take it away.

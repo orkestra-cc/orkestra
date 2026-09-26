@@ -48,6 +48,113 @@ func TestMailUpDriver_Requires(t *testing.T) {
 	}
 }
 
+// TestMailUpDriver_Capabilities: accepting ExtendedHeaders is not the same
+// as delivering them — MailUp adds only its own approved headers, and
+// RFC 8058 additionally needs DKIM coverage this driver cannot yet prove.
+func TestMailUpDriver_Capabilities(t *testing.T) {
+	if NewMailUpDriver(nil).Capabilities().ListUnsubscribeHeaders {
+		t.Fatal("mailup must report ListUnsubscribeHeaders=false until a real send proves otherwise")
+	}
+}
+
+func TestMailUpDriver_MapsHeadersToExtendedHeaders(t *testing.T) {
+	var got mailUpRequest
+	d, _ := mailUpServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"Status":"done","Code":"0","Message":"","Data":{"Id":42}}`))
+	})
+	err := d.Send(context.Background(), mailUpProfile(), EmailMessage{
+		To: "alice@example.com", Subject: "Hi", BodyText: "text",
+		Headers: map[string]string{
+			"List-Unsubscribe":      "<https://api.example/v1/notifications/unsubscribe?token=abc>",
+			"List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	want := []mailUpExtendedHeader{
+		{N: "List-Unsubscribe", V: "<https://api.example/v1/notifications/unsubscribe?token=abc>"},
+		{N: "List-Unsubscribe-Post", V: "List-Unsubscribe=One-Click"},
+	}
+	if len(got.ExtendedHeaders) != len(want) {
+		t.Fatalf("ExtendedHeaders = %+v, want %+v", got.ExtendedHeaders, want)
+	}
+	for i, h := range want {
+		if got.ExtendedHeaders[i] != h {
+			t.Fatalf("ExtendedHeaders[%d] = %+v, want %+v (order must be deterministic)", i, got.ExtendedHeaders[i], h)
+		}
+	}
+}
+
+func TestMailUpDriver_OmitsExtendedHeadersWhenNoneSet(t *testing.T) {
+	var raw json.RawMessage
+	d, _ := mailUpServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"Status":"done","Code":"0"}`))
+	})
+	if err := d.Send(context.Background(), mailUpProfile(), EmailMessage{To: "a@example.com"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if strings.Contains(string(raw), "ExtendedHeaders") {
+		t.Fatalf("ExtendedHeaders must be omitted from the payload when no headers are set: %s", raw)
+	}
+}
+
+// TestMailUpDriver_TextOnlyBodyOmitsHtmlKey guards against regressing to an
+// empty-but-present Html part: a text-only message (e.g. SendTest's
+// EmailMessage{To, Subject, BodyText} with no HTML) must not put an Html key
+// on the wire at all, or MailUp serves clients an empty HTML alternative next
+// to the real Text part and the recipient sees a blank email.
+func TestMailUpDriver_TextOnlyBodyOmitsHtmlKey(t *testing.T) {
+	var raw map[string]json.RawMessage
+	d, _ := mailUpServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"Status":"done","Code":"0"}`))
+	})
+	err := d.Send(context.Background(), mailUpProfile(), EmailMessage{
+		To: "alice@example.com", Subject: "Hi", BodyText: "plain text only",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if _, present := raw["Html"]; present {
+		t.Fatalf("Html key must be omitted from the payload for a text-only message, got: %v", raw)
+	}
+	var text string
+	if err := json.Unmarshal(raw["Text"], &text); err != nil || text != "plain text only" {
+		t.Fatalf("Text = %s, err=%v, want %q", raw["Text"], err, "plain text only")
+	}
+}
+
+// TestMailUpDriver_HTMLBodyIncludesHtmlKey is the symmetric case: when the
+// message carries an HTML body, the Html key must still be sent with that
+// body, unchanged from before the omitempty fix.
+func TestMailUpDriver_HTMLBodyIncludesHtmlKey(t *testing.T) {
+	var raw map[string]json.RawMessage
+	d, _ := mailUpServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"Status":"done","Code":"0"}`))
+	})
+	err := d.Send(context.Background(), mailUpProfile(), EmailMessage{
+		To: "alice@example.com", Subject: "Hi", BodyHTML: "<p>html</p>",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if _, present := raw["Html"]; !present {
+		t.Fatalf("Html key must be present when the message carries an HTML body, got: %v", raw)
+	}
+	var html mailUpHTML
+	if err := json.Unmarshal(raw["Html"], &html); err != nil || html.Body != "<p>html</p>" {
+		t.Fatalf("Html.Body = %+v, err=%v, want Body=%q", html, err, "<p>html</p>")
+	}
+}
+
 func TestMailUpDriver_RequestShapeAndSuccess(t *testing.T) {
 	var got mailUpRequest
 	var method, path, ctype, auth string

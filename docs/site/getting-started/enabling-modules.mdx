@@ -21,6 +21,10 @@ The registry resolves dependencies automatically — using a fork's modules as a
 
 The change takes effect **immediately** — no container restart required. Background jobs start, routes unlock, and the navigation menu updates on the next page load.
 
+## Configuration changes
+
+Saving a module's **configuration** is not the same as toggling it. A module that declares `HotReloadConfig()` picks the new values up at once; every other module reads its configuration once, in `Init()`, and keeps running on the previous values until the backend restarts. The API records that gap as `needsRestart` on the module document, and the module detail page shows a **Restart required** strip for as long as it is set. The flag clears on the next boot.
+
 ## What persists
 
 Module state lives in the `module_configs` collection in MongoDB. On every subsequent boot, the registry honors what you set here. On the **first** boot of a brand-new install the document is seeded from each module's `ConfigSchema().EnvVar` and its `EnabledByDefault` value.

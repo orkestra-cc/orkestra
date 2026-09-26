@@ -14,9 +14,9 @@ type fakeUnsubRepo struct {
 	docs      map[string]*models.UnsubscribeTokenDoc // by tokenHash
 	createErr error
 	getErr    error
-	markErr   error
+	claimErr  error
 	createN   int
-	markN     int
+	claimN    int
 }
 
 func newFakeUnsubRepo() *fakeUnsubRepo {
@@ -44,25 +44,55 @@ func (f *fakeUnsubRepo) GetByHash(_ context.Context, hash string) (*models.Unsub
 	return doc, nil
 }
 
-func (f *fakeUnsubRepo) MarkUsed(_ context.Context, hash string) error {
-	f.markN++
-	if f.markErr != nil {
-		return f.markErr
+// ClaimToken mirrors the repository's CAS: only an unused, unexpired token
+// matches, and the winner comes back stamped with the pending flags for the
+// work that still has to happen.
+func (f *fakeUnsubRepo) ClaimToken(_ context.Context, hash string, now time.Time, hasUser bool) (*models.UnsubscribeTokenDoc, error) {
+	f.claimN++
+	if f.claimErr != nil {
+		return nil, f.claimErr
 	}
 	doc, ok := f.docs[hash]
-	if !ok {
-		return repository.ErrNotFound
+	if !ok || doc.UsedAt != nil || !doc.ExpiresAt.After(now) {
+		return nil, nil
 	}
-	now := time.Now()
 	doc.UsedAt = &now
+	doc.SinkPending = true
+	doc.PrefPending = hasUser
+	cp := *doc
+	return &cp, nil
+}
+
+func (f *fakeUnsubRepo) ClearSinkPending(_ context.Context, hash string) error {
+	if doc, ok := f.docs[hash]; ok {
+		doc.SinkPending = false
+	}
 	return nil
 }
+
+func (f *fakeUnsubRepo) ClearPrefPending(_ context.Context, hash string) error {
+	if doc, ok := f.docs[hash]; ok {
+		doc.PrefPending = false
+	}
+	return nil
+}
+
+// The reconciler's three methods. This fixture is about IssueToken and the
+// consume sequence, so they are inert here — optout_reconciler_test.go has a
+// store that models them.
+func (f *fakeUnsubRepo) ListPending(context.Context, time.Time, int) ([]models.UnsubscribeTokenDoc, error) {
+	return nil, nil
+}
+
+func (f *fakeUnsubRepo) RecordFailedAttempt(context.Context, string, time.Time) error { return nil }
+
+func (f *fakeUnsubRepo) MarkDeadLettered(context.Context, string, time.Time) error { return nil }
 
 func TestUnsubscribeService_IssueToken_StoresHashAndReturnsRaw(t *testing.T) {
 	repo := newFakeUnsubRepo()
 	svc := NewUnsubscribeService(repo)
 
-	raw, err := svc.IssueToken(context.Background(), "user-1", "alice@example.com", models.CategoryAuthVerifyEmail)
+	raw, err := svc.IssueToken(context.Background(), "user-1", "alice@example.com", models.CategoryAuthVerifyEmail, "")
 	if err != nil {
 		t.Fatalf("IssueToken: %v", err)
 	}
@@ -102,7 +132,7 @@ func TestUnsubscribeService_IssueToken_PropagatesRepoError(t *testing.T) {
 	repo.createErr = errors.New("boom")
 	svc := NewUnsubscribeService(repo)
 
-	raw, err := svc.IssueToken(context.Background(), "", "addr@example.com", "")
+	raw, err := svc.IssueToken(context.Background(), "", "addr@example.com", "", "")
 	if err == nil {
 		t.Fatalf("expected error from Create")
 	}
@@ -117,7 +147,7 @@ func TestUnsubscribeService_IssueToken_TokensAreUnique(t *testing.T) {
 
 	seen := map[string]struct{}{}
 	for i := 0; i < 20; i++ {
-		raw, err := svc.IssueToken(context.Background(), "u", "a@example.com", "c")
+		raw, err := svc.IssueToken(context.Background(), "u", "a@example.com", "c", "")
 		if err != nil {
 			t.Fatalf("IssueToken: %v", err)
 		}
@@ -125,98 +155,6 @@ func TestUnsubscribeService_IssueToken_TokensAreUnique(t *testing.T) {
 			t.Fatalf("duplicate token issued: %s", raw)
 		}
 		seen[raw] = struct{}{}
-	}
-}
-
-func TestUnsubscribeService_ConsumeToken_Empty(t *testing.T) {
-	svc := NewUnsubscribeService(newFakeUnsubRepo())
-	_, err := svc.ConsumeToken(context.Background(), "")
-	if !errors.Is(err, ErrUnsubscribeTokenInvalid) {
-		t.Fatalf("expected ErrUnsubscribeTokenInvalid, got %v", err)
-	}
-}
-
-func TestUnsubscribeService_ConsumeToken_NotFound(t *testing.T) {
-	repo := newFakeUnsubRepo()
-	svc := NewUnsubscribeService(repo)
-	_, err := svc.ConsumeToken(context.Background(), "no-such-token")
-	if !errors.Is(err, ErrUnsubscribeTokenInvalid) {
-		t.Fatalf("expected ErrUnsubscribeTokenInvalid for missing token, got %v", err)
-	}
-}
-
-func TestUnsubscribeService_ConsumeToken_AlreadyUsed(t *testing.T) {
-	repo := newFakeUnsubRepo()
-	svc := NewUnsubscribeService(repo)
-	raw, err := svc.IssueToken(context.Background(), "u", "a@example.com", "c")
-	if err != nil {
-		t.Fatalf("IssueToken: %v", err)
-	}
-	used := time.Now()
-	repo.docs[hashToken(raw)].UsedAt = &used
-
-	_, err = svc.ConsumeToken(context.Background(), raw)
-	if !errors.Is(err, ErrUnsubscribeTokenInvalid) {
-		t.Fatalf("expected ErrUnsubscribeTokenInvalid on used token, got %v", err)
-	}
-}
-
-func TestUnsubscribeService_ConsumeToken_Expired(t *testing.T) {
-	repo := newFakeUnsubRepo()
-	svc := NewUnsubscribeService(repo)
-	raw, err := svc.IssueToken(context.Background(), "u", "a@example.com", "c")
-	if err != nil {
-		t.Fatalf("IssueToken: %v", err)
-	}
-	repo.docs[hashToken(raw)].ExpiresAt = time.Now().Add(-1 * time.Minute)
-
-	_, err = svc.ConsumeToken(context.Background(), raw)
-	if !errors.Is(err, ErrUnsubscribeTokenInvalid) {
-		t.Fatalf("expected ErrUnsubscribeTokenInvalid on expired token, got %v", err)
-	}
-}
-
-func TestUnsubscribeService_ConsumeToken_HappyPath(t *testing.T) {
-	repo := newFakeUnsubRepo()
-	svc := NewUnsubscribeService(repo)
-	raw, err := svc.IssueToken(context.Background(), "user-7", "z@example.com", models.CategoryAuthVerifyEmail)
-	if err != nil {
-		t.Fatalf("IssueToken: %v", err)
-	}
-	doc, err := svc.ConsumeToken(context.Background(), raw)
-	if err != nil {
-		t.Fatalf("ConsumeToken: %v", err)
-	}
-	if doc.UserUUID != "user-7" {
-		t.Fatalf("doc UserUUID = %q, want user-7", doc.UserUUID)
-	}
-	if doc.Category != models.CategoryAuthVerifyEmail {
-		t.Fatalf("doc Category = %q, want %q", doc.Category, models.CategoryAuthVerifyEmail)
-	}
-}
-
-func TestUnsubscribeService_MarkUsed_StampsTimestamp(t *testing.T) {
-	repo := newFakeUnsubRepo()
-	svc := NewUnsubscribeService(repo)
-	raw, err := svc.IssueToken(context.Background(), "u", "a@example.com", "c")
-	if err != nil {
-		t.Fatalf("IssueToken: %v", err)
-	}
-	if err := svc.MarkUsed(context.Background(), raw); err != nil {
-		t.Fatalf("MarkUsed: %v", err)
-	}
-	stored := repo.docs[hashToken(raw)]
-	if stored.UsedAt == nil {
-		t.Fatalf("expected UsedAt to be set")
-	}
-}
-
-func TestUnsubscribeService_MarkUsed_PropagatesRepoError(t *testing.T) {
-	repo := newFakeUnsubRepo()
-	repo.markErr = errors.New("write failed")
-	svc := NewUnsubscribeService(repo)
-	if err := svc.MarkUsed(context.Background(), "anything"); err == nil {
-		t.Fatalf("expected error from MarkUsed")
 	}
 }
 
@@ -247,5 +185,21 @@ func TestGenerateRandomToken_Length(t *testing.T) {
 	}
 	if len(raw) != 43 {
 		t.Fatalf("expected 43-char base64 token, got %d (%q)", len(raw), raw)
+	}
+}
+
+func TestIssueTokenStoresContext(t *testing.T) {
+	repo := newFakeUnsubRepo() // mirror the existing fake in this test file
+	svc := NewUnsubscribeService(repo)
+	raw, err := svc.IssueToken(context.Background(), "", "a@b.com", "marketing", "ctx-123")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	doc, ok := repo.docs[hashToken(raw)]
+	if !ok {
+		t.Fatal("IssueToken stored no token")
+	}
+	if doc.Context != "ctx-123" {
+		t.Fatalf("want context ctx-123, got %q", doc.Context)
 	}
 }

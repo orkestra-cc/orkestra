@@ -19,10 +19,11 @@ services:
     # deployment ran 8.0.23 — and CI, which used the same floating tag, was
     # therefore testing on a different patch than the stacks ran, with nothing
     # saying so. Pinning fixed the drift; the 8.0.23 -> 8.0.29 bump that
-    # followed was taken deliberately, as an upgrade rather than a pull.
+    # followed, and 8.0.29 -> 8.0.32 after it, were taken deliberately, as
+    # upgrades rather than pulls.
     # Same-series patch upgrade: FCV stays 8.0 and no data migration runs.
     # Keep this in step with .github/workflows/backend.yml, same patch.
-    image: mongo:8.0.29
+    image: mongo:8.0.32
     container_name: ${APP_NAME}-mongodb-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
@@ -101,7 +102,7 @@ services:
     # Tech Stack tables in CLAUDE.md / backend/CLAUDE.md / backend/README.md
     # / docs/site/intro.mdx, which name this version. The Kubernetes
     # reference deploys plain redis too, so the two now agree.
-    image: redis:8.2.9-alpine
+    image: redis:8.2.10-alpine
     container_name: ${APP_NAME}-redis-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
@@ -155,18 +156,21 @@ services:
   # attachments). Speaks the AWS S3 API so the same `internal/shared/blob`
   # store works against RustFS, AWS S3, MinIO, Backblaze B2, etc.
   #
-  # Status note: RustFS 1.x is in beta — production-grade single-node
-  # mode is fine for avatars (small, regenerable from OAuth fallback);
-  # distributed mode is still under testing. Operators running at scale
-  # should swap STORAGE_ENDPOINT to a managed S3 in production.
+  # Status note: RustFS reached 1.0.0 GA — single-node mode is fine for
+  # avatars (small, regenerable from OAuth fallback). Operators running at
+  # scale should still swap STORAGE_ENDPOINT to a managed S3 in production.
   #
   # Ports: 9100 (S3 API — bumped off the MinIO/Redis-Insight default
   # 9000 to avoid host-port collisions), 9101 (admin console).
   rustfs:
     # Pinned off :latest (which drifted — a newer image 403s on the old
     # /minio/health/live path, marking the container unhealthy). This digest
-    # is RustFS v1.0.0-beta.4 and serves /health → 200. Bump deliberately.
-    image: rustfs/rustfs@sha256:f7cb98ef492fa3c3ed0dbd65df3ce2dd205c666e24e7d7234d9402c9ed1001f9
+    # is RustFS 1.0.0 (GA; the multi-arch index, replacing 1.0.0-beta.4) and
+    # serves /health → 200. Bump deliberately.
+    # 1.0.0 rejects x-amz-* headers a presigned request did not sign; the
+    # blob store signs only Content-Type (+ the exact length), so an upload
+    # that echoes the returned headers verbatim is unaffected.
+    image: rustfs/rustfs@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
     container_name: ${APP_NAME}-rustfs-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
@@ -195,10 +199,10 @@ services:
     volumes:
       - rustfs-data:/data
     healthcheck:
-      # /health returns 200 on this RustFS build; the older MinIO-compat
-      # /minio/health/live path now 403s (see the image pin above). A 200
-      # means the HTTP surface is up; bucket access is checked by the
-      # backend's blob provider (EnsureBucket) on first use.
+      # /health returns 200 on this RustFS build (beta.4 and 1.0.0 alike);
+      # the older MinIO-compat /minio/health/live path now 403s (see the
+      # image pin above). A 200 means the HTTP surface is up; bucket access
+      # is checked by the backend's blob provider (EnsureBucket) on first use.
       test: ["CMD-SHELL", "wget -q --spider http://localhost:9000/health || exit 1"]
       interval: 15s
       timeout: 5s

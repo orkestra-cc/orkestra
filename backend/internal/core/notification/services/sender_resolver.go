@@ -36,6 +36,13 @@ type SenderResolver interface {
 	Default(ctx context.Context) (SenderProfile, error)
 	// BySlug returns one profile by its slug — the explicit-sender test send.
 	BySlug(ctx context.Context, slug string) (SenderProfile, error)
+	// All returns every profile in the roster, in order — drafts included
+	// (a profile with no Categories and/or no AllowedTypes is still listed;
+	// filtering by eligibility is the caller's job). Empty roster → the
+	// synthesized legacy profile, matching Resolve/Default/BySlug (D6).
+	// Never an empty slice on success — a config read failure is an error.
+	// The SenderDirectory companion's data source (ADR-0021 D6).
+	All(ctx context.Context) ([]SenderProfile, error)
 }
 
 // hasRoutingMap reports whether any profile declares a pattern. This — not
@@ -128,4 +135,19 @@ func (r *senderResolver) BySlug(ctx context.Context, slug string) (SenderProfile
 		return cfg.Legacy, nil
 	}
 	return SenderProfile{}, ErrSenderNotFound
+}
+
+// All returns the whole roster in configuration order, drafts included. An
+// empty roster reports [cfg.Legacy] — the same D6 cutover every other
+// resolver method observes — so a caller never has to special-case "no
+// profiles configured yet" against "the roster could not be read".
+func (r *senderResolver) All(ctx context.Context) ([]SenderProfile, error) {
+	cfg := r.load(ctx)
+	if cfg.Err != nil {
+		return nil, ErrSenderConfigUnavailable
+	}
+	if len(cfg.Profiles) == 0 {
+		return []SenderProfile{cfg.Legacy}, nil
+	}
+	return cfg.Profiles, nil
 }
