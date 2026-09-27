@@ -68,6 +68,7 @@ SECRET_VARS=(
     "REDIS_PASSWORD"
     "STORAGE_SECRET_KEY"
     "RUSTFS_ROOT_PASSWORD"
+    "PDF_RENDERER_PASSWORD"
 )
 
 # --- Same-site host pairings (spec §8 follow-up #16) ---------------------

@@ -20,9 +20,11 @@ compose_env=(
   REDIS_PASSWORD=test-redis-password
   # Credentials carry no fallback in the compose files (credential-fallbacks
   # .test.sh), so a render needs the storage pair the rustfs service derives
-  # its root from.
+  # its root from, and the gotenberg service's basic-auth password
+  # (gotenberg-hardening.test.sh).
   STORAGE_ACCESS_KEY=test-access
   STORAGE_SECRET_KEY=test-secret-key-0123
+  PDF_RENDERER_PASSWORD=test-pdf-renderer-password
   OTEL_EXPORTER_OTLP_ENDPOINT=
   SENTRY_DSN_FRONTEND=
   OAUTH_TOKEN_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef

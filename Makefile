@@ -158,7 +158,7 @@ frontend-client-clean:
 .PHONY: install install-hooks fmt ci-help
 .PHONY: ci ci-all ci-mcp ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 .PHONY: mcp-check mcp-test
-.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks backend-script-tests
+.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks backend-script-tests backend-gotenberg-hardening
 .PHONY: admin-lockcheck admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-lockcheck client-typecheck client-lint client-test client-build
 .PHONY: mobile-lockcheck
@@ -275,7 +275,7 @@ mcp-test:
 
 # ---- Backend ----
 
-ci-backend: backend-script-tests backend-mongo-config backend-credential-fallbacks backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
+ci-backend: backend-script-tests backend-mongo-config backend-credential-fallbacks backend-gotenberg-hardening backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
 	@echo "Backend CI: OK"
 
 # Static gate: the compose stacks and CI must all provide a transaction-capable
@@ -290,6 +290,12 @@ backend-mongo-config:
 # facing S3 API — and nothing said so. Also pins Redis to its volume (--dir).
 backend-credential-fallbacks:
 	@docker/tests/credential-fallbacks.test.sh
+
+# Static gate: the Gotenberg sidecar (optional HTML→PDF renderer)
+# keeps its hardening — no published port, pdf-net only, chromium deny-lists
+# and IP flags on. See docker/tests/gotenberg-hardening.test.sh.
+backend-gotenberg-hardening:
+	@bash docker/tests/gotenberg-hardening.test.sh
 
 # backend-openapi-check fails if the committed openapi/enterprise.json drifted
 # from the routes in the current source — same gate as policycoverage but for

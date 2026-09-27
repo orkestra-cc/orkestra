@@ -230,6 +230,12 @@ func main() {
 		logger.Info("blob storage not configured (STORAGE_ACCESS_KEY/SECRET empty) — avatar uploads disabled")
 	}
 
+	// Optional platform PDF renderer (Gotenberg sidecar). Registered even
+	// when unreachable at boot — see registerPDFRenderer — so the platform
+	// checks surfaced below reflect live reachability, not a boot-time
+	// snapshot.
+	platformChecks := registerPDFRenderer(svcRegistry, cfg.PDFRenderer, logger)
+
 	modRegistry := module.NewModuleRegistry(logger)
 	modRegistry.SetConfigService(configService)
 	modRegistry.SetContainerManager(container.NewManager(logger))
@@ -566,6 +572,7 @@ func main() {
 	// system permission; the MFA gate on the mutation group layers on top.
 	// Operator-only — module enable/disable is a Tier-1 operator concern.
 	moduleAdminHandler := module.NewModuleAdminHandler(configService, modRegistry)
+	moduleAdminHandler.SetPlatformChecks(platformChecks)
 	if err := wireModuleAdminAudit(moduleAdminHandler, svcRegistry); err != nil {
 		log.Fatalf("Failed to wire module admin audit: %v", err)
 	}

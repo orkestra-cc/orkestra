@@ -208,6 +208,45 @@ services:
       timeout: 5s
       retries: 5
 
+  gotenberg:
+    # Optional HTML→PDF sidecar (iface.PDFRenderer). Pinned by digest, bump
+    # deliberately. No published port, no egress: it joins ONLY pdf-net
+    # (internal). The backend IS reachable from here (shared pdf-net), so the
+    # deny-list and the IP flags are required — see
+    # docker/tests/gotenberg-hardening.test.sh.
+    image: gotenberg/gotenberg:8@sha256:f29984bd1e226bf1b93ba90af06000afa8b315853e99d27b9aaa41b93f15c769
+    container_name: ${APP_NAME}-gotenberg-${ENV}
+    labels:
+      orkestra.stack: ${APP_NAME}-${ENV}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1g
+    command:
+      - gotenberg
+      - --chromium-disable-javascript=true
+      - --chromium-deny-list=^(?!file:///tmp/).*
+      - --chromium-deny-private-ips=true
+      - --chromium-deny-public-ips=true
+      - --api-download-from-max-entries=0
+      - --libreoffice-disable-routes=true
+      - --webhook-disable=true
+      - --prometheus-disable-collect=true
+      - --api-timeout=30s
+      - --api-enable-basic-auth=true
+    environment:
+      GOTENBERG_API_BASIC_AUTH_USERNAME: ${PDF_RENDERER_USER:-orkestra}
+      GOTENBERG_API_BASIC_AUTH_PASSWORD: ${PDF_RENDERER_PASSWORD:?PDF_RENDERER_PASSWORD is not set — run make init}
+    networks:
+      - pdf-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
 volumes:
   mongodb-data:
     driver: local
@@ -217,3 +256,7 @@ volumes:
     driver: local
   rustfs-data:
     driver: local
+
+networks:
+  pdf-net:
+    internal: true

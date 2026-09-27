@@ -389,6 +389,20 @@ type Recipient struct {
 	Name     string
 }
 
+// Attachment is a file carried by a NotificationRequest. Data is the raw
+// content (never base64). The notification module re-sanitizes Filename and
+// persists only name, type and size — never the bytes.
+type Attachment struct {
+	Filename    string
+	ContentType string
+	Data        []byte
+}
+
+// FailureAttachmentRejected classifies a send refused because of its
+// attachments (size, type, provider rejection). It is persisted on the
+// message log and returned again by an idempotent replay.
+const FailureAttachmentRejected = "attachment_rejected"
+
 type NotificationRequest struct {
 	Channel        string
 	Type           string // "transactional" | "marketing"
@@ -412,6 +426,9 @@ type NotificationRequest struct {
 	// allowed_types contains this request's Type (ADR-0021). Unknown,
 	// ineligible, or malformed slugs fail the send; there is no fallback.
 	Sender string
+	// Attachments are optional files (raw bytes). Honored by Send only;
+	// SendTemplated ignores them. Nil = no attachment.
+	Attachments []Attachment
 }
 
 type TemplatedNotificationRequest struct {
@@ -444,6 +461,10 @@ type NotificationResult struct {
 	Status   string // "sent" | "failed" | "suppressed" | "queued"
 	Provider string
 	Error    string
+	// FailureReason classifies a "failed" Status when the cause is known
+	// (FailureAttachmentRejected). Returned by fresh sends AND by idempotent
+	// replays, so callers never depend on a typed Go error for it.
+	FailureReason string
 }
 
 type NotificationSender interface {

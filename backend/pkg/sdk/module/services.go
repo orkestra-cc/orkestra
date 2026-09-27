@@ -230,6 +230,11 @@ const (
 	// back-compat. Value: iface.ObjectStoreProvider.
 	ServiceObjectStoreProvider ServiceKey = "system.object_store_provider"
 
+	// ServicePDFRenderer is the optional HTML→PDF platform service
+	// (iface.PDFRenderer), registered by main.go when PDF_RENDERER_URL is
+	// set. Resolve it per request; absent ⇒ degrade.
+	ServicePDFRenderer ServiceKey = "system.pdf_renderer"
+
 	// ServiceLogLevelModuleNames is the []string of registered
 	// module names. main.go populates it AFTER RegisterAll runs (so
 	// every catalog factory has fired) and BEFORE InitAll runs (so
