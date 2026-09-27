@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fails if the Gotenberg hardening disappears from the compose files.
-# V1 (spec 2026-09-26 §2): the backend is reachable from gotenberg on
+# The backend is reachable from gotenberg on
 # pdf-net, so the deny-list and the IP flags are REQUIRED, not redundant.
 set -euo pipefail
 cd "$(dirname "$0")/.."

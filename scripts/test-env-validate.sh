@@ -82,7 +82,7 @@ check "production: a key id with no secret is an error"    "1"   "$(run "${prod[
 # with the infra stack — docker-compose.infra.yml's
 # `${PDF_RENDERER_PASSWORD:?...}` is unconditional on the gotenberg service,
 # even when PDF_RENDERER_URL is empty (that only disables the *backend's*
-# use of PDF features — orkestra.sh Task A4b starts gotenberg with every
+# use of PDF features — orkestra.sh starts gotenberg with every
 # infra deploy regardless). A URL-gated skip here let a "PDF disabled"
 # stack pass validation and then fail `docker compose up -d` for ALL of
 # infra, not just gotenberg. Checked unconditionally now, same as every

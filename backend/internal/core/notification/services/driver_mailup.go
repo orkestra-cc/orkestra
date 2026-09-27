@@ -31,14 +31,13 @@ const mailUpTimeout = 30 * time.Second
 // TestMailUpDriver_RequestShapeAndSuccess, and moves neither the success
 // predicate nor the error contract.
 //
-// Attachments follows spec §2 V2 (design doc
-// docs/superpowers/specs/2026-09-26-forms-pdf-copy-design.md), the outcome
-// of the blocking Task 0 verification run on 2026-09-26: the shape —
+// Attachments follows a verification run against the live API
+// (2026-09-26): the shape —
 // Attachments: [{Filename, Body}] — is sourced from MailUp's "Transactional
 // APIs – FAQ" (which lists Attachments among the advanced options) and a
 // production MailUp client (pagopa/io-functions-commons,
 // src/mailer/mailup.ts, which sends Body as a .NET byte[] array). Real
-// sends of 1 MB and 5 MB PDFs from the staging SMTP+ account, with Body as
+// sends of 1 MB and 5 MB PDFs from a test SMTP+ account, with Body as
 // a standard base64 string instead, both answered HTTP 200
 // {"Status":"done","Code":"0"} with an openable attachment on receipt —
 // confirming base64 is accepted and cheaper on the wire (~4x) than the byte
@@ -137,9 +136,9 @@ func (d *mailUpDriver) Requires() []ProfileRequirement {
 // accepting our ExtendedHeaders is not the same as delivering them, and
 // RFC 8058 additionally needs them covered by the DKIM signature. Flipping
 // that field is the outcome of the release gate's test, not a configuration
-// an operator can set. Attachments is true: spec §2 V2 confirmed the
-// payload shape and proved it with real sends (see the mailUpRequest
-// comment).
+// an operator can set. Attachments is true: the verification run
+// confirmed the payload shape and proved it with real sends (see the
+// mailUpRequest comment).
 func (d *mailUpDriver) Capabilities() DriverCapabilities {
 	return DriverCapabilities{ListUnsubscribeHeaders: false, Attachments: true}
 }
@@ -233,7 +232,7 @@ func (d *mailUpDriver) Send(ctx context.Context, p SenderProfile, msg EmailMessa
 	ok := resp.StatusCode >= 200 && resp.StatusCode < 300 && env.Status == "done" && env.Code == "0"
 	if !ok {
 		envErr := vendorEnvelopeError("mailup", resp.StatusCode, env.Status, env.Code)
-		// Task 0 (spec §2 V2) found no MailUp-specific attachment-rejection
+		// The verification run found no MailUp-specific attachment-rejection
 		// code — its public FAQ and the confirmed integrations do not
 		// document one. Fallback: a 4xx on a send that carried attachments
 		// is classified ErrAttachmentRejected; a 4xx without attachments,

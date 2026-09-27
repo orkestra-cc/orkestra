@@ -444,7 +444,7 @@ func Load() (*Config, error) {
 	// PDF renderer (Gotenberg sidecar, optional). Empty URL in the binary's
 	// own default — see PDFRendererConfig — so a backend run outside the
 	// compose stack never attempts connections nobody asked for; the
-	// compose default (Task A4) sets PDF_RENDERER_URL=http://gotenberg:3000.
+	// compose default sets PDF_RENDERER_URL=http://gotenberg:3000.
 	config.PDFRenderer = PDFRendererConfig{
 		URL:      getEnv("PDF_RENDERER_URL", ""),
 		Username: getEnv("PDF_RENDERER_USER", ""),

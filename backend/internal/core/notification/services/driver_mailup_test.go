@@ -276,7 +276,7 @@ func TestMailUpDriver_TimeoutAndRefusedProfile(t *testing.T) {
 }
 
 // TestMailUpDriver_AttachmentsInPayload: field names and Body encoding per
-// spec §2 V2 (see the mailUpRequest doc comment for the source).
+// the verified shape (see the mailUpRequest doc comment for the source).
 func TestMailUpDriver_AttachmentsInPayload(t *testing.T) {
 	var got map[string]any
 	d, _ := mailUpServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -312,9 +312,9 @@ func TestMailUpDriver_NoAttachments_KeyOmitted(t *testing.T) {
 	}
 }
 
-// TestMailUpDriver_AttachmentRejection_Classified: Task 0 (spec §2 V2)
-// found no MailUp-specific attachment-rejection code, so the controller
-// ruling's fallback applies — a 4xx on a send that carried attachments is
+// TestMailUpDriver_AttachmentRejection_Classified: the verification run
+// found no MailUp-specific attachment-rejection code, so the documented
+// fallback applies — a 4xx on a send that carried attachments is
 // classified ErrAttachmentRejected; a 4xx on a send without attachments is
 // not.
 func TestMailUpDriver_AttachmentRejection_Classified(t *testing.T) {

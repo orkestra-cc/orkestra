@@ -209,7 +209,7 @@ services:
       retries: 5
 
   gotenberg:
-    # HTML→PDF sidecar (spec forms copia PDF). Pinned by digest, bump
+    # Optional HTML→PDF sidecar (iface.PDFRenderer). Pinned by digest, bump
     # deliberately. No published port, no egress: it joins ONLY pdf-net
     # (internal). The backend IS reachable from here (shared pdf-net), so the
     # deny-list and the IP flags are required — see

@@ -1641,7 +1641,7 @@ func TestNotificationService_PreflightDelivery_DefaultArm_RoutedButNotConfigured
 	}
 }
 
-// ---- attachments (forms PDF copy, Task A5) -------------------------------
+// ---- attachments ----------------------------------------------------------
 
 // Attachment tests reuse the package kit (newKit / fakeDriver / fakeResolver):
 // the kit's default profile is slug "default" on the "noop" fake driver.
@@ -1650,7 +1650,7 @@ func ctx() context.Context { return context.Background() }
 
 func reqWith(atts ...iface.Attachment) iface.NotificationRequest {
 	return iface.NotificationRequest{
-		Channel: "email", Type: models.TypeTransactional, Category: "forms.registration_approved",
+		Channel: "email", Type: models.TypeTransactional, Category: "billing.receipt",
 		Recipients: []iface.Recipient{{Address: "a@example.com"}}, Subject: "s", Body: "b",
 		IdempotencyKey: "k1",
 		Attachments:    atts,
@@ -1709,7 +1709,7 @@ func TestSendTemplated_Replay_ReturnsFailureReason(t *testing.T) {
 	k := newKit(Options{})
 	k.logRepo.existing = &models.NotificationDoc{UUID: "u1", Status: models.StatusFailed, FailureReason: iface.FailureAttachmentRejected}
 	res, err := k.svc.SendTemplated(ctx(), iface.TemplatedNotificationRequest{
-		Type: models.TypeTransactional, Category: "forms.x", TemplateID: "t", IdempotencyKey: "k1",
+		Type: models.TypeTransactional, Category: "billing.x", TemplateID: "t", IdempotencyKey: "k1",
 		Recipients: []iface.Recipient{{Address: "a@example.com"}},
 	})
 	if err != nil || res.FailureReason != iface.FailureAttachmentRejected {

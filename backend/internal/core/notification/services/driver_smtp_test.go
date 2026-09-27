@@ -586,7 +586,7 @@ func TestBuildMIME_TextOnlyWithAttachment(t *testing.T) {
 	}
 }
 
-// Review focus 3: a title with non-ASCII, '/' and '"' must give a valid,
+// A title with non-ASCII, '/' and '"' must give a valid,
 // readable header — no path, no broken quoting, no line over 998 octets —
 // even for a long name or a 1 KB attachment.
 func TestBuildMIME_AttachmentFilenameUTF8(t *testing.T) {
