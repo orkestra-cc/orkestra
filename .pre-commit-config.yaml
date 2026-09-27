@@ -23,6 +23,7 @@ exclude: |
     frontend-admin/src/assets/json/.*|               # vendored map/geo data
     frontend-admin/src/components/wizard/lottie/.*|  # vendored lottie animations (minified json)
     frontend-admin/\.impeccable/.*|                  # tool-written cache and design data
+    .*/testdata/.*|                                  # test fixtures + goldens, byte-compared (`-update` writes them)
     \.github/badges/.*\.svg                          # written by the coverage-badge bot, which runs no hooks
   )$
 
