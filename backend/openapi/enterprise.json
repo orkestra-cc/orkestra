@@ -1049,6 +1049,27 @@
         ],
         "type": "object"
       },
+      "AttachmentMeta": {
+        "additionalProperties": false,
+        "properties": {
+          "contentType": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "filename",
+          "contentType",
+          "sizeBytes"
+        ],
+        "type": "object"
+      },
       "AuditEvent": {
         "additionalProperties": false,
         "properties": {
@@ -4230,6 +4251,15 @@
               "array",
               "null"
             ]
+          },
+          "platform": {
+            "items": {
+              "$ref": "#/components/schemas/PlatformHealthStatus"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "required": [
@@ -4502,6 +4532,15 @@
       "NotificationDoc": {
         "additionalProperties": false,
         "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/AttachmentMeta"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "attemptedSenderSlug": {
             "type": "string"
           },
@@ -4516,6 +4555,9 @@
             "type": "string"
           },
           "error": {
+            "type": "string"
+          },
+          "failureReason": {
             "type": "string"
           },
           "id": {
@@ -4937,6 +4979,25 @@
         "required": [
           "userUuid",
           "reason"
+        ],
+        "type": "object"
+      },
+      "PlatformHealthStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "status"
         ],
         "type": "object"
       },
