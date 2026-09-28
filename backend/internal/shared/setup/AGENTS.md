@@ -1,7 +1,7 @@
 # Orkestra setup — first-install bootstrap and the finalization saga
 
 _Path: `/backend/internal/shared/setup`_
-_Parent: [../../../CLAUDE.md](../../../CLAUDE.md)_
+_Parent: [../../../AGENTS.md](../../../AGENTS.md)_
 
 In-tree package of the single backend Go module, imported as
 `github.com/orkestra/backend/internal/shared/setup`. Not a `Module`: it is
@@ -214,7 +214,7 @@ cause. **Never** match a tenant sentinel or its error text here.
 states that the coordinator record for *this* reservation exists and is not
 completed (derived from the record, not hardcoded). The tenant seam gates
 its restore-a-soft-deleted-reserved-row branch on it — see
-[`../../core/tenant/CLAUDE.md`](../../core/tenant/CLAUDE.md) for why the row
+[`../../core/tenant/AGENTS.md`](../../core/tenant/AGENTS.md) for why the row
 signature alone is not enough.
 
 **The attestation is only half the proof, and it is worth being precise

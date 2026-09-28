@@ -1,7 +1,7 @@
 # Tool: errquality
 
 _Path: `/backend/tools/errquality`_
-_Parent: [../../CLAUDE.md](../../CLAUDE.md)_
+_Parent: [../../AGENTS.md](../../AGENTS.md)_
 
 You are probably here because `make ci-backend` (or `make backend-errquality`
 on its own) just failed and printed something like:
@@ -26,7 +26,7 @@ answered `400 {"detail":"Request failed"}` — a server fault, reported as if
 the caller had mistyped a password. See
 [the design doc](../../../docs/superpowers/specs/2026-08-21-backend-error-quality-design.md)
 for the full incident writeup. The analyzer's `URL` field points at
-`backend/CLAUDE.md#error-code-contract` — the doc section that names this
+`backend/AGENTS.md#error-code-contract` — the doc section that names this
 gate for the backend as a whole.
 
 ## The three rules
@@ -236,12 +236,12 @@ in sync between a workflow file and a Makefile target.
 | `analyzer_test.go` | Unit tests against inline Go source fixtures — no `analysistest`, no testdata module. |
 | `baseline.txt` | Accepted historical drift; shrinks as `internal/core/` is burned down. |
 | `cmd/errquality/main.go` | `singlechecker` CLI wrapper. |
-| `CLAUDE.md` | This file. |
+| `AGENTS.md` | This file. |
 
 ## Related
 
 - [Design doc — the 2026-08-21 incident and the census](../../../docs/superpowers/specs/2026-08-21-backend-error-quality-design.md)
 - [Implementation plan — Global Constraints (source of the decision table) and the task-by-task burn-down](../../../docs/superpowers/plans/2026-08-21-backend-error-quality.md)
-- [`../../CLAUDE.md`](../../CLAUDE.md) — "Error-code contract" section, where this gate is documented for the backend as a whole
+- [`../../AGENTS.md`](../../AGENTS.md) — "Error-code contract" section, where this gate is documented for the backend as a whole
 - [`internal/shared/errcode/`](../../internal/shared/errcode/) — the `New`/`BadRequest`/.../`ServiceUnavailable`/`Internal` builders R3 fixes land on
-- [`../tenantscope/CLAUDE.md`](../tenantscope/CLAUDE.md) — the sibling analyzer this tool's layout and baseline mechanism are modelled on
+- [`../tenantscope/AGENTS.md`](../tenantscope/AGENTS.md) — the sibling analyzer this tool's layout and baseline mechanism are modelled on

@@ -6,7 +6,7 @@ sidebar_position: 5
 
 # Authentication Flow
 
-This is the cross-cutting walkthrough of how a request becomes an authenticated identity in Orkestra. It does **not** enumerate every endpoint — for the full per-route table see the [auth module reference in the monorepo](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/core/auth/CLAUDE.md). Read this page when you want the *story*; read the module CLAUDE.md when you want the *contract*.
+This is the cross-cutting walkthrough of how a request becomes an authenticated identity in Orkestra. It does **not** enumerate every endpoint — for the full per-route table see the [auth module reference in the monorepo](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/core/auth/AGENTS.md). Read this page when you want the *story*; read the module AGENTS.md when you want the *contract*.
 
 ## 1. Audience model
 
@@ -467,8 +467,8 @@ The audience flag is the difference between "I can hit `console.*`" and "I can h
 
 | Question                                          | Source of truth                                                                                                                                                  |
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| What endpoints exist?                             | The [API Reference](/api) on this site (auto-generated from the canonical spec), or the [auth module CLAUDE.md](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/core/auth/CLAUDE.md) for prose context |
+| What endpoints exist?                             | The [API Reference](/api) on this site (auto-generated from the canonical spec), or the [auth module AGENTS.md](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/core/auth/AGENTS.md) for prose context |
 | Why the audience split?                           | [ADR-0003 — three-audience host split](/adrs/three-audience-host-split), and [ADR-0014](/adrs/service-accounts-client-credentials) for the `service` audience it reserved |
-| What env vars does auth read?                     | [auth module CLAUDE.md → Runtime configuration](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/core/auth/CLAUDE.md#runtime-configuration)    |
-| How are cookie domains configured per audience?   | [docker/CLAUDE.md → Host split](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md)                                                              |
+| What env vars does auth read?                     | [auth module AGENTS.md → Runtime configuration](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/core/auth/AGENTS.md#runtime-configuration)    |
+| How are cookie domains configured per audience?   | [docker/AGENTS.md → Host split](https://github.com/orkestra-cc/orkestra/blob/main/docker/AGENTS.md)                                                              |
 | What's the JWT validator doing under the hood?    | `backend/internal/core/auth/services/jwt_service.go` (`ValidateAccessToken`) and `backend/internal/shared/middleware/audience.go` (`RequireAudience`)            |

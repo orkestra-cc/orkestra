@@ -2,7 +2,7 @@
 
 **Orkestra Professional Management System**
 
-> **Post-ADR-0003 update (2026-05-14).** Orkestra now serves three audiences from one backend binary, dispatched by `Host` header — operator (Tier-1 console), client (Tier-2 API/app), and service (internal AI sidecar). Each public audience has its own host, cookie domain, and OAuth callback. The single `orkestra.cc` host described in older revisions of this guide has been superseded by the per-audience hosts below. See [ADR-0003](adr/0003-three-audience-host-split.md) and [`docker/CLAUDE.md`](../docker/CLAUDE.md) for the canonical mapping.
+> **Post-ADR-0003 update (2026-05-14).** Orkestra now serves three audiences from one backend binary, dispatched by `Host` header — operator (Tier-1 console), client (Tier-2 API/app), and service (internal AI sidecar). Each public audience has its own host, cookie domain, and OAuth callback. The single `orkestra.cc` host described in older revisions of this guide has been superseded by the per-audience hosts below. See [ADR-0003](adr/0003-three-audience-host-split.md) and [`docker/AGENTS.md`](../docker/AGENTS.md) for the canonical mapping.
 
 ## Overview
 
@@ -20,7 +20,7 @@ Per-audience host mapping (post-ADR-0003):
 | **Staging** | `staging-console.orkestra.cc` | `staging-api.orkestra.cc` | `app.orkestra.cc` (HMR target) | Shared dev creds | Cloud/isolated |
 | **Production** | `console.orkestra.com` | `api.orkestra.com` | `orkestra.cc` (marketing) / `app.orkestra.cc` (Tier-2 SPA) | **Separate prod credentials** | Dedicated with HA |
 
-OAuth credentials are managed at runtime via the auth module's ConfigService (`/admin/modules/auth`); the env vars listed below are seed-only fallbacks used on first boot of a fresh install. See [`backend/internal/core/auth/CLAUDE.md`](../backend/internal/core/auth/CLAUDE.md#oauth-provider-config) for the full schema.
+OAuth credentials are managed at runtime via the auth module's ConfigService (`/admin/modules/auth`); the env vars listed below are seed-only fallbacks used on first boot of a fresh install. See [`backend/internal/core/auth/AGENTS.md`](../backend/internal/core/auth/AGENTS.md#oauth-provider-config) for the full schema.
 
 ---
 
@@ -857,9 +857,9 @@ mongodump --uri="mongodb://user:pass@prod-mongo/orkestra_prod" --out=/backups/$(
 ## Additional Resources
 
 - [Authentication Flow Documentation](./site/architecture/authentication-flow.mdx)
-- [Backend Module Documentation](../backend/CLAUDE.md)
-- [Frontend Module Documentation](../frontend-admin/CLAUDE.md)
-- [Docker Module Documentation](../docker/CLAUDE.md)
+- [Backend Module Documentation](../backend/AGENTS.md)
+- [Frontend Module Documentation](../frontend-admin/AGENTS.md)
+- [Docker Module Documentation](../docker/AGENTS.md)
 
 ---
 
@@ -867,7 +867,7 @@ mongodump --uri="mongodb://user:pass@prod-mongo/orkestra_prod" --out=/backups/$(
 
 For questions or issues:
 1. Check this documentation
-2. Review module-specific CLAUDE.md files
+2. Review module-specific AGENTS.md files
 3. Check application logs
 4. Contact DevOps team
 

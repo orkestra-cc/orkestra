@@ -9,7 +9,7 @@
 // verbatim — JSON tags here are the wire contract.
 //
 // Codes live in codes.go and follow <module>.<situation> snake_case —
-// see backend/CLAUDE.md "Error-code contract" for the convention and
+// see backend/AGENTS.md "Error-code contract" for the convention and
 // codes_test.go for the golden-file lock that fails CI on a silent
 // rename.
 package errcode

@@ -108,7 +108,7 @@ const AuthTooManyAttempts = "auth.too_many_attempts"
 // The four codes below all ride on a 401, and the reason they exist is
 // the same for each: a 401 that carries NO top-level code is the one
 // 401 shape the operator console does not read as a verdict. Its error
-// interceptor (`baseQueryWithRetry`, frontend-admin/CLAUDE.md) treats a
+// interceptor (`baseQueryWithRetry`, frontend-admin/AGENTS.md) treats a
 // codeless 401 as a JWT signing-key rotation — after which every
 // unexpired bearer validates as plain "invalid" — and answers it by
 // running `performRefresh` once. So a *verdict* 401 that stays codeless

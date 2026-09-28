@@ -1,9 +1,9 @@
 # Module: Tenant — Organizations, memberships, plan entitlements
 
 _Path: `/backend/internal/core/tenant`_
-_Parent: [../CLAUDE.md](../CLAUDE.md)_
+_Parent: [../AGENTS.md](../AGENTS.md)_
 
-[← Core](../CLAUDE.md) | [☰ Backend](../../../CLAUDE.md) | [Root](../../../../CLAUDE.md)
+[← Core](../AGENTS.md) | [☰ Backend](../../../AGENTS.md) | [Root](../../../../AGENTS.md)
 
 ## Purpose
 
@@ -94,8 +94,8 @@ Collection name constants live in `repository/repository.go` (`CollTenants`, `Co
 
 - **Init**: constructs the repository, builds the service, creates the handler, registers the service as `iface.TenantProvider` in the registry, wires the `ProvisioningModeResolver` (a closure over `deps.ConfigService` reading the `provisioning.{internal,external}.mode` keys live), and resolves the two **required** boot-reconciliation seams — `systeminit.FinalizationStore` (`module.ServiceSetupFinalizationStore`) and the narrow `userCounter` slice of `iface.UserProvider` (`module.ServiceUserService`). Either one missing returns an error from `Init`: missing wiring fails module initialization loudly rather than degrading the upgrade path into a silent no-op.
 - **Start**: versioned boot reconciliation — see [Boot reconciliation](#boot-reconciliation). **Stop / HealthCheck**: inherit from `BaseModule` (no-op).
-- **Seeding**: the first-install setup flow provisions **exactly one** internal tenant, and it is **mandatory**. `POST /v1/setup/admin` still creates no tenant — the initial admin is a super_admin (system role, tenant-independent) — but the wizard's organization step is **not skippable**: it calls `POST /v1/setup/finalize`, whose resumable saga persists the Tier-1 provisioning mode, ensures that one internal tenant through `EnsureSetupTenant` (reserved UUID, `plan=enterprise`), assigns it as the **platform default**, and only then marks setup complete. So a finished install always has one internal tenant and one `tenant_defaults` pointer; a zero-internal-tenant install is an *unfinished* setup, not a supported steady state. Contract: [`internal/shared/setup/CLAUDE.md`](../../shared/setup/CLAUDE.md).
-- **GDPR/DSR** (`services/pii_producer.go`): registers an `iface.PIIProducer` (subject `"tenant"`) on `ServicePIIProducerRegistry` at Init. The subject's personal data here is their **tenant memberships** (which orgs, what roles) — the orgs/tenants themselves are not the subject's data and are left intact. Export returns the membership rows; purge deletes them (`tenant_memberships`) under **both** erase modes, since a membership row IS the user→org linkage with no anonymizable residue. Consumed by the [compliance module](../compliance/CLAUDE.md)'s DSR pipeline (ADR-0009).
+- **Seeding**: the first-install setup flow provisions **exactly one** internal tenant, and it is **mandatory**. `POST /v1/setup/admin` still creates no tenant — the initial admin is a super_admin (system role, tenant-independent) — but the wizard's organization step is **not skippable**: it calls `POST /v1/setup/finalize`, whose resumable saga persists the Tier-1 provisioning mode, ensures that one internal tenant through `EnsureSetupTenant` (reserved UUID, `plan=enterprise`), assigns it as the **platform default**, and only then marks setup complete. So a finished install always has one internal tenant and one `tenant_defaults` pointer; a zero-internal-tenant install is an *unfinished* setup, not a supported steady state. Contract: [`internal/shared/setup/AGENTS.md`](../../shared/setup/AGENTS.md).
+- **GDPR/DSR** (`services/pii_producer.go`): registers an `iface.PIIProducer` (subject `"tenant"`) on `ServicePIIProducerRegistry` at Init. The subject's personal data here is their **tenant memberships** (which orgs, what roles) — the orgs/tenants themselves are not the subject's data and are left intact. Export returns the membership rows; purge deletes them (`tenant_memberships`) under **both** erase modes, since a membership row IS the user→org linkage with no anonymizable residue. Consumed by the [compliance module](../compliance/AGENTS.md)'s DSR pipeline (ADR-0009).
 
 ## Boot reconciliation
 
@@ -355,7 +355,7 @@ Typical consumers:
 
 ## Org-scoping invariants
 
-The system-wide invariants that govern tenant isolation live in [`../authz/CLAUDE.md`](../authz/CLAUDE.md#org-scoping-invariants-system-wide). Three of them are directly owned by this module:
+The system-wide invariants that govern tenant isolation live in [`../authz/AGENTS.md`](../authz/AGENTS.md#org-scoping-invariants-system-wide). Three of them are directly owned by this module:
 
 - **Invariant #1** — every addon `collection.Find/Update/Delete/Aggregate` must derive its filter from `pkg/sdk/tenantrepo.Scope*`. Enforced at dev time by panic in the helper; CI-enforced in Phase 0 by the `tools/tenantscope` analyzer.
 - **Invariant #2** — `X-Tenant-ID` header must match a membership in the JWT. Already enforced in `shared/middleware/auth.go::resolveCurrentTenant`, with one exception: holders of `system.tenants.admin` bypass the check via `tryImpersonationBypass` (operator admins can act in any tenant). Every impersonation emits an `admin.tenant.impersonate.{personal,business}` audit event through `iface.AuditSink` — split by the target's IsCompany+SignupChannel shape so SOC2 review can tell apart sensitive personal-tenant access from routine operator work. Personal targets (IsCompany=false + SignupChannel=self_serve) additionally require a fresh MFA-satisfied session: a pwd-only operator hits the standard 401 `step_up_required` envelope before the bypass applies. Handlers that want to refuse destructive self-targeted actions while impersonating can read `middleware.IsImpersonating(ctx)`.
@@ -363,8 +363,8 @@ The system-wide invariants that govern tenant isolation live in [`../authz/CLAUD
 
 ## Related
 
-- [`../user/CLAUDE.md`](../user/CLAUDE.md) — hard dep; user accounts must exist before memberships
-- [`../authz/CLAUDE.md`](../authz/CLAUDE.md) — provides the role-name vocabulary this module stores in `Membership.Roles`; owns the **Org-scoping invariants** table
-- [`../auth/CLAUDE.md`](../auth/CLAUDE.md) — embeds memberships in JWT claims via `TenantProvider.ListUserMemberships`
+- [`../user/AGENTS.md`](../user/AGENTS.md) — hard dep; user accounts must exist before memberships
+- [`../authz/AGENTS.md`](../authz/AGENTS.md) — provides the role-name vocabulary this module stores in `Membership.Roles`; owns the **Org-scoping invariants** table
+- [`../auth/AGENTS.md`](../auth/AGENTS.md) — embeds memberships in JWT claims via `TenantProvider.ListUserMemberships`
 - [`../../../pkg/sdk/iface/interfaces.go`](../../../pkg/sdk/iface/interfaces.go) — `TenantProvider` interface definition (`type TenantProvider interface` ~`:366`)
 - [`../../../pkg/sdk/tenantrepo/`](../../../pkg/sdk/tenantrepo) — helpers for other modules that need to scope queries by tenant

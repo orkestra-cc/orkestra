@@ -232,7 +232,7 @@ func bindingIsExpired(b *models.Binding, now time.Time) bool {
 //
 // An expired binding confers nothing: ListActiveBindingsForUser filters it
 // out of every effective-permission computation. But authz_bindings has no
-// TTL index and no reaper (see this module's CLAUDE.md — both are tracked as
+// TTL index and no reaper (see this module's AGENTS.md — both are tracked as
 // future work), so the row survives forever, and the unique
 // (tenantId, userUUID, roleId) index then makes it block every subsequent
 // grant of that role. Reaping it at grant time is what keeps "expired" from
@@ -325,7 +325,7 @@ func (r *Repository) EnsureBinding(ctx context.Context, b *models.Binding) (*mod
 // ensureBindingOnce is EnsureBinding's single upsert attempt, without the
 // expired-incumbent handling its caller layers on top.
 func (r *Repository) ensureBindingOnce(ctx context.Context, b *models.Binding) (*models.Binding, error) {
-	//tenantscope:allow authz owns the global authz_bindings registry; the ensure filter pins tenantId, userUUID and roleId explicitly (owner-binding ensure — see authz/CLAUDE.md)
+	//tenantscope:allow authz owns the global authz_bindings registry; the ensure filter pins tenantId, userUUID and roleId explicitly (owner-binding ensure — see authz/AGENTS.md)
 	res := r.db.Collection(CollBindings).FindOneAndUpdate(ctx,
 		bson.M{"tenantId": b.TenantID, "userUUID": b.UserUUID, "roleId": b.RoleUUID},
 		bson.M{"$setOnInsert": bson.M{
@@ -408,7 +408,7 @@ func (r *Repository) DeleteBindingsByUserAndTenant(ctx context.Context, userUUID
 	if userUUID == "" || tenantUUID == "" {
 		return 0, nil
 	}
-	//tenantscope:allow authz owns the global authz_bindings registry; the filter pins both userUUID and tenantId explicitly (mirrors DeleteBindingsByTenant). Membership-unbind hook — see backend/internal/core/authz/CLAUDE.md#org-scoping-invariants-system-wide.
+	//tenantscope:allow authz owns the global authz_bindings registry; the filter pins both userUUID and tenantId explicitly (mirrors DeleteBindingsByTenant). Membership-unbind hook — see backend/internal/core/authz/AGENTS.md#org-scoping-invariants-system-wide.
 	res, err := r.db.Collection(CollBindings).DeleteMany(ctx, bson.M{"userUUID": userUUID, "tenantId": tenantUUID})
 	if err != nil {
 		return 0, err

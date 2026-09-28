@@ -272,7 +272,7 @@ services:
       - ../frontend-admin/.npm-cache:/app/.npm-cache
     # Regenerate public/config.js from the VITE_* env vars BEFORE
     # `npm run dev` starts. public/config.js is gitignored (see
-    # frontend-admin/.gitignore + frontend-admin/CLAUDE.md → "Runtime
+    # frontend-admin/.gitignore + frontend-admin/AGENTS.md → "Runtime
     # config"); each environment writes its own. The dev-default template
     # at public/config.example.js is the fallback when this script can't
     # run (e.g. `npm run dev` directly on the host).
@@ -282,7 +282,7 @@ services:
       - |
         cat > /app/public/config.js <<EOF
         // Generated at container start by docker-compose.dev.yml.
-        // Gitignored — do not commit. See frontend-admin/CLAUDE.md.
+        // Gitignored — do not commit. See frontend-admin/AGENTS.md.
         window.__ORKESTRA_CONFIG__ = {
           apiUrl: "$${VITE_API_URL}",
           wsUrl: "$${VITE_WS_URL}",
@@ -353,7 +353,7 @@ services:
       - |
         cat > /app/public/config.js <<EOF
         // Generated at container start by docker-compose.dev.yml.
-        // Gitignored — do not commit. See frontend-client/CLAUDE.md.
+        // Gitignored — do not commit. See frontend-client/AGENTS.md.
         window.__ORKESTRA_CONFIG__ = {
           apiBase: "$${VITE_API_BASE}",
           stripePublishableKey: "$${VITE_STRIPE_PUBLISHABLE_KEY}"

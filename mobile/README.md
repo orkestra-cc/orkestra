@@ -2,7 +2,7 @@
 
 Flutter cross-platform client for [Orkestra](https://github.com/orkestra-cc/orkestra). Early-stage — the app currently boots, picks an environment, and renders the active backend URL. Real product surfaces are in active development.
 
-> AI assistants: see [`CLAUDE.md`](CLAUDE.md) for module-specific conventions.
+> AI assistants: see [`AGENTS.md`](AGENTS.md) for module-specific conventions.
 
 ## Status
 
@@ -108,7 +108,7 @@ Before your first store submission you'll need at minimum:
 
 ## See also
 
-- [`mobile/CLAUDE.md`](CLAUDE.md) — AI-assistant module guide
+- [`mobile/AGENTS.md`](AGENTS.md) — AI-assistant module guide
 - [I just forked Orkestra](https://docs.orkestra.cc/getting-started/forking) — backend bootstrap on a fork
 - [Mobile app — operator docs](https://docs.orkestra.cc/operating/mobile-app) — Tier-1 deployment view
 - [Flutter documentation](https://docs.flutter.dev/)

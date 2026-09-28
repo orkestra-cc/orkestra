@@ -1,9 +1,9 @@
 # Module: Shared - Data Models & Types
 *Path: `/shared`*
-*Parent: [../CLAUDE.md](../CLAUDE.md)*
+*Parent: [../AGENTS.md](../AGENTS.md)*
 
 <!-- Navigation -->
-[← Root](../CLAUDE.md) | [☰ Module Map](../CLAUDE.md#module-map) | [🚀 Quick Start](../CLAUDE.md#quick-start)
+[← Root](../AGENTS.md) | [☰ Module Map](../AGENTS.md#module-map) | [🚀 Quick Start](../AGENTS.md#quick-start)
 <!-- /Navigation -->
 
 ## Module Purpose
@@ -20,9 +20,9 @@ The shared module contains **unified data models, types, and interfaces** used a
 - **Standards**: JSON Schema, OpenAPI 3.1 specifications, industry validation patterns
 
 ### Importers
-- **[`/backend/`](../backend/CLAUDE.md)** - Go structs and validation logic
-- **[`/frontend-admin/`](../frontend-admin/CLAUDE.md)** - TypeScript interfaces and validation schemas
-- **[`/mobile/`](../mobile/CLAUDE.md)** - Dart classes and serialization methods
+- **[`/backend/`](../backend/AGENTS.md)** - Go structs and validation logic
+- **[`/frontend-admin/`](../frontend-admin/AGENTS.md)** - TypeScript interfaces and validation schemas
+- **[`/mobile/`](../mobile/AGENTS.md)** - Dart classes and serialization methods
 
 ## Overview
 
@@ -695,7 +695,7 @@ module.exports = {
 ---
 
 ### Related Guides
-- [Project Overview](../CLAUDE.md) - System architecture and design principles
-- [Backend Implementation](../backend/CLAUDE.md) - Go structs and MongoDB schemas
-- [Frontend Types](../frontend-admin/CLAUDE.md) - TypeScript interfaces and validation
-- [Mobile Models](../mobile/CLAUDE.md) - Dart classes and serialization
+- [Project Overview](../AGENTS.md) - System architecture and design principles
+- [Backend Implementation](../backend/AGENTS.md) - Go structs and MongoDB schemas
+- [Frontend Types](../frontend-admin/AGENTS.md) - TypeScript interfaces and validation
+- [Mobile Models](../mobile/AGENTS.md) - Dart classes and serialization

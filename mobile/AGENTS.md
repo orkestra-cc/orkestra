@@ -1,11 +1,11 @@
 # Module: Mobile - Flutter Cross-Platform Application
 
 _Path: `/mobile`_
-_Parent: [../CLAUDE.md](../CLAUDE.md)_
+_Parent: [../AGENTS.md](../AGENTS.md)_
 
 <!-- Navigation -->
 
-[← Root](../CLAUDE.md) | [☰ Module Map](../CLAUDE.md#module-map) | [🚀 Quick Start](../CLAUDE.md#quick-start)
+[← Root](../AGENTS.md) | [☰ Module Map](../AGENTS.md#module-map) | [🚀 Quick Start](../AGENTS.md#quick-start)
 
 <!-- /Navigation -->
 
@@ -21,7 +21,7 @@ The mobile module provides a **Flutter-based cross-platform application** for iO
 
 ### Imports
 
-- **[`/backend/`](../backend/CLAUDE.md)** - REST APIs, WebSocket events, authentication
+- **[`/backend/`](../backend/AGENTS.md)** - REST APIs, WebSocket events, authentication
 
 ### Importers
 
@@ -169,6 +169,6 @@ Two notes on the Android scaffold:
 
 ### Related Guides
 
-- [Project Overview](../CLAUDE.md) - System architecture and design principles
-- [Backend APIs](../backend/CLAUDE.md) - API specifications and authentication
-- [Docker Development](../docker/CLAUDE.md) - Development environment setup
+- [Project Overview](../AGENTS.md) - System architecture and design principles
+- [Backend APIs](../backend/AGENTS.md) - API specifications and authentication
+- [Docker Development](../docker/AGENTS.md) - Development environment setup

@@ -1,9 +1,9 @@
 # Module: Scripts - Automation & Development Tools
 *Path: `/scripts`*
-*Parent: [../CLAUDE.md](../CLAUDE.md)*
+*Parent: [../AGENTS.md](../AGENTS.md)*
 
 <!-- Navigation -->
-[← Root](../CLAUDE.md) | [☰ Module Map](../CLAUDE.md#module-map) | [🚀 Quick Start](../CLAUDE.md#quick-start)
+[← Root](../AGENTS.md) | [☰ Module Map](../AGENTS.md#module-map) | [🚀 Quick Start](../AGENTS.md#quick-start)
 <!-- /Navigation -->
 
 ## Module Purpose
@@ -17,7 +17,7 @@ The scripts module contains **automation scripts, development tools, and utiliti
 ## Dependencies
 
 ### Imports
-- **[`/docker/`](../docker/CLAUDE.md)** - Infrastructure and container orchestration
+- **[`/docker/`](../docker/AGENTS.md)** - Infrastructure and container orchestration
 - **All Modules**: Build and deployment targets for backend, frontend, and mobile
 
 ### Importers
@@ -45,7 +45,7 @@ ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
 ./orkestra.sh --help                  # Full command surface
 ```
 
-ADR-0006 collapsed Orkestra to a core-only base, removing the runtime-profile (minimal/full) path. `orkestra.sh` handles every docker compose operation for the full-stack dev/staging/prod environments (`docker-compose.infra.yml` + `docker-compose.{dev,staging,prod}.yml`) plus the opt-in observability overlay. See [docker/CLAUDE.md](../docker/CLAUDE.md) for compose-file details.
+ADR-0006 collapsed Orkestra to a core-only base, removing the runtime-profile (minimal/full) path. `orkestra.sh` handles every docker compose operation for the full-stack dev/staging/prod environments (`docker-compose.infra.yml` + `docker-compose.{dev,staging,prod}.yml`) plus the opt-in observability overlay. See [docker/AGENTS.md](../docker/AGENTS.md) for compose-file details.
 
 ### Top-level operational scripts (project root)
 
@@ -82,7 +82,7 @@ The following scripts used to exist and have been folded into `./orkestra.sh`:
 
 These are called by `orkestra.sh` or used directly during development:
 
-- **init.sh**: Bootstrap a fresh checkout — copy `docker/.env.example` → `docker/.env`, fill `REPLACE_WITH_RANDOM_HEX_*` placeholders with `openssl rand -hex N`, generate RS256 JWT keys, seed a non-colliding block of host ports (per-`ENV` base + free-port scan). Every stack is namespaced by `APP_NAME`+`ENV` — there is no shared `orkestra-network` bridge to create (removed; see [docker/CLAUDE.md](../docker/CLAUDE.md#multi-stack-model)). Idempotent (preserves existing files unless `--force`). `make init` invokes it directly (non-interactive, CI path); `./orkestra.sh init` on a TTY — and the fresh-clone missing-`.env` path via `fullstack_init_env()` — now launch the guided `env_wizard` instead, which calls init.sh under the hood for scaffolding, while flags/`--quick`/non-TTY runs still delegate straight to init.sh. POSIX-bash safe (`[ ]` / `case`, no `[[ ]]` or `<<<`).
+- **init.sh**: Bootstrap a fresh checkout — copy `docker/.env.example` → `docker/.env`, fill `REPLACE_WITH_RANDOM_HEX_*` placeholders with `openssl rand -hex N`, generate RS256 JWT keys, seed a non-colliding block of host ports (per-`ENV` base + free-port scan). Every stack is namespaced by `APP_NAME`+`ENV` — there is no shared `orkestra-network` bridge to create (removed; see [docker/AGENTS.md](../docker/AGENTS.md#multi-stack-model)). Idempotent (preserves existing files unless `--force`). `make init` invokes it directly (non-interactive, CI path); `./orkestra.sh init` on a TTY — and the fresh-clone missing-`.env` path via `fullstack_init_env()` — now launch the guided `env_wizard` instead, which calls init.sh under the hood for scaffolding, while flags/`--quick`/non-TTY runs still delegate straight to init.sh. POSIX-bash safe (`[ ]` / `case`, no `[[ ]]` or `<<<`).
 - **env-detect.sh**: Sourced by `orkestra.sh` to detect ENV from `docker/.env`
 - **env-validate.sh**: Validates `docker/.env` — required keys, ENV-appropriate security settings, and the **same-site host pairings** (`CLIENT_API_HOST` / `CLIENT_API_URL` / `CLIENT_FRONTEND_URL`, and `VITE_API_URL` / `FRONTEND_URL`), compared as **sites** with scheme and port stripped — the whole host under `*.localhost`, the last two labels elsewhere — and only for the keys that are set. Takes no arguments (`--help` aside): `./scripts/env-validate.sh`. Called by `orkestra.sh` twice, on purpose with different severities — the `init` wizard warns and continues, `deploy` aborts before any compose command (`--yes` does not bypass it). Covered by `scripts/test-orkestra-helpers.sh`.
 - **generate-jwt-keys.sh**: Generates the RS256 JWT key pair (called by `init.sh`)
@@ -877,8 +877,8 @@ echo "CI tests complete!"
 ---
 
 ### Related Guides
-- [Project Overview](../CLAUDE.md) - System architecture and development workflow
-- [Docker Infrastructure](../docker/CLAUDE.md) - Container orchestration and environment setup
-- [Backend Deployment](../backend/CLAUDE.md) - Go application build and deployment
-- [Frontend Build](../frontend-admin/CLAUDE.md) - React application build process
-- [Mobile Build](../mobile/CLAUDE.md) - Flutter application build and release
+- [Project Overview](../AGENTS.md) - System architecture and development workflow
+- [Docker Infrastructure](../docker/AGENTS.md) - Container orchestration and environment setup
+- [Backend Deployment](../backend/AGENTS.md) - Go application build and deployment
+- [Frontend Build](../frontend-admin/AGENTS.md) - React application build process
+- [Mobile Build](../mobile/AGENTS.md) - Flutter application build and release

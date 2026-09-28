@@ -43,7 +43,7 @@ func TestUpdateUserInputLanguageAllowlist(t *testing.T) {
 	}
 }
 
-// TestToResponseIncludesLanguage guards the user/CLAUDE.md invariant
+// TestToResponseIncludesLanguage guards the user/AGENTS.md invariant
 // that every new field on User must be reflected in UserManagementResponse.
 // A forgotten mapping would silently strip the language from /me
 // responses without a test failure on the auth handler.

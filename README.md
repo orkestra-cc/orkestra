@@ -130,7 +130,7 @@ dependencies, and background processes.
 Cross-module integrations use the interfaces in `backend/pkg/sdk/iface`, which
 keeps modules independent of each other's service and repository packages.
 Start with the [addon authoring guide](https://docs.orkestra.cc/sdk/build-your-first-addon)
-or read the [backend contract](backend/CLAUDE.md).
+or read the [backend contract](backend/AGENTS.md).
 
 ## Repository map
 
@@ -146,7 +146,7 @@ docs/adr/         Architecture Decision Records
 
 The [project documentation](https://docs.orkestra.cc) covers installation,
 architecture, the module SDK, authentication, deployment, and operations. The
-in-repository contracts in [CLAUDE.md](CLAUDE.md) describe the invariants that
+in-repository contracts in [AGENTS.md](AGENTS.md) describe the invariants that
 contributors must preserve.
 
 ## Contributing

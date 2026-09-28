@@ -1,9 +1,9 @@
 # Core modules — always-loaded kernel
 
 _Path: `/backend/internal/core`_
-_Parent: [../../CLAUDE.md](../../CLAUDE.md)_
+_Parent: [../../AGENTS.md](../../AGENTS.md)_
 
-[← Backend](../../CLAUDE.md) | [Root](../../../CLAUDE.md)
+[← Backend](../../AGENTS.md) | [Root](../../../AGENTS.md)
 
 ## What this is
 
@@ -19,18 +19,18 @@ The registry walks this DAG, constructs each module, auto-creates its MongoDB co
 
 ## Module map
 
-The CLAUDE.md is the **contract** (invariants, wiring, rules — read before editing); the page is the human-facing **reference** published to docs.orkestra.cc. Change a module, update both.
+The AGENTS.md is the **contract** (invariants, wiring, rules — read before editing); the page is the human-facing **reference** published to docs.orkestra.cc. Change a module, update both.
 
 | Module | Tagline | Contract | Page |
 |---|---|---|---|
-| **user** | Global user accounts, profiles, system role field, document expiry tracking | [user/CLAUDE.md](user/CLAUDE.md) | [user](../../../docs/site/modules/core/user.mdx) |
-| **notification** | Outbound email: SMTP transport, template rendering, preferences, suppressions, idempotency | [notification/CLAUDE.md](notification/CLAUDE.md) | [notification](../../../docs/site/modules/core/notification.mdx) |
-| **tenant** | Organizations, per-user memberships, plan-based feature entitlements | [tenant/CLAUDE.md](tenant/CLAUDE.md) | [tenant](../../../docs/site/modules/core/tenant.mdx) |
-| **authz** | Permission catalog, roles (system + custom), role bindings, evaluator with Redis cache | [authz/CLAUDE.md](authz/CLAUDE.md) | [authz](../../../docs/site/modules/core/authz.mdx) |
-| **auth** | Email/password + OAuth 2.1, JWT issuance, sessions-per-device, refresh rotation | [auth/CLAUDE.md](auth/CLAUDE.md) | [auth](../../../docs/site/modules/core/auth.mdx) |
-| **navigation** | Role-filtered sidebar aggregated from every module's `NavItems()` + persisted ordering overrides via `/admin/modules/navigation` | [navigation/CLAUDE.md](navigation/CLAUDE.md) | [navigation](../../../docs/site/modules/core/navigation.mdx) |
-| **logging** | Runtime log-level admin (ADR-0005 Phase F): atomic-snapshot `LevelResolver` swap behind `PerModuleLevelHandler` | [logging/CLAUDE.md](logging/CLAUDE.md) | [logging](../../../docs/site/modules/core/logging.mdx) |
-| **compliance** | Audit trail (`iface.AuditSink`) + GDPR DSR (`iface.PIIProducer` export/erasure), per-tenant KMS crypto-shred, legal hold, retention, SOC2 evidence (ADR-0009, always-on) | [compliance/CLAUDE.md](compliance/CLAUDE.md) | [compliance](../../../docs/site/modules/core/compliance.mdx) |
+| **user** | Global user accounts, profiles, system role field, document expiry tracking | [user/AGENTS.md](user/AGENTS.md) | [user](../../../docs/site/modules/core/user.mdx) |
+| **notification** | Outbound email: SMTP transport, template rendering, preferences, suppressions, idempotency | [notification/AGENTS.md](notification/AGENTS.md) | [notification](../../../docs/site/modules/core/notification.mdx) |
+| **tenant** | Organizations, per-user memberships, plan-based feature entitlements | [tenant/AGENTS.md](tenant/AGENTS.md) | [tenant](../../../docs/site/modules/core/tenant.mdx) |
+| **authz** | Permission catalog, roles (system + custom), role bindings, evaluator with Redis cache | [authz/AGENTS.md](authz/AGENTS.md) | [authz](../../../docs/site/modules/core/authz.mdx) |
+| **auth** | Email/password + OAuth 2.1, JWT issuance, sessions-per-device, refresh rotation | [auth/AGENTS.md](auth/AGENTS.md) | [auth](../../../docs/site/modules/core/auth.mdx) |
+| **navigation** | Role-filtered sidebar aggregated from every module's `NavItems()` + persisted ordering overrides via `/admin/modules/navigation` | [navigation/AGENTS.md](navigation/AGENTS.md) | [navigation](../../../docs/site/modules/core/navigation.mdx) |
+| **logging** | Runtime log-level admin (ADR-0005 Phase F): atomic-snapshot `LevelResolver` swap behind `PerModuleLevelHandler` | [logging/AGENTS.md](logging/AGENTS.md) | [logging](../../../docs/site/modules/core/logging.mdx) |
+| **compliance** | Audit trail (`iface.AuditSink`) + GDPR DSR (`iface.PIIProducer` export/erasure), per-tenant KMS crypto-shred, legal hold, retention, SOC2 evidence (ADR-0009, always-on) | [compliance/AGENTS.md](compliance/AGENTS.md) | [compliance](../../../docs/site/modules/core/compliance.mdx) |
 
 ## Dependency graph
 
@@ -134,5 +134,5 @@ Several pieces of state are written to MongoDB only during `InitAll`. If the col
 - [`../../pkg/sdk/module/module.go`](../../pkg/sdk/module/module.go) — the `Module` interface contract
 - [`../../pkg/sdk/iface/interfaces.go`](../../pkg/sdk/iface/interfaces.go) — every cross-module interface lives in one file
 - [`../../cmd/server/catalog.go`](../../cmd/server/catalog.go) — module catalog, core vs optional split
-- [Root CLAUDE.md](../../../CLAUDE.md) — module map and overall architecture
-- [Backend CLAUDE.md](../../CLAUDE.md) — project structure and dev workflow
+- [Root AGENTS.md](../../../AGENTS.md) — module map and overall architecture
+- [Backend AGENTS.md](../../AGENTS.md) — project structure and dev workflow

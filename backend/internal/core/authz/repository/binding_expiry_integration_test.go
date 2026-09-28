@@ -11,7 +11,7 @@ package repository
 // way of granting the same role again. Before the unique index shipped,
 // that was true for free: a re-grant simply inserted a second row. With the
 // constraint in place, an expired row occupies the tuple permanently
-// (authz_bindings has no TTL and no reaper — see this module's CLAUDE.md),
+// (authz_bindings has no TTL and no reaper — see this module's AGENTS.md),
 // which turned "expired" into "un-re-grantable": CreateBinding surfaced
 // E11000 (the service maps it to a 409) and EnsureBinding returned the dead
 // row while reporting success, so the OwnerRoleBinder call sites

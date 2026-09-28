@@ -1,11 +1,11 @@
 # Module: Notification — Email delivery, templates, preferences
 
 _Path: `/backend/internal/core/notification`_
-_Parent: [../../../CLAUDE.md](../../../CLAUDE.md)_
+_Parent: [../../../AGENTS.md](../../../AGENTS.md)_
 
 <!-- Navigation -->
 
-[← Backend](../../../CLAUDE.md) | [☰ Module Map](../../../../CLAUDE.md#module-map)
+[← Backend](../../../AGENTS.md) | [☰ Module Map](../../../../AGENTS.md#module-map)
 
 <!-- /Navigation -->
 
@@ -52,7 +52,7 @@ Declared in `module.go::Collections()` and auto-created on boot:
 - **Init**: constructs repositories, builds the `SnapshotLoader` over `ConfigService.GetConfig` (**one** document read per send, so values and secrets always come from the same active environment — see [ADR-0019](../../../../docs/adr/0019-notification-multi-sender.md) D4 — while admin UI changes still propagate without a restart), registers the core drivers (`noop`, `smtp`) and the resolver, wires the `NotificationService` and registers it as `ServiceNotificationSender`.
 - **Start**: calls `TemplateService.SeedDefaults(ctx)` which inserts every `auth.*` system template (`verify_email`, `reset_password`, `suspicious_login`, `new_device_login`, `admin_suspicious_login`, `admin_invite`) into the DB if they are missing. Source strings live in `services/default_templates.go` as Go constants.
 - **Stop / HealthCheck**: inherit base no-op from `BaseModule`.
-- **GDPR/DSR** (`services/pii_producer.go`): registers an `iface.PIIProducer` (subject `"notification"`) on `ServicePIIProducerRegistry` at Init. Exports the subject's delivered-message history (`notification_messages`) + per-category delivery preferences (`notification_preferences`); purge deletes both under **either** erase mode. Suppressions are keyed by email address (not `userUUID`), so they ride the auth/email erasure path rather than this producer. Consumed by the [compliance module](../compliance/CLAUDE.md)'s DSR pipeline (ADR-0009). **`notification_marketing_optouts` is address-keyed the same way, and nothing in this codebase erases it on any DSR request, under either erase mode.** This is a position, not an oversight: the opt-out is retained past erasure **by design**, the same reasoning that already applies to a suppression row — deleting the fact that an address asked to stop receiving marketing would let a future marketing send to that same address go out again, exactly the outcome the opt-out exists to prevent. `pii_producer.go`'s own doc comment now names both — suppressions and the marketing opt-out — as the module's address-keyed exclusions from this producer, with the same "retained by design" reasoning stated briefly there and pointing back at this section for the fuller argument.
+- **GDPR/DSR** (`services/pii_producer.go`): registers an `iface.PIIProducer` (subject `"notification"`) on `ServicePIIProducerRegistry` at Init. Exports the subject's delivered-message history (`notification_messages`) + per-category delivery preferences (`notification_preferences`); purge deletes both under **either** erase mode. Suppressions are keyed by email address (not `userUUID`), so they ride the auth/email erasure path rather than this producer. Consumed by the [compliance module](../compliance/AGENTS.md)'s DSR pipeline (ADR-0009). **`notification_marketing_optouts` is address-keyed the same way, and nothing in this codebase erases it on any DSR request, under either erase mode.** This is a position, not an oversight: the opt-out is retained past erasure **by design**, the same reasoning that already applies to a suppression row — deleting the fact that an address asked to stop receiving marketing would let a future marketing send to that same address go out again, exactly the outcome the opt-out exists to prevent. `pii_producer.go`'s own doc comment now names both — suppressions and the marketing opt-out — as the module's address-keyed exclusions from this producer, with the same "retained by design" reasoning stated briefly there and pointing back at this section for the fuller argument.
 
 ## Settings (loaded lazily per send)
 
@@ -691,7 +691,7 @@ module compose and preview notification templates without importing this module'
 
 ## Related
 
-- [Root CLAUDE.md](../../../../CLAUDE.md) — module map and architecture
+- [Root AGENTS.md](../../../../AGENTS.md) — module map and architecture
 - [`pkg/sdk/iface/interfaces.go`](../../../pkg/sdk/iface/interfaces.go) — `NotificationSender` + `SenderDirectory` interface definitions and the sender sentinels
 - [ADR-0019](../../../../docs/adr/0019-notification-multi-sender.md) — sender profiles, category routing, the driver seam
 - [ADR-0021](../../../../docs/adr/0021-explicit-sender-selection.md) — explicit sender selection under operator policy

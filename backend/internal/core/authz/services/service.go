@@ -90,7 +90,7 @@ var ErrBindingUserRequired = errors.New("authz: binding target user is required"
 // ErrBindingExists is returned when CreateBinding targets a
 // (tenantID, userUUID, roleID) tuple that already has a binding — surfaced
 // from the authz_bindings unique compound index (see this module's
-// CLAUDE.md and the 0009 migration) rather than a raw duplicate-key error.
+// AGENTS.md and the 0009 migration) rather than a raw duplicate-key error.
 // Callers that want "grant if absent, otherwise return the existing row"
 // semantics should call EnsureBinding instead.
 var ErrBindingExists = errors.New("authz: role already bound")
@@ -770,7 +770,7 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, userUUID, tenantI
 	// Union of tenant-scoped bindings.
 	//
 	// Platform-reserved keys are skipped here, which makes evaluator
-	// rule 4 in authz/CLAUDE.md — System:true permissions require a
+	// rule 4 in authz/AGENTS.md — System:true permissions require a
 	// GLOBAL grant (by system role, or by a binding with an empty
 	// orgID), never a per-org binding — enforced rather than incidental.
 	// It held only because no seeded tenant role carries a platform key,
@@ -1449,7 +1449,7 @@ func (s *Service) CreateBinding(ctx context.Context, tenantID, grantedBy string,
 	if err := s.bindingGrantGeneration(ctx, grantedBy, userScope(input.UserUUID), func() error {
 		if err := s.repo.CreateBinding(ctx, b); err != nil {
 			// authz_bindings now carries a unique (tenantId, userUUID, roleId)
-			// index (see this module's CLAUDE.md + the 0009 migration). A
+			// index (see this module's AGENTS.md + the 0009 migration). A
 			// plain CreateBinding on a tuple that is already granted surfaces
 			// as E11000 here rather than silently doubling the row — mapped to
 			// a sentinel so the handler can answer 409 instead of leaking the

@@ -70,7 +70,7 @@ import (
 var Analyzer = &analysis.Analyzer{
 	Name:     "tenantscope",
 	Doc:      "reports MongoDB collection queries in addon packages whose filter does not come from shared/tenantrepo.Scope*",
-	URL:      "https://github.com/orkestra/orkestra/blob/main/backend/internal/core/authz/CLAUDE.md#org-scoping-invariants-system-wide",
+	URL:      "https://github.com/orkestra/orkestra/blob/main/backend/internal/core/authz/AGENTS.md#org-scoping-invariants-system-wide",
 	Requires: []*analysis.Analyzer{inspect.Analyzer},
 	Run:      run,
 }
@@ -309,7 +309,7 @@ func analyzeBody(pass *analysis.Pass, body *ast.BlockStmt) {
 		}
 		pass.Reportf(
 			call.Pos(),
-			"tenantscope: %s in addon package must derive its filter from tenantrepo.Scope/MustScope/ScopeAggregate (invariant #1 — see backend/internal/core/authz/CLAUDE.md#org-scoping-invariants-system-wide). Silence with //tenantscope:allow <reason> if the call genuinely operates outside any tenant.",
+			"tenantscope: %s in addon package must derive its filter from tenantrepo.Scope/MustScope/ScopeAggregate (invariant #1 — see backend/internal/core/authz/AGENTS.md#org-scoping-invariants-system-wide). Silence with //tenantscope:allow <reason> if the call genuinely operates outside any tenant.",
 			sel.Sel.Name,
 		)
 		return true

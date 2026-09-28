@@ -254,8 +254,8 @@ check "env-validate: the client refusal names all three keys" "yes" \
     "$(ev_saw 'Client tier is cross-site: CLIENT_API_HOST=api.localhost, CLIENT_API_URL=api.localhost, CLIENT_FRONTEND_URL=localhost')"
 check "env-validate: the client refusal carries the migration keys" "yes" \
     "$(ev_saw 'CLIENT_FRONTEND_URL=http://client.localhost:8081')"
-check "env-validate: the client refusal points at docker/CLAUDE.md" "yes" \
-    "$(ev_saw 'docker/CLAUDE.md')"
+check "env-validate: the client refusal points at docker/AGENTS.md" "yes" \
+    "$(ev_saw 'docker/AGENTS.md')"
 
 check "env-validate: the migrated client triple passes" "0" \
     "$(ev_run CLIENT_API_HOST=client.localhost \

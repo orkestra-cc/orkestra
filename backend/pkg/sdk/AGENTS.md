@@ -1,7 +1,7 @@
 # Orkestra SDK
 
 _Path: `/backend/pkg/sdk`_
-_Parent: [../../CLAUDE.md](../../CLAUDE.md)_
+_Parent: [../../AGENTS.md](../../AGENTS.md)_
 
 ## What this is
 
@@ -491,7 +491,7 @@ the above plus `backend-tenantscope` and a single binary build.
   this file.
 - [Onboarding doc](../../../docs/onboarding/orkestra-sdk.md) — narrative
   walkthrough aimed at new contributors
-- [Backend module system](../../CLAUDE.md#module-system) — how the
+- [Backend module system](../../AGENTS.md#module-system) — how the
   registry consumes the SDK at boot
-- [Core modules](../../internal/core/CLAUDE.md) — the eight always-loaded
+- [Core modules](../../internal/core/AGENTS.md) — the eight always-loaded
   modules, all of which implement `module.Module`

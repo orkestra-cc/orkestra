@@ -96,7 +96,7 @@ src/
 | 4     | Self-subscribe + Stripe Checkout (setup mode) + return URL                   | ❌ removed by ADR-0006 — fork territory |
 | 5     | Subscriptions / transactions / payment-methods dashboard + owner switcher    | ❌ removed by ADR-0006 — fork territory |
 
-Phases 4–5 were built and then removed with the `subscriptions`/`payments` addons — as was phase 2's anonymous **catalog browse**, so the base's anonymous surface is home + signup + email verify. A fork rebuilding that layer can crib from the archived `orkestra-cc/orkestra-addon-{subscriptions,payments}` repos or from this repo's history before the ADR-0006 removal; `CLAUDE.md` keeps the design notes under its "Fork reference" headings.
+Phases 4–5 were built and then removed with the `subscriptions`/`payments` addons — as was phase 2's anonymous **catalog browse**, so the base's anonymous surface is home + signup + email verify. A fork rebuilding that layer can crib from the archived `orkestra-cc/orkestra-addon-{subscriptions,payments}` repos or from this repo's history before the ADR-0006 removal; `AGENTS.md` keeps the design notes under its "Fork reference" headings.
 
 Web OAuth login for the client tier landed with the password-login toggle work (spec: `docs/superpowers/specs/2026-08-29-password-login-toggle-design.md` §4.10).
 
@@ -106,8 +106,8 @@ Web OAuth login for the client tier landed with the password-login toggle work (
 docker build -t orkestra-client:staging frontend-client/
 ```
 
-**One image serves every environment.** `VITE_API_BASE` is no longer a build arg (`ORKESTRA_VERSION` is the only one the `Dockerfile` declares): the nginx entrypoint regenerates `/config.js` from the container's `ORKESTRA_API_BASE` — plus the reserved `ORKESTRA_STRIPE_PUBLISHABLE_KEY` — at start-up, so staging (`app.orkestra.cc`) and prod (`app.orkestra.com`) run the same tag with different env. See "Runtime config" in [CLAUDE.md](CLAUDE.md).
+**One image serves every environment.** `VITE_API_BASE` is no longer a build arg (`ORKESTRA_VERSION` is the only one the `Dockerfile` declares): the nginx entrypoint regenerates `/config.js` from the container's `ORKESTRA_API_BASE` — plus the reserved `ORKESTRA_STRIPE_PUBLISHABLE_KEY` — at start-up, so staging (`app.orkestra.cc`) and prod (`app.orkestra.com`) run the same tag with different env. See "Runtime config" in [AGENTS.md](AGENTS.md).
 
 ## Backend routes this SPA needs
 
-Everything the base calls is already mounted on the client surface: `/v1/auth/client/*` (register, verify-email, login, OAuth start + relay completion, password recovery, MFA) and the `/v1/me/*` self-service slice (profile, avatar, billing identity, DSR). There is no `backend/internal/addons/` in the base — a fork adding a vertical mounts its own routes on `ri.Client.ProtectedRouter`; see "Adding a feature" in [CLAUDE.md](CLAUDE.md).
+Everything the base calls is already mounted on the client surface: `/v1/auth/client/*` (register, verify-email, login, OAuth start + relay completion, password recovery, MFA) and the `/v1/me/*` self-service slice (profile, avatar, billing identity, DSR). There is no `backend/internal/addons/` in the base — a fork adding a vertical mounts its own routes on `ri.Client.ProtectedRouter`; see "Adding a feature" in [AGENTS.md](AGENTS.md).

@@ -294,7 +294,7 @@ validate_env_file() {
                 print_info "  CLIENT_API_HOST=client.localhost"
                 print_info "  CLIENT_API_URL=http://client.localhost:3000"
                 print_info "  CLIENT_FRONTEND_URL=http://client.localhost:8081"
-                print_info "See docker/CLAUDE.md -> \"Client tier: the SPA and the client API must be same-site\","
+                print_info "See docker/AGENTS.md -> \"Client tier: the SPA and the client API must be same-site\","
                 print_info "under \"Upgrading an existing dev checkout\"."
                 errors=$((errors + 1))
             fi
@@ -308,7 +308,7 @@ validate_env_file() {
         print_info "development values are:"
         print_info "  FRONTEND_URL=http://localhost:8080"
         print_info "  VITE_API_URL=http://localhost:3000"
-        print_info "See docker/CLAUDE.md -> \"Client tier: the SPA and the client API must be same-site\","
+        print_info "See docker/AGENTS.md -> \"Client tier: the SPA and the client API must be same-site\","
         print_info "whose closing paragraph covers the operator tier."
         errors=$((errors + 1))
     fi

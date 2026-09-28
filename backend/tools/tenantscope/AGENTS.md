@@ -1,7 +1,7 @@
 # Tool: tenantscope
 
 _Path: `/backend/tools/tenantscope`_
-_Parent: [../../CLAUDE.md](../../CLAUDE.md)_
+_Parent: [../../AGENTS.md](../../AGENTS.md)_
 
 ## What it does
 
@@ -124,7 +124,7 @@ printed to stderr and visible in the job log).
 | `analyzer_test.go` | Unit tests against inline Go source fixtures |
 | `baseline.txt` | Accepted historical drift; shrinks over time |
 | `cmd/tenantscope/main.go` | singlechecker CLI wrapper |
-| `CLAUDE.md` | This file |
+| `AGENTS.md` | This file |
 
 ## Related
 
@@ -132,4 +132,4 @@ printed to stderr and visible in the job log).
 - [ADR-0002 — Metrics label schema](../../../docs/adr/0002-metrics-label-schema.md)
 - [`shared/tenantrepo/scope.go`](../../pkg/sdk/tenantrepo/scope.go) — the helpers the analyzer accepts as scope sources
 - [`shared/middleware/auth.go`](../../internal/shared/middleware/auth.go) — populates the tenant context the helpers read
-- [`authz/CLAUDE.md`](../../internal/core/authz/CLAUDE.md) — the 9-invariant checklist this analyzer enforces #1 of
+- [`authz/AGENTS.md`](../../internal/core/authz/AGENTS.md) — the 9-invariant checklist this analyzer enforces #1 of

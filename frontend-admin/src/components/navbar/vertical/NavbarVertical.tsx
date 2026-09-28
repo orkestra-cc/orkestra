@@ -50,7 +50,7 @@ const writeRealmCollapsedMap = (map: Record<string, boolean>) => {
 // developer role, so non-developers don't see it even in a dev build. NOTE:
 // the `/reference/*` routes themselves are still only build-gated, so this is
 // a cosmetic menu restriction — not an access control. See frontend-admin
-// CLAUDE.md "How navigation works" → Dev-only exception.
+// AGENTS.md "How navigation works" → Dev-only exception.
 const REFERENCE_ROUTES_REGISTERED =
   import.meta.env.DEV || !!import.meta.env.VITE_ENABLE_REFERENCE;
 
