@@ -2,7 +2,8 @@
 
 # Development Token Generator
 # Generates JWT tokens for testing backend endpoints
-# Only works in development and staging environments
+# Only works in development (ENV=development): the backend does not register
+# /dev/token on staging or production — see backend/AGENTS.md
 
 set -e
 
@@ -28,7 +29,7 @@ usage() {
     echo "Usage: $0 [ROLE] [OPTIONS]"
     echo ""
     echo "Generate JWT tokens for testing backend endpoints."
-    echo "Only works in development and staging environments."
+    echo "Only works in development (ENV=development) — /dev/token does not exist on staging or production."
     echo ""
     echo "Arguments:"
     echo "  ROLE              Role for the token (default: interactive selection)"

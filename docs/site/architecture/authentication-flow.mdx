@@ -451,7 +451,7 @@ The credential lifecycle (create, rotate, revoke — max two active credentials,
 
 ## 11. Dev tooling
 
-`scripts/devtoken.sh` mints synthetic-user JWTs for local testing without touching the database. Disabled in production.
+`scripts/devtoken.sh` mints synthetic-user JWTs for local testing without touching the database. Development only — disabled in staging and production.
 
 ```bash
 ./scripts/devtoken.sh administrator                       # default — aud=operator

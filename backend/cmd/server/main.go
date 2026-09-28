@@ -532,8 +532,8 @@ func main() {
 	})
 
 	// Dev-token endpoint (LOCAL DEVELOPMENT ONLY) — synthetic JWTs for
-	// first login + local API testing, used by scripts/devtoken.sh and the
-	// console's "Sign in with dev token" affordance. Re-provided in core
+	// local API testing, used by scripts/devtoken.sh (the console has no
+	// UI for it). Re-provided in core
 	// after ADR-0006 removed the dev addon. Mounted as a raw chi route on
 	// the operator root mux (bypasses Huma, hidden from /docs); never on
 	// the client host. No DB writes.
