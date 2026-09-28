@@ -14,6 +14,8 @@ export interface SectionCardProps {
   /** Muted line(s) under the title — e.g. what the panel is about. */
   subtitle?: ReactNode;
   headerEnd?: ReactNode;
+  /** Classes for the body — e.g. `p-0` for a table that runs edge to edge. */
+  bodyClassName?: string;
   children: ReactNode;
 }
 
@@ -23,6 +25,7 @@ const SectionCard = ({
   title,
   subtitle,
   headerEnd,
+  bodyClassName,
   children
 }: SectionCardProps) => (
   <Card>
@@ -36,7 +39,7 @@ const SectionCard = ({
       </div>
       {headerEnd}
     </Card.Header>
-    <Card.Body>{children}</Card.Body>
+    <Card.Body className={bodyClassName}>{children}</Card.Body>
   </Card>
 );
 
