@@ -20,15 +20,15 @@ dependencies:
 
   # State Management
   provider: ^6.1.1
-  flutter_riverpod: ^3.4.2
+  flutter_riverpod: ^3.4.3
 
   # Networking
-  dio: ^5.11.0
+  dio: ^5.11.1
   web_socket_channel: ^2.4.0
 
   # Storage
   shared_preferences: ^2.2.2
-  flutter_secure_storage: ^11.0.0
+  flutter_secure_storage: ^11.2.0
 
 
   # Code Generation
