@@ -21,6 +21,7 @@ import (
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
+	authServices "github.com/orkestra/backend/internal/core/auth/services"
 	"github.com/orkestra/backend/internal/shared/systeminit"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
@@ -220,6 +221,12 @@ func (s *Service) CreateInitialAdmin(ctx context.Context, email, password, fullN
 	}
 	tokens, err := s.admin.RegisterInitialAdmin(ctx, email, password, fullName, ip)
 	if err != nil {
+		// Losing the first-admin claim means another request created the
+		// administrator between our count check and our claim — the same
+		// fact the count check reports, so it gets the same error (409).
+		if errors.Is(err, authServices.ErrInitialAdminExists) {
+			return nil, ErrAlreadyCompleted
+		}
 		return nil, err
 	}
 

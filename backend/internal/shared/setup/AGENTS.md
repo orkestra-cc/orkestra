@@ -64,7 +64,11 @@ on its own read failure — it controls no phase, authorization, or creation.
 
 - `key: first_admin` — the rollback-capable CAS for the first `super_admin`
   seat. `Release(userUUID)` can delete **only** this record after a failed
-  user create.
+  user create. It is the real race defense: two concurrent first-install
+  requests can both pass `CreateInitialAdmin`'s user-count check, and the
+  one that loses this claim gets `authServices.ErrInitialAdminExists`,
+  which `CreateInitialAdmin` reports as `ErrAlreadyCompleted` — the same
+  `409` a request that arrives after the first admin exists gets.
 - `key: setup_finalization` — the persistent coordinator: bound admin,
   reserved tenant UUID, normalized name/slug, mode, request hash, stage,
   revision, leases, result snapshot. **Nothing deletes it**, and

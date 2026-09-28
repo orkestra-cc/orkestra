@@ -56,6 +56,12 @@ var (
 	// identity across the AdminAuthInviter boundary); the per-surface
 	// method gates of spec §4.3 return it.
 	ErrPasswordLoginDisabled = iface.ErrPasswordLoginDisabled
+	// ErrInitialAdminExists is returned by RegisterInitialAdmin when the
+	// first-admin claim was already taken — the loser of a concurrent
+	// first-install race. The setup service reports it as
+	// setup.ErrAlreadyCompleted (409), the same answer a caller gets when
+	// a user already existed before it arrived.
+	ErrInitialAdminExists = stderrors.New("initial admin already exists")
 )
 
 // lockedError carries the remaining life of the window alongside
@@ -400,8 +406,8 @@ func (s *PasswordAuthService) Register(ctx context.Context, in RegisterInput) (*
 // wizard can log the operator straight in.
 //
 // Atomically claims the system_init first-admin sentinel before creating
-// the user; returns ErrAlreadyCompleted-equivalent behaviour via the
-// claimer if someone else has already taken the seat. The unique index on
+// the user; returns ErrInitialAdminExists if someone else has already
+// taken the seat. The unique index on
 // users.email is a secondary guard but no longer the primary race defense.
 func (s *PasswordAuthService) RegisterInitialAdmin(ctx context.Context, email, password, fullName, ip string) (*authModels.TokenResponse, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
@@ -428,7 +434,7 @@ func (s *PasswordAuthService) RegisterInitialAdmin(ctx context.Context, email, p
 			return nil, fmt.Errorf("claim first admin: %w", err)
 		}
 		if !claimed {
-			return nil, fmt.Errorf("initial admin already exists")
+			return nil, ErrInitialAdminExists
 		}
 	}
 
