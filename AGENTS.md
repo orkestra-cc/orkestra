@@ -115,7 +115,10 @@ docker compose -f docker-compose.dev.yml --env-file .env up -d
 # Backend API: http://localhost:3000
 # API Docs:    http://localhost:3000/docs   (development only unless API_DOCS_ENABLED=true)
 
-# Generate an administrator token for first login (run from project root):
+# Console:     http://localhost:8080   — first visit runs the setup wizard,
+#              which creates the first administrator
+
+# Dev token for curl-ing the API (ENV=development only; run from project root):
 ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
 ```
 

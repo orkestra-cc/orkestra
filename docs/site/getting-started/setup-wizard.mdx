@@ -10,7 +10,7 @@ Every Orkestra installation — a brand-new one, or an existing one that has upg
 
 This is a different thing from `orkestra.sh`'s **Setup** TUI option, which only scaffolds `docker/.env` and secrets before the stack ever starts (see [Installation](/getting-started/installation)). The wizard on this page runs inside the operator console itself, after the backend is already up.
 
-For local development only, the [dev-token shortcut](/getting-started/first-admin-login) mints a token directly and skips the wizard entirely — it does not exist on staging or production.
+The wizard is the only way into the console on a fresh install, local development included. The [dev-token script](/getting-started/first-admin-login#what-devtokensh-is-for) mints tokens for calling the API with `curl` on a development stack. It does not sign you into the console or skip the wizard, and it does not exist on staging or production.
 
 ## What a fresh installation does
 
