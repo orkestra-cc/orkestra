@@ -336,7 +336,7 @@ func (h *Handler) RegisterPublicRoutes(api huma.API) {
 		Method:      http.MethodPost,
 		Path:        "/v1/setup/admin",
 		Summary:     "Create the first administrator (first-install only)",
-		Description: "Creates the initial developer-role user during the first-install wizard. Returns 409 Conflict once any user exists. Email verification is bypassed because this endpoint runs before SMTP can be configured.",
+		Description: "Creates the first administrator — a `super_admin` — during the first-install wizard and signs them in: returns an access token and sets the operator refresh cookie. Returns 409 Conflict once any user exists. Email verification is bypassed because this endpoint runs before SMTP can be configured.",
 		Tags:        []string{"Setup"},
 	}, h.CreateAdmin)
 }
