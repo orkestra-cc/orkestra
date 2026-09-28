@@ -1,11 +1,11 @@
 // Package devtoken serves the dev-only synthetic JWT endpoint used by
-// scripts/devtoken.sh and the operator console's "Sign in with dev token"
-// affordance for first login + local API testing.
+// scripts/devtoken.sh for local API testing. The console has no UI for it.
 //
 // ADR-0006 deleted the `dev` addon that previously owned `POST /dev/token`.
 // The capability is core dev-tooling (not a product vertical), so it is
 // re-provided here as a small shared package mounted directly on the
-// operator root chi router by cmd/server/main.go — gated to non-production.
+// operator root chi router by cmd/server/main.go — development only (not
+// staging, not production; see RegisterRoutes).
 // It writes no database rows: every token is minted for a synthetic user.
 package devtoken
 
