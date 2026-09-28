@@ -72,7 +72,7 @@ if (!db.getCollectionNames().includes(COLL)) {
   //    would rank a grant expiring tomorrow ABOVE a permanent one.
   //
   //    Expired rows are NOT reaped here — that is a separate concern (this
-  //    collection has no TTL and no reaper; see authz/CLAUDE.md). The
+  //    collection has no TTL and no reaper; see authz/AGENTS.md). The
   //    runtime grant paths reap the tuple's own expired row when a role is
   //    granted again, so an expired survivor never becomes un-re-grantable.
   const dups = c.aggregate([

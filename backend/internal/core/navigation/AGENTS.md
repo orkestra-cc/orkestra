@@ -1,9 +1,9 @@
 # Module: Navigation — Dynamic menu aggregator
 
 _Path: `/backend/internal/core/navigation`_
-_Parent: [../CLAUDE.md](../CLAUDE.md)_
+_Parent: [../AGENTS.md](../AGENTS.md)_
 
-[← Core](../CLAUDE.md) | [☰ Backend](../../../CLAUDE.md) | [Root](../../../../CLAUDE.md)
+[← Core](../AGENTS.md) | [☰ Backend](../../../AGENTS.md) | [Root](../../../../AGENTS.md)
 
 ## Purpose
 
@@ -112,5 +112,5 @@ Filtering by tenant kind + global system role still can't express per-org scope 
 - [`../../../pkg/sdk/module/registry.go:146-153`](../../../pkg/sdk/module/registry.go) — where nav items are collected and stamped with owner
 - [`../../../pkg/sdk/module/module.go`](../../../pkg/sdk/module/module.go) — `NavItemSpec` type definition
 - [`../../../pkg/sdk/modulegate/modulegate.go`](../../../pkg/sdk/modulegate/modulegate.go) — `ModuleEnabledChecker` interface
-- [`../authz/CLAUDE.md`](../authz/CLAUDE.md) — the provider the filter should eventually consult
-- [`../../../../frontend-admin/CLAUDE.md`](../../../../frontend-admin/CLAUDE.md) — how the frontend consumes `/v1/navigation`
+- [`../authz/AGENTS.md`](../authz/AGENTS.md) — the provider the filter should eventually consult
+- [`../../../../frontend-admin/AGENTS.md`](../../../../frontend-admin/AGENTS.md) — how the frontend consumes `/v1/navigation`

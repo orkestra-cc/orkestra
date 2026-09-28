@@ -35,7 +35,7 @@ import (
 var Analyzer = &analysis.Analyzer{
 	Name: "errquality",
 	Doc:  "reports client-facing error constructors that leak raw error text, say nothing, or report a server fault as a client error",
-	URL:  "https://github.com/orkestra/orkestra/blob/main/backend/CLAUDE.md#error-code-contract",
+	URL:  "https://github.com/orkestra/orkestra/blob/main/backend/AGENTS.md#error-code-contract",
 	Run:  run,
 }
 

@@ -16,7 +16,7 @@ interface SetupGateProps {
 // The backend fails CLOSED on this read — it never infers a phase — so the
 // frontend must mirror that: a match here is routed to a neutral,
 // retryable "unavailable" screen, never the wizard and never a cached
-// phase. See backend/internal/shared/setup/CLAUDE.md "Fail closed on
+// phase. See backend/internal/shared/setup/AGENTS.md "Fail closed on
 // every authoritative read".
 const SETUP_STATUS_UNAVAILABLE_CODE = 'setup.status_unavailable';
 // Backend always sends Retry-After on this 503 (routes.go hardcodes "5"),

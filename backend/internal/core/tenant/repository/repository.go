@@ -863,7 +863,7 @@ func (r *Repository) RestoreTenant(ctx context.Context, uuid string) error {
 // <= 0 means no limit.
 //
 // This applies the "operational tenant" predicate, deliberately NOT the
-// provisioning-slot one (see CLAUDE.md#lifecycle): a suspended, archived,
+// provisioning-slot one (see AGENTS.md#lifecycle): a suspended, archived,
 // purged or soft-deleted tenant is never returned, so boot reconciliation
 // can never adopt one as the platform default.
 //

@@ -188,7 +188,7 @@ Docker's default JSON log driver grows unbounded. Configure rotation in `/etc/do
 
 Restart the daemon (`systemctl restart docker`) — existing containers keep their old config until next recreate, so re-run `docker compose up -d`.
 
-For structured JSON logs shipping straight to Loki, use [the observability stack](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md#self-hosted-otel-stack-docker-composeobservabilityyml):
+For structured JSON logs shipping straight to Loki, use [the observability stack](https://github.com/orkestra-cc/orkestra/blob/main/docker/AGENTS.md#self-hosted-otel-stack-docker-composeobservabilityyml):
 
 ```bash
 docker compose -f docker-compose.observability.yml --env-file .env up -d

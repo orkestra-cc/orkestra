@@ -1,11 +1,11 @@
 # Frontend Client — Tier-2 External Client SPA
 
 _Path: `/frontend-client`_
-_Parent: [../CLAUDE.md](../CLAUDE.md)_
+_Parent: [../AGENTS.md](../AGENTS.md)_
 
-[← Root](../CLAUDE.md) | [☰ Module Map](../CLAUDE.md#module-map) | [Operator console](../frontend-admin/CLAUDE.md)
+[← Root](../AGENTS.md) | [☰ Module Map](../AGENTS.md#module-map) | [Operator console](../frontend-admin/AGENTS.md)
 
-The customer-facing SPA — sibling to the operator console at [`../frontend-admin`](../frontend-admin/CLAUDE.md), with a separate origin, cookie domain, design system, and data layer. External (Tier-2) tenants register, manage their account (profile, security/MFA, billing identity), and log in here.
+The customer-facing SPA — sibling to the operator console at [`../frontend-admin`](../frontend-admin/AGENTS.md), with a separate origin, cookie domain, design system, and data layer. External (Tier-2) tenants register, manage their account (profile, security/MFA, billing identity), and log in here.
 
 > **ADR-0006:** this SPA is a **thin auth/account demo**. The catalog → subscribe → Stripe-checkout → transactions → payment-methods flows left with the `subscriptions`/`payments` addons; only login + account + billing-identity remain. The sections describing subscribe/Stripe are retained as a record of how a fork rebuilds that layer; they are headed **Fork reference**, and nothing under them exists in this tree.
 
@@ -320,7 +320,7 @@ The Vite dev server runs inside Docker; if you need to rebuild outside Docker (e
 **`/config.js` is served `no-store` on both paths, and that is load-bearing.** It is rewritten on every container start, so a client holding a stale copy points at the wrong `apiBase` until its cache expires. Prod nginx sets the header in `Dockerfile` (`location = /config.js`); the dev server — dev **and** staging — gets it from the `orkestra-client-runtime-config` plugin in `vite.config.ts`, which serves the file itself rather than letting Vite's public-dir middleware answer. Two reasons, both non-obvious:
 
 - Vite's public-dir middleware (sirv) writes `Cache-Control` **unconditionally into the response head**, so a middleware that only calls `res.setHeader` upstream of it is silently overridden. Short-circuiting is the only way to own the header — the same shape `healthCheckPlugin` uses.
-- `no-cache`, which is what sirv sends by default, is not "don't cache" but "cache and revalidate" — enough for a CDN to keep a copy. Cloudflare classifies `.js` as a static asset **by extension** and replaces the origin header with its own default `max-age`; the operator console served a runtime config four hours stale after a deploy because of exactly this ([`frontend-admin/CLAUDE.md`](../frontend-admin/CLAUDE.md), Runtime config).
+- `no-cache`, which is what sirv sends by default, is not "don't cache" but "cache and revalidate" — enough for a CDN to keep a copy. Cloudflare classifies `.js` as a static asset **by extension** and replaces the origin header with its own default `max-age`; the operator console served a runtime config four hours stale after a deploy because of exactly this ([`frontend-admin/AGENTS.md`](../frontend-admin/AGENTS.md), Runtime config).
 
 The plugin also makes the missing-file case legible: when `config.js` is absent it logs `[orkestra-client-runtime-config] /config.js not served from disk` and falls through to the old behaviour, so the `nosniff` block above announces its cause instead of being a puzzle. If a middleware edit to `vite.config.ts` looks inert, restart the container: Vite's own config reload logs `server restarted` but cannot be relied on to replace a middleware a previous `configureServer` registered (it did pick this plugin up here, and did not on the operator console).
 
@@ -363,8 +363,8 @@ The base SPA is a **thin auth/account demo**: anonymous home + signup + email ve
 
 ## Related
 
-- [Operator console](../frontend-admin/CLAUDE.md) — the Tier-1 admin SPA (different stack, different audience, different cookie domain)
-- [Backend auth core](../backend/internal/core/auth/CLAUDE.md) — `/v1/auth/client/*` audience-split routes, JWT claims, refresh-cookie behaviour
-- [Backend tenant core](../backend/internal/core/tenant/CLAUDE.md) — ownership model, why `org_owner` is the proxy used here
+- [Operator console](../frontend-admin/AGENTS.md) — the Tier-1 admin SPA (different stack, different audience, different cookie domain)
+- [Backend auth core](../backend/internal/core/auth/AGENTS.md) — `/v1/auth/client/*` audience-split routes, JWT claims, refresh-cookie behaviour
+- [Backend tenant core](../backend/internal/core/tenant/AGENTS.md) — ownership model, why `org_owner` is the proxy used here
 - [Authentication flow doc](../docs/site/architecture/authentication-flow.mdx) — wire-level walkthrough of the post-PR-D world
-- [Docker compose](../docker/CLAUDE.md) — `client-frontend` service / container wiring
+- [Docker compose](../docker/AGENTS.md) — `client-frontend` service / container wiring

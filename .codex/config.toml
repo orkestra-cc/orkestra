@@ -1,7 +1,3 @@
-# Keep CLAUDE.md as the canonical project-instructions filename for both
-# Claude Code and Codex. AGENTS.md still takes precedence where it exists.
-project_doc_fallback_filenames = ["CLAUDE.md"]
-
 # Codex does not read Claude Code's .mcp.json directly. Keep these entries in
 # sync with .mcp.json until the clients support a shared project MCP format.
 [mcp_servers.dart]

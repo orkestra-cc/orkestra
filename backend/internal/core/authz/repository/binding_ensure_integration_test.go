@@ -13,7 +13,7 @@ package repository
 // mongo.IsDuplicateKeyError translation actually recognizes the E11000
 // shape these code paths depend on. The harness below builds that index
 // itself, exactly as module.go's Collections() declares it (see
-// authz/CLAUDE.md) — production boot goes through ensureCollections
+// authz/AGENTS.md) — production boot goes through ensureCollections
 // instead, which is create-only and non-fatal, hence the 0009 migration.
 
 import (
@@ -52,7 +52,7 @@ func liveBindingRepository(t *testing.T) (*Repository, func()) {
 	db := client.Database("authz_bindings_ensure_" + uuid.NewString())
 	repo := New(db)
 	// Mirror module.go's Collections() CollBindings unique index — see
-	// this package's parent module CLAUDE.md and
+	// this package's parent module AGENTS.md and
 	// docs/migrations/0009_authz_bindings_unique.md. Production boot
 	// creates this via ensureCollections; here the test stands it up
 	// directly so EnsureBinding's upsert races the real constraint.

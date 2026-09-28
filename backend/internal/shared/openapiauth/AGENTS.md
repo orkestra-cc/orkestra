@@ -1,7 +1,7 @@
 # Orkestra OpenAPI auth — shared minter for openapi.it bearers
 
 _Path: `/backend/internal/shared/openapiauth`_
-_Parent: [../../../CLAUDE.md](../../../CLAUDE.md)_
+_Parent: [../../../AGENTS.md](../../../AGENTS.md)_
 
 ## Module home
 

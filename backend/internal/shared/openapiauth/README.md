@@ -10,7 +10,7 @@
 [![Latest tag](https://img.shields.io/github/v/tag/orkestra-cc/orkestra-openapi-auth?sort=semver&style=flat-square)](https://github.com/orkestra-cc/orkestra-openapi-auth/tags)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
 
-[Monorepo](https://github.com/orkestra-cc/orkestra) · [Module docs](CLAUDE.md)
+[Monorepo](https://github.com/orkestra-cc/orkestra) · [Module docs](AGENTS.md)
 
 </div>
 

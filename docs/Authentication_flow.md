@@ -9,11 +9,11 @@
 # Authentication Flow
 
 *Path: `/docs`*
-*Parent: [../CLAUDE.md](../CLAUDE.md)*
+*Parent: [../AGENTS.md](../AGENTS.md)*
 
-[← Root](../CLAUDE.md) | [ADR-0003 — three-audience host split](adr/0003-three-audience-host-split.md) | [Auth module reference](../backend/internal/core/auth/CLAUDE.md)
+[← Root](../AGENTS.md) | [ADR-0003 — three-audience host split](adr/0003-three-audience-host-split.md) | [Auth module reference](../backend/internal/core/auth/AGENTS.md)
 
-This document is the cross-cutting walkthrough of how a request becomes an authenticated identity in Orkestra. It does **not** enumerate every endpoint — for the full per-route table see [`backend/internal/core/auth/CLAUDE.md`](../backend/internal/core/auth/CLAUDE.md), which the auth module owns and keeps current. Read this doc when you want the *story*; read the module CLAUDE.md when you want the *contract*.
+This document is the cross-cutting walkthrough of how a request becomes an authenticated identity in Orkestra. It does **not** enumerate every endpoint — for the full per-route table see [`backend/internal/core/auth/AGENTS.md`](../backend/internal/core/auth/AGENTS.md), which the auth module owns and keeps current. Read this doc when you want the *story*; read the module AGENTS.md when you want the *contract*.
 
 ---
 
@@ -42,7 +42,7 @@ Every auth route is mounted twice — once under `/v1/auth/operator/...` (operat
 - **JWT service** — both use the same RS256 key pair, but stamp `aud=operator` / `aud=client` at issuance
 - **Refresh-cookie `Domain` attribute** — `console.orkestra.com` vs `api.orkestra.com` (see §6)
 
-Use `{tier}` below as a stand-in for `operator` or `client`. The full route inventory (including MFA, WebAuthn, device trust, admin MFA-reset) is in the [auth module CLAUDE.md](../backend/internal/core/auth/CLAUDE.md#http-endpoints).
+Use `{tier}` below as a stand-in for `operator` or `client`. The full route inventory (including MFA, WebAuthn, device trust, admin MFA-reset) is in the [auth module AGENTS.md](../backend/internal/core/auth/AGENTS.md#http-endpoints).
 
 ### Public endpoints (no bearer required)
 
@@ -123,7 +123,7 @@ All access and refresh tokens are RS256-signed JWTs from the same key pair (`AUT
 
 Same shape, `type: "refresh"`, longer expiry (`JWT_REFRESH_TOKEN_EXPIRY`, default 30d). Refresh tokens carry the **same `aud` claim** as the access token they paired with, so a refresh token issued for the operator host cannot be redeemed on the client host.
 
-Refresh tokens rotate on every use with family detection: each login mints a new `FamilyID`, every rotation preserves it via an atomic CAS, and replaying a rotated token revokes the entire family with `revokedReason="replay_detected"`. A durable tier-scoped family-revocation record fences a successor that races replay revocation, so it cannot escape as an active token. Retain rotated/revoked rows for at least one refresh-token TTL so replay detection remains effective (see [auth module CLAUDE.md → Key invariants](../backend/internal/core/auth/CLAUDE.md#key-invariants)).
+Refresh tokens rotate on every use with family detection: each login mints a new `FamilyID`, every rotation preserves it via an atomic CAS, and replaying a rotated token revokes the entire family with `revokedReason="replay_detected"`. A durable tier-scoped family-revocation record fences a successor that races replay revocation, so it cannot escape as an active token. Retain rotated/revoked rows for at least one refresh-token TTL so replay detection remains effective (see [auth module AGENTS.md → Key invariants](../backend/internal/core/auth/AGENTS.md#key-invariants)).
 
 ---
 
@@ -161,7 +161,7 @@ Both flows share `{tier}_email_tokens` (TTL: 24h verification, 30 min reset; bot
 
 ## 5. OAuth 2.1 flow
 
-Provider configuration (client IDs / secrets / redirect URIs / mobile-platform IDs) is admin-managed in `module_configs` and resolved live on each OAuth request via `OAuthConfigResolver`; edits take effect without a service restart. Env vars are seed-only — once the document exists, editing the env has no effect without a wipe. See [auth module CLAUDE.md → Runtime configuration](../backend/internal/core/auth/CLAUDE.md#runtime-configuration) for the schema and seed table.
+Provider configuration (client IDs / secrets / redirect URIs / mobile-platform IDs) is admin-managed in `module_configs` and resolved live on each OAuth request via `OAuthConfigResolver`; edits take effect without a service restart. Env vars are seed-only — once the document exists, editing the env has no effect without a wipe. See [auth module AGENTS.md → Runtime configuration](../backend/internal/core/auth/AGENTS.md#runtime-configuration) for the schema and seed table.
 
 ### Web flow
 
@@ -304,11 +304,11 @@ The audience flag (PR-D D-10) is the difference between "I can hit `console.*`" 
 
 | Question | Source of truth |
 |---|---|
-| What endpoints exist? | [auth module CLAUDE.md → HTTP endpoints](../backend/internal/core/auth/CLAUDE.md#http-endpoints) |
+| What endpoints exist? | [auth module AGENTS.md → HTTP endpoints](../backend/internal/core/auth/AGENTS.md#http-endpoints) |
 | Why the audience split? | [ADR-0003](adr/0003-three-audience-host-split.md) |
-| What env vars does auth read? | [auth module CLAUDE.md → Runtime configuration](../backend/internal/core/auth/CLAUDE.md#runtime-configuration) |
-| What collections does auth own? | [auth module CLAUDE.md → MongoDB collections](../backend/internal/core/auth/CLAUDE.md#mongodb-collections) |
-| How are cookie domains configured per audience? | [docker/CLAUDE.md → Host split](../docker/CLAUDE.md#host-split-adr-0003) |
-| Are there hard invariants I shouldn't break? | [auth module CLAUDE.md → Key invariants](../backend/internal/core/auth/CLAUDE.md#key-invariants) and **Rules** |
+| What env vars does auth read? | [auth module AGENTS.md → Runtime configuration](../backend/internal/core/auth/AGENTS.md#runtime-configuration) |
+| What collections does auth own? | [auth module AGENTS.md → MongoDB collections](../backend/internal/core/auth/AGENTS.md#mongodb-collections) |
+| How are cookie domains configured per audience? | [docker/AGENTS.md → Host split](../docker/AGENTS.md#host-split-adr-0003) |
+| Are there hard invariants I shouldn't break? | [auth module AGENTS.md → Key invariants](../backend/internal/core/auth/AGENTS.md#key-invariants) and **Rules** |
 | How do I generate dev tokens? | §10 above; full flag list in `scripts/devtoken.sh --help` |
 | What's the JWT validator do under the hood? | `backend/internal/core/auth/services/jwt_service.go` (`ValidateAccessToken`) and `backend/internal/shared/middleware/audience.go` (`RequireAudience`) |

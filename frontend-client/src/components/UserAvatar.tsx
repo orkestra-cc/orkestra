@@ -7,7 +7,7 @@ import { avatarColor, initialsFor } from "@/lib/avatarColor";
 //
 // Pure Tailwind — by design separate from the operator console's
 // UserAvatar (which leans on Bootstrap classes) per
-// frontend-client/CLAUDE.md "Don't import from ../frontend-admin".
+// frontend-client/AGENTS.md "Don't import from ../frontend-admin".
 
 export interface UserAvatarProfile {
   id?: string;

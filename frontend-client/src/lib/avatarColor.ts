@@ -4,7 +4,7 @@
 // console's palette so a human switching between the two SPAs sees
 // the same color for the same account — but kept as a separate file
 // because frontend-admin and frontend-client are stack-isolated (no
-// shared imports per ../CLAUDE.md).
+// shared imports per ../AGENTS.md).
 
 const PALETTE: ReadonlyArray<{ bg: string; fg: string }> = [
   { bg: "#5d6b98", fg: "#ffffff" },

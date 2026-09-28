@@ -78,7 +78,7 @@ Run through this whenever you edit a `Collections()` method or a repository file
 4. **Follow the name to its usage.** Every `db.Collection(...)` call must reference the named constant, never a literal.
 5. **Growing from 1 to 2 collections.** The pre-existing collection gains the prefix in the same commit. Flag the breaking rename to the user — existing deployments need `db.collection.renameCollection(...)` in mongosh; there is no automated migration.
 6. **New modules/addons.** Default to prefixed names from day one, even for a single collection. Cheaper than renaming later.
-7. **Docs sync.** Update the module's `CLAUDE.md` "MongoDB collections" table in the same change.
+7. **Docs sync.** Update the module's `AGENTS.md` "MongoDB collections" table in the same change.
 
 ## Where Collection Names Live
 

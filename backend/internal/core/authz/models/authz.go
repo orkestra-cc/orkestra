@@ -40,7 +40,7 @@ type Role struct {
 // system role). Optional ExpiresAt supports contractor/trial grants.
 //
 // There is NO TTL index on expiresAt (a plain index only) and no background
-// reaper — both are tracked as future work in this module's CLAUDE.md — so
+// reaper — both are tracked as future work in this module's AGENTS.md — so
 // an expired row survives indefinitely. Because the unique
 // (tenantId, userUUID, roleId) index would then let a dead grant block
 // every future grant of that role, the repository's CreateBinding and

@@ -643,7 +643,7 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		// D9 wire contract for a legitimately locked-out user (429 +
 		// Retry-After → 401), which is a spec decision, not an
 		// implementation one. See "Attempt counters (login lockout)" in
-		// the module CLAUDE.md before touching this.
+		// the module AGENTS.md before touching this.
 		return nil, LockedAfter(retryAfter)
 	}
 	if user.PasswordHash == "" {

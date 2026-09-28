@@ -1,9 +1,9 @@
 # Module: Logging — Runtime log-level admin
 
 _Path: `/backend/internal/core/logging`_
-_Parent: [../CLAUDE.md](../CLAUDE.md)_
+_Parent: [../AGENTS.md](../AGENTS.md)_
 
-[← Core](../CLAUDE.md) | [☰ Backend](../../../CLAUDE.md) | [Root](../../../../CLAUDE.md)
+[← Core](../AGENTS.md) | [☰ Backend](../../../AGENTS.md) | [Root](../../../../AGENTS.md)
 
 ## Purpose
 
@@ -111,4 +111,4 @@ The service implements both `utils.LevelResolver` (consumed by `PerModuleLevelHa
 - [`../../shared/utils/logger.go`](../../shared/utils/logger.go) — `SwapLevelResolver` global called by `main.go`
 - [`../../../pkg/sdk/module/services.go`](../../../pkg/sdk/module/services.go) — `ServiceLogLevelResolver` / `ServiceLogLevelModuleNames` keys
 - [`../../../../docs/adr/0005-observability-logging-tracing-metrics.md`](../../../../docs/adr/0005-observability-logging-tracing-metrics.md) — full Phase F design
-- [`../navigation/CLAUDE.md`](../navigation/CLAUDE.md) — neighbour core module; same module-interface shape
+- [`../navigation/AGENTS.md`](../navigation/AGENTS.md) — neighbour core module; same module-interface shape

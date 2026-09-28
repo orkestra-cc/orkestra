@@ -258,7 +258,7 @@ func Load() (*Config, error) {
 		// api.localhost are different *sites* to a browser: an api.* client
 		// API cannot store or send them. Ports play no part in a site, so
 		// the SPA on :8081 and the API on :3000 are same-site (and still
-		// cross-origin). See docker/CLAUDE.md, "Client tier: the SPA and
+		// cross-origin). See docker/AGENTS.md, "Client tier: the SPA and
 		// the client API must be same-site".
 		defaultClientHost = "client.localhost:3000"
 	}

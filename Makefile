@@ -156,8 +156,8 @@ frontend-client-clean:
 # ============================================================================
 
 .PHONY: install install-hooks fmt ci-help
-.PHONY: ci ci-all ci-mcp ci-backend ci-frontend-admin ci-frontend-client ci-mobile
-.PHONY: mcp-check mcp-test
+.PHONY: ci ci-all ci-mcp ci-agents ci-backend ci-frontend-admin ci-frontend-client ci-mobile
+.PHONY: mcp-check mcp-test agents-check agents-test
 .PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks backend-script-tests backend-gotenberg-hardening
 .PHONY: admin-lockcheck admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-lockcheck client-typecheck client-lint client-test client-build
@@ -258,8 +258,11 @@ ci:
 	@if [ -n "$(CLIENT_CHANGED)"  ]; then $(MAKE) ci-frontend-client; fi
 	@if [ -n "$(MOBILE_CHANGED)"  ]; then $(MAKE) ci-mobile;          fi
 	@if [ -n "$(MCP_CHANGED)"     ]; then $(MAKE) ci-mcp;             fi
+	@# No path filter: agents-check is sub-second, and a filter would miss the
+	@# untracked CLAUDE.md that /init writes in a new directory.
+	@$(MAKE) --no-print-directory agents-check
 
-ci-all: ci-mcp ci-backend ci-frontend-admin ci-frontend-client ci-mobile
+ci-all: ci-mcp ci-agents ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 	@echo "All surface checks passed."
 
 # ---- Shared MCP configuration ----
@@ -272,6 +275,20 @@ mcp-check:
 
 mcp-test:
 	@python3 scripts/test-mcp-sync.py
+
+# ---- Agent instruction files ----
+
+# AGENTS.md is the only instruction filename: a single CLAUDE.md (or
+# CLAUDE.local.md) makes Claude Code drop every AGENTS.md. See
+# docs/onboarding/claude-codex-interoperability.md.
+ci-agents: agents-test agents-check
+	@echo "Agent instructions CI: OK"
+
+agents-check:
+	@python3 scripts/check-agent-instructions.py
+
+agents-test:
+	@python3 scripts/test-agent-instructions.py
 
 # ---- Backend ----
 
@@ -506,6 +523,7 @@ ci-help:
 	@echo "  make ci-mobile             - Flutter CI (lockfile + analyze + test)"
 	@echo "  make ci-mcp                - Shared Claude Code/Codex MCP config check"
 	@echo "  make mcp-check             - Verify project MCP definitions are in sync"
+	@echo "  make agents-check          - Verify the repo has AGENTS.md only (no CLAUDE.md)"
 	@echo ""
 	@echo "  make admin-lockcheck       - Is frontend-admin/package-lock.json in sync? (no install)"
 	@echo "  make client-lockcheck      - Same for frontend-client"

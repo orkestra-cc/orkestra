@@ -32,7 +32,7 @@ body:
     id: tenancy-tier
     attributes:
       label: Tenancy tier (if relevant)
-      description: Orkestra has two tiers — pick the one the bug surfaces in. See [CLAUDE.md](https://github.com/orkestra-cc/orkestra/blob/main/CLAUDE.md#tenancy-model).
+      description: Orkestra has two tiers — pick the one the bug surfaces in. See [AGENTS.md](https://github.com/orkestra-cc/orkestra/blob/main/AGENTS.md#tenancy-model).
       options:
         - Tier-1 (internal operator)
         - Tier-2 (external customer)

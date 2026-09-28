@@ -39,7 +39,7 @@ The goal is to add a "Widgets" module with a list page and a detail page.
 
 ### 1. Backend prerequisites
 
-Create the backend addon (see `backend/CLAUDE.md` for details). The backend module's `NavItems()` should declare the menu entries that will appear in the sidebar:
+Create the backend addon (see `backend/AGENTS.md` for details). The backend module's `NavItems()` should declare the menu entries that will appear in the sidebar:
 
 ```go
 func (m *WidgetsModule) NavItems() []module.NavItemSpec {

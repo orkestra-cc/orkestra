@@ -1,7 +1,7 @@
 package tenant
 
 // Versioned boot reconciliation — the upgrade path an existing installation
-// takes the first time it boots this code. See CLAUDE.md#boot-reconciliation
+// takes the first time it boots this code. See AGENTS.md#boot-reconciliation
 // for the contract and the rule for bumping the version below.
 
 import (

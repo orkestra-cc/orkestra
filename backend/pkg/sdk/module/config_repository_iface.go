@@ -24,7 +24,7 @@ type ConfigRepository interface {
 
 // ConfigRepository is provided TO ModuleConfigService by the host, never
 // implemented BY a module — so, like RedisClient, it is outside the SDK's
-// additive-only rule for consumer interfaces (see pkg/sdk/CLAUDE.md,
+// additive-only rule for consumer interfaces (see pkg/sdk/AGENTS.md,
 // "Versioning policy"). A fork that substitutes its own repository (a test
 // double, typically) tracks it.
 var _ ConfigRepository = (*ModuleConfigRepository)(nil)

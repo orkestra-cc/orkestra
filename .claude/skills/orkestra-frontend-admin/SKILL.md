@@ -7,7 +7,7 @@ description: Use when creating or modifying ANY UI in frontend-admin/ (the Tier-
 
 Mandatory for all UI work in `frontend-admin/` (the Tier-1 operator console).
 
-**Scope**: `frontend-admin/` only. The sibling `frontend-client/` SPA is out of scope — it has its own design system, primitives, and patterns; consult that project's own `CLAUDE.md` instead.
+**Scope**: `frontend-admin/` only. The sibling `frontend-client/` SPA is out of scope — it has its own design system, primitives, and patterns; consult that project's own `AGENTS.md` instead.
 
 ## Pre-flight contract (before any JSX)
 
@@ -255,4 +255,4 @@ If the request is to add a new feature module (not just a page), use the canonic
 - ✅ Lazy-load route components in module manifests (`React.lazy()`).
 - ✅ Co-locate page-only sub-components next to the page.
 - ✅ Treat `src/reference/` as the Orkestra-owned design-reference library: copy from it, and when you build a reusable primitive, put it in `components/common/` and add a live showcase under `src/reference/<subfolder>/` (register in `src/routes/referenceRoutes.tsx` + `src/reference/navigation/referenceRoutes.ts`), e.g. `reference/components/ui/StatCards.tsx` → `components/common/StatCard` + `SectionCard`.
-- ✅ Read `frontend-admin/CLAUDE.md` ("Component reuse hierarchy") when in doubt — it is the source of truth over this skill.
+- ✅ Read `frontend-admin/AGENTS.md` ("Component reuse hierarchy") when in doubt — it is the source of truth over this skill.

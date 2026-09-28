@@ -9,7 +9,7 @@ Go 1.26.8 | Huma v2 (OpenAPI-first) | MongoDB 8.0 | Redis 8.2 | Chi router | AIR
 ## Module System
 
 Every module implements the `Module` interface from the Orkestra SDK
-(`pkg/sdk/module/module.go` — see [`pkg/sdk/CLAUDE.md`](pkg/sdk/CLAUDE.md)
+(`pkg/sdk/module/module.go` — see [`pkg/sdk/AGENTS.md`](pkg/sdk/AGENTS.md)
 for the SDK boundary rules and [`../docs/onboarding/orkestra-sdk.md`](../docs/onboarding/orkestra-sdk.md)
 for the new-developer walkthrough):
 
@@ -107,7 +107,7 @@ Each module follows: `module.go` → `handlers/` → `services/` → `repository
 7. Use `pkg/sdk/iface` interfaces for cross-module deps — add new interfaces there if needed
 8. Use `deps.Services.Register(key, impl)` to expose services to other modules
 
-Users enable the module via the admin UI at `/admin/modules` (takes effect immediately, no restart needed). For first boot of a fresh install, the module's `ConfigSchema().EnvVar` fields seed the initial `module_configs` document from the host environment, and its `EnabledByDefault` decides the initial enabled state — see [docker/CLAUDE.md](../docker/CLAUDE.md) for the env-var-vs-admin-UI split.
+Users enable the module via the admin UI at `/admin/modules` (takes effect immediately, no restart needed). For first boot of a fresh install, the module's `ConfigSchema().EnvVar` fields seed the initial `module_configs` document from the host environment, and its `EnabledByDefault` decides the initial enabled state — see [docker/AGENTS.md](../docker/AGENTS.md) for the env-var-vs-admin-UI split.
 
 ## API Endpoints
 
@@ -219,7 +219,7 @@ docker compose logs -f backend
 
 The dev backend builds `docker/Dockerfile.dev-backend` (golang:alpine, AIR pre-baked; a fork with a Chainguard subscription overrides the base via the `GO_BASE` build-arg). One infra base + one app file per environment (`docker-compose.{dev,staging,prod}.yml`) + an opt-in `docker-compose.observability.yml` — ADR-0006 removed the `minimal`/`full` runtime-profile compose files.
 
-**WSL2 caveat**: AIR doesn't detect file changes on Windows mounts. Rebuild manually (container names are stack-namespaced — `${APP_NAME}-<svc>-${ENV}`; example below uses the shipped defaults, **not necessarily your stack** — read yours from `docker/.env`, see [docker/CLAUDE.md](../docker/CLAUDE.md#multi-stack-model)):
+**WSL2 caveat**: AIR doesn't detect file changes on Windows mounts. Rebuild manually (container names are stack-namespaced — `${APP_NAME}-<svc>-${ENV}`; example below uses the shipped defaults, **not necessarily your stack** — read yours from `docker/.env`, see [docker/AGENTS.md](../docker/AGENTS.md#multi-stack-model)):
 ```bash
 docker exec orkestra-backend-development go build -o /app/tmp/main ./cmd/server/
 docker restart orkestra-backend-development
@@ -239,7 +239,7 @@ docker restart orkestra-backend-development
 
 ## Rules
 
-- **Read the module's own CLAUDE.md** before modifying it — all eight core modules (`user`, `notification`, `tenant`, `authz`, `auth`, `navigation`, `logging`, `compliance`) have one under `internal/core/<name>/`. Each also has a published page under [`../docs/site/modules/core/`](../docs/site/modules/core/) — the CLAUDE.md is the contract, the page is the reference; **update both** when you change a module.
+- **Read the module's own AGENTS.md** before modifying it — all eight core modules (`user`, `notification`, `tenant`, `authz`, `auth`, `navigation`, `logging`, `compliance`) have one under `internal/core/<name>/`. Each also has a published page under [`../docs/site/modules/core/`](../docs/site/modules/core/) — the AGENTS.md is the contract, the page is the reference; **update both** when you change a module.
 - **Use the module system** — don't add routes or init logic directly to main.go
 - **Use `pkg/sdk/iface`** for cross-module deps — never import another module's services package from module.go
 - **Validate all inputs**, implement RBAC on every endpoint, never expose secrets in responses

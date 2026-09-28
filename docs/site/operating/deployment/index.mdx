@@ -34,7 +34,7 @@ Regardless of shape, you'll be reading one or more of these compose files. They 
 
 **Module configuration** (OAuth credentials, SMTP, per-module enable flags — plus whatever config keys a fork's addons declare, e.g. payment or API-provider keys) lives in MongoDB (`module_configs` collection) and is edited at `/admin/modules`. Secrets are AES-256-GCM-encrypted at rest.
 
-A module's `ConfigSchema().EnvVar` is consulted **only on first-boot seeding** — env-var changes after that boot have no effect. The single source of truth is the admin UI. See [docker/CLAUDE.md "What belongs in .env / compose vs /admin/modules"](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md) for the full bucket split.
+A module's `ConfigSchema().EnvVar` is consulted **only on first-boot seeding** — env-var changes after that boot have no effect. The single source of truth is the admin UI. See [docker/AGENTS.md "What belongs in .env / compose vs /admin/modules"](https://github.com/orkestra-cc/orkestra/blob/main/docker/AGENTS.md) for the full bucket split.
 
 ## Related guides
 

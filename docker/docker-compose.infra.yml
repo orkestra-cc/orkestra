@@ -99,7 +99,7 @@ services:
     # publishes an advisory, not only when something breaks.
     #
     # Keep the patch in step with .github/workflows/backend.yml and with the
-    # Tech Stack tables in CLAUDE.md / backend/CLAUDE.md / backend/README.md
+    # Tech Stack tables in AGENTS.md / backend/AGENTS.md / backend/README.md
     # / docs/site/intro.mdx, which name this version. The Kubernetes
     # reference deploys plain redis too, so the two now agree.
     image: redis:8.2.10-alpine

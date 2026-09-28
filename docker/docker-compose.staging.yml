@@ -326,7 +326,7 @@ services:
       - |
         cat > /app/public/config.js <<EOF
         // Generated at container start by docker-compose.staging.yml.
-        // public/config.js is gitignored — see frontend-admin/CLAUDE.md.
+        // public/config.js is gitignored — see frontend-admin/AGENTS.md.
         window.__ORKESTRA_CONFIG__ = {
           apiUrl: "$${VITE_API_URL}",
           wsUrl: "$${VITE_WS_URL}",
@@ -386,7 +386,7 @@ services:
       - |
         cat > /app/public/config.js <<EOF
         // Generated at container start by docker-compose.staging.yml.
-        // Gitignored — do not commit. See frontend-client/CLAUDE.md.
+        // Gitignored — do not commit. See frontend-client/AGENTS.md.
         window.__ORKESTRA_CONFIG__ = {
           apiBase: "$${VITE_API_BASE}",
           stripePublishableKey: "$${VITE_STRIPE_PUBLISHABLE_KEY}"

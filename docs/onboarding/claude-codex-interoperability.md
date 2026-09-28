@@ -6,11 +6,36 @@ duplicate content.
 
 ## Shared project instructions
 
-`CLAUDE.md` is the canonical instruction file. At the repository root,
-`AGENTS.md` is a symbolic link to it. Nested `CLAUDE.md` files are discovered
-by Codex through `project_doc_fallback_filenames` in `.codex/config.toml`.
+`AGENTS.md` is the only instruction filename: one at the repository root and
+one per module directory. Codex reads it natively. Claude Code reads it
+natively from v2.1.277 on, as long as no `CLAUDE.md` is in play.
 
-Edit `CLAUDE.md` only; do not replace `AGENTS.md` with a copied file.
+Claude Code's default **Project instructions** setting,
+`claude-md-or-agents-md`, reads `AGENTS.md` only when there is no `CLAUDE.md`,
+`.claude/CLAUDE.md`, or `CLAUDE.local.md` in the working directory or any
+directory above it. A single one of those files, even a symbolic link to
+`AGENTS.md`, switches Claude Code to `CLAUDE.md` files only, and every nested
+`AGENTS.md` silently stops loading. The repository therefore contains no
+`CLAUDE.md` of any kind:
+
+- Edit `AGENTS.md`. Do not add a `CLAUDE.md`, including a symbolic link or an
+  `@AGENTS.md` import stub.
+- `/init`, `/memory` and "add this to CLAUDE.md" requests still write
+  `CLAUDE.md`. Move any such content into the matching `AGENTS.md` and delete
+  the file.
+- For personal, uncommitted instructions, do not create `CLAUDE.local.md` in
+  the checkout; it disables `AGENTS.md` for you as well. Use `~/.claude/CLAUDE.md`,
+  which does not count, or set **Project instructions** to
+  `claude-md-and-agents-md` in `/config` (user scope only; Claude Code ignores
+  it in project settings).
+
+`make agents-check` enforces the first rule. It runs from pre-commit whenever a
+`CLAUDE.md` or `CLAUDE.local.md` is staged, from `make ci`, and in the agent
+configuration GitHub Actions workflow.
+
+A nested `AGENTS.md` loads when Claude Code reads a file in that directory.
+Claude Code does not fire `InstructionsLoaded` hooks for an `AGENTS.md` it
+reads directly, so do not build a hook on that event.
 
 ## Shared skills and references
 
@@ -34,7 +59,7 @@ never commit tokens or passwords to either file.
 Run `make mcp-check` after editing either file. The same semantic comparison
 runs from pre-commit whenever `.mcp.json` or `.codex/config.toml` is staged,
 from `make ci` when the shared MCP configuration or checker changes, and in
-the dedicated MCP configuration GitHub Actions workflow.
+the dedicated agent configuration GitHub Actions workflow.
 
 The shared `integrated-browser-mcp` entry expects the
 `thimo.integrated-browser-mcp` VS Code extension to be installed. The extension
@@ -68,5 +93,5 @@ daemon.
 Start a fresh session after changing agent configuration. In Codex, verify MCP
 servers with `/mcp` or `codex mcp list`, and verify available skills with
 `/skills`. Ask the agent to list its active instruction sources from the root
-and from a nested module directory to confirm that the expected `CLAUDE.md`
-chain is loaded.
+and from a nested module directory to confirm that the expected `AGENTS.md`
+chain is loaded. In Claude Code, `/memory` lists the `AGENTS.md` files it read.

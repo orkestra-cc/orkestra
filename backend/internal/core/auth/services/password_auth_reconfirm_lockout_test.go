@@ -3,7 +3,7 @@ package services
 // Both ChangePassword and ConfirmPasswordWithSecurity verify a password.
 // Leaving them unthrottled makes them the unthrottled back door around
 // the login lockout (M-8) — see the "Attempt counters" section of this
-// module's CLAUDE.md. Reuses the login-lockout fixture from
+// module's AGENTS.md. Reuses the login-lockout fixture from
 // gates_fakes_test.go — read that file before editing.
 
 import (

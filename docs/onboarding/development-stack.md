@@ -1011,7 +1011,7 @@ The primary checkout may already be bind-mounted into a running Docker stack.
 A new worktree does not redirect that stack to the new code. Do not switch the
 primary checkout's branch underneath it.
 
-Use the existing [Docker stack conventions](../../docker/CLAUDE.md) and
+Use the existing [Docker stack conventions](../../docker/AGENTS.md) and
 `orkestra.sh` for runtime work. Each task has distinct source mounts, app
 identity, ports and browser origins. **Data are shared by default**, through
 an explicit binding to the codebase's dev environment. Separate data or full

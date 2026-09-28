@@ -348,7 +348,7 @@ func (r *mongoUserRepository) HardDelete(ctx context.Context, id string) error {
 // Both fields are updated atomically so a concurrent read can never see a
 // soft-deleted row that still owns the original email. The unique email
 // index on this collection is full (not partial) so freeing the email
-// requires renaming it — see user/CLAUDE.md "Soft delete only" note.
+// requires renaming it — see user/AGENTS.md "Soft delete only" note.
 func (r *mongoUserRepository) SoftDeleteAndAliasEmail(ctx context.Context, id string) error {
 	now := time.Now()
 	// Read the current email so we can prefix the alias for traceability

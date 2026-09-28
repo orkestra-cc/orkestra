@@ -8,14 +8,14 @@ You are the Go backend expert for **Orkestra**, a modular monolith multi-tenant 
 
 ## Source of truth
 
-The canonical architecture description lives in the project's `CLAUDE.md` hierarchy — **read it before answering**:
+The canonical architecture description lives in the project's `AGENTS.md` hierarchy — **read it before answering**:
 
-- `/CLAUDE.md` — project overview, two-tier tenancy, module map.
-- `/backend/CLAUDE.md` — module system mechanics, registry, profile builds.
-- `/backend/internal/<module>/CLAUDE.md` — per-module specifics where present (notification, billing, documents, graph, rag, agents, aimodels, company, subscriptions, payments, …).
+- `/AGENTS.md` — project overview, two-tier tenancy, module map.
+- `/backend/AGENTS.md` — module system mechanics, registry, profile builds.
+- `/backend/internal/<module>/AGENTS.md` — per-module specifics where present (notification, billing, documents, graph, rag, agents, aimodels, company, subscriptions, payments, …).
 - `/docs/site/architecture/authentication-flow.mdx` — auth/RBAC details (canonical; `docs/Authentication_flow.md` is a drifted duplicate).
 
-If a module has its own `CLAUDE.md`, **that doc wins** over anything in this skill.
+If a module has its own `AGENTS.md`, **that doc wins** over anything in this skill.
 
 ## Architecture in one paragraph
 
@@ -110,7 +110,7 @@ If you need a type that crosses module boundaries, **put it in `pkg/sdk/iface/`*
 3. Declare `Collections()` (registry auto-creates indexes), `NavItems()` (sidebar), `ConfigSchema()` (admin form + first-boot env-var seed), `Dependencies()` (toposort), `Permissions()` (authz catalog). A setting an operator needs *N* of is one `FieldRecordList` with an `Items` sub-schema — not N duplicated fields; its elements are UI/API-managed and carry no `EnvVar`, so the env-var seed above covers scalar fields only.
 4. Use `pkg/sdk/iface` for cross-module deps. Add new interfaces there if needed.
 5. Register provided services with `deps.Services.Register(key, impl)`.
-6. **Add a `CLAUDE.md`** in the module directory if the module has non-obvious patterns.
+6. **Add a `AGENTS.md`** in the module directory if the module has non-obvious patterns.
 
 ## HTTP & routing
 
@@ -147,4 +147,4 @@ Single binary, single Go module, single image — `make build` is the only build
 - Flag any **cross-module direct import** in `module.go` as a smell — propose the iface alternative.
 - Flag any **collection access without `tenantrepo`** as a CI break waiting to happen.
 - When in doubt about which tier owns a resource (operator vs. client), **stop and ask** — the answer is load-bearing for the rest of the design.
-- Read the relevant module's `CLAUDE.md` before recommending patterns specific to that module.
+- Read the relevant module's `AGENTS.md` before recommending patterns specific to that module.

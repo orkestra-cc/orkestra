@@ -43,7 +43,7 @@ func NewMongoRepository(coll *mongo.Collection) Repository {
 // one document.
 func (r *mongoRepo) Get(ctx context.Context) (*models.LogLevelDoc, error) {
 	var doc models.LogLevelDoc
-	//tenantscope:allow log_levels is a single global system-config document (_id="default"), not tenant-data — see backend/internal/core/logging/CLAUDE.md "What this module does NOT do".
+	//tenantscope:allow log_levels is a single global system-config document (_id="default"), not tenant-data — see backend/internal/core/logging/AGENTS.md "What this module does NOT do".
 	err := r.coll.FindOne(ctx, bson.M{"_id": models.DefaultConfigKey}).Decode(&doc)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
@@ -73,7 +73,7 @@ func (r *mongoRepo) CompareAndSwap(ctx context.Context, expectedRevision int64, 
 	} else {
 		filter["revision"] = expectedRevision
 	}
-	//tenantscope:allow log_levels is a single global system-config document (_id="default"), not tenant-data — see backend/internal/core/logging/CLAUDE.md "What this module does NOT do".
+	//tenantscope:allow log_levels is a single global system-config document (_id="default"), not tenant-data — see backend/internal/core/logging/AGENTS.md "What this module does NOT do".
 	result, err := r.coll.ReplaceOne(ctx, filter, doc, opts)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {

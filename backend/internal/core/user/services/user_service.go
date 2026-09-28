@@ -72,7 +72,7 @@ type UserService interface {
 	// administrator, excluding excludeUUID when non-empty. Used by the
 	// last-admin guard on delete / deactivate / role-demote so the
 	// platform can never be locked out by removing its only operator.
-	// Best-effort under concurrent edits — see backend/CLAUDE.md
+	// Best-effort under concurrent edits — see backend/AGENTS.md
 	// "Error-code contract" `user.last_admin_forbidden`.
 	CountActiveAdministrators(ctx context.Context, excludeUUID string) (int64, error)
 
@@ -1099,7 +1099,7 @@ var _ iface.UserLifecycleStateProvider = (*userService)(nil)
 // BumpMFAEpoch implements iface.MFAEpochBumper — a thin delegation like
 // the other single-field mutators, so the not-found translation applies
 // the same way: repository.ErrUserNotFound must never cross this module
-// boundary raw (see asUserNotFound's doc and this module's CLAUDE.md).
+// boundary raw (see asUserNotFound's doc and this module's AGENTS.md).
 func (s *userService) BumpMFAEpoch(ctx context.Context, userUUID string) (int, error) {
 	if userUUID == "" {
 		return 0, ErrInvalidInput
