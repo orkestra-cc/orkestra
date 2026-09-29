@@ -430,3 +430,51 @@ func TestParseSkipPaths_TrimsAndDropsBlanks(t *testing.T) {
 		t.Errorf("expected 3 entries, got %d: %v", len(got), got)
 	}
 }
+
+// fakeAuth mimics RequireAuth: it stamps the principal on a DERIVED context,
+// which the outer RequestLogger cannot see without the annotations.
+func fakeAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		ctx = context.WithValue(ctx, ctxauth.KeyUserUUID, "user-downstream")
+		ctx = context.WithValue(ctx, ctxauth.KeyTenantID, "tenant-downstream")
+		ctx = context.WithValue(ctx, ctxauth.KeyTenantKind, "internal")
+		ctx = context.WithValue(ctx, ctxauth.KeySystemRole, "developer")
+		annotatePrincipal(ctx)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func TestRequestLogger_PrincipalFromDownstreamAuth(t *testing.T) {
+	logger, buf := newCapturingLogger(t)
+	handler := RequestLogger(logger, RequestLoggerOptions{})(fakeAuth(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+	))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/x", nil))
+
+	line := parseLine(t, buf.Bytes())
+	for k, want := range map[string]string{"tenant_id": "tenant-downstream", "tenant_kind": "internal", "user_id": "user-downstream", "user_role": "developer"} {
+		if line[k] != want {
+			t.Errorf("%s = %v, want %s", k, line[k], want)
+		}
+	}
+}
+
+func TestRequestLogger_RealRequireAuthChain(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	logger, buf := newCapturingLogger(t)
+	handler := RequestLogger(logger, RequestLoggerOptions{})(f.mw.RequireAuth(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+	))
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+f.issueTokenForUser("user-chain-1", "administrator"))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	line := parseLine(t, buf.Bytes())
+	if line["user_id"] != "user-chain-1" {
+		t.Fatalf("user_id = %v, want user-chain-1 (RequireAuth principal must reach the outer log line)", line["user_id"])
+	}
+}

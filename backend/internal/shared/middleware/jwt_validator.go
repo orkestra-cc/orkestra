@@ -176,6 +176,7 @@ func (v *JWTValidator) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
+		annotatePrincipal(ctx)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

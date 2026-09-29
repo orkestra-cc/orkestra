@@ -116,11 +116,11 @@ func parseSkipPaths(raw string) map[string]struct{} {
 // added here — so module-emitted logs in the same request scope share
 // the same correlation IDs.
 //
-// tenant_id / tenant_kind / user_id / user_role / audience are stamped
-// here when available (the auth/audience middleware may have already run
-// and populated them; CORS/audience rejects naturally have them empty).
-// Empty values are dropped rather than logged as "" to keep collector-
-// side filtering predictable.
+// tenant_id / tenant_kind / user_id / user_role / audience come from the
+// request annotations the auth and audience middlewares fill downstream
+// (ctxauth.RequestAnnotations); without them this outer middleware could
+// not see the principal at all. Empty values are dropped rather than logged
+// as "" to keep collector-side filtering predictable.
 func RequestLogger(logger *slog.Logger, opts RequestLoggerOptions) func(http.Handler) http.Handler {
 	if opts.SkipPaths == nil {
 		opts.SkipPaths = defaultSkipPaths
@@ -134,6 +134,9 @@ func RequestLogger(logger *slog.Logger, opts RequestLoggerOptions) func(http.Han
 				next.ServeHTTP(w, r)
 				return
 			}
+
+			ctx, ann := ctxauth.WithRequestAnnotations(r.Context())
+			r = r.WithContext(ctx)
 
 			start := time.Now()
 			ww := chiMiddleware.NewWrapResponseWriter(w, r.ProtoMajor)
@@ -157,22 +160,39 @@ func RequestLogger(logger *slog.Logger, opts RequestLoggerOptions) func(http.Han
 				attrs = append(attrs, slog.Bool("slow", true))
 			}
 
-			// Tenant + user + audience are best-effort: when CORS or
-			// audience-mismatch rejects fire before RequireAuth runs,
-			// these are empty and intentionally omitted from the line.
-			if v, ok := ctxauth.GetTenantID(r.Context()); ok && v != "" {
-				attrs = append(attrs, slog.String("tenant_id", v))
+			// The auth middlewares run downstream on a derived context; they
+			// report the principal through the annotations installed above.
+			// Values already on this context (tests, outer middleware) are the
+			// fallback. Empty values are omitted from the line.
+			snap := ann.Snapshot()
+			tenantID := snap.TenantID
+			if tenantID == "" {
+				tenantID, _ = ctxauth.GetTenantID(r.Context())
 			}
-			if v := ctxauth.TenantKindFromContext(r.Context()); v != "" {
-				attrs = append(attrs, slog.String("tenant_kind", v))
+			tenantKind := snap.TenantKind
+			if tenantKind == "" {
+				tenantKind = ctxauth.TenantKindFromContext(r.Context())
 			}
-			if v, ok := ctxauth.GetUserUUID(r.Context()); ok && v != "" {
-				attrs = append(attrs, slog.String("user_id", v))
+			userID := snap.UserID
+			if userID == "" {
+				userID, _ = ctxauth.GetUserUUID(r.Context())
 			}
-			if v, ok := ctxauth.GetSystemRole(r.Context()); ok && v != "" {
-				attrs = append(attrs, slog.String("user_role", v))
+			userRole := snap.UserRole
+			if userRole == "" {
+				userRole, _ = ctxauth.GetSystemRole(r.Context())
 			}
-			audience := AudienceFromContext(r.Context())
+			for _, kv := range [...]struct{ k, v string }{
+				{"tenant_id", tenantID}, {"tenant_kind", tenantKind},
+				{"user_id", userID}, {"user_role", userRole},
+			} {
+				if kv.v != "" {
+					attrs = append(attrs, slog.String(kv.k, kv.v))
+				}
+			}
+			audience := snap.Audience
+			if audience == "" {
+				audience = AudienceFromContext(r.Context())
+			}
 			if audience == "" {
 				audience = opts.Audience
 			}
