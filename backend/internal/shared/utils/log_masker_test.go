@@ -591,10 +591,12 @@ func TestMaskText_IPRuleIsLinear(t *testing.T) {
 	if testing.Short() {
 		t.Skip("timing test")
 	}
-	bound := time.Second
 	if raceEnabled {
-		bound = 12 * time.Second
+		// The race detector slows the scan ~10x and the bound flakes on a
+		// loaded host; linearity is enforced by the normal (non-race) run.
+		t.Skip("timing test: not meaningful under the race detector")
 	}
+	bound := time.Second
 	m := modeMasker(iface.IPAddressTruncated)
 	const mb = 1 << 20
 	rep := func(unit string) string { return strings.Repeat(unit, mb/len(unit)) }
