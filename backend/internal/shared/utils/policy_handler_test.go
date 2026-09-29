@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -100,14 +101,69 @@ func TestPolicyHandler_MessageScanned(t *testing.T) {
 	}
 }
 
+// restorePolicyGlobals puts the SwapLogPolicyResolver registry back as it
+// was when the test ends.
+func restorePolicyGlobals(t *testing.T) {
+	t.Helper()
+	policyBoxesMu.Lock()
+	prevBoxes, prevSwapped := slices.Clone(policyBoxes), swappedPolicy.Load()
+	policyBoxesMu.Unlock()
+	prevPM := globalPerModule.Load()
+	t.Cleanup(func() {
+		policyBoxesMu.Lock()
+		policyBoxes = prevBoxes
+		swappedPolicy.Store(prevSwapped)
+		policyBoxesMu.Unlock()
+		globalPerModule.Store(prevPM)
+	})
+}
+
+func lastPolicyBox() *logPolicyBox {
+	policyBoxesMu.Lock()
+	defer policyBoxesMu.Unlock()
+	if len(policyBoxes) == 0 {
+		return nil
+	}
+	return policyBoxes[len(policyBoxes)-1].Value()
+}
+
 func TestSetupLogger_InstallsPolicyHandler(t *testing.T) {
+	restorePolicyGlobals(t)
 	t.Setenv("ENV", "production")
 	logger := SetupLogger()
-	h := globalPolicyBox.Load()
-	if h == nil {
+	if lastPolicyBox() == nil {
 		t.Fatal("SetupLogger did not register the policy handler box")
 	}
 	_ = logger
+}
+
+// main.go calls SetupLogger twice and keeps using loggers from the first
+// call: one swap must reach both, and a SetupLogger after the swap too.
+func TestSwapLogPolicyResolver_ReachesEverySetupLogger(t *testing.T) {
+	restorePolicyGlobals(t)
+	t.Setenv("ENV", "production")
+	t.Setenv("LOG_LEVEL", "info")
+	first, second := &captureState{}, &captureState{}
+	l1 := SetupLogger(&capturingHandler{st: first})
+	l2 := SetupLogger(&capturingHandler{st: second})
+
+	full := policy(func(p *iface.LogContentPolicy) { p.IPAddress = iface.IPAddressFull })
+	SwapLogPolicyResolver(NewStaticLogPolicyResolver(*full))
+	third := &captureState{}
+	l3 := SetupLogger(&capturingHandler{st: third})
+
+	for i, c := range []struct {
+		l  *slog.Logger
+		st *captureState
+	}{{l1, first}, {l2, second}, {l3, third}} {
+		c.l.Info("x", slog.String("ip", "203.0.113.7"))
+		c.st.mu.Lock()
+		all := strings.Join(c.st.kv, "\n")
+		c.st.mu.Unlock()
+		if !strings.Contains(all, "ip=203.0.113.7") {
+			t.Errorf("logger %d does not use the swapped resolver:\n%s", i+1, all)
+		}
+	}
 }
 
 func TestLogHashKeyFromEnv(t *testing.T) {
@@ -244,8 +300,7 @@ func (c *capturingHandler) Handle(_ context.Context, r slog.Record) error {
 // Chain position (spec §2.3): the fan-out members (stdout, OTLP) receive the
 // already-masked record, and the level gate sits in front of the mask.
 func TestSetupLogger_FanoutReceivesMaskedRecords(t *testing.T) {
-	prevBox, prevPM := globalPolicyBox.Load(), globalPerModule.Load()
-	t.Cleanup(func() { globalPolicyBox.Store(prevBox); globalPerModule.Store(prevPM) })
+	restorePolicyGlobals(t)
 	t.Setenv("ENV", "production")
 	t.Setenv("LOG_LEVEL", "info")
 	t.Setenv("OAUTH_TOKEN_ENCRYPTION_KEY", "")

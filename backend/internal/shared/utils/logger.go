@@ -92,9 +92,10 @@ func SetupLogger(extras ...slog.Handler) *slog.Logger {
 	// Spec §2.3 — compliance masking sits after the level gate (records
 	// dropped for level cost nothing) and before the fan-out (stdout and
 	// OTLP receive the same masked record). Boot uses the platform
-	// defaults; main.go swaps in the compliance module's live resolver.
+	// defaults; main.go swaps in the compliance module's live resolver, which
+	// reaches this handler whenever the swap happens (registerPolicyBox).
 	policyHandler := NewPolicyHandler(handler, NewStaticLogPolicyResolver(iface.DefaultLogContentPolicy()), LogHashKeyFromEnv())
-	globalPolicyBox.Store(policyHandler.box)
+	registerPolicyBox(policyHandler.box)
 	handler = policyHandler
 
 	// ADR-0005 §1.4 — per-module level overrides. Sits between the base

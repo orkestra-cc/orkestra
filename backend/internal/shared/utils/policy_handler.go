@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"weak"
 
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
@@ -38,17 +39,53 @@ type logPolicyBox struct {
 	p atomic.Pointer[LogPolicyResolver]
 }
 
-// globalPolicyBox is the resolver box of the handler built by the most
-// recent SetupLogger; SwapLogPolicyResolver targets it (mirrors
-// globalPerModule / SwapLevelResolver).
-var globalPolicyBox atomic.Pointer[logPolicyBox]
+// policyBoxes holds (weakly) the resolver box of every handler SetupLogger
+// has built. main.go calls SetupLogger twice (stdout first, then with the
+// OTLP fan-out), and loggers derived from the first call stay in use:
+// SwapLogPolicyResolver must reach all of them, not only the latest.
+var (
+	policyBoxesMu sync.Mutex
+	policyBoxes   []weak.Pointer[logPolicyBox]
+	// swappedPolicy is the last resolver passed to SwapLogPolicyResolver; a
+	// SetupLogger call after the swap starts from it, not from the defaults.
+	// Written under policyBoxesMu.
+	swappedPolicy atomic.Pointer[LogPolicyResolver]
+)
 
-// SwapLogPolicyResolver replaces the resolver behind every logger derived
-// from the most recent SetupLogger. Called from main.go once the compliance
-// module is up. No-op before SetupLogger or with a nil resolver.
+// registerPolicyBox adds b to the boxes SwapLogPolicyResolver updates (b
+// takes the swapped resolver at once if there was a swap already) and drops
+// the entries of collected handlers.
+func registerPolicyBox(b *logPolicyBox) {
+	policyBoxesMu.Lock()
+	defer policyBoxesMu.Unlock()
+	if r := swappedPolicy.Load(); r != nil {
+		b.p.Store(r)
+	}
+	live := policyBoxes[:0]
+	for _, wp := range policyBoxes {
+		if wp.Value() != nil {
+			live = append(live, wp)
+		}
+	}
+	clear(policyBoxes[len(live):])
+	live = append(live, weak.Make(b))
+	policyBoxes = live
+}
+
+// SwapLogPolicyResolver replaces the resolver behind every logger built by
+// SetupLogger, and those built later. Called from main.go once the
+// compliance module is up. No-op with a nil resolver.
 func SwapLogPolicyResolver(r LogPolicyResolver) {
-	if b := globalPolicyBox.Load(); b != nil && r != nil {
-		b.p.Store(&r)
+	if r == nil {
+		return
+	}
+	policyBoxesMu.Lock()
+	defer policyBoxesMu.Unlock()
+	swappedPolicy.Store(&r)
+	for _, wp := range policyBoxes {
+		if b := wp.Value(); b != nil {
+			b.p.Store(&r)
+		}
 	}
 }
 
