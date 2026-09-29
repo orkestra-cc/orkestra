@@ -207,10 +207,10 @@ func TestMaskText_IPv6Boundaries(t *testing.T) {
 	}{
 		{"trailing colon truncated", trunc, "lookup 2001:db8:1:2::1: no such host", "lookup 2001:db8:1::/48: no such host"},
 		{"trailing colon hashed", hashed, "lookup 2001:db8:1:2::1: no such host", "lookup " + h6 + ": no such host"},
-		{"trailing colon omitted", omitted, "lookup 2001:db8:1:2::1: no such host", "lookup [IP]: no such host"},
+		{"trailing colon omitted", omitted, "lookup 2001:db8:1:2::1: no such host", "lookup [IP] no such host"},
 		{"word colon prefix truncated", trunc, "ip:2001:db8:1:2::1", "ip:2001:db8:1::/48"},
 		{"word colon prefix hashed", hashed, "ip:2001:db8:1:2::1", "ip:" + h6},
-		{"word colon prefix omitted", omitted, "ip:2001:db8:1:2::1", "ip:[IP]"},
+		{"word colon prefix omitted", omitted, "ip:2001:db8:1:2::1", "ip[IP]"},
 		{"trailing full stop", trunc, "peer 2001:db8:1:2::1.", "peer 2001:db8:1::/48."},
 		{"bracketed with port", trunc, "dial [2001:db8:1:2::1]:443", "dial [2001:db8:1::/48]:443"},
 		{"loopback", trunc, "on ::1 only", "on ::/48 only"},
@@ -271,8 +271,10 @@ func TestMaskText_IPv4Edges(t *testing.T) {
 		{"ip=203.0.113.7,x", "ip=203.0.113.0/24,x"},
 		{"203.000.113.007", "[IP]"},
 		{"from 999.1.1.1 x", "from [IP] x"},
-		{"build 1.2.3.4.5 done", "build 1.2.3.0/24 done"},
-		{"build 999.999.999.999.999 done", "build 999.999.999.999.999 done"},
+		{"build 1.2.3.4.5 done", "build [IP] done"},
+		{"build 999.999.999.999.999 done", "build [IP] done"},
+		{"v1.203.000.113.007", "v[IP]"},
+		{"stamp 2026.09.29 and 2026.09.29.12", "stamp 2026.09.29 and 2026.09.29.12"},
 	}
 	for _, c := range cases {
 		if got := maskedText(t, m, c.in); got != c.want {
@@ -407,57 +409,55 @@ func TestMaskAttr_StringContainers(t *testing.T) {
 // --- fix round 2 ---
 
 func TestMaskText_WordTailBeforeUncompressedIPv6(t *testing.T) {
-	trunc := modeMasker(iface.IPAddressTruncated)
-	hashed := modeMasker(iface.IPAddressHashed)
-	omitted := modeMasker(iface.IPAddressOmitted)
+	// A word ending in hex letters joins the run: the run is not exactly one
+	// address, so every mode renders "[IP]" and no group can stay behind.
 	full := "2001:db8:85a3:0:0:8a2e:370:7334"
-	h := hashed.hash("ip:", net.ParseIP(full).String()) // hashes use the canonical form
-	h2 := hashed.hash("ip:", net.ParseIP("2001:db8:85a3:1:2:8a2e:370:7334").String())
-	cases := []struct {
-		name string
-		m    logMasker
-		in   string
+	modes := []iface.IPAddressMode{iface.IPAddressTruncated, iface.IPAddressHashed, iface.IPAddressOmitted}
+	cases := []struct{ in, want string }{
+		{"src:" + full, "sr[IP]"},
+		{"failed:2001:db8:85a3:1:2:8a2e:370:7334", "fail[IP]"},
+		{"cafe:beef:2001:db8:85a3:1:2:8a2e:370:7334", "[IP]"},
+		{"v1.2001:db8:85a3:0:0:8a2e:370:7334", "v[IP]"},
+		{"2001:db8:85a3:1:2:8a2e:370:7334:8080", "[IP]"},
+	}
+	for _, mode := range modes {
+		for _, c := range cases {
+			got := maskedText(t, modeMasker(mode), c.in)
+			if got != c.want {
+				t.Errorf("%s: %q -> %q, want %q", mode, c.in, got, c.want)
+			}
+		}
+	}
+	// A lone non-hex word keeps its colon and the address is rendered exactly.
+	h := modeMasker(iface.IPAddressHashed).hash("ip:", net.ParseIP(full).String())
+	exact := []struct {
+		mode iface.IPAddressMode
 		want string
 	}{
-		{"omitted src", omitted, "src:" + full, "sr[IP]"},
-		{"truncated src", trunc, "src:" + full, "sr2001:db8:85a3::/48"},
-		{"hashed src", hashed, "src:" + full, "sr" + h},
-		{"hashed failed", hashed, "failed:2001:db8:85a3:1:2:8a2e:370:7334", "fail" + h2},
-		{"omitted two hex groups", omitted, "cafe:beef:2001:db8:85a3:1:2:8a2e:370:7334", "[IP]"},
-		{"non-hex word keeps its colon", omitted, "ip:" + full, "ip:[IP]"},
+		{iface.IPAddressTruncated, "ip:2001:db8:85a3::/48"},
+		{iface.IPAddressHashed, "ip:" + h},
+		{iface.IPAddressOmitted, "ip[IP]"},
 	}
-	for _, c := range cases {
-		got := maskedText(t, c.m, c.in)
-		if got != c.want {
-			t.Errorf("%s: %q -> %q, want %q", c.name, c.in, got, c.want)
-		}
-		if strings.Contains(got, "7334") || strings.Contains(got, "370") {
-			t.Errorf("%s: trailing group leaked: %q", c.name, got)
+	for _, c := range exact {
+		if got := maskedText(t, modeMasker(c.mode), "ip:"+full); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.mode, got, c.want)
 		}
 	}
 }
 
 func TestMaskText_IPv4WithDottedNeighbours(t *testing.T) {
-	trunc := modeMasker(iface.IPAddressTruncated)
-	omitted := modeMasker(iface.IPAddressOmitted)
-	hashed := modeMasker(iface.IPAddressHashed)
-	cases := []struct {
-		name string
-		m    logMasker
-		in   string
-		want string
-	}{
-		{"omitted v-prefix", omitted, "v1.203.0.113.7", "v[IP]"},
-		{"omitted in a sentence", omitted, "release 1.203.0.113.7 ok", "release [IP] ok"},
-		{"omitted trailing number", omitted, "203.0.113.7.5", "[IP]"},
-		{"truncated trailing number", trunc, "203.0.113.7.5", "203.0.113.0/24"},
-		{"truncated v-prefix", trunc, "v1.203.0.113.7", "v1.203.0.0/24"},
-		{"hashed trailing number", hashed, "203.0.113.7.5", hashed.hash("ip:", "203.0.113.7")},
-		{"omitted six numbers", omitted, "9.9.203.0.113.7", "[IP]"},
+	cases := []struct{ in, want string }{
+		{"v1.203.0.113.7", "v[IP]"},
+		{"release 1.203.0.113.7 ok", "release [IP] ok"},
+		{"203.0.113.7.5", "[IP]"},
+		{"9.9.203.0.113.7", "[IP]"},
+		{"cafe203.0.113.7", "[IP]"},
 	}
-	for _, c := range cases {
-		if got := maskedText(t, c.m, c.in); got != c.want {
-			t.Errorf("%s: %q -> %q, want %q", c.name, c.in, got, c.want)
+	for _, mode := range []iface.IPAddressMode{iface.IPAddressTruncated, iface.IPAddressHashed, iface.IPAddressOmitted} {
+		for _, c := range cases {
+			if got := maskedText(t, modeMasker(mode), c.in); got != c.want {
+				t.Errorf("%s: %q -> %q, want %q", mode, c.in, got, c.want)
+			}
 		}
 	}
 }
@@ -475,20 +475,9 @@ func TestMaskText_LongRunFailsClosed(t *testing.T) {
 }
 
 func TestMaskText_IPv6AfterIPv4Octets(t *testing.T) {
-	in := "10.0.0.1:2001:db8:1:2::1"
-	h4 := modeMasker(iface.IPAddressHashed).hash("ip:", "10.0.0.1")
-	h6 := modeMasker(iface.IPAddressHashed).hash("ip:", "2001:db8:1:2::1")
-	cases := []struct {
-		mode iface.IPAddressMode
-		want string
-	}{
-		{iface.IPAddressTruncated, "10.0.0.0/24:2001:db8:1::/48"},
-		{iface.IPAddressHashed, h4 + ":" + h6},
-		{iface.IPAddressOmitted, "[IP]:[IP]"},
-	}
-	for _, c := range cases {
-		if got := maskedText(t, modeMasker(c.mode), in); got != c.want {
-			t.Errorf("%s: got %q, want %q", c.mode, got, c.want)
+	for _, mode := range []iface.IPAddressMode{iface.IPAddressTruncated, iface.IPAddressHashed, iface.IPAddressOmitted} {
+		if got := maskedText(t, modeMasker(mode), "at 10.0.0.1:2001:db8:1:2::1 up"); got != "at [IP] up" {
+			t.Errorf("%s: got %q, want %q", mode, got, "at [IP] up")
 		}
 	}
 }
@@ -500,8 +489,8 @@ func TestMaskAttr_BranchingCycleIsBounded(t *testing.T) {
 	self["b"] = self
 	start := time.Now()
 	out, keep := m.maskAttr(slog.Any("payload", self))
-	if !keep || out.Value.Kind() != slog.KindAny {
-		t.Fatalf("unexpected result %v %v", out, keep)
+	if !keep || out.Value.String() != "[REDACTED]" {
+		t.Fatalf("branching cycle = %v %v, want the whole value [REDACTED]", out, keep)
 	}
 	if d := time.Since(start); d > 2*time.Second {
 		t.Fatalf("branching cycle took %v", d)
@@ -514,9 +503,8 @@ func TestMaskAttr_BranchingCycleIsBounded(t *testing.T) {
 	for i := range big {
 		big[i] = "v"
 	}
-	bv, _ := maskOne(t, m, slog.Any("big", big))
-	if bv.([]any)[maxMaskNodes+4] != "[REDACTED]" {
-		t.Errorf("values past the node budget must be [REDACTED]")
+	if bv, _ := maskOne(t, m, slog.Any("big", big)); bv != "[REDACTED]" {
+		t.Errorf("a slice past the node budget must become [REDACTED], got %T", bv)
 	}
 }
 
@@ -557,4 +545,138 @@ func TestMaskAttr_GroupKeyRulesIPUserAgentSubject(t *testing.T) {
 			t.Errorf("%s: got %v, want a recursed group", c.name, out.Value)
 		}
 	}
+}
+
+// --- fix round 3: one fail-closed IP rule, header/budget/group-depth safety ---
+
+func TestMaskText_SingleIPRuleProbes(t *testing.T) {
+	trunc := modeMasker(iface.IPAddressTruncated)
+	omitted := modeMasker(iface.IPAddressOmitted)
+	hashed := modeMasker(iface.IPAddressHashed)
+	cases := []struct {
+		name string
+		m    logMasker
+		in   string
+		want string
+	}{
+		{"ipv4 with port", trunc, "203.0.113.7:51234", "203.0.113.0/24:51234"},
+		{"ipv4 with port hashed", hashed, "203.0.113.7:51234", hashed.hash("ip:", "203.0.113.7") + ":51234"},
+		{"ipv4 with port omitted", omitted, "203.0.113.7:51234", "[IP]"},
+		{"ipv4 port and colon", trunc, "dial tcp 203.0.113.7:51234: connection refused", "dial tcp 203.0.113.0/24:51234: connection refused"},
+		{"bracketed ipv6 with port", trunc, "[2001:db8::1]:443", "[2001:db8::/48]:443"},
+		{"bracketed ipv6 with port omitted", omitted, "[2001:db8::1]:443", "[IP]:443"},
+		{"bracketed with zone", trunc, "peer [fe80::1%eth0] up", "peer [fe80::/48] up"},
+		{"zone without brackets", omitted, "peer fe80::1%eth0 up", "peer [IP] up"},
+		{"timestamp", trunc, "10:20:30", "10:20:30"},
+		{"timestamp with fraction", trunc, "at 10:20:30.123 done", "at 10:20:30.123 done"},
+		{"cpp scope truncated", trunc, "std::string", "std::/48string"},
+		{"cpp scope omitted", omitted, "std::string", "st[IP]string"},
+		{"version five numbers", trunc, "1.2.3.4.5", "[IP]"},
+		{"zero padded with prefix", omitted, "v1.203.000.113.007", "v[IP]"},
+		{"two addresses", trunc, "1.2.3.4,5.6.7.8", "1.2.3.0/24,5.6.7.0/24"},
+		{"two addresses glued", trunc, "1.2.3.4:5.6.7.8", "[IP]"},
+		{"leading dot ipv4", trunc, "ip:203.0.113.7", "ip:203.0.113.0/24"},
+		{"plain words untouched", trunc, "a.b.c.d and dead:beef", "a.b.c.d and dead:beef"},
+	}
+	for _, c := range cases {
+		if got := maskedText(t, c.m, c.in); got != c.want {
+			t.Errorf("%s: %q -> %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+}
+
+func TestMaskText_IPRuleIsLinear(t *testing.T) {
+	if testing.Short() {
+		t.Skip("timing test")
+	}
+	bound := 2 * time.Second
+	if raceEnabled {
+		bound = 12 * time.Second
+	}
+	m := modeMasker(iface.IPAddressTruncated)
+	inputs := map[string]string{
+		"a::a::":       strings.Repeat("a::a::", (1<<20)/6),
+		"five-digit":   strings.Repeat("12345:", (1<<20)/6),
+		"dotted 4digs": strings.Repeat("1234.", (1<<20)/5),
+		"colons":       strings.Repeat(":", 1<<20),
+	}
+	for name, in := range inputs {
+		start := time.Now()
+		got := m.safeText(in)
+		if d := time.Since(start); d > bound {
+			t.Errorf("%s: masking 1 MB took %v", name, d)
+		}
+		if name == "a::a::" && got != "[IP]" {
+			t.Errorf("%s: got %.20q..., want [IP]", name, got)
+		}
+	}
+}
+
+func TestMaskAttr_HeaderBudgetExhaustionDoesNotPanic(t *testing.T) {
+	var panics int
+	SetMaskingPanicHook(func() { panics++ })
+	t.Cleanup(func() { SetMaskingPanicHook(nil) })
+	m := logMasker{p: policy(nil), key: testHashKey}
+	// enough sibling values to spend the whole node budget before the header
+	wide := make([]any, 0, maxMaskNodes)
+	for i := 0; i < maxMaskNodes-2; i++ {
+		wide = append(wide, 1)
+	}
+	wide = append(wide, http.Header{"X": {"a@b.it"}}, url.Values{"q": {"a@b.it"}})
+	out, keep := m.maskAttr(slog.Any("wide", wide))
+	if !keep {
+		t.Fatal("dropped")
+	}
+	if panics != 0 {
+		t.Fatalf("masking panicked %d times on budget exhaustion", panics)
+	}
+	if out.Value.String() != "[REDACTED]" {
+		t.Errorf("got %v, want [REDACTED]", out.Value)
+	}
+}
+
+type selfGroup struct{ n int }
+
+func (g *selfGroup) LogValue() slog.Value {
+	// children that are LogValuers themselves: a cycle that also branches
+	return slog.GroupValue(slog.Any("a", g), slog.Any("b", g), slog.String("email", "a@b.it"))
+}
+
+func TestMaskAttr_SelfReferencingGroupTerminates(t *testing.T) {
+	var panics int
+	SetMaskingPanicHook(func() { panics++ })
+	t.Cleanup(func() { SetMaskingPanicHook(nil) })
+	m := logMasker{p: policy(nil), key: testHashKey}
+	start := time.Now()
+	out, keep := m.maskAttr(slog.Any("g", &selfGroup{}))
+	if !keep || panics != 0 {
+		t.Fatalf("keep=%v panics=%d", keep, panics)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("self-referencing group took %v", d)
+	}
+	if out.Value.Kind() != slog.KindGroup && out.Value.String() != "[REDACTED]" {
+		t.Errorf("unexpected value %v", out.Value)
+	}
+}
+
+func TestMaskAttr_GroupDepthCapRedacts(t *testing.T) {
+	m := logMasker{p: policy(nil), key: testHashKey}
+	// a linear chain of 40 nested groups: capped at the depth limit
+	a := slog.String("leaf", "x")
+	for i := 0; i < 40; i++ {
+		a = slog.Group("g", a)
+	}
+	out, _ := m.maskAttr(a)
+	cur := out
+	for i := 0; i < 50; i++ {
+		if cur.Value.Kind() != slog.KindGroup {
+			if cur.Value.String() != "[REDACTED]" {
+				t.Fatalf("depth cap value = %v, want [REDACTED]", cur.Value)
+			}
+			return
+		}
+		cur = cur.Value.Group()[0]
+	}
+	t.Fatal("group nesting was not capped")
 }
