@@ -840,3 +840,17 @@ func truncateV4(a [4]byte) string {
 	b = append(b, ".0/24"...)
 	return string(b)
 }
+
+// MaskKV applies policy p to one key/value pair with the same rules as the
+// slog PolicyHandler (spec §2.3), for callers outside the slog chain such as
+// the span exporter. keep=false means "drop the pair". Never panics.
+func MaskKV(p *iface.LogContentPolicy, hashKey []byte, key string, val any) (out any, keep bool) {
+	defer func() {
+		if recover() != nil {
+			reportMaskingPanic()
+			out, keep = maskErrValue, true
+		}
+	}()
+	budget := maxMaskNodes
+	return logMasker{p: p, key: hashKey}.maskKV(key, val, 0, &budget)
+}
