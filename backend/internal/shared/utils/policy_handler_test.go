@@ -6,6 +6,9 @@ import (
 	"encoding/hex"
 	"io"
 	"log/slog"
+	"reflect"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
@@ -123,6 +126,156 @@ func TestLogHashKeyFromEnv(t *testing.T) {
 	}
 	if !bytes.Equal(k1, LogHashKeyFromEnv()) {
 		t.Fatal("derivation must be deterministic")
+	}
+}
+
+// A WithGroup whose name is claimed by a group key rule must behave like an
+// inline slog.Group with that name: everything under it collapses into the
+// single masked outcome (or is dropped), for the record's own attributes and
+// for later With attributes alike.
+func TestPolicyHandler_WithGroupFollowsGroupKeyRules(t *testing.T) {
+	cases := []struct {
+		name string
+		key  string
+		mut  func(*iface.LogContentPolicy)
+	}{
+		{"secret", "password", nil},
+		{"secret-nested-word", "refresh_token", nil},
+		{"ip-omitted", "ip", func(p *iface.LogContentPolicy) { p.IPAddress = iface.IPAddressOmitted }},
+		{"ip-truncated", "ip", func(p *iface.LogContentPolicy) { p.IPAddress = iface.IPAddressTruncated }},
+		{"ip-full", "ip", func(p *iface.LogContentPolicy) { p.IPAddress = iface.IPAddressFull }},
+		{"ua-omitted", "user_agent", func(p *iface.LogContentPolicy) { p.UserAgent = iface.UserAgentOmitted }},
+		{"subject-omitted", "user_id", func(p *iface.LogContentPolicy) { p.SubjectIDs = iface.SubjectIDOmitted }},
+		{"pii-key", "email", nil},
+	}
+	strip := func(m map[string]any) map[string]any { delete(m, "time"); return m }
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := NewStaticLogPolicyResolver(*policy(c.mut))
+			inline, _, ibuf := newPolicyLogger(t, r)
+			inline.Info("a", slog.Group(c.key, slog.String("value", "hunter2")))
+			viaWith, _, wbuf := newPolicyLogger(t, r)
+			viaWith.WithGroup(c.key).Info("a", slog.String("value", "hunter2"))
+			laterWith, _, lbuf := newPolicyLogger(t, r)
+			laterWith.WithGroup(c.key).With(slog.String("value", "hunter2")).Info("a")
+
+			want := strip(parseLines(t, ibuf.Bytes())[0])
+			for name, buf := range map[string]*bytes.Buffer{"WithGroup+record attr": wbuf, "WithGroup+With attr": lbuf} {
+				if strings.Contains(buf.String(), "hunter2") && !strings.Contains(ibuf.String(), "hunter2") {
+					t.Fatalf("%s leaked the value: %s", name, buf.String())
+				}
+				if got := strip(parseLines(t, buf.Bytes())[0]); !reflect.DeepEqual(got, want) {
+					t.Fatalf("%s = %v, inline slog.Group = %v", name, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestPolicyHandler_WithGroupNestedSealed(t *testing.T) {
+	r := NewStaticLogPolicyResolver(iface.DefaultLogContentPolicy())
+	strip := func(m map[string]any) map[string]any { delete(m, "time"); return m }
+	inline, _, ibuf := newPolicyLogger(t, r)
+	inline.Info("a", slog.Group("safe", slog.Group("password", slog.String("value", "hunter2")), slog.String("ok", "1")))
+	nested, _, nbuf := newPolicyLogger(t, r)
+	nested.WithGroup("safe").WithGroup("password").Info("a", slog.String("value", "hunter2"))
+
+	got := strip(parseLines(t, nbuf.Bytes())[0])
+	if strings.Contains(nbuf.String(), "hunter2") {
+		t.Fatalf("nested sealed group leaked: %v", got)
+	}
+	safe, ok := got["safe"].(map[string]any)
+	if !ok || safe["password"] != "[REDACTED]" {
+		t.Fatalf("WithGroup(safe).WithGroup(password) = %v", got)
+	}
+	// Same shape as the inline group, minus the sibling "ok" attribute.
+	want := strip(parseLines(t, ibuf.Bytes())[0])
+	if want["safe"].(map[string]any)["password"] != "[REDACTED]" {
+		t.Fatalf("inline reference = %v", want)
+	}
+}
+
+// A sealed group with nothing logged under it emits nothing, and a later
+// non-sealed sibling group is unaffected.
+func TestPolicyHandler_WithGroupSealedEmptyAndDeeper(t *testing.T) {
+	r := NewStaticLogPolicyResolver(iface.DefaultLogContentPolicy())
+	logger, _, buf := newPolicyLogger(t, r)
+	logger.WithGroup("password").Info("empty")
+	logger.WithGroup("password").WithGroup("inner").With(slog.String("k", "hunter2")).Info("deep", slog.String("v", "hunter2"))
+	lines := parseLines(t, buf.Bytes())
+	if _, ok := lines[0]["password"]; ok {
+		t.Fatalf("sealed group with no content must not be emitted: %v", lines[0])
+	}
+	if strings.Contains(buf.String(), "hunter2") || lines[1]["password"] != "[REDACTED]" {
+		t.Fatalf("groups below a sealed group must collapse: %v", lines[1])
+	}
+}
+
+// capturingHandler records every attribute it is given (handler-level and
+// record-level) as a flat key=value list, and every message.
+type capturingHandler struct {
+	st    *captureState
+	attrs []slog.Attr
+}
+
+type captureState struct {
+	mu   sync.Mutex
+	msgs []string
+	kv   []string
+}
+
+func (c *capturingHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (c *capturingHandler) WithAttrs(a []slog.Attr) slog.Handler {
+	return &capturingHandler{st: c.st, attrs: append(append([]slog.Attr{}, c.attrs...), a...)}
+}
+func (c *capturingHandler) WithGroup(string) slog.Handler { return c }
+func (c *capturingHandler) Handle(_ context.Context, r slog.Record) error {
+	c.st.mu.Lock()
+	defer c.st.mu.Unlock()
+	c.st.msgs = append(c.st.msgs, r.Message)
+	add := func(a slog.Attr) bool { c.st.kv = append(c.st.kv, a.Key+"="+a.Value.String()); return true }
+	for _, a := range c.attrs {
+		add(a)
+	}
+	r.Attrs(add)
+	return nil
+}
+
+// Chain position (spec §2.3): the fan-out members (stdout, OTLP) receive the
+// already-masked record, and the level gate sits in front of the mask.
+func TestSetupLogger_FanoutReceivesMaskedRecords(t *testing.T) {
+	prevBox, prevPM := globalPolicyBox.Load(), globalPerModule.Load()
+	t.Cleanup(func() { globalPolicyBox.Store(prevBox); globalPerModule.Store(prevPM) })
+	t.Setenv("ENV", "production")
+	t.Setenv("LOG_LEVEL", "info")
+	t.Setenv("OAUTH_TOKEN_ENCRYPTION_KEY", "")
+
+	st := &captureState{}
+	logger := SetupLogger(&capturingHandler{st: st})
+	logger.Info("login failed for anna@example.com",
+		slog.String("password", "hunter2"),
+		slog.String("remote", "203.0.113.7:4711"),
+		slog.String("note", "mail bob@example.org"))
+	logger.Debug("below the level gate anna@example.com", slog.String("password", "hunter2"))
+
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if len(st.msgs) != 1 {
+		t.Fatalf("extra handler got %d records, want 1 (debug must be gated): %v", len(st.msgs), st.msgs)
+	}
+	if st.msgs[0] != "login failed for [EMAIL]" {
+		t.Fatalf("message not masked before the fan-out: %q", st.msgs[0])
+	}
+	all := strings.Join(st.kv, "\n")
+	for _, leak := range []string{"hunter2", "203.0.113.7", "bob@example.org", "anna@example.com"} {
+		if strings.Contains(all, leak) || strings.Contains(st.msgs[0], leak) {
+			t.Fatalf("extra handler saw %q unmasked:\n%s", leak, all)
+		}
+	}
+	for _, want := range []string{"password=[REDACTED]", "remote=203.0.113.0/24", "note=mail [EMAIL]"} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("extra handler missing %q:\n%s", want, all)
+		}
 	}
 }
 

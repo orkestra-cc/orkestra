@@ -100,6 +100,10 @@ type keyInfo struct {
 // simply recomputed, so an attacker-chosen key stream cannot grow memory.
 const maxKeyCacheEntries = 4096
 
+// maxCachedKeyLen keeps long raw keys out of the cache: a key can be caller
+// controlled (even PII), and the cache would retain up to 4096 of them.
+const maxCachedKeyLen = 64
+
 // keyCache is copy-on-write: readers do one atomic load and a map lookup, no
 // lock; the few writers (each new key once, at most maxKeyCacheEntries times)
 // clone the map under keyCacheMu.
@@ -130,6 +134,9 @@ func classifyKey(raw string) keyInfo {
 		} else if _, ok := subjectKeys[ki.norm]; ok {
 			ki.class = keySubject
 		}
+	}
+	if len(raw) > maxCachedKeyLen {
+		return ki
 	}
 	keyCacheMu.Lock()
 	defer keyCacheMu.Unlock()
