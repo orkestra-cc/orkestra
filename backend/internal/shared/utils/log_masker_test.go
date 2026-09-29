@@ -3,10 +3,12 @@ package utils
 import (
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
@@ -269,7 +271,8 @@ func TestMaskText_IPv4Edges(t *testing.T) {
 		{"ip=203.0.113.7,x", "ip=203.0.113.0/24,x"},
 		{"203.000.113.007", "[IP]"},
 		{"from 999.1.1.1 x", "from [IP] x"},
-		{"build 1.2.3.4.5 done", "build 1.2.3.4.5 done"},
+		{"build 1.2.3.4.5 done", "build 1.2.3.0/24 done"},
+		{"build 999.999.999.999.999 done", "build 999.999.999.999.999 done"},
 	}
 	for _, c := range cases {
 		if got := maskedText(t, m, c.in); got != c.want {
@@ -398,5 +401,160 @@ func TestMaskAttr_StringContainers(t *testing.T) {
 	mu := uv.(url.Values)
 	if mu["token"][0] != "[REDACTED]" || mu["q"][0] != "[EMAIL]" {
 		t.Errorf("url.Values = %v", mu)
+	}
+}
+
+// --- fix round 2 ---
+
+func TestMaskText_WordTailBeforeUncompressedIPv6(t *testing.T) {
+	trunc := modeMasker(iface.IPAddressTruncated)
+	hashed := modeMasker(iface.IPAddressHashed)
+	omitted := modeMasker(iface.IPAddressOmitted)
+	full := "2001:db8:85a3:0:0:8a2e:370:7334"
+	h := hashed.hash("ip:", net.ParseIP(full).String()) // hashes use the canonical form
+	h2 := hashed.hash("ip:", net.ParseIP("2001:db8:85a3:1:2:8a2e:370:7334").String())
+	cases := []struct {
+		name string
+		m    logMasker
+		in   string
+		want string
+	}{
+		{"omitted src", omitted, "src:" + full, "sr[IP]"},
+		{"truncated src", trunc, "src:" + full, "sr2001:db8:85a3::/48"},
+		{"hashed src", hashed, "src:" + full, "sr" + h},
+		{"hashed failed", hashed, "failed:2001:db8:85a3:1:2:8a2e:370:7334", "fail" + h2},
+		{"omitted two hex groups", omitted, "cafe:beef:2001:db8:85a3:1:2:8a2e:370:7334", "[IP]"},
+		{"non-hex word keeps its colon", omitted, "ip:" + full, "ip:[IP]"},
+	}
+	for _, c := range cases {
+		got := maskedText(t, c.m, c.in)
+		if got != c.want {
+			t.Errorf("%s: %q -> %q, want %q", c.name, c.in, got, c.want)
+		}
+		if strings.Contains(got, "7334") || strings.Contains(got, "370") {
+			t.Errorf("%s: trailing group leaked: %q", c.name, got)
+		}
+	}
+}
+
+func TestMaskText_IPv4WithDottedNeighbours(t *testing.T) {
+	trunc := modeMasker(iface.IPAddressTruncated)
+	omitted := modeMasker(iface.IPAddressOmitted)
+	hashed := modeMasker(iface.IPAddressHashed)
+	cases := []struct {
+		name string
+		m    logMasker
+		in   string
+		want string
+	}{
+		{"omitted v-prefix", omitted, "v1.203.0.113.7", "v[IP]"},
+		{"omitted in a sentence", omitted, "release 1.203.0.113.7 ok", "release [IP] ok"},
+		{"omitted trailing number", omitted, "203.0.113.7.5", "[IP]"},
+		{"truncated trailing number", trunc, "203.0.113.7.5", "203.0.113.0/24"},
+		{"truncated v-prefix", trunc, "v1.203.0.113.7", "v1.203.0.0/24"},
+		{"hashed trailing number", hashed, "203.0.113.7.5", hashed.hash("ip:", "203.0.113.7")},
+		{"omitted six numbers", omitted, "9.9.203.0.113.7", "[IP]"},
+	}
+	for _, c := range cases {
+		if got := maskedText(t, c.m, c.in); got != c.want {
+			t.Errorf("%s: %q -> %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+}
+
+func TestMaskText_LongRunFailsClosed(t *testing.T) {
+	long := "ab:" + strings.Repeat("f", 112) + ":2001:db8:1:2::1"
+	for _, mode := range []iface.IPAddressMode{iface.IPAddressTruncated, iface.IPAddressHashed, iface.IPAddressOmitted} {
+		if got := maskedText(t, modeMasker(mode), "x "+long+" y"); got != "x [IP] y" {
+			t.Errorf("%s: got %q, want %q", mode, got, "x [IP] y")
+		}
+	}
+	if got := maskedText(t, modeMasker(iface.IPAddressFull), long); got != long {
+		t.Errorf("full mode changed the text")
+	}
+}
+
+func TestMaskText_IPv6AfterIPv4Octets(t *testing.T) {
+	in := "10.0.0.1:2001:db8:1:2::1"
+	h4 := modeMasker(iface.IPAddressHashed).hash("ip:", "10.0.0.1")
+	h6 := modeMasker(iface.IPAddressHashed).hash("ip:", "2001:db8:1:2::1")
+	cases := []struct {
+		mode iface.IPAddressMode
+		want string
+	}{
+		{iface.IPAddressTruncated, "10.0.0.0/24:2001:db8:1::/48"},
+		{iface.IPAddressHashed, h4 + ":" + h6},
+		{iface.IPAddressOmitted, "[IP]:[IP]"},
+	}
+	for _, c := range cases {
+		if got := maskedText(t, modeMasker(c.mode), in); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.mode, got, c.want)
+		}
+	}
+}
+
+func TestMaskAttr_BranchingCycleIsBounded(t *testing.T) {
+	m := logMasker{p: policy(nil), key: testHashKey}
+	self := map[string]any{}
+	self["a"] = self
+	self["b"] = self
+	start := time.Now()
+	out, keep := m.maskAttr(slog.Any("payload", self))
+	if !keep || out.Value.Kind() != slog.KindAny {
+		t.Fatalf("unexpected result %v %v", out, keep)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("branching cycle took %v", d)
+	}
+	// a node budget is per attribute: the next attribute is masked normally
+	if v, _ := maskOne(t, m, slog.Any("ok", map[string]any{"a": "x@y.it"})); v.(map[string]any)["a"] != "[EMAIL]" {
+		t.Errorf("budget leaked across attributes: %v", v)
+	}
+	big := make([]any, maxMaskNodes+5)
+	for i := range big {
+		big[i] = "v"
+	}
+	bv, _ := maskOne(t, m, slog.Any("big", big))
+	if bv.([]any)[maxMaskNodes+4] != "[REDACTED]" {
+		t.Errorf("values past the node budget must be [REDACTED]")
+	}
+}
+
+func TestMaskAttr_GroupKeyRulesIPUserAgentSubject(t *testing.T) {
+	child := []any{"addr", "203.0.113.7"}
+	cases := []struct {
+		name string
+		mut  func(*iface.LogContentPolicy)
+		attr slog.Attr
+		keep bool
+		want string // string value when kept as a string; "" = kept as a group
+	}{
+		{"ip group truncated", func(p *iface.LogContentPolicy) { p.IPAddress = iface.IPAddressTruncated }, slog.Group("client_ip", child...), true, "[REDACTED]"},
+		{"ip group hashed", func(p *iface.LogContentPolicy) { p.IPAddress = iface.IPAddressHashed }, slog.Group("remote", child...), true, "[REDACTED]"},
+		{"ip group omitted", func(p *iface.LogContentPolicy) { p.IPAddress = iface.IPAddressOmitted }, slog.Group("ip", child...), false, ""},
+		{"ip group full recurses", func(p *iface.LogContentPolicy) { p.IPAddress = iface.IPAddressFull }, slog.Group("ip", child...), true, ""},
+		{"ua group omitted", func(p *iface.LogContentPolicy) { p.UserAgent = iface.UserAgentOmitted }, slog.Group("user_agent", "raw", "Mozilla/5.0"), false, ""},
+		{"ua group full recurses", nil, slog.Group("user_agent", "raw", "Mozilla/5.0"), true, ""},
+		{"subject group omitted", func(p *iface.LogContentPolicy) { p.SubjectIDs = iface.SubjectIDOmitted }, slog.Group("user_id", "value", "3f2b"), false, ""},
+		{"subject group hashed", func(p *iface.LogContentPolicy) { p.SubjectIDs = iface.SubjectIDHashed }, slog.Group("actorUserId", "value", "3f2b"), false, ""},
+		{"subject group uuid recurses", nil, slog.Group("user_id", "value", "3f2b"), true, ""},
+	}
+	for _, c := range cases {
+		m := logMasker{p: policy(c.mut), key: testHashKey}
+		out, keep := m.maskAttr(c.attr)
+		if keep != c.keep {
+			t.Errorf("%s: keep = %v, want %v", c.name, keep, c.keep)
+			continue
+		}
+		if !keep {
+			continue
+		}
+		if c.want != "" {
+			if out.Value.Kind() != slog.KindString || out.Value.String() != c.want {
+				t.Errorf("%s: got %v, want string %q", c.name, out.Value, c.want)
+			}
+		} else if out.Value.Kind() != slog.KindGroup {
+			t.Errorf("%s: got %v, want a recursed group", c.name, out.Value)
+		}
 	}
 }

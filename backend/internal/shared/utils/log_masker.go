@@ -44,7 +44,7 @@ var (
 	// Any dotted run of four numbers; boundaries and validity are decided in
 	// code (net.ParseIP), so "client_203.0.113.7" and "203.000.113.007" are
 	// both seen.
-	ipv4Re = regexp.MustCompile(`[0-9]+(?:\.[0-9]+){3}`)
+	ipv4Re = regexp.MustCompile(`[0-9]+(?:\.[0-9]+){3,}`)
 	// A maximal run of hex digits and colons with at least two colons, whose
 	// last segment may carry a dotted-quad tail (IPv4-mapped addresses).
 	// It is only a candidate: ipv6Spans finds the real address inside it.
@@ -56,6 +56,9 @@ const (
 	// self-referencing container would otherwise overflow the stack, which
 	// recover() cannot catch.
 	maxMaskDepth = 32
+	// maxMaskNodes bounds the values visited per attribute: the depth cap
+	// alone lets a branching cycle (m["a"]=m; m["b"]=m) visit 2^33 nodes.
+	maxMaskNodes = 10000
 	// maxIPv6Candidate bounds the quadratic address search inside a candidate.
 	maxIPv6Candidate = 128
 )
@@ -98,15 +101,11 @@ func (m logMasker) maskAttr(a slog.Attr) (out slog.Attr, keep bool) {
 	}()
 	v := a.Value.Resolve()
 	if v.Kind() == slog.KindGroup {
-		// A named group is subject to the secret and PII key rules as a
-		// whole; an empty key (inline group) just recurses.
+		// A named group follows the same key rules as a map under that key;
+		// an empty key (inline group) just recurses.
 		if a.Key != "" {
-			gk := redact.NormalizeKey(a.Key)
-			if redact.IsSecretNormalized(gk) {
-				return slog.String(a.Key, redact.Redacted), true
-			}
-			if slices.Contains(m.p.PIIKeys, gk) {
-				return slog.String(a.Key, piiMask), true
+			if attr, keep, handled := m.groupKeyRule(a.Key); handled {
+				return attr, keep
 			}
 		}
 		children := v.Group()
@@ -118,15 +117,52 @@ func (m logMasker) maskAttr(a slog.Attr) (out slog.Attr, keep bool) {
 		}
 		return slog.Attr{Key: a.Key, Value: slog.GroupValue(masked...)}, true
 	}
-	nv, ok := m.maskKV(a.Key, v.Any(), 0)
+	budget := maxMaskNodes
+	nv, ok := m.maskKV(a.Key, v.Any(), 0, &budget)
 	if !ok {
 		return slog.Attr{}, false
 	}
 	return slog.Any(a.Key, nv), true
 }
 
+// groupKeyRule applies to a named slog group the key rules maskKV applies to
+// a map under the same key, in the same order. handled=false means no rule
+// claims the key and the children are masked one by one.
+func (m logMasker) groupKeyRule(rawKey string) (attr slog.Attr, keep, handled bool) {
+	key := redact.NormalizeKey(rawKey)
+	if redact.IsSecretNormalized(key) {
+		return slog.String(rawKey, redact.Redacted), true, true
+	}
+	if _, ok := ipKeys[key]; ok {
+		switch m.p.IPAddress {
+		case iface.IPAddressFull:
+			return slog.Attr{}, false, false
+		case iface.IPAddressTruncated, iface.IPAddressHashed:
+			return slog.String(rawKey, redact.Redacted), true, true
+		default: // omitted, or an unknown mode: fail closed
+			return slog.Attr{}, false, true
+		}
+	}
+	if _, ok := uaKeys[key]; ok {
+		if m.p.UserAgent == iface.UserAgentFull {
+			return slog.Attr{}, false, false
+		}
+		return slog.Attr{}, false, true
+	}
+	if _, ok := subjectKeys[key]; ok {
+		if m.p.SubjectIDs == iface.SubjectIDUUID {
+			return slog.Attr{}, false, false
+		}
+		return slog.Attr{}, false, true
+	}
+	if slices.Contains(m.p.PIIKeys, key) {
+		return slog.String(rawKey, piiMask), true, true
+	}
+	return slog.Attr{}, false, false
+}
+
 // maskKV applies the key rules in spec order, then the value rules.
-func (m logMasker) maskKV(rawKey string, val any, depth int) (any, bool) {
+func (m logMasker) maskKV(rawKey string, val any, depth int, budget *int) (any, bool) {
 	key := redact.NormalizeKey(rawKey)
 	if redact.IsSecretNormalized(key) {
 		return redact.Redacted, true
@@ -146,11 +182,12 @@ func (m logMasker) maskKV(rawKey string, val any, depth int) (any, bool) {
 	if slices.Contains(m.p.PIIKeys, key) {
 		return piiMask, true
 	}
-	return m.maskValue(val, depth), true
+	return m.maskValue(val, depth, budget), true
 }
 
-func (m logMasker) maskValue(val any, depth int) any {
-	if depth > maxMaskDepth {
+func (m logMasker) maskValue(val any, depth int, budget *int) any {
+	*budget--
+	if depth > maxMaskDepth || *budget < 0 {
 		return redact.Redacted
 	}
 	switch x := val.(type) {
@@ -161,7 +198,7 @@ func (m logMasker) maskValue(val any, depth int) any {
 	case map[string]any:
 		out := make(map[string]any, len(x))
 		for k, v := range x {
-			if nv, ok := m.maskKV(k, v, depth+1); ok {
+			if nv, ok := m.maskKV(k, v, depth+1, budget); ok {
 				out[k] = nv
 			}
 		}
@@ -169,7 +206,7 @@ func (m logMasker) maskValue(val any, depth int) any {
 	case []any:
 		out := make([]any, len(x))
 		for i, v := range x {
-			out[i] = m.maskValue(v, depth+1)
+			out[i] = m.maskValue(v, depth+1, budget)
 		}
 		return out
 	case []string:
@@ -181,21 +218,21 @@ func (m logMasker) maskValue(val any, depth int) any {
 	case map[string]string:
 		out := make(map[string]string, len(x))
 		for k, v := range x {
-			if nv, ok := m.maskKV(k, v, depth+1); ok {
+			if nv, ok := m.maskKV(k, v, depth+1, budget); ok {
 				out[k] = fmt.Sprint(nv)
 			}
 		}
 		return out
 	case http.Header: // named types do not match the plain map case below
-		return http.Header(m.maskValue(map[string][]string(x), depth).(map[string][]string))
+		return http.Header(m.maskValue(map[string][]string(x), depth, budget).(map[string][]string))
 	case url.Values:
-		return url.Values(m.maskValue(map[string][]string(x), depth).(map[string][]string))
+		return url.Values(m.maskValue(map[string][]string(x), depth, budget).(map[string][]string))
 	case map[string][]string:
 		out := make(map[string][]string, len(x))
 		for k, vs := range x {
 			masked := make([]string, 0, len(vs))
 			for _, v := range vs {
-				if nv, ok := m.maskKV(k, v, depth+1); ok {
+				if nv, ok := m.maskKV(k, v, depth+1, budget); ok {
 					masked = append(masked, fmt.Sprint(nv))
 				}
 			}
@@ -281,52 +318,70 @@ type ipSpan struct {
 	ip         net.IP
 }
 
-// ipv6Spans finds IPv6 addresses in s. A candidate run may carry extra
-// characters around the address ("host:2001:db8::1:" or a trailing "."), so
-// the longest valid address is searched inside it, starting at the run start
-// or right after a colon and ending at the run end or before a ':' or '.'.
+// ipv6Spans finds IPv6 addresses in s and fails closed around them. A
+// candidate run may carry extra characters ("host:2001:db8::1:", a word whose
+// tail is hex digits before an uncompressed address, a trailing "."), so the
+// address is searched inside it: start at the run start or right after a
+// colon, end at the run end or before a ':' or '.'. Among the valid
+// addresses the one reaching furthest right wins (earliest start on a tie),
+// so a word tail cannot absorb a group and strand the last one in the clear.
+// Hex left over next to the address is masked with it; bare ':' and '.'
+// punctuation stays. A run too long to search is masked whole (nil ip).
 func ipv6Spans(s string) []ipSpan {
 	var spans []ipSpan
 	for _, loc := range ipv6CandidateRe.FindAllStringIndex(s, -1) {
 		lo, hi := loc[0], loc[1]
-		if hi-lo > maxIPv6Candidate {
-			continue
-		}
-		// "203.0.113.7:ab::cd": the run belongs to an IPv4 address and its port.
+		// "203.0.113.7:2001:db8::1": the group before the first colon is the
+		// last octet of an IPv4 address, which the IPv4 pass handles.
 		if lo >= 2 && s[lo-1] == '.' && s[lo-2] >= '0' && s[lo-2] <= '9' {
+			if c := strings.IndexByte(s[lo:hi], ':'); c >= 0 {
+				lo += c
+			}
+		}
+		if hi-lo > maxIPv6Candidate {
+			spans = append(spans, ipSpan{start: lo, end: hi})
 			continue
 		}
-		for lo < hi {
-			found := false
-			for i := lo; i < hi && !found; i++ {
-				if i > lo && s[i-1] != ':' {
+		bestI, bestJ := -1, -1
+		var bestIP net.IP
+		for i := lo; i < hi; i++ {
+			if i > lo && s[i-1] != ':' {
+				continue
+			}
+			for j := hi; j > i && j > bestJ; j-- {
+				if j < hi && s[j] != ':' && s[j] != '.' {
 					continue
 				}
-				for j := hi; j > i; j-- {
-					if j < hi && s[j] != ':' && s[j] != '.' {
-						continue
-					}
-					if !strings.Contains(s[i:j], ":") {
-						break
-					}
-					if ip := net.ParseIP(s[i:j]); ip != nil {
-						spans = append(spans, ipSpan{start: i, end: j, ip: ip})
-						lo, found = j, true
-						break
-					}
+				if !strings.Contains(s[i:j], ":") {
+					break
+				}
+				if ip := net.ParseIP(s[i:j]); ip != nil {
+					bestI, bestJ, bestIP = i, j, ip
+					break
 				}
 			}
-			if !found {
-				break
-			}
 		}
+		if bestI < 0 {
+			continue
+		}
+		start, end := bestI, bestJ
+		if strings.Trim(s[lo:bestI], ":") != "" {
+			start = lo
+		}
+		if strings.Trim(s[bestJ:hi], ":.") != "" {
+			end = hi
+		}
+		spans = append(spans, ipSpan{start: start, end: end, ip: bestIP})
 	}
 	return spans
 }
 
 // maskIPv4Text replaces the dotted quads of a text segment. A quad that
 // net.ParseIP rejects ("203.000.113.007", "999.1.1.1") still looks like an
-// address and becomes "[IP]"; a run of five or more numbers is not one.
+// address and becomes "[IP]". In a run of five or more numbers ("v1.203.0.113.7",
+// "203.0.113.7.5") every window of four that parses is an address: the span
+// from the first to the last such window is replaced as one, rendered from
+// the first window's address; a run with no valid window is left alone.
 func (m logMasker) maskIPv4Text(s string) string {
 	locs := ipv4Re.FindAllStringIndex(s, -1)
 	if locs == nil {
@@ -335,15 +390,43 @@ func (m logMasker) maskIPv4Text(s string) string {
 	var b strings.Builder
 	last := 0
 	for _, loc := range locs {
-		if loc[1]+1 < len(s) && s[loc[1]] == '.' && s[loc[1]+1] >= '0' && s[loc[1]+1] <= '9' {
+		run := s[loc[0]:loc[1]]
+		nums := strings.Split(run, ".")
+		if len(nums) == 4 {
+			b.WriteString(s[last:loc[0]])
+			if ip := net.ParseIP(run); ip != nil {
+				b.WriteString(m.ipReplacement(ip))
+			} else {
+				b.WriteString(textIP)
+			}
+			last = loc[1]
 			continue
 		}
-		b.WriteString(s[last:loc[0]])
-		if ip := net.ParseIP(s[loc[0]:loc[1]]); ip != nil {
-			b.WriteString(m.ipReplacement(ip))
-		} else {
-			b.WriteString(textIP)
+		first, lastEnd := -1, -1
+		var firstIP net.IP
+		for w := 0; w+4 <= len(nums); w++ {
+			if ip := net.ParseIP(strings.Join(nums[w:w+4], ".")); ip != nil {
+				if first < 0 {
+					first, firstIP = w, ip
+				}
+				lastEnd = w + 4
+			}
 		}
+		if first < 0 {
+			continue
+		}
+		off := 0 // byte offset of nums[first] and end of nums[lastEnd-1] in run
+		for _, n := range nums[:first] {
+			off += len(n) + 1
+		}
+		endOff := off
+		for _, n := range nums[first:lastEnd] {
+			endOff += len(n) + 1
+		}
+		endOff-- // no dot after the last number
+		b.WriteString(s[last : loc[0]+off])
+		b.WriteString(m.ipReplacement(firstIP))
+		b.WriteString(s[loc[0]+endOff : loc[1]])
 		last = loc[1]
 	}
 	b.WriteString(s[last:])
@@ -363,6 +446,9 @@ func (m logMasker) safeText(s string) (out string) {
 // ipReplacement renders an address found in free text per the IP mode; any
 // mode that cannot produce a pseudonym fails closed to "[IP]".
 func (m logMasker) ipReplacement(ip net.IP) string {
+	if ip == nil {
+		return textIP
+	}
 	switch m.p.IPAddress {
 	case iface.IPAddressTruncated:
 		return truncateIP(ip)
