@@ -87,6 +87,8 @@ func TestSwapSpanPolicyResolver(t *testing.T) {
 	strict.UserAgent = iface.UserAgentOmitted
 	mem := tracetest.NewInMemoryExporter()
 	exp := NewMaskingExporter(mem, mapResolver{"": func() *iface.LogContentPolicy { p := iface.DefaultLogContentPolicy(); return &p }()}, nil)
+	prev := globalSpanBox.Load()
+	t.Cleanup(func() { globalSpanBox.Store(prev) })
 	globalSpanBox.Store(exp.box)
 	SwapSpanPolicyResolver(mapResolver{"": &strict})
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))

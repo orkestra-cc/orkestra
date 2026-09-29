@@ -13,6 +13,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 // newCapturingLogger returns a logger writing JSON to a buffer plus a
@@ -512,5 +514,36 @@ func TestRequestLogger_FallsBackToPathWithoutTemplate(t *testing.T) {
 	}
 	if _, ok := line["route"]; ok {
 		t.Fatalf("no template → no route attribute: %v", line["route"])
+	}
+}
+
+func TestRequestLogger_StampsRouteTemplateOnActiveSpan(t *testing.T) {
+	logger, _ := newCapturingLogger(t)
+	rec := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
+	r := chi.NewRouter()
+	r.Use(RequestLogger(logger, RequestLoggerOptions{SkipPaths: map[string]struct{}{}}))
+	r.Get("/v1/x/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	// The span is opened by an outer layer, like otelhttp does in production.
+	outer := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		ctx, span := tp.Tracer("t").Start(req.Context(), "server")
+		defer span.End()
+		r.ServeHTTP(w, req.WithContext(ctx))
+	})
+	outer.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/x/SECRET123", nil))
+
+	ended := rec.Ended()
+	if len(ended) != 1 {
+		t.Fatalf("spans = %d", len(ended))
+	}
+	got := ""
+	for _, kv := range ended[0].Attributes() {
+		if kv.Key == "http.route" {
+			got = kv.Value.AsString()
+		}
+	}
+	if got != "/v1/x/{id}" {
+		t.Errorf("http.route on span = %q, want /v1/x/{id}", got)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -142,6 +143,14 @@ func RequestLogger(logger *slog.Logger, opts RequestLoggerOptions) func(http.Han
 			ww := chiMiddleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			next.ServeHTTP(ww, r)
 			duration := time.Since(start)
+
+			// otelhttp computes http.route once, at span start, from a
+			// pattern chi has not set yet, so server spans never carry it.
+			// Stamp the matched template on the still-open span: the trace
+			// exporter substitutes it for the raw url.path (spec §2.5).
+			if route := chiRoutePattern(r); route != "" {
+				trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("http.route", route))
+			}
 
 			attrs := make([]slog.Attr, 0, 16)
 			attrs = append(attrs,
