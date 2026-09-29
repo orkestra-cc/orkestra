@@ -40,13 +40,15 @@ The preview never accepts raw LogQL or an upstream URL. Its schema restricts the
 A single `log_levels` document (`_id="default"`) stores `global`, `perModule`, temporary `diagnostics`, `revision`, `permanentRevision`, and update metadata. No declared indexes are needed beyond MongoDB's `_id`; replacements predicate on both `_id` and the expected document revision.
 
 :::note Scope
-This module sets thresholds, not destinations. Live log tailing lives in Grafana, and per-tenant filtering happens at query time in Loki via the `tenant_id` field of the `http_request` line and of records logged with a tenant-scoped context — not here. Levels are global-per-module, not per-tenant.
+This module sets thresholds, not destinations. Live log tailing lives in Grafana, and per-tenant filtering happens at query time in Loki via the `tenant_id` field, which the `http_request` line always carries and other lines carry only when the calling code adds it (no handler stamps it: the trace handler adds just `trace_id` and `span_id`) — not here. Levels are global-per-module, not per-tenant.
 :::
 
 ## Masking
 
-Every log record and every exported span is masked before it leaves the
-backend. Secrets (passwords, tokens, cookies, keys) are always replaced by
+Every log record written through `slog` and every exported span is masked
+before it leaves the backend. The one exception is chi's `Recoverer`
+middleware: it writes a recovered panic value and its stack trace straight to
+stderr, outside the `slog` chain, so that output is not masked. Secrets (passwords, tokens, cookies, keys) are always replaced by
 `[REDACTED]`. IP addresses, user agents, user identifiers, personal-data keys
 and personal data found inside free text are handled according to the
 compliance policy of the tenant the record belongs to: kept, truncated,
