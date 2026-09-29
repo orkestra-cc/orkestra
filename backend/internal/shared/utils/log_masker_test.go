@@ -274,7 +274,9 @@ func TestMaskText_IPv4Edges(t *testing.T) {
 		{"build 1.2.3.4.5 done", "build [IP] done"},
 		{"build 999.999.999.999.999 done", "build [IP] done"},
 		{"v1.203.000.113.007", "v[IP]"},
-		{"stamp 2026.09.29 and 2026.09.29.12", "stamp 2026.09.29 and 2026.09.29.12"},
+		// four dot-separated all-digit groups of any length count as an
+		// address (fail closed), so a four-part date is masked; three stay
+		{"stamp 2026.09.29 and 2026.09.29.12", "stamp 2026.09.29 and [IP]"},
 	}
 	for _, c := range cases {
 		if got := maskedText(t, m, c.in); got != c.want {
@@ -589,25 +591,82 @@ func TestMaskText_IPRuleIsLinear(t *testing.T) {
 	if testing.Short() {
 		t.Skip("timing test")
 	}
-	bound := 2 * time.Second
+	bound := time.Second
 	if raceEnabled {
 		bound = 12 * time.Second
 	}
 	m := modeMasker(iface.IPAddressTruncated)
+	const mb = 1 << 20
+	rep := func(unit string) string { return strings.Repeat(unit, mb/len(unit)) }
 	inputs := map[string]string{
-		"a::a::":       strings.Repeat("a::a::", (1<<20)/6),
-		"five-digit":   strings.Repeat("12345:", (1<<20)/6),
-		"dotted 4digs": strings.Repeat("1234.", (1<<20)/5),
-		"colons":       strings.Repeat(":", 1<<20),
+		"a::a::":        rep("a::a::"),
+		"five-digit":    rep("12345:"),
+		"dotted 4digs":  rep("1234."),
+		"colons":        rep(":"),
+		"dot colon":     rep(".:"),
+		"one colon dot": rep("1:."),
+		"hex groups":    rep("abcd:"),
+		"hex dots":      rep("a1:b2.c3:"),
+		"mixed":         rep(".:1:.a:12345:1234.:ffff:1.2:"),
+		"v4 tail":       rep("1:2:300.1.1.111:"),
 	}
 	for name, in := range inputs {
 		start := time.Now()
 		got := m.safeText(in)
-		if d := time.Since(start); d > bound {
+		d := time.Since(start)
+		t.Logf("%s: %v", name, d)
+		if d > bound {
 			t.Errorf("%s: masking 1 MB took %v", name, d)
 		}
 		if name == "a::a::" && got != "[IP]" {
 			t.Errorf("%s: got %.20q..., want [IP]", name, got)
+		}
+	}
+}
+
+// --- fix round 4: addresses glued to words and digits ---
+
+func TestMaskText_GluedAddresses(t *testing.T) {
+	// A glued run is never exactly one address: every mode renders the
+	// whole run as "[IP]" and nothing of the address stays behind.
+	cases := []struct{ in, want string }{
+		{"source2001:db8:85a3:1:2:8a2e:370:7334 up", "sour[IP] up"},
+		{"src2001:db8:85a3:1:2:8a2e:370:7334", "sr[IP]"},
+		{"node2a02:1234:5678:9abc:def0:1234:5678:9abc", "no[IP]"},
+		{"12001:db8:85a3:1:2:8a2e:370:7334", "[IP]"},
+		{"2001:db8:85a3:1:2:8a2e:370:7334abc", "[IP]"},
+		{"2001:db8:85a3:1:2:8a2e:370:73341", "[IP]"},
+		{"2001:db8::1abcde", "[IP]"},
+		{"x 2001:db8::1abcde y", "x [IP] y"},
+		{"id1203.0.113.7", "i[IP]"},
+		{"203.0.113.7123", "[IP]"},
+		{"x 41203.0.113.745 y", "x [IP] y"},
+		{"x ::ffff:203.0.113.7123 y", "x [IP] y"},
+	}
+	modes := []iface.IPAddressMode{iface.IPAddressTruncated, iface.IPAddressHashed, iface.IPAddressOmitted, iface.IPAddressMode("bogus")}
+	for _, mode := range modes {
+		for _, c := range cases {
+			if got := maskedText(t, modeMasker(mode), c.in); got != c.want {
+				t.Errorf("%s: %q -> %q, want %q", mode, c.in, got, c.want)
+			}
+		}
+	}
+}
+
+func TestMaskText_TimestampsUntouched(t *testing.T) {
+	ins := []string{
+		"10:20:30",
+		"12:34:56.789",
+		"at 12:34:56.789 and 10:20:30 done",
+		"ts=2026-09-29T12:34:56.789Z",
+		"took 00:01:02.345678",
+	}
+	modes := []iface.IPAddressMode{iface.IPAddressTruncated, iface.IPAddressHashed, iface.IPAddressOmitted, iface.IPAddressMode("bogus")}
+	for _, mode := range modes {
+		for _, in := range ins {
+			if got := maskedText(t, modeMasker(mode), in); got != in {
+				t.Errorf("%s: %q -> %q, want unchanged", mode, in, got)
+			}
 		}
 	}
 }

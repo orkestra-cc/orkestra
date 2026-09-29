@@ -350,7 +350,9 @@ func isZoneByte(c byte) bool {
 // hashed form is rendered only when the run, minus brackets, zone and one
 // leading/trailing punctuation or port, is exactly one address (exactRunIP);
 // every other case becomes "[IP]". Words are part of a run when they end in
-// hex letters ("src:2001:..." gives "sr[IP]"): over-masking by design.
+// hex letters ("src:2001:..." gives "sr[IP]", "source2001:..." "sour[IP]"),
+// and digits glued to a quad join it ("id1203.0.113.7" gives "i[IP]"):
+// over-masking by design.
 func (m logMasker) maskIPRuns(s string) string {
 	var b strings.Builder
 	last := 0
@@ -410,31 +412,63 @@ func (m logMasker) maskIPRuns(s string) string {
 }
 
 // runContainsIP reports whether a candidate run holds an address or something
-// shaped like one: four consecutive dotted decimal groups of one to three
-// digits (valid or not, so zero-padded quads count; the first group may end
-// in digits and the last may start with digits, so a hex-letter word glued to
-// an octet does not hide it), or a substring of at most 45 characters that
-// starts at a group boundary (run start, after ':' or '.'), ends at one (run
-// end, before ':' or '.') and parses as an address. Linear: each start looks
-// at most 45 characters ahead.
+// shaped like one (hasDottedQuad or hasIPv6). Glued words and digits do not
+// hide an address: both checks look at every substring, not only at group
+// boundaries. Linear in the run.
 func runContainsIP(r string) bool {
-	if parts := strings.Split(r, "."); len(parts) >= 4 {
-		for k := 0; k+3 < len(parts); k++ {
-			if decTail(parts[k]) && decGroup(parts[k+1]) && decGroup(parts[k+2]) && decHead(parts[k+3]) {
-				return true
-			}
+	return hasDottedQuad(r) || hasIPv6(r)
+}
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+func isHexDigit(c byte) bool {
+	return isDigit(c) || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+}
+
+// hasDottedQuad reports whether r contains [0-9]+(\.[0-9]+){3}: four
+// consecutive '.'-separated fields, the middle two all digits (any count), the
+// first ending and the last starting with a digit. Valid or not, and whatever
+// is glued before or after it, such a quad counts as an address (fail closed).
+func hasDottedQuad(r string) bool {
+	// ends/all of the three fields before the current one, oldest first
+	var ends, all [3]bool
+	seen := 0
+	for start := 0; start <= len(r); {
+		end := strings.IndexByte(r[start:], '.')
+		if end < 0 {
+			end = len(r)
+		} else {
+			end += start
 		}
+		f := r[start:end]
+		fAll := f != ""
+		for i := 0; i < len(f) && fAll; i++ {
+			fAll = isDigit(f[i])
+		}
+		fStarts := f != "" && isDigit(f[0])
+		fEnds := f != "" && isDigit(f[len(f)-1])
+		if seen >= 3 && ends[0] && all[1] && all[2] && fStarts {
+			return true
+		}
+		ends = [3]bool{ends[1], ends[2], fEnds}
+		all = [3]bool{all[1], all[2], fAll}
+		seen++
+		start = end + 1
 	}
+	return false
+}
+
+// hasIPv6 reports whether some substring of r is an IPv6 address for
+// net.ParseIP. An address starts with a hex digit or with "::", so only those
+// positions are tried; that includes positions inside a longer hex word
+// ("src2001:..." holds "2001:..."), and ipv6From lets the address end inside
+// a longer last group ("...:7334abc"). Each start looks at most
+// maxIPv6Substring bytes ahead and stops at the first byte no address can
+// continue with, so the scan is linear with a small constant.
+func hasIPv6(r string) bool {
 	for i := 0; i < len(r); i++ {
-		if i > 0 && r[i-1] != ':' && r[i-1] != '.' {
-			continue
-		}
-		limit := min(len(r), i+maxIPv6Substring)
-		for j := i + 2; j <= limit; j++ {
-			if j < len(r) && r[j] != ':' && r[j] != '.' {
-				continue
-			}
-			if net.ParseIP(r[i:j]) != nil {
+		if isHexDigit(r[i]) || r[i] == ':' && i+1 < len(r) && r[i+1] == ':' {
+			if ipv6From(r, i) {
 				return true
 			}
 		}
@@ -442,47 +476,89 @@ func runContainsIP(r string) bool {
 	return false
 }
 
-func isDigit(c byte) bool { return c >= '0' && c <= '9' }
-
-func decGroup(p string) bool {
-	if len(p) == 0 || len(p) > 3 {
-		return false
-	}
-	for i := 0; i < len(p); i++ {
-		if !isDigit(p[i]) {
+// ipv6From reports whether some r[i:j] parses as an IPv6 address. It walks
+// the IPv6 grammar forward from i and gives up as soon as the prefix can no
+// longer be the start of an address: a group over four hex digits, a second
+// "::" or ":::", more than eight groups, an IPv4 tail not after a ':' or
+// with more than four fields or three-digit octets. The grammar here is looser
+// than net.ParseIP's (octet values, leading zeros, "::" standing for no group
+// are not checked), so it never stops early on a real address; net.ParseIP
+// only confirms prefixes that are complete (at least two ':', ending in a hex
+// group, "::" or a four-field IPv4 tail, eight groups or fewer with "::").
+func ipv6From(r string, i int) bool {
+	limit := min(len(r), i+maxIPv6Substring)
+	colons, groups, cur := 0, 0, 0 // cur: hex digits in the current group
+	digitsOnly, ellipsis := true, false
+	v4, dots, oct := false, 0, 0 // IPv4 tail: fields seen, digits in the current one
+	for j := i; j < limit; j++ {
+		c := r[j]
+		complete, total := false, 0
+		switch {
+		case v4:
+			switch {
+			case isDigit(c):
+				if oct++; oct > 3 {
+					return false
+				}
+				complete, total = dots == 3, groups+2
+			case c == '.':
+				if oct == 0 || dots == 3 {
+					return false
+				}
+				dots, oct = dots+1, 0
+			default:
+				return false
+			}
+		case isHexDigit(c):
+			if cur++; cur > 4 {
+				return false
+			}
+			digitsOnly = digitsOnly && isDigit(c)
+			complete, total = true, groups+1
+		case c == ':':
+			if cur > 0 {
+				if groups++; groups > 8 {
+					return false
+				}
+				cur, digitsOnly = 0, true
+			} else if j > i { // the previous byte was ':' too
+				if ellipsis {
+					return false
+				}
+				ellipsis = true
+				complete, total = true, groups
+			}
+			colons++
+		case c == '.':
+			// the current group becomes the first IPv4 field
+			if cur == 0 || cur > 3 || !digitsOnly || colons == 0 {
+				return false
+			}
+			v4, dots, oct = true, 1, 0
+		default:
 			return false
 		}
+		if complete && colons >= 2 && (total == 8 || ellipsis && total <= 8) && net.ParseIP(r[i:j+1]) != nil {
+			return true
+		}
 	}
-	return true
+	return false
 }
 
-// decTail: p ends in one to three digits that follow a non-digit or start.
-func decTail(p string) bool {
-	n := 0
-	for n < len(p) && isDigit(p[len(p)-1-n]) {
-		n++
-	}
-	return n >= 1 && n <= 3
-}
+// maxExactRun bounds the runs exactRunIP looks at: the longest address plus
+// a leading punctuation, a ":<port>" and a trailing punctuation.
+const maxExactRun = maxIPv6Substring + 8
 
-// decHead: p starts with one to three digits followed by a non-digit or end.
-func decHead(p string) bool {
-	n := 0
-	for n < len(p) && isDigit(p[n]) {
-		n++
-	}
-	return n >= 1 && n <= 3
-}
-
-// exactRunIP accepts a run that is exactly one address, optionally with one
-// leading ':' or '.', a '%zone' (dropped), and one trailing ':' or '.' and/or
-// ':<port digits>'; lead and trail are returned to be kept outside the
-// replacement. Whole-run parsing is tried first, and a port is only cut off an
+// exactRunIP accepts a run (without its brackets and '%zone', which the
+// caller handles) that is exactly one address, optionally with one leading
+// ':' or '.' and one trailing ':' or '.' and/or ':<port digits>'; lead and
+// trail are returned to be kept outside the replacement. A run with anything
+// glued to the address is never exact. Whole-run parsing is tried first, and a port is only cut off an
 // IPv4 address (bare IPv6 has no port syntax, and reading the last group of a
 // nine-group run as a port would leave it in the clear).
 func exactRunIP(core string) (lead string, ip net.IP, trail string, ok bool) {
-	if i := strings.IndexByte(core, '%'); i >= 0 {
-		core = core[:i]
+	if len(core) > maxExactRun {
+		return "", nil, "", false
 	}
 	for _, tk := range [4]int{0, 1, 2, 3} {
 		for _, strip := range [2]bool{false, true} {
