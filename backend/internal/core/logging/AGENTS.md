@@ -115,11 +115,19 @@ The service implements both `utils.LevelResolver` (consumed by `PerModuleLevelHa
   live policy (T2), the platform defaults apply.
 - `http_request` logs the chi route template (`route`), not the raw path;
   `path` appears only when no template matched.
-- Outgoing spans are masked the same way by `telemetry.MaskingExporter`. The RequestLogger stamps `http.route` on the active server span, and the exporter drops `url.path`/`http.target` when a span has no route (fail closed); `url.full` and `url.query` are never exported; `network.peer.address`, `client.address` and forwarded-for headers follow the IP rule.
-- `make backend-logscope` rejects new `slog.Any` calls with opaque values
-  and secret-looking keys with dynamic values; pre-existing ones are in
+- Outgoing spans are masked the same way by `telemetry.MaskingExporter`. The
+  RequestLogger stamps `http.route` on the active server span; a span with a
+  route gets the route template as the value of `url.path`/`http.target`. The
+  exporter drops `url.path`, `http.target`, and `http.url` when a span has no
+  route (fail closed); `url.full` and `url.query` are never exported;
+  `network.peer.address`, `client.address` and forwarded-for headers follow
+  the IP rule.
+- `make backend-logscope` rejects new `slog.Any` calls with opaque values and
+  secret-looking keys with dynamic values; pre-existing ones are in
   `tools/logscope/baseline.txt`.
-- Log masking overhead budget is ≤ 2 µs per record over a plain JSON handler (10 attrs, no free-text scan), measured by `BenchmarkPolicyHandler_TenAttrs` vs `BenchmarkPlainJSON_TenAttrs` in `internal/shared/utils`.
+- Log masking overhead budget is ≤ 2 µs per record over a plain JSON handler
+  (10 attrs, no free-text scan), measured by `BenchmarkPolicyHandler_TenAttrs`
+  vs `BenchmarkPlainJSON_TenAttrs` in `internal/shared/utils`.
 
 ## Related
 

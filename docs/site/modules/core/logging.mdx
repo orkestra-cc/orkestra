@@ -54,4 +54,4 @@ pseudonymised with a keyed hash, or removed. Records that belong to no
 tenant get the strictest policy in force.
 
 The `http_request` line identifies the endpoint by its route template
-(`/v1/admin/users/{id}`), not by the raw path.
+(`/v1/admin/users/{id}`), or the masked raw path when no route matched.
