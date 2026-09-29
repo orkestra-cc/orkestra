@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // globalPerModule remembers the PerModuleLevelHandler instance built
@@ -97,6 +99,14 @@ func SetupLogger(extras ...slog.Handler) *slog.Logger {
 	// SwapResolver below so admin mutations take effect without a
 	// restart. The handler instance does not change — only the
 	// resolver behind it.
+	// Spec §2.3 — compliance masking sits after the level gate (records
+	// dropped for level cost nothing) and before the fan-out (stdout and
+	// OTLP receive the same masked record). Boot uses the platform
+	// defaults; main.go swaps in the compliance module's live resolver.
+	policyHandler := NewPolicyHandler(handler, NewStaticLogPolicyResolver(iface.DefaultLogContentPolicy()), LogHashKeyFromEnv())
+	globalPolicyBox.Store(policyHandler.box)
+	handler = policyHandler
+
 	resolver := NewStaticLevelResolver(level, loadPerModuleLevels())
 	perModule := NewPerModuleLevelHandler(handler, resolver)
 	globalPerModule.Store(perModule)

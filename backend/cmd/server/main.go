@@ -54,6 +54,8 @@ var (
 func main() {
 	logger := utils.SetupLogger()
 	slog.SetDefault(logger)
+	// Compliance spec §9 — count recovered masking panics.
+	utils.SetMaskingPanicHook(metrics.Default().RecordLogMaskingPanic)
 	logger.Info("orkestra-backend starting",
 		slog.String("version", Version),
 		slog.String("build_time", BuildTime),
