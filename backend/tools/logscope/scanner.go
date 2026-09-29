@@ -1,16 +1,20 @@
 // Package logscope flags slog calls the compliance PolicyHandler cannot
-// mask reliably (compliance spec §2.6): slog.Any with an opaque value (a
-// struct, a pointer to one, or an interface other than error), and
-// secret-looking keys carrying a non-constant value. Existing calls live in
-// baseline.txt; a new one fails CI.
+// mask reliably (compliance spec §2.6): a value of a type the masker does not
+// scan (anything outside an allowlist: strings, byte slices, errors, basic
+// numbers/booleans/times, maps with string keys, slices of those, LogValuers),
+// and secret-looking keys carrying a non-constant value. Both slog.Any and the
+// key/value form of the logging calls (slog.Info("m", "key", v), With, ...)
+// are checked. Existing calls live in baseline.txt; a new one fails CI.
 package logscope
 
 import (
+	"fmt"
 	"go/ast"
 	"go/constant"
 	"go/token"
 	"go/types"
 	"path/filepath"
+	"strings"
 
 	"github.com/orkestra/backend/internal/shared/redact"
 	"golang.org/x/tools/go/packages"
@@ -38,6 +42,14 @@ func (f Finding) BaselineKey() string {
 
 var errorType = types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
 
+// kvArgsFrom maps the slog functions and *slog.Logger methods taking
+// alternating key/value arguments to the index of the first of them.
+var kvArgsFrom = map[string]int{
+	"Debug": 1, "Info": 1, "Warn": 1, "Error": 1,
+	"DebugContext": 2, "InfoContext": 2, "WarnContext": 2, "ErrorContext": 2,
+	"Log": 3, "With": 0, "Group": 1,
+}
+
 // ScanFiles inspects already type-checked files. relFile maps an absolute
 // file name to the path written in findings.
 func ScanFiles(fset *token.FileSet, files []*ast.File, info *types.Info, relFile func(string) string) []Finding {
@@ -50,31 +62,54 @@ func ScanFiles(fset *token.FileSet, files []*ast.File, info *types.Info, relFile
 			}
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
-				if !ok || len(call.Args) != 2 {
+				if !ok {
 					return true
 				}
 				callee, ok := typeutil.Callee(info, call).(*types.Func)
 				if !ok || callee.Pkg() == nil || callee.Pkg().Path() != "log/slog" {
 					return true
 				}
-				if !isAttrConstructor(callee) {
-					return true
-				}
-				keyTV, ok := info.Types[call.Args[0]]
-				if !ok || keyTV.Value == nil || keyTV.Value.Kind() != constant.String {
-					return true
-				}
-				key := constant.StringVal(keyTV.Value)
 				pos := fset.Position(call.Pos())
-				mk := func(cat string) Finding {
-					return Finding{Category: cat, File: relFile(pos.Filename), Line: pos.Line, Func: fn.Name.Name, Key: key}
+				check := func(keyExpr, valExpr ast.Expr, anyValue bool) {
+					keyTV, ok := info.Types[keyExpr]
+					if !ok || keyTV.Value == nil || keyTV.Value.Kind() != constant.String {
+						return
+					}
+					key := constant.StringVal(keyTV.Value)
+					mk := func(cat string) Finding {
+						return Finding{Category: cat, File: relFile(pos.Filename), Line: pos.Line, Func: fn.Name.Name, Key: key}
+					}
+					valTV := info.Types[valExpr]
+					if anyValue && !maskable(valTV.Type, callee.Pkg(), true) {
+						out = append(out, mk(CategoryAnyOpaque))
+					}
+					if redact.IsSecretKey(key) && valTV.Value == nil {
+						out = append(out, mk(CategorySecretKeyDynamic))
+					}
 				}
-				valTV := info.Types[call.Args[1]]
-				if callee.Name() == "Any" && opaque(valTV.Type) {
-					out = append(out, mk(CategoryAnyOpaque))
+				if isAttrConstructor(callee) {
+					if len(call.Args) == 2 {
+						check(call.Args[0], call.Args[1], callee.Name() == "Any")
+					}
+					return true
 				}
-				if redact.IsSecretKey(key) && valTV.Value == nil {
-					out = append(out, mk(CategorySecretKeyDynamic))
+				from, ok := kvArgsFrom[callee.Name()]
+				if !ok || !kvCallee(callee) || call.Ellipsis.IsValid() {
+					return true
+				}
+				// slog's own pairing: an Attr stands alone, a string is a key
+				// followed by its value, anything else is a !BADKEY value.
+				for i := from; i < len(call.Args); {
+					t := info.Types[call.Args[i]].Type
+					switch {
+					case isSlogNamed(t, "Attr"):
+						i++
+					case isString(t) && i+1 < len(call.Args):
+						check(call.Args[i], call.Args[i+1], true)
+						i += 2
+					default:
+						i++
+					}
 				}
 				return true
 			})
@@ -86,34 +121,92 @@ func ScanFiles(fset *token.FileSet, files []*ast.File, info *types.Info, relFile
 // isAttrConstructor reports whether fn is one of slog's key/value attribute
 // constructors (String, Int, Any, ...). Logging functions and methods such as
 // slog.Info("msg", err) also take two arguments, but their first one is a
-// message, not an attribute key. Group is skipped too: its second argument is
-// a nested attribute and the masker walks group members by their own keys.
+// message, not an attribute key. Group is handled with the key/value form:
+// its arguments after the name are pairs or attributes.
 func isAttrConstructor(fn *types.Func) bool {
 	sig, ok := fn.Type().(*types.Signature)
 	if !ok || sig.Recv() != nil || sig.Results().Len() != 1 || fn.Name() == "Group" {
 		return false
 	}
-	named, ok := sig.Results().At(0).Type().(*types.Named)
-	return ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "log/slog" && named.Obj().Name() == "Attr"
+	return isSlogNamed(sig.Results().At(0).Type(), "Attr")
 }
 
-// opaque reports values the masker passes through unchanged: structs,
-// pointers to structs, and interfaces other than error.
-func opaque(t types.Type) bool {
-	if t == nil {
+// kvCallee reports whether fn is a package-level slog function or a method
+// of *slog.Logger (not, say, slog.Value.Group or a Handler method).
+func kvCallee(fn *types.Func) bool {
+	sig, ok := fn.Type().(*types.Signature)
+	if !ok {
 		return false
+	}
+	if sig.Recv() == nil {
+		return true
+	}
+	ptr, ok := sig.Recv().Type().(*types.Pointer)
+	return ok && isSlogNamed(ptr.Elem(), "Logger")
+}
+
+func isSlogNamed(t types.Type, name string) bool {
+	named, ok := t.(*types.Named)
+	return ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "log/slog" && named.Obj().Name() == name
+}
+
+func isString(t types.Type) bool {
+	b, ok := t.(*types.Basic)
+	return ok && b.Info()&types.IsString != 0
+}
+
+// maskable reports whether the PolicyHandler scans (or has nothing to scan
+// in) a value of static type t. It is an allowlist of what the masker
+// handles: string kinds, byte slices (json.RawMessage), errors, LogValuers,
+// slog.Value, basic numbers and booleans, time.Time and time.Duration, maps
+// with string-kind keys, slices, arrays and pointers of maskable types.
+// top=false inside a container, where an interface element is accepted: the
+// masker walks the dynamic value. Everything else (structs, pointers to
+// structs, other interfaces, maps with other keys, funcs, chans) is opaque.
+func maskable(t types.Type, slogPkg *types.Package, top bool) bool {
+	if t == nil {
+		return true
+	}
+	// Also covers interfaces embedding error or LogValuer: every dynamic
+	// value of such a type is one.
+	if types.Implements(t, errorType) || implementsLogValuer(t, slogPkg) {
+		return true
+	}
+	if isSlogNamed(t, "Value") {
+		return true
+	}
+	if named, ok := t.(*types.Named); ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "time" && named.Obj().Name() == "Time" {
+		return true
 	}
 	switch u := t.Underlying().(type) {
-	case *types.Struct:
-		return true
+	case *types.Basic:
+		return u.Kind() != types.UnsafePointer && u.Kind() != types.Invalid
+	case *types.Slice:
+		return maskable(u.Elem(), slogPkg, false)
+	case *types.Array:
+		return maskable(u.Elem(), slogPkg, false)
+	case *types.Map:
+		k, ok := u.Key().Underlying().(*types.Basic)
+		return ok && k.Info()&types.IsString != 0 && maskable(u.Elem(), slogPkg, false)
 	case *types.Pointer:
-		_, isStruct := u.Elem().Underlying().(*types.Struct)
-		return isStruct
+		if _, isStruct := u.Elem().Underlying().(*types.Struct); isStruct {
+			return false
+		}
+		return maskable(u.Elem(), slogPkg, top)
 	case *types.Interface:
-		return !types.Implements(t, errorType) || u.NumMethods() == 0
-	default:
+		return !top && u.Empty()
+	default: // struct, func, chan, signature
 		return false
 	}
+}
+
+func implementsLogValuer(t types.Type, slogPkg *types.Package) bool {
+	obj := slogPkg.Scope().Lookup("LogValuer")
+	if obj == nil {
+		return false
+	}
+	iface, ok := obj.Type().Underlying().(*types.Interface)
+	return ok && types.Implements(t, iface)
 }
 
 // Scan loads the packages matching patterns (relative to dir) and scans
@@ -133,6 +226,17 @@ func Scan(dir string, patterns []string) ([]Finding, error) {
 			return filepath.ToSlash(r)
 		}
 		return p
+	}
+	// A package that does not load or type-check would be scanned partially
+	// or not at all, and the gate would pass vacuously: fail instead.
+	var loadErrs []string
+	packages.Visit(pkgs, nil, func(p *packages.Package) {
+		for _, e := range p.Errors {
+			loadErrs = append(loadErrs, e.Error())
+		}
+	})
+	if len(loadErrs) > 0 {
+		return nil, fmt.Errorf("logscope: %d package error(s):\n%s", len(loadErrs), strings.Join(loadErrs, "\n"))
 	}
 	var out []Finding
 	for _, p := range pkgs {
