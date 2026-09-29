@@ -306,6 +306,59 @@ func TestMaskText_IBANAndCodiceFiscaleForms(t *testing.T) {
 	}
 }
 
+func TestMaskText_IBANChecksum(t *testing.T) {
+	m := logMasker{p: policy(nil), key: testHashKey}
+	cases := []struct{ in, want string }{
+		// valid mod-97, several countries, compact / grouped / lowercase
+		{"GB82WEST12345698765432", "[IBAN]"},
+		{"gb82 west 1234 5698 7654 32", "[IBAN]"},
+		{"DE89370400440532013000", "[IBAN]"},
+		{"IT60 X054 2811 1010 0000 0123 456", "[IBAN]"},
+		{"pay it60x0542811101000000123456 now", "pay [IBAN] now"},
+		// same shape, wrong checksum: left alone
+		{"IT61X0542811101000000123456", "IT61X0542811101000000123456"},
+		{"IT61 X054 2811 1010 0000 0123 456", "IT61 X054 2811 1010 0000 0123 456"},
+		// a 32-hex id that ibanRe matches but is not an IBAN
+		{"ab12c4d5e6f708192a3b4c5d6e7f8091", "ab12c4d5e6f708192a3b4c5d6e7f8091"},
+	}
+	for _, c := range cases {
+		if got := maskedText(t, m, c.in); got != c.want {
+			t.Errorf("%q -> %q, want %q", c.in, got, c.want)
+		}
+	}
+	const traceLike = "ab12c4d5e6f708192a3b4c5d6e7f8091"
+	if !ibanRe.MatchString(traceLike) || validIBAN(traceLike) {
+		t.Fatalf("fixture must match ibanRe and fail the checksum")
+	}
+}
+
+func TestMaskAttr_CorrelationKeysSkipFreeText(t *testing.T) {
+	m := logMasker{p: policy(nil), key: testHashKey}
+	// Would be scanned as an IBAN or an IP by the free-text rules.
+	for _, key := range []string{"trace_id", "span_id", "request_id", "traceId", "Request-ID"} {
+		for _, val := range []string{"ab12c4d5e6f708192a3b4c5d6e7f8091", "IT60X0542811101000000123456", "203.0.113.7"} {
+			if v, keep := maskOne(t, m, slog.String(key, val)); !keep || v != val {
+				t.Errorf("%s=%q -> %v (keep=%v), want unchanged", key, val, v, keep)
+			}
+		}
+	}
+	// Inside a map the same key rule applies.
+	out, _ := m.maskAttr(slog.Any("ctx", map[string]any{"trace_id": "IT60X0542811101000000123456", "note": "IT60X0542811101000000123456"}))
+	got := out.Value.Any().(map[string]any)
+	if got["trace_id"] != "IT60X0542811101000000123456" || got["note"] != "[IBAN]" {
+		t.Errorf("map = %v", got)
+	}
+	// A policy PII key wins over the exemption.
+	pm := logMasker{p: policy(func(p *iface.LogContentPolicy) { p.PIIKeys = []string{"requestid"} }), key: testHashKey}
+	if v, _ := maskOne(t, pm, slog.String("request_id", "abc")); v != piiMask {
+		t.Errorf("PII key request_id = %v, want %s", v, piiMask)
+	}
+	// Other keys keep being scanned.
+	if v, _ := maskOne(t, m, slog.String("detail", "IT60X0542811101000000123456")); v != "[IBAN]" {
+		t.Errorf("detail = %v, want [IBAN]", v)
+	}
+}
+
 func TestMaskAttr_UnknownModesFailClosed(t *testing.T) {
 	m := logMasker{p: policy(func(p *iface.LogContentPolicy) {
 		p.IPAddress = "bogus"

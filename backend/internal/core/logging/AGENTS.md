@@ -113,6 +113,9 @@ The service implements both `utils.LevelResolver` (consumed by `PerModuleLevelHa
   compliance policy of the record's tenant. A record without a tenant gets
   the strictest policy in force. Until the compliance module provides the
   live policy (T2), the platform defaults apply.
+- Free-text IBAN detection validates the ISO 13616 mod-97 checksum (a bare
+  regex misreads 32-hex trace ids as IBANs), and the generated correlation
+  keys `trace_id`, `span_id`, `request_id` are never scanned as free text.
 - `http_request` logs the chi route template (`route`), not the raw path;
   `path` appears only when no template matched.
 - Outgoing spans are masked the same way by `telemetry.MaskingExporter`. The

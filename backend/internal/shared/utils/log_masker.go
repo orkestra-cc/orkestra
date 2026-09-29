@@ -35,6 +35,9 @@ var (
 	ipKeys      = map[string]struct{}{"remote": {}, "ip": {}, "ipaddress": {}, "clientip": {}, "remoteaddr": {}, "remoteip": {}}
 	uaKeys      = map[string]struct{}{"ua": {}, "useragent": {}}
 	subjectKeys = map[string]struct{}{"userid": {}, "useruuid": {}, "actoruserid": {}, "subjectid": {}}
+	// correlationKeys carry generated ids (hex trace/span ids, request ids)
+	// that the free-text rules only ever misread as an IBAN or similar.
+	correlationKeys = map[string]struct{}{"traceid": {}, "spanid": {}, "requestid": {}}
 )
 
 var (
@@ -88,6 +91,9 @@ const (
 	keyIP
 	keyUA
 	keySubject
+	// keyCorrelation marks the generated correlation ids (trace_id, span_id,
+	// request_id): opaque machine values, never scanned as free text.
+	keyCorrelation
 )
 
 type keyInfo struct {
@@ -133,6 +139,8 @@ func classifyKey(raw string) keyInfo {
 			ki.class = keyUA
 		} else if _, ok := subjectKeys[ki.norm]; ok {
 			ki.class = keySubject
+		} else if _, ok := correlationKeys[ki.norm]; ok {
+			ki.class = keyCorrelation
 		}
 	}
 	if len(raw) > maxCachedKeyLen {
@@ -244,7 +252,7 @@ func (m logMasker) maskAttrAt(a slog.Attr, depth int, budget *int) (out slog.Att
 			return slog.Attr{}, false
 		}
 	}
-	if ki.class == keyOther && !slices.Contains(m.p.PIIKeys, ki.norm) {
+	if (ki.class == keyOther || ki.class == keyCorrelation) && !slices.Contains(m.p.PIIKeys, ki.norm) {
 		switch kind {
 		case slog.KindString, slog.KindInt64, slog.KindUint64, slog.KindFloat64,
 			slog.KindBool, slog.KindDuration, slog.KindTime:
@@ -253,7 +261,7 @@ func (m logMasker) maskAttrAt(a slog.Attr, depth int, budget *int) (out slog.Att
 			if *budget < 0 {
 				return slog.String(a.Key, redact.Redacted), true
 			}
-			if kind == slog.KindString {
+			if kind == slog.KindString && ki.class == keyOther {
 				return slog.String(a.Key, m.maskText(v.String())), true
 			}
 			return slog.Attr{Key: a.Key, Value: v}, true
@@ -318,6 +326,11 @@ func (m logMasker) maskKV(rawKey string, val any, depth int, budget *int) (any, 
 	}
 	if slices.Contains(m.p.PIIKeys, ki.norm) {
 		return piiMask, true
+	}
+	if ki.class == keyCorrelation {
+		if str, ok := val.(string); ok {
+			return str, true
+		}
 	}
 	return m.maskValue(val, depth, budget), true
 }
@@ -480,12 +493,66 @@ func (m logMasker) maskText(s string) string {
 		return s
 	}
 	s = emailRe.ReplaceAllString(s, textEmail)
-	s = ibanRe.ReplaceAllString(s, textIBAN)
+	s = ibanRe.ReplaceAllStringFunc(s, maskIBANCandidate)
 	s = cfRe.ReplaceAllString(s, textCF)
 	if m.p.IPAddress == iface.IPAddressFull {
 		return s
 	}
 	return m.maskIPRuns(s)
+}
+
+// maskIBANCandidate replaces an ibanRe match with [IBAN] only when it passes
+// the ISO 13616 mod-97 check. The regex alone also matches generated ids (a
+// 32-hex trace id starting with two letters and two digits), which would
+// lose their meaning as [IBAN].
+func maskIBANCandidate(c string) string {
+	if validIBAN(c) {
+		return textIBAN
+	}
+	return c
+}
+
+// validIBAN reports whether c (spaces allowed, any case) is 15-34 letters
+// and digits with a valid mod-97 checksum: the first four characters move to
+// the end, letters become 10..35, and the number mod 97 must be 1.
+func validIBAN(c string) bool {
+	var buf [40]byte
+	n := 0
+	for i := 0; i < len(c); i++ {
+		b := c[i]
+		switch {
+		case b == ' ':
+			continue
+		case b >= 'a' && b <= 'z':
+			b -= 'a' - 'A'
+		case b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		default:
+			return false
+		}
+		if n == len(buf) {
+			return false
+		}
+		buf[n] = b
+		n++
+	}
+	if n < 15 || n > 34 {
+		return false
+	}
+	rem := 0
+	feed := func(b byte) {
+		if b >= 'A' {
+			rem = (rem*100 + int(b-'A') + 10) % 97
+			return
+		}
+		rem = (rem*10 + int(b-'0')) % 97
+	}
+	for _, b := range buf[4:n] {
+		feed(b)
+	}
+	for _, b := range buf[:4] {
+		feed(b)
+	}
+	return rem == 1
 }
 
 func isIPRunByte(c byte) bool {
