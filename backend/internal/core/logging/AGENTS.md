@@ -95,7 +95,7 @@ The service implements both `utils.LevelResolver` (consumed by `PerModuleLevelHa
 ## What this module does NOT do
 
 - Loki retention overrides — out of scope for Phase F; reserved as a future amendment.
-- Per-tenant log levels — the threshold is global per module; tenant-scoped filtering happens at query time in Loki via the `tenant_id` field already stamped on every log line.
+- Per-tenant log levels — the threshold is global per module. Tenant-scoped filtering happens at query time in Loki via `tenant_id`, which is present on the `http_request` line (through `ctxauth.RequestAnnotations`) and on records logged with a context that carries the tenant; other module lines have it only when logged with a `*Context` call.
 - An unbounded or streaming log console — preview is a small manual/periodic diagnostic aid; full investigation remains in Grafana.
 - Audit-log integration — runtime log-level changes are persisted with `updatedBy`/`updatedAt` but are not pushed through the compliance `AuditSink`. Future work.
 
@@ -104,6 +104,22 @@ The service implements both `utils.LevelResolver` (consumed by `PerModuleLevelHa
 - **Never mutate the snapshot in place.** Always build a new `*snapshot` and `Store` it — readers depend on the immutability invariant.
 - **Never expose the resolver as `services.LogLevelService` to consumers.** The interface boundary is `utils.LevelResolver`; the concrete type can rename without breaking consumers.
 - **Env vars are seed-only.** After first boot, the Mongo doc is authoritative. Setting `LOG_LEVEL_<MODULE>` after the document exists is silently shadowed — surface this in operator-facing docs whenever it changes.
+
+## Compliance masking (compliance spec §2)
+
+- Every record passes through `utils.PolicyHandler` (after the level gate,
+  before the fan-out to stdout and OTLP). Secrets are always masked; IP,
+  user agent, user ids, personal-data keys and free text follow the
+  compliance policy of the record's tenant. A record without a tenant gets
+  the strictest policy in force. Until the compliance module provides the
+  live policy (T2), the platform defaults apply.
+- `http_request` logs the chi route template (`route`), not the raw path;
+  `path` appears only when no template matched.
+- Outgoing spans are masked the same way by `telemetry.MaskingExporter`. The RequestLogger stamps `http.route` on the active server span, and the exporter drops `url.path`/`http.target` when a span has no route (fail closed); `url.full` and `url.query` are never exported; `network.peer.address`, `client.address` and forwarded-for headers follow the IP rule.
+- `make backend-logscope` rejects new `slog.Any` calls with opaque values
+  and secret-looking keys with dynamic values; pre-existing ones are in
+  `tools/logscope/baseline.txt`.
+- Log masking overhead budget is ≤ 2 µs per record over a plain JSON handler (10 attrs, no free-text scan), measured by `BenchmarkPolicyHandler_TenAttrs` vs `BenchmarkPlainJSON_TenAttrs` in `internal/shared/utils`.
 
 ## Related
 
