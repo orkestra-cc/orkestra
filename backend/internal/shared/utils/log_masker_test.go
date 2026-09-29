@@ -3,6 +3,8 @@ package utils
 import (
 	"errors"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -172,5 +174,229 @@ func TestMaskAttr_RecoversFromPanic(t *testing.T) {
 	}
 	if panics != 2 {
 		t.Fatalf("panic hook called %d times, want 2", panics)
+	}
+}
+
+// --- regression tests for the review fix round ---
+
+func maskedText(t *testing.T, m logMasker, in string) string {
+	t.Helper()
+	v, keep := maskOne(t, m, slog.String("detail", in))
+	if !keep {
+		t.Fatalf("detail %q dropped", in)
+	}
+	return v.(string)
+}
+
+func modeMasker(mode iface.IPAddressMode) logMasker {
+	return logMasker{p: policy(func(p *iface.LogContentPolicy) { p.IPAddress = mode }), key: testHashKey}
+}
+
+func TestMaskText_IPv6Boundaries(t *testing.T) {
+	trunc := modeMasker(iface.IPAddressTruncated)
+	hashed := modeMasker(iface.IPAddressHashed)
+	omitted := modeMasker(iface.IPAddressOmitted)
+	h6 := hashed.hash("ip:", "2001:db8:1:2::1")
+	cases := []struct {
+		name string
+		m    logMasker
+		in   string
+		want string
+	}{
+		{"trailing colon truncated", trunc, "lookup 2001:db8:1:2::1: no such host", "lookup 2001:db8:1::/48: no such host"},
+		{"trailing colon hashed", hashed, "lookup 2001:db8:1:2::1: no such host", "lookup " + h6 + ": no such host"},
+		{"trailing colon omitted", omitted, "lookup 2001:db8:1:2::1: no such host", "lookup [IP]: no such host"},
+		{"word colon prefix truncated", trunc, "ip:2001:db8:1:2::1", "ip:2001:db8:1::/48"},
+		{"word colon prefix hashed", hashed, "ip:2001:db8:1:2::1", "ip:" + h6},
+		{"word colon prefix omitted", omitted, "ip:2001:db8:1:2::1", "ip:[IP]"},
+		{"trailing full stop", trunc, "peer 2001:db8:1:2::1.", "peer 2001:db8:1::/48."},
+		{"bracketed with port", trunc, "dial [2001:db8:1:2::1]:443", "dial [2001:db8:1::/48]:443"},
+		{"loopback", trunc, "on ::1 only", "on ::/48 only"},
+		{"clock time untouched", trunc, "at 10:20:30 and 10:20:30.123", "at 10:20:30 and 10:20:30.123"},
+		{"ipv4 with port then colon", trunc, "dial tcp 203.0.113.7:51234: connection refused", "dial tcp 203.0.113.0/24:51234: connection refused"},
+	}
+	for _, c := range cases {
+		if got := maskedText(t, c.m, c.in); got != c.want {
+			t.Errorf("%s: %q -> %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+}
+
+func TestMaskText_IPv4MappedIPv6(t *testing.T) {
+	in := "peer ::ffff:203.0.113.7 closed"
+	h4 := modeMasker(iface.IPAddressHashed).hash("ip:", "203.0.113.7")
+	cases := []struct {
+		mode iface.IPAddressMode
+		want string
+	}{
+		{iface.IPAddressTruncated, "peer 203.0.113.0/24 closed"},
+		{iface.IPAddressHashed, "peer " + h4 + " closed"},
+		{iface.IPAddressOmitted, "peer [IP] closed"},
+		{iface.IPAddressFull, in},
+	}
+	for _, c := range cases {
+		if got := maskedText(t, modeMasker(c.mode), in); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.mode, got, c.want)
+		}
+	}
+}
+
+func TestMaskText_IPModesInFreeText(t *testing.T) {
+	in := "from 203.0.113.7 ok"
+	h4 := modeMasker(iface.IPAddressHashed).hash("ip:", "203.0.113.7")
+	cases := []struct {
+		name string
+		m    logMasker
+		want string
+	}{
+		{"hashed", modeMasker(iface.IPAddressHashed), "from " + h4 + " ok"},
+		{"hashed without key", logMasker{p: policy(func(p *iface.LogContentPolicy) { p.IPAddress = iface.IPAddressHashed })}, "from [IP] ok"},
+		{"omitted", modeMasker(iface.IPAddressOmitted), "from [IP] ok"},
+		{"unknown mode fails closed", modeMasker(iface.IPAddressMode("bogus")), "from [IP] ok"},
+	}
+	for _, c := range cases {
+		if got := maskedText(t, c.m, in); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestMaskText_IPv4Edges(t *testing.T) {
+	m := modeMasker(iface.IPAddressTruncated)
+	cases := []struct{ in, want string }{
+		{"client_203.0.113.7", "client_203.0.113.0/24"},
+		{"at 203.0.113.7.", "at 203.0.113.0/24."},
+		{"ip=203.0.113.7,x", "ip=203.0.113.0/24,x"},
+		{"203.000.113.007", "[IP]"},
+		{"from 999.1.1.1 x", "from [IP] x"},
+		{"build 1.2.3.4.5 done", "build 1.2.3.4.5 done"},
+	}
+	for _, c := range cases {
+		if got := maskedText(t, m, c.in); got != c.want {
+			t.Errorf("%q -> %q, want %q", c.in, got, c.want)
+		}
+	}
+	if got := maskedText(t, modeMasker(iface.IPAddressFull), "203.000.113.007"); got != "203.000.113.007" {
+		t.Errorf("full mode changed the text: %q", got)
+	}
+}
+
+func TestMaskText_IBANAndCodiceFiscaleForms(t *testing.T) {
+	m := logMasker{p: policy(nil), key: testHashKey}
+	cases := []struct{ in, want string }{
+		{"IT60 X054 2811 1010 0000 0123 456", "[IBAN]"},
+		{"iban: IT60 X054 2811 1010 0000 0123 456, ok", "iban: [IBAN], ok"},
+		{"it60x0542811101000000123456", "[IBAN]"},
+		{"IT60X0542811101000000123456", "[IBAN]"},
+		{"CF RSSMRA85T10A56NS", "CF [CF]"},
+		{"CF rssmra85t10a562s", "CF [CF]"},
+		{"CF RSSMRA85T10A562S", "CF [CF]"},
+	}
+	for _, c := range cases {
+		if got := maskedText(t, m, c.in); got != c.want {
+			t.Errorf("%q -> %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestMaskAttr_UnknownModesFailClosed(t *testing.T) {
+	m := logMasker{p: policy(func(p *iface.LogContentPolicy) {
+		p.IPAddress = "bogus"
+		p.UserAgent = "bogus"
+		p.SubjectIDs = "bogus"
+	}), key: testHashKey}
+	for _, a := range []slog.Attr{slog.String("remote", "203.0.113.7"), slog.String("ua", "Mozilla/5.0"), slog.String("user_id", "3f2b")} {
+		if v, keep := maskOne(t, m, a); keep {
+			t.Errorf("%s kept as %v with an unknown mode", a.Key, v)
+		}
+	}
+}
+
+func TestMaskAttr_GroupKeyRules(t *testing.T) {
+	m := logMasker{p: policy(nil), key: testHashKey}
+	out, keep := m.maskAttr(slog.Group("credentials", "user", "anna", "value", "hunter2"))
+	if !keep || out.Value.Kind() != slog.KindString || out.Value.String() != "[REDACTED]" {
+		t.Errorf("secret group = %v, want the string [REDACTED]", out.Value)
+	}
+	out, keep = m.maskAttr(slog.Group("address", "street", "Via Roma 1"))
+	if !keep || out.Value.Kind() != slog.KindString || out.Value.String() != "[PII]" {
+		t.Errorf("PII group = %v, want the string [PII]", out.Value)
+	}
+	out, _ = m.maskAttr(slog.Group("req", slog.Group("credentials", "x", "y"), slog.String("path", "/v1")))
+	g := out.Value.Group()
+	if g[0].Value.String() != "[REDACTED]" || g[1].Value.String() != "/v1" {
+		t.Errorf("nested secret group not masked: %v", g)
+	}
+	out, _ = m.maskAttr(slog.Group("", slog.String("email", "a@b.it"), slog.String("path", "/v1")))
+	g = out.Value.Group()
+	if g[0].Value.String() != "[PII]" || g[1].Value.String() != "/v1" {
+		t.Errorf("inline group not recursed: %v", g)
+	}
+}
+
+func TestMaskAttr_SelfReferencingContainersTerminate(t *testing.T) {
+	m := logMasker{p: policy(nil), key: testHashKey}
+	self := map[string]any{}
+	self["self"] = self
+	mv, _ := maskOne(t, m, slog.Any("payload", self))
+	cur := mv.(map[string]any)
+	depth := 0
+	for {
+		next := cur["self"]
+		if s, ok := next.(string); ok {
+			if s != "[REDACTED]" {
+				t.Fatalf("depth cap value = %q, want [REDACTED]", s)
+			}
+			break
+		}
+		cur = next.(map[string]any)
+		if depth++; depth > 40 {
+			t.Fatal("recursion was not capped")
+		}
+	}
+	loop := []any{nil}
+	loop[0] = loop
+	lv, _ := maskOne(t, m, slog.Any("list", loop))
+	inner := lv.([]any)
+	for i := 0; i < 40; i++ {
+		if s, ok := inner[0].(string); ok {
+			if s != "[REDACTED]" {
+				t.Fatalf("slice depth cap value = %q", s)
+			}
+			return
+		}
+		inner = inner[0].([]any)
+	}
+	t.Fatal("slice recursion was not capped")
+}
+
+func TestMaskAttr_StringContainers(t *testing.T) {
+	m := logMasker{p: policy(nil), key: testHashKey}
+
+	sv, _ := maskOne(t, m, slog.Any("emails", []string{"a@b.it", "plain"}))
+	if got := sv.([]string); got[0] != "[EMAIL]" || got[1] != "plain" {
+		t.Errorf("[]string = %v", got)
+	}
+
+	mv, _ := maskOne(t, m, slog.Any("form", map[string]string{"password": "x", "phone": "333", "note": "call a@b.it"}))
+	ms := mv.(map[string]string)
+	if ms["password"] != "[REDACTED]" || ms["phone"] != "[PII]" || ms["note"] != "call [EMAIL]" {
+		t.Errorf("map[string]string = %v", ms)
+	}
+
+	hv, _ := maskOne(t, m, slog.Any("headers", http.Header{
+		"Authorization": {"Bearer abc"},
+		"X-Note":        {"from 203.0.113.7", "ok"},
+		"Email":         {"a@b.it"},
+	}))
+	mh := hv.(http.Header)
+	if mh["Authorization"][0] != "[REDACTED]" || mh["X-Note"][0] != "from 203.0.113.0/24" || mh["X-Note"][1] != "ok" || mh["Email"][0] != "[PII]" {
+		t.Errorf("map[string][]string = %v", mh)
+	}
+
+	uv, _ := maskOne(t, m, slog.Any("query", url.Values{"token": {"t"}, "q": {"a@b.it"}}))
+	mu := uv.(url.Values)
+	if mu["token"][0] != "[REDACTED]" || mu["q"][0] != "[EMAIL]" {
+		t.Errorf("url.Values = %v", mu)
 	}
 }

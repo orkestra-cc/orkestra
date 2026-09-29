@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -34,12 +36,28 @@ var (
 
 var (
 	emailRe = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
-	ibanRe  = regexp.MustCompile(`\b[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}\b`)
-	cfRe    = regexp.MustCompile(`(?i)\b[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]\b`)
-	ipv4Re  = regexp.MustCompile(`\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b`)
-	// Any run with at least two colons; net.ParseIP decides whether it is
-	// really an IPv6 address (times like 10:20:30 are rejected there).
-	ipv6CandidateRe = regexp.MustCompile(`[0-9A-Fa-f:]*:[0-9A-Fa-f:]*:[0-9A-Fa-f:]*`)
+	// IBAN: compact or in space-separated groups of four, any case.
+	ibanRe = regexp.MustCompile(`(?i)\b[A-Z]{2}[0-9]{2}(?:[A-Z0-9]{11,30}|(?: [A-Z0-9]{4}){2,7}(?: [A-Z0-9]{1,4})?)\b`)
+	// Codice fiscale; the omocodia substitutions (L M N P Q R S T U V) may
+	// replace any of the digits.
+	cfRe = regexp.MustCompile(`(?i)\b[A-Z]{6}[0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{3}[A-Z]\b`)
+	// Any dotted run of four numbers; boundaries and validity are decided in
+	// code (net.ParseIP), so "client_203.0.113.7" and "203.000.113.007" are
+	// both seen.
+	ipv4Re = regexp.MustCompile(`[0-9]+(?:\.[0-9]+){3}`)
+	// A maximal run of hex digits and colons with at least two colons, whose
+	// last segment may carry a dotted-quad tail (IPv4-mapped addresses).
+	// It is only a candidate: ipv6Spans finds the real address inside it.
+	ipv6CandidateRe = regexp.MustCompile(`[0-9A-Fa-f:]*:[0-9A-Fa-f:]*:[0-9A-Fa-f:.]*`)
+)
+
+const (
+	// maxMaskDepth bounds the recursion into maps and slices: a
+	// self-referencing container would otherwise overflow the stack, which
+	// recover() cannot catch.
+	maxMaskDepth = 32
+	// maxIPv6Candidate bounds the quadratic address search inside a candidate.
+	maxIPv6Candidate = 128
 )
 
 // maskingPanicHook is called after every recovered masking panic; main.go
@@ -80,6 +98,17 @@ func (m logMasker) maskAttr(a slog.Attr) (out slog.Attr, keep bool) {
 	}()
 	v := a.Value.Resolve()
 	if v.Kind() == slog.KindGroup {
+		// A named group is subject to the secret and PII key rules as a
+		// whole; an empty key (inline group) just recurses.
+		if a.Key != "" {
+			gk := redact.NormalizeKey(a.Key)
+			if redact.IsSecretNormalized(gk) {
+				return slog.String(a.Key, redact.Redacted), true
+			}
+			if slices.Contains(m.p.PIIKeys, gk) {
+				return slog.String(a.Key, piiMask), true
+			}
+		}
 		children := v.Group()
 		masked := make([]slog.Attr, 0, len(children))
 		for _, c := range children {
@@ -89,7 +118,7 @@ func (m logMasker) maskAttr(a slog.Attr) (out slog.Attr, keep bool) {
 		}
 		return slog.Attr{Key: a.Key, Value: slog.GroupValue(masked...)}, true
 	}
-	nv, ok := m.maskKV(a.Key, v.Any())
+	nv, ok := m.maskKV(a.Key, v.Any(), 0)
 	if !ok {
 		return slog.Attr{}, false
 	}
@@ -97,7 +126,7 @@ func (m logMasker) maskAttr(a slog.Attr) (out slog.Attr, keep bool) {
 }
 
 // maskKV applies the key rules in spec order, then the value rules.
-func (m logMasker) maskKV(rawKey string, val any) (any, bool) {
+func (m logMasker) maskKV(rawKey string, val any, depth int) (any, bool) {
 	key := redact.NormalizeKey(rawKey)
 	if redact.IsSecretNormalized(key) {
 		return redact.Redacted, true
@@ -117,10 +146,13 @@ func (m logMasker) maskKV(rawKey string, val any) (any, bool) {
 	if slices.Contains(m.p.PIIKeys, key) {
 		return piiMask, true
 	}
-	return m.maskValue(val), true
+	return m.maskValue(val, depth), true
 }
 
-func (m logMasker) maskValue(val any) any {
+func (m logMasker) maskValue(val any, depth int) any {
+	if depth > maxMaskDepth {
+		return redact.Redacted
+	}
 	switch x := val.(type) {
 	case string:
 		return m.maskText(x)
@@ -129,7 +161,7 @@ func (m logMasker) maskValue(val any) any {
 	case map[string]any:
 		out := make(map[string]any, len(x))
 		for k, v := range x {
-			if nv, ok := m.maskKV(k, v); ok {
+			if nv, ok := m.maskKV(k, v, depth+1); ok {
 				out[k] = nv
 			}
 		}
@@ -137,7 +169,37 @@ func (m logMasker) maskValue(val any) any {
 	case []any:
 		out := make([]any, len(x))
 		for i, v := range x {
-			out[i] = m.maskValue(v)
+			out[i] = m.maskValue(v, depth+1)
+		}
+		return out
+	case []string:
+		out := make([]string, len(x))
+		for i, v := range x {
+			out[i] = m.maskText(v)
+		}
+		return out
+	case map[string]string:
+		out := make(map[string]string, len(x))
+		for k, v := range x {
+			if nv, ok := m.maskKV(k, v, depth+1); ok {
+				out[k] = fmt.Sprint(nv)
+			}
+		}
+		return out
+	case http.Header: // named types do not match the plain map case below
+		return http.Header(m.maskValue(map[string][]string(x), depth).(map[string][]string))
+	case url.Values:
+		return url.Values(m.maskValue(map[string][]string(x), depth).(map[string][]string))
+	case map[string][]string:
+		out := make(map[string][]string, len(x))
+		for k, vs := range x {
+			masked := make([]string, 0, len(vs))
+			for _, v := range vs {
+				if nv, ok := m.maskKV(k, v, depth+1); ok {
+					masked = append(masked, fmt.Sprint(nv))
+				}
+			}
+			out[k] = masked
 		}
 		return out
 	default:
@@ -189,8 +251,10 @@ func (m logMasker) maskSubject(raw string) (any, bool) {
 	}
 }
 
-// maskText scans free text. IPv6 runs first so that the "/48" a truncated
-// IPv6 leaves behind is not re-matched; the IPv4 output has no colons.
+// maskText scans free text: email, IBAN and codice fiscale first, then IP
+// addresses. IPv6 spans are located first and the text between them is
+// scanned for IPv4, so one address is never processed twice (an IPv6 output
+// such as "203.0.113.0/24" is not re-matched).
 func (m logMasker) maskText(s string) string {
 	if !m.p.ScanFreeText || s == "" {
 		return s
@@ -201,8 +265,89 @@ func (m logMasker) maskText(s string) string {
 	if m.p.IPAddress == iface.IPAddressFull {
 		return s
 	}
-	s = ipv6CandidateRe.ReplaceAllStringFunc(s, m.textIP)
-	return ipv4Re.ReplaceAllStringFunc(s, m.textIP)
+	var b strings.Builder
+	last := 0
+	for _, sp := range ipv6Spans(s) {
+		b.WriteString(m.maskIPv4Text(s[last:sp.start]))
+		b.WriteString(m.ipReplacement(sp.ip))
+		last = sp.end
+	}
+	b.WriteString(m.maskIPv4Text(s[last:]))
+	return b.String()
+}
+
+type ipSpan struct {
+	start, end int
+	ip         net.IP
+}
+
+// ipv6Spans finds IPv6 addresses in s. A candidate run may carry extra
+// characters around the address ("host:2001:db8::1:" or a trailing "."), so
+// the longest valid address is searched inside it, starting at the run start
+// or right after a colon and ending at the run end or before a ':' or '.'.
+func ipv6Spans(s string) []ipSpan {
+	var spans []ipSpan
+	for _, loc := range ipv6CandidateRe.FindAllStringIndex(s, -1) {
+		lo, hi := loc[0], loc[1]
+		if hi-lo > maxIPv6Candidate {
+			continue
+		}
+		// "203.0.113.7:ab::cd": the run belongs to an IPv4 address and its port.
+		if lo >= 2 && s[lo-1] == '.' && s[lo-2] >= '0' && s[lo-2] <= '9' {
+			continue
+		}
+		for lo < hi {
+			found := false
+			for i := lo; i < hi && !found; i++ {
+				if i > lo && s[i-1] != ':' {
+					continue
+				}
+				for j := hi; j > i; j-- {
+					if j < hi && s[j] != ':' && s[j] != '.' {
+						continue
+					}
+					if !strings.Contains(s[i:j], ":") {
+						break
+					}
+					if ip := net.ParseIP(s[i:j]); ip != nil {
+						spans = append(spans, ipSpan{start: i, end: j, ip: ip})
+						lo, found = j, true
+						break
+					}
+				}
+			}
+			if !found {
+				break
+			}
+		}
+	}
+	return spans
+}
+
+// maskIPv4Text replaces the dotted quads of a text segment. A quad that
+// net.ParseIP rejects ("203.000.113.007", "999.1.1.1") still looks like an
+// address and becomes "[IP]"; a run of five or more numbers is not one.
+func (m logMasker) maskIPv4Text(s string) string {
+	locs := ipv4Re.FindAllStringIndex(s, -1)
+	if locs == nil {
+		return s
+	}
+	var b strings.Builder
+	last := 0
+	for _, loc := range locs {
+		if loc[1]+1 < len(s) && s[loc[1]] == '.' && s[loc[1]+1] >= '0' && s[loc[1]+1] <= '9' {
+			continue
+		}
+		b.WriteString(s[last:loc[0]])
+		if ip := net.ParseIP(s[loc[0]:loc[1]]); ip != nil {
+			b.WriteString(m.ipReplacement(ip))
+		} else {
+			b.WriteString(textIP)
+		}
+		last = loc[1]
+	}
+	b.WriteString(s[last:])
+	return b.String()
 }
 
 func (m logMasker) safeText(s string) (out string) {
@@ -215,11 +360,9 @@ func (m logMasker) safeText(s string) (out string) {
 	return m.maskText(s)
 }
 
-func (m logMasker) textIP(candidate string) string {
-	ip := net.ParseIP(candidate)
-	if ip == nil {
-		return candidate
-	}
+// ipReplacement renders an address found in free text per the IP mode; any
+// mode that cannot produce a pseudonym fails closed to "[IP]".
+func (m logMasker) ipReplacement(ip net.IP) string {
 	switch m.p.IPAddress {
 	case iface.IPAddressTruncated:
 		return truncateIP(ip)
