@@ -1,0 +1,16 @@
+# logscope baseline — existing slog calls the compliance masker cannot mask reliably.
+# Remove a line when the call is fixed; never add one by hand for new code.
+logscope.any_opaque_value:internal/core/auth/services/mail_dispatcher.go:run:panic
+logscope.any_opaque_value:internal/core/authz/services/service.go:shadowEvaluate:recover
+logscope.any_opaque_value:internal/core/notification/services/notification_service.go:dispatchEmail:recover
+logscope.secret_key_dynamic_value:internal/core/auth/services/webauthn_service.go:FinishRegistration:credentialName
+logscope.secret_key_dynamic_value:internal/core/auth/services/webauthn_service.go:FinishRegistration:totalCredentials
+logscope.secret_key_dynamic_value:internal/core/auth/services/webauthn_service.go:RemoveCredential:credentialIDLen
+logscope.secret_key_dynamic_value:internal/core/notification/services/optout_reconciler.go:clear:tokenUuid
+logscope.secret_key_dynamic_value:internal/core/notification/services/optout_reconciler.go:deadLetter:tokenUuid
+logscope.secret_key_dynamic_value:internal/core/notification/services/optout_reconciler.go:recordFailure:tokenUuid
+logscope.secret_key_dynamic_value:internal/core/notification/services/optout_reconciler.go:replay:tokenUuid
+logscope.secret_key_dynamic_value:internal/core/notification/services/optout_reconciler.go:replayPreference:tokenUuid
+logscope.secret_key_dynamic_value:internal/core/notification/services/optout_reconciler.go:replaySink:tokenUuid
+logscope.secret_key_dynamic_value:internal/core/notification/services/unsubscribe_service.go:Consume:tokenUuid
+logscope.secret_key_dynamic_value:internal/core/notification/services/unsubscribe_service.go:clearPending:tokenUuid
