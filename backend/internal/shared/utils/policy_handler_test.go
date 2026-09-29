@@ -126,17 +126,38 @@ func TestLogHashKeyFromEnv(t *testing.T) {
 	}
 }
 
-func BenchmarkPolicyHandler_TenAttrs(b *testing.B) {
-	p := iface.DefaultLogContentPolicy()
-	p.ScanFreeText = false
-	h := NewPolicyHandler(slog.NewJSONHandler(io.Discard, nil), NewStaticLogPolicyResolver(p), testHashKey)
-	logger := slog.New(h).With(slog.String("service", "orkestra-backend"), slog.String("version", "1"), slog.String("environment", "production"))
-	attrs := []any{
+// benchAttrs is the 10-attribute record shared by the two benchmarks below;
+// the spec budget (§2.3) is the difference between them.
+func benchAttrs() []any {
+	return []any{
 		slog.String("method", "GET"), slog.String("path", "/v1/x"), slog.Int("status", 200),
 		slog.Int64("duration_ms", 3), slog.Int("bytes", 120), slog.String("remote", "203.0.113.7:1"),
 		slog.String("ua", "Mozilla/5.0"), slog.String("request_id", "r-1"), slog.String("tenant_id", "t"),
 		slog.String("user_id", "u"),
 	}
+}
+
+func benchWith(l *slog.Logger) *slog.Logger {
+	return l.With(slog.String("service", "orkestra-backend"), slog.String("version", "1"), slog.String("environment", "production"))
+}
+
+// BenchmarkPlainJSON_TenAttrs is the baseline: the same record through the
+// bare slog JSON handler.
+func BenchmarkPlainJSON_TenAttrs(b *testing.B) {
+	logger := benchWith(slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	attrs := benchAttrs()
+	b.ReportAllocs()
+	for b.Loop() {
+		logger.Info("http_request", attrs...)
+	}
+}
+
+func BenchmarkPolicyHandler_TenAttrs(b *testing.B) {
+	p := iface.DefaultLogContentPolicy()
+	p.ScanFreeText = false
+	h := NewPolicyHandler(slog.NewJSONHandler(io.Discard, nil), NewStaticLogPolicyResolver(p), testHashKey)
+	logger := benchWith(slog.New(h))
+	attrs := benchAttrs()
 	b.ReportAllocs()
 	for b.Loop() {
 		logger.Info("http_request", attrs...)

@@ -132,12 +132,17 @@ func (h *PolicyHandler) Handle(ctx context.Context, r slog.Record) error {
 	p := h.policyFor(ctx)
 	m := logMasker{p: p, key: h.hashKey}
 	out := slog.NewRecord(r.Time, r.Level, m.safeText(r.Message), r.PC)
+	// Collected and added in one call: adding attribute by attribute grows the
+	// record's overflow slice repeatedly.
+	var buf [16]slog.Attr
+	masked := buf[:0]
 	r.Attrs(func(a slog.Attr) bool {
 		if ma, keep := m.maskAttr(a); keep {
-			out.AddAttrs(ma)
+			masked = append(masked, ma)
 		}
 		return true
 	})
+	out.AddAttrs(masked...)
 	return h.derived(p).Handle(ctx, out)
 }
 

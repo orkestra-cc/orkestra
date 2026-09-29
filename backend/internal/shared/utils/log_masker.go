@@ -8,10 +8,13 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/orkestra/backend/internal/shared/redact"
@@ -75,6 +78,84 @@ func reportMaskingPanic() {
 	}
 }
 
+// keyClass is the policy-independent rule family of a normalised attribute
+// key; whether it is one of the policy's PIIKeys stays a per-policy check.
+type keyClass uint8
+
+const (
+	keyOther keyClass = iota
+	keySecret
+	keyIP
+	keyUA
+	keySubject
+)
+
+type keyInfo struct {
+	norm  string
+	class keyClass
+}
+
+// maxKeyCacheEntries bounds the normalisation cache. Attribute keys are
+// almost always a small fixed vocabulary; once the cache is full new keys are
+// simply recomputed, so an attacker-chosen key stream cannot grow memory.
+const maxKeyCacheEntries = 4096
+
+// keyCache is copy-on-write: readers do one atomic load and a map lookup, no
+// lock; the few writers (each new key once, at most maxKeyCacheEntries times)
+// clone the map under keyCacheMu.
+var (
+	keyCache   atomic.Pointer[map[string]keyInfo]
+	keyCacheMu sync.Mutex
+)
+
+// classifyKey returns the normalised form and rule family of a raw key,
+// memoised: NormalizeKey and the secret/IP/UA/subject lookups are the
+// dominant per-attribute cost otherwise.
+func classifyKey(raw string) keyInfo {
+	if mp := keyCache.Load(); mp != nil {
+		if ki, ok := (*mp)[raw]; ok {
+			return ki
+		}
+	}
+	var ki keyInfo
+	ki.norm = redact.NormalizeKey(raw)
+	switch {
+	case redact.IsSecretNormalized(ki.norm):
+		ki.class = keySecret
+	default:
+		if _, ok := ipKeys[ki.norm]; ok {
+			ki.class = keyIP
+		} else if _, ok := uaKeys[ki.norm]; ok {
+			ki.class = keyUA
+		} else if _, ok := subjectKeys[ki.norm]; ok {
+			ki.class = keySubject
+		}
+	}
+	keyCacheMu.Lock()
+	defer keyCacheMu.Unlock()
+	var cur map[string]keyInfo
+	if mp := keyCache.Load(); mp != nil {
+		cur = *mp
+	}
+	if _, ok := cur[raw]; !ok && len(cur) < maxKeyCacheEntries {
+		next := make(map[string]keyInfo, len(cur)+1)
+		for k, v := range cur {
+			next[k] = v
+		}
+		next[strings.Clone(raw)] = ki
+		keyCache.Store(&next)
+	}
+	return ki
+}
+
+// valueString is fmt.Sprint(val) without the copy for the common string case.
+func valueString(val any) string {
+	if s, ok := val.(string); ok {
+		return s
+	}
+	return fmt.Sprint(val)
+}
+
 // logMasker applies one LogContentPolicy to log attributes. A nil key makes
 // the "hashed" modes drop the value.
 type logMasker struct {
@@ -104,8 +185,12 @@ func (m logMasker) maskAttrAt(a slog.Attr, depth int, budget *int) (out slog.Att
 	if depth > maxMaskDepth || *budget < 0 {
 		return slog.String(a.Key, redact.Redacted), true
 	}
-	v := a.Value.Resolve()
-	if v.Kind() == slog.KindGroup {
+	v := a.Value
+	if v.Kind() == slog.KindLogValuer {
+		v = v.Resolve()
+	}
+	kind := v.Kind()
+	if kind == slog.KindGroup {
 		// A named group follows the same key rules as a map under that key;
 		// an empty key (inline group) just recurses.
 		if a.Key != "" {
@@ -125,6 +210,47 @@ func (m logMasker) maskAttrAt(a slog.Attr, depth int, budget *int) (out slog.Att
 		}
 		return slog.Attr{Key: a.Key, Value: slog.GroupValue(masked...)}, true
 	}
+	// Fast path (behaviour-identical to the maskKV route below): a key with no
+	// rule and not a PII key only needs its value scanned, and scalar kinds
+	// need nothing at all, so neither pays for the any/slog.Any round trip.
+	ki := classifyKey(a.Key)
+	if kind == slog.KindString {
+		// String values under an IP, subject or user-agent key skip the
+		// v.Any() boxing too; the key rules themselves are unchanged.
+		switch ki.class {
+		case keyIP:
+			s, ok := m.maskIPString(v.String())
+			if !ok {
+				return slog.Attr{}, false
+			}
+			return slog.String(a.Key, s), true
+		case keySubject:
+			s, ok := m.maskSubjectString(v.String())
+			if !ok {
+				return slog.Attr{}, false
+			}
+			return slog.String(a.Key, s), true
+		case keyUA:
+			if m.p.UserAgent == iface.UserAgentFull {
+				return slog.Attr{Key: a.Key, Value: v}, true
+			}
+			return slog.Attr{}, false
+		}
+	}
+	if ki.class == keyOther && !slices.Contains(m.p.PIIKeys, ki.norm) {
+		switch kind {
+		case slog.KindString, slog.KindInt64, slog.KindUint64, slog.KindFloat64,
+			slog.KindBool, slog.KindDuration, slog.KindTime:
+			// maskValue charges one more node against the budget.
+			if *budget--; *budget < 0 {
+				return slog.String(a.Key, redact.Redacted), true
+			}
+			if kind == slog.KindString {
+				return slog.String(a.Key, m.maskText(v.String())), true
+			}
+			return slog.Attr{Key: a.Key, Value: v}, true
+		}
+	}
 	nv, ok := m.maskKV(a.Key, v.Any(), depth, budget)
 	if !ok {
 		return slog.Attr{}, false
@@ -136,11 +262,11 @@ func (m logMasker) maskAttrAt(a slog.Attr, depth int, budget *int) (out slog.Att
 // a map under the same key, in the same order. handled=false means no rule
 // claims the key and the children are masked one by one.
 func (m logMasker) groupKeyRule(rawKey string) (attr slog.Attr, keep, handled bool) {
-	key := redact.NormalizeKey(rawKey)
-	if redact.IsSecretNormalized(key) {
+	ki := classifyKey(rawKey)
+	switch ki.class {
+	case keySecret:
 		return slog.String(rawKey, redact.Redacted), true, true
-	}
-	if _, ok := ipKeys[key]; ok {
+	case keyIP:
 		switch m.p.IPAddress {
 		case iface.IPAddressFull:
 			return slog.Attr{}, false, false
@@ -149,20 +275,18 @@ func (m logMasker) groupKeyRule(rawKey string) (attr slog.Attr, keep, handled bo
 		default: // omitted, or an unknown mode: fail closed
 			return slog.Attr{}, false, true
 		}
-	}
-	if _, ok := uaKeys[key]; ok {
+	case keyUA:
 		if m.p.UserAgent == iface.UserAgentFull {
 			return slog.Attr{}, false, false
 		}
 		return slog.Attr{}, false, true
-	}
-	if _, ok := subjectKeys[key]; ok {
+	case keySubject:
 		if m.p.SubjectIDs == iface.SubjectIDUUID {
 			return slog.Attr{}, false, false
 		}
 		return slog.Attr{}, false, true
 	}
-	if slices.Contains(m.p.PIIKeys, key) {
+	if slices.Contains(m.p.PIIKeys, ki.norm) {
 		return slog.String(rawKey, piiMask), true, true
 	}
 	return slog.Attr{}, false, false
@@ -170,23 +294,21 @@ func (m logMasker) groupKeyRule(rawKey string) (attr slog.Attr, keep, handled bo
 
 // maskKV applies the key rules in spec order, then the value rules.
 func (m logMasker) maskKV(rawKey string, val any, depth int, budget *int) (any, bool) {
-	key := redact.NormalizeKey(rawKey)
-	if redact.IsSecretNormalized(key) {
+	ki := classifyKey(rawKey)
+	switch ki.class {
+	case keySecret:
 		return redact.Redacted, true
-	}
-	if _, ok := ipKeys[key]; ok {
-		return m.maskIP(fmt.Sprint(val))
-	}
-	if _, ok := uaKeys[key]; ok {
+	case keyIP:
+		return m.maskIP(valueString(val))
+	case keyUA:
 		if m.p.UserAgent == iface.UserAgentFull {
 			return val, true
 		}
 		return nil, false
+	case keySubject:
+		return m.maskSubject(valueString(val))
 	}
-	if _, ok := subjectKeys[key]; ok {
-		return m.maskSubject(fmt.Sprint(val))
-	}
-	if slices.Contains(m.p.PIIKeys, key) {
+	if slices.Contains(m.p.PIIKeys, ki.norm) {
 		return piiMask, true
 	}
 	return m.maskValue(val, depth, budget), true
@@ -274,6 +396,14 @@ func (m logMasker) maskValue(val any, depth int, budget *int) any {
 }
 
 func (m logMasker) maskIP(raw string) (any, bool) {
+	s, ok := m.maskIPString(raw)
+	if !ok {
+		return nil, false
+	}
+	return s, true
+}
+
+func (m logMasker) maskIPString(raw string) (string, bool) {
 	if raw == "" {
 		return raw, true
 	}
@@ -281,14 +411,24 @@ func (m logMasker) maskIP(raw string) (any, bool) {
 	case iface.IPAddressFull:
 		return raw, true
 	case iface.IPAddressTruncated:
-		ip := parseHostIP(raw)
+		host := hostOf(raw)
+		if strings.IndexByte(host, ':') < 0 {
+			// No colon: only a dotted quad can parse, and netip does it
+			// without allocating.
+			addr, err := netip.ParseAddr(host)
+			if err != nil || !addr.Is4() {
+				return redact.Redacted, true
+			}
+			return truncateV4(addr.As4()), true
+		}
+		ip := net.ParseIP(host)
 		if ip == nil {
 			return redact.Redacted, true
 		}
 		return truncateIP(ip), true
 	case iface.IPAddressHashed:
 		if len(m.key) == 0 {
-			return nil, false
+			return "", false
 		}
 		host := raw
 		if ip := parseHostIP(raw); ip != nil {
@@ -296,11 +436,19 @@ func (m logMasker) maskIP(raw string) (any, bool) {
 		}
 		return m.hash("ip:", host), true
 	default: // omitted, or an unknown mode: fail closed
-		return nil, false
+		return "", false
 	}
 }
 
 func (m logMasker) maskSubject(raw string) (any, bool) {
+	s, ok := m.maskSubjectString(raw)
+	if !ok {
+		return nil, false
+	}
+	return s, true
+}
+
+func (m logMasker) maskSubjectString(raw string) (string, bool) {
 	if raw == "" {
 		return raw, true
 	}
@@ -309,11 +457,11 @@ func (m logMasker) maskSubject(raw string) (any, bool) {
 		return raw, true
 	case iface.SubjectIDHashed:
 		if len(m.key) == 0 {
-			return nil, false
+			return "", false
 		}
 		return m.hash("sub:", raw), true
 	default:
-		return nil, false
+		return "", false
 	}
 }
 
@@ -653,15 +801,35 @@ func (m logMasker) hash(domain, value string) string {
 // parseHostIP accepts "ip", "ip:port" and "[ipv6]:port" (http.Request's
 // RemoteAddr carries the port).
 func parseHostIP(raw string) net.IP {
-	if host, _, err := net.SplitHostPort(raw); err == nil {
-		raw = host
+	return net.ParseIP(hostOf(raw))
+}
+
+// hostOf strips the port and any brackets; a string without ':' cannot carry
+// a port, so SplitHostPort (whose error allocates) is skipped for it.
+func hostOf(raw string) string {
+	if strings.IndexByte(raw, ':') >= 0 {
+		if host, _, err := net.SplitHostPort(raw); err == nil {
+			raw = host
+		}
 	}
-	return net.ParseIP(strings.Trim(raw, "[]"))
+	return strings.Trim(raw, "[]")
 }
 
 func truncateIP(ip net.IP) string {
 	if v4 := ip.To4(); v4 != nil {
-		return v4.Mask(net.CIDRMask(24, 32)).String() + "/24"
+		return truncateV4([4]byte(v4))
 	}
 	return ip.Mask(net.CIDRMask(48, 128)).String() + "/48"
+}
+
+// truncateV4 renders "a.b.c.0/24" in one allocation.
+func truncateV4(a [4]byte) string {
+	var buf [18]byte
+	b := strconv.AppendUint(buf[:0], uint64(a[0]), 10)
+	b = append(b, '.')
+	b = strconv.AppendUint(b, uint64(a[1]), 10)
+	b = append(b, '.')
+	b = strconv.AppendUint(b, uint64(a[2]), 10)
+	b = append(b, ".0/24"...)
+	return string(b)
 }
