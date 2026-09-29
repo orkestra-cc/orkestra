@@ -204,7 +204,6 @@ func (h *PolicyHandler) derived(p *iface.LogContentPolicy) *derivedEntry {
 	}
 	m := logMasker{p: p, key: h.hashKey}
 	d = &derivedEntry{h: h.base}
-replay:
 	for i, s := range h.steps {
 		if s.group != "" {
 			if attr, keep, handled := m.groupKeyRule(s.group); handled {
@@ -214,7 +213,7 @@ replay:
 						d.nested = true
 					}
 				}
-				break replay
+				break
 			}
 			d.h = d.h.WithGroup(s.group)
 			continue

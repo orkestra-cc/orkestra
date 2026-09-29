@@ -249,7 +249,8 @@ func (m logMasker) maskAttrAt(a slog.Attr, depth int, budget *int) (out slog.Att
 		case slog.KindString, slog.KindInt64, slog.KindUint64, slog.KindFloat64,
 			slog.KindBool, slog.KindDuration, slog.KindTime:
 			// maskValue charges one more node against the budget.
-			if *budget--; *budget < 0 {
+			*budget--
+			if *budget < 0 {
 				return slog.String(a.Key, redact.Redacted), true
 			}
 			if kind == slog.KindString {
@@ -652,7 +653,8 @@ func ipv6From(r string, i int) bool {
 		case v4:
 			switch {
 			case isDigit(c):
-				if oct++; oct > 3 {
+				oct++
+				if oct > 3 {
 					return false
 				}
 				complete, total = dots == 3, groups+2
@@ -665,14 +667,16 @@ func ipv6From(r string, i int) bool {
 				return false
 			}
 		case isHexDigit(c):
-			if cur++; cur > 4 {
+			cur++
+			if cur > 4 {
 				return false
 			}
 			digitsOnly = digitsOnly && isDigit(c)
 			complete, total = true, groups+1
 		case c == ':':
 			if cur > 0 {
-				if groups++; groups > 8 {
+				groups++
+				if groups > 8 {
 					return false
 				}
 				cur, digitsOnly = 0, true

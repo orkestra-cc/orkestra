@@ -40,7 +40,7 @@ func main() {
 		}
 		sort.Strings(lines)
 		header := "# logscope baseline — existing slog calls the compliance masker cannot mask reliably.\n# Remove a line when the call is fixed; never add one by hand for new code.\n"
-		if err := os.WriteFile(*write, []byte(header+strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		if err := os.WriteFile(*write, []byte(header+strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
