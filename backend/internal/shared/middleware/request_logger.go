@@ -104,7 +104,7 @@ func parseSkipPaths(raw string) map[string]struct{} {
 // RequestLogger returns an HTTP middleware that emits one structured
 // JSON log line per request, replacing chi's default unstructured
 // Logger. ADR-0005 §1.2 — only allowlisted attributes are written; no
-// bodies, no headers, no raw query strings.
+// bodies, no headers, no raw query strings, and the route template instead of the raw path.
 //
 // The middleware must run AFTER chiMiddleware.RequestID and
 // chiMiddleware.RealIP so request_id and r.RemoteAddr are populated,
@@ -146,13 +146,21 @@ func RequestLogger(logger *slog.Logger, opts RequestLoggerOptions) func(http.Han
 			attrs := make([]slog.Attr, 0, 16)
 			attrs = append(attrs,
 				slog.String("method", r.Method),
-				slog.String("path", r.URL.Path),
 				slog.Int("status", ww.Status()),
 				slog.Int64("duration_ms", duration.Milliseconds()),
 				slog.Int("bytes", ww.BytesWritten()),
 				slog.String("remote", r.RemoteAddr),
 				slog.String("ua", r.UserAgent()),
 			)
+			// Spec §2.4: the route template identifies the endpoint without
+			// the identifiers a raw path carries (user ids, e-mails). The
+			// raw path is logged only when chi matched no template (404s,
+			// requests outside the router); the PolicyHandler still masks it.
+			if route := chiRoutePattern(r); route != "" {
+				attrs = append(attrs, slog.String("route", route))
+			} else {
+				attrs = append(attrs, slog.String("path", r.URL.Path))
+			}
 			if reqID := chiMiddleware.GetReqID(r.Context()); reqID != "" {
 				attrs = append(attrs, slog.String("request_id", reqID))
 			}

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
@@ -476,5 +477,40 @@ func TestRequestLogger_RealRequireAuthChain(t *testing.T) {
 	line := parseLine(t, buf.Bytes())
 	if line["user_id"] != "user-chain-1" {
 		t.Fatalf("user_id = %v, want user-chain-1 (RequireAuth principal must reach the outer log line)", line["user_id"])
+	}
+}
+
+func TestRequestLogger_LogsRouteTemplateNotRawPath(t *testing.T) {
+	logger, buf := newCapturingLogger(t)
+	r := chi.NewRouter()
+	r.Use(RequestLogger(logger, RequestLoggerOptions{}))
+	r.Get("/v1/admin/users/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/admin/users/3f2b-anna@example.com", nil))
+
+	line := parseLine(t, buf.Bytes())
+	if line["route"] != "/v1/admin/users/{id}" {
+		t.Fatalf("route = %v, want the template", line["route"])
+	}
+	if _, ok := line["path"]; ok {
+		t.Fatalf("raw path must not be logged when a template exists: %v", line["path"])
+	}
+}
+
+func TestRequestLogger_FallsBackToPathWithoutTemplate(t *testing.T) {
+	logger, buf := newCapturingLogger(t)
+	r := chi.NewRouter()
+	r.Use(RequestLogger(logger, RequestLoggerOptions{}))
+	// Register a dummy route to ensure chi router is fully initialized.
+	r.Get("/v1/valid", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	// Now request a path that doesn't match any route.
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/nope", nil))
+
+	line := parseLine(t, buf.Bytes())
+	if line["path"] != "/nope" {
+		t.Fatalf("404 without template must log the path: %v", line)
+	}
+	if _, ok := line["route"]; ok {
+		t.Fatalf("no template → no route attribute: %v", line["route"])
 	}
 }
