@@ -315,11 +315,13 @@ func TestMaskText_IBANChecksum(t *testing.T) {
 		{"DE89370400440532013000", "[IBAN]"},
 		{"IT60 X054 2811 1010 0000 0123 456", "[IBAN]"},
 		{"pay it60x0542811101000000123456 now", "pay [IBAN] now"},
-		// same shape, wrong checksum: left alone
-		{"IT61X0542811101000000123456", "IT61X0542811101000000123456"},
-		{"IT61 X054 2811 1010 0000 0123 456", "IT61 X054 2811 1010 0000 0123 456"},
-		// a 32-hex id that ibanRe matches but is not an IBAN
+		// wrong checksum but not hex-only (a mistyped IBAN): still masked
+		{"IT61X0542811101000000123456", "[IBAN]"},
+		{"IT61 X054 2811 1010 0000 0123 456", "[IBAN]"},
+		{"pay GB83WEST12345698765432 now", "pay [IBAN] now"},
+		// hex-only candidates must pass mod-97: a 32-hex id is left alone
 		{"ab12c4d5e6f708192a3b4c5d6e7f8091", "ab12c4d5e6f708192a3b4c5d6e7f8091"},
+		{"DE89370400440532013001", "DE89370400440532013001"},
 	}
 	for _, c := range cases {
 		if got := maskedText(t, m, c.in); got != c.want {
@@ -332,30 +334,51 @@ func TestMaskText_IBANChecksum(t *testing.T) {
 	}
 }
 
-func TestMaskAttr_CorrelationKeysSkipFreeText(t *testing.T) {
+func TestMaskAttr_CorrelationKeysSkipFreeTextOnlyWhenGenerated(t *testing.T) {
 	m := logMasker{p: policy(nil), key: testHashKey}
-	// Would be scanned as an IBAN or an IP by the free-text rules.
-	for _, key := range []string{"trace_id", "span_id", "request_id", "traceId", "Request-ID"} {
-		for _, val := range []string{"ab12c4d5e6f708192a3b4c5d6e7f8091", "IT60X0542811101000000123456", "203.0.113.7"} {
-			if v, keep := maskOne(t, m, slog.String(key, val)); !keep || v != val {
-				t.Errorf("%s=%q -> %v (keep=%v), want unchanged", key, val, v, keep)
-			}
+	const traceID = "ab12c4d5e6f708192a3b4c5d6e7f8091" // ibanRe matches it
+	const spanID = "ab12c4d5e6f70819"
+	// The tracer's own shape is left intact.
+	for key, val := range map[string]string{"trace_id": traceID, "traceId": traceID, "span_id": spanID, "SpanID": spanID} {
+		if v, keep := maskOne(t, m, slog.String(key, val)); !keep || v != val {
+			t.Errorf("%s=%q -> %v (keep=%v), want unchanged", key, val, v, keep)
+		}
+	}
+	// Any other value under those keys is scanned: wrong length, not hex,
+	// upper case, or a span id under the trace key.
+	for _, c := range []struct{ key, val, want string }{
+		{"trace_id", "alice@example.com 203.0.113.7", "[EMAIL] 203.0.113.0/24"},
+		{"trace_id", "IT60X0542811101000000123456", "[IBAN]"},
+		{"trace_id", spanID + " bob@example.org", spanID + " [EMAIL]"},
+		{"span_id", traceID + " x@example.com", traceID + " [EMAIL]"},
+		{"trace_id", "AB12C4D5E6F708192A3B4C5D6E7F8091", "AB12C4D5E6F708192A3B4C5D6E7F8091"}, // hex-only: mod-97 decides
+		{"span_id", "zz12c4d5e6f70819", "[IBAN]"},                                            // not hex: scanned, IBAN-shaped
+		{"span_id", "not-a-span", "not-a-span"},
+	} {
+		if v, _ := maskOne(t, m, slog.String(c.key, c.val)); v != c.want {
+			t.Errorf("%s=%q -> %v, want %q", c.key, c.val, v, c.want)
+		}
+	}
+	// request_id carries the client's X-Request-Id: always scanned.
+	for _, key := range []string{"request_id", "requestId", "Request-ID"} {
+		if v, _ := maskOne(t, m, slog.String(key, "alice@example.com 203.0.113.7")); v != "[EMAIL] 203.0.113.0/24" {
+			t.Errorf("%s -> %v, want it scanned", key, v)
 		}
 	}
 	// Inside a map the same key rule applies.
-	out, _ := m.maskAttr(slog.Any("ctx", map[string]any{"trace_id": "IT60X0542811101000000123456", "note": "IT60X0542811101000000123456"}))
+	out, _ := m.maskAttr(slog.Any("ctx", map[string]any{"trace_id": traceID, "span_id": "IT60X0542811101000000123456", "note": "IT60X0542811101000000123456"}))
 	got := out.Value.Any().(map[string]any)
-	if got["trace_id"] != "IT60X0542811101000000123456" || got["note"] != "[IBAN]" {
+	if got["trace_id"] != traceID || got["span_id"] != "[IBAN]" || got["note"] != "[IBAN]" {
 		t.Errorf("map = %v", got)
 	}
-	// A policy PII key wins over the exemption.
-	pm := logMasker{p: policy(func(p *iface.LogContentPolicy) { p.PIIKeys = []string{"requestid"} }), key: testHashKey}
-	if v, _ := maskOne(t, pm, slog.String("request_id", "abc")); v != piiMask {
-		t.Errorf("PII key request_id = %v, want %s", v, piiMask)
+	// Through MaskKV (the span exporter's entry point) too.
+	if v, _ := MaskKV(policy(nil), testHashKey, "request_id", "bob@example.org"); v != "[EMAIL]" {
+		t.Errorf("MaskKV request_id = %v", v)
 	}
-	// Other keys keep being scanned.
-	if v, _ := maskOne(t, m, slog.String("detail", "IT60X0542811101000000123456")); v != "[IBAN]" {
-		t.Errorf("detail = %v, want [IBAN]", v)
+	// A policy PII key wins over the exemption.
+	pm := logMasker{p: policy(func(p *iface.LogContentPolicy) { p.PIIKeys = []string{"traceid"} }), key: testHashKey}
+	if v, _ := maskOne(t, pm, slog.String("trace_id", traceID)); v != piiMask {
+		t.Errorf("PII key trace_id = %v, want %s", v, piiMask)
 	}
 }
 

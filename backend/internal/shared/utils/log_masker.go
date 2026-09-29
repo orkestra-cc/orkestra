@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -32,13 +33,37 @@ const (
 
 // Normalized attribute keys with a dedicated rule (spec §2.3).
 var (
-	ipKeys      = map[string]struct{}{"remote": {}, "ip": {}, "ipaddress": {}, "clientip": {}, "remoteaddr": {}, "remoteip": {}}
+	ipKeys = map[string]struct{}{
+		"remote": {}, "ip": {}, "ipaddress": {}, "clientip": {}, "remoteaddr": {}, "remoteip": {},
+		// forwarding headers and peer addresses logged under their own names
+		"xforwardedfor": {}, "xrealip": {}, "forwarded": {},
+		"clientaddress": {}, "peeraddress": {}, "networkpeeraddress": {},
+	}
 	uaKeys      = map[string]struct{}{"ua": {}, "useragent": {}}
 	subjectKeys = map[string]struct{}{"userid": {}, "useruuid": {}, "actoruserid": {}, "subjectid": {}}
-	// correlationKeys carry generated ids (hex trace/span ids, request ids)
-	// that the free-text rules only ever misread as an IBAN or similar.
-	correlationKeys = map[string]struct{}{"traceid": {}, "spanid": {}, "requestid": {}}
+	// correlationKeys carry the tracer's generated hex ids, which the
+	// free-text rules only ever misread as an IBAN or similar. The exemption
+	// holds only for a value of exactly that shape (correlationShaped): the
+	// key name alone proves nothing, anyone can log under it. request_id is
+	// not here: chi's RequestID copies the client's X-Request-Id verbatim.
+	correlationKeys = map[string]int{"traceid": 32, "spanid": 16}
 )
+
+// correlationShaped reports whether s is exactly what the tracer generates
+// for the correlation key norm: 32 (trace id) or 16 (span id) lowercase hex
+// characters. Any other value under such a key is scanned like free text.
+func correlationShaped(norm, s string) bool {
+	n, ok := correlationKeys[norm]
+	if !ok || len(s) != n {
+		return false
+	}
+	for i := 0; i < n; i++ {
+		if c := s[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
 
 var (
 	emailRe = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
@@ -91,8 +116,8 @@ const (
 	keyIP
 	keyUA
 	keySubject
-	// keyCorrelation marks the generated correlation ids (trace_id, span_id,
-	// request_id): opaque machine values, never scanned as free text.
+	// keyCorrelation marks the tracer's correlation ids (trace_id, span_id):
+	// not scanned as free text when the value has the generated shape.
 	keyCorrelation
 )
 
@@ -118,11 +143,19 @@ var (
 	keyCacheMu sync.Mutex
 )
 
-// classifyKey returns the normalised form and rule family of a raw key,
-// memoised: NormalizeKey and the secret/IP/UA/subject lookups are the
+// classifyKey returns the normalised form and rule family of an attribute
+// key, memoised: NormalizeKey and the secret/IP/UA/subject lookups are the
 // dominant per-attribute cost otherwise.
-func classifyKey(raw string) keyInfo {
-	if mp := keyCache.Load(); mp != nil {
+func classifyKey(raw string) keyInfo { return lookupKey(raw, true) }
+
+// classifyDataKey classifies a key found inside a logged value (a map key):
+// the cache is read but never grows, because such keys are data, often
+// caller-controlled, and the cache would retain them.
+func classifyDataKey(raw string) keyInfo { return lookupKey(raw, false) }
+
+func lookupKey(raw string, store bool) keyInfo {
+	mp := keyCache.Load()
+	if mp != nil {
 		if ki, ok := (*mp)[raw]; ok {
 			return ki
 		}
@@ -143,7 +176,9 @@ func classifyKey(raw string) keyInfo {
 			ki.class = keyCorrelation
 		}
 	}
-	if len(raw) > maxCachedKeyLen {
+	// A full cache is final: checked before the mutex, so once it is full no
+	// lookup miss ever takes the lock.
+	if !store || len(raw) > maxCachedKeyLen || mp != nil && len(*mp) >= maxKeyCacheEntries {
 		return ki
 	}
 	keyCacheMu.Lock()
@@ -261,7 +296,7 @@ func (m logMasker) maskAttrAt(a slog.Attr, depth int, budget *int) (out slog.Att
 			if *budget < 0 {
 				return slog.String(a.Key, redact.Redacted), true
 			}
-			if kind == slog.KindString && ki.class == keyOther {
+			if kind == slog.KindString && (ki.class == keyOther || !correlationShaped(ki.norm, v.String())) {
 				return slog.String(a.Key, m.maskText(v.String())), true
 			}
 			return slog.Attr{Key: a.Key, Value: v}, true
@@ -308,9 +343,14 @@ func (m logMasker) groupKeyRule(rawKey string) (attr slog.Attr, keep, handled bo
 	return slog.Attr{}, false, false
 }
 
-// maskKV applies the key rules in spec order, then the value rules.
+// maskKV applies the key rules in spec order, then the value rules, to an
+// attribute key and its value.
 func (m logMasker) maskKV(rawKey string, val any, depth int, budget *int) (any, bool) {
-	ki := classifyKey(rawKey)
+	return m.maskKVInfo(classifyKey(rawKey), val, depth, budget)
+}
+
+// maskKVInfo is maskKV for an already classified key.
+func (m logMasker) maskKVInfo(ki keyInfo, val any, depth int, budget *int) (any, bool) {
 	switch ki.class {
 	case keySecret:
 		return redact.Redacted, true
@@ -328,11 +368,22 @@ func (m logMasker) maskKV(rawKey string, val any, depth int, budget *int) (any, 
 		return piiMask, true
 	}
 	if ki.class == keyCorrelation {
-		if str, ok := val.(string); ok {
+		if str, ok := val.(string); ok && correlationShaped(ki.norm, str) {
 			return str, true
 		}
 	}
 	return m.maskValue(val, depth, budget), true
+}
+
+// maskDataKV masks one map entry: the key is scanned as free text (a map key
+// is data and can carry an e-mail), the key rules apply to the value under
+// the raw key. ok=false drops the entry.
+func (m logMasker) maskDataKV(rawKey string, val any, depth int, budget *int) (key string, out any, ok bool) {
+	out, ok = m.maskKVInfo(classifyDataKey(rawKey), val, depth, budget)
+	if !ok {
+		return "", nil, false
+	}
+	return m.maskText(rawKey), out, true
 }
 
 func (m logMasker) maskValue(val any, depth int, budget *int) any {
@@ -343,15 +394,38 @@ func (m logMasker) maskValue(val any, depth int, budget *int) any {
 	// Containers give up as a whole once the node budget is spent, instead of
 	// allocating a full-width copy at every remaining level.
 	switch x := val.(type) {
+	case nil:
+		return nil
 	case string:
 		return m.maskText(x)
 	case error:
 		return m.maskText(x.Error())
+	case slog.LogValuer:
+		// Inside a container nothing resolves it (a handler would marshal the
+		// raw type): resolve it and mask what it stands for.
+		return m.maskValue(slog.AnyValue(x).Resolve().Any(), depth+1, budget)
+	case slog.Value:
+		return m.maskValue(x.Resolve().Any(), depth+1, budget)
+	case []slog.Attr: // a resolved group
+		out := make(map[string]any, len(x))
+		for _, a := range x {
+			if k, nv, ok := m.maskDataKV(a.Key, a.Value.Resolve().Any(), depth+1, budget); ok {
+				out[k] = nv
+			}
+			if *budget < 0 {
+				return redact.Redacted
+			}
+		}
+		return out
+	case []byte:
+		// The text handler prints the bytes raw, the JSON one base64: both
+		// give the content back, so it is scanned as text.
+		return m.maskText(string(x))
 	case map[string]any:
 		out := make(map[string]any, len(x))
 		for k, v := range x {
-			if nv, ok := m.maskKV(k, v, depth+1, budget); ok {
-				out[k] = nv
+			if mk, nv, ok := m.maskDataKV(k, v, depth+1, budget); ok {
+				out[mk] = nv
 			}
 			if *budget < 0 {
 				return redact.Redacted
@@ -376,8 +450,8 @@ func (m logMasker) maskValue(val any, depth int, budget *int) any {
 	case map[string]string:
 		out := make(map[string]string, len(x))
 		for k, v := range x {
-			if nv, ok := m.maskKV(k, v, depth+1, budget); ok {
-				out[k] = fmt.Sprint(nv)
+			if mk, nv, ok := m.maskDataKV(k, v, depth+1, budget); ok {
+				out[mk] = fmt.Sprint(nv)
 			}
 			if *budget < 0 {
 				return redact.Redacted
@@ -399,21 +473,86 @@ func (m logMasker) maskValue(val any, depth int, budget *int) any {
 	case map[string][]string:
 		out := make(map[string][]string, len(x))
 		for k, vs := range x {
+			ki := classifyDataKey(k)
 			masked := make([]string, 0, len(vs))
 			for _, v := range vs {
-				if nv, ok := m.maskKV(k, v, depth+1, budget); ok {
+				if nv, ok := m.maskKVInfo(ki, v, depth+1, budget); ok {
 					masked = append(masked, fmt.Sprint(nv))
 				}
 				if *budget < 0 {
 					return redact.Redacted
 				}
 			}
-			out[k] = masked
+			out[m.maskText(k)] = masked
 		}
 		return out
 	default:
+		return m.maskReflect(val, depth, budget)
+	}
+}
+
+// maskReflect covers what the switch in maskValue cannot name: named string
+// types (type Email string), byte slices such as json.RawMessage, maps with
+// string-kind keys, slices and arrays of anything, pointers to non-structs.
+// The rest (numbers, booleans, structs, functions, maps with other keys) is
+// returned as it is; logscope flags the opaque ones at the call site.
+func (m logMasker) maskReflect(val any, depth int, budget *int) any {
+	rv := reflect.ValueOf(val)
+	switch rv.Kind() {
+	case reflect.String:
+		return m.maskText(rv.String())
+	case reflect.Slice:
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return m.maskText(string(rv.Bytes()))
+		}
+		return m.maskSeq(val, rv, depth, budget)
+	case reflect.Array:
+		// Byte arrays are fixed-size binary ids (uuid.UUID), not text.
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return val
+		}
+		return m.maskSeq(val, rv, depth, budget)
+	case reflect.Map:
+		if rv.Type().Key().Kind() != reflect.String {
+			return val
+		}
+		out := make(map[string]any, rv.Len())
+		for it := rv.MapRange(); it.Next(); {
+			if mk, nv, ok := m.maskDataKV(it.Key().String(), it.Value().Interface(), depth+1, budget); ok {
+				out[mk] = nv
+			}
+			if *budget < 0 {
+				return redact.Redacted
+			}
+		}
+		return out
+	case reflect.Pointer:
+		if rv.IsNil() || rv.Elem().Kind() == reflect.Struct {
+			return val
+		}
+		return m.maskValue(rv.Elem().Interface(), depth+1, budget)
+	default:
 		return val
 	}
+}
+
+// maskSeq masks the elements of a slice or array; one of numbers or
+// booleans is returned as it is, without a copy.
+func (m logMasker) maskSeq(val any, rv reflect.Value, depth int, budget *int) any {
+	switch rv.Type().Elem().Kind() {
+	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
+		return val
+	}
+	out := make([]any, rv.Len())
+	for i := range out {
+		out[i] = m.maskValue(rv.Index(i).Interface(), depth+1, budget)
+		if *budget < 0 {
+			return redact.Redacted
+		}
+	}
+	return out
 }
 
 func (m logMasker) maskIP(raw string) (any, bool) {
@@ -501,15 +640,26 @@ func (m logMasker) maskText(s string) string {
 	return m.maskIPRuns(s)
 }
 
-// maskIBANCandidate replaces an ibanRe match with [IBAN] only when it passes
-// the ISO 13616 mod-97 check. The regex alone also matches generated ids (a
-// 32-hex trace id starting with two letters and two digits), which would
-// lose their meaning as [IBAN].
+// maskIBANCandidate replaces an ibanRe match with [IBAN]. Only a candidate
+// made entirely of hex characters must also pass the ISO 13616 mod-97
+// check: that is the one shape a generated hex id (a 32-hex trace id
+// starting with two letters and two digits) shares with an IBAN. Any other
+// match is masked whatever its checksum, so a mistyped IBAN does not leak.
 func maskIBANCandidate(c string) string {
-	if validIBAN(c) {
+	if !allHex(c) || validIBAN(c) {
 		return textIBAN
 	}
 	return c
+}
+
+// allHex reports whether c, spaces aside, is only [0-9A-Fa-f].
+func allHex(c string) bool {
+	for i := 0; i < len(c); i++ {
+		if c[i] != ' ' && !isHexDigit(c[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // validIBAN reports whether c (spaces allowed, any case) is 15-34 letters

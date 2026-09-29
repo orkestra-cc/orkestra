@@ -8,11 +8,15 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	chiMiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
@@ -545,5 +549,30 @@ func TestRequestLogger_StampsRouteTemplateOnActiveSpan(t *testing.T) {
 	}
 	if got != "/v1/x/{id}" {
 		t.Errorf("http.route on span = %q, want /v1/x/{id}", got)
+	}
+}
+
+// chi's RequestID copies a client's X-Request-Id verbatim: request_id is
+// caller-controlled and the PolicyHandler must scan it like free text.
+func TestRequestLogger_ClientRequestIDIsMasked(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := slog.New(utils.NewPolicyHandler(
+		slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}),
+		utils.NewStaticLogPolicyResolver(iface.DefaultLogContentPolicy()), nil))
+	r := chi.NewRouter()
+	r.Use(chiMiddleware.RequestID)
+	r.Use(RequestLogger(logger, RequestLoggerOptions{SkipPaths: map[string]struct{}{}, SlowThreshold: time.Hour}))
+	r.Get("/v1/x", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
+	req.Header.Set("X-Request-Id", "alice@example.com 203.0.113.7")
+	r.ServeHTTP(httptest.NewRecorder(), req)
+
+	line := parseLine(t, buf.Bytes())
+	if got := line["request_id"]; got != "[EMAIL] 203.0.113.0/24" {
+		t.Fatalf("request_id = %v, want the client value masked", got)
+	}
+	if strings.Contains(buf.String(), "alice@example.com") || strings.Contains(buf.String(), "203.0.113.7") {
+		t.Fatalf("client X-Request-Id leaked: %s", buf.String())
 	}
 }

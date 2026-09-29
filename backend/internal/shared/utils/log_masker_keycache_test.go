@@ -43,3 +43,22 @@ func TestClassifyKey_LongKeysNotCached(t *testing.T) {
 		t.Fatal("masking must not cache the long key either")
 	}
 }
+
+// Keys found inside logged values are data (often caller-controlled): they
+// are classified but never enter the cache. Attribute keys do.
+func TestClassifyKey_MapKeysNotCached(t *testing.T) {
+	m := logMasker{p: policy(nil), key: testHashKey}
+	const attrKey, mapKey, nestedKey, headerKey = "zz_attr_probe", "zz_map_probe", "zz_nested_probe", "Zz-Header-Probe"
+	m.maskAttr(slog.Any(attrKey, map[string]any{
+		mapKey: map[string]string{nestedKey: "v"},
+		"h":    map[string][]string{headerKey: {"v"}},
+	}))
+	if !keyCached(attrKey) {
+		t.Fatal("the attribute key must be cached")
+	}
+	for _, k := range []string{mapKey, nestedKey, headerKey} {
+		if keyCached(k) {
+			t.Errorf("map key %q entered the cache", k)
+		}
+	}
+}
