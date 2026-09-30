@@ -35,18 +35,20 @@ import (
 // admin/me handlers.
 type Module struct {
 	module.BaseModule
-	sink         *services.AuditSink
-	admin        *handlers.AdminHandler
-	me           *handlers.MeHandler
-	soc2         *handlers.SOC2Handler
-	legalHold    *handlers.LegalHoldHandler
-	retention    *handlers.RetentionHandler
-	retentionSvc *services.RetentionService
-	erasureReq   *handlers.ErasureRequestHandler
-	policySvc    *services.PolicyService
-	policyAdmin  *services.PolicyAdminService
-	stopCh       chan struct{}
-	logger       *slog.Logger
+	sink          *services.AuditSink
+	admin         *handlers.AdminHandler
+	me            *handlers.MeHandler
+	soc2          *handlers.SOC2Handler
+	legalHold     *handlers.LegalHoldHandler
+	retention     *handlers.RetentionHandler
+	retentionSvc  *services.RetentionService
+	erasureReq    *handlers.ErasureRequestHandler
+	policySvc     *services.PolicyService
+	policyAdmin   *services.PolicyAdminService
+	policyHandler *handlers.PolicyHandler
+	tenantPolicy  *handlers.TenantPolicyHandler
+	stopCh        chan struct{}
+	logger        *slog.Logger
 }
 
 // NewModule returns an unwired module; Init constructs the sink.
@@ -283,6 +285,8 @@ func (m *Module) Init(deps *module.Dependencies) error {
 			slog.String("error", err.Error()))
 	}
 	deps.Services.Register(module.ServiceCompliancePolicy, iface.CompliancePolicyProvider(m.policySvc))
+	m.policyHandler = handlers.NewPolicyHandler(m.policyAdmin, m.policySvc)
+	m.tenantPolicy = handlers.NewTenantPolicyHandler(m.policySvc)
 
 	// KMS provider — per-tenant envelope encryption + crypto-shred on
 	// purge. Boots lazily: if the master key env is missing the provider
@@ -429,6 +433,30 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 			r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
 			api := humachi.New(r, ri.APIConfig)
 			handlers.RegisterErasureRequestAdminWriteRoutes(api, m.erasureReq)
+		})
+	}
+	// Policy engine (compliance spec §7) — Tier-1 operator. Reads (and the
+	// validate POSTs, which change nothing) need policy.read; writes need
+	// policy.manage plus a fresh step-up.
+	if m.policyHandler != nil {
+		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.compliance.policy.read"))
+			api := humachi.New(r, ri.APIConfig)
+			handlers.RegisterPolicyReadRoutes(api, m.policyHandler)
+		})
+		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.compliance.policy.manage"))
+			r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
+			api := humachi.New(r, ri.APIConfig)
+			handlers.RegisterPolicyWriteRoutes(api, m.policyHandler)
+		})
+	}
+	// Tier-2 client: a read-only summary of its own tenant's policy.
+	if m.tenantPolicy != nil && ri.Client != nil && ri.Client.ProtectedRouter != nil {
+		ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Client.AuthMW.RequirePermission("tenant.read"))
+			api := humachi.New(r, ri.APIConfig)
+			handlers.RegisterTenantPolicyRoutes(api, m.tenantPolicy)
 		})
 	}
 	if m.me != nil {
