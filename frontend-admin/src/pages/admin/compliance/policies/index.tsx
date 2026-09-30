@@ -105,13 +105,16 @@ const PolicyDetailPage = () => {
     return platform ? newTenantPolicy(platform) : undefined;
   }, [isNew, policy, fromId, source.data, platform, t]);
 
+  // A refused write (409) still invalidates the policy, so the detail is
+  // refetched behind the editor. While the editor is in conflict the form
+  // seed is withheld: the operator's edits stay on screen until Reload.
+  const [conflict, setConflict] = useState(false);
   const form = useForm<PolicyFormValues>({
     resolver: yupResolver(policySchema),
-    values: initial ? toFormValues(initial) : undefined
+    values: initial && !conflict ? toFormValues(initial) : undefined
   });
   const dirty = form.formState.isDirty;
 
-  const [conflict, setConflict] = useState(false);
   const [review, setReview] = useState<{
     input: PolicyInput;
     warnings: PolicyIssue[];
@@ -241,7 +244,11 @@ const PolicyDetailPage = () => {
 
   const reload = async () => {
     const res = await detail.refetch();
-    if (!res.isError) setConflict(false);
+    if (res.isError) return;
+    // Re-seed explicitly: when the server content equals what the form was
+    // last seeded from, the `values` prop alone would keep the edits.
+    if (res.data) form.reset(toFormValues(editableOf(res.data.policy)));
+    setConflict(false);
   };
 
   if (detail.isError || source.isError) {

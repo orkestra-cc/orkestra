@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'react-toastify';
 import { Route, Routes } from 'react-router';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
@@ -69,12 +70,23 @@ const classes = [
   tenantSettable: i < 3
 }));
 
-const stub = (opts: { validate?: object; put?: () => Response } = {}) => {
-  const seen: { put?: unknown } = {};
+interface Stub {
+  put?: unknown;
+  gets: number;
+  // The policy the detail endpoint serves; a test may swap it mid-flight.
+  policy: object;
+}
+
+const stub = (
+  opts: { validate?: object; put?: () => Response; policy?: object } = {}
+) => {
+  const seen: Stub = { gets: 0, policy: opts.policy ?? strict };
+  const id = (seen.policy as { uuid: string }).uuid;
   server.use(
-    http.get(url('/v1/admin/compliance/policies/p-1'), () =>
-      HttpResponse.json({ policy: strict, assignments: [] })
-    ),
+    http.get(url(`/v1/admin/compliance/policies/${id}`), () => {
+      seen.gets += 1;
+      return HttpResponse.json({ policy: seen.policy, assignments: [] });
+    }),
     http.get(url('/v1/admin/compliance/policies'), () =>
       HttpResponse.json({ items: [platform] })
     ),
@@ -89,15 +101,18 @@ const stub = (opts: { validate?: object; put?: () => Response } = {}) => {
         }
       )
     ),
-    http.put(url('/v1/admin/compliance/policies/p-1'), async ({ request }) => {
-      seen.put = await request.json();
-      return opts.put
-        ? opts.put()
-        : HttpResponse.json(
-            { applied: false, warnings: [], changeRequest: { uuid: 'cr-1' } },
-            { status: 202 }
-          );
-    })
+    http.put(
+      url(`/v1/admin/compliance/policies/${id}`),
+      async ({ request }) => {
+        seen.put = await request.json();
+        return opts.put
+          ? opts.put()
+          : HttpResponse.json(
+              { applied: false, warnings: [], changeRequest: { uuid: 'cr-1' } },
+              { status: 202 }
+            );
+      }
+    )
   );
   return seen;
 };
@@ -182,17 +197,27 @@ describe('PolicyDetailPage', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('locks the editor after a version conflict', async () => {
-    stub({
-      put: () =>
-        HttpResponse.json(
+  it('keeps the edits visible after a version conflict and reloads the server version on demand', async () => {
+    const newer = {
+      ...strict,
+      version: 2,
+      description: 'Aggiornata da un collega',
+      logContent: { ...strict.logContent, ipAddress: 'hashed' }
+    };
+    const seen = stub({
+      // Another operator saved first: the write is refused and the detail
+      // the (invalidated) refetch brings back is already version 2.
+      put: () => {
+        seen.policy = newer;
+        return HttpResponse.json(
           {
             status: 409,
             detail: 'changed',
             code: 'compliance.policy_version_conflict'
           },
           { status: 409 }
-        ) as unknown as Response
+        ) as unknown as Response;
+      }
     });
     renderPage();
     const user = userEvent.setup();
@@ -208,6 +233,85 @@ describe('PolicyDetailPage', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm' }));
     expect(await screen.findByText('The policy changed')).toBeInTheDocument();
     expect(screen.getByLabelText('IP addresses')).toBeDisabled();
+    // The refetch triggered by the failed write has landed...
+    await waitFor(() => expect(seen.gets).toBeGreaterThanOrEqual(2));
+    // ...and the operator's edit is still on screen, not the newer value.
+    expect(screen.getByLabelText('IP addresses')).toHaveValue('full');
+    expect(screen.getByLabelText('Description')).toHaveValue('');
+
+    await user.click(screen.getByRole('button', { name: 'Reload' }));
+    await waitFor(() =>
+      expect(screen.getByLabelText('IP addresses')).toHaveValue('hashed')
+    );
+    expect(screen.getByLabelText('Description')).toHaveValue(
+      'Aggiornata da un collega'
+    );
+    expect(screen.getByLabelText('IP addresses')).toBeEnabled();
+    expect(screen.queryByText('The policy changed')).not.toBeInTheDocument();
+  });
+
+  it('closes the confirmation and resets the form when the change is sent for approval', async () => {
+    const info = vi.spyOn(toast, 'info');
+    stub();
+    renderPage();
+    const user = userEvent.setup();
+    await user.selectOptions(
+      await screen.findByLabelText('IP addresses'),
+      'full'
+    );
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.type(await screen.findByLabelText('Reason'), 'motivo');
+    await user.click(
+      screen.getByLabelText('I have read the warnings and confirm the change')
+    );
+    await user.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() =>
+      expect(info).toHaveBeenCalledWith('Request sent for approval.')
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Confirm' })
+      ).not.toBeInTheDocument()
+    );
+    // Nothing was applied: the form is back on the server values, clean.
+    expect(screen.getByLabelText('IP addresses')).toHaveValue('omitted');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    info.mockRestore();
+  });
+
+  it('sends the platform policy back with its sinks and lets its platform-only classes be edited', async () => {
+    const sinks = { loki: { days: 30, warnErrorDays: 90 } };
+    const seen = stub({
+      validate: { errors: [], warnings: [] },
+      policy: { ...platform, sinks }
+    });
+    renderPage('/admin/compliance/policies/plat');
+    const user = userEvent.setup();
+    expect(await screen.findByDisplayValue('Platform')).toBeInTheDocument();
+    expect(screen.getByLabelText('Authentication security')).toBeEnabled();
+    await user.type(
+      screen.getByLabelText('Description'),
+      'Base di piattaforma'
+    );
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.type(await screen.findByLabelText('Reason'), 'aggiornamento');
+    await user.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(seen.put).toBeDefined());
+    expect(seen.put).toMatchObject({
+      expectedVersion: 1,
+      policy: { description: 'Base di piattaforma' }
+    });
+    expect((seen.put as { policy: { sinks: unknown } }).policy.sinks).toEqual(
+      sinks
+    );
+  });
+
+  it('keeps the classes a tenant may not set read-only on a tenant policy', async () => {
+    stub();
+    renderPage();
+    expect(await screen.findByDisplayValue('Strict')).toBeInTheDocument();
+    expect(screen.getByLabelText('Authentication security')).toBeDisabled();
+    expect(screen.getByLabelText('Administrator access')).toBeEnabled();
   });
 
   it('creates a new tenant policy from the platform content and opens it', async () => {
