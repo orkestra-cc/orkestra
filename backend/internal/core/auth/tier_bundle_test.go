@@ -1,12 +1,118 @@
 package auth
 
 import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
 	"testing"
 
+	"github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+type initialPasswordBundleUser struct {
+	iface.UserProvider
+	user        *iface.User
+	setterCalls int
+}
+
+func (u *initialPasswordBundleUser) GetUserByID(context.Context, string) (*iface.User, error) {
+	return u.user, nil
+}
+
+func (u *initialPasswordBundleUser) ClearFailedLogins(context.Context, string) error { return nil }
+
+func (u *initialPasswordBundleUser) SetPasswordHashIfUnset(_ context.Context, id, hash string) error {
+	if id != u.user.UUID || hash != "test-hash" {
+		return errors.New("unexpected credential setter arguments")
+	}
+	u.setterCalls++
+	u.user.PasswordHash = hash
+	return nil
+}
+
+type bundlePasswordHasher struct{ services.PasswordService }
+
+func (bundlePasswordHasher) Hash(string) (string, error)                          { return "test-hash", nil }
+func (bundlePasswordHasher) ValidatePolicy(context.Context, string, string) error { return nil }
+
+type bundleSecurityEvents struct {
+	repository.SecurityEventRepository
+	rows []*models.SecurityEvent
+}
+
+func (r *bundleSecurityEvents) Insert(_ context.Context, event *models.SecurityEvent) error {
+	r.rows = append(r.rows, event)
+	return nil
+}
+
+type bundleAuditEvents struct{ rows []iface.AuditEvent }
+
+func (r *bundleAuditEvents) Emit(_ context.Context, event iface.AuditEvent) {
+	r.rows = append(r.rows, event)
+}
+
+func TestTierBundle_InitialPasswordUsesTierDependencies(t *testing.T) {
+	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://test/test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	users := &initialPasswordBundleUser{user: &iface.User{
+		UUID: "operator-user", Email: "operator@example.com", IsActive: true, EmailVerified: true,
+	}}
+	events := &bundleSecurityEvents{}
+	bundle, err := buildAuthTierBundle(tierBundleDeps{
+		db: client.Database("test"), tier: tierOperator, userProvider: users,
+		initialPasswordSetter: users, passwordService: bundlePasswordHasher{},
+		authPolicy:        services.NewAuthPolicyServiceForTest(map[string]string{"passwordLoginEnabledAdmin": "true"}),
+		securityEventRepo: events, logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit := &bundleAuditEvents{}
+	bundle.authService.(iface.AuditSinkSetter).SetAuditSink(audit)
+	// Both consumers receive the sink in production. Enrollment must still emit once.
+	bundle.passwordSvc.SetAuditSink(audit)
+	// Mongo is deliberately unconnected: teardown errors are best-effort, and
+	// the emitted metadata must report that no teardown completion is known.
+	if err := bundle.passwordSvc.SetInitialPassword(context.Background(), services.SetInitialPasswordInput{
+		UserUUID: users.user.UUID, CurrentSID: "caller-sid", New: "new-passphrase",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if users.setterCalls != 1 || users.user.PasswordHash != "test-hash" {
+		t.Fatal("bundle did not enroll through the supplied setter")
+	}
+	if len(events.rows) != 1 || events.rows[0].EventType != "self_password_added" || events.rows[0].UserUUID != "operator-user" {
+		t.Fatalf("bundle security events = %+v, want one self_password_added for operator-user", events.rows)
+	}
+	if len(audit.rows) != 1 || audit.rows[0].Action != "auth.password.added" {
+		t.Fatalf("bundle compliance events = %+v, want one auth.password.added", audit.rows)
+	}
+	if events.rows[0].Metadata["audience"] != "operator" || events.rows[0].Metadata["teardownComplete"] != false {
+		t.Fatalf("unexpected tier/teardown metadata: %v", events.rows[0].Metadata)
+	}
+}
+
+func TestTierBundle_ClientInitialPasswordSetterIsOptional(t *testing.T) {
+	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://test/test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := buildAuthTierBundle(tierBundleDeps{db: client.Database("test"), tier: tierClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bundle.passwordSvc.SetInitialPassword(context.Background(), services.SetInitialPasswordInput{}); !errors.Is(err, services.ErrInitialPasswordUnavailable) {
+		t.Fatalf("client initial-password error = %v, want setter unavailable", err)
+	}
+}
 
 // TestBuildAuthTierBundlePicksMatchingConstructors covers the D-2
 // invariant that the builder picks the operator-tier or client-tier

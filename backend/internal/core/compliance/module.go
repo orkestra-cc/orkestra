@@ -267,6 +267,9 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	// optional — missing services (out of init order) are ignored so
 	// compliance boots cleanly. (A later pass adopts iface.AuditSinkSetter
 	// to drop the concrete-type coupling.)
+	if authAudit, ok := module.GetTyped[iface.AuditSinkSetter](deps.Services, module.ServiceAuthService); ok {
+		authAudit.SetAuditSink(sink)
+	}
 	if pa, ok := module.GetTyped[*authServices.PasswordAuthService](deps.Services, module.ServicePasswordAuthService); ok {
 		pa.SetAuditSink(sink)
 	}

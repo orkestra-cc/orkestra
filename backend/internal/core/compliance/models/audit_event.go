@@ -57,6 +57,7 @@ const (
 	ActionAuthLoginSucceeded     = "auth.login.succeeded"
 	ActionAuthLoginFailed        = "auth.login.failed"
 	ActionAuthLogout             = "auth.logout"
+	ActionAuthPasswordAdded      = "auth.password.added"
 	ActionAuthPasswordChanged    = "auth.password.changed"
 	ActionAuthPasswordResetStart = "auth.password.reset_requested"
 	ActionAuthPasswordResetDone  = "auth.password.reset_completed"

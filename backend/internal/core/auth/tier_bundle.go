@@ -68,6 +68,7 @@ type tierBundleDeps struct {
 	logger                  *slog.Logger
 	tier                    audienceTier
 	userProvider            iface.UserProvider
+	initialPasswordSetter   iface.InitialPasswordSetter
 	tenantProvider          iface.TenantProvider
 	jwtService              services.JWTService
 	passwordService         services.PasswordService
@@ -180,6 +181,7 @@ func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 	policyAudience := policyAudienceForBundle
 	passSvc := services.NewPasswordAuthService(services.PasswordAuthConfig{
 		UserService:              d.userProvider,
+		InitialPasswordSetter:    d.initialPasswordSetter,
 		TenantProvider:           d.tenantProvider,
 		PasswordService:          d.passwordService,
 		JWTService:               d.jwtService,
@@ -204,6 +206,9 @@ func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 		Audience:                 policyAudience,
 		GeoResolver:              d.geoResolver,
 	})
+	if sink, ok := authSvc.(services.SecurityEventSink); ok {
+		passSvc.SetSecurityEventSink(sink)
+	}
 
 	mfaSvc := services.NewMFAService(mfaRepo, d.mfaChallengeService, d.passwordService, d.mfaIssuer, d.logger)
 	mfaSvc.SetDeviceTrust(d.deviceTrust)

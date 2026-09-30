@@ -2116,6 +2116,8 @@ func (s *authService) recordAuthEvent(ctx context.Context, eventType, targetUUID
 // so adding a new event-type here is opt-in.
 func authEventComplianceAction(eventType string) string {
 	switch eventType {
+	case "self_password_added":
+		return "auth.password.added"
 	case "admin_password_reset_sent":
 		return "auth.password.reset_requested"
 	case "admin_verification_resent":
