@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | **Date** | 2026-09-30 |
-| **Status** | v1 — awaiting review |
+| **Status** | v1 — approved; implementation planned |
 | **Scope** | `backend/internal/core/{auth,user}`, `backend/internal/shared/errcode`, `backend/pkg/sdk/iface`, `backend/openapi/enterprise.json`, `frontend-admin`, the auth module contract and canonical docs-site auth pages |
 | **Source** | Code review on `dev` at `0f328be4` |
 | **Audience** | Tier 1 only: operator users on the operator API surface and `frontend-admin` |
