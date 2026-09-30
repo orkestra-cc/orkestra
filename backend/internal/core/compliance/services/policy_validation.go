@@ -35,12 +35,15 @@ const (
 // on, a second operator's approval. less_restrictive_than_current is this
 // plan's addition to spec §1.4 (an assignment that weakens a tenant).
 const (
-	WarnLessRestrictiveThanPlatform = "less_restrictive_than_platform"
-	WarnLessRestrictiveThanCurrent  = "less_restrictive_than_current"
-	WarnRetentionLongerThanDefault  = "retention_longer_than_default"
-	WarnIPFull                      = "ip_full"
-	WarnReviewOverdue               = "review_overdue"
-	WarnAccountabilityIncomplete    = "accountability_incomplete"
+	WarnLessRestrictiveThanPlatform    = "less_restrictive_than_platform"
+	WarnLessRestrictiveThanCurrent     = "less_restrictive_than_current"
+	WarnRetentionLongerThanDefault     = "retention_longer_than_default"
+	WarnRetentionShorterThanDefault    = "retention_shorter_than_default"
+	WarnSinkRetentionLongerThanDefault = "sink_retention_longer_than_default"
+	WarnExternalSinkChanged            = "external_sink_changed"
+	WarnIPFull                         = "ip_full"
+	WarnReviewOverdue                  = "review_overdue"
+	WarnAccountabilityIncomplete       = "accountability_incomplete"
 )
 
 const (
@@ -132,8 +135,11 @@ type PolicyCheck struct {
 	Input      models.PolicyInput
 	IsPlatform bool
 	Platform   *models.Policy
-	NameTaken  bool
-	Now        time.Time
+	// Current is the policy being edited, nil for a new one. Only the sinks
+	// of the platform policy use it, to spot new or changed external sinks.
+	Current   *models.Policy
+	NameTaken bool
+	Now       time.Time
 }
 
 func ValidatePolicy(c PolicyCheck) ValidationResult {
@@ -190,6 +196,13 @@ func ValidatePolicy(c PolicyCheck) ValidationResult {
 		r.addError(IssueSinksNotPlatform, "sinks", nil)
 	}
 	r.Warnings = PolicyWarnings(in, c.IsPlatform, c.Platform, c.Now)
+	if c.IsPlatform && in.Sinks != nil {
+		var current *models.SinkPolicy
+		if c.Current != nil {
+			current = c.Current.Sinks
+		}
+		r.Warnings = append(r.Warnings, sinkWarnings(in.Sinks, current)...)
+	}
 	return r
 }
 
@@ -219,6 +232,54 @@ func validateSinks(r *ValidationResult, s *models.SinkPolicy) {
 	}
 }
 
+// sinkWarnings are the warnings of the platform sink policy: values above the
+// spec §5.1 defaults, and external sinks (new processors or transfers, GDPR
+// art. 28 and 44) that current does not already have unchanged. current may
+// be nil.
+func sinkWarnings(next, current *models.SinkPolicy) []Issue {
+	var w []Issue
+	def := models.DefaultSinkPolicy()
+	for _, v := range []struct {
+		field      string
+		val, deflt int
+	}{
+		{"loki.days", next.Loki.Days, def.Loki.Days},
+		{"loki.warnErrorDays", next.Loki.WarnErrorDays, def.Loki.WarnErrorDays},
+		{"tempo.days", next.Tempo.Days, def.Tempo.Days},
+		{"prometheus.days", next.Prometheus.Days, def.Prometheus.Days},
+		{"containerLogs.maxSizeMb", next.ContainerLogs.MaxSizeMB, def.ContainerLogs.MaxSizeMB},
+		{"containerLogs.maxFiles", next.ContainerLogs.MaxFiles, def.ContainerLogs.MaxFiles},
+		{"backups.days", next.Backups.Days, def.Backups.Days},
+		{"dsrExportDays", next.DSRExportDays, def.DSRExportDays},
+		{"spool.deadLetterDays", next.Spool.DeadLetterDays, def.Spool.DeadLetterDays},
+	} {
+		if v.val > v.deflt {
+			w = append(w, Issue{Code: WarnSinkRetentionLongerThanDefault, Field: "sinks." + v.field,
+				Params: map[string]any{"default": v.deflt}})
+		}
+	}
+	var known []models.ExternalSink
+	if current != nil {
+		known = current.External
+	}
+	for i, e := range next.External {
+		if !slices.ContainsFunc(known, func(k models.ExternalSink) bool { return sameExternalSink(e, k) }) {
+			w = append(w, Issue{Code: WarnExternalSinkChanged, Field: fmt.Sprintf("sinks.external[%d]", i)})
+		}
+	}
+	return w
+}
+
+// sameExternalSink compares two external sinks; the review date is compared
+// as an instant, not as a struct (location pointers differ after a round trip).
+func sameExternalSink(a, b models.ExternalSink) bool {
+	if !a.ReviewDueAt.Equal(b.ReviewDueAt) {
+		return false
+	}
+	a.ReviewDueAt, b.ReviewDueAt = time.Time{}, time.Time{}
+	return a == b
+}
+
 // PolicyWarnings are the warnings of a policy on its own (spec §1.4);
 // platform is the current platform policy, nil for the platform itself.
 func PolicyWarnings(in models.PolicyInput, isPlatform bool, platform *models.Policy, now time.Time) []Issue {
@@ -230,8 +291,19 @@ func PolicyWarnings(in models.PolicyInput, isPlatform bool, platform *models.Pol
 		}
 	}
 	for _, class := range sortedClasses(in.Retention) {
-		if def, ok := retentionclass.Get(class); ok && in.Retention[class] > def.DefaultDays {
-			w = append(w, Issue{Code: WarnRetentionLongerThanDefault, Field: "retention." + string(class),
+		def, ok := retentionclass.Get(class)
+		if !ok {
+			continue
+		}
+		code := ""
+		switch days := in.Retention[class]; {
+		case days > def.DefaultDays:
+			code = WarnRetentionLongerThanDefault
+		case days < def.DefaultDays:
+			code = WarnRetentionShorterThanDefault
+		}
+		if code != "" {
+			w = append(w, Issue{Code: code, Field: "retention." + string(class),
 				Params: map[string]any{"default": def.DefaultDays}})
 		}
 	}

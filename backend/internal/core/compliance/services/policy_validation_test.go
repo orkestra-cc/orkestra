@@ -21,12 +21,12 @@ func platformPolicy() *models.Policy {
 }
 
 // tenantInput is a clean tenant policy: same content as the platform,
-// stricter retention, complete accountability, no warnings.
+// default retention, complete accountability, no warnings.
 func tenantInput() models.PolicyInput {
 	return models.PolicyInput{
 		Name:       "Cliente sanità",
 		LogContent: iface.DefaultLogContentPolicy(),
-		Retention:  map[iface.RetentionClass]int{iface.RetentionPrivilegedChange: 400},
+		Retention:  map[iface.RetentionClass]int{iface.RetentionPrivilegedChange: 730},
 		Accountability: models.Accountability{
 			Role: models.RoleProcessor, RoPARef: "RoPA-7", AssessmentRef: "DPIA-3",
 			ReviewDueAt: testNow.AddDate(0, 6, 0),
@@ -201,5 +201,91 @@ func TestLessRestrictiveThanCurrent(t *testing.T) {
 	// Towards a stricter policy: nothing to warn about.
 	if w := LessRestrictiveThanCurrent(strict, platform, platform); len(w) != 0 {
 		t.Fatalf("stricter move warned: %v", codes(w))
+	}
+}
+
+func TestValidatePolicy_ShorterThanDefault(t *testing.T) {
+	in := tenantInput()
+	in.Retention[iface.RetentionPrivilegedChange] = 400
+	r := ValidatePolicy(PolicyCheck{Input: NormalizePolicyInput(in, false), Platform: platformPolicy(), Now: testNow})
+	if len(r.Errors) != 0 {
+		t.Fatalf("errors = %v", codes(r.Errors))
+	}
+	if !slices.Contains(codes(r.Warnings), WarnRetentionShorterThanDefault+"@retention.privileged_change") {
+		t.Fatalf("warnings = %v", codes(r.Warnings))
+	}
+	// Shortening the audit evidence needs a second operator too.
+	plat := platformPolicy().Input()
+	plat.Retention[iface.RetentionComplianceEvidence] = 1
+	r = ValidatePolicy(PolicyCheck{Input: NormalizePolicyInput(plat, true), IsPlatform: true, Now: testNow})
+	if !slices.Contains(codes(r.Warnings), WarnRetentionShorterThanDefault+"@retention.compliance_evidence") {
+		t.Fatalf("warnings = %v", codes(r.Warnings))
+	}
+}
+
+func TestValidatePolicy_DefaultPlatformPolicyIsClean(t *testing.T) {
+	in := platformPolicy().Input()
+	r := ValidatePolicy(PolicyCheck{Input: NormalizePolicyInput(in, true), IsPlatform: true, Now: testNow})
+	if len(r.Errors) != 0 || len(r.Warnings) != 0 {
+		t.Fatalf("errors=%v warnings=%v", codes(r.Errors), codes(r.Warnings))
+	}
+}
+
+func TestValidatePolicy_SinkRetentionLongerThanDefault(t *testing.T) {
+	in := platformPolicy().Input()
+	in.Sinks.Loki.Days = 30
+	r := ValidatePolicy(PolicyCheck{Input: NormalizePolicyInput(in, true), IsPlatform: true, Now: testNow})
+	if len(r.Errors) != 0 {
+		t.Fatalf("errors = %v", codes(r.Errors))
+	}
+	if got := codes(r.Warnings); !slices.Equal(got, []string{WarnSinkRetentionLongerThanDefault + "@sinks.loki.days"}) {
+		t.Fatalf("warnings = %v", got)
+	}
+	if def := r.Warnings[0].Params["default"]; def != 14 {
+		t.Fatalf("default param = %v", def)
+	}
+	// More backup copies than the default is not a warning.
+	in = platformPolicy().Input()
+	in.Sinks.Backups.MinKeep = 10
+	r = ValidatePolicy(PolicyCheck{Input: NormalizePolicyInput(in, true), IsPlatform: true, Now: testNow})
+	if len(r.Warnings) != 0 {
+		t.Fatalf("warnings = %v", codes(r.Warnings))
+	}
+}
+
+func TestValidatePolicy_ExternalSinkChanged(t *testing.T) {
+	ext := models.ExternalSink{Name: "Grafana Cloud", Kind: models.ExternalKindOTLP, DPARef: "DPA-9", DeclaredRetentionDays: 30}
+	in := platformPolicy().Input()
+	in.Sinks.External = []models.ExternalSink{ext}
+	check := func(current *models.Policy) ValidationResult {
+		return ValidatePolicy(PolicyCheck{Input: NormalizePolicyInput(in, true), IsPlatform: true, Current: current, Now: testNow})
+	}
+
+	without := platformPolicy()
+	r := check(without)
+	if len(r.Errors) != 0 || !slices.Equal(codes(r.Warnings), []string{WarnExternalSinkChanged + "@sinks.external[0]"}) {
+		t.Fatalf("errors=%v warnings=%v", codes(r.Errors), codes(r.Warnings))
+	}
+
+	with := platformPolicy()
+	with.Sinks.External = []models.ExternalSink{{Name: "Altro", Kind: models.ExternalKindSyslog, DPARef: "DPA-1", DeclaredRetentionDays: 7}, ext}
+	if r := check(with); slices.Contains(r.WarningCodes(), WarnExternalSinkChanged) {
+		t.Fatalf("unchanged sink warned: %v", codes(r.Warnings))
+	}
+
+	changed := platformPolicy()
+	changed.Sinks.External = []models.ExternalSink{ext}
+	changed.Sinks.External[0].DeclaredRetentionDays = 10
+	if r := check(changed); !slices.Contains(r.WarningCodes(), WarnExternalSinkChanged) {
+		t.Fatalf("changed sink not warned: %v", codes(r.Warnings))
+	}
+
+	if r := check(nil); !slices.Contains(codes(r.Warnings), WarnExternalSinkChanged+"@sinks.external[0]") {
+		t.Fatalf("nil current: %v", codes(r.Warnings))
+	}
+	nilSinks := platformPolicy()
+	nilSinks.Sinks = nil
+	if r := check(nilSinks); !slices.Contains(codes(r.Warnings), WarnExternalSinkChanged+"@sinks.external[0]") {
+		t.Fatalf("nil current sinks: %v", codes(r.Warnings))
 	}
 }
