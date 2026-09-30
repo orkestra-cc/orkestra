@@ -299,6 +299,9 @@ func (r *refreshTokenRepository) GetActiveTokensByUser(ctx context.Context, user
 		}
 		tokens = append(tokens, &token)
 	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read active tokens: %w", err)
+	}
 
 	return tokens, nil
 }

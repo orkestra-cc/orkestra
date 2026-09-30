@@ -921,8 +921,9 @@ func (s *PasswordAuthService) SetSessionRevocation(rev SessionRevocationService)
 // credentialRevocationResult counts fully revoked sessions and reports whether
 // every required teardown pathway completed successfully.
 type credentialRevocationResult struct {
-	Revoked  int
-	Complete bool
+	Revoked       int
+	Complete      bool
+	processedSIDs map[string]struct{}
 }
 
 // revokeSessionsAfterCredentialChange evicts every way the old password
@@ -952,7 +953,7 @@ type credentialRevocationResult struct {
 // this runs, and failing the request would leave the caller believing
 // the change did not happen. Failures are logged.
 func (s *PasswordAuthService) revokeSessionsAfterCredentialChange(ctx context.Context, userUUID, reason, keepSID, trustReason string) credentialRevocationResult {
-	result := credentialRevocationResult{Complete: true}
+	result := credentialRevocationResult{Complete: true, processedSIDs: make(map[string]struct{})}
 	// Missing collaborators remain nil-tolerant, but cannot claim a complete
 	// teardown. Enrollment exposes this status in its security event.
 	if s.authSessionRepo == nil || s.refreshTokenRepo == nil || s.sessionRevocation == nil || s.deviceTrust == nil {
@@ -973,6 +974,7 @@ func (s *PasswordAuthService) revokeSessionsAfterCredentialChange(ctx context.Co
 			if sess == nil || sess.UUID == "" || sess.UUID == keepSID {
 				continue
 			}
+			result.processedSIDs[sess.UUID] = struct{}{}
 			sessionComplete := s.refreshTokenRepo != nil && s.sessionRevocation != nil
 			if s.refreshTokenRepo != nil {
 				if err := s.refreshTokenRepo.RevokeTokensBySession(ctx, sess.UUID, reason); err != nil {
@@ -1338,8 +1340,19 @@ func (s *PasswordAuthService) SetInitialPassword(ctx context.Context, in SetInit
 	}
 	_ = s.userService.ClearFailedLogins(ctx, user.UUID)
 	s.resetLoginFailures(ctx, user.Email)
+	// Snapshot refresh SIDs before the shared helper can perform its by-user
+	// sweep (when CurrentSID is empty), otherwise orphan SIDs disappear from
+	// the active-token query before their access tokens are denylisted.
+	var refreshTokens []*authModels.RefreshTokenDoc
+	var refreshReadErr error
+	if s.refreshTokenRepo != nil {
+		refreshTokens, refreshReadErr = s.refreshTokenRepo.GetActiveTokensByUser(ctx, user.UUID)
+	}
 	teardown := s.revokeSessionsAfterCredentialChange(ctx, user.UUID,
 		"password_added", in.CurrentSID, authModels.DeviceTrustRevokedOnPasswordAdded)
+	if !s.revokeRemainingRefreshCredentials(ctx, user.UUID, in.CurrentSID, teardown.processedSIDs, refreshTokens, refreshReadErr) {
+		teardown.Complete = false
+	}
 	emitCredentialEvent(ctx, s.securityEventSink, s.logger, "self_password_added", user.UUID, map[string]interface{}{
 		"audience":             string(s.audience),
 		"currentSessionId":     in.CurrentSID,
@@ -1347,6 +1360,57 @@ func (s *PasswordAuthService) SetInitialPassword(ctx context.Context, in SetInit
 		"teardownComplete":     teardown.Complete,
 	})
 	return nil
+}
+
+// revokeRemainingRefreshCredentials closes refresh/SID paths whose active
+// session document is missing. Only initial-password enrollment calls this:
+// refresh currently permits a missing session anchor during its compatibility
+// window. Orphan refresh-only SIDs do not add to the session-completion count.
+func (s *PasswordAuthService) revokeRemainingRefreshCredentials(ctx context.Context, userUUID, keepSID string, processed map[string]struct{}, tokens []*authModels.RefreshTokenDoc, readErr error) bool {
+	if s.refreshTokenRepo == nil {
+		return false
+	}
+	if readErr != nil {
+		if s.logger != nil {
+			s.logger.Warn("auth: could not list refresh credentials after initial password enrollment",
+				slog.String("user_uuid", userUUID), slog.String("error", readErr.Error()))
+		}
+		return false
+	}
+	complete := true
+	for _, token := range tokens {
+		if token == nil || token.SessionUUID == "" {
+			complete = false
+			continue
+		}
+		sid := token.SessionUUID
+		if sid == keepSID {
+			continue
+		}
+		if _, seen := processed[sid]; seen {
+			continue
+		}
+		processed[sid] = struct{}{}
+		if err := s.refreshTokenRepo.RevokeTokensBySession(ctx, sid, "password_added"); err != nil {
+			complete = false
+			if s.logger != nil {
+				s.logger.Warn("auth: revoke orphan refresh credentials failed",
+					slog.String("session_uuid", sid), slog.String("error", err.Error()))
+			}
+		}
+		if s.sessionRevocation == nil {
+			complete = false
+			continue
+		}
+		if err := s.sessionRevocation.Revoke(ctx, sid, "password_added"); err != nil {
+			complete = false
+			if s.logger != nil {
+				s.logger.Warn("auth: revoke orphan session sid failed",
+					slog.String("session_uuid", sid), slog.String("error", err.Error()))
+			}
+		}
+	}
+	return complete
 }
 
 // ChangePassword updates the password for an authenticated user who

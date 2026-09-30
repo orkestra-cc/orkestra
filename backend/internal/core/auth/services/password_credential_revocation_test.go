@@ -48,6 +48,9 @@ type revocationRefreshRepo struct {
 	byUserErr      error
 	bySessionErr   error
 	reasons        []string
+	tokens         []*authModels.RefreshTokenDoc
+	listErr        error
+	sessionErrors  map[string]error
 }
 
 func (r *revocationRefreshRepo) RevokeTokensByUser(_ context.Context, userUUID, reason string) error {
@@ -55,6 +58,14 @@ func (r *revocationRefreshRepo) RevokeTokensByUser(_ context.Context, userUUID, 
 	defer r.mu.Unlock()
 	r.revokedByUser = append(r.revokedByUser, userUUID)
 	r.reasons = append(r.reasons, reason)
+	if r.byUserErr == nil {
+		for _, token := range r.tokens {
+			if token.UserUUID == userUUID {
+				token.IsRevoked = true
+				token.RevokedReason = reason
+			}
+		}
+	}
 	return r.byUserErr
 }
 
@@ -63,7 +74,35 @@ func (r *revocationRefreshRepo) RevokeTokensBySession(_ context.Context, session
 	defer r.mu.Unlock()
 	r.revokedBySess = append(r.revokedBySess, sessionUUID)
 	r.reasons = append(r.reasons, reason)
-	return r.bySessionErr
+	if err := r.sessionErrors[sessionUUID]; err != nil {
+		return err
+	}
+	if r.bySessionErr != nil {
+		return r.bySessionErr
+	}
+	for _, token := range r.tokens {
+		if token.SessionUUID == sessionUUID {
+			token.IsRevoked = true
+			token.RevokedReason = reason
+		}
+	}
+	return nil
+}
+
+func (r *revocationRefreshRepo) GetActiveTokensByUser(_ context.Context, userUUID string) ([]*authModels.RefreshTokenDoc, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	var tokens []*authModels.RefreshTokenDoc
+	for _, token := range r.tokens {
+		if token.UserUUID == userUUID && !token.IsRevoked && token.ExpiresAt.After(time.Now()) {
+			cp := *token
+			tokens = append(tokens, &cp)
+		}
+	}
+	return tokens, nil
 }
 
 func (r *revocationRefreshRepo) CreateRefreshToken(_ context.Context, doc *authModels.RefreshTokenDoc) error {
@@ -105,12 +144,17 @@ type failingCredentialSessions struct {
 
 type credentialSIDRevocation struct {
 	*fakeSessionRevocation
-	reasons []string
+	reasons   []string
+	sidErrors map[string]error
 }
 
 func (r *credentialSIDRevocation) Revoke(ctx context.Context, sid, reason string) error {
 	r.reasons = append(r.reasons, reason)
-	return r.fakeSessionRevocation.Revoke(ctx, sid, reason)
+	err := r.fakeSessionRevocation.Revoke(ctx, sid, reason)
+	if sidErr := r.sidErrors[sid]; sidErr != nil {
+		return sidErr
+	}
+	return err
 }
 
 func (r *failingCredentialSessions) GetActiveSessionsByUser(ctx context.Context, userUUID string) ([]*authModels.AuthSessionDoc, error) {

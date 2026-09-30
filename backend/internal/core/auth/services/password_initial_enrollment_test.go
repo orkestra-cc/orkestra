@@ -235,3 +235,100 @@ func TestSetInitialPassword_MissingTeardownDependencyIsIncomplete(t *testing.T) 
 		})
 	}
 }
+
+func TestSetInitialPassword_RevokesOrphanRefreshCredentialsAndPreservesCaller(t *testing.T) {
+	e := newInitialPasswordEnv(t)
+	current := &authModels.RefreshTokenDoc{UserUUID: e.user.UUID, SessionUUID: "sess-caller", ExpiresAt: time.Now().Add(time.Hour)}
+	orphan := &authModels.RefreshTokenDoc{UserUUID: e.user.UUID, SessionUUID: "orphan-sid", ExpiresAt: time.Now().Add(time.Hour)}
+	duplicate := *orphan
+	foreign := &authModels.RefreshTokenDoc{UserUUID: "other-user", SessionUUID: "foreign-sid", ExpiresAt: time.Now().Add(time.Hour)}
+	e.refresh.tokens = []*authModels.RefreshTokenDoc{current, orphan, &duplicate, foreign}
+	if err := e.svc.SetInitialPassword(context.Background(), SetInitialPasswordInput{UserUUID: e.user.UUID, CurrentSID: "sess-caller", New: "new-password-passphrase"}); err != nil {
+		t.Fatal(err)
+	}
+	if !orphan.IsRevoked || !duplicate.IsRevoked || orphan.RevokedReason != "password_added" {
+		t.Fatal("active orphan refresh credentials survived initial password enrollment")
+	}
+	if current.IsRevoked || foreign.IsRevoked || contains(e.revoker.revokedList(), "sess-caller") || contains(e.revoker.revokedList(), "foreign-sid") {
+		t.Fatal("caller and other user's credentials must survive")
+	}
+	_, bySession := e.refresh.snapshot()
+	for _, calls := range [][]string{bySession, e.revoker.revokedList()} {
+		count := 0
+		for _, sid := range calls {
+			if sid == "orphan-sid" {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("orphan SID must be revoked once, calls=%v", calls)
+		}
+	}
+	md := e.events.rows[0].Metadata
+	if md["otherSessionsRevoked"] != 2 || md["teardownComplete"] != true {
+		t.Fatalf("orphan refresh-only SID must not inflate session count: %v", md)
+	}
+}
+
+func TestSetInitialPassword_OrphanRefreshTeardownFailureIsIncomplete(t *testing.T) {
+	for _, stage := range []string{"list", "refresh", "sid"} {
+		t.Run(stage, func(t *testing.T) {
+			e := newInitialPasswordEnv(t)
+			first := &authModels.RefreshTokenDoc{UserUUID: e.user.UUID, SessionUUID: "orphan-one", ExpiresAt: time.Now().Add(time.Hour)}
+			second := &authModels.RefreshTokenDoc{UserUUID: e.user.UUID, SessionUUID: "orphan-two", ExpiresAt: time.Now().Add(time.Hour)}
+			e.refresh.tokens = []*authModels.RefreshTokenDoc{first, second}
+			outage := errors.New("injected orphan teardown failure")
+			switch stage {
+			case "list":
+				e.refresh.listErr = outage
+			case "refresh":
+				e.refresh.sessionErrors = map[string]error{"orphan-one": outage}
+			case "sid":
+				e.revoker.sidErrors = map[string]error{"orphan-one": outage}
+			}
+			if err := e.svc.SetInitialPassword(context.Background(), SetInitialPasswordInput{UserUUID: e.user.UUID, CurrentSID: "sess-caller", New: "new-password-passphrase"}); err != nil {
+				t.Fatal("persisted password must still report success", err)
+			}
+			md := e.events.rows[0].Metadata
+			if md["teardownComplete"] != false || md["otherSessionsRevoked"] != 2 {
+				t.Fatalf("failure must preserve conservative count and status: %v", md)
+			}
+			if stage != "list" && (!second.IsRevoked || !contains(e.revoker.revokedList(), "orphan-one") || !contains(e.revoker.revokedList(), "orphan-two")) {
+				t.Fatal("failure must not stop SID denial or later orphan refresh teardown")
+			}
+		})
+	}
+}
+
+func TestSetInitialPassword_DoesNotRetryAlreadyProcessedSessionSIDs(t *testing.T) {
+	e := newInitialPasswordEnv(t)
+	e.refresh.tokens = []*authModels.RefreshTokenDoc{{UserUUID: e.user.UUID, SessionUUID: "sess-other", ExpiresAt: time.Now().Add(time.Hour)}}
+	e.refresh.sessionErrors = map[string]error{"sess-other": errors.New("refresh outage")}
+	if err := e.svc.SetInitialPassword(context.Background(), SetInitialPasswordInput{UserUUID: e.user.UUID, CurrentSID: "sess-caller", New: "new-password-passphrase"}); err != nil {
+		t.Fatal(err)
+	}
+	_, bySession := e.refresh.snapshot()
+	if len(bySession) != 2 || len(e.revoker.revokedList()) != 2 {
+		t.Fatal("already processed session SIDs must not be revoked again")
+	}
+	md := e.events.rows[0].Metadata
+	if md["otherSessionsRevoked"] != 1 || md["teardownComplete"] != false {
+		t.Fatalf("failed session teardown must retain its conservative result: %v", md)
+	}
+}
+
+func TestSetInitialPassword_EmptyCurrentSIDAlsoDeniesOrphanSID(t *testing.T) {
+	e := newInitialPasswordEnv(t)
+	orphan := &authModels.RefreshTokenDoc{UserUUID: e.user.UUID, SessionUUID: "orphan-sid", ExpiresAt: time.Now().Add(time.Hour)}
+	e.refresh.tokens = []*authModels.RefreshTokenDoc{orphan}
+	if err := e.svc.SetInitialPassword(context.Background(), SetInitialPasswordInput{UserUUID: e.user.UUID, New: "new-password-passphrase"}); err != nil {
+		t.Fatal(err)
+	}
+	if !orphan.IsRevoked || !contains(e.revoker.revokedList(), "orphan-sid") {
+		t.Fatal("empty caller SID must revoke orphan refresh credentials and deny its access-token SID")
+	}
+	md := e.events.rows[0].Metadata
+	if md["otherSessionsRevoked"] != 3 || md["teardownComplete"] != true {
+		t.Fatalf("all real sessions must count while orphan SID does not: %v", md)
+	}
+}
