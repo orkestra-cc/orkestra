@@ -5,6 +5,7 @@ Brainstorming del 2026-09-29 con Salvatore, dopo un'analisi del logging su
 tutto lo stack. **Revisione 2** dello stesso giorno, dopo la review GDPR/ISO
 `tmp/compliance-policy-engine-gdpr-iso27001-review.md` e le sezioni R1–R3
 approvate in conversazione.
+**Allineata alla T2** il 2026-09-30 (piano `docs/superpowers/plans/2026-09-30-compliance-t2-motore-di-policy.md`, sezione «Deviazioni dalla spec»).
 
 ## Obiettivo
 
@@ -316,7 +317,11 @@ Ogni salvataggio e `POST …/policies/validate` restituiscono `errors[]` e
 | Codice | Condizione |
 |---|---|
 | `less_restrictive_than_platform` | policy di tenant meno restrittiva della piattaforma (contenuto o retention più lunga) |
+| `less_restrictive_than_current` | un'assegnazione, un cambio di assegnazione, una rimozione o una modifica rende la policy effettiva di un tenant meno restrittiva di quella attuale |
 | `retention_longer_than_default` | una classe oltre il suo default |
+| `retention_shorter_than_default` | una classe sotto il suo default: le evidenze di audit scadrebbero prima |
+| `sink_retention_longer_than_default` | un valore di sink (§5.1) oltre il suo default |
+| `external_sink_changed` | un sink esterno aggiunto o modificato rispetto alla policy di piattaforma attuale (GDPR art. 28 e 44) |
 | `ip_full` | `ipAddress=full` |
 | `review_overdue` | `accountability.reviewDueAt` nel passato o vuota |
 | `accountability_incomplete` | `roPARef` o `assessmentRef` vuoti |
@@ -339,7 +344,7 @@ type PolicyChangeRequest struct {
     Kind            string // create | update | assign | unassign | shorten_existing
     PolicyUUID      string
     TenantID        string
-    Payload         bson.Raw // la modifica richiesta, nel formato dell'API
+    Payload         ChangePayload // policy (create/update) oppure tenant e policy (assign/unassign), con l'assegnazione precedente
     ExpectedVersion int
     Warnings        []string
     Reason          string
@@ -359,6 +364,13 @@ type PolicyChangeRequest struct {
 - Le richieste `pending` scadono dopo 14 giorni (`expired`).
 - Le modifiche **senza avvisi** si applicano subito, come prima.
 - Autore, approvatore, esito e nota finiscono nell'audit e nell'export.
+- Allineamento T2: non esiste il tipo di richiesta `delete` (una policy si
+  cancella solo se non è assegnata, quindi senza avvisi e subito, con
+  motivazione e audit; la versione di cancellazione resta in
+  `compliance_policy_versions` con `changeKind: "delete"`); `shorten_existing`
+  arriva con la T4. Fino alla T3 l'audit delle modifiche passa dall'`AuditSink`
+  dopo il commit (best effort); versioni e storico, scritti in transazione,
+  sono la traccia durevole.
 
 ## 2. Log operativi e trace
 
@@ -758,6 +770,7 @@ Tier-1 operatore, sotto `/v1/admin/compliance/`:
 | `GET retention-classes` | `policy.read` | catalogo di §1.3 |
 | `POST policies`, `PUT policies/{id}`, `DELETE policies/{id}` | `policy.manage` + step-up | `PUT` con `expectedVersion`; con avvisi e quattro occhi attivo rispondono **202** con la richiesta creata |
 | `GET policy-assignments`, `PUT/DELETE policy-assignments/{tenantId}` | read / manage + step-up | come sopra per i 202 |
+| `POST policy-assignments/{tenantId}/validate` | `policy.read` | avvisi di un'assegnazione (o della rimozione) prima di confermarla |
 | `POST policies/{id}/retention/shorten` | `policy.manage` + step-up | `{class, tenantId?, reason, acknowledgeWarnings}` (§4.2) |
 | `GET change-requests`, `GET change-requests/{id}` | `policy.read` | filtro per stato |
 | `POST change-requests/{id}/approve`, `…/reject` | `policy.manage` + step-up | approvatore ≠ autore; nota obbligatoria |
@@ -787,7 +800,9 @@ Codici errore (`internal/shared/errcode`, con golden):
 `…change_request_not_pending`, `…change_request_self_approval` (409),
 `…policy_invalid`, `…policy_warnings_unacknowledged`,
 `…policy_reason_required`, `…policy_period_invalid` (422),
-`…evidence_signing_unavailable` (503).
+`…evidence_signing_unavailable` (503), `compliance.change_request_not_found`,
+`compliance.tenant_not_found` (404), `compliance.policy_unavailable` (503),
+`compliance.policy_persistence_failed` (500).
 
 ## 8. Console (frontend-admin)
 
@@ -816,7 +831,9 @@ Codici errore (`internal/shared/errcode`, con golden):
 
 ## 9. Monitoraggio e allarmi
 
-**Metriche Prometheus** (senza tenant né utente nelle label, ADR-0002):
+**Metriche Prometheus** (senza tenant né utente nelle label, ADR-0002).
+Il collector usa il namespace `orkestra`: il nome esposto è `orkestra_`
+seguito dal nome della tabella (es. `orkestra_compliance_log_masking_panics_total`).
 
 | Metrica | Significato |
 |---|---|
@@ -824,7 +841,7 @@ Codici errore (`internal/shared/errcode`, con golden):
 | `compliance_audit_spool_events`, `…_spool_retries_total`, `…_dead_letter_events` | stato dello spool |
 | `compliance_audit_metadata_dropped_total{action}`, `…_unknown_action_total{action}` | allowlist |
 | `compliance_log_masking_panics_total` | panic recuperati nel mascheramento di log e trace |
-| `compliance_policy_snapshot_age_seconds` | età dell'ultima istantanea valida |
+| `compliance_policy_snapshot_age_seconds` | età dell'ultima istantanea valida; finché nessuna istantanea è stata caricata, il tempo dall'avvio (l'allarme scatta anche con Mongo giù al boot) |
 | `compliance_retention_backlog`, `compliance_retention_run_failures_total` | job di retention |
 | `compliance_audit_chain_broken` (0/1) | esito dell'ultima verifica |
 | `compliance_sink_violation{sink}` (0/1), `compliance_sink_report_age_seconds{sink}` | verifica dei sink |

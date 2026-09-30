@@ -83,7 +83,7 @@ Every core module has **two** docs: the in-repo `AGENTS.md` is the AI-facing *co
 | **auth**         | Email/password (argon2id) + OAuth 2.1, MFA + passkeys, JWT, sessions, service accounts     | [AGENTS.md](backend/internal/core/auth/AGENTS.md) | [auth](docs/site/modules/core/auth.mdx) |
 | **navigation**   | Dynamic menu from module NavItems + persisted reorder via `/admin/modules/navigation`      | [AGENTS.md](backend/internal/core/navigation/AGENTS.md) | [navigation](docs/site/modules/core/navigation.mdx) |
 | **logging**      | Tier-1 runtime logging workspace: permanent levels, expiring diagnostics, bounded preview  | [AGENTS.md](backend/internal/core/logging/AGENTS.md) | [logging](docs/site/modules/core/logging.mdx) |
-| **compliance**   | Audit trail + GDPR DSR, per-tenant KMS crypto-shred, legal hold, retention, SOC2 (ADR-0009) | [AGENTS.md](backend/internal/core/compliance/AGENTS.md) | [compliance](docs/site/modules/core/compliance.mdx) |
+| **compliance**   | Audit trail + GDPR DSR, per-tenant KMS crypto-shred, legal hold, retention, SOC2, compliance policy engine with four-eyes changes (ADR-0009) | [AGENTS.md](backend/internal/core/compliance/AGENTS.md) | [compliance](docs/site/modules/core/compliance.mdx) |
 
 Load order (topologically sorted by `Dependencies()`): `user` → `notification` → `tenant` → `authz` → `auth` → `navigation` → `logging` → `compliance`. Auth depends on notification (optional at runtime) so it can deliver verification and password-reset emails; `logging` has no declared dependencies; `compliance` (ADR-0009, always-on) depends on `user`/`auth`/`tenant` so it resolves the PII-producer registry + audit sink after they init.
 

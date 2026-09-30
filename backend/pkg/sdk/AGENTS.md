@@ -190,6 +190,12 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   `mapAdminInviterError`, `auth/handlers/self_user_auth_handler.go`
   `mapSelfAuthError`, which turn a 404 into a 500). Every one of them
   classifies by identity with `errors.Is` — never by message.
+  `iface.ErrTenantNotFound` is the same pattern for `TenantProvider.GetTenant`:
+  the tenant module wraps it (beside its own `repository.ErrNotFound`) when no
+  live tenant has the UUID, and the compliance policy engine matches it with
+  `errors.Is` to answer `404 compliance.tenant_not_found` instead of a 500. A
+  `TenantProvider` implementation — a fork's included — MUST return or wrap it
+  for a missing tenant.
 - **Encryption helpers live here, not via `shared/utils`.** The SDK has
   its own `secrets.go` reading `OAUTH_TOKEN_ENCRYPTION_KEY` — the
   algorithm matches `internal/shared/utils.{Encrypt,Decrypt}OAuthToken`

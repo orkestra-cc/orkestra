@@ -113,8 +113,10 @@ The service implements both `utils.LevelResolver` (consumed by `PerModuleLevelHa
   `slog` chain. Secrets are always masked; IP,
   user agent, user ids, personal-data keys and free text follow the
   compliance policy of the record's tenant. A record without a tenant gets
-  the strictest policy in force. Until the compliance module provides the
-  live policy (T2), the platform defaults apply.
+  the strictest policy in force. The compliance module's `PolicyService` is
+  the live resolver (swapped in by main.go after InitAll); before its first
+  snapshot the platform defaults apply. A recovered masking panic is counted
+  by `orkestra_compliance_log_masking_panics_total`.
 - Free-text IBAN detection requires the ISO 13616 mod-97 checksum only for
   candidates made entirely of hex characters (the shape a 32-hex trace id
   shares with an IBAN); every other IBAN-shaped match is masked whatever its
@@ -125,7 +127,12 @@ The service implements both `utils.LevelResolver` (consumed by `PerModuleLevelHa
 - Values are scanned whatever their static type: named string types, `[]byte`
   and `json.RawMessage` as text, map keys as free text (key rules still apply
   to the value under its raw key), `LogValuer`s inside containers resolved.
-  Keys found inside values never enter the key-classification cache.
+  Keys found inside values never enter the key-classification cache. Map keys
+  are rendered as text only for string, bool, integer and float kinds (a key
+  that is a `slog.LogValuer` is resolved first); a map with any other key kind
+  is replaced whole by `[REDACTED]`, because printing such a key would carry
+  every field of it into the log. Free text longer than 32 KiB is cut at the
+  last whitespace before the limit and marked `[TRUNCATED]`.
 - `utils.SwapLogPolicyResolver` reaches the handler of every `SetupLogger`
   call (main.go calls it twice) and of any later one.
 - `http_request` logs the chi route template (`route`), not the raw path;
@@ -139,10 +146,12 @@ The service implements both `utils.LevelResolver` (consumed by `PerModuleLevelHa
   the IP rule.
 - `make backend-logscope` rejects new values of a type the masker does not
   scan (an allowlist: string kinds, byte slices, errors, `LogValuer`s, basic
-  numbers/booleans/times, maps with string keys, slices of those; everything
-  else, structs first, is flagged) and secret-looking keys with dynamic
-  values, both in `slog.Any` and in the key/value form (`slog.Info("m", "k",
-  v)`, `With`, `Log`, `Group`); a package that fails to load fails the gate.
+  numbers/booleans/times, maps with string, bool, integer or float keys,
+  slices of those; everything else, structs first, is flagged) and
+  secret-looking keys with dynamic values, both in `slog.Any` and in the
+  key/value form (`slog.Info("m", "k", v)`, `With`, `Log`, `Group`). Keyless
+  values (logged by slog under `!BADKEY`) and attributes with a computed key
+  are checked too. A package that fails to load fails the gate.
   Pre-existing findings are in `tools/logscope/baseline.txt`.
 - Log masking overhead budget is ≤ 2 µs per record over a plain JSON handler
   (10 attrs, no free-text scan), measured by `BenchmarkPolicyHandler_TenAttrs`

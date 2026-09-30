@@ -55,5 +55,12 @@ compliance policy of the tenant the record belongs to: kept, truncated,
 pseudonymised with a keyed hash, or removed. Records that belong to no
 tenant get the strictest policy in force.
 
+Operators choose the policy per tenant in **Compliance → Policies**. Free text
+longer than 32 KiB is cut at a word boundary and marked `[TRUNCATED]`. A map
+whose keys are not plain strings, booleans or numbers is replaced whole by
+`[REDACTED]`. A masking failure never drops the record: the value becomes
+`[REDACTED:error]` and the `orkestra_compliance_log_masking_panics_total`
+counter goes up.
+
 The `http_request` line identifies the endpoint by its route template
 (`/v1/admin/users/{id}`), or the masked raw path when no route matched.
