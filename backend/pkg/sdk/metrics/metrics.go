@@ -132,6 +132,7 @@ type Collector struct {
 	authzCacheInvalidationFailures prometheus.Counter
 	authzCacheInvalidationRefusals prometheus.Counter
 	logMaskingPanics               prometheus.Counter
+	compliancePolicySnapshotAge    prometheus.Gauge
 	tokenSweepBacklog              *prometheus.GaugeVec
 	tokenSweepDuration             *prometheus.HistogramVec
 
@@ -342,6 +343,15 @@ func (c *Collector) buildMetrics() {
 			Subsystem: "compliance",
 			Name:      "log_masking_panics_total",
 			Help:      "Recovered panics while masking a log or span attribute; the value was written as [REDACTED:error]. Unlabelled by design (ADR-0002).",
+		},
+	)
+
+	c.compliancePolicySnapshotAge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "orkestra",
+			Subsystem: "compliance",
+			Name:      "policy_snapshot_age_seconds",
+			Help:      "Seconds since the compliance policy snapshot was last loaded from MongoDB. It grows while refreshes fail; the last snapshot stays in force meanwhile. Unlabelled by design (ADR-0002).",
 		},
 	)
 
@@ -774,3 +784,9 @@ func Default() *Collector {
 // RecordLogMaskingPanic counts one recovered panic in the compliance log /
 // span masker (compliance spec §9).
 func (c *Collector) RecordLogMaskingPanic() { c.logMaskingPanics.Inc() }
+
+// SetCompliancePolicySnapshotAge records the age of the compliance policy
+// snapshot (compliance spec §9).
+func (c *Collector) SetCompliancePolicySnapshotAge(seconds float64) {
+	c.compliancePolicySnapshotAge.Set(seconds)
+}
