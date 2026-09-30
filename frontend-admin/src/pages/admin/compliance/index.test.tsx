@@ -407,4 +407,106 @@ describe('CompliancePage', () => {
     expect(dialog.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
     expect(dialog.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
   });
+
+  // Four eyes (ISO A.5.3): the author of a request must never be offered the
+  // decision on it. The default test store has no auth.user, so this needs an
+  // authenticated operator whose id equals the request's requestedBy.
+  const operatorState = (id: string) => ({
+    auth: {
+      user: {
+        id,
+        email: 'op@example.com',
+        username: 'op',
+        fullName: 'Operator',
+        role: 'administrator',
+        isActive: true,
+        emailVerified: true,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z'
+      },
+      isAuthenticated: true,
+      isLoading: false,
+      error: null,
+      sessionExpiry: null,
+      permissions: [] as string[],
+      preferences: {
+        theme: 'light' as const,
+        language: 'en',
+        notifications: true
+      },
+      _isLoggingOut: false,
+      accessToken: 'test-token',
+      tokenExpiry: null
+    }
+  });
+
+  const openPendingRequest = async (id?: string) => {
+    stubReads();
+    renderWithProviders(<CompliancePage />, {
+      routerEntries: ['/?tab=changes'],
+      preloadedState: id ? operatorState(id) : undefined
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Details' }));
+    const dialog = within(await screen.findByRole('dialog'));
+    return { user, dialog };
+  };
+
+  it('hides the decision buttons from the author of the request', async () => {
+    const { dialog } = await openPendingRequest('someone-else');
+
+    expect(
+      dialog.getByText(
+        'You made this request: another operator must decide it.'
+      )
+    ).toBeInTheDocument();
+    expect(
+      dialog.queryByRole('button', { name: 'Approve' })
+    ).not.toBeInTheDocument();
+    expect(
+      dialog.queryByRole('button', { name: 'Reject' })
+    ).not.toBeInTheDocument();
+    expect(dialog.queryByLabelText('Decision note')).not.toBeInTheDocument();
+  });
+
+  it('does not approve without a decision note', async () => {
+    let approveHits = 0;
+    server.use(
+      http.post(
+        url('/v1/admin/compliance/change-requests/cr-1/approve'),
+        () => {
+          approveHits++;
+          return HttpResponse.json({});
+        }
+      )
+    );
+    const { user, dialog } = await openPendingRequest('another-operator');
+
+    await user.click(dialog.getByRole('button', { name: 'Approve' }));
+
+    expect(
+      await dialog.findByText('A reason of 1 to 500 characters is required.')
+    ).toBeInTheDocument();
+    expect(approveHits).toBe(0);
+  });
+
+  it('approves with the typed note as the request body', async () => {
+    let approveBody: unknown = null;
+    server.use(
+      http.post(
+        url('/v1/admin/compliance/change-requests/cr-1/approve'),
+        async ({ request }) => {
+          approveBody = await request.json();
+          return HttpResponse.json({});
+        }
+      )
+    );
+    const { user, dialog } = await openPendingRequest('another-operator');
+
+    await user.type(dialog.getByLabelText('Decision note'), 'Checked with DPO');
+    await user.click(dialog.getByRole('button', { name: 'Approve' }));
+
+    await waitFor(() => expect(approveBody).not.toBeNull());
+    expect(approveBody).toEqual({ note: 'Checked with DPO' });
+  });
 });
