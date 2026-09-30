@@ -131,6 +131,8 @@ type Collector struct {
 	tokenSweepDeleted              *prometheus.CounterVec
 	authzCacheInvalidationFailures prometheus.Counter
 	authzCacheInvalidationRefusals prometheus.Counter
+	logMaskingPanics               prometheus.Counter
+	compliancePolicySnapshotAge    prometheus.Gauge
 	tokenSweepBacklog              *prometheus.GaugeVec
 	tokenSweepDuration             *prometheus.HistogramVec
 
@@ -335,6 +337,24 @@ func (c *Collector) buildMetrics() {
 		},
 	)
 
+	c.logMaskingPanics = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "compliance",
+			Name:      "log_masking_panics_total",
+			Help:      "Recovered panics while masking a log or span attribute; the value was written as [REDACTED:error]. Unlabelled by design (ADR-0002).",
+		},
+	)
+
+	c.compliancePolicySnapshotAge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "orkestra",
+			Subsystem: "compliance",
+			Name:      "policy_snapshot_age_seconds",
+			Help:      "Seconds since the compliance policy snapshot was last loaded from MongoDB. It grows while refreshes fail; the last snapshot stays in force meanwhile. Unlabelled by design (ADR-0002).",
+		},
+	)
+
 	c.entitlementLag = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "orkestra",
@@ -382,7 +402,7 @@ func (c *Collector) Register() error {
 	if !atomic.CompareAndSwapUint32(&c.registered, 0, 1) {
 		return nil
 	}
-	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.sessionAnchorAnomalies, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped, c.authzCacheInvalidationFailures, c.authzCacheInvalidationRefusals} {
+	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.sessionAnchorAnomalies, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped, c.authzCacheInvalidationFailures, c.authzCacheInvalidationRefusals, c.logMaskingPanics, c.compliancePolicySnapshotAge} {
 		if err := c.registry.Register(m); err != nil {
 			// rollback so the caller can retry with a fresh collector
 			atomic.StoreUint32(&c.registered, 0)
@@ -759,4 +779,14 @@ func Default() *Collector {
 		defaultCollector = NewCollector()
 	})
 	return defaultCollector
+}
+
+// RecordLogMaskingPanic counts one recovered panic in the compliance log /
+// span masker (compliance spec §9).
+func (c *Collector) RecordLogMaskingPanic() { c.logMaskingPanics.Inc() }
+
+// SetCompliancePolicySnapshotAge records the age of the compliance policy
+// snapshot (compliance spec §9).
+func (c *Collector) SetCompliancePolicySnapshotAge(seconds float64) {
+	c.compliancePolicySnapshotAge.Set(seconds)
 }

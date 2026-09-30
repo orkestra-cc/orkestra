@@ -655,6 +655,12 @@ type TenantMembership struct {
 	IsOwner    bool
 }
 
+// ErrTenantNotFound is wrapped by TenantProvider.GetTenant when no live
+// tenant has the UUID, so a consumer can tell "no such tenant" (a 404 for
+// its caller) from an infrastructure failure (a 5xx) without importing the
+// tenant module.
+var ErrTenantNotFound = errors.New("tenant not found")
+
 type TenantProvider interface {
 	GetTenant(ctx context.Context, tenantUUID string) (*Tenant, error)
 	ListUserMemberships(ctx context.Context, userUUID string) ([]TenantMembership, error)

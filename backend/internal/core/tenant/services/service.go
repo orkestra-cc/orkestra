@@ -268,6 +268,9 @@ func (s *Service) resolveDefaultActor(ctx context.Context, actorUUID string) (us
 
 func (s *Service) GetTenant(ctx context.Context, tenantUUID string) (*iface.Tenant, error) {
 	t, err := s.repo.GetTenantByUUID(ctx, tenantUUID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, fmt.Errorf("%w: %w", iface.ErrTenantNotFound, err)
+	}
 	if err != nil {
 		return nil, err
 	}

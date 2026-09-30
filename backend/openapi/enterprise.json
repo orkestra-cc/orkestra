@@ -196,6 +196,37 @@
         ],
         "type": "object"
       },
+      "Accountability": {
+        "additionalProperties": false,
+        "properties": {
+          "assessmentRef": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "owner": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "reviewDueAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "ropaRef": {
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "ropaRef",
+          "assessmentRef",
+          "owner"
+        ],
+        "type": "object"
+      },
       "AdminClientUserItem": {
         "additionalProperties": false,
         "properties": {
@@ -994,6 +1025,73 @@
         ],
         "type": "object"
       },
+      "AssignPolicyInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AssignPolicyInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "acknowledgeWarnings": {
+            "type": "boolean"
+          },
+          "policyId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "policyId",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "AssignmentView": {
+        "additionalProperties": false,
+        "properties": {
+          "assignedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "assignedBy": {
+            "type": "string"
+          },
+          "policyName": {
+            "type": "string"
+          },
+          "policyUuid": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "tenantKind": {
+            "type": "string"
+          },
+          "tenantName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenantId",
+          "tenantKind",
+          "policyUuid",
+          "assignedBy",
+          "assignedAt",
+          "reason"
+        ],
+        "type": "object"
+      },
       "AttachMemberAdminInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -1200,6 +1298,24 @@
         ],
         "type": "object"
       },
+      "BackupsSink": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "minKeep": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "days",
+          "minKeep"
+        ],
+        "type": "object"
+      },
       "Badge": {
         "additionalProperties": false,
         "properties": {
@@ -1362,6 +1478,118 @@
         "required": [
           "currentPassword",
           "newPassword"
+        ],
+        "type": "object"
+      },
+      "ChangePayload": {
+        "additionalProperties": false,
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/PolicyInput"
+          },
+          "policyUuid": {
+            "type": "string"
+          },
+          "previousPolicyUuid": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Class": {
+        "additionalProperties": false,
+        "properties": {
+          "defaultDays": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "events": {
+            "type": "string"
+          },
+          "hardMinimum": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "legalBasis": {
+            "type": "string"
+          },
+          "minDays": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "tenantSettable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "events",
+          "purpose",
+          "legalBasis",
+          "minDays",
+          "hardMinimum",
+          "defaultDays",
+          "tenantSettable"
+        ],
+        "type": "object"
+      },
+      "ClientPolicySummary": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ClientPolicySummary.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "ipAddress": {
+            "type": "string"
+          },
+          "retention": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "description": "Configured retention in days per tenant-settable class. These are the values set by the policy; they are not yet applied to stored audit events (see retentionEnforced).",
+            "type": "object"
+          },
+          "retentionEnforced": {
+            "description": "False while the configured retention is not yet applied to stored audit events.",
+            "type": "boolean"
+          },
+          "subjectIds": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "userAgent": {
+            "type": "string"
+          },
+          "validFrom": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenantId",
+          "ipAddress",
+          "userAgent",
+          "subjectIds",
+          "retention",
+          "retentionEnforced",
+          "validFrom"
         ],
         "type": "object"
       },
@@ -1586,6 +1814,24 @@
         },
         "type": "object"
       },
+      "ContainerLogsSink": {
+        "additionalProperties": false,
+        "properties": {
+          "maxFiles": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "maxSizeMb": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "maxSizeMb",
+          "maxFiles"
+        ],
+        "type": "object"
+      },
       "CreateAdminRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -1745,6 +1991,35 @@
         },
         "required": [
           "name"
+        ],
+        "type": "object"
+      },
+      "CreatePolicyInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CreatePolicyInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "acknowledgeWarnings": {
+            "type": "boolean"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/PolicyInput"
+          },
+          "reason": {
+            "description": "Why the policy is created (1-500 characters)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy",
+          "reason"
         ],
         "type": "object"
       },
@@ -2043,6 +2318,41 @@
         ],
         "type": "object"
       },
+      "DaysSink": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "days"
+        ],
+        "type": "object"
+      },
+      "DecideChangeRequestInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/DecideChangeRequestInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "note": {
+            "description": "Why the request is approved or rejected (1-500 characters)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "type": "object"
+      },
       "DeleteClientUserAdminResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -2061,6 +2371,27 @@
         },
         "required": [
           "message"
+        ],
+        "type": "object"
+      },
+      "DeletePolicyInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/DeletePolicyInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
         ],
         "type": "object"
       },
@@ -2145,6 +2476,48 @@
           "tenantId",
           "permissions",
           "systemRole"
+        ],
+        "type": "object"
+      },
+      "EffectivePolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/EffectivePolicy.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "assignment": {
+            "$ref": "#/components/schemas/PolicyAssignment"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/Policy"
+          },
+          "retention": {
+            "items": {
+              "$ref": "#/components/schemas/RetentionDecision"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenantId",
+          "source",
+          "policy",
+          "retention"
         ],
         "type": "object"
       },
@@ -2479,6 +2852,52 @@
         "required": [
           "bundle",
           "producers"
+        ],
+        "type": "object"
+      },
+      "ExternalSink": {
+        "additionalProperties": false,
+        "properties": {
+          "declaredRetentionDays": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "dpaRef": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 80,
+            "type": "string"
+          },
+          "processor": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "region": {
+            "maxLength": 80,
+            "type": "string"
+          },
+          "reviewDueAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "transferBasis": {
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "processor",
+          "dpaRef",
+          "region",
+          "transferBasis",
+          "declaredRetentionDays"
         ],
         "type": "object"
       },
@@ -3037,6 +3456,33 @@
         ],
         "type": "object"
       },
+      "ListAssignmentsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListAssignmentsOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssignmentView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "ListAuditEventsOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -3076,6 +3522,33 @@
           "total",
           "limit",
           "offset"
+        ],
+        "type": "object"
+      },
+      "ListChangeRequestsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListChangeRequestsOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyChangeRequest"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -3273,6 +3746,33 @@
         ],
         "type": "object"
       },
+      "ListPoliciesOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListPoliciesOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "ListPreferencesResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -3354,6 +3854,33 @@
         ],
         "type": "object"
       },
+      "ListVersionsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListVersionsOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyVersion"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "Location": {
         "additionalProperties": false,
         "properties": {
@@ -3399,6 +3926,40 @@
         },
         "type": "object"
       },
+      "LogContentPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "ipAddress": {
+            "type": "string"
+          },
+          "piiKeys": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "scanFreeText": {
+            "type": "boolean"
+          },
+          "subjectIds": {
+            "type": "string"
+          },
+          "userAgent": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ipAddress",
+          "userAgent",
+          "subjectIds",
+          "piiKeys",
+          "scanFreeText"
+        ],
+        "type": "object"
+      },
       "LogEvent": {
         "additionalProperties": false,
         "properties": {
@@ -3441,6 +4002,24 @@
         },
         "required": [
           "available"
+        ],
+        "type": "object"
+      },
+      "LokiSink": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "warnErrorDays": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "days",
+          "warnErrorDays"
         ],
         "type": "object"
       },
@@ -5001,6 +5580,405 @@
         ],
         "type": "object"
       },
+      "Policy": {
+        "additionalProperties": false,
+        "properties": {
+          "accountability": {
+            "$ref": "#/components/schemas/Accountability"
+          },
+          "changeReason": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "isPlatformDefault": {
+            "type": "boolean"
+          },
+          "logContent": {
+            "$ref": "#/components/schemas/LogContentPolicy"
+          },
+          "name": {
+            "type": "string"
+          },
+          "retention": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "sinks": {
+            "$ref": "#/components/schemas/SinkPolicy"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedBy": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "uuid",
+          "name",
+          "description",
+          "isPlatformDefault",
+          "version",
+          "logContent",
+          "retention",
+          "accountability",
+          "createdBy",
+          "updatedBy",
+          "createdAt",
+          "updatedAt",
+          "changeReason"
+        ],
+        "type": "object"
+      },
+      "PolicyAssignment": {
+        "additionalProperties": false,
+        "properties": {
+          "assignedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "assignedBy": {
+            "type": "string"
+          },
+          "policyUuid": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "tenantKind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenantId",
+          "tenantKind",
+          "policyUuid",
+          "assignedBy",
+          "assignedAt",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "PolicyChangeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PolicyChangeRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "decidedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "decidedBy": {
+            "type": "string"
+          },
+          "decisionNote": {
+            "type": "string"
+          },
+          "expectedVersion": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/ChangePayload"
+          },
+          "policyUuid": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requestedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "requestedBy": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "uuid",
+          "kind",
+          "payload",
+          "expectedVersion",
+          "warnings",
+          "reason",
+          "requestedBy",
+          "requestedAt",
+          "status"
+        ],
+        "type": "object"
+      },
+      "PolicyDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PolicyDetail.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/AssignmentView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "policy": {
+            "$ref": "#/components/schemas/Policy"
+          }
+        },
+        "required": [
+          "policy",
+          "assignments"
+        ],
+        "type": "object"
+      },
+      "PolicyInput": {
+        "additionalProperties": false,
+        "properties": {
+          "accountability": {
+            "$ref": "#/components/schemas/Accountability"
+          },
+          "description": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "logContent": {
+            "$ref": "#/components/schemas/LogContentPolicy"
+          },
+          "name": {
+            "type": "string"
+          },
+          "retention": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "sinks": {
+            "$ref": "#/components/schemas/SinkPolicy"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "logContent",
+          "retention",
+          "accountability"
+        ],
+        "type": "object"
+      },
+      "PolicyIssue": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
+      "PolicyVersion": {
+        "additionalProperties": false,
+        "properties": {
+          "approvedBy": {
+            "type": "string"
+          },
+          "changeKind": {
+            "type": "string"
+          },
+          "changeRequestUuid": {
+            "type": "string"
+          },
+          "changedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "changedBy": {
+            "type": "string"
+          },
+          "policyUuid": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/Policy"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "policyUuid",
+          "version",
+          "changeKind",
+          "snapshot",
+          "changedBy",
+          "changedAt",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "PolicyView": {
+        "additionalProperties": false,
+        "properties": {
+          "accountability": {
+            "$ref": "#/components/schemas/Accountability"
+          },
+          "assignedTenants": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "changeReason": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "isPlatformDefault": {
+            "type": "boolean"
+          },
+          "lessRestrictiveFields": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "logContent": {
+            "$ref": "#/components/schemas/LogContentPolicy"
+          },
+          "name": {
+            "type": "string"
+          },
+          "retention": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "reviewOverdue": {
+            "type": "boolean"
+          },
+          "sinks": {
+            "$ref": "#/components/schemas/SinkPolicy"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedBy": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "assignedTenants",
+          "lessRestrictiveFields",
+          "reviewOverdue",
+          "uuid",
+          "name",
+          "description",
+          "isPlatformDefault",
+          "version",
+          "logContent",
+          "retention",
+          "accountability",
+          "createdBy",
+          "updatedBy",
+          "createdAt",
+          "updatedAt",
+          "changeReason"
+        ],
+        "type": "object"
+      },
       "PreferenceDoc": {
         "additionalProperties": false,
         "properties": {
@@ -5397,6 +6375,59 @@
         "required": [
           "token",
           "newPassword"
+        ],
+        "type": "object"
+      },
+      "RetentionClassesOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/RetentionClassesOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Class"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "RetentionDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "class": {
+            "type": "string"
+          },
+          "days": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "policyUuid": {
+            "type": "string"
+          },
+          "policyVersion": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "class",
+          "policyUuid",
+          "policyVersion",
+          "days"
         ],
         "type": "object"
       },
@@ -6121,6 +7152,66 @@
         ],
         "type": "object"
       },
+      "SinkPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "backups": {
+            "$ref": "#/components/schemas/BackupsSink"
+          },
+          "containerLogs": {
+            "$ref": "#/components/schemas/ContainerLogsSink"
+          },
+          "dsrExportDays": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "external": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalSink"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "loki": {
+            "$ref": "#/components/schemas/LokiSink"
+          },
+          "prometheus": {
+            "$ref": "#/components/schemas/DaysSink"
+          },
+          "spool": {
+            "$ref": "#/components/schemas/SpoolSink"
+          },
+          "tempo": {
+            "$ref": "#/components/schemas/DaysSink"
+          }
+        },
+        "required": [
+          "loki",
+          "tempo",
+          "prometheus",
+          "containerLogs",
+          "backups",
+          "dsrExportDays",
+          "spool",
+          "external"
+        ],
+        "type": "object"
+      },
+      "SpoolSink": {
+        "additionalProperties": false,
+        "properties": {
+          "deadLetterDays": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deadLetterDays"
+        ],
+        "type": "object"
+      },
       "Status": {
         "additionalProperties": false,
         "properties": {
@@ -6653,6 +7744,30 @@
         ],
         "type": "object"
       },
+      "UnassignPolicyInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/UnassignPolicyInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "acknowledgeWarnings": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
       "UnsubscribeResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -6831,6 +7946,40 @@
         },
         "required": [
           "plan"
+        ],
+        "type": "object"
+      },
+      "UpdatePolicyInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/UpdatePolicyInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "acknowledgeWarnings": {
+            "type": "boolean"
+          },
+          "expectedVersion": {
+            "description": "The version the editor started from",
+            "format": "int64",
+            "type": "integer"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/PolicyInput"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "policy",
+          "reason"
         ],
         "type": "object"
       },
@@ -7193,6 +8342,87 @@
           "email",
           "name",
           "email_verified"
+        ],
+        "type": "object"
+      },
+      "ValidateAssignmentInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ValidateAssignmentInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "policyId": {
+            "description": "Policy to assign; empty previews moving the tenant back to the platform policy",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ValidatePolicyInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ValidatePolicyInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/PolicyInput"
+          },
+          "policyId": {
+            "description": "UUID of the policy being edited; empty for a new tenant policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy"
+        ],
+        "type": "object"
+      },
+      "ValidationResult": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ValidationResult.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyIssue"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyIssue"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "errors",
+          "warnings"
         ],
         "type": "object"
       },
@@ -7639,6 +8869,46 @@
           "accessToken",
           "tokenType",
           "expiresIn"
+        ],
+        "type": "object"
+      },
+      "WriteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/WriteResponse.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "applied": {
+            "type": "boolean"
+          },
+          "assignment": {
+            "$ref": "#/components/schemas/PolicyAssignment"
+          },
+          "changeRequest": {
+            "$ref": "#/components/schemas/PolicyChangeRequest"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/Policy"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyIssue"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "applied",
+          "warnings"
         ],
         "type": "object"
       }
@@ -8522,6 +9792,199 @@
         ]
       }
     },
+    "/v1/admin/compliance/change-requests": {
+      "get": {
+        "operationId": "compliance-change-request-list",
+        "parameters": [
+          {
+            "description": "Filter by status; all when empty",
+            "explode": false,
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "description": "Filter by status; all when empty",
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                "superseded",
+                "expired"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListChangeRequestsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List policy change requests",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/change-requests/{id}": {
+      "get": {
+        "operationId": "compliance-change-request-get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyChangeRequest"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get a policy change request",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/change-requests/{id}/approve": {
+      "post": {
+        "operationId": "compliance-change-request-approve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideChangeRequestInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Approve a policy change request",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/change-requests/{id}/reject": {
+      "post": {
+        "operationId": "compliance-change-request-reject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideChangeRequestInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyChangeRequest"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Reject a policy change request",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
     "/v1/admin/compliance/erasure-requests": {
       "get": {
         "operationId": "compliance-erasure-requests-list",
@@ -8769,6 +10232,601 @@
           }
         },
         "summary": "Release a legal hold",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/policies": {
+      "get": {
+        "operationId": "compliance-policy-list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPoliciesOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List compliance policies",
+        "tags": [
+          "Compliance"
+        ]
+      },
+      "post": {
+        "operationId": "compliance-policy-create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePolicyInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
+              }
+            },
+            "description": "Accepted: the change has warnings and four eyes is on, so it was stored as a pending change request (changeRequest) for another operator to approve; nothing was applied."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Create a tenant compliance policy",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/policies/effective": {
+      "get": {
+        "operationId": "compliance-policy-effective",
+        "parameters": [
+          {
+            "description": "Tenant UUID",
+            "explode": false,
+            "in": "query",
+            "name": "tenantId",
+            "required": true,
+            "schema": {
+              "description": "Tenant UUID",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectivePolicy"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Effective compliance policy of a tenant",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/policies/validate": {
+      "post": {
+        "operationId": "compliance-policy-validate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidatePolicyInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Validate a policy draft (errors and warnings)",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/policies/{id}": {
+      "delete": {
+        "operationId": "compliance-policy-delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "expectedVersion",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeletePolicyInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete an unassigned tenant policy",
+        "tags": [
+          "Compliance"
+        ]
+      },
+      "get": {
+        "operationId": "compliance-policy-get",
+        "parameters": [
+          {
+            "description": "Policy UUID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Policy UUID",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyDetail"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get a compliance policy and its tenants",
+        "tags": [
+          "Compliance"
+        ]
+      },
+      "put": {
+        "operationId": "compliance-policy-update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePolicyInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
+              }
+            },
+            "description": "Accepted: the change has warnings and four eyes is on, so it was stored as a pending change request (changeRequest) for another operator to approve; nothing was applied."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Change a compliance policy",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/policies/{id}/versions": {
+      "get": {
+        "operationId": "compliance-policy-versions",
+        "parameters": [
+          {
+            "description": "Policy UUID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Policy UUID",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListVersionsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List the versions of a policy",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/policy-assignments": {
+      "get": {
+        "operationId": "compliance-policy-assignment-list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAssignmentsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List tenant policy assignments",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/policy-assignments/{tenantId}": {
+      "delete": {
+        "operationId": "compliance-policy-unassign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnassignPolicyInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
+              }
+            },
+            "description": "Accepted: the change has warnings and four eyes is on, so it was stored as a pending change request (changeRequest) for another operator to approve; nothing was applied."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Move a tenant back to the platform policy",
+        "tags": [
+          "Compliance"
+        ]
+      },
+      "put": {
+        "operationId": "compliance-policy-assign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignPolicyInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
+              }
+            },
+            "description": "Accepted: the change has warnings and four eyes is on, so it was stored as a pending change request (changeRequest) for another operator to approve; nothing was applied."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Assign a policy to a tenant",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/policy-assignments/{tenantId}/validate": {
+      "post": {
+        "operationId": "compliance-policy-assignment-validate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateAssignmentInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Warnings of assigning a policy to a tenant (or removing it)",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/retention-classes": {
+      "get": {
+        "operationId": "compliance-retention-classes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionClassesOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Retention class catalog",
         "tags": [
           "Compliance"
         ]
@@ -16313,6 +18371,48 @@
         "summary": "Update a role (name/description/permissions for custom roles; isActive for any role)",
         "tags": [
           "Authorization"
+        ]
+      }
+    },
+    "/v1/tenants/{tenantId}/compliance/policy": {
+      "get": {
+        "description": "The log-content rules in force for the tenant and the configured retention per class. The retention days are the configured values: they are not yet applied to stored audit events (retentionEnforced is false until a later stage deletes audit events by class).",
+        "operationId": "tenant-compliance-policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientPolicySummary"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "How the tenant's data is logged and retained",
+        "tags": [
+          "Compliance"
         ]
       }
     },

@@ -60,12 +60,14 @@ Operational logs follow an **allowlist** — only attributes explicitly declared
 The allowlist for request logs is fixed by this ADR:
 
 ```
-method, path, status, duration_ms, bytes, request_id,
+method, route, status, duration_ms, bytes, request_id,
 trace_id, span_id, tenant_id, tenant_kind, user_id, user_role,
 audience, remote, ua, slow
 ```
 
-Notably **not** in the allowlist: `Authorization` header, `Cookie` header, query strings (path is logged with parameters intact since they're part of the OpenAPI surface; the raw query string is dropped), request bodies, response bodies, error messages from upstream services that may carry user input.
+Notably **not** in the allowlist: `Authorization` header, `Cookie` header, query strings (route is the chi route template, e.g. `/v1/admin/users/{id}`, identifying the endpoint; the raw path appears only when no template matched, and the raw query string is dropped), request bodies, response bodies, error messages from upstream services that may carry user input.
+
+> **Amended by the compliance policy engine spec (2026-09-29, T1):** `route` carries the chi template whenever one matched; when none matched (404s, requests outside the router) `path` is logged instead, still masked by the compliance policy.
 
 Module-emitted logs follow the same discipline: `slog.InfoContext(ctx, "msg", slog.String("key", "value"))` only — never `slog.Info("msg", slog.Any("everything", obj))` with user-shaped objects.
 

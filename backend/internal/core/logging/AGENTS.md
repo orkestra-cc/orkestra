@@ -95,7 +95,7 @@ The service implements both `utils.LevelResolver` (consumed by `PerModuleLevelHa
 ## What this module does NOT do
 
 - Loki retention overrides — out of scope for Phase F; reserved as a future amendment.
-- Per-tenant log levels — the threshold is global per module; tenant-scoped filtering happens at query time in Loki via the `tenant_id` field already stamped on every log line.
+- Per-tenant log levels — the threshold is global per module. Tenant-scoped filtering happens at query time in Loki via `tenant_id`, which is present on the `http_request` line (through `ctxauth.RequestAnnotations`) and on the lines where the calling code adds it itself. No handler stamps it on other records: `TraceContextHandler` adds only `trace_id`/`span_id`, and the tenant a `*Context` call carries only selects the masking policy.
 - An unbounded or streaming log console — preview is a small manual/periodic diagnostic aid; full investigation remains in Grafana.
 - Audit-log integration — runtime log-level changes are persisted with `updatedBy`/`updatedAt` but are not pushed through the compliance `AuditSink`. Future work.
 
@@ -104,6 +104,58 @@ The service implements both `utils.LevelResolver` (consumed by `PerModuleLevelHa
 - **Never mutate the snapshot in place.** Always build a new `*snapshot` and `Store` it — readers depend on the immutability invariant.
 - **Never expose the resolver as `services.LogLevelService` to consumers.** The interface boundary is `utils.LevelResolver`; the concrete type can rename without breaking consumers.
 - **Env vars are seed-only.** After first boot, the Mongo doc is authoritative. Setting `LOG_LEVEL_<MODULE>` after the document exists is silently shadowed — surface this in operator-facing docs whenever it changes.
+
+## Compliance masking (compliance spec §2)
+
+- Every `slog` record passes through `utils.PolicyHandler` (after the level
+  gate, before the fan-out to stdout and OTLP). Not masked: chi's
+  `Recoverer` writes recovered panic values and stacks to stderr outside the
+  `slog` chain. Secrets are always masked; IP,
+  user agent, user ids, personal-data keys and free text follow the
+  compliance policy of the record's tenant. A record without a tenant gets
+  the strictest policy in force. The compliance module's `PolicyService` is
+  the live resolver (swapped in by main.go after InitAll); before its first
+  snapshot the platform defaults apply. A recovered masking panic is counted
+  by `orkestra_compliance_log_masking_panics_total`.
+- Free-text IBAN detection requires the ISO 13616 mod-97 checksum only for
+  candidates made entirely of hex characters (the shape a 32-hex trace id
+  shares with an IBAN); every other IBAN-shaped match is masked whatever its
+  checksum, so a mistyped IBAN does not leak. `trace_id`/`span_id` skip the
+  free-text scan only when the value is exactly 32/16 lowercase hex
+  characters; any other value under those keys is scanned. `request_id` is
+  always scanned: chi's `RequestID` copies the client's `X-Request-Id`.
+- Values are scanned whatever their static type: named string types, `[]byte`
+  and `json.RawMessage` as text, map keys as free text (key rules still apply
+  to the value under its raw key), `LogValuer`s inside containers resolved.
+  Keys found inside values never enter the key-classification cache. Map keys
+  are rendered as text only for string, bool, integer and float kinds (a key
+  that is a `slog.LogValuer` is resolved first); a map with any other key kind
+  is replaced whole by `[REDACTED]`, because printing such a key would carry
+  every field of it into the log. Free text longer than 32 KiB is cut at the
+  last whitespace before the limit and marked `[TRUNCATED]`.
+- `utils.SwapLogPolicyResolver` reaches the handler of every `SetupLogger`
+  call (main.go calls it twice) and of any later one.
+- `http_request` logs the chi route template (`route`), not the raw path;
+  `path` appears only when no template matched.
+- Outgoing spans are masked the same way by `telemetry.MaskingExporter`. The
+  RequestLogger stamps `http.route` on the active server span; a span with a
+  route gets the route template as the value of `url.path`/`http.target`. The
+  exporter drops `url.path` and `http.target` when a span has no route (fail
+  closed); `http.url`, `url.full` and `url.query` are never exported;
+  `network.peer.address`, `client.address` and forwarded-for headers follow
+  the IP rule.
+- `make backend-logscope` rejects new values of a type the masker does not
+  scan (an allowlist: string kinds, byte slices, errors, `LogValuer`s, basic
+  numbers/booleans/times, maps with string, bool, integer or float keys,
+  slices of those; everything else, structs first, is flagged) and
+  secret-looking keys with dynamic values, both in `slog.Any` and in the
+  key/value form (`slog.Info("m", "k", v)`, `With`, `Log`, `Group`). Keyless
+  values (logged by slog under `!BADKEY`) and attributes with a computed key
+  are checked too. A package that fails to load fails the gate.
+  Pre-existing findings are in `tools/logscope/baseline.txt`.
+- Log masking overhead budget is ≤ 2 µs per record over a plain JSON handler
+  (10 attrs, no free-text scan), measured by `BenchmarkPolicyHandler_TenAttrs`
+  vs `BenchmarkPlainJSON_TenAttrs` in `internal/shared/utils`.
 
 ## Related
 

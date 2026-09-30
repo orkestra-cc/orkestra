@@ -3,7 +3,7 @@ import { http, HttpResponse } from 'msw';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
 import { url } from 'test/handlers';
-import { complianceApi } from './complianceApi';
+import { complianceApi, type PolicyInput } from './complianceApi';
 
 // These tests exercise the RTK Query slice's request-building in isolation:
 // dispatch an endpoint, let MSW capture the outbound request, and assert the
@@ -110,5 +110,127 @@ describe('complianceApi', () => {
     expect(captured!.path).toBe('/v1/admin/compliance/legal-holds/hold-9');
     expect(captured!.method).toBe('DELETE');
     expect(captured!.body).toEqual({ releaseReason: 'case closed' });
+  });
+
+  it('updatePolicy PUTs the expected version, the policy, the reason and the acknowledgement', async () => {
+    let body: unknown = null;
+    server.use(
+      http.put(
+        url('/v1/admin/compliance/policies/p-1'),
+        async ({ request }) => {
+          body = await request.json();
+          return HttpResponse.json(
+            { applied: false, warnings: [] },
+            { status: 202 }
+          );
+        }
+      )
+    );
+    const { store } = renderWithProviders(<></>);
+    const policy: PolicyInput = {
+      name: 'Strict',
+      description: '',
+      logContent: {
+        ipAddress: 'omitted',
+        userAgent: 'full',
+        subjectIds: 'uuid',
+        piiKeys: ['email'],
+        scanFreeText: true
+      },
+      retention: { privileged_change: 400 },
+      accountability: {
+        role: 'processor',
+        ropaRef: 'R',
+        assessmentRef: 'D',
+        owner: ''
+      }
+    };
+    const res = await store
+      .dispatch(
+        complianceApi.endpoints.updatePolicy.initiate({
+          id: 'p-1',
+          expectedVersion: 3,
+          policy,
+          reason: 'contratto',
+          acknowledgeWarnings: true
+        })
+      )
+      .unwrap();
+    expect(res.applied).toBe(false);
+    expect(body).toEqual({
+      expectedVersion: 3,
+      policy,
+      reason: 'contratto',
+      acknowledgeWarnings: true
+    });
+  });
+
+  it('deletePolicy sends the expected version as a query and the reason in the body', async () => {
+    let seen: { version: string | null; body: unknown } | null = null;
+    server.use(
+      http.delete(
+        url('/v1/admin/compliance/policies/p-1'),
+        async ({ request }) => {
+          seen = {
+            version: new URL(request.url).searchParams.get('expectedVersion'),
+            body: await request.json()
+          };
+          return new HttpResponse(null, { status: 204 });
+        }
+      )
+    );
+    const { store } = renderWithProviders(<></>);
+    await store
+      .dispatch(
+        complianceApi.endpoints.deletePolicy.initiate({
+          id: 'p-1',
+          expectedVersion: 2,
+          reason: 'non più usata'
+        })
+      )
+      .unwrap();
+    expect(seen).toEqual({ version: '2', body: { reason: 'non più usata' } });
+  });
+
+  it('listChangeRequests filters by status unless all are asked for', async () => {
+    const statuses: (string | null)[] = [];
+    server.use(
+      http.get(url('/v1/admin/compliance/change-requests'), ({ request }) => {
+        statuses.push(new URL(request.url).searchParams.get('status'));
+        return HttpResponse.json({ items: [] });
+      })
+    );
+    const { store } = renderWithProviders(<></>);
+    await store
+      .dispatch(complianceApi.endpoints.listChangeRequests.initiate('pending'))
+      .unwrap();
+    await store
+      .dispatch(complianceApi.endpoints.listChangeRequests.initiate('all'))
+      .unwrap();
+    expect(statuses).toEqual(['pending', null]);
+  });
+
+  it('unassignPolicy DELETEs with the reason and the acknowledgement', async () => {
+    let body: unknown = null;
+    server.use(
+      http.delete(
+        url('/v1/admin/compliance/policy-assignments/t-1'),
+        async ({ request }) => {
+          body = await request.json();
+          return HttpResponse.json({ applied: true, warnings: [] });
+        }
+      )
+    );
+    const { store } = renderWithProviders(<></>);
+    await store
+      .dispatch(
+        complianceApi.endpoints.unassignPolicy.initiate({
+          tenantId: 't-1',
+          reason: 'fine',
+          acknowledgeWarnings: true
+        })
+      )
+      .unwrap();
+    expect(body).toEqual({ reason: 'fine', acknowledgeWarnings: true });
   });
 });

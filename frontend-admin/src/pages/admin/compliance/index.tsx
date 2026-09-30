@@ -4,20 +4,26 @@ import {
   faClipboardList,
   faClockRotateLeft,
   faGavel,
+  faScaleBalanced,
+  faUserCheck,
   faUserSlash
 } from '@fortawesome/free-solid-svg-icons';
 import { useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import {
   useListAuditEventsQuery,
+  useListChangeRequestsQuery,
   useListErasureRequestsQuery,
   useListLegalHoldsQuery,
   useRetentionPreviewQuery
 } from 'store/api/complianceApi';
 import StatCard from 'components/common/StatCard';
+import SubtleBadge from 'components/common/SubtleBadge';
+import ChangeRequestsTab from './ChangeRequestsTab';
 import AuditEventsTab from './AuditEventsTab';
 import ErasureRequestsTab from './ErasureRequestsTab';
 import LegalHoldsTab from './LegalHoldsTab';
+import PoliciesTab from './PoliciesTab';
 import RetentionTab from './RetentionTab';
 
 // CompliancePage is the operator-facing GDPR/compliance dashboard (ADR-0009):
@@ -26,6 +32,8 @@ import RetentionTab from './RetentionTab';
 // trail. Destructive actions are step-up-gated on the backend — the global
 // StepUpModal handles the 401 + replay transparently. The active tab is synced
 // to the `?tab=` query param so the view is shareable and survives a refresh.
+// It also hosts the compliance policy catalog with its four-eyes change
+// requests (spec §8).
 
 const TABS = [
   {
@@ -43,6 +51,16 @@ const TABS = [
     key: 'audit',
     labelKey: 'adminCompliance.tabs.auditEvents',
     icon: faClipboardList
+  },
+  {
+    key: 'policies',
+    labelKey: 'adminCompliance.tabs.policies',
+    icon: faScaleBalanced
+  },
+  {
+    key: 'changes',
+    labelKey: 'adminCompliance.tabs.changeRequests',
+    icon: faUserCheck
   }
 ] as const;
 
@@ -68,6 +86,8 @@ const CompliancePage = () => {
   const holds = useListLegalHoldsQuery();
   const retention = useRetentionPreviewQuery();
   const audit = useListAuditEventsQuery({ limit: 50 });
+  const pendingChanges =
+    useListChangeRequestsQuery('pending').data?.items?.length ?? 0;
 
   const pendingErasures = erasures.data?.items?.length ?? 0;
   const activeHolds = (holds.data?.items ?? []).filter(h => h.active).length;
@@ -163,6 +183,11 @@ const CompliancePage = () => {
                   <Nav.Link eventKey={tab.key} className="text-nowrap">
                     <FontAwesomeIcon icon={tab.icon} className="me-2" />
                     {t(tab.labelKey)}
+                    {tab.key === 'changes' && pendingChanges > 0 && (
+                      <SubtleBadge pill bg="warning" className="ms-2">
+                        {pendingChanges}
+                      </SubtleBadge>
+                    )}
                   </Nav.Link>
                 </Nav.Item>
               ))}
@@ -181,6 +206,12 @@ const CompliancePage = () => {
               </Tab.Pane>
               <Tab.Pane eventKey="audit">
                 <AuditEventsTab />
+              </Tab.Pane>
+              <Tab.Pane eventKey="policies">
+                <PoliciesTab />
+              </Tab.Pane>
+              <Tab.Pane eventKey="changes">
+                <ChangeRequestsTab />
               </Tab.Pane>
             </Tab.Content>
           </Card.Body>

@@ -54,6 +54,8 @@ var (
 func main() {
 	logger := utils.SetupLogger()
 	slog.SetDefault(logger)
+	// Compliance spec §9 — count recovered masking panics.
+	utils.SetMaskingPanicHook(metrics.Default().RecordLogMaskingPanic)
 	logger.Info("orkestra-backend starting",
 		slog.String("version", Version),
 		slog.String("build_time", BuildTime),
@@ -315,6 +317,15 @@ func main() {
 		utils.SwapLevelResolver(r)
 		logger.Info("logging: live level resolver active",
 			slog.String("source", "logging core module"))
+	}
+
+	// Compliance spec §2.1 — the live compliance policy replaces the static
+	// platform defaults behind every logger built so far and the span
+	// exporter. No-op when the compliance module did not publish it.
+	if p, ok := module.GetTyped[iface.CompliancePolicyProvider](svcRegistry, module.ServiceCompliancePolicy); ok {
+		utils.SwapLogPolicyResolver(p)
+		telemetry.SwapSpanPolicyResolver(p)
+		logger.Info("compliance: live log policy resolver active")
 	}
 
 	// Retrieve auth infrastructure for middleware setup

@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
 // AudienceContextKey holds the resolved JWT audience for the current
@@ -94,6 +96,7 @@ func RequireAudience(expected ...string) func(http.Handler) http.Handler {
 			for _, aud := range readUnverifiedAudiences(token) {
 				if _, ok := allowed[aud]; ok {
 					ctx := context.WithValue(r.Context(), AudienceContextKey, aud)
+					ctxauth.RequestAnnotationsFrom(ctx).SetAudience(aud)
 					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				}

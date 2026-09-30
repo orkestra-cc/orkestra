@@ -549,6 +549,7 @@ func (m *AuthMiddleware) setUserContext(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 
+	annotatePrincipal(ctx)
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
@@ -946,6 +947,7 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 					ctx = context.WithValue(ctx, ctxauth.KeyTenantKind, kind)
 				}
 			}
+			annotatePrincipal(ctx)
 			r = r.WithContext(ctx)
 		}
 

@@ -158,7 +158,7 @@ frontend-client-clean:
 .PHONY: install install-hooks fmt ci-help
 .PHONY: ci ci-all ci-mcp ci-agents ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 .PHONY: mcp-check mcp-test agents-check agents-test
-.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks backend-script-tests backend-gotenberg-hardening
+.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks backend-script-tests backend-gotenberg-hardening
 .PHONY: admin-lockcheck admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-lockcheck client-typecheck client-lint client-test client-build
 .PHONY: mobile-lockcheck
@@ -292,7 +292,7 @@ agents-test:
 
 # ---- Backend ----
 
-ci-backend: backend-script-tests backend-mongo-config backend-credential-fallbacks backend-gotenberg-hardening backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
+ci-backend: backend-script-tests backend-mongo-config backend-credential-fallbacks backend-gotenberg-hardening backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
 	@echo "Backend CI: OK"
 
 # Static gate: the compose stacks and CI must all provide a transaction-capable
@@ -376,6 +376,14 @@ backend-piiscan:
 	@cd backend && go test ./tools/piiscan/...
 	@cd backend && go run ./tools/piiscan/cmd/piiscan \
 	  -baseline=tools/piiscan/baseline.txt ./internal/...
+
+# backend-logscope flags slog calls the compliance PolicyHandler cannot mask
+# reliably: slog.Any with an opaque value, secret-looking keys with a dynamic
+# value (compliance spec §2.6). Baseline carries the pre-existing calls.
+backend-logscope:
+	@cd backend && go test ./tools/logscope/...
+	@cd backend && go run ./tools/logscope/cmd/logscope \
+	  -baseline=tools/logscope/baseline.txt ./internal/... ./pkg/... ./cmd/...
 
 # Reads OSV IDs (one per line, '#'-comments) from backend/.vulncheck-allowlist.txt.
 # Fails only if a reachable vulnerability is NOT on the allowlist.

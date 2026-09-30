@@ -52,7 +52,7 @@
       "title": "Logs Explorer",
       "gridPos": { "x": 0, "y": 0, "w": 24, "h": 4 },
       "options": {
-        "content": "Three signal classes from ADR-0005: (1) Phase A HTTP request log carries `audience`/`method`/`path`/`status`/`duration_ms`/`trace_id`, (2) Phase C application log lines auto-stamped with `module`, (3) Promtail-shipped startup lines without either. `module` and `audience` are NOT universal — a stream carries one or the other depending on origin, so the **Application feed** filters by module+level and ignores audience, while the **HTTP request feed** filters by audience+level and ignores module. Click any `trace_id` in either panel to jump to Tempo."
+        "content": "Three signal classes from ADR-0005: (1) Phase A HTTP request log carries `audience`/`method`/`route`/`status`/`duration_ms`/`trace_id`, (2) Phase C application log lines auto-stamped with `module`, (3) Promtail-shipped startup lines without either. `module` and `audience` are NOT universal — a stream carries one or the other depending on origin, so the **Application feed** filters by module+level and ignores audience, while the **HTTP request feed** filters by audience+level and ignores module. Click any `trace_id` in either panel to jump to Tempo."
       }
     },
     {
