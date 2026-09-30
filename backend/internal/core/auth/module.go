@@ -1117,9 +1117,14 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// always registers ServiceOperatorUserProvider, so a missing
 	// provider here means the user module failed to init.
 	operatorUser := module.MustGetTyped[iface.UserProvider](deps.Services, module.ServiceOperatorUserProvider)
+	operatorInitialPasswordSetter, ok := operatorUser.(iface.InitialPasswordSetter)
+	if !ok {
+		logger.Warn("auth: operator user provider lacks initial-password capability; enrollment will fail closed")
+	}
 	opDeps := commonTierDeps
 	opDeps.tier = tierOperator
 	opDeps.userProvider = operatorUser
+	opDeps.initialPasswordSetter = operatorInitialPasswordSetter
 	opDeps.mfaEpochBumper = resolveMFAEpochBumper(deps.Services, module.ServiceOperatorUserProvider, logger, string(tierOperator))
 	opDeps.jwtService = operatorJWT
 	if cfg.Server.Operator.FrontendURL != "" {
@@ -1748,6 +1753,10 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 	m.operatorAuthHandler.RegisterTierMountableRoutes(ri.Operator.PublicAPI, operatorProtectedAPI, ri.Router, handlers.OperatorMount)
 	m.operatorAuthHandler.RegisterOAuthStartRoutes(ri.Operator.PublicAPI, handlers.OperatorMount)
 
+	// Resolve once for initial-password, TOTP, and passkey enrollment, so
+	// missing middleware support warns once and refuses every enrollment.
+	operatorEnrolmentGate := enrolmentGate(m.logger, "operator", ri.Operator.AuthMW, 5*time.Minute)
+
 	// Operator password auth: register/login/verify/reset/forgot are
 	// public; change-password is protected and runs without an org
 	// context (user self-service).
@@ -1756,6 +1765,12 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		r.Use(ri.Operator.AuthMW.RequireGlobal())
 		api := humachi.New(r, ri.APIConfig)
 		m.operatorPasswordHandler.RegisterProtectedRoutes(api, handlers.OperatorMount)
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
+		r.Use(operatorEnrolmentGate)
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorPasswordHandler.RegisterInitialPasswordRoute(api)
 	})
 
 	// Service-account client-credentials grant (Task 8): public, single
@@ -1777,11 +1792,6 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
 		m.serviceAccountAdminHandler.RegisterManageRoutes(humachi.New(r, ri.APIConfig))
 	})
-
-	// The enrolment-proof gate, resolved ONCE per surface so a fork whose
-	// middleware lacks module.EnrolmentProofGate gets one WARN, not one
-	// per route group. Reused by this surface's TOTP and passkey mounts.
-	operatorEnrolmentGate := enrolmentGate(m.logger, "operator", ri.Operator.AuthMW, 5*time.Minute)
 
 	// Operator MFA endpoints split into five groups:
 	//   - public: /v1/auth/operator/mfa/login/verify completes an in-
