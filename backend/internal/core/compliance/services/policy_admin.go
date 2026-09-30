@@ -371,9 +371,14 @@ func (s *PolicyAdminService) Unassign(ctx context.Context, actor Actor, tenantID
 	if !ok {
 		return nil, ErrReasonRequired
 	}
-	tenant, err := s.lookupTenant(ctx, tenantID)
+	tenant, gone, err := s.unassignTarget(ctx, tenantID)
 	if err != nil {
 		return nil, err
+	}
+	if gone != nil {
+		// The tenant no longer exists: there is nothing left to protect, so
+		// the assignment goes at once, without warnings, four eyes or not.
+		return s.applyUnassign(ctx, actor, actor.UserID, tenant, gone.PolicyUUID, reason, nil)
 	}
 	warnings, _, prev, err := s.assignmentWarnings(ctx, tenantID, "")
 	if err != nil {
@@ -447,6 +452,26 @@ func (s *PolicyAdminService) currentFor(ctx context.Context, tenantID string, pl
 	return p, a.PolicyUUID, nil
 }
 
+// unassignTarget resolves the tenant of an unassignment. A tenant missing
+// from the lookup (soft-deleted or purged) whose assignment survives is
+// rebuilt from the assignment and returned with it as gone, so its policy
+// does not stay in use forever; a missing tenant without an assignment is
+// ErrTenantNotFound.
+func (s *PolicyAdminService) unassignTarget(ctx context.Context, tenantID string) (*iface.Tenant, *models.PolicyAssignment, error) {
+	t, err := s.lookupTenant(ctx, tenantID)
+	if !errors.Is(err, ErrTenantNotFound) {
+		return t, nil, err
+	}
+	a, aerr := s.repo.GetAssignment(ctx, tenantID)
+	if errors.Is(aerr, repository.ErrAssignmentNotFound) {
+		return nil, nil, ErrTenantNotFound
+	}
+	if aerr != nil {
+		return nil, nil, aerr
+	}
+	return &iface.Tenant{UUID: tenantID, Kind: a.TenantKind}, a, nil
+}
+
 func (s *PolicyAdminService) lookupTenant(ctx context.Context, tenantID string) (*iface.Tenant, error) {
 	if s.tenants == nil {
 		return nil, errors.New("compliance: tenant provider not available")
@@ -506,6 +531,9 @@ func (s *PolicyAdminService) Approve(ctx context.Context, actor Actor, requestUU
 	}
 	if cr.Status != models.ChangeStatusPending {
 		return nil, repository.ErrChangeRequestNotPending
+	}
+	if err := s.expireIfOverdue(ctx, cr); err != nil {
+		return nil, err
 	}
 	if cr.RequestedBy == actor.UserID {
 		return nil, ErrSelfApproval
@@ -578,7 +606,7 @@ func (s *PolicyAdminService) applyRequest(ctx context.Context, cr *models.Policy
 		}
 		return s.applyAssign(ctx, ap.by, author, tenant, cr.PolicyUUID, cr.ExpectedVersion, cr.Payload.PreviousPolicyUUID, cr.Reason, ap)
 	case models.ChangeUnassign:
-		tenant, err := s.lookupTenant(ctx, cr.TenantID)
+		tenant, _, err := s.unassignTarget(ctx, cr.TenantID)
 		if err != nil {
 			return nil, err
 		}
@@ -599,6 +627,9 @@ func (s *PolicyAdminService) Reject(ctx context.Context, actor Actor, requestUUI
 	if cr.Status != models.ChangeStatusPending {
 		return nil, repository.ErrChangeRequestNotPending
 	}
+	if err := s.expireIfOverdue(ctx, cr); err != nil {
+		return nil, err
+	}
 	if cr.RequestedBy == actor.UserID {
 		return nil, ErrSelfApproval
 	}
@@ -611,6 +642,27 @@ func (s *PolicyAdminService) Reject(ctx context.Context, actor Actor, requestUUI
 	s.emit(ctx, actor, "compliance.change_request.rejected", "compliance_change_request", cr.UUID,
 		map[string]any{"kind": cr.Kind, "requestedBy": cr.RequestedBy, "note": note})
 	return cr, nil
+}
+
+// expireIfOverdue expires a pending request older than changeRequestTTL
+// that the hourly sweep has not reached yet, so it can no longer be decided:
+// it returns ErrChangeRequestNotPending, or what the compare-and-set
+// returned when a concurrent decision won. Only the winner audits it.
+func (s *PolicyAdminService) expireIfOverdue(ctx context.Context, cr *models.PolicyChangeRequest) error {
+	now := s.now().UTC()
+	if now.Sub(cr.RequestedAt) <= changeRequestTTL {
+		return nil
+	}
+	if err := s.repo.DecideChangeRequest(ctx, cr.UUID, models.ChangeStatusExpired, models.SystemActor, "", now); err != nil {
+		return err
+	}
+	s.emitExpired(ctx, cr)
+	return repository.ErrChangeRequestNotPending
+}
+
+func (s *PolicyAdminService) emitExpired(ctx context.Context, cr *models.PolicyChangeRequest) {
+	s.emit(ctx, Actor{UserID: models.SystemActor}, "compliance.change_request.expired", "compliance_change_request", cr.UUID,
+		map[string]any{"kind": cr.Kind, "requestedBy": cr.RequestedBy, "requestedAt": cr.RequestedAt})
 }
 
 // ExpireStale expires the requests pending for more than 14 days.
@@ -630,8 +682,7 @@ func (s *PolicyAdminService) ExpireStale(ctx context.Context) (int, error) {
 			return n, err
 		}
 		n++
-		s.emit(ctx, Actor{UserID: models.SystemActor}, "compliance.change_request.expired", "compliance_change_request", cr.UUID,
-			map[string]any{"kind": cr.Kind, "requestedBy": cr.RequestedBy, "requestedAt": cr.RequestedAt})
+		s.emitExpired(ctx, &cr)
 	}
 	return n, nil
 }

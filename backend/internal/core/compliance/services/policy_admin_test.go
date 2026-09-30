@@ -26,6 +26,7 @@ type adminFixture struct {
 	policies *PolicyService
 	repo     *policytest.MemRepo
 	sink     *policytest.Sink
+	tenants  policytest.Tenants
 	fourEyes bool
 	now      time.Time
 }
@@ -36,11 +37,11 @@ func newAdminFixture(t *testing.T) *adminFixture {
 	logger := slog.New(slog.DiscardHandler)
 	f.policies = NewPolicyService(f.repo, logger)
 	f.policies.now = func() time.Time { return f.now }
-	tenants := policytest.Tenants{
+	f.tenants = policytest.Tenants{
 		"t1": {UUID: "t1", Kind: iface.TenantKindExternal, Name: "Clinica"},
 		"t2": {UUID: "t2", Kind: iface.TenantKindInternal, Name: "Interno"},
 	}
-	f.admin = NewPolicyAdminService(f.repo, f.policies, tenants, f.sink, func(context.Context) bool { return f.fourEyes }, logger)
+	f.admin = NewPolicyAdminService(f.repo, f.policies, f.tenants, f.sink, func(context.Context) bool { return f.fourEyes }, logger)
 	f.admin.now = func() time.Time { return f.now }
 	n := 0
 	f.admin.newUUID = func() string { n++; return fmt.Sprintf("id-%d", n) }
@@ -517,5 +518,141 @@ func TestEnsurePlatformPolicy_RealFailureIsReturned(t *testing.T) {
 	admin := NewPolicyAdminService(repo, NewPolicyService(repo, logger), nil, &policytest.Sink{}, func(context.Context) bool { return true }, logger)
 	if err := admin.EnsurePlatformPolicy(context.Background()); !errors.Is(err, boom) {
 		t.Fatalf("EnsurePlatformPolicy = %v, want the original error", err)
+	}
+}
+
+// pendingLooseCreate stores, at f.now, a create request with warnings.
+func (f *adminFixture) pendingLooseCreate(t *testing.T) *models.PolicyChangeRequest {
+	t.Helper()
+	in := tenantInput()
+	in.LogContent.IPAddress = iface.IPAddressFull
+	res, err := f.admin.Create(context.Background(), alice, in, "motivo", true)
+	if err != nil || res.ChangeRequest == nil {
+		t.Fatalf("Create with warnings = %+v, %v", res, err)
+	}
+	return res.ChangeRequest
+}
+
+func (f *adminFixture) assertExpiredOnce(t *testing.T, id string) {
+	t.Helper()
+	cr, _ := f.repo.GetChangeRequest(context.Background(), id)
+	if cr.Status != models.ChangeStatusExpired || cr.DecidedBy != models.SystemActor || cr.DecisionNote != "" {
+		t.Fatalf("request = %+v, want expired by the system", cr)
+	}
+	n := 0
+	for _, a := range f.sink.Actions() {
+		if a == "compliance.change_request.expired" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("expired events = %d, want 1 (audit %v)", n, f.sink.Actions())
+	}
+	if ps, _ := f.repo.ListPolicies(context.Background()); len(ps) != 1 {
+		t.Fatalf("an expired request was applied: %d policies", len(ps))
+	}
+}
+
+// A request past its 14 days is expired on the spot, not approved, even if
+// the hourly sweep has not reached it yet.
+func TestApprove_ExpiredRequestIsNotApplied(t *testing.T) {
+	f := newAdminFixture(t)
+	ctx := context.Background()
+	cr := f.pendingLooseCreate(t)
+	f.now = testNow.Add(15 * 24 * time.Hour)
+	if _, err := f.admin.Approve(ctx, bob, cr.UUID, "ok"); !errors.Is(err, repository.ErrChangeRequestNotPending) {
+		t.Fatalf("approving a 15-day-old request: %v", err)
+	}
+	f.assertExpiredOnce(t, cr.UUID)
+	if slices.Contains(f.sink.Actions(), "compliance.change_request.approved") {
+		t.Fatal("an expired request was audited as approved")
+	}
+	// The sweep that runs later finds nothing left to expire.
+	if n, err := f.admin.ExpireStale(ctx); err != nil || n != 0 {
+		t.Fatalf("ExpireStale = %d, %v", n, err)
+	}
+	f.assertExpiredOnce(t, cr.UUID)
+}
+
+func TestReject_ExpiredRequestIsExpiredNotRejected(t *testing.T) {
+	f := newAdminFixture(t)
+	ctx := context.Background()
+	cr := f.pendingLooseCreate(t)
+	f.now = testNow.Add(15 * 24 * time.Hour)
+	if _, err := f.admin.Reject(ctx, bob, cr.UUID, "no"); !errors.Is(err, repository.ErrChangeRequestNotPending) {
+		t.Fatalf("rejecting a 15-day-old request: %v", err)
+	}
+	f.assertExpiredOnce(t, cr.UUID)
+	if slices.Contains(f.sink.Actions(), "compliance.change_request.rejected") {
+		t.Fatal("an expired request was audited as rejected")
+	}
+}
+
+// A request still inside its 14 days is decided normally.
+func TestApprove_RequestInsideItsTTLIsApplied(t *testing.T) {
+	f := newAdminFixture(t)
+	cr := f.pendingLooseCreate(t)
+	f.now = testNow.Add(13 * 24 * time.Hour)
+	if res, err := f.admin.Approve(context.Background(), bob, cr.UUID, "ok"); err != nil || !res.Applied {
+		t.Fatalf("Approve = %+v, %v", res, err)
+	}
+}
+
+// A tenant soft-deleted or purged after its assignment can still be moved
+// off its policy: the assignment is removed at once, without warnings (there
+// is nothing left to protect), and the policy becomes deletable.
+func TestUnassign_TenantGoneFromTheLookup(t *testing.T) {
+	f := newAdminFixture(t)
+	ctx := context.Background()
+	p := f.createStrict(t, "Strict")
+	if _, err := f.admin.Assign(ctx, alice, "t1", p.UUID, "contratto", false); err != nil {
+		t.Fatal(err)
+	}
+	delete(f.tenants, "t1")
+
+	res, err := f.admin.Unassign(ctx, alice, "t1", "tenant cancellato", false)
+	if err != nil || !res.Applied || res.ChangeRequest != nil || len(res.Warnings) != 0 {
+		t.Fatalf("Unassign of a vanished tenant = %+v, %v", res, err)
+	}
+	if _, err := f.repo.GetAssignment(ctx, "t1"); !errors.Is(err, repository.ErrAssignmentNotFound) {
+		t.Fatalf("assignment still there: %v", err)
+	}
+	h := f.repo.History()
+	last := h[len(h)-1]
+	if last.Action != models.AssignmentActionUnassign || last.TenantID != "t1" || last.TenantKind != iface.TenantKindExternal ||
+		last.PreviousPolicyUUID != p.UUID || last.ChangedBy != "alice" {
+		t.Fatalf("history = %+v", last)
+	}
+	if err := f.admin.Delete(ctx, alice, p.UUID, 1, "non più usata"); err != nil {
+		t.Fatalf("Delete after the unassignment: %v", err)
+	}
+}
+
+// A pending unassignment whose tenant vanishes before approval still applies.
+func TestApprove_UnassignOfATenantGoneMeanwhile(t *testing.T) {
+	f := newAdminFixture(t)
+	ctx := context.Background()
+	p := f.createStrict(t, "Strict")
+	if _, err := f.admin.Assign(ctx, alice, "t1", p.UUID, "contratto", false); err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.admin.Unassign(ctx, alice, "t1", "fine contratto", true)
+	if err != nil || res.ChangeRequest == nil {
+		t.Fatalf("Unassign with warnings = %+v, %v", res, err)
+	}
+	delete(f.tenants, "t1")
+	out, err := f.admin.Approve(ctx, bob, res.ChangeRequest.UUID, "ok")
+	if err != nil || !out.Applied {
+		t.Fatalf("Approve = %+v, %v", out, err)
+	}
+	if _, err := f.repo.GetAssignment(ctx, "t1"); !errors.Is(err, repository.ErrAssignmentNotFound) {
+		t.Fatalf("assignment still there: %v", err)
+	}
+}
+
+func TestUnassign_MissingTenantWithoutAssignmentIsNotFound(t *testing.T) {
+	f := newAdminFixture(t)
+	if _, err := f.admin.Unassign(context.Background(), alice, "ghost", "motivo", true); !errors.Is(err, ErrTenantNotFound) {
+		t.Fatalf("unassigning an unknown tenant: %v", err)
 	}
 }

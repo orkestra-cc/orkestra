@@ -39,6 +39,52 @@ func TestCatalog(t *testing.T) {
 	}
 }
 
+// TestCatalogValues pins every value of the catalog the spec fixes (§1.3):
+// a change here is a change of the spec, not a refactor.
+func TestCatalogValues(t *testing.T) {
+	if MaxDays != 3650 {
+		t.Fatalf("MaxDays = %d, want 3650", MaxDays)
+	}
+	want := []struct {
+		key            iface.RetentionClass
+		minDays        int
+		hardMinimum    bool
+		defaultDays    int
+		tenantSettable bool
+	}{
+		{iface.RetentionAdminAccess, 184, true, 365, true},
+		{iface.RetentionPrivilegedChange, 1, false, 730, true},
+		{iface.RetentionClientActivity, 1, false, 365, true},
+		{iface.RetentionAuthenticationSecurity, 1, false, 365, false},
+		{iface.RetentionComplianceEvidence, 1, false, 1825, false},
+	}
+	all := All()
+	if len(all) != len(want) {
+		t.Fatalf("catalog has %d classes, want %d", len(all), len(want))
+	}
+	seen := map[iface.RetentionClass]bool{}
+	for _, c := range all {
+		if seen[c.Key] {
+			t.Fatalf("class %s appears twice", c.Key)
+		}
+		seen[c.Key] = true
+	}
+	defaults := DefaultRetention()
+	for _, w := range want {
+		c, ok := Get(w.key)
+		if !ok {
+			t.Fatalf("class %s missing", w.key)
+		}
+		if c.MinDays != w.minDays || c.HardMinimum != w.hardMinimum || c.DefaultDays != w.defaultDays || c.TenantSettable != w.tenantSettable {
+			t.Errorf("%s = min %d hard %v default %d tenant %v, want min %d hard %v default %d tenant %v", w.key,
+				c.MinDays, c.HardMinimum, c.DefaultDays, c.TenantSettable, w.minDays, w.hardMinimum, w.defaultDays, w.tenantSettable)
+		}
+		if defaults[w.key] != w.defaultDays {
+			t.Errorf("DefaultRetention()[%s] = %d, want %d", w.key, defaults[w.key], w.defaultDays)
+		}
+	}
+}
+
 func TestClassify(t *testing.T) {
 	cases := []struct {
 		action, audience string

@@ -125,9 +125,12 @@ func (r *PolicyRepository) NameTaken(ctx context.Context, name, exceptUUID strin
 }
 
 // ReplacePolicy writes p over the document with p.UUID and expectedVersion.
+// The filter also pins isPlatformDefault, so a replace can never flip it: a
+// replace that tries is a version conflict and changes nothing.
 func (r *PolicyRepository) ReplacePolicy(ctx context.Context, p *models.Policy, expectedVersion int) error {
+	filter := bson.M{"uuid": p.UUID, "version": expectedVersion, "isPlatformDefault": p.IsPlatformDefault}
 	//tenantscope:allow compliance policies are platform state managed by Tier-1 operators
-	res, err := r.policies.ReplaceOne(ctx, bson.M{"uuid": p.UUID, "version": expectedVersion}, p)
+	res, err := r.policies.ReplaceOne(ctx, filter, p)
 	if err != nil {
 		return mapPolicyDup(err)
 	}

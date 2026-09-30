@@ -33,9 +33,12 @@ const (
 
 // maxScanTextLen bounds the free-text scan (T1 follow-up): a longer value is
 // cut at the last whitespace within the first maxScanTextLen bytes, so no
-// partial token (half an e-mail, half an IBAN) survives, and textTruncated
-// marks the cut. The regexps are linear, but a multi-megabyte value would
-// still cost milliseconds on every record.
+// whitespace-free token (an e-mail, a compact IBAN) is split by the cut, and
+// textTruncated marks it. A space-separated IBAN can still straddle the cut:
+// its first group(s) before it (country and check digits, up to one 4-char
+// group) survive unmasked, too short to match the IBAN rule. The regexps are
+// linear, but a multi-megabyte value would still cost milliseconds on every
+// record.
 const (
 	maxScanTextLen = 32 << 10
 	textTruncated  = "[TRUNCATED]"
@@ -527,9 +530,12 @@ func (m logMasker) maskReflect(val any, depth int, budget *int) any {
 		return m.maskSeq(val, rv, depth, budget)
 	case reflect.Map:
 		// Basic keys are rendered as text, as the JSON handler does with
-		// numeric keys, and masked as data keys: a map keyed by user id or by
-		// something that prints an e-mail must not bypass the rules. Any other
-		// key fails the whole map closed.
+		// numeric keys, and the key text goes through the free-text scan: a
+		// map keyed by something that prints an e-mail must not bypass the
+		// rules. A key that looks like a user ID is only text-scanned, never
+		// pseudonymised under the subjectIds rule (that rule applies to the
+		// values of known subject keys). Any other key fails the whole map
+		// closed.
 		out := make(map[string]any, rv.Len())
 		for it := rv.MapRange(); it.Next(); {
 			k, ok := mapKeyText(it.Key())

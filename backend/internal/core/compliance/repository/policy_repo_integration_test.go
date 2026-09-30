@@ -112,6 +112,40 @@ func TestPolicyRepo_PoliciesAndVersionCAS(t *testing.T) {
 	}
 }
 
+// A replace can never flip isPlatformDefault: the platform policy stays
+// the platform policy, a tenant policy never becomes one.
+func TestPolicyRepo_ReplaceCannotFlipThePlatformFlag(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	ensurePolicyIndexes(t, db)
+	r := NewPolicyRepo(db)
+	ctx := context.Background()
+	if err := r.InsertPolicy(ctx, testPolicy("plat", "Platform", true)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.InsertPolicy(ctx, testPolicy("a", "A", false)); err != nil {
+		t.Fatal(err)
+	}
+
+	demoted, _ := r.GetPolicy(ctx, "plat")
+	demoted.Version, demoted.IsPlatformDefault, demoted.Description = 2, false, "demoted"
+	if err := r.ReplacePolicy(ctx, demoted, 1); !errors.Is(err, ErrPolicyVersionConflict) {
+		t.Fatalf("replace demoting the platform policy: %v", err)
+	}
+	if got, _ := r.GetPolicy(ctx, "plat"); !got.IsPlatformDefault || got.Version != 1 || got.Description == "demoted" {
+		t.Fatalf("platform policy changed: %+v", got)
+	}
+
+	promoted, _ := r.GetPolicy(ctx, "a")
+	promoted.Version, promoted.IsPlatformDefault, promoted.Description = 2, true, "promoted"
+	if err := r.ReplacePolicy(ctx, promoted, 1); !errors.Is(err, ErrPolicyVersionConflict) {
+		t.Fatalf("replace promoting a tenant policy: %v", err)
+	}
+	if got, _ := r.GetPolicy(ctx, "a"); got.IsPlatformDefault || got.Version != 1 || got.Description == "promoted" {
+		t.Fatalf("tenant policy changed: %+v", got)
+	}
+}
+
 func TestPolicyRepo_TxnRollsBack(t *testing.T) {
 	db, cleanup := newTestDB(t)
 	defer cleanup()

@@ -38,8 +38,9 @@ func (s *Sink) Events() []iface.AuditEvent {
 }
 
 func (s *Sink) Actions() []string {
-	out := []string{}
-	for _, e := range s.Events() {
+	events := s.Events()
+	out := make([]string, 0, len(events))
+	for _, e := range events {
 		out = append(out, e.Action)
 	}
 	return out

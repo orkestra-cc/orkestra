@@ -286,22 +286,44 @@ func RegisterPolicyReadRoutes(api huma.API, h *PolicyHandler) {
 		Path: "/v1/admin/compliance/change-requests/{id}", Summary: "Get a policy change request", Tags: tags}, h.GetChangeRequest)
 }
 
+// acceptedResponses documents, on a write that can wait for four eyes, the
+// 202 it answers with the pending change request. Huma adds the applied
+// status by itself but drops its default error response once an operation
+// declares more than one response, so that one is declared here as well.
+// A fresh map per operation: huma fills it in place.
+func acceptedResponses() map[string]*huma.Response {
+	return map[string]*huma.Response{
+		"202": {
+			Description: "Accepted: the change has warnings and four eyes is on, so it was stored as a pending " +
+				"change request (changeRequest) for another operator to approve; nothing was applied.",
+			Content: map[string]*huma.MediaType{"application/json": {Schema: &huma.Schema{Ref: "#/components/schemas/WriteResponse"}}},
+		},
+		"default": {
+			Description: "Error",
+			Content:     map[string]*huma.MediaType{"application/problem+json": {Schema: &huma.Schema{Ref: "#/components/schemas/ErrorModel"}}},
+		},
+	}
+}
+
 // RegisterPolicyWriteRoutes mounts the writes; module.go wraps them with
 // system.compliance.policy.manage and a fresh step-up.
 func RegisterPolicyWriteRoutes(api huma.API, h *PolicyHandler) {
 	tags := []string{"Compliance"}
 	huma.Register(api, huma.Operation{OperationID: "compliance-policy-create", Method: http.MethodPost,
 		Path: "/v1/admin/compliance/policies", Summary: "Create a tenant compliance policy", Tags: tags,
-		DefaultStatus: http.StatusCreated}, h.Create)
+		DefaultStatus: http.StatusCreated, Responses: acceptedResponses()}, h.Create)
 	huma.Register(api, huma.Operation{OperationID: "compliance-policy-update", Method: http.MethodPut,
-		Path: "/v1/admin/compliance/policies/{id}", Summary: "Change a compliance policy", Tags: tags}, h.Update)
+		Path: "/v1/admin/compliance/policies/{id}", Summary: "Change a compliance policy", Tags: tags,
+		Responses: acceptedResponses()}, h.Update)
 	huma.Register(api, huma.Operation{OperationID: "compliance-policy-delete", Method: http.MethodDelete,
 		Path: "/v1/admin/compliance/policies/{id}", Summary: "Delete an unassigned tenant policy", Tags: tags,
 		DefaultStatus: http.StatusNoContent}, h.Delete)
 	huma.Register(api, huma.Operation{OperationID: "compliance-policy-assign", Method: http.MethodPut,
-		Path: "/v1/admin/compliance/policy-assignments/{tenantId}", Summary: "Assign a policy to a tenant", Tags: tags}, h.Assign)
+		Path: "/v1/admin/compliance/policy-assignments/{tenantId}", Summary: "Assign a policy to a tenant", Tags: tags,
+		Responses: acceptedResponses()}, h.Assign)
 	huma.Register(api, huma.Operation{OperationID: "compliance-policy-unassign", Method: http.MethodDelete,
-		Path: "/v1/admin/compliance/policy-assignments/{tenantId}", Summary: "Move a tenant back to the platform policy", Tags: tags}, h.Unassign)
+		Path: "/v1/admin/compliance/policy-assignments/{tenantId}", Summary: "Move a tenant back to the platform policy", Tags: tags,
+		Responses: acceptedResponses()}, h.Unassign)
 	huma.Register(api, huma.Operation{OperationID: "compliance-change-request-approve", Method: http.MethodPost,
 		Path: "/v1/admin/compliance/change-requests/{id}/approve", Summary: "Approve a policy change request", Tags: tags}, h.Approve)
 	huma.Register(api, huma.Operation{OperationID: "compliance-change-request-reject", Method: http.MethodPost,

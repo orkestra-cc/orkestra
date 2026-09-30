@@ -205,6 +205,9 @@ func TestTenantPolicyHandler_OwnTenantOnly(t *testing.T) {
 	if _, ok := out.Body.Retention[iface.RetentionComplianceEvidence]; ok {
 		t.Fatal("a platform-only class leaked to the client summary")
 	}
+	if out.Body.RetentionEnforced {
+		t.Fatal("the summary claims the retention is enforced, but no stage deletes audit events by class yet")
+	}
 }
 
 func TestMapPolicyError_UnknownIsAServerFault(t *testing.T) {

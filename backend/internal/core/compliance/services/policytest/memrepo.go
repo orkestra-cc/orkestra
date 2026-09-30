@@ -124,7 +124,7 @@ func (m *MemRepo) ReplacePolicy(_ context.Context, p *models.Policy, expectedVer
 	if !ok {
 		return repository.ErrPolicyNotFound
 	}
-	if cur.Version != expectedVersion {
+	if cur.Version != expectedVersion || cur.IsPlatformDefault != p.IsPlatformDefault {
 		return repository.ErrPolicyVersionConflict
 	}
 	for _, q := range m.policies {

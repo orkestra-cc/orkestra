@@ -33,8 +33,11 @@ type ClientPolicySummary struct {
 	IPAddress  iface.IPAddressMode          `json:"ipAddress"`
 	UserAgent  iface.UserAgentMode          `json:"userAgent"`
 	SubjectIDs iface.SubjectIDMode          `json:"subjectIds"`
-	Retention  map[iface.RetentionClass]int `json:"retention"`
-	ValidFrom  time.Time                    `json:"validFrom"`
+	Retention  map[iface.RetentionClass]int `json:"retention" doc:"Configured retention in days per tenant-settable class. These are the values set by the policy; they are not yet applied to stored audit events (see retentionEnforced)."`
+	// RetentionEnforced is true once audit events are stamped and deleted by
+	// class (stage T4); until then the days above are configuration only.
+	RetentionEnforced bool      `json:"retentionEnforced" doc:"False while the configured retention is not yet applied to stored audit events."`
+	ValidFrom         time.Time `json:"validFrom"`
 }
 
 type ClientPolicyOutput struct {
@@ -53,7 +56,7 @@ func (h *TenantPolicyHandler) Get(ctx context.Context, in *ClientPolicyInput) (*
 	}
 	lc := eff.Policy.LogContent
 	s := ClientPolicySummary{TenantID: in.TenantID, IPAddress: lc.IPAddress, UserAgent: lc.UserAgent,
-		SubjectIDs: lc.SubjectIDs, Retention: map[iface.RetentionClass]int{}, ValidFrom: eff.Policy.UpdatedAt}
+		SubjectIDs: lc.SubjectIDs, Retention: map[iface.RetentionClass]int{}, RetentionEnforced: false, ValidFrom: eff.Policy.UpdatedAt}
 	if eff.Assignment != nil && eff.Assignment.AssignedAt.After(s.ValidFrom) {
 		s.ValidFrom = eff.Assignment.AssignedAt
 	}
@@ -71,5 +74,8 @@ func (h *TenantPolicyHandler) Get(ctx context.Context, in *ClientPolicyInput) (*
 func RegisterTenantPolicyRoutes(api huma.API, h *TenantPolicyHandler) {
 	huma.Register(api, huma.Operation{OperationID: "tenant-compliance-policy", Method: http.MethodGet,
 		Path: "/v1/tenants/{tenantId}/compliance/policy", Summary: "How the tenant's data is logged and retained",
+		Description: "The log-content rules in force for the tenant and the configured retention per class. " +
+			"The retention days are the configured values: they are not yet applied to stored audit events " +
+			"(retentionEnforced is false until a later stage deletes audit events by class).",
 		Tags: []string{"Compliance"}}, h.Get)
 }
