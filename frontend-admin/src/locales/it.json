@@ -2466,6 +2466,8 @@
       "approved": "Richiesta approvata e applicata.",
       "rejected": "Richiesta rifiutata.",
       "decideError": "Non è stato possibile salvare la decisione.",
+      "currentLoading": "Caricamento della versione attuale della policy…",
+      "currentLoadError": "Non è stato possibile caricare la versione attuale della policy, quindi le modifiche non si possono mostrare. Rifiuta la richiesta o riprova più tardi.",
       "ownRequest": "Hai fatto tu questa richiesta: deve deciderla un altro operatore.",
       "assignSummary": "Tenant {{tenant}}: da {{from}} a {{to}}.",
       "unassignSummary": "Tenant {{tenant}}: da {{from}} di nuovo alla policy di piattaforma."

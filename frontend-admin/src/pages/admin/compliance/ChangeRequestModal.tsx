@@ -1,5 +1,12 @@
 import { useEffect } from 'react';
-import { Alert, Button, Form, ListGroup, Modal } from 'react-bootstrap';
+import {
+  Alert,
+  Button,
+  Form,
+  ListGroup,
+  Modal,
+  Spinner
+} from 'react-bootstrap';
 import { useForm } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
@@ -56,7 +63,12 @@ const ChangeRequestModal = ({ request, onHide }: Props) => {
   const { t } = useTranslation();
   const me = useAppSelector(selectUser);
   const currentId = request?.kind === 'update' ? request.policyUuid : undefined;
-  const { data: current } = useGetCompliancePolicyQuery(currentId ?? '', {
+  const {
+    data: current,
+    isLoading: currentLoading,
+    isFetching: currentFetching,
+    isError: currentFailed
+  } = useGetCompliancePolicyQuery(currentId ?? '', {
     skip: !currentId
   });
   const [approve, { isLoading: approving }] = useApproveChangeRequestMutation();
@@ -76,9 +88,18 @@ const ChangeRequestModal = ({ request, onHide }: Props) => {
   if (!request) return null;
   const isAuthor = me?.id === request.requestedBy;
   const canDecide = request.status === 'pending' && !isAuthor;
-  const rows = request.payload.policy
-    ? diffPolicies(current?.policy, request.payload.policy)
-    : [];
+  // An update is diffed against the current policy: until it is loaded
+  // (or when it cannot be) there is no honest diff, so none is shown and
+  // the request cannot be approved; it can still be rejected.
+  const needsCurrent = request.kind === 'update';
+  const currentPending =
+    needsCurrent && !current && (currentLoading || currentFetching);
+  const currentMissing = needsCurrent && !current && currentFailed;
+  const diffReady = !needsCurrent || !!current;
+  const rows =
+    request.payload.policy && diffReady
+      ? diffPolicies(current?.policy, request.payload.policy)
+      : [];
 
   const decide = (action: 'approve' | 'reject') =>
     handleSubmit(async ({ note }) => {
@@ -151,6 +172,20 @@ const ChangeRequestModal = ({ request, onHide }: Props) => {
             ))}
           </div>
         )}
+        {currentPending && (
+          <div className="mb-3">
+            <Spinner animation="border" size="sm" role="status">
+              <span className="visually-hidden">
+                {t('adminCompliance.changeRequests.currentLoading')}
+              </span>
+            </Spinner>
+          </div>
+        )}
+        {currentMissing && (
+          <Alert variant="danger" className="fs-10">
+            {t('adminCompliance.changeRequests.currentLoadError')}
+          </Alert>
+        )}
         {rows.length > 0 && (
           <div className="mb-3">
             <h6 className="fs-10 text-700">
@@ -209,7 +244,7 @@ const ChangeRequestModal = ({ request, onHide }: Props) => {
             <Button
               variant="orkestra-primary"
               onClick={decide('approve')}
-              disabled={approving || rejecting}
+              disabled={approving || rejecting || !diffReady}
             >
               {t('adminCompliance.changeRequests.approve')}
             </Button>

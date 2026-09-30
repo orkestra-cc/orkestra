@@ -2466,6 +2466,8 @@
       "approved": "Request approved and applied.",
       "rejected": "Request rejected.",
       "decideError": "The decision could not be saved.",
+      "currentLoading": "Loading the current version of the policy…",
+      "currentLoadError": "The current version of the policy could not be loaded, so the changes cannot be shown. Reject the request or try again later.",
       "ownRequest": "You made this request: another operator must decide it.",
       "assignSummary": "Tenant {{tenant}}: from {{from}} to {{to}}.",
       "unassignSummary": "Tenant {{tenant}}: from {{from}} back to the platform policy."
