@@ -1,10 +1,12 @@
 package utils
 
 import (
+	"log/slog"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/orkestra/backend/internal/shared/redact"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -75,5 +77,83 @@ func TestMaskText_NoScanNoCut(t *testing.T) {
 	long := strings.Repeat("b", 2*maxScanTextLen)
 	if got := off.maskText(long); got != long {
 		t.Fatal("text cut although scanFreeText is off")
+	}
+}
+
+// Fix round 1: a map key is rendered only when it is a basic value. A struct
+// or pointer key printed with fmt.Sprint would carry every field (names,
+// passwords) into the log, so the whole map fails closed.
+type keyPerson struct{ Name, Password string }
+
+type keyLV struct{ v any }
+
+func (k keyLV) LogValue() slog.Value { return slog.AnyValue(k.v) }
+
+func maskMapValue(t *testing.T, v any) any {
+	t.Helper()
+	m := logMasker{p: policy(nil), key: testHashKey}
+	budget := maxMaskNodes
+	return m.maskValue([]any{v}, 0, &budget)
+}
+
+func TestMaskValue_MapWithStructKeyIsRedacted(t *testing.T) {
+	got := maskMapValue(t, map[keyPerson]string{{"Mario Rossi", "hunter2"}: "x"})
+	if want := []any{redact.Redacted}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("struct key: %#v, want %#v", got, want)
+	}
+	got = maskMapValue(t, map[*keyPerson]string{{"Mario Rossi", "hunter2"}: "x"})
+	if want := []any{redact.Redacted}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("pointer key: %#v, want %#v", got, want)
+	}
+	got = maskMapValue(t, map[any]string{keyPerson{"Mario Rossi", "hunter2"}: "x"})
+	if want := []any{redact.Redacted}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("interface holding a struct: %#v, want %#v", got, want)
+	}
+	got = maskMapValue(t, map[[2]int]string{{1, 2}: "x"})
+	if want := []any{redact.Redacted}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("array key: %#v, want %#v", got, want)
+	}
+	got = maskMapValue(t, map[complex128]string{1i: "x"})
+	if want := []any{redact.Redacted}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("complex key: %#v, want %#v", got, want)
+	}
+	got = maskMapValue(t, map[any]string{nil: "x"})
+	if want := []any{redact.Redacted}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("nil interface key: %#v, want %#v", got, want)
+	}
+}
+
+func TestMaskValue_MapWithLogValuerKeys(t *testing.T) {
+	got := maskMapValue(t, map[any]string{keyLV{"mario.rossi@example.com"}: "x"})
+	if want := []any{map[string]any{"[EMAIL]": "x"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("string LogValuer: %#v, want %#v", got, want)
+	}
+	got = maskMapValue(t, map[any]string{keyLV{keyPerson{"Mario Rossi", "hunter2"}}: "x"})
+	if want := []any{redact.Redacted}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("struct LogValuer: %#v, want %#v", got, want)
+	}
+	got = maskMapValue(t, map[keyLV]string{{"plain"}: "x"})
+	if want := []any{map[string]any{"plain": "x"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("typed LogValuer key: %#v, want %#v", got, want)
+	}
+}
+
+func TestMaskValue_MapWithBasicKeys(t *testing.T) {
+	got := maskMapValue(t, []any{
+		map[float64]string{1.5: "a"},
+		map[float32]string{2.25: "b"},
+		map[bool]string{false: "c"},
+		map[uint8]string{9: "d"},
+		map[any]string{int64(-3): "e", "k": "f"},
+	})
+	want := []any{[]any{
+		map[string]any{"1.5": "a"},
+		map[string]any{"2.25": "b"},
+		map[string]any{"false": "c"},
+		map[string]any{"9": "d"},
+		map[string]any{"-3": "e", "k": "f"},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("basic keys: %#v, want %#v", got, want)
 	}
 }

@@ -502,10 +502,13 @@ func (m logMasker) maskValue(val any, depth int, budget *int) any {
 }
 
 // maskReflect covers what the switch in maskValue cannot name: named string
-// types (type Email string), byte slices such as json.RawMessage, maps with
-// keys of any kind (rendered as text), slices and arrays of anything, pointers
-// to non-structs. The rest (numbers, booleans, structs, functions) is
-// returned as it is; logscope flags the opaque ones at the call site.
+// types (type Email string), byte slices such as json.RawMessage, maps whose
+// keys are basic values (rendered as text, see mapKeyText), slices and arrays
+// of anything, pointers to non-structs. A map with any other kind of key
+// (struct, pointer, array, interface holding one, ...) is replaced whole by
+// redact.Redacted: printing such a key would carry every field of it into the
+// log. The rest (numbers, booleans, structs, functions) is returned as it is;
+// logscope flags the opaque ones at the call site.
 func (m logMasker) maskReflect(val any, depth int, budget *int) any {
 	rv := reflect.ValueOf(val)
 	switch rv.Kind() {
@@ -523,17 +526,15 @@ func (m logMasker) maskReflect(val any, depth int, budget *int) any {
 		}
 		return m.maskSeq(val, rv, depth, budget)
 	case reflect.Map:
-		// Keys of any kind are rendered as text, as the JSON handler does with
+		// Basic keys are rendered as text, as the JSON handler does with
 		// numeric keys, and masked as data keys: a map keyed by user id or by
-		// something that prints an e-mail must not bypass the rules.
-		stringKeys := rv.Type().Key().Kind() == reflect.String
+		// something that prints an e-mail must not bypass the rules. Any other
+		// key fails the whole map closed.
 		out := make(map[string]any, rv.Len())
 		for it := rv.MapRange(); it.Next(); {
-			var k string
-			if stringKeys {
-				k = it.Key().String()
-			} else {
-				k = fmt.Sprint(it.Key().Interface())
+			k, ok := mapKeyText(it.Key())
+			if !ok {
+				return redact.Redacted
 			}
 			if mk, nv, ok := m.maskDataKV(k, it.Value().Interface(), depth+1, budget); ok {
 				out[mk] = nv
@@ -550,6 +551,39 @@ func (m logMasker) maskReflect(val any, depth int, budget *int) any {
 		return m.maskValue(rv.Elem().Interface(), depth+1, budget)
 	default:
 		return val
+	}
+}
+
+// mapKeyText renders a map key as text, and only when it is a basic value:
+// string, bool, any integer or float kind. It looks at the dynamic value, so
+// an interface key is judged by what it holds. A key implementing
+// slog.LogValuer is resolved first, and the result must itself be basic.
+// Nothing here goes through fmt's %v: a struct or pointer key would print
+// every field, ignoring json:"-" and LogValue. ok is false for the rest.
+func mapKeyText(key reflect.Value) (string, bool) {
+	if !key.IsValid() {
+		return "", false
+	}
+	kv := key.Interface()
+	if lv, isLV := kv.(slog.LogValuer); isLV {
+		kv = slog.AnyValue(lv).Resolve().Any()
+	}
+	rv := reflect.ValueOf(kv)
+	switch rv.Kind() {
+	case reflect.String:
+		return rv.String(), true
+	case reflect.Bool:
+		return strconv.FormatBool(rv.Bool()), true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(rv.Int(), 10), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return strconv.FormatUint(rv.Uint(), 10), true
+	case reflect.Float32:
+		return strconv.FormatFloat(rv.Float(), 'g', -1, 32), true
+	case reflect.Float64:
+		return strconv.FormatFloat(rv.Float(), 'g', -1, 64), true
+	default:
+		return "", false
 	}
 }
 
