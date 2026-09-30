@@ -1492,9 +1492,14 @@ winning credential. Password replacement still uses `change-password`.
 After persistence, credential teardown runs unconditionally, independent
 of `revokeSessionsOnPasswordChange`: preserve the current SID, revoke every
 other refresh credential and active session, denylist their SIDs, and revoke
-all device-trust grants with reason `password_added`. Active refresh SIDs
-are snapshotted before teardown so orphan refresh credentials with no
-session document are covered too. Post-write teardown is best effort; a
+all device-trust grants with reason `password_added`. Unexpired refresh
+history (including revoked/rotating predecessors) is snapshotted before
+teardown so the CAS-to-successor-insert gap cannot hide a family. Every
+non-current non-empty family is fenced with `RevokeFamily` before session
+cleanup; the current SID's families are preserved. Families and SIDs are
+deduplicated. Orphan and legacy empty-family SIDs are still revoked and
+denylisted. A lineage read or family-fence failure reports incomplete
+teardown while the remaining cleanup stages continue. Post-write teardown is best effort; a
 failure neither rolls the password back nor turns successful creation into
 a retryable failure. The success security event `self_password_added` maps
 to compliance action `auth.password.added`, carrying operator audience,

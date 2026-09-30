@@ -72,8 +72,13 @@ The caller's current SID is preserved. Every other session/refresh path,
 including refresh credentials whose session document is missing, is
 revoked or denylisted, and all device-trust grants are revoked with reason
 `password_added`. This teardown always runs regardless of
-`revokeSessionsOnPasswordChange`, but is best effort after persistence: a
-failure does not roll back the new hash or change the successful creation
+`revokeSessionsOnPasswordChange`. Unexpired refresh history includes
+rotating predecessors, allowing every other non-empty family to be fenced
+before session cleanup so a concurrent successor cannot escape. The caller's
+SID and families survive; orphan and legacy empty-family SIDs are also
+revoked and denylisted. A failed lineage read or family fence marks teardown
+incomplete. Teardown is best effort after persistence:
+a failure does not roll back the new hash or change the successful creation
 response. The `self_password_added` security event and `auth.password.added`
 compliance action record actor/resource UUID, operator audience, source IP,
 current SID, a conservative `otherSessionsRevoked` count and

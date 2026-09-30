@@ -461,7 +461,8 @@ export const authApi = baseApi.injectEndpoints({
         method: 'POST',
         body
       }),
-      invalidatesTags: ['SelfAuthMethods']
+      invalidatesTags: (_result, error) =>
+        error ? [] : ['SelfAuthMethods', 'Sessions', 'TrustedDevices']
     }),
 
     // Change password while authenticated

@@ -1229,7 +1229,7 @@
       "emailHelp": "Usa questa email per accedere con la nuova password.",
       "enrollmentSubmit": "Aggiungi password",
       "enrollmentSubmitting": "Aggiunta della password…",
-      "enrollmentSuccessToast": "Password aggiunta. Le altre sessioni sono state chiuse.",
+      "enrollmentSuccessToast": "Password aggiunta.",
       "alreadySetNotice": "Il tuo account ha già una password. Puoi cambiarla usando la password attuale.",
       "enrollmentDisabled": "L'accesso con email e password non è disponibile. Contatta l'amministratore per abilitarlo prima di aggiungere una password.",
       "errorRequiredCurrent": "Inserisci la password attuale.",

@@ -1340,17 +1340,18 @@ func (s *PasswordAuthService) SetInitialPassword(ctx context.Context, in SetInit
 	}
 	_ = s.userService.ClearFailedLogins(ctx, user.UUID)
 	s.resetLoginFailures(ctx, user.Email)
-	// Snapshot refresh SIDs before the shared helper can perform its by-user
-	// sweep (when CurrentSID is empty), otherwise orphan SIDs disappear from
-	// the active-token query before their access tokens are denylisted.
+	// Include rotating/revoked predecessors: rotation has a CAS→insert gap
+	// with no active row. Fence their families before session-level cleanup
+	// so a late successor cannot escape that cleanup.
 	var refreshTokens []*authModels.RefreshTokenDoc
 	var refreshReadErr error
 	if s.refreshTokenRepo != nil {
-		refreshTokens, refreshReadErr = s.refreshTokenRepo.GetActiveTokensByUser(ctx, user.UUID)
+		refreshTokens, refreshReadErr = s.refreshTokenRepo.GetUnexpiredTokensByUser(ctx, user.UUID)
 	}
+	familiesComplete := s.fenceOtherRefreshFamilies(ctx, in.CurrentSID, refreshTokens, refreshReadErr)
 	teardown := s.revokeSessionsAfterCredentialChange(ctx, user.UUID,
 		"password_added", in.CurrentSID, authModels.DeviceTrustRevokedOnPasswordAdded)
-	if !s.revokeRemainingRefreshCredentials(ctx, user.UUID, in.CurrentSID, teardown.processedSIDs, refreshTokens, refreshReadErr) {
+	if !s.revokeRemainingRefreshCredentials(ctx, user.UUID, in.CurrentSID, teardown.processedSIDs, refreshTokens, refreshReadErr) || !familiesComplete {
 		teardown.Complete = false
 	}
 	emitCredentialEvent(ctx, s.securityEventSink, s.logger, "self_password_added", user.UUID, map[string]interface{}{
@@ -1362,7 +1363,40 @@ func (s *PasswordAuthService) SetInitialPassword(ctx context.Context, in SetInit
 	return nil
 }
 
-// revokeRemainingRefreshCredentials closes refresh/SID paths whose active
+func (s *PasswordAuthService) fenceOtherRefreshFamilies(ctx context.Context, keepSID string, tokens []*authModels.RefreshTokenDoc, readErr error) bool {
+	if s.refreshTokenRepo == nil || readErr != nil {
+		return false
+	}
+	kept := map[string]struct{}{}
+	for _, token := range tokens {
+		if token != nil && keepSID != "" && token.SessionUUID == keepSID {
+			kept[token.FamilyID] = struct{}{}
+		}
+	}
+	seen := map[string]struct{}{}
+	complete := true
+	for _, token := range tokens {
+		if token == nil || token.FamilyID == "" {
+			continue // Legacy families are covered by SID revocation below.
+		}
+		if _, keep := kept[token.FamilyID]; keep {
+			continue
+		}
+		if _, duplicate := seen[token.FamilyID]; duplicate {
+			continue
+		}
+		seen[token.FamilyID] = struct{}{}
+		if _, err := s.refreshTokenRepo.RevokeFamily(ctx, token.FamilyID, "password_added"); err != nil {
+			complete = false
+			if s.logger != nil {
+				s.logger.Warn("auth: fence refresh family after initial password enrollment failed", slog.String("family_id", token.FamilyID), slog.String("error", err.Error()))
+			}
+		}
+	}
+	return complete
+}
+
+// revokeRemainingRefreshCredentials closes unexpired refresh/SID paths whose
 // session document is missing. Only initial-password enrollment calls this:
 // refresh currently permits a missing session anchor during its compatibility
 // window. Orphan refresh-only SIDs do not add to the session-completion count.

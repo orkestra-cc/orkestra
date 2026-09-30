@@ -617,6 +617,9 @@ func (r *gateRefreshRepo) GetBySessionUUID(context.Context, string) (*authModels
 func (r *gateRefreshRepo) GetActiveTokensByUser(context.Context, string) ([]*authModels.RefreshTokenDoc, error) {
 	panic("not used")
 }
+func (r *gateRefreshRepo) GetUnexpiredTokensByUser(context.Context, string) ([]*authModels.RefreshTokenDoc, error) {
+	panic("not used")
+}
 func (r *gateRefreshRepo) GetActiveTokensByDevice(context.Context, string, string) ([]*authModels.RefreshTokenDoc, error) {
 	panic("not used")
 }

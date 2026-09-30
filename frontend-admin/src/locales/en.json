@@ -1229,7 +1229,7 @@
       "emailHelp": "Use this email when signing in with your new password.",
       "enrollmentSubmit": "Add password",
       "enrollmentSubmitting": "Adding password…",
-      "enrollmentSuccessToast": "Password added. Other sessions have been signed out.",
+      "enrollmentSuccessToast": "Password added.",
       "alreadySetNotice": "Your account already has a password. You can change it using your current password.",
       "enrollmentDisabled": "Email/password sign-in is unavailable. Contact your administrator to enable it before adding a password.",
       "errorRequiredCurrent": "Enter your current password.",

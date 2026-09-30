@@ -51,6 +51,42 @@ type revocationRefreshRepo struct {
 	tokens         []*authModels.RefreshTokenDoc
 	listErr        error
 	sessionErrors  map[string]error
+	familyErrors   map[string]error
+	fencedFamilies []string
+}
+
+func (r *revocationRefreshRepo) GetUnexpiredTokensByUser(_ context.Context, userUUID string) ([]*authModels.RefreshTokenDoc, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	var rows []*authModels.RefreshTokenDoc
+	for _, row := range r.tokens {
+		if row.UserUUID == userUUID && row.ExpiresAt.After(time.Now()) {
+			cp := *row
+			rows = append(rows, &cp)
+		}
+	}
+	return rows, nil
+}
+
+func (r *revocationRefreshRepo) RevokeFamily(_ context.Context, family, reason string) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.fencedFamilies = append(r.fencedFamilies, family)
+	if err := r.familyErrors[family]; err != nil {
+		return 0, err
+	}
+	var count int64
+	for _, row := range r.tokens {
+		if row.FamilyID == family && !row.IsRevoked {
+			row.IsRevoked = true
+			row.RevokedReason = reason
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (r *revocationRefreshRepo) RevokeTokensByUser(_ context.Context, userUUID, reason string) error {

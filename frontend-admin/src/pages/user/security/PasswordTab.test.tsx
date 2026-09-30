@@ -16,6 +16,9 @@ import {
 } from 'test/handlers';
 import PasswordTab from './PasswordTab';
 
+const { successToast } = vi.hoisted(() => ({ successToast: vi.fn() }));
+vi.mock('react-toastify', () => ({ toast: { success: successToast } }));
+
 const oauthOnly = {
   ...emptySelfAuthMethods,
   hasPasswordSet: false,
@@ -263,6 +266,7 @@ describe('PasswordTab credential submissions', () => {
         expect(screen.getByRole('alert')).toHaveTextContent(
           /already.*password/i
         );
+      else expect(successToast).toHaveBeenLastCalledWith('Password added.');
     }
   );
 

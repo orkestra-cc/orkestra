@@ -4,20 +4,210 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/internal/core/auth/repository"
+	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"go.mongodb.org/mongo-driver/event"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type initialPasswordSetterFunc func(context.Context, string, string) error
 
 func (f initialPasswordSetterFunc) SetPasswordHashIfUnset(ctx context.Context, userUUID, hash string) error {
 	return f(ctx, userUUID, hash)
+}
+
+// Use the existing rotation fake's CAS barrier; only the repository read is
+// adapted, preserving the real race semantics and durable family fence.
+type enrollmentRaceRepo struct{ *gateRefreshRepo }
+
+func (r *enrollmentRaceRepo) tokensByUser(user string, activeOnly bool) ([]*authModels.RefreshTokenDoc, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var rows []*authModels.RefreshTokenDoc
+	for _, row := range r.byHash {
+		if row.UserUUID == user && row.ExpiresAt.After(time.Now()) && (!activeOnly || !row.IsRevoked) {
+			cp := *row
+			rows = append(rows, &cp)
+		}
+	}
+	return rows, nil
+}
+
+func (r *enrollmentRaceRepo) GetActiveTokensByUser(_ context.Context, user string) ([]*authModels.RefreshTokenDoc, error) {
+	return r.tokensByUser(user, true)
+}
+
+func (r *enrollmentRaceRepo) GetUnexpiredTokensByUser(_ context.Context, user string) ([]*authModels.RefreshTokenDoc, error) {
+	return r.tokensByUser(user, false)
+}
+
+func TestSetInitialPassword_FencesRotationInCASInsertGap(t *testing.T) {
+	e := newInitialPasswordEnv(t)
+	r := &enrollmentRaceRepo{&gateRefreshRepo{byHash: map[string]*authModels.RefreshTokenDoc{}, compromised: map[string]testFamilyRevocation{}}}
+	e.svc.refreshTokenRepo = r
+	ctx := context.Background()
+	r.seedRefreshDoc(utils.HashRefreshToken("old"), &authModels.RefreshTokenDoc{UUID: "old", UserUUID: e.user.UUID, SessionUUID: "orphan-sid", FamilyID: "other-family", ExpiresAt: time.Now().Add(time.Hour)})
+	reached, release := make(chan struct{}), make(chan struct{})
+	r.setRotationBarrier(reached, release)
+	done := make(chan error, 1)
+	go func() {
+		done <- r.RotateWithFamily(ctx, utils.HashRefreshToken("old"), &authModels.RefreshTokenDoc{UUID: "successor", Token: "next", UserUUID: e.user.UUID, SessionUUID: "orphan-sid", FamilyID: "other-family", ExpiresAt: time.Now().Add(time.Hour)})
+	}()
+	<-reached
+	if err := e.svc.SetInitialPassword(ctx, SetInitialPasswordInput{UserUUID: e.user.UUID, CurrentSID: "sess-caller", New: "new-password-passphrase"}); err != nil {
+		close(release)
+		<-done
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-done; !errors.Is(err, repository.ErrTokenAlreadyRotated) {
+		t.Fatalf("successor escaped enrollment fence: rotation error=%v", err)
+	}
+	row, err := r.GetByTokenAny(ctx, utils.HashRefreshToken("next"))
+	if err != nil || row == nil || !row.IsRevoked || row.RevokedReason != "password_added" {
+		t.Fatalf("late successor must be unusable: row=%+v error=%v", row, err)
+	}
+	if !contains(e.revoker.revokedList(), "orphan-sid") {
+		t.Fatal("rotating orphan SID must also be denylisted")
+	}
+}
+
+func TestSetInitialPassword_LiveMongoFencesRotationInCASInsertGap(t *testing.T) {
+	uri := os.Getenv("MONGO_TEST_URI")
+	if uri == "" {
+		t.Skip("set MONGO_TEST_URI for live enrollment race regression")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	if err := client.Ping(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	db := client.Database("auth_enrollment_race_" + uuid.NewString())
+	defer db.Drop(context.Background())
+	repo := repository.NewOperatorRefreshTokenRepository(db)
+	e := newInitialPasswordEnv(t)
+	e.svc.refreshTokenRepo = repo
+	old := &authModels.RefreshTokenDoc{UUID: "old", Token: "mongo-old", UserUUID: e.user.UUID, SessionUUID: "orphan-sid", FamilyID: "other-family", DeviceID: "other-device", DeviceType: "desktop", Platform: "web", Fingerprint: "test-fingerprint", ExpiresAt: time.Now().Add(time.Hour)}
+	if err := repo.CreateRefreshToken(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateRefreshToken(ctx, &authModels.RefreshTokenDoc{UUID: "caller", Token: "mongo-caller", UserUUID: e.user.UUID, SessionUUID: "sess-caller", FamilyID: "caller-family", DeviceID: "caller-device", DeviceType: "desktop", Platform: "web", Fingerprint: "test-fingerprint", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	reached, release := make(chan struct{}), make(chan struct{})
+	monitor := &event.CommandMonitor{Succeeded: func(commandCtx context.Context, command *event.CommandSucceededEvent) {
+		if command.CommandName == "update" {
+			close(reached)
+			select {
+			case <-release:
+			case <-commandCtx.Done():
+			}
+		}
+	}}
+	rotatingClient, err := mongo.Connect(ctx, options.Client().ApplyURI(uri).SetMonitor(monitor))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rotatingClient.Disconnect(context.Background())
+	rotatingRepo := repository.NewOperatorRefreshTokenRepository(rotatingClient.Database(db.Name()))
+	done := make(chan error, 1)
+	go func() {
+		done <- rotatingRepo.RotateWithFamily(ctx, utils.HashRefreshToken("mongo-old"), &authModels.RefreshTokenDoc{UUID: "next", Token: "mongo-next", UserUUID: e.user.UUID, SessionUUID: "orphan-sid", FamilyID: "other-family", ExpiresAt: time.Now().Add(time.Hour)})
+	}()
+	select {
+	case <-reached:
+	case <-ctx.Done():
+		t.Fatal("rotation did not reach CAS barrier")
+	}
+	enrollErr := e.svc.SetInitialPassword(ctx, SetInitialPasswordInput{UserUUID: e.user.UUID, CurrentSID: "sess-caller", New: "new-password-passphrase"})
+	close(release)
+	rotateErr := <-done
+	if enrollErr != nil {
+		t.Fatal(enrollErr)
+	}
+	if !errors.Is(rotateErr, repository.ErrTokenAlreadyRotated) {
+		t.Fatalf("late successor escaped: %v", rotateErr)
+	}
+	row, err := repo.GetByTokenAny(ctx, utils.HashRefreshToken("mongo-next"))
+	if err != nil || row == nil || !row.IsRevoked || row.RevokedReason != "password_added" {
+		t.Fatalf("successor=%+v error=%v", row, err)
+	}
+	caller, err := repo.GetByToken(ctx, utils.HashRefreshToken("mongo-caller"))
+	if err != nil || caller == nil {
+		t.Fatalf("caller lost refresh credential: %v", err)
+	}
+	if !contains(e.revoker.revokedList(), "orphan-sid") || e.events.rows[0].Metadata["teardownComplete"] != true {
+		t.Fatal("complete enrollment must denylist rotating orphan SID")
+	}
+}
+
+func TestSetInitialPassword_PreservesCurrentFamilyAndDeduplicatesHistory(t *testing.T) {
+	e := newInitialPasswordEnv(t)
+	for _, row := range []struct {
+		sid, family string
+		revoked     bool
+	}{
+		{"sess-caller", "caller-family", true},
+		{"sess-caller", "caller-family", false},
+		{"orphan-sid", "other-family", true},
+		{"orphan-sid", "other-family", false},
+		{"legacy-sid", "", true},
+	} {
+		e.refresh.tokens = append(e.refresh.tokens, &authModels.RefreshTokenDoc{UserUUID: e.user.UUID, SessionUUID: row.sid, FamilyID: row.family, IsRevoked: row.revoked, ExpiresAt: time.Now().Add(time.Hour)})
+	}
+	if err := e.svc.SetInitialPassword(context.Background(), SetInitialPasswordInput{UserUUID: e.user.UUID, CurrentSID: "sess-caller", New: "new-password-passphrase"}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(e.refresh.fencedFamilies, []string{"other-family"}) {
+		t.Fatalf("only other family must be fenced once: %v", e.refresh.fencedFamilies)
+	}
+	if e.refresh.tokens[1].IsRevoked || !e.refresh.tokens[3].IsRevoked {
+		t.Fatal("caller family must remain usable and other family must be revoked")
+	}
+	for _, sid := range []string{"orphan-sid", "legacy-sid"} {
+		count := 0
+		for _, revoked := range e.revoker.revokedList() {
+			if revoked == sid {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("SID %s denylisted %d times", sid, count)
+		}
+	}
+}
+
+func TestSetInitialPassword_FamilyFenceFailureDoesNotStopTeardown(t *testing.T) {
+	e := newInitialPasswordEnv(t)
+	e.refresh.familyErrors = map[string]error{"failed-family": errors.New("family fence unavailable")}
+	for _, family := range []string{"failed-family", "later-family"} {
+		e.refresh.tokens = append(e.refresh.tokens, &authModels.RefreshTokenDoc{UserUUID: e.user.UUID, SessionUUID: family + "-sid", FamilyID: family, IsRevoked: true, ExpiresAt: time.Now().Add(time.Hour)})
+	}
+	if err := e.svc.SetInitialPassword(context.Background(), SetInitialPasswordInput{UserUUID: e.user.UUID, CurrentSID: "sess-caller", New: "new-password-passphrase"}); err != nil {
+		t.Fatal(err)
+	}
+	if e.user.PasswordHash == "" || e.events.rows[0].Metadata["teardownComplete"] != false {
+		t.Fatal("successful password creation must report incomplete teardown")
+	}
+	if !reflect.DeepEqual(e.refresh.fencedFamilies, []string{"failed-family", "later-family"}) || !contains(e.revoker.revokedList(), "failed-family-sid") || !contains(e.revoker.revokedList(), "later-family-sid") || len(e.trust.revokedList()) != 1 {
+		t.Fatal("failed family fence must not stop later fences, SID revocation, or trust teardown")
+	}
 }
 
 type initialPasswordEnv struct {
