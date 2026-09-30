@@ -410,3 +410,112 @@ func TestListPolicies(t *testing.T) {
 		t.Fatalf("GetPolicy = %+v, %v", d, err)
 	}
 }
+
+var carolActor = Actor{UserID: "carol", TenantID: "internal-1"}
+
+// racyRepo serves one stale read of a change request (still pending), as the
+// loser of an approval race sees it before the winner commits.
+type racyRepo struct {
+	*policytest.MemRepo
+	staleRead *models.PolicyChangeRequest
+}
+
+func (r *racyRepo) GetChangeRequest(ctx context.Context, uuid string) (*models.PolicyChangeRequest, error) {
+	if r.staleRead != nil && r.staleRead.UUID == uuid {
+		cr := *r.staleRead
+		r.staleRead = nil
+		return &cr, nil
+	}
+	return r.MemRepo.GetChangeRequest(ctx, uuid)
+}
+
+// A concurrent approver won the compare-and-set and applied the request: the
+// loser's revalidation fails (the policy moved), but the request is already
+// decided, so the loser reports "not pending" and records nothing.
+func TestApprove_LosingTheRaceIsNotSuperseded(t *testing.T) {
+	f := newAdminFixture(t)
+	ctx := context.Background()
+	p := f.createStrict(t, "Strict")
+	looser := p.Input()
+	looser.LogContent.IPAddress = iface.IPAddressFull
+	res, err := f.admin.Update(ctx, alice, p.UUID, 1, looser, "motivo", true)
+	if err != nil || res.ChangeRequest == nil {
+		t.Fatalf("Update with warnings = %+v, %v", res, err)
+	}
+	id := res.ChangeRequest.UUID
+	stalePending := *res.ChangeRequest // what the loser read before the winner committed
+	// The winner: the request is approved and the policy moved to version 2.
+	if err := f.repo.DecideChangeRequest(ctx, id, models.ChangeStatusApproved, "carol", "ok", f.now); err != nil {
+		t.Fatal(err)
+	}
+	edit := p.Input()
+	edit.Description = "applicata dal vincitore"
+	if _, err := f.admin.Update(ctx, carolActor, p.UUID, 1, edit, "descrizione", false); err != nil {
+		t.Fatal(err)
+	}
+	f.admin.repo = &racyRepo{MemRepo: f.repo, staleRead: &stalePending}
+	_, err = f.admin.Approve(ctx, bob, id, "ok")
+	if !errors.Is(err, repository.ErrChangeRequestNotPending) {
+		t.Fatalf("losing approval = %v, want ErrChangeRequestNotPending", err)
+	}
+	if slices.Contains(f.sink.Actions(), "compliance.change_request.superseded") {
+		t.Fatalf("a superseded event was recorded: %v", f.sink.Actions())
+	}
+	if cr, _ := f.repo.GetChangeRequest(ctx, id); cr.Status != models.ChangeStatusApproved || cr.DecidedBy != "carol" {
+		t.Fatalf("request = %+v, want it left as decided by the winner", cr)
+	}
+}
+
+// racedBootRepo makes another replica's platform policy appear during the
+// boot transaction, which then fails with err (name or platform-flag
+// duplicate, whichever Mongo reports first).
+type racedBootRepo struct {
+	*policytest.MemRepo
+	winner *models.Policy
+	err    error
+}
+
+func (r *racedBootRepo) WithTxn(ctx context.Context, fn func(context.Context) error) error {
+	if r.winner != nil {
+		w := r.winner
+		r.winner = nil
+		if err := r.MemRepo.InsertPolicy(ctx, w); err != nil {
+			return err
+		}
+		return r.err
+	}
+	return r.MemRepo.WithTxn(ctx, fn)
+}
+
+func TestEnsurePlatformPolicy_LosingTheBootRaceIsNotAnError(t *testing.T) {
+	for _, dup := range []error{repository.ErrPolicyNameTaken, repository.ErrPlatformPolicyExists} {
+		sink := &policytest.Sink{}
+		winner := models.NewPlatformPolicy("winner", testNow)
+		repo := &racedBootRepo{MemRepo: policytest.NewMemRepo(), winner: &winner, err: dup}
+		logger := slog.New(slog.DiscardHandler)
+		admin := NewPolicyAdminService(repo, NewPolicyService(repo, logger), nil, sink, func(context.Context) bool { return true }, logger)
+		if err := admin.EnsurePlatformPolicy(context.Background()); err != nil {
+			t.Fatalf("EnsurePlatformPolicy after %v = %v, want nil", dup, err)
+		}
+		if got := sink.Actions(); len(got) != 0 {
+			t.Fatalf("the loser emitted %v", got)
+		}
+	}
+}
+
+type failingTxnRepo struct {
+	*policytest.MemRepo
+	err error
+}
+
+func (r *failingTxnRepo) WithTxn(context.Context, func(context.Context) error) error { return r.err }
+
+func TestEnsurePlatformPolicy_RealFailureIsReturned(t *testing.T) {
+	boom := errors.New("boom")
+	repo := &failingTxnRepo{MemRepo: policytest.NewMemRepo(), err: boom}
+	logger := slog.New(slog.DiscardHandler)
+	admin := NewPolicyAdminService(repo, NewPolicyService(repo, logger), nil, &policytest.Sink{}, func(context.Context) bool { return true }, logger)
+	if err := admin.EnsurePlatformPolicy(context.Background()); !errors.Is(err, boom) {
+		t.Fatalf("EnsurePlatformPolicy = %v, want the original error", err)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 
@@ -45,21 +46,66 @@ func ensurePolicyIndexesForServices(t *testing.T, db *mongo.Database) {
 
 func newMongoAdmin(t *testing.T) (*PolicyAdminService, *repository.PolicyRepository, func()) {
 	t.Helper()
+	admin, repo, _, cleanup := newMongoAdminWithSink(t)
+	return admin, repo, cleanup
+}
+
+func newMongoAdminWithSink(t *testing.T) (*PolicyAdminService, *repository.PolicyRepository, *policytest.Sink, func()) {
+	t.Helper()
 	db, cleanup := newServiceTestDB(t)
 	ensurePolicyIndexesForServices(t, db)
 	repo := repository.NewPolicyRepo(db)
 	logger := slog.New(slog.DiscardHandler)
 	svc := NewPolicyService(repo, logger)
 	tenants := policytest.Tenants{"t1": {UUID: "t1", Kind: iface.TenantKindExternal, Name: "Clinica"}}
-	admin := NewPolicyAdminService(repo, svc, tenants, &policytest.Sink{}, func(context.Context) bool { return true }, logger)
+	sink := &policytest.Sink{}
+	admin := NewPolicyAdminService(repo, svc, tenants, sink, func(context.Context) bool { return true }, logger)
 	if err := admin.EnsurePlatformPolicy(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	return admin, repo, cleanup
+	return admin, repo, sink, cleanup
+}
+
+// Replicas booting together on a fresh database all call EnsurePlatformPolicy:
+// every call returns nil and exactly one platform policy (one version) exists.
+func TestPolicyAdmin_Mongo_ConcurrentBootCreatesOnePlatformPolicy(t *testing.T) {
+	db, cleanup := newServiceTestDB(t)
+	defer cleanup()
+	ensurePolicyIndexesForServices(t, db)
+	repo := repository.NewPolicyRepo(db)
+	logger := slog.New(slog.DiscardHandler)
+	const replicas = 6
+	var wg sync.WaitGroup
+	errs := make([]error, replicas)
+	start := make(chan struct{})
+	for i := range replicas {
+		admin := NewPolicyAdminService(repo, NewPolicyService(repo, logger), nil, &policytest.Sink{}, func(context.Context) bool { return true }, logger)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs[i] = admin.EnsurePlatformPolicy(context.Background())
+		}()
+	}
+	close(start)
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("replica %d: EnsurePlatformPolicy = %v, want nil", i, err)
+		}
+	}
+	ctx := context.Background()
+	ps, err := repo.ListPolicies(ctx)
+	if err != nil || len(ps) != 1 || !ps[0].IsPlatformDefault {
+		t.Fatalf("policies = %+v, %v; want exactly the platform policy", ps, err)
+	}
+	if vs, err := repo.ListVersions(ctx, ps[0].UUID); err != nil || len(vs) != 1 {
+		t.Fatalf("versions = %+v, %v; want one", vs, err)
+	}
 }
 
 func TestPolicyAdmin_Mongo_ConcurrentApprovalsApplyOnce(t *testing.T) {
-	admin, repo, cleanup := newMongoAdmin(t)
+	admin, repo, sink, cleanup := newMongoAdminWithSink(t)
 	defer cleanup()
 	ctx := context.Background()
 	in := tenantInput()
@@ -80,8 +126,11 @@ func TestPolicyAdmin_Mongo_ConcurrentApprovalsApplyOnce(t *testing.T) {
 	wg.Wait()
 	wins := 0
 	for _, err := range errs {
-		if err == nil {
+		switch {
+		case err == nil:
 			wins++
+		case !errors.Is(err, repository.ErrChangeRequestNotPending):
+			t.Fatalf("the losing approval = %v, want ErrChangeRequestNotPending (not superseded)", err)
 		}
 	}
 	if wins != 1 {
@@ -90,6 +139,20 @@ func TestPolicyAdmin_Mongo_ConcurrentApprovalsApplyOnce(t *testing.T) {
 	ps, _ := repo.ListPolicies(ctx)
 	if len(ps) != 2 {
 		t.Fatalf("policies = %d, want platform + 1", len(ps))
+	}
+	if cr, err := repo.GetChangeRequest(ctx, res.ChangeRequest.UUID); err != nil || cr.Status != models.ChangeStatusApproved {
+		t.Fatalf("request = %+v, %v; want approved", cr, err)
+	}
+	for _, p := range ps {
+		if p.IsPlatformDefault {
+			continue
+		}
+		if vs, _ := repo.ListVersions(ctx, p.UUID); len(vs) != 1 {
+			t.Fatalf("versions of the created policy = %d, want 1", len(vs))
+		}
+	}
+	if slices.Contains(sink.Actions(), "compliance.change_request.superseded") {
+		t.Fatalf("a superseded event was recorded: %v", sink.Actions())
 	}
 }
 

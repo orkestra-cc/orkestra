@@ -167,8 +167,8 @@ func maskReason(s string) string {
 }
 
 // EnsurePlatformPolicy creates the platform policy on first boot (spec
-// §10.1). Concurrent replicas race on the partial unique index; the loser
-// returns nil.
+// §10.1). Concurrent replicas race on the unique indexes; the loser finds the
+// winner's policy and returns nil.
 func (s *PolicyAdminService) EnsurePlatformPolicy(ctx context.Context) error {
 	if _, err := s.repo.GetPlatformPolicy(ctx); err == nil || !errors.Is(err, repository.ErrPolicyNotFound) {
 		return err
@@ -180,10 +180,13 @@ func (s *PolicyAdminService) EnsurePlatformPolicy(ctx context.Context) error {
 		}
 		return s.repo.InsertVersion(ctx, s.version(p, models.VersionCreate, models.SystemActor, p.CreatedAt, nil))
 	})
-	if errors.Is(err, repository.ErrPlatformPolicyExists) {
-		return nil
-	}
 	if err != nil {
+		// A concurrent replica may have created the platform policy first;
+		// Mongo reports either the name or the platform-flag duplicate. If
+		// the policy exists now, the boot succeeded (the winner audits it).
+		if _, gerr := s.repo.GetPlatformPolicy(ctx); gerr == nil {
+			return nil
+		}
 		return err
 	}
 	s.emit(ctx, Actor{UserID: models.SystemActor}, "compliance.policy.created", "compliance_policy", p.UUID,
@@ -510,8 +513,10 @@ func (s *PolicyAdminService) Approve(ctx context.Context, actor Actor, requestUU
 	ap := &approval{request: cr, by: actor, note: maskReason(note)}
 	res, err := s.applyRequest(ctx, cr, ap)
 	if isStale(err) {
-		if derr := s.repo.DecideChangeRequest(ctx, cr.UUID, models.ChangeStatusSuperseded, actor.UserID, ap.note, s.now().UTC()); derr != nil &&
-			!errors.Is(derr, repository.ErrChangeRequestNotPending) {
+		// Only the call that wins the compare-and-set records the outcome: if
+		// a concurrent approver already decided the request, this one lost
+		// the race and reports it as not pending, without an audit event.
+		if derr := s.repo.DecideChangeRequest(ctx, cr.UUID, models.ChangeStatusSuperseded, actor.UserID, ap.note, s.now().UTC()); derr != nil {
 			return nil, derr
 		}
 		s.emit(ctx, actor, "compliance.change_request.superseded", "compliance_change_request", cr.UUID,
