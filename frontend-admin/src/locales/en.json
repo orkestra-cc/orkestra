@@ -1221,6 +1221,18 @@
       "dash": "—"
     },
     "passwordTab": {
+      "loading": "Loading password settings…",
+      "loadError": "Couldn’t load password settings. Try again in a moment.",
+      "enrollmentHeading": "Add email and password sign-in",
+      "enrollmentIntro": "Choose a password to sign in with your existing account email. Your social sign-in stays available. Adding a password signs out your other sessions.",
+      "labelEmail": "Account email",
+      "emailHelp": "Use this email when signing in with your new password.",
+      "enrollmentSubmit": "Add password",
+      "enrollmentSubmitting": "Adding password…",
+      "enrollmentSuccessToast": "Password added. Other sessions have been signed out.",
+      "alreadySetNotice": "Your account already has a password. You can change it using your current password.",
+      "enrollmentDisabled": "Email/password sign-in is unavailable. Contact your administrator to enable it before adding a password.",
+      "errorRequiredCurrent": "Enter your current password.",
       "title": "Change password",
       "intro": "Choose a password you don’t use anywhere else. Changing it signs out your other sessions.",
       "ssoOnlyHint": "Your account uses a single sign-on provider only. Set a password here to add a second login method.",

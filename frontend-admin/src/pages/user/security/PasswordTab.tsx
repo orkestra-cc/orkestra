@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, Button, Col, Form, Row, Spinner } from 'react-bootstrap';
 import { useForm } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
@@ -9,15 +9,21 @@ import { toast } from 'react-toastify';
 import {
   passwordUiVisible,
   useChangePasswordMutation,
-  useGetAuthPolicyQuery
+  useGetPasswordEnrollmentPolicyQuery,
+  useGetCurrentUserQuery,
+  useGetSelfAuthMethodsQuery,
+  useSetInitialPasswordMutation
 } from 'store/api/authApi';
-import { useGetSelfAuthMethodsQuery } from 'store/api/authApi';
 
 // The schema depends on the live password policy, so it is built per
 // `minLength` rather than declared as a module constant.
-const makeSchema = (minLength: number, t: TFunction) =>
+const makeSchema = (minLength: number, hasPassword: boolean, t: TFunction) =>
   yup.object({
-    oldPassword: yup.string().defined().default(''),
+    oldPassword: hasPassword
+      ? yup
+          .string()
+          .required(t('userSecurity.passwordTab.errorRequiredCurrent'))
+      : yup.string().defined().default(''),
     newPassword: yup
       .string()
       .required(t('userSecurity.passwordTab.errorRequiredNew'))
@@ -36,30 +42,30 @@ const makeSchema = (minLength: number, t: TFunction) =>
 
 type PasswordForm = yup.InferType<ReturnType<typeof makeSchema>>;
 
-// PasswordTab implements the self-service password-change flow that
-// the legacy /user/settings::ChangePassword card stubbed out. Wired
-// to the existing /v1/auth/operator/change-password mutation; the
-// backend enforces the current admin-managed password policy
-// (min/max length, complexity, HIBP) — we display the minimum length
-// up-front so the user knows what they're targeting.
-//
 // The pane carries no card of its own: the tab strip above already names
 // this section (same rule the /admin/compliance panes follow).
 const PasswordTab = () => {
   const { t } = useTranslation();
-  const { data: policy } = useGetAuthPolicyQuery();
-  const { data: authMethods } = useGetSelfAuthMethodsQuery();
-  const [changePassword, { isLoading }] = useChangePasswordMutation();
+  const policyQuery = useGetPasswordEnrollmentPolicyQuery();
+  const methodsQuery = useGetSelfAuthMethodsQuery();
+  const userQuery = useGetCurrentUserQuery();
+  const [changePassword, changeState] = useChangePasswordMutation();
+  const [setInitialPassword, enrollmentState] = useSetInitialPasswordMutation();
+  const [alreadySet, setAlreadySet] = useState(false);
+  const isLoading = changeState.isLoading || enrollmentState.isLoading;
+  const policy = policyQuery.data;
+  const authMethods = methodsQuery.data;
 
   const minLength = policy?.passwordMinLength ?? 10;
-  const hasPassword = authMethods?.hasPasswordSet ?? true;
+  const hasPassword = authMethods?.hasPasswordSet === true;
   const passwordKeptButUnusable =
     authMethods?.hasPasswordSet &&
     authMethods?.passwordUsableForLogin === false;
 
-  // Rebuilt when the policy query resolves — `minLength` is the only moving
-  // part; the mismatch and required rules are static.
-  const schema = useMemo(() => makeSchema(minLength, t), [minLength, t]);
+  const schema = useMemo(
+    () => makeSchema(minLength, hasPassword, t),
+    [minLength, hasPassword, t]
+  );
 
   const {
     register,
@@ -75,16 +81,41 @@ const PasswordTab = () => {
 
   const onSubmit = async (values: PasswordForm) => {
     clearErrors('root');
+    setAlreadySet(false);
     try {
-      await changePassword({
-        currentPassword: values.oldPassword,
-        newPassword: values.newPassword
-      }).unwrap();
-      toast.success(t('userSecurity.passwordTab.successToast'));
+      if (hasPassword) {
+        await changePassword({
+          currentPassword: values.oldPassword,
+          newPassword: values.newPassword
+        }).unwrap();
+        toast.success(t('userSecurity.passwordTab.successToast'));
+      } else {
+        await setInitialPassword({ newPassword: values.newPassword }).unwrap();
+        toast.success(t('userSecurity.passwordTab.enrollmentSuccessToast'));
+      }
       reset();
     } catch (err: unknown) {
-      const data = (err as { data?: { detail?: string; title?: string } })
-        ?.data;
+      const error = err as {
+        status?: number;
+        data?: { code?: string; detail?: string; title?: string };
+      };
+      const data = error?.data;
+      if (
+        data?.code === 'step_up_required' ||
+        data?.code === 'password_confirm_required' ||
+        data?.code === 'reauthentication_required'
+      )
+        return; // The shared API layer owns proof prompts and redirects.
+      if (
+        !hasPassword &&
+        error.status === 409 &&
+        data?.code === 'auth.password_already_set'
+      ) {
+        reset();
+        setAlreadySet(true);
+        void methodsQuery.refetch();
+        return;
+      }
       setError('root', {
         message:
           data?.detail ||
@@ -93,6 +124,40 @@ const PasswordTab = () => {
       });
     }
   };
+
+  if (policyQuery.isError || methodsQuery.isError || userQuery.isError) {
+    return (
+      <Alert variant="danger" className="fs-10">
+        {t('userSecurity.passwordTab.loadError')}
+      </Alert>
+    );
+  }
+  if (
+    policyQuery.isFetching ||
+    methodsQuery.isFetching ||
+    userQuery.isFetching
+  ) {
+    return (
+      <div role="status" className="fs-10 text-muted">
+        <Spinner animation="border" size="sm" className="me-2" />
+        {t('userSecurity.passwordTab.loading')}
+      </div>
+    );
+  }
+  if (!policy || !authMethods || !userQuery.data) {
+    return (
+      <Alert variant="danger" className="fs-10">
+        {t('userSecurity.passwordTab.loadError')}
+      </Alert>
+    );
+  }
+  if (!hasPassword && !passwordUiVisible(policy)) {
+    return (
+      <Alert variant="info" className="fs-10">
+        {t('userSecurity.passwordTab.enrollmentDisabled')}
+      </Alert>
+    );
+  }
 
   return (
     <Row>
@@ -105,9 +170,9 @@ const PasswordTab = () => {
             {t('userSecurity.passwordTab.keptNotice')}
           </Alert>
         )}
-        {!hasPassword && passwordUiVisible(policy) && (
+        {alreadySet && (
           <Alert variant="info" className="fs-10">
-            {t('userSecurity.passwordTab.ssoOnlyHint')}
+            {t('userSecurity.passwordTab.alreadySetNotice')}
           </Alert>
         )}
         {errors.root && (
@@ -115,22 +180,50 @@ const PasswordTab = () => {
             {errors.root.message}
           </Alert>
         )}
+        {!hasPassword && (
+          <h5>{t('userSecurity.passwordTab.enrollmentHeading')}</h5>
+        )}
         <p className="fs-10 text-muted mb-3">
-          {t('userSecurity.passwordTab.intro')}
+          {t(
+            hasPassword
+              ? 'userSecurity.passwordTab.intro'
+              : 'userSecurity.passwordTab.enrollmentIntro'
+          )}
         </p>
         <Form onSubmit={handleSubmit(onSubmit)} noValidate>
-          <Form.Group className="mb-3" controlId="self-old-password">
-            <Form.Label>
-              {t('userSecurity.passwordTab.labelCurrent')}
-            </Form.Label>
-            <Form.Control
-              type="password"
-              autoComplete="current-password"
-              required={hasPassword}
-              disabled={isLoading}
-              {...register('oldPassword')}
-            />
-          </Form.Group>
+          {!hasPassword && (
+            <Form.Group className="mb-3" controlId="self-account-email">
+              <Form.Label>
+                {t('userSecurity.passwordTab.labelEmail')}
+              </Form.Label>
+              <Form.Control
+                type="email"
+                value={userQuery.data.email}
+                readOnly
+              />
+              <Form.Text className="text-muted">
+                {t('userSecurity.passwordTab.emailHelp')}
+              </Form.Text>
+            </Form.Group>
+          )}
+          {hasPassword && (
+            <Form.Group className="mb-3" controlId="self-old-password">
+              <Form.Label>
+                {t('userSecurity.passwordTab.labelCurrent')}
+              </Form.Label>
+              <Form.Control
+                type="password"
+                autoComplete="current-password"
+                required={hasPassword}
+                disabled={isLoading}
+                isInvalid={!!errors.oldPassword}
+                {...register('oldPassword')}
+              />
+              <Form.Control.Feedback type="invalid">
+                {errors.oldPassword?.message}
+              </Form.Control.Feedback>
+            </Form.Group>
+          )}
           <Form.Group className="mb-3" controlId="self-new-password">
             <Form.Label>{t('userSecurity.passwordTab.labelNew')}</Form.Label>
             <Form.Control
@@ -167,14 +260,22 @@ const PasswordTab = () => {
             </Form.Control.Feedback>
           </Form.Group>
           {/* The one primary action of this pane — solid Orkestra Blue. */}
-          <Button type="submit" variant="primary" disabled={isLoading}>
+          <Button type="submit" variant="orkestra-primary" disabled={isLoading}>
             {isLoading ? (
               <>
                 <Spinner animation="border" size="sm" className="me-2" />
-                {t('userSecurity.passwordTab.submitting')}
+                {t(
+                  hasPassword
+                    ? 'userSecurity.passwordTab.submitting'
+                    : 'userSecurity.passwordTab.enrollmentSubmitting'
+                )}
               </>
             ) : (
-              t('userSecurity.passwordTab.submit')
+              t(
+                hasPassword
+                  ? 'userSecurity.passwordTab.submit'
+                  : 'userSecurity.passwordTab.enrollmentSubmit'
+              )
             )}
           </Button>
         </Form>

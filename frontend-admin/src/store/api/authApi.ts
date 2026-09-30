@@ -445,6 +445,25 @@ export const authApi = baseApi.injectEndpoints({
       })
     }),
 
+    // Credential enrollment must not use the public login UI's fail-open
+    // policy fallback: an unreadable policy means no enrollment form.
+    getPasswordEnrollmentPolicy: builder.query<AuthPolicy, void>({
+      query: () => 'v1/auth/operator/policy',
+      keepUnusedDataFor: 30
+    }),
+
+    setInitialPassword: builder.mutation<
+      SimpleMessageResponse,
+      { newPassword: string }
+    >({
+      query: body => ({
+        url: 'v1/auth/operator/me/password',
+        method: 'POST',
+        body
+      }),
+      invalidatesTags: ['SelfAuthMethods']
+    }),
+
     // Change password while authenticated
     changePassword: builder.mutation<
       SimpleMessageResponse,
@@ -771,6 +790,8 @@ export const {
   useForgotPasswordMutation,
   useResetPasswordMutation,
   useChangePasswordMutation,
+  useGetPasswordEnrollmentPolicyQuery,
+  useSetInitialPasswordMutation,
   useConfirmPasswordMutation,
   useLogoutMutation,
   useInitiateOAuthMutation,
