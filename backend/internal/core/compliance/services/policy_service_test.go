@@ -202,3 +202,22 @@ func TestPolicyService_SnapshotAgeHook(t *testing.T) {
 		t.Fatalf("age hook = %v, want 7", got)
 	}
 }
+
+func TestPolicyService_SnapshotAgeBeforeTheFirstLoad(t *testing.T) {
+	// No platform policy: Refresh always fails, so no snapshot ever loads.
+	s := NewPolicyService(policytest.NewMemRepo(), slog.New(slog.DiscardHandler))
+	var got float64 = -1
+	s.SetSnapshotAgeHook(func(v float64) { got = v })
+	s.startedAt = testNow
+	s.now = func() time.Time { return testNow.Add(90 * time.Second) }
+	if err := s.Refresh(context.Background()); err == nil {
+		t.Fatal("a catalog without the platform policy was accepted")
+	}
+	s.reportAge()
+	if got != 90 {
+		t.Fatalf("age hook = %v, want 90 (time since start, no snapshot yet)", got)
+	}
+	if _, ok := s.SnapshotAge(); ok {
+		t.Fatal("SnapshotAge must keep reporting false without a snapshot")
+	}
+}

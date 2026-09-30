@@ -80,6 +80,9 @@ type PolicyService struct {
 	logger *slog.Logger
 	now    func() time.Time
 	snap   atomic.Pointer[policySnapshot]
+	// startedAt anchors the age reported while no snapshot has ever loaded, so
+	// the stale alarm can fire even if Mongo is unreachable from boot.
+	startedAt time.Time
 
 	mu         sync.Mutex // serialises Refresh; guards the fields below
 	contents   map[string]*iface.LogContentPolicy
@@ -88,7 +91,7 @@ type PolicyService struct {
 }
 
 func NewPolicyService(store policySnapshotStore, logger *slog.Logger) *PolicyService {
-	return &PolicyService{store: store, logger: logger, now: time.Now, contents: map[string]*iface.LogContentPolicy{}}
+	return &PolicyService{store: store, logger: logger, now: time.Now, startedAt: time.Now(), contents: map[string]*iface.LogContentPolicy{}}
 }
 
 // SetSnapshotAgeHook receives the snapshot age after every loop tick (the
@@ -191,6 +194,10 @@ func (s *PolicyService) Loop(ctx context.Context, stop <-chan struct{}) {
 	}
 }
 
+// reportAge feeds the hook. Before the first snapshot has ever loaded it
+// reports the time since the service was created, so the gauge keeps growing
+// and the policy_snapshot_stale alarm (spec §9, §10.3) fires when Mongo is
+// down from boot or the catalog has no platform policy.
 func (s *PolicyService) reportAge() {
 	s.mu.Lock()
 	hook := s.ageHook
@@ -200,10 +207,13 @@ func (s *PolicyService) reportAge() {
 	}
 	if age, ok := s.SnapshotAge(); ok {
 		hook(age.Seconds())
+		return
 	}
+	hook(s.now().Sub(s.startedAt).Seconds())
 }
 
-// SnapshotAge is the time since the snapshot in force was loaded.
+// SnapshotAge is the time since the snapshot in force was loaded; false while
+// no snapshot has ever loaded (reportAge substitutes the time since start).
 func (s *PolicyService) SnapshotAge() (time.Duration, bool) {
 	snap := s.snap.Load()
 	if snap == nil {
