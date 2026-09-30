@@ -16,6 +16,8 @@ It deliberately does *not* own passwords, sessions, JWTs, or org memberships. Th
 - **The avatar pipeline** — the reference consumer of the [object-storage seam](/sdk/object-storage): presign, upload direct to storage, commit. Sources are `uploaded`, `initials`, or a linked OAuth provider's picture.
 - **Three registry providers** — `ServiceUserService` (canonical, operator-tier), plus `ServiceOperatorUserProvider` and `ServiceClientUserProvider` for audience-aware consumers.
 
+Each per-tier provider also implements the additive `iface.InitialPasswordSetter` capability, without changing `iface.UserProvider`. `SetPasswordHashIfUnset` persists a first hash only when a live user's stored `passwordHash` is absent or empty, setting `passwordUpdatedAt` and `updatedAt` in the same atomic write. An existing hash returns `iface.ErrPasswordAlreadySet` and leaves the hash and timestamps unchanged; a missing or soft-deleted user returns `iface.ErrUserNotFound`. Two concurrent initial writes yield one success and one conflict. The existing `UpdatePasswordHash` keeps its overwrite behavior for password changes and resets; auth still owns hashing and self-service HTTP policy.
+
 ## Routes
 
 | Surface | Paths | Gate |

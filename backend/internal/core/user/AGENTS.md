@@ -37,6 +37,7 @@ Declared in `module.go::Collections()`. Email uniqueness is scoped per collectio
 - **Required services**: none.
 - **Optional services**: none.
 - **Provides**: `ServiceUserService` (canonical, operator-tier) + `ServiceOperatorUserProvider` + `ServiceClientUserProvider` → `iface.UserProvider`.
+- **Initial-password capability**: the same per-tier services also implement the additive `iface.InitialPasswordSetter`; `iface.UserProvider` is unchanged. `SetPasswordHashIfUnset` validates a non-blank UUID and non-empty hash, then atomically updates only a live row whose `passwordHash` is absent or empty. Success stamps `passwordUpdatedAt` and `updatedAt`; an existing hash returns `iface.ErrPasswordAlreadySet` without changing it or its timestamps, and missing/soft-deleted users return `iface.ErrUserNotFound` through the service. Concurrent callers yield one successful initial write. `UpdatePasswordHash` retains its existing overwrite semantics for password changes/resets; hashing and self-service HTTP policy remain owned by auth.
 - **Permissions contributed** (`module.go:48-55`):
 
 | Key | Purpose |

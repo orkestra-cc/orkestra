@@ -171,6 +171,16 @@ type UserLifecycleStateProvider interface {
 	UserLifecycleState(ctx context.Context, userUUID string) (UserLifecycleState, error)
 }
 
+// InitialPasswordSetter atomically stores a first password hash on a live user.
+// A non-empty existing hash is preserved and returns ErrPasswordAlreadySet;
+// a missing or soft-deleted user returns ErrUserNotFound. Consumers resolve
+// this additive capability from the tier's user provider.
+type InitialPasswordSetter interface {
+	SetPasswordHashIfUnset(ctx context.Context, userUUID, hash string) error
+}
+
+var ErrPasswordAlreadySet = errors.New("password already set")
+
 // ---------------------------------------------------------------------------
 // MFAEpochBumper — consumed by: the auth module's MFA service and WebAuthn
 // service, on every credential removal or replacement. Narrow on purpose

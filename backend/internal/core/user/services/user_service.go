@@ -41,6 +41,7 @@ type UserService interface {
 	GetUserForAuth(ctx context.Context, email string) (*iface.User, error)
 	CreateUserWithPassword(ctx context.Context, input *iface.CreateUserInput) (*iface.User, error)
 	UpdatePasswordHash(ctx context.Context, userUUID, hash string) error
+	SetPasswordHashIfUnset(ctx context.Context, userUUID, hash string) error
 	MarkEmailVerified(ctx context.Context, userUUID string) error
 	RecordFailedLogin(ctx context.Context, userUUID string, lockUntil *time.Time) error
 	ClearFailedLogins(ctx context.Context, userUUID string) error
@@ -914,6 +915,16 @@ func (s *userService) UpdatePasswordHash(ctx context.Context, userUUID, hash str
 	}
 	return asUserNotFound(s.userRepo.UpdatePasswordHash(ctx, userUUID, hash))
 }
+
+// SetPasswordHashIfUnset implements the additive initial-password capability.
+func (s *userService) SetPasswordHashIfUnset(ctx context.Context, userUUID, hash string) error {
+	if strings.TrimSpace(userUUID) == "" || hash == "" {
+		return ErrInvalidInput
+	}
+	return asUserNotFound(s.userRepo.SetPasswordHashIfUnset(ctx, userUUID, hash))
+}
+
+var _ iface.InitialPasswordSetter = (*userService)(nil)
 
 // MarkEmailVerified delegates to the repository.
 func (s *userService) MarkEmailVerified(ctx context.Context, userUUID string) error {

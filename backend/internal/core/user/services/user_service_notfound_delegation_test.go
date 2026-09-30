@@ -50,6 +50,9 @@ func (notFoundRepo) UpdateLastLogin(context.Context, string) error {
 func (notFoundRepo) UpdatePasswordHash(context.Context, string, string) error {
 	return repository.ErrUserNotFound
 }
+func (notFoundRepo) SetPasswordHashIfUnset(context.Context, string, string) error {
+	return repository.ErrUserNotFound
+}
 func (notFoundRepo) MarkEmailVerified(context.Context, string) error {
 	return repository.ErrUserNotFound
 }
@@ -102,6 +105,7 @@ func TestDelegationsTranslateRepositoryNotFound(t *testing.T) {
 		}},
 		{"UpdateUserLastLogin", func() error { return svc.UpdateUserLastLogin(ctx, "u-1") }},
 		{"UpdatePasswordHash", func() error { return svc.UpdatePasswordHash(ctx, "u-1", "argon2id$hash") }},
+		{"SetPasswordHashIfUnset", func() error { return svc.SetPasswordHashIfUnset(ctx, "u-1", "argon2id$hash") }},
 		{"MarkEmailVerified", func() error { return svc.MarkEmailVerified(ctx, "u-1") }},
 		{"StartMFAGraceIfUnset", func() error { return svc.StartMFAGraceIfUnset(ctx, "u-1") }},
 		{"StartMFAGraceIfUnset (stamp)", func() error { return graceSvc.StartMFAGraceIfUnset(ctx, "u-1") }},
@@ -135,7 +139,8 @@ func (boomRepo) GetOAuthLinks(context.Context, string) ([]iface.OAuthLink, error
 func (boomRepo) RemoveOAuthLink(context.Context, string, iface.OAuthProvider, string) error {
 	return errRepoBoom
 }
-func (boomRepo) UpdatePasswordHash(context.Context, string, string) error { return errRepoBoom }
+func (boomRepo) UpdatePasswordHash(context.Context, string, string) error     { return errRepoBoom }
+func (boomRepo) SetPasswordHashIfUnset(context.Context, string, string) error { return errRepoBoom }
 
 func TestDelegationsLeaveOtherErrorsAlone(t *testing.T) {
 	svc := &userService{userRepo: boomRepo{newFakeUserRepo()}}
@@ -145,6 +150,7 @@ func TestDelegationsLeaveOtherErrorsAlone(t *testing.T) {
 		"RemoveOAuthLinkFromUser": func() error { return svc.RemoveOAuthLinkFromUser(ctx, "u-1", "google", "g-1") },
 		"GetUserOAuthLinks":       func() error { _, err := svc.GetUserOAuthLinks(ctx, "u-1"); return err },
 		"UpdatePasswordHash":      func() error { return svc.UpdatePasswordHash(ctx, "u-1", "argon2id$hash") },
+		"SetPasswordHashIfUnset":  func() error { return svc.SetPasswordHashIfUnset(ctx, "u-1", "argon2id$hash") },
 		"StartMFAGraceIfUnset":    func() error { return svc.StartMFAGraceIfUnset(ctx, "u-1") },
 	}
 	for name, call := range cases {

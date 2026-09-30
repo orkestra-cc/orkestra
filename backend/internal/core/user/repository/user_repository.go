@@ -58,6 +58,7 @@ type UserRepository interface {
 
 	// Password-auth operations
 	UpdatePasswordHash(ctx context.Context, userUUID, hash string) error
+	SetPasswordHashIfUnset(ctx context.Context, userUUID, hash string) error
 	MarkEmailVerified(ctx context.Context, userUUID string) error
 	RecordFailedLogin(ctx context.Context, userUUID string, lockUntil *time.Time) error
 	ClearFailedLogins(ctx context.Context, userUUID string) error
@@ -1033,6 +1034,44 @@ func (r *mongoUserRepository) UpdatePasswordHash(ctx context.Context, userUUID, 
 		return ErrUserNotFound
 	}
 	return nil
+}
+
+// SetPasswordHashIfUnset stores a first hash without overwriting an existing credential.
+func (r *mongoUserRepository) SetPasswordHashIfUnset(ctx context.Context, userUUID, hash string) error {
+	now := time.Now()
+	filter := bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+		"$or": bson.A{
+			bson.M{"passwordHash": bson.M{"$exists": false}},
+			bson.M{"passwordHash": ""},
+		},
+	}
+	update := bson.M{"$set": bson.M{
+		"passwordHash":      hash,
+		"passwordUpdatedAt": now,
+		"updatedAt":         now,
+	}}
+	//tenantscope:allow Per-tier identity collection selected at construction; credential write targets one user UUID.
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("set initial password hash: %w", err)
+	}
+	if result.MatchedCount == 1 {
+		return nil
+	}
+	//tenantscope:allow Per-tier identity collection selected at construction; conflict lookup targets the same user UUID.
+	count, err := r.collection.CountDocuments(ctx, bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+	}, options.Count().SetLimit(1))
+	if err != nil {
+		return fmt.Errorf("classify initial password conflict: %w", err)
+	}
+	if count == 0 {
+		return ErrUserNotFound
+	}
+	return iface.ErrPasswordAlreadySet
 }
 
 // MarkEmailVerified flips emailVerified to true.
