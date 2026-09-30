@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
@@ -72,6 +72,88 @@ const stubReads = (overrides?: {
     ),
     http.get(url('/v1/admin/audit-events'), () =>
       HttpResponse.json(overrides?.audit ?? auditEvents)
+    ),
+    http.get(url('/v1/admin/compliance/policies'), () =>
+      HttpResponse.json({
+        items: [
+          {
+            uuid: 'pol-plat',
+            name: 'Platform',
+            description: '',
+            isPlatformDefault: true,
+            version: 3,
+            logContent: {
+              ipAddress: 'truncated',
+              userAgent: 'full',
+              subjectIds: 'uuid',
+              piiKeys: ['email'],
+              scanFreeText: true
+            },
+            retention: { admin_access: 365 },
+            accountability: {
+              role: 'controller',
+              ropaRef: '',
+              assessmentRef: '',
+              owner: ''
+            },
+            createdBy: 'system',
+            updatedBy: 'system',
+            createdAt: '2026-09-01T00:00:00Z',
+            updatedAt: '2026-09-01T00:00:00Z',
+            changeReason: 'boot',
+            assignedTenants: 0,
+            lessRestrictiveFields: [],
+            reviewOverdue: false
+          },
+          {
+            uuid: 'pol-open',
+            name: 'Loose tenant',
+            description: '',
+            isPlatformDefault: false,
+            version: 1,
+            logContent: {
+              ipAddress: 'full',
+              userAgent: 'full',
+              subjectIds: 'uuid',
+              piiKeys: [],
+              scanFreeText: true
+            },
+            retention: {},
+            accountability: {
+              role: 'processor',
+              ropaRef: '',
+              assessmentRef: '',
+              owner: ''
+            },
+            createdBy: 'alice',
+            updatedBy: 'alice',
+            createdAt: '2026-09-02T00:00:00Z',
+            updatedAt: '2026-09-02T00:00:00Z',
+            changeReason: 'test',
+            assignedTenants: 2,
+            lessRestrictiveFields: ['logContent.ipAddress'],
+            reviewOverdue: true
+          }
+        ]
+      })
+    ),
+    http.get(url('/v1/admin/compliance/change-requests'), () =>
+      HttpResponse.json({
+        items: [
+          {
+            uuid: 'cr-1',
+            kind: 'assign',
+            tenantId: 't-9',
+            payload: { tenantId: 't-9', policyUuid: 'pol-open' },
+            expectedVersion: 1,
+            warnings: ['less_restrictive_than_current'],
+            reason: 'richiesta del cliente',
+            requestedBy: 'someone-else',
+            requestedAt: '2026-09-29T10:00:00Z',
+            status: 'pending'
+          }
+        ]
+      })
     )
   );
 };
@@ -298,5 +380,31 @@ describe('CompliancePage', () => {
       '/v1/admin/compliance/erasure-requests/er-1/execute'
     );
     expect(executeHit!.body).toEqual({ mode: 'hard_delete' });
+  });
+
+  it('lists the policies with their badges and counts the pending requests on the tab', async () => {
+    stubReads();
+    renderWithProviders(<CompliancePage />);
+    expect(await screen.findByText('Loose tenant')).toBeInTheDocument();
+    expect(screen.getByText('Less restrictive')).toBeInTheDocument();
+    expect(screen.getByText('Review overdue')).toBeInTheDocument();
+    const changesTab = screen.getByRole('tab', { name: /^Requests/ });
+    await waitFor(() => expect(changesTab).toHaveTextContent('1'));
+  });
+
+  it('opens a change request and offers the decision to another operator', async () => {
+    stubReads();
+    renderWithProviders(<CompliancePage />, {
+      routerEntries: ['/?tab=changes']
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Details' }));
+    expect(
+      await screen.findByText('Weakens the current protection')
+    ).toBeInTheDocument();
+    // The erasure tab has its own Reject button: scope to the open dialog.
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(dialog.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
   });
 });
