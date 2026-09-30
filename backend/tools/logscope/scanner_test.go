@@ -50,7 +50,9 @@ func f(ctx context.Context, u user, p *user, v any, tok string, l *slog.Logger, 
 		slog.Any("when", time.Now()),        // time.Time: ok
 		slog.Any("val", valuer{}),           // LogValuer: ok
 		slog.Any("users", []user{u}),        // slice of structs: flagged
-		slog.Any("byid", map[int]string{}),  // map with non-string keys: flagged
+		slog.Any("byid", map[int]string{}),  // map with non-string keys: ok (keys masked as text)
+		slog.Any("bystruct", map[user]string{}), // map with struct keys: flagged
+		slog.Any("byuser", map[int]user{}),  // map of structs: flagged
 		slog.Any("umap", map[string]user{}), // map of structs: flagged
 		slog.String("token", tok),           // secret key, dynamic value: flagged
 		slog.String("token_type", "bearer"), // secret key, constant value: ok
@@ -65,6 +67,14 @@ func f(ctx context.Context, u user, p *user, v any, tok string, l *slog.Logger, 
 	slog.Group("g", "kvgroup", u)
 	args := []any{"spread", u}
 	slog.Info("spread", args...) // not analysable: skipped
+}
+
+func g(u user, tok string, key string, v any) {
+	slog.Info("keyless", u)               // keyless struct: flagged as !BADKEY
+	slog.Info("keyless ok", 42, "k", "v") // keyless number: ok
+	slog.Any(key, u)                      // dynamic key, opaque value: flagged
+	slog.String(key, tok)                 // dynamic key: masked at run time, ok
+	slog.Info("dyn", key, v)              // dynamic key, interface value: flagged
 }
 `
 
@@ -86,7 +96,8 @@ func TestScanFiles(t *testing.T) {
 	sort.Strings(got)
 	want := []string{
 		"logscope.any_opaque_value:sample.go:f:anything",
-		"logscope.any_opaque_value:sample.go:f:byid",
+		"logscope.any_opaque_value:sample.go:f:bystruct",
+		"logscope.any_opaque_value:sample.go:f:byuser",
 		"logscope.any_opaque_value:sample.go:f:kvattr",
 		"logscope.any_opaque_value:sample.go:f:kvctxptr",
 		"logscope.any_opaque_value:sample.go:f:kvgroup",
@@ -97,6 +108,9 @@ func TestScanFiles(t *testing.T) {
 		"logscope.any_opaque_value:sample.go:f:umap",
 		"logscope.any_opaque_value:sample.go:f:user",
 		"logscope.any_opaque_value:sample.go:f:users",
+		"logscope.any_opaque_value:sample.go:g:!BADKEY",
+		"logscope.any_opaque_value:sample.go:g:<dynamic>",
+		"logscope.any_opaque_value:sample.go:g:<dynamic>",
 		"logscope.secret_key_dynamic_value:sample.go:f:kvsecret",
 		"logscope.secret_key_dynamic_value:sample.go:f:token",
 	}

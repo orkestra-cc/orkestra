@@ -1,7 +1,7 @@
 // Package logscope flags slog calls the compliance PolicyHandler cannot
 // mask reliably (compliance spec §2.6): a value of a type the masker does not
 // scan (anything outside an allowlist: strings, byte slices, errors, basic
-// numbers/booleans/times, maps with string keys, slices of those, LogValuers),
+// numbers/booleans/times, maps with basic-kind keys, slices of those, LogValuers),
 // and secret-looking keys carrying a non-constant value. Both slog.Any and the
 // key/value form of the logging calls (slog.Info("m", "key", v), With, ...)
 // are checked. Existing calls live in baseline.txt; a new one fails CI.
@@ -24,6 +24,14 @@ import (
 const (
 	CategoryAnyOpaque        = "logscope.any_opaque_value"
 	CategorySecretKeyDynamic = "logscope.secret_key_dynamic_value"
+)
+
+// Keys written in findings when the source has no constant key: an
+// attribute whose key is computed at run time, and a value slog logs under
+// its own !BADKEY because it has no key at all.
+const (
+	dynamicKey = "<dynamic>"
+	badKey     = "!BADKEY"
 )
 
 type Finding struct {
@@ -70,21 +78,23 @@ func ScanFiles(fset *token.FileSet, files []*ast.File, info *types.Info, relFile
 					return true
 				}
 				pos := fset.Position(call.Pos())
+				mk := func(cat, key string) Finding {
+					return Finding{Category: cat, File: relFile(pos.Filename), Line: pos.Line, Func: fn.Name.Name, Key: key}
+				}
 				check := func(keyExpr, valExpr ast.Expr, anyValue bool) {
-					keyTV, ok := info.Types[keyExpr]
-					if !ok || keyTV.Value == nil || keyTV.Value.Kind() != constant.String {
-						return
-					}
-					key := constant.StringVal(keyTV.Value)
-					mk := func(cat string) Finding {
-						return Finding{Category: cat, File: relFile(pos.Filename), Line: pos.Line, Func: fn.Name.Name, Key: key}
+					key, constKey := dynamicKey, false
+					if keyTV, ok := info.Types[keyExpr]; ok && keyTV.Value != nil && keyTV.Value.Kind() == constant.String {
+						key, constKey = constant.StringVal(keyTV.Value), true
 					}
 					valTV := info.Types[valExpr]
 					if anyValue && !maskable(valTV.Type, callee.Pkg(), true) {
-						out = append(out, mk(CategoryAnyOpaque))
+						out = append(out, mk(CategoryAnyOpaque, key))
 					}
-					if redact.IsSecretKey(key) && valTV.Value == nil {
-						out = append(out, mk(CategorySecretKeyDynamic))
+					// A computed key is classified by the masker at run time;
+					// only a constant secret key with a dynamic value is a
+					// finding the source can prove.
+					if constKey && redact.IsSecretKey(key) && valTV.Value == nil {
+						out = append(out, mk(CategorySecretKeyDynamic, key))
 					}
 				}
 				if isAttrConstructor(callee) {
@@ -98,7 +108,8 @@ func ScanFiles(fset *token.FileSet, files []*ast.File, info *types.Info, relFile
 					return true
 				}
 				// slog's own pairing: an Attr stands alone, a string is a key
-				// followed by its value, anything else is a !BADKEY value.
+				// followed by its value, anything else is a value logged under
+				// !BADKEY — which the masker sees without a key.
 				for i := from; i < len(call.Args); {
 					t := info.Types[call.Args[i]].Type
 					switch {
@@ -108,6 +119,9 @@ func ScanFiles(fset *token.FileSet, files []*ast.File, info *types.Info, relFile
 						check(call.Args[i], call.Args[i+1], true)
 						i += 2
 					default:
+						if !maskable(t, callee.Pkg(), true) {
+							out = append(out, mk(CategoryAnyOpaque, badKey))
+						}
 						i++
 					}
 				}
@@ -155,12 +169,19 @@ func isString(t types.Type) bool {
 	return ok && b.Info()&types.IsString != 0
 }
 
+// basicMapKey mirrors the masker's key rendering (log_masker.go maskReflect):
+// only string, bool, integer and float keys are rendered.
+func basicMapKey(t types.Type) bool {
+	b, ok := t.Underlying().(*types.Basic)
+	return ok && b.Info()&(types.IsString|types.IsBoolean|types.IsInteger|types.IsFloat) != 0
+}
+
 // maskable reports whether the PolicyHandler scans (or has nothing to scan
 // in) a value of static type t. It is an allowlist of what the masker
 // handles: string kinds, byte slices (json.RawMessage), errors, LogValuers,
 // slog.Value, basic numbers and booleans, time.Time and time.Duration, maps
-// with string-kind keys, slices, arrays and pointers of maskable types.
-// top=false inside a container, where an interface element is accepted: the
+// with string, bool, integer or float keys, slices, arrays and pointers of
+// maskable types. top=false inside a container, where an interface element is accepted: the
 // masker walks the dynamic value. Everything else (structs, pointers to
 // structs, other interfaces, maps with other keys, funcs, chans) is opaque.
 func maskable(t types.Type, slogPkg *types.Package, top bool) bool {
@@ -186,8 +207,10 @@ func maskable(t types.Type, slogPkg *types.Package, top bool) bool {
 	case *types.Array:
 		return maskable(u.Elem(), slogPkg, false)
 	case *types.Map:
-		k, ok := u.Key().Underlying().(*types.Basic)
-		return ok && k.Info()&types.IsString != 0 && maskable(u.Elem(), slogPkg, false)
+		// The masker renders keys of basic kinds (string, bool, integers,
+		// floats) as text and masks them; a map with any other key kind is
+		// replaced whole by [REDACTED], so its content is lost: flag it.
+		return basicMapKey(u.Key()) && maskable(u.Elem(), slogPkg, false)
 	case *types.Pointer:
 		if _, isStruct := u.Elem().Underlying().(*types.Struct); isStruct {
 			return false
