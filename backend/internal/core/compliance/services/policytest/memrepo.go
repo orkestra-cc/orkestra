@@ -193,7 +193,10 @@ func (m *MemRepo) ListAssignments(_ context.Context) ([]models.PolicyAssignment,
 	if m.listErr != nil {
 		return nil, m.listErr
 	}
-	out := slices.Collect(maps.Values(m.assignments))
+	out := make([]models.PolicyAssignment, 0, len(m.assignments))
+	for _, a := range m.assignments {
+		out = append(out, a)
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].TenantID < out[j].TenantID })
 	return out, nil
 }
@@ -308,5 +311,9 @@ func (m *MemRepo) History() []models.PolicyAssignmentHistory {
 func (m *MemRepo) Requests() []models.PolicyChangeRequest {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return slices.Collect(maps.Values(m.requests))
+	out := make([]models.PolicyChangeRequest, 0, len(m.requests))
+	for _, cr := range m.requests {
+		out = append(out, cr)
+	}
+	return out
 }

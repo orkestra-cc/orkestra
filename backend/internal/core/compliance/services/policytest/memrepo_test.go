@@ -41,3 +41,33 @@ func TestMemRepoMirrorsTheRepository(t *testing.T) {
 		t.Fatalf("second decision: %v", err)
 	}
 }
+
+// The real repository returns [] (never null) when nothing matches: the
+// console receives an empty array, so the double must do the same.
+func TestMemRepoEmptyListsAreNonNil(t *testing.T) {
+	m := NewMemRepo()
+	ctx := context.Background()
+	policies, err := m.ListPolicies(ctx)
+	if err != nil || policies == nil {
+		t.Errorf("ListPolicies = %#v, %v; want non-nil empty", policies, err)
+	}
+	versions, err := m.ListVersions(ctx, "none")
+	if err != nil || versions == nil {
+		t.Errorf("ListVersions = %#v, %v; want non-nil empty", versions, err)
+	}
+	assignments, err := m.ListAssignments(ctx)
+	if err != nil || assignments == nil {
+		t.Errorf("ListAssignments = %#v, %v; want non-nil empty", assignments, err)
+	}
+	requests, err := m.ListChangeRequests(ctx, "")
+	if err != nil || requests == nil {
+		t.Errorf("ListChangeRequests = %#v, %v; want non-nil empty", requests, err)
+	}
+	pending, err := m.ListPendingBefore(ctx, time.Now())
+	if err != nil || pending == nil {
+		t.Errorf("ListPendingBefore = %#v, %v; want non-nil empty", pending, err)
+	}
+	if reqs := m.Requests(); reqs == nil {
+		t.Error("Requests() = nil, want non-nil empty")
+	}
+}
