@@ -55,7 +55,9 @@ var (
 	// ErrPasswordLoginDisabled is iface.ErrPasswordLoginDisabled (one
 	// identity across the AdminAuthInviter boundary); the per-surface
 	// method gates of spec §4.3 return it.
-	ErrPasswordLoginDisabled = iface.ErrPasswordLoginDisabled
+	ErrPasswordLoginDisabled      = iface.ErrPasswordLoginDisabled
+	ErrPasswordAlreadySet         = iface.ErrPasswordAlreadySet
+	ErrInitialPasswordUnavailable = stderrors.New("initial password setter unavailable")
 	// ErrInitialAdminExists is returned by RegisterInitialAdmin when the
 	// first-admin claim was already taken — the loser of a concurrent
 	// first-install race. The setup service reports it as
@@ -98,6 +100,7 @@ type FirstAdminClaimer interface {
 // PasswordAuthConfig configures the password auth service.
 type PasswordAuthConfig struct {
 	UserService             iface.UserProvider
+	InitialPasswordSetter   iface.InitialPasswordSetter
 	TenantProvider          iface.TenantProvider // required: drives RoleRequiresMFA check at login
 	PasswordService         PasswordService
 	JWTService              JWTService
@@ -142,6 +145,7 @@ type PasswordAuthConfig struct {
 // password flows. It complements the existing OAuth-focused AuthService.
 type PasswordAuthService struct {
 	userService             iface.UserProvider
+	initialPasswordSetter   iface.InitialPasswordSetter
 	tenantProvider          iface.TenantProvider
 	passwordService         PasswordService
 	jwtService              JWTService
@@ -175,6 +179,8 @@ type PasswordAuthService struct {
 	// auditSink is wired post-construction via SetAuditSink by the compliance
 	// module. Nil when compliance is disabled — emit* helpers tolerate that.
 	auditSink iface.AuditSink
+	// securityEventSink owns the single enrollment event and its compliance mapping.
+	securityEventSink SecurityEventSink
 	// sessionRevocation pushes revoked sids into Redis so a credential
 	// change invalidates access tokens immediately rather than after
 	// their TTL. Wired post-construction; nil-tolerant.
@@ -231,6 +237,7 @@ func (s *PasswordAuthService) buildUserResponse(ctx context.Context, user *iface
 func NewPasswordAuthService(cfg PasswordAuthConfig) *PasswordAuthService {
 	return &PasswordAuthService{
 		userService:              cfg.UserService,
+		initialPasswordSetter:    cfg.InitialPasswordSetter,
 		tenantProvider:           cfg.TenantProvider,
 		passwordService:          cfg.PasswordService,
 		jwtService:               cfg.JWTService,
@@ -887,6 +894,11 @@ func (s *PasswordAuthService) SetAuditSink(sink iface.AuditSink) {
 	s.auditSink = sink
 }
 
+// SetSecurityEventSink wires the credential event lane shared with MFA.
+func (s *PasswordAuthService) SetSecurityEventSink(sink SecurityEventSink) {
+	s.securityEventSink = sink
+}
+
 // RefreshTokenTTL surfaces the JWT service's refresh lifetime so the
 // handler can size the refresh cookie to the token it carries instead
 // of a literal.
@@ -904,6 +916,13 @@ func (s *PasswordAuthService) RefreshTokenTTL() time.Duration {
 // minted.
 func (s *PasswordAuthService) SetSessionRevocation(rev SessionRevocationService) {
 	s.sessionRevocation = rev
+}
+
+// credentialRevocationResult counts fully revoked sessions and reports whether
+// every required teardown pathway completed successfully.
+type credentialRevocationResult struct {
+	Revoked  int
+	Complete bool
 }
 
 // revokeSessionsAfterCredentialChange evicts every way the old password
@@ -932,36 +951,62 @@ func (s *PasswordAuthService) SetSessionRevocation(rev SessionRevocationService)
 // Best-effort throughout: the password is already changed by the time
 // this runs, and failing the request would leave the caller believing
 // the change did not happen. Failures are logged.
-func (s *PasswordAuthService) revokeSessionsAfterCredentialChange(ctx context.Context, userUUID, reason, keepSID, trustReason string) int {
-	revoked := 0
+func (s *PasswordAuthService) revokeSessionsAfterCredentialChange(ctx context.Context, userUUID, reason, keepSID, trustReason string) credentialRevocationResult {
+	result := credentialRevocationResult{Complete: true}
+	// Missing collaborators remain nil-tolerant, but cannot claim a complete
+	// teardown. Enrollment exposes this status in its security event.
+	if s.authSessionRepo == nil || s.refreshTokenRepo == nil || s.sessionRevocation == nil || s.deviceTrust == nil {
+		result.Complete = false
+	}
 
 	if s.authSessionRepo != nil {
 		sessions, err := s.authSessionRepo.GetActiveSessionsByUser(ctx, userUUID)
-		if err != nil && s.logger != nil {
-			s.logger.Warn("auth: could not list sessions for credential-change revocation",
-				slog.String("user_uuid", userUUID),
-				slog.String("error", err.Error()))
+		if err != nil {
+			result.Complete = false
+			if s.logger != nil {
+				s.logger.Warn("auth: could not list sessions for credential-change revocation",
+					slog.String("user_uuid", userUUID),
+					slog.String("error", err.Error()))
+			}
 		}
 		for _, sess := range sessions {
 			if sess == nil || sess.UUID == "" || sess.UUID == keepSID {
 				continue
 			}
+			sessionComplete := s.refreshTokenRepo != nil && s.sessionRevocation != nil
 			if s.refreshTokenRepo != nil {
-				if err := s.refreshTokenRepo.RevokeTokensBySession(ctx, sess.UUID, reason); err != nil && s.logger != nil {
-					s.logger.Warn("auth: revoke refresh tokens by session failed",
+				if err := s.refreshTokenRepo.RevokeTokensBySession(ctx, sess.UUID, reason); err != nil {
+					sessionComplete = false
+					if s.logger != nil {
+						s.logger.Warn("auth: revoke refresh tokens by session failed",
+							slog.String("session_uuid", sess.UUID),
+							slog.String("error", err.Error()))
+					}
+				}
+			}
+			if err := s.authSessionRepo.TerminateSession(ctx, sess.UUID); err != nil {
+				sessionComplete = false
+				if s.logger != nil {
+					s.logger.Warn("auth: terminate session doc failed",
 						slog.String("session_uuid", sess.UUID),
 						slog.String("error", err.Error()))
 				}
 			}
-			if err := s.authSessionRepo.TerminateSession(ctx, sess.UUID); err != nil && s.logger != nil {
-				s.logger.Warn("auth: terminate session doc failed",
-					slog.String("session_uuid", sess.UUID),
-					slog.String("error", err.Error()))
-			}
 			if s.sessionRevocation != nil {
-				_ = s.sessionRevocation.Revoke(ctx, sess.UUID, reason)
+				if err := s.sessionRevocation.Revoke(ctx, sess.UUID, reason); err != nil {
+					sessionComplete = false
+					if s.logger != nil {
+						s.logger.Warn("auth: revoke session sid failed",
+							slog.String("session_uuid", sess.UUID),
+							slog.String("error", err.Error()))
+					}
+				}
 			}
-			revoked++
+			if sessionComplete {
+				result.Revoked++
+			} else {
+				result.Complete = false
+			}
 		}
 	}
 
@@ -969,22 +1014,28 @@ func (s *PasswordAuthService) revokeSessionsAfterCredentialChange(ctx context.Co
 	// cannot exclude a session, so running it with a keepSID set would
 	// sign the caller out along with everyone else.
 	if keepSID == "" && s.refreshTokenRepo != nil {
-		if err := s.refreshTokenRepo.RevokeTokensByUser(ctx, userUUID, reason); err != nil && s.logger != nil {
-			s.logger.Warn("auth: revoke refresh tokens by user failed",
-				slog.String("user_uuid", userUUID),
-				slog.String("error", err.Error()))
+		if err := s.refreshTokenRepo.RevokeTokensByUser(ctx, userUUID, reason); err != nil {
+			result.Complete = false
+			if s.logger != nil {
+				s.logger.Warn("auth: revoke refresh tokens by user failed",
+					slog.String("user_uuid", userUUID),
+					slog.String("error", err.Error()))
+			}
 		}
 	}
 
 	if s.deviceTrust != nil {
-		if err := s.deviceTrust.RevokeAllByUser(ctx, userUUID, trustReason); err != nil && s.logger != nil {
-			s.logger.Warn("device_trust: revoke on credential change failed",
-				slog.String("user_uuid", userUUID),
-				slog.String("error", err.Error()))
+		if err := s.deviceTrust.RevokeAllByUser(ctx, userUUID, trustReason); err != nil {
+			result.Complete = false
+			if s.logger != nil {
+				s.logger.Warn("device_trust: revoke on credential change failed",
+					slog.String("user_uuid", userUUID),
+					slog.String("error", err.Error()))
+			}
 		}
 	}
 
-	return revoked
+	return result
 }
 
 // emitAudit is a best-effort wrapper over auditSink.Emit that no-ops when
@@ -1212,7 +1263,7 @@ func (s *PasswordAuthService) ResetPassword(ctx context.Context, rawToken, newPa
 	if s.logger != nil {
 		s.logger.Info("auth: sessions revoked after password reset",
 			slog.String("user_uuid", user.UUID),
-			slog.Int("sessions_revoked", revoked))
+			slog.Int("sessions_revoked", revoked.Revoked))
 	}
 	s.emitAudit(ctx, iface.AuditEvent{
 		ActorUserID:  user.UUID,
@@ -1239,6 +1290,63 @@ type ChangePasswordInput struct {
 	// counters and the audit row. Empty skips the address scope (the
 	// counters' empty-key rule) rather than sharing a bucket.
 	IP string
+}
+
+// SetInitialPasswordInput adds a first password to an authenticated account.
+// CurrentSID preserves the caller's session during credential teardown.
+type SetInitialPasswordInput struct {
+	UserUUID   string
+	CurrentSID string
+	New        string
+}
+
+// SetInitialPassword requires a verified, active human and a live password
+// method policy, then atomically enrolls the credential without replacing one.
+func (s *PasswordAuthService) SetInitialPassword(ctx context.Context, in SetInitialPasswordInput) error {
+	if s.initialPasswordSetter == nil {
+		return ErrInitialPasswordUnavailable
+	}
+	enabled, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+	if err != nil {
+		return ErrAuthPolicyUnavailable
+	}
+	if !enabled {
+		return ErrPasswordLoginDisabled
+	}
+	user, err := s.userService.GetUserByID(ctx, in.UserUUID)
+	if err != nil {
+		return err
+	}
+	if !user.IsActive || user.Kind == iface.UserKindService {
+		return ErrUserInactive
+	}
+	if !user.EmailVerified {
+		return ErrEmailNotVerified
+	}
+	if user.PasswordHash != "" {
+		return ErrPasswordAlreadySet
+	}
+	if err := s.passwordService.ValidatePolicy(ctx, in.New, user.Email); err != nil {
+		return err
+	}
+	hash, err := s.passwordService.Hash(in.New)
+	if err != nil {
+		return err
+	}
+	if err := s.initialPasswordSetter.SetPasswordHashIfUnset(ctx, user.UUID, hash); err != nil {
+		return err
+	}
+	_ = s.userService.ClearFailedLogins(ctx, user.UUID)
+	s.resetLoginFailures(ctx, user.Email)
+	teardown := s.revokeSessionsAfterCredentialChange(ctx, user.UUID,
+		"password_added", in.CurrentSID, authModels.DeviceTrustRevokedOnPasswordAdded)
+	emitCredentialEvent(ctx, s.securityEventSink, s.logger, "self_password_added", user.UUID, map[string]interface{}{
+		"audience":             string(s.audience),
+		"currentSessionId":     in.CurrentSID,
+		"otherSessionsRevoked": teardown.Revoked,
+		"teardownComplete":     teardown.Complete,
+	})
+	return nil
 }
 
 // ChangePassword updates the password for an authenticated user who
@@ -1311,7 +1419,7 @@ func (s *PasswordAuthService) ChangePassword(ctx context.Context, in ChangePassw
 		if s.logger != nil {
 			s.logger.Info("auth: sessions revoked after password change",
 				slog.String("user_uuid", user.UUID),
-				slog.Int("sessions_revoked", revoked))
+				slog.Int("sessions_revoked", revoked.Revoked))
 		}
 	}
 	// Clear BOTH the durable counter and the counter-scope on success,

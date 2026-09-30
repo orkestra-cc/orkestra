@@ -23,6 +23,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -44,20 +45,25 @@ type revocationRefreshRepo struct {
 	revokedByUser  []string
 	revokedBySess  []string
 	createdSession []string
+	byUserErr      error
+	bySessionErr   error
+	reasons        []string
 }
 
-func (r *revocationRefreshRepo) RevokeTokensByUser(_ context.Context, userUUID, _ string) error {
+func (r *revocationRefreshRepo) RevokeTokensByUser(_ context.Context, userUUID, reason string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.revokedByUser = append(r.revokedByUser, userUUID)
-	return nil
+	r.reasons = append(r.reasons, reason)
+	return r.byUserErr
 }
 
-func (r *revocationRefreshRepo) RevokeTokensBySession(_ context.Context, sessionUUID, _ string) error {
+func (r *revocationRefreshRepo) RevokeTokensBySession(_ context.Context, sessionUUID, reason string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.revokedBySess = append(r.revokedBySess, sessionUUID)
-	return nil
+	r.reasons = append(r.reasons, reason)
+	return r.bySessionErr
 }
 
 func (r *revocationRefreshRepo) CreateRefreshToken(_ context.Context, doc *authModels.RefreshTokenDoc) error {
@@ -78,13 +84,48 @@ type revocationDeviceTrust struct {
 	DeviceTrustService
 	mu      sync.Mutex
 	revoked []string
+	reasons []string
+	err     error
 }
 
-func (d *revocationDeviceTrust) RevokeAllByUser(_ context.Context, userUUID, _ string) error {
+func (d *revocationDeviceTrust) RevokeAllByUser(_ context.Context, userUUID, reason string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.revoked = append(d.revoked, userUUID)
-	return nil
+	d.reasons = append(d.reasons, reason)
+	return d.err
+}
+
+type failingCredentialSessions struct {
+	*fakeAuthSessionRepo
+	listErr      error
+	terminateErr error
+	attempted    []string
+}
+
+type credentialSIDRevocation struct {
+	*fakeSessionRevocation
+	reasons []string
+}
+
+func (r *credentialSIDRevocation) Revoke(ctx context.Context, sid, reason string) error {
+	r.reasons = append(r.reasons, reason)
+	return r.fakeSessionRevocation.Revoke(ctx, sid, reason)
+}
+
+func (r *failingCredentialSessions) GetActiveSessionsByUser(ctx context.Context, userUUID string) ([]*authModels.AuthSessionDoc, error) {
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	return r.fakeAuthSessionRepo.GetActiveSessionsByUser(ctx, userUUID)
+}
+
+func (r *failingCredentialSessions) TerminateSession(ctx context.Context, sid string) error {
+	r.attempted = append(r.attempted, sid)
+	if r.terminateErr != nil {
+		return r.terminateErr
+	}
+	return r.fakeAuthSessionRepo.TerminateSession(ctx, sid)
 }
 
 func (d *revocationDeviceTrust) revokedList() []string {
@@ -129,7 +170,7 @@ type credentialRevocationEnv struct {
 	users    *gateUserFake
 	refresh  *revocationRefreshRepo
 	sessions *fakeAuthSessionRepo
-	revoker  *fakeSessionRevocation
+	revoker  *credentialSIDRevocation
 	trust    *revocationDeviceTrust
 	tokens   *revocationEmailTokens
 	pwd      PasswordService
@@ -142,7 +183,7 @@ func newCredentialRevocationEnv(t *testing.T) *credentialRevocationEnv {
 		users:    newGateUserFake(),
 		refresh:  &revocationRefreshRepo{},
 		sessions: newFakeAuthSessionRepo(),
-		revoker:  &fakeSessionRevocation{},
+		revoker:  &credentialSIDRevocation{fakeSessionRevocation: &fakeSessionRevocation{}},
 		trust:    &revocationDeviceTrust{},
 		tokens:   &revocationEmailTokens{},
 		pwd:      NewPasswordService(silentLogger(), false),
@@ -295,5 +336,51 @@ func TestChangePassword_WrongCurrentPasswordRevokesNothing(t *testing.T) {
 	}
 	if len(env.trust.revokedList()) != 0 {
 		t.Error("a failed password change must not drop device trust")
+	}
+}
+
+func TestCredentialRevocation_ReportsFailuresAndContinues(t *testing.T) {
+	for _, stage := range []string{"list", "refresh_session", "terminate", "sid", "refresh_user", "trust"} {
+		t.Run(stage, func(t *testing.T) {
+			env := newCredentialRevocationEnv(t)
+			user := env.userWithSessions("correct-horse-battery", "sess-one", "sess-two")
+			sessions := &failingCredentialSessions{fakeAuthSessionRepo: env.sessions}
+			env.svc.authSessionRepo = sessions
+			outage := errors.New("injected teardown failure")
+			switch stage {
+			case "list":
+				sessions.listErr = outage
+			case "refresh_session":
+				env.refresh.bySessionErr = outage
+			case "terminate":
+				sessions.terminateErr = outage
+			case "sid":
+				env.revoker.err = outage
+			case "refresh_user":
+				env.refresh.byUserErr = outage
+			case "trust":
+				env.trust.err = outage
+			}
+			// Failure status must not depend on whether a logger is wired.
+			env.svc.logger = nil
+			result := env.svc.revokeSessionsAfterCredentialChange(context.Background(), user.UUID, "password_reset", "", "password_reset")
+			if result.Complete {
+				t.Fatal("a failed teardown stage must report incomplete")
+			}
+			wantRevoked := 0
+			if stage == "refresh_user" || stage == "trust" {
+				wantRevoked = 2
+			}
+			if result.Revoked != wantRevoked {
+				t.Fatalf("Revoked=%d, want %d completed per-session revocations", result.Revoked, wantRevoked)
+			}
+			byUser, bySession := env.refresh.snapshot()
+			if len(byUser) != 1 || len(env.trust.revokedList()) != 1 {
+				t.Fatal("by-user refresh sweep and device trust must still be attempted")
+			}
+			if stage != "list" && (len(bySession) != 2 || len(sessions.attempted) != 2 || len(env.revoker.revokedList()) != 2) {
+				t.Fatal("failure must not stop later stages or later sessions")
+			}
+		})
 	}
 }

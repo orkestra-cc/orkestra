@@ -163,6 +163,22 @@ func (f *gateUserFake) UpdatePasswordHash(_ context.Context, userUUID, hash stri
 	return nil
 }
 
+func (f *gateUserFake) SetPasswordHashIfUnset(_ context.Context, userUUID, hash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u := f.byUUID[userUUID]
+	if u == nil {
+		return iface.ErrUserNotFound
+	}
+	if u.PasswordHash != "" {
+		return iface.ErrPasswordAlreadySet
+	}
+	u.PasswordHash = hash
+	now := time.Now()
+	u.PasswordUpdatedAt = &now
+	return nil
+}
+
 func (f *gateUserFake) MarkEmailVerified(_ context.Context, userUUID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
