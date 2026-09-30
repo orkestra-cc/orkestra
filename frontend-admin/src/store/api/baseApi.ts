@@ -856,7 +856,10 @@ export const baseApi = createApi({
     // Compliance — audit trail + GDPR DSR (ADR-0009)
     'AuditEvent',
     'ErasureRequest',
-    'LegalHold'
+    'LegalHold',
+    'CompliancePolicy',
+    'CompliancePolicyAssignment',
+    'ComplianceChangeRequest'
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,
