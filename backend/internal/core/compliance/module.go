@@ -189,6 +189,40 @@ func (m *Module) Collections() []module.CollectionSpec {
 				{Field: "requestedAt", Direction: -1},
 			}},
 		}},
+		// Policy engine (compliance spec §1.1). Platform state managed by
+		// Tier-1 operators; the partial unique index enforces a single
+		// platform policy even under concurrent first boots.
+		{Name: models.PoliciesCollection, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"uuid": 1}, Unique: true},
+			{Keys: map[string]int{"name": 1}, Unique: true},
+			{Keys: map[string]int{"isPlatformDefault": 1}, Unique: true,
+				PartialFilter: map[string]any{"isPlatformDefault": true}},
+		}},
+		{Name: models.PolicyVersionsCollection, Indexes: []module.IndexSpec{
+			{OrderedKeys: []module.IndexKey{
+				{Field: "policyUuid", Direction: 1},
+				{Field: "version", Direction: 1},
+			}, Unique: true},
+			{Keys: map[string]int{"changedAt": 1}},
+		}},
+		{Name: models.PolicyAssignmentsCollection, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"tenantId": 1}, Unique: true},
+			{Keys: map[string]int{"policyUuid": 1}},
+		}},
+		{Name: models.PolicyAssignmentHistoryCollection, Indexes: []module.IndexSpec{
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "changedAt", Direction: -1},
+			}},
+			{Keys: map[string]int{"changedAt": 1}},
+		}},
+		{Name: models.PolicyChangeRequestsCollection, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"uuid": 1}, Unique: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "status", Direction: 1},
+				{Field: "requestedAt", Direction: -1},
+			}},
+		}},
 	}
 }
 
