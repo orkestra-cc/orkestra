@@ -66,3 +66,18 @@ func TestLessRestrictiveContentFields(t *testing.T) {
 		t.Fatalf("stricter policy reported %v", got)
 	}
 }
+
+func TestRetentionClassValid(t *testing.T) {
+	all := AllRetentionClasses()
+	if len(all) != 5 {
+		t.Fatalf("AllRetentionClasses = %v, want 5 classes", all)
+	}
+	for _, c := range all {
+		if !c.Valid() {
+			t.Fatalf("%q not valid", c)
+		}
+	}
+	if RetentionClass("forever").Valid() || RetentionClass("").Valid() {
+		t.Fatal("unknown class accepted")
+	}
+}

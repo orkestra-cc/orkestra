@@ -129,3 +129,48 @@ func LessRestrictiveContentFields(candidate, baseline LogContentPolicy) []string
 	}
 	return out
 }
+
+// RetentionClass groups audit evidence by purpose and legal basis (spec
+// §1.3). The catalog with purposes, legal bases and minimums lives in the
+// compliance module (internal/core/compliance/retentionclass).
+type RetentionClass string
+
+const (
+	RetentionAdminAccess            RetentionClass = "admin_access"
+	RetentionPrivilegedChange       RetentionClass = "privileged_change"
+	RetentionClientActivity         RetentionClass = "client_activity"
+	RetentionAuthenticationSecurity RetentionClass = "authentication_security"
+	RetentionComplianceEvidence     RetentionClass = "compliance_evidence"
+)
+
+// AllRetentionClasses lists the classes in catalog order.
+func AllRetentionClasses() []RetentionClass {
+	return []RetentionClass{
+		RetentionAdminAccess, RetentionPrivilegedChange, RetentionClientActivity,
+		RetentionAuthenticationSecurity, RetentionComplianceEvidence,
+	}
+}
+
+func (c RetentionClass) Valid() bool { return slices.Contains(AllRetentionClasses(), c) }
+
+// RetentionDecision is the retention a sink stamps on an event: the class,
+// the policy (and version) that decided it, and the days to keep it.
+type RetentionDecision struct {
+	Class         RetentionClass `json:"class"`
+	PolicyUUID    string         `json:"policyUuid"`
+	PolicyVersion int            `json:"policyVersion"`
+	Days          int            `json:"days"`
+}
+
+// CompliancePolicyProvider resolves the live compliance policy. It is
+// published by the compliance module as module.ServiceCompliancePolicy and
+// satisfies the slog PolicyHandler's resolver (LogContentFor).
+type CompliancePolicyProvider interface {
+	// LogContentFor returns the log-content policy of tenantID; "" asks for
+	// the strictest policy in force. The pointer is immutable and stays the
+	// same while the policy version does not change.
+	LogContentFor(tenantID string) *LogContentPolicy
+	// RetentionFor returns the retention of class for tenantID: the assigned
+	// policy when it sets the class, the platform policy otherwise.
+	RetentionFor(tenantID string, class RetentionClass) RetentionDecision
+}
