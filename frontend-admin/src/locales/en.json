@@ -183,6 +183,22 @@
       "country_blocked": "Access from your country is not permitted.",
       "password_confirm_unavailable": "This account cannot reconfirm with a password. Use MFA or reauthenticate via OAuth.",
       "oauth_provider_disabled": "This OAuth provider is not enabled for this surface. Contact an administrator."
+    },
+    "compliance": {
+      "policy_not_found": "The compliance policy does not exist.",
+      "change_request_not_found": "The change request does not exist.",
+      "tenant_not_found": "The tenant does not exist.",
+      "policy_version_conflict": "Someone changed the policy or the assignment meanwhile: reload and try again.",
+      "policy_platform_protected": "The platform policy cannot be deleted or assigned to a tenant.",
+      "policy_in_use": "The policy is assigned to at least one tenant.",
+      "policy_name_taken": "Another policy already has this name.",
+      "change_request_not_pending": "The request has already been decided.",
+      "change_request_self_approval": "A request must be decided by another operator.",
+      "policy_invalid": "The policy is not valid.",
+      "policy_warnings_unacknowledged": "Confirm the warnings to continue.",
+      "policy_reason_required": "A reason of 1 to 500 characters is required.",
+      "policy_unavailable": "Policies are loading: retry in a few seconds.",
+      "policy_persistence_failed": "The request could not be completed."
     }
   },
   "banner": {
@@ -2197,7 +2213,9 @@
       "erasureRequests": "Erasure Requests",
       "legalHolds": "Legal Holds",
       "retention": "Retention",
-      "auditEvents": "Audit Events"
+      "auditEvents": "Audit Events",
+      "policies": "Policies",
+      "changeRequests": "Requests"
     },
     "stats": {
       "pendingErasures": {
@@ -2297,6 +2315,285 @@
       "emptyMessage": "No audit events.",
       "emptyHint": "Security-relevant actions across the platform are recorded here.",
       "searchPlaceholder": "Search by action, actor or resource"
+    },
+    "policies": {
+      "new": "New policy",
+      "duplicate": "Duplicate",
+      "columns": {
+        "name": "Policy",
+        "version": "Version",
+        "tenants": "Tenants",
+        "ip": "IP addresses",
+        "updated": "Updated",
+        "actions": "Actions"
+      },
+      "badges": {
+        "platform": "Platform",
+        "lessRestrictive": "Less restrictive",
+        "reviewOverdue": "Review overdue"
+      },
+      "emptyMessage": "No compliance policy yet",
+      "emptyHint": "The platform policy is created at first start.",
+      "searchPlaceholder": "Search policies…"
+    },
+    "modes": {
+      "ipAddress": {
+        "full": "Full",
+        "truncated": "Truncated",
+        "hashed": "Pseudonymised",
+        "omitted": "Removed"
+      },
+      "userAgent": {
+        "full": "Full",
+        "omitted": "Removed"
+      },
+      "subjectIds": {
+        "uuid": "UUID",
+        "hashed": "Pseudonymised",
+        "omitted": "Removed"
+      }
+    },
+    "roles": {
+      "controller": "Controller",
+      "processor": "Processor",
+      "joint_controller": "Joint controller"
+    },
+    "retentionClasses": {
+      "admin_access": {
+        "label": "Administrator access",
+        "purpose": "Control of administrator access",
+        "legalBasis": "Art. 6(1)(c) GDPR — Garante, system administrators measure"
+      },
+      "privileged_change": {
+        "label": "Privileged changes",
+        "purpose": "Accountability and security of privileged changes",
+        "legalBasis": "Art. 6(1)(f) GDPR — legitimate interest"
+      },
+      "client_activity": {
+        "label": "Client activity",
+        "purpose": "Security of the service provided to the client",
+        "legalBasis": "Art. 6(1)(b) or (f) GDPR"
+      },
+      "authentication_security": {
+        "label": "Authentication security",
+        "purpose": "Detection of fraud and abuse",
+        "legalBasis": "Art. 6(1)(f) GDPR — legitimate interest"
+      },
+      "compliance_evidence": {
+        "label": "Compliance evidence",
+        "purpose": "Demonstrating compliance",
+        "legalBasis": "Art. 6(1)(c) GDPR"
+      }
+    },
+    "issues": {
+      "invalid_enum": "Value not allowed ({{value}}).",
+      "retention_out_of_range": "Between {{min}} and {{max}} days.",
+      "class_below_minimum": "At least {{min}} days: the Garante system-administrators measure requires six months.",
+      "class_not_tenant_settable": "This class can be set only on the platform policy.",
+      "sinks_not_platform": "Sink retention can be set only on the platform policy.",
+      "sinks_missing": "The platform policy needs the sink section.",
+      "sink_invalid": "Sink value out of range.",
+      "invalid_pii_key": "Keys must be 2 to 40 lowercase letters or digits, at most 100.",
+      "name_invalid": "Enter a name of at most {{max}} characters.",
+      "name_taken": "Another policy already has this name.",
+      "reason_required": "A reason of 1 to 500 characters is required.",
+      "less_restrictive_than_platform": "Less restrictive than the platform policy: {{fields}}.",
+      "less_restrictive_than_current": "Weakens the current protection: {{fields}}.",
+      "retention_longer_than_default": "Retention longer than the default ({{default}} days).",
+      "retention_shorter_than_default": "Retention shorter than the default ({{default}} days): audit evidence expires sooner.",
+      "sink_retention_longer_than_default": "Sink retention above the default ({{default}}).",
+      "external_sink_changed": "New or changed external sink: check the processor, the DPA and any transfer outside the EU.",
+      "ip_full": "Full IP addresses will reach the logs.",
+      "review_overdue": "The review date is missing or past.",
+      "accountability_incomplete": "The RoPA or DPIA/LIA reference is missing."
+    },
+    "issueTitles": {
+      "less_restrictive_than_platform": "Less restrictive than the platform",
+      "less_restrictive_than_current": "Weakens the current protection",
+      "retention_longer_than_default": "Retention over the default",
+      "retention_shorter_than_default": "Retention under the default",
+      "sink_retention_longer_than_default": "Sink retention over the default",
+      "external_sink_changed": "External sink changed",
+      "ip_full": "Full IP addresses",
+      "review_overdue": "Review overdue",
+      "accountability_incomplete": "Accountability incomplete"
+    },
+    "fields": {
+      "name": "Name",
+      "description": "Description",
+      "ipAddress": "IP addresses",
+      "userAgent": "User agent",
+      "subjectIds": "User identifiers",
+      "piiKeys": "Personal-data keys",
+      "scanFreeText": "Free-text scan",
+      "role": "GDPR role",
+      "ropaRef": "RoPA reference",
+      "assessmentRef": "DPIA / LIA reference",
+      "owner": "Owner (operator UUID)",
+      "reviewDueAt": "Next review",
+      "accountability": "Accountability",
+      "sinks": "Sinks"
+    },
+    "changeRequests": {
+      "columns": {
+        "kind": "Change",
+        "target": "Target",
+        "warnings": "Warnings",
+        "requestedBy": "Requested by",
+        "requestedAt": "Requested",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "kinds": {
+        "create": "New policy",
+        "update": "Policy change",
+        "assign": "Tenant assignment",
+        "unassign": "Assignment removal"
+      },
+      "statuses": {
+        "pending": "Pending",
+        "approved": "Approved",
+        "rejected": "Rejected",
+        "superseded": "Superseded",
+        "expired": "Expired",
+        "all": "All"
+      },
+      "filterLabel": "Status",
+      "open": "Details",
+      "emptyMessage": "No change request",
+      "emptyHint": "Changes with warnings wait here for a second operator.",
+      "searchPlaceholder": "Search requests…",
+      "requestedBy": "Requested by",
+      "requestedAt": "Requested",
+      "tenant": "Tenant",
+      "reason": "Reason",
+      "status": "Status",
+      "warnings": "Warnings",
+      "changes": "Changes",
+      "noteLabel": "Decision note",
+      "notePlaceholder": "Why you approve or reject",
+      "approve": "Approve",
+      "reject": "Reject",
+      "close": "Close",
+      "approved": "Request approved and applied.",
+      "rejected": "Request rejected.",
+      "decideError": "The decision could not be saved.",
+      "currentLoading": "Loading the current version of the policy…",
+      "currentLoadError": "The current version of the policy could not be loaded, so the changes cannot be shown. Reject the request or try again later.",
+      "ownRequest": "You made this request: another operator must decide it.",
+      "assignSummary": "Tenant {{tenant}}: from {{from}} to {{to}}.",
+      "unassignSummary": "Tenant {{tenant}}: from {{from}} back to the platform policy."
+    },
+    "policyDetail": {
+      "newTitle": "New compliance policy",
+      "copyName": "{{name}} (copy)",
+      "back": "Compliance",
+      "sections": {
+        "settings": "Settings",
+        "history": "History",
+        "tenants": "Tenants"
+      },
+      "save": "Save",
+      "saving": "Checking…",
+      "delete": "Delete",
+      "saved": "Policy saved.",
+      "sentForApproval": "Request sent for approval.",
+      "validateError": "The policy could not be checked.",
+      "saveError": "The policy could not be saved.",
+      "conflictTitle": "The policy changed",
+      "conflictBody": "Another operator saved a newer version. Reload it before editing again.",
+      "reload": "Reload",
+      "unsavedTitle": "Unsaved changes",
+      "unsavedBody": "Leave the page and discard your changes?",
+      "stay": "Stay",
+      "leave": "Discard and leave",
+      "inherit": "Platform: {{days}} days",
+      "deleteTitle": "Delete the policy",
+      "deleteBody": "The policy is removed from the catalog; its versions stay as evidence.",
+      "deleted": "Policy deleted.",
+      "deleteError": "The policy could not be deleted.",
+      "loadError": "The policy could not be loaded."
+    },
+    "policyForm": {
+      "sectionContent": "Log content",
+      "sectionRetention": "Audit retention by class",
+      "sectionAccountability": "Accountability",
+      "piiKeysHelp": "Attribute keys masked as personal data, separated by commas. Matching is exact after removing separators.",
+      "scanFreeTextLabel": "Mask e-mails, IBANs, tax codes and IPs inside free text",
+      "minDays": "min {{days}}",
+      "defaultDays": "default {{days}}",
+      "hardMinimum": "legal minimum",
+      "invalid": "Check this value.",
+      "platformOnly": "Platform only"
+    },
+    "saveModal": {
+      "title": "Confirm the change",
+      "changes": "Changes",
+      "noChanges": "No field changed.",
+      "warnings": "Warnings",
+      "fourEyesNote": "With four-eyes approval on, a change with warnings waits for a second operator.",
+      "reasonLabel": "Reason",
+      "reasonPlaceholder": "Why the change is needed (kept as evidence)",
+      "acknowledge": "I have read the warnings and confirm the change",
+      "acknowledgeRequired": "Confirm the warnings to continue.",
+      "confirm": "Confirm",
+      "cancel": "Cancel"
+    },
+    "history": {
+      "columns": {
+        "version": "Version",
+        "kind": "Change",
+        "changedBy": "Author",
+        "approvedBy": "Approver",
+        "changedAt": "Date",
+        "reason": "Reason"
+      },
+      "kinds": {
+        "create": "Created",
+        "update": "Changed",
+        "delete": "Deleted"
+      },
+      "emptyMessage": "No version yet",
+      "searchPlaceholder": "Search versions…"
+    },
+    "tenantsPanel": {
+      "columns": {
+        "tenant": "Tenant",
+        "kind": "Tier",
+        "assignedBy": "Assigned by",
+        "assignedAt": "Assigned",
+        "reason": "Reason"
+      },
+      "kinds": {
+        "internal": "Internal",
+        "external": "Client"
+      },
+      "emptyMessage": "No tenant uses this policy",
+      "searchPlaceholder": "Search tenants…"
+    },
+    "tenantCard": {
+      "title": "Compliance policy",
+      "source": {
+        "assigned": "Assigned",
+        "platform": "Platform policy"
+      },
+      "change": "Change",
+      "retention": "Audit retention",
+      "days": "{{count}} days",
+      "loadError": "The compliance policy could not be loaded."
+    },
+    "assignModal": {
+      "title": "Compliance policy of the tenant",
+      "policyLabel": "Policy",
+      "platformOption": "Platform policy (remove the assignment)",
+      "noWarnings": "No warning.",
+      "reasonLabel": "Reason",
+      "acknowledge": "I have read the warnings and confirm the change",
+      "confirm": "Save",
+      "cancel": "Cancel",
+      "applied": "Policy of the tenant updated.",
+      "sentForApproval": "Request sent for approval.",
+      "error": "The assignment could not be saved."
     }
   },
   "adminComplianceSoc2": {

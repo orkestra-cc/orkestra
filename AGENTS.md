@@ -83,7 +83,7 @@ Every core module has **two** docs: the in-repo `AGENTS.md` is the AI-facing *co
 | **auth**         | Email/password (argon2id) + OAuth 2.1, MFA + passkeys, JWT, sessions, service accounts     | [AGENTS.md](backend/internal/core/auth/AGENTS.md) | [auth](docs/site/modules/core/auth.mdx) |
 | **navigation**   | Dynamic menu from module NavItems + persisted reorder via `/admin/modules/navigation`      | [AGENTS.md](backend/internal/core/navigation/AGENTS.md) | [navigation](docs/site/modules/core/navigation.mdx) |
 | **logging**      | Tier-1 runtime logging workspace: permanent levels, expiring diagnostics, bounded preview  | [AGENTS.md](backend/internal/core/logging/AGENTS.md) | [logging](docs/site/modules/core/logging.mdx) |
-| **compliance**   | Audit trail + GDPR DSR, per-tenant KMS crypto-shred, legal hold, retention, SOC2 (ADR-0009) | [AGENTS.md](backend/internal/core/compliance/AGENTS.md) | [compliance](docs/site/modules/core/compliance.mdx) |
+| **compliance**   | Audit trail + GDPR DSR, per-tenant KMS crypto-shred, legal hold, retention, SOC2, compliance policy engine with four-eyes changes (ADR-0009) | [AGENTS.md](backend/internal/core/compliance/AGENTS.md) | [compliance](docs/site/modules/core/compliance.mdx) |
 
 Load order (topologically sorted by `Dependencies()`): `user` → `notification` → `tenant` → `authz` → `auth` → `navigation` → `logging` → `compliance`. Auth depends on notification (optional at runtime) so it can deliver verification and password-reset emails; `logging` has no declared dependencies; `compliance` (ADR-0009, always-on) depends on `user`/`auth`/`tenant` so it resolves the PII-producer registry + audit sink after they init.
 
@@ -171,7 +171,7 @@ The frontend has the mirror-image concern: `frontend-admin/vite.config.js` enabl
 
 GitHub Actions workflows (`.github/workflows/`) run on PR and push to `dev`/`main` (except where noted below). Non-gating jobs — Docker image publish, coverage-badge refresh, the weekly security cron — additionally require the repo-level Actions variable **`CI_FULL=true`** (set on the public upstream and commons); a product fork defaults to minimal CI and opts in per repo, no file edits. **CI workflows invoke `make` targets from the repo root — local and CI cannot drift.** Run `make ci-help` for the full list.
 
-- `backend.yml` → `make ci-backend` (lint, tenantscope, policycoverage, piiscan, vuln, tests, build, openapi-check) + a single Docker image build on push
+- `backend.yml` → `make ci-backend` (lint, tenantscope, policycoverage, piiscan, logscope, vuln, tests, build, openapi-check) + a single Docker image build on push
 - `frontend-admin.yml` → `make ci-frontend-admin` (typecheck, eslint, tests, audit, build)
 - `frontend-client.yml` → `make ci-frontend-client` (typecheck, eslint, tests, build)
 - `mobile.yml` → `make ci-mobile` (flutter analyze, test)

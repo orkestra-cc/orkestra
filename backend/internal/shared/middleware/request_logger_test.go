@@ -8,10 +8,17 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	chiMiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/iface"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 // newCapturingLogger returns a logger writing JSON to a buffer plus a
@@ -428,5 +435,144 @@ func TestParseSkipPaths_TrimsAndDropsBlanks(t *testing.T) {
 	}
 	if len(got) != 3 {
 		t.Errorf("expected 3 entries, got %d: %v", len(got), got)
+	}
+}
+
+// fakeAuth mimics RequireAuth: it stamps the principal on a DERIVED context,
+// which the outer RequestLogger cannot see without the annotations.
+func fakeAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		ctx = context.WithValue(ctx, ctxauth.KeyUserUUID, "user-downstream")
+		ctx = context.WithValue(ctx, ctxauth.KeyTenantID, "tenant-downstream")
+		ctx = context.WithValue(ctx, ctxauth.KeyTenantKind, "internal")
+		ctx = context.WithValue(ctx, ctxauth.KeySystemRole, "developer")
+		annotatePrincipal(ctx)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func TestRequestLogger_PrincipalFromDownstreamAuth(t *testing.T) {
+	logger, buf := newCapturingLogger(t)
+	handler := RequestLogger(logger, RequestLoggerOptions{})(fakeAuth(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+	))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/x", nil))
+
+	line := parseLine(t, buf.Bytes())
+	for k, want := range map[string]string{"tenant_id": "tenant-downstream", "tenant_kind": "internal", "user_id": "user-downstream", "user_role": "developer"} {
+		if line[k] != want {
+			t.Errorf("%s = %v, want %s", k, line[k], want)
+		}
+	}
+}
+
+func TestRequestLogger_RealRequireAuthChain(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	logger, buf := newCapturingLogger(t)
+	handler := RequestLogger(logger, RequestLoggerOptions{})(f.mw.RequireAuth(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+	))
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+f.issueTokenForUser("user-chain-1", "administrator"))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	line := parseLine(t, buf.Bytes())
+	if line["user_id"] != "user-chain-1" {
+		t.Fatalf("user_id = %v, want user-chain-1 (RequireAuth principal must reach the outer log line)", line["user_id"])
+	}
+}
+
+func TestRequestLogger_LogsRouteTemplateNotRawPath(t *testing.T) {
+	logger, buf := newCapturingLogger(t)
+	r := chi.NewRouter()
+	r.Use(RequestLogger(logger, RequestLoggerOptions{}))
+	r.Get("/v1/admin/users/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/admin/users/3f2b-anna@example.com", nil))
+
+	line := parseLine(t, buf.Bytes())
+	if line["route"] != "/v1/admin/users/{id}" {
+		t.Fatalf("route = %v, want the template", line["route"])
+	}
+	if _, ok := line["path"]; ok {
+		t.Fatalf("raw path must not be logged when a template exists: %v", line["path"])
+	}
+}
+
+func TestRequestLogger_FallsBackToPathWithoutTemplate(t *testing.T) {
+	logger, buf := newCapturingLogger(t)
+	r := chi.NewRouter()
+	r.Use(RequestLogger(logger, RequestLoggerOptions{}))
+	// Register a dummy route to ensure chi router is fully initialized.
+	r.Get("/v1/valid", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	// Now request a path that doesn't match any route.
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/nope", nil))
+
+	line := parseLine(t, buf.Bytes())
+	if line["path"] != "/nope" {
+		t.Fatalf("404 without template must log the path: %v", line)
+	}
+	if _, ok := line["route"]; ok {
+		t.Fatalf("no template → no route attribute: %v", line["route"])
+	}
+}
+
+func TestRequestLogger_StampsRouteTemplateOnActiveSpan(t *testing.T) {
+	logger, _ := newCapturingLogger(t)
+	rec := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
+	r := chi.NewRouter()
+	r.Use(RequestLogger(logger, RequestLoggerOptions{SkipPaths: map[string]struct{}{}}))
+	r.Get("/v1/x/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	// The span is opened by an outer layer, like otelhttp does in production.
+	outer := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		ctx, span := tp.Tracer("t").Start(req.Context(), "server")
+		defer span.End()
+		r.ServeHTTP(w, req.WithContext(ctx))
+	})
+	outer.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/x/SECRET123", nil))
+
+	ended := rec.Ended()
+	if len(ended) != 1 {
+		t.Fatalf("spans = %d", len(ended))
+	}
+	got := ""
+	for _, kv := range ended[0].Attributes() {
+		if kv.Key == "http.route" {
+			got = kv.Value.AsString()
+		}
+	}
+	if got != "/v1/x/{id}" {
+		t.Errorf("http.route on span = %q, want /v1/x/{id}", got)
+	}
+}
+
+// chi's RequestID copies a client's X-Request-Id verbatim: request_id is
+// caller-controlled and the PolicyHandler must scan it like free text.
+func TestRequestLogger_ClientRequestIDIsMasked(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := slog.New(utils.NewPolicyHandler(
+		slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}),
+		utils.NewStaticLogPolicyResolver(iface.DefaultLogContentPolicy()), nil))
+	r := chi.NewRouter()
+	r.Use(chiMiddleware.RequestID)
+	r.Use(RequestLogger(logger, RequestLoggerOptions{SkipPaths: map[string]struct{}{}, SlowThreshold: time.Hour}))
+	r.Get("/v1/x", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
+	req.Header.Set("X-Request-Id", "alice@example.com 203.0.113.7")
+	r.ServeHTTP(httptest.NewRecorder(), req)
+
+	line := parseLine(t, buf.Bytes())
+	if got := line["request_id"]; got != "[EMAIL] 203.0.113.0/24" {
+		t.Fatalf("request_id = %v, want the client value masked", got)
+	}
+	if strings.Contains(buf.String(), "alice@example.com") || strings.Contains(buf.String(), "203.0.113.7") {
+		t.Fatalf("client X-Request-Id leaked: %s", buf.String())
 	}
 }

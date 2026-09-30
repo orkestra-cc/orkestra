@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import type { Org } from 'store/api/tenantApi';
 import { useUpdateOrgAdminMutation } from 'store/api/tenantApi';
+import CompliancePolicyCard from './CompliancePolicyCard';
 
 interface Props {
   org: Org;
@@ -52,87 +53,100 @@ const OverviewTab: React.FC<Props> = ({ org }) => {
   };
 
   return (
-    <Form className="px-1">
-      <div className="row g-3">
-        <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">
-            {t('adminClients.overview.labelName')}
-          </Form.Label>
-          <Form.Control value={name} onChange={e => setName(e.target.value)} />
-        </Form.Group>
-        <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">
-            {t('adminClients.overview.labelSlug')}
-          </Form.Label>
-          <Form.Control value={slug} onChange={e => setSlug(e.target.value)} />
-        </Form.Group>
-        <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">
-            {t('adminClients.overview.labelPlan')}
-          </Form.Label>
-          <Form.Control readOnly value={org.plan} className="fs-11" />
-          <Form.Text muted>{t('adminClients.overview.planHelp')}</Form.Text>
-        </Form.Group>
-        <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">
-            {t('adminClients.overview.labelStatus')}
-          </Form.Label>
-          <Form.Control readOnly value={org.status ?? '—'} className="fs-11" />
-        </Form.Group>
-        <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">
-            {t('adminClients.overview.labelTenantId')}
-          </Form.Label>
-          <Form.Control
-            readOnly
-            value={org.id}
-            className="fs-11 font-monospace"
-          />
-        </Form.Group>
-        <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">
-            {t('adminClients.overview.labelOwner')}
-          </Form.Label>
-          <Form.Control
-            readOnly
-            value={org.ownerUserUUID || '—'}
-            className="fs-11 font-monospace"
-          />
-        </Form.Group>
-        <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">
-            {t('adminClients.overview.labelCreated')}
-          </Form.Label>
-          <Form.Control
-            readOnly
-            value={new Date(org.createdAt).toLocaleString()}
-            className="fs-11"
-          />
-        </Form.Group>
-        <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">
-            {t('adminClients.overview.labelUpdated')}
-          </Form.Label>
-          <Form.Control
-            readOnly
-            value={new Date(org.updatedAt).toLocaleString()}
-            className="fs-11"
-          />
-        </Form.Group>
-      </div>
-      <div className="d-flex justify-content-end mt-3">
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={!dirty || isLoading}
-          onClick={onSave}
-        >
-          {isLoading
-            ? t('adminClients.overview.saving')
-            : t('adminClients.overview.save')}
-        </Button>
-      </div>
-    </Form>
+    <>
+      <Form className="px-1">
+        <div className="row g-3">
+          <Form.Group className="col-md-6">
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.overview.labelName')}
+            </Form.Label>
+            <Form.Control
+              value={name}
+              onChange={e => setName(e.target.value)}
+            />
+          </Form.Group>
+          <Form.Group className="col-md-6">
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.overview.labelSlug')}
+            </Form.Label>
+            <Form.Control
+              value={slug}
+              onChange={e => setSlug(e.target.value)}
+            />
+          </Form.Group>
+          <Form.Group className="col-md-6">
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.overview.labelPlan')}
+            </Form.Label>
+            <Form.Control readOnly value={org.plan} className="fs-11" />
+            <Form.Text muted>{t('adminClients.overview.planHelp')}</Form.Text>
+          </Form.Group>
+          <Form.Group className="col-md-6">
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.overview.labelStatus')}
+            </Form.Label>
+            <Form.Control
+              readOnly
+              value={org.status ?? '—'}
+              className="fs-11"
+            />
+          </Form.Group>
+          <Form.Group className="col-md-6">
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.overview.labelTenantId')}
+            </Form.Label>
+            <Form.Control
+              readOnly
+              value={org.id}
+              className="fs-11 font-monospace"
+            />
+          </Form.Group>
+          <Form.Group className="col-md-6">
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.overview.labelOwner')}
+            </Form.Label>
+            <Form.Control
+              readOnly
+              value={org.ownerUserUUID || '—'}
+              className="fs-11 font-monospace"
+            />
+          </Form.Group>
+          <Form.Group className="col-md-6">
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.overview.labelCreated')}
+            </Form.Label>
+            <Form.Control
+              readOnly
+              value={new Date(org.createdAt).toLocaleString()}
+              className="fs-11"
+            />
+          </Form.Group>
+          <Form.Group className="col-md-6">
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.overview.labelUpdated')}
+            </Form.Label>
+            <Form.Control
+              readOnly
+              value={new Date(org.updatedAt).toLocaleString()}
+              className="fs-11"
+            />
+          </Form.Group>
+        </div>
+        <div className="d-flex justify-content-end mt-3">
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!dirty || isLoading}
+            onClick={onSave}
+          >
+            {isLoading
+              ? t('adminClients.overview.saving')
+              : t('adminClients.overview.save')}
+          </Button>
+        </div>
+      </Form>
+      <CompliancePolicyCard tenantId={org.id} />
+    </>
   );
 };
 

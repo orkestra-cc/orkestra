@@ -203,6 +203,12 @@ const (
 	// module that envelope-encrypts PII fields. Value: iface.KMSProvider.
 	ServiceKMSProvider ServiceKey = "compliance.kms_provider"
 
+	// ServiceCompliancePolicy is the live compliance policy resolver
+	// (iface.CompliancePolicyProvider), published by the compliance module.
+	// main.go swaps it into the slog PolicyHandler and the span exporter
+	// after InitAll (compliance spec §2.1).
+	ServiceCompliancePolicy ServiceKey = "compliance.policy"
+
 	// ServiceLogLevelResolver is the DB-backed log-level resolver
 	// (ADR-0005 Phase F). Registered by the logging core module;
 	// main.go reads it after module init and calls
