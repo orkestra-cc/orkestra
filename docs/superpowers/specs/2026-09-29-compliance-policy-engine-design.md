@@ -794,6 +794,19 @@ in `tenant_scope.cedar`):
 - `system.compliance.evidence.export` — super_admin, administrator (stessa
   regola per il developer).
 
+> **Nota (stato della T2).** Oggi la tabella dei ruoli di authz assegna i
+> permessi per suffisso: il ruolo di piattaforma `manager` (tutto tranne
+> `.delete` e `.admin`) riceve anche `system.compliance.policy.manage`, e
+> `.read` arriva pure a `manager`, `operator` e `guest`. La regola Cedar
+> `system_actions.require_platform_role` che lo impedirebbe è in shadow mode
+> (registra la divergenza, non nega). Finché `CEDAR_ENFORCE_ACTIONS` non
+> include `system.compliance.policy.manage`, un `manager` può quindi creare,
+> modificare, assegnare e approvare policy, come già oggi per
+> `legalhold.manage` e `dsr.manage`. Raccomandazione per chi installa:
+> aggiungere `system.compliance.policy.manage` a `CEDAR_ENFORCE_ACTIONS`
+> (lista raccomandata in `backend/internal/core/authz/AGENTS.md`) appena il
+> motore di policy è in uso.
+
 Codici errore (`internal/shared/errcode`, con golden):
 `compliance.policy_not_found` (404), `…policy_version_conflict`,
 `…policy_platform_protected`, `…policy_in_use`, `…policy_name_taken`,

@@ -17,7 +17,7 @@ Platform **audit trail** + **GDPR data-subject rights**. Re-homed from a removed
 - **Retention auto-cleanup** — a daily job that hard-deletes anonymized user tombstones past the retention window. **Off by default.**
 - **Mediated erasure-request workflow** — a subject lodges a request; an operator reviews, then executes or rejects it.
 - **SOC2 evidence** — a point-in-time controls snapshot. **Gated off by default** (`soc2_enabled`).
-- **Compliance policies** — a named, versioned catalog: one platform policy plus tenant policies assigned to internal or client tenants. A policy sets what reaches the operational logs and traces (IP addresses, user agents, user identifiers, personal-data keys, free-text scanning) and the audit retention of each [retention class](#retention-classes). Changes need a reason, keep an immutable version, and — when they lower protection — wait for a second operator (four eyes).
+- **Compliance policies** — a named, versioned catalog: one platform policy plus tenant policies assigned to internal or client tenants. A policy sets what reaches the operational logs and traces (IP addresses, user agents, user identifiers, personal-data keys, free-text scanning) and the audit retention of each [retention class](#retention-classes) — stored and resolved today, applied to stored audit events by a later stage. Changes need a reason, keep an immutable version, and — when they lower protection — wait for a second operator (four eyes).
 
 ## Routes
 
@@ -26,7 +26,9 @@ Platform **audit trail** + **GDPR data-subject rights**. Re-homed from a removed
 - **Admin writes** (step-up gated): place/release legal holds (`system.compliance.legalhold.manage`), execute/reject erasure requests (`system.compliance.dsr.manage`).
 - **Policy engine reads** (`system.compliance.policy.read`): list and read policies and their versions, the effective policy of a tenant, the retention-class catalog, assignments, change requests, and validation previews (`POST …/compliance/policies/validate`, `POST …/compliance/policy-assignments/{tenantId}/validate`).
 - **Policy engine writes** (`system.compliance.policy.manage`, step-up gated): create, change and delete policies, assign a policy to a tenant or move it back to the platform policy, approve or reject change requests. A change that waits for four eyes answers `202` with the created request.
-- **Client surface** (Tier 2, own tenant only): `GET /v1/tenants/{tenantId}/compliance/policy` shows a client how its own data is logged and retained.
+
+  Until `CEDAR_ENFORCE_ACTIONS` includes `system.compliance.policy.manage`, the role table grants it by suffix to the platform `manager` role too, who can then manage **and approve** policies — the same as `legalhold.manage` and `dsr.manage` today. Add it to `CEDAR_ENFORCE_ACTIONS` once the policy engine is in use.
+- **Client surface** (Tier 2, own tenant only): `GET /v1/tenants/{tenantId}/compliance/policy` shows a client how its own data is logged and the retention configured for it; `retentionEnforced` stays `false` until audit events are stamped and deleted by class.
 
 ## Config
 
@@ -64,7 +66,7 @@ With `four_eyes_enabled` on (the default), a policy change that raises warnings 
 | `review_overdue` | the review date is in the past or empty |
 | `accountability_incomplete` | the record-of-processing or assessment reference is empty |
 
-The operator ticks an acknowledgement to send a change with warnings. An approval re-checks the current state and supersedes the request if the policy or the assignment changed meanwhile. Requests expire after 14 days. Reasons and notes are personal data kept as compliance evidence: e-mail addresses, IBANs and codici fiscali typed into them are masked before they are stored.
+The operator ticks an acknowledgement to send a change with warnings. An approval re-checks the current state and supersedes the request if the policy or the assignment changed meanwhile. Requests expire after 14 days: a request past that age can no longer be approved or rejected, even before the hourly sweep marks it. Reasons and notes are personal data kept as compliance evidence: e-mail addresses, IBANs and codici fiscali typed into them are masked before they are stored.
 
 :::caution Supported controls, not conformity
 The policy engine supports GDPR minimisation and storage limitation and ISO/IEC 27001 controls such as A.5.3, A.8.11 and A.8.15. Conformity is shown by your risk assessment and Statement of Applicability, not by this module.
