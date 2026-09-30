@@ -319,6 +319,15 @@ func main() {
 			slog.String("source", "logging core module"))
 	}
 
+	// Compliance spec §2.1 — the live compliance policy replaces the static
+	// platform defaults behind every logger built so far and the span
+	// exporter. No-op when the compliance module did not publish it.
+	if p, ok := module.GetTyped[iface.CompliancePolicyProvider](svcRegistry, module.ServiceCompliancePolicy); ok {
+		utils.SwapLogPolicyResolver(p)
+		telemetry.SwapSpanPolicyResolver(p)
+		logger.Info("compliance: live log policy resolver active")
+	}
+
 	// Retrieve auth infrastructure for middleware setup
 	jwtService := svcRegistry.MustGet(module.ServiceJWTService).(services.JWTService)
 

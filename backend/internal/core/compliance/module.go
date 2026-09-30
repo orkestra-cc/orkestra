@@ -13,6 +13,7 @@ package compliance
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/orkestra/backend/internal/core/compliance/services"
 	tenantServices "github.com/orkestra/backend/internal/core/tenant/services"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/metrics"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
@@ -41,6 +43,8 @@ type Module struct {
 	retention    *handlers.RetentionHandler
 	retentionSvc *services.RetentionService
 	erasureReq   *handlers.ErasureRequestHandler
+	policySvc    *services.PolicyService
+	policyAdmin  *services.PolicyAdminService
 	stopCh       chan struct{}
 	logger       *slog.Logger
 }
@@ -70,18 +74,25 @@ func (m *Module) ConfigSchema() []module.ConfigField {
 		// DSR export (always-on right-of-access pipeline), independent of the
 		// cleanup job — it must stay visible whether or not auto-cleanup is on.
 		{Key: "export_retention_days", Label: "Export retention (days)", Group: "retention", Description: "Days a generated DSR export stays downloadable before it expires.", Type: module.FieldInt, Default: "30", EnvVar: "COMPLIANCE_EXPORT_RETENTION_DAYS"},
+		// Four eyes (compliance spec §1.5): a policy change with warnings
+		// waits for a second operator. Turning it off is itself a module
+		// config change, audited by the SDK module admin handler.
+		{Key: "four_eyes_enabled", Label: "Four-eyes approval", Group: "policy", Description: "A compliance policy change with warnings (less restrictive, longer retention, full IPs, overdue review) waits for the approval of a second operator.", Type: module.FieldBool, Default: "true", EnvVar: "COMPLIANCE_FOUR_EYES_ENABLED"},
 	}
 }
 
-// ConfigGroups puts the four compliance settings on the full-page rail. SOC2
+// ConfigGroups puts the compliance settings on the full-page rail. SOC2
 // evidence (off unless pursuing certification) is its own group; the retention
 // auto-cleanup window and the DSR-export download TTL share "Retention & DSR".
+// The policy group holds the four-eyes switch.
 func (m *Module) ConfigGroups() []module.ConfigGroup {
 	return []module.ConfigGroup{
 		{Key: "soc2", Label: "SOC2 evidence", Order: 1,
 			Description: "The SOC2 evidence page and API, off unless you pursue certification."},
 		{Key: "retention", Label: "Retention & DSR", Order: 2,
 			Description: "How long anonymized tombstones and generated DSR exports are kept."},
+		{Key: "policy", Label: "Policy engine", Order: 3,
+			Description: "How changes to the compliance policies are approved."},
 	}
 }
 
@@ -99,7 +110,7 @@ func (m *Module) Dependencies() []string {
 // ProvidedServices publishes the sink under a stable key so every consumer
 // can resolve it with module.GetTyped.
 func (m *Module) ProvidedServices() []module.ServiceKey {
-	return []module.ServiceKey{module.ServiceAuditSink}
+	return []module.ServiceKey{module.ServiceAuditSink, module.ServiceCompliancePolicy}
 }
 
 // NavItems surfaces the admin-only compliance pages in the sidebar. Both
@@ -139,6 +150,18 @@ func (m *Module) Permissions() []iface.PermissionSpec {
 			Key:         "system.compliance.dsr.manage",
 			Module:      "compliance",
 			Description: "Execute or reject right-to-erasure requests on behalf of data subjects",
+			System:      true,
+		},
+		{
+			Key:         "system.compliance.policy.read",
+			Module:      "compliance",
+			Description: "Read compliance policies, their versions, tenant assignments and change requests",
+			System:      true,
+		},
+		{
+			Key:         "system.compliance.policy.manage",
+			Module:      "compliance",
+			Description: "Create, change, delete and assign compliance policies; approve or reject change requests",
 			System:      true,
 		},
 	}
@@ -239,6 +262,28 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	sink := iface.AuditSink(m.sink)
 	deps.Services.Register(module.ServiceAuditSink, sink)
 
+	// Policy engine (compliance spec §1–§2). The platform policy is created
+	// on first boot and the first snapshot is loaded before main.go swaps
+	// this resolver into the log and span masking.
+	policyRepo := repository.NewPolicyRepo(deps.DB)
+	m.policySvc = services.NewPolicyService(policyRepo, deps.Logger)
+	m.policySvc.SetSnapshotAgeHook(metrics.Default().SetCompliancePolicySnapshotAge)
+	tenants, _ := module.GetTyped[iface.TenantProvider](deps.Services, module.ServiceTenantProvider)
+	fourEyes := func(context.Context) bool {
+		return deps.GetConfigBool("compliance", "four_eyes_enabled", true)
+	}
+	m.policyAdmin = services.NewPolicyAdminService(policyRepo, m.policySvc, tenants, sink, fourEyes, deps.Logger)
+	bootCtx, cancelBoot := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelBoot()
+	if err := m.policyAdmin.EnsurePlatformPolicy(bootCtx); err != nil {
+		return fmt.Errorf("compliance: create the platform policy: %w", err)
+	}
+	if err := m.policySvc.Refresh(bootCtx); err != nil {
+		deps.Logger.Warn("compliance: first policy snapshot failed, static defaults until the next refresh",
+			slog.String("error", err.Error()))
+	}
+	deps.Services.Register(module.ServiceCompliancePolicy, iface.CompliancePolicyProvider(m.policySvc))
+
 	// KMS provider — per-tenant envelope encryption + crypto-shred on
 	// purge. Boots lazily: if the master key env is missing the provider
 	// is absent and the tenant service runs without crypto-shred (dev
@@ -312,15 +357,20 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	return nil
 }
 
-// Start launches the retention auto-cleanup ticker. The loop itself re-reads
-// the enable flag every run, so it's safe to start unconditionally — it
-// no-ops while auto_cleanup_enabled is false.
+// Start launches the background loops: the policy snapshot refresh (every
+// 5 s), the change-request expiry (hourly) and the retention auto-cleanup
+// ticker (which re-reads its enable flag every run).
 func (m *Module) Start(ctx context.Context) error {
-	if m.retentionSvc == nil {
-		return nil
-	}
 	m.stopCh = make(chan struct{})
-	go m.retentionSvc.Loop(ctx, m.stopCh)
+	if m.policySvc != nil {
+		go m.policySvc.Loop(ctx, m.stopCh)
+	}
+	if m.policyAdmin != nil {
+		go m.policyAdmin.ExpiryLoop(ctx, m.stopCh)
+	}
+	if m.retentionSvc != nil {
+		go m.retentionSvc.Loop(ctx, m.stopCh)
+	}
 	return nil
 }
 
