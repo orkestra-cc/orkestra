@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from 'test/render';
@@ -125,5 +125,106 @@ describe('CompliancePolicyCard', () => {
         acknowledgeWarnings: true
       })
     );
+  });
+});
+
+// Three policies so the operator can move between two of them; the list is
+// answered after a delay to reproduce a cold cache on first open.
+const stubTwoPolicies = (listDelayMs = 0) => {
+  const seen: { assign: unknown[]; validated: unknown[] } = {
+    assign: [],
+    validated: []
+  };
+  const item = (uuid: string, name: string) => ({
+    ...strict,
+    uuid,
+    name,
+    assignedTenants: 0,
+    lessRestrictiveFields: [],
+    reviewOverdue: false
+  });
+  server.use(
+    http.get(url('/v1/admin/compliance/policies/effective'), () =>
+      HttpResponse.json({
+        tenantId: 't-1',
+        source: 'assigned',
+        policy: strict,
+        retention: []
+      })
+    ),
+    http.get(url('/v1/admin/compliance/policies'), async () => {
+      await delay(listDelayMs);
+      return HttpResponse.json({
+        items: [item('p-1', 'Strict'), item('a', 'Alpha'), item('b', 'Beta')]
+      });
+    }),
+    http.post(
+      url('/v1/admin/compliance/policy-assignments/t-1/validate'),
+      async ({ request }) => {
+        seen.validated.push(await request.json());
+        return HttpResponse.json({
+          errors: [],
+          warnings: [
+            {
+              code: 'less_restrictive_than_current',
+              params: { fields: ['logContent.ipAddress'] }
+            }
+          ]
+        });
+      }
+    ),
+    http.put(
+      url('/v1/admin/compliance/policy-assignments/t-1'),
+      async ({ request }) => {
+        seen.assign.push(await request.json());
+        return HttpResponse.json({ applied: true, warnings: [] });
+      }
+    )
+  );
+  return seen;
+};
+
+describe('AssignPolicyModal', () => {
+  it('never carries an acknowledgement over to another policy', async () => {
+    const seen = stubTwoPolicies();
+    renderWithProviders(<CompliancePolicyCard tenantId="t-1" />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Change' }));
+    const select = screen.getByLabelText('Policy');
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Alpha' })).toBeInTheDocument()
+    );
+
+    await user.selectOptions(select, 'a');
+    const ackLabel = 'I have read the warnings and confirm the change';
+    await user.click(await screen.findByLabelText(ackLabel));
+    expect(screen.getByLabelText(ackLabel)).toBeChecked();
+
+    await user.selectOptions(select, 'b');
+    await waitFor(() =>
+      expect(seen.validated).toContainEqual({ policyId: 'b' })
+    );
+    const box = await screen.findByLabelText(ackLabel);
+    expect(box).not.toBeChecked();
+
+    await user.type(screen.getByLabelText('Reason'), 'cambio');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(box).toHaveClass('is-invalid'));
+    expect(seen.assign).toEqual([]);
+  });
+
+  it('shows the current policy selected even when the list arrives late', async () => {
+    const seen = stubTwoPolicies(150);
+    renderWithProviders(<CompliancePolicyCard tenantId="t-1" />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Change' }));
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Alpha' })).toBeInTheDocument()
+    );
+    const select = screen.getByLabelText('Policy');
+    expect(select).toHaveValue('p-1');
+
+    await user.selectOptions(select, '');
+    await waitFor(() => expect(seen.validated).toHaveLength(1));
   });
 });

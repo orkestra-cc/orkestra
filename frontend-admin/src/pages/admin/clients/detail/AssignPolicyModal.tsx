@@ -53,6 +53,7 @@ const AssignPolicyModal = ({
     reset,
     watch,
     setError,
+    setValue,
     formState: { errors }
   } = useForm<AssignForm>({
     resolver: yupResolver(schema),
@@ -71,6 +72,13 @@ const AssignPolicyModal = ({
     reset({ policyId: currentPolicyId, reason: '', acknowledge: false });
     resetPreview.current();
   }, [show, currentPolicyId, reset]);
+
+  // An acknowledgement belongs to the preview it was given for: the checkbox
+  // unmounts with the warnings but react-hook-form keeps its value, so it is
+  // cleared whenever the selection changes.
+  useEffect(() => {
+    setValue('acknowledge', false);
+  }, [policyId, setValue]);
 
   useEffect(() => {
     if (show && !unchanged)
@@ -126,7 +134,14 @@ const AssignPolicyModal = ({
             <Form.Label>
               {t('adminCompliance.assignModal.policyLabel')}
             </Form.Label>
-            <Form.Select {...register('policyId')}>
+            <Form.Select
+              // The options arrive after the modal opens: remount once they
+              // are there so the select shows the seeded (current) policy,
+              // and keep it disabled meanwhile so it never misreports it.
+              key={policies ? 'loaded' : 'loading'}
+              disabled={!policies}
+              {...register('policyId')}
+            >
               <option value="">
                 {t('adminCompliance.assignModal.platformOption')}
               </option>
