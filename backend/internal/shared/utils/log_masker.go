@@ -34,11 +34,10 @@ const (
 // maxScanTextLen bounds the free-text scan (T1 follow-up): a longer value is
 // cut at the last whitespace within the first maxScanTextLen bytes, so no
 // whitespace-free token (an e-mail, a compact IBAN) is split by the cut, and
-// textTruncated marks it. A space-separated IBAN can still straddle the cut:
-// its first group(s) before it (country and check digits, up to one 4-char
-// group) survive unmasked, too short to match the IBAN rule. The regexps are
-// linear, but a multi-megabyte value would still cost milliseconds on every
-// record.
+// textTruncated marks it. A space-separated IBAN straddling the cut is
+// dropped from its country code on (ibanTailRe), so none of its groups
+// survives. The regexps are linear, but a multi-megabyte value would still
+// cost milliseconds on every record.
 const (
 	maxScanTextLen = 32 << 10
 	textTruncated  = "[TRUNCATED]"
@@ -82,6 +81,9 @@ var (
 	emailRe = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
 	// IBAN: compact or in space-separated groups of four, any case.
 	ibanRe = regexp.MustCompile(`(?i)\b[A-Z]{2}[0-9]{2}(?:[A-Z0-9]{11,30}|(?: [A-Z0-9]{4}){2,7}(?: [A-Z0-9]{1,4})?)\b`)
+	// ibanTailRe matches the start of an IBAN (country and check digits,
+	// then space-separated groups) running to the end of a truncated text.
+	ibanTailRe = regexp.MustCompile(`(?i)\b[A-Z]{2}[0-9]{2}(?: [A-Z0-9]{1,4})*\s*$`)
 	// Codice fiscale; the omocodia substitutions (L M N P Q R S T U V) may
 	// replace any of the digits.
 	cfRe = regexp.MustCompile(`(?i)\b[A-Z]{6}[0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{3}[A-Z]\b`)
@@ -692,6 +694,12 @@ func (m logMasker) maskText(s string) string {
 	suffix := ""
 	if len(s) > maxScanTextLen {
 		s = s[:strings.LastIndexAny(s[:maxScanTextLen], " \t\r\n")+1]
+		// A space-separated IBAN may straddle the cut: drop its leading
+		// groups too, whatever their number (an all-digit prefix would
+		// fail the mod-97 exemption and survive otherwise).
+		if loc := ibanTailRe.FindStringIndex(s); loc != nil {
+			s = s[:loc[0]]
+		}
 		suffix = textTruncated
 	}
 	s = emailRe.ReplaceAllString(s, textEmail)

@@ -72,6 +72,36 @@ func TestMaskText_CutNeverLeavesAPartialToken(t *testing.T) {
 	}
 }
 
+// A space-separated IBAN straddling the cut: the groups before the limit
+// form an all-digit prefix that fails the mod-97 exemption, so without the
+// trailing-fragment drop most of a German IBAN survived unmasked.
+func TestMaskText_CutDropsATrailingIBANFragment(t *testing.T) {
+	m := logMasker{p: policy(nil), key: testHashKey}
+	const iban = "DE89 3704 0044 0532 0130 00"
+	for _, cutAt := range []int{3, 7, 12, 17, 22, 26} { // inside each group
+		// Exactly maxScanTextLen-cutAt bytes, ending with a space.
+		prefix := strings.Repeat("a ", (maxScanTextLen-cutAt)/2)
+		if len(prefix)+cutAt != maxScanTextLen {
+			prefix = "x" + prefix
+		}
+		s := prefix + iban + " tail " + strings.Repeat("y", maxScanTextLen)
+		got := m.maskText(s)
+		for _, group := range []string{"3704", "0044", "0532", "0130", "DE89"} {
+			if strings.Contains(got, group) {
+				t.Fatalf("cut at %d: IBAN group %s survived: …%q", cutAt, group, got[len(got)-60:])
+			}
+		}
+		if !strings.HasSuffix(got, textTruncated) {
+			t.Fatalf("cut at %d: missing marker", cutAt)
+		}
+	}
+	// Ordinary words before the cut are kept.
+	s := strings.Repeat("parola ", maxScanTextLen/7+10)
+	if got := m.maskText(s); !strings.HasPrefix(got, "parola parola") || !strings.HasSuffix(got, "parola "+textTruncated) {
+		t.Fatalf("plain text damaged: …%q", got[len(got)-40:])
+	}
+}
+
 func TestMaskText_NoScanNoCut(t *testing.T) {
 	off := logMasker{p: policy(func(p *iface.LogContentPolicy) { p.ScanFreeText = false }), key: testHashKey}
 	long := strings.Repeat("b", 2*maxScanTextLen)
