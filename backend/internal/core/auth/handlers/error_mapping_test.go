@@ -64,6 +64,10 @@ func TestMapPasswordError_KnownCodes(t *testing.T) {
 		{"CountryBlocked → 403 auth.country_blocked", services.ErrCountryBlocked, http.StatusForbidden, errcode.AuthCountryBlocked},
 		{"password login disabled", services.ErrPasswordLoginDisabled, http.StatusForbidden, errcode.AuthPasswordLoginDisabled},
 		{"policy unavailable", services.ErrAuthPolicyUnavailable, http.StatusServiceUnavailable, errcode.AuthPolicyUnavailable},
+		{"password already set", services.ErrPasswordAlreadySet, http.StatusConflict, "auth.password_already_set"},
+		{"wrapped SDK password conflict", fmt.Errorf("set initial password: %w", iface.ErrPasswordAlreadySet), http.StatusConflict, "auth.password_already_set"},
+		{"initial password unavailable", services.ErrInitialPasswordUnavailable, http.StatusServiceUnavailable, errcode.AuthUnavailable},
+		{"wrapped initial password unavailable", fmt.Errorf("set initial password: %w", services.ErrInitialPasswordUnavailable), http.StatusServiceUnavailable, errcode.AuthUnavailable},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -263,6 +263,50 @@ func (h *PasswordAuthHandler) AcceptInvite(ctx context.Context, req *AcceptInvit
 	return resp, nil
 }
 
+// --- Add initial password (authenticated operator) ---
+
+type SetInitialPasswordRequest struct {
+	Body struct {
+		NewPassword string `json:"newPassword" doc:"New password"`
+	}
+}
+
+type SetInitialPasswordResponse struct {
+	Body struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+}
+
+func (h *PasswordAuthHandler) SetInitialPassword(ctx context.Context, req *SetInitialPasswordRequest) (*SetInitialPasswordResponse, error) {
+	userUUID, _ := ctx.Value("userUUID").(string)
+	if userUUID == "" {
+		return nil, huma.Error401Unauthorized("authentication required")
+	}
+	if err := h.svc.SetInitialPassword(ctx, services.SetInitialPasswordInput{
+		UserUUID: userUUID, CurrentSID: currentSessionID(ctx), New: req.Body.NewPassword,
+	}); err != nil {
+		return nil, mapPasswordError(err)
+	}
+	resp := &SetInitialPasswordResponse{}
+	resp.Body.Success = true
+	resp.Body.Message = "Password sign-in added."
+	return resp, nil
+}
+
+// RegisterInitialPasswordRoute is deliberately separate from the tier-mountable
+// protected routes: initial password enrollment serves operators only.
+func (h *PasswordAuthHandler) RegisterInitialPasswordRoute(api huma.API) {
+	huma.Register(api, huma.Operation{
+		OperationID: "operator-password-set-initial",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth/operator/me/password",
+		Summary:     "Add password sign-in to the current operator account",
+		Tags:        []string{"Authentication", "Self-Service"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.SetInitialPassword)
+}
+
 // --- Change password (authenticated) ---
 
 type ChangePasswordRequest struct {
@@ -479,6 +523,12 @@ func buildRefreshCookie(name, value, domain string, secure bool, maxAgeSeconds i
 
 func mapPasswordError(err error) error {
 	switch {
+	case errors.Is(err, services.ErrPasswordAlreadySet):
+		return errcode.Conflict(errcode.AuthPasswordAlreadySet,
+			"This account already has a password. Use change password instead.")
+	case errors.Is(err, services.ErrInitialPasswordUnavailable):
+		return errcode.ServiceUnavailable(errcode.AuthUnavailable,
+			"Password enrollment is temporarily unavailable; try again shortly.")
 	// A VERDICT 401 — it names itself for the same reason the MFA and
 	// passkey verdicts do (errcode/codes.go, AuthInvalidCredentials). The
 	// detail stays the one neutral sentence both the unknown-address and

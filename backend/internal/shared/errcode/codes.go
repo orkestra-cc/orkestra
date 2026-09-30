@@ -60,6 +60,10 @@ const AuthCountryBlocked = "auth.country_blocked"
 // the caller must use MFA or reauthenticate via OAuth instead. 409.
 const AuthPasswordConfirmUnavailable = "auth.password_confirm_unavailable"
 
+// AuthPasswordAlreadySet signals that initial enrollment cannot replace an
+// existing password; the authenticated change-password flow must be used.
+const AuthPasswordAlreadySet = "auth.password_already_set"
+
 // AuthOAuthProviderDisabled signals that the requested OAuth provider
 // is not enabled for the surface the request came in on. 403.
 const AuthOAuthProviderDisabled = "auth.oauth_provider_disabled"
