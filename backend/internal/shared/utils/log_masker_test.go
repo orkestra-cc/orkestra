@@ -690,7 +690,9 @@ func TestMaskText_IPRuleIsLinear(t *testing.T) {
 	}
 	for name, in := range inputs {
 		start := time.Now()
-		got := m.safeText(in)
+		// maskIPRuns directly: maskText now cuts a value at maxScanTextLen, and
+		// the linearity of the IP rule itself is what this test guards.
+		got := m.maskIPRuns(in)
 		d := time.Since(start)
 		t.Logf("%s: %v", name, d)
 		if d > bound {

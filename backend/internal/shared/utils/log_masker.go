@@ -31,6 +31,16 @@ const (
 	textIP       = "[IP]"
 )
 
+// maxScanTextLen bounds the free-text scan (T1 follow-up): a longer value is
+// cut at the last whitespace within the first maxScanTextLen bytes, so no
+// partial token (half an e-mail, half an IBAN) survives, and textTruncated
+// marks the cut. The regexps are linear, but a multi-megabyte value would
+// still cost milliseconds on every record.
+const (
+	maxScanTextLen = 32 << 10
+	textTruncated  = "[TRUNCATED]"
+)
+
 // Normalized attribute keys with a dedicated rule (spec §2.3).
 var (
 	ipKeys = map[string]struct{}{
@@ -493,8 +503,8 @@ func (m logMasker) maskValue(val any, depth int, budget *int) any {
 
 // maskReflect covers what the switch in maskValue cannot name: named string
 // types (type Email string), byte slices such as json.RawMessage, maps with
-// string-kind keys, slices and arrays of anything, pointers to non-structs.
-// The rest (numbers, booleans, structs, functions, maps with other keys) is
+// keys of any kind (rendered as text), slices and arrays of anything, pointers
+// to non-structs. The rest (numbers, booleans, structs, functions) is
 // returned as it is; logscope flags the opaque ones at the call site.
 func (m logMasker) maskReflect(val any, depth int, budget *int) any {
 	rv := reflect.ValueOf(val)
@@ -513,12 +523,19 @@ func (m logMasker) maskReflect(val any, depth int, budget *int) any {
 		}
 		return m.maskSeq(val, rv, depth, budget)
 	case reflect.Map:
-		if rv.Type().Key().Kind() != reflect.String {
-			return val
-		}
+		// Keys of any kind are rendered as text, as the JSON handler does with
+		// numeric keys, and masked as data keys: a map keyed by user id or by
+		// something that prints an e-mail must not bypass the rules.
+		stringKeys := rv.Type().Key().Kind() == reflect.String
 		out := make(map[string]any, rv.Len())
 		for it := rv.MapRange(); it.Next(); {
-			if mk, nv, ok := m.maskDataKV(it.Key().String(), it.Value().Interface(), depth+1, budget); ok {
+			var k string
+			if stringKeys {
+				k = it.Key().String()
+			} else {
+				k = fmt.Sprint(it.Key().Interface())
+			}
+			if mk, nv, ok := m.maskDataKV(k, it.Value().Interface(), depth+1, budget); ok {
 				out[mk] = nv
 			}
 			if *budget < 0 {
@@ -626,18 +643,24 @@ func (m logMasker) maskSubjectString(raw string) (string, bool) {
 }
 
 // maskText scans free text: email, IBAN and codice fiscale first, then IP
-// addresses (maskIPRuns). Every step is linear in the input.
+// addresses (maskIPRuns). Every step is linear in the input, and the input
+// is bounded by maxScanTextLen.
 func (m logMasker) maskText(s string) string {
 	if !m.p.ScanFreeText || s == "" {
 		return s
 	}
+	suffix := ""
+	if len(s) > maxScanTextLen {
+		s = s[:strings.LastIndexAny(s[:maxScanTextLen], " \t\r\n")+1]
+		suffix = textTruncated
+	}
 	s = emailRe.ReplaceAllString(s, textEmail)
 	s = ibanRe.ReplaceAllStringFunc(s, maskIBANCandidate)
 	s = cfRe.ReplaceAllString(s, textCF)
-	if m.p.IPAddress == iface.IPAddressFull {
-		return s
+	if m.p.IPAddress != iface.IPAddressFull {
+		s = m.maskIPRuns(s)
 	}
-	return m.maskIPRuns(s)
+	return s + suffix
 }
 
 // maskIBANCandidate replaces an ibanRe match with [IBAN]. Only a candidate
