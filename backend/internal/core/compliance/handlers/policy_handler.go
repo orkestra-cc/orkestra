@@ -34,7 +34,7 @@ type WriteResponse struct {
 	Policy        *models.Policy              `json:"policy,omitempty"`
 	Assignment    *models.PolicyAssignment    `json:"assignment,omitempty"`
 	ChangeRequest *models.PolicyChangeRequest `json:"changeRequest,omitempty"`
-	Warnings      []services.Issue            `json:"warnings"`
+	Warnings      []services.PolicyIssue      `json:"warnings"`
 }
 
 type WriteOutput struct {
@@ -48,7 +48,7 @@ func writeOutput(res *services.WriteResult, appliedStatus int) *WriteOutput {
 		ChangeRequest: res.ChangeRequest, Warnings: res.Warnings,
 	}}
 	if out.Body.Warnings == nil {
-		out.Body.Warnings = []services.Issue{}
+		out.Body.Warnings = []services.PolicyIssue{}
 	}
 	if !res.Applied {
 		out.Status = http.StatusAccepted
@@ -135,10 +135,10 @@ type ValidationOutput struct {
 
 func validationOutput(r services.ValidationResult) *ValidationOutput {
 	if r.Errors == nil {
-		r.Errors = []services.Issue{}
+		r.Errors = []services.PolicyIssue{}
 	}
 	if r.Warnings == nil {
-		r.Warnings = []services.Issue{}
+		r.Warnings = []services.PolicyIssue{}
 	}
 	return &ValidationOutput{Body: r}
 }

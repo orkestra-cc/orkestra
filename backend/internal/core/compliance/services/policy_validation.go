@@ -54,30 +54,30 @@ const (
 
 var piiKeyRe = regexp.MustCompile(`^[a-z0-9]{2,40}$`)
 
-type Issue struct {
+type PolicyIssue struct {
 	Code   string         `json:"code"`
 	Field  string         `json:"field,omitempty"`
 	Params map[string]any `json:"params,omitempty"`
 }
 
 type ValidationResult struct {
-	Errors   []Issue `json:"errors"`
-	Warnings []Issue `json:"warnings"`
+	Errors   []PolicyIssue `json:"errors"`
+	Warnings []PolicyIssue `json:"warnings"`
 }
 
 func (r *ValidationResult) addError(code, field string, params map[string]any) {
-	r.Errors = append(r.Errors, Issue{Code: code, Field: field, Params: params})
+	r.Errors = append(r.Errors, PolicyIssue{Code: code, Field: field, Params: params})
 }
 
 func (r ValidationResult) HasError(code string) bool {
-	return slices.ContainsFunc(r.Errors, func(i Issue) bool { return i.Code == code })
+	return slices.ContainsFunc(r.Errors, func(i PolicyIssue) bool { return i.Code == code })
 }
 
 func (r ValidationResult) ErrorCodes() []string { return uniqueCodes(r.Errors) }
 
 func (r ValidationResult) WarningCodes() []string { return uniqueCodes(r.Warnings) }
 
-func uniqueCodes(issues []Issue) []string {
+func uniqueCodes(issues []PolicyIssue) []string {
 	out := make([]string, 0, len(issues))
 	for _, i := range issues {
 		out = append(out, i.Code)
@@ -236,8 +236,8 @@ func validateSinks(r *ValidationResult, s *models.SinkPolicy) {
 // spec §5.1 defaults, and external sinks (new processors or transfers, GDPR
 // art. 28 and 44) that current does not already have unchanged. current may
 // be nil.
-func sinkWarnings(next, current *models.SinkPolicy) []Issue {
-	var w []Issue
+func sinkWarnings(next, current *models.SinkPolicy) []PolicyIssue {
+	var w []PolicyIssue
 	def := models.DefaultSinkPolicy()
 	for _, v := range []struct {
 		field      string
@@ -254,7 +254,7 @@ func sinkWarnings(next, current *models.SinkPolicy) []Issue {
 		{"spool.deadLetterDays", next.Spool.DeadLetterDays, def.Spool.DeadLetterDays},
 	} {
 		if v.val > v.deflt {
-			w = append(w, Issue{Code: WarnSinkRetentionLongerThanDefault, Field: "sinks." + v.field,
+			w = append(w, PolicyIssue{Code: WarnSinkRetentionLongerThanDefault, Field: "sinks." + v.field,
 				Params: map[string]any{"default": v.deflt}})
 		}
 	}
@@ -264,7 +264,7 @@ func sinkWarnings(next, current *models.SinkPolicy) []Issue {
 	}
 	for i, e := range next.External {
 		if !slices.ContainsFunc(known, func(k models.ExternalSink) bool { return sameExternalSink(e, k) }) {
-			w = append(w, Issue{Code: WarnExternalSinkChanged, Field: fmt.Sprintf("sinks.external[%d]", i)})
+			w = append(w, PolicyIssue{Code: WarnExternalSinkChanged, Field: fmt.Sprintf("sinks.external[%d]", i)})
 		}
 	}
 	return w
@@ -282,12 +282,12 @@ func sameExternalSink(a, b models.ExternalSink) bool {
 
 // PolicyWarnings are the warnings of a policy on its own (spec §1.4);
 // platform is the current platform policy, nil for the platform itself.
-func PolicyWarnings(in models.PolicyInput, isPlatform bool, platform *models.Policy, now time.Time) []Issue {
-	var w []Issue
+func PolicyWarnings(in models.PolicyInput, isPlatform bool, platform *models.Policy, now time.Time) []PolicyIssue {
+	var w []PolicyIssue
 	if !isPlatform && platform != nil {
 		fields := lessRestrictiveFields(in.LogContent, platform.LogContent, in.Retention, platform.Retention)
 		if len(fields) > 0 {
-			w = append(w, Issue{Code: WarnLessRestrictiveThanPlatform, Params: map[string]any{"fields": fields}})
+			w = append(w, PolicyIssue{Code: WarnLessRestrictiveThanPlatform, Params: map[string]any{"fields": fields}})
 		}
 	}
 	for _, class := range sortedClasses(in.Retention) {
@@ -303,18 +303,18 @@ func PolicyWarnings(in models.PolicyInput, isPlatform bool, platform *models.Pol
 			code = WarnRetentionShorterThanDefault
 		}
 		if code != "" {
-			w = append(w, Issue{Code: code, Field: "retention." + string(class),
+			w = append(w, PolicyIssue{Code: code, Field: "retention." + string(class),
 				Params: map[string]any{"default": def.DefaultDays}})
 		}
 	}
 	if in.LogContent.IPAddress == iface.IPAddressFull {
-		w = append(w, Issue{Code: WarnIPFull, Field: iface.FieldIPAddress})
+		w = append(w, PolicyIssue{Code: WarnIPFull, Field: iface.FieldIPAddress})
 	}
 	if due := in.Accountability.ReviewDueAt; due.IsZero() || due.Before(now) {
-		w = append(w, Issue{Code: WarnReviewOverdue, Field: "accountability.reviewDueAt"})
+		w = append(w, PolicyIssue{Code: WarnReviewOverdue, Field: "accountability.reviewDueAt"})
 	}
 	if in.Accountability.RoPARef == "" || in.Accountability.AssessmentRef == "" {
-		w = append(w, Issue{Code: WarnAccountabilityIncomplete, Field: "accountability"})
+		w = append(w, PolicyIssue{Code: WarnAccountabilityIncomplete, Field: "accountability"})
 	}
 	return w
 }
@@ -337,13 +337,13 @@ func EffectiveRetention(p, platform *models.Policy) map[iface.RetentionClass]int
 
 // LessRestrictiveThanCurrent warns when moving a tenant from current to next
 // (either may be the platform policy) weakens its protection.
-func LessRestrictiveThanCurrent(next, current, platform *models.Policy) []Issue {
+func LessRestrictiveThanCurrent(next, current, platform *models.Policy) []PolicyIssue {
 	fields := lessRestrictiveFields(next.LogContent, current.LogContent,
 		EffectiveRetention(next, platform), EffectiveRetention(current, platform))
 	if len(fields) == 0 {
 		return nil
 	}
-	return []Issue{{Code: WarnLessRestrictiveThanCurrent, Params: map[string]any{"fields": fields}}}
+	return []PolicyIssue{{Code: WarnLessRestrictiveThanCurrent, Params: map[string]any{"fields": fields}}}
 }
 
 // lessRestrictiveFields lists the content fields and the retention classes

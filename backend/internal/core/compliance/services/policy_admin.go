@@ -97,7 +97,7 @@ type WriteResult struct {
 	Policy        *models.Policy
 	Assignment    *models.PolicyAssignment
 	ChangeRequest *models.PolicyChangeRequest
-	Warnings      []Issue
+	Warnings      []PolicyIssue
 }
 
 type PolicyView struct {
@@ -399,7 +399,7 @@ func (s *PolicyAdminService) ValidateAssignment(ctx context.Context, tenantID, p
 // assignmentWarnings computes the warnings of moving the tenant to
 // policyUUID ("" = back to the platform). It returns the target policy (the
 // platform one for a removal) and the tenant's current assignment.
-func (s *PolicyAdminService) assignmentWarnings(ctx context.Context, tenantID, policyUUID string) ([]Issue, *models.Policy, string, error) {
+func (s *PolicyAdminService) assignmentWarnings(ctx context.Context, tenantID, policyUUID string) ([]PolicyIssue, *models.Policy, string, error) {
 	platform, err := s.repo.GetPlatformPolicy(ctx)
 	if err != nil {
 		return nil, nil, "", err
@@ -466,7 +466,7 @@ func (s *PolicyAdminService) lookupTenant(ctx context.Context, tenantID string) 
 // gate applies a change at once when it has no warnings, refuses it when
 // its warnings are not acknowledged, applies it when four eyes is off, and
 // otherwise stores it as a pending change request (spec §1.5).
-func (s *PolicyAdminService) gate(ctx context.Context, actor Actor, warnings []Issue, ack bool, reason string,
+func (s *PolicyAdminService) gate(ctx context.Context, actor Actor, warnings []PolicyIssue, ack bool, reason string,
 	cr *models.PolicyChangeRequest, apply func(context.Context) (*WriteResult, error)) (*WriteResult, error) {
 	codes := uniqueCodes(warnings)
 	if len(codes) > 0 && !ack {

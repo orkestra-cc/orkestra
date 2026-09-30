@@ -34,7 +34,7 @@ func tenantInput() models.PolicyInput {
 	}
 }
 
-func codes(issues []Issue) []string {
+func codes(issues []PolicyIssue) []string {
 	out := []string{}
 	for _, i := range issues {
 		out = append(out, i.Code+"@"+i.Field)
