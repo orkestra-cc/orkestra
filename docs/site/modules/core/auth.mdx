@@ -21,9 +21,68 @@ Every way a caller proves who it is: email/password (argon2id), OAuth 2.1, MFA, 
 
 Almost every route is mirrored under `/v1/auth/operator/*` (Tier-1) and `/v1/auth/client/*` (Tier-2) — same handlers, different collections, cookie domains, and [lockout](#lockout) accounting: the email scope is counted separately per surface, so an operator and a client account sharing an address lock independently, while the source-address scope is shared across both. A token minted for one surface is rejected at the edge of the other with `401 audience_mismatch`, above and beyond per-route RBAC.
 
-Some surfaces exist on one tier only: session listing and OAuth link/unlink are operator-side self-service, while registration exists on both but is independently gated by config.
+Some surfaces exist on one tier only: session listing, OAuth link/unlink and initial-password enrollment are operator-side self-service, while registration exists on both but is independently gated by config.
 
 Web OAuth is tier-aware end to end: a flow started on the client surface lands on the client SPA and a flow started on the console lands on the console, each under one closed callback contract (`success`/`provider`, an allowlisted `error` code, or an MFA continuation carried in the URL fragment) that never contains a token, an email or a user id. Because every provider redirects to the operator host and that host cannot set a client cookie, a client-tier login finishes through a single-use relay on the client API host, which also verifies that the browser completing the flow is the one that started it. A provider is offered to a surface only when its toggle is on **and** every field the flow needs is present; a defect on one provider removes that provider alone, while an unreadable auth document answers 503 everywhere so a configuration outage can never quietly widen access. An identity that has never been linked is matched to an existing account — or allowed to sign up — only with an address the identity provider itself marked verified.
+
+## Initial-password enrollment (Tier-1)
+
+An active human operator with a verified account email and no password can
+add email/password sign-in to the same account after signing in through
+OAuth. In `/user/security?tab=password`, the email is read-only and the
+**Add password** form asks for a new password and confirmation. Existing
+passwords use the ordinary change-password form, including when password
+login is disabled; only first-password creation requires the method to be
+enabled.
+
+```http
+POST /v1/auth/operator/me/password
+Authorization: Bearer <access-token>
+Content-Type: application/json
+
+{"newPassword":"<policy-compliant-password>"}
+```
+
+`newPassword` is the only required writable body field. No email, target
+user, current password or confirmation is sent. The route is guarded by
+operator bearer/audience middleware, `RequireGlobal()` and
+`RequireEnrolmentProof(5m)`: an enrolled caller must provide fresh MFA; a
+caller without a factor can use a recent interactive `auth_time`. A stale
+no-factor session must sign in again; refresh does not renew presence.
+There is no `/v1/auth/client/me/password` endpoint.
+
+| Status | Meaning |
+|---|---|
+| 200 | The password was created; body `{"success":true,"message":"Password sign-in added."}`. Reload auth methods and offer change-password. |
+| 401 | Missing/invalid bearer or wrong audience under the existing middleware contract; `step_up_required` asks for fresh MFA, and `reauthentication_required` asks a stale no-factor caller to sign in again. |
+| 403 | `auth.password_login_disabled` when the operator password method is off, `auth.email_not_verified` for an unverified account email, or the existing uncoded account-inactive refusal for an inactive/service account. |
+| 409 | `auth.password_already_set`: a password already exists or another request won the atomic creation race. Clear submitted secrets, reload auth methods and use change-password. |
+| 400 | The new password fails the live password policy; choose a compliant password. |
+| 422 | Request-body validation failed, for example a missing required `newPassword` or an unknown property. |
+| 503 | `auth.policy_unavailable` when the live password-method policy cannot be established; `auth.unavailable` when a fork's user provider lacks the initial-password capability. Retry after availability is restored. |
+
+The strict `passwordLoginEnabledAdmin` read is authoritative; operator
+break-glass never permits credential creation. The service uses the live
+password policy and argon2id. The user module's additive
+`iface.InitialPasswordSetter` performs a create-only update on the
+non-deleted caller with an absent/empty hash, writing the hash and both
+timestamps atomically. It cannot replace an existing password.
+
+The caller's current SID is preserved. Every other session/refresh path,
+including refresh credentials whose session document is missing, is
+revoked or denylisted, and all device-trust grants are revoked with reason
+`password_added`. This teardown always runs regardless of
+`revokeSessionsOnPasswordChange`, but is best effort after persistence: a
+failure does not roll back the new hash or change the successful creation
+response. The `self_password_added` security event and `auth.password.added`
+compliance action record actor/resource UUID, operator audience, source IP,
+current SID, a conservative `otherSessionsRevoked` count and
+`teardownComplete`. Event metadata contains no password, hash, token, email
+or OAuth profile data.
+
+OAuth links, UUID, role and memberships are retained. Tier-2 enrollment and
+changing the account email are outside this feature. The complete sequence
+is described in [Authentication flow](/architecture/authentication-flow#add-a-first-password-after-oauth-tier-1).
 
 ## SSO-only surface
 

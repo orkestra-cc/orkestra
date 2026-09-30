@@ -21,7 +21,7 @@ Does not own user profile data (delegates to `iface.UserProvider`), org membersh
 | `handlers/oauth_callback_flow.go` | The ONE web-callback implementation (`completeOAuthCallback`): trust before destination, strict provider resolution from one config read, per-provider `oauthExchange` closures, inline completion for operator/legacy flows, one-shot relay for client-tier flows; `HandleOAuthRelayCompleteHTTP` (client host); the four `Handle*CallbackHTTP` wrappers are thin |
 | `handlers/oauth_callback_redirect.go` | The closed SPA callback contract — the ONLY file that may build `/auth/callback` or `/user/security` URLs; per-tier `spaURL()`, allowlisted codes, MFA in the fragment, relay destination, `Referrer-Policy: no-referrer`; policed by `TestCallbackURLBuilders_StructuralScan` |
 | `services/oauth_provider_usability.go` | `ProviderStructurallyConfigured` (pure), `OAuthWebProviderUsable` / `UsableWebProviders` (strict, one read), `OAuthResolver` interface |
-| `handlers/password_handler.go` | Register, login, verify email, forgot/reset/change password |
+| `handlers/password_handler.go` | Register, login, verify email, forgot/reset/change password, and operator-only initial-password enrollment |
 | `handlers/admin_user_auth_handler.go` | Operator-side admin endpoints under `/v1/admin/users/{id}/...` — auth-methods aggregator, send-password-reset, resend-verification, oauth unlink. Inline error mapping translates the typed service errors to 404 / 409 with body codes |
 | `handlers/self_user_auth_handler.go` | Self-service endpoints under `/v1/auth/{tier}/me/...` — auth-methods aggregator, session list/revoke, OAuth self-unlink. Drives the operator-tier `/user/security` page; mirrors the admin handler's structure with self-action allowed |
 | `services/auth_service.go` | OAuth orchestration, provider linking, token pair issuance, auth-methods aggregator (`GetUserAuthMethods`), admin OAuth unlink (`AdminUnlinkOAuth`) + self-service unlink (`SelfUnlinkOAuth`) sharing a `wouldLockOutOAuthUnlink` lockout helper that counts **usable** credentials (`usableProvidersForLinks` + the `SetProviderUsability` seam), session list / revoke methods with three-step revocation (refresh tokens → session doc → Redis sid) |
@@ -332,6 +332,7 @@ not make.
 |---|---|---|
 | `POST /v1/auth/{tier}/login` | **403** `auth.password_login_disabled` | `PasswordLoginDecision`. Sits after the `loginEnabledAdmin/Client` kill switch and **before** the lockout peek and `GetUserForAuth`, so the attempt counters and the audit trail see nothing and every email — known or unknown — gets the identical answer. Only the operator surface can be rescued |
 | `POST /v1/auth/{tier}/register` | **403** | Strict `PasswordLoginEnabled` — break-glass never opens registration. The **operator-only** first-user branch and `RegisterInitialAdmin` (setup wizard) are the two bootstrap exceptions: they are evaluated before the gate and read no policy at all. The client tier has no first-user bypass |
+| `POST /v1/auth/operator/me/password` | **403** `auth.password_login_disabled` | Strict `PasswordLoginEnabled`; creating a first credential requires an enabled method even inside an authenticated session. No break-glass or bootstrap exception |
 | `POST /v1/auth/{tier}/forgot-password` | **403** | Strict `PasswordLoginEnabled`, evaluated **before** the user lookup, so no reset token is minted and the outcome cannot depend on account state. `ErrPasswordLoginDisabled` and `ErrAuthPolicyUnavailable` are the ONLY errors this service method propagates — every account-specific outcome stays swallowed behind the generic success body, so it is not an enumeration oracle. `PasswordAuthHandler.ForgotPassword` enforces the same contract independently: it maps those two sentinels and lets **any** other error fall through to the generic success body (logged at warn, never with the address), so a future service-side error cannot answer differently for some addresses |
 | `POST /v1/auth/{tier}/mfa/login/verify`, `POST /v1/auth/{tier}/mfa/webauthn/login/finish` | **403** when the challenge was password-sourced | `PasswordLoginDecision`, re-evaluated **before** the factor is verified. See "Completion re-check" under HTTP endpoints for the four outcomes (untouched / 403+consume / 503+retain / 401 on an empty audience) |
 | `POST /v1/admin/users/{userId}/send-password-reset` **and** `POST /v1/admin/client-users/{id}/send-password-reset` | **409** `auth.password_login_disabled` | Strict `PasswordLoginEnabled` on the target's tier, inside `AdminTriggerPasswordReset`. A reset link for a refused method would also revoke the target's sessions and leave them an unusable password. Break-glass never opens it. Both handlers match `iface.ErrPasswordLoginDisabled` with `errors.Is` |
@@ -1116,7 +1117,7 @@ Every callback and relay response — redirects **and** terminal 400s, whose req
 
 Registered from two handlers — `auth_handler.go` for OAuth/session/refresh, `password_handler.go` for password flows.
 
-After the ADR-0003 PR-D D-8 hard cutover every auth route is mounted under one of two audience prefixes — `/v1/auth/operator/...` (operator host mux) or `/v1/auth/client/...` (client host mux). The legacy `/v1/auth/...` paths no longer exist. Use `{tier}` below as a stand-in for `operator` or `client`; both prefixes mount the same routes with audience-correct token issuance and cookie domains.
+After the ADR-0003 PR-D D-8 hard cutover tier-aware auth routes are mounted under `/v1/auth/operator/...` (operator host mux) or `/v1/auth/client/...` (client host mux). Use `{tier}` below as a stand-in for `operator` or `client`; mirrored routes issue audience-correct tokens and cookies. Initial-password enrollment is operator-only and has no client counterpart.
 
 The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/callback`) and the OAuth-side session poll (`/v1/auth/session`) stay un-prefixed — the IdP has a single registered redirect URI per provider, and the operator AuthHandler dispatches the resulting flow to the matching tier's authService via the signed-state JWT's `tier` claim.
 
@@ -1154,6 +1155,7 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 | GET | `/v1/auth/{tier}/me` | bearer | Return the current authenticated user. The response `avatar` field is resolved server-side via `blob.ResolveAvatarURL` from `User.AvatarSource`: a fresh presigned GET for `uploaded`, the matching `OAuthLinks[i].OAuthData["picture"]` for `oauth_*`, empty for `initials`. The same resolution runs on every other response builder (login, refresh-cookie session-poll, MFA partial responses) so the SPA sees a stable shape regardless of code path |
 | PATCH | `/v1/auth/{tier}/me` | bearer | Self-service preference patch. Strictly allowlisted: `language` (BCP-47, oneof=en/it) and `fullName` (1..100 chars). Response mirrors GET /me so the SPA can replace its cached user document without an extra round-trip. Adding a new mutable preference requires extending `UpdateCurrentUserInput` AND honoring it in `UpdateCurrentUser` — the underlying SDK `UpdateUserInput` shape is wider but NOT pass-through |
 | POST | `/v1/auth/{tier}/change-password` | `RequireGlobal()` | Self-service password change |
+| POST | `/v1/auth/operator/me/password` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Tier-1 human: atomically add the first password for the verified account email. Body `{newPassword}` only; 200 on creation, 403 when email is unverified or password login is disabled, 409 `auth.password_already_set` on an existing hash or a lost creation race, 503 on unavailable policy/capability. No client route; see "Initial-password enrollment" below |
 | POST | `/v1/auth/{tier}/mfa/enroll/begin` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Start TOTP enrollment — returns `{challengeId, secret, provisioningUri}` |
 | POST | `/v1/auth/{tier}/mfa/enroll/confirm` | `RequireGlobal()` + `RequireEnrolmentProof(5m)` | Confirm enrollment with a TOTP code, receive 10 one-shot backup codes. Gated **as well as** `begin` — the factor set can change between the two halves. When it **replaces** an existing TOTP secret it is a removal too, and carries a removal's consequences (D16); a first enrolment carries none. Either way it emits a security event and the `auth.mfa_factor_added` email. Capped per (audience, user) by the **`mfa-enroll`** attempt scope — its own budget, never the step-up one — so 5 rejected codes in 5 minutes answer 429 `auth.too_many_attempts` with `Retry-After`; a wrong code answers 401 `auth.mfa_code_invalid` |
 | GET | `/v1/auth/{tier}/me/mfa` | `RequireGlobal()` | Return `{status, type, backupCodesRemaining}` |
@@ -1455,6 +1457,56 @@ secret) also send the `auth.mfa_factor_added` email — category
 (`services.MailEnqueuer`), never inline, so a slow relay cannot add latency
 to an enrolment. Removals are not emailed: they already end every other
 session, which is louder.
+
+### Initial-password enrollment (Tier-1 only)
+
+`POST /v1/auth/operator/me/password` is registered separately by
+`PasswordAuthHandler.RegisterInitialPasswordRoute`, under the operator
+bearer/audience middleware, `RequireGlobal()`, and the same
+`operatorEnrolmentGate` used for MFA enrollment. The five-minute proof gate
+requires fresh MFA for a caller with an enrolled factor; a caller without a
+factor may use a recent interactive `auth_time`, including OAuth login.
+Stale no-factor proof answers 401 `reauthentication_required`; missing fresh
+factor proof answers 401 `step_up_required`; unresolved proof fails closed.
+Refresh and dev-token issuance do not establish a new interactive proof.
+
+`PasswordAuthService.SetInitialPassword` strictly reads
+`passwordLoginEnabledAdmin` through `PasswordLoginEnabled`, never
+`PasswordLoginDecision`: disabled answers 403 `auth.password_login_disabled`,
+unreadable policy answers 503 `auth.policy_unavailable`, and operator
+break-glass cannot create a credential. The caller must be an active,
+non-deleted human with `EmailVerified=true` and no password hash. The
+account email stays unchanged; the request accepts only `{newPassword}`,
+with no email, current password, target UUID, or confirmation field.
+Validation and argon2id hashing reuse the live `PasswordService` policy.
+
+The additive `iface.InitialPasswordSetter` capability is resolved from the
+**operator** user provider at Init; `iface.UserProvider` is unchanged. A
+missing capability in a fork fails closed to 503 `auth.unavailable`. Its
+`SetPasswordHashIfUnset` operation is create-only: the Mongo update matches
+the non-deleted caller UUID and an absent/empty `passwordHash`, then writes
+the hash and both timestamps together. Existing-password and concurrency
+losers answer 409 `auth.password_already_set`, without overwriting the
+winning credential. Password replacement still uses `change-password`.
+
+After persistence, credential teardown runs unconditionally, independent
+of `revokeSessionsOnPasswordChange`: preserve the current SID, revoke every
+other refresh credential and active session, denylist their SIDs, and revoke
+all device-trust grants with reason `password_added`. Active refresh SIDs
+are snapshotted before teardown so orphan refresh credentials with no
+session document are covered too. Post-write teardown is best effort; a
+failure neither rolls the password back nor turns successful creation into
+a retryable failure. The success security event `self_password_added` maps
+to compliance action `auth.password.added`, carrying operator audience,
+current SID, conservative `otherSessionsRevoked` count and
+`teardownComplete` status, with actor/resource UUID and source IP in the
+audit envelope. Passwords, hashes, tokens, account email and OAuth profile
+data are absent from event metadata.
+
+Tier-2 enrollment, changing the account email, and adding a second password
+are explicit non-goals. OAuth links, user UUID, role and memberships remain
+intact; the user can subsequently sign in with the verified account email
+and password or an active linked OAuth provider.
 
 ### Self-service security surface
 

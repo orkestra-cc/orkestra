@@ -34,7 +34,7 @@ In dev (`ENV=development`) the host mux falls through to the operator mux when t
 
 ## 2. Two login paths, one module
 
-Every auth route is mounted twice — once under `/v1/auth/operator/...` (operator host) and once under `/v1/auth/client/...` (client host) — by the same `auth` module. The two mounts share the password service code, MFA logic, and OAuth provider catalogue, but each is wired to its own:
+Most auth routes are mounted twice — once under `/v1/auth/operator/...` (operator host) and once under `/v1/auth/client/...` (client host) — by the same `auth` module. Initial-password enrollment is Tier-1 only, at `POST /v1/auth/operator/me/password`. The two mounts share the password service code, MFA logic, and OAuth provider catalogue, but each is wired to its own:
 
 - **User collection** — `operator_users` vs `client_users`
 - **Refresh-token / session / OAuth-link / MFA / email-token collections** — `operator_*` vs `client_*`
@@ -81,6 +81,7 @@ These four callbacks are mounted **only on the operator host**. The OAuth `state
 ```
 GET   /v1/auth/{tier}/me                    return the current user
 POST  /v1/auth/{tier}/change-password       requires current password
+POST  /v1/auth/operator/me/password        add a first password (Tier-1 only)
 POST  /v1/auth/{tier}/mfa/...               TOTP enrol / verify / remove
 POST  /v1/auth/{tier}/mfa/webauthn/...      passkey enrol / verify / remove
 POST  /v1/auth/{tier}/me/devices/trust      mark current device as trusted (skip MFA prompts)
@@ -186,6 +187,54 @@ The same policy is the reason the login page can render honestly rather than gue
 ### Verification + reset
 
 Both flows share `{tier}_email_tokens` (TTL: 24h verification, 30 min reset; both single-use, SHA-256 hashed at rest, `expiresAt` TTL index sweeps expired rows). Reset atomically updates `PasswordHash`, clears the failed-login counter, marks the token used, and revokes every refresh token for the user — the user must sign in from scratch on every device.
+
+### Add a first password after OAuth (Tier-1)
+
+An OAuth-only operator can add email/password sign-in to the same account
+from `/user/security?tab=password`. The account's verified email is shown
+read-only; the user enters a new password and its confirmation. No current
+password is requested, because none exists. OAuth links, user UUID, role and
+memberships remain intact. Tier-2 initial-password enrollment and changing
+the account email are outside this flow.
+
+1. The console loads the current account, its auth methods and the operator
+   policy. With no password and `passwordLoginEnabled=true`, it offers
+   **Add password**. An unavailable read shows a loading/error state; a
+   disabled method shows a policy notice. Existing-password accounts keep
+   the normal change-password flow.
+2. The console sends `POST /v1/auth/operator/me/password` with
+   `{newPassword}` and a bearer token. The operator audience and
+   `RequireGlobal()` gates precede the shared
+   [enrolment proof gate](#enrolment-proof-gate), with a five-minute maximum
+   age. A caller with a factor must provide fresh MFA; one without a factor
+   can use the `auth_time` of a recent interactive OAuth login. Stale
+   no-factor proof returns `reauthentication_required` and sends the user
+   through sign-in again; a refresh does not renew that proof.
+3. The service strictly checks `passwordLoginEnabledAdmin` and requires an
+   active human with a verified account email and no password. The operator
+   break-glass override cannot open enrollment. It validates the new
+   password against the live password policy and hashes it with argon2id.
+4. The user module atomically writes the hash and timestamps only if the
+   non-deleted account still has an absent/empty hash. Concurrent requests
+   have one winner; the loser receives `409 auth.password_already_set`.
+   The console clears submitted secrets and reloads auth methods on success
+   or that conflict, then offers the ordinary change-password form.
+5. After creation, the current session survives. Every other refresh/session
+   path, including orphan refresh SIDs, is revoked or denylisted and all
+   device-trust grants are revoked, unconditionally and independently of
+   `revokeSessionsOnPasswordChange`. Teardown is best effort: a storage
+   failure can leave other credentials live, so the success event records
+   both a conservative revocation count and `teardownComplete`. The new hash
+   is retained and the response still reports successful creation.
+6. `self_password_added` records the security event and maps to the
+   `auth.password.added` compliance action, with actor/resource UUID,
+   operator audience, source IP and current SID. No password, hash, token,
+   email or OAuth profile is included in event metadata. Subsequent logins
+   can use the same verified email with the new password or a linked OAuth
+   provider, subject to the live login policy and MFA rules.
+
+See [Initial-password enrollment](/modules/core/auth#initial-password-enrollment-tier-1)
+for the endpoint's response contract.
 
 ## 5. OAuth 2.1 flow
 
@@ -293,6 +342,8 @@ One consequence worth naming: a **service account** hitting a step-up-gated rout
 ### Enrolment proof gate
 
 `RequireEnrolmentProof(maxAge)` — carried by the additive `module.EnrolmentProofGate` sub-interface rather than by `RoleMiddleware` itself, so a fork's own middleware keeps compiling — sits on the four endpoints that **create or replace** a second factor — TOTP `enroll/begin` + `enroll/confirm`, passkey `register/begin` + `register/finish`, on both tiers. Before it, those endpoints required only a valid bearer, so a stolen session-only token could attach a passkey to the victim's account, or *replace* their TOTP secret (confirming an enrolment deletes the existing factor after validating a code for the new one), and then own the account outright.
+
+The same gate also protects [initial-password enrollment](#add-a-first-password-after-oauth-tier-1) on the operator surface, with the same five-minute maximum age.
 
 Both halves of each ceremony are gated, not just the first: the factor set can change between `begin` and `confirm`/`finish`. Reading `/me/mfa`, verifying an existing factor and listing passkeys are unaffected — they do not add a credential.
 
