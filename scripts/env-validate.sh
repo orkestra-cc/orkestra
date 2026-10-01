@@ -361,6 +361,17 @@ validate_env_file() {
                 print_success "$var is set"
             fi
         done
+
+        # STORAGE_PUBLIC_ENDPOINT is the host browsers — and, for public
+        # cover images, anonymous visitors — fetch presigned URLs from. Plain
+        # HTTP there is a cleartext signed URL and mixed content on every
+        # HTTPS site that embeds the image. Unset is fine (single-endpoint or
+        # managed S3); set means https.
+        pub_ep=$(env_value STORAGE_PUBLIC_ENDPOINT)
+        if [ -n "$pub_ep" ] && [[ "$pub_ep" != https://* ]]; then
+            print_error "STORAGE_PUBLIC_ENDPOINT must be an https:// URL in $env_name (got: $pub_ep)"
+            errors=$((errors + 1))
+        fi
         echo ""
     fi
 
