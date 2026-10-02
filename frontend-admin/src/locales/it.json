@@ -164,7 +164,8 @@
     "500": {
       "title": "Ops, qualcosa è andato storto!",
       "detail": "Prova ad aggiornare la pagina o a tornare indietro e riprovare l'azione. Se il problema persiste,",
-      "contactUs": "contattaci"
+      "contactUs": "contattaci",
+      "backToDashboard": "Torna alla dashboard"
     },
     "user": {
       "self_delete_forbidden": "Non puoi eliminare il tuo account.",

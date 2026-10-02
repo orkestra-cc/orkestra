@@ -164,7 +164,8 @@
     "500": {
       "title": "Whoops, something went wrong!",
       "detail": "Try refreshing the page, or go back and attempt the action again. If the problem persists,",
-      "contactUs": "contact us"
+      "contactUs": "contact us",
+      "backToDashboard": "Back to dashboard"
     },
     "user": {
       "self_delete_forbidden": "You cannot delete your own account.",

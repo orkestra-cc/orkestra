@@ -71,6 +71,11 @@ export function buildCoreRoutes(
   return [
     {
       element: <App />,
+      errorElement: (
+        <ErrorLayout>
+          <Error500 />
+        </ErrorLayout>
+      ),
       children: [
         {
           path: 'landing',
