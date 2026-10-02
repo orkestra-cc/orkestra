@@ -71,6 +71,16 @@ describe('SortableGroupList', () => {
     expect(band).toHaveAttribute('aria-expanded', 'false');
   });
 
+  it('renders no placeholder when emptyGroup returns a falsy value', () => {
+    const { container } = renderList({
+      emptyGroup: g => (g.id === 'g2' ? null : `nothing in ${g.name}`)
+    });
+    expect(screen.queryByText('nothing in Beta')).not.toBeInTheDocument();
+    expect(
+      container.querySelector('[data-group-id="g2"] .text-muted')
+    ).toBeNull();
+  });
+
   it('toggles on band click and on Enter/Space, but not on action clicks', () => {
     const { onToggle } = renderList();
     fireEvent.click(screen.getByText('Alpha'));

@@ -56,7 +56,9 @@ export interface SortableGroupListProps<G, R> {
   /** Controlled: pair with `useCollapsedSet`. */
   collapsed: Set<string>;
   onToggle: (groupId: string) => void;
-  /** Placeholder for an expanded group with no rows. Omit to render nothing. */
+  /** Placeholder for an expanded group with no rows. Return a falsy value
+   *  (null, '', false) to render nothing for that group; omit the prop to
+   *  render nothing for every group. */
   emptyGroup?: (group: G) => ReactNode;
   dnd?: SortableGroupListDnd<G, R>;
   className?: string;

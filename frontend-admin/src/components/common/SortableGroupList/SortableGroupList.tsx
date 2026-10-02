@@ -135,6 +135,8 @@ function GroupSection<G, R>(props: GroupSectionProps<G, R>) {
     collapsed: isCollapsed,
     rowCount: rows.length
   });
+  const placeholder =
+    rows.length === 0 && emptyGroup ? emptyGroup(group) : null;
 
   return (
     <div
@@ -170,27 +172,29 @@ function GroupSection<G, R>(props: GroupSectionProps<G, R>) {
           items={rows.map(getRowId)}
           strategy={verticalListSortingStrategy}
         >
-          {rows.length === 0
-            ? emptyGroup && (
-                <div className="px-x1 py-3 text-center text-muted fs-11 border-top border-200">
-                  {emptyGroup(group)}
-                </div>
-              )
-            : rows.map(row => {
-                const rowId = getRowId(row);
-                return (
-                  <RowItem
-                    key={rowId}
-                    row={row}
-                    group={group}
-                    groupId={groupId}
-                    rowId={rowId}
-                    draggable={rowsDraggable}
-                    renderRow={renderRow}
-                    handleLabel={dnd?.handleLabel}
-                  />
-                );
-              })}
+          {rows.length === 0 ? (
+            placeholder ? (
+              <div className="px-x1 py-3 text-center text-muted fs-11 border-top border-200">
+                {placeholder}
+              </div>
+            ) : null
+          ) : (
+            rows.map(row => {
+              const rowId = getRowId(row);
+              return (
+                <RowItem
+                  key={rowId}
+                  row={row}
+                  group={group}
+                  groupId={groupId}
+                  rowId={rowId}
+                  draggable={rowsDraggable}
+                  renderRow={renderRow}
+                  handleLabel={dnd?.handleLabel}
+                />
+              );
+            })
+          )}
         </SortableContext>
       )}
     </div>
