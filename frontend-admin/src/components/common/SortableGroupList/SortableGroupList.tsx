@@ -166,6 +166,7 @@ function GroupSection<G, R>(props: GroupSectionProps<G, R>) {
         title={slots.title}
         meta={slots.meta}
         actions={slots.actions}
+        toggleLabel={slots.toggleLabel}
       />
       {!isCollapsed && (
         <SortableContext
@@ -256,8 +257,10 @@ function SortableGroupList<G, R>(props: SortableGroupListProps<G, R>) {
     </div>
   );
 
-  // Filtered views render the same tree without a DndContext: the hooks stay
-  // mounted (disabled), so toggling the filter never remounts the sections.
+  // Filtered views render the same tree without a DndContext. The hooks are
+  // always called (disabled), so hook order is stable; the subtree IS
+  // re-created when `enabled` flips, which is fine because collapse state is
+  // controlled by the page.
   if (!dndOn) return body;
 
   return (

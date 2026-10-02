@@ -11,6 +11,10 @@ export interface GroupSlots {
   meta?: ReactNode;
   /** Trailing controls (a kebab menu). Clicks never toggle the band. */
   actions?: ReactNode;
+  /** Accessible name for the band's expand/collapse control, e.g.
+   *  "Collapse Newsletter". Without it the name is computed from the band's
+   *  content, grip and kebab labels included. */
+  toggleLabel?: string;
 }
 
 /** What a row renders: content right after the grip, meta pinned right. */
@@ -44,9 +48,13 @@ export interface SortableGroupListDnd<G, R> {
 export interface SortableGroupListProps<G, R> {
   /** Already ordered. */
   groups: G[];
+  /** Group ids and row ids share one DndContext id space: they must be
+   *  unique across BOTH sets (UUIDs are fine; small integers in both would
+   *  collide). */
   getGroupId: (group: G) => string;
   /** Already ordered. */
   rowsOf: (group: G) => R[];
+  /** See getGroupId: unique across groups and rows. */
   getRowId: (row: R) => string;
   renderGroup: (
     group: G,

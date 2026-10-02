@@ -6,8 +6,8 @@
 // bespoke section/row pair so every grouped list shares one band, one indent,
 // one grip and one mobile wrap.
 
-import { useMemo, useState } from 'react';
-import { Badge, Button, Dropdown, Form } from 'react-bootstrap';
+import { useState } from 'react';
+import { Button, Dropdown, Form } from 'react-bootstrap';
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import PageHeader from 'components/common/PageHeader';
 import SubtleBadge from 'components/common/SubtleBadge';
@@ -180,7 +180,7 @@ const filteredCode = `Demo = () => {
           collapsed={collapsed}
           onToggle={toggle}
           renderGroup={(g, { rowCount }) => ({ title: g.name, meta: '(' + rowCount + ')' })}
-          renderRow={r => ({ content: r.title, meta: <Badge bg="secondary">{r.status}</Badge> })}
+          renderRow={r => ({ content: r.title, meta: <SubtleBadge bg="secondary">{r.status}</SubtleBadge> })}
           emptyGroup={() => 'No rows in this group.'}
           dnd={{
             enabled: needle === '',
@@ -195,7 +195,6 @@ const filteredCode = `Demo = () => {
 
 const scope = {
   useState,
-  useMemo,
   seed,
   SortableGroupList,
   useCollapsedSet,
@@ -203,7 +202,6 @@ const scope = {
   CardDropdown,
   Dropdown,
   Button,
-  Badge,
   Form
 };
 

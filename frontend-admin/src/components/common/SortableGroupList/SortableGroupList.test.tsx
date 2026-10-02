@@ -160,4 +160,50 @@ describe('SortableGroupList', () => {
     fireEvent.click(screen.getByRole('button', { name: 'drag group Alpha' }));
     expect(onToggle).not.toHaveBeenCalled();
   });
+
+  it('a keypress on the grip or on the kebab does not toggle the band', () => {
+    const { onToggle } = renderList({
+      dnd: {
+        enabled: true,
+        handleLabel: {
+          group: g => `drag group ${g.name}`,
+          row: r => `drag row ${r.label}`
+        }
+      }
+    });
+    fireEvent.keyDown(
+      screen.getByRole('button', { name: 'drag group Alpha' }),
+      { key: ' ' }
+    );
+    fireEvent.keyDown(screen.getByText('menu Alpha'), { key: 'Enter' });
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it('a keydown inside the actions slot still reaches the document (dropdown keyboard handling)', () => {
+    renderList();
+    const spy = vi.fn();
+    document.addEventListener('keydown', spy);
+    try {
+      fireEvent.keyDown(screen.getByText('menu Alpha'), { key: 'Escape' });
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener('keydown', spy);
+    }
+  });
+
+  it('toggleLabel becomes the band accessible name', () => {
+    renderList({
+      renderGroup: (g, { collapsed }) => ({
+        title: g.name,
+        toggleLabel: `${collapsed ? 'Expand' : 'Collapse'} ${g.name}`
+      }),
+      collapsed: new Set(['g2'])
+    });
+    expect(
+      screen.getByRole('button', { name: 'Collapse Alpha' })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Expand Beta' })
+    ).toBeInTheDocument();
+  });
 });

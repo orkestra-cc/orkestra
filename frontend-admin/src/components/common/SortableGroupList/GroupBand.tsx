@@ -7,7 +7,7 @@
 // here — this band can be a drop target for a bare group with no wrapper of
 // its own to key off, so only one element in the tree carries the id.
 
-import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faChevronDown,
@@ -22,7 +22,7 @@ interface GroupBandProps extends GroupSlots {
   dropRef?: (el: HTMLElement | null) => void;
 }
 
-const stop = (e: MouseEvent | KeyboardEvent) => e.stopPropagation();
+const stop = (e: MouseEvent) => e.stopPropagation();
 
 const GroupBand = ({
   collapsed,
@@ -32,15 +32,21 @@ const GroupBand = ({
   marker,
   title,
   meta,
-  actions
+  actions,
+  toggleLabel
 }: GroupBandProps) => (
   <div
     ref={dropRef}
     role="button"
     tabIndex={0}
     aria-expanded={!collapsed}
+    aria-label={toggleLabel}
     onClick={onToggle}
     onKeyDown={e => {
+      // Only a keypress on the band itself toggles: the grip and the kebab
+      // live inside the band, and dnd-kit's keyboard sensor picks a group
+      // up on Space/Enter without stopping propagation.
+      if (e.target !== e.currentTarget) return;
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         onToggle();
@@ -64,12 +70,7 @@ const GroupBand = ({
       </span>
     )}
     {actions && (
-      <span
-        role="presentation"
-        className="flex-shrink-0"
-        onClick={stop}
-        onKeyDown={stop}
-      >
+      <span role="presentation" className="flex-shrink-0" onClick={stop}>
         {actions}
       </span>
     )}
