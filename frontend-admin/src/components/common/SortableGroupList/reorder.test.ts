@@ -43,6 +43,20 @@ describe('computeTargetOrder', () => {
       'b'
     ]);
   });
+  it('moves a same-group row down onto its neighbour', () => {
+    expect(computeTargetOrder(['a', 'b', 'c'], 'a', 'b')).toEqual([
+      'b',
+      'a',
+      'c'
+    ]);
+  });
+  it('moves a same-group row down to the last slot', () => {
+    expect(computeTargetOrder(['a', 'b', 'c'], 'a', 'c')).toEqual([
+      'b',
+      'c',
+      'a'
+    ]);
+  });
 });
 
 describe('droppableTypesFor', () => {
@@ -176,6 +190,22 @@ describe('resolveDragEnd', () => {
         rows
       )
     ).toEqual({ kind: 'row', rowId: 'b', toGroupId: 'g1', ids: ['b', 'a'] });
+  });
+
+  it('reorders downward within the same group', () => {
+    expect(
+      resolveDragEnd(
+        {
+          activeId: 'a',
+          activeType: 'row',
+          overId: 'b',
+          overType: 'row',
+          overGroupId: 'g1'
+        },
+        groupIds,
+        rows
+      )
+    ).toEqual({ kind: 'row', rowId: 'a', toGroupId: 'g1', ids: ['b', 'a'] });
   });
 
   it('appends when a row lands on a band container', () => {

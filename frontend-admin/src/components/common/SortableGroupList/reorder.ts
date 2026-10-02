@@ -22,14 +22,18 @@ export const reorderIds = (
 };
 
 /** The destination group's authoritative ordered row-id list after dropping
- *  `activeId`: dedupe it out first (so a same-group move repositions and a
- *  cross-group move just inserts), then splice it in at `overRowId`'s index,
- *  or append when `overRowId` is null (drop on a band / empty group). */
+ *  `activeId`. A same-group drop onto a row takes that row's slot
+ *  (`arrayMove`, so a downward move lands after it, an upward one before);
+ *  otherwise `activeId` is deduped out and spliced in at `overRowId`'s index,
+ *  or appended when `overRowId` is null (drop on a band / empty group). */
 export const computeTargetOrder = (
   idsInTargetGroup: string[],
   activeId: string,
   overRowId: string | null
 ): string[] => {
+  const from = idsInTargetGroup.indexOf(activeId);
+  const to = overRowId ? idsInTargetGroup.indexOf(overRowId) : -1;
+  if (from >= 0 && to >= 0) return arrayMove(idsInTargetGroup, from, to);
   const base = idsInTargetGroup.filter(id => id !== activeId);
   const idx = overRowId ? base.indexOf(overRowId) : -1;
   const at = idx < 0 ? base.length : idx;

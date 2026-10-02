@@ -154,9 +154,25 @@ const fixedRowsCode = `Demo = () => {
 
 const filteredCode = `Demo = () => {
   const [q, setQ] = useState('');
+  const [all, setAll] = useState(seed);
   const { collapsed, toggle } = useCollapsedSet('reference.sgl.filtered');
   const needle = q.trim().toLowerCase();
-  const groups = seed
+
+  // Drag is only on while the filter is empty, so these always see full groups.
+  const onReorderGroups = ids =>
+    setAll(prev => ids.map(id => prev.find(g => g.id === id)));
+
+  const onMoveRow = (rowId, toGroupId, orderedRowIds) =>
+    setAll(prev => {
+      const row = prev.flatMap(g => g.rows).find(r => r.id === rowId);
+      return prev.map(g => {
+        const rows = g.rows.filter(r => r.id !== rowId);
+        if (g.id !== toGroupId) return { ...g, rows };
+        return { ...g, rows: orderedRowIds.map(id => (id === rowId ? row : rows.find(r => r.id === id))) };
+      });
+    });
+
+  const groups = all
     .map(g => ({ ...g, rows: g.rows.filter(r => !needle || r.title.toLowerCase().includes(needle)) }))
     .filter(g => !needle || g.rows.length > 0);
 
@@ -185,6 +201,8 @@ const filteredCode = `Demo = () => {
           dnd={{
             enabled: needle === '',
             groupDraggable: g => g.id !== 'archive',
+            onReorderGroups,
+            onMoveRow,
             handleLabel: { group: g => 'Drag ' + g.name, row: r => 'Drag ' + r.title }
           }}
         />
