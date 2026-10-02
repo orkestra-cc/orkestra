@@ -29,6 +29,9 @@ const StatCards = lazy(() => import('reference/components/ui/StatCards'));
 const ExportFormatMenus = lazy(
   () => import('reference/components/ui/ExportFormatMenus')
 );
+const SortableGroupListShowcase = lazy(
+  () => import('reference/components/ui/SortableGroupList')
+);
 const SecretOnceDisplayExample = lazy(
   () => import('reference/components/ui/SecretOnceDisplayExample')
 );
@@ -584,6 +587,10 @@ export function getReferenceRoutes(): RouteObject[] {
           element: <ExportFormatMenus />
         },
         {
+          path: paths.sortableGroupList,
+          element: <SortableGroupListShowcase />
+        },
+        {
           path: paths.secretOnceDisplay,
           element: <SecretOnceDisplayExample />
         },
@@ -883,6 +890,10 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: 'export-format-menu',
               element: <ExportFormatMenus />
+            },
+            {
+              path: 'sortable-group-list',
+              element: <SortableGroupListShowcase />
             },
             {
               path: 'secret-once-display',
