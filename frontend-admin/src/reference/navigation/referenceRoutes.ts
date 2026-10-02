@@ -649,6 +649,11 @@ export const modulesRoutes: RouteGroup = {
           active: true
         },
         {
+          name: 'Sortable Group List',
+          to: paths.refComponentsSortableGroupList,
+          active: true
+        },
+        {
           name: 'Secret Once Display',
           to: paths.refComponentsSecretOnceDisplay,
           active: true
@@ -1267,6 +1272,11 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'Export Format Menu',
           to: paths.refComponentsExportFormatMenu,
+          active: true
+        },
+        {
+          name: 'Sortable Group List',
+          to: paths.refComponentsSortableGroupList,
           active: true
         },
         {
