@@ -46,8 +46,15 @@ COPY . .
 # leak into a running staging/prod container.
 RUN cp -n public/config.example.js public/config.js
 
-# Build the application
-RUN npm run build
+# Self-hosted TinyMCE: the editor loads /tinymce/tinymce.min.js, which
+# postinstall.js copies from node_modules into public/tinymce (gitignored).
+# `npm ci --ignore-scripts` above skips that hook, so run it explicitly —
+# otherwise the image ships without TinyMCE and every rich-text editor
+# renders as an empty box.
+RUN node postinstall.js
+
+# Build the application, and fail it if TinyMCE did not make it into dist/.
+RUN npm run build && test -f dist/tinymce/tinymce.min.js
 
 # ============================================
 # Stage 2: Production
