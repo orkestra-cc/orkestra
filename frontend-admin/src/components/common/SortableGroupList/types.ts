@@ -21,6 +21,11 @@ export interface GroupSlots {
 export interface RowSlots {
   content: ReactNode;
   meta?: ReactNode;
+  /** true ⇒ long content wraps its text BESIDE the meta cluster (the
+   *  content group gets a 25% flex-basis floored at its min-content) instead
+   *  of pushing the cluster down a line. Default false: the content group is
+   *  min-w-0, so `text-truncate` content truncates. */
+  contentWraps?: boolean;
 }
 
 export interface SortableGroupListDnd<G, R> {
