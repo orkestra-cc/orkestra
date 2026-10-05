@@ -81,6 +81,7 @@ function RowItem<G, R>({
       }
       content={slots.content}
       meta={slots.meta}
+      contentWraps={slots.contentWraps}
     />
   );
 }

@@ -62,6 +62,24 @@ describe('SortableGroupList', () => {
     expect(screen.getByText('nothing in Beta')).toBeInTheDocument();
   });
 
+  it('row content is min-w-0 by default and gets a wrapping basis with contentWraps', () => {
+    const contentGroup = (c: HTMLElement) =>
+      c.querySelector('[data-row-id="r1"]')?.firstElementChild as HTMLElement;
+    const { container, unmount } = renderList();
+    expect(contentGroup(container)).toHaveClass('min-w-0');
+    expect(contentGroup(container)).not.toHaveClass('w-25');
+    unmount();
+    const wrapped = renderList({
+      renderRow: r => ({
+        content: r.label,
+        meta: <span>meta</span>,
+        contentWraps: true
+      })
+    });
+    expect(contentGroup(wrapped.container)).toHaveClass('w-25');
+    expect(contentGroup(wrapped.container)).not.toHaveClass('min-w-0');
+  });
+
   it('hides rows and the empty placeholder when a group is collapsed, with aria-expanded=false', () => {
     renderList({ collapsed: new Set(['g1', 'g2']) });
     expect(screen.queryByText('One')).not.toBeInTheDocument();
