@@ -1544,13 +1544,43 @@ func (h *AuthHandler) RefreshTokensHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Return JSON response
+	// The body carries the access token and nothing durable. The rotated
+	// refresh token travels ONLY in the HttpOnly cookie minted above —
+	// encoding the whole TokenResponse used to echo it in the body too,
+	// which handed a seven-day rotating credential to any script that
+	// could call this endpoint with credentials: 'include', defeating
+	// HttpOnly. A caller that supplied the token in the request body has
+	// no cookie and gets the successor back in the body; that is the
+	// one shape in which the field is written.
+	response := refreshCookieBody{
+		AccessToken:    tokenResponse.AccessToken,
+		TokenType:      tokenResponse.TokenType,
+		ExpiresIn:      tokenResponse.ExpiresIn,
+		User:           tokenResponse.User,
+		OAuthProviders: tokenResponse.OAuthProviders,
+		Success:        true,
+	}
+	if tokenSource == "request_body" {
+		response.RefreshToken = tokenResponse.RefreshToken
+	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(tokenResponse); err != nil {
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		logger.Error("Failed to encode response", slog.String("error", err.Error()))
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
+}
+
+// refreshCookieBody is the closed wire shape of POST /v1/auth/{tier}/refresh-cookie.
+// RefreshToken is populated only for a body-sourced caller (see RefreshTokensHTTP).
+type refreshCookieBody struct {
+	AccessToken    string                        `json:"accessToken"`
+	RefreshToken   string                        `json:"refreshToken,omitempty"`
+	TokenType      string                        `json:"tokenType"`
+	ExpiresIn      int64                         `json:"expiresIn"`
+	User           *iface.UserManagementResponse `json:"user,omitempty"`
+	OAuthProviders []models.OAuthProviderInfo    `json:"oauthProviders,omitempty"`
+	Success        bool                          `json:"success"`
 }
 
 // Logout Request

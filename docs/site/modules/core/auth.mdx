@@ -340,6 +340,14 @@ subsystem is legible in a support ticket; both are 503 and every client
 already treats 503 as transient. An account that has genuinely been deleted
 still answers 401 — otherwise a dead session could never end.
 
+A successful `POST /v1/auth/{tier}/refresh-cookie` answers with the new access
+token, its `expiresIn`, the user and the linked providers — and nothing
+durable. The rotated refresh token is written only into the HttpOnly cookie;
+it never appears in the body, because a body is readable by any script on the
+SPA origin and the cookie's whole purpose is to keep that credential out of
+script's reach. Only a caller that sent `{"refreshToken"}` in the request body
+(no cookie to mint) receives the successor in the body.
+
 The bootstrap endpoint `GET /v1/auth/session` is covered end to end too. Its
 cookie-classification step answers 503, and so does the read-only mint it
 performs afterwards (`MintAccessTokenFromRefresh`) — its own token lookup, its
