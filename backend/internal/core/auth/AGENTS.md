@@ -627,6 +627,36 @@ independent admin-managed pairs:
   quirks, for no security gain. If that judgement is ever revisited, give it
   a **third** key — sharing `mfa-enroll` would mean a fumbled TOTP enrolment
   blocks the passkey fallback, which is the circular lockout again.
+- **`MFAHandler.LoginVerify` is the ninth consumer, on its own `mfa-login`
+  scope.** Key `auth:attempts:mfa-login:<audience>:<userUUID>`
+  (`AttemptKeyMFALogin`), limit `MFALoginLimit` — the same
+  `MFAMaxAttempts` (5) per `MFAChallengeTTL` (5m) pair. The PUBLIC
+  `/v1/auth/{tier}/mfa/login/verify` route was the one factor-verifying
+  route D20 missed: its only bound was the per-challenge counter, which
+  destroys ONE challenge at five failures — and a correct password mints a
+  fresh challenge on demand, while a successful password login clears the
+  `email` lockout scope on the way (`resetLoginFailures` runs before
+  `completeLogin`). So a caller holding the password could buy five new
+  TOTP guesses per login indefinitely, bounded only by the per-IP
+  `api:general` bucket. Same peek-charge-reset shape as `Verify`: peek
+  **after** the challenge is read (the key needs the challenge's user) and
+  after the password-policy recheck, so a disabled login still burns no
+  budget; a locked caller answers 429 `auth.too_many_attempts` with
+  `Retry-After` through the shared `lockoutError` and spends neither the
+  challenge's own budget nor a factor read; charge one failure per
+  request on `ErrMFAInvalidCode` only; `Reset` on success; fail OPEN on a
+  counter error. The user is read from the challenge, never from a bearer:
+  the caller is not authenticated yet. It reuses the counter and audience
+  `SetVerifyAttemptCounter` already wires, so `module.go` needs nothing
+  new. 🔴 **A separate key, deliberately** — the same reasoning as
+  `mfa-enroll`: a login budget burned by an attacker who holds the password
+  must not lock the legitimate user out of step-up, and a fumbled step-up
+  must not close the login door. `TestLoginVerifyCap_*` pins the fresh-
+  challenge case, the reset, the independence from both other scopes and
+  the not-a-guess rule. `WebAuthnHandler.LoginFinish` stays uncapped for
+  the same reason `RegisterFinish` does: an assertion is produced by an
+  authenticator over a server-issued challenge, so there is no secret to
+  search for.
 
 #### Mail dispatcher (transactional auth mail)
 

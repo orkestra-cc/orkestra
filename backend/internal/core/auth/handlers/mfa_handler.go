@@ -836,16 +836,41 @@ func (h *MFAHandler) LoginVerify(ctx context.Context, req *MFALoginVerifyRequest
 		return nil, err
 	}
 
+	// OUTER cap across challenges for this (audience, user) — the same
+	// bound D20 put on the authenticated verify routes, on its own key
+	// (services.MFALoginLimit). The per-challenge counter below bounds ONE
+	// challenge, and a correct password mints a new one on demand, so
+	// without this a password holder could buy five fresh TOTP guesses per
+	// login forever. Peek before verifying so a locked caller spends
+	// neither the challenge's budget nor a factor read, and so the lock
+	// cannot extend itself on every probe. A counter error reads as "not
+	// locked": the AttemptCounter contract is fail-open by design.
+	capKey := services.AttemptKeyMFALogin(h.audience, ch.UserUUID)
+	if h.verifyAttempts != nil {
+		if v, err := h.verifyAttempts.Locked(ctx, capKey, services.MFALoginLimit); err == nil && v.Locked {
+			return nil, lockoutError(v.RetryAfter)
+		}
+	}
+
+	var verifyErr error
 	if req.Body.UseBackup {
-		if err := h.mfa.VerifyBackupCode(ctx, ch.UserUUID, req.Body.Code); err != nil {
-			_, _ = h.challenges.IncrementAttempts(ctx, req.Body.ChallengeID)
-			return nil, mapMFAError(err)
-		}
+		verifyErr = h.mfa.VerifyBackupCode(ctx, ch.UserUUID, req.Body.Code)
 	} else {
-		if err := h.mfa.Verify(ctx, ch.UserUUID, req.Body.Code); err != nil {
-			_, _ = h.challenges.IncrementAttempts(ctx, req.Body.ChallengeID)
-			return nil, mapMFAError(err)
+		verifyErr = h.mfa.Verify(ctx, ch.UserUUID, req.Body.Code)
+	}
+	if verifyErr != nil {
+		_, _ = h.challenges.IncrementAttempts(ctx, req.Body.ChallengeID)
+		// One failure per request, and only for a rejected CREDENTIAL —
+		// the same two rules Verify applies (see its comment): a backup
+		// code walk is one guess, and "not enrolled" or a store error is
+		// a refusal, not a guess.
+		if h.verifyAttempts != nil && errors.Is(verifyErr, services.ErrMFAInvalidCode) {
+			_, _ = h.verifyAttempts.RecordFailure(ctx, capKey, services.MFALoginLimit)
 		}
+		return nil, mapMFAError(verifyErr)
+	}
+	if h.verifyAttempts != nil {
+		_ = h.verifyAttempts.Reset(ctx, capKey)
 	}
 
 	// Verified — atomically claim the challenge. Concurrent requests may

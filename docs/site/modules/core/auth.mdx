@@ -173,6 +173,7 @@ across every replica and survive a restart.
 | Client ID | service-account grant | the account pair |
 | Reset / verification requests | forgot-password, resend-verification | 3 per email address per 15m, 60 per source address per 15m |
 | MFA verify (per user, independent per surface) | the authenticated `mfa/verify` and passkey `verify/finish` routes | 5 failures per 5m |
+| MFA login completion (per user, independent per surface, its own budget) | the public `mfa/login/verify` route | 5 failures per 5m |
 
 An address threshold **must** be at least the account threshold: an
 address that locks first would tell an attacker which accounts exist
@@ -197,6 +198,17 @@ verification clears the counter; anything that was not a rejected
 credential — no factor enrolled, an expired or already-spent challenge, a
 storage failure — costs nothing, so one subsystem's degradation can never
 spend a legitimate user's budget in another.
+
+The public login-completion route, `mfa/login/verify`, carries the same
+outer bound on a budget of its own. Its per-challenge counter only ever
+bounded one challenge: a correct password mints a fresh challenge, and a
+successful password login clears the email lockout on the way, so a caller
+who already held the password could buy five new authenticator-code guesses
+per login without limit. The budget is keyed on the challenge's user, since
+the caller is not signed in yet, and is deliberately separate from the
+step-up budget: an attacker burning the login budget must not lock the
+account holder out of step-up, and a fumbled step-up must not close the
+login door.
 
 The durable per-account lock (`User.LockedUntil`) runs alongside the
 counters rather than behind them: an account locks when either its
