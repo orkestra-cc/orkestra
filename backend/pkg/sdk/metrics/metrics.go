@@ -551,7 +551,7 @@ var (
 		"ip": {}, "email": {}, "client": {},
 		"reset-email": {}, "reset-ip": {},
 		"verify-email": {}, "verify-ip": {},
-		"mfa-verify": {}, "mfa-enroll": {},
+		"mfa-verify": {}, "mfa-enroll": {}, "mfa-login": {},
 	}
 	droppedTemplates = map[string]struct{}{
 		"auth.reset_password":   {},
