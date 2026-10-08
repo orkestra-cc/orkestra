@@ -170,8 +170,11 @@ func (s *authService) sessionWithinAbsoluteCap(ctx context.Context, sessionUUID 
 		return ErrSessionEnforcementUnavailable
 	}
 	if maxAge <= 0 {
-		// Disabled: skip the query entirely. This is the exit for a fork
-		// that does not want the cap, and it must cost nothing.
+		// Disabled: skip the CAP's query entirely. This is the exit for a
+		// fork that does not want the cap, and the cap must cost nothing.
+		// (The session-STATE read in refuseTerminatedSession is separate
+		// and runs on every refresh regardless: a terminated session must
+		// be refused whether or not a fork bounds session age.)
 		return nil
 	}
 

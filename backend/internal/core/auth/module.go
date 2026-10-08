@@ -780,6 +780,13 @@ func (m *AuthModule) Collections() []module.CollectionSpec {
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
 			{Keys: map[string]int{"userUuid": 1}},
 			{Keys: map[string]int{"familyId": 1}},
+			// Every refresh entry point looks the presented token up by its
+			// hash (PeekRefreshToken, GetByTokenAny, the rotation CAS); with
+			// one row per rotation per user kept for the whole refresh TTL,
+			// an unindexed lookup is a collection scan per refresh, on an
+			// anonymous endpoint. Non-unique: uniqueness is M-9's follow-up
+			// and a unique build can fail on existing data.
+			{Keys: map[string]int{"token": 1}},
 			// Serves the sweep's sorted, limited selection. Deliberately
 			// NOT a TTL index: deletion at expiry is semantically safe,
 			// but Mongo's TTL monitor cannot provide the bounded
@@ -791,6 +798,13 @@ func (m *AuthModule) Collections() []module.CollectionSpec {
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
 			{Keys: map[string]int{"userUuid": 1}},
 			{Keys: map[string]int{"familyId": 1}},
+			// Every refresh entry point looks the presented token up by its
+			// hash (PeekRefreshToken, GetByTokenAny, the rotation CAS); with
+			// one row per rotation per user kept for the whole refresh TTL,
+			// an unindexed lookup is a collection scan per refresh, on an
+			// anonymous endpoint. Non-unique: uniqueness is M-9's follow-up
+			// and a unique build can fail on existing data.
+			{Keys: map[string]int{"token": 1}},
 			// Serves the sweep's sorted, limited selection. Deliberately
 			// NOT a TTL index: deletion at expiry is semantically safe,
 			// but Mongo's TTL monitor cannot provide the bounded

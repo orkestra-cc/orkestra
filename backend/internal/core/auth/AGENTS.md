@@ -47,7 +47,7 @@ Declared in `module.go::Collections()`. Collection name constants live in `model
 | Collection | Indexes | TTL |
 |---|---|---|
 | `operator_oauth_providers` / `client_oauth_providers` | compound `(userUuid, provider)` unique | — |
-| `operator_refresh_tokens` / `client_refresh_tokens` | `uuid` unique, `userUuid`, `familyId` | — (application sweep, not a TTL index: bounded per-cycle progress and backlog telemetry are required for the first cleanup of an upgraded install, and a TTL index provides neither) |
+| `operator_refresh_tokens` / `client_refresh_tokens` | `uuid` unique, `userUuid`, `familyId`, `token` (the sha256 every refresh entry point looks up by — non-unique; uniqueness is the M-9 follow-up) | — (application sweep, not a TTL index: bounded per-cycle progress and backlog telemetry are required for the first cleanup of an upgraded install, and a TTL index provides neither) |
 | `operator_refresh_token_families` / `client_refresh_token_families` | `familyId` unique, `expiresAt` | Yes — absolute expiry is the latest token expiry in the family (with a 24h minimum fallback), so the non-PII replay fence survives every refresh token it protects |
 | `operator_sessions` / `client_sessions` | `uuid` unique, `expiresAt` (TTL via ExpireAt) | Yes — `expiresAt` is the 90-day retention deadline (`models.AuthSessionRetention`) |
 | `auth_security_events` | (none declared) | — — single non-tier-split (audit log keyed on userUUID alone) |
@@ -627,6 +627,36 @@ independent admin-managed pairs:
   quirks, for no security gain. If that judgement is ever revisited, give it
   a **third** key — sharing `mfa-enroll` would mean a fumbled TOTP enrolment
   blocks the passkey fallback, which is the circular lockout again.
+- **`MFAHandler.LoginVerify` is the ninth consumer, on its own `mfa-login`
+  scope.** Key `auth:attempts:mfa-login:<audience>:<userUUID>`
+  (`AttemptKeyMFALogin`), limit `MFALoginLimit` — the same
+  `MFAMaxAttempts` (5) per `MFAChallengeTTL` (5m) pair. The PUBLIC
+  `/v1/auth/{tier}/mfa/login/verify` route was the one factor-verifying
+  route D20 missed: its only bound was the per-challenge counter, which
+  destroys ONE challenge at five failures — and a correct password mints a
+  fresh challenge on demand, while a successful password login clears the
+  `email` lockout scope on the way (`resetLoginFailures` runs before
+  `completeLogin`). So a caller holding the password could buy five new
+  TOTP guesses per login indefinitely, bounded only by the per-IP
+  `api:general` bucket. Same peek-charge-reset shape as `Verify`: peek
+  **after** the challenge is read (the key needs the challenge's user) and
+  after the password-policy recheck, so a disabled login still burns no
+  budget; a locked caller answers 429 `auth.too_many_attempts` with
+  `Retry-After` through the shared `lockoutError` and spends neither the
+  challenge's own budget nor a factor read; charge one failure per
+  request on `ErrMFAInvalidCode` only; `Reset` on success; fail OPEN on a
+  counter error. The user is read from the challenge, never from a bearer:
+  the caller is not authenticated yet. It reuses the counter and audience
+  `SetVerifyAttemptCounter` already wires, so `module.go` needs nothing
+  new. 🔴 **A separate key, deliberately** — the same reasoning as
+  `mfa-enroll`: a login budget burned by an attacker who holds the password
+  must not lock the legitimate user out of step-up, and a fumbled step-up
+  must not close the login door. `TestLoginVerifyCap_*` pins the fresh-
+  challenge case, the reset, the independence from both other scopes and
+  the not-a-guess rule. `WebAuthnHandler.LoginFinish` stays uncapped for
+  the same reason `RegisterFinish` does: an assertion is produced by an
+  authenticator over a server-issued challenge, so there is no secret to
+  search for.
 
 #### Mail dispatcher (transactional auth mail)
 
@@ -771,16 +801,33 @@ usable `CreatedAt` is **not** an anomaly — it has a perfectly good anchor,
 and counting it would poison the observation window.
 
 **The cap outcomes above, and the refresh-path outcomes beside them, surface
-as six distinct HTTP responses**
+as seven distinct HTTP responses**
 (`writeRefreshErr`, called from all three refresh-flow handlers —
 `RefreshTokensWithHeaderHTTP`, `GetSessionHTTP`, `RefreshTokensHTTP`):
 `ErrSessionEnforcementUnavailable` is **503** `session_enforcement_unavailable`
 — never a 401, because reporting a storage outage as an authentication
 failure would train clients to discard a session that is still perfectly
-valid, and the caller may retry once storage recovers.
+valid, and the caller may retry once storage recovers. **The same code
+covers an unreadable session document on the session-state read below.**
 `ErrSessionMaxAgeReached` is **401** `session_max_age_reached` — distinct
 from `refresh_token_replay` because "revoked" is inaccurate for a session
 that simply aged out.
+`ErrRefreshSessionInactive` is **401** `session_revoked` — the presented
+row is valid but the session document it belongs to has been terminated.
+**Both entry points read the session document on every call**
+(`refuseTerminatedSession`, before the cap and before any write), because a
+rotation racing a revocation's bulk `UpdateMany` could insert its successor
+after the update scanned and keep a dead session alive under a row nothing
+would ever look at again; and because a session ended by any path — self
+revoke, admin kill, password change, replay verdict, cap — must not be
+refreshable from a copy of its cookie. The code is the one `RequireAuth`
+emits for the same fact, so both SPAs' terminal-401 handling already covers
+it, and the cookie is cleared (the allowlist below). A **missing** session
+document is deliberately not this error: that is the ADR-0017 compatibility
+window the cap measures (#277), untouched. The read runs whether or not the
+cap is enabled — the cap's own "disabled costs nothing" rule is about the
+cap's query, not this one. Pinned by `refresh_session_inactive_test.go` and
+`refresh_session_inactive_http_test.go`.
 `ErrRefreshRotationRaced` is **409** `refresh_rotation_raced` — a sibling
 tab won the CAS inside `RefreshRotationGrace` against a healthy family, so
 the browser already holds the successor cookie and one retry lands. It is
@@ -1007,8 +1054,9 @@ code**: a generic logout, since a partially degraded cap logout must not
 claim a completely recorded cap expiry. The HttpOnly refresh cookie is
 expired (`clearRefreshCookieOnTerminalRefreshErr`, called immediately
 before `writeRefreshErr` at each of the three call sites) on exactly the
-two outcomes where the session is durably gone — cap expiry and the
-degraded logout — and deliberately left alone on
+three outcomes where the session is durably gone — cap expiry, a
+terminated session (`ErrRefreshSessionInactive`) and the degraded logout —
+and deliberately left alone on
 `ErrSessionEnforcementUnavailable`, where durable logout is not known to
 have completed. Redux state cleanup on the frontend is not a substitute:
 without the expiring `Set-Cookie`, the browser keeps presenting a cookie
@@ -1144,7 +1192,7 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 | POST | `/v1/auth/{tier}/reset-password` | Consume a reset token and set a new password. **Not** gated by the password-login toggle — redeeming an already-issued token stays open so a reset in flight when the method is turned off can still complete |
 | POST | `/v1/auth/{tier}/accept-invite` | Consume an `admin_invite` token: set the user's password **and** mark email verified atomically. Issued by the operator-side admin invite flow (see user AGENTS.md). Redemption, like `reset-password` and `verify-email`, is **not** gated by the password-login toggle. |
 | POST | `/v1/auth/{tier}/refresh` | Refresh using a header-supplied refresh token |
-| POST | `/v1/auth/{tier}/refresh-cookie` | Refresh using the `Cookie:` header |
+| POST | `/v1/auth/{tier}/refresh-cookie` | Refresh using the `Cookie:` header. The response body (`refreshCookieBody`) carries the access token, `expiresIn`, the user and provider list — **never the rotated refresh token**, which travels only in the HttpOnly cookie. Encoding the whole `TokenResponse` used to echo it in the body, which handed a seven-day rotating credential to any script able to call the endpoint with `credentials: 'include'` and defeated HttpOnly. The one exception is a caller that supplied `{"refreshToken"}` in the request body: it has no cookie, so the successor is returned to it in the body. Pinned by `refresh_cookie_body_test.go` |
 | POST | `/v1/auth/{tier}/logout` | Revoke refresh cookie, invalidate session. Public route — identity comes from `resolveLogoutIdentity`, which requires a **signature-verified** refresh cookie whenever the request context is anonymous (see Key invariants) |
 | POST | `/v1/auth/token` | OAuth2 client-credentials grant for service accounts (machine principals). Un-prefixed — operator-tier only, no client-tier equivalent. `{grantType: client_credentials, clientId, clientSecret}` → `{accessToken, tokenType: Bearer, expiresIn}`, no refresh token. Lockout-capped by the same `AttemptCounter` login uses, on the `client`/`ip` scopes (spec §4.1 D7). See "Service accounts" below |
 
@@ -1649,7 +1697,7 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 - **First-user heuristic.** `password_auth_service.go::Register` (`:116-121`), `RegisterInitialAdmin` (`:177`), and `auth_service.go::OAuth register` all check `GetUserCount(ctx, nil) == 0` and assign `super_admin` to the first account created on a fresh install. The setup wizard's `POST /v1/setup/admin` uses `RegisterInitialAdmin` which also bypasses email verification. The setup wizard's `POST /v1/setup/admin` creates the admin only — it no longer bootstraps an internal tenant (ADR-note: zero-tenant installs are supported).
 - **Email verification is gated by `AUTH_REQUIRE_EMAIL_VERIFICATION`.** `true` in production, `false` elsewhere. When true, signup returns 503 with `ErrNotificationDown` if the notification sender is missing or reports `iface.IsConfiguredForCategory(ctx, notifier, "auth.verify_email") == false` — every auth pre-flight asks for the category it is about to send (ADR-0019 D7); a fork's sender without the companion interface falls back to `IsConfigured`. `RegisterInitialAdmin` (setup wizard path) bypasses verification entirely because the wizard runs before SMTP is configured. Verification and reset sends carry `auth.verify_email` / `auth.reset_password` as their category (aligned in ADR-0019 PR 2; before that they carried the bare token-purpose strings).
 - **A provider-verified email is mandatory before any email lookup.** Every provider populates `OAuthUserInfo.EmailVerified` from its own signal (Google `email_verified`; Apple `email_verified`, which Apple types as **String or Boolean** — read by `getBoolOrStringClaimFromMap`, which accepts a JSON bool *and* `"true"`/`"false"`, since reading the string shape as false would lock every unlinked Apple identity out of signup and linking; Discord `verified`; GitHub **only** from `/user/emails` — primary verified first, then any verified). A failing `/user/emails` — transport error, non-200 (401 on a revoked token, 403/429 on rate limits), unreadable or non-JSON body — is a **provider error** (`ProviderError` operation `user_emails`, carrying the HTTP status where there is one), never a silent downgrade: only a 200 that carries no verified address falls back to the public-profile `email`, which is a free-text field and is therefore never marked verified by assumption. The handlers forward it as `email_verified` in the `userInfoMap`. `HandleOAuthCallbackWithLinking` decides three things **before** `GetUserByEmail` for an identity with no existing `(provider, providerID)` link, in this order: the bit must be `true` (else `ErrOAuthEmailUnverified` → 403 `auth.oauth_email_unverified` / web `error=auth.oauth_email_unverified`, identically whether or not a local account exists — it must not become an account-existence oracle); the auto-link policy must be establishable (strict `OAuthAutoLinkByEmailEnabled`: read failure, missing document or malformed value → `ErrAuthPolicyUnavailable` → 503 before lookup, link or token issuance; a nil policy is the same outage, never the legacy "always link"); only then the lookup, after which a found account auto-links only when the policy is on, and a new account lands `EmailVerified=true` without re-asking. An existing provider-ID link logs in as today regardless of the bit (`oauth_inactive_user_test.go` pins it). Regression tests: `gates_test.go` `TestOAuthCallback_NewUser_RequiresVerifiedEmail`, `_UnverifiedEmail_SameAnswerForKnownAndUnknownAccount`, `_AutoLinkPolicyUnavailable_FailsClosedBeforeLookup`, `github_oauth_service_test.go`.
-- **Refresh tokens rotate on every use with family detection.** Each login mints a fresh `FamilyID`; every subsequent rotation preserves it via `RotateWithFamily` (atomic CAS on `{isRevoked:false}`). Old rows are marked `revokedReason="rotated"` with `succeededBy` pointing at the successor so the chain is walkable. Reuse of a rotated token — or CAS-loss on concurrent rotation — triggers `RevokeFamily`: every active row in the lineage is revoked with `revokedReason="replay_detected"`, a structured `slog.Warn` fires, and callers get `ErrRefreshTokenReplay` → 401 with body `{code:"refresh_token_replay"}`. **Except inside `RefreshRotationGrace` (10s).** Several tabs of one app share a login, so their access tokens expire at the same instant and each posts the same cookie; exactly one wins the CAS. Answering every loser with replay revoked the family — the winner's fresh successor included — and forced a full re-login about once per access-token lifetime. So when the presented row is `rotated`, was revoked within the grace window, **and the family carries no revocation fence** (`FamilyRevoked`), the refresh returns `ErrRefreshRotationRaced` → **409** `{code:"refresh_rotation_raced"}` and touches nothing: no family revocation, no credentials. The family fence is the discriminator — a racing sibling runs against a healthy family, a replay that already tripped detection does not. The trade is deliberate: an attacker replaying inside the window gets a retry hint instead of tripping the kill, but gains nothing, since progress still needs the successor cookie only the legitimate client holds. Outside the window, or once the fence exists, detection is unchanged. Clients retry **once** on 409 — `frontend-admin` additionally serialises rotation across tabs with a Web Lock (`orkestra:auth-refresh`), which prevents most races from reaching the backend at all. Pre-Block-C rows have empty `FamilyID`; `RevokeFamily("")` is a no-op guard so a stray pre-Block-C replay doesn't wipe unrelated sessions. No refresh row may be deleted while its token could still pass temporal validation, regardless of revocation state — an unexpired rotated row is exactly what replay detection matches against. Once `expiresAt` is past, replaying it cannot mint credentials and the row may be swept. `CleanupRevokedTokens` was deleted in ADR-0017 D7: revocation age alone is never a safe deletion criterion, and it was wrong across a `JWT_REFRESH_TOKEN_EXPIRY` change between restarts.
+- **Refresh tokens rotate on every use with family detection.** Each login mints a fresh `FamilyID`; every subsequent rotation preserves it via `RotateWithFamily` (atomic CAS on `{isRevoked:false}`). Old rows are marked `revokedReason="rotated"` with `succeededBy` pointing at the successor so the chain is walkable. Reuse of a rotated token — or CAS-loss on concurrent rotation — triggers `RevokeFamily`: every active row in the lineage is revoked with `revokedReason="replay_detected"`, **the session the row belonged to is terminated** (`revokeSessionInternal`: its refresh rows, the session document, the sid denylist — the same three steps every other revocation runs), a `refresh_token_replay` security-event row names the user with the presenting address, a structured `slog.Warn` fires (outcome classifiers only — no identifier, address or error text, pinned by `refresh_replay_logging_test.go`), and callers get `ErrRefreshTokenReplay` → 401 with body `{code:"refresh_token_replay"}`. The session half is what ends the access token the replayer already holds: without it the family died but their bearer stayed valid until `exp`, the session still read "active" in `/me/sessions`, and no durable record existed. Each consequence is independent and best-effort after the verdict — a failed session step or a degraded denylist is logged as `session_outcome`, never surfaced, because the verdict is the answer and the family is already dead (`refresh_replay_session_test.go`). **Except inside `RefreshRotationGrace` (10s).** Several tabs of one app share a login, so their access tokens expire at the same instant and each posts the same cookie; exactly one wins the CAS. Answering every loser with replay revoked the family — the winner's fresh successor included — and forced a full re-login about once per access-token lifetime. So when the presented row is `rotated`, was revoked within the grace window, **and the family carries no revocation fence** (`FamilyRevoked`), the refresh returns `ErrRefreshRotationRaced` → **409** `{code:"refresh_rotation_raced"}` and touches nothing: no family revocation, no credentials. The family fence is the discriminator — a racing sibling runs against a healthy family, a replay that already tripped detection does not. The trade is deliberate: an attacker replaying inside the window gets a retry hint instead of tripping the kill, but gains nothing, since progress still needs the successor cookie only the legitimate client holds. Outside the window, or once the fence exists, detection is unchanged. Clients retry **once** on 409 — `frontend-admin` additionally serialises rotation across tabs with a Web Lock (`orkestra:auth-refresh`), which prevents most races from reaching the backend at all. Pre-Block-C rows have empty `FamilyID`; `RevokeFamily("")` is a no-op guard so a stray pre-Block-C replay doesn't wipe unrelated sessions. No refresh row may be deleted while its token could still pass temporal validation, regardless of revocation state — an unexpired rotated row is exactly what replay detection matches against. Once `expiresAt` is past, replaying it cannot mint credentials and the row may be swept. `CleanupRevokedTokens` was deleted in ADR-0017 D7: revocation age alone is never a safe deletion criterion, and it was wrong across a `JWT_REFRESH_TOKEN_EXPIRY` change between restarts.
 - **Refresh-token retention is an elected, self-draining sweep.** `AuthModule.Start` runs one loop covering both tiers. A Redis lease (`auth:maintenance:token-sweep`, 2m TTL, renewed every 30s with Lua compare-and-expire) elects **one scheduler across replicas** — held across the idle wait too, so 5,000 rows/tier/cycle is a cluster-wide bound, not a per-replica multiplier. The cadence adapts to the `hasMore` bit the previous batch reported: 5 minutes while draining, 6 hours once dry. Watch `orkestra_auth_token_sweep_backlog_estimate{tier}` reach zero; no manual intervention or interval change is expected. **Every lease failure is a step-down, never an exit.** A failed acquire, a failed renew, and a renew that reports someone else owns the key all land in the same follower state: log one bounded warning, sweep nothing, re-contend in five minutes. Exiting the loop on any of them would end retention for the life of the process — nothing calls `Start` again — and the most ordinary instance of that is a Redis restart, which comes back *healthy* and answers the next renew with `not_owner` rather than an error. Authentication is never affected on any of these paths. The next pass is scheduled as an **absolute deadline**, not a duration recomputed each time the loop wakes: the renew ticker wakes it every 30s, so rebuilding the timer from the full interval on each wake would starve the sweep forever while every log line still looked healthy.
 - **A refresh recomputes the MFA markers; it never copies them forward.** Both mint-from-refresh paths — `RefreshTokensWithRiskAssessment` (rotating) and `MintAccessTokenFromRefresh` (`/session`, non-rotating) — run `carryAMR(prior, priorLastOTPAt, tokenEpoch, user.MFAEpoch)` instead of handing `claims.AMR`/`claims.LastOTPAt` straight to the signer (spec §4.3 D17, the second half of M-2). `"reauth"` is **always** dropped — a five-minute presence proof is not a property of a session, and a refresh is not a reconfirm; the epoch-governed markers (`otp`, `webauthn`, `mfa`, `device_trust`) survive **only** under a matching epoch; `LastOTPAt` is carried only when at least one of them survived, because a freshness stamp with nothing to be fresh about is a timestamp a gate would believe; the base markers (`pwd`, `oauth`) always survive, since they describe how the session began. The new token is stamped with the user's **current** epoch (the mint reads `user.MFAEpoch`), so it is never stale the moment it is signed. ⚠️ On the paths as they stand this is **behaviour-neutral**: refresh tokens deliberately carry no `amr` at all (`GenerateEnhancedRefreshToken` omits it), so `prior` is empty at both call sites. The rule is stated in the one place that mints from a refresh so it holds the day that changes, rather than being rediscovered as a second M-2.
 - **Refresh-family replay fencing is durable.** The tier-scoped `*_refresh_token_families` row records a family revocation independently of the token rows. It closes the standalone-Mongo race where replay revocation lands after a rotation CAS but before its successor insert: the late successor is fenced and cannot remain active. Do not replace this with process-local coordination.

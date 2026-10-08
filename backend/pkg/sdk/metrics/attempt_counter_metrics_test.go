@@ -98,3 +98,26 @@ func TestRegister_IncludesAuthAttemptFamilies(t *testing.T) {
 		}
 	}
 }
+
+// Every scope the auth attempt counter can lock on must be in the closed
+// label set, or its lockouts vanish into "unknown" and an operator cannot
+// tell an MFA login lockout from a caller bug. The list mirrors the
+// services.Scope* constants (attempt_counter.go) by value, because the SDK
+// must not import the auth module.
+func TestRecordAuthLockout_KeepsEveryAttemptScope(t *testing.T) {
+	c := NewCollector()
+	scopes := []string{
+		"ip", "email", "client",
+		"reset-email", "reset-ip", "verify-email", "verify-ip",
+		"mfa-verify", "mfa-enroll", "mfa-login",
+	}
+	for _, s := range scopes {
+		c.RecordAuthLockout(s)
+		if got := testutil.ToFloat64(c.authLockouts.WithLabelValues(s)); got != 1 {
+			t.Errorf("%s = %v, want 1 — the scope collapsed to unknown", s, got)
+		}
+	}
+	if got := testutil.ToFloat64(c.authLockouts.WithLabelValues("unknown")); got != 0 {
+		t.Errorf("unknown = %v, want 0 — a real scope must never be relabelled", got)
+	}
+}
