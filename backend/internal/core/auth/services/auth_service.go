@@ -33,6 +33,16 @@ var (
 	// again after its successor already existed — a textbook replay attack.
 	// The whole family is revoked before this error is returned.
 	ErrRefreshTokenReplay = errors.New("refresh token replay detected — session revoked")
+	// ErrRefreshSessionInactive: the presented refresh row is itself valid,
+	// but the session document it belongs to has been terminated — by a
+	// self-service revoke, an admin kill, a password change, a replay
+	// verdict or the absolute cap. The refresh path reads the session on
+	// every rotation and every read-only mint and refuses on this, so a
+	// successor row inserted in the window between a revocation's bulk
+	// update and a concurrent rotation's insert cannot keep a dead session
+	// alive. A MISSING session document is deliberately NOT this error:
+	// that is the ADR-0017 compatibility window (#277), unchanged.
+	ErrRefreshSessionInactive = errors.New("refresh token's session has been terminated")
 	// ErrRefreshRotationRaced signals that the presented token was rotated
 	// by a CONCURRENT caller moments ago while the family is still intact:
 	// several tabs of one app hit their 401 at the same instant (their
@@ -1640,6 +1650,11 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 	// Absolute session cap. Placed after the row's revocation/expiry
 	// checks and before the mint, so a capped session never receives a
 	// token pair. ADR-0017 D3.
+	// A terminated session refuses the refresh before anything is minted or
+	// rotated — see ErrRefreshSessionInactive for the race this closes.
+	if err := s.refuseTerminatedSession(ctx, newSessionID); err != nil {
+		return nil, err
+	}
 	if err := s.sessionWithinAbsoluteCap(ctx, newSessionID); err != nil {
 		return nil, err
 	}
@@ -1852,6 +1867,11 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 	// The same cap on the non-rotating path. /session mints without
 	// rotating, so omitting this would let a client that calls only the
 	// bootstrap endpoint hold a session open indefinitely. ADR-0017 D3.
+	// A terminated session refuses the refresh before anything is minted or
+	// rotated — see ErrRefreshSessionInactive for the race this closes.
+	if err := s.refuseTerminatedSession(ctx, doc.SessionUUID); err != nil {
+		return nil, err
+	}
 	if err := s.sessionWithinAbsoluteCap(ctx, doc.SessionUUID); err != nil {
 		return nil, err
 	}
@@ -1927,6 +1947,39 @@ func (s *authService) benignRotationRetry(ctx context.Context, doc *models.Refre
 		return false, fmt.Errorf("family state read failed: %w: %w", ErrRefreshLookupUnavailable, err)
 	}
 	return !revoked, nil
+}
+
+// refuseTerminatedSession reads the session document a refresh row belongs
+// to and refuses when it has been terminated. It runs on every rotation and
+// every read-only mint, before the absolute cap and before any write.
+//
+// Three outcomes, deliberately: an inactive document is the verdict
+// (ErrRefreshSessionInactive → 401 session_revoked, cookie cleared); an
+// unreadable store is an outage (ErrSessionEnforcementUnavailable → 503,
+// never a sign-out); a MISSING document is permitted unchanged — that is the
+// ADR-0017 compatibility window the absolute cap already measures (#277),
+// and this check must not pre-empt that decision. An empty session UUID
+// cannot yield credentials anyway (requireSessionContext) and is skipped.
+func (s *authService) refuseTerminatedSession(ctx context.Context, sessionUUID string) error {
+	if s.authSessionRepo == nil || sessionUUID == "" {
+		return nil
+	}
+	sess, err := s.authSessionRepo.GetByUUID(ctx, sessionUUID)
+	if err != nil {
+		// The session store is the subsystem the absolute cap already
+		// classifies as ErrSessionEnforcementUnavailable (503, cookie kept,
+		// client retries); an unreadable session document here is the same
+		// outage and keeps the same name — session_cap_enforcement_test.go
+		// pins it for both entry points.
+		slogDefault().ErrorContext(ctx, "refresh: session state lookup failed",
+			slog.String("outcome", "fail_closed"),
+			slog.String("error", err.Error()))
+		return ErrSessionEnforcementUnavailable
+	}
+	if sess != nil && !sess.IsActive {
+		return ErrRefreshSessionInactive
+	}
+	return nil
 }
 
 // handleRefreshReplay is the consequence of a replay VERDICT: the family is

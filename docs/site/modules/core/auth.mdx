@@ -324,6 +324,16 @@ token without rotating the refresh cookie (a deliberate anti-replay split), so
 a client calling only that endpoint would otherwise hold a session open
 forever.
 
+Both refresh paths also read the session document on every call and refuse a
+session that has been terminated — by the user, an administrator, a password
+change, a replay verdict or the cap — with a 401 carrying
+`code: "session_revoked"`, the same code a protected route answers once the
+session's access token meets the denylist, and with the refresh cookie
+expired. This is what stops a copy of the cookie from keeping a dead session
+alive when a rotation races the revocation. An unreadable session store on
+that read is the same 503 `session_enforcement_unavailable` the cap answers:
+an outage, never a sign-out.
+
 Rotation only ever happens on an explicit refresh call (`/refresh-cookie`, `/refresh`). `RequireAuth` itself is bearer-only — it never reads or rotates the refresh cookie ([ADR-0020](/adrs/bearer-only-require-auth)); an expired access token is a plain `401` that the client answers with `/refresh-cookie` and a retry.
 
 The same `session_max_age_reached` code comes back from any protected route

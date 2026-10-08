@@ -1104,7 +1104,7 @@ func (h *AuthHandler) clearStaleParentDomainCookies(w http.ResponseWriter, cooki
 // retry when storage recovers.
 func (h *AuthHandler) clearRefreshCookieOnTerminalRefreshErr(w http.ResponseWriter, cookieName string, err error) {
 	var degraded *services.SessionRevocationDegradedError
-	if errors.Is(err, services.ErrSessionMaxAgeReached) || errors.As(err, &degraded) {
+	if errors.Is(err, services.ErrSessionMaxAgeReached) || errors.Is(err, services.ErrRefreshSessionInactive) || errors.As(err, &degraded) {
 		utils.ClearRefreshTokenCookie(w, cookieName, h.cookieDomain, h.config.Auth.Cookie.Secure)
 	}
 }
@@ -1681,6 +1681,8 @@ func refreshFailureOutcome(err error) string {
 		return "replay_detected"
 	case errors.Is(err, services.ErrSessionMaxAgeReached):
 		return "session_max_age"
+	case errors.Is(err, services.ErrRefreshSessionInactive):
+		return "session_inactive"
 	case errors.Is(err, services.ErrSessionEnforcementUnavailable):
 		return "enforcement_unavailable"
 	case errors.Is(err, services.ErrRefreshLookupUnavailable):
@@ -2006,7 +2008,10 @@ func (h *AuthHandler) RegisterTierMountableRoutes(publicAPI huma.API, protectedA
 
 // writeRefreshErr writes the JSON error for a refresh-flow failure.
 //
-// Six outcomes are deliberately distinct:
+// Seven outcomes are deliberately distinct:
+//   - 401 session_revoked — the row is valid but the session it belongs to
+//     has been terminated (services.ErrRefreshSessionInactive). The same
+//     code RequireAuth emits for the same fact; the cookie is cleared.
 //   - 503 session_enforcement_unavailable — the cap could not be
 //     evaluated or applied because storage failed. NOT a 401: reporting
 //     an outage as an authentication failure would train clients to
@@ -2087,6 +2092,12 @@ func writeRefreshErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, services.ErrSessionMaxAgeReached):
 		body["code"] = "session_max_age_reached"
 		body["detail"] = "session reached its maximum age — please sign in again"
+	case errors.Is(err, services.ErrRefreshSessionInactive):
+		// The same code RequireAuth emits for the same fact, so both SPAs'
+		// terminal-401 handling already covers it. The cookie is cleared
+		// by clearRefreshCookieOnTerminalRefreshErr: the session is gone.
+		body["code"] = "session_revoked"
+		body["detail"] = "this session has been revoked; please sign in again"
 	case errors.Is(err, services.ErrRefreshTokenReplay):
 		body["code"] = "refresh_token_replay"
 		body["detail"] = "refresh token reuse detected — session revoked"

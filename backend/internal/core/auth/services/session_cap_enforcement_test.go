@@ -203,11 +203,21 @@ func TestSessionCapExpiry_RevokesFamilyAndSession(t *testing.T) {
 
 func TestSessionCap_DisabledWhenUnset(t *testing.T) {
 	env := newCapEnv(t, "")
+	// Ten years old: any live cap would have expired it. The refresh path
+	// still reads the session's active flag on every call
+	// (refuseTerminatedSession), so the proof that the CAP did not run is
+	// the session surviving, not the store going untouched.
 	_, token := env.seedUserAndSession(t, time.Now().Add(-10*365*24*time.Hour))
-	env.sessions.failEveryGet(t) // an empty cap must skip the query entirely
 
 	if _, err := env.auth.RefreshTokensWithRiskAssessment(context.Background(), token, nil); err != nil {
-		t.Fatalf("cap disabled must not query the session repo or block the refresh: %v", err)
+		t.Fatalf("cap disabled must not block the refresh: %v", err)
+	}
+	sess, _ := env.sessions.GetByUUID(context.Background(), "sess-A")
+	if sess == nil || !sess.IsActive {
+		t.Fatalf("cap disabled must not expire the session: %+v", sess)
+	}
+	if env.sessions.expiryTransitions("sess-A") != 0 {
+		t.Fatal("cap disabled must never attempt the max-age CAS")
 	}
 }
 

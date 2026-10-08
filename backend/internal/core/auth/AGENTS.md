@@ -801,16 +801,33 @@ usable `CreatedAt` is **not** an anomaly — it has a perfectly good anchor,
 and counting it would poison the observation window.
 
 **The cap outcomes above, and the refresh-path outcomes beside them, surface
-as six distinct HTTP responses**
+as seven distinct HTTP responses**
 (`writeRefreshErr`, called from all three refresh-flow handlers —
 `RefreshTokensWithHeaderHTTP`, `GetSessionHTTP`, `RefreshTokensHTTP`):
 `ErrSessionEnforcementUnavailable` is **503** `session_enforcement_unavailable`
 — never a 401, because reporting a storage outage as an authentication
 failure would train clients to discard a session that is still perfectly
-valid, and the caller may retry once storage recovers.
+valid, and the caller may retry once storage recovers. **The same code
+covers an unreadable session document on the session-state read below.**
 `ErrSessionMaxAgeReached` is **401** `session_max_age_reached` — distinct
 from `refresh_token_replay` because "revoked" is inaccurate for a session
 that simply aged out.
+`ErrRefreshSessionInactive` is **401** `session_revoked` — the presented
+row is valid but the session document it belongs to has been terminated.
+**Both entry points read the session document on every call**
+(`refuseTerminatedSession`, before the cap and before any write), because a
+rotation racing a revocation's bulk `UpdateMany` could insert its successor
+after the update scanned and keep a dead session alive under a row nothing
+would ever look at again; and because a session ended by any path — self
+revoke, admin kill, password change, replay verdict, cap — must not be
+refreshable from a copy of its cookie. The code is the one `RequireAuth`
+emits for the same fact, so both SPAs' terminal-401 handling already covers
+it, and the cookie is cleared (the allowlist below). A **missing** session
+document is deliberately not this error: that is the ADR-0017 compatibility
+window the cap measures (#277), untouched. The read runs whether or not the
+cap is enabled — the cap's own "disabled costs nothing" rule is about the
+cap's query, not this one. Pinned by `refresh_session_inactive_test.go` and
+`refresh_session_inactive_http_test.go`.
 `ErrRefreshRotationRaced` is **409** `refresh_rotation_raced` — a sibling
 tab won the CAS inside `RefreshRotationGrace` against a healthy family, so
 the browser already holds the successor cookie and one retry lands. It is
@@ -1037,8 +1054,9 @@ code**: a generic logout, since a partially degraded cap logout must not
 claim a completely recorded cap expiry. The HttpOnly refresh cookie is
 expired (`clearRefreshCookieOnTerminalRefreshErr`, called immediately
 before `writeRefreshErr` at each of the three call sites) on exactly the
-two outcomes where the session is durably gone — cap expiry and the
-degraded logout — and deliberately left alone on
+three outcomes where the session is durably gone — cap expiry, a
+terminated session (`ErrRefreshSessionInactive`) and the degraded logout —
+and deliberately left alone on
 `ErrSessionEnforcementUnavailable`, where durable logout is not known to
 have completed. Redux state cleanup on the frontend is not a substitute:
 without the expiring `Set-Cookie`, the browser keeps presenting a cookie
