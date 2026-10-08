@@ -1929,14 +1929,70 @@ func (s *authService) benignRotationRetry(ctx context.Context, doc *models.Refre
 	return !revoked, nil
 }
 
+// handleRefreshReplay is the consequence of a replay VERDICT: the family is
+// revoked, the SESSION the row belonged to is terminated (refresh rows,
+// session document, sid denylist — the same three steps every other
+// revocation path runs), and a security-event row names the user.
+//
+// The session half used to be missing. Revoking the family alone left the
+// attacker who provoked the replay — by exfiltrating the cookie and rotating
+// it — holding an access token that stayed valid until its exp, a session
+// that still read "active" in /me/sessions, and no durable record for an
+// operator to act on. Each consequence is independent: a failed session
+// step or a degraded denylist is logged, never surfaced, because the wire
+// answer is the verdict (ErrRefreshTokenReplay) and the family is already
+// dead. The log carries outcome classifiers only — no identifier, no
+// address, no error text (refresh_replay_logging_test.go).
 func (s *authService) handleRefreshReplay(ctx context.Context, doc *models.RefreshTokenDoc, securityCtx *models.SecurityContext, kind string) {
 	revoked, err := s.refreshTokenRepo.RevokeFamily(ctx, doc.FamilyID, models.RevokeReasonReplayDetected)
+
+	sessionOutcome := "terminated"
+	if serr := s.revokeSessionInternal(ctx, doc.SessionUUID, models.RevokeReasonReplayDetected); serr != nil {
+		var degraded *SessionRevocationDegradedError
+		if errors.As(serr, &degraded) {
+			sessionOutcome = "denylist_degraded"
+		} else {
+			sessionOutcome = errorOutcome(serr)
+		}
+	}
+	s.recordReplayEvent(ctx, doc, securityCtx, kind)
+
 	logger := slogDefault()
 	logger.Warn("refresh_token_replay",
 		"revokedCount", revoked,
 		"kind", kind,
 		"outcome", errorOutcome(err),
+		"session_outcome", sessionOutcome,
 	)
+}
+
+// recordReplayEvent writes the auth_security_events row for a detected
+// replay. Modelled on recordSessionCapEvent: nil-safe, never propagates —
+// durable state is already revoked, so a failed insert cannot restore
+// anything — and logs the failure without identifiers. The IP is the
+// presenting request's (the replayer's), falling back to the context's.
+// Metadata carries the replay kind only; never token material.
+func (s *authService) recordReplayEvent(ctx context.Context, doc *models.RefreshTokenDoc, securityCtx *models.SecurityContext, kind string) {
+	if s.securityEventRepo == nil || doc == nil || doc.UserUUID == "" {
+		return
+	}
+	ctxIP, _ := ipFromCtx(ctx)
+	event := &models.SecurityEvent{
+		UserUUID:    doc.UserUUID,
+		EventType:   "refresh_token_replay",
+		Severity:    "critical",
+		Description: "refresh token reuse detected; token family and session revoked",
+		IPAddress:   nonEmpty(securityCtxIP(securityCtx), ctxIP),
+		DeviceID:    doc.DeviceID,
+		SessionID:   doc.SessionUUID,
+		Success:     false,
+		Metadata:    map[string]interface{}{"kind": kind},
+		Timestamp:   time.Now().UTC(),
+	}
+	if err := s.securityEventRepo.Insert(ctx, event); err != nil {
+		slogDefault().WarnContext(ctx, "refresh replay: security event persist failed",
+			slog.String("outcome", "store_error"))
+	}
 }
 
 // securityCtxIP safely extracts an IP from a possibly-nil context.
