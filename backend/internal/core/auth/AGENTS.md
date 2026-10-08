@@ -47,7 +47,7 @@ Declared in `module.go::Collections()`. Collection name constants live in `model
 | Collection | Indexes | TTL |
 |---|---|---|
 | `operator_oauth_providers` / `client_oauth_providers` | compound `(userUuid, provider)` unique | — |
-| `operator_refresh_tokens` / `client_refresh_tokens` | `uuid` unique, `userUuid`, `familyId` | — (application sweep, not a TTL index: bounded per-cycle progress and backlog telemetry are required for the first cleanup of an upgraded install, and a TTL index provides neither) |
+| `operator_refresh_tokens` / `client_refresh_tokens` | `uuid` unique, `userUuid`, `familyId`, `token` (the sha256 every refresh entry point looks up by — non-unique; uniqueness is the M-9 follow-up) | — (application sweep, not a TTL index: bounded per-cycle progress and backlog telemetry are required for the first cleanup of an upgraded install, and a TTL index provides neither) |
 | `operator_refresh_token_families` / `client_refresh_token_families` | `familyId` unique, `expiresAt` | Yes — absolute expiry is the latest token expiry in the family (with a 24h minimum fallback), so the non-PII replay fence survives every refresh token it protects |
 | `operator_sessions` / `client_sessions` | `uuid` unique, `expiresAt` (TTL via ExpireAt) | Yes — `expiresAt` is the 90-day retention deadline (`models.AuthSessionRetention`) |
 | `auth_security_events` | (none declared) | — — single non-tier-split (audit log keyed on userUUID alone) |
