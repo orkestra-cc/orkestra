@@ -418,6 +418,13 @@ func main() {
 	// has registered routes.
 	apiConfig := huma.DefaultConfig("Orkestra API", "1.0.0")
 	apiConfig.DocsPath = ""
+	// Error bodies: outside development a 5xx carries the handler's own
+	// detail and nothing else. Huma would otherwise serialise every wrapped
+	// error — Redis and Mongo dial errors included — into errors[].message
+	// for anonymous callers. Installed on the shared config so both audience
+	// surfaces and every module sub-router inherit it.
+	apiConfig.Transformers = append(apiConfig.Transformers,
+		errors.HumaErrorDetailPolicy(cfg.IsProductionLike(), logger))
 	apiConfig.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
 		"bearerAuth": {
 			Type:         "http",
