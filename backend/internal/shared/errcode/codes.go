@@ -68,6 +68,23 @@ const AuthPasswordAlreadySet = "auth.password_already_set"
 // is not enabled for the surface the request came in on. 403.
 const AuthOAuthProviderDisabled = "auth.oauth_provider_disabled"
 
+// AuthOAuthStoreUnavailable signals that the OAuth identity store could
+// not answer (migration 0010 not run here, or the store is unreachable).
+// Retryable; never a fall-through into auto-link or signup. 503.
+const AuthOAuthStoreUnavailable = "auth.oauth_store_unavailable"
+
+// AuthOAuthIdentityUnlinked signals that the presented OAuth identity was
+// unlinked from its account: sign in another way and re-link it. 403.
+const AuthOAuthIdentityUnlinked = "auth.oauth_identity_unlinked"
+
+// AuthOAuthIdentityConflict signals that the presented OAuth identity is
+// owned by a different account. 409.
+const AuthOAuthIdentityConflict = "auth.oauth_identity_conflict"
+
+// AuthOAuthProviderAlreadyLinked signals that the account already has a
+// different identity of this provider linked. 409.
+const AuthOAuthProviderAlreadyLinked = "auth.oauth_provider_already_linked"
+
 // AuthPolicyUnavailable signals that an admin-managed sign-in policy — or
 // the auth configuration document it lives in — could not be read or
 // parsed. The decision fails closed, never open, so the caller retries

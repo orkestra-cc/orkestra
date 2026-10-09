@@ -25,6 +25,10 @@ func (r *inactiveOAuthRepo) GetByProviderAndID(context.Context, authModels.OAuth
 	return r.linked, nil
 }
 
+func (r *inactiveOAuthRepo) GetByProviderAndIDIncludingUnlinked(context.Context, authModels.OAuthProvider, string) (*authModels.OAuthProviderDoc, error) {
+	return r.linked, nil
+}
+
 func (r *inactiveOAuthRepo) GetByUserUUID(context.Context, string) ([]*authModels.OAuthProviderDoc, error) {
 	return nil, nil
 }

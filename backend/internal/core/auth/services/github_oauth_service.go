@@ -343,6 +343,9 @@ func (s *githubOAuthService) SupportsRefreshTokens() bool {
 	return false // GitHub tokens don't expire
 }
 
+// SupportsPKCE — GitHub: false until the staging round-trip of §7 proves the token endpoint accepts code_verifier (edge case 24).
+func (s *githubOAuthService) SupportsPKCE() bool { return false }
+
 func (s *githubOAuthService) SupportsMobileFlow() bool {
 	return false // GitHub doesn't support ID token validation
 }

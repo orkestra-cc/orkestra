@@ -385,7 +385,11 @@
           "linkDisabled": "An account with this email already exists. Sign in and link the provider from your security settings.",
           "emailUnverified": "The identity provider has not verified this email address, so it cannot be used to sign in.",
           "providerUnavailable": "This sign-in provider is temporarily unavailable. Try again later.",
-          "loginFailed": "Authentication failed. Please try again."
+          "loginFailed": "Authentication failed. Please try again.",
+          "identityUnlinked": "This sign-in method was unlinked from your account. Sign in another way and re-link it from Security.",
+          "identityConflict": "This provider account is already linked to a different user. Sign in to that account, or unlink it there first.",
+          "storeUnavailable": "Social sign-in is temporarily unavailable. Try again in a moment, or sign in another way.",
+          "providerAlreadyLinked": "Your account already has a different identity from this provider linked. Sign in with that one, or unlink it from Security first."
         }
       }
     },

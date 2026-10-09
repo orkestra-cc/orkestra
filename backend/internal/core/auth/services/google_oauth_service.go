@@ -189,57 +189,14 @@ func (s *googleOAuthService) RefreshAccessToken(ctx context.Context, refreshToke
 
 // Mobile authentication flow (ID token validation)
 func (s *googleOAuthService) ValidateIDToken(ctx context.Context, request *IDTokenValidationRequest) (*UserInfo, error) {
-	// Parse the JWT without verification to get the header
-	token, _, err := jwt.NewParser().ParseUnverified(request.IDToken, jwt.MapClaims{})
+	claims, err := validateIDTokenClaims(ctx, models.OAuthProviderGoogle, request, GoogleIDTokenIssuers, s.getGooglePublicKey)
 	if err != nil {
-		return nil, NewProviderError(models.OAuthProviderGoogle, "id_token_validation", ErrInvalidTokenFormat)
-	}
-
-	// Get the key ID from the header
-	kid, ok := token.Header["kid"].(string)
-	if !ok {
-		return nil, NewProviderError(models.OAuthProviderGoogle, "id_token_validation", fmt.Errorf("missing kid in token header"))
-	}
-
-	// Get Google's public keys
-	publicKey, err := s.getGooglePublicKey(ctx, kid)
-	if err != nil {
-		return nil, NewProviderError(models.OAuthProviderGoogle, "id_token_validation", err)
-	}
-
-	// Verify the token
-	parsedToken, err := jwt.Parse(request.IDToken, func(token *jwt.Token) (interface{}, error) {
-		// Verify signing method
-		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return publicKey, nil
-	})
-
-	if err != nil {
-		// Token validation error - could be expired or malformed
-		return nil, NewProviderError(models.OAuthProviderGoogle, "id_token_validation", fmt.Errorf("token validation failed: %w", err))
-	}
-
-	if !parsedToken.Valid {
-		return nil, NewProviderError(models.OAuthProviderGoogle, "id_token_validation", ErrInvalidIDToken)
-	}
-
-	claims, ok := parsedToken.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, NewProviderError(models.OAuthProviderGoogle, "id_token_validation", fmt.Errorf("invalid claims format"))
-	}
-
-	// Validate audience if specified
-	if request.Audience != "" {
-		aud, _ := claims["aud"].(string)
-		if aud != request.Audience {
-			return nil, NewProviderError(models.OAuthProviderGoogle, "id_token_validation", fmt.Errorf("invalid audience"))
-		}
+		return nil, err
 	}
 
 	// Extract user information
 	userInfo := &UserInfo{
+		Nonce:         getStringClaim(claims, "nonce"),
 		ProviderID:    getStringClaim(claims, "sub"),
 		Email:         getStringClaim(claims, "email"),
 		EmailVerified: getBoolClaim(claims, "email_verified"),
@@ -370,6 +327,9 @@ func (s *googleOAuthService) GetSupportedGrantTypes() []string {
 func (s *googleOAuthService) SupportsRefreshTokens() bool {
 	return true
 }
+
+// SupportsPKCE — PKCE proven against Google's token endpoint (S256).
+func (s *googleOAuthService) SupportsPKCE() bool { return true }
 
 func (s *googleOAuthService) SupportsMobileFlow() bool {
 	return true

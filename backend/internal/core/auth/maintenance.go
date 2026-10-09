@@ -2,6 +2,10 @@ package auth
 
 import (
 	"context"
+	"fmt"
+	"github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
+	"go.mongodb.org/mongo-driver/mongo"
 	"log/slog"
 	"time"
 
@@ -72,6 +76,43 @@ func (m *AuthModule) Start(ctx context.Context) error {
 	// or won the lease.
 	m.mailDispatcher.Start()
 
+	// Migration 0010 is what guarantees the (provider, providerId) unique
+	// index on an existing install; ensureCollections is create-only and
+	// non-fatal, so it cannot be relied on. The ownership-first link flow
+	// DETECTS a conflict by the duplicate key this index produces —
+	// without it, two users would silently share an identity again.
+	//
+	// Never a boot failure: auth is a core module and StartAll propagates
+	// its error to log.Fatalf. Degrade OAuth instead, loudly, and re-check
+	// on every Start so an admin module restart after the migration lifts
+	// the degradation without a redeploy.
+	if m.logger == nil {
+		m.logger = slog.Default()
+	}
+	if err := m.verifyOAuthIdentityIndex(ctx); err != nil {
+		m.oauthIndexMissing.Store(true)
+		m.logger.Error("auth: the OAuth identity unique index is missing — OAuth is degraded until migration 0010 has run",
+			slog.String("error", err.Error()))
+	} else {
+		m.oauthIndexMissing.Store(false)
+	}
+
+	// First-admin sentinel backfill.
+	//
+	// D30's tier guard protects a FRESH install. An install upgraded from
+	// before the sentinel existed has an administrator and an UNCLAIMED
+	// sentinel, so the next operator-tier OAuth signup would still win
+	// it. Claiming it on behalf of the existing super_admin closes that.
+	//
+	// No migration script: one idempotent query and one $setOnInsert
+	// upsert per boot, and Start runs before ListenAndServe, so no
+	// request can reach the callback first. Concurrent replicas converge.
+	//
+	// Errors log ERROR and Start still returns nil — auth is a core
+	// module, the client tier is already closed by D30, and the next boot
+	// retries.
+	m.backfillFirstAdminSentinel(ctx)
+
 	if len(m.sweepTiers) == 0 || m.sweepLease == nil {
 		// Nothing to sweep, or Redis did not satisfy the lease contract
 		// at Init. Maintenance is skipped; authentication is untouched.
@@ -104,6 +145,54 @@ func (m *AuthModule) Start(ctx context.Context) error {
 	m.sweepDone = done
 	go m.tokenSweepLoop(sweepCtx, done, sweepStartupDelay, services.LeaseRenewInterval, services.LeaseRetryInterval)
 	return nil
+}
+
+// backfillFirstAdminSentinel claims the sentinel for the oldest existing
+// super_admin (spec §4.7 D31). Nothing to do on a fresh install.
+func (m *AuthModule) backfillFirstAdminSentinel(ctx context.Context) {
+	if m.firstAdminClaimer == nil {
+		return
+	}
+
+	uuid, found := "", false
+	if m.roleHolderFinder != nil {
+		u, f, err := m.roleHolderFinder.FindOldestUserWithRole(ctx, "super_admin")
+		if err != nil {
+			m.logger.Error("auth: first-admin sentinel backfill lookup failed",
+				slog.String("error", err.Error()))
+			return
+		}
+		uuid, found = u, f
+	} else if m.operatorUsers != nil {
+		// A fork's provider that predates the seam. The placeholder is
+		// safe by the sentinel's own contract: nothing reads its
+		// userUUID back (shared/setup/service.go), and Release deletes
+		// only a MATCHING uuid (systeminit/firstadmin.go), so no signup
+		// rollback can ever remove it.
+		n, err := m.operatorUsers.GetUserCount(ctx, &iface.UserFilters{Role: "super_admin"})
+		if err != nil {
+			m.logger.Error("auth: first-admin sentinel backfill count failed",
+				slog.String("error", err.Error()))
+			return
+		}
+		if n > 0 {
+			uuid, found = "legacy-backfill", true
+		}
+	}
+
+	if !found {
+		return // fresh install: nothing to backfill
+	}
+	claimed, err := m.firstAdminClaimer.ClaimFirstAdmin(ctx, uuid)
+	if err != nil {
+		m.logger.Error("auth: first-admin sentinel backfill claim failed",
+			slog.String("user_uuid", uuid), slog.String("error", err.Error()))
+		return
+	}
+	if claimed {
+		m.logger.Info("first-admin sentinel backfilled",
+			slog.String("user_uuid", uuid), slog.String("source", "backfill"))
+	}
 }
 
 // Stop cancels the sweep loop and waits for it to exit, releasing the
@@ -327,4 +416,96 @@ func errOutcome(err error) string {
 		return "renew_error"
 	}
 	return "not_owner"
+}
+
+// oauthIdentityIndexName is the name migration 0010 gives the unique
+// (provider, providerId) index — and the name the registry's create-only
+// ensureCollections produces from the ordered spec on a fresh install.
+const oauthIdentityIndexName = "provider_1_providerId_1"
+
+// indexSpec is what the boot check reads about one index: its name and
+// whether it is unique. The name alone proves nothing — a plain
+// createIndex({provider:1, providerId:1}) auto-generates the migration's
+// name WITHOUT the unique option, and ensureCollections only logs that
+// drift — so uniqueness is read, not inferred.
+type indexSpec struct {
+	Name   string
+	Unique bool
+}
+
+// indexLister is the narrow read the boot check needs.
+type indexLister interface {
+	ListIndexes(ctx context.Context, collection string) ([]indexSpec, error)
+}
+
+// verifyOAuthIdentityIndex reports an error naming the first provider
+// collection on which the unique (provider, providerId) index is absent, or
+// whose index list could not be read — an unreadable list must never read
+// as present. Nil when both collections carry it.
+func (m *AuthModule) verifyOAuthIdentityIndex(ctx context.Context) error {
+	if m.indexLister == nil {
+		return fmt.Errorf("oauth identity index check: no index lister wired")
+	}
+	for _, collection := range []string{models.OperatorOAuthProvidersCollection, models.ClientOAuthProvidersCollection} {
+		specs, err := m.indexLister.ListIndexes(ctx, collection)
+		if err != nil {
+			return fmt.Errorf("oauth identity index check: list indexes on %s: %w", collection, err)
+		}
+		var found *indexSpec
+		for i := range specs {
+			if specs[i].Name == oauthIdentityIndexName {
+				found = &specs[i]
+				break
+			}
+		}
+		if found == nil {
+			return fmt.Errorf("oauth identity index check: %s has no %s index — run migration 0010", collection, oauthIdentityIndexName)
+		}
+		if !found.Unique {
+			return fmt.Errorf("oauth identity index check: %s index %s is not unique — drop it and run migration 0010", collection, oauthIdentityIndexName)
+		}
+	}
+	return nil
+}
+
+// HealthCheck implements module.HealthCheckable. The module is degraded —
+// not down — while the OAuth identity index is missing: every non-OAuth
+// flow keeps working, and the /admin/modules/health view says why social
+// sign-in answers oauth_store_unavailable.
+func (m *AuthModule) HealthCheck(ctx context.Context) error {
+	if m.oauthIndexMissing.Load() {
+		return fmt.Errorf("degraded: the OAuth identity unique index (%s) is missing on a provider collection — run migration 0010 and restart the module", oauthIdentityIndexName)
+	}
+	return nil
+}
+
+// oauthStoreDegraded is the probe module.go wires into both tier services
+// (SetOAuthStoreGate). Read live on every OAuth request, so a module
+// restart after the migration lifts the degradation.
+func (m *AuthModule) oauthStoreDegraded() bool { return m.oauthIndexMissing.Load() }
+
+// mongoIndexLister is the production indexLister: the module database.
+type mongoIndexLister struct{ db *mongo.Database }
+
+func (l mongoIndexLister) ListIndexes(ctx context.Context, collection string) ([]indexSpec, error) {
+	if l.db == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	cur, err := l.db.Collection(collection).Indexes().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	var specs []indexSpec
+	for cur.Next(ctx) {
+		var spec struct {
+			Name   string `bson:"name"`
+			Unique bool   `bson:"unique"`
+		}
+		if err := cur.Decode(&spec); err != nil {
+			return nil, err
+		}
+		specs = append(specs, indexSpec{Name: spec.Name, Unique: spec.Unique})
+	}
+	return specs, cur.Err()
 }

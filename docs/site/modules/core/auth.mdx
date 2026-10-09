@@ -10,7 +10,7 @@ Every way a caller proves who it is: email/password (argon2id), OAuth 2.1, MFA, 
 ## What it owns
 
 - **Email + password** — argon2id in PHC format (OWASP 2025 params), transparent rehash on login when the stored hash is weaker than the current default.
-- **OAuth 2.1** — Google, Apple, GitHub, and Discord, each independently enable-able per surface, with a web flow and a mobile flow.
+- **OAuth 2.1** — Google, Apple, GitHub, and Discord, each independently enable-able per surface, with a web flow (PKCE sent to the providers proven to accept it) and a two-step mobile flow bound to a server-issued, single-use challenge. One identity has one owner: the provider collection is the source of truth and ownership is written before a session is ever minted.
 - **Tokens and sessions** — RS256 access + refresh JWTs from one key pair, refresh rotation with family replay detection, and a Redis-backed revocation set so logout kills an access token instantly rather than waiting out its TTL.
 - **MFA** — TOTP with backup codes, WebAuthn passkeys, the step-up gate (`RequireStepUp`) that catastrophic actions sit behind, and the [enrolment proof gate](/architecture/authentication-flow#enrolment-proof-gate) (`RequireEnrolmentProof`) that every factor creation or replacement sits behind. Removing or replacing a factor moves the user's **MFA epoch**, which ends the MFA authority of every token they hold — the caller's own included — on its next request; see [Removing or replacing a factor](/architecture/authentication-flow#removing-or-replacing-a-factor).
 - **Device trust** — per-surface trusted-device grants that let a known device skip the second factor.
@@ -160,6 +160,60 @@ operator break-glass restores password login for `POST
 /v1/auth/operator/login` alone, without reopening signups, resets or the
 client surface — see [Going SSO-only](/operating/oauth-providers#going-sso-only)
 for the procedure and the drill.
+
+## OAuth identities
+
+An OAuth identity — one Google account, one GitHub account — has exactly one
+owner. Both provider collections carry a unique index on
+`(provider, providerId)`, created on a fresh install by the module's own
+declaration and on an existing one by **migration 0010**
+(`backend/migrations/20260903_oauth_provider_identity_unique.js`). The
+migration never decides ownership: a duplicate on that pair is one identity
+claimed by two different users, which it reports and refuses until an
+operator names the keeper per identity; every deletion it then makes is
+printed for the change record.
+
+The module verifies that index at every start, by name and by its `unique`
+option (an ordinary index on the same keys carries the same name and
+guarantees nothing). While it is missing or not unique on
+either collection the module's health check reports degraded, naming the
+migration, and every OAuth login and link path answers a retryable
+`oauth_store_unavailable` instead of running the ownership flow without the
+constraint that detects a conflict. Nothing else is affected, and a module
+restart after the migration lifts the degradation.
+
+The provider collection is also what every listing reads: the Security
+page, the admin auth-methods view and the unlink safety check ("would this
+leave the account with no way in?") all count the identities that actually
+exist there, so a link created by a sign-in is visible and can be unlinked
+(unlinking removes the identity row, so it stops signing in at once), and an
+identity that carries an unlink tombstone is neither listed nor counted as a
+way in. A sign-in with a tombstoned identity is refused with
+`oauth_identity_unlinked`, never silently re-linked by the email match: the
+user signs in another way and re-links it from Security. The account itself
+is untouched.
+
+Removing a credential is serialized per account: the "no way in" check and
+the removal run under a short per-account lock, so two removals racing each
+other cannot both pass the check on the other's link and leave nothing. A
+removal that arrives while another one holds the account answers
+`credential_change_in_progress` and can simply be retried; if the lock store
+cannot answer, the removal is refused with `oauth_store_unavailable` rather
+than run unguarded.
+
+Ownership is written before anything else. Every path that attaches an
+identity to an account — a first social sign-in, an automatic link by
+verified email, a link started from Security — records the identity first,
+and only the outcome of that write lets the flow continue: a session is
+never minted for an identity the store has not recorded as that user's. If
+the identity turns out to belong to a different account the sign-in is
+refused with `oauth_identity_conflict`; if your account already has a
+different identity of the same provider, with `oauth_provider_already_linked`;
+if the store cannot answer, with a retryable `oauth_store_unavailable`. A first sign-in that fails halfway
+(the identity reserved, the account not created) is cleaned up on the
+spot, and if that clean-up itself fails the leftover reservation heals on
+the next sign-in with that identity, counted in
+`orkestra_auth_oauth_compensation_failures_total` so an operator sees it.
 
 ## Lockout
 

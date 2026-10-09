@@ -267,6 +267,22 @@ func (r *fakeUserRepo) List(_ context.Context, _ *iface.UserFilters, p *iface.Pa
 func (r *fakeUserRepo) ListWithOptions(_ context.Context, _ bson.M, _ ...*options.FindOptions) ([]*iface.User, error) {
 	return nil, nil
 }
+func (r *fakeUserRepo) FindOldestByRole(_ context.Context, role string) (*iface.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var oldest *iface.User
+	for _, u := range r.users {
+		if u.Role != role || u.DeletedAt != nil {
+			continue
+		}
+		if oldest == nil || u.CreatedAt.Before(oldest.CreatedAt) ||
+			(u.CreatedAt.Equal(oldest.CreatedAt) && u.UUID < oldest.UUID) {
+			oldest = u
+		}
+	}
+	return oldest, nil
+}
+
 func (r *fakeUserRepo) GetByRole(_ context.Context, role string) ([]*iface.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -380,6 +396,9 @@ func (r *fakeOAuthProviderRepo) LinkOAuthProvider(context.Context, string, *auth
 	return nil
 }
 func (r *fakeOAuthProviderRepo) GetByProviderAndID(context.Context, authModels.OAuthProvider, string) (*authModels.OAuthProviderDoc, error) {
+	return nil, nil
+}
+func (r *fakeOAuthProviderRepo) GetByProviderAndIDIncludingUnlinked(context.Context, authModels.OAuthProvider, string) (*authModels.OAuthProviderDoc, error) {
 	return nil, nil
 }
 func (r *fakeOAuthProviderRepo) GetPrimaryProvider(context.Context, string) (*authModels.OAuthProviderDoc, error) {

@@ -668,6 +668,21 @@ func (s *userService) GetUserByOAuthLink(ctx context.Context, provider iface.OAu
 	return user, nil
 }
 
+// FindOldestUserWithRole implements iface.SystemRoleHolderFinder for the
+// auth module's first-admin sentinel backfill (spec §4.7 D31): one
+// deterministic repository query, deleted users excluded, deactivated
+// ones included.
+func (s *userService) FindOldestUserWithRole(ctx context.Context, role string) (string, bool, error) {
+	u, err := s.userRepo.FindOldestByRole(ctx, role)
+	if err != nil {
+		return "", false, fmt.Errorf("find oldest %s: %w", role, err)
+	}
+	if u == nil {
+		return "", false, nil
+	}
+	return u.UUID, true, nil
+}
+
 // CreateUserFromOAuth creates a new user from OAuth data
 func (s *userService) CreateUserFromOAuth(ctx context.Context, input *iface.CreateUserInput) (*iface.User, error) {
 	if input == nil {
@@ -693,6 +708,13 @@ func (s *userService) CreateUserFromOAuth(ctx context.Context, input *iface.Crea
 
 	// Create user model
 	user := iface.NewUser()
+	// The caller may pre-mint the uuid: the auth module claims the
+	// first-admin sentinel with the uuid it is ABOUT to create, and a
+	// rollback Release deletes only a matching uuid — the sentinel and
+	// the account must agree (spec §4.7 D30, as CreateUserWithPassword).
+	if input.UUID != "" {
+		user.UUID = input.UUID
+	}
 	user.Email = input.Email
 	user.Username = input.Username
 	user.FullName = input.FullName

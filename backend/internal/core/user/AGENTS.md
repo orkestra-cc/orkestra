@@ -104,7 +104,8 @@ The companion tier-aware MFA reset is mounted by the auth module at `POST /v1/ad
 Key method groups:
 
 - **Identity / lookup** — `GetUserByID`, `GetUserByEmail`, `GetUserForAuth` (includes password hash + lockout fields; auth-only), `GetUserCount`
-- **Creation** — `CreateUserWithPassword` (called by password signup), `CreateUserFromOAuth` (called by OAuth flows; honours `CreateUserInput.EmailVerified` so an IdP-verified email lands as verified without re-asking the user)
+- **Creation** — `CreateUserWithPassword` (called by password signup), `CreateUserFromOAuth` (called by OAuth flows; honours a caller-supplied `CreateUserInput.UUID` — the auth module pre-mints it for the first-admin sentinel, spec §4.7 D30 — and `CreateUserInput.EmailVerified` so an IdP-verified email lands as verified without re-asking the user)
+- **Oldest role holder** — `FindOldestUserWithRole` implements `iface.SystemRoleHolderFinder` for the auth module's first-admin sentinel backfill (spec §4.7 D31): one repository query, `FindOldestByRole` (role, `deletedAt` excluded, `isActive` deliberately unfiltered, sorted `createdAt` asc then `uuid` asc, limit 1), so every replica names the same user. Pinned by `services/user_service_finder_test.go`.
 - **Auth-side mutations** — `UpdatePasswordHash`, `MarkEmailVerified`, `RecordFailedLogin` (optional `lockUntil`), `ClearFailedLogins`, `UpdateUserLastLogin`, `StartMFAGraceIfUnset` (idempotent — preserves an existing clock), `ResetMFAGrace` (unconditionally restarts — used by admin MFA reset), `ClearMFAGrace` (wipe on successful enrollment)
 - **OAuth link management** — `GetUserOAuthLinks`, `AddOAuthLinkToUser`, `RemoveOAuthLinkFromUser`, `SetPrimaryOAuthLink`
 - **General mutation** — `UpdateUser`, `DeleteUser`

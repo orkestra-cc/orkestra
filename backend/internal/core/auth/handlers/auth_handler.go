@@ -283,6 +283,42 @@ func oauthErrorResponseFor(err error) oauthErrorResponse {
 			outcome:    "policy_unavailable",
 		}
 	}
+	if errors.Is(err, services.ErrOAuthStoreUnavailable) {
+		return oauthErrorResponse{
+			status:     http.StatusServiceUnavailable,
+			code:       errcode.AuthOAuthStoreUnavailable,
+			humaDetail: "Social sign-in is temporarily unavailable; try again shortly",
+			rawDetail:  "Social sign-in is temporarily unavailable; try again shortly",
+			outcome:    "store_unavailable",
+		}
+	}
+	if errors.Is(err, services.ErrOAuthIdentityUnlinked) {
+		return oauthErrorResponse{
+			status:     http.StatusForbidden,
+			code:       errcode.AuthOAuthIdentityUnlinked,
+			humaDetail: "This sign-in method was unlinked from your account; sign in another way and re-link it",
+			rawDetail:  "This sign-in method was unlinked from your account; sign in another way and re-link it",
+			outcome:    "identity_unlinked",
+		}
+	}
+	if errors.Is(err, services.ErrOAuthIdentityClaimedByOther) {
+		return oauthErrorResponse{
+			status:     http.StatusConflict,
+			code:       errcode.AuthOAuthIdentityConflict,
+			humaDetail: "This provider account is already linked to a different user",
+			rawDetail:  "This provider account is already linked to a different user",
+			outcome:    "identity_conflict",
+		}
+	}
+	if errors.Is(err, services.ErrOAuthLinkAlreadyExists) {
+		return oauthErrorResponse{
+			status:     http.StatusConflict,
+			code:       errcode.AuthOAuthProviderAlreadyLinked,
+			humaDetail: "This account already has a different identity from this provider linked",
+			rawDetail:  "This account already has a different identity from this provider linked",
+			outcome:    "provider_already_linked",
+		}
+	}
 	return oauthErrorResponse{
 		status:     http.StatusInternalServerError,
 		humaDetail: "Failed to process authentication",
@@ -521,11 +557,27 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
 	}
 
+	provider, err := h.oauthFactory.CreateProvider(req.Body.Provider, cfg)
+	if err != nil {
+		logger.Error("oauth initiation failed", slog.String("outcome", "provider_construct_failed"))
+		return nil, huma.Error500InternalServerError("OAuth not available", err)
+	}
+	// PKCE (spec §4.9 D34): the verifier lives in the state row, the
+	// S256 challenge goes to the provider, and the callback threads the
+	// stored verifier into the exchange. Only for providers PROVEN to
+	// accept it; the others get neither — exactly the pre-D34 request.
+	codeVerifier, codeChallenge, err := pkceForProvider(provider)
+	if err != nil {
+		logger.Error("oauth initiation failed", slog.String("outcome", "pkce_generation_failed"))
+		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
+	}
 	stateRequest := &services.StoreOAuthStateRequest{
 		Provider:       req.Body.Provider,
 		Tier:           h.tier,
 		State:          csrf,
 		RedirectURI:    frontendRedirectURL,
+		CodeVerifier:   codeVerifier,
+		CodeChallenge:  codeChallenge,
 		DeviceInfo:     deviceInfo,
 		ExpiryDuration: 10 * time.Minute,
 	}
@@ -534,15 +586,9 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 		logger.Error("oauth initiation failed", slog.String("outcome", "state_store_failed"))
 		return nil, huma.Error400BadRequest("Failed to create OAuth state", err)
 	}
-
-	provider, err := h.oauthFactory.CreateProvider(req.Body.Provider, cfg)
-	if err != nil {
-		logger.Error("oauth initiation failed", slog.String("outcome", "provider_construct_failed"))
-		return nil, huma.Error500InternalServerError("OAuth not available", err)
-	}
 	// Non-empty by the structural predicate that just passed.
 	backendCallbackURL := cfg.AdditionalConfig["redirect_url"]
-	authURL := provider.GetAuthURL(signedState, "", backendCallbackURL)
+	authURL := provider.GetAuthURL(signedState, codeChallenge, backendCallbackURL)
 
 	return &OAuthLoginResponse{
 		SetCookie: buildOAuthStateCookie(csrf, h.config.Auth.Cookie.Secure),
@@ -618,11 +664,24 @@ func (h *AuthHandler) InitiateOAuthLink(ctx context.Context, req *OAuthLinkReque
 		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
 	}
 
+	providerSvc, err := h.oauthFactory.CreateProvider(provider, cfg)
+	if err != nil {
+		logger.Error("oauth link initiation failed", slog.String("outcome", "provider_construct_failed"))
+		return nil, huma.Error500InternalServerError("OAuth not available", err)
+	}
+	// PKCE (spec §4.9 D34), as on the login start.
+	codeVerifier, codeChallenge, err := pkceForProvider(providerSvc)
+	if err != nil {
+		logger.Error("oauth link initiation failed", slog.String("outcome", "pkce_generation_failed"))
+		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
+	}
 	stateRequest := &services.StoreOAuthStateRequest{
 		Provider:       provider,
 		Tier:           h.tier,
 		State:          csrf,
 		RedirectURI:    frontendRedirectURL,
+		CodeVerifier:   codeVerifier,
+		CodeChallenge:  codeChallenge,
 		ExpiryDuration: 10 * time.Minute,
 		Mode:           services.OAuthStateModeLink,
 		LinkUserUUID:   userUUID,
@@ -631,15 +690,9 @@ func (h *AuthHandler) InitiateOAuthLink(ctx context.Context, req *OAuthLinkReque
 		logger.Error("oauth link initiation failed", slog.String("outcome", "state_store_failed"))
 		return nil, huma.Error400BadRequest("Failed to create OAuth state", err)
 	}
-
-	providerSvc, err := h.oauthFactory.CreateProvider(provider, cfg)
-	if err != nil {
-		logger.Error("oauth link initiation failed", slog.String("outcome", "provider_construct_failed"))
-		return nil, huma.Error500InternalServerError("OAuth not available", err)
-	}
 	// Non-empty by the structural predicate that just passed.
 	backendCallbackURL := cfg.AdditionalConfig["redirect_url"]
-	authURL := providerSvc.GetAuthURL(signedState, "", backendCallbackURL)
+	authURL := providerSvc.GetAuthURL(signedState, codeChallenge, backendCallbackURL)
 
 	return &OAuthLoginResponse{
 		SetCookie: buildOAuthStateCookie(csrf, h.config.Auth.Cookie.Secure),
@@ -1222,8 +1275,8 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 // MobileGoogleAuthRequest represents the request from mobile app with Google tokens
 type MobileGoogleAuthRequest struct {
 	Body struct {
-		IDToken     string `json:"id_token" form:"id_token" doc:"Google ID token from mobile app"`
-		AccessToken string `json:"access_token,omitempty" form:"access_token" doc:"Google access token from mobile app"`
+		IDToken      string `json:"id_token" form:"id_token" doc:"Google ID token from the platform sign-in SDK, minted with the nonce that begin answered"`
+		CodeVerifier string `json:"code_verifier" form:"code_verifier" doc:"PKCE verifier whose S256 challenge was committed at begin"`
 	}
 }
 
@@ -1244,221 +1297,17 @@ type MobileGoogleAuthResponse struct {
 	}
 }
 
-// HandleMobileGoogleAuth handles Google authentication from mobile apps
-func (h *AuthHandler) HandleMobileGoogleAuth(ctx context.Context, req *MobileGoogleAuthRequest) (*MobileGoogleAuthResponse, error) {
-	logger := slog.Default()
-
-	if err := h.oauthProviderAllowed(ctx, "google"); err != nil {
-		return nil, err
-	}
-
-	// Extract device info from context
-	var deviceInfo *models.DeviceInfo
-	var ipAddress string = "unknown"
-	if di := ctx.Value("deviceInfo"); di != nil {
-		if d, ok := di.(*types.DeviceInfo); ok {
-			deviceInfo = &models.DeviceInfo{
-				DeviceID:    d.DeviceID,
-				DeviceType:  d.DeviceType,
-				Platform:    d.Platform,
-				UserAgent:   d.UserAgent,
-				Fingerprint: d.Fingerprint,
-			}
-			ipAddress = d.IP // Get IP from types.DeviceInfo
-		}
-	}
-	securityCtx := &models.SecurityContext{
-		IPAddress: ipAddress,
-		Timestamp: time.Now(),
-	}
-
-	// Get Google OAuth provider from live admin-panel config.
-	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderGoogle)
-	if err != nil {
-		logger.Error("mobile oauth failed", slog.String("provider", "google"), slog.String("outcome", "provider_unavailable"))
-		return nil, huma.Error500InternalServerError("Google OAuth not configured", err)
-	}
-
-	// Validate ID token and get user info. The audience is the platform-specific
-	// client ID registered in Google Console for the mobile app.
-	audience := h.oauthResolver.MobileAudience(ctx, models.OAuthProviderGoogle, "android")
-	validationRequest := &services.IDTokenValidationRequest{
-		IDToken:     req.Body.IDToken,
-		AccessToken: req.Body.AccessToken,
-		Audience:    audience,
-	}
-
-	userInfo, err := provider.ValidateIDToken(ctx, validationRequest)
-	if err != nil {
-		logger.Warn("mobile oauth failed", slog.String("provider", "google"), slog.String("outcome", "invalid_id_token"))
-		return nil, huma.Error401Unauthorized("Invalid Google ID token", err)
-	}
-
-	// Convert userInfo to map for auth service
-	userInfoMap := map[string]interface{}{
-		"email":          userInfo.Email,
-		"name":           userInfo.Name,
-		"picture":        userInfo.Picture,
-		"provider_id":    userInfo.ProviderID,
-		"email_verified": userInfo.EmailVerified,
-		"given_name":     userInfo.GivenName,
-		"family_name":    userInfo.FamilyName,
-	}
-
-	// Store OAuth provider tokens if we have an access token
-	var oauthTokens *models.OAuthProviderTokens
-	if req.Body.AccessToken != "" {
-		oauthTokens = &models.OAuthProviderTokens{
-			AccessToken: req.Body.AccessToken,
-			TokenType:   "Bearer",
-		}
-	}
-
-	// Use auth service to handle user creation/update and generate JWT tokens
-	tokenResponse, err := h.authService.HandleOAuthCallbackWithLinking(
-		ctx,
-		models.OAuthProviderGoogle,
-		userInfoMap,
-		oauthTokens,
-		securityCtx,
-		deviceInfo,
-	)
-	if err != nil {
-		logOAuthAuthenticationFailure(models.OAuthProviderGoogle, oauthErrorResponseFor(err).outcome)
-		return nil, mapOAuthError(err)
-	}
-
-	// Prepare response
-	response := &MobileGoogleAuthResponse{}
-	response.Body.AccessToken = tokenResponse.AccessToken
-	response.Body.RefreshToken = tokenResponse.RefreshToken
-	response.Body.TokenType = "Bearer"
-	response.Body.ExpiresIn = tokenResponse.ExpiresIn
-	response.Body.User.ID = tokenResponse.User.ID
-	response.Body.User.Email = tokenResponse.User.Email
-	response.Body.User.Name = tokenResponse.User.FullName // Use FullName instead of Name
-	response.Body.User.Avatar = tokenResponse.User.Avatar
-	response.Body.User.EmailVerified = tokenResponse.User.EmailVerified
-
-	return response, nil
-}
-
 // MobileAppleAuthRequest represents the request from mobile app with Apple ID token
 type MobileAppleAuthRequest struct {
 	Body struct {
-		IDToken     string `json:"id_token" form:"id_token" doc:"Apple ID token from mobile app"`
-		AccessToken string `json:"access_token,omitempty" form:"access_token" doc:"Apple access token from mobile app (optional)"`
+		IDToken      string `json:"id_token" form:"id_token" doc:"Apple ID token from Sign in with Apple, minted with the SHA-256 of the nonce that begin answered"`
+		CodeVerifier string `json:"code_verifier" form:"code_verifier" doc:"PKCE verifier whose S256 challenge was committed at begin"`
 	}
 }
 
 // MobileAppleAuthResponse represents the response to mobile app with JWT tokens
 // Reuses the same structure as Google for consistency
 type MobileAppleAuthResponse = MobileGoogleAuthResponse
-
-// HandleMobileAppleAuth handles Apple authentication from mobile apps
-func (h *AuthHandler) HandleMobileAppleAuth(ctx context.Context, req *MobileAppleAuthRequest) (*MobileAppleAuthResponse, error) {
-	logger := slog.Default()
-
-	if err := h.oauthProviderAllowed(ctx, "apple"); err != nil {
-		return nil, err
-	}
-
-	// Extract device info from context
-	var deviceInfo *models.DeviceInfo
-	var ipAddress string = "unknown"
-	if di := ctx.Value("deviceInfo"); di != nil {
-		if d, ok := di.(*types.DeviceInfo); ok {
-			deviceInfo = &models.DeviceInfo{
-				DeviceID:    d.DeviceID,
-				DeviceType:  d.DeviceType,
-				Platform:    d.Platform,
-				UserAgent:   d.UserAgent,
-				Fingerprint: d.Fingerprint,
-			}
-			ipAddress = d.IP // Get IP from types.DeviceInfo
-		}
-	}
-	securityCtx := &models.SecurityContext{
-		IPAddress: ipAddress,
-		Timestamp: time.Now(),
-	}
-
-	// Get Apple OAuth provider from live admin-panel config.
-	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderApple)
-	if err != nil {
-		logger.Error("mobile oauth failed", slog.String("provider", "apple"), slog.String("outcome", "provider_unavailable"))
-		return nil, huma.Error500InternalServerError("Apple OAuth not configured", err)
-	}
-
-	// Determine audience based on platform — falls back to the web client ID
-	// when the device platform is unknown or the platform-specific ID isn't set.
-	var platform string
-	if deviceInfo != nil {
-		platform = deviceInfo.Platform
-	}
-	audience := h.oauthResolver.MobileAudience(ctx, models.OAuthProviderApple, platform)
-
-	// Validate ID token and get user info
-	validationRequest := &services.IDTokenValidationRequest{
-		IDToken:     req.Body.IDToken,
-		AccessToken: req.Body.AccessToken,
-		Audience:    audience,
-	}
-
-	userInfo, err := provider.ValidateIDToken(ctx, validationRequest)
-	if err != nil {
-		logger.Warn("mobile oauth failed", slog.String("provider", "apple"), slog.String("outcome", "invalid_id_token"))
-		return nil, huma.Error401Unauthorized("Invalid Apple ID token", err)
-	}
-
-	// Convert userInfo to map for auth service
-	userInfoMap := map[string]interface{}{
-		"email":          userInfo.Email,
-		"name":           userInfo.Name,
-		"picture":        userInfo.Picture,
-		"provider_id":    userInfo.ProviderID,
-		"email_verified": userInfo.EmailVerified,
-		"given_name":     userInfo.GivenName,
-		"family_name":    userInfo.FamilyName,
-	}
-
-	// Store OAuth provider tokens if we have an access token
-	var oauthTokens *models.OAuthProviderTokens
-	if req.Body.AccessToken != "" {
-		oauthTokens = &models.OAuthProviderTokens{
-			AccessToken: req.Body.AccessToken,
-			TokenType:   "Bearer",
-		}
-	}
-
-	// Use auth service to handle user creation/update and generate JWT tokens
-	tokenResponse, err := h.authService.HandleOAuthCallbackWithLinking(
-		ctx,
-		models.OAuthProviderApple,
-		userInfoMap,
-		oauthTokens,
-		securityCtx,
-		deviceInfo,
-	)
-	if err != nil {
-		logOAuthAuthenticationFailure(models.OAuthProviderApple, oauthErrorResponseFor(err).outcome)
-		return nil, mapOAuthError(err)
-	}
-
-	// Prepare response
-	response := &MobileAppleAuthResponse{}
-	response.Body.AccessToken = tokenResponse.AccessToken
-	response.Body.RefreshToken = tokenResponse.RefreshToken
-	response.Body.TokenType = "Bearer"
-	response.Body.ExpiresIn = tokenResponse.ExpiresIn
-	response.Body.User.ID = tokenResponse.User.ID
-	response.Body.User.Email = tokenResponse.User.Email
-	response.Body.User.Name = tokenResponse.User.FullName // Use FullName instead of Name
-	response.Body.User.Avatar = tokenResponse.User.Avatar
-	response.Body.User.EmailVerified = tokenResponse.User.EmailVerified
-
-	return response, nil
-}
 
 // RefreshTokensHTTP handles token refresh with cookie support (raw HTTP handler)
 func (h *AuthHandler) RefreshTokensHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1931,11 +1780,29 @@ func (h *AuthHandler) RegisterOAuthStartRoutes(publicAPI huma.API, mount RouteMo
 	}, h.InitiateOAuthLogin)
 
 	huma.Register(publicAPI, huma.Operation{
+		OperationID: mount.OpIDPrefix + "mobile-google-begin",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth" + mount.PathPrefix + "/google/mobile/begin",
+		Summary:     "Begin Google sign-in from a mobile app",
+		Description: "Commit a PKCE S256 code_challenge and receive the nonce to hand to the platform sign-in SDK. The backend holds the nonce against the challenge for ten minutes; completion presents the ID token minted with that nonce plus the verifier.",
+		Tags:        []string{"Authentication", "Mobile"},
+	}, h.HandleMobileGoogleBegin)
+
+	huma.Register(publicAPI, huma.Operation{
+		OperationID: mount.OpIDPrefix + "mobile-apple-begin",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth" + mount.PathPrefix + "/apple/mobile/begin",
+		Summary:     "Begin Apple sign-in from a mobile app",
+		Description: "Commit a PKCE S256 code_challenge and receive the nonce. Sign in with Apple takes the SHA-256 hex of that nonce; the ID token then carries it. Completion presents the ID token plus the verifier.",
+		Tags:        []string{"Authentication", "Mobile"},
+	}, h.HandleMobileAppleBegin)
+
+	huma.Register(publicAPI, huma.Operation{
 		OperationID: mount.OpIDPrefix + "mobile-google-auth",
 		Method:      http.MethodPost,
 		Path:        "/v1/auth" + mount.PathPrefix + "/google/mobile",
 		Summary:     "Authenticate with Google from mobile app",
-		Description: "Validate Google ID token from mobile app and return JWT tokens. Tokens are minted with the audience matching this mount.",
+		Description: "Complete Google sign-in from a mobile app: the ID token minted with the nonce from begin, plus the PKCE verifier. The record is taken once; any miss is one opaque 401. Tokens are minted with the audience matching this mount.",
 		Tags:        []string{"Authentication", "Mobile"},
 	}, h.HandleMobileGoogleAuth)
 
@@ -1944,7 +1811,7 @@ func (h *AuthHandler) RegisterOAuthStartRoutes(publicAPI huma.API, mount RouteMo
 		Method:      http.MethodPost,
 		Path:        "/v1/auth" + mount.PathPrefix + "/apple/mobile",
 		Summary:     "Authenticate with Apple from mobile app",
-		Description: "Validate Apple ID token from mobile app and return JWT tokens. Tokens are minted with the audience matching this mount.",
+		Description: "Complete Apple sign-in from a mobile app: the ID token minted with the hashed nonce from begin, plus the PKCE verifier. The record is taken once; any miss is one opaque 401. Tokens are minted with the audience matching this mount.",
 		Tags:        []string{"Authentication", "Mobile"},
 	}, h.HandleMobileAppleAuth)
 }

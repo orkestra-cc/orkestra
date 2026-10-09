@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/auth/models"
@@ -10,6 +12,31 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+// ErrOAuthIdentityDuplicate wraps the unique-index violation on
+// (provider, providerId). Under that index a duplicate means one thing:
+// this identity is already recorded, and the caller must re-read to find
+// out whose it is.
+var ErrOAuthIdentityDuplicate = errors.New("oauth identity already recorded")
+
+// ErrOAuthProviderAlreadyLinked wraps the unique-index violation on
+// (userUuid, provider): this user already has an identity of this
+// provider — a different one. Not an ownership question.
+var ErrOAuthProviderAlreadyLinked = errors.New("oauth provider already linked to this user")
+
+// duplicateKeySentinel maps a Mongo duplicate-key error to the sentinel of
+// the index it violated. The provider collections carry two unique
+// indexes: (provider, providerId) — the identity — and (userUuid,
+// provider) — one identity per provider per user. Only the first is an
+// ownership question; the second is "already linked". An unrecognised
+// index falls back to the identity sentinel: the caller's re-read then
+// decides, and a miss there is a refusal, never a silent continue.
+func duplicateKeySentinel(err error) error {
+	if err != nil && strings.Contains(err.Error(), "userUuid") {
+		return ErrOAuthProviderAlreadyLinked
+	}
+	return ErrOAuthIdentityDuplicate
+}
 
 // OAuthProviderRepository handles OAuth provider data operations
 type OAuthProviderRepository interface {
@@ -19,6 +46,10 @@ type OAuthProviderRepository interface {
 
 	// Find providers
 	GetByProviderAndID(ctx context.Context, provider models.OAuthProvider, providerID string) (*models.OAuthProviderDoc, error)
+	// GetByProviderAndIDIncludingUnlinked also returns a tombstoned row
+	// (UnlinkedAt != nil) — for callers that must tell "unlinked" apart
+	// from "never seen".
+	GetByProviderAndIDIncludingUnlinked(ctx context.Context, provider models.OAuthProvider, providerID string) (*models.OAuthProviderDoc, error)
 	GetByUserUUID(ctx context.Context, userUUID string) ([]*models.OAuthProviderDoc, error)
 	GetPrimaryProvider(ctx context.Context, userUUID string) (*models.OAuthProviderDoc, error)
 
@@ -80,14 +111,14 @@ func (r *oauthProviderRepository) CreateOAuthProvider(ctx context.Context, provi
 		provider.Tier = r.tier
 	}
 
-	// Check if provider already exists
-	existing, err := r.GetByProviderAndID(ctx, provider.Provider, provider.ProviderID)
-	if err == nil && existing != nil {
-		return fmt.Errorf("OAuth provider already exists for user %s", existing.UserUUID)
-	}
-
-	_, err = r.collection.InsertOne(ctx, provider)
-	if err != nil {
+	// The unique (provider, providerId) index decides ownership — not a
+	// read-then-insert, which was the race the index exists to close. A
+	// duplicate key is surfaced as ErrOAuthIdentityDuplicate so the
+	// service can re-read and find out whose identity it is.
+	if _, err := r.collection.InsertOne(ctx, provider); err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return fmt.Errorf("%w: %v", duplicateKeySentinel(err), err)
+		}
 		return fmt.Errorf("failed to create OAuth provider: %w", err)
 	}
 
@@ -110,10 +141,29 @@ func (r *oauthProviderRepository) LinkOAuthProvider(ctx context.Context, userUUI
 	return r.CreateOAuthProvider(ctx, provider)
 }
 
+// GetByProviderAndID resolves an ACTIVE identity. A tombstoned document
+// (UnlinkedAt != nil) is deliberately invisible here: every caller of
+// this method is asking "who owns this identity right now", and an
+// unlinked identity is owned by nobody.
+//
+// Use GetByProviderAndIDIncludingUnlinked when the caller needs to tell
+// "unlinked" apart from "never seen" — the callback does, so it can
+// answer oauth_identity_unlinked instead of starting a signup.
 func (r *oauthProviderRepository) GetByProviderAndID(ctx context.Context, provider models.OAuthProvider, providerID string) (*models.OAuthProviderDoc, error) {
+	return r.findIdentity(ctx, provider, providerID, false)
+}
+
+func (r *oauthProviderRepository) GetByProviderAndIDIncludingUnlinked(ctx context.Context, provider models.OAuthProvider, providerID string) (*models.OAuthProviderDoc, error) {
+	return r.findIdentity(ctx, provider, providerID, true)
+}
+
+func (r *oauthProviderRepository) findIdentity(ctx context.Context, provider models.OAuthProvider, providerID string, includeUnlinked bool) (*models.OAuthProviderDoc, error) {
 	filter := bson.M{
 		"provider":   provider,
 		"providerId": providerID,
+	}
+	if !includeUnlinked {
+		filter["unlinkedAt"] = bson.M{"$exists": false}
 	}
 
 	var result models.OAuthProviderDoc
@@ -129,8 +179,9 @@ func (r *oauthProviderRepository) GetByProviderAndID(ctx context.Context, provid
 	return &result, nil
 }
 
+// GetByUserUUID lists what the user HAS: tombstoned rows are excluded.
 func (r *oauthProviderRepository) GetByUserUUID(ctx context.Context, userUUID string) ([]*models.OAuthProviderDoc, error) {
-	filter := bson.M{"userUuid": userUUID}
+	filter := bson.M{"userUuid": userUUID, "unlinkedAt": bson.M{"$exists": false}}
 
 	// Sort by isPrimary desc, then by linkedAt desc
 	opts := options.Find().SetSort(bson.D{

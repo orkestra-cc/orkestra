@@ -35,6 +35,8 @@ import (
 // else panics so a regression that adds a new dependency is visible
 // immediately.
 type gateUserFake struct {
+	// addOAuthLinkErr, when set, fails AddOAuthLinkToUser (the read-model repair).
+	addOAuthLinkErr  error
 	mu               sync.Mutex
 	byEmail          map[string]*iface.User
 	byUUID           map[string]*iface.User
@@ -57,10 +59,51 @@ type gateUserFake struct {
 	// purpose: the whole point of §4.9 is that those two produce different
 	// statuses.
 	getByIDErr error
+	// getByEmailErr, when set, fails GetUserByEmail with a NON-not-found
+	// error (an outage), which must never read as "no account".
+	getByEmailErr        error
+	createFromOAuthCalls int
+	addOAuthLinkCalls    int
+	// lifecycle overrides the UserLifecycleState answer per uuid (a
+	// soft-deleted row answers "deleted" although GetUserByID says not found).
+	lifecycle map[string]iface.UserLifecycleState
 	// clearedFailedLogins records every ClearFailedLogins target so the
 	// expired-lock test can assert the CALL happened, not merely that
 	// the count reads zero.
 	clearedFailedLogins []string
+}
+
+// UserLifecycleState implements iface.UserLifecycleStateProvider: an
+// override wins; otherwise a seeded row is active/inactive, an unknown
+// uuid is missing.
+func (f *gateUserFake) UserLifecycleState(_ context.Context, userUUID string) (iface.UserLifecycleState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if st, ok := f.lifecycle[userUUID]; ok {
+		return st, nil
+	}
+	if u, ok := f.byUUID[userUUID]; ok {
+		if u.IsActive {
+			return iface.UserLifecycleActive, nil
+		}
+		return iface.UserLifecycleInactive, nil
+	}
+	return iface.UserLifecycleMissing, nil
+}
+
+// softDelete removes the row from the lookups (GetUserByID answers not
+// found) while the lifecycle probe still reports it as deleted.
+func (f *gateUserFake) softDelete(userUUID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if u, ok := f.byUUID[userUUID]; ok {
+		delete(f.byEmail, u.Email)
+		delete(f.byUUID, userUUID)
+	}
+	if f.lifecycle == nil {
+		f.lifecycle = map[string]iface.UserLifecycleState{}
+	}
+	f.lifecycle[userUUID] = iface.UserLifecycleDeleted
 }
 
 func (f *gateUserFake) setGetByIDErr(err error) {
@@ -100,6 +143,9 @@ func (f *gateUserFake) GetUserByEmail(_ context.Context, email string) (*iface.U
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.getByEmailCalls++
+	if f.getByEmailErr != nil {
+		return nil, f.getByEmailErr
+	}
 	if u, ok := f.byEmail[email]; ok {
 		return u.ToResponse(), nil
 	}
@@ -115,10 +161,17 @@ func (f *gateUserFake) GetUserForAuth(_ context.Context, email string) (*iface.U
 	return nil, errNotFound
 }
 
+// CreateUserFromOAuth persists the user and THEN honours the abort switch:
+// the gate tests use the abort to stop the flow right after creation and
+// inspect what was written.
 func (f *gateUserFake) CreateUserFromOAuth(_ context.Context, in *iface.CreateUserInput) (*iface.User, error) {
+	f.mu.Lock()
+	f.createFromOAuthCalls++
+	abort := f.createFromOAuthAbortErr
+	f.mu.Unlock()
 	u, _ := f.createInternal(in)
-	if f.createFromOAuthAbortErr != nil {
-		return nil, f.createFromOAuthAbortErr
+	if abort != nil {
+		return nil, abort
 	}
 	return u, nil
 }
@@ -346,6 +399,10 @@ func (f *gateUserFake) ClearMFAGrace(_ context.Context, userUUID string) error {
 func (f *gateUserFake) AddOAuthLinkToUser(_ context.Context, userUUID string, link iface.OAuthLink) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.addOAuthLinkCalls++
+	if f.addOAuthLinkErr != nil {
+		return f.addOAuthLinkErr
+	}
 	u, ok := f.byUUID[userUUID]
 	if !ok {
 		return errNotFound
@@ -660,7 +717,8 @@ func (r *gateRefreshRepo) RevokeTokensBySession(_ context.Context, sessionUUID, 
 	return nil
 }
 func (r *gateRefreshRepo) RevokeTokensByDevice(context.Context, string, string, string) error {
-	panic("not used")
+	// Device dedup on a new login: nothing to revoke in the gate fixture.
+	return nil
 }
 
 // CleanupExpiredTokens mirrors the production sweep: delete at most
@@ -949,11 +1007,13 @@ type gateClaimer struct {
 	claimed  map[string]bool
 	released []string
 	claimErr error
+	calls    int
 }
 
 func newGateClaimer() *gateClaimer { return &gateClaimer{claimed: map[string]bool{}} }
 
 func (c *gateClaimer) ClaimFirstAdmin(_ context.Context, userUUID string) (bool, error) {
+	c.calls++
 	if c.claimErr != nil {
 		return false, c.claimErr
 	}
@@ -962,6 +1022,25 @@ func (c *gateClaimer) ClaimFirstAdmin(_ context.Context, userUUID string) (bool,
 	}
 	c.claimed[userUUID] = true
 	return true, nil
+}
+
+// claimCalls counts ClaimFirstAdmin invocations, successful or not.
+func (c *gateClaimer) claimCalls() int { return c.calls }
+
+// failWith makes every claim fail with err (a broken sentinel store).
+func (c *gateClaimer) failWith(err error) { c.claimErr = err }
+
+// alreadyClaimed seeds a taken sentinel: the next claim loses the race.
+func (c *gateClaimer) alreadyClaimed() { c.claimed["someone-else"] = true }
+
+// claimedUUID returns the uuid the sentinel holds, or "" when unclaimed.
+func (c *gateClaimer) claimedUUID() string {
+	for u := range c.claimed {
+		if u != "someone-else" {
+			return u
+		}
+	}
+	return ""
 }
 func (c *gateClaimer) Release(_ context.Context, userUUID string) error {
 	delete(c.claimed, userUUID)

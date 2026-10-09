@@ -73,6 +73,16 @@ Each entry point picks a different `EnvironmentConfig` from [`lib/config/environ
 
 OAuth client IDs / Stripe keys are not yet wired into the mobile app — the SDK dependencies aren't in `pubspec.yaml` yet. As those features land, add the matching keys here.
 
+## Social sign-in contract (backend)
+
+The backend's mobile sign-in is a two-step flow (auth spec §4.10 D35). The in-tree app does not call it yet (`lib/` has no OAuth code); an app that does must target a backend at this release or later.
+
+1. Generate a PKCE verifier (43–128 chars from `A-Z a-z 0-9 - . _ ~`) and keep it. `POST /v1/auth/{tier}/{google|apple}/mobile/begin` with `{"code_challenge": base64url(sha256(verifier))}` → `{"nonce"}`.
+2. Hand the nonce to the platform SDK: Google Sign-In takes it as is; Sign in with Apple takes `hex(sha256(nonce))`. The SDK returns an ID token carrying it.
+3. `POST /v1/auth/{tier}/{google|apple}/mobile` with `{"id_token", "code_verifier"}` → the Orkestra token pair.
+
+The nonce is single-use and lives ten minutes. Any failure at step 3 — expired, replayed, wrong verifier, token from another app — is the same `401` and burns the nonce: start again from step 1. Do not send an `access_token`; the field is gone.
+
 ## Common commands
 
 ```bash

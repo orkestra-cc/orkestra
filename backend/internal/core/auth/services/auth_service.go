@@ -5,7 +5,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/orkestra/backend/pkg/sdk/metrics"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,8 +29,23 @@ var (
 	ErrCannotRemoveLastOAuthLink = errors.New("cannot remove the last OAuth link")
 	ErrOAuthLinkNotFound         = errors.New("OAuth link not found")
 	ErrOAuthLinkAlreadyExists    = errors.New("OAuth link already exists")
-	ErrUserMigrationRequired     = errors.New("user migration to UUID required")
-	ErrInvalidRefreshToken       = errors.New("invalid refresh token")
+	// ErrOAuthStoreUnavailable: the OAuth identity store cannot be relied
+	// on — the unique (provider, providerId) index is missing (migration
+	// 0010 has not run here) or it could not be read/written. Every OAuth
+	// entry point answers it before touching the store; the callback maps
+	// it to the retryable oauth_store_unavailable code (spec §4.8 D32/D33).
+	ErrOAuthStoreUnavailable = errors.New("OAuth identity store unavailable")
+	// ErrOAuthIdentityUnlinked: the (provider, providerId) identity carries a
+	// tombstone — it was unlinked, by the user or an operator — and must
+	// not sign in or be silently re-linked by the email branch. The
+	// account itself is unaffected (spec §4.8 D32 item 7).
+	ErrOAuthIdentityUnlinked = errors.New("OAuth identity has been unlinked from its account")
+	// ErrOAuthIdentityClaimedByOther: the (provider, providerId) identity is
+	// recorded against a different user. Callback code
+	// oauth_identity_conflict; no session (spec §4.8 D32 item 5).
+	ErrOAuthIdentityClaimedByOther = errors.New("OAuth identity is claimed by another account")
+	ErrUserMigrationRequired       = errors.New("user migration to UUID required")
+	ErrInvalidRefreshToken         = errors.New("invalid refresh token")
 	// ErrRefreshTokenReplay signals that a rotated refresh token was used
 	// again after its successor already existed — a textbook replay attack.
 	// The whole family is revoked before this error is returned.
@@ -116,6 +133,12 @@ var (
 	// Translated to 409 last_credential at the handler boundary so the
 	// UI can prompt the operator to send a password-reset first.
 	ErrLastCredentialRemoval = errors.New("cannot remove the user's only remaining credential")
+	// ErrCredentialChangeInProgress is returned when another credential
+	// removal holds the account's lock: the lockout guard and the removal
+	// run serialized per account (across replicas) so two concurrent
+	// unlinks cannot each pass the guard on the other's link and leave
+	// no way to sign in. Maps to 409; the caller retries.
+	ErrCredentialChangeInProgress = errors.New("another credential change on this account is in progress")
 	// ErrAdminSelfAction signals that an admin tried to invoke an
 	// admin-on-user action against their own account (MFA reset, OAuth
 	// unlink) — actions where lock-out risk is real and the admin
@@ -300,6 +323,16 @@ type AuthService interface {
 	// signature. Empty falls back to operator semantics.
 	SetAudience(a PolicyAudience)
 
+	// SetOAuthStoreGate wires the "is the OAuth identity store degraded"
+	// probe (the boot-time index check). While it reports true every OAuth
+	// entry point answers ErrOAuthStoreUnavailable before any lookup. Nil
+	// keeps the store open — a fork that never wires it keeps today's
+	// behaviour.
+	SetOAuthStoreGate(gate func() bool)
+	// SetUnlinkLock wires the lock store that serializes credential
+	// removal per account across replicas.
+	SetUnlinkLock(UnlinkLockRedisClient)
+
 	// SetProviderUsability wires the per-audience "is this provider a
 	// usable web login method" resolver (§4.7): providerOn ∧ structurally
 	// configured against the active snapshot, without this package
@@ -334,6 +367,14 @@ type AuthConfig struct {
 }
 
 type authService struct {
+	// oauthCompensationFailure counts a failed backwards compensation on
+	// the signup reservation (spec §4.8 D32 item 5). Nil records on the
+	// process-wide metrics collector; tests inject a counter.
+	oauthCompensationFailure func()
+	// oauthStoreGate reports whether the OAuth identity store is degraded
+	// (module.go wires it to the boot index check). Nil = open.
+	oauthStoreGate func() bool
+
 	userService         iface.UserProvider
 	tenantProvider      iface.TenantProvider
 	oauthProviderRepo   repository.OAuthProviderRepository
@@ -361,6 +402,10 @@ type authService struct {
 	// post-construction from module.go over the shared OAuth config
 	// resolver; nil means the guards refuse rather than guess.
 	providerUsability func(ctx context.Context, audience PolicyAudience, provider iface.OAuthProvider) (bool, error)
+	// unlinkLock serializes credential removal per account across
+	// replicas (SetNX + scripted release). Nil keeps the guard
+	// unserialized — a fork that never wires it keeps today's behaviour.
+	unlinkLock UnlinkLockRedisClient
 	// sessionRevocation is the Redis-backed sid revocation store
 	// shared across all tiers. Wired post-construction via
 	// SetSessionRevocation; nil disables the in-flight access-token
@@ -413,6 +458,8 @@ func (s *authService) SetPolicy(p *AuthPolicyService) {
 
 // SetAudience records the surface this service serves so policy
 // reads can fetch audience-scoped knobs.
+func (s *authService) SetOAuthStoreGate(gate func() bool) { s.oauthStoreGate = gate }
+
 func (s *authService) SetAudience(a PolicyAudience) {
 	s.audience = a
 }
@@ -451,6 +498,58 @@ func (s *authService) usableProvidersForLinks(ctx context.Context, links []iface
 // SetSessionRevocation wires the Redis-backed sid revocation store.
 func (s *authService) SetSessionRevocation(rev SessionRevocationService) {
 	s.sessionRevocation = rev
+}
+
+// UnlinkLockRedisClient is the narrow shape the per-account unlink lock
+// needs: SetNX to take the key, Eval to release it only if still ours.
+type UnlinkLockRedisClient interface {
+	SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) (bool, error)
+	Eval(ctx context.Context, script string, keys []string, args ...interface{}) (interface{}, error)
+}
+
+// unlinkLockTTL bounds how long a crashed replica can hold an account's
+// lock. An unlink is two reads and two writes; ten seconds is generous.
+const unlinkLockTTL = 10 * time.Second
+
+// SetUnlinkLock wires the lock store that serializes credential removal
+// per account.
+func (s *authService) SetUnlinkLock(client UnlinkLockRedisClient) {
+	s.unlinkLock = client
+}
+
+// withAccountLock runs fn while holding the account's credential-change
+// lock. A held lock refuses with ErrCredentialChangeInProgress; a lock
+// store that cannot answer refuses with ErrOAuthStoreUnavailable — the
+// guard this protects is "do not remove the last way in", and running
+// it unserialized because Redis is down would be guessing. No store
+// wired means no lock (fork behaviour preserved).
+func (s *authService) withAccountLock(ctx context.Context, userUUID string, fn func() error) error {
+	if s.unlinkLock == nil {
+		return fn()
+	}
+	token, err := randomLeaseToken()
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
+	}
+	key := "auth:credential-change:" + string(s.audience) + ":" + userUUID
+	ok, err := s.unlinkLock.SetNX(ctx, key, token, unlinkLockTTL)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
+	}
+	if !ok {
+		return ErrCredentialChangeInProgress
+	}
+	defer func() {
+		// Release on our own clock: the request may be cancelled by now,
+		// and a lock left behind blocks the account for the whole TTL.
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		if _, rerr := s.unlinkLock.Eval(rctx, leaseReleaseScript, []string{key}, token); rerr != nil {
+			slog.Default().Warn("auth: failed to release the account credential-change lock; it expires on its own",
+				slog.String("user_uuid", userUUID), slog.String("error", rerr.Error()))
+		}
+	}()
+	return fn()
 }
 
 // SetBlobStore wires the object-storage handle used to resolve
@@ -576,8 +675,121 @@ func (s *authService) SetPrimaryOAuthLink(ctx context.Context, userUUID string, 
 	return s.userService.SetPrimaryOAuthLink(ctx, userUUID, iface.OAuthProvider(input.Provider), targetProviderID)
 }
 
+// activeOAuthLinks reads the user's linked identities from the provider
+// collection — the source of truth for OAuth identity (spec §4.8 D32) —
+// in the iface.OAuthLink shape the listings and the lockout calculation
+// consume. The repository already excludes tombstoned rows, so every
+// link returned is active. user.oauthLinks is a derived read-model and
+// decides nothing.
+func (s *authService) activeOAuthLinks(ctx context.Context, userUUID string) ([]iface.OAuthLink, error) {
+	if s.oauthProviderRepo == nil {
+		return nil, nil
+	}
+	docs, err := s.oauthProviderRepo.GetByUserUUID(ctx, userUUID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
+	}
+	links := make([]iface.OAuthLink, 0, len(docs))
+	for _, d := range docs {
+		links = append(links, iface.OAuthLink{
+			Provider:   iface.OAuthProvider(d.Provider),
+			ProviderID: d.ProviderID,
+			Email:      d.Email,
+			LinkedAt:   d.LinkedAt,
+			IsActive:   true,
+			IsPrimary:  d.IsPrimary,
+			OAuthData:  d.Metadata,
+			LastUsed:   d.LastUsed,
+		})
+	}
+	return links, nil
+}
+
+// deleteProviderRow removes the user's row for (provider, providerID) from
+// the provider collection — the source of truth every listing reads
+// (D32). In D1 this is a hard delete, not a tombstone: an older binary
+// then sees exactly what it saw before an unlink, no row. D2 replaces the
+// delete with the tombstone write. Already gone is not an error.
+func (s *authService) deleteProviderRow(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string) error {
+	if s.oauthProviderRepo == nil {
+		return nil
+	}
+	docs, err := s.oauthProviderRepo.GetByUserUUID(ctx, userUUID)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
+	}
+	for _, d := range docs {
+		if string(d.Provider) == string(provider) && d.ProviderID == providerID {
+			if err := s.oauthProviderRepo.DeleteProvider(ctx, d.UUID); err != nil {
+				return fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// orphanDisposition decides what a provider row whose owner GetUserByID
+// cannot find really is (D32 item 8). "Not found" alone proves nothing:
+// a soft-deleted owner answers not found too, and so does an in-flight
+// signup whose user row is not written yet. Deleting a real user's
+// identity in either case would be a loss, so the lifecycle probe and a
+// grace window decide, and every uncertain case is retryable.
+type orphanDisposition int
+
+const (
+	orphanRetry orphanDisposition = iota
+	orphanHeal
+	orphanRefuse
+)
+
+// oauthOrphanGrace is how old a reservation must be before a missing owner
+// counts as a crashed signup rather than one still in flight.
+const oauthOrphanGrace = 60 * time.Second
+
+func (s *authService) orphanDisposition(ctx context.Context, doc *models.OAuthProviderDoc) orphanDisposition {
+	probe, ok := s.userService.(iface.UserLifecycleStateProvider)
+	if !ok {
+		slog.Default().Warn("auth: user provider has no lifecycle probe — an orphan reservation cannot be told from a deleted owner, not healing",
+			slog.String("provider_doc", doc.UUID))
+		return orphanRetry
+	}
+	state, err := probe.UserLifecycleState(ctx, doc.UserUUID)
+	if err != nil {
+		return orphanRetry
+	}
+	switch state {
+	case iface.UserLifecycleMissing:
+		if !doc.CreatedAt.IsZero() && time.Since(doc.CreatedAt) < oauthOrphanGrace {
+			return orphanRetry
+		}
+		return orphanHeal
+	case iface.UserLifecycleDeleted:
+		return orphanRefuse
+	default:
+		// The probe sees a live row GetUserByID did not: inconsistent,
+		// never a reason to delete anything.
+		return orphanRetry
+	}
+}
+
+// signupDisplayName is the name a first social sign-in lands with: the
+// IdP's, or the email's local part when the IdP sends none (Apple never
+// carries a name in the ID token; GitHub users may have no profile name).
+// Never a type assertion on a possibly-missing key — that panic would
+// fire after the identity is reserved and the sentinel claimed.
+func signupDisplayName(userInfo map[string]interface{}, email string) string {
+	if name, _ := userInfo["name"].(string); strings.TrimSpace(name) != "" {
+		return strings.TrimSpace(name)
+	}
+	if i := strings.IndexByte(email, '@'); i > 0 {
+		return email[:i]
+	}
+	return email
+}
+
 func (s *authService) GetOAuthLinks(ctx context.Context, userUUID string) (*models.OAuthLinksResponse, error) {
-	links, err := s.userService.GetUserOAuthLinks(ctx, userUUID)
+	links, err := s.activeOAuthLinks(ctx, userUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -660,30 +872,36 @@ func (s *authService) AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUI
 		return ErrOAuthLinkNotFound
 	}
 
-	links, err := s.userService.GetUserOAuthLinks(ctx, targetUUID)
-	if err != nil {
-		return err
-	}
-	// §4.7: resolve what actually counts as a way in BEFORE mutating.
-	// Strict reads — break-glass never counts as a lasting credential,
-	// and any uncertainty refuses with 503 rather than guessing.
-	passwordUsable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
-	if err != nil {
-		return err
-	}
-	usable, err := s.usableProvidersForLinks(ctx, links)
-	if err != nil {
-		return err
-	}
-	providerID, locked, found := wouldLockOutOAuthUnlink(target, links, provider, passwordUsable, usable)
-	if !found {
-		return ErrOAuthLinkNotFound
-	}
-	if locked {
-		return ErrLastCredentialRemoval
-	}
-
-	if err := s.userService.RemoveOAuthLinkFromUser(ctx, targetUUID, provider, providerID); err != nil {
+	// Same lock as the self path — the account is what is serialized,
+	// not the caller (see ErrCredentialChangeInProgress).
+	if err := s.withAccountLock(ctx, targetUUID, func() error {
+		links, err := s.activeOAuthLinks(ctx, targetUUID)
+		if err != nil {
+			return err
+		}
+		// §4.7: resolve what actually counts as a way in BEFORE mutating.
+		// Strict reads — break-glass never counts as a lasting credential,
+		// and any uncertainty refuses with 503 rather than guessing.
+		passwordUsable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+		if err != nil {
+			return err
+		}
+		usable, err := s.usableProvidersForLinks(ctx, links)
+		if err != nil {
+			return err
+		}
+		providerID, locked, found := wouldLockOutOAuthUnlink(target, links, provider, passwordUsable, usable)
+		if !found {
+			return ErrOAuthLinkNotFound
+		}
+		if locked {
+			return ErrLastCredentialRemoval
+		}
+		if err := s.deleteProviderRow(ctx, targetUUID, provider, providerID); err != nil {
+			return err
+		}
+		return s.userService.RemoveOAuthLinkFromUser(ctx, targetUUID, provider, providerID)
+	}); err != nil {
 		return err
 	}
 
@@ -748,29 +966,37 @@ func (s *authService) SelfUnlinkOAuth(ctx context.Context, userUUID string, prov
 	if user == nil {
 		return ErrOAuthLinkNotFound
 	}
-	links, err := s.userService.GetUserOAuthLinks(ctx, userUUID)
-	if err != nil {
-		return err
-	}
-	// §4.7: resolve what actually counts as a way in BEFORE mutating.
-	// Strict reads — break-glass never counts as a lasting credential,
-	// and any uncertainty refuses with 503 rather than guessing.
-	passwordUsable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
-	if err != nil {
-		return err
-	}
-	usable, err := s.usableProvidersForLinks(ctx, links)
-	if err != nil {
-		return err
-	}
-	providerID, locked, found := wouldLockOutOAuthUnlink(user, links, provider, passwordUsable, usable)
-	if !found {
-		return ErrOAuthLinkNotFound
-	}
-	if locked {
-		return ErrLastCredentialRemoval
-	}
-	if err := s.userService.RemoveOAuthLinkFromUser(ctx, userUUID, provider, providerID); err != nil {
+	// The guard and the removal run under the account's lock: two
+	// concurrent unlinks must not each pass the guard on the other's
+	// link (see ErrCredentialChangeInProgress).
+	if err := s.withAccountLock(ctx, userUUID, func() error {
+		links, err := s.activeOAuthLinks(ctx, userUUID)
+		if err != nil {
+			return err
+		}
+		// §4.7: resolve what actually counts as a way in BEFORE mutating.
+		// Strict reads — break-glass never counts as a lasting credential,
+		// and any uncertainty refuses with 503 rather than guessing.
+		passwordUsable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+		if err != nil {
+			return err
+		}
+		usable, err := s.usableProvidersForLinks(ctx, links)
+		if err != nil {
+			return err
+		}
+		providerID, locked, found := wouldLockOutOAuthUnlink(user, links, provider, passwordUsable, usable)
+		if !found {
+			return ErrOAuthLinkNotFound
+		}
+		if locked {
+			return ErrLastCredentialRemoval
+		}
+		if err := s.deleteProviderRow(ctx, userUUID, provider, providerID); err != nil {
+			return err
+		}
+		return s.userService.RemoveOAuthLinkFromUser(ctx, userUUID, provider, providerID)
+	}); err != nil {
 		return err
 	}
 	s.RecordSelfAuthEvent(ctx, "self_oauth_unlink", userUUID, map[string]interface{}{
@@ -808,6 +1034,9 @@ func (s *authService) SelfLinkOAuthFromCallback(
 	if userUUID == "" {
 		return fmt.Errorf("self link: userUUID is required")
 	}
+	if s.oauthStoreGate != nil && s.oauthStoreGate() {
+		return ErrOAuthStoreUnavailable
+	}
 	user, err := s.userService.GetUserByID(ctx, userUUID)
 	if err != nil {
 		return err
@@ -839,10 +1068,11 @@ func (s *authService) SelfLinkOAuthFromCallback(
 		return nil
 	}
 
-	// Already-on-this-user check: walk the embedded array. Picking up
-	// here means a row exists on the user without a matching provider
-	// repo doc — defensive, treat as duplicate.
-	existingLinks, err := s.userService.GetUserOAuthLinks(ctx, userUUID)
+	// Already-on-this-user check, on the provider collection (D32): a
+	// link created by a login has no embedded twin, and the
+	// (userUuid, provider) unique index would reject the row anyway —
+	// answer the typed sentinel instead of a duplicate-key error.
+	existingLinks, err := s.activeOAuthLinks(ctx, userUUID)
 	if err != nil {
 		return err
 	}
@@ -872,9 +1102,6 @@ func (s *authService) SelfLinkOAuthFromCallback(
 		LastUsed:   &now,
 		OAuthData:  metadata,
 	}
-	if err := s.userService.AddOAuthLinkToUser(ctx, userUUID, link); err != nil {
-		return fmt.Errorf("persist user link: %w", err)
-	}
 
 	// Mirror to the provider-side index so future logins by this
 	// identity resolve back to the right user. Best-effort — a write
@@ -899,12 +1126,32 @@ func (s *authService) SelfLinkOAuthFromCallback(
 	if oauthTokens != nil {
 		providerDoc.Scopes = oauthTokens.Scopes
 	}
-	if err := s.oauthProviderRepo.CreateOAuthProvider(ctx, providerDoc); err != nil {
-		slog.Warn("self_oauth_link: provider repo write failed (link still attached to user)",
-			"userUUID", userUUID,
-			"provider", string(provider),
-			"error", err.Error(),
-		)
+	// Ownership FIRST (D32 item 5): the provider row is the source of
+	// truth, so it is written before the embedded read-model and its
+	// outcome decides the call. A duplicate owned by someone else is the
+	// typed self-link conflict; a store failure refuses.
+	reserved, created, err := s.claimIdentity(ctx, providerDoc)
+	if err != nil {
+		if errors.Is(err, ErrOAuthIdentityClaimedByOther) {
+			return ErrOAuthLinkClaimedByOther
+		}
+		return err
+	}
+	if err := s.userService.AddOAuthLinkToUser(ctx, userUUID, link); err != nil {
+		// Compensate: the read-model failed, so the ownership row must
+		// not stand alone (a login would heal it, but the user asked to
+		// link now and is told it failed). Only a row THIS call created
+		// is released — a duplicate handed back by claimIdentity belongs
+		// to the concurrent flow that wrote it, and deleting it would
+		// undo that flow's successful link.
+		if created {
+			if derr := s.oauthProviderRepo.DeleteProvider(ctx, reserved.UUID); derr != nil {
+				s.recordOAuthCompensationFailure()
+				slog.Default().Error("auth: failed to release a self-link identity after a read-model failure",
+					slog.String("provider_doc", reserved.UUID), slog.String("error", derr.Error()))
+			}
+		}
+		return fmt.Errorf("persist user link: %w", err)
 	}
 
 	s.RecordSelfAuthEvent(ctx, "self_oauth_link", userUUID, map[string]interface{}{
@@ -1001,10 +1248,13 @@ func (s *authService) GetUserAuthMethods(ctx context.Context, targetUUID string)
 		}
 	}
 
-	for _, link := range user.OAuthLinks {
-		if !link.IsActive {
-			continue
-		}
+	// The provider collection, not user.oauthLinks: a link created by a
+	// login exists only there, and a tombstoned one must not be listed.
+	links, err := s.activeOAuthLinks(ctx, targetUUID)
+	if err != nil {
+		return nil, err
+	}
+	for _, link := range links {
 		view.OAuthProviders = append(view.OAuthProviders, models.OAuthProviderView{
 			Provider:   string(link.Provider),
 			Email:      link.Email,
@@ -2306,7 +2556,150 @@ func (s *authService) ConvertOAuthLinksToNewFormat(ctx context.Context, userUUID
 	return fmt.Errorf("OAuth link conversion not yet implemented")
 }
 
+// claimIdentity writes ownership and is the FIRST durable step of every
+// link path (spec §4.8 D32 item 5). Nothing is minted without it.
+//
+// CreateOAuthProvider used to be best-effort here: its error was ignored
+// and a session was minted anyway, so a session could exist for an
+// identity the store never recorded as the caller's. Under the unique
+// index on (provider, providerId) a duplicate key means "already
+// recorded", so the outcome of THIS write decides the whole flow:
+//
+//	success                 → continue (created=true)
+//	duplicate, same owner   → continue (a benign double callback, two tabs;
+//	                          created=false — the row belongs to the flow
+//	                          that wrote it, and only that flow may release it)
+//	duplicate, tombstoned   → ErrOAuthIdentityUnlinked (D2 revives it)
+//	duplicate, other owner  → ErrOAuthIdentityClaimedByOther, no session
+//	any other error         → ErrOAuthStoreUnavailable, no session
+func (s *authService) claimIdentity(ctx context.Context, doc *models.OAuthProviderDoc) (row *models.OAuthProviderDoc, created bool, err error) {
+	err = s.oauthProviderRepo.CreateOAuthProvider(ctx, doc)
+	if err == nil {
+		return doc, true, nil
+	}
+	if errors.Is(err, repository.ErrOAuthProviderAlreadyLinked) {
+		// The per-user (userUuid, provider) index: this account already
+		// has a different identity of this provider. Not an ownership
+		// question, and not an outage to retry forever.
+		return nil, false, ErrOAuthLinkAlreadyExists
+	}
+	if !errors.Is(err, repository.ErrOAuthIdentityDuplicate) {
+		slog.Default().Error("auth: oauth identity write failed",
+			slog.String("provider", string(doc.Provider)), slog.String("error", err.Error()))
+		return nil, false, fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
+	}
+
+	existing, rerr := s.oauthProviderRepo.GetByProviderAndIDIncludingUnlinked(ctx, doc.Provider, doc.ProviderID)
+	if rerr != nil || existing == nil {
+		return nil, false, ErrOAuthStoreUnavailable
+	}
+	if existing.UnlinkedAt != nil {
+		return nil, false, ErrOAuthIdentityUnlinked
+	}
+	if existing.UserUUID != doc.UserUUID {
+		return nil, false, ErrOAuthIdentityClaimedByOther
+	}
+	return existing, false, nil
+}
+
+// recordOAuthCompensationFailure counts a failed backwards compensation —
+// the reservation or the sentinel could not be released after a failed
+// signup. Item 8 heals the residue on the next callback; it must still be
+// visible.
+func (s *authService) recordOAuthCompensationFailure() {
+	if s.oauthCompensationFailure != nil {
+		s.oauthCompensationFailure()
+		return
+	}
+	metrics.Default().RecordOAuthCompensationFailure()
+}
+
+// newOAuthProviderDoc builds the identity document a link path writes:
+// the IdP's picture/locale as metadata and the provider tokens encrypted
+// at rest (a token that cannot be encrypted is simply not stored — the
+// tokens are a linking artifact, not ownership).
+func newOAuthProviderDoc(userUUID string, provider models.OAuthProvider, providerID, email string, isPrimary bool, oauthTokens *models.OAuthProviderTokens, userInfo map[string]interface{}) *models.OAuthProviderDoc {
+	now := time.Now()
+	metadata := make(map[string]interface{})
+	if picture, _ := userInfo["picture"].(string); picture != "" {
+		metadata["picture"] = picture
+	}
+	if locale, _ := userInfo["locale"].(string); locale != "" {
+		metadata["locale"] = locale
+	}
+	doc := &models.OAuthProviderDoc{
+		UUID:        models.GenerateUUIDv7(),
+		UserUUID:    userUUID,
+		Provider:    provider,
+		ProviderID:  providerID,
+		Email:       email,
+		IsPrimary:   isPrimary,
+		LinkedAt:    now,
+		TokenStatus: "active",
+		Metadata:    metadata,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if oauthTokens == nil {
+		return doc
+	}
+	if oauthTokens.AccessToken != "" {
+		if enc, err := utils.EncryptOAuthToken(oauthTokens.AccessToken); err == nil {
+			doc.AccessToken = enc
+			if oauthTokens.ExpiresIn > 0 {
+				expiresAt := now.Add(time.Duration(oauthTokens.ExpiresIn) * time.Second)
+				doc.AccessTokenExpiresAt = &expiresAt
+			}
+		}
+	}
+	if oauthTokens.RefreshToken != "" {
+		if enc, err := utils.EncryptOAuthToken(oauthTokens.RefreshToken); err == nil {
+			doc.RefreshToken = enc
+			if oauthTokens.RefreshTokenExpiresIn > 0 {
+				expiresAt := now.Add(time.Duration(oauthTokens.RefreshTokenExpiresIn) * time.Second)
+				doc.RefreshTokenExpiresAt = &expiresAt
+			}
+		}
+	}
+	doc.Scopes = oauthTokens.Scopes
+	return doc
+}
+
+// repairEmbeddedOAuthLink re-adds the embedded user.oauthLinks entry for a
+// provider document that has none (a link created by a login). The
+// embedded slice is a derived read-model since D32 — nothing decides on
+// it — so a failure is a WARN, never a failed login.
+func (s *authService) repairEmbeddedOAuthLink(ctx context.Context, user *iface.User, doc *models.OAuthProviderDoc) {
+	if user == nil || doc == nil || s.userService == nil {
+		return
+	}
+	for _, l := range user.OAuthLinks {
+		if string(l.Provider) == string(doc.Provider) && l.ProviderID == doc.ProviderID {
+			return
+		}
+	}
+	err := s.userService.AddOAuthLinkToUser(ctx, user.UUID, iface.OAuthLink{
+		Provider:   iface.OAuthProvider(doc.Provider),
+		ProviderID: doc.ProviderID,
+		Email:      doc.Email,
+		LinkedAt:   doc.LinkedAt,
+		IsActive:   true,
+		IsPrimary:  doc.IsPrimary,
+		OAuthData:  doc.Metadata,
+		LastUsed:   doc.LastUsed,
+	})
+	if err != nil {
+		slog.Default().Warn("auth: could not repair the embedded OAuth link read-model",
+			slog.String("user_uuid", user.UUID), slog.String("provider", string(doc.Provider)), slog.String("error", err.Error()))
+	}
+}
+
 func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provider models.OAuthProvider, userInfo map[string]interface{}, oauthTokens *models.OAuthProviderTokens, securityCtx *models.SecurityContext, deviceInfo *models.DeviceInfo) (*models.TokenResponse, error) {
+	// Before any lookup: a degraded identity store (migration 0010 not run
+	// here) must not run the ownership flow without its constraint.
+	if s.oauthStoreGate != nil && s.oauthStoreGate() {
+		return nil, ErrOAuthStoreUnavailable
+	}
 	// First extract email for validation and later use
 	email, _ := userInfo["email"].(string)
 	if email == "" {
@@ -2319,24 +2712,71 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 		// Fallback to sub claim for OpenID Connect providers
 		providerID, _ = userInfo["sub"].(string)
 	}
+	if providerID == "" {
+		// Now that the provider collection decides ownership, an empty id
+		// would resolve to whoever holds (provider, "") — refuse it.
+		return nil, ErrInvalidCredentials
+	}
 
-	// Check if this OAuth provider is already linked
-	existingProvider, err := s.oauthProviderRepo.GetByProviderAndID(ctx, provider, providerID)
-	if err != nil && err.Error() != "failed to find OAuth provider: mongo: no documents in result" {
-		// Don't fail the auth when the optional link lookup is unavailable.
+	// Who owns this identity right now? Looked up INCLUDING tombstones,
+	// because "unlinked" and "never seen" must answer differently: an
+	// unlinked identity is refused here, before the email branch, or the
+	// auto-link path (which matches by verified email) would silently
+	// re-create the link an operator just removed — and the signup path
+	// would mint a second account for it. A store error fails closed:
+	// proceeding would run the ownership flow blind.
+	existingProvider, err := s.oauthProviderRepo.GetByProviderAndIDIncludingUnlinked(ctx, provider, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
+	}
+	if existingProvider != nil && existingProvider.UnlinkedAt != nil {
+		return nil, ErrOAuthIdentityUnlinked
 	}
 
 	var user *iface.User
-
+	autoLinked := false
 	if existingProvider != nil {
 		// Provider exists - fetch the user by UserUUID from the provider record
-		// CRITICAL FIX: Fetch the actual user using the provider's UserUUID
 		userModel, err := s.userService.GetUserByID(ctx, existingProvider.UserUUID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get user for existing provider: %w", err)
+		switch {
+		case err == nil && userModel != nil:
+			user = userModel
+			// Lazy repair of the derived read-model: a link created by a
+			// login has no embedded twin. Best-effort — it decides nothing.
+			s.repairEmbeddedOAuthLink(ctx, user, existingProvider)
+		case errors.Is(err, iface.ErrUserNotFound) || (err == nil && userModel == nil):
+			// Possibly an ORPHAN reservation (D32 item 8): a crash between
+			// the identity reservation and the user creation, or a
+			// compensation that failed. But "not found" alone is not
+			// proof — orphanDisposition tells a true orphan from a
+			// soft-deleted owner and from an in-flight signup.
+			switch s.orphanDisposition(ctx, existingProvider) {
+			case orphanHeal:
+				// Nobody owns it — it is not a linked identity — so
+				// delete it and continue as unlinked. The same person
+				// completes their signup on this very attempt. Before,
+				// this state was terminal: any lookup error was fatal.
+				if derr := s.oauthProviderRepo.DeleteProvider(ctx, existingProvider.UUID); derr != nil {
+					return nil, fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, derr)
+				}
+				existingProvider = nil
+			case orphanRefuse:
+				// A soft-deleted owner: the account exists, the identity
+				// stays with it, and it does not sign in.
+				return nil, ErrInvalidCredentials
+			default:
+				// Too young to call (an in-flight signup), no probe, or an
+				// inconsistent answer: retryable, nothing deleted.
+				return nil, ErrOAuthStoreUnavailable
+			}
+		default:
+			// An OUTAGE is not an absence. Deleting a real user's
+			// identity because Mongo was briefly unavailable would be
+			// catastrophic.
+			return nil, fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
 		}
-		user = userModel
-	} else {
+	}
+	if existingProvider == nil {
 		// No existing (provider, providerID) link. §4.4 — three things are
 		// decided BEFORE the local email lookup, in this order:
 		//
@@ -2357,6 +2797,12 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			return nil, err
 		}
 		userResponse, err := s.userService.GetUserByEmail(ctx, email)
+		if err != nil && !errors.Is(err, iface.ErrUserNotFound) {
+			// D33: a lookup that could not be answered is an OUTAGE, not
+			// "no account". Falling through would start a signup for an
+			// address that may already have one.
+			return nil, fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
+		}
 		if err != nil {
 			// Signup gates. Two toggles must both allow the new account:
 			// the audience-scoped registration kill switch (the umbrella
@@ -2373,47 +2819,100 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 					return nil, ErrOAuthSignupDisabled
 				}
 			}
-			// Create new user via UserService
+			// 1. RESERVE the identity with the UUID the user will be
+			//    created with (D32 item 5). A conflict here means no user
+			//    is ever created for a lost race, and no sentinel is
+			//    claimed for it either.
 			newUUID := models.GenerateUUIDv7()
+			// A freshly generated UUID cannot own a prior row, so a
+			// successful claim here is always a row this flow created and
+			// may release.
+			reserved, _, err := s.claimIdentity(ctx, newOAuthProviderDoc(newUUID, provider, providerID, email, true, oauthTokens, userInfo))
+			if err != nil {
+				return nil, err
+			}
+			// releaseReservation is the backwards compensation: delete the
+			// identity document, release the sentinel. Two writes in two
+			// modules cannot share a transaction, so a failure here is
+			// logged and counted; item 8 heals the residue on the next
+			// callback for this identity.
+			releaseReservation := func(claimed bool) {
+				// The request context may already be cancelled (a client
+				// that disconnected mid-signup): the compensation runs on
+				// its own clock, or the reservation is stranded.
+				cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				if derr := s.oauthProviderRepo.DeleteProvider(cctx, reserved.UUID); derr != nil {
+					s.recordOAuthCompensationFailure()
+					slog.Default().Error("auth: failed to release a reserved oauth identity",
+						slog.String("provider_doc", reserved.UUID), slog.String("error", derr.Error()))
+				}
+				if claimed && s.firstAdminClaimer != nil {
+					if rerr := s.firstAdminClaimer.Release(cctx, newUUID); rerr != nil {
+						s.recordOAuthCompensationFailure()
+						slog.Default().Error("auth: failed to release the first-admin sentinel",
+							slog.String("user_uuid", newUUID), slog.String("error", rerr.Error()))
+					}
+				}
+			}
 
-			// Atomic first-admin claim (replaces the former count-based race).
-			// If the sentinel is already taken by another concurrent signup,
-			// fall through to the tier-default role: "guest" (lowest system
-			// role) for operator-tier signups so a fresh OAuth callback
-			// can't grant itself elevated privileges by default; for
-			// client-tier signups, the admin-configurable defaultRoleClient
-			// (falls back to "operator" when unset, matching today's
-			// password-path behaviour).
+			// 2. Claim the first-admin sentinel when the tier allows it.
+			// If the sentinel is already taken by another concurrent
+			// signup, fall through to the tier-default role: "guest"
+			// (lowest system role) for operator-tier signups so a fresh
+			// OAuth callback can't grant itself elevated privileges by
+			// default; for client-tier signups, the admin-configurable
+			// defaultRoleClient (falls back to "operator" when unset).
 			role := "guest"
 			if s.audience == PolicyAudienceClient && s.policy != nil {
 				role = s.policy.DefaultClientRole(ctx)
 			}
+			// The claim is OPERATOR-tier only. The claimer is wired into
+			// both bundles (tier_bundle.go), so without this guard the
+			// first client-tier OAuth signup on a fresh install — an
+			// external customer — became the platform super_admin. The
+			// password path has had this guard all along
+			// (password_auth_service.go: isOperatorBootstrap); this is
+			// the mirror. Spec §4.7 D30.
 			claimed := false
-			if s.firstAdminClaimer != nil {
+			if s.audience != PolicyAudienceClient && s.firstAdminClaimer != nil {
 				c, err := s.firstAdminClaimer.ClaimFirstAdmin(ctx, newUUID)
-				if err == nil && c {
+				if err != nil {
+					// Fatal, as on the password path: a swallowed claim
+					// error is how a lost race becomes a silent guest,
+					// and how a broken sentinel store silently stops
+					// minting super_admins on an install that looks
+					// fresh. A LOST race (c == false, err == nil) is
+					// not an error: the tier default stands.
+					releaseReservation(false)
+					return nil, fmt.Errorf("claim first admin: %w", err)
+				}
+				if c {
 					claimed = true
 					role = "super_admin"
 				}
 			}
 
-			// The IdP verified the address (checked above), so the account
-			// lands verified: nobody is asked to confirm what the IdP just
-			// confirmed.
+			// 3. Create the user with that UUID. The IdP verified the
+			//    address (checked above), so the account lands verified:
+			//    nobody is asked to confirm what the IdP just confirmed.
+			//    The OAuth fields make CreateUserFromOAuth write the
+			//    embedded read-model link alongside.
 			createInput := &iface.CreateUserInput{
 				UUID:          newUUID,
 				Email:         email,
-				FullName:      userInfo["name"].(string),
+				FullName:      signupDisplayName(userInfo, email),
 				Role:          role,
 				EmailVerified: true,
+				OAuthProvider: iface.OAuthProvider(provider),
+				OAuthID:       providerID,
+				OAuthData:     reserved.Metadata,
 			}
-
-			userModel, err := s.userService.CreateUserFromOAuth(ctx, createInput)
-			if err != nil {
-				if claimed && s.firstAdminClaimer != nil {
-					_ = s.firstAdminClaimer.Release(ctx, newUUID)
-				}
-				return nil, fmt.Errorf("failed to create user: %w", err)
+			userModel, cerr := s.userService.CreateUserFromOAuth(ctx, createInput)
+			if cerr != nil {
+				// 4. Compensate BACKWARDS.
+				releaseReservation(claimed)
+				return nil, fmt.Errorf("failed to create user: %w", cerr)
 			}
 			user = convertUserModelToAuthModel(userModel)
 		} else {
@@ -2427,6 +2926,7 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 				return nil, ErrOAuthLinkDisabled
 			}
 			user = convertUserResponseToAuthModel(userResponse)
+			autoLinked = true
 		}
 	}
 
@@ -2435,6 +2935,20 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 	// boundary for every direct caller.
 	if err := ValidateTokenEligibleUser(user); err != nil {
 		return nil, err
+	}
+	if autoLinked {
+		// Ownership FIRST (D32 item 5): the identity is written for the
+		// account the verified email matched, and only its outcome lets
+		// the flow continue — a session for an identity the store never
+		// recorded as this user's was the original bug. The embedded
+		// link is the derived read-model, best-effort.
+		userProviders, _ := s.oauthProviderRepo.GetByUserUUID(ctx, user.UUID)
+		doc := newOAuthProviderDoc(user.UUID, provider, providerID, email, len(userProviders) == 0, oauthTokens, userInfo)
+		claimed, _, err := s.claimIdentity(ctx, doc)
+		if err != nil {
+			return nil, err
+		}
+		s.repairEmbeddedOAuthLink(ctx, user, claimed)
 	}
 
 	// Link OAuth provider (if not already linked)
@@ -2506,83 +3020,6 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			if updater, ok := s.userService.(iface.OAuthLinkDataUpdater); ok {
 				_ = updater.UpdateOAuthLinkData(ctx, user.UUID, iface.OAuthProvider(provider), existingProvider.ProviderID, freshMeta)
 			}
-		}
-	} else {
-		// Check if this is the first provider for the user
-		userProviders, err := s.oauthProviderRepo.GetByUserUUID(ctx, user.UUID)
-		isPrimary := len(userProviders) == 0
-
-		// Extract additional provider metadata
-		picture, _ := userInfo["picture"].(string)
-		locale, _ := userInfo["locale"].(string)
-
-		metadata := make(map[string]interface{})
-		if picture != "" {
-			metadata["picture"] = picture
-		}
-		if locale != "" {
-			metadata["locale"] = locale
-		}
-
-		// Encrypt OAuth tokens if provided
-		var encryptedAccessToken, encryptedRefreshToken string
-		var accessTokenExpiresAt, refreshTokenExpiresAt *time.Time
-		var tokenStatus string = "active"
-		var tokenScopes []string
-
-		if oauthTokens != nil {
-			if oauthTokens.AccessToken != "" {
-				var err error
-				encryptedAccessToken, err = utils.EncryptOAuthToken(oauthTokens.AccessToken)
-				if err != nil {
-					// Continue without storing access token rather than failing auth
-				} else {
-					if oauthTokens.ExpiresIn > 0 {
-						expiresAt := time.Now().Add(time.Duration(oauthTokens.ExpiresIn) * time.Second)
-						accessTokenExpiresAt = &expiresAt
-					}
-				}
-			}
-
-			if oauthTokens.RefreshToken != "" {
-				var err error
-				encryptedRefreshToken, err = utils.EncryptOAuthToken(oauthTokens.RefreshToken)
-				if err != nil {
-					// Continue without storing refresh token rather than failing auth
-				} else {
-					if oauthTokens.RefreshTokenExpiresIn > 0 {
-						expiresAt := time.Now().Add(time.Duration(oauthTokens.RefreshTokenExpiresIn) * time.Second)
-						refreshTokenExpiresAt = &expiresAt
-					}
-				}
-			}
-
-			tokenScopes = oauthTokens.Scopes
-		}
-
-		// Create new OAuth provider link with encrypted tokens
-		newProvider := &models.OAuthProviderDoc{
-			UUID:                  models.GenerateUUIDv7(),
-			UserUUID:              user.UUID,
-			Provider:              provider,
-			ProviderID:            providerID,
-			Email:                 email,
-			IsPrimary:             isPrimary,
-			LinkedAt:              time.Now(),
-			AccessToken:           encryptedAccessToken,
-			RefreshToken:          encryptedRefreshToken,
-			AccessTokenExpiresAt:  accessTokenExpiresAt,
-			RefreshTokenExpiresAt: refreshTokenExpiresAt,
-			TokenStatus:           tokenStatus,
-			Scopes:                tokenScopes,
-			Metadata:              metadata,
-			CreatedAt:             time.Now(),
-			UpdatedAt:             time.Now(),
-		}
-
-		err = s.oauthProviderRepo.CreateOAuthProvider(ctx, newProvider)
-		if err != nil {
-			// Don't fail the auth, continue without provider linking
 		}
 	}
 

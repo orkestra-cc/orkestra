@@ -33,6 +33,14 @@ type OAuthProviderInterface interface {
 	GetSupportedScopes() []string
 	GetSupportedGrantTypes() []string
 	SupportsRefreshTokens() bool
+	// SupportsPKCE reports whether this provider's token endpoint has
+	// been PROVEN to accept a code_verifier. It is deliberately not
+	// "does the provider document PKCE": a provider that ignores
+	// code_challenge but rejects code_verifier breaks the exchange
+	// entirely (edge case 24), so a provider stays false until a
+	// staging round-trip confirms it. Promoting one is a one-line
+	// change. Spec §4.9 D34.
+	SupportsPKCE() bool
 	SupportsMobileFlow() bool
 }
 
@@ -51,6 +59,17 @@ type IDTokenValidationRequest struct {
 	Audience    string                 `json:"audience,omitempty"`
 	DeviceInfo  *models.DeviceInfo     `json:"deviceInfo,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+
+	// Issuers is the set of acceptable `iss` values. Empty means the
+	// provider's own canonical set — never "unchecked": a token minted by
+	// anyone would otherwise pass the signature check against a key set
+	// the attacker also controls. Spec §4.10 D35.
+	Issuers []string `json:"-"`
+
+	// ExpectedNonce, when non-empty, must equal the token's `nonce`
+	// claim. Empty on the web Apple exchange, which is unchanged and
+	// keeps its state-cookie binding.
+	ExpectedNonce string `json:"-"`
 }
 
 // TokenResponse represents the response from token exchange or refresh
@@ -71,6 +90,9 @@ type UserInfo struct {
 	ProviderID    string `json:"providerId"` // Unique ID from the provider
 	Email         string `json:"email"`
 	EmailVerified bool   `json:"emailVerified"`
+	// Nonce is the token's `nonce` claim, verbatim (empty when absent).
+	// The mobile completion keys its one-shot record on it (D35).
+	Nonce string `json:"-"`
 
 	// Profile information (optional)
 	Name       string `json:"name,omitempty"`

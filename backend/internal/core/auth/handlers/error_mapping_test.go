@@ -202,6 +202,10 @@ func TestMapOAuthError_NewSentinels(t *testing.T) {
 	}{
 		{services.ErrOAuthEmailUnverified, http.StatusForbidden, errcode.AuthOAuthEmailUnverified},
 		{services.ErrAuthPolicyUnavailable, http.StatusServiceUnavailable, errcode.AuthPolicyUnavailable},
+		{services.ErrOAuthStoreUnavailable, http.StatusServiceUnavailable, errcode.AuthOAuthStoreUnavailable},
+		{services.ErrOAuthIdentityUnlinked, http.StatusForbidden, errcode.AuthOAuthIdentityUnlinked},
+		{services.ErrOAuthIdentityClaimedByOther, http.StatusConflict, errcode.AuthOAuthIdentityConflict},
+		{services.ErrOAuthLinkAlreadyExists, http.StatusConflict, errcode.AuthOAuthProviderAlreadyLinked},
 		{services.ErrInvalidCredentials, http.StatusUnauthorized, ""},
 		{errors.New("anything else"), http.StatusInternalServerError, ""},
 	}
@@ -448,5 +452,24 @@ func TestMappersKeepUnrelatedErrorsAt500(t *testing.T) {
 				t.Errorf("status = %d, want %d", got, http.StatusInternalServerError)
 			}
 		})
+	}
+}
+
+// A provider-store outage on the auth-methods and unlink routes carries
+// the same 503 code the callback does, and a credential change refused
+// because another one holds the account is a 409, not a server fault.
+func TestMapSelfAndAdminAuthError_StoreOutageAndSerialization(t *testing.T) {
+	for name, mapper := range map[string]func(error) error{"self": mapSelfAuthError, "admin": mapAdminUserAuthError} {
+		err := mapper(fmt.Errorf("%w: dial tcp: refused", services.ErrOAuthStoreUnavailable))
+		if got := statusOf(t, err); got != http.StatusServiceUnavailable {
+			t.Errorf("%s: store outage → %d, want 503", name, got)
+		}
+		var e *errcode.Error
+		if !errors.As(err, &e) || e.Code != errcode.AuthOAuthStoreUnavailable {
+			t.Errorf("%s: store outage → %v, want code %s", name, err, errcode.AuthOAuthStoreUnavailable)
+		}
+		if got := statusOf(t, mapper(services.ErrCredentialChangeInProgress)); got != http.StatusConflict {
+			t.Errorf("%s: change in progress → %d, want 409", name, got)
+		}
 	}
 }
