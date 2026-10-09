@@ -133,6 +133,12 @@ var (
 	// Translated to 409 last_credential at the handler boundary so the
 	// UI can prompt the operator to send a password-reset first.
 	ErrLastCredentialRemoval = errors.New("cannot remove the user's only remaining credential")
+	// ErrCredentialChangeInProgress is returned when another credential
+	// removal holds the account's lock: the lockout guard and the removal
+	// run serialized per account (across replicas) so two concurrent
+	// unlinks cannot each pass the guard on the other's link and leave
+	// no way to sign in. Maps to 409; the caller retries.
+	ErrCredentialChangeInProgress = errors.New("another credential change on this account is in progress")
 	// ErrAdminSelfAction signals that an admin tried to invoke an
 	// admin-on-user action against their own account (MFA reset, OAuth
 	// unlink) — actions where lock-out risk is real and the admin
@@ -323,6 +329,9 @@ type AuthService interface {
 	// keeps the store open — a fork that never wires it keeps today's
 	// behaviour.
 	SetOAuthStoreGate(gate func() bool)
+	// SetUnlinkLock wires the lock store that serializes credential
+	// removal per account across replicas.
+	SetUnlinkLock(UnlinkLockRedisClient)
 
 	// SetProviderUsability wires the per-audience "is this provider a
 	// usable web login method" resolver (§4.7): providerOn ∧ structurally
@@ -393,6 +402,10 @@ type authService struct {
 	// post-construction from module.go over the shared OAuth config
 	// resolver; nil means the guards refuse rather than guess.
 	providerUsability func(ctx context.Context, audience PolicyAudience, provider iface.OAuthProvider) (bool, error)
+	// unlinkLock serializes credential removal per account across
+	// replicas (SetNX + scripted release). Nil keeps the guard
+	// unserialized — a fork that never wires it keeps today's behaviour.
+	unlinkLock UnlinkLockRedisClient
 	// sessionRevocation is the Redis-backed sid revocation store
 	// shared across all tiers. Wired post-construction via
 	// SetSessionRevocation; nil disables the in-flight access-token
@@ -485,6 +498,58 @@ func (s *authService) usableProvidersForLinks(ctx context.Context, links []iface
 // SetSessionRevocation wires the Redis-backed sid revocation store.
 func (s *authService) SetSessionRevocation(rev SessionRevocationService) {
 	s.sessionRevocation = rev
+}
+
+// UnlinkLockRedisClient is the narrow shape the per-account unlink lock
+// needs: SetNX to take the key, Eval to release it only if still ours.
+type UnlinkLockRedisClient interface {
+	SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) (bool, error)
+	Eval(ctx context.Context, script string, keys []string, args ...interface{}) (interface{}, error)
+}
+
+// unlinkLockTTL bounds how long a crashed replica can hold an account's
+// lock. An unlink is two reads and two writes; ten seconds is generous.
+const unlinkLockTTL = 10 * time.Second
+
+// SetUnlinkLock wires the lock store that serializes credential removal
+// per account.
+func (s *authService) SetUnlinkLock(client UnlinkLockRedisClient) {
+	s.unlinkLock = client
+}
+
+// withAccountLock runs fn while holding the account's credential-change
+// lock. A held lock refuses with ErrCredentialChangeInProgress; a lock
+// store that cannot answer refuses with ErrOAuthStoreUnavailable — the
+// guard this protects is "do not remove the last way in", and running
+// it unserialized because Redis is down would be guessing. No store
+// wired means no lock (fork behaviour preserved).
+func (s *authService) withAccountLock(ctx context.Context, userUUID string, fn func() error) error {
+	if s.unlinkLock == nil {
+		return fn()
+	}
+	token, err := randomLeaseToken()
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
+	}
+	key := "auth:credential-change:" + string(s.audience) + ":" + userUUID
+	ok, err := s.unlinkLock.SetNX(ctx, key, token, unlinkLockTTL)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
+	}
+	if !ok {
+		return ErrCredentialChangeInProgress
+	}
+	defer func() {
+		// Release on our own clock: the request may be cancelled by now,
+		// and a lock left behind blocks the account for the whole TTL.
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		if _, rerr := s.unlinkLock.Eval(rctx, leaseReleaseScript, []string{key}, token); rerr != nil {
+			slog.Default().Warn("auth: failed to release the account credential-change lock; it expires on its own",
+				slog.String("user_uuid", userUUID), slog.String("error", rerr.Error()))
+		}
+	}()
+	return fn()
 }
 
 // SetBlobStore wires the object-storage handle used to resolve
@@ -807,33 +872,36 @@ func (s *authService) AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUI
 		return ErrOAuthLinkNotFound
 	}
 
-	links, err := s.activeOAuthLinks(ctx, targetUUID)
-	if err != nil {
-		return err
-	}
-	// §4.7: resolve what actually counts as a way in BEFORE mutating.
-	// Strict reads — break-glass never counts as a lasting credential,
-	// and any uncertainty refuses with 503 rather than guessing.
-	passwordUsable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
-	if err != nil {
-		return err
-	}
-	usable, err := s.usableProvidersForLinks(ctx, links)
-	if err != nil {
-		return err
-	}
-	providerID, locked, found := wouldLockOutOAuthUnlink(target, links, provider, passwordUsable, usable)
-	if !found {
-		return ErrOAuthLinkNotFound
-	}
-	if locked {
-		return ErrLastCredentialRemoval
-	}
-
-	if err := s.deleteProviderRow(ctx, targetUUID, provider, providerID); err != nil {
-		return err
-	}
-	if err := s.userService.RemoveOAuthLinkFromUser(ctx, targetUUID, provider, providerID); err != nil {
+	// Same lock as the self path — the account is what is serialized,
+	// not the caller (see ErrCredentialChangeInProgress).
+	if err := s.withAccountLock(ctx, targetUUID, func() error {
+		links, err := s.activeOAuthLinks(ctx, targetUUID)
+		if err != nil {
+			return err
+		}
+		// §4.7: resolve what actually counts as a way in BEFORE mutating.
+		// Strict reads — break-glass never counts as a lasting credential,
+		// and any uncertainty refuses with 503 rather than guessing.
+		passwordUsable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+		if err != nil {
+			return err
+		}
+		usable, err := s.usableProvidersForLinks(ctx, links)
+		if err != nil {
+			return err
+		}
+		providerID, locked, found := wouldLockOutOAuthUnlink(target, links, provider, passwordUsable, usable)
+		if !found {
+			return ErrOAuthLinkNotFound
+		}
+		if locked {
+			return ErrLastCredentialRemoval
+		}
+		if err := s.deleteProviderRow(ctx, targetUUID, provider, providerID); err != nil {
+			return err
+		}
+		return s.userService.RemoveOAuthLinkFromUser(ctx, targetUUID, provider, providerID)
+	}); err != nil {
 		return err
 	}
 
@@ -898,32 +966,37 @@ func (s *authService) SelfUnlinkOAuth(ctx context.Context, userUUID string, prov
 	if user == nil {
 		return ErrOAuthLinkNotFound
 	}
-	links, err := s.activeOAuthLinks(ctx, userUUID)
-	if err != nil {
-		return err
-	}
-	// §4.7: resolve what actually counts as a way in BEFORE mutating.
-	// Strict reads — break-glass never counts as a lasting credential,
-	// and any uncertainty refuses with 503 rather than guessing.
-	passwordUsable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
-	if err != nil {
-		return err
-	}
-	usable, err := s.usableProvidersForLinks(ctx, links)
-	if err != nil {
-		return err
-	}
-	providerID, locked, found := wouldLockOutOAuthUnlink(user, links, provider, passwordUsable, usable)
-	if !found {
-		return ErrOAuthLinkNotFound
-	}
-	if locked {
-		return ErrLastCredentialRemoval
-	}
-	if err := s.deleteProviderRow(ctx, userUUID, provider, providerID); err != nil {
-		return err
-	}
-	if err := s.userService.RemoveOAuthLinkFromUser(ctx, userUUID, provider, providerID); err != nil {
+	// The guard and the removal run under the account's lock: two
+	// concurrent unlinks must not each pass the guard on the other's
+	// link (see ErrCredentialChangeInProgress).
+	if err := s.withAccountLock(ctx, userUUID, func() error {
+		links, err := s.activeOAuthLinks(ctx, userUUID)
+		if err != nil {
+			return err
+		}
+		// §4.7: resolve what actually counts as a way in BEFORE mutating.
+		// Strict reads — break-glass never counts as a lasting credential,
+		// and any uncertainty refuses with 503 rather than guessing.
+		passwordUsable, err := s.policy.PasswordLoginEnabled(ctx, s.audience)
+		if err != nil {
+			return err
+		}
+		usable, err := s.usableProvidersForLinks(ctx, links)
+		if err != nil {
+			return err
+		}
+		providerID, locked, found := wouldLockOutOAuthUnlink(user, links, provider, passwordUsable, usable)
+		if !found {
+			return ErrOAuthLinkNotFound
+		}
+		if locked {
+			return ErrLastCredentialRemoval
+		}
+		if err := s.deleteProviderRow(ctx, userUUID, provider, providerID); err != nil {
+			return err
+		}
+		return s.userService.RemoveOAuthLinkFromUser(ctx, userUUID, provider, providerID)
+	}); err != nil {
 		return err
 	}
 	s.RecordSelfAuthEvent(ctx, "self_oauth_unlink", userUUID, map[string]interface{}{
@@ -1057,7 +1130,7 @@ func (s *authService) SelfLinkOAuthFromCallback(
 	// truth, so it is written before the embedded read-model and its
 	// outcome decides the call. A duplicate owned by someone else is the
 	// typed self-link conflict; a store failure refuses.
-	reserved, err := s.claimIdentity(ctx, providerDoc)
+	reserved, created, err := s.claimIdentity(ctx, providerDoc)
 	if err != nil {
 		if errors.Is(err, ErrOAuthIdentityClaimedByOther) {
 			return ErrOAuthLinkClaimedByOther
@@ -1067,11 +1140,16 @@ func (s *authService) SelfLinkOAuthFromCallback(
 	if err := s.userService.AddOAuthLinkToUser(ctx, userUUID, link); err != nil {
 		// Compensate: the read-model failed, so the ownership row must
 		// not stand alone (a login would heal it, but the user asked to
-		// link now and is told it failed).
-		if derr := s.oauthProviderRepo.DeleteProvider(ctx, reserved.UUID); derr != nil {
-			s.recordOAuthCompensationFailure()
-			slog.Default().Error("auth: failed to release a self-link identity after a read-model failure",
-				slog.String("provider_doc", reserved.UUID), slog.String("error", derr.Error()))
+		// link now and is told it failed). Only a row THIS call created
+		// is released — a duplicate handed back by claimIdentity belongs
+		// to the concurrent flow that wrote it, and deleting it would
+		// undo that flow's successful link.
+		if created {
+			if derr := s.oauthProviderRepo.DeleteProvider(ctx, reserved.UUID); derr != nil {
+				s.recordOAuthCompensationFailure()
+				slog.Default().Error("auth: failed to release a self-link identity after a read-model failure",
+					slog.String("provider_doc", reserved.UUID), slog.String("error", derr.Error()))
+			}
 		}
 		return fmt.Errorf("persist user link: %w", err)
 	}
@@ -2487,39 +2565,41 @@ func (s *authService) ConvertOAuthLinksToNewFormat(ctx context.Context, userUUID
 // index on (provider, providerId) a duplicate key means "already
 // recorded", so the outcome of THIS write decides the whole flow:
 //
-//	success                 → continue
-//	duplicate, same owner   → continue (a benign double callback, two tabs)
+//	success                 → continue (created=true)
+//	duplicate, same owner   → continue (a benign double callback, two tabs;
+//	                          created=false — the row belongs to the flow
+//	                          that wrote it, and only that flow may release it)
 //	duplicate, tombstoned   → ErrOAuthIdentityUnlinked (D2 revives it)
 //	duplicate, other owner  → ErrOAuthIdentityClaimedByOther, no session
 //	any other error         → ErrOAuthStoreUnavailable, no session
-func (s *authService) claimIdentity(ctx context.Context, doc *models.OAuthProviderDoc) (*models.OAuthProviderDoc, error) {
-	err := s.oauthProviderRepo.CreateOAuthProvider(ctx, doc)
+func (s *authService) claimIdentity(ctx context.Context, doc *models.OAuthProviderDoc) (row *models.OAuthProviderDoc, created bool, err error) {
+	err = s.oauthProviderRepo.CreateOAuthProvider(ctx, doc)
 	if err == nil {
-		return doc, nil
+		return doc, true, nil
 	}
 	if errors.Is(err, repository.ErrOAuthProviderAlreadyLinked) {
 		// The per-user (userUuid, provider) index: this account already
 		// has a different identity of this provider. Not an ownership
 		// question, and not an outage to retry forever.
-		return nil, ErrOAuthLinkAlreadyExists
+		return nil, false, ErrOAuthLinkAlreadyExists
 	}
 	if !errors.Is(err, repository.ErrOAuthIdentityDuplicate) {
 		slog.Default().Error("auth: oauth identity write failed",
 			slog.String("provider", string(doc.Provider)), slog.String("error", err.Error()))
-		return nil, fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
+		return nil, false, fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
 	}
 
 	existing, rerr := s.oauthProviderRepo.GetByProviderAndIDIncludingUnlinked(ctx, doc.Provider, doc.ProviderID)
 	if rerr != nil || existing == nil {
-		return nil, ErrOAuthStoreUnavailable
+		return nil, false, ErrOAuthStoreUnavailable
 	}
 	if existing.UnlinkedAt != nil {
-		return nil, ErrOAuthIdentityUnlinked
+		return nil, false, ErrOAuthIdentityUnlinked
 	}
 	if existing.UserUUID != doc.UserUUID {
-		return nil, ErrOAuthIdentityClaimedByOther
+		return nil, false, ErrOAuthIdentityClaimedByOther
 	}
-	return existing, nil
+	return existing, false, nil
 }
 
 // recordOAuthCompensationFailure counts a failed backwards compensation —
@@ -2744,7 +2824,10 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			//    is ever created for a lost race, and no sentinel is
 			//    claimed for it either.
 			newUUID := models.GenerateUUIDv7()
-			reserved, err := s.claimIdentity(ctx, newOAuthProviderDoc(newUUID, provider, providerID, email, true, oauthTokens, userInfo))
+			// A freshly generated UUID cannot own a prior row, so a
+			// successful claim here is always a row this flow created and
+			// may release.
+			reserved, _, err := s.claimIdentity(ctx, newOAuthProviderDoc(newUUID, provider, providerID, email, true, oauthTokens, userInfo))
 			if err != nil {
 				return nil, err
 			}
@@ -2861,7 +2944,7 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 		// link is the derived read-model, best-effort.
 		userProviders, _ := s.oauthProviderRepo.GetByUserUUID(ctx, user.UUID)
 		doc := newOAuthProviderDoc(user.UUID, provider, providerID, email, len(userProviders) == 0, oauthTokens, userInfo)
-		claimed, err := s.claimIdentity(ctx, doc)
+		claimed, _, err := s.claimIdentity(ctx, doc)
 		if err != nil {
 			return nil, err
 		}

@@ -186,6 +186,12 @@ func mapAdminUserAuthError(err error) error {
 	case errors.Is(err, services.ErrAuthPolicyUnavailable):
 		return errcode.ServiceUnavailable(errcode.AuthPolicyUnavailable,
 			"Sign-in policy is temporarily unavailable; try again shortly.")
+	case errors.Is(err, services.ErrOAuthStoreUnavailable):
+		return errcode.ServiceUnavailable(errcode.AuthOAuthStoreUnavailable,
+			"The sign-in identity store is temporarily unavailable; try again shortly.")
+	case errors.Is(err, services.ErrCredentialChangeInProgress):
+		return huma.NewError(http.StatusConflict, "credential_change_in_progress",
+			&huma.ErrorDetail{Message: "another change to this user's login methods is in progress — try again in a moment"})
 	case errors.Is(err, services.ErrLastCredentialRemoval):
 		return huma.NewError(http.StatusConflict, "last_credential",
 			&huma.ErrorDetail{Message: "user has no other login method — send a password reset first"})

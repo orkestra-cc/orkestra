@@ -173,7 +173,9 @@ claimed by two different users, which it reports and refuses until an
 operator names the keeper per identity; every deletion it then makes is
 printed for the change record.
 
-The module verifies that index at every start. While it is missing on
+The module verifies that index at every start, by name and by its `unique`
+option (an ordinary index on the same keys carries the same name and
+guarantees nothing). While it is missing or not unique on
 either collection the module's health check reports degraded, naming the
 migration, and every OAuth login and link path answers a retryable
 `oauth_store_unavailable` instead of running the ownership flow without the
@@ -190,6 +192,14 @@ way in. A sign-in with a tombstoned identity is refused with
 `oauth_identity_unlinked`, never silently re-linked by the email match: the
 user signs in another way and re-links it from Security. The account itself
 is untouched.
+
+Removing a credential is serialized per account: the "no way in" check and
+the removal run under a short per-account lock, so two removals racing each
+other cannot both pass the check on the other's link and leave nothing. A
+removal that arrives while another one holds the account answers
+`credential_change_in_progress` and can simply be retried; if the lock store
+cannot answer, the removal is refused with `oauth_store_unavailable` rather
+than run unguarded.
 
 Ownership is written before anything else. Every path that attaches an
 identity to an account — a first social sign-in, an automatic link by

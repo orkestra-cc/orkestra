@@ -139,7 +139,7 @@ func newBackfillModule(t *testing.T, opts ...backfillOpt) (*AuthModule, *backfil
 	t.Helper()
 	d := &backfillDeps{users: &backfillUsers{}, claimer: &backfillClaimer{}}
 	m := &AuthModule{
-		indexLister:       fakeIndexLister{names: bothIndexed()},
+		indexLister:       fakeIndexLister{specs: bothIndexed()},
 		firstAdminClaimer: d.claimer,
 		roleHolderFinder:  d.users,
 		operatorUsers:     d.users,

@@ -16,44 +16,62 @@ import (
 	"github.com/orkestra/backend/internal/core/auth/models"
 )
 
-// fakeIndexLister answers ListIndexNames from a map; a missing collection
-// returns no names, a configured error is returned for every call.
+// fakeIndexLister answers ListIndexes from a map; a missing collection
+// returns no indexes, a configured error is returned for every call.
 type fakeIndexLister struct {
-	names map[string][]string
+	specs map[string][]indexSpec
 	err   error
 }
 
-func (f fakeIndexLister) ListIndexNames(_ context.Context, collection string) ([]string, error) {
+func (f fakeIndexLister) ListIndexes(_ context.Context, collection string) ([]indexSpec, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	return f.names[collection], nil
+	return f.specs[collection], nil
 }
 
-func bothIndexed() map[string][]string {
-	return map[string][]string{
-		models.OperatorOAuthProvidersCollection: {"_id_", "userUuid_1_provider_1", oauthIdentityIndexName},
-		models.ClientOAuthProvidersCollection:   {"_id_", "userUuid_1_provider_1", oauthIdentityIndexName},
+func bothIndexed() map[string][]indexSpec {
+	return map[string][]indexSpec{
+		models.OperatorOAuthProvidersCollection: {{Name: "_id_"}, {Name: "userUuid_1_provider_1", Unique: true}, {Name: oauthIdentityIndexName, Unique: true}},
+		models.ClientOAuthProvidersCollection:   {{Name: "_id_"}, {Name: "userUuid_1_provider_1", Unique: true}, {Name: oauthIdentityIndexName, Unique: true}},
 	}
 }
 
 func TestVerifyOAuthIdentityIndex_PresentOnBothIsNil(t *testing.T) {
-	m := &AuthModule{indexLister: fakeIndexLister{names: bothIndexed()}}
+	m := &AuthModule{indexLister: fakeIndexLister{specs: bothIndexed()}}
 	if err := m.verifyOAuthIdentityIndex(context.Background()); err != nil {
 		t.Fatalf("both collections indexed, got %v", err)
 	}
 }
 
 func TestVerifyOAuthIdentityIndex_MissingOnOneNamesThatCollection(t *testing.T) {
-	names := bothIndexed()
-	names[models.ClientOAuthProvidersCollection] = []string{"_id_", "userUuid_1_provider_1"}
-	m := &AuthModule{indexLister: fakeIndexLister{names: names}}
+	specs := bothIndexed()
+	specs[models.ClientOAuthProvidersCollection] = []indexSpec{{Name: "_id_"}, {Name: "userUuid_1_provider_1", Unique: true}}
+	m := &AuthModule{indexLister: fakeIndexLister{specs: specs}}
 	err := m.verifyOAuthIdentityIndex(context.Background())
 	if err == nil {
 		t.Fatal("a collection without the index must be reported")
 	}
 	if !strings.Contains(err.Error(), models.ClientOAuthProvidersCollection) {
 		t.Fatalf("error must name the collection, got %v", err)
+	}
+}
+
+// An index that merely carries the migration's name proves nothing: a
+// plain createIndex({provider:1, providerId:1}) auto-generates the SAME
+// name without the unique option, and ensureCollections only logs the
+// drift. The constraint the ownership-first flow relies on is uniqueness,
+// so that is what the check must read.
+func TestVerifyOAuthIdentityIndex_SameNameNonUniqueIsMissing(t *testing.T) {
+	specs := bothIndexed()
+	specs[models.OperatorOAuthProvidersCollection] = []indexSpec{{Name: "_id_"}, {Name: "userUuid_1_provider_1", Unique: true}, {Name: oauthIdentityIndexName, Unique: false}}
+	m := &AuthModule{indexLister: fakeIndexLister{specs: specs}}
+	err := m.verifyOAuthIdentityIndex(context.Background())
+	if err == nil {
+		t.Fatal("a non-unique index with the migration's name must be reported as missing")
+	}
+	if !strings.Contains(err.Error(), models.OperatorOAuthProvidersCollection) || !strings.Contains(err.Error(), "unique") {
+		t.Fatalf("error must name the collection and say the index is not unique, got %v", err)
 	}
 }
 

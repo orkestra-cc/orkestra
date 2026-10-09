@@ -423,9 +423,19 @@ func errOutcome(err error) string {
 // ensureCollections produces from the ordered spec on a fresh install.
 const oauthIdentityIndexName = "provider_1_providerId_1"
 
+// indexSpec is what the boot check reads about one index: its name and
+// whether it is unique. The name alone proves nothing — a plain
+// createIndex({provider:1, providerId:1}) auto-generates the migration's
+// name WITHOUT the unique option, and ensureCollections only logs that
+// drift — so uniqueness is read, not inferred.
+type indexSpec struct {
+	Name   string
+	Unique bool
+}
+
 // indexLister is the narrow read the boot check needs.
 type indexLister interface {
-	ListIndexNames(ctx context.Context, collection string) ([]string, error)
+	ListIndexes(ctx context.Context, collection string) ([]indexSpec, error)
 }
 
 // verifyOAuthIdentityIndex reports an error naming the first provider
@@ -437,19 +447,22 @@ func (m *AuthModule) verifyOAuthIdentityIndex(ctx context.Context) error {
 		return fmt.Errorf("oauth identity index check: no index lister wired")
 	}
 	for _, collection := range []string{models.OperatorOAuthProvidersCollection, models.ClientOAuthProvidersCollection} {
-		names, err := m.indexLister.ListIndexNames(ctx, collection)
+		specs, err := m.indexLister.ListIndexes(ctx, collection)
 		if err != nil {
 			return fmt.Errorf("oauth identity index check: list indexes on %s: %w", collection, err)
 		}
-		found := false
-		for _, n := range names {
-			if n == oauthIdentityIndexName {
-				found = true
+		var found *indexSpec
+		for i := range specs {
+			if specs[i].Name == oauthIdentityIndexName {
+				found = &specs[i]
 				break
 			}
 		}
-		if !found {
+		if found == nil {
 			return fmt.Errorf("oauth identity index check: %s has no %s index — run migration 0010", collection, oauthIdentityIndexName)
+		}
+		if !found.Unique {
+			return fmt.Errorf("oauth identity index check: %s index %s is not unique — drop it and run migration 0010", collection, oauthIdentityIndexName)
 		}
 	}
 	return nil
@@ -474,7 +487,7 @@ func (m *AuthModule) oauthStoreDegraded() bool { return m.oauthIndexMissing.Load
 // mongoIndexLister is the production indexLister: the module database.
 type mongoIndexLister struct{ db *mongo.Database }
 
-func (l mongoIndexLister) ListIndexNames(ctx context.Context, collection string) ([]string, error) {
+func (l mongoIndexLister) ListIndexes(ctx context.Context, collection string) ([]indexSpec, error) {
 	if l.db == nil {
 		return nil, fmt.Errorf("no database")
 	}
@@ -483,15 +496,16 @@ func (l mongoIndexLister) ListIndexNames(ctx context.Context, collection string)
 		return nil, err
 	}
 	defer cur.Close(ctx)
-	var names []string
+	var specs []indexSpec
 	for cur.Next(ctx) {
 		var spec struct {
-			Name string `bson:"name"`
+			Name   string `bson:"name"`
+			Unique bool   `bson:"unique"`
 		}
 		if err := cur.Decode(&spec); err != nil {
 			return nil, err
 		}
-		names = append(names, spec.Name)
+		specs = append(specs, indexSpec{Name: spec.Name, Unique: spec.Unique})
 	}
-	return names, cur.Err()
+	return specs, cur.Err()
 }

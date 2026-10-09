@@ -982,6 +982,14 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		return fmt.Errorf("auth: Redis adapter lacks EVAL support")
 	}
 	attemptCounter := services.NewRedisAttemptCounter(scriptRedis, logger)
+	// The per-account credential-change lock needs SetNX + EVAL too; the
+	// same adapter provides both, and a client without them must be a
+	// boot failure for the same reason as above — unserialized unlinks
+	// can remove an account's last way in.
+	unlinkLockRedis, ok := deps.RedisAdapter.(services.UnlinkLockRedisClient)
+	if !ok {
+		return fmt.Errorf("auth: Redis adapter lacks SETNX/EVAL support for the credential-change lock")
+	}
 	// Bounded dispatcher for transactional auth mail (D5). Constructed
 	// here so it exists before the tier bundles that hand it to
 	// PasswordAuthConfig; started/stopped by maintenance.go's Start/Stop
@@ -1223,6 +1231,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// would stay valid until the per-token TTL ticked over.
 	opBundle.authService.SetSessionRevocation(sessionRevocationSvc)
 	opBundle.authService.SetOAuthStoreGate(m.oauthStoreDegraded)
+	opBundle.authService.SetUnlinkLock(unlinkLockRedis)
 	// Same store for the password service: ResetPassword / ChangePassword
 	// push every evicted sid so a credential change kills access tokens
 	// already in flight instead of waiting out their TTL.
@@ -1396,6 +1405,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	}
 	clBundle.authService.SetSessionRevocation(sessionRevocationSvc)
 	clBundle.authService.SetOAuthStoreGate(m.oauthStoreDegraded)
+	clBundle.authService.SetUnlinkLock(unlinkLockRedis)
 	clBundle.passwordSvc.SetSessionRevocation(sessionRevocationSvc)
 
 	// §4.7: the unlink guards count usable links through the same strict
