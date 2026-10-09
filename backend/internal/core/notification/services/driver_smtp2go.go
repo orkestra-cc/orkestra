@@ -110,10 +110,21 @@ func newSMTP2GODriver(logger *slog.Logger, endpoint func(string) (string, bool),
 func (d *smtp2goDriver) Name() string { return "smtp2go" }
 
 // Requires: identity plus the API key. The region is not listed: the record
-// list defaults it to global, and an empty one reads as global. The secret
-// is invisible to the save-time gate (D5).
+// list defaults it to global, and an empty one reads as global — its value
+// is checked by Unusable instead. The secret is invisible to the save-time
+// gate (D5).
 func (d *smtp2goDriver) Requires() []ProfileRequirement {
 	return []ProfileRequirement{{Key: SubFromAddress}, {Key: SubSMTP2GOAPIKey, Secret: true}}
+}
+
+// Unusable (ProfileChecker): a region with no API host. The config plane
+// does not enforce enum options, so without this a profile carrying one
+// would pass save and readiness and then fail every send.
+func (d *smtp2goDriver) Unusable(p SenderProfile) []string {
+	if _, ok := smtp2goEndpoint(p.SMTP2GORegion); !ok {
+		return []string{SubSMTP2GORegion}
+	}
+	return nil
 }
 
 // Capabilities: ListUnsubscribeHeaders is false for the reason the mailup
@@ -155,7 +166,7 @@ func (d *smtp2goDriver) Send(ctx context.Context, p SenderProfile, msg EmailMess
 		return err
 	}
 	endpoint, ok := d.endpoint(p.SMTP2GORegion)
-	if !ok {
+	if !ok { // Unusable already refused this; kept for the endpoint seam
 		return &ProfileIncompleteError{Driver: d.Name(), Missing: []string{SubSMTP2GORegion}}
 	}
 	payload := smtp2goRequest{
@@ -199,12 +210,12 @@ func (d *smtp2goDriver) Send(ctx context.Context, p SenderProfile, msg EmailMess
 		return transportError("smtp2go", "read", err)
 	}
 	if tooLarge {
-		return vendorBodyError("smtp2go", resp.StatusCode, bodyTooLarge, 0, "")
+		return smtp2goClassify(msg, vendorBodyError("smtp2go", resp.StatusCode, bodyTooLarge, 0, ""))
 	}
 
 	var env smtp2goResponse
 	if len(raw) == 0 || json.Unmarshal(raw, &env) != nil {
-		return vendorBodyError("smtp2go", resp.StatusCode, bodyUnparseable, len(raw), strings.TrimSpace(resp.Header.Get("Content-Type")))
+		return smtp2goClassify(msg, vendorBodyError("smtp2go", resp.StatusCode, bodyUnparseable, len(raw), strings.TrimSpace(resp.Header.Get("Content-Type"))))
 	}
 
 	// Success is an allowlist. SMTP2GO answers 200 for a request whose
@@ -219,17 +230,7 @@ func (d *smtp2goDriver) Send(ctx context.Context, p SenderProfile, msg EmailMess
 		if data.ErrorCode != "" {
 			status = "error"
 		}
-		envErr := vendorEnvelopeError("smtp2go", resp.StatusCode, status, data.ErrorCode)
-		// SMTP2GO answers 400 to every refused request (an unverified
-		// sender, a malformed field) and documents no attachment-specific
-		// error code, so a 4xx says nothing about the attachment. Only 413 —
-		// the request was too large — is a verdict on it. Callers treat
-		// ErrAttachmentRejected as final, so a wrong positive would turn a
-		// fixable configuration error into a permanent one.
-		if len(msg.Attachments) > 0 && resp.StatusCode == http.StatusRequestEntityTooLarge {
-			return fmt.Errorf("%w: %w", ErrAttachmentRejected, envErr)
-		}
-		return envErr
+		return smtp2goClassify(msg, vendorEnvelopeError("smtp2go", resp.StatusCode, status, data.ErrorCode))
 	}
 	d.logger.Info("notification.email accepted",
 		slog.String("to", msg.To),
@@ -237,4 +238,19 @@ func (d *smtp2goDriver) Send(ctx context.Context, p SenderProfile, msg EmailMess
 		slog.String("provider", "smtp2go"),
 	)
 	return nil
+}
+
+// smtp2goClassify wraps a failed response in ErrAttachmentRejected when it is
+// a verdict on the attachment. SMTP2GO answers 400 to every refused request
+// (an unverified sender, a malformed field) and documents no
+// attachment-specific error code, so a 4xx says nothing about the attachment.
+// Only 413 — the request was too large — is a verdict on it, whatever its
+// body: a proxy in front of the API answers it with an HTML page or nothing.
+// Callers treat ErrAttachmentRejected as final, so a wrong positive would
+// turn a fixable configuration error into a permanent one.
+func smtp2goClassify(msg EmailMessage, se *SendError) error {
+	if len(msg.Attachments) > 0 && se.HTTP == http.StatusRequestEntityTooLarge {
+		return fmt.Errorf("%w: %w", ErrAttachmentRejected, se)
+	}
+	return se
 }

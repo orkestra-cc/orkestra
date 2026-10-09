@@ -92,8 +92,19 @@ const (
 	SaveTimeView
 )
 
-// ProfileIncompleteError lists the sub-field keys a profile is missing.
-// The keys are ours (constants), never operator text.
+// ProfileChecker is an optional EmailDriver companion for what Requires()
+// cannot express: a sub-field that is present but holds a value the driver
+// cannot use (the config plane does not enforce enum options). Its keys must
+// be non-secret, since ValidateProfile runs it in both views — save,
+// activation, readiness and send then agree on whether a profile is usable.
+type ProfileChecker interface {
+	// Unusable returns the sub-field keys whose values the driver cannot use.
+	Unusable(p SenderProfile) []string
+}
+
+// ProfileIncompleteError lists the sub-field keys a profile is missing, or
+// holds a value its driver cannot use (ProfileChecker). The keys are ours
+// (constants), never operator text.
 type ProfileIncompleteError struct {
 	Driver  string
 	Missing []string
@@ -115,6 +126,9 @@ func ValidateProfile(d EmailDriver, p SenderProfile, view RequirementView) error
 		if strings.TrimSpace(p.Field(r.Key)) == "" {
 			missing = append(missing, r.Key)
 		}
+	}
+	if c, ok := d.(ProfileChecker); ok {
+		missing = append(missing, c.Unusable(p)...)
 	}
 	if len(missing) == 0 {
 		return nil

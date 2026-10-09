@@ -163,8 +163,12 @@ default). **Success ⇔ 2xx ∧ body ≤ 64 KiB ∧ parses ∧ `Status=="done"` 
 MailUp support, or the vendor rejects the message.
 `smtp2go` `from_address`, `smtp2go_api_key` (secret); `smtp2go_region`
 (`global` | `eu` | `us` | `au`, default `global`) picks the API host —
-`api.smtp2go.com` or `<region>-api.smtp2go.com` — and an unknown value fails
-the send as incomplete (`missing=smtp2go_region`) before any request, never
+`api.smtp2go.com` or `<region>-api.smtp2go.com`. The config plane does not
+enforce enum options, so the driver also implements the optional
+`ProfileChecker` companion (`Unusable(p) []string`), which `ValidateProfile`
+runs in **both** views: an unknown region is reported like a missing field
+(`notification.sender_incomplete` on `smtp2go_region` at save, not-ready in
+preflight, `missing=smtp2go_region` at send, before any request), never
 falling through to another region. Sends `POST https://<host>/v3/email/send`
 with the key in the `X-Smtp2go-Api-Key` header — never in the body.
 `reply_to` rides in `custom_headers` (the API has no field for it); `Category`
@@ -296,7 +300,7 @@ Every refusal — pre-driver, or a driver returning `ErrAttachmentRejected` (bar
 
 **MailUp wire shape.** `mailup` also reports `Attachments: true`: `msg.Attachments` become the request body's `Attachments: [{Filename, Body}]`, `Body` a plain base64 string (not the `.NET`-style byte array some third-party clients use — confirmed against MailUp's own transactional API by a real send). The vendor never returns an attachment-specific error code, so the driver classifies coarsely, the same trade as the SMTP 552/554 mapping: a 4xx response to a send that carried attachments becomes `ErrAttachmentRejected` wrapping the vendor envelope error — **except 401/403/408/429**, which are credential, timeout and throttling conditions rather than a verdict on the attachment and keep their normal (retryable) classification, since callers treat `ErrAttachmentRejected` as final; a 4xx without attachments, any 5xx, or a 200 carrying MailUp's own error envelope, is not — that shape has no attachment-specific signal to key off. MailUp's own documented attachment ceiling sits above this module's 5 MiB raw cap, so the cap never depends on the vendor.
 
-**SMTP2GO wire shape.** `smtp2go` reports `Attachments: true`: `msg.Attachments` become `attachments: [{filename, fileblob, mimetype}]`, `fileblob` standard base64 — the shape SMTP2GO's API reference and its official Go client both declare. The classification is **narrower than MailUp's**: SMTP2GO answers 400 to every refused request (an unverified sender, a malformed field) and documents no attachment-specific error code, so a 4xx says nothing about the attachment. Only a **413** on a send that carried attachments becomes `ErrAttachmentRejected`; every other status keeps its normal (retryable) classification, because a false positive would make a fixable configuration error final.
+**SMTP2GO wire shape.** `smtp2go` reports `Attachments: true`: `msg.Attachments` become `attachments: [{filename, fileblob, mimetype}]`, `fileblob` standard base64 — the shape SMTP2GO's API reference and its official Go client both declare. The classification is **narrower than MailUp's**: SMTP2GO answers 400 to every refused request (an unverified sender, a malformed field) and documents no attachment-specific error code, so a 4xx says nothing about the attachment. Only a **413** on a send that carried attachments becomes `ErrAttachmentRejected` — whatever its body, since a proxy in front of the API answers it with an HTML page or nothing; every other status keeps its normal (retryable) classification, because a false positive would make a fixable configuration error final.
 
 ## HTTP endpoints
 

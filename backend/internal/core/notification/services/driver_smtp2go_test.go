@@ -121,6 +121,27 @@ func TestSMTP2GODriver_UnknownRegionRefusedBeforeRequest(t *testing.T) {
 	}
 }
 
+// TestSMTP2GODriver_UnknownRegionIsNotReady: the config plane does not
+// enforce enum options, so a region the driver cannot use must fail the
+// shared ValidateProfile seam — the one save, activation, readiness and send
+// all read — never only Send, or the profile would look ready and fail
+// every message.
+func TestSMTP2GODriver_UnknownRegionIsNotReady(t *testing.T) {
+	d := NewSMTP2GODriver(nil)
+	for _, view := range []RequirementView{SaveTimeView, RuntimeView} {
+		err := ValidateProfile(d, SenderProfile{FromAddress: "f", SMTP2GOAPIKey: "k", SMTP2GORegion: "mars"}, view)
+		var inc *ProfileIncompleteError
+		if !errors.As(err, &inc) || len(inc.Missing) != 1 || inc.Missing[0] != SubSMTP2GORegion {
+			t.Fatalf("view %d: err = %v, want ProfileIncompleteError naming %s", view, err, SubSMTP2GORegion)
+		}
+	}
+	for _, region := range []string{"", "global", "eu"} {
+		if err := ValidateProfile(d, SenderProfile{FromAddress: "f", SMTP2GOAPIKey: "k", SMTP2GORegion: region}, RuntimeView); err != nil {
+			t.Fatalf("region %q must be usable: %v", region, err)
+		}
+	}
+}
+
 func TestSMTP2GODriver_RequestShapeAndSuccess(t *testing.T) {
 	var raw []byte
 	var method, path, ctype, auth, apiKey string
@@ -340,24 +361,30 @@ func TestSMTP2GODriver_TimeoutAndRefusedProfile(t *testing.T) {
 // positive would turn a fixable configuration error into a permanent one.
 func TestSMTP2GODriver_AttachmentRejection_StatusTable(t *testing.T) {
 	pdf := []iface.Attachment{{Filename: "r.pdf", ContentType: "application/pdf", Data: []byte("%PDF-")}}
+	envelope := `{"data":{"error_code":"x"}}`
 	cases := []struct {
 		name        string
 		status      int
+		body        string
 		attachments []iface.Attachment
 		rejected    bool
 	}{
-		{"413 with attachments", http.StatusRequestEntityTooLarge, pdf, true},
-		{"413 without attachments", http.StatusRequestEntityTooLarge, nil, false},
-		{"400 with attachments", http.StatusBadRequest, pdf, false},
-		{"401 with attachments", http.StatusUnauthorized, pdf, false},
-		{"429 with attachments", http.StatusTooManyRequests, pdf, false},
-		{"500 with attachments", http.StatusInternalServerError, pdf, false},
+		{"413 with attachments", http.StatusRequestEntityTooLarge, envelope, pdf, true},
+		// A proxy in front of the API answers 413 with an HTML page or
+		// nothing: the verdict is the status, not whether the body parses.
+		{"413 html page with attachments", http.StatusRequestEntityTooLarge, "<html>too large</html>", pdf, true},
+		{"413 empty body with attachments", http.StatusRequestEntityTooLarge, "", pdf, true},
+		{"413 without attachments", http.StatusRequestEntityTooLarge, envelope, nil, false},
+		{"400 with attachments", http.StatusBadRequest, envelope, pdf, false},
+		{"401 with attachments", http.StatusUnauthorized, envelope, pdf, false},
+		{"429 with attachments", http.StatusTooManyRequests, envelope, pdf, false},
+		{"500 with attachments", http.StatusInternalServerError, envelope, pdf, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			d, _ := smtp2goServer(t, func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tc.status)
-				_, _ = w.Write([]byte(`{"data":{"error_code":"x"}}`))
+				_, _ = w.Write([]byte(tc.body))
 			})
 			err := d.Send(context.Background(), smtp2goProfile(), EmailMessage{To: "a@example.com", Subject: "s", BodyText: "b", Attachments: tc.attachments})
 			if err == nil {
