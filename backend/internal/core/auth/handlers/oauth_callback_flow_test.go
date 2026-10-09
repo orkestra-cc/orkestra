@@ -107,10 +107,27 @@ type fakeProvider struct {
 	info        *services.UserInfo
 	infoErr     error
 	exchanges   int
+	// PKCE (D34): what the start endpoint sent and what the callback
+	// handed to the exchange.
+	pkce      bool
+	challenge string
+	lastReq   *services.CodeExchangeRequest
 }
 
-func (p *fakeProvider) ExchangeCodeForToken(context.Context, *services.CodeExchangeRequest) (*services.TokenResponse, error) {
+func (p *fakeProvider) SupportsPKCE() bool { return p.pkce }
+
+func (p *fakeProvider) lastChallenge() string { return p.challenge }
+
+func (p *fakeProvider) lastExchange() *services.CodeExchangeRequest {
+	if p.lastReq == nil {
+		return &services.CodeExchangeRequest{}
+	}
+	return p.lastReq
+}
+
+func (p *fakeProvider) ExchangeCodeForToken(_ context.Context, req *services.CodeExchangeRequest) (*services.TokenResponse, error) {
 	p.exchanges++
+	p.lastReq = req
 	return p.token, p.exchangeErr
 }
 func (p *fakeProvider) GetUserInfo(context.Context, string) (*services.UserInfo, error) {
@@ -120,7 +137,8 @@ func (p *fakeProvider) ValidateIDToken(context.Context, *services.IDTokenValidat
 	return p.info, p.infoErr
 }
 func (p *fakeProvider) GetClientID() string { return "client-id" }
-func (p *fakeProvider) GetAuthURL(state, _, redirect string) string {
+func (p *fakeProvider) GetAuthURL(state, challenge, redirect string) string {
+	p.challenge = challenge
 	return "https://idp.example/authorize?state=" + url.QueryEscape(state) + "&redirect_uri=" + url.QueryEscape(redirect)
 }
 

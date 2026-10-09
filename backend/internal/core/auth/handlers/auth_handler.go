@@ -521,11 +521,27 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
 	}
 
+	provider, err := h.oauthFactory.CreateProvider(req.Body.Provider, cfg)
+	if err != nil {
+		logger.Error("oauth initiation failed", slog.String("outcome", "provider_construct_failed"))
+		return nil, huma.Error500InternalServerError("OAuth not available", err)
+	}
+	// PKCE (spec §4.9 D34): the verifier lives in the state row, the
+	// S256 challenge goes to the provider, and the callback threads the
+	// stored verifier into the exchange. Only for providers PROVEN to
+	// accept it; the others get neither — exactly the pre-D34 request.
+	codeVerifier, codeChallenge, err := pkceForProvider(provider)
+	if err != nil {
+		logger.Error("oauth initiation failed", slog.String("outcome", "pkce_generation_failed"))
+		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
+	}
 	stateRequest := &services.StoreOAuthStateRequest{
 		Provider:       req.Body.Provider,
 		Tier:           h.tier,
 		State:          csrf,
 		RedirectURI:    frontendRedirectURL,
+		CodeVerifier:   codeVerifier,
+		CodeChallenge:  codeChallenge,
 		DeviceInfo:     deviceInfo,
 		ExpiryDuration: 10 * time.Minute,
 	}
@@ -534,15 +550,9 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 		logger.Error("oauth initiation failed", slog.String("outcome", "state_store_failed"))
 		return nil, huma.Error400BadRequest("Failed to create OAuth state", err)
 	}
-
-	provider, err := h.oauthFactory.CreateProvider(req.Body.Provider, cfg)
-	if err != nil {
-		logger.Error("oauth initiation failed", slog.String("outcome", "provider_construct_failed"))
-		return nil, huma.Error500InternalServerError("OAuth not available", err)
-	}
 	// Non-empty by the structural predicate that just passed.
 	backendCallbackURL := cfg.AdditionalConfig["redirect_url"]
-	authURL := provider.GetAuthURL(signedState, "", backendCallbackURL)
+	authURL := provider.GetAuthURL(signedState, codeChallenge, backendCallbackURL)
 
 	return &OAuthLoginResponse{
 		SetCookie: buildOAuthStateCookie(csrf, h.config.Auth.Cookie.Secure),
@@ -618,11 +628,24 @@ func (h *AuthHandler) InitiateOAuthLink(ctx context.Context, req *OAuthLinkReque
 		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
 	}
 
+	providerSvc, err := h.oauthFactory.CreateProvider(provider, cfg)
+	if err != nil {
+		logger.Error("oauth link initiation failed", slog.String("outcome", "provider_construct_failed"))
+		return nil, huma.Error500InternalServerError("OAuth not available", err)
+	}
+	// PKCE (spec §4.9 D34), as on the login start.
+	codeVerifier, codeChallenge, err := pkceForProvider(providerSvc)
+	if err != nil {
+		logger.Error("oauth link initiation failed", slog.String("outcome", "pkce_generation_failed"))
+		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
+	}
 	stateRequest := &services.StoreOAuthStateRequest{
 		Provider:       provider,
 		Tier:           h.tier,
 		State:          csrf,
 		RedirectURI:    frontendRedirectURL,
+		CodeVerifier:   codeVerifier,
+		CodeChallenge:  codeChallenge,
 		ExpiryDuration: 10 * time.Minute,
 		Mode:           services.OAuthStateModeLink,
 		LinkUserUUID:   userUUID,
@@ -631,15 +654,9 @@ func (h *AuthHandler) InitiateOAuthLink(ctx context.Context, req *OAuthLinkReque
 		logger.Error("oauth link initiation failed", slog.String("outcome", "state_store_failed"))
 		return nil, huma.Error400BadRequest("Failed to create OAuth state", err)
 	}
-
-	providerSvc, err := h.oauthFactory.CreateProvider(provider, cfg)
-	if err != nil {
-		logger.Error("oauth link initiation failed", slog.String("outcome", "provider_construct_failed"))
-		return nil, huma.Error500InternalServerError("OAuth not available", err)
-	}
 	// Non-empty by the structural predicate that just passed.
 	backendCallbackURL := cfg.AdditionalConfig["redirect_url"]
-	authURL := providerSvc.GetAuthURL(signedState, "", backendCallbackURL)
+	authURL := providerSvc.GetAuthURL(signedState, codeChallenge, backendCallbackURL)
 
 	return &OAuthLoginResponse{
 		SetCookie: buildOAuthStateCookie(csrf, h.config.Auth.Cookie.Secure),

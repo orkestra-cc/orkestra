@@ -301,6 +301,9 @@ func (s *discordOAuthService) SupportsRefreshTokens() bool {
 	return true
 }
 
+// SupportsPKCE — PKCE proven against Discord's token endpoint (S256).
+func (s *discordOAuthService) SupportsPKCE() bool { return true }
+
 func (s *discordOAuthService) SupportsMobileFlow() bool {
 	return false // Discord doesn't use ID tokens like Google/Apple
 }

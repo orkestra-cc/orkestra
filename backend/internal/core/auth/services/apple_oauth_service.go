@@ -388,6 +388,9 @@ func (s *appleOAuthService) SupportsRefreshTokens() bool {
 	return true
 }
 
+// SupportsPKCE — Apple: false until the staging round-trip of §7 proves the token endpoint accepts code_verifier (edge case 24).
+func (s *appleOAuthService) SupportsPKCE() bool { return false }
+
 func (s *appleOAuthService) SupportsMobileFlow() bool {
 	return true
 }

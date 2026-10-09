@@ -371,6 +371,9 @@ func (s *googleOAuthService) SupportsRefreshTokens() bool {
 	return true
 }
 
+// SupportsPKCE — PKCE proven against Google's token endpoint (S256).
+func (s *googleOAuthService) SupportsPKCE() bool { return true }
+
 func (s *googleOAuthService) SupportsMobileFlow() bool {
 	return true
 }

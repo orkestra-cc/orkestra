@@ -33,6 +33,14 @@ type OAuthProviderInterface interface {
 	GetSupportedScopes() []string
 	GetSupportedGrantTypes() []string
 	SupportsRefreshTokens() bool
+	// SupportsPKCE reports whether this provider's token endpoint has
+	// been PROVEN to accept a code_verifier. It is deliberately not
+	// "does the provider document PKCE": a provider that ignores
+	// code_challenge but rejects code_verifier breaks the exchange
+	// entirely (edge case 24), so a provider stays false until a
+	// staging round-trip confirms it. Promoting one is a one-line
+	// change. Spec §4.9 D34.
+	SupportsPKCE() bool
 	SupportsMobileFlow() bool
 }
 

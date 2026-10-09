@@ -459,40 +459,6 @@ func (m *MemoryOAuthStateStore) DeleteByPattern(ctx context.Context, pattern str
 	return nil
 }
 
-// Helper functions for OAuth state validation
-
-// ValidateOAuthCallback validates OAuth callback parameters against stored state
-func ValidateOAuthCallback(stateInfo *OAuthStateInfo, code, state, codeVerifier string) error {
-	// Validate state matches
-	if stateInfo.State != state {
-		return fmt.Errorf("invalid OAuth state")
-	}
-
-	// Validate authorization code is present
-	if code == "" {
-		return fmt.Errorf("authorization code is required")
-	}
-
-	// Validate PKCE code verifier if challenge was used
-	if stateInfo.CodeChallenge != "" {
-		if codeVerifier == "" {
-			return fmt.Errorf("PKCE code verifier is required")
-		}
-
-		// Verify the code verifier matches the challenge
-		expectedChallenge, err := utils.GeneratePKCEChallengeFromVerifier(codeVerifier)
-		if err != nil {
-			return fmt.Errorf("failed to verify PKCE challenge: %w", err)
-		}
-
-		if expectedChallenge != stateInfo.CodeChallenge {
-			return fmt.Errorf("invalid PKCE code verifier")
-		}
-	}
-
-	return nil
-}
-
 // GenerateSecureState generates a cryptographically secure OAuth state
 func GenerateSecureState() (string, error) {
 	return utils.SecureRandomString(32)
