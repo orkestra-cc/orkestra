@@ -27,8 +27,14 @@ var (
 	ErrCannotRemoveLastOAuthLink = errors.New("cannot remove the last OAuth link")
 	ErrOAuthLinkNotFound         = errors.New("OAuth link not found")
 	ErrOAuthLinkAlreadyExists    = errors.New("OAuth link already exists")
-	ErrUserMigrationRequired     = errors.New("user migration to UUID required")
-	ErrInvalidRefreshToken       = errors.New("invalid refresh token")
+	// ErrOAuthStoreUnavailable: the OAuth identity store cannot be relied
+	// on — the unique (provider, providerId) index is missing (migration
+	// 0010 has not run here) or it could not be read/written. Every OAuth
+	// entry point answers it before touching the store; the callback maps
+	// it to the retryable oauth_store_unavailable code (spec §4.8 D32/D33).
+	ErrOAuthStoreUnavailable = errors.New("OAuth identity store unavailable")
+	ErrUserMigrationRequired = errors.New("user migration to UUID required")
+	ErrInvalidRefreshToken   = errors.New("invalid refresh token")
 	// ErrRefreshTokenReplay signals that a rotated refresh token was used
 	// again after its successor already existed — a textbook replay attack.
 	// The whole family is revoked before this error is returned.
@@ -300,6 +306,13 @@ type AuthService interface {
 	// signature. Empty falls back to operator semantics.
 	SetAudience(a PolicyAudience)
 
+	// SetOAuthStoreGate wires the "is the OAuth identity store degraded"
+	// probe (the boot-time index check). While it reports true every OAuth
+	// entry point answers ErrOAuthStoreUnavailable before any lookup. Nil
+	// keeps the store open — a fork that never wires it keeps today's
+	// behaviour.
+	SetOAuthStoreGate(gate func() bool)
+
 	// SetProviderUsability wires the per-audience "is this provider a
 	// usable web login method" resolver (§4.7): providerOn ∧ structurally
 	// configured against the active snapshot, without this package
@@ -334,6 +347,10 @@ type AuthConfig struct {
 }
 
 type authService struct {
+	// oauthStoreGate reports whether the OAuth identity store is degraded
+	// (module.go wires it to the boot index check). Nil = open.
+	oauthStoreGate func() bool
+
 	userService         iface.UserProvider
 	tenantProvider      iface.TenantProvider
 	oauthProviderRepo   repository.OAuthProviderRepository
@@ -413,6 +430,8 @@ func (s *authService) SetPolicy(p *AuthPolicyService) {
 
 // SetAudience records the surface this service serves so policy
 // reads can fetch audience-scoped knobs.
+func (s *authService) SetOAuthStoreGate(gate func() bool) { s.oauthStoreGate = gate }
+
 func (s *authService) SetAudience(a PolicyAudience) {
 	s.audience = a
 }
@@ -807,6 +826,9 @@ func (s *authService) SelfLinkOAuthFromCallback(
 ) error {
 	if userUUID == "" {
 		return fmt.Errorf("self link: userUUID is required")
+	}
+	if s.oauthStoreGate != nil && s.oauthStoreGate() {
+		return ErrOAuthStoreUnavailable
 	}
 	user, err := s.userService.GetUserByID(ctx, userUUID)
 	if err != nil {
@@ -2307,6 +2329,11 @@ func (s *authService) ConvertOAuthLinksToNewFormat(ctx context.Context, userUUID
 }
 
 func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provider models.OAuthProvider, userInfo map[string]interface{}, oauthTokens *models.OAuthProviderTokens, securityCtx *models.SecurityContext, deviceInfo *models.DeviceInfo) (*models.TokenResponse, error) {
+	// Before any lookup: a degraded identity store (migration 0010 not run
+	// here) must not run the ownership flow without its constraint.
+	if s.oauthStoreGate != nil && s.oauthStoreGate() {
+		return nil, ErrOAuthStoreUnavailable
+	}
 	// First extract email for validation and later use
 	email, _ := userInfo["email"].(string)
 	if email == "" {

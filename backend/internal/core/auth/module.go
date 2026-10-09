@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -31,6 +32,16 @@ import (
 
 type AuthModule struct {
 	module.BaseModule
+
+	// indexLister answers "which indexes exist on this collection" for the
+	// boot-time identity-index check (spec §4.8 D32 item 1). Defaulted to
+	// the module database at Init; a seam so the check is testable.
+	indexLister indexLister
+	// oauthIndexMissing is set at Start when the unique (provider,
+	// providerId) index is absent from either provider collection —
+	// migration 0010 has not run here. While set, HealthCheck reports
+	// degraded and every OAuth entry point answers oauth_store_unavailable.
+	oauthIndexMissing atomic.Bool
 
 	// deviceTrust is a single non-tier-split collection so one handler
 	// is reused across both operator and client mounts.
@@ -772,9 +783,17 @@ func (m *AuthModule) Collections() []module.CollectionSpec {
 		// differs.
 		{Name: models.OperatorOAuthProvidersCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"userUuid": 1, "provider": 1}, Unique: true},
+			// One identity, one owner (spec §4.8 D32 item 1). Ordered, so
+			// the name is provider_1_providerId_1 on a fresh install —
+			// exactly what migration 0010 builds on an existing one and
+			// what verifyOAuthIdentityIndex looks for at Start.
+			// ensureCollections is create-only and non-fatal, so the
+			// migration is what actually guarantees this on an upgrade.
+			{OrderedKeys: []module.IndexKey{{Field: "provider", Direction: 1}, {Field: "providerId", Direction: 1}}, Unique: true},
 		}},
 		{Name: models.ClientOAuthProvidersCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"userUuid": 1, "provider": 1}, Unique: true},
+			{OrderedKeys: []module.IndexKey{{Field: "provider", Direction: 1}, {Field: "providerId", Direction: 1}}, Unique: true},
 		}},
 		{Name: models.OperatorRefreshTokensCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
@@ -891,6 +910,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// Device-trust is the only auth collection that stays single (not
 	// tier-split) — the grant follows the user record and is reused
 	// across both tier mounts.
+	m.indexLister = mongoIndexLister{db: deps.DB}
 	deviceTrustRepo := repository.NewDeviceTrustRepository(deps.DB)
 	deviceTrustDuration := parseDurationEnv("AUTH_DEVICE_TRUST_DURATION", models.DeviceTrustDuration)
 	deviceTrustSvc := services.NewDeviceTrustService(deviceTrustRepo, deviceTrustDuration, logger)
@@ -1189,6 +1209,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// authenticated request. Without this, in-flight access tokens
 	// would stay valid until the per-token TTL ticked over.
 	opBundle.authService.SetSessionRevocation(sessionRevocationSvc)
+	opBundle.authService.SetOAuthStoreGate(m.oauthStoreDegraded)
 	// Same store for the password service: ResetPassword / ChangePassword
 	// push every evicted sid so a credential change kills access tokens
 	// already in flight instead of waiting out their TTL.
@@ -1361,6 +1382,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		clBundle.passwordSvc.SetBlobStore(store)
 	}
 	clBundle.authService.SetSessionRevocation(sessionRevocationSvc)
+	clBundle.authService.SetOAuthStoreGate(m.oauthStoreDegraded)
 	clBundle.passwordSvc.SetSessionRevocation(sessionRevocationSvc)
 
 	// §4.7: the unlink guards count usable links through the same strict

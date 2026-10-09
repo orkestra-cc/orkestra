@@ -161,6 +161,25 @@ operator break-glass restores password login for `POST
 client surface — see [Going SSO-only](/operating/oauth-providers#going-sso-only)
 for the procedure and the drill.
 
+## OAuth identities
+
+An OAuth identity — one Google account, one GitHub account — has exactly one
+owner. Both provider collections carry a unique index on
+`(provider, providerId)`, created on a fresh install by the module's own
+declaration and on an existing one by **migration 0010**
+(`backend/migrations/20260903_oauth_provider_identity_unique.js`). The
+migration never decides ownership: a duplicate on that pair is one identity
+claimed by two different users, which it reports and refuses until an
+operator names the keeper per identity; every deletion it then makes is
+printed for the change record.
+
+The module verifies that index at every start. While it is missing on
+either collection the module's health check reports degraded, naming the
+migration, and every OAuth login and link path answers a retryable
+`oauth_store_unavailable` instead of running the ownership flow without the
+constraint that detects a conflict. Nothing else is affected, and a module
+restart after the migration lifts the degradation.
+
 ## Lockout
 
 Failed attempts are counted in Redis in fixed windows, so the limits hold

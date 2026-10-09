@@ -2,6 +2,9 @@ package auth
 
 import (
 	"context"
+	"fmt"
+	"github.com/orkestra/backend/internal/core/auth/models"
+	"go.mongodb.org/mongo-driver/mongo"
 	"log/slog"
 	"time"
 
@@ -71,6 +74,27 @@ func (m *AuthModule) Start(ctx context.Context) error {
 	// so it starts regardless of whether this replica has sweep tiers
 	// or won the lease.
 	m.mailDispatcher.Start()
+
+	// Migration 0010 is what guarantees the (provider, providerId) unique
+	// index on an existing install; ensureCollections is create-only and
+	// non-fatal, so it cannot be relied on. The ownership-first link flow
+	// DETECTS a conflict by the duplicate key this index produces —
+	// without it, two users would silently share an identity again.
+	//
+	// Never a boot failure: auth is a core module and StartAll propagates
+	// its error to log.Fatalf. Degrade OAuth instead, loudly, and re-check
+	// on every Start so an admin module restart after the migration lifts
+	// the degradation without a redeploy.
+	if m.logger == nil {
+		m.logger = slog.Default()
+	}
+	if err := m.verifyOAuthIdentityIndex(ctx); err != nil {
+		m.oauthIndexMissing.Store(true)
+		m.logger.Error("auth: the OAuth identity unique index is missing — OAuth is degraded until migration 0010 has run",
+			slog.String("error", err.Error()))
+	} else {
+		m.oauthIndexMissing.Store(false)
+	}
 
 	if len(m.sweepTiers) == 0 || m.sweepLease == nil {
 		// Nothing to sweep, or Redis did not satisfy the lease contract
@@ -327,4 +351,82 @@ func errOutcome(err error) string {
 		return "renew_error"
 	}
 	return "not_owner"
+}
+
+// oauthIdentityIndexName is the name migration 0010 gives the unique
+// (provider, providerId) index — and the name the registry's create-only
+// ensureCollections produces from the ordered spec on a fresh install.
+const oauthIdentityIndexName = "provider_1_providerId_1"
+
+// indexLister is the narrow read the boot check needs.
+type indexLister interface {
+	ListIndexNames(ctx context.Context, collection string) ([]string, error)
+}
+
+// verifyOAuthIdentityIndex reports an error naming the first provider
+// collection on which the unique (provider, providerId) index is absent, or
+// whose index list could not be read — an unreadable list must never read
+// as present. Nil when both collections carry it.
+func (m *AuthModule) verifyOAuthIdentityIndex(ctx context.Context) error {
+	if m.indexLister == nil {
+		return fmt.Errorf("oauth identity index check: no index lister wired")
+	}
+	for _, collection := range []string{models.OperatorOAuthProvidersCollection, models.ClientOAuthProvidersCollection} {
+		names, err := m.indexLister.ListIndexNames(ctx, collection)
+		if err != nil {
+			return fmt.Errorf("oauth identity index check: list indexes on %s: %w", collection, err)
+		}
+		found := false
+		for _, n := range names {
+			if n == oauthIdentityIndexName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("oauth identity index check: %s has no %s index — run migration 0010", collection, oauthIdentityIndexName)
+		}
+	}
+	return nil
+}
+
+// HealthCheck implements module.HealthCheckable. The module is degraded —
+// not down — while the OAuth identity index is missing: every non-OAuth
+// flow keeps working, and the /admin/modules/health view says why social
+// sign-in answers oauth_store_unavailable.
+func (m *AuthModule) HealthCheck(ctx context.Context) error {
+	if m.oauthIndexMissing.Load() {
+		return fmt.Errorf("degraded: the OAuth identity unique index (%s) is missing on a provider collection — run migration 0010 and restart the module", oauthIdentityIndexName)
+	}
+	return nil
+}
+
+// oauthStoreDegraded is the probe module.go wires into both tier services
+// (SetOAuthStoreGate). Read live on every OAuth request, so a module
+// restart after the migration lifts the degradation.
+func (m *AuthModule) oauthStoreDegraded() bool { return m.oauthIndexMissing.Load() }
+
+// mongoIndexLister is the production indexLister: the module database.
+type mongoIndexLister struct{ db *mongo.Database }
+
+func (l mongoIndexLister) ListIndexNames(ctx context.Context, collection string) ([]string, error) {
+	if l.db == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	cur, err := l.db.Collection(collection).Indexes().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	var names []string
+	for cur.Next(ctx) {
+		var spec struct {
+			Name string `bson:"name"`
+		}
+		if err := cur.Decode(&spec); err != nil {
+			return nil, err
+		}
+		names = append(names, spec.Name)
+	}
+	return names, cur.Err()
 }
