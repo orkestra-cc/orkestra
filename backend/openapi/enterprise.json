@@ -4573,17 +4573,62 @@
             "readOnly": true,
             "type": "string"
           },
-          "access_token": {
-            "description": "Apple access token from mobile app (optional)",
+          "code_verifier": {
+            "description": "PKCE verifier whose S256 challenge was committed at begin",
             "type": "string"
           },
           "id_token": {
-            "description": "Apple ID token from mobile app",
+            "description": "Apple ID token from Sign in with Apple, minted with the SHA-256 of the nonce that begin answered",
             "type": "string"
           }
         },
         "required": [
-          "id_token"
+          "id_token",
+          "code_verifier"
+        ],
+        "type": "object"
+      },
+      "MobileAuthBeginRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MobileAuthBeginRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "code_challenge": {
+            "description": "base64url S256 of a verifier the app keeps; 43 characters",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code_challenge"
+        ],
+        "type": "object"
+      },
+      "MobileAuthBeginResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MobileAuthBeginResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "nonce": {
+            "description": "Nonce for the platform sign-in SDK. Google: pass as is. Apple: pass the SHA-256 hex of it, as the SDK requires.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nonce"
         ],
         "type": "object"
       },
@@ -4599,17 +4644,18 @@
             "readOnly": true,
             "type": "string"
           },
-          "access_token": {
-            "description": "Google access token from mobile app",
+          "code_verifier": {
+            "description": "PKCE verifier whose S256 challenge was committed at begin",
             "type": "string"
           },
           "id_token": {
-            "description": "Google ID token from mobile app",
+            "description": "Google ID token from the platform sign-in SDK, minted with the nonce that begin answered",
             "type": "string"
           }
         },
         "required": [
-          "id_token"
+          "id_token",
+          "code_verifier"
         ],
         "type": "object"
       },
@@ -13534,7 +13580,7 @@
     },
     "/v1/auth/client/apple/mobile": {
       "post": {
-        "description": "Validate Apple ID token from mobile app and return JWT tokens. Tokens are minted with the audience matching this mount.",
+        "description": "Complete Apple sign-in from a mobile app: the ID token minted with the hashed nonce from begin, plus the PKCE verifier. The record is taken once; any miss is one opaque 401. Tokens are minted with the audience matching this mount.",
         "operationId": "client-mobile-apple-auth",
         "requestBody": {
           "content": {
@@ -13569,6 +13615,49 @@
           }
         },
         "summary": "Authenticate with Apple from mobile app",
+        "tags": [
+          "Authentication",
+          "Mobile"
+        ]
+      }
+    },
+    "/v1/auth/client/apple/mobile/begin": {
+      "post": {
+        "description": "Commit a PKCE S256 code_challenge and receive the nonce. Sign in with Apple takes the SHA-256 hex of that nonce; the ID token then carries it. Completion presents the ID token plus the verifier.",
+        "operationId": "client-mobile-apple-begin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MobileAuthBeginRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MobileAuthBeginResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Begin Apple sign-in from a mobile app",
         "tags": [
           "Authentication",
           "Mobile"
@@ -13664,7 +13753,7 @@
     },
     "/v1/auth/client/google/mobile": {
       "post": {
-        "description": "Validate Google ID token from mobile app and return JWT tokens. Tokens are minted with the audience matching this mount.",
+        "description": "Complete Google sign-in from a mobile app: the ID token minted with the nonce from begin, plus the PKCE verifier. The record is taken once; any miss is one opaque 401. Tokens are minted with the audience matching this mount.",
         "operationId": "client-mobile-google-auth",
         "requestBody": {
           "content": {
@@ -13699,6 +13788,49 @@
           }
         },
         "summary": "Authenticate with Google from mobile app",
+        "tags": [
+          "Authentication",
+          "Mobile"
+        ]
+      }
+    },
+    "/v1/auth/client/google/mobile/begin": {
+      "post": {
+        "description": "Commit a PKCE S256 code_challenge and receive the nonce to hand to the platform sign-in SDK. The backend holds the nonce against the challenge for ten minutes; completion presents the ID token minted with that nonce plus the verifier.",
+        "operationId": "client-mobile-google-begin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MobileAuthBeginRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MobileAuthBeginResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Begin Google sign-in from a mobile app",
         "tags": [
           "Authentication",
           "Mobile"
@@ -14988,7 +15120,7 @@
     },
     "/v1/auth/operator/apple/mobile": {
       "post": {
-        "description": "Validate Apple ID token from mobile app and return JWT tokens. Tokens are minted with the audience matching this mount.",
+        "description": "Complete Apple sign-in from a mobile app: the ID token minted with the hashed nonce from begin, plus the PKCE verifier. The record is taken once; any miss is one opaque 401. Tokens are minted with the audience matching this mount.",
         "operationId": "operator-mobile-apple-auth",
         "requestBody": {
           "content": {
@@ -15023,6 +15155,49 @@
           }
         },
         "summary": "Authenticate with Apple from mobile app",
+        "tags": [
+          "Authentication",
+          "Mobile"
+        ]
+      }
+    },
+    "/v1/auth/operator/apple/mobile/begin": {
+      "post": {
+        "description": "Commit a PKCE S256 code_challenge and receive the nonce. Sign in with Apple takes the SHA-256 hex of that nonce; the ID token then carries it. Completion presents the ID token plus the verifier.",
+        "operationId": "operator-mobile-apple-begin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MobileAuthBeginRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MobileAuthBeginResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Begin Apple sign-in from a mobile app",
         "tags": [
           "Authentication",
           "Mobile"
@@ -15118,7 +15293,7 @@
     },
     "/v1/auth/operator/google/mobile": {
       "post": {
-        "description": "Validate Google ID token from mobile app and return JWT tokens. Tokens are minted with the audience matching this mount.",
+        "description": "Complete Google sign-in from a mobile app: the ID token minted with the nonce from begin, plus the PKCE verifier. The record is taken once; any miss is one opaque 401. Tokens are minted with the audience matching this mount.",
         "operationId": "operator-mobile-google-auth",
         "requestBody": {
           "content": {
@@ -15153,6 +15328,49 @@
           }
         },
         "summary": "Authenticate with Google from mobile app",
+        "tags": [
+          "Authentication",
+          "Mobile"
+        ]
+      }
+    },
+    "/v1/auth/operator/google/mobile/begin": {
+      "post": {
+        "description": "Commit a PKCE S256 code_challenge and receive the nonce to hand to the platform sign-in SDK. The backend holds the nonce against the challenge for ten minutes; completion presents the ID token minted with that nonce plus the verifier.",
+        "operationId": "operator-mobile-google-begin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MobileAuthBeginRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MobileAuthBeginResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Begin Google sign-in from a mobile app",
         "tags": [
           "Authentication",
           "Mobile"

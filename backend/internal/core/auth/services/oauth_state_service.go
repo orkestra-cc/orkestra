@@ -33,7 +33,42 @@ type OAuthStateService interface {
 	// second call with the same id, an unknown id or a record past its
 	// ExpiresAt is an error.
 	TakeOAuthRelay(ctx context.Context, id string) (*OAuthRelayRecord, error)
+
+	// StoreMobileNonce / TakeMobileNonce hold the mobile begin→complete
+	// record (spec §4.10 D35) under key — mobileNonceKeyPrefix plus the
+	// sha256 hex of the nonce — for MobileNonceTTL. Take is a GETDEL: one
+	// completion wins, a failed completion burns the record.
+	StoreMobileNonce(ctx context.Context, key string, rec *MobileNonceRecord) error
+	TakeMobileNonce(ctx context.Context, key string) (*MobileNonceRecord, error)
 }
+
+// MobileNonceRecord is what the mobile `begin` stores and `complete` takes.
+//
+// The nonce is issued and held by the BACKEND, against a challenge the
+// client commits to before it ever sees the nonce. So an ID token
+// exfiltrated on its own — SDK logs, a crash report, a leaked debug
+// build — is worthless: it has no verifier. A token minted for another
+// app or flow has no record. A replay finds none, because the take is a
+// GETDEL.
+//
+// What it does NOT defeat: an attacker who observes the completion
+// request itself (a compromised device, a broken TLS channel) holds both
+// token and verifier and can race the legitimate completion. No
+// request-level control closes that; it is the same boundary the web
+// flow's cookie binding has, and the platform accepts it there.
+type MobileNonceRecord struct {
+	Provider      models.OAuthProvider `json:"provider"`
+	Tier          string               `json:"tier"`
+	CodeChallenge string               `json:"codeChallenge"`
+	CreatedAt     time.Time            `json:"createdAt"`
+	ExpiresAt     time.Time            `json:"expiresAt"`
+}
+
+// MobileNonceKeyPrefix namespaces the mobile records in the shared store.
+const MobileNonceKeyPrefix = "oauth:mobile:nonce:"
+
+// MobileNonceTTL matches the web state row's lifetime.
+const MobileNonceTTL = 10 * time.Minute
 
 // StoreOAuthStateRequest contains parameters for storing OAuth state.
 //
@@ -254,6 +289,43 @@ func (s *oAuthStateService) StoreOAuthRelay(ctx context.Context, rec *OAuthRelay
 		return "", fmt.Errorf("oauth relay: store: %w", err)
 	}
 	return id, nil
+}
+
+func (s *oAuthStateService) StoreMobileNonce(ctx context.Context, key string, rec *MobileNonceRecord) error {
+	if rec == nil || key == "" || rec.Provider == "" || rec.CodeChallenge == "" {
+		return fmt.Errorf("mobile nonce: key, provider and challenge are required")
+	}
+	now := time.Now()
+	rec.CreatedAt = now
+	if rec.ExpiresAt.IsZero() {
+		rec.ExpiresAt = now.Add(MobileNonceTTL)
+	}
+	plain, err := json.Marshal(rec)
+	if err != nil {
+		return fmt.Errorf("mobile nonce: serialize: %w", err)
+	}
+	if err := s.store.Set(ctx, key, plain, MobileNonceTTL); err != nil {
+		return fmt.Errorf("mobile nonce: store: %w", err)
+	}
+	return nil
+}
+
+func (s *oAuthStateService) TakeMobileNonce(ctx context.Context, key string) (*MobileNonceRecord, error) {
+	if key == "" {
+		return nil, fmt.Errorf("mobile nonce: key is required")
+	}
+	plain, err := s.store.Take(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("mobile nonce not found, expired or already used: %w", err)
+	}
+	var rec MobileNonceRecord
+	if err := json.Unmarshal(plain, &rec); err != nil {
+		return nil, fmt.Errorf("mobile nonce: deserialize: %w", err)
+	}
+	if time.Now().After(rec.ExpiresAt) {
+		return nil, fmt.Errorf("mobile nonce expired")
+	}
+	return &rec, nil
 }
 
 func (s *oAuthStateService) TakeOAuthRelay(ctx context.Context, id string) (*OAuthRelayRecord, error) {

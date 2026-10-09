@@ -141,6 +141,10 @@ flutter packages pub run build_runner build
 - **State Management**: Use Provider for simple state, Riverpod for complex features
 - **Testing**: Write widget tests and integration tests for all features
 
+## Backend Sign-In Contract
+
+Social sign-in against the backend is `begin` + `complete` (auth spec §4.10 D35; details in `README.md` → "Social sign-in contract"): commit a PKCE challenge, receive a nonce, hand it to the platform SDK (Apple: its SHA-256 hex), then present `{id_token, code_verifier}`. The nonce is single-use and expires in ten minutes; every completion failure is one opaque `401` that burns it. Never send an `access_token`. The in-tree app has no OAuth code yet; when it gains some, it must follow this sequence and target a backend at or after the release that introduced it.
+
 ## Common Commands
 
 ```bash

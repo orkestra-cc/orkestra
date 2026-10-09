@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,6 +27,10 @@ type fakeStateService struct {
 	err       error
 	validated int
 	stored    []*services.StoreOAuthStateRequest
+	// mobile begin→complete records (D35), with a movable clock
+	mmu    sync.Mutex
+	mobile map[string]*services.MobileNonceRecord
+	skew   time.Duration
 	// relay: the last stored record, handed out exactly once by TakeOAuthRelay.
 	relay      *services.OAuthRelayRecord
 	relayTaken bool
@@ -44,6 +49,44 @@ func (f *fakeStateService) StoreOAuthState(_ context.Context, req *services.Stor
 	f.stored = append(f.stored, req)
 	return &services.OAuthStateInfo{State: req.State, Tier: req.Tier, Provider: req.Provider, RedirectURI: req.RedirectURI}, nil
 }
+
+func (f *fakeStateService) clock() time.Time { return time.Now().Add(f.skew) }
+
+func (f *fakeStateService) StoreMobileNonce(_ context.Context, key string, rec *services.MobileNonceRecord) error {
+	f.mmu.Lock()
+	defer f.mmu.Unlock()
+	if f.mobile == nil {
+		f.mobile = map[string]*services.MobileNonceRecord{}
+	}
+	cp := *rec
+	cp.CreatedAt = f.clock()
+	cp.ExpiresAt = cp.CreatedAt.Add(services.MobileNonceTTL)
+	f.mobile[key] = &cp
+	return nil
+}
+
+func (f *fakeStateService) TakeMobileNonce(_ context.Context, key string) (*services.MobileNonceRecord, error) {
+	f.mmu.Lock()
+	defer f.mmu.Unlock()
+	rec, ok := f.mobile[key]
+	if !ok {
+		return nil, errors.New("mobile nonce not found, expired or already used")
+	}
+	delete(f.mobile, key)
+	if f.clock().After(rec.ExpiresAt) {
+		return nil, errors.New("mobile nonce expired")
+	}
+	return rec, nil
+}
+
+func (f *fakeStateService) recordExists(nonce string) bool {
+	f.mmu.Lock()
+	defer f.mmu.Unlock()
+	_, ok := f.mobile[mobileNonceKey(nonce)]
+	return ok
+}
+
+func (f *fakeStateService) fastForward(d time.Duration) { f.skew += d }
 
 func (f *fakeStateService) StoreOAuthRelay(_ context.Context, rec *services.OAuthRelayRecord) (string, error) {
 	if f.relayErr != nil {
@@ -68,6 +111,9 @@ type fakeResolver struct {
 	err    error
 	list   []models.OAuthProvider
 	calls  int
+	// mobile audience answered, and the platform the handler asked for
+	audience     string
+	lastPlatform string
 }
 
 func (f *fakeResolver) Get(context.Context, models.OAuthProvider) (*services.OAuthProviderConfig, bool) {
@@ -79,8 +125,9 @@ func (f *fakeResolver) RedirectURL(context.Context, models.OAuthProvider) string
 	}
 	return f.cfg.AdditionalConfig["redirect_url"]
 }
-func (f *fakeResolver) MobileAudience(context.Context, models.OAuthProvider, string) string {
-	return ""
+func (f *fakeResolver) MobileAudience(_ context.Context, _ models.OAuthProvider, platform string) string {
+	f.lastPlatform = platform
+	return f.audience
 }
 func (f *fakeResolver) ConfiguredProviders(context.Context) []models.OAuthProvider { return f.list }
 func (f *fakeResolver) OAuthWebProviderUsable(context.Context, services.PolicyAudience, models.OAuthProvider) (*services.OAuthProviderConfig, bool, error) {
@@ -154,15 +201,20 @@ func (f fakeFactory) GetSupportedProviders() []models.OAuthProvider { return nil
 
 type fakeAuthService struct {
 	services.AuthService
-	resp      *models.TokenResponse
-	err       error
-	calls     int
-	lastInfo  map[string]interface{}
-	linkErr   error
-	linkCalls int
+	mu         sync.Mutex
+	resp       *models.TokenResponse
+	err        error
+	calls      int
+	lastInfo   map[string]interface{}
+	lastTokens *models.OAuthProviderTokens
+	linkErr    error
+	linkCalls  int
 }
 
-func (f *fakeAuthService) HandleOAuthCallbackWithLinking(_ context.Context, _ models.OAuthProvider, info map[string]interface{}, _ *models.OAuthProviderTokens, _ *models.SecurityContext, _ *models.DeviceInfo) (*models.TokenResponse, error) {
+func (f *fakeAuthService) HandleOAuthCallbackWithLinking(_ context.Context, _ models.OAuthProvider, info map[string]interface{}, tokens *models.OAuthProviderTokens, _ *models.SecurityContext, _ *models.DeviceInfo) (*models.TokenResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastTokens = tokens
 	f.calls++
 	f.lastInfo = info
 	return f.resp, f.err
@@ -212,8 +264,9 @@ func newCallbackHarness(t *testing.T) *callbackHarness {
 		info:  &services.UserInfo{ProviderID: "g-1", Email: "u@example.com", EmailVerified: true, Name: "U", Picture: "https://p"},
 	}
 	resolver := &fakeResolver{
-		cfg:    &services.OAuthProviderConfig{ClientID: "cid", ClientSecret: "csecret", AdditionalConfig: map[string]string{"redirect_url": "https://console.example/v1/auth/oauth/google/callback"}},
-		usable: true,
+		cfg:      &services.OAuthProviderConfig{ClientID: "cid", ClientSecret: "csecret", AdditionalConfig: map[string]string{"redirect_url": "https://console.example/v1/auth/oauth/google/callback"}},
+		usable:   true,
+		audience: "mobile-client-id",
 	}
 	state := &fakeStateService{info: &services.OAuthStateInfo{Provider: models.OAuthProviderGoogle}}
 	mkAuth := func() *fakeAuthService {
