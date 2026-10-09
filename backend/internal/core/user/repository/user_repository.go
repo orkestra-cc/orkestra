@@ -444,6 +444,7 @@ func (r *mongoUserRepository) FindOldestByRole(ctx context.Context, role string)
 	}
 	opts := options.FindOne().SetSort(bson.D{{Key: "createdAt", Value: 1}, {Key: "uuid", Value: 1}})
 	var user iface.User
+	//tenantscope:allow system: users are audience-tier scoped (one collection per tier, this repository is bound to one), and the first-admin sentinel backfill asks for the platform-wide oldest holder of a system role by design (auth spec §4.7 D31).
 	if err := r.collection.FindOne(ctx, filter, opts).Decode(&user); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, nil
