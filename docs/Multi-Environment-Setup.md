@@ -401,7 +401,7 @@ docker compose -f docker/environments/prod/docker-compose.yml up -d
 ```bash
 # Install required tools
 - Docker & Docker Compose
-- Go 1.26.8+
+- Go 1.26.9+
 - Node.js 18+
 - Git
 
