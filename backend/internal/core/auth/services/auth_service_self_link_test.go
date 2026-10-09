@@ -52,11 +52,25 @@ func (r *fakeOAuthProviderRepo) GetByProviderAndID(_ context.Context, provider a
 	return nil, nil
 }
 
+func (r *fakeOAuthProviderRepo) GetByProviderAndIDIncludingUnlinked(ctx context.Context, provider authModels.OAuthProvider, providerID string) (*authModels.OAuthProviderDoc, error) {
+	return r.GetByProviderAndID(ctx, provider, providerID)
+}
+
 func (r *fakeOAuthProviderRepo) LinkOAuthProvider(context.Context, string, *authModels.OAuthLink) error {
 	panic("unused: LinkOAuthProvider")
 }
-func (r *fakeOAuthProviderRepo) GetByUserUUID(context.Context, string) ([]*authModels.OAuthProviderDoc, error) {
-	panic("unused: GetByUserUUID")
+func (r *fakeOAuthProviderRepo) GetByUserUUID(_ context.Context, userUUID string) ([]*authModels.OAuthProviderDoc, error) {
+	// The provider collection is what the already-linked check reads
+	// since D32; tombstoned rows are excluded like the Mongo repository.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*authModels.OAuthProviderDoc
+	for _, d := range r.byKey {
+		if d.UserUUID == userUUID && d.UnlinkedAt == nil {
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }
 func (r *fakeOAuthProviderRepo) GetPrimaryProvider(context.Context, string) (*authModels.OAuthProviderDoc, error) {
 	panic("unused: GetPrimaryProvider")
@@ -218,6 +232,10 @@ func TestSelfLinkOAuth_RejectsDuplicateProvider(t *testing.T) {
 		},
 	})
 	repo := newFakeOAuthProviderRepo()
+	// The provider collection is what the already-linked check reads (D32).
+	repo.seed(&authModels.OAuthProviderDoc{
+		UUID: "link-old", UserUUID: "u-1", Provider: "google", ProviderID: "g-existing", Email: "old@example.com", LinkedAt: time.Now(),
+	})
 	svc := newSelfLinkSvc(users, repo)
 
 	err := svc.SelfLinkOAuthFromCallback(

@@ -71,6 +71,10 @@ func newOrchestrationEnv(t *testing.T) *orchestrationEnv {
 // payload still validates.
 type orchOAuthRepo struct{}
 
+func (orchOAuthRepo) GetByProviderAndIDIncludingUnlinked(context.Context, authModels.OAuthProvider, string) (*authModels.OAuthProviderDoc, error) {
+	return nil, nil
+}
+
 func (orchOAuthRepo) CreateOAuthProvider(context.Context, *authModels.OAuthProviderDoc) error {
 	return nil
 }

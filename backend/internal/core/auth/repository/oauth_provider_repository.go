@@ -19,6 +19,10 @@ type OAuthProviderRepository interface {
 
 	// Find providers
 	GetByProviderAndID(ctx context.Context, provider models.OAuthProvider, providerID string) (*models.OAuthProviderDoc, error)
+	// GetByProviderAndIDIncludingUnlinked also returns a tombstoned row
+	// (UnlinkedAt != nil) — for callers that must tell "unlinked" apart
+	// from "never seen".
+	GetByProviderAndIDIncludingUnlinked(ctx context.Context, provider models.OAuthProvider, providerID string) (*models.OAuthProviderDoc, error)
 	GetByUserUUID(ctx context.Context, userUUID string) ([]*models.OAuthProviderDoc, error)
 	GetPrimaryProvider(ctx context.Context, userUUID string) (*models.OAuthProviderDoc, error)
 
@@ -110,10 +114,29 @@ func (r *oauthProviderRepository) LinkOAuthProvider(ctx context.Context, userUUI
 	return r.CreateOAuthProvider(ctx, provider)
 }
 
+// GetByProviderAndID resolves an ACTIVE identity. A tombstoned document
+// (UnlinkedAt != nil) is deliberately invisible here: every caller of
+// this method is asking "who owns this identity right now", and an
+// unlinked identity is owned by nobody.
+//
+// Use GetByProviderAndIDIncludingUnlinked when the caller needs to tell
+// "unlinked" apart from "never seen" — the callback does, so it can
+// answer oauth_identity_unlinked instead of starting a signup.
 func (r *oauthProviderRepository) GetByProviderAndID(ctx context.Context, provider models.OAuthProvider, providerID string) (*models.OAuthProviderDoc, error) {
+	return r.findIdentity(ctx, provider, providerID, false)
+}
+
+func (r *oauthProviderRepository) GetByProviderAndIDIncludingUnlinked(ctx context.Context, provider models.OAuthProvider, providerID string) (*models.OAuthProviderDoc, error) {
+	return r.findIdentity(ctx, provider, providerID, true)
+}
+
+func (r *oauthProviderRepository) findIdentity(ctx context.Context, provider models.OAuthProvider, providerID string, includeUnlinked bool) (*models.OAuthProviderDoc, error) {
 	filter := bson.M{
 		"provider":   provider,
 		"providerId": providerID,
+	}
+	if !includeUnlinked {
+		filter["unlinkedAt"] = bson.M{"$exists": false}
 	}
 
 	var result models.OAuthProviderDoc
@@ -129,8 +152,9 @@ func (r *oauthProviderRepository) GetByProviderAndID(ctx context.Context, provid
 	return &result, nil
 }
 
+// GetByUserUUID lists what the user HAS: tombstoned rows are excluded.
 func (r *oauthProviderRepository) GetByUserUUID(ctx context.Context, userUUID string) ([]*models.OAuthProviderDoc, error) {
-	filter := bson.M{"userUuid": userUUID}
+	filter := bson.M{"userUuid": userUUID, "unlinkedAt": bson.M{"$exists": false}}
 
 	// Sort by isPrimary desc, then by linkedAt desc
 	opts := options.Find().SetSort(bson.D{

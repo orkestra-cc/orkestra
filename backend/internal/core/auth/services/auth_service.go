@@ -33,6 +33,11 @@ var (
 	// entry point answers it before touching the store; the callback maps
 	// it to the retryable oauth_store_unavailable code (spec §4.8 D32/D33).
 	ErrOAuthStoreUnavailable = errors.New("OAuth identity store unavailable")
+	// ErrOAuthIdentityUnlinked: the (provider, providerId) identity carries a
+	// tombstone — it was unlinked, by the user or an operator — and must
+	// not sign in or be silently re-linked by the email branch. The
+	// account itself is unaffected (spec §4.8 D32 item 7).
+	ErrOAuthIdentityUnlinked = errors.New("OAuth identity has been unlinked from its account")
 	ErrUserMigrationRequired = errors.New("user migration to UUID required")
 	ErrInvalidRefreshToken   = errors.New("invalid refresh token")
 	// ErrRefreshTokenReplay signals that a rotated refresh token was used
@@ -595,8 +600,38 @@ func (s *authService) SetPrimaryOAuthLink(ctx context.Context, userUUID string, 
 	return s.userService.SetPrimaryOAuthLink(ctx, userUUID, iface.OAuthProvider(input.Provider), targetProviderID)
 }
 
+// activeOAuthLinks reads the user's linked identities from the provider
+// collection — the source of truth for OAuth identity (spec §4.8 D32) —
+// in the iface.OAuthLink shape the listings and the lockout calculation
+// consume. The repository already excludes tombstoned rows, so every
+// link returned is active. user.oauthLinks is a derived read-model and
+// decides nothing.
+func (s *authService) activeOAuthLinks(ctx context.Context, userUUID string) ([]iface.OAuthLink, error) {
+	if s.oauthProviderRepo == nil {
+		return nil, nil
+	}
+	docs, err := s.oauthProviderRepo.GetByUserUUID(ctx, userUUID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
+	}
+	links := make([]iface.OAuthLink, 0, len(docs))
+	for _, d := range docs {
+		links = append(links, iface.OAuthLink{
+			Provider:   iface.OAuthProvider(d.Provider),
+			ProviderID: d.ProviderID,
+			Email:      d.Email,
+			LinkedAt:   d.LinkedAt,
+			IsActive:   true,
+			IsPrimary:  d.IsPrimary,
+			OAuthData:  d.Metadata,
+			LastUsed:   d.LastUsed,
+		})
+	}
+	return links, nil
+}
+
 func (s *authService) GetOAuthLinks(ctx context.Context, userUUID string) (*models.OAuthLinksResponse, error) {
-	links, err := s.userService.GetUserOAuthLinks(ctx, userUUID)
+	links, err := s.activeOAuthLinks(ctx, userUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -679,7 +714,7 @@ func (s *authService) AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUI
 		return ErrOAuthLinkNotFound
 	}
 
-	links, err := s.userService.GetUserOAuthLinks(ctx, targetUUID)
+	links, err := s.activeOAuthLinks(ctx, targetUUID)
 	if err != nil {
 		return err
 	}
@@ -767,7 +802,7 @@ func (s *authService) SelfUnlinkOAuth(ctx context.Context, userUUID string, prov
 	if user == nil {
 		return ErrOAuthLinkNotFound
 	}
-	links, err := s.userService.GetUserOAuthLinks(ctx, userUUID)
+	links, err := s.activeOAuthLinks(ctx, userUUID)
 	if err != nil {
 		return err
 	}
@@ -861,10 +896,11 @@ func (s *authService) SelfLinkOAuthFromCallback(
 		return nil
 	}
 
-	// Already-on-this-user check: walk the embedded array. Picking up
-	// here means a row exists on the user without a matching provider
-	// repo doc — defensive, treat as duplicate.
-	existingLinks, err := s.userService.GetUserOAuthLinks(ctx, userUUID)
+	// Already-on-this-user check, on the provider collection (D32): a
+	// link created by a login has no embedded twin, and the
+	// (userUuid, provider) unique index would reject the row anyway —
+	// answer the typed sentinel instead of a duplicate-key error.
+	existingLinks, err := s.activeOAuthLinks(ctx, userUUID)
 	if err != nil {
 		return err
 	}
@@ -1023,10 +1059,13 @@ func (s *authService) GetUserAuthMethods(ctx context.Context, targetUUID string)
 		}
 	}
 
-	for _, link := range user.OAuthLinks {
-		if !link.IsActive {
-			continue
-		}
+	// The provider collection, not user.oauthLinks: a link created by a
+	// login exists only there, and a tombstoned one must not be listed.
+	links, err := s.activeOAuthLinks(ctx, targetUUID)
+	if err != nil {
+		return nil, err
+	}
+	for _, link := range links {
 		view.OAuthProviders = append(view.OAuthProviders, models.OAuthProviderView{
 			Provider:   string(link.Provider),
 			Email:      link.Email,
@@ -2328,6 +2367,35 @@ func (s *authService) ConvertOAuthLinksToNewFormat(ctx context.Context, userUUID
 	return fmt.Errorf("OAuth link conversion not yet implemented")
 }
 
+// repairEmbeddedOAuthLink re-adds the embedded user.oauthLinks entry for a
+// provider document that has none (a link created by a login). The
+// embedded slice is a derived read-model since D32 — nothing decides on
+// it — so a failure is a WARN, never a failed login.
+func (s *authService) repairEmbeddedOAuthLink(ctx context.Context, user *iface.User, doc *models.OAuthProviderDoc) {
+	if user == nil || doc == nil || s.userService == nil {
+		return
+	}
+	for _, l := range user.OAuthLinks {
+		if string(l.Provider) == string(doc.Provider) && l.ProviderID == doc.ProviderID {
+			return
+		}
+	}
+	err := s.userService.AddOAuthLinkToUser(ctx, user.UUID, iface.OAuthLink{
+		Provider:   iface.OAuthProvider(doc.Provider),
+		ProviderID: doc.ProviderID,
+		Email:      doc.Email,
+		LinkedAt:   doc.LinkedAt,
+		IsActive:   true,
+		IsPrimary:  doc.IsPrimary,
+		OAuthData:  doc.Metadata,
+		LastUsed:   doc.LastUsed,
+	})
+	if err != nil {
+		slog.Default().Warn("auth: could not repair the embedded OAuth link read-model",
+			slog.String("user_uuid", user.UUID), slog.String("provider", string(doc.Provider)), slog.String("error", err.Error()))
+	}
+}
+
 func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provider models.OAuthProvider, userInfo map[string]interface{}, oauthTokens *models.OAuthProviderTokens, securityCtx *models.SecurityContext, deviceInfo *models.DeviceInfo) (*models.TokenResponse, error) {
 	// Before any lookup: a degraded identity store (migration 0010 not run
 	// here) must not run the ownership flow without its constraint.
@@ -2347,10 +2415,19 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 		providerID, _ = userInfo["sub"].(string)
 	}
 
-	// Check if this OAuth provider is already linked
-	existingProvider, err := s.oauthProviderRepo.GetByProviderAndID(ctx, provider, providerID)
-	if err != nil && err.Error() != "failed to find OAuth provider: mongo: no documents in result" {
-		// Don't fail the auth when the optional link lookup is unavailable.
+	// Who owns this identity right now? Looked up INCLUDING tombstones,
+	// because "unlinked" and "never seen" must answer differently: an
+	// unlinked identity is refused here, before the email branch, or the
+	// auto-link path (which matches by verified email) would silently
+	// re-create the link an operator just removed — and the signup path
+	// would mint a second account for it. A store error fails closed:
+	// proceeding would run the ownership flow blind.
+	existingProvider, err := s.oauthProviderRepo.GetByProviderAndIDIncludingUnlinked(ctx, provider, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
+	}
+	if existingProvider != nil && existingProvider.UnlinkedAt != nil {
+		return nil, ErrOAuthIdentityUnlinked
 	}
 
 	var user *iface.User
@@ -2363,6 +2440,9 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			return nil, fmt.Errorf("failed to get user for existing provider: %w", err)
 		}
 		user = userModel
+		// Lazy repair of the derived read-model: a link created by a
+		// login has no embedded twin. Best-effort — it decides nothing.
+		s.repairEmbeddedOAuthLink(ctx, user, existingProvider)
 	} else {
 		// No existing (provider, providerID) link. §4.4 — three things are
 		// decided BEFORE the local email lookup, in this order:

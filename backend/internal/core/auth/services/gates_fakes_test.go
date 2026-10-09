@@ -35,6 +35,8 @@ import (
 // else panics so a regression that adds a new dependency is visible
 // immediately.
 type gateUserFake struct {
+	// addOAuthLinkErr, when set, fails AddOAuthLinkToUser (the read-model repair).
+	addOAuthLinkErr  error
 	mu               sync.Mutex
 	byEmail          map[string]*iface.User
 	byUUID           map[string]*iface.User
@@ -346,6 +348,9 @@ func (f *gateUserFake) ClearMFAGrace(_ context.Context, userUUID string) error {
 func (f *gateUserFake) AddOAuthLinkToUser(_ context.Context, userUUID string, link iface.OAuthLink) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.addOAuthLinkErr != nil {
+		return f.addOAuthLinkErr
+	}
 	u, ok := f.byUUID[userUUID]
 	if !ok {
 		return errNotFound

@@ -17,6 +17,9 @@ export const OAUTH_CALLBACK_ERROR_KEYS = {
   "auth.oauth_email_unverified": "emailUnverified",
   oauth_provider_unavailable: "providerUnavailable",
   oauth_login_failed: "loginFailed",
+  oauth_identity_unlinked: "identityUnlinked",
+  oauth_identity_conflict: "identityConflict",
+  oauth_store_unavailable: "storeUnavailable",
 } as const;
 
 export type OAuthCallbackErrorKey =

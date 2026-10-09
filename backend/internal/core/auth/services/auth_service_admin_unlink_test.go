@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/orkestra/backend/internal/core/auth/repository"
 	"sync"
 	"testing"
 	"time"
@@ -151,7 +152,38 @@ func (f *adminUnlinkUserFake) ClearMFAGrace(context.Context, string) error {
 // populated — riskAssessment, jwt, etc. are nil because the unlink
 // path never reaches them.
 func newAdminUnlinkSvc(fake *adminUnlinkUserFake) *authService {
-	return &authService{userService: fake}
+	return &authService{userService: fake, oauthProviderRepo: &mirrorOAuthRepo{users: fake}}
+}
+
+// mirrorOAuthRepo presents the user fake's embedded links AS the provider
+// collection, so the unlink and auth-methods fixtures keep seeding
+// user.OAuthLinks while the service reads the source of truth (D32): an
+// IsActive=false link plays a tombstoned row.
+type mirrorOAuthRepo struct {
+	repository.OAuthProviderRepository
+	users embeddedLinkReader
+}
+
+type embeddedLinkReader interface {
+	GetUserOAuthLinks(ctx context.Context, userUUID string) ([]iface.OAuthLink, error)
+}
+
+func (m *mirrorOAuthRepo) GetByUserUUID(ctx context.Context, userUUID string) ([]*authModels.OAuthProviderDoc, error) {
+	links, err := m.users.GetUserOAuthLinks(ctx, userUUID)
+	if err != nil {
+		return nil, err
+	}
+	var out []*authModels.OAuthProviderDoc
+	for _, l := range links {
+		if !l.IsActive {
+			continue
+		}
+		out = append(out, &authModels.OAuthProviderDoc{
+			UserUUID: userUUID, Provider: authModels.OAuthProvider(l.Provider), ProviderID: l.ProviderID,
+			Email: l.Email, IsPrimary: l.IsPrimary, LinkedAt: l.LinkedAt, LastUsed: l.LastUsed, Metadata: l.OAuthData,
+		})
+	}
+	return out, nil
 }
 
 func TestAdminUnlinkOAuth_Success(t *testing.T) {

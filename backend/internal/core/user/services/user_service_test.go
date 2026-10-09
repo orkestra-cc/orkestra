@@ -398,6 +398,9 @@ func (r *fakeOAuthProviderRepo) LinkOAuthProvider(context.Context, string, *auth
 func (r *fakeOAuthProviderRepo) GetByProviderAndID(context.Context, authModels.OAuthProvider, string) (*authModels.OAuthProviderDoc, error) {
 	return nil, nil
 }
+func (r *fakeOAuthProviderRepo) GetByProviderAndIDIncludingUnlinked(context.Context, authModels.OAuthProvider, string) (*authModels.OAuthProviderDoc, error) {
+	return nil, nil
+}
 func (r *fakeOAuthProviderRepo) GetPrimaryProvider(context.Context, string) (*authModels.OAuthProviderDoc, error) {
 	return nil, nil
 }

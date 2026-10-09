@@ -38,9 +38,19 @@ const (
 	oauthRelayCompletePath = "/v1/auth/client/oauth/complete"
 
 	// Login-callback failure codes — the closed allowlist of spec §4.10.
-	OAuthCallbackErrAccessDenied        = "oauth_access_denied"
-	OAuthCallbackErrSignupDisabled      = "oauth_signup_disabled"
-	OAuthCallbackErrLinkDisabled        = "oauth_link_disabled"
+	OAuthCallbackErrAccessDenied   = "oauth_access_denied"
+	OAuthCallbackErrSignupDisabled = "oauth_signup_disabled"
+	OAuthCallbackErrLinkDisabled   = "oauth_link_disabled"
+	// OAuthCallbackErrIdentityUnlinked: the identity carries a tombstone —
+	// it was unlinked from its account and must be re-linked from
+	// Security after signing in another way (spec §4.8 D32).
+	OAuthCallbackErrIdentityUnlinked = "oauth_identity_unlinked"
+	// OAuthCallbackErrIdentityConflict: the identity is already owned by
+	// a different account (ownership-first link, D32 item 5).
+	OAuthCallbackErrIdentityConflict = "oauth_identity_conflict"
+	// OAuthCallbackErrStoreUnavailable: the identity store is degraded or
+	// unreachable (migration 0010 not run, or Mongo down) — retryable.
+	OAuthCallbackErrStoreUnavailable    = "oauth_store_unavailable"
 	OAuthCallbackErrEmailUnverified     = errcode.AuthOAuthEmailUnverified
 	OAuthCallbackErrProviderUnavailable = "oauth_provider_unavailable"
 	OAuthCallbackErrLoginFailed         = "oauth_login_failed"
@@ -61,6 +71,9 @@ var oauthCallbackErrorAllowlist = map[string]bool{
 	OAuthCallbackErrEmailUnverified:     true,
 	OAuthCallbackErrProviderUnavailable: true,
 	OAuthCallbackErrLoginFailed:         true,
+	OAuthCallbackErrIdentityUnlinked:    true,
+	OAuthCallbackErrIdentityConflict:    true,
+	OAuthCallbackErrStoreUnavailable:    true,
 }
 
 var oauthLinkCodeAllowlist = map[string]bool{

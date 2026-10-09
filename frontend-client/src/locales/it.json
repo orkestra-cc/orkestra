@@ -106,7 +106,10 @@
         "linkDisabled": "Esiste già un account con questa email e il collegamento automatico è disattivato. Contatta un amministratore.",
         "emailUnverified": "Il provider di identità non ha verificato questo indirizzo email, quindi non può essere usato per accedere.",
         "providerUnavailable": "Questo provider di accesso non è al momento disponibile. Riprova più tardi.",
-        "loginFailed": "Accesso non riuscito. Riprova."
+        "loginFailed": "Accesso non riuscito. Riprova.",
+        "identityUnlinked": "Questo metodo di accesso è stato scollegato dal tuo account. Accedi in un altro modo e ricollegalo dalle impostazioni del tuo account.",
+        "identityConflict": "Questo account del provider è già collegato a un altro utente. Accedi a quell'account, oppure scollegalo prima da lì.",
+        "storeUnavailable": "L'accesso social non è al momento disponibile. Riprova tra poco, oppure accedi in un altro modo."
       }
     }
   },

@@ -180,6 +180,16 @@ migration, and every OAuth login and link path answers a retryable
 constraint that detects a conflict. Nothing else is affected, and a module
 restart after the migration lifts the degradation.
 
+The provider collection is also what every listing reads: the Security
+page, the admin auth-methods view and the unlink safety check ("would this
+leave the account with no way in?") all count the identities that actually
+exist there, so a link created by a sign-in is visible and can be unlinked,
+and an identity that carries an unlink tombstone is neither listed nor
+counted as a way in. A sign-in with a tombstoned identity is refused with
+`oauth_identity_unlinked`, never silently re-linked by the email match: the
+user signs in another way and re-links it from Security. The account itself
+is untouched.
+
 ## Lockout
 
 Failed attempts are counted in Redis in fixed windows, so the limits hold

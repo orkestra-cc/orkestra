@@ -385,7 +385,10 @@
           "linkDisabled": "Esiste già un account con questa email. Accedi e collega il provider dalle impostazioni di sicurezza.",
           "emailUnverified": "Il provider di identità non ha verificato questo indirizzo email, quindi non può essere usato per accedere.",
           "providerUnavailable": "Questo provider di accesso non è al momento disponibile. Riprova più tardi.",
-          "loginFailed": "Autenticazione fallita. Riprova."
+          "loginFailed": "Autenticazione fallita. Riprova.",
+          "identityUnlinked": "Questo metodo di accesso è stato scollegato dal tuo account. Accedi in un altro modo e ricollegalo dalla sezione Sicurezza.",
+          "identityConflict": "Questo account del provider è già collegato a un altro utente. Accedi a quell'account, oppure scollegalo prima da lì.",
+          "storeUnavailable": "L'accesso social non è al momento disponibile. Riprova tra poco, oppure accedi in un altro modo."
         }
       }
     },

@@ -846,6 +846,10 @@ func newOAuthGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[st
 // meaningful.
 type oauthRepoStub struct{}
 
+func (oauthRepoStub) GetByProviderAndIDIncludingUnlinked(context.Context, authModels.OAuthProvider, string) (*authModels.OAuthProviderDoc, error) {
+	return nil, nil
+}
+
 func (oauthRepoStub) CreateOAuthProvider(context.Context, *authModels.OAuthProviderDoc) error {
 	return nil
 }

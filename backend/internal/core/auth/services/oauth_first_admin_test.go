@@ -13,18 +13,19 @@ import (
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 type oauthGateEnv struct {
 	users   *gateUserFake
 	claimer *gateClaimer
-	auth    AuthService
+	auth    *authService
 }
 
-// newOAuthGateService builds a real authService for one audience, with an
-// open registration policy, over the gate fakes.
-func newOAuthGateService(t *testing.T, aud PolicyAudience) (*oauthGateEnv, *gateClaimer) {
+// buildOAuthEnv is the shared builder: a real authService for one audience
+// over the gate fakes, with the given provider store and policy values.
+func buildOAuthEnv(t *testing.T, aud PolicyAudience, repo repository.OAuthProviderRepository, policy map[string]string) *oauthGateEnv {
 	t.Helper()
 	priv := testRSAKey()
 	jwt, err := NewJWTServiceWithAudience(priv, &priv.PublicKey, "test", string(aud), 15*time.Minute, 7*24*time.Hour)
@@ -33,10 +34,10 @@ func newOAuthGateService(t *testing.T, aud PolicyAudience) (*oauthGateEnv, *gate
 	}
 	jwt.SetTenantProvider(gateTenantProvider{})
 	env := &oauthGateEnv{users: newGateUserFake(), claimer: newGateClaimer()}
-	authSvc, err := NewAuthService(&AuthConfig{
+	svc, err := NewAuthService(&AuthConfig{
 		UserService:       env.users,
 		TenantProvider:    gateTenantProvider{},
-		OAuthProviderRepo: &orchOAuthRepo{},
+		OAuthProviderRepo: repo,
 		RefreshTokenRepo:  newGateRefreshRepo(),
 		AuthSessionRepo:   newGateSessionRepo(),
 		JWTService:        jwt,
@@ -45,15 +46,23 @@ func newOAuthGateService(t *testing.T, aud PolicyAudience) (*oauthGateEnv, *gate
 	if err != nil {
 		t.Fatalf("NewAuthService: %v", err)
 	}
-	authSvc.SetAudience(aud)
-	authSvc.SetPolicy(NewAuthPolicyServiceForTest(map[string]string{
+	env.auth = svc.(*authService)
+	env.auth.SetAudience(aud)
+	env.auth.SetPolicy(NewAuthPolicyServiceForTest(policy))
+	return env
+}
+
+// newOAuthGateService builds a real authService for one audience, with an
+// open registration policy, over the gate fakes.
+func newOAuthGateService(t *testing.T, aud PolicyAudience) (*oauthGateEnv, *gateClaimer) {
+	t.Helper()
+	env := buildOAuthEnv(t, aud, newMemOAuthRepo(), map[string]string{
 		"registrationEnabledAdmin":  "true",
 		"registrationEnabledClient": "true",
 		"oauthAllowSignupAdmin":     "true",
 		"oauthAllowSignupClient":    "true",
 		"oauthAutoLinkByEmail":      "true",
-	}))
-	env.auth = authSvc
+	})
 	return env, env.claimer
 }
 

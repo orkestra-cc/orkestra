@@ -30,10 +30,13 @@ describe("parseOAuthCallback — closed contract", () => {
       [
         "auth.oauth_email_unverified",
         "oauth_access_denied",
+        "oauth_identity_conflict",
+        "oauth_identity_unlinked",
         "oauth_link_disabled",
         "oauth_login_failed",
         "oauth_provider_unavailable",
         "oauth_signup_disabled",
+        "oauth_store_unavailable",
       ].sort(),
     );
   });
