@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,12 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+// ErrOAuthIdentityDuplicate wraps the unique-index violation on
+// (provider, providerId). Under that index a duplicate means one thing:
+// this identity is already recorded, and the caller must re-read to find
+// out whose it is.
+var ErrOAuthIdentityDuplicate = errors.New("oauth identity already recorded")
 
 // OAuthProviderRepository handles OAuth provider data operations
 type OAuthProviderRepository interface {
@@ -84,14 +91,14 @@ func (r *oauthProviderRepository) CreateOAuthProvider(ctx context.Context, provi
 		provider.Tier = r.tier
 	}
 
-	// Check if provider already exists
-	existing, err := r.GetByProviderAndID(ctx, provider.Provider, provider.ProviderID)
-	if err == nil && existing != nil {
-		return fmt.Errorf("OAuth provider already exists for user %s", existing.UserUUID)
-	}
-
-	_, err = r.collection.InsertOne(ctx, provider)
-	if err != nil {
+	// The unique (provider, providerId) index decides ownership — not a
+	// read-then-insert, which was the race the index exists to close. A
+	// duplicate key is surfaced as ErrOAuthIdentityDuplicate so the
+	// service can re-read and find out whose identity it is.
+	if _, err := r.collection.InsertOne(ctx, provider); err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return fmt.Errorf("%w: %v", ErrOAuthIdentityDuplicate, err)
+		}
 		return fmt.Errorf("failed to create OAuth provider: %w", err)
 	}
 

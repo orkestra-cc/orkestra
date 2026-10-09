@@ -226,6 +226,12 @@ func oauthLoginErrorCode(err error) (code, outcome string) {
 		return OAuthCallbackErrProviderUnavailable, "policy_unavailable"
 	case errors.Is(err, services.ErrInvalidCredentials):
 		return OAuthCallbackErrLoginFailed, "invalid_credentials"
+	case errors.Is(err, services.ErrOAuthIdentityUnlinked):
+		return OAuthCallbackErrIdentityUnlinked, "identity_unlinked"
+	case errors.Is(err, services.ErrOAuthIdentityClaimedByOther):
+		return OAuthCallbackErrIdentityConflict, "identity_conflict"
+	case errors.Is(err, services.ErrOAuthStoreUnavailable):
+		return OAuthCallbackErrStoreUnavailable, "store_unavailable"
 	}
 	return OAuthCallbackErrLoginFailed, "internal_error"
 }

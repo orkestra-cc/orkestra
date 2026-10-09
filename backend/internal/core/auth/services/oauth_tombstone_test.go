@@ -9,6 +9,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +29,13 @@ type memOAuthRepo struct {
 	repository.OAuthProviderRepository
 	mu   sync.Mutex
 	docs []*authModels.OAuthProviderDoc
+	// failure switches (see the ownership tests)
+	createErr       error
+	dupOwner        string // next create: the identity is already recorded for this user
+	deleteErr       error
+	getErr          error
+	updateTokensErr error
+	deleteCalls     int
 }
 
 func newMemOAuthRepo() *memOAuthRepo { return &memOAuthRepo{} }
@@ -44,11 +52,36 @@ func (r *memOAuthRepo) find(provider authModels.OAuthProvider, providerID string
 }
 
 func (r *memOAuthRepo) GetByProviderAndID(_ context.Context, p authModels.OAuthProvider, id string) (*authModels.OAuthProviderDoc, error) {
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
 	return r.find(p, id, false), nil
 }
 
 func (r *memOAuthRepo) GetByProviderAndIDIncludingUnlinked(_ context.Context, p authModels.OAuthProvider, id string) (*authModels.OAuthProviderDoc, error) {
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
 	return r.find(p, id, true), nil
+}
+
+// DeleteProvider removes one document by its uuid (the compensation and
+// orphan-healing write).
+func (r *memOAuthRepo) DeleteProvider(_ context.Context, uuid string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.deleteCalls++
+	if r.deleteErr != nil {
+		return r.deleteErr
+	}
+	kept := r.docs[:0]
+	for _, d := range r.docs {
+		if d.UUID != uuid {
+			kept = append(kept, d)
+		}
+	}
+	r.docs = kept
+	return nil
 }
 
 func (r *memOAuthRepo) GetByUserUUID(_ context.Context, userUUID string) ([]*authModels.OAuthProviderDoc, error) {
@@ -63,16 +96,40 @@ func (r *memOAuthRepo) GetByUserUUID(_ context.Context, userUUID string) ([]*aut
 	return out, nil
 }
 
+// CreateOAuthProvider behaves like the Mongo repository under the unique
+// (provider, providerId) index: a second row for the same identity is
+// ErrOAuthIdentityDuplicate. dupOwner simulates a race lost to another
+// writer: the identity is recorded for dupOwner just before this insert.
 func (r *memOAuthRepo) CreateOAuthProvider(_ context.Context, d *authModels.OAuthProviderDoc) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.createErr != nil {
+		return r.createErr
+	}
+	if r.dupOwner != "" {
+		owner := r.dupOwner
+		r.dupOwner = ""
+		r.docs = append(r.docs, &authModels.OAuthProviderDoc{
+			UUID: "link-raced-" + d.ProviderID, UserUUID: owner, Provider: d.Provider, ProviderID: d.ProviderID,
+			Email: d.Email, LinkedAt: time.Now(),
+		})
+		return fmt.Errorf("%w: E11000 duplicate key", repository.ErrOAuthIdentityDuplicate)
+	}
+	for _, x := range r.docs {
+		if x.Provider == d.Provider && x.ProviderID == d.ProviderID {
+			return fmt.Errorf("%w: E11000 duplicate key", repository.ErrOAuthIdentityDuplicate)
+		}
+	}
+	if d.UUID == "" {
+		d.UUID = authModels.GenerateUUIDv7()
+	}
 	r.docs = append(r.docs, d)
 	return nil
 }
 
 func (r *memOAuthRepo) UpdateLastUsed(context.Context, string) error { return nil }
 func (r *memOAuthRepo) UpdateOAuthTokens(context.Context, string, string, string, *time.Time, *time.Time, []string) error {
-	return nil
+	return r.updateTokensErr
 }
 func (r *memOAuthRepo) UpdateMetadata(context.Context, string, map[string]interface{}) error {
 	return nil
@@ -85,11 +142,56 @@ type providerDoc struct {
 }
 
 // tombstoneFixture pairs the provider store with the user store the
-// service reads beside it.
+// service reads beside it, the first-admin claimer, and the compensation
+// counter the service reports into.
 type tombstoneFixture struct {
-	repo  *memOAuthRepo
-	users *gateUserFake
+	repo         *memOAuthRepo
+	users        *gateUserFake
+	claimer      *gateClaimer
+	compFailures int
 }
+
+// --- failure switches ---
+
+func (f *tombstoneFixture) duplicateOnNextCreate(owner string) { f.repo.dupOwner = owner }
+func (f *tombstoneFixture) failCreateWith(err error)           { f.repo.createErr = err }
+func (f *tombstoneFixture) failDeleteProvider() {
+	f.repo.deleteErr = errors.New("provider store: delete failed")
+}
+func (f *tombstoneFixture) failUpdateOAuthTokens() {
+	f.repo.updateTokensErr = errors.New("provider store: update failed")
+}
+func (f *tombstoneFixture) failGetByProviderAndIDWith(err error) { f.repo.getErr = err }
+func (f *tombstoneFixture) failCreateUserWith(err error)         { f.users.createFromOAuthAbortErr = err }
+func (f *tombstoneFixture) failGetUserByIDWith(err error)        { f.users.setGetByIDErr(err) }
+func (f *tombstoneFixture) failGetUserByEmailWith(err error)     { f.users.getByEmailErr = err }
+
+// --- observations ---
+
+func (f *tombstoneFixture) providerDocCount(provider, providerID string) int {
+	f.repo.mu.Lock()
+	defer f.repo.mu.Unlock()
+	n := 0
+	for _, d := range f.repo.docs {
+		if string(d.Provider) == provider && d.ProviderID == providerID && d.UnlinkedAt == nil {
+			n++
+		}
+	}
+	return n
+}
+
+func (f *tombstoneFixture) providerDocOwner(provider, providerID string) string {
+	if d := f.repo.find(authModels.OAuthProvider(provider), providerID, true); d != nil {
+		return d.UserUUID
+	}
+	return ""
+}
+
+func (f *tombstoneFixture) createUserCalls() int           { return f.users.createFromOAuthCalls }
+func (f *tombstoneFixture) addOAuthLinkCalls() int         { return f.users.addOAuthLinkCalls }
+func (f *tombstoneFixture) claimerCalls() int              { return f.claimer.claimCalls() }
+func (f *tombstoneFixture) sentinelReleased() bool         { return len(f.claimer.released) > 0 }
+func (f *tombstoneFixture) compensationFailureMetric() int { return f.compFailures }
 
 func (f *tombstoneFixture) seedProvider(t *testing.T, d providerDoc) {
 	t.Helper()
@@ -141,35 +243,46 @@ func (f *tombstoneFixture) failAddOAuthLink() {
 	f.users.addOAuthLinkErr = errors.New("user store: write failed")
 }
 
-type callbackOpt func(policy map[string]string)
+type callbackCfg struct {
+	policy   map[string]string
+	audience PolicyAudience
+}
+
+type callbackOpt func(*callbackCfg)
 
 func withAutoLink(on bool) callbackOpt {
-	return func(p map[string]string) {
+	return func(c *callbackCfg) {
 		if on {
-			p["oauthAutoLinkByEmail"] = "true"
+			c.policy["oauthAutoLinkByEmail"] = "true"
 		} else {
-			p["oauthAutoLinkByEmail"] = "false"
+			c.policy["oauthAutoLinkByEmail"] = "false"
 		}
 	}
 }
+
+func tier(aud PolicyAudience) callbackOpt { return func(c *callbackCfg) { c.audience = aud } }
 
 // newOAuthCallbackService is an operator-tier service over the fixture,
 // every provider usable, auto-link OFF unless withAutoLink(true).
 func newOAuthCallbackService(t *testing.T, opts ...callbackOpt) (*authService, *tombstoneFixture) {
 	t.Helper()
-	policy := map[string]string{
+	cfg := &callbackCfg{audience: PolicyAudienceOperator, policy: map[string]string{
 		"registrationEnabledAdmin":  "true",
+		"registrationEnabledClient": "true",
 		"oauthAllowSignupAdmin":     "true",
+		"oauthAllowSignupClient":    "true",
 		"oauthAutoLinkByEmail":      "false",
 		"passwordLoginEnabledAdmin": "true",
-	}
+	}}
 	for _, o := range opts {
-		o(policy)
+		o(cfg)
 	}
 	repo := newMemOAuthRepo()
-	env := buildOAuthEnv(t, PolicyAudienceOperator, repo, policy)
+	env := buildOAuthEnv(t, cfg.audience, repo, cfg.policy)
 	env.auth.SetProviderUsability(func(context.Context, PolicyAudience, iface.OAuthProvider) (bool, error) { return true, nil })
-	return env.auth, &tombstoneFixture{repo: repo, users: env.users}
+	f := &tombstoneFixture{repo: repo, users: env.users, claimer: env.claimer}
+	env.auth.oauthCompensationFailure = func() { f.compFailures++ }
+	return env.auth, f
 }
 
 func completeOAuthCallback(t *testing.T, svc *authService, provider, providerID, email string) (*authModels.TokenResponse, error) {

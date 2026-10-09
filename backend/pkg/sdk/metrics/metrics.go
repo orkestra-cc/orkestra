@@ -124,6 +124,10 @@ type Collector struct {
 	sessionRevocationStoreFailures *prometheus.CounterVec
 	sessionCapExpiries             prometheus.Counter
 	sessionCapEventFailures        prometheus.Counter
+	// oauthCompensationFailures counts failed backwards compensations on the
+	// OAuth signup reservation (auth spec §4.8 D32 item 5). Unlabelled: the
+	// value is a rate of residue the next callback heals, nothing to slice.
+	oauthCompensationFailures      prometheus.Counter
 	sessionAnchorAnomalies         *prometheus.CounterVec
 	attemptStoreFailures           *prometheus.CounterVec
 	authLockouts                   *prometheus.CounterVec
@@ -216,6 +220,15 @@ func (c *Collector) buildMetrics() {
 			Help:      "Count of Redis failures while reading or writing revoked session identifiers.",
 		},
 		[]string{"operation"},
+	)
+
+	c.oauthCompensationFailures = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "auth",
+			Name:      "oauth_compensation_failures_total",
+			Help:      "Count of failed backwards compensations on an OAuth signup reservation (identity document delete or first-admin sentinel release). The residue heals on the next callback for that identity; a non-zero rate means the identity store was unreachable mid-signup.",
+		},
 	)
 
 	c.sessionCapExpiries = prometheus.NewCounter(
@@ -402,7 +415,7 @@ func (c *Collector) Register() error {
 	if !atomic.CompareAndSwapUint32(&c.registered, 0, 1) {
 		return nil
 	}
-	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.sessionAnchorAnomalies, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped, c.authzCacheInvalidationFailures, c.authzCacheInvalidationRefusals, c.logMaskingPanics, c.compliancePolicySnapshotAge} {
+	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.oauthCompensationFailures, c.sessionAnchorAnomalies, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped, c.authzCacheInvalidationFailures, c.authzCacheInvalidationRefusals, c.logMaskingPanics, c.compliancePolicySnapshotAge} {
 		if err := c.registry.Register(m); err != nil {
 			// rollback so the caller can retry with a fresh collector
 			atomic.StoreUint32(&c.registered, 0)
@@ -492,6 +505,15 @@ func (c *Collector) RecordSessionCapExpiry() {
 		return
 	}
 	c.sessionCapExpiries.Inc()
+}
+
+// RecordOAuthCompensationFailure counts one failed backwards compensation on
+// an OAuth signup reservation (auth spec §4.8 D32 item 5).
+func (c *Collector) RecordOAuthCompensationFailure() {
+	if c == nil || c.oauthCompensationFailures == nil {
+		return
+	}
+	c.oauthCompensationFailures.Inc()
 }
 
 // RecordSessionCapEventFailure counts a cap expiry whose security-event
