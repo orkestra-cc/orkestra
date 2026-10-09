@@ -112,6 +112,7 @@ type fakeResolver struct {
 	list   []models.OAuthProvider
 	calls  int
 	// mobile audience answered, and the platform the handler asked for
+	mu           sync.Mutex
 	audience     string
 	lastPlatform string
 }
@@ -126,6 +127,8 @@ func (f *fakeResolver) RedirectURL(context.Context, models.OAuthProvider) string
 	return f.cfg.AdditionalConfig["redirect_url"]
 }
 func (f *fakeResolver) MobileAudience(_ context.Context, _ models.OAuthProvider, platform string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastPlatform = platform
 	return f.audience
 }

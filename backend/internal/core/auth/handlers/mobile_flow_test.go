@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/internal/core/auth/services"
 	authutils "github.com/orkestra/backend/internal/core/auth/utils"
 	"github.com/orkestra/backend/internal/shared/types"
 )
@@ -282,5 +284,19 @@ func TestMobileBegin_RejectsAnImplausibleChallenge(t *testing.T) {
 		if _, err := hx.operator.HandleMobileGoogleBegin(mobileCtx(""), req); mobileStatusOf(err) != http.StatusBadRequest {
 			t.Fatalf("challenge %q: status %d, want 400", bad, mobileStatusOf(err))
 		}
+	}
+}
+
+// Sign in with Apple carries the SHA-256 of the nonce as hex; the record
+// key must not depend on the hex case the SDK happened to emit.
+func TestMobileRecordKeyFor_AppleClaimIsCaseInsensitive(t *testing.T) {
+	nonce := "n-abc"
+	key := mobileNonceKey(nonce)
+	claim := strings.TrimPrefix(key, services.MobileNonceKeyPrefix)
+	if got := mobileRecordKeyFor(models.OAuthProviderApple, strings.ToUpper(claim)); got != key {
+		t.Fatalf("upper-case claim → %q, want %q", got, key)
+	}
+	if got := mobileRecordKeyFor(models.OAuthProviderApple, claim); got != key {
+		t.Fatalf("lower-case claim → %q, want %q", got, key)
 	}
 }

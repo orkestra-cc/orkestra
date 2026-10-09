@@ -20,6 +20,7 @@ export const OAUTH_CALLBACK_ERROR_KEYS = {
   oauth_identity_unlinked: "identityUnlinked",
   oauth_identity_conflict: "identityConflict",
   oauth_store_unavailable: "storeUnavailable",
+  oauth_provider_already_linked: "providerAlreadyLinked",
 } as const;
 
 export type OAuthCallbackErrorKey =

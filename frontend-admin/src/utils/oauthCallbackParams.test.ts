@@ -169,7 +169,8 @@ describe('parseOAuthCallback (closed contract)', () => {
       oauth_login_failed: 'loginFailed',
       oauth_identity_unlinked: 'identityUnlinked',
       oauth_identity_conflict: 'identityConflict',
-      oauth_store_unavailable: 'storeUnavailable'
+      oauth_store_unavailable: 'storeUnavailable',
+      oauth_provider_already_linked: 'providerAlreadyLinked'
     };
     for (const [code, key] of Object.entries(expected)) {
       expect(

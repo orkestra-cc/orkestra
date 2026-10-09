@@ -168,6 +168,10 @@ type embeddedLinkReader interface {
 	GetUserOAuthLinks(ctx context.Context, userUUID string) ([]iface.OAuthLink, error)
 }
 
+// DeleteProvider: the mirrored row has no uuid of its own; the embedded
+// removal that follows is what the mirror reflects.
+func (m *mirrorOAuthRepo) DeleteProvider(context.Context, string) error { return nil }
+
 func (m *mirrorOAuthRepo) GetByUserUUID(ctx context.Context, userUUID string) ([]*authModels.OAuthProviderDoc, error) {
 	links, err := m.users.GetUserOAuthLinks(ctx, userUUID)
 	if err != nil {

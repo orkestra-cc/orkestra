@@ -388,7 +388,8 @@
           "loginFailed": "Autenticazione fallita. Riprova.",
           "identityUnlinked": "Questo metodo di accesso è stato scollegato dal tuo account. Accedi in un altro modo e ricollegalo dalla sezione Sicurezza.",
           "identityConflict": "Questo account del provider è già collegato a un altro utente. Accedi a quell'account, oppure scollegalo prima da lì.",
-          "storeUnavailable": "L'accesso social non è al momento disponibile. Riprova tra poco, oppure accedi in un altro modo."
+          "storeUnavailable": "L'accesso social non è al momento disponibile. Riprova tra poco, oppure accedi in un altro modo.",
+          "providerAlreadyLinked": "Il tuo account ha già collegata un'altra identità di questo provider. Accedi con quella, oppure scollegala prima dalla sezione Sicurezza."
         }
       }
     },

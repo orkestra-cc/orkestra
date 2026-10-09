@@ -283,6 +283,42 @@ func oauthErrorResponseFor(err error) oauthErrorResponse {
 			outcome:    "policy_unavailable",
 		}
 	}
+	if errors.Is(err, services.ErrOAuthStoreUnavailable) {
+		return oauthErrorResponse{
+			status:     http.StatusServiceUnavailable,
+			code:       errcode.AuthOAuthStoreUnavailable,
+			humaDetail: "Social sign-in is temporarily unavailable; try again shortly",
+			rawDetail:  "Social sign-in is temporarily unavailable; try again shortly",
+			outcome:    "store_unavailable",
+		}
+	}
+	if errors.Is(err, services.ErrOAuthIdentityUnlinked) {
+		return oauthErrorResponse{
+			status:     http.StatusForbidden,
+			code:       errcode.AuthOAuthIdentityUnlinked,
+			humaDetail: "This sign-in method was unlinked from your account; sign in another way and re-link it",
+			rawDetail:  "This sign-in method was unlinked from your account; sign in another way and re-link it",
+			outcome:    "identity_unlinked",
+		}
+	}
+	if errors.Is(err, services.ErrOAuthIdentityClaimedByOther) {
+		return oauthErrorResponse{
+			status:     http.StatusConflict,
+			code:       errcode.AuthOAuthIdentityConflict,
+			humaDetail: "This provider account is already linked to a different user",
+			rawDetail:  "This provider account is already linked to a different user",
+			outcome:    "identity_conflict",
+		}
+	}
+	if errors.Is(err, services.ErrOAuthLinkAlreadyExists) {
+		return oauthErrorResponse{
+			status:     http.StatusConflict,
+			code:       errcode.AuthOAuthProviderAlreadyLinked,
+			humaDetail: "This account already has a different identity from this provider linked",
+			rawDetail:  "This account already has a different identity from this provider linked",
+			outcome:    "provider_already_linked",
+		}
+	}
 	return oauthErrorResponse{
 		status:     http.StatusInternalServerError,
 		humaDetail: "Failed to process authentication",

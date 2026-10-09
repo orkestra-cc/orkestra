@@ -67,7 +67,12 @@ func (r *memOAuthRepo) GetByProviderAndIDIncludingUnlinked(_ context.Context, p 
 
 // DeleteProvider removes one document by its uuid (the compensation and
 // orphan-healing write).
-func (r *memOAuthRepo) DeleteProvider(_ context.Context, uuid string) error {
+func (r *memOAuthRepo) DeleteProvider(ctx context.Context, uuid string) error {
+	// A real store honours a cancelled context: the compensation must
+	// not run on the request's.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.deleteCalls++
@@ -120,6 +125,12 @@ func (r *memOAuthRepo) CreateOAuthProvider(_ context.Context, d *authModels.OAut
 			return fmt.Errorf("%w: E11000 duplicate key", repository.ErrOAuthIdentityDuplicate)
 		}
 	}
+	// The per-user (userUuid, provider) unique index.
+	for _, x := range r.docs {
+		if x.UserUUID == d.UserUUID && x.Provider == d.Provider && x.UnlinkedAt == nil {
+			return fmt.Errorf("%w: E11000 duplicate key", repository.ErrOAuthProviderAlreadyLinked)
+		}
+	}
 	if d.UUID == "" {
 		d.UUID = authModels.GenerateUUIDv7()
 	}
@@ -139,6 +150,7 @@ type providerDoc struct {
 	userUUID, provider, providerID, email string
 	isPrimary                             bool
 	unlinkedAt                            *time.Time
+	createdAt                             time.Time // zero = an hour ago (an old row)
 }
 
 // tombstoneFixture pairs the provider store with the user store the
@@ -199,10 +211,14 @@ func (f *tombstoneFixture) seedProvider(t *testing.T, d providerDoc) {
 	if email == "" {
 		email = fixtureEmail(d.userUUID)
 	}
+	created := d.createdAt
+	if created.IsZero() {
+		created = time.Now().Add(-time.Hour)
+	}
 	_ = f.repo.CreateOAuthProvider(context.Background(), &authModels.OAuthProviderDoc{
 		UUID: "link-" + d.provider + "-" + d.providerID, UserUUID: d.userUUID,
 		Provider: authModels.OAuthProvider(d.provider), ProviderID: d.providerID, Email: email,
-		IsPrimary: d.isPrimary, LinkedAt: time.Now().Add(-time.Hour), UnlinkedAt: d.unlinkedAt,
+		IsPrimary: d.isPrimary, LinkedAt: created, CreatedAt: created, UnlinkedAt: d.unlinkedAt,
 	})
 }
 
@@ -287,8 +303,13 @@ func newOAuthCallbackService(t *testing.T, opts ...callbackOpt) (*authService, *
 
 func completeOAuthCallback(t *testing.T, svc *authService, provider, providerID, email string) (*authModels.TokenResponse, error) {
 	t.Helper()
-	return svc.HandleOAuthCallbackWithLinking(context.Background(), authModels.OAuthProvider(provider),
-		map[string]interface{}{"email": email, "name": "U", "provider_id": providerID, "email_verified": true},
+	return completeOAuthCallbackInfo(t, context.Background(), svc, provider,
+		map[string]interface{}{"email": email, "name": "U", "provider_id": providerID, "email_verified": true})
+}
+
+func completeOAuthCallbackInfo(t *testing.T, ctx context.Context, svc *authService, provider string, info map[string]interface{}) (*authModels.TokenResponse, error) {
+	t.Helper()
+	return svc.HandleOAuthCallbackWithLinking(ctx, authModels.OAuthProvider(provider), info,
 		nil, &authModels.SecurityContext{IPAddress: "1.1.1.1", Timestamp: time.Now()},
 		&authModels.DeviceInfo{Platform: "web"})
 }

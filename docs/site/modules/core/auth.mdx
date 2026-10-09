@@ -183,9 +183,10 @@ restart after the migration lifts the degradation.
 The provider collection is also what every listing reads: the Security
 page, the admin auth-methods view and the unlink safety check ("would this
 leave the account with no way in?") all count the identities that actually
-exist there, so a link created by a sign-in is visible and can be unlinked,
-and an identity that carries an unlink tombstone is neither listed nor
-counted as a way in. A sign-in with a tombstoned identity is refused with
+exist there, so a link created by a sign-in is visible and can be unlinked
+(unlinking removes the identity row, so it stops signing in at once), and an
+identity that carries an unlink tombstone is neither listed nor counted as a
+way in. A sign-in with a tombstoned identity is refused with
 `oauth_identity_unlinked`, never silently re-linked by the email match: the
 user signs in another way and re-links it from Security. The account itself
 is untouched.
@@ -196,8 +197,9 @@ verified email, a link started from Security — records the identity first,
 and only the outcome of that write lets the flow continue: a session is
 never minted for an identity the store has not recorded as that user's. If
 the identity turns out to belong to a different account the sign-in is
-refused with `oauth_identity_conflict`; if the store cannot answer, with a
-retryable `oauth_store_unavailable`. A first sign-in that fails halfway
+refused with `oauth_identity_conflict`; if your account already has a
+different identity of the same provider, with `oauth_provider_already_linked`;
+if the store cannot answer, with a retryable `oauth_store_unavailable`. A first sign-in that fails halfway
 (the identity reserved, the account not created) is cleaned up on the
 spot, and if that clean-up itself fails the leftover reservation heals on
 the next sign-in with that identity, counted in

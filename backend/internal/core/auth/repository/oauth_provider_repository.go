@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/auth/models"
@@ -17,6 +18,25 @@ import (
 // this identity is already recorded, and the caller must re-read to find
 // out whose it is.
 var ErrOAuthIdentityDuplicate = errors.New("oauth identity already recorded")
+
+// ErrOAuthProviderAlreadyLinked wraps the unique-index violation on
+// (userUuid, provider): this user already has an identity of this
+// provider — a different one. Not an ownership question.
+var ErrOAuthProviderAlreadyLinked = errors.New("oauth provider already linked to this user")
+
+// duplicateKeySentinel maps a Mongo duplicate-key error to the sentinel of
+// the index it violated. The provider collections carry two unique
+// indexes: (provider, providerId) — the identity — and (userUuid,
+// provider) — one identity per provider per user. Only the first is an
+// ownership question; the second is "already linked". An unrecognised
+// index falls back to the identity sentinel: the caller's re-read then
+// decides, and a miss there is a refusal, never a silent continue.
+func duplicateKeySentinel(err error) error {
+	if err != nil && strings.Contains(err.Error(), "userUuid") {
+		return ErrOAuthProviderAlreadyLinked
+	}
+	return ErrOAuthIdentityDuplicate
+}
 
 // OAuthProviderRepository handles OAuth provider data operations
 type OAuthProviderRepository interface {
@@ -97,7 +117,7 @@ func (r *oauthProviderRepository) CreateOAuthProvider(ctx context.Context, provi
 	// service can re-read and find out whose identity it is.
 	if _, err := r.collection.InsertOne(ctx, provider); err != nil {
 		if mongo.IsDuplicateKeyError(err) {
-			return fmt.Errorf("%w: %v", ErrOAuthIdentityDuplicate, err)
+			return fmt.Errorf("%w: %v", duplicateKeySentinel(err), err)
 		}
 		return fmt.Errorf("failed to create OAuth provider: %w", err)
 	}

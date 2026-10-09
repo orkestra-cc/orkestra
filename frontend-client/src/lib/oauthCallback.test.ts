@@ -34,6 +34,7 @@ describe("parseOAuthCallback — closed contract", () => {
         "oauth_identity_unlinked",
         "oauth_link_disabled",
         "oauth_login_failed",
+        "oauth_provider_already_linked",
         "oauth_provider_unavailable",
         "oauth_signup_disabled",
         "oauth_store_unavailable",

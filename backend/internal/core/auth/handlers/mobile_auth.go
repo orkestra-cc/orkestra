@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -62,7 +63,8 @@ func mobileNonceKey(nonce string) string {
 // SDK was given (use it as is).
 func mobileRecordKeyFor(provider models.OAuthProvider, nonceClaim string) string {
 	if provider == models.OAuthProviderApple {
-		return services.MobileNonceKeyPrefix + nonceClaim
+		// Lowercase hex, whatever case the SDK emitted.
+		return services.MobileNonceKeyPrefix + strings.ToLower(nonceClaim)
 	}
 	return mobileNonceKey(nonceClaim)
 }

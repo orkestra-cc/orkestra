@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/orkestra/backend/pkg/sdk/metrics"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -639,6 +640,89 @@ func (s *authService) activeOAuthLinks(ctx context.Context, userUUID string) ([]
 	return links, nil
 }
 
+// deleteProviderRow removes the user's row for (provider, providerID) from
+// the provider collection — the source of truth every listing reads
+// (D32). In D1 this is a hard delete, not a tombstone: an older binary
+// then sees exactly what it saw before an unlink, no row. D2 replaces the
+// delete with the tombstone write. Already gone is not an error.
+func (s *authService) deleteProviderRow(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string) error {
+	if s.oauthProviderRepo == nil {
+		return nil
+	}
+	docs, err := s.oauthProviderRepo.GetByUserUUID(ctx, userUUID)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
+	}
+	for _, d := range docs {
+		if string(d.Provider) == string(provider) && d.ProviderID == providerID {
+			if err := s.oauthProviderRepo.DeleteProvider(ctx, d.UUID); err != nil {
+				return fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, err)
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// orphanDisposition decides what a provider row whose owner GetUserByID
+// cannot find really is (D32 item 8). "Not found" alone proves nothing:
+// a soft-deleted owner answers not found too, and so does an in-flight
+// signup whose user row is not written yet. Deleting a real user's
+// identity in either case would be a loss, so the lifecycle probe and a
+// grace window decide, and every uncertain case is retryable.
+type orphanDisposition int
+
+const (
+	orphanRetry orphanDisposition = iota
+	orphanHeal
+	orphanRefuse
+)
+
+// oauthOrphanGrace is how old a reservation must be before a missing owner
+// counts as a crashed signup rather than one still in flight.
+const oauthOrphanGrace = 60 * time.Second
+
+func (s *authService) orphanDisposition(ctx context.Context, doc *models.OAuthProviderDoc) orphanDisposition {
+	probe, ok := s.userService.(iface.UserLifecycleStateProvider)
+	if !ok {
+		slog.Default().Warn("auth: user provider has no lifecycle probe — an orphan reservation cannot be told from a deleted owner, not healing",
+			slog.String("provider_doc", doc.UUID))
+		return orphanRetry
+	}
+	state, err := probe.UserLifecycleState(ctx, doc.UserUUID)
+	if err != nil {
+		return orphanRetry
+	}
+	switch state {
+	case iface.UserLifecycleMissing:
+		if !doc.CreatedAt.IsZero() && time.Since(doc.CreatedAt) < oauthOrphanGrace {
+			return orphanRetry
+		}
+		return orphanHeal
+	case iface.UserLifecycleDeleted:
+		return orphanRefuse
+	default:
+		// The probe sees a live row GetUserByID did not: inconsistent,
+		// never a reason to delete anything.
+		return orphanRetry
+	}
+}
+
+// signupDisplayName is the name a first social sign-in lands with: the
+// IdP's, or the email's local part when the IdP sends none (Apple never
+// carries a name in the ID token; GitHub users may have no profile name).
+// Never a type assertion on a possibly-missing key — that panic would
+// fire after the identity is reserved and the sentinel claimed.
+func signupDisplayName(userInfo map[string]interface{}, email string) string {
+	if name, _ := userInfo["name"].(string); strings.TrimSpace(name) != "" {
+		return strings.TrimSpace(name)
+	}
+	if i := strings.IndexByte(email, '@'); i > 0 {
+		return email[:i]
+	}
+	return email
+}
+
 func (s *authService) GetOAuthLinks(ctx context.Context, userUUID string) (*models.OAuthLinksResponse, error) {
 	links, err := s.activeOAuthLinks(ctx, userUUID)
 	if err != nil {
@@ -746,6 +830,9 @@ func (s *authService) AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUI
 		return ErrLastCredentialRemoval
 	}
 
+	if err := s.deleteProviderRow(ctx, targetUUID, provider, providerID); err != nil {
+		return err
+	}
 	if err := s.userService.RemoveOAuthLinkFromUser(ctx, targetUUID, provider, providerID); err != nil {
 		return err
 	}
@@ -832,6 +919,9 @@ func (s *authService) SelfUnlinkOAuth(ctx context.Context, userUUID string, prov
 	}
 	if locked {
 		return ErrLastCredentialRemoval
+	}
+	if err := s.deleteProviderRow(ctx, userUUID, provider, providerID); err != nil {
+		return err
 	}
 	if err := s.userService.RemoveOAuthLinkFromUser(ctx, userUUID, provider, providerID); err != nil {
 		return err
@@ -2407,6 +2497,12 @@ func (s *authService) claimIdentity(ctx context.Context, doc *models.OAuthProvid
 	if err == nil {
 		return doc, nil
 	}
+	if errors.Is(err, repository.ErrOAuthProviderAlreadyLinked) {
+		// The per-user (userUuid, provider) index: this account already
+		// has a different identity of this provider. Not an ownership
+		// question, and not an outage to retry forever.
+		return nil, ErrOAuthLinkAlreadyExists
+	}
 	if !errors.Is(err, repository.ErrOAuthIdentityDuplicate) {
 		slog.Default().Error("auth: oauth identity write failed",
 			slog.String("provider", string(doc.Provider)), slog.String("error", err.Error()))
@@ -2536,6 +2632,11 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 		// Fallback to sub claim for OpenID Connect providers
 		providerID, _ = userInfo["sub"].(string)
 	}
+	if providerID == "" {
+		// Now that the provider collection decides ownership, an empty id
+		// would resolve to whoever holds (provider, "") — refuse it.
+		return nil, ErrInvalidCredentials
+	}
 
 	// Who owns this identity right now? Looked up INCLUDING tombstones,
 	// because "unlinked" and "never seen" must answer differently: an
@@ -2564,17 +2665,30 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			// login has no embedded twin. Best-effort — it decides nothing.
 			s.repairEmbeddedOAuthLink(ctx, user, existingProvider)
 		case errors.Is(err, iface.ErrUserNotFound) || (err == nil && userModel == nil):
-			// An ORPHAN reservation (D32 item 8): a crash between the
-			// identity reservation and the user creation, or a
-			// compensation that failed. Nobody owns it — it is not a
-			// linked identity — so delete it and continue as unlinked.
-			// The same person completes their signup on this very
-			// attempt. Before, this state was terminal: any lookup
-			// error was fatal.
-			if derr := s.oauthProviderRepo.DeleteProvider(ctx, existingProvider.UUID); derr != nil {
-				return nil, fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, derr)
+			// Possibly an ORPHAN reservation (D32 item 8): a crash between
+			// the identity reservation and the user creation, or a
+			// compensation that failed. But "not found" alone is not
+			// proof — orphanDisposition tells a true orphan from a
+			// soft-deleted owner and from an in-flight signup.
+			switch s.orphanDisposition(ctx, existingProvider) {
+			case orphanHeal:
+				// Nobody owns it — it is not a linked identity — so
+				// delete it and continue as unlinked. The same person
+				// completes their signup on this very attempt. Before,
+				// this state was terminal: any lookup error was fatal.
+				if derr := s.oauthProviderRepo.DeleteProvider(ctx, existingProvider.UUID); derr != nil {
+					return nil, fmt.Errorf("%w: %v", ErrOAuthStoreUnavailable, derr)
+				}
+				existingProvider = nil
+			case orphanRefuse:
+				// A soft-deleted owner: the account exists, the identity
+				// stays with it, and it does not sign in.
+				return nil, ErrInvalidCredentials
+			default:
+				// Too young to call (an in-flight signup), no probe, or an
+				// inconsistent answer: retryable, nothing deleted.
+				return nil, ErrOAuthStoreUnavailable
 			}
-			existingProvider = nil
 		default:
 			// An OUTAGE is not an absence. Deleting a real user's
 			// identity because Mongo was briefly unavailable would be
@@ -2640,13 +2754,18 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			// logged and counted; item 8 heals the residue on the next
 			// callback for this identity.
 			releaseReservation := func(claimed bool) {
-				if derr := s.oauthProviderRepo.DeleteProvider(ctx, reserved.UUID); derr != nil {
+				// The request context may already be cancelled (a client
+				// that disconnected mid-signup): the compensation runs on
+				// its own clock, or the reservation is stranded.
+				cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				if derr := s.oauthProviderRepo.DeleteProvider(cctx, reserved.UUID); derr != nil {
 					s.recordOAuthCompensationFailure()
 					slog.Default().Error("auth: failed to release a reserved oauth identity",
 						slog.String("provider_doc", reserved.UUID), slog.String("error", derr.Error()))
 				}
 				if claimed && s.firstAdminClaimer != nil {
-					if rerr := s.firstAdminClaimer.Release(ctx, newUUID); rerr != nil {
+					if rerr := s.firstAdminClaimer.Release(cctx, newUUID); rerr != nil {
 						s.recordOAuthCompensationFailure()
 						slog.Default().Error("auth: failed to release the first-admin sentinel",
 							slog.String("user_uuid", newUUID), slog.String("error", rerr.Error()))
@@ -2699,7 +2818,7 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			createInput := &iface.CreateUserInput{
 				UUID:          newUUID,
 				Email:         email,
-				FullName:      userInfo["name"].(string),
+				FullName:      signupDisplayName(userInfo, email),
 				Role:          role,
 				EmailVerified: true,
 				OAuthProvider: iface.OAuthProvider(provider),

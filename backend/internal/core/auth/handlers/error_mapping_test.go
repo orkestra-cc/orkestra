@@ -202,6 +202,10 @@ func TestMapOAuthError_NewSentinels(t *testing.T) {
 	}{
 		{services.ErrOAuthEmailUnverified, http.StatusForbidden, errcode.AuthOAuthEmailUnverified},
 		{services.ErrAuthPolicyUnavailable, http.StatusServiceUnavailable, errcode.AuthPolicyUnavailable},
+		{services.ErrOAuthStoreUnavailable, http.StatusServiceUnavailable, errcode.AuthOAuthStoreUnavailable},
+		{services.ErrOAuthIdentityUnlinked, http.StatusForbidden, errcode.AuthOAuthIdentityUnlinked},
+		{services.ErrOAuthIdentityClaimedByOther, http.StatusConflict, errcode.AuthOAuthIdentityConflict},
+		{services.ErrOAuthLinkAlreadyExists, http.StatusConflict, errcode.AuthOAuthProviderAlreadyLinked},
 		{services.ErrInvalidCredentials, http.StatusUnauthorized, ""},
 		{errors.New("anything else"), http.StatusInternalServerError, ""},
 	}

@@ -50,10 +50,13 @@ const (
 	OAuthCallbackErrIdentityConflict = "oauth_identity_conflict"
 	// OAuthCallbackErrStoreUnavailable: the identity store is degraded or
 	// unreachable (migration 0010 not run, or Mongo down) — retryable.
-	OAuthCallbackErrStoreUnavailable    = "oauth_store_unavailable"
-	OAuthCallbackErrEmailUnverified     = errcode.AuthOAuthEmailUnverified
-	OAuthCallbackErrProviderUnavailable = "oauth_provider_unavailable"
-	OAuthCallbackErrLoginFailed         = "oauth_login_failed"
+	OAuthCallbackErrStoreUnavailable = "oauth_store_unavailable"
+	// OAuthCallbackErrProviderAlreadyLinked: the matched account already
+	// has a different identity of this provider linked.
+	OAuthCallbackErrProviderAlreadyLinked = "oauth_provider_already_linked"
+	OAuthCallbackErrEmailUnverified       = errcode.AuthOAuthEmailUnverified
+	OAuthCallbackErrProviderUnavailable   = "oauth_provider_unavailable"
+	OAuthCallbackErrLoginFailed           = "oauth_login_failed"
 
 	// Link-mode result codes on /user/security?tab=oauth&link=failed.
 	oauthLinkCodeAlreadyLinked       = "already_linked"
@@ -65,15 +68,16 @@ const (
 )
 
 var oauthCallbackErrorAllowlist = map[string]bool{
-	OAuthCallbackErrAccessDenied:        true,
-	OAuthCallbackErrSignupDisabled:      true,
-	OAuthCallbackErrLinkDisabled:        true,
-	OAuthCallbackErrEmailUnverified:     true,
-	OAuthCallbackErrProviderUnavailable: true,
-	OAuthCallbackErrLoginFailed:         true,
-	OAuthCallbackErrIdentityUnlinked:    true,
-	OAuthCallbackErrIdentityConflict:    true,
-	OAuthCallbackErrStoreUnavailable:    true,
+	OAuthCallbackErrAccessDenied:          true,
+	OAuthCallbackErrSignupDisabled:        true,
+	OAuthCallbackErrLinkDisabled:          true,
+	OAuthCallbackErrEmailUnverified:       true,
+	OAuthCallbackErrProviderUnavailable:   true,
+	OAuthCallbackErrLoginFailed:           true,
+	OAuthCallbackErrIdentityUnlinked:      true,
+	OAuthCallbackErrIdentityConflict:      true,
+	OAuthCallbackErrStoreUnavailable:      true,
+	OAuthCallbackErrProviderAlreadyLinked: true,
 }
 
 var oauthLinkCodeAllowlist = map[string]bool{
@@ -232,6 +236,8 @@ func oauthLoginErrorCode(err error) (code, outcome string) {
 		return OAuthCallbackErrIdentityConflict, "identity_conflict"
 	case errors.Is(err, services.ErrOAuthStoreUnavailable):
 		return OAuthCallbackErrStoreUnavailable, "store_unavailable"
+	case errors.Is(err, services.ErrOAuthLinkAlreadyExists):
+		return OAuthCallbackErrProviderAlreadyLinked, "provider_already_linked"
 	}
 	return OAuthCallbackErrLoginFailed, "internal_error"
 }

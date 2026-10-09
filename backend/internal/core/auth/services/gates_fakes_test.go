@@ -64,10 +64,46 @@ type gateUserFake struct {
 	getByEmailErr        error
 	createFromOAuthCalls int
 	addOAuthLinkCalls    int
+	// lifecycle overrides the UserLifecycleState answer per uuid (a
+	// soft-deleted row answers "deleted" although GetUserByID says not found).
+	lifecycle map[string]iface.UserLifecycleState
 	// clearedFailedLogins records every ClearFailedLogins target so the
 	// expired-lock test can assert the CALL happened, not merely that
 	// the count reads zero.
 	clearedFailedLogins []string
+}
+
+// UserLifecycleState implements iface.UserLifecycleStateProvider: an
+// override wins; otherwise a seeded row is active/inactive, an unknown
+// uuid is missing.
+func (f *gateUserFake) UserLifecycleState(_ context.Context, userUUID string) (iface.UserLifecycleState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if st, ok := f.lifecycle[userUUID]; ok {
+		return st, nil
+	}
+	if u, ok := f.byUUID[userUUID]; ok {
+		if u.IsActive {
+			return iface.UserLifecycleActive, nil
+		}
+		return iface.UserLifecycleInactive, nil
+	}
+	return iface.UserLifecycleMissing, nil
+}
+
+// softDelete removes the row from the lookups (GetUserByID answers not
+// found) while the lifecycle probe still reports it as deleted.
+func (f *gateUserFake) softDelete(userUUID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if u, ok := f.byUUID[userUUID]; ok {
+		delete(f.byEmail, u.Email)
+		delete(f.byUUID, userUUID)
+	}
+	if f.lifecycle == nil {
+		f.lifecycle = map[string]iface.UserLifecycleState{}
+	}
+	f.lifecycle[userUUID] = iface.UserLifecycleDeleted
 }
 
 func (f *gateUserFake) setGetByIDErr(err error) {
