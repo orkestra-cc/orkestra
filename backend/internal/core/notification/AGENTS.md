@@ -20,7 +20,7 @@ Primary consumer today is the auth module (verification, password reset). Design
 | Concern                | Where                                      |
 | ---------------------- | ------------------------------------------ |
 | Sender profiles + resolver | `services/sender_profile.go`, `services/sender_resolver.go`, `services/sender_loader.go` |
-| Driver seam + registry (`noop`, `smtp`) | `services/email_driver.go`, `services/driver_noop.go`, `services/driver_smtp.go` |
+| Driver seam + registry (`noop`, `smtp`, `mailup`, `smtp2go`) | `services/email_driver.go`, `services/driver_noop.go`, `services/driver_smtp.go`, `services/driver_mailup.go`, `services/driver_smtp2go.go` |
 | Send error contract     | `services/send_error.go`                   |
 | Template rendering     | `services/template_service.go`             |
 | Default system templates | `services/default_templates.go`           |
@@ -67,6 +67,8 @@ All settings live in the `module_configs` collection under the `notification` mo
 | `email.senders`               | — *(record list, see Sender profiles)* | —         |
 | `email.senders.<slug>.mailup_user`   | — *(element sub-field)*        | —         |
 | `email.senders.<slug>.mailup_secret` | — *(element sub-field, secret)* | —        |
+| `email.senders.<slug>.smtp2go_api_key` | — *(element sub-field, secret)* | —      |
+| `email.senders.<slug>.smtp2go_region` | — *(element sub-field)*        | `global` (options: `global`, `eu`, `us`, `au`) |
 | `email.smtp.host`             | `SMTP_HOST`                    | — *(required when provider is `smtp`)* |
 | `email.smtp.port`             | `SMTP_PORT`                    | `587`     |
 | `email.smtp.username`         | `SMTP_USERNAME`                | —         |
@@ -114,7 +116,7 @@ group **Sender profiles**). Storage is the flat map every setting uses:
 `.categories`, `.from_address`, `.from_name`, `.reply_to`, `.smtp_host`,
 `.smtp_port`, `.smtp_tls_mode`, `.smtp_username`, `.smtp_password` (secret,
 AES-256-GCM at its ordinary key), `.mailup_user`, `.mailup_secret` (secret),
-`.allowed_types` (ADR-0021, below). Element sub-fields carry **no `EnvVar`** by
+`.smtp2go_api_key` (secret), `.smtp2go_region`, `.allowed_types` (ADR-0021, below). Element sub-fields carry **no `EnvVar`** by
 construction, so the flat `email.*` keys stay as the environment-bootstrap
 path: **until some profile declares a pattern** — the roster is empty, or holds
 only drafts — the resolver synthesizes `slug=_legacy`, pattern `*`, from them
@@ -159,6 +161,20 @@ default). **Success ⇔ 2xx ∧ body ≤ 64 KiB ∧ parses ∧ `Status=="done"` 
 `Message` is never read. A success means *accepted*, not delivered. A
 `reply_to` differing from `from_address` must be enabled on the account by
 MailUp support, or the vendor rejects the message.
+`smtp2go` `from_address`, `smtp2go_api_key` (secret); `smtp2go_region`
+(`global` | `eu` | `us` | `au`, default `global`) picks the API host —
+`api.smtp2go.com` or `<region>-api.smtp2go.com` — and an unknown value fails
+the send as incomplete (`missing=smtp2go_region`) before any request, never
+falling through to another region. Sends `POST https://<host>/v3/email/send`
+with the key in the `X-Smtp2go-Api-Key` header — never in the body.
+`reply_to` rides in `custom_headers` (the API has no field for it); `Category`
+is not put on the wire (no documented per-message campaign field). SMTP2GO
+answers **200 for a send whose recipient failed**, so **success ⇔ 2xx ∧ body ≤
+64 KiB ∧ parses ∧ no `data.error_code` ∧ `data.succeeded==1` ∧
+`data.failed==0`** — anything else fails with `http=<n> status=error
+code=<error_code>` or `status=not_accepted code=`; `data.error` and
+`data.failures` (which names recipients) are never read. The sender domain
+must be verified in the SMTP2GO account.
 
 **Error contract.** `NotificationDoc.Error` is served to operators and rides the
 GDPR export, so **no string produced by a remote peer is ever persisted or
@@ -280,6 +296,8 @@ Every refusal — pre-driver, or a driver returning `ErrAttachmentRejected` (bar
 
 **MailUp wire shape.** `mailup` also reports `Attachments: true`: `msg.Attachments` become the request body's `Attachments: [{Filename, Body}]`, `Body` a plain base64 string (not the `.NET`-style byte array some third-party clients use — confirmed against MailUp's own transactional API by a real send). The vendor never returns an attachment-specific error code, so the driver classifies coarsely, the same trade as the SMTP 552/554 mapping: a 4xx response to a send that carried attachments becomes `ErrAttachmentRejected` wrapping the vendor envelope error — **except 401/403/408/429**, which are credential, timeout and throttling conditions rather than a verdict on the attachment and keep their normal (retryable) classification, since callers treat `ErrAttachmentRejected` as final; a 4xx without attachments, any 5xx, or a 200 carrying MailUp's own error envelope, is not — that shape has no attachment-specific signal to key off. MailUp's own documented attachment ceiling sits above this module's 5 MiB raw cap, so the cap never depends on the vendor.
 
+**SMTP2GO wire shape.** `smtp2go` reports `Attachments: true`: `msg.Attachments` become `attachments: [{filename, fileblob, mimetype}]`, `fileblob` standard base64 — the shape SMTP2GO's API reference and its official Go client both declare. The classification is **narrower than MailUp's**: SMTP2GO answers 400 to every refused request (an unverified sender, a malformed field) and documents no attachment-specific error code, so a 4xx says nothing about the attachment. Only a **413** on a send that carried attachments becomes `ErrAttachmentRejected`; every other status keeps its normal (retryable) classification, because a false positive would make a fixable configuration error final.
+
 ## HTTP endpoints
 
 Registered in three groups with different middleware:
@@ -350,7 +368,7 @@ is inert until one is registered.
 
 This is a known, accepted consequence of the specified `GET` behaviour, not a defect to be fixed by weakening it, and it is written down here so an operator does not first learn about it from a customer asking why they stopped receiving mail. The natural follow-up is an **admin endpoint that removes a marketing opt-out row** (administrator-only, audited, address-keyed) so a false positive can be undone deliberately; the repository already exposes the collection, so it is a handler and a permission rather than a redesign. Until that exists, the only remedies are operational: prefer `unsubscribe_page_url` (a hosted page that does NOT call the API on load — the token is single-use and scanners follow links immediately — and POSTs only on a real button press), and treat a sudden cluster of opt-outs from one recipient domain as a scanner, not as churn.
 
-**A driver's capability is a promise, not an acceptance.** `EmailDriver.Capabilities().ListUnsubscribeHeaders` answers whether the driver *guarantees* the two headers reach the wire, not whether it merely accepts them. `noop` and `smtp` report `true` (`smtp` writes the MIME message itself, so it controls every header it emits). `mailup` reports `false`: it converts `EmailMessage.Headers` into its API payload's `ExtendedHeaders` field, but the vendor's own docs say only approved headers are honored, so accepting the field is not proof of delivering it — and RFC 8058 additionally requires the headers be covered by the DKIM signature, which no automated test in this repository can prove (see the docs-site DKIM release gate). Flipping `mailUpDriver.Capabilities()` to `true` is the outcome of a release-gate test against a real mailbox, never a config field an operator can set.
+**A driver's capability is a promise, not an acceptance.** `EmailDriver.Capabilities().ListUnsubscribeHeaders` answers whether the driver *guarantees* the two headers reach the wire, not whether it merely accepts them. `noop` and `smtp` report `true` (`smtp` writes the MIME message itself, so it controls every header it emits). `mailup` reports `false`: it converts `EmailMessage.Headers` into its API payload's `ExtendedHeaders` field, but the vendor's own docs say only approved headers are honored, so accepting the field is not proof of delivering it — and RFC 8058 additionally requires the headers be covered by the DKIM signature, which no automated test in this repository can prove (see the docs-site DKIM release gate). Flipping `mailUpDriver.Capabilities()` to `true` is the outcome of a release-gate test against a real mailbox, never a config field an operator can set. `smtp2go` reports `false` for the same reason: it maps `EmailMessage.Headers` into `custom_headers`, and the API accepting them is not proof they reach the inbox DKIM-signed.
 
 **The preflight is fail-closed, and on by default.** `require_one_click_unsubscribe` defaults to `true`. While it is on, `ValidateSenderConfig`'s `oneClickAdmissible` (`services/sender_validation.go`) refuses to *save* a profile whose `allowed_types` includes `marketing` unless its driver's capability and a usable `public_api_base_url` together satisfy `OneClickPolicy.gap` — the same gate `dispatchEmail` applies at send time, so the two agree on what "one-click is guaranteed" means. Turning the requirement off does not merely skip a check: marketing then sends **without** an unsubscribe header, a trade an operator takes explicitly.
 
