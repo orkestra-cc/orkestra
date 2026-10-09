@@ -43,6 +43,14 @@ type AuthModule struct {
 	// degraded and every OAuth entry point answers oauth_store_unavailable.
 	oauthIndexMissing atomic.Bool
 
+	// First-admin sentinel backfill (spec §4.7 D31): the claimer and the
+	// operator tier's user provider, resolved at Init, consumed at Start.
+	// roleHolderFinder is the narrow seam (nil for a provider that
+	// predates it — then GetUserCount on operatorUsers is the fallback).
+	firstAdminClaimer services.FirstAdminClaimer
+	roleHolderFinder  iface.SystemRoleHolderFinder
+	operatorUsers     iface.UserProvider
+
 	// deviceTrust is a single non-tier-split collection so one handler
 	// is reused across both operator and client mounts.
 	deviceTrustHandler *handlers.DeviceTrustHandler
@@ -1002,6 +1010,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	} else {
 		logger.Warn("first-admin claimer not wired — signup flows will fall through to non-atomic first-user heuristic")
 	}
+	m.firstAdminClaimer = firstAdminClaimer
 
 	mfaChallengeSvc := services.NewMFAChallengeService(redisStore)
 
@@ -1151,6 +1160,10 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// always registers ServiceOperatorUserProvider, so a missing
 	// provider here means the user module failed to init.
 	operatorUser := module.MustGetTyped[iface.UserProvider](deps.Services, module.ServiceOperatorUserProvider)
+	m.operatorUsers = operatorUser
+	if finder, ok := module.GetTyped[iface.SystemRoleHolderFinder](deps.Services, module.ServiceOperatorUserProvider); ok {
+		m.roleHolderFinder = finder
+	}
 	operatorInitialPasswordSetter, ok := operatorUser.(iface.InitialPasswordSetter)
 	if !ok {
 		logger.Warn("auth: operator user provider lacks initial-password capability; enrollment will fail closed")

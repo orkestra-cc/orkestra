@@ -112,6 +112,10 @@ type UserRepository interface {
 	List(ctx context.Context, filters *iface.UserFilters, pagination *iface.PaginationParams) ([]*iface.User, int64, error)
 	ListWithOptions(ctx context.Context, filter bson.M, opts ...*options.FindOptions) ([]*iface.User, error)
 	GetByRole(ctx context.Context, role string) ([]*iface.User, error)
+	// FindOldestByRole returns the non-deleted holder of role with the
+	// earliest createdAt, ties broken by uuid, so every replica gets the
+	// same answer; nil, nil when nobody holds it. isActive is NOT filtered.
+	FindOldestByRole(ctx context.Context, role string) (*iface.User, error)
 
 	// Utility Operations
 	Count(ctx context.Context, filters *iface.UserFilters) (int64, error)
@@ -433,6 +437,22 @@ func (r *mongoUserRepository) List(ctx context.Context, filters *iface.UserFilte
 }
 
 // GetByRole retrieves users by role
+func (r *mongoUserRepository) FindOldestByRole(ctx context.Context, role string) (*iface.User, error) {
+	filter := bson.M{
+		"role":      role,
+		"deletedAt": bson.M{"$exists": false},
+	}
+	opts := options.FindOne().SetSort(bson.D{{Key: "createdAt", Value: 1}, {Key: "uuid", Value: 1}})
+	var user iface.User
+	if err := r.collection.FindOne(ctx, filter, opts).Decode(&user); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to find oldest user by role: %w", err)
+	}
+	return &user, nil
+}
+
 func (r *mongoUserRepository) GetByRole(ctx context.Context, role string) ([]*iface.User, error) {
 	filter := bson.M{
 		"role":      role,

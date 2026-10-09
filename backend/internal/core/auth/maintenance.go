@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/mongo"
 	"log/slog"
 	"time"
@@ -96,6 +97,22 @@ func (m *AuthModule) Start(ctx context.Context) error {
 		m.oauthIndexMissing.Store(false)
 	}
 
+	// First-admin sentinel backfill.
+	//
+	// D30's tier guard protects a FRESH install. An install upgraded from
+	// before the sentinel existed has an administrator and an UNCLAIMED
+	// sentinel, so the next operator-tier OAuth signup would still win
+	// it. Claiming it on behalf of the existing super_admin closes that.
+	//
+	// No migration script: one idempotent query and one $setOnInsert
+	// upsert per boot, and Start runs before ListenAndServe, so no
+	// request can reach the callback first. Concurrent replicas converge.
+	//
+	// Errors log ERROR and Start still returns nil — auth is a core
+	// module, the client tier is already closed by D30, and the next boot
+	// retries.
+	m.backfillFirstAdminSentinel(ctx)
+
 	if len(m.sweepTiers) == 0 || m.sweepLease == nil {
 		// Nothing to sweep, or Redis did not satisfy the lease contract
 		// at Init. Maintenance is skipped; authentication is untouched.
@@ -128,6 +145,54 @@ func (m *AuthModule) Start(ctx context.Context) error {
 	m.sweepDone = done
 	go m.tokenSweepLoop(sweepCtx, done, sweepStartupDelay, services.LeaseRenewInterval, services.LeaseRetryInterval)
 	return nil
+}
+
+// backfillFirstAdminSentinel claims the sentinel for the oldest existing
+// super_admin (spec §4.7 D31). Nothing to do on a fresh install.
+func (m *AuthModule) backfillFirstAdminSentinel(ctx context.Context) {
+	if m.firstAdminClaimer == nil {
+		return
+	}
+
+	uuid, found := "", false
+	if m.roleHolderFinder != nil {
+		u, f, err := m.roleHolderFinder.FindOldestUserWithRole(ctx, "super_admin")
+		if err != nil {
+			m.logger.Error("auth: first-admin sentinel backfill lookup failed",
+				slog.String("error", err.Error()))
+			return
+		}
+		uuid, found = u, f
+	} else if m.operatorUsers != nil {
+		// A fork's provider that predates the seam. The placeholder is
+		// safe by the sentinel's own contract: nothing reads its
+		// userUUID back (shared/setup/service.go), and Release deletes
+		// only a MATCHING uuid (systeminit/firstadmin.go), so no signup
+		// rollback can ever remove it.
+		n, err := m.operatorUsers.GetUserCount(ctx, &iface.UserFilters{Role: "super_admin"})
+		if err != nil {
+			m.logger.Error("auth: first-admin sentinel backfill count failed",
+				slog.String("error", err.Error()))
+			return
+		}
+		if n > 0 {
+			uuid, found = "legacy-backfill", true
+		}
+	}
+
+	if !found {
+		return // fresh install: nothing to backfill
+	}
+	claimed, err := m.firstAdminClaimer.ClaimFirstAdmin(ctx, uuid)
+	if err != nil {
+		m.logger.Error("auth: first-admin sentinel backfill claim failed",
+			slog.String("user_uuid", uuid), slog.String("error", err.Error()))
+		return
+	}
+	if claimed {
+		m.logger.Info("first-admin sentinel backfilled",
+			slog.String("user_uuid", uuid), slog.String("source", "backfill"))
+	}
 }
 
 // Stop cancels the sweep loop and waits for it to exit, releasing the

@@ -171,6 +171,27 @@ type UserLifecycleStateProvider interface {
 	UserLifecycleState(ctx context.Context, userUUID string) (UserLifecycleState, error)
 }
 
+// ---------------------------------------------------------------------------
+// SystemRoleHolderFinder — consumed by: the auth module's first-admin
+// sentinel backfill (spec §4.7 D31). Narrow on purpose (the
+// UserLifecycleStateProvider precedent): one deterministic answer, no
+// paging, no DTO. Resolved via module.GetTyped against the operator tier's
+// ServiceOperatorUserProvider.
+//
+// UserProvider exposes GetUserCount but no listing, and widening it would
+// break every external implementor. A provider that lacks this seam still
+// gets a backfill — the caller falls back to GetUserCount and a placeholder
+// uuid, which is safe by the sentinel's own contract.
+// ---------------------------------------------------------------------------
+
+type SystemRoleHolderFinder interface {
+	// FindOldestUserWithRole returns the UUID of the oldest non-deleted
+	// user holding role, ordered by createdAt then uuid so every replica
+	// picks the same one. Deactivated users are INCLUDED: a deactivated
+	// super_admin still proves the install was bootstrapped.
+	FindOldestUserWithRole(ctx context.Context, role string) (userUUID string, found bool, err error)
+}
+
 // InitialPasswordSetter atomically stores a first password hash on a live user.
 // A non-empty existing hash is preserved and returns ErrPasswordAlreadySet;
 // a missing or soft-deleted user returns ErrUserNotFound. Consumers resolve
