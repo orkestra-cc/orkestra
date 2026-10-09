@@ -174,6 +174,10 @@ func TestOAuthLoginErrorCode(t *testing.T) {
 		{services.ErrOAuthEmailUnverified, OAuthCallbackErrEmailUnverified, "email_unverified"},
 		{services.ErrAuthPolicyUnavailable, OAuthCallbackErrProviderUnavailable, "policy_unavailable"},
 		{services.ErrInvalidCredentials, OAuthCallbackErrLoginFailed, "invalid_credentials"},
+		{services.ErrOAuthIdentityUnlinked, OAuthCallbackErrIdentityUnlinked, "identity_unlinked"},
+		{services.ErrOAuthIdentityClaimedByOther, OAuthCallbackErrIdentityConflict, "identity_conflict"},
+		{services.ErrOAuthStoreUnavailable, OAuthCallbackErrStoreUnavailable, "store_unavailable"},
+		{services.ErrOAuthLinkAlreadyExists, OAuthCallbackErrProviderAlreadyLinked, "provider_already_linked"},
 		{errors.New("user u-1 <secret@example.com> inactive"), OAuthCallbackErrLoginFailed, "internal_error"},
 	}
 	for _, tc := range cases {
@@ -191,6 +195,16 @@ func TestSanitizeIdPError(t *testing.T) {
 	for _, raw := range []string{"", "Access Denied", "<script>", strings.Repeat("a", 65), "user u-1 secret@example.com"} {
 		if got := sanitizeIdPError(raw); got != "unrecognized" {
 			t.Fatalf("%q → %q, want unrecognized", raw, got)
+		}
+	}
+}
+
+// The redirect contract's allowlist must carry every D32 code, or the
+// SPA gets a bare generic failure for a refusal it has copy for.
+func TestCallbackRedirect_AllowlistCarriesTheNewCodes(t *testing.T) {
+	for _, code := range []string{OAuthCallbackErrIdentityUnlinked, OAuthCallbackErrIdentityConflict, OAuthCallbackErrStoreUnavailable, OAuthCallbackErrProviderAlreadyLinked} {
+		if !oauthCallbackErrorAllowlist[code] {
+			t.Errorf("%s is not in the callback redirect allowlist", code)
 		}
 	}
 }

@@ -753,7 +753,7 @@ var devTokenSystemRoles = map[string]struct{}{
 // principal — the one identity that legitimately has no database row.
 //
 // POST /dev/token mints `sub = dev-<role>-<unix>` without writing a user,
-// and that token is the documented local flow (the root CLAUDE.md Quick
+// and that token is the documented local flow (the root AGENTS.md Quick
 // Start, scripts/devtoken.sh). Resolving its role from the store misses by
 // construction, so D28's "a lookup miss is a 500" would take every
 // dev-token role assignment down.

@@ -172,6 +172,37 @@ type UserLifecycleStateProvider interface {
 }
 
 // ---------------------------------------------------------------------------
+// SystemRoleHolderFinder — consumed by: the auth module's first-admin
+// sentinel backfill (spec §4.7 D31). Narrow on purpose (the
+// UserLifecycleStateProvider precedent): one deterministic answer, no
+// paging, no DTO. Resolved via module.GetTyped against the operator tier's
+// ServiceOperatorUserProvider.
+//
+// UserProvider exposes GetUserCount but no listing, and widening it would
+// break every external implementor. A provider that lacks this seam still
+// gets a backfill — the caller falls back to GetUserCount and a placeholder
+// uuid, which is safe by the sentinel's own contract.
+// ---------------------------------------------------------------------------
+
+type SystemRoleHolderFinder interface {
+	// FindOldestUserWithRole returns the UUID of the oldest non-deleted
+	// user holding role, ordered by createdAt then uuid so every replica
+	// picks the same one. Deactivated users are INCLUDED: a deactivated
+	// super_admin still proves the install was bootstrapped.
+	FindOldestUserWithRole(ctx context.Context, role string) (userUUID string, found bool, err error)
+}
+
+// InitialPasswordSetter atomically stores a first password hash on a live user.
+// A non-empty existing hash is preserved and returns ErrPasswordAlreadySet;
+// a missing or soft-deleted user returns ErrUserNotFound. Consumers resolve
+// this additive capability from the tier's user provider.
+type InitialPasswordSetter interface {
+	SetPasswordHashIfUnset(ctx context.Context, userUUID, hash string) error
+}
+
+var ErrPasswordAlreadySet = errors.New("password already set")
+
+// ---------------------------------------------------------------------------
 // MFAEpochBumper — consumed by: the auth module's MFA service and WebAuthn
 // service, on every credential removal or replacement. Narrow on purpose
 // (the UserLifecycleStateProvider precedent): UserProvider is implemented by
@@ -389,6 +420,20 @@ type Recipient struct {
 	Name     string
 }
 
+// Attachment is a file carried by a NotificationRequest. Data is the raw
+// content (never base64). The notification module re-sanitizes Filename and
+// persists only name, type and size — never the bytes.
+type Attachment struct {
+	Filename    string
+	ContentType string
+	Data        []byte
+}
+
+// FailureAttachmentRejected classifies a send refused because of its
+// attachments (size, type, provider rejection). It is persisted on the
+// message log and returned again by an idempotent replay.
+const FailureAttachmentRejected = "attachment_rejected"
+
 type NotificationRequest struct {
 	Channel        string
 	Type           string // "transactional" | "marketing"
@@ -412,6 +457,9 @@ type NotificationRequest struct {
 	// allowed_types contains this request's Type (ADR-0021). Unknown,
 	// ineligible, or malformed slugs fail the send; there is no fallback.
 	Sender string
+	// Attachments are optional files (raw bytes). Honored by Send only;
+	// SendTemplated ignores them. Nil = no attachment.
+	Attachments []Attachment
 }
 
 type TemplatedNotificationRequest struct {
@@ -444,6 +492,10 @@ type NotificationResult struct {
 	Status   string // "sent" | "failed" | "suppressed" | "queued"
 	Provider string
 	Error    string
+	// FailureReason classifies a "failed" Status when the cause is known
+	// (FailureAttachmentRejected). Returned by fresh sends AND by idempotent
+	// replays, so callers never depend on a typed Go error for it.
+	FailureReason string
 }
 
 type NotificationSender interface {
@@ -633,6 +685,12 @@ type TenantMembership struct {
 	Roles      []string // authz role names the user holds in this tenant
 	IsOwner    bool
 }
+
+// ErrTenantNotFound is wrapped by TenantProvider.GetTenant when no live
+// tenant has the UUID, so a consumer can tell "no such tenant" (a 404 for
+// its caller) from an infrastructure failure (a 5xx) without importing the
+// tenant module.
+var ErrTenantNotFound = errors.New("tenant not found")
 
 type TenantProvider interface {
 	GetTenant(ctx context.Context, tenantUUID string) (*Tenant, error)

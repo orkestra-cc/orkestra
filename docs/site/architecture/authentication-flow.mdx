@@ -6,7 +6,7 @@ sidebar_position: 5
 
 # Authentication Flow
 
-This is the cross-cutting walkthrough of how a request becomes an authenticated identity in Orkestra. It does **not** enumerate every endpoint — for the full per-route table see the [auth module reference in the monorepo](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/core/auth/CLAUDE.md). Read this page when you want the *story*; read the module CLAUDE.md when you want the *contract*.
+This is the cross-cutting walkthrough of how a request becomes an authenticated identity in Orkestra. It does **not** enumerate every endpoint — for the full per-route table see the [auth module reference in the monorepo](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/core/auth/AGENTS.md). Read this page when you want the *story*; read the module AGENTS.md when you want the *contract*.
 
 ## 1. Audience model
 
@@ -34,7 +34,7 @@ In dev (`ENV=development`) the host mux falls through to the operator mux when t
 
 ## 2. Two login paths, one module
 
-Every auth route is mounted twice — once under `/v1/auth/operator/...` (operator host) and once under `/v1/auth/client/...` (client host) — by the same `auth` module. The two mounts share the password service code, MFA logic, and OAuth provider catalogue, but each is wired to its own:
+Most auth routes are mounted twice — once under `/v1/auth/operator/...` (operator host) and once under `/v1/auth/client/...` (client host) — by the same `auth` module. Initial-password enrollment is Tier-1 only, at `POST /v1/auth/operator/me/password`. The two mounts share the password service code, MFA logic, and OAuth provider catalogue, but each is wired to its own:
 
 - **User collection** — `operator_users` vs `client_users`
 - **Refresh-token / session / OAuth-link / MFA / email-token collections** — `operator_*` vs `client_*`
@@ -81,6 +81,7 @@ These four callbacks are mounted **only on the operator host**. The OAuth `state
 ```
 GET   /v1/auth/{tier}/me                    return the current user
 POST  /v1/auth/{tier}/change-password       requires current password
+POST  /v1/auth/operator/me/password        add a first password (Tier-1 only)
 POST  /v1/auth/{tier}/mfa/...               TOTP enrol / verify / remove
 POST  /v1/auth/{tier}/mfa/webauthn/...      passkey enrol / verify / remove
 POST  /v1/auth/{tier}/me/devices/trust      mark current device as trusted (skip MFA prompts)
@@ -151,7 +152,7 @@ A provider hiccup — the platform-default pointer being unreadable, or nothing 
 
 Same shape, `type: "refresh"`, longer expiry (`JWT_REFRESH_TOKEN_EXPIRY`, default `7d`). Because rotation rewrites the expiry on every use, this value is the session's **idle** timeout; its absolute lifetime is bounded separately by `sessionAbsoluteTTL` (see [ADR-0017](/adrs/session-lifetime-and-token-retention)). Refresh tokens carry the **same `aud` claim** as the access token they paired with, so a refresh token issued for the operator host cannot be redeemed on the client host.
 
-Refresh tokens rotate on every use with family detection: each login mints a new `FamilyID`, every rotation preserves it via an atomic CAS, and replaying a rotated token revokes the entire family with `revokedReason="replay_detected"`. A rotation lost to a *concurrent* caller is not a replay: within a 10-second grace window, and only while the family carries no revocation fence, the loser gets **409** `refresh_rotation_raced` — no family revocation and no credentials — and retries once with the successor cookie its sibling left in the jar. This is what keeps a browser with several console tabs open from signing itself out every time the access token expires; the operator console also serialises rotation across tabs with a Web Lock. A **rotation** that fails for an *infrastructure* reason — an unreachable token or user store, a signing failure, a failed rotating write, a cookie candidate the store could not classify at all, or a server holding no verifying key to check the presented token with — answers **503 `refresh_lookup_unavailable`**, never 401: reporting an outage as an authentication failure is what trains a client to discard a session that is still perfectly valid. A genuinely deleted account is still a 401, so a dead session can still end. The **read-only mint** `GET /v1/auth/session` performs after classifying the cookie (`MintAccessTokenFromRefresh`) answers the same way, on its own token lookup, its own user lookup and its own signing call. That mint reads the store a *second* time, so a blip opening between the classification step and the mint used to answer session bootstrap with a codeless 401. `POST /v1/auth/{tier}/refresh-cookie`, `POST /v1/auth/{tier}/refresh` and `GET /v1/auth/session` are therefore each covered end to end. A durable tier-scoped family-revocation record fences a successor that races replay revocation; it cannot escape as active. No row is deleted while its token could still pass temporal validation, regardless of revocation state — an unexpired rotated row is exactly what replay detection matches a reused token against; once `expiresAt` is past, replaying it cannot mint credentials and the row may be swept ([ADR-0017](/adrs/session-lifetime-and-token-retention), D7).
+Refresh tokens rotate on every use with family detection: each login mints a new `FamilyID`, every rotation preserves it via an atomic CAS, and replaying a rotated token revokes the entire family with `revokedReason="replay_detected"`, terminates the session the token belonged to (session document and sid denylist, so the access token the replayer already holds stops working at once) and records a `refresh_token_replay` security event against the user. A rotation lost to a *concurrent* caller is not a replay: within a 10-second grace window, and only while the family carries no revocation fence, the loser gets **409** `refresh_rotation_raced` — no family revocation and no credentials — and retries once with the successor cookie its sibling left in the jar. This is what keeps a browser with several console tabs open from signing itself out every time the access token expires; the operator console also serialises rotation across tabs with a Web Lock. A **rotation** that fails for an *infrastructure* reason — an unreachable token or user store, a signing failure, a failed rotating write, a cookie candidate the store could not classify at all, or a server holding no verifying key to check the presented token with — answers **503 `refresh_lookup_unavailable`**, never 401: reporting an outage as an authentication failure is what trains a client to discard a session that is still perfectly valid. A genuinely deleted account is still a 401, so a dead session can still end. The **read-only mint** `GET /v1/auth/session` performs after classifying the cookie (`MintAccessTokenFromRefresh`) answers the same way, on its own token lookup, its own user lookup and its own signing call. That mint reads the store a *second* time, so a blip opening between the classification step and the mint used to answer session bootstrap with a codeless 401. `POST /v1/auth/{tier}/refresh-cookie`, `POST /v1/auth/{tier}/refresh` and `GET /v1/auth/session` are therefore each covered end to end. A durable tier-scoped family-revocation record fences a successor that races replay revocation; it cannot escape as active. No row is deleted while its token could still pass temporal validation, regardless of revocation state — an unexpired rotated row is exactly what replay detection matches a reused token against; once `expiresAt` is past, replaying it cannot mint credentials and the row may be swept ([ADR-0017](/adrs/session-lifetime-and-token-retention), D7).
 
 ## 4. Email + password flow
 
@@ -187,13 +188,61 @@ The same policy is the reason the login page can render honestly rather than gue
 
 Both flows share `{tier}_email_tokens` (TTL: 24h verification, 30 min reset; both single-use, SHA-256 hashed at rest, `expiresAt` TTL index sweeps expired rows). Reset atomically updates `PasswordHash`, clears the failed-login counter, marks the token used, and revokes every refresh token for the user — the user must sign in from scratch on every device.
 
+### Add a first password after OAuth (Tier-1)
+
+An OAuth-only operator can add email/password sign-in to the same account
+from `/user/security?tab=password`. The account's verified email is shown
+read-only; the user enters a new password and its confirmation. No current
+password is requested, because none exists. OAuth links, user UUID, role and
+memberships remain intact. Tier-2 initial-password enrollment and changing
+the account email are outside this flow.
+
+1. The console loads the current account, its auth methods and the operator
+   policy. With no password and `passwordLoginEnabled=true`, it offers
+   **Add password**. An unavailable read shows a loading/error state; a
+   disabled method shows a policy notice. Existing-password accounts keep
+   the normal change-password flow.
+2. The console sends `POST /v1/auth/operator/me/password` with
+   `{newPassword}` and a bearer token. The operator audience and
+   `RequireGlobal()` gates precede the shared
+   [enrolment proof gate](#enrolment-proof-gate), with a five-minute maximum
+   age. A caller with a factor must provide fresh MFA; one without a factor
+   can use the `auth_time` of a recent interactive OAuth login. Stale
+   no-factor proof returns `reauthentication_required` and sends the user
+   through sign-in again; a refresh does not renew that proof.
+3. The service strictly checks `passwordLoginEnabledAdmin` and requires an
+   active human with a verified account email and no password. The operator
+   break-glass override cannot open enrollment. It validates the new
+   password against the live password policy and hashes it with argon2id.
+4. The user module atomically writes the hash and timestamps only if the
+   non-deleted account still has an absent/empty hash. Concurrent requests
+   have one winner; the loser receives `409 auth.password_already_set`.
+   The console clears submitted secrets and reloads auth methods on success
+   or that conflict, then offers the ordinary change-password form.
+5. After creation, the current session survives. Every other refresh/session
+   path, including orphan refresh SIDs, is revoked or denylisted and all
+   device-trust grants are revoked, unconditionally and independently of
+   `revokeSessionsOnPasswordChange`. Teardown is best effort: a storage
+   failure can leave other credentials live, so the success event records
+   both a conservative revocation count and `teardownComplete`. The new hash
+   is retained and the response still reports successful creation.
+6. `self_password_added` records the security event and maps to the
+   `auth.password.added` compliance action, with actor/resource UUID,
+   operator audience, source IP and current SID. No password, hash, token,
+   email or OAuth profile is included in event metadata. Subsequent logins
+   can use the same verified email with the new password or a linked OAuth
+   provider, subject to the live login policy and MFA rules.
+
+See [Initial-password enrollment](/modules/core/auth#initial-password-enrollment-tier-1)
+for the endpoint's response contract.
+
 ## 5. OAuth 2.1 flow
 
 Provider configuration (client IDs / secrets / redirect URIs / mobile-platform IDs) is admin-managed in `module_configs` and resolved live on each OAuth request via `OAuthConfigResolver`; edits take effect without a service restart. Env vars are seed-only — once the document exists, editing the env has no effect without a wipe.
 
 ### Web flow
 
-1. Frontend calls `POST /v1/auth/{tier}/oauth/login` with `{provider}`. The backend resolves the provider **strictly from one config read** (toggle on for this surface, client ID + redirect URL + secret present — 403 `auth.oauth_provider_disabled` otherwise, 503 `auth.policy_unavailable` when the auth document cannot be read), constructs a signed HS256 state JWT `{tier, csrf, shost, exp}` (HMAC secret deterministically derived from the JWT private key — every replica agrees without an env var, rotates implicitly when JWT keys rotate), drops the CSRF nonce in an HttpOnly cookie **on the host that served this call**, and stores per-flow side data (`provider`, `tier`, `deviceInfo`, `securityContext`, and a `redirectUri` that is always the configured tier SPA — never the `Origin` header) in Redis keyed by the nonce, with a 10-minute TTL. Returns `{authUrl, state}`.
+1. Frontend calls `POST /v1/auth/{tier}/oauth/login` with `{provider}`. The backend resolves the provider **strictly from one config read** (toggle on for this surface, client ID + redirect URL + secret present — 403 `auth.oauth_provider_disabled` otherwise, 503 `auth.policy_unavailable` when the auth document cannot be read), constructs a signed HS256 state JWT `{tier, csrf, shost, exp}` (HMAC secret deterministically derived from the JWT private key — every replica agrees without an env var, rotates implicitly when JWT keys rotate), drops the CSRF nonce in an HttpOnly cookie **on the host that served this call**, and stores per-flow side data (`provider`, `tier`, `deviceInfo`, `securityContext`, and a `redirectUri` that is always the configured tier SPA — never the `Origin` header) in Redis keyed by the nonce, with a 10-minute TTL. Returns `{authUrl, state}`. For a provider proven to accept PKCE (Google, Discord) the backend also mints a code verifier, keeps it in the state row and sends the S256 challenge in the authorization URL; GitHub and Apple get neither until a staging round-trip proves their token endpoint accepts a verifier, because a provider that ignores the challenge but rejects the verifier would break the exchange outright.
 2. Frontend redirects the user to the provider.
 3. Provider redirects back to **the single shared callback URL** registered with each provider (`/v1/auth/oauth/{provider}/callback`, mounted on the operator mux only — one redirect URI per provider in IdP config; all four are raw handlers). The callback establishes **trust before destination**: signature/expiry, the browser binding, the **one-shot** Redis row (consumed atomically — a replay or a concurrent second presentation is refused), `state.tier == redis.tier`, `redis.provider == this endpoint's provider`, and the link-mode pair; any failure is a terminal generic 400 with no redirect. Only then does it dispatch to the matching tier's `AuthHandler` (empty / unknown tier falls through to the legacy operator handler) and interpret the IdP's `error`.
 4. The dispatched-to handler re-resolves the provider from the same strict read, exchanges the code and fetches user info. **Where the flow completes depends on who owns the cookie.** An operator/legacy flow completes here: `HandleOAuthCallbackWithLinking` (find by `(provider, providerId)`; for an unlinked identity it first requires a provider-**verified** email and an establishable auto-link policy — before any local email lookup — then links an existing email account or signs up), active-user check, a token pair stamped with the audience's `aud`, the refresh cookie on the operator cookie domain, and a redirect to the operator SPA. A **client-tier flow cannot** get its cookie from the operator host (a response from `console.*` cannot set a cookie for `api.*`), so the callback stores a 60-second single-use encrypted relay record and redirects the browser to `CLIENT_API_URL/v1/auth/client/oauth/complete?relay=<id>`; that endpoint, on the client API host, takes the record once, **requires** the state cookie the same host set in step 1 (a login-CSRF attempt that finished someone else's flow is refused before any token exists), runs the same application half on the client authService, sets the client refresh cookie on its own host and redirects to the client SPA. Both destinations use one closed contract: `?success=true&provider=<p>` on success, `?success=false&error=<oauth_access_denied|oauth_signup_disabled|oauth_link_disabled|auth.oauth_email_unverified|oauth_provider_unavailable|oauth_login_failed>` on any valid-state failure, and `#requiresMfa=true&mfaToken=<one-shot id>&webauthnAvailable=<bool>` in the **fragment** for an MFA continuation (no cookie is written then). Every callback and relay response — redirects and terminal 400s alike — carries `Referrer-Policy: no-referrer` and `Cache-Control: no-store`; **no callback URL ever contains an access token, refresh token, email or user id.** A client-tier flow that fails before completion is relayed too, so the client host verifies the binding and clears its state cookie before the browser sees the failure.
@@ -203,7 +252,12 @@ The signed state + CSRF-keyed Redis row is what defeats both classic CSRF (state
 
 ### Mobile flow
 
-Mobile apps go through the platform's native OAuth SDK (Google Sign-In, Sign in with Apple) and POST the resulting **ID token** to `POST /v1/auth/{tier}/{google|apple}/mobile`. Backend validates the ID token signature against the provider's published JWKs, checks audience (`MobileAudience(provider, platform)` resolves to the platform-specific client ID, falling back to the web client ID for unknown platforms), runs the same find-or-create + active-user eligibility path as web, and returns the token pair in the response body. No state JWT is needed — the ID token *is* the proof.
+Mobile apps go through the platform's native sign-in SDK (Google Sign-In, Sign in with Apple), in two steps:
+
+1. `POST /v1/auth/{tier}/{google|apple}/mobile/begin` with `{code_challenge}` — the base64url S256 of a PKCE verifier the app keeps. The backend answers a `nonce` and holds it, bound to the challenge, for ten minutes. The app hands the nonce to the SDK (Sign in with Apple takes its SHA-256 hex).
+2. `POST /v1/auth/{tier}/{google|apple}/mobile` with `{id_token, code_verifier}`. The backend validates the ID token (signature against the provider's published JWKs, `exp` required, issuer, audience — `MobileAudience(provider, platform)` resolves the platform-specific client ID and an unresolved audience is a refusal, never a skip), requires the nonce claim, takes the record atomically (one completion wins, a failed one burns it), checks the verifier against the challenge in constant time, then runs the same find-or-create + active-user eligibility path as web and returns the token pair in the response body.
+
+An ID token exfiltrated on its own — SDK logs, a crash report, a leaked debug build — is worthless without the verifier; a token minted for another app or flow has no record; a replay finds none. Every miss is one opaque 401. No client-supplied access token is accepted or stored.
 
 The mobile entry points are tier-aware just like the web ones, so a mobile client can target either audience by hitting the matching prefix.
 
@@ -293,6 +347,8 @@ One consequence worth naming: a **service account** hitting a step-up-gated rout
 ### Enrolment proof gate
 
 `RequireEnrolmentProof(maxAge)` — carried by the additive `module.EnrolmentProofGate` sub-interface rather than by `RoleMiddleware` itself, so a fork's own middleware keeps compiling — sits on the four endpoints that **create or replace** a second factor — TOTP `enroll/begin` + `enroll/confirm`, passkey `register/begin` + `register/finish`, on both tiers. Before it, those endpoints required only a valid bearer, so a stolen session-only token could attach a passkey to the victim's account, or *replace* their TOTP secret (confirming an enrolment deletes the existing factor after validating a code for the new one), and then own the account outright.
+
+The same gate also protects [initial-password enrollment](#add-a-first-password-after-oauth-tier-1) on the operator surface, with the same five-minute maximum age.
 
 Both halves of each ceremony are gated, not just the first: the factor set can change between `begin` and `confirm`/`finish`. Reading `/me/mfa`, verifying an existing factor and listing passkeys are unaffected — they do not add a credential.
 
@@ -451,7 +507,7 @@ The credential lifecycle (create, rotate, revoke — max two active credentials,
 
 ## 11. Dev tooling
 
-`scripts/devtoken.sh` mints synthetic-user JWTs for local testing without touching the database. Disabled in production.
+`scripts/devtoken.sh` mints synthetic-user JWTs for local testing without touching the database. Development only — disabled in staging and production.
 
 ```bash
 ./scripts/devtoken.sh administrator                       # default — aud=operator
@@ -467,8 +523,8 @@ The audience flag is the difference between "I can hit `console.*`" and "I can h
 
 | Question                                          | Source of truth                                                                                                                                                  |
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| What endpoints exist?                             | The [API Reference](/api) on this site (auto-generated from the canonical spec), or the [auth module CLAUDE.md](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/core/auth/CLAUDE.md) for prose context |
+| What endpoints exist?                             | The [API Reference](/api) on this site (auto-generated from the canonical spec), or the [auth module AGENTS.md](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/core/auth/AGENTS.md) for prose context |
 | Why the audience split?                           | [ADR-0003 — three-audience host split](/adrs/three-audience-host-split), and [ADR-0014](/adrs/service-accounts-client-credentials) for the `service` audience it reserved |
-| What env vars does auth read?                     | [auth module CLAUDE.md → Runtime configuration](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/core/auth/CLAUDE.md#runtime-configuration)    |
-| How are cookie domains configured per audience?   | [docker/CLAUDE.md → Host split](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md)                                                              |
+| What env vars does auth read?                     | [auth module AGENTS.md → Runtime configuration](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/core/auth/AGENTS.md#runtime-configuration)    |
+| How are cookie domains configured per audience?   | [docker/AGENTS.md → Host split](https://github.com/orkestra-cc/orkestra/blob/main/docker/AGENTS.md)                                                              |
 | What's the JWT validator doing under the hood?    | `backend/internal/core/auth/services/jwt_service.go` (`ValidateAccessToken`) and `backend/internal/shared/middleware/audience.go` (`RequireAudience`)            |

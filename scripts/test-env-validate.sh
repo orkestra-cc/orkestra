@@ -49,6 +49,7 @@ prod=(
     "MONGO_ROOT_PASSWORD=${hex32}"
     "REDIS_PASSWORD=${hex32}"
     "STORAGE_SECRET_KEY=${hex32}"
+    "PDF_RENDERER_PASSWORD=${hex32}"
 )
 
 # --- development: the shipped placeholders are tolerated, but named ---
@@ -76,6 +77,22 @@ check "production: storage disabled without a RustFS root is refused" "1" "$(run
 check "production: the refusal names the RustFS root"      "yes" "$(saw 'set RUSTFS_ROOT_USER and RUSTFS_ROOT_PASSWORD')"
 check "development: storage disabled without a RustFS root is refused too" "1" "$(run STORAGE_ACCESS_KEY= STORAGE_SECRET_KEY=)"
 check "production: a key id with no secret is an error"    "1"   "$(run "${prod[@]}" STORAGE_SECRET_KEY=)"
+
+# --- PDF_RENDERER_PASSWORD gates the gotenberg sidecar, which always starts
+# with the infra stack — docker-compose.infra.yml's
+# `${PDF_RENDERER_PASSWORD:?...}` is unconditional on the gotenberg service,
+# even when PDF_RENDERER_URL is empty (that only disables the *backend's*
+# use of PDF features — orkestra.sh starts gotenberg with every
+# infra deploy regardless). A URL-gated skip here let a "PDF disabled"
+# stack pass validation and then fail `docker compose up -d` for ALL of
+# infra, not just gotenberg. Checked unconditionally now, same as every
+# other datastore secret. ---
+check "production: PDF_RENDERER_PASSWORD is required even with PDF disabled" "1" \
+    "$(run "${prod[@]}" PDF_RENDERER_URL= PDF_RENDERER_PASSWORD=)"
+check "production: the refusal names PDF_RENDERER_PASSWORD"                  "yes" \
+    "$(saw 'PDF_RENDERER_PASSWORD is empty or a placeholder')"
+check "development: an empty PDF_RENDERER_URL still warns about the password" "yes" \
+    "$(run PDF_RENDERER_URL= PDF_RENDERER_PASSWORD= > /dev/null; saw 'PDF_RENDERER_PASSWORD is empty or a placeholder')"
 
 # --- the RustFS S3 API must stay reachable by the reverse proxy ----------
 # STORAGE_PUBLIC_ENDPOINT means the BROWSER PUTs presigned uploads to rustfs
@@ -105,6 +122,17 @@ check "storage: no public endpoint, loopback is fine"          "no"  "$(run HOST
 
 # --- staging is as strict as production ---
 check "staging: the shipped RustFS literal is refused"     "1"   "$(run "${prod[@]}" ENV=staging COOKIE_SAME_SITE=lax STORAGE_SECRET_KEY=changeme-rustfs)"
+
+# --- the storage public endpoint must be https in staging/production -----
+# Browsers — and, for public cover images, anonymous visitors — fetch
+# presigned URLs from STORAGE_PUBLIC_ENDPOINT. Plain HTTP there is a
+# cleartext signed URL and mixed content on every HTTPS site embedding it.
+check "production: a plain-http public endpoint is refused"    "1"   "$(run "${prod[@]}" STORAGE_PUBLIC_ENDPOINT=http://storage.example.com)"
+check "production: the error names STORAGE_PUBLIC_ENDPOINT"    "yes" "$(saw 'STORAGE_PUBLIC_ENDPOINT must be an https')"
+check "production: an https public endpoint passes"            "0"   "$(run "${prod[@]}" STORAGE_PUBLIC_ENDPOINT=https://storage.example.com)"
+check "production: an unset public endpoint passes"            "0"   "$(run_without STORAGE_PUBLIC_ENDPOINT "${prod[@]}")"
+check "staging: a plain-http public endpoint is refused"       "1"   "$(run "${prod[@]}" ENV=staging STORAGE_PUBLIC_ENDPOINT=http://storage.example.com)"
+check "development: a plain-http public endpoint is tolerated" "0"   "$(run STORAGE_PUBLIC_ENDPOINT=http://localhost:9100)"
 
 echo
 printf 'env-validate: %d passed, %d failed\n' "$pass" "$fail"

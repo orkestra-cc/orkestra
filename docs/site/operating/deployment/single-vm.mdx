@@ -161,7 +161,7 @@ On VM reboot, Docker comes up, then orkestra.service brings the stack up automat
 
 ## Step 6 — First admin login
 
-The core dev-token issuer (`POST /dev/token`, used by `scripts/devtoken.sh`) is **auto-disabled when `ENV=production`** — so on a real production VM you can't mint an admin token. Create the first administrator through the **setup wizard** instead:
+The core dev-token issuer (`POST /dev/token`, used by `scripts/devtoken.sh`) is **auto-disabled when `ENV=production` or `ENV=staging`** — so on a real production VM you can't mint an admin token. Create the first administrator through the **setup wizard** instead:
 
 ```bash
 # The setup endpoints (/v1/setup/*) bootstrap the first admin on a fresh install.
@@ -170,7 +170,7 @@ curl -fsS http://localhost:3000/v1/setup/status | jq .
 
 Follow the wizard (or its UI counterpart) to create the first administrator account, then log into `/admin/users` to manage the rest.
 
-> For a non-production VM (`ENV=development` / `staging`), you can instead mint a one-time token with `ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator` — but never leave a non-production env exposed publicly.
+> Only an `ENV=development` VM can instead mint a one-time API token with `ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator` — `staging` disables the endpoint too. Never leave a development env exposed publicly.
 
 ## Step 7 — Log rotation
 
@@ -188,7 +188,7 @@ Docker's default JSON log driver grows unbounded. Configure rotation in `/etc/do
 
 Restart the daemon (`systemctl restart docker`) — existing containers keep their old config until next recreate, so re-run `docker compose up -d`.
 
-For structured JSON logs shipping straight to Loki, use [the observability stack](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md#self-hosted-otel-stack-docker-composeobservabilityyml):
+For structured JSON logs shipping straight to Loki, use [the observability stack](https://github.com/orkestra-cc/orkestra/blob/main/docker/AGENTS.md#self-hosted-otel-stack-docker-composeobservabilityyml):
 
 ```bash
 docker compose -f docker-compose.observability.yml --env-file .env up -d

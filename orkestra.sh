@@ -1295,7 +1295,7 @@ fullstack_execute_deploy() {
         compose_files+=(-f "$OBSERVABILITY_COMPOSE")
     fi
     with_spinner "Ensuring infrastructure services are running" \
-        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d mongodb redis rustfs
+        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d mongodb redis rustfs gotenberg
     sleep 5
     p_ok "Infrastructure ready"
 

@@ -32,8 +32,8 @@ func TestContentDispositionAttachment(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := contentDispositionAttachment(tc.in); got != tc.want {
-				t.Fatalf("contentDispositionAttachment(%q)\n got: %q\nwant: %q", tc.in, got, tc.want)
+			if got := ContentDispositionAttachment(tc.in); got != tc.want {
+				t.Fatalf("ContentDispositionAttachment(%q)\n got: %q\nwant: %q", tc.in, got, tc.want)
 			}
 		})
 	}

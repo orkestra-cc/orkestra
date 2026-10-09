@@ -121,7 +121,7 @@ Vite dev server is serving an HTML page where JS was expected — usually a 404 
 
 The core dev-token endpoint (`POST /dev/token`, in `internal/shared/devtoken`) is gated to non-production-*like* environments: both `ENV=production` and `ENV=staging` disable it. It is unauthenticated and mints a `super_admin` token, so it must never be reachable from an internet-facing host.
 
-- For local / staging-like: keep `ENV=development` or `staging`, NOT `production` — the endpoint is present in any non-production build.
+- For local development: keep `ENV=development` — it is the only environment where the endpoint exists. `staging` disables it just like `production`.
 - For production: the dev token issuer is correctly disabled. Create the first admin via the setup wizard (`/v1/setup/*`), then use OAuth or password login.
 
 ### Symptom: CORS error in browser console
@@ -145,7 +145,7 @@ Restart the backend after editing.
 
 The base ships **no** optional addons — the `optionalModules` catalog is empty, so a stock Orkestra build only lists the 8 core modules. An addon only appears once a fork has added it in-tree (`internal/addons/<name>/` + a `cmd/server/catalog_<name>.go` that registers its factory). Once registered, it's listed at `/admin/modules` and toggled there at runtime — there are no per-SKU builds or build tags to compile it in.
 
-If the addon was registered but still isn't listed, confirm the fork's `catalog_<name>.go` calls the registry in its `init()` and that the binary you launched was built from that fork (see the [Backend module map](https://github.com/orkestra-cc/orkestra/blob/main/backend/CLAUDE.md#module-system)).
+If the addon was registered but still isn't listed, confirm the fork's `catalog_<name>.go` calls the registry in its `init()` and that the binary you launched was built from that fork (see the [Backend module map](https://github.com/orkestra-cc/orkestra/blob/main/backend/AGENTS.md#module-system)).
 
 ### Symptom: enabling an addon at `/admin/modules` returns 409
 
@@ -161,7 +161,7 @@ By design. Addon-owned infrastructure containers are managed by the backend via 
 docker ps --filter label=orkestra.managed=true
 ```
 
-See [docker/CLAUDE.md "Backend-managed Containers"](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md#backend-managed-containers-not-visible-to-compose) for the full lifecycle.
+See [docker/AGENTS.md "Backend-managed Containers"](https://github.com/orkestra-cc/orkestra/blob/main/docker/AGENTS.md#backend-managed-containers-not-visible-to-compose) for the full lifecycle.
 
 ### Symptom: backend can't start the addon container — `permission denied on /var/run/docker.sock`
 

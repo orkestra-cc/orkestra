@@ -2,7 +2,7 @@ package services
 
 // The user module's not-found sentinel must be classifiable from OUTSIDE the
 // module. internal/core/auth/services cannot import this package (root
-// CLAUDE.md forbids cross-module service imports), but it must distinguish
+// AGENTS.md forbids cross-module service imports), but it must distinguish
 // "this account is gone" (a terminal 401 on the refresh path) from "the store
 // is unreachable" (a 503). Aliasing the module sentinel to the SDK one is what
 // makes errors.Is work across that boundary without an import.

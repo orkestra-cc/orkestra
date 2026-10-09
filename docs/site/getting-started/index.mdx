@@ -17,11 +17,10 @@ docker compose -f docker-compose.dev.yml --env-file .env up -d
 # Backend API: http://localhost:3000
 # API docs:    http://localhost:3000/docs
 
-# Generate an administrator token for first login (from repo root):
-ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
+# Console:     http://localhost:8080   (first visit runs the setup wizard)
 ```
 
-Once you're in, head to `/admin/modules` to manage modules. The registry hot-reloads — no restart required.
+Open the console and the [setup wizard](/getting-started/setup-wizard) creates your first administrator — see [First admin login](/getting-started/first-admin-login). Once you're in, head to `/admin/modules` to manage modules. The registry hot-reloads — no restart required.
 
 ## One image, core modules only
 

@@ -41,6 +41,7 @@ type UserService interface {
 	GetUserForAuth(ctx context.Context, email string) (*iface.User, error)
 	CreateUserWithPassword(ctx context.Context, input *iface.CreateUserInput) (*iface.User, error)
 	UpdatePasswordHash(ctx context.Context, userUUID, hash string) error
+	SetPasswordHashIfUnset(ctx context.Context, userUUID, hash string) error
 	MarkEmailVerified(ctx context.Context, userUUID string) error
 	RecordFailedLogin(ctx context.Context, userUUID string, lockUntil *time.Time) error
 	ClearFailedLogins(ctx context.Context, userUUID string) error
@@ -72,7 +73,7 @@ type UserService interface {
 	// administrator, excluding excludeUUID when non-empty. Used by the
 	// last-admin guard on delete / deactivate / role-demote so the
 	// platform can never be locked out by removing its only operator.
-	// Best-effort under concurrent edits — see backend/CLAUDE.md
+	// Best-effort under concurrent edits — see backend/AGENTS.md
 	// "Error-code contract" `user.last_admin_forbidden`.
 	CountActiveAdministrators(ctx context.Context, excludeUUID string) (int64, error)
 
@@ -667,6 +668,21 @@ func (s *userService) GetUserByOAuthLink(ctx context.Context, provider iface.OAu
 	return user, nil
 }
 
+// FindOldestUserWithRole implements iface.SystemRoleHolderFinder for the
+// auth module's first-admin sentinel backfill (spec §4.7 D31): one
+// deterministic repository query, deleted users excluded, deactivated
+// ones included.
+func (s *userService) FindOldestUserWithRole(ctx context.Context, role string) (string, bool, error) {
+	u, err := s.userRepo.FindOldestByRole(ctx, role)
+	if err != nil {
+		return "", false, fmt.Errorf("find oldest %s: %w", role, err)
+	}
+	if u == nil {
+		return "", false, nil
+	}
+	return u.UUID, true, nil
+}
+
 // CreateUserFromOAuth creates a new user from OAuth data
 func (s *userService) CreateUserFromOAuth(ctx context.Context, input *iface.CreateUserInput) (*iface.User, error) {
 	if input == nil {
@@ -692,6 +708,13 @@ func (s *userService) CreateUserFromOAuth(ctx context.Context, input *iface.Crea
 
 	// Create user model
 	user := iface.NewUser()
+	// The caller may pre-mint the uuid: the auth module claims the
+	// first-admin sentinel with the uuid it is ABOUT to create, and a
+	// rollback Release deletes only a matching uuid — the sentinel and
+	// the account must agree (spec §4.7 D30, as CreateUserWithPassword).
+	if input.UUID != "" {
+		user.UUID = input.UUID
+	}
 	user.Email = input.Email
 	user.Username = input.Username
 	user.FullName = input.FullName
@@ -915,6 +938,16 @@ func (s *userService) UpdatePasswordHash(ctx context.Context, userUUID, hash str
 	return asUserNotFound(s.userRepo.UpdatePasswordHash(ctx, userUUID, hash))
 }
 
+// SetPasswordHashIfUnset implements the additive initial-password capability.
+func (s *userService) SetPasswordHashIfUnset(ctx context.Context, userUUID, hash string) error {
+	if strings.TrimSpace(userUUID) == "" || hash == "" {
+		return ErrInvalidInput
+	}
+	return asUserNotFound(s.userRepo.SetPasswordHashIfUnset(ctx, userUUID, hash))
+}
+
+var _ iface.InitialPasswordSetter = (*userService)(nil)
+
 // MarkEmailVerified delegates to the repository.
 func (s *userService) MarkEmailVerified(ctx context.Context, userUUID string) error {
 	if userUUID == "" {
@@ -1099,7 +1132,7 @@ var _ iface.UserLifecycleStateProvider = (*userService)(nil)
 // BumpMFAEpoch implements iface.MFAEpochBumper — a thin delegation like
 // the other single-field mutators, so the not-found translation applies
 // the same way: repository.ErrUserNotFound must never cross this module
-// boundary raw (see asUserNotFound's doc and this module's CLAUDE.md).
+// boundary raw (see asUserNotFound's doc and this module's AGENTS.md).
 func (s *userService) BumpMFAEpoch(ctx context.Context, userUUID string) (int, error) {
 	if userUUID == "" {
 		return 0, ErrInvalidInput

@@ -2,17 +2,16 @@ package logquery
 
 import (
 	"strings"
-	"unicode"
+
+	"github.com/orkestra/backend/internal/shared/redact"
 )
 
-const redactedValue = "[REDACTED]"
+const redactedValue = redact.Redacted
 
-var sensitiveKeyFragments = [...]string{
-	"password",
-	"secret",
-	"token",
-	"authorization",
-	"cookie",
+// previewOnlyFragments are masked in the preview on top of the shared
+// secret list: the preview shows raw Loki lines to an operator, so it keeps
+// its historic stricter set.
+var previewOnlyFragments = [...]string{
 	"email",
 	"phone",
 	"address",
@@ -47,13 +46,11 @@ func Redact(value any) any {
 }
 
 func sensitiveKey(key string) bool {
-	normalized := strings.Map(func(r rune) rune {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			return unicode.ToLower(r)
-		}
-		return -1
-	}, key)
-	for _, fragment := range sensitiveKeyFragments {
+	normalized := redact.NormalizeKey(key)
+	if redact.IsSecretNormalized(normalized) {
+		return true
+	}
+	for _, fragment := range previewOnlyFragments {
 		if strings.Contains(normalized, fragment) {
 			return true
 		}

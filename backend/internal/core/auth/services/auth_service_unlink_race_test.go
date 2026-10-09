@@ -42,7 +42,7 @@ func (f *unlinkRaceUserFake) RemoveOAuthLinkFromUser(context.Context, string, if
 }
 
 func newUnlinkRaceSvc(users iface.UserProvider) *authService {
-	s := &authService{userService: users}
+	s := &authService{userService: users, oauthProviderRepo: &mirrorOAuthRepo{users: users}}
 	s.policy = &AuthPolicyService{cs: &stubReader{}}
 	s.audience = PolicyAudienceOperator
 	s.SetProviderUsability(func(context.Context, PolicyAudience, iface.OAuthProvider) (bool, error) {

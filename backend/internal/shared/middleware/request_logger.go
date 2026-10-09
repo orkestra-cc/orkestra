@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -104,7 +105,7 @@ func parseSkipPaths(raw string) map[string]struct{} {
 // RequestLogger returns an HTTP middleware that emits one structured
 // JSON log line per request, replacing chi's default unstructured
 // Logger. ADR-0005 §1.2 — only allowlisted attributes are written; no
-// bodies, no headers, no raw query strings.
+// bodies, no headers, no raw query strings, and the route template instead of the raw path.
 //
 // The middleware must run AFTER chiMiddleware.RequestID and
 // chiMiddleware.RealIP so request_id and r.RemoteAddr are populated,
@@ -116,11 +117,11 @@ func parseSkipPaths(raw string) map[string]struct{} {
 // added here — so module-emitted logs in the same request scope share
 // the same correlation IDs.
 //
-// tenant_id / tenant_kind / user_id / user_role / audience are stamped
-// here when available (the auth/audience middleware may have already run
-// and populated them; CORS/audience rejects naturally have them empty).
-// Empty values are dropped rather than logged as "" to keep collector-
-// side filtering predictable.
+// tenant_id / tenant_kind / user_id / user_role / audience come from the
+// request annotations the auth and audience middlewares fill downstream
+// (ctxauth.RequestAnnotations); without them this outer middleware could
+// not see the principal at all. Empty values are dropped rather than logged
+// as "" to keep collector-side filtering predictable.
 func RequestLogger(logger *slog.Logger, opts RequestLoggerOptions) func(http.Handler) http.Handler {
 	if opts.SkipPaths == nil {
 		opts.SkipPaths = defaultSkipPaths
@@ -135,21 +136,40 @@ func RequestLogger(logger *slog.Logger, opts RequestLoggerOptions) func(http.Han
 				return
 			}
 
+			ctx, ann := ctxauth.WithRequestAnnotations(r.Context())
+			r = r.WithContext(ctx)
+
 			start := time.Now()
 			ww := chiMiddleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			next.ServeHTTP(ww, r)
 			duration := time.Since(start)
 
+			// otelhttp computes http.route once, at span start, from a
+			// pattern chi has not set yet, so server spans never carry it.
+			// Stamp the matched template on the still-open span: the trace
+			// exporter substitutes it for the raw url.path (spec §2.5).
+			if route := chiRoutePattern(r); route != "" {
+				trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("http.route", route))
+			}
+
 			attrs := make([]slog.Attr, 0, 16)
 			attrs = append(attrs,
 				slog.String("method", r.Method),
-				slog.String("path", r.URL.Path),
 				slog.Int("status", ww.Status()),
 				slog.Int64("duration_ms", duration.Milliseconds()),
 				slog.Int("bytes", ww.BytesWritten()),
 				slog.String("remote", r.RemoteAddr),
 				slog.String("ua", r.UserAgent()),
 			)
+			// Spec §2.4: the route template identifies the endpoint without
+			// the identifiers a raw path carries (user ids, e-mails). The
+			// raw path is logged only when chi matched no template (404s,
+			// requests outside the router); the PolicyHandler still masks it.
+			if route := chiRoutePattern(r); route != "" {
+				attrs = append(attrs, slog.String("route", route))
+			} else {
+				attrs = append(attrs, slog.String("path", r.URL.Path))
+			}
 			if reqID := chiMiddleware.GetReqID(r.Context()); reqID != "" {
 				attrs = append(attrs, slog.String("request_id", reqID))
 			}
@@ -157,22 +177,39 @@ func RequestLogger(logger *slog.Logger, opts RequestLoggerOptions) func(http.Han
 				attrs = append(attrs, slog.Bool("slow", true))
 			}
 
-			// Tenant + user + audience are best-effort: when CORS or
-			// audience-mismatch rejects fire before RequireAuth runs,
-			// these are empty and intentionally omitted from the line.
-			if v, ok := ctxauth.GetTenantID(r.Context()); ok && v != "" {
-				attrs = append(attrs, slog.String("tenant_id", v))
+			// The auth middlewares run downstream on a derived context; they
+			// report the principal through the annotations installed above.
+			// Values already on this context (tests, outer middleware) are the
+			// fallback. Empty values are omitted from the line.
+			snap := ann.Snapshot()
+			tenantID := snap.TenantID
+			if tenantID == "" {
+				tenantID, _ = ctxauth.GetTenantID(r.Context())
 			}
-			if v := ctxauth.TenantKindFromContext(r.Context()); v != "" {
-				attrs = append(attrs, slog.String("tenant_kind", v))
+			tenantKind := snap.TenantKind
+			if tenantKind == "" {
+				tenantKind = ctxauth.TenantKindFromContext(r.Context())
 			}
-			if v, ok := ctxauth.GetUserUUID(r.Context()); ok && v != "" {
-				attrs = append(attrs, slog.String("user_id", v))
+			userID := snap.UserID
+			if userID == "" {
+				userID, _ = ctxauth.GetUserUUID(r.Context())
 			}
-			if v, ok := ctxauth.GetSystemRole(r.Context()); ok && v != "" {
-				attrs = append(attrs, slog.String("user_role", v))
+			userRole := snap.UserRole
+			if userRole == "" {
+				userRole, _ = ctxauth.GetSystemRole(r.Context())
 			}
-			audience := AudienceFromContext(r.Context())
+			for _, kv := range [...]struct{ k, v string }{
+				{"tenant_id", tenantID}, {"tenant_kind", tenantKind},
+				{"user_id", userID}, {"user_role", userRole},
+			} {
+				if kv.v != "" {
+					attrs = append(attrs, slog.String(kv.k, kv.v))
+				}
+			}
+			audience := snap.Audience
+			if audience == "" {
+				audience = AudienceFromContext(r.Context())
+			}
 			if audience == "" {
 				audience = opts.Audience
 			}

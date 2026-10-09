@@ -247,6 +247,12 @@ func describeSendError(p SenderProfile, err error) string {
 		out = prefix + " driver=" + safeToken(p.Provider) + " err=not_configured missing=" + safeTokens(inc.Missing)
 	case errors.As(err, &se):
 		out = prefix + " " + se.Error() // rendered from typed fields through the allowlists — never a driver's string
+	// After the SendError case on purpose: an SMTP rejection that a driver
+	// classified as ErrAttachmentRejected keeps its code-bearing diagnostic
+	// (code=552). This case covers the pre-driver refusals (size, type,
+	// driver capability) and a driver's bare sentinel wrap.
+	case errors.Is(err, ErrAttachmentRejected):
+		out = prefix + " err=attachment_rejected"
 	case errors.Is(err, context.DeadlineExceeded):
 		out = prefix + " err=timeout"
 	case errors.Is(err, context.Canceled):

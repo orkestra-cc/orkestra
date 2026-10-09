@@ -83,3 +83,13 @@ func TestSensitiveKeyMatchingIsCaseInsensitiveAndSeparatorAgnostic(t *testing.T)
 		})
 	}
 }
+
+func TestRedactMasksSharedSecretFragments(t *testing.T) {
+	got := Redact(map[string]any{"api_key": "k", "private_key": "p", "module": "auth"}).(map[string]any)
+	if got["api_key"] != redactedValue || got["private_key"] != redactedValue {
+		t.Fatalf("shared secret fragments not masked: %v", got)
+	}
+	if got["module"] != "auth" {
+		t.Fatalf("non-sensitive key masked: %v", got)
+	}
+}

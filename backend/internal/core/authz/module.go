@@ -89,7 +89,7 @@ func (m *Module) Collections() []module.CollectionSpec {
 			// needs the dedup migration run first — see
 			// docs/migrations/0009_authz_bindings_unique.md and the
 			// "Idempotent binding grants" section of this module's
-			// CLAUDE.md.
+			// AGENTS.md.
 			{OrderedKeys: []module.IndexKey{
 				{Field: "tenantId", Direction: 1},
 				{Field: "userUUID", Direction: 1},
@@ -253,7 +253,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 			// EnsureBinding grants the (tenant, owner, role) tuple only
 			// if it does not already exist and otherwise returns the
 			// existing row untouched, backed by the unique compound
-			// index on authz_bindings — see this module's CLAUDE.md.
+			// index on authz_bindings — see this module's AGENTS.md.
 			if _, err := m.svc.EnsureBinding(ctx, tenantUUID, "system", authzModels.CreateBindingInput{
 				UserUUID: ownerUUID,
 				RoleUUID: role.UUID,

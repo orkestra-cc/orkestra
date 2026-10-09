@@ -8,6 +8,7 @@ import (
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -19,6 +20,7 @@ type fakeOAuthProviderRepo struct {
 	mu        sync.Mutex
 	byKey     map[string]*authModels.OAuthProviderDoc // key = provider+"|"+providerID
 	created   []*authModels.OAuthProviderDoc
+	deleted   []string
 	createErr error
 }
 
@@ -52,11 +54,25 @@ func (r *fakeOAuthProviderRepo) GetByProviderAndID(_ context.Context, provider a
 	return nil, nil
 }
 
+func (r *fakeOAuthProviderRepo) GetByProviderAndIDIncludingUnlinked(ctx context.Context, provider authModels.OAuthProvider, providerID string) (*authModels.OAuthProviderDoc, error) {
+	return r.GetByProviderAndID(ctx, provider, providerID)
+}
+
 func (r *fakeOAuthProviderRepo) LinkOAuthProvider(context.Context, string, *authModels.OAuthLink) error {
 	panic("unused: LinkOAuthProvider")
 }
-func (r *fakeOAuthProviderRepo) GetByUserUUID(context.Context, string) ([]*authModels.OAuthProviderDoc, error) {
-	panic("unused: GetByUserUUID")
+func (r *fakeOAuthProviderRepo) GetByUserUUID(_ context.Context, userUUID string) ([]*authModels.OAuthProviderDoc, error) {
+	// The provider collection is what the already-linked check reads
+	// since D32; tombstoned rows are excluded like the Mongo repository.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*authModels.OAuthProviderDoc
+	for _, d := range r.byKey {
+		if d.UserUUID == userUUID && d.UnlinkedAt == nil {
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }
 func (r *fakeOAuthProviderRepo) GetPrimaryProvider(context.Context, string) (*authModels.OAuthProviderDoc, error) {
 	panic("unused: GetPrimaryProvider")
@@ -79,8 +95,11 @@ func (r *fakeOAuthProviderRepo) UpdateMetadata(context.Context, string, map[stri
 func (r *fakeOAuthProviderRepo) UnlinkProvider(context.Context, string, authModels.OAuthProvider) error {
 	panic("unused: UnlinkProvider")
 }
-func (r *fakeOAuthProviderRepo) DeleteProvider(context.Context, string) error {
-	panic("unused: DeleteProvider")
+func (r *fakeOAuthProviderRepo) DeleteProvider(_ context.Context, uuid string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.deleted = append(r.deleted, uuid)
+	return nil
 }
 func (r *fakeOAuthProviderRepo) FindByEmail(context.Context, string) ([]*authModels.OAuthProviderDoc, error) {
 	panic("unused: FindByEmail")
@@ -218,6 +237,10 @@ func TestSelfLinkOAuth_RejectsDuplicateProvider(t *testing.T) {
 		},
 	})
 	repo := newFakeOAuthProviderRepo()
+	// The provider collection is what the already-linked check reads (D32).
+	repo.seed(&authModels.OAuthProviderDoc{
+		UUID: "link-old", UserUUID: "u-1", Provider: "google", ProviderID: "g-existing", Email: "old@example.com", LinkedAt: time.Now(),
+	})
 	svc := newSelfLinkSvc(users, repo)
 
 	err := svc.SelfLinkOAuthFromCallback(
@@ -286,5 +309,75 @@ func TestSelfLinkOAuth_NilUserReturnsTheSDKSentinel(t *testing.T) {
 	}
 	if !errors.Is(err, iface.ErrUserNotFound) {
 		t.Fatalf("err = %v, want it to wrap iface.ErrUserNotFound", err)
+	}
+}
+
+// readModelFailingUsers fails the embedded-link append so the
+// compensation path runs.
+type readModelFailingUsers struct{ *adminUnlinkUserFake }
+
+func (readModelFailingUsers) AddOAuthLinkToUser(context.Context, string, iface.OAuthLink) error {
+	return errors.New("users: write failed")
+}
+
+// raceOAuthRepo models the second of two concurrent link flows for the
+// same user and identity: its pre-write reads see nothing (the first
+// flow's row lands between them and the insert), the insert reports the
+// duplicate, and the ownership re-read returns the first flow's row.
+type raceOAuthRepo struct {
+	*fakeOAuthProviderRepo
+	first *authModels.OAuthProviderDoc
+}
+
+func (r raceOAuthRepo) GetByProviderAndID(context.Context, authModels.OAuthProvider, string) (*authModels.OAuthProviderDoc, error) {
+	return nil, nil
+}
+
+func (r raceOAuthRepo) GetByUserUUID(context.Context, string) ([]*authModels.OAuthProviderDoc, error) {
+	return nil, nil
+}
+
+func (r raceOAuthRepo) GetByProviderAndIDIncludingUnlinked(context.Context, authModels.OAuthProvider, string) (*authModels.OAuthProviderDoc, error) {
+	return r.first, nil
+}
+
+// Two link flows for the same user and identity can both pass the reads;
+// the second insert reports a duplicate and claimIdentity hands back the
+// row the FIRST flow created. If this flow's embedded append then fails,
+// the cleanup must not delete a row it did not create — that would undo
+// the other flow's successful link.
+func TestSelfLinkOAuth_ReadModelFailureKeepsARowThisCallDidNotCreate(t *testing.T) {
+	users := newAdminUnlinkUserFake()
+	users.seed(&iface.User{UUID: "u-1", Email: "u@example.com", PasswordHash: "x"})
+	base := newFakeOAuthProviderRepo()
+	base.createErr = repository.ErrOAuthIdentityDuplicate
+	first := &authModels.OAuthProviderDoc{UUID: "row-first", UserUUID: "u-1", Provider: "google", ProviderID: "g-1", Email: "u@example.com"}
+	svc := &authService{userService: readModelFailingUsers{users}, oauthProviderRepo: raceOAuthRepo{fakeOAuthProviderRepo: base, first: first}}
+
+	err := svc.SelfLinkOAuthFromCallback(context.Background(), "u-1", "google", sampleUserInfo("g-1", "u@example.com"), nil)
+	if err == nil {
+		t.Fatal("a failed read-model write must be reported")
+	}
+	if len(base.deleted) != 0 {
+		t.Fatalf("the row this call did not create must survive, deleted %v", base.deleted)
+	}
+}
+
+// The mirror image: a row THIS call created is released when the embedded
+// append fails, so ownership never stands alone for a link the user was
+// told failed.
+func TestSelfLinkOAuth_ReadModelFailureReleasesTheRowThisCallCreated(t *testing.T) {
+	users := newAdminUnlinkUserFake()
+	users.seed(&iface.User{UUID: "u-2", Email: "u2@example.com", PasswordHash: "x"})
+	repo := newFakeOAuthProviderRepo()
+	svc := newSelfLinkSvc(users, repo)
+	svc.userService = readModelFailingUsers{users}
+
+	err := svc.SelfLinkOAuthFromCallback(context.Background(), "u-2", "google", sampleUserInfo("g-2", "u2@example.com"), nil)
+	if err == nil {
+		t.Fatal("a failed read-model write must be reported")
+	}
+	if len(repo.created) != 1 || len(repo.deleted) != 1 || repo.deleted[0] != repo.created[0].UUID {
+		t.Fatalf("the row this call created must be released: created %d, deleted %v", len(repo.created), repo.deleted)
 	}
 }

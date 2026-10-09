@@ -584,7 +584,7 @@ func TestOAuthCallback_SignupDisabled_ReturnsErr(t *testing.T) {
 	_, err := env.auth.HandleOAuthCallbackWithLinking(
 		context.Background(),
 		authModels.OAuthProviderGoogle,
-		map[string]any{"id": "g-99", "email": "newcomer@example.com", "name": "New", "email_verified": true},
+		map[string]any{"provider_id": "g-99", "email": "newcomer@example.com", "name": "New", "email_verified": true},
 		nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
 	)
 	if !errors.Is(err, ErrOAuthSignupDisabled) {
@@ -607,7 +607,7 @@ func TestOAuthCallback_OperatorDefaultRoleGuest(t *testing.T) {
 	_, _ = env.auth.HandleOAuthCallbackWithLinking(
 		context.Background(),
 		authModels.OAuthProviderGoogle,
-		map[string]any{"id": "g-200", "email": "joiner@example.com", "name": "Joiner", "email_verified": true},
+		map[string]any{"provider_id": "g-200", "email": "joiner@example.com", "name": "Joiner", "email_verified": true},
 		nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
 	)
 	created := env.users.byEmail["joiner@example.com"]
@@ -632,7 +632,7 @@ func TestOAuthCallback_ClientDefaultRoleReadsPolicy(t *testing.T) {
 	_, _ = env.auth.HandleOAuthCallbackWithLinking(
 		context.Background(),
 		authModels.OAuthProviderGoogle,
-		map[string]any{"id": "g-300", "email": "client-joiner@example.com", "name": "Client", "email_verified": true},
+		map[string]any{"provider_id": "g-300", "email": "client-joiner@example.com", "name": "Client", "email_verified": true},
 		nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
 	)
 	created := env.users.byEmail["client-joiner@example.com"]
@@ -761,7 +761,7 @@ func TestOAuthCallback_RegistrationDisabled_ReturnsErr(t *testing.T) {
 	_, err := env.auth.HandleOAuthCallbackWithLinking(
 		context.Background(),
 		authModels.OAuthProviderGoogle,
-		map[string]any{"id": "g-100", "email": "newcomer2@example.com", "name": "New2", "email_verified": true},
+		map[string]any{"provider_id": "g-100", "email": "newcomer2@example.com", "name": "New2", "email_verified": true},
 		nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
 	)
 	if !errors.Is(err, ErrOAuthSignupDisabled) {
@@ -780,7 +780,7 @@ func TestOAuthCallback_AutoLinkDisabled_ReturnsErr(t *testing.T) {
 	_, err := env.auth.HandleOAuthCallbackWithLinking(
 		context.Background(),
 		authModels.OAuthProviderGoogle,
-		map[string]any{"id": "g-existing", "email": "existing@example.com", "name": "Existing", "email_verified": true},
+		map[string]any{"provider_id": "g-existing", "email": "existing@example.com", "name": "Existing", "email_verified": true},
 		nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
 	)
 	if !errors.Is(err, ErrOAuthLinkDisabled) {
@@ -845,6 +845,10 @@ func newOAuthGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[st
 // success since the test path returns before the repo writes anything
 // meaningful.
 type oauthRepoStub struct{}
+
+func (oauthRepoStub) GetByProviderAndIDIncludingUnlinked(context.Context, authModels.OAuthProvider, string) (*authModels.OAuthProviderDoc, error) {
+	return nil, nil
+}
 
 func (oauthRepoStub) CreateOAuthProvider(context.Context, *authModels.OAuthProviderDoc) error {
 	return nil

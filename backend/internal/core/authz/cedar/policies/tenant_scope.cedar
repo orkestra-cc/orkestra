@@ -122,6 +122,19 @@ forbid (
     resource.kind == "external"
 };
 
+// system.compliance.policy.manage is operator-side (admin creates, changes,
+// assigns and approves compliance policies — compliance spec §7).
+@id("tenant_scope.system_compliance_policy_manage_internal_only")
+forbid (
+    principal,
+    action == Action::"system.compliance.policy.manage",
+    resource
+) when {
+    resource is Orkestra::Tenant &&
+    resource has kind &&
+    resource.kind == "external"
+};
+
 // Suspended / archived / purged tenants reject every non-read action. A
 // tenant that's been suspended by the operator console should surface as
 // read-only until it's reactivated.

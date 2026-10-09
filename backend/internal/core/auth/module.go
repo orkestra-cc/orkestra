@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -31,6 +32,24 @@ import (
 
 type AuthModule struct {
 	module.BaseModule
+
+	// indexLister answers "which indexes exist on this collection" for the
+	// boot-time identity-index check (spec §4.8 D32 item 1). Defaulted to
+	// the module database at Init; a seam so the check is testable.
+	indexLister indexLister
+	// oauthIndexMissing is set at Start when the unique (provider,
+	// providerId) index is absent from either provider collection —
+	// migration 0010 has not run here. While set, HealthCheck reports
+	// degraded and every OAuth entry point answers oauth_store_unavailable.
+	oauthIndexMissing atomic.Bool
+
+	// First-admin sentinel backfill (spec §4.7 D31): the claimer and the
+	// operator tier's user provider, resolved at Init, consumed at Start.
+	// roleHolderFinder is the narrow seam (nil for a provider that
+	// predates it — then GetUserCount on operatorUsers is the fallback).
+	firstAdminClaimer services.FirstAdminClaimer
+	roleHolderFinder  iface.SystemRoleHolderFinder
+	operatorUsers     iface.UserProvider
 
 	// deviceTrust is a single non-tier-split collection so one handler
 	// is reused across both operator and client mounts.
@@ -772,14 +791,29 @@ func (m *AuthModule) Collections() []module.CollectionSpec {
 		// differs.
 		{Name: models.OperatorOAuthProvidersCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"userUuid": 1, "provider": 1}, Unique: true},
+			// One identity, one owner (spec §4.8 D32 item 1). Ordered, so
+			// the name is provider_1_providerId_1 on a fresh install —
+			// exactly what migration 0010 builds on an existing one and
+			// what verifyOAuthIdentityIndex looks for at Start.
+			// ensureCollections is create-only and non-fatal, so the
+			// migration is what actually guarantees this on an upgrade.
+			{OrderedKeys: []module.IndexKey{{Field: "provider", Direction: 1}, {Field: "providerId", Direction: 1}}, Unique: true},
 		}},
 		{Name: models.ClientOAuthProvidersCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"userUuid": 1, "provider": 1}, Unique: true},
+			{OrderedKeys: []module.IndexKey{{Field: "provider", Direction: 1}, {Field: "providerId", Direction: 1}}, Unique: true},
 		}},
 		{Name: models.OperatorRefreshTokensCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
 			{Keys: map[string]int{"userUuid": 1}},
 			{Keys: map[string]int{"familyId": 1}},
+			// Every refresh entry point looks the presented token up by its
+			// hash (PeekRefreshToken, GetByTokenAny, the rotation CAS); with
+			// one row per rotation per user kept for the whole refresh TTL,
+			// an unindexed lookup is a collection scan per refresh, on an
+			// anonymous endpoint. Non-unique: uniqueness is M-9's follow-up
+			// and a unique build can fail on existing data.
+			{Keys: map[string]int{"token": 1}},
 			// Serves the sweep's sorted, limited selection. Deliberately
 			// NOT a TTL index: deletion at expiry is semantically safe,
 			// but Mongo's TTL monitor cannot provide the bounded
@@ -791,6 +825,13 @@ func (m *AuthModule) Collections() []module.CollectionSpec {
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
 			{Keys: map[string]int{"userUuid": 1}},
 			{Keys: map[string]int{"familyId": 1}},
+			// Every refresh entry point looks the presented token up by its
+			// hash (PeekRefreshToken, GetByTokenAny, the rotation CAS); with
+			// one row per rotation per user kept for the whole refresh TTL,
+			// an unindexed lookup is a collection scan per refresh, on an
+			// anonymous endpoint. Non-unique: uniqueness is M-9's follow-up
+			// and a unique build can fail on existing data.
+			{Keys: map[string]int{"token": 1}},
 			// Serves the sweep's sorted, limited selection. Deliberately
 			// NOT a TTL index: deletion at expiry is semantically safe,
 			// but Mongo's TTL monitor cannot provide the bounded
@@ -877,6 +918,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// Device-trust is the only auth collection that stays single (not
 	// tier-split) — the grant follows the user record and is reused
 	// across both tier mounts.
+	m.indexLister = mongoIndexLister{db: deps.DB}
 	deviceTrustRepo := repository.NewDeviceTrustRepository(deps.DB)
 	deviceTrustDuration := parseDurationEnv("AUTH_DEVICE_TRUST_DURATION", models.DeviceTrustDuration)
 	deviceTrustSvc := services.NewDeviceTrustService(deviceTrustRepo, deviceTrustDuration, logger)
@@ -940,6 +982,14 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		return fmt.Errorf("auth: Redis adapter lacks EVAL support")
 	}
 	attemptCounter := services.NewRedisAttemptCounter(scriptRedis, logger)
+	// The per-account credential-change lock needs SetNX + EVAL too; the
+	// same adapter provides both, and a client without them must be a
+	// boot failure for the same reason as above — unserialized unlinks
+	// can remove an account's last way in.
+	unlinkLockRedis, ok := deps.RedisAdapter.(services.UnlinkLockRedisClient)
+	if !ok {
+		return fmt.Errorf("auth: Redis adapter lacks SETNX/EVAL support for the credential-change lock")
+	}
 	// Bounded dispatcher for transactional auth mail (D5). Constructed
 	// here so it exists before the tier bundles that hand it to
 	// PasswordAuthConfig; started/stopped by maintenance.go's Start/Stop
@@ -968,6 +1018,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	} else {
 		logger.Warn("first-admin claimer not wired — signup flows will fall through to non-atomic first-user heuristic")
 	}
+	m.firstAdminClaimer = firstAdminClaimer
 
 	mfaChallengeSvc := services.NewMFAChallengeService(redisStore)
 
@@ -1117,9 +1168,18 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// always registers ServiceOperatorUserProvider, so a missing
 	// provider here means the user module failed to init.
 	operatorUser := module.MustGetTyped[iface.UserProvider](deps.Services, module.ServiceOperatorUserProvider)
+	m.operatorUsers = operatorUser
+	if finder, ok := module.GetTyped[iface.SystemRoleHolderFinder](deps.Services, module.ServiceOperatorUserProvider); ok {
+		m.roleHolderFinder = finder
+	}
+	operatorInitialPasswordSetter, ok := operatorUser.(iface.InitialPasswordSetter)
+	if !ok {
+		logger.Warn("auth: operator user provider lacks initial-password capability; enrollment will fail closed")
+	}
 	opDeps := commonTierDeps
 	opDeps.tier = tierOperator
 	opDeps.userProvider = operatorUser
+	opDeps.initialPasswordSetter = operatorInitialPasswordSetter
 	opDeps.mfaEpochBumper = resolveMFAEpochBumper(deps.Services, module.ServiceOperatorUserProvider, logger, string(tierOperator))
 	opDeps.jwtService = operatorJWT
 	if cfg.Server.Operator.FrontendURL != "" {
@@ -1170,6 +1230,8 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// authenticated request. Without this, in-flight access tokens
 	// would stay valid until the per-token TTL ticked over.
 	opBundle.authService.SetSessionRevocation(sessionRevocationSvc)
+	opBundle.authService.SetOAuthStoreGate(m.oauthStoreDegraded)
+	opBundle.authService.SetUnlinkLock(unlinkLockRedis)
 	// Same store for the password service: ResetPassword / ChangePassword
 	// push every evicted sid so a credential change kills access tokens
 	// already in flight instead of waiting out their TTL.
@@ -1342,6 +1404,8 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		clBundle.passwordSvc.SetBlobStore(store)
 	}
 	clBundle.authService.SetSessionRevocation(sessionRevocationSvc)
+	clBundle.authService.SetOAuthStoreGate(m.oauthStoreDegraded)
+	clBundle.authService.SetUnlinkLock(unlinkLockRedis)
 	clBundle.passwordSvc.SetSessionRevocation(sessionRevocationSvc)
 
 	// §4.7: the unlink guards count usable links through the same strict
@@ -1748,6 +1812,10 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 	m.operatorAuthHandler.RegisterTierMountableRoutes(ri.Operator.PublicAPI, operatorProtectedAPI, ri.Router, handlers.OperatorMount)
 	m.operatorAuthHandler.RegisterOAuthStartRoutes(ri.Operator.PublicAPI, handlers.OperatorMount)
 
+	// Resolve once for initial-password, TOTP, and passkey enrollment, so
+	// missing middleware support warns once and refuses every enrollment.
+	operatorEnrolmentGate := enrolmentGate(m.logger, "operator", ri.Operator.AuthMW, 5*time.Minute)
+
 	// Operator password auth: register/login/verify/reset/forgot are
 	// public; change-password is protected and runs without an org
 	// context (user self-service).
@@ -1756,6 +1824,12 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		r.Use(ri.Operator.AuthMW.RequireGlobal())
 		api := humachi.New(r, ri.APIConfig)
 		m.operatorPasswordHandler.RegisterProtectedRoutes(api, handlers.OperatorMount)
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
+		r.Use(operatorEnrolmentGate)
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorPasswordHandler.RegisterInitialPasswordRoute(api)
 	})
 
 	// Service-account client-credentials grant (Task 8): public, single
@@ -1777,11 +1851,6 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
 		m.serviceAccountAdminHandler.RegisterManageRoutes(humachi.New(r, ri.APIConfig))
 	})
-
-	// The enrolment-proof gate, resolved ONCE per surface so a fork whose
-	// middleware lacks module.EnrolmentProofGate gets one WARN, not one
-	// per route group. Reused by this surface's TOTP and passkey mounts.
-	operatorEnrolmentGate := enrolmentGate(m.logger, "operator", ri.Operator.AuthMW, 5*time.Minute)
 
 	// Operator MFA endpoints split into five groups:
 	//   - public: /v1/auth/operator/mfa/login/verify completes an in-

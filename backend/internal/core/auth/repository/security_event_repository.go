@@ -100,7 +100,7 @@ func (r *securityEventRepository) ListByUser(ctx context.Context, userUUID strin
 	opts := options.Find().
 		SetSort(bson.D{{Key: "timestamp", Value: -1}}).
 		SetLimit(int64(limit))
-	//tenantscope:allow auth_security_events is a non-tier-split audit log keyed on userUUID alone — see backend/internal/core/auth/CLAUDE.md ("MongoDB collections" table marks auth_security_events as the single non-tier-split row).
+	//tenantscope:allow auth_security_events is a non-tier-split audit log keyed on userUUID alone — see backend/internal/core/auth/AGENTS.md ("MongoDB collections" table marks auth_security_events as the single non-tier-split row).
 	cursor, err := r.collection.Find(ctx, bson.M{"userUuid": userUUID}, opts)
 	if err != nil {
 		return nil, err
@@ -153,7 +153,7 @@ func (r *securityEventRepository) ListByUserPaged(ctx context.Context, userUUID 
 		SetSort(bson.D{{Key: "timestamp", Value: -1}}).
 		SetSkip(int64(offset)).
 		SetLimit(int64(limit))
-	//tenantscope:allow auth_security_events is a non-tier-split audit log keyed on userUUID alone — see backend/internal/core/auth/CLAUDE.md.
+	//tenantscope:allow auth_security_events is a non-tier-split audit log keyed on userUUID alone — see backend/internal/core/auth/AGENTS.md.
 	cursor, err := r.collection.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, total, err

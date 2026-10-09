@@ -110,6 +110,9 @@ func (f *fakeUserService) CreateUserWithPassword(ctx context.Context, input *ifa
 func (f *fakeUserService) UpdatePasswordHash(context.Context, string, string) error {
 	panic("unused: UpdatePasswordHash")
 }
+func (f *fakeUserService) SetPasswordHashIfUnset(context.Context, string, string) error {
+	panic("unused: SetPasswordHashIfUnset")
+}
 func (f *fakeUserService) MarkEmailVerified(ctx context.Context, userUUID string) error {
 	if f.markEmailVerifiedFn != nil {
 		return f.markEmailVerifiedFn(ctx, userUUID)

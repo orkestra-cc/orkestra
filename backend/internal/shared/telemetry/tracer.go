@@ -101,7 +101,9 @@ func Init(serviceName, environment string, logger *slog.Logger) ShutdownFunc {
 			tp = sdktrace.NewTracerProvider(sdktrace.WithResource(res))
 		} else {
 			tp = sdktrace.NewTracerProvider(
-				sdktrace.WithBatcher(exp),
+				// Compliance spec §2.5: spans leave the process masked with
+				// the tenant's policy; main.go swaps in the live resolver.
+				sdktrace.WithBatcher(newGlobalMaskingExporter(exp)),
 				sdktrace.WithResource(res),
 			)
 			logger.Info("telemetry: OTLP exporter ready", slog.String("endpoint", endpoint))

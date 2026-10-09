@@ -39,7 +39,11 @@ type fakeUserRepo struct {
 	// GetLifecycleProjection — simulates a repository failure distinct
 	// from every lifecycle state so the not-a-state contract can be
 	// tested.
-	lifecycleErr error
+	lifecycleErr              error
+	setPasswordHashIfUnsetErr error
+	initialPasswordCalls      int
+	initialPasswordUUID       string
+	initialPasswordHash       string
 }
 
 func newFakeUserRepo() *fakeUserRepo {
@@ -171,7 +175,13 @@ func (r *fakeUserRepo) SoftDeleteAndAliasEmail(_ context.Context, id string) err
 	return nil
 }
 
-func (r *fakeUserRepo) UpdatePasswordHash(_ context.Context, _, _ string) error           { return nil }
+func (r *fakeUserRepo) UpdatePasswordHash(_ context.Context, _, _ string) error { return nil }
+func (r *fakeUserRepo) SetPasswordHashIfUnset(_ context.Context, userUUID, hash string) error {
+	r.initialPasswordCalls++
+	r.initialPasswordUUID = userUUID
+	r.initialPasswordHash = hash
+	return r.setPasswordHashIfUnsetErr
+}
 func (r *fakeUserRepo) MarkEmailVerified(_ context.Context, _ string) error               { return nil }
 func (r *fakeUserRepo) RecordFailedLogin(_ context.Context, _ string, _ *time.Time) error { return nil }
 func (r *fakeUserRepo) ClearFailedLogins(_ context.Context, _ string) error               { return nil }
@@ -257,6 +267,22 @@ func (r *fakeUserRepo) List(_ context.Context, _ *iface.UserFilters, p *iface.Pa
 func (r *fakeUserRepo) ListWithOptions(_ context.Context, _ bson.M, _ ...*options.FindOptions) ([]*iface.User, error) {
 	return nil, nil
 }
+func (r *fakeUserRepo) FindOldestByRole(_ context.Context, role string) (*iface.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var oldest *iface.User
+	for _, u := range r.users {
+		if u.Role != role || u.DeletedAt != nil {
+			continue
+		}
+		if oldest == nil || u.CreatedAt.Before(oldest.CreatedAt) ||
+			(u.CreatedAt.Equal(oldest.CreatedAt) && u.UUID < oldest.UUID) {
+			oldest = u
+		}
+	}
+	return oldest, nil
+}
+
 func (r *fakeUserRepo) GetByRole(_ context.Context, role string) ([]*iface.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -372,6 +398,9 @@ func (r *fakeOAuthProviderRepo) LinkOAuthProvider(context.Context, string, *auth
 func (r *fakeOAuthProviderRepo) GetByProviderAndID(context.Context, authModels.OAuthProvider, string) (*authModels.OAuthProviderDoc, error) {
 	return nil, nil
 }
+func (r *fakeOAuthProviderRepo) GetByProviderAndIDIncludingUnlinked(context.Context, authModels.OAuthProvider, string) (*authModels.OAuthProviderDoc, error) {
+	return nil, nil
+}
 func (r *fakeOAuthProviderRepo) GetPrimaryProvider(context.Context, string) (*authModels.OAuthProviderDoc, error) {
 	return nil, nil
 }
@@ -409,6 +438,58 @@ func newSvcForTest(t *testing.T) (*userService, *fakeUserRepo, *fakeOAuthProvide
 	oauth := newFakeOAuthProviderRepo()
 	svc := &userService{userRepo: users, oauthProviderRepo: oauth}
 	return svc, users, oauth
+}
+
+func TestUserService_SetPasswordHashIfUnset_RejectsInvalidInput(t *testing.T) {
+	for _, tc := range []struct{ name, id, hash string }{
+		{"empty UUID", "", "hash"},
+		{"blank UUID", " \t\n", "hash"},
+		{"empty hash", "u-1", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo, _ := newSvcForTest(t)
+			err := svc.SetPasswordHashIfUnset(context.Background(), tc.id, tc.hash)
+			if !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("got %v, want ErrInvalidInput", err)
+			}
+			if repo.initialPasswordCalls != 0 {
+				t.Fatal("invalid input reached repository")
+			}
+		})
+	}
+}
+
+func TestUserService_SetPasswordHashIfUnset_Delegates(t *testing.T) {
+	svc, repo, _ := newSvcForTest(t)
+	const hash = "$argon2id$v=19$hash"
+	if err := svc.SetPasswordHashIfUnset(context.Background(), "u-1", hash); err != nil {
+		t.Fatalf("SetPasswordHashIfUnset: %v", err)
+	}
+	if repo.initialPasswordCalls != 1 || repo.initialPasswordUUID != "u-1" || repo.initialPasswordHash != hash {
+		t.Fatalf("calls=%d UUID=%q hash=%q, want 1, u-1, provided hash", repo.initialPasswordCalls, repo.initialPasswordUUID, repo.initialPasswordHash)
+	}
+}
+
+func TestUserService_SetPasswordHashIfUnset_PreservesErrors(t *testing.T) {
+	storeErr := errors.New("store unavailable")
+	for _, tc := range []struct {
+		name          string
+		repoErr, want error
+	}{
+		{"repository failure", storeErr, storeErr},
+		{"repository not found", repository.ErrUserNotFound, iface.ErrUserNotFound},
+		{"SDK not found", iface.ErrUserNotFound, iface.ErrUserNotFound},
+		{"conflict", iface.ErrPasswordAlreadySet, iface.ErrPasswordAlreadySet},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo, _ := newSvcForTest(t)
+			repo.setPasswordHashIfUnsetErr = tc.repoErr
+			err := svc.SetPasswordHashIfUnset(context.Background(), "u-1", "$argon2id$v=19$hash")
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("got %v, want %v", err, tc.want)
+			}
+		})
+	}
 }
 
 func TestCreateUser_RejectsNilInput(t *testing.T) {

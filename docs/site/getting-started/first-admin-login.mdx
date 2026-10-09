@@ -1,24 +1,40 @@
 ---
 title: First Admin Login
 sidebar_position: 4
+description: How the first administrator signs in on a fresh install — through the setup wizard, on every environment — and what the dev-token script is (and is not) for.
 ---
 
 # First Admin Login
 
-On a brand-new install there are no users yet. Orkestra ships a built-in dev-token endpoint (in `shared/devtoken` — no longer an optional addon since [ADR-0006](/adrs/collapse-to-core-only-base)) that lets you generate an administrator JWT without going through registration.
+On a brand-new install there are no users yet. The first administrator is created by the **[setup wizard](/getting-started/setup-wizard)**, in the browser, on every environment — local development included. There is no other way into the operator console on a fresh database.
+
+## Sign in the first time
+
+1. Open the operator console — `http://localhost:8080` on a local dev stack, your console host on staging or production.
+2. Every route redirects to `/setup` until the wizard is finished. Create the administrator account: the first account becomes the platform's `super_admin`, and you are signed in straight away. Email verification is skipped for this one account, because SMTP can't be configured yet.
+3. Name the initial Tier-1 organization and choose its provisioning mode. **Lock to this one tenant** caps Tier-1 provisioning at that single tenant. Pick **Allow additional internal tenants** unless that cap is what you want.
+4. The wizard finishes on the dashboard and never appears again.
+
+If the wizard is interrupted after step 2, reopen the console. It resumes at the organization step; sign in with the account you just created if it asks. The [setup wizard](/getting-started/setup-wizard) page covers resuming, recovery and upgrades in detail.
+
+From then on, sign in at `/login` with that email and password — or with an OAuth provider, once you've configured one at `/admin/modules/auth`.
+
+## What `devtoken.sh` is for
+
+`scripts/devtoken.sh` mints a synthetic-user JWT for **calling the API with `curl`** on a local development stack:
 
 ```bash
 ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
 ```
 
-The script prints a `Bearer` token. Paste it into the admin UI's login form (or any API client) to access the platform with the `administrator` role.
+It is **not** a way into the console. The console has no field to paste a token into, and it holds its own access token in memory. On a fresh database, an operator dev token also carries no tenant, because the platform-default tenant only exists once the wizard's organization step is done. Tenant-scoped endpoints won't work with a tenant-less token, so finish the wizard first even if you only want API access.
 
 :::warning Local development only
-The dev-token endpoint is available in **development only** — it is automatically disabled in production *and staging*, because it hands a signed `super_admin` token to any caller with no credentials at all. Never expose it on a public-facing instance.
+The dev-token endpoint (`POST /dev/token`) exists **only when `ENV=development`**. It is automatically disabled in staging *and* production, because it hands a signed `super_admin` token to any caller with no credentials at all. On those environments a request to it answers `401`. For machine access there, use a [service account](/architecture/authentication-flow#10-machine-callers-service-accounts) instead.
 :::
 
 ## What to do next
 
-1. Configure SMTP at `/admin/modules` so verification and password-reset emails are delivered (the default `noop` driver logs them to stdout).
-2. Create your real administrator user via the standard registration flow.
-3. Confirm the dev-token endpoint is not reachable in production once you're done with the bootstrap (it is off automatically outside dev/staging).
+1. **Configure SMTP** at `/admin/modules` (notification module). Until you do, the default `noop` driver logs verification and password-reset emails to the backend stdout instead of delivering them.
+2. **Enrol a second factor** (TOTP or passkey) at `/user/security`. Only then should you turn on **Require MFA for privileged users** at `/admin/modules/auth`. That switch is off on a fresh install so you can finish configuring the platform first. Once it is on, privileged actions such as module configuration writes ask for your second factor.
+3. **Create accounts for the rest of your team** at `/admin/users`, rather than sharing the first one.

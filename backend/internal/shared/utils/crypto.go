@@ -83,65 +83,6 @@ func GenerateNonce() (string, error) {
 	return SecureRandomString(24) // 32 character base64url string
 }
 
-// PKCE (Proof Key for Code Exchange) implementation for OAuth 2.1
-
-// PKCEChallenge contains the code verifier and challenge
-type PKCEChallenge struct {
-	CodeVerifier  string `json:"codeVerifier"`
-	CodeChallenge string `json:"codeChallenge"`
-	Method        string `json:"method"`
-}
-
-// GeneratePKCEChallenge generates a PKCE code verifier and challenge pair
-func GeneratePKCEChallenge() (*PKCEChallenge, error) {
-	// Generate code verifier: 43-128 characters, base64url-encoded string
-	// RFC 7636 recommends 32 bytes (43 chars after base64url encoding)
-	verifierBytes := make([]byte, 32)
-	if _, err := rand.Read(verifierBytes); err != nil {
-		return nil, fmt.Errorf("failed to generate code verifier: %w", err)
-	}
-
-	codeVerifier := base64.RawURLEncoding.EncodeToString(verifierBytes)
-
-	// Generate code challenge: BASE64URL(SHA256(codeVerifier))
-	hash := sha256.Sum256([]byte(codeVerifier))
-	codeChallenge := base64.RawURLEncoding.EncodeToString(hash[:])
-
-	return &PKCEChallenge{
-		CodeVerifier:  codeVerifier,
-		CodeChallenge: codeChallenge,
-		Method:        "S256", // SHA256
-	}, nil
-}
-
-// GeneratePKCEChallengeFromVerifier generates a PKCE challenge from a verifier
-func GeneratePKCEChallengeFromVerifier(codeVerifier string) (string, error) {
-	if codeVerifier == "" {
-		return "", fmt.Errorf("code verifier cannot be empty")
-	}
-
-	// Generate challenge: BASE64URL(SHA256(codeVerifier))
-	hash := sha256.Sum256([]byte(codeVerifier))
-	codeChallenge := base64.RawURLEncoding.EncodeToString(hash[:])
-
-	return codeChallenge, nil
-}
-
-// ValidatePKCEChallenge validates a code verifier against a code challenge
-func ValidatePKCEChallenge(codeVerifier, codeChallenge string) bool {
-	if codeVerifier == "" || codeChallenge == "" {
-		return false
-	}
-
-	// Generate challenge from verifier
-	expectedChallenge, err := GeneratePKCEChallengeFromVerifier(codeVerifier)
-	if err != nil {
-		return false
-	}
-
-	return expectedChallenge == codeChallenge
-}
-
 // Token generation utilities
 
 // GenerateRefreshToken creates a secure refresh token
@@ -340,11 +281,6 @@ func NewNonce() (string, error) {
 // NewRefreshToken generates a standard refresh token
 func NewRefreshToken() (string, error) {
 	return GenerateRefreshToken()
-}
-
-// NewPKCEChallenge generates a standard PKCE challenge
-func NewPKCEChallenge() (*PKCEChallenge, error) {
-	return GeneratePKCEChallenge()
 }
 
 // OAuth Token Encryption/Decryption utilities

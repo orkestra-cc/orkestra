@@ -1,0 +1,503 @@
+# Orkestra SDK
+
+_Path: `/backend/pkg/sdk`_
+_Parent: [../../AGENTS.md](../../AGENTS.md)_
+
+## What this is
+
+The **contract layer** between the Orkestra kernel and every module — the
+`Module` interface, registry, `ServiceRegistry`, `ConfigService`, and the
+`iface` consumer interfaces a fork's addon builds against.
+
+Per [ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md) D2 this
+is an **in-tree package** of the single `github.com/orkestra/backend` Go
+module — imported as `github.com/orkestra/backend/pkg/sdk/...`. There is no
+separate `go.mod`, no `go.work`, no `replace`, and nothing published to the
+Go proxy. (The old `github.com/orkestra-cc/orkestra-sdk` published module is
+archived; the multi-repo SDK split was reverted.)
+
+For the conceptual / new-developer walkthrough see
+[../../../docs/onboarding/orkestra-sdk.md](../../../docs/onboarding/orkestra-sdk.md).
+
+## Load-bearing invariant: SDK self-containment
+
+**No file in `pkg/sdk/` may import anything from `backend/internal/`.**
+
+This is the single rule that keeps the SDK publishable. Anything inside
+this tree must compile against ONLY:
+
+- the Go standard library
+- the third-party modules listed in `go.mod` (huma/v2, chi/v5, google/uuid,
+  prometheus, mongo-driver)
+- other packages inside `pkg/sdk/`
+
+Verify before any PR that touches this tree:
+
+```bash
+grep -rn "internal/" backend/pkg/sdk/ --include="*.go"
+```
+
+A clean run shows only doc-comment hits ("see internal/shared/X for the
+backend impl"), never an actual `import` line. CI does not gate this
+explicitly yet — the grep is the gate.
+
+## Package map
+
+| Package | Purpose | Stability |
+| --- | --- | --- |
+| `module/` | Module interface + 17 optional sub-interfaces, BaseModule, ModuleRegistry, ServiceRegistry, ConfigService, RouteInfo, RedisClient, secrets (AES-256-GCM helpers), `ConfigGroup`, `HasConfigGroups`. The boot kernel. | Required surface frozen at v1 |
+| `iface/` | Cross-module interfaces (UserProvider, TenantProvider, AuthzProvider, NotificationSender, JWTProvider, PDFProvider, AIModelProvider, RAGQueryProvider, AuditSink, SessionTerminator, AuthzCacheInvalidator, BillingTenantProvider, PaymentProvider, …) + their DTOs (User, OAuthLink, Tenant, NotificationRequest, …). Includes `CategoryConfiguredChecker` (optional companion to `NotificationSender`, ADR-0019) + the `IsConfiguredForCategory` accessor, `SenderDirectory` + `SenderInfo` (a second optional companion asserted off the same registered object, ADR-0021), `PDFRenderer` (`RenderHTML(ctx, HTMLDocument) ([]byte, error)` — an optional platform service, not a `PDFProvider` implementation; see the platform-service rule below) with its `HTMLDocument`/`PaperSpec` DTOs and `ErrPDFRendererUnavailable`/`ErrPDFRenderFailed`/`ErrPDFTooLarge` sentinels, `Attachment` (`Filename`, `ContentType`, `Data []byte` — raw bytes, never base64) consumed by `NotificationRequest.Attachments`, and the `FailureAttachmentRejected` classification string surfaced on `NotificationResult.FailureReason`, and the error **sentinels** a consumer must match across the module boundary (`ErrKMSKeyNotFound`, `ErrPasswordLoginDisabled`, `ErrAuthPolicyUnavailable`, the six `ErrSender*` sender-selection sentinels, …) — see the sentinel rule below. Narrow, additive sub-interfaces resolved by a type assertion or `module.GetTyped` against the tier's provider sit beside the wide providers rather than widening them: `UserLifecycleStateProvider` (lifecycle classification for the setup finalizer, resolved by a plain type assertion — `internal/shared/setup/service.go`'s `users.(iface.UserLifecycleStateProvider)`), `OAuthLinkDataUpdater` (refreshes the cached OAuth `picture` URL on link reuse, resolved by a plain type assertion — `internal/core/auth/services/auth_service.go`'s `s.userService.(iface.OAuthLinkDataUpdater)`), `SystemRoleHolderFinder` (`FindOldestUserWithRole` — the oldest non-deleted holder of a system role, `createdAt` then `uuid` so every replica agrees, deactivated included; consumed by the auth module's first-admin sentinel backfill, spec §4.7 D31, resolved via `module.GetTyped` against `ServiceOperatorUserProvider`; a provider that lacks it still gets a backfill through `GetUserCount` and a placeholder uuid), `MFAEpochBumper` (`BumpMFAEpoch` — increments `User.MFAEpoch`, the counter that invalidates MFA authority on every live token the instant a credential is removed or replaced, without waiting for a refresh; resolved via `module.GetTyped`), and `AuthzCacheInvalidator` (`InvalidateUserPermissions` — retires a user's cached authorization verdicts after a system-role change; resolved via `module.GetTyped` against `ServiceAuthzProvider`). | Additive-only |
+| `pdf/gotenberg/` | `iface.PDFRenderer` backed by a Gotenberg 8 sidecar (Chromium HTML→PDF route) over HTTP Basic Auth. Bounded concurrency, a hard response-size cap, and a `%PDF-` magic-byte check on the reply; never retries — the caller decides. No `internal/` import, so a fork can vendor it standalone. | Additive-only |
+| `ctxauth/` | Request-context getters: `GetUserUUID`, `GetTenantID`, `GetTenantRoles`, `GetClientIP`, `IsImpersonating`, `TenantKindFromContext`. Plus the exported `Key*` string constants the backend AuthMiddleware writes against. | Frozen |
+| `modulegate/` | `ModuleGate(checker, name)` HTTP middleware (503 when disabled) + `ModuleEnabledChecker` interface. | Frozen |
+| `tenantrepo/` | Fail-closed Mongo query helpers (`Scope`, `MustScope`, `StampInsert`, `StampInsertM`, `ScopeAggregate`, `RequireInternalTenant`, `RequireExternalTenant`) + `ErrTenantScopeMissing` / `ErrTenantKindMismatch` sentinels. | Frozen |
+| `capability/` | `Capability` struct + `Registry`. The unit a tenant subscribes to. | Frozen |
+| `metrics/` | Default Prometheus registry + a `Default` snapshot. | Frozen |
+
+## Versioning policy
+
+The SDK is on the path to v1.0 publication. Until then:
+
+- **Additive-only changes** to existing interfaces and DTOs. Adding a new
+  method to `iface.UserProvider` is a breaking change for every consumer
+  that implements it — instead add a new sub-interface (`HasFooProvider`)
+  and have callers type-assert.
+- **The `Module` interface is frozen at 3 methods** (`Name`, `Category`,
+  `Init`). New module capabilities go behind optional sub-interfaces in
+  `module/module.go` — see the existing `HasConfigSchema`,
+  `HasNavItems`, `Startable`, … pattern. Never widen `Module`.
+- **`module.RoleMiddleware` is implemented BY forks, so it is additive-only
+  too** — the same category as `iface.UserProvider`, and (since the
+  `RedisClient` correction below) the same category as `RedisClient` as
+  well. A fork that supplies its own route-gating middleware satisfies
+  this interface, so a new method on it breaks that fork at compile time.
+  New gates therefore arrive as their own sub-interface, type-asserted off
+  `APISurface.AuthMW`: `module.EnrolmentProofGate`
+  (`RequireEnrolmentProof`, spec §4.2 D11/D12) is the worked example.
+  ⚠️ **A failed assertion must fail closed, never pass through** — a gate
+  that is missing because a fork has not implemented it must refuse, and
+  the consumer should log once at wiring time so the fork learns at boot
+  rather than from a user's 401 (`auth/module.go`'s `enrolmentGate`
+  substitutes `middleware.RefuseEnrolmentProof` and does exactly that).
+- **`module.RedisClient` is provided TO modules, but it is still
+  implemented BY some of them.** The backend satisfies it on the
+  consumer's behalf (`deps.RedisAdapter`), and it historically gained
+  `Incr` + `Expire` that way — for callers that cap attempts, where a
+  read-modify-write counter over `Get`/`Set` loses concurrent increments
+  and silently turns "N tries" into "N tries per serial caller". **Do not
+  read that as licence to widen it again.** A fork's own client type (and
+  every in-tree and out-of-tree test double) implements this interface, so
+  a new method is a breaking change for all of them, and the compiler
+  reports it in the fork rather than here.
+  **The pattern to follow instead** is a narrow optional extension,
+  declared where it is consumed, type-asserted **once** at construction,
+  with a defined degraded behaviour when the assertion fails:
+  `auth/services.AtomicTakeRedisClient` (atomic take) and
+  `authz/services.MultiGetRedisClient` (`MGET`, added for the
+  generation-keyed permission cache — a client without it bypasses the
+  cache and resolves from Mongo, which is slower and never wrong). Add the
+  method to `database.RedisClientAdapter` so the real client has it; leave
+  the SDK interface alone.
+- **`module.ConfigRepository` is provided TO `ModuleConfigService`, not
+  implemented BY modules** — the same category as `RedisClient`, and its own
+  doc comment says so ("exactly what the service calls — no more"). It is
+  therefore outside the additive-only rule: it changed shape for atomic
+  module-config writes (`CompareAndSwapConfig` added, and its `ConfigMutation`
+  now accepts `Activate` combined with `WriteLegacy`/`Env`;
+  `ClearNeedsRestartAt` added for the revision-guarded restart-hint clear;
+  `CompareAndSwapEnvironment` and `MigrateToEnvironments` re-signed; the four
+  two-step write methods removed). The only thing that tracks it is a fork's substitute repository (a
+  test double); `var _ ConfigRepository = (*ModuleConfigRepository)(nil)` pins
+  the in-tree one.
+- **DTO field additions** in `iface/` should be optional (pointer types
+  or `omitempty`) so older implementations keep compiling. Required
+  fields are major-version bumps.
+- **No new third-party dependencies** without a deliberate decision. The
+  current set is intentional. Pulling in another large module
+  (especially one with its own transitive driver/encoder/etc.) becomes
+  a forced transitive dep on every future external addon.
+
+## When code goes here vs `internal/`
+
+| Concern | Goes in `pkg/sdk/` | Goes in `internal/shared/` or `internal/core/` |
+| --- | --- | --- |
+| Interface every module needs to consume or implement | ✅ | ❌ |
+| Concrete implementation of one of those interfaces | ❌ | ✅ (in the producing module) |
+| Pure data manipulation, no I/O or framework deps | ✅ if module-author-facing | ✅ if backend-internal |
+| Database client wrapper, OAuth flow, cookie helpers, geoip | ❌ | ✅ |
+| Anything that imports `shared/config` or auth-internal types | ❌ | ✅ |
+| HTTP middleware tied to AuthMiddleware lifecycle | ❌ | ✅ (`internal/shared/middleware`) |
+| HTTP middleware addons need to wrap their own routes with | ✅ | ❌ |
+
+When in doubt, ask: **"Could an addon extracted to its own GitHub repo
+import this?"** If yes, it belongs here. If it references config.Config,
+auth's `*models.JWTClaims`, or any backend-private package, it doesn't.
+
+## Import path
+
+Every Go file in this tree (and every consumer) imports SDK packages via
+the in-tree module path:
+
+```go
+import (
+    "github.com/orkestra/backend/pkg/sdk/iface"
+    "github.com/orkestra/backend/pkg/sdk/ctxauth"
+    "github.com/orkestra/backend/pkg/sdk/module"
+)
+```
+
+The old `github.com/orkestra-cc/orkestra-sdk` identity no longer exists
+(ADR-0006 D2 folded the SDK back into the single backend module); a
+regression grep for `orkestra-cc/orkestra-sdk` should find nothing.
+
+## go.mod hygiene
+
+`pkg/sdk` has no `go.mod` of its own — it is part of `backend/go.mod`. When
+you add a third-party import inside `pkg/sdk/`, add it to `backend/go.mod`
+and run `cd backend && go mod tidy` (the `backend-deps` make target).
+
+## Rules
+
+- **Never import `backend/internal/*` from inside `pkg/sdk/`.** This is
+  the one rule that, if broken, makes the whole split pointless.
+- **Never widen the `Module` interface.** New capabilities go behind a
+  new `HasFoo` / `Fooable` sub-interface in `module/module.go` and the
+  registry calls them via type-assertion accessors (`FooOf(m)`).
+- **Never add a required method to an existing `iface` interface.**
+  Doing so breaks every external implementor at compile time. Add a new
+  interface and have the registry probe with `module.GetTyped[T]`.
+- **Cross-module sentinels** — `iface.ErrPasswordLoginDisabled` and
+  `iface.ErrAuthPolicyUnavailable` live beside `AdminAuthInviter` because its
+  consumers (the user module's client-user reset routes) must map them across
+  the module boundary with `errors.Is`; message matching breaks on wrapped
+  errors. `auth/services` aliases both, so each name is ONE identity. Same
+  pattern as `ErrKMSKeyNotFound` beside `KMSProvider`. `iface.ErrUserNotFound`
+  follows the same pattern in the other direction: the user module's
+  `services.ErrUserNotFound` aliases it, so auth's refresh path can classify a
+  deleted account with `errors.Is` without importing the user module. A
+  `UserProvider` implementation — a fork's included — MUST return or wrap it
+  when the user does not exist: any other error reads as "could not read the
+  store". Every in-tree consumer that classifies a lookup depends on it, so a
+  non-conforming implementation degrades all of them at once —
+  **the refresh path** (`auth/services/auth_service.go`
+  `RefreshTokensWithRiskAssessment` + `MintAccessTokenFromRefresh`, which
+  answer 503 instead of ending the session, leaving the client holding its
+  token and session marker forever), **the service-account gate**
+  (`auth/services/service_account_service.go` `requireServiceAccount`, which
+  then reports "directory unavailable" for an account that is genuinely
+  gone), and **the three handler mappers**
+  (`auth/handlers/admin_user_auth_handler.go` `mapAdminUserAuthError` and
+  `mapAdminInviterError`, `auth/handlers/self_user_auth_handler.go`
+  `mapSelfAuthError`, which turn a 404 into a 500). Every one of them
+  classifies by identity with `errors.Is` — never by message.
+  `iface.ErrTenantNotFound` is the same pattern for `TenantProvider.GetTenant`:
+  the tenant module wraps it (beside its own `repository.ErrNotFound`) when no
+  live tenant has the UUID, and the compliance policy engine matches it with
+  `errors.Is` to answer `404 compliance.tenant_not_found` instead of a 500. A
+  `TenantProvider` implementation — a fork's included — MUST return or wrap it
+  for a missing tenant.
+- **Encryption helpers live here, not via `shared/utils`.** The SDK has
+  its own `secrets.go` reading `OAUTH_TOKEN_ENCRYPTION_KEY` — the
+  algorithm matches `internal/shared/utils.{Encrypt,Decrypt}OAuthToken`
+  so secrets are interchangeable, but the SDK never imports utils.
+- **`tenantrepo` returns SDK-native sentinel errors** (`ErrTenantScopeMissing`,
+  `ErrTenantKindMismatch`), never the `internal/shared/errors` builders.
+  Backend code that wants HTTP-shaped responses wraps further with its
+  own typed errors at the boundary.
+- **There is no `Dependencies.Config` field.** The legacy `any`-typed
+  handle was retired in Phase 1c. If a core module legitimately needs
+  the backend's app-wide config (today only auth qualifies), thread it
+  in through that module's own `NewModule(cfg *config.Config, ...)`
+  constructor at the catalog factory — see
+  `cmd/server/catalog.go::coreModules` for the closure-capture pattern.
+  Addons should never need this; if you reach for it, write an iface
+  contract instead.
+- **Config groups are presentation-only and never persisted.** `ConfigSchema`
+  is snapshotted into `module_configs` and refreshed by `RefreshMetadata` on
+  every boot; `ConfigGroups()` is resolved live from the registry by the admin
+  handler. Do not add `bson` tags to `ConfigGroup`.
+- **`ConfigField.Advanced` and `ConfigField.DependsOn` are honoured by the
+  operator console.** `Advanced: true` collapses a field behind an
+  "Advanced (N)" toggle on `/admin/modules/{name}`; `DependsOn`
+  (`[]FieldCondition{{Key, In}}`) hides a field until another field of the
+  *same* module matches — by default AND across entries, OR within one
+  entry's `In` (see the matching contract documented on `FieldCondition` in
+  `types.go`: a `FieldBool` target compares both sides via the `parseBool`
+  rule, everything else is case-insensitive, whitespace-trimmed string
+  equality). Set `DependsOnMatch: "any"` to OR across entries instead — for a
+  capability with more than one independent enable switch (e.g. an OAuth
+  provider's separate operator-console and client-app toggles), that is the
+  only way to show the field as soon as either is on; AND would require both,
+  and a single entry is wrong for the other switch. `ValidateConfigDeclarations`
+  rejects an unknown `DependsOnMatch` value and a `DependsOnMatch` set without
+  any `DependsOn` to combine. Both `Advanced` and `DependsOn` ride on the
+  `configSchema` the admin handler already serializes, so an addon that
+  declares them gets the behavior with no frontend code to write.
+- **`ConfigField.Type = FieldRecordList` declares a repeatable list of
+  records** — the construct a module needs when an operator manages *several*
+  of something (named delivery profiles, webhook endpoints) rather than one.
+  The element's sub-schema goes in `Items []ConfigItemField`; the schema is
+  **non-recursive by construction** (`ConfigItemField` has no `Items`), so no
+  cyclic `$ref` reaches the OpenAPI contract. `ConfigItemField` also omits
+  `Group` (an element is not a page), `Advanced`, and `EnvVar` — an empty list
+  has no element to seed, and an indexed env convention is a contract this
+  design deliberately does not take on.
+  Storage stays the existing flat key/value map: each element carries an
+  immutable slug (minted once from the operator's label, never changed by a
+  rename) and its values live at `<field>.<slug>.<sub>`, with the roster at
+  `<field>.__items` and the display name at `<field>.<slug>.__label`. **`__` is
+  reserved to the SDK** — `ValidateConfigDeclarations` rejects a sub-field key
+  using it, a `recordList` with no `Items`, `Items` on any other type, a nested
+  `recordList`, and a sub-field `DependsOn` naming anything but a sibling in
+  the same element. Because an element's secret is an ordinary encrypted value
+  at an ordinary key, per-key AES-256-GCM encryption is untouched.
+  Decode with a `[]T` field tagged `module:"<field>"`; inside `T`,
+  `module:"slug"` receives the key segment and `module:"label"` the display
+  name. `UnmarshalConfig(schema, values, encrypted, &v)` is the repo-free half
+  of `UnmarshalModule` for a caller that already holds a snapshot.
+  **Membership is explicit intent, never inferred from the keys a request
+  carries**, and is accepted ONLY on
+  `PATCH /v1/admin/modules/{name}/environments/{env}` via
+  `recordLists: [{field, create, remove}]` — the bare module PATCH does not
+  declare the field, and Huma's `additionalProperties: false` refuses it before
+  any handler runs. Every environment write is a compare-and-swap on
+  `EnvironmentConfig.Revision` (absent and 0 are the same value, so a
+  pre-feature document compares against 0 and wins). A request that removes
+  anything MUST carry the revision it read and is never retried — removal
+  destroys keys, secrets included, and replaying it against unseen state could
+  destroy an element that appeared in the meantime. A request that only adds
+  may omit it and IS retried against the refreshed roster, so two operators
+  each adding an element both succeed. 409 = the roster moved (stale revision,
+  `create` of an existing slug, `remove` of an absent one); 422 = the request
+  is malformed (removal with no revision, duplicate field, a slug in both
+  lists, over the 50-element ceiling). Preconditions are evaluated against the
+  **stored** roster on every attempt, and the module's `ValidateConfig` hook
+  sees the reconciled map — the exact map that will be written.
+- **`module.HasConfigValidator` is the optional module config-validation
+  seam (ADR-0017 D6).** A module implements
+  `ValidateConfig(ctx context.Context, mergedValues map[string]string) error`
+  to reject config values `UpdateConfig`/`UpdateEnvironmentConfig` would
+  otherwise persist unchecked — `ConfigField.Min`/`Max` are `*int` and
+  cannot express a bound on a duration, and teaching the service to
+  interpret every schema constraint generically is a separate contract
+  change with its own ADR. It runs on **both** PATCH surfaces —
+  `PATCH /v1/admin/modules/{name}` and
+  `PATCH /v1/admin/modules/{name}/environments/{env}` — always **before**
+  encryption or persistence, and always with the module's stored non-secret
+  values **merged** with the PATCH body, not just the submitted keys, so a
+  cross-field rule can't be bypassed by patching one half of a pair.
+  Secrets are never passed to it. Return a `*module.ConfigValidationError{Field,
+  Message}` to have the admin handler map the failure to
+  `422 Unprocessable Entity` naming the offending field; any other error
+  propagates as an ordinary failure. Omitting the interface preserves
+  today's behaviour exactly — `UpdateConfig` persists whatever it is given.
+  `SetActiveEnvironment` deliberately does **not** invoke it: switching to
+  an already-stored (possibly legacy-invalid) profile must stay possible so
+  the defensive readers keep the deployment operable until the operator
+  repairs the value on the next PATCH. See `HasConfigActivationValidator`
+  below for the separate, optional seam that *does* run on activation.
+- **`module.HasConfigActivationValidator` is the optional activation-veto
+  seam**, distinct from `HasConfigValidator` above: a module implements
+  `ValidateConfigActivation(ctx context.Context, targetValues map[string]string) error`
+  to refuse `PUT /v1/admin/modules/{name}/active-environment` when the
+  *complete* target profile — not a PATCH-merged one — is no longer
+  satisfiable as a whole (the motivating case: a tenant provisioning policy
+  stored in a profile that a later config edit elsewhere made
+  inconsistent). It runs inside `SetActiveEnvironment`, after the
+  "environment exists" check and strictly **before**
+  `repo.SetActiveEnvironment` — the point of no return, since that write
+  also flips `needsRestart: true`. A rejection therefore leaves both the
+  active profile name and `needsRestart` exactly as they were.
+  `targetValues` is the target profile's non-secret map only; secrets are
+  never passed. Modules that omit the interface keep today's
+  validation-free activation — this is deliberate legacy-recovery
+  behaviour (see the note above), not an oversight: a module that only
+  implements `HasConfigValidator` still activates a legacy-invalid stored
+  profile unconditionally.
+- **`module.HasConfigSnapshotValidator` is the successor seam that sees the
+  whole target snapshot.** `ValidateConfigSnapshot(ctx, module.ConfigValidationSnapshot)`
+  runs on all three mutation surfaces — active-config PATCH, named-environment
+  PATCH (record-list path included) and activation — with `Values` (raw merged
+  target, absent ≠ empty), `EffectiveValues` (the runtime EnvVar/Default
+  fallback applied) and `SecretPresent` (names → booleans, computed from the
+  **target** profile's own stored ciphertext, this request's submitted secrets,
+  and the schema fallback — never another profile's secrets, never plaintext).
+  A module that implements it is judged through it everywhere and its older
+  hooks are not called; a module that omits it keeps `HasConfigValidator` /
+  `HasConfigActivationValidator` exactly as before. A stored secret that cannot
+  be decrypted aborts the mutation (`ErrConfigSecretUnreadable`) unless the
+  request submits a replacement for that key.
+- **Every config mutation is ONE compare-and-swap `UpdateOne` on
+  `ModuleConfig.ConfigRevision`** (`ConfigRepository.CompareAndSwapConfig` with
+  an explicit `ConfigMutation`: profile write + legacy mirror, or an activation
+  that copies the STRIPPED target profile into the mirror client-side under the
+  same revision guard — the server-side `$ifNull` copy remains for an `Activate`
+  without supplied maps; that combined form additionally requires the legacy maps
+  to EQUAL the profile it activates, since the mirror is that profile's copy).
+  Profiles are the source of truth; the legacy top-level maps are a mirror
+  written in the same update. A lost race is `ErrRevisionStale` → 409
+  with body code `module.CodeConfigRevisionStale` (`"module.config_revision_stale"`,
+  SDK-owned — `errcode` must never declare a `module.*` code); the client
+  reloads and re-reviews, nothing auto-retries. The record-list CAS increments
+  `configRevision` in its own update, so record-list and ordinary writes cannot
+  pass each other unseen. `needsRestart` is persisted in that same write as
+  `!SupportsHotReload(name)` (`SetHotReloadResolver`, installed by the registry
+  before seeding); the admin handler no longer clears it afterwards.
+  The one clear it still does — after an enable/disable that carried no cold
+  config change — goes through `ClearNeedsRestartAt(ctx, name, revision)`, a
+  compare-and-swap on the revision the request itself observed (and one that
+  deliberately does NOT bump it, since a presentation-flag clear must not make
+  a concurrent config write lose its own CAS): a cold config change that
+  landed in between keeps the hint it earned, and the lost clear is logged at
+  INFO, never an error. `ClearNeedsRestart` stays unconditional for boot
+  seeding, where the process is the only writer.
+- **A module that fails to STOP is not disabled.** `StopModule` returns before
+  clearing `started`, so the module and any infra it declared keep running;
+  the admin handler therefore restores `enabled=true` and answers **422**
+  (`module %q failed to stop`), audits `module.disabled` with outcome
+  `failure`, and leaves `needsRestart` alone — reporting success would tell
+  the operator the opposite of what happened and let the next boot skip a
+  module they believe is merely stopped.
+- **The admin API's two request lanes are enforced server-side
+  (`config_lanes.go`).** A key in `config` must be a declared non-secret
+  field, a record-list label key or a non-secret sub-field key; a key in
+  `secrets` a declared secret or secret sub-field key. The SDK-owned roster
+  key (`<field>.__items`) and any undeclared key are refused from either
+  lane. The refusal is a 422 carrying the SDK-owned code
+  `module.CodeConfigKeyInvalid` (`"module.config_key_invalid"`), naming the
+  key only, and happens BEFORE validation, encryption or persistence — on
+  every mutation surface, and on the record-list path before the roster
+  strip, so a roster key is refused rather than silently dropped.
+  Classification uses the module's LIVE `ConfigSchema()` (`schemaFor`),
+  never the stored snapshot, whose boot refresh may have failed. A module
+  that declares no schema keeps accepting anything.
+  The lane rule only stops NEW misfiled writes, so `nonSecretValues` strips
+  every key the live schema declares as a secret (scalar or record-list
+  sub-field) from every non-secret map the service reads or writes — the
+  validation snapshot (the LEGACY `ValidateConfig` /
+  `ValidateConfigActivation` hooks included, not just the snapshot seam),
+  the `configValues` of every admin response, the merged map each mutation
+  persists, the boot backfill's candidate (`buildBackfill`, so a boot stops
+  rewriting the plaintext into the profile AND the mirror, and realigns a
+  mirror that still holds one), the profile the legacy→profiles migration
+  creates (`ensureEnvironments`), and the map an activation publishes into
+  the mirror — so plaintext a legacy document still carries is never
+  validated, never echoed, and is dropped by the next write. Because the
+  activation's mirror copy must be stripped, it is made CLIENT-side from the
+  read at revision r (`ConfigMutation.Activate` combined with `WriteLegacy`,
+  a plain `$set` under the same `configRevision` filter) instead of the
+  server-side `$ifNull` pipeline; the revision guard is what makes that safe,
+  and when stripping removed something the activated profile is repaired in
+  the same update. Membership is checked in BOTH lanes too
+  (`validateElementKeysInRoster`): an element key whose slug is not in the
+  roster the write is judged against is refused with `ErrUnknownSlug` → 409,
+  the same status the record-list route returns, so an orphan ciphertext is
+  never left for a later `create` to adopt.
+- **`GetConfig` propagates a failed legacy-profile migration** instead of
+  logging it and serving the unmigrated document. The lost-race case is
+  absorbed inside `ensureEnvironments` by re-reading: `MigrateToEnvironments`
+  is itself a compare-and-swap that matches only a document still without
+  profiles at the read revision, so two concurrent writers on a legacy
+  document cannot copy a stale legacy snapshot over a freshly written
+  profile.
+- **`RequirePersistedConfig(ctx, names...)` turns off lazy self-heal for the
+  named modules and is their boot gate** — call it once, after `InitAll`,
+  before serving; it fails (and `cmd/server` exits) when a named module's
+  document is missing or `SeedFromModules` recorded a seeding/backfill failure
+  for it, because a strict reader must never be handed an incomplete
+  document. For those modules
+  a missing document makes `GetConfig` / `GetRawValueRequiredModule` return
+  `ErrRequiredConfigMissing` (503 on the admin API) and `ListConfigs` emit a
+  `ModuleConfigStatus{Missing: true}` row instead of re-seeding; every other
+  module keeps today's rebuild-from-schema behaviour. The set is sealed after
+  the first call. In-tree the server marks `auth` (`cmd/server/admin_wiring.go`).
+- **`ActiveConfigRequiredModule(ctx, name)` is the multi-key strict reader** —
+  ONE repository read returning an immutable `ActiveConfigView` of the active
+  profile: `Raw(key)` (presence-aware, schema-secret keys stripped),
+  `Effective(key)` (GetValue's present-non-empty-else-EnvVar/Default rule),
+  `Secret(key)` / `SecretPresent(key)` (GetSecret's rule, decrypted once at
+  read time) and `Revision()`. A missing document is `ErrRequiredConfigMissing`
+  and a stored ciphertext that no longer decrypts fails the WHOLE read with
+  `ErrConfigSecretUnreadable` naming the key — a document-level outage, never
+  a silent env-var fallback. Fallbacks and secret-ness come from the LIVE
+  schema. `auth` reads every OAuth provider decision (toggle, structural
+  fields, the secret the provider is built from) out of one view so a check
+  and the value it guards can never observe two different documents.
+  `NewActiveConfigView` is exported for a fork's fakes.
+- **`SeedFromModules` backfills absent schema keys with a non-empty `EnvVar`/`Default`
+  on existing documents** (the active profile gains its defaults and the
+  legacy mirror is rewritten as an exact copy of it — never backfilled on its
+  own, and rewritten whenever it merely DIVERGES from the stripped candidate,
+  which is how a legacy document whose only defect is plaintext under a secret
+  key is repaired at boot rather than at the next operator save; each secret
+  encrypted once; one CAS retried on a lost race;
+  `configRevision +1`; `needsRestart=false` in the same write; INFO log of the
+  names; a failure is recorded for `RequirePersistedConfig` to refuse a
+  required module). Empty-fallback keys stay absent — presence is a signal to
+  `GetRawValue` readers (ADR-0017). A schema default therefore never has to be
+  re-implemented as a runtime guess.
+- **A `ConfigValidationError` with a non-empty `Code`** (e.g.
+  `"tenant.single_mode_conflict"`) upgrades the admin API's response from
+  the legacy text-only `422` to the `{status,title,detail,code}` envelope
+  shared with `internal/shared/errcode` — reproduced SDK-locally in
+  `config_error_envelope.go` since `pkg/sdk` cannot import
+  `internal/shared/errcode` (SDK self-containment). `mapConfigServiceError`
+  is the single mapper for all three module-admin mutation surfaces
+  (`UpdateModule`, `UpdateEnvironment`, `SetActiveEnvironment`): a
+  code-bearing error becomes the stable envelope, a codeless one keeps the
+  pre-existing text-only `huma.Error422UnprocessableEntity`, and anything
+  else falls through to the caller's own fallback status. Leave `Code`
+  empty for a validator that has no reason to add a stable machine-readable
+  identity yet — the legacy 422 remains correct and requires no opt-in.
+- **`ModuleAdminHandler` audits every mutation it serves** through the
+  nil-tolerant `SetAuditSink(iface.AuditSink)` + `SetActorResolver(func(ctx) module.AdminActor)`
+  seams. Config validation and the CAS write happen **before** the
+  enable/disable side effect; each half emits its own event with its actual
+  result. Metadata is key names (schema-derived, bounded), `code`, `env`,
+  `requestId` — never values. A panicking sink is recovered and WARNed; the
+  HTTP result never changes because of the sink.
+- **A `system.*` `ServiceKey` is an optional *platform* service — registered
+  once by `cmd/server/main.go`, not by any module's `Init`/`Start`.**
+  `ServicePDFRenderer` follows the same shape as the earlier
+  `ServiceObjectStoreProvider`: main.go builds the concrete implementation
+  from process config (for the PDF renderer, `pkg/sdk/pdf/gotenberg.Client`
+  from `PDF_RENDERER_URL`/`_USER`/`_PASSWORD`) and calls
+  `ServiceRegistry.Register` unconditionally when configured — even if the
+  sidecar is unreachable at boot, since reachability can change without a
+  restart. A consumer resolves it per call with
+  `module.GetTyped[iface.PDFRenderer](reg, module.ServicePDFRenderer)` and
+  degrades when the second return is `false` (empty URL ⇒ never registered)
+  or the call itself returns `iface.ErrPDFRendererUnavailable` — never at
+  boot, never by panicking. When a platform service's live reachability is
+  operationally interesting, main.go also appends a `module.PlatformCheck{Name,
+  Check}` to the slice passed to `ModuleAdminHandler.SetPlatformChecks`, which
+  `GET /v1/admin/modules/health` reports under the response's `platform` array
+  (`PlatformHealthStatus{Name,Status,Error}`) alongside the per-module rows —
+  on a failed check `Error` is always the fixed word `"unreachable"`
+  (`ModuleAdminHandler.HealthCheck` hardcodes `st.Status, st.Error = "down",
+  "unreachable"`), never the underlying Go error text or an upstream status
+  code — a `PlatformCheck.Check`'s returned `error` decides up/down only and
+  is never itself surfaced. A fork adding another sidecar-backed capability no
+  module owns follows the same recipe: a `Service<Foo>` key here, a
+  `register<Foo>(reg, cfg, logger) []module.PlatformCheck` helper in
+  `cmd/server`, and — only if it matters operationally — a `PlatformCheck`
+  appended alongside the others.
+
+## CI
+
+`pkg/sdk` is part of the backend Go module, so `cd backend && go test ./...`
+(the `backend-test` / `backend-test-ci` targets) and `golangci-lint`
+(`backend-lint`) cover it with no separate target. `ci-backend` runs all of
+the above plus `backend-tenantscope` and a single binary build.
+
+## Related
+
+- [README.md](README.md) — external-facing intro (install, Module
+  contract, hello-world example, versioning policy). Keep in sync with
+  this file.
+- [Onboarding doc](../../../docs/onboarding/orkestra-sdk.md) — narrative
+  walkthrough aimed at new contributors
+- [Backend module system](../../AGENTS.md#module-system) — how the
+  registry consumes the SDK at boot
+- [Core modules](../../internal/core/AGENTS.md) — the eight always-loaded
+  modules, all of which implement `module.Module`

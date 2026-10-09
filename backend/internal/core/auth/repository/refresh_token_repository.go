@@ -32,6 +32,9 @@ type RefreshTokenRepository interface {
 	GetByTokenAny(ctx context.Context, tokenHash string) (*models.RefreshTokenDoc, error)
 	GetBySessionUUID(ctx context.Context, sessionUUID string) (*models.RefreshTokenDoc, error)
 	GetActiveTokensByUser(ctx context.Context, userUUID string) ([]*models.RefreshTokenDoc, error)
+	// GetUnexpiredTokensByUser includes revoked/rotating predecessors so
+	// credential teardown can fence a family before its successor is inserted.
+	GetUnexpiredTokensByUser(ctx context.Context, userUUID string) ([]*models.RefreshTokenDoc, error)
 	GetActiveTokensByDevice(ctx context.Context, userUUID, deviceID string) ([]*models.RefreshTokenDoc, error)
 
 	// Token updates
@@ -299,7 +302,24 @@ func (r *refreshTokenRepository) GetActiveTokensByUser(ctx context.Context, user
 		}
 		tokens = append(tokens, &token)
 	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read active tokens: %w", err)
+	}
 
+	return tokens, nil
+}
+
+func (r *refreshTokenRepository) GetUnexpiredTokensByUser(ctx context.Context, userUUID string) ([]*models.RefreshTokenDoc, error) {
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
+	cursor, err := r.collection.Find(ctx, bson.M{"userUuid": userUUID, "expiresAt": bson.M{"$gt": time.Now()}})
+	if err != nil {
+		return nil, fmt.Errorf("failed to find refresh lineage: %w", err)
+	}
+	defer cursor.Close(ctx)
+	var tokens []*models.RefreshTokenDoc
+	if err := cursor.All(ctx, &tokens); err != nil {
+		return nil, fmt.Errorf("failed to read refresh lineage: %w", err)
+	}
 	return tokens, nil
 }
 

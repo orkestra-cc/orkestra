@@ -22,10 +22,11 @@ import (
 // absent, not because the reader is nil.
 func newGetMethodsSvc(fake *adminUnlinkUserFake, factors *fakeFactorRepo, policyValues map[string]string) *authService {
 	return &authService{
-		userService:   fake,
-		mfaFactorRepo: factors,
-		policy:        &AuthPolicyService{cs: &stubReader{values: policyValues}},
-		audience:      PolicyAudienceOperator,
+		userService:       fake,
+		oauthProviderRepo: &mirrorOAuthRepo{users: fake},
+		mfaFactorRepo:     factors,
+		policy:            &AuthPolicyService{cs: &stubReader{values: policyValues}},
+		audience:          PolicyAudienceOperator,
 	}
 }
 

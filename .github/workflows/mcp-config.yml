@@ -1,4 +1,4 @@
-name: MCP configuration
+name: Agent configuration
 
 on:
   pull_request:
@@ -9,6 +9,11 @@ on:
       - 'Makefile'
       - 'scripts/check-mcp-sync.py'
       - 'scripts/test-mcp-sync.py'
+      - 'scripts/check-agent-instructions.py'
+      - 'scripts/test-agent-instructions.py'
+      - '**/CLAUDE.md'
+      - '**/CLAUDE.local.md'
+      - '**/AGENTS.md'
       - '.github/workflows/mcp-config.yml'
   push:
     branches: [dev, main]
@@ -19,6 +24,11 @@ on:
       - 'Makefile'
       - 'scripts/check-mcp-sync.py'
       - 'scripts/test-mcp-sync.py'
+      - 'scripts/check-agent-instructions.py'
+      - 'scripts/test-agent-instructions.py'
+      - '**/CLAUDE.md'
+      - '**/CLAUDE.local.md'
+      - '**/AGENTS.md'
       - '.github/workflows/mcp-config.yml'
 
 permissions:
@@ -31,3 +41,5 @@ jobs:
       - uses: actions/checkout@v7
       - name: Verify shared MCP configuration
         run: make ci-mcp
+      - name: Verify AGENTS.md is the only instruction filename
+        run: make ci-agents

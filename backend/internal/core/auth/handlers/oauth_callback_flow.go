@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	authutils "github.com/orkestra/backend/internal/core/auth/utils"
 	"log/slog"
 	"net/http"
 
@@ -34,15 +35,31 @@ func formCallbackParams(r *http.Request) (oauthCallbackParams, error) {
 // oauthExchange turns an authorization code into the provider's userinfo
 // map plus the tokens to store. Each provider supplies one; everything
 // else about a callback is shared by completeOAuthCallback.
-type oauthExchange func(ctx context.Context, prov services.OAuthProviderInterface, cfg *services.OAuthProviderConfig, code string) (map[string]interface{}, *models.OAuthProviderTokens, error)
+type oauthExchange func(ctx context.Context, prov services.OAuthProviderInterface, cfg *services.OAuthProviderConfig, code, codeVerifier string) (map[string]interface{}, *models.OAuthProviderTokens, error)
+
+// pkceForProvider mints a code verifier and its S256 challenge for a
+// provider proven to accept them (spec §4.9 D34); both empty otherwise —
+// exactly the pre-D34 request for a provider that has not been proven,
+// because one that ignores code_challenge but rejects code_verifier would
+// break the exchange entirely (edge case 24).
+func pkceForProvider(prov services.OAuthProviderInterface) (verifier, challenge string, err error) {
+	if !prov.SupportsPKCE() {
+		return "", "", nil
+	}
+	verifier, err = authutils.GenerateCodeVerifier()
+	if err != nil {
+		return "", "", err
+	}
+	return verifier, authutils.GenerateCodeChallenge(verifier), nil
+}
 
 // exchangeWithUserInfo is the code-exchange + userinfo-endpoint path
 // Google, Discord and GitHub share. The redirect URI presented at exchange
 // is the provider's backend callback from the SAME resolved config the
 // usability check answered with.
 func exchangeWithUserInfo() oauthExchange {
-	return func(ctx context.Context, prov services.OAuthProviderInterface, cfg *services.OAuthProviderConfig, code string) (map[string]interface{}, *models.OAuthProviderTokens, error) {
-		tok, err := prov.ExchangeCodeForToken(ctx, &services.CodeExchangeRequest{Code: code, RedirectURI: cfg.AdditionalConfig["redirect_url"]})
+	return func(ctx context.Context, prov services.OAuthProviderInterface, cfg *services.OAuthProviderConfig, code, codeVerifier string) (map[string]interface{}, *models.OAuthProviderTokens, error) {
+		tok, err := prov.ExchangeCodeForToken(ctx, &services.CodeExchangeRequest{Code: code, RedirectURI: cfg.AdditionalConfig["redirect_url"], CodeVerifier: codeVerifier})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -57,8 +74,8 @@ func exchangeWithUserInfo() oauthExchange {
 // exchangeAppleIDToken is Apple's path: no userinfo endpoint, the identity
 // comes from the ID token returned by the exchange.
 func exchangeAppleIDToken() oauthExchange {
-	return func(ctx context.Context, prov services.OAuthProviderInterface, cfg *services.OAuthProviderConfig, code string) (map[string]interface{}, *models.OAuthProviderTokens, error) {
-		tok, err := prov.ExchangeCodeForToken(ctx, &services.CodeExchangeRequest{Code: code, RedirectURI: cfg.AdditionalConfig["redirect_url"]})
+	return func(ctx context.Context, prov services.OAuthProviderInterface, cfg *services.OAuthProviderConfig, code, codeVerifier string) (map[string]interface{}, *models.OAuthProviderTokens, error) {
+		tok, err := prov.ExchangeCodeForToken(ctx, &services.CodeExchangeRequest{Code: code, RedirectURI: cfg.AdditionalConfig["redirect_url"], CodeVerifier: codeVerifier})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -216,7 +233,7 @@ func (h *AuthHandler) completeOAuthCallback(w http.ResponseWriter, r *http.Reque
 		fail(OAuthCallbackErrProviderUnavailable, oauthLinkCodeProviderUnavailable, "provider_construct_failed")
 		return
 	}
-	userInfo, oauthTokens, err := exchange(ctx, prov, cfg, params.Code)
+	userInfo, oauthTokens, err := exchange(ctx, prov, cfg, params.Code, res.info.CodeVerifier)
 	if err != nil {
 		fail(OAuthCallbackErrProviderUnavailable, oauthLinkCodeProviderUnavailable, "exchange_failed")
 		return

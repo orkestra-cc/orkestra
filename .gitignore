@@ -118,3 +118,6 @@ mobile/build/
 
 # Superpowers brainstorming companion (mockups, transient session state)
 .superpowers/
+
+# Local git worktrees used for isolated implementation sessions
+.worktrees/

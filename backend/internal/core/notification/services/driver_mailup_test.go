@@ -1,15 +1,20 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 func mailUpProfile() SenderProfile {
@@ -267,5 +272,114 @@ func TestMailUpDriver_TimeoutAndRefusedProfile(t *testing.T) {
 	p.MailUpSecret = ""
 	if err := d.Send(context.Background(), p, EmailMessage{To: "a@example.com"}); !errors.Is(err, ErrSenderNotConfigured) {
 		t.Fatalf("incomplete profile must be refused before any request: %v", err)
+	}
+}
+
+// TestMailUpDriver_AttachmentsInPayload: field names and Body encoding per
+// the verified shape (see the mailUpRequest doc comment for the source).
+func TestMailUpDriver_AttachmentsInPayload(t *testing.T) {
+	var got map[string]any
+	d, _ := mailUpServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = w.Write([]byte(`{"Status":"done","Code":"0"}`))
+	})
+	err := d.Send(context.Background(), mailUpProfile(), EmailMessage{To: "a@example.com", Subject: "s", BodyText: "b",
+		Attachments: []iface.Attachment{{Filename: "r.pdf", ContentType: "application/pdf", Data: []byte("%PDF-1")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	atts, _ := got["Attachments"].([]any)
+	if len(atts) != 1 {
+		t.Fatalf("Attachments = %v", got["Attachments"])
+	}
+	a := atts[0].(map[string]any)
+	if a["Filename"] != "r.pdf" || a["Body"] != base64.StdEncoding.EncodeToString([]byte("%PDF-1")) {
+		t.Fatalf("attachment = %v", a)
+	}
+}
+
+// TestMailUpDriver_NoAttachments_KeyOmitted: a message with no attachments
+// must not carry the Attachments key at all — omitempty must not be lost.
+func TestMailUpDriver_NoAttachments_KeyOmitted(t *testing.T) {
+	var raw []byte
+	d, _ := mailUpServer(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte(`{"Status":"done","Code":"0"}`))
+	})
+	_ = d.Send(context.Background(), mailUpProfile(), EmailMessage{To: "a@example.com", Subject: "s", BodyText: "b"})
+	if bytes.Contains(raw, []byte("Attachments")) {
+		t.Fatalf("payload without attachments must not carry the key: %s", raw)
+	}
+}
+
+// TestMailUpDriver_AttachmentRejection_Classified: the verification run
+// found no MailUp-specific attachment-rejection code, so the documented
+// fallback applies — a 4xx on a send that carried attachments is
+// classified ErrAttachmentRejected; a 4xx on a send without attachments is
+// not.
+func TestMailUpDriver_AttachmentRejection_Classified(t *testing.T) {
+	t.Run("4xx with attachments is classified", func(t *testing.T) {
+		d, _ := mailUpServer(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"Status":"error","Code":"400"}`))
+		})
+		err := d.Send(context.Background(), mailUpProfile(), EmailMessage{To: "a@example.com", Subject: "s", BodyText: "b",
+			Attachments: []iface.Attachment{{Filename: "r.pdf", ContentType: "application/pdf", Data: []byte("%PDF-")}}})
+		if !errors.Is(err, ErrAttachmentRejected) {
+			t.Fatalf("err = %v", err)
+		}
+	})
+
+	t.Run("4xx without attachments is not classified", func(t *testing.T) {
+		d, _ := mailUpServer(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"Status":"error","Code":"400"}`))
+		})
+		err := d.Send(context.Background(), mailUpProfile(), EmailMessage{To: "a@example.com", Subject: "s", BodyText: "b"})
+		if errors.Is(err, ErrAttachmentRejected) {
+			t.Fatalf("err = %v, must not be classified as an attachment rejection without attachments", err)
+		}
+	})
+}
+
+// TestMailUpDriver_AttachmentRejection_StatusTable: the 4xx fallback excludes
+// auth (401/403), timeout (408) and throttling (429) — and every 5xx — so an
+// operational blip never becomes the final attachment_rejected verdict.
+func TestMailUpDriver_AttachmentRejection_StatusTable(t *testing.T) {
+	cases := []struct {
+		status   int
+		rejected bool
+	}{
+		{http.StatusBadRequest, true},
+		{http.StatusRequestEntityTooLarge, true},
+		{http.StatusUnprocessableEntity, true},
+		{http.StatusUnsupportedMediaType, true},
+		{http.StatusUnauthorized, false},
+		{http.StatusForbidden, false},
+		{http.StatusRequestTimeout, false},
+		{http.StatusTooManyRequests, false},
+		{http.StatusInternalServerError, false},
+		{http.StatusBadGateway, false},
+		{http.StatusServiceUnavailable, false},
+	}
+	for _, tc := range cases {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			d, _ := mailUpServer(t, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(`{"Status":"error","Code":"x"}`))
+			})
+			err := d.Send(context.Background(), mailUpProfile(), EmailMessage{To: "a@example.com", Subject: "s", BodyText: "b",
+				Attachments: []iface.Attachment{{Filename: "r.pdf", ContentType: "application/pdf", Data: []byte("%PDF-")}}})
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if got := errors.Is(err, ErrAttachmentRejected); got != tc.rejected {
+				t.Fatalf("status %d: attachment_rejected = %v, want %v (err = %v)", tc.status, got, tc.rejected, err)
+			}
+			var se *SendError
+			if !errors.As(err, &se) || se.HTTP != tc.status {
+				t.Fatalf("status %d: normal SendError classification lost: %v", tc.status, err)
+			}
+		})
 	}
 }

@@ -60,9 +60,30 @@ const AuthCountryBlocked = "auth.country_blocked"
 // the caller must use MFA or reauthenticate via OAuth instead. 409.
 const AuthPasswordConfirmUnavailable = "auth.password_confirm_unavailable"
 
+// AuthPasswordAlreadySet signals that initial enrollment cannot replace an
+// existing password; the authenticated change-password flow must be used.
+const AuthPasswordAlreadySet = "auth.password_already_set"
+
 // AuthOAuthProviderDisabled signals that the requested OAuth provider
 // is not enabled for the surface the request came in on. 403.
 const AuthOAuthProviderDisabled = "auth.oauth_provider_disabled"
+
+// AuthOAuthStoreUnavailable signals that the OAuth identity store could
+// not answer (migration 0010 not run here, or the store is unreachable).
+// Retryable; never a fall-through into auto-link or signup. 503.
+const AuthOAuthStoreUnavailable = "auth.oauth_store_unavailable"
+
+// AuthOAuthIdentityUnlinked signals that the presented OAuth identity was
+// unlinked from its account: sign in another way and re-link it. 403.
+const AuthOAuthIdentityUnlinked = "auth.oauth_identity_unlinked"
+
+// AuthOAuthIdentityConflict signals that the presented OAuth identity is
+// owned by a different account. 409.
+const AuthOAuthIdentityConflict = "auth.oauth_identity_conflict"
+
+// AuthOAuthProviderAlreadyLinked signals that the account already has a
+// different identity of this provider linked. 409.
+const AuthOAuthProviderAlreadyLinked = "auth.oauth_provider_already_linked"
 
 // AuthPolicyUnavailable signals that an admin-managed sign-in policy — or
 // the auth configuration document it lives in — could not be read or
@@ -108,7 +129,7 @@ const AuthTooManyAttempts = "auth.too_many_attempts"
 // The four codes below all ride on a 401, and the reason they exist is
 // the same for each: a 401 that carries NO top-level code is the one
 // 401 shape the operator console does not read as a verdict. Its error
-// interceptor (`baseQueryWithRetry`, frontend-admin/CLAUDE.md) treats a
+// interceptor (`baseQueryWithRetry`, frontend-admin/AGENTS.md) treats a
 // codeless 401 as a JWT signing-key rotation — after which every
 // unexpired bearer validates as plain "invalid" — and answers it by
 // running `performRefresh` once. So a *verdict* 401 that stays codeless
@@ -445,3 +466,63 @@ const NotificationSenderDriverNoOneClick = "notification.sender_driver_no_one_cl
 // origin), so no one-click unsubscribe link can be built, while
 // require_one_click_unsubscribe is on. 422.
 const NotificationPublicBaseURLMissing = "notification.public_base_url_missing"
+
+// --- compliance ---
+
+// CompliancePolicyNotFound signals that the compliance policy, or the
+// tenant's policy assignment, does not exist. 404.
+const CompliancePolicyNotFound = "compliance.policy_not_found"
+
+// ComplianceChangeRequestNotFound signals that the policy change request
+// does not exist. 404.
+const ComplianceChangeRequestNotFound = "compliance.change_request_not_found"
+
+// ComplianceTenantNotFound signals that the tenant a policy is assigned to
+// does not exist, or is not the caller's own tenant on the Tier-2 route. 404.
+const ComplianceTenantNotFound = "compliance.tenant_not_found"
+
+// CompliancePolicyVersionConflict signals that the policy or the tenant's
+// assignment changed since the caller read it, or that an approved change
+// request no longer fits the current state (it is marked superseded). The
+// caller reloads. 409.
+const CompliancePolicyVersionConflict = "compliance.policy_version_conflict"
+
+// CompliancePolicyPlatformProtected signals an attempt to delete the
+// platform policy or to assign it to a tenant. 409.
+const CompliancePolicyPlatformProtected = "compliance.policy_platform_protected"
+
+// CompliancePolicyInUse signals an attempt to delete a policy still
+// assigned to at least one tenant. 409.
+const CompliancePolicyInUse = "compliance.policy_in_use"
+
+// CompliancePolicyNameTaken signals that another policy has the name. 409.
+const CompliancePolicyNameTaken = "compliance.policy_name_taken"
+
+// ComplianceChangeRequestNotPending signals that the change request was
+// already approved, rejected, superseded or expired. 409.
+const ComplianceChangeRequestNotPending = "compliance.change_request_not_pending"
+
+// ComplianceChangeRequestSelfApproval signals that the author of a change
+// request tried to decide it (four eyes, separation of duties). 409.
+const ComplianceChangeRequestSelfApproval = "compliance.change_request_self_approval"
+
+// CompliancePolicyInvalid signals blocking validation errors; the detail
+// lists their codes and POST .../policies/validate returns them per field.
+// 422.
+const CompliancePolicyInvalid = "compliance.policy_invalid"
+
+// CompliancePolicyWarningsUnacknowledged signals a change with warnings sent
+// without acknowledgeWarnings. 422.
+const CompliancePolicyWarningsUnacknowledged = "compliance.policy_warnings_unacknowledged"
+
+// CompliancePolicyReasonRequired signals a missing reason or decision note
+// (1 to 500 characters). 422.
+const CompliancePolicyReasonRequired = "compliance.policy_reason_required"
+
+// CompliancePolicyUnavailable signals that the policy snapshot is not loaded
+// yet (first seconds after boot, or MongoDB unreachable since boot). 503.
+const CompliancePolicyUnavailable = "compliance.policy_unavailable"
+
+// CompliancePolicyPersistenceFailed signals an unexpected failure of the
+// policy engine; the cause is logged server-side, never returned. 500.
+const CompliancePolicyPersistenceFailed = "compliance.policy_persistence_failed"

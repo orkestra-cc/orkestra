@@ -28,7 +28,7 @@ fail() {
   exit 1
 }
 
-creds='MONGO_ROOT_PASSWORD|REDIS_PASSWORD|STORAGE_SECRET_KEY|RUSTFS_ROOT_PASSWORD|RUSTFS_SECRET_KEY|COOKIE_SECRET|OAUTH_TOKEN_ENCRYPTION_KEY|ORKESTRA_KMS_MASTER_KEY'
+creds='MONGO_ROOT_PASSWORD|REDIS_PASSWORD|STORAGE_SECRET_KEY|RUSTFS_ROOT_PASSWORD|RUSTFS_SECRET_KEY|COOKIE_SECRET|OAUTH_TOKEN_ENCRYPTION_KEY|ORKESTRA_KMS_MASTER_KEY|PDF_RENDERER_PASSWORD'
 
 # 1. Literal fallbacks. `[^$}]` after `:-` excludes both the empty fallback and
 #    a nested variable reference (`${A:-${B:?...}}`).
@@ -73,6 +73,7 @@ compose_env=(
   REDIS_PASSWORD=test-redis-password
   STORAGE_ACCESS_KEY=test-access
   STORAGE_SECRET_KEY=test-secret-key-0123
+  PDF_RENDERER_PASSWORD=test-pdf-renderer-password
 )
 rendered="$(env "${compose_env[@]}" docker compose --env-file "$empty_env" -f docker/docker-compose.infra.yml config)"
 grep -q 'RUSTFS_ACCESS_KEY: test-access' <<<"$rendered" \

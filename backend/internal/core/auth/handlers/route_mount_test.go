@@ -45,9 +45,46 @@ func TestRouteMountsRegisterDistinctPaths(t *testing.T) {
 		auth.RegisterOAuthLinkRoute(api, mount)
 	}
 
+	registerInitialPasswordRoute(t, pwd, api)
+
 	spec := api.OpenAPI()
 	if spec == nil || spec.Paths == nil {
 		t.Fatal("OpenAPI spec or paths missing after registration")
+	}
+	item, ok := spec.Paths["/v1/auth/operator/me/password"]
+	if !ok || item.Post == nil {
+		t.Fatal("operator initial-password POST path missing")
+	}
+	if _, ok := spec.Paths["/v1/auth/client/me/password"]; ok {
+		t.Fatal("initial-password path must not exist on the client surface")
+	}
+	if item.Post.OperationID != "operator-password-set-initial" || len(item.Post.Security) != 1 {
+		t.Fatalf("unexpected initial-password operation: %+v", item.Post)
+	}
+	if _, ok := item.Post.Security[0]["bearerAuth"]; !ok {
+		t.Fatal("initial-password operation must declare bearer authentication")
+	}
+	schema := item.Post.RequestBody.Content["application/json"].Schema
+	if schema.Ref != "" {
+		schema = spec.Components.Schemas.SchemaFromRef(schema.Ref)
+	}
+	if schema == nil || schema.Properties["newPassword"] == nil {
+		t.Fatalf("request must expose only newPassword: %+v", schema)
+	}
+	// Huma's default schema-link transformer adds read-only $schema metadata
+	// to every object. It supplies no domain input to the handler.
+	for name, property := range schema.Properties {
+		if name != "newPassword" && !(name == "$schema" && property.ReadOnly) {
+			t.Errorf("unexpected request property %q", name)
+		}
+	}
+	if len(schema.Required) != 1 || schema.Required[0] != "newPassword" || schema.AdditionalProperties != false {
+		t.Fatalf("newPassword must be required and extra fields forbidden: %+v", schema)
+	}
+	for _, forbidden := range []string{"email", "currentPassword", "confirmPassword", "userId", "audience"} {
+		if _, ok := schema.Properties[forbidden]; ok {
+			t.Errorf("request must not expose %q", forbidden)
+		}
 	}
 
 	// Spot-check the tier-split login paths land at the expected

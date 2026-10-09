@@ -191,7 +191,7 @@ The kernel guarantees:
 - **New DTO fields are additive** — old implementations keep compiling and the field is ignored at runtime.
 - **No new third-party dependencies without a deliberate decision.** Every transitive dep is a forced transitive on every external addon. The current five are intentional.
 
-See the upstream [CLAUDE.md](CLAUDE.md) for the full set of rules, and [`docs/plans/orkestra-sdk-split.md`](https://github.com/orkestra-cc/orkestra/blob/main/docs/plans/orkestra-sdk-split.md) in the monorepo for the rollout history.
+See the upstream [AGENTS.md](AGENTS.md) for the full set of rules, and [`docs/plans/orkestra-sdk-split.md`](https://github.com/orkestra-cc/orkestra/blob/main/docs/plans/orkestra-sdk-split.md) in the monorepo for the rollout history.
 
 ## Self-containment invariant
 

@@ -1,4 +1,5 @@
 import { http, HttpResponse } from 'msw';
+import type { BackendUser } from 'store/api/authApi';
 
 // Wildcard host so handlers match regardless of how baseApi resolves
 // VITE_BACKEND_URL (e.g. localhost:3000 in dev, anything in tests).
@@ -15,6 +16,26 @@ export const resetCapturedRequests = () => {
 };
 
 // --- Self-service security center (/user/security) ---
+
+export const currentOperator: BackendUser = {
+  id: 'operator-1',
+  email: 'oauth@example.com',
+  username: 'oauth-operator',
+  fullName: 'OAuth Operator',
+  avatar: '',
+  avatarSource: 'initials',
+  role: 'operator',
+  oauthLinks: [],
+  oauthProviders: [],
+  isActive: true,
+  emailVerified: true,
+  createdAt: '2026-09-30T10:00:00Z',
+  updatedAt: '2026-09-30T10:00:00Z',
+  language: 'en'
+};
+
+export const currentOperatorHandler = (body: BackendUser = currentOperator) =>
+  http.get(url('/v1/auth/operator/me'), () => HttpResponse.json(body));
 
 // Default empty self-auth-methods. Tests that need a populated state
 // pass an override to selfAuthMethodsHandler.

@@ -104,6 +104,29 @@ label {
   }
 }
 
+// Compact switch for dense rows (e.g. a per-row toggle in a long editable
+// list), where the 2.75×1.5rem track dominates the row.
+// Only the glyph shrinks: the label keeps the
+// 1.5rem line box above, so the clickable row stays 24px tall (WCAG 2.2
+// target-size floor) and the 1rem track is re-centred on it with
+// margin-top = (1.5rem - 1rem) / 2.
+.form-check.form-switch.form-switch-sm {
+  padding-left: 2.25rem;
+  .form-check-input {
+    width: 1.75rem;
+    height: 1rem;
+    margin-left: -2.25rem;
+    margin-top: 0.25rem;
+  }
+  // The global label margin-bottom (.5rem) made the .form-check 32px tall
+  // against its 24px line, so in an align-items-center row the switch sat
+  // 4px above its neighbours.
+  .form-check-label {
+    font-size: map_get($font-sizes, 11);
+    margin-bottom: 0;
+  }
+}
+
 .form-check-line-through {
   & + label {
     transition: $transition-base;

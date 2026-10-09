@@ -164,7 +164,8 @@
     "500": {
       "title": "Ops, qualcosa è andato storto!",
       "detail": "Prova ad aggiornare la pagina o a tornare indietro e riprovare l'azione. Se il problema persiste,",
-      "contactUs": "contattaci"
+      "contactUs": "contattaci",
+      "backToDashboard": "Torna alla dashboard"
     },
     "user": {
       "self_delete_forbidden": "Non puoi eliminare il tuo account.",
@@ -183,6 +184,22 @@
       "country_blocked": "L'accesso dal tuo paese non è consentito.",
       "password_confirm_unavailable": "Questo account non può riconfermare con una password. Usa l'MFA o autenticati nuovamente tramite OAuth.",
       "oauth_provider_disabled": "Questo provider OAuth non è abilitato per questa superficie. Contatta un amministratore."
+    },
+    "compliance": {
+      "policy_not_found": "La policy di conformità non esiste.",
+      "change_request_not_found": "La richiesta di cambio non esiste.",
+      "tenant_not_found": "Il tenant non esiste.",
+      "policy_version_conflict": "Qualcuno ha modificato la policy o l'assegnazione nel frattempo: ricarica e riprova.",
+      "policy_platform_protected": "La policy di piattaforma non si può cancellare né assegnare a un tenant.",
+      "policy_in_use": "La policy è assegnata ad almeno un tenant.",
+      "policy_name_taken": "Un'altra policy ha già questo nome.",
+      "change_request_not_pending": "La richiesta è già stata decisa.",
+      "change_request_self_approval": "Una richiesta deve essere decisa da un altro operatore.",
+      "policy_invalid": "La policy non è valida.",
+      "policy_warnings_unacknowledged": "Conferma gli avvisi per continuare.",
+      "policy_reason_required": "Serve una motivazione da 1 a 500 caratteri.",
+      "policy_unavailable": "Le policy si stanno caricando: riprova fra qualche secondo.",
+      "policy_persistence_failed": "Non è stato possibile completare la richiesta."
     }
   },
   "banner": {
@@ -368,7 +385,11 @@
           "linkDisabled": "Esiste già un account con questa email. Accedi e collega il provider dalle impostazioni di sicurezza.",
           "emailUnverified": "Il provider di identità non ha verificato questo indirizzo email, quindi non può essere usato per accedere.",
           "providerUnavailable": "Questo provider di accesso non è al momento disponibile. Riprova più tardi.",
-          "loginFailed": "Autenticazione fallita. Riprova."
+          "loginFailed": "Autenticazione fallita. Riprova.",
+          "identityUnlinked": "Questo metodo di accesso è stato scollegato dal tuo account. Accedi in un altro modo e ricollegalo dalla sezione Sicurezza.",
+          "identityConflict": "Questo account del provider è già collegato a un altro utente. Accedi a quell'account, oppure scollegalo prima da lì.",
+          "storeUnavailable": "L'accesso social non è al momento disponibile. Riprova tra poco, oppure accedi in un altro modo.",
+          "providerAlreadyLinked": "Il tuo account ha già collegata un'altra identità di questo provider. Accedi con quella, oppure scollegala prima dalla sezione Sicurezza."
         }
       }
     },
@@ -1221,6 +1242,18 @@
       "dash": "—"
     },
     "passwordTab": {
+      "loading": "Caricamento delle impostazioni password…",
+      "loadError": "Impossibile caricare le impostazioni password. Riprova tra poco.",
+      "enrollmentHeading": "Aggiungi l'accesso con email e password",
+      "enrollmentIntro": "Scegli una password per accedere con l'email del tuo account. L'accesso social resta disponibile. Aggiungendo una password, le altre sessioni verranno disconnesse.",
+      "labelEmail": "Email dell'account",
+      "emailHelp": "Usa questa email per accedere con la nuova password.",
+      "enrollmentSubmit": "Aggiungi password",
+      "enrollmentSubmitting": "Aggiunta della password…",
+      "enrollmentSuccessToast": "Password aggiunta.",
+      "alreadySetNotice": "Il tuo account ha già una password. Puoi cambiarla usando la password attuale.",
+      "enrollmentDisabled": "L'accesso con email e password non è disponibile. Contatta l'amministratore per abilitarlo prima di aggiungere una password.",
+      "errorRequiredCurrent": "Inserisci la password attuale.",
       "title": "Cambia password",
       "intro": "Scegli una password che non usi altrove. Cambiandola, le altre sessioni verranno disconnesse.",
       "ssoOnlyHint": "Il tuo account usa solo un provider SSO. Imposta una password qui per aggiungere un secondo metodo di login.",
@@ -2185,7 +2218,9 @@
       "erasureRequests": "Richieste di cancellazione",
       "legalHolds": "Vincoli legali",
       "retention": "Conservazione",
-      "auditEvents": "Eventi di audit"
+      "auditEvents": "Eventi di audit",
+      "policies": "Policy",
+      "changeRequests": "Richieste"
     },
     "stats": {
       "pendingErasures": {
@@ -2285,6 +2320,285 @@
       "emptyMessage": "Nessun evento di audit.",
       "emptyHint": "Le azioni rilevanti per la sicurezza sulla piattaforma vengono registrate qui.",
       "searchPlaceholder": "Cerca per azione, autore o risorsa"
+    },
+    "policies": {
+      "new": "Nuova policy",
+      "duplicate": "Duplica",
+      "columns": {
+        "name": "Policy",
+        "version": "Versione",
+        "tenants": "Tenant",
+        "ip": "Indirizzi IP",
+        "updated": "Aggiornata",
+        "actions": "Azioni"
+      },
+      "badges": {
+        "platform": "Piattaforma",
+        "lessRestrictive": "Meno restrittiva",
+        "reviewOverdue": "Revisione scaduta"
+      },
+      "emptyMessage": "Nessuna policy di conformità",
+      "emptyHint": "La policy di piattaforma viene creata al primo avvio.",
+      "searchPlaceholder": "Cerca policy…"
+    },
+    "modes": {
+      "ipAddress": {
+        "full": "Intero",
+        "truncated": "Troncato",
+        "hashed": "Pseudonimizzato",
+        "omitted": "Rimosso"
+      },
+      "userAgent": {
+        "full": "Intero",
+        "omitted": "Rimosso"
+      },
+      "subjectIds": {
+        "uuid": "UUID",
+        "hashed": "Pseudonimizzato",
+        "omitted": "Rimosso"
+      }
+    },
+    "roles": {
+      "controller": "Titolare",
+      "processor": "Responsabile",
+      "joint_controller": "Contitolare"
+    },
+    "retentionClasses": {
+      "admin_access": {
+        "label": "Accessi degli amministratori",
+        "purpose": "Controllo degli accessi degli amministratori",
+        "legalBasis": "Art. 6.1.c GDPR — provvedimento del Garante sugli amministratori di sistema"
+      },
+      "privileged_change": {
+        "label": "Modifiche privilegiate",
+        "purpose": "Responsabilizzazione e sicurezza delle modifiche privilegiate",
+        "legalBasis": "Art. 6.1.f GDPR — legittimo interesse"
+      },
+      "client_activity": {
+        "label": "Attività dei clienti",
+        "purpose": "Sicurezza del servizio verso il cliente",
+        "legalBasis": "Art. 6.1.b o f GDPR"
+      },
+      "authentication_security": {
+        "label": "Sicurezza dell'autenticazione",
+        "purpose": "Rilevazione di frodi e abusi",
+        "legalBasis": "Art. 6.1.f GDPR — legittimo interesse"
+      },
+      "compliance_evidence": {
+        "label": "Evidenze di conformità",
+        "purpose": "Dimostrare la conformità",
+        "legalBasis": "Art. 6.1.c GDPR"
+      }
+    },
+    "issues": {
+      "invalid_enum": "Valore non ammesso ({{value}}).",
+      "retention_out_of_range": "Fra {{min}} e {{max}} giorni.",
+      "class_below_minimum": "Almeno {{min}} giorni: il provvedimento del Garante sugli amministratori di sistema richiede sei mesi.",
+      "class_not_tenant_settable": "Questa classe si imposta solo sulla policy di piattaforma.",
+      "sinks_not_platform": "La retention dei sink si imposta solo sulla policy di piattaforma.",
+      "sinks_missing": "La policy di piattaforma deve avere la sezione dei sink.",
+      "sink_invalid": "Valore del sink fuori dai limiti.",
+      "invalid_pii_key": "Le chiavi devono avere da 2 a 40 lettere minuscole o cifre, al massimo 100.",
+      "name_invalid": "Inserisci un nome di al massimo {{max}} caratteri.",
+      "name_taken": "Un'altra policy ha già questo nome.",
+      "reason_required": "Serve una motivazione da 1 a 500 caratteri.",
+      "less_restrictive_than_platform": "Meno restrittiva della policy di piattaforma: {{fields}}.",
+      "less_restrictive_than_current": "Riduce la protezione attuale: {{fields}}.",
+      "retention_longer_than_default": "Retention più lunga del default ({{default}} giorni).",
+      "retention_shorter_than_default": "Retention più corta del default ({{default}} giorni): le evidenze di audit scadono prima.",
+      "sink_retention_longer_than_default": "Retention del sink oltre il default ({{default}}).",
+      "external_sink_changed": "Sink esterno nuovo o modificato: verifica il responsabile, la DPA e gli eventuali trasferimenti fuori dall'UE.",
+      "ip_full": "Gli indirizzi IP interi finiranno nei log.",
+      "review_overdue": "La data di revisione manca o è passata.",
+      "accountability_incomplete": "Manca il riferimento al registro dei trattamenti o alla DPIA/LIA."
+    },
+    "issueTitles": {
+      "less_restrictive_than_platform": "Meno restrittiva della piattaforma",
+      "less_restrictive_than_current": "Riduce la protezione attuale",
+      "retention_longer_than_default": "Retention oltre il default",
+      "retention_shorter_than_default": "Retention sotto il default",
+      "sink_retention_longer_than_default": "Retention dei sink oltre il default",
+      "external_sink_changed": "Sink esterno modificato",
+      "ip_full": "IP interi",
+      "review_overdue": "Revisione scaduta",
+      "accountability_incomplete": "Accountability incompleta"
+    },
+    "fields": {
+      "name": "Nome",
+      "description": "Descrizione",
+      "ipAddress": "Indirizzi IP",
+      "userAgent": "User agent",
+      "subjectIds": "Identificativi degli utenti",
+      "piiKeys": "Chiavi di dati personali",
+      "scanFreeText": "Analisi del testo libero",
+      "role": "Ruolo GDPR",
+      "ropaRef": "Riferimento nel registro dei trattamenti",
+      "assessmentRef": "Riferimento DPIA / LIA",
+      "owner": "Responsabile (UUID dell'operatore)",
+      "reviewDueAt": "Prossima revisione",
+      "accountability": "Accountability",
+      "sinks": "Sink"
+    },
+    "changeRequests": {
+      "columns": {
+        "kind": "Modifica",
+        "target": "Oggetto",
+        "warnings": "Avvisi",
+        "requestedBy": "Richiesta da",
+        "requestedAt": "Richiesta il",
+        "status": "Stato",
+        "actions": "Azioni"
+      },
+      "kinds": {
+        "create": "Nuova policy",
+        "update": "Modifica di policy",
+        "assign": "Assegnazione a un tenant",
+        "unassign": "Rimozione dell'assegnazione"
+      },
+      "statuses": {
+        "pending": "In attesa",
+        "approved": "Approvata",
+        "rejected": "Rifiutata",
+        "superseded": "Superata",
+        "expired": "Scaduta",
+        "all": "Tutte"
+      },
+      "filterLabel": "Stato",
+      "open": "Dettaglio",
+      "emptyMessage": "Nessuna richiesta di cambio",
+      "emptyHint": "Le modifiche con avvisi aspettano qui un secondo operatore.",
+      "searchPlaceholder": "Cerca richieste…",
+      "requestedBy": "Richiesta da",
+      "requestedAt": "Richiesta il",
+      "tenant": "Tenant",
+      "reason": "Motivazione",
+      "status": "Stato",
+      "warnings": "Avvisi",
+      "changes": "Differenze",
+      "noteLabel": "Nota della decisione",
+      "notePlaceholder": "Perché approvi o rifiuti",
+      "approve": "Approva",
+      "reject": "Rifiuta",
+      "close": "Chiudi",
+      "approved": "Richiesta approvata e applicata.",
+      "rejected": "Richiesta rifiutata.",
+      "decideError": "Non è stato possibile salvare la decisione.",
+      "currentLoading": "Caricamento della versione attuale della policy…",
+      "currentLoadError": "Non è stato possibile caricare la versione attuale della policy, quindi le modifiche non si possono mostrare. Rifiuta la richiesta o riprova più tardi.",
+      "ownRequest": "Hai fatto tu questa richiesta: deve deciderla un altro operatore.",
+      "assignSummary": "Tenant {{tenant}}: da {{from}} a {{to}}.",
+      "unassignSummary": "Tenant {{tenant}}: da {{from}} di nuovo alla policy di piattaforma."
+    },
+    "policyDetail": {
+      "newTitle": "Nuova policy di conformità",
+      "copyName": "{{name}} (copia)",
+      "back": "Conformità",
+      "sections": {
+        "settings": "Impostazioni",
+        "history": "Storico",
+        "tenants": "Tenant"
+      },
+      "save": "Salva",
+      "saving": "Verifica…",
+      "delete": "Elimina",
+      "saved": "Policy salvata.",
+      "sentForApproval": "Richiesta inviata per approvazione.",
+      "validateError": "Non è stato possibile verificare la policy.",
+      "saveError": "Non è stato possibile salvare la policy.",
+      "conflictTitle": "La policy è cambiata",
+      "conflictBody": "Un altro operatore ha salvato una versione più recente. Ricaricala prima di modificarla di nuovo.",
+      "reload": "Ricarica",
+      "unsavedTitle": "Modifiche non salvate",
+      "unsavedBody": "Vuoi lasciare la pagina e perdere le modifiche?",
+      "stay": "Resta",
+      "leave": "Perdi le modifiche ed esci",
+      "inherit": "Piattaforma: {{days}} giorni",
+      "deleteTitle": "Elimina la policy",
+      "deleteBody": "La policy esce dal catalogo; le sue versioni restano come evidenza.",
+      "deleted": "Policy eliminata.",
+      "deleteError": "Non è stato possibile eliminare la policy.",
+      "loadError": "Non è stato possibile caricare la policy."
+    },
+    "policyForm": {
+      "sectionContent": "Contenuto dei log",
+      "sectionRetention": "Retention dell'audit per classe",
+      "sectionAccountability": "Accountability",
+      "piiKeysHelp": "Chiavi degli attributi mascherate come dati personali, separate da virgole. Il confronto è esatto, senza separatori.",
+      "scanFreeTextLabel": "Maschera email, IBAN, codici fiscali e IP dentro il testo libero",
+      "minDays": "min {{days}}",
+      "defaultDays": "default {{days}}",
+      "hardMinimum": "minimo di legge",
+      "invalid": "Controlla questo valore.",
+      "platformOnly": "Solo piattaforma"
+    },
+    "saveModal": {
+      "title": "Conferma la modifica",
+      "changes": "Differenze",
+      "noChanges": "Nessun campo modificato.",
+      "warnings": "Avvisi",
+      "fourEyesNote": "Con il quattro occhi attivo, una modifica con avvisi aspetta un secondo operatore.",
+      "reasonLabel": "Motivazione",
+      "reasonPlaceholder": "Perché serve la modifica (resta come evidenza)",
+      "acknowledge": "Ho letto gli avvisi e confermo la modifica",
+      "acknowledgeRequired": "Conferma gli avvisi per continuare.",
+      "confirm": "Conferma",
+      "cancel": "Annulla"
+    },
+    "history": {
+      "columns": {
+        "version": "Versione",
+        "kind": "Modifica",
+        "changedBy": "Autore",
+        "approvedBy": "Approvata da",
+        "changedAt": "Data",
+        "reason": "Motivazione"
+      },
+      "kinds": {
+        "create": "Creata",
+        "update": "Modificata",
+        "delete": "Eliminata"
+      },
+      "emptyMessage": "Nessuna versione",
+      "searchPlaceholder": "Cerca versioni…"
+    },
+    "tenantsPanel": {
+      "columns": {
+        "tenant": "Tenant",
+        "kind": "Tier",
+        "assignedBy": "Assegnata da",
+        "assignedAt": "Assegnata il",
+        "reason": "Motivazione"
+      },
+      "kinds": {
+        "internal": "Interno",
+        "external": "Cliente"
+      },
+      "emptyMessage": "Nessun tenant usa questa policy",
+      "searchPlaceholder": "Cerca tenant…"
+    },
+    "tenantCard": {
+      "title": "Policy di conformità",
+      "source": {
+        "assigned": "Assegnata",
+        "platform": "Policy di piattaforma"
+      },
+      "change": "Cambia",
+      "retention": "Retention dell'audit",
+      "days": "{{count}} giorni",
+      "loadError": "Non è stato possibile caricare la policy di conformità."
+    },
+    "assignModal": {
+      "title": "Policy di conformità del tenant",
+      "policyLabel": "Policy",
+      "platformOption": "Policy di piattaforma (rimuove l'assegnazione)",
+      "noWarnings": "Nessun avviso.",
+      "reasonLabel": "Motivazione",
+      "acknowledge": "Ho letto gli avvisi e confermo la modifica",
+      "confirm": "Salva",
+      "cancel": "Annulla",
+      "applied": "Policy del tenant aggiornata.",
+      "sentForApproval": "Richiesta inviata per approvazione.",
+      "error": "Non è stato possibile salvare l'assegnazione."
     }
   },
   "adminComplianceSoc2": {

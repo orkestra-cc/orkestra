@@ -148,7 +148,7 @@ func TestHasPermission_InactiveRoleIsIgnored(t *testing.T) {
 
 // ===== GetEffectivePermissions =====
 
-// Rule 4 (authz/CLAUDE.md): a tenant-scoped binding never grants a
+// Rule 4 (authz/AGENTS.md): a tenant-scoped binding never grants a
 // platform permission. It was true incidentally — no seeded tenant role
 // carries one — which is not the same as enforced. Existing data can
 // carry a stale system key, and until the D21 validator landed anyone

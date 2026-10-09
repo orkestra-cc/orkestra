@@ -26,7 +26,7 @@ The ranking is therefore:
 
 The `_perm` computed field in step 1 exists because rule 1 cannot be folded into the sort: BSON's canonical type ordering sorts null *below* dates, so `expiresAt: -1` alone would rank a grant expiring tomorrow above a permanent one.
 
-**Expired rows are not reaped here.** `authz_bindings` has no TTL index and no background reaper (both tracked as future work in [authz/CLAUDE.md](../../backend/internal/core/authz/CLAUDE.md)), so an expired survivor persists. It cannot become un-re-grantable, though: `CreateBinding` and `EnsureBinding` reap the tuple's own expired row before re-granting it.
+**Expired rows are not reaped here.** `authz_bindings` has no TTL index and no background reaper (both tracked as future work in [authz/AGENTS.md](../../backend/internal/core/authz/AGENTS.md)), so an expired survivor persists. It cannot become un-re-grantable, though: `CreateBinding` and `EnsureBinding` reap the tuple's own expired row before re-granting it.
 
 ### Companion test
 

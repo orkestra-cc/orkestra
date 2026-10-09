@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/orkestra/backend/internal/shared/blob"
 )
 
 const (
@@ -58,9 +61,10 @@ func (d *smtpDriver) Requires() []ProfileRequirement {
 }
 
 // Capabilities: smtp writes the MIME itself, so it can guarantee
-// List-Unsubscribe / List-Unsubscribe-Post reach the wire.
+// List-Unsubscribe / List-Unsubscribe-Post reach the wire, and it wraps
+// attachments in multipart/mixed.
 func (d *smtpDriver) Capabilities() DriverCapabilities {
-	return DriverCapabilities{ListUnsubscribeHeaders: true}
+	return DriverCapabilities{ListUnsubscribeHeaders: true, Attachments: true}
 }
 
 func (d *smtpDriver) Send(ctx context.Context, p SenderProfile, msg EmailMessage) error {
@@ -120,16 +124,17 @@ func (d *smtpDriver) sendSMTP(ctx context.Context, p SenderProfile, msg EmailMes
 		return smtpError(smtpOpRcptTo, err)
 	}
 
+	hasAttachments := len(msg.Attachments) > 0
 	wc, err := client.Data()
 	if err != nil {
-		return smtpError(smtpOpData, err)
+		return smtpDataError(smtpOpData, err, hasAttachments)
 	}
 	if _, err := wc.Write([]byte(buildMIMEMessage(p, msg))); err != nil {
 		wc.Close()
 		return smtpError(smtpOpWrite, err)
 	}
 	if err := wc.Close(); err != nil {
-		return smtpError(smtpOpClose, err)
+		return smtpDataError(smtpOpClose, err, hasAttachments)
 	}
 
 	d.logger.Info("notification.email sent",
@@ -152,8 +157,25 @@ func smtpError(op string, err error) error {
 	return transportError("smtp", op, err)
 }
 
+// smtpDataError is smtpError for the DATA exchange. A 552 (storage
+// allocation exceeded — the usual size-limit reply) or 554 (transaction
+// failed — what content filters answer) on a message that carries
+// attachments is classified as ErrAttachmentRejected. The classification is
+// deliberately coarse: SMTP gives no finer signal, and the reply text is
+// never read (smtpError drops it). The *SendError stays in the chain, so
+// describeSendError still persists "smtp op=close code=552".
+func smtpDataError(op string, err error, hasAttachments bool) error {
+	se := smtpError(op, err)
+	var tp *textproto.Error
+	if hasAttachments && errors.As(err, &tp) && (tp.Code == 552 || tp.Code == 554) {
+		return fmt.Errorf("%w: %w", ErrAttachmentRejected, se)
+	}
+	return se
+}
+
 // buildMIMEMessage formats the message as multipart/alternative when both
-// text and HTML bodies are provided, or text/plain when only text is.
+// text and HTML bodies are provided, or text/plain when only text is; with
+// attachments, that body is wrapped in multipart/mixed.
 func buildMIMEMessage(p SenderProfile, msg EmailMessage) string {
 	return buildMIMEMessageAt(p, msg, time.Now())
 }
@@ -197,30 +219,125 @@ func buildMIMEMessageAt(p SenderProfile, msg EmailMessage, now time.Time) string
 	fmt.Fprintf(&b, "Date: %s\r\n", now.UTC().Format(time.RFC1123Z))
 	b.WriteString("MIME-Version: 1.0\r\n")
 
+	if len(msg.Attachments) == 0 {
+		writeBody(&b, msg, now)
+		return b.String()
+	}
+
+	// multipart/mixed: the body (exactly what writeBody emits without
+	// attachments, inner boundary included) is the first part, then one
+	// base64 part per attachment.
+	mixed := "orkestra_mixed_" + fmt.Sprint(now.UnixNano())
+	fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", mixed)
+	fmt.Fprintf(&b, "--%s\r\n", mixed)
+	writeBody(&b, msg, now) // emits its own Content-Type (+ inner boundary)
+	b.WriteString("\r\n")
+	for _, a := range msg.Attachments {
+		fmt.Fprintf(&b, "--%s\r\n", mixed)
+		fmt.Fprintf(&b, "Content-Type: %s\r\n", attachmentContentType(a.ContentType))
+		b.WriteString("Content-Transfer-Encoding: base64\r\n")
+		writeContentDisposition(&b, a.Filename)
+		b.WriteString("\r\n")
+		writeBase64Lines(&b, a.Data)
+	}
+	fmt.Fprintf(&b, "--%s--\r\n", mixed)
+	return b.String()
+}
+
+// writeBody writes the body of a message without attachments: the
+// multipart/alternative pair when there is HTML, a bare text/plain part
+// otherwise. Its bytes are pinned by mimeGolden — do not change them.
+func writeBody(b *strings.Builder, msg EmailMessage, now time.Time) {
 	if msg.BodyHTML != "" {
 		boundary := "orkestra_boundary_" + fmt.Sprint(now.UnixNano())
-		fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=%q\r\n\r\n", boundary)
+		fmt.Fprintf(b, "Content-Type: multipart/alternative; boundary=%q\r\n\r\n", boundary)
 
-		fmt.Fprintf(&b, "--%s\r\n", boundary)
+		fmt.Fprintf(b, "--%s\r\n", boundary)
 		b.WriteString("Content-Type: text/plain; charset=\"utf-8\"\r\n")
 		b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
 		b.WriteString(encodeQuotedPrintable(msg.BodyText))
 		b.WriteString("\r\n")
 
-		fmt.Fprintf(&b, "--%s\r\n", boundary)
+		fmt.Fprintf(b, "--%s\r\n", boundary)
 		b.WriteString("Content-Type: text/html; charset=\"utf-8\"\r\n")
 		b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
 		b.WriteString(encodeQuotedPrintable(msg.BodyHTML))
 		b.WriteString("\r\n")
 
-		fmt.Fprintf(&b, "--%s--\r\n", boundary)
+		fmt.Fprintf(b, "--%s--\r\n", boundary)
 	} else {
 		b.WriteString("Content-Type: text/plain; charset=\"utf-8\"\r\n")
 		b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
 		b.WriteString(encodeQuotedPrintable(msg.BodyText))
 	}
+}
 
-	return b.String()
+// attachmentContentType guards the one attachment field written verbatim.
+// The service allowlists it (application/pdf) before any driver sees it;
+// this is the builder's own defence against a header-breaking value.
+func attachmentContentType(ct string) string {
+	if strings.TrimSpace(ct) == "" || strings.ContainsAny(ct, "\r\n") {
+		return "application/octet-stream"
+	}
+	return ct
+}
+
+// rfc2231ChunkLen bounds one percent-encoded filename segment, so every
+// Content-Disposition line stays within RFC 5322's 78-character guidance.
+const rfc2231ChunkLen = 60
+
+// writeContentDisposition writes the attachment's Content-Disposition with
+// the same parameters as blob.ContentDispositionAttachment (an ASCII
+// filename="..." fallback plus the UTF-8 percent-encoded filename*), one
+// parameter per folded line. A long encoded name is split into RFC 2231
+// continuations (filename*0*= carrying the UTF-8 charset, then filename*1*=…) — a single
+// filename*= token cannot be folded, and a 150-rune CJK title encodes to
+// well over the 998-octet line limit.
+func writeContentDisposition(b *strings.Builder, filename string) {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		filename = "attachment"
+	}
+	fmt.Fprintf(b, "Content-Disposition: attachment;\r\n filename=\"%s\";\r\n", blob.ASCIIFilenameFallback(filename))
+	enc := blob.RFC5987Encode(filename)
+	if len(enc) <= rfc2231ChunkLen {
+		fmt.Fprintf(b, " filename*=UTF-8''%s\r\n", enc)
+		return
+	}
+	for i := 0; enc != ""; i++ {
+		n := min(rfc2231ChunkLen, len(enc))
+		// Never split a %XX triple across two segments.
+		if j := strings.LastIndexByte(enc[:n], '%'); j >= 0 && j > n-3 && n < len(enc) {
+			n = j
+		}
+		chunk := enc[:n]
+		enc = enc[n:]
+		charset := ""
+		if i == 0 {
+			charset = "UTF-8''"
+		}
+		sep := ";"
+		if enc == "" {
+			sep = ""
+		}
+		fmt.Fprintf(b, " filename*%d*=%s%s%s\r\n", i, charset, chunk, sep)
+	}
+}
+
+// writeBase64Lines writes data as standard base64 wrapped at 76 characters
+// per line (RFC 2045 §6.8), each line CRLF-terminated.
+func writeBase64Lines(b *strings.Builder, data []byte) {
+	const lineLen = 76
+	enc := base64.StdEncoding.EncodeToString(data)
+	for len(enc) > lineLen {
+		b.WriteString(enc[:lineLen])
+		b.WriteString("\r\n")
+		enc = enc[lineLen:]
+	}
+	if enc != "" {
+		b.WriteString(enc)
+		b.WriteString("\r\n")
+	}
 }
 
 // reservedMIMEHeaders are the fields buildMIMEMessageAt writes itself, keyed

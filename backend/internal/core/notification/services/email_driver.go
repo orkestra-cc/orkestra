@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 var (
@@ -43,6 +45,13 @@ type EmailMessage struct {
 	// the wire in its own idiom. Building these is not this type's job —
 	// it only carries what the chokepoint decided to send.
 	Headers map[string]string
+
+	// Attachments are the files to attach, as raw bytes (the driver encodes
+	// them in its own idiom). Already validated and sanitized by the service
+	// (prepareAttachments): allowed type, total ≤ MaxAttachmentBytes, safe
+	// filename. A driver that cannot carry them reports
+	// Capabilities().Attachments=false and never receives any.
+	Attachments []iface.Attachment
 }
 
 // ProfileRequirement names one sub-field a driver cannot send without.
@@ -67,6 +76,10 @@ type EmailDriver interface {
 // on the wire — not that it accepts them and may drop them silently.
 type DriverCapabilities struct {
 	ListUnsubscribeHeaders bool
+	// Attachments means the driver puts EmailMessage.Attachments on the
+	// wire. A send with attachments routed to a driver without it fails
+	// closed (ErrAttachmentRejected) instead of dropping them silently.
+	Attachments bool
 }
 
 // RequirementView selects which requirements ValidateProfile enforces.

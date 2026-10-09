@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 func TestNoopDriver_RequiresNothingAndNeverFails(t *testing.T) {
@@ -115,5 +117,28 @@ func TestTruncate(t *testing.T) {
 		if got := truncate(c.in, c.n); got != c.want {
 			t.Fatalf("truncate(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
 		}
+	}
+}
+
+// TestNoopDriver_LogsAttachmentMetaNeverBytes: the noop log names each
+// attachment (name, type, size) so a dev can see it rode along, but the
+// content never reaches a log.
+func TestNoopDriver_LogsAttachmentMetaNeverBytes(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	if !NewNoopDriver(logger).Capabilities().Attachments {
+		t.Fatal("noop must report Attachments=true")
+	}
+	msg := EmailMessage{To: "ada@example.test", Subject: "s", BodyText: "b",
+		Attachments: []iface.Attachment{{Filename: "r.pdf", ContentType: "application/pdf", Data: []byte("%PDF-1.7 secret")}}}
+	if err := NewNoopDriver(logger).Send(context.Background(), SenderProfile{}, msg); err != nil {
+		t.Fatalf("noop send must never error, got %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "r.pdf") || !strings.Contains(got, "application/pdf") || !strings.Contains(got, "15 B") {
+		t.Fatalf("expected attachment meta in the log, got:\n%s", got)
+	}
+	if strings.Contains(got, "%PDF-") {
+		t.Fatalf("attachment bytes must never reach the log: %s", got)
 	}
 }

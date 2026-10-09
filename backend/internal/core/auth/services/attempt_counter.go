@@ -103,6 +103,7 @@ const (
 	ScopeVerifyIP    = "verify-ip"
 	ScopeMFAVerify   = "mfa-verify"
 	ScopeMFAEnroll   = "mfa-enroll"
+	ScopeMFALogin    = "mfa-login"
 )
 
 const attemptKeyPrefix = "auth:attempts:"
@@ -139,6 +140,17 @@ var MFAVerifyLimit = Limit{Threshold: MFAMaxAttempts, Window: MFAChallengeTTL}
 // The budgets stay independent so exhausting one can never close the door
 // the other opens.
 var MFAEnrollLimit = Limit{Threshold: MFAMaxAttempts, Window: MFAChallengeTTL}
+
+// MFALoginLimit bounds the PUBLIC `/mfa/login/verify` route — the outer cap
+// across challenges for one (audience, user), the same judgement D20 made
+// for the authenticated verify routes. Per-challenge counting alone is not
+// a cap on the caller: a correct password mints a fresh challenge, and a
+// successful password login clears the email lockout scope, so a password
+// holder could buy five new TOTP guesses per login indefinitely. Same pair
+// as MFAVerifyLimit, on a SEPARATE key: a login budget burned by an
+// attacker who holds the password must not lock the legitimate user out of
+// step-up, and a fumbled step-up must not close the login door.
+var MFALoginLimit = Limit{Threshold: MFAMaxAttempts, Window: MFAChallengeTTL}
 
 // normaliseEmail applies the SAME normalisation Login does
 // (password_auth_service.go: strings.ToLower(strings.TrimSpace(...))),
@@ -207,6 +219,13 @@ func AttemptKeyMFAVerify(aud PolicyAudience, userUUID string) string {
 // See MFAEnrollLimit for why that separation is load-bearing.
 func AttemptKeyMFAEnroll(aud PolicyAudience, userUUID string) string {
 	return mfaUserKey(ScopeMFAEnroll, aud, userUUID)
+}
+
+// AttemptKeyMFALogin is the LOGIN-COMPLETION sibling: the public
+// `/mfa/login/verify` route, keyed on the challenge's user. See
+// MFALoginLimit for why it is not AttemptKeyMFAVerify.
+func AttemptKeyMFALogin(aud PolicyAudience, userUUID string) string {
+	return mfaUserKey(ScopeMFALogin, aud, userUUID)
 }
 
 func mfaUserKey(scope string, aud PolicyAudience, userUUID string) string {

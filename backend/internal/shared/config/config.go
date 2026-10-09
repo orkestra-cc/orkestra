@@ -17,12 +17,21 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	Redis    RedisConfig
-	Auth     AuthConfig
-	Rate     RateLimitConfig
-	Storage  StorageConfig
+	Server      ServerConfig
+	Database    DatabaseConfig
+	Redis       RedisConfig
+	Auth        AuthConfig
+	Rate        RateLimitConfig
+	Storage     StorageConfig
+	PDFRenderer PDFRendererConfig
+}
+
+// PDFRendererConfig points at the optional Gotenberg sidecar. Empty URL ⇒
+// no renderer: PDF features degrade (503 / email without attachment).
+type PDFRendererConfig struct {
+	URL      string
+	Username string
+	Password string
 }
 
 // StorageConfig holds the S3-compatible object-storage connection
@@ -249,7 +258,7 @@ func Load() (*Config, error) {
 		// api.localhost are different *sites* to a browser: an api.* client
 		// API cannot store or send them. Ports play no part in a site, so
 		// the SPA on :8081 and the API on :3000 are same-site (and still
-		// cross-origin). See docker/CLAUDE.md, "Client tier: the SPA and
+		// cross-origin). See docker/AGENTS.md, "Client tier: the SPA and
 		// the client API must be same-site".
 		defaultClientHost = "client.localhost:3000"
 	}
@@ -430,6 +439,16 @@ func Load() (*Config, error) {
 		// so defaulting to that alone would miss the real console.
 		CORSAllowedOrigins: getEnvAsSlice("STORAGE_CORS_ALLOWED_ORIGINS",
 			mergeOrigins(corsOrigins, config.Server.Operator.CORSOrigins, config.Server.Client.CORSOrigins)),
+	}
+
+	// PDF renderer (Gotenberg sidecar, optional). Empty URL in the binary's
+	// own default — see PDFRendererConfig — so a backend run outside the
+	// compose stack never attempts connections nobody asked for; the
+	// compose default sets PDF_RENDERER_URL=http://gotenberg:3000.
+	config.PDFRenderer = PDFRendererConfig{
+		URL:      getEnv("PDF_RENDERER_URL", ""),
+		Username: getEnv("PDF_RENDERER_USER", ""),
+		Password: getEnv("PDF_RENDERER_PASSWORD", ""),
 	}
 
 	if err := config.Validate(); err != nil {

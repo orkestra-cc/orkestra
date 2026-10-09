@@ -58,6 +58,7 @@ type UserRepository interface {
 
 	// Password-auth operations
 	UpdatePasswordHash(ctx context.Context, userUUID, hash string) error
+	SetPasswordHashIfUnset(ctx context.Context, userUUID, hash string) error
 	MarkEmailVerified(ctx context.Context, userUUID string) error
 	RecordFailedLogin(ctx context.Context, userUUID string, lockUntil *time.Time) error
 	ClearFailedLogins(ctx context.Context, userUUID string) error
@@ -111,6 +112,10 @@ type UserRepository interface {
 	List(ctx context.Context, filters *iface.UserFilters, pagination *iface.PaginationParams) ([]*iface.User, int64, error)
 	ListWithOptions(ctx context.Context, filter bson.M, opts ...*options.FindOptions) ([]*iface.User, error)
 	GetByRole(ctx context.Context, role string) ([]*iface.User, error)
+	// FindOldestByRole returns the non-deleted holder of role with the
+	// earliest createdAt, ties broken by uuid, so every replica gets the
+	// same answer; nil, nil when nobody holds it. isActive is NOT filtered.
+	FindOldestByRole(ctx context.Context, role string) (*iface.User, error)
 
 	// Utility Operations
 	Count(ctx context.Context, filters *iface.UserFilters) (int64, error)
@@ -348,7 +353,7 @@ func (r *mongoUserRepository) HardDelete(ctx context.Context, id string) error {
 // Both fields are updated atomically so a concurrent read can never see a
 // soft-deleted row that still owns the original email. The unique email
 // index on this collection is full (not partial) so freeing the email
-// requires renaming it — see user/CLAUDE.md "Soft delete only" note.
+// requires renaming it — see user/AGENTS.md "Soft delete only" note.
 func (r *mongoUserRepository) SoftDeleteAndAliasEmail(ctx context.Context, id string) error {
 	now := time.Now()
 	// Read the current email so we can prefix the alias for traceability
@@ -432,6 +437,23 @@ func (r *mongoUserRepository) List(ctx context.Context, filters *iface.UserFilte
 }
 
 // GetByRole retrieves users by role
+func (r *mongoUserRepository) FindOldestByRole(ctx context.Context, role string) (*iface.User, error) {
+	filter := bson.M{
+		"role":      role,
+		"deletedAt": bson.M{"$exists": false},
+	}
+	opts := options.FindOne().SetSort(bson.D{{Key: "createdAt", Value: 1}, {Key: "uuid", Value: 1}})
+	var user iface.User
+	//tenantscope:allow system: users are audience-tier scoped (one collection per tier, this repository is bound to one), and the first-admin sentinel backfill asks for the platform-wide oldest holder of a system role by design (auth spec §4.7 D31).
+	if err := r.collection.FindOne(ctx, filter, opts).Decode(&user); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to find oldest user by role: %w", err)
+	}
+	return &user, nil
+}
+
 func (r *mongoUserRepository) GetByRole(ctx context.Context, role string) ([]*iface.User, error) {
 	filter := bson.M{
 		"role":      role,
@@ -1033,6 +1055,44 @@ func (r *mongoUserRepository) UpdatePasswordHash(ctx context.Context, userUUID, 
 		return ErrUserNotFound
 	}
 	return nil
+}
+
+// SetPasswordHashIfUnset stores a first hash without overwriting an existing credential.
+func (r *mongoUserRepository) SetPasswordHashIfUnset(ctx context.Context, userUUID, hash string) error {
+	now := time.Now()
+	filter := bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+		"$or": bson.A{
+			bson.M{"passwordHash": bson.M{"$exists": false}},
+			bson.M{"passwordHash": ""},
+		},
+	}
+	update := bson.M{"$set": bson.M{
+		"passwordHash":      hash,
+		"passwordUpdatedAt": now,
+		"updatedAt":         now,
+	}}
+	//tenantscope:allow Per-tier identity collection selected at construction; credential write targets one user UUID.
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("set initial password hash: %w", err)
+	}
+	if result.MatchedCount == 1 {
+		return nil
+	}
+	//tenantscope:allow Per-tier identity collection selected at construction; conflict lookup targets the same user UUID.
+	count, err := r.collection.CountDocuments(ctx, bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+	}, options.Count().SetLimit(1))
+	if err != nil {
+		return fmt.Errorf("classify initial password conflict: %w", err)
+	}
+	if count == 0 {
+		return ErrUserNotFound
+	}
+	return iface.ErrPasswordAlreadySet
 }
 
 // MarkEmailVerified flips emailVerified to true.

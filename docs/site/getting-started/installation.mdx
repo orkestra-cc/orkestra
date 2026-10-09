@@ -71,15 +71,13 @@ Pull it to evaluate. Build from source when you're developing, or when your fork
 
 ## First login
 
-On staging and production, open the operator console — it redirects to the [setup wizard](/getting-started/setup-wizard), which creates the first administrator and the initial Tier-1 organization for you; there's no dev-token endpoint on those environments.
+On every environment — local development included — open the operator console: it redirects to the [setup wizard](/getting-started/setup-wizard), which creates the first administrator and the initial Tier-1 organization for you. See [First admin login](/getting-started/first-admin-login).
 
-For a local dev stack, skip straight to a token instead:
+On a local dev stack you can additionally mint a token for calling the API with `curl` (the endpoint doesn't exist on staging or production):
 
 ```bash
 ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
 ```
-
-Then continue with [First admin login](/getting-started/first-admin-login).
 
 :::warning `localhost` assumes `HOST_BIND_ADDRESS=0.0.0.0`
 That is the default and what `docker/.env.example` ships, but the compose files publish the browser-facing ports **on that address only**. A host that pins it to one interface — a VM serving the stack over a private-network IP, for instance — is reachable *only* there.

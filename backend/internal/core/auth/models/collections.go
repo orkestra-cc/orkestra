@@ -23,6 +23,19 @@ type OAuthProviderDoc struct {
 	IsPrimary  bool          `bson:"isPrimary" json:"isPrimary"`
 	LinkedAt   time.Time     `bson:"linkedAt" json:"linkedAt"`
 	LastUsed   *time.Time    `bson:"lastUsed,omitempty" json:"lastUsed,omitempty"`
+	// UnlinkedAt tombstones an identity the user (or an admin) has
+	// unlinked. READ from this release; WRITTEN from the next one.
+	//
+	// A hard delete would be undone by the very next callback: the
+	// unlinked branch auto-links by verified email, so the operator
+	// would have removed nothing. The tombstone is what makes an unlink
+	// stick.
+	//
+	// Splitting read from write is what keeps the rollback safe — a
+	// binary that does not know the field would re-enable every unlinked
+	// identity. Once a tombstone exists anywhere, this release is the
+	// hard rollback floor.
+	UnlinkedAt *time.Time `bson:"unlinkedAt,omitempty" json:"-"`
 	// OAuth Provider Tokens (encrypted)
 	AccessToken           string                 `bson:"accessToken,omitempty" json:"-"`  // Encrypted OAuth access token
 	RefreshToken          string                 `bson:"refreshToken,omitempty" json:"-"` // Encrypted OAuth refresh token, only if ongoing access needed

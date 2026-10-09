@@ -17,7 +17,7 @@ The old two-flavor split (`docker-compose.dev-public.yml` vs `docker-compose.dev
 `docker-compose.dev.yml` builds `docker/Dockerfile.dev-backend`:
 
 ```dockerfile
-ARG GO_BASE=golang:1.26.8-alpine
+ARG GO_BASE=golang:1.26.9-alpine
 FROM ${GO_BASE}
 ARG AIR_VERSION=v1.67.4
 RUN apk add --no-cache git build-base \
@@ -26,7 +26,7 @@ RUN apk add --no-cache git build-base \
 WORKDIR /app
 ```
 
-- **Default**: public `golang:1.26.8-alpine` from Docker Hub — no auth, fork-friendly. AIR is pre-baked so the container starts as a non-root user without a runtime `go install`.
+- **Default**: public `golang:1.26.9-alpine` from Docker Hub — no auth, fork-friendly. AIR is pre-baked so the container starts as a non-root user without a runtime `go install`.
 - **AIR is pinned, never `@latest`**: a release that raises its `go` directive above the base fails to build under `GOTOOLCHAIN=local` (air v1.67.2 did exactly that on Go 1.25). Bump `AIR_VERSION` together with `GO_BASE`.
 - **Frontends**: `node:24-alpine` (both the operator console and the Tier-2 client SPA).
 
@@ -43,4 +43,4 @@ docker compose -f docker-compose.dev.yml build \
 
 ## Staging and production
 
-`docker-compose.staging.yml` and `docker-compose.prod.yml` are unchanged by this — one app file per environment. See [`docker/CLAUDE.md`](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md) for the full Docker guide.
+`docker-compose.staging.yml` and `docker-compose.prod.yml` are unchanged by this — one app file per environment. See [`docker/AGENTS.md`](https://github.com/orkestra-cc/orkestra/blob/main/docker/AGENTS.md) for the full Docker guide.

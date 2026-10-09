@@ -35,7 +35,7 @@ If you ever find the addon's name diverging across these (e.g. dir `test` but co
 
 ## Backend rules
 
-Deep reference: **`orkestra-go` skill**, [`backend/CLAUDE.md`](../../../backend/CLAUDE.md), [`backend/pkg/sdk/CLAUDE.md`](../../../backend/pkg/sdk/CLAUDE.md).
+Deep reference: **`orkestra-go` skill**, [`backend/AGENTS.md`](../../../backend/AGENTS.md), [`backend/pkg/sdk/AGENTS.md`](../../../backend/pkg/sdk/AGENTS.md).
 
 1. **Implement the `Module` interface** (`pkg/sdk/module/module.go` — `Name() / Category() / Init(*Dependencies)`), embedding `module.BaseModule` for defaults. Add the optional sub-interfaces you need: `Routable` (RegisterRoutes), `HasCollections`, `HasNavItems`, `HasConfigSchema`, `HasPermissions`, `HasDependencies`, `Startable`/`Stoppable`, `HealthCheckable`. `Category()` returns `CategoryToggleable` (no external creds) or `CategoryExternal` (needs API keys).
 
@@ -43,14 +43,14 @@ Deep reference: **`orkestra-go` skill**, [`backend/CLAUDE.md`](../../../backend/
 
 3. **Cross-module deps go through `pkg/sdk/iface` + `ServiceRegistry` only.** Resolve with `module.GetTyped[T]` (optional, nil-safe) / `module.MustGetTyped[T]` (required, panics). **Never** import another module's `services/` or `repository/` package from `module.go`. Declare `Dependencies()`, `RequiredServices()`, `OptionalServices()` honestly. Failure: import cycle / panic at init.
 
-4. **Tenant-scope every Mongo query.** Use `tenantrepo.Scope` / `MustScope` / `StampInsert(M)` / `ScopeAggregate` (`pkg/sdk/tenantrepo/scope.go`) — never a raw `bson.M` filter. Legitimate exceptions carry an inline `//tenantscope:allow <reason>` (or `//tenantscope:allow-until=YYYY-MM-DD`). Failure: CI `tenantscope` job fails; dev panics, prod 403. See `backend/internal/<module>/CLAUDE.md` org-scoping invariants.
+4. **Tenant-scope every Mongo query.** Use `tenantrepo.Scope` / `MustScope` / `StampInsert(M)` / `ScopeAggregate` (`pkg/sdk/tenantrepo/scope.go`) — never a raw `bson.M` filter. Legitimate exceptions carry an inline `//tenantscope:allow <reason>` (or `//tenantscope:allow-until=YYYY-MM-DD`). Failure: CI `tenantscope` job fails; dev panics, prod 403. See `backend/internal/<module>/AGENTS.md` org-scoping invariants.
 
 5. **Collection naming.** A module owning ≥2 collections prefixes every one with `test_`. Single-collection modules may keep any name. → **`orkestra-mongo-collection-naming` skill** is the authority.
 
-6. **RBAC on every endpoint + declare the tier.** In `RegisterRoutes`, mount on `ri.Operator` (Tier-1) and/or `ri.Client` (Tier-2, may be nil — check). Gate every authed route with the audience's `AuthMW` (`RequirePermission` / `RequireSystemPermission` / `RequireCapability` / `RequireStepUp` …). Declare the permission catalog in `Permissions()` (`iface.PermissionSpec`). Tier filtering of routes/nav is via `Tier: "internal" | "external" | ""`. Non-core routes are auto-wrapped in `ModuleGate` → **503** (`module_disabled`) when disabled. Every new endpoint must state which tier it serves (CLAUDE.md mandate).
+6. **RBAC on every endpoint + declare the tier.** In `RegisterRoutes`, mount on `ri.Operator` (Tier-1) and/or `ri.Client` (Tier-2, may be nil — check). Gate every authed route with the audience's `AuthMW` (`RequirePermission` / `RequireSystemPermission` / `RequireCapability` / `RequireStepUp` …). Declare the permission catalog in `Permissions()` (`iface.PermissionSpec`). Tier filtering of routes/nav is via `Tier: "internal" | "external" | ""`. Non-core routes are auto-wrapped in `ModuleGate` → **503** (`module_disabled`) when disabled. Every new endpoint must state which tier it serves (AGENTS.md mandate).
 
 7. **Config & secrets.** Declare admin-editable fields in `ConfigSchema()` (`ConfigField{Key,Type,EnvVar,…}`); use `Type: FieldSecret` for credentials — encrypted at rest (AES-256-GCM) via `ConfigService`. Read with `deps.GetConfig/GetSecret/…`. Never log or return secrets.
-   **When an operator manages *several* of something** (delivery profiles, webhook endpoints, per-region credentials), declare **one** `Type: FieldRecordList` field with the element's sub-schema in `Items []ConfigItemField` — do **not** hand-roll parallel field sets with a `secondary_`/`fallback_` prefix. That workaround costs a duplicated block plus a `DependsOn` condition per field, and every new attribute has to be added twice. Elements carry an immutable slug minted from the operator's label and decode into a `[]T` tagged `module:"<field>"` (`module:"slug"` / `module:"label"` inside `T`). `ConfigItemField` has no `EnvVar` — an empty list has no element to seed, so a record list is UI/API-managed only, and anything a fresh install must boot with belongs in a scalar field. See `pkg/sdk/CLAUDE.md`.
+   **When an operator manages *several* of something** (delivery profiles, webhook endpoints, per-region credentials), declare **one** `Type: FieldRecordList` field with the element's sub-schema in `Items []ConfigItemField` — do **not** hand-roll parallel field sets with a `secondary_`/`fallback_` prefix. That workaround costs a duplicated block plus a `DependsOn` condition per field, and every new attribute has to be added twice. Elements carry an immutable slug minted from the operator's label and decode into a `[]T` tagged `module:"<field>"` (`module:"slug"` / `module:"label"` inside `T`). `ConfigItemField` has no `EnvVar` — an empty list has no element to seed, so a record list is UI/API-managed only, and anything a fresh install must boot with belongs in a scalar field. See `pkg/sdk/AGENTS.md`.
 
 8. **Error codes** live in `internal/shared/errcode/codes.go`, named `test.<situation>` (snake_case), returned through the `errcode` builders. They are wire contracts — stable, snake_case, module-namespaced.
 
@@ -60,7 +60,7 @@ Deep reference: **`orkestra-go` skill**, [`backend/CLAUDE.md`](../../../backend/
 
 ## Frontend-admin rules
 
-Deep reference: **`orkestra-frontend-admin` skill**, [`frontend-admin/CLAUDE.md`](../../../frontend-admin/CLAUDE.md), [`frontend-admin/src/modules/_template/README.md`](../../../frontend-admin/src/modules/_template/README.md) (the canonical scaffold — copy it).
+Deep reference: **`orkestra-frontend-admin` skill**, [`frontend-admin/AGENTS.md`](../../../frontend-admin/AGENTS.md), [`frontend-admin/src/modules/_template/README.md`](../../../frontend-admin/src/modules/_template/README.md) (the canonical scaffold — copy it).
 
 10. **Module manifest** `src/modules/test.tsx` exporting a `ModuleManifest` with `name: 'test'`, lazy `routes()` each wrapped in `<ModuleGate module="test">` + `<ProtectedRoute>` + `<Suspense>`, `injectApi`, and `injectI18n`. Register it in `src/modules/index.ts` `moduleCatalog`.
 

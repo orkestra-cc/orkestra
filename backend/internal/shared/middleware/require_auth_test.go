@@ -680,7 +680,7 @@ func TestAuthMiddleware_Fields_CannotReintroduceCookieRotation(t *testing.T) {
 			"AuthMiddleware gained field(s) not in the expected set: %v\n\n"+
 				"RequireAuth is bearer-only per ADR-0020 / #317 (see the "+
 				"\"RequireAuth is bearer-only\" bullet in "+
-				"backend/internal/core/auth/CLAUDE.md). A field carrying an "+
+				"backend/internal/core/auth/AGENTS.md). A field carrying an "+
 				"auth service, a config struct, or a cookie name is exactly "+
 				"the seam that let the old code silently rotate the refresh "+
 				"cookie on any request with a missing/expired/invalid bearer "+
@@ -697,7 +697,7 @@ func TestAuthMiddleware_Fields_CannotReintroduceCookieRotation(t *testing.T) {
 			"AuthMiddleware lost expected field(s): %v — update expectedFields "+
 				"in this test (and, if the removal is significant, the "+
 				"\"RequireAuth is bearer-only\" bullet in "+
-				"backend/internal/core/auth/CLAUDE.md) so this list keeps "+
+				"backend/internal/core/auth/AGENTS.md) so this list keeps "+
 				"tracking the real struct instead of silently going stale.",
 			missing,
 		)
@@ -791,7 +791,7 @@ func TestAuthGo_ContainsNoCookieRead(t *testing.T) {
 				"The sanctioned client recovery for a missing/expired/invalid "+
 				"bearer is 401 -> POST /v1/auth/{tier}/refresh-cookie -> retry, "+
 				"not a silent mint here. See the \"RequireAuth is bearer-only\" "+
-				"bullet in backend/internal/core/auth/CLAUDE.md.",
+				"bullet in backend/internal/core/auth/AGENTS.md.",
 			offenders,
 		)
 	}

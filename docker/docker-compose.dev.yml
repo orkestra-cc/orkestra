@@ -193,6 +193,13 @@ services:
       STORAGE_FORCE_PATH_STYLE: ${STORAGE_FORCE_PATH_STYLE:-true}
       STORAGE_ENSURE_BUCKET: ${STORAGE_ENSURE_BUCKET:-true}
 
+      # PDF renderer (Gotenberg sidecar, docker-compose.infra.yml) — reached
+      # over pdf-net (see the `networks:` key on this service below). Empty
+      # PDF_RENDERER_URL disables PDF features; they degrade, never fail.
+      PDF_RENDERER_URL: ${PDF_RENDERER_URL-http://gotenberg:3000}
+      PDF_RENDERER_USER: ${PDF_RENDERER_USER:-orkestra}
+      PDF_RENDERER_PASSWORD: ${PDF_RENDERER_PASSWORD:-}
+
       # Hot reload
       AIR_BUILD_CMD: go build -o ./tmp/main ./cmd/server
       AIR_BIN: ./tmp/main
@@ -203,6 +210,9 @@ services:
       GOCACHE: "/app/.go-build-cache"
       GOBIN: "/app/.go-bin"
       PATH: "/app/.go-bin:/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    networks:
+      - default
+      - pdf-net
     volumes:
       - ../backend:/app
       - ./keys:/app/keys
@@ -262,7 +272,7 @@ services:
       - ../frontend-admin/.npm-cache:/app/.npm-cache
     # Regenerate public/config.js from the VITE_* env vars BEFORE
     # `npm run dev` starts. public/config.js is gitignored (see
-    # frontend-admin/.gitignore + frontend-admin/CLAUDE.md → "Runtime
+    # frontend-admin/.gitignore + frontend-admin/AGENTS.md → "Runtime
     # config"); each environment writes its own. The dev-default template
     # at public/config.example.js is the fallback when this script can't
     # run (e.g. `npm run dev` directly on the host).
@@ -272,7 +282,7 @@ services:
       - |
         cat > /app/public/config.js <<EOF
         // Generated at container start by docker-compose.dev.yml.
-        // Gitignored — do not commit. See frontend-admin/CLAUDE.md.
+        // Gitignored — do not commit. See frontend-admin/AGENTS.md.
         window.__ORKESTRA_CONFIG__ = {
           apiUrl: "$${VITE_API_URL}",
           wsUrl: "$${VITE_WS_URL}",
@@ -343,7 +353,7 @@ services:
       - |
         cat > /app/public/config.js <<EOF
         // Generated at container start by docker-compose.dev.yml.
-        // Gitignored — do not commit. See frontend-client/CLAUDE.md.
+        // Gitignored — do not commit. See frontend-client/AGENTS.md.
         window.__ORKESTRA_CONFIG__ = {
           apiBase: "$${VITE_API_BASE}",
           stripePublishableKey: "$${VITE_STRIPE_PUBLISHABLE_KEY}"
@@ -362,3 +372,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+
+networks:
+  pdf-net:
+    internal: true

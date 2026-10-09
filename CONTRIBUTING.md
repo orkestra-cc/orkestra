@@ -24,7 +24,7 @@ echo 'eval "$(mise activate bash)"' >> ~/.bashrc
 exec $SHELL                 # reload the shell so the eval takes effect
 
 # 3. Provision the languages at the versions pinned in .mise.toml
-mise install                # Go 1.26.8, Node 24, Flutter 3.44, golangci-lint, pre-commit, ...
+mise install                # Go 1.26.9, Node 24, Flutter 3.44, golangci-lint, pre-commit, ...
 
 # 4. Bootstrap dependencies for the surface(s) you'll touch
 make install                # everything; or scope manually:
@@ -110,7 +110,7 @@ That parity is load-bearing on private forks, whose Actions runners are billing-
 | `docker/` | Compose configs (dev/staging/prod/infra) | Local dev orchestration |
 | `docs/` | Architecture, ADRs, plans | Design docs, RFCs |
 
-Every subdirectory has its own `CLAUDE.md` / `README.md` with module-specific guidance — start there before diving in.
+Every subdirectory has its own `AGENTS.md` / `README.md` with module-specific guidance — start there before diving in.
 
 ## Two-tier tenancy reminder
 
@@ -119,7 +119,7 @@ Orkestra has **two distinct tiers of tenants**:
 - **Tier 1** — internal operator organizations (the companies running Orkestra).
 - **Tier 2** — external customer organizations that register on the platform and subscribe to its services.
 
-Every endpoint, collection, and RBAC check must declare its tier. See [`CLAUDE.md`](CLAUDE.md#tenancy-model) for the full model. When in doubt about which tier a resource belongs to, ask before implementing.
+Every endpoint, collection, and RBAC check must declare its tier. See [`AGENTS.md`](AGENTS.md#tenancy-model) for the full model. When in doubt about which tier a resource belongs to, ask before implementing.
 
 ## Commit conventions
 
@@ -134,14 +134,14 @@ ci(workflows): split coverage badge into its own job
 
 Allowed types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `ci`, `build`, `perf`, `style`, `revert`.
 
-Commits that touch a module **must** update affected `CLAUDE.md` / `README.md` files in the same commit. Documentation drift is treated as a bug.
+Commits that touch a module **must** update affected `AGENTS.md` / `README.md` files in the same commit. Documentation drift is treated as a bug.
 
 ## PR checklist
 
 - [ ] `make ci` passes locally
-- [ ] Affected `CLAUDE.md` / `README.md` files updated in the same commit
+- [ ] Affected `AGENTS.md` / `README.md` files updated in the same commit
 - [ ] New endpoints declare their tenancy tier and enforce org-scoped RBAC
-- [ ] New MongoDB collections follow the [module-prefix naming convention](backend/CLAUDE.md)
+- [ ] New MongoDB collections follow the [module-prefix naming convention](backend/AGENTS.md)
 - [ ] No secrets in code, logs, or env-file examples — module secrets live in `ConfigService` (AES-256-GCM encrypted)
 - [ ] If the change crosses backend and a frontend (e.g., OpenAPI shape change), the generated TypeScript clients are regenerated in the same PR
 
@@ -185,14 +185,14 @@ The repo contains configuration for several AI coding assistants. All of it is *
 
 | Path | Tool | What it does |
 | --- | --- | --- |
-| `CLAUDE.md` (root + per-module) | [Claude Code](https://claude.ai/code) | Project- and module-specific assistant guidance. Read by the CLI on every prompt. |
+| `AGENTS.md` (root + per-module) | [Claude Code](https://claude.ai/code) (v2.1.277+), [Codex](https://developers.openai.com/codex) | Project- and module-specific assistant guidance. The repository deliberately has **no** `CLAUDE.md`: one would make Claude Code skip every `AGENTS.md`. See [`docs/onboarding/claude-codex-interoperability.md`](docs/onboarding/claude-codex-interoperability.md). |
 | `.claude/` | Claude Code | Per-project skills, hooks, slash commands, permissions. Per-developer customizations under `.claude/settings.local.json` are gitignored. |
 | `.clinerules` | [Cline](https://cline.bot/) (VS Code) | Commit-message and other workflow rules. |
 | `.gemini/commands/` | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Slash-command definitions. |
 
 GitHub linguist marks these as `linguist-documentation` in `.gitattributes` so they don't pollute the repo's language stats. If you don't use any of these tools, ignore the files — they're inert without their respective CLIs.
 
-If you use a different assistant (Cursor, Continue, GitHub Copilot, JetBrains AI, etc.), most read `CLAUDE.md` directly or auto-discover the per-module CLAUDE.md files. No additional config required.
+If you use a different assistant (Cursor, Continue, GitHub Copilot, JetBrains AI, etc.), most read `AGENTS.md` directly or auto-discover the per-module `AGENTS.md` files. No additional config required.
 
 ## License
 

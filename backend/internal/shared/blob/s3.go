@@ -322,7 +322,7 @@ func (s *s3Store) PresignGetDownload(ctx context.Context, key, downloadAs string
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
 	}
-	if cd := contentDispositionAttachment(downloadAs); cd != "" {
+	if cd := ContentDispositionAttachment(downloadAs); cd != "" {
 		in.ResponseContentDisposition = aws.String(cd)
 	}
 	req, err := s.presigner.PresignGetObject(ctx, in, func(opts *s3.PresignOptions) {

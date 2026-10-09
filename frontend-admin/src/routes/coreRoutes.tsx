@@ -32,6 +32,9 @@ const SetupWizard = lazy(() => import('pages/setup/SetupWizard'));
 const UserManagement = lazy(() => import('pages/admin/users'));
 const CompliancePage = lazy(() => import('pages/admin/compliance'));
 const SOC2EvidencePage = lazy(() => import('pages/admin/compliance/soc2'));
+const CompliancePolicyPage = lazy(
+  () => import('pages/admin/compliance/policies')
+);
 const ModuleManagement = lazy(() => import('pages/admin/modules'));
 const ModuleDetail = lazy(() => import('pages/admin/modules/detail'));
 const NavigationAdminPage = lazy(() => import('pages/admin/navigation'));
@@ -68,6 +71,11 @@ export function buildCoreRoutes(
   return [
     {
       element: <App />,
+      errorElement: (
+        <ErrorLayout>
+          <Error500 />
+        </ErrorLayout>
+      ),
       children: [
         {
           path: 'landing',
@@ -160,6 +168,23 @@ export function buildCoreRoutes(
                         fallback={<OrkestraLoader />}
                       >
                         <SOC2EvidencePage />
+                      </Suspense>
+                    </ProtectedRoute>
+                  )
+                },
+                {
+                  path: 'compliance/policies/:policyId',
+                  element: (
+                    <ProtectedRoute
+                      requiredPermissions={[
+                        ['super_admin', 'administrator', 'developer']
+                      ]}
+                    >
+                      <Suspense
+                        key="admin-compliance-policy"
+                        fallback={<OrkestraLoader />}
+                      >
+                        <CompliancePolicyPage />
                       </Suspense>
                     </ProtectedRoute>
                   )

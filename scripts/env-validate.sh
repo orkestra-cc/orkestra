@@ -68,6 +68,7 @@ SECRET_VARS=(
     "REDIS_PASSWORD"
     "STORAGE_SECRET_KEY"
     "RUSTFS_ROOT_PASSWORD"
+    "PDF_RENDERER_PASSWORD"
 )
 
 # --- Same-site host pairings (spec §8 follow-up #16) ---------------------
@@ -293,7 +294,7 @@ validate_env_file() {
                 print_info "  CLIENT_API_HOST=client.localhost"
                 print_info "  CLIENT_API_URL=http://client.localhost:3000"
                 print_info "  CLIENT_FRONTEND_URL=http://client.localhost:8081"
-                print_info "See docker/CLAUDE.md -> \"Client tier: the SPA and the client API must be same-site\","
+                print_info "See docker/AGENTS.md -> \"Client tier: the SPA and the client API must be same-site\","
                 print_info "under \"Upgrading an existing dev checkout\"."
                 errors=$((errors + 1))
             fi
@@ -307,7 +308,7 @@ validate_env_file() {
         print_info "development values are:"
         print_info "  FRONTEND_URL=http://localhost:8080"
         print_info "  VITE_API_URL=http://localhost:3000"
-        print_info "See docker/CLAUDE.md -> \"Client tier: the SPA and the client API must be same-site\","
+        print_info "See docker/AGENTS.md -> \"Client tier: the SPA and the client API must be same-site\","
         print_info "whose closing paragraph covers the operator tier."
         errors=$((errors + 1))
     fi
@@ -360,6 +361,17 @@ validate_env_file() {
                 print_success "$var is set"
             fi
         done
+
+        # STORAGE_PUBLIC_ENDPOINT is the host browsers — and, for public
+        # cover images, anonymous visitors — fetch presigned URLs from. Plain
+        # HTTP there is a cleartext signed URL and mixed content on every
+        # HTTPS site that embeds the image. Unset is fine (single-endpoint or
+        # managed S3); set means https.
+        pub_ep=$(env_value STORAGE_PUBLIC_ENDPOINT)
+        if [ -n "$pub_ep" ] && [[ "$pub_ep" != https://* ]]; then
+            print_error "STORAGE_PUBLIC_ENDPOINT must be an https:// URL in $env_name (got: $pub_ep)"
+            errors=$((errors + 1))
+        fi
         echo ""
     fi
 

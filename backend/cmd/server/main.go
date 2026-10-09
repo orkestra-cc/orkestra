@@ -54,6 +54,8 @@ var (
 func main() {
 	logger := utils.SetupLogger()
 	slog.SetDefault(logger)
+	// Compliance spec §9 — count recovered masking panics.
+	utils.SetMaskingPanicHook(metrics.Default().RecordLogMaskingPanic)
 	logger.Info("orkestra-backend starting",
 		slog.String("version", Version),
 		slog.String("build_time", BuildTime),
@@ -230,6 +232,12 @@ func main() {
 		logger.Info("blob storage not configured (STORAGE_ACCESS_KEY/SECRET empty) — avatar uploads disabled")
 	}
 
+	// Optional platform PDF renderer (Gotenberg sidecar). Registered even
+	// when unreachable at boot — see registerPDFRenderer — so the platform
+	// checks surfaced below reflect live reachability, not a boot-time
+	// snapshot.
+	platformChecks := registerPDFRenderer(svcRegistry, cfg.PDFRenderer, logger)
+
 	modRegistry := module.NewModuleRegistry(logger)
 	modRegistry.SetConfigService(configService)
 	modRegistry.SetContainerManager(container.NewManager(logger))
@@ -309,6 +317,15 @@ func main() {
 		utils.SwapLevelResolver(r)
 		logger.Info("logging: live level resolver active",
 			slog.String("source", "logging core module"))
+	}
+
+	// Compliance spec §2.1 — the live compliance policy replaces the static
+	// platform defaults behind every logger built so far and the span
+	// exporter. No-op when the compliance module did not publish it.
+	if p, ok := module.GetTyped[iface.CompliancePolicyProvider](svcRegistry, module.ServiceCompliancePolicy); ok {
+		utils.SwapLogPolicyResolver(p)
+		telemetry.SwapSpanPolicyResolver(p)
+		logger.Info("compliance: live log policy resolver active")
 	}
 
 	// Retrieve auth infrastructure for middleware setup
@@ -401,6 +418,13 @@ func main() {
 	// has registered routes.
 	apiConfig := huma.DefaultConfig("Orkestra API", "1.0.0")
 	apiConfig.DocsPath = ""
+	// Error bodies: outside development a 5xx carries the handler's own
+	// detail and nothing else. Huma would otherwise serialise every wrapped
+	// error — Redis and Mongo dial errors included — into errors[].message
+	// for anonymous callers. Installed on the shared config so both audience
+	// surfaces and every module sub-router inherit it.
+	apiConfig.Transformers = append(apiConfig.Transformers,
+		errors.HumaErrorDetailPolicy(cfg.IsProductionLike(), logger))
 	apiConfig.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
 		"bearerAuth": {
 			Type:         "http",
@@ -526,8 +550,8 @@ func main() {
 	})
 
 	// Dev-token endpoint (LOCAL DEVELOPMENT ONLY) — synthetic JWTs for
-	// first login + local API testing, used by scripts/devtoken.sh and the
-	// console's "Sign in with dev token" affordance. Re-provided in core
+	// local API testing, used by scripts/devtoken.sh (the console has no
+	// UI for it). Re-provided in core
 	// after ADR-0006 removed the dev addon. Mounted as a raw chi route on
 	// the operator root mux (bypasses Huma, hidden from /docs); never on
 	// the client host. No DB writes.
@@ -566,6 +590,7 @@ func main() {
 	// system permission; the MFA gate on the mutation group layers on top.
 	// Operator-only — module enable/disable is a Tier-1 operator concern.
 	moduleAdminHandler := module.NewModuleAdminHandler(configService, modRegistry)
+	moduleAdminHandler.SetPlatformChecks(platformChecks)
 	if err := wireModuleAdminAudit(moduleAdminHandler, svcRegistry); err != nil {
 		log.Fatalf("Failed to wire module admin audit: %v", err)
 	}

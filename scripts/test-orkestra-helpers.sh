@@ -254,8 +254,8 @@ check "env-validate: the client refusal names all three keys" "yes" \
     "$(ev_saw 'Client tier is cross-site: CLIENT_API_HOST=api.localhost, CLIENT_API_URL=api.localhost, CLIENT_FRONTEND_URL=localhost')"
 check "env-validate: the client refusal carries the migration keys" "yes" \
     "$(ev_saw 'CLIENT_FRONTEND_URL=http://client.localhost:8081')"
-check "env-validate: the client refusal points at docker/CLAUDE.md" "yes" \
-    "$(ev_saw 'docker/CLAUDE.md')"
+check "env-validate: the client refusal points at docker/AGENTS.md" "yes" \
+    "$(ev_saw 'docker/AGENTS.md')"
 
 check "env-validate: the migrated client triple passes" "0" \
     "$(ev_run CLIENT_API_HOST=client.localhost \
@@ -347,6 +347,88 @@ check "orkestra.sh deploy runs no compose command when it aborts" "0" \
 check "orkestra.sh deploy names the validation as the reason" "yes" \
     "$(grep -q 'failed validation' "$ev_deploy_out" && grep -q 'Nothing was started' "$ev_deploy_out" && printf yes || printf no)"
 rm -f "$ev_deploy_log" "$ev_deploy_out"
+
+# --- The Gotenberg PDF sidecar is a first-class infra service —
+# `orkestra.sh deploy --scope infra` must start it alongside mongodb/redis/
+# rustfs, not silently skip it (it used to: the `up -d` list hardcoded the
+# original three and every clone ran with no gotenberg container at all). ---
+ev_run > /dev/null # restore a valid same-site .env; the previous case left a cross-site one
+gotenberg_deploy_log="$(mktemp)"
+gotenberg_deploy_out="$(mktemp)"
+export GOTENBERG_DEPLOY_LOG="$gotenberg_deploy_log"
+gotenberg_deploy_status="$(
+    (
+        SCRIPT_DIR="$ev_tmp"
+        DOCKER_DIR="$ev_tmp/docker"
+        ENV=development
+        DEPLOY_SCOPE=infra
+        REBUILD_IMAGES=no
+        BRANCH=any
+        SKIP_CONFIRMATION=yes
+        INFRA_COMPOSE="$ev_tmp/docker/docker-compose.infra.yml"
+        COMPOSE_FILE="$ev_tmp/docker/docker-compose.dev.yml"
+        ENV_FILE="$ev_env"
+        check_docker_running() { :; }
+        ensure_jwt_keys_readable() { :; }
+        docker() {
+            local IFS=' '
+            printf '%s\n' "docker $*" >> "$GOTENBERG_DEPLOY_LOG"
+            return 0
+        }
+        fullstack_execute_deploy
+    ) > "$gotenberg_deploy_out" 2>&1
+    printf '%s' "$?"
+)"
+check "orkestra.sh infra deploy succeeds" "0" "$gotenberg_deploy_status"
+check "orkestra.sh infra deploy starts gotenberg with mongodb/redis/rustfs" "yes" \
+    "$(grep -Eq 'compose .* up -d mongodb redis rustfs gotenberg$' "$gotenberg_deploy_log" && printf yes || printf no)"
+rm -f "$gotenberg_deploy_log" "$gotenberg_deploy_out"
+
+# --- scripts/health-check.sh checks gotenberg exactly like the other infra
+# containers: Docker container state + its compose healthcheck, no HTTP
+# probe (it has no published port to probe from the host). Run the real
+# script as its own process with a stub `docker` on PATH so it never
+# touches a live daemon; the app-tier checks short-circuit on "container
+# not found" before any HTTP probe, so this stays instant. ---
+hc_tmp="$(mktemp -d)"
+mkdir -p "$hc_tmp/scripts" "$hc_tmp/docker" "$hc_tmp/bin"
+cp "$DIR/health-check.sh" "$DIR/env-file.sh" "$hc_tmp/scripts/"
+printf 'APP_NAME=hc-test\nENV=development\n' > "$hc_tmp/docker/.env"
+cat > "$hc_tmp/bin/docker" <<'DOCKEREOF'
+#!/usr/bin/env bash
+# Fake docker: answers `inspect -f` for mongodb/redis/rustfs/gotenberg only;
+# everything else "not found" (empty stdout, exit 1), same as a real daemon
+# asked about a container that was never started.
+args="$*"
+case "$args" in
+    *"State.Health"*)
+        case "$args" in
+            *gotenberg*) echo "${GOTENBERG_HEALTH:-healthy}" ;;
+            *mongodb*|*redis*|*rustfs*) echo healthy ;;
+            *) exit 1 ;;
+        esac ;;
+    *"State.Status"*)
+        case "$args" in
+            *gotenberg*|*mongodb*|*redis*|*rustfs*) echo running ;;
+            *) exit 1 ;;
+        esac ;;
+    *) exit 1 ;;
+esac
+DOCKEREOF
+chmod +x "$hc_tmp/bin/docker"
+
+hc_out="$(mktemp)"
+hc_status="$(PATH="$hc_tmp/bin:$PATH" bash "$hc_tmp/scripts/health-check.sh" development infra > "$hc_out" 2>&1; printf '%s' "$?")"
+check "health-check.sh infra scope passes when gotenberg is healthy" "0" "$hc_status"
+check "health-check.sh reports gotenberg healthy" "yes" \
+    "$(grep -q 'gotenberg: running (healthy)' "$hc_out" && printf yes || printf no)"
+
+hc_status_unhealthy="$(GOTENBERG_HEALTH=unhealthy PATH="$hc_tmp/bin:$PATH" bash "$hc_tmp/scripts/health-check.sh" development infra > "$hc_out" 2>&1; printf '%s' "$?")"
+check "health-check.sh infra scope fails when gotenberg is unhealthy" "1" "$hc_status_unhealthy"
+check "health-check.sh names gotenberg as the failing service" "yes" \
+    "$(grep -q 'gotenberg: container reports unhealthy' "$hc_out" && printf yes || printf no)"
+rm -rf "$hc_tmp"
+rm -f "$hc_out"
 
 # wiz_urls on a RE-RUN over a pre-#10 .env: the stored CLIENT_API_URL still
 # says api.localhost, so it must NOT come back as the default once the user

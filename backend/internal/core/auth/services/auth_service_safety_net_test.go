@@ -12,6 +12,8 @@ package services
 
 import (
 	"context"
+	"errors"
+	"github.com/orkestra/backend/internal/core/auth/repository"
 	"sync"
 	"testing"
 	"time"
@@ -37,7 +39,7 @@ func TestGetOAuthLinks_RequiresMFAFalseWithoutFactor(t *testing.T) {
 	})
 	// mfaFactorRepo intentionally nil — emulates the test wiring before
 	// MFA was bolted on. RequiresMFA must stay false in this degraded mode.
-	svc := &authService{userService: fake}
+	svc := &authService{userService: fake, oauthProviderRepo: &mirrorOAuthRepo{users: fake}}
 
 	resp, err := svc.GetOAuthLinks(context.Background(), "u-multi")
 	if err != nil {
@@ -73,7 +75,7 @@ func TestGetOAuthLinks_RequiresMFATrueWithEnrolledTOTP(t *testing.T) {
 		Type:       models.MFAFactorTOTP,
 		VerifiedAt: &enrolled,
 	})
-	svc := &authService{userService: fake, mfaFactorRepo: factors}
+	svc := &authService{userService: fake, oauthProviderRepo: &mirrorOAuthRepo{users: fake}, mfaFactorRepo: factors}
 
 	resp, err := svc.GetOAuthLinks(context.Background(), "u-totp")
 	if err != nil {
@@ -106,7 +108,7 @@ func TestGetOAuthLinks_RequiresMFATrueWithWebAuthn(t *testing.T) {
 			{CredentialID: []byte{0x01, 0x02}, Name: "Touch ID", CreatedAt: time.Now()},
 		},
 	})
-	svc := &authService{userService: fake, mfaFactorRepo: factors}
+	svc := &authService{userService: fake, oauthProviderRepo: &mirrorOAuthRepo{users: fake}, mfaFactorRepo: factors}
 
 	resp, _ := svc.GetOAuthLinks(context.Background(), "u-wa")
 	if !resp.RequiresMFA {
@@ -135,7 +137,7 @@ func TestGetOAuthLinks_RequiresMFAFalseWithEmptyWebAuthnArray(t *testing.T) {
 		Type:                models.MFAFactorWebAuthn,
 		WebAuthnCredentials: nil,
 	})
-	svc := &authService{userService: fake, mfaFactorRepo: factors}
+	svc := &authService{userService: fake, oauthProviderRepo: &mirrorOAuthRepo{users: fake}, mfaFactorRepo: factors}
 
 	resp, _ := svc.GetOAuthLinks(context.Background(), "u-wa-empty")
 	if resp.RequiresMFA {
@@ -155,7 +157,7 @@ func TestGetOAuthLinks_SingleLinkCannotUnlink(t *testing.T) {
 			{Provider: "google", ProviderID: "g-1", Email: "u@x.com", IsActive: true, IsPrimary: true},
 		},
 	})
-	svc := &authService{userService: fake}
+	svc := &authService{userService: fake, oauthProviderRepo: &mirrorOAuthRepo{users: fake}}
 
 	resp, err := svc.GetOAuthLinks(context.Background(), "u-sole")
 	if err != nil {
@@ -166,18 +168,27 @@ func TestGetOAuthLinks_SingleLinkCannotUnlink(t *testing.T) {
 	}
 }
 
-// TestGetOAuthLinks_PropagatesUserServiceError: a missing user surfaces as an
-// error from the user provider; GetOAuthLinks must not swallow it. The fake
-// returns errNotFound when no user is seeded, which is the closest off-the-
-// shelf failure mode without growing the shared helper.
-func TestGetOAuthLinks_PropagatesUserServiceError(t *testing.T) {
+// TestGetOAuthLinks_PropagatesStoreError: the listing reads the provider
+// collection (D32); a store failure must surface as ErrOAuthStoreUnavailable,
+// never as an empty list.
+func TestGetOAuthLinks_PropagatesStoreError(t *testing.T) {
 	t.Parallel()
-	svc := &authService{userService: newAdminUnlinkUserFake()}
+	svc := &authService{userService: newAdminUnlinkUserFake(), oauthProviderRepo: failingOAuthRepo{err: errors.New("mongo: no reachable servers")}}
 
-	_, err := svc.GetOAuthLinks(context.Background(), "no-such-user")
-	if err == nil {
-		t.Fatal("expected error from underlying user provider")
+	_, err := svc.GetOAuthLinks(context.Background(), "u-1")
+	if !errors.Is(err, ErrOAuthStoreUnavailable) {
+		t.Fatalf("err = %v, want ErrOAuthStoreUnavailable", err)
 	}
+}
+
+// failingOAuthRepo fails every listing.
+type failingOAuthRepo struct {
+	repository.OAuthProviderRepository
+	err error
+}
+
+func (f failingOAuthRepo) GetByUserUUID(context.Context, string) ([]*models.OAuthProviderDoc, error) {
+	return nil, f.err
 }
 
 // TestRecordSecurityEvent_NoRepoStillReturnsNil: a service constructed

@@ -26246,6 +26246,20 @@ label {
   vertical-align: top;
 }
 
+.form-check.form-switch.form-switch-sm {
+  padding-left: 2.25rem;
+}
+.form-check.form-switch.form-switch-sm .form-check-input {
+  width: 1.75rem;
+  height: 1rem;
+  margin-left: -2.25rem;
+  margin-top: 0.25rem;
+}
+.form-check.form-switch.form-switch-sm .form-check-label {
+  font-size: 0.6944444444rem;
+  margin-bottom: 0;
+}
+
 .form-check-line-through + label {
   transition: all 0.2s ease-in-out;
 }

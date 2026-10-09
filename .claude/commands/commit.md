@@ -15,7 +15,7 @@ regression, even if the build is green.
 ## 2. Doc-impact pass (mandatory, blocking)
 
 For every changed file, walk up its directory tree and collect every
-`CLAUDE.md` and `README.md` until the repo root. Pull in any
+`AGENTS.md` and `README.md` until the repo root. Pull in any
 `docs/*.md` cross-referenced from those files. List the full doc set
 before deciding anything.
 
@@ -43,7 +43,7 @@ Silent skips are not allowed.
 
 ## 3. Update docs in the same commit
 
-CLAUDE.md is a snapshot of current state, never a changelog. Do not
+AGENTS.md is a snapshot of current state, never a changelog. Do not
 add "Recent changes" sections, "as of <date>" notes, or narrate the
 diff — the git history is the changelog. Edit the documented shape so
 it matches the new code.
@@ -56,7 +56,7 @@ counts still match.
 
 ## 4. Stage by explicit path
 
-Never `git add -A` / `git add .` — root CLAUDE.md forbids it because
+Never `git add -A` / `git add .` — root AGENTS.md forbids it because
 of secret/binary leakage risk. Stage docs and code together by name.
 
 If untracked files exist, list them and ask which to include before

@@ -156,9 +156,9 @@ frontend-client-clean:
 # ============================================================================
 
 .PHONY: install install-hooks fmt ci-help
-.PHONY: ci ci-all ci-mcp ci-backend ci-frontend-admin ci-frontend-client ci-mobile
-.PHONY: mcp-check mcp-test
-.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks backend-script-tests
+.PHONY: ci ci-all ci-mcp ci-agents ci-backend ci-frontend-admin ci-frontend-client ci-mobile
+.PHONY: mcp-check mcp-test agents-check agents-test
+.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate backend-mongo-config backend-credential-fallbacks backend-script-tests backend-gotenberg-hardening
 .PHONY: admin-lockcheck admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-lockcheck client-typecheck client-lint client-test client-build
 .PHONY: mobile-lockcheck
@@ -258,8 +258,11 @@ ci:
 	@if [ -n "$(CLIENT_CHANGED)"  ]; then $(MAKE) ci-frontend-client; fi
 	@if [ -n "$(MOBILE_CHANGED)"  ]; then $(MAKE) ci-mobile;          fi
 	@if [ -n "$(MCP_CHANGED)"     ]; then $(MAKE) ci-mcp;             fi
+	@# No path filter: agents-check is sub-second, and a filter would miss the
+	@# untracked CLAUDE.md that /init writes in a new directory.
+	@$(MAKE) --no-print-directory agents-check
 
-ci-all: ci-mcp ci-backend ci-frontend-admin ci-frontend-client ci-mobile
+ci-all: ci-mcp ci-agents ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 	@echo "All surface checks passed."
 
 # ---- Shared MCP configuration ----
@@ -273,9 +276,23 @@ mcp-check:
 mcp-test:
 	@python3 scripts/test-mcp-sync.py
 
+# ---- Agent instruction files ----
+
+# AGENTS.md is the only instruction filename: a single CLAUDE.md (or
+# CLAUDE.local.md) makes Claude Code drop every AGENTS.md. See
+# docs/onboarding/claude-codex-interoperability.md.
+ci-agents: agents-test agents-check
+	@echo "Agent instructions CI: OK"
+
+agents-check:
+	@python3 scripts/check-agent-instructions.py
+
+agents-test:
+	@python3 scripts/test-agent-instructions.py
+
 # ---- Backend ----
 
-ci-backend: backend-script-tests backend-mongo-config backend-credential-fallbacks backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
+ci-backend: backend-script-tests backend-mongo-config backend-credential-fallbacks backend-gotenberg-hardening backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-logscope backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
 	@echo "Backend CI: OK"
 
 # Static gate: the compose stacks and CI must all provide a transaction-capable
@@ -290,6 +307,12 @@ backend-mongo-config:
 # facing S3 API — and nothing said so. Also pins Redis to its volume (--dir).
 backend-credential-fallbacks:
 	@docker/tests/credential-fallbacks.test.sh
+
+# Static gate: the Gotenberg sidecar (optional HTML→PDF renderer)
+# keeps its hardening — no published port, pdf-net only, chromium deny-lists
+# and IP flags on. See docker/tests/gotenberg-hardening.test.sh.
+backend-gotenberg-hardening:
+	@bash docker/tests/gotenberg-hardening.test.sh
 
 # backend-openapi-check fails if the committed openapi/enterprise.json drifted
 # from the routes in the current source — same gate as policycoverage but for
@@ -353,6 +376,14 @@ backend-piiscan:
 	@cd backend && go test ./tools/piiscan/...
 	@cd backend && go run ./tools/piiscan/cmd/piiscan \
 	  -baseline=tools/piiscan/baseline.txt ./internal/...
+
+# backend-logscope flags slog calls the compliance PolicyHandler cannot mask
+# reliably: slog.Any with an opaque value, secret-looking keys with a dynamic
+# value (compliance spec §2.6). Baseline carries the pre-existing calls.
+backend-logscope:
+	@cd backend && go test ./tools/logscope/...
+	@cd backend && go run ./tools/logscope/cmd/logscope \
+	  -baseline=tools/logscope/baseline.txt ./internal/... ./pkg/... ./cmd/...
 
 # Reads OSV IDs (one per line, '#'-comments) from backend/.vulncheck-allowlist.txt.
 # Fails only if a reachable vulnerability is NOT on the allowlist.
@@ -500,6 +531,7 @@ ci-help:
 	@echo "  make ci-mobile             - Flutter CI (lockfile + analyze + test)"
 	@echo "  make ci-mcp                - Shared Claude Code/Codex MCP config check"
 	@echo "  make mcp-check             - Verify project MCP definitions are in sync"
+	@echo "  make agents-check          - Verify the repo has AGENTS.md only (no CLAUDE.md)"
 	@echo ""
 	@echo "  make admin-lockcheck       - Is frontend-admin/package-lock.json in sync? (no install)"
 	@echo "  make client-lockcheck      - Same for frontend-client"

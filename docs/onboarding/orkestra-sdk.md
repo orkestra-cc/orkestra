@@ -7,7 +7,7 @@ _Audience: backend developers writing or modifying Orkestra modules (core or add
 > - `pkg/sdk` is now an **in-tree package** of the single `github.com/orkestra/backend` module — imported as `github.com/orkestra/backend/pkg/sdk/...`. There is **no** separate `go.mod`, no `go.work`, no `replace`, and nothing published to the Go proxy.
 > - The 14 addons were **deleted** from the monorepo and their extracted repos archived. The base ships eight core modules (compliance was re-homed to core in v0.3.9 per ADR-0009) and an empty optional-module catalog.
 >
-> The SDK's *contract* (the `Module` interface, `ServiceRegistry`, `ConfigService`, `iface`, `tenantrepo`, …) is unchanged — only the packaging is. Read the sections below for that contract, but **mentally substitute the in-tree import path** for every `github.com/orkestra-cc/orkestra-sdk/...` and ignore the `go.work` / `replace` / publish / extract machinery. Current source of truth: [`backend/pkg/sdk/CLAUDE.md`](../../backend/pkg/sdk/CLAUDE.md).
+> The SDK's *contract* (the `Module` interface, `ServiceRegistry`, `ConfigService`, `iface`, `tenantrepo`, …) is unchanged — only the packaging is. Read the sections below for that contract, but **mentally substitute the in-tree import path** for every `github.com/orkestra-cc/orkestra-sdk/...` and ignore the `go.work` / `replace` / publish / extract machinery. Current source of truth: [`backend/pkg/sdk/AGENTS.md`](../../backend/pkg/sdk/AGENTS.md).
 
 ## What the SDK is
 
@@ -561,7 +561,7 @@ shape for cross-module communication.
    `cmd/server/main.go` so the registry sees it.
 
 6. **Add the frontend slice** if you have UI — see
-   `frontend-admin/CLAUDE.md` for the module pattern there. Backend
+   `frontend-admin/AGENTS.md` for the module pattern there. Backend
    declares the nav item, frontend declares the route + RTK Query slice.
 
 7. **Test:** `make backend-test` runs the full backend + SDK suite. Tests
@@ -572,15 +572,15 @@ shape for cross-module communication.
 
 If you're going to spend serious time in the backend, in priority order:
 
-1. **`backend/CLAUDE.md`** — module system + project structure
-2. **`backend/internal/addons/billing/CLAUDE.md`** — most complex addon,
+1. **`backend/AGENTS.md`** — module system + project structure
+2. **`backend/internal/addons/billing/AGENTS.md`** — most complex addon,
    exercises every capability (config schema, infra containers,
    dependencies, hot reload, dynamic config closures, webhooks)
-3. **`backend/internal/addons/subscriptions/CLAUDE.md`** — cleanest
+3. **`backend/internal/addons/subscriptions/AGENTS.md`** — cleanest
    service-publishing pattern + cycle-free wiring with payments
-4. **`backend/internal/core/auth/CLAUDE.md`** — authentication +
+4. **`backend/internal/core/auth/AGENTS.md`** — authentication +
    middleware chain
-5. **`backend/internal/core/authz/CLAUDE.md`** — RBAC + Cedar ABAC + the
+5. **`backend/internal/core/authz/AGENTS.md`** — RBAC + Cedar ABAC + the
    9 org-scoping invariants every module must respect
 6. **[docs/plans/orkestra-sdk-split.md][1]** — full multi-phase plan for
    how the SDK reached its current shape and where it's going

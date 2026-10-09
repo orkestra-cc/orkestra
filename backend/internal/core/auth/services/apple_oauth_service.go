@@ -37,6 +37,10 @@ type appleOAuthService struct {
 	// Redis-based caching for improved performance and scalability
 	redisClient RedisClient
 	cacheTTL    time.Duration
+
+	// keyFetcher resolves the signing key for a kid. Nil means Apple's
+	// JWKS (fetchApplePublicKey); tests inject a local key.
+	keyFetcher func(ctx context.Context, kid string) (interface{}, error)
 }
 
 // NewAppleOAuthService creates a new Apple OAuth service with full OAuth 2.1 support
@@ -255,59 +259,18 @@ func (s *appleOAuthService) RefreshAccessToken(ctx context.Context, refreshToken
 
 // Mobile authentication flow (ID token validation)
 func (s *appleOAuthService) ValidateIDToken(ctx context.Context, request *IDTokenValidationRequest) (*UserInfo, error) {
-	// Parse the ID token without verification to get the header
-	token, err := jwt.Parse(request.IDToken, func(token *jwt.Token) (interface{}, error) {
-		// We'll return nil here as we need to fetch Apple's public keys
-		return nil, fmt.Errorf("key fetching required")
-	})
-
-	if token == nil {
-		return nil, NewProviderError(models.OAuthProviderApple, "id_token_validation", err)
+	keyFor := s.keyFetcher
+	if keyFor == nil {
+		keyFor = s.fetchApplePublicKey
 	}
-
-	// Extract key ID from token header
-	keyID, ok := token.Header["kid"].(string)
-	if !ok {
-		return nil, NewProviderError(models.OAuthProviderApple, "id_token_validation", fmt.Errorf("missing key ID in token header"))
-	}
-
-	// Fetch Apple's public key for validation
-	publicKey, err := s.fetchApplePublicKey(ctx, keyID)
+	claims, err := validateIDTokenClaims(ctx, models.OAuthProviderApple, request, AppleIDTokenIssuers, keyFor)
 	if err != nil {
-		return nil, NewProviderError(models.OAuthProviderApple, "id_token_validation", err)
-	}
-
-	// Validate the token with the public key
-	token, err = jwt.Parse(request.IDToken, func(token *jwt.Token) (interface{}, error) {
-		// Apple uses RSA-based signing methods (RS256)
-		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return publicKey, nil
-	})
-
-	if err != nil {
-		return nil, NewProviderError(models.OAuthProviderApple, "id_token_validation", err)
-	}
-
-	if !token.Valid {
-		return nil, NewProviderError(models.OAuthProviderApple, "id_token_validation", fmt.Errorf("invalid token"))
-	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, NewProviderError(models.OAuthProviderApple, "id_token_validation", fmt.Errorf("invalid claims"))
-	}
-
-	// Validate audience
-	if request.Audience != "" {
-		if aud, ok := claims["aud"].(string); !ok || aud != request.Audience {
-			return nil, NewProviderError(models.OAuthProviderApple, "id_token_validation", fmt.Errorf("invalid audience"))
-		}
+		return nil, err
 	}
 
 	// Extract user information from claims
 	userInfo := &UserInfo{
+		Nonce:         getStringClaimFromMap(claims, "nonce"),
 		ProviderID:    getStringClaimFromMap(claims, "sub"),
 		Email:         getStringClaimFromMap(claims, "email"),
 		EmailVerified: getBoolOrStringClaimFromMap(claims, "email_verified"),
@@ -387,6 +350,9 @@ func (s *appleOAuthService) GetSupportedGrantTypes() []string {
 func (s *appleOAuthService) SupportsRefreshTokens() bool {
 	return true
 }
+
+// SupportsPKCE — Apple: false until the staging round-trip of §7 proves the token endpoint accepts code_verifier (edge case 24).
+func (s *appleOAuthService) SupportsPKCE() bool { return false }
 
 func (s *appleOAuthService) SupportsMobileFlow() bool {
 	return true

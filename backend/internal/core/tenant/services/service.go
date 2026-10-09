@@ -268,6 +268,9 @@ func (s *Service) resolveDefaultActor(ctx context.Context, actorUUID string) (us
 
 func (s *Service) GetTenant(ctx context.Context, tenantUUID string) (*iface.Tenant, error) {
 	t, err := s.repo.GetTenantByUUID(ctx, tenantUUID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, fmt.Errorf("%w: %w", iface.ErrTenantNotFound, err)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -526,7 +529,7 @@ func (s *Service) emitDefaultGuardDenied(ctx context.Context, action, tenantUUID
 // CreateTenant provisions a brand-new tenant with a freshly minted UUID.
 // It is a thin wrapper over the shared absent-to-present primitive so every
 // actual creation — normal or setup-reserved — passes the same service-level
-// provisioning guard. See tenant/CLAUDE.md#creation-vs-reconciliation.
+// provisioning guard. See tenant/AGENTS.md#creation-vs-reconciliation.
 func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input models.CreateTenantInput) (*models.Tenant, error) {
 	return s.createTenantWithUUID(ctx, ownerUUID, uuid.Must(uuid.NewV7()).String(), input)
 }
@@ -551,7 +554,7 @@ func (s *Service) createTenantWithUUID(ctx context.Context, ownerUUID, tenantUUI
 	}
 
 	// Provisioning policy backstop: in `single` mode a tier may hold at most
-	// one tenant occupying a provisioning slot (see CLAUDE.md's Lifecycle
+	// one tenant occupying a provisioning slot (see AGENTS.md's Lifecycle
 	// terminology). Enforced here (not just at the handler) so every
 	// creation path — POST /v1/tenants, divisions, lazy provisioning — is
 	// covered. The first tenant on a fresh install has count 0 and passes,
@@ -712,7 +715,7 @@ var ErrSetupTenantRemediation = errors.New("tenant: reserved setup tenant requir
 // crashed executor, or an expired lease — until it observes a nil error, so
 // every step it takes must be safe to replay any number of times, including
 // concurrently. Idempotency is ordered deliberately around the `single`
-// provisioning gate; see tenant/CLAUDE.md#creation-vs-reconciliation for the
+// provisioning gate; see tenant/AGENTS.md#creation-vs-reconciliation for the
 // contract this method and CreateTenant both honour:
 //
 //  1. The reserved UUID already names a row → this is RECONCILIATION, not

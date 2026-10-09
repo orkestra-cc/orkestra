@@ -385,3 +385,20 @@ func TestRecordAuthzCacheInvalidationRefusal_IsItsOwnFamily(t *testing.T) {
 		t.Errorf("expected the unlabelled refusals family in the exposition body, got:\n%s", body)
 	}
 }
+
+func TestRecordLogMaskingPanic(t *testing.T) {
+	c := NewCollector()
+	c.RecordLogMaskingPanic()
+	c.RecordLogMaskingPanic()
+	if got := testutil.ToFloat64(c.logMaskingPanics); got != 2 {
+		t.Fatalf("log_masking_panics_total = %v, want 2", got)
+	}
+}
+
+func TestSetCompliancePolicySnapshotAge(t *testing.T) {
+	c := NewCollector()
+	c.SetCompliancePolicySnapshotAge(12.5)
+	if got := testutil.ToFloat64(c.compliancePolicySnapshotAge); got != 12.5 {
+		t.Fatalf("policy_snapshot_age_seconds = %v, want 12.5", got)
+	}
+}
