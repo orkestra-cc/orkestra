@@ -58,6 +58,8 @@ docker exec -i "${APP_NAME}-mongodb-${ENV}" mongosh --quiet \
 
 Only rows of the listed identities are deleted, only the losers, and every deletion is printed (`deleted <collection> uuid=… userUuid=… identity=…`). **File that output with the change.** Identities not in the map still block, so the run is repeatable until the map is complete. With zero groups left the index is created on both collections and verified; the script then prints `migration 0010 complete`. A re-run on a migrated database is a no-op.
 
+The whole script runs inside one `try/catch` that ends with `quit(1)`: piped on stdin, as above, `mongosh` would otherwise print an uncaught error, keep going and exit zero, reporting a half-run migration as a success. Any `FAILED …` line therefore means the exit code was non-zero.
+
 ## Deploy gate
 
 The release that ships ownership-first OAuth writes verifies this index at boot. If it is missing, the auth module's health check reports degraded and **every OAuth login and link path answers `oauth_store_unavailable`** until the migration has run — never a boot failure, auth is a core module, but no social sign-in either. So: **this migration must have exited zero on every environment before that release is deployed there.** A conflict report stops the rollout for that environment until an operator names the keeper per identity.
