@@ -10,7 +10,7 @@
 
 [tools]
 # Matches the version in .github/workflows/*.yml. Bump in lockstep.
-go            = "1.26.8"
+go            = "1.26.9"
 node          = "24"
 flutter       = "3.44"
 # Bump deliberately, not lazily — minor-version moves regress on legacy

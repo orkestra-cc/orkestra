@@ -1,6 +1,6 @@
 module github.com/orkestra/backend
 
-go 1.26.8
+go 1.26.9
 
 // ADR-0006 (Phase 1): the SDK (pkg/sdk), the OpenAPI-auth helper
 // (internal/shared/openapiauth), and all addons (internal/addons/*)
@@ -109,7 +109,7 @@ require (
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20220921023135-46d9e7742f1e // indirect
 	golang.org/x/mod v0.41.0 // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
