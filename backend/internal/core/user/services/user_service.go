@@ -693,6 +693,13 @@ func (s *userService) CreateUserFromOAuth(ctx context.Context, input *iface.Crea
 
 	// Create user model
 	user := iface.NewUser()
+	// The caller may pre-mint the uuid: the auth module claims the
+	// first-admin sentinel with the uuid it is ABOUT to create, and a
+	// rollback Release deletes only a matching uuid — the sentinel and
+	// the account must agree (spec §4.7 D30, as CreateUserWithPassword).
+	if input.UUID != "" {
+		user.UUID = input.UUID
+	}
 	user.Email = input.Email
 	user.Username = input.Username
 	user.FullName = input.FullName

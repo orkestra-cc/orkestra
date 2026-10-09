@@ -2415,10 +2415,26 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			if s.audience == PolicyAudienceClient && s.policy != nil {
 				role = s.policy.DefaultClientRole(ctx)
 			}
+			// The claim is OPERATOR-tier only. The claimer is wired into
+			// both bundles (tier_bundle.go), so without this guard the
+			// first client-tier OAuth signup on a fresh install — an
+			// external customer — became the platform super_admin. The
+			// password path has had this guard all along
+			// (password_auth_service.go: isOperatorBootstrap); this is
+			// the mirror. Spec §4.7 D30.
 			claimed := false
-			if s.firstAdminClaimer != nil {
+			if s.audience != PolicyAudienceClient && s.firstAdminClaimer != nil {
 				c, err := s.firstAdminClaimer.ClaimFirstAdmin(ctx, newUUID)
-				if err == nil && c {
+				if err != nil {
+					// Fatal, as on the password path: a swallowed claim
+					// error is how a lost race becomes a silent guest,
+					// and how a broken sentinel store silently stops
+					// minting super_admins on an install that looks
+					// fresh. A LOST race (c == false, err == nil) is
+					// not an error: the tier default stands.
+					return nil, fmt.Errorf("claim first admin: %w", err)
+				}
+				if c {
 					claimed = true
 					role = "super_admin"
 				}

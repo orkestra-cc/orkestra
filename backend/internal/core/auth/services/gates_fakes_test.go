@@ -660,7 +660,8 @@ func (r *gateRefreshRepo) RevokeTokensBySession(_ context.Context, sessionUUID, 
 	return nil
 }
 func (r *gateRefreshRepo) RevokeTokensByDevice(context.Context, string, string, string) error {
-	panic("not used")
+	// Device dedup on a new login: nothing to revoke in the gate fixture.
+	return nil
 }
 
 // CleanupExpiredTokens mirrors the production sweep: delete at most
@@ -949,11 +950,13 @@ type gateClaimer struct {
 	claimed  map[string]bool
 	released []string
 	claimErr error
+	calls    int
 }
 
 func newGateClaimer() *gateClaimer { return &gateClaimer{claimed: map[string]bool{}} }
 
 func (c *gateClaimer) ClaimFirstAdmin(_ context.Context, userUUID string) (bool, error) {
+	c.calls++
 	if c.claimErr != nil {
 		return false, c.claimErr
 	}
@@ -962,6 +965,25 @@ func (c *gateClaimer) ClaimFirstAdmin(_ context.Context, userUUID string) (bool,
 	}
 	c.claimed[userUUID] = true
 	return true, nil
+}
+
+// claimCalls counts ClaimFirstAdmin invocations, successful or not.
+func (c *gateClaimer) claimCalls() int { return c.calls }
+
+// failWith makes every claim fail with err (a broken sentinel store).
+func (c *gateClaimer) failWith(err error) { c.claimErr = err }
+
+// alreadyClaimed seeds a taken sentinel: the next claim loses the race.
+func (c *gateClaimer) alreadyClaimed() { c.claimed["someone-else"] = true }
+
+// claimedUUID returns the uuid the sentinel holds, or "" when unclaimed.
+func (c *gateClaimer) claimedUUID() string {
+	for u := range c.claimed {
+		if u != "someone-else" {
+			return u
+		}
+	}
+	return ""
 }
 func (c *gateClaimer) Release(_ context.Context, userUUID string) error {
 	delete(c.claimed, userUUID)
