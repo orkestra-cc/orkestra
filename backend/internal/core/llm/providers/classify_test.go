@@ -55,6 +55,14 @@ func TestReadErrorInfo_RealProviderShapes(t *testing.T) {
 			t.Fatalf("non-string id kept: %+v", info)
 		}
 	})
+	t.Run("details that is not a list of objects does not lose type and code", func(t *testing.T) {
+		for _, d := range []string{`"x"`, `{"a":1}`, `[1,"x"]`, `null`} {
+			info := ReadErrorInfo(respWith(429, `{"error":{"type":"insufficient_quota","code":"insufficient_quota","details":`+d+`}}`))
+			if info.Type != "insufficient_quota" || info.Code != "insufficient_quota" || info.QuotaID != "" {
+				t.Errorf("details %s: info = %+v", d, info)
+			}
+		}
+	})
 	t.Run("gemini array-wrapped (stream) error", func(t *testing.T) {
 		info := ReadErrorInfo(respWith(400, `[{"error":{"code":400,"message":"x","status":"INVALID_ARGUMENT"}}]`))
 		if info.Type != "INVALID_ARGUMENT" {

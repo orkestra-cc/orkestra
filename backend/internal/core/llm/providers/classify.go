@@ -77,11 +77,11 @@ func ReadErrorInfo(resp *http.Response) ErrorInfo {
 	}
 	type payload struct {
 		Error struct {
-			Type    any              `json:"type"`    // OpenAI / Anthropic
-			Code    any              `json:"code"`    // OpenAI string; Gemini numeric (the HTTP status)
-			Param   any              `json:"param"`   // OpenAI
-			Status  any              `json:"status"`  // Gemini: RESOURCE_EXHAUSTED, ...
-			Details []map[string]any `json:"details"` // Gemini: google.rpc.QuotaFailure, ...
+			Type    any `json:"type"`    // OpenAI / Anthropic
+			Code    any `json:"code"`    // OpenAI string; Gemini numeric (the HTTP status)
+			Param   any `json:"param"`   // OpenAI
+			Status  any `json:"status"`  // Gemini: RESOURCE_EXHAUSTED, ...
+			Details any `json:"details"` // Gemini: google.rpc.QuotaFailure, ...
 		} `json:"error"`
 	}
 	var p payload
@@ -107,8 +107,21 @@ func ReadErrorInfo(resp *http.Response) ErrorInfo {
 
 // QuotaIDFromDetails returns the first quotaId of a google.rpc.QuotaFailure
 // entry that passes the identifier check ("" when there is none).
-func QuotaIDFromDetails(details []map[string]any) string {
-	for _, d := range details {
+// details is whatever the body carried: anything but a list of objects
+// yields "".
+func QuotaIDFromDetails(details any) string {
+	var list []map[string]any
+	switch v := details.(type) {
+	case []map[string]any:
+		list = v
+	case []any:
+		for _, e := range v {
+			if m, ok := e.(map[string]any); ok {
+				list = append(list, m)
+			}
+		}
+	}
+	for _, d := range list {
 		if t, _ := d["@type"].(string); !strings.HasSuffix(t, ".QuotaFailure") {
 			continue
 		}
