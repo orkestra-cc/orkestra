@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/orkestra/backend/internal/core/llm/models"
+	"github.com/orkestra/backend/internal/core/llm/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
@@ -34,29 +36,51 @@ type BudgetReader interface {
 	Get(ctx context.Context) (*models.Budget, error)
 }
 
-var _ Notifier = (*BudgetNotifier)(nil)
+// DeliveryLog records per-recipient progress on the outbox event, fenced
+// by the worker's lease (repository.Outbox satisfies it).
+type DeliveryLog interface {
+	MarkDelivered(ctx context.Context, uuid string, leaseUntil time.Time, recipient string) error
+}
+
+var (
+	_ Notifier    = (*BudgetNotifier)(nil)
+	_ DeliveryLog = (*repository.Outbox)(nil)
+)
+
+// recipientSendTimeout bounds one recipient's send, so a slow mail server
+// cannot spend the whole lease on one address and doom the rest.
+const recipientSendTimeout = 15 * time.Second
 
 // BudgetNotifier turns an outbox event into one templated email per
 // recipient: the org's owners (IsOwner or the org_owner role) and admins
 // (org_admin) — notification targeting, not authorization (ruling 4.12) —
-// plus the budget's extra recipients that are still members. Each send
-// has its own idempotency key, llm-budget-<eventUUID>-<recipientUUID>,
-// because the notification module delivers only Recipients[0] and dedups
-// per key; a retry after a partial failure does not resend, within the
-// notification module's idempotency window, to whoever already got it.
+// plus the budget's extra recipients that are still members.
+//
+// Delivery is tracked per recipient on the outbox row (DeliveredTo, written
+// under the lease right after each successful send), so a retry after a
+// partial failure sends only to the recipients still missing, however much
+// later it runs. Each send's idempotency key is scoped to the attempt,
+// llm-budget-<eventUUID>-<recipientUUID>-<attempts>: the notification
+// module replays a key's cached result for an hour, failures included, so
+// a key reused across retries would replay the failure instead of sending.
+// The same key within one attempt (a worker that crashed between the send
+// and recording it, re-leased without an attempt increment) replays the
+// delivery instead of duplicating it.
 type BudgetNotifier struct {
-	sender     iface.NotificationSender
-	dir        iface.TenantDirectoryReader
-	users      UserLookup
-	budgets    BudgetReader
-	consoleURL string
-	logger     *slog.Logger
+	sender      iface.NotificationSender
+	dir         iface.TenantDirectoryReader
+	users       UserLookup
+	budgets     BudgetReader
+	deliveries  DeliveryLog
+	consoleURL  string
+	sendTimeout time.Duration
+	logger      *slog.Logger
 }
 
 // NewBudgetNotifier: consoleOrigin is the operator console's public origin
 // (the budget page link is built from it). A nil sender or user lookup
 // makes every event a logged no-op.
-func NewBudgetNotifier(sender iface.NotificationSender, dir iface.TenantDirectoryReader, users UserLookup, budgets BudgetReader, consoleOrigin string, logger *slog.Logger) *BudgetNotifier {
+func NewBudgetNotifier(sender iface.NotificationSender, dir iface.TenantDirectoryReader, users UserLookup, budgets BudgetReader, deliveries DeliveryLog, consoleOrigin string, logger *slog.Logger) *BudgetNotifier {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -64,7 +88,7 @@ func NewBudgetNotifier(sender iface.NotificationSender, dir iface.TenantDirector
 	if o := strings.TrimRight(consoleOrigin, "/"); o != "" {
 		url = o + "/admin/llm?tab=budget"
 	}
-	return &BudgetNotifier{sender: sender, dir: dir, users: users, budgets: budgets, consoleURL: url, logger: logger}
+	return &BudgetNotifier{sender: sender, dir: dir, users: users, budgets: budgets, deliveries: deliveries, consoleURL: url, sendTimeout: recipientSendTimeout, logger: logger}
 }
 
 // actionNotes explains, per locale, what the threshold means for new
@@ -92,9 +116,11 @@ func localeOf(u *iface.User) string {
 	return "en"
 }
 
-// SendBudgetEvent delivers ev to every recipient. It returns an error —
-// so the outbox retries — when the recipients cannot be resolved or any
-// send failed; unresolvable users are skipped with a WARN.
+// SendBudgetEvent delivers ev to every recipient not yet in
+// ev.DeliveredTo. It returns an error — so the outbox retries the rest —
+// when the recipients cannot be resolved, a send failed or timed out, or
+// the event's deadline ended before every recipient was tried;
+// unresolvable users are skipped with a WARN.
 func (n *BudgetNotifier) SendBudgetEvent(ctx context.Context, ev models.OutboxEvent) error {
 	if n.sender == nil || n.users == nil {
 		n.logger.WarnContext(ctx, "llm: no notification sender or user directory; budget alert dropped", slog.String("event", ev.UUID), slog.String("threshold", ev.Threshold))
@@ -134,18 +160,27 @@ func (n *BudgetNotifier) SendBudgetEvent(ctx context.Context, ev models.OutboxEv
 			want[u] = true
 		}
 	}
+	for _, u := range ev.DeliveredTo {
+		delete(want, u)
+	}
 	recipients := make([]string, 0, len(want))
 	for u := range want {
 		recipients = append(recipients, u)
 	}
 	sort.Strings(recipients)
 	if len(recipients) == 0 {
-		n.logger.WarnContext(ctx, "llm: budget alert has no recipient", slog.String("event", ev.UUID))
+		if len(ev.DeliveredTo) == 0 {
+			n.logger.WarnContext(ctx, "llm: budget alert has no recipient", slog.String("event", ev.UUID))
+		}
 		return nil
 	}
 
 	failed := 0
-	for _, uid := range recipients {
+	for i, uid := range recipients {
+		if ctx.Err() != nil {
+			// The event's own deadline: the rest is retried, untouched.
+			return fmt.Errorf("llm: budget alert: deadline reached with %d of %d recipients left", len(recipients)-i, len(recipients))
+		}
 		u, err := n.users.GetUserByID(ctx, uid)
 		if err != nil || u == nil || u.Email == "" {
 			n.logger.WarnContext(ctx, "llm: budget alert recipient not resolvable; skipped", slog.String("event", ev.UUID), slog.String("user", uid))
@@ -156,19 +191,37 @@ func (n *BudgetNotifier) SendBudgetEvent(ctx context.Context, ev models.OutboxEv
 			"period": ev.Period, "consumedTokens": ev.Payload["consumedTokens"], "limitTokens": ev.Payload["limitTokens"],
 			"pct": ev.Payload["pct"], "consoleUrl": n.consoleURL, "actionNote": actionNotes[locale][ev.Threshold+"|"+action],
 		}
-		res, err := n.sender.SendTemplated(ctx, iface.TemplatedNotificationRequest{
+		sctx, cancel := context.WithTimeout(ctx, n.sendTimeout)
+		res, err := n.sender.SendTemplated(sctx, iface.TemplatedNotificationRequest{
 			Channel: "email", Type: "transactional", Category: NotificationCategoryBudget, TemplateID: template, Locale: locale,
 			Recipients:     []iface.Recipient{{UserUUID: uid, Address: u.Email, Name: u.FullName}},
 			Data:           data,
-			IdempotencyKey: "llm-budget-" + ev.UUID + "-" + uid,
+			IdempotencyKey: fmt.Sprintf("llm-budget-%s-%s-%d", ev.UUID, uid, ev.Attempts),
 		})
+		cancel()
 		switch {
 		case err != nil:
 			failed++
 			n.logger.WarnContext(ctx, "llm: budget alert send failed", slog.String("event", ev.UUID), slog.String("user", uid), slog.String("error", err.Error()))
+			continue
 		case res != nil && res.Status == "failed":
 			failed++
 			n.logger.WarnContext(ctx, "llm: budget alert delivery failed", slog.String("event", ev.UUID), slog.String("user", uid))
+			continue
+		}
+		// Delivered (or suppressed by the recipient's own settings): record
+		// it so no retry sends it again.
+		if n.deliveries == nil || ev.LeaseUntil == nil {
+			continue
+		}
+		if err := n.deliveries.MarkDelivered(ctx, ev.UUID, *ev.LeaseUntil, uid); err != nil {
+			if errors.Is(err, repository.ErrLeaseLost) {
+				return err // another worker holds the event now; it continues from the recorded progress
+			}
+			// Unrecorded: a retry may send this recipient a second copy,
+			// which beats losing the progress of everyone else.
+			failed++
+			n.logger.WarnContext(ctx, "llm: budget alert delivery not recorded", slog.String("event", ev.UUID), slog.String("user", uid), slog.String("error", err.Error()))
 		}
 	}
 	if failed > 0 {

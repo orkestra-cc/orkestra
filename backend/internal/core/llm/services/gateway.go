@@ -262,13 +262,16 @@ func (g *Gateway) ListUsable(ctx context.Context) ([]iface.LLMModelInfo, error) 
 	return out, nil
 }
 
-// ChatPinned runs req on exactly m for an admin operation (the prompt
+// chatPinned runs req on exactly m for an admin operation (the prompt
 // test): validation and the liveness rules apply as on the live path —
 // active model, allow_hosted, no mock in production-like envs, an active
 // org credential (ruling 5.3) — but the access resolver, and so the
 // grants, is skipped. The call is reserved, routed and ledgered by the
-// router like any other, under the acting admin's user UUID.
-func (g *Gateway) ChatPinned(ctx context.Context, m models.Model, req iface.ChatRequest, sink iface.ChatSink) (*iface.ChatResult, error) {
+// router like any other, under the acting admin's user UUID. Unexported on
+// purpose: the Gateway is the object registered as ServiceLLMGateway, and a
+// grant bypass must not be reachable from it; NewPinnedRunner hands it to
+// AdminOps only.
+func (g *Gateway) chatPinned(ctx context.Context, m models.Model, req iface.ChatRequest, sink iface.ChatSink) (*iface.ChatResult, error) {
 	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
 		return nil, err
 	}
@@ -284,3 +287,15 @@ func (g *Gateway) ChatPinned(ctx context.Context, m models.Model, req iface.Chat
 	userUUID, _ := ctxauth.GetUserUUID(ctx)
 	return g.router.Chat(ctx, []models.Model{m}, userUUID, req, sink)
 }
+
+// pinnedRunner is the grant-bypassing chat path, a separate object from
+// the registered Gateway.
+type pinnedRunner struct{ g *Gateway }
+
+func (p pinnedRunner) ChatPinned(ctx context.Context, m models.Model, req iface.ChatRequest, sink iface.ChatSink) (*iface.ChatResult, error) {
+	return p.g.chatPinned(ctx, m, req, sink)
+}
+
+// NewPinnedRunner returns g's admin prompt-test path (grants skipped) for
+// AdminOps; the module wires it there and nowhere else.
+func NewPinnedRunner(g *Gateway) PromptRunner { return pinnedRunner{g: g} }

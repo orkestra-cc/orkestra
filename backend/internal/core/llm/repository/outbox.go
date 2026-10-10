@@ -105,6 +105,25 @@ func (r *Outbox) setStatus(ctx context.Context, uuid string, leaseUntil time.Tim
 	return nil
 }
 
+// MarkDelivered records that recipient got the event, under the lease
+// that ends at leaseUntil (same fence as setStatus; the event stays
+// sending). A retry skips every recipient listed. ErrLeaseLost when the
+// lease was taken over.
+func (r *Outbox) MarkDelivered(ctx context.Context, uuid string, leaseUntil time.Time, recipient string) error {
+	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid, "status": models.OutboxStatusSending, "leaseUntil": leaseUntil})
+	if err != nil {
+		return err
+	}
+	res, err := r.coll.UpdateOne(ctx, filter, bson.M{"$addToSet": bson.M{"deliveredTo": recipient}})
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrLeaseLost
+	}
+	return nil
+}
+
 // MarkSent records delivery under the lease that ended at leaseUntil;
 // terminal.
 func (r *Outbox) MarkSent(ctx context.Context, uuid string, leaseUntil time.Time) error {

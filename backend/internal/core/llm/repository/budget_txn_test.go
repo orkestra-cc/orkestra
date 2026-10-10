@@ -532,3 +532,36 @@ func TestOutbox_PurgeSettledBefore(t *testing.T) {
 		t.Fatalf("t2 kept = %d, %v; want 0", n, err)
 	}
 }
+
+// MarkDelivered is fenced by the lease like the settles: a stale holder
+// cannot record progress on an event another worker took over.
+func TestOutbox_MarkDeliveredIsLeaseFenced(t *testing.T) {
+	db := newTestDB(t)
+	ensureBudgetIndexes(t, db)
+	ob := NewOutbox(db)
+	ctx := ctxFor("t1")
+	now := time.Now().UTC()
+	if ok, err := ob.InsertUnique(ctx, &models.OutboxEvent{UUID: "ob-d", Period: "2026-10", Threshold: models.ThresholdWarn, Status: models.OutboxStatusPending, NextAttemptAt: now, CreatedAt: now}); !ok || err != nil {
+		t.Fatal(ok, err)
+	}
+	ev, err := ob.LeaseDue(context.Background(), now, time.Minute)
+	if err != nil || ev == nil {
+		t.Fatal(ev, err)
+	}
+	for _, u := range []string{"u1", "u2", "u1"} {
+		if err := ob.MarkDelivered(ctx, ev.UUID, *ev.LeaseUntil, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ob.MarkDelivered(ctxFor("t2"), ev.UUID, *ev.LeaseUntil, "u3"); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("cross-tenant MarkDelivered err = %v", err)
+	}
+	if err := ob.MarkDelivered(ctx, ev.UUID, ev.LeaseUntil.Add(time.Second), "u3"); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("stale-lease MarkDelivered err = %v", err)
+	}
+	var got models.OutboxEvent
+	findDoc(t, db, CollBudgetOutbox, bson.M{"uuid": "ob-d"}, &got)
+	if len(got.DeliveredTo) != 2 || got.DeliveredTo[0] != "u1" || got.DeliveredTo[1] != "u2" || got.Status != models.OutboxStatusSending {
+		t.Fatalf("event = %+v", got)
+	}
+}

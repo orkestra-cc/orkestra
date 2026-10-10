@@ -333,10 +333,10 @@ func TestCredentials_SetTestResultIsTargetedAndFenced(t *testing.T) {
 		t.Fatal(err)
 	}
 	at := time.Now().UTC().Truncate(time.Millisecond)
-	if err := repo.SetTestResult(ctxFor("t2"), "c-a", "b2xk", at, "error", "llm.credential_rejected"); !errors.Is(err, ErrNotFound) {
+	if err := repo.SetTestResult(ctxFor("t2"), a, at, "error", "llm.credential_rejected"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-tenant SetTestResult err = %v", err)
 	}
-	if err := repo.SetTestResult(ctx, "c-a", "b2xk", at, "error", "llm.credential_rejected"); err != nil {
+	if err := repo.SetTestResult(ctx, a, at, "error", "llm.credential_rejected"); err != nil {
 		t.Fatal(err)
 	}
 	got, err := repo.Get(ctx, "c-a")
@@ -350,7 +350,7 @@ func TestCredentials_SetTestResultIsTargetedAndFenced(t *testing.T) {
 		t.Fatalf("SetTestResult touched other fields: %+v", got)
 	}
 	// An ok result clears the previous code.
-	if err := repo.SetTestResult(ctx, "c-a", "b2xk", at, "ok", ""); err != nil {
+	if err := repo.SetTestResult(ctx, a, at, "ok", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := repo.Get(ctx, "c-a"); got.LastTestStatus != "ok" || got.LastTestError != "" {
@@ -360,10 +360,46 @@ func TestCredentials_SetTestResultIsTargetedAndFenced(t *testing.T) {
 	if _, err := repo.SetSecret(ctx, "c-a", models.Envelope{Alg: models.EnvelopeAlgLocal, SchemaVersion: models.EnvelopeSchemaVersion, Ciphertext: "bmV3"}, "2222"); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.SetTestResult(ctx, "c-a", "b2xk", at, "ok", ""); !errors.Is(err, ErrNotFound) {
+	if err := repo.SetTestResult(ctx, a, at, "ok", ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("stale SetTestResult err = %v", err)
 	}
 	if got, _ := repo.Get(ctx, "c-a"); got.LastTestedAt != nil || got.LastTestStatus != "" {
 		t.Fatalf("stale result written over the rotated secret: %v %q", got.LastTestedAt, got.LastTestStatus)
+	}
+}
+
+// A keyless credential (ollama, mock: empty ciphertext, possibly no
+// baseUrl) is recorded too; a base URL re-pointed during the test fences
+// the stale result out.
+func TestCredentials_SetTestResultKeylessAndRepointed(t *testing.T) {
+	db := newTestDB(t)
+	repo := NewCredentials(db)
+	ctx := ctxFor("t1")
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	mock := &models.Credential{UUID: "c-mock", Name: "mock", Provider: models.ProviderMock, Status: models.CredentialStatusActive, CreatedBy: "u-admin", CreatedAt: now, UpdatedAt: now}
+	ollama := &models.Credential{UUID: "c-oll", Name: "ollama", Provider: models.ProviderOllama, BaseURL: "http://ollama:11434", Status: models.CredentialStatusActive, CreatedBy: "u-admin", CreatedAt: now, UpdatedAt: now}
+	for _, c := range []*models.Credential{mock, ollama} {
+		if err := repo.Insert(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.SetTestResult(ctx, mock, now, "ok", ""); err != nil {
+		t.Fatalf("keyless, no baseUrl: %v", err)
+	}
+	if got, _ := repo.Get(ctx, "c-mock"); got.LastTestStatus != "ok" {
+		t.Fatalf("mock lastTestStatus = %q", got.LastTestStatus)
+	}
+	if err := repo.SetTestResult(ctx, ollama, now, "ok", ""); err != nil {
+		t.Fatalf("keyless with baseUrl: %v", err)
+	}
+	moved := "http://other:11434"
+	if _, err := repo.Patch(ctx, "c-oll", models.CredentialPatch{BaseURL: &moved}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetTestResult(ctx, ollama, now.Add(time.Second), "error", "llm.provider_unavailable"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("re-pointed SetTestResult err = %v", err)
+	}
+	if got, _ := repo.Get(ctx, "c-oll"); got.LastTestStatus != "ok" || !got.LastTestedAt.Equal(now) {
+		t.Fatalf("stale result written over the re-pointed endpoint: %+v", got)
 	}
 }

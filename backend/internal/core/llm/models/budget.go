@@ -53,4 +53,7 @@ type OutboxEvent struct {
 	LeaseUntil    *time.Time     `json:"leaseUntil,omitempty" bson:"leaseUntil"`
 	CreatedAt     time.Time      `json:"createdAt" bson:"createdAt"`
 	SentAt        *time.Time     `json:"sentAt,omitempty" bson:"sentAt,omitempty"`
+	// DeliveredTo lists the recipients (user UUIDs) already delivered by an
+	// earlier attempt; a retry sends only to the others.
+	DeliveredTo []string `json:"deliveredTo,omitempty" bson:"deliveredTo,omitempty"`
 }

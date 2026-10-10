@@ -151,14 +151,20 @@ func (r *Credentials) SetSecret(ctx context.Context, uuid string, env models.Env
 	return now, nil
 }
 
-// SetTestResult records a connectivity test: a targeted $set of
-// lastTestedAt, lastTestStatus and lastTestError (unset when code is empty)
-// on (tenant, uuid), and nothing else — updatedAt included, since a probe
-// changes no configuration. It is fenced by the secret that was tested
-// (testedCiphertext): when the key was rotated while the test ran, the
-// result describes the old key and is not written (ErrNotFound).
-func (r *Credentials) SetTestResult(ctx context.Context, uuid, testedCiphertext string, at time.Time, status, code string) error {
-	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid, "secret.ciphertext": testedCiphertext})
+// SetTestResult records a connectivity test of tested (the copy the test
+// ran with): a targeted $set of lastTestedAt, lastTestStatus and
+// lastTestError (unset when code is empty) on (tenant, uuid), and nothing
+// else — updatedAt included, since a probe changes no configuration. It is
+// fenced by what was tested, the secret ciphertext and the base URL: when
+// the key was rotated or the endpoint re-pointed while the test ran, the
+// result describes something no longer stored and is not written
+// (ErrNotFound).
+func (r *Credentials) SetTestResult(ctx context.Context, tested *models.Credential, at time.Time, status, code string) error {
+	filter, err := tenantrepo.Scope(ctx, bson.M{
+		"uuid":              tested.UUID,
+		"secret.ciphertext": emptyOrAbsent(tested.Secret.Ciphertext),
+		"baseUrl":           emptyOrAbsent(tested.BaseURL),
+	})
 	if err != nil {
 		return err
 	}
@@ -176,6 +182,15 @@ func (r *Credentials) SetTestResult(ctx context.Context, uuid, testedCiphertext 
 		return ErrNotFound
 	}
 	return nil
+}
+
+// emptyOrAbsent matches v, or — for "" — a field that is empty, null or
+// missing (omitempty fields such as baseUrl are not stored when empty).
+func emptyOrAbsent(v string) any {
+	if v == "" {
+		return bson.M{"$in": []any{nil, ""}}
+	}
+	return v
 }
 
 func (r *Credentials) Delete(ctx context.Context, uuid string) error {

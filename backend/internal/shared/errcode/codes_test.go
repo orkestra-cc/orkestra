@@ -121,6 +121,7 @@ var goldenCodes = map[string]string{
 	"LLMCredentialRejected":                  "llm.credential_rejected",
 	"LLMRateLimited":                         "llm.rate_limited",
 	"LLMPartialOutput":                       "llm.partial_output",
+	"LLMRequestCanceled":                     "llm.request_canceled",
 	"SetupStatusUnavailable":                 "setup.status_unavailable",
 	"SetupFinalizerStateUnavailable":         "setup.finalizer_state_unavailable",
 	"SetupFinalizerBoundToAnotherAdmin":      "setup.finalizer_bound_to_another_admin",

@@ -96,13 +96,13 @@ func (f *fakeCreds) SetSecret(ctx context.Context, id string, env models.Envelop
 	return r.UpdatedAt, nil
 }
 
-func (f *fakeCreds) SetTestResult(ctx context.Context, id, tested string, at time.Time, status, code string) error {
-	r, ok := f.rows[id]
-	if !ok || r.TenantID != tenantOf(ctx) || r.Secret.Ciphertext != tested {
+func (f *fakeCreds) SetTestResult(ctx context.Context, tested *models.Credential, at time.Time, status, code string) error {
+	r, ok := f.rows[tested.UUID]
+	if !ok || r.TenantID != tenantOf(ctx) || r.Secret.Ciphertext != tested.Secret.Ciphertext || r.BaseURL != tested.BaseURL {
 		return repository.ErrNotFound
 	}
 	r.LastTestedAt, r.LastTestStatus, r.LastTestError = &at, status, code
-	f.rows[id] = r
+	f.rows[tested.UUID] = r
 	return nil
 }
 

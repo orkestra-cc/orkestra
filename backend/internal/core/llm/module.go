@@ -74,6 +74,8 @@ type Module struct {
 	outboxW    *services.OutboxWorker
 	reconciler *services.Reconciler
 	purge      func(ctx context.Context)
+	// retention cadence; zero means the defaults (test seam).
+	retentionFirst, retentionInterval time.Duration
 
 	clientsMu sync.Mutex
 	clients   map[string]*http.Client
@@ -275,7 +277,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	if up, ok := module.GetTyped[iface.UserProvider](deps.Services, module.ServiceOperatorUserProvider); ok {
 		users = up
 	}
-	notifier := services.NewBudgetNotifier(sender, dir, users, budgets, consoleOrigin(deps), logger)
+	notifier := services.NewBudgetNotifier(sender, dir, users, budgets, outbox, consoleOrigin(deps), logger)
 	m.outboxW = services.NewOutboxWorker(outbox, notifier, logger)
 	m.reconciler = services.NewReconciler(usage, budgetSvc, logger)
 	m.purge = func(ctx context.Context) { runRetention(ctx, logger, settings().retentionDays, usage, monthly, outbox) }
@@ -293,7 +295,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	m.admin = handlers.NewAdminHandler(m.catalog, logger)
 	m.self = handlers.NewSelfHandler(m.gateway, logger)
 	limiter := services.NewRateLimiter(deps.RedisAdapter, logger)
-	m.ops = handlers.NewOpsHandler(services.NewAdminOps(m.catalog, m.registry, m.clientFor, limiter, m.gateway, logger), logger)
+	m.ops = handlers.NewOpsHandler(services.NewAdminOps(m.catalog, m.registry, m.clientFor, limiter, services.NewPinnedRunner(m.gateway), logger), logger)
 	m.usageH = handlers.NewUsageHandler(services.NewUsageService(usage, monthly, budgets, dir, m.catalog, budgetCfg, logger), logger)
 	return nil
 }
@@ -426,7 +428,14 @@ func (m *Module) Start(ctx context.Context) error {
 }
 
 func (m *Module) retentionLoop(ctx context.Context) {
-	t := time.NewTimer(retentionFirstRun)
+	first, every := m.retentionFirst, m.retentionInterval
+	if first <= 0 {
+		first = retentionFirstRun
+	}
+	if every <= 0 {
+		every = retentionEvery
+	}
+	t := time.NewTimer(first)
 	defer t.Stop()
 	for {
 		select {
@@ -434,7 +443,7 @@ func (m *Module) retentionLoop(ctx context.Context) {
 			return
 		case <-t.C:
 			m.purge(ctx)
-			t.Reset(retentionEvery)
+			t.Reset(every)
 		}
 	}
 }

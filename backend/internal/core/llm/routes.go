@@ -88,10 +88,14 @@ func RegisterPromptRoute(api huma.API, h *handlers.OpsHandler) {
 		Summary: "Send a test prompt to a model (ignores grants, ledgered as llm.admin_test)", Tags: adminTags, Security: adminScope}, h.PromptTest)
 }
 
-// RegisterUsageReadRoutes mounts the usage report. Gated by llm.usage.read.
+// RegisterUsageReadRoutes mounts the usage report. Gated by llm.usage.read,
+// which therefore also reads the budget (the report carries it): both are
+// read-only System permissions, and the budget alone stays readable with
+// llm.admin.read.
 func RegisterUsageReadRoutes(api huma.API, h *handlers.UsageHandler) {
 	huma.Register(api, huma.Operation{OperationID: "admin-llm-usage-get", Method: http.MethodGet, Path: "/v1/admin/llm/usage",
-		Summary: "Usage of the current organization by model, user or caller, with the month's rollup and the budget", Tags: adminTags, Security: adminScope}, h.GetUsage)
+		Summary:     "Usage of the current organization by model, user or caller, with the month's rollup and the budget",
+		Description: "Requires llm.usage.read, which also grants reading the budget embedded in the report (both read-only).", Tags: adminTags, Security: adminScope}, h.GetUsage)
 }
 
 // RegisterBudgetReadRoutes mounts the budget read. Gated by llm.admin.read.

@@ -59,6 +59,10 @@ var validationDetails = []struct {
 // told to come back in an hour rather than to retry at once.
 const budgetRetryAfter = "3600"
 
+// statusClientClosedRequest is nginx's 499 "Client Closed Request"; Go's
+// net/http has no constant for it.
+const statusClientClosedRequest = 499
+
 const invalidRequestDetail = "The request was rejected because a field is out of range or malformed."
 
 func invalidDetail(err error) string {
@@ -77,6 +81,10 @@ func invalidDetail(err error) string {
 // tenant context the repositories require) are the server's fault: a
 // generic 500 whose cause the caller logs (see failure).
 func MapError(err error) error {
+	if errors.Is(err, context.Canceled) {
+		// The caller hung up: 499, quiet (failure logs only 5xx).
+		return errcode.New(statusClientClosedRequest, errcode.LLMRequestCanceled, "The request was cancelled before it completed.")
+	}
 	var limited *services.RateLimitedError
 	if errors.As(err, &limited) {
 		secs := int64(math.Ceil(limited.RetryAfter.Seconds()))

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -319,4 +321,48 @@ func TestOutbox_CrashAfterSendReusesIdempotencyKey(t *testing.T) {
 		t.Fatalf("calls = %d, keys = %v, delivered = %v", notifier.calls, notifier.keys, notifier.delivered)
 	}
 	assertSent(t, rig, stale.UUID)
+}
+
+// The per-recipient progress survives the retry through the real outbox:
+// the first pass delivers two of three recipients, the rescheduled pass
+// sends only to the third (new attempt key) and settles the event.
+func TestOutbox_PartialDeliveryResumesWithOnlyTheMissingRecipient(t *testing.T) {
+	rig := newBudgetRig(t, BudgetConfig{ReserveOutputTokens: 10, ReservationTTL: time.Minute})
+	crossWarnOnce(t, rig)
+	sender := newReplaySender()
+	sender.failFor["admin-1"] = true
+	n, _ := notifierFixture(&captureSender{})
+	n.sender, n.budgets, n.deliveries = sender, rig.budgets, rig.outbox
+	w := NewOutboxWorker(rig.outbox, n, slog.Default())
+	if got, err := w.RunOnce(context.Background()); got != 1 || err != nil {
+		t.Fatalf("first pass = %d, %v", got, err)
+	}
+	if got := strings.Join(sender.sent(), ","); got != "owner-1,owner-2" {
+		t.Fatalf("first pass delivered %s", got)
+	}
+	filter, err := tenantrepo.Scope(ctxFor("t1"), bson.M{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coll := rig.db.Collection(repository.CollBudgetOutbox)
+	if _, err := coll.UpdateOne(context.Background(), filter, bson.M{"$set": bson.M{"nextAttemptAt": time.Now().UTC().Add(-time.Second)}}); err != nil {
+		t.Fatal(err)
+	}
+	sender.mu.Lock()
+	sender.failFor["admin-1"] = false
+	sender.mu.Unlock()
+	if got, err := w.RunOnce(context.Background()); got != 1 || err != nil {
+		t.Fatalf("retry pass = %d, %v", got, err)
+	}
+	if got := strings.Join(sender.sent(), ","); got != "admin-1,owner-1,owner-2" {
+		t.Fatalf("after retry delivered %s (each exactly once)", got)
+	}
+	var ev models.OutboxEvent
+	if err := coll.FindOne(context.Background(), filter).Decode(&ev); err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(ev.DeliveredTo)
+	if ev.Status != models.OutboxStatusSent || strings.Join(ev.DeliveredTo, ",") != "admin-1,owner-1,owner-2" {
+		t.Fatalf("event = %+v", ev)
+	}
 }

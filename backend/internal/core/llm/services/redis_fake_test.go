@@ -111,3 +111,29 @@ func (r *memRedis) keysWithoutTTL() []string {
 	}
 	return out
 }
+
+// evalRedis adds the atomic script path the backend adapter offers. It
+// understands only the limiter's increment-with-TTL script.
+type evalRedis struct {
+	*memRedis
+	evals int
+}
+
+func (r *evalRedis) Eval(_ context.Context, script string, keys []string, args ...interface{}) (interface{}, error) {
+	if script != incrWithTTL || len(keys) != 1 || len(args) != 1 {
+		return nil, errors.New("unexpected script")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.evals++
+	if r.incrErr != nil {
+		return nil, r.incrErr
+	}
+	n, _ := strconv.ParseInt(r.vals[keys[0]], 10, 64)
+	n++
+	r.vals[keys[0]] = strconv.FormatInt(n, 10)
+	if _, ok := r.ttl[keys[0]]; !ok {
+		r.ttl[keys[0]] = time.Duration(args[0].(int64)) * time.Millisecond
+	}
+	return n, nil
+}

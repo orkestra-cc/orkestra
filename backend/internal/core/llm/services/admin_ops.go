@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/orkestra/backend/internal/core/llm/models"
 	"github.com/orkestra/backend/internal/core/llm/providers"
@@ -27,17 +28,16 @@ const (
 	// maxPromptOutputBytes is what the prompt test collects for display.
 	maxPromptOutputBytes = 64 << 10
 	maxDiscoveredModels  = 1000
+	maxPromptRunes       = 4000
 	// AdminTestCaller is the ledger caller of the admin prompt test.
 	AdminTestCaller = "llm.admin_test"
 )
 
-// PromptRunner runs a chat call on one model, bypassing grants (the
-// Gateway's ChatPinned).
+// PromptRunner runs a chat call on one model, bypassing grants
+// (NewPinnedRunner). The Gateway itself deliberately does not implement it.
 type PromptRunner interface {
 	ChatPinned(ctx context.Context, m models.Model, req iface.ChatRequest, sink iface.ChatSink) (*iface.ChatResult, error)
 }
-
-var _ PromptRunner = (*Gateway)(nil)
 
 // AdminOps runs the operator's live checks: a credential's connectivity
 // test, model discovery and the prompt test. Each applies the same
@@ -191,7 +191,8 @@ func (o *AdminOps) PromptTest(ctx context.Context, modelUUID, prompt string) (*m
 	if err := o.guard(ctx, "prompt", userUUID); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(prompt) == "" || len(prompt) > 4000 {
+	// Runes, like the body schema's maxLength (Huma counts characters).
+	if strings.TrimSpace(prompt) == "" || utf8.RuneCountInString(prompt) > maxPromptRunes {
 		return nil, fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, ErrInvalidPrompt)
 	}
 	v, err := o.catalog.GetModel(ctx, modelUUID)

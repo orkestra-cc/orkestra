@@ -5,9 +5,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/orkestra/backend/internal/shared/database"
 )
 
 func newTestLimiter(r *memRedis) (*RateLimiter, *bytes.Buffer) {
@@ -97,3 +100,40 @@ func TestRateLimiter_CheckCarriesRetryAfter(t *testing.T) {
 		t.Fatalf("err = %v (%+v)", err, rl)
 	}
 }
+
+// With a store that runs scripts, increment and expiry are one atomic
+// step: a counter left without TTL (a crash between INCR and EXPIRE under
+// an older path) gets one on the next call, and the plain INCR/EXPIRE pair
+// is never used.
+func TestRateLimiter_AtomicScriptPath(t *testing.T) {
+	r := &evalRedis{memRedis: newMemRedis()}
+	l := NewRateLimiter(r, nil)
+	base := time.Date(2026, 10, 10, 12, 0, 30, 0, time.UTC)
+	l.now = func() time.Time { return base }
+	slot := base.UnixNano() / int64(time.Minute)
+	immortal := "llm:rl:k:" + strconv.FormatInt(slot, 10)
+	r.vals[immortal] = "2" // pre-existing counter without TTL
+	r.expireErr = errors.New("EXPIRE must not be used on the script path")
+	for i := 0; i < 3; i++ {
+		if ok, _ := l.Allow(context.Background(), "k", 5, time.Minute); !ok {
+			t.Fatalf("call %d refused", i+1)
+		}
+	}
+	if ok, _ := l.Allow(context.Background(), "k", 5, time.Minute); ok {
+		t.Fatal("the counter carried over must count: 2 + 4 > 5")
+	}
+	if left := r.keysWithoutTTL(); len(left) != 0 {
+		t.Fatalf("counters without TTL: %v", left)
+	}
+	if r.evals != 4 {
+		t.Fatalf("evals = %d, want 4", r.evals)
+	}
+	r.incrErr = errors.New("down")
+	if ok, _ := l.Allow(context.Background(), "k", 5, time.Minute); !ok {
+		t.Fatal("a failing script must fail open")
+	}
+}
+
+// The backend adapter is the store the module gets: it must take the
+// atomic path.
+var _ scriptRunner = (*database.RedisClientAdapter)(nil)

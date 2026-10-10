@@ -29,9 +29,9 @@ type CredentialRepo interface {
 	// returns the updatedAt it wrote.
 	SetSecret(ctx context.Context, uuid string, env models.Envelope, last4 string) (time.Time, error)
 	// SetTestResult writes only lastTestedAt/lastTestStatus/lastTestError,
-	// and only while the stored secret is still testedCiphertext;
-	// repository.ErrNotFound otherwise.
-	SetTestResult(ctx context.Context, uuid, testedCiphertext string, at time.Time, status, code string) error
+	// and only while the stored secret and base URL are still the tested
+	// ones; repository.ErrNotFound otherwise.
+	SetTestResult(ctx context.Context, tested *models.Credential, at time.Time, status, code string) error
 	Delete(ctx context.Context, uuid string) error
 }
 
@@ -361,10 +361,11 @@ func (s *CatalogService) OpenCredentialSecret(ctx context.Context, c *models.Cre
 }
 
 // recordCredentialTest persists a connectivity test of c (the copy the
-// test ran with) and audits it. A credential rotated or deleted while the
-// test ran keeps its state: the result described the old key.
+// test ran with) and audits it. A credential rotated, re-pointed or
+// deleted while the test ran keeps its state: the result described the old
+// key or endpoint.
 func (s *CatalogService) recordCredentialTest(ctx context.Context, c *models.Credential, at time.Time, status, code string) {
-	err := s.creds.SetTestResult(ctx, c.UUID, c.Secret.Ciphertext, at, status, code)
+	err := s.creds.SetTestResult(ctx, c, at, status, code)
 	switch {
 	case errors.Is(err, repository.ErrNotFound):
 		s.logger.InfoContext(ctx, "llm: credential changed during its test; result not recorded", slog.String("resource_uuid", c.UUID))

@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"text/template"
+	"time"
 
 	"github.com/orkestra/backend/internal/core/llm/models"
 	"github.com/orkestra/backend/internal/core/llm/repository"
@@ -84,11 +86,34 @@ func notifierFixture(sender *captureSender) (*BudgetNotifier, *bytes.Buffer) {
 	}
 	budget := oneBudget{b: &models.Budget{MonthlyTokenLimit: 1000, WarnPct: 80, Action: models.BudgetActionBlock, NotifyExtraUserUUIDs: []string{"extra-1", "not-a-member", "owner-1"}}}
 	logs := &bytes.Buffer{}
-	return NewBudgetNotifier(sender, dir, users, budget, "https://console.example.test", slog.New(slog.NewTextHandler(logs, nil))), logs
+	return NewBudgetNotifier(sender, dir, users, budget, &memDeliveries{}, "https://console.example.test", slog.New(slog.NewTextHandler(logs, nil))), logs
+}
+
+// memDeliveries is a DeliveryLog keyed by event, fenced by nothing.
+type memDeliveries struct {
+	mu   sync.Mutex
+	done map[string][]string
+}
+
+func (d *memDeliveries) MarkDelivered(_ context.Context, uuid string, _ time.Time, recipient string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.done == nil {
+		d.done = map[string][]string{}
+	}
+	d.done[uuid] = append(d.done[uuid], recipient)
+	return nil
+}
+
+func (d *memDeliveries) of(uuid string) []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string(nil), d.done[uuid]...)
 }
 
 func outboxEvent(threshold string) models.OutboxEvent {
-	return models.OutboxEvent{UUID: "ev-1", TenantID: "t1", Period: "2026-10", Threshold: threshold,
+	lease := time.Now().Add(time.Minute)
+	return models.OutboxEvent{UUID: "ev-1", TenantID: "t1", Period: "2026-10", Threshold: threshold, LeaseUntil: &lease,
 		Payload: map[string]any{"consumedTokens": int64(850), "limitTokens": int64(1000), "pct": int64(85)}}
 }
 
@@ -108,7 +133,7 @@ func TestBudgetNotifier_RecipientsTemplatesAndKeys(t *testing.T) {
 		if r.TemplateID != TemplateBudgetWarning || r.Type != "transactional" || r.Category != NotificationCategoryBudget || r.Channel != "email" {
 			t.Fatalf("request = %+v", r)
 		}
-		if r.IdempotencyKey != "llm-budget-ev-1-"+rc.UserUUID {
+		if r.IdempotencyKey != "llm-budget-ev-1-"+rc.UserUUID+"-0" {
 			t.Fatalf("idempotency key = %q", r.IdempotencyKey)
 		}
 		if r.Data["consoleUrl"] != "https://console.example.test/admin/llm?tab=budget" || r.Data["period"] != "2026-10" || r.Data["pct"] != int64(85) {
@@ -194,5 +219,124 @@ func TestBudgetTemplates_ParseAndRender(t *testing.T) {
 				t.Fatalf("%s/%s renders a missing variable: %s", s.TemplateID, s.Locale, out.String())
 			}
 		}
+	}
+}
+
+// replaySender models the notification module's idempotency: a key seen
+// before replays its cached result — a failure included — without sending.
+type replaySender struct {
+	mu      sync.Mutex
+	cache   map[string]string // key -> status
+	sends   []string          // recipient of every real send
+	failFor map[string]bool   // recipient -> fail the real send
+	slow    map[string]bool   // recipient -> block until the send's ctx ends
+}
+
+func newReplaySender() *replaySender {
+	return &replaySender{cache: map[string]string{}, failFor: map[string]bool{}, slow: map[string]bool{}}
+}
+
+func (s *replaySender) IsConfigured(context.Context) bool { return true }
+func (s *replaySender) Send(context.Context, iface.NotificationRequest) (*iface.NotificationResult, error) {
+	return nil, errors.New("not used")
+}
+func (s *replaySender) SendTemplated(ctx context.Context, req iface.TemplatedNotificationRequest) (*iface.NotificationResult, error) {
+	uid := req.Recipients[0].UserUUID
+	s.mu.Lock()
+	if st, ok := s.cache[req.IdempotencyKey]; ok {
+		s.mu.Unlock()
+		return &iface.NotificationResult{Status: st}, nil
+	}
+	slow := s.slow[uid]
+	s.mu.Unlock()
+	if slow {
+		<-ctx.Done()
+		s.mu.Lock()
+		s.cache[req.IdempotencyKey] = "failed"
+		s.mu.Unlock()
+		return nil, ctx.Err()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := "sent"
+	if s.failFor[uid] {
+		st = "failed"
+	} else {
+		s.sends = append(s.sends, uid)
+	}
+	s.cache[req.IdempotencyKey] = st
+	return &iface.NotificationResult{Status: st}, nil
+}
+
+func (s *replaySender) sent() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := append([]string(nil), s.sends...)
+	sort.Strings(out)
+	return out
+}
+
+// A partial failure: the retry sends only to the recipient still missing,
+// under a new attempt-scoped key (the failed key would only replay the
+// cached failure), and the recipients delivered on the first pass never
+// get a second copy — not on the retry, not on a later pass after the
+// notification module's idempotency window has long expired.
+func TestBudgetNotifier_RetrySendsOnlyToUndeliveredRecipients(t *testing.T) {
+	sender := newReplaySender()
+	sender.failFor["admin-1"] = true
+	n, _ := notifierFixture(&captureSender{})
+	n.sender = sender
+	log := n.deliveries.(*memDeliveries)
+	ctx := ctxWithTenant(context.Background(), "t1")
+
+	ev := outboxEvent(models.ThresholdWarn)
+	if err := n.SendBudgetEvent(ctx, ev); err == nil {
+		t.Fatal("a failed recipient must surface for the retry")
+	}
+	if got := strings.Join(sender.sent(), ","); got != "extra-1,owner-1,owner-2" {
+		t.Fatalf("first pass delivered %s", got)
+	}
+
+	// Attempt 2: the recipient's mail server is back.
+	sender.mu.Lock()
+	sender.failFor["admin-1"] = false
+	sender.mu.Unlock()
+	ev.Attempts, ev.DeliveredTo = 1, log.of(ev.UUID)
+	if err := n.SendBudgetEvent(ctx, ev); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if got := strings.Join(sender.sent(), ","); got != "admin-1,extra-1,owner-1,owner-2" {
+		t.Fatalf("after retry delivered %s (each recipient exactly once)", got)
+	}
+
+	// Much later (cache expired), a spurious re-run of the same event.
+	sender.mu.Lock()
+	sender.cache = map[string]string{}
+	sender.mu.Unlock()
+	ev.Attempts, ev.DeliveredTo = 7, log.of(ev.UUID)
+	if err := n.SendBudgetEvent(ctx, ev); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(sender.sent()); got != 4 {
+		t.Fatalf("a delivered recipient got a second copy: %d sends", got)
+	}
+}
+
+// One slow mail server costs only its own recipient: the others are
+// delivered and recorded, the slow one is retried.
+func TestBudgetNotifier_SlowRecipientDoesNotFailTheOthers(t *testing.T) {
+	sender := newReplaySender()
+	sender.slow["admin-1"] = true
+	n, _ := notifierFixture(&captureSender{})
+	n.sender, n.sendTimeout = sender, 50*time.Millisecond
+	ctx, cancel := context.WithTimeout(ctxWithTenant(context.Background(), "t1"), 5*time.Second)
+	defer cancel()
+	if err := n.SendBudgetEvent(ctx, outboxEvent(models.ThresholdWarn)); err == nil {
+		t.Fatal("the timed-out recipient must be retried")
+	}
+	got := n.deliveries.(*memDeliveries).of("ev-1")
+	sort.Strings(got)
+	if strings.Join(got, ",") != "extra-1,owner-1,owner-2" {
+		t.Fatalf("recorded = %v", got)
 	}
 }

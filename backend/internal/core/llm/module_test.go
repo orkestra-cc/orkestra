@@ -3,11 +3,14 @@ package llm
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +25,8 @@ import (
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
+	"github.com/orkestra/backend/pkg/sdk/tenantrepo"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -206,7 +211,7 @@ func (emptyCreds) Patch(context.Context, string, models.CredentialPatch) (time.T
 func (emptyCreds) SetSecret(context.Context, string, models.Envelope, string) (time.Time, error) {
 	return time.Time{}, repository.ErrNotFound
 }
-func (emptyCreds) SetTestResult(context.Context, string, string, time.Time, string, string) error {
+func (emptyCreds) SetTestResult(context.Context, *models.Credential, time.Time, string, string) error {
 	return repository.ErrNotFound
 }
 func (emptyCreds) Delete(context.Context, string) error { return repository.ErrNotFound }
@@ -274,7 +279,7 @@ func moduleForRoutes(t *testing.T) *Module {
 	m := NewModule()
 	m.admin = handlers.NewAdminHandler(catalog, logger)
 	m.self = handlers.NewSelfHandler(gw, logger)
-	m.ops = handlers.NewOpsHandler(services.NewAdminOps(catalog, providers.NewRegistry(), nil, services.NewRateLimiter(nil, logger), gw, logger), logger)
+	m.ops = handlers.NewOpsHandler(services.NewAdminOps(catalog, providers.NewRegistry(), nil, services.NewRateLimiter(nil, logger), services.NewPinnedRunner(gw), logger), logger)
 	m.usageH = handlers.NewUsageHandler(services.NewUsageService(emptyUsage{}, emptyMonthly{}, emptyBudgets{}, noMembers{}, catalog,
 		func() services.BudgetConfig { return services.BudgetConfig{} }, logger), logger)
 	return m
@@ -571,5 +576,119 @@ func TestModule_NotificationTemplatesInEveryLocale(t *testing.T) {
 		if !locales[id]["en"] || !locales[id]["it"] {
 			t.Errorf("%s locales = %v", id, locales[id])
 		}
+	}
+}
+
+// The grant-bypassing prompt path is not reachable from the object other
+// modules resolve under ServiceLLMGateway.
+func TestModule_RegisteredGatewayHasNoGrantBypass(t *testing.T) {
+	_, reg, _, _ := initModule(t, "")
+	if _, ok := module.GetTyped[services.PromptRunner](reg, module.ServiceLLMGateway); ok {
+		t.Fatal("the registered gateway must not expose ChatPinned")
+	}
+}
+
+// The retention loop runs its first pass after the first delay, then on
+// every interval, and stops with Stop.
+func TestModule_RetentionLoopRunsAndStops(t *testing.T) {
+	m, _, _, _ := initModule(t, "")
+	var mu sync.Mutex
+	runs := 0
+	m.purge = func(context.Context) { mu.Lock(); runs++; mu.Unlock() }
+	m.retentionFirst, m.retentionInterval = 5*time.Millisecond, 5*time.Millisecond
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		n := runs
+		mu.Unlock()
+		if n >= 3 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("retention ran %d times in 5s", n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := m.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	after := runs
+	mu.Unlock()
+	time.Sleep(30 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if runs != after {
+		t.Fatalf("retention kept running after Stop: %d -> %d", after, runs)
+	}
+}
+
+// runRetention against Mongo: old finalized ledger rows, rollups past 24
+// months and settled old alerts go; pending rows, fresh rows and unsettled
+// alerts stay.
+func TestModule_RunRetentionPurges(t *testing.T) {
+	uri := os.Getenv("MONGO_TEST_URI")
+	if uri == "" {
+		t.Skip("MONGO_TEST_URI not set")
+	}
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(uri))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := client.Database(fmt.Sprintf("llm_mod_test_%d", time.Now().UnixNano()))
+	t.Cleanup(func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) })
+	usage, monthly, outbox := repository.NewUsage(db), repository.NewMonthly(db), repository.NewOutbox(db)
+	id := testkit.NewIdentity("u1", "u1@example.test", "administrator").WithTenant("t1", []string{"org_owner"}, true)
+	ctx := ctxauth.WithTenantKind(id.ContextFor(context.Background(), "t1"), "internal")
+	old, fresh := time.Now().UTC().AddDate(0, 0, -100), time.Now().UTC()
+	for _, ev := range []*models.UsageEvent{
+		{UUID: "old-ok", Outcome: models.OutcomeOK, CreatedAt: old},
+		{UUID: "old-pending", Outcome: models.OutcomePending, CreatedAt: old},
+		{UUID: "new-ok", Outcome: models.OutcomeOK, CreatedAt: fresh},
+	} {
+		if err := usage.InsertPending(ctx, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ancient := models.PeriodOf(time.Now().UTC().AddDate(0, -30, 0))
+	for _, p := range []string{ancient, models.PeriodOf(fresh)} {
+		if err := monthly.Reserve(ctx, p, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, ev := range []*models.OutboxEvent{
+		{UUID: "ob-old-sent", Period: "2026-01", Threshold: models.ThresholdWarn, Status: models.OutboxStatusSent, CreatedAt: old, NextAttemptAt: old},
+		{UUID: "ob-old-pending", Period: "2026-02", Threshold: models.ThresholdWarn, Status: models.OutboxStatusPending, CreatedAt: old, NextAttemptAt: old},
+	} {
+		if _, err := outbox.InsertUnique(ctx, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runRetention(context.Background(), slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), 90, usage, monthly, outbox)
+
+	count := func(coll string, extra bson.M) int64 {
+		f, err := tenantrepo.Scope(ctx, extra)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n, err := db.Collection(coll).CountDocuments(context.Background(), f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := count(repository.CollUsage, bson.M{}); n != 2 || count(repository.CollUsage, bson.M{"uuid": "old-ok"}) != 0 {
+		t.Fatalf("usage left = %d (want old-pending + new-ok)", n)
+	}
+	if count(repository.CollUsageMonthly, bson.M{"period": ancient}) != 0 || count(repository.CollUsageMonthly, bson.M{}) != 1 {
+		t.Fatal("rollup retention wrong")
+	}
+	if count(repository.CollBudgetOutbox, bson.M{"uuid": "ob-old-sent"}) != 0 || count(repository.CollBudgetOutbox, bson.M{"uuid": "ob-old-pending"}) != 1 {
+		t.Fatal("outbox retention wrong")
 	}
 }

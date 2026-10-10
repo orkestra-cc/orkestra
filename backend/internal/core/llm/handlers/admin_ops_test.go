@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/internal/testkit"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // --- fakes for the budget path ------------------------------------------------
@@ -81,13 +83,42 @@ func (r *counterRedis) Incr(_ context.Context, key string) (int64, error) {
 	return r.n[key], nil
 }
 
-type emptyUsage struct{}
+// fakeUsage answers fixed rows and remembers which user a self query was
+// for, so a test can prove the caller's own UUID reached the repository.
+type fakeUsage struct {
+	mu       sync.Mutex
+	askedFor []string
+}
 
-func (emptyUsage) Query(context.Context, time.Time, time.Time, string) ([]models.LLMUsageRow, error) {
+func (*fakeUsage) Query(context.Context, time.Time, time.Time, string) ([]models.LLMUsageRow, error) {
 	return []models.LLMUsageRow{{Key: "m1", Requests: 2, InputTokens: 30, OutputTokens: 5}}, nil
 }
-func (emptyUsage) UserMonth(_ context.Context, _ string, period string) (*models.LLMSelfUsage, error) {
+func (f *fakeUsage) UserMonth(_ context.Context, userUUID, period string) (*models.LLMSelfUsage, error) {
+	f.mu.Lock()
+	f.askedFor = append(f.askedFor, userUUID)
+	f.mu.Unlock()
 	return &models.LLMSelfUsage{Period: period, Requests: 1, OrgInputTokens: 7}, nil
+}
+
+type recordingAudit struct {
+	mu     sync.Mutex
+	events []iface.AuditEvent
+}
+
+func (r *recordingAudit) Emit(_ context.Context, ev iface.AuditEvent) {
+	r.mu.Lock()
+	r.events = append(r.events, ev)
+	r.mu.Unlock()
+}
+
+func (r *recordingAudit) actions() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, 0, len(r.events))
+	for _, e := range r.events {
+		out = append(out, e.Action)
+	}
+	return out
 }
 
 type emptyMonthly struct{}
@@ -121,6 +152,8 @@ type opsHarness struct {
 	ledger  *ledgerStore
 	budgets *memBudgets
 	cfg     *services.CatalogConfig
+	usageDB *fakeUsage
+	audit   *recordingAudit
 	ctx     context.Context
 }
 
@@ -137,11 +170,14 @@ func newOpsHarness(t *testing.T) *opsHarness {
 		ledger:  &ledgerStore{rows: map[string]*models.UsageEvent{}},
 		budgets: &memBudgets{b: map[string]models.Budget{}},
 		cfg:     &services.CatalogConfig{AllowHosted: true},
+		usageDB: &fakeUsage{},
+		audit:   &recordingAudit{},
 	}
 	grants := &fakeGrants{rows: map[string]map[string][]string{}, models: h.mods}
 	dir := &fakeDir{members: map[string][]string{"t1": {"u-admin", "u1", "u2"}}}
 	cfg := func() services.CatalogConfig { return *h.cfg }
 	catalog := services.NewCatalogService(h.creds, h.mods, grants, vault, dir, cfg, logger)
+	catalog.SetAuditSink(h.audit)
 	// Only the mock adapter: any other provider kind has no adapter here.
 	reg := providers.NewRegistry()
 	reg.Register(models.ProviderMock, func(c providers.Credential, _ *http.Client) (providers.Provider, error) {
@@ -156,8 +192,8 @@ func newOpsHarness(t *testing.T) *opsHarness {
 	gw.SetRouter(services.NewRouter(reg, services.NewOrgCredentialResolver(catalog), budget, services.NewBreaker(3, 30*time.Second), clients,
 		func() services.RouterConfig { return services.RouterConfig{RequestTimeout: 5 * time.Second} }, nil, logger))
 	limiter := services.NewRateLimiter(&counterRedis{n: map[string]int64{}}, logger)
-	h.ops = NewOpsHandler(services.NewAdminOps(catalog, reg, clients, limiter, gw, logger), logger)
-	h.usage = NewUsageHandler(services.NewUsageService(emptyUsage{}, emptyMonthly{}, h.budgets, dir, catalog, bcfg, logger), logger)
+	h.ops = NewOpsHandler(services.NewAdminOps(catalog, reg, clients, limiter, services.NewPinnedRunner(gw), logger), logger)
+	h.usage = NewUsageHandler(services.NewUsageService(h.usageDB, emptyMonthly{}, h.budgets, dir, catalog, bcfg, logger), logger)
 	h.admin = NewAdminHandler(catalog, logger)
 	id := testkit.NewIdentity("u-admin", "admin@example.test", "administrator").WithTenant("t1", []string{"org_owner"}, true)
 	h.ctx = ctxauth.WithTenantKind(id.ContextFor(context.Background(), "t1"), "internal")
@@ -390,6 +426,21 @@ func TestUsage_ReportBudgetAndSelf(t *testing.T) {
 	if err != nil || me.Body.Period != models.PeriodOf(time.Now()) || me.Body.OrgInputTokens != 7 {
 		t.Fatalf("me = %+v, %v", me, err)
 	}
+	if got := h.usageDB.askedFor; len(got) != 1 || got[0] != "u-admin" {
+		t.Fatalf("self usage asked for %v, want the caller u-admin only", got)
+	}
+	var budgetEvents []iface.AuditEvent
+	for _, e := range h.audit.events {
+		if e.Action == "llm.budget.updated" {
+			budgetEvents = append(budgetEvents, e)
+		}
+	}
+	if len(budgetEvents) != 1 {
+		t.Fatalf("llm.budget.updated events = %d (a refused PUT must not audit): %v", len(budgetEvents), h.audit.actions())
+	}
+	if e := budgetEvents[0]; e.TenantID != "t1" || e.ActorUserID != "u-admin" || e.Metadata["action"] != models.BudgetActionWarnOnly || e.Metadata["monthlyTokenLimit"] != int64(1000) || e.Metadata["warnPct"] != 80 {
+		t.Fatalf("budget audit = %+v", e)
+	}
 }
 
 func TestUsage_RefusesExternalTenant(t *testing.T) {
@@ -404,5 +455,42 @@ func TestUsage_RefusesExternalTenant(t *testing.T) {
 		if status, _, _ := codeOf(t, call()); status != http.StatusForbidden {
 			t.Fatalf("%s from an external tenant = %d", name, status)
 		}
+	}
+}
+
+// Huma's maxLength counts characters: a 4000-rune non-ASCII prompt (8000
+// bytes) is accepted, the 4001st rune is refused.
+func TestOps_PromptLengthCountsRunes(t *testing.T) {
+	h := newOpsHarness(t)
+	model := h.mockModel(t)
+	ok := strings.Repeat("é", 4000)
+	resp, err := h.ops.PromptTest(h.ctx, &LLMPromptTestRequest{UUID: model, Body: models.LLMPromptTestBody{Prompt: ok}})
+	if err != nil || resp.Body.Text != "mock: "+ok {
+		t.Fatalf("4000 runes: %v", err)
+	}
+	_, err = h.ops.PromptTest(h.ctx, &LLMPromptTestRequest{UUID: model, Body: models.LLMPromptTestBody{Prompt: ok + "é"}})
+	if status, code, _ := codeOf(t, err); status != http.StatusUnprocessableEntity || code != errcode.LLMInvalidRequest {
+		t.Fatalf("4001 runes = %d %s", status, code)
+	}
+}
+
+// A caller who hangs up gets a quiet 499, not a logged 500, and a test that
+// learned nothing is not recorded.
+func TestOps_ClientHangUpIs499(t *testing.T) {
+	h := newOpsHarness(t)
+	model := h.mockModel(t)
+	cred := h.mods.rows[model].CredentialRef.CredentialUUID
+	ctx, cancel := context.WithCancel(h.ctx)
+	cancel()
+	_, err := h.ops.TestCredential(ctx, &LLMCredentialPath{UUID: cred})
+	if status, code, _ := codeOf(t, err); status != 499 || code != errcode.LLMRequestCanceled {
+		t.Fatalf("test hang-up = %d %s", status, code)
+	}
+	if row := h.creds.rows[cred]; row.LastTestedAt != nil {
+		t.Fatal("an abandoned test must not be recorded")
+	}
+	_, err = h.ops.PromptTest(ctx, &LLMPromptTestRequest{UUID: model, Body: models.LLMPromptTestBody{Prompt: "hi"}})
+	if status, code, _ := codeOf(t, err); status != 499 || code != errcode.LLMRequestCanceled {
+		t.Fatalf("prompt hang-up = %d %s", status, code)
 	}
 }

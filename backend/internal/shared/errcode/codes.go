@@ -456,6 +456,12 @@ const LLMRateLimited = "llm.rate_limited"
 // the caller; the call is not retried on another model. 502.
 const LLMPartialOutput = "llm.partial_output"
 
+// LLMRequestCanceled: the caller hung up (or its context was cancelled)
+// while a live check or a model call was running. Neither a server fault
+// nor a rejection on the request's merits: 499 Client Closed Request, so
+// an abandoned request never counts as a 5xx.
+const LLMRequestCanceled = "llm.request_canceled"
+
 // --- navigation ---
 
 // NavigationOverrideUnknownParent signals that a PATCH against the
