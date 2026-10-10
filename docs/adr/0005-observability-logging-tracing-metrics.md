@@ -106,6 +106,8 @@ The shape every operator gets without setting any environment variable beyond `E
 - **Skipped paths** (no per-request log line): `/health`, `/ready`, `/metrics`, `/openapi.json`. Tunable via `LOG_HTTP_SKIP_PATHS` (comma-separated).
 - **Slow flag**: `slow=true` stamped when `duration_ms > LOG_HTTP_SLOW_THRESHOLD_MS` (default `1000`).
 - **Status → level mapping**: 5xx → `Error`, 4xx → `Warn`, else → `Info`.
+
+  > **Amended (2026-10-10, opt-in WARN for unconfigured optional features):** a 503 whose error *declares itself* an expected unavailability of an optional feature the installation has deliberately left unconfigured — built with `errcode.FeatureNotConfigured`, recorded on the request by the `errors.RecordErrorCode()` Huma transformer via `ctxauth.RequestAnnotations` — is logged at `Warn`. The opt-in is explicit: the error code is never pattern-matched, so a 503 that does not opt in (e.g. `auth.jwt_not_configured`, where sign-in itself is down) and every other 5xx stay `Error`. The response body is unchanged.
 - **Position in middleware chain**: outermost (slot 1) so 421 misdirected requests, CORS rejects, and audience-mismatch rejects all produce a log line.
 
 Operators who deploy `docker compose up` and never touch an env var get correlated structured logs with tenant attribution. That is the **simple-by-default** half of the promise.
