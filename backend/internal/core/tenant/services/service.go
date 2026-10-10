@@ -1478,6 +1478,26 @@ func (s *Service) ListMembers(ctx context.Context, tenantUUID string) ([]models.
 	return s.repo.ListMembershipsByTenant(ctx, tenantUUID)
 }
 
+// ListTenantMembers implements iface.TenantDirectoryReader: the tenant's
+// memberships projected to the SDK summary, roles copied so callers cannot
+// alias the stored slice.
+func (s *Service) ListTenantMembers(ctx context.Context, tenantUUID string) ([]iface.TenantMemberSummary, error) {
+	members, err := s.ListMembers(ctx, tenantUUID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]iface.TenantMemberSummary, 0, len(members))
+	for _, member := range members {
+		result = append(result, iface.TenantMemberSummary{
+			UserUUID: member.UserUUID,
+			Roles:    append([]string(nil), member.Roles...),
+			IsOwner:  member.IsOwner,
+			JoinedAt: member.JoinedAt,
+		})
+	}
+	return result, nil
+}
+
 func (s *Service) RemoveMember(ctx context.Context, tenantUUID, userUUID string) error {
 	// Drop the member's tenant-scoped authz binding(s) first so a removed
 	// member never keeps permissions, and a later re-attach can't union a

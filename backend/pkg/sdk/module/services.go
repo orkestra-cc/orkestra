@@ -102,7 +102,8 @@ const (
 	// auth-policy roadmap. Value: *auth/services.AuthPolicyService.
 	ServiceAuthPolicy ServiceKey = "auth.policy"
 
-	ServiceTenantProvider ServiceKey = "tenant.provider"
+	ServiceTenantProvider        ServiceKey = "tenant.provider"
+	ServiceTenantDirectoryReader ServiceKey = "tenant.directory_reader" // iface.TenantDirectoryReader, registered by core/tenant
 	// ServiceAccessProvider is the polymorphic-owner capability-entitlement
 	// surface. Registered by the tenant module alongside ServiceTenantProvider
 	// because the entitlements projection lives in the tenant collection set
