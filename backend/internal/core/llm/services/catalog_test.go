@@ -230,7 +230,7 @@ func modelInput(name string, cred *models.Credential) models.ModelInput {
 		Name: name, Provider: models.ProviderOpenAI, ModelID: "gpt-5.6-terra",
 		Capabilities:  models.LLMModelCapabilities{Chat: true, Streaming: true},
 		CredentialRef: models.LLMCredentialRef{Kind: models.CredentialKindOrg, CredentialUUID: cred.UUID},
-		Purposes:      []models.LLMModelPurpose{{Purpose: "default", Priority: 10}}, Access: models.AccessGranted,
+		Purposes:      []models.LLMModelPurpose{{Purpose: "default", Priority: 10}},
 	}
 }
 
@@ -339,7 +339,7 @@ func TestCatalog_MissingTenantScope(t *testing.T) {
 	if _, err := svc.CreateCredential(context.Background(), models.CredentialInput{Name: "A", Provider: models.ProviderOpenAI, Secret: "sk-live-abcdef"}); !errors.Is(err, tenantrepo.ErrTenantScopeMissing) {
 		t.Fatalf("create err = %v", err)
 	}
-	if _, err := svc.ReplaceGrants(context.Background(), "m", nil); !errors.Is(err, tenantrepo.ErrTenantScopeMissing) && !errors.Is(err, ErrNotFound) {
+	if _, err := svc.ReplaceGrants(context.Background(), "m", models.AccessGranted, nil); !errors.Is(err, tenantrepo.ErrTenantScopeMissing) && !errors.Is(err, ErrNotFound) {
 		t.Fatalf("grants err = %v", err)
 	}
 }
@@ -357,7 +357,7 @@ func TestCatalog_RefusesExternalTenants(t *testing.T) {
 	nCreds, nModels, nEvents := len(creds.rows), len(mods.rows), len(audit.events)
 
 	ext := ctxauthExternal(t)
-	name, everyone := "X", models.AccessEveryone
+	name := "X"
 	calls := map[string]func() error{
 		"CreateCredential": func() error {
 			_, err := svc.CreateCredential(ext, models.CredentialInput{Name: "E", Provider: models.ProviderOpenAI, Secret: "sk-live-abcdef"})
@@ -376,11 +376,14 @@ func TestCatalog_RefusesExternalTenants(t *testing.T) {
 		"ListModels":           func() error { _, err := svc.ListModels(ext); return err },
 		"GetModel":             func() error { _, err := svc.GetModel(ext, m.UUID); return err },
 		"PatchModel": func() error {
-			_, err := svc.PatchModel(ext, m.UUID, models.LLMModelPatchBody{Access: &everyone})
+			_, err := svc.PatchModel(ext, m.UUID, models.LLMModelPatchBody{Name: &name})
 			return err
 		},
-		"DeleteModel":   func() error { return svc.DeleteModel(ext, m.UUID) },
-		"ReplaceGrants": func() error { _, err := svc.ReplaceGrants(ext, m.UUID, []string{"u-ext"}); return err },
+		"DeleteModel": func() error { return svc.DeleteModel(ext, m.UUID) },
+		"ReplaceGrants": func() error {
+			_, err := svc.ReplaceGrants(ext, m.UUID, models.AccessEveryone, []string{"u-ext"})
+			return err
+		},
 	}
 	for name, call := range calls {
 		if err := call(); !errors.Is(err, tenantrepo.ErrTenantKindMismatch) {
@@ -390,7 +393,7 @@ func TestCatalog_RefusesExternalTenants(t *testing.T) {
 	if len(creds.rows) != nCreds || len(mods.rows) != nModels || len(grants.rows) != 0 || len(audit.events) != nEvents {
 		t.Fatalf("an external-tenant call wrote something: creds %d models %d grants %d events %d", len(creds.rows), len(mods.rows), len(grants.rows), len(audit.events))
 	}
-	if got := mods.rows[m.UUID]; got.Access != models.AccessGranted {
+	if got := mods.rows[m.UUID]; got.Access != models.AccessGranted || got.Name != "Fast" {
 		t.Fatalf("model changed under an external tenant: %+v", got)
 	}
 }
@@ -521,21 +524,21 @@ func TestCatalog_ModelRulesAndGrants(t *testing.T) {
 		t.Fatalf("in use err = %v", err)
 	}
 	// grants: non-member rejected atomically
-	if _, err := svc.ReplaceGrants(ctx, m.UUID, []string{"u1", "ghost"}); !errors.Is(err, ErrGrantNotMember) {
+	if _, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessGranted, []string{"u1", "ghost"}); !errors.Is(err, ErrGrantNotMember) {
 		t.Fatalf("non-member err = %v", err)
 	}
-	if view, _ := svc.GetModel(ctx, m.UUID); len(view.Grants) != 0 {
+	if view, _ := svc.GetModel(ctx, m.UUID); len(view.Grants) != 0 || view.Access != models.AccessGranted {
 		t.Fatalf("partial grants written: %+v", view.Grants)
 	}
 	// a member of another org is not a member of this one
-	if _, err := svc.ReplaceGrants(ctx, m.UUID, []string{"u9"}); !errors.Is(err, ErrGrantNotMember) {
+	if _, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessGranted, []string{"u9"}); !errors.Is(err, ErrGrantNotMember) {
 		t.Fatalf("foreign member err = %v", err)
 	}
-	granted, err := svc.ReplaceGrants(ctx, m.UUID, []string{"u1", "u2", "u1"})
-	if err != nil || len(granted) != 2 {
+	granted, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessGranted, []string{"u1", "u2", "u1"})
+	if err != nil || len(granted.Grants) != 2 || granted.Access != models.AccessGranted {
 		t.Fatalf("grants = %+v, %v", granted, err)
 	}
-	if _, err := svc.ReplaceGrants(ctx, "nope", []string{"u1"}); !errors.Is(err, ErrNotFound) {
+	if _, err := svc.ReplaceGrants(ctx, "nope", models.AccessGranted, []string{"u1"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("grants on unknown model err = %v", err)
 	}
 	// delete model removes grants
@@ -573,7 +576,7 @@ func TestCatalog_UserAccountModelRules(t *testing.T) {
 		Name: "Mine", Provider: models.ProviderOpenAI, ModelID: "gpt-5.6-terra",
 		Capabilities:  models.LLMModelCapabilities{Chat: true},
 		CredentialRef: models.LLMCredentialRef{Kind: models.CredentialKindUserAccount},
-		Purposes:      []models.LLMModelPurpose{{Purpose: "default"}}, Access: models.AccessGranted,
+		Purposes:      []models.LLMModelPurpose{{Purpose: "default"}},
 	}
 	if _, err := svc.CreateModel(ctx, ua); err != nil {
 		t.Fatalf("valid user_account model: %v", err)
@@ -596,7 +599,7 @@ func fullPatch(in models.ModelInput, status *string) models.LLMModelPatchBody {
 	return models.LLMModelPatchBody{
 		Name: &in.Name, Provider: &in.Provider, ModelID: &in.ModelID, Capabilities: &in.Capabilities,
 		CredentialRef: &in.CredentialRef, Defaults: &in.Defaults, BudgetReserveOutputTokens: in.BudgetReserveOutputTokens,
-		Purposes: in.Purposes, Access: &in.Access, Status: status,
+		Purposes: in.Purposes, Status: status,
 	}
 }
 
@@ -610,16 +613,16 @@ func TestCatalog_PatchModelPartial(t *testing.T) {
 	}
 	before := *mods.rows[m.UUID]
 
-	everyone := models.AccessEveryone
-	got, err := svc.PatchModel(ctx, m.UUID, models.LLMModelPatchBody{Access: &everyone})
+	renamed := "Faster"
+	got, err := svc.PatchModel(ctx, m.UUID, models.LLMModelPatchBody{Name: &renamed})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Access != models.AccessEveryone {
-		t.Fatalf("access = %s", got.Access)
+	if got.Name != "Faster" {
+		t.Fatalf("name = %s", got.Name)
 	}
 	after := *mods.rows[m.UUID]
-	after.Access, after.UpdatedAt = before.Access, before.UpdatedAt
+	after.Name, after.UpdatedAt = before.Name, before.UpdatedAt
 	if !reflect.DeepEqual(after, before) {
 		t.Fatalf("a one-field patch changed other fields:\n before %+v\n after  %+v", before, after)
 	}
@@ -635,7 +638,7 @@ func TestCatalog_PatchModelPartial(t *testing.T) {
 	if _, err := svc.PatchModel(ctx, m.UUID, models.LLMModelPatchBody{Provider: &anthropic}); !errors.Is(err, ErrProviderMismatch) {
 		t.Fatalf("provider no longer matching the credential err = %v", err)
 	}
-	if mods.rows[m.UUID].Access != models.AccessEveryone || mods.rows[m.UUID].Provider != models.ProviderOpenAI {
+	if mods.rows[m.UUID].Name != "Faster" || mods.rows[m.UUID].Provider != models.ProviderOpenAI {
 		t.Fatal("a rejected patch was persisted")
 	}
 
@@ -737,7 +740,7 @@ func TestCatalog_ModelsFollowTheProviderGate(t *testing.T) {
 		Name: "Mine", Provider: models.ProviderOpenAI, ModelID: "gpt-5.6-terra",
 		Capabilities:  models.LLMModelCapabilities{Chat: true},
 		CredentialRef: models.LLMCredentialRef{Kind: models.CredentialKindUserAccount},
-		Purposes:      []models.LLMModelPurpose{{Purpose: "default"}}, Access: models.AccessGranted,
+		Purposes:      []models.LLMModelPurpose{{Purpose: "default"}},
 	}
 	if _, err := svc.CreateModel(ctx, ua); !errors.Is(err, ErrHostedDisabled) {
 		t.Fatalf("user_account create err = %v", err)
@@ -751,7 +754,7 @@ func TestCatalog_ModelsFollowTheProviderGate(t *testing.T) {
 		Name: "Llama", Provider: models.ProviderOllama, ModelID: "llama3",
 		Capabilities:  models.LLMModelCapabilities{Chat: true},
 		CredentialRef: models.LLMCredentialRef{Kind: models.CredentialKindOrg, CredentialUUID: oll.UUID},
-		Purposes:      []models.LLMModelPurpose{{Purpose: "default"}}, Access: models.AccessGranted,
+		Purposes:      []models.LLMModelPurpose{{Purpose: "default"}},
 	}
 	if _, err := svc.CreateModel(ctx, local); err != nil {
 		t.Fatalf("ollama model under allow_hosted=false: %v", err)
@@ -769,7 +772,7 @@ func TestCatalog_MockModelRefusedInProduction(t *testing.T) {
 		Name: "M", Provider: models.ProviderMock, ModelID: "mock-1",
 		Capabilities:  models.LLMModelCapabilities{Chat: true},
 		CredentialRef: models.LLMCredentialRef{Kind: models.CredentialKindOrg, CredentialUUID: mock.UUID},
-		Purposes:      []models.LLMModelPurpose{{Purpose: "default"}}, Access: models.AccessGranted,
+		Purposes:      []models.LLMModelPurpose{{Purpose: "default"}},
 	}
 	if _, err := svc.CreateModel(ctx, in); err != nil {
 		t.Fatalf("mock model outside production: %v", err)
@@ -778,5 +781,111 @@ func TestCatalog_MockModelRefusedInProduction(t *testing.T) {
 	in.Name = "M2"
 	if _, err := svc.CreateModel(ctx, in); !errors.Is(err, ErrMockNotAllowed) {
 		t.Fatalf("mock model in production err = %v", err)
+	}
+}
+
+// I2: who may use a model is decided only on the grants route (its own
+// permission and step-up). A new model is closed (access granted, no
+// grants); ReplaceGrants sets access and the grant list together.
+func TestCatalog_AccessIsSetOnlyThroughReplaceGrants(t *testing.T) {
+	svc, _, mods, grants, audit := newCatalog(t, CatalogConfig{AllowHosted: true})
+	ctx := ctxFor("t1")
+	cred := openAICredential(t, svc, ctx, "OpenAI")
+	m, err := svc.CreateModel(ctx, modelInput("Fast", cred))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Access != models.AccessGranted {
+		t.Fatalf("a new model must default to access granted, got %q", m.Access)
+	}
+
+	view, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessEveryone, []string{"u1"})
+	if err != nil || view.Access != models.AccessEveryone || len(view.Grants) != 1 {
+		t.Fatalf("replace = %+v, %v", view, err)
+	}
+	if mods.rows[m.UUID].Access != models.AccessEveryone {
+		t.Fatal("access not persisted")
+	}
+	last := audit.events[len(audit.events)-1]
+	if last.Action != "llm.grants.replaced" || last.Metadata["access"] != models.AccessEveryone || last.Metadata["granted"] != 1 {
+		t.Fatalf("grants audit = %+v", last)
+	}
+
+	// With access everyone the stored grants stay dormant: going back to
+	// granted restores them as they are.
+	view, err = svc.ReplaceGrants(ctx, m.UUID, models.AccessGranted, []string{"u1"})
+	if err != nil || view.Access != models.AccessGranted || len(view.Grants) != 1 {
+		t.Fatalf("back to granted = %+v, %v", view, err)
+	}
+
+	// An unknown access value and a non-member are refused before anything
+	// is written, access included.
+	if _, err := svc.ReplaceGrants(ctx, m.UUID, "friends", nil); !errors.Is(err, iface.ErrLLMInvalidRequest) || !errors.Is(err, models.ErrInvalidAccess) {
+		t.Fatalf("bad access err = %v", err)
+	}
+	if _, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessEveryone, []string{"ghost"}); !errors.Is(err, ErrGrantNotMember) {
+		t.Fatalf("non-member err = %v", err)
+	}
+	if got := mods.rows[m.UUID]; got.Access != models.AccessGranted || len(grants.rows[m.UUID]) != 1 {
+		t.Fatalf("a refused replace changed the model: access %s grants %v", got.Access, grants.rows[m.UUID])
+	}
+
+	// A model patch cannot change access: the patch body has no such field
+	// (asserted in models), and a full edit keeps what the grants route set.
+	if _, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessEveryone, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.PatchModel(ctx, m.UUID, fullPatch(modelInput("Fast", cred), nil)); err != nil {
+		t.Fatal(err)
+	}
+	if mods.rows[m.UUID].Access != models.AccessEveryone {
+		t.Fatalf("a model edit changed access to %s", mods.rows[m.UUID].Access)
+	}
+}
+
+// M5: a model cannot be created on, or brought back to life on, a credential
+// that is disabled. Disabling a model on it always works.
+func TestCatalog_LiveModelsNeedAnActiveCredential(t *testing.T) {
+	svc, _, mods, _, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
+	ctx := ctxFor("t1")
+	cred := openAICredential(t, svc, ctx, "OpenAI")
+	m, err := svc.CreateModel(ctx, modelInput("Fast", cred))
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled, active := models.ModelStatusDisabled, models.ModelStatusActive
+	if _, err := svc.PatchModel(ctx, m.UUID, models.LLMModelPatchBody{Status: &disabled}); err != nil {
+		t.Fatal(err)
+	}
+	credOff := models.CredentialStatusDisabled
+	if _, err := svc.PatchCredential(ctx, cred.UUID, nil, nil, &credOff); err != nil {
+		t.Fatal(err)
+	}
+
+	before := len(mods.rows)
+	if _, err := svc.CreateModel(ctx, modelInput("New", cred)); !errors.Is(err, iface.ErrLLMInvalidRequest) || !errors.Is(err, ErrCredentialDisabled) {
+		t.Fatalf("create on a disabled credential err = %v", err)
+	}
+	if len(mods.rows) != before {
+		t.Fatal("a refused create wrote a model")
+	}
+	if _, err := svc.PatchModel(ctx, m.UUID, models.LLMModelPatchBody{Status: &active}); !errors.Is(err, ErrCredentialDisabled) {
+		t.Fatalf("re-enable on a disabled credential err = %v", err)
+	}
+	if mods.rows[m.UUID].Status != models.ModelStatusDisabled {
+		t.Fatal("a refused re-enable was persisted")
+	}
+	// Editing the disabled model, or keeping it disabled, is fine.
+	renamed := "Fast2"
+	if _, err := svc.PatchModel(ctx, m.UUID, models.LLMModelPatchBody{Name: &renamed}); err != nil {
+		t.Fatalf("edit a disabled model on a disabled credential: %v", err)
+	}
+	// Once the credential is active again the model can be re-enabled.
+	credOn := models.CredentialStatusActive
+	if _, err := svc.PatchCredential(ctx, cred.UUID, nil, nil, &credOn); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := svc.PatchModel(ctx, m.UUID, models.LLMModelPatchBody{Status: &active}); err != nil || got.Status != models.ModelStatusActive {
+		t.Fatalf("re-enable on an active credential = %+v, %v", got, err)
 	}
 }

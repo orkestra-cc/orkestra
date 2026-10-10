@@ -60,7 +60,7 @@ func RegisterModelWriteRoutes(api huma.API, h *handlers.AdminHandler) {
 // llm.grants.admin plus RequireStepUp.
 func RegisterGrantRoutes(api huma.API, h *handlers.AdminHandler) {
 	huma.Register(api, huma.Operation{OperationID: "admin-llm-models-grants-put", Method: http.MethodPut, Path: "/v1/admin/llm/models/{uuid}/grants",
-		Summary: "Replace the users allowed to use a model", Tags: adminTags, Security: adminScope}, h.PutGrants)
+		Summary: "Set who may use a model: access and the complete grant list", Tags: adminTags, Security: adminScope}, h.PutGrants)
 }
 
 // RegisterSelfRoutes mounts the current user's model list. Gated by the

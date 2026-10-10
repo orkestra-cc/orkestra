@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -146,5 +147,79 @@ func TestVault_ErrorsDoNotLeakSecretOrKey(t *testing.T) {
 	}
 	if _, err := NewVault(key[:63]+"z", slog.Default()); err == nil || strings.Contains(err.Error(), key[:63]) {
 		t.Fatalf("NewVault error leaks key: %v", err)
+	}
+}
+
+// scriptedKMS returns decryptErr from Decrypt; everything else round-trips.
+type scriptedKMS struct {
+	fakeKMS
+	decryptErr error
+}
+
+func (s *scriptedKMS) Decrypt(ctx context.Context, keyID string, c []byte) ([]byte, error) {
+	if s.decryptErr != nil {
+		return nil, s.decryptErr
+	}
+	return s.fakeKMS.Decrypt(ctx, keyID, c)
+}
+
+// T4.a: a KMS ciphertext that does not open is a corrupt envelope, like on
+// the local path; a shredded key and an infrastructure failure keep their
+// own identity (crypto-shred and retries depend on it).
+func TestVault_KMSDecryptFailuresAreClassified(t *testing.T) {
+	kms := &scriptedKMS{fakeKMS: fakeKMS{keys: map[string]bool{}}}
+	v, _ := NewVault("", slog.Default())
+	v.SetKMSProvider(kms)
+	env, err := v.Seal(context.Background(), "t1", "c1", "secret", "sk-live-abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	transient := errors.New("kms repo: connection reset")
+	for _, tc := range []struct {
+		name        string
+		decryptErr  error
+		wantCorrupt bool
+		wantIs      error
+	}{
+		{"authentication failed", fmt.Errorf("compliance: open: %w", iface.ErrKMSCiphertextInvalid), true, nil},
+		{"too short", fmt.Errorf("compliance: ciphertext too short: %w", iface.ErrKMSCiphertextInvalid), true, nil},
+		{"shredded key", iface.ErrKMSKeyDeleted, false, iface.ErrKMSKeyDeleted},
+		{"transient", transient, false, transient},
+	} {
+		kms.decryptErr = tc.decryptErr
+		_, err := v.Open(context.Background(), "t1", "c1", "secret", env)
+		if errors.Is(err, ErrEnvelopeCorrupt) != tc.wantCorrupt {
+			t.Errorf("%s: err = %v, corrupt = %v, want %v", tc.name, err, errors.Is(err, ErrEnvelopeCorrupt), tc.wantCorrupt)
+		}
+		if tc.wantIs != nil && !errors.Is(err, tc.wantIs) {
+			t.Errorf("%s: err = %v, want it to stay %v", tc.name, err, tc.wantIs)
+		}
+	}
+}
+
+// T4.b: the AAD is tenant|resource|field|schema; an empty part or one that
+// contains the separator could make two contexts collide, so Seal and Open
+// refuse them before touching any key.
+func TestVault_RejectsAmbiguousContext(t *testing.T) {
+	for _, withKMS := range []bool{false, true} {
+		v, _ := NewVault(randomKeyHex(t), slog.Default())
+		if withKMS {
+			v.SetKMSProvider(&fakeKMS{keys: map[string]bool{}})
+		}
+		env, err := v.Seal(context.Background(), "t1", "c1", "secret", "sk-live-abcdef")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, parts := range [][3]string{
+			{"", "c1", "secret"}, {"t1", "", "secret"}, {"t1", "c1", ""},
+			{"t1|c1", "secret", "x"}, {"t1", "c1|secret", "x"}, {"t1", "c1", "secret|1"},
+		} {
+			if _, err := v.Seal(context.Background(), parts[0], parts[1], parts[2], "x"); !errors.Is(err, ErrInvalidEnvelopeContext) {
+				t.Errorf("kms=%v Seal%v err = %v", withKMS, parts, err)
+			}
+			if _, err := v.Open(context.Background(), parts[0], parts[1], parts[2], env); !errors.Is(err, ErrInvalidEnvelopeContext) {
+				t.Errorf("kms=%v Open%v err = %v", withKMS, parts, err)
+			}
+		}
 	}
 }

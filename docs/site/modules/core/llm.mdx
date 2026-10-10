@@ -16,7 +16,7 @@ Three collections, all scoped to an internal organization (`tenantId`):
 | Collection | Holds |
 |---|---|
 | `llm_credentials` | An API key per provider: `name`, `provider`, `baseUrl`, the sealed `secret` envelope, the display-only `secretLast4`, `status`, and who created it. Names are unique per organization. |
-| `llm_models` | A configured model: provider and model ID, the **capabilities** it offers (chat, streaming, tools, structured output, embeddings and dimensions), a `credentialRef`, defaults (temperature, output limit, effort), the **purposes** it serves with a priority each, `access` (`granted` or `everyone`) and `status`. Names are unique per organization. |
+| `llm_models` | A configured model: provider and model ID, the **capabilities** it offers (chat, streaming, tools, structured output, embeddings and dimensions), a `credentialRef`, defaults (temperature, output limit, effort), the **purposes** it serves with a priority each, `access` (`granted` or `everyone`, set only through the grants route) and `status`. Names are unique per organization. |
 | `llm_grants` | One row per `(model, user)` pair that may use a model, with who granted it. |
 
 ### Secrets and the envelope
@@ -28,7 +28,7 @@ The stored form is an envelope `{alg, keyId, keyVersion, schemaVersion, cipherte
 - `alg: kms` — sealed with the per-tenant key of the compliance module's KMS provider, once compliance has injected one. A tenant purge crypto-shreds the credentials with it.
 - `alg: local` — AES-256-GCM with the dedicated `LLM_SECRET_ENCRYPTION_KEY` (32 bytes, 64 hex characters).
 
-The associated data is `tenantId|resourceUuid|field|schemaVersion`, so an envelope copied to another tenant, record or field fails to open. The key is decrypted only when a provider request is built, and never reaches a log, a response or an error message.
+The associated data is `tenantId|resourceUuid|field|schemaVersion`, so an envelope copied to another tenant, record or field fails to open; an empty part or one containing `|` is refused on seal and open. On the KMS path a ciphertext the provider cannot open (truncated, tampered with, or sealed under another key) is a corrupt envelope, while a crypto-shredded key keeps its own error. The key is decrypted only when a provider request is built, and never reaches a log, a response or an error message.
 
 :::note Missing key
 A missing or malformed `LLM_SECRET_ENCRYPTION_KEY` does not stop the boot. The module logs a warning and treats the key as absent: everything works except saving a secret, which answers `llm.secret_key_missing` (503) until a key or a KMS provider exists. In staging and production the environment checker refuses a missing, placeholder or non-64-hex value before the stack starts.
@@ -48,17 +48,17 @@ Operator host. Every route requires an authenticated internal-organization conte
 | DELETE | `/v1/admin/llm/credentials/{uuid}` | `llm.credentials.admin` | Step-up. `204`; `409 llm.credential_in_use` while an active model uses it |
 | GET | `/v1/admin/llm/models` | `llm.admin.read` | List, each model with its grants |
 | GET | `/v1/admin/llm/models/{uuid}` | `llm.admin.read` | |
-| POST | `/v1/admin/llm/models` | `llm.models.admin` | `201` |
-| PATCH | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` | **Partial**: an omitted field keeps its stored value; capabilities, credential reference, defaults and purposes replace the stored value whole when present; the merged model is validated as on create |
+| POST | `/v1/admin/llm/models` | `llm.models.admin` | `201`. A new model is closed: `access: granted` and no grants. The body has no `access` |
+| PATCH | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` | **Partial**: an omitted field keeps its stored value; capabilities, credential reference, defaults and purposes replace the stored value whole when present; the merged model is validated as on create. `{status}` alone enables or disables the model. It cannot change `access` |
 | DELETE | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` | `204`; also deletes the model's grants |
-| PUT | `/v1/admin/llm/models/{uuid}/grants` | `llm.grants.admin` | Step-up. Replaces the complete list of users allowed to use the model |
+| PUT | `/v1/admin/llm/models/{uuid}/grants` | `llm.grants.admin` | Step-up. Body `{access, userUuids}`: sets `access` (`granted` or `everyone`, required) and replaces the complete grant list together; answers the model with its grants |
 | GET | `/v1/llm/me/models` | `llm.models.self` | The models the calling user may use in the current organization |
 
 Collections are returned as `{ "items": [...] }`. Errors carry a stable `llm.*` code:
 
 | Code | HTTP | When |
 |---|---|---|
-| `llm.invalid_request` | 422 | A field is out of range or malformed (name, provider, base URL, model ID, purposes, capabilities, …) |
+| `llm.invalid_request` | 422 | A field is out of range or malformed (name, provider, base URL, model ID, purposes, capabilities, default temperature 0–2, default output limit 1–131072, …), or a model would be created or left active on a disabled credential |
 | `llm.not_found` | 404 | No such credential, model or grant in this organization |
 | `llm.name_in_use` | 409 | Another credential or model already has this name |
 | `llm.credential_in_use` | 409 | Delete refused: an active model references the credential |
@@ -86,11 +86,11 @@ Every `.admin` mutation requires an enrolled second factor (the policy engine's 
 
 ## Configuration
 
-Settings at `/admin/modules/llm`, in two groups. The module hot-reloads its configuration, so a change applies without a restart. In this step only `allow_hosted` is consulted; the other four take effect with the gateway.
+Settings at `/admin/modules/llm`, in two groups. The module hot-reloads its configuration, so a change applies without a restart. In this step only `allow_hosted` is consulted (on every write and every read of the catalog); the other four take effect with the gateway.
 
 | Key | Default | Env var | Meaning |
 |---|---|---|---|
-| `allow_hosted` | `false` | `LLM_ALLOW_HOSTED` | Explicit privacy opt-in for hosted providers (`openai`, `anthropic`, `gemini`, `openai_compatible`): prompts and outputs leave the installation. Without it only `ollama` and `mock` can be created, enabled or edited. Disabling a credential or model is always possible |
+| `allow_hosted` | `false` | `LLM_ALLOW_HOSTED` | Explicit privacy opt-in for hosted providers (`openai`, `anthropic`, `gemini`, `openai_compatible`): prompts and outputs leave the installation. Without it only `ollama` and `mock` can be created, enabled or edited, and existing hosted models stop being offered at once. Disabling a credential or model is always possible |
 | `request_timeout` | `60s` | `LLM_REQUEST_TIMEOUT` | Deadline per provider call; a consumer may only lower it |
 | `usage_retention_days` | `90` | `LLM_USAGE_RETENTION_DAYS` | Retention of per-call usage rows (1–3650) |
 | `budget_warn_pct` | `80` | `LLM_BUDGET_WARN_PCT` | Default warning threshold for new budgets (0–100) |
@@ -104,12 +104,14 @@ Endpoint rules: `openai`, `anthropic` and `gemini` have a fixed endpoint and tak
 
 **Managing is not using.** Holding `llm.models.admin` lets you define a model; it does not let you call it. A user may use a model when:
 
-1. the model is `active` **and**
+1. the model is **live**: `active`, its provider is allowed by the configuration read on that call (`allow_hosted` for hosted providers, never `mock` in a production-like environment), and the organization credential it rides on exists and is active; **and**
 2. its `access` is `everyone`, **or** the user holds a grant for it.
 
-Grants are replaced as a complete list (`PUT …/grants`), and every grantee must be a member of the organization, or the whole list is rejected. `GET /v1/llm/me/models` and the gateway use the same resolver, so the self list shows exactly what a call may route to.
+A model that is not live is invisible to the self list, to `Resolve` and to routing, exactly as if it were disabled: turning `allow_hosted` off, or disabling a credential, takes effect at once for every existing model. An organization whose only active models are not live is *not configured* (`llm.not_configured`).
 
-Routing for a purpose: the candidates are the usable models that declare the purpose and offer the capabilities the request needs, ordered by that purpose's priority (lower wins) then name. The purpose falls back to `default` **only** when no active model of the organization declares it at all; if some model declares it but the caller may not use it, the result is empty (`ErrLLMNoEligibleModel`) rather than a silent move to another purpose. A caller may pin one model; a pin must be among its candidates, so pinning never widens access.
+Who may use a model is decided only on the grants route (`PUT …/grants`, `llm.grants.admin` plus step-up), never by `llm.models.admin`: opening a model to everyone is the widest access change, so it has the strongest gate. The route sets `access` and replaces the complete grant list together. Every listed user must be a member of the organization, or the whole call is rejected and nothing (not even `access`) changes. With `access: everyone` the listed grants are still stored but dormant; they apply again when `access` returns to `granted`. `GET /v1/llm/me/models` and the gateway use the same resolver, so the self list shows exactly what a call may route to.
+
+Routing for a purpose: the candidates are the usable models that declare the purpose and offer the capabilities the request needs, ordered by that purpose's priority (lower wins) then name. The purpose falls back to `default` **only** when no live model of the organization declares it at all; if some model declares it but the caller may not use it, the result is empty (`ErrLLMNoEligibleModel`) rather than a silent move to another purpose. A caller may pin one model; a pin must be among its candidates, so pinning never widens access.
 
 A model billed to the user's own linked account (`credentialRef.kind = user_account`) must use the `openai` provider, cannot offer embeddings and cannot set a temperature or output limit.
 
@@ -144,11 +146,11 @@ The compliance module resolves the same service to inject its KMS provider and a
 
 ## Data-subject rights
 
-The module registers an `iface.PIIProducer` with the subject `llm`. Export returns explicit projections only — never a credential, an endpoint or an envelope: the grants the user holds, the grants they issued, and references to the credentials and models they created. Erasure deletes the grants the user holds and replaces the actor id on the grants they issued and on the credentials and models they created with a fixed constant (`erased-subject`) that is not derived from the user; the credentials and models themselves are organization assets and stay.
+The module registers an `iface.PIIProducer` with the subject `llm`. Export returns explicit projections only — never a credential, an endpoint or an envelope: the grants the user holds, the grants they issued, and references to the credentials and models they created. Erasure deletes the grants the user holds and replaces the actor id on the grants they issued and on the credentials and models they created with a fixed constant (`erased-subject`) that is not derived from the user; the credentials and models themselves are organization assets and stay. A request with an empty subject id is refused before any query: it would otherwise match every row created without a user.
 
 ## Status
 
-This is the foundations step ([ADR-0022](/adrs/core-llm-module)): the catalog, access model, encrypted secrets, data-subject rights, the admin API and the `/admin/llm` console page (tabs `models` and `credentials`, kept in the URL). `Resolve` and `ListUsable` are complete. `Chat` and `Embed` validate the request and resolve access but no provider adapter is registered yet, so they end with `ErrLLMProviderUnavailable`.
+This is the foundations step ([ADR-0022](/adrs/core-llm-module)): the catalog, access model, encrypted secrets, data-subject rights, the admin API and the `/admin/llm` console page (tabs `models` and `credentials`, kept in the URL; models and credentials can each be enabled or disabled from their row, and "Who may use it" sets access and grants together). `Resolve` and `ListUsable` are complete. `Chat` and `Embed` validate the request and resolve access but no provider adapter is registered yet, so they end with `ErrLLMProviderUnavailable`.
 
 Following steps add the provider adapters, routing with fallback and circuit breaking, the usage ledger and monthly budget, connectivity tests and model discovery, and Sign in with ChatGPT for per-user subscriptions.
 

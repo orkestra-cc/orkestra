@@ -1,7 +1,10 @@
 package models
 
 import (
+	"errors"
+	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,7 +18,6 @@ func TestValidateModelInput(t *testing.T) {
 		Capabilities:  LLMModelCapabilities{Chat: true, Streaming: true},
 		CredentialRef: LLMCredentialRef{Kind: CredentialKindOrg, CredentialUUID: "c1"},
 		Purposes:      []LLMModelPurpose{{Purpose: "default", Priority: 10}},
-		Access:        AccessGranted,
 	}
 	if err := ValidateModelInput(ok); err != nil {
 		t.Fatalf("valid input rejected: %v", err)
@@ -43,7 +45,6 @@ func TestValidateModelInput(t *testing.T) {
 			m.Purposes = []LLMModelPurpose{{Purpose: "a", Priority: 1}, {Purpose: "a", Priority: 2}}
 		},
 		"no purposes":             func(m *ModelInput) { m.Purposes = nil },
-		"bad access":              func(m *ModelInput) { m.Access = "friends" },
 		"embeddings without dims": func(m *ModelInput) { m.Capabilities = LLMModelCapabilities{Embeddings: true} },
 		"no capability at all":    func(m *ModelInput) { m.Capabilities = LLMModelCapabilities{} },
 	}
@@ -54,6 +55,59 @@ func TestValidateModelInput(t *testing.T) {
 		if err := ValidateModelInput(m); err == nil {
 			t.Errorf("%s: expected error", name)
 		}
+	}
+}
+
+// I2: access is not part of the model bodies; only the grants body sets it.
+// M3: stored defaults reach the provider adapters as they are, so they are
+// held to the same ranges as per-request options.
+func TestValidateModelInput_DefaultsRanges(t *testing.T) {
+	base := ModelInput{
+		Name: "Fast", Provider: ProviderOpenAI, ModelID: "gpt-5.6-terra",
+		Capabilities:  LLMModelCapabilities{Chat: true},
+		CredentialRef: LLMCredentialRef{Kind: CredentialKindOrg, CredentialUUID: "c1"},
+		Purposes:      []LLMModelPurpose{{Purpose: "default"}},
+	}
+	f := func(v float64) *float64 { return &v }
+	n := func(v int) *int { return &v }
+	for _, tc := range []struct {
+		name string
+		temp *float64
+		max  *int
+		want error
+	}{
+		{"zero temperature", f(0), nil, nil},
+		{"top temperature", f(2), nil, nil},
+		{"negative temperature", f(-0.1), nil, ErrInvalidTemperature},
+		{"temperature above 2", f(2.01), nil, ErrInvalidTemperature},
+		{"NaN temperature", f(math.NaN()), nil, ErrInvalidTemperature},
+		{"infinite temperature", f(math.Inf(1)), nil, ErrInvalidTemperature},
+		{"one output token", nil, n(1), nil},
+		{"max output tokens", nil, n(MaxOutputTokens), nil},
+		{"zero output tokens", nil, n(0), ErrInvalidMaxOutputTokens},
+		{"negative output tokens", nil, n(-5), ErrInvalidMaxOutputTokens},
+		{"too many output tokens", nil, n(MaxOutputTokens + 1), ErrInvalidMaxOutputTokens},
+	} {
+		in := base
+		in.Defaults = LLMModelDefaults{Temperature: tc.temp, MaxOutputTokens: tc.max}
+		if err := ValidateModelInput(in); !errors.Is(err, tc.want) || (tc.want == nil && err != nil) {
+			t.Errorf("%s: err = %v, want %v", tc.name, err, tc.want)
+		}
+	}
+}
+
+func TestModelBodiesCarryNoAccess(t *testing.T) {
+	for _, typ := range []reflect.Type{reflect.TypeOf(LLMModelBody{}), reflect.TypeOf(LLMModelPatchBody{}), reflect.TypeOf(ModelInput{})} {
+		for i := 0; i < typ.NumField(); i++ {
+			f := typ.Field(i)
+			if f.Name == "Access" || strings.HasPrefix(f.Tag.Get("json"), "access") {
+				t.Errorf("%s.%s: access belongs to the grants route", typ.Name(), f.Name)
+			}
+		}
+	}
+	f, ok := reflect.TypeOf(LLMGrantsPutBody{}).FieldByName("Access")
+	if !ok || f.Tag.Get("json") != "access" || f.Tag.Get("enum") != "granted,everyone" {
+		t.Fatalf("LLMGrantsPutBody.Access must be a required enum, got %+v", f)
 	}
 }
 

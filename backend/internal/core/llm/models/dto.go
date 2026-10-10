@@ -45,21 +45,24 @@ type LLMModelBody struct {
 	Defaults                  LLMModelDefaults     `json:"defaults"`
 	BudgetReserveOutputTokens *int                 `json:"budgetReserveOutputTokens,omitempty" minimum:"1" maximum:"131072"`
 	Purposes                  []LLMModelPurpose    `json:"purposes" minItems:"1" maxItems:"16"`
-	Access                    string               `json:"access" enum:"granted,everyone"`
 }
 
+// Input returns the create input. Access is not part of it: a new model is
+// always created with access granted and no grants, and only the grants
+// route (its own permission and step-up) opens it.
 func (b LLMModelBody) Input() ModelInput {
 	return ModelInput{
 		Name: b.Name, Provider: b.Provider, ModelID: b.ModelID, Capabilities: b.Capabilities,
 		CredentialRef: b.CredentialRef, Defaults: b.Defaults, BudgetReserveOutputTokens: b.BudgetReserveOutputTokens,
-		Purposes: b.Purposes, Access: b.Access,
+		Purposes: b.Purposes,
 	}
 }
 
 // LLMModelPatchBody is a partial update: an absent (nil) field keeps the
 // stored value. Struct-valued fields (capabilities, credentialRef, defaults)
 // and purposes replace the stored value whole when present. The merged
-// model is validated with the create rules.
+// model is validated with the create rules. Access is changed only on the
+// grants route.
 type LLMModelPatchBody struct {
 	Name                      *string               `json:"name,omitempty" maxLength:"64"`
 	Provider                  *string               `json:"provider,omitempty" enum:"openai,anthropic,gemini,ollama,openai_compatible,mock"`
@@ -69,7 +72,6 @@ type LLMModelPatchBody struct {
 	Defaults                  *LLMModelDefaults     `json:"defaults,omitempty"`
 	BudgetReserveOutputTokens *int                  `json:"budgetReserveOutputTokens,omitempty" minimum:"1" maximum:"131072"`
 	Purposes                  []LLMModelPurpose     `json:"purposes,omitempty" minItems:"1" maxItems:"16"`
-	Access                    *string               `json:"access,omitempty" enum:"granted,everyone"`
 	Status                    *string               `json:"status,omitempty" enum:"active,disabled"`
 }
 
@@ -99,9 +101,6 @@ func (p LLMModelPatchBody) ApplyTo(in ModelInput) ModelInput {
 	if p.Purposes != nil {
 		in.Purposes = p.Purposes
 	}
-	if p.Access != nil {
-		in.Access = *p.Access
-	}
 	return in
 }
 
@@ -111,6 +110,11 @@ type LLMModelView struct {
 	Grants []LLMGrant `json:"grants"`
 }
 
+// LLMGrantsPutBody decides who may use a model: access and the complete
+// grant list, replaced together. With access everyone the grants are kept
+// but dormant (everyone in the org may use the model); they apply again
+// once access returns to granted. Every listed user must be a member.
 type LLMGrantsPutBody struct {
+	Access    string   `json:"access" enum:"granted,everyone" doc:"granted: only the listed users; everyone: every member of the organization"`
 	UserUUIDs []string `json:"userUuids" doc:"Complete list; replaces the current grants" maxItems:"500"`
 }

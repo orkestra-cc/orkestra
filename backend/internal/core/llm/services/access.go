@@ -40,13 +40,21 @@ func (n Need) satisfiedBy(c models.LLMModelCapabilities) bool {
 // purpose, with these needs", ordered by the purpose priority. Managing a
 // model is never a reason to use it: only a grant or Access == everyone is.
 // Every call is scoped to the org in ctx by the repositories.
+//
+// A model counts only while it is live: status active, its provider passes
+// the operator opt-ins under the config read on this call (providerGate:
+// allow_hosted, no mock in production-like envs), and an org-billed model's
+// credential exists and is active. A model that is not live is invisible to
+// listing, routing and the purpose fallback alike, as if it were disabled.
 type AccessResolver struct {
 	models ModelRepo
 	grants GrantRepo
+	creds  CredentialRepo
+	cfg    func() CatalogConfig
 }
 
-func NewAccessResolver(models ModelRepo, grants GrantRepo) *AccessResolver {
-	return &AccessResolver{models: models, grants: grants}
+func NewAccessResolver(models ModelRepo, grants GrantRepo, creds CredentialRepo, cfg func() CatalogConfig) *AccessResolver {
+	return &AccessResolver{models: models, grants: grants, creds: creds, cfg: cfg}
 }
 
 // grantedSet is the set of model UUIDs userUUID holds a grant for. An empty
@@ -66,7 +74,54 @@ func (a *AccessResolver) grantedSet(ctx context.Context, userUUID string) (map[s
 	return set, nil
 }
 
-// usableFrom filters active down to what userUUID may use.
+// live keeps the models of active that can serve a call right now (see
+// AccessResolver). The credentials are listed once per call, org-scoped.
+func (a *AccessResolver) live(ctx context.Context, active []models.Model) ([]models.Model, error) {
+	cfg := a.cfg()
+	var activeCreds map[string]bool
+	out := make([]models.Model, 0, len(active))
+	for _, m := range active {
+		if m.Status != models.ModelStatusActive || providerGate(cfg, m.Provider) != nil {
+			continue
+		}
+		switch m.CredentialRef.Kind {
+		case models.CredentialKindOrg:
+			if activeCreds == nil {
+				creds, err := a.creds.List(ctx)
+				if err != nil {
+					return nil, err
+				}
+				activeCreds = make(map[string]bool, len(creds))
+				for _, c := range creds {
+					if c.Status == models.CredentialStatusActive {
+						activeCreds[c.UUID] = true
+					}
+				}
+			}
+			if !activeCreds[m.CredentialRef.CredentialUUID] {
+				continue
+			}
+		case models.CredentialKindUserAccount:
+			// Billed to the caller's linked account; whether one exists is
+			// decided per call by the linked-account step.
+		default:
+			continue
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+// liveActive lists the org's live models.
+func (a *AccessResolver) liveActive(ctx context.Context) ([]models.Model, error) {
+	active, err := a.models.ListActive(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return a.live(ctx, active)
+}
+
+// usableFrom filters the live models down to what userUUID may use.
 func (a *AccessResolver) usableFrom(ctx context.Context, active []models.Model, userUUID string) ([]models.Model, error) {
 	granted, err := a.grantedSet(ctx, userUUID)
 	if err != nil {
@@ -85,7 +140,7 @@ func (a *AccessResolver) usableFrom(ctx context.Context, active []models.Model, 
 // Usable lists every active model userUUID may use, in name order. With no
 // user it lists only the models open to everyone.
 func (a *AccessResolver) Usable(ctx context.Context, userUUID string) ([]models.Model, error) {
-	active, err := a.models.ListActive(ctx)
+	active, err := a.liveActive(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -98,10 +153,11 @@ func (a *AccessResolver) Usable(ctx context.Context, userUUID string) ([]models.
 // Routing step 2): if some model declares it but the caller may not use it,
 // or lacks a needed capability, the result is empty rather than silently
 // moving the request to another purpose. ErrLLMNotConfigured when the org
-// has no active model; an empty slice when models exist but none fits, so
-// the caller can tell "not configured" from "nothing eligible".
+// has no live model; an empty slice when models exist but none fits, so
+// the caller can tell "not configured" from "nothing eligible". "Active"
+// here and in the fallback rule means live (see AccessResolver).
 func (a *AccessResolver) Candidates(ctx context.Context, userUUID, purpose string, need Need) ([]models.Model, error) {
-	active, err := a.models.ListActive(ctx)
+	active, err := a.liveActive(ctx)
 	if err != nil {
 		return nil, err
 	}

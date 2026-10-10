@@ -38,8 +38,11 @@ var validationDetails = []struct {
 	{models.ErrInvalidCapabilities, "The model must offer chat or embeddings; embeddings need a dimension count above zero."},
 	{models.ErrInvalidEffort, "The effort must be empty, low, medium or high."},
 	{models.ErrInvalidReserve, "The reserved output tokens must be between 1 and 131072."},
+	{models.ErrInvalidTemperature, "The default temperature must be between 0 and 2."},
+	{models.ErrInvalidMaxOutputTokens, "The default output limit must be between 1 and 131072 tokens."},
 	{services.ErrInvalidStatus, "The status must be active or disabled."},
 	{services.ErrProviderMismatch, "The credential belongs to a different provider than the model."},
+	{services.ErrCredentialDisabled, "The model's credential is disabled; enable the credential first, or choose another one."},
 }
 
 const invalidRequestDetail = "The request was rejected because a field is out of range or malformed."

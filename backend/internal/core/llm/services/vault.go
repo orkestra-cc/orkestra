@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/orkestra/backend/internal/core/llm/models"
@@ -75,7 +76,23 @@ func aad(tenantID, resourceUUID, field string, schema int) []byte {
 	return []byte(tenantID + "|" + resourceUUID + "|" + field + "|" + strconv.Itoa(schema))
 }
 
+// checkContext refuses an AAD part that is empty or contains the '|'
+// separator: either could make two different contexts produce the same
+// AAD. All parts are server-generated today; this fails closed if a caller
+// ever passes something else.
+func checkContext(parts ...string) error {
+	for _, p := range parts {
+		if p == "" || strings.Contains(p, "|") {
+			return ErrInvalidEnvelopeContext
+		}
+	}
+	return nil
+}
+
 func (v *Vault) Seal(ctx context.Context, tenantID, resourceUUID, field, plaintext string) (models.Envelope, error) {
+	if err := checkContext(tenantID, resourceUUID, field); err != nil {
+		return models.Envelope{}, err
+	}
 	kms, local := v.current()
 	env := models.Envelope{SchemaVersion: models.EnvelopeSchemaVersion}
 	ad := aad(tenantID, resourceUUID, field, env.SchemaVersion)
@@ -117,6 +134,9 @@ func (v *Vault) Seal(ctx context.Context, tenantID, resourceUUID, field, plainte
 }
 
 func (v *Vault) Open(ctx context.Context, tenantID, resourceUUID, field string, env models.Envelope) (string, error) {
+	if err := checkContext(tenantID, resourceUUID, field); err != nil {
+		return "", err
+	}
 	if env.IsZero() {
 		return "", ErrEnvelopeCorrupt
 	}
@@ -132,8 +152,13 @@ func (v *Vault) Open(ctx context.Context, tenantID, resourceUUID, field string, 
 			return "", ErrSecretKeyMissing
 		}
 		pt, err := kms.Decrypt(ctx, env.KeyID, raw)
+		if errors.Is(err, iface.ErrKMSCiphertextInvalid) {
+			return "", ErrEnvelopeCorrupt
+		}
 		if err != nil {
-			return "", err // iface.ErrKMSKeyDeleted stays classifiable
+			// iface.ErrKMSKeyDeleted (crypto-shred) and infrastructure
+			// failures stay classifiable as themselves.
+			return "", err
 		}
 		sep := len(ad)
 		if len(pt) < sep+1 || string(pt[:sep]) != string(ad) || pt[sep] != 0 {

@@ -208,7 +208,7 @@ func moduleForRoutes(t *testing.T) *Module {
 	}
 	cfg := func() services.CatalogConfig { return services.CatalogConfig{} }
 	catalog := services.NewCatalogService(emptyCreds{}, emptyModels{}, emptyGrants{}, vault, nil, cfg, logger)
-	gw := services.NewGateway(services.NewAccessResolver(emptyModels{}, emptyGrants{}), catalog, providers.NewRegistry(), vault, logger)
+	gw := services.NewGateway(services.NewAccessResolver(emptyModels{}, emptyGrants{}, emptyCreds{}, cfg), catalog, providers.NewRegistry(), vault, logger)
 	m := NewModule()
 	m.admin = handlers.NewAdminHandler(catalog, logger)
 	m.self = handlers.NewSelfHandler(gw, logger)

@@ -128,10 +128,12 @@ func mapRepoErr(err error) error {
 
 // --- credentials ---------------------------------------------------------
 
-// checkProviderGate applies the operator opt-ins: hosted providers need
-// allow_hosted, the mock provider never runs in production-like envs.
-func (s *CatalogService) checkProviderGate(provider string) error {
-	cfg := s.cfg()
+// providerGate applies the operator opt-ins to provider under cfg: hosted
+// providers need allow_hosted, the mock provider never runs in
+// production-like envs. The catalog applies it on every write that leaves
+// something live, the AccessResolver on every read, so turning
+// allow_hosted off takes effect for existing models without editing them.
+func providerGate(cfg CatalogConfig, provider string) error {
 	if models.IsHostedProvider(provider) && !cfg.AllowHosted {
 		return ErrHostedDisabled
 	}
@@ -139,6 +141,10 @@ func (s *CatalogService) checkProviderGate(provider string) error {
 		return ErrMockNotAllowed
 	}
 	return nil
+}
+
+func (s *CatalogService) checkProviderGate(provider string) error {
+	return providerGate(s.cfg(), provider)
 }
 
 // resolveBaseURL returns the endpoint to store: none for mock, the fixed
@@ -326,7 +332,12 @@ func (s *CatalogService) OpenCredentialSecret(ctx context.Context, c *models.Cre
 
 // --- models ---------------------------------------------------------------
 
-func (s *CatalogService) checkModelInput(ctx context.Context, in models.ModelInput) error {
+// checkModelInput validates the shape and the credential coherence of in.
+// A model that will be live (created, or patched to end up active) also
+// needs its org credential to be active, the same rule the AccessResolver
+// applies on every read; a model that ends up disabled may keep pointing at
+// a disabled credential, so disabling always works.
+func (s *CatalogService) checkModelInput(ctx context.Context, in models.ModelInput, live bool) error {
 	if err := models.ValidateModelInput(in); err != nil {
 		return fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, err)
 	}
@@ -338,6 +349,9 @@ func (s *CatalogService) checkModelInput(ctx context.Context, in models.ModelInp
 		if c.Provider != in.Provider {
 			return fmt.Errorf("%w: %w (%s, %s)", iface.ErrLLMInvalidRequest, ErrProviderMismatch, c.Provider, in.Provider)
 		}
+		if live && c.Status != models.CredentialStatusActive {
+			return fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, ErrCredentialDisabled)
+		}
 	}
 	return nil
 }
@@ -346,7 +360,7 @@ func (s *CatalogService) CreateModel(ctx context.Context, in models.ModelInput) 
 	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
 		return nil, err
 	}
-	if err := s.checkModelInput(ctx, in); err != nil {
+	if err := s.checkModelInput(ctx, in, true); err != nil {
 		return nil, err
 	}
 	// New models are active: same opt-ins as the credential they ride on.
@@ -358,7 +372,7 @@ func (s *CatalogService) CreateModel(ctx context.Context, in models.ModelInput) 
 	m := &models.Model{
 		UUID: uuid.NewString(), Name: in.Name, Provider: in.Provider, ModelID: in.ModelID, Capabilities: in.Capabilities,
 		CredentialRef: in.CredentialRef, Defaults: in.Defaults, BudgetReserveOutputTokens: in.BudgetReserveOutputTokens,
-		Purposes: in.Purposes, Access: in.Access, Status: models.ModelStatusActive, CreatedBy: actor, CreatedAt: now, UpdatedAt: now,
+		Purposes: in.Purposes, Access: models.AccessGranted, Status: models.ModelStatusActive, CreatedBy: actor, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.models.Insert(ctx, m); err != nil {
 		return nil, mapRepoErr(err)
@@ -407,7 +421,9 @@ func (s *CatalogService) GetModel(ctx context.Context, id string) (*models.LLMMo
 
 // PatchModel applies the provided fields of p onto the stored model and
 // validates the merged result with the create rules (shape, credential
-// coherence, provider gate); absent fields keep their stored value.
+// coherence, provider gate, active credential); absent fields keep their
+// stored value. A model that ends up disabled skips the provider gate and
+// the active-credential rule, so disabling always works.
 func (s *CatalogService) PatchModel(ctx context.Context, id string, p models.LLMModelPatchBody) (*models.Model, error) {
 	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
 		return nil, err
@@ -417,17 +433,17 @@ func (s *CatalogService) PatchModel(ctx context.Context, id string, p models.LLM
 		return nil, mapRepoErr(err)
 	}
 	in := p.ApplyTo(m.Input())
-	if err := s.checkModelInput(ctx, in); err != nil {
-		return nil, err
-	}
-	m.Name, m.Provider, m.ModelID, m.Capabilities = in.Name, in.Provider, in.ModelID, in.Capabilities
-	m.CredentialRef, m.Defaults, m.BudgetReserveOutputTokens, m.Purposes, m.Access = in.CredentialRef, in.Defaults, in.BudgetReserveOutputTokens, in.Purposes, in.Access
 	if p.Status != nil {
 		if *p.Status != models.ModelStatusActive && *p.Status != models.ModelStatusDisabled {
 			return nil, fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, ErrInvalidStatus)
 		}
 		m.Status = *p.Status
 	}
+	if err := s.checkModelInput(ctx, in, m.Status != models.ModelStatusDisabled); err != nil {
+		return nil, err
+	}
+	m.Name, m.Provider, m.ModelID, m.Capabilities = in.Name, in.Provider, in.ModelID, in.Capabilities
+	m.CredentialRef, m.Defaults, m.BudgetReserveOutputTokens, m.Purposes = in.CredentialRef, in.Defaults, in.BudgetReserveOutputTokens, in.Purposes
 	// Same rule as PatchCredential: a model that ends up disabled is never
 	// gated (disabling must always work); enabling or editing a live one is.
 	if m.Status != models.ModelStatusDisabled {
@@ -460,13 +476,21 @@ func (s *CatalogService) DeleteModel(ctx context.Context, id string) error {
 	return nil
 }
 
-// ReplaceGrants validates every grantee against the org directory first,
-// so a single non-member rejects the whole list and nothing is written.
-func (s *CatalogService) ReplaceGrants(ctx context.Context, modelUUID string, userUUIDs []string) ([]models.LLMGrant, error) {
+// ReplaceGrants decides who may use a model: it sets access and replaces
+// the complete grant list together. Access and every grantee are validated
+// first (a single non-member rejects the whole call) and nothing is written
+// on a refusal. With access everyone the grants are stored but dormant.
+// This is the only place access changes; it sits behind llm.grants.admin
+// and step-up, never behind the model write permission.
+func (s *CatalogService) ReplaceGrants(ctx context.Context, modelUUID, access string, userUUIDs []string) (*models.LLMModelView, error) {
 	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
 		return nil, err
 	}
-	if _, err := s.models.Get(ctx, modelUUID); err != nil {
+	if err := models.ValidateAccess(access); err != nil {
+		return nil, fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, err)
+	}
+	m, err := s.models.Get(ctx, modelUUID)
+	if err != nil {
 		return nil, mapRepoErr(err)
 	}
 	tenantID, ok := tenantrepo.CurrentTenantID(ctx)
@@ -478,8 +502,8 @@ func (s *CatalogService) ReplaceGrants(ctx context.Context, modelUUID string, us
 		return nil, fmt.Errorf("llm: list members: %w", err)
 	}
 	isMember := make(map[string]bool, len(members))
-	for _, m := range members {
-		isMember[m.UserUUID] = true
+	for _, mb := range members {
+		isMember[mb.UserUUID] = true
 	}
 	seen := make(map[string]bool, len(userUUIDs))
 	unique := make([]string, 0, len(userUUIDs))
@@ -493,10 +517,16 @@ func (s *CatalogService) ReplaceGrants(ctx context.Context, modelUUID string, us
 		seen[u] = true
 		unique = append(unique, u)
 	}
+	if m.Access != access {
+		m.Access = access
+		if err := s.models.Update(ctx, m); err != nil {
+			return nil, mapRepoErr(err)
+		}
+	}
 	actor, _ := ctxauth.GetUserUUID(ctx)
 	if err := s.grants.Replace(ctx, modelUUID, actor, unique); err != nil {
 		return nil, err
 	}
-	s.emit(ctx, "llm.grants.replaced", "llm_model", modelUUID, map[string]any{"granted": len(unique)})
-	return s.grants.ListByModel(ctx, modelUUID)
+	s.emit(ctx, "llm.grants.replaced", "llm_model", modelUUID, map[string]any{"access": access, "granted": len(unique)})
+	return s.withGrants(ctx, *m)
 }

@@ -21,9 +21,9 @@ Delivery is in three steps and this file documents what is built. **Built (found
 | `handlers/self.go` | `GET /v1/llm/me/models` over the same `iface.LLMGateway` addons use |
 | `handlers/errors.go` | `MapError`: sentinels → stable `llm.*` codes with written (never `err.Error()`) details; `failure` logs server-side causes |
 | `services/vault.go` | `Vault`: `Seal`/`Open` with KMS-first, local AES-256-GCM fallback; AAD binding; `SetKMSProvider` |
-| `services/catalog.go` | `CatalogService`: credentials, models, grants, the hosted/mock/endpoint gates, audit emission, `SetAuditSink` |
+| `services/catalog.go` | `CatalogService`: credentials, models, grants (and access), the hosted/mock/endpoint gates (`providerGate`, shared with the resolver), audit emission, `SetAuditSink` |
 | `services/endpoint.go` | `ValidateEndpoint` (SSRF string checks) and `IsPublicIP` (the check PR 2's dial-time guard must reuse) |
-| `services/access.go` | `AccessResolver`: usable models, candidates per purpose and capability need |
+| `services/access.go` | `AccessResolver`: live models (active + `providerGate` under the live config + active org credential), usable models, candidates per purpose and capability need |
 | `services/gateway.go` | `Gateway` implementing `iface.LLMGateway`, `iface.KMSProviderSetter`, `iface.AuditSinkSetter`; request limits |
 | `services/pii_producer.go` | `PIIProducer` (subject `llm`) over the DSR repository slices |
 | `services/errors.go` | Service sentinels |
@@ -55,7 +55,7 @@ Resolving the subject's organizations through memberships is not an option: the 
 
 ### Secret envelope
 
-`{alg: "kms"|"local", keyId, keyVersion, schemaVersion, ciphertext}` (all `json:"-"`). `ciphertext` is base64 of the sealed bytes. The display tail lives only on the document as top-level `secretLast4` (set by `models.Last4`, empty below 8 characters), never inside the envelope. AAD is `tenantId|resourceUuid|field|schemaVersion`; the algorithm is chosen at write time and `Open` dispatches on the stored `alg`.
+`{alg: "kms"|"local", keyId, keyVersion, schemaVersion, ciphertext}` (all `json:"-"`). `ciphertext` is base64 of the sealed bytes. The display tail lives only on the document as top-level `secretLast4` (set by `models.Last4`, empty below 8 characters), never inside the envelope. AAD is `tenantId|resourceUuid|field|schemaVersion`; `Seal`/`Open` refuse an empty part or one containing `|` (`ErrInvalidEnvelopeContext`). The algorithm is chosen at write time and `Open` dispatches on the stored `alg`. On the KMS path `iface.ErrKMSCiphertextInvalid` (truncated, tampered, foreign key) becomes `ErrEnvelopeCorrupt`; `iface.ErrKMSKeyDeleted` and infrastructure errors pass through unchanged.
 
 ## Dependencies
 
@@ -70,7 +70,7 @@ Resolving the subject's organizations through memberships is not an option: the 
 ## Lifecycle
 
 - **Init**: builds the vault from `LLM_SECRET_ENCRYPTION_KEY`. A **missing** key logs a WARN and leaves the vault without a local key; a **malformed** key logs a WARN and is treated as absent. Neither stops the boot (a core `Init` error is fatal, and an unconfigured optional capability must not be). The value is never logged. It then resolves the tenant directory, builds the three repositories, `CatalogService`, `Registry`, `AccessResolver` and `Gateway`, registers the gateway under `ServiceLLMGateway`, registers the PIIProducer, and builds the handlers.
-- **`HotReloadConfig()`** is `true`. `allow_hosted` is read through `deps.GetConfigBool` on every catalog decision. The other keys are declared for the next steps.
+- **`HotReloadConfig()`** is `true`. `allow_hosted` is read through `deps.GetConfigBool` on every catalog decision and every resolver read (one `cfg` accessor shared by `CatalogService` and `AccessResolver`). The other keys are declared for the next steps.
 - **No `Start`/`Stop`** in this step (no background work yet).
 - **`HealthCheck`** returns `nil` unconditionally: a missing key only disables secret writes (already warned once at Init), the rest of the module works.
 
@@ -100,15 +100,15 @@ Operator host. Every group runs `RequireInternalTenant` first; a tenant of anoth
 | DELETE | `/v1/admin/llm/credentials/{uuid}` | `llm.credentials.admin` + step-up | 204; 409 `llm.credential_in_use` |
 | GET | `/v1/admin/llm/models` | `llm.admin.read` | 200 `{items}`, each with `grants` |
 | GET | `/v1/admin/llm/models/{uuid}` | `llm.admin.read` | 200 |
-| POST | `/v1/admin/llm/models` | `llm.models.admin` | 201 |
-| PATCH | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` | 200, **partial** (pointer fields; validated on the merged model) |
+| POST | `/v1/admin/llm/models` | `llm.models.admin` | 201; always `access: granted`, no grants (the body has no `access`) |
+| PATCH | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` | 200, **partial** (pointer fields; validated on the merged model); `{status}` enables/disables; no `access` field |
 | DELETE | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` | 204; deletes the model's grants first |
-| PUT | `/v1/admin/llm/models/{uuid}/grants` | `llm.grants.admin` + step-up | 200 `{items}`; replaces the complete list |
+| PUT | `/v1/admin/llm/models/{uuid}/grants` | `llm.grants.admin` + step-up | body `{access, userUuids}` (`access` required: `granted`\|`everyone`); sets access and replaces the complete grant list together; 200 the model view with its grants |
 | GET | `/v1/llm/me/models` | org permission `llm.models.self` | 200 `{items}` |
 
 Step-up is `RequireStepUp(5 * time.Minute)`. Credential `PATCH` is included on purpose: re-pointing `baseUrl` sends the stored key to another host. Model writes have no step-up.
 
-Error codes (`shared/errcode`, `llm.` prefix) and statuses: `invalid_request` 422, `not_found` 404, `name_in_use` 409, `credential_in_use` 409, `secret_key_missing` 503, `endpoint_not_allowed` 422, `hosted_disabled` 422, `mock_not_allowed` 422, `grant_not_member` 422, plus the gateway's `not_configured` 503 (FeatureNotConfigured pattern), `no_eligible_model` 403, `model_access_denied` 403, `capability_mismatch` 422, `provider_unavailable` 503. A wrong-tier tenant is `403` with no code; an unknown error is a generic `500` whose cause is logged, with no `llm.internal` code. Audit actions: `llm.credential.{created,updated,rotated,deleted}`, `llm.model.{created,updated,deleted}`, `llm.grants.replaced`.
+Error codes (`shared/errcode`, `llm.` prefix) and statuses: `invalid_request` 422, `not_found` 404, `name_in_use` 409, `credential_in_use` 409, `secret_key_missing` 503, `endpoint_not_allowed` 422, `hosted_disabled` 422, `mock_not_allowed` 422, `grant_not_member` 422, plus the gateway's `not_configured` 503 (FeatureNotConfigured pattern), `no_eligible_model` 403, `model_access_denied` 403, `capability_mismatch` 422, `provider_unavailable` 503. A wrong-tier tenant is `403` with no code; an unknown error is a generic `500` whose cause is logged, with no `llm.internal` code. Audit actions: `llm.credential.{created,updated,rotated,deleted}`, `llm.model.{created,updated,deleted}`, `llm.grants.replaced` (metadata `access`, `granted` count).
 
 ## RBAC
 
@@ -124,10 +124,10 @@ The nav item `/admin/llm` has `MinRole: administrator`; the console additionally
 
 ## Gateway contract (`pkg/sdk/iface/llm.go`)
 
-`Chat`, `Embed`, `Resolve`, `ListUsable`. Every entry point first requires an internal tenant. `ChatRequest.Caller` is required and `Purpose` defaults to `default`; the request limits are enforced before any resolution (`ValidateChatRequest`/`ValidateEmbedRequest`). The routing rules in `AccessResolver.Candidates`:
+`Chat`, `Embed`, `Resolve`, `ListUsable`. Every entry point first requires an internal tenant. `ChatRequest.Caller` is required and `Purpose` defaults to `default`; the request limits are enforced before any resolution (`ValidateChatRequest`/`ValidateEmbedRequest`). Every rule below works on **live** models only: status `active`, `providerGate(cfg(), provider)` passes under the config read on this call (`allow_hosted`, no `mock` when production-like), and for `credentialRef.kind = org` the credential exists in the org and is `active` (`user_account` models are not credential-checked yet; an unknown kind is never live). A model that is not live is invisible to `Usable`/`ListUsable`, `Resolve`, `Candidates` and the purpose fallback, as if disabled. The routing rules in `AccessResolver.Candidates`:
 
-1. no active model in the org → `ErrLLMNotConfigured`;
-2. the purpose falls back to `default` **only if no active model of the org declares it**; if some model declares it but the caller may not use it or it lacks a needed capability, the result is empty (`ErrLLMNoEligibleModel`);
+1. no live model in the org → `ErrLLMNotConfigured`;
+2. the purpose falls back to `default` **only if no live model of the org declares it**; if some model declares it but the caller may not use it or it lacks a needed capability, the result is empty (`ErrLLMNoEligibleModel`);
 3. candidates are ordered by the purpose's priority (lower wins), then name;
 4. a `ModelUUID` pin must be among the candidates (`ErrLLMModelAccessDenied` otherwise) — pinning never widens access.
 
@@ -136,11 +136,14 @@ The nav item `/admin/llm` has `MinRole: administrator`; the console additionally
 - **Secrets never leak.** The API key is write-only; it appears in no response, log line, error message or audit metadata (audit metadata also never carries `baseUrl`). `Open` happens just-in-time via `CatalogService.OpenCredentialSecret`; the plaintext is not retained past the provider call.
 - **The envelope is context-bound.** Always `Seal`/`Open` with the same `(tenantID, resourceUUID, "secret")`; the tenant must be the stored `TenantID`, not whatever is in a test fake's context.
 - **Managing ≠ using.** Access is a grant or `access = everyone`; a model manager has no implicit use. Do not add a role-based shortcut.
+- **Access changes only on the grants route.** `access` is not in `LLMModelBody`, `LLMModelPatchBody` or `ModelInput`; `CreateModel` always stores `granted`; `ReplaceGrants(ctx, model, access, userUUIDs)` validates access and membership first (a refusal writes nothing, access included), then sets both. With `access = everyone` the grants are kept but dormant and apply again when access returns to `granted`. `TestModelBodiesCarryNoAccess` pins the bodies.
 - **`user_account` models** (reserved for the linked-account step) must use `openai`, cannot offer embeddings and cannot set temperature or max tokens; they are validated now.
 - **Fallback never changes the payer** (ADR-0022 D12).
-- **Hosted/mock gates apply on create, edit and re-enable** of credentials and models; disabling is always allowed.
+- **Hosted/mock gates apply on create, edit and re-enable** of credentials and models, and on every read through the resolver; disabling is always allowed.
+- **A live model needs an active credential.** `CreateModel` and a `PatchModel` that leaves the model active refuse a disabled org credential (`llm.invalid_request`, sentinel `ErrCredentialDisabled`); a model that ends up disabled may keep pointing at one.
+- **Model defaults are bounded like request options:** `defaults.temperature` 0–2 (NaN refused), `defaults.maxOutputTokens` 1–`models.MaxOutputTokens` (131072, the `budget_reserve_output_tokens` maximum).
 - **Endpoints**: fixed vendor URLs for `openai`/`anthropic`/`gemini`; `ollama`/`openai_compatible` need a `baseUrl`; `mock` takes none. In production-like environments only public HTTPS is accepted. The string check is the first line only — PR 2's transport **must** re-validate every resolved address at dial time with `IsPublicIP`.
-- **Data-subject rights.** Export uses explicit projections (never a raw model). Erasure deletes the grants the subject holds and rewrites `createdBy`/`grantedBy` to the fixed constant `models.ErasedActor` (`erased-subject`), not derived from the user. Credentials, models and grants issued to others are org assets and stay.
+- **Data-subject rights.** Export uses explicit projections (never a raw model). Erasure deletes the grants the subject holds and rewrites `createdBy`/`grantedBy` to the fixed constant `models.ErasedActor` (`erased-subject`), not derived from the user. An empty subject is refused (`ErrEmptySubject`) before any query, in export and purge. Credentials, models and grants issued to others are org assets and stay.
 - **Huma schema names are package-less**, and Huma panics on duplicates. Every HTTP-visible type here carries the `LLM` prefix (`LLMCredentialView`, `LLMModelBody`, `LLMGrant`, …) because `auth` already owns `CredentialView`. Methods on `Credential` and `Model` have pointer receivers for the same family of reasons (Huma's schema-link transformer cannot rebuild a struct embedding a type with a value method set).
 - **Capabilities are persisted through `models.LLMModelCapabilities`** (explicit `bson` tags), not `iface.LLMCapabilities` (json-only, it would be stored lower-cased).
 - **No cross-module imports.** Tenant membership comes through `iface.TenantDirectoryReader`; compliance reaches this module only through the registered service and its two setter interfaces.

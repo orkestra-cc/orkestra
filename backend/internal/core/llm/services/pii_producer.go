@@ -109,8 +109,13 @@ func NewPIIProducer(creds CredentialDSRRepo, mods ModelDSRRepo, grants GrantDSRR
 func (p *PIIProducer) Subject() string { return "llm" }
 
 // ExportPersonalData returns a *PersonalDataExport, or (nil, nil) when the
-// module holds nothing about the subject.
+// module holds nothing about the subject. An empty userUUID is refused with
+// ErrEmptySubject before any query (it would match every row whose actor
+// field is empty, in every org); PurgePersonalData likewise.
 func (p *PIIProducer) ExportPersonalData(ctx context.Context, userUUID string) (any, error) {
+	if userUUID == "" {
+		return nil, ErrEmptySubject
+	}
 	held, err := p.grants.ListByUserAllTenants(ctx, userUUID)
 	if err != nil {
 		return nil, fmt.Errorf("llm export: grants held: %w", err)
@@ -164,6 +169,9 @@ func (p *PIIProducer) ExportPersonalData(ctx context.Context, userUUID string) (
 // (grantee and granter) is counted once, as deleted. The result reflects
 // what was done up to a failure, which is also returned.
 func (p *PIIProducer) PurgePersonalData(ctx context.Context, userUUID string, _ iface.EraseMode) (iface.PurgeResult, error) {
+	if userUUID == "" {
+		return iface.PurgeResult{}, ErrEmptySubject
+	}
 	res := iface.PurgeResult{Collections: []string{repository.CollGrants, repository.CollCredentials, repository.CollModels}}
 
 	deleted, err := p.grants.DeleteByUser(ctx, userUUID)

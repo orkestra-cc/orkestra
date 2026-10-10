@@ -19,13 +19,14 @@ func newGatewayForTest(t *testing.T) *Gateway {
 
 func newGatewayWithModels(t *testing.T) (*Gateway, *memModels) {
 	t.Helper()
-	svc, _, mods, grants, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
-	seedModels(mods, grants)
+	svc, creds, mods, grants, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
+	seedModels(mods, grants, creds)
 	v, err := NewVault(randomKeyHex(t), slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewGateway(NewAccessResolver(mods, grants), svc, providers.NewRegistry(), v, slog.Default()), mods
+	cfg := func() CatalogConfig { return svc.cfg() }
+	return NewGateway(NewAccessResolver(mods, grants, creds, cfg), svc, providers.NewRegistry(), v, slog.Default()), mods
 }
 
 func TestGateway_ListUsableAndResolve(t *testing.T) {
@@ -41,6 +42,37 @@ func TestGateway_ListUsableAndResolve(t *testing.T) {
 	}
 	if _, err := g.Resolve(ctx, "Bad Purpose"); !errors.Is(err, iface.ErrLLMInvalidRequest) {
 		t.Fatalf("Resolve bad purpose err = %v", err)
+	}
+}
+
+// I1: the gateway reads allow_hosted on every call, so turning it off stops
+// Resolve, ListUsable and Chat from offering a hosted model right away.
+func TestGateway_AllowHostedOffHidesHostedModels(t *testing.T) {
+	svc, creds, mods, grants, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
+	seedModels(mods, grants, creds)
+	v, err := NewVault(randomKeyHex(t), slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := NewGateway(NewAccessResolver(mods, grants, creds, func() CatalogConfig { return svc.cfg() }), svc, providers.NewRegistry(), v, slog.Default())
+	ctx := ctxFor("t1")
+	if info, err := g.Resolve(ctx, "default"); err != nil || info.UUID != "m-everyone" {
+		t.Fatalf("Resolve with allow_hosted on = %+v, %v", info, err)
+	}
+
+	svc.cfg = func() CatalogConfig { return CatalogConfig{AllowHosted: false} }
+	if list, err := g.ListUsable(ctx); err != nil || len(list) != 0 {
+		t.Fatalf("ListUsable with allow_hosted off = %+v, %v", list, err)
+	}
+	if _, err := g.Resolve(ctx, "default"); !errors.Is(err, iface.ErrLLMNotConfigured) {
+		t.Fatalf("Resolve with allow_hosted off err = %v", err)
+	}
+	_, err = g.Chat(ctx, iface.ChatRequest{Caller: "test", Messages: []iface.ChatMessage{{Role: "user", Content: "hi"}}}, nil)
+	if !errors.Is(err, iface.ErrLLMNotConfigured) {
+		t.Fatalf("Chat with allow_hosted off err = %v", err)
+	}
+	if _, err := g.Embed(ctx, iface.EmbedRequest{Caller: "test", Inputs: []string{"hi"}}); !errors.Is(err, iface.ErrLLMNotConfigured) {
+		t.Fatalf("Embed with allow_hosted off err = %v", err)
 	}
 }
 

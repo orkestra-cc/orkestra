@@ -80,20 +80,13 @@ type LLMGrantsPutRequest struct {
 	Body models.LLMGrantsPutBody
 }
 
-type LLMGrantListResponse struct {
-	Body struct {
-		Items []models.LLMGrant `json:"items"`
-	}
-}
-
-// PutGrants replaces the users allowed to use a model. One non-member
-// rejects the whole list (422) and nothing is written.
-func (h *AdminHandler) PutGrants(ctx context.Context, req *LLMGrantsPutRequest) (*LLMGrantListResponse, error) {
-	grants, err := h.catalog.ReplaceGrants(ctx, req.UUID, req.Body.UserUUIDs)
+// PutGrants sets who may use a model: access and the complete grant list,
+// together. One non-member rejects the whole call (422) and nothing is
+// written. The response is the model with its new access and grants.
+func (h *AdminHandler) PutGrants(ctx context.Context, req *LLMGrantsPutRequest) (*LLMModelResponse, error) {
+	v, err := h.catalog.ReplaceGrants(ctx, req.UUID, req.Body.Access, req.Body.UserUUIDs)
 	if err != nil {
 		return nil, h.fail(ctx, "replace grants", err)
 	}
-	resp := &LLMGrantListResponse{}
-	resp.Body.Items = grants
-	return resp, nil
+	return &LLMModelResponse{Body: *v}, nil
 }

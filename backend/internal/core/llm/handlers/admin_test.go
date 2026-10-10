@@ -45,7 +45,7 @@ func newHarness(t *testing.T, keyHex string) *harness {
 	dir := &fakeDir{members: map[string][]string{"t1": {"u-admin", "u1", "u2"}}}
 	cfg := func() services.CatalogConfig { return services.CatalogConfig{AllowHosted: true} }
 	catalog := services.NewCatalogService(creds, mods, grants, vault, dir, cfg, logger)
-	gw := services.NewGateway(services.NewAccessResolver(mods, grants), catalog, providers.NewRegistry(), vault, logger)
+	gw := services.NewGateway(services.NewAccessResolver(mods, grants, creds, cfg), catalog, providers.NewRegistry(), vault, logger)
 	id := testkit.NewIdentity("u-admin", "admin@example.test", "administrator").WithTenant("t1", []string{"org_owner"}, true)
 	ctx := ctxauth.WithTenantKind(id.ContextFor(context.Background(), "t1"), "internal")
 	return &harness{admin: NewAdminHandler(catalog, logger), self: NewSelfHandler(gw, logger), ctx: ctx, logs: logs}
@@ -79,7 +79,6 @@ func modelBody(name, credUUID string) models.LLMModelBody {
 		Capabilities:  models.LLMModelCapabilities{Chat: true},
 		CredentialRef: models.LLMCredentialRef{Kind: models.CredentialKindOrg, CredentialUUID: credUUID},
 		Purposes:      []models.LLMModelPurpose{{Purpose: "default", Priority: 1}},
-		Access:        models.AccessGranted,
 	}
 }
 
@@ -216,7 +215,7 @@ func TestAdmin_GrantNonMemberIs422(t *testing.T) {
 	h := newHarness(t, testKeyHex)
 	c := h.credential(t, "OpenAI")
 	m := h.model(t, "Fast", c.Body.UUID)
-	_, err := h.admin.PutGrants(h.ctx, &LLMGrantsPutRequest{UUID: m.Body.UUID, Body: models.LLMGrantsPutBody{UserUUIDs: []string{"u1", "ghost"}}})
+	_, err := h.admin.PutGrants(h.ctx, &LLMGrantsPutRequest{UUID: m.Body.UUID, Body: models.LLMGrantsPutBody{Access: models.AccessGranted, UserUUIDs: []string{"u1", "ghost"}}})
 	status, code, detail := codeOf(t, err)
 	if status != http.StatusUnprocessableEntity || code != errcode.LLMGrantNotMember {
 		t.Fatalf("grant = %d %s", status, code)
@@ -242,8 +241,8 @@ func TestSelf_MyModelsHonoursGrants(t *testing.T) {
 	if len(mine.Body.Items) != 0 {
 		t.Fatalf("managing a model must not grant its use, got %+v", mine.Body.Items)
 	}
-	put, err := h.admin.PutGrants(h.ctx, &LLMGrantsPutRequest{UUID: m.Body.UUID, Body: models.LLMGrantsPutBody{UserUUIDs: []string{"u-admin"}}})
-	if err != nil || len(put.Body.Items) != 1 || put.Body.Items[0].UserUUID != "u-admin" {
+	put, err := h.admin.PutGrants(h.ctx, &LLMGrantsPutRequest{UUID: m.Body.UUID, Body: models.LLMGrantsPutBody{Access: models.AccessGranted, UserUUIDs: []string{"u-admin"}}})
+	if err != nil || len(put.Body.Grants) != 1 || put.Body.Grants[0].UserUUID != "u-admin" || put.Body.Access != models.AccessGranted {
 		t.Fatalf("put grants = %+v, %v", put, err)
 	}
 	mine, err = h.self.MyModels(h.ctx, nil)
@@ -254,12 +253,28 @@ func TestSelf_MyModelsHonoursGrants(t *testing.T) {
 		t.Fatalf("after grant = %+v", mine.Body.Items)
 	}
 	// Revoking every grant removes it again.
-	if _, err := h.admin.PutGrants(h.ctx, &LLMGrantsPutRequest{UUID: m.Body.UUID, Body: models.LLMGrantsPutBody{UserUUIDs: []string{}}}); err != nil {
+	if _, err := h.admin.PutGrants(h.ctx, &LLMGrantsPutRequest{UUID: m.Body.UUID, Body: models.LLMGrantsPutBody{Access: models.AccessGranted, UserUUIDs: []string{}}}); err != nil {
 		t.Fatal(err)
 	}
 	mine, _ = h.self.MyModels(h.ctx, nil)
 	if len(mine.Body.Items) != 0 {
 		t.Fatalf("after revoke = %+v", mine.Body.Items)
+	}
+	// Opening the model to everyone goes through the same route.
+	put, err = h.admin.PutGrants(h.ctx, &LLMGrantsPutRequest{UUID: m.Body.UUID, Body: models.LLMGrantsPutBody{Access: models.AccessEveryone, UserUUIDs: []string{}}})
+	if err != nil || put.Body.Access != models.AccessEveryone {
+		t.Fatalf("open to everyone = %+v, %v", put, err)
+	}
+	if mine, _ = h.self.MyModels(h.ctx, nil); len(mine.Body.Items) != 1 {
+		t.Fatalf("after access everyone = %+v", mine.Body.Items)
+	}
+	// I1: disabling the credential takes the model out of the list at once.
+	disabled := models.CredentialStatusDisabled
+	if _, err := h.admin.PatchCredential(h.ctx, &LLMCredentialPatchRequest{UUID: c.Body.UUID, Body: models.LLMCredentialPatchBody{Status: &disabled}}); err != nil {
+		t.Fatal(err)
+	}
+	if mine, _ = h.self.MyModels(h.ctx, nil); len(mine.Body.Items) != 0 {
+		t.Fatalf("a model on a disabled credential is still listed: %+v", mine.Body.Items)
 	}
 }
 
@@ -315,7 +330,7 @@ func TestMapError_EveryModelValidationErrorHasItsOwnSentence(t *testing.T) {
 		models.ErrBaseURLNotAllowed, models.ErrSecretRequired, models.ErrInvalidModelID, models.ErrInvalidCredentialRef,
 		models.ErrUserAccountProvider, models.ErrUserAccountCapabilities, models.ErrUserAccountDefaults,
 		models.ErrInvalidPurposes, models.ErrInvalidAccess, models.ErrInvalidCapabilities, models.ErrInvalidEffort,
-		models.ErrInvalidReserve, services.ErrInvalidStatus, services.ErrProviderMismatch,
+		models.ErrInvalidReserve, models.ErrInvalidTemperature, models.ErrInvalidMaxOutputTokens, services.ErrInvalidStatus, services.ErrProviderMismatch, services.ErrCredentialDisabled,
 	}
 	for _, sentinel := range sentinels {
 		detail := MapError(fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, sentinel)).(*errcode.Error).Detail

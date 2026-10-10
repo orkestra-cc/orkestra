@@ -54,8 +54,8 @@ type LLMCredentialRef struct {
 }
 
 type LLMModelDefaults struct {
-	Temperature     *float64 `bson:"temperature,omitempty" json:"temperature,omitempty"`
-	MaxOutputTokens *int     `bson:"maxOutputTokens,omitempty" json:"maxOutputTokens,omitempty"`
+	Temperature     *float64 `bson:"temperature,omitempty" json:"temperature,omitempty" minimum:"0" maximum:"2"`
+	MaxOutputTokens *int     `bson:"maxOutputTokens,omitempty" json:"maxOutputTokens,omitempty" minimum:"1" maximum:"131072"`
 	Effort          string   `bson:"effort,omitempty" json:"effort,omitempty"`
 }
 
@@ -101,11 +101,12 @@ func (m *Model) Input() ModelInput {
 	return ModelInput{
 		Name: m.Name, Provider: m.Provider, ModelID: m.ModelID, Capabilities: m.Capabilities,
 		CredentialRef: m.CredentialRef, Defaults: m.Defaults, BudgetReserveOutputTokens: m.BudgetReserveOutputTokens,
-		Purposes: m.Purposes, Access: m.Access,
+		Purposes: m.Purposes,
 	}
 }
 
-// ModelInput is the validated shape of create/patch bodies.
+// ModelInput is the validated shape of create/patch bodies. It has no
+// access: that is set only by CatalogService.ReplaceGrants.
 type ModelInput struct {
 	Name                      string
 	Provider                  string
@@ -115,8 +116,12 @@ type ModelInput struct {
 	Defaults                  LLMModelDefaults
 	BudgetReserveOutputTokens *int
 	Purposes                  []LLMModelPurpose
-	Access                    string
 }
+
+// MaxOutputTokens bounds both defaults.maxOutputTokens and
+// budgetReserveOutputTokens; it matches the module's
+// budget_reserve_output_tokens maximum.
+const MaxOutputTokens = 131072
 
 var purposeRE = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,63}$`)
 var modelIDRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
@@ -132,6 +137,8 @@ var (
 	ErrInvalidCapabilities     = errors.New("declare at least chat or embeddings; embeddings require dimensions > 0")
 	ErrInvalidEffort           = errors.New("effort must be empty, low, medium or high")
 	ErrInvalidReserve          = errors.New("budgetReserveOutputTokens must be 1-131072")
+	ErrInvalidTemperature      = errors.New("defaults.temperature must be between 0 and 2")
+	ErrInvalidMaxOutputTokens  = errors.New("defaults.maxOutputTokens must be 1-131072")
 )
 
 func ValidateModelInput(in ModelInput) error {
@@ -171,12 +178,18 @@ func ValidateModelInput(in ModelInput) error {
 	if in.Capabilities.Embeddings && in.Capabilities.Dimensions <= 0 {
 		return ErrInvalidCapabilities
 	}
+	if t := in.Defaults.Temperature; t != nil && !(*t >= 0 && *t <= 2) { // NaN fails both
+		return ErrInvalidTemperature
+	}
+	if n := in.Defaults.MaxOutputTokens; n != nil && (*n < 1 || *n > MaxOutputTokens) {
+		return ErrInvalidMaxOutputTokens
+	}
 	switch in.Defaults.Effort {
 	case "", "low", "medium", "high":
 	default:
 		return ErrInvalidEffort
 	}
-	if in.BudgetReserveOutputTokens != nil && (*in.BudgetReserveOutputTokens < 1 || *in.BudgetReserveOutputTokens > 131072) {
+	if in.BudgetReserveOutputTokens != nil && (*in.BudgetReserveOutputTokens < 1 || *in.BudgetReserveOutputTokens > MaxOutputTokens) {
 		return ErrInvalidReserve
 	}
 	if len(in.Purposes) == 0 || len(in.Purposes) > 16 {
@@ -189,7 +202,12 @@ func ValidateModelInput(in ModelInput) error {
 		}
 		seen[p.Purpose] = true
 	}
-	if in.Access != AccessGranted && in.Access != AccessEveryone {
+	return nil
+}
+
+// ValidateAccess checks the access value the grants route sets.
+func ValidateAccess(access string) error {
+	if access != AccessGranted && access != AccessEveryone {
 		return ErrInvalidAccess
 	}
 	return nil

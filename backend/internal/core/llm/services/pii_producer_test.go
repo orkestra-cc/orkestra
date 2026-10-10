@@ -367,3 +367,23 @@ func TestPIIProducer_PropagatesRepositoryErrors(t *testing.T) {
 		t.Errorf("purge err = %v", err)
 	}
 }
+
+// M4: an empty subject would match every row created without a user in
+// context, across every org. The producer refuses it before any query.
+func TestPIIProducer_RejectsEmptySubject(t *testing.T) {
+	p, g, c, m := dsrFixture()
+	g.rows = append(g.rows, models.LLMGrant{UUID: "g-anon", TenantID: "t3", ModelUUID: "m9", UserUUID: "u4", GrantedBy: "", CreatedAt: tm0})
+	c.rows = append(c.rows, models.Credential{UUID: "cred-anon", TenantID: "t3", Name: "Seeded", CreatedBy: ""})
+	m.rows = append(m.rows, models.Model{UUID: "model-anon", TenantID: "t3", Name: "Seeded", CreatedBy: ""})
+
+	if out, err := p.ExportPersonalData(context.Background(), ""); !errors.Is(err, ErrEmptySubject) || out != nil {
+		t.Fatalf("export of an empty subject = %#v, %v", out, err)
+	}
+	res, err := p.PurgePersonalData(context.Background(), "", iface.EraseHardDelete)
+	if !errors.Is(err, ErrEmptySubject) || res.RowsDeleted != 0 || res.RowsAnonymized != 0 {
+		t.Fatalf("purge of an empty subject = %+v, %v", res, err)
+	}
+	if g.rows[len(g.rows)-1].GrantedBy != "" || c.rows[len(c.rows)-1].CreatedBy != "" || m.rows[len(m.rows)-1].CreatedBy != "" || len(g.rows) != 6 {
+		t.Fatal("a purge of an empty subject rewrote rows")
+	}
+}

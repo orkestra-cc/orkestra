@@ -17,6 +17,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/internal/core/llm/handlers"
+	"github.com/orkestra/backend/internal/core/llm/models"
 	"github.com/orkestra/backend/internal/core/llm/providers"
 	"github.com/orkestra/backend/internal/core/llm/repository"
 	"github.com/orkestra/backend/internal/core/llm/services"
@@ -98,7 +99,7 @@ func (m *Module) ConfigGroups() []module.ConfigGroup {
 }
 
 func (m *Module) ConfigSchema() []module.ConfigField {
-	one, maxReserve, maxDays, zero, hundred := 1, 131072, 3650, 0, 100
+	one, maxReserve, maxDays, zero, hundred := 1, models.MaxOutputTokens, 3650, 0, 100
 	return []module.ConfigField{
 		{Key: "allow_hosted", Label: "Allow hosted providers", Group: "providers", Type: module.FieldBool, Default: "false", EnvVar: "LLM_ALLOW_HOSTED",
 			Description: "Explicit privacy opt-in: prompts and outputs leave this installation (OpenAI, Anthropic, Gemini, OpenAI-compatible). Without it only ollama and mock are selectable. Document the data flow (RoPA, processor, transfer basis) before enabling."},
@@ -171,7 +172,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	}
 	m.catalog = services.NewCatalogService(creds, mods, grants, vault, dir, cfg, logger)
 	m.registry = providers.NewRegistry()
-	m.gateway = services.NewGateway(services.NewAccessResolver(mods, grants), m.catalog, m.registry, vault, logger)
+	m.gateway = services.NewGateway(services.NewAccessResolver(mods, grants, creds, cfg), m.catalog, m.registry, vault, logger)
 
 	// Late wiring: compliance inits after us and pushes its KMS provider and
 	// audit sink through the setters the gateway exposes
