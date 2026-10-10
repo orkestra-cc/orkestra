@@ -424,7 +424,11 @@ func main() {
 	// for anonymous callers. Installed on the shared config so both audience
 	// surfaces and every module sub-router inherit it.
 	apiConfig.Transformers = append(apiConfig.Transformers,
-		errors.HumaErrorDetailPolicy(cfg.IsProductionLike(), logger))
+		errors.HumaErrorDetailPolicy(cfg.IsProductionLike(), logger),
+		// Hands the error code to the access logger, so a 503 that opted in
+		// as an unconfigured optional feature (errcode.FeatureNotConfigured)
+		// is logged at WARN, not ERROR.
+		errors.RecordErrorCode())
 	apiConfig.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
 		"bearerAuth": {
 			Type:         "http",

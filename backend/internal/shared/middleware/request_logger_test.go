@@ -12,8 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/orkestra/backend/internal/shared/errcode"
+	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
@@ -305,23 +309,126 @@ func TestRequestLogger_DefaultStatusIs200(t *testing.T) {
 }
 
 func TestLevelForStatus(t *testing.T) {
-	if levelForStatus(0) != slog.LevelInfo {
+	if levelForStatus(0, false) != slog.LevelInfo {
 		t.Errorf("status 0 should map to Info")
 	}
-	if levelForStatus(199) != slog.LevelInfo {
+	if levelForStatus(199, false) != slog.LevelInfo {
 		t.Errorf("status 199 should map to Info")
 	}
-	if levelForStatus(399) != slog.LevelInfo {
+	if levelForStatus(399, false) != slog.LevelInfo {
 		t.Errorf("status 399 should map to Info")
 	}
-	if levelForStatus(400) != slog.LevelWarn {
+	if levelForStatus(400, false) != slog.LevelWarn {
 		t.Errorf("status 400 should map to Warn")
 	}
-	if levelForStatus(499) != slog.LevelWarn {
+	if levelForStatus(499, false) != slog.LevelWarn {
 		t.Errorf("status 499 should map to Warn")
 	}
-	if levelForStatus(500) != slog.LevelError {
+	if levelForStatus(500, false) != slog.LevelError {
 		t.Errorf("status 500 should map to Error")
+	}
+}
+
+func TestLevelForStatus_ExpectedUnavailable503(t *testing.T) {
+	cases := []struct {
+		name     string
+		status   int
+		expected bool
+		want     slog.Level
+	}{
+		{"503 opted in", 503, true, slog.LevelWarn},
+		{"503 not opted in", 503, false, slog.LevelError},
+		{"500 opted in", 500, true, slog.LevelError},
+		{"502 opted in", 502, true, slog.LevelError},
+		{"404 opted in", 404, true, slog.LevelWarn},
+		{"200 opted in", 200, true, slog.LevelInfo},
+	}
+	for _, tc := range cases {
+		if got := levelForStatus(tc.status, tc.expected); got != tc.want {
+			t.Errorf("%s: level = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// The declaration a handler records must reach the access-log level decision:
+// the recorder runs inside the handler chain (as a Huma transformer in
+// production) and the logger reads it back after next returns. A code alone —
+// even one that reads "*_not_configured", like auth.jwt_not_configured, a real
+// deployment fault — never downgrades the line.
+func TestRequestLogger_ExpectedUnavailable503LoggedAtWarn(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		code     string
+		expected bool
+		want     string
+	}{
+		{"opted in", "x.feature_not_configured", true, "WARN"},
+		{"not_configured code without opt-in", "auth.jwt_not_configured", false, "ERROR"},
+		{"other code", "x.y_broken", false, "ERROR"},
+		{"no code", "", false, "ERROR"},
+	} {
+		logger, buf := newCapturingLogger(t)
+		handler := RequestLogger(logger, RequestLoggerOptions{SkipPaths: map[string]struct{}{}})(
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ann := ctxauth.RequestAnnotationsFrom(r.Context())
+				ann.SetErrorCode(tc.code)
+				if tc.expected {
+					ann.MarkExpectedUnavailable()
+				}
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}),
+		)
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x", nil))
+		if got := parseLine(t, buf.Bytes())["level"]; got != tc.want {
+			t.Errorf("%s: level = %v, want %s", tc.name, got, tc.want)
+		}
+	}
+}
+
+// End to end, wired as cmd/server/main.go wires it: RequestLogger outermost on
+// a chi mux, a Huma API on that mux whose config carries the detail policy and
+// the RecordErrorCode transformer. Only the 503 built by
+// errcode.FeatureNotConfigured is logged at WARN; a plain coded 503 — the shape
+// auth.jwt_not_configured answers with — and Huma's own 503 stay ERROR, and the
+// opt-in never changes the response body.
+func TestRequestLogger_EndToEnd_HumaFeatureNotConfigured(t *testing.T) {
+	logger, buf := newCapturingLogger(t)
+	mux := chi.NewMux()
+	mux.Use(RequestLogger(logger, RequestLoggerOptions{SkipPaths: map[string]struct{}{}}))
+
+	cfg := huma.DefaultConfig("test", "1.0")
+	cfg.Transformers = append(cfg.Transformers,
+		sharederrors.HumaErrorDetailPolicy(true, slog.New(slog.NewTextHandler(io.Discard, nil))),
+		sharederrors.RecordErrorCode())
+	api := humachi.New(mux, cfg)
+
+	const detail = "the feature is not configured"
+	for path, err := range map[string]error{
+		"/optin":  errcode.FeatureNotConfigured("x.feature_not_configured", detail),
+		"/plain":  errcode.ServiceUnavailable("x.feature_not_configured", detail),
+		"/jwt":    errcode.ServiceUnavailable(errcode.AuthJWTNotConfigured, detail),
+		"/huma":   huma.Error503ServiceUnavailable(detail),
+		"/server": errcode.Internal("x.internal", detail),
+	} {
+		huma.Register(api, huma.Operation{OperationID: strings.TrimPrefix(path, "/"), Method: http.MethodGet, Path: path},
+			func(context.Context, *struct{}) (*struct{}, error) { return nil, err })
+	}
+
+	bodies := map[string]string{}
+	for path, want := range map[string]string{
+		"/optin": "WARN", "/plain": "ERROR", "/jwt": "ERROR", "/huma": "ERROR", "/server": "ERROR",
+	} {
+		buf.Reset()
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		line := parseLine(t, buf.Bytes())
+		if got := line["level"]; got != want {
+			t.Errorf("%s: access-log level = %v, want %s (status %v)", path, got, want, line["status"])
+		}
+		bodies[path] = rec.Body.String()
+	}
+	if bodies["/optin"] != bodies["/plain"] {
+		t.Errorf("opt-in changed the response body:\n optin: %s\n plain: %s", bodies["/optin"], bodies["/plain"])
 	}
 }
 

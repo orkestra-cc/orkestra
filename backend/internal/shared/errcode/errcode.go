@@ -31,6 +31,12 @@ type Error struct {
 	// body — the {status,title,detail,code} envelope is a frozen wire
 	// contract. Retry-After on a 429 is the motivating case.
 	Headers http.Header `json:"-"`
+
+	// expectedUnavailable marks a 503 the handler returns on purpose because
+	// an optional feature is not configured on this installation — see
+	// FeatureNotConfigured. Unexported, so it never reaches the wire and only
+	// that constructor can set it.
+	expectedUnavailable bool
 }
 
 // Error implements the error interface using the human-readable
@@ -103,6 +109,27 @@ func TooManyRequests(code, detail string) *Error {
 func ServiceUnavailable(code, detail string) *Error {
 	return New(http.StatusServiceUnavailable, code, detail)
 }
+
+// FeatureNotConfigured returns a 503 for an OPTIONAL feature that this
+// installation has deliberately left unconfigured: a fail-closed, expected
+// state the caller's UI renders inline, not a server fault. The response is
+// byte-for-byte the one ServiceUnavailable builds; the only difference is
+// ExpectedUnavailable, which lets the access log grade it WARN instead of
+// ERROR (shared/middleware.RequestLogger).
+//
+// Opt in only when the platform works fine without the feature. A missing
+// dependency that breaks a core flow — the JWT signing keys behind sign-in
+// (AuthJWTNotConfigured), a database, the cache — is a deployment fault and
+// must keep using ServiceUnavailable so it is logged at ERROR.
+func FeatureNotConfigured(code, detail string) *Error {
+	e := ServiceUnavailable(code, detail)
+	e.expectedUnavailable = true
+	return e
+}
+
+// ExpectedUnavailable reports whether the error was built by
+// FeatureNotConfigured: an expected 503 for an unconfigured optional feature.
+func (e *Error) ExpectedUnavailable() bool { return e != nil && e.expectedUnavailable }
 
 // Internal returns a 500 — the server hit a state it does not model.
 // The detail must stay a written sentence, never the underlying error
