@@ -74,6 +74,12 @@ services:
       # DEK. Keep env-derived so operators can rotate without a rebuild.
       ORKESTRA_KMS_MASTER_KEY: ${ORKESTRA_KMS_MASTER_KEY}
 
+      # LLM module (ADR-0022) — dedicated AES-256-GCM key (64 hex chars) that
+      # seals provider API keys when no per-tenant KMS is available. Missing
+      # or malformed only disables secret writes (WARN); env-validate refuses
+      # it on staging.
+      LLM_SECRET_ENCRYPTION_KEY: ${LLM_SECRET_ENCRYPTION_KEY}
+
       # Cookie Configuration (production-like)
       COOKIE_SECRET: ${COOKIE_SECRET}
       # Refresh-cookie name — the only cookie set in the browser (the access
