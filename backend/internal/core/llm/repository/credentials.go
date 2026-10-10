@@ -151,6 +151,33 @@ func (r *Credentials) SetSecret(ctx context.Context, uuid string, env models.Env
 	return now, nil
 }
 
+// SetTestResult records a connectivity test: a targeted $set of
+// lastTestedAt, lastTestStatus and lastTestError (unset when code is empty)
+// on (tenant, uuid), and nothing else — updatedAt included, since a probe
+// changes no configuration. It is fenced by the secret that was tested
+// (testedCiphertext): when the key was rotated while the test ran, the
+// result describes the old key and is not written (ErrNotFound).
+func (r *Credentials) SetTestResult(ctx context.Context, uuid, testedCiphertext string, at time.Time, status, code string) error {
+	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid, "secret.ciphertext": testedCiphertext})
+	if err != nil {
+		return err
+	}
+	update := bson.M{"$set": bson.M{"lastTestedAt": at, "lastTestStatus": status}}
+	if code != "" {
+		update["$set"].(bson.M)["lastTestError"] = code
+	} else {
+		update["$unset"] = bson.M{"lastTestError": ""}
+	}
+	res, err := r.coll.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *Credentials) Delete(ctx context.Context, uuid string) error {
 	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid})
 	if err != nil {

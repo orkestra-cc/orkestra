@@ -493,3 +493,42 @@ func TestBudgets_GetPut(t *testing.T) {
 		t.Fatalf("t2 sees t1 budget: %v", err)
 	}
 }
+
+// TestOutbox_PurgeSettledBefore deletes only sent/failed rows older than
+// the cutoff, across orgs; pending and sending rows always stay.
+func TestOutbox_PurgeSettledBefore(t *testing.T) {
+	db := newTestDB(t)
+	ensureBudgetIndexes(t, db)
+	ob := NewOutbox(db)
+	old := time.Now().UTC().Add(-48 * time.Hour)
+	fresh := time.Now().UTC()
+	rows := []struct {
+		tenant, uuid, period, status string
+		created                      time.Time
+	}{
+		{"t1", "old-sent", "2026-01", models.OutboxStatusSent, old},
+		{"t2", "old-failed", "2026-01", models.OutboxStatusFailed, old},
+		{"t1", "old-pending", "2026-02", models.OutboxStatusPending, old},
+		{"t1", "old-sending", "2026-03", models.OutboxStatusSending, old},
+		{"t1", "new-sent", "2026-04", models.OutboxStatusSent, fresh},
+	}
+	for _, r := range rows {
+		if ok, err := ob.InsertUnique(ctxFor(r.tenant), &models.OutboxEvent{UUID: r.uuid, Period: r.period, Threshold: models.ThresholdWarn, Status: r.status, NextAttemptAt: r.created, CreatedAt: r.created}); !ok || err != nil {
+			t.Fatalf("insert %s: %v %v", r.uuid, ok, err)
+		}
+	}
+	n, err := ob.PurgeSettledBefore(context.Background(), time.Now().UTC().Add(-24*time.Hour))
+	if err != nil || n != 2 {
+		t.Fatalf("purged = %d, %v; want 2", n, err)
+	}
+	if left := countDocs(t, db, CollBudgetOutbox, bson.M{}); left != 3 {
+		t.Fatalf("t1 kept = %d, want 3 (pending, sending, fresh sent)", left)
+	}
+	t2, err := tenantrepo.Scope(ctxFor("t2"), bson.M{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := db.Collection(CollBudgetOutbox).CountDocuments(context.Background(), t2); err != nil || n != 0 {
+		t.Fatalf("t2 kept = %d, %v; want 0", n, err)
+	}
+}

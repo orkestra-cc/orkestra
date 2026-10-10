@@ -120,3 +120,16 @@ func (r *Outbox) Reschedule(ctx context.Context, uuid string, leaseUntil time.Ti
 func (r *Outbox) MarkFailed(ctx context.Context, uuid string, leaseUntil time.Time, attempts int) error {
 	return r.setStatus(ctx, uuid, leaseUntil, bson.M{"status": models.OutboxStatusFailed, "attempts": attempts})
 }
+
+// PurgeSettledBefore deletes the sent and failed events of every org
+// created before cutoff (daily retention). Pending and sending events are
+// never touched; the rollup's warnedAt/exhaustedAt marks, not these rows,
+// keep a period from notifying twice.
+func (r *Outbox) PurgeSettledBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	//tenantscope:allow system: retention purge of delivered or abandoned budget notifications for every org on the daily ticker; deletes only terminal rows older than the module-wide retention cutoff
+	res, err := r.coll.DeleteMany(ctx, bson.M{"status": bson.M{"$in": []string{models.OutboxStatusSent, models.OutboxStatusFailed}}, "createdAt": bson.M{"$lt": cutoff}})
+	if err != nil {
+		return 0, err
+	}
+	return res.DeletedCount, nil
+}

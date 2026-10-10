@@ -58,9 +58,10 @@ func TestModule_Declarations(t *testing.T) {
 			self++
 		}
 	}
-	// PR 1 declares only the permissions its routes use (ruling M4).
-	if system != 4 || self != 1 {
-		t.Fatalf("permissions = %d system + %d self, want 4 + 1", system, self)
+	// Only the permissions the mounted routes use (amendment 1; PR 2 adds
+	// llm.usage.read, llm.budgets.admin and llm.usage.self).
+	if system != 6 || self != 2 {
+		t.Fatalf("permissions = %d system + %d self, want 6 + 2", system, self)
 	}
 
 	keys := map[string]bool{}
@@ -205,6 +206,9 @@ func (emptyCreds) Patch(context.Context, string, models.CredentialPatch) (time.T
 func (emptyCreds) SetSecret(context.Context, string, models.Envelope, string) (time.Time, error) {
 	return time.Time{}, repository.ErrNotFound
 }
+func (emptyCreds) SetTestResult(context.Context, string, string, time.Time, string, string) error {
+	return repository.ErrNotFound
+}
 func (emptyCreds) Delete(context.Context, string) error { return repository.ErrNotFound }
 
 type emptyModels struct{}
@@ -220,6 +224,26 @@ func (emptyModels) Get(context.Context, string) (*models.Model, error) {
 }
 func (emptyModels) Update(context.Context, *models.Model) error { return repository.ErrNotFound }
 func (emptyModels) Delete(context.Context, string) error        { return repository.ErrNotFound }
+
+type emptyUsage struct{}
+
+func (emptyUsage) Query(context.Context, time.Time, time.Time, string) ([]models.LLMUsageRow, error) {
+	return nil, nil
+}
+func (emptyUsage) UserMonth(_ context.Context, _ string, period string) (*models.LLMSelfUsage, error) {
+	return &models.LLMSelfUsage{Period: period}, nil
+}
+
+type emptyMonthly struct{}
+
+func (emptyMonthly) Get(_ context.Context, period string) (*models.UsageMonthly, error) {
+	return &models.UsageMonthly{Period: period}, nil
+}
+
+type emptyBudgets struct{}
+
+func (emptyBudgets) Get(context.Context) (*models.Budget, error) { return nil, repository.ErrNotFound }
+func (emptyBudgets) Put(context.Context, *models.Budget) error   { return nil }
 
 type emptyGrants struct{}
 
@@ -250,6 +274,9 @@ func moduleForRoutes(t *testing.T) *Module {
 	m := NewModule()
 	m.admin = handlers.NewAdminHandler(catalog, logger)
 	m.self = handlers.NewSelfHandler(gw, logger)
+	m.ops = handlers.NewOpsHandler(services.NewAdminOps(catalog, providers.NewRegistry(), nil, services.NewRateLimiter(nil, logger), gw, logger), logger)
+	m.usageH = handlers.NewUsageHandler(services.NewUsageService(emptyUsage{}, emptyMonthly{}, emptyBudgets{}, noMembers{}, catalog,
+		func() services.BudgetConfig { return services.BudgetConfig{} }, logger), logger)
 	return m
 }
 
@@ -292,6 +319,13 @@ func TestModule_RouteGuards(t *testing.T) {
 		{http.MethodDelete, "/v1/admin/llm/models" + id, []string{"internal", "sys:llm.models.admin", "mfa"}},
 		{http.MethodPut, "/v1/admin/llm/models" + id + "/grants", []string{"internal", "sys:llm.grants.admin", "mfa", stepUp}},
 		{http.MethodGet, "/v1/llm/me/models", []string{"internal", "perm:llm.models.self"}},
+		{http.MethodPost, "/v1/admin/llm/credentials" + id + "/test", []string{"internal", "sys:llm.credentials.admin", "mfa"}},
+		{http.MethodPost, "/v1/admin/llm/credentials" + id + "/models", []string{"internal", "sys:llm.credentials.admin", "mfa"}},
+		{http.MethodPost, "/v1/admin/llm/models" + id + "/prompt", []string{"internal", "sys:llm.models.admin", "mfa"}},
+		{http.MethodGet, "/v1/admin/llm/usage", []string{"internal", "sys:llm.usage.read"}},
+		{http.MethodGet, "/v1/admin/llm/budget", read},
+		{http.MethodPut, "/v1/admin/llm/budget", []string{"internal", "sys:llm.budgets.admin", "mfa", stepUp}},
+		{http.MethodGet, "/v1/llm/me/usage", []string{"internal", "perm:llm.usage.self"}},
 	}
 	used := map[string]bool{}
 	for _, tc := range cases {
@@ -335,6 +369,15 @@ func TestModule_RouteGuards(t *testing.T) {
 		if !used[p.Key] {
 			t.Errorf("permission %s is declared but gates no route", p.Key)
 		}
+	}
+
+	// No budget is a 204 with no body, through the real Huma stack.
+	req := httptest.NewRequest(http.MethodGet, "/v1/admin/llm/budget", nil)
+	req = req.WithContext(context.WithValue(operatorCtx(), guardsKey{}, &[]string{}))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Fatalf("GET budget without one = %d %q", rec.Code, rec.Body.String())
 	}
 }
 
@@ -436,5 +479,97 @@ func TestModule_InitRequiresTheTenantDirectory(t *testing.T) {
 	err := m.Init(&module.Dependencies{DB: offlineDB(t), Logger: slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), Services: module.NewServiceRegistry()})
 	if err == nil {
 		t.Fatal("Init must fail without the tenant directory reader")
+	}
+}
+
+// The config accessors clamp every value: an out-of-range or zero stored
+// value can never yield a zero deadline or a reservation that expires
+// under a running call (Task 7 review: ReservationTTL must exceed the
+// finalization window and cover two full attempts).
+func TestModule_SettingsAreClamped(t *testing.T) {
+	cases := []struct {
+		in   moduleSettings
+		want moduleSettings
+	}{
+		{moduleSettings{requestTimeout: 0, retentionDays: 0, warnPct: -5, reserveOutput: -1},
+			moduleSettings{requestTimeout: defaultRequestTimeout, retentionDays: 1, warnPct: 0, reserveOutput: 1}},
+		{moduleSettings{requestTimeout: -time.Second, retentionDays: 99999, warnPct: 500, reserveOutput: 1 << 30},
+			moduleSettings{requestTimeout: defaultRequestTimeout, retentionDays: maxRetentionDays, warnPct: 100, reserveOutput: models.MaxOutputTokens}},
+		{moduleSettings{requestTimeout: 2 * time.Second, retentionDays: 30, warnPct: 75, reserveOutput: 512},
+			moduleSettings{requestTimeout: 2 * time.Second, retentionDays: 30, warnPct: 75, reserveOutput: 512}},
+	}
+	for _, tc := range cases {
+		got := clampSettings(tc.in)
+		if got != tc.want {
+			t.Errorf("clamp(%+v) = %+v, want %+v", tc.in, got, tc.want)
+		}
+		b := got.budget()
+		if b.ReservationTTL < 2*got.requestTimeout || b.ReservationTTL <= 6*time.Second {
+			t.Errorf("ReservationTTL %v too short for request_timeout %v", b.ReservationTTL, got.requestTimeout)
+		}
+		if b.WarnPct != got.warnPct || b.ReserveOutputTokens != got.reserveOutput {
+			t.Errorf("budget config = %+v from %+v", b, got)
+		}
+	}
+}
+
+func TestModule_InitRegistersSixAdaptersAndRouter(t *testing.T) {
+	m, _, _, _ := initModule(t, strings.Repeat("ab", 32))
+	kinds := map[string]bool{}
+	for _, k := range m.registry.Kinds() {
+		kinds[k] = true
+	}
+	for _, p := range models.Providers {
+		if !kinds[p] {
+			t.Errorf("no adapter registered for %s", p)
+		}
+	}
+	if m.clientFor(models.ProviderOpenAI) != m.clientFor(models.ProviderOpenAI) || m.clientFor(models.ProviderOpenAI) == m.clientFor(models.ProviderGemini) {
+		t.Fatal("one client per provider kind, reused")
+	}
+	if m.outboxW == nil || m.reconciler == nil || m.purge == nil || m.ops == nil || m.usageH == nil {
+		t.Fatal("background jobs and handlers must be wired")
+	}
+}
+
+func TestModule_StartStopIsIdempotent(t *testing.T) {
+	m, _, _, _ := initModule(t, "")
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := m.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop = %v", err)
+	}
+	if err := m.Stop(stopCtx); err != nil {
+		t.Fatalf("second Stop = %v", err)
+	}
+	// Not initialized: both are no-ops.
+	if err := NewModule().Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Every budget alert template exists in en and it.
+func TestModule_NotificationTemplatesInEveryLocale(t *testing.T) {
+	locales := map[string]map[string]bool{}
+	for _, spec := range NewModule().NotificationTemplates() {
+		if !strings.HasPrefix(spec.TemplateID, "llm.") {
+			t.Errorf("template %s is not llm.-prefixed", spec.TemplateID)
+		}
+		if locales[spec.TemplateID] == nil {
+			locales[spec.TemplateID] = map[string]bool{}
+		}
+		locales[spec.TemplateID][spec.Locale] = true
+	}
+	for _, id := range []string{services.TemplateBudgetWarning, services.TemplateBudgetExhausted} {
+		if !locales[id]["en"] || !locales[id]["it"] {
+			t.Errorf("%s locales = %v", id, locales[id])
+		}
 	}
 }

@@ -33,4 +33,22 @@ var (
 	// ErrCredentialDisabled: a model that would end up active rides on a
 	// disabled credential.
 	ErrCredentialDisabled = errors.New("llm: the model's credential is disabled")
+	// ErrModelDisabled: an admin prompt test on a model that is not active
+	// (wrapped in iface.ErrLLMInvalidRequest).
+	ErrModelDisabled = errors.New("llm: the model is disabled")
+	// ErrInvalidUsageRange: the usage report window is empty, reversed or
+	// longer than 366 days (wrapped in iface.ErrLLMInvalidRequest).
+	ErrInvalidUsageRange = errors.New("llm: invalid usage report range")
+	// ErrInvalidGroupBy: the usage report grouping is not model, user or
+	// caller (wrapped in iface.ErrLLMInvalidRequest).
+	ErrInvalidGroupBy = errors.New("llm: invalid usage report grouping")
+	// ErrInvalidBudget: a budget limit, warn threshold or action out of
+	// range (wrapped in iface.ErrLLMInvalidRequest).
+	ErrInvalidBudget = errors.New("llm: invalid budget")
+	// ErrBudgetRecipientNotMember: an extra budget recipient is not a
+	// member of this organization (wrapped in iface.ErrLLMInvalidRequest).
+	ErrBudgetRecipientNotMember = errors.New("llm: budget recipient is not a member of this organization")
+	// ErrInvalidPrompt: an admin prompt test without text or over 4000
+	// bytes (wrapped in iface.ErrLLMInvalidRequest).
+	ErrInvalidPrompt = errors.New("llm: invalid test prompt")
 )

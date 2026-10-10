@@ -261,3 +261,26 @@ func (g *Gateway) ListUsable(ctx context.Context) ([]iface.LLMModelInfo, error) 
 	}
 	return out, nil
 }
+
+// ChatPinned runs req on exactly m for an admin operation (the prompt
+// test): validation and the liveness rules apply as on the live path —
+// active model, allow_hosted, no mock in production-like envs, an active
+// org credential (ruling 5.3) — but the access resolver, and so the
+// grants, is skipped. The call is reserved, routed and ledgered by the
+// router like any other, under the acting admin's user UUID.
+func (g *Gateway) ChatPinned(ctx context.Context, m models.Model, req iface.ChatRequest, sink iface.ChatSink) (*iface.ChatResult, error) {
+	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
+		return nil, err
+	}
+	if err := ValidateChatRequest(req); err != nil {
+		return nil, err
+	}
+	if err := g.catalog.pinnable(ctx, m); err != nil {
+		return nil, err
+	}
+	if g.router == nil {
+		return nil, g.unavailable(m)
+	}
+	userUUID, _ := ctxauth.GetUserUUID(ctx)
+	return g.router.Chat(ctx, []models.Model{m}, userUUID, req, sink)
+}

@@ -318,3 +318,52 @@ func TestCredentials_PatchWritesOnlyProvidedFields(t *testing.T) {
 		t.Fatalf("duplicate err = %v", err)
 	}
 }
+
+// TestCredentials_SetTestResultIsTargetedAndFenced: the probe result is a
+// $set of the three lastTest* fields only, tenant-scoped, and is dropped
+// (ErrNotFound) when the secret was rotated while the test ran.
+func TestCredentials_SetTestResultIsTargetedAndFenced(t *testing.T) {
+	db := newTestDB(t)
+	repo := NewCredentials(db)
+	ctx := ctxFor("t1")
+	created := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	env := models.Envelope{Alg: models.EnvelopeAlgLocal, SchemaVersion: models.EnvelopeSchemaVersion, Ciphertext: "b2xk"}
+	a := &models.Credential{UUID: "c-a", Name: "k", Provider: models.ProviderOpenAI, Secret: env, SecretLast4: "1111", Status: models.CredentialStatusActive, CreatedBy: "u-admin", CreatedAt: created, UpdatedAt: created}
+	if err := repo.Insert(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC().Truncate(time.Millisecond)
+	if err := repo.SetTestResult(ctxFor("t2"), "c-a", "b2xk", at, "error", "llm.credential_rejected"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-tenant SetTestResult err = %v", err)
+	}
+	if err := repo.SetTestResult(ctx, "c-a", "b2xk", at, "error", "llm.credential_rejected"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.Get(ctx, "c-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LastTestedAt == nil || !got.LastTestedAt.Equal(at) || got.LastTestStatus != "error" || got.LastTestError != "llm.credential_rejected" {
+		t.Fatalf("lastTest* = %v %q %q", got.LastTestedAt, got.LastTestStatus, got.LastTestError)
+	}
+	if !got.UpdatedAt.Equal(created) || got.Name != "k" || got.SecretLast4 != "1111" || got.Secret.Ciphertext != "b2xk" {
+		t.Fatalf("SetTestResult touched other fields: %+v", got)
+	}
+	// An ok result clears the previous code.
+	if err := repo.SetTestResult(ctx, "c-a", "b2xk", at, "ok", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := repo.Get(ctx, "c-a"); got.LastTestStatus != "ok" || got.LastTestError != "" {
+		t.Fatalf("after ok: %q %q", got.LastTestStatus, got.LastTestError)
+	}
+	// Rotated during the test: the stale result is not written.
+	if _, err := repo.SetSecret(ctx, "c-a", models.Envelope{Alg: models.EnvelopeAlgLocal, SchemaVersion: models.EnvelopeSchemaVersion, Ciphertext: "bmV3"}, "2222"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetTestResult(ctx, "c-a", "b2xk", at, "ok", ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("stale SetTestResult err = %v", err)
+	}
+	if got, _ := repo.Get(ctx, "c-a"); got.LastTestedAt != nil || got.LastTestStatus != "" {
+		t.Fatalf("stale result written over the rotated secret: %v %q", got.LastTestedAt, got.LastTestStatus)
+	}
+}

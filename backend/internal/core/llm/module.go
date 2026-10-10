@@ -1,8 +1,9 @@
 // Package llm is the core module that manages LLM credentials, models and
 // grants per internal organization and exposes iface.LLMGateway to the
-// addons (ADR-0022). PR 1: catalog + access + envelope encryption; the
-// provider adapters, routing and budget arrive in PR 2, Sign in with
-// ChatGPT in PR 3.
+// addons (ADR-0022): catalog, access and envelope encryption, the six
+// provider adapters, routing with budget reservation, fallback and the
+// usage ledger, budget alerts and the operator's live checks. Sign in with
+// ChatGPT arrives in PR 3.
 package llm
 
 import (
@@ -11,6 +12,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -22,6 +25,7 @@ import (
 	"github.com/orkestra/backend/internal/core/llm/repository"
 	"github.com/orkestra/backend/internal/core/llm/services"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/metrics"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
@@ -29,8 +33,29 @@ import (
 // when compliance has not injected a KMS provider.
 const secretKeyEnv = "LLM_SECRET_ENCRYPTION_KEY"
 
-// stepUpMaxAge is the MFA freshness required on credential and grant writes.
+// stepUpMaxAge is the MFA freshness required on credential, grant and budget
+// writes.
 const stepUpMaxAge = 5 * time.Minute
+
+// Defaults the config accessors fall back to (and clamp into).
+const (
+	defaultRequestTimeout = 60 * time.Second
+	defaultRetentionDays  = 90
+	maxRetentionDays      = 3650
+	defaultWarnPct        = 80
+	defaultReserveOutput  = 4096
+	// reservationSlack is added to 2 × request_timeout: a call may run two
+	// full attempts (a fallback) plus its finalization before the
+	// reconciler may claim its reservation.
+	reservationSlack = 60 * time.Second
+	// streamIdleTimeout bounds the silence between two reads of a stream
+	// (and the wait for its headers).
+	streamIdleTimeout = 30 * time.Second
+	// rollupRetentionPeriods: monthly rollups are kept 24 months (spec).
+	rollupRetentionPeriods = 24
+	retentionEvery         = 24 * time.Hour
+	retentionFirstRun      = time.Minute
+)
 
 type Module struct {
 	module.BaseModule
@@ -41,6 +66,22 @@ type Module struct {
 	registry *providers.Registry
 	admin    *handlers.AdminHandler
 	self     *handlers.SelfHandler
+	ops      *handlers.OpsHandler
+	usageH   *handlers.UsageHandler
+
+	// Background work (Start/Stop): the outbox worker, the reconciler and
+	// the daily retention purge.
+	outboxW    *services.OutboxWorker
+	reconciler *services.Reconciler
+	purge      func(ctx context.Context)
+
+	clientsMu sync.Mutex
+	clients   map[string]*http.Client
+	prodLike  bool
+
+	lifecycleMu sync.Mutex
+	cancel      context.CancelFunc
+	done        chan struct{}
 }
 
 func NewModule() *Module { return &Module{} }
@@ -140,16 +181,25 @@ func (m *Module) ConfigSchema() []module.ConfigField {
 	}
 }
 
-// Permissions declares only what PR 1 routes use; usage, budget and linked
-// account permissions arrive with their routes in PR 2 and PR 3.
+// Permissions declares only what the mounted routes use (the policy
+// coverage baseline rejects a declared permission with no route); the
+// linked-account permissions arrive with their routes in PR 3.
 func (m *Module) Permissions() []iface.PermissionSpec {
 	return []iface.PermissionSpec{
-		{Key: "llm.admin.read", Module: "llm", Description: "Read LLM credentials (redacted), models and grants", System: true},
-		{Key: "llm.credentials.admin", Module: "llm", Description: "Create, rotate, re-point and delete LLM credentials", System: true},
-		{Key: "llm.models.admin", Module: "llm", Description: "Configure, update and delete LLM models", System: true},
+		{Key: "llm.admin.read", Module: "llm", Description: "Read LLM credentials (redacted), models, grants and the budget", System: true},
+		{Key: "llm.credentials.admin", Module: "llm", Description: "Create, rotate, re-point, test and delete LLM credentials", System: true},
+		{Key: "llm.models.admin", Module: "llm", Description: "Configure, update, test and delete LLM models", System: true},
 		{Key: "llm.grants.admin", Module: "llm", Description: "Decide which users may use each LLM model", System: true},
+		{Key: "llm.usage.read", Module: "llm", Description: "Read the organization's LLM usage report", System: true},
+		{Key: "llm.budgets.admin", Module: "llm", Description: "Set the organization's monthly LLM budget", System: true},
 		{Key: "llm.models.self", Module: "llm", Description: "List the LLM models you may use"},
+		{Key: "llm.usage.self", Module: "llm", Description: "See your own LLM usage this month"},
 	}
+}
+
+// NotificationTemplates declares the budget alert emails (en, it).
+func (m *Module) NotificationTemplates() []module.NotificationTemplateSpec {
+	return services.BudgetNotificationTemplates()
 }
 
 func (m *Module) NavItems() []module.NavItemSpec {
@@ -190,6 +240,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	grants := repository.NewGrants(deps.DB)
 
 	productionLike := deps.Platform != nil && deps.Platform.IsProductionLike()
+	m.prodLike = productionLike
 	cfg := func() services.CatalogConfig {
 		return services.CatalogConfig{
 			AllowHosted:    deps.GetConfigBool("llm", "allow_hosted", false),
@@ -198,7 +249,36 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	}
 	m.catalog = services.NewCatalogService(creds, mods, grants, vault, dir, cfg, logger)
 	m.registry = providers.NewRegistry()
+	providers.RegisterAll(m.registry, m.clientFor)
 	m.gateway = services.NewGateway(services.NewAccessResolver(mods, grants, creds, cfg), m.catalog, m.registry, vault, logger)
+
+	// Ledger, rollup, budget and alerts.
+	usage := repository.NewUsage(deps.DB)
+	monthly := repository.NewMonthly(deps.DB)
+	budgets := repository.NewBudgets(deps.DB)
+	outbox := repository.NewOutbox(deps.DB)
+	store := repository.NewBudgetStore(deps.DB, usage, monthly, budgets, outbox)
+	settings := func() moduleSettings { return readSettings(deps) }
+	budgetCfg := func() services.BudgetConfig { return settings().budget() }
+	budgetSvc := services.NewBudgetService(store, budgetCfg, logger)
+	router := services.NewRouter(m.registry, services.NewOrgCredentialResolver(m.catalog), budgetSvc,
+		services.NewBreaker(3, 30*time.Second), m.clientFor,
+		func() services.RouterConfig { return services.RouterConfig{RequestTimeout: settings().requestTimeout} },
+		metrics.Default(), logger)
+	m.gateway.SetRouter(router)
+
+	// The notification module is a declared dependency and always loaded;
+	// the sender and the operator user directory are still resolved
+	// optionally, and a missing one makes each alert a logged no-op.
+	sender, _ := module.GetTyped[iface.NotificationSender](deps.Services, module.ServiceNotificationSender)
+	var users services.UserLookup
+	if up, ok := module.GetTyped[iface.UserProvider](deps.Services, module.ServiceOperatorUserProvider); ok {
+		users = up
+	}
+	notifier := services.NewBudgetNotifier(sender, dir, users, budgets, consoleOrigin(deps), logger)
+	m.outboxW = services.NewOutboxWorker(outbox, notifier, logger)
+	m.reconciler = services.NewReconciler(usage, budgetSvc, logger)
+	m.purge = func(ctx context.Context) { runRetention(ctx, logger, settings().retentionDays, usage, monthly, outbox) }
 
 	// Late wiring: compliance inits after us and pushes its KMS provider and
 	// audit sink through the setters the gateway exposes
@@ -212,7 +292,173 @@ func (m *Module) Init(deps *module.Dependencies) error {
 
 	m.admin = handlers.NewAdminHandler(m.catalog, logger)
 	m.self = handlers.NewSelfHandler(m.gateway, logger)
+	limiter := services.NewRateLimiter(deps.RedisAdapter, logger)
+	m.ops = handlers.NewOpsHandler(services.NewAdminOps(m.catalog, m.registry, m.clientFor, limiter, m.gateway, logger), logger)
+	m.usageH = handlers.NewUsageHandler(services.NewUsageService(usage, monthly, budgets, dir, m.catalog, budgetCfg, logger), logger)
 	return nil
+}
+
+// clientFor returns the SSRF-safe client of a provider kind, built once
+// per kind so connection pools are never shared across kinds. One client
+// serves both shapes: non-stream responses are size-capped and their
+// headers bounded by the transport's HeaderTimeout; requests marked
+// providers.WithStreaming get the idle timeout instead. Timeout stays 0
+// (it would cut healthy streams); the per-attempt deadline is the
+// router's context.
+func (m *Module) clientFor(kind string) *http.Client {
+	m.clientsMu.Lock()
+	defer m.clientsMu.Unlock()
+	if c, ok := m.clients[kind]; ok {
+		return c
+	}
+	if m.clients == nil {
+		m.clients = map[string]*http.Client{}
+	}
+	c := providers.NewHTTPClient(providers.TransportConfig{ProductionLike: m.prodLike, Timeout: 0, IdleTimeout: streamIdleTimeout})
+	m.clients[kind] = c
+	return c
+}
+
+// consoleOrigin is the operator console's public origin for the links in
+// budget alerts: OPERATOR_FRONTEND_URL, else the platform frontend URL.
+func consoleOrigin(deps *module.Dependencies) string {
+	if v := strings.TrimSpace(os.Getenv("OPERATOR_FRONTEND_URL")); v != "" {
+		return v
+	}
+	if deps.Platform != nil {
+		return deps.Platform.FrontendURL()
+	}
+	return ""
+}
+
+// moduleSettings is the hot-reloaded module config, read on every call and
+// clamped into range: a stored value out of range (or unparsable) can never
+// produce a zero deadline, a negative reservation or a reservation that
+// expires before its call can end.
+type moduleSettings struct {
+	requestTimeout time.Duration
+	retentionDays  int
+	warnPct        int
+	reserveOutput  int
+}
+
+func readSettings(deps *module.Dependencies) moduleSettings {
+	return clampSettings(moduleSettings{
+		requestTimeout: deps.GetConfigDuration("llm", "request_timeout", defaultRequestTimeout),
+		retentionDays:  deps.GetConfigInt("llm", "usage_retention_days", defaultRetentionDays),
+		warnPct:        deps.GetConfigInt("llm", "budget_warn_pct", defaultWarnPct),
+		reserveOutput:  deps.GetConfigInt("llm", "budget_reserve_output_tokens", defaultReserveOutput),
+	})
+}
+
+func clampSettings(s moduleSettings) moduleSettings {
+	if s.requestTimeout <= 0 {
+		s.requestTimeout = defaultRequestTimeout
+	}
+	s.retentionDays = min(max(s.retentionDays, 1), maxRetentionDays)
+	s.warnPct = min(max(s.warnPct, 0), 100)
+	s.reserveOutput = min(max(s.reserveOutput, 1), models.MaxOutputTokens)
+	return s
+}
+
+// budget derives the BudgetService config. ReservationTTL is
+// 2 × request_timeout + 60s: always at least two full attempts, and always
+// far above the router's finalization window, so a reservation never
+// expires under a call that is still allowed to run.
+func (s moduleSettings) budget() services.BudgetConfig {
+	return services.BudgetConfig{
+		ReserveOutputTokens: s.reserveOutput,
+		ReservationTTL:      2*s.requestTimeout + reservationSlack,
+		WarnPct:             s.warnPct,
+	}
+}
+
+// runRetention is the daily purge: ledger rows older than
+// usage_retention_days, rollups older than 24 months, and delivered or
+// abandoned budget alerts older than the ledger cutoff. Each sweep is a
+// system query across every org; a failure is logged and retried the next
+// day.
+func runRetention(ctx context.Context, logger *slog.Logger, days int, usage *repository.Usage, monthly *repository.Monthly, outbox *repository.Outbox) {
+	cutoff := time.Now().UTC().AddDate(0, 0, -days)
+	report := func(what string, n int64, err error) {
+		if err != nil {
+			logger.WarnContext(ctx, "llm: retention purge failed", slog.String("what", what), slog.String("error", err.Error()))
+			return
+		}
+		if n > 0 {
+			logger.InfoContext(ctx, "llm: retention purge", slog.String("what", what), slog.Int64("deleted", n))
+		}
+	}
+	n, err := usage.PurgeBefore(ctx, cutoff)
+	report("usage", n, err)
+	n, err = monthly.PurgeOlderThan(ctx, rollupRetentionPeriods)
+	report("usage_monthly", n, err)
+	n, err = outbox.PurgeSettledBefore(ctx, cutoff)
+	report("budget_outbox", n, err)
+}
+
+// Start launches the outbox worker, the reconciler and the daily retention
+// purge. Idempotent: a second Start while running is a no-op. Each job
+// handles every row under the row's own tenant (ruling 3.5/5.4).
+func (m *Module) Start(ctx context.Context) error {
+	if m.outboxW == nil {
+		return nil // not initialized
+	}
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if m.cancel != nil {
+		select {
+		case <-m.done:
+		default:
+			return nil
+		}
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() { defer wg.Done(); m.outboxW.Run(runCtx) }()
+	go func() { defer wg.Done(); m.reconciler.Run(runCtx) }()
+	go func() { defer wg.Done(); m.retentionLoop(runCtx) }()
+	go func() { wg.Wait(); close(done) }()
+	m.cancel, m.done = cancel, done
+	return nil
+}
+
+func (m *Module) retentionLoop(ctx context.Context) {
+	t := time.NewTimer(retentionFirstRun)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			m.purge(ctx)
+			t.Reset(retentionEvery)
+		}
+	}
+}
+
+// Stop cancels the background jobs and waits for them (or for ctx).
+func (m *Module) Stop(ctx context.Context) error {
+	m.lifecycleMu.Lock()
+	cancel, done := m.cancel, m.done
+	m.lifecycleMu.Unlock()
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	select {
+	case <-done:
+		m.lifecycleMu.Lock()
+		if m.done == done {
+			m.cancel, m.done = nil, nil
+		}
+		m.lifecycleMu.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // RegisterRoutes mounts every route on the operator surface (Tier-1 only)
@@ -254,6 +500,23 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 		op.AuthMW.RequireSystemPermission("llm.grants.admin"), op.AuthMW.RequireMFA(), op.AuthMW.RequireStepUp(stepUpMaxAge))
 	group(func(r chi.Router) { RegisterSelfRoutes(api(r), m.self) },
 		op.AuthMW.RequirePermission("llm.models.self"))
+
+	// Live checks: MFA like every write group (they send the stored key or
+	// a prompt to a provider), no step-up (no configuration changes).
+	group(func(r chi.Router) { RegisterCredentialOpsRoutes(api(r), m.ops) },
+		op.AuthMW.RequireSystemPermission("llm.credentials.admin"), op.AuthMW.RequireMFA())
+	group(func(r chi.Router) { RegisterPromptRoute(api(r), m.ops) },
+		op.AuthMW.RequireSystemPermission("llm.models.admin"), op.AuthMW.RequireMFA())
+	group(func(r chi.Router) { RegisterUsageReadRoutes(api(r), m.usageH) },
+		op.AuthMW.RequireSystemPermission("llm.usage.read"))
+	group(func(r chi.Router) { RegisterBudgetReadRoutes(api(r), m.usageH) },
+		op.AuthMW.RequireSystemPermission("llm.admin.read"))
+	// The budget write: MFA then a fresh step-up, like grants (relaxing
+	// block to warn_only lifts the cap).
+	group(func(r chi.Router) { RegisterBudgetWriteRoutes(api(r), m.usageH) },
+		op.AuthMW.RequireSystemPermission("llm.budgets.admin"), op.AuthMW.RequireMFA(), op.AuthMW.RequireStepUp(stepUpMaxAge))
+	group(func(r chi.Router) { RegisterSelfUsageRoutes(api(r), m.usageH) },
+		op.AuthMW.RequirePermission("llm.usage.self"))
 }
 
 // HealthCheck reports healthy without a secret key or KMS: that state only

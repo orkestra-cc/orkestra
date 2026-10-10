@@ -6,9 +6,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
+	"strconv"
 
 	"github.com/orkestra/backend/internal/core/llm/models"
+	"github.com/orkestra/backend/internal/core/llm/providers"
 	"github.com/orkestra/backend/internal/core/llm/services"
 	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/iface"
@@ -43,7 +46,18 @@ var validationDetails = []struct {
 	{services.ErrInvalidStatus, "The status must be active or disabled."},
 	{services.ErrProviderMismatch, "The credential belongs to a different provider than the model."},
 	{services.ErrCredentialDisabled, "The model's credential is disabled; enable the credential first, or choose another one."},
+	{services.ErrModelDisabled, "The model is disabled; enable it before testing it."},
+	{services.ErrInvalidPrompt, "The test prompt must be 1 to 4000 characters."},
+	{services.ErrInvalidUsageRange, "The usage period must end after it starts and span at most 366 days."},
+	{services.ErrInvalidGroupBy, "Usage can be grouped by model, user or caller."},
+	{services.ErrInvalidBudget, "The budget needs a monthly limit of at least 1 token, a warning threshold between 0 and 100, and the action block or warn_only."},
+	{services.ErrBudgetRecipientNotMember, "Every extra budget recipient must be a member of this organization."},
 }
+
+// budgetRetryAfter is the Retry-After of llm.budget_exceeded: the budget
+// frees up at the next period or when an admin raises it, so clients are
+// told to come back in an hour rather than to retry at once.
+const budgetRetryAfter = "3600"
 
 const invalidRequestDetail = "The request was rejected because a field is out of range or malformed."
 
@@ -63,6 +77,12 @@ func invalidDetail(err error) string {
 // tenant context the repositories require) are the server's fault: a
 // generic 500 whose cause the caller logs (see failure).
 func MapError(err error) error {
+	var limited *services.RateLimitedError
+	if errors.As(err, &limited) {
+		secs := int64(math.Ceil(limited.RetryAfter.Seconds()))
+		return errcode.TooManyRequests(errcode.LLMRateLimited, "Too many requests of this kind; wait a minute and try again.").
+			WithHeader("Retry-After", strconv.FormatInt(max(secs, 1), 10))
+	}
 	switch {
 	case errors.Is(err, iface.ErrLLMInvalidRequest):
 		return errcode.UnprocessableEntity(errcode.LLMInvalidRequest, invalidDetail(err))
@@ -90,6 +110,22 @@ func MapError(err error) error {
 		return errcode.Forbidden(errcode.LLMModelAccessDenied, "You may not use the selected model.")
 	case errors.Is(err, iface.ErrLLMCapabilityMismatch):
 		return errcode.UnprocessableEntity(errcode.LLMCapabilityMismatch, "The request needs a capability the model does not offer.")
+	case errors.Is(err, iface.ErrLLMBudgetExceeded):
+		return errcode.TooManyRequests(errcode.LLMBudgetExceeded, "The organization's monthly LLM budget has no room for this request.").
+			WithHeader("Retry-After", budgetRetryAfter)
+	case errors.Is(err, iface.ErrLLMQuotaExhausted):
+		return errcode.TooManyRequests(errcode.LLMPlanQuotaExhausted, "The provider reports the account's quota is exhausted.")
+	case errors.Is(err, iface.ErrLLMUserAccountRequired):
+		return errcode.Conflict(errcode.LLMUserAccountRequired, "This model bills your own linked account; link one first.")
+	case errors.Is(err, iface.ErrLLMUserAccountReauth):
+		return errcode.Conflict(errcode.LLMUserAccountReauthRequired, "Your linked account needs you to sign in again.")
+	case errors.Is(err, iface.ErrLLMPlanUsageDisabled):
+		return errcode.Conflict(errcode.LLMPlanUsageDisabled, "Your linked account does not allow direct plan usage.")
+	case errors.Is(err, iface.ErrLLMPartialOutput):
+		return errcode.New(http.StatusBadGateway, errcode.LLMPartialOutput, "The provider failed after part of the answer was sent.")
+	case errors.Is(err, providers.ErrUnauthorized):
+		// Before provider_unavailable, which it also wraps.
+		return errcode.UnprocessableEntity(errcode.LLMCredentialRejected, "The provider rejected the credential; check or rotate the API key.")
 	case errors.Is(err, iface.ErrLLMProviderUnavailable):
 		return errcode.ServiceUnavailable(errcode.LLMProviderUnavailable, "The model provider cannot be reached right now.")
 	case errors.Is(err, tenantrepo.ErrTenantKindMismatch):

@@ -100,6 +100,14 @@ func (m *memCreds) SetSecret(ctx context.Context, id string, env models.Envelope
 	r.UpdatedAt = time.Now().UTC()
 	return r.UpdatedAt, nil
 }
+func (m *memCreds) SetTestResult(ctx context.Context, id, tested string, at time.Time, status, code string) error {
+	r, ok := m.rows[id]
+	if !ok || r.TenantID != tenantOf(ctx) || r.Secret.Ciphertext != tested {
+		return repository.ErrNotFound
+	}
+	r.LastTestedAt, r.LastTestStatus, r.LastTestError = &at, status, code
+	return nil
+}
 func (m *memCreds) Delete(ctx context.Context, id string) error {
 	if r, ok := m.rows[id]; !ok || r.TenantID != tenantOf(ctx) {
 		return repository.ErrNotFound

@@ -28,6 +28,10 @@ type CredentialRepo interface {
 	// SetSecret writes the secret envelope and its display tail only and
 	// returns the updatedAt it wrote.
 	SetSecret(ctx context.Context, uuid string, env models.Envelope, last4 string) (time.Time, error)
+	// SetTestResult writes only lastTestedAt/lastTestStatus/lastTestError,
+	// and only while the stored secret is still testedCiphertext;
+	// repository.ErrNotFound otherwise.
+	SetTestResult(ctx context.Context, uuid, testedCiphertext string, at time.Time, status, code string) error
 	Delete(ctx context.Context, uuid string) error
 }
 
@@ -354,6 +358,49 @@ func (s *CatalogService) OpenCredentialSecret(ctx context.Context, c *models.Cre
 		return "", nil
 	}
 	return s.vault.Open(ctx, c.TenantID, c.UUID, "secret", c.Secret)
+}
+
+// recordCredentialTest persists a connectivity test of c (the copy the
+// test ran with) and audits it. A credential rotated or deleted while the
+// test ran keeps its state: the result described the old key.
+func (s *CatalogService) recordCredentialTest(ctx context.Context, c *models.Credential, at time.Time, status, code string) {
+	err := s.creds.SetTestResult(ctx, c.UUID, c.Secret.Ciphertext, at, status, code)
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		s.logger.InfoContext(ctx, "llm: credential changed during its test; result not recorded", slog.String("resource_uuid", c.UUID))
+	case err != nil:
+		s.logger.WarnContext(ctx, "llm: record credential test failed", slog.String("resource_uuid", c.UUID), slog.String("error", err.Error()))
+	}
+	s.emit(ctx, "llm.credential.tested", "llm_credential", c.UUID, map[string]any{"provider": c.Provider, "name": c.Name, "outcome": status, "code": code})
+}
+
+// pinnable checks that m can serve an admin prompt test right now: the
+// rules that make a model live (see AccessResolver), each refused with the
+// error the catalog uses for it, plus chat capability. Grants are not
+// checked: the test is an admin operation on the model itself.
+func (s *CatalogService) pinnable(ctx context.Context, m models.Model) error {
+	if m.Status != models.ModelStatusActive {
+		return fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, ErrModelDisabled)
+	}
+	if err := s.checkProviderGate(m.Provider); err != nil {
+		return err
+	}
+	if !m.Capabilities.Chat {
+		return fmt.Errorf("%w: model %s offers no chat", iface.ErrLLMCapabilityMismatch, m.Name)
+	}
+	if m.CredentialRef.Kind == models.CredentialKindOrg {
+		c, err := s.GetCredential(ctx, m.CredentialRef.CredentialUUID)
+		if errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, ErrCredentialDisabled)
+		}
+		if err != nil {
+			return err
+		}
+		if c.Status != models.CredentialStatusActive {
+			return fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, ErrCredentialDisabled)
+		}
+	}
+	return nil
 }
 
 // --- models ---------------------------------------------------------------

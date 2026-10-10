@@ -96,6 +96,16 @@ func (f *fakeCreds) SetSecret(ctx context.Context, id string, env models.Envelop
 	return r.UpdatedAt, nil
 }
 
+func (f *fakeCreds) SetTestResult(ctx context.Context, id, tested string, at time.Time, status, code string) error {
+	r, ok := f.rows[id]
+	if !ok || r.TenantID != tenantOf(ctx) || r.Secret.Ciphertext != tested {
+		return repository.ErrNotFound
+	}
+	r.LastTestedAt, r.LastTestStatus, r.LastTestError = &at, status, code
+	f.rows[id] = r
+	return nil
+}
+
 func (f *fakeCreds) Delete(ctx context.Context, id string) error {
 	if r, ok := f.rows[id]; !ok || r.TenantID != tenantOf(ctx) {
 		return repository.ErrNotFound
