@@ -25,7 +25,7 @@ An API key is **write-only**: it is accepted on create and rotate and never retu
 
 The stored form is an envelope `{alg, keyId, keyVersion, schemaVersion, ciphertext}`:
 
-- `alg: kms` — sealed with the per-tenant key of the compliance module's KMS provider, once compliance has injected one. A tenant purge crypto-shreds the credentials with it.
+- `alg: kms` — sealed with the per-tenant key of the compliance module's KMS provider, once compliance has injected one. A tenant purge crypto-shreds the credentials with it, including when the organization predates KMS and its key was first created for an LLM credential.
 - `alg: local` — AES-256-GCM with the dedicated `LLM_SECRET_ENCRYPTION_KEY` (32 bytes, 64 hex characters).
 
 The associated data is `tenantId|resourceUuid|field|schemaVersion`, so an envelope copied to another tenant, record or field fails to open; an empty part or one containing `|` is refused on seal and open. On the KMS path a ciphertext the provider cannot open (truncated, tampered with, or sealed under another key) is a corrupt envelope, while a crypto-shredded key keeps its own error. The key is decrypted only when a provider request is built, and never reaches a log, a response or an error message.

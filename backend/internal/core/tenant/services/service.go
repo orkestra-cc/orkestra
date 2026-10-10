@@ -1176,16 +1176,39 @@ func (s *Service) PurgeTenant(ctx context.Context, tenantUUID string) error {
 	// the key row stays active and can be shredded manually. Without
 	// crypto-shred the row is still marked purged and downstream
 	// reads are blocked by status gating.
-	if s.kms != nil && lookupErr == nil && existing != nil && existing.KMSKeyID != nil && *existing.KMSKeyID != "" {
-		if err := s.kms.DeleteKey(ctx, *existing.KMSKeyID); err != nil {
-			// The audit row below still fires so auditors see the
-			// attempt; a retry pathway is tracked as tech debt.
-			_ = err
+	if s.kms != nil {
+		if keyID := s.purgeKeyID(ctx, tenantUUID, existing, lookupErr); keyID != "" {
+			if err := s.kms.DeleteKey(ctx, keyID); err != nil {
+				// The audit row below still fires so auditors see the
+				// attempt; a retry pathway is tracked as tech debt.
+				_ = err
+			}
 		}
 	}
 	s.runPostDeleteHooks(ctx, cascadeCtx)
 	s.emitLifecycle(ctx, "tenant.lifecycle.purged", tenantUUID)
 	return nil
+}
+
+// purgeKeyID names the KMS key PurgeTenant must crypto-shred. The stamped
+// KMSKeyID wins when the row carries one. When it does not — a tenant created
+// before KMS was wired, whose key a consumer (the llm vault, for one) later
+// minted lazily through CreateKey and recorded only in its own envelopes —
+// the key is resolved with the same CreateKey, which is idempotent per tenant
+// and returns the existing key rather than minting a second one. Skipping
+// that case would leave the lazily sealed data recoverable after a purge.
+// For a tenant that never had a key this mints one only for it to be shredded
+// at once, which is harmless. A resolution error is treated like a DeleteKey
+// error: best-effort, the purge still completes ("" = nothing to shred).
+func (s *Service) purgeKeyID(ctx context.Context, tenantUUID string, existing *models.Tenant, lookupErr error) string {
+	if lookupErr == nil && existing != nil && existing.KMSKeyID != nil && *existing.KMSKeyID != "" {
+		return *existing.KMSKeyID
+	}
+	keyID, err := s.kms.CreateKey(ctx, tenantUUID)
+	if err != nil {
+		return ""
+	}
+	return keyID
 }
 
 // emitLifecycle is shared boilerplate for the status-transition emits.
