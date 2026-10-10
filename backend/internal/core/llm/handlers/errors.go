@@ -55,8 +55,9 @@ func invalidDetail(err error) string {
 
 // MapError turns service and iface sentinels into the stable llm.* codes.
 // Details are written sentences, never err.Error() (errquality R1).
-// Unknown errors and tenant-scope wiring faults (a route mounted without
-// the tenant context the repositories require) are the server's fault: a
+// A tenant of the wrong tier is refused with 403 like the route gate.
+// Unknown errors and a missing tenant scope (a route mounted without the
+// tenant context the repositories require) are the server's fault: a
 // generic 500 whose cause the caller logs (see failure).
 func MapError(err error) error {
 	switch {
@@ -88,7 +89,11 @@ func MapError(err error) error {
 		return errcode.UnprocessableEntity(errcode.LLMCapabilityMismatch, "The request needs a capability the model does not offer.")
 	case errors.Is(err, iface.ErrLLMProviderUnavailable):
 		return errcode.ServiceUnavailable(errcode.LLMProviderUnavailable, "The model provider cannot be reached right now.")
-	case errors.Is(err, tenantrepo.ErrTenantScopeMissing), errors.Is(err, tenantrepo.ErrTenantKindMismatch):
+	case errors.Is(err, tenantrepo.ErrTenantKindMismatch):
+		// Same answer as the enforce-mode RequireInternalTenant gate (403, no
+		// code); reached when that gate runs in warn mode.
+		return errcode.Forbidden("", "This endpoint is available only in an internal organization.")
+	case errors.Is(err, tenantrepo.ErrTenantScopeMissing):
 		return errcode.Internal("", "The organization context of this request could not be resolved.")
 	}
 	return errcode.Internal("", "The language model settings could not be processed.")
@@ -96,9 +101,15 @@ func MapError(err error) error {
 
 // failure maps err for the client and logs the cause of every server-side
 // failure, which the response never carries. The expected not_configured
-// 503 and every 4xx are outcomes, not faults, and are not logged.
+// 503 and the 4xx outcomes are not logged, except a tenant-tier mismatch:
+// that one means the route gate let it through (warn mode), so it is a
+// WARN, mirroring the gate's own warn-mode line.
 func failure(ctx context.Context, logger *slog.Logger, op string, err error) error {
 	mapped := MapError(err)
+	if errors.Is(err, tenantrepo.ErrTenantKindMismatch) {
+		logger.WarnContext(ctx, "llm: request refused outside an internal organization", slog.String("op", op), slog.String("error", err.Error()))
+		return mapped
+	}
 	var e *errcode.Error
 	if !errors.As(mapped, &e) || e.Status < http.StatusInternalServerError || e.ExpectedUnavailable() {
 		return mapped

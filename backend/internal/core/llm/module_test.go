@@ -248,7 +248,7 @@ func TestModule_RouteGuards(t *testing.T) {
 		{http.MethodPost, "/v1/admin/llm/credentials", []string{"internal", "sys:llm.credentials.admin", stepUp}},
 		{http.MethodPost, "/v1/admin/llm/credentials" + id + "/rotate", []string{"internal", "sys:llm.credentials.admin", stepUp}},
 		{http.MethodDelete, "/v1/admin/llm/credentials" + id, []string{"internal", "sys:llm.credentials.admin", stepUp}},
-		{http.MethodPatch, "/v1/admin/llm/credentials" + id, []string{"internal", "sys:llm.credentials.admin"}},
+		{http.MethodPatch, "/v1/admin/llm/credentials" + id, []string{"internal", "sys:llm.credentials.admin", stepUp}},
 		{http.MethodPost, "/v1/admin/llm/models", []string{"internal", "sys:llm.models.admin"}},
 		{http.MethodPatch, "/v1/admin/llm/models" + id, []string{"internal", "sys:llm.models.admin"}},
 		{http.MethodDelete, "/v1/admin/llm/models" + id, []string{"internal", "sys:llm.models.admin"}},
@@ -342,6 +342,9 @@ func TestModule_InitWiresGatewayAndPIIProducer(t *testing.T) {
 	}
 	if _, ok := module.GetTyped[iface.KMSProviderSetter](reg, module.ServiceLLMGateway); !ok {
 		t.Fatal("the gateway must accept a KMS provider (compliance late wiring)")
+	}
+	if _, ok := module.GetTyped[iface.AuditSinkSetter](reg, module.ServiceLLMGateway); !ok {
+		t.Fatal("the gateway must accept an audit sink (compliance late wiring)")
 	}
 	found := false
 	for _, p := range pii.List() {

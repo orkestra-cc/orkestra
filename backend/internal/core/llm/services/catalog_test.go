@@ -333,12 +333,65 @@ func TestCatalog_NamesAreUniquePerOrgAndRowsAreOrgScoped(t *testing.T) {
 }
 
 func TestCatalog_MissingTenantScope(t *testing.T) {
+	// Outside dev an unset tenant kind is an error, not a panic.
+	t.Setenv("ENV", "production")
 	svc, _, _, _, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
 	if _, err := svc.CreateCredential(context.Background(), models.CredentialInput{Name: "A", Provider: models.ProviderOpenAI, Secret: "sk-live-abcdef"}); !errors.Is(err, tenantrepo.ErrTenantScopeMissing) {
 		t.Fatalf("create err = %v", err)
 	}
 	if _, err := svc.ReplaceGrants(context.Background(), "m", nil); !errors.Is(err, tenantrepo.ErrTenantScopeMissing) && !errors.Is(err, ErrNotFound) {
 		t.Fatalf("grants err = %v", err)
+	}
+}
+
+// Under TENANT_KIND_ENFORCEMENT=warn an external tenant reaches the
+// handlers; the catalog itself refuses it and writes nothing.
+func TestCatalog_RefusesExternalTenants(t *testing.T) {
+	svc, creds, mods, grants, audit := newCatalog(t, CatalogConfig{AllowHosted: true})
+	internal := ctxFor("t1")
+	cred := openAICredential(t, svc, internal, "OpenAI")
+	m, err := svc.CreateModel(internal, modelInput("Fast", cred))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nCreds, nModels, nEvents := len(creds.rows), len(mods.rows), len(audit.events)
+
+	ext := ctxauthExternal(t)
+	name, everyone := "X", models.AccessEveryone
+	calls := map[string]func() error{
+		"CreateCredential": func() error {
+			_, err := svc.CreateCredential(ext, models.CredentialInput{Name: "E", Provider: models.ProviderOpenAI, Secret: "sk-live-abcdef"})
+			return err
+		},
+		"ListCredentials": func() error { _, err := svc.ListCredentials(ext); return err },
+		"GetCredential":   func() error { _, err := svc.GetCredential(ext, cred.UUID); return err },
+		"PatchCredential": func() error { _, err := svc.PatchCredential(ext, cred.UUID, &name, nil, nil); return err },
+		"RotateCredential": func() error {
+			_, err := svc.RotateCredential(ext, cred.UUID, "sk-live-zzzzzz")
+			return err
+		},
+		"DeleteCredential":     func() error { return svc.DeleteCredential(ext, cred.UUID) },
+		"OpenCredentialSecret": func() error { _, err := svc.OpenCredentialSecret(ext, cred); return err },
+		"CreateModel":          func() error { _, err := svc.CreateModel(ext, modelInput("E", cred)); return err },
+		"ListModels":           func() error { _, err := svc.ListModels(ext); return err },
+		"GetModel":             func() error { _, err := svc.GetModel(ext, m.UUID); return err },
+		"PatchModel": func() error {
+			_, err := svc.PatchModel(ext, m.UUID, models.LLMModelPatchBody{Access: &everyone})
+			return err
+		},
+		"DeleteModel":   func() error { return svc.DeleteModel(ext, m.UUID) },
+		"ReplaceGrants": func() error { _, err := svc.ReplaceGrants(ext, m.UUID, []string{"u-ext"}); return err },
+	}
+	for name, call := range calls {
+		if err := call(); !errors.Is(err, tenantrepo.ErrTenantKindMismatch) {
+			t.Errorf("%s under an external tenant err = %v", name, err)
+		}
+	}
+	if len(creds.rows) != nCreds || len(mods.rows) != nModels || len(grants.rows) != 0 || len(audit.events) != nEvents {
+		t.Fatalf("an external-tenant call wrote something: creds %d models %d grants %d events %d", len(creds.rows), len(mods.rows), len(grants.rows), len(audit.events))
+	}
+	if got := mods.rows[m.UUID]; got.Access != models.AccessGranted {
+		t.Fatalf("model changed under an external tenant: %+v", got)
 	}
 }
 

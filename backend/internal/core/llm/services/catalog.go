@@ -57,7 +57,12 @@ type CatalogConfig struct {
 }
 
 // CatalogService owns credentials, models and grants for an org and the
-// coherence rules between them.
+// coherence rules between them. Every public method first requires an
+// internal (Tier-1) tenant in ctx: the route-level RequireInternalTenant
+// passes external tenants through under TENANT_KIND_ENFORCEMENT=warn, and
+// llm rows must never be written or read under a client org. In dev an
+// unset tenant kind panics there (a wiring fault); elsewhere it is
+// tenantrepo.ErrTenantScopeMissing.
 type CatalogService struct {
 	creds  CredentialRepo
 	models ModelRepo
@@ -150,6 +155,9 @@ func (s *CatalogService) resolveBaseURL(provider, baseURL string) (string, error
 }
 
 func (s *CatalogService) CreateCredential(ctx context.Context, in models.CredentialInput) (*models.Credential, error) {
+	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
+		return nil, err
+	}
 	if err := models.ValidateCredentialInput(in, true); err != nil {
 		return nil, fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, err)
 	}
@@ -186,10 +194,16 @@ func (s *CatalogService) CreateCredential(ctx context.Context, in models.Credent
 }
 
 func (s *CatalogService) ListCredentials(ctx context.Context) ([]models.Credential, error) {
+	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
+		return nil, err
+	}
 	return s.creds.List(ctx)
 }
 
 func (s *CatalogService) GetCredential(ctx context.Context, id string) (*models.Credential, error) {
+	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
+		return nil, err
+	}
 	c, err := s.creds.Get(ctx, id)
 	if err != nil {
 		return nil, mapRepoErr(err)
@@ -202,6 +216,9 @@ func (s *CatalogService) GetCredential(ctx context.Context, id string) (*models.
 // turned allow_hosted off can still disable what already exists; enabling
 // or editing a live credential still goes through the gate.
 func (s *CatalogService) PatchCredential(ctx context.Context, id string, name, baseURL, status *string) (*models.Credential, error) {
+	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
+		return nil, err
+	}
 	c, err := s.GetCredential(ctx, id)
 	if err != nil {
 		return nil, err
@@ -244,6 +261,9 @@ func (s *CatalogService) PatchCredential(ctx context.Context, id string, name, b
 }
 
 func (s *CatalogService) RotateCredential(ctx context.Context, id, secret string) (*models.Credential, error) {
+	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
+		return nil, err
+	}
 	if secret == "" {
 		return nil, fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, models.ErrSecretRequired)
 	}
@@ -270,6 +290,9 @@ func (s *CatalogService) RotateCredential(ctx context.Context, id, secret string
 }
 
 func (s *CatalogService) DeleteCredential(ctx context.Context, id string) error {
+	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
+		return err
+	}
 	c, err := s.GetCredential(ctx, id)
 	if err != nil {
 		return err
@@ -292,6 +315,9 @@ func (s *CatalogService) DeleteCredential(ctx context.Context, id string) error 
 // the plaintext beyond the provider call it builds. c must come from the
 // repository (its TenantID is part of the AAD).
 func (s *CatalogService) OpenCredentialSecret(ctx context.Context, c *models.Credential) (string, error) {
+	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
+		return "", err
+	}
 	if c.Secret.IsZero() {
 		return "", nil
 	}
@@ -317,6 +343,9 @@ func (s *CatalogService) checkModelInput(ctx context.Context, in models.ModelInp
 }
 
 func (s *CatalogService) CreateModel(ctx context.Context, in models.ModelInput) (*models.Model, error) {
+	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
+		return nil, err
+	}
 	if err := s.checkModelInput(ctx, in); err != nil {
 		return nil, err
 	}
@@ -347,6 +376,9 @@ func (s *CatalogService) withGrants(ctx context.Context, m models.Model) (*model
 }
 
 func (s *CatalogService) ListModels(ctx context.Context) ([]models.LLMModelView, error) {
+	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
+		return nil, err
+	}
 	list, err := s.models.List(ctx)
 	if err != nil {
 		return nil, err
@@ -363,6 +395,9 @@ func (s *CatalogService) ListModels(ctx context.Context) ([]models.LLMModelView,
 }
 
 func (s *CatalogService) GetModel(ctx context.Context, id string) (*models.LLMModelView, error) {
+	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
+		return nil, err
+	}
 	m, err := s.models.Get(ctx, id)
 	if err != nil {
 		return nil, mapRepoErr(err)
@@ -374,6 +409,9 @@ func (s *CatalogService) GetModel(ctx context.Context, id string) (*models.LLMMo
 // validates the merged result with the create rules (shape, credential
 // coherence, provider gate); absent fields keep their stored value.
 func (s *CatalogService) PatchModel(ctx context.Context, id string, p models.LLMModelPatchBody) (*models.Model, error) {
+	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
+		return nil, err
+	}
 	m, err := s.models.Get(ctx, id)
 	if err != nil {
 		return nil, mapRepoErr(err)
@@ -405,6 +443,9 @@ func (s *CatalogService) PatchModel(ctx context.Context, id string, p models.LLM
 }
 
 func (s *CatalogService) DeleteModel(ctx context.Context, id string) error {
+	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
+		return err
+	}
 	m, err := s.models.Get(ctx, id)
 	if err != nil {
 		return mapRepoErr(err)
@@ -422,6 +463,9 @@ func (s *CatalogService) DeleteModel(ctx context.Context, id string) error {
 // ReplaceGrants validates every grantee against the org directory first,
 // so a single non-member rejects the whole list and nothing is written.
 func (s *CatalogService) ReplaceGrants(ctx context.Context, modelUUID string, userUUIDs []string) ([]models.LLMGrant, error) {
+	if err := tenantrepo.RequireInternalTenant(ctx); err != nil {
+		return nil, err
+	}
 	if _, err := s.models.Get(ctx, modelUUID); err != nil {
 		return nil, mapRepoErr(err)
 	}

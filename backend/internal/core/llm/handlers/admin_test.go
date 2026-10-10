@@ -287,7 +287,7 @@ func TestMapError(t *testing.T) {
 		{"capability", iface.ErrLLMCapabilityMismatch, 422, errcode.LLMCapabilityMismatch},
 		{"provider", fmt.Errorf("%w: routing not wired", iface.ErrLLMProviderUnavailable), 503, errcode.LLMProviderUnavailable},
 		{"tenant scope missing", tenantrepo.ErrTenantScopeMissing, 500, ""},
-		{"tenant kind mismatch", tenantrepo.ErrTenantKindMismatch, 500, ""},
+		{"tenant kind mismatch", fmt.Errorf("%w: want internal, got \"external\"", tenantrepo.ErrTenantKindMismatch), 403, ""},
 		{"unknown", errors.New("mongo: connection reset by peer 10.0.0.7"), 500, ""},
 	}
 	for _, tc := range cases {
@@ -326,6 +326,45 @@ func TestMapError_EveryModelValidationErrorHasItsOwnSentence(t *testing.T) {
 			t.Errorf("%v and %v share the detail %q", prev, sentinel, detail)
 		}
 		seen[detail] = sentinel
+	}
+}
+
+// Under TENANT_KIND_ENFORCEMENT=warn an external tenant reaches the
+// handlers: it is refused with 403 at WARN and nothing is written.
+func TestAdmin_ExternalTenantIs403AndWritesNothing(t *testing.T) {
+	h := newHarness(t, testKeyHex)
+	id := testkit.NewIdentity("u-ext", "ext@example.test", "guest").WithTenant("ext-1", []string{"org_owner"}, true)
+	ext := ctxauth.WithTenantKind(id.ContextFor(context.Background(), "ext-1"), "external")
+	_, err := h.admin.CreateCredential(ext, &LLMCredentialCreateRequest{Body: models.LLMCredentialCreateBody{
+		Name: "OpenAI", Provider: models.ProviderOpenAI, Secret: "sk-live-abcdef",
+	}})
+	if status, code, _ := codeOf(t, err); status != http.StatusForbidden || code != "" {
+		t.Fatalf("external create = %d %q", status, code)
+	}
+	if _, err := h.self.MyModels(ext, nil); err == nil {
+		t.Fatal("an external tenant must not list models")
+	} else if status, _, _ := codeOf(t, err); status != http.StatusForbidden {
+		t.Fatalf("external self list = %d", status)
+	}
+	logs := h.logs.String()
+	if !strings.Contains(logs, "level=WARN") || strings.Contains(logs, "level=ERROR") {
+		t.Fatalf("a tier mismatch must log at WARN, never ERROR: %s", logs)
+	}
+	if list, err := h.admin.ListCredentials(h.ctx, nil); err != nil || len(list.Body.Items) != 0 {
+		t.Fatalf("an external-tenant create wrote a row: %+v, %v", list, err)
+	}
+}
+
+// A request with no tenant kind is a wiring fault: 500, logged at ERROR.
+func TestAdmin_MissingTenantScopeIs500(t *testing.T) {
+	t.Setenv("ENV", "production") // dev panics on an unset tenant kind
+	h := newHarness(t, testKeyHex)
+	_, err := h.admin.ListCredentials(context.Background(), nil)
+	if status, code, _ := codeOf(t, err); status != http.StatusInternalServerError || code != "" {
+		t.Fatalf("no tenant = %d %q", status, code)
+	}
+	if !strings.Contains(h.logs.String(), "level=ERROR") {
+		t.Fatalf("a missing scope must log at ERROR: %s", h.logs.String())
 	}
 }
 

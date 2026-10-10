@@ -28,7 +28,7 @@ import (
 // when compliance has not injected a KMS provider.
 const secretKeyEnv = "LLM_SECRET_ENCRYPTION_KEY"
 
-// stepUpMaxAge is the MFA freshness required on secret and grant writes.
+// stepUpMaxAge is the MFA freshness required on credential and grant writes.
 const stepUpMaxAge = 5 * time.Minute
 
 type Module struct {
@@ -144,12 +144,12 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	// value itself is never logged.
 	vault, err := services.NewVault(os.Getenv(secretKeyEnv), logger)
 	if err != nil {
-		logger.Warn("llm: " + secretKeyEnv + " is not 64 hex characters and is ignored; API keys cannot be stored until it is fixed or compliance injects a KMS provider")
+		logger.Warn("llm: " + secretKeyEnv + " is not 64 hex characters and is ignored; API keys cannot be stored unless it is fixed or a KMS provider is injected")
 		if vault, err = services.NewVault("", logger); err != nil {
 			return err
 		}
 	} else if !vault.Available() {
-		logger.Warn("llm: " + secretKeyEnv + " is not set; API keys cannot be stored until compliance injects a KMS provider")
+		logger.Warn("llm: " + secretKeyEnv + " is not set; API keys cannot be stored unless a KMS provider is injected")
 	}
 	m.vault = vault
 
@@ -191,8 +191,8 @@ func (m *Module) Init(deps *module.Dependencies) error {
 // RegisterRoutes mounts every route on the operator surface (Tier-1 only)
 // behind RequireInternalTenant and a permission: reads llm.admin.read,
 // writes the matching .admin System permission, the self list the org
-// permission llm.models.self. Secret writes and grant changes also need a
-// fresh MFA proof.
+// permission llm.models.self. Every credential write (the API key or where
+// it is sent) and every grant change also needs a fresh MFA proof.
 func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 	op := ri.Operator
 	group := func(register func(r chi.Router), gates ...func(http.Handler) http.Handler) {
@@ -208,10 +208,8 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 
 	group(func(r chi.Router) { RegisterAdminReadRoutes(api(r), m.admin) },
 		op.AuthMW.RequireSystemPermission("llm.admin.read"))
-	group(func(r chi.Router) { RegisterCredentialStepUpRoutes(api(r), m.admin) },
+	group(func(r chi.Router) { RegisterCredentialWriteRoutes(api(r), m.admin) },
 		op.AuthMW.RequireSystemPermission("llm.credentials.admin"), op.AuthMW.RequireStepUp(stepUpMaxAge))
-	group(func(r chi.Router) { RegisterCredentialPatchRoutes(api(r), m.admin) },
-		op.AuthMW.RequireSystemPermission("llm.credentials.admin"))
 	group(func(r chi.Router) { RegisterModelWriteRoutes(api(r), m.admin) },
 		op.AuthMW.RequireSystemPermission("llm.models.admin"))
 	group(func(r chi.Router) { RegisterGrantRoutes(api(r), m.admin) },
