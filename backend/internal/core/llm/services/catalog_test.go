@@ -571,8 +571,102 @@ func TestCatalog_UpdateModel(t *testing.T) {
 	if _, err := svc.UpdateModel(ctx, "nope", in, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown err = %v", err)
 	}
-	// A disabled model no longer pins its credential.
+	// The disabled model no longer pins the credential, but "Slow" (still
+	// active) does.
 	if err := svc.DeleteCredential(ctx, cred.UUID); !errors.Is(err, ErrCredentialInUse) {
 		t.Fatalf("the other active model still pins the credential: %v", err)
+	}
+}
+
+func TestCatalog_ModelsFollowTheProviderGate(t *testing.T) {
+	svc, _, mods, _, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
+	ctx := ctxFor("t1")
+	cred := openAICredential(t, svc, ctx, "OpenAI")
+	live, err := svc.CreateModel(ctx, modelInput("Live", cred))
+	if err != nil {
+		t.Fatal(err)
+	}
+	off, err := svc.CreateModel(ctx, modelInput("Off", cred))
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled, active := models.ModelStatusDisabled, models.ModelStatusActive
+	if _, err := svc.UpdateModel(ctx, off.UUID, modelInput("Off", cred), &disabled); err != nil {
+		t.Fatal(err)
+	}
+
+	// The operator turns allow_hosted off.
+	svc.cfg = func() CatalogConfig { return CatalogConfig{AllowHosted: false, ProductionLike: true} }
+
+	// A still-active hosted credential cannot back a new model.
+	before := len(mods.rows)
+	if _, err := svc.CreateModel(ctx, modelInput("New", cred)); !errors.Is(err, ErrHostedDisabled) {
+		t.Fatalf("create on hosted credential err = %v", err)
+	}
+	if len(mods.rows) != before {
+		t.Fatal("a refused create must not write a model")
+	}
+	// A disabled hosted model cannot be re-enabled; the stored status holds.
+	if _, err := svc.UpdateModel(ctx, off.UUID, modelInput("Off", cred), &active); !errors.Is(err, ErrHostedDisabled) {
+		t.Fatalf("re-enable err = %v", err)
+	}
+	if mods.rows[off.UUID].Status != models.ModelStatusDisabled {
+		t.Fatalf("status after refused re-enable = %s", mods.rows[off.UUID].Status)
+	}
+	// Editing a live hosted model is gated too...
+	if _, err := svc.UpdateModel(ctx, live.UUID, modelInput("Live2", cred), nil); !errors.Is(err, ErrHostedDisabled) {
+		t.Fatalf("edit live err = %v", err)
+	}
+	// ...but disabling always works.
+	got, err := svc.UpdateModel(ctx, live.UUID, modelInput("Live", cred), &disabled)
+	if err != nil || got.Status != models.ModelStatusDisabled {
+		t.Fatalf("disable under gate = %+v, %v", got, err)
+	}
+	// A subscription-backed (user_account) model is hosted as well.
+	ua := models.ModelInput{
+		Name: "Mine", Provider: models.ProviderOpenAI, ModelID: "gpt-5.6-terra",
+		Capabilities:  models.LLMModelCapabilities{Chat: true},
+		CredentialRef: models.LLMCredentialRef{Kind: models.CredentialKindUserAccount},
+		Purposes:      []models.LLMModelPurpose{{Purpose: "default"}}, Access: models.AccessGranted,
+	}
+	if _, err := svc.CreateModel(ctx, ua); !errors.Is(err, ErrHostedDisabled) {
+		t.Fatalf("user_account create err = %v", err)
+	}
+	// Local providers stay available.
+	oll, err := svc.CreateCredential(ctx, models.CredentialInput{Name: "Local", Provider: models.ProviderOllama, BaseURL: "https://ollama.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := models.ModelInput{
+		Name: "Llama", Provider: models.ProviderOllama, ModelID: "llama3",
+		Capabilities:  models.LLMModelCapabilities{Chat: true},
+		CredentialRef: models.LLMCredentialRef{Kind: models.CredentialKindOrg, CredentialUUID: oll.UUID},
+		Purposes:      []models.LLMModelPurpose{{Purpose: "default"}}, Access: models.AccessGranted,
+	}
+	if _, err := svc.CreateModel(ctx, local); err != nil {
+		t.Fatalf("ollama model under allow_hosted=false: %v", err)
+	}
+}
+
+func TestCatalog_MockModelRefusedInProduction(t *testing.T) {
+	svc, _, _, _, _ := newCatalog(t, CatalogConfig{})
+	ctx := ctxFor("t1")
+	mock, err := svc.CreateCredential(ctx, models.CredentialInput{Name: "Mock", Provider: models.ProviderMock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := models.ModelInput{
+		Name: "M", Provider: models.ProviderMock, ModelID: "mock-1",
+		Capabilities:  models.LLMModelCapabilities{Chat: true},
+		CredentialRef: models.LLMCredentialRef{Kind: models.CredentialKindOrg, CredentialUUID: mock.UUID},
+		Purposes:      []models.LLMModelPurpose{{Purpose: "default"}}, Access: models.AccessGranted,
+	}
+	if _, err := svc.CreateModel(ctx, in); err != nil {
+		t.Fatalf("mock model outside production: %v", err)
+	}
+	svc.cfg = func() CatalogConfig { return CatalogConfig{ProductionLike: true} }
+	in.Name = "M2"
+	if _, err := svc.CreateModel(ctx, in); !errors.Is(err, ErrMockNotAllowed) {
+		t.Fatalf("mock model in production err = %v", err)
 	}
 }

@@ -320,6 +320,10 @@ func (s *CatalogService) CreateModel(ctx context.Context, in models.ModelInput) 
 	if err := s.checkModelInput(ctx, in); err != nil {
 		return nil, err
 	}
+	// New models are active: same opt-ins as the credential they ride on.
+	if err := s.checkProviderGate(in.Provider); err != nil {
+		return nil, err
+	}
 	actor, _ := ctxauth.GetUserUUID(ctx)
 	now := time.Now().UTC()
 	m := &models.Model{
@@ -381,6 +385,13 @@ func (s *CatalogService) UpdateModel(ctx context.Context, id string, in models.M
 			return nil, fmt.Errorf("%w: status", iface.ErrLLMInvalidRequest)
 		}
 		m.Status = *status
+	}
+	// Same rule as PatchCredential: a model that ends up disabled is never
+	// gated (disabling must always work); enabling or editing a live one is.
+	if m.Status != models.ModelStatusDisabled {
+		if err := s.checkProviderGate(in.Provider); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.models.Update(ctx, m); err != nil {
 		return nil, mapRepoErr(err)
