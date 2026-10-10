@@ -7,6 +7,7 @@ import (
 	"github.com/orkestra/backend/internal/core/auth"
 	"github.com/orkestra/backend/internal/core/authz"
 	"github.com/orkestra/backend/internal/core/compliance"
+	"github.com/orkestra/backend/internal/core/llm"
 	"github.com/orkestra/backend/internal/core/logging"
 	"github.com/orkestra/backend/internal/core/navigation"
 	"github.com/orkestra/backend/internal/core/notification"
@@ -32,6 +33,9 @@ import (
 //   - logging: ADR-0005 Phase F admin surface for runtime log-level mutation
 //     (no deps; its own service is read by main.go AFTER InitAll to hot-swap
 //     the slog handler's resolver).
+//   - llm: ADR-0022 — LLM credentials/models/grants per org + iface.LLMGateway.
+//     Depends on user/tenant/notification; inits BEFORE compliance so the
+//     latter can push the KMS provider and the audit sink into the gateway.
 //   - compliance: ADR-0009 — audit sink + GDPR DSR pipeline + per-tenant KMS
 //     crypto-shred + SOC2 evidence. Depends on user/auth/tenant; inits last so
 //     their PII producers and concrete services are already registered when it
@@ -45,6 +49,7 @@ func coreModules(cfg *config.Config) []func() module.Module {
 		func() module.Module { return auth.NewModule(cfg) },
 		func() module.Module { return navigation.NewModule() },
 		func() module.Module { return logging.NewModule() },
+		func() module.Module { return llm.NewModule() },
 		func() module.Module { return compliance.NewModule() },
 	}
 }

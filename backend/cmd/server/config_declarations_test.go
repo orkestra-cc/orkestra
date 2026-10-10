@@ -10,7 +10,7 @@ import (
 // coreModuleCount guards against the gate silently going partial: if a core
 // module is added to the catalog without this number moving, the new module
 // is being checked, but a *removal* would otherwise shrink the gate unnoticed.
-const coreModuleCount = 8
+const coreModuleCount = 9
 
 // buildAllModules instantiates every module compiled into this binary. The
 // instances are used for reading declarations only — Init is never called —
