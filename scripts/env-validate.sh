@@ -228,7 +228,7 @@ validate_env_file() {
 
     # Secret hygiene — see SECRET_VARS above.
     print_info "Checking secret values..."
-    local strict=0 value reason
+    local strict=0 value reason hint
     [[ "$env_name" == "staging" || "$env_name" == "production" ]] && strict=1
     for var in "${SECRET_VARS[@]}"; do
         value=$(env_value "$var")
@@ -252,8 +252,15 @@ validate_env_file() {
                 [ -z "$value" ] && continue
                 ;;
         esac
+        hint="openssl rand -hex 16"
         if secret_is_placeholder "$value"; then
             reason="is empty or a placeholder"
+        elif [ "$var" = "LLM_SECRET_ENCRYPTION_KEY" ] && ! [[ "$value" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            # The backend (llm vault) accepts exactly 64 hex chars (32 bytes);
+            # anything else is logged as a WARN and silently disables secret
+            # writes, so this is the only deploy-time gate.
+            reason="must be 64 hex characters"
+            hint="openssl rand -hex 32"
         elif secret_is_weak "$value"; then
             reason="is shorter than 16 characters"
         else
@@ -261,7 +268,7 @@ validate_env_file() {
             continue
         fi
         if [ "$strict" -eq 1 ]; then
-            print_error "$var $reason — generate one with: openssl rand -hex 16 (make init does this for a fresh checkout)"
+            print_error "$var $reason — generate one with: $hint (make init does this for a fresh checkout)"
             errors=$((errors + 1))
         else
             print_warning "$var $reason — tolerated in development, refused in staging/production"
@@ -465,8 +472,10 @@ ${BLUE}Checks performed:${NC}
     - Security settings appropriate for the environment
     - Every secret (COOKIE_SECRET, OAUTH_TOKEN_ENCRYPTION_KEY,
       ORKESTRA_KMS_MASTER_KEY, LLM_SECRET_ENCRYPTION_KEY, MONGO_ROOT_PASSWORD,
-      REDIS_PASSWORD, STORAGE_SECRET_KEY, a set RUSTFS_ROOT_PASSWORD) is a real value: not a
-      shipped placeholder, at least 16 characters. Error in staging and
+      REDIS_PASSWORD, STORAGE_SECRET_KEY, a set RUSTFS_ROOT_PASSWORD) is a
+      real value: not a shipped placeholder, at least 16 characters.
+      LLM_SECRET_ENCRYPTION_KEY must also be exactly 64 hex characters
+      (the llm module ignores anything else). Error in staging and
       production, warning in development. Object storage disabled (both
       STORAGE_* keys empty) needs RUSTFS_ROOT_* for the bundled container.
     - No placeholder/development values in production
