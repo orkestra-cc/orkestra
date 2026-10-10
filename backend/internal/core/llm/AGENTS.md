@@ -94,19 +94,19 @@ Operator host. Every group runs `RequireInternalTenant` first; a tenant of anoth
 |---|---|---|---|
 | GET | `/v1/admin/llm/credentials` | `llm.admin.read` | 200 `{items}` |
 | GET | `/v1/admin/llm/credentials/{uuid}` | `llm.admin.read` | 200 |
-| POST | `/v1/admin/llm/credentials` | `llm.credentials.admin` + step-up | 201 |
-| PATCH | `/v1/admin/llm/credentials/{uuid}` | `llm.credentials.admin` + step-up | 200 |
-| POST | `/v1/admin/llm/credentials/{uuid}/rotate` | `llm.credentials.admin` + step-up | 200 |
-| DELETE | `/v1/admin/llm/credentials/{uuid}` | `llm.credentials.admin` + step-up | 204; 409 `llm.credential_in_use` |
+| POST | `/v1/admin/llm/credentials` | `llm.credentials.admin` + MFA + step-up | 201 |
+| PATCH | `/v1/admin/llm/credentials/{uuid}` | `llm.credentials.admin` + MFA + step-up | 200 |
+| POST | `/v1/admin/llm/credentials/{uuid}/rotate` | `llm.credentials.admin` + MFA + step-up | 200 |
+| DELETE | `/v1/admin/llm/credentials/{uuid}` | `llm.credentials.admin` + MFA + step-up | 204; 409 `llm.credential_in_use` |
 | GET | `/v1/admin/llm/models` | `llm.admin.read` | 200 `{items}`, each with `grants` |
 | GET | `/v1/admin/llm/models/{uuid}` | `llm.admin.read` | 200 |
-| POST | `/v1/admin/llm/models` | `llm.models.admin` | 201; always `access: granted`, no grants (the body has no `access`) |
-| PATCH | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` | 200, **partial** (pointer fields; validated on the merged model); `{status}` enables/disables; no `access` field |
-| DELETE | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` | 204; deletes the model's grants first |
-| PUT | `/v1/admin/llm/models/{uuid}/grants` | `llm.grants.admin` + step-up | body `{access, userUuids}` (`access` required: `granted`\|`everyone`); sets access and replaces the complete grant list together; 200 the model view with its grants |
+| POST | `/v1/admin/llm/models` | `llm.models.admin` + MFA | 201; always `access: granted`, no grants (the body has no `access`) |
+| PATCH | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` + MFA | 200, **partial** (pointer fields; validated on the merged model); `{status}` enables/disables; no `access` field |
+| DELETE | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` + MFA | 204; deletes the model's grants first |
+| PUT | `/v1/admin/llm/models/{uuid}/grants` | `llm.grants.admin` + MFA + step-up | body `{access, userUuids}` (`access` required: `granted`\|`everyone`); sets access and replaces the complete grant list together; 200 the model view with its grants |
 | GET | `/v1/llm/me/models` | org permission `llm.models.self` | 200 `{items}` |
 
-Step-up is `RequireStepUp(5 * time.Minute)`. Credential `PATCH` is included on purpose: re-pointing `baseUrl` sends the stored key to another host. Model writes have no step-up.
+Step-up is `RequireStepUp(5 * time.Minute)`. Credential `PATCH` is included on purpose: re-pointing `baseUrl` sends the stored key to another host. Model writes have no step-up. **Every write group carries `RequireMFA()`** (the authz precedent): with `CEDAR_ENFORCE_ACTIONS` unset the role table decides and the Cedar admin-suffix refusal is only logged, so the route gate is what keeps a password-only administrator (one in the MFA enrollment grace period included) out; on the credential and grant groups it sits before the step-up because step-up alone accepts a password reconfirm from an operator with no enrolled factor whose role does not require one. `TestModule_RouteGuards` pins the order.
 
 Error codes (`shared/errcode`, `llm.` prefix) and statuses: `invalid_request` 422, `not_found` 404, `name_in_use` 409, `credential_in_use` 409, `secret_key_missing` 503, `endpoint_not_allowed` 422, `hosted_disabled` 422, `mock_not_allowed` 422, `grant_not_member` 422, plus the gateway's `not_configured` 503 (FeatureNotConfigured pattern), `no_eligible_model` 403, `model_access_denied` 403, `capability_mismatch` 422, `provider_unavailable` 503. A wrong-tier tenant is `403` with no code; an unknown error is a generic `500` whose cause is logged, with no `llm.internal` code. Audit actions: `llm.credential.{created,updated,rotated,deleted}`, `llm.model.{created,updated,deleted}`, `llm.grants.replaced` (metadata `access`, `granted` count).
 

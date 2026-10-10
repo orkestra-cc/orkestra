@@ -192,8 +192,19 @@ func (m *Module) Init(deps *module.Dependencies) error {
 // RegisterRoutes mounts every route on the operator surface (Tier-1 only)
 // behind RequireInternalTenant and a permission: reads llm.admin.read,
 // writes the matching .admin System permission, the self list the org
-// permission llm.models.self. Every credential write (the API key or where
-// it is sent) and every grant change also needs a fresh MFA proof.
+// permission llm.models.self.
+//
+// Every write group also carries RequireMFA (the authz precedent). The
+// .admin suffix makes Cedar demand an enrolled second factor, but with
+// CEDAR_ENFORCE_ACTIONS unset the role table decides and Cedar's refusal is
+// only logged, so without this gate a password-only administrator (one in
+// the MFA enrollment grace period included) could change models. On the
+// credential and grant groups RequireMFA sits before the step-up: step-up
+// alone is satisfied by a password reconfirm for an operator with no
+// enrolled factor whose role does not require one, so it does not prove a
+// second factor; RequireMFA does, and the step-up then demands it be fresh
+// for every credential write (the API key or where it is sent) and every
+// grant change.
 func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 	op := ri.Operator
 	group := func(register func(r chi.Router), gates ...func(http.Handler) http.Handler) {
@@ -210,11 +221,11 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 	group(func(r chi.Router) { RegisterAdminReadRoutes(api(r), m.admin) },
 		op.AuthMW.RequireSystemPermission("llm.admin.read"))
 	group(func(r chi.Router) { RegisterCredentialWriteRoutes(api(r), m.admin) },
-		op.AuthMW.RequireSystemPermission("llm.credentials.admin"), op.AuthMW.RequireStepUp(stepUpMaxAge))
+		op.AuthMW.RequireSystemPermission("llm.credentials.admin"), op.AuthMW.RequireMFA(), op.AuthMW.RequireStepUp(stepUpMaxAge))
 	group(func(r chi.Router) { RegisterModelWriteRoutes(api(r), m.admin) },
-		op.AuthMW.RequireSystemPermission("llm.models.admin"))
+		op.AuthMW.RequireSystemPermission("llm.models.admin"), op.AuthMW.RequireMFA())
 	group(func(r chi.Router) { RegisterGrantRoutes(api(r), m.admin) },
-		op.AuthMW.RequireSystemPermission("llm.grants.admin"), op.AuthMW.RequireStepUp(stepUpMaxAge))
+		op.AuthMW.RequireSystemPermission("llm.grants.admin"), op.AuthMW.RequireMFA(), op.AuthMW.RequireStepUp(stepUpMaxAge))
 	group(func(r chi.Router) { RegisterSelfRoutes(api(r), m.self) },
 		op.AuthMW.RequirePermission("llm.models.self"))
 }

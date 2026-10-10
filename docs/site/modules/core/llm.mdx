@@ -36,22 +36,22 @@ A missing or malformed `LLM_SECRET_ENCRYPTION_KEY` does not stop the boot. The m
 
 ## Routes
 
-Operator host. Every route requires an authenticated internal-organization context (a tenant of another kind is refused with `403`) and the permission shown. Write routes marked *step-up* additionally need a fresh MFA proof, valid for 5 minutes.
+Operator host. Every route requires an authenticated internal-organization context (a tenant of another kind is refused with `403`) and the permission shown. Every write route needs a second factor completed in the session (*second factor*); routes marked *step-up* additionally need it to be fresh, within 5 minutes.
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
 | GET | `/v1/admin/llm/credentials` | `llm.admin.read` | List, secrets redacted |
 | GET | `/v1/admin/llm/credentials/{uuid}` | `llm.admin.read` | |
-| POST | `/v1/admin/llm/credentials` | `llm.credentials.admin` | Step-up. `201` |
-| PATCH | `/v1/admin/llm/credentials/{uuid}` | `llm.credentials.admin` | Step-up. Rename, re-point `baseUrl`, enable or disable; it can send a stored key to another host, hence the step-up |
-| POST | `/v1/admin/llm/credentials/{uuid}/rotate` | `llm.credentials.admin` | Step-up. Replaces the API key |
-| DELETE | `/v1/admin/llm/credentials/{uuid}` | `llm.credentials.admin` | Step-up. `204`; `409 llm.credential_in_use` while an active model uses it |
+| POST | `/v1/admin/llm/credentials` | `llm.credentials.admin` | Second factor + step-up. `201` |
+| PATCH | `/v1/admin/llm/credentials/{uuid}` | `llm.credentials.admin` | Second factor + step-up. Rename, re-point `baseUrl`, enable or disable; it can send a stored key to another host, hence the step-up |
+| POST | `/v1/admin/llm/credentials/{uuid}/rotate` | `llm.credentials.admin` | Second factor + step-up. Replaces the API key |
+| DELETE | `/v1/admin/llm/credentials/{uuid}` | `llm.credentials.admin` | Second factor + step-up. `204`; `409 llm.credential_in_use` while an active model uses it |
 | GET | `/v1/admin/llm/models` | `llm.admin.read` | List, each model with its grants |
 | GET | `/v1/admin/llm/models/{uuid}` | `llm.admin.read` | |
-| POST | `/v1/admin/llm/models` | `llm.models.admin` | `201`. A new model is closed: `access: granted` and no grants. The body has no `access` |
-| PATCH | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` | **Partial**: an omitted field keeps its stored value; capabilities, credential reference, defaults and purposes replace the stored value whole when present; the merged model is validated as on create. `{status}` alone enables or disables the model. It cannot change `access` |
-| DELETE | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` | `204`; also deletes the model's grants |
-| PUT | `/v1/admin/llm/models/{uuid}/grants` | `llm.grants.admin` | Step-up. Body `{access, userUuids}`: sets `access` (`granted` or `everyone`, required) and replaces the complete grant list together; answers the model with its grants |
+| POST | `/v1/admin/llm/models` | `llm.models.admin` | Second factor. `201`. A new model is closed: `access: granted` and no grants. The body has no `access` |
+| PATCH | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` | Second factor. **Partial**: an omitted field keeps its stored value; capabilities, credential reference, defaults and purposes replace the stored value whole when present; the merged model is validated as on create. `{status}` alone enables or disables the model. It cannot change `access` |
+| DELETE | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` | Second factor. `204`; also deletes the model's grants |
+| PUT | `/v1/admin/llm/models/{uuid}/grants` | `llm.grants.admin` | Second factor + step-up. Body `{access, userUuids}`: sets `access` (`granted` or `everyone`, required) and replaces the complete grant list together; answers the model with its grants |
 | GET | `/v1/llm/me/models` | `llm.models.self` | The models the calling user may use in the current organization |
 
 Collections are returned as `{ "items": [...] }`. Errors carry a stable `llm.*` code:
@@ -82,7 +82,7 @@ All admin permissions are `System: true` — only the platform system roles inhe
 | `llm.grants.admin` | mutation | Decide who may use each model |
 | `llm.models.self` | self | List the models you may use (an organization permission, not a system one) |
 
-Every `.admin` mutation requires an enrolled second factor (the policy engine's admin-suffix rule), and a `developer` is not granted an `.admin` key in production. Each mutation emits an audit event (`llm.credential.created|updated|rotated|deleted`, `llm.model.created|updated|deleted`, `llm.grants.replaced`) once the compliance module has injected the audit sink; the event carries names and counts, never secrets or base URLs.
+Every `.admin` mutation requires a second factor completed in the session — the route itself checks it, independently of whether the policy engine's admin-suffix rule is enforced — and credential and grant changes additionally require a fresh one (step-up, five minutes; a password reconfirm does not count). A `developer` is not granted an `.admin` key in production. Each mutation emits an audit event (`llm.credential.created|updated|rotated|deleted`, `llm.model.created|updated|deleted`, `llm.grants.replaced`) once the compliance module has injected the audit sink; the event carries names and counts, never secrets or base URLs.
 
 ## Configuration
 
