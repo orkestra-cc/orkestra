@@ -46,6 +46,7 @@ prod=(
     "COOKIE_SECRET=${hex32}${hex32}"
     "OAUTH_TOKEN_ENCRYPTION_KEY=${hex32}${hex32}"
     "ORKESTRA_KMS_MASTER_KEY=${hex32}${hex32}"
+    "LLM_SECRET_ENCRYPTION_KEY=${hex32}${hex32}"
     "MONGO_ROOT_PASSWORD=${hex32}"
     "REDIS_PASSWORD=${hex32}"
     "STORAGE_SECRET_KEY=${hex32}"

@@ -162,6 +162,7 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
   cookie_secret=$(openssl rand -hex 32)
   oauth_key=$(openssl rand -hex 32)
   kms_key=$(openssl rand -hex 32)
+  llm_key=$(openssl rand -hex 32)
   mongo_pw=$(openssl rand -hex 16)
   redis_pw=$(openssl rand -hex 16)
   # Object-storage secret. On the bundled RustFS this IS the root secret
@@ -179,6 +180,7 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
     -e "s|REPLACE_WITH_RANDOM_HEX_64_COOKIE_SECRET|${cookie_secret}|" \
     -e "s|REPLACE_WITH_RANDOM_HEX_64_OAUTH_ENCRYPTION|${oauth_key}|" \
     -e "s|REPLACE_WITH_RANDOM_HEX_64_KMS_MASTER|${kms_key}|" \
+    -e "s|REPLACE_WITH_RANDOM_HEX_64_LLM_SECRET|${llm_key}|" \
     -e "s|REPLACE_WITH_RANDOM_HEX_32_MONGO_PASSWORD|${mongo_pw}|" \
     -e "s|REPLACE_WITH_RANDOM_HEX_32_REDIS_PASSWORD|${redis_pw}|" \
     -e "s|REPLACE_WITH_RANDOM_HEX_32_STORAGE_SECRET|${storage_secret}|" \
@@ -196,7 +198,7 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
 
   mv "$tmp_env" "$ENV_FILE"
   chmod 600 "$ENV_FILE"
-  ok "filled COOKIE_SECRET / OAUTH_TOKEN_ENCRYPTION_KEY / ORKESTRA_KMS_MASTER_KEY / MONGO_ROOT_PASSWORD / REDIS_PASSWORD / STORAGE_SECRET_KEY / PDF_RENDERER_PASSWORD"
+  ok "filled COOKIE_SECRET / OAUTH_TOKEN_ENCRYPTION_KEY / ORKESTRA_KMS_MASTER_KEY / LLM_SECRET_ENCRYPTION_KEY / MONGO_ROOT_PASSWORD / REDIS_PASSWORD / STORAGE_SECRET_KEY / PDF_RENDERER_PASSWORD"
   muted "chmod 600 applied — .env now contains live secrets"
 
   # Seed a non-colliding port block so a second Orkestra stack on this host

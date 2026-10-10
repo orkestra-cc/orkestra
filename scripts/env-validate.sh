@@ -64,6 +64,7 @@ SECRET_VARS=(
     "COOKIE_SECRET"
     "OAUTH_TOKEN_ENCRYPTION_KEY"
     "ORKESTRA_KMS_MASTER_KEY"
+    "LLM_SECRET_ENCRYPTION_KEY"
     "MONGO_ROOT_PASSWORD"
     "REDIS_PASSWORD"
     "STORAGE_SECRET_KEY"
@@ -463,8 +464,8 @@ ${BLUE}Checks performed:${NC}
       client tier is disabled and is not checked.
     - Security settings appropriate for the environment
     - Every secret (COOKIE_SECRET, OAUTH_TOKEN_ENCRYPTION_KEY,
-      ORKESTRA_KMS_MASTER_KEY, MONGO_ROOT_PASSWORD, REDIS_PASSWORD,
-      STORAGE_SECRET_KEY, a set RUSTFS_ROOT_PASSWORD) is a real value: not a
+      ORKESTRA_KMS_MASTER_KEY, LLM_SECRET_ENCRYPTION_KEY, MONGO_ROOT_PASSWORD,
+      REDIS_PASSWORD, STORAGE_SECRET_KEY, a set RUSTFS_ROOT_PASSWORD) is a real value: not a
       shipped placeholder, at least 16 characters. Error in staging and
       production, warning in development. Object storage disabled (both
       STORAGE_* keys empty) needs RUSTFS_ROOT_* for the bundled container.

@@ -28,7 +28,7 @@ fail() {
   exit 1
 }
 
-creds='MONGO_ROOT_PASSWORD|REDIS_PASSWORD|STORAGE_SECRET_KEY|RUSTFS_ROOT_PASSWORD|RUSTFS_SECRET_KEY|COOKIE_SECRET|OAUTH_TOKEN_ENCRYPTION_KEY|ORKESTRA_KMS_MASTER_KEY|PDF_RENDERER_PASSWORD'
+creds='MONGO_ROOT_PASSWORD|REDIS_PASSWORD|STORAGE_SECRET_KEY|RUSTFS_ROOT_PASSWORD|RUSTFS_SECRET_KEY|COOKIE_SECRET|OAUTH_TOKEN_ENCRYPTION_KEY|ORKESTRA_KMS_MASTER_KEY|LLM_SECRET_ENCRYPTION_KEY|PDF_RENDERER_PASSWORD'
 
 # 1. Literal fallbacks. `[^$}]` after `:-` excludes both the empty fallback and
 #    a nested variable reference (`${A:-${B:?...}}`).
@@ -40,7 +40,7 @@ for f in docker/docker-compose.infra.yml docker/docker-compose.dev.yml \
 done
 
 # 2. .env.example ships placeholders, never values, for the generated secrets.
-for var in COOKIE_SECRET OAUTH_TOKEN_ENCRYPTION_KEY ORKESTRA_KMS_MASTER_KEY \
+for var in COOKIE_SECRET OAUTH_TOKEN_ENCRYPTION_KEY ORKESTRA_KMS_MASTER_KEY LLM_SECRET_ENCRYPTION_KEY \
            MONGO_ROOT_PASSWORD REDIS_PASSWORD STORAGE_SECRET_KEY; do
   val="$(grep -E "^${var}=" docker/.env.example | head -1 | cut -d= -f2-)"
   case "$val" in
