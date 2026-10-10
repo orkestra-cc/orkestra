@@ -91,7 +91,9 @@ var (
 	ErrInvalidProvider = errors.New("unknown provider")
 	ErrBaseURLFixed    = errors.New("baseUrl is fixed for this provider")
 	ErrBaseURLRequired = errors.New("baseUrl is required for this provider")
-	ErrSecretRequired  = errors.New("secret is required for this provider")
+	// ErrBaseURLNotAllowed: the provider has no endpoint to configure (mock).
+	ErrBaseURLNotAllowed = errors.New("baseUrl is not accepted for this provider")
+	ErrSecretRequired    = errors.New("secret is required for this provider")
 )
 
 // ValidateCredentialInput checks shape only; endpoint safety and hosted
@@ -105,6 +107,9 @@ func ValidateCredentialInput(in CredentialInput, creating bool) error {
 	}
 	if fixed := FixedBaseURL(in.Provider); fixed != "" && in.BaseURL != "" && in.BaseURL != fixed {
 		return ErrBaseURLFixed
+	}
+	if in.Provider == ProviderMock && in.BaseURL != "" {
+		return ErrBaseURLNotAllowed
 	}
 	if FixedBaseURL(in.Provider) == "" && in.Provider != ProviderMock && in.BaseURL == "" {
 		return ErrBaseURLRequired

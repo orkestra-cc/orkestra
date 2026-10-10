@@ -126,3 +126,24 @@ func TestCredentialView(t *testing.T) {
 		t.Fatal("empty credential must report no secret")
 	}
 }
+
+func TestValidateCredentialInput_BaseURLOnlyForProvidersThatTakeOne(t *testing.T) {
+	cases := []struct {
+		name string
+		in   CredentialInput
+		want error
+	}{
+		{"mock with baseUrl", CredentialInput{Name: "M", Provider: ProviderMock, BaseURL: "http://x"}, ErrBaseURLNotAllowed},
+		{"mock without baseUrl", CredentialInput{Name: "M", Provider: ProviderMock}, nil},
+		{"openai custom baseUrl", CredentialInput{Name: "O", Provider: ProviderOpenAI, Secret: "k", BaseURL: "https://evil.example"}, ErrBaseURLFixed},
+		{"openai fixed baseUrl echoed back", CredentialInput{Name: "O", Provider: ProviderOpenAI, Secret: "k", BaseURL: "https://api.openai.com/v1"}, nil},
+		{"ollama needs baseUrl", CredentialInput{Name: "L", Provider: ProviderOllama}, ErrBaseURLRequired},
+		{"ollama with baseUrl", CredentialInput{Name: "L", Provider: ProviderOllama, BaseURL: "http://ollama:11434"}, nil},
+		{"openai_compatible with baseUrl", CredentialInput{Name: "C", Provider: ProviderOpenAICompatible, Secret: "k", BaseURL: "https://x.example"}, nil},
+	}
+	for _, c := range cases {
+		if got := ValidateCredentialInput(c.in, true); got != c.want {
+			t.Errorf("%s: err = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
