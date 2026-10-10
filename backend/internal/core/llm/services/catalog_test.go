@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"reflect"
 	"sort"
 	"testing"
 
@@ -537,7 +538,63 @@ func TestCatalog_UserAccountModelRules(t *testing.T) {
 	}
 }
 
-func TestCatalog_UpdateModel(t *testing.T) {
+// fullPatch sets every field of in, the way the admin form saves a model.
+func fullPatch(in models.ModelInput, status *string) models.LLMModelPatchBody {
+	return models.LLMModelPatchBody{
+		Name: &in.Name, Provider: &in.Provider, ModelID: &in.ModelID, Capabilities: &in.Capabilities,
+		CredentialRef: &in.CredentialRef, Defaults: &in.Defaults, BudgetReserveOutputTokens: in.BudgetReserveOutputTokens,
+		Purposes: in.Purposes, Access: &in.Access, Status: status,
+	}
+}
+
+func TestCatalog_PatchModelPartial(t *testing.T) {
+	svc, _, mods, _, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
+	ctx := ctxFor("t1")
+	cred := openAICredential(t, svc, ctx, "OpenAI")
+	m, err := svc.CreateModel(ctx, modelInput("Fast", cred))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := *mods.rows[m.UUID]
+
+	everyone := models.AccessEveryone
+	got, err := svc.PatchModel(ctx, m.UUID, models.LLMModelPatchBody{Access: &everyone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Access != models.AccessEveryone {
+		t.Fatalf("access = %s", got.Access)
+	}
+	after := *mods.rows[m.UUID]
+	after.Access, after.UpdatedAt = before.Access, before.UpdatedAt
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("a one-field patch changed other fields:\n before %+v\n after  %+v", before, after)
+	}
+
+	// The merged model is validated as a whole: embeddings without
+	// dimensions are rejected, and so is a provider that no longer matches
+	// the stored credential.
+	emb := models.LLMModelCapabilities{Embeddings: true}
+	if _, err := svc.PatchModel(ctx, m.UUID, models.LLMModelPatchBody{Capabilities: &emb}); !errors.Is(err, iface.ErrLLMInvalidRequest) || !errors.Is(err, models.ErrInvalidCapabilities) {
+		t.Fatalf("invalid merged capabilities err = %v", err)
+	}
+	anthropic := models.ProviderAnthropic
+	if _, err := svc.PatchModel(ctx, m.UUID, models.LLMModelPatchBody{Provider: &anthropic}); !errors.Is(err, ErrProviderMismatch) {
+		t.Fatalf("provider no longer matching the credential err = %v", err)
+	}
+	if mods.rows[m.UUID].Access != models.AccessEveryone || mods.rows[m.UUID].Provider != models.ProviderOpenAI {
+		t.Fatal("a rejected patch was persisted")
+	}
+
+	// Disabling through a status-only patch works under the hosted gate.
+	svc.cfg = func() CatalogConfig { return CatalogConfig{} }
+	disabled := models.ModelStatusDisabled
+	if got, err := svc.PatchModel(ctx, m.UUID, models.LLMModelPatchBody{Status: &disabled}); err != nil || got.Status != models.ModelStatusDisabled {
+		t.Fatalf("disable = %+v, %v", got, err)
+	}
+}
+
+func TestCatalog_PatchModelFull(t *testing.T) {
 	svc, _, mods, _, audit := newCatalog(t, CatalogConfig{AllowHosted: true})
 	ctx := ctxFor("t1")
 	cred := openAICredential(t, svc, ctx, "OpenAI")
@@ -550,7 +607,7 @@ func TestCatalog_UpdateModel(t *testing.T) {
 	}
 	in := modelInput("Faster", cred)
 	disabled := models.ModelStatusDisabled
-	updated, err := svc.UpdateModel(ctx, m.UUID, in, &disabled)
+	updated, err := svc.PatchModel(ctx, m.UUID, fullPatch(in, &disabled))
 	if err != nil || updated.Name != "Faster" || updated.Status != models.ModelStatusDisabled {
 		t.Fatalf("update = %+v, %v", updated, err)
 	}
@@ -561,14 +618,14 @@ func TestCatalog_UpdateModel(t *testing.T) {
 		t.Fatalf("audit = %+v", last)
 	}
 	// Renaming onto another model's name collides.
-	if _, err := svc.UpdateModel(ctx, m.UUID, modelInput("Slow", cred), nil); !errors.Is(err, ErrNameInUse) {
+	if _, err := svc.PatchModel(ctx, m.UUID, fullPatch(modelInput("Slow", cred), nil)); !errors.Is(err, ErrNameInUse) {
 		t.Fatalf("rename collision err = %v", err)
 	}
 	bad := "paused"
-	if _, err := svc.UpdateModel(ctx, m.UUID, in, &bad); !errors.Is(err, iface.ErrLLMInvalidRequest) {
+	if _, err := svc.PatchModel(ctx, m.UUID, fullPatch(in, &bad)); !errors.Is(err, iface.ErrLLMInvalidRequest) {
 		t.Fatalf("bad status err = %v", err)
 	}
-	if _, err := svc.UpdateModel(ctx, "nope", in, nil); !errors.Is(err, ErrNotFound) {
+	if _, err := svc.PatchModel(ctx, "nope", fullPatch(in, nil)); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown err = %v", err)
 	}
 	// The disabled model no longer pins the credential, but "Slow" (still
@@ -591,7 +648,7 @@ func TestCatalog_ModelsFollowTheProviderGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	disabled, active := models.ModelStatusDisabled, models.ModelStatusActive
-	if _, err := svc.UpdateModel(ctx, off.UUID, modelInput("Off", cred), &disabled); err != nil {
+	if _, err := svc.PatchModel(ctx, off.UUID, fullPatch(modelInput("Off", cred), &disabled)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -607,18 +664,18 @@ func TestCatalog_ModelsFollowTheProviderGate(t *testing.T) {
 		t.Fatal("a refused create must not write a model")
 	}
 	// A disabled hosted model cannot be re-enabled; the stored status holds.
-	if _, err := svc.UpdateModel(ctx, off.UUID, modelInput("Off", cred), &active); !errors.Is(err, ErrHostedDisabled) {
+	if _, err := svc.PatchModel(ctx, off.UUID, fullPatch(modelInput("Off", cred), &active)); !errors.Is(err, ErrHostedDisabled) {
 		t.Fatalf("re-enable err = %v", err)
 	}
 	if mods.rows[off.UUID].Status != models.ModelStatusDisabled {
 		t.Fatalf("status after refused re-enable = %s", mods.rows[off.UUID].Status)
 	}
 	// Editing a live hosted model is gated too...
-	if _, err := svc.UpdateModel(ctx, live.UUID, modelInput("Live2", cred), nil); !errors.Is(err, ErrHostedDisabled) {
+	if _, err := svc.PatchModel(ctx, live.UUID, fullPatch(modelInput("Live2", cred), nil)); !errors.Is(err, ErrHostedDisabled) {
 		t.Fatalf("edit live err = %v", err)
 	}
 	// ...but disabling always works.
-	got, err := svc.UpdateModel(ctx, live.UUID, modelInput("Live", cred), &disabled)
+	got, err := svc.PatchModel(ctx, live.UUID, fullPatch(modelInput("Live", cred), &disabled))
 	if err != nil || got.Status != models.ModelStatusDisabled {
 		t.Fatalf("disable under gate = %+v, %v", got, err)
 	}

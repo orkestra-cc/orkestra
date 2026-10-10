@@ -84,8 +84,8 @@ type Model struct {
 	UpdatedAt                 time.Time            `bson:"updatedAt" json:"updatedAt"`
 }
 
-// Info projects the consumer-visible view.
-func (m Model) Info() iface.LLMModelInfo {
+// Info projects the consumer-visible view (pointer receiver: see View).
+func (m *Model) Info() iface.LLMModelInfo {
 	purposes := make([]string, 0, len(m.Purposes))
 	for _, p := range m.Purposes {
 		purposes = append(purposes, p.Purpose)
@@ -93,6 +93,15 @@ func (m Model) Info() iface.LLMModelInfo {
 	return iface.LLMModelInfo{
 		UUID: m.UUID, Name: m.Name, Provider: m.Provider, ModelID: m.ModelID,
 		Capabilities: m.Capabilities.ToIface(), CredentialKind: m.CredentialRef.Kind, Purposes: purposes,
+	}
+}
+
+// Input returns the editable fields of m, the base a patch applies to.
+func (m *Model) Input() ModelInput {
+	return ModelInput{
+		Name: m.Name, Provider: m.Provider, ModelID: m.ModelID, Capabilities: m.Capabilities,
+		CredentialRef: m.CredentialRef, Defaults: m.Defaults, BudgetReserveOutputTokens: m.BudgetReserveOutputTokens,
+		Purposes: m.Purposes, Access: m.Access,
 	}
 }
 

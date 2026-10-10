@@ -17,4 +17,8 @@ var (
 	ErrHostedDisabled     = errors.New("llm: hosted providers are disabled")
 	ErrMockNotAllowed     = errors.New("llm: mock provider is not allowed here")
 	ErrGrantNotMember     = errors.New("llm: grantee is not a member of this organization")
+	// ErrInvalidStatus and ErrProviderMismatch are validation details,
+	// always wrapped in iface.ErrLLMInvalidRequest.
+	ErrInvalidStatus    = errors.New("llm: status must be active or disabled")
+	ErrProviderMismatch = errors.New("llm: the credential provider does not match the model provider")
 )

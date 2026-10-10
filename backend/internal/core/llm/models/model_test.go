@@ -1,6 +1,7 @@
 package models
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -122,8 +123,29 @@ func TestCredentialView(t *testing.T) {
 	if v := c.View(); !v.HasSecret || v.SecretLast4 != "cdef" {
 		t.Fatalf("view = %+v", v)
 	}
-	if v := (Credential{}).View(); v.HasSecret {
+	if v := (&Credential{}).View(); v.HasSecret {
 		t.Fatal("empty credential must report no secret")
+	}
+}
+
+// Huma's schema-link transformer rebuilds every response body with
+// reflect.StructOf, prepending a $schema field. That panics (Huma recovers
+// and prints a warning) when a non-first embedded struct has value methods,
+// which is why Credential and Model keep pointer receivers.
+func TestViewsSupportHumaSchemaLinks(t *testing.T) {
+	for _, body := range []reflect.Type{reflect.TypeFor[LLMCredentialView](), reflect.TypeFor[LLMModelView]()} {
+		fields := []reflect.StructField{{Name: "Schema", Type: reflect.TypeFor[string](), Tag: `json:"$schema,omitempty"`}}
+		for i := 0; i < body.NumField(); i++ {
+			fields = append(fields, body.Field(i))
+		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%s cannot carry a $schema link: %v", body, r)
+				}
+			}()
+			reflect.StructOf(fields)
+		}()
 	}
 }
 

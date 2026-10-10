@@ -151,7 +151,7 @@ func (s *CatalogService) resolveBaseURL(provider, baseURL string) (string, error
 
 func (s *CatalogService) CreateCredential(ctx context.Context, in models.CredentialInput) (*models.Credential, error) {
 	if err := models.ValidateCredentialInput(in, true); err != nil {
-		return nil, fmt.Errorf("%w: %v", iface.ErrLLMInvalidRequest, err)
+		return nil, fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, err)
 	}
 	if err := s.checkProviderGate(in.Provider); err != nil {
 		return nil, err
@@ -214,12 +214,12 @@ func (s *CatalogService) PatchCredential(ctx context.Context, id string, name, b
 		in.BaseURL = *baseURL
 	}
 	if err := models.ValidateCredentialInput(in, false); err != nil {
-		return nil, fmt.Errorf("%w: %v", iface.ErrLLMInvalidRequest, err)
+		return nil, fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, err)
 	}
 	newStatus := c.Status
 	if status != nil {
 		if *status != models.CredentialStatusActive && *status != models.CredentialStatusDisabled {
-			return nil, fmt.Errorf("%w: status", iface.ErrLLMInvalidRequest)
+			return nil, fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, ErrInvalidStatus)
 		}
 		newStatus = *status
 	}
@@ -245,7 +245,7 @@ func (s *CatalogService) PatchCredential(ctx context.Context, id string, name, b
 
 func (s *CatalogService) RotateCredential(ctx context.Context, id, secret string) (*models.Credential, error) {
 	if secret == "" {
-		return nil, fmt.Errorf("%w: secret required", iface.ErrLLMInvalidRequest)
+		return nil, fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, models.ErrSecretRequired)
 	}
 	c, err := s.GetCredential(ctx, id)
 	if err != nil {
@@ -302,7 +302,7 @@ func (s *CatalogService) OpenCredentialSecret(ctx context.Context, c *models.Cre
 
 func (s *CatalogService) checkModelInput(ctx context.Context, in models.ModelInput) error {
 	if err := models.ValidateModelInput(in); err != nil {
-		return fmt.Errorf("%w: %v", iface.ErrLLMInvalidRequest, err)
+		return fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, err)
 	}
 	if in.CredentialRef.Kind == models.CredentialKindOrg {
 		c, err := s.GetCredential(ctx, in.CredentialRef.CredentialUUID)
@@ -310,7 +310,7 @@ func (s *CatalogService) checkModelInput(ctx context.Context, in models.ModelInp
 			return err
 		}
 		if c.Provider != in.Provider {
-			return fmt.Errorf("%w: credential provider %s does not match model provider %s", iface.ErrLLMInvalidRequest, c.Provider, in.Provider)
+			return fmt.Errorf("%w: %w (%s, %s)", iface.ErrLLMInvalidRequest, ErrProviderMismatch, c.Provider, in.Provider)
 		}
 	}
 	return nil
@@ -370,21 +370,25 @@ func (s *CatalogService) GetModel(ctx context.Context, id string) (*models.LLMMo
 	return s.withGrants(ctx, *m)
 }
 
-func (s *CatalogService) UpdateModel(ctx context.Context, id string, in models.ModelInput, status *string) (*models.Model, error) {
+// PatchModel applies the provided fields of p onto the stored model and
+// validates the merged result with the create rules (shape, credential
+// coherence, provider gate); absent fields keep their stored value.
+func (s *CatalogService) PatchModel(ctx context.Context, id string, p models.LLMModelPatchBody) (*models.Model, error) {
 	m, err := s.models.Get(ctx, id)
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}
+	in := p.ApplyTo(m.Input())
 	if err := s.checkModelInput(ctx, in); err != nil {
 		return nil, err
 	}
 	m.Name, m.Provider, m.ModelID, m.Capabilities = in.Name, in.Provider, in.ModelID, in.Capabilities
 	m.CredentialRef, m.Defaults, m.BudgetReserveOutputTokens, m.Purposes, m.Access = in.CredentialRef, in.Defaults, in.BudgetReserveOutputTokens, in.Purposes, in.Access
-	if status != nil {
-		if *status != models.ModelStatusActive && *status != models.ModelStatusDisabled {
-			return nil, fmt.Errorf("%w: status", iface.ErrLLMInvalidRequest)
+	if p.Status != nil {
+		if *p.Status != models.ModelStatusActive && *p.Status != models.ModelStatusDisabled {
+			return nil, fmt.Errorf("%w: %w", iface.ErrLLMInvalidRequest, ErrInvalidStatus)
 		}
-		m.Status = *status
+		m.Status = *p.Status
 	}
 	// Same rule as PatchCredential: a model that ends up disabled is never
 	// gated (disabling must always work); enabling or editing a live one is.

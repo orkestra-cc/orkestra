@@ -11,8 +11,12 @@ type LLMCredentialView struct {
 	HasSecret bool `json:"hasSecret"`
 }
 
-func (c Credential) View() LLMCredentialView {
-	return LLMCredentialView{Credential: c, HasSecret: !c.Secret.IsZero()}
+// View, like every method of Credential and Model, has a pointer receiver:
+// the views embed those structs, and Huma's schema-link transformer
+// (reflect.StructOf) cannot rebuild a struct embedding a type whose value
+// method set is non-empty; it warns on stderr and drops $schema instead.
+func (c *Credential) View() LLMCredentialView {
+	return LLMCredentialView{Credential: *c, HasSecret: !c.Secret.IsZero()}
 }
 
 type LLMCredentialCreateBody struct {
@@ -52,9 +56,53 @@ func (b LLMModelBody) Input() ModelInput {
 	}
 }
 
+// LLMModelPatchBody is a partial update: an absent (nil) field keeps the
+// stored value. Struct-valued fields (capabilities, credentialRef, defaults)
+// and purposes replace the stored value whole when present. The merged
+// model is validated with the create rules.
 type LLMModelPatchBody struct {
-	LLMModelBody
-	Status *string `json:"status,omitempty" enum:"active,disabled"`
+	Name                      *string               `json:"name,omitempty" maxLength:"64"`
+	Provider                  *string               `json:"provider,omitempty" enum:"openai,anthropic,gemini,ollama,openai_compatible,mock"`
+	ModelID                   *string               `json:"modelId,omitempty" maxLength:"128"`
+	Capabilities              *LLMModelCapabilities `json:"capabilities,omitempty"`
+	CredentialRef             *LLMCredentialRef     `json:"credentialRef,omitempty"`
+	Defaults                  *LLMModelDefaults     `json:"defaults,omitempty"`
+	BudgetReserveOutputTokens *int                  `json:"budgetReserveOutputTokens,omitempty" minimum:"1" maximum:"131072"`
+	Purposes                  []LLMModelPurpose     `json:"purposes,omitempty" minItems:"1" maxItems:"16"`
+	Access                    *string               `json:"access,omitempty" enum:"granted,everyone"`
+	Status                    *string               `json:"status,omitempty" enum:"active,disabled"`
+}
+
+// ApplyTo returns in with every provided field of the patch replaced.
+func (p LLMModelPatchBody) ApplyTo(in ModelInput) ModelInput {
+	if p.Name != nil {
+		in.Name = *p.Name
+	}
+	if p.Provider != nil {
+		in.Provider = *p.Provider
+	}
+	if p.ModelID != nil {
+		in.ModelID = *p.ModelID
+	}
+	if p.Capabilities != nil {
+		in.Capabilities = *p.Capabilities
+	}
+	if p.CredentialRef != nil {
+		in.CredentialRef = *p.CredentialRef
+	}
+	if p.Defaults != nil {
+		in.Defaults = *p.Defaults
+	}
+	if p.BudgetReserveOutputTokens != nil {
+		in.BudgetReserveOutputTokens = p.BudgetReserveOutputTokens
+	}
+	if p.Purposes != nil {
+		in.Purposes = p.Purposes
+	}
+	if p.Access != nil {
+		in.Access = *p.Access
+	}
+	return in
 }
 
 // LLMModelView adds the grant list the admin table shows inline.
