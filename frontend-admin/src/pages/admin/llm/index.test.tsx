@@ -398,6 +398,56 @@ describe('LlmAdminPage — credentials', () => {
 });
 
 describe('LlmAdminPage — models', () => {
+  it('adds a user_account model when the organization has no credential', async () => {
+    stubReads({ credentials: [], models: [] });
+    captureWrite('post', '/v1/admin/llm/models', () =>
+      HttpResponse.json({ ...model, uuid: 'm-2', grants: [] }, { status: 201 })
+    );
+    renderPage('/admin/llm');
+    // The empty state still says how to get an organization key, but the
+    // CTA is enabled: a model billed to each user's own account needs none.
+    expect(
+      await screen.findByText(/or add a model billed to each user/i)
+    ).toBeInTheDocument();
+    const cta = screen.getByRole('button', { name: /add model/i });
+    expect(cta).toBeEnabled();
+    await userEvent.click(cta);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('Billed to')).toHaveValue(
+      'user_account'
+    );
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Plan');
+    await userEvent.type(within(dialog).getByLabelText('Model ID'), 'gpt-5.5');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect((sent[0].body as Body).credentialRef).toEqual({
+      kind: 'user_account'
+    });
+  });
+
+  it('explains and requires an org credential when none fits the provider', async () => {
+    stubReads({ credentials: [], models: [] });
+    renderPage('/admin/llm');
+    await userEvent.click(
+      await screen.findByRole('button', { name: /add model/i })
+    );
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.selectOptions(
+      within(dialog).getByLabelText('Billed to'),
+      'org'
+    );
+    expect(
+      within(dialog).getByText(/no active api key for this provider/i)
+    ).toBeInTheDocument();
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Fast');
+    await userEvent.type(within(dialog).getByLabelText('Model ID'), 'gpt-5.5');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(
+      await within(dialog).findByText('This field is required.')
+    ).toBeInTheDocument();
+    expect(sent).toHaveLength(0);
+  });
+
   it('creates a user_account model without embeddings or sampling defaults', async () => {
     stubReads();
     captureWrite('post', '/v1/admin/llm/models', () =>

@@ -49,11 +49,16 @@ interface ModelFormValues {
   access: LlmAccess;
 }
 
-const toFormValues = (m?: LlmModel): ModelFormValues => ({
+// A new model defaults to an org credential, or to the user's own account
+// when the organization has no credential yet (the only kind it can save).
+const toFormValues = (
+  m?: LlmModel,
+  defaultKind: CredentialKind = 'org'
+): ModelFormValues => ({
   name: m?.name ?? '',
   provider: m?.provider ?? 'openai',
   modelId: m?.modelId ?? '',
-  credentialKind: m?.credentialRef.kind ?? 'org',
+  credentialKind: m?.credentialRef.kind ?? defaultKind,
   credentialUuid: m?.credentialRef.credentialUuid ?? '',
   chat: m?.capabilities.chat ?? true,
   streaming: m?.capabilities.streaming ?? true,
@@ -244,7 +249,10 @@ const ModelEditorModal = ({
     formState: { errors }
   } = useForm<ModelFormValues>({
     resolver: yupResolver(schema) as unknown as Resolver<ModelFormValues>,
-    defaultValues: toFormValues(model)
+    defaultValues: toFormValues(
+      model,
+      credentials.length === 0 ? 'user_account' : 'org'
+    )
   });
   const { fields, append, remove } = useFieldArray({
     control,
@@ -559,6 +567,11 @@ const ModelEditorModal = ({
                   <Form.Control.Feedback type="invalid">
                     {errors.credentialUuid?.message}
                   </Form.Control.Feedback>
+                  {credentialOptions.length === 0 && (
+                    <Form.Text className="d-block text-600">
+                      {t('adminLlm.models.fields.noCredentialForProvider')}
+                    </Form.Text>
+                  )}
                 </Form.Group>
               )}
             </Col>

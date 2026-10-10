@@ -238,13 +238,19 @@ const ModelsTab = () => {
   }
 
   const items = data?.items ?? [];
+  // No organization credential does not block adding a model: one billed
+  // to each user's own account needs none. The editor requires a credential
+  // only for an org model and explains how to get one.
   const noCredentials = (credentials.data?.items ?? []).length === 0;
-  const canAdd = canManageModels && !noCredentials;
+  const canAdd = canManageModels;
   const blockedReason = !canManageModels
     ? t('adminLlm.models.noPermission')
-    : noCredentials
+    : undefined;
+  const emptyHint =
+    blockedReason ??
+    (noCredentials
       ? t('adminLlm.models.needCredential')
-      : undefined;
+      : t('adminLlm.models.emptyHint'));
   const openCreate = () => setEditor({});
 
   return (
@@ -253,7 +259,7 @@ const ModelsTab = () => {
         <EmptyState
           icon={faRobot}
           message={t('adminLlm.models.emptyTitle')}
-          hint={blockedReason ?? t('adminLlm.models.emptyHint')}
+          hint={emptyHint}
           ctaLabel={t('adminLlm.models.add')}
           ctaDisabled={!canAdd}
           onCta={openCreate}
