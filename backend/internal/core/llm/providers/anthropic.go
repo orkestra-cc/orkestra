@@ -277,7 +277,13 @@ func buildAnthropicMessages(req iface.ChatRequest) ([]anthropic.TextBlockParam, 
 			if m.ToolCallID == "" {
 				return nil, nil, fmt.Errorf("%w: tool result needs a tool call id", iface.ErrLLMInvalidRequest)
 			}
-			results = append(results, anthropic.NewToolResultBlock(m.ToolCallID, m.Content, false))
+			// An empty result must carry no content at all: the helper would
+			// emit an empty text block, which the API rejects.
+			tr := anthropic.ToolResultBlockParam{ToolUseID: m.ToolCallID}
+			if m.Content != "" {
+				tr.Content = []anthropic.ToolResultBlockParamContentUnion{{OfText: &anthropic.TextBlockParam{Text: m.Content}}}
+			}
+			results = append(results, anthropic.ContentBlockParamUnion{OfToolResult: &tr})
 		default:
 			return nil, nil, fmt.Errorf("%w: unsupported message role", iface.ErrLLMInvalidRequest)
 		}
@@ -302,9 +308,6 @@ func (a *Anthropic) buildParams(ctx context.Context, call ChatCall) (anthropic.M
 		Messages:  messages,
 		System:    system,
 	}
-	if t := firstFloat(req.Options.Temperature, call.Defaults.Temperature); t != nil {
-		params.Temperature = anthropic.Float(*t)
-	}
 	hasToolTurns := len(req.Tools) > 0
 	for _, t := range req.Tools {
 		schema, err := anthropicToolSchema(t)
@@ -326,9 +329,12 @@ func (a *Anthropic) buildParams(ctx context.Context, call ChatCall) (anthropic.M
 		params.OutputConfig.Format = anthropic.JSONOutputFormatParam{Schema: rf.Schema}
 	}
 	// Effort / adaptive thinking only for models whose discovered
-	// capabilities declare them. Thinking is additionally limited to
-	// tool-free conversations: a tool loop would have to carry the model's
-	// thinking blocks back, which the neutral message type cannot hold.
+	// capabilities declare them: both are sent only when an effort was
+	// requested (per request or model default) and the model declares that
+	// level; adaptive thinking additionally needs the adaptive type. Thinking
+	// is further limited to tool-free conversations: a tool loop would have to
+	// carry the model's thinking blocks back, which the neutral message type
+	// cannot hold.
 	if effort := firstString(req.Options.Effort, call.Defaults.Effort); effort != "" {
 		caps, ok, err := a.modelCaps(ctx, call.ModelID)
 		if err != nil {
@@ -339,6 +345,14 @@ func (a *Anthropic) buildParams(ctx context.Context, call ChatCall) (anthropic.M
 			if caps.adaptive && !hasToolTurns {
 				params.Thinking = anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{}}
 			}
+		}
+	}
+	// Thinking is incompatible with temperature modification (the API answers
+	// 400), so a temperature, including a model default, is dropped whenever
+	// thinking is on.
+	if params.Thinking.OfAdaptive == nil {
+		if t := firstFloat(req.Options.Temperature, call.Defaults.Temperature); t != nil {
+			params.Temperature = anthropic.Float(*t)
 		}
 	}
 	return params, nil
@@ -413,7 +427,9 @@ func (a *Anthropic) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink
 				stopReason = v.Delta.StopReason
 			}
 			u := v.Usage // cumulative; absent fields stay zero
-			if in := int(u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens); in > 0 {
+			// Never replace the start total (input + cache) with a smaller
+			// delta value: the larger of the two is the conservative count.
+			if in := int(u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens); in > usage.InputTokens {
 				usage.InputTokens = in
 			}
 			if u.OutputTokens > 0 {

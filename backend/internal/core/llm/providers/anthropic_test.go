@@ -89,6 +89,7 @@ func TestAnthropic_MessagesStreamTextToolsUsage(t *testing.T) {
 	var text strings.Builder
 	var tcs []*iface.ChatToolCall
 	var done *iface.LLMUsage
+	var order []string
 	temp := 0.3
 	outcome, err := p.Chat(context.Background(), ChatCall{ModelID: "claude-x", Request: iface.ChatRequest{
 		Caller: "t", Instructions: "be brief",
@@ -99,6 +100,14 @@ func TestAnthropic_MessagesStreamTextToolsUsage(t *testing.T) {
 		Options:        iface.ChatOptions{Temperature: &temp},
 	}}, func(e iface.ChatEvent) error {
 		text.WriteString(e.Delta)
+		switch {
+		case e.Delta != "":
+			order = append(order, "text")
+		case e.ToolCall != nil:
+			order = append(order, "tool")
+		case e.Done:
+			order = append(order, "done")
+		}
 		if e.ToolCall != nil {
 			tcs = append(tcs, e.ToolCall)
 		}
@@ -107,6 +116,9 @@ func TestAnthropic_MessagesStreamTextToolsUsage(t *testing.T) {
 		}
 		return nil
 	})
+	if got := strings.Join(order, ","); got != "text,text,tool,done" {
+		t.Fatalf("event order = %s", got)
+	}
 	if err != nil || text.String() != "Hello" || len(tcs) != 1 || tcs[0].ID != "toolu_1" || tcs[0].Name != "lookup" || tcs[0].Arguments != `{"q":"x"}` {
 		t.Fatalf("text=%q tcs=%+v err=%v", text.String(), tcs, err)
 	}
@@ -586,5 +598,98 @@ func TestAnthropic_ConstructorValidationAndRegistry(t *testing.T) {
 	p, err := r.Build("anthropic", Credential{Kind: iface.LLMCredentialKindOrg, Secret: "k"}, nil)
 	if err != nil || p.Name() != "anthropic" {
 		t.Fatalf("build: %v", err)
+	}
+}
+
+func TestAnthropic_TemperatureIsDroppedWhenThinkingIsOn(t *testing.T) {
+	var captured map[string]any
+	p := newAnt(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(antModelsBody))
+			return
+		}
+		captured = nil
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		antSSE(w, antStart(1, 1), antMsgDelta("end_turn", 1), antMsgStop())
+	})
+	def := 0.7
+	run := func(model, effort string, reqTemp *float64) map[string]any {
+		req := userReq("hi")
+		req.Options.Effort = effort
+		req.Options.Temperature = reqTemp
+		if _, err := p.Chat(context.Background(), ChatCall{ModelID: model, Defaults: ChatDefaults{Temperature: &def}, Request: req}, noopSink); err != nil {
+			t.Fatal(err)
+		}
+		return captured
+	}
+	// Thinking on: neither the model default nor a request temperature is sent.
+	reqTemp := 0.2
+	for _, rt := range []*float64{nil, &reqTemp} {
+		c := run("claude-opus-5-5", "high", rt)
+		if _, has := c["thinking"]; !has {
+			t.Fatalf("thinking not sent: %v", c)
+		}
+		if _, has := c["temperature"]; has {
+			t.Errorf("temperature sent together with thinking: %v", c["temperature"])
+		}
+	}
+	// No thinking (model without the capability): the default still applies.
+	if c := run("claude-old", "high", nil); c["temperature"] != 0.7 {
+		t.Errorf("temperature = %v, want the model default", c["temperature"])
+	}
+	// Effort without thinking (tool-free rule does not apply, no effort): default applies.
+	if c := run("claude-opus-5-5", "", nil); c["temperature"] != 0.7 {
+		t.Errorf("temperature without effort = %v", c["temperature"])
+	}
+}
+
+func TestAnthropic_EmptyToolResultHasNoContentBlock(t *testing.T) {
+	var captured map[string]any
+	p := newAnt(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		antSSE(w, antStart(1, 1), antMsgDelta("end_turn", 1), antMsgStop())
+	})
+	_, err := p.Chat(context.Background(), ChatCall{ModelID: "m", Request: iface.ChatRequest{Caller: "t", Messages: []iface.ChatMessage{
+		{Role: "user", Content: "q"},
+		{Role: "assistant", ToolCalls: []iface.ChatToolCall{{ID: "c1", Name: "a"}, {ID: "c2", Name: "b"}}},
+		{Role: "tool", ToolCallID: "c1", Content: ""},
+		{Role: "tool", ToolCallID: "c2", Content: "ok"},
+	}}}, noopSink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := captured["messages"].([]any)[2].(map[string]any)["content"].([]any)
+	empty, full := results[0].(map[string]any), results[1].(map[string]any)
+	if empty["tool_use_id"] != "c1" || empty["type"] != "tool_result" {
+		t.Fatalf("empty result = %v", empty)
+	}
+	if c, has := empty["content"]; has {
+		t.Errorf("empty tool result carries content %v (an empty text block is rejected by the API)", c)
+	}
+	if b, _ := json.Marshal(full["content"]); !strings.Contains(string(b), `"text":"ok"`) {
+		t.Errorf("non-empty result = %v", full)
+	}
+}
+
+func TestAnthropic_DeltaUsageNeverShrinksTheStartTotal(t *testing.T) {
+	cases := []struct {
+		name, delta string
+		wantIn      int
+	}{
+		{"smaller delta input keeps start total", `{"input_tokens":5,"output_tokens":7}`, 35},
+		{"larger delta input wins", `{"input_tokens":50,"output_tokens":7}`, 50},
+		{"delta cache fields count too", `{"input_tokens":2,"cache_read_input_tokens":60,"output_tokens":7}`, 62},
+	}
+	for _, c := range cases {
+		p := newAnt(t, func(w http.ResponseWriter, r *http.Request) {
+			antSSE(w,
+				ev("message_start", `{"type":"message_start","message":{"id":"m","type":"message","role":"assistant","content":[],"usage":{"input_tokens":5,"cache_creation_input_tokens":10,"cache_read_input_tokens":20,"output_tokens":1}}}`),
+				ev("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":`+c.delta+`}`), antMsgStop())
+		})
+		out, err := p.Chat(context.Background(), ChatCall{ModelID: "m", Request: userReq("hi")}, noopSink)
+		if err != nil || out.Usage.InputTokens != c.wantIn || out.Usage.OutputTokens != 7 {
+			t.Errorf("%s: out=%+v err=%v, want input %d", c.name, out, err, c.wantIn)
+		}
 	}
 }
