@@ -70,6 +70,7 @@ type routerEnv struct {
 	metrics *memMetrics
 	calls   map[string]*int
 	cfg     RouterConfig
+	bcfg    BudgetConfig
 }
 
 func newRouterEnv(t *testing.T, store *memBudgetStore, scripts map[string]chatScript) *routerEnv {
@@ -79,7 +80,7 @@ func newRouterEnv(t *testing.T, store *memBudgetStore, scripts map[string]chatSc
 		store.budget = nil
 	}
 	env := &routerEnv{store: store, metrics: &memMetrics{requests: map[string]int64{}, tokens: map[string]int64{}}, calls: map[string]*int{},
-		cfg: RouterConfig{RequestTimeout: 5 * time.Second}}
+		cfg: RouterConfig{RequestTimeout: 5 * time.Second}, bcfg: BudgetConfig{ReserveOutputTokens: 10, ReservationTTL: time.Minute}}
 	reg := providers.NewRegistry()
 	for kind, script := range scripts {
 		k, s := kind, script
@@ -89,7 +90,7 @@ func newRouterEnv(t *testing.T, store *memBudgetStore, scripts map[string]chatSc
 			return &scriptedProvider{name: k, caps: allCaps, chat: s, calls: n}, nil
 		})
 	}
-	budget := NewBudgetService(store, func() BudgetConfig { return BudgetConfig{ReserveOutputTokens: 10, ReservationTTL: time.Minute} }, slog.Default())
+	budget := NewBudgetService(store, func() BudgetConfig { return env.bcfg }, slog.Default())
 	env.r = NewRouter(reg, staticCreds{}, budget, NewBreaker(3, 30*time.Second), func(string) *http.Client { return &http.Client{} },
 		func() RouterConfig { return env.cfg }, env.metrics, slog.Default())
 	return env
@@ -215,13 +216,13 @@ func TestRouter_NoFallbackAfterPartialOutput(t *testing.T) {
 	}
 }
 
-// Reported usage wins over the reservation share when it is larger; a tool
-// call counts as output just like text.
+// With reported usage the charge is max(reported, emitted bytes / 3), not
+// the reservation share (ruling 5.5); a tool call counts as output.
 func TestRouter_PartialOutputChargesReportedUsageAndToolCalls(t *testing.T) {
 	env := newRouterEnv(t, nil, map[string]chatScript{
 		"openai": func(_ context.Context, sink iface.ChatSink) (*providers.ChatOutcome, error) {
 			_ = sink(iface.ChatEvent{ToolCall: &iface.ChatToolCall{ID: "1", Name: "f", Arguments: "{}"}})
-			_ = sink(iface.ChatEvent{Usage: &iface.LLMUsage{InputTokens: 50, OutputTokens: 40}})
+			_ = sink(iface.ChatEvent{Usage: &iface.LLMUsage{InputTokens: 50, OutputTokens: 4}})
 			return nil, iface.ErrLLMProviderUnavailable
 		},
 		"anthropic": ok("never", 1, 1),
@@ -230,7 +231,7 @@ func TestRouter_PartialOutputChargesReportedUsageAndToolCalls(t *testing.T) {
 	if !errors.Is(err, iface.ErrLLMPartialOutput) || env.count("anthropic") != 0 {
 		t.Fatalf("err = %v, fallback calls %d", err, env.count("anthropic"))
 	}
-	if ev := singleLedger(t, env.store); ev.InputTokens != 50 || ev.OutputTokens != 40 {
+	if ev := singleLedger(t, env.store); ev.InputTokens != 50 || ev.OutputTokens != 4 {
 		t.Fatalf("ledger = %+v", ev)
 	}
 }
@@ -458,5 +459,122 @@ func TestRouter_EmptyCandidates(t *testing.T) {
 	}
 	if _, err := env.r.Embed(ctxFor("t1"), nil, "u", iface.EmbedRequest{Caller: "t", Inputs: []string{"x"}}); !errors.Is(err, iface.ErrLLMNoEligibleModel) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// blockUntilDone is a provider that hangs until its call context ends and
+// then reports what the transport would: unavailable + deadline.
+func blockUntilDone(ctx context.Context, _ iface.ChatSink) (*providers.ChatOutcome, error) {
+	<-ctx.Done()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return nil, errors.Join(iface.ErrLLMProviderUnavailable, context.DeadlineExceeded)
+	}
+	return nil, iface.ErrLLMProviderUnavailable
+}
+
+const keyA = "openai|http://x|m-a|c1"
+
+// Ruling 5.2: a deadline the caller lowered (Options.Timeout) is the
+// caller's choice, not a provider fault.
+func TestRouter_CallerLoweredDeadlineNeverOpensTheCircuit(t *testing.T) {
+	env := newRouterEnv(t, nil, map[string]chatScript{"openai": blockUntilDone})
+	req := simpleReq
+	req.Options.Timeout = 50 * time.Millisecond
+	for i := 0; i < 4; i++ {
+		if _, err := env.chat([]models.Model{model("a", "openai", "c1")}, req, nil); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("err = %v", err)
+		}
+	}
+	if err := env.r.breaker.Allow(keyA); err != nil || env.count("openai") != 4 {
+		t.Fatalf("lowered deadlines opened the circuit: %v (calls %d)", err, env.count("openai"))
+	}
+	for _, ev := range env.store.ledger {
+		if ev.ErrorCode != "timeout" {
+			t.Fatalf("ledger code = %q", ev.ErrorCode)
+		}
+	}
+}
+
+// The module's own request_timeout firing is a provider fault; a circuit
+// opened by timeouts still lets the call fall back (only quota is final).
+func TestRouter_ModuleTimeoutsOpenTheCircuitButFallBack(t *testing.T) {
+	env := newRouterEnv(t, nil, map[string]chatScript{"openai": blockUntilDone, "anthropic": ok("hi", 1, 1)})
+	env.cfg.RequestTimeout = 50 * time.Millisecond
+	for i := 0; i < 3; i++ {
+		_, _ = env.chat([]models.Model{model("a", "openai", "c1")}, simpleReq, nil)
+	}
+	if err := env.r.breaker.Allow(keyA); !errors.Is(err, iface.ErrLLMProviderUnavailable) || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("open circuit err = %v (must be unavailable, not a final deadline)", err)
+	}
+	res, err := env.chat([]models.Model{model("a", "openai", "c1"), model("b", "anthropic", "c2")}, simpleReq, nil)
+	if err != nil || res.Model.UUID != "b" || !res.Fallback || env.count("openai") != 3 {
+		t.Fatalf("res=%+v err=%v openai calls=%d", res, err, env.count("openai"))
+	}
+}
+
+func TestRouter_CallerCanceledDuringCallIsNotRecorded(t *testing.T) {
+	var cancel context.CancelFunc
+	env := newRouterEnv(t, nil, map[string]chatScript{
+		"openai": func(context.Context, iface.ChatSink) (*providers.ChatOutcome, error) {
+			cancel() // the client hangs up mid-call; the adapter misreports it
+			return nil, iface.ErrLLMProviderUnavailable
+		},
+		"anthropic": ok("x", 1, 1),
+	})
+	for i := 0; i < 4; i++ {
+		ctx, c := context.WithCancel(ctxFor("t1"))
+		cancel = c
+		_, err := env.r.Chat(ctx, []models.Model{model("a", "openai", "c1"), model("b", "anthropic", "c2")}, "u", simpleReq, nil)
+		c()
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v", err)
+		}
+	}
+	if err := env.r.breaker.Allow(keyA); err != nil || env.count("anthropic") != 0 {
+		t.Fatalf("breaker err=%v fallback calls=%d", err, env.count("anthropic"))
+	}
+	for _, ev := range env.store.ledger {
+		if ev.ErrorCode != "canceled" {
+			t.Fatalf("ledger code = %q", ev.ErrorCode)
+		}
+	}
+}
+
+func TestRouter_CallerOwnDeadlineIsLedgeredAsTimeout(t *testing.T) {
+	env := newRouterEnv(t, nil, map[string]chatScript{"openai": blockUntilDone})
+	ctx, cancel := context.WithTimeout(ctxFor("t1"), 50*time.Millisecond)
+	defer cancel()
+	if _, err := env.r.Chat(ctx, []models.Model{model("a", "openai", "c1")}, "u", simpleReq, nil); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v", err)
+	}
+	if ev := singleLedger(t, env.store); ev.ErrorCode != "timeout" {
+		t.Fatalf("ledger code = %q", ev.ErrorCode)
+	}
+	if err := env.r.breaker.Allow(keyA); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The attempt deadline never outlives the reservation: it is clamped to
+// the window, and no attempt starts with less than minAttemptWindow left.
+func TestRouter_ReservationWindowClampsAndStops(t *testing.T) {
+	var got time.Duration
+	env := newRouterEnv(t, nil, map[string]chatScript{"openai": func(ctx context.Context, sink iface.ChatSink) (*providers.ChatOutcome, error) {
+		dl, _ := ctx.Deadline()
+		got = time.Until(dl)
+		return ok("x", 1, 1)(ctx, sink)
+	}})
+	env.bcfg.ReservationTTL = finalizeTimeout + 1500*time.Millisecond
+	if _, err := env.chat([]models.Model{model("a", "openai", "c1")}, simpleReq, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got <= 0 || got > 1500*time.Millisecond {
+		t.Fatalf("clamped deadline = %v", got)
+	}
+
+	env.bcfg.ReservationTTL = finalizeTimeout + 500*time.Millisecond
+	_, err := env.chat([]models.Model{model("a", "openai", "c1")}, simpleReq, nil)
+	if !errors.Is(err, iface.ErrLLMProviderUnavailable) || env.count("openai") != 1 {
+		t.Fatalf("err=%v calls=%d", err, env.count("openai"))
 	}
 }

@@ -153,6 +153,7 @@ type callResult struct {
 	emitted      bool
 	emittedBytes int
 	streamed     iface.LLMUsage
+	reported     bool // a Usage event arrived
 }
 
 // execSpec describes one logical call to run().
@@ -195,7 +196,7 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 
 	var attempts []models.Attempt
 	var lastErr error
-	callerAborted := false
+	abortCode := "" // set when the caller ended the call: canceled | timeout
 	for i, m := range cands {
 		if len(attempts) >= models.MaxLedgerAttempts {
 			break
@@ -204,10 +205,12 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 			continue // D12: a fallback never changes who pays
 		}
 		if err := ctx.Err(); err != nil {
-			lastErr, callerAborted = err, true
+			lastErr, abortCode = err, errorCodeOf(err)
 			break
 		}
-		deadline := r.attemptTimeout(spec.timeout)
+		// lowered: the deadline is shorter than the module's
+		// request_timeout, so its firing is not the provider's fault.
+		deadline, lowered := r.attemptTimeout(spec.timeout)
 		if left := time.Until(windowEnd); left < deadline {
 			if left < minAttemptWindow {
 				if lastErr == nil {
@@ -215,7 +218,7 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 				}
 				break
 			}
-			deadline = left
+			deadline, lowered = left, true
 		}
 		attempt := models.Attempt{Provider: m.Provider, CredentialKind: m.CredentialRef.Kind, Outcome: attemptError}
 
@@ -238,12 +241,14 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 		}
 		prov, err := r.registry.Build(m.Provider, cred, r.clients(m.Provider))
 		if err != nil {
+			r.breaker.Release(key)
 			// %v: a constructor's invalid-config error is not the caller's
 			// malformed request.
 			attempts, lastErr = append(attempts, attempt), fmt.Errorf("%w: %s adapter: %v", iface.ErrLLMProviderUnavailable, m.Provider, err)
 			continue
 		}
 		if !spec.supports(m, prov) {
+			r.breaker.Release(key)
 			attempt.Outcome = attemptCapabilityMismatch
 			attempts, lastErr = append(attempts, attempt), fmt.Errorf("%w: model %s", iface.ErrLLMCapabilityMismatch, m.Name)
 			continue
@@ -251,10 +256,15 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 
 		callCtx, cancel := context.WithTimeout(ctx, deadline)
 		cr := spec.call(callCtx, prov, m)
+		deadlineHit := errors.Is(callCtx.Err(), context.DeadlineExceeded) || errors.Is(cr.err, context.DeadlineExceeded)
 		cancel()
 		callerGone := ctx.Err() != nil
-		if cr.callerErr == nil && !callerGone {
-			r.breaker.Record(key, cr.err) // ruling 5.2: hang-ups never reach the breaker
+		// Ruling 5.2: hang-ups, sink aborts and deadlines the caller (or
+		// the reservation window) shortened say nothing about the provider.
+		if cr.callerErr != nil || callerGone || (cr.err != nil && lowered && deadlineHit) {
+			r.breaker.Release(key)
+		} else {
+			r.breaker.Record(key, cr.err)
 		}
 
 		if cr.err == nil && cr.callerErr == nil {
@@ -274,25 +284,34 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 		charged := cr.streamed
 		if cr.emitted {
 			// Ruling 5.5: output already reached the caller but the stream
-			// ended without final usage. Charge conservatively — the
-			// reservation's share, or what was reported or emitted if more.
-			charged.InputTokens = max(charged.InputTokens, spec.reserve.EstimatedInput)
-			charged.OutputTokens = max(charged.OutputTokens, res.ReservedOutput, (cr.emittedBytes+2)/3)
+			// ended without final usage. With reported usage charge it, or
+			// the emitted bytes / 3 if more; with none, charge the
+			// reservation's share conservatively, as the reconciler would.
+			emittedTokens := (cr.emittedBytes + 2) / 3
+			if cr.reported {
+				if charged.InputTokens <= 0 {
+					charged.InputTokens = spec.reserve.EstimatedInput
+				}
+				charged.OutputTokens = max(charged.OutputTokens, emittedTokens)
+			} else {
+				charged.InputTokens = spec.reserve.EstimatedInput
+				charged.OutputTokens = max(res.ReservedOutput, emittedTokens)
+			}
 		}
 		attempt.InputTokens, attempt.OutputTokens = max(charged.InputTokens, 0), max(charged.OutputTokens, 0)
 		attempts = append(attempts, attempt)
 
 		switch {
 		case cr.callerErr != nil:
-			lastErr, callerAborted = cr.callerErr, true
+			lastErr, abortCode = cr.callerErr, "canceled"
 		case callerGone:
-			lastErr, callerAborted = fmt.Errorf("%w (provider: %v)", ctx.Err(), cr.err), true
+			lastErr, abortCode = fmt.Errorf("%w (provider: %v)", ctx.Err(), cr.err), errorCodeOf(ctx.Err())
 		case cr.emitted:
 			lastErr = fmt.Errorf("%w: %v", iface.ErrLLMPartialOutput, cr.err)
 		default:
 			lastErr = cr.err
 		}
-		if callerAborted || !fallbackable(lastErr) {
+		if abortCode != "" || !fallbackable(lastErr) {
 			break
 		}
 	}
@@ -300,8 +319,8 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 		lastErr = iface.ErrLLMNoEligibleModel
 	}
 	code := errorCodeOf(lastErr)
-	if callerAborted {
-		code = "canceled"
+	if abortCode != "" {
+		code = abortCode
 	}
 	r.finish(ctx, res, attempts, FinalizeInput{Outcome: models.OutcomeError, ErrorCode: code,
 		Provider: first.Provider, ModelID: first.ModelID, ModelUUID: first.UUID, CredentialKind: first.CredentialRef.Kind, CredentialUUID: first.CredentialRef.CredentialUUID})
@@ -310,16 +329,16 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 }
 
 // attemptTimeout is min(request_timeout, Options.Timeout): a consumer may
-// only lower the module deadline.
-func (r *Router) attemptTimeout(opt time.Duration) time.Duration {
-	d := r.cfg().RequestTimeout
+// only lower the module deadline. lowered reports that Options.Timeout won.
+func (r *Router) attemptTimeout(opt time.Duration) (d time.Duration, lowered bool) {
+	d = r.cfg().RequestTimeout
 	if d <= 0 {
 		d = defaultRequestTimeout
 	}
 	if opt > 0 && opt < d {
-		d = opt
+		return opt, true
 	}
-	return d
+	return d, false
 }
 
 // finish writes the ledger (usage = every attempt's charge) and the token
@@ -372,7 +391,7 @@ func (r *Router) Chat(ctx context.Context, cands []models.Model, userUUID string
 						}
 					}
 					if ev.Usage != nil {
-						cr.streamed = *ev.Usage
+						cr.streamed, cr.reported = *ev.Usage, true
 					}
 					if err := sink(ev); err != nil {
 						cr.callerErr = err
