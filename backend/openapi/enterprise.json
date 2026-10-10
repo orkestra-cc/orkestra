@@ -3718,9 +3718,10 @@
             "type": "string"
           },
           "budgetReserveOutputTokens": {
+            "description": "Output tokens reserved per call for the budget; absent or 0 uses the module default (budget_reserve_output_tokens)",
             "format": "int64",
             "maximum": 131072,
-            "minimum": 1,
+            "minimum": 0,
             "type": "integer"
           },
           "capabilities": {
@@ -3909,9 +3910,10 @@
             "type": "string"
           },
           "budgetReserveOutputTokens": {
+            "description": "Absent keeps the stored override; 0 clears it (back to the module default)",
             "format": "int64",
             "maximum": 131072,
-            "minimum": 1,
+            "minimum": 0,
             "type": "integer"
           },
           "capabilities": {
