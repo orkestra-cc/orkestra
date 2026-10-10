@@ -8,7 +8,7 @@
       "command": "sh",
       "args": [
         "-lc",
-        "exec mise exec -- node \"$HOME/.integrated-browser-mcp/mcp-server.mjs\""
+        "if command -v mise >/dev/null 2>&1; then exec mise exec -- node \"$HOME/.integrated-browser-mcp/mcp-server.mjs\"; else exec node \"$HOME/.integrated-browser-mcp/mcp-server.mjs\"; fi"
       ]
     }
   }
