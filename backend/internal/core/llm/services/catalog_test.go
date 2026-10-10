@@ -80,7 +80,12 @@ func (m *memCreds) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-type memModels struct{ rows map[string]*models.Model }
+type memModels struct {
+	rows map[string]*models.Model
+	// afterGet, when set, runs once right after a Get returned its copy: the
+	// window in which a concurrent writer can make that copy stale.
+	afterGet func()
+}
 
 func (m *memModels) Insert(ctx context.Context, x *models.Model) error {
 	tenant, err := tenantrepo.StampInsert(ctx)
@@ -130,6 +135,10 @@ func (m *memModels) ListActiveByCredential(ctx context.Context, cred string) ([]
 func (m *memModels) Get(ctx context.Context, id string) (*models.Model, error) {
 	if r, ok := m.rows[id]; ok && r.TenantID == tenantOf(ctx) {
 		cp := *r
+		if hook := m.afterGet; hook != nil {
+			m.afterGet = nil
+			hook()
+		}
 		return &cp, nil
 	}
 	return nil, repository.ErrNotFound
@@ -146,7 +155,16 @@ func (m *memModels) Update(ctx context.Context, x *models.Model) error {
 	}
 	x.TenantID = tenantOf(ctx)
 	cp := *x
+	cp.Access = r.Access // access is owned by SetAccess, as in the real repository
 	m.rows[x.UUID] = &cp
+	return nil
+}
+func (m *memModels) SetAccess(ctx context.Context, id, access string) error {
+	r, ok := m.rows[id]
+	if !ok || r.TenantID != tenantOf(ctx) {
+		return repository.ErrNotFound
+	}
+	r.Access = access
 	return nil
 }
 func (m *memModels) Delete(ctx context.Context, id string) error {
@@ -157,7 +175,10 @@ func (m *memModels) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-type memGrants struct{ rows map[string][]string } // modelUUID -> users
+type memGrants struct {
+	rows        map[string][]string // modelUUID -> users
+	replaceFail error               // when set, Replace fails without writing
+}
 
 func (m *memGrants) ListByModel(_ context.Context, model string) ([]models.LLMGrant, error) {
 	out := []models.LLMGrant{}
@@ -178,6 +199,9 @@ func (m *memGrants) ListByUser(_ context.Context, user string) ([]models.LLMGran
 	return out, nil
 }
 func (m *memGrants) Replace(_ context.Context, model, _ string, users []string) error {
+	if m.replaceFail != nil {
+		return m.replaceFail
+	}
 	m.rows[model] = append([]string(nil), users...)
 	return nil
 }
@@ -887,5 +911,66 @@ func TestCatalog_LiveModelsNeedAnActiveCredential(t *testing.T) {
 	}
 	if got, err := svc.PatchModel(ctx, m.UUID, models.LLMModelPatchBody{Status: &active}); err != nil || got.Status != models.ModelStatusActive {
 		t.Fatalf("re-enable on an active credential = %+v, %v", got, err)
+	}
+}
+
+// A PatchModel that loaded the model before a grants change must not write
+// that stale access back: access belongs to ReplaceGrants alone.
+func TestCatalog_PatchModelWithStaleViewDoesNotRevertAccess(t *testing.T) {
+	svc, _, mods, _, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
+	ctx := ctxFor("t1")
+	cred := openAICredential(t, svc, ctx, "OpenAI")
+	m, err := svc.CreateModel(ctx, modelInput("Fast", cred))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mods.afterGet = func() {
+		if _, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessEveryone, []string{"u1"}); err != nil {
+			t.Error(err)
+		}
+	}
+	renamed := "Faster"
+	if _, err := svc.PatchModel(ctx, m.UUID, models.LLMModelPatchBody{Name: &renamed}); err != nil {
+		t.Fatal(err)
+	}
+	got := mods.rows[m.UUID]
+	if got.Access != models.AccessEveryone || got.Name != "Faster" {
+		t.Fatalf("stale patch reverted a field: access %q name %q", got.Access, got.Name)
+	}
+}
+
+// A grants replace that fails on infrastructure must leave the model no more
+// open than before: narrowing already restricted it, widening did not open it.
+func TestCatalog_ReplaceGrantsFailureFailsClosed(t *testing.T) {
+	svc, _, mods, grants, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
+	ctx := ctxFor("t1")
+	cred := openAICredential(t, svc, ctx, "OpenAI")
+	m, err := svc.CreateModel(ctx, modelInput("Fast", cred))
+	if err != nil {
+		t.Fatal(err)
+	}
+	boom := errors.New("mongo down")
+	grants.replaceFail = boom
+
+	// Widening: grants are written first, so a failure leaves access granted.
+	if _, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessEveryone, []string{"u1"}); !errors.Is(err, boom) {
+		t.Fatalf("widen err = %v", err)
+	}
+	if got := mods.rows[m.UUID].Access; got != models.AccessGranted {
+		t.Fatalf("a failed widening opened the model: access %q", got)
+	}
+
+	// Narrowing: access is written first, so the model is restricted even
+	// though the grant list could not be replaced.
+	grants.replaceFail = nil
+	if _, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessEveryone, []string{"u1"}); err != nil {
+		t.Fatal(err)
+	}
+	grants.replaceFail = boom
+	if _, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessGranted, []string{"u2"}); !errors.Is(err, boom) {
+		t.Fatalf("narrow err = %v", err)
+	}
+	if got := mods.rows[m.UUID].Access; got != models.AccessGranted {
+		t.Fatalf("a failed narrowing left the model open: access %q", got)
 	}
 }

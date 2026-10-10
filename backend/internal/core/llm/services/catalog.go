@@ -32,7 +32,10 @@ type ModelRepo interface {
 	ListActive(ctx context.Context) ([]models.Model, error)
 	ListActiveByCredential(ctx context.Context, credentialUUID string) ([]models.Model, error)
 	Get(ctx context.Context, uuid string) (*models.Model, error)
+	// Update writes every editable field except access.
 	Update(ctx context.Context, m *models.Model) error
+	// SetAccess writes access and nothing else.
+	SetAccess(ctx context.Context, uuid, access string) error
 	Delete(ctx context.Context, uuid string) error
 }
 
@@ -517,15 +520,38 @@ func (s *CatalogService) ReplaceGrants(ctx context.Context, modelUUID, access st
 		seen[u] = true
 		unique = append(unique, u)
 	}
-	if m.Access != access {
-		m.Access = access
-		if err := s.models.Update(ctx, m); err != nil {
-			return nil, mapRepoErr(err)
-		}
-	}
 	actor, _ := ctxauth.GetUserUUID(ctx)
-	if err := s.grants.Replace(ctx, modelUUID, actor, unique); err != nil {
-		return nil, err
+	// Access and grants are two writes with no transaction, so order them so
+	// that a failure between them leaves the model no more open than before
+	// the call. Narrowing to granted writes access first: the model is
+	// restricted at once, and a failed grant replace only leaves the previous
+	// grant list in force. Widening to everyone replaces the grants first: a
+	// failed access write leaves the model granted, never everyone with a
+	// grant list the admin did not intend.
+	setAccess := func() error {
+		if m.Access == access {
+			return nil
+		}
+		if err := s.models.SetAccess(ctx, modelUUID, access); err != nil {
+			return mapRepoErr(err)
+		}
+		m.Access = access
+		return nil
+	}
+	replaceGrants := func() error {
+		if err := s.grants.Replace(ctx, modelUUID, actor, unique); err != nil {
+			return fmt.Errorf("llm: replace grants: %w", err)
+		}
+		return nil
+	}
+	steps := []func() error{setAccess, replaceGrants}
+	if access == models.AccessEveryone {
+		steps = []func() error{replaceGrants, setAccess}
+	}
+	for _, step := range steps {
+		if err := step(); err != nil {
+			return nil, err
+		}
 	}
 	s.emit(ctx, "llm.grants.replaced", "llm_model", modelUUID, map[string]any{"access": access, "granted": len(unique)})
 	return s.withGrants(ctx, *m)

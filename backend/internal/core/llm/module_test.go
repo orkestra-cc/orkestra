@@ -182,8 +182,9 @@ func (emptyModels) ListActiveByCredential(context.Context, string) ([]models.Mod
 func (emptyModels) Get(context.Context, string) (*models.Model, error) {
 	return nil, repository.ErrNotFound
 }
-func (emptyModels) Update(context.Context, *models.Model) error { return repository.ErrNotFound }
-func (emptyModels) Delete(context.Context, string) error        { return repository.ErrNotFound }
+func (emptyModels) Update(context.Context, *models.Model) error     { return repository.ErrNotFound }
+func (emptyModels) SetAccess(context.Context, string, string) error { return repository.ErrNotFound }
+func (emptyModels) Delete(context.Context, string) error            { return repository.ErrNotFound }
 
 type emptyGrants struct{}
 

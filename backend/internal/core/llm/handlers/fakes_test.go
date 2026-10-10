@@ -147,7 +147,19 @@ func (f *fakeModels) Update(ctx context.Context, m *models.Model) error {
 		}
 	}
 	m.TenantID = r.TenantID
-	f.rows[m.UUID] = *m
+	cp := *m
+	cp.Access = r.Access // access is owned by SetAccess, as in the real repository
+	f.rows[m.UUID] = cp
+	return nil
+}
+
+func (f *fakeModels) SetAccess(ctx context.Context, id, access string) error {
+	r, ok := f.rows[id]
+	if !ok || r.TenantID != tenantOf(ctx) {
+		return repository.ErrNotFound
+	}
+	r.Access = access
+	f.rows[id] = r
 	return nil
 }
 

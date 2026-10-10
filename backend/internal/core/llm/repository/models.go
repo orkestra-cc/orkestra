@@ -72,8 +72,12 @@ func (r *Models) Get(ctx context.Context, uuid string) (*models.Model, error) {
 	return &m, nil
 }
 
-// Update replaces the document identified by (tenant, m.UUID) and bumps
-// UpdatedAt. TenantID is re-stamped from the context.
+// Update writes the editable fields of m onto the document identified by
+// (tenant, m.UUID) with a targeted $set and bumps UpdatedAt. TenantID is
+// re-stamped from the context. It never touches access, nor the immutable
+// uuid, tenantId, createdBy and createdAt: access is owned by SetAccess, so a
+// patch that loaded a stale access cannot revert a concurrent grants change.
+// An unset BudgetReserveOutputTokens is removed from the document.
 func (r *Models) Update(ctx context.Context, m *models.Model) error {
 	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": m.UUID})
 	if err != nil {
@@ -85,11 +89,46 @@ func (r *Models) Update(ctx context.Context, m *models.Model) error {
 	}
 	m.TenantID = tenantID
 	m.UpdatedAt = time.Now().UTC()
-	res, err := r.coll.ReplaceOne(ctx, filter, m)
+	set := bson.M{
+		"name":          m.Name,
+		"provider":      m.Provider,
+		"modelId":       m.ModelID,
+		"capabilities":  m.Capabilities,
+		"credentialRef": m.CredentialRef,
+		"defaults":      m.Defaults,
+		"purposes":      m.Purposes,
+		"status":        m.Status,
+		"updatedAt":     m.UpdatedAt,
+	}
+	update := bson.M{"$set": set}
+	if m.BudgetReserveOutputTokens != nil {
+		set["budgetReserveOutputTokens"] = *m.BudgetReserveOutputTokens
+	} else {
+		update["$unset"] = bson.M{"budgetReserveOutputTokens": ""}
+	}
+	res, err := r.coll.UpdateOne(ctx, filter, update)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			return ErrDuplicateName
 		}
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetAccess sets access (and bumps updatedAt) on the model identified by
+// (tenant, uuid) and nothing else. It is the only writer of access, so it
+// cannot clobber a concurrent Update of the other fields.
+func (r *Models) SetAccess(ctx context.Context, uuid, access string) error {
+	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid})
+	if err != nil {
+		return err
+	}
+	res, err := r.coll.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"access": access, "updatedAt": time.Now().UTC()}})
+	if err != nil {
 		return err
 	}
 	if res.MatchedCount == 0 {
