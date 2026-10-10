@@ -171,7 +171,7 @@ func (o *Ollama) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (
 	outcome := &ChatOutcome{FinishReason: "stop"}
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 64<<10), ollamaMaxLine)
-	toolCalls, argBytes := 0, 0
+	toolCalls, argBytes, outBytes := 0, 0, 0
 	finished := false
 	for sc.Scan() {
 		raw := bytes.TrimSpace(sc.Bytes())
@@ -193,12 +193,13 @@ func (o *Ollama) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (
 			return nil, fmt.Errorf("%w: upstream reported an error", iface.ErrLLMProviderUnavailable)
 		}
 		if line.Message.Content != "" {
+			outBytes += len(line.Message.Content)
 			if err := sink(iface.ChatEvent{Delta: line.Message.Content}); err != nil {
 				return nil, err
 			}
 		}
 		for _, tc := range line.Message.ToolCalls {
-			args, err := normalizeArgs(tc.Function.Arguments)
+			args, err := ollamaArgs(tc.Function.Arguments)
 			if err != nil || tc.Function.Name == "" {
 				return nil, malformed("tool call")
 			}
@@ -206,6 +207,7 @@ func (o *Ollama) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (
 				return nil, malformed("tool call")
 			}
 			toolCalls++
+			outBytes += len(tc.Function.Name) + len(args)
 			id := tc.ID
 			if id == "" {
 				id = fmt.Sprintf("call_%d", toolCalls)
@@ -233,10 +235,26 @@ func (o *Ollama) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (
 	if !finished {
 		return nil, fmt.Errorf("%w: stream ended before completion", iface.ErrLLMProviderUnavailable)
 	}
+	// prompt_eval_count is absent/0 when the prompt was served from cache.
+	outcome.Usage = ensureUsage(req, outcome.Usage, outBytes)
 	if err := sink(iface.ChatEvent{Done: true, Usage: &outcome.Usage}); err != nil {
 		return nil, err
 	}
 	return outcome, nil
+}
+
+// ollamaArgs normalises response-side arguments. Some Ollama builds send the
+// arguments object as a JSON string holding the object; that one level of
+// wrapping is undone here, and the result must still be an object.
+func ollamaArgs(raw json.RawMessage) (string, error) {
+	if t := bytes.TrimSpace(raw); len(t) > 0 && t[0] == '"' {
+		var s string
+		if err := json.Unmarshal(t, &s); err != nil {
+			return "", err
+		}
+		return normalizeArgs([]byte(s))
+	}
+	return normalizeArgs(raw)
 }
 
 func (o *Ollama) Embed(ctx context.Context, call EmbedCall) (*EmbedOutcome, error) {
@@ -256,7 +274,12 @@ func (o *Ollama) Embed(ctx context.Context, call EmbedCall) (*EmbedOutcome, erro
 	if err := json.Unmarshal(body, &out); err != nil || len(out.Embeddings) != len(call.Inputs) {
 		return nil, malformed("embeddings response")
 	}
-	return &EmbedOutcome{Vectors: out.Embeddings, Usage: iface.LLMUsage{InputTokens: out.PromptEvalCount}}, nil
+	for _, v := range out.Embeddings {
+		if len(v) == 0 {
+			return nil, malformed("embeddings response")
+		}
+	}
+	return &EmbedOutcome{Vectors: out.Embeddings, Usage: ensureEmbedUsage(call.Inputs, iface.LLMUsage{InputTokens: out.PromptEvalCount})}, nil
 }
 
 func (o *Ollama) ListModels(ctx context.Context) ([]ModelDescriptor, error) {

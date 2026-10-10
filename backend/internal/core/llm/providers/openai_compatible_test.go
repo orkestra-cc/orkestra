@@ -329,7 +329,7 @@ func TestOpenAICompatible_CancelIsNotAProviderFault(t *testing.T) {
 
 func TestRegisterAll_BuildsEveryAdapterKind(t *testing.T) {
 	r := NewRegistry()
-	RegisterAll(r, func(string) *http.Client { return http.DefaultClient })
+	RegisterAll(r, func(string) *http.Client { return &http.Client{} })
 	for kind, cred := range map[string]Credential{
 		"mock": {}, "ollama": {BaseURL: "http://o"}, "openai_compatible": {BaseURL: "http://c", Secret: "k"},
 	} {

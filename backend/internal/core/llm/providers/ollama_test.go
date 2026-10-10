@@ -247,7 +247,7 @@ func TestOllama_ConstructorRequiresClientAndBaseURL(t *testing.T) {
 	if _, err := NewOllama(Credential{BaseURL: "http://x"}, nil); err == nil {
 		t.Fatal("nil client accepted")
 	}
-	if _, err := NewOllama(Credential{}, http.DefaultClient); !errors.Is(err, iface.ErrLLMInvalidRequest) {
+	if _, err := NewOllama(Credential{}, &http.Client{}); !errors.Is(err, iface.ErrLLMInvalidRequest) {
 		t.Fatalf("empty base url err = %v", err)
 	}
 }

@@ -187,7 +187,7 @@ func (o *OpenAI) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (
 		outcome    = &ChatOutcome{FinishReason: "stop"}
 		pending    = map[string]*iface.ChatToolCall{} // output item id -> call being assembled
 		emitted    int                                // tool calls handed to the sink
-		textLen    int
+		outBytes   int                                // text + emitted tool-call bytes, for the usage fallback
 		finished   bool
 		incomplete string
 	)
@@ -198,6 +198,7 @@ func (o *OpenAI) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (
 		}
 		tc.Arguments = args
 		emitted++
+		outBytes += len(tc.Name) + len(args)
 		return sink(iface.ChatEvent{ToolCall: tc})
 	}
 	for stream.Next() && !finished {
@@ -208,7 +209,7 @@ func (o *OpenAI) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (
 			if d == "" {
 				continue
 			}
-			textLen += len(d)
+			outBytes += len(d)
 			if err := sink(iface.ChatEvent{Delta: d}); err != nil {
 				return nil, err
 			}
@@ -279,11 +280,7 @@ func (o *OpenAI) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (
 	case emitted > 0:
 		outcome.FinishReason = "tool_calls"
 	}
-	if outcome.Usage.InputTokens == 0 && outcome.Usage.OutputTokens == 0 {
-		// No usage reported: fall back to the module-wide conservative
-		// estimate so the budget never records zero.
-		outcome.Usage = iface.LLMUsage{InputTokens: EstimateTokens(call.Request), OutputTokens: (textLen + 2) / 3}
-	}
+	outcome.Usage = ensureUsage(call.Request, outcome.Usage, outBytes)
 	if err := sink(iface.ChatEvent{Done: true, Usage: &outcome.Usage}); err != nil {
 		return nil, err
 	}
@@ -364,7 +361,7 @@ func (o *OpenAI) Embed(ctx context.Context, call EmbedCall) (*EmbedOutcome, erro
 	if len(res.Data) != len(call.Inputs) {
 		return nil, malformed("embeddings response")
 	}
-	out := &EmbedOutcome{Usage: iface.LLMUsage{InputTokens: int(res.Usage.PromptTokens)}, Vectors: make([][]float32, len(res.Data))}
+	out := &EmbedOutcome{Usage: ensureEmbedUsage(call.Inputs, iface.LLMUsage{InputTokens: int(res.Usage.PromptTokens)}), Vectors: make([][]float32, len(res.Data))}
 	for _, d := range res.Data {
 		i := int(d.Index)
 		if i < 0 || i >= len(out.Vectors) || out.Vectors[i] != nil || len(d.Embedding) == 0 {

@@ -186,12 +186,15 @@ func (o *OpenAICompatible) Chat(ctx context.Context, call ChatCall, sink iface.C
 		argBytes     int
 		finishReason string
 		usage        *iface.LLMUsage
-		text         strings.Builder
+		outBytes     int // text + emitted tool-call bytes, for the usage fallback
 		sawDone      bool
 		emittedTools bool
 	)
 	// flushTools emits every accumulated call, in index order, exactly once.
-	flushTools := func() error {
+	// With lenient set (finish_reason=length) a call whose arguments were cut
+	// off is dropped instead of failing the response: truncation is the
+	// model hitting its output cap, not a provider fault.
+	flushTools := func(lenient bool) error {
 		if len(tools) == 0 {
 			return nil
 		}
@@ -204,6 +207,9 @@ func (o *OpenAICompatible) Chat(ctx context.Context, call ChatCall, sink iface.C
 			acc := tools[i]
 			args, err := normalizeArgs([]byte(acc.args.String()))
 			if err != nil || acc.name == "" {
+				if lenient {
+					continue
+				}
 				return malformed("tool call")
 			}
 			id := acc.id
@@ -215,6 +221,7 @@ func (o *OpenAICompatible) Chat(ctx context.Context, call ChatCall, sink iface.C
 				return err
 			}
 			emittedTools = true
+			outBytes += len(acc.name) + len(args)
 		}
 		tools = map[int]*toolAcc{}
 		return nil
@@ -270,7 +277,7 @@ func (o *OpenAICompatible) Chat(ctx context.Context, call ChatCall, sink iface.C
 		}
 		ch := chunk.Choices[0]
 		if c := ch.Delta.Content; c != "" {
-			text.WriteString(c)
+			outBytes += len(c)
 			if err := sink(iface.ChatEvent{Delta: c}); err != nil {
 				return err
 			}
@@ -297,7 +304,7 @@ func (o *OpenAICompatible) Chat(ctx context.Context, call ChatCall, sink iface.C
 		}
 		if fr := ch.FinishReason; fr != nil && *fr != "" {
 			finishReason = *fr
-			if err := flushTools(); err != nil {
+			if err := flushTools(*fr == "length"); err != nil {
 				return err
 			}
 		}
@@ -315,18 +322,17 @@ func (o *OpenAICompatible) Chat(ctx context.Context, call ChatCall, sink iface.C
 	if finishReason == "" && !sawDone {
 		return nil, fmt.Errorf("%w: stream ended before completion", iface.ErrLLMProviderUnavailable)
 	}
-	if err := flushTools(); err != nil { // servers that never send a finish_reason
+	if err := flushTools(false); err != nil { // servers that never send a finish_reason
 		return nil, err
 	}
 
 	outcome := &ChatOutcome{FinishReason: mapFinishReason(finishReason, emittedTools)}
+	var reported iface.LLMUsage
 	if usage != nil {
-		outcome.Usage = *usage
-	} else {
-		// The server did not report usage: fall back to the module-wide
-		// conservative estimate so the budget never records zero.
-		outcome.Usage = iface.LLMUsage{InputTokens: EstimateTokens(req), OutputTokens: (text.Len() + 2) / 3}
+		reported = *usage
 	}
+	// Servers may omit usage or send zeros: never under-count the budget.
+	outcome.Usage = ensureUsage(req, reported, outBytes)
 	if err := sink(iface.ChatEvent{Done: true, Usage: &outcome.Usage}); err != nil {
 		return nil, err
 	}
@@ -387,7 +393,7 @@ func (o *OpenAICompatible) Embed(ctx context.Context, call EmbedCall) (*EmbedOut
 		}
 		vectors[i] = v
 	}
-	return &EmbedOutcome{Vectors: vectors, Usage: iface.LLMUsage{InputTokens: out.Usage.PromptTokens}}, nil
+	return &EmbedOutcome{Vectors: vectors, Usage: ensureEmbedUsage(call.Inputs, iface.LLMUsage{InputTokens: out.Usage.PromptTokens})}, nil
 }
 
 func (o *OpenAICompatible) ListModels(ctx context.Context) ([]ModelDescriptor, error) {
