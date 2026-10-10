@@ -2894,7 +2894,8 @@
       "chartTitle": "Token in ingresso e in uscita",
       "search": "Cerca nell'utilizzo",
       "emptyTitle": "Nessun utilizzo in questo periodo",
-      "emptyHint": "Le chiamate compaiono qui appena un modello ha risposto."
+      "emptyHint": "Le chiamate compaiono qui appena un modello ha risposto.",
+      "modelNamesError": "Impossibile caricare i nomi dei modelli: le righe mostrano gli ID dei modelli."
     },
     "budget": {
       "semantics": "Il limite conta i token in ingresso e in uscita di tutti i modelli, sulle chiavi dell'organizzazione e sugli account degli utenti, per mese solare UTC. Ogni chiamata prenota la propria stima prima di partire e alla fine le viene addebitato il consumo reale.",

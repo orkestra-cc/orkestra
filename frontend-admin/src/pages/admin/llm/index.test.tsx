@@ -872,6 +872,38 @@ describe('LlmAdminPage — credential test and model discovery', () => {
     );
   });
 
+  it('disables only the tested row while its test runs', async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>(r => {
+      release = r;
+    });
+    stubReads({ credentials: [credential, ollamaCredential] });
+    server.use(
+      http.post(url('/v1/admin/llm/credentials/c-1/test'), async () => {
+        await held;
+        return HttpResponse.json({ outcome: 'ok', testedAt: '' });
+      })
+    );
+    renderPage('/admin/llm?tab=credentials');
+    const row = await rowOf('OpenAI prod');
+    const other = await rowOf('Local ollama');
+    const button = within(row).getByRole('button', { name: 'Test connection' });
+    await userEvent.click(button);
+    await waitFor(() => expect(button).toBeDisabled());
+    expect(
+      within(other).getByRole('button', { name: 'Test connection' })
+    ).toBeEnabled();
+    release();
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith('The credential works.')
+    );
+    await waitFor(() =>
+      expect(
+        within(row).getByRole('button', { name: 'Test connection' })
+      ).toBeEnabled()
+    );
+  });
+
   it('stays quiet when the test was cancelled by the caller', async () => {
     stubReads();
     captureWrite('post', '/v1/admin/llm/credentials/c-1/test', () =>
@@ -958,6 +990,44 @@ describe('LlmAdminPage — credential test and model discovery', () => {
     // The slug stays free text.
     expect(within(dialog).getByLabelText('Model ID')).toBeEnabled();
   });
+
+  it.each([
+    [422, 'llm.credential_rejected', true],
+    [499, 'llm.request_canceled', false]
+  ])(
+    'reports a failed discovery (%i %s shown: %s)',
+    async (status, code, shown) => {
+      stubReads();
+      captureWrite('post', '/v1/admin/llm/credentials/c-1/models', () =>
+        HttpResponse.json({ code }, { status })
+      );
+      const { store } = renderPage('/admin/llm');
+      await userEvent.click(
+        await screen.findByRole('button', { name: /add model/i })
+      );
+      const dialog = await screen.findByRole('dialog');
+      await userEvent.selectOptions(
+        within(dialog).getByLabelText('Credential'),
+        'c-1'
+      );
+      await userEvent.click(
+        within(dialog).getByRole('button', { name: /fetch from provider/i })
+      );
+      await waitFor(() =>
+        expect(
+          Object.values(store.getState().api.mutations).some(
+            m =>
+              m?.endpointName === 'discoverLlmModels' && m.status === 'rejected'
+          )
+        ).toBe(true)
+      );
+      expect(
+        within(dialog).queryByText(/provider rejected the credential/i) !== null
+      ).toBe(shown);
+      expect(within(dialog).queryByText(/models found/i)).toBeNull();
+      expect(within(dialog).queryByText(/cancelled/i)).toBeNull();
+    }
+  );
 
   it('keeps model discovery off without llm.credentials.admin', async () => {
     mockedUseAuth.mockReturnValue(

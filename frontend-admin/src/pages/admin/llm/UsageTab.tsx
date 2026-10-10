@@ -60,6 +60,12 @@ const fromOf = (period: Period, now = new Date()): string => {
   return start.toISOString();
 };
 
+const AXIS_LABEL_MAX = 14;
+const shortLabel = (label: string): string =>
+  label.length > AXIS_LABEL_MAX
+    ? `${label.slice(0, AXIS_LABEL_MAX - 1)}…`
+    : label;
+
 interface LabelledRow extends LlmUsageRow {
   label: string;
 }
@@ -79,8 +85,11 @@ const UsageTab = () => {
     from,
     groupBy
   });
+  // Labels follow the grouping of the data on screen, not the selector: while
+  // a new grouping loads, the previous rows keep their own labels.
+  const shownGroup: LlmUsageGroupBy = data?.groupBy ?? groupBy;
   const models = useListLlmModelsQuery(undefined, {
-    skip: groupBy !== 'model'
+    skip: groupBy !== 'model' && shownGroup !== 'model'
   });
 
   const num = (n: number) => n.toLocaleString(i18n.language);
@@ -93,21 +102,25 @@ const UsageTab = () => {
     [i18n.language]
   );
 
+  // Model keys resolve to names only once the model list has loaded: while
+  // it loads, or when it failed, a row shows its bare id — never "deleted
+  // model", which only a loaded list can prove.
   const rows = useMemo<LabelledRow[]>(() => {
-    const names = new Map(
-      (models.data?.items ?? []).map(m => [m.uuid, m.name])
-    );
+    const names = models.isSuccess
+      ? new Map((models.data?.items ?? []).map(m => [m.uuid, m.name]))
+      : null;
     return (data?.rows ?? []).map(r => {
       let label = r.key;
       if (!r.key) {
-        label = t(`adminLlm.usage.noKey.${groupBy}`);
-      } else if (groupBy === 'model') {
+        label = t(`adminLlm.usage.noKey.${shownGroup}`);
+      } else if (shownGroup === 'model' && names) {
         label =
           names.get(r.key) ?? t('adminLlm.usage.unknownModel', { id: r.key });
       }
       return { ...r, label };
     });
-  }, [data?.rows, models.data, groupBy, t]);
+  }, [data?.rows, models.isSuccess, models.data, shownGroup, t]);
+  const modelNamesFailed = shownGroup === 'model' && models.isError;
 
   const columns = useMemo<ColumnDef<LabelledRow>[]>(() => {
     const numeric = (
@@ -128,10 +141,12 @@ const UsageTab = () => {
     return [
       {
         accessorKey: 'label',
-        header: t(`adminLlm.usage.groupBy.${groupBy}`),
+        header: t(`adminLlm.usage.groupBy.${shownGroup}`),
         meta: { headerProps: { className: 'text-900' } },
         cell: ({ row: { original } }: CellContext<LabelledRow, unknown>) => (
-          <span className={groupBy === 'model' ? undefined : 'font-monospace'}>
+          <span
+            className={shownGroup === 'model' ? undefined : 'font-monospace'}
+          >
             {original.label}
           </span>
         )
@@ -157,7 +172,7 @@ const UsageTab = () => {
         r => r.inputTokens + r.outputTokens
       )
     ];
-  }, [t, groupBy, i18n.language]);
+  }, [t, shownGroup, i18n.language]);
 
   // Theme tokens only, so the chart follows light and dark mode.
   const chartOption = useMemo(
@@ -178,7 +193,12 @@ const UsageTab = () => {
         type: 'category',
         data: rows.map(r => r.label),
         axisLine: { lineStyle: { color: getThemeColor('gray-300') } },
-        axisLabel: { color: getThemeColor('gray-600') },
+        // Long keys (user UUIDs, caller names) are cut on the axis; the
+        // axis tooltip keeps the full value.
+        axisLabel: {
+          color: getThemeColor('gray-600'),
+          formatter: shortLabel
+        },
         axisTick: { show: false }
       },
       yAxis: {
@@ -345,6 +365,11 @@ const UsageTab = () => {
             style={{ height: 280 }}
             className="mb-4"
           />
+          {modelNamesFailed && (
+            <p className="fs-10 text-600 mb-2" role="status">
+              {t('adminLlm.usage.modelNamesError')}
+            </p>
+          )}
           <SearchablePagedTable
             data={rows}
             columns={columns}

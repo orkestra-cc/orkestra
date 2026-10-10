@@ -2894,7 +2894,8 @@
       "chartTitle": "Input and output tokens",
       "search": "Search usage",
       "emptyTitle": "No usage in this period",
-      "emptyHint": "Calls show up here once a model has answered."
+      "emptyHint": "Calls show up here once a model has answered.",
+      "modelNamesError": "The model names could not be loaded, so rows show model IDs."
     },
     "budget": {
       "semantics": "The limit counts input and output tokens of every model, on organization keys and on users' own accounts, per UTC calendar month. Each call reserves its estimate before it runs and is charged its real usage when it ends.",

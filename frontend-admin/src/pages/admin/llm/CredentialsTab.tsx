@@ -39,6 +39,48 @@ import {
 import { useLlmPermissions } from './llmPermissions';
 import { needsSecret } from './llmRules';
 
+// TestCredentialButton runs one credential's connectivity test. It owns its
+// in-flight state, so the button is disabled while its own test runs
+// without that state reaching the memoised columns (which would remount
+// every row's actions and drop focus).
+const TestCredentialButton = ({
+  credential,
+  disabled
+}: {
+  credential: LlmCredential;
+  disabled: boolean;
+}) => {
+  const { t } = useTranslation();
+  const [testCredential, { isLoading }] = useTestLlmCredentialMutation();
+  const onTest = async () => {
+    try {
+      const res = await testCredential(credential.uuid).unwrap();
+      if (res.outcome === 'ok') {
+        toast.success(t('adminLlm.credentials.testOk'));
+      } else {
+        toast.error(
+          t('adminLlm.credentials.testFailed', {
+            reason: llmCodeMessage(t, res.code)
+          })
+        );
+      }
+    } catch (e) {
+      if (!isQuietLlmError(e)) toast.error(llmErrorMessage(t, e));
+    }
+  };
+  return (
+    <IconButton
+      variant="orkestra-default"
+      size="sm"
+      icon={faVial}
+      title={t('adminLlm.credentials.test')}
+      aria-label={t('adminLlm.credentials.test')}
+      disabled={disabled || isLoading}
+      onClick={onTest}
+    />
+  );
+};
+
 // CredentialsTab lists the org's provider credentials. Create, rotate,
 // re-point, enable/disable and delete are step-up-gated on the backend; the
 // global StepUpModal replays the request after re-auth. Delete answers 409
@@ -52,7 +94,6 @@ const CredentialsTab = () => {
   const { data, isLoading, isError, refetch } = useListLlmCredentialsQuery();
   const [remove, { isLoading: deleting }] = useDeleteLlmCredentialMutation();
   const [patch] = usePatchLlmCredentialMutation();
-  const [testCredential] = useTestLlmCredentialMutation();
   const [editor, setEditor] = useState<{
     mode: EditorMode;
     credential?: LlmCredential;
@@ -80,26 +121,6 @@ const CredentialsTab = () => {
       }
     },
     [patch, t]
-  );
-
-  const onTest = useCallback(
-    async (c: LlmCredential) => {
-      try {
-        const res = await testCredential(c.uuid).unwrap();
-        if (res.outcome === 'ok') {
-          toast.success(t('adminLlm.credentials.testOk'));
-        } else {
-          toast.error(
-            t('adminLlm.credentials.testFailed', {
-              reason: llmCodeMessage(t, res.code)
-            })
-          );
-        }
-      } catch (e) {
-        if (!isQuietLlmError(e)) toast.error(llmErrorMessage(t, e));
-      }
-    },
-    [testCredential, t]
   );
 
   const onConfirmDelete = async () => {
@@ -224,14 +245,9 @@ const CredentialsTab = () => {
           );
           return (
             <div className="d-inline-flex gap-1">
-              <IconButton
-                variant="orkestra-default"
-                size="sm"
-                icon={faVial}
-                title={t('adminLlm.credentials.test')}
-                aria-label={t('adminLlm.credentials.test')}
+              <TestCredentialButton
+                credential={original}
                 disabled={!canManage}
-                onClick={() => onTest(original)}
               />
               <IconButton
                 variant="orkestra-default"
@@ -282,7 +298,7 @@ const CredentialsTab = () => {
         }
       }
     ],
-    [t, canManage, onToggle, onTest]
+    [t, canManage, onToggle]
   );
 
   if (isLoading) return <Spinner animation="border" size="sm" />;

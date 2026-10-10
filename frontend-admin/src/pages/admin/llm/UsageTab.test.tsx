@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from 'test/render';
@@ -63,7 +63,11 @@ const model = {
 const queries: URLSearchParams[] = [];
 const last = () => queries[queries.length - 1];
 
-function stubUsage(report: Record<string, unknown>) {
+function stubUsage(
+  report: Record<string, unknown>,
+  modelsReply: () => Response | Promise<Response> = () =>
+    HttpResponse.json({ items: [model] })
+) {
   server.use(
     http.get(url('/v1/admin/llm/usage'), ({ request }) => {
       const params = new URL(request.url).searchParams;
@@ -75,9 +79,7 @@ function stubUsage(report: Record<string, unknown>) {
         ...report
       });
     }),
-    http.get(url('/v1/admin/llm/models'), () =>
-      HttpResponse.json({ items: [model] })
-    )
+    http.get(url('/v1/admin/llm/models'), () => modelsReply())
   );
 }
 
@@ -173,6 +175,77 @@ describe('UsageTab', () => {
       expect(from.getUTCDate()).toBe(1);
       expect(from.getUTCHours()).toBe(0);
     });
+  });
+
+  it('shows bare model ids while the model list is still loading', async () => {
+    stubUsage({ month, budget, rows }, async () => {
+      await delay('infinite');
+      return HttpResponse.json({ items: [] });
+    });
+    renderWithProviders(<UsageTab />);
+    const table = await screen.findByRole('table');
+    expect(within(table).getByText('m-1')).toBeInTheDocument();
+    expect(within(table).getByText('m-gone')).toBeInTheDocument();
+    expect(screen.queryByText(/deleted model/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps bare model ids and says why when the model list failed', async () => {
+    stubUsage({ month, budget, rows }, () =>
+      HttpResponse.json({ code: 'forbidden' }, { status: 403 })
+    );
+    renderWithProviders(<UsageTab />);
+    expect(
+      await screen.findByText(/model names could not be loaded/i)
+    ).toBeInTheDocument();
+    const table = screen.getByRole('table');
+    expect(within(table).getByText('m-1')).toBeInTheDocument();
+    expect(screen.queryByText(/deleted model/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps the labels of the data on screen while a new grouping loads', async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>(r => {
+      release = r;
+    });
+    server.use(
+      http.get(url('/v1/admin/llm/usage'), async ({ request }) => {
+        const groupBy = new URL(request.url).searchParams.get('groupBy');
+        if (groupBy === 'caller') await held;
+        return HttpResponse.json({
+          groupBy,
+          month,
+          budget,
+          rows:
+            groupBy === 'caller'
+              ? [
+                  {
+                    key: 'notes.summarize',
+                    requests: 1,
+                    inputTokens: 1,
+                    outputTokens: 1
+                  }
+                ]
+              : rows
+        });
+      }),
+      http.get(url('/v1/admin/llm/models'), () =>
+        HttpResponse.json({ items: [model] })
+      )
+    );
+    renderWithProviders(<UsageTab />);
+    const table = await screen.findByRole('table');
+    expect(await within(table).findByText('Fast')).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText(/group by/i), 'caller');
+    // Still the model data: model header and model names.
+    expect(
+      within(table).getByRole('columnheader', { name: /^model/i })
+    ).toBeInTheDocument();
+    expect(within(table).getByText('Fast')).toBeInTheDocument();
+    release();
+    expect(await screen.findByText('notes.summarize')).toBeInTheDocument();
+    expect(
+      screen.getByRole('columnheader', { name: /^caller/i })
+    ).toBeInTheDocument();
   });
 
   it('shows a retryable error state', async () => {
