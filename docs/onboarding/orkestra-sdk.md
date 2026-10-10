@@ -373,7 +373,7 @@ Two flavors of lookup:
 
 Service keys are declared once in `pkg/sdk/module/services.go` (e.g.
 `ServiceUserService`, `ServiceTenantProvider`, `ServiceAuditSink`,
-`ServiceAIModelProvider`). When you publish a new service add the key
+`ServiceLLMGateway`). When you publish a new service add the key
 constant there.
 
 The interfaces themselves live in `pkg/sdk/iface/`. If you need to
@@ -491,7 +491,7 @@ interfaces every module shares. The biggest ones you'll encounter:
 | `NotificationSender` | `notification` | auth (verification + reset), subscriptions (dunning) |
 | `JWTProvider` | `auth` | dev token generator |
 | `PDFProvider` | `documents` | billing (invoice rendering) |
-| `AIModelProvider` | `aimodels` | rag, sales, agents |
+| `LLMGateway` | `llm` (core) | every addon that uses a language model |
 | `RAGQueryProvider` | `rag` | agents |
 | `AuditSink` | `compliance` | every module that emits audit events |
 | `BillingTenantProvider` | `tenant` | billing (CessionarioCommittente snapshot) |

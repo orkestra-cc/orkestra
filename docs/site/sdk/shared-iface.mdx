@@ -79,7 +79,9 @@ must match them across the module boundary with `errors.Is`.
 
 [ADR-0006](/adrs/collapse-to-core-only-base) collapsed the base to core-only, but kept the interfaces the removed verticals used. Nothing in the base implements these — they are the shape a fork's addon satisfies so it plugs into the same seam:
 
-`PDFProvider` · `GraphProvider` · `AIModelProvider` · `RAGQueryProvider` · `PaymentProvider` · `SubscriptionReconciler` · `SelfServiceCheckoutPlanner` · `BillingTenantProvider` · `ClientSelfDeletionGate`
+`PDFProvider` · `GraphProvider` · `RAGQueryProvider` · `PaymentProvider` · `SubscriptionReconciler` · `SelfServiceCheckoutPlanner` · `BillingTenantProvider` · `ClientSelfDeletionGate`
+
+`LLMGateway` is not in this list: it is **implemented by the core** (the `llm` module, [ADR-0022](/adrs/core-llm-module)) and consumed by addons with `module.GetTyped[iface.LLMGateway](reg, module.ServiceLLMGateway)`. The message-based contract (`ChatRequest`, `ChatSink`, `EmbedRequest`, the `ErrLLM*` sentinels) lives in `pkg/sdk/iface/llm.go`.
 
 Do not confuse `PDFProvider` with `PDFRenderer` above: `PDFProvider` is the wider, module-shaped generate/store/retrieve contract a fork's own documents addon can choose to implement; `PDFRenderer` is the narrow, core-wired HTML→PDF conversion service described above, with no storage or template concerns of its own.
 

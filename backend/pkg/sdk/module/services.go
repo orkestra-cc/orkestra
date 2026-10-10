@@ -46,7 +46,7 @@ const (
 	ServiceOAuthProviderFactory ServiceKey = "auth.oauth_factory"
 	ServiceOAuthStateService    ServiceKey = "auth.oauth_state"
 	ServiceOAuthProviderRepo    ServiceKey = "auth.oauth_provider_repo"
-	ServiceAIModelProvider      ServiceKey = "aimodels.provider"
+	ServiceLLMGateway           ServiceKey = "llm.gateway" // iface.LLMGateway, registered by core/llm
 	ServicePDFService           ServiceKey = "documents.pdf"
 	ServiceGraphRepo            ServiceKey = "graph.repository"
 	ServiceRAGQuery             ServiceKey = "rag.query"
