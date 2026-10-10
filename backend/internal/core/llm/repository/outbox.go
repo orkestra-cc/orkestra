@@ -171,7 +171,11 @@ func (r *Outbox) ListDeliveredTo(ctx context.Context, userUUID string) ([]models
 // RemoveDelivered drops the data subject from deliveredTo in every org.
 // An event still being retried does not resend to them: recipients are
 // resolved at send time and the subject's memberships and extra-recipient
-// entries are gone by then.
+// entries are gone by then. Narrow window: an attempt that resolved its
+// recipients before the memberships were deleted and is still sending may
+// $addToSet the subject again after this $pull (MarkDelivered, under its
+// lease); the row then names them until outbox retention purges it, and a
+// later erasure run removes it.
 func (r *Outbox) RemoveDelivered(ctx context.Context, userUUID string) (int64, error) {
 	//tenantscope:allow dsr: right-to-erasure removal of the subject from delivered budget alerts across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
 	res, err := r.coll.UpdateMany(ctx, bson.M{"deliveredTo": userUUID}, bson.M{"$pull": bson.M{"deliveredTo": userUUID}})

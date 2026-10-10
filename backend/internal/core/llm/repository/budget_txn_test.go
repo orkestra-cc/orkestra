@@ -441,52 +441,66 @@ func TestUsage_DSRAndMonthlyPurge(t *testing.T) {
 	usage := NewUsage(db)
 	monthly := NewMonthly(db)
 	now := time.Now().UTC()
+	bg := context.Background()
 	for i, tenant := range []string{"t1", "t2"} {
 		if err := usage.InsertPending(ctxFor(tenant), &models.UsageEvent{UUID: fmt.Sprintf("r%d", i), UserUUID: "subject", CredentialUUID: "acc", Outcome: models.OutcomeOK, CreatedAt: now}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := usage.InsertPending(ctxFor("t1"), &models.UsageEvent{UUID: "keep", UserUUID: "someone", Outcome: models.OutcomeOK, CreatedAt: now}); err != nil {
+	if err := usage.InsertPending(ctxFor("t1"), &models.UsageEvent{UUID: "keep", UserUUID: "someone", CredentialUUID: "acc", Outcome: models.OutcomeOK, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	// An in-flight call of the subject: its reservation is still counted in
-	// the rollup, so erasure must leave it to the reconciler.
-	if err := usage.InsertPending(ctxFor("t1"), &models.UsageEvent{UUID: "inflight", UserUUID: "anon-x", CredentialUUID: "acc2", Outcome: models.OutcomePending, ReservedTokens: 40, CreatedAt: now}); err != nil {
+	// the rollup, so the hard delete must leave it to the reconciler.
+	if err := usage.InsertPending(ctxFor("t1"), &models.UsageEvent{UUID: "inflight", UserUUID: "subject", CredentialUUID: "acc2", Outcome: models.OutcomePending, ReservedTokens: 40, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := usage.ListByUserAllTenants(context.Background(), "subject")
-	if err != nil || len(rows) != 2 {
+	rows, err := usage.ListByUserAllTenants(bg, "subject")
+	if err != nil || len(rows) != 3 {
 		t.Fatalf("export = %d, %v", len(rows), err)
 	}
-	// One replacement per row: the rows must not stay linkable.
+
+	// Hard delete: the two finalized rows (both orgs), never the pending one.
+	if n, err := usage.DeleteByUser(bg, "subject"); err != nil || n != 2 {
+		t.Fatalf("delete = %d, %v", n, err)
+	}
+	if n := countAll(t, db, CollUsage, bson.M{"uuid": "inflight", "userUuid": "subject", "outcome": models.OutcomePending, "reservedTokens": 40}); n != 1 {
+		t.Fatal("hard delete removed or altered the pending row")
+	}
+	if n := countAll(t, db, CollUsage, bson.M{"uuid": "keep", "userUuid": "someone", "credentialUuid": "acc"}); n != 1 {
+		t.Fatal("hard delete touched another user's row")
+	}
+
+	// ... then the producer anonymizes what is left (the pending row).
 	ids := []string{}
 	newID := func() string {
-		id := fmt.Sprintf("erased-%d", len(ids))
+		id := fmt.Sprintf("%s%d", models.ErasedUsagePrefix, len(ids))
 		ids = append(ids, id)
 		return id
 	}
-	if n, err := usage.AnonymizeByUser(context.Background(), "subject", newID); err != nil || n != 2 || len(ids) != 2 {
+	if n, err := usage.AnonymizeByUser(bg, "subject", newID); err != nil || n != 1 || len(ids) != 1 {
+		t.Fatalf("anonymize pending = %d, %v (ids %v)", n, err, ids)
+	}
+	if n := countAll(t, db, CollUsage, bson.M{"uuid": "inflight", "userUuid": ids[0], "credentialUuid": bson.M{"$exists": false}, "outcome": models.OutcomePending}); n != 1 {
+		t.Fatal("pending row not anonymized in place")
+	}
+
+	// Anonymize mode on finalized rows: one replacement per row, across orgs.
+	for i, tenant := range []string{"t1", "t2"} {
+		if err := usage.InsertPending(ctxFor(tenant), &models.UsageEvent{UUID: fmt.Sprintf("a%d", i), UserUUID: "subject", CredentialUUID: "acc", InputTokens: 9, Outcome: models.OutcomeOK, CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := usage.AnonymizeByUser(bg, "subject", newID); err != nil || n != 2 || len(ids) != 3 {
 		t.Fatalf("anonymize = %d, %v (ids %v)", n, err, ids)
 	}
-	for _, id := range ids {
-		if n := countAll(t, db, CollUsage, bson.M{"userUuid": id, "credentialUuid": bson.M{"$exists": false}}); n != 1 {
+	for _, id := range ids[1:] {
+		if n := countAll(t, db, CollUsage, bson.M{"userUuid": id, "credentialUuid": bson.M{"$exists": false}, "inputTokens": 9}); n != 1 {
 			t.Fatalf("rows anonymized as %s = %d", id, n)
 		}
 	}
 	if n := countAll(t, db, CollUsage, bson.M{"userUuid": "subject"}); n != 0 {
 		t.Fatalf("rows still naming the subject = %d", n)
-	}
-	// The ledger is rewritten in place: same rows, both orgs.
-	for _, u := range ids {
-		if _, err := usage.DeleteByUser(context.Background(), u); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if n := countDocs(t, db, CollUsage, bson.M{}); n != 2 {
-		t.Fatalf("left = %d (want keep + inflight)", n)
-	}
-	if n := countDocs(t, db, CollUsage, bson.M{"uuid": "inflight", "outcome": models.OutcomePending}); n != 1 {
-		t.Fatal("erasure deleted a pending row")
 	}
 	for _, p := range []string{"2023-01", models.PeriodOf(now)} {
 		if err := WithTxn(ctxFor("t1"), db, func(sc mongo.SessionContext) error { return monthly.Reserve(sc, p, 1) }); err != nil {
@@ -495,6 +509,53 @@ func TestUsage_DSRAndMonthlyPurge(t *testing.T) {
 	}
 	if n, err := monthly.PurgeOlderThan(context.Background(), 24); err != nil || n != 1 {
 		t.Fatalf("monthly purge = %d, %v", n, err)
+	}
+}
+
+// A call in flight while its user is erased: the finalization must not
+// restore the credential reference the anonymization removed, and must
+// still release the reservation and count the tokens.
+func TestUsage_FinalizeAfterAnonymizeKeepsCredentialRemoved(t *testing.T) {
+	db := newTestDB(t)
+	ensureBudgetIndexes(t, db)
+	store := newStore(db)
+	usage := NewUsage(db)
+	monthly := NewMonthly(db)
+	ctx := ctxFor("t1")
+	period := models.PeriodOf(time.Now().UTC())
+
+	erased := pendingEvent("t1", 1, 100)
+	erased.UserUUID, erased.CredentialUUID = "subject", "cred-1"
+	control := pendingEvent("t1", 2, 50)
+	control.UserUUID, control.CredentialUUID = "other", "cred-1"
+	for _, ev := range []*models.UsageEvent{erased, control} {
+		if ok, err := store.Reserve(ctx, period, ev, 0, true); err != nil || !ok {
+			t.Fatalf("reserve = %v, %v", ok, err)
+		}
+	}
+	if n, err := usage.AnonymizeByUser(context.Background(), "subject", func() string { return models.ErasedUsagePrefix + "x" }); err != nil || n != 1 {
+		t.Fatalf("anonymize = %d, %v", n, err)
+	}
+	for _, ev := range []*models.UsageEvent{erased, control} {
+		upd := models.FinalizeUpdate{Outcome: models.OutcomeOK, InputTokens: 10, OutputTokens: 5, FinalizedAt: time.Now().UTC(),
+			Provider: "openai", ModelID: "gpt", ModelUUID: "m1", CredentialKind: models.CredentialKindOrg, CredentialUUID: "cred-1"}
+		if _, err := store.Finalize(ctx, period, ev.UUID, upd); err != nil {
+			t.Fatalf("finalize %s: %v", ev.UUID, err)
+		}
+	}
+	if n := countDocs(t, db, CollUsage, bson.M{"uuid": erased.UUID, "userUuid": models.ErasedUsagePrefix + "x", "outcome": models.OutcomeOK,
+		"credentialUuid": bson.M{"$exists": false}, "reservedTokens": 0, "reservationExpiresAt": bson.M{"$exists": false}}); n != 1 {
+		t.Fatal("finalize restored credentialUuid on an anonymized row (or did not close it)")
+	}
+	if n := countDocs(t, db, CollUsage, bson.M{"uuid": control.UUID, "userUuid": "other", "credentialUuid": "cred-1", "outcome": models.OutcomeOK, "inputTokens": 10}); n != 1 {
+		t.Fatal("finalize of a regular row lost its credentialUuid")
+	}
+	m, err := monthly.Get(ctx, period)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.ReservedTokens != 0 || m.OrgInputTokens != 20 || m.OrgOutputTokens != 10 || m.Requests != 2 {
+		t.Fatalf("rollup after finalize = %+v", m)
 	}
 }
 

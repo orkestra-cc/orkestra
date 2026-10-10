@@ -123,7 +123,9 @@ func TestModule_UniqueIndexes(t *testing.T) {
 	// reconciler's pending scan, the daily usage retention purge and the
 	// outbox worker's lease. Anything else must lead with tenantId.
 	sweepIndexes := map[string][][]string{
-		repository.CollUsage:        {{"outcome", "reservationExpiresAt"}, {"createdAt"}},
+		// userUuid: not a sweep but the DSR queries (subject across every
+		// org, //tenantscope:allow dsr:), which have no tenantId to lead with.
+		repository.CollUsage:        {{"outcome", "reservationExpiresAt"}, {"createdAt"}, {"userUuid"}},
 		repository.CollBudgetOutbox: {{"status", "nextAttemptAt"}},
 	}
 	for _, c := range NewModule().Collections() {

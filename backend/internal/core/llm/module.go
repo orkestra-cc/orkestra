@@ -144,6 +144,9 @@ func (m *Module) Collections() []module.CollectionSpec {
 			// and the daily retention purge, both cross-org by design.
 			{OrderedKeys: key("outcome", "reservationExpiresAt"), PartialFilter: map[string]any{"outcome": "pending"}},
 			{OrderedKeys: key("createdAt")},
+			// DSR: the subject-scoped, cross-org usage queries of the
+			// PIIProducer (export, delete, anonymize) filter on userUuid alone.
+			{OrderedKeys: key("userUuid"), PartialFilter: map[string]any{"userUuid": map[string]any{"$type": "string"}}},
 		}},
 		{Name: repository.CollUsageMonthly, Indexes: []module.IndexSpec{
 			{OrderedKeys: key("tenantId", "period"), Unique: true},

@@ -80,21 +80,34 @@ func (r *Usage) Finalize(ctx context.Context, uuid string, upd models.FinalizeUp
 	if attempts == nil {
 		attempts = []models.Attempt{}
 	}
+	// A pipeline update, so the credential reference can be conditioned on
+	// the row's current state: a DSR anonymization may have rewritten
+	// userUuid (and dropped credentialUuid) while the call was in flight,
+	// and the finalization must not put the reference back. Literal values
+	// go through $literal so no string is ever read as a field path.
+	lit := func(v any) bson.M { return bson.M{"$literal": v} }
 	set := bson.M{
-		"outcome": upd.Outcome, "fallback": upd.Fallback, "inputTokens": upd.InputTokens, "outputTokens": upd.OutputTokens,
-		"attempts": attempts, "latencyMs": upd.LatencyMs, "finalizedAt": upd.FinalizedAt, "reservedTokens": 0,
+		"outcome": lit(upd.Outcome), "fallback": lit(upd.Fallback), "inputTokens": lit(upd.InputTokens), "outputTokens": lit(upd.OutputTokens),
+		"attempts": lit(attempts), "latencyMs": lit(upd.LatencyMs), "finalizedAt": lit(upd.FinalizedAt), "reservedTokens": lit(0),
 	}
-	unset := bson.M{"reservationExpiresAt": ""}
 	if upd.ErrorCode != "" {
-		set["errorCode"] = upd.ErrorCode
+		set["errorCode"] = lit(upd.ErrorCode)
 	}
-	for field, v := range map[string]string{"provider": upd.Provider, "modelId": upd.ModelID, "modelUuid": upd.ModelUUID, "credentialKind": upd.CredentialKind, "credentialUuid": upd.CredentialUUID} {
+	for field, v := range map[string]string{"provider": upd.Provider, "modelId": upd.ModelID, "modelUuid": upd.ModelUUID, "credentialKind": upd.CredentialKind} {
 		if v != "" {
-			set[field] = v
+			set[field] = lit(v)
 		}
 	}
+	if upd.CredentialUUID != "" {
+		set["credentialUuid"] = bson.M{"$cond": bson.A{
+			bson.M{"$regexMatch": bson.M{"input": bson.M{"$ifNull": bson.A{"$userUuid", ""}}, "regex": "^" + models.ErasedUsagePrefix}},
+			"$$REMOVE",
+			lit(upd.CredentialUUID),
+		}}
+	}
+	pipeline := bson.A{bson.M{"$set": set}, bson.M{"$unset": bson.A{"reservationExpiresAt"}}}
 	var before models.UsageEvent
-	err = r.coll.FindOneAndUpdate(ctx, filter, bson.M{"$set": set, "$unset": unset},
+	err = r.coll.FindOneAndUpdate(ctx, filter, pipeline,
 		options.FindOneAndUpdate().SetReturnDocument(options.Before)).Decode(&before)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return nil, ErrAlreadyFinalized
@@ -257,6 +270,8 @@ func (r *Usage) AnonymizeByUser(ctx context.Context, userUUID string, newID func
 		if len(batch) == 0 {
 			return nil
 		}
+		// BulkWrite is outside tenantscope's method list: every filter below is
+		// the subject-scoped _id + userUuid pair, under the dsr directive above.
 		res, err := r.coll.BulkWrite(ctx, batch, options.BulkWrite().SetOrdered(false))
 		if res != nil {
 			total += res.ModifiedCount
