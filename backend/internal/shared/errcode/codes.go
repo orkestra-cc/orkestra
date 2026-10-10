@@ -366,6 +366,62 @@ const LoggingConfigConflict = "logging.config_conflict"
 // underlying cause is logged server-side and never enters the response. 500.
 const LoggingPersistenceFailed = "logging.persistence_failed"
 
+// --- llm ---
+
+// LLMNotConfigured: the organization has no active model at all. 503.
+const LLMNotConfigured = "llm.not_configured"
+
+// LLMProviderUnavailable: the provider could not be reached or returned a
+// transient failure; the circuit breaker may be open. 503.
+const LLMProviderUnavailable = "llm.provider_unavailable"
+
+// LLMNoEligibleModel: models exist but none matches purpose, capabilities
+// and the caller's grants. 403.
+const LLMNoEligibleModel = "llm.no_eligible_model"
+
+// LLMModelAccessDenied: the pinned ModelUUID is not among the caller's
+// candidates. 403.
+const LLMModelAccessDenied = "llm.model_access_denied"
+
+// LLMCapabilityMismatch: the request asks for something the model or the
+// credential kind cannot do. 422.
+const LLMCapabilityMismatch = "llm.capability_mismatch"
+
+// LLMInvalidRequest: size limits, message role or option rejected before
+// any provider is resolved. 422.
+const LLMInvalidRequest = "llm.invalid_request"
+
+// LLMNotFound: credential, model or grant UUID unknown in this org. 404.
+const LLMNotFound = "llm.not_found"
+
+// LLMNameInUse: a credential or model with this name already exists in
+// this org. 409.
+const LLMNameInUse = "llm.name_in_use"
+
+// LLMCredentialInUse: delete refused because an active model references
+// the credential. 409.
+const LLMCredentialInUse = "llm.credential_in_use"
+
+// LLMSecretKeyMissing: neither a KMS provider nor LLM_SECRET_ENCRYPTION_KEY
+// is available, so no secret can be stored. 503, a deployment fault.
+const LLMSecretKeyMissing = "llm.secret_key_missing"
+
+// LLMEndpointNotAllowed: baseUrl rejected by the anti-SSRF validation in a
+// production-like environment. 422.
+const LLMEndpointNotAllowed = "llm.endpoint_not_allowed"
+
+// LLMHostedDisabled: a cloud provider was requested while allow_hosted is
+// false. 422.
+const LLMHostedDisabled = "llm.hosted_disabled"
+
+// LLMMockNotAllowed: the mock provider is only selectable outside
+// production-like environments. 422.
+const LLMMockNotAllowed = "llm.mock_not_allowed"
+
+// LLMGrantNotMember: a grant names a user who is not a member of this
+// org. 422; the grant list is not written at all.
+const LLMGrantNotMember = "llm.grant_not_member"
+
 // --- navigation ---
 
 // NavigationOverrideUnknownParent signals that a PATCH against the
