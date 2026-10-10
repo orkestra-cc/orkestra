@@ -13,8 +13,8 @@ import {
   useReleaseLegalHoldMutation,
   type LegalHold
 } from 'store/api/complianceApi';
-import ComplianceEmptyState from './ComplianceEmptyState';
-import ComplianceTable from './ComplianceTable';
+import EmptyState from 'components/common/EmptyState';
+import SearchablePagedTable from 'components/common/advance-table/SearchablePagedTable';
 import { formatDateTime } from './complianceFormat';
 
 // LegalHoldsTab lets operators place a litigation hold on a subject (which
@@ -188,13 +188,13 @@ const LegalHoldsTab = () => {
       {isLoading ? (
         <Spinner animation="border" size="sm" className="mt-2" />
       ) : items.length === 0 ? (
-        <ComplianceEmptyState
+        <EmptyState
           icon={faGavel}
           message={t('adminCompliance.holds.emptyMessage')}
           hint={t('adminCompliance.holds.emptyHint')}
         />
       ) : (
-        <ComplianceTable
+        <SearchablePagedTable
           data={items}
           columns={columns}
           searchPlaceholder={t('adminCompliance.holds.searchPlaceholder')}

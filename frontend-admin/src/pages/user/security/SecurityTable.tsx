@@ -9,7 +9,7 @@ import AdvanceTableProvider from 'providers/AdvanceTableProvider';
 // SecurityTable is the AdvanceTable shell every list on /user/security renders
 // through — the console's one production table primitive (DESIGN.md: "never raw
 // <table> for production lists"), wired once here so the tabs contribute only
-// their column definitions. Modelled on /admin/compliance's ComplianceTable.
+// their column definitions. Modelled on components/common/advance-table/SearchablePagedTable.
 interface SecurityTableProps<T> {
   data: T[];
   columns: ColumnDef<T>[];

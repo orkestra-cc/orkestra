@@ -192,8 +192,8 @@ describe('CompliancePage', () => {
 
   // The global filter matches cell VALUES, not rendered text, so a date column
   // accessored on the raw ISO string is searchable only by a string the
-  // operator never sees. Every ComplianceTable ships a search box, so this was
-  // live here, not latent.
+  // operator never sees. Every SearchablePagedTable ships a search box, so this
+  // was live here, not latent.
   //
   // Search on the MONTH NAME, not the time: the runner is UTC, where a rendered
   // "10:00" is byte-identical to the ISO "10:00" behind it and the bug is

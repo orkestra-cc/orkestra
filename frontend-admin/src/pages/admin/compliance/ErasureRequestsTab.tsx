@@ -12,8 +12,8 @@ import {
   useRejectErasureRequestMutation,
   type ErasureRequest
 } from 'store/api/complianceApi';
-import ComplianceEmptyState from './ComplianceEmptyState';
-import ComplianceTable from './ComplianceTable';
+import EmptyState from 'components/common/EmptyState';
+import SearchablePagedTable from 'components/common/advance-table/SearchablePagedTable';
 import { erasureStatusColor, formatDateTime } from './complianceFormat';
 
 // ErasureRequestsTab drives the GDPR right-to-erasure queue: operators execute
@@ -119,13 +119,13 @@ const ErasureRequestsTab = () => {
   return isLoading ? (
     <Spinner animation="border" size="sm" className="mt-2" />
   ) : items.length === 0 ? (
-    <ComplianceEmptyState
+    <EmptyState
       icon={faUserSlash}
       message={t('adminCompliance.erasure.emptyMessage')}
       hint={t('adminCompliance.erasure.emptyHint')}
     />
   ) : (
-    <ComplianceTable
+    <SearchablePagedTable
       data={items}
       columns={columns}
       searchPlaceholder={t('adminCompliance.erasure.searchPlaceholder')}
