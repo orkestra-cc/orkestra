@@ -252,7 +252,12 @@ validate_env_file() {
                 [ -z "$value" ] && continue
                 ;;
         esac
+        # The hint depends on the key, not on the failure: the llm vault
+        # takes exactly 64 hex chars (32 bytes), so every LLM branch —
+        # missing, placeholder or malformed — must recommend -hex 32; a
+        # -hex 16 value would only fail the 64-hex check on the next run.
         hint="openssl rand -hex 16"
+        [ "$var" = "LLM_SECRET_ENCRYPTION_KEY" ] && hint="openssl rand -hex 32"
         if secret_is_placeholder "$value"; then
             reason="is empty or a placeholder"
         elif [ "$var" = "LLM_SECRET_ENCRYPTION_KEY" ] && ! [[ "$value" =~ ^[0-9a-fA-F]{64}$ ]]; then
@@ -260,7 +265,6 @@ validate_env_file() {
             # anything else is logged as a WARN and silently disables secret
             # writes, so this is the only deploy-time gate.
             reason="must be 64 hex characters"
-            hint="openssl rand -hex 32"
         elif secret_is_weak "$value"; then
             reason="is shorter than 16 characters"
         else
