@@ -97,4 +97,141 @@ describe('llmApi', () => {
     expect(path).toBe('/v1/admin/llm/models/m-1');
     expect(body).toEqual({ status: 'disabled' });
   });
+
+  it('getLlmBudget turns the 204 of an org without a budget into null', async () => {
+    server.use(
+      http.get(
+        url('/v1/admin/llm/budget'),
+        () => new HttpResponse(null, { status: 204 })
+      )
+    );
+    const budget = await setupStore()
+      .dispatch(llmApi.endpoints.getLlmBudget.initiate())
+      .unwrap();
+    expect(budget).toBeNull();
+  });
+
+  it('putLlmBudget sends the whole budget with PUT', async () => {
+    let body: unknown = null;
+    server.use(
+      http.put(url('/v1/admin/llm/budget'), async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({
+          ...(body as object),
+          updatedBy: 'u-1',
+          updatedAt: '2026-10-10T00:00:00Z'
+        });
+      })
+    );
+    await setupStore()
+      .dispatch(
+        llmApi.endpoints.putLlmBudget.initiate({
+          monthlyTokenLimit: 1000,
+          warnPct: 80,
+          action: 'warn_only',
+          notifyExtraUserUuids: ['u-2']
+        })
+      )
+      .unwrap();
+    expect(body).toEqual({
+      monthlyTokenLimit: 1000,
+      warnPct: 80,
+      action: 'warn_only',
+      notifyExtraUserUuids: ['u-2']
+    });
+  });
+
+  it('getLlmUsage passes groupBy and the window as query params', async () => {
+    let params: URLSearchParams | null = null;
+    server.use(
+      http.get(url('/v1/admin/llm/usage'), ({ request }) => {
+        params = new URL(request.url).searchParams;
+        return HttpResponse.json({ groupBy: 'user', rows: [], month: {} });
+      })
+    );
+    await setupStore()
+      .dispatch(
+        llmApi.endpoints.getLlmUsage.initiate({
+          from: '2026-10-01T00:00:00.000Z',
+          groupBy: 'user'
+        })
+      )
+      .unwrap();
+    const p = params as unknown as URLSearchParams;
+    expect(p.get('groupBy')).toBe('user');
+    expect(p.get('from')).toBe('2026-10-01T00:00:00.000Z');
+    expect(p.has('to')).toBe(false);
+  });
+
+  it('promptTestLlmModel posts only the prompt; discovery and test are bodiless POSTs', async () => {
+    const seen: { method: string; path: string; body: string }[] = [];
+    const record = async ({ request }: { request: Request }) => {
+      seen.push({
+        method: request.method,
+        path: new URL(request.url).pathname,
+        body: await request.text()
+      });
+    };
+    server.use(
+      http.post(url('/v1/admin/llm/models/m-1/prompt'), async args => {
+        await record(args);
+        return HttpResponse.json({
+          text: 'hi',
+          usage: { inputTokens: 1, outputTokens: 1 },
+          finishReason: 'stop',
+          fallback: false
+        });
+      }),
+      http.post(url('/v1/admin/llm/credentials/c-1/models'), async args => {
+        await record(args);
+        return HttpResponse.json({ items: [{ id: 'gpt-x' }] });
+      }),
+      http.post(url('/v1/admin/llm/credentials/c-1/test'), async args => {
+        await record(args);
+        return HttpResponse.json({ outcome: 'ok', testedAt: '' });
+      })
+    );
+    const store = setupStore();
+    await store
+      .dispatch(
+        llmApi.endpoints.promptTestLlmModel.initiate({
+          uuid: 'm-1',
+          prompt: 'Hello'
+        })
+      )
+      .unwrap();
+    const found = await store
+      .dispatch(llmApi.endpoints.discoverLlmModels.initiate('c-1'))
+      .unwrap();
+    const tested = await store
+      .dispatch(llmApi.endpoints.testLlmCredential.initiate('c-1'))
+      .unwrap();
+    expect(seen[0]).toEqual({
+      method: 'POST',
+      path: '/v1/admin/llm/models/m-1/prompt',
+      body: JSON.stringify({ prompt: 'Hello' })
+    });
+    expect(seen.slice(1).map(s => s.body)).toEqual(['', '']);
+    expect(found.items[0].id).toBe('gpt-x');
+    expect(tested.outcome).toBe('ok');
+  });
+
+  it('getMyLlmUsage reads the caller own usage', async () => {
+    server.use(
+      http.get(url('/v1/llm/me/usage'), () =>
+        HttpResponse.json({
+          period: '2026-10',
+          requests: 3,
+          orgInputTokens: 1,
+          orgOutputTokens: 2,
+          userAccountInputTokens: 3,
+          userAccountOutputTokens: 4
+        })
+      )
+    );
+    const mine = await setupStore()
+      .dispatch(llmApi.endpoints.getMyLlmUsage.initiate())
+      .unwrap();
+    expect(mine.requests).toBe(3);
+  });
 });

@@ -20,12 +20,22 @@ vi.mock('react-toastify', () => ({
 // mocked (precedent: components/navbar/top/NineDotMenu.test.tsx).
 const mockedUseAuth = vi.fn();
 vi.mock('hooks/auth/useAuthRTK', () => ({ useAuth: () => mockedUseAuth() }));
+// The usage tab draws an ECharts canvas and reads theme colours from
+// AppProvider, which renderWithProviders does not wire.
+vi.mock('components/common/ReactEchart', () => ({
+  default: () => <div data-testid="echart-stub" />
+}));
+vi.mock('providers/AppProvider', () => ({
+  useAppContext: () => ({ getThemeColor: () => 'currentColor', config: {} })
+}));
 
 const ALL = [
   'llm.admin.read',
   'llm.credentials.admin',
   'llm.models.admin',
-  'llm.grants.admin'
+  'llm.grants.admin',
+  'llm.usage.read',
+  'llm.budgets.admin'
 ];
 const authWith = (permissions: string[]) => ({
   hasPermission: (p: string) => permissions.includes(p)
@@ -388,7 +398,13 @@ describe('LlmAdminPage — credentials', () => {
     stubReads();
     renderPage('/admin/llm?tab=credentials');
     const row = await rowOf('OpenAI prod');
-    for (const name of ['Edit', 'Rotate key', 'Disable', 'Delete']) {
+    for (const name of [
+      'Test connection',
+      'Edit',
+      'Rotate key',
+      'Disable',
+      'Delete'
+    ]) {
       expect(within(row).getByRole('button', { name })).toBeDisabled();
     }
     expect(
@@ -737,6 +753,9 @@ describe('LlmAdminPage — models', () => {
     expect(within(row).getByRole('button', { name: 'Delete' })).toBeDisabled();
     expect(within(row).getByRole('button', { name: 'Disable' })).toBeDisabled();
     expect(
+      within(row).getByRole('button', { name: 'Try a prompt' })
+    ).toBeDisabled();
+    expect(
       within(row).getByRole('button', { name: 'Who may use it' })
     ).toBeEnabled();
     expect(screen.getByRole('button', { name: /add model/i })).toBeDisabled();
@@ -752,5 +771,221 @@ describe('LlmAdminPage — models', () => {
     await userEvent.click(within(row).getByRole('button', { name: 'Edit' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByLabelText('Access')).toBeDisabled();
+  });
+});
+
+const usageReport = {
+  from: '2026-09-10T00:00:00Z',
+  to: '2026-10-10T00:00:00Z',
+  groupBy: 'model',
+  rows: [],
+  month: {
+    period: '2026-10',
+    requests: 0,
+    orgInputTokens: 0,
+    orgOutputTokens: 0,
+    userAccountInputTokens: 0,
+    userAccountOutputTokens: 0,
+    reservedTokens: 0
+  }
+};
+
+describe('LlmAdminPage — usage and budget tabs', () => {
+  it('opens the usage tab through the URL', async () => {
+    stubReads();
+    server.use(
+      http.get(url('/v1/admin/llm/usage'), () => HttpResponse.json(usageReport))
+    );
+    renderPage('/admin/llm?tab=usage');
+    expect(await screen.findByText(/tokens consumed/i)).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /usage/i })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+  });
+
+  it('hides the usage tab without llm.usage.read and degrades its URL to the models tab', async () => {
+    mockedUseAuth.mockReturnValue(authWith(['llm.admin.read']));
+    stubReads();
+    renderPage('/admin/llm?tab=usage');
+    expect(await screen.findByText('Fast')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('tab', { name: /usage/i })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /budget/i })).toBeInTheDocument();
+  });
+
+  it('opens the budget tab read-only with llm.admin.read alone', async () => {
+    mockedUseAuth.mockReturnValue(authWith(['llm.admin.read']));
+    stubReads();
+    server.use(
+      http.get(
+        url('/v1/admin/llm/budget'),
+        () => new HttpResponse(null, { status: 204 })
+      )
+    );
+    renderPage('/admin/llm?tab=budget');
+    expect(await screen.findByText(/has no budget/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled();
+  });
+});
+
+describe('LlmAdminPage — credential test and model discovery', () => {
+  it('tests a credential and reports success', async () => {
+    stubReads();
+    captureWrite('post', '/v1/admin/llm/credentials/c-1/test', () =>
+      HttpResponse.json({ outcome: 'ok', testedAt: '2026-10-10T10:00:00Z' })
+    );
+    renderPage('/admin/llm?tab=credentials');
+    const row = await rowOf('OpenAI prod');
+    expect(within(row).getByText(/never tested/i)).toBeInTheDocument();
+    await userEvent.click(
+      within(row).getByRole('button', { name: 'Test connection' })
+    );
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith('The credential works.')
+    );
+    expect(sent[0]).toMatchObject({
+      method: 'POST',
+      path: '/v1/admin/llm/credentials/c-1/test'
+    });
+  });
+
+  it('translates a failed test code instead of showing provider text', async () => {
+    stubReads();
+    captureWrite('post', '/v1/admin/llm/credentials/c-1/test', () =>
+      HttpResponse.json({
+        outcome: 'error',
+        code: 'llm.credential_rejected',
+        testedAt: '2026-10-10T10:00:00Z'
+      })
+    );
+    renderPage('/admin/llm?tab=credentials');
+    const row = await rowOf('OpenAI prod');
+    await userEvent.click(
+      within(row).getByRole('button', { name: 'Test connection' })
+    );
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        'The test failed: The provider rejected the credential. Check or rotate the API key.'
+      )
+    );
+  });
+
+  it('stays quiet when the test was cancelled by the caller', async () => {
+    stubReads();
+    captureWrite('post', '/v1/admin/llm/credentials/c-1/test', () =>
+      HttpResponse.json({ code: 'llm.request_canceled' }, { status: 499 })
+    );
+    const { store } = renderPage('/admin/llm?tab=credentials');
+    const row = await rowOf('OpenAI prod');
+    await userEvent.click(
+      within(row).getByRole('button', { name: 'Test connection' })
+    );
+    // Anchor on the settled mutation: a quiet failure leaves no DOM trace.
+    await waitFor(() =>
+      expect(
+        Object.values(store.getState().api.mutations).some(
+          m =>
+            m?.endpointName === 'testLlmCredential' && m.status === 'rejected'
+        )
+      ).toBe(true)
+    );
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('shows the last recorded test with its localized error code', async () => {
+    stubReads({
+      credentials: [
+        {
+          ...credential,
+          lastTestStatus: 'error',
+          lastTestedAt: '2026-10-09T08:00:00Z',
+          lastTestError: 'llm.rate_limited'
+        },
+        {
+          ...ollamaCredential,
+          lastTestStatus: 'ok',
+          lastTestedAt: '2026-10-09T08:00:00Z'
+        }
+      ]
+    });
+    renderPage('/admin/llm?tab=credentials');
+    const failed = await rowOf('OpenAI prod');
+    const cell = within(failed).getByTestId('llm-last-test');
+    expect(within(cell).getByText('Failed')).toBeInTheDocument();
+    expect(within(cell).getByText(/too many requests/i)).toBeInTheDocument();
+    expect(within(cell).queryByText(/llm\.rate_limited/)).toBeNull();
+    const ok = await rowOf('Local ollama');
+    expect(
+      within(within(ok).getByTestId('llm-last-test')).getByText('OK')
+    ).toBeInTheDocument();
+  });
+
+  it('fetches model ids from the selected credential as suggestions', async () => {
+    stubReads();
+    captureWrite('post', '/v1/admin/llm/credentials/c-1/models', () =>
+      HttpResponse.json({
+        items: [{ id: 'gpt-5.6-terra' }, { id: 'gpt-5.6-mini' }]
+      })
+    );
+    renderPage('/admin/llm');
+    await userEvent.click(
+      await screen.findByRole('button', { name: /add model/i })
+    );
+    const dialog = await screen.findByRole('dialog');
+    const fetch = within(dialog).getByRole('button', {
+      name: /fetch from provider/i
+    });
+    // No credential chosen yet.
+    expect(fetch).toBeDisabled();
+    await userEvent.selectOptions(
+      within(dialog).getByLabelText('Credential'),
+      'c-1'
+    );
+    await userEvent.click(fetch);
+    expect(
+      await within(dialog).findByText(/2 models found/i)
+    ).toBeInTheDocument();
+    const options = document.querySelectorAll(
+      '#llm-model-id-suggestions option'
+    );
+    expect(Array.from(options).map(o => o.getAttribute('value'))).toEqual([
+      'gpt-5.6-terra',
+      'gpt-5.6-mini'
+    ]);
+    // The slug stays free text.
+    expect(within(dialog).getByLabelText('Model ID')).toBeEnabled();
+  });
+
+  it('keeps model discovery off without llm.credentials.admin', async () => {
+    mockedUseAuth.mockReturnValue(
+      authWith(['llm.admin.read', 'llm.models.admin'])
+    );
+    stubReads();
+    renderPage('/admin/llm');
+    await userEvent.click(
+      await screen.findByRole('button', { name: /add model/i })
+    );
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.selectOptions(
+      within(dialog).getByLabelText('Credential'),
+      'c-1'
+    );
+    expect(
+      within(dialog).getByRole('button', { name: /fetch from provider/i })
+    ).toBeDisabled();
+  });
+
+  it('opens the prompt test from an active model row', async () => {
+    stubReads();
+    renderPage('/admin/llm');
+    const row = await rowOf('Fast');
+    await userEvent.click(
+      within(row).getByRole('button', { name: 'Try a prompt' })
+    );
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/try "fast"/i)).toBeInTheDocument();
   });
 });

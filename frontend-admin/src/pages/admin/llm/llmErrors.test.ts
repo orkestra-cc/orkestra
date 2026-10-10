@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { llmErrorMessage } from './llmErrors';
+import { isQuietLlmError, llmCodeMessage, llmErrorMessage } from './llmErrors';
 
 const t = (key: string) =>
   ({
@@ -36,5 +36,24 @@ describe('llmErrorMessage', () => {
       llmErrorMessage(t, { data: { code: 'llm.other', detail: 'Detail.' } })
     ).toBe('Detail.');
     expect(llmErrorMessage(t, {})).toBe('The operation failed.');
+  });
+});
+
+describe('llmCodeMessage', () => {
+  it('translates a bare code, falling back to the generic line', () => {
+    expect(llmCodeMessage(t, 'llm.not_found')).toBe('Not found (translated).');
+    expect(llmCodeMessage(t, 'llm.unknown')).toBe('The operation failed.');
+    expect(llmCodeMessage(t, undefined)).toBe('The operation failed.');
+  });
+});
+
+describe('isQuietLlmError', () => {
+  it('is quiet for a caller cancel and a dismissed step-up only', () => {
+    expect(isQuietLlmError({ data: { code: 'llm.request_canceled' } })).toBe(
+      true
+    );
+    expect(isQuietLlmError({ data: { code: 'step_up_required' } })).toBe(true);
+    expect(isQuietLlmError({ data: { code: 'llm.rate_limited' } })).toBe(false);
+    expect(isQuietLlmError(undefined)).toBe(false);
   });
 });

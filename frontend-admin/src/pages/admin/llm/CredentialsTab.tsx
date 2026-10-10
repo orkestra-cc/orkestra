@@ -6,7 +6,8 @@ import {
   faKey,
   faPen,
   faRotate,
-  faTrash
+  faTrash,
+  faVial
 } from '@fortawesome/free-solid-svg-icons';
 import type { CellContext, ColumnDef } from '@tanstack/react-table';
 import { useTranslation } from 'react-i18next';
@@ -16,11 +17,12 @@ import IconButton from 'components/common/IconButton';
 import SubtleBadge from 'components/common/SubtleBadge';
 import SearchablePagedTable from 'components/common/advance-table/SearchablePagedTable';
 import { byTimestamp } from 'components/common/advance-table/sorting';
-import { formatDate } from 'helpers/dateFormat';
+import { formatDate, formatDateTime } from 'helpers/dateFormat';
 import {
   useDeleteLlmCredentialMutation,
   useListLlmCredentialsQuery,
   usePatchLlmCredentialMutation,
+  useTestLlmCredentialMutation,
   type LlmCredential
 } from 'store/api/llmApi';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
@@ -28,7 +30,12 @@ import CredentialEditorModal, {
   type EditorMode
 } from './CredentialEditorModal';
 import LlmLoadError from './LlmLoadError';
-import { isReauthCancelled, llmErrorMessage } from './llmErrors';
+import {
+  isQuietLlmError,
+  isReauthCancelled,
+  llmCodeMessage,
+  llmErrorMessage
+} from './llmErrors';
 import { useLlmPermissions } from './llmPermissions';
 import { needsSecret } from './llmRules';
 
@@ -36,12 +43,16 @@ import { needsSecret } from './llmRules';
 // re-point, enable/disable and delete are step-up-gated on the backend; the
 // global StepUpModal replays the request after re-auth. Delete answers 409
 // llm.credential_in_use while an active model references the credential.
+// The connectivity test (llm.credentials.admin + MFA, no step-up) records
+// its outcome on the credential: the "Last test" column shows it, with the
+// stored llm.* code translated, never provider text.
 const CredentialsTab = () => {
   const { t } = useTranslation();
   const { canManageCredentials: canManage } = useLlmPermissions();
   const { data, isLoading, isError, refetch } = useListLlmCredentialsQuery();
   const [remove, { isLoading: deleting }] = useDeleteLlmCredentialMutation();
   const [patch] = usePatchLlmCredentialMutation();
+  const [testCredential] = useTestLlmCredentialMutation();
   const [editor, setEditor] = useState<{
     mode: EditorMode;
     credential?: LlmCredential;
@@ -69,6 +80,26 @@ const CredentialsTab = () => {
       }
     },
     [patch, t]
+  );
+
+  const onTest = useCallback(
+    async (c: LlmCredential) => {
+      try {
+        const res = await testCredential(c.uuid).unwrap();
+        if (res.outcome === 'ok') {
+          toast.success(t('adminLlm.credentials.testOk'));
+        } else {
+          toast.error(
+            t('adminLlm.credentials.testFailed', {
+              reason: llmCodeMessage(t, res.code)
+            })
+          );
+        }
+      } catch (e) {
+        if (!isQuietLlmError(e)) toast.error(llmErrorMessage(t, e));
+      }
+    },
+    [testCredential, t]
   );
 
   const onConfirmDelete = async () => {
@@ -134,6 +165,41 @@ const CredentialsTab = () => {
         )
       },
       {
+        id: 'lastTest',
+        accessorFn: c =>
+          c.lastTestStatus
+            ? t(`adminLlm.credentials.testStatus.${c.lastTestStatus}`)
+            : t('adminLlm.credentials.neverTested'),
+        header: t('adminLlm.credentials.columns.lastTest'),
+        enableSorting: false,
+        meta: { headerProps: { className: 'text-900' } },
+        cell: ({ row: { original } }: CellContext<LlmCredential, unknown>) =>
+          original.lastTestStatus ? (
+            <div data-testid="llm-last-test">
+              <SubtleBadge
+                pill
+                bg={original.lastTestStatus === 'ok' ? 'success' : 'danger'}
+              >
+                {t(
+                  `adminLlm.credentials.testStatus.${original.lastTestStatus}`
+                )}
+              </SubtleBadge>
+              <span className="ms-2 text-600">
+                {formatDateTime(original.lastTestedAt)}
+              </span>
+              {original.lastTestStatus === 'error' && (
+                <div className="fs-11 text-600 text-wrap mt-1">
+                  {llmCodeMessage(t, original.lastTestError)}
+                </div>
+              )}
+            </div>
+          ) : (
+            <span className="text-600">
+              {t('adminLlm.credentials.neverTested')}
+            </span>
+          )
+      },
+      {
         id: 'updatedAt',
         // Formatted accessor + timestamp comparator — see byTimestamp.
         accessorFn: c => formatDate(c.updatedAt),
@@ -158,6 +224,15 @@ const CredentialsTab = () => {
           );
           return (
             <div className="d-inline-flex gap-1">
+              <IconButton
+                variant="orkestra-default"
+                size="sm"
+                icon={faVial}
+                title={t('adminLlm.credentials.test')}
+                aria-label={t('adminLlm.credentials.test')}
+                disabled={!canManage}
+                onClick={() => onTest(original)}
+              />
               <IconButton
                 variant="orkestra-default"
                 size="sm"
@@ -207,7 +282,7 @@ const CredentialsTab = () => {
         }
       }
     ],
-    [t, canManage, onToggle]
+    [t, canManage, onToggle, onTest]
   );
 
   if (isLoading) return <Spinner animation="border" size="sm" />;

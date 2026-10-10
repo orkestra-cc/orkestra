@@ -863,7 +863,9 @@ export const baseApi = createApi({
     // LLM — core llm module (ADR-0022)
     'LLMCredential',
     'LLMModel',
-    'LLMMyModels'
+    'LLMMyModels',
+    'LLMUsage',
+    'LLMBudget'
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,

@@ -6,8 +6,9 @@ import { baseApi } from './baseApi';
 // Credential create/patch/rotate/delete and grant replacement are
 // step-up-gated on the backend; baseApi's 401 interceptor drives the
 // StepUpModal and replays the request, so nothing here handles it.
-// Shapes mirror backend/internal/core/llm/models (dto.go, credential.go,
-// model.go, grant.go).
+// The budget PUT is step-up-gated too. Shapes mirror
+// backend/internal/core/llm/models (dto.go, credential.go, model.go,
+// grant.go, ops.go, usage.go, budget.go).
 
 export type LlmProvider =
   'openai' | 'anthropic' | 'gemini' | 'ollama' | 'openai_compatible' | 'mock';
@@ -131,6 +132,114 @@ export interface LlmModelInfo {
   purposes: string[];
 }
 
+// POST …/credentials/{uuid}/test. A provider failure is a 200 with outcome
+// error and an llm.* code (never provider text); the outcome is also
+// recorded on the credential (lastTestStatus/lastTestedAt/lastTestError).
+export interface LlmCredentialTestResult {
+  outcome: 'ok' | 'error';
+  code?: string;
+  testedAt: string;
+}
+
+export interface LlmDiscoveredModel {
+  id: string;
+  displayName?: string;
+}
+
+export interface LlmUsageCounts {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+// POST …/models/{uuid}/prompt. The answer does not name the model that
+// replied; fallback says whether it was not the pinned one.
+export interface LlmPromptTestResult {
+  text: string;
+  truncated?: boolean;
+  usage: LlmUsageCounts;
+  finishReason: string;
+  fallback: boolean;
+}
+
+export type LlmBudgetAction = 'block' | 'warn_only';
+export const LLM_BUDGET_ACTIONS: LlmBudgetAction[] = ['block', 'warn_only'];
+
+export interface LlmBudget {
+  // Input + output tokens per UTC month, both credential kinds.
+  monthlyTokenLimit: number;
+  // 0 disables the warning.
+  warnPct: number;
+  action: LlmBudgetAction;
+  notifyExtraUserUuids: string[];
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export interface LlmBudgetBody {
+  monthlyTokenLimit: number;
+  warnPct?: number;
+  action: LlmBudgetAction;
+  notifyExtraUserUuids?: string[];
+}
+
+export type LlmUsageGroupBy = 'model' | 'user' | 'caller';
+
+export interface LlmUsageRow {
+  // modelUuid, userUuid or caller, after groupBy.
+  key: string;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+// The current UTC month's rollup. Consumed = the four token counters;
+// reservedTokens is what calls still in flight have reserved.
+export interface LlmUsageMonth {
+  period: string;
+  requests: number;
+  orgInputTokens: number;
+  orgOutputTokens: number;
+  userAccountInputTokens: number;
+  userAccountOutputTokens: number;
+  reservedTokens: number;
+  warnedAt?: string;
+  exhaustedAt?: string;
+  updatedAt?: string;
+}
+
+export interface LlmUsageReport {
+  from: string;
+  to: string;
+  groupBy: LlmUsageGroupBy;
+  rows: LlmUsageRow[] | null;
+  month: LlmUsageMonth;
+  // Absent when the org has no budget (no limit).
+  budget?: LlmBudget;
+}
+
+export interface LlmUsageQuery {
+  from?: string;
+  to?: string;
+  groupBy: LlmUsageGroupBy;
+}
+
+export interface LlmSelfUsage {
+  period: string;
+  requests: number;
+  orgInputTokens: number;
+  orgOutputTokens: number;
+  userAccountInputTokens: number;
+  userAccountOutputTokens: number;
+}
+
+export const llmMonthConsumed = (m?: LlmUsageMonth): number =>
+  m
+    ? m.orgInputTokens +
+      m.orgOutputTokens +
+      m.userAccountInputTokens +
+      m.userAccountOutputTokens
+    : 0;
+
 export const llmApi = baseApi.injectEndpoints({
   endpoints: build => ({
     listLlmCredentials: build.query<{ items: LlmCredential[] }, void>({
@@ -218,6 +327,58 @@ export const llmApi = baseApi.injectEndpoints({
     listMyLlmModels: build.query<{ items: LlmModelInfo[] }, void>({
       query: () => '/v1/llm/me/models',
       providesTags: ['LLMMyModels']
+    }),
+    // Records the outcome on the credential, so the list is refetched.
+    testLlmCredential: build.mutation<LlmCredentialTestResult, string>({
+      query: uuid => ({
+        url: `/v1/admin/llm/credentials/${uuid}/test`,
+        method: 'POST'
+      }),
+      invalidatesTags: ['LLMCredential']
+    }),
+    // A POST that changes nothing: a mutation so it runs only on demand.
+    discoverLlmModels: build.mutation<{ items: LlmDiscoveredModel[] }, string>({
+      query: uuid => ({
+        url: `/v1/admin/llm/credentials/${uuid}/models`,
+        method: 'POST'
+      })
+    }),
+    // Reserved against the budget and ledgered as llm.admin_test.
+    promptTestLlmModel: build.mutation<
+      LlmPromptTestResult,
+      { uuid: string; prompt: string }
+    >({
+      query: ({ uuid, prompt }) => ({
+        url: `/v1/admin/llm/models/${uuid}/prompt`,
+        method: 'POST',
+        body: { prompt }
+      }),
+      invalidatesTags: ['LLMUsage']
+    }),
+    getLlmUsage: build.query<LlmUsageReport, LlmUsageQuery>({
+      query: ({ from, to, groupBy }) => ({
+        url: '/v1/admin/llm/usage',
+        params: {
+          groupBy,
+          ...(from ? { from } : {}),
+          ...(to ? { to } : {})
+        }
+      }),
+      providesTags: ['LLMUsage']
+    }),
+    // 204 (no budget, i.e. no limit) arrives as an empty body → null.
+    getLlmBudget: build.query<LlmBudget | null, void>({
+      query: () => '/v1/admin/llm/budget',
+      transformResponse: (body: LlmBudget | null | undefined) => body ?? null,
+      providesTags: ['LLMBudget']
+    }),
+    putLlmBudget: build.mutation<LlmBudget, LlmBudgetBody>({
+      query: body => ({ url: '/v1/admin/llm/budget', method: 'PUT', body }),
+      invalidatesTags: ['LLMBudget', 'LLMUsage']
+    }),
+    getMyLlmUsage: build.query<LlmSelfUsage, void>({
+      query: () => '/v1/llm/me/usage',
+      providesTags: ['LLMUsage']
     })
   })
 });
@@ -233,5 +394,12 @@ export const {
   usePatchLlmModelMutation,
   useDeleteLlmModelMutation,
   usePutLlmGrantsMutation,
-  useListMyLlmModelsQuery
+  useListMyLlmModelsQuery,
+  useTestLlmCredentialMutation,
+  useDiscoverLlmModelsMutation,
+  usePromptTestLlmModelMutation,
+  useGetLlmUsageQuery,
+  useGetLlmBudgetQuery,
+  usePutLlmBudgetMutation,
+  useGetMyLlmUsageQuery
 } = llmApi;
