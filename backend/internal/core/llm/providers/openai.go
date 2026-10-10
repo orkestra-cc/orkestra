@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -75,24 +73,10 @@ func (o *OpenAI) Capabilities() iface.LLMCapabilities {
 // Profile reports the request dialect (PR 3 uses it for the SIWC path).
 func (o *OpenAI) Profile() OpenAIProfile { return o.profile }
 
-// captureHTTPError is a per-call SDK middleware. For an error status it
-// reads the (bounded) body itself, keeps only the allowlisted identifiers in
-// *dst and hands the SDK an empty error object, so that neither the SDK's
-// unbounded read nor its Error() text (URL + raw body) is ever involved.
+// captureHTTPError is the per-call SDK middleware that keeps only the
+// allowlisted error identifiers (see captureErrorMiddleware).
 func captureHTTPError(dst *ErrorInfo) option.RequestOption {
-	return option.WithMiddleware(func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
-		resp, err := next(req)
-		if err != nil || resp == nil || resp.StatusCode < 400 {
-			return resp, err
-		}
-		*dst = ReadErrorInfo(resp)
-		if resp.Body != nil {
-			_ = resp.Body.Close()
-		}
-		resp.Body = io.NopCloser(strings.NewReader(`{"error":{}}`))
-		resp.ContentLength = -1
-		return resp, nil
-	})
+	return option.WithMiddleware(captureErrorMiddleware(dst))
 }
 
 func (o *OpenAI) buildInput(req iface.ChatRequest) (responses.ResponseInputParam, error) {
@@ -308,19 +292,8 @@ const sdkStreamErrorPrefix = "received error while streaming: "
 // classifySDKError turns a non-HTTP SDK failure into a sentinel without ever
 // returning the SDK's text (it can carry the request URL or provider body).
 func classifySDKError(ctx context.Context, err error) error {
-	switch {
-	case errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled):
-		return transportErr(ctx, err)
-	case errors.Is(err, context.DeadlineExceeded):
-		return fmt.Errorf("%w: %w", iface.ErrLLMProviderUnavailable, context.DeadlineExceeded)
-	case errors.Is(err, ErrStreamIdle):
-		return fmt.Errorf("%w: %w", iface.ErrLLMProviderUnavailable, ErrStreamIdle)
-	case errors.Is(err, ErrResponseTooLarge):
-		return fmt.Errorf("%w: %w", iface.ErrLLMProviderUnavailable, ErrResponseTooLarge)
-	case errors.Is(err, ErrDestinationNotPublic):
-		return fmt.Errorf("%w: %w", iface.ErrLLMProviderUnavailable, ErrDestinationNotPublic)
-	case errors.Is(err, ErrRedirectRefused):
-		return fmt.Errorf("%w: %w", iface.ErrLLMProviderUnavailable, ErrRedirectRefused)
+	if e := sdkTransportFailure(ctx, err); e != nil {
+		return e
 	}
 	var apierr *openai.Error
 	if errors.As(err, &apierr) {
@@ -335,12 +308,7 @@ func classifySDKError(ctx context.Context, err error) error {
 		_ = json.NewDecoder(bytes.NewReader([]byte(strings.TrimPrefix(msg, sdkStreamErrorPrefix)))).Decode(&p)
 		return Classify(ErrorInfo{Status: http.StatusBadGateway, Type: identifier(p.Type), Code: identifier(p.Code)})
 	}
-	var ne net.Error
-	var ue *url.Error
-	if errors.As(err, &ue) || errors.As(err, &ne) {
-		return transportErr(ctx, err)
-	}
-	return malformed("response")
+	return sdkFallbackFailure(ctx, err)
 }
 
 func (o *OpenAI) Embed(ctx context.Context, call EmbedCall) (*EmbedOutcome, error) {

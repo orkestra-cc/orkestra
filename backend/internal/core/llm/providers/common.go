@@ -6,7 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
@@ -90,4 +94,59 @@ func firstInt(vals ...*int) *int {
 		}
 	}
 	return nil
+}
+
+// captureErrorMiddleware is the vendor-neutral half of the per-call SDK
+// middleware (both SDKs' option.Middleware share this exact signature). For
+// an error status it reads the (bounded) body itself, keeps only the
+// allowlisted identifiers in *dst and hands the SDK an empty error object,
+// so that neither the SDK's unbounded read nor its Error() text (URL + raw
+// body) is ever involved.
+func captureErrorMiddleware(dst *ErrorInfo) func(*http.Request, func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+		resp, err := next(req)
+		if err != nil || resp == nil || resp.StatusCode < 400 {
+			return resp, err
+		}
+		*dst = ReadErrorInfo(resp)
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		resp.Body = io.NopCloser(strings.NewReader(`{"error":{}}`))
+		resp.ContentLength = -1
+		return resp, nil
+	}
+}
+
+// sdkTransportFailure maps the failures every SDK adapter shares (caller
+// cancel, deadline, the transport's own sentinels) onto the module's
+// sentinels. It returns nil for anything else.
+func sdkTransportFailure(ctx context.Context, err error) error {
+	switch {
+	case errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled):
+		return transportErr(ctx, err)
+	case errors.Is(err, context.DeadlineExceeded):
+		return fmt.Errorf("%w: %w", iface.ErrLLMProviderUnavailable, context.DeadlineExceeded)
+	case errors.Is(err, ErrStreamIdle):
+		return fmt.Errorf("%w: %w", iface.ErrLLMProviderUnavailable, ErrStreamIdle)
+	case errors.Is(err, ErrResponseTooLarge):
+		return fmt.Errorf("%w: %w", iface.ErrLLMProviderUnavailable, ErrResponseTooLarge)
+	case errors.Is(err, ErrDestinationNotPublic):
+		return fmt.Errorf("%w: %w", iface.ErrLLMProviderUnavailable, ErrDestinationNotPublic)
+	case errors.Is(err, ErrRedirectRefused):
+		return fmt.Errorf("%w: %w", iface.ErrLLMProviderUnavailable, ErrRedirectRefused)
+	}
+	return nil
+}
+
+// sdkFallbackFailure is the last resort of an SDK classifier: network-level
+// errors become provider-unavailable, anything unrecognised is "malformed
+// response". The SDK's text is never included.
+func sdkFallbackFailure(ctx context.Context, err error) error {
+	var ne net.Error
+	var ue *url.Error
+	if errors.As(err, &ue) || errors.As(err, &ne) {
+		return transportErr(ctx, err)
+	}
+	return malformed("response")
 }

@@ -12,5 +12,6 @@ func RegisterAll(r *Registry, clientFor func(kind string) *http.Client) {
 		return NewOpenAICompatible(c, clientFor("openai_compatible"))
 	})
 	r.Register("openai", func(c Credential, _ *http.Client) (Provider, error) { return NewOpenAI(c, clientFor("openai")) })
-	// anthropic, gemini: Tasks 4-5 append their lines here.
+	r.Register("anthropic", func(c Credential, _ *http.Client) (Provider, error) { return NewAnthropic(c, clientFor("anthropic")) })
+	// gemini: Task 5 appends its line here.
 }
