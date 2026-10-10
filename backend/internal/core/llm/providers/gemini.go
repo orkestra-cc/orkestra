@@ -626,6 +626,7 @@ func classifyGeminiSDKError(ctx context.Context, err error) error {
 // ---- embeddings ----
 
 func (g *Gemini) Embed(ctx context.Context, call EmbedCall) (*EmbedOutcome, error) {
+	ctx = WithResponseCap(ctx, MaxEmbedResponseBytes)
 	out := &EmbedOutcome{Vectors: make([][]float32, 0, len(call.Inputs))}
 	for start := 0; start < len(call.Inputs); start += geminiEmbedBatchSize {
 		end := min(start+geminiEmbedBatchSize, len(call.Inputs))

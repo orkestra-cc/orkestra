@@ -24,6 +24,22 @@ const (
 	OutboxStatusFailed  = "failed"
 )
 
+// RefusalAlerts reports whether a refused reservation fires the period's
+// "exhausted" alert: only when consumed + reserved (before the refused
+// request) already reach the warn threshold, or the limit when warnPct
+// is 0. A refusal caused by one oversized request while the balance is
+// largely untouched is ledgered budget_blocked but keeps the month's only
+// exhausted alert for when the balance is really running out.
+func RefusalAlerts(consumedPlusReserved, limit int64, warnPct int) bool {
+	if limit <= 0 {
+		return false
+	}
+	if warnPct <= 0 {
+		return consumedPlusReserved >= limit
+	}
+	return consumedPlusReserved*100 >= limit*int64(warnPct)
+}
+
 // Budget is the org's monthly token cap (llm_budgets, one per org; no
 // document means no budget). MonthlyTokenLimit counts input + output of
 // both credential kinds.

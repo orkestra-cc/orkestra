@@ -121,11 +121,14 @@ func (s *BudgetStore) GetBudget(ctx context.Context) (*models.Budget, error) {
 //
 // limit <= 0 means no budget: always admitted. When the request does not
 // fit and block is set, the same transaction records ev as
-// budget_blocked (no reservation), marks exhaustedAt and inserts the
-// period's single "exhausted" outbox event if this is the first refusal
-// (ruling 4.1), and Reserve returns false. Under warn_only the call is
-// admitted over the limit.
-func (s *BudgetStore) Reserve(ctx context.Context, period string, ev *models.UsageEvent, limit int64, block bool) (bool, error) {
+// budget_blocked (no reservation) and Reserve returns false. If consumed
+// + reserved already reach the warn threshold (warnPct of the limit, or
+// the limit itself when warnPct is 0) it also marks exhaustedAt and
+// inserts the period's single "exhausted" outbox event, on the first such
+// refusal (ruling 4.1 as refined by the final review): one oversized
+// request against a largely unused balance does not burn the alert.
+// Under warn_only the call is admitted over the limit.
+func (s *BudgetStore) Reserve(ctx context.Context, period string, ev *models.UsageEvent, limit int64, warnPct int, block bool) (bool, error) {
 	orig := *ev
 	admitted := false
 	err := WithTxn(ctx, s.db, func(sc mongo.SessionContext) error {
@@ -143,8 +146,10 @@ func (s *BudgetStore) Reserve(ctx context.Context, period string, ev *models.Usa
 			if err := s.usage.InsertPending(sc, &row); err != nil {
 				return err
 			}
-			if err := s.markAndEnqueue(sc, period, models.ThresholdExhausted, m, limit); err != nil {
-				return err
+			if models.RefusalAlerts(m.Consumed()+m.ReservedTokens, limit, warnPct) {
+				if err := s.markAndEnqueue(sc, period, models.ThresholdExhausted, m, limit); err != nil {
+					return err
+				}
 			}
 			*ev = row
 			return nil

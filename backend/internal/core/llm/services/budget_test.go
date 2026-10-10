@@ -36,12 +36,14 @@ func (m *memBudgetStore) GetBudget(context.Context) (*models.Budget, error) {
 	return m.budget, nil
 }
 
-func (m *memBudgetStore) Reserve(_ context.Context, period string, ev *models.UsageEvent, limit int64, block bool) (bool, error) {
+func (m *memBudgetStore) Reserve(_ context.Context, period string, ev *models.UsageEvent, limit int64, warnPct int, block bool) (bool, error) {
 	mo := m.month(period)
 	if limit > 0 && mo.Consumed()+mo.ReservedTokens+int64(ev.ReservedTokens) > limit && block {
 		ev.Outcome, ev.ReservedTokens, ev.ReservedOutputTokens = models.OutcomeBudgetBlocked, 0, 0
 		m.ledger[ev.UUID] = ev
-		m.mark(mo, models.ThresholdExhausted)
+		if models.RefusalAlerts(mo.Consumed()+mo.ReservedTokens, limit, warnPct) {
+			m.mark(mo, models.ThresholdExhausted)
+		}
 		return false, nil
 	}
 	mo.ReservedTokens += int64(ev.ReservedTokens)

@@ -3,10 +3,13 @@ package providers
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -149,4 +152,73 @@ func sdkFallbackFailure(ctx context.Context, err error) error {
 		return transportErr(ctx, err)
 	}
 	return malformed("response")
+}
+
+// oaiEmbeddingResponse is the /embeddings body of OpenAI and of the
+// compatible servers. Embedding stays raw: it is a float array, or with
+// encoding_format=base64 a string (decodeEmbedding handles both).
+type oaiEmbeddingResponse struct {
+	Data []struct {
+		Index     *int            `json:"index"`
+		Embedding json.RawMessage `json:"embedding"`
+	} `json:"data"`
+	Usage struct {
+		PromptTokens int `json:"prompt_tokens"`
+	} `json:"usage"`
+}
+
+// vectors returns one vector per input, in input order (the index field
+// when present, the position otherwise), refusing gaps, duplicates and
+// empty or undecodable vectors.
+func (r *oaiEmbeddingResponse) vectors(n int) ([][]float32, error) {
+	if len(r.Data) != n {
+		return nil, malformed("embeddings response")
+	}
+	out := make([][]float32, n)
+	for pos, d := range r.Data {
+		i := pos
+		if d.Index != nil {
+			i = *d.Index
+		}
+		if i < 0 || i >= n || out[i] != nil {
+			return nil, malformed("embeddings response")
+		}
+		v, err := decodeEmbedding(d.Embedding)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = v
+	}
+	return out, nil
+}
+
+// decodeEmbedding decodes one embedding in either OpenAI wire form: a
+// JSON float array, or a base64 string of little-endian float32 values
+// (encoding_format=base64, about a sixth of the float JSON size).
+func decodeEmbedding(raw json.RawMessage) ([]float32, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) > 0 && raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return nil, malformed("embeddings response")
+		}
+		b, err := base64.StdEncoding.DecodeString(s)
+		if err != nil || len(b) == 0 || len(b)%4 != 0 {
+			return nil, malformed("embeddings response")
+		}
+		v := make([]float32, len(b)/4)
+		for k := range v {
+			v[k] = math.Float32frombits(binary.LittleEndian.Uint32(b[4*k:]))
+		}
+		return v, nil
+	}
+	var fs []float64
+	if err := json.Unmarshal(raw, &fs); err != nil || len(fs) == 0 {
+		return nil, malformed("embeddings response")
+	}
+	v := make([]float32, len(fs))
+	for k, f := range fs {
+		v[k] = float32(f)
+	}
+	return v, nil
 }

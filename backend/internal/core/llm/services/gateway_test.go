@@ -190,6 +190,26 @@ func TestGateway_RejectsNaNTemperatureAndUnserializableSchema(t *testing.T) {
 	}
 }
 
+// Final review I2: Options.MaxOutputTokens is bounded like every other
+// output limit (1-131072); an unbounded value would inflate the
+// reservation.
+func TestGateway_MaxOutputTokensIsBounded(t *testing.T) {
+	for _, tc := range []struct {
+		n    int
+		want bool
+	}{{1, true}, {models.MaxOutputTokens, true}, {models.MaxOutputTokens + 1, false}, {1_000_000_000, false}, {0, false}} {
+		n := tc.n
+		req := iface.ChatRequest{Caller: "ok", Messages: []iface.ChatMessage{{Role: "user", Content: "x"}}, Options: iface.ChatOptions{MaxOutputTokens: &n}}
+		err := ValidateChatRequest(req)
+		if tc.want && err != nil {
+			t.Errorf("maxOutputTokens %d rejected: %v", n, err)
+		}
+		if !tc.want && !errors.Is(err, iface.ErrLLMInvalidRequest) {
+			t.Errorf("maxOutputTokens %d err = %v, want ErrLLMInvalidRequest", n, err)
+		}
+	}
+}
+
 func TestGateway_ToolNamesMayBeMixedCase(t *testing.T) {
 	good := iface.ChatRequest{Caller: "ok", Messages: []iface.ChatMessage{{Role: "user", Content: "x"}}, Tools: []iface.ChatToolSpec{{Name: "getWeather", InputSchema: map[string]any{}}}}
 	if err := ValidateChatRequest(good); err != nil {

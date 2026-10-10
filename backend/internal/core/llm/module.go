@@ -48,8 +48,10 @@ const (
 	// full attempts (a fallback) plus its finalization before the
 	// reconciler may claim its reservation.
 	reservationSlack = 60 * time.Second
-	// streamIdleTimeout bounds the silence between two reads of a stream
-	// (and the wait for its headers).
+	// streamIdleTimeout is the client default for the silence between two
+	// reads of a stream (and the wait for its headers). Gateway calls
+	// override it per request with max(30s, request_timeout) (the router's
+	// streamIdle); it still bounds an unmarked stream.
 	streamIdleTimeout = 30 * time.Second
 	// rollupRetentionPeriods: monthly rollups are kept 24 months (spec).
 	rollupRetentionPeriods = 24

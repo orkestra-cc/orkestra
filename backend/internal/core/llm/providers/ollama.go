@@ -24,10 +24,9 @@ type Ollama struct {
 }
 
 const (
-	ollamaMaxLine     = 1 << 20  // one ndjson line
-	ollamaMaxEmbed    = 32 << 20 // /api/embed response
-	ollamaMaxTags     = 4 << 20  // /api/tags response
-	ollamaMaxToolArgs = 1 << 20  // cumulative tool-call argument bytes per call
+	ollamaMaxLine     = 1 << 20 // one ndjson line
+	ollamaMaxTags     = 4 << 20 // /api/tags response
+	ollamaMaxToolArgs = 1 << 20 // cumulative tool-call argument bytes per call
 )
 
 // NewOllama builds the adapter. The client MUST be the SSRF-safe one from
@@ -258,12 +257,12 @@ func ollamaArgs(raw json.RawMessage) (string, error) {
 }
 
 func (o *Ollama) Embed(ctx context.Context, call EmbedCall) (*EmbedOutcome, error) {
-	resp, err := o.post(ctx, "/api/embed", map[string]any{"model": call.ModelID, "input": call.Inputs})
+	resp, err := o.post(WithResponseCap(ctx, MaxEmbedResponseBytes), "/api/embed", map[string]any{"model": call.ModelID, "input": call.Inputs})
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := ReadAllBounded(resp.Body, ollamaMaxEmbed)
+	body, err := ReadAllBounded(resp.Body, MaxEmbedResponseBytes)
 	if err != nil {
 		return nil, transportErr(ctx, err)
 	}

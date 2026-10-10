@@ -339,3 +339,72 @@ func TestTransport_ActiveStreamIsNotCutAndHasNoTotalCap(t *testing.T) {
 		t.Fatalf("read %d bytes", len(b))
 	}
 }
+
+// Final review I1: the response cap is raised per request (embeddings),
+// never for the client as a whole.
+func TestTransport_ResponseCapMarkerRaisesTheCapForThatRequestOnly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.(http.Flusher).Flush() // chunked: exercise the body cap
+		_, _ = w.Write([]byte(strings.Repeat("x", 2048)))
+	}))
+	defer srv.Close()
+	client := NewHTTPClient(TransportConfig{ProductionLike: false, Timeout: 2 * time.Second, MaxResponseBytes: 1024})
+	get := func(ctx context.Context) error {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		_, err = io.ReadAll(resp.Body)
+		return err
+	}
+	if err := get(WithResponseCap(context.Background(), 4096)); err != nil {
+		t.Fatalf("raised cap: %v", err)
+	}
+	if err := get(context.Background()); !errors.Is(err, ErrResponseTooLarge) {
+		t.Fatalf("unmarked request err = %v, want ErrResponseTooLarge", err)
+	}
+	if err := get(WithResponseCap(context.Background(), 0)); !errors.Is(err, ErrResponseTooLarge) {
+		t.Fatalf("zero marker err = %v, want the client's cap", err)
+	}
+}
+
+// Final review I3: the stream idle timeout is set per request (the router
+// derives it from request_timeout); the client's IdleTimeout is only the
+// default for unmarked streams.
+func TestTransport_StreamIdleMarkerOverridesTheClientIdleTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/late-headers" {
+			time.Sleep(400 * time.Millisecond) // silent before the headers
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: thinking\n\n"))
+		w.(http.Flusher).Flush()
+		time.Sleep(400 * time.Millisecond) // a silent reasoning phase
+		_, _ = w.Write([]byte("data: answer\n\n"))
+	}))
+	defer srv.Close()
+	client := NewHTTPClient(TransportConfig{ProductionLike: false, IdleTimeout: 100 * time.Millisecond})
+	read := func(ctx context.Context, path string) error {
+		req, _ := http.NewRequestWithContext(WithStreaming(ctx), http.MethodGet, srv.URL+path, nil)
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		_, err = io.ReadAll(resp.Body)
+		return err
+	}
+	for _, path := range []string{"/", "/late-headers"} {
+		if err := read(WithStreamIdleTimeout(context.Background(), 2*time.Second), path); err != nil {
+			t.Fatalf("%s with a 2s idle marker: %v", path, err)
+		}
+		if err := read(context.Background(), path); !errors.Is(err, ErrStreamIdle) {
+			t.Fatalf("%s unmarked err = %v, want ErrStreamIdle (client default 100ms)", path, err)
+		}
+	}
+	if d := StreamIdleTimeout(WithStreamIdleTimeout(context.Background(), -time.Second)); d != 0 {
+		t.Fatalf("negative marker = %v", d)
+	}
+}

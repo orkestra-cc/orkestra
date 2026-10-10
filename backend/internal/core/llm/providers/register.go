@@ -3,8 +3,10 @@ package providers
 import "net/http"
 
 // RegisterAll wires every adapter into r. clientFor returns the shared
-// SSRF-safe client for a provider kind (the module builds one per kind so
-// per-kind pools do not share connections across base URLs).
+// SSRF-safe client for a provider kind. The module builds one client per
+// kind, which keeps each kind's connection pool (and idle-connection
+// budget) separate from the others; within a kind, connections are
+// pooled per host as usual, so different base URLs never share one.
 func RegisterAll(r *Registry, clientFor func(kind string) *http.Client) {
 	r.Register("mock", func(c Credential, _ *http.Client) (Provider, error) { return NewMock(c, nil) })
 	r.Register("ollama", func(c Credential, _ *http.Client) (Provider, error) { return NewOllama(c, clientFor("ollama")) })

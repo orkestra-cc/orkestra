@@ -159,7 +159,7 @@ func TestBudgetStore_ConcurrentReservationsOnOneBalance(t *testing.T) {
 				wg.Add(1)
 				go func(i int) {
 					defer wg.Done()
-					ok, err := store.Reserve(ctx, period, pendingEvent("t1", i, 500), 1000, block)
+					ok, err := store.Reserve(ctx, period, pendingEvent("t1", i, 500), 1000, 80, block)
 					if err != nil {
 						t.Errorf("reserve %d: %v", i, err)
 					}
@@ -189,7 +189,7 @@ func TestBudgetStore_ConcurrentReservationsOnOneBalance(t *testing.T) {
 			}
 			if block {
 				// A second refusal in the same period: still one alert.
-				if ok, err := store.Reserve(ctx, period, pendingEvent("t1", 9, 500), 1000, true); ok || err != nil {
+				if ok, err := store.Reserve(ctx, period, pendingEvent("t1", 9, 500), 1000, 80, true); ok || err != nil {
 					t.Fatalf("third reserve = %v, %v", ok, err)
 				}
 				if n := countDocs(t, db, CollBudgetOutbox, bson.M{"threshold": models.ThresholdExhausted}); n != 1 {
@@ -203,6 +203,61 @@ func TestBudgetStore_ConcurrentReservationsOnOneBalance(t *testing.T) {
 	}
 }
 
+// Final review I2 / ruling 4.1 refined: a refusal fires the period's
+// single exhausted alert only once consumed + reserved already reach the
+// warn threshold (or the limit when warnPct is 0). One oversized request
+// at 10% is ledgered budget_blocked without burning the alert; a refusal
+// near the limit still sends it, once.
+func TestBudgetStore_RefusalAlertsOnlyNearTheLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		warnPct            int
+		consumed, reserved int64 // before the refused request
+		request            int
+		wantAlert          bool
+	}{
+		{"oversized request at 10%", 80, 100, 0, 5000, false},
+		{"just under the warn threshold", 80, 700, 99, 500, false},
+		{"consumed + reserved at the warn threshold", 80, 700, 100, 500, true},
+		{"warnPct 0, under the limit", 0, 900, 0, 500, false},
+		{"warnPct 0, at the limit", 0, 990, 10, 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newTestDB(t)
+			ensureBudgetIndexes(t, db)
+			store := newStore(db)
+			ctx := ctxFor("t1")
+			period := models.PeriodOf(time.Now())
+			if err := WithTxn(ctx, db, func(sc mongo.SessionContext) error {
+				if err := store.monthly.Apply(sc, period, models.CredentialKindOrg, 0, tc.consumed, 0); err != nil {
+					return err
+				}
+				return store.monthly.Reserve(sc, period, tc.reserved)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			ok, err := store.Reserve(ctx, period, pendingEvent("t1", 1, tc.request), 1000, tc.warnPct, true)
+			if ok || err != nil {
+				t.Fatalf("reserve = %v, %v; want a refusal", ok, err)
+			}
+			if n := countDocs(t, db, CollUsage, bson.M{"outcome": models.OutcomeBudgetBlocked}); n != 1 {
+				t.Fatalf("budget_blocked rows = %d", n)
+			}
+			n := countDocs(t, db, CollBudgetOutbox, bson.M{"threshold": models.ThresholdExhausted})
+			m, _ := store.monthly.Get(ctx, period)
+			if tc.wantAlert {
+				if n != 1 || m.ExhaustedAt == nil {
+					t.Fatalf("exhausted outbox rows = %d, exhaustedAt = %v; want one alert", n, m.ExhaustedAt)
+				}
+				return
+			}
+			if n != 0 || m.ExhaustedAt != nil {
+				t.Fatalf("exhausted outbox rows = %d, exhaustedAt = %v; want none", n, m.ExhaustedAt)
+			}
+		})
+	}
+}
+
 func TestBudgetStore_FinalizeAppliesOnceAndSplitsByKind(t *testing.T) {
 	db := newTestDB(t)
 	ensureBudgetIndexes(t, db)
@@ -211,7 +266,7 @@ func TestBudgetStore_FinalizeAppliesOnceAndSplitsByKind(t *testing.T) {
 	period := models.PeriodOf(time.Now())
 	ev := pendingEvent("t1", 1, 300)
 	ev.CredentialKind = models.CredentialKindUserAccount
-	if ok, err := store.Reserve(ctx, period, ev, 0, false); !ok || err != nil {
+	if ok, err := store.Reserve(ctx, period, ev, 0, 0, false); !ok || err != nil {
 		t.Fatalf("reserve without budget = %v, %v", ok, err)
 	}
 	upd := models.FinalizeUpdate{Outcome: models.OutcomeOK, InputTokens: 120, OutputTokens: 30, LatencyMs: 5, FinalizedAt: time.Now().UTC(),
@@ -234,7 +289,7 @@ func TestBudgetStore_FinalizeAppliesOnceAndSplitsByKind(t *testing.T) {
 	}
 	// Another tenant cannot finalize t1's row.
 	ev2 := pendingEvent("t1", 2, 10)
-	if ok, err := store.Reserve(ctx, period, ev2, 0, false); !ok || err != nil {
+	if ok, err := store.Reserve(ctx, period, ev2, 0, 0, false); !ok || err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Finalize(ctxFor("t2"), period, ev2.UUID, upd); !errors.Is(err, ErrAlreadyFinalized) {
@@ -257,7 +312,7 @@ func TestBudgetStore_ConcurrentFinalizationsCrossWarnOnce(t *testing.T) {
 	evs := make([]*models.UsageEvent, n)
 	for i := range evs {
 		evs[i] = pendingEvent("t1", i, 1000)
-		if ok, err := store.Reserve(ctx, period, evs[i], 10000, true); !ok || err != nil {
+		if ok, err := store.Reserve(ctx, period, evs[i], 10000, 80, true); !ok || err != nil {
 			t.Fatalf("reserve %d = %v, %v", i, ok, err)
 		}
 	}
@@ -529,7 +584,7 @@ func TestUsage_FinalizeAfterAnonymizeKeepsCredentialRemoved(t *testing.T) {
 	control := pendingEvent("t1", 2, 50)
 	control.UserUUID, control.CredentialUUID = "other", "cred-1"
 	for _, ev := range []*models.UsageEvent{erased, control} {
-		if ok, err := store.Reserve(ctx, period, ev, 0, true); err != nil || !ok {
+		if ok, err := store.Reserve(ctx, period, ev, 0, 0, true); err != nil || !ok {
 			t.Fatalf("reserve = %v, %v", ok, err)
 		}
 	}

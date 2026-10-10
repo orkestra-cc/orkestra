@@ -368,6 +368,31 @@ func TestRouter_SinkErrorAbortsWithoutFallback(t *testing.T) {
 	}
 }
 
+// Final review M5: when the provider completed and only the consumer's
+// sink refuses the Done event, the call is ledgered ok with the reported
+// usage (not canceled with the reservation charged); the sink's error still
+// comes back to the caller unchanged.
+func TestRouter_SinkErrorOnDoneIsLedgeredOK(t *testing.T) {
+	env := newRouterEnv(t, nil, map[string]chatScript{"openai": ok("hello", 4, 2), "anthropic": ok("x", 1, 1)})
+	gone := errors.New("client went away after the last delta")
+	_, err := env.chat([]models.Model{model("a", "openai", "c1"), model("b", "anthropic", "c2")}, simpleReq, func(ev iface.ChatEvent) error {
+		if ev.Done {
+			return gone
+		}
+		return nil
+	})
+	if !errors.Is(err, gone) || env.count("anthropic") != 0 {
+		t.Fatalf("err = %v, fallback calls %d", err, env.count("anthropic"))
+	}
+	ev := singleLedger(t, env.store)
+	if ev.Outcome != models.OutcomeOK || ev.ErrorCode != "" || ev.InputTokens != 4 || ev.OutputTokens != 2 {
+		t.Fatalf("ledger = %+v, want ok with the reported 4/2 tokens", ev)
+	}
+	if env.metrics.requests["openai/"+models.OutcomeOK] != 1 {
+		t.Fatalf("metrics = %v", env.metrics.requests)
+	}
+}
+
 // Spec data model: at most 8 attempts per logical call (preflight 3.13).
 func TestRouter_FallbackAttemptsAreBounded(t *testing.T) {
 	env := newRouterEnv(t, nil, map[string]chatScript{"openai": fail(iface.ErrLLMProviderUnavailable)})
@@ -407,6 +432,31 @@ func TestRouter_DeadlineIsMinOfConfigAndOption(t *testing.T) {
 	}
 	if got > 5*time.Second {
 		t.Fatalf("deadline = %v, want <= request timeout", got)
+	}
+}
+
+// Final review I3: the stream idle timeout is max(30s, request_timeout),
+// read per call (request_timeout is hot-reloadable), so a model that
+// thinks silently is bounded by the attempt deadline, not a fixed 30 s.
+func TestRouter_StreamIdleTimeoutFollowsRequestTimeout(t *testing.T) {
+	var got time.Duration
+	env := newRouterEnv(t, nil, map[string]chatScript{"openai": func(ctx context.Context, sink iface.ChatSink) (*providers.ChatOutcome, error) {
+		got = providers.StreamIdleTimeout(ctx)
+		return ok("x", 1, 1)(ctx, sink)
+	}})
+	for _, tc := range []struct{ requestTimeout, want time.Duration }{
+		{5 * time.Second, 30 * time.Second},
+		{30 * time.Second, 30 * time.Second},
+		{10 * time.Minute, 10 * time.Minute},
+		{0, defaultRequestTimeout},
+	} {
+		env.cfg.RequestTimeout = tc.requestTimeout
+		if _, err := env.chat([]models.Model{model("a", "openai", "c1")}, simpleReq, nil); err != nil {
+			t.Fatal(err)
+		}
+		if got != tc.want {
+			t.Errorf("request_timeout %v: stream idle = %v, want %v", tc.requestTimeout, got, tc.want)
+		}
 	}
 }
 

@@ -36,10 +36,11 @@ type BudgetStore interface {
 	GetBudget(ctx context.Context) (*models.Budget, error)
 	// Reserve atomically admits ev (inserting it pending with its
 	// reservation) when consumed+reserved+requested <= limit, or records
-	// it budget_blocked — firing the period's exhausted alert on the
-	// first refusal — and returns false when block is set. limit <= 0
-	// means no budget.
-	Reserve(ctx context.Context, period string, ev *models.UsageEvent, limit int64, block bool) (admitted bool, err error)
+	// it budget_blocked and returns false when block is set — firing the
+	// period's exhausted alert on the first refusal that finds
+	// consumed+reserved already at the warn threshold (models.RefusalAlerts).
+	// limit <= 0 means no budget.
+	Reserve(ctx context.Context, period string, ev *models.UsageEvent, limit int64, warnPct int, block bool) (admitted bool, err error)
 	// Finalize closes the pending row, applies real usage to the rollup,
 	// releases the reservation and marks thresholds; it returns the
 	// thresholds crossed by this call (an outbox row was inserted for
@@ -136,18 +137,19 @@ func (s *BudgetService) Reserve(ctx context.Context, in ReserveInput) (*Reservat
 	}
 	period := models.PeriodOf(now)
 	var limit int64
+	warnPct := 0
 	block := false
 	budget, err := s.store.GetBudget(ctx)
 	switch err = mapRepoErr(err); {
 	case err == nil:
 		// Fail closed: anything but an explicit warn_only blocks.
-		limit, block = budget.MonthlyTokenLimit, budget.Action != models.BudgetActionWarnOnly
+		limit, warnPct, block = budget.MonthlyTokenLimit, budget.WarnPct, budget.Action != models.BudgetActionWarnOnly
 	case errors.Is(err, ErrNotFound):
 		// No budget: no limit.
 	default:
 		return nil, fmt.Errorf("llm: read budget: %w", err)
 	}
-	admitted, err := s.store.Reserve(ctx, period, ev, limit, block)
+	admitted, err := s.store.Reserve(ctx, period, ev, limit, warnPct, block)
 	if err != nil {
 		return nil, fmt.Errorf("llm: reserve budget: %w", err)
 	}

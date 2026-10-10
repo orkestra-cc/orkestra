@@ -26,11 +26,10 @@ type OpenAICompatible struct {
 }
 
 const (
-	oaiMaxEvent       = 1 << 20  // one SSE event
-	oaiMaxJSON        = 32 << 20 // /embeddings response
-	oaiMaxModels      = 4 << 20  // /models response
-	oaiMaxToolCalls   = 64       // distinct tool-call indexes per response
-	oaiMaxToolArgsLen = 1 << 20  // cumulative tool-call argument bytes per response
+	oaiMaxEvent       = 1 << 20 // one SSE event
+	oaiMaxModels      = 4 << 20 // /models response
+	oaiMaxToolCalls   = 64      // distinct tool-call indexes per response
+	oaiMaxToolArgsLen = 1 << 20 // cumulative tool-call argument bytes per response
 )
 
 // NewOpenAICompatible builds the adapter. The client MUST be the SSRF-safe
@@ -357,41 +356,24 @@ func mapFinishReason(fr string, tools bool) string {
 }
 
 func (o *OpenAICompatible) Embed(ctx context.Context, call EmbedCall) (*EmbedOutcome, error) {
-	resp, err := o.post(ctx, "/embeddings", "", map[string]any{"model": call.ModelID, "input": call.Inputs})
+	// No encoding_format: compatible servers differ on whether they accept
+	// it, so they answer floats; base64 is still decoded if one sends it.
+	resp, err := o.post(WithResponseCap(ctx, MaxEmbedResponseBytes), "/embeddings", "", map[string]any{"model": call.ModelID, "input": call.Inputs})
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := ReadAllBounded(resp.Body, oaiMaxJSON)
+	body, err := ReadAllBounded(resp.Body, MaxEmbedResponseBytes)
 	if err != nil {
 		return nil, transportErr(ctx, err)
 	}
-	var out struct {
-		Data []struct {
-			Index     *int      `json:"index"`
-			Embedding []float64 `json:"embedding"`
-		} `json:"data"`
-		Usage struct {
-			PromptTokens int `json:"prompt_tokens"`
-		} `json:"usage"`
-	}
-	if err := json.Unmarshal(body, &out); err != nil || len(out.Data) != len(call.Inputs) {
+	var out oaiEmbeddingResponse
+	if err := json.Unmarshal(body, &out); err != nil {
 		return nil, malformed("embeddings response")
 	}
-	vectors := make([][]float32, len(out.Data))
-	for pos, d := range out.Data {
-		i := pos
-		if d.Index != nil {
-			i = *d.Index
-		}
-		if i < 0 || i >= len(vectors) || vectors[i] != nil || len(d.Embedding) == 0 {
-			return nil, malformed("embeddings response")
-		}
-		v := make([]float32, len(d.Embedding))
-		for k, f := range d.Embedding {
-			v[k] = float32(f)
-		}
-		vectors[i] = v
+	vectors, err := out.vectors(len(call.Inputs))
+	if err != nil {
+		return nil, err
 	}
 	return &EmbedOutcome{Vectors: vectors, Usage: ensureEmbedUsage(call.Inputs, iface.LLMUsage{InputTokens: out.Usage.PromptTokens})}, nil
 }

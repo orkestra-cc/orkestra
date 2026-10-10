@@ -315,33 +315,32 @@ func (o *OpenAI) Embed(ctx context.Context, call EmbedCall) (*EmbedOutcome, erro
 	if o.profile == ProfileSIWC {
 		return nil, fmt.Errorf("%w: embeddings are not available on the ChatGPT plan route", iface.ErrLLMCapabilityMismatch)
 	}
+	// Base64 is about a sixth of the float JSON; the body is read raw so
+	// both forms decode (a server that ignores encoding_format answers
+	// floats). The embedding cap covers 256 vectors either way.
+	ctx = WithResponseCap(ctx, MaxEmbedResponseBytes)
 	var httpErr ErrorInfo
-	res, err := o.client.Embeddings.New(ctx, openai.EmbeddingNewParams{
-		Model: openai.EmbeddingModel(call.ModelID),
-		Input: openai.EmbeddingNewParamsInputUnion{OfArrayOfStrings: call.Inputs},
-	}, captureHTTPError(&httpErr))
+	var body []byte
+	_, err := o.client.Embeddings.New(ctx, openai.EmbeddingNewParams{
+		Model:          openai.EmbeddingModel(call.ModelID),
+		Input:          openai.EmbeddingNewParamsInputUnion{OfArrayOfStrings: call.Inputs},
+		EncodingFormat: openai.EmbeddingNewParamsEncodingFormatBase64,
+	}, captureHTTPError(&httpErr), option.WithResponseBodyInto(&body))
 	if httpErr.Status != 0 {
 		return nil, Classify(httpErr)
 	}
 	if err != nil {
 		return nil, classifySDKError(ctx, err)
 	}
-	if len(res.Data) != len(call.Inputs) {
+	var res oaiEmbeddingResponse
+	if err := json.Unmarshal(body, &res); err != nil {
 		return nil, malformed("embeddings response")
 	}
-	out := &EmbedOutcome{Usage: ensureEmbedUsage(call.Inputs, iface.LLMUsage{InputTokens: int(res.Usage.PromptTokens)}), Vectors: make([][]float32, len(res.Data))}
-	for _, d := range res.Data {
-		i := int(d.Index)
-		if i < 0 || i >= len(out.Vectors) || out.Vectors[i] != nil || len(d.Embedding) == 0 {
-			return nil, malformed("embeddings response")
-		}
-		vec := make([]float32, len(d.Embedding))
-		for k, f := range d.Embedding {
-			vec[k] = float32(f)
-		}
-		out.Vectors[i] = vec
+	vectors, err := res.vectors(len(call.Inputs))
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	return &EmbedOutcome{Vectors: vectors, Usage: ensureEmbedUsage(call.Inputs, iface.LLMUsage{InputTokens: res.Usage.PromptTokens})}, nil
 }
 
 func (o *OpenAI) ListModels(ctx context.Context) ([]ModelDescriptor, error) {

@@ -24,7 +24,51 @@ const (
 	defaultMaxResponseBytes = 8 << 20
 	defaultHeaderTimeout    = 5 * time.Minute
 	defaultIdleTimeout      = 30 * time.Second
+	// MaxEmbedResponseBytes is the non-stream cap of an embedding call:
+	// the contract admits 256 inputs, and 256 vectors of a 3072-dim model
+	// in float JSON are well past the 8 MiB default.
+	MaxEmbedResponseBytes = 32 << 20
 )
+
+// responseCapKey and streamIdleKey carry per-request overrides of the
+// client's non-stream body cap and stream idle timeout.
+type (
+	responseCapKey struct{}
+	streamIdleKey  struct{}
+)
+
+// WithResponseCap sets the non-stream body cap of every request made with
+// the returned context to n bytes (n <= 0 leaves the client's cap). Like
+// WithStreaming it is request-side on purpose: an adapter raises the cap
+// only for the call shape that needs it (embeddings, MaxEmbedResponseBytes),
+// never because of anything the response says.
+func WithResponseCap(ctx context.Context, n int64) context.Context {
+	return context.WithValue(ctx, responseCapKey{}, n)
+}
+
+func responseCap(ctx context.Context, def int64) int64 {
+	if n, _ := ctx.Value(responseCapKey{}).(int64); n > 0 {
+		return n
+	}
+	return def
+}
+
+// WithStreamIdleTimeout sets the stream idle timeout (the wait for headers
+// and every silence between two reads) of the streaming requests made
+// with the returned context; d <= 0 leaves the client's IdleTimeout. The
+// router derives it per call from the hot-reloadable request_timeout, so
+// a model that thinks silently is cut by the attempt deadline, not by a
+// fixed 30 s.
+func WithStreamIdleTimeout(ctx context.Context, d time.Duration) context.Context {
+	return context.WithValue(ctx, streamIdleKey{}, d)
+}
+
+// StreamIdleTimeout returns the idle timeout set by WithStreamIdleTimeout
+// (0 when none).
+func StreamIdleTimeout(ctx context.Context) time.Duration {
+	d, _ := ctx.Value(streamIdleKey{}).(time.Duration)
+	return max(d, 0)
+}
 
 // streamingKey marks a request as an intentional stream.
 type streamingKey struct{}
@@ -49,13 +93,15 @@ func isStreaming(ctx context.Context) bool {
 // serves both call shapes; the shape is chosen per request.
 //
 //   - Non-streaming (default, no marker): the body is capped at
-//     MaxResponseBytes whatever the response Content-Type says, and the wait
+//     MaxResponseBytes (or the request's WithResponseCap) whatever the
+//     response Content-Type says, and the wait
 //     for headers is bounded by HeaderTimeout (generous: a reasoning model
 //     sends nothing until it is done). Stall detection is the caller's
 //     context deadline (or Timeout).
 //   - Streaming (request context from WithStreaming): no total cap (the
-//     decoder bounds each event), but IdleTimeout bounds the wait for headers
-//     and every silence between two reads.
+//     decoder bounds each event), but IdleTimeout (or the request's
+//     WithStreamIdleTimeout) bounds the wait for headers and every silence
+//     between two reads.
 //
 // Timeout is http.Client.Timeout and also covers the body read, so it would
 // cut healthy streams: a client that serves streams must leave it 0 and rely
@@ -124,15 +170,16 @@ func (p *pinnedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if isStreaming(req.Context()) {
 		return p.roundTripStream(req)
 	}
+	maxBytes := responseCap(req.Context(), p.maxBytes)
 	resp, err := p.base.RoundTrip(req)
 	if err != nil || resp.Body == nil || resp.Body == http.NoBody {
 		return resp, err
 	}
-	if resp.ContentLength > p.maxBytes {
+	if resp.ContentLength > maxBytes {
 		_ = resp.Body.Close()
 		return nil, ErrResponseTooLarge
 	}
-	resp.Body = &cappedBody{rc: resp.Body, max: p.maxBytes}
+	resp.Body = &cappedBody{rc: resp.Body, max: maxBytes}
 	return resp, nil
 }
 
@@ -140,9 +187,13 @@ func (p *pinnedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // cancelling a derived context, released again when the body is closed) and
 // wraps the body in the per-read idle guard.
 func (p *pinnedTransport) roundTripStream(req *http.Request) (*http.Response, error) {
+	idle := p.idleAfter
+	if d := StreamIdleTimeout(req.Context()); d > 0 {
+		idle = d
+	}
 	ctx, cancel := context.WithCancel(req.Context())
 	var stalled atomic.Bool
-	t := time.AfterFunc(p.idleAfter, func() {
+	t := time.AfterFunc(idle, func() {
 		stalled.Store(true)
 		cancel()
 	})
@@ -159,7 +210,7 @@ func (p *pinnedTransport) roundTripStream(req *http.Request) (*http.Response, er
 		cancel()
 		return resp, nil
 	}
-	resp.Body = newIdleBody(resp.Body, p.idleAfter, cancel)
+	resp.Body = newIdleBody(resp.Body, idle, cancel)
 	return resp, nil
 }
 

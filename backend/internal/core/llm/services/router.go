@@ -34,6 +34,9 @@ const (
 	// minAttemptWindow: no new attempt starts with less time than this
 	// left before the reservation expires.
 	minAttemptWindow = time.Second
+	// minStreamIdle is the floor of the per-call stream idle timeout
+	// (max(minStreamIdle, request_timeout), see streamIdle).
+	minStreamIdle = 30 * time.Second
 )
 
 // Attempt outcomes on a ledger row.
@@ -146,9 +149,13 @@ func reserveOutput(m models.Model, req iface.ChatRequest, cfg BudgetConfig) int 
 type callResult struct {
 	err       error // the provider's error
 	callerErr error // the consumer's sink refused an event: the caller aborted
-	usage     iface.LLMUsage
-	finish    string
-	vectors   [][]float32
+	// doneErr: the sink refused only the final Done event. The provider
+	// had completed, so the attempt is ok; the error goes back to the
+	// caller after the ledger is written.
+	doneErr error
+	usage   iface.LLMUsage
+	finish  string
+	vectors [][]float32
 	// Streaming bookkeeping for the partial-output charge.
 	emitted      bool
 	emittedBytes int
@@ -255,6 +262,7 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 		}
 
 		callCtx, cancel := context.WithTimeout(ctx, deadline)
+		callCtx = providers.WithStreamIdleTimeout(callCtx, r.streamIdle())
 		cr := spec.call(callCtx, prov, m)
 		deadlineHit := errors.Is(callCtx.Err(), context.DeadlineExceeded) || errors.Is(cr.err, context.DeadlineExceeded)
 		cancel()
@@ -341,6 +349,20 @@ func (r *Router) attemptTimeout(opt time.Duration) (d time.Duration, lowered boo
 	return d, false
 }
 
+// streamIdle is the stream idle timeout of one call: max(30s,
+// request_timeout), read per call because request_timeout hot-reloads. A
+// reasoning model may stay silent for most of the attempt before its
+// first output event; an idle cut is a fallbackable provider fault that
+// counts toward the breaker, so it must not fire before the operator's
+// own deadline does. Stall detection is then the attempt deadline.
+func (r *Router) streamIdle() time.Duration {
+	d := r.cfg().RequestTimeout
+	if d <= 0 {
+		d = defaultRequestTimeout
+	}
+	return max(d, minStreamIdle)
+}
+
 // finish writes the ledger (usage = every attempt's charge) and the token
 // metrics. It never fails the call: a Mongo error leaves the row pending
 // for the reconciler, which charges the whole reservation.
@@ -394,6 +416,12 @@ func (r *Router) Chat(ctx context.Context, cands []models.Model, userUUID string
 						cr.streamed, cr.reported = *ev.Usage, true
 					}
 					if err := sink(ev); err != nil {
+						if ev.Done {
+							// The provider has completed: charge and ledger
+							// the call as ok, return the error afterwards.
+							cr.doneErr = err
+							return nil
+						}
 						cr.callerErr = err
 						return err
 					}
@@ -412,6 +440,9 @@ func (r *Router) Chat(ctx context.Context, cands []models.Model, userUUID string
 	})
 	if err != nil {
 		return nil, err
+	}
+	if out.result.doneErr != nil {
+		return nil, out.result.doneErr
 	}
 	return &iface.ChatResult{Model: out.model.Info(), Usage: out.result.usage, FinishReason: out.result.finish,
 		BillingScope: out.model.CredentialRef.Kind, Fallback: out.fallback}, nil

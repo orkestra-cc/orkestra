@@ -39,7 +39,7 @@ func (s *ledgerStore) GetBudget(context.Context) (*models.Budget, error) {
 	return nil, repository.ErrNotFound
 }
 
-func (s *ledgerStore) Reserve(_ context.Context, _ string, ev *models.UsageEvent, _ int64, block bool) (bool, error) {
+func (s *ledgerStore) Reserve(_ context.Context, _ string, ev *models.UsageEvent, _ int64, _ int, block bool) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cp := *ev

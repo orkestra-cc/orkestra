@@ -135,7 +135,9 @@ func ValidateChatRequest(req iface.ChatRequest) error {
 	if t := req.Options.Temperature; t != nil && (math.IsNaN(*t) || *t < 0 || *t > 2) {
 		return fmt.Errorf("%w: temperature", iface.ErrLLMInvalidRequest)
 	}
-	if req.Options.MaxOutputTokens != nil && *req.Options.MaxOutputTokens <= 0 {
+	// Bounded like every other output limit: the value is the call's
+	// output reservation, so an unbounded one would inflate it.
+	if n := req.Options.MaxOutputTokens; n != nil && (*n <= 0 || *n > models.MaxOutputTokens) {
 		return fmt.Errorf("%w: maxOutputTokens", iface.ErrLLMInvalidRequest)
 	}
 	switch req.Options.Effort {
