@@ -35,6 +35,7 @@ const SOC2EvidencePage = lazy(() => import('pages/admin/compliance/soc2'));
 const CompliancePolicyPage = lazy(
   () => import('pages/admin/compliance/policies')
 );
+const LlmAdminPage = lazy(() => import('pages/admin/llm'));
 const ModuleManagement = lazy(() => import('pages/admin/modules'));
 const ModuleDetail = lazy(() => import('pages/admin/modules/detail'));
 const NavigationAdminPage = lazy(() => import('pages/admin/navigation'));
@@ -185,6 +186,26 @@ export function buildCoreRoutes(
                         fallback={<OrkestraLoader />}
                       >
                         <CompliancePolicyPage />
+                      </Suspense>
+                    </ProtectedRoute>
+                  )
+                },
+                {
+                  // ADR-0022 — LLM credentials, models and grants.
+                  path: 'llm',
+                  element: (
+                    <ProtectedRoute
+                      requiredPermissions={[
+                        [
+                          'llm.admin.read',
+                          'super_admin',
+                          'administrator',
+                          'developer'
+                        ]
+                      ]}
+                    >
+                      <Suspense key="admin-llm" fallback={<OrkestraLoader />}>
+                        <LlmAdminPage />
                       </Suspense>
                     </ProtectedRoute>
                   )
