@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
@@ -45,6 +46,9 @@ type ErrorInfo struct {
 	Code      string
 	Param     string
 	RequestID string
+	// QuotaID: the Google QuotaFailure violation id (e.g.
+	// "GenerateRequestsPerDayPerProjectPerModel-FreeTier"), identifier-checked.
+	QuotaID string
 }
 
 const (
@@ -73,10 +77,11 @@ func ReadErrorInfo(resp *http.Response) ErrorInfo {
 	}
 	type payload struct {
 		Error struct {
-			Type   any `json:"type"`   // OpenAI / Anthropic
-			Code   any `json:"code"`   // OpenAI string; Gemini numeric (the HTTP status)
-			Param  any `json:"param"`  // OpenAI
-			Status any `json:"status"` // Gemini: RESOURCE_EXHAUSTED, ...
+			Type    any              `json:"type"`    // OpenAI / Anthropic
+			Code    any              `json:"code"`    // OpenAI string; Gemini numeric (the HTTP status)
+			Param   any              `json:"param"`   // OpenAI
+			Status  any              `json:"status"`  // Gemini: RESOURCE_EXHAUSTED, ...
+			Details []map[string]any `json:"details"` // Gemini: google.rpc.QuotaFailure, ...
 		} `json:"error"`
 	}
 	var p payload
@@ -96,7 +101,26 @@ func ReadErrorInfo(resp *http.Response) ErrorInfo {
 	}
 	info.Code = identifier(p.Error.Code)
 	info.Param = identifier(p.Error.Param)
+	info.QuotaID = QuotaIDFromDetails(p.Error.Details)
 	return info
+}
+
+// QuotaIDFromDetails returns the first quotaId of a google.rpc.QuotaFailure
+// entry that passes the identifier check ("" when there is none).
+func QuotaIDFromDetails(details []map[string]any) string {
+	for _, d := range details {
+		if t, _ := d["@type"].(string); !strings.HasSuffix(t, ".QuotaFailure") {
+			continue
+		}
+		violations, _ := d["violations"].([]any)
+		for _, v := range violations {
+			m, _ := v.(map[string]any)
+			if id := identifier(m["quotaId"]); id != "" {
+				return id
+			}
+		}
+	}
+	return ""
 }
 
 // identifier returns v when it is a short string of [A-Za-z0-9_.:-]; numbers,
@@ -128,6 +152,10 @@ func Classify(info ErrorInfo) error {
 	detail := fmt.Sprintf("status %d, type %q, code %q, request %s", info.Status, info.Type, info.Code, info.RequestID)
 	switch {
 	case info.Status == http.StatusPaymentRequired || quotaErrorCodes[info.Code] || quotaErrorCodes[info.Type]:
+		return fmt.Errorf("%w (%s)", iface.ErrLLMQuotaExhausted, detail)
+	case info.Status == http.StatusTooManyRequests && strings.Contains(info.QuotaID, "PerDay"):
+		// Google's daily quotas do not recover within a retry window, unlike
+		// the per-minute ones that share the RESOURCE_EXHAUSTED status.
 		return fmt.Errorf("%w (%s)", iface.ErrLLMQuotaExhausted, detail)
 	case info.Status == http.StatusUnauthorized || info.Status == http.StatusForbidden:
 		return fmt.Errorf("%w: %w (%s)", ErrUnauthorized, iface.ErrLLMProviderUnavailable, detail)

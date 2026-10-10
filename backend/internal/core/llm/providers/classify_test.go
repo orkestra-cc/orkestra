@@ -42,6 +42,19 @@ func TestReadErrorInfo_RealProviderShapes(t *testing.T) {
 			t.Fatalf("info = %+v", info)
 		}
 	})
+	t.Run("gemini quota failure id", func(t *testing.T) {
+		info := ReadErrorInfo(respWith(429, `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"x","details":[
+ {"@type":"type.googleapis.com/google.rpc.Help","links":[{"url":"https://x"}]},
+ {"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[
+   {"quotaMetric":"m","quotaId":"free text with spaces"},
+   {"quotaMetric":"m","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}]}}`))
+		if info.QuotaID != "GenerateRequestsPerDayPerProjectPerModel-FreeTier" || info.Type != "RESOURCE_EXHAUSTED" {
+			t.Fatalf("info = %+v", info)
+		}
+		if info := ReadErrorInfo(respWith(429, `{"error":{"status":"RESOURCE_EXHAUSTED","details":[{"@type":"x.QuotaFailure","violations":[{"quotaId":5}]}]}}`)); info.QuotaID != "" {
+			t.Fatalf("non-string id kept: %+v", info)
+		}
+	})
 	t.Run("gemini array-wrapped (stream) error", func(t *testing.T) {
 		info := ReadErrorInfo(respWith(400, `[{"error":{"code":400,"message":"x","status":"INVALID_ARGUMENT"}}]`))
 		if info.Type != "INVALID_ARGUMENT" {
@@ -83,7 +96,9 @@ func TestClassify(t *testing.T) {
 		{ErrorInfo{Status: 429, Type: "billing_hard_limit_reached"}, iface.ErrLLMQuotaExhausted},
 		{ErrorInfo{Status: 429}, iface.ErrLLMProviderUnavailable},
 		{ErrorInfo{Status: 429, Type: "RESOURCE_EXHAUSTED"}, iface.ErrLLMProviderUnavailable}, // bare Gemini 429 is rate limiting (5.12)
-		{ErrorInfo{Status: 408}, iface.ErrLLMProviderUnavailable},                             // request timeout is provider-side
+		{ErrorInfo{Status: 429, Type: "RESOURCE_EXHAUSTED", QuotaID: "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}, iface.ErrLLMQuotaExhausted},
+		{ErrorInfo{Status: 429, Type: "RESOURCE_EXHAUSTED", QuotaID: "GenerateContentInputTokensPerModelPerMinute-FreeTier"}, iface.ErrLLMProviderUnavailable},
+		{ErrorInfo{Status: 408}, iface.ErrLLMProviderUnavailable}, // request timeout is provider-side
 		{ErrorInfo{Status: 500}, iface.ErrLLMProviderUnavailable},
 		{ErrorInfo{Status: 503, Type: "overloaded_error"}, iface.ErrLLMProviderUnavailable},
 		{ErrorInfo{Status: 401}, ErrUnauthorized},

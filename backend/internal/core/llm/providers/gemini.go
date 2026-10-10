@@ -1,8 +1,10 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -29,6 +31,16 @@ const (
 	geminiCatalogTTL     = time.Hour
 	geminiCatalogFailTTL = time.Minute
 	geminiCatalogMaxKeys = 128
+	// geminiMaxSignature caps the base64 text of a thought signature.
+	geminiMaxSignature = 64 << 10
+	// geminiSkipSignature is Google's documented escape hatch for replaying a
+	// function call that carries no signature (history from another provider,
+	// a mid-loop fallback). UNVERIFIED against the live API. The documented
+	// JSON string contains '_' (URL-safe base64) while genai encodes []byte
+	// with the standard alphabet, so the bytes are the URL-decoded literal:
+	// the wire form then differs only in '_' vs '/', which proto-JSON decoders
+	// accept interchangeably.
+	geminiSkipSignature = "skip_thought_signature_validator"
 )
 
 // Gemini talks to the Gemini Developer API through the official SDK. The
@@ -100,24 +112,34 @@ func geminiCall(ctx context.Context) (context.Context, *ErrorInfo) {
 type geminiTransport struct{ base http.RoundTripper }
 
 func (t *geminiTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	resp, err := t.base.RoundTrip(req)
-	if err != nil || resp == nil {
+	dst, _ := req.Context().Value(geminiErrKey{}).(*ErrorInfo)
+	if dst == nil {
+		dst = &ErrorInfo{}
+	}
+	resp, err := captureErrorMiddleware(dst)(req, t.base.RoundTrip)
+	if err != nil || resp == nil || resp.StatusCode >= 400 || resp.Body == nil || resp.Body == http.NoBody {
 		return resp, err
 	}
-	if resp.StatusCode >= 400 {
-		if dst, _ := req.Context().Value(geminiErrKey{}).(*ErrorInfo); dst != nil {
-			*dst = ReadErrorInfo(resp)
-		}
-		if resp.Body != nil {
-			_ = resp.Body.Close()
-		}
-		resp.Body = io.NopCloser(strings.NewReader(`{"error":{}}`))
-		resp.ContentLength = -1
-		return resp, nil
-	}
-	if isStreaming(req.Context()) && resp.Body != nil && resp.Body != http.NoBody {
+	switch {
+	case isStreaming(req.Context()):
 		// The SDK's own stream scanner grows to 256 MiB per event; bound it.
 		resp.Body = &eventGuardBody{rc: resp.Body, max: oaiMaxEvent}
+	case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/models"):
+		// The SDK logs the whole response map (headers included) through the
+		// std logger when a models list has no "models" key, e.g. a valid {}.
+		body, rerr := ReadAllBounded(resp.Body, oaiMaxModels)
+		_ = resp.Body.Close()
+		if rerr != nil {
+			return nil, rerr
+		}
+		var probe map[string]json.RawMessage
+		if json.Unmarshal(body, &probe) == nil {
+			if _, ok := probe["models"]; !ok {
+				body = []byte(`{"models":[]}`)
+				resp.ContentLength = int64(len(body))
+			}
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(body))
 	}
 	return resp, nil
 }
@@ -277,6 +299,25 @@ func geminiArgsMap(raw string) (map[string]any, error) {
 	return m, nil
 }
 
+func geminiDecodeSignature(sig string) ([]byte, error) {
+	if sig == "" {
+		return nil, nil
+	}
+	if len(sig) > geminiMaxSignature {
+		return nil, fmt.Errorf("%w: tool call signature is too large", iface.ErrLLMInvalidRequest)
+	}
+	b, err := base64.StdEncoding.DecodeString(sig)
+	if err != nil {
+		return nil, fmt.Errorf("%w: tool call signature is not valid base64", iface.ErrLLMInvalidRequest)
+	}
+	return b, nil
+}
+
+func geminiBypassSignature() []byte {
+	b, _ := base64.URLEncoding.DecodeString(geminiSkipSignature)
+	return b
+}
+
 func buildGeminiContents(req iface.ChatRequest) (*genai.Content, []*genai.Content, error) {
 	var (
 		system   []string
@@ -296,7 +337,15 @@ func buildGeminiContents(req iface.ChatRequest) (*genai.Content, []*genai.Conten
 		}
 	}
 	addSystem(req.Instructions)
-	for _, m := range req.Messages {
+	// Gemini 3 validates function-call signatures only in the current turn:
+	// everything after the last user message.
+	currentTurn := -1
+	for i, m := range req.Messages {
+		if m.Role == "user" {
+			currentTurn = i
+		}
+	}
+	for mi, m := range req.Messages {
 		if m.Role != "tool" {
 			flush()
 		}
@@ -313,7 +362,7 @@ func buildGeminiContents(req iface.ChatRequest) (*genai.Content, []*genai.Conten
 			if strings.TrimSpace(m.Content) != "" {
 				parts = append(parts, genai.NewPartFromText(m.Content))
 			}
-			for _, tc := range m.ToolCalls {
+			for ci, tc := range m.ToolCalls {
 				if tc.ID == "" || tc.Name == "" {
 					return nil, nil, fmt.Errorf("%w: tool call needs an id and a name", iface.ErrLLMInvalidRequest)
 				}
@@ -321,8 +370,17 @@ func buildGeminiContents(req iface.ChatRequest) (*genai.Content, []*genai.Conten
 				if err != nil {
 					return nil, nil, fmt.Errorf("%w: tool call arguments are not valid JSON", iface.ErrLLMInvalidRequest)
 				}
+				sig, err := geminiDecodeSignature(tc.Signature)
+				if err != nil {
+					return nil, nil, err
+				}
+				// Only the first call of a parallel step carries a signature;
+				// in the current turn it must have one.
+				if sig == nil && ci == 0 && mi > currentTurn {
+					sig = geminiBypassSignature()
+				}
 				names[tc.ID] = tc.Name
-				parts = append(parts, &genai.Part{FunctionCall: &genai.FunctionCall{ID: tc.ID, Name: tc.Name, Args: args}})
+				parts = append(parts, &genai.Part{FunctionCall: &genai.FunctionCall{ID: tc.ID, Name: tc.Name, Args: args}, ThoughtSignature: sig})
 			}
 			if len(parts) > 0 { // the API refuses empty content
 				contents = append(contents, genai.NewContentFromParts(parts, genai.RoleModel))
@@ -484,7 +542,11 @@ func (g *Gemini) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (
 					}
 					emitted++
 					outBytes += len(fc.Name) + len(args)
-					if err := sink(iface.ChatEvent{ToolCall: &iface.ChatToolCall{ID: id, Name: fc.Name, Arguments: args}}); err != nil {
+					tc := &iface.ChatToolCall{ID: id, Name: fc.Name, Arguments: args}
+					if sig := base64.StdEncoding.EncodeToString(part.ThoughtSignature); len(part.ThoughtSignature) > 0 && len(sig) <= geminiMaxSignature {
+						tc.Signature = sig // a larger one is dropped: the call is still delivered
+					}
+					if err := sink(iface.ChatEvent{ToolCall: tc}); err != nil {
 						return nil, err
 					}
 					continue
@@ -556,7 +618,7 @@ func classifyGeminiSDKError(ctx context.Context, err error) error {
 	var apierr genai.APIError
 	if errors.As(err, &apierr) {
 		typ := identifier(apierr.Status)
-		return Classify(ErrorInfo{Status: geminiStatusFromRPC(apierr.Code, typ), Type: typ})
+		return Classify(ErrorInfo{Status: geminiStatusFromRPC(apierr.Code, typ), Type: typ, QuotaID: QuotaIDFromDetails(apierr.Details)})
 	}
 	return sdkFallbackFailure(ctx, err)
 }

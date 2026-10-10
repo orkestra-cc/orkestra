@@ -70,6 +70,13 @@ type ChatToolCall struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"` // JSON text, never parsed by the gateway
+	// Signature is opaque provider state that must travel with the call so a
+	// tool loop can continue (Gemini 3 "thought signatures": base64 text).
+	// It is never parsed, logged or shown, and adapters other than the one
+	// that produced it ignore it. Capped at 64 KiB: an adapter drops a larger
+	// value on output (the call itself is still delivered) and rejects one on
+	// input with ErrLLMInvalidRequest.
+	Signature string `json:"signature,omitempty"`
 }
 
 type ChatToolSpec struct {

@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -616,5 +617,178 @@ func TestGemini_CapabilitiesConstructorAndRegistry(t *testing.T) {
 	}
 	if c := p.Capabilities(); !c.Chat || !c.Streaming || !c.Tools || !c.StructuredOutput || !c.Embeddings {
 		t.Errorf("capabilities = %+v", c)
+	}
+}
+
+// ---- thought signatures (Gemini 3 function calling) ----
+
+func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+
+func TestGemini_ThoughtSignatureIsCapturedFromTheStream(t *testing.T) {
+	p := newGem(t, func(w http.ResponseWriter, r *http.Request) {
+		gemSSE(w, `{"candidates":[{"content":{"parts":[
+ {"functionCall":{"name":"a","args":{}},"thoughtSignature":"`+b64("sig-one")+`"},
+ {"functionCall":{"name":"b","args":{}}}],"role":"model"},"finishReason":"STOP"}]}`)
+	})
+	var tcs []iface.ChatToolCall
+	_, err := p.Chat(context.Background(), ChatCall{ModelID: "m", Request: userReq("hi")}, func(e iface.ChatEvent) error {
+		if e.ToolCall != nil {
+			tcs = append(tcs, *e.ToolCall)
+		}
+		return nil
+	})
+	if err != nil || len(tcs) != 2 || tcs[0].Signature != b64("sig-one") || tcs[1].Signature != "" {
+		t.Fatalf("tcs=%+v err=%v", tcs, err)
+	}
+}
+
+func TestGemini_OversizedOutputSignatureIsDroppedButTheCallIsDelivered(t *testing.T) {
+	big := base64.StdEncoding.EncodeToString(make([]byte, geminiMaxSignature)) // encodes past the cap
+	p := newGem(t, func(w http.ResponseWriter, r *http.Request) {
+		gemSSE(w, `{"candidates":[{"content":{"parts":[{"functionCall":{"name":"a","args":{}},"thoughtSignature":"`+big+`"}],"role":"model"},"finishReason":"STOP"}]}`)
+	})
+	var got *iface.ChatToolCall
+	_, err := p.Chat(context.Background(), ChatCall{ModelID: "m", Request: userReq("hi")}, func(e iface.ChatEvent) error {
+		if e.ToolCall != nil {
+			got = e.ToolCall
+		}
+		return nil
+	})
+	if err != nil || got == nil || got.Name != "a" || got.Signature != "" {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+}
+
+// wireParts returns the parts of every content as sent to the provider.
+func wireParts(captured map[string]any) [][]map[string]any {
+	var out [][]map[string]any
+	contents, _ := captured["contents"].([]any)
+	for _, c := range contents {
+		var parts []map[string]any
+		ps, _ := c.(map[string]any)["parts"].([]any)
+		for _, p := range ps {
+			parts = append(parts, p.(map[string]any))
+		}
+		out = append(out, parts)
+	}
+	return out
+}
+
+func TestGemini_SignatureIsEchoedAndCurrentTurnFallsBackToTheBypass(t *testing.T) {
+	var captured map[string]any
+	p := newGem(t, func(w http.ResponseWriter, r *http.Request) {
+		captured = nil
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		gemSSE(w, gemFinal("STOP", 1, 1))
+	})
+	call := func(id, name string) iface.ChatToolCall {
+		return iface.ChatToolCall{ID: id, Name: name, Arguments: `{}`}
+	}
+	signed := call("c1", "a")
+	signed.Signature = b64("sig-one")
+	_, err := p.Chat(context.Background(), ChatCall{ModelID: "m", Request: iface.ChatRequest{Messages: []iface.ChatMessage{
+		{Role: "user", Content: "first"},
+		{Role: "assistant", ToolCalls: []iface.ChatToolCall{call("h1", "old")}}, // before the last user message: not validated
+		{Role: "tool", ToolCallID: "h1", Content: "r"},
+		{Role: "user", Content: "second"},
+		{Role: "assistant", ToolCalls: []iface.ChatToolCall{signed, call("c2", "b")}}, // signed first call, parallel second
+		{Role: "tool", ToolCallID: "c1", Content: "r1"},
+		{Role: "tool", ToolCallID: "c2", Content: "r2"},
+		{Role: "assistant", ToolCalls: []iface.ChatToolCall{call("c3", "c"), call("c4", "d")}}, // unsigned step in the current turn
+		{Role: "tool", ToolCallID: "c3", Content: "r3"},
+		{Role: "tool", ToolCallID: "c4", Content: "r4"},
+	}}}, noopSink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := wireParts(captured)
+	sigOf := func(ci, pi int) any { return contents[ci][pi]["thoughtSignature"] }
+	if sigOf(1, 0) != nil {
+		t.Errorf("history call got a signature: %v", sigOf(1, 0))
+	}
+	if sigOf(4, 0) != b64("sig-one") || sigOf(4, 1) != nil {
+		t.Errorf("signed step: %v / %v", sigOf(4, 0), sigOf(4, 1))
+	}
+	bypass, _ := sigOf(6, 0).(string)
+	// Proto-JSON accepts both base64 alphabets: compare after normalising to the URL-safe one.
+	if strings.NewReplacer("+", "-", "/", "_").Replace(bypass) != "skip_thought_signature_validator" || sigOf(6, 1) != nil {
+		t.Errorf("unsigned current-turn step: %v / %v", sigOf(6, 0), sigOf(6, 1))
+	}
+}
+
+func TestGemini_SignatureInputIsValidatedAndNeverLeaked(t *testing.T) {
+	mode := "ok"
+	p := newGem(t, func(w http.ResponseWriter, r *http.Request) {
+		if mode == "400" {
+			w.WriteHeader(400)
+			_, _ = w.Write([]byte(`{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"bad signature ` + b64("sig-secret") + `"}}`))
+			return
+		}
+		gemSSE(w, gemFinal("STOP", 1, 1))
+	})
+	withSig := func(sig string) iface.ChatRequest {
+		return iface.ChatRequest{Messages: []iface.ChatMessage{
+			{Role: "user", Content: "x"},
+			{Role: "assistant", ToolCalls: []iface.ChatToolCall{{ID: "a", Name: "n", Arguments: `{}`, Signature: sig}}},
+			{Role: "tool", ToolCallID: "a", Content: "r"}}}
+	}
+	for name, sig := range map[string]string{
+		"too large":  strings.Repeat("A", geminiMaxSignature+4),
+		"not base64": "***not base64***",
+	} {
+		if _, err := p.Chat(context.Background(), ChatCall{ModelID: "m", Request: withSig(sig)}, noopSink); !errors.Is(err, iface.ErrLLMInvalidRequest) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	mode = "400"
+	_, err := p.Chat(context.Background(), ChatCall{ModelID: "m", Request: withSig(b64("sig-secret"))}, noopSink)
+	if !errors.Is(err, iface.ErrLLMInvalidRequest) || strings.Contains(err.Error(), "sig-secret") || strings.Contains(err.Error(), b64("sig-secret")) {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// ---- model listing without a "models" key, quota ids ----
+
+func TestGemini_EmptyModelListIsNotLoggedByTheSDK(t *testing.T) {
+	p := newGem(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Secret-Header", "must-not-be-logged")
+		_, _ = w.Write([]byte(`{}`))
+	})
+	var buf strings.Builder
+	defer log.SetOutput(log.Writer())
+	log.SetOutput(&buf)
+	models, err := p.ListModels(context.Background())
+	if err != nil || len(models) != 0 {
+		t.Fatalf("models=%+v err=%v", models, err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("SDK logged: %s", buf.String())
+	}
+}
+
+func TestGemini_QuotaIDSplitsDailyFromPerMinuteRateLimits(t *testing.T) {
+	mode := ""
+	details := func(id string) string {
+		return `"details":[{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaId":"` + id + `"}]}]`
+	}
+	p := newGem(t, func(w http.ResponseWriter, r *http.Request) {
+		switch mode {
+		case "day":
+			w.WriteHeader(429)
+			_, _ = w.Write([]byte(`{"error":{"code":429,"status":"RESOURCE_EXHAUSTED",` + details("GenerateRequestsPerDayPerProjectPerModel-FreeTier") + `}}`))
+		case "minute":
+			w.WriteHeader(429)
+			_, _ = w.Write([]byte(`{"error":{"code":429,"status":"RESOURCE_EXHAUSTED",` + details("GenerateRequestsPerMinutePerProjectPerModel-FreeTier") + `}}`))
+		case "stream_day":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte(`{"error":{"code":429,"status":"RESOURCE_EXHAUSTED",` + details("GenerateRequestsPerDayPerProjectPerModel") + `}}` + "\n\n"))
+		}
+	})
+	for m, want := range map[string]error{"day": iface.ErrLLMQuotaExhausted, "minute": iface.ErrLLMProviderUnavailable, "stream_day": iface.ErrLLMQuotaExhausted} {
+		mode = m
+		_, err := p.Chat(context.Background(), ChatCall{ModelID: "m", Request: userReq("hi")}, noopSink)
+		if !errors.Is(err, want) {
+			t.Errorf("%s: err = %v, want %v", m, err, want)
+		}
 	}
 }
