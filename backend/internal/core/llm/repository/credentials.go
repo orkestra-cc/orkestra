@@ -82,9 +82,13 @@ func (r *Credentials) Get(ctx context.Context, uuid string) (*models.Credential,
 	return &c, nil
 }
 
-// Update replaces the document identified by (tenant, c.UUID) and bumps
-// UpdatedAt. The caller's c.TenantID is ignored: it is re-stamped from the
-// context so a replace can never move a document across orgs.
+// Update writes the patchable fields of c — name, baseUrl, status — and
+// bumps updatedAt, with a targeted $set on (tenant, c.UUID). It owns nothing
+// else: the secret and its display tail belong to SetSecret, createdBy to
+// the DSR pseudonymization, and createdAt, tenantId and uuid never change.
+// A caller holding a stale copy can therefore never revert a concurrent
+// rotation, an erasure or another field's owner. c.TenantID is re-stamped
+// from the context (it is not written); c.UpdatedAt is set to the new value.
 func (r *Credentials) Update(ctx context.Context, c *models.Credential) error {
 	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": c.UUID})
 	if err != nil {
@@ -96,11 +100,44 @@ func (r *Credentials) Update(ctx context.Context, c *models.Credential) error {
 	}
 	c.TenantID = tenantID
 	c.UpdatedAt = time.Now().UTC()
-	res, err := r.coll.ReplaceOne(ctx, filter, c)
+	set := bson.M{"name": c.Name, "status": c.Status, "updatedAt": c.UpdatedAt}
+	update := bson.M{"$set": set}
+	if c.BaseURL != "" {
+		set["baseUrl"] = c.BaseURL
+	} else {
+		update["$unset"] = bson.M{"baseUrl": ""}
+	}
+	res, err := r.coll.UpdateOne(ctx, filter, update)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			return ErrDuplicateName
 		}
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetSecret is the only writer of the secret envelope and its display tail:
+// a targeted $set of secret, secretLast4 (unset when empty, the tail of a
+// short secret) and updatedAt on (tenant, uuid). A new secret also clears
+// the reserved lastTest* result, which described the previous one.
+func (r *Credentials) SetSecret(ctx context.Context, uuid string, env models.Envelope, last4 string) error {
+	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid})
+	if err != nil {
+		return err
+	}
+	set := bson.M{"secret": env, "updatedAt": time.Now().UTC()}
+	unset := bson.M{"lastTestedAt": "", "lastTestStatus": "", "lastTestError": ""}
+	if last4 != "" {
+		set["secretLast4"] = last4
+	} else {
+		unset["secretLast4"] = ""
+	}
+	res, err := r.coll.UpdateOne(ctx, filter, bson.M{"$set": set, "$unset": unset})
+	if err != nil {
 		return err
 	}
 	if res.MatchedCount == 0 {

@@ -168,3 +168,92 @@ func TestCredentials_DSRActorMethods(t *testing.T) {
 		}
 	}
 }
+
+// TestCredentials_StaleUpdateDoesNotRevertSecretOrCreator: Update is
+// field-owned. A rename that read the credential before a rotation and an
+// erasure finishes after them, and must not write back the old secret, the
+// old display tail or the erased creator.
+func TestCredentials_StaleUpdateDoesNotRevertSecretOrCreator(t *testing.T) {
+	db := newTestDB(t)
+	repo := NewCredentials(db)
+	ctx := ctxFor("t1")
+	now := time.Now().UTC().Add(-time.Hour)
+	oldEnv := models.Envelope{Alg: models.EnvelopeAlgLocal, SchemaVersion: models.EnvelopeSchemaVersion, Ciphertext: "b2xk"}
+	a := &models.Credential{UUID: "c-a", Name: "k", Provider: models.ProviderOpenAI, Secret: oldEnv, SecretLast4: "1111", Status: models.CredentialStatusActive, CreatedBy: "subject", CreatedAt: now, UpdatedAt: now}
+	if err := repo.Insert(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := repo.Get(ctx, "c-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A rotation and an erasure land after the rename's read.
+	newEnv := models.Envelope{Alg: models.EnvelopeAlgLocal, SchemaVersion: models.EnvelopeSchemaVersion, Ciphertext: "bmV3"}
+	if err := repo.SetSecret(ctx, "c-a", newEnv, "2222"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PseudonymizeCreator(context.Background(), "subject"); err != nil {
+		t.Fatal(err)
+	}
+	stale.Name = "renamed"
+	stale.Status = models.CredentialStatusDisabled
+	if err := repo.Update(ctx, stale); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, err := repo.Get(ctx, "c-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "renamed" || got.Status != models.CredentialStatusDisabled {
+		t.Fatalf("patch fields not written: %+v", got)
+	}
+	if got.Secret.Ciphertext != "bmV3" || got.SecretLast4 != "2222" {
+		t.Fatalf("stale update reverted the rotated secret: ciphertext=%q last4=%q", got.Secret.Ciphertext, got.SecretLast4)
+	}
+	if got.CreatedBy != models.ErasedActor {
+		t.Fatalf("stale update restored createdBy = %q, want %q", got.CreatedBy, models.ErasedActor)
+	}
+	if !got.CreatedAt.Equal(a.CreatedAt.Truncate(time.Millisecond)) {
+		t.Fatalf("createdAt rewritten: %v, want %v", got.CreatedAt, a.CreatedAt)
+	}
+}
+
+// TestCredentials_SetSecretIsTargetedAndTenantScoped: SetSecret writes the
+// envelope and the tail only, clears the tail for a short secret, and
+// another org cannot reach the row.
+func TestCredentials_SetSecretIsTargetedAndTenantScoped(t *testing.T) {
+	db := newTestDB(t)
+	repo := NewCredentials(db)
+	ctx := ctxFor("t1")
+	now := time.Now().UTC().Add(-time.Hour)
+	a := &models.Credential{UUID: "c-a", Name: "k", Provider: models.ProviderOpenAI, BaseURL: "https://api.openai.com/v1", SecretLast4: "1111", Status: models.CredentialStatusDisabled, CreatedBy: "u-admin", CreatedAt: now, UpdatedAt: now}
+	if err := repo.Insert(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	env := models.Envelope{Alg: models.EnvelopeAlgLocal, SchemaVersion: models.EnvelopeSchemaVersion, Ciphertext: "bmV3"}
+	if err := repo.SetSecret(ctxFor("t2"), "c-a", env, "2222"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-tenant SetSecret err = %v", err)
+	}
+	if err := repo.SetSecret(ctx, "missing", env, "2222"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown SetSecret err = %v", err)
+	}
+	if err := repo.SetSecret(ctx, "c-a", env, "2222"); err != nil {
+		t.Fatalf("SetSecret: %v", err)
+	}
+	got, err := repo.Get(ctx, "c-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Secret.Ciphertext != "bmV3" || got.SecretLast4 != "2222" || !got.UpdatedAt.After(now) {
+		t.Fatalf("after SetSecret = %+v", got)
+	}
+	if got.Name != "k" || got.Status != models.CredentialStatusDisabled || got.BaseURL != "https://api.openai.com/v1" || got.CreatedBy != "u-admin" {
+		t.Fatalf("SetSecret touched other fields: %+v", got)
+	}
+	if err := repo.SetSecret(ctx, "c-a", env, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := repo.Get(ctx, "c-a"); got.SecretLast4 != "" {
+		t.Fatalf("short secret kept tail %q", got.SecretLast4)
+	}
+}

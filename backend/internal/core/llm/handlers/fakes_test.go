@@ -63,11 +63,25 @@ func (f *fakeCreds) Get(ctx context.Context, id string) (*models.Credential, err
 	return nil, repository.ErrNotFound
 }
 
+// Update is field-owned like the real repository: name, baseUrl, status.
 func (f *fakeCreds) Update(ctx context.Context, c *models.Credential) error {
-	if r, ok := f.rows[c.UUID]; !ok || r.TenantID != tenantOf(ctx) {
+	r, ok := f.rows[c.UUID]
+	if !ok || r.TenantID != tenantOf(ctx) {
 		return repository.ErrNotFound
 	}
-	f.rows[c.UUID] = *c
+	r.Name, r.BaseURL, r.Status, r.UpdatedAt = c.Name, c.BaseURL, c.Status, c.UpdatedAt
+	f.rows[c.UUID] = r
+	return nil
+}
+
+func (f *fakeCreds) SetSecret(ctx context.Context, id string, env models.Envelope, last4 string) error {
+	r, ok := f.rows[id]
+	if !ok || r.TenantID != tenantOf(ctx) {
+		return repository.ErrNotFound
+	}
+	r.Secret, r.SecretLast4 = env, last4
+	r.LastTestedAt, r.LastTestStatus, r.LastTestError = nil, "", ""
+	f.rows[id] = r
 	return nil
 }
 

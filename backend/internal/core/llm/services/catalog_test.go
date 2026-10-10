@@ -24,7 +24,12 @@ func tenantOf(ctx context.Context) string {
 	return id
 }
 
-type memCreds struct{ rows map[string]*models.Credential }
+type memCreds struct {
+	rows map[string]*models.Credential
+	// afterGet, when set, runs once right after a Get returned its copy: the
+	// window in which a concurrent writer can make that copy stale.
+	afterGet func()
+}
 
 func (m *memCreds) Insert(ctx context.Context, c *models.Credential) error {
 	tenant, err := tenantrepo.StampInsert(ctx)
@@ -53,6 +58,10 @@ func (m *memCreds) List(ctx context.Context) ([]models.Credential, error) {
 func (m *memCreds) Get(ctx context.Context, id string) (*models.Credential, error) {
 	if r, ok := m.rows[id]; ok && r.TenantID == tenantOf(ctx) {
 		cp := *r
+		if hook := m.afterGet; hook != nil {
+			m.afterGet = nil
+			hook()
+		}
 		return &cp, nil
 	}
 	return nil, repository.ErrNotFound
@@ -67,9 +76,18 @@ func (m *memCreds) Update(ctx context.Context, c *models.Credential) error {
 			return repository.ErrDuplicateName
 		}
 	}
+	// Field-owned like the real repository: name, baseUrl, status only.
 	c.TenantID = tenantOf(ctx)
-	cp := *c
-	m.rows[c.UUID] = &cp
+	r.Name, r.BaseURL, r.Status, r.UpdatedAt = c.Name, c.BaseURL, c.Status, c.UpdatedAt
+	return nil
+}
+func (m *memCreds) SetSecret(ctx context.Context, id string, env models.Envelope, last4 string) error {
+	r, ok := m.rows[id]
+	if !ok || r.TenantID != tenantOf(ctx) {
+		return repository.ErrNotFound
+	}
+	r.Secret, r.SecretLast4 = env, last4
+	r.LastTestedAt, r.LastTestStatus, r.LastTestError = nil, "", ""
 	return nil
 }
 func (m *memCreds) Delete(ctx context.Context, id string) error {
@@ -972,5 +990,57 @@ func TestCatalog_ReplaceGrantsFailureFailsClosed(t *testing.T) {
 	}
 	if got := mods.rows[m.UUID].Access; got != models.AccessGranted {
 		t.Fatalf("a failed narrowing left the model open: access %q", got)
+	}
+}
+
+// TestCatalog_RenameRacingRotationKeepsNewSecret: a rename reads the
+// credential, a rotation saves a new secret, then the rename finishes. The
+// rename must not write back the secret it read (it owns name, baseUrl and
+// status only), and a stale rotation must not undo the rename's disable.
+func TestCatalog_RenameRacingRotationKeepsNewSecret(t *testing.T) {
+	svc, creds, _, _, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
+	ctx := ctxFor("t1")
+	c := openAICredential(t, svc, ctx, "OpenAI")
+	before := creds.rows[c.UUID].Secret
+
+	creds.afterGet = func() {
+		if _, err := svc.RotateCredential(ctx, c.UUID, "sk-live-rotated-9999"); err != nil {
+			t.Errorf("rotate inside the rename window: %v", err)
+		}
+	}
+	name, disabled := "Renamed", models.CredentialStatusDisabled
+	if _, err := svc.PatchCredential(ctx, c.UUID, &name, nil, &disabled); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	got := creds.rows[c.UUID]
+	if got.Name != "Renamed" || got.Status != models.CredentialStatusDisabled {
+		t.Fatalf("rename lost: %+v", got)
+	}
+	if got.SecretLast4 != "9999" || reflect.DeepEqual(got.Secret, before) {
+		t.Fatalf("rename restored the pre-rotation secret (last4=%q)", got.SecretLast4)
+	}
+	plain, err := svc.OpenCredentialSecret(ctx, got)
+	if err != nil || plain != "sk-live-rotated-9999" {
+		t.Fatalf("stored secret opens to %q, %v; want the rotated one", plain, err)
+	}
+
+	// The other order: a rotation that read the credential before a disable
+	// must not re-enable it nor rename it back.
+	enabled := models.CredentialStatusActive
+	if _, err := svc.PatchCredential(ctx, c.UUID, nil, nil, &enabled); err != nil {
+		t.Fatal(err)
+	}
+	creds.afterGet = func() {
+		n := "Again"
+		if _, err := svc.PatchCredential(ctx, c.UUID, &n, nil, &disabled); err != nil {
+			t.Errorf("disable inside the rotation window: %v", err)
+		}
+	}
+	if _, err := svc.RotateCredential(ctx, c.UUID, "sk-live-third-7777"); err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	got = creds.rows[c.UUID]
+	if got.Status != models.CredentialStatusDisabled || got.Name != "Again" || got.SecretLast4 != "7777" {
+		t.Fatalf("stale rotation undid the disable or lost its secret: %+v", got)
 	}
 }

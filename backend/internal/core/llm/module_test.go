@@ -169,7 +169,10 @@ func (emptyCreds) Get(context.Context, string) (*models.Credential, error) {
 	return nil, repository.ErrNotFound
 }
 func (emptyCreds) Update(context.Context, *models.Credential) error { return repository.ErrNotFound }
-func (emptyCreds) Delete(context.Context, string) error             { return repository.ErrNotFound }
+func (emptyCreds) SetSecret(context.Context, string, models.Envelope, string) error {
+	return repository.ErrNotFound
+}
+func (emptyCreds) Delete(context.Context, string) error { return repository.ErrNotFound }
 
 type emptyModels struct{}
 

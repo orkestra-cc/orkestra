@@ -22,7 +22,10 @@ type CredentialRepo interface {
 	Insert(ctx context.Context, c *models.Credential) error
 	List(ctx context.Context) ([]models.Credential, error)
 	Get(ctx context.Context, uuid string) (*models.Credential, error)
+	// Update writes name, baseUrl and status (and updatedAt) only.
 	Update(ctx context.Context, c *models.Credential) error
+	// SetSecret writes the secret envelope and its display tail only.
+	SetSecret(ctx context.Context, uuid string, env models.Envelope, last4 string) error
 	Delete(ctx context.Context, uuid string) error
 }
 
@@ -288,12 +291,14 @@ func (s *CatalogService) RotateCredential(ctx context.Context, id, secret string
 	if err != nil {
 		return nil, err
 	}
-	c.Secret = env
-	c.SecretLast4 = models.Last4(secret)
-	c.LastTestedAt, c.LastTestStatus, c.LastTestError = nil, "", ""
-	if err := s.creds.Update(ctx, c); err != nil {
+	last4 := models.Last4(secret)
+	// SetSecret, not Update: the rotation owns the secret and nothing else,
+	// so a rename or disable racing it is neither reverted nor reverts it.
+	if err := s.creds.SetSecret(ctx, c.UUID, env, last4); err != nil {
 		return nil, mapRepoErr(err)
 	}
+	c.Secret, c.SecretLast4 = env, last4
+	c.LastTestedAt, c.LastTestStatus, c.LastTestError = nil, "", ""
 	s.emit(ctx, "llm.credential.rotated", "llm_credential", c.UUID, map[string]any{"provider": c.Provider, "name": c.Name})
 	return c, nil
 }
