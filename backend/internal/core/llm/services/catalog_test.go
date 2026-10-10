@@ -173,16 +173,8 @@ func (m *memModels) Update(ctx context.Context, x *models.Model) error {
 	}
 	x.TenantID = tenantOf(ctx)
 	cp := *x
-	cp.Access = r.Access // access is owned by SetAccess, as in the real repository
+	cp.Access = r.Access // access is owned by Grants.Replace, as in the real repository
 	m.rows[x.UUID] = &cp
-	return nil
-}
-func (m *memModels) SetAccess(ctx context.Context, id, access string) error {
-	r, ok := m.rows[id]
-	if !ok || r.TenantID != tenantOf(ctx) {
-		return repository.ErrNotFound
-	}
-	r.Access = access
 	return nil
 }
 func (m *memModels) Delete(ctx context.Context, id string) error {
@@ -196,6 +188,9 @@ func (m *memModels) Delete(ctx context.Context, id string) error {
 type memGrants struct {
 	rows        map[string][]string // modelUUID -> users
 	replaceFail error               // when set, Replace fails without writing
+	// models is where Replace writes access, as the real repository does in
+	// the same transaction as the grant rows.
+	models *memModels
 }
 
 func (m *memGrants) ListByModel(_ context.Context, model string) ([]models.LLMGrant, error) {
@@ -216,10 +211,19 @@ func (m *memGrants) ListByUser(_ context.Context, user string) ([]models.LLMGran
 	}
 	return out, nil
 }
-func (m *memGrants) Replace(_ context.Context, model, _ string, users []string) error {
+
+// Replace is all-or-nothing like the real transaction: a failure or an
+// unknown model writes neither access nor grants.
+func (m *memGrants) Replace(ctx context.Context, model, access, _ string, users []string) error {
 	if m.replaceFail != nil {
 		return m.replaceFail
 	}
+	r, ok := m.models.rows[model]
+	if !ok || r.TenantID != tenantOf(ctx) {
+		return repository.ErrNotFound
+	}
+	r.Access = access
+	r.GrantsRevision++
 	m.rows[model] = append([]string(nil), users...)
 	return nil
 }
@@ -250,7 +254,7 @@ func newCatalog(t *testing.T, cfg CatalogConfig) (*CatalogService, *memCreds, *m
 	}
 	creds := &memCreds{rows: map[string]*models.Credential{}}
 	mods := &memModels{rows: map[string]*models.Model{}}
-	grants := &memGrants{rows: map[string][]string{}}
+	grants := &memGrants{rows: map[string][]string{}, models: mods}
 	audit := &memAudit{}
 	dir := &memDir{members: map[string][]string{"t1": {"u1", "u2"}, "t2": {"u9"}}}
 	svc := NewCatalogService(creds, mods, grants, v, dir, func() CatalogConfig { return cfg }, slog.Default())
@@ -957,9 +961,9 @@ func TestCatalog_PatchModelWithStaleViewDoesNotRevertAccess(t *testing.T) {
 	}
 }
 
-// A grants replace that fails on infrastructure must leave the model no more
-// open than before: narrowing already restricted it, widening did not open it.
-func TestCatalog_ReplaceGrantsFailureFailsClosed(t *testing.T) {
+// A grants replace that fails on infrastructure writes nothing, in either
+// direction: access and the grant list stay exactly as they were.
+func TestCatalog_ReplaceGrantsFailureWritesNothing(t *testing.T) {
 	svc, _, mods, grants, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
 	ctx := ctxFor("t1")
 	cred := openAICredential(t, svc, ctx, "OpenAI")
@@ -967,19 +971,21 @@ func TestCatalog_ReplaceGrantsFailureFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessGranted, []string{"u1"}); err != nil {
+		t.Fatal(err)
+	}
 	boom := errors.New("mongo down")
 	grants.replaceFail = boom
-
-	// Widening: grants are written first, so a failure leaves access granted.
-	if _, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessEveryone, []string{"u1"}); !errors.Is(err, boom) {
+	if _, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessEveryone, []string{"u2"}); !errors.Is(err, boom) {
 		t.Fatalf("widen err = %v", err)
 	}
 	if got := mods.rows[m.UUID].Access; got != models.AccessGranted {
 		t.Fatalf("a failed widening opened the model: access %q", got)
 	}
+	if got := grants.rows[m.UUID]; !reflect.DeepEqual(got, []string{"u1"}) {
+		t.Fatalf("a failed widening changed the grants: %v", got)
+	}
 
-	// Narrowing: access is written first, so the model is restricted even
-	// though the grant list could not be replaced.
 	grants.replaceFail = nil
 	if _, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessEveryone, []string{"u1"}); err != nil {
 		t.Fatal(err)
@@ -988,8 +994,11 @@ func TestCatalog_ReplaceGrantsFailureFailsClosed(t *testing.T) {
 	if _, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessGranted, []string{"u2"}); !errors.Is(err, boom) {
 		t.Fatalf("narrow err = %v", err)
 	}
-	if got := mods.rows[m.UUID].Access; got != models.AccessGranted {
-		t.Fatalf("a failed narrowing left the model open: access %q", got)
+	if got := mods.rows[m.UUID].Access; got != models.AccessEveryone {
+		t.Fatalf("a failed narrowing wrote access %q", got)
+	}
+	if got := grants.rows[m.UUID]; !reflect.DeepEqual(got, []string{"u1"}) {
+		t.Fatalf("a failed narrowing changed the grants: %v", got)
 	}
 }
 
@@ -1042,5 +1051,34 @@ func TestCatalog_RenameRacingRotationKeepsNewSecret(t *testing.T) {
 	got = creds.rows[c.UUID]
 	if got.Status != models.CredentialStatusDisabled || got.Name != "Again" || got.SecretLast4 != "7777" {
 		t.Fatalf("stale rotation undid the disable or lost its secret: %+v", got)
+	}
+}
+
+// TestCatalog_ReplaceGrantsAlwaysWritesAccess: ReplaceGrants must not skip
+// the access write because the value it read already matches the request —
+// a concurrent replacement can have changed it since. Here the read sees
+// granted, another admin opens the model to everyone, then this call asks
+// for granted [u1]: the model must end granted, not everyone.
+func TestCatalog_ReplaceGrantsAlwaysWritesAccess(t *testing.T) {
+	svc, _, mods, grants, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
+	ctx := ctxFor("t1")
+	cred := openAICredential(t, svc, ctx, "OpenAI")
+	m, err := svc.CreateModel(ctx, modelInput("Fast", cred))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mods.afterGet = func() {
+		if _, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessEveryone, []string{"u2"}); err != nil {
+			t.Error(err)
+		}
+	}
+	if _, err := svc.ReplaceGrants(ctx, m.UUID, models.AccessGranted, []string{"u1"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mods.rows[m.UUID].Access; got != models.AccessGranted {
+		t.Fatalf("access = %q after a granted [u1] request, want granted (stale skip)", got)
+	}
+	if got := grants.rows[m.UUID]; !reflect.DeepEqual(got, []string{"u1"}) {
+		t.Fatalf("grants = %v, want [u1]", got)
 	}
 }

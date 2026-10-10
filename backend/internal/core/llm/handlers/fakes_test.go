@@ -162,18 +162,8 @@ func (f *fakeModels) Update(ctx context.Context, m *models.Model) error {
 	}
 	m.TenantID = r.TenantID
 	cp := *m
-	cp.Access = r.Access // access is owned by SetAccess, as in the real repository
+	cp.Access = r.Access // access is owned by Grants.Replace, as in the real repository
 	f.rows[m.UUID] = cp
-	return nil
-}
-
-func (f *fakeModels) SetAccess(ctx context.Context, id, access string) error {
-	r, ok := f.rows[id]
-	if !ok || r.TenantID != tenantOf(ctx) {
-		return repository.ErrNotFound
-	}
-	r.Access = access
-	f.rows[id] = r
 	return nil
 }
 
@@ -189,6 +179,9 @@ func (f *fakeModels) Delete(ctx context.Context, id string) error {
 // orgs the way the real (tenantId, modelUuid, userUuid) rows cannot.
 type fakeGrants struct {
 	rows map[string]map[string][]string
+	// models is where Replace writes access, as the real repository does in
+	// the same transaction as the grant rows.
+	models *fakeModels
 }
 
 func (f *fakeGrants) ListByModel(ctx context.Context, modelUUID string) ([]models.LLMGrant, error) {
@@ -211,8 +204,15 @@ func (f *fakeGrants) ListByUser(ctx context.Context, userUUID string) ([]models.
 	return out, nil
 }
 
-func (f *fakeGrants) Replace(ctx context.Context, modelUUID, _ string, userUUIDs []string) error {
+func (f *fakeGrants) Replace(ctx context.Context, modelUUID, access, _ string, userUUIDs []string) error {
 	tenant := tenantOf(ctx)
+	m, ok := f.models.rows[modelUUID]
+	if !ok || m.TenantID != tenant {
+		return repository.ErrNotFound
+	}
+	m.Access = access
+	m.GrantsRevision++
+	f.models.rows[modelUUID] = m
 	if f.rows[tenant] == nil {
 		f.rows[tenant] = map[string][]string{}
 	}

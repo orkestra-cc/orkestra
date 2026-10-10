@@ -74,9 +74,10 @@ func (r *Models) Get(ctx context.Context, uuid string) (*models.Model, error) {
 
 // Update writes the editable fields of m onto the document identified by
 // (tenant, m.UUID) with a targeted $set and bumps UpdatedAt. TenantID is
-// re-stamped from the context. It never touches access, nor the immutable
-// uuid, tenantId, createdBy and createdAt: access is owned by SetAccess, so a
-// patch that loaded a stale access cannot revert a concurrent grants change.
+// re-stamped from the context. It never touches access or grantsRevision,
+// nor the immutable uuid, tenantId, createdBy and createdAt: access is owned
+// by Grants.Replace, so a patch that loaded a stale access cannot revert a
+// concurrent grants change.
 // An unset BudgetReserveOutputTokens is removed from the document.
 func (r *Models) Update(ctx context.Context, m *models.Model) error {
 	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": m.UUID})
@@ -111,24 +112,6 @@ func (r *Models) Update(ctx context.Context, m *models.Model) error {
 		if mongo.IsDuplicateKeyError(err) {
 			return ErrDuplicateName
 		}
-		return err
-	}
-	if res.MatchedCount == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-// SetAccess sets access (and bumps updatedAt) on the model identified by
-// (tenant, uuid) and nothing else. It is the only writer of access, so it
-// cannot clobber a concurrent Update of the other fields.
-func (r *Models) SetAccess(ctx context.Context, uuid, access string) error {
-	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid})
-	if err != nil {
-		return err
-	}
-	res, err := r.coll.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"access": access, "updatedAt": time.Now().UTC()}})
-	if err != nil {
 		return err
 	}
 	if res.MatchedCount == 0 {

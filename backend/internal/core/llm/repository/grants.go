@@ -2,7 +2,7 @@ package repository
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,12 +10,18 @@ import (
 	"github.com/orkestra/backend/pkg/sdk/tenantrepo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-type Grants struct{ coll *mongo.Collection }
+// Grants owns llm_grants and, inside Replace's transaction only, the
+// access and grantsRevision fields of llm_models.
+type Grants struct {
+	coll   *mongo.Collection
+	models *mongo.Collection
+}
 
-func NewGrants(db *mongo.Database) *Grants { return &Grants{coll: db.Collection(CollGrants)} }
+func NewGrants(db *mongo.Database) *Grants {
+	return &Grants{coll: db.Collection(CollGrants), models: db.Collection(CollModels)}
+}
 
 func (r *Grants) list(ctx context.Context, extra bson.M) ([]models.LLMGrant, error) {
 	filter, err := tenantrepo.Scope(ctx, extra)
@@ -41,15 +47,21 @@ func (r *Grants) ListByUser(ctx context.Context, userUUID string) ([]models.LLMG
 	return r.list(ctx, bson.M{"userUuid": userUUID})
 }
 
-// Replace makes the grant set of modelUUID exactly userUUIDs: delete what
-// is no longer listed, insert what is new. Two steps, no transaction, so
-// concurrent calls may interleave; the semantics are last-writer-wins on a
-// full-replace endpoint. A unique (tenantId, modelUuid, userUuid) index
-// makes a racing insert of the same grant a duplicate-key error; the
-// insert is unordered so one duplicate never stops the remaining rows, and
-// duplicate-key results are tolerated (the grant already exists, which is
-// the desired end state). Any other error is returned.
-func (r *Grants) Replace(ctx context.Context, modelUUID, actor string, userUUIDs []string) error {
+// Replace decides who may use modelUUID: it sets the model's access and
+// makes its grant set exactly userUUIDs, in one multi-document transaction
+// (replica set required, as in every Orkestra environment). Inside it, the
+// model document is written first — $set access and updatedAt, $inc
+// grantsRevision — so two concurrent replacements of the same model write
+// the same document: the later one hits a write conflict, and
+// session.WithTransaction retries it from scratch once the first has
+// committed. Replacements are therefore serialized and the end state is
+// always exactly one caller's complete request (access and list together),
+// never a union of two lists nor one caller's access with another's grants.
+// A failure anywhere aborts the whole transaction, so nothing is written.
+// An unknown model (or one of another org) is ErrNotFound. Every filter is
+// tenantrepo-scoped; the closure uses only the session context it receives,
+// because WithTransaction may run it more than once.
+func (r *Grants) Replace(ctx context.Context, modelUUID, access, actor string, userUUIDs []string) error {
 	tenantID, err := tenantrepo.StampInsert(ctx)
 	if err != nil {
 		return err
@@ -57,14 +69,41 @@ func (r *Grants) Replace(ctx context.Context, modelUUID, actor string, userUUIDs
 	if userUUIDs == nil {
 		userUUIDs = []string{} // a nil slice marshals to null and $nin rejects it
 	}
-	delFilter, err := tenantrepo.Scope(ctx, bson.M{"modelUuid": modelUUID, "userUuid": bson.M{"$nin": userUUIDs}})
+	sess, err := r.coll.Database().Client().StartSession()
+	if err != nil {
+		return fmt.Errorf("llm: start session: %w", err)
+	}
+	defer sess.EndSession(ctx)
+	_, err = sess.WithTransaction(ctx, func(sc mongo.SessionContext) (any, error) {
+		return nil, r.replaceInTxn(sc, tenantID, modelUUID, access, actor, userUUIDs)
+	})
+	return err
+}
+
+func (r *Grants) replaceInTxn(sc mongo.SessionContext, tenantID, modelUUID, access, actor string, userUUIDs []string) error {
+	now := time.Now().UTC()
+	modelFilter, err := tenantrepo.Scope(sc, bson.M{"uuid": modelUUID})
 	if err != nil {
 		return err
 	}
-	if _, err := r.coll.DeleteMany(ctx, delFilter); err != nil {
+	res, err := r.models.UpdateOne(sc, modelFilter, bson.M{
+		"$set": bson.M{"access": access, "updatedAt": now},
+		"$inc": bson.M{"grantsRevision": int64(1)},
+	})
+	if err != nil {
 		return err
 	}
-	existing, err := r.ListByModel(ctx, modelUUID)
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	delFilter, err := tenantrepo.Scope(sc, bson.M{"modelUuid": modelUUID, "userUuid": bson.M{"$nin": userUUIDs}})
+	if err != nil {
+		return err
+	}
+	if _, err := r.coll.DeleteMany(sc, delFilter); err != nil {
+		return err
+	}
+	existing, err := r.ListByModel(sc, modelUUID)
 	if err != nil {
 		return err
 	}
@@ -72,7 +111,6 @@ func (r *Grants) Replace(ctx context.Context, modelUUID, actor string, userUUIDs
 	for _, g := range existing {
 		have[g.UserUUID] = true
 	}
-	now := time.Now().UTC()
 	var docs []any
 	for _, u := range userUUIDs {
 		if have[u] {
@@ -84,26 +122,11 @@ func (r *Grants) Replace(ctx context.Context, modelUUID, actor string, userUUIDs
 	if len(docs) == 0 {
 		return nil
 	}
-	if _, err := r.coll.InsertMany(ctx, docs, options.InsertMany().SetOrdered(false)); err != nil && !onlyDuplicateKeyErrors(err) {
-		return err
-	}
-	return nil
-}
-
-// onlyDuplicateKeyErrors is true when every write error of an unordered
-// bulk insert is a duplicate key. A command-level or network error (no
-// BulkWriteException) is never swallowed.
-func onlyDuplicateKeyErrors(err error) bool {
-	var bwe mongo.BulkWriteException
-	if !errors.As(err, &bwe) || bwe.WriteConcernError != nil || len(bwe.WriteErrors) == 0 {
-		return false
-	}
-	for _, we := range bwe.WriteErrors {
-		if we.Code != 11000 {
-			return false
-		}
-	}
-	return true
+	// No duplicate can come from a concurrent replacement (they are
+	// serialized above), and a write error would abort the transaction
+	// anyway, so any insert error is a real failure.
+	_, err = r.coll.InsertMany(sc, docs)
+	return err
 }
 
 func (r *Grants) DeleteByModel(ctx context.Context, modelUUID string) error {

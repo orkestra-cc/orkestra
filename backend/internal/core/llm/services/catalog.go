@@ -35,17 +35,18 @@ type ModelRepo interface {
 	ListActive(ctx context.Context) ([]models.Model, error)
 	ListActiveByCredential(ctx context.Context, credentialUUID string) ([]models.Model, error)
 	Get(ctx context.Context, uuid string) (*models.Model, error)
-	// Update writes every editable field except access.
+	// Update writes every editable field except access (owned by
+	// GrantRepo.Replace).
 	Update(ctx context.Context, m *models.Model) error
-	// SetAccess writes access and nothing else.
-	SetAccess(ctx context.Context, uuid, access string) error
 	Delete(ctx context.Context, uuid string) error
 }
 
 type GrantRepo interface {
 	ListByModel(ctx context.Context, modelUUID string) ([]models.LLMGrant, error)
 	ListByUser(ctx context.Context, userUUID string) ([]models.LLMGrant, error)
-	Replace(ctx context.Context, modelUUID, actor string, userUUIDs []string) error
+	// Replace sets the model's access and its complete grant list in one
+	// transaction; repository.ErrNotFound when the model is unknown.
+	Replace(ctx context.Context, modelUUID, access, actor string, userUUIDs []string) error
 	DeleteByModel(ctx context.Context, modelUUID string) error
 }
 
@@ -485,9 +486,9 @@ func (s *CatalogService) DeleteModel(ctx context.Context, id string) error {
 }
 
 // ReplaceGrants decides who may use a model: it sets access and replaces
-// the complete grant list together. Access and every grantee are validated
-// first (a single non-member rejects the whole call) and nothing is written
-// on a refusal. With access everyone the grants are stored but dormant.
+// the complete grant list together, atomically. Access and every grantee are
+// validated first (a single non-member rejects the whole call) and nothing
+// is written on a refusal or a failed write. With access everyone the grants are stored but dormant.
 // This is the only place access changes; it sits behind llm.grants.admin
 // and step-up, never behind the model write permission.
 func (s *CatalogService) ReplaceGrants(ctx context.Context, modelUUID, access string, userUUIDs []string) (*models.LLMModelView, error) {
@@ -526,38 +527,18 @@ func (s *CatalogService) ReplaceGrants(ctx context.Context, modelUUID, access st
 		unique = append(unique, u)
 	}
 	actor, _ := ctxauth.GetUserUUID(ctx)
-	// Access and grants are two writes with no transaction, so order them so
-	// that a failure between them leaves the model no more open than before
-	// the call. Narrowing to granted writes access first: the model is
-	// restricted at once, and a failed grant replace only leaves the previous
-	// grant list in force. Widening to everyone replaces the grants first: a
-	// failed access write leaves the model granted, never everyone with a
-	// grant list the admin did not intend.
-	setAccess := func() error {
-		if m.Access == access {
-			return nil
+	// Access and the grant list are written together in one transaction
+	// that also bumps the model's grants revision: concurrent replacements
+	// of one model are serialized and a failure writes nothing. Access is
+	// always written, never skipped on the value read above (it may be
+	// stale by now).
+	if err := s.grants.Replace(ctx, modelUUID, access, actor, unique); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, mapRepoErr(err)
 		}
-		if err := s.models.SetAccess(ctx, modelUUID, access); err != nil {
-			return mapRepoErr(err)
-		}
-		m.Access = access
-		return nil
+		return nil, fmt.Errorf("llm: replace grants: %w", err)
 	}
-	replaceGrants := func() error {
-		if err := s.grants.Replace(ctx, modelUUID, actor, unique); err != nil {
-			return fmt.Errorf("llm: replace grants: %w", err)
-		}
-		return nil
-	}
-	steps := []func() error{setAccess, replaceGrants}
-	if access == models.AccessEveryone {
-		steps = []func() error{replaceGrants, setAccess}
-	}
-	for _, step := range steps {
-		if err := step(); err != nil {
-			return nil, err
-		}
-	}
+	m.Access = access
 	s.emit(ctx, "llm.grants.replaced", "llm_model", modelUUID, map[string]any{"access": access, "granted": len(unique)})
 	return s.withGrants(ctx, *m)
 }

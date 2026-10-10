@@ -185,16 +185,17 @@ func (emptyModels) ListActiveByCredential(context.Context, string) ([]models.Mod
 func (emptyModels) Get(context.Context, string) (*models.Model, error) {
 	return nil, repository.ErrNotFound
 }
-func (emptyModels) Update(context.Context, *models.Model) error     { return repository.ErrNotFound }
-func (emptyModels) SetAccess(context.Context, string, string) error { return repository.ErrNotFound }
-func (emptyModels) Delete(context.Context, string) error            { return repository.ErrNotFound }
+func (emptyModels) Update(context.Context, *models.Model) error { return repository.ErrNotFound }
+func (emptyModels) Delete(context.Context, string) error        { return repository.ErrNotFound }
 
 type emptyGrants struct{}
 
 func (emptyGrants) ListByModel(context.Context, string) ([]models.LLMGrant, error) { return nil, nil }
 func (emptyGrants) ListByUser(context.Context, string) ([]models.LLMGrant, error)  { return nil, nil }
-func (emptyGrants) Replace(context.Context, string, string, []string) error        { return nil }
-func (emptyGrants) DeleteByModel(context.Context, string) error                    { return nil }
+func (emptyGrants) Replace(context.Context, string, string, string, []string) error {
+	return repository.ErrNotFound
+}
+func (emptyGrants) DeleteByModel(context.Context, string) error { return nil }
 
 // operatorCtx is what AuthMiddleware leaves for an operator acting in the
 // internal tenant t1; the recording gates do not set it.

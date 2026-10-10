@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"errors"
-	"reflect"
 	"testing"
 	"time"
 
@@ -127,52 +126,6 @@ func TestModels_DSRActorMethods(t *testing.T) {
 	}
 }
 
-func TestModels_SetAccessTouchesOnlyAccessAndIsTenantScoped(t *testing.T) {
-	db := newTestDB(t)
-	ensureUniqueNameIndex(t, db, CollModels)
-	repo := NewModels(db)
-	t1, t2 := ctxFor("t1"), ctxFor("t2")
-	if err := repo.Insert(t1, newModel("m1", "a", "c1", models.ModelStatusActive, "u")); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.Insert(t2, newModel("m2", "a", "c1", models.ModelStatusActive, "u")); err != nil {
-		t.Fatal(err)
-	}
-	before, err := repo.Get(t1, "m1")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := repo.SetAccess(t1, "m1", models.AccessEveryone); err != nil {
-		t.Fatal(err)
-	}
-	after, err := repo.Get(t1, "m1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if after.Access != models.AccessEveryone || !after.UpdatedAt.After(before.UpdatedAt) {
-		t.Fatalf("access %q updatedAt %v (before %v)", after.Access, after.UpdatedAt, before.UpdatedAt)
-	}
-	restored := *after
-	restored.Access, restored.UpdatedAt = before.Access, before.UpdatedAt
-	if !reflect.DeepEqual(restored, *before) {
-		t.Fatalf("SetAccess changed more than access:\n before %+v\n after  %+v", before, after)
-	}
-
-	// The other org's model of the same shape is untouched, and a foreign or
-	// unknown uuid is not found.
-	if err := repo.SetAccess(t2, "m1", models.AccessEveryone); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("cross-tenant SetAccess err = %v", err)
-	}
-	if err := repo.SetAccess(t1, "nope", models.AccessEveryone); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("unknown SetAccess err = %v", err)
-	}
-	other, err := repo.Get(t2, "m2")
-	if err != nil || other.Access != models.AccessGranted {
-		t.Fatalf("other org model = %+v, %v", other, err)
-	}
-}
-
 func TestModels_UpdateDoesNotRevertAccess(t *testing.T) {
 	db := newTestDB(t)
 	ensureUniqueNameIndex(t, db, CollModels)
@@ -188,7 +141,7 @@ func TestModels_UpdateDoesNotRevertAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.SetAccess(t1, "m1", models.AccessEveryone); err != nil {
+	if err := NewGrants(db).Replace(t1, "m1", models.AccessEveryone, "admin", nil); err != nil {
 		t.Fatal(err)
 	}
 	budget := 512
@@ -206,7 +159,7 @@ func TestModels_UpdateDoesNotRevertAccess(t *testing.T) {
 	if got.Name != "renamed" || got.Status != models.ModelStatusDisabled || got.BudgetReserveOutputTokens == nil || *got.BudgetReserveOutputTokens != 512 {
 		t.Fatalf("Update did not apply the editable fields: %+v", got)
 	}
-	if got.CreatedBy != "u" || got.TenantID != "t1" {
+	if got.CreatedBy != "u" || got.TenantID != "t1" || got.GrantsRevision != 1 {
 		t.Fatalf("immutable fields changed: %+v", got)
 	}
 

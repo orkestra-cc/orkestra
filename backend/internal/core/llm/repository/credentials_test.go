@@ -113,7 +113,7 @@ func TestInsertWithoutTenantFailsClosed(t *testing.T) {
 	if err := NewModels(db).Insert(context.Background(), &models.Model{UUID: "m-x", Name: "x"}); err == nil {
 		t.Fatal("model insert without tenant must fail")
 	}
-	if err := NewGrants(db).Replace(context.Background(), "m-x", "u", []string{"u1"}); err == nil {
+	if err := NewGrants(db).Replace(context.Background(), "m-x", models.AccessGranted, "u", []string{"u1"}); err == nil {
 		t.Fatal("grants replace without tenant must fail")
 	}
 	if _, err := NewCredentials(db).List(context.Background()); err == nil {

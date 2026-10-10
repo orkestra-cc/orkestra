@@ -41,7 +41,7 @@ func newHarness(t *testing.T, keyHex string) *harness {
 	}
 	creds := &fakeCreds{rows: map[string]models.Credential{}}
 	mods := &fakeModels{rows: map[string]models.Model{}}
-	grants := &fakeGrants{rows: map[string]map[string][]string{}}
+	grants := &fakeGrants{rows: map[string]map[string][]string{}, models: mods}
 	dir := &fakeDir{members: map[string][]string{"t1": {"u-admin", "u1", "u2"}}}
 	cfg := func() services.CatalogConfig { return services.CatalogConfig{AllowHosted: true} }
 	catalog := services.NewCatalogService(creds, mods, grants, vault, dir, cfg, logger)

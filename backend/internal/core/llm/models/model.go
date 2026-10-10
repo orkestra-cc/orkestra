@@ -78,10 +78,15 @@ type Model struct {
 	BudgetReserveOutputTokens *int                 `bson:"budgetReserveOutputTokens,omitempty" json:"budgetReserveOutputTokens,omitempty"`
 	Purposes                  []LLMModelPurpose    `bson:"purposes" json:"purposes"`
 	Access                    string               `bson:"access" json:"access"`
-	Status                    string               `bson:"status" json:"status"`
-	CreatedBy                 string               `bson:"createdBy" json:"createdBy"`
-	CreatedAt                 time.Time            `bson:"createdAt" json:"createdAt"`
-	UpdatedAt                 time.Time            `bson:"updatedAt" json:"updatedAt"`
+	// GrantsRevision is bumped by every grants replacement, inside the same
+	// transaction that writes access and the grant rows: two concurrent
+	// replacements of one model write the same document, so one of them hits
+	// a write conflict and is retried after the other commits. Internal only.
+	GrantsRevision int64     `bson:"grantsRevision,omitempty" json:"-"`
+	Status         string    `bson:"status" json:"status"`
+	CreatedBy      string    `bson:"createdBy" json:"createdBy"`
+	CreatedAt      time.Time `bson:"createdAt" json:"createdAt"`
+	UpdatedAt      time.Time `bson:"updatedAt" json:"updatedAt"`
 }
 
 // Info projects the consumer-visible view (pointer receiver: see View).
