@@ -49,6 +49,17 @@
           -17%
         )};
     }
+    // `orkestra-primary` takes the dark Link Ink (see
+    // `$btn-orkestra-primary-color-dark`); hover and `-active-color` lift 17%.
+    --#{$prefix}btn-orkestra-primary-color: #{$btn-orkestra-primary-color-dark};
+    --#{$prefix}btn-orkestra-primary-hover-color: #{shift-color(
+        $btn-orkestra-primary-color-dark,
+        -17%
+      )};
+    --#{$prefix}btn-orkestra-primary-active-color: #{shift-color(
+        $btn-orkestra-primary-color-dark,
+        -17%
+      )};
 
     --#{$prefix}body-color: #{$body-color-dark};
     --#{$prefix}body-bg: #{$body-bg-dark};

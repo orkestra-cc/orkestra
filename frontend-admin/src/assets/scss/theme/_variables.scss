@@ -144,8 +144,8 @@ $link-shade-percentage: 20% !default;
 // Bootstrap's default ($primary, #2c7be5) is 4.14:1 on white — below the
 // 4.5:1 AA floor for body-size text. A 15% shade (#2569c3) passes on every
 // surface links actually sit on (white 5.40, gray-100 5.17, gray-200 4.90)
-// while staying a derivation of Orkestra Blue. Dark is untouched:
-// $link-color-dark references $primary directly.
+// while staying a derivation of Orkestra Blue. Dark has its own ink,
+// `$link-color-dark` in `_variables-dark.scss`.
 $link-color: shade-color($primary, 15%) !default;
 
 // Code
@@ -377,6 +377,16 @@ $btn-orkestra-hover-box-shadow:
   0 3px 9px 0 rgba(43, 45, 80, 0.08),
   0 1px 1.5px 0 rgba($black, 0.08),
   0 1px 2px 0 rgba($black, 0.08) !default;
+// The `orkestra-primary` label. `$primary` (#2c7be5) is 4.14:1 on the white
+// button surface and 3.23:1 on its own selected fill (`.active` /
+// `.btn-check:checked`, an 80% tint, #d5e5fa; a pressed button shows the
+// same pair) — under the 4.5:1 AA floor in both states. A 20% shade (#2362b7,
+// the `btn-primary` active fill) holds 5.97:1 at rest and 4.65:1 selected;
+// the hover (and `-active-color`) ink steps a further 17% darker from it, as
+// the loop in `root/_light.scss` does for the other colors.
+// Label only: the selected fill and the focus ring stay Orkestra Blue.
+// Declared both-modes 2026-10-02 (dark: `$btn-orkestra-primary-color-dark`).
+$btn-orkestra-primary-color: shade-color($primary, 20%) !default;
 // scss-docs-end btn-orkestra-variables
 
 // scss-docs-start input-btn-variables

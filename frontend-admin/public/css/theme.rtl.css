@@ -173,10 +173,10 @@
   --orkestra-light-border-subtle: #5e6e82;
   --orkestra-dark-border-subtle: #4d5969;
   --orkestra-heading-color: #d8e2ef;
-  --orkestra-link-color: #2c7be5;
-  --orkestra-link-hover-color: rgb(13.8039215686%, 38.5882352941%, 71.8431372549%);
-  --orkestra-link-color-rgb: 44, 123, 229;
-  --orkestra-link-hover-color-rgb: 35, 98, 183;
+  --orkestra-link-color: rgb(29.6666666667%, 56%, 91.3333333333%);
+  --orkestra-link-hover-color: rgb(43.7333333333%, 64.8%, 93.0666666667%);
+  --orkestra-link-color-rgb: 76, 143, 233;
+  --orkestra-link-hover-color-rgb: 112, 165, 237;
   --orkestra-code-color: #ff679b;
   --orkestra-highlight-color: #9da9bb;
   --orkestra-highlight-bg: rgb(38.431372549%, 20.0784313725%, 9.7254901961%);
@@ -290,6 +290,9 @@
   --orkestra-btn-orkestra-dark-hover-color: rgb(4.8823529412%, 6.5098039216%, 9.1137254902%);
   --orkestra-btn-orkestra-dark-active-background: rgb(81.1764705882%, 81.568627451%, 82.1960784314%);
   --orkestra-btn-orkestra-dark-active-color: rgb(4.8823529412%, 6.5098039216%, 9.1137254902%);
+  --orkestra-btn-orkestra-primary-color: rgb(13.8039215686%, 38.5882352941%, 71.8431372549%);
+  --orkestra-btn-orkestra-primary-hover-color: rgb(11.457254902%, 32.0282352941%, 59.6298039216%);
+  --orkestra-btn-orkestra-primary-active-color: rgb(11.457254902%, 32.0282352941%, 59.6298039216%);
   --orkestra-input-btn-focus-color: rgba(44, 123, 229, 0.25);
   --orkestra-btn-link-color: var(--orkestra-link-color);
   --orkestra-btn-link-hover-color: rgb(11.7333333333%, 32.8%, 61.0666666667%);
@@ -580,6 +583,9 @@
   --orkestra-btn-orkestra-dark-hover-color: rgba(64.5505727043%, 66.3230440691%, 68.5789167152%, 0.3775);
   --orkestra-btn-orkestra-dark-active-background: rgb(2.5882352941%, 5.4117647059%, 9.1764705882%);
   --orkestra-btn-orkestra-dark-active-color: rgba(64.5505727043%, 66.3230440691%, 68.5789167152%, 0.3775);
+  --orkestra-btn-orkestra-primary-color: rgb(29.6666666667%, 56%, 91.3333333333%);
+  --orkestra-btn-orkestra-primary-hover-color: rgb(41.6233333333%, 63.48%, 92.8066666667%);
+  --orkestra-btn-orkestra-primary-active-color: rgb(41.6233333333%, 63.48%, 92.8066666667%);
   --orkestra-body-color: #9da9bb;
   --orkestra-body-bg: #0b1727;
   --orkestra-quaternary-bg: #0b1727;
