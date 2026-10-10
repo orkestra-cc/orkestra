@@ -22,6 +22,11 @@ export const isHostedProvider = (p: LlmProvider): boolean =>
   p === 'gemini' ||
   p === 'openai_compatible';
 
+// module.Dependencies.GetConfigBool's truthy set (pkg/sdk/module); empty or
+// anything else is false.
+export const isConfigTrue = (value: string | undefined): boolean =>
+  value === 'true' || value === '1' || value === 'yes';
+
 // Providers whose endpoint the operator types (no fixed base URL, not mock).
 export const needsBaseUrl = (p: LlmProvider): boolean =>
   !LLM_FIXED_BASE_URL[p] && p !== 'mock';

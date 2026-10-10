@@ -3,7 +3,11 @@ import { http, HttpResponse } from 'msw';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { toast } from 'react-toastify';
-import { renderWithProviders, type TestRootState } from 'test/render';
+import {
+  renderWithProviders,
+  waitForQuerySettled,
+  type TestRootState
+} from 'test/render';
 import { server } from 'test/server';
 import { url } from 'test/handlers';
 import tenantReducer from 'store/slices/tenantSlice';
@@ -105,8 +109,13 @@ const sent: { method: string; path: string; body: Body | null }[] = [];
 
 function stubReads({
   credentials = [credential],
-  models = [model]
-}: { credentials?: unknown[]; models?: unknown[] } = {}) {
+  models = [model],
+  allowHosted = 'true'
+}: {
+  credentials?: unknown[];
+  models?: unknown[];
+  allowHosted?: string;
+} = {}) {
   server.use(
     http.get(url('/v1/admin/llm/credentials'), () =>
       HttpResponse.json({ items: credentials })
@@ -115,7 +124,10 @@ function stubReads({
       HttpResponse.json({ items: models })
     ),
     http.get(url('/v1/admin/modules/llm'), () =>
-      HttpResponse.json({ name: 'llm', configValues: { allow_hosted: 'true' } })
+      HttpResponse.json({
+        name: 'llm',
+        configValues: { allow_hosted: allowHosted }
+      })
     ),
     http.get(url('/v1/admin/tenants/t-1/members'), () =>
       HttpResponse.json(members)
@@ -226,6 +238,29 @@ describe('LlmAdminPage — credentials', () => {
     );
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
   });
+
+  it.each([
+    ['1', false],
+    ['yes', false],
+    ['false', true],
+    ['', true]
+  ])(
+    'reads allow_hosted=%j like the backend (warning shown: %s)',
+    async (allowHosted, warned) => {
+      stubReads({ credentials: [], models: [], allowHosted });
+      const { store } = renderPage('/admin/llm?tab=credentials');
+      await userEvent.click(
+        await screen.findByRole('button', { name: /add credential/i })
+      );
+      const dialog = await screen.findByRole('dialog');
+      // Anchor on the config query, not the DOM: without the warning the
+      // tree is identical before and after it lands.
+      await waitForQuerySettled(store, 'getModule');
+      expect(
+        within(dialog).queryByText(/hosted providers are disabled/i) !== null
+      ).toBe(warned);
+    }
+  );
 
   it('creates an ollama credential on a compose-internal endpoint', async () => {
     stubReads({ credentials: [], models: [] });
@@ -456,9 +491,46 @@ describe('LlmAdminPage — models', () => {
     await waitFor(() => expect(sent).toHaveLength(2));
     expect(sent[1].body).toEqual({ userUuids: ['u-2'] });
     await waitFor(() => expect(toast.warning).toHaveBeenCalled());
-    expect(vi.mocked(toast.warning).mock.calls[0][0]).toMatch(
-      /grants were not saved/i
+    const warning = vi.mocked(toast.warning).mock.calls[0][0] as string;
+    expect(warning).toMatch(/grants were not saved/i);
+    // The reason travels with it (errors.llm.grant_not_member).
+    expect(warning).toMatch(/must be a member of this organization/i);
+  });
+
+  it('never calls a grantee a former member when the member list was not loaded', async () => {
+    mockedUseAuth.mockReturnValue(
+      authWith(['llm.admin.read', 'llm.models.admin'])
     );
+    stubReads();
+    renderPage('/admin/llm');
+    const row = await rowOf('Fast');
+    await userEvent.click(within(row).getByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('Granted users')).toBeDisabled();
+    expect(within(dialog).getByText('u-1')).toBeInTheDocument();
+    expect(
+      within(dialog).queryByText(/no longer a member/i)
+    ).not.toBeInTheDocument();
+  });
+
+  it('explains a refused member list and keeps current grantees visible', async () => {
+    stubReads();
+    server.use(
+      http.get(url('/v1/admin/tenants/t-1/members'), () =>
+        HttpResponse.json({ detail: 'forbidden' }, { status: 403 })
+      )
+    );
+    renderPage('/admin/llm');
+    const row = await rowOf('Fast');
+    await userEvent.click(within(row).getByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(
+      await within(dialog).findByText(/needs tenant-admin access/i)
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText('u-1')).toBeInTheDocument();
+    expect(
+      within(dialog).queryByText(/no longer a member/i)
+    ).not.toBeInTheDocument();
   });
 
   it('hides model mutations behind their own permissions', async () => {

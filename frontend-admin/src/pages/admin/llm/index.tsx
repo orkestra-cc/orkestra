@@ -11,9 +11,10 @@ import { useLlmPermissions } from './llmPermissions';
 // /admin/llm — the operator surface of the core llm module (ADR-0022):
 // the org's provider credentials, its configured models and who may use
 // them. Tabs follow the url-tabs convention (?tab=…); PR 2 adds usage and
-// budget, PR 3 accounts. An unknown value degrades to the models tab. Each
-// tab re-checks llm.admin.read itself rather than trusting the menu entry,
-// and mounts only while active so a tab's queries fire only when it shows.
+// budget, PR 3 accounts. An unknown value degrades to the models tab. The
+// page re-checks llm.admin.read itself rather than trusting the menu entry
+// and hides the tabs without it; each tab mounts only while active, so its
+// queries fire only when it shows.
 const TABS = [
   { key: 'models', labelKey: 'adminLlm.tabs.models', icon: faRobot },
   { key: 'credentials', labelKey: 'adminLlm.tabs.credentials', icon: faKey }

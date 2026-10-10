@@ -2761,6 +2761,7 @@
       "saveSuccess": "Model saved",
       "grantsSaved": "Access list saved",
       "grantsNotSaved": "The model was saved, but its grants were not saved. Use \"Who may use it\" to try again.",
+      "grantsNotSavedReason": "The model was saved, but its grants were not saved: {{reason}} Use \"Who may use it\" to try again.",
       "addTitle": "New model",
       "editTitle": "Edit \"{{name}}\"",
       "grantsTitle": "Who may use \"{{name}}\"",
@@ -2795,7 +2796,8 @@
         "granteesNoPermission": "You need the permission to manage LLM grants to change this list.",
         "noMembers": "No matching members",
         "membersError": "The members of this organization could not be loaded.",
-        "formerMember": "{{id}} (no longer a member)"
+        "formerMember": "{{id}} (no longer a member)",
+        "membersForbidden": "Listing this organization's members needs tenant-admin access, so the grant list cannot be edited here."
       },
       "columns": {
         "name": "Name",

@@ -206,7 +206,7 @@
       "provider_unavailable": "Il provider non è raggiungibile in questo momento. Riprova più tardi.",
       "no_eligible_model": "Nessun modello che puoi usare è configurato per questo scopo.",
       "model_access_denied": "Non puoi usare questo modello.",
-      "capability_mismatch": "Il modello non offre ciò che la richiesta richiede.",
+      "capability_mismatch": "Il modello non offre ciò che serve alla richiesta.",
       "invalid_request": "Alcuni campi non sono validi.",
       "not_found": "La credenziale o il modello non esiste più.",
       "name_in_use": "Un'altra credenziale o un altro modello ha già questo nome.",
@@ -2718,7 +2718,7 @@
       "emptyTitle": "Nessuna credenziale",
       "emptyHint": "Aggiungi la chiave API di un provider, poi configura un modello che la usa.",
       "deleteTitle": "Elimina credenziale",
-      "deleteConfirm": "Eliminare la credenziale \"{{name}}\"? I modelli non potranno più usarla.",
+      "deleteConfirm": "Eliminare la credenziale «{{name}}»? I modelli non potranno più usarla.",
       "deleteSuccess": "Credenziale eliminata",
       "saveSuccess": "Credenziale salvata",
       "secretHint": "Conservata cifrata e mai più mostrata. Sono visibili solo gli ultimi quattro caratteri.",
@@ -2726,8 +2726,8 @@
       "hostedDisabledWarning": "I provider in cloud sono disattivati per questa installazione. Attiva «Allow hosted providers» nelle impostazioni del modulo llm prima di usare questa credenziale.",
       "editorTitle": {
         "create": "Nuova credenziale",
-        "edit": "Modifica \"{{name}}\"",
-        "rotate": "Ruota la chiave API di \"{{name}}\""
+        "edit": "Modifica «{{name}}»",
+        "rotate": "Ruota la chiave API di «{{name}}»"
       },
       "fields": {
         "name": "Nome",
@@ -2756,15 +2756,16 @@
       "needCredential": "Aggiungi prima una credenziale.",
       "noPermission": "Serve il permesso di gestire i modelli LLM.",
       "deleteTitle": "Elimina modello",
-      "deleteConfirm": "Eliminare il modello \"{{name}}\" e le sue autorizzazioni?",
+      "deleteConfirm": "Eliminare il modello «{{name}}» e le sue autorizzazioni?",
       "deleteSuccess": "Modello eliminato",
       "saveSuccess": "Modello salvato",
       "grantsSaved": "Elenco degli accessi salvato",
       "grantsNotSaved": "Il modello è stato salvato, ma le sue autorizzazioni no. Usa «Chi può usarlo» per riprovare.",
+      "grantsNotSavedReason": "Il modello è stato salvato, ma le sue autorizzazioni no: {{reason}} Usa «Chi può usarlo» per riprovare.",
       "addTitle": "Nuovo modello",
-      "editTitle": "Modifica \"{{name}}\"",
-      "grantsTitle": "Chi può usare \"{{name}}\"",
-      "userAccountHint": "Questo modello è addebitato al piano ChatGPT di ciascun utente. Embedding, temperatura e token massimi non sono disponibili su questa via, e il modello deve esistere nel catalogo dell'account collegato.",
+      "editTitle": "Modifica «{{name}}»",
+      "grantsTitle": "Chi può usare «{{name}}»",
+      "userAccountHint": "Questo modello è addebitato al piano ChatGPT di ciascun utente. Embedding, temperatura e token massimi non sono disponibili con questa modalità di addebito, e il modello deve esistere nel catalogo dell'account collegato.",
       "purposeWithPriority": "{{purpose}} ({{priority}})",
       "fields": {
         "name": "Nome",
@@ -2787,7 +2788,7 @@
         "purposePlaceholder": "default",
         "removePurpose": "Rimuovi scopo",
         "addPurpose": "Aggiungi scopo",
-        "purposesHint": "Gli addon chiedono uno scopo; vince la priorità più bassa. Tieni un modello su \"default\".",
+        "purposesHint": "Gli addon chiedono uno scopo; vince la priorità più bassa. Tieni un modello su «default».",
         "access": "Accesso",
         "grantees": "Utenti autorizzati",
         "granteesPlaceholder": "Scegli i membri di questa organizzazione",
@@ -2795,7 +2796,8 @@
         "granteesNoPermission": "Serve il permesso di gestire le autorizzazioni LLM per cambiare questo elenco.",
         "noMembers": "Nessun membro corrispondente",
         "membersError": "Non è stato possibile caricare i membri di questa organizzazione.",
-        "formerMember": "{{id}} (non più membro)"
+        "formerMember": "{{id}} (non più membro)",
+        "membersForbidden": "Per elencare i membri di questa organizzazione serve l'accesso di amministrazione dei tenant, quindi l'elenco delle autorizzazioni non si può modificare qui."
       },
       "columns": {
         "name": "Nome",

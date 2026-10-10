@@ -17,6 +17,7 @@ import {
 import { useGetModuleQuery } from 'store/api/moduleApi';
 import { isReauthCancelled, llmErrorMessage } from './llmErrors';
 import {
+  isConfigTrue,
   isHostedProvider,
   isHttpUrl,
   LLM_NAME_RE,
@@ -57,7 +58,7 @@ const CredentialEditorModal = ({ mode, credential, onClose }: Props) => {
   // gets no warning rather than a wrong one — the backend decides anyway.
   const hostedOff =
     moduleConfig.data !== undefined &&
-    moduleConfig.data.configValues?.allow_hosted !== 'true';
+    !isConfigTrue(moduleConfig.data.configValues?.allow_hosted);
 
   const schema = useMemo(
     () =>

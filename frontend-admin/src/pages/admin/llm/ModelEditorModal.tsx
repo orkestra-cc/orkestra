@@ -297,23 +297,34 @@ const ModelEditorModal = ({
       value: m.userUUID,
       label: m.email || m.userUUID
     }));
-    // A grantee who is no longer a member stays visible (so the operator
-    // can see and drop it) instead of vanishing from the list silently.
-    const stale = grantees
+    // A grantee missing from the member list stays visible (so the operator
+    // can see and drop it) instead of vanishing silently. Only a list that
+    // actually loaded can prove someone left: while it is loading, skipped
+    // (no llm.grants.admin) or refused, the grantee is shown by id alone.
+    const unknown = grantees
       .filter(id => !known.some(o => o.value === id))
       .map(id => ({
         value: id,
-        label: t('adminLlm.models.fields.formerMember', { id })
+        label: members.isSuccess
+          ? t('adminLlm.models.fields.formerMember', { id })
+          : id
       }));
-    return [...known, ...stale];
-  }, [members.data, grantees, t]);
+    return [...known, ...unknown];
+  }, [members.data, members.isSuccess, grantees, t]);
+  // GET /v1/admin/tenants/{id}/members needs system.tenants.admin on top of
+  // llm.grants.admin — a known PR 1 limitation; say so instead of a bare error.
+  const membersForbidden =
+    members.isError &&
+    (members.error as { status?: number } | undefined)?.status === 403;
 
-  const saveGrants = async (uuid: string): Promise<boolean> => {
+  // null when saved; otherwise the reason to show, or '' when the operator
+  // dismissed the step-up (nothing more to explain).
+  const saveGrants = async (uuid: string): Promise<string | null> => {
     try {
       await putGrants({ uuid, userUuids: grantees }).unwrap();
-      return true;
-    } catch {
-      return false;
+      return null;
+    } catch (e) {
+      return isReauthCancelled(e) ? '' : llmErrorMessage(t, e);
     }
   };
 
@@ -339,8 +350,15 @@ const ModelEditorModal = ({
       canManageGrants &&
       values.access === 'granted' &&
       !sameSet(grantees, originalGrantees);
-    if (grantsChanged && !(await saveGrants(savedUuid))) {
-      toast.warning(t('adminLlm.models.grantsNotSaved'));
+    const grantsFailure = grantsChanged ? await saveGrants(savedUuid) : null;
+    if (grantsFailure !== null) {
+      toast.warning(
+        grantsFailure
+          ? t('adminLlm.models.grantsNotSavedReason', {
+              reason: grantsFailure
+            })
+          : t('adminLlm.models.grantsNotSaved')
+      );
       onClose();
       return;
     }
@@ -385,7 +403,9 @@ const ModelEditorModal = ({
       />
       {members.isError && (
         <Form.Text className="d-block text-danger">
-          {t('adminLlm.models.fields.membersError')}
+          {membersForbidden
+            ? t('adminLlm.models.fields.membersForbidden')
+            : t('adminLlm.models.fields.membersError')}
         </Form.Text>
       )}
       <Form.Text className="d-block text-600">
