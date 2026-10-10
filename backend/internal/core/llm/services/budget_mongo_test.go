@@ -52,6 +52,13 @@ func newBudgetDB(t *testing.T) *mongo.Database {
 	return db
 }
 
+// pastTTL makes the reconciler sweep as if it ran after every reservation
+// in the test had expired.
+func pastTTL(r *Reconciler) *Reconciler {
+	r.now = func() time.Time { return time.Now().Add(time.Hour) }
+	return r
+}
+
 type budgetRig struct {
 	db      *mongo.Database
 	usage   *repository.Usage
@@ -73,7 +80,7 @@ func newBudgetRig(t *testing.T, cfg BudgetConfig) *budgetRig {
 // input as input, reserved output as output) and closes the row by its
 // next tick; a late finalization afterwards counts nothing.
 func TestReconciler_ChargesOrphanOnceAndLateFinalizeIsNoop(t *testing.T) {
-	rig := newBudgetRig(t, BudgetConfig{ReserveOutputTokens: 100, ReservationTTL: -time.Second}) // already expired
+	rig := newBudgetRig(t, BudgetConfig{ReserveOutputTokens: 100, ReservationTTL: time.Minute})
 	ctx := ctxFor("t1")
 	if err := rig.budgets.Put(ctx, &models.Budget{MonthlyTokenLimit: 100000, WarnPct: 80, Action: models.BudgetActionBlock}); err != nil {
 		t.Fatal(err)
@@ -82,8 +89,13 @@ func TestReconciler_ChargesOrphanOnceAndLateFinalizeIsNoop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// ... the router crashes here: no Finalize.
-	rec := NewReconciler(rig.usage, rig.svc, slog.Default())
+	// ... the router crashes here: no Finalize. The next tick runs after
+	// the reservation TTL.
+	// Within the TTL the reservation is not an orphan yet.
+	if n, err := NewReconciler(rig.usage, rig.svc, slog.Default()).RunOnce(context.Background()); n != 0 || err != nil {
+		t.Fatalf("pass within the TTL = %d, %v", n, err)
+	}
+	rec := pastTTL(NewReconciler(rig.usage, rig.svc, slog.Default()))
 	n, err := rec.RunOnce(context.Background()) // ticker context: no tenant
 	if err != nil || n != 1 {
 		t.Fatalf("reconcile = %d, %v", n, err)
@@ -120,13 +132,13 @@ func TestReconciler_ChargesOrphanOnceAndLateFinalizeIsNoop(t *testing.T) {
 // The reverse order: a normal finalization closes the row first, so a
 // reconciler pass that listed it just before is a no-op.
 func TestReconciler_RacingFinalizeCountsOnce(t *testing.T) {
-	rig := newBudgetRig(t, BudgetConfig{ReserveOutputTokens: 100, ReservationTTL: -time.Second})
+	rig := newBudgetRig(t, BudgetConfig{ReserveOutputTokens: 100, ReservationTTL: time.Minute})
 	ctx := ctxFor("t1")
 	res, err := rig.svc.Reserve(ctx, ReserveInput{Caller: "t", CredentialKind: models.CredentialKindOrg, EstimatedInput: 10, ReserveOutput: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := NewReconciler(rig.usage, rig.svc, slog.Default())
+	rec := pastTTL(NewReconciler(rig.usage, rig.svc, slog.Default()))
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -148,27 +160,33 @@ func TestReconciler_RacingFinalizeCountsOnce(t *testing.T) {
 	}
 }
 
+// dedupNotifier models the notification sender's idempotency: a send
+// whose key was already delivered is accepted but not delivered again.
 type dedupNotifier struct {
 	mu        sync.Mutex
 	calls     int
-	delivered map[string]int // per idempotency key, as the notification sender dedups
+	keys      []string       // key of every call, in order
+	delivered map[string]int // deliveries per idempotency key (at most 1)
 }
+
+func newDedupNotifier() *dedupNotifier { return &dedupNotifier{delivered: map[string]int{}} }
 
 func (n *dedupNotifier) SendBudgetEvent(_ context.Context, ev models.OutboxEvent) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.calls++
-	n.delivered["llm-budget-"+ev.UUID]++
+	key := "llm-budget-" + ev.UUID
+	n.keys = append(n.keys, key)
+	if n.delivered[key] == 0 {
+		n.delivered[key] = 1
+	}
 	return nil
 }
 
-// Review focus 4: a warn threshold crossed by several finalizations at
-// once yields one outbox event; a worker that crashed between leasing
-// (sending) and MarkSent does not let a second worker send while its
-// lease holds, and the recovery after expiry re-sends under the same
-// idempotency key, so one logical notification results.
-func TestOutbox_OneEventAndNoDoubleSendAfterCrash(t *testing.T) {
-	rig := newBudgetRig(t, BudgetConfig{ReserveOutputTokens: 10, ReservationTTL: time.Minute})
+// crossWarnOnce drives five concurrent finalizations across the 50% warn
+// threshold and asserts a single outbox event resulted.
+func crossWarnOnce(t *testing.T, rig *budgetRig) {
+	t.Helper()
 	ctx := ctxFor("t1")
 	if err := rig.budgets.Put(ctx, &models.Budget{MonthlyTokenLimit: 1000, WarnPct: 50, Action: models.BudgetActionWarnOnly}); err != nil {
 		t.Fatal(err)
@@ -200,26 +218,54 @@ func TestOutbox_OneEventAndNoDoubleSendAfterCrash(t *testing.T) {
 	if n, _ := rig.db.Collection(repository.CollBudgetOutbox).CountDocuments(context.Background(), all); n != 1 {
 		t.Fatalf("outbox rows = %d, want 1 (600/1000 crosses 50%% once)", n)
 	}
-	// Worker A leases the event and dies before MarkSent.
+}
+
+func expireLease(t *testing.T, rig *budgetRig, uuid string) {
+	t.Helper()
+	filter, err := tenantrepo.Scope(ctxFor("t1"), bson.M{"uuid": uuid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.db.Collection(repository.CollBudgetOutbox).UpdateOne(context.Background(), filter,
+		bson.M{"$set": bson.M{"leaseUntil": time.Now().UTC().Add(-time.Second)}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertSent(t *testing.T, rig *budgetRig, uuid string) {
+	t.Helper()
+	filter, err := tenantrepo.Scope(ctxFor("t1"), bson.M{"uuid": uuid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ev models.OutboxEvent
+	if err := rig.db.Collection(repository.CollBudgetOutbox).FindOne(context.Background(), filter).Decode(&ev); err != nil {
+		t.Fatal(err)
+	}
+	if ev.Status != models.OutboxStatusSent || ev.SentAt == nil || ev.LeaseUntil != nil {
+		t.Fatalf("event = %+v", ev)
+	}
+}
+
+// Review focus 4, crash BEFORE the send: a threshold crossed by several
+// finalizations yields one outbox event; a worker that leased it and died
+// before sending blocks other workers while its lease holds; after expiry
+// two workers recover concurrently and exactly one sends.
+func TestOutbox_CrashBeforeSendRecoversWithOneSend(t *testing.T) {
+	rig := newBudgetRig(t, BudgetConfig{ReserveOutputTokens: 10, ReservationTTL: time.Minute})
+	crossWarnOnce(t, rig)
 	crashed, err := rig.outbox.LeaseDue(context.Background(), time.Now().UTC(), time.Hour)
 	if err != nil || crashed == nil {
 		t.Fatalf("lease = %+v, %v", crashed, err)
 	}
-	notifier := &dedupNotifier{delivered: map[string]int{}}
+	notifier := newDedupNotifier()
 	w := NewOutboxWorker(rig.outbox, notifier, slog.Default())
 	if n, err := w.RunOnce(context.Background()); n != 0 || err != nil || notifier.calls != 0 {
 		t.Fatalf("pass under a live lease = %d, %v, calls %d", n, err, notifier.calls)
 	}
-	// The lease expires; two workers recover concurrently: one send.
-	evFilter, err := tenantrepo.Scope(ctx, bson.M{"uuid": crashed.UUID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := rig.db.Collection(repository.CollBudgetOutbox).UpdateOne(context.Background(), evFilter,
-		bson.M{"$set": bson.M{"leaseUntil": time.Now().UTC().Add(-time.Second)}}); err != nil {
-		t.Fatal(err)
-	}
+	expireLease(t, rig, crashed.UUID)
 	w2 := NewOutboxWorker(rig.outbox, notifier, slog.Default())
+	var wg sync.WaitGroup
 	wg.Add(2)
 	for _, worker := range []*OutboxWorker{w, w2} {
 		go func(worker *OutboxWorker) {
@@ -233,14 +279,44 @@ func TestOutbox_OneEventAndNoDoubleSendAfterCrash(t *testing.T) {
 	if notifier.calls != 1 || notifier.delivered["llm-budget-"+crashed.UUID] != 1 {
 		t.Fatalf("calls = %d, delivered = %v", notifier.calls, notifier.delivered)
 	}
-	var ev models.OutboxEvent
-	if err := rig.db.Collection(repository.CollBudgetOutbox).FindOne(context.Background(), evFilter).Decode(&ev); err != nil {
-		t.Fatal(err)
-	}
-	if ev.Status != models.OutboxStatusSent || ev.SentAt == nil || ev.LeaseUntil != nil {
-		t.Fatalf("event = %+v", ev)
-	}
+	assertSent(t, rig, crashed.UUID)
 	if n, err := w.RunOnce(context.Background()); n != 0 || err != nil || notifier.calls != 1 {
 		t.Fatalf("pass after sent = %d, %v, calls %d", n, err, notifier.calls)
 	}
+}
+
+// Review focus 4, crash AFTER the send: the worker delivered and died
+// before MarkSent. After the lease expires the event is re-sent under the
+// same idempotency key, so the sender delivers it once, and the stale
+// worker's late MarkSent cannot settle the new holder's lease.
+func TestOutbox_CrashAfterSendReusesIdempotencyKey(t *testing.T) {
+	rig := newBudgetRig(t, BudgetConfig{ReserveOutputTokens: 10, ReservationTTL: time.Minute})
+	crossWarnOnce(t, rig)
+	notifier := newDedupNotifier()
+	stale, err := rig.outbox.LeaseDue(context.Background(), time.Now().UTC(), time.Hour)
+	if err != nil || stale == nil {
+		t.Fatalf("lease = %+v, %v", stale, err)
+	}
+	if err := notifier.SendBudgetEvent(ctxWithTenant(context.Background(), stale.TenantID), *stale); err != nil {
+		t.Fatal(err)
+	}
+	// ... crash: no MarkSent. The lease expires; another worker takes over.
+	expireLease(t, rig, stale.UUID)
+	retaken, err := rig.outbox.LeaseDue(context.Background(), time.Now().UTC(), time.Hour)
+	if err != nil || retaken == nil || retaken.UUID != stale.UUID {
+		t.Fatalf("re-lease = %+v, %v", retaken, err)
+	}
+	if err := rig.outbox.MarkSent(ctxWithTenant(context.Background(), stale.TenantID), stale.UUID, *stale.LeaseUntil); !errors.Is(err, repository.ErrLeaseLost) {
+		t.Fatalf("stale MarkSent err = %v", err)
+	}
+	// The new holder is the worker below once its lease too has expired.
+	expireLease(t, rig, stale.UUID)
+	w := NewOutboxWorker(rig.outbox, notifier, slog.Default())
+	if n, err := w.RunOnce(context.Background()); n != 1 || err != nil {
+		t.Fatalf("recover = %d, %v", n, err)
+	}
+	if notifier.calls != 2 || notifier.keys[0] != notifier.keys[1] || notifier.delivered[notifier.keys[0]] != 1 || len(notifier.delivered) != 1 {
+		t.Fatalf("calls = %d, keys = %v, delivered = %v", notifier.calls, notifier.keys, notifier.delivered)
+	}
+	assertSent(t, rig, stale.UUID)
 }

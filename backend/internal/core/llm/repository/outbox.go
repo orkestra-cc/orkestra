@@ -15,6 +15,11 @@ import (
 
 const CollBudgetOutbox = "llm_budget_outbox"
 
+// ErrLeaseLost: the outbox event is no longer leased by the caller (its
+// lease expired and another worker took it over, or it was already
+// settled); nothing was written.
+var ErrLeaseLost = errors.New("llm repository: outbox lease lost")
+
 func newUUID() string { return uuid.NewString() }
 
 // Outbox owns llm_budget_outbox: budget threshold notifications, one per
@@ -61,7 +66,7 @@ func (r *Outbox) InsertUnique(ctx context.Context, ev *models.OutboxEvent) (bool
 // by setting it sending until now+leaseFor. A held lease makes the event
 // invisible to other workers. nil when nothing is due.
 func (r *Outbox) LeaseDue(ctx context.Context, now time.Time, leaseFor time.Duration) (*models.OutboxEvent, error) {
-	until := now.Add(leaseFor)
+	until := now.Add(leaseFor).Truncate(time.Millisecond) // BSON dates are ms; the fence compares this value
 	var ev models.OutboxEvent
 	//tenantscope:allow system: outbox worker drains budget notifications of every org; each leased event is then handled under its own tenantId (MarkSent/Reschedule/MarkFailed are scoped)
 	err := r.coll.FindOneAndUpdate(ctx, bson.M{
@@ -79,27 +84,39 @@ func (r *Outbox) LeaseDue(ctx context.Context, now time.Time, leaseFor time.Dura
 	return &ev, nil
 }
 
-func (r *Outbox) setStatus(ctx context.Context, uuid string, set bson.M) error {
-	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid, "status": models.OutboxStatusSending})
+// setStatus writes the outcome of one leased attempt. It is fenced by
+// the lease: the filter requires the event to still be sending under
+// exactly the leaseUntil this worker obtained, so a worker whose lease
+// expired (and was taken over) cannot overwrite the new holder's state.
+// A lost lease is ErrLeaseLost and writes nothing.
+func (r *Outbox) setStatus(ctx context.Context, uuid string, leaseUntil time.Time, set bson.M) error {
+	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid, "status": models.OutboxStatusSending, "leaseUntil": leaseUntil})
 	if err != nil {
 		return err
 	}
 	set["leaseUntil"] = nil
-	_, err = r.coll.UpdateOne(ctx, filter, bson.M{"$set": set})
-	return err
+	res, err := r.coll.UpdateOne(ctx, filter, bson.M{"$set": set})
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrLeaseLost
+	}
+	return nil
 }
 
-// MarkSent records delivery; terminal.
-func (r *Outbox) MarkSent(ctx context.Context, uuid string) error {
-	return r.setStatus(ctx, uuid, bson.M{"status": models.OutboxStatusSent, "sentAt": time.Now().UTC()})
+// MarkSent records delivery under the lease that ended at leaseUntil;
+// terminal.
+func (r *Outbox) MarkSent(ctx context.Context, uuid string, leaseUntil time.Time) error {
+	return r.setStatus(ctx, uuid, leaseUntil, bson.M{"status": models.OutboxStatusSent, "sentAt": time.Now().UTC()})
 }
 
 // Reschedule releases the lease and retries the event at next.
-func (r *Outbox) Reschedule(ctx context.Context, uuid string, attempts int, next time.Time) error {
-	return r.setStatus(ctx, uuid, bson.M{"status": models.OutboxStatusPending, "attempts": attempts, "nextAttemptAt": next})
+func (r *Outbox) Reschedule(ctx context.Context, uuid string, leaseUntil time.Time, attempts int, next time.Time) error {
+	return r.setStatus(ctx, uuid, leaseUntil, bson.M{"status": models.OutboxStatusPending, "attempts": attempts, "nextAttemptAt": next})
 }
 
 // MarkFailed abandons the event after the bounded retries; terminal.
-func (r *Outbox) MarkFailed(ctx context.Context, uuid string) error {
-	return r.setStatus(ctx, uuid, bson.M{"status": models.OutboxStatusFailed})
+func (r *Outbox) MarkFailed(ctx context.Context, uuid string, leaseUntil time.Time, attempts int) error {
+	return r.setStatus(ctx, uuid, leaseUntil, bson.M{"status": models.OutboxStatusFailed, "attempts": attempts})
 }

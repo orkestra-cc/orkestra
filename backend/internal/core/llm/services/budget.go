@@ -20,6 +20,13 @@ import (
 // sentinel so errors.Is works across the store boundary.
 var ErrAlreadyFinalized = repository.ErrAlreadyFinalized
 
+// ErrInvalidOutcome: Finalize was asked to close a row with an outcome
+// other than ok, fallback or error (pending or empty would leave the row
+// re-finalizable; budget_blocked is written only by the store).
+var ErrInvalidOutcome = errors.New("llm: invalid usage outcome for finalization")
+
+var finalOutcomes = map[string]bool{models.OutcomeOK: true, models.OutcomeFallback: true, models.OutcomeError: true}
+
 // BudgetStore is what the service needs from Mongo;
 // repository.BudgetStore implements it with real transactions. Its
 // types live in models so repository never imports services (ruling 3.2).
@@ -45,7 +52,7 @@ var _ BudgetStore = (*repository.BudgetStore)(nil)
 // BudgetConfig is read on every reservation (hot-reload).
 type BudgetConfig struct {
 	ReserveOutputTokens int           // default reserved output (budget_reserve_output_tokens)
-	ReservationTTL      time.Duration // after which the reconciler may close a pending row
+	ReservationTTL      time.Duration // after which the reconciler may close a pending row; <= 0 means the 3-minute default
 	WarnPct             int           // default warn threshold for new budgets (budget_warn_pct)
 }
 
@@ -113,8 +120,8 @@ func (s *BudgetService) Reserve(ctx context.Context, in ReserveInput) (*Reservat
 	}
 	reserveOut = max(reserveOut, 0)
 	ttl := cfg.ReservationTTL
-	if ttl == 0 {
-		ttl = defaultReservationTTL
+	if ttl <= 0 {
+		ttl = defaultReservationTTL // a pending row must never be born expired
 	}
 	now := time.Now().UTC()
 	expires := now.Add(ttl)
@@ -133,7 +140,8 @@ func (s *BudgetService) Reserve(ctx context.Context, in ReserveInput) (*Reservat
 	budget, err := s.store.GetBudget(ctx)
 	switch err = mapRepoErr(err); {
 	case err == nil:
-		limit, block = budget.MonthlyTokenLimit, budget.Action == models.BudgetActionBlock
+		// Fail closed: anything but an explicit warn_only blocks.
+		limit, block = budget.MonthlyTokenLimit, budget.Action != models.BudgetActionWarnOnly
 	case errors.Is(err, ErrNotFound):
 		// No budget: no limit.
 	default:
@@ -156,6 +164,9 @@ func (s *BudgetService) Reserve(ctx context.Context, in ReserveInput) (*Reservat
 func (s *BudgetService) Finalize(ctx context.Context, res *Reservation, in FinalizeInput) error {
 	if res == nil {
 		return nil
+	}
+	if !finalOutcomes[in.Outcome] {
+		return fmt.Errorf("%w: %q", ErrInvalidOutcome, in.Outcome)
 	}
 	if in.Latency == 0 && !res.startedAt.IsZero() {
 		in.Latency = time.Since(res.startedAt)

@@ -249,10 +249,14 @@ func (r *Usage) AnonymizeByUser(ctx context.Context, userUUID, replacement strin
 	return res.ModifiedCount, nil
 }
 
-// DeleteByUser hard-deletes every ledger row of a data subject.
+// DeleteByUser hard-deletes every finalized ledger row of a data
+// subject. Pending rows are skipped: deleting one would strand its
+// reservation in the rollup's reservedTokens until the month ends; the
+// reconciler closes them within its TTL and a later erasure run removes
+// them.
 func (r *Usage) DeleteByUser(ctx context.Context, userUUID string) (int64, error) {
 	//tenantscope:allow dsr: right-to-erasure hard delete of the subject's usage rows across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	res, err := r.coll.DeleteMany(ctx, bson.M{"userUuid": userUUID})
+	res, err := r.coll.DeleteMany(ctx, bson.M{"userUuid": userUUID, "outcome": bson.M{"$ne": models.OutcomePending}})
 	if err != nil {
 		return 0, err
 	}

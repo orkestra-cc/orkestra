@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/orkestra/backend/internal/core/llm/models"
+	"github.com/orkestra/backend/internal/core/llm/repository"
 	"github.com/orkestra/backend/pkg/sdk/tenantrepo"
 )
 
@@ -21,7 +22,8 @@ type memOutbox struct {
 func (m *memOutbox) LeaseDue(_ context.Context, now time.Time, _ time.Duration) (*models.OutboxEvent, error) {
 	for _, ev := range m.queue {
 		if ev.Status == models.OutboxStatusPending && !ev.NextAttemptAt.After(now) {
-			ev.Status = models.OutboxStatusSending
+			until := now.Add(time.Minute)
+			ev.Status, ev.LeaseUntil = models.OutboxStatusSending, &until
 			cp := *ev
 			return &cp, nil
 		}
@@ -43,14 +45,14 @@ func (m *memOutbox) tenant(ctx context.Context) {
 	m.tenants = append(m.tenants, id)
 }
 
-func (m *memOutbox) MarkSent(ctx context.Context, uuid string) error {
+func (m *memOutbox) MarkSent(ctx context.Context, uuid string, _ time.Time) error {
 	m.tenant(ctx)
 	m.find(uuid).Status = models.OutboxStatusSent
 	m.sent = append(m.sent, uuid)
 	return nil
 }
 
-func (m *memOutbox) Reschedule(ctx context.Context, uuid string, attempts int, next time.Time) error {
+func (m *memOutbox) Reschedule(ctx context.Context, uuid string, _ time.Time, attempts int, next time.Time) error {
 	m.tenant(ctx)
 	ev := m.find(uuid)
 	ev.Status, ev.Attempts = models.OutboxStatusPending, attempts
@@ -59,7 +61,7 @@ func (m *memOutbox) Reschedule(ctx context.Context, uuid string, attempts int, n
 	return nil
 }
 
-func (m *memOutbox) MarkFailed(ctx context.Context, uuid string) error {
+func (m *memOutbox) MarkFailed(ctx context.Context, uuid string, _ time.Time, _ int) error {
 	m.tenant(ctx)
 	m.find(uuid).Status = models.OutboxStatusFailed
 	m.failed = append(m.failed, uuid)
@@ -67,14 +69,18 @@ func (m *memOutbox) MarkFailed(ctx context.Context, uuid string) error {
 }
 
 type flakyNotifier struct {
-	failures int
-	calls    int
-	tenants  []string
-	kinds    []string
+	failures  int
+	calls     int
+	tenants   []string
+	kinds     []string
+	deadlines []time.Duration
 }
 
 func (n *flakyNotifier) SendBudgetEvent(ctx context.Context, ev models.OutboxEvent) error {
 	n.calls++
+	if dl, ok := ctx.Deadline(); ok {
+		n.deadlines = append(n.deadlines, time.Until(dl))
+	}
 	id, _ := tenantrepo.CurrentTenantID(ctx)
 	n.tenants = append(n.tenants, id)
 	n.kinds = append(n.kinds, tenantrepo.CurrentTenantKind(ctx))
@@ -111,6 +117,31 @@ func TestOutbox_RetriesWithGrowingBackoffThenSends(t *testing.T) {
 		if k != "internal" {
 			t.Fatalf("tenant kind = %q", k)
 		}
+	}
+	// Every send has a deadline well inside the lease.
+	if len(n.deadlines) != n.calls {
+		t.Fatalf("sends without a deadline: %d of %d", n.calls-len(n.deadlines), n.calls)
+	}
+	for _, d := range n.deadlines {
+		if d <= 0 || d > outboxLease/2 {
+			t.Fatalf("send deadline %v not within half the lease", d)
+		}
+	}
+}
+
+// A settle write that reports the lease as lost (another worker took the
+// event over) is not an error of the pass.
+type lostLeaseOutbox struct{ *memOutbox }
+
+func (l lostLeaseOutbox) MarkSent(context.Context, string, time.Time) error {
+	return repository.ErrLeaseLost
+}
+
+func TestOutbox_LostLeaseIsNotAPassError(t *testing.T) {
+	repo := lostLeaseOutbox{outboxWith("t1")}
+	w := NewOutboxWorker(repo, &flakyNotifier{}, slog.Default())
+	if n, err := w.RunOnce(context.Background()); n != 1 || err != nil {
+		t.Fatalf("RunOnce = %d, %v", n, err)
 	}
 }
 

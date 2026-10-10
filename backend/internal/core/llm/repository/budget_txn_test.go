@@ -312,15 +312,47 @@ func TestOutbox_LeaseIsExclusiveAndRecoverable(t *testing.T) {
 	if err != nil || again == nil || again.UUID != "ob-1" {
 		t.Fatalf("lease after expiry = %+v, %v", again, err)
 	}
-	if err := ob.MarkSent(ctx, "ob-1"); err != nil {
+	// The first holder's lease was taken over: its late settle is fenced
+	// out and leaves the new holder's lease intact.
+	if err := ob.MarkSent(ctx, "ob-1", *got.LeaseUntil); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("stale MarkSent err = %v", err)
+	}
+	var cur models.OutboxEvent
+	findDoc(t, db, CollBudgetOutbox, bson.M{"uuid": "ob-1"}, &cur)
+	if cur.Status != models.OutboxStatusSending || cur.LeaseUntil == nil || !cur.LeaseUntil.Equal(*again.LeaseUntil) {
+		t.Fatalf("after stale MarkSent = %+v", cur)
+	}
+	if err := ob.Reschedule(ctx, "ob-1", *got.LeaseUntil, 1, later); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("stale Reschedule err = %v", err)
+	}
+	if err := ob.MarkSent(ctx, "ob-1", *again.LeaseUntil); err != nil {
 		t.Fatal(err)
 	}
 	if done, err := ob.LeaseDue(context.Background(), later.Add(time.Hour), time.Minute); done != nil || err != nil {
 		t.Fatalf("lease after sent = %+v, %v", done, err)
 	}
-	// MarkSent is tenant-scoped.
-	if err := ob.MarkSent(ctxFor("t2"), "ob-1"); err != nil {
+	// Settling is tenant-scoped: t1 cannot settle t2's leased event.
+	t2ev := &models.OutboxEvent{UUID: "ob-t2", Period: "2026-10", Threshold: models.ThresholdWarn, Status: models.OutboxStatusPending, NextAttemptAt: now, CreatedAt: now}
+	if ok, err := ob.InsertUnique(ctxFor("t2"), t2ev); !ok || err != nil {
+		t.Fatalf("t2 insert = %v, %v", ok, err)
+	}
+	t2lease, err := ob.LeaseDue(context.Background(), later.Add(time.Hour), time.Hour)
+	if err != nil || t2lease == nil || t2lease.UUID != "ob-t2" {
+		t.Fatalf("t2 lease = %+v, %v", t2lease, err)
+	}
+	if err := ob.MarkSent(ctx, "ob-t2", *t2lease.LeaseUntil); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("cross-tenant MarkSent err = %v", err)
+	}
+	t2filter, err := tenantrepo.Scope(ctxFor("t2"), bson.M{"uuid": "ob-t2"})
+	if err != nil {
 		t.Fatal(err)
+	}
+	var t2cur models.OutboxEvent
+	if err := db.Collection(CollBudgetOutbox).FindOne(context.Background(), t2filter).Decode(&t2cur); err != nil {
+		t.Fatal(err)
+	}
+	if t2cur.Status != models.OutboxStatusSending || t2cur.LeaseUntil == nil {
+		t.Fatalf("t2 event after t1's MarkSent = %+v", t2cur)
 	}
 }
 
@@ -406,6 +438,11 @@ func TestUsage_DSRAndMonthlyPurge(t *testing.T) {
 	if err := usage.InsertPending(ctxFor("t1"), &models.UsageEvent{UUID: "keep", UserUUID: "someone", Outcome: models.OutcomeOK, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
+	// An in-flight call of the subject: its reservation is still counted in
+	// the rollup, so erasure must leave it to the reconciler.
+	if err := usage.InsertPending(ctxFor("t1"), &models.UsageEvent{UUID: "inflight", UserUUID: "anon-x", CredentialUUID: "acc2", Outcome: models.OutcomePending, ReservedTokens: 40, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
 	rows, err := usage.ListByUserAllTenants(context.Background(), "subject")
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("export = %d, %v", len(rows), err)
@@ -420,8 +457,11 @@ func TestUsage_DSRAndMonthlyPurge(t *testing.T) {
 	if n, err := usage.DeleteByUser(context.Background(), "anon-x"); err != nil || n != 2 {
 		t.Fatalf("delete = %d, %v", n, err)
 	}
-	if n := countDocs(t, db, CollUsage, bson.M{}); n != 1 {
-		t.Fatalf("left = %d", n)
+	if n := countDocs(t, db, CollUsage, bson.M{}); n != 2 {
+		t.Fatalf("left = %d (want keep + inflight)", n)
+	}
+	if n := countDocs(t, db, CollUsage, bson.M{"uuid": "inflight", "outcome": models.OutcomePending}); n != 1 {
+		t.Fatal("erasure deleted a pending row")
 	}
 	for _, p := range []string{"2023-01", models.PeriodOf(now)} {
 		if err := WithTxn(ctxFor("t1"), db, func(sc mongo.SessionContext) error { return monthly.Reserve(sc, p, 1) }); err != nil {

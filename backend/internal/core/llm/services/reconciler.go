@@ -33,13 +33,14 @@ type Reconciler struct {
 	budget   *BudgetService
 	logger   *slog.Logger
 	interval time.Duration
+	now      func() time.Time // test seam: the sweep's notion of "now"
 }
 
 func NewReconciler(pending PendingRepo, budget *BudgetService, logger *slog.Logger) *Reconciler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Reconciler{pending: pending, budget: budget, logger: logger, interval: time.Minute}
+	return &Reconciler{pending: pending, budget: budget, logger: logger, interval: time.Minute, now: time.Now}
 }
 
 // Run ticks RunOnce every minute until ctx is done.
@@ -61,7 +62,7 @@ func (r *Reconciler) Run(ctx context.Context) {
 // RunOnce closes up to reconcileBatch expired pending rows and returns
 // how many it examined.
 func (r *Reconciler) RunOnce(ctx context.Context) (int, error) {
-	rows, err := r.pending.ListPendingExpired(ctx, time.Now().UTC(), reconcileBatch)
+	rows, err := r.pending.ListPendingExpired(ctx, r.now().UTC(), reconcileBatch)
 	if err != nil {
 		return 0, err
 	}

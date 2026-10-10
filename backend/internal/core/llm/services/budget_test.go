@@ -229,3 +229,52 @@ type failingBudgetStore struct{ *memBudgetStore }
 func (failingBudgetStore) GetBudget(context.Context) (*models.Budget, error) {
 	return nil, errors.New("mongo down")
 }
+
+func TestBudget_FinalizeRejectsNonFinalOutcomes(t *testing.T) {
+	store := newMemBudgetStore(0, "")
+	store.budget = nil
+	svc := NewBudgetService(store, fixedBudgetCfg, slog.Default())
+	ctx := ctxFor("t1")
+	res, err := svc.Reserve(ctx, ReserveInput{Caller: "t", EstimatedInput: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, outcome := range []string{"", models.OutcomePending, models.OutcomeBudgetBlocked, "bogus"} {
+		if err := svc.Finalize(ctx, res, FinalizeInput{Outcome: outcome, Usage: iface.LLMUsage{InputTokens: 5}}); !errors.Is(err, ErrInvalidOutcome) {
+			t.Fatalf("outcome %q: err = %v", outcome, err)
+		}
+	}
+	if ev := store.ledger[res.LedgerUUID]; ev.Outcome != models.OutcomePending || store.monthly[res.Period].Requests != 0 {
+		t.Fatalf("a refused finalize wrote: %+v", ev)
+	}
+	if err := svc.Finalize(ctx, res, FinalizeInput{Outcome: models.OutcomeError}); err != nil {
+		t.Fatalf("error outcome refused: %v", err)
+	}
+}
+
+// Any action but an explicit warn_only blocks (fail closed).
+func TestBudget_UnknownActionBlocks(t *testing.T) {
+	for _, action := range []string{"", "bogus", models.BudgetActionBlock} {
+		store := newMemBudgetStore(100, action)
+		svc := NewBudgetService(store, fixedBudgetCfg, slog.Default())
+		if _, err := svc.Reserve(ctxFor("t1"), ReserveInput{Caller: "t", EstimatedInput: 500}); !errors.Is(err, iface.ErrLLMBudgetExceeded) {
+			t.Fatalf("action %q: err = %v", action, err)
+		}
+	}
+}
+
+func TestBudget_NonPositiveTTLUsesDefault(t *testing.T) {
+	for _, ttl := range []time.Duration{0, -time.Hour} {
+		store := newMemBudgetStore(0, "")
+		store.budget = nil
+		svc := NewBudgetService(store, func() BudgetConfig { return BudgetConfig{ReserveOutputTokens: 1, ReservationTTL: ttl} }, slog.Default())
+		res, err := svc.Reserve(ctxFor("t1"), ReserveInput{Caller: "t", EstimatedInput: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		left := time.Until(*store.ledger[res.LedgerUUID].ReservationExpiresAt)
+		if left < defaultReservationTTL-time.Minute || left > defaultReservationTTL {
+			t.Fatalf("ttl %v: reservation expires in %v", ttl, left)
+		}
+	}
+}

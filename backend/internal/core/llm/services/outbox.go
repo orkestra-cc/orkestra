@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -10,13 +12,15 @@ import (
 )
 
 // OutboxRepo is the worker's view of llm_budget_outbox. LeaseDue sweeps
-// every org; the other three are tenant-scoped and run under the event's
-// own tenant.
+// every org; the other three are tenant-scoped, run under the event's own
+// tenant and are fenced by the lease the worker obtained (leaseUntil):
+// once that lease has been taken over they write nothing and return
+// repository.ErrLeaseLost.
 type OutboxRepo interface {
 	LeaseDue(ctx context.Context, now time.Time, leaseFor time.Duration) (*models.OutboxEvent, error) // nil when nothing is due
-	MarkSent(ctx context.Context, uuid string) error
-	Reschedule(ctx context.Context, uuid string, attempts int, next time.Time) error
-	MarkFailed(ctx context.Context, uuid string) error
+	MarkSent(ctx context.Context, uuid string, leaseUntil time.Time) error
+	Reschedule(ctx context.Context, uuid string, leaseUntil time.Time, attempts int, next time.Time) error
+	MarkFailed(ctx context.Context, uuid string, leaseUntil time.Time, attempts int) error
 }
 
 var _ OutboxRepo = (*repository.Outbox)(nil)
@@ -83,23 +87,36 @@ func (w *OutboxWorker) RunOnce(ctx context.Context) (int, error) {
 			return n, nil
 		}
 		n++
-		tctx := ctxWithTenant(ctx, ev.TenantID)
-		if err := w.notifier.SendBudgetEvent(tctx, *ev); err != nil {
-			attempts := ev.Attempts + 1
-			if attempts >= outboxMaxAttempts {
-				w.logger.ErrorContext(ctx, "llm: budget notification abandoned", slog.String("event", ev.UUID), slog.Int("attempts", attempts), slog.String("error", err.Error()))
-				if err := w.repo.MarkFailed(tctx, ev.UUID); err != nil {
-					w.logger.WarnContext(ctx, "llm: outbox mark failed", slog.String("event", ev.UUID), slog.String("error", err.Error()))
-				}
-				continue
-			}
-			if err := w.repo.Reschedule(tctx, ev.UUID, attempts, time.Now().UTC().Add(outboxBackoff(attempts))); err != nil {
-				w.logger.WarnContext(ctx, "llm: outbox reschedule failed; the lease will expire", slog.String("event", ev.UUID), slog.String("error", err.Error()))
-			}
-			continue
+		if ev.LeaseUntil == nil {
+			return n, fmt.Errorf("llm: outbox event %s leased without a lease", ev.UUID)
 		}
-		if err := w.repo.MarkSent(tctx, ev.UUID); err != nil {
-			return n, err
+		lease := *ev.LeaseUntil
+		tctx := ctxWithTenant(ctx, ev.TenantID)
+		// The send must end well before the lease does, or another worker
+		// could take the event over while this one is still sending.
+		sendCtx, cancel := context.WithTimeout(tctx, w.lease/2)
+		err = w.notifier.SendBudgetEvent(sendCtx, *ev)
+		cancel()
+		var settle error
+		switch {
+		case err == nil:
+			settle = w.repo.MarkSent(tctx, ev.UUID, lease)
+		case ev.Attempts+1 >= outboxMaxAttempts:
+			w.logger.ErrorContext(ctx, "llm: budget notification abandoned", slog.String("event", ev.UUID), slog.Int("attempts", ev.Attempts+1), slog.String("error", err.Error()))
+			settle = w.repo.MarkFailed(tctx, ev.UUID, lease, ev.Attempts+1)
+		default:
+			settle = w.repo.Reschedule(tctx, ev.UUID, lease, ev.Attempts+1, time.Now().UTC().Add(outboxBackoff(ev.Attempts+1)))
+		}
+		switch {
+		case settle == nil:
+		case errors.Is(settle, repository.ErrLeaseLost):
+			// Another worker took the event over after our lease expired;
+			// its outcome stands (a re-send reuses the idempotency key).
+			w.logger.InfoContext(ctx, "llm: outbox lease lost", slog.String("event", ev.UUID))
+		case err == nil:
+			return n, settle
+		default:
+			w.logger.WarnContext(ctx, "llm: outbox settle failed; the lease will expire", slog.String("event", ev.UUID), slog.String("error", settle.Error()))
 		}
 	}
 	return n, nil
