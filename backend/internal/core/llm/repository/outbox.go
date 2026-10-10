@@ -152,3 +152,31 @@ func (r *Outbox) PurgeSettledBefore(ctx context.Context, cutoff time.Time) (int6
 	}
 	return res.DeletedCount, nil
 }
+
+// ListDeliveredTo returns, across every org, the budget alerts already
+// delivered to the data subject (deliveredTo).
+func (r *Outbox) ListDeliveredTo(ctx context.Context, userUUID string) ([]models.OutboxEvent, error) {
+	//tenantscope:allow dsr: right-of-access export of the budget alerts delivered to the subject across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
+	cur, err := r.coll.Find(ctx, bson.M{"deliveredTo": userUUID})
+	if err != nil {
+		return nil, err
+	}
+	out := []models.OutboxEvent{}
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// RemoveDelivered drops the data subject from deliveredTo in every org.
+// An event still being retried does not resend to them: recipients are
+// resolved at send time and the subject's memberships and extra-recipient
+// entries are gone by then.
+func (r *Outbox) RemoveDelivered(ctx context.Context, userUUID string) (int64, error) {
+	//tenantscope:allow dsr: right-to-erasure removal of the subject from delivered budget alerts across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
+	res, err := r.coll.UpdateMany(ctx, bson.M{"deliveredTo": userUUID}, bson.M{"$pull": bson.M{"deliveredTo": userUUID}})
+	if err != nil {
+		return 0, err
+	}
+	return res.ModifiedCount, nil
+}

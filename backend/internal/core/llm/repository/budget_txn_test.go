@@ -93,6 +93,17 @@ func TestReserve_ConcurrentCallersCannotOverspend(t *testing.T) {
 
 // countDocs and findDoc read raw rows of tenant t1 (every row these
 // tests assert on belongs to it), scoped like production queries.
+// countAll counts across every org (DSR methods are cross-tenant).
+func countAll(t *testing.T, db *mongo.Database, coll string, filter bson.M) int64 {
+	t.Helper()
+	//tenantscope:allow test: asserts the outcome of cross-tenant DSR methods across every org of a throwaway database
+	n, err := db.Collection(coll).CountDocuments(context.Background(), filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
 func countDocs(t *testing.T, db *mongo.Database, coll string, extra bson.M) int64 {
 	t.Helper()
 	filter, err := tenantrepo.Scope(ctxFor("t1"), extra)
@@ -447,15 +458,29 @@ func TestUsage_DSRAndMonthlyPurge(t *testing.T) {
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("export = %d, %v", len(rows), err)
 	}
-	if n, err := usage.AnonymizeByUser(context.Background(), "subject", "anon-x"); err != nil || n != 2 {
-		t.Fatalf("anonymize = %d, %v", n, err)
+	// One replacement per row: the rows must not stay linkable.
+	ids := []string{}
+	newID := func() string {
+		id := fmt.Sprintf("erased-%d", len(ids))
+		ids = append(ids, id)
+		return id
 	}
-	// One of the two (cross-org count checked above) is t1's.
-	if n := countDocs(t, db, CollUsage, bson.M{"userUuid": "anon-x", "credentialUuid": bson.M{"$exists": false}}); n != 1 {
-		t.Fatalf("anonymized rows = %d", n)
+	if n, err := usage.AnonymizeByUser(context.Background(), "subject", newID); err != nil || n != 2 || len(ids) != 2 {
+		t.Fatalf("anonymize = %d, %v (ids %v)", n, err, ids)
 	}
-	if n, err := usage.DeleteByUser(context.Background(), "anon-x"); err != nil || n != 2 {
-		t.Fatalf("delete = %d, %v", n, err)
+	for _, id := range ids {
+		if n := countAll(t, db, CollUsage, bson.M{"userUuid": id, "credentialUuid": bson.M{"$exists": false}}); n != 1 {
+			t.Fatalf("rows anonymized as %s = %d", id, n)
+		}
+	}
+	if n := countAll(t, db, CollUsage, bson.M{"userUuid": "subject"}); n != 0 {
+		t.Fatalf("rows still naming the subject = %d", n)
+	}
+	// The ledger is rewritten in place: same rows, both orgs.
+	for _, u := range ids {
+		if _, err := usage.DeleteByUser(context.Background(), u); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if n := countDocs(t, db, CollUsage, bson.M{}); n != 2 {
 		t.Fatalf("left = %d (want keep + inflight)", n)
@@ -470,6 +495,76 @@ func TestUsage_DSRAndMonthlyPurge(t *testing.T) {
 	}
 	if n, err := monthly.PurgeOlderThan(context.Background(), 24); err != nil || n != 1 {
 		t.Fatalf("monthly purge = %d, %v", n, err)
+	}
+}
+
+func TestBudgetsAndOutbox_DSR(t *testing.T) {
+	db := newTestDB(t)
+	ensureBudgetIndexes(t, db)
+	b := NewBudgets(db)
+	o := NewOutbox(db)
+	bg := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	for tenant, bud := range map[string]*models.Budget{
+		"t1": {MonthlyTokenLimit: 10, Action: models.BudgetActionBlock, NotifyExtraUserUUIDs: []string{"subject", "other"}, UpdatedBy: "subject", UpdatedAt: now},
+		"t2": {MonthlyTokenLimit: 20, Action: models.BudgetActionBlock, NotifyExtraUserUUIDs: []string{"other"}, UpdatedBy: "admin", UpdatedAt: now},
+		"t3": {MonthlyTokenLimit: 30, Action: models.BudgetActionBlock, NotifyExtraUserUUIDs: []string{"subject"}, UpdatedBy: "admin", UpdatedAt: now},
+	} {
+		if err := b.Put(ctxFor(tenant), bud); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, tenant := range []string{"t1", "t2"} {
+		ev := &models.OutboxEvent{UUID: fmt.Sprintf("ob%d", i), Period: "2026-03", Threshold: models.ThresholdWarn, Status: models.OutboxStatusSent, CreatedAt: now, NextAttemptAt: now}
+		if ok, err := o.InsertUnique(ctxFor(tenant), ev); err != nil || !ok {
+			t.Fatalf("insert outbox = %v, %v", ok, err)
+		}
+	}
+	for tenant, set := range map[string]bson.M{
+		"t1": {"uuid": "ob0", "to": []string{"subject", "other"}},
+		"t2": {"uuid": "ob1", "to": []string{"other"}},
+	} {
+		filter, err := tenantrepo.Scope(ctxFor(tenant), bson.M{"uuid": set["uuid"]})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Collection(CollBudgetOutbox).UpdateOne(bg, filter, bson.M{"$set": bson.M{"deliveredTo": set["to"]}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	refs, err := b.ListReferencingUser(bg, "subject")
+	if err != nil || len(refs) != 2 {
+		t.Fatalf("budgets referencing = %+v, %v", refs, err)
+	}
+	alerts, err := o.ListDeliveredTo(bg, "subject")
+	if err != nil || len(alerts) != 1 || alerts[0].UUID != "ob0" || alerts[0].TenantID != "t1" {
+		t.Fatalf("alerts delivered = %+v, %v", alerts, err)
+	}
+	if n, err := b.RemoveRecipient(bg, "subject"); err != nil || n != 2 {
+		t.Fatalf("remove recipient = %d, %v", n, err)
+	}
+	if n, err := b.PseudonymizeUpdater(bg, "subject"); err != nil || n != 1 {
+		t.Fatalf("pseudonymize updater = %d, %v", n, err)
+	}
+	if n, err := o.RemoveDelivered(bg, "subject"); err != nil || n != 1 {
+		t.Fatalf("remove delivered = %d, %v", n, err)
+	}
+	t1, err := b.Get(ctxFor("t1"))
+	if err != nil || len(t1.NotifyExtraUserUUIDs) != 1 || t1.NotifyExtraUserUUIDs[0] != "other" || t1.UpdatedBy != models.ErasedActor || !t1.UpdatedAt.Equal(now) || t1.MonthlyTokenLimit != 10 {
+		t.Fatalf("t1 budget after erasure = %+v, %v", t1, err)
+	}
+	if t2, _ := b.Get(ctxFor("t2")); t2.UpdatedBy != "admin" || len(t2.NotifyExtraUserUUIDs) != 1 {
+		t.Fatalf("t2 budget must be untouched: %+v", t2)
+	}
+	if n := countAll(t, db, CollBudgets, bson.M{"$or": []bson.M{{"notifyExtraUserUuids": "subject"}, {"updatedBy": "subject"}}}); n != 0 {
+		t.Fatalf("budgets still naming the subject = %d", n)
+	}
+	if n := countAll(t, db, CollBudgetOutbox, bson.M{"deliveredTo": "subject"}); n != 0 {
+		t.Fatalf("alerts still naming the subject = %d", n)
+	}
+	if n := countAll(t, db, CollBudgetOutbox, bson.M{"deliveredTo": "other"}); n != 2 {
+		t.Fatalf("other recipients lost = %d", n)
 	}
 }
 

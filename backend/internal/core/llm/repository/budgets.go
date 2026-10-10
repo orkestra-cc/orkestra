@@ -54,6 +54,43 @@ func (r *Budgets) Put(ctx context.Context, b *models.Budget) error {
 	return err
 }
 
+// ListReferencingUser returns, across every org, the budgets that name
+// the data subject as an extra alert recipient or as the last editor.
+func (r *Budgets) ListReferencingUser(ctx context.Context, userUUID string) ([]models.Budget, error) {
+	//tenantscope:allow dsr: right-of-access export of the budgets naming the subject (recipient or updatedBy) across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
+	cur, err := r.coll.Find(ctx, bson.M{"$or": []bson.M{{"notifyExtraUserUuids": userUUID}, {"updatedBy": userUUID}}})
+	if err != nil {
+		return nil, err
+	}
+	out := []models.Budget{}
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// RemoveRecipient drops the data subject from every org's extra alert
+// recipients.
+func (r *Budgets) RemoveRecipient(ctx context.Context, userUUID string) (int64, error) {
+	//tenantscope:allow dsr: right-to-erasure removal of the subject from budget alert recipients across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
+	res, err := r.coll.UpdateMany(ctx, bson.M{"notifyExtraUserUuids": userUUID}, bson.M{"$pull": bson.M{"notifyExtraUserUuids": userUUID}})
+	if err != nil {
+		return 0, err
+	}
+	return res.ModifiedCount, nil
+}
+
+// PseudonymizeUpdater rewrites updatedBy = subject to models.ErasedActor
+// in every org; updatedAt is left as is (the budget did not change).
+func (r *Budgets) PseudonymizeUpdater(ctx context.Context, userUUID string) (int64, error) {
+	//tenantscope:allow dsr: right-to-erasure pseudonymization of the budget updatedBy actor across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
+	res, err := r.coll.UpdateMany(ctx, bson.M{"updatedBy": userUUID}, bson.M{"$set": bson.M{"updatedBy": models.ErasedActor}})
+	if err != nil {
+		return 0, err
+	}
+	return res.ModifiedCount, nil
+}
+
 // BudgetStore implements services.BudgetStore over the four collections
 // with Mongo transactions: admission (consumed + reserved + requested <=
 // limit) and the ledger insert commit together, and so do the ledger

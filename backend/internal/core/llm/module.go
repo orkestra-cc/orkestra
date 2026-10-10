@@ -289,7 +289,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	deps.Services.Register(module.ServiceLLMGateway, m.gateway)
 
 	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
-		reg.Register(services.NewPIIProducer(creds, mods, grants, logger))
+		reg.Register(services.NewPIIProducer(creds, mods, grants, usage, budgets, outbox, logger))
 	}
 
 	m.admin = handlers.NewAdminHandler(m.catalog, logger)

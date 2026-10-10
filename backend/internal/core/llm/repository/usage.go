@@ -239,15 +239,55 @@ func (r *Usage) ListByUserAllTenants(ctx context.Context, userUUID string) ([]mo
 
 // AnonymizeByUser replaces the subject on every ledger row (keeping the
 // counters the org's rollup and reports rely on) and drops the
-// credential reference that could point back to a linked account.
-func (r *Usage) AnonymizeByUser(ctx context.Context, userUUID, replacement string) (int64, error) {
+// credential reference that could point back to a linked account. Each
+// row gets its own replacement from newID, so the subject's rows can no
+// longer be linked to one another (a per-subject pseudonym would keep a
+// behavioural profile: times, models, callers). Rows are rewritten in
+// bulk batches; a row whose userUuid changed meanwhile is skipped.
+func (r *Usage) AnonymizeByUser(ctx context.Context, userUUID string, newID func() string) (int64, error) {
 	//tenantscope:allow dsr: right-to-erasure anonymization of the subject's usage rows across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	res, err := r.coll.UpdateMany(ctx, bson.M{"userUuid": userUUID}, bson.M{"$set": bson.M{"userUuid": replacement}, "$unset": bson.M{"credentialUuid": ""}})
+	cur, err := r.coll.Find(ctx, bson.M{"userUuid": userUUID}, options.Find().SetProjection(bson.M{"_id": 1}))
 	if err != nil {
 		return 0, err
 	}
-	return res.ModifiedCount, nil
+	defer cur.Close(ctx)
+	var total int64
+	batch := make([]mongo.WriteModel, 0, anonymizeBatch)
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		res, err := r.coll.BulkWrite(ctx, batch, options.BulkWrite().SetOrdered(false))
+		if res != nil {
+			total += res.ModifiedCount
+		}
+		batch = batch[:0]
+		return err
+	}
+	for cur.Next(ctx) {
+		var row struct {
+			ID any `bson:"_id"`
+		}
+		if err := cur.Decode(&row); err != nil {
+			return total, err
+		}
+		batch = append(batch, mongo.NewUpdateOneModel().
+			SetFilter(bson.M{"_id": row.ID, "userUuid": userUUID}).
+			SetUpdate(bson.M{"$set": bson.M{"userUuid": newID()}, "$unset": bson.M{"credentialUuid": ""}}))
+		if len(batch) == anonymizeBatch {
+			if err := flush(); err != nil {
+				return total, err
+			}
+		}
+	}
+	if err := cur.Err(); err != nil {
+		return total, err
+	}
+	return total, flush()
 }
+
+// anonymizeBatch bounds one BulkWrite of AnonymizeByUser.
+const anonymizeBatch = 500
 
 // DeleteByUser hard-deletes every finalized ledger row of a data
 // subject. Pending rows are skipped: deleting one would strand its
