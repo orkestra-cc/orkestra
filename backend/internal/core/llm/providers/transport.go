@@ -5,10 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"net"
 	"net/http"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -24,26 +22,50 @@ var (
 
 const (
 	defaultMaxResponseBytes = 8 << 20
+	defaultHeaderTimeout    = 5 * time.Minute
 	defaultIdleTimeout      = 30 * time.Second
 )
 
-// TransportConfig tunes the one http.Client adapters may use.
+// streamingKey marks a request as an intentional stream.
+type streamingKey struct{}
+
+// WithStreaming marks every request made with the returned context as a
+// stream: the response body is NOT size-capped but must keep producing data
+// (TransportConfig.IdleTimeout applies to the wait for headers and between
+// reads). Adapters call it on, and only on, the streaming call they are about
+// to make. The choice is request-side on purpose: it must never be inferred
+// from the response (Content-Type is chosen by the upstream, and a hostile
+// endpoint could otherwise lift the size cap with one header).
+func WithStreaming(ctx context.Context) context.Context {
+	return context.WithValue(ctx, streamingKey{}, true)
+}
+
+func isStreaming(ctx context.Context) bool {
+	v, _ := ctx.Value(streamingKey{}).(bool)
+	return v
+}
+
+// TransportConfig tunes the one http.Client adapters may use. One client
+// serves both call shapes; the shape is chosen per request.
+//
+//   - Non-streaming (default, no marker): the body is capped at
+//     MaxResponseBytes whatever the response Content-Type says, and the wait
+//     for headers is bounded by HeaderTimeout (generous: a reasoning model
+//     sends nothing until it is done). Stall detection is the caller's
+//     context deadline (or Timeout).
+//   - Streaming (request context from WithStreaming): no total cap (the
+//     decoder bounds each event), but IdleTimeout bounds the wait for headers
+//     and every silence between two reads.
+//
+// Timeout is http.Client.Timeout and also covers the body read, so it would
+// cut healthy streams: a client that serves streams must leave it 0 and rely
+// on the request context.
 type TransportConfig struct {
-	ProductionLike bool
-	// Timeout is http.Client.Timeout: it bounds the whole exchange INCLUDING
-	// reading the body. Streaming callers must leave it 0 and rely on the
-	// request context plus IdleTimeout.
-	Timeout time.Duration
-	// MaxResponseBytes caps every non-streaming response body (enforced in
-	// the transport, so SDK decoders that read the body directly are bound
-	// too); 0 = 8 MiB. Streams are not capped in total: their per-event size
-	// is bounded by the decoder and their liveness by IdleTimeout.
-	MaxResponseBytes int64
-	// IdleTimeout is both the response-header timeout and, for event-stream
-	// / NDJSON bodies, the maximum silence between two reads; 0 = 30s. A
-	// non-streaming call whose provider only answers after generating the
-	// whole completion needs this raised to its expected latency.
-	IdleTimeout time.Duration
+	ProductionLike   bool
+	Timeout          time.Duration // whole-exchange timeout incl. body; 0 = none (required for streaming clients)
+	MaxResponseBytes int64         // non-stream body cap; 0 = 8 MiB
+	HeaderTimeout    time.Duration // non-stream wait for response headers; 0 = 5 min
+	IdleTimeout      time.Duration // stream: headers + inter-read silence; 0 = 30s
 }
 
 type resolverFunc func(ctx context.Context, host string) ([]net.IPAddr, error)
@@ -53,7 +75,7 @@ type pinnedTransport struct {
 	resolve   resolverFunc
 	prod      bool
 	maxBytes  int64
-	idleAfter time.Duration
+	idleAfter time.Duration // stream idle timeout
 }
 
 // NewHTTPClient builds the only http.Client the adapters may use. Every new
@@ -62,12 +84,16 @@ type pinnedTransport struct {
 // at dial time. The dialled address is the one that was validated (no second
 // lookup), Host header and TLS SNI stay the original hostname, proxies from
 // the environment are ignored (a proxy would bypass the IP check) and
-// redirects are refused outright. Response bodies are size-capped (or idle-
-// bounded for streams) inside the RoundTripper.
+// redirects are refused outright. Response bodies are size-capped (or, for
+// requests marked WithStreaming, idle-bounded) inside the RoundTripper.
 func NewHTTPClient(cfg TransportConfig) *http.Client {
 	idle := cfg.IdleTimeout
 	if idle <= 0 {
 		idle = defaultIdleTimeout
+	}
+	header := cfg.HeaderTimeout
+	if header <= 0 {
+		header = defaultHeaderTimeout
 	}
 	maxBytes := cfg.MaxResponseBytes
 	if maxBytes <= 0 {
@@ -80,7 +106,7 @@ func NewHTTPClient(cfg TransportConfig) *http.Client {
 		MaxIdleConns:          32,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: idle,
+		ResponseHeaderTimeout: header,
 		ExpectContinueTimeout: time.Second,
 	}
 	base.DialContext = pt.dial
@@ -95,13 +121,12 @@ func NewHTTPClient(cfg TransportConfig) *http.Client {
 }
 
 func (p *pinnedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if isStreaming(req.Context()) {
+		return p.roundTripStream(req)
+	}
 	resp, err := p.base.RoundTrip(req)
 	if err != nil || resp.Body == nil || resp.Body == http.NoBody {
 		return resp, err
-	}
-	if isStreamingContentType(resp.Header.Get("Content-Type")) {
-		resp.Body = newIdleBody(resp.Body, p.idleAfter)
-		return resp, nil
 	}
 	if resp.ContentLength > p.maxBytes {
 		_ = resp.Body.Close()
@@ -111,16 +136,31 @@ func (p *pinnedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-func isStreamingContentType(ct string) bool {
-	mt, _, err := mime.ParseMediaType(ct)
+// roundTripStream bounds the wait for headers with the idle timeout (by
+// cancelling a derived context, released again when the body is closed) and
+// wraps the body in the per-read idle guard.
+func (p *pinnedTransport) roundTripStream(req *http.Request) (*http.Response, error) {
+	ctx, cancel := context.WithCancel(req.Context())
+	var stalled atomic.Bool
+	t := time.AfterFunc(p.idleAfter, func() {
+		stalled.Store(true)
+		cancel()
+	})
+	resp, err := p.base.RoundTrip(req.WithContext(ctx))
+	t.Stop()
 	if err != nil {
-		mt = strings.ToLower(strings.TrimSpace(ct))
+		cancel()
+		if stalled.Load() && req.Context().Err() == nil {
+			return nil, ErrStreamIdle
+		}
+		return nil, err
 	}
-	switch mt {
-	case "text/event-stream", "application/x-ndjson", "application/ndjson", "application/jsonl", "application/x-jsonlines", "application/stream+json":
-		return true
+	if resp.Body == nil || resp.Body == http.NoBody {
+		cancel()
+		return resp, nil
 	}
-	return false
+	resp.Body = newIdleBody(resp.Body, p.idleAfter, cancel)
+	return resp, nil
 }
 
 func (p *pinnedTransport) dial(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -194,14 +234,15 @@ func (b *cappedBody) Close() error { return b.rc.Close() }
 // only while a Read is in flight, so a slow consumer is never blamed on the
 // provider.
 type idleBody struct {
-	rc    io.ReadCloser
-	d     time.Duration
-	t     *time.Timer
-	fired atomic.Bool
+	rc      io.ReadCloser
+	d       time.Duration
+	t       *time.Timer
+	fired   atomic.Bool
+	release context.CancelFunc
 }
 
-func newIdleBody(rc io.ReadCloser, d time.Duration) *idleBody {
-	b := &idleBody{rc: rc, d: d}
+func newIdleBody(rc io.ReadCloser, d time.Duration, release context.CancelFunc) *idleBody {
+	b := &idleBody{rc: rc, d: d, release: release}
 	b.t = time.AfterFunc(d, func() {
 		b.fired.Store(true)
 		_ = rc.Close()
@@ -225,7 +266,9 @@ func (b *idleBody) Read(p []byte) (int, error) {
 
 func (b *idleBody) Close() error {
 	b.t.Stop()
-	return b.rc.Close()
+	err := b.rc.Close()
+	b.release()
+	return err
 }
 
 // ReadAllBounded reads at most limit bytes and fails when more arrive.

@@ -58,7 +58,8 @@ func TestTransport_MixedAnswerWithOnePrivateAddressIsRefused(t *testing.T) {
 }
 
 func TestTransport_RebindBetweenCallsIsCaughtAtDial(t *testing.T) {
-	// First answer public, second private: a fresh connection must re-check.
+	// Every new connection re-resolves and re-checks: an answer that turns
+	// non-public is refused each time, never cached from an earlier dial.
 	client := NewHTTPClient(TransportConfig{ProductionLike: true, Timeout: 2 * time.Second})
 	calls := 0
 	setResolverForTest(t, client, func(_ context.Context, _ string) ([]net.IPAddr, error) {
@@ -182,6 +183,73 @@ func TestTransport_BodyUnderTheCapPassesThrough(t *testing.T) {
 	}
 }
 
+func streamGet(t *testing.T, client *http.Client, url string) (*http.Response, error) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(WithStreaming(context.Background()), http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client.Do(req)
+}
+
+func TestTransport_UpstreamContentTypeCannotLiftTheSizeCap(t *testing.T) {
+	for _, ct := range []string{"text/event-stream", "application/x-ndjson", "text/event-stream; charset=utf-8"} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", ct)
+			w.(http.Flusher).Flush()
+			_, _ = w.Write([]byte(strings.Repeat("x", 4096)))
+		}))
+		client := NewHTTPClient(TransportConfig{ProductionLike: false, MaxResponseBytes: 1024})
+		resp, err := client.Get(srv.URL) // a non-stream request: the response header must not matter
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		srv.Close()
+		if !errors.Is(err, ErrResponseTooLarge) {
+			t.Fatalf("content-type %q: err = %v, want ErrResponseTooLarge", ct, err)
+		}
+	}
+}
+
+func TestTransport_NonStreamIsNotCutByTheStreamIdleTimeout(t *testing.T) {
+	// A slow, reasoning-like model: no headers for longer than IdleTimeout.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(400 * time.Millisecond)
+		_, _ = w.Write([]byte("done"))
+	}))
+	defer srv.Close()
+	client := NewHTTPClient(TransportConfig{ProductionLike: false, IdleTimeout: 100 * time.Millisecond, HeaderTimeout: 5 * time.Second})
+	resp, err := client.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("slow non-stream call was cut: %v", err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if string(b) != "done" {
+		t.Fatalf("body = %q", b)
+	}
+}
+
+func TestTransport_HeaderTimeoutBoundsANonStreamCall(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(3 * time.Second):
+		}
+	}))
+	defer srv.Close()
+	client := NewHTTPClient(TransportConfig{ProductionLike: false, HeaderTimeout: 150 * time.Millisecond})
+	start := time.Now()
+	if _, err := client.Get(srv.URL); err == nil {
+		t.Fatal("expected a header timeout")
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatalf("took %v", time.Since(start))
+	}
+}
+
 func TestTransport_StreamIdleTimeoutAbortsAStalledStream(t *testing.T) {
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -196,7 +264,7 @@ func TestTransport_StreamIdleTimeoutAbortsAStalledStream(t *testing.T) {
 	defer srv.Close()
 	defer close(release)
 	client := NewHTTPClient(TransportConfig{ProductionLike: false, IdleTimeout: 150 * time.Millisecond})
-	resp, err := client.Get(srv.URL)
+	resp, err := streamGet(t, client, srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +276,40 @@ func TestTransport_StreamIdleTimeoutAbortsAStalledStream(t *testing.T) {
 	}
 	if time.Since(start) > 2*time.Second {
 		t.Fatalf("idle abort took %v", time.Since(start))
+	}
+}
+
+func TestTransport_StreamThatNeverSendsHeadersIsAbortedByIdleTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(3 * time.Second):
+		}
+	}))
+	defer srv.Close()
+	client := NewHTTPClient(TransportConfig{ProductionLike: false, IdleTimeout: 150 * time.Millisecond, HeaderTimeout: time.Minute})
+	start := time.Now()
+	_, err := streamGet(t, client, srv.URL)
+	if !errors.Is(err, ErrStreamIdle) {
+		t.Fatalf("err = %v, want ErrStreamIdle", err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatalf("took %v", time.Since(start))
+	}
+}
+
+func TestTransport_StreamHeaderWaitHonoursCallerCancellation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	client := NewHTTPClient(TransportConfig{ProductionLike: false, IdleTimeout: time.Minute})
+	ctx, cancel := context.WithCancel(WithStreaming(context.Background()))
+	time.AfterFunc(100*time.Millisecond, cancel)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
+	_, err := client.Do(req)
+	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrStreamIdle) {
+		t.Fatalf("err = %v, want context.Canceled (not an idle timeout)", err)
 	}
 }
 
@@ -224,7 +326,7 @@ func TestTransport_ActiveStreamIsNotCutAndHasNoTotalCap(t *testing.T) {
 	// total (>3 KiB) exceeds MaxResponseBytes and the elapsed time exceeds
 	// IdleTimeout, but no single gap does: a healthy stream must complete.
 	client := NewHTTPClient(TransportConfig{ProductionLike: false, IdleTimeout: 200 * time.Millisecond, MaxResponseBytes: 1024})
-	resp, err := client.Get(srv.URL)
+	resp, err := streamGet(t, client, srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}

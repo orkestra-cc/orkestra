@@ -83,6 +83,7 @@ func TestClassify(t *testing.T) {
 		{ErrorInfo{Status: 429, Type: "billing_hard_limit_reached"}, iface.ErrLLMQuotaExhausted},
 		{ErrorInfo{Status: 429}, iface.ErrLLMProviderUnavailable},
 		{ErrorInfo{Status: 429, Type: "RESOURCE_EXHAUSTED"}, iface.ErrLLMProviderUnavailable}, // bare Gemini 429 is rate limiting (5.12)
+		{ErrorInfo{Status: 408}, iface.ErrLLMProviderUnavailable},                             // request timeout is provider-side
 		{ErrorInfo{Status: 500}, iface.ErrLLMProviderUnavailable},
 		{ErrorInfo{Status: 503, Type: "overloaded_error"}, iface.ErrLLMProviderUnavailable},
 		{ErrorInfo{Status: 401}, ErrUnauthorized},

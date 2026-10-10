@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"errors"
 	"net/http"
 
 	anthropicopt "github.com/anthropics/anthropic-sdk-go/option"
@@ -17,15 +18,16 @@ import (
 // destination. Adapters therefore build their clients ONLY through these
 // helpers, which pass every identity-bearing setting explicitly.
 
-// OpenAIClientOptions: options for openai.NewClient. Organization and
-// project are pinned to "" so OPENAI_ORG_ID / OPENAI_PROJECT_ID are not sent.
+// OpenAIClientOptions: options for openai.NewClient. The organization and
+// project headers are deleted (WithOrganization("") would still send an empty
+// header) so OPENAI_ORG_ID / OPENAI_PROJECT_ID are never sent.
 // MaxRetries is 0: retries are the router's decision, not the SDK's.
 func OpenAIClientOptions(baseURL, apiKey string, hc *http.Client) []openaiopt.RequestOption {
 	return []openaiopt.RequestOption{
 		openaiopt.WithBaseURL(baseURL),
 		openaiopt.WithAPIKey(apiKey),
-		openaiopt.WithOrganization(""),
-		openaiopt.WithProject(""),
+		openaiopt.WithHeaderDel("OpenAI-Organization"),
+		openaiopt.WithHeaderDel("OpenAI-Project"),
 		openaiopt.WithHTTPClient(hc),
 		openaiopt.WithMaxRetries(0),
 	}
@@ -51,7 +53,12 @@ func AnthropicClientOptions(baseURL, apiKey string, hc *http.Client) []anthropic
 // GOOGLE_GENAI_USE_VERTEXAI / GOOGLE_API_KEY / GOOGLE_CLOUD_* / base-URL
 // variables (GOOGLE_CLOUD_PROJECT is still copied into the config but is
 // unused on the Gemini API backend). Retries are disabled (the router owns them).
-func GeminiClientConfig(baseURL, apiKey string, hc *http.Client) *genai.ClientConfig {
+func GeminiClientConfig(baseURL, apiKey string, hc *http.Client) (*genai.ClientConfig, error) {
+	// genai falls back to GOOGLE_API_KEY / GEMINI_API_KEY / GOOGLE_GEMINI_BASE_URL
+	// for an empty value, so an empty one is refused rather than passed on.
+	if baseURL == "" || apiKey == "" || hc == nil {
+		return nil, errors.New("llm providers: gemini client needs an explicit base URL, API key and HTTP client")
+	}
 	return &genai.ClientConfig{
 		Backend:    genai.BackendGeminiAPI,
 		APIKey:     apiKey,
@@ -60,5 +67,5 @@ func GeminiClientConfig(baseURL, apiKey string, hc *http.Client) *genai.ClientCo
 			BaseURL:      baseURL,
 			RetryOptions: &genai.HTTPRetryOptions{Attempts: genai.Ptr(int32(1))},
 		},
-	}
+	}, nil
 }

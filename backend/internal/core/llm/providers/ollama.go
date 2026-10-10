@@ -162,7 +162,7 @@ func (o *Ollama) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (
 	if req.ResponseFormat != nil {
 		payload["format"] = req.ResponseFormat.Schema // ollama accepts a JSON schema as format
 	}
-	resp, err := o.post(ctx, "/api/chat", payload)
+	resp, err := o.post(WithStreaming(ctx), "/api/chat", payload)
 	if err != nil {
 		return nil, err
 	}

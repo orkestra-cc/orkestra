@@ -175,7 +175,7 @@ func (o *OpenAICompatible) Chat(ctx context.Context, call ChatCall, sink iface.C
 			"name": rf.Name, "schema": rf.Schema, "strict": rf.Strict,
 		}}
 	}
-	resp, err := o.post(ctx, "/chat/completions", "text/event-stream", payload)
+	resp, err := o.post(WithStreaming(ctx), "/chat/completions", "text/event-stream", payload)
 	if err != nil {
 		return nil, err
 	}

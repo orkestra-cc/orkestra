@@ -35,11 +35,12 @@ func TestOpenAIClientOptions_IgnoreProcessEnvironment(t *testing.T) {
 	if got := hdr.Get("Authorization"); got != "Bearer sk-explicit" {
 		t.Errorf("Authorization = %q", got)
 	}
-	if v := hdr.Get("OpenAI-Organization"); v != "" {
-		t.Errorf("OpenAI-Organization leaked from env: %q", v)
+	// presence, not value: an empty header would still be a (blank) leak
+	if _, ok := hdr["Openai-Organization"]; ok {
+		t.Errorf("OpenAI-Organization header present: %v", hdr["Openai-Organization"])
 	}
-	if v := hdr.Get("OpenAI-Project"); v != "" {
-		t.Errorf("OpenAI-Project leaked from env: %q", v)
+	if _, ok := hdr["Openai-Project"]; ok {
+		t.Errorf("OpenAI-Project header present: %v", hdr["Openai-Project"])
 	}
 }
 
@@ -78,7 +79,10 @@ func TestGeminiClientConfig_IgnoresProcessEnvironment(t *testing.T) {
 	t.Setenv("GOOGLE_API_KEY", "key-from-env")
 	t.Setenv("GOOGLE_GEMINI_BASE_URL", "http://env.invalid/")
 	hc := NewHTTPClient(TransportConfig{ProductionLike: false, Timeout: 2 * time.Second})
-	cfg := GeminiClientConfig("https://generativelanguage.googleapis.com", "key-explicit", hc)
+	cfg, err := GeminiClientConfig("https://generativelanguage.googleapis.com", "key-explicit", hc)
+	if err != nil {
+		t.Fatal(err)
+	}
 	c, err := genai.NewClient(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -89,5 +93,20 @@ func TestGeminiClientConfig_IgnoresProcessEnvironment(t *testing.T) {
 	}
 	if got.HTTPOptions.BaseURL != "https://generativelanguage.googleapis.com" {
 		t.Errorf("base url = %q", got.HTTPOptions.BaseURL)
+	}
+}
+
+func TestGeminiClientConfig_RefusesEmptyValues(t *testing.T) {
+	t.Setenv("GOOGLE_API_KEY", "key-from-env")
+	t.Setenv("GOOGLE_GEMINI_BASE_URL", "http://env.invalid/")
+	hc := &http.Client{}
+	for name, args := range map[string][3]any{
+		"no key":      {"https://generativelanguage.googleapis.com", "", hc},
+		"no base url": {"", "k", hc},
+		"no client":   {"https://generativelanguage.googleapis.com", "k", (*http.Client)(nil)},
+	} {
+		if cfg, err := GeminiClientConfig(args[0].(string), args[1].(string), args[2].(*http.Client)); err == nil || cfg != nil {
+			t.Errorf("%s: cfg=%v err=%v, want an error", name, cfg, err)
+		}
 	}
 }

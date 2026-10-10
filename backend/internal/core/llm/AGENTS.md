@@ -24,7 +24,7 @@ Delivery is in three steps and this file documents what is built. **Built (found
 | `services/catalog.go` | `CatalogService`: credentials, models, grants (and access), the hosted/mock/endpoint gates (`providerGate`, shared with the resolver), audit emission, `SetAuditSink` |
 | `services/endpoint.go` | `ValidateEndpoint` (SSRF string checks; delegates to `netguard`) |
 | `netguard/` | Leaf package: `IsPublicIP` / `PublicHost`, shared by `ValidateEndpoint` and the providers dial-time guard (no import cycle) |
-| `providers/transport.go` | `NewHTTPClient`: dial-time `netguard.IsPublicIP` on every resolved address in production-like mode, no proxy, no redirects, response cap + stream idle timeout; `sdkopts.go` builds SDK clients with explicit options only (no env leakage) |
+| `providers/transport.go` | `NewHTTPClient`: dial-time `netguard.IsPublicIP` on every resolved address in production-like mode, no proxy, no redirects, response cap on every response unless the request opted into streaming with `providers.WithStreaming(ctx)` (then idle timeout instead; never inferred from the response Content-Type); `sdkopts.go` builds SDK clients with explicit options only (no env leakage) |
 | `services/access.go` | `AccessResolver`: live models (active + `providerGate` under the live config + active org credential), usable models, candidates per purpose and capability need |
 | `services/gateway.go` | `Gateway` implementing `iface.LLMGateway`, `iface.KMSProviderSetter`, `iface.AuditSinkSetter`; request limits |
 | `services/pii_producer.go` | `PIIProducer` (subject `llm`) over the DSR repository slices |

@@ -131,7 +131,7 @@ func Classify(info ErrorInfo) error {
 		return fmt.Errorf("%w (%s)", iface.ErrLLMQuotaExhausted, detail)
 	case info.Status == http.StatusUnauthorized || info.Status == http.StatusForbidden:
 		return fmt.Errorf("%w: %w (%s)", ErrUnauthorized, iface.ErrLLMProviderUnavailable, detail)
-	case info.Status == http.StatusTooManyRequests || info.Status >= 500:
+	case info.Status == http.StatusTooManyRequests || info.Status == http.StatusRequestTimeout || info.Status >= 500:
 		return fmt.Errorf("%w (%s)", iface.ErrLLMProviderUnavailable, detail)
 	case info.Status == http.StatusNotFound || capabilityErrorCodes[info.Code] || capabilityErrorCodes[info.Type]:
 		return fmt.Errorf("%w (%s)", iface.ErrLLMCapabilityMismatch, detail)
