@@ -2760,8 +2760,8 @@
       "deleteSuccess": "Modello eliminato",
       "saveSuccess": "Modello salvato",
       "grantsSaved": "Elenco degli accessi salvato",
-      "grantsNotSaved": "Il modello è stato salvato, ma le sue autorizzazioni no. Usa «Chi può usarlo» per riprovare.",
-      "grantsNotSavedReason": "Il modello è stato salvato, ma le sue autorizzazioni no: {{reason}} Usa «Chi può usarlo» per riprovare.",
+      "grantsNotSaved": "Il modello è stato salvato, ma il suo accesso e le sue autorizzazioni no. Usa «Chi può usarlo» per riprovare.",
+      "grantsNotSavedReason": "Il modello è stato salvato, ma il suo accesso e le sue autorizzazioni no: {{reason}} Usa «Chi può usarlo» per riprovare.",
       "addTitle": "Nuovo modello",
       "editTitle": "Modifica «{{name}}»",
       "grantsTitle": "Chi può usare «{{name}}»",
@@ -2797,7 +2797,8 @@
         "noMembers": "Nessun membro corrispondente",
         "membersError": "Non è stato possibile caricare i membri di questa organizzazione.",
         "formerMember": "{{id}} (non più membro)",
-        "membersForbidden": "Per elencare i membri di questa organizzazione serve l'accesso di amministrazione dei tenant, quindi l'elenco delle autorizzazioni non si può modificare qui."
+        "membersForbidden": "Per elencare i membri di questa organizzazione serve l'accesso di amministrazione dei tenant, quindi l'elenco delle autorizzazioni non si può modificare qui.",
+        "accessEveryoneHint": "Ogni membro dell'organizzazione può usare questo modello. Gli utenti autorizzati restano salvati e tornano a valere se reimposti l'accesso."
       },
       "columns": {
         "name": "Nome",
@@ -2806,7 +2807,11 @@
         "purposes": "Scopi",
         "access": "Autorizzati",
         "status": "Stato"
-      }
+      },
+      "enable": "Attiva",
+      "disable": "Disattiva",
+      "enabled": "Modello attivato",
+      "disabled": "Modello disattivato"
     }
   },
   "adminModules": {

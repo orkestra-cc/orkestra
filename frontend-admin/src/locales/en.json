@@ -2760,8 +2760,8 @@
       "deleteSuccess": "Model deleted",
       "saveSuccess": "Model saved",
       "grantsSaved": "Access list saved",
-      "grantsNotSaved": "The model was saved, but its grants were not saved. Use \"Who may use it\" to try again.",
-      "grantsNotSavedReason": "The model was saved, but its grants were not saved: {{reason}} Use \"Who may use it\" to try again.",
+      "grantsNotSaved": "The model was saved, but its access and grants were not saved. Use \"Who may use it\" to try again.",
+      "grantsNotSavedReason": "The model was saved, but its access and grants were not saved: {{reason}} Use \"Who may use it\" to try again.",
       "addTitle": "New model",
       "editTitle": "Edit \"{{name}}\"",
       "grantsTitle": "Who may use \"{{name}}\"",
@@ -2797,7 +2797,8 @@
         "noMembers": "No matching members",
         "membersError": "The members of this organization could not be loaded.",
         "formerMember": "{{id}} (no longer a member)",
-        "membersForbidden": "Listing this organization's members needs tenant-admin access, so the grant list cannot be edited here."
+        "membersForbidden": "Listing this organization's members needs tenant-admin access, so the grant list cannot be edited here.",
+        "accessEveryoneHint": "Every member of the organization may use this model. The granted users are kept and apply again if you switch back."
       },
       "columns": {
         "name": "Name",
@@ -2806,7 +2807,11 @@
         "purposes": "Purposes",
         "access": "Granted",
         "status": "Status"
-      }
+      },
+      "enable": "Enable",
+      "disable": "Disable",
+      "enabled": "Model enabled",
+      "disabled": "Model disabled"
     }
   },
   "adminModules": {

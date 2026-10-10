@@ -105,8 +105,7 @@ const toBody = (v: ModelFormValues): LlmModelBody => {
     purposes: v.purposes.map(p => ({
       purpose: p.purpose,
       priority: p.priority
-    })),
-    access: v.access
+    }))
   };
 };
 
@@ -257,7 +256,7 @@ const ModelEditorModal = ({
   const access = watch('access');
   const embeddings = watch('embeddings');
   const isUserAccount = credentialKind === 'user_account';
-  const showGrants = grantsOnly || access === 'granted';
+  const showGrants = access === 'granted';
 
   // Keep dependent fields coherent: user_account is OpenAI-only and has no
   // embeddings; a credential of another provider cannot stay selected.
@@ -317,11 +316,22 @@ const ModelEditorModal = ({
     members.isError &&
     (members.error as { status?: number } | undefined)?.status === 403;
 
+  // Access and grants travel together on the grants route
+  // (llm.grants.admin + step-up); the model PATCH never carries access. With
+  // access 'everyone' the current grantees are sent unchanged and stay
+  // dormant on the backend.
   // null when saved; otherwise the reason to show, or '' when the operator
   // dismissed the step-up (nothing more to explain).
-  const saveGrants = async (uuid: string): Promise<string | null> => {
+  const saveGrants = async (
+    uuid: string,
+    nextAccess: LlmAccess
+  ): Promise<string | null> => {
     try {
-      await putGrants({ uuid, userUuids: grantees }).unwrap();
+      await putGrants({
+        uuid,
+        access: nextAccess,
+        userUuids: grantees
+      }).unwrap();
       return null;
     } catch (e) {
       return isReauthCancelled(e) ? '' : llmErrorMessage(t, e);
@@ -346,11 +356,15 @@ const ModelEditorModal = ({
       if (!isReauthCancelled(e)) setError(llmErrorMessage(t, e));
       return;
     }
+    // A new model is created closed (access granted, no grants).
+    const storedAccess: LlmAccess = model?.access ?? 'granted';
+    const accessChanged = values.access !== storedAccess;
     const grantsChanged =
-      canManageGrants &&
-      values.access === 'granted' &&
-      !sameSet(grantees, originalGrantees);
-    const grantsFailure = grantsChanged ? await saveGrants(savedUuid) : null;
+      values.access === 'granted' && !sameSet(grantees, originalGrantees);
+    const grantsFailure =
+      canManageGrants && (accessChanged || grantsChanged)
+        ? await saveGrants(savedUuid, values.access)
+        : null;
     if (grantsFailure !== null) {
       toast.warning(
         grantsFailure
@@ -370,7 +384,11 @@ const ModelEditorModal = ({
     if (!model) return;
     setError(null);
     try {
-      await putGrants({ uuid: model.uuid, userUuids: grantees }).unwrap();
+      await putGrants({
+        uuid: model.uuid,
+        access,
+        userUuids: grantees
+      }).unwrap();
       toast.success(t('adminLlm.models.grantsSaved'));
       onClose();
     } catch (e) {
@@ -382,6 +400,22 @@ const ModelEditorModal = ({
     <Alert variant="danger" className="fs-10 py-2">
       {error}
     </Alert>
+  );
+
+  // Access is decided with the grants (llm.grants.admin), not with the model.
+  const accessSelect = (
+    <Form.Group className="mb-3" controlId="llm-model-access">
+      <Form.Label>{t('adminLlm.models.fields.access')}</Form.Label>
+      <Form.Select disabled={!canManageGrants} {...register('access')}>
+        <option value="granted">{t('adminLlm.access.granted')}</option>
+        <option value="everyone">{t('adminLlm.access.everyone')}</option>
+      </Form.Select>
+      {access === 'everyone' && (
+        <Form.Text className="d-block text-600">
+          {t('adminLlm.models.fields.accessEveryoneHint')}
+        </Form.Text>
+      )}
+    </Form.Group>
   );
 
   const grantsPicker = (
@@ -442,7 +476,8 @@ const ModelEditorModal = ({
         </Modal.Header>
         <Modal.Body>
           {errorAlert}
-          {grantsPicker}
+          {accessSelect}
+          {access === 'granted' && grantsPicker}
         </Modal.Body>
         {footer(onSaveGrantsOnly)}
       </Modal>
@@ -718,19 +753,7 @@ const ModelEditorModal = ({
                 {t('adminLlm.models.fields.purposesHint')}
               </Form.Text>
             </Col>
-            <Col md={12}>
-              <Form.Group controlId="llm-model-access">
-                <Form.Label>{t('adminLlm.models.fields.access')}</Form.Label>
-                <Form.Select {...register('access')}>
-                  <option value="granted">
-                    {t('adminLlm.access.granted')}
-                  </option>
-                  <option value="everyone">
-                    {t('adminLlm.access.everyone')}
-                  </option>
-                </Form.Select>
-              </Form.Group>
-            </Col>
+            <Col md={12}>{accessSelect}</Col>
             {access === 'granted' && <Col md={12}>{grantsPicker}</Col>}
             {isUserAccount && (
               <Col md={12}>

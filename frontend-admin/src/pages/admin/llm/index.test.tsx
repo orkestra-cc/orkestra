@@ -446,7 +446,7 @@ describe('LlmAdminPage — models', () => {
   it('labels grantees with their email and replaces the grant list', async () => {
     stubReads();
     captureWrite('put', '/v1/admin/llm/models/m-1/grants', () =>
-      HttpResponse.json({ items: [] })
+      HttpResponse.json(model)
     );
     renderPage('/admin/llm');
     const row = await rowOf('Fast');
@@ -460,10 +460,153 @@ describe('LlmAdminPage — models', () => {
     expect(within(dialog).queryByText('u-1')).not.toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(sent).toHaveLength(1));
-    expect(sent[0].body).toEqual({ userUuids: ['u-1'] });
+    expect(sent[0].body).toEqual({ access: 'granted', userUuids: ['u-1'] });
   });
 
-  it('says the grants were not saved when the model is created but the grant PUT fails', async () => {
+  it('opens a model to everyone through the grants route, keeping its grants', async () => {
+    stubReads();
+    captureWrite('put', '/v1/admin/llm/models/m-1/grants', () =>
+      HttpResponse.json({ ...model, access: 'everyone' })
+    );
+    renderPage('/admin/llm');
+    const row = await rowOf('Fast');
+    await userEvent.click(
+      within(row).getByRole('button', { name: 'Who may use it' })
+    );
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.selectOptions(
+      within(dialog).getByLabelText('Access'),
+      'everyone'
+    );
+    expect(
+      within(dialog).queryByLabelText('Granted users')
+    ).not.toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({
+      method: 'PUT',
+      body: { access: 'everyone', userUuids: ['u-1'] }
+    });
+  });
+
+  it('saves an access change from the model editor on the grants route, never in the model PATCH', async () => {
+    stubReads();
+    captureWrite('patch', '/v1/admin/llm/models/m-1');
+    captureWrite('put', '/v1/admin/llm/models/m-1/grants', () =>
+      HttpResponse.json({ ...model, access: 'everyone' })
+    );
+    renderPage('/admin/llm');
+    const row = await rowOf('Fast');
+    await userEvent.click(within(row).getByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.selectOptions(
+      within(dialog).getByLabelText('Access'),
+      'everyone'
+    );
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({
+      method: 'PUT',
+      path: '/v1/admin/llm/models/m-1/grants',
+      body: { access: 'everyone', userUuids: ['u-1'] }
+    });
+    expect(toast.success).toHaveBeenCalled();
+  });
+
+  it('creates a model without access, then sets access on the grants route', async () => {
+    stubReads();
+    captureWrite('post', '/v1/admin/llm/models', () =>
+      HttpResponse.json({ ...model, uuid: 'm-2', grants: [] }, { status: 201 })
+    );
+    captureWrite('put', '/v1/admin/llm/models/m-2/grants', () =>
+      HttpResponse.json({
+        ...model,
+        uuid: 'm-2',
+        access: 'everyone',
+        grants: []
+      })
+    );
+    renderPage('/admin/llm');
+    await screen.findByText('Fast');
+    await userEvent.click(screen.getByRole('button', { name: /add model/i }));
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Open');
+    await userEvent.selectOptions(
+      within(dialog).getByLabelText('Credential'),
+      'c-1'
+    );
+    await userEvent.type(within(dialog).getByLabelText('Model ID'), 'gpt-5.5');
+    await userEvent.selectOptions(
+      within(dialog).getByLabelText('Access'),
+      'everyone'
+    );
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[0].method).toBe('POST');
+    expect(sent[0].body).not.toHaveProperty('access');
+    expect(sent[1]).toMatchObject({
+      method: 'PUT',
+      body: { access: 'everyone', userUuids: [] }
+    });
+  });
+
+  it('shows the written detail of a rejected model instead of a generic line', async () => {
+    stubReads();
+    captureWrite('patch', '/v1/admin/llm/models/m-1', () =>
+      HttpResponse.json(
+        {
+          code: 'llm.invalid_request',
+          detail:
+            'The credential belongs to a different provider than the model.'
+        },
+        { status: 422 }
+      )
+    );
+    renderPage('/admin/llm');
+    const row = await rowOf('Fast');
+    await userEvent.click(within(row).getByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog');
+    const name = within(dialog).getByLabelText('Name');
+    await userEvent.clear(name);
+    await userEvent.type(name, 'Faster');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(
+      await within(dialog).findByText(
+        'The credential belongs to a different provider than the model.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('disables and enables a model through the PATCH status', async () => {
+    stubReads({
+      models: [
+        model,
+        { ...model, uuid: 'm-9', name: 'Old', status: 'disabled', grants: [] }
+      ]
+    });
+    captureWrite('patch', '/v1/admin/llm/models/m-1', () =>
+      HttpResponse.json({ ...model, status: 'disabled' })
+    );
+    captureWrite('patch', '/v1/admin/llm/models/m-9', () =>
+      HttpResponse.json({ ...model, uuid: 'm-9', status: 'active' })
+    );
+    renderPage('/admin/llm');
+    const row = await rowOf('Fast');
+    await userEvent.click(within(row).getByRole('button', { name: 'Disable' }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({
+      method: 'PATCH',
+      path: '/v1/admin/llm/models/m-1',
+      body: { status: 'disabled' }
+    });
+    const old = await rowOf('Old');
+    await userEvent.click(within(old).getByRole('button', { name: 'Enable' }));
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1].body).toEqual({ status: 'active' });
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(2));
+  });
+
+  it('says access and grants were not saved when the model is created but the grant PUT fails', async () => {
     stubReads();
     captureWrite('post', '/v1/admin/llm/models', () =>
       HttpResponse.json({ ...model, uuid: 'm-2', grants: [] }, { status: 201 })
@@ -489,10 +632,10 @@ describe('LlmAdminPage — models', () => {
     await userEvent.click(await screen.findByText('grace@example.com'));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(sent).toHaveLength(2));
-    expect(sent[1].body).toEqual({ userUuids: ['u-2'] });
+    expect(sent[1].body).toEqual({ access: 'granted', userUuids: ['u-2'] });
     await waitFor(() => expect(toast.warning).toHaveBeenCalled());
     const warning = vi.mocked(toast.warning).mock.calls[0][0] as string;
-    expect(warning).toMatch(/grants were not saved/i);
+    expect(warning).toMatch(/access and grants were not saved/i);
     // The reason travels with it (errors.llm.grant_not_member).
     expect(warning).toMatch(/must be a member of this organization/i);
   });
@@ -542,9 +685,22 @@ describe('LlmAdminPage — models', () => {
     const row = await rowOf('Fast');
     expect(within(row).getByRole('button', { name: 'Edit' })).toBeDisabled();
     expect(within(row).getByRole('button', { name: 'Delete' })).toBeDisabled();
+    expect(within(row).getByRole('button', { name: 'Disable' })).toBeDisabled();
     expect(
       within(row).getByRole('button', { name: 'Who may use it' })
     ).toBeEnabled();
     expect(screen.getByRole('button', { name: /add model/i })).toBeDisabled();
+  });
+
+  it('keeps access read-only in the model editor without llm.grants.admin', async () => {
+    mockedUseAuth.mockReturnValue(
+      authWith(['llm.admin.read', 'llm.models.admin'])
+    );
+    stubReads();
+    renderPage('/admin/llm');
+    const row = await rowOf('Fast');
+    await userEvent.click(within(row).getByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('Access')).toBeDisabled();
   });
 });

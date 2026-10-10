@@ -102,10 +102,18 @@ export interface LlmModel {
   grants: LlmGrant[];
 }
 
-// Create body: the editable fields of a model.
+// Create body: the editable fields of a model. `access` is not one of
+// them: a new model is created closed (access granted, no grants) and only
+// the grants route (llm.grants.admin + step-up) decides who may use it.
 export type LlmModelBody = Omit<
   LlmModel,
-  'uuid' | 'status' | 'createdBy' | 'createdAt' | 'updatedAt' | 'grants'
+  | 'uuid'
+  | 'status'
+  | 'access'
+  | 'createdBy'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'grants'
 >;
 
 // Patch body: partial update. An absent field keeps the stored value;
@@ -149,7 +157,8 @@ export const llmApi = baseApi.injectEndpoints({
         method: 'PATCH',
         body
       }),
-      invalidatesTags: ['LLMCredential', 'LLMModel']
+      // A disabled credential takes its models out of the caller's own list.
+      invalidatesTags: ['LLMCredential', 'LLMModel', 'LLMMyModels']
     }),
     rotateLlmCredential: build.mutation<
       LlmCredential,
@@ -192,15 +201,17 @@ export const llmApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ['LLMModel', 'LLMMyModels', 'LLMCredential']
     }),
-    // Replaces the model's grants with exactly userUuids.
+    // Decides who may use the model: sets access and replaces its grants
+    // with exactly userUuids, together. With access 'everyone' the grants
+    // are kept but dormant. Answers the model with its new access and grants.
     putLlmGrants: build.mutation<
-      { items: LlmGrant[] },
-      { uuid: string; userUuids: string[] }
+      LlmModel,
+      { uuid: string; access: LlmAccess; userUuids: string[] }
     >({
-      query: ({ uuid, userUuids }) => ({
+      query: ({ uuid, access, userUuids }) => ({
         url: `/v1/admin/llm/models/${uuid}/grants`,
         method: 'PUT',
-        body: { userUuids }
+        body: { access, userUuids }
       }),
       invalidatesTags: ['LLMModel', 'LLMMyModels']
     }),

@@ -16,15 +16,24 @@ export const isReauthCancelled = (err: unknown): boolean => {
   return code === 'step_up_required' || code === 'password_confirm_required';
 };
 
+// Codes whose backend detail names the specific field or rule that failed
+// (one written, client-safe sentence per validation sentinel), so it says
+// more than any fixed translation can.
+const DETAIL_FIRST = new Set(['llm.invalid_request']);
+
 // llmErrorMessage prefers the translated `errors.<code>` copy (the backend's
 // llm.* codes live nested under errors.llm), then the backend's written
 // detail, then a generic line — the console convention of
-// hooks/ui/useUserTable.tsx.
+// hooks/ui/useUserTable.tsx. For a validation error the detail comes first,
+// with the translation as the fallback when the backend sent none.
 export const llmErrorMessage = (
   t: (key: string) => string,
   err: unknown
 ): string => {
   const data = (err as ApiError | undefined)?.data;
+  if (data?.code && data.detail && DETAIL_FIRST.has(data.code)) {
+    return data.detail;
+  }
   if (data?.code) {
     const key = `errors.${data.code}`;
     const translated = t(key);

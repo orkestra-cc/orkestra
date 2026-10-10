@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Spinner } from 'react-bootstrap';
 import {
+  faBan,
+  faCircleCheck,
   faPen,
   faRobot,
   faTrash,
@@ -17,6 +19,7 @@ import {
   useDeleteLlmModelMutation,
   useListLlmCredentialsQuery,
   useListLlmModelsQuery,
+  usePatchLlmModelMutation,
   type LlmModel
 } from 'store/api/llmApi';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
@@ -28,13 +31,15 @@ import { useLlmPermissions } from './llmPermissions';
 // ModelsTab lists the org's configured models with who may use them.
 // Defining a model (llm.models.admin) and deciding its users
 // (llm.grants.admin) are separate permissions, so the row actions are gated
-// one by one. Delete removes the model's grants too.
+// one by one. Disabling a model is always possible and keeps its grants;
+// delete removes the grants too.
 const ModelsTab = () => {
   const { t } = useTranslation();
   const { canManageModels, canManageGrants } = useLlmPermissions();
   const { data, isLoading, isError, refetch } = useListLlmModelsQuery();
   const credentials = useListLlmCredentialsQuery();
   const [remove, { isLoading: deleting }] = useDeleteLlmModelMutation();
+  const [patch] = usePatchLlmModelMutation();
   const [editor, setEditor] = useState<{
     model?: LlmModel;
     grantsOnly?: boolean;
@@ -44,6 +49,25 @@ const ModelsTab = () => {
     model?: LlmModel;
     error?: string | null;
   }>({ open: false });
+
+  const onToggle = useCallback(
+    async (m: LlmModel) => {
+      const status = m.status === 'active' ? 'disabled' : 'active';
+      try {
+        await patch({ uuid: m.uuid, status }).unwrap();
+        toast.success(
+          t(
+            status === 'active'
+              ? 'adminLlm.models.enabled'
+              : 'adminLlm.models.disabled'
+          )
+        );
+      } catch (e) {
+        if (!isReauthCancelled(e)) toast.error(llmErrorMessage(t, e));
+      }
+    },
+    [patch, t]
+  );
 
   const onConfirmDelete = async () => {
     const m = confirm.model;
@@ -142,46 +166,61 @@ const ModelsTab = () => {
           headerProps: { className: 'text-end text-900' },
           cellProps: { className: 'text-end' }
         },
-        cell: ({ row: { original } }: CellContext<LlmModel, unknown>) => (
-          <div className="d-inline-flex gap-1">
-            <IconButton
-              variant="orkestra-default"
-              size="sm"
-              icon={faUsers}
-              title={
-                original.access === 'everyone'
-                  ? t('adminLlm.models.grantsEveryone')
-                  : t('adminLlm.models.grants')
-              }
-              aria-label={t('adminLlm.models.grants')}
-              disabled={!canManageGrants || original.access === 'everyone'}
-              onClick={() => setEditor({ model: original, grantsOnly: true })}
-            />
-            <IconButton
-              variant="orkestra-default"
-              size="sm"
-              icon={faPen}
-              title={t('adminLlm.models.edit')}
-              aria-label={t('adminLlm.models.edit')}
-              disabled={!canManageModels}
-              onClick={() => setEditor({ model: original })}
-            />
-            <IconButton
-              variant="orkestra-danger"
-              size="sm"
-              icon={faTrash}
-              title={t('adminLlm.models.delete')}
-              aria-label={t('adminLlm.models.delete')}
-              disabled={!canManageModels}
-              onClick={() =>
-                setConfirm({ open: true, model: original, error: null })
-              }
-            />
-          </div>
-        )
+        cell: ({ row: { original } }: CellContext<LlmModel, unknown>) => {
+          const active = original.status === 'active';
+          const toggleLabel = t(
+            active ? 'adminLlm.models.disable' : 'adminLlm.models.enable'
+          );
+          return (
+            <div className="d-inline-flex gap-1">
+              <IconButton
+                variant="orkestra-default"
+                size="sm"
+                icon={faUsers}
+                title={
+                  original.access === 'everyone'
+                    ? t('adminLlm.models.grantsEveryone')
+                    : t('adminLlm.models.grants')
+                }
+                aria-label={t('adminLlm.models.grants')}
+                disabled={!canManageGrants}
+                onClick={() => setEditor({ model: original, grantsOnly: true })}
+              />
+              <IconButton
+                variant="orkestra-default"
+                size="sm"
+                icon={faPen}
+                title={t('adminLlm.models.edit')}
+                aria-label={t('adminLlm.models.edit')}
+                disabled={!canManageModels}
+                onClick={() => setEditor({ model: original })}
+              />
+              <IconButton
+                variant="orkestra-default"
+                size="sm"
+                icon={active ? faBan : faCircleCheck}
+                title={toggleLabel}
+                aria-label={toggleLabel}
+                disabled={!canManageModels}
+                onClick={() => onToggle(original)}
+              />
+              <IconButton
+                variant="orkestra-danger"
+                size="sm"
+                icon={faTrash}
+                title={t('adminLlm.models.delete')}
+                aria-label={t('adminLlm.models.delete')}
+                disabled={!canManageModels}
+                onClick={() =>
+                  setConfirm({ open: true, model: original, error: null })
+                }
+              />
+            </div>
+          );
+        }
       }
     ],
-    [t, canManageModels, canManageGrants]
+    [t, canManageModels, canManageGrants, onToggle]
   );
 
   if (isLoading || credentials.isLoading) {

@@ -6,28 +6,35 @@ import { url } from 'test/handlers';
 import { llmApi } from './llmApi';
 
 describe('llmApi', () => {
-  it('putLlmGrants sends the complete user list to the model grants route', async () => {
+  it('putLlmGrants sends access and the complete user list to the model grants route', async () => {
     let body: unknown = null;
     let method: string | null = null;
     server.use(
       http.put(url('/v1/admin/llm/models/m-1/grants'), async ({ request }) => {
         body = await request.json();
         method = request.method;
-        return HttpResponse.json({ items: [] });
+        return HttpResponse.json({
+          uuid: 'm-1',
+          access: 'everyone',
+          grants: []
+        });
       })
     );
 
-    await setupStore()
+    const saved = await setupStore()
       .dispatch(
         llmApi.endpoints.putLlmGrants.initiate({
           uuid: 'm-1',
+          access: 'everyone',
           userUuids: ['u-1', 'u-2']
         })
       )
       .unwrap();
 
     expect(method).toBe('PUT');
-    expect(body).toEqual({ userUuids: ['u-1', 'u-2'] });
+    expect(body).toEqual({ access: 'everyone', userUuids: ['u-1', 'u-2'] });
+    // The route answers the model with its new access and grants.
+    expect(saved.access).toBe('everyone');
   });
 
   it('createLlmCredential posts the secret once and never reads it back', async () => {
