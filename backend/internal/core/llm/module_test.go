@@ -90,26 +90,57 @@ func TestModule_UniqueIndexes(t *testing.T) {
 			unique[c.Name] = append(unique[c.Name], fields)
 		}
 	}
-	want := map[string][]string{
-		repository.CollCredentials: {"tenantId", "name"},
-		repository.CollModels:      {"tenantId", "name"},
-		repository.CollGrants:      {"tenantId", "modelUuid", "userUuid"},
+	want := map[string][][]string{
+		repository.CollCredentials:  {{"tenantId", "name"}, {"tenantId", "uuid"}},
+		repository.CollModels:       {{"tenantId", "name"}, {"tenantId", "uuid"}},
+		repository.CollGrants:       {{"tenantId", "modelUuid", "userUuid"}},
+		repository.CollUsage:        {{"tenantId", "uuid"}},
+		repository.CollUsageMonthly: {{"tenantId", "period"}},
+		repository.CollBudgets:      {{"tenantId"}},
+		repository.CollBudgetOutbox: {{"tenantId", "period", "threshold"}, {"tenantId", "uuid"}},
 	}
-	for coll, fields := range want {
-		found := false
-		for _, got := range unique[coll] {
-			if reflect.DeepEqual(got, fields) {
-				found = true
+	for coll, all := range want {
+		for _, fields := range all {
+			found := false
+			for _, got := range unique[coll] {
+				if reflect.DeepEqual(got, fields) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("%s has no unique index on %v (got %v)", coll, fields, unique[coll])
 			}
 		}
-		if !found {
-			t.Errorf("%s has no unique index on %v (got %v)", coll, fields, unique[coll])
-		}
+	}
+	// The only indexes not led by tenantId serve the system sweeps that
+	// run across every org by design (//tenantscope:allow system:): the
+	// reconciler's pending scan, the daily usage retention purge and the
+	// outbox worker's lease. Anything else must lead with tenantId.
+	sweepIndexes := map[string][][]string{
+		repository.CollUsage:        {{"outcome", "reservationExpiresAt"}, {"createdAt"}},
+		repository.CollBudgetOutbox: {{"status", "nextAttemptAt"}},
 	}
 	for _, c := range NewModule().Collections() {
 		for _, idx := range c.Indexes {
-			if len(idx.OrderedKeys) == 0 || idx.OrderedKeys[0].Field != "tenantId" {
-				t.Errorf("%s index %+v does not lead with tenantId", c.Name, idx)
+			if len(idx.OrderedKeys) == 0 {
+				t.Errorf("%s index %+v has no ordered keys", c.Name, idx)
+				continue
+			}
+			if idx.OrderedKeys[0].Field == "tenantId" {
+				continue
+			}
+			var fields []string
+			for _, k := range idx.OrderedKeys {
+				fields = append(fields, k.Field)
+			}
+			allowed := false
+			for _, sweep := range sweepIndexes[c.Name] {
+				if reflect.DeepEqual(sweep, fields) && !idx.Unique {
+					allowed = true
+				}
+			}
+			if !allowed {
+				t.Errorf("%s index %v does not lead with tenantId and is not a declared system sweep", c.Name, fields)
 			}
 		}
 	}

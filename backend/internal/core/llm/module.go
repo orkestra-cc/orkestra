@@ -60,10 +60,13 @@ func (m *Module) RequiredServices() []module.ServiceKey {
 	return []module.ServiceKey{module.ServiceTenantDirectoryReader}
 }
 
-// Collections declares the three org-scoped collections. The unique
+// Collections declares the org-scoped collections. The unique
 // (tenantId, name) indexes back the repository's ErrDuplicateName; the
 // unique (tenantId, modelUuid, userUuid) index makes a racing grant insert
-// a tolerated duplicate in Grants.Replace.
+// a tolerated duplicate in Grants.Replace; the unique (tenantId, period)
+// rollup is the document budget transactions serialize on, and the unique
+// (tenantId, period, threshold) outbox index keeps one notification per
+// threshold and month.
 func (m *Module) Collections() []module.CollectionSpec {
 	key := func(fields ...string) []module.IndexKey {
 		out := make([]module.IndexKey, 0, len(fields))
@@ -87,6 +90,29 @@ func (m *Module) Collections() []module.CollectionSpec {
 		{Name: repository.CollGrants, Indexes: []module.IndexSpec{
 			{OrderedKeys: key("tenantId", "modelUuid", "userUuid"), Unique: true},
 			{OrderedKeys: key("tenantId", "userUuid")},
+		}},
+		{Name: repository.CollUsage, Indexes: []module.IndexSpec{
+			{OrderedKeys: key("tenantId", "uuid"), Unique: true},
+			{OrderedKeys: []module.IndexKey{{Field: "tenantId", Direction: 1}, {Field: "createdAt", Direction: -1}}},
+			{OrderedKeys: []module.IndexKey{{Field: "tenantId", Direction: 1}, {Field: "userUuid", Direction: 1}, {Field: "createdAt", Direction: -1}}},
+			{OrderedKeys: []module.IndexKey{{Field: "tenantId", Direction: 1}, {Field: "modelUuid", Direction: 1}, {Field: "createdAt", Direction: -1}}},
+			// System sweeps (the only indexes not led by tenantId; see
+			// sweepIndexes in module_test.go): the reconciler's pending scan
+			// and the daily retention purge, both cross-org by design.
+			{OrderedKeys: key("outcome", "reservationExpiresAt"), PartialFilter: map[string]any{"outcome": "pending"}},
+			{OrderedKeys: key("createdAt")},
+		}},
+		{Name: repository.CollUsageMonthly, Indexes: []module.IndexSpec{
+			{OrderedKeys: key("tenantId", "period"), Unique: true},
+		}},
+		{Name: repository.CollBudgets, Indexes: []module.IndexSpec{
+			{OrderedKeys: key("tenantId"), Unique: true},
+		}},
+		{Name: repository.CollBudgetOutbox, Indexes: []module.IndexSpec{
+			{OrderedKeys: key("tenantId", "period", "threshold"), Unique: true},
+			{OrderedKeys: key("tenantId", "uuid"), Unique: true},
+			// System sweep: the outbox worker's due-event lease.
+			{OrderedKeys: key("status", "nextAttemptAt")},
 		}},
 	}
 }
