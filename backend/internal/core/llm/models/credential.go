@@ -78,6 +78,14 @@ type Credential struct {
 
 var nameRE = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,63}$`)
 
+// CredentialPatch carries only the fields a PATCH provided (nil = leave the
+// stored value alone). A provided empty BaseURL clears the stored endpoint.
+type CredentialPatch struct {
+	Name    *string
+	BaseURL *string
+	Status  *string
+}
+
 // CredentialInput is the validated shape of create/patch bodies.
 type CredentialInput struct {
 	Name     string

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"sort"
+	"time"
 
 	"github.com/orkestra/backend/internal/core/llm/models"
 	"github.com/orkestra/backend/internal/core/llm/repository"
@@ -63,26 +64,36 @@ func (f *fakeCreds) Get(ctx context.Context, id string) (*models.Credential, err
 	return nil, repository.ErrNotFound
 }
 
-// Update is field-owned like the real repository: name, baseUrl, status.
-func (f *fakeCreds) Update(ctx context.Context, c *models.Credential) error {
-	r, ok := f.rows[c.UUID]
-	if !ok || r.TenantID != tenantOf(ctx) {
-		return repository.ErrNotFound
-	}
-	r.Name, r.BaseURL, r.Status, r.UpdatedAt = c.Name, c.BaseURL, c.Status, c.UpdatedAt
-	f.rows[c.UUID] = r
-	return nil
-}
-
-func (f *fakeCreds) SetSecret(ctx context.Context, id string, env models.Envelope, last4 string) error {
+// Patch is field-owned like the real repository: only the provided fields.
+func (f *fakeCreds) Patch(ctx context.Context, id string, p models.CredentialPatch) (time.Time, error) {
 	r, ok := f.rows[id]
 	if !ok || r.TenantID != tenantOf(ctx) {
-		return repository.ErrNotFound
+		return time.Time{}, repository.ErrNotFound
+	}
+	if p.Name != nil {
+		r.Name = *p.Name
+	}
+	if p.Status != nil {
+		r.Status = *p.Status
+	}
+	if p.BaseURL != nil {
+		r.BaseURL = *p.BaseURL
+	}
+	r.UpdatedAt = time.Now().UTC()
+	f.rows[id] = r
+	return r.UpdatedAt, nil
+}
+
+func (f *fakeCreds) SetSecret(ctx context.Context, id string, env models.Envelope, last4 string) (time.Time, error) {
+	r, ok := f.rows[id]
+	if !ok || r.TenantID != tenantOf(ctx) {
+		return time.Time{}, repository.ErrNotFound
 	}
 	r.Secret, r.SecretLast4 = env, last4
 	r.LastTestedAt, r.LastTestStatus, r.LastTestError = nil, "", ""
+	r.UpdatedAt = time.Now().UTC()
 	f.rows[id] = r
-	return nil
+	return r.UpdatedAt, nil
 }
 
 func (f *fakeCreds) Delete(ctx context.Context, id string) error {

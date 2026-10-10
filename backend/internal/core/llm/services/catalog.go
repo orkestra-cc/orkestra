@@ -22,10 +22,12 @@ type CredentialRepo interface {
 	Insert(ctx context.Context, c *models.Credential) error
 	List(ctx context.Context) ([]models.Credential, error)
 	Get(ctx context.Context, uuid string) (*models.Credential, error)
-	// Update writes name, baseUrl and status (and updatedAt) only.
-	Update(ctx context.Context, c *models.Credential) error
-	// SetSecret writes the secret envelope and its display tail only.
-	SetSecret(ctx context.Context, uuid string, env models.Envelope, last4 string) error
+	// Patch writes only the provided fields (and updatedAt); it returns the
+	// updatedAt it wrote.
+	Patch(ctx context.Context, uuid string, p models.CredentialPatch) (time.Time, error)
+	// SetSecret writes the secret envelope and its display tail only and
+	// returns the updatedAt it wrote.
+	SetSecret(ctx context.Context, uuid string, env models.Envelope, last4 string) (time.Time, error)
 	Delete(ctx context.Context, uuid string) error
 }
 
@@ -258,17 +260,30 @@ func (s *CatalogService) PatchCredential(ctx context.Context, id string, name, b
 			return nil, err
 		}
 	}
+	// Only what the request provided reaches the repository, so a patch
+	// built on a stale read cannot revert a concurrent change to the rest.
+	var patch models.CredentialPatch
+	if name != nil {
+		patch.Name = &in.Name
+		c.Name = in.Name
+	}
+	if status != nil {
+		patch.Status = &newStatus
+		c.Status = newStatus
+	}
 	if baseURL != nil {
 		normalized, err := s.resolveBaseURL(c.Provider, in.BaseURL)
 		if err != nil {
 			return nil, err
 		}
+		patch.BaseURL = &normalized
 		c.BaseURL = normalized
 	}
-	c.Name, c.Status = in.Name, newStatus
-	if err := s.creds.Update(ctx, c); err != nil {
+	updatedAt, err := s.creds.Patch(ctx, c.UUID, patch)
+	if err != nil {
 		return nil, mapRepoErr(err)
 	}
+	c.UpdatedAt = updatedAt
 	s.emit(ctx, "llm.credential.updated", "llm_credential", c.UUID, map[string]any{"provider": c.Provider, "name": c.Name, "status": c.Status})
 	return c, nil
 }
@@ -293,11 +308,13 @@ func (s *CatalogService) RotateCredential(ctx context.Context, id, secret string
 		return nil, err
 	}
 	last4 := models.Last4(secret)
-	// SetSecret, not Update: the rotation owns the secret and nothing else,
+	// SetSecret, not Patch: the rotation owns the secret and nothing else,
 	// so a rename or disable racing it is neither reverted nor reverts it.
-	if err := s.creds.SetSecret(ctx, c.UUID, env, last4); err != nil {
+	updatedAt, err := s.creds.SetSecret(ctx, c.UUID, env, last4)
+	if err != nil {
 		return nil, mapRepoErr(err)
 	}
+	c.UpdatedAt = updatedAt
 	c.Secret, c.SecretLast4 = env, last4
 	c.LastTestedAt, c.LastTestStatus, c.LastTestError = nil, "", ""
 	s.emit(ctx, "llm.credential.rotated", "llm_credential", c.UUID, map[string]any{"provider": c.Provider, "name": c.Name})

@@ -168,9 +168,11 @@ func (emptyCreds) List(context.Context) ([]models.Credential, error) { return ni
 func (emptyCreds) Get(context.Context, string) (*models.Credential, error) {
 	return nil, repository.ErrNotFound
 }
-func (emptyCreds) Update(context.Context, *models.Credential) error { return repository.ErrNotFound }
-func (emptyCreds) SetSecret(context.Context, string, models.Envelope, string) error {
-	return repository.ErrNotFound
+func (emptyCreds) Patch(context.Context, string, models.CredentialPatch) (time.Time, error) {
+	return time.Time{}, repository.ErrNotFound
+}
+func (emptyCreds) SetSecret(context.Context, string, models.Envelope, string) (time.Time, error) {
+	return time.Time{}, repository.ErrNotFound
 }
 func (emptyCreds) Delete(context.Context, string) error { return repository.ErrNotFound }
 

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/orkestra/backend/internal/core/llm/models"
 	"github.com/orkestra/backend/internal/core/llm/repository"
@@ -66,29 +67,38 @@ func (m *memCreds) Get(ctx context.Context, id string) (*models.Credential, erro
 	}
 	return nil, repository.ErrNotFound
 }
-func (m *memCreds) Update(ctx context.Context, c *models.Credential) error {
-	r, ok := m.rows[c.UUID]
-	if !ok || r.TenantID != tenantOf(ctx) {
-		return repository.ErrNotFound
-	}
-	for _, o := range m.rows {
-		if o.UUID != c.UUID && o.TenantID == r.TenantID && o.Name == c.Name {
-			return repository.ErrDuplicateName
-		}
-	}
-	// Field-owned like the real repository: name, baseUrl, status only.
-	c.TenantID = tenantOf(ctx)
-	r.Name, r.BaseURL, r.Status, r.UpdatedAt = c.Name, c.BaseURL, c.Status, c.UpdatedAt
-	return nil
-}
-func (m *memCreds) SetSecret(ctx context.Context, id string, env models.Envelope, last4 string) error {
+func (m *memCreds) Patch(ctx context.Context, id string, p models.CredentialPatch) (time.Time, error) {
 	r, ok := m.rows[id]
 	if !ok || r.TenantID != tenantOf(ctx) {
-		return repository.ErrNotFound
+		return time.Time{}, repository.ErrNotFound
+	}
+	if p.Name != nil {
+		for _, o := range m.rows {
+			if o.UUID != id && o.TenantID == r.TenantID && o.Name == *p.Name {
+				return time.Time{}, repository.ErrDuplicateName
+			}
+		}
+		r.Name = *p.Name
+	}
+	// Field-owned like the real repository: only the provided fields.
+	if p.Status != nil {
+		r.Status = *p.Status
+	}
+	if p.BaseURL != nil {
+		r.BaseURL = *p.BaseURL
+	}
+	r.UpdatedAt = time.Now().UTC()
+	return r.UpdatedAt, nil
+}
+func (m *memCreds) SetSecret(ctx context.Context, id string, env models.Envelope, last4 string) (time.Time, error) {
+	r, ok := m.rows[id]
+	if !ok || r.TenantID != tenantOf(ctx) {
+		return time.Time{}, repository.ErrNotFound
 	}
 	r.Secret, r.SecretLast4 = env, last4
 	r.LastTestedAt, r.LastTestStatus, r.LastTestError = nil, "", ""
-	return nil
+	r.UpdatedAt = time.Now().UTC()
+	return r.UpdatedAt, nil
 }
 func (m *memCreds) Delete(ctx context.Context, id string) error {
 	if r, ok := m.rows[id]; !ok || r.TenantID != tenantOf(ctx) {
@@ -1080,5 +1090,54 @@ func TestCatalog_ReplaceGrantsAlwaysWritesAccess(t *testing.T) {
 	}
 	if got := grants.rows[m.UUID]; !reflect.DeepEqual(got, []string{"u1"}) {
 		t.Fatalf("grants = %v, want [u1]", got)
+	}
+}
+
+// TestCatalog_RenameAfterConcurrentDisableKeepsDisabled: a rename-only patch
+// read the credential active; another admin disables it before the write.
+// The rename sends only the name, so the disable survives.
+func TestCatalog_RenameAfterConcurrentDisableKeepsDisabled(t *testing.T) {
+	svc, creds, _, _, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
+	ctx := ctxFor("t1")
+	c := openAICredential(t, svc, ctx, "OpenAI")
+	creds.afterGet = func() {
+		creds.rows[c.UUID].Status = models.CredentialStatusDisabled
+	}
+	name := "Renamed"
+	if _, err := svc.PatchCredential(ctx, c.UUID, &name, nil, nil); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	got := creds.rows[c.UUID]
+	if got.Name != "Renamed" || got.Status != models.CredentialStatusDisabled {
+		t.Fatalf("rename reverted the concurrent disable: %+v", got)
+	}
+}
+
+// TestCatalog_WritesReturnTheirOwnUpdatedAt: both PatchCredential and
+// RotateCredential report the timestamp the repository wrote, not the one
+// of the row they loaded.
+func TestCatalog_WritesReturnTheirOwnUpdatedAt(t *testing.T) {
+	svc, creds, _, _, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
+	ctx := ctxFor("t1")
+	c := openAICredential(t, svc, ctx, "OpenAI")
+	old := time.Now().UTC().Add(-time.Hour)
+	creds.rows[c.UUID].UpdatedAt = old
+
+	rotated, err := svc.RotateCredential(ctx, c.UUID, "sk-live-rotated-9999")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rotated.UpdatedAt.After(old) || !rotated.UpdatedAt.Equal(creds.rows[c.UUID].UpdatedAt) {
+		t.Fatalf("rotation updatedAt = %v, stored %v, old %v", rotated.UpdatedAt, creds.rows[c.UUID].UpdatedAt, old)
+	}
+
+	creds.rows[c.UUID].UpdatedAt = old
+	name := "Renamed"
+	patched, err := svc.PatchCredential(ctx, c.UUID, &name, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !patched.UpdatedAt.After(old) || !patched.UpdatedAt.Equal(creds.rows[c.UUID].UpdatedAt) {
+		t.Fatalf("patch updatedAt = %v, stored %v, old %v", patched.UpdatedAt, creds.rows[c.UUID].UpdatedAt, old)
 	}
 }

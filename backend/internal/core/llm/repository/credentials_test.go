@@ -71,17 +71,16 @@ func TestCredentials_UpdateAndDeleteAreTenantScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Other tenant cannot update or delete it.
-	other := *a
-	other.Name = "hijack"
-	if err := repo.Update(ctxFor("t2"), &other); !errors.Is(err, ErrNotFound) {
+	hijack := "hijack"
+	if _, err := repo.Patch(ctxFor("t2"), "c-a", models.CredentialPatch{Name: &hijack}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-tenant update err = %v", err)
 	}
 	if err := repo.Delete(ctxFor("t2"), "c-a"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-tenant delete err = %v", err)
 	}
 	// Owner update bumps UpdatedAt.
-	a.Name = "renamed"
-	if err := repo.Update(ctxFor("t1"), a); err != nil {
+	renamed := "renamed"
+	if _, err := repo.Patch(ctxFor("t1"), "c-a", models.CredentialPatch{Name: &renamed}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	got, err := repo.Get(ctxFor("t1"), "c-a")
@@ -189,16 +188,16 @@ func TestCredentials_StaleUpdateDoesNotRevertSecretOrCreator(t *testing.T) {
 	}
 	// A rotation and an erasure land after the rename's read.
 	newEnv := models.Envelope{Alg: models.EnvelopeAlgLocal, SchemaVersion: models.EnvelopeSchemaVersion, Ciphertext: "bmV3"}
-	if err := repo.SetSecret(ctx, "c-a", newEnv, "2222"); err != nil {
+	if _, err := repo.SetSecret(ctx, "c-a", newEnv, "2222"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.PseudonymizeCreator(context.Background(), "subject"); err != nil {
 		t.Fatal(err)
 	}
-	stale.Name = "renamed"
-	stale.Status = models.CredentialStatusDisabled
-	if err := repo.Update(ctx, stale); err != nil {
-		t.Fatalf("update: %v", err)
+	_ = stale
+	renamed, disabled := "renamed", models.CredentialStatusDisabled
+	if _, err := repo.Patch(ctx, "c-a", models.CredentialPatch{Name: &renamed, Status: &disabled}); err != nil {
+		t.Fatalf("patch: %v", err)
 	}
 	got, err := repo.Get(ctx, "c-a")
 	if err != nil {
@@ -231,14 +230,14 @@ func TestCredentials_SetSecretIsTargetedAndTenantScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := models.Envelope{Alg: models.EnvelopeAlgLocal, SchemaVersion: models.EnvelopeSchemaVersion, Ciphertext: "bmV3"}
-	if err := repo.SetSecret(ctxFor("t2"), "c-a", env, "2222"); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.SetSecret(ctxFor("t2"), "c-a", env, "2222"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-tenant SetSecret err = %v", err)
 	}
-	if err := repo.SetSecret(ctx, "missing", env, "2222"); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.SetSecret(ctx, "missing", env, "2222"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown SetSecret err = %v", err)
 	}
-	if err := repo.SetSecret(ctx, "c-a", env, "2222"); err != nil {
-		t.Fatalf("SetSecret: %v", err)
+	if at, err := repo.SetSecret(ctx, "c-a", env, "2222"); err != nil || !at.After(now) {
+		t.Fatalf("SetSecret: at=%v err=%v", at, err)
 	}
 	got, err := repo.Get(ctx, "c-a")
 	if err != nil {
@@ -250,10 +249,72 @@ func TestCredentials_SetSecretIsTargetedAndTenantScoped(t *testing.T) {
 	if got.Name != "k" || got.Status != models.CredentialStatusDisabled || got.BaseURL != "https://api.openai.com/v1" || got.CreatedBy != "u-admin" {
 		t.Fatalf("SetSecret touched other fields: %+v", got)
 	}
-	if err := repo.SetSecret(ctx, "c-a", env, ""); err != nil {
+	if _, err := repo.SetSecret(ctx, "c-a", env, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := repo.Get(ctx, "c-a"); got.SecretLast4 != "" {
 		t.Fatalf("short secret kept tail %q", got.SecretLast4)
+	}
+}
+
+// TestCredentials_PatchWritesOnlyProvidedFields: a name-only patch leaves a
+// status and baseUrl changed after the caller's read alone; a provided empty
+// baseUrl unsets it; unknown uuid and duplicate names map to the sentinels.
+func TestCredentials_PatchWritesOnlyProvidedFields(t *testing.T) {
+	db := newTestDB(t)
+	ensureUniqueNameIndex(t, db, CollCredentials)
+	repo := NewCredentials(db)
+	ctx := ctxFor("t1")
+	now := time.Now().UTC().Add(-time.Hour)
+	mk := func(uuid, name string) *models.Credential {
+		return &models.Credential{UUID: uuid, Name: name, Provider: models.ProviderOpenAICompatible, BaseURL: "https://one.example/v1", Status: models.CredentialStatusActive, CreatedBy: "u-admin", CreatedAt: now, UpdatedAt: now}
+	}
+	if err := repo.Insert(ctx, mk("c-a", "alpha")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Insert(ctx, mk("c-b", "beta")); err != nil {
+		t.Fatal(err)
+	}
+
+	// A concurrent writer disables and moves the endpoint after our read...
+	disabled, other := models.CredentialStatusDisabled, "https://two.example/v1"
+	if _, err := repo.Patch(ctx, "c-a", models.CredentialPatch{Status: &disabled, BaseURL: &other}); err != nil {
+		t.Fatal(err)
+	}
+	// ...then a rename that only provided the name must not revert them.
+	renamed := "alpha2"
+	at, err := repo.Patch(ctx, "c-a", models.CredentialPatch{Name: &renamed})
+	if err != nil {
+		t.Fatalf("name-only patch: %v", err)
+	}
+	got, err := repo.Get(ctx, "c-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "alpha2" || got.Status != models.CredentialStatusDisabled || got.BaseURL != "https://two.example/v1" {
+		t.Fatalf("name-only patch touched other fields: %+v", got)
+	}
+	if !got.UpdatedAt.Equal(at.Truncate(time.Millisecond)) || !got.UpdatedAt.After(now) {
+		t.Fatalf("updatedAt = %v, returned %v", got.UpdatedAt, at)
+	}
+
+	// A provided empty baseUrl clears the stored one.
+	empty := ""
+	if _, err := repo.Patch(ctx, "c-a", models.CredentialPatch{BaseURL: &empty}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := repo.Get(ctx, "c-a"); got.BaseURL != "" || got.Name != "alpha2" {
+		t.Fatalf("empty baseUrl not unset (or name lost): %+v", got)
+	}
+
+	if _, err := repo.Patch(ctx, "missing", models.CredentialPatch{Name: &renamed}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown uuid err = %v", err)
+	}
+	if _, err := repo.Patch(ctxFor("t2"), "c-a", models.CredentialPatch{Name: &renamed}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-tenant err = %v", err)
+	}
+	dup := "beta"
+	if _, err := repo.Patch(ctx, "c-a", models.CredentialPatch{Name: &dup}); !errors.Is(err, ErrDuplicateName) {
+		t.Fatalf("duplicate err = %v", err)
 	}
 }

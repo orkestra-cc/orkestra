@@ -82,54 +82,59 @@ func (r *Credentials) Get(ctx context.Context, uuid string) (*models.Credential,
 	return &c, nil
 }
 
-// Update writes the patchable fields of c — name, baseUrl, status — and
-// bumps updatedAt, with a targeted $set on (tenant, c.UUID). It owns nothing
+// Patch writes only the fields p provides — name, baseUrl (unset when the
+// provided value is empty), status — plus updatedAt, with a targeted $set on
+// (tenant, uuid), and returns the updatedAt it wrote. Fields the request did
+// not provide are never written, so a patch built from a stale read cannot
+// revert a concurrent disable, endpoint change or rename. It owns nothing
 // else: the secret and its display tail belong to SetSecret, createdBy to
 // the DSR pseudonymization, and createdAt, tenantId and uuid never change.
-// A caller holding a stale copy can therefore never revert a concurrent
-// rotation, an erasure or another field's owner. c.TenantID is re-stamped
-// from the context (it is not written); c.UpdatedAt is set to the new value.
-func (r *Credentials) Update(ctx context.Context, c *models.Credential) error {
-	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": c.UUID})
+func (r *Credentials) Patch(ctx context.Context, uuid string, p models.CredentialPatch) (time.Time, error) {
+	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid})
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
-	tenantID, err := tenantrepo.StampInsert(ctx)
-	if err != nil {
-		return err
-	}
-	c.TenantID = tenantID
-	c.UpdatedAt = time.Now().UTC()
-	set := bson.M{"name": c.Name, "status": c.Status, "updatedAt": c.UpdatedAt}
+	now := time.Now().UTC()
+	set := bson.M{"updatedAt": now}
 	update := bson.M{"$set": set}
-	if c.BaseURL != "" {
-		set["baseUrl"] = c.BaseURL
-	} else {
-		update["$unset"] = bson.M{"baseUrl": ""}
+	if p.Name != nil {
+		set["name"] = *p.Name
+	}
+	if p.Status != nil {
+		set["status"] = *p.Status
+	}
+	if p.BaseURL != nil {
+		if *p.BaseURL != "" {
+			set["baseUrl"] = *p.BaseURL
+		} else {
+			update["$unset"] = bson.M{"baseUrl": ""}
+		}
 	}
 	res, err := r.coll.UpdateOne(ctx, filter, update)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
-			return ErrDuplicateName
+			return time.Time{}, ErrDuplicateName
 		}
-		return err
+		return time.Time{}, err
 	}
 	if res.MatchedCount == 0 {
-		return ErrNotFound
+		return time.Time{}, ErrNotFound
 	}
-	return nil
+	return now, nil
 }
 
 // SetSecret is the only writer of the secret envelope and its display tail:
 // a targeted $set of secret, secretLast4 (unset when empty, the tail of a
 // short secret) and updatedAt on (tenant, uuid). A new secret also clears
-// the reserved lastTest* result, which described the previous one.
-func (r *Credentials) SetSecret(ctx context.Context, uuid string, env models.Envelope, last4 string) error {
+// the reserved lastTest* result, which described the previous one. It
+// returns the updatedAt it wrote.
+func (r *Credentials) SetSecret(ctx context.Context, uuid string, env models.Envelope, last4 string) (time.Time, error) {
 	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid})
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
-	set := bson.M{"secret": env, "updatedAt": time.Now().UTC()}
+	now := time.Now().UTC()
+	set := bson.M{"secret": env, "updatedAt": now}
 	unset := bson.M{"lastTestedAt": "", "lastTestStatus": "", "lastTestError": ""}
 	if last4 != "" {
 		set["secretLast4"] = last4
@@ -138,12 +143,12 @@ func (r *Credentials) SetSecret(ctx context.Context, uuid string, env models.Env
 	}
 	res, err := r.coll.UpdateOne(ctx, filter, bson.M{"$set": set, "$unset": unset})
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
 	if res.MatchedCount == 0 {
-		return ErrNotFound
+		return time.Time{}, ErrNotFound
 	}
-	return nil
+	return now, nil
 }
 
 func (r *Credentials) Delete(ctx context.Context, uuid string) error {
