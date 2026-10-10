@@ -1,0 +1,157 @@
+---
+title: llm
+sidebar_position: 8
+---
+
+# llm
+
+Language-model access for the platform: **credentials**, a **model catalog**, per-user **grants**, and the `iface.LLMGateway` that other modules consume. Added to the always-loaded core by [ADR-0022](/adrs/core-llm-module) — whose API key is used, which models exist, who may use them and how much they may spend are questions every product rebuilds, so the base answers them once. Tier-1 only: every row belongs to an internal organization.
+
+The module boots with zero credentials and zero models. It is healthy in that state and the gateway answers `ErrLLMNotConfigured` until an active model exists, in the same spirit as `notification` booting in `noop`.
+
+## What it owns
+
+Three collections, all scoped to an internal organization (`tenantId`):
+
+| Collection | Holds |
+|---|---|
+| `llm_credentials` | An API key per provider: `name`, `provider`, `baseUrl`, the sealed `secret` envelope, the display-only `secretLast4`, `status`, and who created it. Names are unique per organization. |
+| `llm_models` | A configured model: provider and model ID, the **capabilities** it offers (chat, streaming, tools, structured output, embeddings and dimensions), a `credentialRef`, defaults (temperature, output limit, effort), the **purposes** it serves with a priority each, `access` (`granted` or `everyone`) and `status`. Names are unique per organization. |
+| `llm_grants` | One row per `(model, user)` pair that may use a model, with who granted it. |
+
+### Secrets and the envelope
+
+An API key is **write-only**: it is accepted on create and rotate and never returned. Reads show `hasSecret` and the last four characters (`secretLast4`, and only when the key is at least eight characters long).
+
+The stored form is an envelope `{alg, keyId, keyVersion, schemaVersion, ciphertext}`:
+
+- `alg: kms` — sealed with the per-tenant key of the compliance module's KMS provider, once compliance has injected one. A tenant purge crypto-shreds the credentials with it.
+- `alg: local` — AES-256-GCM with the dedicated `LLM_SECRET_ENCRYPTION_KEY` (32 bytes, 64 hex characters).
+
+The associated data is `tenantId|resourceUuid|field|schemaVersion`, so an envelope copied to another tenant, record or field fails to open. The key is decrypted only when a provider request is built, and never reaches a log, a response or an error message.
+
+:::note Missing key
+A missing or malformed `LLM_SECRET_ENCRYPTION_KEY` does not stop the boot. The module logs a warning and treats the key as absent: everything works except saving a secret, which answers `llm.secret_key_missing` (503) until a key or a KMS provider exists. In staging and production the environment checker refuses a missing, placeholder or non-64-hex value before the stack starts.
+:::
+
+## Routes
+
+Operator host. Every route requires an authenticated internal-organization context (a tenant of another kind is refused with `403`) and the permission shown. Write routes marked *step-up* additionally need a fresh MFA proof, valid for 5 minutes.
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/v1/admin/llm/credentials` | `llm.admin.read` | List, secrets redacted |
+| GET | `/v1/admin/llm/credentials/{uuid}` | `llm.admin.read` | |
+| POST | `/v1/admin/llm/credentials` | `llm.credentials.admin` | Step-up. `201` |
+| PATCH | `/v1/admin/llm/credentials/{uuid}` | `llm.credentials.admin` | Step-up. Rename, re-point `baseUrl`, enable or disable; it can send a stored key to another host, hence the step-up |
+| POST | `/v1/admin/llm/credentials/{uuid}/rotate` | `llm.credentials.admin` | Step-up. Replaces the API key |
+| DELETE | `/v1/admin/llm/credentials/{uuid}` | `llm.credentials.admin` | Step-up. `204`; `409 llm.credential_in_use` while an active model uses it |
+| GET | `/v1/admin/llm/models` | `llm.admin.read` | List, each model with its grants |
+| GET | `/v1/admin/llm/models/{uuid}` | `llm.admin.read` | |
+| POST | `/v1/admin/llm/models` | `llm.models.admin` | `201` |
+| PATCH | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` | **Partial**: an omitted field keeps its stored value; capabilities, credential reference and defaults replace the stored value whole when present; the merged model is validated as on create |
+| DELETE | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` | `204`; also deletes the model's grants |
+| PUT | `/v1/admin/llm/models/{uuid}/grants` | `llm.grants.admin` | Step-up. Replaces the complete list of users allowed to use the model |
+| GET | `/v1/llm/me/models` | `llm.models.self` | The models the calling user may use in the current organization |
+
+Collections are returned as `{ "items": [...] }`. Errors carry a stable `llm.*` code:
+
+| Code | HTTP | When |
+|---|---|---|
+| `llm.invalid_request` | 422 | A field is out of range or malformed (name, provider, base URL, model ID, purposes, capabilities, …) |
+| `llm.not_found` | 404 | No such credential, model or grant in this organization |
+| `llm.name_in_use` | 409 | Another credential or model already has this name |
+| `llm.credential_in_use` | 409 | Delete refused: an active model references the credential |
+| `llm.secret_key_missing` | 503 | Neither a KMS provider nor a valid local key exists |
+| `llm.endpoint_not_allowed` | 422 | `baseUrl` rejected by the SSRF validation |
+| `llm.hosted_disabled` | 422 | A hosted provider was requested while `allow_hosted` is off |
+| `llm.mock_not_allowed` | 422 | The `mock` provider in a production-like environment |
+| `llm.grant_not_member` | 422 | A grantee is not a member of the organization; nothing is written |
+
+The gateway adds `llm.not_configured` (503), `llm.no_eligible_model` (403), `llm.model_access_denied` (403), `llm.capability_mismatch` (422) and `llm.provider_unavailable` (503); see [Gateway contract](#gateway-contract).
+
+## Permissions
+
+All admin permissions are `System: true` — only the platform system roles inherit them, and no role name appears in the module. The suffix carries the rule:
+
+| Permission | Kind | Grants |
+|---|---|---|
+| `llm.admin.read` | read | See credentials (redacted), models and grants. A `developer` keeps this in production |
+| `llm.credentials.admin` | mutation | Create, rotate, re-point and delete credentials |
+| `llm.models.admin` | mutation | Create, update and delete models |
+| `llm.grants.admin` | mutation | Decide who may use each model |
+| `llm.models.self` | self | List the models you may use (an organization permission, not a system one) |
+
+Every `.admin` mutation requires an enrolled second factor (the policy engine's admin-suffix rule), and a `developer` is not granted an `.admin` key in production. Each mutation emits an audit event (`llm.credential.created|updated|rotated|deleted`, `llm.model.created|updated|deleted`, `llm.grants.replaced`) once the compliance module has injected the audit sink; the event carries names and counts, never secrets or base URLs.
+
+## Configuration
+
+Settings at `/admin/modules/llm`, in two groups. The module hot-reloads its configuration, so a change applies without a restart. In this step only `allow_hosted` is consulted; the other four take effect with the gateway.
+
+| Key | Default | Env var | Meaning |
+|---|---|---|---|
+| `allow_hosted` | `false` | `LLM_ALLOW_HOSTED` | Explicit privacy opt-in for hosted providers (`openai`, `anthropic`, `gemini`, `openai_compatible`): prompts and outputs leave the installation. Without it only `ollama` and `mock` can be created, enabled or edited. Disabling a credential or model is always possible |
+| `request_timeout` | `60s` | `LLM_REQUEST_TIMEOUT` | Deadline per provider call; a consumer may only lower it |
+| `usage_retention_days` | `90` | `LLM_USAGE_RETENTION_DAYS` | Retention of per-call usage rows (1–3650) |
+| `budget_warn_pct` | `80` | `LLM_BUDGET_WARN_PCT` | Default warning threshold for new budgets (0–100) |
+| `budget_reserve_output_tokens` | `4096` | `LLM_BUDGET_RESERVE_OUTPUT_TOKENS` | Output tokens reserved against the budget when a model declares none (1–131072) |
+
+`allow_hosted` is a technical control. Before enabling it, document the data flow (categories of prompts and outputs, purpose and legal basis, processor, retention, region and transfer mechanism) in your records of processing.
+
+Endpoint rules: `openai`, `anthropic` and `gemini` have a fixed endpoint and take no `baseUrl`; `ollama` and `openai_compatible` require one; `mock` takes none. In a production-like environment a `baseUrl` must be public HTTPS — loopback, private, link-local, CGNAT, multicast, ULA and other special-use ranges, `.local` and `.internal` names and the metadata host are refused.
+
+## Access model
+
+**Managing is not using.** Holding `llm.models.admin` lets you define a model; it does not let you call it. A user may use a model when:
+
+1. the model is `active` **and**
+2. its `access` is `everyone`, **or** the user holds a grant for it.
+
+Grants are replaced as a complete list (`PUT …/grants`), and every grantee must be a member of the organization, or the whole list is rejected. `GET /v1/llm/me/models` and the gateway use the same resolver, so the self list shows exactly what a call may route to.
+
+Routing for a purpose: the candidates are the usable models that declare the purpose and offer the capabilities the request needs, ordered by that purpose's priority (lower wins) then name. The purpose falls back to `default` **only** when no active model of the organization declares it at all; if some model declares it but the caller may not use it, the result is empty (`ErrLLMNoEligibleModel`) rather than a silent move to another purpose. A caller may pin one model; a pin must be among its candidates, so pinning never widens access.
+
+A model billed to the user's own linked account (`credentialRef.kind = user_account`) must use the `openai` provider, cannot offer embeddings and cannot set a temperature or output limit.
+
+## Gateway contract
+
+Addons resolve the gateway from the service registry and ask for a *purpose*; they never see a credential:
+
+```go
+gw, ok := module.GetTyped[iface.LLMGateway](deps.Services, module.ServiceLLMGateway)
+if !ok {
+    return errors.New("llm module not loaded")
+}
+
+res, err := gw.Chat(ctx, iface.ChatRequest{
+    Purpose:  "summarize", // "" means "default"
+    Caller:   "myaddon",   // required: the calling module's name
+    Messages: []iface.ChatMessage{{Role: "user", Content: text}},
+}, func(ev iface.ChatEvent) error {
+    // stream deltas; return an error to abort
+    return nil
+})
+switch {
+case errors.Is(err, iface.ErrLLMNotConfigured):     // no active model in this organization
+case errors.Is(err, iface.ErrLLMNoEligibleModel):   // models exist, none this caller may use
+case errors.Is(err, iface.ErrLLMProviderUnavailable):
+}
+```
+
+The interface has four methods: `Chat`, `Embed`, `Resolve` (the model `Chat` would pick, without calling it) and `ListUsable`. Message roles are `developer`, `user`, `assistant` and `tool`; system text goes in `ChatRequest.Instructions`. Errors are classified with the `ErrLLM*` sentinels in `pkg/sdk/iface/llm.go`, which a consumer maps to its own error codes. The acting user comes from the request context, and the gateway refuses a tenant that is not internal.
+
+The compliance module resolves the same service to inject its KMS provider and audit sink (`iface.KMSProviderSetter`, `iface.AuditSinkSetter`).
+
+## Data-subject rights
+
+The module registers an `iface.PIIProducer` with the subject `llm`. Export returns explicit projections only — never a credential, an endpoint or an envelope: the grants the user holds, the grants they issued, and references to the credentials and models they created. Erasure deletes the grants the user holds and replaces the actor id on the grants they issued and on the credentials and models they created with a fixed constant (`erased-subject`) that is not derived from the user; the credentials and models themselves are organization assets and stay.
+
+## Status
+
+This is the foundations step ([ADR-0022](/adrs/core-llm-module)): the catalog, access model, encrypted secrets, data-subject rights, the admin API and the `/admin/llm` console page (tabs `models` and `credentials`, kept in the URL). `Resolve` and `ListUsable` are complete. `Chat` and `Embed` validate the request and resolve access but no provider adapter is registered yet, so they end with `ErrLLMProviderUnavailable`.
+
+Following steps add the provider adapters, routing with fallback and circuit breaking, the usage ledger and monthly budget, connectivity tests and model discovery, and Sign in with ChatGPT for per-user subscriptions.
+
+:::note Known limitation
+Editing a model's grants in the console also needs `system.tenants.admin`, because the picker lists the organization's members through the tenant API. Without it the list shows a hint instead of the members.
+:::

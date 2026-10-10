@@ -1,6 +1,6 @@
 # ORKESTRA
 
-**Orkestra is the SaaS plumbing every product rebuilds — users, auth, RBAC, multi-tenancy, navigation, logging — already done.** Eight core modules (`user`, `auth`, `authz`, `tenant`, `notification`, `navigation`, `logging`, `compliance`) supply the baseline on day one. Per [ADR-0006](docs/adr/0006-collapse-to-core-only-base.md) Orkestra is a **core-only base**: it ships *no* addons. A fork that needs invoicing, payments, subscriptions, AI, marketing, etc. builds those verticals on top, against the in-tree SDK contract, using the same `Module` extension seam the core itself is built on.
+**Orkestra is the SaaS plumbing every product rebuilds — users, auth, RBAC, multi-tenancy, navigation, logging — already done.** Nine core modules (`user`, `auth`, `authz`, `tenant`, `notification`, `navigation`, `logging`, `llm`, `compliance`) supply the baseline on day one. Per [ADR-0006](docs/adr/0006-collapse-to-core-only-base.md) Orkestra is a **core-only base**: it ships *no* addons. A fork that needs invoicing, payments, subscriptions, AI, marketing, etc. builds those verticals on top, against the in-tree SDK contract, using the same `Module` extension seam the core itself is built on.
 
 ## Tenancy Model
 
@@ -33,7 +33,7 @@ The companies that **run Orkestra** (one or more of "our" organizations). For ea
 
 | Layer              | Technology                                                         |
 | ------------------ | ------------------------------------------------------------------ |
-| **Backend**        | Go 1.26.9, Huma v2 (OpenAPI-first), 8 core modules, single Go module |
+| **Backend**        | Go 1.26.9, Huma v2 (OpenAPI-first), 9 core modules, single Go module |
 | **Frontend**       | React 19, TypeScript 5.9, Vite 8 (admin) / Vite 7 (client), Redux Toolkit, TanStack Table |
 | **Mobile**         | Flutter 3.44+, Dart, Riverpod                                      |
 | **Database**       | MongoDB 8.0, Redis 8.2                                             |
@@ -42,7 +42,7 @@ The companies that **run Orkestra** (one or more of "our" organizations). For ea
 
 ## Architecture
 
-**Plugin architecture, core-only.** The 8 core modules are themselves implementations of the `Module` contract. The module system that hosts them is **kept by design**: a fork adds its own optional modules through the same clean `Module` + `catalog_<name>.go` + `iface` path the core uses. The `optionalModules` catalog ships **empty** — there is nothing to toggle out of the box, but the `/admin/modules` surface remains for forks that add their own.
+**Plugin architecture, core-only.** The 9 core modules are themselves implementations of the `Module` contract. The module system that hosts them is **kept by design**: a fork adds its own optional modules through the same clean `Module` + `catalog_<name>.go` + `iface` path the core uses. The `optionalModules` catalog ships **empty** — there is nothing to toggle out of the box, but the `/admin/modules` surface remains for forks that add their own.
 
 **Key components** (`backend/pkg/sdk/module/`):
 
@@ -83,9 +83,10 @@ Every core module has **two** docs: the in-repo `AGENTS.md` is the AI-facing *co
 | **auth**         | Email/password (argon2id) + OAuth 2.1, MFA + passkeys, JWT, sessions, service accounts     | [AGENTS.md](backend/internal/core/auth/AGENTS.md) | [auth](docs/site/modules/core/auth.mdx) |
 | **navigation**   | Dynamic menu from module NavItems + persisted reorder via `/admin/modules/navigation`      | [AGENTS.md](backend/internal/core/navigation/AGENTS.md) | [navigation](docs/site/modules/core/navigation.mdx) |
 | **logging**      | Tier-1 runtime logging workspace: permanent levels, expiring diagnostics, bounded preview  | [AGENTS.md](backend/internal/core/logging/AGENTS.md) | [logging](docs/site/modules/core/logging.mdx) |
+| **llm**          | Credentials per org, models with capabilities/purposes, per-user grants, gateway for addons (ADR-0022) | [AGENTS.md](backend/internal/core/llm/AGENTS.md) | [llm](docs/site/modules/core/llm.mdx) |
 | **compliance**   | Audit trail + GDPR DSR, per-tenant KMS crypto-shred, legal hold, retention, SOC2, compliance policy engine with four-eyes changes (ADR-0009) | [AGENTS.md](backend/internal/core/compliance/AGENTS.md) | [compliance](docs/site/modules/core/compliance.mdx) |
 
-Load order (topologically sorted by `Dependencies()`): `user` → `notification` → `tenant` → `authz` → `auth` → `navigation` → `logging` → `compliance`. Auth depends on notification (optional at runtime) so it can deliver verification and password-reset emails; `logging` has no declared dependencies; `compliance` (ADR-0009, always-on) depends on `user`/`auth`/`tenant` so it resolves the PII-producer registry + audit sink after they init.
+Load order (topologically sorted by `Dependencies()`): `user` → `notification` → `tenant` → `authz` → `auth` → `navigation` → `logging` → `llm` → `compliance`. Auth depends on notification (optional at runtime) so it can deliver verification and password-reset emails; `logging` has no declared dependencies; `compliance` (ADR-0009, always-on) depends on `user`/`auth`/`tenant` so it resolves the PII-producer registry + audit sink after they init. `llm` (ADR-0022) depends on `user`/`tenant`/`notification` and is catalogued before `compliance` on purpose: compliance pushes its KMS provider and audit sink into the registered `ServiceLLMGateway` from its own Init (`cmd/server/core_load_order_test.go` pins the order).
 
 **Optional (added by a fork; the base ships none):** `internal/addons/` does not exist in the base. A fork that adds a vertical creates `internal/addons/<name>/` implementing the `Module` interface and a `cmd/server/catalog_<name>.go` to register it — see [`backend/AGENTS.md`](backend/AGENTS.md) and the docs-site [addon-authoring guide](docs/site/sdk/build-your-first-addon.mdx). The archived `orkestra-cc/orkestra-addon-<name>` repos preserve snapshots of most verticals removed by ADR-0006 (billing/SDI, documents, company, graph, aimodels, rag, sales, subscriptions, payments, compliance, identity, dev) for forks to crib from. Two verticals — `agents` and `marketing` — were never split out into standalone repos, so their last in-tree state lives in this repo's own history, in the commits before the ADR-0006 removal.
 
@@ -97,7 +98,7 @@ Load order (topologically sorted by `Dependencies()`): `user` → `notification`
 - **[`/mobile/`](mobile/AGENTS.md)** — Flutter cross-platform app
 - **[`/docker/`](docker/AGENTS.md)** — Docker Compose configs (dev/staging/prod/infra)
 - **[`/docs/site/architecture/authentication-flow.mdx`](docs/site/architecture/authentication-flow.mdx)** — Email/password + OAuth 2.1 + MFA + service-account (ADR-0014) + RBAC details. **This is the canonical copy.** `docs/Authentication_flow.md` is a pre-migration duplicate that has since drifted — it predates the `service` audience entirely.
-- **[`/docs/site/`](docs/site/README.md)** — Canonical source for [docs.orkestra.cc](https://docs.orkestra.cc) hand-written pages. The Docusaurus repo ([orkestra-cc/orkestra-docs](https://github.com/orkestra-cc/orkestra-docs)) mirrors this tree on every build via `npm run sync:site` — edits live here, not there. Covers all eight core modules, the SDK contract ([`Module`](docs/site/sdk/module-interface.mdx), [ServiceRegistry](docs/site/sdk/service-registry.mdx), [ConfigService](docs/site/sdk/config-service.mdx), [iface](docs/site/sdk/shared-iface.mdx), [object storage](docs/site/sdk/object-storage.mdx)), operating guides, and the public ADRs.
+- **[`/docs/site/`](docs/site/README.md)** — Canonical source for [docs.orkestra.cc](https://docs.orkestra.cc) hand-written pages. The Docusaurus repo ([orkestra-cc/orkestra-docs](https://github.com/orkestra-cc/orkestra-docs)) mirrors this tree on every build via `npm run sync:site` — edits live here, not there. Covers all nine core modules, the SDK contract ([`Module`](docs/site/sdk/module-interface.mdx), [ServiceRegistry](docs/site/sdk/service-registry.mdx), [ConfigService](docs/site/sdk/config-service.mdx), [iface](docs/site/sdk/shared-iface.mdx), [object storage](docs/site/sdk/object-storage.mdx)), operating guides, and the public ADRs.
   **Nothing in this repo's CI builds the site** — render locally before merging a `docs/site/**` change; the recipe is in [`docs/site/README.md`](docs/site/README.md). Only a push to `main` publishes: the sync pulls `orkestra@main`, never `dev`.
 
 ## Quick Start

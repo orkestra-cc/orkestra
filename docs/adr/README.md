@@ -11,7 +11,7 @@ Durable, dated records of architectural decisions that shape Orkestra. One file 
 | [0003](0003-three-audience-host-split.md) | Three-audience API host split (operator / client / service) | Accepted | 2026-04-30 |
 | [0004](0004-external-services-integration.md) | External services integration framework | Proposed | 2026-05-14 |
 | [0005](0005-observability-logging-tracing-metrics.md) | Observability — logging, tracing, metrics as core platform features | Accepted | 2026-05-16 |
-| [0006](0006-collapse-to-core-only-base.md) | Collapse Orkestra to a core-only base; addons become per-fork responsibility | Accepted (amended by 0009) | 2026-06-01 |
+| [0006](0006-collapse-to-core-only-base.md) | Collapse Orkestra to a core-only base; addons become per-fork responsibility | Accepted (amended by 0009, 0022) | 2026-06-01 |
 | [0007](0007-per-addon-i18n-namespaces.md) | Per-addon i18n namespaces; addon translations never touch core locale files | Proposed | 2026-06-14 |
 | [0008](0008-partition-openapi-spec-per-module.md) | Partition the OpenAPI spec per module so a fork's addons never collide with core | Proposed | 2026-06-14 |
 | [0009](0009-core-compliance-module.md) | Re-home the compliance plane (audit + GDPR DSR) to core | Accepted (Phases 1–4 shipped) | 2026-06-18 |
@@ -23,6 +23,7 @@ Durable, dated records of architectural decisions that shape Orkestra. One file 
 | [0019](0019-notification-multi-sender.md) | Multi-sender email delivery (sender profiles, category routing, driver seam) | Accepted | 2026-08-26 |
 | [0020](0020-bearer-only-require-auth.md) | RequireAuth is bearer-only; refresh-token rotation only through explicit refresh endpoints | Accepted | 2026-08-29 |
 | [0021](0021-explicit-sender-selection.md) | Explicit per-send sender selection under operator policy | Accepted | 2026-09-11 |
+| [0022](0022-core-llm-module.md) | Core `llm` module: credentials, models, grants, budget and gateway for language models | Accepted | 2026-10-10 |
 
 ## Numbering across the fork chain
 

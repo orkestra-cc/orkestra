@@ -1,6 +1,6 @@
 # Backend — Go Modular Server
 
-Single Go binary, single Go module. 8 core modules (always loaded) and an **empty optional-module catalog** ([ADR-0006](../docs/adr/0006-collapse-to-core-only-base.md): core-only base — a fork adds its own optional modules in-tree). Slim `cmd/server/main.go` that wires infrastructure and delegates everything else to the module registry. Port 3000 inside the container.
+Single Go binary, single Go module. 9 core modules (always loaded) and an **empty optional-module catalog** ([ADR-0006](../docs/adr/0006-collapse-to-core-only-base.md): core-only base — a fork adds its own optional modules in-tree). Slim `cmd/server/main.go` that wires infrastructure and delegates everything else to the module registry. Port 3000 inside the container.
 
 ## Stack
 
@@ -34,7 +34,7 @@ frozen** — it is the public SDK surface, so new capabilities arrive as new
 sub-interfaces, never as extra methods here. Prose reference:
 [`../docs/site/sdk/module-interface.mdx`](../docs/site/sdk/module-interface.mdx).
 
-**Registration** (`cmd/server/catalog.go` + `catalog_<name>.go`): core modules (user → notification → tenant → authz → auth → navigation → logging → compliance) are always loaded — they live in `catalog.go`. The `optionalModules` map ships empty; a fork's optional module lives in its own `cmd/server/catalog_<name>.go` file and registers itself via `init()`. Every registered module compiles into the binary; runtime enable/disable is owned by the `module_configs` collection edited at `/admin/modules`. Optional modules are instantiated, initialized, and routed at boot — only enabled ones have `Start()` called. The admin API can enable/disable modules at runtime via `StartModule()`/`StopModule()` without restart. The registry topologically sorts by `Dependencies()` so producers init before consumers, auto-creates MongoDB collections with their declared indexes, seeds configs, collects nav items, and gates routes for disabled modules via `ModuleGate` middleware.
+**Registration** (`cmd/server/catalog.go` + `catalog_<name>.go`): core modules (user → notification → tenant → authz → auth → navigation → logging → llm → compliance) are always loaded — they live in `catalog.go`. The `optionalModules` map ships empty; a fork's optional module lives in its own `cmd/server/catalog_<name>.go` file and registers itself via `init()`. Every registered module compiles into the binary; runtime enable/disable is owned by the `module_configs` collection edited at `/admin/modules`. Optional modules are instantiated, initialized, and routed at boot — only enabled ones have `Start()` called. The admin API can enable/disable modules at runtime via `StartModule()`/`StopModule()` without restart. The registry topologically sorts by `Dependencies()` so producers init before consumers, auto-creates MongoDB collections with their declared indexes, seeds configs, collects nav items, and gates routes for disabled modules via `ModuleGate` middleware.
 
 **First-boot seeding**: on a fresh install, `ConfigService.SeedFromModules` creates the `module_configs` document from each module's `ConfigSchema().EnvVar` and `EnabledByDefault`. Subsequent boots ignore env defaults; admin-set values in `module_configs` are authoritative. Subsequent boots also **backfill** any schema key an existing document lacks (a key the schema gained after the document was created) with its `EnvVar`/`Default` **when that fallback is non-empty** — present values, explicit empty strings included, are never touched, and a key whose fallback is empty stays absent because absence is meaningful to `GetRawValue` readers (ADR-0017: an absent `sessionAbsoluteTTL` is the default cap, a present empty one disables it). The backfilled key names are logged at INFO. So a runtime read never has to guess a default for a key the document was created without. (ADR-0006 removed the `ORKESTRA_PROFILE` minimal/full seeding — with an empty catalog there is nothing to pre-enable.) Documents for modules **no longer compiled into the binary** (addons a fork removed, or anything left over from the ADR-0006 core-only collapse on an upgraded environment) are treated as **orphans**: `GetAllConfigs` / `ModuleStatusJSON` filter them out of the admin listing so the `/admin/modules` UI only ever shows registered modules. The orphan documents are *not* deleted — they stay in the collection (recoverable, secrets intact); they are simply not served.
 
@@ -59,14 +59,16 @@ backend/
 │   │   └── catalog_<name>.go       # (none in the base) one per fork-added module
 │   └── migrations/                 # One-shot data migrations (0002, 0003)
 ├── internal/
-│   ├── core/                       # Always loaded (init order: user → notification → tenant → authz → auth → navigation → logging)
+│   ├── core/                       # Always loaded (init order: user → notification → tenant → authz → auth → navigation → logging → llm → compliance)
 │   │   ├── user/                   # User CRUD, roles, documents
 │   │   ├── notification/           # Email delivery, templates, preferences, unsubscribe
 │   │   ├── tenant/                 # Orgs + memberships (two-tier tenancy)
 │   │   ├── authz/                  # Permissions, roles, Cedar policy engine
 │   │   ├── auth/                   # Email/password + OAuth 2.1, JWT, sessions, RBAC
 │   │   ├── navigation/             # Dynamic menu from module NavItems
-│   │   └── logging/                # Runtime log-level admin (ADR-0005 Phase F)
+│   │   ├── logging/                # Runtime log-level admin (ADR-0005 Phase F)
+│   │   ├── llm/                    # LLM credentials, models, grants, gateway (ADR-0022)
+│   │   └── compliance/             # Audit trail + GDPR DSR, KMS, legal hold, policy engine (ADR-0009)
 │   │   # internal/addons/ does not exist in the base — a fork adds it
 │   ├── shared/                     # Backend-internal infrastructure
 │   │   ├── config/                 # App configuration
@@ -241,7 +243,7 @@ docker restart orkestra-backend-development
 
 ## Rules
 
-- **Read the module's own AGENTS.md** before modifying it — all eight core modules (`user`, `notification`, `tenant`, `authz`, `auth`, `navigation`, `logging`, `compliance`) have one under `internal/core/<name>/`. Each also has a published page under [`../docs/site/modules/core/`](../docs/site/modules/core/) — the AGENTS.md is the contract, the page is the reference; **update both** when you change a module.
+- **Read the module's own AGENTS.md** before modifying it — all nine core modules (`user`, `notification`, `tenant`, `authz`, `auth`, `navigation`, `logging`, `llm`, `compliance`) have one under `internal/core/<name>/`. Each also has a published page under [`../docs/site/modules/core/`](../docs/site/modules/core/) — the AGENTS.md is the contract, the page is the reference; **update both** when you change a module.
 - **Use the module system** — don't add routes or init logic directly to main.go
 - **Use `pkg/sdk/iface`** for cross-module deps — never import another module's services package from module.go
 - **Validate all inputs**, implement RBAC on every endpoint, never expose secrets in responses

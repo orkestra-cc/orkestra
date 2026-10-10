@@ -7,12 +7,12 @@ _Parent: [../../AGENTS.md](../../AGENTS.md)_
 
 ## What this is
 
-The eight modules under `backend/internal/core/` are the always-loaded kernel of the Orkestra backend. Every deployment boots them — they provide identity, multi-tenancy, permissions, navigation, outbound mail, runtime log-level admin, and the compliance plane (audit + GDPR DSR). Optional modules a fork adds under `backend/internal/addons/` are opt-in (toggled at `/admin/modules`); core is not. Per [ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md) the base ships **no** addons.
+The nine modules under `backend/internal/core/` are the always-loaded kernel of the Orkestra backend. Every deployment boots them — they provide identity, multi-tenancy, permissions, navigation, outbound mail, runtime log-level admin, language-model access (credentials, models, grants, gateway), and the compliance plane (audit + GDPR DSR). Optional modules a fork adds under `backend/internal/addons/` are opt-in (toggled at `/admin/modules`); core is not. Per [ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md) the base ships **no** addons.
 
 Load order is topologically sorted from each module's `Dependencies()` by `ModuleRegistry.InitAll` (`pkg/sdk/module/registry.go:115-217`):
 
 ```
-user → notification → tenant → authz → auth → navigation → logging → compliance
+user → notification → tenant → authz → auth → navigation → logging → llm → compliance
 ```
 
 The registry walks this DAG, constructs each module, auto-creates its MongoDB collections, seeds its module_configs document, collects its nav items, wires its services into the registry, and registers its routes behind a gate (core routes are not gated — the gate only applies to optional addons).
@@ -30,6 +30,7 @@ The AGENTS.md is the **contract** (invariants, wiring, rules — read before edi
 | **auth** | Email/password + OAuth 2.1, JWT issuance, sessions-per-device, refresh rotation | [auth/AGENTS.md](auth/AGENTS.md) | [auth](../../../docs/site/modules/core/auth.mdx) |
 | **navigation** | Role-filtered sidebar aggregated from every module's `NavItems()` + persisted ordering overrides via `/admin/modules/navigation` | [navigation/AGENTS.md](navigation/AGENTS.md) | [navigation](../../../docs/site/modules/core/navigation.mdx) |
 | **logging** | Runtime log-level admin (ADR-0005 Phase F): atomic-snapshot `LevelResolver` swap behind `PerModuleLevelHandler` | [logging/AGENTS.md](logging/AGENTS.md) | [logging](../../../docs/site/modules/core/logging.mdx) |
+| **llm** | Org-scoped LLM API-key credentials (envelope-sealed), model catalog with capabilities and purposes, per-user grants, `iface.LLMGateway` for addons (ADR-0022) | [llm/AGENTS.md](llm/AGENTS.md) | [llm](../../../docs/site/modules/core/llm.mdx) |
 | **compliance** | Audit trail (`iface.AuditSink`) + GDPR DSR (`iface.PIIProducer` export/erasure), per-tenant KMS crypto-shred, legal hold, retention, SOC2 evidence (ADR-0009, always-on) | [compliance/AGENTS.md](compliance/AGENTS.md) | [compliance](../../../docs/site/modules/core/compliance.mdx) |
 
 ## Dependency graph
@@ -64,11 +65,18 @@ The AGENTS.md is the **contract** (invariants, wiring, rules — read before edi
               │  logging   │ ◄── owns `log_levels` collection;
               └────────────┘     hot-swaps slog handler's LevelResolver
                                  (ADR-0005 Phase F)
+                    │
+                    ▼
+              ┌────────────┐
+              │    llm     │ ◄── hard deps: user, tenant, notification;
+              └────────────┘     registers ServiceLLMGateway
+                                 (ADR-0022)
 ```
 
 Edges:
 - **Hard dependency** (listed in `Dependencies()` → blocks boot if missing): `tenant → user`, `authz → user, tenant`, `auth → user, notification, tenant, authz`.
 - **Soft runtime dependency** (`OptionalServices()` → graceful degradation): `auth → notification` (signup still works, but returns 503 when `AUTH_REQUIRE_EMAIL_VERIFICATION=true` and the sender is not configured).
+- **llm** declares `user`, `tenant`, `notification` and requires `ServiceTenantDirectoryReader`. `compliance` does **not** declare a dependency on it (the gateway is optional there), so the order `llm → compliance` is a property of the catalog, pinned by `cmd/server/core_load_order_test.go`: compliance pushes its KMS provider and audit sink into the gateway from its own Init.
 - **Navigation** has no declared dependencies; it reads the already-populated `ServiceNavItems` at init time, so it transitively sees every other module.
 
 ## Service registry keys (core subset)
@@ -95,6 +103,7 @@ Constants live in `backend/pkg/sdk/module/services.go:13-32`. This is the table 
 | `ServiceOAuthStateService` | auth | `*services.OAuthStateService` | |
 | `ServiceOAuthProviderRepo` | auth | `*repository.OAuthProviderRepository` | |
 | `ServiceLogLevelModuleNames` | main.go (pre-`InitAll`) | `[]string` | catalog of registered module names; consumed by `logging` to render the admin view's per-module rows |
+| `ServiceLLMGateway` | llm | `*services.Gateway` (satisfies `iface.LLMGateway`, `iface.KMSProviderSetter`, `iface.AuditSinkSetter`) | consumed by addons; compliance pushes KMS + audit sink into it after its own Init |
 | `ServiceLogLevelResolver` | logging | `*services.LogLevelService` (satisfies `utils.LevelResolver`) | DB-backed `LevelResolver`; main.go hot-swaps it onto `PerModuleLevelHandler` via `utils.SwapLevelResolver` after `InitAll` (ADR-0005 Phase F) |
 
 `module.RedisClient` (`pkg/sdk/module/redis.go`) carries `Incr` + `Expire` alongside Get/Set/Del/Keys. They exist because a read-modify-write counter over Get/Set silently loses concurrent increments — the MFA per-challenge attempt cap was built that way, which made "5 guesses" true only for a serial attacker. Any consumer capping attempts must use `Incr`, not Get/Set.

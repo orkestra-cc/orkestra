@@ -499,5 +499,5 @@ the above plus `backend-tenantscope` and a single binary build.
   walkthrough aimed at new contributors
 - [Backend module system](../../AGENTS.md#module-system) — how the
   registry consumes the SDK at boot
-- [Core modules](../../internal/core/AGENTS.md) — the eight always-loaded
+- [Core modules](../../internal/core/AGENTS.md) — the nine always-loaded
   modules, all of which implement `module.Module`
