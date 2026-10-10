@@ -9,7 +9,7 @@ _Parent: [../AGENTS.md](../AGENTS.md)_
 
 Owns everything an installation needs to let its modules call a language model: the org-scoped **API-key credentials** (secrets sealed in an envelope), the **model catalog** (capabilities, purposes with priority, who pays), the per-user **grants** that decide who may use a model, and `iface.LLMGateway`, the only surface other modules use to call a model ([ADR-0022](../../../../docs/adr/0022-core-llm-module.md)). Tier 1 only: every row belongs to an **internal** organization.
 
-Delivery is in three steps and this file documents what is built. **Built:** catalog, access resolver, envelope vault, admin and self routes, PIIProducer (PR 1 scope: grants and actor ids), late KMS/audit wiring, `Resolve` and `ListUsable`; the six provider adapters, the router (budget reservation, breaker, same-kind fallback, ledger finalization, metrics), the usage ledger, monthly rollup and budget, budget alerts through a durable outbox, the reconciler, the retention purge, credential test, model discovery, the admin prompt test, the usage report and budget routes. **Not yet built:** the PIIProducer sections for usage rows and budget recipients (still to come in this PR; the usage DSR repository methods exist but the producer does not call them yet), and Sign in with ChatGPT (`user_account` credentials answer `ErrLLMUserAccountRequired`). Do not document or depend on those as present.
+Delivery is in three steps and this file documents what is built. **Built:** catalog, access resolver, envelope vault, admin and self routes, late KMS/audit wiring, `Resolve` and `ListUsable`; the six provider adapters, the router (budget reservation, breaker, same-kind fallback, ledger finalization, metrics), the usage ledger, monthly rollup and budget, budget alerts through a durable outbox, the reconciler, the retention purge, credential test, model discovery, the admin prompt test, the usage report and budget routes; the PIIProducer over grants, actor ids, usage rows, budgets and delivered alerts. **Not yet built:** Sign in with ChatGPT (`user_account` credentials answer `ErrLLMUserAccountRequired`). Do not document or depend on it as present.
 
 ## What it owns
 
@@ -32,33 +32,55 @@ Delivery is in three steps and this file documents what is built. **Built:** cat
 | `providers/transport.go` | `NewHTTPClient`: dial-time `netguard.IsPublicIP` on every resolved address in production-like mode, no proxy, no redirects, response cap on every response unless the request opted into streaming with `providers.WithStreaming(ctx)` (then idle timeout instead; never inferred from the response Content-Type); `sdkopts.go` builds SDK clients with explicit options only (no env leakage) |
 | `services/access.go` | `AccessResolver`: live models (active + `providerGate` under the live config + active org credential), usable models, candidates per purpose and capability need |
 | `services/gateway.go` | `Gateway` implementing `iface.LLMGateway`, `iface.KMSProviderSetter`, `iface.AuditSinkSetter`; request limits |
+| `services/router.go`, `services/breaker.go`, `services/credentials_org.go` | `Router`: candidates → reservation → breaker → attempt → same-kind fallback → finalization (see «Routing»); `Breaker` per provider identity; `OrgCredentialResolver` opens an org credential just in time |
+| `services/budget.go`, `services/estimate.go` | `BudgetService`: `Reserve`/`Finalize` over `BudgetStore` (repository), the conservative token estimate (`ceil(bytes/3)`) |
+| `services/reconciler.go`, `services/outbox.go` | `Reconciler` (closes expired pending rows), `OutboxWorker` (leased, at-least-once alert delivery) |
 | `services/pii_producer.go` | `PIIProducer` (subject `llm`) over the DSR repository slices |
 | `services/errors.go` | Service sentinels |
 | `repository/{credentials,models,grants}.go` | `tenantrepo`-scoped Mongo access, plus the DSR methods |
+| `repository/{usage,budgets,outbox}.go` | Ledger + monthly rollup (`Usage`, `Monthly`, `WithTxn`), `Budgets`, `Outbox`, and `BudgetStore` (the transactions of admission and finalization); the system sweeps and DSR methods |
+| `providers/{openai,openai_compatible,anthropic,gemini,ollama,mock}.go` | The six adapters (see «Providers»); `classify.go` maps provider failures onto the `iface.ErrLLM*` sentinels; `sse.go` the bounded event-stream decoder |
 | `models/` | `Credential`, `Model`, `LLMGrant`, `Envelope`, DTOs/bodies, validation, `ErasedActor` |
 | `providers/provider.go` | Internal adapter contract (`Provider`, `ChatCall`, `ChatOutcome`, `EmbedCall`, …) and an empty `Registry` |
 
 ## MongoDB collections
 
-All three carry `tenantId` (the internal org) and are read and written only through `pkg/sdk/tenantrepo` (`Scope` on every query, `StampInsert` on every insert).
+All seven carry `tenantId` (the internal org) and are read and written only through `pkg/sdk/tenantrepo` (`Scope` on every query, `StampInsert` on every insert), except the system sweeps and DSR methods listed below.
 
 | Collection | Key fields | Indexes |
 |---|---|---|
 | `llm_credentials` | `uuid`, `tenantId`, `name`, `provider`, `baseUrl`, `secret` (envelope), `secretLast4`, `status`, `lastTestedAt`/`lastTestStatus`/`lastTestError` (written only by `Credentials.SetTestResult`), `createdBy`, timestamps | unique `(tenantId, name)`; unique `(tenantId, uuid)`; `(tenantId, provider)` |
 | `llm_models` | `uuid`, `tenantId`, `name`, `provider`, `modelId`, `capabilities`, `credentialRef{kind, credentialUuid}`, `defaults`, `budgetReserveOutputTokens`, `purposes[]{purpose, priority}`, `access`, `grantsRevision` (internal, `json:"-"`), `status`, `createdBy`, timestamps | unique `(tenantId, name)`; unique `(tenantId, uuid)`; `(tenantId, status, purposes.purpose)`; `(tenantId, credentialRef.credentialUuid)` |
 | `llm_grants` | `uuid`, `tenantId`, `modelUuid`, `userUuid`, `grantedBy`, `createdAt` | unique `(tenantId, modelUuid, userUuid)`; `(tenantId, userUuid)` |
+| `llm_usage` | one row per logical call: `uuid`, `userUuid`, `modelUuid`, `provider`, `modelId`, `credentialKind`, `credentialUuid`, `caller`, `purpose`, token counters, `reservedTokens`/`reservedOutputTokens`/`reservationExpiresAt` (pending only), `latencyMs`, `outcome` (`pending\|ok\|fallback\|error\|budget_blocked`), `errorCode`, `fallback`, `attempts[]` (≤8, counters only), `createdAt`, `finalizedAt`. Never a prompt or an output | unique `(tenantId, uuid)`; `(tenantId, createdAt)`, `(tenantId, userUuid, createdAt)`, `(tenantId, modelUuid, createdAt)`; partial `(outcome, reservationExpiresAt)` on pending; `createdAt` |
+| `llm_usage_monthly` | per org and UTC month: `period`, `requests`, org/user-account input/output counters, `reservedTokens`, `warnedAt`, `exhaustedAt` | unique `(tenantId, period)` |
+| `llm_budgets` | `monthlyTokenLimit`, `warnPct`, `action` (`block\|warn_only`), `notifyExtraUserUuids[]`, `updatedBy`, `updatedAt`; no document = no budget | unique `tenantId` |
+| `llm_budget_outbox` | `uuid`, `period`, `threshold` (`warn\|exhausted`), `payload` (counters only), `status` (`pending\|sending\|sent\|failed`), `attempts`, `nextAttemptAt`, `leaseUntil`, `deliveredTo[]` (user UUIDs), `createdAt`, `sentAt` | unique `(tenantId, period, threshold)`; unique `(tenantId, uuid)`; `(status, nextAttemptAt)` |
 
 The unique `(tenantId, name)` index backs `repository.ErrDuplicateName`; the unique grant triple is a last line of defence (concurrent `Grants.Replace` calls are serialized by their transaction, so a duplicate is a real error and aborts it).
 
-**`//tenantscope:allow dsr:` — there are exactly eight**, all subject-scoped data-subject-rights queries that cross organizations, reached only from the compliance pipeline through `iface.PIIProducer`:
+**`//tenantscope:allow system:` — there are exactly five**, all ticker jobs that find work across organizations and then handle each row under its own stamped `tenantId`:
+
+| Method | Job |
+|---|---|
+| `Usage.ListPendingExpired` | reconciler (every minute): pending rows whose reservation expired |
+| `Usage.PurgeBefore` | daily retention: finalized rows older than `usage_retention_days` |
+| `Monthly.PurgeOlderThan` | daily retention: rollups older than 24 months |
+| `Outbox.LeaseDue` | outbox worker (every 30s): the next due alert |
+| `Outbox.PurgeSettledBefore` | daily retention: `sent`/`failed` alerts older than the ledger cutoff |
+
+**`//tenantscope:allow dsr:` — there are exactly sixteen**, all subject-scoped data-subject-rights queries that cross organizations, reached only from the compliance pipeline through `iface.PIIProducer`:
 
 | Repository | Methods |
 |---|---|
 | `Grants` | `DeleteByUser`, `ListByUserAllTenants`, `ListByGranter`, `PseudonymizeGranter` |
 | `Credentials` | `ListByCreator`, `PseudonymizeCreator` |
 | `Models` | `ListByCreator`, `PseudonymizeCreator` |
+| `Usage` | `ListByUserAllTenants`, `DeleteByUser` (skips pending rows), `AnonymizeByUser` (one random replacement per row) |
+| `Budgets` | `ListReferencingUser`, `RemoveRecipient`, `PseudonymizeUpdater` |
+| `Outbox` | `ListDeliveredTo`, `RemoveDelivered` |
 
-Resolving the subject's organizations through memberships is not an option: the tenant producer runs first and deletes the memberships, which would orphan the grants (the same reasoning as the authz precedent). No other query, and no baseline entry, is exempt from `tenantscope`.
+Resolving the subject's organizations through memberships is not an option: the tenant producer runs first and deletes the memberships, which would orphan the grants (the same reasoning as the authz precedent). No other query, and no baseline entry, is exempt from `tenantscope`. The usage DSR queries filter on `userUuid` alone (no index leads with it): a scan per erasure request, accepted because requests are rare and the ledger is bounded by retention.
 
 ### Secret envelope
 
@@ -147,6 +169,40 @@ The nav item `/admin/llm` has `MinRole: administrator`; the console additionally
 3. candidates are ordered by the purpose's priority (lower wins), then name;
 4. a `ModelUUID` pin must be among the candidates (`ErrLLMModelAccessDenied` otherwise) — pinning never widens access.
 
+## Routing
+
+`Router.run` for one logical `Chat`/`Embed`:
+
+1. **Candidates** from `AccessResolver.Candidates` (live models, purpose, capabilities, pin).
+2. **Reservation**: `BudgetService.Reserve` inserts the `pending` ledger row and reserves estimated input + reserved output against the month (see «Budget semantics»). A refusal is a `budget_blocked` row and `ErrLLMBudgetExceeded`, before any provider call. The reservation TTL is `2 × request_timeout + 60s`; the call must end by `TTL − 5s` (the finalization window), so a reservation never expires under a running call, and an attempt that would not fit is not started.
+3. **Breaker** per `provider|baseUrl|modelId|credentialUuid` (3 consecutive provider faults → open 30s, then a single half-open probe; `Release` frees a probe that ended without a verdict). Only provider faults count (ruling 5.2): unavailability, provider timeouts, 5xx, rejected credentials, exhausted quota — never a caller cancel, a deadline the caller lowered below `request_timeout`, an invalid request, a capability gap, the budget or the linked account.
+4. **Attempt** with the provider adapter under `min(request_timeout, caller deadline)`.
+5. **Fallback** to the next candidate **with the same `credentialKind`** (D12: the payer never changes) unless the failure is final (`fallbackable`): a caller cancel or a deadline (an attempt that ran out its own deadline included), the budget, the linked-account errors, an exhausted quota (and a circuit it opened), an invalid request and partial output are final. An unavailable provider, a rejected credential, an adapter that cannot be built and an open circuit — one opened by timeouts included — move on; a capability gap skips the candidate. At most 8 attempts are ledgered.
+6. **Finalization** on `context.WithoutCancel` with a 5s bound: the row's outcome (`ok`, `fallback`, `error`), attempts, real tokens and the model that answered; the rollup releases the reservation and adds the tokens to the payer's counters; thresholds crossed enqueue alerts. Metrics `orkestra_llm_requests_total{provider,outcome}` and `orkestra_llm_tokens_total{provider,direction}`.
+7. **Reconciler** closes any `pending` row whose owner died after its TTL, charging the whole reservation (outcome `error`, code `reconciled_timeout`, through `Finalize`; a late router finalize then gets `ErrAlreadyFinalized` and never counts twice).
+
+## Providers
+
+All adapters go through `providers.NewHTTPClient` (dial-time `netguard`, no proxy, no redirects, bounded bodies, SDK retries off) and never surface provider text: failures are reduced to allowlisted identifiers and classified onto the `iface.ErrLLM*` sentinels.
+
+| Provider | Implementation | Not supported |
+|---|---|---|
+| `openai` | `github.com/openai/openai-go` (Responses API) | embeddings on the `user_account` profile (PR 3) |
+| `anthropic` | `github.com/anthropics/anthropic-sdk-go` (Messages API) | embeddings (no endpoint) |
+| `gemini` | `google.golang.org/genai` (Developer API) | — (thought signatures travel in `ChatToolCall.Signature`; the bypass fallback is unverified live) |
+| `ollama` | hand-written, native `/api/chat` (ndjson), `/api/embed`, `/api/tags` | — (key optional, sent as Bearer for proxied deployments) |
+| `openai_compatible` | hand-written Chat Completions (SSE), `/embeddings`, `/models` | — (key optional, for keyless vLLM / llama.cpp; the catalog still decides whether a credential needs one) |
+| `mock` | deterministic echo / tool call / hash embedding | never selectable in production-like environments |
+
+After any SDK bump run `make backend-vulncheck`: the three SDKs pull transitive dependencies (`go.yaml.in/yaml/v4` among them).
+
+## Operational
+
+- **Tickers** (`Start`): outbox worker every 30s (lease 2 min, backoff 1 → 64 min, 20 attempts then `failed`), reconciler every minute, retention first after 1 min then daily. All stop with `Stop`.
+- **Metrics** (ADR-0002): `orkestra_llm_requests_total{provider,outcome}` (`ok\|fallback\|error\|budget_blocked`) and `orkestra_llm_tokens_total{provider,direction}` (`input\|output`, as ledgered, partial-output charges included). Labels are collapsed to closed sets.
+- **Notification templates**: `llm.budget_warning`, `llm.budget_exhausted` (en/it, category `llm.budget`, transactional). With the notification module in `noop` the rendered alert is logged on the backend.
+- **Admin ops limits**: credential test and model discovery 10/min per org + credential, prompt test 10/min per org + user (`llm.rate_limited`, `Retry-After`).
+
 ## Budget semantics
 
 - **Admission, not a kill switch.** A call reserves estimated input + reserved output in one transaction that admits it only if `consumed + reserved + requested <= limit`; real usage can exceed the reservation (a long answer). Under `warn_only` it is admitted anyway; an unknown action blocks (fail closed).
@@ -169,14 +225,16 @@ The nav item `/admin/llm` has `MinRole: administrator`; the console additionally
 - **Model defaults are bounded like request options:** `defaults.temperature` 0–2 (NaN refused), `defaults.maxOutputTokens` 1–`models.MaxOutputTokens` (131072, the `budget_reserve_output_tokens` maximum). The per-model override `budgetReserveOutputTokens` is stored as 1–131072 or absent: on create, absent or `0` means no override; on `PATCH`, absent keeps the stored value and `0` clears it (back to the module default) — a pointer field cannot tell absent from `null`, so `0` is the clear value and both schemas accept `minimum: 0` (`models.budgetOverride`).
 - **Endpoints**: fixed vendor URLs for `openai`/`anthropic`/`gemini`; `ollama`/`openai_compatible` need a `baseUrl`; `mock` takes none. In production-like environments only public HTTPS is accepted. The string check is the first line only — `providers.NewHTTPClient` re-validates every resolved address at dial time with `netguard.IsPublicIP`; adapters must build their SDK clients through `providers.OpenAIClientOptions` / `AnthropicClientOptions` / `GeminiClientConfig`.
 - **Tool-call signatures**: `iface.ChatToolCall.Signature` is opaque provider state (Gemini 3 thought signatures, base64, ≤64 KiB) that the producing adapter sets on output and echoes on replay; never parse, log or show it, and other adapters ignore it. An unsigned first call of a replayed step in the current turn gets Google's documented bypass value (unverified against the live API).
-- **Data-subject rights.** Export uses explicit projections (never a raw model). Erasure deletes the grants the subject holds and rewrites `createdBy`/`grantedBy` to the fixed constant `models.ErasedActor` (`erased-subject`), not derived from the user. An empty subject is refused (`ErrEmptySubject`) before any query, in export and purge. Credentials, models and grants issued to others are org assets and stay.
+- **Data-subject rights.** Export uses explicit projections (never a raw model): grants held and issued, credentials and models created (references only), usage rows (counters, codes, model, purpose, caller, attempts, dates — never a prompt, `credentialUuid` or reservation fields), budgets naming the subject (as extra recipient or `updatedBy`) and the alerts delivered to them. Erasure deletes the grants the subject holds; rewrites `createdBy`/`grantedBy`/budget `updatedBy` to the fixed constant `models.ErasedActor` (`erased-subject`), not derived from the user; removes the subject from `notifyExtraUserUuids` and `deliveredTo`. Usage rows: `EraseHardDelete` deletes the finalized ones; `EraseAnonymize` keeps them with `userUuid` replaced and `credentialUuid` removed; pending rows (their reservation is still in the rollup) are anonymized in both modes and left to retention. An empty subject is refused (`ErrEmptySubject`) before any query, in export and purge. Credentials, models, budgets and grants issued to others are org assets and stay.
+- **Usage anonymization is per row (ruling 5.8).** Each kept row gets its own `erased-<random uuid>`, never one pseudonym per subject: a per-subject value would keep the rows linkable into a behavioural profile (times, models, callers, purposes) that, in a small org and joined with other records, can single the person out. Per row, each is one isolated event with counters; the residual risk (matching one row's timestamp against an external log) reveals one call's token counts and ends with retention. The cost is that anonymized rows appear as separate keys in the by-user report. Do not switch to a per-subject value without a new documented assessment in the spec.
 - **Huma schema names are package-less**, and Huma panics on duplicates. Every HTTP-visible type here carries the `LLM` prefix (`LLMCredentialView`, `LLMModelBody`, `LLMGrant`, …) because `auth` already owns `CredentialView`. Methods on `Credential` and `Model` have pointer receivers for the same family of reasons (Huma's schema-link transformer cannot rebuild a struct embedding a type with a value method set).
 - **Capabilities are persisted through `models.LLMModelCapabilities`** (explicit `bson` tags), not `iface.LLMCapabilities` (json-only, it would be stored lower-cased).
 - **No cross-module imports.** Tenant membership comes through `iface.TenantDirectoryReader`; compliance reaches this module only through the registered service and its two setter interfaces.
 
 ## Known limitations
 
-- Granting from the console also needs `system.tenants.admin`, because the member picker uses the tenant API; a member endpoint scoped to `llm` is a candidate for a later step.
+- Granting from the console, and choosing extra budget recipients, also need `system.tenants.admin`, because both member pickers use the tenant API; a member endpoint scoped to `llm` is a candidate for a later step.
+- The usage report grouped by user shows user UUIDs, not names (and anonymized rows as `erased-…` keys).
 - The admin rate limits need Redis; without `deps.RedisAdapter` (or during a Redis outage) they allow every call (fail open, as auth does).
 
 ## Verification
@@ -188,6 +246,9 @@ cd backend && go test ./internal/core/llm/... ./pkg/sdk/iface/...
 MONGO_TEST_URI='mongodb://admin:<pw>@127.0.0.1:27018/?authSource=admin&directConnection=true' \
   go test ./internal/core/llm/repository/...
 make ci-backend   # lint, tenantscope, policycoverage, piiscan, logscope, vuln, tests, build, openapi-check
+make backend-vulncheck   # after every provider SDK bump
 ```
+
+The budget tests (`repository/budget_txn_test.go`, `services/budget_mongo_test.go`) exercise real multi-document transactions: they need `MONGO_TEST_URI` pointing at a replica set and skip without it, so a green run without the variable proves nothing about admission or finalization.
 
 When you add a route, re-run `make openapi-dump` from `backend/` (the spec is committed) and keep `llm.cedar` in step with `Permissions()`. When you change this module, update [the published page](../../../../docs/site/modules/core/llm.mdx) too.
