@@ -3398,6 +3398,706 @@
         ],
         "type": "object"
       },
+      "LLMCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "chat": {
+            "type": "boolean"
+          },
+          "dimensions": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "embeddings": {
+            "type": "boolean"
+          },
+          "streaming": {
+            "type": "boolean"
+          },
+          "structuredOutput": {
+            "type": "boolean"
+          },
+          "tools": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "chat",
+          "streaming",
+          "tools",
+          "structuredOutput",
+          "embeddings"
+        ],
+        "type": "object"
+      },
+      "LLMCredentialCreateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMCredentialCreateBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "baseUrl": {
+            "description": "Required for ollama and openai_compatible; fixed for cloud providers",
+            "maxLength": 512,
+            "type": "string"
+          },
+          "name": {
+            "description": "Display name, unique per organization",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "openai",
+              "anthropic",
+              "gemini",
+              "ollama",
+              "openai_compatible",
+              "mock"
+            ],
+            "type": "string"
+          },
+          "secret": {
+            "description": "API key, write-only",
+            "maxLength": 4096,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "provider"
+        ],
+        "type": "object"
+      },
+      "LLMCredentialListResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMCredentialListResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LLMCredentialView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "LLMCredentialPatchBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMCredentialPatchBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "baseUrl": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "LLMCredentialRef": {
+        "additionalProperties": false,
+        "properties": {
+          "credentialUuid": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "LLMCredentialRotateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMCredentialRotateBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "secret": {
+            "description": "New API key, write-only",
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "secret"
+        ],
+        "type": "object"
+      },
+      "LLMCredentialView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMCredentialView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "hasSecret": {
+            "type": "boolean"
+          },
+          "lastTestError": {
+            "type": "string"
+          },
+          "lastTestStatus": {
+            "type": "string"
+          },
+          "lastTestedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "secretLast4": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "hasSecret",
+          "uuid",
+          "name",
+          "provider",
+          "status",
+          "createdBy",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "LLMGrant": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "grantedBy": {
+            "type": "string"
+          },
+          "modelUuid": {
+            "type": "string"
+          },
+          "userUuid": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "modelUuid",
+          "userUuid",
+          "grantedBy",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "LLMGrantsPutBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMGrantsPutBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "access": {
+            "description": "granted: only the listed users; everyone: every member of the organization",
+            "enum": [
+              "granted",
+              "everyone"
+            ],
+            "type": "string"
+          },
+          "userUuids": {
+            "description": "Complete list; replaces the current grants",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "access",
+          "userUuids"
+        ],
+        "type": "object"
+      },
+      "LLMModelBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMModelBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "budgetReserveOutputTokens": {
+            "format": "int64",
+            "maximum": 131072,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/LLMModelCapabilities"
+          },
+          "credentialRef": {
+            "$ref": "#/components/schemas/LLMCredentialRef"
+          },
+          "defaults": {
+            "$ref": "#/components/schemas/LLMModelDefaults"
+          },
+          "modelId": {
+            "maxLength": 128,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "openai",
+              "anthropic",
+              "gemini",
+              "ollama",
+              "openai_compatible",
+              "mock"
+            ],
+            "type": "string"
+          },
+          "purposes": {
+            "items": {
+              "$ref": "#/components/schemas/LLMModelPurpose"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "provider",
+          "modelId",
+          "capabilities",
+          "credentialRef",
+          "defaults",
+          "purposes"
+        ],
+        "type": "object"
+      },
+      "LLMModelCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "chat": {
+            "type": "boolean"
+          },
+          "dimensions": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "embeddings": {
+            "type": "boolean"
+          },
+          "streaming": {
+            "type": "boolean"
+          },
+          "structuredOutput": {
+            "type": "boolean"
+          },
+          "tools": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "chat",
+          "streaming",
+          "tools",
+          "structuredOutput",
+          "embeddings"
+        ],
+        "type": "object"
+      },
+      "LLMModelDefaults": {
+        "additionalProperties": false,
+        "properties": {
+          "effort": {
+            "type": "string"
+          },
+          "maxOutputTokens": {
+            "format": "int64",
+            "maximum": 131072,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "temperature": {
+            "format": "double",
+            "maximum": 2,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "LLMModelInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/LLMCapabilities"
+          },
+          "credentialKind": {
+            "type": "string"
+          },
+          "modelId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "purposes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "name",
+          "provider",
+          "modelId",
+          "capabilities",
+          "credentialKind",
+          "purposes"
+        ],
+        "type": "object"
+      },
+      "LLMModelListResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMModelListResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LLMModelView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "LLMModelPatchBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMModelPatchBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "budgetReserveOutputTokens": {
+            "format": "int64",
+            "maximum": 131072,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/LLMModelCapabilities"
+          },
+          "credentialRef": {
+            "$ref": "#/components/schemas/LLMCredentialRef"
+          },
+          "defaults": {
+            "$ref": "#/components/schemas/LLMModelDefaults"
+          },
+          "modelId": {
+            "maxLength": 128,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "openai",
+              "anthropic",
+              "gemini",
+              "ollama",
+              "openai_compatible",
+              "mock"
+            ],
+            "type": "string"
+          },
+          "purposes": {
+            "items": {
+              "$ref": "#/components/schemas/LLMModelPurpose"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "LLMModelPurpose": {
+        "additionalProperties": false,
+        "properties": {
+          "priority": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "purpose": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "purpose",
+          "priority"
+        ],
+        "type": "object"
+      },
+      "LLMModelView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMModelView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "access": {
+            "type": "string"
+          },
+          "budgetReserveOutputTokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/LLMModelCapabilities"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "credentialRef": {
+            "$ref": "#/components/schemas/LLMCredentialRef"
+          },
+          "defaults": {
+            "$ref": "#/components/schemas/LLMModelDefaults"
+          },
+          "grants": {
+            "items": {
+              "$ref": "#/components/schemas/LLMGrant"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "modelId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "purposes": {
+            "items": {
+              "$ref": "#/components/schemas/LLMModelPurpose"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "grants",
+          "uuid",
+          "name",
+          "provider",
+          "modelId",
+          "capabilities",
+          "credentialRef",
+          "defaults",
+          "purposes",
+          "access",
+          "status",
+          "createdBy",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "LLMMyModelsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMMyModelsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LLMModelInfo"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "LegalHold": {
         "additionalProperties": false,
         "properties": {
@@ -10990,6 +11690,584 @@
         ]
       }
     },
+    "/v1/admin/llm/credentials": {
+      "get": {
+        "operationId": "admin-llm-credentials-list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMCredentialListResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "List LLM credentials of the current organization (secrets redacted)",
+        "tags": [
+          "LLM Admin"
+        ]
+      },
+      "post": {
+        "operationId": "admin-llm-credentials-create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMCredentialCreateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMCredentialView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Create an LLM credential (the API key is write-only)",
+        "tags": [
+          "LLM Admin"
+        ]
+      }
+    },
+    "/v1/admin/llm/credentials/{uuid}": {
+      "delete": {
+        "operationId": "admin-llm-credentials-delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Delete a credential (409 while an active model uses it)",
+        "tags": [
+          "LLM Admin"
+        ]
+      },
+      "get": {
+        "operationId": "admin-llm-credentials-get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMCredentialView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Get one LLM credential (secret redacted)",
+        "tags": [
+          "LLM Admin"
+        ]
+      },
+      "patch": {
+        "operationId": "admin-llm-credentials-patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMCredentialPatchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMCredentialView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Rename, re-point or disable a credential",
+        "tags": [
+          "LLM Admin"
+        ]
+      }
+    },
+    "/v1/admin/llm/credentials/{uuid}/rotate": {
+      "post": {
+        "operationId": "admin-llm-credentials-rotate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMCredentialRotateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMCredentialView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Replace the API key of a credential",
+        "tags": [
+          "LLM Admin"
+        ]
+      }
+    },
+    "/v1/admin/llm/models": {
+      "get": {
+        "operationId": "admin-llm-models-list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMModelListResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "List configured LLM models with their grants",
+        "tags": [
+          "LLM Admin"
+        ]
+      },
+      "post": {
+        "operationId": "admin-llm-models-create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMModelBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMModelView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Configure a model",
+        "tags": [
+          "LLM Admin"
+        ]
+      }
+    },
+    "/v1/admin/llm/models/{uuid}": {
+      "delete": {
+        "operationId": "admin-llm-models-delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Delete a configured model and its grants",
+        "tags": [
+          "LLM Admin"
+        ]
+      },
+      "get": {
+        "operationId": "admin-llm-models-get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMModelView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Get one configured LLM model with its grants",
+        "tags": [
+          "LLM Admin"
+        ]
+      },
+      "patch": {
+        "operationId": "admin-llm-models-patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMModelPatchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMModelView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Update the provided fields of a configured model",
+        "tags": [
+          "LLM Admin"
+        ]
+      }
+    },
+    "/v1/admin/llm/models/{uuid}/grants": {
+      "put": {
+        "operationId": "admin-llm-models-grants-put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMGrantsPutBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMModelView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Set who may use a model: access and the complete grant list",
+        "tags": [
+          "LLM Admin"
+        ]
+      }
+    },
     "/v1/admin/modules": {
       "get": {
         "description": "Returns all registered modules with their configuration and status",
@@ -17004,6 +18282,42 @@
         "summary": "List the permission catalog (system-generated)",
         "tags": [
           "Authorization"
+        ]
+      }
+    },
+    "/v1/llm/me/models": {
+      "get": {
+        "operationId": "llm-me-models",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMMyModelsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Models the current user may use in the current organization",
+        "tags": [
+          "LLM"
         ]
       }
     },
