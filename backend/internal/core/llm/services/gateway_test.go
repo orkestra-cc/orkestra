@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/orkestra/backend/internal/core/llm/models"
@@ -208,5 +209,47 @@ func TestProviderRegistry_UnknownKind(t *testing.T) {
 	}
 	if len(r.Kinds()) != 0 {
 		t.Fatalf("kinds = %v", r.Kinds())
+	}
+}
+
+func TestGateway_ChatRoutesThroughRouter(t *testing.T) {
+	g, _ := newGatewayWithModels(t)
+	env := newRouterEnv(t, nil, map[string]chatScript{"openai": ok("hi", 2, 1)})
+	g.SetRouter(env.r)
+	res, err := g.Chat(ctxFor("t1"), iface.ChatRequest{Caller: "test", Messages: []iface.ChatMessage{{Role: "user", Content: "hi"}}}, nil)
+	if err != nil || res.Model.UUID != "m-everyone" || res.Usage.OutputTokens != 1 {
+		t.Fatalf("res = %+v, %v", res, err)
+	}
+	if ev := singleLedger(t, env.store); ev.UserUUID != "u-admin" || ev.ModelUUID != "m-everyone" {
+		t.Fatalf("ledger = %+v", ev)
+	}
+	eres, err := g.Embed(ctxFor("t1"), iface.EmbedRequest{Caller: "test", Inputs: []string{"hi"}})
+	if err != nil || eres.Model.UUID != "m-embed" {
+		t.Fatalf("embed = %+v, %v", eres, err)
+	}
+}
+
+// PR 1 carry-over (T7.b): instructions, tool descriptions and the response
+// schema are bounded like messages and tool schemas.
+func TestGateway_BoundsInstructionsDescriptionsAndResponseSchema(t *testing.T) {
+	g := newGatewayForTest(t)
+	msg := []iface.ChatMessage{{Role: "user", Content: "x"}}
+	big := strings.Repeat("a", maxInstructionsBytes+1)
+	cases := map[string]iface.ChatRequest{
+		"instructions":     {Caller: "ok", Messages: msg, Instructions: big},
+		"tool description": {Caller: "ok", Messages: msg, Tools: []iface.ChatToolSpec{{Name: "f", Description: strings.Repeat("d", maxToolDescriptionBytes+1), InputSchema: map[string]any{}}}},
+		"response schema":  {Caller: "ok", Messages: msg, ResponseFormat: &iface.JSONSchemaFormat{Name: "out", Schema: map[string]any{"description": strings.Repeat("s", maxToolSchemaBytes)}}},
+		"response NaN":     {Caller: "ok", Messages: msg, ResponseFormat: &iface.JSONSchemaFormat{Name: "out", Schema: map[string]any{"x": math.NaN()}}},
+		"response name":    {Caller: "ok", Messages: msg, ResponseFormat: &iface.JSONSchemaFormat{Name: strings.Repeat("n", 65), Schema: map[string]any{}}},
+	}
+	for name, req := range cases {
+		if _, err := g.Chat(ctxFor("t1"), req, nil); !errors.Is(err, iface.ErrLLMInvalidRequest) {
+			t.Errorf("%s: err = %v, want ErrLLMInvalidRequest", name, err)
+		}
+	}
+	okReq := iface.ChatRequest{Caller: "ok", Messages: msg, Instructions: strings.Repeat("a", maxInstructionsBytes),
+		ResponseFormat: &iface.JSONSchemaFormat{Name: "out", Schema: map[string]any{"type": "object"}}}
+	if err := ValidateChatRequest(okReq); err != nil {
+		t.Fatalf("within bounds rejected: %v", err)
 	}
 }

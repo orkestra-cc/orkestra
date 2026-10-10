@@ -24,7 +24,10 @@ var (
 	// DSR queries would otherwise match every row with an empty actor.
 	ErrEmptySubject = errors.New("llm: data-subject request without a subject")
 	// ErrInvalidStatus, ErrProviderMismatch and ErrCredentialDisabled are
-	// validation details, always wrapped in iface.ErrLLMInvalidRequest.
+	// validation details, wrapped in iface.ErrLLMInvalidRequest by the
+	// catalog. On the call path (NewOrgCredentialResolver) the last two are
+	// wrapped in iface.ErrLLMProviderUnavailable instead: a credential
+	// disabled after candidate selection is not the caller's mistake.
 	ErrInvalidStatus    = errors.New("llm: status must be active or disabled")
 	ErrProviderMismatch = errors.New("llm: the credential provider does not match the model provider")
 	// ErrCredentialDisabled: a model that would end up active rides on a

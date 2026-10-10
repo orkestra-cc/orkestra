@@ -127,12 +127,16 @@ type Collector struct {
 	// oauthCompensationFailures counts failed backwards compensations on the
 	// OAuth signup reservation (auth spec §4.8 D32 item 5). Unlabelled: the
 	// value is a rate of residue the next callback heals, nothing to slice.
-	oauthCompensationFailures      prometheus.Counter
-	sessionAnchorAnomalies         *prometheus.CounterVec
-	attemptStoreFailures           *prometheus.CounterVec
-	authLockouts                   *prometheus.CounterVec
-	authMailDropped                *prometheus.CounterVec
-	tokenSweepDeleted              *prometheus.CounterVec
+	oauthCompensationFailures prometheus.Counter
+	sessionAnchorAnomalies    *prometheus.CounterVec
+	attemptStoreFailures      *prometheus.CounterVec
+	authLockouts              *prometheus.CounterVec
+	authMailDropped           *prometheus.CounterVec
+	tokenSweepDeleted         *prometheus.CounterVec
+	// llmRequests / llmTokens: the llm gateway's logical calls and token
+	// consumption. Closed label sets (ADR-0002): never a tenant or model id.
+	llmRequests                    *prometheus.CounterVec
+	llmTokens                      *prometheus.CounterVec
 	authzCacheInvalidationFailures prometheus.Counter
 	authzCacheInvalidationRefusals prometheus.Counter
 	logMaskingPanics               prometheus.Counter
@@ -300,6 +304,28 @@ func (c *Collector) buildMetrics() {
 		[]string{"template"},
 	)
 
+	c.llmRequests = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "llm",
+			Name:      "requests_total",
+			Help:      "Logical llm gateway calls (Chat/Embed) by provider and outcome: ok, fallback (answered by a later candidate), error, budget_blocked (refused by the org's monthly budget before any provider call).",
+		},
+		// Closed label sets: provider is one of the six adapter kinds,
+		// outcome one of llmOutcomes; anything else collapses to unknown.
+		[]string{"provider", "outcome"},
+	)
+
+	c.llmTokens = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "llm",
+			Name:      "tokens_total",
+			Help:      "Tokens charged by the llm gateway per provider and direction (input|output), as written to the usage ledger, including the conservative charge of attempts that failed after partial output.",
+		},
+		[]string{"provider", "direction"},
+	)
+
 	c.tokenSweepDeleted = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "orkestra",
@@ -415,7 +441,7 @@ func (c *Collector) Register() error {
 	if !atomic.CompareAndSwapUint32(&c.registered, 0, 1) {
 		return nil
 	}
-	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.oauthCompensationFailures, c.sessionAnchorAnomalies, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped, c.authzCacheInvalidationFailures, c.authzCacheInvalidationRefusals, c.logMaskingPanics, c.compliancePolicySnapshotAge} {
+	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.oauthCompensationFailures, c.sessionAnchorAnomalies, c.llmRequests, c.llmTokens, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped, c.authzCacheInvalidationFailures, c.authzCacheInvalidationRefusals, c.logMaskingPanics, c.compliancePolicySnapshotAge} {
 		if err := c.registry.Register(m); err != nil {
 			// rollback so the caller can retry with a fresh collector
 			atomic.StoreUint32(&c.registered, 0)
@@ -581,6 +607,31 @@ var (
 		"auth.mfa_factor_added": {},
 	}
 )
+
+var (
+	llmProviders  = map[string]struct{}{"openai": {}, "anthropic": {}, "gemini": {}, "ollama": {}, "openai_compatible": {}, "mock": {}}
+	llmOutcomes   = map[string]struct{}{"ok": {}, "fallback": {}, "error": {}, "budget_blocked": {}}
+	llmDirections = map[string]struct{}{"input": {}, "output": {}}
+)
+
+// RecordLLMRequest counts one llm gateway call by provider and outcome.
+// Both labels are closed sets (ADR-0002): unknown values collapse to
+// "unknown", never a tenant or model id.
+func (c *Collector) RecordLLMRequest(provider, outcome string) {
+	if c == nil || c.llmRequests == nil {
+		return
+	}
+	c.llmRequests.WithLabelValues(collapse(provider, llmProviders), collapse(outcome, llmOutcomes)).Inc()
+}
+
+// RecordLLMTokens adds n tokens charged to provider in direction
+// (input|output). A non-positive n is ignored.
+func (c *Collector) RecordLLMTokens(provider, direction string, n int64) {
+	if c == nil || c.llmTokens == nil || n <= 0 {
+		return
+	}
+	c.llmTokens.WithLabelValues(collapse(provider, llmProviders), collapse(direction, llmDirections)).Add(float64(n))
+}
 
 func collapse(v string, allowed map[string]struct{}) string {
 	if _, ok := allowed[v]; ok {
