@@ -5,8 +5,8 @@ import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import { byTimestamp } from 'components/common/advance-table/sorting';
 import type { PolicyAssignmentView } from 'store/api/complianceApi';
-import ComplianceEmptyState from '../ComplianceEmptyState';
-import ComplianceTable from '../ComplianceTable';
+import EmptyState from 'components/common/EmptyState';
+import SearchablePagedTable from 'components/common/advance-table/SearchablePagedTable';
 import { formatDateTime } from '../complianceFormat';
 
 // PolicyTenantsPanel lists the tenants under the policy, linking each to its
@@ -72,12 +72,12 @@ const PolicyTenantsPanel = ({
     }
   ];
   return assignments.length === 0 ? (
-    <ComplianceEmptyState
+    <EmptyState
       icon={faBuilding}
       message={t('adminCompliance.tenantsPanel.emptyMessage')}
     />
   ) : (
-    <ComplianceTable
+    <SearchablePagedTable
       data={assignments}
       columns={columns}
       searchPlaceholder={t('adminCompliance.tenantsPanel.searchPlaceholder')}

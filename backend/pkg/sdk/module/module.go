@@ -176,8 +176,9 @@ type HasInfraContainers interface {
 // before the registry brings up its infra containers. Returning an
 // error here surfaces directly to the admin UI without side effects.
 //
-// Typical use: agents requires aimodels to have a default LLM
-// configured; Preflight() returns a descriptive error otherwise.
+// Typical use: an addon that calls iface.LLMGateway
+// (ServiceLLMGateway) requires an active model to be configured;
+// Preflight() returns a descriptive error otherwise.
 type HasPreflight interface {
 	Preflight(ctx context.Context) error
 }

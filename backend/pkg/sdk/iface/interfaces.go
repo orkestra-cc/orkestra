@@ -370,34 +370,6 @@ type GraphProvider interface {
 }
 
 // ---------------------------------------------------------------------------
-// AIModelProvider — consumed by: rag, sales
-// Union of the methods both modules need for embedding + LLM access.
-// ---------------------------------------------------------------------------
-
-type AIModelProvider interface {
-	GetDefaultEmbeddingProvider(ctx context.Context) (EmbeddingProvider, error)
-	GetDefaultLLMProvider(ctx context.Context) (LLMProvider, error)
-	GetLLMProvider(ctx context.Context, uuid string) (LLMProvider, error)
-	GetEmbeddingProvider(ctx context.Context, uuid string) (EmbeddingProvider, error)
-	// GetDefaultLLMConfig returns the raw configuration of the default LLM
-	// model (provider name, model name, API key, base URL). Consumed by
-	// modules that need the underlying credentials, e.g. the agents
-	// module which passes them to the Hindsight container as env vars.
-	// Returns an error if no model is marked isDefault or if the module
-	// is disabled.
-	GetDefaultLLMConfig(ctx context.Context) (LLMConfig, error)
-}
-
-// LLMConfig is a serialization-friendly projection of an aimodels record
-// containing the fields needed to configure an external LLM client.
-type LLMConfig struct {
-	Provider string // "openai" | "anthropic" | "gemini" | "ollama"
-	Model    string // e.g. "gpt-4o-mini", "claude-3-5-sonnet"
-	APIKey   string // plaintext — callers must not log this
-	BaseURL  string // optional override for self-hosted / compat endpoints
-}
-
-// ---------------------------------------------------------------------------
 // RAGQueryProvider — consumed by: agents
 // The single query method the agents module wraps in its own RAGBridge.
 // ---------------------------------------------------------------------------
@@ -1512,6 +1484,13 @@ var ErrKMSKeyNotFound = newStringError("kms: key not found")
 // wrapped DEK has been scheduled for deletion (crypto-shred). Decrypt
 // returns this when called against a shredded key.
 var ErrKMSKeyDeleted = newStringError("kms: key scheduled for deletion")
+
+// ErrKMSCiphertextInvalid signals that Decrypt found the ciphertext
+// unopenable under the key: truncated, tampered with, or sealed with a
+// different key. It is a property of the stored data, distinct from a
+// shredded key (ErrKMSKeyDeleted) and from an infrastructure failure,
+// which implementations return unclassified.
+var ErrKMSCiphertextInvalid = newStringError("kms: ciphertext cannot be opened")
 
 // KMSProvider manages per-tenant envelope-encryption keys. Each
 // tenant's data is encrypted with a tenant-scoped Data Encryption Key

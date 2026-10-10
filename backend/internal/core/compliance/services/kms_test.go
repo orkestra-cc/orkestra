@@ -344,3 +344,45 @@ func bytes12(seed byte) []byte {
 	}
 	return out
 }
+
+// A ciphertext that does not open under its key (truncated, tampered, or
+// sealed with another tenant's key) is classified as
+// iface.ErrKMSCiphertextInvalid, so callers can tell corrupt data from a
+// shredded key or an infrastructure failure.
+func TestDecryptClassifiesInvalidCiphertext(t *testing.T) {
+	t.Parallel()
+	k := newTestKMS()
+	ctx := context.Background()
+	keyA, err := k.CreateKey(ctx, "t-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyB, err := k.CreateKey(ctx, "t-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ct, err := k.Encrypt(ctx, keyA, []byte("secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered := append([]byte(nil), ct...)
+	tampered[len(tampered)-1] ^= 0xff
+	for name, tc := range map[string]struct {
+		key string
+		ct  []byte
+	}{
+		"too short":   {keyA, ct[:5]},
+		"tampered":    {keyA, tampered},
+		"another key": {keyB, ct},
+	} {
+		if _, err := k.Decrypt(ctx, tc.key, tc.ct); !stderrors.Is(err, iface.ErrKMSCiphertextInvalid) {
+			t.Errorf("%s: err = %v, want ErrKMSCiphertextInvalid", name, err)
+		}
+	}
+	if err := k.DeleteKey(ctx, keyA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.Decrypt(ctx, keyA, ct); !stderrors.Is(err, iface.ErrKMSKeyDeleted) || stderrors.Is(err, iface.ErrKMSCiphertextInvalid) {
+		t.Errorf("shredded key err = %v, want ErrKMSKeyDeleted only", err)
+	}
+}

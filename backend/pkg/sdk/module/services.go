@@ -46,7 +46,7 @@ const (
 	ServiceOAuthProviderFactory ServiceKey = "auth.oauth_factory"
 	ServiceOAuthStateService    ServiceKey = "auth.oauth_state"
 	ServiceOAuthProviderRepo    ServiceKey = "auth.oauth_provider_repo"
-	ServiceAIModelProvider      ServiceKey = "aimodels.provider"
+	ServiceLLMGateway           ServiceKey = "llm.gateway" // iface.LLMGateway, registered by core/llm
 	ServicePDFService           ServiceKey = "documents.pdf"
 	ServiceGraphRepo            ServiceKey = "graph.repository"
 	ServiceRAGQuery             ServiceKey = "rag.query"
@@ -102,7 +102,8 @@ const (
 	// auth-policy roadmap. Value: *auth/services.AuthPolicyService.
 	ServiceAuthPolicy ServiceKey = "auth.policy"
 
-	ServiceTenantProvider ServiceKey = "tenant.provider"
+	ServiceTenantProvider        ServiceKey = "tenant.provider"
+	ServiceTenantDirectoryReader ServiceKey = "tenant.directory_reader" // iface.TenantDirectoryReader, registered by core/tenant
 	// ServiceAccessProvider is the polymorphic-owner capability-entitlement
 	// surface. Registered by the tenant module alongside ServiceTenantProvider
 	// because the entitlements projection lives in the tenant collection set

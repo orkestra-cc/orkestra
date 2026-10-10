@@ -5,15 +5,15 @@ _Audience: backend developers writing or modifying Orkestra modules (core or add
 > ## ⚠️ Reverted by ADR-0006
 > This doc describes the **multi-repo SDK split** (the SDK + each addon as its own published Go module, bound by `go.work` + `replace`). [ADR-0006](../adr/0006-collapse-to-core-only-base.md) **reverted** all of that and collapsed Orkestra to a core-only base:
 > - `pkg/sdk` is now an **in-tree package** of the single `github.com/orkestra/backend` module — imported as `github.com/orkestra/backend/pkg/sdk/...`. There is **no** separate `go.mod`, no `go.work`, no `replace`, and nothing published to the Go proxy.
-> - The 14 addons were **deleted** from the monorepo and their extracted repos archived. The base ships eight core modules (compliance was re-homed to core in v0.3.9 per ADR-0009) and an empty optional-module catalog.
+> - The 14 addons were **deleted** from the monorepo and their extracted repos archived. The base ships nine core modules (compliance was re-homed to core in v0.3.9 per ADR-0009) and an empty optional-module catalog.
 >
 > The SDK's *contract* (the `Module` interface, `ServiceRegistry`, `ConfigService`, `iface`, `tenantrepo`, …) is unchanged — only the packaging is. Read the sections below for that contract, but **mentally substitute the in-tree import path** for every `github.com/orkestra-cc/orkestra-sdk/...` and ignore the `go.work` / `replace` / publish / extract machinery. Current source of truth: [`backend/pkg/sdk/AGENTS.md`](../../backend/pkg/sdk/AGENTS.md).
 
 ## What the SDK is
 
 The Orkestra SDK is the **contract layer** between the backend kernel and
-every module — the eight core modules (`user`, `auth`, `authz`, `tenant`,
-`notification`, `navigation`, `logging`, `compliance`) plus any optional module a fork
+every module — the nine core modules (`user`, `auth`, `authz`, `tenant`,
+`notification`, `navigation`, `logging`, `llm`, `compliance`) plus any optional module a fork
 adds. It lives at `backend/pkg/sdk/` as an **in-tree package** of the
 single backend Go module, imported as:
 
@@ -373,7 +373,7 @@ Two flavors of lookup:
 
 Service keys are declared once in `pkg/sdk/module/services.go` (e.g.
 `ServiceUserService`, `ServiceTenantProvider`, `ServiceAuditSink`,
-`ServiceAIModelProvider`). When you publish a new service add the key
+`ServiceLLMGateway`). When you publish a new service add the key
 constant there.
 
 The interfaces themselves live in `pkg/sdk/iface/`. If you need to
@@ -491,7 +491,7 @@ interfaces every module shares. The biggest ones you'll encounter:
 | `NotificationSender` | `notification` | auth (verification + reset), subscriptions (dunning) |
 | `JWTProvider` | `auth` | dev token generator |
 | `PDFProvider` | `documents` | billing (invoice rendering) |
-| `AIModelProvider` | `aimodels` | rag, sales, agents |
+| `LLMGateway` | `llm` (core) | every addon that uses a language model |
 | `RAGQueryProvider` | `rag` | agents |
 | `AuditSink` | `compliance` | every module that emits audit events |
 | `BillingTenantProvider` | `tenant` | billing (CessionarioCommittente snapshot) |

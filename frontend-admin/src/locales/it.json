@@ -200,6 +200,22 @@
       "policy_reason_required": "Serve una motivazione da 1 a 500 caratteri.",
       "policy_unavailable": "Le policy si stanno caricando: riprova fra qualche secondo.",
       "policy_persistence_failed": "Non è stato possibile completare la richiesta."
+    },
+    "llm": {
+      "not_configured": "Nessun modello o credenziale attivi in questa organizzazione.",
+      "provider_unavailable": "Il provider non è raggiungibile in questo momento. Riprova più tardi.",
+      "no_eligible_model": "Nessun modello che puoi usare è configurato per questo scopo.",
+      "model_access_denied": "Non puoi usare questo modello.",
+      "capability_mismatch": "Il modello non offre ciò che serve alla richiesta.",
+      "invalid_request": "Alcuni campi non sono validi.",
+      "not_found": "La credenziale o il modello non esiste più.",
+      "name_in_use": "Un'altra credenziale o un altro modello ha già questo nome.",
+      "credential_in_use": "Un modello attivo usa ancora questa credenziale. Eliminalo o collegalo a un'altra credenziale prima.",
+      "secret_key_missing": "Questa installazione non ha una chiave di cifratura dei segreti, quindi le chiavi non possono essere salvate.",
+      "endpoint_not_allowed": "Questo endpoint non è consentito in questo ambiente.",
+      "hosted_disabled": "I provider in cloud sono disattivati nelle impostazioni del modulo llm.",
+      "mock_not_allowed": "Il provider mock è disponibile solo fuori dalla produzione.",
+      "grant_not_member": "Ogni utente autorizzato deve essere membro di questa organizzazione."
     }
   },
   "banner": {
@@ -2618,6 +2634,185 @@
       "kms_keys_active": "Chiavi KMS attive",
       "kms_keys_shredded": "Chiavi KMS distrutte",
       "audit_rows_24h": "Righe di audit (24h)"
+    }
+  },
+  "adminLlm": {
+    "pageTitle": "Modelli linguistici",
+    "pageSubtitle": "Le credenziali dei provider, i modelli che le usano e chi nell'organizzazione può usare ciascuno.",
+    "noAccess": "Non hai accesso ai modelli linguistici di questa organizzazione.",
+    "loadError": "Non è stato possibile caricare l'elenco.",
+    "tabs": {
+      "models": "Modelli",
+      "credentials": "Credenziali"
+    },
+    "actions": {
+      "cancel": "Annulla",
+      "save": "Salva",
+      "delete": "Elimina",
+      "retry": "Riprova"
+    },
+    "columns": {
+      "actions": "Azioni"
+    },
+    "status": {
+      "active": "Attivo",
+      "disabled": "Disattivato"
+    },
+    "providers": {
+      "openai": "OpenAI",
+      "anthropic": "Anthropic",
+      "gemini": "Google Gemini",
+      "ollama": "Ollama",
+      "openai_compatible": "Compatibile OpenAI",
+      "mock": "Mock (non per produzione)"
+    },
+    "credentialKind": {
+      "org": "Chiave API dell'organizzazione",
+      "user_account": "Account ChatGPT dell'utente"
+    },
+    "access": {
+      "granted": "Solo utenti autorizzati",
+      "everyone": "Tutta l'organizzazione"
+    },
+    "capabilities": {
+      "chat": "Chat",
+      "streaming": "Streaming",
+      "tools": "Strumenti",
+      "structuredOutput": "Output strutturato",
+      "embeddings": "Embedding"
+    },
+    "effort": {
+      "default": "Predefinito del provider",
+      "low": "Basso",
+      "medium": "Medio",
+      "high": "Alto"
+    },
+    "validation": {
+      "required": "Campo obbligatorio.",
+      "name": "Usa da 1 a 64 lettere, cifre, spazi, punti, trattini bassi o trattini, iniziando con una lettera o una cifra.",
+      "tooLong": "Il valore è troppo lungo.",
+      "url": "Inserisci un URL http o https, ad esempio http://ollama:11434.",
+      "modelId": "Usa da 1 a 128 lettere, cifre, punti, trattini, trattini bassi, due punti o barre.",
+      "purpose": "Usa una chiave minuscola come default o summarize.",
+      "number": "Inserisci un numero.",
+      "integer": "Inserisci un numero intero.",
+      "min": "Il minimo è {{min}}.",
+      "max": "Il massimo è {{max}}."
+    },
+    "errors": {
+      "generic": "L'operazione non è riuscita. Riprova."
+    },
+    "credentials": {
+      "add": "Aggiungi credenziale",
+      "edit": "Modifica",
+      "rotate": "Ruota chiave",
+      "delete": "Elimina",
+      "enable": "Attiva",
+      "disable": "Disattiva",
+      "enabled": "Credenziale attivata",
+      "disabled": "Credenziale disattivata",
+      "search": "Cerca credenziali",
+      "noSecret": "Nessuna chiave",
+      "secretTail": "•••• {{last4}}",
+      "noPermission": "Serve il permesso di gestire le credenziali LLM.",
+      "emptyTitle": "Nessuna credenziale",
+      "emptyHint": "Aggiungi la chiave API di un provider, poi configura un modello che la usa.",
+      "deleteTitle": "Elimina credenziale",
+      "deleteConfirm": "Eliminare la credenziale «{{name}}»? I modelli non potranno più usarla.",
+      "deleteSuccess": "Credenziale eliminata",
+      "saveSuccess": "Credenziale salvata",
+      "secretHint": "Conservata cifrata e mai più mostrata. Sono visibili solo gli ultimi quattro caratteri.",
+      "fixedEndpoint": "Questo provider usa sempre {{url}}.",
+      "hostedDisabledWarning": "I provider in cloud sono disattivati per questa installazione. Attiva «Allow hosted providers» nelle impostazioni del modulo llm prima di usare questa credenziale.",
+      "editorTitle": {
+        "create": "Nuova credenziale",
+        "edit": "Modifica «{{name}}»",
+        "rotate": "Ruota la chiave API di «{{name}}»"
+      },
+      "fields": {
+        "name": "Nome",
+        "provider": "Provider",
+        "baseUrl": "URL di base",
+        "baseUrlPlaceholder": "http://ollama:11434",
+        "secret": "Chiave API"
+      },
+      "columns": {
+        "name": "Nome",
+        "provider": "Provider",
+        "secret": "Chiave",
+        "status": "Stato",
+        "updated": "Aggiornata"
+      }
+    },
+    "models": {
+      "add": "Aggiungi modello",
+      "edit": "Modifica",
+      "delete": "Elimina",
+      "grants": "Chi può usarlo",
+      "grantsEveryone": "Tutta l'organizzazione può usare questo modello",
+      "search": "Cerca modelli",
+      "emptyTitle": "Nessun modello configurato",
+      "emptyHint": "Definisci un modello, le sue capacità e chi può usarlo.",
+      "needCredential": "Nessuna chiave API dell'organizzazione: aggiungine una in Credenziali, oppure aggiungi un modello addebitato al piano ChatGPT di ciascun utente.",
+      "noPermission": "Serve il permesso di gestire i modelli LLM.",
+      "deleteTitle": "Elimina modello",
+      "deleteConfirm": "Eliminare il modello «{{name}}» e le sue autorizzazioni?",
+      "deleteSuccess": "Modello eliminato",
+      "saveSuccess": "Modello salvato",
+      "grantsSaved": "Elenco degli accessi salvato",
+      "grantsNotSaved": "Il modello è stato salvato, ma il suo accesso e le sue autorizzazioni no. Usa «Chi può usarlo» per riprovare.",
+      "grantsNotSavedReason": "Il modello è stato salvato, ma il suo accesso e le sue autorizzazioni no: {{reason}} Usa «Chi può usarlo» per riprovare.",
+      "addTitle": "Nuovo modello",
+      "editTitle": "Modifica «{{name}}»",
+      "grantsTitle": "Chi può usare «{{name}}»",
+      "userAccountHint": "Questo modello è addebitato al piano ChatGPT di ciascun utente. Embedding, temperatura e token massimi non sono disponibili con questa modalità di addebito, e il modello deve esistere nel catalogo dell'account collegato.",
+      "purposeWithPriority": "{{purpose}} ({{priority}})",
+      "fields": {
+        "name": "Nome",
+        "provider": "Provider",
+        "credentialKind": "Addebitato a",
+        "credential": "Credenziale",
+        "credentialPlaceholder": "Scegli una credenziale",
+        "credentialDisabled": "{{name}} (disattivata)",
+        "noCredentialForProvider": "Nessuna chiave API attiva per questo provider. Aggiungine una in Credenziali, oppure addebita un modello OpenAI all'account ChatGPT di ciascun utente.",
+        "modelId": "ID del modello",
+        "modelIdPlaceholder": "gpt-5.6-terra",
+        "modelIdHint": "Lo slug del modello presso il provider, ad esempio gpt-5.6-terra, claude-opus-5-5, gemini-2.5-pro, llama3.1.",
+        "capabilities": "Capacità",
+        "dimensions": "Dimensioni del vettore",
+        "temperature": "Temperatura",
+        "maxOutputTokens": "Token massimi in uscita",
+        "effort": "Livello di ragionamento",
+        "purposes": "Scopi e priorità",
+        "purposeLabel": "Scopo {{index}}",
+        "priorityLabel": "Priorità dello scopo {{index}}",
+        "purposePlaceholder": "default",
+        "removePurpose": "Rimuovi scopo",
+        "addPurpose": "Aggiungi scopo",
+        "purposesHint": "Gli addon chiedono uno scopo; vince la priorità più bassa. Tieni un modello su «default».",
+        "access": "Accesso",
+        "grantees": "Utenti autorizzati",
+        "granteesPlaceholder": "Scegli i membri di questa organizzazione",
+        "granteesHint": "Gestire un modello non dà il diritto di usarlo.",
+        "granteesNoPermission": "Serve il permesso di gestire le autorizzazioni LLM per cambiare questo elenco.",
+        "noMembers": "Nessun membro corrispondente",
+        "membersError": "Non è stato possibile caricare i membri di questa organizzazione.",
+        "formerMember": "{{id}} (non più membro)",
+        "membersForbidden": "Per elencare i membri di questa organizzazione serve l'accesso di amministrazione dei tenant, quindi l'elenco delle autorizzazioni non si può modificare qui.",
+        "accessEveryoneHint": "Ogni membro dell'organizzazione può usare questo modello. Gli utenti autorizzati restano salvati e tornano a valere se reimposti l'accesso."
+      },
+      "columns": {
+        "name": "Nome",
+        "model": "Modello",
+        "billing": "Addebitato a",
+        "purposes": "Scopi",
+        "access": "Autorizzati",
+        "status": "Stato"
+      },
+      "enable": "Attiva",
+      "disable": "Disattiva",
+      "enabled": "Modello attivato",
+      "disabled": "Modello disattivato"
     }
   },
   "adminModules": {

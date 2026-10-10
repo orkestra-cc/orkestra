@@ -46,6 +46,7 @@ prod=(
     "COOKIE_SECRET=${hex32}${hex32}"
     "OAUTH_TOKEN_ENCRYPTION_KEY=${hex32}${hex32}"
     "ORKESTRA_KMS_MASTER_KEY=${hex32}${hex32}"
+    "LLM_SECRET_ENCRYPTION_KEY=${hex32}${hex32}"
     "MONGO_ROOT_PASSWORD=${hex32}"
     "REDIS_PASSWORD=${hex32}"
     "STORAGE_SECRET_KEY=${hex32}"
@@ -67,6 +68,26 @@ check "production: a short datastore password is refused"  "1"   "$(run "${prod[
 check "production: the refusal explains the length rule"   "yes" "$(saw 'REDIS_PASSWORD is shorter than 16 characters')"
 check "production: a set RustFS root password is checked"  "1"   "$(run "${prod[@]}" RUSTFS_ROOT_PASSWORD=changeme-rustfs)"
 check "production: an unset RustFS root is not an error"   "0"   "$(run "${prod[@]}")"
+
+# --- LLM_SECRET_ENCRYPTION_KEY must be exactly 64 hex chars: the backend
+# drops anything else with a WARN and disables secret writes, so this is the
+# only deploy-time gate. ---
+llm_nonhex=zzzzzzzzzzzzzzzzzzzz
+check "production: a 64-hex LLM key passes"                "0"   "$(run "${prod[@]}" "LLM_SECRET_ENCRYPTION_KEY=${hex32}${hex32}")"
+check "production: a non-hex LLM key is refused"           "1"   "$(run "${prod[@]}" "LLM_SECRET_ENCRYPTION_KEY=${llm_nonhex}")"
+check "production: the refusal names the 64-hex rule"      "yes" "$(saw 'LLM_SECRET_ENCRYPTION_KEY must be 64 hex characters')"
+check "production: the refusal gives the right hint"       "yes" "$(saw 'openssl rand -hex 32')"
+check "production: a 32-hex (16 byte) LLM key is refused"  "1"   "$(run "${prod[@]}" "LLM_SECRET_ENCRYPTION_KEY=${hex32}")"
+check "production: a 64-char non-hex LLM key is refused"   "1"   "$(run "${prod[@]}" "LLM_SECRET_ENCRYPTION_KEY=${llm_nonhex}${llm_nonhex}${llm_nonhex}zzzz")"
+check "production: an LLM key placeholder is refused"      "1"   "$(run "${prod[@]}" LLM_SECRET_ENCRYPTION_KEY=REPLACE_WITH_RANDOM_HEX_64_LLM_SECRET)"
+check "production: the placeholder refusal gives the 64-hex hint" "yes" "$(run "${prod[@]}" LLM_SECRET_ENCRYPTION_KEY=REPLACE_WITH_RANDOM_HEX_64_LLM_SECRET >/dev/null; saw 'LLM_SECRET_ENCRYPTION_KEY is empty or a placeholder — generate one with: openssl rand -hex 32')"
+check "production: a missing LLM key is refused"            "1"   "$(run "${prod[@]}" LLM_SECRET_ENCRYPTION_KEY=)"
+check "production: the missing-key refusal gives the 64-hex hint" "yes" "$(run "${prod[@]}" LLM_SECRET_ENCRYPTION_KEY= >/dev/null; saw 'LLM_SECRET_ENCRYPTION_KEY is empty or a placeholder — generate one with: openssl rand -hex 32')"
+check "staging: a non-hex LLM key is refused"              "1"   "$(run "${prod[@]}" ENV=staging "LLM_SECRET_ENCRYPTION_KEY=${llm_nonhex}")"
+check "development: a non-hex LLM key only warns"          "0"   "$(run "LLM_SECRET_ENCRYPTION_KEY=${llm_nonhex}")"
+check "development: the warning names the 64-hex rule"     "yes" "$(saw 'LLM_SECRET_ENCRYPTION_KEY must be 64 hex characters')"
+check "development: a 32-hex LLM key only warns"           "0"   "$(run "LLM_SECRET_ENCRYPTION_KEY=${hex32}")"
+check "development: a 64-hex LLM key passes silently"      "no"  "$(run "LLM_SECRET_ENCRYPTION_KEY=${hex32}${hex32}" >/dev/null; saw 'LLM_SECRET_ENCRYPTION_KEY must be')"
 
 # --- object storage may be disabled outright: both keys empty — but the bundled
 # rustfs container still starts with the infra stack and needs a root of its own ---

@@ -63,6 +63,10 @@ services:
       # Wraps per-tenant DEKs; losing this key invalidates every wrapped DEK.
       ORKESTRA_KMS_MASTER_KEY: ${ORKESTRA_KMS_MASTER_KEY}
 
+      # LLM module (ADR-0022) — dedicated key for provider API keys and
+      # linked-account tokens; 64 hex chars = 32 bytes.
+      LLM_SECRET_ENCRYPTION_KEY: ${LLM_SECRET_ENCRYPTION_KEY}
+
       # Cookie Configuration (maximum security)
       COOKIE_SECRET: ${COOKIE_SECRET}
       # Refresh-cookie name — the only cookie set in the browser (the access

@@ -8,8 +8,8 @@ import {
   useListAuditEventsQuery,
   type AuditEvent
 } from 'store/api/complianceApi';
-import ComplianceEmptyState from './ComplianceEmptyState';
-import ComplianceTable from './ComplianceTable';
+import EmptyState from 'components/common/EmptyState';
+import SearchablePagedTable from 'components/common/advance-table/SearchablePagedTable';
 import { formatDateTime, outcomeColor } from './complianceFormat';
 
 // AuditEventsTab renders the immutable audit trail (latest 50 events). Read-only.
@@ -78,13 +78,13 @@ const AuditEventsTab = () => {
   return isLoading ? (
     <Spinner animation="border" size="sm" className="mt-2" />
   ) : items.length === 0 ? (
-    <ComplianceEmptyState
+    <EmptyState
       icon={faClipboardList}
       message={t('adminCompliance.audit.emptyMessage')}
       hint={t('adminCompliance.audit.emptyHint')}
     />
   ) : (
-    <ComplianceTable
+    <SearchablePagedTable
       data={items}
       columns={columns}
       searchPlaceholder={t('adminCompliance.audit.searchPlaceholder')}

@@ -14,8 +14,8 @@ import {
   useListCompliancePoliciesQuery,
   type CompliancePolicyView
 } from 'store/api/complianceApi';
-import ComplianceEmptyState from './ComplianceEmptyState';
-import ComplianceTable from './ComplianceTable';
+import EmptyState from 'components/common/EmptyState';
+import SearchablePagedTable from 'components/common/advance-table/SearchablePagedTable';
 import { formatDateTime } from './complianceFormat';
 
 // PoliciesTab is the compliance policy catalog (spec §8): the platform policy
@@ -126,13 +126,13 @@ const PoliciesTab = () => {
       {isLoading ? (
         <Spinner animation="border" size="sm" className="mt-2" />
       ) : items.length === 0 ? (
-        <ComplianceEmptyState
+        <EmptyState
           icon={faScaleBalanced}
           message={t('adminCompliance.policies.emptyMessage')}
           hint={t('adminCompliance.policies.emptyHint')}
         />
       ) : (
-        <ComplianceTable
+        <SearchablePagedTable
           data={items}
           columns={columns}
           searchPlaceholder={t('adminCompliance.policies.searchPlaceholder')}

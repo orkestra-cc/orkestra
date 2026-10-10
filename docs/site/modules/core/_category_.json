@@ -4,6 +4,6 @@
   "link": {
     "type": "generated-index",
     "title": "Core modules",
-    "description": "The always-load core modules — user, notification, tenant, authz, auth, navigation, logging, compliance."
+    "description": "The always-load core modules — user, notification, tenant, authz, auth, navigation, logging, llm, compliance."
   }
 }

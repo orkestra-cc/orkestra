@@ -178,6 +178,7 @@ export interface AppPaths {
   exportFormatMenu: string;
   sortableGroupList: string;
   secretOnceDisplay: string;
+  searchablePagedTable: string;
   bootstrapCarousel: string;
   slickCarousel: string;
   collapse: string;
@@ -288,6 +289,7 @@ export interface AppPaths {
   refComponentsExportFormatMenu: string;
   refComponentsSortableGroupList: string;
   refComponentsSecretOnceDisplay: string;
+  refComponentsSearchablePagedTable: string;
   refComponentsCarouselBootstrap: string;
   refComponentsCarouselSlick: string;
   refComponentsCollapse: string;
@@ -514,6 +516,7 @@ const paths: AppPaths = {
   exportFormatMenu: `/${rootPaths.componentsRoot}/export-format-menu`,
   sortableGroupList: `/${rootPaths.componentsRoot}/sortable-group-list`,
   secretOnceDisplay: `/${rootPaths.componentsRoot}/secret-once-display`,
+  searchablePagedTable: `/${rootPaths.componentsRoot}/searchable-paged-table`,
   bootstrapCarousel: `/${rootPaths.componentsRoot}/${rootPaths.carouselRoot}/bootstrap`,
   slickCarousel: `/${rootPaths.componentsRoot}/${rootPaths.carouselRoot}/slick`,
   collapse: `/${rootPaths.componentsRoot}/collapse`,
@@ -625,6 +628,7 @@ const paths: AppPaths = {
   refComponentsExportFormatMenu: `/${rootPaths.referenceRoot}/components/export-format-menu`,
   refComponentsSortableGroupList: `/${rootPaths.referenceRoot}/components/sortable-group-list`,
   refComponentsSecretOnceDisplay: `/${rootPaths.referenceRoot}/components/secret-once-display`,
+  refComponentsSearchablePagedTable: `/${rootPaths.referenceRoot}/components/searchable-paged-table`,
   refComponentsCarouselBootstrap: `/${rootPaths.referenceRoot}/components/carousel/bootstrap`,
   refComponentsCarouselSlick: `/${rootPaths.referenceRoot}/components/carousel/slick`,
   refComponentsCollapse: `/${rootPaths.referenceRoot}/components/collapse`,

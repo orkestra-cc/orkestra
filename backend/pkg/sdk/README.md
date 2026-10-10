@@ -169,7 +169,7 @@ For the full new-developer walkthrough — `Dependencies` fields, `ConfigService
 | Package | Purpose |
 | --- | --- |
 | [`module`](module/) | The `Module` interface + 16 optional sub-interfaces, `BaseModule`, `ModuleRegistry`, `ServiceRegistry`, `ConfigService` (with AES-256-GCM secret helpers), `RouteInfo`, `RedisClient`, `Dependencies`, `PlatformInfo`. The boot kernel. |
-| [`iface`](iface/) | Cross-module interfaces — `UserProvider`, `TenantProvider`, `AuthzProvider`, `NotificationSender`, `JWTProvider`, `PDFProvider`, `AIModelProvider`, `RAGQueryProvider`, `AuditSink`, `BillingTenantProvider`, `PaymentProvider`, … — plus their DTOs (`User`, `OAuthLink`, `Tenant`, `NotificationRequest`, …). |
+| [`iface`](iface/) | Cross-module interfaces — `UserProvider`, `TenantProvider`, `AuthzProvider`, `NotificationSender`, `JWTProvider`, `PDFProvider`, `LLMGateway`, `RAGQueryProvider`, `AuditSink`, `BillingTenantProvider`, `PaymentProvider`, … — plus their DTOs (`User`, `OAuthLink`, `Tenant`, `NotificationRequest`, …). |
 | [`ctxauth`](ctxauth/) | Typed accessors over the request context: `GetUserUUID`, `GetTenantID`, `GetTenantRoles`, `GetClientIP`, `IsImpersonating`, `TenantKindFromContext`, plus the exported `Key*` constants the upstream `AuthMiddleware` writes against. |
 | [`modulegate`](modulegate/) | `ModuleGate(checker, name)` HTTP middleware — returns 503 when its module is disabled — and the `ModuleEnabledChecker` interface. |
 | [`tenantrepo`](tenantrepo/) | Fail-closed MongoDB helpers: `Scope`, `MustScope`, `StampInsert`, `StampInsertM`, `ScopeAggregate`, `RequireInternalTenant`, `RequireExternalTenant`, plus `ErrTenantScopeMissing` / `ErrTenantKindMismatch` sentinels. |

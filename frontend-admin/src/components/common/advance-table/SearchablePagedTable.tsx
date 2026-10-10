@@ -6,22 +6,23 @@ import AdvanceTableSearchBox from 'components/common/advance-table/AdvanceTableS
 import useAdvanceTable from 'hooks/ui/useAdvanceTable';
 import AdvanceTableProvider from 'providers/AdvanceTableProvider';
 
-// ComplianceTable is the shared, searchable + paginated AdvanceTable shell every
-// compliance tab renders. Keeping the provider/search/footer wiring in one place
-// keeps the four tabs to just their column definitions.
-interface ComplianceTableProps<T> {
+// SearchablePagedTable is the shared, searchable + paginated AdvanceTable shell
+// a tabbed admin page renders its lists through (/admin/compliance,
+// /admin/llm). Keeping the provider/search/footer wiring in one place keeps
+// each tab to just its column definitions.
+interface SearchablePagedTableProps<T> {
   data: T[];
   columns: ColumnDef<T>[];
   searchPlaceholder?: string;
   perPage?: number;
 }
 
-const ComplianceTable = <T,>({
+const SearchablePagedTable = <T,>({
   data,
   columns,
   searchPlaceholder,
   perPage = 10
-}: ComplianceTableProps<T>) => {
+}: SearchablePagedTableProps<T>) => {
   const table = useAdvanceTable({
     data,
     columns,
@@ -53,4 +54,4 @@ const ComplianceTable = <T,>({
   );
 };
 
-export default ComplianceTable;
+export default SearchablePagedTable;

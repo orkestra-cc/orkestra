@@ -200,6 +200,22 @@
       "policy_reason_required": "A reason of 1 to 500 characters is required.",
       "policy_unavailable": "Policies are loading: retry in a few seconds.",
       "policy_persistence_failed": "The request could not be completed."
+    },
+    "llm": {
+      "not_configured": "No active model or credential is configured in this organization.",
+      "provider_unavailable": "The provider is not reachable right now. Try again later.",
+      "no_eligible_model": "No model you may use is configured for this purpose.",
+      "model_access_denied": "You may not use this model.",
+      "capability_mismatch": "The model does not offer what the request needs.",
+      "invalid_request": "Some fields are invalid.",
+      "not_found": "The credential or model no longer exists.",
+      "name_in_use": "Another credential or model already has this name.",
+      "credential_in_use": "An active model still uses this credential. Delete it or point it at another credential first.",
+      "secret_key_missing": "This deployment has no secret encryption key configured, so keys cannot be stored.",
+      "endpoint_not_allowed": "That endpoint is not allowed in this environment.",
+      "hosted_disabled": "Hosted providers are disabled in the llm module settings.",
+      "mock_not_allowed": "The mock provider is only available outside production.",
+      "grant_not_member": "Every granted user must be a member of this organization."
     }
   },
   "banner": {
@@ -2618,6 +2634,185 @@
       "kms_keys_active": "KMS Keys Active",
       "kms_keys_shredded": "KMS Keys Shredded",
       "audit_rows_24h": "Audit Rows (24h)"
+    }
+  },
+  "adminLlm": {
+    "pageTitle": "Language models",
+    "pageSubtitle": "Provider credentials, the models built on them and who in this organization may use each one.",
+    "noAccess": "You do not have access to the language models of this organization.",
+    "loadError": "The list could not be loaded.",
+    "tabs": {
+      "models": "Models",
+      "credentials": "Credentials"
+    },
+    "actions": {
+      "cancel": "Cancel",
+      "save": "Save",
+      "delete": "Delete",
+      "retry": "Retry"
+    },
+    "columns": {
+      "actions": "Actions"
+    },
+    "status": {
+      "active": "Active",
+      "disabled": "Disabled"
+    },
+    "providers": {
+      "openai": "OpenAI",
+      "anthropic": "Anthropic",
+      "gemini": "Google Gemini",
+      "ollama": "Ollama",
+      "openai_compatible": "OpenAI-compatible",
+      "mock": "Mock (non-production)"
+    },
+    "credentialKind": {
+      "org": "Organization API key",
+      "user_account": "User's ChatGPT account"
+    },
+    "access": {
+      "granted": "Only granted users",
+      "everyone": "Everyone in the organization"
+    },
+    "capabilities": {
+      "chat": "Chat",
+      "streaming": "Streaming",
+      "tools": "Tools",
+      "structuredOutput": "Structured output",
+      "embeddings": "Embeddings"
+    },
+    "effort": {
+      "default": "Provider default",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High"
+    },
+    "validation": {
+      "required": "This field is required.",
+      "name": "Use 1 to 64 letters, digits, spaces, dots, underscores or dashes, starting with a letter or digit.",
+      "tooLong": "This value is too long.",
+      "url": "Enter an http or https URL, e.g. http://ollama:11434.",
+      "modelId": "Use 1 to 128 letters, digits, dots, dashes, underscores, colons or slashes.",
+      "purpose": "Use a lowercase key such as default or summarize.",
+      "number": "Enter a number.",
+      "integer": "Enter a whole number.",
+      "min": "The minimum is {{min}}.",
+      "max": "The maximum is {{max}}."
+    },
+    "errors": {
+      "generic": "The operation failed. Try again."
+    },
+    "credentials": {
+      "add": "Add credential",
+      "edit": "Edit",
+      "rotate": "Rotate key",
+      "delete": "Delete",
+      "enable": "Enable",
+      "disable": "Disable",
+      "enabled": "Credential enabled",
+      "disabled": "Credential disabled",
+      "search": "Search credentials",
+      "noSecret": "No key",
+      "secretTail": "•••• {{last4}}",
+      "noPermission": "You need the permission to manage LLM credentials.",
+      "emptyTitle": "No credentials yet",
+      "emptyHint": "Add a provider API key, then configure a model that uses it.",
+      "deleteTitle": "Delete credential",
+      "deleteConfirm": "Delete the credential \"{{name}}\"? Models can no longer use it.",
+      "deleteSuccess": "Credential deleted",
+      "saveSuccess": "Credential saved",
+      "secretHint": "Stored encrypted and never shown again. Only the last four characters are displayed.",
+      "fixedEndpoint": "This provider always uses {{url}}.",
+      "hostedDisabledWarning": "Hosted providers are disabled for this installation. Enable \"Allow hosted providers\" in the llm module settings before using this credential.",
+      "editorTitle": {
+        "create": "New credential",
+        "edit": "Edit \"{{name}}\"",
+        "rotate": "Rotate the API key of \"{{name}}\""
+      },
+      "fields": {
+        "name": "Name",
+        "provider": "Provider",
+        "baseUrl": "Base URL",
+        "baseUrlPlaceholder": "http://ollama:11434",
+        "secret": "API key"
+      },
+      "columns": {
+        "name": "Name",
+        "provider": "Provider",
+        "secret": "Key",
+        "status": "Status",
+        "updated": "Updated"
+      }
+    },
+    "models": {
+      "add": "Add model",
+      "edit": "Edit",
+      "delete": "Delete",
+      "grants": "Who may use it",
+      "grantsEveryone": "Everyone in the organization may use this model",
+      "search": "Search models",
+      "emptyTitle": "No models configured",
+      "emptyHint": "Define a model, its capabilities and who may use it.",
+      "needCredential": "No organization API key yet: add one under Credentials, or add a model billed to each user's own ChatGPT plan.",
+      "noPermission": "You need the permission to manage LLM models.",
+      "deleteTitle": "Delete model",
+      "deleteConfirm": "Delete the model \"{{name}}\" and its grants?",
+      "deleteSuccess": "Model deleted",
+      "saveSuccess": "Model saved",
+      "grantsSaved": "Access list saved",
+      "grantsNotSaved": "The model was saved, but its access and grants were not saved. Use \"Who may use it\" to try again.",
+      "grantsNotSavedReason": "The model was saved, but its access and grants were not saved: {{reason}} Use \"Who may use it\" to try again.",
+      "addTitle": "New model",
+      "editTitle": "Edit \"{{name}}\"",
+      "grantsTitle": "Who may use \"{{name}}\"",
+      "userAccountHint": "This model is billed to each user's own ChatGPT plan. Embeddings, temperature and max tokens are not available on that route, and the model must exist in the linked account's catalog.",
+      "purposeWithPriority": "{{purpose}} ({{priority}})",
+      "fields": {
+        "name": "Name",
+        "provider": "Provider",
+        "credentialKind": "Billed to",
+        "credential": "Credential",
+        "credentialPlaceholder": "Choose a credential",
+        "credentialDisabled": "{{name}} (disabled)",
+        "noCredentialForProvider": "No active API key for this provider. Add one under Credentials, or bill an OpenAI model to each user's own ChatGPT account.",
+        "modelId": "Model ID",
+        "modelIdPlaceholder": "gpt-5.6-terra",
+        "modelIdHint": "The provider's model slug, e.g. gpt-5.6-terra, claude-opus-5-5, gemini-2.5-pro, llama3.1.",
+        "capabilities": "Capabilities",
+        "dimensions": "Vector dimensions",
+        "temperature": "Temperature",
+        "maxOutputTokens": "Max output tokens",
+        "effort": "Reasoning effort",
+        "purposes": "Purposes and priority",
+        "purposeLabel": "Purpose {{index}}",
+        "priorityLabel": "Priority of purpose {{index}}",
+        "purposePlaceholder": "default",
+        "removePurpose": "Remove purpose",
+        "addPurpose": "Add purpose",
+        "purposesHint": "Addons ask for a purpose; the lowest priority wins. Keep one model on \"default\".",
+        "access": "Access",
+        "grantees": "Granted users",
+        "granteesPlaceholder": "Pick members of this organization",
+        "granteesHint": "Managing a model does not grant its use.",
+        "granteesNoPermission": "You need the permission to manage LLM grants to change this list.",
+        "noMembers": "No matching members",
+        "membersError": "The members of this organization could not be loaded.",
+        "formerMember": "{{id}} (no longer a member)",
+        "membersForbidden": "Listing this organization's members needs tenant-admin access, so the grant list cannot be edited here.",
+        "accessEveryoneHint": "Every member of the organization may use this model. The granted users are kept and apply again if you switch back."
+      },
+      "columns": {
+        "name": "Name",
+        "model": "Model",
+        "billing": "Billed to",
+        "purposes": "Purposes",
+        "access": "Granted",
+        "status": "Status"
+      },
+      "enable": "Enable",
+      "disable": "Disable",
+      "enabled": "Model enabled",
+      "disabled": "Model disabled"
     }
   },
   "adminModules": {

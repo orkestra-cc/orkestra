@@ -293,10 +293,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	// deployments that opt out). A future AWS KMS provider swaps in here.
 	kmsRepo := repository.NewKMSKeyRepo(deps.DB)
 	if kms, err := services.NewLocalKMS(kmsRepo); err == nil {
-		deps.Services.Register(module.ServiceKMSProvider, iface.KMSProvider(kms))
-		if ts, ok := module.GetTyped[*tenantServices.Service](deps.Services, module.ServiceTenantService); ok {
-			ts.SetKMSProvider(kms)
-		}
+		publishKMSProvider(deps.Services, kms)
 	} else {
 		deps.Logger.Warn("compliance: KMS provider disabled — ORKESTRA_KMS_MASTER_KEY missing or invalid",
 			slog.String("error", err.Error()),
@@ -351,6 +348,20 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	return nil
 }
 
+// publishKMSProvider registers the provider and pushes it into every core
+// consumer that opted in through iface.KMSProviderSetter. The llm gateway
+// (ADR-0022) seals credentials with it; absent consumers are skipped
+// because module sets vary by fork.
+func publishKMSProvider(registry *module.ServiceRegistry, kms iface.KMSProvider) {
+	registry.Register(module.ServiceKMSProvider, kms)
+	if ts, ok := module.GetTyped[*tenantServices.Service](registry, module.ServiceTenantService); ok {
+		ts.SetKMSProvider(kms)
+	}
+	if gw, ok := module.GetTyped[iface.KMSProviderSetter](registry, module.ServiceLLMGateway); ok {
+		gw.SetKMSProvider(kms)
+	}
+}
+
 // publishAuditSink makes the sink visible only after every fallible Init step
 // has succeeded, then pushes the same instance into known core consumers.
 // Missing consumers are ignored because module dependencies can vary by fork.
@@ -364,6 +375,9 @@ func publishAuditSink(registry *module.ServiceRegistry, sink iface.AuditSink) {
 	}
 	if ts, ok := module.GetTyped[*tenantServices.Service](registry, module.ServiceTenantService); ok {
 		ts.SetAuditSink(sink)
+	}
+	if gw, ok := module.GetTyped[iface.AuditSinkSetter](registry, module.ServiceLLMGateway); ok {
+		gw.SetAuditSink(sink)
 	}
 }
 

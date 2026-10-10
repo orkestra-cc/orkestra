@@ -859,7 +859,11 @@ export const baseApi = createApi({
     'LegalHold',
     'CompliancePolicy',
     'CompliancePolicyAssignment',
-    'ComplianceChangeRequest'
+    'ComplianceChangeRequest',
+    // LLM — core llm module (ADR-0022)
+    'LLMCredential',
+    'LLMModel',
+    'LLMMyModels'
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,
