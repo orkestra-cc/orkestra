@@ -58,6 +58,7 @@ The data model supports two tenant tiers:
 | **Navigation and modules** | Backend-driven navigation, per-tenant module configuration, health checks, and runtime start/stop for optional modules |
 | **Logging and observability** | Structured logs, request and tenant correlation, runtime log controls, OpenTelemetry, Prometheus, and an optional self-hosted Grafana stack |
 | **Compliance** | Audit trail, GDPR data-subject workflows, per-tenant encryption, retention, and legal-hold controls |
+| **LLM** | Per-organization provider credentials with encrypted secrets, a model catalog, per-user access grants, and a provider-neutral gateway contract for other modules |
 
 The repository also includes:
 
@@ -121,8 +122,8 @@ multi-stack setups, and deployment configuration, see the
 | Mobile | Flutter 3.44+, Riverpod |
 | Data | MongoDB 8, Redis 8, S3-compatible object storage |
 
-Eight core modules always load: `user`, `notification`, `tenant`, `authz`,
-`auth`, `navigation`, `logging`, and `compliance`. Optional modules added by a
+Nine core modules always load: `user`, `notification`, `tenant`, `authz`,
+`auth`, `navigation`, `logging`, `llm`, and `compliance`. Optional modules added by a
 fork implement the `Module` interface and register through the module catalog.
 They can declare routes, collections, permissions, configuration, navigation,
 dependencies, and background processes.
