@@ -1485,6 +1485,13 @@ var ErrKMSKeyNotFound = newStringError("kms: key not found")
 // returns this when called against a shredded key.
 var ErrKMSKeyDeleted = newStringError("kms: key scheduled for deletion")
 
+// ErrKMSCiphertextInvalid signals that Decrypt found the ciphertext
+// unopenable under the key: truncated, tampered with, or sealed with a
+// different key. It is a property of the stored data, distinct from a
+// shredded key (ErrKMSKeyDeleted) and from an infrastructure failure,
+// which implementations return unclassified.
+var ErrKMSCiphertextInvalid = newStringError("kms: ciphertext cannot be opened")
+
 // KMSProvider manages per-tenant envelope-encryption keys. Each
 // tenant's data is encrypted with a tenant-scoped Data Encryption Key
 // (DEK); the DEK is wrapped with a master key never exposed to

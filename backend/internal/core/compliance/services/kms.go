@@ -142,7 +142,9 @@ func (k *LocalKMS) Encrypt(ctx context.Context, keyID string, plaintext []byte) 
 
 // Decrypt opens ciphertext produced by Encrypt. Returns
 // ErrKMSKeyDeleted once the key has been shredded — the signal
-// crypto-shred relies on to make callers notice the data is gone.
+// crypto-shred relies on to make callers notice the data is gone — and
+// ErrKMSCiphertextInvalid when the ciphertext is truncated, tampered with
+// or sealed under another key.
 func (k *LocalKMS) Decrypt(ctx context.Context, keyID string, ciphertext []byte) ([]byte, error) {
 	dek, err := k.unwrapByID(ctx, keyID)
 	if err != nil {
@@ -154,10 +156,14 @@ func (k *LocalKMS) Decrypt(ctx context.Context, keyID string, ciphertext []byte)
 	}
 	ns := aead.NonceSize()
 	if len(ciphertext) < ns+aead.Overhead() {
-		return nil, fmt.Errorf("compliance: ciphertext too short")
+		return nil, fmt.Errorf("compliance: ciphertext too short: %w", iface.ErrKMSCiphertextInvalid)
 	}
 	nonce, sealed := ciphertext[:ns], ciphertext[ns:]
-	return aead.Open(nil, nonce, sealed, []byte(keyID))
+	pt, err := aead.Open(nil, nonce, sealed, []byte(keyID))
+	if err != nil {
+		return nil, fmt.Errorf("compliance: open ciphertext: %w", iface.ErrKMSCiphertextInvalid)
+	}
+	return pt, nil
 }
 
 // DeleteKey shreds the wrapped DEK. The metadata row survives with

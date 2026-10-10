@@ -66,6 +66,12 @@ must match them across the module boundary with `errors.Is`.
   found nothing, either because the key never existed or because it was
   shredded; callers branch on it without importing the `compliance`
   implementation.
+- `ErrKMSCiphertextInvalid` — `KMSProvider.Decrypt` found the ciphertext
+  truncated, tampered with or sealed under another key. It describes the
+  stored data, so a caller can tell it from a shredded key (`ErrKMSKeyDeleted`)
+  and from an infrastructure failure, which stays unclassified. **A
+  `KMSProvider` implementation MUST wrap this sentinel for an unopenable
+  ciphertext**; the `llm` vault maps it to a corrupt envelope.
 - `ErrUserNotFound` — the user module's `services.ErrUserNotFound` aliases it,
   so auth's refresh path can classify a deleted account with `errors.Is`
   without importing the user module: a 401 for an account that is gone, a 503
