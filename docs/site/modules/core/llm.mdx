@@ -94,7 +94,7 @@ Settings at `/admin/modules/llm`, in two groups. The module hot-reloads its conf
 | `request_timeout` | `60s` | `LLM_REQUEST_TIMEOUT` | Deadline per provider call; a consumer may only lower it |
 | `usage_retention_days` | `90` | `LLM_USAGE_RETENTION_DAYS` | Retention of per-call usage rows (1–3650) |
 | `budget_warn_pct` | `80` | `LLM_BUDGET_WARN_PCT` | Default warning threshold for new budgets (0–100) |
-| `budget_reserve_output_tokens` | `4096` | `LLM_BUDGET_RESERVE_OUTPUT_TOKENS` | Output tokens reserved against the budget when a model declares none (1–131072) |
+| `budget_reserve_output_tokens` | `4096` | `LLM_BUDGET_RESERVE_OUTPUT_TOKENS` | Output tokens reserved against the budget when a model declares none (1–131072). A model's own `budgetReserveOutputTokens` overrides it; sending `0` on create or `PATCH` means no override, so `PATCH` with `0` returns the model to this default |
 
 `allow_hosted` is a technical control. Before enabling it, document the data flow (categories of prompts and outputs, purpose and legal basis, processor, retention, region and transfer mechanism) in your records of processing.
 

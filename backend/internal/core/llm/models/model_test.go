@@ -223,3 +223,31 @@ func TestValidateCredentialInput_BaseURLOnlyForProvidersThatTakeOne(t *testing.T
 		}
 	}
 }
+
+// TestBudgetReserveOutputTokens_ZeroMeansUnset: once an override is stored,
+// PATCH must be able to remove it (back to the module default). A pointer
+// field cannot tell "absent" from "null", so 0 is the clear value; on create
+// 0 is the same as absent. Both schemas therefore accept 0.
+func TestBudgetReserveOutputTokens_ZeroMeansUnset(t *testing.T) {
+	zero, n := 0, 512
+	stored := ModelInput{BudgetReserveOutputTokens: &n}
+	if got := (LLMModelPatchBody{BudgetReserveOutputTokens: &zero}).ApplyTo(stored); got.BudgetReserveOutputTokens != nil {
+		t.Fatalf("PATCH 0 kept the override: %d", *got.BudgetReserveOutputTokens)
+	}
+	if got := (LLMModelPatchBody{}).ApplyTo(stored); got.BudgetReserveOutputTokens == nil || *got.BudgetReserveOutputTokens != 512 {
+		t.Fatalf("absent field changed the override: %v", got.BudgetReserveOutputTokens)
+	}
+	m := 1024
+	if got := (LLMModelPatchBody{BudgetReserveOutputTokens: &m}).ApplyTo(stored); got.BudgetReserveOutputTokens == nil || *got.BudgetReserveOutputTokens != 1024 {
+		t.Fatalf("PATCH 1024 = %v", got.BudgetReserveOutputTokens)
+	}
+	if got := (LLMModelBody{BudgetReserveOutputTokens: &zero}).Input(); got.BudgetReserveOutputTokens != nil {
+		t.Fatalf("create 0 stored an override: %d", *got.BudgetReserveOutputTokens)
+	}
+	for _, typ := range []reflect.Type{reflect.TypeOf(LLMModelBody{}), reflect.TypeOf(LLMModelPatchBody{})} {
+		f, _ := typ.FieldByName("BudgetReserveOutputTokens")
+		if min := f.Tag.Get("minimum"); min != "0" {
+			t.Errorf("%s.budgetReserveOutputTokens minimum = %q, want 0 (the clear value)", typ.Name(), min)
+		}
+	}
+}

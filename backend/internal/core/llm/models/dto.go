@@ -43,8 +43,18 @@ type LLMModelBody struct {
 	Capabilities              LLMModelCapabilities `json:"capabilities"`
 	CredentialRef             LLMCredentialRef     `json:"credentialRef"`
 	Defaults                  LLMModelDefaults     `json:"defaults"`
-	BudgetReserveOutputTokens *int                 `json:"budgetReserveOutputTokens,omitempty" minimum:"1" maximum:"131072"`
+	BudgetReserveOutputTokens *int                 `json:"budgetReserveOutputTokens,omitempty" minimum:"0" maximum:"131072" doc:"Output tokens reserved per call for the budget; absent or 0 uses the module default (budget_reserve_output_tokens)"`
 	Purposes                  []LLMModelPurpose    `json:"purposes" minItems:"1" maxItems:"16"`
+}
+
+// budgetOverride maps the wire value to the stored override: absent and 0
+// both mean "no override, use the module default".
+func budgetOverride(v *int) *int {
+	if v == nil || *v == 0 {
+		return nil
+	}
+	n := *v
+	return &n
 }
 
 // Input returns the create input. Access is not part of it: a new model is
@@ -53,13 +63,13 @@ type LLMModelBody struct {
 func (b LLMModelBody) Input() ModelInput {
 	return ModelInput{
 		Name: b.Name, Provider: b.Provider, ModelID: b.ModelID, Capabilities: b.Capabilities,
-		CredentialRef: b.CredentialRef, Defaults: b.Defaults, BudgetReserveOutputTokens: b.BudgetReserveOutputTokens,
+		CredentialRef: b.CredentialRef, Defaults: b.Defaults, BudgetReserveOutputTokens: budgetOverride(b.BudgetReserveOutputTokens),
 		Purposes: b.Purposes,
 	}
 }
 
 // LLMModelPatchBody is a partial update: an absent (nil) field keeps the
-// stored value. Struct-valued fields (capabilities, credentialRef, defaults)
+// stored value, and budgetReserveOutputTokens 0 clears the override. Struct-valued fields (capabilities, credentialRef, defaults)
 // and purposes replace the stored value whole when present. The merged
 // model is validated with the create rules. Access is changed only on the
 // grants route.
@@ -70,7 +80,7 @@ type LLMModelPatchBody struct {
 	Capabilities              *LLMModelCapabilities `json:"capabilities,omitempty"`
 	CredentialRef             *LLMCredentialRef     `json:"credentialRef,omitempty"`
 	Defaults                  *LLMModelDefaults     `json:"defaults,omitempty"`
-	BudgetReserveOutputTokens *int                  `json:"budgetReserveOutputTokens,omitempty" minimum:"1" maximum:"131072"`
+	BudgetReserveOutputTokens *int                  `json:"budgetReserveOutputTokens,omitempty" minimum:"0" maximum:"131072" doc:"Absent keeps the stored override; 0 clears it (back to the module default)"`
 	Purposes                  []LLMModelPurpose     `json:"purposes,omitempty" minItems:"1" maxItems:"16"`
 	Status                    *string               `json:"status,omitempty" enum:"active,disabled"`
 }
@@ -96,7 +106,9 @@ func (p LLMModelPatchBody) ApplyTo(in ModelInput) ModelInput {
 		in.Defaults = *p.Defaults
 	}
 	if p.BudgetReserveOutputTokens != nil {
-		in.BudgetReserveOutputTokens = p.BudgetReserveOutputTokens
+		// 0 clears the override: a pointer field cannot tell an absent value
+		// from null, so 0 is the only way back to the module default.
+		in.BudgetReserveOutputTokens = budgetOverride(p.BudgetReserveOutputTokens)
 	}
 	if p.Purposes != nil {
 		in.Purposes = p.Purposes

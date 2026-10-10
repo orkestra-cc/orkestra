@@ -401,3 +401,35 @@ func TestFailure_LogsTheCauseNotTheClient(t *testing.T) {
 		t.Fatalf("expected outcomes must not be logged: %s", logs.String())
 	}
 }
+
+// TestAdmin_BudgetReserveOverrideCanBeCleared: a stored override is removed
+// by PATCH 0 and the model falls back to the module default (no field).
+func TestAdmin_BudgetReserveOverrideCanBeCleared(t *testing.T) {
+	h := newHarness(t, testKeyHex)
+	c := h.credential(t, "OpenAI")
+	body := modelBody("Fast", c.Body.UUID)
+	zero, n := 0, 2048
+	body.BudgetReserveOutputTokens = &zero
+	created, err := h.admin.CreateModel(h.ctx, &LLMModelCreateRequest{Body: body})
+	if err != nil {
+		t.Fatalf("create with 0: %v", err)
+	}
+	if created.Body.BudgetReserveOutputTokens != nil {
+		t.Fatalf("create 0 stored %d", *created.Body.BudgetReserveOutputTokens)
+	}
+	set, err := h.admin.PatchModel(h.ctx, &LLMModelPatchRequest{UUID: created.Body.UUID, Body: models.LLMModelPatchBody{BudgetReserveOutputTokens: &n}})
+	if err != nil || set.Body.BudgetReserveOutputTokens == nil || *set.Body.BudgetReserveOutputTokens != 2048 {
+		t.Fatalf("set override = %+v, %v", set, err)
+	}
+	cleared, err := h.admin.PatchModel(h.ctx, &LLMModelPatchRequest{UUID: created.Body.UUID, Body: models.LLMModelPatchBody{BudgetReserveOutputTokens: &zero}})
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if cleared.Body.BudgetReserveOutputTokens != nil {
+		t.Fatalf("PATCH 0 kept %d", *cleared.Body.BudgetReserveOutputTokens)
+	}
+	after, err := h.admin.GetModel(h.ctx, &LLMModelPath{UUID: created.Body.UUID})
+	if err != nil || after.Body.BudgetReserveOutputTokens != nil {
+		t.Fatalf("stored after clear = %+v, %v", after, err)
+	}
+}
