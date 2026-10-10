@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 
 	"github.com/orkestra/backend/internal/core/llm/models"
@@ -93,11 +94,15 @@ func ValidateChatRequest(req iface.ChatRequest) error {
 		if !toolNameRE.MatchString(t.Name) {
 			return fmt.Errorf("%w: tool name %q", iface.ErrLLMInvalidRequest, t.Name)
 		}
-		if b, _ := json.Marshal(t.InputSchema); len(b) > maxToolSchemaBytes {
+		b, err := json.Marshal(t.InputSchema)
+		if err != nil {
+			return fmt.Errorf("%w: tool schema not serializable", iface.ErrLLMInvalidRequest)
+		}
+		if len(b) > maxToolSchemaBytes {
 			return fmt.Errorf("%w: tool schema too large", iface.ErrLLMInvalidRequest)
 		}
 	}
-	if req.Options.Temperature != nil && (*req.Options.Temperature < 0 || *req.Options.Temperature > 2) {
+	if t := req.Options.Temperature; t != nil && (math.IsNaN(*t) || *t < 0 || *t > 2) {
 		return fmt.Errorf("%w: temperature", iface.ErrLLMInvalidRequest)
 	}
 	if req.Options.MaxOutputTokens != nil && *req.Options.MaxOutputTokens <= 0 {

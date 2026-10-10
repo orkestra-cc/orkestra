@@ -3,13 +3,21 @@ package services
 import (
 	"errors"
 	"log/slog"
+	"math"
 	"testing"
 
+	"github.com/orkestra/backend/internal/core/llm/models"
 	"github.com/orkestra/backend/internal/core/llm/providers"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/tenantrepo"
 )
 
 func newGatewayForTest(t *testing.T) *Gateway {
+	g, _ := newGatewayWithModels(t)
+	return g
+}
+
+func newGatewayWithModels(t *testing.T) (*Gateway, *memModels) {
 	t.Helper()
 	svc, _, mods, grants, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
 	seedModels(mods, grants)
@@ -17,7 +25,7 @@ func newGatewayForTest(t *testing.T) *Gateway {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewGateway(NewAccessResolver(mods, grants), svc, providers.NewRegistry(), v, slog.Default())
+	return NewGateway(NewAccessResolver(mods, grants), svc, providers.NewRegistry(), v, slog.Default()), mods
 }
 
 func TestGateway_ListUsableAndResolve(t *testing.T) {
@@ -97,17 +105,55 @@ func TestGateway_PinnedModelMustBeCandidate(t *testing.T) {
 }
 
 func TestGateway_RequiresInternalTenant(t *testing.T) {
-	g := newGatewayForTest(t)
+	g, mods := newGatewayWithModels(t)
+	// Give the external org a usable model so that a missing guard would
+	// surface as success or provider-unavailable, not as "not configured".
+	mods.rows["m-ext"] = &models.Model{UUID: "m-ext", TenantID: "ext-1", Name: "Ext", Provider: "openai", Status: models.ModelStatusActive, Access: models.AccessEveryone,
+		Capabilities: models.LLMModelCapabilities{Chat: true, Embeddings: true, Dimensions: 8}, Purposes: []models.LLMModelPurpose{{Purpose: "default", Priority: 1}}}
 	ext := ctxauthExternal(t)
-	if _, err := g.ListUsable(ext); err == nil {
-		t.Fatal("ListUsable: external tenant must be refused")
+	msg := []iface.ChatMessage{{Role: "user", Content: "hi"}}
+
+	if _, err := g.ListUsable(ext); !errors.Is(err, tenantrepo.ErrTenantKindMismatch) {
+		t.Errorf("ListUsable err = %v, want ErrTenantKindMismatch", err)
 	}
-	if _, err := g.Resolve(ext, "default"); err == nil {
-		t.Fatal("Resolve: external tenant must be refused")
+	if _, err := g.Resolve(ext, "default"); !errors.Is(err, tenantrepo.ErrTenantKindMismatch) {
+		t.Errorf("Resolve err = %v, want ErrTenantKindMismatch", err)
 	}
-	_, err := g.Chat(ext, iface.ChatRequest{Caller: "test", Messages: []iface.ChatMessage{{Role: "user", Content: "hi"}}}, nil)
-	if err == nil || errors.Is(err, iface.ErrLLMProviderUnavailable) {
-		t.Fatalf("Chat: external tenant must be refused before routing, got %v", err)
+	if _, err := g.Chat(ext, iface.ChatRequest{Caller: "test", Messages: msg}, nil); !errors.Is(err, tenantrepo.ErrTenantKindMismatch) {
+		t.Errorf("Chat err = %v, want ErrTenantKindMismatch", err)
+	}
+	if _, err := g.Embed(ext, iface.EmbedRequest{Caller: "test", Inputs: []string{"hi"}}); !errors.Is(err, tenantrepo.ErrTenantKindMismatch) {
+		t.Errorf("Embed err = %v, want ErrTenantKindMismatch", err)
+	}
+}
+
+func TestGateway_PurposeWithoutUsableModelIsNotRoutedToDefault(t *testing.T) {
+	g := newGatewayForTest(t)
+	// "code" exists (m-granted) but u-admin holds no grant: no silent fallback.
+	msg := []iface.ChatMessage{{Role: "user", Content: "hi"}}
+	if _, err := g.Chat(ctxFor("t1"), iface.ChatRequest{Caller: "test", Purpose: "code", Messages: msg}, nil); !errors.Is(err, iface.ErrLLMNoEligibleModel) {
+		t.Fatalf("Chat err = %v, want ErrLLMNoEligibleModel", err)
+	}
+	if _, err := g.Resolve(ctxFor("t1"), "code"); !errors.Is(err, iface.ErrLLMNoEligibleModel) {
+		t.Fatalf("Resolve err = %v, want ErrLLMNoEligibleModel", err)
+	}
+	// A purpose nobody declares still resolves through default.
+	info, err := g.Resolve(ctxFor("t1"), "summaries")
+	if err != nil || info.UUID != "m-everyone" {
+		t.Fatalf("Resolve undeclared purpose = %+v, %v", info, err)
+	}
+}
+
+func TestGateway_RejectsNaNTemperatureAndUnserializableSchema(t *testing.T) {
+	nan := math.NaN()
+	req := iface.ChatRequest{Caller: "ok", Messages: []iface.ChatMessage{{Role: "user", Content: "x"}}, Options: iface.ChatOptions{Temperature: &nan}}
+	if err := ValidateChatRequest(req); !errors.Is(err, iface.ErrLLMInvalidRequest) {
+		t.Errorf("NaN temperature err = %v", err)
+	}
+	req = iface.ChatRequest{Caller: "ok", Messages: []iface.ChatMessage{{Role: "user", Content: "x"}},
+		Tools: []iface.ChatToolSpec{{Name: "t", InputSchema: map[string]any{"bad": make(chan int)}}}}
+	if err := ValidateChatRequest(req); !errors.Is(err, iface.ErrLLMInvalidRequest) {
+		t.Errorf("unserializable schema err = %v", err)
 	}
 }
 

@@ -87,6 +87,48 @@ func TestAccessResolver_NotConfiguredVsNoEligible(t *testing.T) {
 	}
 }
 
+// Spec Routing step 2: fall back to "default" only when the purpose has no
+// model in the org, never because the caller cannot use, or the model cannot
+// serve, the purpose that does exist.
+func TestAccessResolver_PurposeFallbackOnlyWhenPurposeHasNoModels(t *testing.T) {
+	a, mods, grants := newResolverForTest()
+	seedModels(mods, grants)
+	ctx := ctxFor("t1")
+
+	// "code" is declared by m-granted only, and only u1 holds the grant.
+	got, err := a.Candidates(ctx, "u2", "code", Need{Chat: true})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("u2 on a purpose it cannot use = %v, %v; want empty (no silent move to default)", ids(got), err)
+	}
+	if got, _ := a.Candidates(ctx, "", "code", Need{Chat: true}); len(got) != 0 {
+		t.Fatalf("job on code = %v, want empty", ids(got))
+	}
+
+	// "chatonly" is declared by m-everyone, which has no tools: a tools
+	// request must not be moved onto the default models (m-granted has tools).
+	mods.rows["m-everyone"].Purposes = append(mods.rows["m-everyone"].Purposes, models.LLMModelPurpose{Purpose: "chatonly", Priority: 1})
+	got, err = a.Candidates(ctx, "u1", "chatonly", Need{Chat: true, Tools: true})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("tools on a purpose without tool models = %v, %v; want empty", ids(got), err)
+	}
+	got, _ = a.Candidates(ctx, "u1", "chatonly", Need{Chat: true})
+	if len(got) != 1 || got[0].UUID != "m-everyone" {
+		t.Fatalf("chatonly without tools = %v", ids(got))
+	}
+
+	// A purpose no active model declares falls back to default; a purpose
+	// declared only by a disabled model counts as undeclared.
+	got, _ = a.Candidates(ctx, "u1", "nobody-declares-this", Need{Chat: true})
+	if len(got) != 2 || got[0].UUID != "m-granted" {
+		t.Fatalf("undeclared purpose = %v, want the default models", ids(got))
+	}
+	mods.rows["m-disabled"].Purposes = append(mods.rows["m-disabled"].Purposes, models.LLMModelPurpose{Purpose: "legacy", Priority: 1})
+	got, _ = a.Candidates(ctx, "u1", "legacy", Need{Chat: true})
+	if len(got) != 2 {
+		t.Fatalf("purpose of a disabled model = %v, want default fallback", ids(got))
+	}
+}
+
 // Review Focus 5: the "my models" listing must never widen access.
 func TestAccessResolver_UsableNeverWidensAccess(t *testing.T) {
 	a, mods, grants := newResolverForTest()

@@ -92,10 +92,13 @@ func (a *AccessResolver) Usable(ctx context.Context, userUUID string) ([]models.
 	return a.usableFrom(ctx, active, userUUID)
 }
 
-// Candidates returns the usable models that serve purpose (falling back to
-// "default" when no usable model serves purpose) and satisfy need, ordered
-// by ascending priority then name. ErrLLMNotConfigured when the org has no
-// active model at all; an empty slice when models exist but none fits, so
+// Candidates returns the usable models that serve purpose and satisfy
+// need, ordered by ascending priority then name. The purpose falls back to
+// "default" only when no active model of the org declares it at all (spec,
+// Routing step 2): if some model declares it but the caller may not use it,
+// or lacks a needed capability, the result is empty rather than silently
+// moving the request to another purpose. ErrLLMNotConfigured when the org
+// has no active model; an empty slice when models exist but none fits, so
 // the caller can tell "not configured" from "nothing eligible".
 func (a *AccessResolver) Candidates(ctx context.Context, userUUID, purpose string, need Need) ([]models.Model, error) {
 	active, err := a.models.ListActive(ctx)
@@ -109,14 +112,22 @@ func (a *AccessResolver) Candidates(ctx context.Context, userUUID, purpose strin
 	if err != nil {
 		return nil, err
 	}
-	if purpose == "" {
+	if purpose == "" || !declaresPurpose(active, purpose) {
 		purpose = defaultPurpose
 	}
-	out := pickForPurpose(usable, purpose, need)
-	if len(out) == 0 && purpose != defaultPurpose {
-		out = pickForPurpose(usable, defaultPurpose, need)
+	return pickForPurpose(usable, purpose, need), nil
+}
+
+// declaresPurpose reports whether any of ms lists purpose.
+func declaresPurpose(ms []models.Model, purpose string) bool {
+	for _, m := range ms {
+		for _, p := range m.Purposes {
+			if p.Purpose == purpose {
+				return true
+			}
+		}
 	}
-	return out, nil
+	return false
 }
 
 // pickForPurpose keeps the models that declare purpose and satisfy need,
