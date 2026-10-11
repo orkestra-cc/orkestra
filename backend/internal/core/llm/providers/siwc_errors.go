@@ -72,20 +72,50 @@ func IsSIWCPlanCode(code string) bool {
 	return strings.HasPrefix(code, "subscription_sharing_") || strings.HasPrefix(code, "chatpass_v2_")
 }
 
+// PlanRouteFailure is a classified ChatGPT plan-route failure together with
+// its allowlisted identifiers (HTTP status, plan code, request id), so the
+// router can log them (ruling 5.3: never provider text, only these). Its
+// text and its Unwrap chain are the classified error's.
+type PlanRouteFailure struct {
+	Status    int    // 0 for a failure delivered inside the stream
+	Code      string // identifier-checked, may be ""
+	RequestID string // identifier-checked, may be ""
+	err       error
+}
+
+func (f *PlanRouteFailure) Error() string { return f.err.Error() }
+func (f *PlanRouteFailure) Unwrap() error { return f.err }
+
 // ClassifySIWCHTTP classifies a pre-stream HTTP failure on the ChatGPT plan
 // route: a documented plan code wins; otherwise 401 is ErrSIWCInvalidUser
 // (refresh once, then reauth only on a terminal refresh) and 403 is "plan
-// usage not granted"; anything else falls back to Classify.
+// usage not granted"; anything else falls back to Classify. Neither 401 nor
+// 403 is ever ErrUnauthorized: the remedy is the user's account, not the
+// operator rotating an API key. The result is a *PlanRouteFailure.
 func ClassifySIWCHTTP(info ErrorInfo) error {
+	var err error
 	switch {
 	case IsSIWCPlanCode(info.Code):
-		return ClassifySIWCCode(info.Code)
+		err = ClassifySIWCCode(info.Code)
 	case info.Status == http.StatusUnauthorized:
-		return fmt.Errorf("%w: %w (status 401, request %s)", ErrSIWCInvalidUser, iface.ErrLLMProviderUnavailable, info.RequestID)
+		err = fmt.Errorf("%w: %w (status 401, request %s)", ErrSIWCInvalidUser, iface.ErrLLMProviderUnavailable, info.RequestID)
 	case info.Status == http.StatusForbidden:
-		return fmt.Errorf("%w (status 403, request %s)", iface.ErrLLMPlanUsageDisabled, info.RequestID)
+		err = fmt.Errorf("%w (status 403, request %s)", iface.ErrLLMPlanUsageDisabled, info.RequestID)
+	default:
+		err = Classify(info)
 	}
-	return Classify(info)
+	return &PlanRouteFailure{Status: info.Status, Code: identifier(info.Code), RequestID: info.RequestID, err: err}
+}
+
+// classifySIWCEvent classifies a response.failed / error event on the plan
+// route: a plan code goes through ClassifySIWCCode, anything else through
+// the generic event mapping.
+func classifySIWCEvent(code string) error {
+	code = identifier(code)
+	if !IsSIWCPlanCode(code) {
+		return Classify(failedInfo(code))
+	}
+	return &PlanRouteFailure{Code: code, err: ClassifySIWCCode(code)}
 }
 
 // OAuthErrorCode returns the identifier-checked error code of an OAuth error

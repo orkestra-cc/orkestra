@@ -576,6 +576,36 @@ func TestModule_InitRegistersSixAdaptersAndRouter(t *testing.T) {
 	if m.outboxW == nil || m.reconciler == nil || m.purge == nil || m.ops == nil || m.usageH == nil {
 		t.Fatal("background jobs and handlers must be wired")
 	}
+	if m.accounts == nil {
+		t.Fatal("the linked-account service must be wired (user_account resolution)")
+	}
+}
+
+// afterCall stamps lastUsedAt only for a successful user_account attempt
+// (ruling 2.17); everything else must not touch the accounts store. With
+// an offline database a write would log a WARN, so silence proves it.
+func TestModule_AfterCallStampsOnlyPlanSuccess(t *testing.T) {
+	t.Setenv("LLM_SECRET_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	logs := &bytes.Buffer{}
+	reg := module.NewServiceRegistry()
+	reg.Register(module.ServiceTenantDirectoryReader, iface.TenantDirectoryReader(noMembers{}))
+	m := NewModule()
+	if err := m.Init(&module.Dependencies{DB: offlineDB(t), Logger: slog.New(slog.NewTextHandler(logs, nil)), Services: reg}); err != nil {
+		t.Fatal(err)
+	}
+	ua := models.Model{Provider: models.ProviderOpenAI, CredentialRef: models.LLMCredentialRef{Kind: models.CredentialKindUserAccount}}
+	org := models.Model{Provider: models.ProviderOpenAI, CredentialRef: models.LLMCredentialRef{Kind: models.CredentialKindOrg, CredentialUUID: "c1"}}
+	ctx := operatorCtx()
+	m.afterCall(ctx, ua, "acc-1", iface.ErrLLMQuotaExhausted)
+	m.afterCall(ctx, ua, "acc-1", iface.ErrLLMUserAccountReauth)
+	m.afterCall(ctx, org, "c1", nil)
+	if strings.Contains(logs.String(), "last-use") {
+		t.Fatalf("a failed or org-billed attempt touched the account: %s", logs.String())
+	}
+	m.afterCall(ctx, ua, "acc-1", nil)
+	if !strings.Contains(logs.String(), "llm siwc: last-use stamp failed") {
+		t.Fatalf("a successful plan call must stamp lastUsedAt: %s", logs.String())
+	}
 }
 
 func TestModule_StartStopIsIdempotent(t *testing.T) {

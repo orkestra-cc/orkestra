@@ -70,6 +70,9 @@ type Module struct {
 	catalog  *services.CatalogService
 	gateway  *services.Gateway
 	registry *providers.Registry
+	// accounts owns the Sign in with ChatGPT registrations; the router
+	// resolves user_account models through it.
+	accounts *services.AccountsService
 	admin    *handlers.AdminHandler
 	self     *handlers.SelfHandler
 	ops      *handlers.OpsHandler
@@ -324,10 +327,24 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	settings := func() moduleSettings { return readSettings(deps) }
 	budgetCfg := func() services.BudgetConfig { return settings().budget() }
 	budgetSvc := services.NewBudgetService(store, budgetCfg, logger)
-	router := services.NewRouter(m.registry, services.NewOrgCredentialResolver(m.catalog), budgetSvc,
+	limiter := services.NewRateLimiter(deps.RedisAdapter, logger)
+
+	// Sign in with ChatGPT: the linked registrations a user_account model
+	// bills to. The plan catalog is read through the openai adapter (one
+	// parser, ruling 2.10).
+	m.accounts = services.NewAccountsService(services.AccountsDeps{
+		Repo: repository.NewUserAccounts(deps.DB), Host: repository.NewInstallation(deps.DB),
+		OIDC: services.NewOIDCClient(m.clientFor(models.ProviderOpenAI), logger), Plans: services.RegistryPlanCatalog{Registry: m.registry},
+		State: services.NewSIWCStateStore(deps.RedisAdapter, vault), Vault: vault, Limiter: limiter, Redis: deps.RedisAdapter,
+		Config: m.siwcCfg, Logger: logger,
+	})
+	m.gateway.SetAccounts(m.accounts)
+
+	router := services.NewRouter(m.registry, services.NewCredentialResolver(m.catalog, m.accounts), budgetSvc,
 		services.NewBreaker(3, 30*time.Second), m.clientFor,
 		func() services.RouterConfig { return services.RouterConfig{RequestTimeout: settings().requestTimeout} },
 		metrics.Default(), logger)
+	router.AfterCall = m.afterCall
 	m.gateway.SetRouter(router)
 
 	// The notification module is a declared dependency and always loaded;
@@ -355,10 +372,19 @@ func (m *Module) Init(deps *module.Dependencies) error {
 
 	m.admin = handlers.NewAdminHandler(m.catalog, logger)
 	m.self = handlers.NewSelfHandler(m.gateway, logger)
-	limiter := services.NewRateLimiter(deps.RedisAdapter, logger)
 	m.ops = handlers.NewOpsHandler(services.NewAdminOps(m.catalog, m.registry, m.clientFor, limiter, services.NewPinnedRunner(m.gateway), logger), logger)
 	m.usageH = handlers.NewUsageHandler(services.NewUsageService(usage, monthly, budgets, dir, m.catalog, budgetCfg, logger), logger)
 	return nil
+}
+
+// afterCall is the router's per-attempt hook: a successful plan-billed call
+// stamps the linked account's lastUsedAt (ruling 2.17). Failures change
+// nothing here: a terminal refresh already flagged the account
+// needs_reauth where it happened.
+func (m *Module) afterCall(ctx context.Context, model models.Model, credentialUUID string, err error) {
+	if err == nil && model.CredentialRef.Kind == models.CredentialKindUserAccount && credentialUUID != "" && m.accounts != nil {
+		m.accounts.MarkUsed(ctx, credentialUUID)
+	}
 }
 
 // clientFor returns the SSRF-safe client of a provider kind, built once

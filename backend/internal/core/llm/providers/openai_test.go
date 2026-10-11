@@ -356,7 +356,8 @@ func TestOpenAI_SIWCProfile(t *testing.T) {
 	if _, err := p.Chat(context.Background(), ChatCall{ModelID: "m", Request: req}, noopSink); !errors.Is(err, iface.ErrLLMCapabilityMismatch) {
 		t.Errorf("temperature err = %v", err)
 	}
-	if _, err := p.Chat(context.Background(), ChatCall{ModelID: "m", Request: userReq("hi")}, noopSink); err != nil {
+	shaped := iface.ChatRequest{Caller: "t", Instructions: "sys", Messages: []iface.ChatMessage{{Role: "developer", Content: "d"}, {Role: "user", Content: "u"}}}
+	if _, err := p.Chat(context.Background(), ChatCall{ModelID: "m", Request: shaped}, noopSink); err != nil {
 		t.Fatal(err)
 	}
 	for _, forbidden := range []string{"temperature", "max_output_tokens", "metadata", "user", "previous_response_id"} {
@@ -364,8 +365,18 @@ func TestOpenAI_SIWCProfile(t *testing.T) {
 			t.Errorf("SIWC request carries forbidden field %s", forbidden)
 		}
 	}
-	if captured["store"] != false || captured["stream"] != true {
+	if captured["store"] != false || captured["stream"] != true || captured["instructions"] != "sys" {
 		t.Errorf("request = %v", captured)
+	}
+	// Developer items stay developer; nothing is sent with role system.
+	input, _ := captured["input"].([]any)
+	if len(input) != 2 || input[0].(map[string]any)["role"] != "developer" {
+		t.Errorf("input = %v", input)
+	}
+	for _, item := range input {
+		if item.(map[string]any)["role"] == "system" {
+			t.Error("system role item sent on the plan route")
+		}
 	}
 	api, _ := newOAI(t, func(w http.ResponseWriter, r *http.Request) {}, iface.LLMCredentialKindOrg)
 	if !api.Capabilities().Embeddings || api.(*OpenAI).Profile() != ProfileAPIKey {
