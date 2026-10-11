@@ -4,11 +4,13 @@ import {
   faChartColumn,
   faCoins,
   faKey,
-  faRobot
+  faRobot,
+  faUserShield
 } from '@fortawesome/free-solid-svg-icons';
 import { useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import PageHeader from 'components/common/PageHeader';
+import AccountsTab from './AccountsTab';
 import BudgetTab from './BudgetTab';
 import CredentialsTab from './CredentialsTab';
 import ModelsTab from './ModelsTab';
@@ -18,7 +20,8 @@ import { useLlmPermissions } from './llmPermissions';
 // /admin/llm — the operator surface of the core llm module (ADR-0022):
 // the org's provider credentials, its configured models and who may use
 // them, the month's usage and the budget. Tabs follow the url-tabs
-// convention (?tab=…); PR 3 adds accounts. An unknown value — or a tab the
+// convention (?tab=…); the accounts tab lists the members' linked ChatGPT
+// accounts (Sign in with ChatGPT). An unknown value — or a tab the
 // caller may not open — degrades to the models tab. The page re-checks
 // llm.admin.read itself rather than trusting the menu entry and hides the
 // tabs without it; the usage tab additionally needs llm.usage.read (the
@@ -27,6 +30,7 @@ import { useLlmPermissions } from './llmPermissions';
 const TABS = [
   { key: 'models', labelKey: 'adminLlm.tabs.models', icon: faRobot },
   { key: 'credentials', labelKey: 'adminLlm.tabs.credentials', icon: faKey },
+  { key: 'accounts', labelKey: 'adminLlm.tabs.accounts', icon: faUserShield },
   { key: 'usage', labelKey: 'adminLlm.tabs.usage', icon: faChartColumn },
   { key: 'budget', labelKey: 'adminLlm.tabs.budget', icon: faCoins }
 ] as const;
@@ -94,6 +98,9 @@ const LlmAdminPage = () => {
                 </Tab.Pane>
                 <Tab.Pane eventKey="credentials" mountOnEnter unmountOnExit>
                   <CredentialsTab />
+                </Tab.Pane>
+                <Tab.Pane eventKey="accounts" mountOnEnter unmountOnExit>
+                  <AccountsTab />
                 </Tab.Pane>
                 {canReadUsage && (
                   <Tab.Pane eventKey="usage" mountOnEnter unmountOnExit>

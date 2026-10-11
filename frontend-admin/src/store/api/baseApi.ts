@@ -865,7 +865,8 @@ export const baseApi = createApi({
     'LLMModel',
     'LLMMyModels',
     'LLMUsage',
-    'LLMBudget'
+    'LLMBudget',
+    'LLMAccount'
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,
@@ -935,12 +936,14 @@ export const TENANT_SCOPED_TAGS = [
   'AdminOrg',
   'OrgInvite',
   // llm: every slice is the active org's (credentials, models, grants,
-  // usage, budget) and none carries the org in its cache key.
+  // usage, budget, linked ChatGPT accounts) and none carries the org in its
+  // cache key.
   'LLMCredential',
   'LLMModel',
   'LLMMyModels',
   'LLMUsage',
-  'LLMBudget'
+  'LLMBudget',
+  'LLMAccount'
 ] as const;
 
 // Addon-owned tenant-scoped tags. An addon declares its RTK Query tags in its

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from 'test/render';
@@ -12,6 +12,15 @@ import {
   url
 } from 'test/handlers';
 import SecurityPage from './index';
+
+// The AI accounts tab is gated on llm.accounts.self, so useAuth is mocked
+// (precedent: pages/admin/llm/BudgetTab.test.tsx). No other tab reads it.
+const mockedUseAuth = vi.fn();
+vi.mock('hooks/auth/useAuthRTK', () => ({ useAuth: () => mockedUseAuth() }));
+const authWith = (permissions: string[]) => ({
+  hasPermission: (p: string) => permissions.includes(p)
+});
+beforeEach(() => mockedUseAuth.mockReturnValue(authWith([])));
 
 // The KPI row derives from three queries the tabs already hold. A query that
 // FAILED is not a zero, and on a security page that distinction is the whole
@@ -94,5 +103,46 @@ describe('SecurityPage summary row', () => {
       .find(Boolean)!;
     expect(sessionsTile).toHaveTextContent('—');
     expect(sessionsTile).not.toHaveTextContent(/\b0\b/);
+  });
+});
+
+describe('SecurityPage AI accounts tab', () => {
+  const summary = () => [
+    operatorPolicyHandler(),
+    selfAuthMethodsHandler(),
+    mySessionsHandler(),
+    trustedDevicesHandler()
+  ];
+
+  it('is hidden without llm.accounts.self, and its URL degrades to the password tab', async () => {
+    server.use(...summary());
+    renderWithProviders(<SecurityPage />, {
+      routerEntries: ['/user/security?tab=ai']
+    });
+    expect(
+      await screen.findByRole('tab', { name: /password/i })
+    ).toHaveAttribute('aria-selected', 'true');
+    expect(
+      screen.queryByRole('tab', { name: /ai accounts/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it('opens through the URL with llm.accounts.self', async () => {
+    mockedUseAuth.mockReturnValue(authWith(['llm.accounts.self']));
+    server.use(
+      ...summary(),
+      http.get(url('/v1/llm/accounts/openai'), () =>
+        HttpResponse.json({ mode: 'hosted_paste', items: [] })
+      )
+    );
+    renderWithProviders(<SecurityPage />, {
+      routerEntries: ['/user/security?tab=ai']
+    });
+    expect(
+      await screen.findByRole('tab', { name: /ai accounts/i })
+    ).toHaveAttribute('aria-selected', 'true');
+    expect(
+      await screen.findByRole('button', { name: /link a chatgpt account/i })
+    ).toBeInTheDocument();
   });
 });

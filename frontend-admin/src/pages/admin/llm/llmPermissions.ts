@@ -15,7 +15,15 @@ export const LLM_PERMISSIONS = {
   models: 'llm.models.admin',
   grants: 'llm.grants.admin',
   usage: 'llm.usage.read',
-  budgets: 'llm.budgets.admin'
+  budgets: 'llm.budgets.admin',
+  // Force-unlink any member's linked ChatGPT account (system permission).
+  accounts: 'llm.accounts.admin',
+  // Link, select and unlink your own ChatGPT accounts (org permission):
+  // gates the AI tab on /user/security.
+  accountsSelf: 'llm.accounts.self',
+  // The caller's own usable models and month's usage (org permissions).
+  modelsSelf: 'llm.models.self',
+  usageSelf: 'llm.usage.self'
 } as const;
 
 export const useLlmPermissions = () => {
@@ -27,6 +35,10 @@ export const useLlmPermissions = () => {
     canManageModels: hasPermission(P.models),
     canManageGrants: hasPermission(P.grants),
     canReadUsage: hasPermission(P.usage),
-    canManageBudget: hasPermission(P.budgets)
+    canManageBudget: hasPermission(P.budgets),
+    canManageAccounts: hasPermission(P.accounts),
+    canLinkOwnAccounts: hasPermission(P.accountsSelf),
+    canListOwnModels: hasPermission(P.modelsSelf),
+    canReadOwnUsage: hasPermission(P.usageSelf)
   };
 };

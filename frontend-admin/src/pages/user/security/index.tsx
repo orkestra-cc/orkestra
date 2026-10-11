@@ -8,10 +8,12 @@ import {
   faLaptop,
   faLifeRing,
   faLink,
+  faRobot,
   faShieldHalved
 } from '@fortawesome/free-solid-svg-icons';
 import { useTranslation } from 'react-i18next';
 import StatCard from 'components/common/StatCard';
+import { useLlmPermissions } from 'pages/admin/llm/llmPermissions';
 import {
   useGetMySessionsQuery,
   useGetSelfAuthMethodsQuery
@@ -24,6 +26,7 @@ const LinkedProvidersTab = lazy(() => import('./LinkedProvidersTab'));
 const SessionsTab = lazy(() => import('./SessionsTab'));
 const TrustedDevicesTab = lazy(() => import('./TrustedDevicesTab'));
 const BackupCodesTab = lazy(() => import('./BackupCodesTab'));
+const AiAccountsTab = lazy(() => import('./AiAccountsTab'));
 
 const TABS = [
   { key: 'password', labelKey: 'userSecurity.tabs.password', icon: faKey },
@@ -35,28 +38,34 @@ const TABS = [
     key: 'backup-codes',
     labelKey: 'userSecurity.tabs.backupCodes',
     icon: faLifeRing
-  }
+  },
+  // Linked ChatGPT accounts (Sign in with ChatGPT): shown only with the org
+  // permission llm.accounts.self.
+  { key: 'ai', labelKey: 'userSecurity.tabs.ai', icon: faRobot }
 ] as const;
 
-const TAB_KEYS = TABS.map(tab => tab.key);
 type TabKey = (typeof TABS)[number]['key'];
 
 const DEFAULT_TAB: TabKey = 'password';
 
 // URL-tabs convention: persist the active tab to ?tab=X so the page
-// is shareable + bookmarkable. Unknown values fall back to the
-// password tab.
-function readTab(param: string | null): TabKey {
-  const candidate = (param ?? DEFAULT_TAB) as TabKey;
-  return (TAB_KEYS as readonly string[]).includes(candidate)
-    ? candidate
-    : DEFAULT_TAB;
+// is shareable + bookmarkable. Unknown values — or a tab the caller may not
+// open — fall back to the password tab.
+function readTab(
+  param: string | null,
+  visible: readonly (typeof TABS)[number][]
+): TabKey {
+  return visible.find(tab => tab.key === param)?.key ?? DEFAULT_TAB;
 }
 
 const SecurityPage = () => {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = readTab(searchParams.get('tab'));
+  const { canLinkOwnAccounts } = useLlmPermissions();
+  const visibleTabs = TABS.filter(
+    item => item.key !== 'ai' || canLinkOwnAccounts
+  );
+  const tab = readTab(searchParams.get('tab'), visibleTabs);
 
   // The KPI row reads the same RTK Query caches the tabs read, so it costs no
   // extra round trip — RTK Query dedupes the in-flight requests (the pattern
@@ -101,7 +110,7 @@ const SecurityPage = () => {
   const unavailable = t('userSecurity.stats.unavailable');
 
   const onTabChange = (key: string | null) => {
-    const next = readTab(key);
+    const next = readTab(key, visibleTabs);
     const sp = new URLSearchParams(searchParams);
     if (next === DEFAULT_TAB) sp.delete('tab');
     else sp.set('tab', next);
@@ -215,7 +224,7 @@ const SecurityPage = () => {
         <Tab.Container activeKey={tab} onSelect={onTabChange}>
           <Card.Header className="border-bottom border-200">
             <Nav variant="tabs" className="card-header-tabs fs-10">
-              {TABS.map(item => (
+              {visibleTabs.map(item => (
                 <Nav.Item key={item.key}>
                   <Nav.Link eventKey={item.key} className="text-nowrap">
                     <FontAwesomeIcon icon={item.icon} className="me-2" />
@@ -252,6 +261,13 @@ const SecurityPage = () => {
                 <Tab.Pane eventKey="backup-codes">
                   <BackupCodesTab />
                 </Tab.Pane>
+                {canLinkOwnAccounts && (
+                  // Mounted only while open: its three queries (accounts,
+                  // models, usage) are not the security summary's.
+                  <Tab.Pane eventKey="ai" mountOnEnter unmountOnExit>
+                    <AiAccountsTab />
+                  </Tab.Pane>
+                )}
               </Tab.Content>
             </Suspense>
           </Card.Body>
