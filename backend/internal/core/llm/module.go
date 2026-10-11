@@ -346,6 +346,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		Config: m.siwcCfg, Logger: logger,
 	})
 	m.gateway.SetAccounts(m.accounts)
+	m.gateway.SetActiveModelTenants(mods)
 
 	router := services.NewRouter(m.registry, services.NewCredentialResolver(m.catalog, m.accounts), budgetSvc,
 		services.NewBreaker(3, 30*time.Second), m.clientFor,

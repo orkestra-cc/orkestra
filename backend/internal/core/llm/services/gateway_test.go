@@ -1,9 +1,11 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"math"
+	"sort"
 	"strings"
 	"testing"
 
@@ -359,5 +361,65 @@ func TestGateway_ForwardsAuditSinkToAccounts(t *testing.T) {
 	h.linkAccount(t, ctxFor("t1"), "oaiapp_1", "c")
 	if len(sink.actions()) == 0 {
 		t.Fatal("no account audit event reached the gateway's sink")
+	}
+}
+
+// TenantsWithActiveModels makes the in-memory repo an ActiveModelTenants.
+func (m *memModels) TenantsWithActiveModels(context.Context) ([]string, error) {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, r := range m.rows {
+		if r.Status == models.ModelStatusActive && !seen[r.TenantID] {
+			seen[r.TenantID] = true
+			out = append(out, r.TenantID)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// The availability probe runs with no user or org in context (a module
+// health check): it looks across orgs, ignores grants and follows the
+// live rules and the purpose fallback routing uses.
+func TestGateway_HasLiveModel(t *testing.T) {
+	g, mods := newGatewayWithModels(t)
+	ctx := context.Background()
+	tools := iface.LLMCapabilities{Chat: true, Tools: true}
+	if _, err := g.HasLiveModel(ctx, "support", tools); !errors.Is(err, iface.ErrLLMNotConfigured) {
+		t.Fatalf("unwired probe err = %v", err)
+	}
+	g.SetActiveModelTenants(mods)
+	for _, tc := range []struct {
+		purpose string
+		need    iface.LLMCapabilities
+		want    bool
+	}{
+		// support is declared by no model: the default purpose serves it,
+		// and m-granted (tools, granted to u1 only) counts.
+		{"support", tools, true},
+		{"code", tools, true},
+		{"default", iface.LLMCapabilities{Embeddings: true}, true},
+		{"default", iface.LLMCapabilities{Chat: true, StructuredOutput: true}, false},
+	} {
+		if ok, err := g.HasLiveModel(ctx, tc.purpose, tc.need); err != nil || ok != tc.want {
+			t.Fatalf("HasLiveModel(%s, %+v) = %v, %v; want %v", tc.purpose, tc.need, ok, err, tc.want)
+		}
+	}
+
+	// A model that is not live (disabled) does not count.
+	mods.rows["m-granted"].Status = models.ModelStatusDisabled
+	if ok, err := g.HasLiveModel(ctx, "support", tools); err != nil || ok {
+		t.Fatalf("with the tools model disabled = %v, %v", ok, err)
+	}
+	// Any org will do.
+	other := *mods.rows["m-granted"]
+	other.UUID, other.TenantID, other.Status = "m-t2", "t2", models.ModelStatusActive
+	other.CredentialRef = models.LLMCredentialRef{Kind: models.CredentialKindUserAccount}
+	mods.rows[other.UUID] = &other
+	if ok, err := g.HasLiveModel(ctx, "support", tools); err != nil || !ok {
+		t.Fatalf("with a tools model in another org = %v, %v", ok, err)
+	}
+	if _, err := g.HasLiveModel(ctx, "Bad Purpose", tools); !errors.Is(err, iface.ErrLLMInvalidRequest) {
+		t.Fatalf("bad purpose err = %v", err)
 	}
 }

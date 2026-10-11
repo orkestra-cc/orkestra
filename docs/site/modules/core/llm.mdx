@@ -181,7 +181,7 @@ case errors.Is(err, iface.ErrLLMProviderUnavailable):
 }
 ```
 
-The interface has four methods: `Chat`, `Embed`, `Resolve` (the model `Chat` would pick, without calling it) and `ListUsable`. Message roles are `developer`, `user`, `assistant` and `tool`; system text goes in `ChatRequest.Instructions`. Errors are classified with the `ErrLLM*` sentinels in `pkg/sdk/iface/llm.go`, which a consumer maps to its own error codes. The acting user comes from the request context, and the gateway refuses a tenant that is not internal.
+The interface has four methods: `Chat`, `Embed`, `Resolve` (the model `Chat` would pick, without calling it) and `ListUsable`. The registered gateway also implements `iface.LLMAvailabilityProbe`, for checks that run with no user or organization in context, such as a module health check: `HasLiveModel(ctx, purpose, need)` reports whether any organization has a live model that would serve the purpose with the given capabilities. It ignores per-user grants and linked accounts, so `true` does not mean every user can use the model. Message roles are `developer`, `user`, `assistant` and `tool`; system text goes in `ChatRequest.Instructions`. Errors are classified with the `ErrLLM*` sentinels in `pkg/sdk/iface/llm.go`, which a consumer maps to its own error codes. The acting user comes from the request context, and the gateway refuses a tenant that is not internal.
 
 `Options.MaxOutputTokens` must be between 1 and 131072, like every other output limit: it is what the call reserves against the budget. `ChatResult.Usage` and the final `Done` event report the usage of the attempt that answered; after a fallback the ledger and the budget also charge the failed attempts.
 

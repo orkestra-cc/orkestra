@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -178,5 +180,28 @@ func TestModels_UpdateDoesNotRevertAccess(t *testing.T) {
 	}
 	if err := repo.Update(ctxFor("t2"), got); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-tenant Update err = %v", err)
+	}
+}
+
+// The availability probe needs the orgs with an active model, across
+// every org, and nothing else.
+func TestModels_TenantsWithActiveModels(t *testing.T) {
+	db := newTestDB(t)
+	repo := NewModels(db)
+	for tenant, ms := range map[string][]*models.Model{
+		"t1": {newModel("m1", "a", "c1", models.ModelStatusActive, "u"), newModel("m2", "b", "c1", models.ModelStatusActive, "u")},
+		"t2": {newModel("m3", "a", "c1", models.ModelStatusDisabled, "u")},
+		"t3": {newModel("m4", "a", "c1", models.ModelStatusActive, "u")},
+	} {
+		for _, m := range ms {
+			if err := repo.Insert(ctxFor(tenant), m); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	got, err := repo.TenantsWithActiveModels(context.Background())
+	sort.Strings(got)
+	if err != nil || strings.Join(got, ",") != "t1,t3" {
+		t.Fatalf("tenants = %v, %v", got, err)
 	}
 }

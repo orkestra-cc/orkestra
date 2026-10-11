@@ -174,6 +174,20 @@ func (a *AccessResolver) Candidates(ctx context.Context, userUUID, purpose strin
 	return pickForPurpose(usable, purpose, need), nil
 }
 
+// HasLive reports whether the org in ctx has a live model that serves
+// purpose (with the fallback Candidates applies) and need, whoever holds
+// a grant for it.
+func (a *AccessResolver) HasLive(ctx context.Context, purpose string, need Need) (bool, error) {
+	active, err := a.liveActive(ctx)
+	if err != nil {
+		return false, err
+	}
+	if purpose == "" || !declaresPurpose(active, purpose) {
+		purpose = defaultPurpose
+	}
+	return len(pickForPurpose(active, purpose, need)) > 0, nil
+}
+
 // declaresPurpose reports whether any of ms lists purpose.
 func declaresPurpose(ms []models.Model, purpose string) bool {
 	for _, m := range ms {
