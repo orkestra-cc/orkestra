@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/orkestra/backend/internal/core/llm/models"
+	"github.com/orkestra/backend/internal/core/llm/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -239,6 +240,71 @@ func (d *dsrOutbox) RemoveDelivered(_ context.Context, user string) (int64, erro
 	return n, nil
 }
 
+// dsrAccounts mirrors repository.UserAccounts' DSR pair, including its
+// refusal of an empty subject.
+type dsrAccounts struct {
+	rows  []models.UserAccount
+	err   error
+	calls int
+}
+
+func (d *dsrAccounts) ListByUserAllTenants(_ context.Context, user string) ([]models.UserAccount, error) {
+	d.calls++
+	if user == "" {
+		return nil, repository.ErrEmptySubject
+	}
+	out := []models.UserAccount{}
+	for _, a := range d.rows {
+		if a.UserUUID == user {
+			out = append(out, a)
+		}
+	}
+	return out, d.err
+}
+
+func (d *dsrAccounts) DeleteByUser(_ context.Context, user string) (int64, error) {
+	d.calls++
+	if user == "" {
+		return 0, repository.ErrEmptySubject
+	}
+	if d.err != nil {
+		return 0, d.err
+	}
+	kept := d.rows[:0]
+	var n int64
+	for _, a := range d.rows {
+		if a.UserUUID == user {
+			n++
+			continue
+		}
+		kept = append(kept, a)
+	}
+	d.rows = kept
+	return n, nil
+}
+
+func (d *dsrAccounts) has(uuid string) bool {
+	for _, a := range d.rows {
+		if a.UUID == uuid {
+			return true
+		}
+	}
+	return false
+}
+
+// revokeLog records each revocation and whether the row still existed then
+// (revoke must come before the delete).
+type revokeLog struct {
+	accounts *dsrAccounts
+	seen     []string // uuid@tenant
+	before   []bool
+}
+
+func (r *revokeLog) revoke(_ context.Context, a models.UserAccount) {
+	r.seen = append(r.seen, a.UUID+"@"+a.TenantID)
+	r.before = append(r.before, r.accounts.has(a.UUID))
+}
+
 func contains(list []string, v string) bool {
 	for _, x := range list {
 		if x == v {
@@ -265,6 +331,8 @@ type dsrSet struct {
 	u *dsrUsage
 	b *dsrBudgets
 	o *dsrOutbox
+	a *dsrAccounts
+	r *revokeLog
 }
 
 var (
@@ -280,7 +348,8 @@ var (
 // dsrFixture: subject "u1" is grantee of g1, g2 and g5, granter of g3 and g5,
 // creator of cred-1 and model-1, owner of usage rows us1 (finalized), us2
 // (finalized, user account) and us3 (pending), extra recipient of the t1
-// and t3 budgets and last editor of t1's, and received alert ob1.
+// and t3 budgets and last editor of t1's, received alert ob1, and linked
+// the ChatGPT accounts acct-1 (t1) and acct-2 (t2).
 // Everything else belongs to other people.
 func dsrFixture() (*PIIProducer, *dsrSet) {
 	set := &dsrSet{}
@@ -333,7 +402,21 @@ func dsrFixture() (*PIIProducer, *dsrSet) {
 		{UUID: "ob2", TenantID: "t2", Period: "2026-03", Threshold: models.ThresholdExhausted, Status: models.OutboxStatusSending,
 			DeliveredTo: []string{"u3"}, CreatedAt: tm5},
 	}}
-	p := NewPIIProducer(set.c, set.m, set.g, set.u, set.b, set.o, slog.Default())
+	sealed := func(tag string) models.Envelope {
+		return models.Envelope{Alg: models.EnvelopeAlgLocal, KeyVersion: 1, SchemaVersion: 1, Ciphertext: "TOKEN-SENTINEL-" + tag}
+	}
+	set.a = &dsrAccounts{rows: []models.UserAccount{
+		{UUID: "acct-1", TenantID: "t1", UserUUID: "u1", Provider: models.ProviderOpenAI, Label: "Work", Issuer: "https://auth.openai.com",
+			Subject: "SUBJECT-SENTINEL", Email: "u1@example.test", ClientID: "oaiapp_CLIENT-SENTINEL", ExtAgentHostID: "urn:uuid:HOST-SENTINEL",
+			IDToken: sealed("id"), AccessToken: sealed("access"), RefreshToken: sealed("refresh"), TokenType: "Bearer",
+			ExpiresAt: tm3, RefreshExpiresAt: tm6, SavedAt: tm2, Scopes: []string{"openid", models.ScopePlanUsage}, PlanUsageGranted: true,
+			Selected: true, Status: models.AccountStatusActive, LinkedAt: tm1, LastUsedAt: &tm4, LastError: "llm.provider_unavailable", UpdatedAt: tm4},
+		{UUID: "acct-2", TenantID: "t2", UserUUID: "u1", Provider: models.ProviderOpenAI, Label: "Personal", Subject: "SUBJECT-SENTINEL-2",
+			ClientID: "oaiapp_CLIENT-SENTINEL-2", RefreshToken: sealed("refresh-2"), Status: models.AccountStatusNeedsReauth, LinkedAt: tm2},
+		{UUID: "acct-3", TenantID: "t1", UserUUID: "u2", Provider: models.ProviderOpenAI, Label: "Other", ClientID: "oaiapp_other", Status: models.AccountStatusActive, LinkedAt: tm0},
+	}}
+	set.r = &revokeLog{accounts: set.a}
+	p := NewPIIProducer(set.c, set.m, set.g, set.u, set.b, set.o, set.a, set.r.revoke, slog.Default())
 	return p, set
 }
 
@@ -433,6 +516,15 @@ func TestPIIProducer_ExportEveryField(t *testing.T) {
 	if !reflect.DeepEqual(b.BudgetAlerts, wantAlerts) {
 		t.Errorf("budgetAlertsReceived = %+v, want %+v", b.BudgetAlerts, wantAlerts)
 	}
+
+	// llm_user_accounts.userUuid (acct-1, acct-2), every projected field.
+	wantAccounts := []ExportedLinkedAccount{
+		{UUID: "acct-1", Label: "Work", Email: "u1@example.test", Status: models.AccountStatusActive, LinkedAt: tm1, LastUsedAt: &tm4},
+		{UUID: "acct-2", Label: "Personal", Status: models.AccountStatusNeedsReauth, LinkedAt: tm2},
+	}
+	if !reflect.DeepEqual(b.Accounts, wantAccounts) {
+		t.Errorf("accounts = %+v, want %+v", b.Accounts, wantAccounts)
+	}
 }
 
 // The DSR listing returns whole credentials, envelope included. None of it
@@ -454,7 +546,12 @@ func TestPIIProducer_ExportNeverLeaksCredentialMaterial(t *testing.T) {
 		// Usage bookkeeping and the credential reference stay out too.
 		"credentialUuid", "acct-9", "reservedTokens", "reservedOutputTokens", "reservationExpiresAt",
 		// Budget settings and alert payloads are org data, not the subject's.
-		"monthlyTokenLimit", "warnPct", "action", "notifyExtraUserUuids", "updatedBy", "payload", "status", "u3",
+		"monthlyTokenLimit", "warnPct", "action", "notifyExtraUserUuids", "updatedBy", "payload", "u3", "sending",
+		// Linked accounts: never a token, the issued client id, the OIDC
+		// subject, the issuer, the host id or the scopes.
+		"TOKEN-SENTINEL", "accessToken", "refreshToken", "idToken", "clientId", "CLIENT-SENTINEL", "oaiapp",
+		"subject", "SUBJECT-SENTINEL", "issuer", "auth.openai.com", "extAgentHostId", "HOST-SENTINEL", "scopes",
+		models.ScopePlanUsage, "Bearer", "lastError", "acct-3",
 	} {
 		if strings.Contains(s, forbidden) {
 			t.Errorf("export JSON contains %q: %s", forbidden, s)
@@ -485,6 +582,7 @@ func TestPIIProducer_ExportNeverLeaksCredentialMaterial(t *testing.T) {
 		"budgetRecipientOf":    {"tenantId", "updatedAt"},
 		"budgetsUpdated":       {"tenantId", "updatedAt"},
 		"budgetAlertsReceived": {"createdAt", "period", "sentAt", "tenantId", "threshold"},
+		"accounts":             {"email", "label", "lastUsedAt", "linkedAt", "status", "uuid"},
 	}
 	for section, keys := range wantKeys {
 		rows := generic[section]
@@ -544,20 +642,21 @@ func TestPIIProducer_PurgeBothModes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("mode %v: %v", mode, err)
 		}
-		// Both modes: deleted g1, g2, g5 (grantee); anonymized g3 (granter) +
+		// Both modes: deleted acct-1, acct-2 (linked accounts) and g1, g2, g5
+		// (grantee); anonymized g3 (granter) +
 		// cred-1 + model-1 + budgets t1, t3 (recipient) + t1 (editor) + ob1.
 		// g5 was both grantee and granter; it is deleted, so not counted twice.
 		// Usage: hard delete removes us1, us2 and anonymizes the pending us3;
 		// anonymize rewrites all three.
-		wantDeleted, wantAnon := 3+2, 3+3+1+1
+		wantDeleted, wantAnon := 2+3+2, 3+3+1+1
 		if mode == iface.EraseAnonymize {
-			wantDeleted, wantAnon = 3, 3+3+3+1
+			wantDeleted, wantAnon = 2+3, 3+3+3+1
 		}
 		if res.RowsDeleted != wantDeleted || res.RowsAnonymized != wantAnon {
 			t.Errorf("mode %v result = %+v, want %d deleted / %d anonymized", mode, res, wantDeleted, wantAnon)
 		}
 		wantColls := map[string]bool{"llm_grants": true, "llm_credentials": true, "llm_models": true,
-			"llm_usage": true, "llm_budgets": true, "llm_budget_outbox": true}
+			"llm_usage": true, "llm_budgets": true, "llm_budget_outbox": true, "llm_user_accounts": true}
 		if len(res.Collections) != len(wantColls) {
 			t.Errorf("mode %v collections = %v", mode, res.Collections)
 		}
@@ -565,6 +664,16 @@ func TestPIIProducer_PurgeBothModes(t *testing.T) {
 			if !wantColls[coll] {
 				t.Errorf("mode %v unexpected collection %q", mode, coll)
 			}
+		}
+
+		// llm_user_accounts: each of the subject's refresh tokens revoked
+		// under its own org while the row still existed, then every
+		// registration deleted; acct-3 (u2) untouched.
+		if !reflect.DeepEqual(set.r.seen, []string{"acct-1@t1", "acct-2@t2"}) || !reflect.DeepEqual(set.r.before, []bool{true, true}) {
+			t.Errorf("mode %v revocations = %v (row present: %v)", mode, set.r.seen, set.r.before)
+		}
+		if len(set.a.rows) != 1 || set.a.rows[0].UUID != "acct-3" {
+			t.Errorf("mode %v remaining accounts = %+v", mode, set.a.rows)
 		}
 
 		// llm_grants.userUuid: the subject's grant rows are gone.
@@ -680,7 +789,7 @@ func TestPIIProducer_PurgeUnknownSubjectIsNoop(t *testing.T) {
 
 func TestPIIProducer_PropagatesRepositoryErrors(t *testing.T) {
 	boom := errors.New("db down")
-	for _, which := range []string{"grants", "usage", "budgets", "outbox"} {
+	for _, which := range []string{"grants", "usage", "budgets", "outbox", "accounts"} {
 		p, set := dsrFixture()
 		switch which {
 		case "grants":
@@ -691,6 +800,8 @@ func TestPIIProducer_PropagatesRepositoryErrors(t *testing.T) {
 			set.b.err = boom
 		case "outbox":
 			set.o.err = boom
+		case "accounts":
+			set.a.err = boom
 		}
 		if _, err := p.ExportPersonalData(context.Background(), "u1"); !errors.Is(err, boom) {
 			t.Errorf("%s: export err = %v", which, err)
@@ -714,6 +825,7 @@ func TestPIIProducer_RejectsEmptySubject(t *testing.T) {
 	set.u.rows = append(set.u.rows, models.UsageEvent{UUID: "us-anon", TenantID: "t3", UserUUID: "", Outcome: models.OutcomeOK, CreatedAt: tm0})
 	set.b.rows = append(set.b.rows, models.Budget{TenantID: "t4", UpdatedBy: "", NotifyExtraUserUUIDs: []string{}})
 
+	set.a.rows = append(set.a.rows, models.UserAccount{UUID: "acct-anon", TenantID: "t3", UserUUID: ""})
 	if out, err := p.ExportPersonalData(context.Background(), ""); !errors.Is(err, ErrEmptySubject) || out != nil {
 		t.Fatalf("export of an empty subject = %#v, %v", out, err)
 	}
@@ -724,5 +836,23 @@ func TestPIIProducer_RejectsEmptySubject(t *testing.T) {
 	if g.rows[len(g.rows)-1].GrantedBy != "" || c.rows[len(c.rows)-1].CreatedBy != "" || m.rows[len(m.rows)-1].CreatedBy != "" || len(g.rows) != 6 ||
 		len(set.u.rows) != 5 || set.u.rows[4].UserUUID != "" || set.b.rows[3].UpdatedBy != "" {
 		t.Fatal("a purge of an empty subject rewrote rows")
+	}
+	if set.a.calls != 0 || len(set.r.seen) != 0 || len(set.a.rows) != 4 {
+		t.Fatalf("an empty subject reached the accounts (calls %d, revoked %v)", set.a.calls, set.r.seen)
+	}
+}
+
+// The accounts repository refuses an empty subject itself; were the guard
+// above ever lost, that refusal must stop the request, never read as "no
+// rows" (carry from Task 2).
+func TestPIIProducer_RepositoryEmptySubjectIsARefusal(t *testing.T) {
+	p, set := dsrFixture()
+	set.a.err = repository.ErrEmptySubject
+	if _, err := p.ExportPersonalData(context.Background(), "u1"); !errors.Is(err, repository.ErrEmptySubject) {
+		t.Fatalf("export err = %v", err)
+	}
+	res, err := p.PurgePersonalData(context.Background(), "u1", iface.EraseHardDelete)
+	if !errors.Is(err, repository.ErrEmptySubject) || res.RowsDeleted != 0 || len(set.g.rows) != 5 {
+		t.Fatalf("purge = %+v, %v (grants %d)", res, err, len(set.g.rows))
 	}
 }

@@ -466,7 +466,7 @@ func TestAccounts_PasteFlowLinksActiveAndSelected(t *testing.T) {
 	}
 	state := stateFrom(t, link.AuthorizeURL)
 	pasted := "http://127.0.0.1:14555/v1/llm/accounts/openai/callback?code=c1&state=" + state + "&client_id=oaiapp_1"
-	in, err := h.svc.ParsePastedCallback(pasted, "http://127.0.0.1:14555/v1/llm/accounts/openai/callback")
+	in, err := h.svc.ParsePastedCallback(pasted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -540,30 +540,60 @@ func TestAccounts_PasteByAnotherUserIsRejectedAndConsumed(t *testing.T) {
 }
 
 func TestAccounts_PasteURLMustMatchRedirect(t *testing.T) {
-	svc, _ := newAccounts(t, SIWCModeHostedPaste, &fakeOIDC{scope: SIWCScope})
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1"}
+	svc, _ := newAccounts(t, SIWCModeHostedPaste, oidc)
 	expected := "http://127.0.0.1:14555/v1/llm/accounts/openai/callback"
-	bad := []string{
-		"http://localhost:14555/v1/llm/accounts/openai/callback?code=c&state=s",
-		"http://127.0.0.1:1455/v1/llm/accounts/openai/callback?code=c&state=s",
-		"https://127.0.0.1:14555/v1/llm/accounts/openai/callback?code=c&state=s",
-		"http://127.0.0.1:14555/other?code=c&state=s",
-		"http://127.0.0.1:14555/v1/llm/accounts/openai/callback/?code=c&state=s",
+	// Refused by the parser itself: nothing is consumed.
+	malformed := []string{
 		"http://u:p@127.0.0.1:14555/v1/llm/accounts/openai/callback?code=c&state=s",
 		"http://127.0.0.1:14555/v1/llm/accounts/openai/callback?state=s", // no code, no error
 		"http://127.0.0.1:14555/v1/llm/accounts/openai/callback?code=c",  // no state
+		"/v1/llm/accounts/openai/callback?code=c&state=s",                // not absolute
 		"not a url",
 		"",
 		expected + "?code=c&state=s&pad=" + strings.Repeat("x", pastedCallbackMaxLen),
 	}
-	for _, raw := range bad {
-		if _, err := svc.ParsePastedCallback(raw, expected); !errors.Is(err, ErrSIWCCallbackInvalid) {
+	for _, raw := range malformed {
+		if _, err := svc.ParsePastedCallback(raw); !errors.Is(err, ErrSIWCCallbackInvalid) {
 			t.Errorf("%.80q accepted: %v", raw, err)
 		}
 	}
-	in, err := svc.ParsePastedCallback("  "+expected+"?error=access_denied&state=s#frag  ", expected)
+	in, err := svc.ParsePastedCallback("  " + expected + "?error=access_denied&state=s#frag  ")
 	if err != nil || in.Error != "access_denied" || in.State != "s" || in.RedirectURI != expected {
 		t.Fatalf("denied parse = %+v, %v", in, err)
 	}
+	// Parsed, then refused by Complete against the attempt's own redirect
+	// (ruling 5.17): the attempt is consumed and nothing is exchanged.
+	ctx := ctxFor("t1")
+	for _, base := range []string{
+		"http://localhost:14555/v1/llm/accounts/openai/callback",
+		"http://127.0.0.1:1455/v1/llm/accounts/openai/callback",
+		"https://127.0.0.1:14555/v1/llm/accounts/openai/callback",
+		"http://127.0.0.1:14555/other",
+		"http://127.0.0.1:14555/v1/llm/accounts/openai/callback/",
+	} {
+		link, err := svc.Link(ctx, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		state := stateFrom(t, link.AuthorizeURL)
+		in, err := svc.ParsePastedCallback(base + "?code=c&client_id=oaiapp_1&state=" + state)
+		if err != nil {
+			t.Fatalf("%s: parse err = %v", base, err)
+		}
+		if _, err := svc.Complete(ctx, in, true); !errors.Is(err, ErrSIWCCallbackInvalid) {
+			t.Fatalf("%s: complete err = %v", base, err)
+		}
+		in.RedirectURI = expected
+		if _, err := svc.Complete(ctx, in, true); !errors.Is(err, ErrSIWCStateInvalid) {
+			t.Fatalf("%s: the attempt must be consumed, err = %v", base, err)
+		}
+	}
+	oidc.locked(func() {
+		if oidc.exchanges != 0 {
+			t.Error("exchanged on a mismatched redirect")
+		}
+	})
 }
 
 func TestAccounts_CompleteRefusesARedirectOtherThanTheAttempts(t *testing.T) {

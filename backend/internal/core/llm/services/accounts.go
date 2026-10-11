@@ -379,25 +379,23 @@ type CallbackInput struct {
 const pastedCallbackMaxLen = 4096
 
 // ParsePastedCallback reads the URL the user pasted from the browser's
-// address bar. Scheme, host, port and path must equal expectedRedirect byte
-// for byte (localhost never matches 127.0.0.1); the fragment is ignored.
-func (s *AccountsService) ParsePastedCallback(raw, expectedRedirect string) (CallbackInput, error) {
+// address bar: an absolute URL without userinfo carrying a state and a code
+// or an error; the fragment is ignored. It does not judge where the URL
+// points: RedirectURI is filled from it (scheme://host:port/path) and
+// Complete compares that, byte for byte, with the redirect URI of the
+// attempt the state names, after consuming it (ruling 5.17). A localhost,
+// another port or another path therefore fails there, never against the
+// live configuration, which may have changed since the link started.
+func (s *AccountsService) ParsePastedCallback(raw string) (CallbackInput, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || len(raw) > pastedCallbackMaxLen {
 		return CallbackInput{}, ErrSIWCCallbackInvalid
 	}
 	u, err := url.Parse(raw)
-	if err != nil {
-		return CallbackInput{}, ErrSIWCCallbackInvalid
-	}
-	exp, err := url.Parse(expectedRedirect)
-	if err != nil {
+	if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || u.Opaque != "" {
 		return CallbackInput{}, ErrSIWCCallbackInvalid
 	}
 	u.Fragment, u.RawFragment = "", ""
-	if u.Scheme != exp.Scheme || u.Host != exp.Host || u.User != nil || u.Opaque != "" || u.EscapedPath() != exp.EscapedPath() {
-		return CallbackInput{}, ErrSIWCCallbackInvalid
-	}
 	q := u.Query()
 	in := CallbackInput{
 		Code: q.Get("code"), State: q.Get("state"), ClientID: q.Get("client_id"), Error: q.Get("error"),

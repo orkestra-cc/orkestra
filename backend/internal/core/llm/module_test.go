@@ -64,9 +64,10 @@ func TestModule_Declarations(t *testing.T) {
 		}
 	}
 	// Only the permissions the mounted routes use (amendment 1; PR 2 adds
-	// llm.usage.read, llm.budgets.admin and llm.usage.self).
-	if system != 6 || self != 2 {
-		t.Fatalf("permissions = %d system + %d self, want 6 + 2", system, self)
+	// llm.usage.read, llm.budgets.admin and llm.usage.self; PR 3
+	// llm.accounts.admin and llm.accounts.self).
+	if system != 7 || self != 3 {
+		t.Fatalf("permissions = %d system + %d self, want 7 + 3", system, self)
 	}
 
 	keys := map[string]bool{}
@@ -298,6 +299,37 @@ func (emptyGrants) Replace(context.Context, string, string, string, []string) er
 }
 func (emptyGrants) DeleteByModel(context.Context, string) error { return nil }
 
+// emptyAccounts is a linked-account store with nothing in it.
+type emptyAccounts struct{}
+
+var _ services.AccountRepo = emptyAccounts{}
+
+func (emptyAccounts) Insert(context.Context, *models.UserAccount) error { return nil }
+func (emptyAccounts) ListByUser(context.Context, string) ([]models.UserAccount, error) {
+	return nil, nil
+}
+func (emptyAccounts) ListAdmin(context.Context) ([]models.UserAccount, error) { return nil, nil }
+func (emptyAccounts) Get(context.Context, string) (*models.UserAccount, error) {
+	return nil, repository.ErrNotFound
+}
+func (emptyAccounts) GetSelected(context.Context, string, string) (*models.UserAccount, error) {
+	return nil, repository.ErrNotFound
+}
+func (emptyAccounts) Select(context.Context, string, string, string) error {
+	return repository.ErrNotFound
+}
+func (emptyAccounts) Delete(context.Context, string) error                 { return repository.ErrNotFound }
+func (emptyAccounts) SetLastUsed(context.Context, string, time.Time) error { return nil }
+func (emptyAccounts) SetStatus(context.Context, string, string, string) error {
+	return nil
+}
+func (emptyAccounts) SetStatusIf(context.Context, string, time.Time, string, string) error {
+	return nil
+}
+func (emptyAccounts) ReplaceTokens(context.Context, string, time.Time, models.AccountTokenSet) error {
+	return repository.ErrNotFound
+}
+
 // operatorCtx is what AuthMiddleware leaves for an operator acting in the
 // internal tenant t1; the recording gates do not set it.
 func operatorCtx() context.Context {
@@ -321,6 +353,11 @@ func moduleForRoutes(t *testing.T) *Module {
 	m.ops = handlers.NewOpsHandler(services.NewAdminOps(catalog, providers.NewRegistry(), nil, services.NewRateLimiter(nil, logger), services.NewPinnedRunner(gw), logger), logger)
 	m.usageH = handlers.NewUsageHandler(services.NewUsageService(emptyUsage{}, emptyMonthly{}, emptyBudgets{}, noMembers{}, catalog,
 		func() services.BudgetConfig { return services.BudgetConfig{} }, logger), logger)
+	siwcCfg := func() services.SIWCConfig { return services.SIWCConfig{Mode: services.SIWCModeDisabled} }
+	limiter := services.NewRateLimiter(nil, logger)
+	accounts := services.NewAccountsService(services.AccountsDeps{Repo: emptyAccounts{}, Vault: vault, Limiter: limiter, Config: siwcCfg, Logger: logger})
+	m.siwc = handlers.NewSIWCHandler(accounts, siwcCfg, limiter, nil, "http://localhost:8080", logger)
+	m.logger = logger
 	return m
 }
 
@@ -370,6 +407,15 @@ func TestModule_RouteGuards(t *testing.T) {
 		{http.MethodGet, "/v1/admin/llm/budget", read},
 		{http.MethodPut, "/v1/admin/llm/budget", []string{"internal", "sys:llm.budgets.admin", "mfa", stepUp}},
 		{http.MethodGet, "/v1/llm/me/usage", []string{"internal", "perm:llm.usage.self"}},
+		// Sign in with ChatGPT (ruling 5.6): own registrations without MFA or
+		// step-up; the forced unlink with both; the org list with the reads.
+		{http.MethodGet, "/v1/llm/accounts/openai", []string{"internal", "perm:llm.accounts.self"}},
+		{http.MethodPost, "/v1/llm/accounts/openai/link", []string{"internal", "perm:llm.accounts.self"}},
+		{http.MethodPost, "/v1/llm/accounts/openai/complete", []string{"internal", "perm:llm.accounts.self"}},
+		{http.MethodPut, "/v1/llm/accounts/openai" + id + "/selected", []string{"internal", "perm:llm.accounts.self"}},
+		{http.MethodDelete, "/v1/llm/accounts/openai" + id, []string{"internal", "perm:llm.accounts.self"}},
+		{http.MethodGet, "/v1/admin/llm/accounts", read},
+		{http.MethodDelete, "/v1/admin/llm/accounts" + id, []string{"internal", "sys:llm.accounts.admin", "mfa", stepUp}},
 	}
 	used := map[string]bool{}
 	for _, tc := range cases {
@@ -424,6 +470,85 @@ func TestModule_RouteGuards(t *testing.T) {
 		t.Fatalf("GET budget without one = %d %q", rec.Code, rec.Body.String())
 	}
 }
+
+// The public loopback callback exists only in loopback_local, on the root
+// router (no auth gate), decided once at RegisterRoutes; in hosted_paste and
+// disabled it is absent.
+func TestModule_CallbackMountedOnlyInLoopbackLocal(t *testing.T) {
+	for _, tc := range []struct {
+		mode    string
+		mounted bool
+	}{
+		{services.SIWCModeDisabled, false},
+		{services.SIWCModeHostedPaste, false},
+		{services.SIWCModeLoopbackLocal, true},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			m := moduleForRoutes(t)
+			m.siwcCfg = func() services.SIWCConfig {
+				return services.SIWCConfig{Mode: tc.mode, AllowHosted: true, PastePort: services.SIWCDefaultPastePort, OperatorPublicURL: "http://127.0.0.1:3007"}
+			}
+			root, protected := chi.NewRouter(), chi.NewRouter()
+			m.RegisterRoutes(&module.RouteInfo{
+				Operator:  &module.APISurface{Audience: module.AudienceOperator, ProtectedRouter: protected, AuthMW: recordingMW{}},
+				Router:    root,
+				APIConfig: docsless(),
+			})
+			var rootRoutes []string
+			if err := chi.Walk(root, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+				rootRoutes = append(rootRoutes, method+" "+route)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			want := []string(nil)
+			if tc.mounted {
+				want = []string{http.MethodGet + " " + services.SIWCCallbackPath}
+			}
+			if !reflect.DeepEqual(rootRoutes, want) {
+				t.Fatalf("root routes = %v, want %v", rootRoutes, want)
+			}
+			// Never on the authenticated router either.
+			if err := chi.Walk(protected, func(_, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+				if route == services.SIWCCallbackPath {
+					t.Errorf("callback mounted behind auth")
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if !tc.mounted {
+				return
+			}
+			req := httptest.NewRequest(http.MethodGet, services.SIWCCallbackPath+"?code=c&state=s", nil)
+			req.Host = "127.0.0.1:3007"
+			rec := httptest.NewRecorder()
+			root.ServeHTTP(rec, req)
+			if rec.Code != http.StatusFound || !strings.HasPrefix(rec.Header().Get("Location"), "http://localhost:8080/user/security?") {
+				t.Fatalf("callback = %d %q", rec.Code, rec.Header().Get("Location"))
+			}
+		})
+	}
+}
+
+func TestModule_LiveRedisDropsTypedNil(t *testing.T) {
+	var typed *typedNilRedis
+	if liveRedis(typed) != nil || liveRedis(nil) != nil {
+		t.Fatal("a nil or typed-nil client must become a plain nil")
+	}
+	if liveRedis(&typedNilRedis{}) == nil {
+		t.Fatal("a real client must pass through")
+	}
+}
+
+type typedNilRedis struct{}
+
+func (*typedNilRedis) Get(context.Context, string) (string, error)                   { return "", nil }
+func (*typedNilRedis) Set(context.Context, string, interface{}, time.Duration) error { return nil }
+func (*typedNilRedis) Del(context.Context, ...string) error                          { return nil }
+func (*typedNilRedis) Keys(context.Context, string) ([]string, error)                { return nil, nil }
+func (*typedNilRedis) Incr(context.Context, string) (int64, error)                   { return 0, nil }
+func (*typedNilRedis) Expire(context.Context, string, time.Duration) error           { return nil }
 
 // --- Init --------------------------------------------------------------------
 
@@ -576,8 +701,8 @@ func TestModule_InitRegistersSixAdaptersAndRouter(t *testing.T) {
 	if m.outboxW == nil || m.reconciler == nil || m.purge == nil || m.ops == nil || m.usageH == nil {
 		t.Fatal("background jobs and handlers must be wired")
 	}
-	if m.accounts == nil {
-		t.Fatal("the linked-account service must be wired (user_account resolution)")
+	if m.accounts == nil || m.siwc == nil {
+		t.Fatal("the linked-account service and its handler must be wired")
 	}
 }
 
