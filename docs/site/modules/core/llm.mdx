@@ -220,9 +220,10 @@ A budget is an **admission control**, not a kill switch. Each call reserves its 
 Alerts go by email to the organization's owners and admins plus the extra recipients still in the organization:
 
 - **warning** when consumption crosses `warnPct` of the limit (the default comes from `budget_warn_pct`; `0` disables it);
-- **exhausted** at the first call of the month refused under `block` once consumed plus reserved tokens already reach the warning threshold (or the limit, when `warnPct` is `0`), or when consumption reaches the limit. A single oversized request refused while most of the balance is unused is recorded as `budget_blocked` but sends no alert, so it cannot use up the month's only exhausted alert.
+- **exhausted** at the first call of the month refused under `block` once consumed plus reserved tokens already reach the warning threshold (or the limit, when `warnPct` is `0`), or when consumption reaches the limit. A single oversized request refused while most of the balance is unused is recorded as `budget_blocked` but sends no exhausted alert, so it cannot use up the month's only one;
+- **oversized** at the first call of the month refused under `block` that needs more tokens than the whole limit, when the exhausted alert does not fire. No balance could ever admit such a call: without this alert a budget smaller than one call would block the organization silently.
 
-Each alert is sent at most once per organization and month. It is written in the same transaction that crosses the threshold and delivered from a durable outbox with retries; delivery is tracked per recipient, so a retry only reaches the recipients still missing. Delivery is at-least-once: a recipient may rarely receive a copy twice, never zero copies while the notification module works. Templates: `llm.budget_warning` and `llm.budget_exhausted` (English and Italian).
+Each alert is sent at most once per organization and month. It is written in the same transaction that crosses the threshold and delivered from a durable outbox with retries; delivery is tracked per recipient, so a retry only reaches the recipients still missing. Delivery is at-least-once: a recipient may rarely receive a copy twice, never zero copies while the notification module works. Templates: `llm.budget_warning`, `llm.budget_exhausted` and `llm.budget_oversized` (English and Italian).
 
 ## Usage
 

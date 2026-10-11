@@ -92,6 +92,7 @@ type UsageMonthly struct {
 	ReservedTokens          int64      `json:"reservedTokens" bson:"reservedTokens"`
 	WarnedAt                *time.Time `json:"warnedAt,omitempty" bson:"warnedAt,omitempty"`
 	ExhaustedAt             *time.Time `json:"exhaustedAt,omitempty" bson:"exhaustedAt,omitempty"`
+	OversizedAt             *time.Time `json:"oversizedAt,omitempty" bson:"oversizedAt,omitempty"`
 	UpdatedAt               time.Time  `json:"updatedAt" bson:"updatedAt"`
 }
 

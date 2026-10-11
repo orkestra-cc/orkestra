@@ -22,6 +22,7 @@ import (
 const (
 	TemplateBudgetWarning      = "llm.budget_warning"
 	TemplateBudgetExhausted    = "llm.budget_exhausted"
+	TemplateBudgetOversized    = "llm.budget_oversized"
 	NotificationCategoryBudget = "llm.budget"
 )
 
@@ -128,8 +129,11 @@ func (n *BudgetNotifier) SendBudgetEvent(ctx context.Context, ev models.OutboxEv
 		return nil
 	}
 	template := TemplateBudgetWarning
-	if ev.Threshold == models.ThresholdExhausted {
+	switch ev.Threshold {
+	case models.ThresholdExhausted:
 		template = TemplateBudgetExhausted
+	case models.ThresholdOversized:
+		template = TemplateBudgetOversized
 	}
 	action := models.BudgetActionBlock
 	var extra []string
@@ -199,6 +203,9 @@ func (n *BudgetNotifier) SendBudgetEvent(ctx context.Context, ev models.OutboxEv
 			"period": ev.Period, "consumedTokens": ev.Payload["consumedTokens"], "limitTokens": ev.Payload["limitTokens"],
 			"pct": ev.Payload["pct"], "consoleUrl": n.consoleURL, "actionNote": actionNotes[locale][ev.Threshold+"|"+action],
 		}
+		if ev.Threshold == models.ThresholdOversized {
+			data["requestTokens"] = ev.Payload["requestTokens"]
+		}
 		sctx, cancel := context.WithTimeout(ctx, n.sendTimeout)
 		res, err := n.sender.SendTemplated(sctx, iface.TemplatedNotificationRequest{
 			Channel: "email", Type: "transactional", Category: NotificationCategoryBudget, TemplateID: template, Locale: locale,
@@ -252,6 +259,7 @@ func hasRole(roles []string, r string) bool {
 // text/template syntax; html/template escapes the HTML body.
 func BudgetNotificationTemplates() []module.NotificationTemplateSpec {
 	warnVars := []string{"period", "consumedTokens", "limitTokens", "pct", "actionNote", "consoleUrl"}
+	oversizedVars := []string{"period", "requestTokens", "limitTokens", "consoleUrl"}
 	return []module.NotificationTemplateSpec{
 		{TemplateID: TemplateBudgetWarning, Locale: "en",
 			Subject:     "LLM budget at {{.pct}}% for {{.period}}",
@@ -273,5 +281,15 @@ func BudgetNotificationTemplates() []module.NotificationTemplateSpec {
 			BodyText:    "L'organizzazione ha raggiunto il budget LLM di {{.limitTokens}} token per {{.period}} ({{.consumedTokens}} token usati). {{.actionNote}}\n\nApri la pagina del budget: {{.consoleUrl}}",
 			BodyHTML:    "<p>L'organizzazione ha raggiunto il budget LLM di <strong>{{.limitTokens}}</strong> token per {{.period}} ({{.consumedTokens}} token usati).</p><p>{{.actionNote}}</p><p><a href=\"{{.consoleUrl}}\">Apri la pagina del budget</a></p>",
 			Description: "Inviata una volta al mese quando il budget LLM rifiuta la prima chiamata o il consumo raggiunge il limite", Variables: warnVars},
+		{TemplateID: TemplateBudgetOversized, Locale: "en",
+			Subject:     "LLM budget too small for a single call in {{.period}}",
+			BodyText:    "A call that needed {{.requestTokens}} tokens was refused: the organization's whole LLM budget is {{.limitTokens}} tokens, so no call of that size can run. Raise the monthly limit or lower the model's output tokens.\n\nOpen the budget page: {{.consoleUrl}}",
+			BodyHTML:    "<p>A call that needed <strong>{{.requestTokens}}</strong> tokens was refused: the organization's whole LLM budget is {{.limitTokens}} tokens, so no call of that size can run.</p><p>Raise the monthly limit or lower the model's output tokens.</p><p><a href=\"{{.consoleUrl}}\">Open the budget page</a></p>",
+			Description: "Sent once per month when the LLM budget refuses a call larger than the whole limit", Variables: oversizedVars},
+		{TemplateID: TemplateBudgetOversized, Locale: "it",
+			Subject:     "Budget LLM insufficiente per una singola chiamata in {{.period}}",
+			BodyText:    "Una chiamata che richiedeva {{.requestTokens}} token è stata rifiutata: l'intero budget LLM dell'organizzazione è di {{.limitTokens}} token, quindi nessuna chiamata di quelle dimensioni può essere eseguita. Alza il limite mensile o riduci i token di output del modello.\n\nApri la pagina del budget: {{.consoleUrl}}",
+			BodyHTML:    "<p>Una chiamata che richiedeva <strong>{{.requestTokens}}</strong> token è stata rifiutata: l'intero budget LLM dell'organizzazione è di {{.limitTokens}} token, quindi nessuna chiamata di quelle dimensioni può essere eseguita.</p><p>Alza il limite mensile o riduci i token di output del modello.</p><p><a href=\"{{.consoleUrl}}\">Apri la pagina del budget</a></p>",
+			Description: "Inviata una volta al mese quando il budget LLM rifiuta una chiamata più grande dell'intero limite", Variables: oversizedVars},
 	}
 }

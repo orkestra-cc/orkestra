@@ -142,7 +142,7 @@ func (r *Outbox) MarkFailed(ctx context.Context, uuid string, leaseUntil time.Ti
 
 // PurgeSettledBefore deletes the sent and failed events of every org
 // created before cutoff (daily retention). Pending and sending events are
-// never touched; the rollup's warnedAt/exhaustedAt marks, not these rows,
+// never touched; the rollup's warnedAt/exhaustedAt/oversizedAt marks, not these rows,
 // keep a period from notifying twice.
 func (r *Outbox) PurgeSettledBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	//tenantscope:allow system: retention purge of delivered or abandoned budget notifications for every org on the daily ticker; deletes only terminal rows older than the module-wide retention cutoff

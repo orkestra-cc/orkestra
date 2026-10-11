@@ -38,11 +38,14 @@ func (m *memBudgetStore) GetBudget(context.Context) (*models.Budget, error) {
 
 func (m *memBudgetStore) Reserve(_ context.Context, period string, ev *models.UsageEvent, limit int64, warnPct int, block bool) (bool, error) {
 	mo := m.month(period)
-	if limit > 0 && mo.Consumed()+mo.ReservedTokens+int64(ev.ReservedTokens) > limit && block {
+	requested := int64(ev.ReservedTokens)
+	if limit > 0 && mo.Consumed()+mo.ReservedTokens+requested > limit && block {
 		ev.Outcome, ev.ReservedTokens, ev.ReservedOutputTokens = models.OutcomeBudgetBlocked, 0, 0
 		m.ledger[ev.UUID] = ev
 		if models.RefusalAlerts(mo.Consumed()+mo.ReservedTokens, limit, warnPct) {
 			m.mark(mo, models.ThresholdExhausted)
+		} else if models.RefusalOversized(requested, limit) {
+			m.mark(mo, models.ThresholdOversized)
 		}
 		return false, nil
 	}
@@ -96,8 +99,11 @@ func (m *memBudgetStore) Finalize(_ context.Context, period, uuid string, upd mo
 
 func (m *memBudgetStore) mark(mo *models.UsageMonthly, threshold string) bool {
 	at := &mo.WarnedAt
-	if threshold == models.ThresholdExhausted {
+	switch threshold {
+	case models.ThresholdExhausted:
 		at = &mo.ExhaustedAt
+	case models.ThresholdOversized:
+		at = &mo.OversizedAt
 	}
 	if *at != nil {
 		return false

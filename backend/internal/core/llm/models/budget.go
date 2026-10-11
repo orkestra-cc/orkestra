@@ -14,6 +14,9 @@ const (
 const (
 	ThresholdWarn      = "warn"
 	ThresholdExhausted = "exhausted"
+	// ThresholdOversized: a refused call needed more than the whole limit,
+	// so it could never be admitted on this budget (RefusalOversized).
+	ThresholdOversized = "oversized"
 )
 
 // Outbox statuses. failed is terminal after the bounded retries.
@@ -38,6 +41,15 @@ func RefusalAlerts(consumedPlusReserved, limit int64, warnPct int) bool {
 		return consumedPlusReserved >= limit
 	}
 	return consumedPlusReserved*100 >= limit*int64(warnPct)
+}
+
+// RefusalOversized reports whether a refused reservation fires the
+// period's "oversized" alert: the request alone needs more than the whole
+// limit, so no balance could ever admit it. Without this alert a budget
+// smaller than one call blocks the org with nothing ever reaching the
+// warn threshold. It is a separate alert so it never burns "exhausted".
+func RefusalOversized(requested, limit int64) bool {
+	return limit > 0 && requested > limit
 }
 
 // Budget is the org's monthly token cap (llm_budgets, one per org; no

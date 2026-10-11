@@ -207,7 +207,10 @@ func TestBudgetStore_ConcurrentReservationsOnOneBalance(t *testing.T) {
 // single exhausted alert only once consumed + reserved already reach the
 // warn threshold (or the limit when warnPct is 0). One oversized request
 // at 10% is ledgered budget_blocked without burning the alert; a refusal
-// near the limit still sends it, once.
+// near the limit still sends it, once. A request larger than the whole
+// limit can never be admitted, so it fires the separate oversized alert
+// instead: otherwise a budget smaller than one call blocks the org
+// without telling anyone.
 func TestBudgetStore_RefusalAlertsOnlyNearTheLimit(t *testing.T) {
 	for _, tc := range []struct {
 		name               string
@@ -215,12 +218,16 @@ func TestBudgetStore_RefusalAlertsOnlyNearTheLimit(t *testing.T) {
 		consumed, reserved int64 // before the refused request
 		request            int
 		wantAlert          bool
+		wantOversized      bool
 	}{
-		{"oversized request at 10%", 80, 100, 0, 5000, false},
-		{"just under the warn threshold", 80, 700, 99, 500, false},
-		{"consumed + reserved at the warn threshold", 80, 700, 100, 500, true},
-		{"warnPct 0, under the limit", 0, 900, 0, 500, false},
-		{"warnPct 0, at the limit", 0, 990, 10, 1, true},
+		{"request over the whole limit at 10%", 80, 100, 0, 5000, false, true},
+		{"request over the whole limit with nothing used", 80, 0, 0, 1001, false, true},
+		{"request of the whole limit with nothing used", 80, 0, 1, 1000, false, false},
+		{"just under the warn threshold", 80, 700, 99, 500, false, false},
+		{"consumed + reserved at the warn threshold", 80, 700, 100, 500, true, false},
+		{"over the whole limit at the warn threshold", 80, 800, 0, 5000, true, false},
+		{"warnPct 0, under the limit", 0, 900, 0, 500, false, false},
+		{"warnPct 0, at the limit", 0, 990, 10, 1, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := newTestDB(t)
@@ -245,6 +252,19 @@ func TestBudgetStore_RefusalAlertsOnlyNearTheLimit(t *testing.T) {
 			}
 			n := countDocs(t, db, CollBudgetOutbox, bson.M{"threshold": models.ThresholdExhausted})
 			m, _ := store.monthly.Get(ctx, period)
+			oversized := countDocs(t, db, CollBudgetOutbox, bson.M{"threshold": models.ThresholdOversized, "payload.requestTokens": int64(tc.request)})
+			if tc.wantOversized != (oversized == 1) || tc.wantOversized != (m.OversizedAt != nil) {
+				t.Fatalf("oversized outbox rows = %d, oversizedAt = %v; want alert %v", oversized, m.OversizedAt, tc.wantOversized)
+			}
+			if tc.wantOversized {
+				// Once per period: a second refusal sends nothing more.
+				if ok, err := store.Reserve(ctx, period, pendingEvent("t1", 2, tc.request), 1000, tc.warnPct, true); ok || err != nil {
+					t.Fatalf("second reserve = %v, %v; want a refusal", ok, err)
+				}
+				if n := countDocs(t, db, CollBudgetOutbox, bson.M{"threshold": models.ThresholdOversized}); n != 1 {
+					t.Fatalf("oversized outbox rows after a second refusal = %d", n)
+				}
+			}
 			if tc.wantAlert {
 				if n != 1 || m.ExhaustedAt == nil {
 					t.Fatalf("exhausted outbox rows = %d, exhaustedAt = %v; want one alert", n, m.ExhaustedAt)

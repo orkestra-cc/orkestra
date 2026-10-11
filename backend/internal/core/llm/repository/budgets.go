@@ -127,7 +127,10 @@ func (s *BudgetStore) GetBudget(ctx context.Context) (*models.Budget, error) {
 // inserts the period's single "exhausted" outbox event, on the first such
 // refusal (ruling 4.1 as refined by the final review): one oversized
 // request against a largely unused balance does not burn the alert.
-// Under warn_only the call is admitted over the limit.
+// Otherwise, when the request alone exceeds the whole limit (it can never
+// be admitted), it marks oversizedAt and inserts the period's single
+// "oversized" event instead. Under warn_only the call is admitted over
+// the limit.
 func (s *BudgetStore) Reserve(ctx context.Context, period string, ev *models.UsageEvent, limit int64, warnPct int, block bool) (bool, error) {
 	orig := *ev
 	admitted := false
@@ -146,8 +149,14 @@ func (s *BudgetStore) Reserve(ctx context.Context, period string, ev *models.Usa
 			if err := s.usage.InsertPending(sc, &row); err != nil {
 				return err
 			}
-			if models.RefusalAlerts(m.Consumed()+m.ReservedTokens, limit, warnPct) {
-				if err := s.markAndEnqueue(sc, period, models.ThresholdExhausted, m, limit); err != nil {
+			requested := int64(orig.ReservedTokens)
+			switch {
+			case models.RefusalAlerts(m.Consumed()+m.ReservedTokens, limit, warnPct):
+				if err := s.markAndEnqueue(sc, period, models.ThresholdExhausted, m, limit, 0); err != nil {
+					return err
+				}
+			case models.RefusalOversized(requested, limit):
+				if err := s.markAndEnqueue(sc, period, models.ThresholdOversized, m, limit, requested); err != nil {
 					return err
 				}
 			}
@@ -208,13 +217,13 @@ func (s *BudgetStore) Finalize(ctx context.Context, _ string, uuid string, upd m
 		}
 		limit := budget.MonthlyTokenLimit
 		if budget.WarnPct > 0 && m.Consumed()*100 >= limit*int64(budget.WarnPct) && m.WarnedAt == nil {
-			if err := s.markAndEnqueue(sc, period, models.ThresholdWarn, m, limit); err != nil {
+			if err := s.markAndEnqueue(sc, period, models.ThresholdWarn, m, limit, 0); err != nil {
 				return err
 			}
 			crossed = append(crossed, models.ThresholdWarn)
 		}
 		if m.Consumed() >= limit && m.ExhaustedAt == nil {
-			if err := s.markAndEnqueue(sc, period, models.ThresholdExhausted, m, limit); err != nil {
+			if err := s.markAndEnqueue(sc, period, models.ThresholdExhausted, m, limit, 0); err != nil {
 				return err
 			}
 			crossed = append(crossed, models.ThresholdExhausted)
@@ -231,7 +240,9 @@ func (s *BudgetStore) Finalize(ctx context.Context, _ string, uuid string, upd m
 // call set it, inserts the outbox event in the same transaction. The
 // mark is the dedup point inside a period; the unique
 // (tenantId, period, threshold) index is the last line of defence.
-func (s *BudgetStore) markAndEnqueue(sc mongo.SessionContext, period, threshold string, m *models.UsageMonthly, limit int64) error {
+// requested (the refused reservation, oversized only; 0 otherwise) is
+// added to the payload as requestTokens.
+func (s *BudgetStore) markAndEnqueue(sc mongo.SessionContext, period, threshold string, m *models.UsageMonthly, limit, requested int64) error {
 	marked, err := s.monthly.MarkThreshold(sc, period, threshold)
 	if err != nil || !marked {
 		return err
@@ -241,9 +252,13 @@ func (s *BudgetStore) markAndEnqueue(sc mongo.SessionContext, period, threshold 
 	if limit > 0 {
 		pct = m.Consumed() * 100 / limit
 	}
+	payload := map[string]any{"consumedTokens": m.Consumed(), "reservedTokens": m.ReservedTokens, "limitTokens": limit, "pct": pct}
+	if requested > 0 {
+		payload["requestTokens"] = requested
+	}
 	_, err = s.outbox.InsertUnique(sc, &models.OutboxEvent{
 		UUID: newUUID(), Period: period, Threshold: threshold, Status: models.OutboxStatusPending,
-		Payload:       map[string]any{"consumedTokens": m.Consumed(), "reservedTokens": m.ReservedTokens, "limitTokens": limit, "pct": pct},
+		Payload:       payload,
 		NextAttemptAt: now, CreatedAt: now,
 	})
 	return err

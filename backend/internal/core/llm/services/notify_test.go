@@ -127,7 +127,7 @@ func (d *memDeliveries) of(uuid string) []string {
 func outboxEvent(threshold string) models.OutboxEvent {
 	lease := time.Now().Add(time.Minute)
 	return models.OutboxEvent{UUID: "ev-1", TenantID: "t1", Period: "2026-10", Threshold: threshold, LeaseUntil: &lease,
-		Payload: map[string]any{"consumedTokens": int64(850), "limitTokens": int64(1000), "pct": int64(85)}}
+		Payload: map[string]any{"consumedTokens": int64(850), "limitTokens": int64(1000), "pct": int64(85), "requestTokens": int64(5000)}}
 }
 
 func TestBudgetNotifier_RecipientsTemplatesAndKeys(t *testing.T) {
@@ -191,6 +191,24 @@ func TestBudgetNotifier_ExhaustedTemplateAndFailedResultRetries(t *testing.T) {
 	}
 }
 
+// A call larger than the whole budget gets its own email: the org is not
+// out of tokens, the limit is below a single call.
+func TestBudgetNotifier_OversizedTemplate(t *testing.T) {
+	sender := &captureSender{}
+	n, _ := notifierFixture(sender)
+	if err := n.SendBudgetEvent(ctxWithTenant(context.Background(), "t1"), outboxEvent(models.ThresholdOversized)); err != nil {
+		t.Fatal(err)
+	}
+	if len(sender.reqs) != 4 {
+		t.Fatalf("sends = %d", len(sender.reqs))
+	}
+	for _, r := range sender.reqs {
+		if r.TemplateID != TemplateBudgetOversized || r.Data["requestTokens"] != int64(5000) || r.Data["limitTokens"] != int64(1000) {
+			t.Fatalf("request = %s %v", r.TemplateID, r.Data)
+		}
+	}
+}
+
 func TestBudgetNotifier_NoSenderIsANoop(t *testing.T) {
 	n, _ := notifierFixture(&captureSender{})
 	n.sender = nil
@@ -204,7 +222,7 @@ func TestBudgetNotifier_NoSenderIsANoop(t *testing.T) {
 func TestBudgetTemplates_ParseAndRender(t *testing.T) {
 	sender := &captureSender{}
 	n, _ := notifierFixture(sender)
-	for _, th := range []string{models.ThresholdWarn, models.ThresholdExhausted} {
+	for _, th := range []string{models.ThresholdWarn, models.ThresholdExhausted, models.ThresholdOversized} {
 		if err := n.SendBudgetEvent(ctxWithTenant(context.Background(), "t1"), outboxEvent(th)); err != nil {
 			t.Fatal(err)
 		}
@@ -214,8 +232,8 @@ func TestBudgetTemplates_ParseAndRender(t *testing.T) {
 		data[r.TemplateID+"|"+r.Locale] = r.Data
 	}
 	specs := BudgetNotificationTemplates()
-	if len(specs) != 4 {
-		t.Fatalf("templates = %d, want 2 ids x en,it", len(specs))
+	if len(specs) != 6 {
+		t.Fatalf("templates = %d, want 3 ids x en,it", len(specs))
 	}
 	for _, s := range specs {
 		d := data[s.TemplateID+"|en"]
