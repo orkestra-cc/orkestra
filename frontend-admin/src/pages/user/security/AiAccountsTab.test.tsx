@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useLocation } from 'react-router';
-import { renderWithProviders } from 'test/render';
+import { renderWithProviders, type TestRootState } from 'test/render';
 import { server } from 'test/server';
 import { url } from 'test/handlers';
+import tenantReducer, { setCurrentOrg } from 'store/slices/tenantSlice';
 import AiAccountsTab from './AiAccountsTab';
 
 // The plan-billed models and the month's usage are their own sections, each
@@ -433,5 +434,85 @@ describe('AiAccountsTab', () => {
       await screen.findByRole('button', { name: /link a chatgpt account/i })
     ).toBeInTheDocument();
     expect(screen.queryByText(/billed to your plan/i)).not.toBeInTheDocument();
+  });
+  // An org switch (a super_admin keeps the tab mounted: every permission
+  // still holds) must not carry an attempt minted in the previous org.
+  const membership = (tenantId: string) => ({
+    tenantId,
+    name: tenantId,
+    slug: tenantId,
+    plan: 'free',
+    roles: [],
+    isOwner: true
+  });
+  const twoOrgs = {
+    tenant: {
+      ...tenantReducer(undefined, { type: 'init' }),
+      memberships: [membership('org-a'), membership('org-b')],
+      currentOrgId: 'org-a'
+    }
+  } as Partial<TestRootState>;
+
+  it('closes the link wizard when the active org changes', async () => {
+    stub();
+    server.use(
+      http.post(url('/v1/llm/accounts/openai/link'), () =>
+        HttpResponse.json({ authorizeUrl: AUTHORIZE, mode: 'hosted_paste' })
+      )
+    );
+    const { store } = renderWithProviders(<AiAccountsTab />, {
+      preloadedState: twoOrgs
+    });
+    await userEvent.click(
+      await screen.findByRole('button', { name: /link a chatgpt account/i })
+    );
+    expect(
+      await screen.findByRole('button', { name: /open openai/i })
+    ).toBeInTheDocument();
+    act(() => {
+      store.dispatch(setCurrentOrg('org-b'));
+    });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: /open openai/i })
+      ).not.toBeInTheDocument()
+    );
+  });
+
+  it('ignores a link response that arrives after the org changed', async () => {
+    let answer: () => void = () => {};
+    const answered = new Promise<void>(resolve => {
+      answer = resolve;
+    });
+    stub();
+    server.use(
+      http.post(url('/v1/llm/accounts/openai/link'), async () => {
+        await answered;
+        return HttpResponse.json({
+          authorizeUrl: AUTHORIZE,
+          mode: 'hosted_paste'
+        });
+      })
+    );
+    const { store } = renderWithProviders(<AiAccountsTab />, {
+      preloadedState: twoOrgs
+    });
+    const linkButton = await screen.findByRole('button', {
+      name: /link a chatgpt account/i
+    });
+    await userEvent.click(linkButton);
+    await waitFor(() => expect(linkButton).toBeDisabled());
+    act(() => {
+      store.dispatch(setCurrentOrg('org-b'));
+    });
+    answer();
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: /link a chatgpt account/i })
+      ).toBeEnabled()
+    );
+    expect(
+      screen.queryByRole('button', { name: /open openai/i })
+    ).not.toBeInTheDocument();
   });
 });

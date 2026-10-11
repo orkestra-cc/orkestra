@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { Alert, Button, Col, Modal, Row, Spinner } from 'react-bootstrap';
 import {
@@ -17,6 +17,7 @@ import StatCard from 'components/common/StatCard';
 import SubtleBadge from 'components/common/SubtleBadge';
 import { byTimestamp } from 'components/common/advance-table/sorting';
 import { formatDate, formatDateTime } from 'helpers/dateFormat';
+import { useAppSelector } from 'store/hooks';
 import {
   useGetMyLlmUsageQuery,
   useLinkLlmAccountMutation,
@@ -54,6 +55,10 @@ const CALLBACK_ERROR_CODES: ReadonlyMap<string, string> = new Map([
 
 type Banner = { variant: 'success' | 'danger'; message: string };
 
+// The wizard remembers the org its attempt was started in: the attempt is
+// bound to that org, so it is never shown (or completed) under another.
+type OrgWizard = LinkWizardState & { orgId: string };
+
 // AiAccountsTab is the user's own Sign in with ChatGPT surface: the ChatGPT
 // accounts linked in the active org, which one plan-billed models use, the
 // link wizard, and what those models are and cost this month. The page shows
@@ -75,11 +80,25 @@ const AiAccountsTab = () => {
   const [link, { isLoading: linkPending }] = useLinkLlmAccountMutation();
   const [select, { isLoading: selectPending }] = useSelectLlmAccountMutation();
   const [unlink, { isLoading: unlinkPending }] = useUnlinkLlmAccountMutation();
-  const [wizard, setWizard] = useState<LinkWizardState | null>(null);
+  const [wizard, setWizard] = useState<OrgWizard | null>(null);
   const [banner, setBanner] = useState<Banner | null>(null);
   const [unlinkTarget, setUnlinkTarget] = useState<LlmAccount | null>(null);
   const [unlinkError, setUnlinkError] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
+  // The org the requests are sent under (baseApi's X-Tenant-ID).
+  const orgId =
+    useAppSelector(
+      s => s.tenant.impersonatedTenantId ?? s.tenant.currentOrgId
+    ) ?? '';
+  // Read after an await: the org a pending link response would land in.
+  const orgRef = useRef(orgId);
+  useEffect(() => {
+    orgRef.current = orgId;
+  }, [orgId]);
+  // An org switch keeps this tab mounted (a super_admin holds every
+  // permission everywhere): drop a wizard opened in another org, whose
+  // pasted callback would otherwise complete under the new one.
+  if (wizard && wizard.orgId !== orgId) setWizard(null);
 
   // Drain the loopback callback's ?linked= / ?error= into a banner and
   // replace the URL, so a refresh does not replay it. The callback always
@@ -115,10 +134,14 @@ const AiAccountsTab = () => {
   const startLink = useCallback(
     async (reauth?: LlmAccount) => {
       setBanner(null);
+      const startedIn = orgId;
       try {
         const res = await link(
           reauth ? { reauthAccountUuid: reauth.uuid } : {}
         ).unwrap();
+        // The org changed while the link was pending: the attempt belongs
+        // to the previous org, so it is neither opened nor shown.
+        if (orgRef.current !== startedIn) return;
         if (res.mode === 'loopback_local') {
           window.location.assign(res.authorizeUrl);
           return;
@@ -126,15 +149,17 @@ const AiAccountsTab = () => {
         setWizard({
           step: 1,
           authorizeUrl: res.authorizeUrl,
-          reauthLabel: reauth?.label
+          reauthLabel: reauth?.label,
+          orgId: startedIn
         });
       } catch (e) {
+        if (orgRef.current !== startedIn) return;
         if (!isQuietLlmError(e)) {
           setBanner({ variant: 'danger', message: llmErrorMessage(t, e) });
         }
       }
     },
-    [link, t]
+    [link, orgId, t]
   );
 
   const onSelect = useCallback(
@@ -373,7 +398,7 @@ const AiAccountsTab = () => {
                   variant="link"
                   size="sm"
                   className="p-0 fs-11"
-                  onClick={() => setWizard({ step: 2 })}
+                  onClick={() => setWizard({ step: 2, orgId })}
                 >
                   {t('userSecurity.aiAccounts.pasteInstead')}
                 </Button>
