@@ -139,6 +139,19 @@ func (m *Module) Collections() []module.CollectionSpec {
 			{OrderedKeys: key("tenantId", "modelUuid", "userUuid"), Unique: true},
 			{OrderedKeys: key("tenantId", "userUuid")},
 		}},
+		{Name: repository.CollUserAccounts, Indexes: []module.IndexSpec{
+			{OrderedKeys: key("tenantId", "userUuid", "clientId"), Unique: true},
+			// At most one selected registration per (user, provider).
+			{OrderedKeys: key("tenantId", "userUuid", "provider", "selected"), Unique: true, PartialFilter: map[string]any{"selected": true}},
+			{OrderedKeys: key("tenantId", "status")},
+			{OrderedKeys: key("tenantId", "uuid"), Unique: true},
+			// DSR: the subject-scoped, cross-org queries of the PIIProducer
+			// (export, delete) filter on userUuid alone.
+			{OrderedKeys: key("userUuid"), PartialFilter: map[string]any{"userUuid": map[string]any{"$type": "string"}}},
+		}},
+		// The one collection without tenantId: a single document holding the
+		// installation's ext_agent_host_id, addressed by _id.
+		{Name: repository.CollInstallation},
 		{Name: repository.CollUsage, Indexes: []module.IndexSpec{
 			{OrderedKeys: key("tenantId", "uuid"), Unique: true},
 			{OrderedKeys: []module.IndexKey{{Field: "tenantId", Direction: 1}, {Field: "createdAt", Direction: -1}}},

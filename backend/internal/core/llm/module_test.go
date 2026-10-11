@@ -100,6 +100,7 @@ func TestModule_UniqueIndexes(t *testing.T) {
 		repository.CollCredentials:  {{"tenantId", "name"}, {"tenantId", "uuid"}},
 		repository.CollModels:       {{"tenantId", "name"}, {"tenantId", "uuid"}},
 		repository.CollGrants:       {{"tenantId", "modelUuid", "userUuid"}},
+		repository.CollUserAccounts: {{"tenantId", "userUuid", "clientId"}, {"tenantId", "userUuid", "provider", "selected"}, {"tenantId", "uuid"}},
 		repository.CollUsage:        {{"tenantId", "uuid"}},
 		repository.CollUsageMonthly: {{"tenantId", "period"}},
 		repository.CollBudgets:      {{"tenantId"}},
@@ -127,6 +128,9 @@ func TestModule_UniqueIndexes(t *testing.T) {
 		// org, //tenantscope:allow dsr:), which have no tenantId to lead with.
 		repository.CollUsage:        {{"outcome", "reservationExpiresAt"}, {"createdAt"}, {"userUuid"}},
 		repository.CollBudgetOutbox: {{"status", "nextAttemptAt"}},
+		// userUuid: the DSR queries over the ChatGPT registrations (export,
+		// delete across every org, //tenantscope:allow dsr:).
+		repository.CollUserAccounts: {{"userUuid"}},
 	}
 	for _, c := range NewModule().Collections() {
 		for _, idx := range c.Indexes {
@@ -152,6 +156,26 @@ func TestModule_UniqueIndexes(t *testing.T) {
 			}
 		}
 	}
+}
+
+// The one-selected-account rule rests on the partial unique index: a
+// non-partial one would forbid a second unselected registration.
+func TestModule_UserAccountSelectedIndexIsPartial(t *testing.T) {
+	for _, c := range NewModule().Collections() {
+		if c.Name != repository.CollUserAccounts {
+			continue
+		}
+		for _, idx := range c.Indexes {
+			n := len(idx.OrderedKeys)
+			if n == 4 && idx.OrderedKeys[3].Field == "selected" {
+				if !idx.Unique || idx.PartialFilter["selected"] != true {
+					t.Fatalf("selected index = %+v, want unique + partial {selected: true}", idx)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("no (tenantId, userUuid, provider, selected) index on llm_user_accounts")
 }
 
 // --- route guards ------------------------------------------------------------
