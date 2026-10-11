@@ -173,3 +173,41 @@ func TestUserAccounts_ConcurrentReplaceTokensOneWinner(t *testing.T) {
 		t.Fatalf("wins = %d, stales = %d", wins, stales)
 	}
 }
+
+// SetStatusIf flags only the set it was read with: a terminal refresh of a
+// stale set can never mark a newer one needs_reauth.
+func TestUserAccounts_SetStatusIfIsFencedOnSavedAt(t *testing.T) {
+	db := newTestDB(t)
+	ensureAccountIndexes(t, db)
+	repo := NewUserAccounts(db)
+	ctx := ctxFor("t1")
+	t0 := time.Now().UTC().Truncate(time.Millisecond)
+	a := account("a1", "u1", "oaiapp_1", true, t0)
+	a.SavedAt = t0
+	if err := repo.Insert(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	t1 := t0.Add(time.Second)
+	if err := repo.ReplaceTokens(ctx, "a1", t0, tokenSet("new", t1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetStatusIf(ctx, "a1", t0, models.AccountStatusNeedsReauth, "llm.user_account_reauth_required"); !errors.Is(err, ErrStaleTokenSet) {
+		t.Fatalf("stale flag err = %v", err)
+	}
+	if got, _ := repo.Get(ctx, "a1"); got.Status != models.AccountStatusActive {
+		t.Fatalf("a newer set was flagged: %s", got.Status)
+	}
+	if err := repo.SetStatusIf(ctx, "a1", t1, models.AccountStatusNeedsReauth, "llm.user_account_reauth_required"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := repo.Get(ctx, "a1")
+	if got.Status != models.AccountStatusNeedsReauth || got.LastError != "llm.user_account_reauth_required" || got.AccessToken.Ciphertext != "at-new" {
+		t.Fatalf("fenced flag: %s / %s", got.Status, got.LastError)
+	}
+	if err := repo.SetStatusIf(ctxFor("t2"), "a1", t1, models.AccountStatusRevoked, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("other org err = %v", err)
+	}
+	if err := repo.SetStatusIf(ctx, "nope", t1, models.AccountStatusRevoked, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown err = %v", err)
+	}
+}

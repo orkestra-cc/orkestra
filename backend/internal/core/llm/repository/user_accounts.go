@@ -163,6 +163,28 @@ func (r *UserAccounts) SetStatus(ctx context.Context, uuid, status, lastError st
 	return r.setFields(ctx, uuid, bson.M{"status": status, "lastError": lastError})
 }
 
+// SetStatusIf is SetStatus fenced on the token set: it writes only while
+// the stored savedAt is prevSavedAt, so a terminal refresh of a stale set
+// can never flag a newer, valid one. A moved-on set is ErrStaleTokenSet; an
+// unknown uuid (or another org's) is ErrNotFound.
+func (r *UserAccounts) SetStatusIf(ctx context.Context, uuid string, prevSavedAt time.Time, status, lastError string) error {
+	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid, "savedAt": prevSavedAt.UTC()})
+	if err != nil {
+		return err
+	}
+	res, err := r.coll.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"status": status, "lastError": lastError, "updatedAt": time.Now().UTC()}})
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 1 {
+		return nil
+	}
+	if _, err := r.findOne(ctx, bson.M{"uuid": uuid}); err != nil {
+		return err
+	}
+	return ErrStaleTokenSet
+}
+
 // ReplaceTokens writes a refreshed or re-authorized token set in one update,
 // matched on org, uuid AND the savedAt the caller read (compare-and-swap):
 // a writer that lost the race gets ErrStaleTokenSet and nothing is written,

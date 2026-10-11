@@ -37,6 +37,9 @@ type memAccounts struct {
 	// beforeInsert, when set, runs once inside the next Insert before the
 	// uniqueness checks (a concurrent writer's window).
 	beforeInsert func(rows map[string]*models.UserAccount)
+	// beforeReplace, when set, runs once inside the next ReplaceTokens
+	// before the compare-and-swap (another writer storing a set first).
+	beforeReplace func(r *models.UserAccount)
 }
 
 func newMemAccounts() *memAccounts { return &memAccounts{rows: map[string]*models.UserAccount{}} }
@@ -151,8 +154,22 @@ func (m *memAccounts) SetStatus(ctx context.Context, id, status, lastError strin
 	return m.mutateScoped(ctx, id, func(r *models.UserAccount) error { r.Status, r.LastError = status, lastError; return nil })
 }
 
+func (m *memAccounts) SetStatusIf(ctx context.Context, id string, prev time.Time, status, lastError string) error {
+	return m.mutateScoped(ctx, id, func(r *models.UserAccount) error {
+		if !r.SavedAt.Equal(prev) {
+			return repository.ErrStaleTokenSet
+		}
+		r.Status, r.LastError = status, lastError
+		return nil
+	})
+}
+
 func (m *memAccounts) ReplaceTokens(ctx context.Context, id string, prev time.Time, set models.AccountTokenSet) error {
 	return m.mutateScoped(ctx, id, func(r *models.UserAccount) error {
+		if hook := m.beforeReplace; hook != nil {
+			m.beforeReplace = nil
+			hook(r)
+		}
 		if !r.SavedAt.Equal(prev) {
 			return repository.ErrStaleTokenSet
 		}
@@ -201,6 +218,7 @@ type fakeOIDC struct {
 	revoked                         []string
 	models                          []string
 	rejectAT                        string // ListPlanModels answers invalid_user for it
+	beforeRefreshAnswer             func() // runs (unlocked) before Refresh answers
 	usedRT                          map[string]bool
 	n                               int
 
@@ -246,6 +264,12 @@ func (f *fakeOIDC) Refresh(_ context.Context, clientID, rt string) (*TokenRespon
 	f.mu.Lock()
 	f.refreshes++
 	f.lastRefreshClient = clientID
+	if hook := f.beforeRefreshAnswer; hook != nil {
+		f.beforeRefreshAnswer = nil
+		f.mu.Unlock()
+		hook()
+		f.mu.Lock()
+	}
 	if f.refreshErr != nil {
 		err := f.refreshErr
 		f.mu.Unlock()
@@ -302,6 +326,28 @@ type fixedHost struct{}
 
 func (fixedHost) GetOrCreateHostID(context.Context) (string, error) { return "urn:uuid:host-1", nil }
 
+// switchHost is a host id source a test can change or break.
+type switchHost struct {
+	mu  sync.Mutex
+	id  string
+	err error
+}
+
+func (h *switchHost) GetOrCreateHostID(context.Context) (string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.id, h.err
+}
+
+func (h *switchHost) set(id string, err error) {
+	h.mu.Lock()
+	h.id, h.err = id, err
+	h.mu.Unlock()
+}
+
+// pasteRedirect is the hosted_paste redirect of hostedPasteConfig.
+const pasteRedirect = "http://127.0.0.1:14555" + SIWCCallbackPath
+
 type syncAudit struct {
 	mu     sync.Mutex
 	events []iface.AuditEvent
@@ -329,6 +375,7 @@ type accountsHarness struct {
 	vault *Vault
 	audit *syncAudit
 	cfg   SIWCConfig
+	host  *switchHost
 }
 
 func hostedPasteConfig(mode string) SIWCConfig {
@@ -341,7 +388,7 @@ func newAccountsHarness(t *testing.T, cfg SIWCConfig, oidc *fakeOIDC) *accountsH
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &accountsHarness{repo: newMemAccounts(), oidc: oidc, redis: newMemRedis(), vault: v, audit: &syncAudit{}, cfg: cfg}
+	h := &accountsHarness{repo: newMemAccounts(), oidc: oidc, redis: newMemRedis(), vault: v, audit: &syncAudit{}, cfg: cfg, host: &switchHost{id: "urn:uuid:host-1"}}
 	h.svc = h.replica()
 	return h
 }
@@ -350,7 +397,7 @@ func newAccountsHarness(t *testing.T, cfg SIWCConfig, oidc *fakeOIDC) *accountsH
 // vault and provider: a second backend replica.
 func (h *accountsHarness) replica() *AccountsService {
 	svc := NewAccountsService(AccountsDeps{
-		Repo: h.repo, Host: fixedHost{}, OIDC: h.oidc, Plans: h.oidc, State: NewSIWCStateStore(h.redis, h.vault), Vault: h.vault,
+		Repo: h.repo, Host: h.host, OIDC: h.oidc, Plans: h.oidc, State: NewSIWCStateStore(h.redis, h.vault), Vault: h.vault,
 		Limiter: NewRateLimiter(h.redis, slog.Default()), Redis: h.redis, Config: func() SIWCConfig { return h.cfg }, Logger: slog.Default(),
 	})
 	svc.pollEvery = 5 * time.Millisecond
@@ -380,7 +427,7 @@ func (h *accountsHarness) linkAccount(t *testing.T, ctx context.Context, clientI
 	if err != nil {
 		t.Fatalf("link: %v", err)
 	}
-	acc, err := h.svc.Complete(ctx, CallbackInput{Code: code, State: stateFrom(t, link.AuthorizeURL), ClientID: clientID}, true)
+	acc, err := h.svc.Complete(ctx, CallbackInput{Code: code, State: stateFrom(t, link.AuthorizeURL), ClientID: clientID, RedirectURI: pasteRedirect}, true)
 	if err != nil {
 		t.Fatalf("complete: %v", err)
 	}
@@ -462,7 +509,7 @@ func TestAccounts_PasteByAnotherUserIsRejectedAndConsumed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := CallbackInput{Code: "c", State: stateFrom(t, link.AuthorizeURL), ClientID: "oaiapp_9"}
+	in := CallbackInput{Code: "c", State: stateFrom(t, link.AuthorizeURL), ClientID: "oaiapp_9", RedirectURI: pasteRedirect}
 	if _, err := svc.Complete(ctxForUser("t1", "u-other"), in, true); !errors.Is(err, ErrSIWCStateInvalid) {
 		t.Fatalf("other user err = %v", err)
 	}
@@ -471,7 +518,7 @@ func TestAccounts_PasteByAnotherUserIsRejectedAndConsumed(t *testing.T) {
 	}
 	// The same user in another org is not the attempt's owner either.
 	link2, _ := svc.Link(ctxFor("t1"), "", "")
-	in2 := CallbackInput{Code: "c", State: stateFrom(t, link2.AuthorizeURL), ClientID: "oaiapp_9"}
+	in2 := CallbackInput{Code: "c", State: stateFrom(t, link2.AuthorizeURL), ClientID: "oaiapp_9", RedirectURI: pasteRedirect}
 	if _, err := svc.Complete(ctxFor("t2"), in2, true); !errors.Is(err, ErrSIWCStateInvalid) {
 		t.Fatalf("other org err = %v", err)
 	}
@@ -516,16 +563,79 @@ func TestAccounts_CompleteRefusesARedirectOtherThanTheAttempts(t *testing.T) {
 	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1"}
 	svc, _ := newAccounts(t, SIWCModeHostedPaste, oidc)
 	ctx := ctxFor("t1")
-	link, _ := svc.Link(ctx, "", "")
-	in := CallbackInput{Code: "c", State: stateFrom(t, link.AuthorizeURL), ClientID: "oaiapp_1", RedirectURI: "http://127.0.0.1:9999" + SIWCCallbackPath}
-	if _, err := svc.Complete(ctx, in, true); !errors.Is(err, ErrSIWCCallbackInvalid) {
-		t.Fatalf("err = %v", err)
+	// Mandatory: an unstated redirect fails closed like a wrong one.
+	for _, redirect := range []string{"http://127.0.0.1:9999" + SIWCCallbackPath, ""} {
+		link, _ := svc.Link(ctx, "", "")
+		in := CallbackInput{Code: "c", State: stateFrom(t, link.AuthorizeURL), ClientID: "oaiapp_1", RedirectURI: redirect}
+		if _, err := svc.Complete(ctx, in, true); !errors.Is(err, ErrSIWCCallbackInvalid) {
+			t.Fatalf("redirect %q: err = %v", redirect, err)
+		}
 	}
 	oidc.locked(func() {
 		if oidc.exchanges != 0 {
 			t.Error("exchanged on a mismatched redirect")
 		}
 	})
+}
+
+// The attempt is bound to the installation's host id.
+func TestAccounts_CompleteRefusesAStateOfAnotherInstallation(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1"}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx := ctxFor("t1")
+	for _, c := range []struct {
+		id  string
+		err error
+	}{
+		{"urn:uuid:host-2", nil},
+		{"", errors.New("installation unreadable")},
+	} {
+		h.host.set("urn:uuid:host-1", nil)
+		link, err := h.svc.Link(ctx, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		in := CallbackInput{Code: "c", State: stateFrom(t, link.AuthorizeURL), ClientID: "oaiapp_1", RedirectURI: pasteRedirect}
+		h.host.set(c.id, c.err)
+		if _, err := h.svc.Complete(ctx, in, true); !errors.Is(err, ErrSIWCStateInvalid) {
+			t.Fatalf("host %q / %v: err = %v", c.id, c.err, err)
+		}
+		h.host.set("urn:uuid:host-1", nil)
+		if _, err := h.svc.Complete(ctx, in, true); !errors.Is(err, ErrSIWCStateInvalid) {
+			t.Fatalf("the rejected attempt must stay consumed: %v", err)
+		}
+	}
+	oidc.locked(func() {
+		if oidc.exchanges != 0 {
+			t.Errorf("exchanges = %d", oidc.exchanges)
+		}
+	})
+	if h.repo.count() != 0 {
+		t.Fatal("nothing may be stored")
+	}
+}
+
+// A new link is selected whenever the user has no selected registration,
+// e.g. after unlinking the selected one while another remains.
+func TestAccounts_LinkAfterUnlinkingTheSelectedIsSelected(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1"}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx := ctxFor("t1")
+	a := h.linkAccount(t, ctx, "oaiapp_1", "a")
+	b := h.linkAccount(t, ctx, "oaiapp_2", "b")
+	if !a.Selected || b.Selected {
+		t.Fatal("first link selected, second not")
+	}
+	if err := h.svc.Unlink(ctx, a.UUID, false); err != nil {
+		t.Fatal(err)
+	}
+	c := h.linkAccount(t, ctx, "oaiapp_3", "c")
+	if !c.Selected {
+		t.Fatal("with no selected registration left, the new link is selected")
+	}
+	if cred, err := h.svc.CredentialFor(ctx, "u-admin"); err != nil || cred.Account.UUID != c.UUID {
+		t.Fatalf("credential err = %v", err)
+	}
 }
 
 func TestAccounts_DeniedAndMissingClientIDCloseWithoutExchange(t *testing.T) {
@@ -536,9 +646,9 @@ func TestAccounts_DeniedAndMissingClientIDCloseWithoutExchange(t *testing.T) {
 		in   CallbackInput
 		want error
 	}{
-		{CallbackInput{Error: "access_denied"}, ErrSIWCDenied},
-		{CallbackInput{Error: "server_error"}, ErrSIWCExchangeFailed},
-		{CallbackInput{Code: "c"}, ErrSIWCExchangeFailed}, // first link without an issued client id
+		{CallbackInput{Error: "access_denied", RedirectURI: pasteRedirect}, ErrSIWCDenied},
+		{CallbackInput{Error: "server_error", RedirectURI: pasteRedirect}, ErrSIWCExchangeFailed},
+		{CallbackInput{Code: "c", RedirectURI: pasteRedirect}, ErrSIWCExchangeFailed}, // first link without an issued client id
 	} {
 		link, err := h.svc.Link(ctx, "", "")
 		if err != nil {
@@ -610,7 +720,7 @@ func TestAccounts_ReauthRejectsDifferentClientOrSubject(t *testing.T) {
 	before, _ := h.repo.row(acc.UUID)
 	var exchanges int
 	oidc.locked(func() { exchanges = oidc.exchanges })
-	if _, err := h.svc.Complete(ctx, CallbackInput{Code: "c2", State: stateFrom(t, re.AuthorizeURL), ClientID: "oaiapp_2"}, true); !errors.Is(err, ErrSIWCIDTokenInvalid) {
+	if _, err := h.svc.Complete(ctx, CallbackInput{Code: "c2", State: stateFrom(t, re.AuthorizeURL), ClientID: "oaiapp_2", RedirectURI: pasteRedirect}, true); !errors.Is(err, ErrSIWCIDTokenInvalid) {
 		t.Fatalf("different client err = %v", err)
 	}
 	oidc.locked(func() {
@@ -623,7 +733,7 @@ func TestAccounts_ReauthRejectsDifferentClientOrSubject(t *testing.T) {
 	}
 	oidc.locked(func() { oidc.sub = "sub-2" })
 	re2, _ := h.svc.Link(ctx, "", acc.UUID)
-	if _, err := h.svc.Complete(ctx, CallbackInput{Code: "c3", State: stateFrom(t, re2.AuthorizeURL)}, true); !errors.Is(err, ErrSIWCIDTokenInvalid) {
+	if _, err := h.svc.Complete(ctx, CallbackInput{Code: "c3", State: stateFrom(t, re2.AuthorizeURL), RedirectURI: pasteRedirect}, true); !errors.Is(err, ErrSIWCIDTokenInvalid) {
 		t.Fatalf("different subject err = %v", err)
 	}
 	if got, _ := h.repo.row(acc.UUID); got.AccessToken.Ciphertext != before.AccessToken.Ciphertext || got.Subject != "sub-1" {
@@ -656,7 +766,7 @@ func TestAccounts_ReauthRestoresTheRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The issued client id may be omitted on a reauth callback.
-	got, err := h.svc.Complete(ctx, CallbackInput{Code: "c2", State: stateFrom(t, re.AuthorizeURL)}, true)
+	got, err := h.svc.Complete(ctx, CallbackInput{Code: "c2", State: stateFrom(t, re.AuthorizeURL), RedirectURI: pasteRedirect}, true)
 	if err != nil || got.UUID != acc.UUID || got.Status != models.AccountStatusActive || got.LastError != "" || got.Label != acc.Label {
 		t.Fatalf("reauth err = %v", err)
 	}
@@ -713,7 +823,7 @@ func TestAccounts_SameClientIDRelinksInsteadOfDuplicating(t *testing.T) {
 	// would not merge either).
 	oidc.locked(func() { oidc.sub = "sub-2" })
 	link, _ := h.svc.Link(ctx, "", "")
-	if _, err := h.svc.Complete(ctx, CallbackInput{Code: "c3", State: stateFrom(t, link.AuthorizeURL), ClientID: "oaiapp_1"}, true); !errors.Is(err, ErrSIWCIDTokenInvalid) {
+	if _, err := h.svc.Complete(ctx, CallbackInput{Code: "c3", State: stateFrom(t, link.AuthorizeURL), ClientID: "oaiapp_1", RedirectURI: pasteRedirect}, true); !errors.Is(err, ErrSIWCIDTokenInvalid) {
 		t.Fatalf("foreign identity err = %v", err)
 	}
 	// A second registration (another issued client id) is linked but not
@@ -756,7 +866,7 @@ func TestAccounts_FirstLinkRaceOnSelectionInsertsUnselected(t *testing.T) {
 	h.repo.beforeInsert = func(rows map[string]*models.UserAccount) {
 		rows["racer"] = &models.UserAccount{UUID: "racer", TenantID: "t1", UserUUID: "u-admin", Provider: models.ProviderOpenAI, ClientID: "oaiapp_race", Selected: true}
 	}
-	acc, err := h.svc.Complete(ctx, CallbackInput{Code: "c", State: stateFrom(t, link.AuthorizeURL), ClientID: "oaiapp_1"}, true)
+	acc, err := h.svc.Complete(ctx, CallbackInput{Code: "c", State: stateFrom(t, link.AuthorizeURL), ClientID: "oaiapp_1", RedirectURI: pasteRedirect}, true)
 	if err != nil || acc.Selected {
 		t.Fatalf("race err = %v selected = %v", err, acc != nil && acc.Selected)
 	}
@@ -836,7 +946,7 @@ func TestAccounts_AuditEventsCarryNoURLOrToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := stateFrom(t, re.AuthorizeURL)
-	if _, err := h.svc.Complete(ctx, CallbackInput{Code: "code-2", State: state, ClientID: "oaiapp_1"}, true); err != nil {
+	if _, err := h.svc.Complete(ctx, CallbackInput{Code: "code-2", State: state, ClientID: "oaiapp_1", RedirectURI: pasteRedirect}, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.svc.Unlink(ctx, acc.UUID, false); err != nil {
@@ -1237,5 +1347,99 @@ func TestAccounts_RevokeRegistrationWorksWithoutATenantContext(t *testing.T) {
 	})
 	if h.repo.count() != 1 {
 		t.Fatal("RevokeRegistration deletes nothing")
+	}
+}
+
+// One replica without Redis: the in-process single-flight alone makes
+// concurrent callers share one network refresh.
+func TestAccounts_SingleReplicaWithoutRedisIsSingleFlight(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1", refreshDelay: 30 * time.Millisecond}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx := ctxFor("t1")
+	acc := h.linkAccount(t, ctx, "oaiapp_1", "c")
+	h.expire(acc.UUID)
+	svc := NewAccountsService(AccountsDeps{
+		Repo: h.repo, Host: h.host, OIDC: oidc, Plans: oidc, State: NewSIWCStateStore(h.redis, h.vault), Vault: h.vault,
+		Limiter: NewRateLimiter(h.redis, slog.Default()), Redis: nil, Config: func() SIWCConfig { return h.cfg },
+	})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if cred, err := svc.CredentialFor(ctx, "u-admin"); err != nil || cred.AccessToken != "at-r1" {
+				t.Errorf("credential err = %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	oidc.locked(func() {
+		if oidc.refreshes != 1 {
+			t.Errorf("refreshes = %d, want 1", oidc.refreshes)
+		}
+	})
+}
+
+// storeNewerSet plays another writer: it stores a newer, valid set whose
+// access token is at.
+func (h *accountsHarness) storeNewerSet(t *testing.T, r *models.UserAccount, at string) {
+	t.Helper()
+	env, err := h.vault.Seal(context.Background(), r.TenantID, r.UUID, accountFieldAccessToken, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.AccessToken, r.SavedAt, r.ExpiresAt = env, r.SavedAt.Add(time.Second), time.Now().Add(time.Hour)
+	r.Status, r.LastError = models.AccountStatusActive, ""
+}
+
+// A rotation that loses the compare-and-swap serves the stored set and
+// revokes the set it drops.
+func TestAccounts_LostRotationIsRevokedAndTheStoredSetServed(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1"}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx := ctxFor("t1")
+	acc := h.linkAccount(t, ctx, "oaiapp_1", "c")
+	h.expire(acc.UUID)
+	h.repo.mu.Lock()
+	h.repo.beforeReplace = func(r *models.UserAccount) { h.storeNewerSet(t, r, "at-winner") }
+	h.repo.mu.Unlock()
+	cred, err := h.svc.CredentialFor(ctx, "u-admin")
+	if err != nil || cred.AccessToken != "at-winner" {
+		t.Fatalf("lost rotation err = %v", err)
+	}
+	oidc.locked(func() {
+		if len(oidc.revoked) != 1 || oidc.revoked[0] != "rt-r1" {
+			t.Errorf("the dropped rotation must be revoked (revocations = %d)", len(oidc.revoked))
+		}
+	})
+}
+
+// A stale presenter gets a terminal answer (refresh_token_reused) while the
+// row already holds a newer valid set: no needs_reauth, the stored set is
+// served.
+func TestAccounts_TerminalOnAStaleSetServesTheNewerOne(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1"}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx := ctxFor("t1")
+	acc := h.linkAccount(t, ctx, "oaiapp_1", "c")
+	h.expire(acc.UUID)
+	oidc.locked(func() {
+		oidc.refreshErr = providers.ClassifySIWCCode("refresh_token_reused")
+		oidc.beforeRefreshAnswer = func() { h.repo.edit(acc.UUID, func(r *models.UserAccount) { h.storeNewerSet(t, r, "at-winner") }) }
+	})
+	cred, err := h.svc.CredentialFor(ctx, "u-admin")
+	if err != nil || cred.AccessToken != "at-winner" {
+		t.Fatalf("stale terminal err = %v", err)
+	}
+	if got, _ := h.repo.row(acc.UUID); got.Status != models.AccountStatusActive || got.LastError != "" {
+		t.Fatalf("a newer set must not be flagged (status %s)", got.Status)
+	}
+	// The fenced flag itself: written for the set that failed only.
+	stored, _ := h.repo.row(acc.UUID)
+	if err := h.repo.SetStatusIf(ctx, acc.UUID, acc.SavedAt, models.AccountStatusNeedsReauth, "llm.x"); !errors.Is(err, repository.ErrStaleTokenSet) {
+		t.Fatalf("fenced flag on an old set err = %v", err)
+	}
+	if err := h.repo.SetStatusIf(ctx, acc.UUID, stored.SavedAt, models.AccountStatusNeedsReauth, "llm.x"); err != nil {
+		t.Fatal(err)
 	}
 }

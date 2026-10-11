@@ -75,6 +75,7 @@ type AccountRepo interface {
 	Delete(ctx context.Context, uuid string) error
 	SetLastUsed(ctx context.Context, uuid string, at time.Time) error
 	SetStatus(ctx context.Context, uuid, status, lastError string) error
+	SetStatusIf(ctx context.Context, uuid string, prevSavedAt time.Time, status, lastError string) error
 	ReplaceTokens(ctx context.Context, uuid string, prevSavedAt time.Time, set models.AccountTokenSet) error
 }
 
@@ -368,7 +369,8 @@ func cleanLabel(label string) (string, error) {
 
 // CallbackInput is what came back on the redirect. RedirectURI is the
 // scheme://host:port/path the callback actually arrived on (ParsePastedCallback
-// fills it); when set, Complete requires it to equal the attempt's.
+// fills it; the loopback handler sets it from the request). It is
+// mandatory: Complete requires it to equal the attempt's.
 type CallbackInput struct {
 	Code, State, ClientID, Error string
 	RedirectURI                  string
@@ -417,6 +419,12 @@ func (s *AccountsService) Complete(ctx context.Context, in CallbackInput, viaPas
 	if err != nil {
 		return nil, err
 	}
+	// The attempt is bound to this installation's host id: a state minted
+	// by another installation (or one whose host id cannot be read now)
+	// is not honored.
+	if hostID, err := s.host.GetOrCreateHostID(ctx); err != nil || hostID == "" || hostID != attempt.HostID {
+		return nil, ErrSIWCStateInvalid
+	}
 	if viaPaste {
 		tenantID, userUUID := actorOf(ctx)
 		if attempt.UserUUID != userUUID || attempt.TenantID != tenantID {
@@ -428,7 +436,8 @@ func (s *AccountsService) Complete(ctx context.Context, in CallbackInput, viaPas
 	if !s.cfg().Enabled() {
 		return nil, ErrSIWCDisabled
 	}
-	if in.RedirectURI != "" && in.RedirectURI != attempt.RedirectURI {
+	// Mandatory (fail closed): the caller states where the callback arrived.
+	if in.RedirectURI == "" || in.RedirectURI != attempt.RedirectURI {
 		return nil, ErrSIWCCallbackInvalid
 	}
 	if in.Error != "" {
@@ -620,9 +629,11 @@ func (s *AccountsService) completeNew(ctx context.Context, attempt *SIWCAttempt,
 			return s.relink(ctx, &existing[i], clientID, tok, claims)
 		}
 	}
+	// Selected unless the user already has a selected registration for the
+	// provider (unlinking the selected one and linking again selects).
 	selected := true
 	for _, r := range existing {
-		if r.Provider == models.ProviderOpenAI {
+		if r.Provider == models.ProviderOpenAI && r.Selected {
 			selected = false
 		}
 	}
@@ -965,8 +976,7 @@ func (s *AccountsService) refreshFlight(ctx context.Context, accountUUID string,
 	rt, err := s.vault.Open(ctx, acc.TenantID, acc.UUID, accountFieldRefreshToken, acc.RefreshToken)
 	if err != nil {
 		if errors.Is(err, ErrEnvelopeCorrupt) {
-			s.markReauth(ctx, acc.UUID, errcode.LLMUserAccountReauthRequired)
-			return nil, iface.ErrLLMUserAccountReauth
+			return s.terminal(ctx, acc)
 		}
 		return nil, fmt.Errorf("%w: open linked account token: %w", iface.ErrLLMProviderUnavailable, err)
 	}
@@ -974,11 +984,10 @@ func (s *AccountsService) refreshFlight(ctx context.Context, accountUUID string,
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrSIWCRefreshTerminal):
-			// Terminal: the user repeats OAuth with the saved client id.
+			// Terminal for the set we presented: the user repeats OAuth with
+			// the saved client id, unless a newer set was stored meanwhile.
 			// ErrSIWCRefreshTerminal itself never leaves the module.
-			s.markReauth(ctx, acc.UUID, errcode.LLMUserAccountReauthRequired)
-			s.logger.WarnContext(ctx, "llm siwc: refresh refused, account needs reauth", slog.String("account", acc.UUID))
-			return nil, iface.ErrLLMUserAccountReauth
+			return s.terminal(ctx, acc)
 		case errors.Is(err, ErrSIWCInvalidClient):
 			// The guide files invalid_client under "fix configuration, not
 			// tokens": a reauth with the same issued client id would fail
@@ -994,9 +1003,14 @@ func (s *AccountsService) refreshFlight(ctx context.Context, accountUUID string,
 	}
 	if err := s.repo.ReplaceTokens(ctx, acc.UUID, acc.SavedAt, set); err != nil {
 		if errors.Is(err, repository.ErrStaleTokenSet) {
-			// Someone else stored a rotation first: use theirs.
-			if cur, rerr := s.readUsable(ctx, accountUUID); rerr == nil && s.now().Before(cur.ExpiresAt) {
-				return s.credential(ctx, cur)
+			// Someone else stored a rotation first: use theirs, and revoke
+			// the set we drop (only a rotated refresh token is ours to
+			// revoke; an omitted one is still the stored one).
+			if tok.RefreshToken != "" {
+				s.revokeQuiet(ctx, acc.ClientID, tok.RefreshToken)
+			}
+			if cred, ok := s.serveNewer(ctx, accountUUID, acc.SavedAt); ok {
+				return cred, nil
 			}
 		}
 		return nil, fmt.Errorf("%w: store refreshed tokens: %w", iface.ErrLLMProviderUnavailable, mapRepoErr(err))
@@ -1007,6 +1021,45 @@ func (s *AccountsService) refreshFlight(ctx context.Context, accountUUID string,
 		return nil, err
 	}
 	return &AccountCredential{Account: acc, AccessToken: tok.AccessToken}, nil
+}
+
+// serveNewer returns the stored set when it is usable, unexpired and newer
+// than prev (a rotation stored by another writer).
+func (s *AccountsService) serveNewer(ctx context.Context, accountUUID string, prev time.Time) (*AccountCredential, bool) {
+	cur, err := s.readUsable(ctx, accountUUID)
+	if err != nil || cur.SavedAt.Equal(prev) || !s.now().Before(cur.ExpiresAt) {
+		return nil, false
+	}
+	cred, err := s.credential(ctx, cur)
+	return cred, err == nil
+}
+
+// terminal handles a refresh token that is unusable for the set acc holds.
+// A stale presenter (lease fail-open, a refresh racing a reauth) gets
+// refresh_token_reused while the row already holds a newer valid set: that
+// set is served and nothing is flagged. Otherwise the flag is written fenced
+// on the savedAt of the set that failed, so it can never land on a newer one.
+func (s *AccountsService) terminal(ctx context.Context, acc *models.UserAccount) (*AccountCredential, error) {
+	if cred, ok := s.serveNewer(ctx, acc.UUID, acc.SavedAt); ok {
+		return cred, nil
+	}
+	err := s.repo.SetStatusIf(ctx, acc.UUID, acc.SavedAt, models.AccountStatusNeedsReauth, errcode.LLMUserAccountReauthRequired)
+	switch {
+	case errors.Is(err, repository.ErrStaleTokenSet):
+		if cred, ok := s.serveNewer(ctx, acc.UUID, acc.SavedAt); ok {
+			return cred, nil
+		}
+		if _, rerr := s.readUsable(ctx, acc.UUID); rerr != nil {
+			return nil, rerr
+		}
+		return nil, fmt.Errorf("%w: linked account changed during refresh", iface.ErrLLMProviderUnavailable)
+	case err != nil:
+		s.logger.WarnContext(ctx, "llm siwc: reauth flag failed", slog.String("account", acc.UUID))
+	default:
+		s.logger.WarnContext(ctx, "llm siwc: refresh refused, account needs reauth", slog.String("account", acc.UUID))
+	}
+	s.dropPlanCache(acc.UUID)
+	return nil, iface.ErrLLMUserAccountReauth
 }
 
 // sealRefreshed builds the rotated set: an omitted refresh_token keeps the
