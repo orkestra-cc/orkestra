@@ -394,3 +394,43 @@ func TestOpenAI_RegisteredInRegistry(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 }
+
+func TestOpenAI_SIWCListModelsReadsThePlanCatalog(t *testing.T) {
+	var auth, path string
+	p, _ := newOAI(t, func(w http.ResponseWriter, r *http.Request) {
+		auth, path = r.Header.Get("Authorization"), r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"slug":"gpt-5.6-terra","display_name":"GPT-5.6","visibility":"list"},{"slug":"hidden","display_name":"x","visibility":"hidden"},{"slug":"gpt-5.6-mini","visibility":"list"}]}`))
+	}, iface.LLMCredentialKindUserAccount)
+	ms, err := p.ListModels(context.Background())
+	if err != nil || len(ms) != 2 || ms[0].ID != "gpt-5.6-terra" || ms[0].DisplayName != "GPT-5.6" || ms[1].ID != "gpt-5.6-mini" || ms[1].DisplayName != "gpt-5.6-mini" {
+		t.Fatalf("models = %+v, %v", ms, err)
+	}
+	if auth != "Bearer sk-test" || path != "/v1/models" {
+		t.Fatalf("request = %s %q", path, auth)
+	}
+}
+
+func TestOpenAI_SIWCListModelsErrors(t *testing.T) {
+	cases := []struct {
+		status int
+		body   string
+		want   error
+	}{
+		{401, `{"detail":"sk-live-x"}`, ErrSIWCInvalidUser},
+		{403, `{"error":{"code":"subscription_sharing_user_not_eligible","message":"sk-live-x"}}`, iface.ErrLLMPlanUsageDisabled},
+		{503, ``, iface.ErrLLMProviderUnavailable},
+		{200, `{"data":[{"id":"gpt"}]}`, iface.ErrLLMProviderUnavailable}, // API-key shape on the plan route
+	}
+	for _, c := range cases {
+		p, _ := newOAI(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(c.status)
+			_, _ = w.Write([]byte(c.body))
+		}, iface.LLMCredentialKindUserAccount)
+		_, err := p.ListModels(context.Background())
+		if !errors.Is(err, c.want) || strings.Contains(err.Error(), "sk-live-x") {
+			t.Errorf("%d → %v, want %v", c.status, err, c.want)
+		}
+	}
+}

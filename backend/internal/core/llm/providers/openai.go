@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -345,7 +346,7 @@ func (o *OpenAI) Embed(ctx context.Context, call EmbedCall) (*EmbedOutcome, erro
 
 func (o *OpenAI) ListModels(ctx context.Context) ([]ModelDescriptor, error) {
 	if o.profile == ProfileSIWC {
-		return nil, fmt.Errorf("%w: SIWC catalog not wired", iface.ErrLLMProviderUnavailable) // PR 3
+		return o.listSIWCModels(ctx)
 	}
 	var httpErr ErrorInfo
 	page, err := o.client.Models.List(ctx, captureHTTPError(&httpErr))
@@ -363,6 +364,55 @@ func (o *OpenAI) ListModels(ctx context.Context) ([]ModelDescriptor, error) {
 		}
 	}
 	return out, nil
+}
+
+// listSIWCModels reads the account-specific ChatGPT plan catalog. Its shape
+// is {models:[{slug,display_name,visibility}]}, not the API-key {data:[…]};
+// only visibility == "list" entries are meant for display, and the server's
+// order is kept (guide "Models and inference", 2026-10-10). This is the one
+// parser of that shape: the accounts service reaches it through the adapter.
+func (o *OpenAI) listSIWCModels(ctx context.Context) ([]ModelDescriptor, error) {
+	var httpErr ErrorInfo
+	var body []byte
+	err := o.client.Get(ctx, "models", nil, &body, captureHTTPError(&httpErr))
+	if httpErr.Status != 0 {
+		return nil, ClassifySIWCHTTP(httpErr)
+	}
+	if err != nil {
+		return nil, classifySDKError(ctx, err)
+	}
+	return parseSIWCCatalog(body)
+}
+
+func parseSIWCCatalog(body []byte) ([]ModelDescriptor, error) {
+	var res struct {
+		Models []struct {
+			Slug        string `json:"slug"`
+			DisplayName string `json:"display_name"`
+			Visibility  string `json:"visibility"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(body, &res); err != nil || res.Models == nil {
+		return nil, malformed("plan catalog")
+	}
+	out := make([]ModelDescriptor, 0, len(res.Models))
+	for _, m := range res.Models {
+		if m.Visibility != "list" || !isIdentifier(m.Slug, maxIdentLength) {
+			continue
+		}
+		out = append(out, ModelDescriptor{ID: m.Slug, DisplayName: siwcDisplayName(m.DisplayName, m.Slug)})
+	}
+	return out, nil
+}
+
+// siwcDisplayName keeps a provider label only when it is short, printable
+// text; otherwise the slug stands in.
+func siwcDisplayName(name, slug string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 128 || strings.ContainsFunc(name, unicode.IsControl) {
+		return slug
+	}
+	return name
 }
 
 func (o *OpenAI) Health(ctx context.Context) error {
