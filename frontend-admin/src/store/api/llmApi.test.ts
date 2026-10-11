@@ -4,8 +4,22 @@ import { server } from 'test/server';
 import { setupStore } from 'test/render';
 import { url } from 'test/handlers';
 import { llmApi } from './llmApi';
+import { getTenantScopedTags } from './baseApi';
 
 describe('llmApi', () => {
+  it('invalidates every llm cache on an org switch', () => {
+    const tags = (getTenantScopedTags() as string[]).map(String);
+    for (const tag of [
+      'LLMCredential',
+      'LLMModel',
+      'LLMMyModels',
+      'LLMUsage',
+      'LLMBudget'
+    ]) {
+      expect(tags).toContain(tag);
+    }
+  });
+
   it('putLlmGrants sends access and the complete user list to the model grants route', async () => {
     let body: unknown = null;
     let method: string | null = null;
@@ -106,7 +120,7 @@ describe('llmApi', () => {
       )
     );
     const budget = await setupStore()
-      .dispatch(llmApi.endpoints.getLlmBudget.initiate())
+      .dispatch(llmApi.endpoints.getLlmBudget.initiate('t1'))
       .unwrap();
     expect(budget).toBeNull();
   });

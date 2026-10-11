@@ -124,4 +124,22 @@ describe('PromptTestModal', () => {
     ).toBeInTheDocument();
     expect(bodies).toHaveLength(0);
   });
+
+  it('counts an emoji as one character, as the backend does', async () => {
+    stubPrompt(() =>
+      HttpResponse.json({
+        text: 'ok',
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: 'stop',
+        fallback: false
+      })
+    );
+    renderModal();
+    await userEvent.click(screen.getByLabelText(/^prompt$/i));
+    // 2001 emoji = 4002 UTF-16 units but 2001 characters: under the limit.
+    await userEvent.paste('\u{1F600}'.repeat(2001));
+    await userEvent.click(screen.getByRole('button', { name: /^run$/i }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(screen.queryByText(/at most 4000 characters/i)).toBeNull();
+  });
 });

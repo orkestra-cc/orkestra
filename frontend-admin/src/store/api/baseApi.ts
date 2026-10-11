@@ -933,7 +933,14 @@ export const TENANT_SCOPED_TAGS = [
   'Permission',
   'EffectivePermissions',
   'AdminOrg',
-  'OrgInvite'
+  'OrgInvite',
+  // llm: every slice is the active org's (credentials, models, grants,
+  // usage, budget) and none carries the org in its cache key.
+  'LLMCredential',
+  'LLMModel',
+  'LLMMyModels',
+  'LLMUsage',
+  'LLMBudget'
 ] as const;
 
 // Addon-owned tenant-scoped tags. An addon declares its RTK Query tags in its

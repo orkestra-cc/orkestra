@@ -40,7 +40,13 @@ const PromptTestModal = ({ model, onClose }: Props) => {
           .string()
           .trim()
           .required(t('adminLlm.validation.required'))
-          .max(MAX_PROMPT, t('adminLlm.prompt.tooLong', { max: MAX_PROMPT }))
+          // Characters as the backend counts them (code points), not
+          // UTF-16 units: an emoji is one character, not two.
+          .test(
+            'max-chars',
+            t('adminLlm.prompt.tooLong', { max: MAX_PROMPT }),
+            v => Array.from(v ?? '').length <= MAX_PROMPT
+          )
       }),
     [t]
   );

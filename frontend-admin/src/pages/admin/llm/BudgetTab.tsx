@@ -296,11 +296,24 @@ const BudgetForm = ({ budget }: { budget: LlmBudget | null }) => {
 // BudgetTab reads the budget (llm.admin.read; 204 = none, no limit) and
 // hands it to the form; saving needs llm.budgets.admin.
 const BudgetTab = () => {
-  const { data, isLoading, isError, refetch } = useGetLlmBudgetQuery();
-  if (isLoading) return <Spinner animation="border" size="sm" />;
+  const tenantId =
+    useAppSelector(
+      s => s.tenant.impersonatedTenantId ?? s.tenant.currentOrgId
+    ) ?? '';
+  // Keyed by org: right after a switch currentData is undefined until the
+  // new org's budget lands, so the form never shows (or saves) the
+  // previous org's values.
+  const { currentData, isError, refetch } = useGetLlmBudgetQuery(tenantId);
   if (isError) return <LlmLoadError onRetry={() => refetch()} />;
-  const budget = data ?? null;
-  return <BudgetForm key={budget?.updatedAt ?? 'none'} budget={budget} />;
+  if (currentData === undefined)
+    return <Spinner animation="border" size="sm" />;
+  const budget = currentData;
+  return (
+    <BudgetForm
+      key={`${tenantId}:${budget?.updatedAt ?? 'none'}`}
+      budget={budget}
+    />
+  );
 };
 
 export default BudgetTab;

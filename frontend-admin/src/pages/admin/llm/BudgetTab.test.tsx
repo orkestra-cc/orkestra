@@ -3,10 +3,14 @@ import { http, HttpResponse } from 'msw';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { toast } from 'react-toastify';
-import { renderWithProviders, type TestRootState } from 'test/render';
+import {
+  renderWithProviders,
+  setupStore,
+  type TestRootState
+} from 'test/render';
 import { server } from 'test/server';
 import { url } from 'test/handlers';
-import tenantReducer from 'store/slices/tenantSlice';
+import tenantReducer, { setCurrentOrg } from 'store/slices/tenantSlice';
 import { completeStepUp, subscribeStepUp } from 'store/stepUp';
 import BudgetTab from './BudgetTab';
 
@@ -139,6 +143,34 @@ describe('BudgetTab', () => {
     await userEvent.click(screen.getByRole('button', { name: /^save$/i }));
     expect(await screen.findByText(message)).toBeInTheDocument();
     expect(puts).toHaveLength(0);
+  });
+
+  it('never shows the previous org budget after an org switch', async () => {
+    let served = budget;
+    server.use(
+      http.get(url('/v1/admin/llm/budget'), () => HttpResponse.json(served)),
+      http.get(url('/v1/admin/tenants/:id/members'), () =>
+        HttpResponse.json({ members: [] })
+      )
+    );
+    const base = tenantReducer(undefined, { type: 'init' });
+    const store = setupStore({
+      tenant: {
+        ...base,
+        currentOrgId: 't-1',
+        memberships: [{ tenantId: 't-1' }, { tenantId: 't-2' }]
+      }
+    } as unknown as Partial<TestRootState>);
+    renderWithProviders(<BudgetTab />, { store });
+    await waitFor(async () => expect(await limitInput()).toHaveValue(500000));
+
+    served = {
+      ...budget,
+      monthlyTokenLimit: 7000,
+      updatedAt: '2026-10-02T00:00:00Z'
+    };
+    store.dispatch(setCurrentOrg('t-2'));
+    await waitFor(async () => expect(await limitInput()).toHaveValue(7000));
   });
 
   it('shows the written detail of a refused save', async () => {

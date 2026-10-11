@@ -367,7 +367,9 @@ export const llmApi = baseApi.injectEndpoints({
       providesTags: ['LLMUsage']
     }),
     // 204 (no budget, i.e. no limit) arrives as an empty body → null.
-    getLlmBudget: build.query<LlmBudget | null, void>({
+    // The arg is the active org id. The URL is the same for every org (the
+    // tenant header selects it): the arg only keys the cache per org.
+    getLlmBudget: build.query<LlmBudget | null, string>({
       query: () => '/v1/admin/llm/budget',
       transformResponse: (body: LlmBudget | null | undefined) => body ?? null,
       providesTags: ['LLMBudget']
