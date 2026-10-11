@@ -409,3 +409,59 @@ func TestRouterSIWC_InvalidClientOnRefreshIsFinal(t *testing.T) {
 		t.Fatal("a client or grant configuration rejection must not be a provider fault")
 	}
 }
+
+// Greptile 4241218104: an account rejection (a second 401 after the forced
+// refresh, or one after output) says nothing about the provider's health,
+// so repeated ones never open the model's circuit: once the account works
+// again the next call goes through.
+func TestRouterSIWC_AccountRejectionsNeverOpenTheCircuit(t *testing.T) {
+	e := newSIWCEnv(t)
+	e.setRespond(func(w http.ResponseWriter, _ string) { planHTTP(w, 401, `{}`) })
+	for call := 1; call <= 3; call++ {
+		if _, err := e.chat(); !errors.Is(err, iface.ErrLLMProviderUnavailable) {
+			t.Fatalf("call %d: err = %v", call, err)
+		}
+	}
+	e.setRespond(func(w http.ResponseWriter, _ string) {
+		planSSE(w, planDelta("partial"), planFailed("subscription_sharing_invalid_user"))
+	})
+	for call := 1; call <= 3; call++ {
+		if _, err := e.chat(); !errors.Is(err, iface.ErrLLMPartialOutput) {
+			t.Fatalf("after-output call %d: err = %v", call, err)
+		}
+	}
+	e.setRespond(func(w http.ResponseWriter, _ string) { planSSE(w, planDelta("ok"), planCompleted) })
+	if res, err := e.chat(); err != nil || res.Model.UUID != "ua" {
+		t.Fatalf("recovered account: chat = %+v, %v (circuit opened by account rejections)", res, err)
+	}
+}
+
+// Greptile 4241218099: a plan catalog read that met a 401 refreshed the
+// token; inference must use that refreshed token, not the rejected one, so
+// the call is one provider attempt with no second refresh.
+func TestRouterSIWC_CatalogRefreshHandsTheNewTokenToInference(t *testing.T) {
+	e := newSIWCEnv(t)
+	e.h.oidc.locked(func() { e.h.oidc.rejectAT = "at-c" })
+	e.setRespond(func(w http.ResponseWriter, tok string) {
+		if tok == "at-c" {
+			planHTTP(w, 401, `{"error":{"code":"subscription_sharing_invalid_user","message":"provider text"}}`)
+			return
+		}
+		planSSE(w, planDelta("ok"), planCompleted)
+	})
+	res, err := e.chat()
+	if err != nil || res.Model.UUID != "ua" {
+		t.Fatalf("chat = %+v, %v", res, err)
+	}
+	if got := e.seen(); len(got) != 1 || got[0] != "at-r1" {
+		t.Fatalf("inference requests = %d (want one, with the refreshed token: %v)", len(got), len(got) == 1 && got[0] == "at-r1")
+	}
+	e.h.oidc.locked(func() {
+		if e.h.oidc.refreshes != 1 {
+			t.Errorf("refreshes = %d, want 1", e.h.oidc.refreshes)
+		}
+	})
+	if ev := singleLedger(t, e.store); len(ev.Attempts) != 1 || ev.Attempts[0].Outcome != attemptOK {
+		t.Fatalf("ledger attempts = %+v", ev.Attempts)
+	}
+}

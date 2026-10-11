@@ -246,6 +246,9 @@ type dsrAccounts struct {
 	rows  []models.UserAccount
 	err   error
 	calls int
+	// beforeDelete, when set, runs once inside the next DeleteByUser (a
+	// refresh rotating a set just before the erasure).
+	beforeDelete func(rows []models.UserAccount)
 }
 
 func (d *dsrAccounts) ListByUserAllTenants(_ context.Context, user string) ([]models.UserAccount, error) {
@@ -262,25 +265,29 @@ func (d *dsrAccounts) ListByUserAllTenants(_ context.Context, user string) ([]mo
 	return out, d.err
 }
 
-func (d *dsrAccounts) DeleteByUser(_ context.Context, user string) (int64, error) {
+func (d *dsrAccounts) DeleteByUser(_ context.Context, user string) ([]models.UserAccount, error) {
 	d.calls++
 	if user == "" {
-		return 0, repository.ErrEmptySubject
+		return nil, repository.ErrEmptySubject
+	}
+	if hook := d.beforeDelete; hook != nil {
+		d.beforeDelete = nil
+		hook(d.rows)
 	}
 	if d.err != nil {
-		return 0, d.err
+		return nil, d.err
 	}
 	kept := d.rows[:0]
-	var n int64
+	gone := []models.UserAccount{}
 	for _, a := range d.rows {
 		if a.UserUUID == user {
-			n++
+			gone = append(gone, a)
 			continue
 		}
 		kept = append(kept, a)
 	}
 	d.rows = kept
-	return n, nil
+	return gone, nil
 }
 
 func (d *dsrAccounts) has(uuid string) bool {
@@ -292,17 +299,20 @@ func (d *dsrAccounts) has(uuid string) bool {
 	return false
 }
 
-// revokeLog records each revocation and whether the row still existed then
-// (revoke must come before the delete).
+// revokeLog records each revocation, whether the row still existed then
+// (the purge revokes what the delete removed, so it must be gone) and the
+// refresh-token envelope it was handed.
 type revokeLog struct {
 	accounts *dsrAccounts
 	seen     []string // uuid@tenant
 	before   []bool
+	tokens   []string // refresh-token ciphertexts
 }
 
 func (r *revokeLog) revoke(_ context.Context, a models.UserAccount) {
 	r.seen = append(r.seen, a.UUID+"@"+a.TenantID)
 	r.before = append(r.before, r.accounts.has(a.UUID))
+	r.tokens = append(r.tokens, a.RefreshToken.Ciphertext)
 }
 
 func contains(list []string, v string) bool {
@@ -666,10 +676,10 @@ func TestPIIProducer_PurgeBothModes(t *testing.T) {
 			}
 		}
 
-		// llm_user_accounts: each of the subject's refresh tokens revoked
-		// under its own org while the row still existed, then every
-		// registration deleted; acct-3 (u2) untouched.
-		if !reflect.DeepEqual(set.r.seen, []string{"acct-1@t1", "acct-2@t2"}) || !reflect.DeepEqual(set.r.before, []bool{true, true}) {
+		// llm_user_accounts: every registration deleted, then each deleted
+		// document's refresh token revoked under its own org; acct-3 (u2)
+		// untouched.
+		if !reflect.DeepEqual(set.r.seen, []string{"acct-1@t1", "acct-2@t2"}) || !reflect.DeepEqual(set.r.before, []bool{false, false}) {
 			t.Errorf("mode %v revocations = %v (row present: %v)", mode, set.r.seen, set.r.before)
 		}
 		if len(set.a.rows) != 1 || set.a.rows[0].UUID != "acct-3" {
@@ -854,5 +864,25 @@ func TestPIIProducer_RepositoryEmptySubjectIsARefusal(t *testing.T) {
 	res, err := p.PurgePersonalData(context.Background(), "u1", iface.EraseHardDelete)
 	if !errors.Is(err, repository.ErrEmptySubject) || res.RowsDeleted != 0 || len(set.g.rows) != 5 {
 		t.Fatalf("purge = %+v, %v (grants %d)", res, err, len(set.g.rows))
+	}
+}
+
+// Greptile 4241218095: a refresh that rotates a registration's set just
+// before the erasure is not lost: the purge revokes the token of the
+// document the delete removed, not of an earlier read.
+func TestPIIProducer_PurgeRevokesTheSetTheDeleteRemoved(t *testing.T) {
+	p, set := dsrFixture()
+	set.a.beforeDelete = func(rows []models.UserAccount) {
+		for i := range rows {
+			if rows[i].UUID == "acct-1" {
+				rows[i].RefreshToken.Ciphertext = "TOKEN-SENTINEL-rotated"
+			}
+		}
+	}
+	if _, err := p.PurgePersonalData(context.Background(), "u1", iface.EraseHardDelete); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(set.r.tokens, []string{"TOKEN-SENTINEL-rotated", "TOKEN-SENTINEL-refresh-2"}) {
+		t.Fatalf("revoked envelopes = %v, want the rotated acct-1 set and acct-2's", set.r.tokens)
 	}
 }

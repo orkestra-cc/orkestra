@@ -198,17 +198,51 @@ func TestUserAccounts_GetUpdateDeleteRoundTrip(t *testing.T) {
 		t.Fatalf("cross-tenant update err = %v", err)
 	}
 
-	if err := repo.Delete(ctxFor("t2"), "a1"); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.Delete(ctxFor("t2"), "a1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-tenant delete err = %v", err)
 	}
-	if err := repo.Delete(ctx, "a1"); err != nil {
+	if _, err := repo.Delete(ctx, "a1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.Get(ctx, "a1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("get after delete err = %v", err)
 	}
-	if err := repo.Delete(ctx, "a1"); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.Delete(ctx, "a1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second delete err = %v", err)
+	}
+}
+
+// Greptile 4241218095: Delete hands back the document it removed, so the
+// unlink revokes the set the row held when it went, including one a
+// refresh stored after the caller's read.
+func TestUserAccounts_DeleteReturnsTheRemovedSet(t *testing.T) {
+	db := newTestDB(t)
+	ensureAccountIndexes(t, db)
+	repo := NewUserAccounts(db)
+	ctx := ctxFor("t1")
+	t0 := time.Now().UTC().Truncate(time.Millisecond)
+	a := account("a1", "u1", "oaiapp_1", true, t0)
+	a.SavedAt = t0
+	if err := repo.Insert(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	read, err := repo.Get(ctx, "a1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A refresh lands between the caller's read and its delete.
+	if err := repo.ReplaceTokens(ctx, "a1", read.SavedAt, tokenSet("r1", t0.Add(time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := repo.Delete(ctx, "a1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gone.UUID != "a1" || gone.TenantID != "t1" || gone.RefreshToken.Ciphertext != "rt-r1" || !gone.SavedAt.Equal(t0.Add(time.Second)) {
+		t.Fatalf("deleted document = %+v, want the rotated set", gone)
+	}
+	if _, err := repo.Get(ctx, "a1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("get after delete err = %v", err)
 	}
 }
 
@@ -253,9 +287,21 @@ func TestUserAccounts_DSRAcrossTenants(t *testing.T) {
 	if err != nil || len(list) != 2 {
 		t.Fatalf("all-tenant list = %+v, %v", list, err)
 	}
-	n, err := repo.DeleteByUser(context.Background(), "u1")
-	if err != nil || n != 2 {
-		t.Fatalf("delete = %d, %v", n, err)
+	// A refresh rotates a1 after the list: the delete returns the rotated
+	// set, the one the purge must revoke.
+	if err := repo.ReplaceTokens(ctxFor("t1"), "a1", time.Time{}, tokenSet("r1", now.Add(time.Second).Truncate(time.Millisecond))); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := repo.DeleteByUser(context.Background(), "u1")
+	if err != nil || len(gone) != 2 {
+		t.Fatalf("delete = %+v, %v", gone, err)
+	}
+	byUUID := map[string]models.UserAccount{}
+	for _, g := range gone {
+		byUUID[g.UUID] = g
+	}
+	if byUUID["a1"].RefreshToken.Ciphertext != "rt-r1" || byUUID["a1"].TenantID != "t1" || byUUID["a2"].RefreshToken.Ciphertext != "rt-a2" || byUUID["a2"].TenantID != "t2" {
+		t.Fatalf("deleted documents = %+v", gone)
 	}
 	if l, _ := repo.ListByUserAllTenants(context.Background(), "u1"); len(l) != 0 {
 		t.Fatalf("u1 rows left: %+v", l)
@@ -263,8 +309,8 @@ func TestUserAccounts_DSRAcrossTenants(t *testing.T) {
 	if l, _ := repo.ListByUser(ctxFor("t1"), "u2"); len(l) != 1 {
 		t.Fatalf("other subject touched: %+v", l)
 	}
-	if n, err := repo.DeleteByUser(context.Background(), "u1"); err != nil || n != 0 {
-		t.Fatalf("second delete = %d, %v", n, err)
+	if gone, err := repo.DeleteByUser(context.Background(), "u1"); err != nil || len(gone) != 0 {
+		t.Fatalf("second delete = %+v, %v", gone, err)
 	}
 }
 
@@ -284,8 +330,8 @@ func TestUserAccounts_DSRRefusesEmptySubject(t *testing.T) {
 	if l, err := repo.ListByUserAllTenants(context.Background(), ""); !errors.Is(err, ErrEmptySubject) || len(l) != 0 {
 		t.Fatalf("list empty subject = %+v, %v", l, err)
 	}
-	if n, err := repo.DeleteByUser(context.Background(), ""); !errors.Is(err, ErrEmptySubject) || n != 0 {
-		t.Fatalf("delete empty subject = %d, %v", n, err)
+	if gone, err := repo.DeleteByUser(context.Background(), ""); !errors.Is(err, ErrEmptySubject) || len(gone) != 0 {
+		t.Fatalf("delete empty subject = %+v, %v", gone, err)
 	}
 	for _, tenant := range []string{"t1", "t2"} {
 		if l, err := repo.ListByUser(ctxFor(tenant), ""); err != nil || len(l) != 1 {

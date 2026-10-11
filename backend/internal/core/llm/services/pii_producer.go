@@ -63,10 +63,12 @@ type OutboxDSRRepo interface {
 
 // AccountDSRRepo covers llm_user_accounts.userUuid: the subject's Sign in
 // with ChatGPT registrations in every org. Both methods refuse an empty
-// subject with repository.ErrEmptySubject.
+// subject with repository.ErrEmptySubject. DeleteByUser returns the
+// documents it removed (each atomically, with the token set it held then),
+// also those removed before a failure.
 type AccountDSRRepo interface {
 	ListByUserAllTenants(ctx context.Context, userUUID string) ([]models.UserAccount, error)
-	DeleteByUser(ctx context.Context, userUUID string) (int64, error)
+	DeleteByUser(ctx context.Context, userUUID string) ([]models.UserAccount, error)
 }
 
 // AccountRevoker revokes one registration's refresh token at the provider,
@@ -202,8 +204,9 @@ type PersonalDataExport struct {
 // grants issued to others are org assets and stay, with the actor field
 // rewritten to models.ErasedActor; the subject leaves every budget's
 // recipients and every alert's deliveredTo. Linked accounts go in both
-// modes: each refresh token is revoked at the provider (best-effort, under
-// the row's org) and then every registration is deleted. Usage rows are the only part
+// modes: every registration is deleted and the refresh token of each
+// deleted document is revoked at the provider (best-effort, under the row's
+// org). Usage rows are the only part
 // that depends on the mode: EraseHardDelete deletes the finalized ones,
 // EraseAnonymize keeps them with userUuid replaced by a random identifier
 // per row and credentialUuid removed. A pending row (a call in flight; its
@@ -368,23 +371,23 @@ func (p *PIIProducer) PurgePersonalData(ctx context.Context, userUUID string, mo
 		repository.CollUsage, repository.CollBudgets, repository.CollBudgetOutbox, repository.CollUserAccounts,
 	}}
 
-	// Linked accounts first, in both modes: revoke every refresh token at
-	// the provider (best-effort, under the row's own org), then delete
-	// every registration, so no usable token outlives the request.
-	accounts, err := p.accounts.ListByUserAllTenants(ctx, userUUID)
-	if err != nil {
-		return iface.PurgeResult{}, fmt.Errorf("llm purge: linked accounts: %w", err)
-	}
+	// Linked accounts first, in both modes: delete every registration, then
+	// revoke the refresh token of each deleted document at the provider
+	// (best-effort, under the row's own org), so no usable token outlives
+	// the request. Revoking what the delete removed, not an earlier list,
+	// covers a refresh that rotated a set in between; one that stores after
+	// the delete finds no row and revokes its own token. Rows deleted before
+	// a failure are revoked too.
+	deletedAccounts, err := p.accounts.DeleteByUser(ctx, userUUID)
 	if p.revoke != nil {
-		for _, a := range accounts {
+		for _, a := range deletedAccounts {
 			p.revoke(ctx, a)
 		}
 	}
-	n, err := p.accounts.DeleteByUser(ctx, userUUID)
 	if err != nil {
 		return iface.PurgeResult{}, fmt.Errorf("llm purge: linked accounts delete: %w", err)
 	}
-	res.RowsDeleted = int(n)
+	res.RowsDeleted = len(deletedAccounts)
 
 	deleted, err := p.grants.DeleteByUser(ctx, userUUID)
 	if err != nil {
@@ -401,7 +404,7 @@ func (p *PIIProducer) PurgePersonalData(ctx context.Context, userUUID string, mo
 	}
 	// Anonymize mode: every row. Hard delete: the pending rows the delete
 	// skipped, so nothing left names the subject.
-	n, err = p.usage.AnonymizeByUser(ctx, userUUID, p.newID)
+	n, err := p.usage.AnonymizeByUser(ctx, userUUID, p.newID)
 	if err != nil {
 		return res, fmt.Errorf("llm purge: usage anonymize: %w", err)
 	}

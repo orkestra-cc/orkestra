@@ -42,6 +42,9 @@ type memAccounts struct {
 	beforeReplace func(r *models.UserAccount)
 	// listErr, when set, is what ListByUser answers (a Mongo blip).
 	listErr error
+	// beforeDelete, when set, runs once inside the next Delete before the
+	// row goes (a refresh storing a newer set in the unlink's window).
+	beforeDelete func(r *models.UserAccount)
 }
 
 func newMemAccounts() *memAccounts { return &memAccounts{rows: map[string]*models.UserAccount{}} }
@@ -134,14 +137,20 @@ func (m *memAccounts) Select(ctx context.Context, user, provider, id string) err
 	return nil
 }
 
-func (m *memAccounts) Delete(ctx context.Context, id string) error {
+func (m *memAccounts) Delete(ctx context.Context, id string) (*models.UserAccount, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if r, ok := m.rows[id]; !ok || r.TenantID != tenantOf(ctx) {
-		return repository.ErrNotFound
+	r, ok := m.rows[id]
+	if !ok || r.TenantID != tenantOf(ctx) {
+		return nil, repository.ErrNotFound
+	}
+	if hook := m.beforeDelete; hook != nil {
+		m.beforeDelete = nil
+		hook(r)
 	}
 	delete(m.rows, id)
-	return nil
+	cp := *r
+	return &cp, nil
 }
 
 func (m *memAccounts) mutateScoped(ctx context.Context, id string, fn func(*models.UserAccount) error) error {
@@ -428,6 +437,7 @@ func (h *accountsHarness) replica() *AccountsService {
 		Limiter: NewRateLimiter(h.redis, slog.Default()), Redis: h.redis, Config: func() SIWCConfig { return h.cfg }, Logger: slog.Default(),
 	})
 	svc.pollEvery = 5 * time.Millisecond
+	svc.sealRetryEvery = time.Millisecond
 	svc.SetAuditSink(h.audit)
 	return svc
 }
@@ -1260,7 +1270,7 @@ func TestAccounts_PlanModelsCacheAndInvalidUserRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 3; i++ {
-		slugs, err := h.svc.PlanModels(ctx, cred)
+		slugs, _, err := h.svc.PlanModels(ctx, cred)
 		if err != nil || len(slugs) != 1 || slugs[0] != "gpt-5.6-terra" {
 			t.Fatalf("plan models = %v, %v", slugs, err)
 		}
@@ -1271,7 +1281,7 @@ func TestAccounts_PlanModelsCacheAndInvalidUserRetry(t *testing.T) {
 		t.Fatalf("plan calls = %d, want 1 (cached)", calls())
 	}
 	h.svc.now = func() time.Time { return time.Now().Add(accountPlanCacheTTL + time.Second) }
-	if _, err := h.svc.PlanModels(ctx, cred); err != nil || calls() != 2 {
+	if _, _, err := h.svc.PlanModels(ctx, cred); err != nil || calls() != 2 {
 		t.Fatalf("expired cache: calls = %d, err = %v", calls(), err)
 	}
 	h.svc.now = time.Now
@@ -1281,9 +1291,12 @@ func TestAccounts_PlanModelsCacheAndInvalidUserRetry(t *testing.T) {
 	// 401 with the current token: one forced refresh and one retry with the
 	// rotated token.
 	oidc.locked(func() { oidc.rejectAT = "at-c" })
-	slugs, err := h.svc.PlanModels(ctx, cred)
+	slugs, used, err := h.svc.PlanModels(ctx, cred)
 	if err != nil || len(slugs) != 1 {
 		t.Fatalf("retry = %v, %v", slugs, err)
+	}
+	if used == nil || used.AccessToken != "at-r1" || !used.Account.SavedAt.After(cred.Account.SavedAt) {
+		t.Fatal("PlanModels must hand back the refreshed credential, not the rejected one")
 	}
 	oidc.locked(func() {
 		if oidc.refreshes != 1 || oidc.lastPlanToken != "at-r1" {
@@ -1691,4 +1704,187 @@ func TestAccounts_UnresolvableDuplicateIsAnExchangeFailure(t *testing.T) {
 			})
 		})
 	}
+}
+
+// flakyKMS is a KMS provider whose Encrypt fails while fail is non-zero
+// (fail < 0: always); Decrypt reverses a successful Encrypt.
+type flakyKMS struct {
+	mu   sync.Mutex
+	fail int
+}
+
+func (k *flakyKMS) CreateKey(_ context.Context, tenantUUID string) (string, error) {
+	return "k-" + tenantUUID, nil
+}
+
+func (k *flakyKMS) Encrypt(_ context.Context, keyID string, p []byte) ([]byte, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.fail != 0 {
+		if k.fail > 0 {
+			k.fail--
+		}
+		return nil, errors.New("kms: service unavailable")
+	}
+	return append([]byte(keyID+":"), p...), nil
+}
+
+func (k *flakyKMS) Decrypt(_ context.Context, keyID string, c []byte) ([]byte, error) {
+	return []byte(strings.TrimPrefix(string(c), keyID+":")), nil
+}
+
+func (k *flakyKMS) DeleteKey(context.Context, string) error { return nil }
+
+// Greptile 4241218091: the provider rotated the set but the vault failed to
+// seal it once. The same returned set is sealed again and stored; the
+// refresh is never repeated (the stored refresh token is spent).
+func TestAccounts_SealFailureAfterRefreshRetriesTheSameSet(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1"}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx := ctxFor("t1")
+	acc := h.linkAccount(t, ctx, "oaiapp_1", "c")
+	before, _ := h.repo.row(acc.UUID)
+	h.expire(acc.UUID)
+	h.vault.SetKMSProvider(&flakyKMS{fail: 1})
+	cred, err := h.svc.CredentialFor(ctx, "u-admin")
+	if err != nil || cred.AccessToken != "at-r1" {
+		t.Fatalf("credential err = %v (rotated token served: %v)", err, cred != nil && cred.AccessToken == "at-r1")
+	}
+	oidc.locked(func() {
+		if oidc.refreshes != 1 || len(oidc.revoked) != 0 {
+			t.Errorf("refreshes = %d, revocations = %d (want 1, 0)", oidc.refreshes, len(oidc.revoked))
+		}
+	})
+	after, _ := h.repo.row(acc.UUID)
+	if !after.SavedAt.After(before.SavedAt) || after.RefreshToken.Alg != models.EnvelopeAlgKMS || after.Status != models.AccountStatusActive {
+		t.Fatalf("the rotated set was not stored (status %s)", after.Status)
+	}
+	if got, err := h.svc.vault.Open(ctx, after.TenantID, after.UUID, accountFieldRefreshToken, after.RefreshToken); err != nil || got != "rt-r1" {
+		t.Fatal("the stored refresh token is not the rotated one")
+	}
+}
+
+// When the vault keeps refusing, the rotated refresh token cannot be kept:
+// it is revoked and the registration flagged needs_reauth (fenced on the
+// set that was refreshed), instead of leaving the spent token stored.
+func TestAccounts_PersistentSealFailureRevokesAndNeedsReauth(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1"}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx := ctxFor("t1")
+	acc := h.linkAccount(t, ctx, "oaiapp_1", "c")
+	h.expire(acc.UUID)
+	before, _ := h.repo.row(acc.UUID)
+	h.vault.SetKMSProvider(&flakyKMS{fail: -1})
+	_, err := h.svc.CredentialFor(ctx, "u-admin")
+	if !errors.Is(err, iface.ErrLLMUserAccountReauth) {
+		t.Fatalf("err = %v, want ErrLLMUserAccountReauth", err)
+	}
+	oidc.locked(func() {
+		if oidc.refreshes != 1 || len(oidc.revoked) != 1 || oidc.revoked[0] != "rt-r1" {
+			t.Errorf("refreshes = %d, revocations = %d (want one refresh, the rotated token revoked)", oidc.refreshes, len(oidc.revoked))
+		}
+	})
+	after, _ := h.repo.row(acc.UUID)
+	if after.Status != models.AccountStatusNeedsReauth || after.LastError != errcode.LLMUserAccountReauthRequired || !after.SavedAt.Equal(before.SavedAt) {
+		t.Fatalf("status = %s / %s", after.Status, after.LastError)
+	}
+}
+
+// A refresh that kept the refresh token loses nothing when sealing fails:
+// the stored set stays usable, the call is unavailable, nothing revoked.
+func TestAccounts_SealFailureWithoutRotationKeepsTheStoredSet(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1", refreshOmitsOptional: true}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx := ctxFor("t1")
+	acc := h.linkAccount(t, ctx, "oaiapp_1", "c")
+	h.expire(acc.UUID)
+	h.vault.SetKMSProvider(&flakyKMS{fail: -1})
+	if _, err := h.svc.CredentialFor(ctx, "u-admin"); !errors.Is(err, iface.ErrLLMProviderUnavailable) || errors.Is(err, iface.ErrLLMUserAccountReauth) {
+		t.Fatalf("err = %v", err)
+	}
+	oidc.locked(func() {
+		if len(oidc.revoked) != 0 {
+			t.Errorf("revocations = %d", len(oidc.revoked))
+		}
+	})
+	if after, _ := h.repo.row(acc.UUID); after.Status != models.AccountStatusActive {
+		t.Fatalf("status = %s", after.Status)
+	}
+}
+
+// Greptile 4241218095: a refresh stores a newer set between the unlink's
+// read and its delete. The unlink revokes the set the delete removed, so
+// the newer refresh token does not outlive the registration.
+func TestAccounts_UnlinkRevokesTheSetTheDeleteRemoved(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1"}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx := ctxFor("t1")
+	acc := h.linkAccount(t, ctx, "oaiapp_1", "c")
+	newer, err := h.vault.Seal(ctx, acc.TenantID, acc.UUID, accountFieldRefreshToken, "rt-newer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.repo.mu.Lock()
+	h.repo.beforeDelete = func(r *models.UserAccount) {
+		r.RefreshToken, r.SavedAt = newer, r.SavedAt.Add(time.Second)
+	}
+	h.repo.mu.Unlock()
+	if err := h.svc.Unlink(ctx, acc.UUID, false); err != nil {
+		t.Fatal(err)
+	}
+	oidc.locked(func() {
+		if len(oidc.revoked) != 1 || oidc.revoked[0] != "rt-newer" {
+			t.Errorf("revocations = %d (the newer token revoked: %v)", len(oidc.revoked), len(oidc.revoked) == 1 && oidc.revoked[0] == "rt-newer")
+		}
+	})
+	if h.repo.count() != 0 {
+		t.Fatalf("rows = %d", h.repo.count())
+	}
+}
+
+// Greptile 4241218111: the plan catalog cache is tied to the token set. A
+// rotation stored by another replica (whose invalidation never reaches this
+// one) makes the old entry a miss, and a read of the older set that ends
+// late never replaces the newer entry.
+func TestAccounts_PlanCacheIsTiedToTheTokenSet(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1", models: []string{"m-old"}}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx := ctxFor("t1")
+	acc := h.linkAccount(t, ctx, "oaiapp_1", "c")
+	old, err := h.svc.CredentialFor(ctx, "u-admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slugs, _, err := h.svc.PlanModels(ctx, old); err != nil || len(slugs) != 1 || slugs[0] != "m-old" {
+		t.Fatalf("first read = %v, %v", slugs, err)
+	}
+	// Another replica refreshes the set; this replica's cache is not told.
+	h.expire(acc.UUID)
+	if _, err := h.replica().CredentialFor(ctx, "u-admin"); err != nil {
+		t.Fatal(err)
+	}
+	oidc.locked(func() { oidc.models = []string{"m-new"} })
+	cur, err := h.svc.CredentialFor(ctx, "u-admin")
+	if err != nil || cur.Account.SavedAt.Equal(old.Account.SavedAt) {
+		t.Fatalf("this replica did not read the rotated set: %v", err)
+	}
+	if slugs, _, err := h.svc.PlanModels(ctx, cur); err != nil || len(slugs) != 1 || slugs[0] != "m-new" {
+		t.Fatalf("after another replica's rotation = %v, %v (stale catalog served)", slugs, err)
+	}
+	// A read with the older set answers its caller but is not cached over
+	// the newer entry.
+	oidc.locked(func() { oidc.models = []string{"m-stale"} })
+	if _, _, err := h.svc.PlanModels(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	oidc.locked(func() { calls = oidc.planCalls })
+	if slugs, _, err := h.svc.PlanModels(ctx, cur); err != nil || len(slugs) != 1 || slugs[0] != "m-new" {
+		t.Fatalf("newer entry replaced by an older read: %v, %v", slugs, err)
+	}
+	oidc.locked(func() {
+		if oidc.planCalls != calls {
+			t.Errorf("plan calls = %d, want %d (the newer entry served from cache)", oidc.planCalls, calls)
+		}
+	})
 }

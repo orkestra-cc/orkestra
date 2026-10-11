@@ -108,14 +108,16 @@ func (f *fakeAccounts) Select(ctx context.Context, user, provider, id string) er
 	return nil
 }
 
-func (f *fakeAccounts) Delete(ctx context.Context, id string) error {
+func (f *fakeAccounts) Delete(ctx context.Context, id string) (*models.UserAccount, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if r, ok := f.rows[id]; !ok || r.TenantID != tenantOf(ctx) {
-		return repository.ErrNotFound
+	r, ok := f.rows[id]
+	if !ok || r.TenantID != tenantOf(ctx) {
+		return nil, repository.ErrNotFound
 	}
 	delete(f.rows, id)
-	return nil
+	cp := *r
+	return &cp, nil
 }
 
 func (f *fakeAccounts) mutate(ctx context.Context, id string, fn func(*models.UserAccount) error) error {

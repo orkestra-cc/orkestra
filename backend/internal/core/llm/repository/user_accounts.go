@@ -268,19 +268,24 @@ func (r *UserAccounts) Select(ctx context.Context, userUUID, provider, uuid stri
 	})
 }
 
-func (r *UserAccounts) Delete(ctx context.Context, uuid string) error {
+// Delete removes the registration and returns the document it removed, in
+// one FindOneAndDelete: the caller revokes the token set the row held when
+// it went, so a refresh or reauth that stored a newer set after the
+// caller's read is never deleted unrevoked. An unknown uuid (or another
+// org's) is ErrNotFound.
+func (r *UserAccounts) Delete(ctx context.Context, uuid string) (*models.UserAccount, error) {
 	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	res, err := r.coll.DeleteOne(ctx, filter)
-	if err != nil {
-		return err
+	var a models.UserAccount
+	if err := r.coll.FindOneAndDelete(ctx, filter).Decode(&a); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNotFound
+		}
+		return nil, err
 	}
-	if res.DeletedCount == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return &a, nil
 }
 
 // ListByUserAllTenants exports every registration of a data subject for
@@ -303,15 +308,27 @@ func (r *UserAccounts) ListByUserAllTenants(ctx context.Context, userUUID string
 }
 
 // DeleteByUser erases every registration of a data subject across all
-// tenants. Only the DSR pipeline (PIIProducer.PurgePersonalData) calls it.
-func (r *UserAccounts) DeleteByUser(ctx context.Context, userUUID string) (int64, error) {
+// tenants and returns the removed documents. Each row goes in its own
+// FindOneAndDelete, so the caller revokes the token set each row held when
+// it was deleted (a concurrent refresh can rotate a set between a list and
+// a bulk delete). On a failure the rows removed so far are returned with
+// the error, so their tokens can still be revoked. Only the DSR pipeline
+// (PIIProducer.PurgePersonalData) calls it.
+func (r *UserAccounts) DeleteByUser(ctx context.Context, userUUID string) ([]models.UserAccount, error) {
 	if userUUID == "" {
-		return 0, ErrEmptySubject
+		return nil, ErrEmptySubject
 	}
-	//tenantscope:allow dsr: right-to-erasure of the subject's ChatGPT registrations across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
-	res, err := r.coll.DeleteMany(ctx, bson.M{"userUuid": userUUID})
-	if err != nil {
-		return 0, err
+	out := []models.UserAccount{}
+	for {
+		var a models.UserAccount
+		//tenantscope:allow dsr: right-to-erasure of the subject's ChatGPT registrations across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
+		err := r.coll.FindOneAndDelete(ctx, bson.M{"userUuid": userUUID}).Decode(&a)
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return out, nil
+		}
+		if err != nil {
+			return out, err
+		}
+		out = append(out, a)
 	}
-	return res.DeletedCount, nil
 }

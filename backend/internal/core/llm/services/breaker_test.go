@@ -79,6 +79,9 @@ func TestBreaker_CountsOnlyProviderFaults(t *testing.T) {
 		iface.ErrLLMPlanUsageDisabled,
 		iface.ErrLLMPartialOutput,
 		errors.New("sink closed"),
+		// A plan-route 401 says the user's account context was not
+		// validated, never that the provider is unhealthy.
+		fmt.Errorf("%w: %w (status 401)", providers.ErrSIWCInvalidUser, iface.ErrLLMProviderUnavailable),
 	}
 	for _, e := range notFaults {
 		b, _ := newClockBreaker(1, time.Minute)

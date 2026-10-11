@@ -318,7 +318,9 @@ func (emptyAccounts) GetSelected(context.Context, string, string) (*models.UserA
 func (emptyAccounts) Select(context.Context, string, string, string) error {
 	return repository.ErrNotFound
 }
-func (emptyAccounts) Delete(context.Context, string) error                 { return repository.ErrNotFound }
+func (emptyAccounts) Delete(context.Context, string) (*models.UserAccount, error) {
+	return nil, repository.ErrNotFound
+}
 func (emptyAccounts) SetLastUsed(context.Context, string, time.Time) error { return nil }
 func (emptyAccounts) SetStatus(context.Context, string, string, string) error {
 	return nil

@@ -69,6 +69,11 @@ const (
 	// up must not leave an issued refresh token neither stored nor revoked.
 	accountCompleteTimeout = 30 * time.Second
 
+	// accountSealRetryDelay spaces the attempts to seal a rotated set the
+	// vault (KMS) refused: the provider already consumed the stored refresh
+	// token, so the returned set is retried, never a second refresh.
+	accountSealRetryDelay = 200 * time.Millisecond
+
 	accountLabelMaxLen = 100
 	accountStoreRetry  = 3
 )
@@ -84,7 +89,9 @@ type AccountRepo interface {
 	Get(ctx context.Context, uuid string) (*models.UserAccount, error)
 	GetSelected(ctx context.Context, userUUID, provider string) (*models.UserAccount, error)
 	Select(ctx context.Context, userUUID, provider, uuid string) error
-	Delete(ctx context.Context, uuid string) error
+	// Delete removes the registration and returns the document it removed
+	// (atomically: the token set it held when it went, never an earlier read).
+	Delete(ctx context.Context, uuid string) (*models.UserAccount, error)
 	SetLastUsed(ctx context.Context, uuid string, at time.Time) error
 	SetStatus(ctx context.Context, uuid, status, lastError string) error
 	SetStatusIf(ctx context.Context, uuid string, prevSavedAt time.Time, status, lastError string) error
@@ -156,7 +163,10 @@ type AccountCredentialSource interface {
 	// ForceRefresh rotates the set cred was built from (an inference 401,
 	// ruling 5.2); a set already rotated since is returned as is.
 	ForceRefresh(ctx context.Context, cred *AccountCredential) (*AccountCredential, error)
-	PlanModels(ctx context.Context, cred *AccountCredential) ([]string, error)
+	// PlanModels returns the account's plan catalog and the credential to
+	// call with: cred itself, or the refreshed one when the catalog read had
+	// to refresh a rejected token (the caller must not reuse cred then).
+	PlanModels(ctx context.Context, cred *AccountCredential) ([]string, *AccountCredential, error)
 	MarkUsed(ctx context.Context, accountUUID string)
 }
 
@@ -196,6 +206,9 @@ type AccountsService struct {
 	now     func() time.Time
 	// pollEvery is the lease waiter's re-read interval (tests shorten it).
 	pollEvery time.Duration
+	// sealRetryEvery spaces the re-seals of a rotated set the vault refused
+	// (tests shorten it).
+	sealRetryEvery time.Duration
 
 	flights singleflight.Group
 
@@ -211,9 +224,13 @@ type AccountsService struct {
 	audit   iface.AuditSink
 }
 
+// planEntry is one account's catalog as read with the token set stored at
+// savedAt: a reader holding another set (rotated here or on another
+// replica) never uses it.
 type planEntry struct {
-	slugs []string
-	at    time.Time
+	slugs   []string
+	at      time.Time
+	savedAt time.Time
 }
 
 type invalidClientEntry struct {
@@ -233,7 +250,7 @@ func NewAccountsService(d AccountsDeps) *AccountsService {
 	return &AccountsService{
 		repo: d.Repo, host: d.Host, oidc: d.OIDC, plans: d.Plans, state: d.State, vault: d.Vault,
 		limiter: d.Limiter, redis: d.Redis, cfg: cfg, logger: logger, now: time.Now,
-		pollEvery: 200 * time.Millisecond, planCache: map[string]planEntry{}, invalidClient: map[string]invalidClientEntry{},
+		pollEvery: 200 * time.Millisecond, sealRetryEvery: accountSealRetryDelay, planCache: map[string]planEntry{}, invalidClient: map[string]invalidClientEntry{},
 	}
 }
 
@@ -792,9 +809,13 @@ func (s *AccountsService) Select(ctx context.Context, id string) error {
 	return nil
 }
 
-// Unlink revokes the registration's refresh token best-effort, then deletes
-// it locally even if the revocation failed. force (admin) reaches any user's
-// registration in the org; otherwise only the caller's own.
+// Unlink deletes the registration, then revokes the refresh token of the
+// document the delete removed, best-effort (the row is gone even if the
+// revocation failed). Revoking what the delete returned, not an earlier
+// read, covers a refresh or reauth that stored a newer set in between; one
+// that stores after the delete finds no row and revokes its own token.
+// force (admin) reaches any user's registration in the org; otherwise only
+// the caller's own.
 func (s *AccountsService) Unlink(ctx context.Context, id string, force bool) error {
 	var (
 		acc *models.UserAccount
@@ -807,10 +828,11 @@ func (s *AccountsService) Unlink(ctx context.Context, id string, force bool) err
 	} else if acc, err = s.ownAccount(ctx, id); err != nil {
 		return err
 	}
-	s.RevokeRegistration(ctx, *acc)
-	if err := s.repo.Delete(ctx, acc.UUID); err != nil {
+	deleted, err := s.repo.Delete(ctx, acc.UUID)
+	if err != nil {
 		return mapRepoErr(err)
 	}
+	s.RevokeRegistration(ctx, *deleted)
 	s.dropPlanCache(acc.UUID)
 	s.emit(ctx, "", "llm.account.unlinked", acc.UUID, map[string]any{"force": force, "userUuid": acc.UserUUID})
 	return nil
@@ -1038,9 +1060,9 @@ func (s *AccountsService) refreshFlight(ctx context.Context, accountUUID string,
 		}
 		return nil, err // transient: credentials kept
 	}
-	set, err := s.sealRefreshed(ctx, acc, tok)
+	set, err := s.sealRefreshedRetry(ctx, acc, tok)
 	if err != nil {
-		return nil, fmt.Errorf("%w: seal refreshed tokens: %w", iface.ErrLLMProviderUnavailable, err)
+		return s.unsealable(ctx, acc, rt, tok, err)
 	}
 	if err := s.repo.ReplaceTokens(ctx, acc.UUID, acc.SavedAt, set); err != nil {
 		if errors.Is(err, repository.ErrStaleTokenSet) {
@@ -1051,8 +1073,8 @@ func (s *AccountsService) refreshFlight(ctx context.Context, accountUUID string,
 				return cred, nil
 			}
 		} else if errors.Is(err, repository.ErrNotFound) {
-			// The row is gone: an unlink or an erasure raced this refresh and
-			// revoked only the token it read. The rotated one must not
+			// The row is gone: an unlink or an erasure deleted it before this
+			// store and revoked the token it held. The rotated one must not
 			// outlive it. (Any other store failure leaves the row, and an
 			// unacknowledged write may even have landed: revoking there could
 			// kill the stored set, so it is left alone.)
@@ -1165,6 +1187,42 @@ func (s *AccountsService) terminal(ctx context.Context, acc *models.UserAccount)
 	return nil, iface.ErrLLMUserAccountReauth
 }
 
+// sealRefreshedRetry seals the set the provider returned, retrying the
+// seal of that same set (a KMS blip) up to accountStoreRetry times: the
+// refresh is never repeated, since the stored refresh token is spent.
+func (s *AccountsService) sealRefreshedRetry(ctx context.Context, acc *models.UserAccount, tok *TokenResponse) (models.AccountTokenSet, error) {
+	var (
+		set models.AccountTokenSet
+		err error
+	)
+	for i := 0; i < accountStoreRetry; i++ {
+		if i > 0 {
+			if serr := sleepCtx(ctx, s.sealRetryEvery); serr != nil {
+				return set, err
+			}
+		}
+		if set, err = s.sealRefreshed(ctx, acc, tok); err == nil {
+			return set, nil
+		}
+	}
+	return set, err
+}
+
+// unsealable handles a rotated set that cannot be sealed. If the provider
+// rotated the refresh token, the stored one is spent: the new one is
+// revoked (it cannot be kept) and the registration is flagged needs_reauth
+// through the savedAt-fenced terminal path, so the next call does not
+// present the spent token. A response that kept the refresh token loses
+// nothing: the stored set stays as it is and the call is unavailable.
+func (s *AccountsService) unsealable(ctx context.Context, acc *models.UserAccount, presented string, tok *TokenResponse, err error) (*AccountCredential, error) {
+	if tok.RefreshToken == "" || tok.RefreshToken == presented {
+		return nil, fmt.Errorf("%w: seal refreshed tokens: %w", iface.ErrLLMProviderUnavailable, err)
+	}
+	s.logger.WarnContext(ctx, "llm siwc: rotated tokens cannot be sealed; revoking them, account needs reauth", slog.String("account", acc.UUID))
+	s.revokeQuiet(ctx, acc.ClientID, tok.RefreshToken)
+	return s.terminal(ctx, acc)
+}
+
 // sealRefreshed builds the rotated set: an omitted refresh_token keeps the
 // stored one (and its expiry), an omitted scope keeps the stored scopes, an
 // omitted id_token keeps the stored one. A refreshed ID token is stored as
@@ -1260,38 +1318,39 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 // --- plan catalog ------------------------------------------------------------
 
 // PlanModels lists the slugs the credential's ChatGPT account may use,
-// cached five minutes per account (never shared between accounts) and
-// dropped on select, refresh, reauth and unlink. A 401 (invalid user) gets
-// one forced refresh and one retry.
-func (s *AccountsService) PlanModels(ctx context.Context, cred *AccountCredential) ([]string, error) {
+// cached five minutes per account and token set (never shared between
+// accounts; an entry read with another set's savedAt is a miss, so a
+// rotation stored on another replica is honored too) and dropped on
+// select, refresh, reauth and unlink. A 401 (invalid user) gets one forced
+// refresh and one retry; the refreshed credential is returned so the caller
+// does not present the rejected token again.
+func (s *AccountsService) PlanModels(ctx context.Context, cred *AccountCredential) ([]string, *AccountCredential, error) {
 	if cred == nil || cred.Account == nil {
-		return nil, iface.ErrLLMUserAccountRequired
+		return nil, nil, iface.ErrLLMUserAccountRequired
 	}
-	id := cred.Account.UUID
-	if slugs, ok := s.cachedPlan(id); ok {
-		return slugs, nil
+	if slugs, ok := s.cachedPlan(cred.Account.UUID, cred.Account.SavedAt); ok {
+		return slugs, cred, nil
 	}
 	if s.plans == nil {
-		return nil, fmt.Errorf("%w: no plan catalog", iface.ErrLLMProviderUnavailable)
+		return nil, nil, fmt.Errorf("%w: no plan catalog", iface.ErrLLMProviderUnavailable)
 	}
 	slugs, err := s.plans.ListPlanModels(ctx, cred.AccessToken)
 	if errors.Is(err, ErrSIWCInvalidUser) {
 		next, rerr := s.ForceRefresh(ctx, cred)
 		if rerr != nil {
-			return nil, rerr
+			return nil, nil, rerr
 		}
-		slugs, err = s.plans.ListPlanModels(ctx, next.AccessToken)
+		cred = next
+		slugs, err = s.plans.ListPlanModels(ctx, cred.AccessToken)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	s.planMu.Lock()
-	s.planCache[id] = planEntry{slugs: append([]string(nil), slugs...), at: s.now()}
-	s.planMu.Unlock()
-	return slugs, nil
+	s.storePlan(cred.Account.UUID, cred.Account.SavedAt, slugs)
+	return slugs, cred, nil
 }
 
-func (s *AccountsService) cachedPlan(id string) ([]string, bool) {
+func (s *AccountsService) cachedPlan(id string, savedAt time.Time) ([]string, bool) {
 	s.planMu.Lock()
 	defer s.planMu.Unlock()
 	e, ok := s.planCache[id]
@@ -1299,7 +1358,22 @@ func (s *AccountsService) cachedPlan(id string) ([]string, bool) {
 		delete(s.planCache, id)
 		return nil, false
 	}
+	if !e.savedAt.Equal(savedAt) {
+		return nil, false
+	}
 	return append([]string(nil), e.slugs...), true
+}
+
+// storePlan caches a catalog read with the set stored at savedAt, unless
+// an entry of a newer set is already there: a read that was in flight
+// across a rotation (or an invalidation) never replaces a newer catalog.
+func (s *AccountsService) storePlan(id string, savedAt time.Time, slugs []string) {
+	s.planMu.Lock()
+	defer s.planMu.Unlock()
+	if e, ok := s.planCache[id]; ok && e.savedAt.After(savedAt) && s.now().Sub(e.at) < accountPlanCacheTTL {
+		return
+	}
+	s.planCache[id] = planEntry{slugs: append([]string(nil), slugs...), at: s.now(), savedAt: savedAt}
 }
 
 func (s *AccountsService) dropPlanCache(id string) {

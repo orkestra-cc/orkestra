@@ -56,7 +56,9 @@ func (r userAccountResolver) fromAccount(ctx context.Context, m models.Model, cr
 	if m.Provider != models.ProviderOpenAI {
 		return providers.Credential{}, "", fmt.Errorf("%w: %w", iface.ErrLLMProviderUnavailable, ErrProviderMismatch)
 	}
-	slugs, err := r.accounts.PlanModels(ctx, cred)
+	// PlanModels may have refreshed a token the catalog rejected: call with
+	// the credential it hands back, never the rejected one.
+	slugs, cred, err := r.accounts.PlanModels(ctx, cred)
 	if err != nil {
 		return providers.Credential{}, "", err
 	}
@@ -80,7 +82,8 @@ func planCatalogFor(ctx context.Context, accounts AccountCredentialSource, userU
 	if err != nil {
 		return nil, err
 	}
-	return accounts.PlanModels(ctx, cred)
+	slugs, _, err := accounts.PlanModels(ctx, cred)
+	return slugs, err
 }
 
 // accountClassified reports whether err is one of the linked-account
