@@ -20,6 +20,9 @@ type Provider interface {
 	Name() string
 	Capabilities() iface.LLMCapabilities
 	Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (*ChatOutcome, error)
+	// Embed may return a non-nil outcome together with an error: its
+	// Usage is what the provider already billed (completed batches) and
+	// the router charges it; its Vectors are ignored.
 	Embed(ctx context.Context, call EmbedCall) (*EmbedOutcome, error)
 	ListModels(ctx context.Context) ([]ModelDescriptor, error)
 	Health(ctx context.Context) error

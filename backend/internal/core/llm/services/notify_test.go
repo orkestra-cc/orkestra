@@ -55,7 +55,20 @@ func (b userBook) GetUserByID(_ context.Context, id string) (*iface.User, error)
 	if u, ok := b[id]; ok {
 		return u, nil
 	}
-	return nil, errors.New("user not found")
+	return nil, iface.ErrUserNotFound
+}
+
+// flakyUsers fails the lookup of the listed users with a transient error.
+type flakyUsers struct {
+	userBook
+	down map[string]bool
+}
+
+func (f flakyUsers) GetUserByID(ctx context.Context, id string) (*iface.User, error) {
+	if f.down[id] {
+		return nil, errors.New("user store: connection reset")
+	}
+	return f.userBook.GetUserByID(ctx, id)
 }
 
 type oneBudget struct{ b *models.Budget }
@@ -338,5 +351,34 @@ func TestBudgetNotifier_SlowRecipientDoesNotFailTheOthers(t *testing.T) {
 	sort.Strings(got)
 	if strings.Join(got, ",") != "extra-1,owner-1,owner-2" {
 		t.Fatalf("recorded = %v", got)
+	}
+}
+
+// A transient profile lookup failure is not a deleted user: the event
+// fails so the outbox retries that recipient, while the others are
+// delivered and recorded once.
+func TestBudgetNotifier_LookupFailureIsRetried(t *testing.T) {
+	sender := newReplaySender()
+	n, _ := notifierFixture(&captureSender{})
+	n.sender = sender
+	book := n.users.(userBook)
+	n.users = flakyUsers{userBook: book, down: map[string]bool{"admin-1": true}}
+	log := n.deliveries.(*memDeliveries)
+	ctx := ctxWithTenant(context.Background(), "t1")
+
+	ev := outboxEvent(models.ThresholdWarn)
+	if err := n.SendBudgetEvent(ctx, ev); err == nil {
+		t.Fatal("a failed lookup must surface for the retry")
+	}
+	if got := strings.Join(sender.sent(), ","); got != "extra-1,owner-1,owner-2" {
+		t.Fatalf("first pass delivered %s", got)
+	}
+	n.users = book
+	ev.Attempts, ev.DeliveredTo = 1, log.of(ev.UUID)
+	if err := n.SendBudgetEvent(ctx, ev); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if got := strings.Join(sender.sent(), ","); got != "admin-1,extra-1,owner-1,owner-2" {
+		t.Fatalf("after retry delivered %s", got)
 	}
 }

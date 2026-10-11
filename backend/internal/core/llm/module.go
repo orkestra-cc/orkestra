@@ -41,9 +41,12 @@ const stepUpMaxAge = 5 * time.Minute
 const (
 	defaultRequestTimeout = 60 * time.Second
 	defaultRetentionDays  = 90
-	maxRetentionDays      = 3650
-	defaultWarnPct        = 80
-	defaultReserveOutput  = 4096
+	// minRetentionDays keeps every row of the current UTC month: the self
+	// usage route sums the month from these rows, not from the rollup.
+	minRetentionDays     = 31
+	maxRetentionDays     = 3650
+	defaultWarnPct       = 80
+	defaultReserveOutput = 4096
 	// reservationSlack is added to 2 × request_timeout: a call may run two
 	// full attempts (a fallback) plus its finalization before the
 	// reconciler may claim its reservation.
@@ -173,14 +176,14 @@ func (m *Module) ConfigGroups() []module.ConfigGroup {
 }
 
 func (m *Module) ConfigSchema() []module.ConfigField {
-	one, maxReserve, maxDays, zero, hundred := 1, models.MaxOutputTokens, 3650, 0, 100
+	one, minDays, maxReserve, maxDays, zero, hundred := 1, minRetentionDays, models.MaxOutputTokens, 3650, 0, 100
 	return []module.ConfigField{
 		{Key: "allow_hosted", Label: "Allow hosted providers", Group: "providers", Type: module.FieldBool, Default: "false", EnvVar: "LLM_ALLOW_HOSTED",
 			Description: "Explicit privacy opt-in: prompts and outputs leave this installation (OpenAI, Anthropic, Gemini, OpenAI-compatible). Without it only ollama and mock are selectable. Document the data flow (RoPA, processor, transfer basis) before enabling."},
 		{Key: "request_timeout", Label: "Request timeout", Group: "limits", Type: module.FieldDuration, Default: "60s", EnvVar: "LLM_REQUEST_TIMEOUT",
 			Description: "Deadline per provider call. A consumer may only lower it."},
-		{Key: "usage_retention_days", Label: "Usage retention (days)", Group: "limits", Type: module.FieldInt, Default: "90", EnvVar: "LLM_USAGE_RETENTION_DAYS", Min: &one, Max: &maxDays,
-			Description: "Per-call usage rows older than this are purged daily. Monthly rollups are kept 24 months."},
+		{Key: "usage_retention_days", Label: "Usage retention (days)", Group: "limits", Type: module.FieldInt, Default: "90", EnvVar: "LLM_USAGE_RETENTION_DAYS", Min: &minDays, Max: &maxDays,
+			Description: "Per-call usage rows older than this are purged daily (at least 31, so the current month stays complete). Monthly rollups are kept 24 months."},
 		{Key: "budget_warn_pct", Label: "Budget warning threshold (%)", Group: "limits", Type: module.FieldInt, Default: "80", EnvVar: "LLM_BUDGET_WARN_PCT", Min: &zero, Max: &hundred,
 			Description: "Default warning threshold for new budgets."},
 		{Key: "budget_reserve_output_tokens", Label: "Reserved output tokens", Group: "limits", Type: module.FieldInt, Default: "4096", EnvVar: "LLM_BUDGET_RESERVE_OUTPUT_TOKENS", Min: &one, Max: &maxReserve,
@@ -362,7 +365,7 @@ func clampSettings(s moduleSettings) moduleSettings {
 	if s.requestTimeout <= 0 {
 		s.requestTimeout = defaultRequestTimeout
 	}
-	s.retentionDays = min(max(s.retentionDays, 1), maxRetentionDays)
+	s.retentionDays = min(max(s.retentionDays, minRetentionDays), maxRetentionDays)
 	s.warnPct = min(max(s.warnPct, 0), 100)
 	s.reserveOutput = min(max(s.reserveOutput, 1), models.MaxOutputTokens)
 	return s

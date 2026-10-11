@@ -22,43 +22,43 @@ func TestBreaker_OpensAfterThresholdAndWrapsCause(t *testing.T) {
 	b, now := newClockBreaker(3, 30*time.Second)
 	const key = "openai|https://api.openai.com|gpt|c1"
 	for i := 0; i < 2; i++ {
-		b.Record(key, iface.ErrLLMQuotaExhausted)
-		if err := b.Allow(key); err != nil {
+		b.Record(key, 0, iface.ErrLLMQuotaExhausted)
+		if _, err := b.Allow(key); err != nil {
 			t.Fatalf("open after %d failures: %v", i+1, err)
 		}
 	}
-	b.Record(key, iface.ErrLLMQuotaExhausted)
-	err := b.Allow(key)
+	b.Record(key, 0, iface.ErrLLMQuotaExhausted)
+	_, err := b.Allow(key)
 	if !errors.Is(err, iface.ErrLLMProviderUnavailable) || !errors.Is(err, iface.ErrLLMQuotaExhausted) {
 		t.Fatalf("open circuit err = %v, want both sentinels", err)
 	}
 	// Distinct keys are independent.
-	if err := b.Allow("other"); err != nil {
+	if _, err := b.Allow("other"); err != nil {
 		t.Fatalf("other key: %v", err)
 	}
 	*now = now.Add(30 * time.Second)
-	if err := b.Allow(key); err != nil {
+	if _, err := b.Allow(key); err != nil {
 		t.Fatalf("after cooldown: %v", err)
 	}
 	// Half-open: one probe at a time.
-	if err := b.Allow(key); !errors.Is(err, iface.ErrLLMProviderUnavailable) {
+	if _, err := b.Allow(key); !errors.Is(err, iface.ErrLLMProviderUnavailable) {
 		t.Fatalf("second concurrent probe allowed: %v", err)
 	}
 	// The first failure after the cooldown re-opens at once.
-	b.Record(key, iface.ErrLLMProviderUnavailable)
-	if err := b.Allow(key); !errors.Is(err, iface.ErrLLMProviderUnavailable) {
+	b.Record(key, 0, iface.ErrLLMProviderUnavailable)
+	if _, err := b.Allow(key); !errors.Is(err, iface.ErrLLMProviderUnavailable) {
 		t.Fatalf("half-open failure did not re-open: %v", err)
 	}
 }
 
 func TestBreaker_SuccessResets(t *testing.T) {
 	b, _ := newClockBreaker(3, 30*time.Second)
-	b.Record("k", iface.ErrLLMProviderUnavailable)
-	b.Record("k", iface.ErrLLMProviderUnavailable)
-	b.Record("k", nil)
-	b.Record("k", iface.ErrLLMProviderUnavailable)
-	b.Record("k", iface.ErrLLMProviderUnavailable)
-	if err := b.Allow("k"); err != nil {
+	b.Record("k", 0, iface.ErrLLMProviderUnavailable)
+	b.Record("k", 0, iface.ErrLLMProviderUnavailable)
+	b.Record("k", 0, nil)
+	b.Record("k", 0, iface.ErrLLMProviderUnavailable)
+	b.Record("k", 0, iface.ErrLLMProviderUnavailable)
+	if _, err := b.Allow("k"); err != nil {
 		t.Fatalf("success did not reset the count: %v", err)
 	}
 }
@@ -81,8 +81,8 @@ func TestBreaker_CountsOnlyProviderFaults(t *testing.T) {
 	}
 	for _, e := range notFaults {
 		b, _ := newClockBreaker(1, time.Minute)
-		b.Record("k", e)
-		if err := b.Allow("k"); err != nil {
+		b.Record("k", 0, e)
+		if _, err := b.Allow("k"); err != nil {
 			t.Errorf("%v opened the circuit: %v", e, err)
 		}
 	}
@@ -95,8 +95,8 @@ func TestBreaker_CountsOnlyProviderFaults(t *testing.T) {
 	}
 	for _, e := range faults {
 		b, _ := newClockBreaker(1, time.Minute)
-		b.Record("k", e)
-		if err := b.Allow("k"); err == nil {
+		b.Record("k", 0, e)
+		if _, err := b.Allow("k"); err == nil {
 			t.Errorf("%v did not count as a provider fault", e)
 		}
 	}
@@ -104,27 +104,58 @@ func TestBreaker_CountsOnlyProviderFaults(t *testing.T) {
 
 func TestBreaker_ProbeReleasedOrExpires(t *testing.T) {
 	b, now := newClockBreaker(1, 10*time.Second)
-	b.Record("k", iface.ErrLLMProviderUnavailable)
+	b.Record("k", 0, iface.ErrLLMProviderUnavailable)
 	*now = now.Add(10 * time.Second)
-	if err := b.Allow("k"); err != nil {
-		t.Fatal(err)
+	ticket, err := b.Allow("k")
+	if err != nil || ticket == 0 {
+		t.Fatalf("probe ticket=%d err=%v", ticket, err)
 	}
 	// A probe that ended without a verdict (caller hang-up) frees the slot.
-	b.Release("k")
-	if err := b.Allow("k"); err != nil {
+	b.Release("k", ticket)
+	if _, err := b.Allow("k"); err != nil {
 		t.Fatalf("released probe slot still held: %v", err)
 	}
 	// A probe that never reports back stops blocking after a cooldown.
-	if err := b.Allow("k"); err == nil {
+	if _, err := b.Allow("k"); err == nil {
 		t.Fatal("second probe allowed")
 	}
 	*now = now.Add(10 * time.Second)
-	if err := b.Allow("k"); err != nil {
+	if _, err := b.Allow("k"); err != nil {
 		t.Fatalf("stale probe still blocks: %v", err)
 	}
-	b.Record("k", nil)
-	if err := b.Allow("k"); err != nil {
+	b.Record("k", 0, nil)
+	if _, err := b.Allow("k"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A call admitted while the circuit was still closed carries no ticket:
+// its late Release or non-fault Record must not free a newer probe's slot.
+func TestBreaker_OlderCallCannotFreeTheProbe(t *testing.T) {
+	b, now := newClockBreaker(1, 10*time.Second)
+	old, err := b.Allow("k")
+	if err != nil || old != 0 {
+		t.Fatalf("closed circuit ticket=%d err=%v", old, err)
+	}
+	b.Record("k", 0, iface.ErrLLMProviderUnavailable) // another call opens it
+	*now = now.Add(10 * time.Second)
+	probe, err := b.Allow("k")
+	if err != nil || probe == 0 {
+		t.Fatalf("probe ticket=%d err=%v", probe, err)
+	}
+	b.Release("k", old)
+	b.Record("k", old, context.Canceled)
+	if _, err := b.Allow("k"); !errors.Is(err, iface.ErrLLMProviderUnavailable) {
+		t.Fatalf("an older call freed the live probe: %v", err)
+	}
+	// A stale ticket from an earlier probe does not free the new one either.
+	b.Release("k", probe+1)
+	if _, err := b.Allow("k"); err == nil {
+		t.Fatal("a foreign ticket freed the live probe")
+	}
+	b.Release("k", probe)
+	if _, err := b.Allow("k"); err != nil {
+		t.Fatalf("the probe's own release did not free the slot: %v", err)
 	}
 }
 
@@ -132,16 +163,16 @@ func TestBreaker_ProbeReleasedOrExpires(t *testing.T) {
 // outage must stay fallbackable, and a rejected credential keeps its code.
 func TestBreaker_OpenCircuitErrorKeepsOnlyTheCauseClass(t *testing.T) {
 	b, _ := newClockBreaker(1, time.Minute)
-	b.Record("t", fmt.Errorf("%w: %w", iface.ErrLLMProviderUnavailable, context.DeadlineExceeded))
-	if err := b.Allow("t"); !errors.Is(err, iface.ErrLLMProviderUnavailable) || errors.Is(err, context.DeadlineExceeded) || !fallbackable(err) {
+	b.Record("t", 0, fmt.Errorf("%w: %w", iface.ErrLLMProviderUnavailable, context.DeadlineExceeded))
+	if _, err := b.Allow("t"); !errors.Is(err, iface.ErrLLMProviderUnavailable) || errors.Is(err, context.DeadlineExceeded) || !fallbackable(err) {
 		t.Fatalf("timeout-opened circuit err = %v", err)
 	}
-	b.Record("q", iface.ErrLLMQuotaExhausted)
-	if err := b.Allow("q"); !errors.Is(err, iface.ErrLLMQuotaExhausted) || fallbackable(err) {
+	b.Record("q", 0, iface.ErrLLMQuotaExhausted)
+	if _, err := b.Allow("q"); !errors.Is(err, iface.ErrLLMQuotaExhausted) || fallbackable(err) {
 		t.Fatalf("quota-opened circuit err = %v", err)
 	}
-	b.Record("u", fmt.Errorf("%w: %w", providers.ErrUnauthorized, iface.ErrLLMProviderUnavailable))
-	if err := b.Allow("u"); !errors.Is(err, providers.ErrUnauthorized) || !fallbackable(err) {
+	b.Record("u", 0, fmt.Errorf("%w: %w", providers.ErrUnauthorized, iface.ErrLLMProviderUnavailable))
+	if _, err := b.Allow("u"); !errors.Is(err, providers.ErrUnauthorized) || !fallbackable(err) {
 		t.Fatalf("unauthorized-opened circuit err = %v", err)
 	}
 }

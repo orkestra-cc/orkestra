@@ -499,11 +499,13 @@ func TestModule_SettingsAreClamped(t *testing.T) {
 		want moduleSettings
 	}{
 		{moduleSettings{requestTimeout: 0, retentionDays: 0, warnPct: -5, reserveOutput: -1},
-			moduleSettings{requestTimeout: defaultRequestTimeout, retentionDays: 1, warnPct: 0, reserveOutput: 1}},
+			moduleSettings{requestTimeout: defaultRequestTimeout, retentionDays: minRetentionDays, warnPct: 0, reserveOutput: 1}},
+		{moduleSettings{requestTimeout: time.Second, retentionDays: 30, warnPct: 1, reserveOutput: 1},
+			moduleSettings{requestTimeout: time.Second, retentionDays: minRetentionDays, warnPct: 1, reserveOutput: 1}},
 		{moduleSettings{requestTimeout: -time.Second, retentionDays: 99999, warnPct: 500, reserveOutput: 1 << 30},
 			moduleSettings{requestTimeout: defaultRequestTimeout, retentionDays: maxRetentionDays, warnPct: 100, reserveOutput: models.MaxOutputTokens}},
-		{moduleSettings{requestTimeout: 2 * time.Second, retentionDays: 30, warnPct: 75, reserveOutput: 512},
-			moduleSettings{requestTimeout: 2 * time.Second, retentionDays: 30, warnPct: 75, reserveOutput: 512}},
+		{moduleSettings{requestTimeout: 2 * time.Second, retentionDays: 45, warnPct: 75, reserveOutput: 512},
+			moduleSettings{requestTimeout: 2 * time.Second, retentionDays: 45, warnPct: 75, reserveOutput: 512}},
 	}
 	for _, tc := range cases {
 		got := clampSettings(tc.in)

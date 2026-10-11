@@ -120,7 +120,8 @@ func localeOf(u *iface.User) string {
 // ev.DeliveredTo. It returns an error — so the outbox retries the rest —
 // when the recipients cannot be resolved, a send failed or timed out, or
 // the event's deadline ended before every recipient was tried;
-// unresolvable users are skipped with a WARN.
+// deleted users and users without an address are skipped with a WARN;
+// a failed lookup counts as a failed delivery, so the outbox retries it.
 func (n *BudgetNotifier) SendBudgetEvent(ctx context.Context, ev models.OutboxEvent) error {
 	if n.sender == nil || n.users == nil {
 		n.logger.WarnContext(ctx, "llm: no notification sender or user directory; budget alert dropped", slog.String("event", ev.UUID), slog.String("threshold", ev.Threshold))
@@ -182,6 +183,13 @@ func (n *BudgetNotifier) SendBudgetEvent(ctx context.Context, ev models.OutboxEv
 			return fmt.Errorf("llm: budget alert: deadline reached with %d of %d recipients left", len(recipients)-i, len(recipients))
 		}
 		u, err := n.users.GetUserByID(ctx, uid)
+		if err != nil && !errors.Is(err, iface.ErrUserNotFound) {
+			// A lookup that failed says nothing about the recipient: retry
+			// it with the event instead of dropping it as if deleted.
+			failed++
+			n.logger.WarnContext(ctx, "llm: budget alert recipient lookup failed", slog.String("event", ev.UUID), slog.String("user", uid), slog.String("error", err.Error()))
+			continue
+		}
 		if err != nil || u == nil || u.Email == "" {
 			n.logger.WarnContext(ctx, "llm: budget alert recipient not resolvable; skipped", slog.String("event", ev.UUID), slog.String("user", uid))
 			continue

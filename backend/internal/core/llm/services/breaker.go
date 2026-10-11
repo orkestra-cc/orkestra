@@ -18,6 +18,9 @@ import (
 // a fault on it re-opens the circuit at once, a success closes it, and a
 // probe that ends without a verdict (Release) frees the slot. A probe
 // that never reports back stops holding the slot after one cooldown.
+// Allow hands the probe a ticket; only that ticket frees or settles the
+// slot, so a call admitted before the circuit opened can never clear a
+// newer probe and let a second one through.
 //
 // Only provider faults count (ruling 5.2): unavailability, provider-side
 // timeouts, rejected credentials and exhausted quota. A caller hanging
@@ -31,6 +34,7 @@ type Breaker struct {
 
 	mu     sync.Mutex
 	states map[string]*breakerState
+	seq    uint64 // last probe ticket handed out
 }
 
 type breakerState struct {
@@ -38,6 +42,7 @@ type breakerState struct {
 	openUntil    time.Time
 	lastErr      error
 	probeStarted time.Time // zero = no probe in flight
+	probe        uint64    // the in-flight probe's ticket
 }
 
 func NewBreaker(threshold int, cooldown time.Duration) *Breaker {
@@ -47,25 +52,27 @@ func NewBreaker(threshold int, cooldown time.Duration) *Breaker {
 	return &Breaker{threshold: threshold, cooldown: cooldown, now: time.Now, states: map[string]*breakerState{}}
 }
 
-// Allow returns nil when a call on key may proceed (a nil from a
-// half-open circuit makes the caller the probe: it must Record or
-// Release), or an open-circuit error (see openErr).
-func (b *Breaker) Allow(key string) error {
+// Allow returns a nil error when a call on key may proceed, or an
+// open-circuit error (see openErr). The ticket is non-zero only for the
+// half-open probe; every call passes its ticket back to Record or
+// Release, and a zero ticket never touches the probe slot.
+func (b *Breaker) Allow(key string) (ticket uint64, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	s := b.states[key]
 	if s == nil || s.failures < b.threshold {
-		return nil
+		return 0, nil
 	}
 	now := b.now()
 	if now.Before(s.openUntil) {
-		return openErr(s.lastErr)
+		return 0, openErr(s.lastErr)
 	}
 	if !s.probeStarted.IsZero() && now.Before(s.probeStarted.Add(b.cooldown)) {
-		return openErr(s.lastErr) // another caller is probing
+		return 0, openErr(s.lastErr) // another caller is probing
 	}
-	s.probeStarted = now
-	return nil
+	b.seq++
+	s.probeStarted, s.probe = now, b.seq
+	return s.probe, nil
 }
 
 // openErr wraps iface.ErrLLMProviderUnavailable and keeps only the cause
@@ -85,21 +92,26 @@ func openErr(cause error) error {
 }
 
 // Release ends a call that produced no verdict on the provider (the
-// caller left, or its own deadline fired): it frees a half-open probe
-// slot without counting anything.
-func (b *Breaker) Release(key string) {
+// caller left, or its own deadline fired) without counting anything. It
+// frees the half-open probe slot only when ticket is that probe's.
+func (b *Breaker) Release(key string, ticket uint64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if s := b.states[key]; s != nil {
-		s.probeStarted = time.Time{}
+	b.freeProbe(key, ticket)
+}
+
+func (b *Breaker) freeProbe(key string, ticket uint64) {
+	if s := b.states[key]; s != nil && ticket != 0 && s.probe == ticket {
+		s.probeStarted, s.probe = time.Time{}, 0
 	}
 }
 
 // Record reports the outcome of a call on key: nil closes the circuit,
 // a provider fault counts towards opening it, anything else is ignored.
-func (b *Breaker) Record(key string, err error) {
+// ticket is the one Allow returned (see Release).
+func (b *Breaker) Record(key string, ticket uint64, err error) {
 	if err != nil && !providerFault(err) {
-		b.Release(key)
+		b.Release(key, ticket)
 		return
 	}
 	b.mu.Lock()
@@ -114,7 +126,7 @@ func (b *Breaker) Record(key string, err error) {
 		b.states[key] = s
 	}
 	s.failures++
-	s.probeStarted = time.Time{}
+	b.freeProbe(key, ticket)
 	if s.failures >= b.threshold {
 		s.openUntil = b.now().Add(b.cooldown)
 		s.lastErr = err

@@ -502,6 +502,28 @@ func TestRouter_EmbedOKAndFallback(t *testing.T) {
 	}
 }
 
+// Batches an adapter embedded before failing are charged on the failed
+// attempt, before the fallback, so they reach the ledger and the budget.
+func TestRouter_EmbedChargesCompletedBatchesOfAFailedAttempt(t *testing.T) {
+	env := newRouterEnv(t, nil, map[string]chatScript{"openai": ok("", 0, 0), "gemini": ok("", 0, 0)})
+	n := new(int)
+	env.calls["openai"] = n
+	env.r.registry.Register("openai", func(providers.Credential, *http.Client) (providers.Provider, error) {
+		return &scriptedProvider{name: "openai", caps: allCaps, calls: n, embed: func(context.Context) (*providers.EmbedOutcome, error) {
+			return &providers.EmbedOutcome{Vectors: [][]float32{{9}}, Usage: iface.LLMUsage{InputTokens: 40}}, iface.ErrLLMProviderUnavailable
+		}}, nil
+	})
+	req := iface.EmbedRequest{Caller: "test", Inputs: []string{"abc"}}
+	res, err := env.r.Embed(ctxFor("t1"), []models.Model{model("a", "openai", "c1"), model("b", "gemini", "c2")}, "u", req)
+	if err != nil || res.Model.UUID != "b" || len(res.Vectors) != 1 || res.Vectors[0][0] == 9 {
+		t.Fatalf("res = %+v, %v", res, err)
+	}
+	ev := singleLedger(t, env.store)
+	if len(ev.Attempts) != 2 || ev.Attempts[0].InputTokens != 40 || ev.InputTokens != 41 {
+		t.Fatalf("ledger = %+v, want the failed attempt charged 40 and 41 in total", ev)
+	}
+}
+
 func TestRouter_EmptyCandidates(t *testing.T) {
 	env := newRouterEnv(t, nil, nil)
 	if _, err := env.chat(nil, simpleReq, nil); !errors.Is(err, iface.ErrLLMNoEligibleModel) {
@@ -535,7 +557,7 @@ func TestRouter_CallerLoweredDeadlineNeverOpensTheCircuit(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	}
-	if err := env.r.breaker.Allow(keyA); err != nil || env.count("openai") != 4 {
+	if _, err := env.r.breaker.Allow(keyA); err != nil || env.count("openai") != 4 {
 		t.Fatalf("lowered deadlines opened the circuit: %v (calls %d)", err, env.count("openai"))
 	}
 	for _, ev := range env.store.ledger {
@@ -553,7 +575,7 @@ func TestRouter_ModuleTimeoutsOpenTheCircuitButFallBack(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		_, _ = env.chat([]models.Model{model("a", "openai", "c1")}, simpleReq, nil)
 	}
-	if err := env.r.breaker.Allow(keyA); !errors.Is(err, iface.ErrLLMProviderUnavailable) || errors.Is(err, context.DeadlineExceeded) {
+	if _, err := env.r.breaker.Allow(keyA); !errors.Is(err, iface.ErrLLMProviderUnavailable) || errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("open circuit err = %v (must be unavailable, not a final deadline)", err)
 	}
 	res, err := env.chat([]models.Model{model("a", "openai", "c1"), model("b", "anthropic", "c2")}, simpleReq, nil)
@@ -580,7 +602,7 @@ func TestRouter_CallerCanceledDuringCallIsNotRecorded(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	}
-	if err := env.r.breaker.Allow(keyA); err != nil || env.count("anthropic") != 0 {
+	if _, err := env.r.breaker.Allow(keyA); err != nil || env.count("anthropic") != 0 {
 		t.Fatalf("breaker err=%v fallback calls=%d", err, env.count("anthropic"))
 	}
 	for _, ev := range env.store.ledger {
@@ -600,7 +622,7 @@ func TestRouter_CallerOwnDeadlineIsLedgeredAsTimeout(t *testing.T) {
 	if ev := singleLedger(t, env.store); ev.ErrorCode != "timeout" {
 		t.Fatalf("ledger code = %q", ev.ErrorCode)
 	}
-	if err := env.r.breaker.Allow(keyA); err != nil {
+	if _, err := env.r.breaker.Allow(keyA); err != nil {
 		t.Fatal(err)
 	}
 }

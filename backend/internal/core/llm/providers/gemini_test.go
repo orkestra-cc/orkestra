@@ -563,6 +563,42 @@ func TestGemini_EmbedBatchesAndPreservesOrder(t *testing.T) {
 	}
 }
 
+// A failure on a later batch keeps the usage of the batches already
+// embedded (the provider billed them); a failure on the first has none.
+func TestGemini_EmbedFailedLaterBatchKeepsEarlierUsage(t *testing.T) {
+	batch := 0
+	p := newGem(t, func(w http.ResponseWriter, r *http.Request) {
+		batch++
+		if batch == 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":{"code":503,"status":"UNAVAILABLE","message":"x"}}`))
+			return
+		}
+		embs := make([]string, 100)
+		for i := range embs {
+			embs[i] = `{"values":[1,0.5]}`
+		}
+		_, _ = w.Write([]byte(`{"embeddings":[` + strings.Join(embs, ",") + `]}`))
+	})
+	inputs := make([]string, 150)
+	for i := range inputs {
+		inputs[i] = "abcdef" // 6 bytes = 2 estimated tokens each
+	}
+	out, err := p.Embed(context.Background(), EmbedCall{ModelID: "text-embed", Inputs: inputs})
+	if !errors.Is(err, iface.ErrLLMProviderUnavailable) {
+		t.Fatalf("err = %v", err)
+	}
+	if out == nil || out.Usage.InputTokens != 200 || len(out.Vectors) != 0 {
+		t.Fatalf("partial outcome = %+v, want 200 input tokens for the first 100 inputs and no vectors", out)
+	}
+
+	batch = 1 // the next call fails on its first batch
+	out, err = p.Embed(context.Background(), EmbedCall{ModelID: "text-embed", Inputs: inputs})
+	if err == nil || out != nil {
+		t.Fatalf("first-batch failure = %+v, %v; want no outcome", out, err)
+	}
+}
+
 func TestGemini_EmbedRejectsShortOrEmptyResponses(t *testing.T) {
 	body := ""
 	p := newGem(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) })

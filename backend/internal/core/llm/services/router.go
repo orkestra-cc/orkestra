@@ -238,7 +238,8 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 			continue
 		}
 		key := m.Provider + "|" + cred.BaseURL + "|" + m.ModelID + "|" + credUUID
-		if err := r.breaker.Allow(key); err != nil {
+		ticket, err := r.breaker.Allow(key)
+		if err != nil {
 			attempt.Outcome = attemptCircuitOpen
 			attempts, lastErr = append(attempts, attempt), err
 			if !fallbackable(err) { // a circuit opened by an exhausted quota stays final
@@ -248,14 +249,14 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 		}
 		prov, err := r.registry.Build(m.Provider, cred, r.clients(m.Provider))
 		if err != nil {
-			r.breaker.Release(key)
+			r.breaker.Release(key, ticket)
 			// %v: a constructor's invalid-config error is not the caller's
 			// malformed request.
 			attempts, lastErr = append(attempts, attempt), fmt.Errorf("%w: %s adapter: %v", iface.ErrLLMProviderUnavailable, m.Provider, err)
 			continue
 		}
 		if !spec.supports(m, prov) {
-			r.breaker.Release(key)
+			r.breaker.Release(key, ticket)
 			attempt.Outcome = attemptCapabilityMismatch
 			attempts, lastErr = append(attempts, attempt), fmt.Errorf("%w: model %s", iface.ErrLLMCapabilityMismatch, m.Name)
 			continue
@@ -270,9 +271,9 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 		// Ruling 5.2: hang-ups, sink aborts and deadlines the caller (or
 		// the reservation window) shortened say nothing about the provider.
 		if cr.callerErr != nil || callerGone || (cr.err != nil && lowered && deadlineHit) {
-			r.breaker.Release(key)
+			r.breaker.Release(key, ticket)
 		} else {
-			r.breaker.Record(key, cr.err)
+			r.breaker.Record(key, ticket, cr.err)
 		}
 
 		if cr.err == nil && cr.callerErr == nil {
@@ -487,6 +488,11 @@ func (r *Router) Embed(ctx context.Context, cands []models.Model, userUUID strin
 			switch {
 			case err != nil:
 				cr.err = err
+				if outcome != nil {
+					// Batches the provider completed before failing:
+					// charged on the failed attempt (see Provider.Embed).
+					cr.streamed.InputTokens = max(outcome.Usage.InputTokens, 0)
+				}
 			case outcome == nil || len(outcome.Vectors) != len(req.Inputs):
 				cr.err = fmt.Errorf("%w: adapter returned a vector count that does not match the inputs", iface.ErrLLMProviderUnavailable)
 			default:

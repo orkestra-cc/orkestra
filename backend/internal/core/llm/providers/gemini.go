@@ -629,6 +629,14 @@ func (g *Gemini) Embed(ctx context.Context, call EmbedCall) (*EmbedOutcome, erro
 	ctx = WithResponseCap(ctx, MaxEmbedResponseBytes)
 	out := &EmbedOutcome{Vectors: make([][]float32, 0, len(call.Inputs))}
 	for start := 0; start < len(call.Inputs); start += geminiEmbedBatchSize {
+		// A later batch failing does not undo the earlier ones: the
+		// provider billed them, so their usage rides back with the error.
+		fail := func(err error) (*EmbedOutcome, error) {
+			if start == 0 {
+				return nil, err
+			}
+			return &EmbedOutcome{Usage: ensureEmbedUsage(call.Inputs[:start], iface.LLMUsage{})}, err
+		}
 		end := min(start+geminiEmbedBatchSize, len(call.Inputs))
 		contents := make([]*genai.Content, 0, end-start)
 		for _, in := range call.Inputs[start:end] {
@@ -637,17 +645,17 @@ func (g *Gemini) Embed(ctx context.Context, call EmbedCall) (*EmbedOutcome, erro
 		cctx, httpErr := geminiCall(ctx)
 		res, err := g.client.Models.EmbedContent(cctx, call.ModelID, contents, nil)
 		if httpErr.Status != 0 {
-			return nil, Classify(*httpErr)
+			return fail(Classify(*httpErr))
 		}
 		if err != nil {
-			return nil, classifyGeminiSDKError(ctx, err)
+			return fail(classifyGeminiSDKError(ctx, err))
 		}
 		if res == nil || len(res.Embeddings) != len(contents) {
-			return nil, malformed("embeddings response")
+			return fail(malformed("embeddings response"))
 		}
 		for _, e := range res.Embeddings {
 			if e == nil || len(e.Values) == 0 {
-				return nil, malformed("embeddings response")
+				return fail(malformed("embeddings response"))
 			}
 			out.Vectors = append(out.Vectors, e.Values)
 		}
