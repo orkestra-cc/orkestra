@@ -83,7 +83,15 @@ func (l *RateLimiter) Allow(ctx context.Context, key string, limit int, window t
 }
 
 func (l *RateLimiter) incr(ctx context.Context, k string, ttl time.Duration) (int64, error) {
-	if sr, ok := l.redis.(scriptRunner); ok {
+	return incrCounter(ctx, l.redis, k, ttl)
+}
+
+// incrCounter is the shared atomic counter step: the incrWithTTL script when
+// the store can run one, otherwise INCR then EXPIRE with the counter dropped
+// if EXPIRE fails (never a counter without expiry). The rate limiter and the
+// SIWC one-shot state marker both use it.
+func incrCounter(ctx context.Context, rc module.RedisClient, k string, ttl time.Duration) (int64, error) {
+	if sr, ok := rc.(scriptRunner); ok {
 		v, err := sr.Eval(ctx, incrWithTTL, []string{k}, ttl.Milliseconds())
 		if err != nil {
 			return 0, err
@@ -94,15 +102,14 @@ func (l *RateLimiter) incr(ctx context.Context, k string, ttl time.Duration) (in
 		}
 		return n, nil
 	}
-	n, err := l.redis.Incr(ctx, k)
+	n, err := rc.Incr(ctx, k)
 	if err != nil {
 		return 0, err
 	}
 	if n == 1 {
-		if err := l.redis.Expire(ctx, k, ttl); err != nil {
-			// Never leave a counter without expiry: drop it and let the
-			// call through.
-			_ = l.redis.Del(ctx, k)
+		if err := rc.Expire(ctx, k, ttl); err != nil {
+			// Never leave a counter without expiry: drop it and report.
+			_ = rc.Del(ctx, k)
 			return 0, fmt.Errorf("set window expiry: %w", err)
 		}
 	}
