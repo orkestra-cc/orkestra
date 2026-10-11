@@ -25,6 +25,19 @@ type LLMGateway interface {
 	ListUsable(ctx context.Context) ([]LLMModelInfo, error)
 }
 
+// LLMAvailabilityProbe is implemented by the gateway registered under
+// module.ServiceLLMGateway, for checks that run with no user or org in
+// context, such as a consumer module's HealthCheck: assert it on the
+// resolved LLMGateway.
+type LLMAvailabilityProbe interface {
+	// HasLiveModel reports whether at least one org has a live model that
+	// routing would pick for purpose (falling back to "default" as Chat
+	// does) with every capability set in need. Per-user grants and linked
+	// accounts are not considered: true means the catalog can serve the
+	// purpose somewhere, not that every user can use it.
+	HasLiveModel(ctx context.Context, purpose string, need LLMCapabilities) (bool, error)
+}
+
 // LLMCredentialKind* name who pays for a call: the org's API key or the
 // linked ChatGPT account of the user in context.
 const (

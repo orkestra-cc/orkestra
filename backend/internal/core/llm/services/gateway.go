@@ -10,6 +10,7 @@ import (
 
 	"github.com/orkestra/backend/internal/core/llm/models"
 	"github.com/orkestra/backend/internal/core/llm/providers"
+	"github.com/orkestra/backend/internal/core/llm/repository"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/tenantrepo"
@@ -52,8 +53,22 @@ type Gateway struct {
 	// accounts (optional) is the linked-account source listing and Resolve
 	// intersect user_account models with (ruling 5.1).
 	accounts AccountCredentialSource
-	logger   *slog.Logger
+	// tenants (optional) lists the orgs HasLiveModel looks into.
+	tenants ActiveModelTenants
+	logger  *slog.Logger
 }
+
+// ActiveModelTenants lists the orgs with at least one active model
+// (repository.Models).
+type ActiveModelTenants interface {
+	TenantsWithActiveModels(ctx context.Context) ([]string, error)
+}
+
+var (
+	_ ActiveModelTenants         = (*repository.Models)(nil)
+	_ iface.LLMGateway           = (*Gateway)(nil)
+	_ iface.LLMAvailabilityProbe = (*Gateway)(nil)
+)
 
 func NewGateway(access *AccessResolver, catalog *CatalogService, registry *providers.Registry, vault *Vault, logger *slog.Logger) *Gateway {
 	if logger == nil {
@@ -74,6 +89,11 @@ func (g *Gateway) Router() *Router { return g.router }
 // called once by the module's Init. Without it user_account models are
 // never listed or resolved (no account can be usable).
 func (g *Gateway) SetAccounts(a AccountCredentialSource) { g.accounts = a }
+
+// SetActiveModelTenants wires the org listing of the availability probe;
+// called once by the module's Init. Without it HasLiveModel reports
+// ErrLLMNotConfigured.
+func (g *Gateway) SetActiveModelTenants(t ActiveModelTenants) { g.tenants = t }
 
 // SetKMSProvider forwards to the vault; SetAuditSink to the catalog. They are
 // the late-wiring seams compliance uses (iface.KMSProviderSetter,
@@ -266,6 +286,33 @@ func (g *Gateway) Resolve(ctx context.Context, purpose string) (*iface.LLMModelI
 	}
 	info := cands[0].Info()
 	return &info, nil
+}
+
+// HasLiveModel implements iface.LLMAvailabilityProbe. It runs with no user
+// or org in context: it looks into each org that has an active model, under
+// that org's own scope, and stops at the first that can serve purpose.
+func (g *Gateway) HasLiveModel(ctx context.Context, purpose string, need iface.LLMCapabilities) (bool, error) {
+	if purpose != "" && !keyRE.MatchString(purpose) {
+		return false, fmt.Errorf("%w: purpose", iface.ErrLLMInvalidRequest)
+	}
+	if g.tenants == nil {
+		return false, fmt.Errorf("%w: availability probe not wired", iface.ErrLLMNotConfigured)
+	}
+	tenants, err := g.tenants.TenantsWithActiveModels(ctx)
+	if err != nil {
+		return false, err
+	}
+	want := Need{Chat: need.Chat, Tools: need.Tools, StructuredOutput: need.StructuredOutput, Embeddings: need.Embeddings}
+	for _, tenantID := range tenants {
+		ok, err := g.access.HasLive(ctxWithTenant(ctx, tenantID), purpose, want)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ListUsable lists every model the acting user may use in the current org.

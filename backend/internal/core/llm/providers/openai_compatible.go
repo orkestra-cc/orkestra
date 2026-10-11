@@ -213,7 +213,7 @@ func (o *OpenAICompatible) Chat(ctx context.Context, call ChatCall, sink iface.C
 			}
 			id := acc.id
 			if id == "" {
-				id = fmt.Sprintf("call_%d", i)
+				id = syntheticCallID()
 			}
 			emitted := iface.ChatToolCall{ID: id, Name: acc.name, Arguments: args}
 			if err := sink(iface.ChatEvent{ToolCall: &emitted}); err != nil {

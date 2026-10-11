@@ -13,7 +13,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -538,7 +537,7 @@ func (g *Gemini) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (
 					}
 					id := fc.ID
 					if id == "" {
-						id = "call_" + strconv.Itoa(emitted)
+						id = syntheticCallID()
 					}
 					emitted++
 					outBytes += len(fc.Name) + len(args)

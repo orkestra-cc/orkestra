@@ -397,9 +397,9 @@ func (r *Monthly) Apply(ctx context.Context, period, credentialKind string, rele
 	return err
 }
 
-var thresholdFields = map[string]string{models.ThresholdWarn: "warnedAt", models.ThresholdExhausted: "exhaustedAt"}
+var thresholdFields = map[string]string{models.ThresholdWarn: "warnedAt", models.ThresholdExhausted: "exhaustedAt", models.ThresholdOversized: "oversizedAt"}
 
-// MarkThreshold sets warnedAt or exhaustedAt on the rollup if unset and
+// MarkThreshold sets warnedAt, exhaustedAt or oversizedAt on the rollup if unset and
 // reports whether this call set it (true exactly once per period).
 func (r *Monthly) MarkThreshold(ctx context.Context, period, which string) (bool, error) {
 	field, ok := thresholdFields[which]

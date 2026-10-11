@@ -89,7 +89,7 @@ func TestGemini_StreamTextFunctionCallUsage(t *testing.T) {
 	if got := strings.Join(order, ","); got != "text,text,tool,done" {
 		t.Fatalf("event order = %s", got)
 	}
-	if err != nil || text.String() != "Hello" || len(tcs) != 1 || tcs[0].ID != "call_0" || tcs[0].Name != "lookup" || tcs[0].Arguments != `{"q":"x"}` {
+	if err != nil || text.String() != "Hello" || len(tcs) != 1 || !isSyntheticCallID(tcs[0].ID) || tcs[0].Name != "lookup" || tcs[0].Arguments != `{"q":"x"}` {
 		t.Fatalf("text=%q tcs=%+v err=%v", text.String(), tcs, err)
 	}
 	if outcome.Usage.InputTokens != 8 || outcome.Usage.OutputTokens != 3 || outcome.FinishReason != "tool_calls" || done == nil || *done != outcome.Usage {
@@ -228,7 +228,7 @@ func TestGemini_ThoughtPartsAreNotEmittedAndCallIDsPassThrough(t *testing.T) {
 	if err != nil || text.String() != "answer" || len(tcs) != 2 {
 		t.Fatalf("text=%q tcs=%+v err=%v", text.String(), tcs, err)
 	}
-	if tcs[0] != (iface.ChatToolCall{ID: "fc-9", Name: "noargs", Arguments: "{}"}) || tcs[1] != (iface.ChatToolCall{ID: "call_1", Name: "second", Arguments: "{}"}) {
+	if tcs[0] != (iface.ChatToolCall{ID: "fc-9", Name: "noargs", Arguments: "{}"}) || !isSyntheticCallID(tcs[1].ID) || tcs[1] != (iface.ChatToolCall{ID: tcs[1].ID, Name: "second", Arguments: "{}"}) {
 		t.Errorf("tool calls = %+v", tcs)
 	}
 }

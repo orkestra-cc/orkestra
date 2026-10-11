@@ -53,6 +53,23 @@ func (r *Models) ListActive(ctx context.Context) ([]models.Model, error) {
 	return r.find(ctx, bson.M{"status": models.ModelStatusActive})
 }
 
+// TenantsWithActiveModels lists the orgs with at least one active model,
+// for the gateway's availability probe (Gateway.HasLiveModel).
+func (r *Models) TenantsWithActiveModels(ctx context.Context) ([]string, error) {
+	//tenantscope:allow system: availability probe for module health checks, which run with no org in context; returns only the tenant ids that have an active model, each then resolved under its own tenant scope
+	vals, err := r.coll.Distinct(ctx, "tenantId", bson.M{"status": models.ModelStatusActive})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(vals))
+	for _, v := range vals {
+		if id, ok := v.(string); ok && id != "" {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
 func (r *Models) ListActiveByCredential(ctx context.Context, credentialUUID string) ([]models.Model, error) {
 	return r.find(ctx, bson.M{"status": models.ModelStatusActive, "credentialRef.credentialUuid": credentialUUID})
 }

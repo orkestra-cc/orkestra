@@ -209,7 +209,7 @@ func (o *Ollama) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (
 			outBytes += len(tc.Function.Name) + len(args)
 			id := tc.ID
 			if id == "" {
-				id = fmt.Sprintf("call_%d", toolCalls)
+				id = syntheticCallID()
 			}
 			emitted := iface.ChatToolCall{ID: id, Name: tc.Function.Name, Arguments: args}
 			if err := sink(iface.ChatEvent{ToolCall: &emitted}); err != nil {

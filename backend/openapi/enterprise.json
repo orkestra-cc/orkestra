@@ -4569,6 +4569,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "oversizedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
           "period": {
             "type": "string"
           },
