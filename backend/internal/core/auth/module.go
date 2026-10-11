@@ -1564,6 +1564,13 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// outage rather than a bug.
 	deps.Services.Register(module.ServiceMFAEpochLookup, newMFAEpochLookup(operatorUser, clientUser))
 
+	// Password-set lookup: RequireStepUp's no-factor branch offers a
+	// password reconfirm only to a caller who has a password, so an
+	// OAuth-only account is sent to enroll a factor instead of a modal it
+	// cannot answer. Built from both tiers' user providers, like the epoch
+	// lookup above.
+	deps.Services.Register(module.ServicePasswordSetLookup, newPasswordSetLookup(operatorUser, clientUser))
+
 	// Register one PII producer per tier with the DSR registry. Each
 	// producer reports tier-correct collection names in the DSR audit
 	// row. The registry tolerates missing producers — a deployment
@@ -1792,6 +1799,31 @@ func newMFAEpochLookup(operator, client iface.UserProvider) authMiddleware.MFAEp
 			return 0, iface.ErrUserNotFound
 		}
 		return user.MFAEpoch, nil
+	}
+}
+
+// newPasswordSetLookup answers RequireStepUp's "does this caller have a
+// password" question from the user provider of the tier that minted the
+// token — dispatching on audience for the reason newMFAEpochLookup gives.
+// A missing user or provider is an error, which the middleware reads as
+// "keep offering the reconfirm".
+func newPasswordSetLookup(operator, client iface.UserProvider) authMiddleware.PasswordSetLookup {
+	return func(ctx context.Context, audience, userUUID string) (bool, error) {
+		provider := operator
+		if audience == services.AudienceClient {
+			provider = client
+		}
+		if provider == nil {
+			return false, fmt.Errorf("auth: no user provider wired for audience %q", audience)
+		}
+		user, err := provider.GetUserByID(ctx, userUUID)
+		if err != nil {
+			return false, err
+		}
+		if user == nil {
+			return false, iface.ErrUserNotFound
+		}
+		return user.PasswordHash != "", nil
 	}
 }
 

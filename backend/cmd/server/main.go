@@ -379,6 +379,12 @@ func main() {
 	if lookup, ok := module.GetTyped[authMiddleware.MFAEnrollmentLookup](svcRegistry, module.ServiceMFAEnrollmentLookup); ok {
 		authMW.SetMFAEnrollmentLookup(lookup)
 	}
+	// Password-set lookup: on the no-factor branch, a caller with no
+	// password (OAuth-only) gets mfa_enrollment_required instead of a
+	// reconfirm modal it cannot answer. Optional, like the lookup above.
+	if lookup, ok := module.GetTyped[authMiddleware.PasswordSetLookup](svcRegistry, module.ServicePasswordSetLookup); ok {
+		authMW.SetPasswordSetLookup(lookup)
+	}
 	// MFA-epoch lookup (spec §4.3 D16). Unlike the two setters below this is
 	// tier-DISPATCHING, not tier-agnostic: the auth module builds it from
 	// both tiers' user providers because this one middleware instance serves
