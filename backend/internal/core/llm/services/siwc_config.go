@@ -70,7 +70,7 @@ func (c SIWCConfig) CallbackRouteMounted() bool { return c.Mode == SIWCModeLoopb
 
 func loopbackPort(raw string) (int, error) {
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "http" || u.Hostname() != SIWCLoopbackHost || (u.Path != "" && u.Path != "/") {
+	if err != nil || u.Scheme != "http" || u.User != nil || u.Hostname() != SIWCLoopbackHost || (u.Path != "" && u.Path != "/") {
 		return 0, ErrSIWCUnsupportedDeployment
 	}
 	port := u.Port()

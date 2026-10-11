@@ -13,6 +13,12 @@ import (
 
 var _ module.HasConfigSnapshotValidator = (*Module)(nil)
 
+// runtimeBool mirrors Dependencies.GetConfigBool (pkg/sdk/module/module.go):
+// exactly "true", "1" or "yes" is true, anything else (including "TRUE", "t"
+// and "") is false. The validator must read allow_hosted the way the runtime
+// does, or a snapshot could pass with hosted providers off at runtime.
+func runtimeBool(v string) bool { return v == "true" || v == "1" || v == "yes" }
+
 // siwcMode normalizes a stored mode: absent means disabled.
 func siwcMode(v string) string {
 	if v = strings.TrimSpace(v); v == "" {
@@ -43,13 +49,7 @@ func (m *Module) ValidateConfigSnapshot(_ context.Context, snap module.ConfigVal
 		}
 		cfg.PastePort = n
 	}
-	if raw := strings.TrimSpace(eff[services.SIWCFieldAllowHost]); raw != "" {
-		b, err := strconv.ParseBool(raw)
-		if err != nil {
-			return siwcValidationError(services.SIWCFieldAllowHost, "allow_hosted must be true or false")
-		}
-		cfg.AllowHosted = b
-	}
+	cfg.AllowHosted = runtimeBool(eff[services.SIWCFieldAllowHost])
 	if err := services.ValidateSIWCConfig(cfg); err != nil {
 		var ce *services.SIWCConfigError
 		if errors.As(err, &ce) {

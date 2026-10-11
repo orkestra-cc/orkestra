@@ -48,6 +48,7 @@ func TestValidateSIWCConfig(t *testing.T) {
 		{SIWCConfig{Mode: SIWCModeLoopbackLocal, AllowHosted: true, OperatorPublicURL: "http://localhost:3000"}, SIWCFieldMode, ErrSIWCUnsupportedDeployment},
 		{SIWCConfig{Mode: SIWCModeLoopbackLocal, AllowHosted: true, OperatorPublicURL: "https://127.0.0.1:3000"}, SIWCFieldMode, ErrSIWCUnsupportedDeployment},
 		{SIWCConfig{Mode: SIWCModeLoopbackLocal, AllowHosted: true, OperatorPublicURL: "http://10.0.0.5:3000"}, SIWCFieldMode, ErrSIWCUnsupportedDeployment},
+		{SIWCConfig{Mode: SIWCModeLoopbackLocal, AllowHosted: true, OperatorPublicURL: "http://x@127.0.0.1:3000"}, SIWCFieldMode, ErrSIWCUnsupportedDeployment},
 		{SIWCConfig{Mode: SIWCModeLoopbackLocal, AllowHosted: true}, SIWCFieldMode, ErrSIWCUnsupportedDeployment},
 		{SIWCConfig{Mode: SIWCModeHostedPaste, AllowHosted: true, PastePort: 80}, SIWCFieldPastePort, ErrSIWCConfigInvalid},
 		{SIWCConfig{Mode: SIWCModeHostedPaste, AllowHosted: true, PastePort: 70000}, SIWCFieldPastePort, ErrSIWCConfigInvalid},

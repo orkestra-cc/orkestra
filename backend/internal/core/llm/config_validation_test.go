@@ -30,7 +30,10 @@ func TestValidateConfigSnapshot(t *testing.T) {
 		{"loopback with absent allow_hosted", loopback, false, map[string]string{"siwc_mode": "loopback_local"}, "siwc_mode"},
 		{"loopback with https console url", "https://console.example.test", false, map[string]string{"siwc_mode": "loopback_local", "allow_hosted": "true"}, "siwc_mode"},
 		{"loopback with localhost", "http://localhost:3000", false, map[string]string{"siwc_mode": "loopback_local", "allow_hosted": "true"}, "siwc_mode"},
-		{"unparsable allow_hosted", loopback, false, map[string]string{"siwc_mode": "loopback_local", "allow_hosted": "maybe"}, "allow_hosted"},
+		{"allow_hosted yes is true like the runtime", loopback, false, map[string]string{"siwc_mode": "loopback_local", "allow_hosted": "yes"}, ""},
+		{"allow_hosted TRUE is false like the runtime", loopback, false, map[string]string{"siwc_mode": "loopback_local", "allow_hosted": "TRUE"}, "siwc_mode"},
+		{"allow_hosted t is false like the runtime", loopback, false, map[string]string{"siwc_mode": "loopback_local", "allow_hosted": "t"}, "siwc_mode"},
+		{"allow_hosted empty is false", loopback, false, map[string]string{"siwc_mode": "loopback_local", "allow_hosted": ""}, "siwc_mode"},
 		{"unknown mode", "", false, map[string]string{"siwc_mode": "hosted", "allow_hosted": "true"}, "siwc_mode"},
 		{"paste default port", "", false, map[string]string{"siwc_mode": "hosted_paste", "allow_hosted": "true"}, ""},
 		{"paste low port", "", false, map[string]string{"siwc_mode": "hosted_paste", "allow_hosted": "true", "siwc_paste_port": "80"}, "siwc_paste_port"},
@@ -67,5 +70,18 @@ func TestNewModule_OperatorPublicURLOption(t *testing.T) {
 	}
 	if NewModule().operatorPublicURL != "" {
 		t.Fatal("default must be empty")
+	}
+}
+
+// Pins runtimeBool to the GetConfigBool predicate (module.go): a validator
+// that disagrees would accept a SIWC mode the runtime treats as hosted-off.
+func TestRuntimeBool_ParityWithGetConfigBool(t *testing.T) {
+	for v, want := range map[string]bool{
+		"true": true, "1": true, "yes": true,
+		"TRUE": false, "True": false, "t": false, "T": false, "false": false, "0": false, "no": false, "": false, " true": false,
+	} {
+		if got := runtimeBool(v); got != want {
+			t.Errorf("runtimeBool(%q) = %v, want %v", v, got, want)
+		}
 	}
 }
