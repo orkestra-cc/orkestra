@@ -795,6 +795,9 @@ const ModelEditorModal = ({
                 className="mb-2"
                 label={t('adminLlm.models.fields.purposes')}
                 hint={t('adminLlm.models.fields.purposesHelp')}
+                // A long explanation: opening to the side keeps it inside
+                // the viewport instead of running off the top of the modal.
+                placement="right"
               />
               {fields.map((f, i) => (
                 <Row key={f.id} className="g-2 mb-2 align-items-start">
