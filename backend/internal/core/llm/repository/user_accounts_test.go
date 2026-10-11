@@ -21,7 +21,9 @@ func ensureAccountIndexes(t *testing.T, db *mongo.Database) {
 		{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "userUuid", Value: 1}, {Key: "clientId", Value: 1}}, Options: options.Index().SetUnique(true)},
 		{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "userUuid", Value: 1}, {Key: "provider", Value: 1}, {Key: "selected", Value: 1}},
 			Options: options.Index().SetUnique(true).SetPartialFilterExpression(bson.M{"selected": true})},
+		{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "status", Value: 1}}},
 		{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "uuid", Value: 1}}, Options: options.Index().SetUnique(true)},
+		{Keys: bson.D{{Key: "userUuid", Value: 1}}, Options: options.Index().SetPartialFilterExpression(bson.M{"userUuid": bson.M{"$type": "string"}})},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -263,6 +265,32 @@ func TestUserAccounts_DSRAcrossTenants(t *testing.T) {
 	}
 	if n, err := repo.DeleteByUser(context.Background(), "u1"); err != nil || n != 0 {
 		t.Fatalf("second delete = %d, %v", n, err)
+	}
+}
+
+// An empty subject id must match nothing: rows with userUuid "" exist in the
+// fixture and must survive both calls.
+func TestUserAccounts_DSRRefusesEmptySubject(t *testing.T) {
+	db := newTestDB(t)
+	ensureAccountIndexes(t, db)
+	repo := NewUserAccounts(db)
+	now := time.Now().UTC()
+	if err := repo.Insert(ctxFor("t1"), account("e1", "", "c1", true, now)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Insert(ctxFor("t2"), account("e2", "", "c2", true, now)); err != nil {
+		t.Fatal(err)
+	}
+	if l, err := repo.ListByUserAllTenants(context.Background(), ""); !errors.Is(err, ErrEmptySubject) || len(l) != 0 {
+		t.Fatalf("list empty subject = %+v, %v", l, err)
+	}
+	if n, err := repo.DeleteByUser(context.Background(), ""); !errors.Is(err, ErrEmptySubject) || n != 0 {
+		t.Fatalf("delete empty subject = %d, %v", n, err)
+	}
+	for _, tenant := range []string{"t1", "t2"} {
+		if l, err := repo.ListByUser(ctxFor(tenant), ""); err != nil || len(l) != 1 {
+			t.Fatalf("%s empty-subject row gone: %+v, %v", tenant, l, err)
+		}
 	}
 }
 

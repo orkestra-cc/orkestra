@@ -15,6 +15,10 @@ import (
 // CollUserAccounts holds the Sign in with ChatGPT registrations.
 const CollUserAccounts = "llm_user_accounts"
 
+// ErrEmptySubject: the cross-org DSR methods refuse an empty subject id, which
+// would otherwise match (and erase) every row stored without a userUuid.
+var ErrEmptySubject = errors.New("llm repository: empty subject id")
+
 // UserAccounts owns llm_user_accounts.
 type UserAccounts struct{ coll *mongo.Collection }
 
@@ -23,10 +27,11 @@ func NewUserAccounts(db *mongo.Database) *UserAccounts {
 }
 
 // Insert stores a registration under the caller's org (stamped from ctx).
-// ErrDuplicateName covers both unique indexes that can fire: the same
-// issued client id for the same user, and a second Selected row for the
-// same (user, provider) when two first links race — the caller tells them
-// apart by re-reading.
+// ErrDuplicateName covers the three unique indexes that can fire: the same
+// issued client id for the same user (tenantId, userUuid, clientId), a
+// second Selected row for the same (user, provider) when two first links
+// race (the partial selected index), and a reused uuid (tenantId, uuid) —
+// the caller tells them apart by re-reading.
 func (r *UserAccounts) Insert(ctx context.Context, a *models.UserAccount) error {
 	tenantID, err := tenantrepo.StampInsert(ctx)
 	if err != nil {
@@ -176,6 +181,9 @@ func (r *UserAccounts) Delete(ctx context.Context, uuid string) error {
 // DSR. The sealed envelopes are part of the rows; the PIIProducer maps
 // them to the envelope-free export shape.
 func (r *UserAccounts) ListByUserAllTenants(ctx context.Context, userUUID string) ([]models.UserAccount, error) {
+	if userUUID == "" {
+		return nil, ErrEmptySubject
+	}
 	//tenantscope:allow dsr: right-of-access export of the subject's ChatGPT registrations across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
 	cur, err := r.coll.Find(ctx, bson.M{"userUuid": userUUID})
 	if err != nil {
@@ -191,6 +199,9 @@ func (r *UserAccounts) ListByUserAllTenants(ctx context.Context, userUUID string
 // DeleteByUser erases every registration of a data subject across all
 // tenants. Only the DSR pipeline (PIIProducer.PurgePersonalData) calls it.
 func (r *UserAccounts) DeleteByUser(ctx context.Context, userUUID string) (int64, error) {
+	if userUUID == "" {
+		return 0, ErrEmptySubject
+	}
 	//tenantscope:allow dsr: right-to-erasure of the subject's ChatGPT registrations across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
 	res, err := r.coll.DeleteMany(ctx, bson.M{"userUuid": userUUID})
 	if err != nil {
