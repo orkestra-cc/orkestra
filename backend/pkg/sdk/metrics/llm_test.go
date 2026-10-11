@@ -43,8 +43,30 @@ func TestLLMMetrics_ClosedLabelSets(t *testing.T) {
 	}
 }
 
+func TestLLMMetrics_SIWCLinkOutcomes(t *testing.T) {
+	c := NewCollector()
+	if err := c.Register(); err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range []string{"linked", "denied", "state_invalid", "exchange_failed", "id_token_invalid", "plan_disabled"} {
+		c.RecordLLMSIWCLink(o)
+		if got := testutil.ToFloat64(c.llmSIWCLinks.WithLabelValues(o)); got != 1 {
+			t.Fatalf("%s = %v", o, got)
+		}
+	}
+	c.RecordLLMSIWCLink("tenant-123")
+	c.RecordLLMSIWCLink("")
+	if got := testutil.ToFloat64(c.llmSIWCLinks.WithLabelValues("unknown")); got != 2 {
+		t.Fatalf("unknown = %v", got)
+	}
+	if n := testutil.CollectAndCount(c.llmSIWCLinks, "orkestra_llm_siwc_link_total"); n != 7 {
+		t.Fatalf("siwc series = %d, want 7", n)
+	}
+}
+
 func TestLLMMetrics_NilCollectorIsSafe(t *testing.T) {
 	var c *Collector
+	c.RecordLLMSIWCLink("linked")
 	c.RecordLLMRequest("openai", "ok")
 	c.RecordLLMTokens("openai", "input", 1)
 }

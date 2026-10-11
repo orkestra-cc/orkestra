@@ -208,7 +208,7 @@
       "model_access_denied": "Non puoi usare questo modello.",
       "capability_mismatch": "Il modello non offre ciò che serve alla richiesta.",
       "invalid_request": "Alcuni campi non sono validi.",
-      "not_found": "La credenziale o il modello non esiste più.",
+      "not_found": "La credenziale, il modello o l'account collegato non esiste più.",
       "name_in_use": "Un'altra credenziale o un altro modello ha già questo nome.",
       "credential_in_use": "Un modello attivo usa ancora questa credenziale. Eliminalo o collegalo a un'altra credenziale prima.",
       "secret_key_missing": "Questa installazione non ha una chiave di cifratura dei segreti, quindi le chiavi non possono essere salvate.",
@@ -225,7 +225,14 @@
       "user_account_reauth_required": "L'account collegato deve essere autorizzato di nuovo.",
       "plan_usage_disabled": "L'account collegato non ha consentito l'uso del piano.",
       "request_canceled": "La richiesta è stata annullata prima di essere completata.",
-      "siwc_config_invalid": "Accedi con ChatGPT non è configurato correttamente su questa installazione. Chiedi a un amministratore di controllare le impostazioni del modulo llm."
+      "siwc_config_invalid": "Accedi con ChatGPT non è configurato correttamente su questa installazione. Chiedi a un amministratore di controllare le impostazioni del modulo llm.",
+      "siwc_disabled": "Accedi con ChatGPT è disattivato su questa installazione.",
+      "siwc_unsupported_deployment": "Accedi con ChatGPT non può completarsi automaticamente qui: l'API deve essere raggiunta come http://127.0.0.1. Chiedi a un amministratore di usare il flusso con incolla.",
+      "siwc_callback_invalid": "Non è l'indirizzo che il browser ha mostrato dopo l'accesso. Copia l'URL completo dalla barra degli indirizzi e incollalo di nuovo.",
+      "siwc_state_invalid": "Questo tentativo di accesso è scaduto o è già stato usato. Ricomincia il collegamento.",
+      "siwc_denied": "L'autorizzazione è stata rifiutata su OpenAI. Non è stato collegato nulla.",
+      "siwc_exchange_failed": "OpenAI non ha completato l'accesso. Riprova a collegare più tardi.",
+      "siwc_id_token_invalid": "L'identità restituita da OpenAI non è verificabile, oppure appartiene a un altro account. Non è stato modificato nulla."
     }
   },
   "banner": {

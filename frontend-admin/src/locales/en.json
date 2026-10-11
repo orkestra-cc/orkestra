@@ -208,7 +208,7 @@
       "model_access_denied": "You may not use this model.",
       "capability_mismatch": "The model does not offer what the request needs.",
       "invalid_request": "Some fields are invalid.",
-      "not_found": "The credential or model no longer exists.",
+      "not_found": "The credential, model or linked account no longer exists.",
       "name_in_use": "Another credential or model already has this name.",
       "credential_in_use": "An active model still uses this credential. Delete it or point it at another credential first.",
       "secret_key_missing": "This deployment has no secret encryption key configured, so keys cannot be stored.",
@@ -225,7 +225,14 @@
       "user_account_reauth_required": "Your linked account must be authorized again.",
       "plan_usage_disabled": "The linked account did not allow plan usage.",
       "request_canceled": "The request was cancelled before it completed.",
-      "siwc_config_invalid": "Sign in with ChatGPT is not configured correctly on this installation. Ask an administrator to review the llm module settings."
+      "siwc_config_invalid": "Sign in with ChatGPT is not configured correctly on this installation. Ask an administrator to review the llm module settings.",
+      "siwc_disabled": "Sign in with ChatGPT is turned off on this installation.",
+      "siwc_unsupported_deployment": "Sign in with ChatGPT cannot complete automatically here: the API must be reached as http://127.0.0.1. Ask an administrator to use the paste flow.",
+      "siwc_callback_invalid": "That is not the address the browser showed after signing in. Copy the full URL from the address bar and paste it again.",
+      "siwc_state_invalid": "This sign-in attempt has expired or was already used. Start linking again.",
+      "siwc_denied": "The authorization was declined at OpenAI. Nothing was linked.",
+      "siwc_exchange_failed": "OpenAI did not complete the sign-in. Try linking again later.",
+      "siwc_id_token_invalid": "The identity returned by OpenAI could not be verified, or it belongs to another account. Nothing was changed."
     }
   },
   "banner": {

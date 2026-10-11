@@ -135,8 +135,11 @@ type Collector struct {
 	tokenSweepDeleted         *prometheus.CounterVec
 	// llmRequests / llmTokens: the llm gateway's logical calls and token
 	// consumption. Closed label sets (ADR-0002): never a tenant or model id.
-	llmRequests                    *prometheus.CounterVec
-	llmTokens                      *prometheus.CounterVec
+	llmRequests *prometheus.CounterVec
+	llmTokens   *prometheus.CounterVec
+	// llmSIWCLinks: Sign in with ChatGPT link completions by outcome
+	// (closed set, see llmSIWCOutcomes).
+	llmSIWCLinks                   *prometheus.CounterVec
 	authzCacheInvalidationFailures prometheus.Counter
 	authzCacheInvalidationRefusals prometheus.Counter
 	logMaskingPanics               prometheus.Counter
@@ -326,6 +329,17 @@ func (c *Collector) buildMetrics() {
 		[]string{"provider", "direction"},
 	)
 
+	c.llmSIWCLinks = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "llm",
+			Name:      "siwc_link_total",
+			Help:      "Sign in with ChatGPT link completions (loopback callback or pasted URL) by outcome: linked, plan_disabled (linked without plan usage), denied, state_invalid, exchange_failed, id_token_invalid.",
+		},
+		// outcome one of llmSIWCOutcomes; anything else collapses to unknown.
+		[]string{"outcome"},
+	)
+
 	c.tokenSweepDeleted = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "orkestra",
@@ -441,7 +455,7 @@ func (c *Collector) Register() error {
 	if !atomic.CompareAndSwapUint32(&c.registered, 0, 1) {
 		return nil
 	}
-	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.oauthCompensationFailures, c.sessionAnchorAnomalies, c.llmRequests, c.llmTokens, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped, c.authzCacheInvalidationFailures, c.authzCacheInvalidationRefusals, c.logMaskingPanics, c.compliancePolicySnapshotAge} {
+	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.oauthCompensationFailures, c.sessionAnchorAnomalies, c.llmRequests, c.llmTokens, c.llmSIWCLinks, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration, c.attemptStoreFailures, c.authLockouts, c.authMailDropped, c.authzCacheInvalidationFailures, c.authzCacheInvalidationRefusals, c.logMaskingPanics, c.compliancePolicySnapshotAge} {
 		if err := c.registry.Register(m); err != nil {
 			// rollback so the caller can retry with a fresh collector
 			atomic.StoreUint32(&c.registered, 0)
@@ -609,10 +623,22 @@ var (
 )
 
 var (
-	llmProviders  = map[string]struct{}{"openai": {}, "anthropic": {}, "gemini": {}, "ollama": {}, "openai_compatible": {}, "mock": {}}
-	llmOutcomes   = map[string]struct{}{"ok": {}, "fallback": {}, "error": {}, "budget_blocked": {}}
-	llmDirections = map[string]struct{}{"input": {}, "output": {}}
+	llmProviders    = map[string]struct{}{"openai": {}, "anthropic": {}, "gemini": {}, "ollama": {}, "openai_compatible": {}, "mock": {}}
+	llmOutcomes     = map[string]struct{}{"ok": {}, "fallback": {}, "error": {}, "budget_blocked": {}}
+	llmDirections   = map[string]struct{}{"input": {}, "output": {}}
+	llmSIWCOutcomes = map[string]struct{}{
+		"linked": {}, "denied": {}, "state_invalid": {}, "exchange_failed": {}, "id_token_invalid": {}, "plan_disabled": {},
+	}
 )
+
+// RecordLLMSIWCLink counts one Sign in with ChatGPT link completion by
+// outcome (closed set; anything else collapses to "unknown").
+func (c *Collector) RecordLLMSIWCLink(outcome string) {
+	if c == nil || c.llmSIWCLinks == nil {
+		return
+	}
+	c.llmSIWCLinks.WithLabelValues(collapse(outcome, llmSIWCOutcomes)).Inc()
+}
 
 // RecordLLMRequest counts one llm gateway call by provider and outcome.
 // Both labels are closed sets (ADR-0002): unknown values collapse to
