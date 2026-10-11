@@ -50,6 +50,11 @@ func TestValidateSIWCConfig(t *testing.T) {
 		{SIWCConfig{Mode: SIWCModeLoopbackLocal, AllowHosted: true, OperatorPublicURL: "http://10.0.0.5:3000"}, SIWCFieldMode, ErrSIWCUnsupportedDeployment},
 		{SIWCConfig{Mode: SIWCModeLoopbackLocal, AllowHosted: true, OperatorPublicURL: "http://x@127.0.0.1:3000"}, SIWCFieldMode, ErrSIWCUnsupportedDeployment},
 		{SIWCConfig{Mode: SIWCModeLoopbackLocal, AllowHosted: true}, SIWCFieldMode, ErrSIWCUnsupportedDeployment},
+		// Minor 5 (final review): no port, or the default one, would make the
+		// browser send Host: 127.0.0.1 and never match the redirect.
+		{SIWCConfig{Mode: SIWCModeLoopbackLocal, AllowHosted: true, OperatorPublicURL: "http://127.0.0.1"}, SIWCFieldMode, ErrSIWCUnsupportedDeployment},
+		{SIWCConfig{Mode: SIWCModeLoopbackLocal, AllowHosted: true, OperatorPublicURL: "http://127.0.0.1/"}, SIWCFieldMode, ErrSIWCUnsupportedDeployment},
+		{SIWCConfig{Mode: SIWCModeLoopbackLocal, AllowHosted: true, OperatorPublicURL: "http://127.0.0.1:80"}, SIWCFieldMode, ErrSIWCUnsupportedDeployment},
 		{SIWCConfig{Mode: SIWCModeHostedPaste, AllowHosted: true, PastePort: 80}, SIWCFieldPastePort, ErrSIWCConfigInvalid},
 		{SIWCConfig{Mode: SIWCModeHostedPaste, AllowHosted: true, PastePort: 70000}, SIWCFieldPastePort, ErrSIWCConfigInvalid},
 		{SIWCConfig{Mode: SIWCModeHostedPaste, AllowHosted: true, PastePort: 14555, ProductionLike: true, OperatorPublicURL: "http://console.example.test"}, SIWCFieldMode, ErrSIWCConfigInvalid},

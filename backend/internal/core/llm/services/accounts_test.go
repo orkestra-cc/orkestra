@@ -40,6 +40,8 @@ type memAccounts struct {
 	// beforeReplace, when set, runs once inside the next ReplaceTokens
 	// before the compare-and-swap (another writer storing a set first).
 	beforeReplace func(r *models.UserAccount)
+	// listErr, when set, is what ListByUser answers (a Mongo blip).
+	listErr error
 }
 
 func newMemAccounts() *memAccounts { return &memAccounts{rows: map[string]*models.UserAccount{}} }
@@ -84,6 +86,12 @@ func (m *memAccounts) scoped(ctx context.Context, keep func(*models.UserAccount)
 }
 
 func (m *memAccounts) ListByUser(ctx context.Context, user string) ([]models.UserAccount, error) {
+	m.mu.Lock()
+	err := m.listErr
+	m.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	out := m.scoped(ctx, func(r *models.UserAccount) bool { return r.UserUUID == user })
 	sort.Slice(out, func(i, j int) bool { return out[i].LinkedAt.Before(out[j].LinkedAt) })
 	return out, nil
@@ -220,6 +228,7 @@ type fakeOIDC struct {
 	models                          []string
 	rejectAT                        string // ListPlanModels answers invalid_user for it
 	beforeRefreshAnswer             func() // runs (unlocked) before Refresh answers
+	beforeExchangeAnswer            func() // runs (unlocked) before Exchange answers
 	usedRT                          map[string]bool
 	n                               int
 
@@ -252,7 +261,18 @@ func (f *fakeOIDC) AuthorizeURL(p AuthorizeParams) string {
 	return "https://auth.example.test/authorize?" + q.Encode()
 }
 
-func (f *fakeOIDC) Exchange(_ context.Context, clientID, code, verifier, redirect string) (*TokenResponse, error) {
+func (f *fakeOIDC) Exchange(ctx context.Context, clientID, code, verifier, redirect string) (*TokenResponse, error) {
+	f.mu.Lock()
+	hook := f.beforeExchangeAnswer
+	f.beforeExchangeAnswer = nil
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	// The token request dies with its context, as the real client's does.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.exchanges++
@@ -1502,4 +1522,173 @@ func TestAccounts_LostRotationDoesNotRevokeAnEchoedRefreshToken(t *testing.T) {
 			t.Errorf("an echoed refresh token still in use was revoked (revocations = %d)", len(oidc.revoked))
 		}
 	})
+}
+
+// --- final review fixes ----------------------------------------------------------
+
+// Minor 1: once the code is being exchanged, a browser that hangs up must
+// not lose the registration (the code is spent at OpenAI and the state
+// consumed): exchange, verification and store run on a detached context.
+func TestAccounts_CompleteSurvivesTheCallerHangingUp(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1"}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx, cancel := context.WithCancel(ctxFor("t1"))
+	defer cancel()
+	link, err := h.svc.Link(ctx, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oidc.locked(func() { oidc.beforeExchangeAnswer = cancel })
+	acc, err := h.svc.Complete(ctx, CallbackInput{Code: "c", State: stateFrom(t, link.AuthorizeURL), ClientID: "oaiapp_1", RedirectURI: pasteRedirect}, true)
+	if err != nil || acc == nil {
+		t.Fatalf("complete after hang-up err = %v", err)
+	}
+	if _, ok := h.repo.row(acc.UUID); !ok {
+		t.Fatal("the registration must be stored")
+	}
+	oidc.locked(func() {
+		if len(oidc.revoked) != 0 {
+			t.Errorf("a stored registration must not be revoked (revocations = %d)", len(oidc.revoked))
+		}
+	})
+}
+
+// Minor 2: invalid_client keeps credentials and status (ruling: a
+// configuration error), and the same set is not presented again for a
+// short backoff; a new set (reauth, rotation) is never held back.
+func TestAccounts_InvalidClientIsNotRepeatedForTheSameSet(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1"}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx := ctxFor("t1")
+	acc := h.linkAccount(t, ctx, "oaiapp_1", "c")
+	h.expire(acc.UUID)
+	oidc.locked(func() { oidc.refreshErr = providers.ClassifySIWCCode("invalid_client") })
+	for i := 0; i < 3; i++ {
+		_, err := h.svc.CredentialFor(ctx, "u-admin")
+		if !errors.Is(err, ErrSIWCInvalidClient) || !errors.Is(err, iface.ErrLLMProviderUnavailable) {
+			t.Fatalf("call %d err = %v", i, err)
+		}
+	}
+	refreshes := func() (n int) { oidc.locked(func() { n = oidc.refreshes }); return n }
+	if n := refreshes(); n != 1 {
+		t.Fatalf("token endpoint hit %d times, want 1", n)
+	}
+	if got, _ := h.repo.row(acc.UUID); got.Status != models.AccountStatusActive || got.LastError != "" {
+		t.Fatalf("invalid_client is not a reauth: status %s", got.Status)
+	}
+	// A new set (here: savedAt moved, as a reauth or rotation would) is
+	// presented at once.
+	h.repo.edit(acc.UUID, func(r *models.UserAccount) { r.SavedAt = r.SavedAt.Add(time.Second) })
+	_, _ = h.svc.CredentialFor(ctx, "u-admin")
+	if n := refreshes(); n != 2 {
+		t.Fatalf("a new set must not be held back (refreshes = %d)", n)
+	}
+	// After the backoff the same set is tried again.
+	h.svc.now = func() time.Time { return time.Now().Add(accountInvalidClientBackoff + time.Second) }
+	h.expire(acc.UUID)
+	_, _ = h.svc.CredentialFor(ctx, "u-admin")
+	if n := refreshes(); n != 3 {
+		t.Fatalf("the backoff must expire (refreshes = %d)", n)
+	}
+}
+
+// Minor 3: an unlink (or erasure) that races a refresh revoked only the
+// token it read; the rotated one stored nowhere is revoked too.
+func TestAccounts_RotationOfADeletedRegistrationIsRevoked(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1"}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx := ctxFor("t1")
+	acc := h.linkAccount(t, ctx, "oaiapp_1", "c")
+	h.expire(acc.UUID)
+	oidc.locked(func() {
+		oidc.beforeRefreshAnswer = func() {
+			if err := h.svc.Unlink(ctx, acc.UUID, false); err != nil {
+				t.Errorf("unlink: %v", err)
+			}
+		}
+	})
+	if _, err := h.svc.CredentialFor(ctx, "u-admin"); err == nil {
+		t.Fatal("a deleted registration must not yield a credential")
+	}
+	oidc.locked(func() {
+		if len(oidc.revoked) != 2 || oidc.revoked[0] != "rt-c" || oidc.revoked[1] != "rt-r1" {
+			t.Errorf("revocations = %d (the unlink's, then the rotated token)", len(oidc.revoked))
+		}
+	})
+}
+
+// Minor 3 boundary: a token the IdP echoed is the one the unlink revoked.
+func TestAccounts_EchoedTokenOfADeletedRegistrationIsNotRevokedTwice(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1", refreshEchoes: true}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx := ctxFor("t1")
+	acc := h.linkAccount(t, ctx, "oaiapp_1", "c")
+	h.expire(acc.UUID)
+	oidc.locked(func() {
+		oidc.beforeRefreshAnswer = func() { _ = h.svc.Unlink(ctx, acc.UUID, false) }
+	})
+	_, _ = h.svc.CredentialFor(ctx, "u-admin")
+	oidc.locked(func() {
+		if len(oidc.revoked) != 1 {
+			t.Errorf("revocations = %d, want only the unlink's", len(oidc.revoked))
+		}
+	})
+}
+
+// Minor 8: the label limit counts characters, like the API schema.
+func TestAccounts_LabelLimitCountsCharacters(t *testing.T) {
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), &fakeOIDC{})
+	if _, err := h.svc.Link(ctxFor("t1"), strings.Repeat("é", accountLabelMaxLen), ""); err != nil {
+		t.Fatalf("%d two-byte characters err = %v", accountLabelMaxLen, err)
+	}
+	if _, err := h.svc.Link(ctxFor("t1"), strings.Repeat("é", accountLabelMaxLen+1), ""); !errors.Is(err, iface.ErrLLMInvalidRequest) {
+		t.Fatalf("%d characters err = %v", accountLabelMaxLen+1, err)
+	}
+}
+
+// Minor 10: a duplicate on the first link whose cause cannot be told (the
+// re-read fails, or the same client id lands right after it) is a failed
+// exchange, never llm.name_in_use, and the fresh set is revoked.
+func TestAccounts_UnresolvableDuplicateIsAnExchangeFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		arm  func(h *accountsHarness)
+	}{
+		{"re-read fails", func(h *accountsHarness) {
+			h.repo.beforeInsert = func(rows map[string]*models.UserAccount) {
+				rows["racer"] = &models.UserAccount{UUID: "racer", TenantID: "t1", UserUUID: "u-admin", Provider: models.ProviderOpenAI, ClientID: "oaiapp_1"}
+				h.repo.listErr = errors.New("mongo blip")
+			}
+		}},
+		{"same client id after the re-read", func(h *accountsHarness) {
+			h.repo.beforeInsert = func(rows map[string]*models.UserAccount) {
+				rows["selected"] = &models.UserAccount{UUID: "selected", TenantID: "t1", UserUUID: "u-admin", Provider: models.ProviderOpenAI, ClientID: "oaiapp_other", Selected: true}
+				h.repo.beforeInsert = func(rows map[string]*models.UserAccount) {
+					rows["racer"] = &models.UserAccount{UUID: "racer", TenantID: "t1", UserUUID: "u-admin", Provider: models.ProviderOpenAI, ClientID: "oaiapp_1"}
+				}
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1"}
+			h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+			ctx := ctxFor("t1")
+			link, err := h.svc.Link(ctx, "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.repo.mu.Lock()
+			tc.arm(h)
+			h.repo.mu.Unlock()
+			_, err = h.svc.Complete(ctx, CallbackInput{Code: "c", State: stateFrom(t, link.AuthorizeURL), ClientID: "oaiapp_1", RedirectURI: pasteRedirect}, true)
+			if !errors.Is(err, ErrSIWCExchangeFailed) || errors.Is(err, repository.ErrDuplicateName) || errors.Is(err, ErrNameInUse) {
+				t.Fatalf("err = %v", err)
+			}
+			oidc.locked(func() {
+				if len(oidc.revoked) != 1 || oidc.revoked[0] != "rt-c" {
+					t.Errorf("the fresh set must be revoked (revocations = %d)", len(oidc.revoked))
+				}
+			})
+		})
+	}
 }

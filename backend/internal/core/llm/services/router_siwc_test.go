@@ -324,3 +324,88 @@ func TestRouterSIWC_EmbedIsCapabilityMismatch(t *testing.T) {
 		t.Fatalf("ledger = %+v", ev)
 	}
 }
+
+// Important 1 (final review): a plan-route configuration rejection
+// (route_not_supported, chatpass_v2_*) is final. The next user_account
+// candidate bills the same account through the same issued client and
+// grant, so there is exactly one provider call per logical call, no
+// fallback, and the rejection never counts toward the breaker: a fourth
+// call still reaches the provider after three rejections.
+func TestRouterSIWC_RouteConfigurationRejectionIsFinalAndNotAFault(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		respond func(w http.ResponseWriter)
+	}{
+		{"route_not_supported in stream", func(w http.ResponseWriter) {
+			planSSE(w, planFailed("subscription_sharing_route_not_supported"))
+		}},
+		{"chatpass_v2 scope over HTTP", func(w http.ResponseWriter) {
+			planHTTP(w, 403, `{"error":{"code":"chatpass_v2_scope_not_authorized","message":"provider text"}}`)
+		}},
+		{"chatpass_v2 context over HTTP", func(w http.ResponseWriter) {
+			planHTTP(w, 400, `{"error":{"code":"chatpass_v2_invalid_authorization_context","message":"provider text"}}`)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newSIWCEnv(t)
+			e.setRespond(func(w http.ResponseWriter, _ string) { tc.respond(w) })
+			cands := []models.Model{userAccountModel("ua", "gpt-5.6-terra"), userAccountModel("ua2", "gpt-5.6-terra"), model("org", "anthropic", "c2")}
+			for call := 1; call <= 4; call++ {
+				_, err := e.r.Chat(ctxFor("t1"), cands, "u-admin", simpleReq, nil)
+				if !errors.Is(err, iface.ErrLLMProviderUnavailable) || !errors.Is(err, providers.ErrSIWCRouteNotSupported) || errorCodeOf(err) != "provider_unavailable" {
+					t.Fatalf("call %d: err = %v (%s)", call, err, errorCodeOf(err))
+				}
+				if got := len(e.seen()); got != call {
+					t.Fatalf("call %d: plan requests = %d (a fallback to the next same-kind model, or an open circuit)", call, got)
+				}
+			}
+			if *e.orgCall != 0 {
+				t.Fatalf("org calls = %d", *e.orgCall)
+			}
+			if len(e.store.ledger) != 4 {
+				t.Fatalf("ledger rows = %d, want 4", len(e.store.ledger))
+			}
+			for _, ev := range e.store.ledger {
+				if ev.ErrorCode != "provider_unavailable" || len(ev.Attempts) != 1 || ev.Fallback {
+					t.Fatalf("ledger = %+v", ev)
+				}
+			}
+			e.h.oidc.locked(func() {
+				if e.h.oidc.refreshes != 0 {
+					t.Errorf("a configuration rejection must not refresh (refreshes = %d)", e.h.oidc.refreshes)
+				}
+			})
+			if acc := e.account(t); acc.Status != models.AccountStatusActive {
+				t.Fatalf("a configuration rejection is not a reauth: status %q", acc.Status)
+			}
+		})
+	}
+}
+
+// Minor 2 (final review): invalid_client from the refresh inside Resolve is
+// final for fallback too, and does not count toward the breaker.
+func TestRouterSIWC_InvalidClientOnRefreshIsFinal(t *testing.T) {
+	e := newSIWCEnv(t)
+	e.setRespond(func(w http.ResponseWriter, _ string) { planSSE(w, planDelta("x"), planCompleted) })
+	e.h.expire(e.acc.UUID)
+	e.h.oidc.locked(func() { e.h.oidc.refreshErr = providers.ClassifySIWCCode("invalid_client") })
+	cands := []models.Model{userAccountModel("ua", "gpt-5.6-terra"), userAccountModel("ua2", "gpt-5.6-terra"), model("org", "anthropic", "c2")}
+	_, err := e.r.Chat(ctxFor("t1"), cands, "u-admin", simpleReq, nil)
+	if !errors.Is(err, providers.ErrSIWCInvalidClient) || errorCodeOf(err) != "provider_unavailable" {
+		t.Fatalf("err = %v (%s)", err, errorCodeOf(err))
+	}
+	if len(e.seen()) != 0 || *e.orgCall != 0 {
+		t.Fatalf("plan calls %d, org calls %d", len(e.seen()), *e.orgCall)
+	}
+	e.h.oidc.locked(func() {
+		if e.h.oidc.refreshes != 1 {
+			t.Errorf("refreshes = %d, want 1 (the second candidate must not re-hit the token endpoint)", e.h.oidc.refreshes)
+		}
+	})
+	if ev := singleLedger(t, e.store); len(ev.Attempts) != 1 {
+		t.Fatalf("ledger attempts = %+v", ev.Attempts)
+	}
+	if providerFault(providers.ClassifySIWCCode("invalid_client")) || providerFault(providers.ClassifySIWCCode("chatpass_v2_scope_not_authorized")) {
+		t.Fatal("a client or grant configuration rejection must not be a provider fault")
+	}
+}

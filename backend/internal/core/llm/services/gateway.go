@@ -66,6 +66,10 @@ func NewGateway(access *AccessResolver, catalog *CatalogService, registry *provi
 // before any request is served.
 func (g *Gateway) SetRouter(r *Router) { g.router = r }
 
+// Router is the wired execution path (nil before SetRouter); read-only,
+// for the module's wiring checks.
+func (g *Gateway) Router() *Router { return g.router }
+
 // SetAccounts wires the linked-account source (Sign in with ChatGPT);
 // called once by the module's Init. Without it user_account models are
 // never listed or resolved (no account can be usable).

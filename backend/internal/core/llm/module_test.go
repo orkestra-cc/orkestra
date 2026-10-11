@@ -888,3 +888,73 @@ func TestModule_RunRetentionPurges(t *testing.T) {
 		t.Fatal("outbox retention wrong")
 	}
 }
+
+// Deferred T8 minor: with no console origin the loopback callback's closed
+// redirect would be relative (an API 404), so mounting it WARNs; with an
+// origin it does not.
+func TestModule_CallbackMountWarnsWithoutAConsoleOrigin(t *testing.T) {
+	for _, origin := range []string{"", "http://localhost:8080"} {
+		m := moduleForRoutes(t)
+		logs := &bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(logs, nil))
+		m.logger = logger
+		cfg := func() services.SIWCConfig {
+			return services.SIWCConfig{Mode: services.SIWCModeLoopbackLocal, AllowHosted: true, OperatorPublicURL: "http://127.0.0.1:3007"}
+		}
+		m.siwcCfg = cfg
+		vault, err := services.NewVault("", logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		limiter := services.NewRateLimiter(nil, logger)
+		accounts := services.NewAccountsService(services.AccountsDeps{Repo: emptyAccounts{}, Vault: vault, Limiter: limiter, Config: cfg, Logger: logger})
+		m.siwc = handlers.NewSIWCHandler(accounts, cfg, limiter, nil, origin, logger)
+		m.RegisterRoutes(&module.RouteInfo{
+			Operator:  &module.APISurface{Audience: module.AudienceOperator, ProtectedRouter: chi.NewRouter(), AuthMW: recordingMW{}},
+			Router:    chi.NewRouter(),
+			APIConfig: docsless(),
+		})
+		warned := strings.Contains(logs.String(), "no operator console origin")
+		if warned != (origin == "") {
+			t.Fatalf("origin %q: warned = %v: %s", origin, warned, logs.String())
+		}
+	}
+}
+
+// Deferred T7 minor: Init wires the router the gateway serves with the
+// module's own afterCall hook and a composite resolver over the module's
+// accounts service, so the hook and the resolver cannot drift from what the
+// tests of each exercise.
+func TestModule_InitWiresTheRouterHookAndTheAccountResolver(t *testing.T) {
+	t.Setenv("LLM_SECRET_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	logs := &bytes.Buffer{}
+	reg := module.NewServiceRegistry()
+	reg.Register(module.ServiceTenantDirectoryReader, iface.TenantDirectoryReader(noMembers{}))
+	m := NewModule()
+	if err := m.Init(&module.Dependencies{DB: offlineDB(t), Logger: slog.New(slog.NewTextHandler(logs, nil)), Services: reg}); err != nil {
+		t.Fatal(err)
+	}
+	r := m.gateway.Router()
+	if r == nil || r.AfterCall == nil {
+		t.Fatal("the gateway must serve a router with the AfterCall hook")
+	}
+	cr, ok := r.Credentials().(*services.CompositeCredentialResolver)
+	if !ok {
+		t.Fatalf("router resolver = %T, want the composite resolver", r.Credentials())
+	}
+	if cr.Accounts() != services.AccountCredentialSource(m.accounts) || m.accounts == nil {
+		t.Fatal("kind=user_account must resolve through the module's accounts service")
+	}
+	// The hook behaves as module.afterCall: a failed plan call touches
+	// nothing, a successful one stamps lastUsedAt (an offline database
+	// makes the stamp WARN, which is the observable).
+	ua := models.Model{Provider: models.ProviderOpenAI, CredentialRef: models.LLMCredentialRef{Kind: models.CredentialKindUserAccount}}
+	r.AfterCall(operatorCtx(), ua, "acc-1", iface.ErrLLMQuotaExhausted)
+	if strings.Contains(logs.String(), "last-use") {
+		t.Fatalf("a failed attempt touched the account: %s", logs.String())
+	}
+	r.AfterCall(operatorCtx(), ua, "acc-1", nil)
+	if !strings.Contains(logs.String(), "llm siwc: last-use stamp failed") {
+		t.Fatalf("the router hook is not module.afterCall: %s", logs.String())
+	}
+}

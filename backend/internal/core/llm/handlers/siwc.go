@@ -73,6 +73,10 @@ func NewSIWCHandler(accounts *services.AccountsService, cfg func() services.SIWC
 		frontendURL: strings.TrimRight(strings.TrimSpace(frontendURL), "/"), logger: logger}
 }
 
+// ConsoleOrigin is the origin the loopback callback redirects to ("" makes
+// the closed redirect relative, which lands on the API host).
+func (h *SIWCHandler) ConsoleOrigin() string { return h.frontendURL }
+
 func (h *SIWCHandler) record(outcome string) {
 	if h.metrics != nil {
 		h.metrics.RecordLLMSIWCLink(outcome)
@@ -148,8 +152,15 @@ type LLMAccountResponse struct {
 // the attempt's redirect URI is decided against the attempt itself, after
 // it is consumed (ruling 5.17), never against the live configuration.
 func (h *SIWCHandler) Complete(ctx context.Context, req *LLMAccountCompleteRequest) (*LLMAccountResponse, error) {
-	if !h.cfg().Enabled() {
+	cfg := h.cfg()
+	if !cfg.Enabled() {
 		return nil, failure(ctx, h.logger, "complete linking", services.ErrSIWCDisabled)
+	}
+	// The live configuration is re-validated like Link and the callback do
+	// (amendment 2): an attempt minted before allow_hosted was switched off
+	// cannot be completed by paste either.
+	if err := services.ValidateSIWCConfig(cfg); err != nil {
+		return nil, failure(ctx, h.logger, "complete linking", err)
 	}
 	userUUID, _ := ctxauth.GetUserUUID(ctx)
 	if err := h.limiter.CheckSIWCComplete(ctx, userUUID); err != nil {
@@ -219,6 +230,9 @@ func (h *SIWCHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		h.redirect(w, r, siwcRedirectCode(err))
 		return
 	}
+	// The public route has no auth middleware to stamp the caller's address:
+	// the audit events of the completion carry the one RealIP resolved.
+	ctx = ctxauth.WithClientIP(ctx, utils.GetClientIP(r))
 	q := r.URL.Query()
 	in := services.CallbackInput{
 		Code: q.Get("code"), State: q.Get("state"), ClientID: q.Get("client_id"), Error: q.Get("error"),

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"golang.org/x/sync/singleflight"
@@ -56,6 +57,17 @@ const (
 	accountEarliestRefreshWait = 5 * time.Second
 	// accountPlanCacheTTL: the per-account plan catalog cache (spec: 5 min).
 	accountPlanCacheTTL = 5 * time.Minute
+	// accountInvalidClientBackoff: after the token endpoint answered
+	// invalid_client for a registration's set, refreshes of that same set
+	// answer unavailable from memory for this long instead of presenting
+	// the same failing client again (final review, Minor 2). A reauth or a
+	// rotation stores a new set (another savedAt) and is never held back.
+	accountInvalidClientBackoff = time.Minute
+	// accountCompleteTimeout bounds the code exchange, the ID token check
+	// and the store of a completion. They run on a context detached from
+	// the request: once the code is spent at OpenAI, a browser that hangs
+	// up must not leave an issued refresh token neither stored nor revoked.
+	accountCompleteTimeout = 30 * time.Second
 
 	accountLabelMaxLen = 100
 	accountStoreRetry  = 3
@@ -190,6 +202,11 @@ type AccountsService struct {
 	planMu    sync.Mutex
 	planCache map[string]planEntry
 
+	// invalidClient: account uuid → the set that met invalid_client, until
+	// when (see accountInvalidClientBackoff).
+	invalidMu     sync.Mutex
+	invalidClient map[string]invalidClientEntry
+
 	auditMu sync.RWMutex
 	audit   iface.AuditSink
 }
@@ -197,6 +214,11 @@ type AccountsService struct {
 type planEntry struct {
 	slugs []string
 	at    time.Time
+}
+
+type invalidClientEntry struct {
+	savedAt time.Time
+	until   time.Time
 }
 
 func NewAccountsService(d AccountsDeps) *AccountsService {
@@ -211,7 +233,7 @@ func NewAccountsService(d AccountsDeps) *AccountsService {
 	return &AccountsService{
 		repo: d.Repo, host: d.Host, oidc: d.OIDC, plans: d.Plans, state: d.State, vault: d.Vault,
 		limiter: d.Limiter, redis: d.Redis, cfg: cfg, logger: logger, now: time.Now,
-		pollEvery: 200 * time.Millisecond, planCache: map[string]planEntry{},
+		pollEvery: 200 * time.Millisecond, planCache: map[string]planEntry{}, invalidClient: map[string]invalidClientEntry{},
 	}
 }
 
@@ -359,7 +381,8 @@ func loopbackRedirect(raw string) bool {
 
 func cleanLabel(label string) (string, error) {
 	label = strings.TrimSpace(label)
-	if len(label) > accountLabelMaxLen || strings.ContainsFunc(label, unicode.IsControl) {
+	// Characters, not bytes: the API schema's maxLength counts runes too.
+	if utf8.RuneCountInString(label) > accountLabelMaxLen || strings.ContainsFunc(label, unicode.IsControl) {
 		return "", fmt.Errorf("%w: label must be at most %d printable characters", iface.ErrLLMInvalidRequest, accountLabelMaxLen)
 	}
 	return label, nil
@@ -462,6 +485,11 @@ func (s *AccountsService) Complete(ctx context.Context, in CallbackInput, viaPas
 	if !loopbackRedirect(attempt.RedirectURI) {
 		return nil, ErrSIWCUnsupportedDeployment
 	}
+	// From here the authorization code is spent at OpenAI: the exchange,
+	// the ID token check and the store (or the revocation of what cannot
+	// be stored) run to the end even if the browser hangs up.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), accountCompleteTimeout)
+	defer cancel()
 	tok, err := s.oidc.Exchange(ctx, clientID, in.Code, attempt.Verifier, attempt.RedirectURI)
 	if err != nil {
 		return nil, err
@@ -660,15 +688,24 @@ func (s *AccountsService) completeNew(ctx context.Context, attempt *SIWCAttempt,
 		// concurrently (re-read by client id and update that row) or two
 		// first links raced on the selected index (insert unselected).
 		rows, lerr := s.repo.ListByUser(ctx, attempt.UserUUID)
-		if lerr == nil {
-			for i := range rows {
-				if rows[i].Provider == models.ProviderOpenAI && rows[i].ClientID == clientID {
-					return s.relink(ctx, &rows[i], clientID, tok, claims)
-				}
+		if lerr != nil {
+			// Which index refused the insert is unknown: retrying unselected
+			// could only duplicate again and read as a name clash.
+			s.revokeQuiet(ctx, clientID, tok.RefreshToken)
+			return nil, fmt.Errorf("%w: %w: re-read linked accounts", ErrSIWCExchangeFailed, iface.ErrLLMProviderUnavailable)
+		}
+		for i := range rows {
+			if rows[i].Provider == models.ProviderOpenAI && rows[i].ClientID == clientID {
+				return s.relink(ctx, &rows[i], clientID, tok, claims)
 			}
 		}
 		acc.Selected = false
-		err = s.repo.Insert(ctx, acc)
+		if err = s.repo.Insert(ctx, acc); errors.Is(err, repository.ErrDuplicateName) {
+			// The same client id landed between the re-read and this insert:
+			// a store race, not a label the user chose.
+			s.revokeQuiet(ctx, clientID, tok.RefreshToken)
+			return nil, fmt.Errorf("%w: %w: concurrent link", ErrSIWCExchangeFailed, iface.ErrLLMProviderUnavailable)
+		}
 	}
 	if err != nil {
 		s.revokeQuiet(ctx, clientID, tok.RefreshToken)
@@ -971,6 +1008,9 @@ func (s *AccountsService) refreshFlight(ctx context.Context, accountUUID string,
 			}
 		}
 	}
+	if s.invalidClientHeld(acc) {
+		return nil, fmt.Errorf("%w: %w: client configuration rejected recently", ErrSIWCInvalidClient, iface.ErrLLMProviderUnavailable)
+	}
 	rt, err := s.vault.Open(ctx, acc.TenantID, acc.UUID, accountFieldRefreshToken, acc.RefreshToken)
 	if err != nil {
 		if errors.Is(err, ErrEnvelopeCorrupt) {
@@ -990,7 +1030,10 @@ func (s *AccountsService) refreshFlight(ctx context.Context, accountUUID string,
 			// The guide files invalid_client under "fix configuration, not
 			// tokens": a reauth with the same issued client id would fail
 			// the same way, so credentials and status are kept and the call
-			// is unavailable (logged for the operator).
+			// is unavailable (logged for the operator). The same set is not
+			// presented again for accountInvalidClientBackoff, and the
+			// router treats it as final (no same-kind fallback).
+			s.holdInvalidClient(acc)
 			s.logger.WarnContext(ctx, "llm siwc: token endpoint rejected the client configuration", slog.String("account", acc.UUID))
 		}
 		return nil, err // transient: credentials kept
@@ -1007,6 +1050,13 @@ func (s *AccountsService) refreshFlight(ctx context.Context, accountUUID string,
 			if cred, ok := s.serveNewer(ctx, accountUUID, acc.SavedAt); ok {
 				return cred, nil
 			}
+		} else if errors.Is(err, repository.ErrNotFound) {
+			// The row is gone: an unlink or an erasure raced this refresh and
+			// revoked only the token it read. The rotated one must not
+			// outlive it. (Any other store failure leaves the row, and an
+			// unacknowledged write may even have landed: revoking there could
+			// kill the stored set, so it is left alone.)
+			s.revokeRotated(ctx, acc.ClientID, rt, tok.RefreshToken)
 		}
 		return nil, fmt.Errorf("%w: store refreshed tokens: %w", iface.ErrLLMProviderUnavailable, mapRepoErr(err))
 	}
@@ -1016,6 +1066,44 @@ func (s *AccountsService) refreshFlight(ctx context.Context, accountUUID string,
 		return nil, err
 	}
 	return &AccountCredential{Account: acc, AccessToken: tok.AccessToken}, nil
+}
+
+// revokeRotated revokes a freshly issued refresh token whose registration
+// was deleted meanwhile. A token the IdP echoed instead of rotating is the
+// one the unlink or erasure already revoked.
+func (s *AccountsService) revokeRotated(ctx context.Context, clientID, presented, issued string) {
+	if issued == "" || issued == presented {
+		return
+	}
+	s.revokeQuiet(ctx, clientID, issued)
+}
+
+// invalidClientHeld reports whether acc's current set met invalid_client
+// less than accountInvalidClientBackoff ago.
+func (s *AccountsService) invalidClientHeld(acc *models.UserAccount) bool {
+	s.invalidMu.Lock()
+	defer s.invalidMu.Unlock()
+	e, ok := s.invalidClient[acc.UUID]
+	if !ok {
+		return false
+	}
+	if !e.savedAt.Equal(acc.SavedAt) || !s.now().Before(e.until) {
+		delete(s.invalidClient, acc.UUID)
+		return false
+	}
+	return true
+}
+
+func (s *AccountsService) holdInvalidClient(acc *models.UserAccount) {
+	now := s.now()
+	s.invalidMu.Lock()
+	defer s.invalidMu.Unlock()
+	for id, e := range s.invalidClient { // bounded by the failing registrations
+		if !now.Before(e.until) {
+			delete(s.invalidClient, id)
+		}
+	}
+	s.invalidClient[acc.UUID] = invalidClientEntry{savedAt: acc.SavedAt, until: now.Add(accountInvalidClientBackoff)}
 }
 
 // revokeDropped revokes the refresh token of a rotation that lost the

@@ -676,6 +676,11 @@ func (m *Module) mountSIWCCallback(ri *module.RouteInfo) {
 	if err := services.ValidateSIWCConfig(cfg); err != nil {
 		logger.Warn("llm siwc: loopback_local configuration is invalid; the callback refuses every request until it is fixed", slog.String("error", err.Error()))
 	}
+	if m.siwc.ConsoleOrigin() == "" {
+		// The closed redirect would be relative and land the browser on the
+		// API's own 127.0.0.1:<port>/user/security, a 404.
+		logger.Warn("llm siwc: no operator console origin is configured (OPERATOR_FRONTEND_URL or the platform frontend URL); the loopback callback cannot return the browser to the console")
+	}
 	ri.Router.Get(services.SIWCCallbackPath, m.siwc.Callback)
 }
 

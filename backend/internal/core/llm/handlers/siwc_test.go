@@ -30,14 +30,15 @@ const (
 )
 
 type siwcHarness struct {
-	h       *SIWCHandler
-	repo    *fakeAccounts
-	oidc    *fakeSIWCOIDC
-	redis   *memRedis
-	metrics *recordingMetrics
-	logs    *bytes.Buffer
-	mu      sync.Mutex
-	cfg     services.SIWCConfig
+	h        *SIWCHandler
+	accounts *services.AccountsService
+	repo     *fakeAccounts
+	oidc     *fakeSIWCOIDC
+	redis    *memRedis
+	metrics  *recordingMetrics
+	logs     *bytes.Buffer
+	mu       sync.Mutex
+	cfg      services.SIWCConfig
 }
 
 func (s *siwcHarness) setMode(mode string) {
@@ -73,6 +74,7 @@ func newSIWCHandler(t *testing.T, mode string) (*siwcHarness, context.Context) {
 		State: services.NewSIWCStateStore(s.redis, vault), Vault: vault, Limiter: limiter, Redis: s.redis,
 		Config: s.config, Logger: logger,
 	})
+	s.accounts = accounts
 	s.h = NewSIWCHandler(accounts, s.config, limiter, s.metrics, siwcConsole+"/", logger)
 	return s, ctxForUser(t, "t1", "u-admin")
 }
@@ -612,5 +614,66 @@ func TestMapError_SIWC(t *testing.T) {
 		if status, code, detail := codeOf(t, MapError(tc.err)); status != tc.status || code != tc.code || detail == "" || strings.Contains(detail, "llm siwc") {
 			t.Errorf("%v = %d %s %q", tc.err, status, code, detail)
 		}
+	}
+}
+
+// Minor 4 (final review): the paste completion re-validates the live
+// configuration like Link and the callback do. An attempt minted before
+// allow_hosted was switched off is refused before it is consumed or
+// exchanged.
+func TestSIWC_CompleteRevalidatesTheLiveConfiguration(t *testing.T) {
+	s, ctx := newSIWCHandler(t, services.SIWCModeHostedPaste)
+	state := s.link(t, ctx, "")
+	s.mu.Lock()
+	s.cfg.AllowHosted = false
+	s.mu.Unlock()
+	_, err := s.complete(ctx, siwcPasteRedirect+"?code=c&client_id=oaiapp_1&state="+state)
+	if status, code, _ := codeOf(t, err); status != 503 || code != errcode.LLMSIWCConfigInvalid {
+		t.Fatalf("complete = %d %s", status, code)
+	}
+	if s.oidc.exchanged() != 0 || len(s.repo.all()) != 0 {
+		t.Fatal("nothing may be exchanged or stored")
+	}
+}
+
+type ipAudit struct {
+	mu     sync.Mutex
+	events []iface.AuditEvent
+}
+
+func (a *ipAudit) Emit(_ context.Context, e iface.AuditEvent) {
+	a.mu.Lock()
+	a.events = append(a.events, e)
+	a.mu.Unlock()
+}
+
+// Minor 7 (final review): the public callback has no auth middleware, so
+// the handler stamps the RealIP-resolved address itself and the linked /
+// link_denied audit events carry it.
+func TestSIWC_CallbackAuditEventsCarryTheClientIP(t *testing.T) {
+	s, ctx := newSIWCHandler(t, services.SIWCModeLoopbackLocal)
+	audit := &ipAudit{}
+	s.accounts.SetAuditSink(audit)
+	linked := s.link(t, ctx, "")
+	if q := redirectOf(t, s.callback("code=c1&client_id=oaiapp_1&state="+url.QueryEscape(linked), "")); q.Get("linked") != "ok" {
+		t.Fatalf("redirect = %v", q)
+	}
+	denied := s.link(t, ctx, "")
+	if q := redirectOf(t, s.callback("error=access_denied&state="+url.QueryEscape(denied), "")); q.Get("error") != "denied" {
+		t.Fatalf("redirect = %v", q)
+	}
+	audit.mu.Lock()
+	defer audit.mu.Unlock()
+	seen := map[string]bool{}
+	for _, e := range audit.events {
+		if e.Action == "llm.account.linked" || e.Action == "llm.account.link_denied" {
+			seen[e.Action] = true
+			if e.IPAddress != "192.0.2.10" || e.ActorUserID != "u-admin" {
+				t.Fatalf("%s: ip %q actor %q", e.Action, e.IPAddress, e.ActorUserID)
+			}
+		}
+	}
+	if !seen["llm.account.linked"] || !seen["llm.account.link_denied"] {
+		t.Fatalf("events = %v", seen)
 	}
 }

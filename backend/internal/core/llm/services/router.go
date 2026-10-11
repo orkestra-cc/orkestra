@@ -84,6 +84,10 @@ func NewRouter(registry *providers.Registry, creds CredentialResolver, budget *B
 	return &Router{registry: registry, creds: creds, budget: budget, breaker: breaker, clients: clients, cfg: cfg, metrics: metrics, logger: logger}
 }
 
+// Credentials is the resolver the router was built with (read-only, for the
+// module's wiring checks).
+func (r *Router) Credentials() CredentialResolver { return r.creds }
+
 type noopMetrics struct{}
 
 func (noopMetrics) RecordLLMRequest(string, string)       {}
@@ -95,11 +99,17 @@ func (noopMetrics) RecordLLMTokens(string, string, int64) {}
 // partial output are final (spec "Routing", step 4). The plan route's
 // transient usage_unavailable / user_unavailable are fallbackable faults:
 // their bounded backoff in v1 is the breaker (3 failures → 30 s open,
-// ruling 5.13).
+// ruling 5.13). A plan-route configuration rejection
+// (subscription_sharing_route_not_supported, chatpass_v2_*) and an
+// invalid_client from the token endpoint are final too: the next
+// user_account candidate bills the same account through the same issued
+// client and grant, so it would fail the same way (the remedy is the
+// configuration, never another call).
 func fallbackable(err error) bool {
 	for _, final := range []error{context.Canceled, context.DeadlineExceeded, iface.ErrLLMBudgetExceeded,
 		iface.ErrLLMUserAccountRequired, iface.ErrLLMPlanUsageDisabled, iface.ErrLLMUserAccountReauth,
-		iface.ErrLLMQuotaExhausted, iface.ErrLLMInvalidRequest, iface.ErrLLMPartialOutput} {
+		iface.ErrLLMQuotaExhausted, iface.ErrLLMInvalidRequest, iface.ErrLLMPartialOutput,
+		providers.ErrSIWCRouteNotSupported, providers.ErrSIWCInvalidClient} {
 		if errors.Is(err, final) {
 			return false
 		}

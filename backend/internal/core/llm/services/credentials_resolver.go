@@ -39,6 +39,15 @@ func NewCredentialResolver(catalog orgCredentialSource, accounts AccountCredenti
 	return r
 }
 
+// Accounts is the linked-account source kind=user_account resolves through
+// (nil when not wired).
+func (r *CompositeCredentialResolver) Accounts() AccountCredentialSource {
+	if r.user == nil {
+		return nil
+	}
+	return r.user.accounts
+}
+
 func (r *CompositeCredentialResolver) Resolve(ctx context.Context, m models.Model, userUUID string) (providers.Credential, string, error) {
 	if m.CredentialRef.Kind != models.CredentialKindUserAccount {
 		return r.org.Resolve(ctx, m, userUUID)

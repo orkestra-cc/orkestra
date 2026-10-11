@@ -68,17 +68,19 @@ func (c SIWCConfig) Enabled() bool {
 // itself listens on the loopback the browser is redirected to.
 func (c SIWCConfig) CallbackRouteMounted() bool { return c.Mode == SIWCModeLoopbackLocal }
 
+// loopbackPort reads the explicit port of an http://127.0.0.1:<port>
+// operator URL. The port is mandatory and cannot be 80: a browser omits the
+// default port from the Host header (Host: 127.0.0.1), so the address the
+// callback arrives on would never equal the registered
+// http://127.0.0.1:80/… redirect and every callback would read as an
+// invalid state.
 func loopbackPort(raw string) (int, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "http" || u.User != nil || u.Hostname() != SIWCLoopbackHost || (u.Path != "" && u.Path != "/") {
 		return 0, ErrSIWCUnsupportedDeployment
 	}
-	port := u.Port()
-	if port == "" {
-		port = "80"
-	}
-	n, err := strconv.Atoi(port)
-	if err != nil || n < 1 || n > 65535 {
+	n, err := strconv.Atoi(u.Port())
+	if err != nil || n < 1 || n > 65535 || n == 80 {
 		return 0, ErrSIWCUnsupportedDeployment
 	}
 	return n, nil
@@ -118,7 +120,7 @@ func ValidateSIWCConfig(c SIWCConfig) error {
 		if _, err := loopbackPort(c.OperatorPublicURL); err != nil {
 			return &SIWCConfigError{
 				Field:  SIWCFieldMode,
-				Reason: "loopback_local requires OPERATOR_API_URL to be exactly http://127.0.0.1:<port> (never localhost)",
+				Reason: "loopback_local requires OPERATOR_API_URL to be exactly http://127.0.0.1:<port> with an explicit port other than 80 (never localhost)",
 				kind:   ErrSIWCUnsupportedDeployment,
 			}
 		}
