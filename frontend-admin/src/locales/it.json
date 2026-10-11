@@ -233,7 +233,8 @@
       "siwc_denied": "L'autorizzazione è stata rifiutata su OpenAI. Non è stato collegato nulla.",
       "siwc_exchange_failed": "OpenAI non ha completato l'accesso. Riprova a collegare più tardi.",
       "siwc_id_token_invalid": "L'identità restituita da OpenAI non è verificabile, oppure appartiene a un altro account. Non è stato modificato nulla."
-    }
+    },
+    "mfa_enrollment_required": "Questa azione richiede una verifica recente con un secondo fattore. Configura un'app di autenticazione o una passkey nelle impostazioni di sicurezza, poi riprova."
   },
   "banner": {
     "impersonation": {

@@ -233,7 +233,8 @@
       "siwc_denied": "The authorization was declined at OpenAI. Nothing was linked.",
       "siwc_exchange_failed": "OpenAI did not complete the sign-in. Try linking again later.",
       "siwc_id_token_invalid": "The identity returned by OpenAI could not be verified, or it belongs to another account. Nothing was changed."
-    }
+    },
+    "mfa_enrollment_required": "This action needs a fresh check with a second factor. Set up an authenticator app or a passkey in your security settings, then try again."
   },
   "banner": {
     "impersonation": {
