@@ -54,3 +54,24 @@ type UserAccount struct {
 	LastError         string     `bson:"lastError,omitempty"` // llm.* code, never provider text
 	UpdatedAt         time.Time  `bson:"updatedAt"`
 }
+
+// AccountTokenSet is everything a token refresh or a reauth replaces on a
+// registration, written in one update (repository.UserAccounts.ReplaceTokens)
+// fenced by a compare-and-swap on the previous SavedAt. IDToken nil keeps the
+// stored ID token (a refresh response may omit it); Email "" keeps the stored
+// email. Times must already be truncated to the millisecond (Mongo's
+// precision), or the next compare-and-swap on SavedAt cannot match.
+type AccountTokenSet struct {
+	IDToken           *Envelope
+	AccessToken       Envelope
+	RefreshToken      Envelope
+	TokenType         string
+	ExpiresAt         time.Time
+	RefreshExpiresAt  time.Time
+	EarliestRefreshAt *time.Time
+	SavedAt           time.Time
+	Scopes            []string
+	PlanUsageGranted  bool
+	Status            string
+	Email             string
+}

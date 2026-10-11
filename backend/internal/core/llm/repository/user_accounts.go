@@ -19,6 +19,11 @@ const CollUserAccounts = "llm_user_accounts"
 // would otherwise match (and erase) every row stored without a userUuid.
 var ErrEmptySubject = errors.New("llm repository: empty subject id")
 
+// ErrStaleTokenSet: ReplaceTokens lost its compare-and-swap — another writer
+// (a refresh on another replica, a reauth) replaced the token set after the
+// caller read it. The caller re-reads instead of overwriting.
+var ErrStaleTokenSet = errors.New("llm repository: account token set changed concurrently")
+
 // UserAccounts owns llm_user_accounts.
 type UserAccounts struct{ coll *mongo.Collection }
 
@@ -127,6 +132,85 @@ func (r *UserAccounts) Update(ctx context.Context, a *models.UserAccount) error 
 		return ErrNotFound
 	}
 	return nil
+}
+
+// setFields is the targeted writer behind SetLastUsed and SetStatus: a $set
+// of only the given fields (plus updatedAt), so it can never write an old
+// token set back over a concurrent refresh (ruling 2.14).
+func (r *UserAccounts) setFields(ctx context.Context, uuid string, set bson.M) error {
+	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid})
+	if err != nil {
+		return err
+	}
+	set["updatedAt"] = time.Now().UTC()
+	res, err := r.coll.UpdateOne(ctx, filter, bson.M{"$set": set})
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetLastUsed stamps a successful plan-billed call.
+func (r *UserAccounts) SetLastUsed(ctx context.Context, uuid string, at time.Time) error {
+	return r.setFields(ctx, uuid, bson.M{"lastUsedAt": at.UTC()})
+}
+
+// SetStatus records status and lastError (an llm.* code, "" clears it).
+func (r *UserAccounts) SetStatus(ctx context.Context, uuid, status, lastError string) error {
+	return r.setFields(ctx, uuid, bson.M{"status": status, "lastError": lastError})
+}
+
+// ReplaceTokens writes a refreshed or re-authorized token set in one update,
+// matched on org, uuid AND the savedAt the caller read (compare-and-swap):
+// a writer that lost the race gets ErrStaleTokenSet and nothing is written,
+// so two rotations can never interleave their envelopes. An unknown uuid
+// (or another org's) is ErrNotFound. set.IDToken nil and set.Email "" keep
+// the stored values; lastError is cleared.
+func (r *UserAccounts) ReplaceTokens(ctx context.Context, uuid string, prevSavedAt time.Time, set models.AccountTokenSet) error {
+	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid, "savedAt": prevSavedAt.UTC()})
+	if err != nil {
+		return err
+	}
+	fields := bson.M{
+		"accessToken":      set.AccessToken,
+		"refreshToken":     set.RefreshToken,
+		"tokenType":        set.TokenType,
+		"expiresAt":        set.ExpiresAt.UTC(),
+		"refreshExpiresAt": set.RefreshExpiresAt.UTC(),
+		"savedAt":          set.SavedAt.UTC(),
+		"scopes":           set.Scopes,
+		"planUsageGranted": set.PlanUsageGranted,
+		"status":           set.Status,
+		"lastError":        "",
+		"updatedAt":        time.Now().UTC(),
+	}
+	if set.IDToken != nil {
+		fields["idToken"] = *set.IDToken
+	}
+	if set.Email != "" {
+		fields["email"] = set.Email
+	}
+	update := bson.M{"$set": fields}
+	if set.EarliestRefreshAt != nil {
+		fields["earliestRefreshAt"] = set.EarliestRefreshAt.UTC()
+	} else {
+		update["$unset"] = bson.M{"earliestRefreshAt": ""}
+	}
+	res, err := r.coll.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 1 {
+		return nil
+	}
+	// Tell a lost race from a missing row: only the former is retryable.
+	if _, err := r.findOne(ctx, bson.M{"uuid": uuid}); err != nil {
+		return err
+	}
+	return ErrStaleTokenSet
 }
 
 // Select makes uuid the user's selected registration for provider and
