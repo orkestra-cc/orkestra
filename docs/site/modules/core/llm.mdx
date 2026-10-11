@@ -11,7 +11,7 @@ The module boots with zero credentials and zero models. It is healthy in that st
 
 ## What it owns
 
-Seven collections, all scoped to an internal organization (`tenantId`):
+Nine collections. Eight are scoped to an internal organization (`tenantId`); `llm_installation` is the one exception:
 
 | Collection | Holds |
 |---|---|
@@ -22,6 +22,8 @@ Seven collections, all scoped to an internal organization (`tenantId`):
 | `llm_usage_monthly` | One rollup per organization and UTC month: requests, input and output tokens per payer, tokens reserved by calls in flight, and when the warning and exhausted thresholds were crossed. Kept 24 months. |
 | `llm_budgets` | At most one per organization: monthly token limit, warning percentage, action (`block` or `warn_only`), extra alert recipients. No document means no limit. |
 | `llm_budget_outbox` | Budget alerts waiting for or after delivery, one per organization, month and threshold, with the recipients already delivered. |
+| `llm_user_accounts` | A user's linked ChatGPT account (see [Sign in with ChatGPT](#sign-in-with-chatgpt)): label, email, status, whether plan usage was granted, expiry times, and the three sign-in tokens, each sealed in its own envelope. A user may hold several; one is *selected*. |
+| `llm_installation` | One document holding this installation's host identifier, which OpenAI asks for once per host. It has no organization: one database deployment is one host. |
 
 ### Secrets and the envelope
 
@@ -64,6 +66,14 @@ Operator host. Every route requires an authenticated internal-organization conte
 | GET | `/v1/admin/llm/budget` | `llm.admin.read` | The budget; `204` when the organization has none |
 | PUT | `/v1/admin/llm/budget` | `llm.budgets.admin` | Second factor + step-up. Body `{monthlyTokenLimit, warnPct?, action, notifyExtraUserUuids?}`; extra recipients (at most 50) must be members, otherwise `llm.invalid_request` and nothing is written |
 | GET | `/v1/llm/me/usage` | `llm.usage.self` | The calling user's consumption this month, split by who paid |
+| GET | `/v1/llm/accounts/openai` | `llm.accounts.self` | The calling user's linked ChatGPT accounts in the current organization, and the installation's Sign in with ChatGPT mode |
+| POST | `/v1/llm/accounts/openai/link` | `llm.accounts.self` | Body `{label?, reauthAccountUuid?}`. Starts linking (or signing in again to one of your accounts) and returns `{authorizeUrl, mode}`. At most 5 a user in 10 minutes |
+| POST | `/v1/llm/accounts/openai/complete` | `llm.accounts.self` | Body `{callbackUrl}`. Finishes linking from the address the browser landed on (paste flow). At most 10 a user in 10 minutes |
+| PUT | `/v1/llm/accounts/openai/{uuid}/selected` | `llm.accounts.self` | `204`. Makes this account the one your plan-billed models use |
+| DELETE | `/v1/llm/accounts/openai/{uuid}` | `llm.accounts.self` | `204`. Revokes the account's sign-in at OpenAI (best-effort) and removes it |
+| GET | `/v1/admin/llm/accounts` | `llm.admin.read` | Every linked account of the organization with its owner; never a token |
+| DELETE | `/v1/admin/llm/accounts/{uuid}` | `llm.accounts.admin` | Second factor + step-up. `204`. Force-unlinks any member's account |
+| GET | `/v1/llm/accounts/openai/callback` | none | Not part of the API reference: the browser landing point of the automatic flow, present only in `loopback_local` mode. Always answers a redirect to the console |
 
 Collections are returned as `{ "items": [...] }`. Errors carry a stable `llm.*` code:
 
@@ -81,8 +91,16 @@ Collections are returned as `{ "items": [...] }`. Errors carry a stable `llm.*` 
 | `llm.rate_limited` | 429 | More than 10 credential tests, model discoveries or prompt tests a minute (per organization and credential, or per organization and user for prompts); `Retry-After` gives the rest of the window |
 | `llm.credential_rejected` | 422 | The provider refused the key (401/403): wrong, revoked or under-privileged |
 | `llm.request_canceled` | 499 | The caller closed the connection while a provider call was running; never counted as a server error |
+| `llm.siwc_disabled` | 404 | Sign in with ChatGPT is turned off on this installation |
+| `llm.siwc_unsupported_deployment` | 409 | `loopback_local` is set but the operator API is not reached as `http://127.0.0.1:<port>` |
+| `llm.siwc_config_invalid` | 503 | The Sign in with ChatGPT settings are contradictory or unsupported (422 when saved from the settings page) |
+| `llm.siwc_callback_invalid` | 422 | The pasted address is not the one the browser showed (wrong host, port or path, or no `state`/`code`) |
+| `llm.siwc_state_invalid` | 409 | The sign-in attempt expired, was already used, or belongs to another user or organization |
+| `llm.siwc_denied` | 409 | The authorization was declined at OpenAI |
+| `llm.siwc_id_token_invalid` | 409 | The identity OpenAI returned could not be verified, or a re-sign-in came back as another account |
+| `llm.siwc_exchange_failed` | 502 | OpenAI did not complete the sign-in |
 
-The gateway adds `llm.not_configured` (503), `llm.no_eligible_model` (403), `llm.model_access_denied` (403), `llm.capability_mismatch` (422), `llm.provider_unavailable` (503), `llm.budget_exceeded` (429, `Retry-After: 3600`), `llm.plan_quota_exhausted` (429) and `llm.partial_output` (502); see [Gateway contract](#gateway-contract) and [Routing](#routing).
+The gateway adds `llm.not_configured` (503), `llm.no_eligible_model` (403), `llm.model_access_denied` (403), `llm.capability_mismatch` (422), `llm.provider_unavailable` (503), `llm.budget_exceeded` (429, `Retry-After: 3600`), `llm.plan_quota_exhausted` (429), `llm.partial_output` (502) and, for models billed to a user's own account, `llm.user_account_required`, `llm.user_account_reauth_required` and `llm.plan_usage_disabled` (all 409); see [Gateway contract](#gateway-contract) and [Routing](#routing).
 
 ## Permissions
 
@@ -96,14 +114,16 @@ All admin permissions are `System: true` — only the platform system roles inhe
 | `llm.grants.admin` | mutation | Decide who may use each model |
 | `llm.usage.read` | read | See the usage report — which also carries the budget, so this permission reads the budget too |
 | `llm.budgets.admin` | mutation | Set the monthly budget, its action and extra recipients |
+| `llm.accounts.admin` | mutation | Force-unlink another member's linked ChatGPT account |
 | `llm.models.self` | self | List the models you may use (an organization permission, not a system one) |
 | `llm.usage.self` | self | See your own consumption this month (an organization permission) |
+| `llm.accounts.self` | self | Link, select and unlink your own ChatGPT accounts (an organization permission) |
 
-Every `.admin` mutation requires a second factor completed in the session — the route itself checks it, independently of whether the policy engine's admin-suffix rule is enforced — and credential, grant and budget changes additionally require a fresh one (step-up, five minutes; a password reconfirm does not count). A `developer` is not granted an `.admin` key in production. Each mutation emits an audit event (`llm.credential.created|updated|rotated|deleted`, `llm.model.created|updated|deleted`, `llm.grants.replaced`, `llm.budget.updated`, `llm.credential.tested`, `llm.credential.models_discovered`) once the compliance module has injected the audit sink; the event carries names and counts, never secrets or base URLs.
+Every `.admin` mutation requires a second factor completed in the session — the route itself checks it, independently of whether the policy engine's admin-suffix rule is enforced — and credential, grant and budget changes and the forced unlink of a linked account additionally require a fresh one (step-up, five minutes; a password reconfirm does not count). Your **own** linked-account routes (`llm.accounts.self`) need neither: they only touch your own registrations, like the list of your models. A `developer` is not granted an `.admin` key in production. Each mutation emits an audit event (`llm.credential.created|updated|rotated|deleted`, `llm.model.created|updated|deleted`, `llm.grants.replaced`, `llm.budget.updated`, `llm.credential.tested`, `llm.credential.models_discovered`, `llm.account.link_started|link_denied|linked|selected|unlinked`) once the compliance module has injected the audit sink; the event carries names and counts, never secrets or base URLs.
 
 ## Configuration
 
-Settings at `/admin/modules/llm`, in two groups. The module hot-reloads its configuration, so a change applies to the next call without a restart; out-of-range values are clamped.
+Settings at `/admin/modules/llm`, in three groups (providers, limits, Sign in with ChatGPT). The module hot-reloads its configuration, so a change applies to the next call without a restart (with one exception, noted on `siwc_mode`); out-of-range values are clamped.
 
 | Key | Default | Env var | Meaning |
 |---|---|---|---|
@@ -112,8 +132,12 @@ Settings at `/admin/modules/llm`, in two groups. The module hot-reloads its conf
 | `usage_retention_days` | `90` | `LLM_USAGE_RETENTION_DAYS` | Retention of per-call usage rows (31–3650: the current month always stays complete for self usage) |
 | `budget_warn_pct` | `80` | `LLM_BUDGET_WARN_PCT` | Default warning threshold for new budgets (0–100) |
 | `budget_reserve_output_tokens` | `4096` | `LLM_BUDGET_RESERVE_OUTPUT_TOKENS` | Output tokens reserved against the budget when a model declares none (1–131072). A model's own `budgetReserveOutputTokens` overrides it; sending `0` on create or `PATCH` means no override, so `PATCH` with `0` returns the model to this default |
+| `siwc_mode` | `disabled` | `LLM_SIWC_MODE` | `disabled`, `loopback_local` or `hosted_paste` (see [Sign in with ChatGPT](#sign-in-with-chatgpt)). Either mode requires `allow_hosted`; a contradictory combination is refused with `llm.siwc_config_invalid`. Switching **to** `loopback_local` takes effect after a restart (its callback route is mounted at boot); `hosted_paste` and `disabled` apply at once |
+| `siwc_paste_port` | `14555` | `LLM_SIWC_PASTE_PORT` | Advanced, `hosted_paste` only. Port (1024–65535) of the `127.0.0.1` address users paste back. Nothing listens on it; change it only if a program on users' machines uses it (the Codex CLI uses 1455) |
 
 `allow_hosted` is a technical control. Before enabling it, document the data flow (categories of prompts and outputs, purpose and legal basis, processor, retention, region and transfer mechanism) in your records of processing.
+
+`loopback_local` also reads the environment variable `OPERATOR_API_URL`, the operator API's public origin (derived from `CONSOLE_HOST` when unset), and requires it to be exactly `http://127.0.0.1:<port>`; the development compose file defaults to that.
 
 Endpoint rules: `openai`, `anthropic` and `gemini` have a fixed endpoint and take no `baseUrl`; `ollama` and `openai_compatible` require one; `mock` takes none. In a production-like environment a `baseUrl` must be public HTTPS — loopback, private, link-local, CGNAT, multicast, ULA and other special-use ranges, `.local` and `.internal` names and the metadata host are refused.
 
@@ -130,7 +154,7 @@ Who may use a model is decided only on the grants route (`PUT …/grants`, `llm.
 
 Routing for a purpose: the candidates are the usable models that declare the purpose and offer the capabilities the request needs, ordered by that purpose's priority (lower wins) then name. The purpose falls back to `default` **only** when no live model of the organization declares it at all; if some model declares it but the caller may not use it, the result is empty (`ErrLLMNoEligibleModel`) rather than a silent move to another purpose. A caller may pin one model; a pin must be among its candidates, so pinning never widens access.
 
-A model billed to the user's own linked account (`credentialRef.kind = user_account`) must use the `openai` provider, cannot offer embeddings and cannot set a temperature or output limit.
+A model billed to the user's own linked account (`credentialRef.kind = user_account`) must use the `openai` provider, cannot offer embeddings and cannot set a temperature or output limit. It is usable by someone who both holds the grant **and** has a usable selected linked account whose plan catalog lists the model; otherwise it is hidden from the self list and `Resolve`, and a direct call answers `llm.user_account_required`, `llm.user_account_reauth_required`, `llm.plan_usage_disabled` or a capability mismatch, so a consumer can tell the cases apart.
 
 ## Gateway contract
 
@@ -180,7 +204,7 @@ A call that fails after streaming part of its answer is charged conservatively. 
 
 | Provider | Endpoint | Notes |
 |---|---|---|
-| `openai` | fixed (Responses API) | Official SDK. Chat, streaming, tools, structured output, embeddings |
+| `openai` | fixed (Responses API) | Official SDK. Chat, streaming, tools, structured output, embeddings. Models billed to a linked ChatGPT account use a restricted request profile (no embeddings; see [Sign in with ChatGPT](#sign-in-with-chatgpt)) |
 | `anthropic` | fixed (Messages API) | Official SDK. No embeddings |
 | `gemini` | fixed (Gemini Developer API) | Official SDK. Tool calls carry an opaque `Signature` (Gemini 3 thought signatures) that must be sent back on the next turn |
 | `ollama` | `baseUrl` required | Native API. The key is optional (sent as a Bearer token for proxied deployments) |
@@ -204,22 +228,70 @@ Each alert is sent at most once per organization and month. It is written in the
 
 `GET /v1/admin/llm/usage` groups the finalized calls of a period by model, user or calling module (requests, input and output tokens), and returns the current month's rollup and the budget. `GET /v1/llm/me/usage` gives a user their own month, split by whether the organization or their own linked account paid. The console's **Usage** and **Budget** tabs at `/admin/llm` read these routes.
 
+## Sign in with ChatGPT
+
+A model configured with `credentialRef.kind = user_account` is paid by the **calling user's own ChatGPT plan** instead of an organization API key. Each user links an account once; the module keeps its sign-in tokens sealed on the server (the browser never sees them) and refreshes them as needed. This is the "Sign in with ChatGPT" program OpenAI documents for open-source and locally hosted applications: OpenID Connect with PKCE and a callback on `127.0.0.1`. Plan usage still counts against the organization's budget.
+
+### Link your ChatGPT account
+
+Users link accounts in their security settings, on the **AI accounts** tab (`/user/security?tab=ai`, shown with `llm.accounts.self`). Which flow they see depends on `siwc_mode`:
+
+- **Local installation (`loopback_local`).** Choose **Link a ChatGPT account**. OpenAI opens in the same window; sign in with the ChatGPT account you want to use and allow plan usage when asked. OpenAI sends the browser back to the installation and the console returns to the tab with the account linked. This works only when the browser runs on the same machine as the API, which must be reached as `http://127.0.0.1:<port>`.
+- **Hosted installation (`hosted_paste`).** Choose **Link a ChatGPT account** and then **Open OpenAI**; OpenAI opens in a new tab. Sign in and allow plan usage. OpenAI then tries to open an address starting with `http://127.0.0.1` and the tab shows a connection error: that is expected. Copy the full address from that tab's address bar, paste it into the console and choose **Complete linking**. The address works once and for ten minutes.
+
+OpenAI's overview documents the program for open-source and locally hosted applications and points remotely hosted ones to an interest form, so enabling `hosted_paste` on a hosted installation is the operator's decision, not a default.
+
+A user may link several accounts (for example, different workspaces) and **Select** the one plan-billed models use; the list of models they can use follows the selected account's own catalog. **Unlink** revokes the sign-in at OpenAI (best-effort) and removes the account. Operators see every member's accounts on the **Accounts** tab of `/admin/llm` and can force-unlink one.
+
+### Account states
+
+| State | Meaning | What to do |
+|---|---|---|
+| Active | The account can pay for calls | — |
+| Plan usage not granted | The sign-in is valid but OpenAI did not grant plan usage | Sign in again and allow plan usage |
+| Sign-in needed | OpenAI no longer accepts the stored sign-in (it expired, was revoked or was reused) | **Re-authorize**: sign in again to the same account |
+| Revoked | Reserved; not set in this version | Unlink and link again |
+
+A sign-in that comes back as a *different* ChatGPT identity than the account being re-authorized is refused and the stored account is left untouched.
+
+### Operator setup
+
+1. Enable **Allow hosted providers** (both modes need it: prompts leave the installation for OpenAI).
+2. Choose **Sign in with ChatGPT** in the llm settings. For `loopback_local`, `OPERATOR_API_URL` must be exactly `http://127.0.0.1:<port>`; restart the backend after switching to it, because its callback route is mounted at boot. For `hosted_paste`, set `siwc_paste_port` only if the default clashes, and use an `https` `OPERATOR_API_URL` in production-like environments.
+3. Create a model with the credential kind `user_account` (provider `openai`, a model ID the plan offers, no embeddings, no temperature or output limit) and grant it to the users who should have it.
+
+### How plan calls differ
+
+- Requests to the plan route carry only what it accepts: no temperature or output limit, no metadata, `user` or `previous_response_id`, no `system` messages (use `instructions`), `store` is always `false` and the answer is always streamed. Embeddings are not available.
+- Access tokens are refreshed shortly before they expire. Replicas coordinate through a short Redis lease, so one refresh happens at a time; an unusable refresh token marks the account *Sign-in needed*. A `401` from the plan route triggers one refresh and one retry.
+- Quota, eligibility and availability errors from the plan route become the usual `llm.*` codes; a fallback never moves a call from one payer to another.
+- Rate limits protect the flow: 5 link starts and 10 completions per user, and 20 callbacks per client address, each per 10 minutes.
+
+:::note Not verified against a live account yet
+The module has been exercised against test doubles, not a real ChatGPT Plus or Pro account. Whether OpenAI accepts a code exchange that starts from a remotely hosted backend, which the paste flow relies on, is part of that pending check; `siwc_mode` ships as `disabled`.
+:::
+
+:::note Known limits of the first version
+Redis is needed for the one-shot sign-in state: without it the paste flow answers a server error and the automatic callback returns to the console with `token_exchange_failed`. The automatic callback is unauthenticated by nature: a user could try to have someone on the installation's own host approve a sign-in they started, which would link that person's account to them; OpenAI shows a consent screen and attempts last ten minutes. While OpenAI cannot be reached, plan-billed models disappear from the self list because their catalog cannot be read.
+:::
+
 ## Metrics
 
 | Metric | Labels |
 |---|---|
 | `orkestra_llm_requests_total` | `provider`, `outcome` (`ok`, `fallback`, `error`, `budget_blocked`) |
 | `orkestra_llm_tokens_total` | `provider`, `direction` (`input`, `output`) — tokens of the calls the router finalizes, partial-output charges included. Orphans closed by the reconciler are charged in the ledger and the budget but not counted here |
+| `orkestra_llm_siwc_link_total` | `outcome` (`linked`, `plan_disabled`, `denied`, `state_invalid`, `id_token_invalid`, `exchange_failed`) — link completions through the automatic callback or a pasted address |
 
 ## Data-subject rights
 
-The module registers an `iface.PIIProducer` with the subject `llm`. Export returns explicit projections only — never a credential, an endpoint or an envelope: the grants the user holds, the grants they issued, references to the credentials and models they created, their usage rows (model, purpose, calling module, counters, outcome, dates — the ledger holds no prompts), the budgets that name them as extra recipient or last editor, and the budget alerts delivered to them.
+The module registers an `iface.PIIProducer` with the subject `llm`. Export returns explicit projections only — never a credential, an endpoint or an envelope: the grants the user holds, the grants they issued, references to the credentials and models they created, their usage rows (model, purpose, calling module, counters, outcome, dates — the ledger holds no prompts), the budgets that name them as extra recipient or last editor, the budget alerts delivered to them, and their linked ChatGPT accounts (label, email, status and dates; never a token, the client identifier OpenAI issued or the OpenAI subject).
 
-Erasure deletes the grants the user holds; replaces the actor id on the grants they issued, the credentials and models they created and the budgets they last edited with a fixed constant (`erased-subject`) that is not derived from the user; and removes them from every budget's extra recipients and every alert's delivered list. Usage rows depend on the erase mode: a hard delete removes them, an anonymizing erasure keeps the counters with the user replaced by a **random identifier per row** (so the rows cannot be linked to each other into a profile) and the credential reference removed. A row of a call still in flight is anonymized in both modes and removed later by retention. Credentials, models and budgets are organization assets and stay. A request with an empty subject id is refused before any query: it would otherwise match every row created without a user.
+Erasure deletes the grants the user holds; replaces the actor id on the grants they issued, the credentials and models they created and the budgets they last edited with a fixed constant (`erased-subject`) that is not derived from the user; and removes them from every budget's extra recipients and every alert's delivered list. Usage rows depend on the erase mode: a hard delete removes them, an anonymizing erasure keeps the counters with the user replaced by a **random identifier per row** (so the rows cannot be linked to each other into a profile) and the credential reference removed. A row of a call still in flight is anonymized in both modes and removed later by retention. Linked ChatGPT accounts are handled in both erase modes: each account's sign-in is revoked at OpenAI (best-effort) and then every account of the user is deleted. Credentials, models and budgets are organization assets and stay. A request with an empty subject id is refused before any query: it would otherwise match every row created without a user.
 
 ## Status
 
-Foundations and the gateway are delivered ([ADR-0022](/adrs/core-llm-module)): the catalog, access model, encrypted secrets, data-subject rights, the six provider adapters, routing with fallback and circuit breaking, the usage ledger and monthly budget with alerts, connectivity tests, model discovery and the prompt test, and the `/admin/llm` console page (tabs for models, credentials, usage and budget, kept in the URL). Sign in with ChatGPT for per-user subscriptions (`credentialRef.kind = user_account`) follows; until then such models answer `ErrLLMUserAccountRequired`.
+Foundations and the gateway are delivered ([ADR-0022](/adrs/core-llm-module)): the catalog, access model, encrypted secrets, data-subject rights, the six provider adapters, routing with fallback and circuit breaking, the usage ledger and monthly budget with alerts, connectivity tests, model discovery and the prompt test, and the `/admin/llm` console page (tabs for models, credentials, usage and budget, kept in the URL). Sign in with ChatGPT for per-user subscriptions (`credentialRef.kind = user_account`) is delivered as well, in both modes, with the live check against a real ChatGPT account (and the decision to enable `hosted_paste` on a hosted installation) still pending; the console shows it as the **AI accounts** tab in security settings and the **Accounts** tab at `/admin/llm`.
 
 :::note Known limitations
 Editing a model's grants or a budget's extra recipients in the console also needs `system.tenants.admin`, because both pickers list the organization's members through the tenant API. Without it the editor shows a hint instead of the members. The usage report grouped by user shows user IDs, not names.
