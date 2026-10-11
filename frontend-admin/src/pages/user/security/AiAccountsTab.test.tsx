@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useLocation } from 'react-router';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
 import { url } from 'test/handlers';
@@ -93,6 +94,24 @@ const rowOf = async (text: string) => {
   const row = cell.closest('tr');
   if (!row) throw new Error(`no table row holds ${text}`);
   return row as HTMLElement;
+};
+
+// Renders the tab with a probe of the router's search string, so a test
+// can assert what the callback drain left in the URL.
+const renderWithLocation = (entry: string) => {
+  let current = '';
+  const LocationProbe = () => {
+    current = useLocation().search;
+    return null;
+  };
+  renderWithProviders(
+    <>
+      <LocationProbe />
+      <AiAccountsTab />
+    </>,
+    { routerEntries: [entry] }
+  );
+  return () => current;
 };
 
 const originalLocation = window.location;
@@ -253,19 +272,40 @@ describe('AiAccountsTab', () => {
 
   it('shows the outcome of the loopback return and drains its params', async () => {
     stub({ ...empty, mode: 'loopback_local' });
-    renderWithProviders(<AiAccountsTab />, {
-      routerEntries: ['/user/security?tab=ai&error=denied']
-    });
+    const search = renderWithLocation(
+      '/user/security?tab=ai&error=denied&keep=1'
+    );
     expect(await screen.findByText(/declined at openai/i)).toBeInTheDocument();
+    await waitFor(() => expect(search()).toBe('?tab=ai&keep=1'));
   });
 
-  it('confirms a loopback return that linked the account', async () => {
+  it('confirms a loopback return that linked the account and drains its params', async () => {
     stub({ ...empty, mode: 'loopback_local' });
-    renderWithProviders(<AiAccountsTab />, {
-      routerEntries: ['/user/security?tab=ai&linked=ok']
-    });
+    const search = renderWithLocation('/user/security?tab=ai&linked=ok');
     expect(await screen.findByText(/account linked/i)).toBeInTheDocument();
+    await waitFor(() => expect(search()).toBe('?tab=ai'));
   });
+
+  it.each([
+    '__proto__',
+    'constructor',
+    'toString',
+    '<script>alert(1)</script>'
+  ])(
+    'renders the documented fallback for a hostile ?error=%s',
+    async hostile => {
+      stub({ ...empty, mode: 'loopback_local' });
+      const search = renderWithLocation(
+        `/user/security?tab=ai&error=${encodeURIComponent(hostile)}`
+      );
+      expect(
+        await screen.findByText(/openai did not complete the sign-in/i)
+      ).toBeInTheDocument();
+      expect(document.querySelector('script')).toBeNull();
+      expect(document.body.textContent).not.toContain(hostile);
+      await waitFor(() => expect(search()).toBe('?tab=ai'));
+    }
+  );
 
   it('shows plan_disabled and needs_reauth states with their remedies', async () => {
     stub({

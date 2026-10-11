@@ -40,15 +40,17 @@ import SecurityTable from './SecurityTable';
 
 // The closed set of ?error= codes the loopback callback redirects with
 // (backend handlers/siwc.go), mapped onto the errors.llm.* copy. Anything
-// else reads as the backend's own fallback, a failed exchange.
-const CALLBACK_ERROR_CODES: Record<string, string> = {
-  state_invalid: 'llm.siwc_state_invalid',
-  denied: 'llm.siwc_denied',
-  token_exchange_failed: 'llm.siwc_exchange_failed',
-  id_token_invalid: 'llm.siwc_id_token_invalid',
-  disabled: 'llm.siwc_disabled',
-  unsupported_deployment: 'llm.siwc_unsupported_deployment'
-};
+// else reads as the backend's own fallback, a failed exchange. A Map, so a
+// hostile ?error=__proto__ / constructor never resolves to a prototype
+// member.
+const CALLBACK_ERROR_CODES: ReadonlyMap<string, string> = new Map([
+  ['state_invalid', 'llm.siwc_state_invalid'],
+  ['denied', 'llm.siwc_denied'],
+  ['token_exchange_failed', 'llm.siwc_exchange_failed'],
+  ['id_token_invalid', 'llm.siwc_id_token_invalid'],
+  ['disabled', 'llm.siwc_disabled'],
+  ['unsupported_deployment', 'llm.siwc_unsupported_deployment']
+]);
 
 type Banner = { variant: 'success' | 'danger'; message: string };
 
@@ -97,7 +99,8 @@ const AiAccountsTab = () => {
             variant: 'danger',
             message: llmCodeMessage(
               t,
-              CALLBACK_ERROR_CODES[error ?? ''] ?? 'llm.siwc_exchange_failed'
+              CALLBACK_ERROR_CODES.get(error ?? '') ??
+                'llm.siwc_exchange_failed'
             )
           }
     );
