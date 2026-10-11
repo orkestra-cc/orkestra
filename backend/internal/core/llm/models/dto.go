@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 // Every type here is an HTTP request/response body, so it carries the LLM
 // prefix: Huma schema names are package-less and it panics on duplicates
 // (auth already owns CredentialView).
@@ -129,4 +131,44 @@ type LLMModelView struct {
 type LLMGrantsPutBody struct {
 	Access    string   `json:"access" enum:"granted,everyone" doc:"granted: only the listed users; everyone: every member of the organization"`
 	UserUUIDs []string `json:"userUuids" doc:"Complete list; replaces the current grants" maxItems:"500"`
+}
+
+// LLMUserAccountView is a Sign in with ChatGPT registration as its owner
+// sees it. It is an explicit projection of UserAccount: the token
+// envelopes, the issued client id, the OIDC subject, the issuer, the host
+// id and the scopes never reach an HTTP body.
+type LLMUserAccountView struct {
+	UUID             string     `json:"uuid"`
+	Provider         string     `json:"provider"`
+	Label            string     `json:"label"`
+	Email            string     `json:"email,omitempty"`
+	Status           string     `json:"status" enum:"active,plan_disabled,needs_reauth,revoked"`
+	PlanUsageGranted bool       `json:"planUsageGranted"`
+	Selected         bool       `json:"selected"`
+	LinkedAt         time.Time  `json:"linkedAt"`
+	LastUsedAt       *time.Time `json:"lastUsedAt,omitempty"`
+	ExpiresAt        time.Time  `json:"expiresAt" doc:"When the current access token expires; it is refreshed on use"`
+	RefreshExpiresAt time.Time  `json:"refreshExpiresAt" doc:"After this the user must sign in again"`
+	LastError        string     `json:"lastError,omitempty" doc:"An llm.* error code, never provider text"`
+}
+
+// LLMUserAccountAdminView adds the owner, for the org's operators.
+type LLMUserAccountAdminView struct {
+	LLMUserAccountView
+	UserUUID string `json:"userUuid"`
+}
+
+// SelfView projects a registration for its owner (pointer receiver: see
+// Credential.View).
+func (a *UserAccount) SelfView() LLMUserAccountView {
+	return LLMUserAccountView{
+		UUID: a.UUID, Provider: a.Provider, Label: a.Label, Email: a.Email, Status: a.Status,
+		PlanUsageGranted: a.PlanUsageGranted, Selected: a.Selected, LinkedAt: a.LinkedAt, LastUsedAt: a.LastUsedAt,
+		ExpiresAt: a.ExpiresAt, RefreshExpiresAt: a.RefreshExpiresAt, LastError: a.LastError,
+	}
+}
+
+// AdminView projects a registration for the org's operators.
+func (a *UserAccount) AdminView() LLMUserAccountAdminView {
+	return LLMUserAccountAdminView{LLMUserAccountView: a.SelfView(), UserUUID: a.UserUUID}
 }

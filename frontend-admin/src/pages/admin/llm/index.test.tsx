@@ -1059,3 +1059,100 @@ describe('LlmAdminPage — credential test and model discovery', () => {
     expect(within(dialog).getByText(/try "fast"/i)).toBeInTheDocument();
   });
 });
+
+describe('LlmAdminPage — linked accounts', () => {
+  const linked = {
+    uuid: 'a-1',
+    provider: 'openai',
+    userUuid: 'u-1',
+    label: 'Work',
+    email: 'ada@openai.example',
+    status: 'plan_disabled',
+    planUsageGranted: false,
+    selected: true,
+    linkedAt: '2026-10-10T00:00:00Z',
+    expiresAt: '2026-10-10T01:00:00Z',
+    refreshExpiresAt: '2026-11-10T00:00:00Z'
+  };
+  const stubAccounts = (mode = 'hosted_paste', items: unknown[] = [linked]) =>
+    server.use(
+      http.get(url('/v1/admin/llm/accounts'), () =>
+        HttpResponse.json({ mode, items })
+      )
+    );
+
+  it('orders the tabs models, credentials, accounts, usage, budget', async () => {
+    stubReads();
+    renderPage('/admin/llm');
+    await screen.findByText('Fast');
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual([
+      'Models',
+      'Credentials',
+      'Accounts',
+      'Usage',
+      'Budget'
+    ]);
+  });
+
+  it('lists the members accounts with the owner email and the mode from the same response', async () => {
+    stubReads();
+    stubAccounts();
+    renderPage('/admin/llm?tab=accounts');
+    const row = await rowOf('Work');
+    expect(within(row).getByText('ada@example.com')).toBeInTheDocument();
+    expect(
+      within(row).getByText(/plan usage not granted/i)
+    ).toBeInTheDocument();
+    expect(within(row).getByText(/^not granted$/i)).toBeInTheDocument();
+    expect(screen.getByTestId('llm-siwc-mode')).toHaveTextContent(
+      /paste flow/i
+    );
+  });
+
+  it('points at the module settings when sign in with chatgpt is off', async () => {
+    stubReads();
+    stubAccounts('disabled', []);
+    renderPage('/admin/llm?tab=accounts');
+    expect(
+      await screen.findByRole('link', { name: /llm module settings/i })
+    ).toHaveAttribute('href', '/admin/modules/llm');
+    expect(screen.getByText(/no member has linked/i)).toBeInTheDocument();
+  });
+
+  it('force-unlinks after a named confirmation', async () => {
+    mockedUseAuth.mockReturnValue(authWith([...ALL, 'llm.accounts.admin']));
+    stubReads();
+    stubAccounts();
+    captureWrite(
+      'delete',
+      '/v1/admin/llm/accounts/a-1',
+      () => new HttpResponse(null, { status: 204 })
+    );
+    renderPage('/admin/llm?tab=accounts');
+    const row = await rowOf('Work');
+    await userEvent.click(
+      within(row).getByRole('button', { name: /force unlink/i })
+    );
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent(/work of ada@example\.com/i);
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: /force unlink/i })
+    );
+    await waitFor(() =>
+      expect(sent).toEqual([
+        { method: 'DELETE', path: '/v1/admin/llm/accounts/a-1', body: null }
+      ])
+    );
+    expect(toast.success).toHaveBeenCalled();
+  });
+
+  it('disables force unlink without llm.accounts.admin', async () => {
+    stubReads();
+    stubAccounts();
+    renderPage('/admin/llm?tab=accounts');
+    const row = await rowOf('Work');
+    expect(
+      within(row).getByRole('button', { name: /force unlink/i })
+    ).toBeDisabled();
+  });
+});

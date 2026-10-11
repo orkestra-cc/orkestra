@@ -28,8 +28,9 @@ type orgCredentialSource interface {
 type orgCredentialResolver struct{ catalog orgCredentialSource }
 
 // NewOrgCredentialResolver resolves kind=org models through the catalog
-// and the vault. kind=user_account answers iface.ErrLLMUserAccountRequired
-// until PR 3 brings linked accounts.
+// and the vault. On its own it answers kind=user_account with
+// iface.ErrLLMUserAccountRequired; the router uses it through
+// NewCredentialResolver, which sends those to the linked-account resolver.
 func NewOrgCredentialResolver(catalog orgCredentialSource) CredentialResolver {
 	return orgCredentialResolver{catalog: catalog}
 }

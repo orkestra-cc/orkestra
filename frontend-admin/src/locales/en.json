@@ -208,7 +208,7 @@
       "model_access_denied": "You may not use this model.",
       "capability_mismatch": "The model does not offer what the request needs.",
       "invalid_request": "Some fields are invalid.",
-      "not_found": "The credential or model no longer exists.",
+      "not_found": "The credential, model or linked account no longer exists.",
       "name_in_use": "Another credential or model already has this name.",
       "credential_in_use": "An active model still uses this credential. Delete it or point it at another credential first.",
       "secret_key_missing": "This deployment has no secret encryption key configured, so keys cannot be stored.",
@@ -224,7 +224,15 @@
       "user_account_required": "This model is billed to your own account: link it first.",
       "user_account_reauth_required": "Your linked account must be authorized again.",
       "plan_usage_disabled": "The linked account did not allow plan usage.",
-      "request_canceled": "The request was cancelled before it completed."
+      "request_canceled": "The request was cancelled before it completed.",
+      "siwc_config_invalid": "Sign in with ChatGPT is not configured correctly on this installation. Ask an administrator to review the llm module settings.",
+      "siwc_disabled": "Sign in with ChatGPT is turned off on this installation.",
+      "siwc_unsupported_deployment": "Sign in with ChatGPT cannot complete automatically here: the API must be reached as http://127.0.0.1. Ask an administrator to use the paste flow.",
+      "siwc_callback_invalid": "That is not the address the browser showed after signing in. Copy the full URL from the address bar and paste it again.",
+      "siwc_state_invalid": "This sign-in attempt has expired or was already used. Start linking again.",
+      "siwc_denied": "The authorization was declined at OpenAI. Nothing was linked.",
+      "siwc_exchange_failed": "OpenAI did not complete the sign-in. Try linking again later.",
+      "siwc_id_token_invalid": "The identity returned by OpenAI could not be verified, or it belongs to another account. Nothing was changed."
     }
   },
   "banner": {
@@ -1246,7 +1254,8 @@
       "oauth": "Linked sign-ins",
       "sessions": "Sessions",
       "devices": "Trusted devices",
-      "backupCodes": "Backup codes"
+      "backupCodes": "Backup codes",
+      "ai": "AI accounts"
     },
     "stats": {
       "mfaTitle": "Two-factor",
@@ -1403,6 +1412,90 @@
       "modalCancel": "Cancel",
       "modalSubmit": "Unlink",
       "modalSubmitting": "Unlinking…"
+    },
+    "aiAccounts": {
+      "intro": "Link your ChatGPT account so the models your organization bills to your own ChatGPT plan run on it. The sign-in tokens stay on the server: this page never sees them.",
+      "link": "Link a ChatGPT account",
+      "linkStarting": "Starting…",
+      "pasteInstead": "Paste a sign-in address instead",
+      "disabled": "Sign in with ChatGPT is not enabled on this installation.",
+      "disabledHint": "An administrator can turn it on in the llm module settings.",
+      "disabledWithAccounts": "Sign in with ChatGPT is not enabled on this installation. You can still unlink the accounts below.",
+      "empty": "No ChatGPT account is linked yet.",
+      "emptyHint": "Link one to use the models billed to your own ChatGPT plan.",
+      "loadError": "Your linked accounts could not be loaded.",
+      "retry": "Retry",
+      "linked": "Account linked.",
+      "linkedNamed": "Account linked: {{label}}.",
+      "selectedNow": "{{label}} is now the account your plan-billed models use.",
+      "unlinked": "{{label}} was unlinked.",
+      "neverUsed": "Never",
+      "selectedBadge": "Selected",
+      "columns": {
+        "account": "Account",
+        "status": "Status",
+        "selected": "In use",
+        "linked": "Linked",
+        "lastUsed": "Last used",
+        "actions": "Actions"
+      },
+      "status": {
+        "active": "Active",
+        "plan_disabled": "Plan usage not granted",
+        "needs_reauth": "Sign-in needed",
+        "revoked": "Revoked"
+      },
+      "remedies": {
+        "plan_disabled": "Sign in again and allow plan usage when OpenAI asks.",
+        "needs_reauth": "Sign in again to keep using this account.",
+        "revoked": "OpenAI no longer accepts this sign-in. Unlink the account and link it again."
+      },
+      "actions": {
+        "select": "Select",
+        "reauthorize": "Re-authorize",
+        "unlink": "Unlink"
+      },
+      "unlinkTitle": "Unlink {{label}}?",
+      "unlinkBody": "Models billed to your own plan stop using this account, and its sign-in is revoked at OpenAI. You can link it again later.",
+      "wizard": {
+        "title": "Link a ChatGPT account",
+        "reauthTitle": "Sign in again to {{label}}",
+        "stepOf": "Step {{step}} of {{total}}",
+        "step1Title": "Sign in at OpenAI",
+        "step1": "OpenAI opens in a new tab. Sign in with the ChatGPT account you want to use and allow plan usage when asked. Keep this window open: you finish here.",
+        "open": "Open OpenAI",
+        "step2Title": "Paste the address",
+        "step2": "After you sign in, the OpenAI tab tries to open an address that starts with http://127.0.0.1 and shows a connection error. That is expected: copy the full address from that tab's address bar.",
+        "pasteLabel": "Paste the address from the OpenAI tab",
+        "pastePlaceholder": "http://127.0.0.1:…/v1/llm/accounts/openai/callback?…",
+        "pasteHint": "Include everything after the question mark. The address works once, for ten minutes.",
+        "complete": "Complete linking",
+        "completing": "Linking…",
+        "back": "Back",
+        "cancel": "Cancel",
+        "validation": {
+          "required": "Paste the address first.",
+          "invalid": "That is not a web address. Copy it from the address bar.",
+          "tooLong": "That address is too long."
+        }
+      },
+      "myModels": {
+        "title": "Models billed to your plan",
+        "note": "Which of these you can use depends on the catalog of the account you selected.",
+        "empty": "No model billed to your own ChatGPT plan is available to you.",
+        "loadError": "The models could not be loaded.",
+        "columns": {
+          "name": "Model",
+          "modelId": "Model ID"
+        }
+      },
+      "myUsage": {
+        "title": "My usage this month",
+        "org": "Billed to the organization",
+        "orgSubtitle": "Tokens on the organization's credentials",
+        "userAccount": "Billed to your plan",
+        "userAccountSubtitle": "Tokens on your linked ChatGPT account"
+      }
     }
   },
   "operatorProfile": {
@@ -2653,6 +2746,7 @@
     "tabs": {
       "models": "Models",
       "credentials": "Credentials",
+      "accounts": "Accounts",
       "usage": "Usage",
       "budget": "Budget"
     },
@@ -2946,6 +3040,41 @@
       "truncated": "The answer was cut at 64 KiB.",
       "tooLong": "Use at most {{max}} characters.",
       "disabledModel": "Enable the model to try it."
+    },
+    "accounts": {
+      "intro": "ChatGPT accounts the organization's members linked with Sign in with ChatGPT. Tokens never leave the server; this list shows none.",
+      "mode": "Sign in with ChatGPT: {{mode}}",
+      "modes": {
+        "disabled": "off",
+        "loopback_local": "automatic return (local installation)",
+        "hosted_paste": "paste flow"
+      },
+      "disabledHint": "Members cannot link ChatGPT accounts until it is turned on.",
+      "openSettings": "Open the llm module settings",
+      "emptyTitle": "No member has linked a ChatGPT account.",
+      "emptyHint": "Members link their accounts from their security settings.",
+      "search": "Search accounts",
+      "planGranted": "Granted",
+      "planNotGranted": "Not granted",
+      "neverUsed": "Never",
+      "columns": {
+        "user": "Member",
+        "account": "Account",
+        "status": "Status",
+        "planUsage": "Plan usage",
+        "lastUsed": "Last used"
+      },
+      "status": {
+        "active": "Active",
+        "plan_disabled": "Plan usage not granted",
+        "needs_reauth": "Sign-in needed",
+        "revoked": "Revoked"
+      },
+      "forceUnlink": "Force unlink",
+      "forceUnlinkTitle": "Force unlink {{label}}?",
+      "forceUnlinkBody": "{{label}} of {{user}} is revoked at OpenAI and removed. Models billed to that member's plan stop working until they link an account again.",
+      "forceUnlinkSuccess": "The account was unlinked.",
+      "noPermission": "Force unlink needs the permission to manage linked accounts."
     }
   },
   "adminModules": {

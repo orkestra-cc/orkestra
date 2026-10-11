@@ -64,18 +64,32 @@ func TestModule_Declarations(t *testing.T) {
 		}
 	}
 	// Only the permissions the mounted routes use (amendment 1; PR 2 adds
-	// llm.usage.read, llm.budgets.admin and llm.usage.self).
-	if system != 6 || self != 2 {
-		t.Fatalf("permissions = %d system + %d self, want 6 + 2", system, self)
+	// llm.usage.read, llm.budgets.admin and llm.usage.self; PR 3
+	// llm.accounts.admin and llm.accounts.self).
+	if system != 7 || self != 3 {
+		t.Fatalf("permissions = %d system + %d self, want 7 + 3", system, self)
 	}
 
 	keys := map[string]bool{}
 	for _, f := range m.ConfigSchema() {
 		keys[f.Key] = true
 	}
-	for _, want := range []string{"allow_hosted", "request_timeout", "usage_retention_days", "budget_warn_pct", "budget_reserve_output_tokens"} {
+	for _, want := range []string{"allow_hosted", "request_timeout", "usage_retention_days", "budget_warn_pct", "budget_reserve_output_tokens", "siwc_mode", "siwc_paste_port"} {
 		if !keys[want] {
 			t.Errorf("missing config key %s", want)
+		}
+	}
+
+	groups := map[string]bool{}
+	for _, g := range m.ConfigGroups() {
+		groups[g.Key] = true
+	}
+	for _, f := range m.ConfigSchema() {
+		if !groups[f.Group] {
+			t.Errorf("config key %s is in undeclared group %q", f.Key, f.Group)
+		}
+		if f.Key == "siwc_mode" && f.Default != "disabled" {
+			t.Errorf("siwc_mode default = %q, must be disabled", f.Default)
 		}
 	}
 }
@@ -100,6 +114,7 @@ func TestModule_UniqueIndexes(t *testing.T) {
 		repository.CollCredentials:  {{"tenantId", "name"}, {"tenantId", "uuid"}},
 		repository.CollModels:       {{"tenantId", "name"}, {"tenantId", "uuid"}},
 		repository.CollGrants:       {{"tenantId", "modelUuid", "userUuid"}},
+		repository.CollUserAccounts: {{"tenantId", "userUuid", "clientId"}, {"tenantId", "userUuid", "provider", "selected"}, {"tenantId", "uuid"}},
 		repository.CollUsage:        {{"tenantId", "uuid"}},
 		repository.CollUsageMonthly: {{"tenantId", "period"}},
 		repository.CollBudgets:      {{"tenantId"}},
@@ -127,6 +142,9 @@ func TestModule_UniqueIndexes(t *testing.T) {
 		// org, //tenantscope:allow dsr:), which have no tenantId to lead with.
 		repository.CollUsage:        {{"outcome", "reservationExpiresAt"}, {"createdAt"}, {"userUuid"}},
 		repository.CollBudgetOutbox: {{"status", "nextAttemptAt"}},
+		// userUuid: the DSR queries over the ChatGPT registrations (export,
+		// delete across every org, //tenantscope:allow dsr:).
+		repository.CollUserAccounts: {{"userUuid"}},
 	}
 	for _, c := range NewModule().Collections() {
 		for _, idx := range c.Indexes {
@@ -152,6 +170,26 @@ func TestModule_UniqueIndexes(t *testing.T) {
 			}
 		}
 	}
+}
+
+// The one-selected-account rule rests on the partial unique index: a
+// non-partial one would forbid a second unselected registration.
+func TestModule_UserAccountSelectedIndexIsPartial(t *testing.T) {
+	for _, c := range NewModule().Collections() {
+		if c.Name != repository.CollUserAccounts {
+			continue
+		}
+		for _, idx := range c.Indexes {
+			n := len(idx.OrderedKeys)
+			if n == 4 && idx.OrderedKeys[3].Field == "selected" {
+				if !idx.Unique || idx.PartialFilter["selected"] != true {
+					t.Fatalf("selected index = %+v, want unique + partial {selected: true}", idx)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("no (tenantId, userUuid, provider, selected) index on llm_user_accounts")
 }
 
 // --- route guards ------------------------------------------------------------
@@ -261,6 +299,39 @@ func (emptyGrants) Replace(context.Context, string, string, string, []string) er
 }
 func (emptyGrants) DeleteByModel(context.Context, string) error { return nil }
 
+// emptyAccounts is a linked-account store with nothing in it.
+type emptyAccounts struct{}
+
+var _ services.AccountRepo = emptyAccounts{}
+
+func (emptyAccounts) Insert(context.Context, *models.UserAccount) error { return nil }
+func (emptyAccounts) ListByUser(context.Context, string) ([]models.UserAccount, error) {
+	return nil, nil
+}
+func (emptyAccounts) ListAdmin(context.Context) ([]models.UserAccount, error) { return nil, nil }
+func (emptyAccounts) Get(context.Context, string) (*models.UserAccount, error) {
+	return nil, repository.ErrNotFound
+}
+func (emptyAccounts) GetSelected(context.Context, string, string) (*models.UserAccount, error) {
+	return nil, repository.ErrNotFound
+}
+func (emptyAccounts) Select(context.Context, string, string, string) error {
+	return repository.ErrNotFound
+}
+func (emptyAccounts) Delete(context.Context, string) (*models.UserAccount, error) {
+	return nil, repository.ErrNotFound
+}
+func (emptyAccounts) SetLastUsed(context.Context, string, time.Time) error { return nil }
+func (emptyAccounts) SetStatus(context.Context, string, string, string) error {
+	return nil
+}
+func (emptyAccounts) SetStatusIf(context.Context, string, time.Time, string, string) error {
+	return nil
+}
+func (emptyAccounts) ReplaceTokens(context.Context, string, time.Time, models.AccountTokenSet) error {
+	return repository.ErrNotFound
+}
+
 // operatorCtx is what AuthMiddleware leaves for an operator acting in the
 // internal tenant t1; the recording gates do not set it.
 func operatorCtx() context.Context {
@@ -284,6 +355,11 @@ func moduleForRoutes(t *testing.T) *Module {
 	m.ops = handlers.NewOpsHandler(services.NewAdminOps(catalog, providers.NewRegistry(), nil, services.NewRateLimiter(nil, logger), services.NewPinnedRunner(gw), logger), logger)
 	m.usageH = handlers.NewUsageHandler(services.NewUsageService(emptyUsage{}, emptyMonthly{}, emptyBudgets{}, noMembers{}, catalog,
 		func() services.BudgetConfig { return services.BudgetConfig{} }, logger), logger)
+	siwcCfg := func() services.SIWCConfig { return services.SIWCConfig{Mode: services.SIWCModeDisabled} }
+	limiter := services.NewRateLimiter(nil, logger)
+	accounts := services.NewAccountsService(services.AccountsDeps{Repo: emptyAccounts{}, Vault: vault, Limiter: limiter, Config: siwcCfg, Logger: logger})
+	m.siwc = handlers.NewSIWCHandler(accounts, siwcCfg, limiter, nil, "http://localhost:8080", logger)
+	m.logger = logger
 	return m
 }
 
@@ -333,6 +409,15 @@ func TestModule_RouteGuards(t *testing.T) {
 		{http.MethodGet, "/v1/admin/llm/budget", read},
 		{http.MethodPut, "/v1/admin/llm/budget", []string{"internal", "sys:llm.budgets.admin", "mfa", stepUp}},
 		{http.MethodGet, "/v1/llm/me/usage", []string{"internal", "perm:llm.usage.self"}},
+		// Sign in with ChatGPT (ruling 5.6): own registrations without MFA or
+		// step-up; the forced unlink with both; the org list with the reads.
+		{http.MethodGet, "/v1/llm/accounts/openai", []string{"internal", "perm:llm.accounts.self"}},
+		{http.MethodPost, "/v1/llm/accounts/openai/link", []string{"internal", "perm:llm.accounts.self"}},
+		{http.MethodPost, "/v1/llm/accounts/openai/complete", []string{"internal", "perm:llm.accounts.self"}},
+		{http.MethodPut, "/v1/llm/accounts/openai" + id + "/selected", []string{"internal", "perm:llm.accounts.self"}},
+		{http.MethodDelete, "/v1/llm/accounts/openai" + id, []string{"internal", "perm:llm.accounts.self"}},
+		{http.MethodGet, "/v1/admin/llm/accounts", read},
+		{http.MethodDelete, "/v1/admin/llm/accounts" + id, []string{"internal", "sys:llm.accounts.admin", "mfa", stepUp}},
 	}
 	used := map[string]bool{}
 	for _, tc := range cases {
@@ -387,6 +472,85 @@ func TestModule_RouteGuards(t *testing.T) {
 		t.Fatalf("GET budget without one = %d %q", rec.Code, rec.Body.String())
 	}
 }
+
+// The public loopback callback exists only in loopback_local, on the root
+// router (no auth gate), decided once at RegisterRoutes; in hosted_paste and
+// disabled it is absent.
+func TestModule_CallbackMountedOnlyInLoopbackLocal(t *testing.T) {
+	for _, tc := range []struct {
+		mode    string
+		mounted bool
+	}{
+		{services.SIWCModeDisabled, false},
+		{services.SIWCModeHostedPaste, false},
+		{services.SIWCModeLoopbackLocal, true},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			m := moduleForRoutes(t)
+			m.siwcCfg = func() services.SIWCConfig {
+				return services.SIWCConfig{Mode: tc.mode, AllowHosted: true, PastePort: services.SIWCDefaultPastePort, OperatorPublicURL: "http://127.0.0.1:3007"}
+			}
+			root, protected := chi.NewRouter(), chi.NewRouter()
+			m.RegisterRoutes(&module.RouteInfo{
+				Operator:  &module.APISurface{Audience: module.AudienceOperator, ProtectedRouter: protected, AuthMW: recordingMW{}},
+				Router:    root,
+				APIConfig: docsless(),
+			})
+			var rootRoutes []string
+			if err := chi.Walk(root, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+				rootRoutes = append(rootRoutes, method+" "+route)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			want := []string(nil)
+			if tc.mounted {
+				want = []string{http.MethodGet + " " + services.SIWCCallbackPath}
+			}
+			if !reflect.DeepEqual(rootRoutes, want) {
+				t.Fatalf("root routes = %v, want %v", rootRoutes, want)
+			}
+			// Never on the authenticated router either.
+			if err := chi.Walk(protected, func(_, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+				if route == services.SIWCCallbackPath {
+					t.Errorf("callback mounted behind auth")
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if !tc.mounted {
+				return
+			}
+			req := httptest.NewRequest(http.MethodGet, services.SIWCCallbackPath+"?code=c&state=s", nil)
+			req.Host = "127.0.0.1:3007"
+			rec := httptest.NewRecorder()
+			root.ServeHTTP(rec, req)
+			if rec.Code != http.StatusFound || !strings.HasPrefix(rec.Header().Get("Location"), "http://localhost:8080/user/security?") {
+				t.Fatalf("callback = %d %q", rec.Code, rec.Header().Get("Location"))
+			}
+		})
+	}
+}
+
+func TestModule_LiveRedisDropsTypedNil(t *testing.T) {
+	var typed *typedNilRedis
+	if liveRedis(typed) != nil || liveRedis(nil) != nil {
+		t.Fatal("a nil or typed-nil client must become a plain nil")
+	}
+	if liveRedis(&typedNilRedis{}) == nil {
+		t.Fatal("a real client must pass through")
+	}
+}
+
+type typedNilRedis struct{}
+
+func (*typedNilRedis) Get(context.Context, string) (string, error)                   { return "", nil }
+func (*typedNilRedis) Set(context.Context, string, interface{}, time.Duration) error { return nil }
+func (*typedNilRedis) Del(context.Context, ...string) error                          { return nil }
+func (*typedNilRedis) Keys(context.Context, string) ([]string, error)                { return nil, nil }
+func (*typedNilRedis) Incr(context.Context, string) (int64, error)                   { return 0, nil }
+func (*typedNilRedis) Expire(context.Context, string, time.Duration) error           { return nil }
 
 // --- Init --------------------------------------------------------------------
 
@@ -538,6 +702,36 @@ func TestModule_InitRegistersSixAdaptersAndRouter(t *testing.T) {
 	}
 	if m.outboxW == nil || m.reconciler == nil || m.purge == nil || m.ops == nil || m.usageH == nil {
 		t.Fatal("background jobs and handlers must be wired")
+	}
+	if m.accounts == nil || m.siwc == nil {
+		t.Fatal("the linked-account service and its handler must be wired")
+	}
+}
+
+// afterCall stamps lastUsedAt only for a successful user_account attempt
+// (ruling 2.17); everything else must not touch the accounts store. With
+// an offline database a write would log a WARN, so silence proves it.
+func TestModule_AfterCallStampsOnlyPlanSuccess(t *testing.T) {
+	t.Setenv("LLM_SECRET_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	logs := &bytes.Buffer{}
+	reg := module.NewServiceRegistry()
+	reg.Register(module.ServiceTenantDirectoryReader, iface.TenantDirectoryReader(noMembers{}))
+	m := NewModule()
+	if err := m.Init(&module.Dependencies{DB: offlineDB(t), Logger: slog.New(slog.NewTextHandler(logs, nil)), Services: reg}); err != nil {
+		t.Fatal(err)
+	}
+	ua := models.Model{Provider: models.ProviderOpenAI, CredentialRef: models.LLMCredentialRef{Kind: models.CredentialKindUserAccount}}
+	org := models.Model{Provider: models.ProviderOpenAI, CredentialRef: models.LLMCredentialRef{Kind: models.CredentialKindOrg, CredentialUUID: "c1"}}
+	ctx := operatorCtx()
+	m.afterCall(ctx, ua, "acc-1", iface.ErrLLMQuotaExhausted)
+	m.afterCall(ctx, ua, "acc-1", iface.ErrLLMUserAccountReauth)
+	m.afterCall(ctx, org, "c1", nil)
+	if strings.Contains(logs.String(), "last-use") {
+		t.Fatalf("a failed or org-billed attempt touched the account: %s", logs.String())
+	}
+	m.afterCall(ctx, ua, "acc-1", nil)
+	if !strings.Contains(logs.String(), "llm siwc: last-use stamp failed") {
+		t.Fatalf("a successful plan call must stamp lastUsedAt: %s", logs.String())
 	}
 }
 
@@ -694,5 +888,75 @@ func TestModule_RunRetentionPurges(t *testing.T) {
 	}
 	if count(repository.CollBudgetOutbox, bson.M{"uuid": "ob-old-sent"}) != 0 || count(repository.CollBudgetOutbox, bson.M{"uuid": "ob-old-pending"}) != 1 {
 		t.Fatal("outbox retention wrong")
+	}
+}
+
+// Deferred T8 minor: with no console origin the loopback callback's closed
+// redirect would be relative (an API 404), so mounting it WARNs; with an
+// origin it does not.
+func TestModule_CallbackMountWarnsWithoutAConsoleOrigin(t *testing.T) {
+	for _, origin := range []string{"", "http://localhost:8080"} {
+		m := moduleForRoutes(t)
+		logs := &bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(logs, nil))
+		m.logger = logger
+		cfg := func() services.SIWCConfig {
+			return services.SIWCConfig{Mode: services.SIWCModeLoopbackLocal, AllowHosted: true, OperatorPublicURL: "http://127.0.0.1:3007"}
+		}
+		m.siwcCfg = cfg
+		vault, err := services.NewVault("", logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		limiter := services.NewRateLimiter(nil, logger)
+		accounts := services.NewAccountsService(services.AccountsDeps{Repo: emptyAccounts{}, Vault: vault, Limiter: limiter, Config: cfg, Logger: logger})
+		m.siwc = handlers.NewSIWCHandler(accounts, cfg, limiter, nil, origin, logger)
+		m.RegisterRoutes(&module.RouteInfo{
+			Operator:  &module.APISurface{Audience: module.AudienceOperator, ProtectedRouter: chi.NewRouter(), AuthMW: recordingMW{}},
+			Router:    chi.NewRouter(),
+			APIConfig: docsless(),
+		})
+		warned := strings.Contains(logs.String(), "no operator console origin")
+		if warned != (origin == "") {
+			t.Fatalf("origin %q: warned = %v: %s", origin, warned, logs.String())
+		}
+	}
+}
+
+// Deferred T7 minor: Init wires the router the gateway serves with the
+// module's own afterCall hook and a composite resolver over the module's
+// accounts service, so the hook and the resolver cannot drift from what the
+// tests of each exercise.
+func TestModule_InitWiresTheRouterHookAndTheAccountResolver(t *testing.T) {
+	t.Setenv("LLM_SECRET_ENCRYPTION_KEY", strings.Repeat("ab", 32))
+	logs := &bytes.Buffer{}
+	reg := module.NewServiceRegistry()
+	reg.Register(module.ServiceTenantDirectoryReader, iface.TenantDirectoryReader(noMembers{}))
+	m := NewModule()
+	if err := m.Init(&module.Dependencies{DB: offlineDB(t), Logger: slog.New(slog.NewTextHandler(logs, nil)), Services: reg}); err != nil {
+		t.Fatal(err)
+	}
+	r := m.gateway.Router()
+	if r == nil || r.AfterCall == nil {
+		t.Fatal("the gateway must serve a router with the AfterCall hook")
+	}
+	cr, ok := r.Credentials().(*services.CompositeCredentialResolver)
+	if !ok {
+		t.Fatalf("router resolver = %T, want the composite resolver", r.Credentials())
+	}
+	if cr.Accounts() != services.AccountCredentialSource(m.accounts) || m.accounts == nil {
+		t.Fatal("kind=user_account must resolve through the module's accounts service")
+	}
+	// The hook behaves as module.afterCall: a failed plan call touches
+	// nothing, a successful one stamps lastUsedAt (an offline database
+	// makes the stamp WARN, which is the observable).
+	ua := models.Model{Provider: models.ProviderOpenAI, CredentialRef: models.LLMCredentialRef{Kind: models.CredentialKindUserAccount}}
+	r.AfterCall(operatorCtx(), ua, "acc-1", iface.ErrLLMQuotaExhausted)
+	if strings.Contains(logs.String(), "last-use") {
+		t.Fatalf("a failed attempt touched the account: %s", logs.String())
+	}
+	r.AfterCall(operatorCtx(), ua, "acc-1", nil)
+	if !strings.Contains(logs.String(), "llm siwc: last-use stamp failed") {
+		t.Fatalf("the router hook is not module.afterCall: %s", logs.String())
 	}
 }

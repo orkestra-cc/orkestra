@@ -273,3 +273,91 @@ func TestGateway_BoundsInstructionsDescriptionsAndResponseSchema(t *testing.T) {
 		t.Fatalf("within bounds rejected: %v", err)
 	}
 }
+
+// Ruling 5.1: listing and Resolve show a user_account model only when the
+// caller's selected account is usable and its plan catalog lists the
+// model; Chat keeps the classified per-call error.
+func TestGateway_PlanModelsFollowTheSelectedAccount(t *testing.T) {
+	g, mods := newGatewayWithModels(t)
+	for _, m := range []models.Model{userAccountModel("m-plan", "gpt-5.6-terra"), userAccountModel("m-off-plan", "gpt-not-in-plan")} {
+		m.Name, m.Purposes = m.UUID, []models.LLMModelPurpose{{Purpose: "siwc", Priority: 1}}
+		if m.UUID == "m-off-plan" {
+			m.Purposes[0].Priority = 0 // would win Resolve if it were not filtered
+		}
+		mods.rows[m.UUID] = &m
+	}
+	ctx := ctxFor("t1")
+	listed := func() map[string]bool {
+		t.Helper()
+		list, err := g.ListUsable(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]bool{}
+		for _, m := range list {
+			out[m.UUID] = true
+		}
+		return out
+	}
+	// No accounts wired: never listed.
+	if got := listed(); got["m-plan"] || got["m-off-plan"] || !got["m-everyone"] {
+		t.Fatalf("unwired list = %v", got)
+	}
+
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1", models: []string{"gpt-5.6-terra"}}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	g.SetAccounts(h.svc)
+	// Wired, nothing linked: hidden; Resolve finds nothing for the purpose.
+	if got := listed(); got["m-plan"] || got["m-off-plan"] {
+		t.Fatalf("unlinked list = %v", got)
+	}
+	if _, err := g.Resolve(ctx, "siwc"); !errors.Is(err, iface.ErrLLMNoEligibleModel) {
+		t.Fatalf("unlinked Resolve err = %v", err)
+	}
+
+	acc := h.linkAccount(t, ctx, "oaiapp_1", "c")
+	if got := listed(); !got["m-plan"] || got["m-off-plan"] || !got["m-everyone"] {
+		t.Fatalf("linked list = %v", got)
+	}
+	if info, err := g.Resolve(ctx, "siwc"); err != nil || info.UUID != "m-plan" {
+		t.Fatalf("linked Resolve = %+v, %v", info, err)
+	}
+	// The catalog is cached per account: listing twice reads it once.
+	var plans int
+	oidc.locked(func() { plans = oidc.planCalls })
+	listed()
+	oidc.locked(func() {
+		if oidc.planCalls != plans {
+			t.Errorf("plan catalog re-read within the cache window (%d → %d)", plans, oidc.planCalls)
+		}
+	})
+
+	// needs_reauth: hidden again, while Chat still says why.
+	h.repo.edit(acc.UUID, func(a *models.UserAccount) { a.Status = models.AccountStatusNeedsReauth })
+	if got := listed(); got["m-plan"] {
+		t.Fatalf("needs_reauth list = %v", got)
+	}
+	env := newRouterEnv(t, nil, map[string]chatScript{"openai": ok("x", 1, 1)})
+	catalog, _, _, _, _ := newCatalog(t, CatalogConfig{AllowHosted: true})
+	env.r.creds = NewCredentialResolver(catalog, h.svc)
+	g.SetRouter(env.r)
+	req := iface.ChatRequest{Caller: "test", Purpose: "siwc", Messages: []iface.ChatMessage{{Role: "user", Content: "hi"}}}
+	if _, err := g.Chat(ctx, req, nil); !errors.Is(err, iface.ErrLLMUserAccountReauth) {
+		t.Fatalf("Chat err = %v", err)
+	}
+}
+
+// The audit sink compliance pushes into the gateway reaches the accounts
+// service too (account link/unlink events).
+func TestGateway_ForwardsAuditSinkToAccounts(t *testing.T) {
+	g := newGatewayForTest(t)
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1", models: []string{"gpt-5.6-terra"}}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	g.SetAccounts(h.svc)
+	sink := &syncAudit{}
+	g.SetAuditSink(sink)
+	h.linkAccount(t, ctxFor("t1"), "oaiapp_1", "c")
+	if len(sink.actions()) == 0 {
+		t.Fatal("no account audit event reached the gateway's sink")
+	}
+}

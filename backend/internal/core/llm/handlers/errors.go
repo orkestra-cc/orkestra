@@ -95,7 +95,7 @@ func MapError(err error) error {
 	case errors.Is(err, iface.ErrLLMInvalidRequest):
 		return errcode.UnprocessableEntity(errcode.LLMInvalidRequest, invalidDetail(err))
 	case errors.Is(err, services.ErrNotFound):
-		return errcode.NotFound(errcode.LLMNotFound, "No such credential or model in this organization.")
+		return errcode.NotFound(errcode.LLMNotFound, "No such credential, model or linked account in this organization.")
 	case errors.Is(err, services.ErrNameInUse):
 		return errcode.Conflict(errcode.LLMNameInUse, "Another credential or model in this organization already has this name.")
 	case errors.Is(err, services.ErrCredentialInUse):
@@ -129,6 +129,24 @@ func MapError(err error) error {
 		return errcode.Conflict(errcode.LLMUserAccountReauthRequired, "Your linked account needs you to sign in again.")
 	case errors.Is(err, iface.ErrLLMPlanUsageDisabled):
 		return errcode.Conflict(errcode.LLMPlanUsageDisabled, "Your linked account does not allow direct plan usage.")
+	// Sign in with ChatGPT. The exchange failure wraps provider_unavailable,
+	// so these come before it.
+	case errors.Is(err, services.ErrSIWCDisabled):
+		return errcode.NotFound(errcode.LLMSIWCDisabled, "Sign in with ChatGPT is turned off on this installation.")
+	case errors.Is(err, services.ErrSIWCUnsupportedDeployment):
+		return errcode.Conflict(errcode.LLMSIWCUnsupportedDeployment, "This installation cannot complete Sign in with ChatGPT automatically: the API must be reached as http://127.0.0.1:<port>.")
+	case errors.Is(err, services.ErrSIWCConfigInvalid):
+		return errcode.ServiceUnavailable(errcode.LLMSIWCConfigInvalid, "Sign in with ChatGPT is not configured correctly on this installation; ask an administrator to review the llm module settings.")
+	case errors.Is(err, services.ErrSIWCCallbackInvalid):
+		return errcode.UnprocessableEntity(errcode.LLMSIWCCallbackInvalid, "The pasted address is not the one the browser showed after signing in; copy the full URL from the address bar.")
+	case errors.Is(err, services.ErrSIWCStateInvalid):
+		return errcode.Conflict(errcode.LLMSIWCStateInvalid, "This sign-in attempt has expired or was already used; start linking again.")
+	case errors.Is(err, services.ErrSIWCDenied):
+		return errcode.Conflict(errcode.LLMSIWCDenied, "The authorization was declined at OpenAI.")
+	case errors.Is(err, services.ErrSIWCIDTokenInvalid):
+		return errcode.Conflict(errcode.LLMSIWCIDTokenInvalid, "The identity returned by OpenAI could not be verified for this registration.")
+	case errors.Is(err, services.ErrSIWCExchangeFailed):
+		return errcode.New(http.StatusBadGateway, errcode.LLMSIWCExchangeFailed, "OpenAI did not complete the sign-in.")
 	case errors.Is(err, iface.ErrLLMPartialOutput):
 		return errcode.New(http.StatusBadGateway, errcode.LLMPartialOutput, "The provider failed after part of the answer was sent.")
 	case errors.Is(err, providers.ErrUnauthorized):

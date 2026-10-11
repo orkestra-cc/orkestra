@@ -61,6 +61,14 @@ type Router struct {
 	cfg      func() RouterConfig
 	metrics  LLMMetrics
 	logger   *slog.Logger
+
+	// AfterCall (optional) runs after every attempt that reached a provider,
+	// with the credential identity the attempt used and its error (nil on
+	// success). The module stamps a linked account's lastUsedAt from it
+	// (ruling 2.17: success only). It is not called for attempts that never
+	// reached a provider (credential, breaker, adapter or capability
+	// refusals). Set once, before the router serves calls.
+	AfterCall func(ctx context.Context, m models.Model, credentialUUID string, err error)
 }
 
 func NewRouter(registry *providers.Registry, creds CredentialResolver, budget *BudgetService, breaker *Breaker, clients func(kind string) *http.Client, cfg func() RouterConfig, metrics LLMMetrics, logger *slog.Logger) *Router {
@@ -76,6 +84,10 @@ func NewRouter(registry *providers.Registry, creds CredentialResolver, budget *B
 	return &Router{registry: registry, creds: creds, budget: budget, breaker: breaker, clients: clients, cfg: cfg, metrics: metrics, logger: logger}
 }
 
+// Credentials is the resolver the router was built with (read-only, for the
+// module's wiring checks).
+func (r *Router) Credentials() CredentialResolver { return r.creds }
+
 type noopMetrics struct{}
 
 func (noopMetrics) RecordLLMRequest(string, string)       {}
@@ -84,11 +96,20 @@ func (noopMetrics) RecordLLMTokens(string, string, int64) {}
 // fallbackable: the next candidate may be tried only for a failure of
 // THIS provider or credential. Cancellation, timeouts, the budget, the
 // user's linked account, an exhausted quota, a malformed request and
-// partial output are final (spec "Routing", step 4).
+// partial output are final (spec "Routing", step 4). The plan route's
+// transient usage_unavailable / user_unavailable are fallbackable faults:
+// their bounded backoff in v1 is the breaker (3 failures → 30 s open,
+// ruling 5.13). A plan-route configuration rejection
+// (subscription_sharing_route_not_supported, chatpass_v2_*) and an
+// invalid_client from the token endpoint are final too: the next
+// user_account candidate bills the same account through the same issued
+// client and grant, so it would fail the same way (the remedy is the
+// configuration, never another call).
 func fallbackable(err error) bool {
 	for _, final := range []error{context.Canceled, context.DeadlineExceeded, iface.ErrLLMBudgetExceeded,
 		iface.ErrLLMUserAccountRequired, iface.ErrLLMPlanUsageDisabled, iface.ErrLLMUserAccountReauth,
-		iface.ErrLLMQuotaExhausted, iface.ErrLLMInvalidRequest, iface.ErrLLMPartialOutput} {
+		iface.ErrLLMQuotaExhausted, iface.ErrLLMInvalidRequest, iface.ErrLLMPartialOutput,
+		providers.ErrSIWCRouteNotSupported, providers.ErrSIWCInvalidClient} {
 		if errors.Is(err, final) {
 			return false
 		}
@@ -165,10 +186,20 @@ type callResult struct {
 
 // execSpec describes one logical call to run().
 type execSpec struct {
-	reserve  ReserveInput
-	timeout  time.Duration // consumer's Options.Timeout (0 = module default)
+	reserve ReserveInput
+	timeout time.Duration // consumer's Options.Timeout (0 = module default)
+	// refuse (optional) rejects a candidate before its credential is
+	// resolved: a mismatch decidable from the model alone.
+	refuse   func(m models.Model) error
 	supports func(m models.Model, p providers.Provider) bool
 	call     func(ctx context.Context, p providers.Provider, m models.Model) callResult
+}
+
+// resolved is a credential already obtained for the next attempt (the
+// refreshed one of a plan-route 401 retry).
+type resolved struct {
+	cred providers.Credential
+	uuid string
 }
 
 // execOutcome is the winning attempt.
@@ -204,7 +235,12 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 	var attempts []models.Attempt
 	var lastErr error
 	abortCode := "" // set when the caller ended the call: canceled | timeout
-	for i, m := range cands {
+	// Ruling 5.2: one forced refresh per logical call; next carries the
+	// refreshed credential into the retry of the same candidate.
+	refreshed := false
+	var next *resolved
+	for i := 0; i < len(cands); i++ {
+		m := cands[i]
 		if len(attempts) >= models.MaxLedgerAttempts {
 			break
 		}
@@ -228,14 +264,27 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 			deadline, lowered = left, true
 		}
 		attempt := models.Attempt{Provider: m.Provider, CredentialKind: m.CredentialRef.Kind, Outcome: attemptError}
-
-		cred, credUUID, err := r.creds.Resolve(ctx, m, spec.reserve.UserUUID)
-		if err != nil {
-			attempts, lastErr = append(attempts, attempt), err
-			if !fallbackable(err) {
-				break
+		if spec.refuse != nil {
+			if err := spec.refuse(m); err != nil {
+				attempt.Outcome = attemptCapabilityMismatch
+				attempts, lastErr = append(attempts, attempt), err
+				continue
 			}
-			continue
+		}
+
+		var cred providers.Credential
+		var credUUID string
+		if next != nil {
+			cred, credUUID, next = next.cred, next.uuid, nil
+		} else {
+			cred, credUUID, err = r.creds.Resolve(ctx, m, spec.reserve.UserUUID)
+			if err != nil {
+				attempts, lastErr = append(attempts, attempt), err
+				if !fallbackable(err) {
+					break
+				}
+				continue
+			}
 		}
 		key := m.Provider + "|" + cred.BaseURL + "|" + m.ModelID + "|" + credUUID
 		ticket, err := r.breaker.Allow(key)
@@ -268,12 +317,44 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 		deadlineHit := errors.Is(callCtx.Err(), context.DeadlineExceeded) || errors.Is(cr.err, context.DeadlineExceeded)
 		cancel()
 		callerGone := ctx.Err() != nil
-		// Ruling 5.2: hang-ups, sink aborts and deadlines the caller (or
-		// the reservation window) shortened say nothing about the provider.
-		if cr.callerErr != nil || callerGone || (cr.err != nil && lowered && deadlineHit) {
+		// Ruling 5.2 (PR 3): the plan route rejected the user's access
+		// token before any output. Refresh it once and retry this same
+		// candidate; the rejection says nothing about the provider.
+		refresher, canRefresh := r.creds.(CredentialRefresher)
+		retryPlan := canRefresh && !refreshed && cr.err != nil && cr.callerErr == nil && !callerGone && !cr.emitted &&
+			m.CredentialRef.Kind == models.CredentialKindUserAccount && errors.Is(cr.err, providers.ErrSIWCInvalidUser)
+		// Ruling 5.2 (PR 2): hang-ups, sink aborts and deadlines the caller
+		// (or the reservation window) shortened say nothing about the
+		// provider.
+		if retryPlan || cr.callerErr != nil || callerGone || (cr.err != nil && lowered && deadlineHit) {
 			r.breaker.Release(key, ticket)
 		} else {
 			r.breaker.Record(key, ticket, cr.err)
+		}
+		r.afterCall(ctx, m, credUUID, cr)
+
+		if retryPlan {
+			refreshed = true
+			attempts = append(attempts, attempt)
+			r.logger.WarnContext(ctx, "llm siwc: the plan route rejected the linked account token; refreshing once", planRouteAttrs(cr.err, credUUID)...)
+			ncred, nuuid, rerr := refresher.Refresh(ctx, m, spec.reserve.UserUUID, cred)
+			if rerr == nil {
+				next = &resolved{cred: ncred, uuid: nuuid}
+				i-- // the same candidate once more
+				continue
+			}
+			if !accountClassified(rerr) && !errors.Is(rerr, iface.ErrLLMProviderUnavailable) {
+				rerr = fmt.Errorf("%w: linked account refresh: %w", iface.ErrLLMProviderUnavailable, rerr)
+			}
+			if !errors.Is(rerr, iface.ErrLLMUserAccountReauth) {
+				r.logger.WarnContext(ctx, "llm siwc: refresh after a plan-route 401 did not yield a usable token",
+					append(planRouteAttrs(cr.err, credUUID), slog.String("refresh", errorCodeOf(rerr)))...)
+			}
+			lastErr = rerr
+			if !fallbackable(rerr) {
+				break
+			}
+			continue
 		}
 
 		if cr.err == nil && cr.callerErr == nil {
@@ -335,6 +416,42 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 		Provider: first.Provider, ModelID: first.ModelID, ModelUUID: first.UUID, CredentialKind: first.CredentialRef.Kind, CredentialUUID: first.CredentialRef.CredentialUUID})
 	r.metrics.RecordLLMRequest(first.Provider, models.OutcomeError)
 	return nil, lastErr
+}
+
+// afterCall runs the AfterCall hook on a context detached from the caller
+// (a hang-up after the provider completed must not lose the stamp),
+// bounded like the ledger write.
+func (r *Router) afterCall(ctx context.Context, m models.Model, credUUID string, cr callResult) {
+	if r.AfterCall == nil {
+		return
+	}
+	err := cr.err
+	if err == nil {
+		err = cr.callerErr
+	}
+	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeTimeout)
+	defer cancel()
+	r.AfterCall(actx, m, credUUID, err)
+}
+
+// planRouteAttrs are the log attributes of a plan-route failure: the
+// account and the allowlisted identifiers only (ruling 5.3: never provider
+// text, never a token).
+func planRouteAttrs(err error, accountUUID string) []any {
+	attrs := []any{slog.String("account", accountUUID), slog.String("code", errorCodeOf(err))}
+	var f *providers.PlanRouteFailure
+	if errors.As(err, &f) {
+		if f.Status != 0 {
+			attrs = append(attrs, slog.Int("status", f.Status))
+		}
+		if f.Code != "" {
+			attrs = append(attrs, slog.String("providerCode", f.Code))
+		}
+		if f.RequestID != "" {
+			attrs = append(attrs, slog.String("requestId", f.RequestID))
+		}
+	}
+	return attrs
 }
 
 // attemptTimeout is min(request_timeout, Options.Timeout): a consumer may
@@ -478,6 +595,14 @@ func (r *Router) Embed(ctx context.Context, cands []models.Model, userUUID strin
 			CredentialKind: first.CredentialRef.Kind, CredentialUUID: first.CredentialRef.CredentialUUID,
 			Caller: req.Caller, Purpose: req.EffectivePurpose(),
 			EstimatedInput: EstimateEmbedTokens(req.Inputs), ReserveOutput: 1,
+		},
+		// The ChatGPT plan route has no embeddings: refused before the
+		// linked account is even resolved.
+		refuse: func(m models.Model) error {
+			if m.CredentialRef.Kind == models.CredentialKindUserAccount {
+				return fmt.Errorf("%w: embeddings are not available on the ChatGPT plan route", iface.ErrLLMCapabilityMismatch)
+			}
+			return nil
 		},
 		supports: func(m models.Model, p providers.Provider) bool {
 			return p.Capabilities().Embeddings && m.Capabilities.Embeddings

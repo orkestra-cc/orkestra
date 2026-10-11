@@ -11,12 +11,11 @@
 // (D9) never grants a developer an ".admin" key. Reads use "read" so a
 // production developer still sees configuration.
 //
-// llm.models.self and llm.usage.self are suffix-covered by
+// llm.models.self, llm.usage.self and llm.accounts.self (a user's own
+// Sign in with ChatGPT registrations) are suffix-covered by
 // tenant_roles.cedar and platform.cedar (action_suffix == "self") and need
-// no policy here.
-//
-// The linked-account keys (llm.accounts.*) arrive in a later PR together
-// with the routes that use them; name them here when they are declared.
+// no policy here. llm.accounts.admin (an operator force-unlinking another
+// user's registration) is a System mutation like the others below.
 
 @id("llm.admin_read.platform_roles")
 permit (
@@ -40,7 +39,8 @@ permit (
         Action::"llm.credentials.admin",
         Action::"llm.models.admin",
         Action::"llm.grants.admin",
-        Action::"llm.budgets.admin"
+        Action::"llm.budgets.admin",
+        Action::"llm.accounts.admin"
     ],
     resource
 ) when {

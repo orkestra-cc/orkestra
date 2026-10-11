@@ -208,7 +208,7 @@
       "model_access_denied": "Non puoi usare questo modello.",
       "capability_mismatch": "Il modello non offre ciò che serve alla richiesta.",
       "invalid_request": "Alcuni campi non sono validi.",
-      "not_found": "La credenziale o il modello non esiste più.",
+      "not_found": "La credenziale, il modello o l'account collegato non esiste più.",
       "name_in_use": "Un'altra credenziale o un altro modello ha già questo nome.",
       "credential_in_use": "Un modello attivo usa ancora questa credenziale. Eliminalo o collegalo a un'altra credenziale prima.",
       "secret_key_missing": "Questa installazione non ha una chiave di cifratura dei segreti, quindi le chiavi non possono essere salvate.",
@@ -224,7 +224,15 @@
       "user_account_required": "Questo modello è addebitato al tuo account: collegalo prima.",
       "user_account_reauth_required": "L'account collegato deve essere autorizzato di nuovo.",
       "plan_usage_disabled": "L'account collegato non ha consentito l'uso del piano.",
-      "request_canceled": "La richiesta è stata annullata prima di essere completata."
+      "request_canceled": "La richiesta è stata annullata prima di essere completata.",
+      "siwc_config_invalid": "Accedi con ChatGPT non è configurato correttamente su questa installazione. Chiedi a un amministratore di controllare le impostazioni del modulo llm.",
+      "siwc_disabled": "Accedi con ChatGPT è disattivato su questa installazione.",
+      "siwc_unsupported_deployment": "Accedi con ChatGPT non può completarsi automaticamente qui: l'API deve essere raggiunta come http://127.0.0.1. Chiedi a un amministratore di usare il flusso con incolla.",
+      "siwc_callback_invalid": "Non è l'indirizzo che il browser ha mostrato dopo l'accesso. Copia l'URL completo dalla barra degli indirizzi e incollalo di nuovo.",
+      "siwc_state_invalid": "Questo tentativo di accesso è scaduto o è già stato usato. Ricomincia il collegamento.",
+      "siwc_denied": "L'autorizzazione è stata rifiutata su OpenAI. Non è stato collegato nulla.",
+      "siwc_exchange_failed": "OpenAI non ha completato l'accesso. Riprova a collegare più tardi.",
+      "siwc_id_token_invalid": "L'identità restituita da OpenAI non è verificabile, oppure appartiene a un altro account. Non è stato modificato nulla."
     }
   },
   "banner": {
@@ -1246,7 +1254,8 @@
       "oauth": "Accessi collegati",
       "sessions": "Sessioni",
       "devices": "Dispositivi attendibili",
-      "backupCodes": "Codici di backup"
+      "backupCodes": "Codici di backup",
+      "ai": "Account AI"
     },
     "stats": {
       "mfaTitle": "Due fattori",
@@ -1403,6 +1412,90 @@
       "modalCancel": "Annulla",
       "modalSubmit": "Scollega",
       "modalSubmitting": "Scollegamento…"
+    },
+    "aiAccounts": {
+      "intro": "Collega il tuo account ChatGPT perché i modelli che l'organizzazione addebita al tuo piano ChatGPT lo usino. I token di accesso restano sul server: questa pagina non li vede mai.",
+      "link": "Collega un account ChatGPT",
+      "linkStarting": "Avvio…",
+      "pasteInstead": "Incolla invece un indirizzo di accesso",
+      "disabled": "Accedi con ChatGPT non è abilitato su questa installazione.",
+      "disabledHint": "Un amministratore può attivarlo nelle impostazioni del modulo llm.",
+      "disabledWithAccounts": "Accedi con ChatGPT non è abilitato su questa installazione. Puoi comunque scollegare gli account qui sotto.",
+      "empty": "Nessun account ChatGPT collegato.",
+      "emptyHint": "Collegane uno per usare i modelli addebitati al tuo piano ChatGPT.",
+      "loadError": "Non è stato possibile caricare i tuoi account collegati.",
+      "retry": "Riprova",
+      "linked": "Account collegato.",
+      "linkedNamed": "Account collegato: {{label}}.",
+      "selectedNow": "{{label}} è ora l'account usato dai modelli addebitati al tuo piano.",
+      "unlinked": "{{label}} è stato scollegato.",
+      "neverUsed": "Mai",
+      "selectedBadge": "In uso",
+      "columns": {
+        "account": "Account",
+        "status": "Stato",
+        "selected": "In uso",
+        "linked": "Collegato",
+        "lastUsed": "Ultimo uso",
+        "actions": "Azioni"
+      },
+      "status": {
+        "active": "Attivo",
+        "plan_disabled": "Uso del piano non concesso",
+        "needs_reauth": "Accesso richiesto",
+        "revoked": "Revocato"
+      },
+      "remedies": {
+        "plan_disabled": "Accedi di nuovo e consenti l'uso del piano quando OpenAI lo chiede.",
+        "needs_reauth": "Accedi di nuovo per continuare a usare questo account.",
+        "revoked": "OpenAI non accetta più questo accesso. Scollega l'account e collegalo di nuovo."
+      },
+      "actions": {
+        "select": "Seleziona",
+        "reauthorize": "Autorizza di nuovo",
+        "unlink": "Scollega"
+      },
+      "unlinkTitle": "Scollegare {{label}}?",
+      "unlinkBody": "I modelli addebitati al tuo piano smettono di usare questo account e il suo accesso viene revocato presso OpenAI. Puoi ricollegarlo in seguito.",
+      "wizard": {
+        "title": "Collega un account ChatGPT",
+        "reauthTitle": "Accedi di nuovo a {{label}}",
+        "stepOf": "Passo {{step}} di {{total}}",
+        "step1Title": "Accedi su OpenAI",
+        "step1": "OpenAI si apre in una nuova scheda. Accedi con l'account ChatGPT che vuoi usare e consenti l'uso del piano quando richiesto. Tieni aperta questa finestra: concludi qui.",
+        "open": "Apri OpenAI",
+        "step2Title": "Incolla l'indirizzo",
+        "step2": "Dopo l'accesso, la scheda di OpenAI prova ad aprire un indirizzo che inizia con http://127.0.0.1 e mostra un errore di connessione. È previsto: copia l'indirizzo completo dalla barra degli indirizzi di quella scheda.",
+        "pasteLabel": "Incolla l'indirizzo della scheda di OpenAI",
+        "pastePlaceholder": "http://127.0.0.1:…/v1/llm/accounts/openai/callback?…",
+        "pasteHint": "Includi tutto ciò che segue il punto interrogativo. L'indirizzo vale una sola volta, per dieci minuti.",
+        "complete": "Completa il collegamento",
+        "completing": "Collegamento…",
+        "back": "Indietro",
+        "cancel": "Annulla",
+        "validation": {
+          "required": "Incolla prima l'indirizzo.",
+          "invalid": "Non è un indirizzo web. Copialo dalla barra degli indirizzi.",
+          "tooLong": "L'indirizzo è troppo lungo."
+        }
+      },
+      "myModels": {
+        "title": "Modelli addebitati al tuo piano",
+        "note": "Quali puoi usare dipende dal catalogo dell'account selezionato.",
+        "empty": "Nessun modello addebitato al tuo piano ChatGPT è disponibile per te.",
+        "loadError": "Non è stato possibile caricare i modelli.",
+        "columns": {
+          "name": "Modello",
+          "modelId": "ID modello"
+        }
+      },
+      "myUsage": {
+        "title": "Il mio consumo questo mese",
+        "org": "Addebitato all'organizzazione",
+        "orgSubtitle": "Token sulle credenziali dell'organizzazione",
+        "userAccount": "Addebitato al tuo piano",
+        "userAccountSubtitle": "Token sul tuo account ChatGPT collegato"
+      }
     }
   },
   "operatorProfile": {
@@ -2653,6 +2746,7 @@
     "tabs": {
       "models": "Modelli",
       "credentials": "Credenziali",
+      "accounts": "Account",
       "usage": "Utilizzo",
       "budget": "Budget"
     },
@@ -2946,6 +3040,41 @@
       "truncated": "La risposta è stata troncata a 64 KiB.",
       "tooLong": "Usa al massimo {{max}} caratteri.",
       "disabledModel": "Attiva il modello per provarlo."
+    },
+    "accounts": {
+      "intro": "Gli account ChatGPT che i membri dell'organizzazione hanno collegato con Accedi con ChatGPT. I token non lasciano mai il server; questo elenco non ne mostra.",
+      "mode": "Accedi con ChatGPT: {{mode}}",
+      "modes": {
+        "disabled": "disattivato",
+        "loopback_local": "rientro automatico (installazione locale)",
+        "hosted_paste": "flusso con incolla"
+      },
+      "disabledHint": "I membri non possono collegare account ChatGPT finché non viene attivato.",
+      "openSettings": "Apri le impostazioni del modulo llm",
+      "emptyTitle": "Nessun membro ha collegato un account ChatGPT.",
+      "emptyHint": "I membri collegano i propri account dalle impostazioni di sicurezza.",
+      "search": "Cerca account",
+      "planGranted": "Concesso",
+      "planNotGranted": "Non concesso",
+      "neverUsed": "Mai",
+      "columns": {
+        "user": "Membro",
+        "account": "Account",
+        "status": "Stato",
+        "planUsage": "Uso del piano",
+        "lastUsed": "Ultimo uso"
+      },
+      "status": {
+        "active": "Attivo",
+        "plan_disabled": "Uso del piano non concesso",
+        "needs_reauth": "Accesso richiesto",
+        "revoked": "Revocato"
+      },
+      "forceUnlink": "Scollega forzatamente",
+      "forceUnlinkTitle": "Scollegare forzatamente {{label}}?",
+      "forceUnlinkBody": "{{label}} di {{user}} viene revocato presso OpenAI e rimosso. I modelli addebitati al piano di quel membro smettono di funzionare finché non collega di nuovo un account.",
+      "forceUnlinkSuccess": "L'account è stato scollegato.",
+      "noPermission": "Lo scollegamento forzato richiede il permesso di gestire gli account collegati."
     }
   },
   "adminModules": {

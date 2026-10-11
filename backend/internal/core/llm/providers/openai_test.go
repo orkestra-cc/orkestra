@@ -356,7 +356,8 @@ func TestOpenAI_SIWCProfile(t *testing.T) {
 	if _, err := p.Chat(context.Background(), ChatCall{ModelID: "m", Request: req}, noopSink); !errors.Is(err, iface.ErrLLMCapabilityMismatch) {
 		t.Errorf("temperature err = %v", err)
 	}
-	if _, err := p.Chat(context.Background(), ChatCall{ModelID: "m", Request: userReq("hi")}, noopSink); err != nil {
+	shaped := iface.ChatRequest{Caller: "t", Instructions: "sys", Messages: []iface.ChatMessage{{Role: "developer", Content: "d"}, {Role: "user", Content: "u"}}}
+	if _, err := p.Chat(context.Background(), ChatCall{ModelID: "m", Request: shaped}, noopSink); err != nil {
 		t.Fatal(err)
 	}
 	for _, forbidden := range []string{"temperature", "max_output_tokens", "metadata", "user", "previous_response_id"} {
@@ -364,8 +365,18 @@ func TestOpenAI_SIWCProfile(t *testing.T) {
 			t.Errorf("SIWC request carries forbidden field %s", forbidden)
 		}
 	}
-	if captured["store"] != false || captured["stream"] != true {
+	if captured["store"] != false || captured["stream"] != true || captured["instructions"] != "sys" {
 		t.Errorf("request = %v", captured)
+	}
+	// Developer items stay developer; nothing is sent with role system.
+	input, _ := captured["input"].([]any)
+	if len(input) != 2 || input[0].(map[string]any)["role"] != "developer" {
+		t.Errorf("input = %v", input)
+	}
+	for _, item := range input {
+		if item.(map[string]any)["role"] == "system" {
+			t.Error("system role item sent on the plan route")
+		}
 	}
 	api, _ := newOAI(t, func(w http.ResponseWriter, r *http.Request) {}, iface.LLMCredentialKindOrg)
 	if !api.Capabilities().Embeddings || api.(*OpenAI).Profile() != ProfileAPIKey {
@@ -392,5 +403,45 @@ func TestOpenAI_RegisteredInRegistry(t *testing.T) {
 	p, err := r.Build("openai", Credential{Kind: iface.LLMCredentialKindOrg, Secret: "k"}, nil)
 	if err != nil || p.Name() != "openai" {
 		t.Fatalf("build: %v", err)
+	}
+}
+
+func TestOpenAI_SIWCListModelsReadsThePlanCatalog(t *testing.T) {
+	var auth, path string
+	p, _ := newOAI(t, func(w http.ResponseWriter, r *http.Request) {
+		auth, path = r.Header.Get("Authorization"), r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"slug":"gpt-5.6-terra","display_name":"GPT-5.6","visibility":"list"},{"slug":"hidden","display_name":"x","visibility":"hidden"},{"slug":"gpt-5.6-mini","visibility":"list"}]}`))
+	}, iface.LLMCredentialKindUserAccount)
+	ms, err := p.ListModels(context.Background())
+	if err != nil || len(ms) != 2 || ms[0].ID != "gpt-5.6-terra" || ms[0].DisplayName != "GPT-5.6" || ms[1].ID != "gpt-5.6-mini" || ms[1].DisplayName != "gpt-5.6-mini" {
+		t.Fatalf("models = %+v, %v", ms, err)
+	}
+	if auth != "Bearer sk-test" || path != "/v1/models" {
+		t.Fatalf("request = %s %q", path, auth)
+	}
+}
+
+func TestOpenAI_SIWCListModelsErrors(t *testing.T) {
+	cases := []struct {
+		status int
+		body   string
+		want   error
+	}{
+		{401, `{"detail":"sk-live-x"}`, ErrSIWCInvalidUser},
+		{403, `{"error":{"code":"subscription_sharing_user_not_eligible","message":"sk-live-x"}}`, iface.ErrLLMPlanUsageDisabled},
+		{503, ``, iface.ErrLLMProviderUnavailable},
+		{200, `{"data":[{"id":"gpt"}]}`, iface.ErrLLMProviderUnavailable}, // API-key shape on the plan route
+	}
+	for _, c := range cases {
+		p, _ := newOAI(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(c.status)
+			_, _ = w.Write([]byte(c.body))
+		}, iface.LLMCredentialKindUserAccount)
+		_, err := p.ListModels(context.Background())
+		if !errors.Is(err, c.want) || strings.Contains(err.Error(), "sk-live-x") {
+			t.Errorf("%d → %v, want %v", c.status, err, c.want)
+		}
 	}
 }

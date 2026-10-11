@@ -14,7 +14,8 @@ describe('llmApi', () => {
       'LLMModel',
       'LLMMyModels',
       'LLMUsage',
-      'LLMBudget'
+      'LLMBudget',
+      'LLMAccount'
     ]) {
       expect(tags).toContain(tag);
     }
@@ -247,5 +248,80 @@ describe('llmApi', () => {
       .dispatch(llmApi.endpoints.getMyLlmUsage.initiate())
       .unwrap();
     expect(mine.requests).toBe(3);
+  });
+
+  it('linked-account routes: link and complete carry only their bodies, select is a bodiless PUT', async () => {
+    const seen: { method: string; path: string; body: string }[] = [];
+    const record = async (request: Request) => {
+      seen.push({
+        method: request.method,
+        path: new URL(request.url).pathname,
+        body: await request.text()
+      });
+    };
+    server.use(
+      http.post(url('/v1/llm/accounts/openai/link'), async ({ request }) => {
+        await record(request);
+        return HttpResponse.json({
+          authorizeUrl:
+            'https://auth.openai.com/api/accounts/authorize?state=s',
+          mode: 'hosted_paste'
+        });
+      }),
+      http.post(
+        url('/v1/llm/accounts/openai/complete'),
+        async ({ request }) => {
+          await record(request);
+          return HttpResponse.json({ uuid: 'a-1', label: 'Work' });
+        }
+      ),
+      http.put(
+        url('/v1/llm/accounts/openai/a-1/selected'),
+        async ({ request }) => {
+          await record(request);
+          return new HttpResponse(null, { status: 204 });
+        }
+      ),
+      http.delete(url('/v1/admin/llm/accounts/a-1'), async ({ request }) => {
+        await record(request);
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    const store = setupStore();
+    const started = await store
+      .dispatch(
+        llmApi.endpoints.linkLlmAccount.initiate({ reauthAccountUuid: 'a-1' })
+      )
+      .unwrap();
+    await store
+      .dispatch(
+        llmApi.endpoints.completeLlmAccount.initiate({
+          callbackUrl: 'http://127.0.0.1:1455/cb?code=c&state=s'
+        })
+      )
+      .unwrap();
+    await store
+      .dispatch(llmApi.endpoints.selectLlmAccount.initiate('a-1'))
+      .unwrap();
+    await store
+      .dispatch(llmApi.endpoints.forceUnlinkLlmAccount.initiate('a-1'))
+      .unwrap();
+    expect(started.mode).toBe('hosted_paste');
+    expect(seen).toEqual([
+      {
+        method: 'POST',
+        path: '/v1/llm/accounts/openai/link',
+        body: JSON.stringify({ reauthAccountUuid: 'a-1' })
+      },
+      {
+        method: 'POST',
+        path: '/v1/llm/accounts/openai/complete',
+        body: JSON.stringify({
+          callbackUrl: 'http://127.0.0.1:1455/cb?code=c&state=s'
+        })
+      },
+      { method: 'PUT', path: '/v1/llm/accounts/openai/a-1/selected', body: '' },
+      { method: 'DELETE', path: '/v1/admin/llm/accounts/a-1', body: '' }
+    ]);
   });
 });

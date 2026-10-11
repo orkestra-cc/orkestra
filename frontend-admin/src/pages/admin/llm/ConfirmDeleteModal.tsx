@@ -7,6 +7,8 @@ interface Props {
   body: string;
   error?: string | null;
   busy?: boolean;
+  // The confirm button's label; "Delete" when absent.
+  confirmLabel?: string;
   onCancel: () => void;
   onConfirm: () => void;
   onExited?: () => void;
@@ -21,6 +23,7 @@ const ConfirmDeleteModal = ({
   body,
   error,
   busy,
+  confirmLabel,
   onCancel,
   onConfirm,
   onExited
@@ -44,7 +47,7 @@ const ConfirmDeleteModal = ({
           {t('adminLlm.actions.cancel')}
         </Button>
         <Button variant="orkestra-danger" disabled={busy} onClick={onConfirm}>
-          {t('adminLlm.actions.delete')}
+          {confirmLabel ?? t('adminLlm.actions.delete')}
         </Button>
       </Modal.Footer>
     </Modal>

@@ -1,0 +1,334 @@
+package repository
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/orkestra/backend/internal/core/llm/models"
+	"github.com/orkestra/backend/pkg/sdk/tenantrepo"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+// CollUserAccounts holds the Sign in with ChatGPT registrations.
+const CollUserAccounts = "llm_user_accounts"
+
+// ErrEmptySubject: the cross-org DSR methods refuse an empty subject id, which
+// would otherwise match (and erase) every row stored without a userUuid.
+var ErrEmptySubject = errors.New("llm repository: empty subject id")
+
+// ErrStaleTokenSet: ReplaceTokens lost its compare-and-swap — another writer
+// (a refresh on another replica, a reauth) replaced the token set after the
+// caller read it. The caller re-reads instead of overwriting.
+var ErrStaleTokenSet = errors.New("llm repository: account token set changed concurrently")
+
+// UserAccounts owns llm_user_accounts.
+type UserAccounts struct{ coll *mongo.Collection }
+
+func NewUserAccounts(db *mongo.Database) *UserAccounts {
+	return &UserAccounts{coll: db.Collection(CollUserAccounts)}
+}
+
+// Insert stores a registration under the caller's org (stamped from ctx).
+// ErrDuplicateName covers the three unique indexes that can fire: the same
+// issued client id for the same user (tenantId, userUuid, clientId), a
+// second Selected row for the same (user, provider) when two first links
+// race (the partial selected index), and a reused uuid (tenantId, uuid) —
+// the caller tells them apart by re-reading.
+func (r *UserAccounts) Insert(ctx context.Context, a *models.UserAccount) error {
+	tenantID, err := tenantrepo.StampInsert(ctx)
+	if err != nil {
+		return err
+	}
+	a.TenantID = tenantID
+	if _, err := r.coll.InsertOne(ctx, a); err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return ErrDuplicateName
+		}
+		return err
+	}
+	return nil
+}
+
+func (r *UserAccounts) find(ctx context.Context, extra bson.M, opts *options.FindOptions) ([]models.UserAccount, error) {
+	filter, err := tenantrepo.Scope(ctx, extra)
+	if err != nil {
+		return nil, err
+	}
+	cur, err := r.coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	out := []models.UserAccount{}
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListByUser returns the user's registrations in the caller's org, oldest
+// link first.
+func (r *UserAccounts) ListByUser(ctx context.Context, userUUID string) ([]models.UserAccount, error) {
+	return r.find(ctx, bson.M{"userUuid": userUUID}, options.Find().SetSort(bson.D{{Key: "linkedAt", Value: 1}}))
+}
+
+// ListAdmin returns every registration of the caller's org, newest link
+// first.
+func (r *UserAccounts) ListAdmin(ctx context.Context) ([]models.UserAccount, error) {
+	return r.find(ctx, bson.M{}, options.Find().SetSort(bson.D{{Key: "linkedAt", Value: -1}}))
+}
+
+func (r *UserAccounts) Get(ctx context.Context, uuid string) (*models.UserAccount, error) {
+	return r.findOne(ctx, bson.M{"uuid": uuid})
+}
+
+// GetSelected returns the user's selected registration for provider, or
+// ErrNotFound when there is none.
+func (r *UserAccounts) GetSelected(ctx context.Context, userUUID, provider string) (*models.UserAccount, error) {
+	return r.findOne(ctx, bson.M{"userUuid": userUUID, "provider": provider, "selected": true})
+}
+
+func (r *UserAccounts) findOne(ctx context.Context, extra bson.M) (*models.UserAccount, error) {
+	filter, err := tenantrepo.Scope(ctx, extra)
+	if err != nil {
+		return nil, err
+	}
+	var a models.UserAccount
+	if err := r.coll.FindOne(ctx, filter).Decode(&a); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &a, nil
+}
+
+// Update replaces the stored registration (matched on org and uuid) with
+// a, whole-document. Callers that must not clobber a concurrent writer
+// (token refresh, status, last use) need field-targeted writers instead.
+func (r *UserAccounts) Update(ctx context.Context, a *models.UserAccount) error {
+	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": a.UUID})
+	if err != nil {
+		return err
+	}
+	// The replacement carries the caller's org so a stale or zero TenantID
+	// on a can never move the document out of its tenant.
+	tenantID, err := tenantrepo.StampInsert(ctx)
+	if err != nil {
+		return err
+	}
+	a.TenantID = tenantID
+	a.UpdatedAt = time.Now().UTC()
+	res, err := r.coll.ReplaceOne(ctx, filter, a)
+	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return ErrDuplicateName
+		}
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// setFields is the targeted writer behind SetLastUsed and SetStatus: a $set
+// of only the given fields (plus updatedAt), so it can never write an old
+// token set back over a concurrent refresh (ruling 2.14).
+func (r *UserAccounts) setFields(ctx context.Context, uuid string, set bson.M) error {
+	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid})
+	if err != nil {
+		return err
+	}
+	set["updatedAt"] = time.Now().UTC()
+	res, err := r.coll.UpdateOne(ctx, filter, bson.M{"$set": set})
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetLastUsed stamps a successful plan-billed call.
+func (r *UserAccounts) SetLastUsed(ctx context.Context, uuid string, at time.Time) error {
+	return r.setFields(ctx, uuid, bson.M{"lastUsedAt": at.UTC()})
+}
+
+// SetStatus records status and lastError (an llm.* code, "" clears it).
+func (r *UserAccounts) SetStatus(ctx context.Context, uuid, status, lastError string) error {
+	return r.setFields(ctx, uuid, bson.M{"status": status, "lastError": lastError})
+}
+
+// SetStatusIf is SetStatus fenced on the token set: it writes only while
+// the stored savedAt is prevSavedAt, so a terminal refresh of a stale set
+// can never flag a newer, valid one. A moved-on set is ErrStaleTokenSet; an
+// unknown uuid (or another org's) is ErrNotFound.
+func (r *UserAccounts) SetStatusIf(ctx context.Context, uuid string, prevSavedAt time.Time, status, lastError string) error {
+	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid, "savedAt": prevSavedAt.UTC()})
+	if err != nil {
+		return err
+	}
+	res, err := r.coll.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"status": status, "lastError": lastError, "updatedAt": time.Now().UTC()}})
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 1 {
+		return nil
+	}
+	if _, err := r.findOne(ctx, bson.M{"uuid": uuid}); err != nil {
+		return err
+	}
+	return ErrStaleTokenSet
+}
+
+// ReplaceTokens writes a refreshed or re-authorized token set in one update,
+// matched on org, uuid AND the savedAt the caller read (compare-and-swap):
+// a writer that lost the race gets ErrStaleTokenSet and nothing is written,
+// so two rotations can never interleave their envelopes. An unknown uuid
+// (or another org's) is ErrNotFound. set.IDToken nil and set.Email "" keep
+// the stored values; lastError is cleared.
+func (r *UserAccounts) ReplaceTokens(ctx context.Context, uuid string, prevSavedAt time.Time, set models.AccountTokenSet) error {
+	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid, "savedAt": prevSavedAt.UTC()})
+	if err != nil {
+		return err
+	}
+	fields := bson.M{
+		"accessToken":      set.AccessToken,
+		"refreshToken":     set.RefreshToken,
+		"tokenType":        set.TokenType,
+		"expiresAt":        set.ExpiresAt.UTC(),
+		"refreshExpiresAt": set.RefreshExpiresAt.UTC(),
+		"savedAt":          set.SavedAt.UTC(),
+		"scopes":           set.Scopes,
+		"planUsageGranted": set.PlanUsageGranted,
+		"status":           set.Status,
+		"lastError":        "",
+		"updatedAt":        time.Now().UTC(),
+	}
+	if set.IDToken != nil {
+		fields["idToken"] = *set.IDToken
+	}
+	if set.Email != "" {
+		fields["email"] = set.Email
+	}
+	update := bson.M{"$set": fields}
+	if set.EarliestRefreshAt != nil {
+		fields["earliestRefreshAt"] = set.EarliestRefreshAt.UTC()
+	} else {
+		update["$unset"] = bson.M{"earliestRefreshAt": ""}
+	}
+	res, err := r.coll.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 1 {
+		return nil
+	}
+	// Tell a lost race from a missing row: only the former is retryable.
+	if _, err := r.findOne(ctx, bson.M{"uuid": uuid}); err != nil {
+		return err
+	}
+	return ErrStaleTokenSet
+}
+
+// Select makes uuid the user's selected registration for provider and
+// deselects the others, in one transaction: the partial unique index on
+// (tenant, user, provider, selected=true) means exactly one row holds the
+// flag. An unknown uuid (or another user's, or another org's) is
+// ErrNotFound and rolls the deselect back, so the previous selection
+// survives.
+func (r *UserAccounts) Select(ctx context.Context, userUUID, provider, uuid string) error {
+	return WithTxn(ctx, r.coll.Database(), func(sc mongo.SessionContext) error {
+		// Scoped inside the closure: WithTransaction may run it more than
+		// once, and each run derives its filters from the session context.
+		scopeAll, err := tenantrepo.Scope(sc, bson.M{"userUuid": userUUID, "provider": provider, "selected": true})
+		if err != nil {
+			return err
+		}
+		scopeOne, err := tenantrepo.Scope(sc, bson.M{"uuid": uuid, "userUuid": userUUID, "provider": provider})
+		if err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		if _, err := r.coll.UpdateMany(sc, scopeAll, bson.M{"$set": bson.M{"selected": false, "updatedAt": now}}); err != nil {
+			return err
+		}
+		res, err := r.coll.UpdateOne(sc, scopeOne, bson.M{"$set": bson.M{"selected": true, "updatedAt": now}})
+		if err != nil {
+			return err
+		}
+		if res.MatchedCount == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
+
+// Delete removes the registration and returns the document it removed, in
+// one FindOneAndDelete: the caller revokes the token set the row held when
+// it went, so a refresh or reauth that stored a newer set after the
+// caller's read is never deleted unrevoked. An unknown uuid (or another
+// org's) is ErrNotFound.
+func (r *UserAccounts) Delete(ctx context.Context, uuid string) (*models.UserAccount, error) {
+	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid})
+	if err != nil {
+		return nil, err
+	}
+	var a models.UserAccount
+	if err := r.coll.FindOneAndDelete(ctx, filter).Decode(&a); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &a, nil
+}
+
+// ListByUserAllTenants exports every registration of a data subject for
+// DSR. The sealed envelopes are part of the rows; the PIIProducer maps
+// them to the envelope-free export shape.
+func (r *UserAccounts) ListByUserAllTenants(ctx context.Context, userUUID string) ([]models.UserAccount, error) {
+	if userUUID == "" {
+		return nil, ErrEmptySubject
+	}
+	//tenantscope:allow dsr: right-of-access export of the subject's ChatGPT registrations across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
+	cur, err := r.coll.Find(ctx, bson.M{"userUuid": userUUID})
+	if err != nil {
+		return nil, err
+	}
+	out := []models.UserAccount{}
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// DeleteByUser erases every registration of a data subject across all
+// tenants and returns the removed documents. Each row goes in its own
+// FindOneAndDelete, so the caller revokes the token set each row held when
+// it was deleted (a concurrent refresh can rotate a set between a list and
+// a bulk delete). On a failure the rows removed so far are returned with
+// the error, so their tokens can still be revoked. Only the DSR pipeline
+// (PIIProducer.PurgePersonalData) calls it.
+func (r *UserAccounts) DeleteByUser(ctx context.Context, userUUID string) ([]models.UserAccount, error) {
+	if userUUID == "" {
+		return nil, ErrEmptySubject
+	}
+	out := []models.UserAccount{}
+	for {
+		var a models.UserAccount
+		//tenantscope:allow dsr: right-to-erasure of the subject's ChatGPT registrations across every org, invoked only by the compliance DSR pipeline through iface.PIIProducer
+		err := r.coll.FindOneAndDelete(ctx, bson.M{"userUuid": userUUID}).Decode(&a)
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return out, nil
+		}
+		if err != nil {
+			return out, err
+		}
+		out = append(out, a)
+	}
+}

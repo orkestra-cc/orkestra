@@ -61,7 +61,24 @@ type OutboxDSRRepo interface {
 	RemoveDelivered(ctx context.Context, userUUID string) (int64, error)
 }
 
+// AccountDSRRepo covers llm_user_accounts.userUuid: the subject's Sign in
+// with ChatGPT registrations in every org. Both methods refuse an empty
+// subject with repository.ErrEmptySubject. DeleteByUser returns the
+// documents it removed (each atomically, with the token set it held then),
+// also those removed before a failure.
+type AccountDSRRepo interface {
+	ListByUserAllTenants(ctx context.Context, userUUID string) ([]models.UserAccount, error)
+	DeleteByUser(ctx context.Context, userUUID string) ([]models.UserAccount, error)
+}
+
+// AccountRevoker revokes one registration's refresh token at the provider,
+// best-effort, under the row's own org (AccountsService.RevokeRegistration,
+// ruling 2.15): the DSR context carries no tenant. It emits no audit event
+// and deletes nothing.
+type AccountRevoker func(ctx context.Context, acc models.UserAccount)
+
 var (
+	_ AccountDSRRepo    = (*repository.UserAccounts)(nil)
 	_ GrantDSRRepo      = (*repository.Grants)(nil)
 	_ CredentialDSRRepo = (*repository.Credentials)(nil)
 	_ ModelDSRRepo      = (*repository.Models)(nil)
@@ -149,6 +166,18 @@ type ExportedBudgetAlert struct {
 	SentAt    *time.Time `json:"sentAt"`
 }
 
+// ExportedLinkedAccount is one Sign in with ChatGPT registration of the
+// subject. It never carries a token, the issued client id or the OIDC
+// subject.
+type ExportedLinkedAccount struct {
+	UUID       string     `json:"uuid"`
+	Label      string     `json:"label"`
+	Email      string     `json:"email"`
+	Status     string     `json:"status"`
+	LinkedAt   time.Time  `json:"linkedAt"`
+	LastUsedAt *time.Time `json:"lastUsedAt"`
+}
+
 // PersonalDataExport is the llm module's right-of-access bundle. Every
 // section is an explicit projection, never a raw model, so credential
 // envelopes and endpoints cannot reach the data subject by accident.
@@ -161,19 +190,23 @@ type PersonalDataExport struct {
 	BudgetRecipientOf  []ExportedBudgetRef     `json:"budgetRecipientOf"`
 	BudgetsUpdated     []ExportedBudgetRef     `json:"budgetsUpdated"`
 	BudgetAlerts       []ExportedBudgetAlert   `json:"budgetAlertsReceived"`
+	Accounts           []ExportedLinkedAccount `json:"accounts"`
 }
 
 // PIIProducer exports and erases what the llm module holds about a data
 // subject: the grants they hold, their usage ledger rows, the budgets that
 // list them as alert recipient, the alerts delivered to them, and the
 // actor ids (credential/model createdBy, grant grantedBy, budget
-// updatedBy) that name them. PR 3 adds linked accounts.
+// updatedBy) that name them, and their linked ChatGPT accounts.
 //
 // Erasure: grants held by the subject are satellite rows with no residue
 // worth keeping, so they are deleted; credentials, models, budgets and
 // grants issued to others are org assets and stay, with the actor field
 // rewritten to models.ErasedActor; the subject leaves every budget's
-// recipients and every alert's deliveredTo. Usage rows are the only part
+// recipients and every alert's deliveredTo. Linked accounts go in both
+// modes: every registration is deleted and the refresh token of each
+// deleted document is revoked at the provider (best-effort, under the row's
+// org). Usage rows are the only part
 // that depends on the mode: EraseHardDelete deletes the finalized ones,
 // EraseAnonymize keeps them with userUuid replaced by a random identifier
 // per row and credentialUuid removed. A pending row (a call in flight; its
@@ -186,15 +219,20 @@ type PIIProducer struct {
 	usage   UsageDSRRepo
 	budgets BudgetDSRRepo
 	outbox  OutboxDSRRepo
-	newID   func() string
-	logger  *slog.Logger
+	// accounts / revoke: the linked registrations (revoke may be nil).
+	accounts AccountDSRRepo
+	revoke   AccountRevoker
+	newID    func() string
+	logger   *slog.Logger
 }
 
-func NewPIIProducer(creds CredentialDSRRepo, mods ModelDSRRepo, grants GrantDSRRepo, usage UsageDSRRepo, budgets BudgetDSRRepo, outbox OutboxDSRRepo, logger *slog.Logger) *PIIProducer {
+func NewPIIProducer(creds CredentialDSRRepo, mods ModelDSRRepo, grants GrantDSRRepo, usage UsageDSRRepo, budgets BudgetDSRRepo, outbox OutboxDSRRepo,
+	accounts AccountDSRRepo, revoke AccountRevoker, logger *slog.Logger) *PIIProducer {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &PIIProducer{creds: creds, models: mods, grants: grants, usage: usage, budgets: budgets, outbox: outbox, newID: erasedUsageID, logger: logger}
+	return &PIIProducer{creds: creds, models: mods, grants: grants, usage: usage, budgets: budgets, outbox: outbox,
+		accounts: accounts, revoke: revoke, newID: erasedUsageID, logger: logger}
 }
 
 // erasedUsageID is the per-row replacement for an anonymized userUuid:
@@ -239,7 +277,11 @@ func (p *PIIProducer) ExportPersonalData(ctx context.Context, userUUID string) (
 	if err != nil {
 		return nil, fmt.Errorf("llm export: budget alerts: %w", err)
 	}
-	if len(held)+len(issued)+len(creds)+len(mods)+len(usage)+len(budgets)+len(alerts) == 0 {
+	accounts, err := p.accounts.ListByUserAllTenants(ctx, userUUID)
+	if err != nil {
+		return nil, fmt.Errorf("llm export: linked accounts: %w", err)
+	}
+	if len(held)+len(issued)+len(creds)+len(mods)+len(usage)+len(budgets)+len(alerts)+len(accounts) == 0 {
 		return nil, nil
 	}
 
@@ -252,6 +294,7 @@ func (p *PIIProducer) ExportPersonalData(ctx context.Context, userUUID string) (
 		BudgetRecipientOf:  []ExportedBudgetRef{},
 		BudgetsUpdated:     []ExportedBudgetRef{},
 		BudgetAlerts:       make([]ExportedBudgetAlert, 0, len(alerts)),
+		Accounts:           make([]ExportedLinkedAccount, 0, len(accounts)),
 	}
 	for _, g := range held {
 		out.Grants = append(out.Grants, ExportedGrant{UUID: g.UUID, TenantID: g.TenantID, ModelUUID: g.ModelUUID, CreatedAt: g.CreatedAt})
@@ -292,6 +335,9 @@ func (p *PIIProducer) ExportPersonalData(ctx context.Context, userUUID string) (
 	for _, a := range alerts {
 		out.BudgetAlerts = append(out.BudgetAlerts, ExportedBudgetAlert{TenantID: a.TenantID, Period: a.Period, Threshold: a.Threshold, CreatedAt: a.CreatedAt, SentAt: a.SentAt})
 	}
+	for _, a := range accounts {
+		out.Accounts = append(out.Accounts, ExportedLinkedAccount{UUID: a.UUID, Label: a.Label, Email: a.Email, Status: a.Status, LinkedAt: a.LinkedAt, LastUsedAt: a.LastUsedAt})
+	}
 	// Mongo gives no order; a stable bundle is easier to diff and review.
 	sort.SliceStable(out.Grants, func(i, j int) bool { return out.Grants[i].CreatedAt.Before(out.Grants[j].CreatedAt) })
 	sort.SliceStable(out.GrantsIssued, func(i, j int) bool { return out.GrantsIssued[i].CreatedAt.Before(out.GrantsIssued[j].CreatedAt) })
@@ -306,6 +352,7 @@ func (p *PIIProducer) ExportPersonalData(ctx context.Context, userUUID string) (
 	sort.SliceStable(out.BudgetRecipientOf, byTenant(out.BudgetRecipientOf))
 	sort.SliceStable(out.BudgetsUpdated, byTenant(out.BudgetsUpdated))
 	sort.SliceStable(out.BudgetAlerts, func(i, j int) bool { return out.BudgetAlerts[i].CreatedAt.Before(out.BudgetAlerts[j].CreatedAt) })
+	sort.SliceStable(out.Accounts, func(i, j int) bool { return out.Accounts[i].LinkedAt.Before(out.Accounts[j].LinkedAt) })
 	return out, nil
 }
 
@@ -321,14 +368,32 @@ func (p *PIIProducer) PurgePersonalData(ctx context.Context, userUUID string, mo
 	}
 	res := iface.PurgeResult{Collections: []string{
 		repository.CollGrants, repository.CollCredentials, repository.CollModels,
-		repository.CollUsage, repository.CollBudgets, repository.CollBudgetOutbox,
+		repository.CollUsage, repository.CollBudgets, repository.CollBudgetOutbox, repository.CollUserAccounts,
 	}}
+
+	// Linked accounts first, in both modes: delete every registration, then
+	// revoke the refresh token of each deleted document at the provider
+	// (best-effort, under the row's own org), so no usable token outlives
+	// the request. Revoking what the delete removed, not an earlier list,
+	// covers a refresh that rotated a set in between; one that stores after
+	// the delete finds no row and revokes its own token. Rows deleted before
+	// a failure are revoked too.
+	deletedAccounts, err := p.accounts.DeleteByUser(ctx, userUUID)
+	if p.revoke != nil {
+		for _, a := range deletedAccounts {
+			p.revoke(ctx, a)
+		}
+	}
+	if err != nil {
+		return iface.PurgeResult{}, fmt.Errorf("llm purge: linked accounts delete: %w", err)
+	}
+	res.RowsDeleted = len(deletedAccounts)
 
 	deleted, err := p.grants.DeleteByUser(ctx, userUUID)
 	if err != nil {
-		return iface.PurgeResult{}, fmt.Errorf("llm purge: grants held: %w", err)
+		return res, fmt.Errorf("llm purge: grants held: %w", err)
 	}
-	res.RowsDeleted = int(deleted)
+	res.RowsDeleted += int(deleted)
 
 	if mode == iface.EraseHardDelete {
 		n, err := p.usage.DeleteByUser(ctx, userUUID)

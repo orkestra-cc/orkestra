@@ -61,6 +61,9 @@ func (m *memBudgetStore) Finalize(_ context.Context, period, uuid string, upd mo
 	if upd.ModelUUID != "" {
 		ev.ModelUUID, ev.Provider, ev.ModelID = upd.ModelUUID, upd.Provider, upd.ModelID
 	}
+	if upd.CredentialUUID != "" { // as repository.Usage finalization does
+		ev.CredentialUUID = upd.CredentialUUID
+	}
 	fin := upd.FinalizedAt
 	ev.FinalizedAt = &fin
 	kind := upd.CredentialKind

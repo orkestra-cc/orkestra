@@ -3398,6 +3398,160 @@
         ],
         "type": "object"
       },
+      "LLMAccountCompleteRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMAccountCompleteRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "callbackUrl": {
+            "description": "The http://127.0.0.1:\u003cport\u003e/v1/llm/accounts/openai/callback?… address the browser landed on",
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "callbackUrl"
+        ],
+        "type": "object"
+      },
+      "LLMAccountLinkRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMAccountLinkRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "label": {
+            "description": "Optional name for the registration",
+            "maxLength": 100,
+            "type": "string"
+          },
+          "reauthAccountUuid": {
+            "description": "Sign in again to one of your registrations instead of linking a new one",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "LLMAccountLinkResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMAccountLinkResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "authorizeUrl": {
+            "description": "Open in the browser; it is single-use and expires in ten minutes",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "loopback_local",
+              "hosted_paste"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorizeUrl",
+          "mode"
+        ],
+        "type": "object"
+      },
+      "LLMAccountsAdminListResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMAccountsAdminListResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LLMUserAccountAdminView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "mode": {
+            "enum": [
+              "disabled",
+              "loopback_local",
+              "hosted_paste"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "items"
+        ],
+        "type": "object"
+      },
+      "LLMAccountsListResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMAccountsListResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LLMUserAccountView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "mode": {
+            "enum": [
+              "disabled",
+              "loopback_local",
+              "hosted_paste"
+            ],
+            "type": "string"
+          },
+          "selectedUuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "items"
+        ],
+        "type": "object"
+      },
       "LLMBudgetPutBody": {
         "additionalProperties": false,
         "properties": {
@@ -4532,6 +4686,151 @@
           "requests",
           "inputTokens",
           "outputTokens"
+        ],
+        "type": "object"
+      },
+      "LLMUserAccountAdminView": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "description": "When the current access token expires; it is refreshed on use",
+            "format": "date-time",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "lastError": {
+            "description": "An llm.* error code, never provider text",
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "linkedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "planUsageGranted": {
+            "type": "boolean"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "refreshExpiresAt": {
+            "description": "After this the user must sign in again",
+            "format": "date-time",
+            "type": "string"
+          },
+          "selected": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "plan_disabled",
+              "needs_reauth",
+              "revoked"
+            ],
+            "type": "string"
+          },
+          "userUuid": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "userUuid",
+          "uuid",
+          "provider",
+          "label",
+          "status",
+          "planUsageGranted",
+          "selected",
+          "linkedAt",
+          "expiresAt",
+          "refreshExpiresAt"
+        ],
+        "type": "object"
+      },
+      "LLMUserAccountView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LLMUserAccountView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "description": "When the current access token expires; it is refreshed on use",
+            "format": "date-time",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "lastError": {
+            "description": "An llm.* error code, never provider text",
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "linkedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "planUsageGranted": {
+            "type": "boolean"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "refreshExpiresAt": {
+            "description": "After this the user must sign in again",
+            "format": "date-time",
+            "type": "string"
+          },
+          "selected": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "plan_disabled",
+              "needs_reauth",
+              "revoked"
+            ],
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "provider",
+          "label",
+          "status",
+          "planUsageGranted",
+          "selected",
+          "linkedAt",
+          "expiresAt",
+          "refreshExpiresAt"
         ],
         "type": "object"
       },
@@ -12127,6 +12426,86 @@
         ]
       }
     },
+    "/v1/admin/llm/accounts": {
+      "get": {
+        "operationId": "admin-llm-accounts-list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMAccountsAdminListResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Linked ChatGPT accounts of the current organization's users (no token material)",
+        "tags": [
+          "LLM Admin"
+        ]
+      }
+    },
+    "/v1/admin/llm/accounts/{uuid}": {
+      "delete": {
+        "operationId": "admin-llm-accounts-unlink",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Force-unlink a user's ChatGPT account (its refresh token is revoked best-effort)",
+        "tags": [
+          "LLM Admin"
+        ]
+      }
+    },
     "/v1/admin/llm/budget": {
       "get": {
         "operationId": "admin-llm-budget-get",
@@ -19037,6 +19416,214 @@
         "summary": "List the permission catalog (system-generated)",
         "tags": [
           "Authorization"
+        ]
+      }
+    },
+    "/v1/llm/accounts/openai": {
+      "get": {
+        "operationId": "llm-accounts-openai-list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMAccountsListResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Your linked ChatGPT accounts in the current organization, and the installation's Sign in with ChatGPT mode",
+        "tags": [
+          "LLM Accounts"
+        ]
+      }
+    },
+    "/v1/llm/accounts/openai/complete": {
+      "post": {
+        "operationId": "llm-accounts-openai-complete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMAccountCompleteRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMUserAccountView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Finish linking from the address the browser landed on (paste flow)",
+        "tags": [
+          "LLM Accounts"
+        ]
+      }
+    },
+    "/v1/llm/accounts/openai/link": {
+      "post": {
+        "operationId": "llm-accounts-openai-link",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMAccountLinkRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMAccountLinkResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Start linking a ChatGPT account (or signing in again to one): returns the OpenAI authorize URL",
+        "tags": [
+          "LLM Accounts"
+        ]
+      }
+    },
+    "/v1/llm/accounts/openai/{uuid}": {
+      "delete": {
+        "operationId": "llm-accounts-openai-unlink",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Unlink one of your ChatGPT accounts (its refresh token is revoked best-effort)",
+        "tags": [
+          "LLM Accounts"
+        ]
+      }
+    },
+    "/v1/llm/accounts/openai/{uuid}/selected": {
+      "put": {
+        "operationId": "llm-accounts-openai-select",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Make one of your linked accounts the one plan-billed models use",
+        "tags": [
+          "LLM Accounts"
         ]
       }
     },

@@ -122,7 +122,8 @@ type AudienceConfig struct {
 	// host, no path). The auth module redirects a client-tier OAuth
 	// callback to `{Client.PublicURL}/v1/auth/client/oauth/complete` so
 	// the refresh cookie is set by the host that owns it. Read from
-	// CLIENT_API_URL; empty means no client surface.
+	// CLIENT_API_URL (client) or OPERATOR_API_URL (operator); empty means no
+	// public origin is known for the audience.
 	PublicURL string
 }
 
@@ -300,6 +301,13 @@ func Load() (*Config, error) {
 	// CLIENT_API_HOST when unset: https in production-like environments,
 	// http in development. Empty when no client surface exists.
 	config.Server.Client.PublicURL = getEnv("CLIENT_API_URL", derivedPublicURL(config.Server.Client.Host, config.IsProductionLike()))
+
+	// OPERATOR_API_URL is the operator API's public origin (scheme + host,
+	// no path). The llm module builds the Sign in with ChatGPT loopback
+	// redirect from it in siwc_mode=loopback_local, where it must be exactly
+	// http://127.0.0.1:<port> (ADR-0022 D13). Derived from CONSOLE_HOST when
+	// unset, symmetric with CLIENT_API_URL.
+	config.Server.Operator.PublicURL = getEnv("OPERATOR_API_URL", derivedPublicURL(config.Server.Operator.Host, config.IsProductionLike()))
 
 	config.Database = DatabaseConfig{
 		MongoURI:        getEnv("MONGO_URI", "mongodb://localhost:27017/orkestra"),

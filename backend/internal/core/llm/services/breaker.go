@@ -146,11 +146,18 @@ func (b *Breaker) Record(key string, ticket uint64, err error) {
 // whose caller context ended, nor one whose deadline the caller lowered
 // (Options.Timeout) or the reservation window clamped. ErrLLMPartialOutput
 // is listed only defensively: the router records the raw provider error,
-// so a provider fault after partial output does count.
+// so a provider fault after partial output does count. A plan-route
+// configuration rejection (route_not_supported, chatpass_v2_*) and
+// invalid_client describe the issued client or grant, not the provider's
+// health: they never open the circuit. Neither does a plan-route 401
+// (ErrSIWCInvalidUser), whether or not the router could still refresh and
+// retry it: it rejects the user's account context, and an account that
+// becomes usable again must not find the model's circuit open.
 func providerFault(err error) bool {
 	for _, notFault := range []error{context.Canceled, iface.ErrLLMInvalidRequest, iface.ErrLLMCapabilityMismatch,
 		iface.ErrLLMBudgetExceeded, iface.ErrLLMUserAccountRequired, iface.ErrLLMUserAccountReauth,
-		iface.ErrLLMPlanUsageDisabled, iface.ErrLLMPartialOutput} {
+		iface.ErrLLMPlanUsageDisabled, iface.ErrLLMPartialOutput,
+		providers.ErrSIWCRouteNotSupported, providers.ErrSIWCInvalidClient, providers.ErrSIWCInvalidUser} {
 		if errors.Is(err, notFault) {
 			return false
 		}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -107,6 +108,11 @@ func (o *OpenAI) buildInput(req iface.ChatRequest) (responses.ResponseInputParam
 		case "developer":
 			items = append(items, message(responses.EasyInputMessageRoleDeveloper, m.Content))
 		case "system":
+			if o.profile == ProfileSIWC {
+				// The plan route takes instructions and developer items;
+				// the gateway's validation refuses system already.
+				return nil, fmt.Errorf("%w: system messages are not available on the ChatGPT plan route", iface.ErrLLMInvalidRequest)
+			}
 			items = append(items, message(responses.EasyInputMessageRoleSystem, m.Content))
 		default:
 			return nil, fmt.Errorf("%w: unsupported message role", iface.ErrLLMInvalidRequest)
@@ -230,8 +236,11 @@ func (o *OpenAI) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (
 			if e.Type == "response.completed" {
 				r = e.AsResponseCompleted().Response
 			} else {
+				// Terminal and carries usage, so it is a success on both
+				// profiles (SIWC included, ruling 5.12), finishing with
+				// length or other, never a plain stop.
 				r = e.AsResponseIncomplete().Response
-				incomplete = "unknown" // response.incomplete is never a plain stop
+				incomplete = "unknown"
 			}
 			if r.IncompleteDetails.Reason != "" {
 				incomplete = r.IncompleteDetails.Reason
@@ -239,16 +248,16 @@ func (o *OpenAI) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (
 			outcome.Usage = iface.LLMUsage{InputTokens: int(r.Usage.InputTokens), OutputTokens: int(r.Usage.OutputTokens)}
 			finished = true
 		case "response.failed":
-			return nil, Classify(failedInfo(string(e.AsResponseFailed().Response.Error.Code)))
+			return nil, o.classifyEvent(string(e.AsResponseFailed().Response.Error.Code))
 		case "error":
-			return nil, Classify(failedInfo(e.AsError().Code))
+			return nil, o.classifyEvent(e.AsError().Code)
 		}
 	}
 	if httpErr.Status != 0 {
-		return nil, Classify(httpErr)
+		return nil, o.classifyHTTP(httpErr)
 	}
 	if err := stream.Err(); err != nil && !finished {
-		return nil, classifySDKError(ctx, err)
+		return nil, classifySDKError(ctx, err, o.classifyHTTP)
 	}
 	if !finished {
 		return nil, fmt.Errorf("%w: stream ended before completion", iface.ErrLLMProviderUnavailable)
@@ -271,6 +280,23 @@ func (o *OpenAI) Chat(ctx context.Context, call ChatCall, sink iface.ChatSink) (
 	return outcome, nil
 }
 
+// classifyHTTP maps an HTTP failure: the plan route has its own 401/403
+// meaning (ClassifySIWCHTTP), the API-key route the generic one.
+func (o *OpenAI) classifyHTTP(info ErrorInfo) error {
+	if o.profile == ProfileSIWC {
+		return ClassifySIWCHTTP(info)
+	}
+	return Classify(info)
+}
+
+// classifyEvent maps a response.failed / error event code.
+func (o *OpenAI) classifyEvent(code string) error {
+	if o.profile == ProfileSIWC {
+		return classifySIWCEvent(code)
+	}
+	return Classify(failedInfo(code))
+}
+
 // failedInfo maps a response.failed / error event code onto an ErrorInfo.
 // Only a short identifier is kept; the event's message is discarded. Codes
 // that describe the request itself are invalid-request/capability (never
@@ -291,13 +317,14 @@ const sdkStreamErrorPrefix = "received error while streaming: "
 
 // classifySDKError turns a non-HTTP SDK failure into a sentinel without ever
 // returning the SDK's text (it can carry the request URL or provider body).
-func classifySDKError(ctx context.Context, err error) error {
+// classify is the adapter profile's HTTP classifier.
+func classifySDKError(ctx context.Context, err error, classify func(ErrorInfo) error) error {
 	if e := sdkTransportFailure(ctx, err); e != nil {
 		return e
 	}
 	var apierr *openai.Error
 	if errors.As(err, &apierr) {
-		return Classify(ErrorInfo{Status: apierr.StatusCode, Type: identifier(apierr.Type), Code: identifier(apierr.Code), Param: identifier(apierr.Param)})
+		return classify(ErrorInfo{Status: apierr.StatusCode, Type: identifier(apierr.Type), Code: identifier(apierr.Code), Param: identifier(apierr.Param)})
 	}
 	if msg := err.Error(); strings.HasPrefix(msg, sdkStreamErrorPrefix) {
 		// An error object delivered inside a 200 stream: keep only its ids.
@@ -306,7 +333,7 @@ func classifySDKError(ctx context.Context, err error) error {
 			Code any `json:"code"`
 		}
 		_ = json.NewDecoder(bytes.NewReader([]byte(strings.TrimPrefix(msg, sdkStreamErrorPrefix)))).Decode(&p)
-		return Classify(ErrorInfo{Status: http.StatusBadGateway, Type: identifier(p.Type), Code: identifier(p.Code)})
+		return classify(ErrorInfo{Status: http.StatusBadGateway, Type: identifier(p.Type), Code: identifier(p.Code)})
 	}
 	return sdkFallbackFailure(ctx, err)
 }
@@ -330,7 +357,7 @@ func (o *OpenAI) Embed(ctx context.Context, call EmbedCall) (*EmbedOutcome, erro
 		return nil, Classify(httpErr)
 	}
 	if err != nil {
-		return nil, classifySDKError(ctx, err)
+		return nil, classifySDKError(ctx, err, Classify)
 	}
 	var res oaiEmbeddingResponse
 	if err := json.Unmarshal(body, &res); err != nil {
@@ -345,7 +372,7 @@ func (o *OpenAI) Embed(ctx context.Context, call EmbedCall) (*EmbedOutcome, erro
 
 func (o *OpenAI) ListModels(ctx context.Context) ([]ModelDescriptor, error) {
 	if o.profile == ProfileSIWC {
-		return nil, fmt.Errorf("%w: SIWC catalog not wired", iface.ErrLLMProviderUnavailable) // PR 3
+		return o.listSIWCModels(ctx)
 	}
 	var httpErr ErrorInfo
 	page, err := o.client.Models.List(ctx, captureHTTPError(&httpErr))
@@ -353,7 +380,7 @@ func (o *OpenAI) ListModels(ctx context.Context) ([]ModelDescriptor, error) {
 		return nil, Classify(httpErr)
 	}
 	if err != nil {
-		return nil, classifySDKError(ctx, err)
+		return nil, classifySDKError(ctx, err, Classify)
 	}
 	// /models is not paginated at the API level; the SDK page never has a next page.
 	out := make([]ModelDescriptor, 0, len(page.Data))
@@ -363,6 +390,55 @@ func (o *OpenAI) ListModels(ctx context.Context) ([]ModelDescriptor, error) {
 		}
 	}
 	return out, nil
+}
+
+// listSIWCModels reads the account-specific ChatGPT plan catalog. Its shape
+// is {models:[{slug,display_name,visibility}]}, not the API-key {data:[…]};
+// only visibility == "list" entries are meant for display, and the server's
+// order is kept (guide "Models and inference", 2026-10-10). This is the one
+// parser of that shape: the accounts service reaches it through the adapter.
+func (o *OpenAI) listSIWCModels(ctx context.Context) ([]ModelDescriptor, error) {
+	var httpErr ErrorInfo
+	var body []byte
+	err := o.client.Get(ctx, "models", nil, &body, captureHTTPError(&httpErr))
+	if httpErr.Status != 0 {
+		return nil, ClassifySIWCHTTP(httpErr)
+	}
+	if err != nil {
+		return nil, classifySDKError(ctx, err, ClassifySIWCHTTP)
+	}
+	return parseSIWCCatalog(body)
+}
+
+func parseSIWCCatalog(body []byte) ([]ModelDescriptor, error) {
+	var res struct {
+		Models []struct {
+			Slug        string `json:"slug"`
+			DisplayName string `json:"display_name"`
+			Visibility  string `json:"visibility"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(body, &res); err != nil || res.Models == nil {
+		return nil, malformed("plan catalog")
+	}
+	out := make([]ModelDescriptor, 0, len(res.Models))
+	for _, m := range res.Models {
+		if m.Visibility != "list" || !isIdentifier(m.Slug, maxIdentLength) {
+			continue
+		}
+		out = append(out, ModelDescriptor{ID: m.Slug, DisplayName: siwcDisplayName(m.DisplayName, m.Slug)})
+	}
+	return out, nil
+}
+
+// siwcDisplayName keeps a provider label only when it is short, printable
+// text; otherwise the slug stands in.
+func siwcDisplayName(name, slug string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 128 || strings.ContainsFunc(name, unicode.IsControl) {
+		return slug
+	}
+	return name
 }
 
 func (o *OpenAI) Health(ctx context.Context) error {

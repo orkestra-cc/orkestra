@@ -2,8 +2,8 @@
 // grants per internal organization and exposes iface.LLMGateway to the
 // addons (ADR-0022): catalog, access and envelope encryption, the six
 // provider adapters, routing with budget reservation, fallback and the
-// usage ledger, budget alerts and the operator's live checks. Sign in with
-// ChatGPT arrives in PR 3.
+// usage ledger, budget alerts, the operator's live checks, and Sign in with
+// ChatGPT (users billing plan models to their own linked account).
 package llm
 
 import (
@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -69,10 +71,14 @@ type Module struct {
 	catalog  *services.CatalogService
 	gateway  *services.Gateway
 	registry *providers.Registry
+	// accounts owns the Sign in with ChatGPT registrations; the router
+	// resolves user_account models through it.
+	accounts *services.AccountsService
 	admin    *handlers.AdminHandler
 	self     *handlers.SelfHandler
 	ops      *handlers.OpsHandler
 	usageH   *handlers.UsageHandler
+	siwc     *handlers.SIWCHandler
 
 	// Background work (Start/Stop): the outbox worker, the reconciler and
 	// the daily retention purge.
@@ -86,12 +92,34 @@ type Module struct {
 	clients   map[string]*http.Client
 	prodLike  bool
 
+	// operatorPublicURL is OPERATOR_API_URL (cfg.Server.Operator.PublicURL),
+	// injected by the catalog because module.Dependencies carries no config.
+	operatorPublicURL string
+	// siwcCfg reads the live Sign in with ChatGPT settings (set in Init).
+	siwcCfg func() services.SIWCConfig
+
 	lifecycleMu sync.Mutex
 	cancel      context.CancelFunc
 	done        chan struct{}
 }
 
-func NewModule() *Module { return &Module{} }
+// Option configures a Module at construction.
+type Option func(*Module)
+
+// WithOperatorPublicURL sets the operator API origin (OPERATOR_API_URL),
+// which Sign in with ChatGPT needs to derive its redirect URI and to judge
+// whether the deployment supports the loopback flow.
+func WithOperatorPublicURL(u string) Option {
+	return func(m *Module) { m.operatorPublicURL = strings.TrimSpace(u) }
+}
+
+func NewModule(opts ...Option) *Module {
+	m := &Module{}
+	for _, o := range opts {
+		o(m)
+	}
+	return m
+}
 
 func (m *Module) Name() string        { return "llm" }
 func (m *Module) DisplayName() string { return "LLM" }
@@ -139,6 +167,19 @@ func (m *Module) Collections() []module.CollectionSpec {
 			{OrderedKeys: key("tenantId", "modelUuid", "userUuid"), Unique: true},
 			{OrderedKeys: key("tenantId", "userUuid")},
 		}},
+		{Name: repository.CollUserAccounts, Indexes: []module.IndexSpec{
+			{OrderedKeys: key("tenantId", "userUuid", "clientId"), Unique: true},
+			// At most one selected registration per (user, provider).
+			{OrderedKeys: key("tenantId", "userUuid", "provider", "selected"), Unique: true, PartialFilter: map[string]any{"selected": true}},
+			{OrderedKeys: key("tenantId", "status")},
+			{OrderedKeys: key("tenantId", "uuid"), Unique: true},
+			// DSR: the subject-scoped, cross-org queries of the PIIProducer
+			// (export, delete) filter on userUuid alone.
+			{OrderedKeys: key("userUuid"), PartialFilter: map[string]any{"userUuid": map[string]any{"$type": "string"}}},
+		}},
+		// The one collection without tenantId: a single document holding the
+		// installation's ext_agent_host_id, addressed by _id.
+		{Name: repository.CollInstallation},
 		{Name: repository.CollUsage, Indexes: []module.IndexSpec{
 			{OrderedKeys: key("tenantId", "uuid"), Unique: true},
 			{OrderedKeys: []module.IndexKey{{Field: "tenantId", Direction: 1}, {Field: "createdAt", Direction: -1}}},
@@ -172,11 +213,13 @@ func (m *Module) ConfigGroups() []module.ConfigGroup {
 	return []module.ConfigGroup{
 		{Key: "providers", Label: "Providers", Order: 1, Description: "Which kinds of provider this installation may call."},
 		{Key: "limits", Label: "Limits & retention", Order: 2, Description: "Per-call deadline, usage retention and budget defaults."},
+		{Key: "siwc", Label: "Sign in with ChatGPT", Order: 3, Description: "Let users bill inference to their own ChatGPT plan. The callback is always on 127.0.0.1; hosted installations use the paste flow."},
 	}
 }
 
 func (m *Module) ConfigSchema() []module.ConfigField {
 	one, minDays, maxReserve, maxDays, zero, hundred := 1, minRetentionDays, models.MaxOutputTokens, 3650, 0, 100
+	minPort, maxPort := 1024, 65535
 	return []module.ConfigField{
 		{Key: "allow_hosted", Label: "Allow hosted providers", Group: "providers", Type: module.FieldBool, Default: "false", EnvVar: "LLM_ALLOW_HOSTED",
 			Description: "Explicit privacy opt-in: prompts and outputs leave this installation (OpenAI, Anthropic, Gemini, OpenAI-compatible). Without it only ollama and mock are selectable. Document the data flow (RoPA, processor, transfer basis) before enabling."},
@@ -188,12 +231,17 @@ func (m *Module) ConfigSchema() []module.ConfigField {
 			Description: "Default warning threshold for new budgets."},
 		{Key: "budget_reserve_output_tokens", Label: "Reserved output tokens", Group: "limits", Type: module.FieldInt, Default: "4096", EnvVar: "LLM_BUDGET_RESERVE_OUTPUT_TOKENS", Min: &one, Max: &maxReserve,
 			Description: "Estimated output reserved against the budget when a model declares no value of its own."},
+		{Key: services.SIWCFieldMode, Label: "Sign in with ChatGPT", Group: "siwc", Type: module.FieldEnum, Default: services.SIWCModeDisabled, EnvVar: "LLM_SIWC_MODE",
+			Options:     []string{services.SIWCModeDisabled, services.SIWCModeLoopbackLocal, services.SIWCModeHostedPaste},
+			Description: "disabled: off. loopback_local: browser and API on the same machine, API reached as http://127.0.0.1:<port> (OPERATOR_API_URL), automatic callback. hosted_paste: remote installation; the user pastes the callback URL the browser shows. Either mode needs Allow hosted providers. The loopback_local callback route is mounted at boot: switching to loopback_local takes effect after a restart, while hosted_paste and disabled apply at once. OpenAI documents the plan-usage flow for open-source and locally hosted apps and points remotely hosted apps to its interest form: enabling hosted_paste is an operator decision taken with that in mind (ADR-0022 D13)."},
+		{Key: services.SIWCFieldPastePort, Label: "Paste-mode callback port", Group: "siwc", Type: module.FieldInt, Default: strconv.Itoa(services.SIWCDefaultPastePort), EnvVar: "LLM_SIWC_PASTE_PORT", Min: &minPort, Max: &maxPort, Advanced: true,
+			DependsOn:   []module.FieldCondition{{Key: services.SIWCFieldMode, In: []string{services.SIWCModeHostedPaste}}},
+			Description: "Port of the loopback redirect URI in hosted_paste. Nothing listens on it; change it only if a local process on users' machines occupies it (Codex CLI uses 1455)."},
 	}
 }
 
 // Permissions declares only what the mounted routes use (the policy
-// coverage baseline rejects a declared permission with no route); the
-// linked-account permissions arrive with their routes in PR 3.
+// coverage baseline rejects a declared permission with no route).
 func (m *Module) Permissions() []iface.PermissionSpec {
 	return []iface.PermissionSpec{
 		{Key: "llm.admin.read", Module: "llm", Description: "Read LLM credentials (redacted), models, grants and the budget", System: true},
@@ -202,8 +250,10 @@ func (m *Module) Permissions() []iface.PermissionSpec {
 		{Key: "llm.grants.admin", Module: "llm", Description: "Decide which users may use each LLM model", System: true},
 		{Key: "llm.usage.read", Module: "llm", Description: "Read the organization's LLM usage report", System: true},
 		{Key: "llm.budgets.admin", Module: "llm", Description: "Set the organization's monthly LLM budget", System: true},
+		{Key: "llm.accounts.admin", Module: "llm", Description: "Force-unlink any user's linked ChatGPT account in the organization", System: true},
 		{Key: "llm.models.self", Module: "llm", Description: "List the LLM models you may use"},
 		{Key: "llm.usage.self", Module: "llm", Description: "See your own LLM usage this month"},
+		{Key: "llm.accounts.self", Module: "llm", Description: "Link, select and unlink your own ChatGPT accounts"},
 	}
 }
 
@@ -251,6 +301,15 @@ func (m *Module) Init(deps *module.Dependencies) error {
 
 	productionLike := deps.Platform != nil && deps.Platform.IsProductionLike()
 	m.prodLike = productionLike
+	m.siwcCfg = func() services.SIWCConfig {
+		return services.SIWCConfig{
+			Mode:              siwcMode(deps.GetConfig("llm", services.SIWCFieldMode)),
+			PastePort:         deps.GetConfigInt("llm", services.SIWCFieldPastePort, services.SIWCDefaultPastePort),
+			OperatorPublicURL: m.operatorPublicURL,
+			AllowHosted:       deps.GetConfigBool("llm", services.SIWCFieldAllowHost, false),
+			ProductionLike:    productionLike,
+		}
+	}
 	cfg := func() services.CatalogConfig {
 		return services.CatalogConfig{
 			AllowHosted:    deps.GetConfigBool("llm", "allow_hosted", false),
@@ -271,10 +330,28 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	settings := func() moduleSettings { return readSettings(deps) }
 	budgetCfg := func() services.BudgetConfig { return settings().budget() }
 	budgetSvc := services.NewBudgetService(store, budgetCfg, logger)
-	router := services.NewRouter(m.registry, services.NewOrgCredentialResolver(m.catalog), budgetSvc,
+	// A typed-nil adapter would pass every "no Redis" check and then panic:
+	// normalize it once (Task 5 carry).
+	redis := liveRedis(deps.RedisAdapter)
+	limiter := services.NewRateLimiter(redis, logger)
+
+	// Sign in with ChatGPT: the linked registrations a user_account model
+	// bills to. The plan catalog is read through the openai adapter (one
+	// parser, ruling 2.10).
+	accountsRepo := repository.NewUserAccounts(deps.DB)
+	m.accounts = services.NewAccountsService(services.AccountsDeps{
+		Repo: accountsRepo, Host: repository.NewInstallation(deps.DB),
+		OIDC: services.NewOIDCClient(m.clientFor(models.ProviderOpenAI), logger), Plans: services.RegistryPlanCatalog{Registry: m.registry},
+		State: services.NewSIWCStateStore(redis, vault), Vault: vault, Limiter: limiter, Redis: redis,
+		Config: m.siwcCfg, Logger: logger,
+	})
+	m.gateway.SetAccounts(m.accounts)
+
+	router := services.NewRouter(m.registry, services.NewCredentialResolver(m.catalog, m.accounts), budgetSvc,
 		services.NewBreaker(3, 30*time.Second), m.clientFor,
 		func() services.RouterConfig { return services.RouterConfig{RequestTimeout: settings().requestTimeout} },
 		metrics.Default(), logger)
+	router.AfterCall = m.afterCall
 	m.gateway.SetRouter(router)
 
 	// The notification module is a declared dependency and always loaded;
@@ -297,15 +374,39 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	deps.Services.Register(module.ServiceLLMGateway, m.gateway)
 
 	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
-		reg.Register(services.NewPIIProducer(creds, mods, grants, usage, budgets, outbox, logger))
+		// Linked accounts: each refresh token is revoked under its own org,
+		// then every registration deleted (ruling 2.15).
+		reg.Register(services.NewPIIProducer(creds, mods, grants, usage, budgets, outbox, accountsRepo, m.accounts.RevokeRegistration, logger))
 	}
 
 	m.admin = handlers.NewAdminHandler(m.catalog, logger)
 	m.self = handlers.NewSelfHandler(m.gateway, logger)
-	limiter := services.NewRateLimiter(deps.RedisAdapter, logger)
 	m.ops = handlers.NewOpsHandler(services.NewAdminOps(m.catalog, m.registry, m.clientFor, limiter, services.NewPinnedRunner(m.gateway), logger), logger)
 	m.usageH = handlers.NewUsageHandler(services.NewUsageService(usage, monthly, budgets, dir, m.catalog, budgetCfg, logger), logger)
+	m.siwc = handlers.NewSIWCHandler(m.accounts, m.siwcCfg, limiter, metrics.Default(), consoleOrigin(deps), logger)
 	return nil
+}
+
+// liveRedis returns nil for a nil or typed-nil client, so the "no Redis"
+// paths (fail-open limiter, fail-closed SIWC state) see a plain nil.
+func liveRedis(rc module.RedisClient) module.RedisClient {
+	if rc == nil {
+		return nil
+	}
+	if v := reflect.ValueOf(rc); (v.Kind() == reflect.Pointer || v.Kind() == reflect.Map || v.Kind() == reflect.Interface) && v.IsNil() {
+		return nil
+	}
+	return rc
+}
+
+// afterCall is the router's per-attempt hook: a successful plan-billed call
+// stamps the linked account's lastUsedAt (ruling 2.17). Failures change
+// nothing here: a terminal refresh already flagged the account
+// needs_reauth where it happened.
+func (m *Module) afterCall(ctx context.Context, model models.Model, credentialUUID string, err error) {
+	if err == nil && model.CredentialRef.Kind == models.CredentialKindUserAccount && credentialUUID != "" && m.accounts != nil {
+		m.accounts.MarkUsed(ctx, credentialUUID)
+	}
 }
 
 // clientFor returns the SSRF-safe client of a provider kind, built once
@@ -480,8 +581,8 @@ func (m *Module) Stop(ctx context.Context) error {
 
 // RegisterRoutes mounts every route on the operator surface (Tier-1 only)
 // behind RequireInternalTenant and a permission: reads llm.admin.read,
-// writes the matching .admin System permission, the self list the org
-// permission llm.models.self.
+// writes the matching .admin System permission, the self routes the org
+// permissions llm.models.self, llm.usage.self and llm.accounts.self.
 //
 // Every write group also carries RequireMFA (the authz precedent). The
 // .admin suffix makes Cedar demand an enrolled second factor, but with
@@ -507,8 +608,11 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 	}
 	api := func(r chi.Router) huma.API { return humachi.New(r, ri.APIConfig) }
 
-	group(func(r chi.Router) { RegisterAdminReadRoutes(api(r), m.admin) },
-		op.AuthMW.RequireSystemPermission("llm.admin.read"))
+	group(func(r chi.Router) {
+		a := api(r)
+		RegisterAdminReadRoutes(a, m.admin)
+		RegisterAccountsAdminReadRoutes(a, m.siwc)
+	}, op.AuthMW.RequireSystemPermission("llm.admin.read"))
 	group(func(r chi.Router) { RegisterCredentialWriteRoutes(api(r), m.admin) },
 		op.AuthMW.RequireSystemPermission("llm.credentials.admin"), op.AuthMW.RequireMFA(), op.AuthMW.RequireStepUp(stepUpMaxAge))
 	group(func(r chi.Router) { RegisterModelWriteRoutes(api(r), m.admin) },
@@ -534,6 +638,50 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 		op.AuthMW.RequireSystemPermission("llm.budgets.admin"), op.AuthMW.RequireMFA(), op.AuthMW.RequireStepUp(stepUpMaxAge))
 	group(func(r chi.Router) { RegisterSelfUsageRoutes(api(r), m.usageH) },
 		op.AuthMW.RequirePermission("llm.usage.self"))
+
+	// Sign in with ChatGPT. The user's own registrations: no MFA or step-up
+	// (ruling 5.6: their own account, the same tier as me/models). The
+	// forced unlink of someone else's: a System .admin write, so MFA then a
+	// fresh step-up.
+	group(func(r chi.Router) { RegisterAccountsSelfRoutes(api(r), m.siwc) },
+		op.AuthMW.RequirePermission("llm.accounts.self"))
+	group(func(r chi.Router) { RegisterAccountsAdminWriteRoutes(api(r), m.siwc) },
+		op.AuthMW.RequireSystemPermission("llm.accounts.admin"), op.AuthMW.RequireMFA(), op.AuthMW.RequireStepUp(stepUpMaxAge))
+	m.mountSIWCCallback(ri)
+}
+
+// mountSIWCCallback mounts the public loopback callback, only in
+// loopback_local: the mode is read once here, so turning loopback_local on
+// at runtime needs a restart (hosted_paste and disabled are hot; the
+// handler re-reads the mode on every request and answers a closed
+// redirect once it has changed). An invalid configuration still mounts
+// the route, with a WARN: the handler refuses every callback until the
+// settings are fixed.
+func (m *Module) mountSIWCCallback(ri *module.RouteInfo) {
+	if m.siwcCfg == nil || m.siwc == nil {
+		return
+	}
+	cfg := m.siwcCfg()
+	if !cfg.CallbackRouteMounted() {
+		return
+	}
+	logger := m.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if ri.Router == nil {
+		logger.Warn("llm siwc: loopback_local is set but no root router is available; the callback route is not mounted")
+		return
+	}
+	if err := services.ValidateSIWCConfig(cfg); err != nil {
+		logger.Warn("llm siwc: loopback_local configuration is invalid; the callback refuses every request until it is fixed", slog.String("error", err.Error()))
+	}
+	if m.siwc.ConsoleOrigin() == "" {
+		// The closed redirect would be relative and land the browser on the
+		// API's own 127.0.0.1:<port>/user/security, a 404.
+		logger.Warn("llm siwc: no operator console origin is configured (OPERATOR_FRONTEND_URL or the platform frontend URL); the loopback callback cannot return the browser to the console")
+	}
+	ri.Router.Get(services.SIWCCallbackPath, m.siwc.Callback)
 }
 
 // HealthCheck reports healthy without a secret key or KMS: that state only

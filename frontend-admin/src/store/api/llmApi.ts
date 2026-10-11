@@ -8,7 +8,11 @@ import { baseApi } from './baseApi';
 // StepUpModal and replays the request, so nothing here handles it.
 // The budget PUT is step-up-gated too. Shapes mirror
 // backend/internal/core/llm/models (dto.go, credential.go, model.go,
-// grant.go, ops.go, usage.go, budget.go).
+// grant.go, ops.go, usage.go, budget.go) and handlers/siwc.go,
+// handlers/admin_accounts.go for the Sign in with ChatGPT registrations.
+// No token ever reaches the console: the link endpoint answers only the
+// OpenAI authorize URL, and the paste flow sends back only the address the
+// browser landed on. Neither is logged.
 
 export type LlmProvider =
   'openai' | 'anthropic' | 'gemini' | 'ollama' | 'openai_compatible' | 'mock';
@@ -232,6 +236,54 @@ export interface LlmSelfUsage {
   userAccountOutputTokens: number;
 }
 
+export type SiwcMode = 'disabled' | 'loopback_local' | 'hosted_paste';
+
+export type LlmAccountStatus =
+  'active' | 'plan_disabled' | 'needs_reauth' | 'revoked';
+
+// A Sign in with ChatGPT registration as its owner sees it
+// (models.LLMUserAccountView): no token, client id or OIDC subject.
+export interface LlmAccount {
+  uuid: string;
+  provider?: string;
+  label: string;
+  email?: string;
+  status: LlmAccountStatus;
+  planUsageGranted: boolean;
+  selected: boolean;
+  linkedAt: string;
+  lastUsedAt?: string;
+  // When the current access token expires; it is refreshed on use.
+  expiresAt: string;
+  // After this the user must sign in again.
+  refreshExpiresAt?: string;
+  // An llm.* error code, never provider text.
+  lastError?: string;
+}
+
+// The org operators' view adds the owner.
+export interface LlmAccountAdmin extends LlmAccount {
+  userUuid: string;
+}
+
+export interface LlmMyAccounts {
+  mode: SiwcMode;
+  items: LlmAccount[];
+  selectedUuid?: string;
+}
+
+export interface LlmAdminAccounts {
+  mode: SiwcMode;
+  items: LlmAccountAdmin[];
+}
+
+export interface LlmAccountLinkResult {
+  // Single-use, expires in ten minutes. Never log it: a re-authorization
+  // URL may carry an id_token_hint.
+  authorizeUrl: string;
+  mode: Exclude<SiwcMode, 'disabled'>;
+}
+
 export const llmMonthConsumed = (m?: LlmUsageMonth): number =>
   m
     ? m.orgInputTokens +
@@ -381,6 +433,61 @@ export const llmApi = baseApi.injectEndpoints({
     getMyLlmUsage: build.query<LlmSelfUsage, void>({
       query: () => '/v1/llm/me/usage',
       providesTags: ['LLMUsage']
+    }),
+    // The caller's own linked ChatGPT accounts in the active org, with the
+    // installation's Sign in with ChatGPT mode (which flow to offer).
+    listMyLlmAccounts: build.query<LlmMyAccounts, void>({
+      query: () => '/v1/llm/accounts/openai',
+      providesTags: ['LLMAccount']
+    }),
+    // Starts a link (or, with reauthAccountUuid, a sign-in again to one of
+    // the caller's registrations). Nothing is stored until completion.
+    linkLlmAccount: build.mutation<
+      LlmAccountLinkResult,
+      { label?: string; reauthAccountUuid?: string }
+    >({
+      query: body => ({
+        url: '/v1/llm/accounts/openai/link',
+        method: 'POST',
+        body
+      })
+    }),
+    // Paste flow: the address the browser landed on after signing in.
+    // The selected account decides the plan-billed catalog, hence
+    // LLMMyModels.
+    completeLlmAccount: build.mutation<LlmAccount, { callbackUrl: string }>({
+      query: body => ({
+        url: '/v1/llm/accounts/openai/complete',
+        method: 'POST',
+        body
+      }),
+      invalidatesTags: ['LLMAccount', 'LLMMyModels']
+    }),
+    selectLlmAccount: build.mutation<void, string>({
+      query: uuid => ({
+        url: `/v1/llm/accounts/openai/${uuid}/selected`,
+        method: 'PUT'
+      }),
+      invalidatesTags: ['LLMAccount', 'LLMMyModels']
+    }),
+    unlinkLlmAccount: build.mutation<void, string>({
+      query: uuid => ({
+        url: `/v1/llm/accounts/openai/${uuid}`,
+        method: 'DELETE'
+      }),
+      invalidatesTags: ['LLMAccount', 'LLMMyModels']
+    }),
+    listLlmAccountsAdmin: build.query<LlmAdminAccounts, void>({
+      query: () => '/v1/admin/llm/accounts',
+      providesTags: ['LLMAccount']
+    }),
+    // llm.accounts.admin + MFA + step-up (baseApi replays after re-auth).
+    forceUnlinkLlmAccount: build.mutation<void, string>({
+      query: uuid => ({
+        url: `/v1/admin/llm/accounts/${uuid}`,
+        method: 'DELETE'
+      }),
+      invalidatesTags: ['LLMAccount', 'LLMMyModels']
     })
   })
 });
@@ -403,5 +510,12 @@ export const {
   useGetLlmUsageQuery,
   useGetLlmBudgetQuery,
   usePutLlmBudgetMutation,
-  useGetMyLlmUsageQuery
+  useGetMyLlmUsageQuery,
+  useListMyLlmAccountsQuery,
+  useLinkLlmAccountMutation,
+  useCompleteLlmAccountMutation,
+  useSelectLlmAccountMutation,
+  useUnlinkLlmAccountMutation,
+  useListLlmAccountsAdminQuery,
+  useForceUnlinkLlmAccountMutation
 } = llmApi;

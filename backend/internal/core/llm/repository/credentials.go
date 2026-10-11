@@ -1,8 +1,11 @@
 // Package repository holds the llm module's Mongo access. Every query goes
 // through pkg/sdk/tenantrepo so it is scoped to the caller's org; the only
 // cross-tenant queries are the DSR methods marked //tenantscope:allow dsr:
-// (Grants.DeleteByUser, Grants.ListByUserAllTenants, and the
-// ListBy*/Pseudonymize* actor methods on all three repositories). They are
+// (Grants.DeleteByUser, Grants.ListByUserAllTenants,
+// UserAccounts.DeleteByUser, UserAccounts.ListByUserAllTenants, and the
+// ListBy*/Pseudonymize* actor methods on all three repositories) plus
+// Installation.GetOrCreateHostID (system:, the one tenantless collection).
+// The DSR methods are
 // reached exclusively from the compliance DSR pipeline through
 // iface.PIIProducer.
 package repository

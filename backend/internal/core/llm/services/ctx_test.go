@@ -22,3 +22,10 @@ func ctxauthExternal(t *testing.T) context.Context {
 	id := testkit.NewIdentity("u-ext", "ext@example.test", "guest").WithTenant("ext-1", []string{"org_member"}, true)
 	return ctxauth.WithTenantKind(id.ContextFor(context.Background(), "ext-1"), "external")
 }
+
+// ctxForUser is ctxFor with a chosen user acting as a plain operator of the
+// internal org.
+func ctxForUser(tenant, user string) context.Context {
+	id := testkit.NewIdentity(user, user+"@example.test", "operator").WithTenant(tenant, []string{"org_member"}, true)
+	return ctxauth.WithTenantKind(id.ContextFor(context.Background(), tenant), "internal")
+}

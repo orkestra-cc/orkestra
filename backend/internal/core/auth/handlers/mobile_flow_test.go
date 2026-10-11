@@ -21,13 +21,13 @@ import (
 
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
-	authutils "github.com/orkestra/backend/internal/core/auth/utils"
 	"github.com/orkestra/backend/internal/shared/types"
+	"github.com/orkestra/backend/internal/shared/utils"
 )
 
 const testVerifier = "v-0123456789012345678901234567890123456789012"
 
-func challengeOf(verifier string) string { return authutils.GenerateCodeChallenge(verifier) }
+func challengeOf(verifier string) string { return utils.GenerateCodeChallenge(verifier) }
 
 func mobileCtx(platform string) context.Context {
 	r := httptest.NewRequest(http.MethodPost, "/v1/auth/google/mobile", nil)

@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	authutils "github.com/orkestra/backend/internal/core/auth/utils"
 	"log/slog"
 	"net/http"
 
@@ -46,11 +45,11 @@ func pkceForProvider(prov services.OAuthProviderInterface) (verifier, challenge 
 	if !prov.SupportsPKCE() {
 		return "", "", nil
 	}
-	verifier, err = authutils.GenerateCodeVerifier()
+	verifier, err = utils.GenerateCodeVerifier()
 	if err != nil {
 		return "", "", err
 	}
-	return verifier, authutils.GenerateCodeChallenge(verifier), nil
+	return verifier, utils.GenerateCodeChallenge(verifier), nil
 }
 
 // exchangeWithUserInfo is the code-exchange + userinfo-endpoint path

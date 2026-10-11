@@ -49,6 +49,9 @@ type Gateway struct {
 	registry *providers.Registry
 	vault    *Vault
 	router   *Router
+	// accounts (optional) is the linked-account source listing and Resolve
+	// intersect user_account models with (ruling 5.1).
+	accounts AccountCredentialSource
 	logger   *slog.Logger
 }
 
@@ -63,11 +66,25 @@ func NewGateway(access *AccessResolver, catalog *CatalogService, registry *provi
 // before any request is served.
 func (g *Gateway) SetRouter(r *Router) { g.router = r }
 
+// Router is the wired execution path (nil before SetRouter); read-only,
+// for the module's wiring checks.
+func (g *Gateway) Router() *Router { return g.router }
+
+// SetAccounts wires the linked-account source (Sign in with ChatGPT);
+// called once by the module's Init. Without it user_account models are
+// never listed or resolved (no account can be usable).
+func (g *Gateway) SetAccounts(a AccountCredentialSource) { g.accounts = a }
+
 // SetKMSProvider forwards to the vault; SetAuditSink to the catalog. They are
 // the late-wiring seams compliance uses (iface.KMSProviderSetter,
 // iface.AuditSinkSetter).
 func (g *Gateway) SetKMSProvider(k iface.KMSProvider) { g.vault.SetKMSProvider(k) }
-func (g *Gateway) SetAuditSink(s iface.AuditSink)     { g.catalog.SetAuditSink(s) }
+func (g *Gateway) SetAuditSink(s iface.AuditSink) {
+	g.catalog.SetAuditSink(s)
+	if as, ok := g.accounts.(iface.AuditSinkSetter); ok {
+		as.SetAuditSink(s)
+	}
+}
 
 var (
 	_ iface.LLMGateway        = (*Gateway)(nil)
@@ -239,9 +256,13 @@ func (g *Gateway) Resolve(ctx context.Context, purpose string) (*iface.LLMModelI
 	if purpose != "" && !keyRE.MatchString(purpose) {
 		return nil, fmt.Errorf("%w: purpose", iface.ErrLLMInvalidRequest)
 	}
-	cands, _, err := g.candidates(ctx, purpose, "", Need{Chat: true})
+	cands, userUUID, err := g.candidates(ctx, purpose, "", Need{Chat: true})
 	if err != nil {
 		return nil, err
+	}
+	cands = g.planFilter(ctx, userUUID, cands)
+	if len(cands) == 0 {
+		return nil, iface.ErrLLMNoEligibleModel
 	}
 	info := cands[0].Info()
 	return &info, nil
@@ -257,11 +278,44 @@ func (g *Gateway) ListUsable(ctx context.Context) ([]iface.LLMModelInfo, error) 
 	if err != nil {
 		return nil, err
 	}
+	ms = g.planFilter(ctx, userUUID, ms)
 	out := make([]iface.LLMModelInfo, 0, len(ms))
 	for _, m := range ms {
 		out = append(out, m.Info())
 	}
 	return out, nil
+}
+
+// planFilter drops the user_account models the caller cannot use right now
+// (ruling 5.1): all of them when the caller has no usable linked account
+// (none, unselected, needs_reauth, plan disabled, or its catalog cannot be
+// read), otherwise those whose modelId the selected account's plan
+// catalog (cached per account) does not list. Listing and Resolve only:
+// Chat keeps the classified per-call errors so a consumer can tell "link
+// an account" from "reauthorize" from "not in your plan".
+func (g *Gateway) planFilter(ctx context.Context, userUUID string, ms []models.Model) []models.Model {
+	var plan map[string]bool // nil until a user_account model needs it
+	out := ms[:0:0]
+	for _, m := range ms {
+		if m.CredentialRef.Kind != models.CredentialKindUserAccount {
+			out = append(out, m)
+			continue
+		}
+		if plan == nil {
+			plan = map[string]bool{}
+			slugs, err := planCatalogFor(ctx, g.accounts, userUUID)
+			if err != nil && !accountClassified(err) {
+				g.logger.DebugContext(ctx, "llm: linked account catalog unavailable; plan models hidden", slog.String("code", errorCodeOf(err)))
+			}
+			for _, s := range slugs {
+				plan[s] = true
+			}
+		}
+		if plan[m.ModelID] {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // chatPinned runs req on exactly m for an admin operation (the prompt

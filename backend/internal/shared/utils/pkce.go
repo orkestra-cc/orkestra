@@ -37,13 +37,3 @@ func ValidateCodeVerifier(codeVerifier, codeChallenge string) bool {
 	expectedChallenge := GenerateCodeChallenge(codeVerifier)
 	return expectedChallenge == codeChallenge
 }
-
-// GenerateNonce generates a cryptographically random nonce for OIDC
-func GenerateNonce() (string, error) {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", fmt.Errorf("failed to generate random nonce: %w", err)
-	}
-
-	return base64.RawURLEncoding.EncodeToString(bytes), nil
-}

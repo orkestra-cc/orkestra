@@ -456,6 +456,38 @@ const LLMRateLimited = "llm.rate_limited"
 // the caller; the call is not retried on another model. 502.
 const LLMPartialOutput = "llm.partial_output"
 
+// LLMSIWCConfigInvalid: the Sign in with ChatGPT settings are contradictory
+// or unsupported on this deployment (422 on the module settings surface,
+// 503 when a user-facing flow trips over it).
+const LLMSIWCConfigInvalid = "llm.siwc_config_invalid"
+
+// LLMSIWCDisabled: Sign in with ChatGPT is off on this installation
+// (siwc_mode disabled). 404.
+const LLMSIWCDisabled = "llm.siwc_disabled"
+
+// LLMSIWCUnsupportedDeployment: loopback_local while the operator API is
+// not reached as http://127.0.0.1:<port>. 409.
+const LLMSIWCUnsupportedDeployment = "llm.siwc_unsupported_deployment"
+
+// LLMSIWCCallbackInvalid: the pasted callback URL is malformed or does not
+// match the attempt's redirect URI (scheme, host, port, path). 422.
+const LLMSIWCCallbackInvalid = "llm.siwc_callback_invalid"
+
+// LLMSIWCStateInvalid: the authorization attempt is unknown, expired,
+// already used, or belongs to another user, org or installation. 409.
+const LLMSIWCStateInvalid = "llm.siwc_state_invalid"
+
+// LLMSIWCDenied: the user declined the authorization at OpenAI. 409.
+const LLMSIWCDenied = "llm.siwc_denied"
+
+// LLMSIWCExchangeFailed: the authorization code could not be exchanged
+// for a usable token set. 502.
+const LLMSIWCExchangeFailed = "llm.siwc_exchange_failed"
+
+// LLMSIWCIDTokenInvalid: the ID token did not validate, or a reauth came
+// back under another registration or identity. 409.
+const LLMSIWCIDTokenInvalid = "llm.siwc_id_token_invalid"
+
 // LLMRequestCanceled: the caller hung up (or its context was cancelled)
 // while a live check or a model call was running. Neither a server fault
 // nor a rejection on the request's merits: 499 Client Closed Request, so

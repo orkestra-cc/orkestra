@@ -122,6 +122,8 @@ services:
       CONSOLE_HOST: ${CONSOLE_HOST:-console.localhost:3000}
       CLIENT_API_HOST: ${CLIENT_API_HOST:-client.localhost:3000}
       CLIENT_API_URL: ${CLIENT_API_URL:-http://client.localhost:3000}
+      # Sign in with ChatGPT loopback mode needs exactly http://127.0.0.1:<port>.
+      OPERATOR_API_URL: ${OPERATOR_API_URL:-http://127.0.0.1:${BACKEND_PORT:-3000}}
       OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
       # Default CLIENT_CORS_ORIGINS allows the new Tier-2 demo SPA at
       # http://client.localhost:8081 (served by client-frontend).

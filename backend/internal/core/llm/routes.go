@@ -117,3 +117,36 @@ func RegisterSelfUsageRoutes(api huma.API, h *handlers.UsageHandler) {
 	huma.Register(api, huma.Operation{OperationID: "llm-me-usage", Method: http.MethodGet, Path: "/v1/llm/me/usage",
 		Summary: "The current user's LLM usage this month, by who pays", Tags: []string{"LLM"}, Security: selfScope}, h.MyUsage)
 }
+
+var accountsTags = []string{"LLM Accounts"}
+
+// RegisterAccountsSelfRoutes mounts the current user's Sign in with ChatGPT
+// registrations: list, link, paste completion, select, unlink. Gated by the
+// org permission llm.accounts.self, no MFA or step-up (ruling 5.6). Link is
+// limited to 5 and completion to 10 a user per 10 minutes.
+func RegisterAccountsSelfRoutes(api huma.API, h *handlers.SIWCHandler) {
+	huma.Register(api, huma.Operation{OperationID: "llm-accounts-openai-list", Method: http.MethodGet, Path: "/v1/llm/accounts/openai",
+		Summary: "Your linked ChatGPT accounts in the current organization, and the installation's Sign in with ChatGPT mode", Tags: accountsTags, Security: selfScope}, h.List)
+	huma.Register(api, huma.Operation{OperationID: "llm-accounts-openai-link", Method: http.MethodPost, Path: "/v1/llm/accounts/openai/link",
+		Summary: "Start linking a ChatGPT account (or signing in again to one): returns the OpenAI authorize URL", Tags: accountsTags, Security: selfScope}, h.Link)
+	huma.Register(api, huma.Operation{OperationID: "llm-accounts-openai-complete", Method: http.MethodPost, Path: "/v1/llm/accounts/openai/complete",
+		Summary: "Finish linking from the address the browser landed on (paste flow)", Tags: accountsTags, Security: selfScope}, h.Complete)
+	huma.Register(api, huma.Operation{OperationID: "llm-accounts-openai-select", Method: http.MethodPut, Path: "/v1/llm/accounts/openai/{uuid}/selected",
+		Summary: "Make one of your linked accounts the one plan-billed models use", Tags: accountsTags, Security: selfScope, DefaultStatus: http.StatusNoContent}, h.Select)
+	huma.Register(api, huma.Operation{OperationID: "llm-accounts-openai-unlink", Method: http.MethodDelete, Path: "/v1/llm/accounts/openai/{uuid}",
+		Summary: "Unlink one of your ChatGPT accounts (its refresh token is revoked best-effort)", Tags: accountsTags, Security: selfScope, DefaultStatus: http.StatusNoContent}, h.Unlink)
+}
+
+// RegisterAccountsAdminReadRoutes mounts the org's linked-account list.
+// Gated by llm.admin.read (mounted in that group).
+func RegisterAccountsAdminReadRoutes(api huma.API, h *handlers.SIWCHandler) {
+	huma.Register(api, huma.Operation{OperationID: "admin-llm-accounts-list", Method: http.MethodGet, Path: "/v1/admin/llm/accounts",
+		Summary: "Linked ChatGPT accounts of the current organization's users (no token material)", Tags: adminTags, Security: adminScope}, h.ListAccounts)
+}
+
+// RegisterAccountsAdminWriteRoutes mounts the forced unlink. Gated by
+// llm.accounts.admin + MFA + step-up.
+func RegisterAccountsAdminWriteRoutes(api huma.API, h *handlers.SIWCHandler) {
+	huma.Register(api, huma.Operation{OperationID: "admin-llm-accounts-unlink", Method: http.MethodDelete, Path: "/v1/admin/llm/accounts/{uuid}",
+		Summary: "Force-unlink a user's ChatGPT account (its refresh token is revoked best-effort)", Tags: adminTags, Security: adminScope, DefaultStatus: http.StatusNoContent}, h.ForceUnlink)
+}
