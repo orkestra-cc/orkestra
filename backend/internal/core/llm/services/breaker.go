@@ -108,7 +108,8 @@ func (b *Breaker) freeProbe(key string, ticket uint64) {
 
 // Record reports the outcome of a call on key: nil closes the circuit,
 // a provider fault counts towards opening it, anything else is ignored.
-// ticket is the one Allow returned (see Release).
+// ticket is the one Allow returned (see Release); once the circuit is
+// open only the current probe's ticket is heard.
 func (b *Breaker) Record(key string, ticket uint64, err error) {
 	if err != nil && !providerFault(err) {
 		b.Release(key, ticket)
@@ -116,11 +117,17 @@ func (b *Breaker) Record(key string, ticket uint64, err error) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	s := b.states[key]
+	if s != nil && s.failures >= b.threshold && (ticket == 0 || ticket != s.probe) {
+		// The circuit is open or half-open: only the current probe's
+		// verdict settles it. A call admitted before it opened (ticket 0)
+		// or an expired probe reports on a provider state that is stale.
+		return
+	}
 	if err == nil {
 		delete(b.states, key) // keeps the map bounded by the failing identities
 		return
 	}
-	s := b.states[key]
 	if s == nil {
 		s = &breakerState{}
 		b.states[key] = s

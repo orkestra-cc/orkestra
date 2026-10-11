@@ -37,15 +37,16 @@ func TestBreaker_OpensAfterThresholdAndWrapsCause(t *testing.T) {
 		t.Fatalf("other key: %v", err)
 	}
 	*now = now.Add(30 * time.Second)
-	if _, err := b.Allow(key); err != nil {
+	probe, err := b.Allow(key)
+	if err != nil {
 		t.Fatalf("after cooldown: %v", err)
 	}
 	// Half-open: one probe at a time.
 	if _, err := b.Allow(key); !errors.Is(err, iface.ErrLLMProviderUnavailable) {
 		t.Fatalf("second concurrent probe allowed: %v", err)
 	}
-	// The first failure after the cooldown re-opens at once.
-	b.Record(key, 0, iface.ErrLLMProviderUnavailable)
+	// The probe's failure re-opens at once.
+	b.Record(key, probe, iface.ErrLLMProviderUnavailable)
 	if _, err := b.Allow(key); !errors.Is(err, iface.ErrLLMProviderUnavailable) {
 		t.Fatalf("half-open failure did not re-open: %v", err)
 	}
@@ -120,10 +121,11 @@ func TestBreaker_ProbeReleasedOrExpires(t *testing.T) {
 		t.Fatal("second probe allowed")
 	}
 	*now = now.Add(10 * time.Second)
-	if _, err := b.Allow("k"); err != nil {
+	fresh, err := b.Allow("k")
+	if err != nil {
 		t.Fatalf("stale probe still blocks: %v", err)
 	}
-	b.Record("k", 0, nil)
+	b.Record("k", fresh, nil)
 	if _, err := b.Allow("k"); err != nil {
 		t.Fatal(err)
 	}
@@ -156,6 +158,28 @@ func TestBreaker_OlderCallCannotFreeTheProbe(t *testing.T) {
 	b.Release("k", probe)
 	if _, err := b.Allow("k"); err != nil {
 		t.Fatalf("the probe's own release did not free the slot: %v", err)
+	}
+}
+
+// While the circuit is open only the current probe settles it: an older
+// call's success does not close it under a live probe, and its fault does
+// not push the cooldown out.
+func TestBreaker_OnlyTheProbeSettlesAnOpenCircuit(t *testing.T) {
+	b, now := newClockBreaker(1, 10*time.Second)
+	b.Record("k", 0, iface.ErrLLMProviderUnavailable) // open
+	*now = now.Add(10 * time.Second)
+	probe, err := b.Allow("k")
+	if err != nil || probe == 0 {
+		t.Fatalf("probe ticket=%d err=%v", probe, err)
+	}
+	b.Record("k", 0, nil) // an older call that finished late
+	if _, err := b.Allow("k"); err == nil {
+		t.Fatal("an older call's success closed the circuit under a live probe")
+	}
+	b.Record("k", 0, iface.ErrLLMProviderUnavailable)
+	b.Record("k", probe, nil)
+	if _, err := b.Allow("k"); err != nil {
+		t.Fatalf("the probe's success did not close the circuit: %v", err)
 	}
 }
 
