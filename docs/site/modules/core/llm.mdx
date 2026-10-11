@@ -137,7 +137,7 @@ Settings at `/admin/modules/llm`, in three groups (providers, limits, Sign in wi
 
 `allow_hosted` is a technical control. Before enabling it, document the data flow (categories of prompts and outputs, purpose and legal basis, processor, retention, region and transfer mechanism) in your records of processing.
 
-`loopback_local` also reads the environment variable `OPERATOR_API_URL`, the operator API's public origin (derived from `CONSOLE_HOST` when unset), and requires it to be exactly `http://127.0.0.1:<port>`; the development compose file defaults to that.
+`loopback_local` also reads the environment variable `OPERATOR_API_URL`, the operator API's public origin (derived from `CONSOLE_HOST` when unset), and requires it to be exactly `http://127.0.0.1:<port>` with an explicit port other than 80 (a browser drops the default port from the address it sends back, so the callback could never match); the development compose file defaults to that.
 
 Endpoint rules: `openai`, `anthropic` and `gemini` have a fixed endpoint and take no `baseUrl`; `ollama` and `openai_compatible` require one; `mock` takes none. In a production-like environment a `baseUrl` must be public HTTPS — loopback, private, link-local, CGNAT, multicast, ULA and other special-use ranges, `.local` and `.internal` names and the metadata host are refused.
 
@@ -257,14 +257,14 @@ A sign-in that comes back as a *different* ChatGPT identity than the account bei
 ### Operator setup
 
 1. Enable **Allow hosted providers** (both modes need it: prompts leave the installation for OpenAI).
-2. Choose **Sign in with ChatGPT** in the llm settings. For `loopback_local`, `OPERATOR_API_URL` must be exactly `http://127.0.0.1:<port>`; restart the backend after switching to it, because its callback route is mounted at boot. For `hosted_paste`, set `siwc_paste_port` only if the default clashes, and use an `https` `OPERATOR_API_URL` in production-like environments.
+2. Choose **Sign in with ChatGPT** in the llm settings. For `loopback_local`, `OPERATOR_API_URL` must be exactly `http://127.0.0.1:<port>` (explicit port, not 80); restart the backend after switching to it, because its callback route is mounted at boot. Outside development the API answers `421 Misdirected Request` to a host it does not serve, so on a production-like installation `CONSOLE_HOST` must be that same `127.0.0.1:<port>` for the callback to arrive; otherwise use `hosted_paste`. The console origin (`OPERATOR_FRONTEND_URL` or the platform frontend URL) must be set too, or the callback cannot send the browser back to the console (a warning is logged at boot). For `hosted_paste`, set `siwc_paste_port` only if the default clashes, and use an `https` `OPERATOR_API_URL` in production-like environments.
 3. Create a model with the credential kind `user_account` (provider `openai`, a model ID the plan offers, no embeddings, no temperature or output limit) and grant it to the users who should have it.
 
 ### How plan calls differ
 
 - Requests to the plan route carry only what it accepts: no temperature or output limit, no metadata, `user` or `previous_response_id`, no `system` messages (use `instructions`), `store` is always `false` and the answer is always streamed. Embeddings are not available.
 - Access tokens are refreshed shortly before they expire. Replicas coordinate through a short Redis lease, so one refresh happens at a time; an unusable refresh token marks the account *Sign-in needed*. A `401` from the plan route triggers one refresh and one retry.
-- Quota, eligibility and availability errors from the plan route become the usual `llm.*` codes; a fallback never moves a call from one payer to another.
+- Quota, eligibility and availability errors from the plan route become the usual `llm.*` codes; a fallback never moves a call from one payer to another. A rejection of the client or grant configuration (`subscription_sharing_route_not_supported`, `chatpass_v2_*`, or `invalid_client` while refreshing) is final: the call answers `llm.provider_unavailable` without trying the next plan-billed model, and it does not open the circuit breaker. After `invalid_client`, the same tokens are not presented again for a minute.
 - Rate limits protect the flow: 5 link starts and 10 completions per user, and 20 callbacks per client address, each per 10 minutes.
 
 :::note Not verified against a live account yet
@@ -272,7 +272,7 @@ The module has been exercised against test doubles, not a real ChatGPT Plus or P
 :::
 
 :::note Known limits of the first version
-Redis is needed for the one-shot sign-in state: without it the paste flow answers a server error and the automatic callback returns to the console with `token_exchange_failed`. The automatic callback is unauthenticated by nature: a user could try to have someone on the installation's own host approve a sign-in they started, which would link that person's account to them; OpenAI shows a consent screen and attempts last ten minutes. While OpenAI cannot be reached, plan-billed models disappear from the self list because their catalog cannot be read.
+Redis is needed for the one-shot sign-in state: without it the paste flow answers a server error and the automatic callback returns to the console with `token_exchange_failed`. The automatic callback is unauthenticated by nature: a user could try to have someone on the installation's own host approve a sign-in they started, which would link that person's account to them; OpenAI shows a consent screen and attempts last ten minutes. While OpenAI cannot be reached, plan-billed models disappear from the self list because their catalog cannot be read. A callback refused by the per-address rate limit reports `state_invalid`, although the attempt can be retried after the window. That the automatic callback with `Host: 127.0.0.1:<port>` reaches the operator API (no `421`) is still to be checked live on an installation running `loopback_local`.
 :::
 
 ## Metrics
