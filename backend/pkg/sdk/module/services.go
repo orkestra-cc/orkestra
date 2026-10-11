@@ -87,6 +87,14 @@ const (
 	// every token of the other tier. Value: middleware.MFAEpochLookup.
 	ServiceMFAEpochLookup ServiceKey = "auth.mfa_epoch_lookup"
 
+	// ServicePasswordSetLookup resolves whether a user has a password set,
+	// scoped to the tier that minted the caller's token. Consumed by
+	// AuthMiddleware.RequireStepUp so a caller with no factor and no
+	// password (an OAuth-only account) is told to enroll a factor instead
+	// of being offered a password reconfirm. Wired by the auth module from
+	// both tiers' user providers. Value: middleware.PasswordSetLookup.
+	ServicePasswordSetLookup ServiceKey = "auth.password_set_lookup"
+
 	// ServiceWebAuthn is the W3C WebAuthn ceremony orchestrator (registration
 	// + assertion). Registered by the auth module when the deployment has
 	// configured an RP via WEBAUTHN_RP_ID + WEBAUTHN_RP_ORIGINS. Consumers

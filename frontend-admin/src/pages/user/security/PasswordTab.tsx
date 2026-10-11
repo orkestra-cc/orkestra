@@ -9,6 +9,7 @@ import { toast } from 'react-toastify';
 import {
   passwordUiVisible,
   useChangePasswordMutation,
+  useForgotPasswordMutation,
   useGetPasswordEnrollmentPolicyQuery,
   useGetCurrentUserQuery,
   useGetSelfAuthMethodsQuery,
@@ -52,6 +53,13 @@ const PasswordTab = () => {
   const [changePassword, changeState] = useChangePasswordMutation();
   const [setInitialPassword, enrollmentState] = useSetInitialPasswordMutation();
   const [alreadySet, setAlreadySet] = useState(false);
+  // Change mode asks for the current password, which an operator who signs
+  // in with OAuth may hold without remembering it (set by the setup wizard,
+  // a registration or an invite): the reset email is their way out. The
+  // backend answers success even when its limits drop the email, so the
+  // link stays usable: a "sent" here only means the request was taken.
+  const [forgotPassword, forgotState] = useForgotPasswordMutation();
+  const [resetLink, setResetLink] = useState<'sent' | 'failed' | null>(null);
   const isLoading = changeState.isLoading || enrollmentState.isLoading;
   const policy = policyQuery.data;
   const authMethods = methodsQuery.data;
@@ -78,6 +86,17 @@ const PasswordTab = () => {
     resolver: yupResolver(schema),
     defaultValues: { oldPassword: '', newPassword: '', confirmPassword: '' }
   });
+
+  const sendResetLink = async () => {
+    if (!userQuery.data) return;
+    setResetLink(null);
+    try {
+      await forgotPassword({ email: userQuery.data.email }).unwrap();
+      setResetLink('sent');
+    } catch {
+      setResetLink('failed');
+    }
+  };
 
   const onSubmit = async (values: PasswordForm) => {
     clearErrors('root');
@@ -170,6 +189,18 @@ const PasswordTab = () => {
             {t('userSecurity.passwordTab.keptNotice')}
           </Alert>
         )}
+        {resetLink === 'sent' && (
+          <Alert variant="info" className="fs-10">
+            {t('userSecurity.passwordTab.resetLinkSent', {
+              email: userQuery.data.email
+            })}
+          </Alert>
+        )}
+        {resetLink === 'failed' && (
+          <Alert variant="danger" className="fs-10">
+            {t('userSecurity.passwordTab.resetLinkError')}
+          </Alert>
+        )}
         {alreadySet && (
           <Alert variant="info" className="fs-10">
             {t('userSecurity.passwordTab.alreadySetNotice')}
@@ -222,6 +253,24 @@ const PasswordTab = () => {
               <Form.Control.Feedback type="invalid">
                 {errors.oldPassword?.message}
               </Form.Control.Feedback>
+              {/* A password kept but unusable for login cannot be reset
+                  either: the backend refuses the reset email then. */}
+              {!passwordKeptButUnusable && (
+                <Form.Text className="text-muted d-block">
+                  {t('userSecurity.passwordTab.forgotCurrent')}{' '}
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="p-0 fs-11 align-baseline"
+                    disabled={forgotState.isLoading}
+                    onClick={() => void sendResetLink()}
+                  >
+                    {forgotState.isLoading
+                      ? t('userSecurity.passwordTab.resetLinkSending')
+                      : t('userSecurity.passwordTab.resetLinkSend')}
+                  </Button>
+                </Form.Text>
+              )}
             </Form.Group>
           )}
           <Form.Group className="mb-3" controlId="self-new-password">

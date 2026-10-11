@@ -641,6 +641,7 @@ func TestAuthMiddleware_Fields_CannotReintroduceCookieRotation(t *testing.T) {
 		"sessionRevocation": {},
 		"sessionRiskLookup": {},
 		"mfaEnrollment":     {},
+		"passwordSet":       {},
 		// mfaEpochLookup (spec §4.3 D16) satisfies the bar this tripwire
 		// sets: it is a read-only func(ctx, audience, userUUID) (int,
 		// error) over the user document's mfaEpoch. It carries no auth

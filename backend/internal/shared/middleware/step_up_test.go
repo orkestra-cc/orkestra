@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -347,6 +348,65 @@ func TestRequireStepUp_ReauthAllowedKeepsPasswordConfirm(t *testing.T) {
 	}
 	if status != http.StatusUnauthorized || body["code"] != "password_confirm_required" {
 		t.Fatalf("allowed method keeps today's envelope, got %d %v", status, body["code"])
+	}
+}
+
+// runStepUpWithPassword is the no-factor branch with a password-set lookup
+// wired: hasPassword/pwErr are what the lookup answers.
+func runStepUpWithPassword(t *testing.T, hasPassword bool, pwErr error) (bool, int, map[string]any) {
+	t.Helper()
+	m := newTestMiddleware(&fakeAuthz{}, &fakeTenantProvider{}, nil)
+	m.SetMFAEnrollmentLookup(func(_ context.Context, _, _ string) (bool, error) { return false, nil })
+	m.SetStepUpPolicy(&fakeStepUpPolicy{})
+	var gotAudience, gotUser string
+	m.SetPasswordSetLookup(func(_ context.Context, audience, userUUID string) (bool, error) {
+		gotAudience, gotUser = audience, userUUID
+		return hasPassword, pwErr
+	})
+	claims := &authModels.JWTClaims{UserUUID: "u-1", Audience: "operator", AMR: []string{"oauth"}}
+	called, status, body := runStepUpThrough(t, m, claims)
+	if gotAudience != "operator" || gotUser != "u-1" {
+		t.Fatalf("lookup asked for %q/%q, want operator/u-1", gotAudience, gotUser)
+	}
+	return called, status, body
+}
+
+// An OAuth-only account has no password to reconfirm: offering the
+// password modal would be a dead end, so the answer is "enroll a factor",
+// the same envelope the gate gives when the password method is disabled.
+func TestRequireStepUp_NoFactorNoPasswordBecomesEnrollmentRequired(t *testing.T) {
+	called, status, body := runStepUpWithPassword(t, false, nil)
+	if called {
+		t.Fatal("downstream must not run")
+	}
+	if status != http.StatusForbidden || body["code"] != "mfa_enrollment_required" {
+		t.Fatalf("want 403 mfa_enrollment_required, got %d %v", status, body["code"])
+	}
+	if detail, _ := body["detail"].(string); !strings.Contains(detail, "no password") {
+		t.Fatalf("detail = %q, want the no-password reason", detail)
+	}
+}
+
+func TestRequireStepUp_NoFactorWithPasswordKeepsPasswordConfirm(t *testing.T) {
+	called, status, body := runStepUpWithPassword(t, true, nil)
+	if called {
+		t.Fatal("downstream must not run")
+	}
+	if status != http.StatusUnauthorized || body["code"] != "password_confirm_required" {
+		t.Fatalf("want 401 password_confirm_required, got %d %v", status, body["code"])
+	}
+}
+
+// A failed lookup keeps today's answer: the reconfirm endpoint still
+// verifies the password, so offering it never weakens the gate, and a
+// transient outage must not send a password user to enroll a factor.
+func TestRequireStepUp_PasswordLookupErrorKeepsPasswordConfirm(t *testing.T) {
+	called, status, body := runStepUpWithPassword(t, false, errors.New("mongo down"))
+	if called {
+		t.Fatal("downstream must not run")
+	}
+	if status != http.StatusUnauthorized || body["code"] != "password_confirm_required" {
+		t.Fatalf("want 401 password_confirm_required, got %d %v", status, body["code"])
 	}
 }
 
