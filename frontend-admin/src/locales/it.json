@@ -215,7 +215,16 @@
       "endpoint_not_allowed": "Questo endpoint non è consentito in questo ambiente.",
       "hosted_disabled": "I provider in cloud sono disattivati nelle impostazioni del modulo llm.",
       "mock_not_allowed": "Il provider mock è disponibile solo fuori dalla produzione.",
-      "grant_not_member": "Ogni utente autorizzato deve essere membro di questa organizzazione."
+      "grant_not_member": "Ogni utente autorizzato deve essere membro di questa organizzazione.",
+      "budget_exceeded": "Il budget LLM mensile dell'organizzazione non ha spazio per questa chiamata.",
+      "plan_quota_exhausted": "La quota del piano dell'account collegato è esaurita. Riprova più tardi.",
+      "credential_rejected": "Il provider ha rifiutato la credenziale. Controlla o ruota la chiave API.",
+      "rate_limited": "Troppe richieste. Attendi un minuto e riprova.",
+      "partial_output": "Il provider si è fermato prima di completare la risposta.",
+      "user_account_required": "Questo modello è addebitato al tuo account: collegalo prima.",
+      "user_account_reauth_required": "L'account collegato deve essere autorizzato di nuovo.",
+      "plan_usage_disabled": "L'account collegato non ha consentito l'uso del piano.",
+      "request_canceled": "La richiesta è stata annullata prima di essere completata."
     }
   },
   "banner": {
@@ -2643,7 +2652,9 @@
     "loadError": "Non è stato possibile caricare l'elenco.",
     "tabs": {
       "models": "Modelli",
-      "credentials": "Credenziali"
+      "credentials": "Credenziali",
+      "usage": "Utilizzo",
+      "budget": "Budget"
     },
     "actions": {
       "cancel": "Annulla",
@@ -2741,7 +2752,16 @@
         "provider": "Provider",
         "secret": "Chiave",
         "status": "Stato",
-        "updated": "Aggiornata"
+        "updated": "Aggiornata",
+        "lastTest": "Ultima prova"
+      },
+      "test": "Prova connessione",
+      "testOk": "La credenziale funziona.",
+      "testFailed": "La prova non è riuscita: {{reason}}",
+      "neverTested": "Mai provata",
+      "testStatus": {
+        "ok": "OK",
+        "error": "Fallita"
       }
     },
     "models": {
@@ -2812,7 +2832,120 @@
       "enable": "Attiva",
       "disable": "Disattiva",
       "enabled": "Modello attivato",
-      "disabled": "Modello disattivato"
+      "disabled": "Modello disattivato",
+      "discover": "Recupera dal provider",
+      "discoverFound_one": "{{count}} modello trovato: scegline uno o scrivi qualsiasi slug.",
+      "discoverFound_other": "{{count}} modelli trovati: scegline uno o scrivi qualsiasi slug.",
+      "discoverNone": "Il provider non ha elencato alcun modello.",
+      "discoverNeedCredential": "Scegli prima una credenziale attiva.",
+      "discoverNoPermission": "Per recuperare l'elenco dei modelli serve il permesso di gestire le credenziali LLM."
+    },
+    "usage": {
+      "stats": {
+        "requests": {
+          "title": "Richieste del mese",
+          "subtitle": "Mese UTC {{period}}"
+        },
+        "consumed": {
+          "title": "Token consumati",
+          "subtitle": "Chiavi dell'organizzazione {{org}} · account utente {{user}}"
+        },
+        "reserved": {
+          "title": "Token prenotati",
+          "subtitle": "Trattenuti dalle chiamate ancora in corso"
+        },
+        "budget": {
+          "title": "Budget usato",
+          "none": "Nessun budget",
+          "unlimited": "Nessun limite mensile impostato",
+          "exhausted": "Esaurito",
+          "subtitle": "{{consumed}} consumati · {{reserved}} prenotati · limite {{limit}}"
+        }
+      },
+      "admissionNote": "Il limite è un controllo di ammissione: una chiamata viene ammessa prenotandone la stima, quindi il consumo reale può superare la prenotazione e, per breve tempo, il limite.",
+      "period": "Periodo",
+      "periods": {
+        "30d": "Ultimi 30 giorni",
+        "90d": "Ultimi 90 giorni",
+        "month": "Questo mese (UTC)"
+      },
+      "groupByLabel": "Raggruppa per",
+      "groupBy": {
+        "model": "Modello",
+        "user": "Utente",
+        "caller": "Chiamante"
+      },
+      "noKey": {
+        "model": "Nessun modello",
+        "user": "Nessun utente (chiamata di sistema)",
+        "caller": "Nessun chiamante"
+      },
+      "unknownModel": "{{id}} (modello eliminato)",
+      "columns": {
+        "requests": "Richieste",
+        "inputTokens": "Token in ingresso",
+        "outputTokens": "Token in uscita",
+        "total": "Token totali"
+      },
+      "series": {
+        "input": "Token in ingresso",
+        "output": "Token in uscita"
+      },
+      "chartTitle": "Token in ingresso e in uscita",
+      "search": "Cerca nell'utilizzo",
+      "emptyTitle": "Nessun utilizzo in questo periodo",
+      "emptyHint": "Le chiamate compaiono qui appena un modello ha risposto.",
+      "modelNamesError": "Impossibile caricare i nomi dei modelli: le righe mostrano gli ID dei modelli."
+    },
+    "budget": {
+      "semantics": "Il limite conta i token in ingresso e in uscita di tutti i modelli, sulle chiavi dell'organizzazione e sugli account degli utenti, per mese solare UTC. Ogni chiamata prenota la propria stima prima di partire e alla fine le viene addebitato il consumo reale.",
+      "none": "Questa organizzazione non ha un budget, quindi l'utilizzo LLM è illimitato. Salva un limite per crearne uno.",
+      "lastUpdated": "Ultima modifica il {{date}} da {{user}}.",
+      "saveSuccess": "Budget salvato",
+      "noPermission": "Per modificarlo serve il permesso di gestire il budget LLM.",
+      "fields": {
+        "limit": "Limite mensile di token",
+        "limitHint": "Token in ingresso più token in uscita per mese UTC.",
+        "warnPct": "Soglia di avviso (%)",
+        "warnPctHint": "I destinatari vengono avvisati quando il consumo raggiunge questa quota del limite. 0 disattiva l'avviso.",
+        "action": "Quando una chiamata non rientra",
+        "recipients": "Avvisa anche",
+        "recipientsPlaceholder": "Scegli membri di questa organizzazione",
+        "recipientsHint": "Proprietari e amministratori dell'organizzazione vengono sempre avvisati.",
+        "noMembers": "Nessun membro corrispondente",
+        "membersError": "Impossibile caricare i membri di questa organizzazione.",
+        "membersForbidden": "Per elencare i membri di questa organizzazione serve l'accesso di amministrazione tenant, quindi qui non si possono modificare i destinatari aggiuntivi.",
+        "formerMember": "{{id}} (non più membro)"
+      },
+      "actions": {
+        "block": "Blocca la chiamata",
+        "warn_only": "Avvisa soltanto"
+      },
+      "actionHints": {
+        "block": "Una chiamata che non rientra nel saldo residuo viene rifiutata con «budget superato».",
+        "warn_only": "Ogni chiamata viene ammessa, anche oltre il limite; i destinatari vengono solo avvisati."
+      },
+      "validation": {
+        "maxRecipients": "Al massimo {{max}} destinatari aggiuntivi."
+      }
+    },
+    "prompt": {
+      "action": "Prova un prompt",
+      "title": "Prova «{{name}}»",
+      "field": "Prompt",
+      "hint": "Inviato una sola volta come unico messaggio utente e non salvato da nessuna parte. Le autorizzazioni sono ignorate; la chiamata conta sul budget.",
+      "run": "Esegui",
+      "running": "In esecuzione…",
+      "close": "Chiudi",
+      "answer": "Risposta",
+      "empty": "Il modello non ha restituito testo.",
+      "answeredBy": "Ha risposto {{name}} ({{modelId}}).",
+      "fallback": "Ha risposto un modello di riserva, non {{name}}: il modello scelto ha fallito.",
+      "usage": "{{input}} token in ingresso · {{output}} in uscita",
+      "finishReason": "Motivo di chiusura: {{reason}}",
+      "truncated": "La risposta è stata troncata a 64 KiB.",
+      "tooLong": "Usa al massimo {{max}} caratteri.",
+      "disabledModel": "Attiva il modello per provarlo."
     }
   },
   "adminModules": {

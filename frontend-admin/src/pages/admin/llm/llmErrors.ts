@@ -16,6 +16,12 @@ export const isReauthCancelled = (err: unknown): boolean => {
   return code === 'step_up_required' || code === 'password_confirm_required';
 };
 
+// isQuietLlmError: a failure the operator caused and needs no message for —
+// a dismissed step-up, or llm.request_canceled (499: the caller hung up,
+// e.g. navigated away while a credential or prompt test was running).
+export const isQuietLlmError = (err: unknown): boolean =>
+  isReauthCancelled(err) || codeOf(err) === 'llm.request_canceled';
+
 // Codes whose backend detail names the specific field or rule that failed
 // (one written, client-safe sentence per validation sentinel), so it says
 // more than any fixed translation can.
@@ -40,5 +46,21 @@ export const llmErrorMessage = (
     if (translated && translated !== key) return translated;
   }
   if (data?.detail) return data.detail;
+  return t('adminLlm.errors.generic');
+};
+
+// llmCodeMessage translates a bare llm.* code that arrived as data rather
+// than as an error response — a credential test outcome or the stored
+// lastTestError — with the same errors.<code> copy, falling back to the
+// generic line for a code the console does not know.
+export const llmCodeMessage = (
+  t: (key: string) => string,
+  code?: string
+): string => {
+  if (code) {
+    const key = `errors.${code}`;
+    const translated = t(key);
+    if (translated && translated !== key) return translated;
+  }
   return t('adminLlm.errors.generic');
 };

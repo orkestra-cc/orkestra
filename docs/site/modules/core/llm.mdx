@@ -11,13 +11,17 @@ The module boots with zero credentials and zero models. It is healthy in that st
 
 ## What it owns
 
-Three collections, all scoped to an internal organization (`tenantId`):
+Seven collections, all scoped to an internal organization (`tenantId`):
 
 | Collection | Holds |
 |---|---|
 | `llm_credentials` | An API key per provider: `name`, `provider`, `baseUrl`, the sealed `secret` envelope, the display-only `secretLast4`, `status`, and who created it. Names are unique per organization. |
 | `llm_models` | A configured model: provider and model ID, the **capabilities** it offers (chat, streaming, tools, structured output, embeddings and dimensions), a `credentialRef`, defaults (temperature, output limit, effort), the **purposes** it serves with a priority each, `access` (`granted` or `everyone`, set only through the grants route) and `status`. Names are unique per organization. |
 | `llm_grants` | One row per `(model, user)` pair that may use a model, with who granted it. |
+| `llm_usage` | The per-call ledger: who called (user, calling module, purpose), which model and provider answered, who paid (`org` or `user_account`), token counters, latency, outcome (`pending`, `ok`, `fallback`, `error`, `budget_blocked`), an error code and up to eight attempts (counters only). Never a prompt or an output. Kept `usage_retention_days`. |
+| `llm_usage_monthly` | One rollup per organization and UTC month: requests, input and output tokens per payer, tokens reserved by calls in flight, and when the warning and exhausted thresholds were crossed. Kept 24 months. |
+| `llm_budgets` | At most one per organization: monthly token limit, warning percentage, action (`block` or `warn_only`), extra alert recipients. No document means no limit. |
+| `llm_budget_outbox` | Budget alerts waiting for or after delivery, one per organization, month and threshold, with the recipients already delivered. |
 
 ### Secrets and the envelope
 
@@ -53,6 +57,13 @@ Operator host. Every route requires an authenticated internal-organization conte
 | DELETE | `/v1/admin/llm/models/{uuid}` | `llm.models.admin` | Second factor. `204`; also deletes the model's grants |
 | PUT | `/v1/admin/llm/models/{uuid}/grants` | `llm.grants.admin` | Second factor + step-up. Body `{access, userUuids}`: sets `access` (`granted` or `everyone`, required) and replaces the complete grant list together; answers the model with its grants |
 | GET | `/v1/llm/me/models` | `llm.models.self` | The models the calling user may use in the current organization |
+| POST | `/v1/admin/llm/credentials/{uuid}/test` | `llm.credentials.admin` | Second factor. Calls the provider with the stored key and records the outcome on the credential (`lastTestedAt`, `lastTestStatus`, and an `llm.*` code on failure, never provider text). `200 {outcome, code?, testedAt}` |
+| POST | `/v1/admin/llm/credentials/{uuid}/models` | `llm.credentials.admin` | Second factor. Lists the model IDs the provider serves for this key (at most 1000), to fill the model editor; nothing is stored |
+| POST | `/v1/admin/llm/models/{uuid}/prompt` | `llm.models.admin` | Second factor. Sends `{prompt}` (1–4000 characters) to this model and returns the answer (up to 64 KiB), usage and finish reason. Ignores grants only: a model that is not live is refused. Reserved against the budget and ledgered with the caller `llm.admin_test` |
+| GET | `/v1/admin/llm/usage` | `llm.usage.read` | `from`, `to` (RFC 3339, default the last 30 days, at most 366 days), `groupBy=model\|user\|caller`. Answers the grouped rows, the current month's rollup and the budget |
+| GET | `/v1/admin/llm/budget` | `llm.admin.read` | The budget; `204` when the organization has none |
+| PUT | `/v1/admin/llm/budget` | `llm.budgets.admin` | Second factor + step-up. Body `{monthlyTokenLimit, warnPct?, action, notifyExtraUserUuids?}`; extra recipients (at most 50) must be members, otherwise `llm.invalid_request` and nothing is written |
+| GET | `/v1/llm/me/usage` | `llm.usage.self` | The calling user's consumption this month, split by who paid |
 
 Collections are returned as `{ "items": [...] }`. Errors carry a stable `llm.*` code:
 
@@ -67,8 +78,11 @@ Collections are returned as `{ "items": [...] }`. Errors carry a stable `llm.*` 
 | `llm.hosted_disabled` | 422 | A hosted provider was requested while `allow_hosted` is off |
 | `llm.mock_not_allowed` | 422 | The `mock` provider in a production-like environment |
 | `llm.grant_not_member` | 422 | A grantee is not a member of the organization; nothing is written |
+| `llm.rate_limited` | 429 | More than 10 credential tests, model discoveries or prompt tests a minute (per organization and credential, or per organization and user for prompts); `Retry-After` gives the rest of the window |
+| `llm.credential_rejected` | 422 | The provider refused the key (401/403): wrong, revoked or under-privileged |
+| `llm.request_canceled` | 499 | The caller closed the connection while a provider call was running; never counted as a server error |
 
-The gateway adds `llm.not_configured` (503), `llm.no_eligible_model` (403), `llm.model_access_denied` (403), `llm.capability_mismatch` (422) and `llm.provider_unavailable` (503); see [Gateway contract](#gateway-contract).
+The gateway adds `llm.not_configured` (503), `llm.no_eligible_model` (403), `llm.model_access_denied` (403), `llm.capability_mismatch` (422), `llm.provider_unavailable` (503), `llm.budget_exceeded` (429, `Retry-After: 3600`), `llm.plan_quota_exhausted` (429) and `llm.partial_output` (502); see [Gateway contract](#gateway-contract) and [Routing](#routing).
 
 ## Permissions
 
@@ -80,19 +94,22 @@ All admin permissions are `System: true` — only the platform system roles inhe
 | `llm.credentials.admin` | mutation | Create, rotate, re-point and delete credentials |
 | `llm.models.admin` | mutation | Create, update and delete models |
 | `llm.grants.admin` | mutation | Decide who may use each model |
+| `llm.usage.read` | read | See the usage report — which also carries the budget, so this permission reads the budget too |
+| `llm.budgets.admin` | mutation | Set the monthly budget, its action and extra recipients |
 | `llm.models.self` | self | List the models you may use (an organization permission, not a system one) |
+| `llm.usage.self` | self | See your own consumption this month (an organization permission) |
 
-Every `.admin` mutation requires a second factor completed in the session — the route itself checks it, independently of whether the policy engine's admin-suffix rule is enforced — and credential and grant changes additionally require a fresh one (step-up, five minutes; a password reconfirm does not count). A `developer` is not granted an `.admin` key in production. Each mutation emits an audit event (`llm.credential.created|updated|rotated|deleted`, `llm.model.created|updated|deleted`, `llm.grants.replaced`) once the compliance module has injected the audit sink; the event carries names and counts, never secrets or base URLs.
+Every `.admin` mutation requires a second factor completed in the session — the route itself checks it, independently of whether the policy engine's admin-suffix rule is enforced — and credential, grant and budget changes additionally require a fresh one (step-up, five minutes; a password reconfirm does not count). A `developer` is not granted an `.admin` key in production. Each mutation emits an audit event (`llm.credential.created|updated|rotated|deleted`, `llm.model.created|updated|deleted`, `llm.grants.replaced`, `llm.budget.updated`, `llm.credential.tested`, `llm.credential.models_discovered`) once the compliance module has injected the audit sink; the event carries names and counts, never secrets or base URLs.
 
 ## Configuration
 
-Settings at `/admin/modules/llm`, in two groups. The module hot-reloads its configuration, so a change applies without a restart. In this step only `allow_hosted` is consulted (on every write and every read of the catalog); the other four take effect with the gateway.
+Settings at `/admin/modules/llm`, in two groups. The module hot-reloads its configuration, so a change applies to the next call without a restart; out-of-range values are clamped.
 
 | Key | Default | Env var | Meaning |
 |---|---|---|---|
 | `allow_hosted` | `false` | `LLM_ALLOW_HOSTED` | Explicit privacy opt-in for hosted providers (`openai`, `anthropic`, `gemini`, `openai_compatible`): prompts and outputs leave the installation. Without it only `ollama` and `mock` can be created, enabled or edited, and existing hosted models stop being offered at once. Disabling a credential or model is always possible |
-| `request_timeout` | `60s` | `LLM_REQUEST_TIMEOUT` | Deadline per provider call; a consumer may only lower it |
-| `usage_retention_days` | `90` | `LLM_USAGE_RETENTION_DAYS` | Retention of per-call usage rows (1–3650) |
+| `request_timeout` | `60s` | `LLM_REQUEST_TIMEOUT` | Deadline per provider attempt; a consumer may only lower it. A reservation lasts `2 × request_timeout + 60s` |
+| `usage_retention_days` | `90` | `LLM_USAGE_RETENTION_DAYS` | Retention of per-call usage rows (31–3650: the current month always stays complete for self usage) |
 | `budget_warn_pct` | `80` | `LLM_BUDGET_WARN_PCT` | Default warning threshold for new budgets (0–100) |
 | `budget_reserve_output_tokens` | `4096` | `LLM_BUDGET_RESERVE_OUTPUT_TOKENS` | Output tokens reserved against the budget when a model declares none (1–131072). A model's own `budgetReserveOutputTokens` overrides it; sending `0` on create or `PATCH` means no override, so `PATCH` with `0` returns the model to this default |
 
@@ -142,18 +159,68 @@ case errors.Is(err, iface.ErrLLMProviderUnavailable):
 
 The interface has four methods: `Chat`, `Embed`, `Resolve` (the model `Chat` would pick, without calling it) and `ListUsable`. Message roles are `developer`, `user`, `assistant` and `tool`; system text goes in `ChatRequest.Instructions`. Errors are classified with the `ErrLLM*` sentinels in `pkg/sdk/iface/llm.go`, which a consumer maps to its own error codes. The acting user comes from the request context, and the gateway refuses a tenant that is not internal.
 
+`Options.MaxOutputTokens` must be between 1 and 131072, like every other output limit: it is what the call reserves against the budget. `ChatResult.Usage` and the final `Done` event report the usage of the attempt that answered; after a fallback the ledger and the budget also charge the failed attempts.
+
 The compliance module resolves the same service to inject its KMS provider and audit sink (`iface.KMSProviderSetter`, `iface.AuditSinkSetter`).
+
+## Routing
+
+One `Chat` or `Embed` call goes through these steps:
+
+1. **Candidates** — the usable models for the purpose, as described above.
+2. **Reservation** — the estimated input plus the reserved output tokens are reserved against the month's budget and a `pending` ledger row is written, in one transaction. A call that does not fit under `block` is refused here (`llm.budget_exceeded`), before any provider is contacted.
+3. **Circuit breaker** — per provider, endpoint, model and credential: three consecutive provider faults open the circuit for 30 seconds, then a single probe call is let through. Only the provider's own faults count (unavailability, provider timeouts, 5xx, a rejected key, an exhausted quota); a caller that hangs up or shortens the deadline, an invalid request, the budget or a capability gap never trips it.
+4. **Attempt** — the provider call, bounded by `request_timeout` or the caller's shorter deadline. A streamed answer may stay silent for up to `request_timeout` (at least 30 seconds) before it is cut, so a model that reasons before its first output is bounded by the deadline, not by a shorter idle timer.
+5. **Fallback** — on a provider failure the next candidate is tried, but only one billed the same way (`org` or `user_account`): a fallback never changes who pays. Cancellation, deadlines, budget and linked-account errors, an exhausted quota, an invalid request and a failure after output already reached the caller (`llm.partial_output`) are final.
+6. **Finalization** — the ledger row records the outcome, the attempts and the real tokens; the month's rollup releases the reservation and adds the tokens to the payer's counters. If the process dies before this, a background reconciler closes the row once its reservation expires, charging the whole reservation.
+
+A call that fails after streaming part of its answer is charged conservatively. When the provider reported usage, the charge is the reported input (the estimate if it is missing) and the larger of the reported output and the emitted text (bytes / 3). Without reported usage, it is the estimated input and the larger of the reserved output and the emitted text. A call whose only failure is the consumer's sink refusing the final `Done` event is a completed call: it is charged its reported usage, and `Chat` returns the sink's error.
+
+## Providers
+
+| Provider | Endpoint | Notes |
+|---|---|---|
+| `openai` | fixed (Responses API) | Official SDK. Chat, streaming, tools, structured output, embeddings |
+| `anthropic` | fixed (Messages API) | Official SDK. No embeddings |
+| `gemini` | fixed (Gemini Developer API) | Official SDK. Tool calls carry an opaque `Signature` (Gemini 3 thought signatures) that must be sent back on the next turn |
+| `ollama` | `baseUrl` required | Native API. The key is optional (sent as a Bearer token for proxied deployments) |
+| `openai_compatible` | `baseUrl` required | Chat Completions wire format for self-hosted servers (vLLM, llama.cpp, LiteLLM, …); the key is optional |
+| `mock` | none | Deterministic echo for tests and non-production stacks; never selectable in a production-like environment |
+
+Every provider connection re-checks each resolved address at dial time (no private or special-use address in production-like environments), follows no redirect and no proxy, caps response sizes (8 MiB, 32 MiB for embedding calls; OpenAI embeddings are requested base64-encoded), disables SDK retries and never surfaces provider error text: failures become `llm.*` codes. `allow_hosted` gates the hosted providers on the live path and on the admin test, discovery and prompt operations alike.
+
+## Budget
+
+A budget is an **admission control**, not a kill switch. Each call reserves its estimated tokens before it runs; under `block` a call that does not fit the remaining balance (`consumed + reserved + requested > limit`) is refused, under `warn_only` it runs and only alerts. The limit counts input and output tokens of both payers. Real usage can exceed the reservation (a long answer), so consumption can end slightly above the limit.
+
+Alerts go by email to the organization's owners and admins plus the extra recipients still in the organization:
+
+- **warning** when consumption crosses `warnPct` of the limit (the default comes from `budget_warn_pct`; `0` disables it);
+- **exhausted** at the first call of the month refused under `block` once consumed plus reserved tokens already reach the warning threshold (or the limit, when `warnPct` is `0`), or when consumption reaches the limit. A single oversized request refused while most of the balance is unused is recorded as `budget_blocked` but sends no alert, so it cannot use up the month's only exhausted alert.
+
+Each alert is sent at most once per organization and month. It is written in the same transaction that crosses the threshold and delivered from a durable outbox with retries; delivery is tracked per recipient, so a retry only reaches the recipients still missing. Delivery is at-least-once: a recipient may rarely receive a copy twice, never zero copies while the notification module works. Templates: `llm.budget_warning` and `llm.budget_exhausted` (English and Italian).
+
+## Usage
+
+`GET /v1/admin/llm/usage` groups the finalized calls of a period by model, user or calling module (requests, input and output tokens), and returns the current month's rollup and the budget. `GET /v1/llm/me/usage` gives a user their own month, split by whether the organization or their own linked account paid. The console's **Usage** and **Budget** tabs at `/admin/llm` read these routes.
+
+## Metrics
+
+| Metric | Labels |
+|---|---|
+| `orkestra_llm_requests_total` | `provider`, `outcome` (`ok`, `fallback`, `error`, `budget_blocked`) |
+| `orkestra_llm_tokens_total` | `provider`, `direction` (`input`, `output`) — tokens of the calls the router finalizes, partial-output charges included. Orphans closed by the reconciler are charged in the ledger and the budget but not counted here |
 
 ## Data-subject rights
 
-The module registers an `iface.PIIProducer` with the subject `llm`. Export returns explicit projections only — never a credential, an endpoint or an envelope: the grants the user holds, the grants they issued, and references to the credentials and models they created. Erasure deletes the grants the user holds and replaces the actor id on the grants they issued and on the credentials and models they created with a fixed constant (`erased-subject`) that is not derived from the user; the credentials and models themselves are organization assets and stay. A request with an empty subject id is refused before any query: it would otherwise match every row created without a user.
+The module registers an `iface.PIIProducer` with the subject `llm`. Export returns explicit projections only — never a credential, an endpoint or an envelope: the grants the user holds, the grants they issued, references to the credentials and models they created, their usage rows (model, purpose, calling module, counters, outcome, dates — the ledger holds no prompts), the budgets that name them as extra recipient or last editor, and the budget alerts delivered to them.
+
+Erasure deletes the grants the user holds; replaces the actor id on the grants they issued, the credentials and models they created and the budgets they last edited with a fixed constant (`erased-subject`) that is not derived from the user; and removes them from every budget's extra recipients and every alert's delivered list. Usage rows depend on the erase mode: a hard delete removes them, an anonymizing erasure keeps the counters with the user replaced by a **random identifier per row** (so the rows cannot be linked to each other into a profile) and the credential reference removed. A row of a call still in flight is anonymized in both modes and removed later by retention. Credentials, models and budgets are organization assets and stay. A request with an empty subject id is refused before any query: it would otherwise match every row created without a user.
 
 ## Status
 
-This is the foundations step ([ADR-0022](/adrs/core-llm-module)): the catalog, access model, encrypted secrets, data-subject rights, the admin API and the `/admin/llm` console page (tabs `models` and `credentials`, kept in the URL; models and credentials can each be enabled or disabled from their row, and "Who may use it" sets access and grants together). `Resolve` and `ListUsable` are complete. `Chat` and `Embed` validate the request and resolve access but no provider adapter is registered yet, so they end with `ErrLLMProviderUnavailable`.
+Foundations and the gateway are delivered ([ADR-0022](/adrs/core-llm-module)): the catalog, access model, encrypted secrets, data-subject rights, the six provider adapters, routing with fallback and circuit breaking, the usage ledger and monthly budget with alerts, connectivity tests, model discovery and the prompt test, and the `/admin/llm` console page (tabs for models, credentials, usage and budget, kept in the URL). Sign in with ChatGPT for per-user subscriptions (`credentialRef.kind = user_account`) follows; until then such models answer `ErrLLMUserAccountRequired`.
 
-Following steps add the provider adapters, routing with fallback and circuit breaking, the usage ledger and monthly budget, connectivity tests and model discovery, and Sign in with ChatGPT for per-user subscriptions.
-
-:::note Known limitation
-Editing a model's grants in the console also needs `system.tenants.admin`, because the picker lists the organization's members through the tenant API. Without it the list shows a hint instead of the members.
+:::note Known limitations
+Editing a model's grants or a budget's extra recipients in the console also needs `system.tenants.admin`, because both pickers list the organization's members through the tenant API. Without it the editor shows a hint instead of the members. The usage report grouped by user shows user IDs, not names.
 :::

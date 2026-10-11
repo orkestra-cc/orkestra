@@ -70,6 +70,13 @@ type ChatToolCall struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"` // JSON text, never parsed by the gateway
+	// Signature is opaque provider state that must travel with the call so a
+	// tool loop can continue (Gemini 3 "thought signatures": base64 text).
+	// It is never parsed, logged or shown, and adapters other than the one
+	// that produced it ignore it. Capped at 64 KiB: an adapter drops a larger
+	// value on output (the call itself is still delivered) and rejects one on
+	// input with ErrLLMInvalidRequest.
+	Signature string `json:"signature,omitempty"`
 }
 
 type ChatToolSpec struct {
@@ -117,15 +124,22 @@ type ChatEvent struct {
 	Usage    *LLMUsage     `json:"usage,omitempty"`
 }
 
-// ChatSink receives streamed events. Returning an error aborts the call.
+// ChatSink receives streamed events; Done is the last one. Returning an
+// error for any other event aborts the call (no fallback; the call is
+// ledgered canceled). An error returned for Done comes back from Chat
+// unchanged too, but the provider has already completed, so the call is
+// ledgered and charged as ok with its reported usage.
 type ChatSink func(ChatEvent) error
 
 type ChatResult struct {
-	Model        LLMModelInfo `json:"model"`
-	Usage        LLMUsage     `json:"usage"`
-	FinishReason string       `json:"finishReason"` // stop | tool_calls | length | content_filter | other
-	BillingScope string       `json:"billingScope"` // LLMCredentialKindOrg | LLMCredentialKindUserAccount
-	Fallback     bool         `json:"fallback"`
+	Model LLMModelInfo `json:"model"`
+	// Usage is the winning attempt's usage. The ledger and the budget
+	// charge every attempt of the call, so after a fallback the org is
+	// charged more than this.
+	Usage        LLMUsage `json:"usage"`
+	FinishReason string   `json:"finishReason"` // stop | tool_calls | length | content_filter | other
+	BillingScope string   `json:"billingScope"` // LLMCredentialKindOrg | LLMCredentialKindUserAccount
+	Fallback     bool     `json:"fallback"`
 }
 
 type EmbedRequest struct {

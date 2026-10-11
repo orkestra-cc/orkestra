@@ -422,6 +422,46 @@ const LLMMockNotAllowed = "llm.mock_not_allowed"
 // org. 422; the grant list is not written at all.
 const LLMGrantNotMember = "llm.grant_not_member"
 
+// LLMBudgetExceeded: the org's monthly token budget (action block) has no
+// room for the call's reservation; nothing was sent to a provider. 429
+// with Retry-After.
+const LLMBudgetExceeded = "llm.budget_exceeded"
+
+// LLMPlanQuotaExhausted: the provider reports the account's or plan's
+// quota exhausted (not a transient rate limit); no fallback is tried. 429.
+const LLMPlanQuotaExhausted = "llm.plan_quota_exhausted"
+
+// LLMUserAccountRequired: the model bills the caller's linked account and
+// there is no user or no linked account. 409.
+const LLMUserAccountRequired = "llm.user_account_required"
+
+// LLMUserAccountReauthRequired: the linked account's refresh failed; the
+// user must sign in again. 409.
+const LLMUserAccountReauthRequired = "llm.user_account_reauth_required"
+
+// LLMPlanUsageDisabled: the linked identity lacks the scope that allows
+// direct plan usage. 409.
+const LLMPlanUsageDisabled = "llm.plan_usage_disabled"
+
+// LLMCredentialRejected: the provider refused the credential (401/403):
+// wrong, revoked or under-privileged key. 422.
+const LLMCredentialRejected = "llm.credential_rejected"
+
+// LLMRateLimited: an llm admin operation (credential test, model
+// discovery, prompt test) exceeded its per-minute limit. 429 with
+// Retry-After.
+const LLMRateLimited = "llm.rate_limited"
+
+// LLMPartialOutput: the provider failed after output had already reached
+// the caller; the call is not retried on another model. 502.
+const LLMPartialOutput = "llm.partial_output"
+
+// LLMRequestCanceled: the caller hung up (or its context was cancelled)
+// while a live check or a model call was running. Neither a server fault
+// nor a rejection on the request's merits: 499 Client Closed Request, so
+// an abandoned request never counts as a 5xx.
+const LLMRequestCanceled = "llm.request_canceled"
+
 // --- navigation ---
 
 // NavigationOverrideUnknownParent signals that a PATCH against the

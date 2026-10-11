@@ -215,7 +215,16 @@
       "endpoint_not_allowed": "That endpoint is not allowed in this environment.",
       "hosted_disabled": "Hosted providers are disabled in the llm module settings.",
       "mock_not_allowed": "The mock provider is only available outside production.",
-      "grant_not_member": "Every granted user must be a member of this organization."
+      "grant_not_member": "Every granted user must be a member of this organization.",
+      "budget_exceeded": "The organization's monthly LLM budget has no room for this call.",
+      "plan_quota_exhausted": "The linked account's plan quota is used up. Try again later.",
+      "credential_rejected": "The provider rejected the credential. Check or rotate the API key.",
+      "rate_limited": "Too many requests. Wait a minute and try again.",
+      "partial_output": "The provider stopped before the answer was complete.",
+      "user_account_required": "This model is billed to your own account: link it first.",
+      "user_account_reauth_required": "Your linked account must be authorized again.",
+      "plan_usage_disabled": "The linked account did not allow plan usage.",
+      "request_canceled": "The request was cancelled before it completed."
     }
   },
   "banner": {
@@ -2643,7 +2652,9 @@
     "loadError": "The list could not be loaded.",
     "tabs": {
       "models": "Models",
-      "credentials": "Credentials"
+      "credentials": "Credentials",
+      "usage": "Usage",
+      "budget": "Budget"
     },
     "actions": {
       "cancel": "Cancel",
@@ -2741,7 +2752,16 @@
         "provider": "Provider",
         "secret": "Key",
         "status": "Status",
-        "updated": "Updated"
+        "updated": "Updated",
+        "lastTest": "Last test"
+      },
+      "test": "Test connection",
+      "testOk": "The credential works.",
+      "testFailed": "The test failed: {{reason}}",
+      "neverTested": "Never tested",
+      "testStatus": {
+        "ok": "OK",
+        "error": "Failed"
       }
     },
     "models": {
@@ -2812,7 +2832,120 @@
       "enable": "Enable",
       "disable": "Disable",
       "enabled": "Model enabled",
-      "disabled": "Model disabled"
+      "disabled": "Model disabled",
+      "discover": "Fetch from provider",
+      "discoverFound_one": "{{count}} model found: pick one or type any slug.",
+      "discoverFound_other": "{{count}} models found: pick one or type any slug.",
+      "discoverNone": "The provider listed no models.",
+      "discoverNeedCredential": "Choose an active credential first.",
+      "discoverNoPermission": "Fetching the model list needs the permission to manage LLM credentials."
+    },
+    "usage": {
+      "stats": {
+        "requests": {
+          "title": "Requests this month",
+          "subtitle": "UTC month {{period}}"
+        },
+        "consumed": {
+          "title": "Tokens consumed",
+          "subtitle": "Org keys {{org}} · user accounts {{user}}"
+        },
+        "reserved": {
+          "title": "Tokens reserved",
+          "subtitle": "Held by calls still in flight"
+        },
+        "budget": {
+          "title": "Budget used",
+          "none": "No budget",
+          "unlimited": "No monthly limit is set",
+          "exhausted": "Exhausted",
+          "subtitle": "{{consumed}} consumed · {{reserved}} reserved · limit {{limit}}"
+        }
+      },
+      "admissionNote": "The limit is an admission check: a call is admitted by reserving its estimate, so real consumption can exceed the reservation and, briefly, the limit.",
+      "period": "Period",
+      "periods": {
+        "30d": "Last 30 days",
+        "90d": "Last 90 days",
+        "month": "This month (UTC)"
+      },
+      "groupByLabel": "Group by",
+      "groupBy": {
+        "model": "Model",
+        "user": "User",
+        "caller": "Caller"
+      },
+      "noKey": {
+        "model": "No model",
+        "user": "No user (system call)",
+        "caller": "No caller"
+      },
+      "unknownModel": "{{id}} (deleted model)",
+      "columns": {
+        "requests": "Requests",
+        "inputTokens": "Input tokens",
+        "outputTokens": "Output tokens",
+        "total": "Total tokens"
+      },
+      "series": {
+        "input": "Input tokens",
+        "output": "Output tokens"
+      },
+      "chartTitle": "Input and output tokens",
+      "search": "Search usage",
+      "emptyTitle": "No usage in this period",
+      "emptyHint": "Calls show up here once a model has answered.",
+      "modelNamesError": "The model names could not be loaded, so rows show model IDs."
+    },
+    "budget": {
+      "semantics": "The limit counts input and output tokens of every model, on organization keys and on users' own accounts, per UTC calendar month. Each call reserves its estimate before it runs and is charged its real usage when it ends.",
+      "none": "This organization has no budget, so LLM usage is unlimited. Save a limit to create one.",
+      "lastUpdated": "Last changed on {{date}} by {{user}}.",
+      "saveSuccess": "Budget saved",
+      "noPermission": "You need the permission to manage the LLM budget to change it.",
+      "fields": {
+        "limit": "Monthly token limit",
+        "limitHint": "Input plus output tokens per UTC month.",
+        "warnPct": "Warning threshold (%)",
+        "warnPctHint": "The recipients are notified once consumption reaches this share of the limit. 0 disables the warning.",
+        "action": "When a call does not fit",
+        "recipients": "Also notify",
+        "recipientsPlaceholder": "Pick members of this organization",
+        "recipientsHint": "The owners and admins of the organization are always notified.",
+        "noMembers": "No matching members",
+        "membersError": "The members of this organization could not be loaded.",
+        "membersForbidden": "Listing this organization's members needs tenant-admin access, so the extra recipients cannot be edited here.",
+        "formerMember": "{{id}} (no longer a member)"
+      },
+      "actions": {
+        "block": "Block the call",
+        "warn_only": "Warn only"
+      },
+      "actionHints": {
+        "block": "A call that does not fit the remaining balance is refused with \"budget exceeded\".",
+        "warn_only": "Every call is admitted, even past the limit; the recipients are only notified."
+      },
+      "validation": {
+        "maxRecipients": "At most {{max}} extra recipients."
+      }
+    },
+    "prompt": {
+      "action": "Try a prompt",
+      "title": "Try \"{{name}}\"",
+      "field": "Prompt",
+      "hint": "Sent once as a single user message and stored nowhere. Grants are ignored; the call counts against the budget.",
+      "run": "Run",
+      "running": "Running…",
+      "close": "Close",
+      "answer": "Answer",
+      "empty": "The model returned no text.",
+      "answeredBy": "Answered by {{name}} ({{modelId}}).",
+      "fallback": "Answered by a fallback model, not by {{name}}: the pinned model failed.",
+      "usage": "{{input}} input · {{output}} output tokens",
+      "finishReason": "Finish reason: {{reason}}",
+      "truncated": "The answer was cut at 64 KiB.",
+      "tooLong": "Use at most {{max}} characters.",
+      "disabledModel": "Enable the model to try it."
     }
   },
   "adminModules": {

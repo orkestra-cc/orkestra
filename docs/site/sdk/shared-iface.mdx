@@ -89,6 +89,8 @@ must match them across the module boundary with `errors.Is`.
 
 `LLMGateway` is not in this list: it is **implemented by the core** (the `llm` module, [ADR-0022](/adrs/core-llm-module)) and consumed by addons with `module.GetTyped[iface.LLMGateway](reg, module.ServiceLLMGateway)`. The message-based contract (`ChatRequest`, `ChatSink`, `EmbedRequest`, the `ErrLLM*` sentinels) lives in `pkg/sdk/iface/llm.go`.
 
+A tool loop must keep each `ChatToolCall` whole, including its `Signature`: opaque provider state (Gemini 3 thought signatures, base64, at most 64 KiB) that the producing adapter sets on an assistant turn and needs back when that turn is replayed. Store it with the tool call, never parse, log or display it; other providers ignore it.
+
 Do not confuse `PDFProvider` with `PDFRenderer` above: `PDFProvider` is the wider, module-shaped generate/store/retrieve contract a fork's own documents addon can choose to implement; `PDFRenderer` is the narrow, core-wired HTML→PDF conversion service described above, with no storage or template concerns of its own.
 
 ## Why the indirection

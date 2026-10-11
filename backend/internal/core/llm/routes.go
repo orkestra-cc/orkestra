@@ -10,7 +10,7 @@ import (
 // The bearerAuth scopes below document the operator boundary in OpenAPI;
 // nothing reads them. Authorization is the middleware Module.RegisterRoutes
 // mounts around each group: RequireInternalTenant plus a permission (and
-// RequireStepUp where noted).
+// RequireMFA / RequireStepUp where noted).
 var (
 	adminScope = []map[string][]string{{"bearerAuth": {"administrator"}}}
 	selfScope  = []map[string][]string{{"bearerAuth": {}}}
@@ -68,4 +68,52 @@ func RegisterGrantRoutes(api huma.API, h *handlers.AdminHandler) {
 func RegisterSelfRoutes(api huma.API, h *handlers.SelfHandler) {
 	huma.Register(api, huma.Operation{OperationID: "llm-me-models", Method: http.MethodGet, Path: "/v1/llm/me/models",
 		Summary: "Models the current user may use in the current organization", Tags: []string{"LLM"}, Security: selfScope}, h.MyModels)
+}
+
+// RegisterCredentialOpsRoutes mounts the credential connectivity test and
+// model discovery. Gated by llm.credentials.admin + MFA, no step-up: they
+// change no configuration (the test records its outcome). Rate-limited to
+// 10 a minute per org and credential, each.
+func RegisterCredentialOpsRoutes(api huma.API, h *handlers.OpsHandler) {
+	huma.Register(api, huma.Operation{OperationID: "admin-llm-credentials-test", Method: http.MethodPost, Path: "/v1/admin/llm/credentials/{uuid}/test",
+		Summary: "Test a credential against its provider and record the outcome", Tags: adminTags, Security: adminScope}, h.TestCredential)
+	huma.Register(api, huma.Operation{OperationID: "admin-llm-credentials-models", Method: http.MethodPost, Path: "/v1/admin/llm/credentials/{uuid}/models",
+		Summary: "List the model ids the credential's provider serves", Tags: adminTags, Security: adminScope}, h.DiscoverModels)
+}
+
+// RegisterPromptRoute mounts the admin prompt test. Gated by
+// llm.models.admin + MFA; ignores grants; 10 a minute per org and user.
+func RegisterPromptRoute(api huma.API, h *handlers.OpsHandler) {
+	huma.Register(api, huma.Operation{OperationID: "admin-llm-models-prompt", Method: http.MethodPost, Path: "/v1/admin/llm/models/{uuid}/prompt",
+		Summary: "Send a test prompt to a model (ignores grants, ledgered as llm.admin_test)", Tags: adminTags, Security: adminScope}, h.PromptTest)
+}
+
+// RegisterUsageReadRoutes mounts the usage report. Gated by llm.usage.read,
+// which therefore also reads the budget (the report carries it): both are
+// read-only System permissions, and the budget alone stays readable with
+// llm.admin.read.
+func RegisterUsageReadRoutes(api huma.API, h *handlers.UsageHandler) {
+	huma.Register(api, huma.Operation{OperationID: "admin-llm-usage-get", Method: http.MethodGet, Path: "/v1/admin/llm/usage",
+		Summary:     "Usage of the current organization by model, user or caller, with the month's rollup and the budget",
+		Description: "Requires llm.usage.read, which also grants reading the budget embedded in the report (both read-only).", Tags: adminTags, Security: adminScope}, h.GetUsage)
+}
+
+// RegisterBudgetReadRoutes mounts the budget read. Gated by llm.admin.read.
+func RegisterBudgetReadRoutes(api huma.API, h *handlers.UsageHandler) {
+	huma.Register(api, huma.Operation{OperationID: "admin-llm-budget-get", Method: http.MethodGet, Path: "/v1/admin/llm/budget",
+		Summary: "The organization's monthly LLM budget (204 when it has none)", Tags: adminTags, Security: adminScope}, h.GetBudget)
+}
+
+// RegisterBudgetWriteRoutes mounts the budget write. Gated by
+// llm.budgets.admin + MFA + step-up.
+func RegisterBudgetWriteRoutes(api huma.API, h *handlers.UsageHandler) {
+	huma.Register(api, huma.Operation{OperationID: "admin-llm-budget-put", Method: http.MethodPut, Path: "/v1/admin/llm/budget",
+		Summary: "Create or replace the organization's monthly LLM budget", Tags: adminTags, Security: adminScope}, h.PutBudget)
+}
+
+// RegisterSelfUsageRoutes mounts the current user's usage. Gated by the org
+// permission llm.usage.self.
+func RegisterSelfUsageRoutes(api huma.API, h *handlers.UsageHandler) {
+	huma.Register(api, huma.Operation{OperationID: "llm-me-usage", Method: http.MethodGet, Path: "/v1/llm/me/usage",
+		Summary: "The current user's LLM usage this month, by who pays", Tags: []string{"LLM"}, Security: selfScope}, h.MyUsage)
 }

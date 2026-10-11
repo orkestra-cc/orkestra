@@ -3,11 +3,14 @@ package llm
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +25,8 @@ import (
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
+	"github.com/orkestra/backend/pkg/sdk/tenantrepo"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -58,9 +63,10 @@ func TestModule_Declarations(t *testing.T) {
 			self++
 		}
 	}
-	// PR 1 declares only the permissions its routes use (ruling M4).
-	if system != 4 || self != 1 {
-		t.Fatalf("permissions = %d system + %d self, want 4 + 1", system, self)
+	// Only the permissions the mounted routes use (amendment 1; PR 2 adds
+	// llm.usage.read, llm.budgets.admin and llm.usage.self).
+	if system != 6 || self != 2 {
+		t.Fatalf("permissions = %d system + %d self, want 6 + 2", system, self)
 	}
 
 	keys := map[string]bool{}
@@ -90,26 +96,59 @@ func TestModule_UniqueIndexes(t *testing.T) {
 			unique[c.Name] = append(unique[c.Name], fields)
 		}
 	}
-	want := map[string][]string{
-		repository.CollCredentials: {"tenantId", "name"},
-		repository.CollModels:      {"tenantId", "name"},
-		repository.CollGrants:      {"tenantId", "modelUuid", "userUuid"},
+	want := map[string][][]string{
+		repository.CollCredentials:  {{"tenantId", "name"}, {"tenantId", "uuid"}},
+		repository.CollModels:       {{"tenantId", "name"}, {"tenantId", "uuid"}},
+		repository.CollGrants:       {{"tenantId", "modelUuid", "userUuid"}},
+		repository.CollUsage:        {{"tenantId", "uuid"}},
+		repository.CollUsageMonthly: {{"tenantId", "period"}},
+		repository.CollBudgets:      {{"tenantId"}},
+		repository.CollBudgetOutbox: {{"tenantId", "period", "threshold"}, {"tenantId", "uuid"}},
 	}
-	for coll, fields := range want {
-		found := false
-		for _, got := range unique[coll] {
-			if reflect.DeepEqual(got, fields) {
-				found = true
+	for coll, all := range want {
+		for _, fields := range all {
+			found := false
+			for _, got := range unique[coll] {
+				if reflect.DeepEqual(got, fields) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("%s has no unique index on %v (got %v)", coll, fields, unique[coll])
 			}
 		}
-		if !found {
-			t.Errorf("%s has no unique index on %v (got %v)", coll, fields, unique[coll])
-		}
+	}
+	// The only indexes not led by tenantId serve the system sweeps that
+	// run across every org by design (//tenantscope:allow system:): the
+	// reconciler's pending scan, the daily usage retention purge and the
+	// outbox worker's lease. Anything else must lead with tenantId.
+	sweepIndexes := map[string][][]string{
+		// userUuid: not a sweep but the DSR queries (subject across every
+		// org, //tenantscope:allow dsr:), which have no tenantId to lead with.
+		repository.CollUsage:        {{"outcome", "reservationExpiresAt"}, {"createdAt"}, {"userUuid"}},
+		repository.CollBudgetOutbox: {{"status", "nextAttemptAt"}},
 	}
 	for _, c := range NewModule().Collections() {
 		for _, idx := range c.Indexes {
-			if len(idx.OrderedKeys) == 0 || idx.OrderedKeys[0].Field != "tenantId" {
-				t.Errorf("%s index %+v does not lead with tenantId", c.Name, idx)
+			if len(idx.OrderedKeys) == 0 {
+				t.Errorf("%s index %+v has no ordered keys", c.Name, idx)
+				continue
+			}
+			if idx.OrderedKeys[0].Field == "tenantId" {
+				continue
+			}
+			var fields []string
+			for _, k := range idx.OrderedKeys {
+				fields = append(fields, k.Field)
+			}
+			allowed := false
+			for _, sweep := range sweepIndexes[c.Name] {
+				if reflect.DeepEqual(sweep, fields) && !idx.Unique {
+					allowed = true
+				}
+			}
+			if !allowed {
+				t.Errorf("%s index %v does not lead with tenantId and is not a declared system sweep", c.Name, fields)
 			}
 		}
 	}
@@ -174,6 +213,9 @@ func (emptyCreds) Patch(context.Context, string, models.CredentialPatch) (time.T
 func (emptyCreds) SetSecret(context.Context, string, models.Envelope, string) (time.Time, error) {
 	return time.Time{}, repository.ErrNotFound
 }
+func (emptyCreds) SetTestResult(context.Context, *models.Credential, time.Time, string, string) error {
+	return repository.ErrNotFound
+}
 func (emptyCreds) Delete(context.Context, string) error { return repository.ErrNotFound }
 
 type emptyModels struct{}
@@ -189,6 +231,26 @@ func (emptyModels) Get(context.Context, string) (*models.Model, error) {
 }
 func (emptyModels) Update(context.Context, *models.Model) error { return repository.ErrNotFound }
 func (emptyModels) Delete(context.Context, string) error        { return repository.ErrNotFound }
+
+type emptyUsage struct{}
+
+func (emptyUsage) Query(context.Context, time.Time, time.Time, string) ([]models.LLMUsageRow, error) {
+	return nil, nil
+}
+func (emptyUsage) UserMonth(_ context.Context, _ string, period string) (*models.LLMSelfUsage, error) {
+	return &models.LLMSelfUsage{Period: period}, nil
+}
+
+type emptyMonthly struct{}
+
+func (emptyMonthly) Get(_ context.Context, period string) (*models.UsageMonthly, error) {
+	return &models.UsageMonthly{Period: period}, nil
+}
+
+type emptyBudgets struct{}
+
+func (emptyBudgets) Get(context.Context) (*models.Budget, error) { return nil, repository.ErrNotFound }
+func (emptyBudgets) Put(context.Context, *models.Budget) error   { return nil }
 
 type emptyGrants struct{}
 
@@ -219,6 +281,9 @@ func moduleForRoutes(t *testing.T) *Module {
 	m := NewModule()
 	m.admin = handlers.NewAdminHandler(catalog, logger)
 	m.self = handlers.NewSelfHandler(gw, logger)
+	m.ops = handlers.NewOpsHandler(services.NewAdminOps(catalog, providers.NewRegistry(), nil, services.NewRateLimiter(nil, logger), services.NewPinnedRunner(gw), logger), logger)
+	m.usageH = handlers.NewUsageHandler(services.NewUsageService(emptyUsage{}, emptyMonthly{}, emptyBudgets{}, noMembers{}, catalog,
+		func() services.BudgetConfig { return services.BudgetConfig{} }, logger), logger)
 	return m
 }
 
@@ -261,6 +326,13 @@ func TestModule_RouteGuards(t *testing.T) {
 		{http.MethodDelete, "/v1/admin/llm/models" + id, []string{"internal", "sys:llm.models.admin", "mfa"}},
 		{http.MethodPut, "/v1/admin/llm/models" + id + "/grants", []string{"internal", "sys:llm.grants.admin", "mfa", stepUp}},
 		{http.MethodGet, "/v1/llm/me/models", []string{"internal", "perm:llm.models.self"}},
+		{http.MethodPost, "/v1/admin/llm/credentials" + id + "/test", []string{"internal", "sys:llm.credentials.admin", "mfa"}},
+		{http.MethodPost, "/v1/admin/llm/credentials" + id + "/models", []string{"internal", "sys:llm.credentials.admin", "mfa"}},
+		{http.MethodPost, "/v1/admin/llm/models" + id + "/prompt", []string{"internal", "sys:llm.models.admin", "mfa"}},
+		{http.MethodGet, "/v1/admin/llm/usage", []string{"internal", "sys:llm.usage.read"}},
+		{http.MethodGet, "/v1/admin/llm/budget", read},
+		{http.MethodPut, "/v1/admin/llm/budget", []string{"internal", "sys:llm.budgets.admin", "mfa", stepUp}},
+		{http.MethodGet, "/v1/llm/me/usage", []string{"internal", "perm:llm.usage.self"}},
 	}
 	used := map[string]bool{}
 	for _, tc := range cases {
@@ -304,6 +376,15 @@ func TestModule_RouteGuards(t *testing.T) {
 		if !used[p.Key] {
 			t.Errorf("permission %s is declared but gates no route", p.Key)
 		}
+	}
+
+	// No budget is a 204 with no body, through the real Huma stack.
+	req := httptest.NewRequest(http.MethodGet, "/v1/admin/llm/budget", nil)
+	req = req.WithContext(context.WithValue(operatorCtx(), guardsKey{}, &[]string{}))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Fatalf("GET budget without one = %d %q", rec.Code, rec.Body.String())
 	}
 }
 
@@ -405,5 +486,213 @@ func TestModule_InitRequiresTheTenantDirectory(t *testing.T) {
 	err := m.Init(&module.Dependencies{DB: offlineDB(t), Logger: slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), Services: module.NewServiceRegistry()})
 	if err == nil {
 		t.Fatal("Init must fail without the tenant directory reader")
+	}
+}
+
+// The config accessors clamp every value: an out-of-range or zero stored
+// value can never yield a zero deadline or a reservation that expires
+// under a running call (Task 7 review: ReservationTTL must exceed the
+// finalization window and cover two full attempts).
+func TestModule_SettingsAreClamped(t *testing.T) {
+	cases := []struct {
+		in   moduleSettings
+		want moduleSettings
+	}{
+		{moduleSettings{requestTimeout: 0, retentionDays: 0, warnPct: -5, reserveOutput: -1},
+			moduleSettings{requestTimeout: defaultRequestTimeout, retentionDays: minRetentionDays, warnPct: 0, reserveOutput: 1}},
+		{moduleSettings{requestTimeout: time.Second, retentionDays: 30, warnPct: 1, reserveOutput: 1},
+			moduleSettings{requestTimeout: time.Second, retentionDays: minRetentionDays, warnPct: 1, reserveOutput: 1}},
+		{moduleSettings{requestTimeout: -time.Second, retentionDays: 99999, warnPct: 500, reserveOutput: 1 << 30},
+			moduleSettings{requestTimeout: defaultRequestTimeout, retentionDays: maxRetentionDays, warnPct: 100, reserveOutput: models.MaxOutputTokens}},
+		{moduleSettings{requestTimeout: 2 * time.Second, retentionDays: 45, warnPct: 75, reserveOutput: 512},
+			moduleSettings{requestTimeout: 2 * time.Second, retentionDays: 45, warnPct: 75, reserveOutput: 512}},
+	}
+	for _, tc := range cases {
+		got := clampSettings(tc.in)
+		if got != tc.want {
+			t.Errorf("clamp(%+v) = %+v, want %+v", tc.in, got, tc.want)
+		}
+		b := got.budget()
+		if b.ReservationTTL < 2*got.requestTimeout || b.ReservationTTL <= 6*time.Second {
+			t.Errorf("ReservationTTL %v too short for request_timeout %v", b.ReservationTTL, got.requestTimeout)
+		}
+		if b.WarnPct != got.warnPct || b.ReserveOutputTokens != got.reserveOutput {
+			t.Errorf("budget config = %+v from %+v", b, got)
+		}
+	}
+}
+
+func TestModule_InitRegistersSixAdaptersAndRouter(t *testing.T) {
+	m, _, _, _ := initModule(t, strings.Repeat("ab", 32))
+	kinds := map[string]bool{}
+	for _, k := range m.registry.Kinds() {
+		kinds[k] = true
+	}
+	for _, p := range models.Providers {
+		if !kinds[p] {
+			t.Errorf("no adapter registered for %s", p)
+		}
+	}
+	if m.clientFor(models.ProviderOpenAI) != m.clientFor(models.ProviderOpenAI) || m.clientFor(models.ProviderOpenAI) == m.clientFor(models.ProviderGemini) {
+		t.Fatal("one client per provider kind, reused")
+	}
+	if m.outboxW == nil || m.reconciler == nil || m.purge == nil || m.ops == nil || m.usageH == nil {
+		t.Fatal("background jobs and handlers must be wired")
+	}
+}
+
+func TestModule_StartStopIsIdempotent(t *testing.T) {
+	m, _, _, _ := initModule(t, "")
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := m.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop = %v", err)
+	}
+	if err := m.Stop(stopCtx); err != nil {
+		t.Fatalf("second Stop = %v", err)
+	}
+	// Not initialized: both are no-ops.
+	if err := NewModule().Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Every budget alert template exists in en and it.
+func TestModule_NotificationTemplatesInEveryLocale(t *testing.T) {
+	locales := map[string]map[string]bool{}
+	for _, spec := range NewModule().NotificationTemplates() {
+		if !strings.HasPrefix(spec.TemplateID, "llm.") {
+			t.Errorf("template %s is not llm.-prefixed", spec.TemplateID)
+		}
+		if locales[spec.TemplateID] == nil {
+			locales[spec.TemplateID] = map[string]bool{}
+		}
+		locales[spec.TemplateID][spec.Locale] = true
+	}
+	for _, id := range []string{services.TemplateBudgetWarning, services.TemplateBudgetExhausted} {
+		if !locales[id]["en"] || !locales[id]["it"] {
+			t.Errorf("%s locales = %v", id, locales[id])
+		}
+	}
+}
+
+// The grant-bypassing prompt path is not reachable from the object other
+// modules resolve under ServiceLLMGateway.
+func TestModule_RegisteredGatewayHasNoGrantBypass(t *testing.T) {
+	_, reg, _, _ := initModule(t, "")
+	if _, ok := module.GetTyped[services.PromptRunner](reg, module.ServiceLLMGateway); ok {
+		t.Fatal("the registered gateway must not expose ChatPinned")
+	}
+}
+
+// The retention loop runs its first pass after the first delay, then on
+// every interval, and stops with Stop.
+func TestModule_RetentionLoopRunsAndStops(t *testing.T) {
+	m, _, _, _ := initModule(t, "")
+	var mu sync.Mutex
+	runs := 0
+	m.purge = func(context.Context) { mu.Lock(); runs++; mu.Unlock() }
+	m.retentionFirst, m.retentionInterval = 5*time.Millisecond, 5*time.Millisecond
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		n := runs
+		mu.Unlock()
+		if n >= 3 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("retention ran %d times in 5s", n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := m.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	after := runs
+	mu.Unlock()
+	time.Sleep(30 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if runs != after {
+		t.Fatalf("retention kept running after Stop: %d -> %d", after, runs)
+	}
+}
+
+// runRetention against Mongo: old finalized ledger rows, rollups past 24
+// months and settled old alerts go; pending rows, fresh rows and unsettled
+// alerts stay.
+func TestModule_RunRetentionPurges(t *testing.T) {
+	uri := os.Getenv("MONGO_TEST_URI")
+	if uri == "" {
+		t.Skip("MONGO_TEST_URI not set")
+	}
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(uri))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := client.Database(fmt.Sprintf("llm_mod_test_%d", time.Now().UnixNano()))
+	t.Cleanup(func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) })
+	usage, monthly, outbox := repository.NewUsage(db), repository.NewMonthly(db), repository.NewOutbox(db)
+	id := testkit.NewIdentity("u1", "u1@example.test", "administrator").WithTenant("t1", []string{"org_owner"}, true)
+	ctx := ctxauth.WithTenantKind(id.ContextFor(context.Background(), "t1"), "internal")
+	old, fresh := time.Now().UTC().AddDate(0, 0, -100), time.Now().UTC()
+	for _, ev := range []*models.UsageEvent{
+		{UUID: "old-ok", Outcome: models.OutcomeOK, CreatedAt: old},
+		{UUID: "old-pending", Outcome: models.OutcomePending, CreatedAt: old},
+		{UUID: "new-ok", Outcome: models.OutcomeOK, CreatedAt: fresh},
+	} {
+		if err := usage.InsertPending(ctx, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ancient := models.PeriodOf(time.Now().UTC().AddDate(0, -30, 0))
+	for _, p := range []string{ancient, models.PeriodOf(fresh)} {
+		if err := monthly.Reserve(ctx, p, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, ev := range []*models.OutboxEvent{
+		{UUID: "ob-old-sent", Period: "2026-01", Threshold: models.ThresholdWarn, Status: models.OutboxStatusSent, CreatedAt: old, NextAttemptAt: old},
+		{UUID: "ob-old-pending", Period: "2026-02", Threshold: models.ThresholdWarn, Status: models.OutboxStatusPending, CreatedAt: old, NextAttemptAt: old},
+	} {
+		if _, err := outbox.InsertUnique(ctx, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runRetention(context.Background(), slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), 90, usage, monthly, outbox)
+
+	count := func(coll string, extra bson.M) int64 {
+		f, err := tenantrepo.Scope(ctx, extra)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n, err := db.Collection(coll).CountDocuments(context.Background(), f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := count(repository.CollUsage, bson.M{}); n != 2 || count(repository.CollUsage, bson.M{"uuid": "old-ok"}) != 0 {
+		t.Fatalf("usage left = %d (want old-pending + new-ok)", n)
+	}
+	if count(repository.CollUsageMonthly, bson.M{"period": ancient}) != 0 || count(repository.CollUsageMonthly, bson.M{}) != 1 {
+		t.Fatal("rollup retention wrong")
+	}
+	if count(repository.CollBudgetOutbox, bson.M{"uuid": "ob-old-sent"}) != 0 || count(repository.CollBudgetOutbox, bson.M{"uuid": "ob-old-pending"}) != 1 {
+		t.Fatal("outbox retention wrong")
 	}
 }

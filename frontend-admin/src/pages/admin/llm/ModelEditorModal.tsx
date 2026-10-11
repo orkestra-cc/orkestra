@@ -1,9 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Col, Form, Modal, Row } from 'react-bootstrap';
+import {
+  Alert,
+  Button,
+  Col,
+  Form,
+  InputGroup,
+  Modal,
+  Row
+} from 'react-bootstrap';
 import { useFieldArray, useForm, type Resolver } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
-import { faMinus, faPlus } from '@fortawesome/free-solid-svg-icons';
+import {
+  faCloudArrowDown,
+  faMinus,
+  faPlus
+} from '@fortawesome/free-solid-svg-icons';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import IconButton from 'components/common/IconButton';
@@ -13,16 +25,22 @@ import { useListOrgMembersAdminQuery } from 'store/api/tenantApi';
 import {
   LLM_PROVIDERS,
   useCreateLlmModelMutation,
+  useDiscoverLlmModelsMutation,
   usePatchLlmModelMutation,
   usePutLlmGrantsMutation,
   type LlmAccess,
   type LlmCredential,
+  type LlmDiscoveredModel,
   type LlmModel,
   type LlmModelBody,
   type LlmModelPatch,
   type LlmProvider
 } from 'store/api/llmApi';
-import { isReauthCancelled, llmErrorMessage } from './llmErrors';
+import {
+  isQuietLlmError,
+  isReauthCancelled,
+  llmErrorMessage
+} from './llmErrors';
 import { useLlmPermissions } from './llmPermissions';
 import { LLM_MODEL_ID_RE, LLM_NAME_RE, LLM_PURPOSE_RE } from './llmRules';
 
@@ -157,7 +175,7 @@ const ModelEditorModal = ({
   onClose
 }: Props) => {
   const { t } = useTranslation();
-  const { canManageGrants } = useLlmPermissions();
+  const { canManageGrants, canManageCredentials } = useLlmPermissions();
   const tenantId =
     useAppSelector(
       s => s.tenant.impersonatedTenantId ?? s.tenant.currentOrgId
@@ -171,6 +189,14 @@ const ModelEditorModal = ({
   );
   const [grantees, setGrantees] = useState<string[]>(originalGrantees);
   const [error, setError] = useState<string | null>(null);
+  const [discover, { isLoading: discovering }] = useDiscoverLlmModelsMutation();
+  // Suggestions for the model id, fetched on demand from the selected
+  // credential's provider; the slug stays free text.
+  const [discovery, setDiscovery] = useState<{
+    credentialUuid: string;
+    items?: LlmDiscoveredModel[];
+    error?: string;
+  } | null>(null);
 
   const schema = useMemo(() => {
     const required = t('adminLlm.validation.required');
@@ -323,6 +349,28 @@ const ModelEditorModal = ({
   const membersForbidden =
     members.isError &&
     (members.error as { status?: number } | undefined)?.status === 403;
+
+  // Model discovery is a credential operation (llm.credentials.admin + MFA).
+  const discoverBlocked = !canManageCredentials
+    ? t('adminLlm.models.discoverNoPermission')
+    : isUserAccount || !credentialUuid
+      ? t('adminLlm.models.discoverNeedCredential')
+      : undefined;
+  const onDiscover = async () => {
+    if (!credentialUuid) return;
+    try {
+      const res = await discover(credentialUuid).unwrap();
+      setDiscovery({ credentialUuid, items: res.items ?? [] });
+    } catch (e) {
+      if (isQuietLlmError(e)) return;
+      setDiscovery({ credentialUuid, error: llmErrorMessage(t, e) });
+    }
+  };
+  // Suggestions belong to the credential they were fetched with.
+  const suggestions =
+    discovery && discovery.credentialUuid === credentialUuid && !isUserAccount
+      ? discovery
+      : null;
 
   // Access and grants travel together on the grants route
   // (llm.grants.admin + step-up); the model PATCH never carries access. With
@@ -578,16 +626,50 @@ const ModelEditorModal = ({
             <Col md={12}>
               <Form.Group controlId="llm-model-id">
                 <Form.Label>{t('adminLlm.models.fields.modelId')}</Form.Label>
-                <Form.Control
-                  className="font-monospace"
-                  placeholder={t('adminLlm.models.fields.modelIdPlaceholder')}
-                  isInvalid={!!errors.modelId}
-                  {...register('modelId')}
-                />
-                <Form.Control.Feedback type="invalid">
-                  {errors.modelId?.message}
-                </Form.Control.Feedback>
-                <Form.Text className="text-600">
+                <InputGroup hasValidation>
+                  <Form.Control
+                    className="font-monospace"
+                    placeholder={t('adminLlm.models.fields.modelIdPlaceholder')}
+                    list="llm-model-id-suggestions"
+                    autoComplete="off"
+                    isInvalid={!!errors.modelId}
+                    {...register('modelId')}
+                  />
+                  <IconButton
+                    variant="orkestra-default"
+                    icon={faCloudArrowDown}
+                    title={discoverBlocked}
+                    disabled={!!discoverBlocked || discovering}
+                    onClick={onDiscover}
+                  >
+                    {t('adminLlm.models.discover')}
+                  </IconButton>
+                  <Form.Control.Feedback type="invalid">
+                    {errors.modelId?.message}
+                  </Form.Control.Feedback>
+                </InputGroup>
+                <datalist id="llm-model-id-suggestions">
+                  {(suggestions?.items ?? []).map(m => (
+                    <option key={m.id} value={m.id}>
+                      {m.displayName ?? m.id}
+                    </option>
+                  ))}
+                </datalist>
+                {suggestions?.error && (
+                  <Form.Text className="d-block text-danger">
+                    {suggestions.error}
+                  </Form.Text>
+                )}
+                {suggestions?.items && (
+                  <Form.Text className="d-block text-600" role="status">
+                    {suggestions.items.length > 0
+                      ? t('adminLlm.models.discoverFound', {
+                          count: suggestions.items.length
+                        })
+                      : t('adminLlm.models.discoverNone')}
+                  </Form.Text>
+                )}
+                <Form.Text className="d-block text-600">
                   {t('adminLlm.models.fields.modelIdHint')}
                 </Form.Text>
               </Form.Group>

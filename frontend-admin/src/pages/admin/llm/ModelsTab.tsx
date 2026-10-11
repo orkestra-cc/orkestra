@@ -4,6 +4,7 @@ import {
   faBan,
   faCircleCheck,
   faPen,
+  faPlay,
   faRobot,
   faTrash,
   faUsers
@@ -25,6 +26,7 @@ import {
 import ConfirmDeleteModal from './ConfirmDeleteModal';
 import LlmLoadError from './LlmLoadError';
 import ModelEditorModal from './ModelEditorModal';
+import PromptTestModal from './PromptTestModal';
 import { isReauthCancelled, llmErrorMessage } from './llmErrors';
 import { useLlmPermissions } from './llmPermissions';
 
@@ -32,7 +34,8 @@ import { useLlmPermissions } from './llmPermissions';
 // Defining a model (llm.models.admin) and deciding its users
 // (llm.grants.admin) are separate permissions, so the row actions are gated
 // one by one. Disabling a model is always possible and keeps its grants;
-// delete removes the grants too.
+// delete removes the grants too. Trying a prompt is a model operation
+// (llm.models.admin + MFA) on an active model.
 const ModelsTab = () => {
   const { t } = useTranslation();
   const { canManageModels, canManageGrants } = useLlmPermissions();
@@ -44,6 +47,7 @@ const ModelsTab = () => {
     model?: LlmModel;
     grantsOnly?: boolean;
   } | null>(null);
+  const [trying, setTrying] = useState<LlmModel | null>(null);
   const [confirm, setConfirm] = useState<{
     open: boolean;
     model?: LlmModel;
@@ -176,6 +180,19 @@ const ModelsTab = () => {
               <IconButton
                 variant="orkestra-default"
                 size="sm"
+                icon={faPlay}
+                title={
+                  active
+                    ? t('adminLlm.prompt.action')
+                    : t('adminLlm.prompt.disabledModel')
+                }
+                aria-label={t('adminLlm.prompt.action')}
+                disabled={!canManageModels || !active}
+                onClick={() => setTrying(original)}
+              />
+              <IconButton
+                variant="orkestra-default"
+                size="sm"
                 icon={faUsers}
                 title={
                   original.access === 'everyone'
@@ -292,6 +309,9 @@ const ModelsTab = () => {
           credentials={credentials.data?.items ?? []}
           onClose={() => setEditor(null)}
         />
+      )}
+      {trying && (
+        <PromptTestModal model={trying} onClose={() => setTrying(null)} />
       )}
       <ConfirmDeleteModal
         show={confirm.open}

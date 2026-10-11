@@ -11,16 +11,20 @@
 // (D9) never grants a developer an ".admin" key. Reads use "read" so a
 // production developer still sees configuration.
 //
-// llm.models.self is suffix-covered by tenant_roles.cedar and platform.cedar
-// (action_suffix == "self") and needs no policy here.
+// llm.models.self and llm.usage.self are suffix-covered by
+// tenant_roles.cedar and platform.cedar (action_suffix == "self") and need
+// no policy here.
 //
-// Later llm PRs add their own keys (usage, budgets, accounts) together with
-// the routes that use them; name them here when they are declared.
+// The linked-account keys (llm.accounts.*) arrive in a later PR together
+// with the routes that use them; name them here when they are declared.
 
 @id("llm.admin_read.platform_roles")
 permit (
     principal,
-    action == Action::"llm.admin.read",
+    action in [
+        Action::"llm.admin.read",
+        Action::"llm.usage.read"
+    ],
     resource
 ) when {
     principal has system_role &&
@@ -35,7 +39,8 @@ permit (
     action in [
         Action::"llm.credentials.admin",
         Action::"llm.models.admin",
-        Action::"llm.grants.admin"
+        Action::"llm.grants.admin",
+        Action::"llm.budgets.admin"
     ],
     resource
 ) when {
