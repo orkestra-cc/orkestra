@@ -314,3 +314,62 @@ describe('PasswordTab credential submissions', () => {
     );
   });
 });
+
+describe('PasswordTab forgotten current password', () => {
+  // An operator who signs in with OAuth can still hold a password they do
+  // not remember (set by the setup wizard, a registration or an invite):
+  // change mode asks for it, so the tab offers the reset email for their
+  // own address instead of a dead end.
+  it('sends the reset email for the account address and confirms', async () => {
+    stubQueries();
+    server.use(selfAuthMethodsHandler());
+    let payload: unknown;
+    server.use(
+      http.post(
+        url('/v1/auth/operator/forgot-password'),
+        async ({ request }) => {
+          payload = await request.json();
+          return HttpResponse.json({ success: true, message: 'Sent' });
+        }
+      )
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<PasswordTab />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Email me a reset link' })
+    );
+    await waitFor(() =>
+      expect(payload).toEqual({ email: currentOperator.email })
+    );
+    expect(
+      await screen.findByText(/reset link is on its way/i)
+    ).toBeInTheDocument();
+  });
+
+  it('reports a refused request', async () => {
+    stubQueries();
+    server.use(selfAuthMethodsHandler());
+    server.use(
+      http.post(url('/v1/auth/operator/forgot-password'), () =>
+        HttpResponse.json({ code: 'auth.rate_limited' }, { status: 429 })
+      )
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<PasswordTab />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Email me a reset link' })
+    );
+    expect(
+      await screen.findByText(/could not send the reset link/i)
+    ).toBeInTheDocument();
+  });
+
+  it('is not offered when there is no password to forget', async () => {
+    stubQueries();
+    renderWithProviders(<PasswordTab />);
+    await screen.findByLabelText('New password');
+    expect(
+      screen.queryByRole('button', { name: 'Email me a reset link' })
+    ).not.toBeInTheDocument();
+  });
+});

@@ -1304,7 +1304,12 @@
       "errorTooShort": "New password must be at least {{count}} characters.",
       "errorRequiredNew": "Enter a new password.",
       "errorRequiredConfirm": "Confirm the new password.",
-      "errorGeneric": "Failed to update password."
+      "errorGeneric": "Failed to update password.",
+      "forgotCurrent": "Don't remember your current password?",
+      "resetLinkSend": "Email me a reset link",
+      "resetLinkSending": "Sending…",
+      "resetLinkSent": "A reset link is on its way to {{email}}. Setting a new password through it signs you out on every device.",
+      "resetLinkError": "We could not send the reset link. Try again in a few minutes."
     },
     "backupCodesTab": {
       "title": "Backup codes",

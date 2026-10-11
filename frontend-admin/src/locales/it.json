@@ -1304,7 +1304,12 @@
       "errorTooShort": "La nuova password deve avere almeno {{count}} caratteri.",
       "errorRequiredNew": "Inserisci una nuova password.",
       "errorRequiredConfirm": "Conferma la nuova password.",
-      "errorGeneric": "Aggiornamento della password non riuscito."
+      "errorGeneric": "Aggiornamento della password non riuscito.",
+      "forgotCurrent": "Non ricordi la password attuale?",
+      "resetLinkSend": "Inviami un link per reimpostarla",
+      "resetLinkSending": "Invio…",
+      "resetLinkSent": "Ti stiamo inviando un link di reimpostazione a {{email}}. Impostando la nuova password da quel link verrai disconnesso da tutti i dispositivi.",
+      "resetLinkError": "Non è stato possibile inviare il link di reimpostazione. Riprova tra qualche minuto."
     },
     "backupCodesTab": {
       "title": "Codici di backup",
