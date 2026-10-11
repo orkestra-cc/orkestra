@@ -3,8 +3,10 @@ package providers
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +34,16 @@ func transportErr(ctx context.Context, err error) error {
 		err = ue.Err
 	}
 	return fmt.Errorf("%w: %w", iface.ErrLLMProviderUnavailable, err)
+}
+
+// syntheticCallID names a tool call the provider returned without an ID.
+// A per-response counter (call_0, call_1) would repeat on every step of a
+// tool loop, and tool results are mapped back to their call by ID (Gemini
+// resolves the function name that way), so the ID is random.
+func syntheticCallID() string {
+	var b [12]byte
+	rand.Read(b[:]) // never fails (crypto/rand, Go 1.24+)
+	return "call_" + hex.EncodeToString(b[:])
 }
 
 // malformed reports a response the adapter cannot interpret. The upstream

@@ -117,7 +117,7 @@ func TestOpenAICompatible_ToolCallsFlushedWhenFinishReasonMissing(t *testing.T) 
 		}
 		return nil
 	})
-	if err != nil || len(calls) != 1 || calls[0].Arguments != "{}" || calls[0].ID != "call_0" || outcome.FinishReason != "tool_calls" {
+	if err != nil || len(calls) != 1 || calls[0].Arguments != "{}" || !isSyntheticCallID(calls[0].ID) || outcome.FinishReason != "tool_calls" {
 		t.Fatalf("calls=%+v outcome=%+v err=%v", calls, outcome, err)
 	}
 	// No usage reported: the module-wide estimate is used, never zero.

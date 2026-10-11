@@ -168,7 +168,7 @@ func TestOllama_ToolCallArgumentsNormalised(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil || len(calls) != 2 || calls[0].ID != "srv-1" || calls[0].Arguments != "{}" || calls[1].ID != "call_2" || calls[1].Arguments != `{"x":1}` {
+	if err != nil || len(calls) != 2 || calls[0].ID != "srv-1" || calls[0].Arguments != "{}" || !isSyntheticCallID(calls[1].ID) || calls[1].Arguments != `{"x":1}` {
 		t.Fatalf("calls=%+v err=%v", calls, err)
 	}
 }

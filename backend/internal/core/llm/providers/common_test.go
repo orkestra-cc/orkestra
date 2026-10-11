@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -205,5 +206,27 @@ func TestOpenAI_ZeroUsageAndEmbedFallbacks(t *testing.T) {
 	emb, err := p.Embed(context.Background(), EmbedCall{ModelID: "m", Inputs: []string{"abcdef"}})
 	if err != nil || emb.Usage.InputTokens != 2 {
 		t.Fatalf("embed = %+v, %v", emb, err)
+	}
+}
+
+var syntheticCallIDRE = regexp.MustCompile(`^call_[0-9a-f]{24}$`)
+
+// isSyntheticCallID reports whether id is one syntheticCallID minted.
+func isSyntheticCallID(id string) bool { return syntheticCallIDRE.MatchString(id) }
+
+// A per-response counter repeats on every step of a tool loop (call_0,
+// call_0, ...) and Gemini maps tool results back to calls by ID, so the
+// IDs minted for calls a provider returned without one must not repeat.
+func TestSyntheticCallIDUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for range 1000 {
+		id := syntheticCallID()
+		if !isSyntheticCallID(id) {
+			t.Fatalf("id %q", id)
+		}
+		if seen[id] {
+			t.Fatalf("id %q repeated", id)
+		}
+		seen[id] = true
 	}
 }
