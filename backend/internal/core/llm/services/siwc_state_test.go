@@ -88,19 +88,34 @@ func TestSIWCState_ConcurrentTakesHaveOneWinner(t *testing.T) {
 }
 
 func TestSIWCState_NothingSecretReadableInRedis(t *testing.T) {
+	// Long, distinctive sentinels: a short marker can occur by chance in
+	// base64 ciphertext. The tenant is stored in clear by design and is
+	// not searched for.
+	const (
+		sState    = "sentinel-state-7f3a9c1e5b2d4086a1c3e5f7"
+		sUser     = "sentinel-user-0b8d6f4a2c9e1357b3d5f7a9"
+		sLabel    = "sentinel-label-4e6a8c0d2f1b3957a5c7e9b1"
+		sHost     = "sentinel-host-9d7b5f3a1c8e6024b4d6f8a0"
+		sVerifier = "sentinel-verifier-2a4c6e8f0b1d3597c5e7a9b1d3f5"
+		sNonce    = "sentinel-nonce-6c8e0a2d4f1b3795d7f9b1c3e5a7"
+		sAccount  = "sentinel-account-8b0d2f4a6c1e3579e1a3c5d7f9b0"
+	)
 	r := newMemRedis()
 	store := newStateStore(t, r)
-	if err := store.Put(context.Background(), "state-raw", testAttempt()); err != nil {
+	a := testAttempt()
+	a.UserUUID, a.Label, a.HostID, a.Verifier, a.Nonce, a.AccountUUID = sUser, sLabel, sHost, sVerifier, sNonce, sAccount
+	if err := store.Put(context.Background(), sState, a); err != nil {
 		t.Fatal(err)
 	}
+	if len(r.vals) != 1 {
+		t.Fatalf("redis entries = %d, want 1", len(r.vals))
+	}
 	for k, v := range r.vals {
-		for _, secret := range []string{"verifier-secret-value", "nonce-secret-value", "state-raw", "u1", "acc-1"} {
+		for _, secret := range []string{sState, sUser, sLabel, sHost, sVerifier, sNonce, sAccount} {
 			if strings.Contains(k+v, secret) {
-				t.Fatalf("redis entry %q exposes a bound value", secret)
+				t.Fatal("a redis entry exposes a bound value")
 			}
 		}
-	}
-	for k := range r.vals {
 		if r.ttl[k] != siwcStateTTL {
 			t.Fatalf("%s ttl = %v, want %v", k, r.ttl[k], siwcStateTTL)
 		}
