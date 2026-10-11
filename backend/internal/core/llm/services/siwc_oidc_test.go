@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,6 +39,9 @@ type oidcFixture struct {
 	revokeCode int
 	noRevoke   bool
 	issuer     string // discovery issuer override
+	jwksURI    string // discovery jwks_uri override
+	revokeURI  string // discovery revocation_endpoint override
+	revokeHits atomic.Int32
 }
 
 func newOIDCFixture(t *testing.T) *oidcFixture {
@@ -46,14 +50,20 @@ func newOIDCFixture(t *testing.T) *oidcFixture {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
 		f.mu.Lock()
-		iss, noRevoke := f.issuer, f.noRevoke
+		iss, noRevoke, jwksURI, revokeURI := f.issuer, f.noRevoke, f.jwksURI, f.revokeURI
 		f.mu.Unlock()
 		if iss == "" {
 			iss = f.srv.URL
 		}
-		doc := map[string]any{"issuer": iss, "jwks_uri": f.srv.URL + "/jwks"}
+		if jwksURI == "" {
+			jwksURI = f.srv.URL + "/jwks"
+		}
+		if revokeURI == "" {
+			revokeURI = f.srv.URL + "/revoke"
+		}
+		doc := map[string]any{"issuer": iss, "jwks_uri": jwksURI}
 		if !noRevoke {
-			doc["revocation_endpoint"] = f.srv.URL + "/revoke"
+			doc["revocation_endpoint"] = revokeURI
 		}
 		_ = json.NewEncoder(w).Encode(doc)
 	})
@@ -87,6 +97,7 @@ func newOIDCFixture(t *testing.T) *oidcFixture {
 		})
 	})
 	mux.HandleFunc("/revoke", func(w http.ResponseWriter, r *http.Request) {
+		f.revokeHits.Add(1)
 		_ = r.ParseForm()
 		f.mu.Lock()
 		f.form = r.PostForm
@@ -447,7 +458,102 @@ func TestOIDC_TokenResponseIsBounded(t *testing.T) {
 		_, _ = w.Write([]byte(`{"access_token":"` + strings.Repeat("a", 2<<20) + `"}`))
 		return true
 	}
-	if _, err := newClientFor(f).Exchange(context.Background(), "oaiapp_1", "c", "v", testRedirect); !errors.Is(err, iface.ErrLLMProviderUnavailable) {
+	_, err := newClientFor(f).Exchange(context.Background(), "oaiapp_1", "c", "v", testRedirect)
+	if !errors.Is(err, iface.ErrLLMProviderUnavailable) || errors.Is(err, ErrSIWCExchangeFailed) {
+		t.Fatalf("oversized body must be a size refusal, not a failed exchange: %v", err)
+	}
+}
+
+func TestParseEarliestRefreshClamps(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	num := func(v float64) json.RawMessage { b, _ := json.Marshal(v); return b }
+	str := func(v string) json.RawMessage { b, _ := json.Marshal(v); return b }
+	cases := []struct {
+		name      string
+		raw       json.RawMessage
+		expiresIn int
+		want      *time.Time
+	}{
+		{"rfc3339 in range", str(now.Add(time.Minute).UTC().Format(time.RFC3339)), 3600, ptrTime(now.Add(time.Minute))},
+		{"unix seconds", num(float64(now.Add(10 * time.Minute).Unix())), 3600, ptrTime(now.Add(10 * time.Minute))},
+		{"numeric string", str(strconv.FormatInt(now.Add(time.Minute).Unix(), 10)), 3600, ptrTime(now.Add(time.Minute))},
+		{"small skew in the past", num(float64(now.Add(-time.Minute).Unix())), 3600, ptrTime(now.Add(-time.Minute))},
+		{"far in the past", str(now.Add(-time.Hour).UTC().Format(time.RFC3339)), 3600, nil},
+		{"beyond max(expires_in,1h)", num(float64(now.Add(2 * time.Hour).Unix())), 3600, nil},
+		{"within a long expires_in", num(float64(now.Add(2 * time.Hour).Unix())), 7200, ptrTime(now.Add(2 * time.Hour))},
+		{"beyond 24h whatever expires_in", num(float64(now.Add(25 * time.Hour).Unix())), 200_000, nil},
+		{"millisecond epoch", num(float64(now.Add(time.Minute).UnixMilli())), 3600, nil},
+		{"huge float", num(1e300), 3600, nil},
+		{"negative", num(-1), 3600, nil},
+		{"far-future date", str("9999-12-31T23:59:59Z"), 3600, nil},
+		{"garbage", str("soon"), 3600, nil},
+		{"null", json.RawMessage(`null`), 3600, nil},
+		{"absent", nil, 3600, nil},
+	}
+	for _, c := range cases {
+		got := parseEarliestRefresh(c.raw, c.expiresIn, now)
+		switch {
+		case c.want == nil && got != nil:
+			t.Errorf("%s: got %v, want nil", c.name, *got)
+		case c.want != nil && (got == nil || !got.Equal(*c.want)):
+			t.Errorf("%s: got %v, want %v", c.name, got, *c.want)
+		}
+	}
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }
+
+func TestOIDC_VerifyIDTokenPassesCallerCancellationThrough(t *testing.T) {
+	f := newOIDCFixture(t)
+	c := newClientFor(f)
+	raw := f.idToken(t, "kid-1", nil)
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := c.VerifyIDToken(canceled, raw, "oaiapp_1", "nonce-1")
+	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrSIWCIDTokenInvalid) {
+		t.Fatalf("canceled err = %v", err)
+	}
+	expired, cancel2 := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel2()
+	_, err = c.VerifyIDToken(expired, raw, "oaiapp_1", "nonce-1")
+	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrSIWCIDTokenInvalid) {
+		t.Fatalf("deadline err = %v", err)
+	}
+	// The interrupted fetches did not use up the 1/min refetch budget.
+	if _, err := c.VerifyIDToken(context.Background(), raw, "oaiapp_1", "nonce-1"); err != nil || f.jwksHits.Load() != 1 {
+		t.Fatalf("verify after interruptions: hits=%d err=%v", f.jwksHits.Load(), err)
+	}
+}
+
+func TestOIDC_RefreshMalformedSuccessIsTransientNotAFailedExchange(t *testing.T) {
+	f := newOIDCFixture(t)
+	f.tokenReply = func(w http.ResponseWriter, _ url.Values) bool {
+		_, _ = w.Write([]byte(`{"token_type":"Bearer"}`))
+		return true
+	}
+	_, err := newClientFor(f).Refresh(context.Background(), "oaiapp_1", "rt-1")
+	if !errors.Is(err, iface.ErrLLMProviderUnavailable) || errors.Is(err, ErrSIWCExchangeFailed) || errors.Is(err, ErrSIWCRefreshTerminal) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestOIDC_DiscoveryRequiresHTTPSEndpointsUnderAnHTTPSIssuer(t *testing.T) {
+	quiet := slog.New(slog.DiscardHandler)
+	f := newOIDCFixture(t)
+	f.issuer = "https://issuer.example"
+	c := newClientFor(f) // jwks_uri stays the fixture's http URL
+	c.Issuer, c.logger = "https://issuer.example", quiet
+	_, err := c.VerifyIDToken(context.Background(), f.idToken(t, "kid-1", jwt.MapClaims{"iss": "https://issuer.example"}), "oaiapp_1", "nonce-1")
+	if !errors.Is(err, iface.ErrLLMProviderUnavailable) || f.jwksHits.Load() != 0 {
+		t.Fatalf("http jwks_uri under an https issuer: hits=%d err=%v", f.jwksHits.Load(), err)
+	}
+
+	g := newOIDCFixture(t)
+	g.issuer, g.jwksURI = "https://issuer.example", "https://issuer.example/jwks" // revocation_endpoint stays http
+	r := newClientFor(g)
+	r.Issuer, r.logger = "https://issuer.example", quiet
+	if err := r.Revoke(context.Background(), "oaiapp_1", "rt-2"); err != nil || g.revokeHits.Load() != 0 {
+		t.Fatalf("http revocation_endpoint under an https issuer: hits=%d err=%v", g.revokeHits.Load(), err)
 	}
 }

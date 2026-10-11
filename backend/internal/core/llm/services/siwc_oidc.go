@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -44,6 +45,9 @@ const (
 	oidcCacheTTL       = time.Hour   // discovery + JWKS
 	oidcRefetchCap     = time.Minute // at most one JWKS fetch per minute for unknown kids
 	oidcMinRSABits     = 2048
+
+	earliestRefreshSkew     = 5 * time.Minute
+	earliestRefreshMaxAhead = 24 * time.Hour
 )
 
 // OIDCClient speaks the documented OpenAI OAuth/OIDC endpoints. The endpoint
@@ -143,6 +147,11 @@ type TokenResponse struct {
 	EarliestRefreshAt *time.Time
 }
 
+// errMalformedToken: a 2xx token answer without a usable access token. It is
+// transient (credentials intact); Exchange relabels it ErrSIWCExchangeFailed,
+// Refresh returns it as is.
+var errMalformedToken = fmt.Errorf("%w: malformed token response", iface.ErrLLMProviderUnavailable)
+
 // tokenFailure is a non-2xx token-endpoint answer reduced to its status and
 // an identifier-checked OAuth error code.
 type tokenFailure struct {
@@ -176,35 +185,51 @@ func (c *OIDCClient) token(ctx context.Context, form url.Values) (*TokenResponse
 		EarliestRefreshAt json.RawMessage `json:"earliest_refresh_at"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil || raw.AccessToken == "" {
-		return nil, nil, fmt.Errorf("%w: %w: malformed token response", ErrSIWCExchangeFailed, iface.ErrLLMProviderUnavailable)
+		return nil, nil, errMalformedToken
 	}
 	return &TokenResponse{
 		AccessToken: raw.AccessToken, RefreshToken: raw.RefreshToken, IDToken: raw.IDToken, TokenType: raw.TokenType,
-		Scope: strings.TrimSpace(raw.Scope), ExpiresIn: max(raw.ExpiresIn, 0), EarliestRefreshAt: parseEarliestRefresh(raw.EarliestRefreshAt),
+		Scope: strings.TrimSpace(raw.Scope), ExpiresIn: max(raw.ExpiresIn, 0), EarliestRefreshAt: parseEarliestRefresh(raw.EarliestRefreshAt, raw.ExpiresIn, c.now()),
 	}, nil, nil
 }
 
-// parseEarliestRefresh accepts an RFC 3339 string or Unix seconds (the guide
-// names the field without fixing its encoding); anything else is nil.
-func parseEarliestRefresh(raw json.RawMessage) *time.Time {
+// parseEarliestRefresh accepts an RFC 3339 string, a numeric string or a
+// JSON number of Unix seconds (the guide names the field without fixing its
+// encoding). A value outside [now-skew, now+max(expires_in, 1h)], and in any
+// case later than now+24h, is discarded (nil): a millisecond epoch or a
+// far-future date must not block refreshes. Numbers are range-checked before
+// any conversion.
+func parseEarliestRefresh(raw json.RawMessage, expiresIn int, now time.Time) *time.Time {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil
+	}
+	ahead := max(time.Duration(max(expiresIn, 0))*time.Second, time.Hour)
+	lo, hi := now.Add(-earliestRefreshSkew), now.Add(min(ahead, earliestRefreshMaxAhead))
+	inRange := func(ts time.Time) *time.Time {
+		if ts.Before(lo) || ts.After(hi) {
+			return nil
+		}
+		return &ts
+	}
+	fromSeconds := func(n float64) *time.Time {
+		if math.IsNaN(n) || n < float64(lo.Unix()) || n > float64(hi.Unix()) {
+			return nil
+		}
+		return inRange(time.Unix(int64(n), 0))
 	}
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
 		if ts, err := time.Parse(time.RFC3339, s); err == nil {
-			return &ts
+			return inRange(ts)
 		}
-		if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
-			ts := time.Unix(n, 0)
-			return &ts
+		if n, err := strconv.ParseFloat(s, 64); err == nil {
+			return fromSeconds(n)
 		}
 		return nil
 	}
 	var n float64
-	if json.Unmarshal(raw, &n) == nil && n > 0 {
-		ts := time.Unix(int64(n), 0)
-		return &ts
+	if json.Unmarshal(raw, &n) == nil {
+		return fromSeconds(n)
 	}
 	return nil
 }
@@ -222,6 +247,8 @@ func (c *OIDCClient) Exchange(ctx context.Context, clientID, code, codeVerifier,
 	form.Set("resource", SIWCResource)
 	tok, fail, err := c.token(ctx, form)
 	switch {
+	case errors.Is(err, errMalformedToken):
+		return nil, fmt.Errorf("%w: %w", ErrSIWCExchangeFailed, err)
 	case err != nil:
 		return nil, err
 	case fail != nil && fail.status >= 400 && fail.status < 500:
@@ -322,7 +349,12 @@ func (c *OIDCClient) VerifyIDToken(ctx context.Context, raw, expectedAud, expect
 		jwt.WithTimeFunc(c.now),
 	)
 	if err != nil {
-		if errors.Is(err, iface.ErrLLMProviderUnavailable) {
+		switch {
+		case errors.Is(err, context.Canceled):
+			return nil, fmt.Errorf("llm siwc: id token verification canceled: %w", context.Canceled)
+		case errors.Is(err, context.DeadlineExceeded):
+			return nil, fmt.Errorf("%w: id token signing keys: %w", iface.ErrLLMProviderUnavailable, context.DeadlineExceeded)
+		case errors.Is(err, iface.ErrLLMProviderUnavailable):
 			return nil, fmt.Errorf("%w: id token signing keys unavailable", iface.ErrLLMProviderUnavailable)
 		}
 		return nil, fmt.Errorf("%w: %s", ErrSIWCIDTokenInvalid, jwtFailureReason(err))
@@ -395,6 +427,9 @@ func (c *OIDCClient) keyFor(ctx context.Context, kid string) (*rsa.PublicKey, er
 		return nil, errUnknownKID
 	}
 	keys, err := c.fetchJWKS(ctx)
+	if err != nil && ctx.Err() != nil {
+		return nil, err // the caller gave up: not an attempt against the cap
+	}
 	c.mu.Lock()
 	c.jwksAttemptAt = now
 	if err == nil {
@@ -483,10 +518,11 @@ func (c *OIDCClient) discover(ctx context.Context) (*discoveryDoc, error) {
 		return nil, err
 	}
 	var d discoveryDoc
-	if json.Unmarshal(body, &d) != nil || d.Issuer != c.Issuer || !absoluteHTTPURL(d.JWKSURI) {
+	if json.Unmarshal(body, &d) != nil || d.Issuer != c.Issuer || !c.endpointAllowed(d.JWKSURI) {
 		return nil, fmt.Errorf("%w: discovery document unusable", iface.ErrLLMProviderUnavailable)
 	}
-	if !absoluteHTTPURL(d.RevocationEndpoint) {
+	if d.RevocationEndpoint != "" && !c.endpointAllowed(d.RevocationEndpoint) {
+		c.logger.Warn("llm siwc: discovery revocation_endpoint refused (not https), revoke disabled")
 		d.RevocationEndpoint = ""
 	}
 	c.mu.Lock()
@@ -495,9 +531,17 @@ func (c *OIDCClient) discover(ctx context.Context) (*discoveryDoc, error) {
 	return &d, nil
 }
 
-func absoluteHTTPURL(s string) bool {
-	u, err := url.Parse(s)
-	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != ""
+// endpointAllowed: an absolute https URL with a host; plain http only when
+// the configured issuer itself is http (test fixtures).
+func (c *OIDCClient) endpointAllowed(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.User != nil {
+		return false
+	}
+	if u.Scheme == "https" {
+		return true
+	}
+	return u.Scheme == "http" && strings.HasPrefix(c.Issuer, "http://")
 }
 
 func (c *OIDCClient) get(ctx context.Context, target string, limit int64) ([]byte, error) {
