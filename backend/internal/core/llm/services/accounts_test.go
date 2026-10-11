@@ -215,6 +215,7 @@ type fakeOIDC struct {
 	revokeErr                       error
 	refreshDelay                    time.Duration
 	refreshOmitsOptional            bool // no refresh_token, scope, id_token, expires_in
+	refreshEchoes                   bool // answers with the presented refresh token (no rotation)
 	revoked                         []string
 	models                          []string
 	rejectAT                        string // ListPlanModels answers invalid_user for it
@@ -282,15 +283,21 @@ func (f *fakeOIDC) Refresh(_ context.Context, clientID, rt string) (*TokenRespon
 		f.mu.Unlock()
 		return nil, providers.ClassifySIWCCode("refresh_token_reused")
 	}
-	f.usedRT[rt] = true
+	if !f.refreshEchoes {
+		f.usedRT[rt] = true
+	}
 	f.n++
 	n, delay, omit, scope, sub := f.n, f.refreshDelay, f.refreshOmitsOptional, f.scope, f.sub
+	nextRT := fmt.Sprintf("rt-r%d", n)
+	if f.refreshEchoes {
+		nextRT = rt
+	}
 	f.mu.Unlock()
 	time.Sleep(delay)
 	if omit {
 		return &TokenResponse{AccessToken: fmt.Sprintf("at-r%d", n)}, nil
 	}
-	return &TokenResponse{AccessToken: fmt.Sprintf("at-r%d", n), RefreshToken: fmt.Sprintf("rt-r%d", n), IDToken: "idt:" + sub + ":r", TokenType: "Bearer", ExpiresIn: 3600, Scope: scope}, nil
+	return &TokenResponse{AccessToken: fmt.Sprintf("at-r%d", n), RefreshToken: nextRT, IDToken: "idt:" + sub + ":r", TokenType: "Bearer", ExpiresIn: 3600, Scope: scope}, nil
 }
 
 func (f *fakeOIDC) Revoke(_ context.Context, _ string, rt string) error {
@@ -1442,4 +1449,27 @@ func TestAccounts_TerminalOnAStaleSetServesTheNewerOne(t *testing.T) {
 	if err := h.repo.SetStatusIf(ctx, acc.UUID, stored.SavedAt, models.AccountStatusNeedsReauth, "llm.x"); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// An IdP that echoes the refresh token instead of rotating it: the losing
+// rotation's "new" token is the one the winning stored set still uses, so
+// it must not be revoked.
+func TestAccounts_LostRotationDoesNotRevokeAnEchoedRefreshToken(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1", refreshEchoes: true}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx := ctxFor("t1")
+	acc := h.linkAccount(t, ctx, "oaiapp_1", "c")
+	h.expire(acc.UUID)
+	h.repo.mu.Lock()
+	h.repo.beforeReplace = func(r *models.UserAccount) { h.storeNewerSet(t, r, "at-winner") } // keeps rt-c
+	h.repo.mu.Unlock()
+	cred, err := h.svc.CredentialFor(ctx, "u-admin")
+	if err != nil || cred.AccessToken != "at-winner" {
+		t.Fatalf("lost rotation err = %v", err)
+	}
+	oidc.locked(func() {
+		if len(oidc.revoked) != 0 {
+			t.Errorf("an echoed refresh token still in use was revoked (revocations = %d)", len(oidc.revoked))
+		}
+	})
 }

@@ -1004,11 +1004,8 @@ func (s *AccountsService) refreshFlight(ctx context.Context, accountUUID string,
 	if err := s.repo.ReplaceTokens(ctx, acc.UUID, acc.SavedAt, set); err != nil {
 		if errors.Is(err, repository.ErrStaleTokenSet) {
 			// Someone else stored a rotation first: use theirs, and revoke
-			// the set we drop (only a rotated refresh token is ours to
-			// revoke; an omitted one is still the stored one).
-			if tok.RefreshToken != "" {
-				s.revokeQuiet(ctx, acc.ClientID, tok.RefreshToken)
-			}
+			// the set we drop.
+			s.revokeDropped(ctx, accountUUID, acc.ClientID, tok.RefreshToken)
 			if cred, ok := s.serveNewer(ctx, accountUUID, acc.SavedAt); ok {
 				return cred, nil
 			}
@@ -1021,6 +1018,26 @@ func (s *AccountsService) refreshFlight(ctx context.Context, accountUUID string,
 		return nil, err
 	}
 	return &AccountCredential{Account: acc, AccessToken: tok.AccessToken}, nil
+}
+
+// revokeDropped revokes the refresh token of a rotation that lost the
+// compare-and-swap, but only when it is provably not the one the winning
+// stored set uses: an omitted token, an IdP that echoes the same token
+// instead of rotating it, or a stored envelope that cannot be opened all
+// leave it alone.
+func (s *AccountsService) revokeDropped(ctx context.Context, accountUUID, clientID, dropped string) {
+	if dropped == "" {
+		return
+	}
+	cur, err := s.repo.Get(ctx, accountUUID)
+	if err != nil {
+		return
+	}
+	stored, err := s.vault.Open(ctx, cur.TenantID, cur.UUID, accountFieldRefreshToken, cur.RefreshToken)
+	if err != nil || stored == dropped {
+		return
+	}
+	s.revokeQuiet(ctx, clientID, dropped)
 }
 
 // serveNewer returns the stored set when it is usable, unexpired and newer
