@@ -43,3 +43,20 @@ func TestGenerateCodeChallenge_IsBase64URLUnpaddedSHA256(t *testing.T) {
 		t.Fatal("the challenge must be unpadded")
 	}
 }
+
+func TestValidateCodeVerifier(t *testing.T) {
+	v, err := GenerateCodeVerifier()
+	if err != nil {
+		t.Fatalf("GenerateCodeVerifier: %v", err)
+	}
+	if !ValidateCodeVerifier(v, GenerateCodeChallenge(v)) {
+		t.Fatal("a verifier must validate against its own challenge")
+	}
+	other, _ := GenerateCodeVerifier()
+	if ValidateCodeVerifier(other, GenerateCodeChallenge(v)) {
+		t.Fatal("a different verifier must not validate")
+	}
+	if ValidateCodeVerifier("", GenerateCodeChallenge(v)) || ValidateCodeVerifier(v, "") {
+		t.Fatal("empty inputs must not validate")
+	}
+}

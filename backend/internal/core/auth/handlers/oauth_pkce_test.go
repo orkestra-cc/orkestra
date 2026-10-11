@@ -13,7 +13,7 @@ import (
 
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
-	"github.com/orkestra/backend/internal/core/auth/utils"
+	"github.com/orkestra/backend/internal/shared/utils"
 )
 
 // newOAuthStartHandler is the callback harness; the provider fake answers
