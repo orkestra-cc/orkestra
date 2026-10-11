@@ -224,7 +224,8 @@
       "user_account_required": "Questo modello è addebitato al tuo account: collegalo prima.",
       "user_account_reauth_required": "L'account collegato deve essere autorizzato di nuovo.",
       "plan_usage_disabled": "L'account collegato non ha consentito l'uso del piano.",
-      "request_canceled": "La richiesta è stata annullata prima di essere completata."
+      "request_canceled": "La richiesta è stata annullata prima di essere completata.",
+      "siwc_config_invalid": "Accedi con ChatGPT non è configurato correttamente su questa installazione. Chiedi a un amministratore di controllare le impostazioni del modulo llm."
     }
   },
   "banner": {

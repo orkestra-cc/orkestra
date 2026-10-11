@@ -49,7 +49,7 @@ func coreModules(cfg *config.Config) []func() module.Module {
 		func() module.Module { return auth.NewModule(cfg) },
 		func() module.Module { return navigation.NewModule() },
 		func() module.Module { return logging.NewModule() },
-		func() module.Module { return llm.NewModule() },
+		func() module.Module { return llm.NewModule(llm.WithOperatorPublicURL(cfg.Server.Operator.PublicURL)) },
 		func() module.Module { return compliance.NewModule() },
 	}
 }

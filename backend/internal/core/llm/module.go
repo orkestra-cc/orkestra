@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -86,12 +87,34 @@ type Module struct {
 	clients   map[string]*http.Client
 	prodLike  bool
 
+	// operatorPublicURL is OPERATOR_API_URL (cfg.Server.Operator.PublicURL),
+	// injected by the catalog because module.Dependencies carries no config.
+	operatorPublicURL string
+	// siwcCfg reads the live Sign in with ChatGPT settings (set in Init).
+	siwcCfg func() services.SIWCConfig
+
 	lifecycleMu sync.Mutex
 	cancel      context.CancelFunc
 	done        chan struct{}
 }
 
-func NewModule() *Module { return &Module{} }
+// Option configures a Module at construction.
+type Option func(*Module)
+
+// WithOperatorPublicURL sets the operator API origin (OPERATOR_API_URL),
+// which Sign in with ChatGPT needs to derive its redirect URI and to judge
+// whether the deployment supports the loopback flow.
+func WithOperatorPublicURL(u string) Option {
+	return func(m *Module) { m.operatorPublicURL = strings.TrimSpace(u) }
+}
+
+func NewModule(opts ...Option) *Module {
+	m := &Module{}
+	for _, o := range opts {
+		o(m)
+	}
+	return m
+}
 
 func (m *Module) Name() string        { return "llm" }
 func (m *Module) DisplayName() string { return "LLM" }
@@ -185,11 +208,13 @@ func (m *Module) ConfigGroups() []module.ConfigGroup {
 	return []module.ConfigGroup{
 		{Key: "providers", Label: "Providers", Order: 1, Description: "Which kinds of provider this installation may call."},
 		{Key: "limits", Label: "Limits & retention", Order: 2, Description: "Per-call deadline, usage retention and budget defaults."},
+		{Key: "siwc", Label: "Sign in with ChatGPT", Order: 3, Description: "Let users bill inference to their own ChatGPT plan. The callback is always on 127.0.0.1; hosted installations use the paste flow."},
 	}
 }
 
 func (m *Module) ConfigSchema() []module.ConfigField {
 	one, minDays, maxReserve, maxDays, zero, hundred := 1, minRetentionDays, models.MaxOutputTokens, 3650, 0, 100
+	minPort, maxPort := 1024, 65535
 	return []module.ConfigField{
 		{Key: "allow_hosted", Label: "Allow hosted providers", Group: "providers", Type: module.FieldBool, Default: "false", EnvVar: "LLM_ALLOW_HOSTED",
 			Description: "Explicit privacy opt-in: prompts and outputs leave this installation (OpenAI, Anthropic, Gemini, OpenAI-compatible). Without it only ollama and mock are selectable. Document the data flow (RoPA, processor, transfer basis) before enabling."},
@@ -201,6 +226,12 @@ func (m *Module) ConfigSchema() []module.ConfigField {
 			Description: "Default warning threshold for new budgets."},
 		{Key: "budget_reserve_output_tokens", Label: "Reserved output tokens", Group: "limits", Type: module.FieldInt, Default: "4096", EnvVar: "LLM_BUDGET_RESERVE_OUTPUT_TOKENS", Min: &one, Max: &maxReserve,
 			Description: "Estimated output reserved against the budget when a model declares no value of its own."},
+		{Key: services.SIWCFieldMode, Label: "Sign in with ChatGPT", Group: "siwc", Type: module.FieldEnum, Default: services.SIWCModeDisabled, EnvVar: "LLM_SIWC_MODE",
+			Options:     []string{services.SIWCModeDisabled, services.SIWCModeLoopbackLocal, services.SIWCModeHostedPaste},
+			Description: "disabled: off. loopback_local: browser and API on the same machine, API reached as http://127.0.0.1:<port> (OPERATOR_API_URL), automatic callback. hosted_paste: remote installation; the user pastes the callback URL the browser shows. Either mode needs Allow hosted providers. OpenAI documents the plan-usage flow for open-source and locally hosted apps and points remotely hosted apps to its interest form: enabling hosted_paste is an operator decision taken with that in mind (ADR-0022 D13)."},
+		{Key: services.SIWCFieldPastePort, Label: "Paste-mode callback port", Group: "siwc", Type: module.FieldInt, Default: strconv.Itoa(services.SIWCDefaultPastePort), EnvVar: "LLM_SIWC_PASTE_PORT", Min: &minPort, Max: &maxPort, Advanced: true,
+			DependsOn:   []module.FieldCondition{{Key: services.SIWCFieldMode, In: []string{services.SIWCModeHostedPaste}}},
+			Description: "Port of the loopback redirect URI in hosted_paste. Nothing listens on it; change it only if a local process on users' machines occupies it (Codex CLI uses 1455)."},
 	}
 }
 
@@ -264,6 +295,15 @@ func (m *Module) Init(deps *module.Dependencies) error {
 
 	productionLike := deps.Platform != nil && deps.Platform.IsProductionLike()
 	m.prodLike = productionLike
+	m.siwcCfg = func() services.SIWCConfig {
+		return services.SIWCConfig{
+			Mode:              siwcMode(deps.GetConfig("llm", services.SIWCFieldMode)),
+			PastePort:         deps.GetConfigInt("llm", services.SIWCFieldPastePort, services.SIWCDefaultPastePort),
+			OperatorPublicURL: m.operatorPublicURL,
+			AllowHosted:       deps.GetConfigBool("llm", services.SIWCFieldAllowHost, false),
+			ProductionLike:    productionLike,
+		}
+	}
 	cfg := func() services.CatalogConfig {
 		return services.CatalogConfig{
 			AllowHosted:    deps.GetConfigBool("llm", "allow_hosted", false),

@@ -456,6 +456,11 @@ const LLMRateLimited = "llm.rate_limited"
 // the caller; the call is not retried on another model. 502.
 const LLMPartialOutput = "llm.partial_output"
 
+// LLMSIWCConfigInvalid: the Sign in with ChatGPT settings are contradictory
+// or unsupported on this deployment (422 on the module settings surface,
+// 503 when a user-facing flow trips over it).
+const LLMSIWCConfigInvalid = "llm.siwc_config_invalid"
+
 // LLMRequestCanceled: the caller hung up (or its context was cancelled)
 // while a live check or a model call was running. Neither a server fault
 // nor a rejection on the request's merits: 499 Client Closed Request, so

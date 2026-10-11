@@ -129,6 +129,8 @@ func MapError(err error) error {
 		return errcode.Conflict(errcode.LLMUserAccountReauthRequired, "Your linked account needs you to sign in again.")
 	case errors.Is(err, iface.ErrLLMPlanUsageDisabled):
 		return errcode.Conflict(errcode.LLMPlanUsageDisabled, "Your linked account does not allow direct plan usage.")
+	case errors.Is(err, services.ErrSIWCConfigInvalid), errors.Is(err, services.ErrSIWCUnsupportedDeployment):
+		return errcode.ServiceUnavailable(errcode.LLMSIWCConfigInvalid, "Sign in with ChatGPT is not configured correctly on this installation; ask an administrator to review the llm module settings.")
 	case errors.Is(err, iface.ErrLLMPartialOutput):
 		return errcode.New(http.StatusBadGateway, errcode.LLMPartialOutput, "The provider failed after part of the answer was sent.")
 	case errors.Is(err, providers.ErrUnauthorized):

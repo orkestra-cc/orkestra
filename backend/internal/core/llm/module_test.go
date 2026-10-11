@@ -73,9 +73,22 @@ func TestModule_Declarations(t *testing.T) {
 	for _, f := range m.ConfigSchema() {
 		keys[f.Key] = true
 	}
-	for _, want := range []string{"allow_hosted", "request_timeout", "usage_retention_days", "budget_warn_pct", "budget_reserve_output_tokens"} {
+	for _, want := range []string{"allow_hosted", "request_timeout", "usage_retention_days", "budget_warn_pct", "budget_reserve_output_tokens", "siwc_mode", "siwc_paste_port"} {
 		if !keys[want] {
 			t.Errorf("missing config key %s", want)
+		}
+	}
+
+	groups := map[string]bool{}
+	for _, g := range m.ConfigGroups() {
+		groups[g.Key] = true
+	}
+	for _, f := range m.ConfigSchema() {
+		if !groups[f.Group] {
+			t.Errorf("config key %s is in undeclared group %q", f.Key, f.Group)
+		}
+		if f.Key == "siwc_mode" && f.Default != "disabled" {
+			t.Errorf("siwc_mode default = %q, must be disabled", f.Default)
 		}
 	}
 }

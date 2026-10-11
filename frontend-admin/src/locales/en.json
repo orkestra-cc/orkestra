@@ -224,7 +224,8 @@
       "user_account_required": "This model is billed to your own account: link it first.",
       "user_account_reauth_required": "Your linked account must be authorized again.",
       "plan_usage_disabled": "The linked account did not allow plan usage.",
-      "request_canceled": "The request was cancelled before it completed."
+      "request_canceled": "The request was cancelled before it completed.",
+      "siwc_config_invalid": "Sign in with ChatGPT is not configured correctly on this installation. Ask an administrator to review the llm module settings."
     }
   },
   "banner": {

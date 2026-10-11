@@ -292,6 +292,8 @@ func TestMapError(t *testing.T) {
 		{"name in use", services.ErrNameInUse, 409, errcode.LLMNameInUse},
 		{"credential in use", services.ErrCredentialInUse, 409, errcode.LLMCredentialInUse},
 		{"secret key missing", services.ErrSecretKeyMissing, 503, errcode.LLMSecretKeyMissing},
+		{"siwc config invalid", services.ErrSIWCConfigInvalid, 503, errcode.LLMSIWCConfigInvalid},
+		{"siwc unsupported deployment", services.ErrSIWCUnsupportedDeployment, 503, errcode.LLMSIWCConfigInvalid},
 		{"endpoint", services.ErrEndpointNotAllowed, 422, errcode.LLMEndpointNotAllowed},
 		{"hosted", services.ErrHostedDisabled, 422, errcode.LLMHostedDisabled},
 		{"mock", services.ErrMockNotAllowed, 422, errcode.LLMMockNotAllowed},
