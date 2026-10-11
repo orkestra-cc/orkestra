@@ -329,7 +329,10 @@ func (f *fakeOIDC) Refresh(_ context.Context, clientID, rt string) (*TokenRespon
 	return &TokenResponse{AccessToken: fmt.Sprintf("at-r%d", n), RefreshToken: nextRT, IDToken: "idt:" + sub + ":r", TokenType: "Bearer", ExpiresIn: 3600, Scope: scope}, nil
 }
 
-func (f *fakeOIDC) Revoke(_ context.Context, _ string, rt string) error {
+func (f *fakeOIDC) Revoke(ctx context.Context, _ string, rt string) error {
+	if err := ctx.Err(); err != nil { // a real HTTP call fails on a dead context
+		return err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.revoked = append(f.revoked, rt)
@@ -1418,6 +1421,49 @@ func TestAccounts_RevokeRegistrationWorksWithoutATenantContext(t *testing.T) {
 	if h.repo.count() != 1 {
 		t.Fatal("RevokeRegistration deletes nothing")
 	}
+}
+
+// A client that hangs up (or a deadline) after the registration was deleted
+// must not turn the revocation into a no-op: the row is gone, nothing can
+// retry it. The revocation runs on a detached context.
+func TestAccounts_UnlinkRevokesAfterTheCallerContextIsCanceled(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1"}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	ctx := ctxFor("t1")
+	acc := h.linkAccount(t, ctx, "oaiapp_1", "c")
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := h.svc.Unlink(canceled, acc.UUID, false); err != nil {
+		t.Fatal(err)
+	}
+	oidc.locked(func() {
+		if len(oidc.revoked) != 1 || oidc.revoked[0] != "rt-c" {
+			t.Errorf("revocations = %d, want the deleted row's token", len(oidc.revoked))
+		}
+	})
+	if h.repo.count() != 0 {
+		t.Fatal("the registration is deleted")
+	}
+}
+
+// The DSR purge revokes through RevokeRegistration after the delete: a
+// canceled or expired request context must not stop it.
+func TestAccounts_RevokeRegistrationSurvivesACanceledContext(t *testing.T) {
+	oidc := &fakeOIDC{scope: SIWCScope, sub: "sub-1"}
+	h := newAccountsHarness(t, hostedPasteConfig(SIWCModeHostedPaste), oidc)
+	acc := h.linkAccount(t, ctxFor("t1"), "oaiapp_1", "c")
+	stored, _ := h.repo.row(acc.UUID)
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	h.svc.RevokeRegistration(canceled, stored)
+	expired, cancelExpired := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancelExpired()
+	h.svc.RevokeRegistration(expired, stored)
+	oidc.locked(func() {
+		if len(oidc.revoked) != 2 || oidc.revoked[0] != "rt-c" || oidc.revoked[1] != "rt-c" {
+			t.Errorf("revocations = %d, want both despite the dead contexts", len(oidc.revoked))
+		}
+	})
 }
 
 // One replica without Redis: the in-process single-flight alone makes

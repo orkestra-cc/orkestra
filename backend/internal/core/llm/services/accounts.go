@@ -76,6 +76,10 @@ const (
 
 	accountLabelMaxLen = 100
 	accountStoreRetry  = 3
+	// accountRevokeTimeout bounds each post-delete revocation (the detached
+	// context of revokeContext), so an unreachable provider cannot hold a
+	// request goroutine for long.
+	accountRevokeTimeout = 15 * time.Second
 )
 
 // AccountRepo is what AccountsService needs from repository.UserAccounts.
@@ -744,13 +748,26 @@ func (s *AccountsService) relink(ctx context.Context, acc *models.UserAccount, c
 
 // revokeQuiet revokes a refresh token best-effort; failures are logged
 // without any token or provider text.
+//
+// It runs on a detached, bounded context (revokeContext): every caller
+// revokes a token that must not outlive the request, often of a document
+// already deleted or never stored, so nothing can retry it; a client that
+// hung up must not turn the revocation into a no-op.
 func (s *AccountsService) revokeQuiet(ctx context.Context, clientID, refreshToken string) {
 	if refreshToken == "" || clientID == "" {
 		return
 	}
+	ctx, cancel := revokeContext(ctx)
+	defer cancel()
 	if err := s.oidc.Revoke(ctx, clientID, refreshToken); err != nil {
 		s.logger.WarnContext(ctx, "llm siwc: refresh token revocation failed", slog.String("reason", revokeReason(err)))
 	}
+}
+
+// revokeContext detaches ctx from its cancellation and deadline (keeping its
+// values: tenant, actor, trace) and bounds the work by accountRevokeTimeout.
+func revokeContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), accountRevokeTimeout)
 }
 
 func revokeReason(err error) string {
@@ -841,8 +858,13 @@ func (s *AccountsService) Unlink(ctx context.Context, id string, force bool) err
 // RevokeRegistration revokes acc's refresh token best-effort under acc's own
 // org (the DSR purge has no tenant in its context: ruling 2.15). It emits no
 // audit event and deletes nothing.
+//
+// The registration is already deleted when this runs (Unlink, the DSR purge),
+// so nothing can retry it: the whole revocation, the vault open included,
+// runs on a detached bounded context and survives a canceled caller.
 func (s *AccountsService) RevokeRegistration(ctx context.Context, acc models.UserAccount) {
-	ctx = ctxWithTenant(ctx, acc.TenantID)
+	ctx, cancel := revokeContext(ctxWithTenant(ctx, acc.TenantID))
+	defer cancel()
 	if acc.RefreshToken.IsZero() {
 		return
 	}
@@ -1137,6 +1159,8 @@ func (s *AccountsService) revokeDropped(ctx context.Context, accountUUID, client
 	if dropped == "" {
 		return
 	}
+	ctx, cancel := revokeContext(ctx)
+	defer cancel()
 	cur, err := s.repo.Get(ctx, accountUUID)
 	if err != nil {
 		return
