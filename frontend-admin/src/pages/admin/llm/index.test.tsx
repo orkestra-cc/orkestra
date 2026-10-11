@@ -441,6 +441,22 @@ describe('LlmAdminPage — models', () => {
     });
   });
 
+  // Purposes route requests and priorities order the candidates; an
+  // operator setting them needs that explained where they edit them.
+  it('explains purposes and priority in a help badge', async () => {
+    stubReads({ credentials: [], models: [] });
+    renderPage('/admin/llm');
+    await userEvent.click(
+      await screen.findByRole('button', { name: /add model/i })
+    );
+    const dialog = await screen.findByRole('dialog');
+    const help = within(dialog).getByRole('button', {
+      name: /lowest priority number first/i
+    });
+    expect(help).toHaveAccessibleName(/falls back to default/i);
+    expect(help).toHaveAccessibleName(/does not grant access/i);
+  });
+
   it('explains and requires an org credential when none fits the provider', async () => {
     stubReads({ credentials: [], models: [] });
     renderPage('/admin/llm');

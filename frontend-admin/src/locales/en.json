@@ -2910,6 +2910,7 @@
         "removePurpose": "Remove purpose",
         "addPurpose": "Add purpose",
         "purposesHint": "Addons ask for a purpose; the lowest priority wins. Keep one model on \"default\".",
+        "purposesHelp": "A purpose is the job a caller asks for, such as assistant or summarize. For each request the gateway uses the live models that list that purpose and support what the request needs (tools, for example), lowest priority number first; the next ones are fallbacks billed the same way. When no model lists the purpose, the request falls back to default, so keep one model on default. A purpose does not grant access: access and grants decide who may use the model.",
         "access": "Access",
         "grantees": "Granted users",
         "granteesPlaceholder": "Pick members of this organization",

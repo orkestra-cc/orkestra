@@ -18,6 +18,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
+import FieldHelpLabel from 'components/common/FieldHelpLabel';
 import IconButton from 'components/common/IconButton';
 import MultiSelect from 'components/common/MultiSelect';
 import { useAppSelector } from 'store/hooks';
@@ -789,9 +790,15 @@ const ModelEditorModal = ({
               </Form.Group>
             </Col>
             <Col md={12}>
-              <Form.Label as="p" className="mb-2">
-                {t('adminLlm.models.fields.purposes')}
-              </Form.Label>
+              <FieldHelpLabel
+                as="p"
+                className="mb-2"
+                label={t('adminLlm.models.fields.purposes')}
+                hint={t('adminLlm.models.fields.purposesHelp')}
+                // A long explanation: opening to the side keeps it inside
+                // the viewport instead of running off the top of the modal.
+                placement="right"
+              />
               {fields.map((f, i) => (
                 <Row key={f.id} className="g-2 mb-2 align-items-start">
                   <Col xs={7}>
