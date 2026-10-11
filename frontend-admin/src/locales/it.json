@@ -2910,6 +2910,7 @@
         "removePurpose": "Rimuovi scopo",
         "addPurpose": "Aggiungi scopo",
         "purposesHint": "Gli addon chiedono uno scopo; vince la priorità più bassa. Tieni un modello su «default».",
+        "purposesHelp": "Lo scopo è il compito che chi chiama richiede, per esempio assistant o summarize. A ogni richiesta il gateway usa i modelli attivi che hanno quello scopo e supportano ciò che serve (per esempio i tool), partendo dal numero di priorità più basso; i successivi fanno da riserva, pagati allo stesso modo. Se nessun modello ha lo scopo, si usa default: tieni sempre un modello su default. Lo scopo non dà accesso: chi può usare il modello lo decidono accesso e grant.",
         "access": "Accesso",
         "grantees": "Utenti autorizzati",
         "granteesPlaceholder": "Scegli i membri di questa organizzazione",
