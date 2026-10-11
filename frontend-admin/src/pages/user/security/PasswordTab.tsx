@@ -55,7 +55,9 @@ const PasswordTab = () => {
   const [alreadySet, setAlreadySet] = useState(false);
   // Change mode asks for the current password, which an operator who signs
   // in with OAuth may hold without remembering it (set by the setup wizard,
-  // a registration or an invite): the reset email is their way out.
+  // a registration or an invite): the reset email is their way out. The
+  // backend answers success even when its limits drop the email, so the
+  // link stays usable: a "sent" here only means the request was taken.
   const [forgotPassword, forgotState] = useForgotPasswordMutation();
   const [resetLink, setResetLink] = useState<'sent' | 'failed' | null>(null);
   const isLoading = changeState.isLoading || enrollmentState.isLoading;
@@ -260,7 +262,7 @@ const PasswordTab = () => {
                     variant="link"
                     size="sm"
                     className="p-0 fs-11 align-baseline"
-                    disabled={forgotState.isLoading || resetLink === 'sent'}
+                    disabled={forgotState.isLoading}
                     onClick={() => void sendResetLink()}
                   >
                     {forgotState.isLoading

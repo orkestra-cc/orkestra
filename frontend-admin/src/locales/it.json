@@ -1308,7 +1308,7 @@
       "forgotCurrent": "Non ricordi la password attuale?",
       "resetLinkSend": "Inviami un link per reimpostarla",
       "resetLinkSending": "Invio…",
-      "resetLinkSent": "Ti stiamo inviando un link di reimpostazione a {{email}}. Impostando la nuova password da quel link verrai disconnesso da tutti i dispositivi.",
+      "resetLinkSent": "Link di reimpostazione richiesto per {{email}}. Se non arriva entro qualche minuto, richiedilo di nuovo. Impostando la nuova password da quel link verrai disconnesso da tutti i dispositivi.",
       "resetLinkError": "Non è stato possibile inviare il link di reimpostazione. Riprova tra qualche minuto."
     },
     "backupCodesTab": {

@@ -342,8 +342,17 @@ describe('PasswordTab forgotten current password', () => {
       expect(payload).toEqual({ email: currentOperator.email })
     );
     expect(
-      await screen.findByText(/reset link is on its way/i)
+      await screen.findByText(/reset link requested for/i)
     ).toBeInTheDocument();
+    // The backend answers success even when its limits drop the email, so
+    // the operator can always ask again.
+    const again = screen.getByRole('button', { name: 'Email me a reset link' });
+    expect(again).toBeEnabled();
+    payload = undefined;
+    await user.click(again);
+    await waitFor(() =>
+      expect(payload).toEqual({ email: currentOperator.email })
+    );
   });
 
   it('reports a refused request', async () => {
