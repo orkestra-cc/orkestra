@@ -1,10 +1,23 @@
-import { useEffect, useRef, useState } from 'react';
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react';
 import { Navigate, useBlocker, useParams, useSearchParams } from 'react-router';
 import { Alert, Button, Card, Col, Modal, Row, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
 import { useTranslation } from 'react-i18next';
 import { OrkestraCardHeader } from 'components/common';
+import OrkestraLoader from 'components/common/OrkestraLoader';
+import { moduleCatalog } from 'modules/index';
+import {
+  ADMIN_SECTION_PREFIX,
+  validAdminSections
+} from 'modules/adminSections';
 import {
   useGetModuleQuery,
   useGetModulesQuery,
@@ -125,9 +138,23 @@ const GenericModuleDetailPage: React.FC = () => {
   // real declared hierarchy would be a bigger change than "no rail".
   const showRail = hasPageRail(groupTree, mod?.configGroups);
 
+  // Memoised on the module name: validAdminSections warns (in development)
+  // about each malformed entry it drops, which must not repeat per render.
+  const adminSections = useMemo(
+    () =>
+      validAdminSections(moduleName ? moduleCatalog[moduleName] : undefined),
+    [moduleName]
+  );
+  // An addon section reports a write in flight: the page then refuses every
+  // way out of it (rail, environment switcher, route changes) until it
+  // settles, so the write's refetch can never reset edits started meanwhile.
+  const [addonBusy, setAddonBusy] = useState(false);
+  const onBusyChange = useCallback((busy: boolean) => setAddonBusy(busy), []);
+
   const selectable = [
     SECTION_OVERVIEW,
     ...flatNodes.map(n => n.key),
+    ...adminSections.map(s => ADMIN_SECTION_PREFIX + s.key),
     SECTION_DEPENDENCIES,
     // Only a reachable destination when there is actually a choice to make —
     // matches the rail entry itself, and keeps a stale bookmark from landing
@@ -139,6 +166,7 @@ const GenericModuleDetailPage: React.FC = () => {
   const activeNode = flatNodes.find(node => node.key === active);
 
   const setActive = (key: string) => {
+    if (addonBusy) return;
     setSearchParams(
       prev => {
         const next = new URLSearchParams(prev);
@@ -148,6 +176,12 @@ const GenericModuleDetailPage: React.FC = () => {
       { replace: true }
     );
   };
+
+  // A section that is no longer shown is unmounted, and an unmounted section
+  // cannot report that it settled — never leave the page locked by one.
+  useEffect(() => {
+    setAddonBusy(false);
+  }, [active]);
 
   // A stale/unknown ?section= (a renamed or removed group, a copied link
   // from before a module's groups changed) already falls back to Overview
@@ -183,6 +217,11 @@ const GenericModuleDetailPage: React.FC = () => {
   // This is the page's ONLY useBlocker call — see the controller comment
   // above for why that single-registration property matters.
   const blocker = useBlocker(({ currentLocation, nextLocation }) => {
+    if (addonBusy)
+      return (
+        currentLocation.pathname !== nextLocation.pathname ||
+        currentLocation.search !== nextLocation.search
+      );
     if (dirtyCount === 0) return false;
     if (currentLocation.pathname !== nextLocation.pathname) return true;
     if (envSwitchConfirmed.current) {
@@ -203,6 +242,7 @@ const GenericModuleDetailPage: React.FC = () => {
   // blocker above covers every other route to the same URL (Back, a pasted
   // link, anything that rewrites `?env=`).
   const handleEnvSelect = (env: string) => {
+    if (addonBusy) return;
     if (env === currentEnv) return;
     if (dirtyCount > 0) {
       setPendingEnv(env);
@@ -260,22 +300,44 @@ const GenericModuleDetailPage: React.FC = () => {
     <Modal show centered onHide={() => blocker.reset()}>
       <Modal.Header closeButton>
         <Modal.Title>
-          {t('adminModules.detail.configCard.unsavedTitle')}
+          {addonBusy
+            ? t('adminModules.detail.busyLeave.title')
+            : t('adminModules.detail.configCard.unsavedTitle')}
         </Modal.Title>
       </Modal.Header>
       <Modal.Body className="fs-10">
-        {t('adminModules.detail.configCard.unsavedBody')}
+        {addonBusy
+          ? t('adminModules.detail.busyLeave.body')
+          : t('adminModules.detail.configCard.unsavedBody')}
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" size="sm" onClick={() => blocker.reset()}>
-          {t('adminModules.detail.configCard.stay')}
+          {addonBusy
+            ? t('adminModules.detail.busyLeave.stay')
+            : t('adminModules.detail.configCard.stay')}
         </Button>
         <Button variant="danger" size="sm" onClick={() => blocker.proceed()}>
-          {t('adminModules.detail.configCard.leave')}
+          {addonBusy
+            ? t('adminModules.detail.busyLeave.leave')
+            : t('adminModules.detail.configCard.leave')}
         </Button>
       </Modal.Footer>
     </Modal>
   );
+
+  const renderAdminSection = (section: (typeof adminSections)[number]) => {
+    const Section = section.component;
+    return (
+      <Suspense fallback={<OrkestraLoader />}>
+        <Section
+          moduleName={mod.moduleName}
+          environment={currentEnv}
+          configDirty={dirtyCount > 0}
+          onBusyChange={onBusyChange}
+        />
+      </Suspense>
+    );
+  };
 
   const envSwitchModal = pendingEnv && (
     <Modal show centered onHide={() => setPendingEnv(null)}>
@@ -361,6 +423,7 @@ const GenericModuleDetailPage: React.FC = () => {
                 availableEnvironments={environments}
                 selectedEnvironment={currentEnv}
                 onSelect={handleEnvSelect}
+                disabled={addonBusy}
               />
             )}
 
@@ -369,6 +432,16 @@ const GenericModuleDetailPage: React.FC = () => {
             <ModuleConfigSection module={mod} controller={controller} />
 
             <ModuleDependencyCard module={mod} allModules={allModules} />
+
+            {adminSections.map(section => (
+              <Card key={section.key} className="mb-3">
+                <OrkestraCardHeader
+                  title={t(`${mod.moduleName}:${section.labelKey}`)}
+                  light={false}
+                />
+                <Card.Body>{renderAdminSection(section)}</Card.Body>
+              </Card>
+            ))}
           </Col>
         </Row>
       </RecordListProvider>
@@ -416,6 +489,12 @@ const GenericModuleDetailPage: React.FC = () => {
                 moduleName={mod.moduleName}
                 activeKey={active}
                 onSelect={setActive}
+                disabled={addonBusy}
+                extensionCaption={t('adminModules.detail.rail.extensions')}
+                extensionItems={adminSections.map(section => ({
+                  key: ADMIN_SECTION_PREFIX + section.key,
+                  label: t(`${mod.moduleName}:${section.labelKey}`)
+                }))}
                 statusFor={node => ({
                   unfilled: unfilledByGroup.get(node.key) ?? 0
                 })}
@@ -474,9 +553,16 @@ const GenericModuleDetailPage: React.FC = () => {
                   availableEnvironments={environments}
                   selectedEnvironment={currentEnv}
                   onSelect={handleEnvSelect}
+                  disabled={addonBusy}
                 />
               </Card.Body>
             </Card>
+          )}
+
+          {adminSections.map(section =>
+            active === ADMIN_SECTION_PREFIX + section.key ? (
+              <div key={section.key}>{renderAdminSection(section)}</div>
+            ) : null
           )}
 
           {activeNode && (

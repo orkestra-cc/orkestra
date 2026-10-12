@@ -155,6 +155,22 @@ tenant kind, contributes nothing. Attribution comes from the `moduleName` the
 registry stamps on every nav item; a module with no nav items of its own can
 therefore not carry an overlay.
 
+#### Optional: Admin sections
+
+A manifest may add sections to the module's admin page (`/admin/modules/<name>`) with `adminSections`. Each entry is a `React.lazy` component reached at `?section=__addon:<key>` and listed in the page rail under "Extensions" (a card on the stacked page):
+
+```ts
+adminSections: [
+  {
+    key: 'tools', // ^[a-z0-9][a-z0-9_-]*$, unique within the manifest
+    labelKey: 'admin.toolsTitle', // resolved as t('widgets:admin.toolsTitle')
+    component: lazy(() => import('pages/widgets/admin/ToolsSection'))
+  }
+],
+```
+
+The component receives `ModuleAdminSectionProps` (`moduleName`, `environment`, `configDirty`, `onBusyChange`) from `modules/types`. It owns its reads and writes. Call `onBusyChange(true)` before a write and `onBusyChange(false)` when it settles (and on unmount): while busy the page locks its rail and environment switcher and asks before any navigation.
+
 Then register it in `frontend/src/modules/index.ts`:
 
 ```ts

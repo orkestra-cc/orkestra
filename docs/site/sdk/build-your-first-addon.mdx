@@ -22,6 +22,61 @@ Declare `ConfigGroups()` ([ADR-0012](/adrs/module-config-group-contract)) to ren
 If your module needs the operator to manage *several* of something rather than one, declare a single `FieldRecordList` field with the element's sub-schema in `Items` instead of repeating a block of fields per instance — see [Config service](/sdk/config-service#repeatable-fields-recordlist).
 :::
 
+## Module page sections
+
+An addon can add its own sections to its module page at `/admin/modules/<name>`, next to the generated settings form, by declaring `adminSections` in its frontend manifest (`frontend-admin/src/modules/<name>.tsx`):
+
+```tsx
+import { lazy } from 'react';
+import type { ModuleManifest } from './types';
+
+export const widgetsManifest: ModuleManifest = {
+  name: 'widgets',
+  routes: () => [],
+  adminSections: [
+    {
+      key: 'tools', // ^[a-z0-9][a-z0-9_-]*$, unique within the manifest
+      labelKey: 'admin.toolsTitle', // t('widgets:admin.toolsTitle'), in your own i18n namespace
+      component: lazy(() => import('pages/widgets/admin/ToolsSection'))
+    }
+  ]
+};
+```
+
+- A section is reached at `?section=__addon:<key>` and listed in the page's side rail under **Extensions**. On a module with no rail the same sections render as cards below the dependencies card.
+- Keys must match `^[a-z0-9][a-z0-9_-]*$` and be unique within the manifest. The first duplicate wins; an invalid entry is not mounted (a warning is logged in development).
+- The component receives `moduleName`, `environment` (the environment profile the page is showing, which is not always the live one), `configDirty` and `onBusyChange`.
+- The section owns its own data and writes. It does not take part in the page's shared configuration form or its save bar.
+
+Whenever the section writes, tell the page, so that a refetch cannot discard edits made in the meantime. `onBusyChange` is a boolean state, not a counter: call it with `true` before the write, with `false` when the write settles, and with `false` again when the section unmounts.
+
+```tsx
+import { useEffect } from 'react';
+import type { ModuleAdminSectionProps } from 'modules/types';
+
+const ToolsSection = ({ environment, onBusyChange }: ModuleAdminSectionProps) => {
+  const [save] = useSaveToolsMutation();
+
+  // A section that unmounts mid-write must not leave the page locked.
+  useEffect(() => () => onBusyChange(false), [onBusyChange]);
+
+  const onToggle = async (next: ToolsPatch) => {
+    onBusyChange(true);
+    try {
+      await save({ environment, ...next }).unwrap();
+    } finally {
+      onBusyChange(false);
+    }
+  };
+
+  return <ToolsList environment={environment} onToggle={onToggle} />;
+};
+
+export default ToolsSection;
+```
+
+While busy, the page disables its rail and environment switcher, and asks for confirmation before any navigation away ("Saving in progress"). The page has a single navigation blocker, so a section must never register one of its own.
+
 For the archived snapshots of the verticals Orkestra used to ship (billing/SDI, RAG, agents, marketing, …), see the `orkestra-cc/orkestra-addon-*` repos — useful to crib from, not to depend on.
 
 For the architectural reasons behind this shape, see [Module lifecycle](/architecture/module-lifecycle).

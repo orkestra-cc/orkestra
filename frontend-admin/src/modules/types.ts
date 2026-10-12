@@ -9,9 +9,11 @@ export interface ModuleAdminSectionProps {
   /** True while the page's shared config form has unsaved edits. */
   configDirty: boolean;
   /**
-   * Report a write in flight. While busy the page disables its rail and
-   * environment switcher, and its single navigation blocker holds any route
-   * change. Call with false when the write settles and on unmount.
+   * Report a write in flight. A boolean state, not a counter: pass true while
+   * a write is in flight and false when it settles, and again (false) on
+   * unmount. While true the host refuses to leave the section until it
+   * settles: the page's rail and environment switcher are locked and any
+   * route or query change asks for confirmation first.
    */
   onBusyChange: (busy: boolean) => void;
 }
@@ -19,12 +21,20 @@ export interface ModuleAdminSectionProps {
 /** A section an addon contributes to /admin/modules/:name. */
 export interface ModuleAdminSection {
   /**
-   * Reached at ?section=__addon:<key>. Must match ADMIN_SECTION_KEY and be
-   * unique within the manifest; invalid entries are not mounted.
+   * Reached at ?section=__addon:<key>. Must match `^[a-z0-9][a-z0-9_-]*$` and
+   * be unique within the manifest: the first duplicate wins, and invalid
+   * entries are not mounted.
    */
   key: string;
-  /** i18n key in the module's own namespace (ADR-0007). */
+  /**
+   * A key inside the module's own i18n namespace (ADR-0007), resolved as
+   * `t('<moduleName>:<labelKey>')` for the section's title.
+   */
   labelKey: string;
+  /**
+   * The host wraps it in Suspense and mounts it only while its section is
+   * shown (the selected rail entry, or always on the stacked page).
+   */
   component: LazyExoticComponent<ComponentType<ModuleAdminSectionProps>>;
 }
 

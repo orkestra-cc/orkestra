@@ -3238,7 +3238,14 @@
         "goToError": "Go to {{group}}",
         "reloadReview": "Reload & review"
       },
+      "busyLeave": {
+        "title": "Saving in progress",
+        "body": "A change is still being saved. Leaving now may leave it unconfirmed.",
+        "stay": "Stay",
+        "leave": "Leave anyway"
+      },
       "rail": {
+        "extensions": "Extensions",
         "overview": "Overview",
         "configuration": "Configuration",
         "module": "Module",
