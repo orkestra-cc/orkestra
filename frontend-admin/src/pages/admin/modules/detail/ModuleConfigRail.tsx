@@ -39,6 +39,12 @@ export interface ModuleConfigRailProps {
   trailingCaption?: string;
   /** Non-config entries rendered after the tree (e.g. Dependencies, Environments). */
   trailingItems?: ModuleConfigRailItem[];
+  /** Caption above `extensionItems` (addon sections), rendered after the tree. */
+  extensionCaption?: string;
+  /** Addon-contributed entries, between the tree and `trailingItems`. */
+  extensionItems?: ModuleConfigRailItem[];
+  /** Lock every entry (an addon section is busy writing). */
+  disabled?: boolean;
 }
 
 /**
@@ -69,7 +75,10 @@ const ModuleConfigRail: React.FC<ModuleConfigRailProps> = ({
   leadingItems,
   treeCaption,
   trailingCaption,
-  trailingItems
+  trailingItems,
+  extensionCaption,
+  extensionItems,
+  disabled
 }) => {
   const { t } = useTranslation();
 
@@ -80,7 +89,11 @@ const ModuleConfigRail: React.FC<ModuleConfigRailProps> = ({
         key={item.key}
         active={isActive}
         aria-current={isActive ? 'true' : undefined}
-        onClick={() => onSelect(item.key)}
+        disabled={disabled}
+        aria-disabled={disabled ? 'true' : undefined}
+        onClick={() => {
+          if (!disabled) onSelect(item.key);
+        }}
       >
         {item.label}
       </Nav.Link>
@@ -96,8 +109,12 @@ const ModuleConfigRail: React.FC<ModuleConfigRailProps> = ({
           <Nav.Link
             active={isActive}
             aria-current={isActive ? 'true' : undefined}
+            disabled={disabled}
+            aria-disabled={disabled ? 'true' : undefined}
             className="d-flex align-items-center justify-content-between gap-2"
-            onClick={() => onSelect(node.key)}
+            onClick={() => {
+              if (!disabled) onSelect(node.key);
+            }}
           >
             <span className="text-truncate">
               {translateConfigGroup(t, moduleName, node)}
@@ -142,6 +159,16 @@ const ModuleConfigRail: React.FC<ModuleConfigRailProps> = ({
         </div>
       )}
       {renderNodes(tree)}
+      {extensionItems && extensionItems.length > 0 && (
+        <>
+          {extensionCaption && (
+            <div className="fs-11 fw-semibold text-700 text-uppercase px-2 mt-3 mb-1">
+              {extensionCaption}
+            </div>
+          )}
+          {extensionItems.map(renderItem)}
+        </>
+      )}
       {trailingCaption && (
         <div className="fs-11 fw-semibold text-700 text-uppercase px-2 mt-3 mb-1">
           {trailingCaption}
