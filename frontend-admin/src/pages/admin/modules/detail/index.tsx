@@ -138,12 +138,19 @@ const GenericModuleDetailPage: React.FC = () => {
   // real declared hierarchy would be a bigger change than "no rail".
   const showRail = hasPageRail(groupTree, mod?.configGroups);
 
-  // Memoised on the module name: validAdminSections warns (in development)
-  // about each malformed entry it drops, which must not repeat per render.
+  // Derived from the module actually on screen (`mod`), not from the URL: on a
+  // module switch RTK keeps the previous module's `mod` until the new one
+  // lands, and a section built from the new name would be handed the old
+  // module's name and environment. Memoised because validAdminSections warns
+  // (in development) about each malformed entry it drops, which must not
+  // repeat per render.
+  const sectionsModule = mod?.moduleName;
   const adminSections = useMemo(
     () =>
-      validAdminSections(moduleName ? moduleCatalog[moduleName] : undefined),
-    [moduleName]
+      validAdminSections(
+        sectionsModule ? moduleCatalog[sectionsModule] : undefined
+      ),
+    [sectionsModule]
   );
   // An addon section reports a write in flight: the page then refuses every
   // way out of it (rail, environment switcher, route changes) until it
@@ -178,10 +185,12 @@ const GenericModuleDetailPage: React.FC = () => {
   };
 
   // A section that is no longer shown is unmounted, and an unmounted section
-  // cannot report that it settled — never leave the page locked by one.
+  // cannot report that it settled — never leave the page locked by one. The
+  // module name is a dependency too: a switch between two modules on the
+  // stacked page keeps `active` constant while unmounting the section.
   useEffect(() => {
     setAddonBusy(false);
-  }, [active]);
+  }, [active, moduleName]);
 
   // A stale/unknown ?section= (a renamed or removed group, a copied link
   // from before a module's groups changed) already falls back to Overview
@@ -189,10 +198,17 @@ const GenericModuleDetailPage: React.FC = () => {
   // value keeps propagating every time the link is shared again. Rewrite it
   // once resolved, still with `replace` so this never adds a history entry.
   useEffect(() => {
-    if (showRail && requested && requested !== active) {
+    // Not while `mod` still belongs to the previous module (a switch in
+    // flight): its sections would not know the requested key yet.
+    if (
+      showRail &&
+      mod?.moduleName === moduleName &&
+      requested &&
+      requested !== active
+    ) {
       setActive(active);
     }
-  }, [showRail, requested, active]);
+  }, [showRail, requested, active, mod?.moduleName, moduleName]);
 
   // Set for exactly one navigation by `confirmEnvSwitch`, which has already
   // asked and already discarded. A ref, not state: the blocker predicate runs
@@ -577,7 +593,13 @@ const GenericModuleDetailPage: React.FC = () => {
 
           {adminSections.map(section =>
             active === ADMIN_SECTION_PREFIX + section.key ? (
-              <div key={section.key}>{renderAdminSection(section)}</div>
+              <Card key={section.key} className="mb-3">
+                <OrkestraCardHeader
+                  title={t(`${mod.moduleName}:${section.labelKey}`)}
+                  light={false}
+                />
+                <Card.Body>{renderAdminSection(section)}</Card.Body>
+              </Card>
             ) : null
           )}
 

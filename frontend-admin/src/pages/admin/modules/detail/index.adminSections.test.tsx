@@ -1,8 +1,8 @@
 import { lazy } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { Provider } from 'react-redux';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { setupStore } from 'test/render';
@@ -29,8 +29,25 @@ const Probe = (props: ModuleAdminSectionProps) => {
   );
 };
 
+const seenOther: ModuleAdminSectionProps[] = [];
+const OtherProbe = (props: ModuleAdminSectionProps) => {
+  seenOther.push(props);
+  return <span>other module={props.moduleName}</span>;
+};
+
 vi.mock('modules/index', () => ({
   moduleCatalog: {
+    other: {
+      name: 'other',
+      routes: () => [],
+      adminSections: [
+        {
+          key: 'extra',
+          labelKey: 'other.extra',
+          component: lazy(async () => ({ default: OtherProbe }))
+        }
+      ]
+    },
     demo: {
       name: 'demo',
       routes: () => [],
@@ -96,7 +113,9 @@ const stub = (mod: ModuleConfig) =>
         modules: [{ moduleName: 'demo', status: 'healthy' }]
       })
     ),
-    http.get('*/v1/admin/modules/:name', () => HttpResponse.json(mod)),
+    http.get('*/v1/admin/modules/:name', ({ params }) =>
+      HttpResponse.json({ ...mod, moduleName: params.name })
+    ),
     http.get('*/v1/admin/modules/:name/environments/:env', ({ params }) =>
       HttpResponse.json({
         environment: params.env,
@@ -206,5 +225,104 @@ describe('module detail admin sections', () => {
     expect(input).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'idle' }));
     expect(input).toBeEnabled();
+  });
+
+  it('wraps the section in a card titled by its label on the rail layout too', async () => {
+    stub(railModule);
+    renderAt('/admin/modules/demo?section=__addon:extra');
+    expect(
+      await screen.findByText('probe env=production dirty=false')
+    ).toBeInTheDocument();
+    const probe = screen.getByText('probe env=production dirty=false');
+    const card = probe.closest('.card');
+    expect(card).not.toBeNull();
+    expect(
+      within(card as HTMLElement).getByText('demo.extra')
+    ).toBeInTheDocument();
+  });
+
+  it('disables the environment switcher while a section is busy', async () => {
+    stub({ ...railModule, configGroups: [] } as ModuleConfig);
+    const user = userEvent.setup();
+    renderAt('/admin/modules/demo');
+
+    const sandbox = await screen.findByRole('button', { name: 'sandbox' });
+    expect(sandbox).toBeEnabled();
+    await user.click(await screen.findByRole('button', { name: 'busy' }));
+    expect(sandbox).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'idle' }));
+    expect(sandbox).toBeEnabled();
+  });
+
+  it('tells the section when the shared form has unsaved edits', async () => {
+    stub({ ...railModule, configGroups: [] } as ModuleConfig);
+    const user = userEvent.setup();
+    renderAt('/admin/modules/demo');
+
+    const input = await screen.findByLabelText(/First/);
+    expect(
+      await screen.findByText('probe env=production dirty=false')
+    ).toBeInTheDocument();
+    await user.type(input, 'x');
+    expect(
+      await screen.findByText('probe env=production dirty=true')
+    ).toBeInTheDocument();
+  });
+
+  it('clears a stuck busy state when the module changes', async () => {
+    stub({ ...railModule, configGroups: [] } as ModuleConfig);
+    const user = userEvent.setup();
+    const router = renderAt('/admin/modules/demo');
+
+    await user.click(await screen.findByRole('button', { name: 'busy' }));
+    expect(screen.getByRole('button', { name: 'sandbox' })).toBeDisabled();
+
+    // The operator forces the navigation past the "saving in progress" modal.
+    await router.navigate('/admin/modules/other');
+    await user.click(
+      await screen.findByRole('button', { name: 'Leave anyway' })
+    );
+    // The section that reported busy is gone; the page must not stay locked.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'sandbox' })).toBeEnabled()
+    );
+  });
+
+  it('never hands a section another module name while the new module loads', async () => {
+    seenOther.length = 0;
+    server.use(
+      http.get('*/v1/admin/modules', () =>
+        HttpResponse.json({ modules: [railModule] })
+      ),
+      http.get('*/v1/admin/modules/health', () =>
+        HttpResponse.json({ modules: [] })
+      ),
+      http.get('*/v1/admin/modules/:name', async ({ params }) => {
+        if (params.name === 'other') await delay(100);
+        return HttpResponse.json({
+          ...railModule,
+          moduleName: params.name,
+          displayName: String(params.name)
+        });
+      }),
+      http.get('*/v1/admin/modules/:name/environments/:env', ({ params }) =>
+        HttpResponse.json({
+          environment: params.env,
+          configValues: {},
+          secretStatus: {},
+          updatedAt: ''
+        })
+      )
+    );
+    const router = renderAt('/admin/modules/demo');
+    await screen.findByRole('button', { name: 'demo.extra' });
+
+    await router.navigate('/admin/modules/other?section=__addon:extra');
+    expect(await screen.findByText('other module=other')).toBeInTheDocument();
+
+    expect(seenOther.length).toBeGreaterThan(0);
+    expect(seenOther.every(p => p.moduleName === 'other')).toBe(true);
+    // The requested section survived the switch.
+    expect(router.state.location.search).toContain('section=__addon');
   });
 });

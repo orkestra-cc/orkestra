@@ -157,7 +157,7 @@ therefore not carry an overlay.
 
 #### Optional: Admin sections
 
-A manifest may add sections to the module's admin page (`/admin/modules/<name>`) with `adminSections`. Each entry is a `React.lazy` component reached at `?section=__addon:<key>` and listed in the page rail under "Extensions" (a card on the stacked page):
+A manifest may add sections to the module's admin page (`/admin/modules/<name>`) with `adminSections`. Each entry is a `React.lazy` component reached at `?section=__addon:<key>` and listed in the page rail under "Extensions". The page wraps the component in a card titled by its `labelKey` on both layouts, so the component renders only its body:
 
 ```ts
 adminSections: [
@@ -169,7 +169,7 @@ adminSections: [
 ],
 ```
 
-The component receives `ModuleAdminSectionProps` (`moduleName`, `environment`, `configDirty`, `onBusyChange`) from `modules/types`. It owns its reads and writes. Call `onBusyChange(true)` before a write and `onBusyChange(false)` when it settles (and on unmount): while busy the page locks its rail and environment switcher and asks before any navigation.
+The component receives `ModuleAdminSectionProps` (`moduleName`, `environment`, `configDirty`, `onBusyChange`) from `modules/types`. It owns its reads and writes. Call `onBusyChange(true)` before a write and `onBusyChange(false)` when it settles (and on unmount): while busy the page locks its rail and environment switcher and asks before any navigation. A navigation held while busy completes on its own once the write settles.
 
 Then register it in `frontend/src/modules/index.ts`:
 
