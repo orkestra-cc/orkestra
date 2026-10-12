@@ -233,6 +233,15 @@ const GenericModuleDetailPage: React.FC = () => {
     return from !== to;
   });
 
+  // The operator asked to leave while a write was in flight and the write has
+  // since settled: nothing is left to protect, so let the navigation through
+  // rather than leaving a modal up for a reason that no longer exists.
+  useEffect(() => {
+    if (blocker.state === 'blocked' && !addonBusy && dirtyCount === 0) {
+      blocker.proceed();
+    }
+  }, [blocker, addonBusy, dirtyCount]);
+
   // Picking a different environment changes the query arg behind
   // `useGetModuleEnvironmentQuery`, which lands a new `envConfig` and re-seeds
   // the form — silently discarding every unsaved edit across every group.
@@ -429,7 +438,14 @@ const GenericModuleDetailPage: React.FC = () => {
 
             {inactiveEnvNotice}
 
-            <ModuleConfigSection module={mod} controller={controller} />
+            {/* The section's write refetches the module and re-seeds the shared
+                form, which would discard edits typed meanwhile — so the form
+                is read-only while a section is busy, as the rail is. A
+                disabled fieldset disables every control inside it without
+                changing the layout. */}
+            <fieldset disabled={addonBusy} className="border-0 p-0 m-0">
+              <ModuleConfigSection module={mod} controller={controller} />
+            </fieldset>
 
             <ModuleDependencyCard module={mod} allModules={allModules} />
 

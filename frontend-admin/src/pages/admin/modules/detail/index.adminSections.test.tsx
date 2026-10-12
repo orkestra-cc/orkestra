@@ -178,4 +178,33 @@ describe('module detail admin sections', () => {
       expect(screen.getByText('demo.extra')).toBeInTheDocument()
     );
   });
+
+  it('lets a navigation through once the write that held it settles', async () => {
+    stub(railModule);
+    const user = userEvent.setup();
+    const router = renderAt('/admin/modules/demo?section=__addon:extra');
+
+    await user.click(await screen.findByRole('button', { name: 'busy' }));
+    await router.navigate('/elsewhere');
+    expect(await screen.findByText('Saving in progress')).toBeInTheDocument();
+
+    // The write settles with the modal still open: nothing is left to protect,
+    // so the operator's navigation completes without clicking Leave.
+    await user.click(screen.getByRole('button', { name: 'idle' }));
+    expect(await screen.findByText('elsewhere')).toBeInTheDocument();
+    expect(screen.queryByText('Saving in progress')).not.toBeInTheDocument();
+  });
+
+  it('makes the shared config form read-only on the stacked page while busy', async () => {
+    stub({ ...railModule, configGroups: [] } as ModuleConfig);
+    const user = userEvent.setup();
+    renderAt('/admin/modules/demo');
+
+    const input = await screen.findByLabelText(/First/);
+    expect(input).toBeEnabled();
+    await user.click(await screen.findByRole('button', { name: 'busy' }));
+    expect(input).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'idle' }));
+    expect(input).toBeEnabled();
+  });
 });
