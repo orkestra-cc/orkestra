@@ -91,6 +91,18 @@ describe('useSlotContributions', () => {
     expect(keysFor()).toEqual([]);
   });
 
+  it('non-admin: keeps the navigation fallback while the refused list refetches', () => {
+    // RTK Query refetches a rejected entry for every new subscriber; while
+    // pending, isError is false but the previous error is still there.
+    modulesQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      error: { status: 403 }
+    });
+    navigation.mockReturnValue(navWith('widgets'));
+    expect(keysFor()).toEqual(['widgets.secret', 'widgets.summary']);
+  });
+
   it('renders nothing while modules are unknown', () => {
     modulesQuery.mockReturnValue({ data: undefined, isError: false });
     navigation.mockReturnValue(navWith('widgets'));

@@ -21,9 +21,16 @@ export function useSlotContributions(
   slotId: string
 ): ResolvedSlotContribution[] {
   const hasAccessToken = useAppSelector(s => !!s.auth.accessToken);
-  const { data: admin, isError: adminFailed } = useGetModulesQuery(undefined, {
-    skip: !hasAccessToken
-  });
+  const {
+    data: admin,
+    isError,
+    error
+  } = useGetModulesQuery(undefined, { skip: !hasAccessToken });
+  // RTK Query refetches a rejected entry for every new subscriber, and while
+  // that refetch is pending isError is false — but the previous error is kept.
+  // Reading it keeps a non-admin on the navigation fallback instead of
+  // dropping every contribution (a tab flicker) on each page mount.
+  const adminFailed = admin === undefined && (isError || error !== undefined);
   const {
     filteredNavigation,
     realms,
