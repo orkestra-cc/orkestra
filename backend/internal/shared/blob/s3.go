@@ -309,8 +309,9 @@ func (s *s3Store) PresignGet(ctx context.Context, key string, ttl time.Duration)
 
 // PresignGetDownload mints a presigned GET whose response forces an attachment
 // download named downloadAs, via the signed response-content-disposition query
-// parameter (honored by S3-compatible stores incl. RustFS). A blank downloadAs
-// presigns without a disposition — i.e. it behaves like PresignGet.
+// parameter (honored by S3-compatible stores incl. RustFS), and forbids shared
+// caching via a signed response-cache-control (DownloadCacheControl). A blank
+// downloadAs presigns without a disposition but still forbids shared caching.
 func (s *s3Store) PresignGetDownload(ctx context.Context, key, downloadAs string, ttl time.Duration) (string, error) {
 	if key == "" {
 		return "", errors.New("blob: key is required")
@@ -319,8 +320,9 @@ func (s *s3Store) PresignGetDownload(ctx context.Context, key, downloadAs string
 		ttl = time.Hour
 	}
 	in := &s3.GetObjectInput{
-		Bucket: aws.String(s.bucket),
-		Key:    aws.String(key),
+		Bucket:               aws.String(s.bucket),
+		Key:                  aws.String(key),
+		ResponseCacheControl: aws.String(DownloadCacheControl),
 	}
 	if cd := ContentDispositionAttachment(downloadAs); cd != "" {
 		in.ResponseContentDisposition = aws.String(cd)
