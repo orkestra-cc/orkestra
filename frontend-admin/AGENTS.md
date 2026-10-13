@@ -392,6 +392,7 @@ That only works because `updateModuleEnvironment` no longer invalidates its tags
 ## Conventions
 
 - **Cookie auth** — every fetch goes through RTK Query's `baseApi` which sets `credentials: 'include'`. Never call `fetch` directly with custom auth headers.
+- **Inline API errors** — endpoints whose UI renders every server error inline may set `extraOptions: { suppressErrorToast: true }` to avoid the global 5xx toast. The error is still returned to the caller; auth/refresh handling remains active. Other endpoints retain the default toast behavior.
 - **No inline styles** for colors / spacing — use Bootstrap utility classes or SCSS variables.
 - **Co-locate** sub-components, hooks, and helpers next to the page that uses them. Promote to shared only on second use.
 - **Lazy-load route components** — every route in module manifests uses `React.lazy()` so each module ships its own chunk. All module routes are wrapped in `<ModuleGate>` to gate rendering based on backend module state.

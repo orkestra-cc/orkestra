@@ -426,7 +426,7 @@ const baseQueryWithRetry: BaseQueryFn<
   string | FetchArgs,
   unknown,
   FetchBaseQueryError,
-  object,
+  { suppressErrorToast?: boolean },
   FetchBaseQueryMeta
 > = async (args, api, extraOptions) => {
   // Inject X-Tenant-ID for every tenant-scoped request. Impersonation (set
@@ -787,7 +787,11 @@ const baseQueryWithRetry: BaseQueryFn<
   }
 
   // Handle server errors with user-friendly messages
-  if (result.error && Number(result.error.status) >= 500) {
+  if (
+    result.error &&
+    Number(result.error.status) >= 500 &&
+    !extraOptions?.suppressErrorToast
+  ) {
     toast.error('Server error. Please try again later.', {
       toastId: 'server-error',
       autoClose: 5000
