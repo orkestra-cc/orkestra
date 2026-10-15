@@ -27,7 +27,7 @@ dependencies:
   web_socket_channel: ^2.4.0
 
   # Storage
-  shared_preferences: ^2.2.2
+  shared_preferences: ^2.5.6
   flutter_secure_storage: ^11.2.0
 
 
