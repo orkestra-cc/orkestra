@@ -196,6 +196,7 @@ This is the **canonical workflow** for an LLM agent or contributor asked to add 
 4. **Create a module manifest** — `src/modules/<name>.tsx` with routes wrapped in `<ModuleGate>` + `<ProtectedRoute>` + `<Suspense>`, and an `injectApi` function that dynamically imports the API slice.
 5. **Register the manifest** in `src/modules/index.ts` — add it to the `moduleCatalog` record.
 6. **Backend declares the sidebar entry** via its module's `NavItems()` method. The link appears in the sidebar automatically once the user has the required role and the backend module is enabled.
+7. **Contributing UI to another module (optional)** — a manifest may declare `contributions: { '<slot id>': [{ key: '<module>.<name>', labelKey, permission?, component: lazy(...) }] }` (`SlotContribution` in `src/modules/types.ts`). The slot **owner** publishes the slot id and the props its contributions receive, calls `useSlotContributions(slotId)` (`src/modules/useSlotContributions.ts`) and renders what comes back; the core only collects. A contributor declares a structurally identical props type in its own tree and never imports the owner's code. Rules: a key not prefixed with `<module>.` is dropped (no collisions); results are sorted by key; a contribution with `permission` needs `hasPermission(permission)`; the label is `t(labelKey, { ns: moduleName })` (the contributor's namespace). **Active** means the admin module list's `enabled && status === 'running'` when the caller may read `/v1/admin/modules`; a non-admin gets 403 there, so the modules owning a navigation item served to that user answer instead (the `ModuleGlobalOverlays` rule) — never "let it through on error" like `ModuleGate`, which would show a disabled module's UI. Nothing renders while neither source is known.
 
 `src/modules/_template/` is the **single source of truth** for the convention. If you change the pattern, update `_template/` so future scaffolds pick up the change.
 
@@ -391,6 +392,7 @@ That only works because `updateModuleEnvironment` no longer invalidates its tags
 ## Conventions
 
 - **Cookie auth** — every fetch goes through RTK Query's `baseApi` which sets `credentials: 'include'`. Never call `fetch` directly with custom auth headers.
+- **Inline API errors** — endpoints whose UI renders every server error inline may set `extraOptions: { suppressErrorToast: true }` to avoid the global 5xx toast. The error is still returned to the caller; auth/refresh handling remains active. Other endpoints retain the default toast behavior.
 - **No inline styles** for colors / spacing — use Bootstrap utility classes or SCSS variables.
 - **Co-locate** sub-components, hooks, and helpers next to the page that uses them. Promote to shared only on second use.
 - **Lazy-load route components** — every route in module manifests uses `React.lazy()` so each module ships its own chunk. All module routes are wrapped in `<ModuleGate>` to gate rendering based on backend module state.

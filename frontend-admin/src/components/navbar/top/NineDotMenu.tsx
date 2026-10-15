@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router';
 import { Card, Dropdown, Form } from 'react-bootstrap';
 import SimpleBar from 'simplebar-react';
 import { useTranslation } from 'react-i18next';
@@ -117,8 +116,8 @@ const NineDotMenu = () => {
     >
       <Dropdown.Toggle
         bsPrefix="toggle"
-        as={Link}
-        to="#!"
+        as="button"
+        type="button"
         className="nav-link px-2 nine-dots"
         title={
           isImpersonating
