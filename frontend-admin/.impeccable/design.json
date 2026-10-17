@@ -14,7 +14,7 @@
         "role": "primary",
         "displayName": "Link Ink",
         "canonical": "#2569c3",
-        "tonalRamp": ["#1e549c", "#2569c3", "#2c7be5", "#5b98eb"]
+        "tonalRamp": ["#1e549c", "#2569c3", "#2c7be5", "#4c8fe9", "#70a5ed"]
       },
       "code-pink": {
         "role": "accent",
@@ -107,7 +107,7 @@
       "refersTo": "button-orkestra",
       "description": "The signature white raised-key button for secondary and toolbar actions (variant=\"falcon-primary\").",
       "html": "<button class=\"ds-btn-orkestra\">Export CSV</button>",
-      "css": ".ds-btn-orkestra { background: #fff; color: var(--orkestra-primary, #2c7be5); font-family: 'Open Sans', sans-serif; font-size: 1rem; font-weight: 500; padding: 0.3125rem 1rem; border: none; border-radius: 0.25rem; box-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1), 0 2px 5px 0 rgba(43, 45, 80, 0.08), 0 1px 1.5px 0 rgba(0, 0, 0, 0.07), 0 1px 2px 0 rgba(0, 0, 0, 0.08); transition: color 0.15s, box-shadow 0.15s; } .ds-btn-orkestra:hover { color: #1e63c4; box-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1), 0 2px 5px 0 rgba(43, 45, 80, 0.1), 0 3px 9px 0 rgba(43, 45, 80, 0.08); } .ds-btn-orkestra:focus-visible { outline: none; box-shadow: 0 0 0 0.25rem rgba(44, 123, 229, 0.25); }"
+      "css": ".ds-btn-orkestra { background: #fff; color: var(--orkestra-btn-orkestra-primary-color, #2362b7); font-family: 'Open Sans', sans-serif; font-size: 1rem; font-weight: 500; padding: 0.3125rem 1rem; border: none; border-radius: 0.25rem; box-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1), 0 2px 5px 0 rgba(43, 45, 80, 0.08), 0 1px 1.5px 0 rgba(0, 0, 0, 0.07), 0 1px 2px 0 rgba(0, 0, 0, 0.08); transition: color 0.15s, box-shadow 0.15s; } .ds-btn-orkestra:hover { color: #1d5298; box-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1), 0 2px 5px 0 rgba(43, 45, 80, 0.1), 0 3px 9px 0 rgba(43, 45, 80, 0.08); } .ds-btn-orkestra:focus-visible { outline: none; box-shadow: 0 0 0 0.25rem rgba(44, 123, 229, 0.25); }"
     },
     {
       "name": "Card-Header Tabs",
@@ -179,7 +179,7 @@
       "refersTo": "button-orkestra",
       "description": "Dark falcon/orkestra button: background is the frozen dark quaternary (#0b1727, the canvas itself), colored text, hover shifts the text 17% toward white.",
       "html": "<div class=\"ds-dark-canvas ds-dark-canvas-btn\"><button class=\"ds-btn-orkestra-dark\">Export CSV</button></div>",
-      "css": ".ds-dark-canvas-btn { background: #121e2d; padding: 1.25rem; border-radius: 0.375rem; } .ds-btn-orkestra-dark { background: #0b1727; color: #2c7be5; font-family: 'Open Sans', sans-serif; font-size: 1rem; font-weight: 500; padding: 0.3125rem 1rem; border: none; border-radius: 0.25rem; box-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1), 0 2px 5px 0 rgba(0, 0, 0, 0.25), 0 1px 2px 0 rgba(0, 0, 0, 0.3); transition: color 0.15s, background 0.15s; } .ds-btn-orkestra-dark:hover { color: #5091e9; } .ds-btn-orkestra-dark:active { background: #070e17; } .ds-btn-orkestra-dark:focus-visible { outline: none; box-shadow: 0 0 0 0.25rem rgba(44, 123, 229, 0.25); }"
+      "css": ".ds-dark-canvas-btn { background: #121e2d; padding: 1.25rem; border-radius: 0.375rem; } .ds-btn-orkestra-dark { background: #0b1727; color: #4c8fe9; font-family: 'Open Sans', sans-serif; font-size: 1rem; font-weight: 500; padding: 0.3125rem 1rem; border: none; border-radius: 0.25rem; box-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1), 0 2px 5px 0 rgba(0, 0, 0, 0.25), 0 1px 2px 0 rgba(0, 0, 0, 0.3); transition: color 0.15s, background 0.15s; } .ds-btn-orkestra-dark:hover { color: #6aa2ed; } .ds-btn-orkestra-dark:active { background: #070e17; } .ds-btn-orkestra-dark:focus-visible { outline: none; box-shadow: 0 0 0 0.25rem rgba(44, 123, 229, 0.25); }"
     },
     {
       "name": "Subtle Badge (dark, frozen)",
@@ -223,7 +223,7 @@
       "Don't reintroduce blue-tinted grays, tinted shadows, or the old Falcon values (#edf2f9, #5e6e82, rgba(65,69,88,…)) anywhere in light mode.",
       "Don't hardcode hex colors, inline color/spacing styles, or generic fonts in components — the theme provides all three.",
       "Don't build bespoke primitives where one exists: no raw <table> (AdvanceTable), no hand-rolled KPI tiles (StatCard), no solid status badges (SubtleBadge), no Chart.js/D3 (ECharts via ReactEchart).",
-      "Don't use Orkestra Blue decoratively or add new saturated hues to the system — the palette is closed: one action color (with its darker Link Ink), four status colors, graphite, and the single utilitarian code accent (#c22e64, AA on white)."
+      "Don't use Orkestra Blue decoratively or add new saturated hues to the system — the palette is closed: one action color (with its Link Inks — darker in light, lighter in dark), four status colors, graphite, and the single utilitarian code accent (#c22e64, AA on white)."
     ]
   }
 }
