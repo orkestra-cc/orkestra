@@ -479,3 +479,27 @@ func TestPresignGetDoesNotSignChecksumMode(t *testing.T) {
 		})
 	}
 }
+
+// A presigned download must not outlive its TTL or the object it points at.
+// A CDN in front of the public storage endpoint (Cloudflare caches .csv, .pdf
+// and images by default, keyed on the full URL) otherwise keeps serving the
+// response for hours: past the signature's expiry and after the object is
+// erased. Overriding the response's Cache-Control through the signed
+// response-cache-control parameter keeps shared caches out.
+func TestPresignGetDownloadForbidsSharedCaching(t *testing.T) {
+	st := newTestStore(t, "http://rustfs:9000", "")
+
+	for _, downloadAs := range []string{"report.csv", ""} {
+		raw, err := st.PresignGetDownload(context.Background(), "k/obj.csv", downloadAs, time.Minute)
+		if err != nil {
+			t.Fatalf("PresignGetDownload(%q): %v", downloadAs, err)
+		}
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatalf("URL non valido: %v", err)
+		}
+		if got := u.Query().Get("response-cache-control"); got != DownloadCacheControl {
+			t.Fatalf("downloadAs %q: response-cache-control = %q, want %q", downloadAs, got, DownloadCacheControl)
+		}
+	}
+}

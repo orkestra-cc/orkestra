@@ -14,10 +14,17 @@ import (
 // it never breaks an existing Store implementation.
 type ObjectDownloadPresigner interface {
 	// PresignGetDownload returns a short-lived GET URL that downloads as an
-	// attachment named downloadAs (e.g. "Atlante Perugia 2025.pdf"). A blank
-	// downloadAs behaves like a plain presigned GET.
+	// attachment named downloadAs (e.g. "Atlante Perugia 2025.pdf") and that
+	// shared caches must not store (DownloadCacheControl). A blank downloadAs
+	// omits the disposition.
 	PresignGetDownload(ctx context.Context, key, downloadAs string, ttl time.Duration) (string, error)
 }
+
+// DownloadCacheControl is the Cache-Control a presigned download's response
+// carries (signed response-cache-control). It keeps shared caches out: a CDN in
+// front of the public storage endpoint would otherwise serve the response past
+// the signature's expiry and after the object is deleted.
+const DownloadCacheControl = "private, no-store"
 
 // ContentDispositionAttachment builds an RFC 6266 Content-Disposition value that
 // makes a browser save the response as an attachment named filename. It emits an
