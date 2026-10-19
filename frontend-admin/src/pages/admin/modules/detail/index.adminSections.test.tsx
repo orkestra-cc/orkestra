@@ -1,6 +1,6 @@
-import { lazy } from 'react';
+import { lazy, useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { Provider } from 'react-redux';
@@ -11,9 +11,17 @@ import type { ModuleAdminSectionProps } from 'modules/types';
 import type { ConfigField, ModuleConfig } from 'store/api/moduleApi';
 import ModuleDetailPage from './index';
 
+// When set, Probe reports a write from its mount effect — the shape of a
+// section that starts loading-and-saving as soon as it is shown.
+let probeBusyOnMount = false;
+
 const seen: ModuleAdminSectionProps[] = [];
 const Probe = (props: ModuleAdminSectionProps) => {
   seen.push(props);
+  const { onBusyChange } = props;
+  useEffect(() => {
+    if (probeBusyOnMount) onBusyChange(true);
+  }, [onBusyChange]);
   return (
     <div>
       <span>
@@ -35,8 +43,44 @@ const OtherProbe = (props: ModuleAdminSectionProps) => {
   return <span>other module={props.moduleName}</span>;
 };
 
+const PairProbe = ({
+  name,
+  onBusyChange
+}: ModuleAdminSectionProps & { name: string }) => (
+  <div>
+    <button type="button" onClick={() => onBusyChange(true)}>
+      {name} busy
+    </button>
+    <button type="button" onClick={() => onBusyChange(false)}>
+      {name} idle
+    </button>
+  </div>
+);
+const PairOne = (props: ModuleAdminSectionProps) => (
+  <PairProbe {...props} name="one" />
+);
+const PairTwo = (props: ModuleAdminSectionProps) => (
+  <PairProbe {...props} name="two" />
+);
+
 vi.mock('modules/index', () => ({
   moduleCatalog: {
+    pair: {
+      name: 'pair',
+      routes: () => [],
+      adminSections: [
+        {
+          key: 'one',
+          labelKey: 'pair.one',
+          component: lazy(async () => ({ default: PairOne }))
+        },
+        {
+          key: 'two',
+          labelKey: 'pair.two',
+          component: lazy(async () => ({ default: PairTwo }))
+        }
+      ]
+    },
     other: {
       name: 'other',
       routes: () => [],
@@ -146,6 +190,7 @@ describe('module detail admin sections', () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   afterEach(() => {
     warn.mockClear();
+    probeBusyOnMount = false;
   });
 
   it('lists valid addon sections under Extensions and renders them with page props', async () => {
@@ -324,5 +369,80 @@ describe('module detail admin sections', () => {
     expect(seenOther.every(p => p.moduleName === 'other')).toBe(true);
     // The requested section survived the switch.
     expect(router.state.location.search).toContain('section=__addon');
+  });
+
+  it('locks the rail save bar while a section is busy', async () => {
+    stub(railModule);
+    const user = userEvent.setup();
+    renderAt('/admin/modules/demo?section=a');
+
+    // An unsaved edit keeps the save bar on screen from every section.
+    await user.type(await screen.findByLabelText(/First/), 'x');
+    await user.click(screen.getByRole('button', { name: 'demo.extra' }));
+    await user.click(await screen.findByRole('button', { name: 'busy' }));
+
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'idle' }));
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
+  });
+
+  it('keeps the lock a section reports as it mounts', async () => {
+    stub(railModule);
+    const user = userEvent.setup();
+    renderAt('/admin/modules/demo?section=__addon:extra');
+
+    // Load the section once, so the second visit mounts it in the same
+    // commit that changes the active section.
+    await screen.findByRole('button', { name: 'busy' });
+    await user.click(screen.getByRole('button', { name: 'Group A' }));
+    await screen.findByLabelText(/First/);
+
+    probeBusyOnMount = true;
+    await user.click(screen.getByRole('button', { name: 'demo.extra' }));
+    await screen.findByRole('button', { name: 'busy' });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Group A' })).toHaveAttribute(
+        'aria-disabled',
+        'true'
+      )
+    );
+  });
+
+  it('stays locked until every busy section on the stacked page settles', async () => {
+    stub({ ...railModule, configGroups: [] } as ModuleConfig);
+    const user = userEvent.setup();
+    renderAt('/admin/modules/pair');
+
+    const sandbox = await screen.findByRole('button', { name: 'sandbox' });
+    await user.click(await screen.findByRole('button', { name: 'one busy' }));
+    await user.click(await screen.findByRole('button', { name: 'two busy' }));
+    await user.click(screen.getByRole('button', { name: 'one idle' }));
+    // Section two is still writing.
+    expect(sandbox).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'two idle' }));
+    expect(sandbox).toBeEnabled();
+  });
+
+  it('ignores a report from a section that is no longer shown', async () => {
+    stub({ ...railModule, configGroups: [] } as ModuleConfig);
+    seen.length = 0;
+    const router = renderAt('/admin/modules/demo');
+    await screen.findByRole('button', { name: 'busy' });
+    const departed = seen[seen.length - 1].onBusyChange;
+
+    await router.navigate('/admin/modules/other');
+    expect(await screen.findByText('other module=other')).toBeInTheDocument();
+    const sandbox = screen.getByRole('button', { name: 'sandbox' });
+    expect(sandbox).toBeEnabled();
+
+    // The old section's write settles (or starts) after it was unmounted: it
+    // must not lock the page it no longer belongs to.
+    act(() => departed(true));
+    expect(sandbox).toBeEnabled();
   });
 });

@@ -1,18 +1,10 @@
-import {
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useBlocker, useParams, useSearchParams } from 'react-router';
 import { Alert, Button, Card, Col, Modal, Row, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
 import { useTranslation } from 'react-i18next';
 import { OrkestraCardHeader } from 'components/common';
-import OrkestraLoader from 'components/common/OrkestraLoader';
 import { moduleCatalog } from 'modules/index';
 import {
   ADMIN_SECTION_PREFIX,
@@ -31,6 +23,7 @@ import ModuleConfigRail from './ModuleConfigRail';
 import ModuleConfigPanel from './ModuleConfigPanel';
 import ModuleDependencyCard from './ModuleDependencyCard';
 import ModuleSaveBar from './ModuleSaveBar';
+import AdminSectionHost from './AdminSectionHost';
 import LoggingModulePage from '../logging';
 import { hasPageRail } from '../configModel';
 import { useModuleConfigController } from '../useModuleConfigController';
@@ -153,10 +146,23 @@ const GenericModuleDetailPage: React.FC = () => {
     [sectionsModule]
   );
   // An addon section reports a write in flight: the page then refuses every
-  // way out of it (rail, environment switcher, route changes) until it
-  // settles, so the write's refetch can never reset edits started meanwhile.
-  const [addonBusy, setAddonBusy] = useState(false);
-  const onBusyChange = useCallback((busy: boolean) => setAddonBusy(busy), []);
+  // way out of it (rail, environment switcher, route changes, the shared
+  // save bar) until it settles, so the write's refetch can never reset edits
+  // started meanwhile. One entry per mounted section (AdminSectionHost), so
+  // the page stays locked until every section on screen has settled.
+  const [busySections, setBusySections] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
+  const addonBusy = busySections.size > 0;
+  const onSectionBusy = useCallback((id: string, busy: boolean) => {
+    setBusySections(prev => {
+      if (prev.has(id) === busy) return prev;
+      const next = new Set(prev);
+      if (busy) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
 
   const selectable = [
     SECTION_OVERVIEW,
@@ -183,14 +189,6 @@ const GenericModuleDetailPage: React.FC = () => {
       { replace: true }
     );
   };
-
-  // A section that is no longer shown is unmounted, and an unmounted section
-  // cannot report that it settled — never leave the page locked by one. The
-  // module name is a dependency too: a switch between two modules on the
-  // stacked page keeps `active` constant while unmounting the section.
-  useEffect(() => {
-    setAddonBusy(false);
-  }, [active, moduleName]);
 
   // A stale/unknown ?section= (a renamed or removed group, a copied link
   // from before a module's groups changed) already falls back to Overview
@@ -350,19 +348,20 @@ const GenericModuleDetailPage: React.FC = () => {
     </Modal>
   );
 
-  const renderAdminSection = (section: (typeof adminSections)[number]) => {
-    const Section = section.component;
-    return (
-      <Suspense fallback={<OrkestraLoader />}>
-        <Section
-          moduleName={mod.moduleName}
-          environment={currentEnv}
-          configDirty={dirtyCount > 0}
-          onBusyChange={onBusyChange}
-        />
-      </Suspense>
-    );
-  };
+  const renderAdminSection = (section: (typeof adminSections)[number]) => (
+    <AdminSectionHost
+      section={section}
+      moduleName={mod.moduleName}
+      environment={currentEnv}
+      configDirty={dirtyCount > 0}
+      onSectionBusy={onSectionBusy}
+    />
+  );
+  // Keyed by module as well as section key: two modules may both declare an
+  // `extra` section, and a module switch must remount the host — releasing
+  // the departed section's busy entry — rather than reuse it.
+  const adminSectionKey = (section: (typeof adminSections)[number]) =>
+    `${mod.moduleName}:${section.key}`;
 
   const envSwitchModal = pendingEnv && (
     <Modal show centered onHide={() => setPendingEnv(null)}>
@@ -466,7 +465,7 @@ const GenericModuleDetailPage: React.FC = () => {
             <ModuleDependencyCard module={mod} allModules={allModules} />
 
             {adminSections.map(section => (
-              <Card key={section.key} className="mb-3">
+              <Card key={adminSectionKey(section)} className="mb-3">
                 <OrkestraCardHeader
                   title={t(`${mod.moduleName}:${section.labelKey}`)}
                   light={false}
@@ -593,7 +592,7 @@ const GenericModuleDetailPage: React.FC = () => {
 
           {adminSections.map(section =>
             active === ADMIN_SECTION_PREFIX + section.key ? (
-              <Card key={section.key} className="mb-3">
+              <Card key={adminSectionKey(section)} className="mb-3">
                 <OrkestraCardHeader
                   title={t(`${mod.moduleName}:${section.labelKey}`)}
                   light={false}
@@ -666,6 +665,7 @@ const GenericModuleDetailPage: React.FC = () => {
               errors={saveBarErrorsDisplay}
               saving={saving}
               conflict={conflict}
+              locked={addonBusy}
               onReload={reloadAndReview}
               onDiscard={handleDiscard}
               onSave={onSave}
