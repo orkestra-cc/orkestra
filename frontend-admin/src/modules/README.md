@@ -41,6 +41,10 @@ When asked to build something new, consult these directories in order:
 3. **`src/reference/`** — Orkestra template library with full example apps (calendar, chat, email, kanban, social, support-desk) and 60+ component samples. When asked for a calendar or kanban, copy from here rather than reinventing.
 4. **`src/pages/<existing-module>/`** — for "build a page like X" requests, find an existing page in the same module category and follow its conventions.
 
+## Slot contributions
+
+A module can contribute UI to a slot another module owns (a detail-page tab, a panel) without either importing the other: the contributor declares `contributions: { '<slot id>': [SlotContribution] }` in its manifest, the owner reads `useSlotContributions('<slot id>')` and renders the results with the props it publishes. Keys must be prefixed `<module>.`; only active modules contribute (admin module list, or navigation visibility for non-admins); an optional `permission` hides a contribution from callers without it. See `types.ts`, `slotContributions.ts` and `useSlotContributions.ts`.
+
 ## Navigation is backend-driven
 
 The sidebar menu is **not** defined in the frontend. The React app fetches it from `/v1/navigation` (via the `navigationApi` RTK Query slice and the `useRoleBasedNavigation` hook). Each backend module declares its own `NavItems()` in its `module.go`, and the navigation core module aggregates them filtered by the user's role.

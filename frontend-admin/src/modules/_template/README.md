@@ -220,6 +220,31 @@ Resolution order is `<module>:config.…` → core `moduleConfig.<module>.…` �
 
 **Backend error codes.** To localize your addon's error codes, ship them as `errors.<rest>` inside your namespace bundle (e.g. `billing` code `billing.invoice_overdue` → key `errors.invoice_overdue`) and render with `helpers/resolveErrorMessage(err, fallback?)`, which tries `<module>:errors.<rest>` → core `errors.<code>` → the backend's English `detail`. No keys go into the core `errors.*`.
 
+### 6.6. Contribute to another module's slot (optional)
+
+If `widgets` should add a tab to a page another module owns — say a `reports` detail page that publishes the slot `reports.detail.tabs` — declare it in the manifest:
+
+```tsx
+const WidgetsSummaryTab = lazy(() => import('pages/widgets/ReportSummaryTab'));
+
+export const widgetsManifest: ModuleManifest = {
+  name: 'widgets',
+  routes: () => [/* … */],
+  contributions: {
+    'reports.detail.tabs': [
+      {
+        key: 'widgets.summary',
+        labelKey: 'reportTab.title',
+        permission: 'widgets.read',
+        component: WidgetsSummaryTab
+      }
+    ]
+  }
+};
+```
+
+The key must start with `widgets.`; `labelKey` lives in the `widgets` namespace; the tab's props are the ones the owner publishes — declare a structurally identical type under `pages/widgets/` instead of importing the owner's code. The owner renders it via `useSlotContributions('reports.detail.tabs')`, only while `widgets` is active.
+
 ### 7. Verify
 
 Run `npm run typecheck` and `npm run build` from `frontend/`. Boot the backend with the widgets module enabled (e.g. `MODULES=widgets` in your env file). Log in, and the "Widgets" entry should appear in the sidebar automatically because the navigation comes from the backend.
