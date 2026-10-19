@@ -21,6 +21,43 @@ export interface SlotContribution {
   component: LazyExoticComponent<ComponentType<any>>;
 }
 
+/** Props every addon section of the module detail page receives. */
+export interface ModuleAdminSectionProps {
+  moduleName: string;
+  /** The environment the module page is showing (?env=). */
+  environment: string;
+  /** True while the page's shared config form has unsaved edits. */
+  configDirty: boolean;
+  /**
+   * Report a write in flight. A boolean state, not a counter: pass true while
+   * a write is in flight and false when it settles, and again (false) on
+   * unmount. While true the host refuses to leave the section until it
+   * settles: the page's rail and environment switcher are locked and any
+   * route or query change asks for confirmation first.
+   */
+  onBusyChange: (busy: boolean) => void;
+}
+
+/** A section an addon contributes to /admin/modules/:name. */
+export interface ModuleAdminSection {
+  /**
+   * Reached at ?section=__addon:<key>. Must match `^[a-z0-9][a-z0-9_-]*$` and
+   * be unique within the manifest: the first duplicate wins, and invalid
+   * entries are not mounted.
+   */
+  key: string;
+  /**
+   * A key inside the module's own i18n namespace (ADR-0007), resolved as
+   * `t('<moduleName>:<labelKey>')` for the section's title.
+   */
+  labelKey: string;
+  /**
+   * The host wraps it in Suspense and mounts it only while its section is
+   * shown (the selected rail entry, or always on the stacked page).
+   */
+  component: LazyExoticComponent<ComponentType<ModuleAdminSectionProps>>;
+}
+
 export interface ModuleManifest {
   /** Must match backend module name exactly (e.g. 'billing', 'sales') */
   name: string;
@@ -30,6 +67,8 @@ export interface ModuleManifest {
   globalOverlay?: LazyExoticComponent<ComponentType>;
   /** Optional top-navbar action, mounted only while this module is visible. */
   globalNavAction?: LazyExoticComponent<ComponentType>;
+  /** Optional sections of the module's admin page (/admin/modules/:name). */
+  adminSections?: ModuleAdminSection[];
   /** Dynamically imports the API slice file, triggering injectEndpoints as a side effect */
   injectApi?: () => Promise<unknown>;
   /**

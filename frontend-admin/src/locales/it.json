@@ -3238,7 +3238,14 @@
         "goToError": "Vai a {{group}}",
         "reloadReview": "Ricarica e rivedi"
       },
+      "busyLeave": {
+        "title": "Salvataggio in corso",
+        "body": "Una modifica è ancora in fase di salvataggio. Uscendo ora potresti non vederne l'esito.",
+        "stay": "Resta",
+        "leave": "Esci comunque"
+      },
       "rail": {
+        "extensions": "Estensioni",
         "overview": "Panoramica",
         "configuration": "Configurazione",
         "module": "Modulo",

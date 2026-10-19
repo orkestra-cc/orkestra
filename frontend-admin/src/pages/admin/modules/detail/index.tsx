@@ -1,10 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useBlocker, useParams, useSearchParams } from 'react-router';
 import { Alert, Button, Card, Col, Modal, Row, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
 import { useTranslation } from 'react-i18next';
 import { OrkestraCardHeader } from 'components/common';
+import { moduleCatalog } from 'modules/index';
+import {
+  ADMIN_SECTION_PREFIX,
+  validAdminSections
+} from 'modules/adminSections';
 import {
   useGetModuleQuery,
   useGetModulesQuery,
@@ -18,6 +23,7 @@ import ModuleConfigRail from './ModuleConfigRail';
 import ModuleConfigPanel from './ModuleConfigPanel';
 import ModuleDependencyCard from './ModuleDependencyCard';
 import ModuleSaveBar from './ModuleSaveBar';
+import AdminSectionHost from './AdminSectionHost';
 import LoggingModulePage from '../logging';
 import { hasPageRail } from '../configModel';
 import { useModuleConfigController } from '../useModuleConfigController';
@@ -125,9 +131,43 @@ const GenericModuleDetailPage: React.FC = () => {
   // real declared hierarchy would be a bigger change than "no rail".
   const showRail = hasPageRail(groupTree, mod?.configGroups);
 
+  // Derived from the module actually on screen (`mod`), not from the URL: on a
+  // module switch RTK keeps the previous module's `mod` until the new one
+  // lands, and a section built from the new name would be handed the old
+  // module's name and environment. Memoised because validAdminSections warns
+  // (in development) about each malformed entry it drops, which must not
+  // repeat per render.
+  const sectionsModule = mod?.moduleName;
+  const adminSections = useMemo(
+    () =>
+      validAdminSections(
+        sectionsModule ? moduleCatalog[sectionsModule] : undefined
+      ),
+    [sectionsModule]
+  );
+  // An addon section reports a write in flight: the page then refuses every
+  // way out of it (rail, environment switcher, route changes, the shared
+  // save bar) until it settles, so the write's refetch can never reset edits
+  // started meanwhile. One entry per mounted section (AdminSectionHost), so
+  // the page stays locked until every section on screen has settled.
+  const [busySections, setBusySections] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
+  const addonBusy = busySections.size > 0;
+  const onSectionBusy = useCallback((id: string, busy: boolean) => {
+    setBusySections(prev => {
+      if (prev.has(id) === busy) return prev;
+      const next = new Set(prev);
+      if (busy) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
   const selectable = [
     SECTION_OVERVIEW,
     ...flatNodes.map(n => n.key),
+    ...adminSections.map(s => ADMIN_SECTION_PREFIX + s.key),
     SECTION_DEPENDENCIES,
     // Only a reachable destination when there is actually a choice to make —
     // matches the rail entry itself, and keeps a stale bookmark from landing
@@ -139,6 +179,7 @@ const GenericModuleDetailPage: React.FC = () => {
   const activeNode = flatNodes.find(node => node.key === active);
 
   const setActive = (key: string) => {
+    if (addonBusy) return;
     setSearchParams(
       prev => {
         const next = new URLSearchParams(prev);
@@ -155,10 +196,17 @@ const GenericModuleDetailPage: React.FC = () => {
   // value keeps propagating every time the link is shared again. Rewrite it
   // once resolved, still with `replace` so this never adds a history entry.
   useEffect(() => {
-    if (showRail && requested && requested !== active) {
+    // Not while `mod` still belongs to the previous module (a switch in
+    // flight): its sections would not know the requested key yet.
+    if (
+      showRail &&
+      mod?.moduleName === moduleName &&
+      requested &&
+      requested !== active
+    ) {
       setActive(active);
     }
-  }, [showRail, requested, active]);
+  }, [showRail, requested, active, mod?.moduleName, moduleName]);
 
   // Set for exactly one navigation by `confirmEnvSwitch`, which has already
   // asked and already discarded. A ref, not state: the blocker predicate runs
@@ -183,6 +231,11 @@ const GenericModuleDetailPage: React.FC = () => {
   // This is the page's ONLY useBlocker call — see the controller comment
   // above for why that single-registration property matters.
   const blocker = useBlocker(({ currentLocation, nextLocation }) => {
+    if (addonBusy)
+      return (
+        currentLocation.pathname !== nextLocation.pathname ||
+        currentLocation.search !== nextLocation.search
+      );
     if (dirtyCount === 0) return false;
     if (currentLocation.pathname !== nextLocation.pathname) return true;
     if (envSwitchConfirmed.current) {
@@ -194,6 +247,15 @@ const GenericModuleDetailPage: React.FC = () => {
     return from !== to;
   });
 
+  // The operator asked to leave while a write was in flight and the write has
+  // since settled: nothing is left to protect, so let the navigation through
+  // rather than leaving a modal up for a reason that no longer exists.
+  useEffect(() => {
+    if (blocker.state === 'blocked' && !addonBusy && dirtyCount === 0) {
+      blocker.proceed();
+    }
+  }, [blocker, addonBusy, dirtyCount]);
+
   // Picking a different environment changes the query arg behind
   // `useGetModuleEnvironmentQuery`, which lands a new `envConfig` and re-seeds
   // the form — silently discarding every unsaved edit across every group.
@@ -203,6 +265,7 @@ const GenericModuleDetailPage: React.FC = () => {
   // blocker above covers every other route to the same URL (Back, a pasted
   // link, anything that rewrites `?env=`).
   const handleEnvSelect = (env: string) => {
+    if (addonBusy) return;
     if (env === currentEnv) return;
     if (dirtyCount > 0) {
       setPendingEnv(env);
@@ -260,22 +323,45 @@ const GenericModuleDetailPage: React.FC = () => {
     <Modal show centered onHide={() => blocker.reset()}>
       <Modal.Header closeButton>
         <Modal.Title>
-          {t('adminModules.detail.configCard.unsavedTitle')}
+          {addonBusy
+            ? t('adminModules.detail.busyLeave.title')
+            : t('adminModules.detail.configCard.unsavedTitle')}
         </Modal.Title>
       </Modal.Header>
       <Modal.Body className="fs-10">
-        {t('adminModules.detail.configCard.unsavedBody')}
+        {addonBusy
+          ? t('adminModules.detail.busyLeave.body')
+          : t('adminModules.detail.configCard.unsavedBody')}
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" size="sm" onClick={() => blocker.reset()}>
-          {t('adminModules.detail.configCard.stay')}
+          {addonBusy
+            ? t('adminModules.detail.busyLeave.stay')
+            : t('adminModules.detail.configCard.stay')}
         </Button>
         <Button variant="danger" size="sm" onClick={() => blocker.proceed()}>
-          {t('adminModules.detail.configCard.leave')}
+          {addonBusy
+            ? t('adminModules.detail.busyLeave.leave')
+            : t('adminModules.detail.configCard.leave')}
         </Button>
       </Modal.Footer>
     </Modal>
   );
+
+  const renderAdminSection = (section: (typeof adminSections)[number]) => (
+    <AdminSectionHost
+      section={section}
+      moduleName={mod.moduleName}
+      environment={currentEnv}
+      configDirty={dirtyCount > 0}
+      onSectionBusy={onSectionBusy}
+    />
+  );
+  // Keyed by module as well as section key: two modules may both declare an
+  // `extra` section, and a module switch must remount the host — releasing
+  // the departed section's busy entry — rather than reuse it.
+  const adminSectionKey = (section: (typeof adminSections)[number]) =>
+    `${mod.moduleName}:${section.key}`;
 
   const envSwitchModal = pendingEnv && (
     <Modal show centered onHide={() => setPendingEnv(null)}>
@@ -361,14 +447,32 @@ const GenericModuleDetailPage: React.FC = () => {
                 availableEnvironments={environments}
                 selectedEnvironment={currentEnv}
                 onSelect={handleEnvSelect}
+                disabled={addonBusy}
               />
             )}
 
             {inactiveEnvNotice}
 
-            <ModuleConfigSection module={mod} controller={controller} />
+            {/* The section's write refetches the module and re-seeds the shared
+                form, which would discard edits typed meanwhile — so the form
+                is read-only while a section is busy, as the rail is. A
+                disabled fieldset disables every control inside it without
+                changing the layout. */}
+            <fieldset disabled={addonBusy} className="border-0 p-0 m-0">
+              <ModuleConfigSection module={mod} controller={controller} />
+            </fieldset>
 
             <ModuleDependencyCard module={mod} allModules={allModules} />
+
+            {adminSections.map(section => (
+              <Card key={adminSectionKey(section)} className="mb-3">
+                <OrkestraCardHeader
+                  title={t(`${mod.moduleName}:${section.labelKey}`)}
+                  light={false}
+                />
+                <Card.Body>{renderAdminSection(section)}</Card.Body>
+              </Card>
+            ))}
           </Col>
         </Row>
       </RecordListProvider>
@@ -416,6 +520,12 @@ const GenericModuleDetailPage: React.FC = () => {
                 moduleName={mod.moduleName}
                 activeKey={active}
                 onSelect={setActive}
+                disabled={addonBusy}
+                extensionCaption={t('adminModules.detail.rail.extensions')}
+                extensionItems={adminSections.map(section => ({
+                  key: ADMIN_SECTION_PREFIX + section.key,
+                  label: t(`${mod.moduleName}:${section.labelKey}`)
+                }))}
                 statusFor={node => ({
                   unfilled: unfilledByGroup.get(node.key) ?? 0
                 })}
@@ -474,9 +584,22 @@ const GenericModuleDetailPage: React.FC = () => {
                   availableEnvironments={environments}
                   selectedEnvironment={currentEnv}
                   onSelect={handleEnvSelect}
+                  disabled={addonBusy}
                 />
               </Card.Body>
             </Card>
+          )}
+
+          {adminSections.map(section =>
+            active === ADMIN_SECTION_PREFIX + section.key ? (
+              <Card key={adminSectionKey(section)} className="mb-3">
+                <OrkestraCardHeader
+                  title={t(`${mod.moduleName}:${section.labelKey}`)}
+                  light={false}
+                />
+                <Card.Body>{renderAdminSection(section)}</Card.Body>
+              </Card>
+            ) : null
           )}
 
           {activeNode && (
@@ -542,6 +665,7 @@ const GenericModuleDetailPage: React.FC = () => {
               errors={saveBarErrorsDisplay}
               saving={saving}
               conflict={conflict}
+              locked={addonBusy}
               onReload={reloadAndReview}
               onDiscard={handleDiscard}
               onSave={onSave}

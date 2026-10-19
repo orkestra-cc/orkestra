@@ -39,6 +39,11 @@ export interface ModuleSaveBarProps {
   saving: boolean;
   /** Save lost its compare-and-swap; Save is disabled until `onReload` runs. */
   conflict?: boolean;
+  /**
+   * An addon section of the page has a write in flight: every action is held
+   * until it settles, because that write's refetch re-seeds this form.
+   */
+  locked?: boolean;
   onReload?: () => void;
   onDiscard: () => void;
   onSave: () => void;
@@ -59,6 +64,7 @@ const ModuleSaveBar: React.FC<ModuleSaveBarProps> = ({
   errors,
   saving,
   conflict,
+  locked = false,
   onReload,
   onDiscard,
   onSave
@@ -107,7 +113,7 @@ const ModuleSaveBar: React.FC<ModuleSaveBarProps> = ({
             variant="outline-secondary"
             size="sm"
             onClick={onDiscard}
-            disabled={saving}
+            disabled={saving || locked}
           >
             {t('adminModules.detail.configCard.discard')}
           </Button>
@@ -118,7 +124,7 @@ const ModuleSaveBar: React.FC<ModuleSaveBarProps> = ({
             variant="warning"
             size="sm"
             onClick={onReload}
-            disabled={saving}
+            disabled={saving || locked}
           >
             {t('adminModules.detail.saveBar.reloadReview')}
           </Button>
@@ -128,7 +134,7 @@ const ModuleSaveBar: React.FC<ModuleSaveBarProps> = ({
           variant="primary"
           size="sm"
           onClick={onSave}
-          disabled={saving || dirtyCount === 0 || conflict}
+          disabled={saving || locked || dirtyCount === 0 || conflict}
         >
           {saving ? (
             <Spinner animation="border" size="sm" />
