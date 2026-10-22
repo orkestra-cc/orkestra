@@ -243,25 +243,29 @@ describe('SetupGate — phase routing', () => {
   // OrgStep's sign-in prompt and its switch-account action both send the
   // operator to /login with state.from = /setup; bouncing that back to the
   // wizard looped forever with no way to authenticate.
-  it.each(['/login', '/mfa/verify'])(
-    'lets %s through when phase is tenant_required',
-    async initialPath => {
-      server.use(
-        http.get(url('/v1/setup/status'), () =>
-          HttpResponse.json({
-            setupCompleted: false,
-            phase: 'tenant_required',
-            smtpConfigured: false
-          })
-        )
-      );
+  it.each([
+    '/login',
+    '/login/',
+    '/mfa/verify',
+    '/auth/callback',
+    '/forgot-password',
+    '/reset-password'
+  ])('lets %s through when phase is tenant_required', async initialPath => {
+    server.use(
+      http.get(url('/v1/setup/status'), () =>
+        HttpResponse.json({
+          setupCompleted: false,
+          phase: 'tenant_required',
+          smtpConfigured: false
+        })
+      )
+    );
 
-      renderGate(<div>SIGN_IN_PAGE</div>, { initialPath });
+    renderGate(<div>SIGN_IN_PAGE</div>, { initialPath });
 
-      expect(await screen.findByText('SIGN_IN_PAGE')).toBeInTheDocument();
-      expect(screen.queryByText('SETUP_WIZARD')).not.toBeInTheDocument();
-    }
-  );
+    expect(await screen.findByText('SIGN_IN_PAGE')).toBeInTheDocument();
+    expect(screen.queryByText('SETUP_WIZARD')).not.toBeInTheDocument();
+  });
 
   it('still redirects /login to /setup when phase is admin_required', async () => {
     server.use(

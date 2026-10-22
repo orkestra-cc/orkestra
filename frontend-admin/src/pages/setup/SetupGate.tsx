@@ -23,11 +23,18 @@ const SETUP_STATUS_UNAVAILABLE_CODE = 'setup.status_unavailable';
 // but fall back to something sane if a future change ever omits it.
 const DEFAULT_RETRY_AFTER_SECONDS = 5;
 
-// Sign-in routes reachable once the administrator exists: the wizard's
-// Organization step needs a session, and its sign-in prompt and
+// Public sign-in routes reachable once the administrator exists: the
+// wizard's Organization step needs a session, and its sign-in prompt and
 // switch-account action send the operator here with state.from = /setup,
-// so the login completes back into the wizard.
-const TENANT_REQUIRED_SIGN_IN_PATHS = ['/login', '/mfa/verify'];
+// so every completion path (password, MFA, SSO callback) returns to the
+// wizard. Password recovery is listed because the login page links to it.
+const TENANT_REQUIRED_SIGN_IN_PATHS = [
+  '/login',
+  '/mfa/verify',
+  '/auth/callback',
+  '/forgot-password',
+  '/reset-password'
+];
 
 interface SetupStatusErrorInfo {
   status?: number;
@@ -142,7 +149,9 @@ const SetupGate = ({ children }: SetupGateProps) => {
   const isSetupPath = location.pathname.startsWith('/setup');
   const isSignInPath =
     data.phase === 'tenant_required' &&
-    TENANT_REQUIRED_SIGN_IN_PATHS.includes(location.pathname);
+    TENANT_REQUIRED_SIGN_IN_PATHS.includes(
+      location.pathname.replace(/\/+$/, '')
+    );
 
   if (data.phase !== 'complete' && !isSetupPath && !isSignInPath) {
     return <Navigate to="/setup" replace />;
