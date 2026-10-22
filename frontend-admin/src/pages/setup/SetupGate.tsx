@@ -23,6 +23,12 @@ const SETUP_STATUS_UNAVAILABLE_CODE = 'setup.status_unavailable';
 // but fall back to something sane if a future change ever omits it.
 const DEFAULT_RETRY_AFTER_SECONDS = 5;
 
+// Sign-in routes reachable once the administrator exists: the wizard's
+// Organization step needs a session, and its sign-in prompt and
+// switch-account action send the operator here with state.from = /setup,
+// so the login completes back into the wizard.
+const TENANT_REQUIRED_SIGN_IN_PATHS = ['/login', '/mfa/verify'];
+
 interface SetupStatusErrorInfo {
   status?: number;
   data?: { code?: string; detail?: string };
@@ -50,7 +56,9 @@ interface SetupStatusErrorInfo {
  *  - phase === 'complete': render children normally (the common case
  *    after the first install).
  *  - phase !== 'complete': force-redirect anything that isn't already
- *    under /setup to /setup.
+ *    under /setup to /setup, except the sign-in routes while the phase is
+ *    tenant_required (the administrator exists and must be able to sign
+ *    in to finish the Organization step).
  */
 const SetupGate = ({ children }: SetupGateProps) => {
   const { t } = useTranslation();
@@ -132,8 +140,11 @@ const SetupGate = ({ children }: SetupGateProps) => {
   }
 
   const isSetupPath = location.pathname.startsWith('/setup');
+  const isSignInPath =
+    data.phase === 'tenant_required' &&
+    TENANT_REQUIRED_SIGN_IN_PATHS.includes(location.pathname);
 
-  if (data.phase !== 'complete' && !isSetupPath) {
+  if (data.phase !== 'complete' && !isSetupPath && !isSignInPath) {
     return <Navigate to="/setup" replace />;
   }
 
