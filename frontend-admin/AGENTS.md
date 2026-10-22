@@ -319,7 +319,7 @@ Adding a new field: declare it on `RuntimeConfig` in `src/config/environment.ts`
 
 If a stale config reappears at an edge, diff origin against edge before touching this code — `curl -sI http://127.0.0.1:${FRONTEND_PORT}/config.js` vs `curl -sI https://<host>/config.js` — a `cf-cache-status` other than `DYNAMIC`/`BYPASS` means the CDN, not the app, owns the header, and the fix is a cache rule on the zone.
 
-**Same-origin dev proxy (optional).** Set `VITE_DEV_PROXY_TARGET` (for example `http://127.0.0.1:18551`) when `npm run dev` runs against a separate backend, such as a worktree slot's console. The dev server then forwards `/v1` (HTTP) and `/ws` (WebSocket) to that target, so the SPA calls its API on its own origin. Unset or empty, the proxy is off and nothing changes. The mapping lives in `src/config/devProxy.js`, wired into `server.proxy` in `vite.config.js`. It is dev-server only: the production nginx image is not affected.
+**Same-origin dev proxy (optional).** Set `VITE_DEV_PROXY_TARGET` (for example `http://backend:3000`) when `npm run dev` runs against a separate backend. The dev server then forwards `/v1` (HTTP) and `/ws` (WebSocket) to that target, so the SPA calls its API on its own origin. Unset or empty, the proxy is off and nothing changes. The mapping lives in `src/config/devProxy.js`, wired into `server.proxy` in `vite.config.js`. It is dev-server only: the production nginx image is not affected.
 
 ## Application version
 
