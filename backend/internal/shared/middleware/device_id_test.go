@@ -28,7 +28,7 @@ import (
 
 func deviceMW() *DeviceMiddleware {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	return NewDeviceMiddleware(errors.NewManager(logger, true))
+	return NewDeviceMiddleware(errors.NewManager(logger, true), "")
 }
 
 // runDevice drives the middleware and returns the extracted info plus the
@@ -158,5 +158,48 @@ func TestFingerprint_StaysAStableHeaderSignal(t *testing.T) {
 	}
 	if first.Fingerprint == first.DeviceID {
 		t.Error("the device id must not be the header fingerprint")
+	}
+}
+
+// Two stacks on one host share every cookie by name, so the device cookie
+// name is configurable per environment.
+func TestDeviceCookieNameOverride(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	mw := NewDeviceMiddleware(errors.NewManager(logger, true), "owt_x_did")
+	run := func(r *http.Request) (*types.DeviceInfo, *httptest.ResponseRecorder) {
+		var captured *types.DeviceInfo
+		rec := httptest.NewRecorder()
+		mw.ExtractDeviceInfo(http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
+			captured = types.GetDeviceInfoFromContext(req.Context())
+		})).ServeHTTP(rec, r)
+		return captured, rec
+	}
+
+	info, rec := run(browserRequest())
+	if got := cookieValue(rec, "owt_x_did"); got == "" || got != info.DeviceID {
+		t.Errorf("expected owt_x_did cookie carrying %q, got %q", info.DeviceID, got)
+	}
+	if cookieValue(rec, DeviceIDCookieName) != "" {
+		t.Error("the default cookie name must not be minted when a custom name is set")
+	}
+
+	back := browserRequest()
+	back.AddCookie(&http.Cookie{Name: "owt_x_did", Value: "known-device"})
+	info, rec = run(back)
+	if info.DeviceID != "known-device" {
+		t.Errorf("custom-named cookie must be honoured: got %q", info.DeviceID)
+	}
+	if cookieValue(rec, "owt_x_did") != "" {
+		t.Error("no re-mint when the custom cookie is presented")
+	}
+
+	other := browserRequest()
+	other.AddCookie(&http.Cookie{Name: DeviceIDCookieName, Value: "other-stack-device"})
+	info, rec = run(other)
+	if info.DeviceID == "other-stack-device" {
+		t.Error("a cookie under the default name must be ignored when a custom name is set")
+	}
+	if cookieValue(rec, "owt_x_did") == "" {
+		t.Error("a fresh id must be minted under the custom name")
 	}
 }

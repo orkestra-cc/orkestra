@@ -149,6 +149,7 @@ Keep this split when touching `.env*` or `docker-compose.*.yml`:
 | Boot identity (`APP_NAME`, `ENV`, `PORT`, host/port mappings) | process | ✅ yes |
 | Database connections (`MONGO_URI`, `REDIS_URL`, credentials) | process | ✅ yes |
 | JWT keys, cookies, CORS, rate limits, observability | process | ✅ yes |
+| `COOKIE_NAME_REFRESH` / `DEVICE_COOKIE_NAME` | process — refresh and device-id cookie names (defaults `orkestra_cookie`, `orkestra_did`). Cookies are shared by name across ports on one host, so stacks sharing a host set distinct values; `DEVICE_COOKIE_NAME` must be an RFC 6265 token or `config.Validate()` refuses to boot. | ✅ yes |
 | `LOKI_QUERY_URL` / `GRAFANA_URL` | process — trusted Tier-1 log-preview upstream + optional browser deep-link base; never derived from request data | ✅ yes |
 | Encryption keys (`OAUTH_TOKEN_ENCRYPTION_KEY`, `ORKESTRA_KMS_MASTER_KEY`, `LLM_SECRET_ENCRYPTION_KEY`, optional `MFA_SECRET_ENCRYPTION_KEY`) | process — bootstraps ConfigService; the LLM key seals provider credentials when no KMS is wired (ADR-0022); the backend boots without it (a missing/malformed key only disables secret writes, WARN) but staging/production `env-validate` refuses a missing, placeholder or non-64-hex key | ✅ yes |
 | Process-scoped auth tunables (`AUTH_REQUIRE_EMAIL_VERIFICATION`, `AUTH_RISK_STEP_UP_THRESHOLD`, `WEBAUTHN_RP_ID`, `AUTH_GEOIP_DB_PATH`, `TENANT_KIND_ENFORCEMENT`, `CEDAR_ENFORCE_ACTIONS`) | process | ✅ yes |

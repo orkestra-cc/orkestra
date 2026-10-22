@@ -414,7 +414,7 @@ func main() {
 	if userProv, ok := module.GetTyped[iface.UserProvider](svcRegistry, module.ServiceUserService); ok {
 		authMW.SetUserProvider(userProv)
 	}
-	deviceMW := authMiddleware.NewDeviceMiddleware(errorManager)
+	deviceMW := authMiddleware.NewDeviceMiddleware(errorManager, cfg.Auth.Cookie.DeviceName)
 
 	// ADR-0003 PR-C: build two audience-scoped surfaces (operator + client),
 	// each with its own chi.Mux + huma.API + protected sub-router. Both run

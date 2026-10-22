@@ -41,12 +41,19 @@ const deviceIDCookieMaxAge = 365 * 24 * 60 * 60
 // DeviceMiddleware extracts device information from HTTP requests
 type DeviceMiddleware struct {
 	errorManager *errors.Manager
+	cookieName   string
 }
 
-// NewDeviceMiddleware creates a new device middleware instance
-func NewDeviceMiddleware(errorManager *errors.Manager) *DeviceMiddleware {
+// NewDeviceMiddleware creates a new device middleware instance. cookieName
+// names the device cookie (DEVICE_COOKIE_NAME); empty falls back to
+// DeviceIDCookieName.
+func NewDeviceMiddleware(errorManager *errors.Manager, cookieName string) *DeviceMiddleware {
+	if cookieName == "" {
+		cookieName = DeviceIDCookieName
+	}
 	return &DeviceMiddleware{
 		errorManager: errorManager,
+		cookieName:   cookieName,
 	}
 }
 
@@ -57,9 +64,9 @@ func (m *DeviceMiddleware) ExtractDeviceInfo(next http.Handler) http.Handler {
 		// Mint the cookie only when this request had no device identity
 		// of its own; a returning browser or a native app carries one
 		// already and re-issuing would churn the id on every request.
-		if deviceInfo.DeviceID != "" && !hasDeviceIdentity(r) {
+		if deviceInfo.DeviceID != "" && !m.hasDeviceIdentity(r) {
 			http.SetCookie(w, &http.Cookie{
-				Name:     DeviceIDCookieName,
+				Name:     m.cookieName,
 				Value:    deviceInfo.DeviceID,
 				Path:     "/",
 				MaxAge:   deviceIDCookieMaxAge,
@@ -74,11 +81,11 @@ func (m *DeviceMiddleware) ExtractDeviceInfo(next http.Handler) http.Handler {
 }
 
 // hasDeviceIdentity reports whether the caller already presented one.
-func hasDeviceIdentity(r *http.Request) bool {
+func (m *DeviceMiddleware) hasDeviceIdentity(r *http.Request) bool {
 	if r.Header.Get("X-Device-ID") != "" {
 		return true
 	}
-	c, err := r.Cookie(DeviceIDCookieName)
+	c, err := r.Cookie(m.cookieName)
 	return err == nil && c.Value != ""
 }
 
@@ -132,7 +139,7 @@ func (m *DeviceMiddleware) extractDeviceID(r *http.Request) string {
 		return deviceID
 	}
 	// Browsers carry the server-minted cookie.
-	if c, err := r.Cookie(DeviceIDCookieName); err == nil && c.Value != "" {
+	if c, err := r.Cookie(m.cookieName); err == nil && c.Value != "" {
 		return c.Value
 	}
 	return ""
