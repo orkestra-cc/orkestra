@@ -110,11 +110,25 @@ $body-quaternary-bg-dark: #0b1727 !default;
 $border-color-dark: rgba($white, 0.05) !default;
 $border-color-translucent-dark: rgba($black, 0.175) !default;
 
-$link-color-dark: $primary !default;
+// Dark Link Ink. Raw `$primary` (#2c7be5) measured 4.06:1 on the dark card
+// (#121e2d), 3.88:1 on `bg-body-tertiary` (#162231) and 4.35:1 on the canvas
+// — every dark link and `btn-link` was under the 4.5:1 AA floor. A 15% tint
+// (#4c8fe9) keeps the hue and lands 5.13 / 4.91 / 5.49:1. Hover now *lifts*
+// (tint, Bootstrap's own dark direction) instead of shading: the old shade
+// (#2362b7) sank to 2.82:1 on the card, and `.btn-link`'s active state reads
+// the same token.
+//
+// A deliberate both-modes change under DESIGN.md's Frozen Dark Rule (light
+// already had its Link Ink); derived from `$primary`, never from the ramp.
+$link-color-dark: tint-color($primary, 15%) !default;
 $link-hover-color-dark: shift-color(
   $link-color-dark,
-  $link-shade-percentage
+  -$link-shade-percentage
 ) !default;
+
+// Dark half of `$btn-orkestra-primary-color`: the same ink as dark links. Raw
+// `$primary` sat at 4.35:1 on the dark button surface (#0b1727).
+$btn-orkestra-primary-color-dark: $link-color-dark !default;
 
 $code-color-dark: $pink !default;
 
