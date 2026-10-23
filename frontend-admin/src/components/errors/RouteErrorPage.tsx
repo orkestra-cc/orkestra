@@ -16,12 +16,14 @@ import {
 // fall back into the same broken bundle.
 const RouteErrorPage: React.FC = () => {
   const error = useRouteError();
-  const [reloading] = useState(
+  const [reloading, setReloading] = useState(
     () => isStaleChunkError(error) && staleChunkReloadAllowed()
   );
 
+  // The reload can still give up (storage that reads but refuses the
+  // guard's write): show the error page then, never a loader that stays.
   useEffect(() => {
-    if (reloading) reloadForStaleChunk();
+    if (reloading && !reloadForStaleChunk()) setReloading(false);
   }, [reloading]);
 
   if (reloading) return <OrkestraLoader fullPage />;

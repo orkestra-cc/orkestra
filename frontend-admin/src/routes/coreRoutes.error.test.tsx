@@ -70,6 +70,22 @@ describe('root route error handling', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('shows the error page when the reload cannot start', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Storage that still reads but refuses writes (full quota): the guard
+    // allows a reload, then the reload gives up without reloading.
+    vi.spyOn(staleChunk, 'staleChunkReloadAllowed').mockReturnValue(true);
+    vi.spyOn(staleChunk, 'reloadForStaleChunk').mockReturnValue(false);
+
+    renderFailingRoute(new TypeError('Importing a module script failed.'));
+
+    expect(
+      await screen.findByRole('heading', {
+        name: /whoops, something went wrong/i
+      })
+    ).toBeInTheDocument();
+  });
+
   it('shows the error page when it already reloaded moments ago', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(staleChunk, 'staleChunkReloadAllowed').mockReturnValue(false);
