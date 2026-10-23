@@ -19,6 +19,7 @@ import OrkestraLoader from 'components/common/OrkestraLoader';
 import Error401 from 'components/errors/Error401';
 import Error404 from 'components/errors/Error404';
 import Error500 from 'components/errors/Error500';
+import RouteErrorPage from 'components/errors/RouteErrorPage';
 
 import Login from 'components/authentication/Login';
 import Register from 'components/authentication/Register';
@@ -72,11 +73,7 @@ export function buildCoreRoutes(
   return [
     {
       element: <App />,
-      errorElement: (
-        <ErrorLayout>
-          <Error500 />
-        </ErrorLayout>
-      ),
+      errorElement: <RouteErrorPage />,
       children: [
         {
           path: 'landing',

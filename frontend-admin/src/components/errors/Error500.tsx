@@ -4,8 +4,17 @@ import { Button, Card } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
-const Error500 = () => {
+interface Error500Props {
+  // Load the dashboard from the server instead of navigating in the app: the
+  // route error page uses it, since the app that failed may not recover.
+  fullPageLoad?: boolean;
+}
+
+const Error500 = ({ fullPageLoad = false }: Error500Props) => {
   const { t } = useTranslation();
+  const linkProps = fullPageLoad
+    ? { href: `${import.meta.env.BASE_URL}user/dashboard` }
+    : { as: Link as any, to: '/user/dashboard' };
   return (
     <Card className="text-center h-100">
       <Card.Body className="p-5">
@@ -25,8 +34,7 @@ const Error500 = () => {
           variant="orkestra-primary"
           size="sm"
           className="mt-3"
-          as={Link as any}
-          to="/user/dashboard"
+          {...linkProps}
         >
           <FontAwesomeIcon icon={faHome} className="me-2" />
           {t('errors.500.backToDashboard')}
