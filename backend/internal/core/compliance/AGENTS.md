@@ -7,12 +7,13 @@ Re-homed from the ADR-0006-removed `internal/addons/compliance` addon; see [ADR-
 ## Layout
 
 ```
-module.go                         Module: collections, permissions, config, nav, Init (wires sink/DSR/KMS/legal-hold/retention/workflow), Start/Stop (retention ticker), routes
+module.go                         Module: collections, permissions, config, nav, Init (wires sink/DSR/KMS/legal-hold/retention/workflow), Start/Stop (policy, retention and erasure-retry loops), routes
 services/
   sink.go                         AuditSink impl (append-only compliance_audit_events); satisfies iface.AuditSink
   dsr.go                          DSRService: Export + Erase over iface.PIIProducerRegistry; EraseMode; legal-hold gate (ErrLegalHoldActive)
   legal_hold.go                   LegalHoldService (Place/Release/ListActive/IsHeld) — IsHeld satisfies DSRService.LegalHoldChecker
-  retention.go                    RetentionService: daily Loop reaping anonymized user tombstones via the DSR (off by default)
+  retention.go                    RetentionService: daily Loop reaping anonymized user tombstones through ErasureRequestService.EraseNow (durable `retention` request; skips subjects with an incomplete erasure; off by default)
+  erasure_retry.go                ErasureRetryWorker: every 1m RetryDue up to 50 incomplete requests; launched by Start(), stopped via stopCh
   erasure_request.go              ErasureRequestService: lodge / list / execute / reject
   kms.go                          Local KMS provider (per-tenant envelope encryption + crypto-shred); satisfies iface.KMSProvider; Decrypt wraps iface.ErrKMSCiphertextInvalid for a truncated/tampered/foreign-key ciphertext, iface.ErrKMSKeyDeleted after a shred
   soc2.go                         SOC2 evidence aggregation (gated)

@@ -42,6 +42,7 @@ type Module struct {
 	legalHold     *handlers.LegalHoldHandler
 	retention     *handlers.RetentionHandler
 	retentionSvc  *services.RetentionService
+	erasureRetry  *services.ErasureRetryWorker
 	erasureReq    *handlers.ErasureRequestHandler
 	policySvc     *services.PolicyService
 	policyAdmin   *services.PolicyAdminService
@@ -321,8 +322,17 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		dsrSvc.SetLegalHoldChecker(legalHoldSvc)
 		m.me = handlers.NewMeHandler(dsrSvc)
 
+		// Mediated right-to-erasure workflow — subjects lodge a request, an
+		// operator reviews and executes (running the DSR erase) or rejects it.
+		// Every erasure (operator, self-service, retention) is a durable
+		// request kept incomplete until every producer is done; the retry
+		// worker, launched by Start(), finishes the ones that are not.
+		erasureReqSvc := services.NewErasureRequestService(repository.NewErasureRequestRepo(deps.DB), dsrSvc, sink, deps.Logger)
+		m.erasureReq = handlers.NewErasureRequestHandler(erasureReqSvc)
+		m.erasureRetry = services.NewErasureRetryWorker(erasureReqSvc, deps.Logger)
+
 		// Retention auto-cleanup — reaps anonymized user tombstones past the
-		// window via the DSR pipeline (so the legal-hold gate applies). Off by
+		// window through the erasure workflow (so the legal-hold gate applies). Off by
 		// default; the daily ticker is launched by Start() only when enabled.
 		retentionCfg := func() services.RetentionConfig {
 			return services.RetentionConfig{
@@ -330,13 +340,8 @@ func (m *Module) Init(deps *module.Dependencies) error {
 				Years:   deps.GetConfigInt("compliance", "retention_years", 5),
 			}
 		}
-		m.retentionSvc = services.NewRetentionService(deps.DB, dsrSvc, deps.Logger, retentionCfg)
+		m.retentionSvc = services.NewRetentionService(deps.DB, erasureReqSvc, deps.Logger, retentionCfg)
 		m.retention = handlers.NewRetentionHandler(m.retentionSvc)
-
-		// Mediated right-to-erasure workflow — subjects lodge a request, an
-		// operator reviews and executes (running the DSR erase) or rejects it.
-		erasureReqSvc := services.NewErasureRequestService(repository.NewErasureRequestRepo(deps.DB), dsrSvc, sink, deps.Logger)
-		m.erasureReq = handlers.NewErasureRequestHandler(erasureReqSvc)
 	}
 
 	// SOC2 evidence — gated behind compliance.soc2_enabled (default false):
@@ -391,7 +396,8 @@ func publishAuditSink(registry *module.ServiceRegistry, sink iface.AuditSink) {
 
 // Start launches the background loops: the policy snapshot refresh (every
 // 5 s), the change-request expiry (hourly) and the retention auto-cleanup
-// ticker (which re-reads its enable flag every run).
+// ticker (which re-reads its enable flag every run), plus the erasure retry
+// worker (every minute) that finishes incomplete erasure requests.
 func (m *Module) Start(ctx context.Context) error {
 	m.stopCh = make(chan struct{})
 	if m.policySvc != nil {
@@ -403,10 +409,14 @@ func (m *Module) Start(ctx context.Context) error {
 	if m.retentionSvc != nil {
 		go m.retentionSvc.Loop(ctx, m.stopCh)
 	}
+	if m.erasureRetry != nil {
+		go m.erasureRetry.Loop(ctx, m.stopCh)
+	}
 	return nil
 }
 
-// Stop halts the retention ticker on module disable / host shutdown.
+// Stop halts the background loops (policy refresh, expiry, retention, erasure
+// retry) on module disable / host shutdown by closing stopCh.
 func (m *Module) Stop(_ context.Context) error {
 	if m.stopCh != nil {
 		close(m.stopCh)

@@ -123,7 +123,8 @@ func TestRetentionPreviewAndRunOnce(t *testing.T) {
 	// so RunOnce counts every expired tombstone it processes.
 	dsr := NewDSRService(iface.NewPIIProducerRegistry(), nil, slog.Default())
 	cfg := func() RetentionConfig { return RetentionConfig{Enabled: true, Years: 5} }
-	svc := NewRetentionService(db, dsr, slog.Default(), cfg)
+	erasures := NewErasureRequestService(repository.NewErasureRequestRepo(db), dsr, nil, slog.Default())
+	svc := NewRetentionService(db, erasures, slog.Default(), cfg)
 
 	ids, cutoff, err := svc.Preview(ctx)
 	if err != nil {
@@ -142,6 +143,55 @@ func TestRetentionPreviewAndRunOnce(t *testing.T) {
 	}
 	if purged != 2 {
 		t.Fatalf("RunOnce purged %d; want 2", purged)
+	}
+	rows, err := erasures.repo.ListByStatus(ctx, models.ErasureRequestCompleted)
+	if err != nil {
+		t.Fatalf("ListByStatus: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("want 2 completed erasure rows, got %d: %+v", len(rows), rows)
+	}
+	for _, r := range rows {
+		if r.Source != models.ErasureSourceRetention {
+			t.Fatalf("row source = %q; want retention", r.Source)
+		}
+	}
+}
+
+// TestRetentionSkipsSubjectWithIncompleteErasure pins that the retry worker
+// owns a subject whose erasure is still incomplete: retention records no new
+// run for it.
+func TestRetentionSkipsSubjectWithIncompleteErasure(t *testing.T) {
+	db, cleanup := newServiceTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	old := time.Now().UTC().Add(-10 * 365 * 24 * time.Hour)
+	insertDoc(t, db, "operator_users", bson.M{"uuid": "u-a", "deletedAt": old})
+	insertDoc(t, db, "operator_users", bson.M{"uuid": "u-b", "deletedAt": old})
+
+	dsr := NewDSRService(iface.NewPIIProducerRegistry(), nil, slog.Default())
+	repo := repository.NewErasureRequestRepo(db)
+	erasures := NewErasureRequestService(repo, dsr, nil, slog.Default())
+	if err := repo.Insert(ctx, &models.ErasureRequest{
+		UUID: "pre-a", UserUUID: "u-a", Status: models.ErasureRequestIncomplete,
+		Source: models.ErasureSourceRequest, RequestedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	svc := NewRetentionService(db, erasures, slog.Default(), func() RetentionConfig { return RetentionConfig{Enabled: true, Years: 5} })
+
+	n, err := svc.RunOnce(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("RunOnce = %d, %v; want 1 (u-b only), nil", n, err)
+	}
+	has, err := repo.HasIncomplete(ctx, "u-a")
+	if err != nil || !has {
+		t.Fatalf("u-a incomplete row should remain: %v %v", has, err)
+	}
+	done, err := repo.ListByStatus(ctx, models.ErasureRequestCompleted)
+	if err != nil || len(done) != 1 || done[0].UserUUID != "u-b" {
+		t.Fatalf("only u-b should have a completed run: %+v %v", done, err)
 	}
 }
 

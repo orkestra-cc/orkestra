@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/orkestra/backend/internal/core/compliance/models"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -26,18 +27,20 @@ var userTombstoneCollections = []string{"operator_users", "client_users"}
 // configured retention window. A tombstone is the row the user PII producer
 // leaves behind under EraseAnonymize (deletedAt set, email aliased, UUID
 // kept). Off by default — RunOnce is a no-op unless RetentionConfig.Enabled.
-// Erasure runs through the DSR pipeline, so the legal-hold gate is honoured.
+// Each reap is recorded as a durable erasure request (source "retention"), so
+// the legal-hold gate is honoured and a producer that cannot finish is retried
+// by the erasure retry worker.
 type RetentionService struct {
 	db         *mongo.Database
-	dsr        *DSRService
+	erasures   *ErasureRequestService
 	logger     *slog.Logger
 	loadConfig func() RetentionConfig
 }
 
 // NewRetentionService wires the retention job. loadConfig is consulted on
 // every run so the enable flag and window are live-editable.
-func NewRetentionService(db *mongo.Database, dsr *DSRService, logger *slog.Logger, loadConfig func() RetentionConfig) *RetentionService {
-	return &RetentionService{db: db, dsr: dsr, logger: logger, loadConfig: loadConfig}
+func NewRetentionService(db *mongo.Database, erasures *ErasureRequestService, logger *slog.Logger, loadConfig func() RetentionConfig) *RetentionService {
+	return &RetentionService{db: db, erasures: erasures, logger: logger, loadConfig: loadConfig}
 }
 
 // Preview returns the userUUIDs whose anonymized tombstone has passed the
@@ -49,9 +52,10 @@ func (s *RetentionService) Preview(ctx context.Context) ([]string, time.Time, er
 	return ids, cutoff, err
 }
 
-// RunOnce hard-deletes every expired tombstone, skipping subjects under an
-// active legal hold (the DSR erase gate enforces that — a held subject errors
-// and is logged-and-skipped). No-op when disabled. Returns the purge count.
+// RunOnce hard-deletes every expired tombstone through the erasure workflow,
+// skipping subjects that already have an incomplete erasure (the retry worker
+// owns them) and subjects under an active legal hold (logged and skipped).
+// No-op when disabled. Returns the number of runs settled completed.
 func (s *RetentionService) RunOnce(ctx context.Context) (int, error) {
 	cfg := s.loadConfig()
 	if !cfg.Enabled {
@@ -63,14 +67,28 @@ func (s *RetentionService) RunOnce(ctx context.Context) (int, error) {
 	}
 	purged := 0
 	for _, id := range ids {
-		if _, err := s.dsr.Erase(ctx, id, iface.EraseHardDelete); err != nil {
+		if has, err := s.erasures.HasIncomplete(ctx, id); err != nil {
+			s.logger.Warn("retention: skip subject",
+				slog.String("userUuid", id),
+				slog.String("reason", err.Error()),
+			)
+			continue
+		} else if has {
+			s.logger.Debug("retention: erasure already incomplete; retry worker owns it",
+				slog.String("userUuid", id))
+			continue
+		}
+		out, err := s.erasures.EraseNow(ctx, id, "", models.ErasureSourceRetention, "system:retention", iface.EraseHardDelete)
+		if err != nil {
 			s.logger.Warn("retention: skip subject",
 				slog.String("userUuid", id),
 				slog.String("reason", err.Error()),
 			)
 			continue
 		}
-		purged++
+		if out.Request.Status == models.ErasureRequestCompleted {
+			purged++
+		}
 	}
 	return purged, nil
 }
