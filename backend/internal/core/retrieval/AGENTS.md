@@ -20,7 +20,7 @@ This step (PR 3) delivers the registry, the engine contract, the Qdrant driver a
 | `services/` | `Service` (`New(Options{Engine, CollectionPrefix, Logger})`, `Seal`, `Engine()`, `CollectionPrefix()`): the corpus registry and principal-contributor registry; implements `iface.RetrievalCorpusRegistry` |
 | `engine/` | Engine-neutral contract: `Engine`, `Point`, `Query`, `Filter`, `Selector`, `Runtime`, `PointID`, sentinels |
 | `engine/qdrant/` | Qdrant REST driver (`New(Config{URL, APIKey, Timeout, MaxResponseBytes, HTTPClient, Logger})`) |
-| `enginetest/` | Conformance suite `Run(t, newEngine)`: 21 cases (incl. `EmptySourceIDsRefused`, `SourceIDsWithoutTenantRefused`, tenant-scoped BM25, principal filter, reserved-namespace isolation); imports `engine` and `iface` |
+| `enginetest/` | Conformance suite `Run(t, newEngine)`: 22 cases (incl. `EmptySourceIDsRefused`, `SourceIDsWithoutTenantRefused`, `UpsertReplacesPayload`, tenant-scoped BM25, principal filter, reserved-namespace isolation); imports `engine` and `iface` |
 | `filter/` | Compiles the public `iface.RetrievalFilter` into `engine.Filter` (imports `iface`) |
 
 Later PRs: 4 outbox, indexing worker and corpus state (`retrieval_corpus_state` shape); 5 search path, filter compilation use and principal resolver; 6 compliance wiring (audit sink, DSR); 7 admin page.

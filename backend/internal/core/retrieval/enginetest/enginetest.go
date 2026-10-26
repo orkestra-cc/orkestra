@@ -49,6 +49,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) engine.Engine) {
 		{"FusionWeightsAndModes", testFusionWeightsAndModes},
 		{"Diagnostics", testDiagnostics},
 		{"ConditionalUpsertNeverLowersRevision", testConditionalUpsertNeverLowersRevision},
+		{"UpsertReplacesPayload", testUpsertReplacesPayload},
 		{"DeleteOtherRevisions", testDeleteOtherRevisions},
 		{"DeleteByFilterAcrossCollections", testDeleteByFilterAcrossCollections},
 		{"Count", testCount},
@@ -696,6 +697,17 @@ func testUserFilter(t *testing.T, h *harness) {
 			{Field: "status", Match: []any{"open"}},
 			{Field: "score", Range: &engine.Range{Gte: f64(50)}},
 		}}, []engine.Point{p1, p2, p3}},
+		// in over a keyword[] field: a point matches when any of its
+		// elements is any of the values.
+		{"tags in [vip eu]", engine.Filter{Field: "tags", Match: []any{"vip", "eu"}},
+			[]engine.Point{p1, p2, p3}},
+		// An empty list does not exist: P4 holds tags [].
+		{"tags exists", engine.Filter{Field: "tags", Exists: true},
+			[]engine.Point{p1, p2, p3}},
+		// MustNot on a field a point lacks matches that point: P3 has no
+		// ratio, so it is not excluded by "ratio gt 1".
+		{"MustNot{ratio gt 1}", engine.Filter{MustNot: []engine.Filter{{Field: "ratio", Range: &engine.Range{Gt: f64(1)}}}},
+			[]engine.Point{p1, p3, p4}},
 	}
 	for _, c := range cases {
 		q := query(tenantA, vec(1, 0, 0, 0), "")
@@ -818,6 +830,46 @@ func testConditionalUpsertNeverLowersRevision(t *testing.T, h *harness) {
 	h.upsert(t, name, simple(tenantA, "s1", 3, 0, "newest", v))
 	if c := stored("after writing rev 3"); c.Runtime.SourceRevision != 3 || c.Text != "newest" {
 		t.Errorf("after writing rev 3: stored %s, want rev 3 \"newest\"", describeCandidate(c))
+	}
+}
+
+// An upsert replaces the whole payload: a field (or the runtime page) the
+// new write omits is gone afterwards, not kept from the earlier write.
+func testUpsertReplacesPayload(t *testing.T, h *harness) {
+	spec := h.spec(1)
+	spec.Fields = []iface.RetrievalFilterField{
+		{Name: "status", Type: iface.RetrievalFieldKeyword},
+		{Name: "score", Type: iface.RetrievalFieldInteger},
+	}
+	name := h.ensure(t, spec)
+	v := vec(1, 0, 0, 0)
+
+	first := point(tenantA, "s1", 1, 0, "first write", v, everyone, nil,
+		map[string]any{"status": "open", "score": int64(5)})
+	first.Runtime.Page = 3
+	h.upsert(t, name, first)
+
+	second := point(tenantA, "s1", 1, 0, "second write", v, everyone, nil,
+		map[string]any{"score": int64(6)})
+	h.upsert(t, name, second)
+
+	got := h.search(t, name, query(tenantA, v, ""))
+	assertSet(t, "after re-upserting without status and page", got, second)
+	for _, c := range got {
+		if _, ok := c.Fields["status"]; ok {
+			t.Errorf("Fields = %#v, want status removed by the re-upsert", c.Fields)
+		}
+		if c.Fields["score"] != float64(6) {
+			t.Errorf(`Fields["score"] = %#v, want float64(6)`, c.Fields["score"])
+		}
+		if c.Runtime.Page != 0 {
+			t.Errorf("Runtime.Page = %d, want 0 (removed by the re-upsert)", c.Runtime.Page)
+		}
+	}
+	q := query(tenantA, v, "")
+	q.Filter = &engine.Filter{Field: "status", Exists: true}
+	if got := h.search(t, name, q); len(got) != 0 {
+		t.Errorf("status exists after the re-upsert matched: %s", lines(candidateKeys(got)))
 	}
 }
 
