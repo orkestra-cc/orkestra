@@ -83,7 +83,7 @@ The AGENTS.md is the **contract** (invariants, wiring, rules — read before edi
 Edges:
 - **Hard dependency** (listed in `Dependencies()` → blocks boot if missing): `tenant → user`, `authz → user, tenant`, `auth → user, notification, tenant, authz`.
 - **Soft runtime dependency** (`OptionalServices()` → graceful degradation): `auth → notification` (signup still works, but returns 503 when `AUTH_REQUIRE_EMAIL_VERIFICATION=true` and the sender is not configured).
-- **llm** declares `user`, `tenant`, `notification` and requires `ServiceTenantDirectoryReader`. `compliance` does **not** declare a dependency on it (the gateway is optional there), so the order `llm → compliance` is a property of the catalog, pinned by `cmd/server/core_load_order_test.go`: compliance pushes its KMS provider and audit sink into the gateway from its own Init.
+- **llm** declares `user`, `tenant`, `notification` and requires `ServiceTenantDirectoryReader`. `compliance` does **not** declare a dependency on it (the gateway is optional there), so the order `llm → retrieval → compliance` is a property of the catalog, pinned by `cmd/server/core_load_order_test.go`: compliance pushes its KMS provider and audit sink into the gateway from its own Init.
 - **retrieval** declares `tenant`, `authz`, `llm`. Consumers that register a corpus declare a dependency on it; registration closes at its `Start`. It sits before `compliance`, which will push its audit sink into the service (PR 6); pinned by `cmd/server/core_load_order_test.go`.
 - **Navigation** has no declared dependencies; it reads the already-populated `ServiceNavItems` at init time, so it transitively sees every other module.
 

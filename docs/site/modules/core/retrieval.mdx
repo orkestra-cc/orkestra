@@ -1,0 +1,125 @@
+---
+title: retrieval
+sidebar_position: 9
+---
+
+# retrieval
+
+Corpora and hybrid search over tenant data. Added to the always-loaded core by [ADR-0023](/adrs/core-retrieval-module) as the tenth core module: a module declares a **corpus** (a searchable collection of its own data) and the base indexes it and answers searches with a principal filter, over a vector engine behind a driver boundary. Inference is local by default: a corpus is `local_only` unless its owner declares `hosted_allowed`.
+
+The module is always loaded, but its infrastructure is optional. It boots with no Qdrant configured and stays healthy in that state, in the same spirit as `llm` booting with zero credentials.
+
+## Status
+
+Delivery step 1 is in progress. This release ships:
+
+- the SDK contract (`iface.Retrieval*`) and `module.ServiceRetrieval`;
+- corpus registration and its validation;
+- the engine contract and the Qdrant driver, with a conformance suite that any driver must pass.
+
+It adds **no route, permission, navigation item or configuration setting yet**. Indexing (the outbox and the worker), search, data-subject erasure, the compliance wiring and the admin page arrive in the next releases. Until then a registered corpus is only a declaration, and `iface.RetrievalOutbox`, `iface.RetrievalSearch` and `iface.RetrievalPrincipalResolver` are not yet implemented by the registered service.
+
+## Degraded mode
+
+`Init` never contacts Qdrant or an inference endpoint, and never returns an error: a core `Init` error is fatal, so missing infrastructure is a log line, never a failed boot.
+
+| Situation | Behaviour in this release |
+|---|---|
+| `QDRANT_URL` unset | INFO log; no engine. Corpus registration works. Health reports the module healthy: not configured is the designed degraded mode |
+| `QDRANT_URL` invalid | WARN log (the value is never logged); treated as not configured |
+| `QDRANT_API_KEY` unset | WARN log; the URL is still used |
+| Qdrant configured but unreachable | Registration still works. The module health check (`/v1/admin/modules/health`) reports the error `retrieval: the vector engine is unavailable`; `/ready` does not consult modules |
+| Qdrant older than 1.20 | The driver refuses it in its health check |
+
+Search will answer `ErrRetrievalNotConfigured` when no engine is configured and `ErrRetrievalUnavailable` when it is configured but down; search itself arrives in a later release.
+
+## Declaring a corpus
+
+A module that owns searchable data registers a corpus in its `Init`, declares `retrieval` as a dependency so its `Init` runs after retrieval's, and resolves the registry from the service registry:
+
+```go
+func (m *Module) Dependencies() []string { return []string{"retrieval"} }
+
+func (m *Module) Init(deps *module.Dependencies) error {
+	registry, ok := module.GetTyped[iface.RetrievalCorpusRegistry](deps.Services, module.ServiceRetrieval)
+	if !ok {
+		return errors.New("notes: retrieval service not registered")
+	}
+	return registry.RegisterCorpus(iface.RetrievalCorpusSpec{
+		Name:       "notes",
+		Owner:      "notes",
+		Permission: "notes.search.read",
+		Filters: []iface.RetrievalFilterField{
+			{Name: "status", Type: iface.RetrievalFieldKeyword, Description: "Workflow status"},
+		},
+		Ingestion: iface.RetrievalIngestionProfile{
+			EmbedEndpoint: "embed-default",
+			Chunking:      iface.RetrievalChunking{Strategy: "fixed", MaxTokens: 512, Overlap: 64},
+		},
+		Source: m.source, // implements iface.RetrievalSource: Load, Enumerate, Visible
+	})
+}
+```
+
+Registration is a local, syntax-only check. It never contacts the engine or `llm`; whether the embedding endpoint exists and satisfies the corpus locality is checked when a profile is resolved, in a later release. The rules:
+
+- The corpus name matches `^[a-z][a-z0-9_]{0,31}$` and is unique in the installation; the owner is a module name; the permission has the form `a.b[.c[.d]]` in lowercase; a `Source` is required.
+- At most 32 filter fields. Names match `^[a-z][a-zA-Z0-9_]{0,63}$` and are unique; the type is one of the six listed under [Filters](#filters); the description is 1 to 500 bytes.
+- `embedEndpoint` is required. The tokenizer is `word` (default) or `multilingual`; stemming needs a Snowball language and stop words a stop-word language. Chunking is `none` or `fixed` (`maxTokens` 1 to 8192, `overlap` below `maxTokens`). `hierarchical` chunking and enrichment are refused until delivery step 3.
+- Locality `""` becomes `local_only`. Fusion defaults to dense weight 1, keyword weight 1 and 50 candidates per arm (weights in (0, 10], candidates 1 to 500). Rerank is off by default; its `topK` defaults to 20 (1 to 200), and enabling it needs an endpoint.
+- The registry stores a normalized copy, so a later change to the caller's struct has no effect.
+
+Registration closes when the retrieval module starts: every module's `Init` has run by then, so a module retried later cannot add a corpus. An invalid or duplicate declaration, or one made after that point, fails with `iface.ErrRetrievalInvalidSpec`.
+
+## Filters
+
+A search narrows its results with an `iface.RetrievalFilter` over the fields the corpus declared. The six field types and the values the engine stores:
+
+| Type | Stored as |
+|---|---|
+| `keyword` | string |
+| `keyword[]` | list of strings |
+| `integer` | 64-bit integer |
+| `float` | 64-bit float |
+| `bool` | boolean |
+| `datetime` | RFC 3339 in, stored as Unix milliseconds UTC |
+
+A filter node is either a group (`and`, `or`, `not`) or a comparison of one field:
+
+| Op | Meaning | Value |
+|---|---|---|
+| `eq` | Equals | `value` |
+| `in` | Equals any of | `values` |
+| `lt`, `lte`, `gt`, `gte` | Range | `value`, numbers and datetimes |
+| `exists` | The field is present | none |
+
+Not every op applies to every type: `keyword` and `keyword[]` take `eq`, `in` and `exists`; `integer` takes all seven; `float` and `datetime` take the four range ops and `exists`; `bool` takes `eq` and `exists`. Values must match the field type (datetimes as RFC 3339), strings are 1 to 1024 bytes, and `in` needs 1 to 100 values.
+
+A filter is at most 4 levels deep, has at most 64 nodes and carries at most 100 values. This release validates a filter against a corpus's declared fields (a violation wraps `iface.ErrRetrievalInvalidFilter` and names the node path); compiling it into the engine form and applying it in search belong to later releases.
+
+## Engine driver
+
+The engine contract (`Engine`, `Point`, `Query`, `Selector`, `Filter`) is internal to the module and engine-neutral; consumers never import it. The Qdrant driver is a REST client over `net/http` and adds no dependency. Properties that matter to an operator:
+
+- **Qdrant 1.20 or later.** The BM25 keyword arm uses the full-text index scoring introduced there. The driver's health check parses the server version, refuses an older one and lists collections to prove the API key works.
+- **Tenant isolation is built into the query.** A query without a tenant or without principals is refused. The tenant and principal scope is repeated on every search arm and at the top level, and a result outside that scope is dropped and logged as a warning. BM25 statistics are scoped to the tenant, so one tenant's documents do not shift another's scores.
+- **No secrets in errors or logs.** Driver errors are classified as unavailable or not found and never contain the Qdrant URL, the API key or a response body.
+- **Conditional writes.** A point is overwritten only when the stored source revision is not newer than the incoming one, so a late writer cannot roll an item back.
+- **Payload layout.** Runtime fields live under `_rt` (including the indexed text), declared filter fields under `f`. A user filter field is always rendered as `f.<name>`, so a caller cannot reach a runtime field.
+- **Names.** Collections are named `<prefix>_<corpus>_g<generation>`; point ids are UUIDv5 over tenant, corpus, source id and ordinal.
+
+## Configuration
+
+The Qdrant settings are operator environment variables only; there is no `/admin/modules/retrieval` settings page in this release.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `QDRANT_URL` | unset | `http` or `https` URL of the Qdrant node (single node, internal network only, version 1.20 or later). Unset means retrieval runs without an engine |
+| `QDRANT_API_KEY` | unset | API key sent to Qdrant. Always set one outside local development |
+| `QDRANT_COLLECTION_PREFIX` | `orkestra` | Prefix of every collection name; `^[a-z][a-z0-9_-]{0,31}$`. An invalid value logs a warning and the default is used |
+
+The index is derived data: the owner's MongoDB collections stay the source of truth, so losing Qdrant loses no data and recovery is a rebuild (later release). The collection `retrieval_corpus_state` is declared but unused until indexing arrives.
+
+## Legacy RAG contract
+
+`iface.RAGQueryProvider`, `SourceRef`, `RAGQueryResponse` and `module.ServiceRAGQuery` predate the core-only base and nothing in it implements them; only archived addons used them. [ADR-0023](/adrs/core-retrieval-module) (D16) marks them deprecated in favour of `iface.RetrievalSearch` and removes them in a later release. A fork that still builds an archived `rag` addon should migrate to the retrieval contract before then.
