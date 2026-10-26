@@ -94,7 +94,12 @@ func CollectionName(prefix, corpus string, generation int) string {
 	return fmt.Sprintf("%s_%s_g%d", prefix, corpus, generation)
 }
 
-type Selector struct { // all set fields are ANDed; at least one must be set
+// Selector picks points for DeleteByFilter and Count. All set fields are
+// ANDed and at least one must be set. SourceIDs is either nil (no source
+// restriction) or a non-empty list of non-empty ids: a driver refuses an
+// empty non-nil list or an empty id, so a caller's empty batch never widens
+// into the whole tenant.
+type Selector struct {
 	TenantID  string
 	SourceIDs []string
 	Subject   string // matches _rt.subjects

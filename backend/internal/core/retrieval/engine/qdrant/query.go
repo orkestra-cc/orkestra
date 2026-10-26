@@ -4,17 +4,32 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"slices"
+	"strings"
 
 	"github.com/orkestra/backend/internal/core/retrieval/engine"
 )
 
+var errMalformedFilter = errors.New("qdrant: query: malformed filter")
+
 // renderFilter compiles a user filter into a Qdrant filter. Every field is
 // rendered under payload namespace f, so a user filter can never address the
-// runtime namespace _rt.
-func renderFilter(f *engine.Filter) map[string]any {
+// runtime namespace _rt. A malformed node is refused rather than rendered
+// into something wider: a leaf has a field and exactly one condition (a
+// non-empty Match, a Range with at least one bound, or Exists) and no
+// children; a composite has no field and at least one child.
+func renderFilter(f *engine.Filter) (map[string]any, error) {
+	hasChildren := len(f.Must)+len(f.Should)+len(f.MustNot) > 0
 	if f.Field != "" {
+		if hasChildren {
+			return nil, errMalformedFilter
+		}
 		return renderLeaf(f)
+	}
+	if !hasChildren {
+		return nil, errMalformedFilter
 	}
 	out := map[string]any{}
 	for _, part := range []struct {
@@ -26,20 +41,33 @@ func renderFilter(f *engine.Filter) map[string]any {
 		}
 		rendered := make([]any, len(part.nodes))
 		for i := range part.nodes {
-			rendered[i] = renderFilter(&part.nodes[i])
+			r, err := renderFilter(&part.nodes[i])
+			if err != nil {
+				return nil, err
+			}
+			rendered[i] = r
 		}
 		out[part.key] = rendered
 	}
-	return out
+	return out, nil
 }
 
-func renderLeaf(f *engine.Filter) map[string]any {
+func renderLeaf(f *engine.Filter) (map[string]any, error) {
+	conditions := 0
+	for _, set := range []bool{len(f.Match) > 0, f.Range != nil, f.Exists} {
+		if set {
+			conditions++
+		}
+	}
+	if conditions != 1 {
+		return nil, errMalformedFilter
+	}
 	key := "f." + f.Field
 	switch {
 	case len(f.Match) == 1:
-		return matchValue(key, f.Match[0])
+		return matchValue(key, f.Match[0]), nil
 	case len(f.Match) > 1:
-		return matchAny(key, f.Match)
+		return matchAny(key, f.Match), nil
 	case f.Range != nil:
 		r := map[string]any{}
 		for _, b := range []struct {
@@ -50,23 +78,26 @@ func renderLeaf(f *engine.Filter) map[string]any {
 				r[b.name] = *b.v
 			}
 		}
-		return map[string]any{"key": key, "range": r}
-	case f.Exists:
-		return map[string]any{"must_not": []any{map[string]any{"is_empty": map[string]any{"key": key}}}}
+		if len(r) == 0 {
+			return nil, errMalformedFilter
+		}
+		return map[string]any{"key": key, "range": r}, nil
 	}
-	// A leaf with no condition: Qdrant refuses a bare key, so a malformed
-	// node fails the query instead of matching everything.
-	return map[string]any{"key": key}
+	return map[string]any{"must_not": []any{map[string]any{"is_empty": map[string]any{"key": key}}}}, nil
 }
 
 // scopeFilter is the tenant and principal scope ANDed with the user filter.
 // It is applied to every prefetch and at top level.
-func scopeFilter(tenantID string, principals []string, user *engine.Filter) map[string]any {
+func scopeFilter(tenantID string, principals []string, user *engine.Filter) (map[string]any, error) {
 	must := []any{matchValue(rtTenantID, tenantID), matchAny(rtVisibleTo, principals)}
 	if user != nil {
-		must = append(must, renderFilter(user))
+		rendered, err := renderFilter(user)
+		if err != nil {
+			return nil, err
+		}
+		must = append(must, rendered)
 	}
-	return map[string]any{"must": must}
+	return map[string]any{"must": must}, nil
 }
 
 // checkQuery refuses a query that is unscoped or out of bounds, and returns
@@ -153,11 +184,15 @@ type queryResult struct {
 // the fused query and each arm alone run in one batch, and the arms' own
 // scores are attached to the fused candidates.
 func (d *Driver) Query(ctx context.Context, collection string, q engine.Query) ([]engine.Candidate, error) {
+	q.Keyword = strings.TrimSpace(q.Keyword) // a blank keyword is no keyword arm
 	perArm, err := checkQuery(q)
 	if err != nil {
 		return nil, err
 	}
-	scope := scopeFilter(q.TenantID, q.Principals, q.Filter)
+	scope, err := scopeFilter(q.TenantID, q.Principals, q.Filter)
+	if err != nil {
+		return nil, err
+	}
 	arms := queryArms(q, scope, perArm)
 	prefetch := make([]any, len(arms))
 	weights := make([]float64, len(arms))
@@ -179,7 +214,7 @@ func (d *Driver) Query(ctx context.Context, collection string, q engine.Query) (
 		if err := d.do(ctx, "query", http.MethodPost, path, fused, &res); err != nil {
 			return nil, err
 		}
-		return candidates(res.Points), nil
+		return d.inScope(ctx, q, candidates(res.Points)), nil
 	}
 
 	searches := []any{fused}
@@ -216,7 +251,28 @@ func (d *Driver) Query(ctx context.Context, collection string, q engine.Query) (
 			}
 		}
 	}
-	return out, nil
+	return d.inScope(ctx, q, out), nil
+}
+
+// inScope drops any candidate outside the query's tenant or principals. The
+// scope filter sent to Qdrant is the control; this catches a regression in
+// it, and the warning carries counts only.
+func (d *Driver) inScope(ctx context.Context, q engine.Query, cands []engine.Candidate) []engine.Candidate {
+	principals := make(map[string]bool, len(q.Principals))
+	for _, p := range q.Principals {
+		principals[p] = true
+	}
+	kept := cands[:0]
+	for _, c := range cands {
+		if c.Runtime.TenantID == q.TenantID && slices.ContainsFunc(c.Runtime.VisibleTo, func(v string) bool { return principals[v] }) {
+			kept = append(kept, c)
+		}
+	}
+	if dropped := len(cands) - len(kept); dropped > 0 {
+		d.cfg.Logger.WarnContext(ctx, "qdrant: query returned candidates outside the requested scope; dropped them",
+			slog.Int("dropped", dropped), slog.Int("returned", len(cands)))
+	}
+	return kept
 }
 
 func candidates(points []scoredPoint) []engine.Candidate {

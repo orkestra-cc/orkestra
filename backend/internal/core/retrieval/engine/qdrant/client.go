@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -40,6 +41,7 @@ type Config struct {
 	Timeout          time.Duration // per call; 0 = 10s; the caller's earlier deadline wins
 	MaxResponseBytes int64         // 0 = 16 MiB
 	HTTPClient       *http.Client  // nil = own client (dial 5s, TLS handshake 5s)
+	Logger           *slog.Logger  // nil = slog.Default()
 }
 
 // Driver is the Qdrant implementation of engine.Engine. It is safe for
@@ -111,6 +113,9 @@ func New(cfg Config) (*Driver, error) {
 	}
 	if cfg.MaxResponseBytes <= 0 {
 		cfg.MaxResponseBytes = defaultMaxResponseBytes
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
 	}
 	client := cfg.HTTPClient
 	if client == nil {

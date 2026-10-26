@@ -1,9 +1,13 @@
 package qdrant
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/orkestra/backend/internal/core/retrieval/engine"
@@ -162,10 +166,6 @@ func TestRenderFilter(t *testing.T) {
 			`{"key":"f.score","range":{"lt":4,"lte":3,"gt":1,"gte":2}}`},
 		{"exists", engine.Filter{Field: "ratio", Exists: true},
 			`{"must_not":[{"is_empty":{"key":"f.ratio"}}]}`},
-		// A leaf with no condition renders a bare key, which Qdrant refuses
-		// (422), instead of an empty filter that would match everything.
-		{"leaf without condition", engine.Filter{Field: "ratio"},
-			`{"key":"f.ratio"}`},
 		{"should", engine.Filter{Should: []engine.Filter{
 			{Field: "status", Match: []any{"open"}},
 			{Field: "score", Range: &engine.Range{Gte: f64(50)}},
@@ -185,7 +185,11 @@ func TestRenderFilter(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			raw, err := json.Marshal(renderFilter(&c.in))
+			rendered, err := renderFilter(&c.in)
+			if err != nil {
+				t.Fatalf("renderFilter = %v", err)
+			}
+			raw, err := json.Marshal(rendered)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -207,7 +211,7 @@ const candidatePayload = `"payload":{
 func TestQuery_DecodesCandidates(t *testing.T) {
 	d, _ := queryServer(t, `{"result":{"points":[
 		{"id":"11111111-1111-5111-8111-111111111111","version":3,"score":0.75,`+candidatePayload+`},
-		{"id":"22222222-2222-5222-8222-222222222222","version":3,"score":0.5,"payload":{"_rt":{"tenantId":"T","sourceId":"s2","text":"x"},"f":{}}}
+		{"id":"22222222-2222-5222-8222-222222222222","version":3,"score":0.5,"payload":{"_rt":{"tenantId":"T","sourceId":"s2","visibleTo":["user:u1"],"text":"x"},"f":{}}}
 	]},"status":"ok"}`, "")
 	got, err := d.Query(t.Context(), "c", baseQuery())
 	if err != nil {
@@ -227,7 +231,7 @@ func TestQuery_DecodesCandidates(t *testing.T) {
 		},
 		{
 			PointID: "22222222-2222-5222-8222-222222222222",
-			Runtime: engine.Runtime{TenantID: "T", SourceID: "s2"},
+			Runtime: engine.Runtime{TenantID: "T", SourceID: "s2", VisibleTo: []string{"user:u1"}},
 			Text:    "x",
 			Fields:  map[string]any{},
 			Score:   0.5,
@@ -308,5 +312,120 @@ func TestQuery_DiagnosticsSingleArm(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].DenseScore != nil || got[0].KeywordScore == nil || *got[0].KeywordScore != 1.5 {
 		t.Errorf("candidates = %+v, want one with KeywordScore 1.5 and DenseScore nil", got)
+	}
+}
+
+func TestRenderFilter_RefusesMalformed(t *testing.T) {
+	f64 := func(v float64) *float64 { return &v }
+	open := engine.Filter{Field: "status", Match: []any{"open"}}
+	cases := map[string]engine.Filter{
+		"field with children":      {Field: "status", Match: []any{"open"}, Must: []engine.Filter{open}},
+		"field with only children": {Field: "status", Should: []engine.Filter{open}},
+		"match and range":          {Field: "score", Match: []any{int64(1)}, Range: &engine.Range{Gte: f64(1)}},
+		"match and exists":         {Field: "score", Match: []any{int64(1)}, Exists: true},
+		"range and exists":         {Field: "score", Range: &engine.Range{Gte: f64(1)}, Exists: true},
+		"leaf without condition":   {Field: "ratio"},
+		"empty match":              {Field: "ratio", Match: []any{}},
+		"range without bounds":     {Field: "score", Range: &engine.Range{}},
+		"empty composite":          {},
+		"nested empty composite":   {Must: []engine.Filter{open, {}}},
+		"nested malformed leaf":    {Should: []engine.Filter{open, {MustNot: []engine.Filter{{Field: "x"}}}}},
+	}
+	for name, f := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got, err := renderFilter(&f); err == nil {
+				t.Errorf("renderFilter = %v, nil; want an error", got)
+			}
+		})
+	}
+}
+
+func TestQuery_RefusesMalformedFilter(t *testing.T) {
+	d, rec := queryServer(t, emptyQueryResult, "")
+	q := baseQuery()
+	q.Filter = &engine.Filter{Must: []engine.Filter{{Field: "status", Match: []any{"open"}}, {Field: "ratio"}}}
+	_, err := d.Query(t.Context(), "c", q)
+	notSentinel(t, "Query with a malformed filter", err)
+	if n := len(rec.all()); n != 0 {
+		t.Errorf("sent %d requests, want 0", n)
+	}
+}
+
+func TestQuery_WhitespaceKeywordIsAbsent(t *testing.T) {
+	q := baseQuery()
+	q.Keyword = " \t\n "
+	assertJSON(t, "dense with a blank keyword", onlyRequest(t, q).Body, `{"prefetch":[`+denseArmJSON+`],
+		"query":{"rrf":{"weights":[2]}},"filter":`+scopeJSON+`,"limit":10,"with_payload":["_rt","f"]}`)
+
+	d, rec := queryServer(t, emptyQueryResult, "")
+	q.Dense = nil
+	_, err := d.Query(t.Context(), "c", q)
+	notSentinel(t, "Query with only a blank keyword", err)
+	if n := len(rec.all()); n != 0 {
+		t.Errorf("sent %d requests, want 0", n)
+	}
+}
+
+// outOfScopeResult holds one in-scope point, one of another tenant and one
+// whose visibleTo does not meet baseQuery's principals.
+const outOfScopeResult = `[
+	{"id":"11111111-1111-5111-8111-111111111111","version":1,"score":0.9,"payload":{"_rt":{"tenantId":"T","sourceId":"ok","visibleTo":["user:u1"],"text":"a"},"f":{}}},
+	{"id":"22222222-2222-5222-8222-222222222222","version":1,"score":0.8,"payload":{"_rt":{"tenantId":"OTHER","sourceId":"foreign","visibleTo":["tenant:*"],"text":"b"},"f":{}}},
+	{"id":"33333333-3333-5333-8333-333333333333","version":1,"score":0.7,"payload":{"_rt":{"tenantId":"T","sourceId":"hidden","visibleTo":["user:zz"],"text":"c"},"f":{}}}
+]`
+
+func TestQuery_DropsOutOfScopeCandidates(t *testing.T) {
+	for _, diagnostics := range []bool{false, true} {
+		t.Run(fmt.Sprintf("diagnostics %t", diagnostics), func(t *testing.T) {
+			var logs bytes.Buffer
+			srv, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/batch") {
+					okJSON(w, `{"result":[{"points":`+outOfScopeResult+`},{"points":[]},{"points":[]}]}`)
+					return
+				}
+				okJSON(w, `{"result":{"points":`+outOfScopeResult+`}}`)
+			})
+			d := mustNew(t, Config{URL: srv.URL, Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
+			q := baseQuery()
+			q.Diagnostics = diagnostics
+			got, err := d.Query(t.Context(), "c", q)
+			if err != nil {
+				t.Fatalf("Query: %v", err)
+			}
+			if len(got) != 1 || got[0].Runtime.SourceID != "ok" {
+				t.Fatalf("candidates = %+v, want only the in-scope one", got)
+			}
+			lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+			if len(lines) != 1 {
+				t.Fatalf("logged %d lines, want 1: %s", len(lines), logs.String())
+			}
+			var entry map[string]any
+			if err := json.Unmarshal([]byte(lines[0]), &entry); err != nil {
+				t.Fatal(err)
+			}
+			if entry["level"] != "WARN" || entry["dropped"] != float64(2) || entry["returned"] != float64(3) {
+				t.Errorf("log entry = %v, want WARN with dropped 2 of returned 3", entry)
+			}
+			for _, leak := range []string{"OTHER", "foreign", "hidden", "user:zz", "2222", "3333"} {
+				if strings.Contains(lines[0], leak) {
+					t.Errorf("log entry carries %q: %s", leak, lines[0])
+				}
+			}
+		})
+	}
+}
+
+func TestQuery_InScopeCandidatesLogNothing(t *testing.T) {
+	var logs bytes.Buffer
+	srv, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		okJSON(w, `{"result":{"points":[{"id":"11111111-1111-5111-8111-111111111111","score":1,`+candidatePayload+`}]}}`)
+	})
+	d := mustNew(t, Config{URL: srv.URL, Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
+	got, err := d.Query(t.Context(), "c", baseQuery())
+	if err != nil || len(got) != 1 {
+		t.Fatalf("Query = %d candidates, %v; want 1, nil", len(got), err)
+	}
+	if logs.Len() != 0 {
+		t.Errorf("logged %s, want nothing", logs.String())
 	}
 }

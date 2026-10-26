@@ -48,7 +48,9 @@ func matchAny(key string, vs any) map[string]any {
 // Upsert writes the points conditionally on their revision: Qdrant applies
 // a write only when the stored _rt.sourceRevision is <= the incoming one, so
 // one request carries points of a single revision. A missing point is
-// inserted whatever its revision (ADR D11 handles that on reads).
+// inserted whatever its revision (ADR D11 handles that on reads). A failure
+// in a later revision group leaves the earlier groups written; the ADR D11
+// read path and the re-queued intent handle the partial write.
 func (d *Driver) Upsert(ctx context.Context, collection string, points []engine.Point) error {
 	if len(points) == 0 {
 		return nil
@@ -123,21 +125,23 @@ func (d *Driver) DeleteOtherRevisions(ctx context.Context, collection, tenantID,
 
 // DeleteByFilter removes every point the selector matches.
 func (d *Driver) DeleteByFilter(ctx context.Context, collection string, sel engine.Selector) error {
-	if sel.IsZero() {
-		return errors.New("qdrant: delete by filter: empty selector")
+	filter, err := selectorFilter(sel)
+	if err != nil {
+		return fmt.Errorf("qdrant: delete by filter: %w", err)
 	}
-	return d.deletePoints(ctx, collection, selectorFilter(sel))
+	return d.deletePoints(ctx, collection, filter)
 }
 
 // Count returns the exact number of points the selector matches.
 func (d *Driver) Count(ctx context.Context, collection string, sel engine.Selector) (int64, error) {
-	if sel.IsZero() {
-		return 0, errors.New("qdrant: count: empty selector")
+	filter, err := selectorFilter(sel)
+	if err != nil {
+		return 0, fmt.Errorf("qdrant: count: %w", err)
 	}
 	var out struct {
 		Count int64 `json:"count"`
 	}
-	body := map[string]any{"filter": selectorFilter(sel), "exact": true}
+	body := map[string]any{"filter": filter, "exact": true}
 	if err := d.do(ctx, "count points", http.MethodPost, pointsPath(collection)+"/count", body, &out); err != nil {
 		return 0, err
 	}
@@ -149,8 +153,26 @@ func (d *Driver) deletePoints(ctx context.Context, collection string, filter map
 		map[string]any{"filter": filter}, nil)
 }
 
-// selectorFilter ANDs the selector's set fields.
-func selectorFilter(sel engine.Selector) map[string]any {
+var (
+	errEmptySelector  = errors.New("empty selector")
+	errEmptySourceIDs = errors.New("selector source ids are empty or hold an empty id")
+)
+
+// selectorFilter ANDs the selector's set fields. It fails closed: a zero
+// selector, or SourceIDs non-nil but empty or holding an empty id, would
+// otherwise select more than the caller named.
+func selectorFilter(sel engine.Selector) (map[string]any, error) {
+	if sel.IsZero() {
+		return nil, errEmptySelector
+	}
+	if sel.SourceIDs != nil && len(sel.SourceIDs) == 0 {
+		return nil, errEmptySourceIDs
+	}
+	for _, id := range sel.SourceIDs {
+		if id == "" {
+			return nil, errEmptySourceIDs
+		}
+	}
 	var must []any
 	if sel.TenantID != "" {
 		must = append(must, matchValue(rtTenantID, sel.TenantID))
@@ -161,5 +183,5 @@ func selectorFilter(sel engine.Selector) map[string]any {
 	if sel.Subject != "" {
 		must = append(must, matchValue(rtSubjects, sel.Subject))
 	}
-	return map[string]any{"must": must}
+	return map[string]any{"must": must}, nil
 }

@@ -52,6 +52,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) engine.Engine) {
 		{"DeleteOtherRevisions", testDeleteOtherRevisions},
 		{"DeleteByFilterAcrossCollections", testDeleteByFilterAcrossCollections},
 		{"Count", testCount},
+		{"EmptySourceIDsRefused", testEmptySourceIDsRefused},
 		{"StaleWriterAfterSuccessor", testStaleWriterAfterSuccessor},
 		{"RecreatedPointIsDetectableByRevision", testRecreatedPointIsDetectableByRevision},
 		{"AnalyzerStemming", testAnalyzerStemming},
@@ -905,6 +906,25 @@ func testCount(t *testing.T, h *harness) {
 
 	if n, err := h.e.Count(t.Context(), name, engine.Selector{}); err == nil {
 		t.Errorf("Count with an empty selector = %d, nil, want an error", n)
+	}
+}
+
+// A selector whose SourceIDs is present but empty, or holds an empty id,
+// fails closed: read as "no source restriction" it would delete or count the
+// whole tenant.
+func testEmptySourceIDsRefused(t *testing.T, h *harness) {
+	name := h.collection(t)
+	v := vec(1, 0, 0, 0)
+	h.upsert(t, name,
+		simple(tenantA, "s1", 1, 0, "A s1", v),
+		simple(tenantA, "s2", 1, 0, "A s2", v),
+	)
+	for _, ids := range [][]string{{}, {""}} {
+		sel := engine.Selector{TenantID: tenantA, SourceIDs: ids}
+		refusal(t, fmt.Sprintf("DeleteByFilter with SourceIDs %q", ids), h.e.DeleteByFilter(t.Context(), name, sel))
+		h.wantCount(t, name, engine.Selector{TenantID: tenantA}, 2)
+		n, err := h.e.Count(t.Context(), name, sel)
+		refusal(t, fmt.Sprintf("Count with SourceIDs %q (= %d)", ids, n), err)
 	}
 }
 

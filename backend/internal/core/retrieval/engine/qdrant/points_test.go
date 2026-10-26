@@ -295,3 +295,23 @@ func TestDeleteByFilter_Body(t *testing.T) {
 	}
 	assertJSON(t, "delete", reqs[0].Body, `{"filter":`+selectorJSON+`}`)
 }
+
+func TestSelector_RefusesEmptySourceIDs(t *testing.T) {
+	cases := map[string][]string{
+		"empty list":          {},
+		"empty id":            {""},
+		"empty id among many": {"s1", ""},
+	}
+	for name, ids := range cases {
+		t.Run(name, func(t *testing.T) {
+			d, rec := ackServer(t, `{"result":{"count":1}}`)
+			sel := engine.Selector{TenantID: "A", SourceIDs: ids}
+			notSentinel(t, "DeleteByFilter", d.DeleteByFilter(t.Context(), "c", sel))
+			_, err := d.Count(t.Context(), "c", sel)
+			notSentinel(t, "Count", err)
+			if n := len(rec.all()); n != 0 {
+				t.Errorf("sent %d requests, want 0", n)
+			}
+		})
+	}
+}
