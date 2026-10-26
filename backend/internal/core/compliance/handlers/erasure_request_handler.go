@@ -57,7 +57,7 @@ type ListErasureRequestsOutput struct {
 }
 
 func (h *ErasureRequestHandler) ListPending(ctx context.Context, _ *struct{}) (*ListErasureRequestsOutput, error) {
-	items, err := h.svc.ListPending(ctx)
+	items, err := h.svc.ListOpen(ctx)
 	if err != nil {
 		return nil, huma.Error500InternalServerError("list erasure requests", err)
 	}
@@ -84,7 +84,7 @@ func (h *ErasureRequestHandler) Execute(ctx context.Context, in *ExecuteErasureR
 	if in.Body.Mode == "anonymize" {
 		mode = iface.EraseAnonymize
 	}
-	res, err := h.svc.Execute(ctx, in.ID, mode, actor)
+	out0, err := h.svc.Execute(ctx, in.ID, mode, actor)
 	if errors.Is(err, services.ErrLegalHoldActive) {
 		return nil, huma.Error409Conflict("erasure blocked: the subject is under an active legal hold")
 	}
@@ -95,7 +95,7 @@ func (h *ErasureRequestHandler) Execute(ctx context.Context, in *ExecuteErasureR
 		return nil, huma.Error500InternalServerError("execute erasure request", err)
 	}
 	out := &ExecuteErasureRequestOutput{}
-	out.Body.Purged = res.Purged
+	out.Body.Purged = out0.Run.Purged
 	return out, nil
 }
 

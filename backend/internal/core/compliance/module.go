@@ -335,7 +335,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 
 		// Mediated right-to-erasure workflow — subjects lodge a request, an
 		// operator reviews and executes (running the DSR erase) or rejects it.
-		erasureReqSvc := services.NewErasureRequestService(repository.NewErasureRequestRepo(deps.DB), dsrSvc)
+		erasureReqSvc := services.NewErasureRequestService(repository.NewErasureRequestRepo(deps.DB), dsrSvc, sink, deps.Logger)
 		m.erasureReq = handlers.NewErasureRequestHandler(erasureReqSvc)
 	}
 

@@ -5,44 +5,33 @@ import (
 	"testing"
 
 	"github.com/orkestra/backend/internal/core/compliance/models"
-	"github.com/orkestra/backend/internal/core/compliance/repository"
 	"github.com/orkestra/backend/internal/core/compliance/services"
+	"github.com/orkestra/backend/internal/core/compliance/services/erasuretest"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
-// fakeErasureReqRepo structurally satisfies the services erasure-request seam.
-type fakeErasureReqRepo struct {
-	getResult  *models.ErasureRequest
-	getErr     error
-	listResult []models.ErasureRequest
-	resolveErr error
+func seeded(rows ...models.ErasureRequest) *erasuretest.MemRepo {
+	repo := erasuretest.NewMemRepo()
+	for _, r := range rows {
+		repo.Put(r)
+	}
+	return repo
 }
 
-func (f *fakeErasureReqRepo) Insert(_ context.Context, _ *models.ErasureRequest) error { return nil }
-func (f *fakeErasureReqRepo) Get(_ context.Context, _ string) (*models.ErasureRequest, error) {
-	return f.getResult, f.getErr
-}
-func (f *fakeErasureReqRepo) ListByStatus(_ context.Context, _ ...string) ([]models.ErasureRequest, error) {
-	return f.listResult, nil
-}
-func (f *fakeErasureReqRepo) Resolve(_ context.Context, _, _, _, _, _ string) error {
-	return f.resolveErr
-}
-
-func newErasureHandler(repo *fakeErasureReqRepo, dsr *services.DSRService) *ErasureRequestHandler {
-	return NewErasureRequestHandler(services.NewErasureRequestService(repo, dsr))
+func newErasureHandler(repo *erasuretest.MemRepo, dsr *services.DSRService) *ErasureRequestHandler {
+	return NewErasureRequestHandler(services.NewErasureRequestService(repo, dsr, nil, nil))
 }
 
 func TestErasureLodgeRequiresAuth(t *testing.T) {
 	t.Parallel()
-	h := newErasureHandler(&fakeErasureReqRepo{}, newDSR())
+	h := newErasureHandler(erasuretest.NewMemRepo(), newDSR())
 	_, err := h.Lodge(context.Background(), &LodgeErasureRequestInput{})
 	assertStatus(t, err, 401)
 }
 
 func TestErasureLodgeSuccess(t *testing.T) {
 	t.Parallel()
-	h := newErasureHandler(&fakeErasureReqRepo{}, newDSR())
+	h := newErasureHandler(erasuretest.NewMemRepo(), newDSR())
 	in := &LodgeErasureRequestInput{}
 	in.Body.Reason = "leaving"
 	out, err := h.Lodge(authedCtx("u-1"), in)
@@ -56,7 +45,7 @@ func TestErasureLodgeSuccess(t *testing.T) {
 
 func TestErasureListPending(t *testing.T) {
 	t.Parallel()
-	h := newErasureHandler(&fakeErasureReqRepo{listResult: []models.ErasureRequest{{UUID: "r-1"}}}, newDSR())
+	h := newErasureHandler(seeded(models.ErasureRequest{UUID: "r-1", Status: models.ErasureRequestPending}), newDSR())
 	out, err := h.ListPending(context.Background(), &struct{}{})
 	if err != nil {
 		t.Fatalf("ListPending: %v", err)
@@ -68,9 +57,9 @@ func TestErasureListPending(t *testing.T) {
 
 func TestErasureExecuteSuccess(t *testing.T) {
 	t.Parallel()
-	repo := &fakeErasureReqRepo{getResult: &models.ErasureRequest{
+	repo := seeded(models.ErasureRequest{
 		UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestPending,
-	}}
+	})
 	dsr := newDSR(&fakeProducer{subject: "user", purgeResult: iface.PurgeResult{RowsDeleted: 1}})
 	h := newErasureHandler(repo, dsr)
 
@@ -87,9 +76,9 @@ func TestErasureExecuteSuccess(t *testing.T) {
 
 func TestErasureExecuteBlockedByLegalHoldIs409(t *testing.T) {
 	t.Parallel()
-	repo := &fakeErasureReqRepo{getResult: &models.ErasureRequest{
+	repo := seeded(models.ErasureRequest{
 		UUID: "r-1", UserUUID: "u-held", Status: models.ErasureRequestPending,
-	}}
+	})
 	dsr := newDSR(&fakeProducer{subject: "user"})
 	dsr.SetLegalHoldChecker(&fakeHoldChecker{held: true})
 	h := newErasureHandler(repo, dsr)
@@ -101,9 +90,9 @@ func TestErasureExecuteBlockedByLegalHoldIs409(t *testing.T) {
 func TestErasureExecuteNotFoundIs404(t *testing.T) {
 	t.Parallel()
 	// An already-resolved request is not re-executable → ErrErasureRequestNotFound.
-	repo := &fakeErasureReqRepo{getResult: &models.ErasureRequest{
+	repo := seeded(models.ErasureRequest{
 		UUID: "r-1", Status: models.ErasureRequestCompleted,
-	}}
+	})
 	h := newErasureHandler(repo, newDSR(&fakeProducer{subject: "user"}))
 	_, err := h.Execute(authedCtx("admin-1"), &ExecuteErasureRequestInput{ID: "r-1"})
 	assertStatus(t, err, 404)
@@ -111,14 +100,14 @@ func TestErasureExecuteNotFoundIs404(t *testing.T) {
 
 func TestErasureRejectNotFoundIs404(t *testing.T) {
 	t.Parallel()
-	h := newErasureHandler(&fakeErasureReqRepo{resolveErr: repository.ErrErasureRequestNotFound}, newDSR())
+	h := newErasureHandler(erasuretest.NewMemRepo(), newDSR())
 	_, err := h.Reject(authedCtx("admin-1"), &RejectErasureRequestInput{ID: "missing"})
 	assertStatus(t, err, 404)
 }
 
 func TestErasureRejectSuccess(t *testing.T) {
 	t.Parallel()
-	h := newErasureHandler(&fakeErasureReqRepo{}, newDSR())
+	h := newErasureHandler(seeded(models.ErasureRequest{UUID: "r-1", Status: models.ErasureRequestPending}), newDSR())
 	in := &RejectErasureRequestInput{ID: "r-1"}
 	in.Body.Note = "no proof of identity"
 	if _, err := h.Reject(authedCtx("admin-1"), in); err != nil {

@@ -21,6 +21,8 @@ type stubProducer struct {
 	exportCalls  int
 	purgeCalls   int
 	lastUserUUID string
+	lastMode     iface.EraseMode
+	onPurge      func() // optional hook run at the start of each purge
 
 	// purgeResults/purgeErrs, when set, give the result of the Nth purge call
 	// (falling back to purgeResult/purgeErr once exhausted).
@@ -42,7 +44,11 @@ func (s *stubProducer) ExportPersonalData(ctx context.Context, userUUID string) 
 	s.lastUserUUID = userUUID
 	return s.exportData, s.exportErr
 }
-func (s *stubProducer) PurgePersonalData(ctx context.Context, userUUID string, _ iface.EraseMode) (iface.PurgeResult, error) {
+func (s *stubProducer) PurgePersonalData(ctx context.Context, userUUID string, mode iface.EraseMode) (iface.PurgeResult, error) {
+	if s.onPurge != nil {
+		s.onPurge()
+	}
+	s.lastMode = mode
 	i := s.purgeCalls
 	s.purgeCalls++
 	s.lastUserUUID = userUUID
