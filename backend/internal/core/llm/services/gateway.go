@@ -55,7 +55,10 @@ type Gateway struct {
 	accounts AccountCredentialSource
 	// tenants (optional) lists the orgs HasLiveModel looks into.
 	tenants ActiveModelTenants
-	logger  *slog.Logger
+	// installation (optional) serves the operator-declared inference
+	// endpoints to the retrieval module (ADR-0023).
+	installation *InstallationService
+	logger       *slog.Logger
 }
 
 // ActiveModelTenants lists the orgs with at least one active model
@@ -68,6 +71,9 @@ var (
 	_ ActiveModelTenants         = (*repository.Models)(nil)
 	_ iface.LLMGateway           = (*Gateway)(nil)
 	_ iface.LLMAvailabilityProbe = (*Gateway)(nil)
+	_ iface.LLMInferenceProfiles = (*Gateway)(nil)
+	_ iface.LLMPinnedEmbedder    = (*Gateway)(nil)
+	_ iface.LLMReranker          = (*Gateway)(nil)
 )
 
 func NewGateway(access *AccessResolver, catalog *CatalogService, registry *providers.Registry, vault *Vault, logger *slog.Logger) *Gateway {
@@ -94,6 +100,11 @@ func (g *Gateway) SetAccounts(a AccountCredentialSource) { g.accounts = a }
 // called once by the module's Init. Without it HasLiveModel reports
 // ErrLLMNotConfigured.
 func (g *Gateway) SetActiveModelTenants(t ActiveModelTenants) { g.tenants = t }
+
+// SetInstallation wires the installation-level inference service; called
+// once by the module's Init. Without it the three installation interfaces
+// report ErrLLMNotConfigured.
+func (g *Gateway) SetInstallation(s *InstallationService) { g.installation = s }
 
 // SetKMSProvider forwards to the vault; SetAuditSink to the catalog. They are
 // the late-wiring seams compliance uses (iface.KMSProviderSetter,
