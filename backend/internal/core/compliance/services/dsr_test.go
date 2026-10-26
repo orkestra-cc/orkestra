@@ -1,9 +1,11 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/orkestra/backend/internal/core/compliance/models"
@@ -23,6 +25,8 @@ type stubProducer struct {
 	lastUserUUID string
 	lastMode     iface.EraseMode
 	onPurge      func() // optional hook run at the start of each purge
+	purgePanic   any    // when non-nil, PurgePersonalData panics with it
+	exportPanic  any    // when non-nil, ExportPersonalData panics with it
 
 	// purgeResults/purgeErrs, when set, give the result of the Nth purge call
 	// (falling back to purgeResult/purgeErr once exhausted).
@@ -42,6 +46,9 @@ func (s *stubProducer) Subject() string { return s.subject }
 func (s *stubProducer) ExportPersonalData(ctx context.Context, userUUID string) (any, error) {
 	s.exportCalls++
 	s.lastUserUUID = userUUID
+	if s.exportPanic != nil {
+		panic(s.exportPanic)
+	}
 	return s.exportData, s.exportErr
 }
 func (s *stubProducer) PurgePersonalData(ctx context.Context, userUUID string, mode iface.EraseMode) (iface.PurgeResult, error) {
@@ -52,6 +59,9 @@ func (s *stubProducer) PurgePersonalData(ctx context.Context, userUUID string, m
 	i := s.purgeCalls
 	s.purgeCalls++
 	s.lastUserUUID = userUUID
+	if s.purgePanic != nil {
+		panic(s.purgePanic)
+	}
 	res, err := s.purgeResult, s.purgeErr
 	if i < len(s.purgeResults) {
 		res = s.purgeResults[i]
@@ -592,5 +602,96 @@ func TestExportUnkeyedDuplicatesKeepOwnData(t *testing.T) {
 	}
 	if res.Bundle["auth"].(map[string]any)["n"] != 1 || res.Bundle["auth#2"].(map[string]any)["n"] != 2 {
 		t.Fatalf("bundle = %+v", res.Bundle)
+	}
+}
+
+func TestErasePanickingProducerIsFailedAndSiblingsRun(t *testing.T) {
+	t.Parallel()
+	user := &stubProducer{subject: "user", purgeResult: iface.PurgeResult{RowsDeleted: 1}}
+	bad := &stubProducer{subject: "crm", purgePanic: "nil map write for mario.rossi@example.com"}
+	auth := &stubProducer{subject: "auth"}
+	svc, _ := newDSRService(user, bad, auth)
+
+	res, err := svc.Erase(context.Background(), "u-1", iface.EraseHardDelete)
+	if err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	if len(res.Progress) != 3 || auth.purgeCalls != 1 {
+		t.Fatalf("progress=%+v auth calls=%d", res.Progress, auth.purgeCalls)
+	}
+	want := []string{models.ProducerOutcomeDone, models.ProducerOutcomeFailed, models.ProducerOutcomeDone}
+	for i, p := range res.Progress {
+		if p.Outcome != want[i] {
+			t.Fatalf("progress[%d] = %+v; want %s", i, p, want[i])
+		}
+	}
+	if got := res.Errors["crm"]; got != errProducerPanicked.Error() {
+		t.Fatalf("errors[crm] = %q; want the fixed text %q", got, errProducerPanicked.Error())
+	}
+}
+
+func TestExportPanickingProducerIsRecordedAndSiblingsRun(t *testing.T) {
+	t.Parallel()
+	user := &stubProducer{subject: "user", exportData: map[string]any{"n": 1}}
+	bad := &stubProducer{subject: "crm", exportPanic: "index out of range"}
+	auth := &stubProducer{subject: "auth", exportData: map[string]any{"n": 2}}
+	svc, _ := newDSRService(user, bad, auth)
+
+	res, err := svc.Export(context.Background(), "u-1")
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if res.Errors["crm"] != errProducerPanicked.Error() {
+		t.Fatalf("errors = %+v", res.Errors)
+	}
+	if _, ok := res.Bundle["user"]; !ok {
+		t.Fatalf("bundle = %+v", res.Bundle)
+	}
+	if _, ok := res.Bundle["auth"]; !ok {
+		t.Fatalf("bundle = %+v", res.Bundle)
+	}
+}
+
+func TestProducerKeysReserveMetadata(t *testing.T) {
+	t.Parallel()
+	got := producerKeys([]iface.PIIProducer{
+		&stubProducer{subject: "metadata"},
+		keyedStub{&stubProducer{subject: "x"}, "metadata"},
+	})
+	if got[0] != "metadata#2" || got[1] != "metadata#3" {
+		t.Fatalf("keys = %v", got)
+	}
+	svc, _ := newDSRService(&stubProducer{subject: "metadata", exportData: map[string]any{"n": 1}})
+	res, err := svc.Export(context.Background(), "u-1")
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if res.Bundle["metadata"].(map[string]any)["version"] != "2" || res.Bundle["metadata#2"].(map[string]any)["n"] != 1 {
+		t.Fatalf("bundle = %+v", res.Bundle)
+	}
+}
+
+func TestProducerKeySuffixWarnsOnce(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	reg := iface.NewPIIProducerRegistry()
+	reg.Register(&stubProducer{subject: "auth"})
+	reg.Register(&stubProducer{subject: "auth"})
+	svc := NewDSRService(reg, nil, slog.New(slog.NewTextHandler(&buf, nil)))
+
+	for i := 0; i < 2; i++ {
+		if _, err := svc.Export(context.Background(), "u-1"); err != nil {
+			t.Fatalf("Export: %v", err)
+		}
+		if _, err := svc.Erase(context.Background(), "u-1", iface.EraseHardDelete); err != nil {
+			t.Fatalf("Erase: %v", err)
+		}
+	}
+	out := buf.String()
+	if n := strings.Count(out, "PIIProducerKeyer"); n != 1 {
+		t.Fatalf("want one PIIProducerKeyer warning, got %d:\n%s", n, out)
+	}
+	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "auth#2") {
+		t.Fatalf("warning should be WARN and name the key:\n%s", out)
 	}
 }

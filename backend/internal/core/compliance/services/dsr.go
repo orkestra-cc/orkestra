@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/compliance/models"
@@ -15,6 +17,10 @@ import (
 // ErrLegalHoldActive is returned by Erase when the subject is under an active
 // legal hold — erasure (and retention auto-cleanup) must not proceed.
 var ErrLegalHoldActive = errors.New("compliance: data subject is under an active legal hold")
+
+// errProducerPanicked is the fixed error recorded for a producer that
+// panicked: the panic value and stack are logged, never returned.
+var errProducerPanicked = errors.New("producer panicked")
 
 // LegalHoldChecker reports whether a subject is under an active legal hold.
 // Satisfied by *LegalHoldService; injected via SetLegalHoldChecker so the
@@ -40,6 +46,7 @@ type DSRService struct {
 	sink        iface.AuditSink
 	logger      *slog.Logger
 	holdChecker LegalHoldChecker
+	warnedKeys  sync.Map // suffixed producer keys already warned about
 }
 
 // SetLegalHoldChecker wires the legal-hold gate. When set, Erase refuses to
@@ -64,20 +71,30 @@ type ExportResult struct {
 	Errors    map[string]string
 }
 
-// producerKeys returns one key per producer, in the same order: the
-// producer's ProducerKey() when it implements iface.PIIProducerKeyer, else
-// its Subject(); a repeated key gets "#2", "#3"... so no two instances share
-// one. Erase and export both use it so a producer has one identity.
+// bundleMetadataKey is the export bundle's own section; no producer may use it.
+const bundleMetadataKey = "metadata"
+
+// baseProducerKey is the producer's ProducerKey() when it implements
+// iface.PIIProducerKeyer and returns a non-empty key, else its Subject().
+func baseProducerKey(p iface.PIIProducer) string {
+	if kp, ok := p.(iface.PIIProducerKeyer); ok {
+		if k := strings.TrimSpace(kp.ProducerKey()); k != "" {
+			return k
+		}
+	}
+	return p.Subject()
+}
+
+// producerKeys returns one key per producer, in the same order: its
+// baseProducerKey, with "#2", "#3"... appended when the key is already taken
+// (by an earlier producer or by the reserved "metadata"). Erase and export
+// both use it so a producer has one identity.
 func producerKeys(ps []iface.PIIProducer) []string {
 	keys := make([]string, len(ps))
-	used := make(map[string]bool, len(ps))
+	used := make(map[string]bool, len(ps)+1)
+	used[bundleMetadataKey] = true
 	for i, p := range ps {
-		base := p.Subject()
-		if kp, ok := p.(iface.PIIProducerKeyer); ok {
-			if k := strings.TrimSpace(kp.ProducerKey()); k != "" {
-				base = k
-			}
-		}
+		base := baseProducerKey(p)
 		k := base
 		for n := 2; used[k]; n++ {
 			k = fmt.Sprintf("%s#%d", base, n)
@@ -88,10 +105,62 @@ func producerKeys(ps []iface.PIIProducer) []string {
 	return keys
 }
 
+// keysFor is producerKeys plus a one-time WARN per suffixed key: a "#n" key
+// depends on registration order, so it is not stable across deploys.
+func (s *DSRService) keysFor(ps []iface.PIIProducer) []string {
+	keys := producerKeys(ps)
+	for i, p := range ps {
+		if keys[i] == baseProducerKey(p) {
+			continue
+		}
+		if _, warned := s.warnedKeys.LoadOrStore(keys[i], true); warned {
+			continue
+		}
+		s.logger.Warn("DSR: producer key taken; using a suffixed key that depends on registration order. Implement iface.PIIProducerKeyer with a unique key so erasure progress and export bundles stay stable across deploys",
+			slog.String("subject", p.Subject()),
+			slog.String("key", keys[i]),
+		)
+	}
+	return keys
+}
+
+// exportOne calls the producer's export, turning a panic into errProducerPanicked.
+func (s *DSRService) exportOne(ctx context.Context, p iface.PIIProducer, key, userUUID string) (data any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logProducerPanic("export", p, key, userUUID, r)
+			data, err = nil, errProducerPanicked
+		}
+	}()
+	return p.ExportPersonalData(ctx, userUUID)
+}
+
+// purgeOne calls the producer's purge, turning a panic into errProducerPanicked
+// so one broken producer cannot crash the replica or stop the others.
+func (s *DSRService) purgeOne(ctx context.Context, p iface.PIIProducer, key, userUUID string, mode iface.EraseMode) (res iface.PurgeResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logProducerPanic("purge", p, key, userUUID, r)
+			res, err = iface.PurgeResult{}, errProducerPanicked
+		}
+	}()
+	return p.PurgePersonalData(ctx, userUUID, mode)
+}
+
+func (s *DSRService) logProducerPanic(op string, p iface.PIIProducer, key, userUUID string, r any) {
+	s.logger.Error("DSR: "+op+" producer panicked",
+		slog.String("subject", p.Subject()),
+		slog.String("key", key),
+		slog.String("userUuid", userUUID),
+		slog.String("panic", fmt.Sprint(r)),
+		slog.String("stack", string(debug.Stack())),
+	)
+}
+
 // RegisteredKeys returns the producer keys of the current registry.
 func (s *DSRService) RegisteredKeys() map[string]bool {
 	out := map[string]bool{}
-	for _, k := range producerKeys(s.registry.List()) {
+	for _, k := range s.keysFor(s.registry.List()) {
 		out[k] = true
 	}
 	return out
@@ -114,10 +183,10 @@ func (s *DSRService) Export(ctx context.Context, userUUID string) (*ExportResult
 	}
 
 	producers := s.registry.List()
-	keys := producerKeys(producers)
+	keys := s.keysFor(producers)
 	for i, p := range producers {
 		key := keys[i]
-		data, err := p.ExportPersonalData(ctx, userUUID)
+		data, err := s.exportOne(ctx, p, key, userUUID)
 		if err != nil {
 			s.logger.Warn("DSR: export producer failed",
 				slog.String("subject", p.Subject()),
@@ -185,8 +254,8 @@ func (s *DSRService) Erase(ctx context.Context, userUUID string, mode iface.Eras
 // EraseRemaining runs the producers that are not yet done according to prior
 // and merges the outcome. An active legal hold blocks it outright (no
 // producer runs, no audit "erased" row). Producer errors are surfaced in the
-// result; one failure does not abort the others — partial erasure still
-// reduces personal data and the audit row makes it auditable.
+// result; one failure (a panic included) does not abort the others — partial
+// erasure still reduces personal data and the audit row makes it auditable.
 func (s *DSRService) EraseRemaining(ctx context.Context, userUUID string, mode iface.EraseMode, prior []models.ErasureProducerProgress) (*EraseResult, error) {
 	if err := s.CheckLegalHold(ctx, userUUID); err != nil {
 		return nil, err
@@ -202,7 +271,7 @@ func (s *DSRService) EraseRemaining(ctx context.Context, userUUID string, mode i
 	}
 
 	producers := s.registry.List()
-	keys := producerKeys(producers)
+	keys := s.keysFor(producers)
 	registered := make(map[string]bool, len(keys))
 	for i, p := range producers {
 		key := keys[i]
@@ -212,7 +281,7 @@ func (s *DSRService) EraseRemaining(ctx context.Context, userUUID string, mode i
 			result.Progress = append(result.Progress, pp)
 			continue
 		}
-		res, err := p.PurgePersonalData(ctx, userUUID, mode)
+		res, err := s.purgeOne(ctx, p, key, userUUID, mode)
 		result.Purged[key] = res
 		outcome := models.ProducerOutcomeDone
 		switch {
