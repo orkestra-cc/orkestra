@@ -213,6 +213,14 @@ func (m *Module) Collections() []module.CollectionSpec {
 				{Field: "status", Direction: 1},
 				{Field: "requestedAt", Direction: -1},
 			}},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "status", Direction: 1},
+				{Field: "nextAttemptAt", Direction: 1},
+			}},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "userUuid", Direction: 1},
+				{Field: "status", Direction: 1},
+			}},
 		}},
 		// Policy engine (compliance spec §1.1). Platform state managed by
 		// Tier-1 operators; the partial unique index enforces a single

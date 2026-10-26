@@ -16,7 +16,7 @@ import (
 type erasureRequestRepo interface {
 	Insert(ctx context.Context, req *models.ErasureRequest) error
 	Get(ctx context.Context, uuid string) (*models.ErasureRequest, error)
-	ListByStatus(ctx context.Context, status string) ([]models.ErasureRequest, error)
+	ListByStatus(ctx context.Context, statuses ...string) ([]models.ErasureRequest, error)
 	Resolve(ctx context.Context, uuid, status, resolvedBy, mode, note string) error
 }
 

@@ -22,7 +22,7 @@ func (f *fakeErasureReqRepo) Insert(_ context.Context, _ *models.ErasureRequest)
 func (f *fakeErasureReqRepo) Get(_ context.Context, _ string) (*models.ErasureRequest, error) {
 	return f.getResult, f.getErr
 }
-func (f *fakeErasureReqRepo) ListByStatus(_ context.Context, _ string) ([]models.ErasureRequest, error) {
+func (f *fakeErasureReqRepo) ListByStatus(_ context.Context, _ ...string) ([]models.ErasureRequest, error) {
 	return f.listResult, nil
 }
 func (f *fakeErasureReqRepo) Resolve(_ context.Context, _, _, _, _, _ string) error {

@@ -20,6 +20,7 @@ services/
   policy_service.go               PolicyService: immutable snapshot (atomic.Pointer), 5 s refresh, LogContentFor/RetentionFor/Effective; iface.CompliancePolicyProvider
   policy_admin.go                 PolicyAdminService: writes in one transaction each, four eyes (change requests), audit, 14-day expiry
   policytest/                     In-memory repository, tenant lookup and audit sink for tests (never in production)
+  erasuretest/                    In-memory erasure-request repository with the Mongo lease semantics (Claim/ClaimDue/Settle), for tests (never in production)
 retentionclass/                   Fixed catalog of the five retention classes (purpose, legal basis, minimum, default) + Classify
 handlers/                         admin (audit list), me (self-service DSR), legal_hold, retention (preview), erasure_request, soc2, policy (catalog, versions, effective, validate, classes), policy_workflow (assignments, change requests), tenant_policy (Tier-2 summary)
 repository/                       Mongo persistence per collection

@@ -31,8 +31,10 @@ func (f *fakeErasureRepo) Insert(_ context.Context, req *models.ErasureRequest) 
 func (f *fakeErasureRepo) Get(_ context.Context, _ string) (*models.ErasureRequest, error) {
 	return f.getResult, f.getErr
 }
-func (f *fakeErasureRepo) ListByStatus(_ context.Context, status string) ([]models.ErasureRequest, error) {
-	f.lastListStatus = status
+func (f *fakeErasureRepo) ListByStatus(_ context.Context, statuses ...string) ([]models.ErasureRequest, error) {
+	if len(statuses) > 0 {
+		f.lastListStatus = statuses[0]
+	}
 	return f.listResult, f.listErr
 }
 func (f *fakeErasureRepo) Resolve(_ context.Context, uuid, status, resolvedBy, mode, note string) error {
