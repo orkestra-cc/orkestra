@@ -18,7 +18,8 @@
 //
 // Filter.Field is the declared field name, never a payload path: the driver
 // maps it into payload namespace f. Candidate.Fields holds JSON-decoded
-// values, so numbers come back as float64.
+// values: numbers (integer, float, datetime) come back as float64 and lists
+// (keyword[]) as []any of their elements.
 package engine
 
 import (
@@ -128,6 +129,10 @@ type Filter struct { // compiled form, produced only by retrieval/filter
 
 type Range struct{ Lt, Lte, Gt, Gte *float64 }
 
+// Candidate is one fused search hit. Fields is JSON-decoded (see the package
+// doc: numbers as float64, lists as []any). With Query.Diagnostics, DenseScore
+// is the dense arm's cosine similarity and KeywordScore the keyword arm's BM25
+// score, each nil when the point is absent from that arm's results.
 type Candidate struct {
 	PointID      string
 	Runtime      Runtime

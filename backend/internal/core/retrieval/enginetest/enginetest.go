@@ -5,7 +5,9 @@
 // Every case calls newEngine, works only in collections named
 // engine.CollectionName("ct"+<8 random hex>, <case in snake_case>, <generation>)
 // and drops them in t.Cleanup, so the suite can run repeatedly and next to
-// anything else on the same engine.
+// anything else on the same engine. A killed run cannot clean up: its
+// collections stay behind on a shared engine, and every one of them matches
+// ct<8 hex>_*, so they can be found and dropped by hand.
 package enginetest
 
 import (
@@ -413,13 +415,17 @@ func testUpsertRequiresDenseVector(t *testing.T, h *harness) {
 
 func testRoundTrip(t *testing.T, h *harness) {
 	spec := h.spec(1)
-	spec.Fields = []iface.RetrievalFilterField{{Name: "status", Type: iface.RetrievalFieldKeyword}}
+	spec.Fields = []iface.RetrievalFilterField{
+		{Name: "status", Type: iface.RetrievalFieldKeyword},
+		{Name: "score", Type: iface.RetrievalFieldInteger},
+		{Name: "tags", Type: iface.RetrievalFieldKeywords},
+	}
 	name := h.ensure(t, spec)
 
 	text := "quarterly orchid supply agreement"
 	p := point(tenantA, "s1", 7, 2, text, vec(0.1, 0.2, 0.3, 0.4),
 		[]string{"tenant:*", "user:u1"}, []string{"user:u1", "crm:contact-1"},
-		map[string]any{"status": "open"})
+		map[string]any{"status": "open", "score": int64(42), "tags": []string{"vip", "eu"}})
 	p.Runtime.CharStart = 120
 	p.Runtime.CharEnd = 120 + len([]rune(text))
 	p.Runtime.Page = 3
@@ -441,6 +447,14 @@ func testRoundTrip(t *testing.T, h *harness) {
 	}
 	if c.Fields["status"] != "open" {
 		t.Errorf(`Fields["status"] = %#v, want "open" (Fields %#v)`, c.Fields["status"], c.Fields)
+	}
+	// Candidate.Fields is JSON-decoded: numbers come back as float64, lists
+	// as []any of their elements.
+	if c.Fields["score"] != float64(42) {
+		t.Errorf(`Fields["score"] = %#v, want float64(42) (Fields %#v)`, c.Fields["score"], c.Fields)
+	}
+	if !reflect.DeepEqual(c.Fields["tags"], []any{"vip", "eu"}) {
+		t.Errorf(`Fields["tags"] = %#v, want []any{"vip", "eu"} (Fields %#v)`, c.Fields["tags"], c.Fields)
 	}
 }
 
@@ -638,6 +652,23 @@ func testUserFilter(t *testing.T, h *harness) {
 	})
 	h.upsert(t, name, p1, p2, p3, p4)
 
+	// Points the scope must hide whatever the user filter says: tenant B's,
+	// and tenant A's visible only to user:zz. Between the "open" and the
+	// "pending" variant they satisfy every row below, so each row (Should and
+	// MustNot included) is also a check that the user filter is ANDed with
+	// the tenant and principal scope, never merged into or ORed with it.
+	leak := func(tenant, source string, visibleTo []string, status string) engine.Point {
+		return point(tenant, source, 1, 0, "hidden "+status, vec(1, 0, 0, 0), visibleTo, nil, map[string]any{
+			"status": status, "tags": []string{"vip"}, "score": int64(70), "ratio": 0.9, "active": false, "created": t0 - 1000,
+		})
+	}
+	h.upsert(t, name,
+		leak(tenantB, "leak-b-open", everyone, "open"),
+		leak(tenantB, "leak-b-pending", everyone, "pending"),
+		leak(tenantA, "leak-zz-open", []string{"user:zz"}, "open"),
+		leak(tenantA, "leak-zz-pending", []string{"user:zz"}, "pending"),
+	)
+
 	cases := []struct {
 		label  string
 		filter engine.Filter
@@ -799,14 +830,23 @@ func testDeleteOtherRevisions(t *testing.T, h *harness) {
 		simple(tenantB, "s1", 1, 0, "B s1 rev1 part0", v),
 	)
 	// Rev 2 has two chunks: it rewrites ordinals 0 and 1 and leaves ordinal 2 at rev 1.
-	h.upsert(t, name,
-		simple(tenantA, "s1", 2, 0, "s1 rev2 part0", v),
-		simple(tenantA, "s1", 2, 1, "s1 rev2 part1", v),
-	)
-	h.wantCount(t, name, engine.Selector{TenantID: tenantA, SourceIDs: []string{"s1"}}, 3)
+	keep0 := simple(tenantA, "s1", 2, 0, "s1 rev2 part0", v)
+	keep1 := simple(tenantA, "s1", 2, 1, "s1 rev2 part1", v)
+	h.upsert(t, name, keep0, keep1)
+	// A chunk of a higher revision than the one kept: "differs from keep"
+	// removes it too, not only the older ones.
+	h.upsert(t, name, simple(tenantA, "s1", 3, 5, "s1 rev3 part5", v))
+	h.wantCount(t, name, engine.Selector{TenantID: tenantA, SourceIDs: []string{"s1"}}, 4)
 
 	h.deleteOtherRevisions(t, name, tenantA, "s1", 2)
 	h.wantCount(t, name, engine.Selector{TenantID: tenantA, SourceIDs: []string{"s1"}}, 2)
+	var s1 []engine.Candidate
+	for _, c := range h.search(t, name, query(tenantA, v, "")) {
+		if c.Runtime.SourceID == "s1" {
+			s1 = append(s1, c)
+		}
+	}
+	assertSet(t, "A/s1 after DeleteOtherRevisions(keep 2)", s1, keep0, keep1)
 	h.wantCount(t, name, engine.Selector{TenantID: tenantA, SourceIDs: []string{"s2"}}, 1)
 	h.wantCount(t, name, engine.Selector{TenantID: tenantB, SourceIDs: []string{"s1"}}, 1)
 }
