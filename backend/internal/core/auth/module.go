@@ -1577,12 +1577,14 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// without compliance just skips registration silently.
 	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
 		reg.Register(services.NewPIIProducer(
+			services.PIIProducerKeyOperator,
 			opBundle.refreshTokenRepo, opBundle.authSessionRepo, opBundle.emailTokenRepo, opBundle.mfaFactorRepo,
 			securityEventSvc, deviceTrustRepo,
 			models.OperatorRefreshTokensCollection, models.OperatorSessionsCollection,
 			models.OperatorEmailTokensCollection, models.OperatorMFAFactorsCollection,
 		))
 		reg.Register(services.NewPIIProducer(
+			services.PIIProducerKeyClient,
 			clBundle.refreshTokenRepo, clBundle.authSessionRepo, clBundle.emailTokenRepo, clBundle.mfaFactorRepo,
 			securityEventSvc, deviceTrustRepo,
 			models.ClientRefreshTokensCollection, models.ClientSessionsCollection,

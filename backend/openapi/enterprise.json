@@ -7620,6 +7620,9 @@
               "null"
             ]
           },
+          "pending": {
+            "type": "boolean"
+          },
           "rowsAnonymized": {
             "format": "int64",
             "type": "integer"
