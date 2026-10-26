@@ -3,6 +3,7 @@ package installation
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -95,15 +96,23 @@ func TestSet_CachesUntilVerifyInterval(t *testing.T) {
 }
 
 func TestSet_MismatchCases(t *testing.T) {
-	cases := map[string]teitest.Config{
-		"model":       {ModelID: "BAAI/other", Revision: "abc123", Pooling: "cls"},
-		"revision":    {ModelID: "BAAI/bge-m3", Revision: "zzz", Pooling: "cls"},
-		"no revision": {ModelID: "BAAI/bge-m3", Revision: "", Pooling: "cls"},
-		"pooling":     {ModelID: "BAAI/bge-m3", Revision: "abc123", Pooling: "mean"},
-		"kind":        {ModelID: "BAAI/bge-m3", Revision: "abc123", Kind: "rerank"},
-		"dimensions":  {ModelID: "BAAI/bge-m3", Revision: "abc123", Pooling: "cls", Dimensions: 768},
+	with := func(mut func(*teitest.Config)) teitest.Config {
+		c := baseCfg
+		mut(&c)
+		return c
 	}
-	for name, change := range cases {
+	cases := map[string]struct {
+		cfg   teitest.Config
+		field string
+	}{
+		"model":       {with(func(c *teitest.Config) { c.ModelID = "BAAI/other" }), "model_id"},
+		"revision":    {with(func(c *teitest.Config) { c.Revision = "zzz" }), "model_sha"},
+		"no revision": {with(func(c *teitest.Config) { c.Revision = "" }), "model_sha"},
+		"pooling":     {with(func(c *teitest.Config) { c.Pooling = "mean" }), "pooling"},
+		"kind":        {with(func(c *teitest.Config) { c.Kind = "rerank" }), "model_type"},
+		"dimensions":  {with(func(c *teitest.Config) { c.Dimensions = 768 }), "dimensions"},
+	}
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			srv := teitest.New(t, baseCfg)
 			clk := newClock()
@@ -111,12 +120,38 @@ func TestSet_MismatchCases(t *testing.T) {
 			if _, err := set.Verify(context.Background(), "embed"); err != nil {
 				t.Fatal(err)
 			}
-			srv.SetConfig(change)
+			srv.SetConfig(tc.cfg)
 			clk.Advance(61 * time.Second)
-			if _, err := set.Verify(context.Background(), "embed"); !errors.Is(err, iface.ErrLLMProfileMismatch) {
-				t.Fatalf("err = %v", err)
+			_, err := set.Verify(context.Background(), "embed")
+			if !errors.Is(err, iface.ErrLLMProfileMismatch) || !strings.HasSuffix(err.Error(), ": "+tc.field) {
+				t.Fatalf("err = %v, want mismatch on %s", err, tc.field)
 			}
 		})
+	}
+}
+
+func TestSet_RerankRevisionMismatch(t *testing.T) {
+	cfg := teitest.Config{ModelID: "BAAI/bge-reranker-v2-m3", Revision: "def456", Kind: "rerank"}
+	srv := teitest.New(t, cfg)
+	clk := newClock()
+	set := newSet(t, clk, rerankEP(srv.URL))
+	if _, err := set.Verify(context.Background(), "rerank"); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Revision = "zzz"
+	srv.SetConfig(cfg)
+	clk.Advance(61 * time.Second)
+	_, err := set.Verify(context.Background(), "rerank")
+	if !errors.Is(err, iface.ErrLLMProfileMismatch) || !strings.HasSuffix(err.Error(), ": model_sha") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSet_EndpointWithoutAdapterIsNotConfigured(t *testing.T) {
+	ep := embedEP("")
+	set := newSet(t, newClock(), ep)
+	if _, err := set.Verify(context.Background(), "embed"); !errors.Is(err, iface.ErrLLMNotConfigured) {
+		t.Fatalf("err = %v", err)
 	}
 }
 

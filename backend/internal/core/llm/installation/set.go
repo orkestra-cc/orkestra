@@ -148,6 +148,9 @@ func (s *Set) Verify(ctx context.Context, name string) (*Verified, error) {
 	if e.ep.Kind == iface.InferenceKindChat {
 		return nil, fmt.Errorf("%w: chat endpoints are served from delivery step 3", iface.ErrLLMNotConfigured)
 	}
+	if e.adapter == nil {
+		return nil, fmt.Errorf("%w: inference endpoint has no usable client", iface.ErrLLMNotConfigured)
+	}
 	if v, err, hit := s.cached(e); hit {
 		return v, err
 	}
