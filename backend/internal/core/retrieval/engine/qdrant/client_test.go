@@ -249,6 +249,15 @@ func TestHealth_Version(t *testing.T) {
 			t.Fatalf("Health(1.19.2) = %v, want ErrUnavailable", err)
 		}
 	})
+	t.Run("old version is not echoed", func(t *testing.T) {
+		err := mustNew(t, Config{URL: serve("1.19.2-server-text", 200).URL}).Health(t.Context())
+		if !errors.Is(err, engine.ErrUnavailable) {
+			t.Fatalf("Health = %v, want ErrUnavailable", err)
+		}
+		if strings.Contains(err.Error(), "server-text") || !strings.Contains(err.Error(), "1.19") {
+			t.Errorf("Health error = %q, want the parsed 1.19 and no server-supplied text", err)
+		}
+	})
 	for _, v := range []string{"1.20.0", "1.20.1-dev", "2.0.0"} {
 		t.Run(v, func(t *testing.T) {
 			if err := mustNew(t, Config{URL: serve(v, 200).URL}).Health(t.Context()); err != nil {

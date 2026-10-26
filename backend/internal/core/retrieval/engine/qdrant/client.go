@@ -53,9 +53,6 @@ type Driver struct {
 
 var _ engine.Engine = (*Driver)(nil)
 
-// errNotImplemented is the answer of the methods Task 7 lands.
-var errNotImplemented = errors.New("qdrant: not implemented")
-
 // statusError is a non-success answer from Qdrant (or a transport failure
 // when code is 0). Unwrap maps it to the engine sentinels.
 type statusError struct {
@@ -224,8 +221,10 @@ func (d *Driver) Health(ctx context.Context) error {
 		return &transportError{op: "health", reason: "returned an unrecognised version"}
 	}
 	if major < minVersionMajor || (major == minVersionMajor && minor < minVersionMinor) {
-		return fmt.Errorf("%w: qdrant version %s is older than %d.%d.0",
-			engine.ErrUnavailable, info.Version, minVersionMajor, minVersionMinor)
+		// The parsed numbers, not the server's string: errors carry no
+		// server-provided text.
+		return fmt.Errorf("%w: qdrant version %d.%d is older than %d.%d.0",
+			engine.ErrUnavailable, major, minor, minVersionMajor, minVersionMinor)
 	}
 	return d.do(ctx, "health", http.MethodGet, "/collections", nil, nil)
 }
@@ -241,24 +240,4 @@ func parseVersion(v string) (major, minor int, ok bool) {
 	major, err1 = strconv.Atoi(parts[0])
 	minor, err2 = strconv.Atoi(parts[1])
 	return major, minor, err1 == nil && err2 == nil
-}
-
-func (d *Driver) Upsert(ctx context.Context, collection string, points []engine.Point) error {
-	return errNotImplemented
-}
-
-func (d *Driver) DeleteOtherRevisions(ctx context.Context, collection, tenantID, sourceID string, keep int64) error {
-	return errNotImplemented
-}
-
-func (d *Driver) DeleteByFilter(ctx context.Context, collection string, sel engine.Selector) error {
-	return errNotImplemented
-}
-
-func (d *Driver) Count(ctx context.Context, collection string, sel engine.Selector) (int64, error) {
-	return 0, errNotImplemented
-}
-
-func (d *Driver) Query(ctx context.Context, collection string, q engine.Query) ([]engine.Candidate, error) {
-	return nil, errNotImplemented
 }
