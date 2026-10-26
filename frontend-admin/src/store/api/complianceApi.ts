@@ -27,16 +27,43 @@ export interface AuditEventsResponse {
   offset: number;
 }
 
+export type ErasureRequestStatus =
+  'pending' | 'incomplete' | 'completed' | 'rejected' | 'closed_partial';
+export type ErasureProducerOutcome = 'done' | 'pending' | 'failed';
+export interface ErasureProducerProgress {
+  key: string;
+  subject: string;
+  outcome: ErasureProducerOutcome;
+  rowsDeleted: number;
+  rowsAnonymized: number;
+  attempts: number;
+  updatedAt: string;
+}
+export interface PurgeResult {
+  rowsDeleted: number;
+  rowsAnonymized: number;
+  collections?: string[];
+  pending?: boolean;
+}
+
 export interface ErasureRequest {
   uuid: string;
   userUuid: string;
   tenantId?: string;
   reason?: string;
-  status: string;
+  status: ErasureRequestStatus;
   requestedAt: string;
   resolvedAt?: string;
   resolvedBy?: string;
   mode?: string;
+  source?: 'request' | 'self_service' | 'retention';
+  progress?: ErasureProducerProgress[];
+  attempts?: number;
+  nextAttemptAt?: string;
+  lastError?: string;
+  resolutionNote?: string;
+  abandoned?: string[];
+  closable?: boolean;
 }
 
 export interface LegalHold {
@@ -260,7 +287,11 @@ export const complianceApi = baseApi.injectEndpoints({
       providesTags: [{ type: 'ErasureRequest' as const, id: 'LIST' }]
     }),
     executeErasureRequest: builder.mutation<
-      { purged: Record<string, unknown> },
+      {
+        status: 'completed' | 'incomplete';
+        purged: Record<string, PurgeResult>;
+        progress: ErasureProducerProgress[];
+      },
       { id: string; mode: string }
     >({
       query: ({ id, mode }) => ({
@@ -284,6 +315,19 @@ export const complianceApi = baseApi.injectEndpoints({
         invalidatesTags: [{ type: 'ErasureRequest' as const, id: 'LIST' }]
       }
     ),
+    closeErasureRequest: builder.mutation<
+      ErasureRequest,
+      { id: string; note: string }
+    >({
+      query: ({ id, note }) => ({
+        url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(
+          id
+        )}/close`,
+        method: 'POST',
+        body: { note }
+      }),
+      invalidatesTags: [{ type: 'ErasureRequest' as const, id: 'LIST' }]
+    }),
 
     listLegalHolds: builder.query<{ items: LegalHold[] }, void>({
       query: () => ({ url: '/v1/admin/compliance/legal-holds', method: 'GET' }),
@@ -502,6 +546,7 @@ export const {
   useListErasureRequestsQuery,
   useExecuteErasureRequestMutation,
   useRejectErasureRequestMutation,
+  useCloseErasureRequestMutation,
   useListLegalHoldsQuery,
   usePlaceLegalHoldMutation,
   useReleaseLegalHoldMutation,

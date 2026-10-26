@@ -2349,7 +2349,7 @@
     "stats": {
       "pendingErasures": {
         "title": "Cancellazioni in attesa",
-        "subtitle": "In attesa di revisione",
+        "subtitle": "In attesa di revisione o di un nuovo tentativo",
         "badge": "Richiede attenzione"
       },
       "activeHolds": {
@@ -2373,6 +2373,8 @@
       "completed": "Completata",
       "executed": "Eseguita",
       "rejected": "Rifiutata",
+      "incomplete": "Incompleta",
+      "closed_partial": "Chiusa (parziale)",
       "active": "Attivo",
       "released": "Revocato",
       "success": "Riuscito",
@@ -2393,8 +2395,22 @@
       "executeError": "Esecuzione non riuscita (o bloccata da un vincolo legale)",
       "rejectSuccess": "Richiesta rifiutata",
       "rejectError": "Rifiuto non riuscito",
-      "emptyMessage": "Nessuna richiesta di cancellazione in attesa.",
-      "emptyHint": "Le richieste di cancellazione degli interessati in attesa di revisione appariranno qui.",
+      "close": "Chiudi",
+      "closeTitle": "Chiudi una cancellazione parziale",
+      "closeBody": "Questi produttori non sono più installati e non finiranno mai: {{keys}}. Chiudere registra la cancellazione come parziale; non si può annullare.",
+      "closeSuccess": "Richiesta di cancellazione chiusa come parziale",
+      "closeError": "Chiusura non riuscita",
+      "retry": "Riprova",
+      "executeIncomplete": "Cancellazione avviata: alcuni produttori non hanno ancora finito e verranno ritentati",
+      "progress": "{{done}} produttori su {{total}} completati",
+      "nextRetry": "Prossimo tentativo {{date}}",
+      "retriesExhausted": "Tentativi automatici esauriti",
+      "source": {
+        "self_service": "Self-service",
+        "retention": "Conservazione"
+      },
+      "emptyMessage": "Nessuna richiesta di cancellazione aperta.",
+      "emptyHint": "Le richieste di cancellazione in attesa di revisione o di un nuovo tentativo appariranno qui.",
       "searchPlaceholder": "Cerca per soggetto o motivo"
     },
     "holds": {
