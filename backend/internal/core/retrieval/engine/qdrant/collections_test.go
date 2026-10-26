@@ -181,3 +181,11 @@ func TestEnsureCollection_RejectsInvalidSpec(t *testing.T) {
 		t.Errorf("invalid specs reached the server (%d requests)", n)
 	}
 }
+
+func TestDropCollection_RefusesEmptyName(t *testing.T) {
+	srv, rec := fakeServer(t, func(w http.ResponseWriter, r *http.Request) { okJSON(w, `{"result":true,"status":"ok"}`) })
+	notSentinel(t, `DropCollection("")`, mustNew(t, Config{URL: srv.URL}).DropCollection(t.Context(), ""))
+	if n := len(rec.all()); n != 0 {
+		t.Errorf("sent %d requests, want 0", n)
+	}
+}

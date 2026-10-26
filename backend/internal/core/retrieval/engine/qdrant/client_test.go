@@ -278,3 +278,35 @@ func TestHealth_Version(t *testing.T) {
 		}
 	})
 }
+
+// A non-2xx answer's body is drained (bounded) before close, so the
+// keep-alive connection is reused rather than torn down on every refusal.
+func TestDo_NonSuccessBodyIsDrainedForReuse(t *testing.T) {
+	var mu sync.Mutex
+	conns := 0
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"status":{"error":"`+strings.Repeat("x", 8192)+`"}}`)
+	}))
+	srv.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			mu.Lock()
+			conns++
+			mu.Unlock()
+		}
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+
+	d := mustNew(t, Config{URL: srv.URL})
+	for i := range 3 {
+		if err := d.Health(t.Context()); err == nil {
+			t.Fatalf("request %d: want an error on 400", i)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if conns != 1 {
+		t.Errorf("opened %d connections for 3 refused requests, want 1 (body not drained)", conns)
+	}
+}

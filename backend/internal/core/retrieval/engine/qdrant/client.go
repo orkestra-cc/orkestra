@@ -32,6 +32,10 @@ const (
 
 	defaultTimeout          = 10 * time.Second
 	defaultMaxResponseBytes = 16 << 20
+
+	// maxDrainBytes bounds how much of a non-2xx body is discarded so the
+	// connection can be reused; a longer body costs the connection instead.
+	maxDrainBytes = 64 << 10
 )
 
 // Config configures a Driver.
@@ -162,6 +166,8 @@ func (d *Driver) send(ctx context.Context, op, method, path string, body any) ([
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		// Drained, never read into the error: errors carry no response body.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrainBytes))
 		return nil, &statusError{op: op, code: resp.StatusCode}
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, d.cfg.MaxResponseBytes+1))

@@ -126,8 +126,12 @@ func payloadSchema(t iface.RetrievalFieldType) (string, error) {
 	return "", fmt.Errorf("qdrant: unsupported filter field type %q", t)
 }
 
-// DropCollection deletes the collection; a missing one is not an error.
+// DropCollection deletes the collection; a missing one is not an error. An
+// empty name is refused before any request.
 func (d *Driver) DropCollection(ctx context.Context, name string) error {
+	if name == "" {
+		return errors.New("qdrant: collection name is empty")
+	}
 	err := d.do(ctx, "drop collection", http.MethodDelete, collectionPath(name), nil, nil)
 	if errors.Is(err, engine.ErrNotFound) {
 		return nil
