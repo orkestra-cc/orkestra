@@ -2600,6 +2600,51 @@
         ],
         "type": "object"
       },
+      "ErasureProducerProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "done",
+              "pending",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "rowsAnonymized": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rowsDeleted": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "subject",
+          "outcome",
+          "rowsDeleted",
+          "rowsAnonymized",
+          "attempts",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
       "ErasureRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2612,8 +2657,40 @@
             "readOnly": true,
             "type": "string"
           },
+          "abandoned": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "attempts": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "closable": {
+            "type": "boolean"
+          },
+          "lastError": {
+            "type": "string"
+          },
           "mode": {
             "type": "string"
+          },
+          "nextAttemptAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "progress": {
+            "items": {
+              "$ref": "#/components/schemas/ErasureProducerProgress"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "reason": {
             "type": "string"
@@ -2630,6 +2707,9 @@
             "type": "string"
           },
           "resolvedBy": {
+            "type": "string"
+          },
+          "source": {
             "type": "string"
           },
           "status": {

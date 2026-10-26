@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/orkestra/backend/internal/core/compliance/models"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -20,7 +21,20 @@ type stubProducer struct {
 	exportCalls  int
 	purgeCalls   int
 	lastUserUUID string
+
+	// purgeResults/purgeErrs, when set, give the result of the Nth purge call
+	// (falling back to purgeResult/purgeErr once exhausted).
+	purgeResults []iface.PurgeResult
+	purgeErrs    []error
 }
+
+// keyedStub adds iface.PIIProducerKeyer to a stubProducer.
+type keyedStub struct {
+	*stubProducer
+	key string
+}
+
+func (k keyedStub) ProducerKey() string { return k.key }
 
 func (s *stubProducer) Subject() string { return s.subject }
 func (s *stubProducer) ExportPersonalData(ctx context.Context, userUUID string) (any, error) {
@@ -29,9 +43,17 @@ func (s *stubProducer) ExportPersonalData(ctx context.Context, userUUID string) 
 	return s.exportData, s.exportErr
 }
 func (s *stubProducer) PurgePersonalData(ctx context.Context, userUUID string, _ iface.EraseMode) (iface.PurgeResult, error) {
+	i := s.purgeCalls
 	s.purgeCalls++
 	s.lastUserUUID = userUUID
-	return s.purgeResult, s.purgeErr
+	res, err := s.purgeResult, s.purgeErr
+	if i < len(s.purgeResults) {
+		res = s.purgeResults[i]
+	}
+	if i < len(s.purgeErrs) {
+		err = s.purgeErrs[i]
+	}
+	return res, err
 }
 
 // fakeHoldChecker is a test double for LegalHoldChecker. Lets erase tests
@@ -299,5 +321,203 @@ func TestEraseNilSinkIsSafe(t *testing.T) {
 	}
 	if _, err := svc.Export(context.Background(), "u-1"); err != nil {
 		t.Fatalf("Export with nil sink should not error: %v", err)
+	}
+}
+
+func TestEraseTracksProducersWithTheSameSubjectSeparately(t *testing.T) {
+	t.Parallel()
+	op := &stubProducer{subject: "auth", purgeResult: iface.PurgeResult{RowsDeleted: 2}}
+	cl := &stubProducer{subject: "auth", purgeResult: iface.PurgeResult{RowsDeleted: 1}, purgeErr: errors.New("mongo down")}
+	svc, _ := newDSRService(op, cl)
+
+	res, err := svc.Erase(context.Background(), "u-1", iface.EraseHardDelete)
+	if err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	if res.Progress[0].Key != "auth" || res.Progress[1].Key != "auth#2" {
+		t.Fatalf("keys = %q, %q", res.Progress[0].Key, res.Progress[1].Key)
+	}
+	if res.Progress[0].Outcome != models.ProducerOutcomeDone || res.Progress[1].Outcome != models.ProducerOutcomeFailed {
+		t.Fatalf("outcomes = %+v", res.Progress)
+	}
+	if res.Purged["auth"].RowsDeleted != 2 || res.Purged["auth#2"].RowsDeleted != 1 {
+		t.Fatalf("purged = %+v", res.Purged)
+	}
+	if res.Errors["auth#2"] == "" || res.Complete() {
+		t.Fatalf("errors=%+v complete=%v", res.Errors, res.Complete())
+	}
+}
+
+func TestEraseUsesProducerKeyWhenDeclared(t *testing.T) {
+	t.Parallel()
+	op := keyedStub{&stubProducer{subject: "auth"}, "auth.operator"}
+	cl := keyedStub{&stubProducer{subject: "auth"}, "auth.client"}
+	svc, _ := newDSRService(op, cl)
+
+	res, err := svc.Erase(context.Background(), "u-1", iface.EraseHardDelete)
+	if err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	if res.Progress[0].Key != "auth.operator" || res.Progress[1].Key != "auth.client" {
+		t.Fatalf("progress = %+v", res.Progress)
+	}
+	if res.Progress[0].Subject != "auth" || res.Progress[1].Subject != "auth" {
+		t.Fatalf("subjects = %+v", res.Progress)
+	}
+}
+
+func TestEraseKeepsPartialResultOfFailedProducer(t *testing.T) {
+	t.Parallel()
+	llm := &stubProducer{subject: "llm",
+		purgeResults: []iface.PurgeResult{{RowsDeleted: 3}, {RowsDeleted: 1}},
+		purgeErrs:    []error{errors.New("usage anonymize failed"), nil}}
+	user := &stubProducer{subject: "user", purgeResult: iface.PurgeResult{RowsDeleted: 1}}
+	svc, _ := newDSRService(user, llm)
+
+	first, _ := svc.Erase(context.Background(), "u-1", iface.EraseHardDelete)
+	if first.Purged["llm"].RowsDeleted != 3 {
+		t.Fatalf("partial result lost: %+v", first.Purged)
+	}
+	p := first.Progress[1]
+	if p.Key != "llm" || p.Outcome != models.ProducerOutcomeFailed || p.RowsDeleted != 3 || p.Attempts != 1 {
+		t.Fatalf("first.Progress[1] = %+v", p)
+	}
+	second, _ := svc.EraseRemaining(context.Background(), "u-1", iface.EraseHardDelete, first.Progress)
+	if user.purgeCalls != 1 || llm.purgeCalls != 2 {
+		t.Fatalf("calls user=%d llm=%d", user.purgeCalls, llm.purgeCalls)
+	}
+	p = second.Progress[1]
+	if p.Key != "llm" || p.Outcome != models.ProducerOutcomeDone || p.RowsDeleted != 4 || p.Attempts != 2 {
+		t.Fatalf("second.Progress[1] = %+v", p)
+	}
+	if !second.Complete() {
+		t.Fatal("second run should be complete")
+	}
+}
+
+func TestErasePendingProducerIsNotDone(t *testing.T) {
+	t.Parallel()
+	svc, _ := newDSRService(&stubProducer{subject: "retrieval", purgeResult: iface.PurgeResult{Pending: true}})
+	res, err := svc.Erase(context.Background(), "u-1", iface.EraseHardDelete)
+	if err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	if res.Progress[0].Outcome != models.ProducerOutcomePending || res.Complete() || len(res.Errors) != 0 {
+		t.Fatalf("progress=%+v errors=%+v", res.Progress, res.Errors)
+	}
+}
+
+func TestEraseRemainingReportsPriorKeyNoLongerRegistered(t *testing.T) {
+	t.Parallel()
+	prior := []models.ErasureProducerProgress{{Key: "gone", Subject: "gone", Outcome: models.ProducerOutcomeFailed, Attempts: 1}}
+	svc, _ := newDSRService(&stubProducer{subject: "user"})
+	res, err := svc.EraseRemaining(context.Background(), "u-1", iface.EraseHardDelete, prior)
+	if err != nil {
+		t.Fatalf("EraseRemaining: %v", err)
+	}
+	if len(res.Progress) != 2 || res.Progress[0].Key != "user" || res.Progress[0].Outcome != models.ProducerOutcomeDone ||
+		res.Progress[1].Key != "gone" || res.Progress[1].Outcome != models.ProducerOutcomeFailed || res.Progress[1].Attempts != 1 {
+		t.Fatalf("progress = %+v", res.Progress)
+	}
+	if res.Complete() {
+		t.Fatal("must not be complete")
+	}
+}
+
+func TestEraseAuditRecordsOutcomes(t *testing.T) {
+	t.Parallel()
+	svc, sink := newDSRService(
+		&stubProducer{subject: "user", purgeResult: iface.PurgeResult{RowsDeleted: 1}},
+		&stubProducer{subject: "retrieval", purgeResult: iface.PurgeResult{Pending: true}},
+	)
+	if _, err := svc.Erase(context.Background(), "u-1", iface.EraseHardDelete); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	md := sink.events[0].Metadata
+	if md["complete"] != false || md["pendingCount"] != 1 || md["errorCount"] != 0 {
+		t.Fatalf("metadata = %+v", md)
+	}
+	per := md["perSubject"].(map[string]any)
+	if per["retrieval"].(map[string]any)["outcome"] != "pending" {
+		t.Fatalf("perSubject = %+v", per)
+	}
+}
+
+func TestCheckLegalHold(t *testing.T) {
+	t.Parallel()
+	svc, _ := newDSRService()
+	if err := svc.CheckLegalHold(context.Background(), "u"); err != nil {
+		t.Fatalf("no checker: %v", err)
+	}
+	svc.SetLegalHoldChecker(&fakeHoldChecker{held: true})
+	if err := svc.CheckLegalHold(context.Background(), "u"); !errors.Is(err, ErrLegalHoldActive) {
+		t.Fatalf("held: %v", err)
+	}
+	boom := errors.New("boom")
+	svc.SetLegalHoldChecker(&fakeHoldChecker{err: boom})
+	if err := svc.CheckLegalHold(context.Background(), "u"); !errors.Is(err, boom) {
+		t.Fatalf("checker error: %v", err)
+	}
+}
+
+func TestExportIncludesBothAuthTiers(t *testing.T) {
+	t.Parallel()
+	op := keyedStub{&stubProducer{subject: "auth", exportData: map[string]any{"sessions": []string{"op-s1"}}}, "auth.operator"}
+	cl := keyedStub{&stubProducer{subject: "auth", exportData: map[string]any{"sessions": []string{"cl-s1"}}}, "auth.client"}
+	svc, _ := newDSRService(op, cl)
+
+	res, err := svc.Export(context.Background(), "u-1")
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if _, ok := res.Bundle["auth"]; ok {
+		t.Fatal("bundle must not carry the bare subject key")
+	}
+	if res.Bundle["auth.operator"].(map[string]any)["sessions"].([]string)[0] != "op-s1" ||
+		res.Bundle["auth.client"].(map[string]any)["sessions"].([]string)[0] != "cl-s1" {
+		t.Fatalf("bundle = %+v", res.Bundle)
+	}
+	if len(res.Producers) != 2 || res.Producers[0] != "auth.operator" || res.Producers[1] != "auth.client" {
+		t.Fatalf("producers = %v", res.Producers)
+	}
+	if res.Bundle["metadata"].(map[string]any)["version"] != "2" {
+		t.Fatalf("metadata = %+v", res.Bundle["metadata"])
+	}
+}
+
+func TestExportKeysUnkeyedDuplicatesWithSuffix(t *testing.T) {
+	t.Parallel()
+	a := &stubProducer{subject: "auth", exportData: map[string]any{"n": 1}}
+	b := &stubProducer{subject: "auth", exportErr: errors.New("down")}
+	svc, _ := newDSRService(a, b)
+	res, err := svc.Export(context.Background(), "u-1")
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if _, ok := res.Bundle["auth"]; !ok {
+		t.Fatalf("bundle = %+v", res.Bundle)
+	}
+	if res.Errors["auth#2"] == "" {
+		t.Fatalf("errors = %+v", res.Errors)
+	}
+}
+
+func TestRegisteredKeys(t *testing.T) {
+	t.Parallel()
+	svc, _ := newDSRService(
+		&stubProducer{subject: "user"},
+		keyedStub{&stubProducer{subject: "auth"}, "auth.operator"},
+		keyedStub{&stubProducer{subject: "auth"}, "auth.client"},
+	)
+	got := svc.RegisteredKeys()
+	if len(got) != 3 || !got["user"] || !got["auth.operator"] || !got["auth.client"] {
+		t.Fatalf("keys = %v", got)
+	}
+}
+
+func TestParseEraseMode(t *testing.T) {
+	t.Parallel()
+	if parseEraseMode("anonymize") != iface.EraseAnonymize || parseEraseMode("hard_delete") != iface.EraseHardDelete || parseEraseMode("") != iface.EraseHardDelete {
+		t.Fatal("parseEraseMode mismatch")
 	}
 }

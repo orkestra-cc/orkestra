@@ -3,9 +3,11 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/orkestra/backend/internal/core/compliance/models"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -53,11 +55,42 @@ func NewDSRService(registry *iface.PIIProducerRegistry, sink iface.AuditSink, lo
 
 // ExportResult pairs a bundle with diagnostics about the producer walk.
 // Errors from individual producers are logged and returned in Errors so
-// the caller can decide whether a partial bundle is acceptable.
+// the caller can decide whether a partial bundle is acceptable. Bundle,
+// Producers and Errors are keyed by producer key (see producerKeys).
 type ExportResult struct {
 	Bundle    iface.PersonalDataBundle
 	Producers []string
 	Errors    map[string]string
+}
+
+// producerKeys returns one key per producer, in the same order: the
+// producer's ProducerKey() when it implements iface.PIIProducerKeyer, else
+// its Subject(); a repeated key gets "#2", "#3"... so no two instances share
+// one. Erase and export both use it so a producer has one identity.
+func producerKeys(ps []iface.PIIProducer) []string {
+	keys := make([]string, len(ps))
+	seen := make(map[string]int, len(ps))
+	for i, p := range ps {
+		k := p.Subject()
+		if kp, ok := p.(iface.PIIProducerKeyer); ok {
+			k = kp.ProducerKey()
+		}
+		seen[k]++
+		if n := seen[k]; n > 1 {
+			k = fmt.Sprintf("%s#%d", k, n)
+		}
+		keys[i] = k
+	}
+	return keys
+}
+
+// RegisteredKeys returns the producer keys of the current registry.
+func (s *DSRService) RegisteredKeys() map[string]bool {
+	out := map[string]bool{}
+	for _, k := range producerKeys(s.registry.List()) {
+		out[k] = true
+	}
+	return out
 }
 
 // Export runs every registered producer's ExportPersonalData for
@@ -70,27 +103,30 @@ func (s *DSRService) Export(ctx context.Context, userUUID string) (*ExportResult
 			"metadata": map[string]any{
 				"userUuid":   userUUID,
 				"exportedAt": time.Now().UTC().Format(time.RFC3339),
-				"version":    "1",
+				"version":    "2",
 			},
 		},
 		Errors: map[string]string{},
 	}
 
-	for _, p := range s.registry.List() {
-		subject := p.Subject()
+	producers := s.registry.List()
+	keys := producerKeys(producers)
+	for i, p := range producers {
+		key := keys[i]
 		data, err := p.ExportPersonalData(ctx, userUUID)
 		if err != nil {
 			s.logger.Warn("DSR: export producer failed",
-				slog.String("subject", subject),
+				slog.String("subject", p.Subject()),
+				slog.String("key", key),
 				slog.String("userUuid", userUUID),
 				slog.String("error", err.Error()),
 			)
-			result.Errors[subject] = err.Error()
+			result.Errors[key] = err.Error()
 			continue
 		}
-		result.Producers = append(result.Producers, subject)
+		result.Producers = append(result.Producers, key)
 		if data != nil {
-			result.Bundle[subject] = data
+			result.Bundle[key] = data
 		}
 	}
 
@@ -101,49 +137,107 @@ func (s *DSRService) Export(ctx context.Context, userUUID string) (*ExportResult
 	return result, nil
 }
 
-// EraseResult is the per-producer summary returned to the DSR caller.
-// Mirrors ExportResult shape so the API surface is symmetrical.
+// EraseResult is the summary of one erase run. Purged and Errors hold this
+// run only, keyed by producer key; Purged includes the partial result of a
+// failed producer. Progress is merged with the prior progress: registered
+// producers in registration order, then prior keys no longer registered.
 type EraseResult struct {
-	Purged map[string]iface.PurgeResult
-	Errors map[string]string
+	Purged   map[string]iface.PurgeResult
+	Errors   map[string]string
+	Progress []models.ErasureProducerProgress
 }
 
-// Erase runs every producer's PurgePersonalData. Emits an audit row
-// with the aggregate erase summary. Producer errors are surfaced in the
-// result; the service does not abort the whole pipeline on a single
-// producer failure — partial erasure is still personally-data-reducing
-// and the audit row makes it auditable.
+// Complete reports whether every producer in Progress is done.
+func (r *EraseResult) Complete() bool {
+	for _, p := range r.Progress {
+		if p.Outcome != models.ProducerOutcomeDone {
+			return false
+		}
+	}
+	return true
+}
+
+// CheckLegalHold returns ErrLegalHoldActive when the subject is held, the
+// checker's error when it fails, or nil (also when no checker is wired).
+func (s *DSRService) CheckLegalHold(ctx context.Context, userUUID string) error {
+	if s.holdChecker == nil {
+		return nil
+	}
+	held, err := s.holdChecker.IsHeld(ctx, userUUID)
+	if err != nil {
+		return err
+	}
+	if held {
+		return ErrLegalHoldActive
+	}
+	return nil
+}
+
+// Erase runs every producer's PurgePersonalData once; see EraseRemaining.
 func (s *DSRService) Erase(ctx context.Context, userUUID string, mode iface.EraseMode) (*EraseResult, error) {
-	// Legal hold gate: an active hold blocks erasure outright (no producer
-	// runs, no audit "erased" row — the attempt is the caller's to log).
-	if s.holdChecker != nil {
-		held, err := s.holdChecker.IsHeld(ctx, userUUID)
-		if err != nil {
-			return nil, err
-		}
-		if held {
-			return nil, ErrLegalHoldActive
-		}
+	return s.EraseRemaining(ctx, userUUID, mode, nil)
+}
+
+// EraseRemaining runs the producers that are not yet done according to prior
+// and merges the outcome. An active legal hold blocks it outright (no
+// producer runs, no audit "erased" row). Producer errors are surfaced in the
+// result; one failure does not abort the others — partial erasure still
+// reduces personal data and the audit row makes it auditable.
+func (s *DSRService) EraseRemaining(ctx context.Context, userUUID string, mode iface.EraseMode, prior []models.ErasureProducerProgress) (*EraseResult, error) {
+	if err := s.CheckLegalHold(ctx, userUUID); err != nil {
+		return nil, err
 	}
 
 	result := &EraseResult{
 		Purged: map[string]iface.PurgeResult{},
 		Errors: map[string]string{},
 	}
+	priorByKey := make(map[string]models.ErasureProducerProgress, len(prior))
+	for _, p := range prior {
+		priorByKey[p.Key] = p
+	}
 
-	for _, p := range s.registry.List() {
-		subject := p.Subject()
+	producers := s.registry.List()
+	keys := producerKeys(producers)
+	registered := make(map[string]bool, len(keys))
+	for i, p := range producers {
+		key := keys[i]
+		registered[key] = true
+		pp, hadPrior := priorByKey[key]
+		if hadPrior && pp.Outcome == models.ProducerOutcomeDone {
+			result.Progress = append(result.Progress, pp)
+			continue
+		}
 		res, err := p.PurgePersonalData(ctx, userUUID, mode)
-		if err != nil {
+		result.Purged[key] = res
+		outcome := models.ProducerOutcomeDone
+		switch {
+		case err != nil:
+			outcome = models.ProducerOutcomeFailed
 			s.logger.Warn("DSR: purge producer failed",
-				slog.String("subject", subject),
+				slog.String("subject", p.Subject()),
+				slog.String("key", key),
 				slog.String("userUuid", userUUID),
 				slog.String("error", err.Error()),
 			)
-			result.Errors[subject] = err.Error()
-			continue
+			result.Errors[key] = err.Error()
+		case res.Pending:
+			outcome = models.ProducerOutcomePending
 		}
-		result.Purged[subject] = res
+		result.Progress = append(result.Progress, models.ErasureProducerProgress{
+			Key:            key,
+			Subject:        p.Subject(),
+			Outcome:        outcome,
+			RowsDeleted:    pp.RowsDeleted + res.RowsDeleted,
+			RowsAnonymized: pp.RowsAnonymized + res.RowsAnonymized,
+			Attempts:       pp.Attempts + 1,
+			UpdatedAt:      time.Now().UTC(),
+		})
+	}
+	for _, pp := range prior {
+		if !registered[pp.Key] {
+			result.Progress = append(result.Progress, pp)
+		}
 	}
 
 	meta := eraseMetadata(result)
@@ -158,6 +252,15 @@ func eraseModeLabel(mode iface.EraseMode) string {
 		return "anonymize"
 	}
 	return "hard_delete"
+}
+
+// parseEraseMode is the inverse of eraseModeLabel: "anonymize" is
+// EraseAnonymize, anything else EraseHardDelete.
+func parseEraseMode(label string) iface.EraseMode {
+	if label == "anonymize" {
+		return iface.EraseAnonymize
+	}
+	return iface.EraseHardDelete
 }
 
 func (s *DSRService) emitAudit(ctx context.Context, userUUID, action string, metadata map[string]any) {
@@ -177,17 +280,26 @@ func (s *DSRService) emitAudit(ctx context.Context, userUUID, action string, met
 func eraseMetadata(r *EraseResult) map[string]any {
 	out := map[string]any{}
 	perSubject := map[string]any{}
-	var totalRows int
-	for subject, res := range r.Purged {
-		perSubject[subject] = map[string]any{
+	var totalRows, pendingCount int
+	for _, p := range r.Progress {
+		res := r.Purged[p.Key]
+		perSubject[p.Key] = map[string]any{
+			"subject":        p.Subject,
+			"outcome":        p.Outcome,
 			"rowsDeleted":    res.RowsDeleted,
 			"rowsAnonymized": res.RowsAnonymized,
 			"collections":    res.Collections,
+			"pending":        res.Pending,
 		}
 		totalRows += res.RowsDeleted + res.RowsAnonymized
+		if p.Outcome == models.ProducerOutcomePending {
+			pendingCount++
+		}
 	}
 	out["perSubject"] = perSubject
 	out["totalRows"] = totalRows
 	out["errorCount"] = len(r.Errors)
+	out["pendingCount"] = pendingCount
+	out["complete"] = r.Complete()
 	return out
 }

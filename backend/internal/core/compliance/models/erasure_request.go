@@ -12,7 +12,43 @@ const (
 	ErasureRequestPending   = "pending"
 	ErasureRequestCompleted = "completed"
 	ErasureRequestRejected  = "rejected"
+	// ErasureRequestIncomplete: executed, but at least one producer is not done.
+	ErasureRequestIncomplete = "incomplete"
+	// ErasureRequestClosedPartial: closed by an operator; Abandoned lists the
+	// producers never done.
+	ErasureRequestClosedPartial = "closed_partial"
 )
+
+// Erasure request sources.
+const (
+	ErasureSourceRequest     = "request"      // lodged by the subject, executed by an operator (absent on legacy rows)
+	ErasureSourceSelfService = "self_service" // POST /v1/me/dsr/erase
+	ErasureSourceRetention   = "retention"    // retention auto-cleanup
+)
+
+// Per-producer erasure outcomes.
+const (
+	ProducerOutcomeDone    = "done"
+	ProducerOutcomePending = "pending"
+	ProducerOutcomeFailed  = "failed"
+)
+
+// Run-level lastError values.
+const (
+	ErasureLastErrorLegalHold = "legal_hold_active"
+	ErasureLastErrorRun       = "run_failed"
+)
+
+// ErasureProducerProgress is one producer instance's erasure state on a request.
+type ErasureProducerProgress struct {
+	Key            string    `bson:"key" json:"key"` // producer key (PIIProducerKeyer, else Subject, #n for duplicates)
+	Subject        string    `bson:"subject" json:"subject"`
+	Outcome        string    `bson:"outcome" json:"outcome" enum:"done,pending,failed"`
+	RowsDeleted    int       `bson:"rowsDeleted" json:"rowsDeleted"`       // cumulative over attempts
+	RowsAnonymized int       `bson:"rowsAnonymized" json:"rowsAnonymized"` // cumulative over attempts
+	Attempts       int       `bson:"attempts" json:"attempts"`
+	UpdatedAt      time.Time `bson:"updatedAt" json:"updatedAt"`
+}
 
 // ErasureRequest is one lodged right-to-erasure request.
 type ErasureRequest struct {
@@ -26,4 +62,13 @@ type ErasureRequest struct {
 	ResolvedBy     string     `bson:"resolvedBy,omitempty" json:"resolvedBy,omitempty"`
 	Mode           string     `bson:"mode,omitempty" json:"mode,omitempty"`
 	ResolutionNote string     `bson:"resolutionNote,omitempty" json:"resolutionNote,omitempty"`
+
+	Source        string                    `bson:"source,omitempty" json:"source,omitempty"`
+	Progress      []ErasureProducerProgress `bson:"progress,omitempty" json:"progress,omitempty"`
+	Attempts      int                       `bson:"attempts,omitempty" json:"attempts,omitempty"`
+	NextAttemptAt *time.Time                `bson:"nextAttemptAt,omitempty" json:"nextAttemptAt,omitempty"` // nil on an incomplete row: retries exhausted
+	LeaseUntil    *time.Time                `bson:"leaseUntil,omitempty" json:"-"`
+	LastError     string                    `bson:"lastError,omitempty" json:"lastError,omitempty"`
+	Abandoned     []string                  `bson:"abandoned,omitempty" json:"abandoned,omitempty"` // closed_partial: producer keys never done
+	Closable      bool                      `bson:"-" json:"closable,omitempty"`                    // response-only, filled by ListOpen
 }
