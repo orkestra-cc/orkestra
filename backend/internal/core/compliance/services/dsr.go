@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/compliance/models"
@@ -69,16 +70,19 @@ type ExportResult struct {
 // one. Erase and export both use it so a producer has one identity.
 func producerKeys(ps []iface.PIIProducer) []string {
 	keys := make([]string, len(ps))
-	seen := make(map[string]int, len(ps))
+	used := make(map[string]bool, len(ps))
 	for i, p := range ps {
-		k := p.Subject()
+		base := p.Subject()
 		if kp, ok := p.(iface.PIIProducerKeyer); ok {
-			k = kp.ProducerKey()
+			if k := strings.TrimSpace(kp.ProducerKey()); k != "" {
+				base = k
+			}
 		}
-		seen[k]++
-		if n := seen[k]; n > 1 {
-			k = fmt.Sprintf("%s#%d", k, n)
+		k := base
+		for n := 2; used[k]; n++ {
+			k = fmt.Sprintf("%s#%d", base, n)
 		}
+		used[k] = true
 		keys[i] = k
 	}
 	return keys

@@ -334,6 +334,9 @@ func TestEraseTracksProducersWithTheSameSubjectSeparately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Erase: %v", err)
 	}
+	if len(res.Progress) != 2 {
+		t.Fatalf("progress = %+v", res.Progress)
+	}
 	if res.Progress[0].Key != "auth" || res.Progress[1].Key != "auth#2" {
 		t.Fatalf("keys = %q, %q", res.Progress[0].Key, res.Progress[1].Key)
 	}
@@ -358,6 +361,9 @@ func TestEraseUsesProducerKeyWhenDeclared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Erase: %v", err)
 	}
+	if len(res.Progress) != 2 {
+		t.Fatalf("progress = %+v", res.Progress)
+	}
 	if res.Progress[0].Key != "auth.operator" || res.Progress[1].Key != "auth.client" {
 		t.Fatalf("progress = %+v", res.Progress)
 	}
@@ -374,7 +380,10 @@ func TestEraseKeepsPartialResultOfFailedProducer(t *testing.T) {
 	user := &stubProducer{subject: "user", purgeResult: iface.PurgeResult{RowsDeleted: 1}}
 	svc, _ := newDSRService(user, llm)
 
-	first, _ := svc.Erase(context.Background(), "u-1", iface.EraseHardDelete)
+	first, err := svc.Erase(context.Background(), "u-1", iface.EraseHardDelete)
+	if err != nil || len(first.Progress) != 2 {
+		t.Fatalf("first: err=%v progress=%+v", err, first)
+	}
 	if first.Purged["llm"].RowsDeleted != 3 {
 		t.Fatalf("partial result lost: %+v", first.Purged)
 	}
@@ -382,7 +391,13 @@ func TestEraseKeepsPartialResultOfFailedProducer(t *testing.T) {
 	if p.Key != "llm" || p.Outcome != models.ProducerOutcomeFailed || p.RowsDeleted != 3 || p.Attempts != 1 {
 		t.Fatalf("first.Progress[1] = %+v", p)
 	}
-	second, _ := svc.EraseRemaining(context.Background(), "u-1", iface.EraseHardDelete, first.Progress)
+	second, err := svc.EraseRemaining(context.Background(), "u-1", iface.EraseHardDelete, first.Progress)
+	if err != nil || len(second.Progress) != 2 {
+		t.Fatalf("second: err=%v progress=%+v", err, second)
+	}
+	if _, ok := second.Purged["user"]; ok {
+		t.Fatalf("done producer must be absent from this run's Purged: %+v", second.Purged)
+	}
 	if user.purgeCalls != 1 || llm.purgeCalls != 2 {
 		t.Fatalf("calls user=%d llm=%d", user.purgeCalls, llm.purgeCalls)
 	}
@@ -519,5 +534,57 @@ func TestParseEraseMode(t *testing.T) {
 	t.Parallel()
 	if parseEraseMode("anonymize") != iface.EraseAnonymize || parseEraseMode("hard_delete") != iface.EraseHardDelete || parseEraseMode("") != iface.EraseHardDelete {
 		t.Fatal("parseEraseMode mismatch")
+	}
+}
+
+func TestProducerKeyEmptyFallsBackToSubject(t *testing.T) {
+	t.Parallel()
+	svc, _ := newDSRService(keyedStub{&stubProducer{subject: "auth", exportData: map[string]any{"n": 1}}, "  "})
+	er, err := svc.Erase(context.Background(), "u-1", iface.EraseHardDelete)
+	if err != nil || len(er.Progress) != 1 || er.Progress[0].Key != "auth" {
+		t.Fatalf("erase: err=%v progress=%+v", err, er)
+	}
+	ex, err := svc.Export(context.Background(), "u-1")
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if _, ok := ex.Bundle["auth"]; !ok || len(ex.Producers) != 1 || ex.Producers[0] != "auth" {
+		t.Fatalf("bundle=%+v producers=%v", ex.Bundle, ex.Producers)
+	}
+}
+
+func TestProducerKeysExplicitKeyCollidingWithSuffix(t *testing.T) {
+	t.Parallel()
+	mk := func(ps ...iface.PIIProducer) []string { return producerKeys(ps) }
+	a := &stubProducer{subject: "auth"}
+	b := &stubProducer{subject: "auth"}
+	x := keyedStub{&stubProducer{subject: "other"}, "auth#2"}
+	for _, order := range [][]iface.PIIProducer{{a, b, x}, {x, a, b}} {
+		keys := mk(order...)
+		seen := map[string]bool{}
+		for _, k := range keys {
+			if seen[k] {
+				t.Fatalf("duplicate key %q in %v", k, keys)
+			}
+			seen[k] = true
+		}
+	}
+	if got := mk(x, a, b); got[0] != "auth#2" || got[1] != "auth" || got[2] != "auth#3" {
+		t.Fatalf("keys = %v", got)
+	}
+}
+
+func TestExportUnkeyedDuplicatesKeepOwnData(t *testing.T) {
+	t.Parallel()
+	svc, _ := newDSRService(
+		&stubProducer{subject: "auth", exportData: map[string]any{"n": 1}},
+		&stubProducer{subject: "auth", exportData: map[string]any{"n": 2}},
+	)
+	res, err := svc.Export(context.Background(), "u-1")
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if res.Bundle["auth"].(map[string]any)["n"] != 1 || res.Bundle["auth#2"].(map[string]any)["n"] != 2 {
+		t.Fatalf("bundle = %+v", res.Bundle)
 	}
 }
