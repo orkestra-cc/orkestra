@@ -320,7 +320,6 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
 		dsrSvc := services.NewDSRService(reg, sink, deps.Logger)
 		dsrSvc.SetLegalHoldChecker(legalHoldSvc)
-		m.me = handlers.NewMeHandler(dsrSvc)
 
 		// Mediated right-to-erasure workflow — subjects lodge a request, an
 		// operator reviews and executes (running the DSR erase) or rejects it.
@@ -328,6 +327,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		// request kept incomplete until every producer is done; the retry
 		// worker, launched by Start(), finishes the ones that are not.
 		erasureReqSvc := services.NewErasureRequestService(repository.NewErasureRequestRepo(deps.DB), dsrSvc, sink, deps.Logger)
+		m.me = handlers.NewMeHandler(dsrSvc, erasureReqSvc)
 		m.erasureReq = handlers.NewErasureRequestHandler(erasureReqSvc)
 		m.erasureRetry = services.NewErasureRetryWorker(erasureReqSvc, deps.Logger)
 

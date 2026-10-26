@@ -2,11 +2,18 @@ package handlers
 
 import (
 	"context"
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/go-chi/chi/v5"
+	"net/http"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/orkestra/backend/internal/core/compliance/models"
 	"github.com/orkestra/backend/internal/core/compliance/services"
 	"github.com/orkestra/backend/internal/core/compliance/services/erasuretest"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -43,12 +50,12 @@ func TestErasureLodgeSuccess(t *testing.T) {
 	}
 }
 
-func TestErasureListPending(t *testing.T) {
+func TestErasureListOpen(t *testing.T) {
 	t.Parallel()
 	h := newErasureHandler(seeded(models.ErasureRequest{UUID: "r-1", Status: models.ErasureRequestPending}), newDSR())
-	out, err := h.ListPending(context.Background(), &struct{}{})
+	out, err := h.ListOpen(context.Background(), &struct{}{})
 	if err != nil {
-		t.Fatalf("ListPending: %v", err)
+		t.Fatalf("ListOpen: %v", err)
 	}
 	if len(out.Body.Items) != 1 {
 		t.Fatalf("expected 1 request, got %d", len(out.Body.Items))
@@ -112,5 +119,133 @@ func TestErasureRejectSuccess(t *testing.T) {
 	in.Body.Note = "no proof of identity"
 	if _, err := h.Reject(authedCtx("admin-1"), in); err != nil {
 		t.Fatalf("Reject: %v", err)
+	}
+}
+
+func incompleteRow(progress ...models.ErasureProducerProgress) models.ErasureRequest {
+	return models.ErasureRequest{
+		UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete,
+		Mode: "hard_delete", Progress: progress,
+	}
+}
+
+func TestErasureListOpenIncludesIncomplete(t *testing.T) {
+	t.Parallel()
+	h := newErasureHandler(seeded(
+		models.ErasureRequest{UUID: "r-1", Status: models.ErasureRequestPending},
+		models.ErasureRequest{UUID: "r-2", Status: models.ErasureRequestIncomplete},
+		models.ErasureRequest{UUID: "r-3", Status: models.ErasureRequestCompleted},
+	), newDSR())
+	out, err := h.ListOpen(context.Background(), &struct{}{})
+	if err != nil {
+		t.Fatalf("ListOpen: %v", err)
+	}
+	if len(out.Body.Items) != 2 {
+		t.Fatalf("items = %d, want 2", len(out.Body.Items))
+	}
+}
+
+func TestErasureExecuteIncompleteReturnsProgress(t *testing.T) {
+	t.Parallel()
+	repo := seeded(incompleteRow(
+		models.ErasureProducerProgress{Key: "user", Subject: "user", Outcome: models.ProducerOutcomeDone},
+		models.ErasureProducerProgress{Key: "retrieval", Subject: "retrieval", Outcome: models.ProducerOutcomePending},
+	))
+	h := newErasureHandler(repo, newDSR(&fakeProducer{subject: "user"}, &fakeProducer{subject: "retrieval"}))
+	out, err := h.Execute(authedCtx("admin-1"), &ExecuteErasureRequestInput{ID: "r-1"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if out.Body.Status != "completed" || len(out.Body.Progress) != 2 {
+		t.Fatalf("status=%q progress=%+v", out.Body.Status, out.Body.Progress)
+	}
+}
+
+func TestErasureExecuteBusyIs409(t *testing.T) {
+	t.Parallel()
+	lease := time.Now().Add(time.Hour)
+	row := incompleteRow()
+	row.LeaseUntil = &lease
+	h := newErasureHandler(seeded(row), newDSR(&fakeProducer{subject: "user"}))
+	_, err := h.Execute(authedCtx("admin-1"), &ExecuteErasureRequestInput{ID: "r-1"})
+	assertCode(t, err, http.StatusConflict, errcode.ComplianceErasureRequestBusy)
+}
+
+func TestErasureRejectIncompleteIs409(t *testing.T) {
+	t.Parallel()
+	h := newErasureHandler(seeded(incompleteRow()), newDSR())
+	_, err := h.Reject(authedCtx("admin-1"), &RejectErasureRequestInput{ID: "r-1"})
+	assertCode(t, err, http.StatusConflict, errcode.ComplianceErasureRequestStarted)
+}
+
+func TestErasureCloseUnregisteredProducer(t *testing.T) {
+	t.Parallel()
+	repo := seeded(incompleteRow(
+		models.ErasureProducerProgress{Key: "user", Subject: "user", Outcome: models.ProducerOutcomeDone},
+		models.ErasureProducerProgress{Key: "gone", Subject: "gone", Outcome: models.ProducerOutcomeFailed},
+	))
+	h := newErasureHandler(repo, newDSR(&fakeProducer{subject: "user"}))
+	in := &CloseErasureRequestInput{ID: "r-1"}
+	in.Body.Note = "module removed"
+	out, err := h.Close(authedCtx("admin-1"), in)
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if out.Body.Status != models.ErasureRequestClosedPartial || len(out.Body.Abandoned) != 1 ||
+		out.Body.Abandoned[0] != "gone" || out.Body.ResolvedBy != "admin-1" {
+		t.Fatalf("closed = %+v", out.Body)
+	}
+}
+
+func TestErasureCloseWithRegisteredProducerIs409(t *testing.T) {
+	t.Parallel()
+	repo := seeded(incompleteRow(
+		models.ErasureProducerProgress{Key: "user", Subject: "user", Outcome: models.ProducerOutcomeFailed},
+	))
+	h := newErasureHandler(repo, newDSR(&fakeProducer{subject: "user"}))
+	in := &CloseErasureRequestInput{ID: "r-1"}
+	in.Body.Note = "x"
+	_, err := h.Close(authedCtx("admin-1"), in)
+	assertCode(t, err, http.StatusConflict, errcode.ComplianceErasureRequestNotClosable)
+}
+
+func TestErasureCloseWithoutNoteIs422(t *testing.T) {
+	t.Parallel()
+	h := newErasureHandler(seeded(incompleteRow()), newDSR())
+	_, err := h.Close(authedCtx("admin-1"), &CloseErasureRequestInput{ID: "r-1"})
+	assertCode(t, err, http.StatusUnprocessableEntity, errcode.ComplianceErasureCloseNoteRequired)
+}
+
+func TestErasureCloseNotFoundIs404(t *testing.T) {
+	t.Parallel()
+	h := newErasureHandler(erasuretest.NewMemRepo(), newDSR())
+	in := &CloseErasureRequestInput{ID: "missing"}
+	in.Body.Note = "x"
+	_, err := h.Close(authedCtx("admin-1"), in)
+	assertStatus(t, err, 404)
+}
+
+func TestErasureCloseRouteIsBehindDSRManageAndStepUp(t *testing.T) {
+	t.Parallel()
+	const closePath = "POST /v1/admin/compliance/erasure-requests/{id}/close"
+	mount := func(register func(huma.API, *ErasureRequestHandler)) []string {
+		api := humachi.New(chi.NewRouter(), huma.DefaultConfig("test", "1.0.0"))
+		register(api, &ErasureRequestHandler{})
+		var out []string
+		for path, item := range api.OpenAPI().Paths {
+			if item.Post != nil {
+				out = append(out, "POST "+path)
+			}
+			if item.Get != nil {
+				out = append(out, "GET "+path)
+			}
+		}
+		return out
+	}
+	if !slices.Contains(mount(RegisterErasureRequestAdminWriteRoutes), closePath) {
+		t.Fatal("close must be registered by the write (dsr.manage + step-up) group")
+	}
+	if slices.Contains(mount(RegisterErasureRequestAdminReadRoutes), closePath) {
+		t.Fatal("close must not be registered by the read group")
 	}
 }

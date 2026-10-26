@@ -1593,6 +1593,30 @@
         ],
         "type": "object"
       },
+      "CloseErasureRequestInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CloseErasureRequestInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "note": {
+            "description": "Why the remaining erasure is abandoned",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "type": "object"
+      },
       "CommitAvatarRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -2587,7 +2611,20 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/PurgeResult"
             },
+            "description": "Per producer key",
             "type": "object"
+          },
+          "requestId": {
+            "description": "The recorded erasure request",
+            "type": "string"
+          },
+          "status": {
+            "description": "incomplete: at least one producer is not done; the request is kept and retried",
+            "enum": [
+              "completed",
+              "incomplete"
+            ],
+            "type": "string"
           },
           "totalRows": {
             "format": "int64",
@@ -2595,6 +2632,8 @@
           }
         },
         "required": [
+          "status",
+          "requestId",
           "purged",
           "totalRows"
         ],
@@ -2885,15 +2924,33 @@
             "readOnly": true,
             "type": "string"
           },
+          "progress": {
+            "items": {
+              "$ref": "#/components/schemas/ErasureProducerProgress"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "purged": {
             "additionalProperties": {
               "$ref": "#/components/schemas/PurgeResult"
             },
             "type": "object"
+          },
+          "status": {
+            "enum": [
+              "completed",
+              "incomplete"
+            ],
+            "type": "string"
           }
         },
         "required": [
-          "purged"
+          "status",
+          "purged",
+          "progress"
         ],
         "type": "object"
       },
@@ -11626,7 +11683,59 @@
             "description": "Error"
           }
         },
-        "summary": "List pending right-to-erasure requests",
+        "summary": "List open (pending or incomplete) right-to-erasure requests",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/erasure-requests/{id}/close": {
+      "post": {
+        "description": "Closes an incomplete request whose remaining producers are no longer installed, recording them as abandoned. Requires a note.",
+        "operationId": "compliance-erasure-request-close",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseErasureRequestInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErasureRequest"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Close an incomplete erasure request whose producers are gone",
         "tags": [
           "Compliance"
         ]
@@ -11634,6 +11743,7 @@
     },
     "/v1/admin/compliance/erasure-requests/{id}/execute": {
       "post": {
+        "description": "Runs the erasure of a pending request. An incomplete request is retried with its stored mode and the body's mode is ignored.",
         "operationId": "compliance-erasure-request-execute",
         "parameters": [
           {
@@ -20004,7 +20114,7 @@
     },
     "/v1/me/dsr/erase": {
       "post": {
-        "description": "Irreversibly deletes the caller's personal data across every registered PII producer. After erasure the caller's access token keeps validating until it expires; subsequent refresh fails because the refresh-token rows are wiped.",
+        "description": "Irreversibly deletes the caller's personal data across every registered PII producer. After erasure the caller's access token keeps validating until it expires; subsequent refresh fails because the refresh-token rows are wiped. The erasure is recorded as a request; when a producer is not done the status is incomplete and the request is kept and retried until every producer is done.",
         "operationId": "compliance-me-dsr-erase",
         "responses": {
           "200": {
@@ -20080,7 +20190,7 @@
     },
     "/v1/me/dsr/export": {
       "post": {
-        "description": "Synchronously collects the caller's personal data across every registered PII producer and returns it inline. Safe to retry — read-only.",
+        "description": "Synchronously collects the caller's personal data across every registered PII producer and returns it inline. Safe to retry — read-only. Bundle keys are producer keys (auth.operator, auth.client, ...); bundle metadata version 2 introduced them.",
         "operationId": "compliance-me-dsr-export",
         "responses": {
           "200": {
