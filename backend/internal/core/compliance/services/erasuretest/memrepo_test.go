@@ -10,6 +10,8 @@ import (
 	"github.com/orkestra/backend/internal/core/compliance/repository"
 )
 
+const maxAttempts = 20 // services.ErasureRetryMaxAttempts
+
 func tp(t time.Time) *time.Time { return &t }
 
 func TestMemErasureListOpenNewestFirst(t *testing.T) {
@@ -44,8 +46,8 @@ func TestMemErasureClaimFromPendingSetsModeAndLease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
-	if got.Status != models.ErasureRequestIncomplete || got.Mode != "anonymize" || got.ResolvedBy != "admin-1" {
-		t.Fatalf("claimed = %+v", got)
+	if got.Status != models.ErasureRequestIncomplete || got.Mode != "anonymize" || got.ResolvedBy != "admin-1" || got.Attempts != 1 {
+		t.Fatalf("claimed = %+v; want incomplete, anonymize, admin-1, attempts 1", got)
 	}
 	if got.LeaseUntil == nil || !got.LeaseUntil.Equal(lease.Truncate(time.Millisecond)) {
 		t.Fatalf("LeaseUntil = %v; want %v", got.LeaseUntil, lease.Truncate(time.Millisecond))
@@ -72,16 +74,16 @@ func TestMemErasureClaimDueSkipsLiveLeaseAndFutureAttempts(t *testing.T) {
 	r.Put(models.ErasureRequest{UUID: "d", UserUUID: "u", Status: inc, RequestedAt: now})
 
 	lease := now.Add(5 * time.Minute)
-	got, err := r.ClaimDue(ctx, now, lease)
+	got, err := r.ClaimDue(ctx, now, lease, maxAttempts)
 	if err != nil || got == nil || got.UUID != "a" {
 		t.Fatalf("ClaimDue 1 = %+v, %v; want a", got, err)
 	}
-	got, err = r.ClaimDue(ctx, now, lease)
+	got, err = r.ClaimDue(ctx, now, lease, maxAttempts)
 	if err != nil || got != nil {
 		t.Fatalf("ClaimDue 2 = %+v, %v; want nil", got, err)
 	}
 	later := now.Add(2 * time.Minute)
-	got, err = r.ClaimDue(ctx, later, later.Add(5*time.Minute))
+	got, err = r.ClaimDue(ctx, later, later.Add(5*time.Minute), maxAttempts)
 	if err != nil || got == nil || got.UUID != "b" {
 		t.Fatalf("ClaimDue after lease expiry = %+v, %v; want b", got, err)
 	}
@@ -99,7 +101,7 @@ func TestMemErasureSettleIsFencedByLease(t *testing.T) {
 	}
 	later := l1.Add(time.Second)
 	l2 := later.Add(5 * time.Minute).Truncate(time.Millisecond)
-	taken, err := r.ClaimDue(ctx, later, l2)
+	taken, err := r.ClaimDue(ctx, later, l2, maxAttempts)
 	if err != nil || taken == nil {
 		t.Fatalf("ClaimDue = %+v, %v", taken, err)
 	}
@@ -157,7 +159,7 @@ func TestMemErasureSettleIncompleteThenCompleted(t *testing.T) {
 	}
 
 	l2 := next.Add(5 * time.Minute)
-	if got, err := r.ClaimDue(ctx, next.Add(time.Second), l2); err != nil || got == nil {
+	if got, err := r.ClaimDue(ctx, next.Add(time.Second), l2, maxAttempts); err != nil || got == nil {
 		t.Fatalf("ClaimDue = %+v, %v", got, err)
 	}
 	if err := r.Settle(ctx, "r-1", l2, repository.ErasureSettlement{Status: models.ErasureRequestCompleted, Progress: prog, Attempts: 2, ResolvedAt: &next}); err != nil {
@@ -179,7 +181,7 @@ func TestMemErasureClaimFromIncompleteKeepsModeAndResets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
-	if got.Mode != "anonymize" || got.ResolvedBy != "admin-1" || got.Attempts != 0 || got.LastError != "" || got.Status != models.ErasureRequestIncomplete {
+	if got.Mode != "anonymize" || got.ResolvedBy != "admin-1" || got.Attempts != 1 || got.LastError != "" || got.Status != models.ErasureRequestIncomplete {
 		t.Fatalf("claimed = %+v", got)
 	}
 }
@@ -230,5 +232,56 @@ func TestMemErasureClosePartialOnlyIncompleteAndLeaseFree(t *testing.T) {
 	}
 	if err := r.ClosePartial(ctx, "r-1", now, []string{"gone"}, "admin-1", "n"); !errors.Is(err, repository.ErrErasureRequestNotFound) {
 		t.Fatalf("already closed err = %v; want ErrErasureRequestNotFound", err)
+	}
+}
+
+func TestMemErasureClaimDueCountsAttemptsAndStopsAtMax(t *testing.T) {
+	r := NewMemRepo()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	r.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestIncomplete, RequestedAt: now, NextAttemptAt: tp(now.Add(-time.Second))})
+
+	// A run that dies before Settle still spends its attempt: every claim counts.
+	for i := 1; i <= maxAttempts; i++ {
+		got, err := r.ClaimDue(ctx, now, now.Add(5*time.Minute), maxAttempts)
+		if err != nil || got == nil || got.Attempts != i {
+			t.Fatalf("ClaimDue %d = %+v, %v; want attempts %d", i, got, err, i)
+		}
+		now = now.Add(5*time.Minute + time.Second) // the lease expires without a Settle
+	}
+	got, err := r.ClaimDue(ctx, now, now.Add(5*time.Minute), maxAttempts)
+	if err != nil || got != nil {
+		t.Fatalf("ClaimDue after %d unsettled claims = %+v, %v; want nil", maxAttempts, got, err)
+	}
+	row := r.Row("r-1")
+	if row.Status != models.ErasureRequestIncomplete || row.Attempts != maxAttempts {
+		t.Fatalf("exhausted row = %+v", row)
+	}
+}
+
+func TestMemErasureClosePartialReleasesLeaseAndRefusesStaleSettle(t *testing.T) {
+	r := NewMemRepo()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	r.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now})
+	lease := now.Add(5 * time.Minute)
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, lease); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	later := lease.Add(time.Second) // the run died; its lease expired
+	if err := r.ClosePartial(ctx, "r-1", later, []string{"gone"}, "admin-1", "module removed"); err != nil {
+		t.Fatalf("ClosePartial: %v", err)
+	}
+	row := r.Row("r-1")
+	if row.Status != models.ErasureRequestClosedPartial || row.LeaseUntil != nil {
+		t.Fatalf("closed row = %+v; want closed_partial without a lease", row)
+	}
+	stale := repository.ErasureSettlement{Status: models.ErasureRequestCompleted, Attempts: 1, ResolvedAt: &later}
+	if err := r.Settle(ctx, "r-1", lease, stale); !errors.Is(err, repository.ErrErasureLeaseLost) {
+		t.Fatalf("stale Settle err = %v; want ErrErasureLeaseLost", err)
+	}
+	row = r.Row("r-1")
+	if row.Status != models.ErasureRequestClosedPartial {
+		t.Fatalf("a stale Settle reopened the row: %+v", row)
 	}
 }

@@ -22,6 +22,15 @@ type MemRepo struct {
 	rows       map[string]models.ErasureRequest
 	failSettle error
 	failInsert error
+	onSettle   func(ctx context.Context) error
+}
+
+// OnSettle installs a hook run at the start of every Settle, outside the
+// lock; a non-nil error is returned without writing.
+func (m *MemRepo) OnSettle(hook func(ctx context.Context) error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onSettle = hook
 }
 
 // NewMemRepo returns an empty repository.
@@ -154,7 +163,7 @@ func (m *MemRepo) Claim(_ context.Context, uuid, fromStatus, mode, actor string,
 		return nil, repository.ErrErasureRequestBusy
 	}
 	lease := leaseUntil.Truncate(time.Millisecond)
-	r.LeaseUntil, r.NextAttemptAt, r.Attempts, r.LastError = &lease, cloneTime(&lease), 0, ""
+	r.LeaseUntil, r.NextAttemptAt, r.Attempts, r.LastError = &lease, cloneTime(&lease), 1, ""
 	if fromStatus == models.ErasureRequestPending {
 		r.Status, r.Mode, r.ResolvedBy = models.ErasureRequestIncomplete, mode, actor
 	}
@@ -163,14 +172,16 @@ func (m *MemRepo) Claim(_ context.Context, uuid, fromStatus, mode, actor string,
 	return &c, nil
 }
 
-// ClaimDue leases the next incomplete request whose retry is due; nil, nil when none.
-func (m *MemRepo) ClaimDue(_ context.Context, now, leaseUntil time.Time) (*models.ErasureRequest, error) {
+// ClaimDue leases the next incomplete request whose retry is due and counts
+// the attempt; rows at maxAttempts are skipped; nil, nil when none.
+func (m *MemRepo) ClaimDue(_ context.Context, now, leaseUntil time.Time, maxAttempts int) (*models.ErasureRequest, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now = now.Truncate(time.Millisecond)
 	var best *models.ErasureRequest
 	for _, r := range m.rows {
-		if r.Status != models.ErasureRequestIncomplete || r.NextAttemptAt == nil || r.NextAttemptAt.After(now) || !leaseFree(r, now) {
+		if r.Status != models.ErasureRequestIncomplete || r.NextAttemptAt == nil || r.NextAttemptAt.After(now) ||
+			r.Attempts >= maxAttempts || !leaseFree(r, now) {
 			continue
 		}
 		if best == nil || r.NextAttemptAt.Before(*best.NextAttemptAt) {
@@ -183,13 +194,23 @@ func (m *MemRepo) ClaimDue(_ context.Context, now, leaseUntil time.Time) (*model
 	}
 	lease := leaseUntil.Truncate(time.Millisecond)
 	best.LeaseUntil = &lease
+	best.Attempts++
 	m.rows[best.UUID] = *best
 	c := clone(*best)
 	return &c, nil
 }
 
-// Settle records a leased run's outcome, fenced by the lease.
-func (m *MemRepo) Settle(_ context.Context, uuid string, leaseUntil time.Time, s repository.ErasureSettlement) error {
+// Settle records a leased run's outcome, fenced by the lease and the
+// incomplete status.
+func (m *MemRepo) Settle(ctx context.Context, uuid string, leaseUntil time.Time, s repository.ErasureSettlement) error {
+	m.mu.Lock()
+	hook := m.onSettle
+	m.mu.Unlock()
+	if hook != nil {
+		if err := hook(ctx); err != nil {
+			return err
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.failSettle; err != nil {
@@ -197,7 +218,7 @@ func (m *MemRepo) Settle(_ context.Context, uuid string, leaseUntil time.Time, s
 		return err
 	}
 	r, ok := m.rows[uuid]
-	if !ok || r.LeaseUntil == nil || !r.LeaseUntil.Equal(leaseUntil.Truncate(time.Millisecond)) {
+	if !ok || r.Status != models.ErasureRequestIncomplete || r.LeaseUntil == nil || !r.LeaseUntil.Equal(leaseUntil.Truncate(time.Millisecond)) {
 		return repository.ErrErasureLeaseLost
 	}
 	r.Status, r.Progress, r.Attempts = s.Status, append([]models.ErasureProducerProgress(nil), s.Progress...), s.Attempts
@@ -234,7 +255,7 @@ func (m *MemRepo) ClosePartial(_ context.Context, uuid string, now time.Time, ab
 	}
 	resolved := now.Truncate(time.Millisecond)
 	r.Status, r.Abandoned = models.ErasureRequestClosedPartial, append([]string(nil), abandoned...)
-	r.ResolvedBy, r.ResolvedAt, r.ResolutionNote, r.NextAttemptAt = closedBy, &resolved, note, nil
+	r.ResolvedBy, r.ResolvedAt, r.ResolutionNote, r.NextAttemptAt, r.LeaseUntil = closedBy, &resolved, note, nil, nil
 	m.rows[uuid] = r
 	return nil
 }

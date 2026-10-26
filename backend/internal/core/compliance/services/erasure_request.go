@@ -30,6 +30,9 @@ const (
 	// erasureRunLease is how long one run owns its request; a run's deadline
 	// is half of it.
 	erasureRunLease = 5 * time.Minute
+	// erasureSettleFloor is the least time Settle gets, even when the run used
+	// up its lease.
+	erasureSettleFloor = 5 * time.Second
 
 	erasureRetryBackoffBase = time.Minute
 	erasureRetryBackoffCap  = 6 * time.Hour
@@ -59,7 +62,7 @@ type erasureRequestRepo interface {
 	ListByStatus(ctx context.Context, statuses ...string) ([]models.ErasureRequest, error)
 	Resolve(ctx context.Context, uuid, status, resolvedBy, mode, note string) error
 	Claim(ctx context.Context, uuid, fromStatus, mode, actor string, now, leaseUntil time.Time) (*models.ErasureRequest, error)
-	ClaimDue(ctx context.Context, now, leaseUntil time.Time) (*models.ErasureRequest, error)
+	ClaimDue(ctx context.Context, now, leaseUntil time.Time, maxAttempts int) (*models.ErasureRequest, error)
 	Settle(ctx context.Context, uuid string, leaseUntil time.Time, s repository.ErasureSettlement) error
 	HasIncomplete(ctx context.Context, userUUID string) (bool, error)
 	ClosePartial(ctx context.Context, uuid string, now time.Time, abandoned []string, closedBy, note string) error
@@ -67,7 +70,7 @@ type erasureRequestRepo interface {
 
 // ErasureOutcome is the result of one leased erasure run.
 type ErasureOutcome struct {
-	Request *models.ErasureRequest // the row as settled
+	Request *models.ErasureRequest // the row as settled; as stored (incomplete) when Settle failed
 	Run     *EraseResult           // what this run did
 }
 
@@ -81,6 +84,8 @@ type ErasureRequestService struct {
 	sink   iface.AuditSink // nil-safe
 	logger *slog.Logger
 	now    func() time.Time
+
+	settleFloor time.Duration // erasureSettleFloor; shortened by tests
 }
 
 // NewErasureRequestService wires the workflow service to its repo + the DSR
@@ -89,7 +94,11 @@ func NewErasureRequestService(repo erasureRequestRepo, dsr *DSRService, sink ifa
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &ErasureRequestService{repo: repo, dsr: dsr, sink: sink, logger: logger, now: func() time.Time { return time.Now().UTC() }}
+	return &ErasureRequestService{
+		repo: repo, dsr: dsr, sink: sink, logger: logger,
+		now:         func() time.Time { return time.Now().UTC() },
+		settleFloor: erasureSettleFloor,
+	}
 }
 
 // Lodge records a pending erasure request for the subject.
@@ -219,9 +228,10 @@ func (s *ErasureRequestService) Reject(ctx context.Context, requestUUID, resolve
 	return s.repo.Resolve(ctx, requestUUID, models.ErasureRequestRejected, resolvedBy, "", note)
 }
 
-// EraseNow records an incomplete, leased request for the subject and runs the
-// erasure at once. The row is written before any producer runs, so a crash
-// leaves a request the worker finishes. A held subject records nothing.
+// EraseNow records an incomplete, leased request for the subject (attempt 1)
+// and runs the erasure at once. The row is written before any producer runs,
+// so a crash leaves a request the worker finishes. A subject already under a
+// legal hold records nothing.
 func (s *ErasureRequestService) EraseNow(ctx context.Context, userUUID, tenantID, source, actor string, mode iface.EraseMode) (*ErasureOutcome, error) {
 	if err := s.dsr.CheckLegalHold(ctx, userUUID); err != nil {
 		return nil, err
@@ -237,6 +247,7 @@ func (s *ErasureRequestService) EraseNow(ctx context.Context, userUUID, tenantID
 		Mode:          eraseModeLabel(mode),
 		ResolvedBy:    actor,
 		RequestedAt:   now,
+		Attempts:      1,
 		LeaseUntil:    &lease,
 		NextAttemptAt: &lease,
 	}
@@ -251,7 +262,7 @@ func (s *ErasureRequestService) EraseNow(ctx context.Context, userUUID, tenantID
 // recorded on the row and logged, not returned.
 func (s *ErasureRequestService) RetryDue(ctx context.Context) (bool, error) {
 	now := s.now()
-	row, err := s.repo.ClaimDue(ctx, now, now.Add(erasureRunLease))
+	row, err := s.repo.ClaimDue(ctx, now, now.Add(erasureRunLease), ErasureRetryMaxAttempts)
 	if err != nil {
 		return false, err
 	}
@@ -266,16 +277,19 @@ func (s *ErasureRequestService) RetryDue(ctx context.Context) (bool, error) {
 }
 
 // run executes the remaining producers of a leased request and settles the
-// outcome. The run survives caller cancellation (bounded by half the lease).
-// A run error is returned after settling; settle errors are logged only: on a
-// lost lease the newer holder's state stands, otherwise the lease expires and
-// the worker re-runs the remaining producers.
+// outcome. The attempt was counted when the row was claimed, so row.Attempts
+// is this run's number. The run survives caller cancellation (bounded by half
+// the lease) and Settle is bounded by what is left of the lease (at least
+// settleFloor). A run error is returned after settling. When Settle fails or
+// the lease was lost the outcome is not stored: the request is reported as it
+// is stored, incomplete, and the worker re-runs the remaining producers once
+// the lease expires (or the newer holder's state stands).
 func (s *ErasureRequestService) run(ctx context.Context, row *models.ErasureRequest) (*ErasureOutcome, error) {
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), erasureRunLease/2)
 	defer cancel()
 	res, runErr := s.dsr.EraseRemaining(runCtx, row.UserUUID, parseEraseMode(row.Mode), row.Progress)
 
-	attempts := row.Attempts + 1
+	attempts := row.Attempts
 	st := repository.ErasureSettlement{
 		Status:   models.ErasureRequestIncomplete,
 		Progress: row.Progress,
@@ -304,24 +318,31 @@ func (s *ErasureRequestService) run(ctx context.Context, row *models.ErasureRequ
 		}
 	}
 
-	settleCtx := context.WithoutCancel(ctx)
+	settleCtx, cancelSettle := context.WithTimeout(context.WithoutCancel(ctx), s.settleTimeout(*row.LeaseUntil))
+	defer cancelSettle()
+	settled := *row
+	settled.Status = models.ErasureRequestIncomplete
 	switch err := s.repo.Settle(settleCtx, row.UUID, *row.LeaseUntil, st); {
 	case errors.Is(err, repository.ErrErasureLeaseLost):
-		s.logger.Info("compliance: erasure run lease was taken over; keeping the newer state",
-			slog.String("request", row.UUID))
+		s.logger.Warn("compliance: erasure run lease was lost; its outcome is not recorded and the newer state stands",
+			slog.String("request", row.UUID), slog.String("intendedStatus", st.Status))
 	case err != nil:
 		s.logger.Warn("compliance: erasure settle failed; the lease will expire and the worker will retry",
-			slog.String("request", row.UUID), slog.String("error", err.Error()))
-	}
-
-	settled := *row
-	settled.Status, settled.Progress, settled.Attempts = st.Status, st.Progress, st.Attempts
-	settled.NextAttemptAt, settled.LastError, settled.LeaseUntil = st.NextAttemptAt, st.LastError, nil
-	if st.ResolvedAt != nil {
-		settled.ResolvedAt = st.ResolvedAt
+			slog.String("request", row.UUID), slog.String("intendedStatus", st.Status), slog.String("error", err.Error()))
+	default:
+		settled.Status, settled.Progress, settled.Attempts = st.Status, st.Progress, st.Attempts
+		settled.NextAttemptAt, settled.LastError, settled.LeaseUntil = st.NextAttemptAt, st.LastError, nil
+		if st.ResolvedAt != nil {
+			settled.ResolvedAt = st.ResolvedAt
+		}
 	}
 	if runErr != nil {
 		return nil, runErr
 	}
 	return &ErasureOutcome{Request: &settled, Run: res}, nil
+}
+
+// settleTimeout is the time left on the lease, but at least settleFloor.
+func (s *ErasureRequestService) settleTimeout(leaseUntil time.Time) time.Duration {
+	return max(leaseUntil.Sub(s.now()), s.settleFloor)
 }

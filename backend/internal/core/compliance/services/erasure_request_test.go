@@ -257,7 +257,7 @@ func TestEraseNowRecordsTheRunBeforeProducers(t *testing.T) {
 		t.Fatalf("EraseNow: %v", err)
 	}
 	if len(seen) != 1 || seen[0].UserUUID != "u-1" || seen[0].Source != "self_service" ||
-		seen[0].LeaseUntil == nil || !seen[0].LeaseUntil.After(erasureT0) {
+		seen[0].LeaseUntil == nil || !seen[0].LeaseUntil.After(erasureT0) || seen[0].Attempts != 1 {
 		t.Fatalf("row not recorded before the producer ran: %+v", seen)
 	}
 	row := repo.Row(out.Request.UUID)
@@ -531,5 +531,104 @@ func TestListOpenMarksClosableRows(t *testing.T) {
 		if r.Closable != want[r.UUID] {
 			t.Errorf("%s Closable = %v; want %v", r.UUID, r.Closable, want[r.UUID])
 		}
+	}
+}
+
+func TestExecuteCountsTheAttemptWhenClaimed(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestPending})
+	user := &stubProducer{subject: "user", purgeResult: iface.PurgeResult{Pending: true}}
+	svc, _ := newErasureSvc(repo, user)
+	var during int
+	user.onPurge = func() { during = repo.Row("r-1").Attempts }
+
+	if _, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-1"); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if during != 1 || repo.Row("r-1").Attempts != 1 {
+		t.Fatalf("attempts during run = %d, after = %d; want 1 and 1", during, repo.Row("r-1").Attempts)
+	}
+}
+
+func TestRetryDuePanickingProducerFailsAloneAndSiblingsFinish(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{
+		UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete, Mode: "hard_delete",
+		NextAttemptAt: ptrTime(erasureT0.Add(-time.Second)),
+	})
+	user := &stubProducer{subject: "user"}
+	crm := &stubProducer{subject: "crm", purgePanic: "boom"}
+	auth := &stubProducer{subject: "auth"}
+	svc, _ := newErasureSvc(repo, user, crm, auth)
+
+	if ok, err := svc.RetryDue(context.Background()); !ok || err != nil {
+		t.Fatalf("RetryDue = %v, %v", ok, err)
+	}
+	row := repo.Row("r-1")
+	if row.Status != models.ErasureRequestIncomplete || row.LeaseUntil != nil || row.LastError != "" || len(row.Progress) != 3 ||
+		row.Progress[0].Outcome != models.ProducerOutcomeDone || row.Progress[1].Outcome != models.ProducerOutcomeFailed ||
+		row.Progress[2].Outcome != models.ProducerOutcomeDone || row.NextAttemptAt == nil {
+		t.Fatalf("row wrong: %+v", row)
+	}
+}
+
+func TestRunSettleIsBoundedByTheLease(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestPending})
+	user := &stubProducer{subject: "user"}
+	svc, _ := newErasureSvc(repo, user)
+	svc.settleFloor = 50 * time.Millisecond
+	// The producers use up the lease: only 1ms of it is left at settle time.
+	user.onPurge = func() { svc.now = func() time.Time { return erasureT0.Add(erasureRunLease - time.Millisecond) } }
+	var hadDeadline bool
+	repo.OnSettle(func(ctx context.Context) error {
+		_, hadDeadline = ctx.Deadline()
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	done := make(chan *ErasureOutcome, 1)
+	go func() {
+		out, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-1")
+		if err != nil {
+			t.Errorf("Execute: %v", err)
+		}
+		done <- out
+	}()
+	select {
+	case out := <-done:
+		if !hadDeadline {
+			t.Fatal("Settle ran without a deadline")
+		}
+		if out == nil || out.Request.Status != models.ErasureRequestIncomplete {
+			t.Fatalf("an unsettled run must not report its intended state: %+v", out)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Settle was not bounded by the lease")
+	}
+}
+
+func TestRunSettleFailureReportsIncomplete(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestPending})
+	repo.FailNextSettle(errors.New("mongo blip"))
+	svc, _ := newErasureSvc(repo, &stubProducer{subject: "user"})
+
+	out, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-1")
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if out.Request.Status != models.ErasureRequestIncomplete || out.Request.ResolvedAt != nil {
+		t.Fatalf("returned %+v; want incomplete, as stored", out.Request)
+	}
+	if !out.Run.Complete() {
+		t.Fatalf("the run itself did every producer: %+v", out.Run)
+	}
+	if row := repo.Row("r-1"); row.Status != models.ErasureRequestIncomplete || row.LeaseUntil == nil {
+		t.Fatalf("row = %+v; want incomplete under its lease", row)
 	}
 }

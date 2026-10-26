@@ -93,12 +93,13 @@ func leaseFree(now time.Time) []bson.M {
 // Claim takes the lease on one request for an erasure run. fromStatus is the
 // status the caller expects: pending (first execution: the row becomes
 // incomplete with mode and resolver recorded) or incomplete (an operator
-// retry: mode and resolver stay). It returns the row after the update.
+// retry: mode and resolver stay). Either way the attempt budget restarts and
+// this run is attempt 1. It returns the row after the update.
 func (r *ErasureRequestRepository) Claim(ctx context.Context, uuid, fromStatus, mode, actor string, now, leaseUntil time.Time) (*models.ErasureRequest, error) {
 	// nextAttemptAt = the lease, so the worker takes the row over if this run
 	// dies before Settle (pending rows and exhausted rows have none).
 	lease := leaseUntil.Truncate(time.Millisecond)
-	set := bson.M{"leaseUntil": lease, "nextAttemptAt": lease, "attempts": 0}
+	set := bson.M{"leaseUntil": lease, "nextAttemptAt": lease, "attempts": 1}
 	if fromStatus == models.ErasureRequestPending {
 		set["status"] = models.ErasureRequestIncomplete
 		set["mode"] = mode
@@ -128,17 +129,23 @@ func (r *ErasureRequestRepository) Claim(ctx context.Context, uuid, fromStatus, 
 }
 
 // ClaimDue leases the next incomplete request whose retry is due, of any
-// tenant; nil, nil when nothing is due.
-func (r *ErasureRequestRepository) ClaimDue(ctx context.Context, now, leaseUntil time.Time) (*models.ErasureRequest, error) {
+// tenant, and counts the attempt on the row (attempts + 1), so a run that dies
+// before Settle still spends it. A row that already used maxAttempts is never
+// claimed. nil, nil when nothing is due.
+func (r *ErasureRequestRepository) ClaimDue(ctx context.Context, now, leaseUntil time.Time, maxAttempts int) (*models.ErasureRequest, error) {
 	var req models.ErasureRequest
 	//tenantscope:allow system: erasure retry worker claims incomplete requests of every tenant
 	err := r.coll.FindOneAndUpdate(ctx,
 		bson.M{
 			"status":        models.ErasureRequestIncomplete,
 			"nextAttemptAt": bson.M{"$lte": now},
+			"attempts":      bson.M{"$not": bson.M{"$gte": maxAttempts}}, // also matches a row without attempts
 			"$or":           leaseFree(now),
 		},
-		bson.M{"$set": bson.M{"leaseUntil": leaseUntil.Truncate(time.Millisecond)}},
+		bson.M{
+			"$set": bson.M{"leaseUntil": leaseUntil.Truncate(time.Millisecond)},
+			"$inc": bson.M{"attempts": 1},
+		},
 		options.FindOneAndUpdate().SetSort(bson.D{{Key: "nextAttemptAt", Value: 1}}).SetReturnDocument(options.After),
 	).Decode(&req)
 	if errors.Is(err, mongo.ErrNoDocuments) {
@@ -151,8 +158,9 @@ func (r *ErasureRequestRepository) ClaimDue(ctx context.Context, now, leaseUntil
 }
 
 // Settle records the outcome of one leased run and releases the lease. It is
-// fenced by the lease: the row must still carry exactly leaseUntil, so a run
-// whose lease expired and was taken over cannot overwrite the new holder.
+// fenced by the lease: the row must still be incomplete and carry exactly
+// leaseUntil, so a run whose lease expired and was taken over, or whose
+// request an operator closed meanwhile, cannot overwrite the newer state.
 func (r *ErasureRequestRepository) Settle(ctx context.Context, uuid string, leaseUntil time.Time, s ErasureSettlement) error {
 	set := bson.M{
 		"status":   s.Status,
@@ -175,7 +183,7 @@ func (r *ErasureRequestRepository) Settle(ctx context.Context, uuid string, leas
 	}
 	//tenantscope:allow settles a specific erasure request by its own UUID under its lease — cross-tenant by design.
 	res, err := r.coll.UpdateOne(ctx,
-		bson.M{"uuid": uuid, "leaseUntil": leaseUntil.Truncate(time.Millisecond)},
+		bson.M{"uuid": uuid, "status": models.ErasureRequestIncomplete, "leaseUntil": leaseUntil.Truncate(time.Millisecond)},
 		bson.M{"$set": set, "$unset": unset},
 	)
 	if err != nil {
@@ -225,7 +233,8 @@ func (r *ErasureRequestRepository) Resolve(ctx context.Context, uuid, status, re
 // ClosePartial closes an incomplete request whose remaining producers are no
 // longer registered: status closed_partial, the abandoned producer keys, who
 // closed it and why. It needs the lease free; a live lease means a run is in
-// flight (ErrErasureRequestBusy). Any other row misses (ErrErasureRequestNotFound).
+// flight (ErrErasureRequestBusy). An expired lease is removed, so the late
+// Settle of a dead run cannot match. Any other row misses (ErrErasureRequestNotFound).
 func (r *ErasureRequestRepository) ClosePartial(ctx context.Context, uuid string, now time.Time, abandoned []string, closedBy, note string) error {
 	//tenantscope:allow compliance admin closes a specific erasure request by its own UUID — cross-tenant by design.
 	res, err := r.coll.UpdateOne(ctx,
@@ -238,7 +247,7 @@ func (r *ErasureRequestRepository) ClosePartial(ctx context.Context, uuid string
 				"resolvedAt":     now,
 				"resolutionNote": note,
 			},
-			"$unset": bson.M{"nextAttemptAt": ""},
+			"$unset": bson.M{"nextAttemptAt": "", "leaseUntil": ""},
 		},
 	)
 	if err != nil {
