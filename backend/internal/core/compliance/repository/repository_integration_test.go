@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/orkestra/backend/internal/core/compliance/models"
 	"github.com/orkestra/backend/pkg/sdk/iface"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -234,6 +233,9 @@ func TestErasureClaimFromPendingSetsModeAndLease(t *testing.T) {
 	if got.LeaseUntil == nil || !got.LeaseUntil.Equal(lease.Truncate(time.Millisecond)) {
 		t.Fatalf("LeaseUntil = %v; want %v", got.LeaseUntil, lease.Truncate(time.Millisecond))
 	}
+	if got.NextAttemptAt == nil || !got.NextAttemptAt.Equal(*got.LeaseUntil) {
+		t.Fatalf("NextAttemptAt = %v; want the lease %v", got.NextAttemptAt, got.LeaseUntil)
+	}
 	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestIncomplete, "", "admin-2", now, lease); !errors.Is(err, ErrErasureRequestBusy) {
 		t.Fatalf("second Claim err = %v; want ErrErasureRequestBusy", err)
 	}
@@ -282,11 +284,6 @@ func TestErasureSettleIsFencedByLease(t *testing.T) {
 	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, l1); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
-	// The row needs a due attempt for the worker to take it over once L1 expires.
-	//tenantscope:allow test: sets a retry time on the row under test
-	if _, err := r.coll.UpdateOne(ctx, bson.M{"uuid": "r-1"}, bson.M{"$set": bson.M{"nextAttemptAt": now}}); err != nil {
-		t.Fatalf("set nextAttemptAt: %v", err)
-	}
 	later := l1.Add(time.Second)
 	l2 := later.Add(5 * time.Minute).Truncate(time.Millisecond)
 	taken, err := r.ClaimDue(ctx, later, l2)
@@ -298,14 +295,20 @@ func TestErasureSettleIsFencedByLease(t *testing.T) {
 	if err := r.Settle(ctx, "r-1", l1, done); !errors.Is(err, ErrErasureLeaseLost) {
 		t.Fatalf("Settle with stale lease err = %v; want ErrErasureLeaseLost", err)
 	}
-	row, _ := r.Get(ctx, "r-1")
+	row, err := r.Get(ctx, "r-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
 	if row.Status != models.ErasureRequestIncomplete || row.LeaseUntil == nil {
 		t.Fatalf("row changed by a lost lease: %+v", row)
 	}
 	if err := r.Settle(ctx, "r-1", l2, done); err != nil {
 		t.Fatalf("Settle: %v", err)
 	}
-	row, _ = r.Get(ctx, "r-1")
+	row, err = r.Get(ctx, "r-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
 	if row.Status != models.ErasureRequestCompleted || row.LeaseUntil != nil || row.ResolvedAt == nil {
 		t.Fatalf("settled row = %+v", row)
 	}
@@ -324,6 +327,65 @@ func TestErasureHasIncomplete(t *testing.T) {
 	}
 	if ok, err := r.HasIncomplete(ctx, "u-2"); err != nil || ok {
 		t.Fatalf("HasIncomplete u-2 = %v, %v; want false", ok, err)
+	}
+}
+
+func TestErasureSettleIncompleteThenCompleted(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	r := NewErasureRequestRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	insertErasure(t, r, models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now})
+	lease := now.Add(5 * time.Minute)
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, lease); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	next := now.Add(time.Minute)
+	prog := []models.ErasureProducerProgress{{Key: "auth", Subject: "auth", Outcome: models.ProducerOutcomePending, RowsDeleted: 3, Attempts: 1, UpdatedAt: now}}
+	err := r.Settle(ctx, "r-1", lease, ErasureSettlement{Status: models.ErasureRequestIncomplete, Progress: prog, Attempts: 1, NextAttemptAt: &next, LastError: models.ErasureLastErrorRun})
+	if err != nil {
+		t.Fatalf("Settle incomplete: %v", err)
+	}
+	row, err := r.Get(ctx, "r-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if row.Status != models.ErasureRequestIncomplete || len(row.Progress) != 1 || row.Progress[0].RowsDeleted != 3 || row.Attempts != 1 ||
+		row.NextAttemptAt == nil || !row.NextAttemptAt.Equal(next.Truncate(time.Millisecond)) || row.LastError != models.ErasureLastErrorRun || row.LeaseUntil != nil {
+		t.Fatalf("incomplete row = %+v", row)
+	}
+
+	l2 := next.Add(5 * time.Minute)
+	if got, err := r.ClaimDue(ctx, next.Add(time.Second), l2); err != nil || got == nil {
+		t.Fatalf("ClaimDue = %+v, %v", got, err)
+	}
+	if err := r.Settle(ctx, "r-1", l2, ErasureSettlement{Status: models.ErasureRequestCompleted, Progress: prog, Attempts: 2, ResolvedAt: &next}); err != nil {
+		t.Fatalf("Settle completed: %v", err)
+	}
+	row, err = r.Get(ctx, "r-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if row.Status != models.ErasureRequestCompleted || row.NextAttemptAt != nil || row.LastError != "" || row.ResolvedAt == nil || row.LeaseUntil != nil {
+		t.Fatalf("completed row = %+v", row)
+	}
+}
+
+func TestErasureClaimFromIncompleteKeepsModeAndResets(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	r := NewErasureRequestRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	insertErasure(t, r, models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestIncomplete, RequestedAt: now,
+		Mode: "anonymize", ResolvedBy: "admin-1", Attempts: 20, LastError: models.ErasureLastErrorRun, LeaseUntil: tp(now.Add(-time.Minute))})
+	got, err := r.Claim(ctx, "r-1", models.ErasureRequestIncomplete, "ignored", "admin-2", now, now.Add(5*time.Minute))
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if got.Mode != "anonymize" || got.ResolvedBy != "admin-1" || got.Attempts != 0 || got.LastError != "" || got.Status != models.ErasureRequestIncomplete {
+		t.Fatalf("claimed = %+v", got)
 	}
 }
 

@@ -5,6 +5,7 @@ package erasuretest
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -13,11 +14,14 @@ import (
 	"github.com/orkestra/backend/internal/core/compliance/repository"
 )
 
+var errDuplicate = errors.New("erasuretest: duplicate erasure request uuid")
+
 // MemRepo keeps erasure requests in memory.
 type MemRepo struct {
 	mu         sync.Mutex
 	rows       map[string]models.ErasureRequest
 	failSettle error
+	failInsert error
 }
 
 // NewMemRepo returns an empty repository.
@@ -28,6 +32,13 @@ func (m *MemRepo) Put(req models.ErasureRequest) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.rows[req.UUID] = clone(req)
+}
+
+// FailNextInsert makes the next Insert return err without writing.
+func (m *MemRepo) FailNextInsert(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failInsert = err
 }
 
 // Row returns the stored row, or the zero value when absent.
@@ -47,6 +58,7 @@ func (m *MemRepo) FailNextSettle(err error) {
 func clone(r models.ErasureRequest) models.ErasureRequest {
 	r.Progress = append([]models.ErasureProducerProgress(nil), r.Progress...)
 	r.Abandoned = append([]string(nil), r.Abandoned...)
+	r.RequestedAt = r.RequestedAt.Truncate(time.Millisecond)
 	r.ResolvedAt = cloneTime(r.ResolvedAt)
 	r.NextAttemptAt = cloneTime(r.NextAttemptAt)
 	r.LeaseUntil = cloneTime(r.LeaseUntil)
@@ -57,17 +69,27 @@ func cloneTime(t *time.Time) *time.Time {
 	if t == nil {
 		return nil
 	}
-	c := *t
+	c := t.Truncate(time.Millisecond) // BSON dates are ms
 	return &c
 }
 
 func leaseFree(r models.ErasureRequest, now time.Time) bool {
+	now = now.Truncate(time.Millisecond)
 	return r.LeaseUntil == nil || r.LeaseUntil.Before(now)
 }
 
 // Insert appends a new request.
 func (m *MemRepo) Insert(_ context.Context, req *models.ErasureRequest) error {
-	m.Put(*req)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.failInsert; err != nil {
+		m.failInsert = nil
+		return err
+	}
+	if _, ok := m.rows[req.UUID]; ok {
+		return errDuplicate
+	}
+	m.rows[req.UUID] = clone(*req)
 	return nil
 }
 
@@ -114,7 +136,7 @@ func (m *MemRepo) Resolve(_ context.Context, uuid, status, resolvedBy, mode, not
 	if !ok || r.Status != models.ErasureRequestPending {
 		return repository.ErrErasureRequestNotFound
 	}
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Millisecond)
 	r.Status, r.ResolvedAt, r.ResolvedBy, r.Mode, r.ResolutionNote = status, &now, resolvedBy, mode, note
 	m.rows[uuid] = r
 	return nil
@@ -132,7 +154,7 @@ func (m *MemRepo) Claim(_ context.Context, uuid, fromStatus, mode, actor string,
 		return nil, repository.ErrErasureRequestBusy
 	}
 	lease := leaseUntil.Truncate(time.Millisecond)
-	r.LeaseUntil, r.Attempts, r.LastError = &lease, 0, ""
+	r.LeaseUntil, r.NextAttemptAt, r.Attempts, r.LastError = &lease, cloneTime(&lease), 0, ""
 	if fromStatus == models.ErasureRequestPending {
 		r.Status, r.Mode, r.ResolvedBy = models.ErasureRequestIncomplete, mode, actor
 	}
@@ -145,6 +167,7 @@ func (m *MemRepo) Claim(_ context.Context, uuid, fromStatus, mode, actor string,
 func (m *MemRepo) ClaimDue(_ context.Context, now, leaseUntil time.Time) (*models.ErasureRequest, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	now = now.Truncate(time.Millisecond)
 	var best *models.ErasureRequest
 	for _, r := range m.rows {
 		if r.Status != models.ErasureRequestIncomplete || r.NextAttemptAt == nil || r.NextAttemptAt.After(now) || !leaseFree(r, now) {

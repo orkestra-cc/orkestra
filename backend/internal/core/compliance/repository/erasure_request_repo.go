@@ -95,7 +95,10 @@ func leaseFree(now time.Time) []bson.M {
 // incomplete with mode and resolver recorded) or incomplete (an operator
 // retry: mode and resolver stay). It returns the row after the update.
 func (r *ErasureRequestRepository) Claim(ctx context.Context, uuid, fromStatus, mode, actor string, now, leaseUntil time.Time) (*models.ErasureRequest, error) {
-	set := bson.M{"leaseUntil": leaseUntil.Truncate(time.Millisecond), "attempts": 0, "lastError": ""}
+	// nextAttemptAt = the lease, so the worker takes the row over if this run
+	// dies before Settle (pending rows and exhausted rows have none).
+	lease := leaseUntil.Truncate(time.Millisecond)
+	set := bson.M{"leaseUntil": lease, "nextAttemptAt": lease, "attempts": 0}
 	if fromStatus == models.ErasureRequestPending {
 		set["status"] = models.ErasureRequestIncomplete
 		set["mode"] = mode
@@ -105,7 +108,7 @@ func (r *ErasureRequestRepository) Claim(ctx context.Context, uuid, fromStatus, 
 	//tenantscope:allow compliance admin executes a specific erasure request by its own UUID — cross-tenant by design.
 	err := r.coll.FindOneAndUpdate(ctx,
 		bson.M{"uuid": uuid, "status": fromStatus, "$or": leaseFree(now)},
-		bson.M{"$set": set},
+		bson.M{"$set": set, "$unset": bson.M{"lastError": ""}},
 		options.FindOneAndUpdate().SetReturnDocument(options.After),
 	).Decode(&req)
 	if err == nil {

@@ -50,6 +50,9 @@ func TestMemErasureClaimFromPendingSetsModeAndLease(t *testing.T) {
 	if got.LeaseUntil == nil || !got.LeaseUntil.Equal(lease.Truncate(time.Millisecond)) {
 		t.Fatalf("LeaseUntil = %v; want %v", got.LeaseUntil, lease.Truncate(time.Millisecond))
 	}
+	if got.NextAttemptAt == nil || !got.NextAttemptAt.Equal(*got.LeaseUntil) {
+		t.Fatalf("NextAttemptAt = %v; want the lease %v", got.NextAttemptAt, got.LeaseUntil)
+	}
 	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestIncomplete, "", "admin-2", now, lease); !errors.Is(err, repository.ErrErasureRequestBusy) {
 		t.Fatalf("second Claim err = %v; want repository.ErrErasureRequestBusy", err)
 	}
@@ -94,10 +97,6 @@ func TestMemErasureSettleIsFencedByLease(t *testing.T) {
 	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, l1); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
-	// The row needs a due attempt for the worker to take it over once L1 expires.
-	row0 := r.Row("r-1")
-	row0.NextAttemptAt = &now
-	r.Put(row0)
 	later := l1.Add(time.Second)
 	l2 := later.Add(5 * time.Minute).Truncate(time.Millisecond)
 	taken, err := r.ClaimDue(ctx, later, l2)
@@ -133,5 +132,75 @@ func TestMemErasureHasIncomplete(t *testing.T) {
 	}
 	if ok, err := r.HasIncomplete(ctx, "u-2"); err != nil || ok {
 		t.Fatalf("HasIncomplete u-2 = %v, %v; want false", ok, err)
+	}
+}
+
+func TestMemErasureSettleIncompleteThenCompleted(t *testing.T) {
+	r := NewMemRepo()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	r.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now})
+	lease := now.Add(5 * time.Minute)
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, lease); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	next := now.Add(time.Minute)
+	prog := []models.ErasureProducerProgress{{Key: "auth", Subject: "auth", Outcome: models.ProducerOutcomePending, RowsDeleted: 3, Attempts: 1, UpdatedAt: now}}
+	err := r.Settle(ctx, "r-1", lease, repository.ErasureSettlement{Status: models.ErasureRequestIncomplete, Progress: prog, Attempts: 1, NextAttemptAt: &next, LastError: models.ErasureLastErrorRun})
+	if err != nil {
+		t.Fatalf("Settle incomplete: %v", err)
+	}
+	row := r.Row("r-1")
+	if row.Status != models.ErasureRequestIncomplete || len(row.Progress) != 1 || row.Progress[0].RowsDeleted != 3 || row.Attempts != 1 ||
+		row.NextAttemptAt == nil || !row.NextAttemptAt.Equal(next.Truncate(time.Millisecond)) || row.LastError != models.ErasureLastErrorRun || row.LeaseUntil != nil {
+		t.Fatalf("incomplete row = %+v", row)
+	}
+
+	l2 := next.Add(5 * time.Minute)
+	if got, err := r.ClaimDue(ctx, next.Add(time.Second), l2); err != nil || got == nil {
+		t.Fatalf("ClaimDue = %+v, %v", got, err)
+	}
+	if err := r.Settle(ctx, "r-1", l2, repository.ErasureSettlement{Status: models.ErasureRequestCompleted, Progress: prog, Attempts: 2, ResolvedAt: &next}); err != nil {
+		t.Fatalf("Settle completed: %v", err)
+	}
+	row = r.Row("r-1")
+	if row.Status != models.ErasureRequestCompleted || row.NextAttemptAt != nil || row.LastError != "" || row.ResolvedAt == nil || row.LeaseUntil != nil {
+		t.Fatalf("completed row = %+v", row)
+	}
+}
+
+func TestMemErasureClaimFromIncompleteKeepsModeAndResets(t *testing.T) {
+	r := NewMemRepo()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	r.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestIncomplete, RequestedAt: now,
+		Mode: "anonymize", ResolvedBy: "admin-1", Attempts: 20, LastError: models.ErasureLastErrorRun, LeaseUntil: tp(now.Add(-time.Minute))})
+	got, err := r.Claim(ctx, "r-1", models.ErasureRequestIncomplete, "ignored", "admin-2", now, now.Add(5*time.Minute))
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if got.Mode != "anonymize" || got.ResolvedBy != "admin-1" || got.Attempts != 0 || got.LastError != "" || got.Status != models.ErasureRequestIncomplete {
+		t.Fatalf("claimed = %+v", got)
+	}
+}
+
+func TestMemErasureInsertDuplicateAndInjectedFailure(t *testing.T) {
+	r := NewMemRepo()
+	ctx := context.Background()
+	req := models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending}
+	if err := r.Insert(ctx, &req); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := r.Insert(ctx, &req); err == nil {
+		t.Fatal("duplicate Insert succeeded; want an error like the unique uuid index")
+	}
+	boom := errors.New("boom")
+	r.FailNextInsert(boom)
+	other := models.ErasureRequest{UUID: "r-2"}
+	if err := r.Insert(ctx, &other); !errors.Is(err, boom) {
+		t.Fatalf("Insert err = %v; want boom", err)
+	}
+	if err := r.Insert(ctx, &other); err != nil {
+		t.Fatalf("Insert after consumed failure: %v", err)
 	}
 }
