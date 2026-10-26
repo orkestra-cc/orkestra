@@ -209,6 +209,7 @@ A call that fails after streaming part of its answer is charged conservatively. 
 | `gemini` | fixed (Gemini Developer API) | Official SDK. Tool calls carry an opaque `Signature` (Gemini 3 thought signatures) that must be sent back on the next turn |
 | `ollama` | `baseUrl` required | Native API. The key is optional (sent as a Bearer token for proxied deployments) |
 | `openai_compatible` | `baseUrl` required | Chat Completions wire format for self-hosted servers (vLLM, llama.cpp, LiteLLM, …); the key is optional |
+| `tei` | operator environment | **Installation-only.** Embeddings and reranking for `retrieval`; never selectable for an organization model and never listed at `/admin/llm` (see [Installation inference endpoints](#installation-inference-endpoints)) |
 | `mock` | none | Deterministic echo for tests and non-production stacks; never selectable in a production-like environment |
 
 Every provider connection re-checks each resolved address at dial time (no private or special-use address in production-like environments), follows no redirect and no proxy, caps response sizes (8 MiB, 32 MiB for embedding calls; OpenAI embeddings are requested base64-encoded), disables SDK retries and never surfaces provider error text: failures become `llm.*` codes. `allow_hosted` gates the hosted providers on the live path and on the admin test, discovery and prompt operations alike.
@@ -227,7 +228,7 @@ Each alert is sent at most once per organization and month. It is written in the
 
 ## Usage
 
-`GET /v1/admin/llm/usage` groups the finalized calls of a period by model, user or calling module (requests, input and output tokens), and returns the current month's rollup and the budget. `GET /v1/llm/me/usage` gives a user their own month, split by whether the organization or their own linked account paid. The console's **Usage** and **Budget** tabs at `/admin/llm` read these routes.
+`GET /v1/admin/llm/usage` groups the finalized calls of a period by model, user or calling module (requests, input and output tokens), and returns the current month's rollup and the budget. `GET /v1/llm/me/usage` gives a user their own month, split by whether the organization or their own linked account paid. The console's **Usage** and **Budget** tabs at `/admin/llm` read these routes. Installation inference calls appear under the model `installation:<name>`; a call made by a background worker for an organization (indexing) has no user, so it is billed to the organization and grouped under an empty user in the by-user report.
 
 ## Sign in with ChatGPT
 
@@ -276,11 +277,30 @@ The module has been exercised against test doubles, not a real ChatGPT Plus or P
 Redis is needed for the one-shot sign-in state: without it the paste flow answers a server error and the automatic callback returns to the console with `token_exchange_failed`. The automatic callback is unauthenticated by nature: a user could try to have someone on the installation's own host approve a sign-in they started, which would link that person's account to them; OpenAI shows a consent screen and attempts last ten minutes. While OpenAI cannot be reached, plan-billed models disappear from the self list because their catalog cannot be read. A callback refused by the per-address rate limit reports `state_invalid`, although the attempt can be retried after the window. That the automatic callback with `Host: 127.0.0.1:<port>` reaches the operator API (no `421`) is still to be checked live on an installation running `loopback_local`.
 :::
 
+## Installation inference endpoints
+
+Search over documents needs embeddings and, optionally, a reranker. Those models run on [text-embeddings-inference](https://github.com/huggingface/text-embeddings-inference) (TEI) servers that the **operator** declares for the whole installation ([ADR-0023](/adrs/core-retrieval-module)); they are served only to the `retrieval` module and are separate from the per-organization credentials and models above.
+
+They are declared in one environment variable, a JSON array:
+
+```bash
+RETRIEVAL_INFERENCE_ENDPOINTS=[{"name":"embed","url":"http://tei-embed:80","kind":"embed","boundary":"local","model":"BAAI/bge-m3","revision":"<sha>","pooling":"cls","normalize":true,"truncate":true},{"name":"rerank","url":"http://tei-rerank:80","kind":"rerank","boundary":"local","model":"BAAI/bge-reranker-v2-m3","revision":"<sha>","truncate":true}]
+RETRIEVAL_INFERENCE_API_KEY=<shared bearer key; an endpoint may name another variable in "apiKeyEnv">
+```
+
+Each endpoint states its `boundary`: `local` (inside your infrastructure) or `hosted` (a third party, which then must use `https` in a production-like environment). The `model` and `revision` must be exactly what the server was started with (`--model-id`, `--revision`).
+
+An endpoint is **verified, not trusted**. Before use, and again at most every minute, the module asks the server which model and revision it is running, and for an embedding endpoint measures the vector size. If the server now runs something else, the call is refused (`ErrLLMProfileMismatch`) rather than mixing vectors of two models; an unreachable server is `ErrLLMProviderUnavailable`. Each endpoint has an immutable profile ID derived from its model, revision and settings, so moving a model to another host keeps its ID.
+
+A malformed value is a warning in the log, never a boot failure: a bad endpoint is left out, and with the variable unset the module logs nothing. The module never contacts an endpoint while starting.
+
+Calls are billed to the organization they run for, through the same budget and usage ledger as any other call (provider `tei`, model `installation:<name>`). The private-address rule is unchanged for organization endpoints: an `ollama` or `openai_compatible` base URL that resolves to a private address is still refused in a production-like environment, and `tei` cannot be used as an organization provider.
+
 ## Metrics
 
 | Metric | Labels |
 |---|---|
-| `orkestra_llm_requests_total` | `provider`, `outcome` (`ok`, `fallback`, `error`, `budget_blocked`) |
+| `orkestra_llm_requests_total` | `provider` (`tei` for installation calls), `outcome` (`ok`, `fallback`, `error`, `budget_blocked`) |
 | `orkestra_llm_tokens_total` | `provider`, `direction` (`input`, `output`) — tokens of the calls the router finalizes, partial-output charges included. Orphans closed by the reconciler are charged in the ledger and the budget but not counted here |
 | `orkestra_llm_siwc_link_total` | `outcome` (`linked`, `plan_disabled`, `denied`, `state_invalid`, `id_token_invalid`, `exchange_failed`) — link completions through the automatic callback or a pasted address |
 
@@ -293,6 +313,8 @@ Erasure deletes the grants the user holds; replaces the actor id on the grants t
 ## Status
 
 Foundations and the gateway are delivered ([ADR-0022](/adrs/core-llm-module)): the catalog, access model, encrypted secrets, data-subject rights, the six provider adapters, routing with fallback and circuit breaking, the usage ledger and monthly budget with alerts, connectivity tests, model discovery and the prompt test, and the `/admin/llm` console page (tabs for models, credentials, usage and budget, kept in the URL). Sign in with ChatGPT for per-user subscriptions (`credentialRef.kind = user_account`) is delivered as well, in both modes, with the live check against a real ChatGPT account (and the decision to enable `hosted_paste` on a hosted installation) still pending; the console shows it as the **AI accounts** tab in security settings and the **Accounts** tab at `/admin/llm`.
+
+Installation-level inference for the `retrieval` module ([ADR-0023](/adrs/core-retrieval-module)) is delivered as the first step of that module: operator-declared TEI embedding and reranking endpoints, verified against the server, with no route and no console page of their own.
 
 :::note Known limitations
 Editing a model's grants or a budget's extra recipients in the console also needs `system.tenants.admin`, because both pickers list the organization's members through the tenant API. Without it the editor shows a hint instead of the members. The usage report grouped by user shows user IDs, not names.

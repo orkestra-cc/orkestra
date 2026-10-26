@@ -17,6 +17,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/internal/core/llm/handlers"
+	"github.com/orkestra/backend/internal/core/llm/installation"
 	"github.com/orkestra/backend/internal/core/llm/models"
 	"github.com/orkestra/backend/internal/core/llm/providers"
 	"github.com/orkestra/backend/internal/core/llm/repository"
@@ -575,6 +576,8 @@ func offlineDB(t *testing.T) *mongo.Database {
 func initModule(t *testing.T, key string) (*Module, *module.ServiceRegistry, *iface.PIIProducerRegistry, string) {
 	t.Helper()
 	t.Setenv("LLM_SECRET_ENCRYPTION_KEY", key)
+	t.Setenv(installation.EndpointsEnv, "")
+	t.Setenv(installation.APIKeyEnv, "")
 	logs := &bytes.Buffer{}
 	reg := module.NewServiceRegistry()
 	reg.Register(module.ServiceTenantDirectoryReader, iface.TenantDirectoryReader(noMembers{}))

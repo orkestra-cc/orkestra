@@ -22,6 +22,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/internal/core/llm/handlers"
+	"github.com/orkestra/backend/internal/core/llm/installation"
 	"github.com/orkestra/backend/internal/core/llm/models"
 	"github.com/orkestra/backend/internal/core/llm/providers"
 	"github.com/orkestra/backend/internal/core/llm/repository"
@@ -66,11 +67,14 @@ const (
 
 type Module struct {
 	module.BaseModule
-	logger   *slog.Logger
-	vault    *services.Vault
-	catalog  *services.CatalogService
-	gateway  *services.Gateway
-	registry *providers.Registry
+	logger  *slog.Logger
+	vault   *services.Vault
+	catalog *services.CatalogService
+	gateway *services.Gateway
+	// installation serves the operator-declared inference endpoints
+	// (ADR-0023); kept for tests, the gateway holds the live reference.
+	installation *services.InstallationService
+	registry     *providers.Registry
 	// accounts owns the Sign in with ChatGPT registrations; the router
 	// resolves user_account models through it.
 	accounts *services.AccountsService
@@ -348,12 +352,27 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	m.gateway.SetAccounts(m.accounts)
 	m.gateway.SetActiveModelTenants(mods)
 
+	routerCfg := func() services.RouterConfig { return services.RouterConfig{RequestTimeout: settings().requestTimeout} }
 	router := services.NewRouter(m.registry, services.NewCredentialResolver(m.catalog, m.accounts), budgetSvc,
 		services.NewBreaker(3, 30*time.Second), m.clientFor,
-		func() services.RouterConfig { return services.RouterConfig{RequestTimeout: settings().requestTimeout} },
-		metrics.Default(), logger)
+		routerCfg, metrics.Default(), logger)
 	router.AfterCall = m.afterCall
 	m.gateway.SetRouter(router)
+
+	// Installation-level inference (ADR-0023): operator-declared TEI
+	// endpoints, served only to the retrieval module. Init never contacts
+	// them; a problem is a WARN, an unset variable logs nothing.
+	eps, warns := installation.Parse(os.Getenv(installation.EndpointsEnv), os.Getenv, productionLike)
+	for _, w := range warns {
+		logger.Warn("llm: " + w)
+	}
+	for _, ep := range eps {
+		logger.Info("llm: installation inference endpoint", "name", ep.Name, "kind", ep.Kind, "boundary", ep.Boundary,
+			"model", ep.Model, "revision", ep.Revision, "profile", ep.Profile().ID)
+	}
+	instSet := installation.NewSet(eps, providers.NewInstallationHTTPClient(providers.TransportConfig{IdleTimeout: streamIdleTimeout}), installation.Options{})
+	m.installation = services.NewInstallationService(instSet, budgetSvc, services.NewBreaker(3, 30*time.Second), routerCfg, metrics.Default(), logger)
+	m.gateway.SetInstallation(m.installation)
 
 	// The notification module is a declared dependency and always loaded;
 	// the sender and the operator user directory are still resolved
