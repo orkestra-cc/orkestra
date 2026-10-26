@@ -492,7 +492,7 @@ interfaces every module shares. The biggest ones you'll encounter:
 | `JWTProvider` | `auth` | dev token generator |
 | `PDFProvider` | `documents` | billing (invoice rendering) |
 | `LLMGateway` | `llm` (core) | every addon that uses a language model |
-| `RAGQueryProvider` | `rag` | agents |
+| `RAGQueryProvider` | `rag` | agents — deprecated (ADR-0023 D16) — use `RetrievalSearch` |
 | `AuditSink` | `compliance` | every module that emits audit events |
 | `BillingTenantProvider` | `tenant` | billing (CessionarioCommittente snapshot) |
 | `PaymentProvider` | `payments` | subscriptions |
