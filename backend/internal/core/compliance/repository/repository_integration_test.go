@@ -434,3 +434,36 @@ func TestKMSKeyLifecycle(t *testing.T) {
 		t.Fatalf("GetByTenant missing err = %v; want ErrKMSKeyNotFound", err)
 	}
 }
+
+func TestErasureClosePartialOnlyIncompleteAndLeaseFree(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	r := NewErasureRequestRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	next := now.Add(time.Hour)
+	insertErasure(t, r, models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestIncomplete, RequestedAt: now, NextAttemptAt: &next})
+	insertErasure(t, r, models.ErasureRequest{UUID: "r-2", UserUUID: "u-2", Status: models.ErasureRequestIncomplete, RequestedAt: now, LeaseUntil: tp(now.Add(time.Minute))})
+	insertErasure(t, r, models.ErasureRequest{UUID: "r-3", UserUUID: "u-3", Status: models.ErasureRequestPending, RequestedAt: now})
+
+	if err := r.ClosePartial(ctx, "r-1", now, []string{"gone"}, "admin-1", "module removed"); err != nil {
+		t.Fatalf("ClosePartial: %v", err)
+	}
+	row, err := r.Get(ctx, "r-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if row.Status != models.ErasureRequestClosedPartial || len(row.Abandoned) != 1 || row.Abandoned[0] != "gone" ||
+		row.ResolvedBy != "admin-1" || row.ResolutionNote != "module removed" || row.NextAttemptAt != nil || row.ResolvedAt == nil {
+		t.Fatalf("closed row = %+v", row)
+	}
+	if err := r.ClosePartial(ctx, "r-2", now, []string{"gone"}, "admin-1", "n"); !errors.Is(err, ErrErasureRequestBusy) {
+		t.Fatalf("leased err = %v; want ErrErasureRequestBusy", err)
+	}
+	if err := r.ClosePartial(ctx, "r-3", now, []string{"gone"}, "admin-1", "n"); !errors.Is(err, ErrErasureRequestNotFound) {
+		t.Fatalf("pending err = %v; want ErrErasureRequestNotFound", err)
+	}
+	if err := r.ClosePartial(ctx, "r-1", now, []string{"gone"}, "admin-1", "n"); !errors.Is(err, ErrErasureRequestNotFound) {
+		t.Fatalf("already closed err = %v; want ErrErasureRequestNotFound", err)
+	}
+}

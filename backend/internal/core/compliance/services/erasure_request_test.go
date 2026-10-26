@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -392,5 +393,143 @@ func TestRetryDueUnderLegalHoldStaysIncomplete(t *testing.T) {
 		row.Attempts != 3 || row.NextAttemptAt == nil || !row.NextAttemptAt.Equal(erasureT0.Add(4*time.Minute)) ||
 		len(row.Progress) != 1 || row.Progress[0].Outcome != models.ProducerOutcomeFailed {
 		t.Fatalf("row wrong: %+v purge=%d", row, user.purgeCalls)
+	}
+}
+
+func newCloseSvc(repo *erasuretest.MemRepo, producers ...iface.PIIProducer) (*ErasureRequestService, *capturingAuditSink) {
+	dsr, _ := newDSRService(producers...)
+	sink := &capturingAuditSink{}
+	svc := NewErasureRequestService(repo, dsr, sink, nil)
+	svc.now = func() time.Time { return erasureT0 }
+	return svc, sink
+}
+
+func pendingProgress(key string) models.ErasureProducerProgress {
+	return models.ErasureProducerProgress{Key: key, Subject: key, Outcome: models.ProducerOutcomePending, Attempts: 1}
+}
+
+func TestAbandonedKeys(t *testing.T) {
+	t.Parallel()
+	reg := func(keys ...string) map[string]bool {
+		m := map[string]bool{}
+		for _, k := range keys {
+			m[k] = true
+		}
+		return m
+	}
+	cases := []struct {
+		name     string
+		progress []models.ErasureProducerProgress
+		reg      map[string]bool
+		keys     []string
+		ok       bool
+	}{
+		{"registered not done", []models.ErasureProducerProgress{done("user"), failed("gone"), pendingProgress("auth.client")}, reg("user", "auth.client"), []string{"gone"}, false},
+		{"only unregistered not done", []models.ErasureProducerProgress{done("user"), failed("gone")}, reg("user"), []string{"gone"}, true},
+		{"all done", []models.ErasureProducerProgress{done("user")}, reg("user"), nil, false},
+	}
+	for _, c := range cases {
+		keys, ok := abandonedKeys(c.progress, c.reg)
+		if ok != c.ok || len(keys) != len(c.keys) || (len(keys) == 1 && keys[0] != c.keys[0]) {
+			t.Errorf("%s: abandonedKeys = %v, %v; want %v, %v", c.name, keys, ok, c.keys, c.ok)
+		}
+	}
+}
+
+func TestClosePartialRecordsAbandonedProducersAndAudits(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Mode: "anonymize", Status: models.ErasureRequestIncomplete,
+		Progress: []models.ErasureProducerProgress{done("user"), failed("gone")}, RequestedAt: erasureT0})
+	svc, sink := newCloseSvc(repo, &stubProducer{subject: "user"})
+
+	got, err := svc.ClosePartial(context.Background(), "r-1", "admin-1", "  module removed in v2  ")
+	if err != nil {
+		t.Fatalf("ClosePartial: %v", err)
+	}
+	if got.Status != models.ErasureRequestClosedPartial || len(got.Abandoned) != 1 || got.Abandoned[0] != "gone" || got.ResolutionNote != "module removed in v2" {
+		t.Fatalf("returned row = %+v", got)
+	}
+	if len(sink.events) != 1 {
+		t.Fatalf("events = %+v; want one", sink.events)
+	}
+	ev := sink.events[0]
+	ab, _ := ev.Metadata["abandoned"].([]string)
+	if ev.Action != "gdpr.dsr.erasure_closed_partial" || ev.ResourceID != "r-1" || ev.ActorUserID != "admin-1" ||
+		len(ab) != 1 || ab[0] != "gone" || ev.Metadata["subjectUserUuid"] != "u-9" || ev.Metadata["mode"] != "anonymize" {
+		t.Fatalf("event = %+v", ev)
+	}
+	if _, has := ev.Metadata["note"]; has {
+		t.Fatal("audit metadata must not carry the note")
+	}
+}
+
+func TestClosePartialRefusedWhileARegisteredProducerIsNotDone(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete,
+		Progress: []models.ErasureProducerProgress{done("user"), failed("gone"), failed("auth.client")}, RequestedAt: erasureT0})
+	svc, sink := newCloseSvc(repo, &stubProducer{subject: "user"}, &stubProducer{subject: "auth.client"})
+
+	if _, err := svc.ClosePartial(context.Background(), "r-1", "admin-1", "note"); !errors.Is(err, ErrErasureRequestNotClosable) {
+		t.Fatalf("err = %v; want ErrErasureRequestNotClosable", err)
+	}
+	if repo.Row("r-1").Status != models.ErasureRequestIncomplete || len(sink.events) != 0 {
+		t.Fatalf("row changed or audited: %+v %+v", repo.Row("r-1"), sink.events)
+	}
+}
+
+func TestClosePartialRefusesPendingAndResolved(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-p", Status: models.ErasureRequestPending, RequestedAt: erasureT0})
+	repo.Put(models.ErasureRequest{UUID: "r-c", Status: models.ErasureRequestCompleted, RequestedAt: erasureT0})
+	svc, _ := newCloseSvc(repo)
+	if _, err := svc.ClosePartial(context.Background(), "r-p", "admin-1", "note"); !errors.Is(err, ErrErasureRequestNotClosable) {
+		t.Fatalf("pending err = %v", err)
+	}
+	if _, err := svc.ClosePartial(context.Background(), "r-c", "admin-1", "note"); !errors.Is(err, repository.ErrErasureRequestNotFound) {
+		t.Fatalf("completed err = %v", err)
+	}
+}
+
+func TestClosePartialMasksAndRequiresNote(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete,
+		Progress: []models.ErasureProducerProgress{failed("gone")}, RequestedAt: erasureT0})
+	svc, _ := newCloseSvc(repo)
+	for _, n := range []string{"", strings.Repeat("x", 501)} {
+		if _, err := svc.ClosePartial(context.Background(), "r-1", "admin-1", n); !errors.Is(err, ErrErasureCloseNoteRequired) {
+			t.Fatalf("note len %d err = %v; want ErrErasureCloseNoteRequired", len(n), err)
+		}
+	}
+	got, err := svc.ClosePartial(context.Background(), "r-1", "admin-1", "asked by mario.rossi@example.com")
+	if err != nil {
+		t.Fatalf("ClosePartial: %v", err)
+	}
+	if strings.Contains(got.ResolutionNote, "mario.rossi@example.com") || strings.Contains(repo.Row("r-1").ResolutionNote, "mario.rossi@example.com") {
+		t.Fatalf("note not masked: %q", got.ResolutionNote)
+	}
+}
+
+func TestListOpenMarksClosableRows(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-a", Status: models.ErasureRequestIncomplete, RequestedAt: erasureT0,
+		Progress: []models.ErasureProducerProgress{done("user"), failed("gone")}})
+	repo.Put(models.ErasureRequest{UUID: "r-b", Status: models.ErasureRequestIncomplete, RequestedAt: erasureT0.Add(time.Second),
+		Progress: []models.ErasureProducerProgress{failed("user")}})
+	repo.Put(models.ErasureRequest{UUID: "r-c", Status: models.ErasureRequestPending, RequestedAt: erasureT0.Add(2 * time.Second)})
+	svc, _ := newCloseSvc(repo, &stubProducer{subject: "user"})
+	got, err := svc.ListOpen(context.Background())
+	if err != nil || len(got) != 3 {
+		t.Fatalf("ListOpen = %d, %v", len(got), err)
+	}
+	want := map[string]bool{"r-a": true, "r-b": false, "r-c": false}
+	for _, r := range got {
+		if r.Closable != want[r.UUID] {
+			t.Errorf("%s Closable = %v; want %v", r.UUID, r.Closable, want[r.UUID])
+		}
 	}
 }

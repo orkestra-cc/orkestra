@@ -221,3 +221,38 @@ func (r *ErasureRequestRepository) Resolve(ctx context.Context, uuid, status, re
 	}
 	return nil
 }
+
+// ClosePartial closes an incomplete request whose remaining producers are no
+// longer registered: status closed_partial, the abandoned producer keys, who
+// closed it and why. It needs the lease free; a live lease means a run is in
+// flight (ErrErasureRequestBusy). Any other row misses (ErrErasureRequestNotFound).
+func (r *ErasureRequestRepository) ClosePartial(ctx context.Context, uuid string, now time.Time, abandoned []string, closedBy, note string) error {
+	//tenantscope:allow compliance admin closes a specific erasure request by its own UUID — cross-tenant by design.
+	res, err := r.coll.UpdateOne(ctx,
+		bson.M{"uuid": uuid, "status": models.ErasureRequestIncomplete, "$or": leaseFree(now)},
+		bson.M{
+			"$set": bson.M{
+				"status":         models.ErasureRequestClosedPartial,
+				"abandoned":      abandoned,
+				"resolvedBy":     closedBy,
+				"resolvedAt":     now,
+				"resolutionNote": note,
+			},
+			"$unset": bson.M{"nextAttemptAt": ""},
+		},
+	)
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount > 0 {
+		return nil
+	}
+	cur, gerr := r.Get(ctx, uuid)
+	if gerr != nil {
+		return gerr
+	}
+	if cur.Status == models.ErasureRequestIncomplete {
+		return ErrErasureRequestBusy
+	}
+	return ErrErasureRequestNotFound
+}

@@ -14,7 +14,7 @@ services/
   legal_hold.go                   LegalHoldService (Place/Release/ListActive/IsHeld) — IsHeld satisfies DSRService.LegalHoldChecker
   retention.go                    RetentionService: daily Loop reaping anonymized user tombstones through ErasureRequestService.EraseNow (durable `retention` request; skips subjects with an incomplete erasure; off by default)
   erasure_retry.go                ErasureRetryWorker: every 1m RetryDue up to 50 incomplete requests; launched by Start(), stopped via stopCh
-  erasure_request.go              ErasureRequestService: lodge / list / execute / reject
+  erasure_request.go              ErasureRequestService: lodge / list / execute / reject / close-partial (incomplete request whose remaining producers are unregistered)
   kms.go                          Local KMS provider (per-tenant envelope encryption + crypto-shred); satisfies iface.KMSProvider; Decrypt wraps iface.ErrKMSCiphertextInvalid for a truncated/tampered/foreign-key ciphertext, iface.ErrKMSKeyDeleted after a shred
   soc2.go                         SOC2 evidence aggregation (gated)
   policy_validation.go            Policy validation: blocking errors + warnings (spec §1.4), normalization, less_restrictive_than_current

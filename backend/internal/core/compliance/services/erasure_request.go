@@ -16,6 +16,13 @@ import (
 // has already started: it can be retried, not rejected.
 var ErrErasureRequestStarted = errors.New("compliance: the erasure has started; it can be retried, not rejected")
 
+// ErrErasureRequestNotClosable is returned by ClosePartial for a request that
+// is not incomplete or still waits on a producer this binary registers.
+var ErrErasureRequestNotClosable = errors.New("compliance: the erasure request still waits on a registered producer")
+
+// ErrErasureCloseNoteRequired is returned by ClosePartial without a valid note.
+var ErrErasureCloseNoteRequired = errors.New("compliance: a note of 1 to 500 characters is required to close an erasure request")
+
 const (
 	// ErasureRetryMaxAttempts bounds the automatic retries of one request;
 	// after it nextAttemptAt is cleared and an operator must retry.
@@ -55,6 +62,7 @@ type erasureRequestRepo interface {
 	ClaimDue(ctx context.Context, now, leaseUntil time.Time) (*models.ErasureRequest, error)
 	Settle(ctx context.Context, uuid string, leaseUntil time.Time, s repository.ErasureSettlement) error
 	HasIncomplete(ctx context.Context, userUUID string) (bool, error)
+	ClosePartial(ctx context.Context, uuid string, now time.Time, abandoned []string, closedBy, note string) error
 }
 
 // ErasureOutcome is the result of one leased erasure run.
@@ -102,7 +110,77 @@ func (s *ErasureRequestService) Lodge(ctx context.Context, userUUID, tenantID, r
 
 // ListOpen returns requests awaiting operator action or further erasure work.
 func (s *ErasureRequestService) ListOpen(ctx context.Context) ([]models.ErasureRequest, error) {
-	return s.repo.ListByStatus(ctx, models.ErasureRequestPending, models.ErasureRequestIncomplete)
+	rows, err := s.repo.ListByStatus(ctx, models.ErasureRequestPending, models.ErasureRequestIncomplete)
+	if err != nil {
+		return nil, err
+	}
+	registered := s.dsr.RegisteredKeys()
+	for i := range rows {
+		if rows[i].Status == models.ErasureRequestIncomplete {
+			_, rows[i].Closable = abandonedKeys(rows[i].Progress, registered)
+		}
+	}
+	return rows, nil
+}
+
+// abandonedKeys returns the not-done progress keys absent from registered; ok
+// is true when there is at least one and no not-done key is registered.
+func abandonedKeys(progress []models.ErasureProducerProgress, registered map[string]bool) (keys []string, ok bool) {
+	for _, p := range progress {
+		if p.Outcome == models.ProducerOutcomeDone {
+			continue
+		}
+		if registered[p.Key] {
+			return keys, false
+		}
+		keys = append(keys, p.Key)
+	}
+	return keys, len(keys) > 0
+}
+
+// ClosePartial closes an incomplete request whose not-done producers are all
+// gone from this binary, recording them as abandoned. Nothing is erased, so
+// the legal hold does not gate it. The note is masked before it is stored.
+func (s *ErasureRequestService) ClosePartial(ctx context.Context, requestUUID, closedBy, note string) (*models.ErasureRequest, error) {
+	note, valid := NormalizeReason(note)
+	if !valid {
+		return nil, ErrErasureCloseNoteRequired
+	}
+	note = maskReason(note)
+	row, err := s.repo.Get(ctx, requestUUID)
+	if err != nil {
+		return nil, err
+	}
+	switch row.Status {
+	case models.ErasureRequestPending:
+		return nil, ErrErasureRequestNotClosable
+	case models.ErasureRequestIncomplete:
+	default:
+		return nil, repository.ErrErasureRequestNotFound
+	}
+	keys, ok := abandonedKeys(row.Progress, s.dsr.RegisteredKeys())
+	if !ok {
+		return nil, ErrErasureRequestNotClosable
+	}
+	if err := s.repo.ClosePartial(ctx, requestUUID, s.now(), keys, closedBy, note); err != nil {
+		return nil, err
+	}
+	if s.sink != nil {
+		s.sink.Emit(ctx, iface.AuditEvent{
+			ActorUserID:  closedBy,
+			ActorType:    "user",
+			Action:       "gdpr.dsr.erasure_closed_partial",
+			ResourceType: "erasure_request",
+			ResourceID:   requestUUID,
+			Outcome:      "success",
+			Metadata: map[string]any{
+				"subjectUserUuid": row.UserUUID,
+				"abandoned":       keys,
+				"mode":            row.Mode,
+			},
+		})
+	}
+	return s.repo.Get(ctx, requestUUID)
 }
 
 // HasIncomplete reports whether the subject has an erasure still incomplete.

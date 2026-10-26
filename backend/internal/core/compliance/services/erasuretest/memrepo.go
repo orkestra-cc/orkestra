@@ -220,3 +220,21 @@ func (m *MemRepo) HasIncomplete(_ context.Context, userUUID string) (bool, error
 	}
 	return false, nil
 }
+
+// ClosePartial closes a lease-free incomplete request; see repository.ErasureRequestRepository.ClosePartial.
+func (m *MemRepo) ClosePartial(_ context.Context, uuid string, now time.Time, abandoned []string, closedBy, note string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.rows[uuid]
+	if !ok || r.Status != models.ErasureRequestIncomplete {
+		return repository.ErrErasureRequestNotFound
+	}
+	if !leaseFree(r, now) {
+		return repository.ErrErasureRequestBusy
+	}
+	resolved := now.Truncate(time.Millisecond)
+	r.Status, r.Abandoned = models.ErasureRequestClosedPartial, append([]string(nil), abandoned...)
+	r.ResolvedBy, r.ResolvedAt, r.ResolutionNote, r.NextAttemptAt = closedBy, &resolved, note, nil
+	m.rows[uuid] = r
+	return nil
+}
