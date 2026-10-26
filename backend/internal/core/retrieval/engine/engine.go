@@ -44,6 +44,8 @@ type Engine interface {
 	DeleteOtherRevisions(ctx context.Context, collection, tenantID, sourceID string, keep int64) error
 	DeleteByFilter(ctx context.Context, collection string, sel Selector) error
 	Count(ctx context.Context, collection string, sel Selector) (int64, error)
+	// Query returns at most q.Limit candidates ordered by fused Score
+	// descending; a query that breaks the rules on Query is refused.
 	Query(ctx context.Context, collection string, q Query) ([]Candidate, error)
 }
 
@@ -113,6 +115,18 @@ func (s Selector) IsZero() bool {
 	return s.TenantID == "" && len(s.SourceIDs) == 0 && s.Subject == ""
 }
 
+// Query is one hybrid search. A driver refuses it, before any request, unless:
+//
+//   - TenantID is set and Principals is non-empty with no empty entry;
+//   - at least one arm is present: Dense non-empty, or Keyword not blank (a
+//     whitespace-only Keyword means no keyword arm);
+//   - each present arm's weight is > 0 (an absent arm's weight is ignored);
+//   - Limit is in 1..500;
+//   - Filter, when set, is well-formed: a leaf has a Field and exactly one
+//     condition (non-empty Match, a Range with a bound, or Exists), a
+//     composite has no Field and at least one child.
+//
+// PerArm is raised to max(PerArm, Limit), which must not exceed 500.
 type Query struct {
 	TenantID    string   // mandatory; also scopes BM25 statistics
 	Principals  []string // mandatory, non-empty; _rt.visibleTo must intersect
@@ -137,7 +151,8 @@ type Filter struct { // compiled form, produced only by retrieval/filter
 
 type Range struct{ Lt, Lte, Gt, Gte *float64 }
 
-// Candidate is one fused search hit. Fields is JSON-decoded (see the package
+// Candidate is one fused search hit; Query returns them ordered by Score
+// (fused) descending. Fields is JSON-decoded (see the package
 // doc: numbers as float64, lists as []any). With Query.Diagnostics, DenseScore
 // is the dense arm's cosine similarity and KeywordScore the keyword arm's BM25
 // score, each nil when the point is absent from that arm's results.
@@ -151,7 +166,13 @@ type Candidate struct {
 	KeywordScore *float32 // only with Diagnostics
 }
 
+// ErrUnavailable means the engine could not answer usably: a network
+// failure, a timeout, a 5xx, 401/403 (a wrong API key), 429, a response body
+// over the size limit or one that cannot be decoded. A cancellation by the
+// caller is not an outage: it surfaces as context.Canceled, not
+// ErrUnavailable. ErrNotFound means the collection does not exist. Any other
+// error is a refusal of the request itself.
 var (
-	ErrUnavailable = errors.New("engine: unavailable") // network, 5xx, timeout
+	ErrUnavailable = errors.New("engine: unavailable")
 	ErrNotFound    = errors.New("engine: collection not found")
 )

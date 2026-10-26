@@ -95,7 +95,7 @@ A filter node is either a group (`and`, `or`, `not`) or a comparison of one fiel
 
 Not every op applies to every type: `keyword` and `keyword[]` take `eq`, `in` and `exists`; `integer` takes all seven; `float` and `datetime` take the four range ops and `exists`; `bool` takes `eq` and `exists`. Values must match the field type (datetimes as RFC 3339), strings are 1 to 1024 bytes, and `in` needs 1 to 100 values.
 
-A filter is at most 4 levels deep, has at most 64 nodes and carries at most 100 values. This release validates a filter against a corpus's declared fields (a violation wraps `iface.ErrRetrievalInvalidFilter` and names the node path); compiling it into the engine form and applying it in search belong to later releases.
+A filter is at most 4 levels deep, has at most 64 nodes and carries at most 100 values per `in`. This release validates a filter against a corpus's declared fields (a violation wraps `iface.ErrRetrievalInvalidFilter` and names the node path); compiling it into the engine form and applying it in search belong to later releases.
 
 ## Engine driver
 
@@ -104,7 +104,7 @@ The engine contract (`Engine`, `Point`, `Query`, `Selector`, `Filter`) is intern
 - **Qdrant 1.20 or later.** The BM25 keyword arm uses the full-text index scoring introduced there. The driver's health check parses the server version, refuses an older one and lists collections to prove the API key works.
 - **Tenant isolation is built into the query.** A query without a tenant or without principals is refused. The tenant and principal scope is repeated on every search arm and at the top level, and a result outside that scope is dropped and logged as a warning. BM25 statistics are scoped to the tenant, so one tenant's documents do not shift another's scores.
 - **No secrets in errors or logs.** Driver errors are classified as unavailable or not found and never contain the Qdrant URL, the API key or a response body.
-- **Conditional writes.** A point is overwritten only when the stored source revision is not newer than the incoming one, so a late writer cannot roll an item back.
+- **Conditional writes.** A point is overwritten only when the stored source revision is not newer than the incoming one, so a stale write never replaces a newer chunk in place. A stale writer can still add chunks (ordinals the newer revision does not have, or points recreated after a delete); they carry the old revision, are dropped on read, and are removed by the next cleanup of the item's other revisions (ADR-0023 D11).
 - **Payload layout.** Runtime fields live under `_rt` (including the indexed text), declared filter fields under `f`. A user filter field is always rendered as `f.<name>`, so a caller cannot reach a runtime field.
 - **Names.** Collections are named `<prefix>_<corpus>_g<generation>`; point ids are UUIDv5 over tenant, corpus, source id and ordinal.
 

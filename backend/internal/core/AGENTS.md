@@ -31,7 +31,7 @@ The AGENTS.md is the **contract** (invariants, wiring, rules — read before edi
 | **navigation** | Role-filtered sidebar aggregated from every module's `NavItems()` + persisted ordering overrides via `/admin/modules/navigation` | [navigation/AGENTS.md](navigation/AGENTS.md) | [navigation](../../../docs/site/modules/core/navigation.mdx) |
 | **logging** | Runtime log-level admin (ADR-0005 Phase F): atomic-snapshot `LevelResolver` swap behind `PerModuleLevelHandler` | [logging/AGENTS.md](logging/AGENTS.md) | [logging](../../../docs/site/modules/core/logging.mdx) |
 | **llm** | Org-scoped LLM API-key credentials (envelope-sealed), model catalog with capabilities and purposes, per-user grants, `iface.LLMGateway` for addons (ADR-0022) | [llm/AGENTS.md](llm/AGENTS.md) | [llm](../../../docs/site/modules/core/llm.mdx) |
-| **retrieval** | Corpora, hybrid search with tenant-scoped BM25, principal filter; Qdrant behind an engine driver (ADR-0023) | [retrieval/AGENTS.md](retrieval/AGENTS.md) | — |
+| **retrieval** | Corpora, hybrid search with tenant-scoped BM25, principal filter; Qdrant behind an engine driver (ADR-0023) | [retrieval/AGENTS.md](retrieval/AGENTS.md) | [retrieval](../../../docs/site/modules/core/retrieval.mdx) |
 | **compliance** | Audit trail (`iface.AuditSink`) + GDPR DSR (`iface.PIIProducer` export/erasure), per-tenant KMS crypto-shred, legal hold, retention, SOC2 evidence (ADR-0009, always-on) | [compliance/AGENTS.md](compliance/AGENTS.md) | [compliance](../../../docs/site/modules/core/compliance.mdx) |
 
 ## Dependency graph

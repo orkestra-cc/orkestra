@@ -21,7 +21,7 @@ This step (PR 3) delivers the registry, the engine contract, the Qdrant driver a
 | `engine/` | Engine-neutral contract: `Engine`, `Point`, `Query`, `Filter`, `Selector`, `Runtime`, `PointID`, sentinels |
 | `engine/qdrant/` | Qdrant REST driver (`New(Config{URL, APIKey, Timeout, MaxResponseBytes, HTTPClient, Logger})`) |
 | `enginetest/` | Conformance suite `Run(t, newEngine)`: 22 cases (incl. `EmptySourceIDsRefused`, `SourceIDsWithoutTenantRefused`, `UpsertReplacesPayload`, tenant-scoped BM25, principal filter, reserved-namespace isolation); imports `engine` and `iface` |
-| `filter/` | Compiles the public `iface.RetrievalFilter` into `engine.Filter` (imports `iface`) |
+| `filter/` | `Validate`s a public `iface.RetrievalFilter` against a corpus's declared fields (imports `iface`). It only validates in this PR: `Compile` into `engine.Filter` arrives in PR 5 |
 
 Later PRs: 4 outbox, indexing worker and corpus state (`retrieval_corpus_state` shape); 5 search path, filter compilation use and principal resolver; 6 compliance wiring (audit sink, DSR); 7 admin page.
 
@@ -66,12 +66,17 @@ An invalid URL (`qdrant.New` error) logs a WARN and is treated as not configured
 - Import direction: `engine` -> `iface`, `uuid`, stdlib; `engine/qdrant` -> `engine`, `iface`; `enginetest` -> `engine`, `iface`; `filter` -> `iface`; `services` -> `engine`, `filter`, `iface`; `module.go` -> `services`, `engine`, `engine/qdrant`, `repository`. `engine` never imports a driver, and consumers outside this module never import `engine`.
 - Values: keyword `string`, keyword[] `[]string`, integer `int64`, float `float64`, bool `bool`, datetime `int64` Unix **milliseconds** UTC (`Point.Fields`) and `float64` milliseconds (`Range`). Datetime fields get an integer payload index, so range compilation needs no field-type lookup.
 - Payload: `_rt` = module-only runtime fields plus `_rt.text` (the indexed text); `f` = declared filter fields. A user filter field is always rendered as `f.<name>`, never a raw key.
+- `Upsert` replaces a point's whole payload (a field the new write omits is gone; conformance `UpsertReplacesPayload`). Any future payload-only update must **merge into `_rt`**, i.e. Qdrant `set_payload` with `"key": "_rt"`: a top-level `set_payload` of `_rt` replaces the object and drops `_rt.text`, the indexed text (verified on Qdrant 1.20). A merge never clears a key it omits, so send every `_rt` field, `page` included (`omitempty` drops a zero page from the JSON, leaving the stale one), on such an update.
 - Point ids: UUIDv5 (`engine.PointID`) over `tenantID\x00corpus\x00sourceID\x00ordinal`. Collection names: `<prefix>_<corpus>_g<generation>`.
 
 ## Qdrant driver
 
 - **Floor v1.20.0**: BM25 scoring on the full-text index. `Health` parses the server version as `major.minor` and refuses older servers (the error carries the parsed numbers, never the server string), then lists collections to prove the API key works.
-- **Errors**: classified onto `engine.ErrUnavailable` (network, 5xx, timeout) and `engine.ErrNotFound`; they never contain the URL, the key or a response body.
+- **Errors** never contain the URL, the key or a response body (a non-2xx body is drained, at most 64 KiB, for connection reuse, never read into the error). Classification:
+  - `engine.ErrUnavailable`: network, dial or TLS failure; a timeout (the caller's deadline or the driver's `Timeout`, also `context.DeadlineExceeded`); 5xx; 401/403 (wrong API key); 429; a response over `MaxResponseBytes`; an undecodable body; `Health` on a server older than 1.20.
+  - `engine.ErrNotFound`: 404, i.e. a missing collection (`DropCollection` treats it as success).
+  - `context.Canceled` (not `ErrUnavailable`): the caller canceled the context.
+  - Neither sentinel (a refusal): any other 4xx, and every check made before a request (empty collection name, invalid point, selector or query, malformed filter, dimension mismatch on an existing collection).
 - **Fail closed**: `Query` requires a tenant and non-empty principals; selectors with `SourceIDs` set but empty (or holding an empty id), or with `SourceIDs` but no `TenantID` (source ids are tenant-local), are refused, while a `Subject`-only selector stays tenant-less on purpose (global user erasure); a malformed compiled filter is refused rather than dropped; the scope filter is repeated on every prefetch arm and at top level, and a candidate scope backstop drops (and WARNs about) any returned candidate outside tenant/principals.
 - **BM25 statistics** are tenant-scoped via `params.idf.corpus` on the keyword arm; collections use one shard so statistics stay exact.
 - **Conditional upsert**: a write applies only when the stored `_rt.sourceRevision` is <= the incoming one, so a request carries a single revision (groups are sent in order; a failure in a later group leaves earlier groups written). Limitation: a point that does not exist is inserted whatever its revision, so a stale writer racing a delete can recreate a point; detection is by revision on read (ADR D11).
