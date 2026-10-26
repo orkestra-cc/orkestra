@@ -31,7 +31,10 @@ const (
 	healthTimeout = 2 * time.Second
 )
 
-var prefixPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+// prefixPattern has no "_": collection names are "<prefix>_<corpus>_g<n>" and
+// corpus names may hold "_", so an underscore in the prefix would let two
+// (prefix, corpus) pairs share a collection ("a_b"+"c" and "a"+"b_c").
+var prefixPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 
 // Module is the retrieval core module. The Qdrant settings are operator
 // environment, never database or API configuration (ADR-0023 D4/D9).

@@ -161,10 +161,24 @@ func TestModule_InitBadPrefixFallsBack(t *testing.T) {
 	if !strings.Contains(logs.String(), "level=WARN") {
 		t.Fatalf("missing WARN: %s", logs)
 	}
-	t.Setenv("QDRANT_COLLECTION_PREFIX", " acme_1 ")
+	t.Setenv("QDRANT_COLLECTION_PREFIX", " acme-1 ")
 	_, reg, _ = initModule(t)
-	if got := service(t, reg).CollectionPrefix(); got != "acme_1" {
+	if got := service(t, reg).CollectionPrefix(); got != "acme-1" {
 		t.Fatalf("prefix = %q", got)
+	}
+}
+
+// An underscore in the prefix would make collection names ambiguous: prefix
+// "a_b" with corpus "c" and prefix "a" with corpus "b_c" both give "a_b_c_g1".
+func TestModule_InitPrefixRefusesUnderscore(t *testing.T) {
+	t.Setenv("QDRANT_URL", "")
+	t.Setenv("QDRANT_COLLECTION_PREFIX", "a_b")
+	_, reg, logs := initModule(t)
+	if got := service(t, reg).CollectionPrefix(); got != "orkestra" {
+		t.Fatalf("prefix = %q, want the default", got)
+	}
+	if !strings.Contains(logs.String(), "level=WARN") {
+		t.Fatalf("missing WARN: %s", logs)
 	}
 }
 

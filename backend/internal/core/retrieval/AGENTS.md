@@ -43,7 +43,7 @@ Later PRs: 4 outbox, indexing worker and corpus state (`retrieval_corpus_state` 
 |---|---|---|
 | `QDRANT_URL` | `http(s)` URL of the Qdrant node | INFO "QDRANT_URL is not set..."; engine nil, search answers `ErrRetrievalNotConfigured` |
 | `QDRANT_API_KEY` | Qdrant API key | WARN "QDRANT_API_KEY is not set" (URL still used) |
-| `QDRANT_COLLECTION_PREFIX` | Collection name prefix, `^[a-z][a-z0-9_-]{0,31}$` | Default `orkestra`; an invalid value logs a WARN and uses the default |
+| `QDRANT_COLLECTION_PREFIX` | Collection name prefix, `^[a-z][a-z0-9-]{0,31}$` (no `_`: corpus names may hold one, so `a_b`+`c` would collide with `a`+`b_c`) | Default `orkestra`; an invalid value logs a WARN and uses the default |
 
 An invalid URL (`qdrant.New` error) logs a WARN and is treated as not configured; the value is never logged, nor is the key. When not configured, `Init` passes an **untyped nil** engine to `services.New` (a typed-nil driver inside the interface would defeat `Service.Engine()`'s `== nil` check).
 
