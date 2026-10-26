@@ -166,6 +166,17 @@ func NewHTTPClient(cfg TransportConfig) *http.Client {
 	}
 }
 
+// NewInstallationHTTPClient is NewHTTPClient without the private-address
+// guard (ProductionLike is forced false), for operator-declared installation
+// endpoints such as an in-cluster TEI. Every other protection stays: no
+// proxy, no redirects, bounded bodies. It must only ever receive URLs from
+// operator configuration (RETRIEVAL_INFERENCE_ENDPOINTS), never a URL that
+// came from the database or the API.
+func NewInstallationHTTPClient(cfg TransportConfig) *http.Client {
+	cfg.ProductionLike = false
+	return NewHTTPClient(cfg)
+}
+
 func (p *pinnedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if isStreaming(req.Context()) {
 		return p.roundTripStream(req)

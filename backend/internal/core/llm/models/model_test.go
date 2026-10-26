@@ -251,3 +251,12 @@ func TestBudgetReserveOutputTokens_ZeroMeansUnset(t *testing.T) {
 		}
 	}
 }
+
+func TestProviders_TEIIsNotAnOrgProvider(t *testing.T) {
+	if IsProvider(ProviderTEI) {
+		t.Fatal("tei must never be selectable for an organization credential or model")
+	}
+	if CredentialKindInstallation != "installation" {
+		t.Fatalf("CredentialKindInstallation = %q", CredentialKindInstallation)
+	}
+}

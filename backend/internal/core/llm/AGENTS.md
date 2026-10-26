@@ -47,6 +47,7 @@ Delivery was in three steps and all three are built: catalog, access resolver, e
 | `repository/{usage,budgets,outbox}.go` | Ledger + monthly rollup (`Usage`, `Monthly`, `WithTxn`), `Budgets`, `Outbox`, and `BudgetStore` (the transactions of admission and finalization); the system sweeps and DSR methods |
 | `providers/{openai,openai_compatible,anthropic,gemini,ollama,mock}.go` | The six adapters (see «Providers»); `classify.go` maps provider failures onto the `iface.ErrLLM*` sentinels; `sse.go` the bounded event-stream decoder |
 | `models/` | `Credential`, `Model`, `LLMGrant`, `Envelope`, DTOs/bodies, validation, `ErasedActor` |
+| `providers/tei.go`, `providers/teitest/` | Installation-level TEI adapter (`/info`, `/embed`, `/rerank`, batching, usage from `x-compute-tokens`; ADR-0023). Not in `RegisterAll`, never an org provider; built on `NewInstallationHTTPClient` (no private-address guard, operator-declared URLs only). `teitest` is the in-process fake, imported by tests only |
 | `providers/provider.go` | Internal adapter contract (`Provider`, `ChatCall`, `ChatOutcome`, `EmbedCall`, …) and an empty `Registry` |
 
 ## MongoDB collections
