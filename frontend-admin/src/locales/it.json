@@ -2405,6 +2405,11 @@
       "progress": "{{done}} produttori su {{total}} completati",
       "nextRetry": "Prossimo tentativo {{date}}",
       "retriesExhausted": "Tentativi automatici esauriti",
+      "lastError": {
+        "legal_hold_active": "Bloccata da un blocco legale",
+        "run_failed": "Ultima esecuzione non riuscita"
+      },
+      "busy": "È in corso un'altra esecuzione; riprova tra qualche minuto",
       "source": {
         "self_service": "Self-service",
         "retention": "Conservazione"

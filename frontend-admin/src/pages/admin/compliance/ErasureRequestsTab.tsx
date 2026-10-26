@@ -40,7 +40,12 @@ const ErasureRequestsTab = () => {
       } else {
         toast.success(t('adminCompliance.erasure.executeSuccess'));
       }
-    } catch {
+    } catch (err: unknown) {
+      const e = err as { data?: { code?: string } };
+      if (e?.data?.code === 'compliance.erasure_request_busy') {
+        toast.warning(t('adminCompliance.erasure.busy'));
+        return;
+      }
       toast.error(t('adminCompliance.erasure.executeError'));
     }
   };
@@ -116,6 +121,12 @@ const ErasureRequestsTab = () => {
                     })
                   : t('adminCompliance.erasure.retriesExhausted')}
               </div>
+              {(original.lastError === 'legal_hold_active' ||
+                original.lastError === 'run_failed') && (
+                <div className="text-warning">
+                  {t(`adminCompliance.erasure.lastError.${original.lastError}`)}
+                </div>
+              )}
             </div>
           )}
         </>

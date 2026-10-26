@@ -28,6 +28,7 @@ interface ErasureFixture {
   source?: string;
   attempts?: number;
   nextAttemptAt?: string;
+  lastError?: string;
   closable?: boolean;
   progress?: { key: string; outcome: string }[];
 }
@@ -52,6 +53,7 @@ const incompleteRequests: { items: ErasureFixture[] } = {
       mode: 'anonymize',
       source: 'self_service',
       attempts: 20,
+      lastError: 'legal_hold_active',
       requestedAt: '2026-06-02T10:00:00Z',
       progress: [
         { key: 'user', outcome: 'done' },
@@ -62,6 +64,7 @@ const incompleteRequests: { items: ErasureFixture[] } = {
       uuid: 'er-3',
       userUuid: 'u-erase-3',
       status: 'incomplete',
+      lastError: 'run_failed',
       closable: true,
       requestedAt: '2026-06-03T10:00:00Z',
       progress: [
@@ -448,6 +451,45 @@ describe('CompliancePage', () => {
     expect(row.getByText('Self-service')).toBeInTheDocument();
     expect(row.getByRole('button', { name: /^retry$/i })).toBeInTheDocument();
     expect(row.queryByRole('button', { name: /^reject$/i })).toBeNull();
+  });
+
+  it('shows the last run error of an incomplete request', async () => {
+    stubReads({ erasure: incompleteRequests });
+    renderWithProviders(<CompliancePage />);
+    await screen.findByText('u-erase-2');
+    expect(
+      rowOf('u-erase-2').getByText('Blocked by a legal hold')
+    ).toBeInTheDocument();
+    expect(rowOf('u-erase-3').getByText('Last run failed')).toBeInTheDocument();
+    expect(rowOf('u-erase-1').queryByText(/legal hold|last run/i)).toBeNull();
+  });
+
+  it('explains a retry refused because another run holds the request', async () => {
+    stubReads({ erasure: incompleteRequests });
+    server.use(
+      http.post(url('/v1/admin/compliance/erasure-requests/:id/execute'), () =>
+        HttpResponse.json(
+          {
+            status: 409,
+            title: 'Conflict',
+            detail: 'an erasure run holds this request',
+            code: 'compliance.erasure_request_busy'
+          },
+          { status: 409 }
+        )
+      )
+    );
+    renderWithProviders(<CompliancePage />);
+    await screen.findByText('u-erase-2');
+    await userEvent.click(
+      rowOf('u-erase-2').getByRole('button', { name: /^retry$/i })
+    );
+    await waitFor(() =>
+      expect(toast.warning).toHaveBeenCalledWith(
+        'Another run is in progress; try again in a few minutes'
+      )
+    );
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it('retries an incomplete request with its stored mode', async () => {

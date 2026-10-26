@@ -2405,6 +2405,11 @@
       "progress": "{{done}} of {{total}} producers done",
       "nextRetry": "Next retry {{date}}",
       "retriesExhausted": "Automatic retries exhausted",
+      "lastError": {
+        "legal_hold_active": "Blocked by a legal hold",
+        "run_failed": "Last run failed"
+      },
+      "busy": "Another run is in progress; try again in a few minutes",
       "source": {
         "self_service": "Self-service",
         "retention": "Retention"
