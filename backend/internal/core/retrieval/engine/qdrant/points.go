@@ -154,16 +154,21 @@ func (d *Driver) deletePoints(ctx context.Context, collection string, filter map
 }
 
 var (
-	errEmptySelector  = errors.New("empty selector")
-	errEmptySourceIDs = errors.New("selector source ids are empty or hold an empty id")
+	errEmptySelector          = errors.New("empty selector")
+	errEmptySourceIDs         = errors.New("selector source ids are empty or hold an empty id")
+	errSourceIDsWithoutTenant = errors.New("selector source ids need a tenant id")
 )
 
 // selectorFilter ANDs the selector's set fields. It fails closed: a zero
-// selector, or SourceIDs non-nil but empty or holding an empty id, would
-// otherwise select more than the caller named.
+// selector, SourceIDs non-nil but empty or holding an empty id, or SourceIDs
+// without a TenantID (source ids are tenant-local, so the same id would match
+// in every tenant) would otherwise select more than the caller named.
 func selectorFilter(sel engine.Selector) (map[string]any, error) {
 	if sel.IsZero() {
 		return nil, errEmptySelector
+	}
+	if sel.SourceIDs != nil && sel.TenantID == "" {
+		return nil, errSourceIDsWithoutTenant
 	}
 	if sel.SourceIDs != nil && len(sel.SourceIDs) == 0 {
 		return nil, errEmptySourceIDs

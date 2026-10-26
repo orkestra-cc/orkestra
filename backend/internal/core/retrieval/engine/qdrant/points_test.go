@@ -315,3 +315,24 @@ func TestSelector_RefusesEmptySourceIDs(t *testing.T) {
 		})
 	}
 }
+
+// Source ids are tenant-local: without a tenant, a source id would select the
+// same id in every tenant. A Subject-only selector stays tenant-less (global
+// user erasure, TestCount_OnlySetSelectorFields).
+func TestSelector_RefusesSourceIDsWithoutTenant(t *testing.T) {
+	cases := map[string]engine.Selector{
+		"source ids alone":        {SourceIDs: []string{"s1"}},
+		"source ids with subject": {SourceIDs: []string{"s1"}, Subject: "user:x"},
+	}
+	for name, sel := range cases {
+		t.Run(name, func(t *testing.T) {
+			d, rec := ackServer(t, `{"result":{"count":1}}`)
+			notSentinel(t, "DeleteByFilter", d.DeleteByFilter(t.Context(), "c", sel))
+			_, err := d.Count(t.Context(), "c", sel)
+			notSentinel(t, "Count", err)
+			if n := len(rec.all()); n != 0 {
+				t.Errorf("sent %d requests, want 0", n)
+			}
+		})
+	}
+}

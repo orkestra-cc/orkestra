@@ -98,7 +98,10 @@ func CollectionName(prefix, corpus string, generation int) string {
 // ANDed and at least one must be set. SourceIDs is either nil (no source
 // restriction) or a non-empty list of non-empty ids: a driver refuses an
 // empty non-nil list or an empty id, so a caller's empty batch never widens
-// into the whole tenant.
+// into the whole tenant. Source ids are tenant-local, so SourceIDs requires
+// TenantID: a driver refuses SourceIDs without a tenant rather than match the
+// same id in every tenant. A Subject-only selector is tenant-less on purpose:
+// it reaches a user's points in every tenant (global erasure).
 type Selector struct {
 	TenantID  string
 	SourceIDs []string

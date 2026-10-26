@@ -53,6 +53,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) engine.Engine) {
 		{"DeleteByFilterAcrossCollections", testDeleteByFilterAcrossCollections},
 		{"Count", testCount},
 		{"EmptySourceIDsRefused", testEmptySourceIDsRefused},
+		{"SourceIDsWithoutTenantRefused", testSourceIDsWithoutTenantRefused},
 		{"StaleWriterAfterSuccessor", testStaleWriterAfterSuccessor},
 		{"RecreatedPointIsDetectableByRevision", testRecreatedPointIsDetectableByRevision},
 		{"AnalyzerStemming", testAnalyzerStemming},
@@ -925,6 +926,28 @@ func testEmptySourceIDsRefused(t *testing.T, h *harness) {
 		h.wantCount(t, name, engine.Selector{TenantID: tenantA}, 2)
 		n, err := h.e.Count(t.Context(), name, sel)
 		refusal(t, fmt.Sprintf("Count with SourceIDs %q (= %d)", ids, n), err)
+	}
+}
+
+// Source ids are tenant-local: a selector naming source ids without a tenant
+// would reach the same id in every tenant, so it is refused. A Subject-only
+// selector stays tenant-less (global erasure of a user's points, see Count).
+func testSourceIDsWithoutTenantRefused(t *testing.T, h *harness) {
+	name := h.collection(t)
+	v := vec(1, 0, 0, 0)
+	h.upsert(t, name,
+		point(tenantA, "s1", 1, 0, "A s1", v, everyone, []string{"user:x"}, nil),
+		point(tenantB, "s1", 1, 0, "B s1", v, everyone, []string{"user:x"}, nil),
+	)
+	for _, sel := range []engine.Selector{
+		{SourceIDs: []string{"s1"}},
+		{SourceIDs: []string{"s1"}, Subject: "user:x"},
+	} {
+		refusal(t, fmt.Sprintf("DeleteByFilter(%+v)", sel), h.e.DeleteByFilter(t.Context(), name, sel))
+		h.wantCount(t, name, engine.Selector{TenantID: tenantA}, 1)
+		h.wantCount(t, name, engine.Selector{TenantID: tenantB}, 1)
+		n, err := h.e.Count(t.Context(), name, sel)
+		refusal(t, fmt.Sprintf("Count(%+v) (= %d)", sel, n), err)
 	}
 }
 

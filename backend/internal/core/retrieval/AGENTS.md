@@ -20,7 +20,7 @@ This step (PR 3) delivers the registry, the engine contract, the Qdrant driver a
 | `services/` | `Service` (`New(Options{Engine, CollectionPrefix, Logger})`, `Seal`, `Engine()`, `CollectionPrefix()`): the corpus registry and principal-contributor registry; implements `iface.RetrievalCorpusRegistry` |
 | `engine/` | Engine-neutral contract: `Engine`, `Point`, `Query`, `Filter`, `Selector`, `Runtime`, `PointID`, sentinels |
 | `engine/qdrant/` | Qdrant REST driver (`New(Config{URL, APIKey, Timeout, MaxResponseBytes, HTTPClient, Logger})`) |
-| `enginetest/` | Conformance suite `Run(t, newEngine)`: 20 cases (incl. `EmptySourceIDsRefused`, tenant-scoped BM25, principal filter, reserved-namespace isolation); imports `engine` and `iface` |
+| `enginetest/` | Conformance suite `Run(t, newEngine)`: 21 cases (incl. `EmptySourceIDsRefused`, `SourceIDsWithoutTenantRefused`, tenant-scoped BM25, principal filter, reserved-namespace isolation); imports `engine` and `iface` |
 | `filter/` | Compiles the public `iface.RetrievalFilter` into `engine.Filter` (imports `iface`) |
 
 Later PRs: 4 outbox, indexing worker and corpus state (`retrieval_corpus_state` shape); 5 search path, filter compilation use and principal resolver; 6 compliance wiring (audit sink, DSR); 7 admin page.
@@ -72,7 +72,7 @@ An invalid URL (`qdrant.New` error) logs a WARN and is treated as not configured
 
 - **Floor v1.20.0**: BM25 scoring on the full-text index. `Health` parses the server version as `major.minor` and refuses older servers (the error carries the parsed numbers, never the server string), then lists collections to prove the API key works.
 - **Errors**: classified onto `engine.ErrUnavailable` (network, 5xx, timeout) and `engine.ErrNotFound`; they never contain the URL, the key or a response body.
-- **Fail closed**: `Query` requires a tenant and non-empty principals; selectors with `SourceIDs` set but empty (or holding an empty id) are refused; a malformed compiled filter is refused rather than dropped; the scope filter is repeated on every prefetch arm and at top level, and a candidate scope backstop drops (and WARNs about) any returned candidate outside tenant/principals.
+- **Fail closed**: `Query` requires a tenant and non-empty principals; selectors with `SourceIDs` set but empty (or holding an empty id), or with `SourceIDs` but no `TenantID` (source ids are tenant-local), are refused, while a `Subject`-only selector stays tenant-less on purpose (global user erasure); a malformed compiled filter is refused rather than dropped; the scope filter is repeated on every prefetch arm and at top level, and a candidate scope backstop drops (and WARNs about) any returned candidate outside tenant/principals.
 - **BM25 statistics** are tenant-scoped via `params.idf.corpus` on the keyword arm; collections use one shard so statistics stay exact.
 - **Conditional upsert**: a write applies only when the stored `_rt.sourceRevision` is <= the incoming one, so a request carries a single revision (groups are sent in order; a failure in a later group leaves earlier groups written). Limitation: a point that does not exist is inserted whatever its revision, so a stale writer racing a delete can recreate a point; detection is by revision on read (ADR D11).
 
