@@ -102,7 +102,8 @@ func Parse(raw string, getenv func(string) string, productionLike bool) ([]Endpo
 	malformed := []string{EndpointsEnv + " is malformed JSON (want an array of objects); no installation endpoint loaded"}
 
 	var elems []json.RawMessage
-	if err := json.Unmarshal([]byte(raw), &elems); err != nil {
+	if err := json.Unmarshal([]byte(raw), &elems); err != nil || elems == nil {
+		// elems == nil: the JSON literal null (an explicit [] decodes non-nil).
 		return nil, malformed
 	}
 	for _, el := range elems {

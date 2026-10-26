@@ -235,7 +235,7 @@ func TestTEI_RefusesMalformedResponses(t *testing.T) {
 			return err
 		},
 		"rerank duplicate index": func() error {
-			_, _, err := serve("/rerank", `[{"index":0},{"index":0}]`).Rerank(ctx, "q", []string{"a", "b"}, TEIRerankOptions{})
+			_, _, err := serve("/rerank", `[{"index":0,"score":0.5},{"index":0,"score":0.5}]`).Rerank(ctx, "q", []string{"a", "b"}, TEIRerankOptions{})
 			return err
 		},
 		"rerank out of range": func() error {

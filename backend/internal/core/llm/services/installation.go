@@ -43,6 +43,9 @@ func NewInstallationService(set *installation.Set, budget *BudgetService, breake
 	if breaker == nil {
 		breaker = NewBreaker(3, 30*time.Second)
 	}
+	if metrics == nil {
+		metrics = noopMetrics{}
+	}
 	return &InstallationService{set: set, budget: budget, breaker: breaker, cfg: cfg, metrics: metrics, logger: logger}
 }
 

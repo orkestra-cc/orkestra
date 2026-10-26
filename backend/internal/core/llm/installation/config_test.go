@@ -197,3 +197,14 @@ func TestParse_ChatIsParsed(t *testing.T) {
 		t.Fatalf("%+v %v", eps, warns)
 	}
 }
+
+func TestParse_JSONNullIsMalformedButEmptyArrayIsSilent(t *testing.T) {
+	eps, warns := Parse("null", env(nil), true)
+	if len(eps) != 0 || len(warns) != 1 || !strings.Contains(warns[0], "malformed") {
+		t.Fatalf("null: %v %v", eps, warns)
+	}
+	eps, warns = Parse("[]", env(nil), true)
+	if len(eps) != 0 || len(warns) != 0 {
+		t.Fatalf("[]: %v %v", eps, warns)
+	}
+}

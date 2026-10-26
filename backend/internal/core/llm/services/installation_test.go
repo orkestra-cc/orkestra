@@ -440,3 +440,13 @@ func TestInstallation_EndpointsNeverReachTheOrgCatalog(t *testing.T) {
 		t.Fatalf("CreateCredential err = %v", err)
 	}
 }
+
+func TestInstallation_NilMetricsDefaultsToNoop(t *testing.T) {
+	env := defaultInstallationEnv(t)
+	svc := NewInstallationService(env.set, NewBudgetService(env.store, fixedBudgetCfg, slog.Default()), nil, func() RouterConfig { return RouterConfig{} }, nil, slog.Default())
+	g := newGatewayForTest(t)
+	g.SetInstallation(svc)
+	if _, err := g.EmbedWithProfile(ctxFor("t1"), env.embedReq()); err != nil {
+		t.Fatal(err)
+	}
+}
