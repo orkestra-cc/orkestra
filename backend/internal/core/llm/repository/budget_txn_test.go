@@ -796,3 +796,31 @@ func TestOutbox_MarkDeliveredIsLeaseFenced(t *testing.T) {
 		t.Fatalf("event = %+v", got)
 	}
 }
+
+// ADR-0023: installation-level inference is billed to the org and its rows
+// may carry no user (an indexing call from the worker).
+func TestBudgetStore_InstallationKindCountsAsOrg(t *testing.T) {
+	db := newTestDB(t)
+	ensureBudgetIndexes(t, db)
+	store := newStore(db)
+	ctx := ctxFor("t1")
+	period := models.PeriodOf(time.Now())
+	ev := pendingEvent("t1", 1, 50)
+	ev.CredentialKind, ev.Provider, ev.ModelUUID, ev.UserUUID = models.CredentialKindInstallation, "tei", "installation:embed", ""
+	if ok, err := store.Reserve(ctx, period, ev, 0, 0, false); !ok || err != nil {
+		t.Fatalf("reserve without budget = %v, %v", ok, err)
+	}
+	upd := models.FinalizeUpdate{Outcome: models.OutcomeOK, InputTokens: 40, FinalizedAt: time.Now().UTC(), CredentialKind: models.CredentialKindInstallation}
+	if _, err := store.Finalize(ctx, period, ev.UUID, upd); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := store.monthly.Get(ctx, period)
+	if m.OrgInputTokens != 40 || m.UserAccountInputTokens != 0 || m.Requests != 1 || m.ReservedTokens != 0 {
+		t.Fatalf("monthly = %+v", m)
+	}
+	var raw bson.M
+	findDoc(t, db, CollUsage, bson.M{"uuid": ev.UUID}, &raw)
+	if _, has := raw["userUuid"]; has {
+		t.Fatalf("the row carries a userUuid: %v", raw["userUuid"])
+	}
+}

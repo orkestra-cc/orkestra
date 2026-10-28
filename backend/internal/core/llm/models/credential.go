@@ -13,6 +13,10 @@ const (
 	ProviderOllama           = "ollama"
 	ProviderOpenAICompatible = "openai_compatible"
 	ProviderMock             = "mock"
+
+	// ProviderTEI labels installation-level inference (ADR-0023). It is not
+	// in Providers: no organization credential or model can select it.
+	ProviderTEI = "tei"
 )
 
 // Providers lists every provider kind the module accepts, in UI order.

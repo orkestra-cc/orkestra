@@ -147,6 +147,8 @@ func errorCodeOf(err error) string {
 		return "credential_disabled"
 	case errors.Is(err, iface.ErrLLMNoEligibleModel):
 		return "no_eligible_model"
+	case errors.Is(err, iface.ErrLLMProfileMismatch):
+		return "profile_mismatch"
 	}
 	return "provider_unavailable"
 }
@@ -485,17 +487,24 @@ func (r *Router) streamIdle() time.Duration {
 // metrics. It never fails the call: a Mongo error leaves the row pending
 // for the reconciler, which charges the whole reservation.
 func (r *Router) finish(ctx context.Context, res *Reservation, attempts []models.Attempt, in FinalizeInput) {
+	finalizeCall(ctx, r.budget, r.metrics, r.logger, res, attempts, in)
+}
+
+// finalizeCall is the ledger write shared by the router and the
+// installation service: usage = every attempt's charge, plus the token
+// metrics.
+func finalizeCall(ctx context.Context, budget *BudgetService, metrics LLMMetrics, logger *slog.Logger, res *Reservation, attempts []models.Attempt, in FinalizeInput) {
 	for _, a := range attempts {
 		in.Usage.InputTokens += a.InputTokens
 		in.Usage.OutputTokens += a.OutputTokens
-		r.metrics.RecordLLMTokens(a.Provider, "input", int64(a.InputTokens))
-		r.metrics.RecordLLMTokens(a.Provider, "output", int64(a.OutputTokens))
+		metrics.RecordLLMTokens(a.Provider, "input", int64(a.InputTokens))
+		metrics.RecordLLMTokens(a.Provider, "output", int64(a.OutputTokens))
 	}
 	in.Attempts = attempts
 	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeTimeout)
 	defer cancel()
-	if err := r.budget.Finalize(fctx, res, in); err != nil && !errors.Is(err, ErrAlreadyFinalized) {
-		r.logger.ErrorContext(ctx, "llm: finalize usage failed; the reconciler will charge the reservation",
+	if err := budget.Finalize(fctx, res, in); err != nil && !errors.Is(err, ErrAlreadyFinalized) {
+		logger.ErrorContext(ctx, "llm: finalize usage failed; the reconciler will charge the reservation",
 			slog.String("ledger", res.LedgerUUID), slog.String("error", err.Error()))
 	}
 }
