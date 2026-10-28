@@ -19,14 +19,19 @@ func Snippet(text, query string, max int) string {
 	if max <= 0 {
 		return ""
 	}
-	if len(r) <= max {
+	n := len(r)
+	if n <= max {
 		return string(r)
 	}
+	if max < 3 {
+		// No room for an ellipsis plus content on a cut side.
+		return string(r[:max])
+	}
 
+	m, tl := firstMatch(r, queryTerms(query))
 	start := 0
-	if m := firstMatch(r, queryTerms(query)); m >= 0 {
-		target := m - max/4
-		if target > 0 {
+	if m >= 0 {
+		if target := m - max/4; target > 0 {
 			start = target
 			for i := target; i >= 0; i-- {
 				if r[i] == ' ' {
@@ -37,28 +42,37 @@ func Snippet(text, query string, max int) string {
 		}
 	}
 
-	avail := max
-	lead := start > 0
-	if lead {
-		avail--
+	// layout returns the body bounds [s, e) for a window beginning at start,
+	// clamped to the text; a short tail pulls start back so the window fills.
+	layout := func(start int) (s, e int, lead, trail bool) {
+		avail := max
+		if start > 0 {
+			avail--
+		}
+		if start+avail >= n {
+			return n - (max - 1), n, true, false
+		}
+		return start, start + avail - 1, start > 0, true
 	}
-	var body []rune
-	trail := start+avail < len(r)
-	if trail {
-		avail--
+	s, e, lead, trail := layout(start)
+	if !trail && s > 0 && m >= 0 {
+		// Tail window: begin at a word boundary when that keeps the match.
+		for i := s; i < n && i < s+20 && i <= m; i++ {
+			if r[i] == ' ' {
+				s = i + 1
+				break
+			}
+		}
 	}
-	if avail < 0 {
-		avail = 0
+	if m >= 0 && tl <= max-2 && (m < s || m+tl > e) {
+		s, e, lead, trail = layout(m)
 	}
-	body = r[start : start+avail]
-	if trail {
-		body = []rune(strings.TrimRight(string(body), " "))
-	}
-	out := make([]rune, 0, len(body)+2)
+
+	out := make([]rune, 0, max)
 	if lead {
 		out = append(out, ellipsis)
 	}
-	out = append(out, body...)
+	out = append(out, []rune(strings.TrimSpace(string(r[s:e])))...)
 	if trail {
 		out = append(out, ellipsis)
 	}
@@ -84,8 +98,8 @@ func queryTerms(q string) [][]rune {
 }
 
 // firstMatch returns the rune index of the earliest case-insensitive match of
-// any term, or -1.
-func firstMatch(r []rune, terms [][]rune) int {
+// any term, and length, or -1.
+func firstMatch(r []rune, terms [][]rune) (int, int) {
 	for i := range r {
 		for _, t := range terms {
 			if i+len(t) > len(r) {
@@ -99,9 +113,9 @@ func firstMatch(r []rune, terms [][]rune) int {
 				}
 			}
 			if ok {
-				return i
+				return i, len(t)
 			}
 		}
 	}
-	return -1
+	return -1, 0
 }
