@@ -81,24 +81,41 @@ func (w *Worker) RunOnce(ctx context.Context) (PassReport, error) {
 }
 
 // indexPass claims keys round-robin across the due tenants, so one busy
-// tenant cannot starve the others, and processes each at once.
+// tenant cannot starve the others, and processes each at once. The tenants
+// come from a cursor over tenant IDs kept by this worker: a pass starts after
+// the last tenant the previous pass served, so with more due tenants than
+// worker_batch every tenant gets a claim within ceil(tenants/batch) passes.
 func (w *Worker) indexPass(ctx context.Context, gates map[string]*corpusGate, names []string, s WorkerSettings, rep *PassReport) error {
 	if len(names) == 0 {
 		return nil
 	}
-	tenants, err := w.Outbox.DueTenants(ctx, w.Now(), names, maxTenantsPerPass)
+	w.mu.Lock()
+	after := w.tenantCursor
+	w.mu.Unlock()
+	tenants, err := w.Outbox.DueTenants(ctx, w.Now(), names, after, maxTenantsPerPass)
+	if err == nil && len(tenants) == 0 && after != "" {
+		// nothing due after the cursor: wrap and serve the head of the list
+		after = ""
+		tenants, err = w.Outbox.DueTenants(ctx, w.Now(), names, after, maxTenantsPerPass)
+	}
 	if err != nil {
 		return err
 	}
+
+	visited := 0 // tenants offered a claim in the first round, a prefix of tenants
+	last := -1   // index of the last tenant that received a claim
 	exhausted := make(map[string]bool, len(tenants))
-	for rep.Claimed < s.Batch {
+	for round := 0; rep.Claimed < s.Batch; round++ {
 		progress := false
-		for _, t := range tenants {
+		for i, t := range tenants {
 			if rep.Claimed == s.Batch {
 				break
 			}
 			if exhausted[t] {
 				continue
+			}
+			if round == 0 {
+				visited = i + 1
 			}
 			e, err := w.Outbox.Claim(tenantCtx(ctx, t), w.Now(), names, w.owner, s.Lease)
 			if err != nil {
@@ -110,12 +127,26 @@ func (w *Worker) indexPass(ctx context.Context, gates map[string]*corpusGate, na
 			}
 			rep.Claimed++
 			progress = true
+			last = max(last, i)
 			w.process(ctx, gates[e.Corpus], e, s, rep)
 		}
 		if !progress {
 			break
 		}
 	}
+
+	switch {
+	case len(tenants) < maxTenantsPerPass && visited == len(tenants):
+		// every listed tenant was offered a claim and the list ended: wrap
+		after = ""
+	case last >= 0:
+		after = tenants[last]
+	case len(tenants) > 0:
+		after = tenants[len(tenants)-1] // none claimable any more: move past them
+	}
+	w.mu.Lock()
+	w.tenantCursor = after
+	w.mu.Unlock()
 	return nil
 }
 

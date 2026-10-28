@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -248,28 +249,49 @@ func TestOutbox_RequeueUpsertsDirty(t *testing.T) {
 	}
 }
 
-func TestOutbox_DueTenantsOrdersByOldestAndHonoursLimit(t *testing.T) {
+// DueTenants serves a round-robin cursor: tenants with a claimable key,
+// strictly after the cursor, in tenant id order (not by age: a tenant with an
+// old backlog must not win every pass), one entry per tenant.
+func TestOutbox_DueTenantsOrdersByTenantAfterTheCursor(t *testing.T) {
 	o, db := newOutbox(t)
-	mustEnqueue(t, o, "t1", 1, "c1")
-	mustEnqueue(t, o, "t2", 1, "c1")
-	mustEnqueue(t, o, "t3", 1, "c1")
+	for _, k := range []struct{ tenant, src string }{{"t3", "c1"}, {"t1", "c1"}, {"t1", "c2"}, {"t2", "c1"}, {"t4", "c1"}} {
+		mustEnqueue(t, o, k.tenant, 1, k.src)
+	}
 	set := func(tenant string, at time.Time) {
 		//tenantscope:allow system: test fixture adjusts a row directly
-		if _, err := db.Collection(CollOutbox).UpdateOne(context.Background(), bson.M{"tenantId": tenant},
+		if _, err := db.Collection(CollOutbox).UpdateMany(context.Background(), bson.M{"tenantId": tenant},
 			bson.M{"$set": bson.M{"nextAttemptAt": at}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	set("t2", obNow.Add(-2*time.Minute))
+	set("t3", obNow.Add(-2*time.Minute)) // oldest, still listed after t1 and t2
 	set("t1", obNow.Add(-time.Minute))
-	set("t3", obNow.Add(time.Minute))
-	got, err := o.DueTenants(context.Background(), obNow, obCorpora, 64)
-	if err != nil || len(got) != 2 || got[0] != "t2" || got[1] != "t1" {
-		t.Fatalf("got = %v, %v", got, err)
+	set("t4", obNow.Add(time.Minute)) // not due
+	ctx := context.Background()
+	for _, tc := range []struct {
+		after string
+		limit int
+		want  []string
+	}{
+		{"", 64, []string{"t1", "t2", "t3"}},
+		{"", 2, []string{"t1", "t2"}},
+		{"t1", 64, []string{"t2", "t3"}},
+		{"t2", 1, []string{"t3"}},
+		{"t3", 64, nil},
+		{"", 0, nil},
+		{"", -1, nil},
+	} {
+		got, err := o.DueTenants(ctx, obNow, obCorpora, tc.after, tc.limit)
+		if err != nil || !slices.Equal(got, tc.want) {
+			t.Fatalf("DueTenants(after %q, limit %d) = %v, %v; want %v", tc.after, tc.limit, got, err, tc.want)
+		}
 	}
-	got, err = o.DueTenants(context.Background(), obNow, obCorpora, 1)
-	if err != nil || len(got) != 1 || got[0] != "t2" {
-		t.Fatalf("limited = %v, %v", got, err)
+	// a leased key is not claimable until its lease expires
+	if _, err := o.Claim(tctx("t2"), obNow, obCorpora, "w1", obLease); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := o.DueTenants(ctx, obNow, obCorpora, "t1", 64); err != nil || !slices.Equal(got, []string{"t3"}) {
+		t.Fatalf("after claim = %v, %v", got, err)
 	}
 }
 

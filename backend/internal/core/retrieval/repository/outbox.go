@@ -81,12 +81,22 @@ func (r *Outbox) upsertDirty(ctx context.Context, corpus, sourceID string, revis
 	return err
 }
 
-// DueTenants lists up to limit tenants with a claimable key, oldest first.
-func (r *Outbox) DueTenants(ctx context.Context, now time.Time, corpora []string, limit int) ([]string, error) {
+// DueTenants lists up to limit tenants with a claimable key whose tenant ID
+// sorts strictly after after ("" starts from the first), in tenant ID order.
+// The worker walks it as a round-robin cursor, so a tenant with an old
+// backlog cannot win every pass. limit <= 0 returns nil without a query.
+func (r *Outbox) DueTenants(ctx context.Context, now time.Time, corpora []string, after string, limit int) ([]string, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	match := claimable(now, corpora)
+	if after != "" {
+		match["tenantId"] = bson.M{"$gt": after}
+	}
 	pipeline := []bson.M{
-		{"$match": claimable(now, corpora)},
-		{"$group": bson.M{"_id": "$tenantId", "oldest": bson.M{"$min": "$nextAttemptAt"}}},
-		{"$sort": bson.D{{Key: "oldest", Value: 1}, {Key: "_id", Value: 1}}},
+		{"$match": match},
+		{"$group": bson.M{"_id": "$tenantId"}},
+		{"$sort": bson.M{"_id": 1}},
 		{"$limit": int64(limit)},
 	}
 	//tenantscope:allow system: the index worker finds tenants with due keys; each key is then claimed and processed under its own tenant

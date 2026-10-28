@@ -226,3 +226,71 @@ func TestWorker_RunStopsOnCancel(t *testing.T) {
 		t.Fatal("Run did not return after cancel")
 	}
 }
+
+// cleanTenants returns the tenants with at least one clean (indexed) key.
+func (e *workerEnv) cleanTenants(tenants ...string) map[string]bool {
+	out := map[string]bool{}
+	for _, tn := range tenants {
+		for _, r := range e.outbox.rowsOf(tn, testCorpus) {
+			if !r.Dirty {
+				out[tn] = true
+			}
+		}
+	}
+	return out
+}
+
+// With more due tenants than worker_batch, the round-robin cursor reaches
+// every tenant within ceil(tenants/batch) passes, whatever the age of the
+// others' backlogs (ADR-0023 D11 fairness).
+func TestWorker_EveryDueTenantIsServedWithinCeilTenantsOverBatchPasses(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = nil
+	tenants := []string{"t1", "t2", "t3", "t4", "t5"}
+	for _, tn := range tenants[:4] {
+		for i := range 5 {
+			id := fmt.Sprintf("k%d", i)
+			e.putFor(tn, id)
+			e.enqueueFor(t, tn, id, 1)
+		}
+	}
+	e.clk.Advance(time.Hour) // t5's single key is much fresher than every backlog
+	e.putFor("t5", "fresh")
+	e.enqueueFor(t, "t5", "fresh", 1)
+	e.deps.Settings = func() WorkerSettings { return WorkerSettings{Lease: testLease, Batch: 2} }
+	w := e.newWorker()
+
+	// t1,t2 | t3,t4 | t5 (the tail of the list: the cursor wraps after it)
+	for _, want := range []int{2, 2, 1} {
+		assert.Equal(t, want, e.once(t, w).Claimed)
+	}
+	served := e.cleanTenants(tenants...)
+	for _, tn := range tenants {
+		assert.Equal(t, true, served[tn], tn)
+	}
+	assert.Equal(t, false, e.outbox.row("t5", testCorpus, "fresh").Dirty)
+	// the cursor advanced to the last tenant served each pass, then wrapped
+	// once the tail of the list was served
+	e.once(t, w)
+	assert.Equal(t, []string{"", "t2", "t4", ""}, e.outbox.dueCallsCopy())
+}
+
+// The cursor wraps within the pass when no tenant after it is due any more.
+func TestWorker_EmptyTailWrapsTheCursorInTheSamePass(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = nil
+	for _, k := range []struct{ tenant, id string }{{"t1", "a"}, {"t1", "b"}, {"t2", "a"}} {
+		e.putFor(k.tenant, k.id)
+		e.enqueueFor(t, k.tenant, k.id, 1)
+	}
+	e.deps.Settings = func() WorkerSettings { return WorkerSettings{Lease: testLease, Batch: 1} }
+	w := e.newWorker()
+	assert.Equal(t, 1, e.once(t, w).Claimed) // t1; the cursor stops at t1
+
+	e.outbox.park("t2", testCorpus, "a", e.clk.Now().Add(time.Hour)) // t2 is no longer due
+	assert.Equal(t, 1, e.once(t, w).Claimed)
+	assert.Equal(t, []string{"", "t1", ""}, e.outbox.dueCallsCopy())
+	for _, r := range e.outbox.rowsOf("t1", testCorpus) {
+		assert.Equal(t, false, r.Dirty, r.SourceID)
+	}
+}

@@ -29,7 +29,7 @@ type CorpusStateStore interface {
 // OutboxStore is the outbox the worker drains; satisfied by *repository.Outbox.
 type OutboxStore interface {
 	OutboxWriter
-	DueTenants(ctx context.Context, now time.Time, corpora []string, limit int) ([]string, error)
+	DueTenants(ctx context.Context, now time.Time, corpora []string, after string, limit int) ([]string, error)
 	Claim(ctx context.Context, now time.Time, corpora []string, owner string, lease time.Duration) (*models.OutboxEntry, error)
 	HoldsLease(ctx context.Context, corpus, sourceID string, epoch int64, owner string, now time.Time) (bool, error)
 	Release(ctx context.Context, corpus, sourceID string, epoch int64, owner string, applied *models.AppliedState, now time.Time) error
@@ -119,10 +119,13 @@ type Worker struct {
 	WorkerDeps
 	owner string
 
-	mu        sync.Mutex
-	problems  []string
-	ensured   map[ensureKey]bool // collections ensured by this process
-	afterPass func()             // test hook: runs after every pass of Run
+	mu       sync.Mutex
+	problems []string
+	ensured  map[ensureKey]bool // collections ensured by this process
+	// tenantCursor is the round-robin position of the index pass: the last
+	// tenant served ("" = start). Per process; replicas keep their own.
+	tenantCursor string
+	afterPass    func() // test hook: runs after every pass of Run
 }
 
 // NewWorker builds a Worker with a fresh owner ID; it performs no I/O.

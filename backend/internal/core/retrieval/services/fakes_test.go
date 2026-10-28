@@ -565,6 +565,7 @@ type fakeOutbox struct {
 	mu       sync.Mutex
 	rows     map[outboxKey]*models.OutboxEntry
 	releases []string // owner of each successful Release
+	dueCalls []string // the cursor of each DueTenants call
 }
 
 type outboxKey struct{ tenant, corpus, source string }
@@ -644,28 +645,20 @@ func claimableRow(r *models.OutboxEntry, now time.Time, corpora []string) bool {
 	return (r.Dirty && r.LeaseUntil == nil) || (r.LeaseUntil != nil && r.LeaseUntil.Before(now))
 }
 
-func (f *fakeOutbox) DueTenants(_ context.Context, now time.Time, corpora []string, limit int) ([]string, error) {
+func (f *fakeOutbox) DueTenants(_ context.Context, now time.Time, corpora []string, after string, limit int) ([]string, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	oldest := map[string]time.Time{}
+	f.dueCalls = append(f.dueCalls, after)
+	due := map[string]bool{}
 	for k, r := range f.rows {
-		if !claimableRow(r, now, corpora) {
-			continue
-		}
-		if o, ok := oldest[k.tenant]; !ok || r.NextAttemptAt.Before(o) {
-			oldest[k.tenant] = r.NextAttemptAt
+		if k.tenant > after && claimableRow(r, now, corpora) {
+			due[k.tenant] = true
 		}
 	}
-	out := make([]string, 0, len(oldest))
-	for t := range oldest {
-		out = append(out, t)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if !oldest[out[i]].Equal(oldest[out[j]]) {
-			return oldest[out[i]].Before(oldest[out[j]])
-		}
-		return out[i] < out[j]
-	})
+	out := slices.Sorted(maps.Keys(due))
 	if len(out) > limit {
 		out = out[:limit]
 	}
@@ -1117,4 +1110,18 @@ func (f *fakeOutbox) rowsOf(tenant, corpus string) []models.OutboxEntry {
 		}
 	}
 	return out
+}
+
+// dueCallsCopy returns the cursor of every DueTenants call so far.
+func (f *fakeOutbox) dueCallsCopy() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.dueCalls...)
+}
+
+// park moves a key's next attempt, as a backoff would.
+func (f *fakeOutbox) park(tenant, corpus, sourceID string, next time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rows[outboxKey{tenant, corpus, sourceID}].NextAttemptAt = truncMS(next)
 }
