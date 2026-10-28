@@ -34,6 +34,8 @@ type lateTombstones struct {
 	calls        int
 	coveredLater bool
 	errLater     error
+	failLater    int // with errLater: fail only this many re-checks (0 = all)
+	failed       int
 	probes       [][]Probe
 }
 
@@ -47,8 +49,12 @@ func (l *lateTombstones) Covered(ctx context.Context, tenantID, corpus string, p
 	}
 	l.mu.Lock()
 	l.probes = append(l.probes, probes)
+	fail := l.errLater != nil && (l.failLater == 0 || l.failed < l.failLater)
+	if fail {
+		l.failed++
+	}
 	l.mu.Unlock()
-	if l.errLater != nil {
+	if fail {
 		return nil, l.errLater
 	}
 	out := make(map[string]bool, len(probes))
@@ -104,8 +110,26 @@ func TestSearch_LogRetractCheckFailureKeepsRowAndWarns(t *testing.T) {
 		t.Fatal(err)
 	}
 	logs := fx.logs.String()
-	if len(rl.deleted) != 0 || !strings.Contains(logs, "search log erasure re-check failed") || strings.Contains(logs, "mongo down") {
+	const warn = "search log erasure re-check failed; the row is removed only if its erasure is still being finalized"
+	if len(rl.deleted) != 0 || strings.Count(logs, warn) != 1 || strings.Contains(logs, "mongo down") {
 		t.Fatalf("deleted = %v, logs = %s", rl.deleted, logs)
+	}
+	if late.calls != 3 { // the candidate veto, the re-check and its one retry
+		t.Fatalf("Covered calls = %d, want 3", late.calls)
+	}
+}
+
+func TestSearch_LogRetractCheckRetriedOnceThenRetracts(t *testing.T) {
+	late := &lateTombstones{coveredLater: true, errLater: errors.New("mongo down"), failLater: 1}
+	fx, rl := retractFixture(t, late)
+	if _, err := fx.search(contactsReq()); err != nil {
+		t.Fatal(err)
+	}
+	if len(rl.rows) != 1 || len(rl.deleted) != 1 || rl.deleted[0] != rl.rows[0].UUID {
+		t.Fatalf("rows = %d, deleted = %v", len(rl.rows), rl.deleted)
+	}
+	if late.calls != 3 || strings.Contains(fx.logs.String(), "re-check failed") {
+		t.Fatalf("calls = %d, logs = %s", late.calls, fx.logs.String())
 	}
 }
 

@@ -213,7 +213,9 @@ func (s *Searcher) logFailed(ctx context.Context, g gated, row *models.SearchLog
 // Either this re-check sees the tombstone, or the eraser's delete sees the
 // row, so a row written after the erasure cannot survive. Hits already
 // returned passed the step 6 veto before the erasure was recorded and are
-// not recalled. A failed re-check keeps the row for finalizer stage 0.
+// not recalled. A failed re-check is retried once; if that fails too the row
+// stays, and only finalizer stage 0 removes it, which happens only while its
+// erasure is still being finalized (a done tombstone is never claimed again).
 func (s *Searcher) retract(ctx context.Context, g gated, row *models.SearchLog) {
 	if s.retractor == nil || s.d.Tombstones == nil {
 		return
@@ -226,9 +228,13 @@ func (s *Searcher) retract(ctx context.Context, g gated, row *models.SearchLog) 
 	}
 	slices.Sort(subjects)
 	subjects = slices.Compact(subjects)
-	covered, err := s.d.Tombstones.Covered(rctx, g.tenantID, g.spec.Name, []Probe{{SourceID: row.UUID, Subjects: subjects}})
+	probes := []Probe{{SourceID: row.UUID, Subjects: subjects}}
+	covered, err := s.d.Tombstones.Covered(rctx, g.tenantID, g.spec.Name, probes)
 	if err != nil {
-		s.d.Logger.Warn("retrieval: search log erasure re-check failed; the row is kept for the erasure finalizer",
+		covered, err = s.d.Tombstones.Covered(rctx, g.tenantID, g.spec.Name, probes)
+	}
+	if err != nil {
+		s.d.Logger.Warn("retrieval: search log erasure re-check failed; the row is removed only if its erasure is still being finalized",
 			slog.String("corpus", g.spec.Name), slog.String("tenant", g.tenantID))
 		return
 	}
