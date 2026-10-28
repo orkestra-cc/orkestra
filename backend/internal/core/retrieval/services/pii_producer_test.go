@@ -24,6 +24,9 @@ type rowLogs struct {
 	rows      []models.SearchLog
 	calls     []string
 	deleteErr error // returned by DeleteByUserAllTenants when set
+	// deletedBeforeErr is the partial count DeleteByUserAllTenants returns
+	// with deleteErr (the batches deleteInBatches committed before failing).
+	deletedBeforeErr int64
 }
 
 var _ SearchLogDSRRepo = (*rowLogs)(nil)
@@ -50,7 +53,7 @@ func (r *rowLogs) DeleteByUserAllTenants(_ context.Context, u string) (int64, er
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, "delete")
 	if r.deleteErr != nil {
-		return 0, r.deleteErr
+		return r.deletedBeforeErr, r.deleteErr
 	}
 	var keep []models.SearchLog
 	var n int64
@@ -247,6 +250,48 @@ func TestPIIProducer_PurgeReturnsLogDeleteError(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPIIProducer_PurgeLogDeleteErrorKeepsPartialCount (G3): a search-log
+// delete that committed batches before failing reports them with the error,
+// so compliance's running count keeps the rows a retry can no longer see.
+func TestPIIProducer_PurgeLogDeleteErrorKeepsPartialCount(t *testing.T) {
+	env := newProducerEnv(t, map[string][]string{}, false)
+	boom := errors.New("mongo down mid-batch")
+	env.logs.deleteErr = boom
+	env.logs.deletedBeforeErr = 3
+	res, err := env.prod.PurgePersonalData(context.Background(), "u1", iface.EraseHardDelete)
+	requireIs(t, err, boom)
+	require.Equal(t, iface.PurgeResult{RowsDeleted: 3, Collections: []string{"retrieval_search_log"}}, res)
+}
+
+// listUserFailStore fails ListUser, the read after the inline pass.
+type listUserFailStore struct {
+	*memStore
+	err error
+}
+
+func (l listUserFailStore) ListUser(context.Context, string) ([]models.Erasure, error) {
+	return nil, l.err
+}
+
+// TestPIIProducer_PurgeListUserErrorKeepsDeletedCount (G3): the search-log
+// rows deleted before a failing ListUser are reported with the error.
+func TestPIIProducer_PurgeListUserErrorKeepsDeletedCount(t *testing.T) {
+	clk := newClock()
+	boom := errors.New("list failed")
+	store := listUserFailStore{memStore: newMemStore(), err: boom}
+	logs := &rowLogs{rows: []models.SearchLog{
+		{TenantID: "tA", UserUUID: "u1", CreatedAt: clk.Now()},
+		{TenantID: "tB", UserUUID: "u2", Subjects: []string{"user:u1"}, CreatedAt: clk.Now()},
+		{TenantID: "tB", UserUUID: "u2", CreatedAt: clk.Now()},
+	}}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	fin := NewFinalizer(store, logs, &staticLister{cols: map[string][]string{}}, nil, testFinalizerConfig, NewAuditRelay(), clk.Now, logger)
+	prod := NewPIIProducer(store, logs, fin, clk.Now, logger)
+	res, err := prod.PurgePersonalData(context.Background(), "u1", iface.EraseHardDelete)
+	requireIs(t, err, boom)
+	require.Equal(t, iface.PurgeResult{RowsDeleted: 2, Collections: []string{"retrieval_search_log", "retrieval_index"}}, res)
 }
 
 // claimOneFailStore fails ClaimOne with an error whose text must never be logged.

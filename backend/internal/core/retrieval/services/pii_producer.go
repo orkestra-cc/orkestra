@@ -129,7 +129,9 @@ func (p *PIIProducer) decodeFilter(ctx context.Context, row models.SearchLog) an
 // PurgePersonalData erases the user under both modes (vectors are personal
 // data, ADR-0023 D12). The tombstone is recorded first, so the read veto
 // holds even when the engine is down; Pending stays true until the finalizer
-// has confirmed the second pass.
+// has confirmed the second pass. An error is returned with the rows already
+// deleted (iface.PIIProducer contract): compliance adds them to the request's
+// count, and a retry cannot count rows that are gone.
 func (p *PIIProducer) PurgePersonalData(ctx context.Context, userUUID string, _ iface.EraseMode) (iface.PurgeResult, error) {
 	if userUUID == "" {
 		return iface.PurgeResult{}, ErrErasureEmptySubject
@@ -140,7 +142,12 @@ func (p *PIIProducer) PurgePersonalData(ctx context.Context, userUUID string, _ 
 	}
 	n, err := p.logs.DeleteByUserAllTenants(ctx, userUUID)
 	if err != nil {
-		return iface.PurgeResult{}, err
+		// deleteInBatches returns the batches it committed before failing.
+		partial := iface.PurgeResult{RowsDeleted: int(n)}
+		if n > 0 {
+			partial.Collections = []string{collSearchLogName}
+		}
+		return partial, err
 	}
 	if e.EffectiveStatus() != models.ErasureStatusDone {
 		actx, cancel := context.WithTimeout(ctx, piiAttemptTimeout)
@@ -150,19 +157,20 @@ func (p *PIIProducer) PurgePersonalData(ctx context.Context, userUUID string, _ 
 		}
 		cancel()
 	}
-	rows, err := p.store.ListUser(ctx, userUUID)
-	if err != nil {
-		return iface.PurgeResult{}, err
-	}
-	pending := false
-	for i := range rows {
-		if rows[i].EffectiveStatus() != models.ErasureStatusDone {
-			pending = true
-		}
-	}
-	return iface.PurgeResult{
+	res := iface.PurgeResult{
 		RowsDeleted: int(n),
 		Collections: []string{collSearchLogName, collIndexName},
-		Pending:     pending,
-	}, nil
+	}
+	rows, err := p.store.ListUser(ctx, userUUID)
+	if err != nil {
+		// The search-log rows are gone and the inline pass may have run:
+		// report them as the success path would, without Pending.
+		return res, err
+	}
+	for i := range rows {
+		if rows[i].EffectiveStatus() != models.ErasureStatusDone {
+			res.Pending = true
+		}
+	}
+	return res, nil
 }
