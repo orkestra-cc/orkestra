@@ -113,7 +113,7 @@ A token is a maximal run of runes for which `unicode.IsSpace` is false, when tha
 
 ### Engine additions and config
 
-`Engine.UpdatePayload` replaces `Runtime` and `Fields` of existing points (vector and text kept) only when the stored content hash matches and the stored revision is not higher; it never creates a point and sends every `_rt` field, `page` included. Config group `indexing`: `worker_lease` (2m, clamp 30s-15m, `RETRIEVAL_WORKER_LEASE`), `worker_batch` (32, `RETRIEVAL_WORKER_BATCH`: <= 0 falls back to 32, above 256 clamps to 256), `worker_poll_interval` (5s, clamp 1s-5m, `RETRIEVAL_WORKER_POLL_INTERVAL`). `HealthCheck` strings: `retrieval: indexing disabled: <missing>`, `retrieval: the vector engine is unavailable` (the bare `iface.ErrRetrievalUnavailable`), `retrieval: <problem>; <problem>`.
+`Engine.UpdatePayload` replaces `Runtime` and `Fields` of existing points (vector and text kept) only when the stored content hash matches and the stored revision is not higher; it never creates a point and sends every `_rt` field, `page` included. Config group `indexing`: `worker_lease` (2m, clamp 30s-15m, `RETRIEVAL_WORKER_LEASE`), `worker_batch` (32, `RETRIEVAL_WORKER_BATCH`: <= 0 falls back to 32, above 256 clamps to 256), `worker_poll_interval` (5s, clamp 1s-5m, `RETRIEVAL_WORKER_POLL_INTERVAL`). `HotReloadConfig()` is `true` (the worker's settings closure re-reads all three on every pass, so a config write leaves no restart-required flag; any later per-call key, e.g. PR 5's, is covered by the same module-wide flag). `HealthCheck` strings: `retrieval: indexing disabled: <missing>`, `retrieval: the vector engine is unavailable` (the bare `iface.ErrRetrievalUnavailable`), `retrieval: <problem>; <problem>`.
 
 ## Corpus registration rules
 

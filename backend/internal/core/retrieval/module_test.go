@@ -699,3 +699,18 @@ func TestModule_WorkerOutlivesTheStartContext(t *testing.T) {
 		t.Fatal("Stop returned before the worker ended")
 	}
 }
+
+// The worker re-reads worker_lease / worker_batch / worker_poll_interval on
+// every pass (Settings closure), so the registry must say a config write needs
+// no restart; the admin UI derives needsRestart from this.
+func TestModule_HotReloadsConfig(t *testing.T) {
+	m := NewModule()
+	if !module.HotReloadsConfig(m) {
+		t.Fatal("HotReloadsConfig = false, want true")
+	}
+	reg := module.NewModuleRegistry(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+	reg.Register(m)
+	if !reg.SupportsHotReload("retrieval") {
+		t.Fatal("registry SupportsHotReload(retrieval) = false, want true")
+	}
+}

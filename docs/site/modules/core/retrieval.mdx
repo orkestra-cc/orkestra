@@ -157,7 +157,7 @@ The index is built for one *ingestion profile*: the embedding model, the analyze
 
 ## Configuration
 
-The Qdrant settings are operator environment variables. The three worker settings are module settings (group Indexing) that can also be set from the environment and are re-read on every pass.
+The Qdrant settings are operator environment variables. The three worker settings are module settings (group Indexing) that can also be set from the environment and are re-read on every pass, so changing them takes effect without a restart (the admin settings page shows no restart-required notice).
 
 | Env var | Default | Meaning |
 |---|---|---|
