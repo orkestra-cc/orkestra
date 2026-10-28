@@ -187,31 +187,6 @@ func (r *Repository) ListTenantsByKind(ctx context.Context, kind models.TenantKi
 	return out, nil
 }
 
-// ListPurgedTenantUUIDs returns the UUID of every tenant whose status is
-// purged, soft-deleted rows included, of any kind. Backs the durable
-// reconciliation of tenant-purge cleanups in other modules.
-func (r *Repository) ListPurgedTenantUUIDs(ctx context.Context) ([]string, error) {
-	//tenantscope:allow tenant registry — listing purged tenants is inherently cross-tenant (retrieval erasure reconciliation, ADR-0023 D12; mirrors ListTenantsByKind)
-	cur, err := r.db.Collection(CollTenants).Find(ctx,
-		bson.M{"status": string(models.TenantStatusPurged)},
-		options.Find().SetProjection(bson.M{"uuid": 1}))
-	if err != nil {
-		return nil, err
-	}
-	defer cur.Close(ctx)
-	var rows []struct {
-		UUID string `bson:"uuid"`
-	}
-	if err := cur.All(ctx, &rows); err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(rows))
-	for i := range rows {
-		out = append(out, rows[i].UUID)
-	}
-	return out, nil
-}
-
 // CountProvisioningSlotsByKind returns the number of tenants of the given
 // tier that occupy a provisioning slot: deletedAt == nil AND status in
 // {provisioning, active, suspended}. A suspended tenant remains part of the
@@ -931,4 +906,29 @@ func (r *Repository) ListOperationalByKindOldestFirst(ctx context.Context, kind 
 func (r *Repository) CountAllTenants(ctx context.Context) (int64, error) {
 	//tenantscope:allow tenant registry — an "is this installation pristine" probe is platform-global by definition
 	return r.db.Collection(CollTenants).CountDocuments(ctx, bson.M{})
+}
+
+// ListPurgedTenantUUIDs returns the UUID of every tenant whose status is
+// purged, soft-deleted rows included, of any kind. Backs the durable
+// reconciliation of tenant-purge cleanups in other modules.
+func (r *Repository) ListPurgedTenantUUIDs(ctx context.Context) ([]string, error) {
+	//tenantscope:allow tenant registry — listing purged tenants is inherently cross-tenant (retrieval erasure reconciliation, ADR-0023 D12; mirrors ListTenantsByKind)
+	cur, err := r.db.Collection(CollTenants).Find(ctx,
+		bson.M{"status": string(models.TenantStatusPurged)},
+		options.Find().SetProjection(bson.M{"uuid": 1}))
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	var rows []struct {
+		UUID string `bson:"uuid"`
+	}
+	if err := cur.All(ctx, &rows); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rows))
+	for i := range rows {
+		out = append(out, rows[i].UUID)
+	}
+	return out, nil
 }
