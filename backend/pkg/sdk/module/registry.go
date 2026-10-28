@@ -519,6 +519,8 @@ func (r *ModuleRegistry) StopModule(ctx context.Context, name string) error {
 	return nil
 }
 
+var _ ModuleStatusReader = (*ModuleRegistry)(nil)
+
 // IsStarted returns true if the named module has been started.
 func (r *ModuleRegistry) IsStarted(name string) bool {
 	r.mu.RLock()

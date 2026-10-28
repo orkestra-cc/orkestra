@@ -127,6 +127,11 @@ const (
 	// its audit sink via SetAuditSink — the public provider interface stays
 	// slim, the concrete service carries post-init setters.
 	ServiceTenantService ServiceKey = "tenant.service"
+	// ServiceModuleStatus is the *ModuleRegistry, registered by the server
+	// bootstrap so a module can ask whether another module is started
+	// (ModuleStatusReader). Resolve it lazily: the registry is populated before
+	// InitAll, but module state changes at runtime. Value: *ModuleRegistry.
+	ServiceModuleStatus ServiceKey = "module.status"
 	// ServiceDefaultTenantProvider resolves the platform default Tier-1
 	// tenant (tenant_defaults pointer). Value: iface.DefaultTenantProvider.
 	ServiceDefaultTenantProvider ServiceKey = "tenant.default_provider"
@@ -370,3 +375,9 @@ func MustGetTyped[T any](r *ServiceRegistry, key ServiceKey) T {
 const (
 	ServiceCRMActivitySink ServiceKey = "crm.activity_sink"
 )
+
+// ModuleStatusReader reports whether a module is currently started. It is the
+// narrow view of *ModuleRegistry registered under ServiceModuleStatus.
+type ModuleStatusReader interface {
+	IsStarted(name string) bool
+}

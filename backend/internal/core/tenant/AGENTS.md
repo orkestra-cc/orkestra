@@ -312,6 +312,12 @@ RevokeCapability(ctx, tenantUUID, capabilityID) error
 ListCapabilityIDs(ctx, tenantUUID) ([]string, error)
 ```
 
+`iface.TenantIDLister` (`pkg/sdk/iface/tenant_directory.go`) — a separate narrow interface, also implemented by the concrete `*services.Service` and resolved by type assertion (`module.GetTyped[iface.TenantIDLister](reg, module.ServiceTenantService)`); no method was added to `TenantProvider`. Consumed by `retrieval` for the initial index build:
+
+```go
+ListActiveTenantIDs(ctx, kind string) ([]string, error) // live (not soft-deleted) + status active, sorted ascending; kind must be internal|external, anything else is refused
+```
+
 The `tenant_entitlements` collection is keyed by `(tenantUUID, capabilityID)`. Self-registered clients ride on a personal Tenant aggregate (created lazily by `EnsureTenantForUser`) so every billable principal looks like a tenant.
 
 `Tenant` exposes `UUID, Kind, ParentTenantUUID, Status, Name, Slug, Plan`. `TenantMembership` exposes `TenantUUID, TenantName, TenantSlug, TenantKind, Roles, IsOwner`. Both are intentionally trimmed — anything richer lives in `tenant/models` and is only reachable via the concrete service, not through the provider interface.

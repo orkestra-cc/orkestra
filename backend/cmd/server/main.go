@@ -239,6 +239,8 @@ func main() {
 	platformChecks := registerPDFRenderer(svcRegistry, cfg.PDFRenderer, logger)
 
 	modRegistry := module.NewModuleRegistry(logger)
+	// Consumed by retrieval to keep intents of stopped owners (ADR-0023 D7).
+	svcRegistry.Register(module.ServiceModuleStatus, modRegistry)
 	modRegistry.SetConfigService(configService)
 	modRegistry.SetContainerManager(container.NewManager(logger))
 	modDeps := &module.Dependencies{

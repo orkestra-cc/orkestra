@@ -16,6 +16,7 @@ A representative slice, not the full list — read the package for the rest.
 | `UserProvider` | `user` | auth, and every module that needs a user record |
 | `OperatorUserProvider` / `ClientUserProvider` | `user` | tier-specific lookups |
 | `SessionTerminator` | `user` | any module that must revoke a principal's sessions |
+| `TenantIDLister` | `tenant` | `retrieval` (initial index build) |
 | `NotificationSender` | `notification` | auth (verification, password reset) |
 | `CategoryConfiguredChecker` | `notification` | auth pre-flight guards — optional; `IsConfiguredForCategory` falls back to `IsConfigured` |
 | `TenantProvider` | `tenant` | authz, auth (JWT membership embedding), middleware |
@@ -57,6 +58,9 @@ if !ok {
 A representative slice — sentinels declared beside the interface whose consumers
 must match them across the module boundary with `errors.Is`.
 
+- `ErrRetrievalInvalidIntent` — an index intent handed to `retrieval` is
+  malformed (source ID empty, over 256 bytes, not valid UTF-8 or containing a
+  NUL, negative revision); callers match it with `errors.Is`.
 - `ErrPasswordLoginDisabled` — the email/password method is administratively
   disabled for the target user's surface; the admin send-password-reset routes
   answer 409 `auth.password_login_disabled` with it.
