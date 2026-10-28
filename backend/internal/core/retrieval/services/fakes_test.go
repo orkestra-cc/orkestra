@@ -1016,8 +1016,10 @@ func (l *lockedBuffer) String() string {
 // when it is done or leased and bumps the epoch; Advance is fenced on epoch
 // and owner (ErrLeaseLost), releases the lease and sets done.
 type fakeProgress struct {
-	mu   sync.Mutex
-	rows map[progressKey]*models.TenantProgress
+	mu     sync.Mutex
+	rows   map[progressKey]*models.TenantProgress
+	claims map[progressKey]int // ClaimBuild calls per row
+	gets   map[progressKey]int // Get calls per row
 }
 
 type progressKey struct {
@@ -1028,7 +1030,7 @@ type progressKey struct {
 var _ ProgressStore = (*fakeProgress)(nil)
 
 func newFakeProgress() *fakeProgress {
-	return &fakeProgress{rows: map[progressKey]*models.TenantProgress{}}
+	return &fakeProgress{rows: map[progressKey]*models.TenantProgress{}, claims: map[progressKey]int{}, gets: map[progressKey]int{}}
 }
 
 func (f *fakeProgress) ClaimBuild(ctx context.Context, corpus string, generation int, owner string, now time.Time, lease time.Duration) (*models.TenantProgress, error) {
@@ -1039,6 +1041,7 @@ func (f *fakeProgress) ClaimBuild(ctx context.Context, corpus string, generation
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	k := progressKey{t, corpus, generation}
+	f.claims[k]++
 	r, ok := f.rows[k]
 	if !ok {
 		r = &models.TenantProgress{TenantID: t, Corpus: corpus, Generation: generation, Status: models.ProgressBuilding, StartedAt: truncMS(now)}
@@ -1072,6 +1075,31 @@ func (f *fakeProgress) Advance(ctx context.Context, corpus string, generation in
 		r.Status = models.ProgressDone
 	}
 	return nil
+}
+
+func (f *fakeProgress) Get(ctx context.Context, corpus string, generation int) (*models.TenantProgress, error) {
+	t, err := ctxTenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	k := progressKey{t, corpus, generation}
+	f.gets[k]++
+	r, ok := f.rows[k]
+	if !ok {
+		return nil, nil
+	}
+	c := *r
+	return &c, nil
+}
+
+// calls returns the ClaimBuild and Get calls made for one row.
+func (f *fakeProgress) calls(tenant, corpus string, generation int) (claims, gets int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	k := progressKey{tenant, corpus, generation}
+	return f.claims[k], f.gets[k]
 }
 
 func (f *fakeProgress) get(tenant, corpus string, generation int) models.TenantProgress {

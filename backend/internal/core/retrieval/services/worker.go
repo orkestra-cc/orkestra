@@ -42,6 +42,7 @@ type OutboxStore interface {
 type ProgressStore interface {
 	ClaimBuild(ctx context.Context, corpus string, generation int, owner string, now time.Time, lease time.Duration) (*models.TenantProgress, error)
 	Advance(ctx context.Context, corpus string, generation int, epoch int64, owner, cursor string, added int64, done bool, now time.Time) error
+	Get(ctx context.Context, corpus string, generation int) (*models.TenantProgress, error)
 }
 
 // TombstoneChecker answers which probed items an erasure covers; satisfied
@@ -122,6 +123,7 @@ type Worker struct {
 	mu       sync.Mutex
 	problems []string
 	ensured  map[ensureKey]bool // collections ensured by this process
+	built    map[buildKey]bool  // initial builds known to be done
 	// tenantCursor is the round-robin position of the index pass: the last
 	// tenant served ("" = start). Per process; replicas keep their own.
 	tenantCursor string
@@ -139,7 +141,7 @@ func NewWorker(d WorkerDeps) *Worker {
 	if d.Settings == nil {
 		d.Settings = func() WorkerSettings { return WorkerSettings{} }
 	}
-	return &Worker{WorkerDeps: d, owner: uuid.NewString(), ensured: map[ensureKey]bool{}}
+	return &Worker{WorkerDeps: d, owner: uuid.NewString(), ensured: map[ensureKey]bool{}, built: map[buildKey]bool{}}
 }
 
 func (w *Worker) settings() WorkerSettings { return ClampWorkerSettings(w.Settings()) }

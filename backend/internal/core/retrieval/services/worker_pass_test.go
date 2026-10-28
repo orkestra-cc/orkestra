@@ -294,3 +294,47 @@ func TestWorker_EmptyTailWrapsTheCursorInTheSamePass(t *testing.T) {
 		assert.Equal(t, false, r.Dirty, r.SourceID)
 	}
 }
+
+// A finished build costs no store call per pass: the worker that finished it
+// remembers it, and a replica that did not learns it once (ClaimBuild + Get).
+func TestBuild_FinishedBuildIsSkippedWithoutStoreCalls(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = []string{"t1"}
+	e.putFor("t1", "a")
+
+	e.once(t, e.w)
+	require.Equal(t, models.ProgressDone, e.progress.get("t1", testCorpus, 1).Status)
+	claims, gets := e.progress.calls("t1", testCorpus, 1)
+	require.Equal(t, 1, claims)
+	for range 3 {
+		e.once(t, e.w)
+	}
+	c, g := e.progress.calls("t1", testCorpus, 1)
+	assert.Equal(t, claims, c)
+	assert.Equal(t, gets, g)
+
+	w2 := e.newWorker()
+	for range 3 {
+		e.once(t, w2)
+	}
+	c, g = e.progress.calls("t1", testCorpus, 1)
+	assert.Equal(t, claims+1, c)
+	assert.Equal(t, gets+1, g)
+}
+
+// A build another replica holds is not done: it is asked again next pass.
+func TestBuild_HeldBuildIsAskedAgain(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = []string{"t1"}
+	e.putMany("t1", 450)
+	other := e.newWorker()
+	_, err := e.progress.ClaimBuild(tenantCtx(context.Background(), "t1"), testCorpus, 1, other.owner, e.clk.Now(), testLease)
+	require.NoError(t, err)
+
+	e.once(t, e.w)
+	e.once(t, e.w)
+	c, g := e.progress.calls("t1", testCorpus, 1)
+	assert.Equal(t, 3, c) // the holder's claim and one per pass
+	assert.Equal(t, 2, g)
+	assert.Equal(t, 0, len(e.source.enumerated()))
+}

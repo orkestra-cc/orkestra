@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/orkestra/backend/internal/core/retrieval/models"
 	"github.com/orkestra/backend/internal/core/retrieval/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
@@ -180,22 +181,57 @@ func (w *Worker) buildPass(ctx context.Context, gates map[string]*corpusGate, na
 	return nil
 }
 
+// buildKey names the initial build of one tenant for one generation.
+type buildKey struct {
+	corpus     string
+	generation int
+	tenant     string
+}
+
+func (w *Worker) buildDone(k buildKey) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.built[k]
+}
+
+func (w *Worker) markBuilt(k buildKey) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.built[k] = true
+}
+
 // buildPage claims the build row of one tenant and enqueues its next page.
-// It reports whether an Enumerate page was requested.
+// It reports whether an Enumerate page was requested. A build known to be
+// done (finished here, or seen done once) costs no store call.
 func (w *Worker) buildPage(ctx context.Context, g *corpusGate, tenant string, s WorkerSettings, rep *PassReport) (bool, error) {
 	corpus, gen := g.Spec.Name, g.State.ActiveGeneration
+	key := buildKey{corpus, gen, tenant}
+	if w.buildDone(key) {
+		return false, nil
+	}
 	tctx := tenantCtx(ctx, tenant)
 	p, err := w.Progress.ClaimBuild(tctx, corpus, gen, w.owner, w.Now(), s.Lease)
 	if err != nil {
 		return false, err
 	}
 	if p == nil {
+		// done, or held by another replica: only done is remembered
+		cur, err := w.Progress.Get(tctx, corpus, gen)
+		if err != nil {
+			return false, err
+		}
+		if cur != nil && cur.Status == models.ProgressDone {
+			w.markBuilt(key)
+		}
 		return false, nil
 	}
 	advance := func(cursor string, added int64, done bool) error {
 		err := w.Progress.Advance(tctx, corpus, gen, p.Epoch, w.owner, cursor, added, done, w.Now())
 		if errors.Is(err, repository.ErrLeaseLost) {
 			return nil // another replica took the build over
+		}
+		if err == nil && done {
+			w.markBuilt(key)
 		}
 		return err
 	}
