@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -99,6 +100,9 @@ type gated struct {
 	spec     iface.RetrievalCorpusSpec
 	plan     searchPlan
 	filter   *engine.Filter
+	// filterJSON is the request's filter as stored in the search log
+	// (models.SearchLog.FilterJSON); "" without a filter.
+	filterJSON string
 }
 
 func unavailable(what string) error {
@@ -193,7 +197,7 @@ func (s *Searcher) logRow(req iface.RetrievalSearchRequest, g gated, rec *search
 		UserUUID:   g.userUUID,
 		Corpus:     g.spec.Name,
 		Query:      req.Query,
-		Filter:     req.Filter,
+		FilterJSON: g.filterJSON,
 		Mode:       string(g.plan.Mode),
 		Principals: slices.Clone(rec.principals),
 		SourceIDs:  []string{},
@@ -601,6 +605,16 @@ func (s *Searcher) gate(ctx context.Context, req iface.RetrievalSearchRequest) (
 
 	if g.filter, err = filter.Compile(req.Filter, spec.Filters); err != nil {
 		return g, err
+	}
+	if req.Filter != nil {
+		// The search log stores the filter as canonical JSON. A validated
+		// filter without a JSON form (a json.Number the encoder rejects, a
+		// time.Time outside years 0-9999) could not be audited: refuse it.
+		b, err := json.Marshal(req.Filter)
+		if err != nil {
+			return g, fmt.Errorf("%w: the filter has no JSON form", iface.ErrRetrievalInvalidFilter)
+		}
+		g.filterJSON = string(b)
 	}
 
 	if s.d.Modules == nil || !s.d.Modules.IsStarted(spec.Owner) {

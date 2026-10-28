@@ -43,7 +43,9 @@ func NewSearchLog(db *mongo.Database) *SearchLog {
 }
 
 // Insert writes row for the tenant in ctx; row.TenantID is overridden. A set
-// CreatedAt is kept (truncated to ms UTC), otherwise it is now.
+// CreatedAt is kept (truncated to ms UTC), otherwise it is now. FilterJSON is
+// stored verbatim as the string field "filter" (absent when empty); the
+// caller fills it with the canonical JSON of the request's filter.
 func (r *SearchLog) Insert(ctx context.Context, row *models.SearchLog) error {
 	tenantID, err := tenantrepo.StampInsert(ctx)
 	if err != nil {

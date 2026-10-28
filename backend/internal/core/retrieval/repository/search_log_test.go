@@ -172,6 +172,33 @@ func TestSearchLog_InsertCreatedAtAndEmptyArrays(t *testing.T) {
 	}
 }
 
+// The filter is stored under "filter" as the JSON string it was given, and
+// is absent when the row has none (F3).
+func TestSearchLog_InsertStoresFilterAsJSONString(t *testing.T) {
+	r, db := newSearchLog(t)
+	const js = `{"field":"team","op":"eq","value":"sales"}`
+	if err := r.Insert(tctx("t-1"), &models.SearchLog{UUID: "with", FilterJSON: js}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Insert(tctx("t-1"), &models.SearchLog{UUID: "without"}); err != nil {
+		t.Fatal(err)
+	}
+	raw := func(u string) bson.M {
+		var d bson.M
+		//tenantscope:allow system: test assertion over every tenant
+		if err := db.Collection(CollSearchLog).FindOne(context.Background(), bson.M{"uuid": u}).Decode(&d); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	if got, ok := raw("with")["filter"].(string); !ok || got != js {
+		t.Fatalf("filter = %#v, want the JSON string %s", raw("with")["filter"], js)
+	}
+	if v, ok := raw("without")["filter"]; ok {
+		t.Fatalf("filter = %#v, want absent", v)
+	}
+}
+
 func TestSearchLog_PurgeBeforeReturnsErrorOnDisconnectedClient(t *testing.T) {
 	uri := os.Getenv("MONGO_TEST_URI")
 	if uri == "" {

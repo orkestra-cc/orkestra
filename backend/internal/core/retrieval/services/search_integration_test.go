@@ -2,18 +2,19 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/retrieval/engine"
+	"github.com/orkestra/backend/internal/core/retrieval/filter"
 	"github.com/orkestra/backend/internal/core/retrieval/models"
 	"github.com/orkestra/backend/internal/core/retrieval/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -218,19 +219,30 @@ func TestIntegrationSearch_LogRowWithDatetimeFilter(t *testing.T) {
 	assert.Equal(t, []string{"s1", "s2", "s3"}, got)
 	assert.Equal(t, []string{"crm:c-2", "user:alice", "user:bob"}, row.Subjects)
 
-	if row.Filter == nil || len(row.Filter.And) != 2 {
-		t.Fatalf("stored filter = %+v, want an and of 2 nodes", row.Filter)
+	// The filter is stored as canonical JSON (F3): the raw BSON value is a
+	// string, it decodes back into the SDK type, and it still validates
+	// against the corpus schema, datetime included.
+	var raw bson.M
+	//tenantscope:allow system: test assertion reads a row directly
+	require.NoError(t, e.db.Collection(repository.CollSearchLog).FindOne(context.Background(),
+		bson.M{"tenantId": "t-1", "uuid": row.UUID}).Decode(&raw))
+	if _, ok := raw["filter"].(string); !ok {
+		t.Fatalf("stored filter is %T, want a JSON string", raw["filter"])
 	}
-	assert.Equal(t, "team", row.Filter.And[0].Field)
-	assert.Equal(t, "sales", row.Filter.And[0].Value)
-	assert.Equal(t, "joined", row.Filter.And[1].Field)
-	assert.Equal(t, iface.RetrievalOpGte, row.Filter.And[1].Op)
-	// Pinned: a time.Time value comes back from Mongo as a BSON datetime.
-	dt, ok := row.Filter.And[1].Value.(primitive.DateTime)
-	if !ok {
-		t.Fatalf("stored datetime value is %T, want primitive.DateTime", row.Filter.And[1].Value)
+	assert.Equal(t,
+		`{"and":[{"field":"team","op":"eq","value":"sales"},{"field":"joined","op":"gte","value":"2026-01-01T00:00:00Z"}]}`,
+		row.FilterJSON)
+	var stored iface.RetrievalFilter
+	require.NoError(t, json.Unmarshal([]byte(row.FilterJSON), &stored))
+	require.NoError(t, filter.Validate(&stored, e.spec.Filters))
+	if len(stored.And) != 2 {
+		t.Fatalf("stored filter = %+v, want an and of 2 nodes", stored)
 	}
-	assert.Equal(t, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli(), int64(dt))
+	assert.Equal(t, "team", stored.And[0].Field)
+	assert.Equal(t, "sales", stored.And[0].Value)
+	assert.Equal(t, "joined", stored.And[1].Field)
+	assert.Equal(t, iface.RetrievalOpGte, stored.And[1].Op)
+	assert.Equal(t, "2026-01-01T00:00:00Z", stored.And[1].Value)
 }
 
 // The datetime bound must filter: points joined 2026-06-01, so a bound after

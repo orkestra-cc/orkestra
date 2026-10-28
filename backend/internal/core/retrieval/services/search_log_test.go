@@ -2,12 +2,14 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/retrieval/engine"
+	"github.com/orkestra/backend/internal/core/retrieval/filter"
 	"github.com/orkestra/backend/internal/core/retrieval/models"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
@@ -55,9 +57,9 @@ func TestSearch_WritesSearchLogRow(t *testing.T) {
 	assert.Equal(t, "u-1", row.UserUUID)
 	assert.Equal(t, "contacts", row.Corpus)
 	assert.Equal(t, req.Query, row.Query)
-	if row.Filter != req.Filter {
-		t.Errorf("Filter = %+v, want the request's filter", row.Filter)
-	}
+	// Canonical JSON of the request's filter (F3): the SDK's json tags, no
+	// unset fields.
+	assert.Equal(t, `{"field":"team","op":"eq","value":"sales"}`, row.FilterJSON)
 	assert.Equal(t, "hybrid", row.Mode)
 	assert.Equal(t, []string{"tenant:*", "user:u-1"}, row.Principals)
 	assert.Equal(t, []string{"s1", "s3"}, row.SourceIDs)
@@ -287,4 +289,28 @@ func TestSearch_LogRowContentStaysOutOfSlog(t *testing.T) {
 			t.Errorf("slog output carries %q: %s", leak, out)
 		}
 	}
+}
+
+// A request without a filter stores none.
+func TestSearch_SearchLogRowWithoutFilter(t *testing.T) {
+	fx := newSearchFixture(t)
+	_, err := fx.search(contactsReq())
+	require.NoError(t, err)
+	assert.Equal(t, "", onlyRow(t, fx).FilterJSON)
+}
+
+// A filter that validates but has no JSON form (a hex json.Number on a float
+// field) cannot be stored canonically: it is refused at the gate as invalid,
+// before any engine call and without a row.
+func TestSearch_FilterWithoutJSONFormIsRefused(t *testing.T) {
+	fx := newSearchFixture(t)
+	fx.spec.Filters = append(fx.spec.Filters, iface.RetrievalFilterField{Name: "score", Type: iface.RetrievalFieldFloat})
+	req := contactsReq()
+	req.Filter = &iface.RetrievalFilter{Field: "score", Op: iface.RetrievalOpGte, Value: json.Number("0x1p3")}
+	require.NoError(t, filter.Validate(req.Filter, fx.spec.Filters)) // valid, only unstorable
+	res, err := fx.search(req)
+	requireIs(t, err, iface.ErrRetrievalInvalidFilter)
+	assert.Nil(t, res)
+	noEngineCall(t, fx)
+	assert.Len(t, fx.log.rows, 0)
 }

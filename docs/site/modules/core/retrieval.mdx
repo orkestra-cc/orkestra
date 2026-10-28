@@ -106,7 +106,7 @@ Not every op applies to every type:
 
 Values must match the field type (datetimes as RFC 3339), strings are 1 to 1024 bytes, and `in` needs 1 to 100 values. `exists` takes no value; write absence as `not` around `exists`.
 
-A filter is at most 4 levels deep, has at most 64 nodes and carries at most 100 values per `in`. Search validates a filter against the corpus's declared fields (a violation wraps `iface.ErrRetrievalInvalidFilter` and names the node path), then compiles it into the engine form, where a field is always addressed as a declared filter field.
+A filter is at most 4 levels deep, has at most 64 nodes and carries at most 100 values per `in`. Search validates a filter against the corpus's declared fields (a violation wraps `iface.ErrRetrievalInvalidFilter` and names the node path), then compiles it into the engine form, where a field is always addressed as a declared filter field. The search log keeps the filter as its JSON text, so a filter that has no JSON form (for example a `json.Number` the encoder rejects) is refused with `iface.ErrRetrievalInvalidFilter` too.
 
 ## Engine driver
 
@@ -210,7 +210,7 @@ func (m *Module) find(ctx context.Context, text string) (*iface.RetrievalSearchR
 
 **Errors.** `ErrRetrievalForbidden` (external organization, no permission, no identity), `ErrRetrievalUnknownCorpus`, `ErrRetrievalInvalidRequest`, `ErrRetrievalInvalidFilter`, `ErrRetrievalCorpusUnavailable` (owner module stopped), `ErrRetrievalNotConfigured`, `ErrRetrievalUnavailable` (engine down, principals could not be resolved, the search log could not be written) and `ErrRetrievalVisibilityCheck`. Treat their text as internal: do not show it to end users.
 
-**Every search is logged.** Each search that passes the access checks writes one row to `retrieval_search_log`: who searched, the query and filter, the principals used, which sources came back and which people (subjects) they named, the outcome and timings. A result is returned only after its row is written; if the row cannot be written, the search fails with `ErrRetrievalUnavailable`. Searches refused at the access checks are not logged. Rows are deleted after `search_log_retention_days`. Query text, principals and subjects never go to the application logs.
+**Every search is logged.** Each search that passes the access checks writes one row to `retrieval_search_log`: who searched, the query and the filter (as its JSON text, with datetimes in RFC 3339), the principals used, which sources came back and which people (subjects) they named, the outcome and timings. A result is returned only after its row is written; if the row cannot be written, the search fails with `ErrRetrievalUnavailable`. Searches refused at the access checks are not logged. Rows are deleted after `search_log_retention_days`. Query text, principals and subjects never go to the application logs.
 
 `iface.RetrievalPrincipalResolver` (same registered service) returns the caller's principal set, for an owner that wants to check visibility the same way. It fails like search does: `ErrRetrievalForbidden` without an identity, `ErrRetrievalUnavailable` when the principals cannot be resolved (a contributor's own error text is never returned). `iface.RetrievalSearch.FilterSchema(corpus)` returns the corpus's declared filter fields.
 
