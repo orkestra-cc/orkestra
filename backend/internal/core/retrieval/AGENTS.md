@@ -7,25 +7,25 @@ _Parent: [../AGENTS.md](../AGENTS.md)_
 
 ## Purpose
 
-Lets modules declare **corpora** (searchable collections of their own data), indexes them through a transactional outbox and a worker (PR 4), and, in later steps, answers hybrid (dense + BM25) searches with a principal filter, over a vector engine behind a driver boundary ([ADR-0023](../../../../docs/adr/0023-core-retrieval-module.md)). Inference is local by default: a corpus is `local_only` unless its owner declares `hosted_allowed`.
+Lets modules declare **corpora** (searchable collections of their own data), indexes them through a transactional outbox and a worker (PR 4), and answers hybrid (dense + BM25) searches with a principal filter (PR 5, see [Search](#search)), over a vector engine behind a driver boundary ([ADR-0023](../../../../docs/adr/0023-core-retrieval-module.md)). Inference is local by default: a corpus is `local_only` unless its owner declares `hosted_allowed`.
 
 ## What it owns
 
-PR 3 delivered the registry, the engine contract, the Qdrant driver and the conformance suite; PR 4 adds indexing (outbox, worker, corpus state, chunking). There is still no route, permission or nav item; `ConfigSchema` holds only the three indexing keys.
+PR 3 delivered the registry, the engine contract, the Qdrant driver and the conformance suite; PR 4 added indexing (outbox, worker, corpus state, chunking); PR 5 adds search (gate, pinned generation, hybrid arms, erasure veto and source check, rerank, the search log and its retention). There is still no route, permission or nav item (search has no generic route, ADR D15); `ConfigSchema` holds five keys in two groups: `indexing` (three) and `search` (two).
 
 | File | Purpose |
 |---|---|
-| `module.go` | `Module`: declarations, `Init` (operator env, builds the engine and the service, registers `module.ServiceRetrieval`), `Start` (seals registration), `HealthCheck` |
-| `repository/` | Collection constants and index specs; `Outbox`, `CorpusStates`, `TenantProgress`, `Erasures` repositories |
-| `models/` | Document shapes: `OutboxEntry` (+ `AppliedState`), `CorpusState`, `TenantProgress`, `Erasure` |
+| `module.go` | `Module`: declarations, `Init` (operator env, builds the engine and the service, wires the outbox, the worker and the search, registers `module.ServiceRetrieval`), `Start` (seals registration, starts the worker and the search-log retention loop), `Stop`, `HealthCheck`. Search wiring helpers: `searchSettings`/`clampSearchSettings`/`readSearchSettings`, `searchServices`/`resolveSearchServices` |
+| `repository/` | Collection constants and index specs; `Outbox`, `CorpusStates`, `TenantProgress`, `Erasures`, `SearchLog` repositories |
+| `models/` | Document shapes: `OutboxEntry` (+ `AppliedState`), `CorpusState`, `TenantProgress`, `Erasure`, `SearchLog` (+ `SearchTimings`) |
 | `chunk/` | `Split`, `Validate`, `CountTokens`: the `none` and `fixed` strategies and the token approximation |
-| `services/` | `Service` (`New(Options{Engine, CollectionPrefix, Logger})`, `Seal`, `Engine()`, `CollectionPrefix()`, `SetOutbox`): the corpus registry and principal-contributor registry; implements `iface.RetrievalCorpusRegistry` and `iface.RetrievalOutbox`. Also `Outbox`, `Worker` (`worker.go`, `worker_pass.go`, `gate.go`), `Tombstones`, `IngestionProfileHash`, item validation (`ingest.go`) |
+| `services/` | `Service` (`New(Options{Engine, CollectionPrefix, Logger})`, `Seal`, `Engine()`, `CollectionPrefix()`, `SetOutbox`, `SetSearch`): the corpus registry and principal-contributor registry; implements `iface.RetrievalCorpusRegistry`, `iface.RetrievalOutbox`, `iface.RetrievalSearch` and `iface.RetrievalPrincipalResolver`. Also `Outbox`, `Worker` (`worker.go`, `worker_pass.go`, `gate.go`), `Tombstones`, `IngestionProfileHash`, item validation (`ingest.go`), and the search side: `Searcher` (`search.go`), `planSearch` (`search_params.go`), `Snippet` (`snippet.go`), `PrincipalResolver` (`principals.go`), `NewCorpusStateReader` (`search_state.go`), `PurgeSearchLog` (`search_log_retention.go`) |
 | `engine/` | Engine-neutral contract: `Engine`, `Point`, `Query`, `Filter`, `Selector`, `Runtime`, `PointID`, sentinels |
 | `engine/qdrant/` | Qdrant REST driver (`New(Config{URL, APIKey, Timeout, MaxResponseBytes, HTTPClient, Logger})`) |
 | `enginetest/` | Conformance suite `Run(t, newEngine)`: 22 cases (incl. `EmptySourceIDsRefused`, `SourceIDsWithoutTenantRefused`, `UpsertReplacesPayload`, tenant-scoped BM25, principal filter, reserved-namespace isolation); imports `engine` and `iface` |
-| `filter/` | `Validate`s a public `iface.RetrievalFilter` against a corpus's declared fields (imports `iface`). It only validates in this PR: `Compile` into `engine.Filter` arrives in PR 5 |
+| `filter/` | `Validate`s a public `iface.RetrievalFilter` against a corpus's declared fields and `Compile`s it into `engine.Filter` (imports `engine`, `iface`) |
 
-Later PRs: 5 search path, filter compilation use and principal resolver; 6 compliance wiring (audit sink, DSR); 7 admin page.
+Later PRs: 6 compliance wiring (audit sink, DSR, `DeleteBySubject`, the retrieval `PIIProducer`); 7 admin page and routes.
 
 ## MongoDB collections
 
@@ -35,6 +35,7 @@ Later PRs: 5 search path, filter compilation use and principal resolver; 6 compl
 | `retrieval_outbox` | tenant-scoped (`tenantrepo`) | One row per (tenant, corpus, source) key. `DueTenants` is the only cross-tenant sweep (`system:`) |
 | `retrieval_tenant_progress` | tenant-scoped | Resumable initial build per (tenant, corpus, generation): cursor, enqueued count, lease |
 | `retrieval_erasures` | global + tenant | Tombstones (`scope` `global` for user tombstones, `tenant` otherwise). The insert of a global row is `dsr:`; the covering lookup of global rows is `system:` |
+| `retrieval_search_log` | tenant-scoped (`tenantrepo`) | One row per search that passed the gate (ADR D12); see [Search log](#search-log). The retention purge is the only cross-tenant sweep (`system:`) |
 
 ## Dependencies and load order
 
@@ -52,7 +53,7 @@ Later PRs: 5 search path, filter compilation use and principal resolver; 6 compl
 
 An invalid URL (`qdrant.New` error) logs a WARN and is treated as not configured; the value is never logged, nor is the key. When not configured, `Init` passes an **untyped nil** engine to `services.New` (a typed-nil driver inside the interface would defeat `Service.Engine()`'s `== nil` check).
 
-`Start` calls `Seal()` first (every module's Init has run by then, so a module retried later with `RetryInit` cannot register a corpus), then starts the index worker goroutine under `context.WithoutCancel(ctx)` (the admin enable endpoint passes a request context; precedent `auth/maintenance.go`), so only `Stop` ends it; a second `Start` while running is a no-op. `Stop` cancels the worker and waits for it or the context. A key held at that moment still ends its lease: `Release`, `Reschedule` and `Requeue` run under `context.WithTimeout(context.WithoutCancel(tctx), 5s)`, while the `HoldsLease` guard and the Load/Embed/engine calls stay on the run context (a cancellation that surfaces at the guard re-queues the key, which then stays leased until expiry). `Init` builds the outbox (`SetOutbox`, so `Enqueue` whenever a database handle is present) and, when an engine is configured and the gateway (`LLMPinnedEmbedder`, `LLMInferenceProfiles`), tenant lister and module status reader resolve, the worker; otherwise the worker is nil and one WARN names what is missing. Config (group `indexing`, read every pass): `worker_lease` (2m, `RETRIEVAL_WORKER_LEASE`), `worker_batch` (32, `RETRIEVAL_WORKER_BATCH`; a value <= 0 falls back to 32, only the upper bound 256 clamps), `worker_poll_interval` (5s, `RETRIEVAL_WORKER_POLL_INTERVAL`). Tests inject an engine through the unexported `Module.newEngine`. The one case where the outbox is not wired is a nil `deps.DB` (production always has one; the repository constructors would panic): `Init` still returns nil with a single WARN naming the missing database, there is no worker, and `Enqueue` returns an error.
+`Start` calls `Seal()` first (every module's Init has run by then, so a module retried later with `RetryInit` cannot register a corpus), then starts the background jobs under one `context.WithCancel(context.WithoutCancel(ctx))` (the admin enable endpoint passes a request context; precedent `auth/maintenance.go`), so only `Stop` ends them: the index worker when it was built, and the search-log retention loop whenever a database handle is present, engine or not (rows are written either way). A `sync.WaitGroup` over both closes the single `done` channel (precedent `llm/module.go` Start); a second `Start` while running is a no-op. `Stop` cancels the jobs and waits for them or the context. A key held at that moment still ends its lease: `Release`, `Reschedule` and `Requeue` run under `context.WithTimeout(context.WithoutCancel(tctx), 5s)`, while the `HoldsLease` guard and the Load/Embed/engine calls stay on the run context (a cancellation that surfaces at the guard re-queues the key, which then stays leased until expiry). `Init` builds the outbox (`SetOutbox`, so `Enqueue` whenever a database handle is present) and, when an engine is configured and the gateway (`LLMPinnedEmbedder`, `LLMInferenceProfiles`), tenant lister and module status reader resolve, the worker; otherwise the worker is nil and one WARN names what is missing. Config (group `indexing`, read every pass): `worker_lease` (2m, `RETRIEVAL_WORKER_LEASE`), `worker_batch` (32, `RETRIEVAL_WORKER_BATCH`; a value <= 0 falls back to 32, only the upper bound 256 clamps), `worker_poll_interval` (5s, `RETRIEVAL_WORKER_POLL_INTERVAL`). Tests inject an engine through the unexported `Module.newEngine`. The one case where the outbox is not wired is a nil `deps.DB` (production always has one; the repository constructors would panic): `Init` still returns nil with a single WARN naming the missing database, there is no worker, and `Enqueue` returns an error.
 
 `HealthCheck` (only `/v1/admin/modules/health`; `/ready` does not consult modules): engine nil returns nil (not configured is the designed degraded mode); worker nil returns `retrieval: indexing disabled: <missing>`; otherwise `engine.Health` under a 2s timeout, and any error returns `iface.ErrRetrievalUnavailable` itself, because the handler copies `err.Error()` into the response. The driver error goes to the DEBUG log. A healthy engine then reports `Worker.Problems()` as `retrieval: <problem>; ...`.
 
@@ -115,6 +116,70 @@ A token is a maximal run of runes for which `unicode.IsSpace` is false, when tha
 
 `Engine.UpdatePayload` replaces `Runtime` and `Fields` of existing points (vector and text kept) only when the stored content hash matches and the stored revision is not higher; it never creates a point and sends every `_rt` field, `page` included. Config group `indexing`: `worker_lease` (2m, clamp 30s-15m, `RETRIEVAL_WORKER_LEASE`), `worker_batch` (32, `RETRIEVAL_WORKER_BATCH`: <= 0 falls back to 32, above 256 clamps to 256), `worker_poll_interval` (5s, clamp 1s-5m, `RETRIEVAL_WORKER_POLL_INTERVAL`). `HealthCheck` strings: `retrieval: indexing disabled: <missing>`, `retrieval: the vector engine is unavailable` (the bare `iface.ErrRetrievalUnavailable`), `retrieval: <problem>; <problem>`.
 
+## Search
+
+`iface.RetrievalSearch.Search` on the registered `*services.Service` delegates to the `Searcher` wired by `SetSearch` (no Searcher: `ErrRetrievalNotConfigured`). There is no generic route (ADR D15); a consuming module calls it in process, PR 7 adds the admin search.
+
+### Wiring (`module.go` Init)
+
+- Search is wired **only when `deps.DB != nil`**, `QDRANT_URL` unset included: the search log and `Tombstones` are database-backed. With a nil DB `SetSearch` is not called, `Search` returns `ErrRetrievalNotConfigured`, `Principals` returns `ErrRetrievalForbidden`, and the existing single database WARN covers it.
+- `resolveSearchServices(reg)` resolves once, and the worker reuses its `profiles`/`embedder`: `iface.AuthzProvider` and `iface.AuthzRoleLister` from `module.ServiceAuthzProvider`, `iface.TenantProvider` (the membership checker) from `module.ServiceTenantProvider`, and `LLMInferenceProfiles`, `LLMPinnedEmbedder`, `LLMReranker` by type assertion on the `module.ServiceLLMGateway` value. `ModuleStatusReader` comes from `module.ServiceModuleStatus`.
+- A missing service stays **nil** (the membership checker is passed as an untyped nil: a typed nil inside the interface would defeat the resolver's `== nil` check). Missing authz, role lister, tenant provider or module status fail every search closed; missing inference companions degrade it. Init emits **at most one** WARN naming the missing services, never errors, and contacts nothing (ADR D1).
+- **Engine-less installs** wire `Tombstones` and the source check like any other, so a search passes the gate and the visibility guard and answers `ErrRetrievalNotConfigured` at step 2, leaving its row (`errorKind` `not_configured`). Wiring no tombstones there would report `ErrRetrievalVisibilityCheck` instead, which misnames the situation.
+- The corpus state is read through `services.NewCorpusStateReader(repository.CorpusStates, prefix)`: a missing state or `activeGeneration` 0 is `ErrNoActiveGeneration`; otherwise the pin is `st.Collection` (fallback `engine.CollectionName(prefix, corpus, gen)` when empty) and `st.EmbeddingProfileID`. A corpus in `profile_changed` or `error` that still has an active generation is served; a changed model is caught by the profile-ID comparison (keyword fallback, degraded).
+
+### The pipeline (ADR D5)
+
+| Step | What | Owner |
+|---|---|---|
+| 1 gate | `RequireInternalTenant` → ctx user and tenant → corpus lookup → `planSearch` (request shape) → corpus permission (`AuthzProvider.HasPermission`) → `filter.Compile` → owner module started (`ModuleStatusReader.IsStarted`). A refusal here writes **no** search-log row | `services/search.go` `gate`, `search_params.go`, `filter/compile.go` |
+| 2 pin | One corpus-state read per request: collection and embedding profile ID hold for the whole search | `search.go` `pin`, `search_state.go` |
+| 3 principals | `PrincipalResolver.Principals` (below); the result must match the caller | `principals.go`, `search.go` `principals` |
+| 4 arms | Dense: inference profile of the corpus's embed endpoint, which must be an embed endpoint, match the pinned profile ID and respect locality; then `EmbedWithProfile`. Keyword: the query text (dropped in `dense` mode when the dense arm ran) | `search.go` `denseVector` |
+| 5 fusion | One engine query with tenant, principals, compiled filter, weights, `PerArm` and `Limit = min(PerArm, max(4×Limit, RerankK))` | `search.go` `query`, `engine/qdrant` |
+| 6 check | Tenant/source-id second guard → erasure veto (`Tombstones.Covered`, one probe per source in first-seen order) → `Source.Visible` under a 2 s timeout, revision must match. A short page after a full engine answer refills **once** with `Limit = PerArm` | `search.go` `fetchChecked`, `checkCandidates`; `tombstones.go` |
+| 7 rerank | When the corpus enables it: the first `RerankK = min(200, max(TopK, Limit))` survivors; the head carries the reranker's score | `search.go` `rerank` |
+| 8 result | First `Limit` candidates → hits (rank, score, 300-rune snippet, provenance, locality); the search-log row is written **before** the result is returned | `search.go` `toHits`, `logRow`; `snippet.go` |
+
+### Degraded and fail-closed outcomes
+
+| Situation | Result |
+|---|---|
+| No engine (`QDRANT_URL` unset) | `ErrRetrievalNotConfigured` |
+| Engine error or state read error | `ErrRetrievalUnavailable` (cause kept in the chain, only its kind logged) |
+| No active generation yet | empty hits, `degraded: true` |
+| Dense arm cannot run (no companions, profile error, kind, profile-ID mismatch, locality, bad vector) | keyword-only, `degraded: true` (decision 4 for locality: the text never reaches the endpoint) |
+| Rerank fails or its endpoint breaks locality | fused order and scores, `degraded: true` (decisions 1, 4) |
+| Page still short after the refill and the last engine answer was full | `degraded: true` (decision 3) |
+| Principal resolution error | `ErrRetrievalForbidden` stays forbidden; anything else (cap, invalid contributor principal, dependency) is `ErrRetrievalUnavailable`; only the error kind is logged, never `err.Error()` (decision 6) |
+| Erasure veto or `Visible` fails or times out; nil `Tombstones` or `spec.Source` | `ErrRetrievalVisibilityCheck`, no candidate returned |
+| Owner module not started | `ErrRetrievalCorpusUnavailable` |
+| Search-log row cannot be written on a result | no result, `ErrRetrievalUnavailable` wrapping `services.ErrSearchLogWrite` (decision 2) |
+| Caller cancelled | the context error |
+
+### Principals
+
+`PrincipalResolver` (ADR D10) builds the set from ctx: `user:<uuid>`; `tenant:*` when `TenantProvider.IsMember` says the user is a member; `role:<id>` per `AuthzRoleLister.ActiveRoleIDs` (tenant bindings only, non-expired, active roles); and every registered `RetrievalPrincipalContributor` (`svc.PrincipalContributors`), whose output must match `^[a-z][a-z0-9_]{0,31}:\S{1,200}$` and may not use the reserved prefixes `user`, `tenant`, `role`. The set is deduplicated and sorted. No platform role gets a bypass (`super_admin` resolves like anyone). A nil membership checker or role lister fails every call closed. Above `principal_cap` (config, read per call, default `services.DefaultPrincipalCap` 256, clamp 16-4096) the search fails with `ErrPrincipalCapExceeded` → `ErrRetrievalUnavailable`. A contributor's error is `%w`-wrapped and may name its principals: never log or return its text.
+
+### Search log
+
+`retrieval_search_log` (`models.SearchLog`), tenant-stamped by `tenantrepo.StampInsert`. One row per search that passed the gate:
+
+- `uuid`, `userUuid` (the searcher), `corpus`, `query`, `filter` (the request's), `mode` (the defaulted request mode, not the arm that answered: `degraded` records a fallback), `principals` (empty when the search failed before step 3), `sourceIds` (returned hits, rank order, unique), `subjects` (sorted union over the returned points only), `hitCount`, `degraded`, `outcome` (`ok`, `degraded`, `error`), `errorKind` (`not_configured`, `unavailable`, `principals`, `visibility_check`, `canceled`; `canceled` is an unavailable stage, embed or engine, failing on a context error), `timings` (ms, measured with the Searcher's `Now`: total, resolve = steps 1-3, embed, engine = every query call, check = veto + Visible, rerank), `createdAt` (`Now().UTC()`).
+- **Write before return.** A successful (or degraded) search inserts its row with the request ctx before returning; a failed insert returns no result and `ErrRetrievalUnavailable` + `ErrSearchLogWrite`. A search that failed after the gate is logged best-effort under `context.WithoutCancel(ctx)` with a 5 s timeout (so a cancelled caller still leaves its row); a failed insert there only WARNs and the original error is returned. A nil `Log` fails every search closed before any engine call.
+- `slog` never receives the query, snippets, chunk text, principals or subjects: those go only into this collection.
+- **Retention**: `search_log_retention_days` (default `services.DefaultSearchLogRetentionDays` 90, clamp 1-3650, read at every run). The loop runs a minute after `Start`, then every 24 h (test seams `Module.retentionFirst`, `retentionInterval`), calls `services.PurgeSearchLog`, which deletes every tenant's older rows in batches of 1000 (`//tenantscope:allow system:`), and logs the count at INFO or the failure at WARN.
+- **Indexes** (`repository.SearchLogIndexes`): `{tenantId, uuid}` unique, `{tenantId, userUuid, createdAt}`, and two system sweeps `{subjects}` (PR 6 DSR lookup of the people the results named, cross-tenant) and `{createdAt}` (retention). PR 6's DSR also needs a cross-tenant `{userUuid}` index to find a searcher's own rows; `{tenantId, userUuid, createdAt}` does not serve that query, so PR 6 adds it.
+- **piiscan**: the `userUuid` field makes this a subject-PII collection with no `PIIProducer` yet. `backend/tools/piiscan/baseline.txt` carries the temporary line `pii.subject_collection.no_producer:retrieval`; PR 6 registers the retrieval `PIIProducer` and deletes it.
+
+### DeleteBySubject
+
+`(*Service).DeleteBySubject` returns `services.ErrDeleteBySubjectNotImplemented` (it wraps `errors.ErrUnsupported`) and does nothing else; PR 6 replaces the body with data-subject erasure.
+
+### Config (group `search`, "Search & audit")
+
+`principal_cap` (`RETRIEVAL_PRINCIPAL_CAP`, default 256, 16-4096) and `search_log_retention_days` (`RETRIEVAL_SEARCH_LOG_RETENTION_DAYS`, default 90, 1-3650), both `FieldInt` with `Min`/`Max`, read through `deps.GetConfigInt` on every use (hot reload) and clamped by `clampSearchSettings` (a value <= 0 falls back to the default). `HealthCheck` does not cover the search wiring: the Init WARN names what is missing.
+
 ## Corpus registration rules
 
 `RegisterCorpus` is syntax-only, runs during any module's `Init`, never contacts the engine or llm, and fails once sealed. Rules (`services/registry.go`):
@@ -127,7 +192,7 @@ A token is a maximal run of runes for which `unicode.IsSpace` is false, when tha
 
 ## Engine contract
 
-- Import direction: `engine` -> `iface`, `uuid`, stdlib; `engine/qdrant` -> `engine`, `iface`; `enginetest` -> `engine`, `iface`; `filter` -> `iface`; `services` -> `engine`, `filter`, `iface`; `module.go` -> `services`, `engine`, `engine/qdrant`, `repository`. `engine` never imports a driver, and consumers outside this module never import `engine`.
+- Import direction: `engine` -> `iface`, `uuid`, stdlib; `engine/qdrant` -> `engine`, `iface`; `enginetest` -> `engine`, `iface`; `filter` -> `engine`, `iface`; `services` -> `engine`, `filter`, `models`, `iface`; `module.go` -> `services`, `engine`, `engine/qdrant`, `repository`. `engine` never imports a driver, and consumers outside this module never import `engine`.
 - Values: keyword `string`, keyword[] `[]string`, integer `int64`, float `float64`, bool `bool`, datetime `int64` Unix **milliseconds** UTC (`Point.Fields`) and `float64` milliseconds (`Range`). Datetime fields get an integer payload index, so range compilation needs no field-type lookup.
 - Payload: `_rt` = module-only runtime fields plus `_rt.text` (the indexed text); `f` = declared filter fields. A user filter field is always rendered as `f.<name>`, never a raw key.
 - `Upsert` replaces a point's whole payload (a field the new write omits is gone; conformance `UpsertReplacesPayload`). `UpdatePayload` (the payload-only path) **merges into `_rt`**: the driver sends Qdrant `set_payload` with `"key": "_rt"` (a top-level `set_payload` of `_rt` would replace the object and drop `_rt.text`, the indexed text; verified on Qdrant 1.20) and replaces `f` whole with a second `set_payload`, both filtered on the point id, the stored `_rt.contentHash` and `_rt.sourceRevision <= ` the incoming one. A merge never clears a key it omits, so the driver sends every `_rt` field, `page` included, through its own shape without `omitempty` (ruling R1).
@@ -147,7 +212,8 @@ A token is a maximal run of runes for which `unicode.IsSpace` is false, when tha
 
 ## Invariants
 
-- No route, permission, Cedar policy, errcode or nav item; the Qdrant settings are operator environment only (ADR D4/D9). `ConfigSchema` has only the three indexing keys.
+- No route, permission, Cedar policy, errcode or nav item; the Qdrant settings are operator environment only (ADR D4/D9). `ConfigSchema` has the three indexing keys and the two search keys.
+- A search result is never returned without its search-log row; logs never carry query text, snippets, chunk text, principals or subjects.
 - `Init` never contacts Qdrant or an inference endpoint, and never returns an error.
 - Logs and errors never carry the API key or the Qdrant URL.
 - No bypass of the principal filter for any platform role (ADR D10).

@@ -1,7 +1,9 @@
 // Package retrieval is the core module for corpora, indexing and hybrid
-// search over tenant data with local inference (ADR-0023). This step holds
-// the corpus registry, the engine contract, the Qdrant driver, the outbox and
-// the index worker; search and routes arrive in later steps.
+// search over tenant data with local inference (ADR-0023). It holds the
+// corpus registry, the engine contract, the Qdrant driver, the outbox, the
+// index worker, the search pipeline with its principal resolver and search
+// log, and the search-log retention loop. Compliance wiring (audit sink,
+// data-subject erasure) arrives in PR 6, the admin routes in PR 7.
 package retrieval
 
 import (
@@ -11,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +35,20 @@ const (
 	defaultWorkerBatch  = 32
 	defaultWorkerPoll   = 5 * time.Second
 	maxWorkerBatchField = 256
+)
+
+const (
+	keyPrincipalCap           = "principal_cap"
+	keySearchLogRetentionDays = "search_log_retention_days"
+
+	minPrincipalCap           = 16
+	maxPrincipalCap           = 4096
+	minSearchLogRetentionDays = 1
+
+	// The search-log purge first runs a minute after Start, then daily
+	// (precedent: llm's usage retention).
+	searchLogRetentionFirstRun = time.Minute
+	searchLogRetentionEvery    = 24 * time.Hour
 )
 
 const (
@@ -66,6 +83,15 @@ type Module struct {
 	worker  *services.Worker
 	missing string
 
+	// purger is the search log, nil without a database; settings reads the
+	// search config on every use (hot reload).
+	purger   services.SearchLogPurger
+	settings func() searchSettings
+	// retention cadence; zero means the defaults (test seam).
+	retentionFirst, retentionInterval time.Duration
+
+	// One cancel and one done channel cover every background job (the
+	// worker and the retention loop).
 	lifecycleMu sync.Mutex
 	cancel      context.CancelFunc
 	done        chan struct{}
@@ -84,11 +110,14 @@ func qdrantEngine(cfg qdrant.Config) (engine.Engine, error) {
 func (m *Module) ConfigGroups() []module.ConfigGroup {
 	return []module.ConfigGroup{
 		{Key: "indexing", Label: "Indexing", Order: 1, Description: "Outbox worker: lease per key, keys per pass and pass interval."},
+		{Key: "search", Label: "Search & audit", Order: 2, Description: "Principal cap per search and how long the search log is kept."},
 	}
 }
 
 func (m *Module) ConfigSchema() []module.ConfigField {
 	one, maxBatch := 1, maxWorkerBatchField
+	minCap, maxCap := minPrincipalCap, maxPrincipalCap
+	minDays, maxDays := minSearchLogRetentionDays, services.MaxSearchLogRetentionDays
 	return []module.ConfigField{
 		{Key: keyWorkerLease, Label: "Worker lease", Group: "indexing", Type: module.FieldDuration, Default: "2m", EnvVar: "RETRIEVAL_WORKER_LEASE",
 			Description: "How long a worker owns one item while indexing it (30s–15m). Embedding and engine calls end a quarter of the lease before it expires."},
@@ -96,7 +125,94 @@ func (m *Module) ConfigSchema() []module.ConfigField {
 			Description: "Items indexed per pass, shared round-robin across organizations."},
 		{Key: keyWorkerPollInterval, Label: "Worker poll interval", Group: "indexing", Type: module.FieldDuration, Default: "5s", EnvVar: "RETRIEVAL_WORKER_POLL_INTERVAL",
 			Description: "Pause between passes (1s–5m)."},
+		{Key: keyPrincipalCap, Label: "Principal cap", Group: "search", Type: module.FieldInt,
+			Default: strconv.Itoa(services.DefaultPrincipalCap), EnvVar: "RETRIEVAL_PRINCIPAL_CAP", Min: &minCap, Max: &maxCap,
+			Description: "Maximum number of principals (user, tenant, roles, contributors) a search may carry; a caller above it gets no results until the cap is raised. Fails closed."},
+		{Key: keySearchLogRetentionDays, Label: "Search log retention (days)", Group: "search", Type: module.FieldInt,
+			Default: strconv.Itoa(services.DefaultSearchLogRetentionDays), EnvVar: "RETRIEVAL_SEARCH_LOG_RETENTION_DAYS", Min: &minDays, Max: &maxDays,
+			Description: "Search-log rows older than this are deleted daily. The log records who searched for what and which people the results named (ADR-0023 D12)."},
 	}
+}
+
+// searchSettings are the search config keys, read on every use.
+type searchSettings struct{ principalCap, retentionDays int }
+
+// clampSearchSettings applies the defaults and bounds: principalCap 16..4096
+// (<= 0: 256), retentionDays 1..3650 (<= 0: 90). The admin form enforces the
+// same bounds; this guards a value set around it (env seed, direct write).
+func clampSearchSettings(s searchSettings) searchSettings {
+	switch {
+	case s.principalCap <= 0:
+		s.principalCap = services.DefaultPrincipalCap
+	case s.principalCap < minPrincipalCap:
+		s.principalCap = minPrincipalCap
+	case s.principalCap > maxPrincipalCap:
+		s.principalCap = maxPrincipalCap
+	}
+	switch {
+	case s.retentionDays <= 0:
+		s.retentionDays = services.DefaultSearchLogRetentionDays
+	case s.retentionDays > services.MaxSearchLogRetentionDays:
+		s.retentionDays = services.MaxSearchLogRetentionDays
+	}
+	return s
+}
+
+// readSearchSettings reads and clamps the search config keys.
+func readSearchSettings(deps *module.Dependencies) searchSettings {
+	return clampSearchSettings(searchSettings{
+		principalCap:  deps.GetConfigInt("retrieval", keyPrincipalCap, services.DefaultPrincipalCap),
+		retentionDays: deps.GetConfigInt("retrieval", keySearchLogRetentionDays, services.DefaultSearchLogRetentionDays),
+	})
+}
+
+// searchServices are the other modules' services search and indexing use; a
+// field is nil when its service is not registered.
+type searchServices struct {
+	authz    iface.AuthzProvider
+	roles    iface.AuthzRoleLister
+	members  iface.TenantProvider
+	profiles iface.LLMInferenceProfiles
+	embedder iface.LLMPinnedEmbedder
+	reranker iface.LLMReranker
+}
+
+// resolveSearchServices resolves them once: the authz provider and its role
+// lister from ServiceAuthzProvider, the membership checker from
+// ServiceTenantProvider, and the inference companions by type assertion on
+// the ServiceLLMGateway value.
+func resolveSearchServices(reg *module.ServiceRegistry) searchServices {
+	var s searchServices
+	s.authz, _ = module.GetTyped[iface.AuthzProvider](reg, module.ServiceAuthzProvider)
+	s.roles, _ = module.GetTyped[iface.AuthzRoleLister](reg, module.ServiceAuthzProvider)
+	s.members, _ = module.GetTyped[iface.TenantProvider](reg, module.ServiceTenantProvider)
+	s.profiles, _ = module.GetTyped[iface.LLMInferenceProfiles](reg, module.ServiceLLMGateway)
+	s.embedder, _ = module.GetTyped[iface.LLMPinnedEmbedder](reg, module.ServiceLLMGateway)
+	s.reranker, _ = module.GetTyped[iface.LLMReranker](reg, module.ServiceLLMGateway)
+	return s
+}
+
+// missing names the unresolved services: first those whose absence fails
+// every search closed, then the inference companions, whose absence degrades.
+func (s searchServices) missing(modules module.ModuleStatusReader) []string {
+	var out []string
+	for _, c := range []struct {
+		absent bool
+		name   string
+	}{
+		{s.authz == nil, "AuthzProvider"},
+		{s.roles == nil, "AuthzRoleLister"},
+		{s.members == nil, "TenantProvider"},
+		{modules == nil, "ModuleStatusReader"},
+		{s.profiles == nil, "LLMInferenceProfiles"},
+		{s.embedder == nil, "LLMPinnedEmbedder"},
+		{s.reranker == nil, "LLMReranker"},
+	} {
+		if c.absent {
+			out = append(out, c.name)
+		}
+	}
+	return out
 }
 
 func (m *Module) Name() string        { return "retrieval" }
@@ -169,7 +285,11 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	// The outbox is wired whenever a database handle is present, QDRANT_URL
 	// unset included: owners enqueue intents that the worker drains once an
 	// engine is configured. With a nil DB it stays unwired (Enqueue errors).
-	var worker *services.Worker
+	var (
+		worker   *services.Worker
+		purger   services.SearchLogPurger
+		settings = func() searchSettings { return readSearchSettings(deps) }
+	)
 	missing := ""
 	if deps.DB == nil {
 		missing = "database"
@@ -177,16 +297,16 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		outbox := repository.NewOutbox(deps.DB)
 		states := repository.NewCorpusStates(deps.DB)
 		progress := repository.NewTenantProgress(deps.DB)
-		erasures := repository.NewErasures(deps.DB)
+		tombstones := services.NewTombstones(repository.NewErasures(deps.DB))
+		searchLog := repository.NewSearchLog(deps.DB)
 		svc.SetOutbox(services.NewOutbox(outbox, svc, time.Now))
 
+		svcs := resolveSearchServices(deps.Services)
 		var absent []string
-		embedder, ok := module.GetTyped[iface.LLMPinnedEmbedder](deps.Services, module.ServiceLLMGateway)
-		if !ok {
+		if svcs.embedder == nil {
 			absent = append(absent, "LLMPinnedEmbedder")
 		}
-		profiles, ok := module.GetTyped[iface.LLMInferenceProfiles](deps.Services, module.ServiceLLMGateway)
-		if !ok {
+		if svcs.profiles == nil {
 			absent = append(absent, "LLMInferenceProfiles")
 		}
 		tenants, ok := module.GetTyped[iface.TenantIDLister](deps.Services, module.ServiceTenantService)
@@ -201,8 +321,8 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		if eng != nil && missing == "" {
 			worker = services.NewWorker(services.WorkerDeps{
 				Outbox: outbox, States: states, Progress: progress,
-				Tombstones: services.NewTombstones(erasures),
-				Catalog:    svc, Engine: eng, Profiles: profiles, Embedder: embedder,
+				Tombstones: tombstones,
+				Catalog:    svc, Engine: eng, Profiles: svcs.profiles, Embedder: svcs.embedder,
 				Modules: modules, Tenants: tenants, Prefix: prefix,
 				Settings: func() services.WorkerSettings {
 					return services.WorkerSettings{
@@ -214,6 +334,43 @@ func (m *Module) Init(deps *module.Dependencies) error {
 				Now:    time.Now,
 				Logger: logger,
 			})
+		}
+
+		// Search is wired whenever a database handle is present, QDRANT_URL
+		// unset included: Tombstones and the search log are database-backed,
+		// so an engine-less search passes the gate and the visibility guard,
+		// answers ErrRetrievalNotConfigured at step 2 and leaves its row.
+		// A missing service stays nil and fails closed (or degrades) per
+		// search; Init never errors and contacts nothing (ADR D1).
+		var members services.MembershipChecker // untyped nil unless resolved
+		if svcs.members != nil {
+			members = svcs.members
+		}
+		resolver := &services.PrincipalResolver{
+			Members:      members,
+			Roles:        svcs.roles,
+			Contributors: svc.PrincipalContributors,
+			Cap:          func() int { return settings().principalCap },
+		}
+		svc.SetSearch(services.NewSearcher(services.SearchDeps{
+			Corpora:    svc,
+			State:      services.NewCorpusStateReader(states, prefix),
+			Engine:     eng,
+			Tombstones: tombstones,
+			Authz:      svcs.authz,
+			Principals: resolver,
+			Profiles:   svcs.profiles,
+			Embedder:   svcs.embedder,
+			Reranker:   svcs.reranker,
+			Modules:    modules,
+			Log:        searchLog,
+			Now:        time.Now,
+			Logger:     logger,
+		}), resolver)
+		purger = searchLog
+		if gaps := svcs.missing(modules); len(gaps) > 0 {
+			logger.Warn("retrieval: search is missing services; searches fail closed without the authorization, membership or module-status ones and degrade without the inference ones",
+				slog.String("missing", strings.Join(gaps, ", ")))
 		}
 	}
 	if deps.DB == nil {
@@ -228,24 +385,28 @@ func (m *Module) Init(deps *module.Dependencies) error {
 
 	m.mu.Lock()
 	m.logger, m.svc, m.eng, m.worker, m.missing = logger, svc, eng, worker, missing
+	m.purger, m.settings = purger, settings
 	m.mu.Unlock()
 	deps.Services.Register(module.ServiceRetrieval, svc)
 	return nil
 }
 
-// Start seals corpus registration, then starts the index worker. Every
-// module's Init has run by now, so a consumer that declares a dependency on
-// retrieval has registered; a module retried later cannot register a corpus.
-// Sealing comes first so the worker's first pass bootstraps generation 1 over
-// the final registry. Idempotent: a second Start while running is a no-op.
+// Start seals corpus registration, then starts the background jobs: the
+// index worker, when built, and the search-log retention loop, whenever a
+// database handle is present (rows are written with or without an engine).
+// Every module's Init has run by now, so a consumer that declares a
+// dependency on retrieval has registered; a module retried later cannot
+// register a corpus. Sealing comes first so the worker's first pass
+// bootstraps generation 1 over the final registry. Idempotent: a second
+// Start while running is a no-op.
 func (m *Module) Start(ctx context.Context) error {
 	m.mu.Lock()
-	svc, worker := m.svc, m.worker
+	svc, worker, purger := m.svc, m.worker, m.purger
 	m.mu.Unlock()
 	if svc != nil {
 		svc.Seal()
 	}
-	if worker == nil {
+	if worker == nil && purger == nil {
 		return nil
 	}
 	m.lifecycleMu.Lock()
@@ -260,17 +421,73 @@ func (m *Module) Start(ctx context.Context) error {
 	// WithoutCancel: the caller's context may be request-scoped (the admin
 	// enable endpoint hands StartModule the HTTP request context), and a
 	// worker that died with that response would silently stop indexing.
-	// Stop owns the worker's lifetime (precedent: auth's maintenance loop).
+	// Stop owns the jobs' lifetime (precedent: auth's maintenance loop).
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	done := make(chan struct{})
-	go func() { defer close(done); worker.Run(runCtx) }()
+	var wg sync.WaitGroup
+	if worker != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); worker.Run(runCtx) }()
+	}
+	if purger != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); m.searchLogRetentionLoop(runCtx) }()
+	}
+	go func() { wg.Wait(); close(done) }()
 	m.cancel, m.done = cancel, done
 	return nil
 }
 
-// Stop cancels the worker and waits for it (or for ctx). A key held at that
-// moment is still released or rescheduled: the worker's bookkeeping calls
-// outlive the cancellation for a few seconds.
+// searchLogRetentionLoop purges the search log a minute after Start, then
+// every 24 hours, until ctx ends.
+func (m *Module) searchLogRetentionLoop(ctx context.Context) {
+	first, every := m.retentionFirst, m.retentionInterval
+	if first <= 0 {
+		first = searchLogRetentionFirstRun
+	}
+	if every <= 0 {
+		every = searchLogRetentionEvery
+	}
+	t := time.NewTimer(first)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			m.purgeSearchLog(ctx)
+			t.Reset(every)
+		}
+	}
+}
+
+// purgeSearchLog deletes every tenant's rows older than
+// search_log_retention_days (read now, so a change applies at the next run).
+// A failure is logged and retried at the next run.
+func (m *Module) purgeSearchLog(ctx context.Context) {
+	m.mu.Lock()
+	purger, settings, logger := m.purger, m.settings, m.logger
+	m.mu.Unlock()
+	if purger == nil || settings == nil {
+		return
+	}
+	days := settings().retentionDays
+	n, err := services.PurgeSearchLog(ctx, purger, days, time.Now())
+	if err != nil {
+		if ctx.Err() != nil {
+			return // stopping
+		}
+		logger.WarnContext(ctx, "retrieval: search log retention purge failed",
+			slog.Int("retention_days", days), slog.Int64("deleted", n), slog.String("error", err.Error()))
+		return
+	}
+	logger.InfoContext(ctx, "retrieval: search log retention purge",
+		slog.Int("retention_days", days), slog.Int64("deleted", n))
+}
+
+// Stop cancels the background jobs and waits for them (or for ctx). A key
+// held at that moment is still released or rescheduled: the worker's
+// bookkeeping calls outlive the cancellation for a few seconds.
 func (m *Module) Stop(ctx context.Context) error {
 	m.lifecycleMu.Lock()
 	cancel, done := m.cancel, m.done

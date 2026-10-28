@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/orkestra/backend/internal/core/retrieval/engine"
 	"github.com/orkestra/backend/internal/core/retrieval/filter"
 	"github.com/orkestra/backend/internal/core/retrieval/models"
@@ -104,10 +105,48 @@ func unavailable(what string) error {
 	return fmt.Errorf("%w: %s", iface.ErrRetrievalUnavailable, what)
 }
 
-// Search runs the pipeline in ADR order. Nothing in this method logs the
+// searchLogErrorTimeout bounds the best-effort row of a failed search, which
+// is written detached from the caller's cancellation (precedent: the worker's
+// bookkeepingTimeout).
+const searchLogErrorTimeout = 5 * time.Second
+
+// Search-log error kinds (models.SearchLog.ErrorKind).
+const (
+	errKindNotConfigured   = "not_configured"
+	errKindUnavailable     = "unavailable"
+	errKindPrincipals      = "principals"
+	errKindVisibilityCheck = "visibility_check"
+	errKindCanceled        = "canceled"
+)
+
+// searchRecord collects, while a search that passed the gate runs, what its
+// search-log row needs.
+type searchRecord struct {
+	now        func() time.Time
+	start      time.Time
+	timings    models.SearchTimings
+	principals []string
+	returned   []engine.Candidate // the candidates behind the returned hits
+	kind       string             // set with the error
+}
+
+// since is the milliseconds elapsed from t0 by the Searcher's clock.
+func (r *searchRecord) since(t0 time.Time) int64 { return r.now().Sub(t0).Milliseconds() }
+
+// fail records the error kind of a failed stage and returns err.
+func (r *searchRecord) fail(kind string, err error) error {
+	r.kind = kind
+	return err
+}
+
+// Search runs the pipeline in ADR order. Every search that passes the gate
+// leaves one search-log row (ADR D12, plan decision 2): a result is returned
+// only after its row is written, and a failed write fails the search closed;
+// a failed search is logged best-effort. Nothing in this method logs the
 // query, a snippet, chunk text, principals or subjects.
 func (s *Searcher) Search(ctx context.Context, req iface.RetrievalSearchRequest) (*iface.RetrievalSearchResult, error) {
-	// Step 1: gate.
+	rec := &searchRecord{now: s.d.Now, start: s.d.Now()}
+	// Step 1: gate. A refusal writes no row.
 	g, err := s.gate(ctx, req)
 	if err != nil {
 		return nil, err
@@ -116,28 +155,119 @@ func (s *Searcher) Search(ctx context.Context, req iface.RetrievalSearchRequest)
 		// A result nobody can answer for is never served (plan decision 2).
 		return nil, fmt.Errorf("%w: %w", iface.ErrRetrievalUnavailable, ErrSearchLogWrite)
 	}
+
+	res, err := s.run(ctx, req, g, rec)
+	row := s.logRow(req, g, rec, res, err)
+	if err != nil {
+		s.logFailed(ctx, g, row)
+		return nil, err
+	}
+	if werr := s.d.Log.Insert(ctx, row); werr != nil {
+		s.d.Logger.Warn("retrieval: search log write failed; the search fails closed",
+			slog.String("corpus", g.spec.Name), slog.String("tenant", g.tenantID))
+		return nil, fmt.Errorf("%w: %w", iface.ErrRetrievalUnavailable, ErrSearchLogWrite)
+	}
+	return res, nil
+}
+
+// logFailed writes the row of a search that failed after the gate. It is
+// best-effort (the search returns no data): it runs detached from the
+// caller's cancellation, so a cancelled caller still leaves its row, under
+// searchLogErrorTimeout, and a failure only WARNs.
+func (s *Searcher) logFailed(ctx context.Context, g gated, row *models.SearchLog) {
+	lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), searchLogErrorTimeout)
+	defer cancel()
+	if err := s.d.Log.Insert(lctx, row); err != nil {
+		s.d.Logger.Warn("retrieval: search log write failed for a failed search",
+			slog.String("corpus", g.spec.Name), slog.String("tenant", g.tenantID),
+			slog.String("kind", row.ErrorKind))
+	}
+}
+
+// logRow builds the search-log row of a search that passed the gate. Source
+// IDs and subjects come from the returned hits only.
+func (s *Searcher) logRow(req iface.RetrievalSearchRequest, g gated, rec *searchRecord,
+	res *iface.RetrievalSearchResult, err error) *models.SearchLog {
+	row := &models.SearchLog{
+		UUID:       uuid.NewString(),
+		UserUUID:   g.userUUID,
+		Corpus:     g.spec.Name,
+		Query:      req.Query,
+		Filter:     req.Filter,
+		Mode:       string(g.plan.Mode),
+		Principals: slices.Clone(rec.principals),
+		SourceIDs:  []string{},
+		Subjects:   []string{},
+	}
+	if err != nil {
+		row.Outcome, row.ErrorKind = models.SearchOutcomeError, errorKind(rec.kind, err)
+	} else {
+		row.HitCount, row.Degraded = len(res.Hits), res.Degraded
+		row.Outcome = models.SearchOutcomeOK
+		if res.Degraded {
+			row.Outcome = models.SearchOutcomeDegraded
+		}
+		for _, c := range rec.returned {
+			if !slices.Contains(row.SourceIDs, c.Runtime.SourceID) {
+				row.SourceIDs = append(row.SourceIDs, c.Runtime.SourceID)
+			}
+			for _, sub := range c.Runtime.Subjects {
+				if !slices.Contains(row.Subjects, sub) {
+					row.Subjects = append(row.Subjects, sub)
+				}
+			}
+		}
+		slices.Sort(row.Subjects)
+	}
+	now := s.d.Now()
+	rec.timings.TotalMs = now.Sub(rec.start).Milliseconds()
+	row.Timings = rec.timings
+	row.CreatedAt = now.UTC()
+	return row
+}
+
+// errorKind is the row's ErrorKind: the failed stage's kind, except that an
+// unavailable stage failing on a context error (the caller's cancellation or
+// deadline, as returned by embed or the engine) is "canceled".
+func errorKind(kind string, err error) string {
+	if kind == "" {
+		kind = errKindUnavailable
+	}
+	if kind == errKindUnavailable && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		return errKindCanceled
+	}
+	return kind
+}
+
+// run is steps 2 to 8 of a search that passed the gate; rec collects what
+// the search-log row needs.
+func (s *Searcher) run(ctx context.Context, req iface.RetrievalSearchRequest, g gated, rec *searchRecord) (*iface.RetrievalSearchResult, error) {
 	if s.d.Tombstones == nil || g.spec.Source == nil {
 		// Step 6 could not run, so no candidate may be fetched at all.
-		return nil, fmt.Errorf("%w: the erasure or source check is not configured", iface.ErrRetrievalVisibilityCheck)
+		return nil, rec.fail(errKindVisibilityCheck,
+			fmt.Errorf("%w: the erasure or source check is not configured", iface.ErrRetrievalVisibilityCheck))
 	}
 
 	// Step 2: resolve and pin.
 	if s.d.Engine == nil {
-		return nil, iface.ErrRetrievalNotConfigured
+		return nil, rec.fail(errKindNotConfigured, iface.ErrRetrievalNotConfigured)
 	}
 	pinned, err := s.pin(ctx, g.spec.Name)
 	if errors.Is(err, ErrNoActiveGeneration) {
+		rec.timings.ResolveMs = rec.since(rec.start)
 		return &iface.RetrievalSearchResult{Hits: []iface.RetrievalHit{}, Degraded: true}, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, rec.fail(errKindUnavailable, err)
 	}
 
 	// Step 3: principals.
 	pc, err := s.principals(ctx, g)
 	if err != nil {
-		return nil, err
+		return nil, rec.fail(errKindPrincipals, err)
 	}
+	rec.principals = pc.Principals
+	rec.timings.ResolveMs = rec.since(rec.start)
 
 	// Step 4: arms.
 	var (
@@ -146,9 +276,11 @@ func (s *Searcher) Search(ctx context.Context, req iface.RetrievalSearchRequest)
 		degraded bool
 	)
 	if g.plan.Mode != iface.RetrievalModeKeyword {
+		t0 := s.d.Now()
 		vec, denseOK, err = s.denseVector(ctx, g, pinned, req.Query)
+		rec.timings.EmbedMs = rec.since(t0)
 		if err != nil {
-			return nil, err
+			return nil, rec.fail(errKindUnavailable, err)
 		}
 		degraded = !denseOK
 	}
@@ -159,7 +291,7 @@ func (s *Searcher) Search(ctx context.Context, req iface.RetrievalSearchRequest)
 
 	// Steps 5 and 6: fusion, then erasure veto and source check, with one
 	// refill when the drops shorten the page.
-	cands, short, err := s.fetchChecked(ctx, g, pinned.Collection, pc, engine.Query{
+	cands, short, err := s.fetchChecked(ctx, g, pinned.Collection, pc, rec, engine.Query{
 		TenantID:    g.tenantID,
 		Principals:  append([]string(nil), pc.Principals...),
 		Filter:      g.filter,
@@ -171,18 +303,21 @@ func (s *Searcher) Search(ctx context.Context, req iface.RetrievalSearchRequest)
 		Diagnostics: false,
 	})
 	if err != nil {
-		return nil, err
+		return nil, err // fetchChecked recorded the kind
 	}
 	// Never fewer than the permitted results without a flag (D5).
 	degraded = degraded || short
 
 	// Step 7: optional rerank of the checked candidates.
 	if g.plan.RerankK > 0 && len(cands) > 0 {
-		if ordered, _, ok := s.rerank(ctx, g.tenantID, g.spec, req.Query, cands, g.plan.RerankK); ok {
+		t0 := s.d.Now()
+		ordered, _, ok := s.rerank(ctx, g.tenantID, g.spec, req.Query, cands, g.plan.RerankK)
+		rec.timings.RerankMs = rec.since(t0)
+		if ok {
 			cands = ordered
 		} else {
 			if err := ctx.Err(); err != nil {
-				return nil, err
+				return nil, rec.fail(errKindUnavailable, err)
 			}
 			degraded = true
 		}
@@ -190,6 +325,7 @@ func (s *Searcher) Search(ctx context.Context, req iface.RetrievalSearchRequest)
 
 	// Step 8: result.
 	cands = cands[:min(len(cands), g.plan.Limit)]
+	rec.returned = cands
 	return &iface.RetrievalSearchResult{Hits: s.toHits(g.spec, req.Query, cands), Degraded: degraded}, nil
 }
 
@@ -201,19 +337,38 @@ func (s *Searcher) Search(ctx context.Context, req iface.RetrievalSearchRequest)
 // reports a page still under plan.Limit whose last engine call came back
 // full, so more permitted results may exist.
 func (s *Searcher) fetchChecked(ctx context.Context, g gated, collection string, pc iface.RetrievalPrincipalContext,
-	q engine.Query) (survivors []engine.Candidate, short bool, err error) {
-	first, err := s.query(ctx, g, collection, q)
+	rec *searchRecord, q engine.Query) (survivors []engine.Candidate, short bool, err error) {
+	query := func(q engine.Query) ([]engine.Candidate, error) {
+		t0 := s.d.Now()
+		defer func() { rec.timings.EngineMs += rec.since(t0) }()
+		cands, err := s.query(ctx, g, collection, q)
+		if err != nil {
+			return nil, rec.fail(errKindUnavailable, err)
+		}
+		return cands, nil
+	}
+	check := func(cands []engine.Candidate) ([]engine.Candidate, error) {
+		t0 := s.d.Now()
+		defer func() { rec.timings.CheckMs += rec.since(t0) }()
+		out, err := s.checkCandidates(ctx, g.tenantID, g.spec.Name, g.spec.Source, pc, cands)
+		if err != nil {
+			return nil, rec.fail(errKindVisibilityCheck, err)
+		}
+		return out, nil
+	}
+
+	first, err := query(q)
 	if err != nil {
 		return nil, false, err
 	}
-	survivors, err = s.checkCandidates(ctx, g.tenantID, g.spec.Name, g.spec.Source, pc, first)
+	survivors, err = check(first)
 	if err != nil {
 		return nil, false, err
 	}
 	last, lastLimit := first, q.Limit
 	if len(survivors) < g.plan.Limit && len(first) >= q.Limit && q.Limit < g.plan.Fusion.Candidates {
 		q.Limit = g.plan.Fusion.Candidates
-		second, err := s.query(ctx, g, collection, q)
+		second, err := query(q)
 		if err != nil {
 			return nil, false, err
 		}
@@ -228,7 +383,7 @@ func (s *Searcher) fetchChecked(ctx context.Context, g gated, collection string,
 				fresh = append(fresh, c)
 			}
 		}
-		more, err := s.checkCandidates(ctx, g.tenantID, g.spec.Name, g.spec.Source, pc, fresh)
+		more, err := check(fresh)
 		if err != nil {
 			return nil, false, err
 		}
