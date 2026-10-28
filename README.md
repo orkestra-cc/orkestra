@@ -122,8 +122,8 @@ multi-stack setups, and deployment configuration, see the
 | Mobile | Flutter 3.44+, Riverpod |
 | Data | MongoDB 8, Redis 8, S3-compatible object storage |
 
-Nine core modules always load: `user`, `notification`, `tenant`, `authz`,
-`auth`, `navigation`, `logging`, `llm`, and `compliance`. Optional modules added by a
+Ten core modules always load: `user`, `notification`, `tenant`, `authz`,
+`auth`, `navigation`, `logging`, `llm`, `retrieval`, and `compliance`. Optional modules added by a
 fork implement the `Module` interface and register through the module catalog.
 They can declare routes, collections, permissions, configuration, navigation,
 dependencies, and background processes.
