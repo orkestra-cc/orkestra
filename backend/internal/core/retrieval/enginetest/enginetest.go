@@ -50,6 +50,7 @@ func Run(t *testing.T, newEngine func(t *testing.T) engine.Engine) {
 		{"Diagnostics", testDiagnostics},
 		{"ConditionalUpsertNeverLowersRevision", testConditionalUpsertNeverLowersRevision},
 		{"UpsertReplacesPayload", testUpsertReplacesPayload},
+		{"UpdatePayload", testUpdatePayload},
 		{"DeleteOtherRevisions", testDeleteOtherRevisions},
 		{"DeleteByFilterAcrossCollections", testDeleteByFilterAcrossCollections},
 		{"Count", testCount},
@@ -388,6 +389,9 @@ func testMissingCollection(t *testing.T, h *harness) {
 		}},
 		{"Upsert", func() error {
 			return h.e.Upsert(ctx, name, []engine.Point{p})
+		}},
+		{"UpdatePayload", func() error {
+			return h.e.UpdatePayload(ctx, name, []engine.Point{p})
 		}},
 	}
 	for _, c := range calls {
@@ -871,6 +875,88 @@ func testUpsertReplacesPayload(t *testing.T, h *harness) {
 	if got := h.search(t, name, q); len(got) != 0 {
 		t.Errorf("status exists after the re-upsert matched: %s", lines(candidateKeys(got)))
 	}
+}
+
+func testUpdatePayload(t *testing.T, h *harness) {
+	name := h.collection(t)
+	v := vec(1, 0, 0, 0)
+	user := []string{"user:u1"}
+	p := point(tenantA, "s1", 2, 0, "quarterly orchid contract", v, everyone, nil, map[string]any{"stage": "a"})
+	p.Runtime.ContentHash = "h1"
+	p.Runtime.Page = 3
+	h.upsert(t, name, p)
+
+	update := func(mut func(*engine.Point)) engine.Point {
+		u := p
+		u.Dense, u.Text = nil, ""
+		mut(&u)
+		if err := h.e.UpdatePayload(t.Context(), name, []engine.Point{u}); err != nil {
+			t.Fatalf("UpdatePayload(%s, %s) = %v", name, describePoint(u), err)
+		}
+		return u
+	}
+	stored := func(label string) engine.Candidate {
+		t.Helper()
+		q := query(tenantA, v, "")
+		q.Principals = user
+		q.Weights = engine.Weights{Dense: 1}
+		q.PerArm, q.Limit = 10, 10
+		got := h.search(t, name, q)
+		if len(got) != 1 {
+			t.Fatalf("%s: %d candidates, want 1", label, len(got))
+		}
+		return got[0]
+	}
+
+	// A principal that does not see the point yet finds nothing.
+	q := query(tenantA, v, "")
+	q.Principals = user
+	if got := h.search(t, name, q); len(got) != 0 {
+		t.Fatalf("before the update, user:u1 sees %d candidates, want 0", len(got))
+	}
+
+	update(func(u *engine.Point) {
+		u.Runtime.SourceRevision = 3
+		u.Runtime.VisibleTo = user
+		u.Runtime.Page = 0
+		u.Fields = map[string]any{"stage": "b"}
+	})
+	c := stored("after the update")
+	if c.Runtime.SourceRevision != 3 || c.Fields["stage"] != "b" || c.Text != p.Text {
+		t.Errorf("after the update: revision %d stage %v text %q, want 3, b, %q",
+			c.Runtime.SourceRevision, c.Fields["stage"], c.Text, p.Text)
+	}
+	if c.Runtime.Page != 0 {
+		t.Errorf("after the update: page %d, want 0 (every _rt field is replaced)", c.Runtime.Page)
+	}
+	kw := query(tenantA, nil, "orchid")
+	kw.Principals = user
+	if got := h.search(t, name, kw); len(got) != 1 {
+		t.Errorf("keyword search after the update found %d candidates, want 1 (the text entry must survive)", len(got))
+	}
+
+	update(func(u *engine.Point) {
+		u.Runtime.SourceRevision = 1
+		u.Fields = map[string]any{"stage": "old"}
+	})
+	if c := stored("after a lower revision"); c.Runtime.SourceRevision != 3 || c.Fields["stage"] != "b" {
+		t.Errorf("a lower revision changed the point: revision %d stage %v", c.Runtime.SourceRevision, c.Fields["stage"])
+	}
+
+	update(func(u *engine.Point) {
+		u.Runtime.SourceRevision = 4
+		u.Runtime.ContentHash = "h2"
+		u.Fields = map[string]any{"stage": "c"}
+	})
+	if c := stored("after a different hash"); c.Runtime.SourceRevision != 3 || c.Fields["stage"] != "b" {
+		t.Errorf("a different content hash changed the point: revision %d stage %v", c.Runtime.SourceRevision, c.Fields["stage"])
+	}
+
+	other := point(tenantA, "s2", 1, 0, "never indexed", v, everyone, nil, nil)
+	if err := h.e.UpdatePayload(t.Context(), name, []engine.Point{other}); err != nil {
+		t.Fatalf("UpdatePayload of a missing point = %v", err)
+	}
+	h.wantCount(t, name, engine.Selector{TenantID: tenantA, SourceIDs: []string{"s2"}}, 0)
 }
 
 func testDeleteOtherRevisions(t *testing.T, h *harness) {

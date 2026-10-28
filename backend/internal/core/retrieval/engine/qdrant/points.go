@@ -110,6 +110,69 @@ func (d *Driver) Upsert(ctx context.Context, collection string, points []engine.
 	return nil
 }
 
+// runtimeMerge is the _rt payload UpdatePayload merges: every Runtime field,
+// page included even when 0 (a merge never clears an omitted key), and not
+// the indexed text, which the merge keeps.
+func runtimeMerge(r engine.Runtime) map[string]any {
+	return map[string]any{
+		"tenantId":         r.TenantID,
+		"sourceId":         r.SourceID,
+		"sourceRevision":   r.SourceRevision,
+		"chunkId":          r.ChunkID,
+		"ordinal":          r.Ordinal,
+		"visibleTo":        r.VisibleTo,
+		"subjects":         r.Subjects,
+		"contentHash":      r.ContentHash,
+		"ingestionProfile": r.IngestionProfile,
+		"charStart":        r.CharStart,
+		"charEnd":          r.CharEnd,
+		"page":             r.Page,
+	}
+}
+
+// UpdatePayload replaces Runtime and Fields of existing points without
+// touching their vectors or text. Each point is selected by id, stored
+// content hash equal to the incoming one and stored revision not above the
+// incoming one; a point that does not match, or does not exist, is left
+// alone. _rt is merged key by key (a top-level set would drop _rt.text and
+// its BM25 entry); f is replaced whole.
+func (d *Driver) UpdatePayload(ctx context.Context, collection string, points []engine.Point) error {
+	for i, p := range points {
+		if p.ID == "" {
+			return fmt.Errorf("qdrant: update payload: point %d has no id", i)
+		}
+	}
+	const rtContentHash = "_rt.contentHash"
+	path := pointsPath(collection) + "/batch?wait=true"
+	for start := 0; start < len(points); start += maxPointsPerRequest / 2 {
+		batch := points[start:min(start+maxPointsPerRequest/2, len(points))]
+		ops := make([]any, 0, 2*len(batch))
+		for _, p := range batch {
+			fields := p.Fields
+			if fields == nil {
+				fields = map[string]any{}
+			}
+			filter := map[string]any{"must": []any{
+				map[string]any{"has_id": []string{p.ID}},
+				matchValue(rtContentHash, p.Runtime.ContentHash),
+				map[string]any{"key": rtSourceRevision, "range": map[string]any{"lte": p.Runtime.SourceRevision}},
+			}}
+			ops = append(ops,
+				map[string]any{"set_payload": map[string]any{
+					"payload": runtimeMerge(p.Runtime), "key": "_rt", "filter": filter,
+				}},
+				map[string]any{"set_payload": map[string]any{
+					"payload": map[string]any{"f": fields}, "filter": filter,
+				}},
+			)
+		}
+		if err := d.do(ctx, "update payload", http.MethodPost, path, map[string]any{"operations": ops}, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // DeleteOtherRevisions removes the item's points whose revision differs from
 // keep, older and newer alike.
 func (d *Driver) DeleteOtherRevisions(ctx context.Context, collection, tenantID, sourceID string, keep int64) error {
