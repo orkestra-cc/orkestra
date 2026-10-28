@@ -89,8 +89,9 @@ One consequence to expect in practice: a role holding a permission from a module
 
 1. `super_admin` short-circuits with the wildcard.
 2. `administrator` and `developer` inherit every permission flagged `System: true` by any module.
-3. Otherwise: the union of every active binding for this user in this org, plus their global bindings.
-4. **System permissions — and the wildcard — require a global grant.** A tenant-scoped binding never contributes either: the evaluator skips them on that branch. Keys already stored that way are *ignored*, not deleted — they stay on the role and role reads still show them. The global branch is deliberately unfiltered, because that is where a platform role legitimately conveys a platform key.
+3. **At global scope only** (no org in the check — `RequireSystemPermission`, the platform user routes), the seeded platform role named by the user's system role conveys its permission set, platform-reserved keys excluded: `manager` everything but `.delete`/`.admin`, `operator` `.read`/`.self`, `guest` `.read`, `administrator` and `developer` every non-system key (developer read-only in production). This is how a platform manager holds `user.update` without being an administrator. Inside an org the system role conveys nothing: membership is bindings only.
+4. Otherwise: the union of every active binding for this user in this org, plus their global bindings.
+5. **System permissions — and the wildcard — require a global grant.** A tenant-scoped binding never contributes either: the evaluator skips them on that branch. Keys already stored that way are *ignored*, not deleted — they stay on the role and role reads still show them. The global branch is deliberately unfiltered, because that is where a platform role legitimately conveys a platform key.
 
 Separately, `iface.AuthzRoleLister.ActiveRoleIDs(user, tenant)` lists the active roles a user holds in one tenant (non-expired bindings; system roles and that tenant's own roles; an empty tenant is refused). The retrieval module uses it to compute `role:<id>` search principals. It makes no permission decision and gives platform roles no bypass, and a failure reading a role is returned as an error rather than skipped.
 

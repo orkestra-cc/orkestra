@@ -63,3 +63,59 @@ permit (
         context.action_suffix == "self"
     )
 };
+
+// --- manager / operator / guest at GLOBAL scope (evaluator rule 2b) ---
+//
+// A platform system role conveys its SeedSystemRoles permission set only
+// when no tenant is in scope (context.scope == "global": the platform user
+// routes, RequireSystemPermission). Inside a tenant the same principal is
+// an ordinary member and tenant_roles.cedar decides. Platform-reserved
+// keys stay with the administrator/developer permits above; Cedar has no
+// System flag, so `action_module != "system"` is the proxy — the handful
+// of System:true keys under other modules (auth.service_accounts.*,
+// notification.template.manage, llm.*.admin) diverge here in shadow logs
+// only, and none of them is enforced through Cedar.
+
+// manager: read + create + update, no delete, no admin — global scope.
+@id("platform.manager.global_no_delete_no_admin")
+permit (
+    principal,
+    action,
+    resource
+) when {
+    principal has system_role && principal.system_role == "manager" &&
+    context has scope && context.scope == "global" &&
+    context has action_module && context.action_module != "system" &&
+    context has action_suffix &&
+    context.action_suffix != "delete" &&
+    context.action_suffix != "admin"
+};
+
+// operator: read + self-service — global scope.
+@id("platform.operator.global_read_self")
+permit (
+    principal,
+    action,
+    resource
+) when {
+    principal has system_role && principal.system_role == "operator" &&
+    context has scope && context.scope == "global" &&
+    context has action_module && context.action_module != "system" &&
+    context has action_suffix && (
+        context.action_suffix == "read" ||
+        context.action_suffix == "self"
+    )
+};
+
+// guest: read-only — global scope.
+@id("platform.guest.global_read_only")
+permit (
+    principal,
+    action,
+    resource
+) when {
+    principal has system_role && principal.system_role == "guest" &&
+    context has scope && context.scope == "global" &&
+    context has action_module && context.action_module != "system" &&
+    context has action_suffix && context.action_suffix == "read"
+};

@@ -527,3 +527,88 @@ func TestSeedSystemRoles_DeveloperEnvGated_ProductionReadOnly(t *testing.T) {
 		}
 	}
 }
+
+// ===== Rule 2b: platform role conveys its seeded permission set at global scope =====
+
+// seedPlatformRole mirrors what SeedSystemRoles writes for one system role.
+func seedPlatformRole(repo *fakeRepo, name string, perms []string) {
+	repo.seedRole("role-sys-"+name, name, true, perms, "")
+}
+
+func TestGetEffectivePermissions_Rule2b_ManagerHoldsSeededKeysGloballyOnly(t *testing.T) {
+	svc, repo := newTier1Service(t, staticRoleLookup("manager"))
+	_ = svc.RegisterPermissions(context.Background(), []iface.PermissionSpec{
+		{Key: "user.read", Module: "user"},
+		{Key: "user.update", Module: "user"},
+		{Key: "user.delete", Module: "user"},
+		{Key: "system.users.admin", Module: "system", System: true},
+	})
+	// The seeded row carries a System:true key too (the matrix filters by
+	// suffix only): rule 2b must leave platform keys to rule 2.
+	seedPlatformRole(repo, "manager", []string{"user.read", "user.update", "system.users.admin"})
+
+	for perm, want := range map[string]bool{"user.read": true, "user.update": true, "user.delete": false, "system.users.admin": false} {
+		ok, err := svc.HasPermission(context.Background(), "u-m", "", perm)
+		if err != nil {
+			t.Fatalf("HasPermission(%q): %v", perm, err)
+		}
+		if ok != want {
+			t.Errorf("manager at global scope: %q = %v, want %v", perm, ok, want)
+		}
+	}
+	// Inside a tenant the system role is not a membership: nothing from it.
+	ok, err := svc.HasPermission(context.Background(), "u-m", "tenant-X", "user.update")
+	if err != nil {
+		t.Fatalf("HasPermission tenant: %v", err)
+	}
+	if ok {
+		t.Errorf("manager must NOT hold user.update inside tenant-X from the system role alone")
+	}
+}
+
+func TestGetEffectivePermissions_Rule2b_AdministratorHoldsNonSystemKeyGlobally(t *testing.T) {
+	svc, repo := newTier1Service(t, staticRoleLookup("administrator"))
+	_ = svc.RegisterPermissions(context.Background(), []iface.PermissionSpec{
+		{Key: "user.update", Module: "user"},
+		{Key: "system.users.admin", Module: "system", System: true},
+	})
+	seedPlatformRole(repo, "administrator", []string{"user.update", "system.users.admin"})
+
+	ok, err := svc.HasPermission(context.Background(), "u-a", "", "user.update")
+	if err != nil || !ok {
+		t.Errorf("administrator must hold user.update at global scope via rule 2b, got ok=%v err=%v", ok, err)
+	}
+	// Unchanged: inside a tenant a non-system key still needs a binding
+	// (TestHasPermission_AdministratorInheritsSystemPermissions pins the same).
+	ok2, _ := svc.HasPermission(context.Background(), "u-a", "tenant-X", "user.update")
+	if ok2 {
+		t.Errorf("administrator without binding must NOT hold user.update inside tenant-X")
+	}
+}
+
+func TestGetEffectivePermissions_Rule2b_InactiveOrMissingSeededRoleConveysNothing(t *testing.T) {
+	svc, repo := newTier1Service(t, staticRoleLookup("operator"))
+	_ = svc.RegisterPermissions(context.Background(), []iface.PermissionSpec{{Key: "user.read", Module: "user"}})
+
+	// Missing row: nothing.
+	if ok, _ := svc.HasPermission(context.Background(), "u-o", "", "user.read"); ok {
+		t.Errorf("operator with no seeded row must hold nothing")
+	}
+	// Inactive row: nothing.
+	repo.mu.Lock()
+	repo.roles["role-sys-operator"] = models.Role{UUID: "role-sys-operator", Name: "operator", IsSystem: true, IsActive: false, Permissions: []string{"user.read"}}
+	repo.mu.Unlock()
+	if ok, _ := svc.HasPermission(context.Background(), "u-o", "", "user.read"); ok {
+		t.Errorf("operator with an inactive seeded row must hold nothing")
+	}
+	// Active row: user.read, and a wildcard in the row is never copied.
+	repo.mu.Lock()
+	repo.roles["role-sys-operator"] = models.Role{UUID: "role-sys-operator", Name: "operator", IsSystem: true, IsActive: true, Permissions: []string{"user.read", "*"}}
+	repo.mu.Unlock()
+	if ok, _ := svc.HasPermission(context.Background(), "u-o", "", "user.read"); !ok {
+		t.Errorf("operator with an active seeded row must hold user.read")
+	}
+	if ok, _ := svc.HasPermission(context.Background(), "u-o", "", "anything.else"); ok {
+		t.Errorf("a wildcard in a seeded row must not be conveyed by rule 2b")
+	}
+}

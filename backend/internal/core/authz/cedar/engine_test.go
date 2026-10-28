@@ -860,3 +860,77 @@ func TestSystemActions_NonSystemActionsUnaffected(t *testing.T) {
 		t.Errorf("expected the org_owner permit among the reasons, got %v", d.Reasons)
 	}
 }
+
+// --- platform roles at global scope (evaluator rule 2b) -----------------
+
+// A platform manager holds read/create/update on the user keys when no
+// tenant is in scope, never delete, never a system.* action; inside a
+// tenant the system role conveys nothing (tenant_roles decide).
+func TestPlatformManagerGlobalScope(t *testing.T) {
+	e := newTestEngine(t, "production")
+	p := Principal{UserUUID: "u1", SystemRole: "manager"}
+	global := Resource{}
+	tenant := Resource{TenantUUID: "t1", TenantKind: "internal", TenantStatus: "active"}
+
+	for _, action := range []string{"user.read", "user.create", "user.update", "billing.invoice.create"} {
+		if d := e.IsAuthorized(p, action, global); !d.Allowed {
+			t.Errorf("manager at global scope should be allowed %s: %+v", action, d)
+		}
+		if d := e.IsAuthorized(p, action, tenant); d.Allowed {
+			t.Errorf("manager inside a tenant must NOT be allowed %s from the system role: %+v", action, d)
+		}
+	}
+	for _, action := range []string{"user.delete", "system.users.admin", "system.modules.admin", "billing.invoice.delete"} {
+		if d := e.IsAuthorized(p, action, global); d.Allowed {
+			t.Errorf("manager at global scope must NOT be allowed %s: %+v", action, d)
+		}
+	}
+}
+
+func TestPlatformOperatorAndGuestGlobalScope(t *testing.T) {
+	e := newTestEngine(t, "production")
+	global := Resource{}
+
+	op := Principal{UserUUID: "u1", SystemRole: "operator"}
+	for _, action := range []string{"user.read", "user.self", "user.avatar.self"} {
+		if d := e.IsAuthorized(op, action, global); !d.Allowed {
+			t.Errorf("operator at global scope should be allowed %s: %+v", action, d)
+		}
+	}
+	for _, action := range []string{"user.create", "user.update", "user.delete", "system.users.admin"} {
+		if d := e.IsAuthorized(op, action, global); d.Allowed {
+			t.Errorf("operator at global scope must NOT be allowed %s: %+v", action, d)
+		}
+	}
+
+	guest := Principal{UserUUID: "u2", SystemRole: "guest"}
+	if d := e.IsAuthorized(guest, "user.read", global); !d.Allowed {
+		t.Errorf("guest at global scope should read users: %+v", d)
+	}
+	for _, action := range []string{"user.self", "user.create", "user.update", "user.delete"} {
+		if d := e.IsAuthorized(guest, action, global); d.Allowed {
+			t.Errorf("guest at global scope must NOT be allowed %s: %+v", action, d)
+		}
+	}
+}
+
+// The explicit user.* permits agree with the matrix for every platform role.
+func TestUserKeysPerPlatformRole(t *testing.T) {
+	e := newTestEngine(t, "production")
+	global := Resource{}
+	want := map[string]map[string]bool{
+		"super_admin":   {"user.read": true, "user.create": true, "user.update": true, "user.delete": true},
+		"administrator": {"user.read": true, "user.create": true, "user.update": true, "user.delete": true},
+		"manager":       {"user.read": true, "user.create": true, "user.update": true, "user.delete": false},
+		"operator":      {"user.read": true, "user.create": false, "user.update": false, "user.delete": false},
+		"guest":         {"user.read": true, "user.create": false, "user.update": false, "user.delete": false},
+	}
+	for role, actions := range want {
+		p := Principal{UserUUID: "u-" + role, SystemRole: role}
+		for action, allowed := range actions {
+			if d := e.IsAuthorized(p, action, global); d.Allowed != allowed {
+				t.Errorf("%s / %s at global scope = %v, want %v: %+v", role, action, d.Allowed, allowed, d)
+			}
+		}
+	}
+}
