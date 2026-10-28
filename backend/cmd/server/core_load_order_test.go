@@ -14,6 +14,9 @@ import (
 // Init, so the gateway has to be registered by then. compliance does not
 // declare a dependency on llm (the gateway is optional for it), which makes
 // the order a property of the catalog that only a test can hold.
+// retrieval sits after llm (it declares llm as a dependency, so the
+// topology forces it) and before compliance, which will push its audit sink
+// into the retrieval service from its own Init.
 func TestCoreModulesLoadOrder(t *testing.T) {
 	// main.go registers the core modules one by one (Register, not
 	// RegisterAll), so the catalog order is the init order; mirror that.
@@ -33,7 +36,7 @@ func TestCoreModulesLoadOrder(t *testing.T) {
 			}
 		}
 	}
-	want := []string{"user", "notification", "tenant", "authz", "auth", "navigation", "logging", "llm", "compliance"}
+	want := []string{"user", "notification", "tenant", "authz", "auth", "navigation", "logging", "llm", "retrieval", "compliance"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("core load order = %v, want %v", got, want)
 	}

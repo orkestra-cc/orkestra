@@ -66,12 +66,23 @@ jobs:
       REDIS_URL: redis://localhost:6379
       # Consumed by `make ci-backend`'s coverage gate (Makefile: COVERAGE_THRESHOLD ?= 15).
       COVERAGE_THRESHOLD: 15
+      # Unlock the retrieval driver conformance suite (ADR-0023 D3); without
+      # them it skips and proves nothing.
+      QDRANT_TEST_URL: http://localhost:6333
+      QDRANT_TEST_API_KEY: ci-qdrant-test-key
     services:
       redis:
         # Same image and patch docker-compose.infra.yml pins — CI must test
         # the Redis the stacks run.
         image: redis:8.2.10-alpine
         ports: ['6379:6379']
+      qdrant:
+        # The engine floor of ADR-0023 (BM25 on the full-text index needs
+        # 1.20); pinned by digest like the compose images.
+        image: qdrant/qdrant:v1.20.0@sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
+        env:
+          QDRANT__SERVICE__API_KEY: ci-qdrant-test-key
+        ports: ['6333:6333']
     steps:
       - uses: actions/checkout@v7
       # The app uses MongoDB transactions, which a standalone mongod cannot
@@ -86,7 +97,7 @@ jobs:
         run: |
           docker run --detach --name mongodb --publish 27017:27017 \
             --env GLIBC_TUNABLES=glibc.pthread.rseq=1 \
-            mongo:8.0.32 --replSet rs0 --bind_ip_all
+            mongo:8.0.34 --replSet rs0 --bind_ip_all
           for attempt in {1..30}; do
             if docker exec mongodb mongosh --quiet --eval 'db.runCommand({ping: 1}).ok' | grep -q '^1$'; then
               break

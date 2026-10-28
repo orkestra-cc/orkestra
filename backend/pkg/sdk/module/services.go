@@ -49,7 +49,9 @@ const (
 	ServiceLLMGateway           ServiceKey = "llm.gateway" // iface.LLMGateway, registered by core/llm
 	ServicePDFService           ServiceKey = "documents.pdf"
 	ServiceGraphRepo            ServiceKey = "graph.repository"
-	ServiceRAGQuery             ServiceKey = "rag.query"
+	// Deprecated: use ServiceRetrieval with iface.RetrievalSearch (ADR-0023 D16); removed in a later release.
+	ServiceRAGQuery  ServiceKey = "rag.query"
+	ServiceRetrieval ServiceKey = "retrieval.service" // *retrieval/services.Service: RetrievalCorpusRegistry, RetrievalOutbox, RetrievalSearch, RetrievalPrincipalResolver (ADR-0023)
 
 	ServiceNotificationSender  ServiceKey = "notification.sender"
 	ServicePasswordService     ServiceKey = "auth.password"
