@@ -489,6 +489,67 @@ func TestSearch_RefillChangedSourceIsNotChecked(t *testing.T) {
 	assert.Equal(t, []string{"b1", "b2", "b3"}, fx.source.calls[1])
 }
 
+// The PR 4 sharing case: UpdatePayload rewrites VisibleTo at the same
+// revision, so the repeated point differs only in access. Its source is
+// dropped and the search log names neither it nor its subjects.
+func TestSearch_RefillDropsASourceWhosePointChangedAccessAtTheSameRevision(t *testing.T) {
+	fx := newSearchFixture(t)
+	s0 := cand("s", 1, 0, "candidate s chunk 0 for the head of sales", "user:carol")
+	s0shared := cand("s", 1, 0, "candidate s chunk 0 for the head of sales", "user:carol")
+	s0shared.Runtime.VisibleTo = []string{"user:u-9"}
+	first := append(candRange("a", 1, 7), s0)
+	second := append(append(slices.Clone(first[:7]), s0shared), candRange("b", 1, 3)...)
+	fx.engine.results = [][]engine.Candidate{first, second}
+	refuse(fx, idRange("a", 1, 7)...)
+	req := contactsReq()
+	req.Limit = 2
+	res, err := fx.search(req)
+	require.NoError(t, err)
+	require.Len(t, fx.engine.queries, 2)
+	assert.Equal(t, []string{"b1", "b2"}, hitSources(res))
+	row := onlyRow(t, fx)
+	assert.Equal(t, false, slices.Contains(row.SourceIDs, "s"))
+	assert.Equal(t, false, slices.Contains(row.Subjects, "user:carol"))
+}
+
+// A dropped changed source was never checked and may have been permitted, so
+// a page under Limit is degraded even when the refill came back short (D5).
+func TestSearch_RefillShortWithAChangedSourceDroppedIsFlagged(t *testing.T) {
+	fx := newSearchFixture(t)
+	s0 := cand("s", 1, 0, "candidate s chunk 0 for the head of sales")
+	s0v2 := cand("s", 2, 0, "candidate s chunk 0 for the head of sales")
+	first := append(candRange("a", 1, 7), s0)
+	second := append(append(slices.Clone(first[:7]), s0v2), candRange("b", 1, 1)...) // 9 < 100
+	fx.engine.results = [][]engine.Candidate{first, second}
+	refuse(fx, idRange("a", 1, 7)...)
+	req := contactsReq()
+	req.Limit = 2
+	res, err := fx.search(req)
+	require.NoError(t, err)
+	require.Len(t, fx.engine.queries, 2)
+	assert.Equal(t, []string{"b1"}, hitSources(res))
+	assert.Equal(t, true, res.Degraded)
+	assert.Equal(t, true, onlyRow(t, fx).Degraded)
+}
+
+// The control: the same short refill with nothing changed is not flagged.
+func TestSearch_RefillShortWithNothingChangedIsNotFlagged(t *testing.T) {
+	fx := newSearchFixture(t)
+	s0 := cand("s", 1, 0, "candidate s chunk 0 for the head of sales")
+	first := append(candRange("a", 1, 7), s0)
+	second := append(slices.Clone(first), candRange("b", 1, 1)...) // 9 < 100
+	fx.engine.results = [][]engine.Candidate{first, second}
+	refuse(fx, idRange("a", 1, 7)...)
+	refuse(fx, "b1")
+	req := contactsReq()
+	req.Limit = 2
+	res, err := fx.search(req)
+	require.NoError(t, err)
+	require.Len(t, fx.engine.queries, 2)
+	assert.Equal(t, []string{"s"}, hitSources(res))
+	assert.Equal(t, false, res.Degraded)
+}
+
 func TestSearch_RefillDropsDuplicateNewPoints(t *testing.T) {
 	fx := newSearchFixture(t)
 	b1 := candRange("b", 1, 1)[0]

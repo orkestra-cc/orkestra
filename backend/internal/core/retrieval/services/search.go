@@ -340,7 +340,8 @@ func (s *Searcher) run(ctx context.Context, req iface.RetrievalSearchRequest, g 
 // with Limit = plan.Fusion.Candidates and checks only the points the first
 // call did not return (plan decision 3). There is never a third call. short
 // reports a page still under plan.Limit whose last engine call came back
-// full, so more permitted results may exist.
+// full, or from which the refill dropped a changed source (below), so more
+// permitted results may exist.
 //
 // The erasure veto runs once per engine call, with one probe per source
 // built from that call's chunks only. That is complete because of two
@@ -390,6 +391,9 @@ func (s *Searcher) fetchChecked(ctx context.Context, g gated, collection string,
 		return nil, false, err
 	}
 	last, lastLimit := first, q.Limit
+	// A point ID does not carry the revision: a refill copy that differs
+	// from the first call's drops its whole source, unchecked.
+	changed := map[string]bool{}
 	if len(survivors) < g.plan.Limit && len(first) >= q.Limit && q.Limit < g.plan.Fusion.Candidates {
 		q.Limit = g.plan.Fusion.Candidates
 		second, err := query(q)
@@ -400,9 +404,6 @@ func (s *Searcher) fetchChecked(ctx context.Context, g gated, collection string,
 		for _, c := range first {
 			byID[c.PointID] = c
 		}
-		// A point ID does not carry the revision: a refill copy that differs
-		// from the first call's drops its whole source, unchecked.
-		changed := map[string]bool{}
 		for _, c := range second {
 			if prev, ok := byID[c.PointID]; ok && !sameRuntime(prev.Runtime, c.Runtime) {
 				changed[prev.Runtime.SourceID] = true
@@ -457,7 +458,9 @@ func (s *Searcher) fetchChecked(ctx context.Context, g gated, collection string,
 		survivors = kept
 		last, lastLimit = second, q.Limit
 	}
-	return survivors, len(survivors) < g.plan.Limit && len(last) >= lastLimit, nil
+	// A dropped changed source was never checked and may have been
+	// permitted: a page under Limit then says so even after a short refill.
+	return survivors, len(survivors) < g.plan.Limit && (len(last) >= lastLimit || len(changed) > 0), nil
 }
 
 // sameRuntime reports that two engine copies of one point carry the same
