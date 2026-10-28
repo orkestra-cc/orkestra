@@ -111,8 +111,10 @@ func (s *Service) DeleteBySubject(context.Context, string, string) error {
 
 // Principals implements iface.RetrievalPrincipalResolver for the caller in
 // ctx. Without a wired resolver it fails closed with
-// iface.ErrRetrievalForbidden. The resolver's error text may name a
-// contributor's principals: callers must not log or return it.
+// iface.ErrRetrievalForbidden. A resolver error is mapped by principalError,
+// exactly as search step 3 maps it: iface.ErrRetrievalForbidden passes
+// through, anything else is iface.ErrRetrievalUnavailable naming only the
+// error's kind (the resolver's text may name a contributor's principals).
 func (s *Service) Principals(ctx context.Context) (iface.RetrievalPrincipalContext, error) {
 	s.mu.RLock()
 	r := s.principals
@@ -120,5 +122,9 @@ func (s *Service) Principals(ctx context.Context) (iface.RetrievalPrincipalConte
 	if r == nil {
 		return iface.RetrievalPrincipalContext{}, fmt.Errorf("%w: the principal resolver is not wired", iface.ErrRetrievalForbidden)
 	}
-	return r.Principals(ctx)
+	pc, err := r.Principals(ctx)
+	if err != nil {
+		return iface.RetrievalPrincipalContext{}, principalError(ctx, err)
+	}
+	return pc, nil
 }
