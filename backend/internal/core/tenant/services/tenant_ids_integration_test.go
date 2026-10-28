@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -114,6 +115,51 @@ func TestPurgeTenant_IsListedAsPurgedWithoutAnyHook(t *testing.T) {
 		t.Fatalf("ListPurgedTenantIDs: %v", err)
 	}
 	if want := []string{tn.UUID}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("purged = %v, want %v", got, want)
+	}
+}
+
+// A status change after a committed purge (ArchiveTenant/DeleteTenant, or any
+// UpdateTenantStatus) overwrites status but keeps purgedAt: the tenant must stay
+// listed, or retrieval's reconciliation would never write its tombstone.
+func TestListPurgedTenantIDs_KeepsPurgedTenantAfterLaterStatusChange(t *testing.T) {
+	db, cleanup := newDefaultsTestDB(t)
+	defer cleanup()
+	repo := repository.New(db)
+	svc := New(repo)
+	ctx := context.Background()
+	archived := seedDefaultsTenant(t, repo, nil)
+	suspended := seedDefaultsTenant(t, repo, nil)
+
+	for _, tn := range []*models.Tenant{archived, suspended} {
+		if err := svc.PurgeTenant(ctx, tn.UUID); err != nil {
+			t.Fatalf("PurgeTenant %s: %v", tn.UUID, err)
+		}
+	}
+	if err := svc.ArchiveTenant(ctx, archived.UUID); err != nil {
+		t.Fatalf("ArchiveTenant after purge: %v", err)
+	}
+	if err := repo.UpdateTenantStatus(ctx, suspended.UUID, models.TenantStatusSuspended); err != nil {
+		t.Fatalf("UpdateTenantStatus after purge: %v", err)
+	}
+	for _, tn := range []*models.Tenant{archived, suspended} {
+		got, err := repo.GetTenantByUUIDIncludingDeleted(ctx, tn.UUID)
+		if err != nil {
+			t.Fatalf("reload %s: %v", tn.UUID, err)
+		}
+		if got.Status == models.TenantStatusPurged || got.PurgedAt == nil {
+			t.Fatalf("precondition: %s status=%s purgedAt=%v, want overwritten status and a kept purgedAt",
+				tn.UUID, got.Status, got.PurgedAt)
+		}
+	}
+
+	got, err := svc.ListPurgedTenantIDs(ctx)
+	if err != nil {
+		t.Fatalf("ListPurgedTenantIDs: %v", err)
+	}
+	want := []string{archived.UUID, suspended.UUID}
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("purged = %v, want %v", got, want)
 	}
 }
