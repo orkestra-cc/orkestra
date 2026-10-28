@@ -8,6 +8,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -25,6 +26,8 @@ type fakeRepo struct {
 	bindings    map[string]models.Binding // keyed by binding UUID
 	// Toggleable error injection for failure-path tests.
 	createBindingErr error
+	listBindingsErr  error
+	getRoleErr       error
 }
 
 func newFakeRepo() *fakeRepo {
@@ -151,9 +154,12 @@ func (r *fakeRepo) GetRoleByName(_ context.Context, tenantID, name string) (*mod
 func (r *fakeRepo) GetRoleByUUID(_ context.Context, uuid string) (*models.Role, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.getRoleErr != nil {
+		return nil, r.getRoleErr
+	}
 	role, ok := r.roles[uuid]
 	if !ok {
-		return nil, errors.New("fakeRepo: role not found by uuid")
+		return nil, fmt.Errorf("fakeRepo: role %q: %w", uuid, repository.ErrNotFound)
 	}
 	out := role
 	return &out, nil
@@ -297,6 +303,9 @@ func (r *fakeRepo) DeleteBindingsByUserAndTenant(_ context.Context, userUUID, te
 func (r *fakeRepo) ListActiveBindingsForUser(_ context.Context, userUUID, tenantID string) ([]models.Binding, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.listBindingsErr != nil {
+		return nil, r.listBindingsErr
+	}
 	out := make([]models.Binding, 0)
 	now := time.Now()
 	for _, b := range r.bindings {

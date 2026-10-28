@@ -986,6 +986,21 @@ type AuthzCacheInvalidator interface {
 }
 
 // ---------------------------------------------------------------------------
+// AuthzRoleLister — consumed by: retrieval
+//
+// Narrow capability of the authz service, resolved with module.GetTyped
+// against ServiceAuthzProvider (no method is added to AuthzProvider).
+// Retrieval uses it to expand a user's roles into role:<id> principals
+// (ADR-0023 D10). Platform roles get no bypass.
+// ---------------------------------------------------------------------------
+
+type AuthzRoleLister interface {
+	// ActiveRoleIDs lists the UUIDs of active roles bound to the user in the
+	// tenant through non-expired bindings. tenantID "" is refused.
+	ActiveRoleIDs(ctx context.Context, userUUID, tenantID string) ([]string, error)
+}
+
+// ---------------------------------------------------------------------------
 // PaymentProvider — consumed by: subscriptions
 //
 // Façade over one or more payment gateways (Stripe in v1, PayPal later).

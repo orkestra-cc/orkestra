@@ -92,6 +92,8 @@ One consequence to expect in practice: a role holding a permission from a module
 3. Otherwise: the union of every active binding for this user in this org, plus their global bindings.
 4. **System permissions — and the wildcard — require a global grant.** A tenant-scoped binding never contributes either: the evaluator skips them on that branch. Keys already stored that way are *ignored*, not deleted — they stay on the role and role reads still show them. The global branch is deliberately unfiltered, because that is where a platform role legitimately conveys a platform key.
 
+Separately, `iface.AuthzRoleLister.ActiveRoleIDs(user, tenant)` lists the active roles a user holds in one tenant (non-expired bindings; system roles and that tenant's own roles; an empty tenant is refused). The retrieval module uses it to compute `role:<id>` search principals. It makes no permission decision and gives platform roles no bypass, and a failure reading a role is returned as an error rather than skipped.
+
 ## Routes
 
 | Method | Path | Gate |
