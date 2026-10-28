@@ -591,7 +591,8 @@ func (s *Searcher) pin(ctx context.Context, corpus string) (PinnedGeneration, er
 }
 
 // principals is step 3. A resolution error fails the search (plan decision
-// 6); its text may name a contributor's principals, so only its kind is logged.
+// 6); its text may name a contributor's principals, so only its kind is
+// logged and principalError maps what is returned.
 func (s *Searcher) principals(ctx context.Context, g gated) (iface.RetrievalPrincipalContext, error) {
 	if s.d.Principals == nil {
 		return iface.RetrievalPrincipalContext{}, unavailable("principal resolver is not configured")
@@ -601,10 +602,7 @@ func (s *Searcher) principals(ctx context.Context, g gated) (iface.RetrievalPrin
 		s.d.Logger.Warn("retrieval: search principal resolution failed",
 			slog.String("corpus", g.spec.Name), slog.String("tenant", g.tenantID),
 			slog.String("kind", principalErrorKind(err)))
-		if errors.Is(err, iface.ErrRetrievalForbidden) {
-			return iface.RetrievalPrincipalContext{}, fmt.Errorf("retrieval: principals: %w", err)
-		}
-		return iface.RetrievalPrincipalContext{}, fmt.Errorf("%w: principal resolution: %w", iface.ErrRetrievalUnavailable, err)
+		return iface.RetrievalPrincipalContext{}, principalError(ctx, err)
 	}
 	// Second guard: the engine query is scoped by these values, so they must
 	// be the caller's and must be usable as a filter.
@@ -617,20 +615,6 @@ func (s *Searcher) principals(ctx context.Context, g gated) (iface.RetrievalPrin
 		}
 	}
 	return pc, nil
-}
-
-func principalErrorKind(err error) string {
-	switch {
-	case errors.Is(err, iface.ErrRetrievalForbidden):
-		return "forbidden"
-	case errors.Is(err, ErrPrincipalCapExceeded):
-		return "cap_exceeded"
-	case errors.Is(err, ErrContributorPrincipal):
-		return "invalid_contributor_principal"
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		return "canceled"
-	}
-	return "error"
 }
 
 // denseVector is step 4's dense arm. It returns ok=false, after a WARN, when

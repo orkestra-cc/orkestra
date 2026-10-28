@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/orkestra/backend/internal/testkit"
@@ -112,6 +114,53 @@ func TestPrincipals_ContributorErrorFailsClosed(t *testing.T) {
 	require.NotNil(t, err)
 	assert.Contains(t, err.Error(), "teams")
 	assert.Equal(t, iface.RetrievalPrincipalContext{}, pc)
+}
+
+// A contributor's error may name its principals: its text never leaves the
+// resolver, only the contributor's name and a fixed sentinel do (F1).
+func TestPrincipals_ContributorErrorTextIsNotReturned(t *testing.T) {
+	boom := errors.New("teams: team:secret-team-42 lookup failed")
+	r := &PrincipalResolver{
+		Members:      searchMembers{member: true},
+		Roles:        searchRoles{},
+		Contributors: contribs(searchContributor{name: "teams", err: boom}),
+	}
+	pc, err := r.Principals(principalCtx("operator"))
+	require.NotNil(t, err)
+	if errors.Is(err, boom) {
+		t.Fatalf("the contributor's error is in the chain: %v", err)
+	}
+	if !errors.Is(err, errContributorFailed) {
+		t.Fatalf("err = %v, want errContributorFailed", err)
+	}
+	if errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v carries a context error the ctx does not have", err)
+	}
+	if strings.Contains(err.Error(), "secret-team-42") {
+		t.Fatalf("the contributor's error text was returned: %v", err)
+	}
+	assert.Contains(t, err.Error(), `"teams"`)
+	assert.Equal(t, iface.RetrievalPrincipalContext{}, pc)
+}
+
+// A contributor failing on the caller's cancellation keeps the context error
+// in the chain, still without the contributor's text.
+func TestPrincipals_ContributorErrorKeepsContextError(t *testing.T) {
+	ctx, cancel := context.WithCancel(principalCtx("operator"))
+	cancel()
+	r := &PrincipalResolver{
+		Members: searchMembers{member: true},
+		Roles:   searchRoles{},
+		Contributors: contribs(searchContributor{name: "teams",
+			err: fmt.Errorf("team:secret-team-42: %w", context.Canceled)}),
+	}
+	_, err := r.Principals(ctx)
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, errContributorFailed) {
+		t.Fatalf("err = %v, want errContributorFailed and context.Canceled", err)
+	}
+	if strings.Contains(err.Error(), "secret-team-42") {
+		t.Fatalf("the contributor's error text was returned: %v", err)
+	}
 }
 
 func TestPrincipals_ContributorReservedPrefixRefused(t *testing.T) {

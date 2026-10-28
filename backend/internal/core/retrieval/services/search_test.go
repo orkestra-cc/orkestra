@@ -292,11 +292,22 @@ func TestSearch_PrincipalResolutionErrorFailsClosed(t *testing.T) { // Review Fo
 			fx := newSearchFixture(t)
 			fx.principals.err = perr
 			res, err := fx.search(contactsReq())
-			requireIs(t, err, perr)
+			if perr == boom {
+				// The resolver's own error is never in the chain: its text may
+				// name a contributor's principals (F1, R-T6a).
+				if errors.Is(err, boom) {
+					t.Fatalf("the resolver's error is in the chain: %v", err)
+				}
+			} else {
+				requireIs(t, err, perr)
+			}
 			requireIs(t, err, iface.ErrRetrievalUnavailable)
 			assert.Nil(t, res)
 			noEngineCall(t, fx)
 			assert.Empty(t, fx.embedder.reqs)
+			if strings.Contains(err.Error(), "secret-team-42") {
+				t.Fatalf("a principal error's text was returned: %v", err)
+			}
 			if strings.Contains(fx.logs.String(), "secret-team-42") {
 				t.Fatalf("a principal error's text reached the log: %s", fx.logs.String())
 			}
