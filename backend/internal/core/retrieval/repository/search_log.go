@@ -98,7 +98,9 @@ func (r *SearchLog) PurgeBefore(ctx context.Context, cutoff time.Time) (int64, e
 		}
 		//tenantscope:allow system: search-log retention runs for every tenant on the daily ticker; it deletes only the rows selected above (older than search_log_retention_days)
 		res, err := r.coll.DeleteMany(ctx, bson.M{"_id": bson.M{"$in": in}})
-		total += res.DeletedCount
+		if res != nil {
+			total += res.DeletedCount
+		}
 		if err != nil {
 			return total, err
 		}

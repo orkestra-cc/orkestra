@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/orkestra/backend/pkg/sdk/tenantrepo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func newSearchLog(t *testing.T) (*SearchLog, *mongo.Database) {
@@ -167,5 +169,29 @@ func TestSearchLog_InsertCreatedAtAndEmptyArrays(t *testing.T) {
 		if _, ok := raw[f].(bson.A); !ok {
 			t.Fatalf("%s = %#v, want empty array", f, raw[f])
 		}
+	}
+}
+
+func TestSearchLog_PurgeBeforeReturnsErrorOnDisconnectedClient(t *testing.T) {
+	uri := os.Getenv("MONGO_TEST_URI")
+	if uri == "" {
+		t.Skip("MONGO_TEST_URI not set")
+	}
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(uri).SetServerSelectionTimeout(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Disconnect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	r := NewSearchLog(client.Database("retrieval_test_disconnected"))
+	n, err := r.PurgeBefore(context.Background(), time.Now())
+	if err == nil || n != 0 {
+		t.Fatalf("n=%d err=%v, want 0 and an error", n, err)
+	}
+	cctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := r.PurgeBefore(cctx, time.Now()); err == nil {
+		t.Fatal("cancelled ctx: want error")
 	}
 }
