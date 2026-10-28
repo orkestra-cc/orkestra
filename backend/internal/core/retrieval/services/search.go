@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"reflect"
 	"slices"
 	"time"
 
@@ -350,8 +351,15 @@ func (s *Searcher) run(ctx context.Context, req iface.RetrievalSearchRequest, g 
 // refill the answer can still change (a tombstone landing between the two
 // calls): a source seen in both calls is re-checked together with its
 // first-call survivors, so a source the refill finds covered (or no longer
-// visible) loses every chunk, not only the new ones. This adds no source to
-// either call, and the survivors keep their rank positions.
+// visible) loses every chunk, not only the new ones. A point ID does not
+// carry the revision (engine.PointID hashes tenant, corpus, source and
+// ordinal), so the worker can replace a point between the calls under the
+// same ID: when the refill's copy of a first-call point differs from it in
+// any runtime field (revision, VisibleTo, Subjects, provenance), its source
+// is dropped whole, first-call survivors and new refill points alike, and is
+// not checked again. So every returned candidate is the exact copy its last
+// check of step 6 saw. This adds no source to either call, and the survivors
+// keep their rank positions.
 func (s *Searcher) fetchChecked(ctx context.Context, g gated, collection string, pc iface.RetrievalPrincipalContext,
 	rec *searchRecord, q engine.Query) (survivors []engine.Candidate, short bool, err error) {
 	query := func(q engine.Query) ([]engine.Candidate, error) {
@@ -388,13 +396,26 @@ func (s *Searcher) fetchChecked(ctx context.Context, g gated, collection string,
 		if err != nil {
 			return nil, false, err
 		}
+		byID := make(map[string]engine.Candidate, len(first))
+		for _, c := range first {
+			byID[c.PointID] = c
+		}
+		// A point ID does not carry the revision: a refill copy that differs
+		// from the first call's drops its whole source, unchecked.
+		changed := map[string]bool{}
+		for _, c := range second {
+			if prev, ok := byID[c.PointID]; ok && !sameRuntime(prev.Runtime, c.Runtime) {
+				changed[prev.Runtime.SourceID] = true
+				changed[c.Runtime.SourceID] = true
+			}
+		}
 		seen := make(map[string]bool, len(first)+len(second))
 		for _, c := range first {
 			seen[c.PointID] = true
 		}
 		var fresh []engine.Candidate
 		for _, c := range second {
-			if !seen[c.PointID] {
+			if !seen[c.PointID] && !changed[c.Runtime.SourceID] {
 				seen[c.PointID] = true
 				fresh = append(fresh, c)
 			}
@@ -421,6 +442,9 @@ func (s *Searcher) fetchChecked(ctx context.Context, g gated, collection string,
 		}
 		kept := make([]engine.Candidate, 0, len(survivors)+len(more))
 		for _, c := range survivors {
+			if changed[c.Runtime.SourceID] {
+				continue
+			}
 			if !rechecked[c.PointID] || passed[c.PointID] {
 				kept = append(kept, c)
 			}
@@ -434,6 +458,16 @@ func (s *Searcher) fetchChecked(ctx context.Context, g gated, collection string,
 		last, lastLimit = second, q.Limit
 	}
 	return survivors, len(survivors) < g.plan.Limit && len(last) >= lastLimit, nil
+}
+
+// sameRuntime reports that two engine copies of one point carry the same
+// runtime payload: revision, access (VisibleTo, Subjects) and provenance.
+func sameRuntime(a, b engine.Runtime) bool {
+	if !slices.Equal(a.VisibleTo, b.VisibleTo) || !slices.Equal(a.Subjects, b.Subjects) {
+		return false
+	}
+	a.VisibleTo, a.Subjects, b.VisibleTo, b.Subjects = nil, nil, nil, nil
+	return reflect.DeepEqual(a, b)
 }
 
 // checkCandidates applies ADR D5 step 6 to cands in order and returns the

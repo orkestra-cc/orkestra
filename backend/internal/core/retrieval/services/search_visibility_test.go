@@ -397,6 +397,98 @@ func TestSearch_RefillKeepsRankOrderOfARecheckedSource(t *testing.T) {
 	assert.Equal(t, []string{"s", "b1", "b2", "s"}, hitSources(res))
 }
 
+// Point IDs do not carry the revision: between the two calls the worker can
+// replace a point under the same ID. A refill copy of a first-call point that
+// differs from it (here a newer revision naming a subject erased by then)
+// drops its whole source, whatever the checks would say (P1, 4401533378).
+func TestSearch_RefillDropsASourceWhosePointChangedRevision(t *testing.T) {
+	fx := newSearchFixture(t)
+	s0 := cand("s", 1, 0, "candidate s chunk 0 for the head of sales", "user:carol")
+	s0v2 := cand("s", 2, 0, "candidate s chunk 0 for the head of sales", "user:carol", "user:dave")
+	require.Equal(t, s0.PointID, s0v2.PointID)
+	first := append(candRange("a", 1, 7), s0)
+	second := append(append(slices.Clone(first[:7]), s0v2), candRange("b", 1, 3)...)
+	fx.engine.results = [][]engine.Candidate{first, second}
+	refuse(fx, idRange("a", 1, 7)...)
+	fx.tombstones.coveredFrom = map[string]int{"s": 2}
+	fx.source.onCall = func(_ context.Context, call int) error {
+		if call == 1 { // reindexed at revision 2 after the first check
+			fx.source.mu.Lock()
+			fx.source.visible["s"] = iface.RetrievalVisibility{Visible: true, Revision: 2}
+			fx.source.mu.Unlock()
+		}
+		return nil
+	}
+	req := contactsReq()
+	req.Limit = 2
+	res, err := fx.search(req)
+	require.NoError(t, err)
+	require.Len(t, fx.engine.queries, 2)
+	assert.Equal(t, []string{"b1", "b2"}, hitSources(res))
+	row := onlyRow(t, fx)
+	assert.Equal(t, false, slices.Contains(row.SourceIDs, "s"))
+	assert.Equal(t, false, slices.Contains(row.Subjects, "user:carol"))
+	assert.Equal(t, false, slices.Contains(row.Subjects, "user:dave"))
+}
+
+// The same with an access change: the newer copy is shared with someone else
+// and the owner no longer grants it. Neither copy, nor the source's other
+// first-call survivor (s1, absent from the refill), is returned.
+func TestSearch_RefillDropsASourceWhosePointChangedAccess(t *testing.T) {
+	fx := newSearchFixture(t)
+	s0 := cand("s", 1, 0, "candidate s chunk 0 for the head of sales")
+	s1 := cand("s", 1, 1, "candidate s chunk 1 for the head of sales")
+	s0v2 := cand("s", 2, 0, "candidate s chunk 0 for the head of sales")
+	s0v2.Runtime.VisibleTo = []string{"user:u-9"}
+	first := append([]engine.Candidate{s0, s1}, candRange("a", 1, 10)...) // Limit 3 -> Fetch 12
+	second := append(append([]engine.Candidate{s0v2}, candRange("a", 1, 10)...), candRange("b", 1, 3)...)
+	fx.engine.results = [][]engine.Candidate{first, second}
+	refuse(fx, idRange("a", 1, 10)...)
+	fx.source.onCall = func(_ context.Context, call int) error {
+		if call == 1 {
+			fx.source.mu.Lock()
+			fx.source.visible["s"] = iface.RetrievalVisibility{Visible: false, Revision: 2}
+			fx.source.mu.Unlock()
+		}
+		return nil
+	}
+	req := contactsReq()
+	req.Limit = 3
+	res, err := fx.search(req)
+	require.NoError(t, err)
+	require.Len(t, fx.engine.queries, 2)
+	assert.Equal(t, []string{"b1", "b2", "b3"}, hitSources(res))
+	assert.Equal(t, false, slices.Contains(onlyRow(t, fx).SourceIDs, "s"))
+}
+
+// A changed source is dropped even when the owner grants the newer revision,
+// its new refill chunk included: the refill does not check it at all.
+func TestSearch_RefillChangedSourceIsNotChecked(t *testing.T) {
+	fx := newSearchFixture(t)
+	s0 := cand("s", 1, 0, "candidate s chunk 0 for the head of sales")
+	s0v2 := cand("s", 2, 0, "candidate s chunk 0 for the head of sales")
+	s1v2 := cand("s", 2, 1, "candidate s chunk 1 for the head of sales")
+	first := append(candRange("a", 1, 7), s0)
+	second := append(append(slices.Clone(first[:7]), s0v2, s1v2), candRange("b", 1, 3)...)
+	fx.engine.results = [][]engine.Candidate{first, second}
+	refuse(fx, idRange("a", 1, 7)...)
+	fx.source.onCall = func(_ context.Context, call int) error {
+		if call == 1 { // the owner grants revision 2 by the refill
+			fx.source.mu.Lock()
+			fx.source.visible["s"] = iface.RetrievalVisibility{Visible: true, Revision: 2}
+			fx.source.mu.Unlock()
+		}
+		return nil
+	}
+	req := contactsReq()
+	req.Limit = 2
+	res, err := fx.search(req)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"b1", "b2"}, hitSources(res))
+	require.Len(t, fx.source.calls, 2)
+	assert.Equal(t, []string{"b1", "b2", "b3"}, fx.source.calls[1])
+}
+
 func TestSearch_RefillDropsDuplicateNewPoints(t *testing.T) {
 	fx := newSearchFixture(t)
 	b1 := candRange("b", 1, 1)[0]
