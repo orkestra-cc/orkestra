@@ -273,8 +273,11 @@ func TestUpdateClientUserAdmin_MissingActorRefusesEveryRoleAssignment(t *testing
 
 	err := patchClientRole(t, h, context.Background(), "client-target", "guest")
 
+	// The target-tier guard runs first and refuses an unidentifiable
+	// caller against every recognised target (same fail-closed reading
+	// canAssignRole gives an unknown caller tier).
 	assertStatus(t, err, http.StatusForbidden)
-	assertErrCode(t, err, errcode.UserRoleEscalationForbidden)
+	assertErrCode(t, err, errcode.UserTargetTierForbidden)
 	if n := clients.updateCalls(); n != 0 {
 		t.Errorf("the guard must refuse before the write; %d update calls", n)
 	}
@@ -424,25 +427,72 @@ func TestUpdateClientUserAdmin_NoLastAdminQuorum(t *testing.T) {
 	}
 }
 
-// --- the guard is scoped to the role branch ---------------------------
+// --- the target-tier guard runs on every patch -------------------------
 
-// TestUpdateClientUserAdmin_ProfileOnlyPatchRunsNoRoleGuards pins that a
-// patch carrying no role costs no caller lookup — and therefore keeps
-// working with no operator provider wired at all.
-func TestUpdateClientUserAdmin_ProfileOnlyPatchRunsNoRoleGuards(t *testing.T) {
+// A patch carrying no role still runs the target-tier guard: a manager
+// may rename an operator but not an administrator. The role-escalation
+// guard stays scoped to the role branch.
+func TestUpdateClientUserAdmin_ProfileOnlyPatchRunsTheTargetTierGuard(t *testing.T) {
 	t.Parallel()
-	clients := newUserStore(nil)
-	clients.seed("client-target", "operator")
-	h, _ := newAdminHandler(clients.svc) // registry deliberately empty
+	h, clients, operators, sink := newClientAdminHarness(t)
+	clients.seed("client-admin", "administrator")
+	clients.seed("client-op", "operator")
+	operators.seed("op-manager", "manager")
 
-	if _, err := h.UpdateClientUserAdmin(context.Background(), &UpdateClientUserAdminRequest{
-		ID:   "client-target",
-		Body: UpdateClientUserAdminBody{FullName: "Renamed"},
-	}); err != nil {
-		t.Fatalf("a profile-only patch must not run the role guards: %v", err)
+	rename := func(target string) error {
+		_, err := h.UpdateClientUserAdmin(operatorCtx("op-manager", "super_admin"), &UpdateClientUserAdminRequest{
+			ID:   target,
+			Body: UpdateClientUserAdminBody{FullName: "Renamed"},
+		})
+		return err
 	}
-	if got := clients.roleOf("client-target"); got != "operator" {
-		t.Errorf("target role = %q, want it unchanged", got)
+
+	err := rename("client-admin")
+	assertStatus(t, err, http.StatusForbidden)
+	assertErrCode(t, err, errcode.UserTargetTierForbidden)
+	if n := clients.updateCalls(); n != 0 {
+		t.Errorf("the guard must refuse before the write; %d update calls", n)
+	}
+	ev := findAudit(sink, "user.update.refused")
+	if ev == nil {
+		t.Fatal("no user.update.refused event")
+	}
+	if got := ev.Metadata["attempted"]; got != "target_above_caller" {
+		t.Errorf("metadata.attempted = %v, want target_above_caller", got)
+	}
+	if got := ev.ResourceType; got != "client_user" {
+		t.Errorf("resourceType = %q, want client_user", got)
+	}
+
+	if err := rename("client-op"); err != nil {
+		t.Fatalf("a manager renaming an operator must pass: %v", err)
+	}
+	if n := clients.updateCalls(); n != 1 {
+		t.Errorf("update calls = %d, want 1", n)
+	}
+}
+
+// The delete twin: the same guard, before the soft-delete.
+func TestDeleteClientUserAdmin_RunsTheTargetTierGuard(t *testing.T) {
+	t.Parallel()
+	h, clients, operators, _ := newClientAdminHarness(t)
+	clients.seed("client-admin", "administrator")
+	clients.seed("client-op", "operator")
+	operators.seed("op-manager", "manager")
+	deleted := []string{}
+	clients.svc.softDeleteAndAliasFn = func(_ context.Context, id string) error { deleted = append(deleted, id); return nil }
+
+	_, err := h.DeleteClientUserAdmin(operatorCtx("op-manager", "super_admin"), &DeleteClientUserAdminRequest{ID: "client-admin"})
+	assertStatus(t, err, http.StatusForbidden)
+	assertErrCode(t, err, errcode.UserTargetTierForbidden)
+	if len(deleted) != 0 {
+		t.Errorf("the guard must refuse before the delete; deleted %v", deleted)
+	}
+	if _, err := h.DeleteClientUserAdmin(operatorCtx("op-manager", "super_admin"), &DeleteClientUserAdminRequest{ID: "client-op"}); err != nil {
+		t.Fatalf("a manager deleting an operator must pass: %v", err)
+	}
+	if len(deleted) != 1 || deleted[0] != "client-op" {
+		t.Errorf("deleted = %v, want [client-op]", deleted)
 	}
 }
 

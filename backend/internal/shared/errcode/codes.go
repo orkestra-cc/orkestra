@@ -317,6 +317,15 @@ const UserRoleEscalationForbidden = "user.role_escalation_forbidden"
 // Either way the request fails closed. 500.
 const UserRoleLookupUnavailable = "user.role_lookup_unavailable"
 
+// UserTargetTierForbidden signals that the caller tried to update or
+// delete a user whose CURRENT system role sits higher in the tier ladder
+// than the caller's own (a manager editing an administrator). Companion of
+// UserRoleEscalationForbidden, which guards the role being ASSIGNED; this
+// one guards the target itself, so that holding user.update never lets a
+// lower tier rename, deactivate, re-email or delete a higher one. Wire
+// code "user.target_tier_forbidden"; HTTP 403.
+const UserTargetTierForbidden = "user.target_tier_forbidden"
+
 // --- marketing ---
 
 // MarketingCardCodeCollision signals that the card-emit path

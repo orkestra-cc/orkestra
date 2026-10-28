@@ -11618,7 +11618,7 @@
     },
     "/v1/admin/client-users/{id}": {
       "delete": {
-        "description": "Calls SoftDeleteAndAliasEmail so the original address can be reused for a fresh signup. The original email is preserved on the user document for audit. Requires a fresh MFA proof (RequireStepUp).",
+        "description": "Calls SoftDeleteAndAliasEmail so the original address can be reused for a fresh signup. The original email is preserved on the user document for audit. Refuses a target whose current role is above the caller's (403 user.target_tier_forbidden). Requires a fresh MFA proof (RequireStepUp).",
         "operationId": "delete-client-user-admin",
         "parameters": [
           {
@@ -11711,7 +11711,7 @@
         ]
       },
       "patch": {
-        "description": "Patches name/username/email/phone/role/isActive. Requires a fresh MFA proof (RequireStepUp).",
+        "description": "Patches name/username/email/phone/role/isActive. Refuses role escalation (403 user.role_escalation_forbidden) and a target whose current role is above the caller's (403 user.target_tier_forbidden). Requires a fresh MFA proof (RequireStepUp).",
         "operationId": "update-client-user-admin",
         "parameters": [
           {
@@ -23116,7 +23116,7 @@
     },
     "/v1/users/{id}": {
       "delete": {
-        "description": "Soft-deletes a user (alias-on-delete frees the email). Refuses self-delete (403 user.self_delete_forbidden) and last-administrator removal (403 user.last_admin_forbidden). Requires a fresh MFA proof (RequireStepUp).",
+        "description": "Soft-deletes a user (alias-on-delete frees the email). Refuses self-delete (403 user.self_delete_forbidden), a target whose current role is above the caller's (403 user.target_tier_forbidden) and last-administrator removal (403 user.last_admin_forbidden). Requires a fresh MFA proof (RequireStepUp).",
         "operationId": "delete-user",
         "parameters": [
           {
@@ -23211,7 +23211,7 @@
         ]
       },
       "put": {
-        "description": "Updates a user's information. Refuses role escalation (403 user.role_escalation_forbidden) and last-administrator removal (403 user.last_admin_forbidden). Requires a fresh MFA proof (RequireStepUp).",
+        "description": "Updates a user's information. Refuses role escalation (403 user.role_escalation_forbidden), a target whose current role is above the caller's (403 user.target_tier_forbidden) and last-administrator removal (403 user.last_admin_forbidden). Requires a fresh MFA proof (RequireStepUp).",
         "operationId": "update-user",
         "parameters": [
           {
