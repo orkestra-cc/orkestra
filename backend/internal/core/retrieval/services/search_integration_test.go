@@ -3,14 +3,11 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/retrieval/engine"
-	"github.com/orkestra/backend/internal/core/retrieval/engine/qdrant"
 	"github.com/orkestra/backend/internal/core/retrieval/models"
 	"github.com/orkestra/backend/internal/core/retrieval/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
@@ -39,42 +36,13 @@ type searchIntegrationEnv struct {
 // QDRANT_TEST_API_KEY are all set. A skip proves nothing about these paths.
 func newSearchIntegrationEnv(t *testing.T) *searchIntegrationEnv {
 	t.Helper()
-	var vals [3]string
-	for i, name := range []string{"MONGO_TEST_URI", "QDRANT_TEST_URL", "QDRANT_TEST_API_KEY"} {
-		if vals[i] = os.Getenv(name); vals[i] == "" {
-			t.Skipf("%s not set", name)
-		}
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(vals[0]))
-	require.NoError(t, err)
-	stamp := time.Now().UnixNano()
-	db := client.Database(fmt.Sprintf("retrieval_sit_%d", stamp))
-	drv, err := qdrant.New(qdrant.Config{URL: vals[1], APIKey: vals[2]})
-	require.NoError(t, err)
-	coll := engine.CollectionName(fmt.Sprintf("itest%d", stamp), "contacts", 1)
-	t.Cleanup(func() {
-		_ = drv.DropCollection(context.Background(), coll)
-		_ = db.Drop(context.Background())
-		_ = client.Disconnect(context.Background())
-	})
-
-	for name, specs := range map[string][]module.IndexSpec{
+	db, drv, prefix := integrationStores(t, "sit", "itest")
+	coll := engine.CollectionName(prefix, "contacts", 1)
+	t.Cleanup(func() { dropCollection(t, drv, coll) })
+	ensureIndexes(t, db, map[string][]module.IndexSpec{
 		repository.CollErasures:  repository.ErasureIndexes(),
 		repository.CollSearchLog: repository.SearchLogIndexes(),
-	} {
-		var ms []mongo.IndexModel
-		for _, s := range specs {
-			var keys bson.D
-			for _, k := range s.OrderedKeys {
-				keys = append(keys, bson.E{Key: k.Field, Value: k.Direction})
-			}
-			ms = append(ms, mongo.IndexModel{Keys: keys, Options: options.Index().SetUnique(s.Unique)})
-		}
-		_, err := db.Collection(name).Indexes().CreateMany(context.Background(), ms)
-		require.NoError(t, err)
-	}
+	})
 
 	fx := newSearchFixture(t)
 	fx.spec.Filters = []iface.RetrievalFilterField{
@@ -85,8 +53,6 @@ func newSearchIntegrationEnv(t *testing.T) *searchIntegrationEnv {
 	fx.profiles.profiles["embed"] = &iface.InferenceProfile{
 		ID: "ip_a", Endpoint: "embed", Kind: iface.InferenceKindEmbed, Boundary: iface.InferenceBoundaryLocal, Dimensions: 4}
 	fx.embedder.vec = []float32{1, 0, 0, 0}
-	fx.principals = nil // replaced by the real resolver below
-	fx.log = nil
 
 	e := &searchIntegrationEnv{searchFixture: fx, db: db, eng: drv, erasure: repository.NewErasures(db), coll: coll}
 	require.NoError(t, drv.EnsureCollection(context.Background(), engine.CollectionSpec{
@@ -171,14 +137,14 @@ func TestIntegrationSearch_PrivateRecordDropped(t *testing.T) { // Review Focus 
 
 	e.source.err = nil
 	e.source.block = true
-	e.VisibleTimeoutForTest(50 * time.Millisecond)
+	e.setVisibleTimeout(50 * time.Millisecond)
 	res, err = e.search(e.req("responsabile commerciale"))
 	requireIs(t, err, iface.ErrRetrievalVisibilityCheck)
 	assert.Nil(t, res)
 }
 
-// VisibleTimeoutForTest shortens the Visible timeout of later searches.
-func (e *searchIntegrationEnv) VisibleTimeoutForTest(d time.Duration) {
+// setVisibleTimeout shortens the Visible timeout of later searches.
+func (e *searchIntegrationEnv) setVisibleTimeout(d time.Duration) {
 	prev := e.tweak
 	e.tweak = func(deps *SearchDeps) {
 		prev(deps)
@@ -265,4 +231,20 @@ func TestIntegrationSearch_LogRowWithDatetimeFilter(t *testing.T) {
 		t.Fatalf("stored datetime value is %T, want primitive.DateTime", row.Filter.And[1].Value)
 	}
 	assert.Equal(t, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli(), int64(dt))
+}
+
+// The datetime bound must filter: points joined 2026-06-01, so a bound after
+// that excludes all of them and a bound before keeps all of them.
+func TestIntegrationSearch_DatetimeFilterNarrows(t *testing.T) {
+	e := newSearchIntegrationEnv(t)
+	for bound, want := range map[time.Time]int{
+		time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC): 3,
+		time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC): 0,
+	} {
+		req := e.req("responsabile commerciale")
+		req.Filter = &iface.RetrievalFilter{Field: "joined", Op: iface.RetrievalOpGte, Value: bound}
+		res, err := e.search(req)
+		require.NoError(t, err)
+		assert.Equal(t, want, len(res.Hits), bound.String())
+	}
 }
