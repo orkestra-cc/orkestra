@@ -34,8 +34,8 @@ Later PRs: 7 admin page and routes.
 | `retrieval_corpus_state` | installation-wide, `_id` = corpus name | One document per corpus: status, active generation, collection, profile hashes. Reads and writes carry `//tenantscope:allow system:` |
 | `retrieval_outbox` | tenant-scoped (`tenantrepo`) | One row per (tenant, corpus, source) key. `DueTenants` is the only cross-tenant sweep (`system:`) |
 | `retrieval_tenant_progress` | tenant-scoped | Resumable initial build per (tenant, corpus, generation): cursor, enqueued count, lease |
-| `retrieval_erasures` | global + tenant | Tombstones (`scope` `global` for user tombstones, `tenant` otherwise). The insert of a global row is `dsr:`; the covering lookup of global rows is `system:` |
-| `retrieval_search_log` | tenant-scoped (`tenantrepo`) | One row per search that passed the gate (ADR D12); see [Search log](#search-log). The retention purge is the only cross-tenant sweep (`system:`) |
+| `retrieval_erasures` | global + tenant | Tombstones (`scope` `global` for user tombstones, `tenant` otherwise). The user and subject tombstone upserts (`EnsureUser`, `EnsureSubject`) and `ListUser` are `dsr:`; the tenant tombstone upsert, the finalizer claim and transitions, `TenantTombstoneIDs` and the covering lookup are `system:`. The shared upsert helper takes the label (`allowLabel`) and has one call site per label, because the analyzer reads only the comment right above a Mongo call |
+| `retrieval_search_log` | tenant-scoped (`tenantrepo`) | One row per search that passed the gate (ADR D12); see [Search log](#search-log). The retention purge is a cross-tenant sweep (`system:`); the PR 6 data-subject reads and deletes (`SearchLogDSR` list/delete by user across tenants, delete by subject) are `dsr:`, the tenant purge delete `system:`; `deleteInBatches` takes the label like the tombstone upsert |
 
 ## Dependencies and load order
 

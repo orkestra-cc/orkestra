@@ -77,20 +77,39 @@ var searchLogPurgeBatch int64 = 1000
 // batches so a backlog never becomes one huge delete. On error it returns the
 // total deleted so far.
 func (r *SearchLog) PurgeBefore(ctx context.Context, cutoff time.Time) (int64, error) {
-	return deleteInBatches(ctx, r.coll, bson.M{"createdAt": bson.M{"$lt": ms(cutoff)}})
+	return deleteInBatches(ctx, r.coll, bson.M{"createdAt": bson.M{"$lt": ms(cutoff)}}, allowSystem)
 }
+
+// allowLabel is the //tenantscope:allow category a shared helper files its
+// Mongo calls under. The analyzer reads only the comment right above a call,
+// so a helper serving both categories has one call site per label.
+type allowLabel int
+
+const (
+	allowSystem allowLabel = iota // retention, tenant purge, finalization sweep
+	allowDSR                      // data-subject erasure (ADR-0023 D12, D13)
+)
 
 // deleteInBatches deletes the rows matching filter, searchLogPurgeBatch at a
 // time (find the _ids, then delete them), until a short batch. On error it
-// returns the total deleted so far. The caller owns the filter's scope.
-func deleteInBatches(ctx context.Context, coll *mongo.Collection, filter bson.M) (int64, error) {
+// returns the total deleted so far. The caller owns the filter's scope and
+// names the label its path belongs to.
+func deleteInBatches(ctx context.Context, coll *mongo.Collection, filter bson.M, label allowLabel) (int64, error) {
 	var total int64
+	findOpts := options.Find().SetLimit(searchLogPurgeBatch).SetProjection(bson.M{"_id": 1})
 	for {
 		if err := ctx.Err(); err != nil {
 			return total, err
 		}
-		//tenantscope:allow system: bounded batched delete shared by the search-log retention purge and the DSR/tenant erasure; each caller passes an explicit, narrow filter
-		cur, err := coll.Find(ctx, filter, options.Find().SetLimit(searchLogPurgeBatch).SetProjection(bson.M{"_id": 1}))
+		var cur *mongo.Cursor
+		var err error
+		if label == allowDSR {
+			//tenantscope:allow dsr: data-subject search-log erasure; DeleteByUserAllTenants and DeleteBySubject pass the subject's explicit filter (ADR-0023 D12)
+			cur, err = coll.Find(ctx, filter, findOpts)
+		} else {
+			//tenantscope:allow system: search-log retention purge and tenant purge; each caller passes an explicit, narrow filter
+			cur, err = coll.Find(ctx, filter, findOpts)
+		}
 		if err != nil {
 			return total, err
 		}
@@ -105,8 +124,14 @@ func deleteInBatches(ctx context.Context, coll *mongo.Collection, filter bson.M)
 		for i, d := range ids {
 			in[i] = d["_id"]
 		}
-		//tenantscope:allow system: bounded batched delete shared by the search-log retention purge and the DSR/tenant erasure; it deletes only the rows selected above
-		res, err := coll.DeleteMany(ctx, bson.M{"_id": bson.M{"$in": in}})
+		var res *mongo.DeleteResult
+		if label == allowDSR {
+			//tenantscope:allow dsr: data-subject search-log erasure; deletes only the rows selected above
+			res, err = coll.DeleteMany(ctx, bson.M{"_id": bson.M{"$in": in}})
+		} else {
+			//tenantscope:allow system: search-log retention purge and tenant purge; deletes only the rows selected above
+			res, err = coll.DeleteMany(ctx, bson.M{"_id": bson.M{"$in": in}})
+		}
 		if res != nil {
 			total += res.DeletedCount
 		}

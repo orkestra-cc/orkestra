@@ -30,8 +30,9 @@ func NewErasureFinalization(db *mongo.Database) *ErasureFinalization {
 }
 
 // ensure upserts the row for key, inserting a pending row due at now; created
-// is true only for the call that inserted it.
-func (r *ErasureFinalization) ensure(ctx context.Context, key bson.M, extra bson.M, now time.Time) (*models.Erasure, bool, error) {
+// is true only for the call that inserted it. label files the upsert under
+// the caller's tenantscope category.
+func (r *ErasureFinalization) ensure(ctx context.Context, key bson.M, extra bson.M, now time.Time, label allowLabel) (*models.Erasure, bool, error) {
 	at := ms(now)
 	id := uuid.NewString()
 	set := bson.M{
@@ -44,11 +45,18 @@ func (r *ErasureFinalization) ensure(ctx context.Context, key bson.M, extra bson
 	for k, v := range extra {
 		set[k] = v
 	}
+	update := bson.M{"$setOnInsert": set}
+	opts := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)
+	var res *mongo.SingleResult
+	if label == allowDSR {
+		//tenantscope:allow dsr: data-subject tombstone upsert keyed by the explicit natural key EnsureUser or EnsureSubject supplies (ADR-0023 D12)
+		res = r.coll.FindOneAndUpdate(ctx, key, update, opts)
+	} else {
+		//tenantscope:allow system: tenant purge tombstone upsert keyed by the explicit tenant EnsureTenant supplies (ADR-0023 D12)
+		res = r.coll.FindOneAndUpdate(ctx, key, update, opts)
+	}
 	var e models.Erasure
-	//tenantscope:allow system: tombstone upsert keyed by an explicit natural key supplied by EnsureUser, EnsureSubject and EnsureTenant (ADR-0023 D12)
-	err := r.coll.FindOneAndUpdate(ctx, key, bson.M{"$setOnInsert": set},
-		options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)).Decode(&e)
-	if err != nil {
+	if err := res.Decode(&e); err != nil {
 		return nil, false, err
 	}
 	return &e, e.UUID == id, nil
@@ -57,26 +65,23 @@ func (r *ErasureFinalization) ensure(ctx context.Context, key bson.M, extra bson
 // EnsureUser records the global tombstone of a data subject.
 func (r *ErasureFinalization) EnsureUser(ctx context.Context, userUUID string, now time.Time) (*models.Erasure, bool, error) {
 	subject := userSubjectPrefix + userUUID
-	//tenantscope:allow dsr: global user tombstone of a data-subject erasure (ADR-0023 D12)
 	return r.ensure(ctx,
 		bson.M{"scope": models.ErasureScopeGlobal, "kind": models.ErasureKindUser, "subject": subject},
-		bson.M{}, now)
+		bson.M{}, now, allowDSR)
 }
 
 // EnsureSubject records the tombstone of a subject in an explicit tenant.
 func (r *ErasureFinalization) EnsureSubject(ctx context.Context, tenantID, subject string, now time.Time) (*models.Erasure, bool, error) {
-	//tenantscope:allow dsr: owner-module subject erasure for an explicit tenant
 	return r.ensure(ctx,
 		bson.M{"scope": models.ErasureScopeTenant, "tenantId": tenantID, "kind": models.ErasureKindSubject, "subject": subject},
-		bson.M{}, now)
+		bson.M{}, now, allowDSR)
 }
 
 // EnsureTenant records the purge tombstone of an explicit tenant.
 func (r *ErasureFinalization) EnsureTenant(ctx context.Context, tenantID string, now time.Time) (*models.Erasure, bool, error) {
-	//tenantscope:allow system: tenant purge tombstone for an explicit tenant
 	return r.ensure(ctx,
 		bson.M{"scope": models.ErasureScopeTenant, "tenantId": tenantID, "kind": models.ErasureKindTenant},
-		bson.M{}, now)
+		bson.M{}, now, allowSystem)
 }
 
 // ListUser returns the global tombstones of a data subject (normally one).

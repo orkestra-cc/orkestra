@@ -39,15 +39,15 @@ func (r *SearchLogDSR) ListByUserAllTenants(ctx context.Context, userUUID string
 // DeleteByUserAllTenants deletes every row where the user searched or is a
 // returned subject, across tenants.
 func (r *SearchLogDSR) DeleteByUserAllTenants(ctx context.Context, userUUID string) (int64, error) {
-	return deleteInBatches(ctx, r.coll, userSearchFilter(userUUID))
+	return deleteInBatches(ctx, r.coll, userSearchFilter(userUUID), allowDSR)
 }
 
 // DeleteBySubject deletes the tenant's rows that returned subject.
 func (r *SearchLogDSR) DeleteBySubject(ctx context.Context, tenantID, subject string) (int64, error) {
-	return deleteInBatches(ctx, r.coll, bson.M{"tenantId": tenantID, "subjects": subject})
+	return deleteInBatches(ctx, r.coll, bson.M{"tenantId": tenantID, "subjects": subject}, allowDSR)
 }
 
 // DeleteByTenant deletes every row of the tenant.
 func (r *SearchLogDSR) DeleteByTenant(ctx context.Context, tenantID string) (int64, error) {
-	return deleteInBatches(ctx, r.coll, bson.M{"tenantId": tenantID})
+	return deleteInBatches(ctx, r.coll, bson.M{"tenantId": tenantID}, allowSystem)
 }
