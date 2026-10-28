@@ -245,6 +245,7 @@ var (
 	ErrRetrievalCorpusUnavailable = errors.New("retrieval: the corpus's owning module is not running")
 	ErrRetrievalUnknownCorpus     = errors.New("retrieval: unknown corpus")
 	ErrRetrievalInvalidSpec       = errors.New("retrieval: invalid corpus declaration")
+	ErrRetrievalInvalidIntent     = errors.New("retrieval: invalid index intent")
 	ErrRetrievalInvalidFilter     = errors.New("retrieval: invalid filter")
 	ErrRetrievalInvalidRequest    = errors.New("retrieval: invalid search request")
 	ErrRetrievalForbidden         = errors.New("retrieval: the caller may not search this corpus")

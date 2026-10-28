@@ -21,3 +21,15 @@ type TenantMemberSummary struct {
 type TenantDirectoryReader interface {
 	ListTenantMembers(ctx context.Context, tenantUUID string) ([]TenantMemberSummary, error)
 }
+
+// TenantIDLister lists tenant identifiers by tier without exposing the tenant
+// module's persistence models. Implemented by the tenant module's concrete
+// service; resolve it with
+// module.GetTyped[iface.TenantIDLister](reg, module.ServiceTenantService).
+type TenantIDLister interface {
+	// ListActiveTenantIDs returns the UUIDs of the tenants of kind
+	// (TenantKindInternal | TenantKindExternal) that are not soft-deleted and
+	// whose status is TenantStatusActive, sorted ascending. Any other kind is
+	// refused.
+	ListActiveTenantIDs(ctx context.Context, kind string) ([]string, error)
+}

@@ -16,3 +16,7 @@ userProvider := module.MustGetTyped[iface.UserProvider](registry, "user.UserProv
 ```
 
 Combined with the [`pkg/sdk/iface`](/sdk/shared-iface) interfaces, this is how Orkestra avoids cross-module concrete imports: every consumer programs against an interface, every producer publishes one.
+
+## Module status
+
+The server bootstrap registers the `ModuleRegistry` itself under `module.ServiceModuleStatus` (`"module.status"`). Consumers resolve it as the narrow `module.ModuleStatusReader` (`IsStarted(name string) bool`) to learn whether another module is currently started, for example `retrieval` keeping the index intents of a corpus whose owning module is stopped. Resolve it when needed rather than caching the answer: modules start and stop at runtime.

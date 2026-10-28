@@ -40,6 +40,12 @@ type Engine interface {
 	// Upsert writes points; a point whose stored _rt.sourceRevision is higher
 	// than the incoming one is left unchanged (conditional update).
 	Upsert(ctx context.Context, collection string, points []Point) error
+	// UpdatePayload replaces Runtime and Fields of existing points, keeping
+	// their vectors and text. A point is updated only when it exists, its
+	// stored _rt.contentHash equals the incoming Runtime.ContentHash and its
+	// stored _rt.sourceRevision is not higher than the incoming one; otherwise
+	// it is left unchanged. It never creates a point. Dense and Text are ignored.
+	UpdatePayload(ctx context.Context, collection string, points []Point) error
 	// DeleteOtherRevisions removes the item's points whose revision differs from keep.
 	DeleteOtherRevisions(ctx context.Context, collection, tenantID, sourceID string, keep int64) error
 	DeleteByFilter(ctx context.Context, collection string, sel Selector) error
