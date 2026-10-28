@@ -10,17 +10,6 @@ import (
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
-type fakeErasures struct {
-	docs  []models.Erasure
-	err   error
-	calls int
-}
-
-func (f *fakeErasures) Covering(context.Context, string, []string, []string) ([]models.Erasure, error) {
-	f.calls++
-	return f.docs, f.err
-}
-
 func tombCtx(tenantID string) context.Context {
 	id := testkit.NewIdentity("u-admin", "admin@example.test", "administrator").WithTenant(tenantID, []string{"org_owner"}, true)
 	return ctxauth.WithTenantKind(id.ContextFor(context.Background(), tenantID), "internal")
@@ -60,14 +49,14 @@ func TestTombstones_Covered(t *testing.T) {
 func TestTombstones_CoveredRefusesForeignTenantAndPropagatesErrors(t *testing.T) {
 	probes := []Probe{{SourceID: "a"}}
 	f := &fakeErasures{}
-	if _, err := NewTombstones(f).Covered(tombCtx("t2"), "t1", "c", probes); err == nil || f.calls != 0 {
-		t.Fatalf("foreign tenant: err=%v calls=%d", err, f.calls)
+	if _, err := NewTombstones(f).Covered(tombCtx("t2"), "t1", "c", probes); err == nil || f.callCount() != 0 {
+		t.Fatalf("foreign tenant: err=%v calls=%d", err, f.callCount())
 	}
-	if _, err := NewTombstones(f).Covered(tombCtx("t1"), "", "c", probes); err == nil || f.calls != 0 {
-		t.Fatalf("empty tenant: err=%v calls=%d", err, f.calls)
+	if _, err := NewTombstones(f).Covered(tombCtx("t1"), "", "c", probes); err == nil || f.callCount() != 0 {
+		t.Fatalf("empty tenant: err=%v calls=%d", err, f.callCount())
 	}
-	if _, err := NewTombstones(f).Covered(context.Background(), "t1", "c", probes); err == nil || f.calls != 0 {
-		t.Fatalf("no ctx tenant: err=%v calls=%d", err, f.calls)
+	if _, err := NewTombstones(f).Covered(context.Background(), "t1", "c", probes); err == nil || f.callCount() != 0 {
+		t.Fatalf("no ctx tenant: err=%v calls=%d", err, f.callCount())
 	}
 	boom := errors.New("boom")
 	got, err := NewTombstones(&fakeErasures{err: boom}).Covered(tombCtx("t1"), "t1", "c", probes)
@@ -76,7 +65,7 @@ func TestTombstones_CoveredRefusesForeignTenantAndPropagatesErrors(t *testing.T)
 	}
 	f = &fakeErasures{}
 	got, err = NewTombstones(f).Covered(tombCtx("t1"), "t1", "c", nil)
-	if err != nil || got == nil || len(got) != 0 || f.calls != 0 {
-		t.Fatalf("no probes: %v %v calls=%d", got, err, f.calls)
+	if err != nil || got == nil || len(got) != 0 || f.callCount() != 0 {
+		t.Fatalf("no probes: %v %v calls=%d", got, err, f.callCount())
 	}
 }

@@ -74,7 +74,7 @@ func TestGate_BootstrapCreatesGenerationOne(t *testing.T) {
 
 func TestGate_BootstrapEngineDown(t *testing.T) {
 	e := newGateEnv()
-	e.eng.ensureErr = engine.ErrUnavailable
+	e.eng.setEnsureErr(engine.ErrUnavailable)
 	g, problem := e.prepare(t)
 	assert.Nil(t, g)
 	assert.Equal(t, "corpus crm_contacts: vector engine unavailable", problem)
@@ -83,8 +83,10 @@ func TestGate_BootstrapEngineDown(t *testing.T) {
 
 func TestGate_LocalOnlyRefusesHostedEndpoint(t *testing.T) {
 	e := newGateEnv()
-	e.profiles.profile.Boundary = iface.InferenceBoundaryHosted
-	e.profiles.profile.Endpoint = "embed"
+	e.profiles.update(func(p *iface.InferenceProfile) {
+		p.Boundary = iface.InferenceBoundaryHosted
+		p.Endpoint = "embed"
+	})
 	g, problem := e.prepare(t)
 	assert.Nil(t, g)
 	assert.Equal(t, `corpus crm_contacts: local_only corpus uses hosted endpoint "embed"`, problem)
@@ -141,13 +143,13 @@ func TestGate_ProfileChangedKeepsTheActiveGeneration(t *testing.T) {
 
 func TestGate_OwnerNotStartedTouchesNothing(t *testing.T) {
 	e := newGateEnv()
-	e.modules.started["crm"] = false
+	e.modules.setStarted("crm", false)
 	g, problem := e.prepare(t)
 	assert.Nil(t, g)
 	assert.Empty(t, problem)
-	assert.Equal(t, 0, e.profiles.calls)
+	assert.Equal(t, 0, e.profiles.callCount())
 	assert.Equal(t, 0, e.states.writes)
-	assert.Empty(t, e.eng.calls)
+	assert.Empty(t, e.eng.callLog())
 }
 
 func TestGate_TransientProfileErrorWritesNothing(t *testing.T) {
@@ -161,20 +163,20 @@ func TestGate_TransientProfileErrorWritesNothing(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newGateEnv()
-			e.profiles.err = tc.err
-			e.profiles.profile.Dimensions = tc.dims
+			e.profiles.setErr(tc.err)
+			e.profiles.update(func(p *iface.InferenceProfile) { p.Dimensions = tc.dims })
 			g, problem := e.prepare(t)
 			assert.Nil(t, g)
 			assert.Equal(t, "corpus crm_contacts: inference profile unavailable", problem)
 			assert.Equal(t, 0, e.states.writes)
-			assert.Empty(t, e.eng.calls)
+			assert.Empty(t, e.eng.callLog())
 		})
 	}
 }
 
 func TestGate_WrongKindPersistsError(t *testing.T) {
 	e := newGateEnv()
-	e.profiles.profile.Kind = iface.InferenceKindChat
+	e.profiles.update(func(p *iface.InferenceProfile) { p.Kind = iface.InferenceKindChat })
 	g, problem := e.prepare(t)
 	assert.Nil(t, g)
 	assert.Equal(t, `corpus crm_contacts: endpoint "embed" is not an embedding endpoint`, problem)
@@ -185,7 +187,7 @@ func TestGate_WrongKindPersistsError(t *testing.T) {
 
 func TestGate_UnknownEndpointPersistsErrorAndRecovers(t *testing.T) {
 	e := newGateEnv()
-	e.profiles.err = iface.ErrLLMNotConfigured
+	e.profiles.setErr(iface.ErrLLMNotConfigured)
 	g, problem := e.prepare(t)
 	assert.Nil(t, g)
 	assert.Equal(t, `corpus crm_contacts: embed endpoint "embed" is not configured`, problem)
@@ -193,7 +195,7 @@ func TestGate_UnknownEndpointPersistsErrorAndRecovers(t *testing.T) {
 	assert.Equal(t, models.CorpusStatusError, st.Status)
 	assert.Equal(t, models.ReasonEndpointUnknown, st.Reason)
 
-	e.profiles.err = nil
+	e.profiles.setErr(nil)
 	g, problem = e.prepare(t)
 	require.NotNil(t, g)
 	assert.Empty(t, problem)
