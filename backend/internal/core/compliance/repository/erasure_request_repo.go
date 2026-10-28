@@ -223,6 +223,16 @@ func (r *ErasureRequestRepository) Settle(ctx context.Context, uuid string, leas
 	return nil
 }
 
+// progressFence is the filter value matching exactly the stored progress p:
+// the same array of documents, or no progress at all when p is empty (an
+// empty progress is never stored: the field is omitempty).
+func progressFence(p []models.ErasureProducerProgress) any {
+	if len(p) == 0 {
+		return bson.M{"$exists": false}
+	}
+	return p
+}
+
 // HasIncomplete reports whether the data subject has an incomplete erasure.
 func (r *ErasureRequestRepository) HasIncomplete(ctx context.Context, userUUID string) (bool, error) {
 	//tenantscope:allow dsr: incomplete erasure lookup by data subject across tenants
@@ -260,13 +270,16 @@ func (r *ErasureRequestRepository) Resolve(ctx context.Context, uuid, status, re
 
 // ClosePartial closes an incomplete request whose remaining producers are no
 // longer registered: status closed_partial, the abandoned producer keys, who
-// closed it and why. It needs the lease free; a live lease means a run is in
-// flight (ErrErasureRequestBusy). An expired lease is removed, so the late
-// Settle of a dead run cannot match. Any other row misses (ErrErasureRequestNotFound).
-func (r *ErasureRequestRepository) ClosePartial(ctx context.Context, uuid string, now time.Time, abandoned []string, closedBy, note string) error {
+// closed it and why. It is fenced by the progress the caller checked
+// (expected, compared exactly): a run that changed it since makes the close
+// miss. It needs the lease free; a live lease means a run is in flight. Both
+// misses on a still-incomplete row are ErrErasureRequestBusy. An expired lease
+// is removed, so the late Settle of a dead run cannot match. Any other row
+// misses (ErrErasureRequestNotFound).
+func (r *ErasureRequestRepository) ClosePartial(ctx context.Context, uuid string, now time.Time, expected []models.ErasureProducerProgress, abandoned []string, closedBy, note string) error {
 	//tenantscope:allow compliance admin closes a specific erasure request by its own UUID — cross-tenant by design.
 	res, err := r.coll.UpdateOne(ctx,
-		bson.M{"uuid": uuid, "status": models.ErasureRequestIncomplete, "$or": leaseFree(now)},
+		bson.M{"uuid": uuid, "status": models.ErasureRequestIncomplete, "progress": progressFence(expected), "$or": leaseFree(now)},
 		bson.M{
 			"$set": bson.M{
 				"status":         models.ErasureRequestClosedPartial,

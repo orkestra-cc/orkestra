@@ -110,6 +110,23 @@ func (m *MemRepo) Insert(_ context.Context, req *models.ErasureRequest) error {
 	return nil
 }
 
+// sameProgress compares two progress lists field by field, times at BSON
+// millisecond precision, as the Mongo progress fence does.
+func sameProgress(a, b []models.ErasureProducerProgress) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		x, y := a[i], b[i]
+		if x.Key != y.Key || x.Subject != y.Subject || x.Outcome != y.Outcome || x.RowsDeleted != y.RowsDeleted ||
+			x.RowsAnonymized != y.RowsAnonymized || x.Attempts != y.Attempts ||
+			!x.UpdatedAt.Truncate(time.Millisecond).Equal(y.UpdatedAt.Truncate(time.Millisecond)) {
+			return false
+		}
+	}
+	return true
+}
+
 // activeRetention matches the partial unique userUuid index the module declares.
 func activeRetention(r models.ErasureRequest) bool {
 	return r.Status == models.ErasureRequestIncomplete && r.Source == models.ErasureSourceRetention
@@ -280,15 +297,16 @@ func (m *MemRepo) HasIncomplete(_ context.Context, userUUID string) (bool, error
 	return false, nil
 }
 
-// ClosePartial closes a lease-free incomplete request; see repository.ErasureRequestRepository.ClosePartial.
-func (m *MemRepo) ClosePartial(_ context.Context, uuid string, now time.Time, abandoned []string, closedBy, note string) error {
+// ClosePartial closes a lease-free incomplete request whose progress is still
+// expected; see repository.ErasureRequestRepository.ClosePartial.
+func (m *MemRepo) ClosePartial(_ context.Context, uuid string, now time.Time, expected []models.ErasureProducerProgress, abandoned []string, closedBy, note string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.rows[uuid]
 	if !ok || r.Status != models.ErasureRequestIncomplete {
 		return repository.ErrErasureRequestNotFound
 	}
-	if !leaseFree(r, now) {
+	if !leaseFree(r, now) || !sameProgress(r.Progress, expected) {
 		return repository.ErrErasureRequestBusy
 	}
 	resolved := now.Truncate(time.Millisecond)

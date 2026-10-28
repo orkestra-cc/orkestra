@@ -449,7 +449,7 @@ func TestErasureClosePartialOnlyIncompleteAndLeaseFree(t *testing.T) {
 	insertErasure(t, r, models.ErasureRequest{UUID: "r-2", UserUUID: "u-2", Status: models.ErasureRequestIncomplete, RequestedAt: now, LeaseUntil: tp(now.Add(time.Minute))})
 	insertErasure(t, r, models.ErasureRequest{UUID: "r-3", UserUUID: "u-3", Status: models.ErasureRequestPending, RequestedAt: now})
 
-	if err := r.ClosePartial(ctx, "r-1", now, []string{"gone"}, "admin-1", "module removed"); err != nil {
+	if err := r.ClosePartial(ctx, "r-1", now, nil, []string{"gone"}, "admin-1", "module removed"); err != nil {
 		t.Fatalf("ClosePartial: %v", err)
 	}
 	row, err := r.Get(ctx, "r-1")
@@ -460,13 +460,13 @@ func TestErasureClosePartialOnlyIncompleteAndLeaseFree(t *testing.T) {
 		row.ResolvedBy != "admin-1" || row.ResolutionNote != "module removed" || row.NextAttemptAt != nil || row.ResolvedAt == nil {
 		t.Fatalf("closed row = %+v", row)
 	}
-	if err := r.ClosePartial(ctx, "r-2", now, []string{"gone"}, "admin-1", "n"); !errors.Is(err, ErrErasureRequestBusy) {
+	if err := r.ClosePartial(ctx, "r-2", now, nil, []string{"gone"}, "admin-1", "n"); !errors.Is(err, ErrErasureRequestBusy) {
 		t.Fatalf("leased err = %v; want ErrErasureRequestBusy", err)
 	}
-	if err := r.ClosePartial(ctx, "r-3", now, []string{"gone"}, "admin-1", "n"); !errors.Is(err, ErrErasureRequestNotFound) {
+	if err := r.ClosePartial(ctx, "r-3", now, nil, []string{"gone"}, "admin-1", "n"); !errors.Is(err, ErrErasureRequestNotFound) {
 		t.Fatalf("pending err = %v; want ErrErasureRequestNotFound", err)
 	}
-	if err := r.ClosePartial(ctx, "r-1", now, []string{"gone"}, "admin-1", "n"); !errors.Is(err, ErrErasureRequestNotFound) {
+	if err := r.ClosePartial(ctx, "r-1", now, nil, []string{"gone"}, "admin-1", "n"); !errors.Is(err, ErrErasureRequestNotFound) {
 		t.Fatalf("already closed err = %v; want ErrErasureRequestNotFound", err)
 	}
 }
@@ -512,7 +512,7 @@ func TestErasureClosePartialReleasesLeaseAndRefusesStaleSettle(t *testing.T) {
 		t.Fatalf("Claim: %v", err)
 	}
 	later := lease.Add(time.Second) // the run died; its lease expired
-	if err := r.ClosePartial(ctx, "r-1", later, []string{"gone"}, "admin-1", "module removed"); err != nil {
+	if err := r.ClosePartial(ctx, "r-1", later, nil, []string{"gone"}, "admin-1", "module removed"); err != nil {
 		t.Fatalf("ClosePartial: %v", err)
 	}
 	row, err := r.Get(ctx, "r-1")
@@ -608,5 +608,55 @@ func TestErasureInsertOneActiveRetentionRequestPerSubject(t *testing.T) {
 	}
 	if err := r.Insert(ctx, retention("d")); err != nil {
 		t.Fatalf("retention Insert after the first completed: %v", err)
+	}
+}
+
+// TestErasureClosePartialIsFencedByProgress: the close is written only while
+// the progress is still the one the caller checked. A run that settled in
+// between (changed progress, lease released) makes it fail as busy, leaving
+// the run's state; with the current progress it closes.
+func TestErasureClosePartialIsFencedByProgress(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	r := NewErasureRequestRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	checked := []models.ErasureProducerProgress{
+		{Key: "user", Subject: "user", Outcome: models.ProducerOutcomeDone, Attempts: 1, UpdatedAt: now},
+		{Key: "gone", Subject: "gone", Outcome: models.ProducerOutcomeFailed, Attempts: 1, UpdatedAt: now},
+	}
+	insertErasure(t, r, models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestIncomplete, RequestedAt: now, Progress: checked})
+	seen, err := r.Get(ctx, "r-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	// A concurrent run claims, records a new producer and settles.
+	lease := now.Add(5 * time.Minute).Truncate(time.Millisecond)
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestIncomplete, "", "", now, lease); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	moved := append(append([]models.ErasureProducerProgress(nil), checked...),
+		models.ErasureProducerProgress{Key: "crm", Subject: "crm", Outcome: models.ProducerOutcomePending, Attempts: 1, UpdatedAt: now})
+	next := now.Add(time.Minute)
+	if err := r.Settle(ctx, "r-1", lease, ErasureSettlement{Status: models.ErasureRequestIncomplete, Progress: moved, Attempts: 1, NextAttemptAt: &next}); err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+
+	if err := r.ClosePartial(ctx, "r-1", now, seen.Progress, []string{"gone"}, "admin-1", "n"); !errors.Is(err, ErrErasureRequestBusy) {
+		t.Fatalf("close on stale progress err = %v; want ErrErasureRequestBusy", err)
+	}
+	row, err := r.Get(ctx, "r-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if row.Status != models.ErasureRequestIncomplete || len(row.Progress) != 3 || row.NextAttemptAt == nil {
+		t.Fatalf("row = %+v; want the run's state, not closed", row)
+	}
+	if err := r.ClosePartial(ctx, "r-1", now, row.Progress, []string{"gone", "crm"}, "admin-1", "n"); err != nil {
+		t.Fatalf("close on current progress: %v", err)
+	}
+	if row, _ := r.Get(ctx, "r-1"); row.Status != models.ErasureRequestClosedPartial {
+		t.Fatalf("row = %+v; want closed_partial", row)
 	}
 }

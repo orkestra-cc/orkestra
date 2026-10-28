@@ -66,7 +66,7 @@ type erasureRequestRepo interface {
 	RecordProgress(ctx context.Context, uuid string, leaseUntil time.Time, progress []models.ErasureProducerProgress) error
 	Settle(ctx context.Context, uuid string, leaseUntil time.Time, s repository.ErasureSettlement) error
 	HasIncomplete(ctx context.Context, userUUID string) (bool, error)
-	ClosePartial(ctx context.Context, uuid string, now time.Time, abandoned []string, closedBy, note string) error
+	ClosePartial(ctx context.Context, uuid string, now time.Time, expected []models.ErasureProducerProgress, abandoned []string, closedBy, note string) error
 }
 
 // ErasureOutcome is the result of one leased erasure run.
@@ -124,13 +124,21 @@ func (s *ErasureRequestService) ListOpen(ctx context.Context) ([]models.ErasureR
 	if err != nil {
 		return nil, err
 	}
-	registered := s.dsr.RegisteredKeys()
 	for i := range rows {
 		if rows[i].Status == models.ErasureRequestIncomplete {
-			_, rows[i].Closable = abandonedKeys(rows[i].Progress, registered)
+			_, rows[i].Closable = s.closable(rows[i].Progress)
 		}
 	}
 	return rows, nil
+}
+
+// closable reports the abandoned keys of a request with progress, judged
+// against the producers registered now: the progress is first completed with
+// PlanProgress, so a registered producer that never ran for the subject is
+// pending and keeps the request open.
+func (s *ErasureRequestService) closable(progress []models.ErasureProducerProgress) ([]string, bool) {
+	plan, _ := s.dsr.PlanProgress(progress)
+	return abandonedKeys(plan, s.dsr.RegisteredKeys())
 }
 
 // abandonedKeys returns the not-done progress keys absent from registered; ok
@@ -149,8 +157,12 @@ func abandonedKeys(progress []models.ErasureProducerProgress, registered map[str
 }
 
 // ClosePartial closes an incomplete request whose not-done producers are all
-// gone from this binary, recording them as abandoned. Nothing is erased, so
-// the legal hold does not gate it. The note is masked before it is stored.
+// gone from this binary, recording them as abandoned. A registered producer
+// missing from the progress (added since the last run) has not erased the
+// subject's data, so it makes the request not closable. The write is fenced by
+// the progress checked here: a run that changed it meanwhile makes the close
+// fail with repository.ErrErasureRequestBusy. Nothing is erased, so the legal
+// hold does not gate it. The note is masked before it is stored.
 func (s *ErasureRequestService) ClosePartial(ctx context.Context, requestUUID, closedBy, note string) (*models.ErasureRequest, error) {
 	note, valid := NormalizeReason(note)
 	if !valid {
@@ -168,11 +180,11 @@ func (s *ErasureRequestService) ClosePartial(ctx context.Context, requestUUID, c
 	default:
 		return nil, repository.ErrErasureRequestNotFound
 	}
-	keys, ok := abandonedKeys(row.Progress, s.dsr.RegisteredKeys())
+	keys, ok := s.closable(row.Progress)
 	if !ok {
 		return nil, ErrErasureRequestNotClosable
 	}
-	if err := s.repo.ClosePartial(ctx, requestUUID, s.now(), keys, closedBy, note); err != nil {
+	if err := s.repo.ClosePartial(ctx, requestUUID, s.now(), row.Progress, keys, closedBy, note); err != nil {
 		return nil, err
 	}
 	if s.sink != nil {

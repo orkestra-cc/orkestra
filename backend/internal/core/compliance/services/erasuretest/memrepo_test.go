@@ -216,7 +216,7 @@ func TestMemErasureClosePartialOnlyIncompleteAndLeaseFree(t *testing.T) {
 	r.Put(models.ErasureRequest{UUID: "r-2", UserUUID: "u-2", Status: models.ErasureRequestIncomplete, RequestedAt: now, LeaseUntil: tp(now.Add(time.Minute))})
 	r.Put(models.ErasureRequest{UUID: "r-3", UserUUID: "u-3", Status: models.ErasureRequestPending, RequestedAt: now})
 
-	if err := r.ClosePartial(ctx, "r-1", now, []string{"gone"}, "admin-1", "module removed"); err != nil {
+	if err := r.ClosePartial(ctx, "r-1", now, nil, []string{"gone"}, "admin-1", "module removed"); err != nil {
 		t.Fatalf("ClosePartial: %v", err)
 	}
 	row := r.Row("r-1")
@@ -224,13 +224,13 @@ func TestMemErasureClosePartialOnlyIncompleteAndLeaseFree(t *testing.T) {
 		row.ResolvedBy != "admin-1" || row.ResolutionNote != "module removed" || row.NextAttemptAt != nil || row.ResolvedAt == nil {
 		t.Fatalf("closed row = %+v", row)
 	}
-	if err := r.ClosePartial(ctx, "r-2", now, []string{"gone"}, "admin-1", "n"); !errors.Is(err, repository.ErrErasureRequestBusy) {
+	if err := r.ClosePartial(ctx, "r-2", now, nil, []string{"gone"}, "admin-1", "n"); !errors.Is(err, repository.ErrErasureRequestBusy) {
 		t.Fatalf("leased err = %v; want ErrErasureRequestBusy", err)
 	}
-	if err := r.ClosePartial(ctx, "r-3", now, []string{"gone"}, "admin-1", "n"); !errors.Is(err, repository.ErrErasureRequestNotFound) {
+	if err := r.ClosePartial(ctx, "r-3", now, nil, []string{"gone"}, "admin-1", "n"); !errors.Is(err, repository.ErrErasureRequestNotFound) {
 		t.Fatalf("pending err = %v; want ErrErasureRequestNotFound", err)
 	}
-	if err := r.ClosePartial(ctx, "r-1", now, []string{"gone"}, "admin-1", "n"); !errors.Is(err, repository.ErrErasureRequestNotFound) {
+	if err := r.ClosePartial(ctx, "r-1", now, nil, []string{"gone"}, "admin-1", "n"); !errors.Is(err, repository.ErrErasureRequestNotFound) {
 		t.Fatalf("already closed err = %v; want ErrErasureRequestNotFound", err)
 	}
 }
@@ -269,7 +269,7 @@ func TestMemErasureClosePartialReleasesLeaseAndRefusesStaleSettle(t *testing.T) 
 		t.Fatalf("Claim: %v", err)
 	}
 	later := lease.Add(time.Second) // the run died; its lease expired
-	if err := r.ClosePartial(ctx, "r-1", later, []string{"gone"}, "admin-1", "module removed"); err != nil {
+	if err := r.ClosePartial(ctx, "r-1", later, nil, []string{"gone"}, "admin-1", "module removed"); err != nil {
 		t.Fatalf("ClosePartial: %v", err)
 	}
 	row := r.Row("r-1")
@@ -330,5 +330,26 @@ func TestMemErasureInsertOneActiveRetentionRequestPerSubject(t *testing.T) {
 	r.Put(models.ErasureRequest{UUID: "a", UserUUID: "u-1", Status: models.ErasureRequestCompleted, Source: models.ErasureSourceRetention})
 	if err := r.Insert(ctx, retention("d")); err != nil {
 		t.Fatalf("retention Insert after the first completed: %v", err)
+	}
+}
+
+func TestMemErasureClosePartialIsFencedByProgress(t *testing.T) {
+	r := NewMemRepo()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	checked := []models.ErasureProducerProgress{{Key: "gone", Subject: "gone", Outcome: models.ProducerOutcomeFailed, Attempts: 1, UpdatedAt: now}}
+	r.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestIncomplete, RequestedAt: now, Progress: checked})
+	moved := append(append([]models.ErasureProducerProgress(nil), checked...),
+		models.ErasureProducerProgress{Key: "crm", Subject: "crm", Outcome: models.ProducerOutcomePending, UpdatedAt: now})
+	r.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestIncomplete, RequestedAt: now, Progress: moved})
+
+	if err := r.ClosePartial(ctx, "r-1", now, checked, []string{"gone"}, "admin-1", "n"); !errors.Is(err, repository.ErrErasureRequestBusy) {
+		t.Fatalf("close on stale progress err = %v; want ErrErasureRequestBusy", err)
+	}
+	if row := r.Row("r-1"); row.Status != models.ErasureRequestIncomplete || len(row.Progress) != 2 {
+		t.Fatalf("row = %+v; want untouched", row)
+	}
+	if err := r.ClosePartial(ctx, "r-1", now, r.Row("r-1").Progress, []string{"gone", "crm"}, "admin-1", "n"); err != nil {
+		t.Fatalf("close on current progress: %v", err)
 	}
 }

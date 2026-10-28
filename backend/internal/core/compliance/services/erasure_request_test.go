@@ -772,3 +772,65 @@ func TestRunRecordFailureRunsNoProducer(t *testing.T) {
 		t.Fatalf("purge=%d row=%+v; want no purge, incomplete under its lease", user.purgeCalls, row)
 	}
 }
+
+// TestClosePartialRefusedWhileANewlyRegisteredProducerHasNotRun: a deployment
+// added crm and removed gone before the request's next retry. crm never ran
+// for the subject, so the request is not closable (ListOpen and ClosePartial
+// agree) and nothing is written.
+func TestClosePartialRefusedWhileANewlyRegisteredProducerHasNotRun(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete, RequestedAt: erasureT0,
+		Progress: []models.ErasureProducerProgress{done("user"), failed("gone")}})
+	svc, sink := newCloseSvc(repo, &stubProducer{subject: "user"}, &stubProducer{subject: "crm"})
+
+	open, err := svc.ListOpen(context.Background())
+	if err != nil || len(open) != 1 || open[0].Closable {
+		t.Fatalf("ListOpen = %+v, %v; want r-1 not closable", open, err)
+	}
+	if _, err := svc.ClosePartial(context.Background(), "r-1", "admin-1", "gone removed"); !errors.Is(err, ErrErasureRequestNotClosable) {
+		t.Fatalf("ClosePartial err = %v; want ErrErasureRequestNotClosable", err)
+	}
+	if row := repo.Row("r-1"); row.Status != models.ErasureRequestIncomplete || len(sink.events) != 0 {
+		t.Fatalf("row = %+v, events = %d; want untouched", row, len(sink.events))
+	}
+}
+
+// progressChangingRepo settles a concurrent run (changing the progress) just
+// before the close is written, after the service checked closability.
+type progressChangingRepo struct {
+	*erasuretest.MemRepo
+	change func()
+}
+
+func (r progressChangingRepo) ClosePartial(ctx context.Context, uuid string, now time.Time, expected []models.ErasureProducerProgress, abandoned []string, closedBy, note string) error {
+	r.change()
+	return r.MemRepo.ClosePartial(ctx, uuid, now, expected, abandoned, closedBy, note)
+}
+
+// TestClosePartialFailsWhenARunChangedTheProgressMeanwhile pins the fenced
+// close: a run that changes the progress between the check and the write makes
+// the close fail (busy) instead of overwriting the request.
+func TestClosePartialFailsWhenARunChangedTheProgressMeanwhile(t *testing.T) {
+	t.Parallel()
+	mem := erasuretest.NewMemRepo()
+	row := models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete, RequestedAt: erasureT0,
+		Progress: []models.ErasureProducerProgress{done("user"), failed("gone")}}
+	mem.Put(row)
+	repo := progressChangingRepo{MemRepo: mem, change: func() {
+		changed := row
+		changed.Progress = []models.ErasureProducerProgress{done("user"), failed("gone"), pendingProgress("crm")}
+		mem.Put(changed)
+	}}
+	dsr, _ := newDSRService(&stubProducer{subject: "user"})
+	sink := &capturingAuditSink{}
+	svc := NewErasureRequestService(repo, dsr, sink, nil)
+	svc.now = func() time.Time { return erasureT0 }
+
+	if _, err := svc.ClosePartial(context.Background(), "r-1", "admin-1", "gone removed"); !errors.Is(err, repository.ErrErasureRequestBusy) {
+		t.Fatalf("ClosePartial err = %v; want ErrErasureRequestBusy", err)
+	}
+	if got := mem.Row("r-1"); got.Status != models.ErasureRequestIncomplete || len(got.Progress) != 3 || len(sink.events) != 0 {
+		t.Fatalf("row = %+v, events = %d; want the run's state, not closed", got, len(sink.events))
+	}
+}
