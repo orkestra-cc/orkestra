@@ -11,6 +11,7 @@ import (
 	"github.com/orkestra/backend/internal/core/logging"
 	"github.com/orkestra/backend/internal/core/navigation"
 	"github.com/orkestra/backend/internal/core/notification"
+	"github.com/orkestra/backend/internal/core/retrieval"
 	"github.com/orkestra/backend/internal/core/tenant"
 	"github.com/orkestra/backend/internal/core/user"
 	"github.com/orkestra/backend/internal/shared/config"
@@ -36,6 +37,9 @@ import (
 //   - llm: ADR-0022 — LLM credentials/models/grants per org + iface.LLMGateway.
 //     Depends on user/tenant/notification; inits BEFORE compliance so the
 //     latter can push the KMS provider and the audit sink into the gateway.
+//   - retrieval: ADR-0023 — corpora, indexing and hybrid search over tenant
+//     data (Qdrant behind an engine driver). Depends on tenant/authz/llm;
+//     inits BEFORE compliance, which pushes its audit sink in later (PR 6).
 //   - compliance: ADR-0009 — audit sink + GDPR DSR pipeline + per-tenant KMS
 //     crypto-shred + SOC2 evidence. Depends on user/auth/tenant; inits last so
 //     their PII producers and concrete services are already registered when it
@@ -50,6 +54,7 @@ func coreModules(cfg *config.Config) []func() module.Module {
 		func() module.Module { return navigation.NewModule() },
 		func() module.Module { return logging.NewModule() },
 		func() module.Module { return llm.NewModule(llm.WithOperatorPublicURL(cfg.Server.Operator.PublicURL)) },
+		func() module.Module { return retrieval.NewModule() },
 		func() module.Module { return compliance.NewModule() },
 	}
 }

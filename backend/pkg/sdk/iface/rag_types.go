@@ -8,6 +8,8 @@ package iface
 // SourceRef points to a chunk that contributed to a RAG answer. Returned
 // alongside the answer so consumers can render citations or follow the
 // provenance back to the source document.
+//
+// Deprecated: use iface.RetrievalSearch, served by the core retrieval module under module.ServiceRetrieval (ADR-0023 D16). Removed in a later release.
 type SourceRef struct {
 	DocumentUUID     string  `json:"documentUuid"`
 	DocumentTitle    string  `json:"documentTitle"`
@@ -23,6 +25,8 @@ type SourceRef struct {
 
 // QueryMeta carries timing/sizing breakdowns for a RAG query — useful for
 // observability dashboards and debugging slow requests.
+//
+// Deprecated: use iface.RetrievalSearch, served by the core retrieval module under module.ServiceRetrieval (ADR-0023 D16). Removed in a later release.
 type QueryMeta struct {
 	EmbeddingTimeMs int64  `json:"embeddingTimeMs"`
 	SearchTimeMs    int64  `json:"searchTimeMs"`
@@ -36,6 +40,8 @@ type QueryMeta struct {
 // The Body wrapper matches Huma's response-DTO shape so the rag addon's
 // query handler can return the value directly. Consumers reading the
 // answer should access resp.Body.Answer / Sources / Metadata.
+//
+// Deprecated: use iface.RetrievalSearch, served by the core retrieval module under module.ServiceRetrieval (ADR-0023 D16). Removed in a later release.
 type RAGQueryResponse struct {
 	Body struct {
 		Answer   string      `json:"answer" doc:"Generated answer"`
