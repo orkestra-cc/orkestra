@@ -125,7 +125,11 @@ export function buildCoreRoutes(
                   element: (
                     <ProtectedRoute
                       requiredPermissions={[
-                        ['super_admin', 'administrator', 'developer']
+                        // Platform roles that hold user.read at global scope
+                        // (authz rule 2b): a manager runs the operators without
+                        // being an administrator. Role names, not `user.read`:
+                        // /authz/me is tenant-scoped and never lists global keys.
+                        ['super_admin', 'administrator', 'developer', 'manager']
                       ]}
                     >
                       <Suspense
@@ -455,7 +459,8 @@ export function buildCoreRoutes(
                   element: (
                     <ProtectedRoute
                       requiredPermissions={[
-                        ['super_admin', 'administrator', 'developer']
+                        // Same audience as /admin/users (user.read at global scope).
+                        ['super_admin', 'administrator', 'developer', 'manager']
                       ]}
                     >
                       <Suspense
