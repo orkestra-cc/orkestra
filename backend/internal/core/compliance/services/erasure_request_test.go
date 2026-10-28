@@ -3,43 +3,34 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/orkestra/backend/internal/core/compliance/models"
 	"github.com/orkestra/backend/internal/core/compliance/repository"
+	"github.com/orkestra/backend/internal/core/compliance/services/erasuretest"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
-// fakeErasureRepo is a hand-rolled stub of erasureRequestRepo.
-type fakeErasureRepo struct {
-	inserted       *models.ErasureRequest
-	insertErr      error
-	getResult      *models.ErasureRequest
-	getErr         error
-	listResult     []models.ErasureRequest
-	listErr        error
-	resolveErr     error
-	lastListStatus string
-	resolveCalls   int
-	lastResolve    struct{ uuid, status, resolvedBy, mode, note string }
+var erasureT0 = time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+
+func newErasureSvc(repo *erasuretest.MemRepo, producers ...iface.PIIProducer) (*ErasureRequestService, *DSRService) {
+	dsr, _ := newDSRService(producers...)
+	svc := NewErasureRequestService(repo, dsr, nil, nil)
+	svc.now = func() time.Time { return erasureT0 }
+	return svc, dsr
 }
 
-func (f *fakeErasureRepo) Insert(_ context.Context, req *models.ErasureRequest) error {
-	f.inserted = req
-	return f.insertErr
+func done(key string) models.ErasureProducerProgress {
+	return models.ErasureProducerProgress{Key: key, Subject: key, Outcome: models.ProducerOutcomeDone, Attempts: 1}
 }
-func (f *fakeErasureRepo) Get(_ context.Context, _ string) (*models.ErasureRequest, error) {
-	return f.getResult, f.getErr
+
+func failed(key string) models.ErasureProducerProgress {
+	return models.ErasureProducerProgress{Key: key, Subject: key, Outcome: models.ProducerOutcomeFailed, Attempts: 1}
 }
-func (f *fakeErasureRepo) ListByStatus(_ context.Context, status string) ([]models.ErasureRequest, error) {
-	f.lastListStatus = status
-	return f.listResult, f.listErr
-}
-func (f *fakeErasureRepo) Resolve(_ context.Context, uuid, status, resolvedBy, mode, note string) error {
-	f.resolveCalls++
-	f.lastResolve = struct{ uuid, status, resolvedBy, mode, note string }{uuid, status, resolvedBy, mode, note}
-	return f.resolveErr
-}
+
+func ptrTime(t time.Time) *time.Time { return &t }
 
 // TestLodgeCreatesPendingRequest pins the Lodge contract: the service stamps a
 // UUID + RequestedAt, defaults the status to pending, and forwards the subject
@@ -47,15 +38,15 @@ func (f *fakeErasureRepo) Resolve(_ context.Context, uuid, status, resolvedBy, m
 func TestLodgeCreatesPendingRequest(t *testing.T) {
 	t.Parallel()
 
-	repo := &fakeErasureRepo{}
+	repo := erasuretest.NewMemRepo()
 	dsr, _ := newDSRService()
-	svc := NewErasureRequestService(repo, dsr)
+	svc := NewErasureRequestService(repo, dsr, nil, nil)
 
 	got, err := svc.Lodge(context.Background(), "u-1", "t-1", "no longer a customer")
 	if err != nil {
 		t.Fatalf("Lodge: %v", err)
 	}
-	if repo.inserted == nil {
+	if repo.Row(got.UUID).UUID != got.UUID {
 		t.Fatal("Lodge should insert a request")
 	}
 	if got.UUID == "" || got.RequestedAt.IsZero() {
@@ -69,128 +60,777 @@ func TestLodgeCreatesPendingRequest(t *testing.T) {
 	}
 }
 
-// TestListPendingFiltersByStatus pins that ListPending asks the repo for
-// pending rows specifically.
-func TestListPendingFiltersByStatus(t *testing.T) {
+func TestErasureRetryBackoff(t *testing.T) {
 	t.Parallel()
-
-	repo := &fakeErasureRepo{listResult: []models.ErasureRequest{{UUID: "r-1"}}}
-	dsr, _ := newDSRService()
-	svc := NewErasureRequestService(repo, dsr)
-
-	got, err := svc.ListPending(context.Background())
-	if err != nil {
-		t.Fatalf("ListPending: %v", err)
+	cases := map[int]time.Duration{
+		1: time.Minute, 2: 2 * time.Minute, 9: 256 * time.Minute, 10: 6 * time.Hour, 20: 6 * time.Hour,
 	}
-	if repo.lastListStatus != models.ErasureRequestPending {
-		t.Fatalf("ListPending should query pending status; got %q", repo.lastListStatus)
-	}
-	if len(got) != 1 {
-		t.Fatalf("expected 1 request, got %d", len(got))
+	for attempts, want := range cases {
+		if got := erasureRetryBackoff(attempts); got != want {
+			t.Errorf("erasureRetryBackoff(%d) = %v; want %v", attempts, got, want)
+		}
 	}
 }
 
-// TestExecuteRunsEraseAndResolves pins the happy path: a pending request runs
-// the DSR erase, then the request is resolved to completed carrying the erase
-// mode label.
-func TestExecuteRunsEraseAndResolves(t *testing.T) {
+func TestExecuteCompletesWhenEveryProducerDone(t *testing.T) {
 	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestPending, RequestedAt: erasureT0})
+	user := &stubProducer{subject: "user", purgeResult: iface.PurgeResult{RowsDeleted: 1}}
+	auth := &stubProducer{subject: "auth"}
+	svc, _ := newErasureSvc(repo, user, auth)
 
-	repo := &fakeErasureRepo{getResult: &models.ErasureRequest{
-		UUID:     "r-1",
-		UserUUID: "u-9",
-		Status:   models.ErasureRequestPending,
-	}}
-	producer := &stubProducer{subject: "user", purgeResult: iface.PurgeResult{RowsDeleted: 1}}
-	dsr, _ := newDSRService(producer)
-	svc := NewErasureRequestService(repo, dsr)
-
-	res, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-1")
+	out, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-1")
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if res == nil || res.Purged["user"].RowsDeleted != 1 {
-		t.Fatalf("expected the DSR erase to run; got %+v", res)
+	if out.Request.Status != models.ErasureRequestCompleted || out.Run.Purged["user"].RowsDeleted != 1 {
+		t.Fatalf("outcome wrong: %+v / %+v", out.Request, out.Run)
 	}
-	if producer.purgeCalls != 1 {
-		t.Fatalf("producer should be purged once; got %d", producer.purgeCalls)
-	}
-	if repo.resolveCalls != 1 {
-		t.Fatalf("request should be resolved exactly once; got %d", repo.resolveCalls)
-	}
-	if repo.lastResolve.status != models.ErasureRequestCompleted {
-		t.Fatalf("resolved status = %q; want completed", repo.lastResolve.status)
-	}
-	if repo.lastResolve.resolvedBy != "admin-1" || repo.lastResolve.mode != "hard_delete" {
-		t.Fatalf("resolve metadata wrong: %+v", repo.lastResolve)
+	row := repo.Row("r-1")
+	if row.Status != models.ErasureRequestCompleted || row.ResolvedAt == nil || row.ResolvedBy != "admin-1" ||
+		row.Mode != "hard_delete" || len(row.Progress) != 2 || row.LeaseUntil != nil || row.NextAttemptAt != nil {
+		t.Fatalf("settled row wrong: %+v", row)
 	}
 }
 
-// TestExecuteRejectsNonPending pins that executing an already-resolved request
-// returns ErrErasureRequestNotFound and never runs the erase.
-func TestExecuteRejectsNonPending(t *testing.T) {
+func TestExecutePendingProducerLeavesIncomplete(t *testing.T) {
 	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestPending})
+	svc, _ := newErasureSvc(repo,
+		&stubProducer{subject: "user"},
+		&stubProducer{subject: "retrieval", purgeResult: iface.PurgeResult{Pending: true}})
 
-	repo := &fakeErasureRepo{getResult: &models.ErasureRequest{
-		UUID:   "r-1",
-		Status: models.ErasureRequestCompleted,
-	}}
-	producer := &stubProducer{subject: "user"}
-	dsr, _ := newDSRService(producer)
-	svc := NewErasureRequestService(repo, dsr)
-
-	_, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-1")
-	if !errors.Is(err, repository.ErrErasureRequestNotFound) {
-		t.Fatalf("expected ErrErasureRequestNotFound, got %v", err)
+	out, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-1")
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
 	}
-	if producer.purgeCalls != 0 || repo.resolveCalls != 0 {
-		t.Fatalf("a non-pending request must not erase or resolve; purge=%d resolve=%d",
-			producer.purgeCalls, repo.resolveCalls)
+	row := repo.Row("r-1")
+	if out.Request.Status != models.ErasureRequestIncomplete || row.Status != models.ErasureRequestIncomplete ||
+		row.Attempts != 1 || row.LastError != "" || row.ResolvedAt != nil ||
+		row.NextAttemptAt == nil || !row.NextAttemptAt.Equal(erasureT0.Add(time.Minute)) {
+		t.Fatalf("row wrong: %+v", row)
 	}
 }
 
-// TestExecuteBlockedByLegalHold pins that a hold blocks execution: the erase
-// errors with ErrLegalHoldActive and the request stays pending (not resolved).
-func TestExecuteBlockedByLegalHold(t *testing.T) {
+func TestExecutePendingUnderLegalHoldStaysPending(t *testing.T) {
 	t.Parallel()
-
-	repo := &fakeErasureRepo{getResult: &models.ErasureRequest{
-		UUID:     "r-1",
-		UserUUID: "u-held",
-		Status:   models.ErasureRequestPending,
-	}}
-	dsr, _ := newDSRService(&stubProducer{subject: "user"})
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-held", Status: models.ErasureRequestPending})
+	user := &stubProducer{subject: "user"}
+	svc, dsr := newErasureSvc(repo, user)
 	dsr.SetLegalHoldChecker(&fakeHoldChecker{held: true})
-	svc := NewErasureRequestService(repo, dsr)
 
 	_, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-1")
 	if !errors.Is(err, ErrLegalHoldActive) {
 		t.Fatalf("expected ErrLegalHoldActive, got %v", err)
 	}
-	if repo.resolveCalls != 0 {
-		t.Fatalf("a blocked request must stay pending (not resolved); resolve calls=%d", repo.resolveCalls)
+	if repo.Row("r-1").Status != models.ErasureRequestPending || user.purgeCalls != 0 {
+		t.Fatalf("held request must stay pending untouched: %+v purge=%d", repo.Row("r-1"), user.purgeCalls)
 	}
 }
 
-// TestRejectResolvesRejected pins that Reject closes the request as rejected
-// carrying the operator note.
+func TestExecuteRejectsResolvedRequests(t *testing.T) {
+	t.Parallel()
+	for _, status := range []string{models.ErasureRequestCompleted, models.ErasureRequestRejected} {
+		repo := erasuretest.NewMemRepo()
+		repo.Put(models.ErasureRequest{UUID: "r-1", Status: status})
+		user := &stubProducer{subject: "user"}
+		svc, _ := newErasureSvc(repo, user)
+		_, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-1")
+		if !errors.Is(err, repository.ErrErasureRequestNotFound) || user.purgeCalls != 0 {
+			t.Fatalf("%s: err=%v purge=%d", status, err, user.purgeCalls)
+		}
+	}
+}
+
+func TestExecuteIncompleteRunsOnlyRemainingWithStoredMode(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{
+		UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete, Mode: "anonymize",
+		Progress: []models.ErasureProducerProgress{done("user"), failed("auth")},
+	})
+	user := &stubProducer{subject: "user"}
+	auth := &stubProducer{subject: "auth"}
+	svc, _ := newErasureSvc(repo, user, auth)
+
+	out, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-2")
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if user.purgeCalls != 0 || auth.purgeCalls != 1 || auth.lastMode != iface.EraseAnonymize {
+		t.Fatalf("user=%d auth=%d mode=%v", user.purgeCalls, auth.purgeCalls, auth.lastMode)
+	}
+	if out.Request.Status != models.ErasureRequestCompleted || repo.Row("r-1").Mode != "anonymize" {
+		t.Fatalf("row wrong: %+v", repo.Row("r-1"))
+	}
+}
+
+func TestExecuteIncompleteResetsAttempts(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{
+		UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete, Mode: "hard_delete",
+		Attempts: 20, Progress: []models.ErasureProducerProgress{failed("user")},
+	})
+	svc, _ := newErasureSvc(repo, &stubProducer{subject: "user", purgeErr: errors.New("down")})
+
+	if _, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-2"); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	row := repo.Row("r-1")
+	if row.Attempts != 1 || row.NextAttemptAt == nil || !row.NextAttemptAt.Equal(erasureT0.Add(time.Minute)) {
+		t.Fatalf("attempt budget not restarted: %+v", row)
+	}
+}
+
+func TestExecuteBusyWhileLeaseHeld(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{
+		UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete,
+		LeaseUntil: ptrTime(erasureT0.Add(time.Minute)),
+	})
+	user := &stubProducer{subject: "user"}
+	svc, _ := newErasureSvc(repo, user)
+
+	_, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-1")
+	if !errors.Is(err, repository.ErrErasureRequestBusy) || user.purgeCalls != 0 {
+		t.Fatalf("err=%v purge=%d", err, user.purgeCalls)
+	}
+}
+
+func TestRejectIncompleteIsRefused(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", Status: models.ErasureRequestIncomplete})
+	svc, _ := newErasureSvc(repo)
+
+	err := svc.Reject(context.Background(), "r-1", "admin-2", "no")
+	if !errors.Is(err, ErrErasureRequestStarted) || repo.Row("r-1").Status != models.ErasureRequestIncomplete {
+		t.Fatalf("err=%v row=%+v", err, repo.Row("r-1"))
+	}
+}
+
 func TestRejectResolvesRejected(t *testing.T) {
 	t.Parallel()
-
-	repo := &fakeErasureRepo{}
-	dsr, _ := newDSRService()
-	svc := NewErasureRequestService(repo, dsr)
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", Status: models.ErasureRequestPending})
+	svc, _ := newErasureSvc(repo)
 
 	if err := svc.Reject(context.Background(), "r-1", "admin-2", "insufficient identity proof"); err != nil {
 		t.Fatalf("Reject: %v", err)
 	}
-	if repo.resolveCalls != 1 {
-		t.Fatalf("Reject should resolve once; got %d", repo.resolveCalls)
+	row := repo.Row("r-1")
+	if row.Status != models.ErasureRequestRejected || row.ResolutionNote != "insufficient identity proof" || row.ResolvedBy != "admin-2" {
+		t.Fatalf("row wrong: %+v", row)
 	}
-	if repo.lastResolve.status != models.ErasureRequestRejected {
-		t.Fatalf("resolved status = %q; want rejected", repo.lastResolve.status)
+}
+
+func TestListOpenReturnsPendingAndIncomplete(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	for i, st := range []string{"pending", "incomplete", "completed", "rejected"} {
+		repo.Put(models.ErasureRequest{UUID: "r-" + st, Status: st, RequestedAt: erasureT0.Add(time.Duration(i) * time.Second)})
 	}
-	if repo.lastResolve.note != "insufficient identity proof" || repo.lastResolve.resolvedBy != "admin-2" {
-		t.Fatalf("reject metadata wrong: %+v", repo.lastResolve)
+	svc, _ := newErasureSvc(repo)
+	got, err := svc.ListOpen(context.Background())
+	if err != nil || len(got) != 2 {
+		t.Fatalf("ListOpen = %d items, err %v", len(got), err)
+	}
+}
+
+func TestEraseNowRecordsTheRunBeforeProducers(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	user := &stubProducer{subject: "user"}
+	svc, _ := newErasureSvc(repo, user)
+	var seen []models.ErasureRequest
+	user.onPurge = func() {
+		seen, _ = repo.ListByStatus(context.Background(), models.ErasureRequestIncomplete)
+	}
+
+	out, err := svc.EraseNow(context.Background(), "u-1", "t-1", models.ErasureSourceSelfService, "u-1", iface.EraseHardDelete)
+	if err != nil {
+		t.Fatalf("EraseNow: %v", err)
+	}
+	if len(seen) != 1 || seen[0].UserUUID != "u-1" || seen[0].Source != "self_service" ||
+		seen[0].LeaseUntil == nil || !seen[0].LeaseUntil.After(erasureT0) || seen[0].Attempts != 1 {
+		t.Fatalf("row not recorded before the producer ran: %+v", seen)
+	}
+	row := repo.Row(out.Request.UUID)
+	if row.Status != models.ErasureRequestCompleted || row.Source != "self_service" || row.ResolvedBy != "u-1" || row.TenantID != "t-1" {
+		t.Fatalf("final row wrong: %+v", row)
+	}
+}
+
+func TestEraseNowInsertFailureErasesNothing(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.FailNextInsert(errors.New("mongo down"))
+	user := &stubProducer{subject: "user"}
+	svc, _ := newErasureSvc(repo, user)
+
+	if _, err := svc.EraseNow(context.Background(), "u-1", "t-1", "self_service", "u-1", iface.EraseHardDelete); err == nil {
+		t.Fatal("expected the insert error")
+	}
+	if user.purgeCalls != 0 {
+		t.Fatalf("nothing may be erased; purge=%d", user.purgeCalls)
+	}
+}
+
+func TestEraseNowUnderLegalHoldRecordsNothing(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	svc, dsr := newErasureSvc(repo, &stubProducer{subject: "user"})
+	dsr.SetLegalHoldChecker(&fakeHoldChecker{held: true})
+
+	_, err := svc.EraseNow(context.Background(), "u-held", "t-1", "self_service", "u-held", iface.EraseHardDelete)
+	if !errors.Is(err, ErrLegalHoldActive) {
+		t.Fatalf("expected ErrLegalHoldActive, got %v", err)
+	}
+	if rows, _ := repo.ListByStatus(context.Background()); len(rows) != 0 {
+		t.Fatalf("a held subject must record nothing: %+v", rows)
+	}
+}
+
+func TestEraseNowSettleFailureIsRecoveredByRetry(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.FailNextSettle(errors.New("mongo blip"))
+	user := &stubProducer{subject: "user"}
+	auth := &stubProducer{subject: "auth", purgeErrs: []error{errors.New("boom")}}
+	svc, _ := newErasureSvc(repo, user, auth)
+
+	out, err := svc.EraseNow(context.Background(), "u-1", "t-1", "self_service", "u-1", iface.EraseHardDelete)
+	if err != nil {
+		t.Fatalf("EraseNow: %v", err)
+	}
+	if out.Run.Errors["auth"] == "" {
+		t.Fatalf("run should report the auth error: %+v", out.Run)
+	}
+	row := repo.Row(out.Request.UUID)
+	if row.Status != models.ErasureRequestIncomplete || row.LeaseUntil == nil {
+		t.Fatalf("row should stay incomplete under its lease: %+v", row)
+	}
+	if ok, err := svc.RetryDue(context.Background()); ok || err != nil {
+		t.Fatalf("RetryDue while the lease is live = %v, %v", ok, err)
+	}
+	svc.now = func() time.Time { return erasureT0.Add(erasureRunLease + time.Second) }
+	if ok, err := svc.RetryDue(context.Background()); !ok || err != nil {
+		t.Fatalf("RetryDue after the lease = %v, %v", ok, err)
+	}
+	if got := repo.Row(out.Request.UUID); got.Status != models.ErasureRequestCompleted {
+		t.Fatalf("row should complete: %+v", got)
+	}
+}
+
+func TestRetryDueReclaimsExpiredLeaseAndRunsOnlyRemaining(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{
+		UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete, Mode: "hard_delete",
+		LeaseUntil: ptrTime(erasureT0.Add(-time.Second)), NextAttemptAt: ptrTime(erasureT0.Add(-time.Second)),
+		Progress: []models.ErasureProducerProgress{done("user"), failed("auth.client")},
+	})
+	user := &stubProducer{subject: "user"}
+	client := &stubProducer{subject: "auth"}
+	svc, _ := newErasureSvc(repo, user, keyedStub{client, "auth.client"})
+
+	ok, err := svc.RetryDue(context.Background())
+	if !ok || err != nil {
+		t.Fatalf("RetryDue = %v, %v", ok, err)
+	}
+	if user.purgeCalls != 0 || client.purgeCalls != 1 || repo.Row("r-1").Status != models.ErasureRequestCompleted {
+		t.Fatalf("user=%d client=%d row=%+v", user.purgeCalls, client.purgeCalls, repo.Row("r-1"))
+	}
+}
+
+func TestRetryDueStopsAtMaxAttemptsAndStaysIncomplete(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{
+		UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete, Mode: "hard_delete",
+		Attempts: ErasureRetryMaxAttempts - 1, NextAttemptAt: ptrTime(erasureT0.Add(-time.Second)),
+	})
+	svc, _ := newErasureSvc(repo, &stubProducer{subject: "user", purgeResult: iface.PurgeResult{Pending: true}})
+
+	if ok, err := svc.RetryDue(context.Background()); !ok || err != nil {
+		t.Fatalf("RetryDue = %v, %v", ok, err)
+	}
+	row := repo.Row("r-1")
+	if row.Status != models.ErasureRequestIncomplete || row.Attempts != ErasureRetryMaxAttempts || row.NextAttemptAt != nil || row.ResolvedAt != nil {
+		t.Fatalf("row wrong: %+v", row)
+	}
+	if ok, _ := svc.RetryDue(context.Background()); ok {
+		t.Fatal("an exhausted request must not be retried automatically")
+	}
+	open, _ := svc.ListOpen(context.Background())
+	if len(open) != 1 || open[0].UUID != "r-1" {
+		t.Fatalf("ListOpen = %+v", open)
+	}
+}
+
+func TestRetryDueUnderLegalHoldStaysIncomplete(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	prog := []models.ErasureProducerProgress{failed("user")}
+	repo.Put(models.ErasureRequest{
+		UUID: "r-1", UserUUID: "u-held", Status: models.ErasureRequestIncomplete, Mode: "hard_delete",
+		Attempts: 2, NextAttemptAt: ptrTime(erasureT0.Add(-time.Second)), Progress: prog,
+	})
+	user := &stubProducer{subject: "user"}
+	svc, dsr := newErasureSvc(repo, user)
+	dsr.SetLegalHoldChecker(&fakeHoldChecker{held: true})
+
+	if ok, err := svc.RetryDue(context.Background()); !ok || err != nil {
+		t.Fatalf("RetryDue = %v, %v", ok, err)
+	}
+	row := repo.Row("r-1")
+	if user.purgeCalls != 0 || row.Status != models.ErasureRequestIncomplete || row.LastError != models.ErasureLastErrorLegalHold ||
+		row.Attempts != 3 || row.NextAttemptAt == nil || !row.NextAttemptAt.Equal(erasureT0.Add(4*time.Minute)) ||
+		len(row.Progress) != 1 || row.Progress[0].Outcome != models.ProducerOutcomeFailed {
+		t.Fatalf("row wrong: %+v purge=%d", row, user.purgeCalls)
+	}
+}
+
+func newCloseSvc(repo *erasuretest.MemRepo, producers ...iface.PIIProducer) (*ErasureRequestService, *capturingAuditSink) {
+	dsr, _ := newDSRService(producers...)
+	sink := &capturingAuditSink{}
+	svc := NewErasureRequestService(repo, dsr, sink, nil)
+	svc.now = func() time.Time { return erasureT0 }
+	return svc, sink
+}
+
+func pendingProgress(key string) models.ErasureProducerProgress {
+	return models.ErasureProducerProgress{Key: key, Subject: key, Outcome: models.ProducerOutcomePending, Attempts: 1}
+}
+
+func TestAbandonedKeys(t *testing.T) {
+	t.Parallel()
+	reg := func(keys ...string) map[string]bool {
+		m := map[string]bool{}
+		for _, k := range keys {
+			m[k] = true
+		}
+		return m
+	}
+	cases := []struct {
+		name     string
+		progress []models.ErasureProducerProgress
+		reg      map[string]bool
+		keys     []string
+		ok       bool
+	}{
+		{"registered not done", []models.ErasureProducerProgress{done("user"), failed("gone"), pendingProgress("auth.client")}, reg("user", "auth.client"), []string{"gone"}, false},
+		{"only unregistered not done", []models.ErasureProducerProgress{done("user"), failed("gone")}, reg("user"), []string{"gone"}, true},
+		{"all done", []models.ErasureProducerProgress{done("user")}, reg("user"), nil, false},
+	}
+	for _, c := range cases {
+		keys, ok := abandonedKeys(c.progress, c.reg)
+		if ok != c.ok || len(keys) != len(c.keys) || (len(keys) == 1 && keys[0] != c.keys[0]) {
+			t.Errorf("%s: abandonedKeys = %v, %v; want %v, %v", c.name, keys, ok, c.keys, c.ok)
+		}
+	}
+}
+
+func TestClosePartialRecordsAbandonedProducersAndAudits(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Mode: "anonymize", Status: models.ErasureRequestIncomplete,
+		Progress: []models.ErasureProducerProgress{done("user"), failed("gone")}, RequestedAt: erasureT0})
+	svc, sink := newCloseSvc(repo, &stubProducer{subject: "user"})
+
+	got, err := svc.ClosePartial(context.Background(), "r-1", "admin-1", "  module removed in v2  ")
+	if err != nil {
+		t.Fatalf("ClosePartial: %v", err)
+	}
+	if got.Status != models.ErasureRequestClosedPartial || len(got.Abandoned) != 1 || got.Abandoned[0] != "gone" || got.ResolutionNote != "module removed in v2" {
+		t.Fatalf("returned row = %+v", got)
+	}
+	if len(sink.events) != 1 {
+		t.Fatalf("events = %+v; want one", sink.events)
+	}
+	ev := sink.events[0]
+	ab, _ := ev.Metadata["abandoned"].([]string)
+	if ev.Action != "gdpr.dsr.erasure_closed_partial" || ev.ResourceID != "r-1" || ev.ActorUserID != "admin-1" ||
+		len(ab) != 1 || ab[0] != "gone" || ev.Metadata["subjectUserUuid"] != "u-9" || ev.Metadata["mode"] != "anonymize" {
+		t.Fatalf("event = %+v", ev)
+	}
+	if _, has := ev.Metadata["note"]; has {
+		t.Fatal("audit metadata must not carry the note")
+	}
+}
+
+func TestClosePartialRefusedWhileARegisteredProducerIsNotDone(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete,
+		Progress: []models.ErasureProducerProgress{done("user"), failed("gone"), failed("auth.client")}, RequestedAt: erasureT0})
+	svc, sink := newCloseSvc(repo, &stubProducer{subject: "user"}, &stubProducer{subject: "auth.client"})
+
+	if _, err := svc.ClosePartial(context.Background(), "r-1", "admin-1", "note"); !errors.Is(err, ErrErasureRequestNotClosable) {
+		t.Fatalf("err = %v; want ErrErasureRequestNotClosable", err)
+	}
+	if repo.Row("r-1").Status != models.ErasureRequestIncomplete || len(sink.events) != 0 {
+		t.Fatalf("row changed or audited: %+v %+v", repo.Row("r-1"), sink.events)
+	}
+}
+
+func TestClosePartialRefusesPendingAndResolved(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-p", Status: models.ErasureRequestPending, RequestedAt: erasureT0})
+	repo.Put(models.ErasureRequest{UUID: "r-c", Status: models.ErasureRequestCompleted, RequestedAt: erasureT0})
+	svc, _ := newCloseSvc(repo)
+	if _, err := svc.ClosePartial(context.Background(), "r-p", "admin-1", "note"); !errors.Is(err, ErrErasureRequestNotClosable) {
+		t.Fatalf("pending err = %v", err)
+	}
+	if _, err := svc.ClosePartial(context.Background(), "r-c", "admin-1", "note"); !errors.Is(err, repository.ErrErasureRequestNotFound) {
+		t.Fatalf("completed err = %v", err)
+	}
+}
+
+func TestClosePartialMasksAndRequiresNote(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete,
+		Progress: []models.ErasureProducerProgress{failed("gone")}, RequestedAt: erasureT0})
+	svc, _ := newCloseSvc(repo)
+	for _, n := range []string{"", strings.Repeat("x", 501)} {
+		if _, err := svc.ClosePartial(context.Background(), "r-1", "admin-1", n); !errors.Is(err, ErrErasureCloseNoteRequired) {
+			t.Fatalf("note len %d err = %v; want ErrErasureCloseNoteRequired", len(n), err)
+		}
+	}
+	got, err := svc.ClosePartial(context.Background(), "r-1", "admin-1", "asked by mario.rossi@example.com")
+	if err != nil {
+		t.Fatalf("ClosePartial: %v", err)
+	}
+	if strings.Contains(got.ResolutionNote, "mario.rossi@example.com") || strings.Contains(repo.Row("r-1").ResolutionNote, "mario.rossi@example.com") {
+		t.Fatalf("note not masked: %q", got.ResolutionNote)
+	}
+}
+
+func TestListOpenMarksClosableRows(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-a", Status: models.ErasureRequestIncomplete, RequestedAt: erasureT0,
+		Progress: []models.ErasureProducerProgress{done("user"), failed("gone")}})
+	repo.Put(models.ErasureRequest{UUID: "r-b", Status: models.ErasureRequestIncomplete, RequestedAt: erasureT0.Add(time.Second),
+		Progress: []models.ErasureProducerProgress{failed("user")}})
+	repo.Put(models.ErasureRequest{UUID: "r-c", Status: models.ErasureRequestPending, RequestedAt: erasureT0.Add(2 * time.Second)})
+	svc, _ := newCloseSvc(repo, &stubProducer{subject: "user"})
+	got, err := svc.ListOpen(context.Background())
+	if err != nil || len(got) != 3 {
+		t.Fatalf("ListOpen = %d, %v", len(got), err)
+	}
+	want := map[string]bool{"r-a": true, "r-b": false, "r-c": false}
+	for _, r := range got {
+		if r.Closable != want[r.UUID] {
+			t.Errorf("%s Closable = %v; want %v", r.UUID, r.Closable, want[r.UUID])
+		}
+	}
+}
+
+func TestExecuteCountsTheAttemptWhenClaimed(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestPending})
+	user := &stubProducer{subject: "user", purgeResult: iface.PurgeResult{Pending: true}}
+	svc, _ := newErasureSvc(repo, user)
+	var during int
+	user.onPurge = func() { during = repo.Row("r-1").Attempts }
+
+	if _, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-1"); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if during != 1 || repo.Row("r-1").Attempts != 1 {
+		t.Fatalf("attempts during run = %d, after = %d; want 1 and 1", during, repo.Row("r-1").Attempts)
+	}
+}
+
+func TestRetryDuePanickingProducerFailsAloneAndSiblingsFinish(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{
+		UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete, Mode: "hard_delete",
+		NextAttemptAt: ptrTime(erasureT0.Add(-time.Second)),
+	})
+	user := &stubProducer{subject: "user"}
+	crm := &stubProducer{subject: "crm", purgePanic: "boom"}
+	auth := &stubProducer{subject: "auth"}
+	svc, _ := newErasureSvc(repo, user, crm, auth)
+
+	if ok, err := svc.RetryDue(context.Background()); !ok || err != nil {
+		t.Fatalf("RetryDue = %v, %v", ok, err)
+	}
+	row := repo.Row("r-1")
+	if row.Status != models.ErasureRequestIncomplete || row.LeaseUntil != nil || row.LastError != "" || len(row.Progress) != 3 ||
+		row.Progress[0].Outcome != models.ProducerOutcomeDone || row.Progress[1].Outcome != models.ProducerOutcomeFailed ||
+		row.Progress[2].Outcome != models.ProducerOutcomeDone || row.NextAttemptAt == nil {
+		t.Fatalf("row wrong: %+v", row)
+	}
+}
+
+func TestRunSettleIsBoundedByTheLease(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestPending})
+	user := &stubProducer{subject: "user"}
+	svc, _ := newErasureSvc(repo, user)
+	svc.settleFloor = 50 * time.Millisecond
+	// The producers use up the lease: only 1ms of it is left at settle time.
+	user.onPurge = func() { svc.now = func() time.Time { return erasureT0.Add(erasureRunLease - time.Millisecond) } }
+	var hadDeadline bool
+	repo.OnSettle(func(ctx context.Context) error {
+		_, hadDeadline = ctx.Deadline()
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	done := make(chan *ErasureOutcome, 1)
+	go func() {
+		out, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-1")
+		if err != nil {
+			t.Errorf("Execute: %v", err)
+		}
+		done <- out
+	}()
+	select {
+	case out := <-done:
+		if !hadDeadline {
+			t.Fatal("Settle ran without a deadline")
+		}
+		if out == nil || out.Request.Status != models.ErasureRequestIncomplete {
+			t.Fatalf("an unsettled run must not report its intended state: %+v", out)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Settle was not bounded by the lease")
+	}
+}
+
+func TestRunSettleFailureReportsIncomplete(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestPending})
+	repo.FailNextSettle(errors.New("mongo blip"))
+	svc, _ := newErasureSvc(repo, &stubProducer{subject: "user"})
+
+	out, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-1")
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if out.Request.Status != models.ErasureRequestIncomplete || out.Request.ResolvedAt != nil {
+		t.Fatalf("returned %+v; want incomplete, as stored", out.Request)
+	}
+	if !out.Run.Complete() {
+		t.Fatalf("the run itself did every producer: %+v", out.Run)
+	}
+	if row := repo.Row("r-1"); row.Status != models.ErasureRequestIncomplete || row.LeaseUntil == nil {
+		t.Fatalf("row = %+v; want incomplete under its lease", row)
+	}
+}
+
+// pendingKeys returns the keys of progress whose outcome is pending.
+func pendingKeys(progress []models.ErasureProducerProgress) map[string]bool {
+	out := map[string]bool{}
+	for _, p := range progress {
+		if p.Outcome == models.ProducerOutcomePending {
+			out[p.Key] = true
+		}
+	}
+	return out
+}
+
+// TestEraseNowRecordsEveryProducerPendingBeforeItRuns pins that the row lists
+// every registered producer as pending before the first one runs, so a run
+// that never settles still names every producer that held the subject's data.
+func TestEraseNowRecordsEveryProducerPendingBeforeItRuns(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	user := &stubProducer{subject: "user"}
+	crm := &stubProducer{subject: "crm"}
+	svc, _ := newErasureSvc(repo, user, crm)
+	var seen []models.ErasureProducerProgress
+	user.onPurge = func() {
+		rows, _ := repo.ListByStatus(context.Background(), models.ErasureRequestIncomplete)
+		if len(rows) == 1 {
+			seen = rows[0].Progress
+		}
+	}
+
+	if _, err := svc.EraseNow(context.Background(), "u-1", "t-1", models.ErasureSourceSelfService, "u-1", iface.EraseHardDelete); err != nil {
+		t.Fatalf("EraseNow: %v", err)
+	}
+	if got := pendingKeys(seen); len(seen) != 2 || !got["user"] || !got["crm"] {
+		t.Fatalf("progress before the first producer = %+v; want user and crm pending", seen)
+	}
+}
+
+// TestEraseNowUnsettledRunThenProducerRemovedNeverCompletes is the recovery
+// case: the first run dies before Settle, a later deployment drops a producer
+// that held the subject's data, and the retry must leave the request
+// incomplete (closable as closed_partial), never completed.
+func TestEraseNowUnsettledRunThenProducerRemovedNeverCompletes(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.FailNextSettle(errors.New("replica killed"))
+	svc, _ := newErasureSvc(repo, &stubProducer{subject: "user"}, &stubProducer{subject: "crm", purgeResult: iface.PurgeResult{Pending: true}})
+	out, err := svc.EraseNow(context.Background(), "u-1", "t-1", models.ErasureSourceSelfService, "u-1", iface.EraseHardDelete)
+	if err != nil {
+		t.Fatalf("EraseNow: %v", err)
+	}
+
+	// The next deployment no longer registers crm.
+	next, _ := newErasureSvc(repo, &stubProducer{subject: "user"})
+	next.now = func() time.Time { return erasureT0.Add(erasureRunLease + time.Second) }
+	if ok, err := next.RetryDue(context.Background()); !ok || err != nil {
+		t.Fatalf("RetryDue = %v, %v", ok, err)
+	}
+	row := repo.Row(out.Request.UUID)
+	if row.Status != models.ErasureRequestIncomplete || !pendingKeys(row.Progress)["crm"] {
+		t.Fatalf("row = %+v; want incomplete with crm pending", row)
+	}
+	closed, err := next.ClosePartial(context.Background(), row.UUID, "admin-1", "crm module removed")
+	if err != nil || closed.Status != models.ErasureRequestClosedPartial || len(closed.Abandoned) != 1 || closed.Abandoned[0] != "crm" {
+		t.Fatalf("ClosePartial = %+v, %v; want closed_partial abandoning crm", closed, err)
+	}
+}
+
+// TestExecuteUnsettledRunThenProducerRemovedNeverCompletes is the same case
+// for an operator-executed (claimed) request.
+func TestExecuteUnsettledRunThenProducerRemovedNeverCompletes(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestPending, RequestedAt: erasureT0})
+	repo.FailNextSettle(errors.New("replica killed"))
+	svc, _ := newErasureSvc(repo, &stubProducer{subject: "user"}, &stubProducer{subject: "crm"})
+	if _, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-1"); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	next, _ := newErasureSvc(repo, &stubProducer{subject: "user"})
+	next.now = func() time.Time { return erasureT0.Add(erasureRunLease + time.Second) }
+	if ok, err := next.RetryDue(context.Background()); !ok || err != nil {
+		t.Fatalf("RetryDue = %v, %v", ok, err)
+	}
+	if row := repo.Row("r-1"); row.Status != models.ErasureRequestIncomplete || !pendingKeys(row.Progress)["crm"] {
+		t.Fatalf("row = %+v; want incomplete with crm pending", row)
+	}
+}
+
+// TestRetryRecordsANewlyRegisteredProducerBeforeItRuns pins that a producer
+// first seen on a later run is stored as pending before any producer runs.
+func TestRetryRecordsANewlyRegisteredProducerBeforeItRuns(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{
+		UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete, Mode: "hard_delete",
+		Attempts: 1, NextAttemptAt: ptrTime(erasureT0.Add(-time.Second)),
+		Progress: []models.ErasureProducerProgress{done("user"), failed("auth")},
+	})
+	auth := &stubProducer{subject: "auth"}
+	svc, _ := newErasureSvc(repo, &stubProducer{subject: "user"}, auth, &stubProducer{subject: "crm"})
+	var seen []models.ErasureProducerProgress
+	auth.onPurge = func() { seen = repo.Row("r-1").Progress }
+	repo.FailNextSettle(errors.New("replica killed"))
+
+	if ok, err := svc.RetryDue(context.Background()); !ok || err != nil {
+		t.Fatalf("RetryDue = %v, %v", ok, err)
+	}
+	if len(seen) != 3 || !pendingKeys(seen)["crm"] {
+		t.Fatalf("progress before the run = %+v; want crm recorded pending", seen)
+	}
+
+	next, _ := newErasureSvc(repo, &stubProducer{subject: "user"}, &stubProducer{subject: "auth"})
+	next.now = func() time.Time { return erasureT0.Add(erasureRunLease + time.Second) }
+	if ok, err := next.RetryDue(context.Background()); !ok || err != nil {
+		t.Fatalf("RetryDue = %v, %v", ok, err)
+	}
+	if row := repo.Row("r-1"); row.Status != models.ErasureRequestIncomplete || !pendingKeys(row.Progress)["crm"] {
+		t.Fatalf("row = %+v; want incomplete with crm pending", row)
+	}
+}
+
+// TestRunRecordFailureRunsNoProducer pins that when the pending producers
+// cannot be stored, no producer runs and the row stays incomplete under its
+// lease for the worker.
+func TestRunRecordFailureRunsNoProducer(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestPending})
+	repo.FailNextRecordProgress(errors.New("mongo blip"))
+	user := &stubProducer{subject: "user"}
+	svc, _ := newErasureSvc(repo, user)
+
+	if _, err := svc.Execute(context.Background(), "r-1", iface.EraseHardDelete, "admin-1"); err == nil {
+		t.Fatal("expected the record error")
+	}
+	if row := repo.Row("r-1"); user.purgeCalls != 0 || row.Status != models.ErasureRequestIncomplete || row.LeaseUntil == nil {
+		t.Fatalf("purge=%d row=%+v; want no purge, incomplete under its lease", user.purgeCalls, row)
+	}
+}
+
+// TestClosePartialRefusedWhileANewlyRegisteredProducerHasNotRun: a deployment
+// added crm and removed gone before the request's next retry. crm never ran
+// for the subject, so the request is not closable (ListOpen and ClosePartial
+// agree) and nothing is written.
+func TestClosePartialRefusedWhileANewlyRegisteredProducerHasNotRun(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	repo.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete, RequestedAt: erasureT0,
+		Progress: []models.ErasureProducerProgress{done("user"), failed("gone")}})
+	svc, sink := newCloseSvc(repo, &stubProducer{subject: "user"}, &stubProducer{subject: "crm"})
+
+	open, err := svc.ListOpen(context.Background())
+	if err != nil || len(open) != 1 || open[0].Closable {
+		t.Fatalf("ListOpen = %+v, %v; want r-1 not closable", open, err)
+	}
+	if _, err := svc.ClosePartial(context.Background(), "r-1", "admin-1", "gone removed"); !errors.Is(err, ErrErasureRequestNotClosable) {
+		t.Fatalf("ClosePartial err = %v; want ErrErasureRequestNotClosable", err)
+	}
+	if row := repo.Row("r-1"); row.Status != models.ErasureRequestIncomplete || len(sink.events) != 0 {
+		t.Fatalf("row = %+v, events = %d; want untouched", row, len(sink.events))
+	}
+}
+
+// progressChangingRepo settles a concurrent run (changing the progress) just
+// before the close is written, after the service checked closability.
+type progressChangingRepo struct {
+	*erasuretest.MemRepo
+	change func()
+}
+
+func (r progressChangingRepo) ClosePartial(ctx context.Context, uuid string, now time.Time, expected []models.ErasureProducerProgress, abandoned []string, closedBy, note string) error {
+	r.change()
+	return r.MemRepo.ClosePartial(ctx, uuid, now, expected, abandoned, closedBy, note)
+}
+
+// TestClosePartialFailsWhenARunChangedTheProgressMeanwhile pins the fenced
+// close: a run that changes the progress between the check and the write makes
+// the close fail (busy) instead of overwriting the request.
+func TestClosePartialFailsWhenARunChangedTheProgressMeanwhile(t *testing.T) {
+	t.Parallel()
+	mem := erasuretest.NewMemRepo()
+	row := models.ErasureRequest{UUID: "r-1", UserUUID: "u-9", Status: models.ErasureRequestIncomplete, RequestedAt: erasureT0,
+		Progress: []models.ErasureProducerProgress{done("user"), failed("gone")}}
+	mem.Put(row)
+	repo := progressChangingRepo{MemRepo: mem, change: func() {
+		changed := row
+		changed.Progress = []models.ErasureProducerProgress{done("user"), failed("gone"), pendingProgress("crm")}
+		mem.Put(changed)
+	}}
+	dsr, _ := newDSRService(&stubProducer{subject: "user"})
+	sink := &capturingAuditSink{}
+	svc := NewErasureRequestService(repo, dsr, sink, nil)
+	svc.now = func() time.Time { return erasureT0 }
+
+	if _, err := svc.ClosePartial(context.Background(), "r-1", "admin-1", "gone removed"); !errors.Is(err, repository.ErrErasureRequestBusy) {
+		t.Fatalf("ClosePartial err = %v; want ErrErasureRequestBusy", err)
+	}
+	if got := mem.Row("r-1"); got.Status != models.ErasureRequestIncomplete || len(got.Progress) != 3 || len(sink.events) != 0 {
+		t.Fatalf("row = %+v, events = %d; want the run's state, not closed", got, len(sink.events))
 	}
 }

@@ -53,6 +53,8 @@ type Server struct {
 	embeds  []EmbedCall
 	reranks []RerankCall
 	auths   []string
+
+	dimsAfter, dimsTo int // embed calls beyond dimsAfter serve dimsTo (0 = off)
 }
 
 func normalize(cfg Config) Config {
@@ -101,6 +103,15 @@ func (s *Server) Fail(path string, after, status int) {
 	}
 	s.fails[path] = failRule{after: after, status: status}
 	s.seen[path] = 0
+}
+
+// ChangeDimensionsAfter makes /embed requests beyond the first `after` answer
+// vectors of `dims` entries (a model swapped under a running call); dims 0
+// clears it.
+func (s *Server) ChangeDimensionsAfter(after, dims int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dimsAfter, s.dimsTo = after, dims
 }
 
 func (s *Server) InfoCalls() int {
@@ -203,6 +214,9 @@ func (s *Server) embed(w http.ResponseWriter, r *http.Request, cfg Config) {
 		return
 	}
 	s.mu.Lock()
+	if s.dimsTo > 0 && len(s.embeds) >= s.dimsAfter {
+		cfg.Dimensions = s.dimsTo
+	}
 	s.embeds = append(s.embeds, EmbedCall{Inputs: in.Inputs, Normalize: in.Normalize, Truncate: in.Truncate})
 	s.mu.Unlock()
 	out := make([][]float32, len(in.Inputs))

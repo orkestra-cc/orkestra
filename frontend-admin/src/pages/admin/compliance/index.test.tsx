@@ -1,17 +1,39 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
 import { url } from 'test/handlers';
+import { toast } from 'react-toastify';
 import CompliancePage from './index';
+
+// No ToastContainer is mounted under renderWithProviders: assert the calls.
+vi.mock('react-toastify', () => ({
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+}));
+beforeEach(() => vi.clearAllMocks());
+afterEach(() => vi.useRealTimers());
 
 // CompliancePage mounts four RTK Query tabs at once (react-bootstrap Tabs
 // renders every pane), so each test stubs all four read endpoints to keep
 // MSW's onUnhandledRequest:'error' guard happy.
 
-const erasureRequests = {
+interface ErasureFixture {
+  uuid: string;
+  userUuid: string;
+  reason?: string;
+  status: string;
+  requestedAt: string;
+  mode?: string;
+  source?: string;
+  attempts?: number;
+  nextAttemptAt?: string;
+  lastError?: string;
+  closable?: boolean;
+  progress?: { key: string; outcome: string }[];
+}
+const erasureRequests: { items: ErasureFixture[] } = {
   items: [
     {
       uuid: 'er-1',
@@ -22,6 +44,39 @@ const erasureRequests = {
     }
   ]
 };
+const incompleteRequests: { items: ErasureFixture[] } = {
+  items: [
+    ...erasureRequests.items,
+    {
+      uuid: 'er-2',
+      userUuid: 'u-erase-2',
+      status: 'incomplete',
+      mode: 'anonymize',
+      source: 'self_service',
+      attempts: 20,
+      lastError: 'legal_hold_active',
+      requestedAt: '2026-06-02T10:00:00Z',
+      progress: [
+        { key: 'user', outcome: 'done' },
+        { key: 'auth.client', outcome: 'failed' }
+      ]
+    },
+    {
+      uuid: 'er-3',
+      userUuid: 'u-erase-3',
+      status: 'incomplete',
+      lastError: 'run_failed',
+      closable: true,
+      requestedAt: '2026-06-03T10:00:00Z',
+      progress: [
+        { key: 'user', outcome: 'done' },
+        { key: 'gone', outcome: 'failed' }
+      ]
+    }
+  ]
+};
+const rowOf = (subject: string) =>
+  within(screen.getByText(subject).closest('tr') as HTMLElement);
 const legalHolds = {
   items: [
     {
@@ -55,7 +110,7 @@ const auditEvents = {
 };
 
 const stubReads = (overrides?: {
-  erasure?: typeof erasureRequests;
+  erasure?: { items: ErasureFixture[] };
   holds?: typeof legalHolds;
   retention?: typeof retentionPreview;
   audit?: typeof auditEvents;
@@ -182,7 +237,7 @@ describe('CompliancePage', () => {
     renderWithProviders(<CompliancePage />);
 
     expect(
-      await screen.findByText(/no pending erasure requests/i)
+      await screen.findByText(/no open erasure requests/i)
     ).toBeInTheDocument();
     expect(
       await screen.findByText(/no active legal holds/i)
@@ -366,7 +421,11 @@ describe('CompliancePage', () => {
             path: new URL(request.url).pathname,
             body: await request.json()
           };
-          return HttpResponse.json({ purged: {} });
+          return HttpResponse.json({
+            status: 'completed',
+            purged: {},
+            progress: []
+          });
         }
       )
     );
@@ -380,6 +439,216 @@ describe('CompliancePage', () => {
       '/v1/admin/compliance/erasure-requests/er-1/execute'
     );
     expect(executeHit!.body).toEqual({ mode: 'hard_delete' });
+  });
+
+  it('shows an incomplete request with its progress, a Retry action and no Reject', async () => {
+    stubReads({ erasure: incompleteRequests });
+    renderWithProviders(<CompliancePage />);
+
+    expect(await screen.findAllByText('Incomplete')).toHaveLength(2);
+    const row = rowOf('u-erase-2');
+    expect(row.getByText('1 of 2 producers done')).toBeInTheDocument();
+    expect(row.getByText('Automatic retries exhausted')).toBeInTheDocument();
+    expect(row.getByText('Self-service')).toBeInTheDocument();
+    expect(row.getByRole('button', { name: /^retry$/i })).toBeInTheDocument();
+    expect(row.queryByRole('button', { name: /^reject$/i })).toBeNull();
+  });
+
+  it('refreshes the list while the retry worker may change a request', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const scheduled: ErasureFixture = {
+      uuid: 'er-4',
+      userUuid: 'u-erase-4',
+      status: 'incomplete',
+      mode: 'hard_delete',
+      attempts: 1,
+      nextAttemptAt: '2026-06-04T10:01:00Z',
+      requestedAt: '2026-06-04T10:00:00Z',
+      progress: [
+        { key: 'user', outcome: 'done' },
+        { key: 'crm', outcome: 'pending' }
+      ]
+    };
+    stubReads();
+    // The worker completes er-4 after the first read: it leaves the open list.
+    let reads = 0;
+    server.use(
+      http.get(url('/v1/admin/compliance/erasure-requests'), () => {
+        reads++;
+        return HttpResponse.json({
+          items: reads === 1 ? [scheduled] : []
+        });
+      })
+    );
+    renderWithProviders(<CompliancePage />);
+    await screen.findByText('u-erase-4');
+    const row = rowOf('u-erase-4');
+    expect(row.getByText('1 of 2 producers done')).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(
+      await screen.findByText(/no open erasure requests/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText('u-erase-4')).toBeNull();
+  });
+
+  it('does not refresh when no request has a retry scheduled', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    stubReads();
+    let reads = 0;
+    server.use(
+      http.get(url('/v1/admin/compliance/erasure-requests'), () => {
+        reads++;
+        return HttpResponse.json(incompleteRequests);
+      })
+    );
+    renderWithProviders(<CompliancePage />);
+    await screen.findByText('u-erase-2');
+    expect(reads).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(reads).toBe(1);
+  });
+
+  it('shows the last run error of an incomplete request', async () => {
+    stubReads({ erasure: incompleteRequests });
+    renderWithProviders(<CompliancePage />);
+    await screen.findByText('u-erase-2');
+    expect(
+      rowOf('u-erase-2').getByText('Blocked by a legal hold')
+    ).toBeInTheDocument();
+    expect(rowOf('u-erase-3').getByText('Last run failed')).toBeInTheDocument();
+    expect(rowOf('u-erase-1').queryByText(/legal hold|last run/i)).toBeNull();
+  });
+
+  it('explains a retry refused because another run holds the request', async () => {
+    stubReads({ erasure: incompleteRequests });
+    server.use(
+      http.post(url('/v1/admin/compliance/erasure-requests/:id/execute'), () =>
+        HttpResponse.json(
+          {
+            status: 409,
+            title: 'Conflict',
+            detail: 'an erasure run holds this request',
+            code: 'compliance.erasure_request_busy'
+          },
+          { status: 409 }
+        )
+      )
+    );
+    renderWithProviders(<CompliancePage />);
+    await screen.findByText('u-erase-2');
+    await userEvent.click(
+      rowOf('u-erase-2').getByRole('button', { name: /^retry$/i })
+    );
+    await waitFor(() =>
+      expect(toast.warning).toHaveBeenCalledWith(
+        'Another run is in progress; try again in a few minutes'
+      )
+    );
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('retries an incomplete request with its stored mode', async () => {
+    stubReads({ erasure: incompleteRequests });
+    let body: unknown = null;
+    let path = '';
+    server.use(
+      http.post(
+        url('/v1/admin/compliance/erasure-requests/:id/execute'),
+        async ({ request }) => {
+          path = new URL(request.url).pathname;
+          body = await request.json();
+          return HttpResponse.json({
+            status: 'completed',
+            purged: {},
+            progress: []
+          });
+        }
+      )
+    );
+    renderWithProviders(<CompliancePage />);
+    await screen.findByText('u-erase-2');
+    await userEvent.click(
+      rowOf('u-erase-2').getByRole('button', { name: /^retry$/i })
+    );
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(path).toBe('/v1/admin/compliance/erasure-requests/er-2/execute');
+    expect(body).toEqual({ mode: 'anonymize' });
+  });
+
+  it('closes a closable incomplete request with a mandatory note', async () => {
+    stubReads({ erasure: incompleteRequests });
+    const hits: unknown[] = [];
+    let path = '';
+    server.use(
+      http.post(
+        url('/v1/admin/compliance/erasure-requests/:id/close'),
+        async ({ request }) => {
+          path = new URL(request.url).pathname;
+          hits.push(await request.json());
+          return HttpResponse.json({
+            uuid: 'er-3',
+            userUuid: 'u-erase-3',
+            status: 'closed_partial',
+            requestedAt: '2026-06-03T10:00:00Z'
+          });
+        }
+      )
+    );
+    renderWithProviders(<CompliancePage />);
+    const user = userEvent.setup();
+    await screen.findByText('u-erase-3');
+    await user.click(
+      rowOf('u-erase-3').getByRole('button', { name: /^close$/i })
+    );
+
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.getByText(/gone/)).toBeInTheDocument();
+    // The header X is also named "Close": the confirm button is the last one.
+    const confirm = () =>
+      dialog.getAllByRole('button', { name: /^close$/i }).slice(-1)[0];
+    await user.click(confirm());
+    expect(hits).toHaveLength(0);
+
+    await user.type(dialog.getByRole('textbox'), 'module removed');
+    await user.click(confirm());
+    await waitFor(() => expect(hits).toHaveLength(1));
+    expect(path).toBe('/v1/admin/compliance/erasure-requests/er-3/close');
+    expect(hits[0]).toEqual({ note: 'module removed' });
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        'Erasure request closed as partial'
+      )
+    );
+  });
+
+  it('offers Close only on closable rows', async () => {
+    stubReads({ erasure: incompleteRequests });
+    renderWithProviders(<CompliancePage />);
+    await screen.findByText('u-erase-3');
+    for (const subject of ['u-erase-1', 'u-erase-2']) {
+      expect(
+        rowOf(subject).queryByRole('button', { name: /^close$/i })
+      ).toBeNull();
+    }
+  });
+
+  it('warns when an execution leaves the request incomplete', async () => {
+    stubReads();
+    server.use(
+      http.post(url('/v1/admin/compliance/erasure-requests/:id/execute'), () =>
+        HttpResponse.json({ status: 'incomplete', purged: {}, progress: [] })
+      )
+    );
+    renderWithProviders(<CompliancePage />);
+    await screen.findByText('u-erase-1');
+    await userEvent.click(screen.getByRole('button', { name: /^execute$/i }));
+    await waitFor(() =>
+      expect(toast.warning).toHaveBeenCalledWith(
+        expect.stringMatching(/will be retried/i)
+      )
+    );
   });
 
   it('lists the policies with their badges and counts the pending requests on the tab', async () => {

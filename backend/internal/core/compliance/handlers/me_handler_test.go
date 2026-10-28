@@ -8,9 +8,19 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/orkestra/backend/internal/core/compliance/services"
+	"github.com/orkestra/backend/internal/core/compliance/services/erasuretest"
 	"github.com/orkestra/backend/internal/testkit"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
+
+// newMe builds a MeHandler over an in-memory erasure repo.
+func newMe(dsr *services.DSRService) *MeHandler {
+	return newMeWithRepo(dsr, erasuretest.NewMemRepo())
+}
+
+func newMeWithRepo(dsr *services.DSRService, repo *erasuretest.MemRepo) *MeHandler {
+	return NewMeHandler(dsr, services.NewErasureRequestService(repo, dsr, nil, nil))
+}
 
 // --- shared test helpers (package handlers) ---
 
@@ -34,6 +44,7 @@ func assertStatus(t *testing.T, err error, want int) {
 // service can be exercised through the handler without MongoDB.
 type fakeProducer struct {
 	subject     string
+	key         string // optional PIIProducerKeyer key
 	exportData  any
 	exportErr   error
 	purgeResult iface.PurgeResult
@@ -41,6 +52,9 @@ type fakeProducer struct {
 }
 
 func (p *fakeProducer) Subject() string { return p.subject }
+
+// ProducerKey implements iface.PIIProducerKeyer; empty falls back to Subject.
+func (p *fakeProducer) ProducerKey() string { return p.key }
 func (p *fakeProducer) ExportPersonalData(_ context.Context, _ string) (any, error) {
 	return p.exportData, p.exportErr
 }
@@ -77,14 +91,14 @@ func authedCtx(userUUID string) context.Context {
 
 func TestMeExportRequiresAuth(t *testing.T) {
 	t.Parallel()
-	h := NewMeHandler(newDSR())
+	h := newMe(newDSR())
 	_, err := h.Export(context.Background(), &struct{}{})
 	assertStatus(t, err, 401)
 }
 
 func TestMeEraseRequiresAuth(t *testing.T) {
 	t.Parallel()
-	h := NewMeHandler(newDSR())
+	h := newMe(newDSR())
 	_, err := h.Erase(context.Background(), &struct{}{})
 	assertStatus(t, err, 401)
 }
@@ -95,7 +109,7 @@ func TestMeExportReturnsBundleAndErrors(t *testing.T) {
 	t.Parallel()
 	good := &fakeProducer{subject: "user", exportData: map[string]any{"email": "a@b.com"}}
 	bad := &fakeProducer{subject: "auth", exportErr: errors.New("mongo down")}
-	h := NewMeHandler(newDSR(good, bad))
+	h := newMe(newDSR(good, bad))
 
 	out, err := h.Export(authedCtx("u-1"), &struct{}{})
 	if err != nil {
@@ -112,7 +126,7 @@ func TestMeExportReturnsBundleAndErrors(t *testing.T) {
 // TestMeEraseAggregatesTotalRows pins the totalRows roll-up across producers.
 func TestMeEraseAggregatesTotalRows(t *testing.T) {
 	t.Parallel()
-	h := NewMeHandler(newDSR(
+	h := newMe(newDSR(
 		&fakeProducer{subject: "user", purgeResult: iface.PurgeResult{RowsDeleted: 1, RowsAnonymized: 2}},
 		&fakeProducer{subject: "auth", purgeResult: iface.PurgeResult{RowsDeleted: 3}},
 	))
@@ -130,7 +144,7 @@ func TestMeEraseBlockedByLegalHoldIs409(t *testing.T) {
 	t.Parallel()
 	dsr := newDSR(&fakeProducer{subject: "user"})
 	dsr.SetLegalHoldChecker(&fakeHoldChecker{held: true})
-	h := NewMeHandler(dsr)
+	h := newMe(dsr)
 
 	_, err := h.Erase(authedCtx("u-held"), &struct{}{})
 	assertStatus(t, err, 409)
@@ -142,8 +156,65 @@ func TestMeEraseInternalErrorIs500(t *testing.T) {
 	t.Parallel()
 	dsr := newDSR(&fakeProducer{subject: "user"})
 	dsr.SetLegalHoldChecker(&fakeHoldChecker{err: errors.New("mongo down")})
-	h := NewMeHandler(dsr)
+	h := newMe(dsr)
 
 	_, err := h.Erase(authedCtx("u-1"), &struct{}{})
 	assertStatus(t, err, 500)
+}
+
+func TestMeEraseCompletedRecordsRequest(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	h := newMeWithRepo(newDSR(
+		&fakeProducer{subject: "user", purgeResult: iface.PurgeResult{RowsDeleted: 1}},
+		&fakeProducer{subject: "auth", purgeResult: iface.PurgeResult{RowsDeleted: 2}},
+	), repo)
+	out, err := h.Erase(authedCtx("u-1"), &struct{}{})
+	if err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	if out.Body.Status != "completed" || out.Body.RequestID == "" {
+		t.Fatalf("status/requestId = %q/%q", out.Body.Status, out.Body.RequestID)
+	}
+	if got := repo.Row(out.Body.RequestID).Source; got != "self_service" {
+		t.Fatalf("source = %q", got)
+	}
+}
+
+func TestMeEraseReportsIncomplete(t *testing.T) {
+	t.Parallel()
+	repo := erasuretest.NewMemRepo()
+	h := newMeWithRepo(newDSR(
+		&fakeProducer{subject: "user"},
+		&fakeProducer{subject: "retrieval", purgeResult: iface.PurgeResult{Pending: true}},
+	), repo)
+	out, err := h.Erase(authedCtx("u-1"), &struct{}{})
+	if err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	if out.Body.Status != "incomplete" {
+		t.Fatalf("status = %q", out.Body.Status)
+	}
+	row := repo.Row(out.Body.RequestID)
+	if row.Status != "incomplete" || row.NextAttemptAt == nil {
+		t.Fatalf("row = %+v", row)
+	}
+}
+
+func TestMeExportBundleHasBothAuthTiers(t *testing.T) {
+	t.Parallel()
+	h := newMe(newDSR(
+		&fakeProducer{subject: "auth", key: "auth.operator", exportData: "op"},
+		&fakeProducer{subject: "auth", key: "auth.client", exportData: "cl"},
+	))
+	out, err := h.Export(authedCtx("u-1"), &struct{}{})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if _, ok := out.Body.Bundle["auth.operator"]; !ok {
+		t.Fatalf("bundle = %+v", out.Body.Bundle)
+	}
+	if _, ok := out.Body.Bundle["auth.client"]; !ok {
+		t.Fatalf("bundle = %+v", out.Body.Bundle)
+	}
 }

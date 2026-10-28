@@ -28,7 +28,9 @@ func renderFilter(f *engine.Filter) (map[string]any, error) {
 		}
 		return renderLeaf(f)
 	}
-	if !hasChildren {
+	if !hasChildren || len(f.Match) > 0 || f.Range != nil || f.Exists {
+		// A composite carries no condition of its own; one that does would
+		// have it silently dropped, widening the filter.
 		return nil, errMalformedFilter
 	}
 	out := map[string]any{}

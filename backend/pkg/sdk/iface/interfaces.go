@@ -1372,9 +1372,9 @@ type ClientSelfDeletionGate interface {
 // ---------------------------------------------------------------------------
 
 // PersonalDataBundle is the exported payload returned by the DSR
-// pipeline. Keys are producer subject names (stable identifiers like
-// "user", "auth"); values are each producer's serializable personal-data
-// projection. JSON-round-trippable so the bundle can be written to a
+// pipeline. Keys are producer keys ("user", "auth.operator", "auth.client",
+// …; see PIIProducerKeyer) plus "metadata"; values are each producer's
+// serializable personal-data projection. JSON-round-trippable so the bundle can be written to a
 // file or streamed to the DSR requester.
 type PersonalDataBundle = map[string]any
 
@@ -1403,15 +1403,22 @@ type PurgeResult struct {
 	RowsDeleted    int      `json:"rowsDeleted"`
 	RowsAnonymized int      `json:"rowsAnonymized"`
 	Collections    []string `json:"collections,omitempty"`
+	// Pending is true when the producer accepted the erasure but has not
+	// finished it (ADR-0023 D12). The request stays incomplete and the
+	// producer is called again until it reports Pending false.
+	Pending bool `json:"pending,omitempty"`
 }
 
 // PIIProducer is implemented by modules that hold personal data tied to
 // a user UUID. The compliance module's DSR service enumerates registered
 // producers.
 type PIIProducer interface {
-	// Subject is the stable identifier used as the bundle-key for this
-	// producer's data. Must not change after first use — DSR audit rows
-	// reference it by value.
+	// Subject names the kind of data the producer holds; DSR audit rows
+	// carry it by value, so it must not change after first use. It is not
+	// the export bundle key: compliance keys the bundle by the producer key
+	// (PIIProducerKeyer, else Subject), so two producers sharing a Subject
+	// are both exported — a right-of-access answer (GDPR Art. 15) must be
+	// complete.
 	Subject() string
 
 	// ExportPersonalData returns a JSON-serializable projection of every
@@ -1425,7 +1432,27 @@ type PIIProducer interface {
 	// per the requested EraseMode (hard-delete or anonymize). GDPR
 	// right-to-erasure semantics apply. Returns a summary so the DSR audit
 	// log can record what was wiped without re-reading the rows.
+	//
+	// Idempotent: compliance calls it again for the same user and mode until
+	// the producer reports its purge done, and a call after a completed purge
+	// must succeed and report what it found. Return Pending true with a nil
+	// error when the erasure is accepted but not finished (the request stays
+	// incomplete and the producer is called again). On failure return the
+	// error together with whatever was erased before it; compliance keeps
+	// those counts.
 	PurgePersonalData(ctx context.Context, userUUID string, mode EraseMode) (PurgeResult, error)
+}
+
+// PIIProducerKeyer is an optional companion to PIIProducer, resolved by a
+// type assertion on the registered producer. A producer registered more than
+// once under the same Subject (one per tier, say) implements it so compliance
+// can track each instance's erasure on its own. The key must be unique in the
+// registry and stable across restarts: incomplete erasure requests store it.
+// Without it compliance keys the producer by Subject, suffixing later
+// duplicates "#2", "#3" in registration order. The key is also the producer's
+// key in the export bundle.
+type PIIProducerKeyer interface {
+	ProducerKey() string
 }
 
 // PIIProducerRegistry is the boot-time catalog of registered producers.
