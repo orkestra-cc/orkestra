@@ -222,3 +222,19 @@ func TestSearchLog_PurgeBeforeReturnsErrorOnDisconnectedClient(t *testing.T) {
 		t.Fatal("cancelled ctx: want error")
 	}
 }
+
+func TestSearchLog_DeleteRowScopedToTenant(t *testing.T) {
+	r, db := newSearchLog(t)
+	if err := r.Insert(tctx("t1"), &models.SearchLog{UUID: "r1", UserUUID: "u1", Corpus: "c", Outcome: models.SearchOutcomeOK}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.DeleteRow(tctx("t2"), "r1"); err != nil || count(t, db, bson.M{"uuid": "r1"}) != 1 {
+		t.Fatalf("other tenant: err = %v", err)
+	}
+	if err := r.DeleteRow(tctx("t1"), "r1"); err != nil || count(t, db, bson.M{"uuid": "r1"}) != 0 {
+		t.Fatalf("own tenant: err = %v", err)
+	}
+	if err := r.DeleteRow(tctx("t1"), "missing"); err != nil {
+		t.Fatal(err)
+	}
+}

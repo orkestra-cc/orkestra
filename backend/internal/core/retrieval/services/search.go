@@ -15,6 +15,7 @@ import (
 	"github.com/orkestra/backend/internal/core/retrieval/engine"
 	"github.com/orkestra/backend/internal/core/retrieval/filter"
 	"github.com/orkestra/backend/internal/core/retrieval/models"
+	"github.com/orkestra/backend/internal/core/retrieval/repository"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
@@ -50,6 +51,13 @@ type SearchLogWriter interface {
 	Insert(ctx context.Context, row *models.SearchLog) error
 }
 
+// SearchLogRetractor deletes one search-log row of the ctx tenant; satisfied by *repository.SearchLog.
+type SearchLogRetractor interface {
+	DeleteRow(ctx context.Context, uuid string) error
+}
+
+var _ SearchLogRetractor = (*repository.SearchLog)(nil)
+
 // DefaultVisibleTimeout bounds the owning module's Visible call.
 const DefaultVisibleTimeout = 2 * time.Second
 
@@ -78,6 +86,8 @@ type SearchDeps struct {
 // Searcher runs the search pipeline of ADR-0023 D5.
 type Searcher struct {
 	d SearchDeps
+	// retractor is d.Log when it can also delete a row; nil otherwise.
+	retractor SearchLogRetractor
 }
 
 // NewSearcher applies the defaults of SearchDeps.
@@ -91,7 +101,11 @@ func NewSearcher(d SearchDeps) *Searcher {
 	if d.VisibleTimeout <= 0 {
 		d.VisibleTimeout = DefaultVisibleTimeout
 	}
-	return &Searcher{d: d}
+	s := &Searcher{d: d}
+	if d.Log != nil {
+		s.retractor, _ = d.Log.(SearchLogRetractor)
+	}
+	return s
 }
 
 // gated is what the gate established about a request.
@@ -172,6 +186,7 @@ func (s *Searcher) Search(ctx context.Context, req iface.RetrievalSearchRequest)
 			slog.String("corpus", g.spec.Name), slog.String("tenant", g.tenantID))
 		return nil, fmt.Errorf("%w: %w", iface.ErrRetrievalUnavailable, ErrSearchLogWrite)
 	}
+	s.retract(ctx, g, row)
 	return res, nil
 }
 
@@ -186,6 +201,43 @@ func (s *Searcher) logFailed(ctx context.Context, g gated, row *models.SearchLog
 		s.d.Logger.Warn("retrieval: search log write failed for a failed search",
 			slog.String("corpus", g.spec.Name), slog.String("tenant", g.tenantID),
 			slog.String("kind", row.ErrorKind))
+		return
+	}
+	s.retract(ctx, g, row)
+}
+
+// retract re-reads the tombstones after row was written and deletes the row
+// when an erasure covers the searcher or any subject it names. Ordering: an
+// eraser writes the tombstone and then deletes rows (the producer, and
+// finalizer stage 0); the searcher writes its row and then reads tombstones.
+// Either this re-check sees the tombstone, or the eraser's delete sees the
+// row, so a row written after the erasure cannot survive. Hits already
+// returned passed the step 6 veto before the erasure was recorded and are
+// not recalled. A failed re-check keeps the row for finalizer stage 0.
+func (s *Searcher) retract(ctx context.Context, g gated, row *models.SearchLog) {
+	if s.retractor == nil || s.d.Tombstones == nil {
+		return
+	}
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), searchLogErrorTimeout)
+	defer cancel()
+	subjects := slices.Clone(row.Subjects)
+	if row.UserUUID != "" {
+		subjects = append(subjects, "user:"+row.UserUUID)
+	}
+	slices.Sort(subjects)
+	subjects = slices.Compact(subjects)
+	covered, err := s.d.Tombstones.Covered(rctx, g.tenantID, g.spec.Name, []Probe{{SourceID: row.UUID, Subjects: subjects}})
+	if err != nil {
+		s.d.Logger.Warn("retrieval: search log erasure re-check failed; the row is kept for the erasure finalizer",
+			slog.String("corpus", g.spec.Name), slog.String("tenant", g.tenantID))
+		return
+	}
+	if !covered[row.UUID] {
+		return
+	}
+	if err := s.retractor.DeleteRow(rctx, row.UUID); err != nil {
+		s.d.Logger.Warn("retrieval: search log retraction failed",
+			slog.String("corpus", g.spec.Name), slog.String("tenant", g.tenantID))
 	}
 }
 

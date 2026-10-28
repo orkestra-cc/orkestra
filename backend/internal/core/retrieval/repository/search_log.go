@@ -118,3 +118,14 @@ func deleteInBatches(ctx context.Context, coll *mongo.Collection, filter bson.M)
 		}
 	}
 }
+
+// DeleteRow deletes the search-log row uuid of the tenant in ctx. A missing
+// row, or a row of another tenant, is not an error.
+func (r *SearchLog) DeleteRow(ctx context.Context, uuid string) error {
+	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid})
+	if err != nil {
+		return err
+	}
+	_, err = r.coll.DeleteOne(ctx, filter)
+	return err
+}
