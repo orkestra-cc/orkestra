@@ -124,6 +124,28 @@ func TestRegisterCorpus_Rejects(t *testing.T) {
 	}
 }
 
+// The registry accepts exactly what chunk.Validate accepts (ruling R11): a
+// larger window would pass registration and fail every item as invalid_item.
+func TestRegisterCorpus_FixedChunkingFollowsTheChunkBounds(t *testing.T) {
+	for _, tc := range []struct {
+		maxTokens int
+		ok        bool
+	}{{1, true}, {4096, true}, {4097, false}, {8192, false}} {
+		t.Run(fmt.Sprint(tc.maxTokens), func(t *testing.T) {
+			s := New(Options{})
+			sp := validSpec()
+			sp.Ingestion.Chunking = iface.RetrievalChunking{Strategy: "fixed", MaxTokens: tc.maxTokens}
+			err := s.RegisterCorpus(sp)
+			if tc.ok {
+				noErr(t, err)
+				return
+			}
+			isInvalid(t, err)
+			errContains(t, err, "4096")
+		})
+	}
+}
+
 func TestRegisterCorpus_ClosedAfterSeal(t *testing.T) {
 	s := New(Options{})
 	s.Seal()

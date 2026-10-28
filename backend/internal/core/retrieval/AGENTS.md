@@ -105,7 +105,7 @@ Checks run in this order; the problem text is what `HealthCheck` reports (`%s` c
 
 A token is a maximal run of runes for which `unicode.IsSpace` is false, when that run has at most 32 runes; a longer run counts as consecutive 32-rune pieces (the last may be shorter). Whitespace is never a token. One counted token approximates one word; subword tokenizers (bge-m3's XLM-R) produce roughly 1-2 model tokens per word in English and Italian, so a window of `MaxTokens` counted tokens may exceed `MaxTokens` model tokens. Operators choose `MaxTokens <= MaxInputTokens/2` of the embedding profile; the profile's `Truncate` covers any excess (the tail of an over-long window still reaches BM25, not the vector). A chunk's text runs from its first token's first rune to its last token's last rune.
 
-`none`: one chunk, cut at `MaxChunkBytes` (64512). `fixed`: windows of `MaxTokens` with `Overlap`, at most `MaxChunksPerItem` (512), each also bounded by `MaxChunkBytes`. `chunk.Validate` accepts `MaxTokens` 1-4096, whereas registration accepts up to 8192: a larger value passes registration and every item then fails as `invalid_item`. Provenance offsets `CharStart`/`CharEnd` are rune offsets in the item text.
+`none`: one chunk, cut at `MaxChunkBytes` (64512). `fixed`: windows of `MaxTokens` with `Overlap`, at most `MaxChunksPerItem` (512), each also bounded by `MaxChunkBytes`. `MaxTokens` is 1-4096 (`chunk.MaxTokensLimit`): registration calls `chunk.Validate` for `none` and `fixed`, so a corpus the chunker would refuse never registers. Provenance offsets `CharStart`/`CharEnd` are rune offsets in the item text.
 
 ### Engine additions and config
 
@@ -117,7 +117,7 @@ A token is a maximal run of runes for which `unicode.IsSpace` is false, when tha
 
 - Name `^[a-z][a-z0-9_]{0,31}$`, unique; owner `^[a-z][a-z0-9_-]{0,63}$`; permission `a.b[.c[.d]]` lowercase; `Source` required.
 - At most 32 filters; names `^[a-z][a-zA-Z0-9_]{0,63}$`, unique, known type, description 1..500 bytes.
-- `embedEndpoint` required (no whitespace, <= 64 bytes). Tokenizer `word` (default) or `multilingual`; stemming needs a Snowball language, stop words a stop-word language (Qdrant 1.20 enums). Chunking `none` (no sizes) or `fixed` (`maxTokens` 1..8192, `0 <= overlap < maxTokens`); `hierarchical` and enrichment are refused until delivery step 3.
+- `embedEndpoint` required (no whitespace, <= 64 bytes). Tokenizer `word` (default) or `multilingual`; stemming needs a Snowball language, stop words a stop-word language (Qdrant 1.20 enums). Chunking `none` (no sizes) or `fixed` (`maxTokens` 1..4096, `0 <= overlap < maxTokens`, checked by `chunk.Validate`); `hierarchical` and enrichment are refused until delivery step 3.
 - Locality `""` becomes `local_only`; fusion defaults 1/1/50 (weights in (0,10], candidates 1..500); rerank `topK` defaults to 20 (1..200), enabled needs an endpoint.
 - The registry stores a normalized deep copy. Locality against the actual endpoints is checked at profile resolution (PR 4/5), not here.
 

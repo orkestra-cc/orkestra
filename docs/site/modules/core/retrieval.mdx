@@ -66,7 +66,7 @@ Registration is a local, syntax-only check. It never contacts the engine or `llm
 
 - The corpus name matches `^[a-z][a-z0-9_]{0,31}$` and is unique in the installation; the owner is a module name; the permission has the form `a.b[.c[.d]]` in lowercase; a `Source` is required.
 - At most 32 filter fields. Names match `^[a-z][a-zA-Z0-9_]{0,63}$` and are unique; the type is one of the six listed under [Filters](#filters); the description is 1 to 500 bytes.
-- `embedEndpoint` is required. The tokenizer is `word` (default) or `multilingual`; stemming needs a Snowball language and stop words a stop-word language. Chunking is `none` or `fixed` (`maxTokens` 1 to 8192, `overlap` below `maxTokens`). `hierarchical` chunking and enrichment are refused until delivery step 3.
+- `embedEndpoint` is required. The tokenizer is `word` (default) or `multilingual`; stemming needs a Snowball language and stop words a stop-word language. Chunking is `none` or `fixed` (`maxTokens` 1 to 4096, `overlap` below `maxTokens`). `hierarchical` chunking and enrichment are refused until delivery step 3.
 - Locality `""` becomes `local_only`. Fusion defaults to dense weight 1, keyword weight 1 and 50 candidates per arm (weights in (0, 10], candidates 1 to 500). Rerank is off by default; its `topK` defaults to 20 (1 to 200), and enabling it needs an endpoint.
 - The registry stores a normalized copy, so a later change to the caller's struct has no effect.
 
@@ -143,7 +143,7 @@ A worker holds a short lease on each item and checks it before every write, so t
 ### Chunking
 
 - `none`: one chunk per item, cut at 64,512 bytes if longer.
-- `fixed`: windows of `maxTokens` tokens, consecutive windows sharing `overlap` tokens, at most 512 chunks per item. `maxTokens` is 1 to 4096 in practice: registration accepts up to 8192, but an item of a corpus configured above 4096 is rejected as `invalid_item`, so stay at or below 4096.
+- `fixed`: windows of `maxTokens` tokens, consecutive windows sharing `overlap` tokens, at most 512 chunks per item. `maxTokens` is 1 to 4096; registration refuses a larger value.
 
 Tokens are counted approximately, without a model: a token is a run of non-whitespace characters of at most 32 characters (a longer run counts as consecutive 32-character pieces). One counted token is roughly one word, while the embedding model's own tokenizer produces roughly 1 to 2 tokens per word in English and Italian, so choose `maxTokens` at most half of the endpoint's maximum input; the endpoint's truncation covers any excess (the tail still reaches the keyword search, not the vector).
 

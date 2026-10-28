@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/orkestra/backend/internal/core/retrieval/chunk"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -23,7 +24,6 @@ const (
 	maxWeight       = 10
 	maxCandidates   = 500
 	maxRerankTopK   = 200
-	maxChunkTokens  = 8192
 	stepThree       = "available from delivery step 3"
 )
 
@@ -233,16 +233,11 @@ func normalizeIngestion(name string, in *iface.RetrievalIngestionProfile) error 
 	}
 	c := in.Chunking
 	switch c.Strategy {
-	case "none":
-		if c.MaxTokens != 0 || c.Overlap != 0 {
-			return specErr(name, "chunking none takes no maxTokens or overlap")
-		}
-	case "fixed":
-		if c.MaxTokens < 1 || c.MaxTokens > maxChunkTokens {
-			return specErr(name, "chunking maxTokens must be 1..%d", maxChunkTokens)
-		}
-		if c.Overlap < 0 || c.Overlap >= c.MaxTokens {
-			return specErr(name, "chunking overlap must be >= 0 and < maxTokens")
+	case chunk.StrategyNone, chunk.StrategyFixed:
+		// The chunker's own bounds (MaxTokens 1..chunk.MaxTokensLimit), so a
+		// registered corpus never fails every item as invalid_item.
+		if err := chunk.Validate(c); err != nil {
+			return specErr(name, "%s", err.Error())
 		}
 	case "hierarchical":
 		return specErr(name, "chunking hierarchical is %s", stepThree)
