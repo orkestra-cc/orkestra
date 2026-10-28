@@ -989,6 +989,30 @@ func TestModule_SearchWarnsOnceNamingMissingServices(t *testing.T) {
 	}
 }
 
+// A missing TenantProvider alone (role lister present) still fails Principals
+// closed: the nil interface reaches the resolver as a nil MembershipChecker
+// without a guard in Init (D1).
+func TestModule_PrincipalsWithoutTenantProviderFailsClosed(t *testing.T) {
+	t.Setenv("QDRANT_URL", "")
+	reg := module.NewServiceRegistry()
+	reg.Register(module.ServiceAuthzProvider, iface.AuthzProvider(fakeAuthz{}))
+	reg.Register(module.ServiceLLMGateway, plainGateway{})
+	reg.Register(module.ServiceTenantService, iface.TenantIDLister(fakeTenants{}))
+	reg.Register(module.ServiceModuleStatus, module.ModuleStatusReader(fakeStatus{}))
+	m := NewModule()
+	if err := m.Init(&module.Dependencies{DB: offlineDB(t), Logger: slog.New(slog.DiscardHandler), Services: reg}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	resolver, _ := module.GetTyped[iface.RetrievalPrincipalResolver](reg, module.ServiceRetrieval)
+	pc, err := resolver.Principals(callerCtx())
+	if !errors.Is(err, iface.ErrRetrievalUnavailable) {
+		t.Fatalf("Principals err = %v, want ErrRetrievalUnavailable", err)
+	}
+	if len(pc.Principals) != 0 {
+		t.Fatalf("principals = %v, want none", pc.Principals)
+	}
+}
+
 // fakePurger records PurgeBefore cutoffs and answers n or err.
 type fakePurger struct {
 	mu      sync.Mutex

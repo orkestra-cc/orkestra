@@ -342,12 +342,10 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		// answers ErrRetrievalNotConfigured at step 2 and leaves its row.
 		// A missing service stays nil and fails closed (or degrades) per
 		// search; Init never errors and contacts nothing (ADR D1).
-		var members services.MembershipChecker // untyped nil unless resolved
-		if svcs.members != nil {
-			members = svcs.members
-		}
 		resolver := &services.PrincipalResolver{
-			Members:      members,
+			// A nil iface.TenantProvider converts to a nil MembershipChecker
+			// (interface to interface), so the resolver's == nil check holds.
+			Members:      svcs.members,
 			Roles:        svcs.roles,
 			Contributors: svc.PrincipalContributors,
 			Cap:          func() int { return settings().principalCap },
