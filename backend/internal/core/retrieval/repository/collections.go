@@ -4,8 +4,7 @@ package repository
 import "github.com/orkestra/backend/pkg/sdk/module"
 
 // CollCorpusState is installation-wide (one document per corpus, _id = the
-// corpus name). It is declared here so the module owns the name; its document
-// shape and repository code arrive with the indexing worker (PR 4).
+// corpus name); see CorpusStates.
 const CollCorpusState = "retrieval_corpus_state"
 
 // CollOutbox is the per-key indexing outbox (tenant-scoped).

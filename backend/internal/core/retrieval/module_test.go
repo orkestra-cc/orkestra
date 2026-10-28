@@ -82,8 +82,9 @@ func TestModule_Declarations(t *testing.T) {
 		t.Fatalf("provided = %v", got)
 	}
 	cols := m.Collections()
-	if len(cols) != 2 || cols[0].Name != "retrieval_corpus_state" || repository.CollCorpusState != "retrieval_corpus_state" ||
-		cols[1].Name != "retrieval_outbox" || repository.CollOutbox != "retrieval_outbox" {
+	if len(cols) != 3 || cols[0].Name != "retrieval_corpus_state" || repository.CollCorpusState != "retrieval_corpus_state" ||
+		cols[1].Name != "retrieval_outbox" || repository.CollOutbox != "retrieval_outbox" ||
+		cols[2].Name != "retrieval_tenant_progress" || repository.CollTenantProgress != "retrieval_tenant_progress" {
 		t.Fatalf("collections = %v", cols)
 	}
 	if p := module.PermissionsOf(m); len(p) != 0 {
@@ -143,6 +144,21 @@ func TestModule_IndexesLeadWithTenantOrAreDeclaredSweeps(t *testing.T) {
 	}
 	if !slices.Equal(got, []string{"tenantId", "corpus", "sourceId"}) {
 		t.Errorf("outbox unique index = %v", got)
+	}
+	got = nil
+	for _, c := range NewModule().Collections() {
+		if c.Name == repository.CollTenantProgress {
+			for _, idx := range c.Indexes {
+				if idx.Unique {
+					for _, k := range idx.OrderedKeys {
+						got = append(got, k.Field)
+					}
+				}
+			}
+		}
+	}
+	if !slices.Equal(got, []string{"tenantId", "corpus", "generation"}) {
+		t.Errorf("tenant progress unique index = %v", got)
 	}
 }
 
