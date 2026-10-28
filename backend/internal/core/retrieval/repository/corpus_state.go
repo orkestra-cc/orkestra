@@ -66,19 +66,46 @@ func (r *CorpusStates) Insert(ctx context.Context, st *models.CorpusState) error
 	return nil
 }
 
-// Save replaces the state if its stored Version still equals st.Version, then
-// increments st.Version; ErrStateConflict otherwise.
+// Save writes the worker-owned fields of st if the stored Version still
+// equals st.Version, then increments st.Version; ErrStateConflict otherwise.
+// It is a field update, not a replacement: _id, createdAt and any field this
+// version of the code does not know (one written by a newer replica during a
+// rolling upgrade) are left as stored. A zero omitempty field is unset, so the
+// document keeps the shape Insert gives it.
 func (r *CorpusStates) Save(ctx context.Context, st *models.CorpusState) error {
-	doc := *st
-	doc.Version = st.Version + 1
+	next := st.Version + 1
+	set := bson.M{
+		"owner": st.Owner, "status": st.Status, "activeGeneration": st.ActiveGeneration,
+		"locality": st.Locality, "updatedAt": st.UpdatedAt, "version": next,
+	}
+	unset := bson.M{}
+	for k, v := range map[string]any{
+		"reason": st.Reason, "collection": st.Collection, "ingestionProfileHash": st.IngestionProfileHash,
+		"embeddingProfileId": st.EmbeddingProfileID, "declaredProfileHash": st.DeclaredProfileHash,
+	} {
+		if v == "" {
+			unset[k] = ""
+		} else {
+			set[k] = v
+		}
+	}
+	if st.Dimensions == 0 {
+		unset["dimensions"] = ""
+	} else {
+		set["dimensions"] = st.Dimensions
+	}
+	update := bson.M{"$set": set}
+	if len(unset) > 0 {
+		update["$unset"] = unset
+	}
 	//tenantscope:allow system: installation-wide corpus state (ADR-0023 D11), one document per corpus
-	res, err := r.coll.ReplaceOne(ctx, bson.M{"_id": st.Corpus, "version": st.Version}, &doc)
+	res, err := r.coll.UpdateOne(ctx, bson.M{"_id": st.Corpus, "version": st.Version}, update)
 	if err != nil {
 		return err
 	}
 	if res.MatchedCount == 0 {
 		return ErrStateConflict
 	}
-	st.Version = doc.Version
+	st.Version = next
 	return nil
 }
