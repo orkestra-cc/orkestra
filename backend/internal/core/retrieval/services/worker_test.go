@@ -588,3 +588,122 @@ func TestWorker_StaleHolderResumingAfterSuccessor(t *testing.T) {
 		})
 	}
 }
+
+// R7: a run that issued an engine write and then finds its lease lost at
+// Reschedule re-queues the key, because the write may have landed after the
+// successor's. The flag is set between the lease guard and the write call, so
+// a write that returned an error still counts.
+func TestWorker_LostLeaseAtRescheduleAfterAWriteRequeues(t *testing.T) {
+	e := newTestWorker(t)
+	w1, w2 := e.w, e.newWorker()
+	e.source.put("t1", item(1))
+	e.enqueue(t, 1)
+
+	var first atomic.Bool
+	var rep2 *PassReport
+	e.eng.setBeforeUpsert(func() {
+		if !first.CompareAndSwap(false, true) {
+			return // w2's own upsert
+		}
+		// w1 is about to write: the owner moves to rev 2, w1's lease
+		// expires, w2 claims, indexes and releases the key
+		it := item(2)
+		it.Text = "k l m"
+		e.source.put("t1", it)
+		e.enqueue(t, 2)
+		e.clk.Advance(testLease + time.Second)
+		rep2 = e.processNext(t, w2)
+		require.Equal(t, false, e.row().Dirty)
+		e.eng.setWriteErr(engine.ErrUnavailable) // w1's upsert then fails
+	})
+	rep1 := e.processNext(t, w1)
+	require.NotNil(t, rep2)
+	assert.Equal(t, PassReport{Claimed: 1, Indexed: 1}, *rep2)
+	assert.Equal(t, PassReport{Claimed: 1, Requeued: 1}, *rep1)
+	r := e.row()
+	assert.Equal(t, true, r.Dirty)
+	assert.Equal(t, "", r.LeaseOwner)
+	assert.Equal(t, "", r.LastError) // w1's Reschedule was refused
+	assert.Equal(t, 0, r.Attempts)
+	assert.Equal(t, 0, e.outbox.releasesBy(w1.owner))
+
+	e.eng.setWriteErr(nil)
+	e.eng.setBeforeUpsert(nil)
+	e.processNext(t, w2)
+	pts := e.eng.points(testColl)
+	require.Len(t, pts, 1)
+	assert.Equal(t, int64(2), pts[0].Runtime.SourceRevision)
+	assert.Equal(t, "k l m", pts[0].Text)
+	r = e.row()
+	assert.Equal(t, false, r.Dirty)
+	require.NotNil(t, r.Applied)
+	assert.Equal(t, int64(2), r.Applied.Revision)
+}
+
+// Before any engine write, a lease lost at Reschedule leaves the key to its
+// successor: no Requeue, and the row stays as the successor left it.
+func TestWorker_LostLeaseAtRescheduleBeforeAnyWriteLeavesTheSuccessorsRow(t *testing.T) {
+	e := newTestWorker(t)
+	w1, w2 := e.w, e.newWorker()
+	e.source.put("t1", item(1))
+	e.enqueue(t, 1)
+
+	var successor models.OutboxEntry
+	e.source.setOnLoad(func() {
+		e.source.setOnLoad(nil)
+		e.clk.Advance(testLease + time.Second)
+		require.Equal(t, 1, e.processNext(t, w2).Indexed)
+		successor = e.row()
+		e.source.setErr(errors.New("owner down")) // w1's Load then fails
+	})
+	rep1 := e.processNext(t, w1)
+	assert.Equal(t, PassReport{Claimed: 1}, *rep1)
+	assert.Equal(t, successor, e.row())
+	assert.Equal(t, false, e.row().Dirty)
+	assert.Equal(t, 1, e.eng.callCount("Upsert")) // w2's only
+}
+
+// A Load reply that cannot be trusted for the claimed id is invalid_item:
+// parked for 30 minutes, nothing written, the existing points untouched.
+func TestWorker_UntrustworthyLoadReplyIsInvalidItem(t *testing.T) {
+	cases := map[string]func(ids []string) []iface.RetrievalLoaded{
+		"item names another source": func(ids []string) []iface.RetrievalLoaded {
+			it := item(2)
+			it.SourceID = "c9"
+			return []iface.RetrievalLoaded{{SourceID: ids[0], Item: &it}}
+		},
+		"two entries for the id": func(ids []string) []iface.RetrievalLoaded {
+			a, b := item(2), item(2)
+			b.Text = "other"
+			return []iface.RetrievalLoaded{{SourceID: ids[0], Item: &a}, {SourceID: ids[0], Item: &b}}
+		},
+		"not deleted without an item": func(ids []string) []iface.RetrievalLoaded {
+			return []iface.RetrievalLoaded{{SourceID: ids[0]}}
+		},
+	}
+	for name, reply := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := newTestWorker(t)
+			e.indexRev1(t)
+			before := e.eng.points(testColl)
+			writes, embeds := e.eng.writes(), e.emb.callCount()
+			e.source.setLoadReply(reply)
+			e.enqueue(t, 2)
+			now := e.clk.Now()
+
+			assert.Equal(t, PassReport{Claimed: 1, Rescheduled: 1}, *e.pass(t, e.w))
+			r := e.row()
+			assert.Equal(t, codeInvalidItem, r.LastError)
+			assert.Equal(t, now.Add(30*time.Minute), r.NextAttemptAt)
+			assert.Equal(t, true, r.Dirty)
+			assert.Equal(t, writes, e.eng.writes())
+			assert.Equal(t, embeds, e.emb.callCount())
+			assert.Equal(t, before, e.eng.points(testColl))
+			logs := e.logs.String()
+			assert.Contains(t, logs, "code=invalid_item")
+			for _, leak := range []string{"c9", "other", "a b c", "tenant:*", "crm:1"} {
+				assert.Equal(t, false, strings.Contains(logs, leak), leak)
+			}
+		})
+	}
+}

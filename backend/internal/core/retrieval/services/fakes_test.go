@@ -777,6 +777,8 @@ type fakeSource struct {
 	err     error
 	loads   int
 	onLoad  func() // runs outside the lock, before the items are read
+	// loadReply, when set, replaces the reply of Load (a misbehaving owner).
+	loadReply func(ids []string) []iface.RetrievalLoaded
 
 	enumErr   error
 	enumCalls []enumCall
@@ -833,6 +835,12 @@ func (f *fakeSource) setOnLoad(h func()) {
 	f.onLoad = h
 }
 
+func (f *fakeSource) setLoadReply(h func(ids []string) []iface.RetrievalLoaded) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.loadReply = h
+}
+
 func (f *fakeSource) loadCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -851,6 +859,9 @@ func (f *fakeSource) Load(_ context.Context, tenantID string, ids []string) ([]i
 	defer f.mu.Unlock()
 	if f.err != nil {
 		return nil, f.err
+	}
+	if f.loadReply != nil {
+		return f.loadReply(ids), nil
 	}
 	var out []iface.RetrievalLoaded
 	for _, id := range ids {

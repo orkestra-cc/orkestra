@@ -235,14 +235,11 @@ func (k *keyRun) run() {
 		k.reschedule(codeSource, err)
 		return
 	}
-	var item *iface.RetrievalItem
-	for _, l := range loaded {
-		if l.SourceID == id {
-			if !l.Deleted && l.Item != nil {
-				item = l.Item
-			}
-			break
-		}
+	item, valid := loadedItem(loaded, id)
+	if !valid {
+		// The reply cannot be trusted for this id; the log names the key only.
+		k.reschedule(codeInvalidItem, nil)
+		return
 	}
 	if item == nil {
 		k.remove()
@@ -334,6 +331,32 @@ func (k *keyRun) run() {
 	if k.release(applied) {
 		k.rep.Indexed++
 	}
+}
+
+// loadedItem picks the claimed id's entry from a Load reply: nil when the id
+// is absent or Deleted. valid is false when the reply cannot be trusted for
+// the id: more than one entry, an entry neither deleted nor carrying an
+// item, or an item that names another source.
+func loadedItem(loaded []iface.RetrievalLoaded, id string) (item *iface.RetrievalItem, valid bool) {
+	var entry *iface.RetrievalLoaded
+	for i := range loaded {
+		if loaded[i].SourceID != id {
+			continue
+		}
+		if entry != nil {
+			return nil, false
+		}
+		entry = &loaded[i]
+	}
+	switch {
+	case entry == nil || entry.Deleted:
+		return nil, true
+	case entry.Item == nil:
+		return nil, false
+	case entry.Item.SourceID != "" && entry.Item.SourceID != id:
+		return nil, false
+	}
+	return entry.Item, true
 }
 
 // covered runs the tombstone check; ok is false when the key was rescheduled.

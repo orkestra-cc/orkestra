@@ -126,7 +126,7 @@ Pass the `mongo.SessionContext` of the transaction so the intent commits or abor
 
 The source must answer two calls:
 
-- `Load(tenantID, ids)` returns the current item for each id, or `Deleted` for one that no longer exists. It answers only for the tenant passed. An item has a title (cut to 512 bytes, then prefixed to every chunk), text, declared filter fields, `VisibleTo` (up to 1000 entries) and `Subjects` (up to 100), each entry 1 to 256 bytes. An item that breaks these rules is retried every 30 minutes with the code `invalid_item`.
+- `Load(tenantID, ids)` returns the current item for each id, or `Deleted` for one that no longer exists. It answers only for the tenant passed, with at most one entry per id; an entry that is neither deleted nor carries an item, or whose item names another id, is treated as `invalid_item`. An item has a title (cut to 512 bytes, then prefixed to every chunk), text, declared filter fields, `VisibleTo` (up to 1000 entries) and `Subjects` (up to 100), each entry 1 to 256 bytes. An item that breaks these rules is retried every 30 minutes with the code `invalid_item`.
 - `Enumerate(tenantID, cursor, limit)` pages through the tenant's items by an opaque cursor (empty to start, empty `Next` to end). The first time a corpus is indexed the worker walks it, 200 ids per page, to enqueue every existing item.
 
 ### What the worker does
