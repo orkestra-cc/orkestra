@@ -60,10 +60,13 @@ func (m *Module) ProvidedServices() []module.ServiceKey {
 	return []module.ServiceKey{module.ServiceRetrieval}
 }
 
-// Collections declares the installation-wide corpus state; its shape and
-// repository belong to the indexing step.
+// Collections declares the installation-wide corpus state (shape and
+// repository arrive with the worker) and the per-key indexing outbox.
 func (m *Module) Collections() []module.CollectionSpec {
-	return []module.CollectionSpec{{Name: repository.CollCorpusState}}
+	return []module.CollectionSpec{
+		{Name: repository.CollCorpusState},
+		{Name: repository.CollOutbox, Indexes: repository.OutboxIndexes()},
+	}
 }
 
 // Init reads the operator environment and registers the service. It never

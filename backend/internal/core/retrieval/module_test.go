@@ -82,7 +82,8 @@ func TestModule_Declarations(t *testing.T) {
 		t.Fatalf("provided = %v", got)
 	}
 	cols := m.Collections()
-	if len(cols) != 1 || cols[0].Name != "retrieval_corpus_state" || repository.CollCorpusState != "retrieval_corpus_state" {
+	if len(cols) != 2 || cols[0].Name != "retrieval_corpus_state" || repository.CollCorpusState != "retrieval_corpus_state" ||
+		cols[1].Name != "retrieval_outbox" || repository.CollOutbox != "retrieval_outbox" {
 		t.Fatalf("collections = %v", cols)
 	}
 	if p := module.PermissionsOf(m); len(p) != 0 {
@@ -90,6 +91,58 @@ func TestModule_Declarations(t *testing.T) {
 	}
 	if c := module.ConfigSchemaOf(m); len(c) != 0 {
 		t.Fatalf("config schema = %v", c)
+	}
+}
+
+// Every index leads with tenantId except the declared system sweeps (cross-
+// tenant by design, //tenantscope:allow system:). Sweeps carry unique=false
+// unless a later collection (global tombstones) declares otherwise.
+func TestModule_IndexesLeadWithTenantOrAreDeclaredSweeps(t *testing.T) {
+	type sweep struct {
+		fields []string
+		unique bool
+	}
+	sweeps := map[string][]sweep{
+		repository.CollOutbox: {{[]string{"dirty", "nextAttemptAt"}, false}, {[]string{"leaseUntil"}, false}},
+	}
+	for _, c := range NewModule().Collections() {
+		for _, idx := range c.Indexes {
+			if len(idx.OrderedKeys) == 0 {
+				t.Errorf("%s index %+v has no ordered keys", c.Name, idx)
+				continue
+			}
+			if idx.OrderedKeys[0].Field == "tenantId" {
+				continue
+			}
+			var fields []string
+			for _, k := range idx.OrderedKeys {
+				fields = append(fields, k.Field)
+			}
+			allowed := false
+			for _, s := range sweeps[c.Name] {
+				if slices.Equal(s.fields, fields) && s.unique == idx.Unique {
+					allowed = true
+				}
+			}
+			if !allowed {
+				t.Errorf("%s index %v does not lead with tenantId and is not a declared system sweep", c.Name, fields)
+			}
+		}
+	}
+	var got []string
+	for _, c := range NewModule().Collections() {
+		if c.Name == repository.CollOutbox {
+			for _, idx := range c.Indexes {
+				if idx.Unique {
+					for _, k := range idx.OrderedKeys {
+						got = append(got, k.Field)
+					}
+				}
+			}
+		}
+	}
+	if !slices.Equal(got, []string{"tenantId", "corpus", "sourceId"}) {
+		t.Errorf("outbox unique index = %v", got)
 	}
 }
 
