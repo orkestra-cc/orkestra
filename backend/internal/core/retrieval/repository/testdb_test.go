@@ -55,7 +55,11 @@ func ensureIndexes(t *testing.T, db *mongo.Database, coll string, specs []module
 		for _, k := range s.OrderedKeys {
 			keys = append(keys, bson.E{Key: k.Field, Value: k.Direction})
 		}
-		ms = append(ms, mongo.IndexModel{Keys: keys, Options: options.Index().SetUnique(s.Unique)})
+		opts := options.Index().SetUnique(s.Unique)
+		if len(s.PartialFilter) > 0 {
+			opts.SetPartialFilterExpression(s.PartialFilter)
+		}
+		ms = append(ms, mongo.IndexModel{Keys: keys, Options: opts})
 	}
 	if _, err := db.Collection(coll).Indexes().CreateMany(context.Background(), ms); err != nil {
 		t.Fatal(err)

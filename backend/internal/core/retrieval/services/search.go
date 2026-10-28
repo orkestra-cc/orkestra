@@ -51,9 +51,13 @@ type SearchLogWriter interface {
 	Insert(ctx context.Context, row *models.SearchLog) error
 }
 
-// SearchLogRetractor deletes one search-log row of the ctx tenant; satisfied by *repository.SearchLog.
+// SearchLogRetractor settles one provisional search-log row of the ctx tenant
+// after its erasure re-check: DeleteRow when an erasure covers it, MarkChecked
+// (clears models.SearchLog.Unchecked) when none does. Satisfied by
+// *repository.SearchLog.
 type SearchLogRetractor interface {
 	DeleteRow(ctx context.Context, uuid string) error
+	MarkChecked(ctx context.Context, uuid string) error
 }
 
 var _ SearchLogRetractor = (*repository.SearchLog)(nil)
@@ -86,7 +90,7 @@ type SearchDeps struct {
 // Searcher runs the search pipeline of ADR-0023 D5.
 type Searcher struct {
 	d SearchDeps
-	// retractor is d.Log when it can also delete a row; nil otherwise.
+	// retractor is d.Log when it can also settle a row; nil otherwise.
 	retractor SearchLogRetractor
 }
 
@@ -206,6 +210,12 @@ func (s *Searcher) logFailed(ctx context.Context, g gated, row *models.SearchLog
 	s.retract(ctx, g, row)
 }
 
+// retracts reports whether rows are re-checked after the write (retract), and
+// so are written provisional (models.SearchLog.Unchecked).
+func (s *Searcher) retracts() bool {
+	return s.retractor != nil && s.d.Tombstones != nil
+}
+
 // retract re-reads the tombstones after row was written and deletes the row
 // when an erasure covers the searcher or any subject it names. Ordering: an
 // eraser writes the tombstone and then deletes rows (the producer, and
@@ -213,11 +223,13 @@ func (s *Searcher) logFailed(ctx context.Context, g gated, row *models.SearchLog
 // Either this re-check sees the tombstone, or the eraser's delete sees the
 // row, so a row written after the erasure cannot survive. Hits already
 // returned passed the step 6 veto before the erasure was recorded and are
-// not recalled. A failed re-check is retried once; if that fails too the row
-// stays, and only finalizer stage 0 removes it, which happens only while its
-// erasure is still being finalized (a done tombstone is never claimed again).
+// not recalled. The row was written unchecked: a row no erasure covers is
+// marked checked. A failed re-check is retried once; if that fails too, or
+// the delete or the mark fails, the row stays unchecked and the retention
+// sweep deletes it once older than UncheckedSearchLogGrace, so the outcome
+// is durable even after the covering erasure is done.
 func (s *Searcher) retract(ctx context.Context, g gated, row *models.SearchLog) {
-	if s.retractor == nil || s.d.Tombstones == nil {
+	if !s.retracts() {
 		return
 	}
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), searchLogErrorTimeout)
@@ -234,15 +246,19 @@ func (s *Searcher) retract(ctx context.Context, g gated, row *models.SearchLog) 
 		covered, err = s.d.Tombstones.Covered(rctx, g.tenantID, g.spec.Name, probes)
 	}
 	if err != nil {
-		s.d.Logger.Warn("retrieval: search log erasure re-check failed; the row is removed only if its erasure is still being finalized",
+		s.d.Logger.Warn("retrieval: search log erasure re-check failed; the row is swept as unchecked",
 			slog.String("corpus", g.spec.Name), slog.String("tenant", g.tenantID))
 		return
 	}
 	if !covered[row.UUID] {
+		if err := s.retractor.MarkChecked(rctx, row.UUID); err != nil {
+			s.d.Logger.Warn("retrieval: search log row could not be marked checked; the row is swept as unchecked",
+				slog.String("corpus", g.spec.Name), slog.String("tenant", g.tenantID))
+		}
 		return
 	}
 	if err := s.retractor.DeleteRow(rctx, row.UUID); err != nil {
-		s.d.Logger.Warn("retrieval: search log retraction failed",
+		s.d.Logger.Warn("retrieval: search log retraction failed; the row is swept as unchecked",
 			slog.String("corpus", g.spec.Name), slog.String("tenant", g.tenantID))
 	}
 }
@@ -261,6 +277,7 @@ func (s *Searcher) logRow(req iface.RetrievalSearchRequest, g gated, rec *search
 		Principals: slices.Clone(rec.principals),
 		SourceIDs:  []string{},
 		Subjects:   []string{},
+		Unchecked:  s.retracts(),
 	}
 	if err != nil {
 		row.Outcome, row.ErrorKind = models.SearchOutcomeError, errorKind(rec.kind, err)

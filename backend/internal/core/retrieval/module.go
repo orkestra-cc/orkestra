@@ -576,8 +576,9 @@ func (m *Module) searchLogRetentionLoop(ctx context.Context) {
 }
 
 // purgeSearchLog deletes every tenant's rows older than
-// search_log_retention_days (read now, so a change applies at the next run).
-// A failure is logged and retried at the next run.
+// search_log_retention_days (read now, so a change applies at the next run)
+// and the unchecked rows older than services.UncheckedSearchLogGrace. A
+// failure is logged and retried at the next run.
 func (m *Module) purgeSearchLog(ctx context.Context) {
 	m.mu.Lock()
 	purger, settings, logger := m.purger, m.settings, m.logger

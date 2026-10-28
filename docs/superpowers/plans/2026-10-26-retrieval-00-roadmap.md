@@ -670,7 +670,7 @@ of this file.
 | Audit: retrieval's own events through PR 6's `AuditRelay` (late-wired by compliance via `iface.AuditSinkSetter` on `ServiceRetrieval`); PR 7's admin events resolve `ServiceAuditSink` per call. Both reach the same sink | 6, 7 | — |
 | `iface.PurgedTenantIDLister` (lists purged tenant ids; tenant's `*services.Service`) beside `iface.TenantPurgeHooks`, for the purge reconcile loop | 6 | 6 |
 | Finalizer stage 0 (search-log delete by kind on every pass, before the engine work), with `SearchLogDSRRepo` | 6 | 6 |
-| Search-log post-write re-check: `SearchLogRetractor` (`DeleteRow`) used by `Searcher.retract`, one tombstone lookup per logged search; a failed re-check leaves the row to finalizer stage 0 | 6 | 7 |
+| Search-log post-write re-check: `SearchLogRetractor` (`DeleteRow`, `MarkChecked`) used by `Searcher.retract`, one tombstone lookup per logged search; rows are inserted `unchecked`, settled by the re-check, and a row left unchecked (failed re-check, delete or mark) is swept by the retention run after `UncheckedSearchLogGrace` (10 min) via `PurgeUncheckedBefore` and the partial `{unchecked, createdAt}` index | 6 | 7 |
 | `services.ErasureBackoff(attempts)` = 15s·2^(n−1), capped at 15m | 6 | 6 |
 | `services.ValidateOwnerSubject`: `<owner>:<id>`, owner matches the corpus owner shape and is a registered owner, at most 256 bytes, no `user` owner | 6 | 7 |
 | `retrieval/AGENTS.md` and `docs/site/modules/core/retrieval.mdx` are created by PR 3; later PRs add sections | 3 | 4–8 |

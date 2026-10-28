@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -123,7 +124,7 @@ func TestModule_IndexesLeadWithTenantOrAreDeclaredSweeps(t *testing.T) {
 	sweeps := map[string][]sweep{
 		repository.CollOutbox:    {{[]string{"dirty", "nextAttemptAt"}, false}, {[]string{"leaseUntil"}, false}},
 		repository.CollErasures:  {{[]string{"uuid"}, true}, {[]string{"scope", "kind", "subject"}, false}, {[]string{"status", "nextAttemptAt"}, false}},
-		repository.CollSearchLog: {{[]string{"subjects"}, false}, {[]string{"createdAt"}, false}, {[]string{"userUuid"}, false}},
+		repository.CollSearchLog: {{[]string{"subjects"}, false}, {[]string{"createdAt"}, false}, {[]string{"userUuid"}, false}, {[]string{"unchecked", "createdAt"}, false}},
 	}
 	for _, c := range NewModule().Collections() {
 		for _, idx := range c.Indexes {
@@ -844,6 +845,7 @@ func TestCollections_DeclareSearchLog(t *testing.T) {
 		{[]string{"subjects"}, false},
 		{[]string{"createdAt"}, false},
 		{[]string{"userUuid"}, false},
+		{[]string{"unchecked", "createdAt"}, false},
 	}
 	if len(spec.Indexes) != len(want) {
 		t.Fatalf("indexes = %+v", spec.Indexes)
@@ -859,6 +861,10 @@ func TestCollections_DeclareSearchLog(t *testing.T) {
 		if !slices.Equal(fields, want[i].fields) || idx.Unique != want[i].unique {
 			t.Errorf("index %d = %v unique=%v, want %v unique=%v", i, fields, idx.Unique, want[i].fields, want[i].unique)
 		}
+	}
+	// G2: the unchecked sweep's index holds only provisional rows.
+	if pf := spec.Indexes[len(spec.Indexes)-1].PartialFilter; !reflect.DeepEqual(pf, map[string]any{"unchecked": true}) {
+		t.Errorf("unchecked index partial filter = %v", pf)
 	}
 }
 
@@ -1019,12 +1025,14 @@ func TestModule_PrincipalsWithoutTenantProviderFailsClosed(t *testing.T) {
 	}
 }
 
-// fakePurger records PurgeBefore cutoffs and answers n or err.
+// fakePurger records PurgeBefore cutoffs and answers n or err; the unchecked
+// sweep records its cutoffs and deletes nothing.
 type fakePurger struct {
-	mu      sync.Mutex
-	cutoffs []time.Time
-	n       int64
-	err     error
+	mu        sync.Mutex
+	cutoffs   []time.Time
+	unchecked []time.Time
+	n         int64
+	err       error
 }
 
 func (p *fakePurger) PurgeBefore(_ context.Context, cutoff time.Time) (int64, error) {
@@ -1032,6 +1040,19 @@ func (p *fakePurger) PurgeBefore(_ context.Context, cutoff time.Time) (int64, er
 	defer p.mu.Unlock()
 	p.cutoffs = append(p.cutoffs, cutoff)
 	return p.n, p.err
+}
+
+func (p *fakePurger) PurgeUncheckedBefore(_ context.Context, cutoff time.Time) (int64, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.unchecked = append(p.unchecked, cutoff)
+	return 0, nil
+}
+
+func (p *fakePurger) uncheckedCalls() []time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.unchecked)
 }
 
 func (p *fakePurger) calls() []time.Time {
@@ -1091,6 +1112,11 @@ func TestModule_RetentionLoopRunsWithoutEngine(t *testing.T) {
 	wantLo, wantHi := before.UTC().AddDate(0, 0, -90), time.Now().UTC().AddDate(0, 0, -90)
 	if cutoff.Before(wantLo) || cutoff.After(wantHi) {
 		t.Fatalf("cutoff %v outside [%v, %v]", cutoff, wantLo, wantHi)
+	}
+	// G2: every run also sweeps unchecked rows older than the grace.
+	if u := p.uncheckedCalls(); len(u) != len(p.calls()) ||
+		u[0].Before(before.UTC().Add(-services.UncheckedSearchLogGrace)) || u[0].After(time.Now().UTC().Add(-services.UncheckedSearchLogGrace)) {
+		t.Fatalf("unchecked sweeps = %v, retention runs = %d", u, len(p.calls()))
 	}
 	if !strings.Contains(logs.String(), "level=INFO") || !strings.Contains(logs.String(), "deleted=7") {
 		t.Fatalf("missing INFO with the deleted count: %s", logs)
