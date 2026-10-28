@@ -197,6 +197,13 @@ func (t *TEI) Embed(ctx context.Context, inputs []string, o TEIEmbedOptions) (*E
 		if err != nil {
 			return fail(transportErr(ctx, err))
 		}
+		// The endpoint computed this batch: count it before judging the body.
+		n := 0
+		for _, in := range batch {
+			n += len(in)
+		}
+		out.Usage.InputTokens += computeTokens(resp.Header, ceilThirds(n))
+		completed = true
 		var vectors [][]float32
 		if err := json.Unmarshal(body, &vectors); err != nil || len(vectors) != len(batch) {
 			return fail(malformed("embeddings response"))
@@ -212,13 +219,7 @@ func (t *TEI) Embed(ctx context.Context, inputs []string, o TEIEmbedOptions) (*E
 			}
 			dims = len(v)
 		}
-		n := 0
-		for _, in := range batch {
-			n += len(in)
-		}
 		out.Vectors = append(out.Vectors, vectors...)
-		out.Usage.InputTokens += computeTokens(resp.Header, ceilThirds(n))
-		completed = true
 	}
 	return out, nil
 }
@@ -243,6 +244,12 @@ func (t *TEI) Rerank(ctx context.Context, query string, texts []string, o TEIRer
 		if err != nil {
 			return nil, usage, transportErr(ctx, err)
 		}
+		// The endpoint computed this batch: count it before judging the body.
+		n := len(query) * len(batch)
+		for _, tx := range batch {
+			n += len(tx)
+		}
+		usage.InputTokens += computeTokens(resp.Header, ceilThirds(n))
 		var items []struct {
 			Index *int     `json:"index"`
 			Score *float32 `json:"score"`
@@ -258,11 +265,6 @@ func (t *TEI) Rerank(ctx context.Context, query string, texts []string, o TEIRer
 			seen[*it.Index] = true
 			scores = append(scores, iface.RerankScore{Index: start + *it.Index, Score: *it.Score})
 		}
-		n := len(query) * len(batch)
-		for _, tx := range batch {
-			n += len(tx)
-		}
-		usage.InputTokens += computeTokens(resp.Header, ceilThirds(n))
 	}
 	sort.Slice(scores, func(a, b int) bool {
 		if scores[a].Score != scores[b].Score {
