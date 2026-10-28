@@ -32,3 +32,17 @@ func (s *Service) ListActiveTenantIDs(ctx context.Context, kind string) ([]strin
 	sort.Strings(ids)
 	return ids, nil
 }
+
+var _ iface.PurgedTenantIDLister = (*Service)(nil)
+
+// ListPurgedTenantIDs implements iface.PurgedTenantIDLister: the UUIDs of every
+// tenant whose hard purge has committed (status purged), soft-deleted rows
+// included, of any kind, sorted ascending.
+func (s *Service) ListPurgedTenantIDs(ctx context.Context) ([]string, error) {
+	ids, err := s.repo.ListPurgedTenantUUIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(ids)
+	return ids, nil
+}

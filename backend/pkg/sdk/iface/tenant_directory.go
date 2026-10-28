@@ -33,3 +33,12 @@ type TenantIDLister interface {
 	// refused.
 	ListActiveTenantIDs(ctx context.Context, kind string) ([]string, error)
 }
+
+// PurgedTenantIDLister lists tenants whose hard purge has committed. Implemented by
+// the tenant module's concrete service; resolve it with
+// module.GetTyped[iface.PurgedTenantIDLister](reg, module.ServiceTenantService).
+type PurgedTenantIDLister interface {
+	// ListPurgedTenantIDs returns the UUIDs of every tenant whose status is
+	// TenantStatusPurged, soft-deleted rows included, of any kind, sorted ascending.
+	ListPurgedTenantIDs(ctx context.Context) ([]string, error)
+}

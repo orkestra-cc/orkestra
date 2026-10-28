@@ -17,6 +17,8 @@ A representative slice, not the full list — read the package for the rest.
 | `OperatorUserProvider` / `ClientUserProvider` | `user` | tier-specific lookups |
 | `SessionTerminator` | `user` | any module that must revoke a principal's sessions |
 | `TenantIDLister` | `tenant` | `retrieval` (initial index build) |
+| `TenantPurgeHooks` | `tenant` | `retrieval` (tenant offboarding) |
+| `PurgedTenantIDLister` | `tenant` | `retrieval` (tenant purge reconciliation) |
 | `NotificationSender` | `notification` | auth (verification, password reset) |
 | `CategoryConfiguredChecker` | `notification` | auth pre-flight guards — optional; `IsConfiguredForCategory` falls back to `IsConfigured` |
 | `TenantProvider` | `tenant` | authz, auth (JWT membership embedding), middleware |

@@ -94,6 +94,8 @@ The platform-admin group is gated by a **system** permission rather than per-org
 
 ## GDPR
 
+A hard purge also runs the `iface.TenantPurgeHooks` hooks, which receive only the tenant UUID. They run after the post-delete hooks, are best-effort (a failure is audited as `tenant.cascade.hook_failed` with `hook: purge` and never aborts the purge), and never run for a soft delete. The `retrieval` module uses this to erase the tenant's index. Since a hook can fail, `iface.PurgedTenantIDLister` exposes every tenant already committed as `purged`, so `retrieval` can reconcile any purge whose hook did not complete.
+
 Registers an `iface.PIIProducer` for the subject `tenant`. The subject's personal data here is their **memberships** — which orgs, what roles. The organizations themselves are not the subject's data and are left intact. Erasure deletes the membership rows under either mode, since a membership row *is* the user→org linkage with no anonymizable residue.
 
 :::note No tenant on a fresh install

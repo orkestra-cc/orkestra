@@ -29,6 +29,9 @@ type Service struct {
 	bindOwner       OwnerRoleBinder
 	unbindMember    MemberUnbinder
 	postDeleteHooks []TenantPostDeleteHook
+	// purgeHooks run after a hard purge with the purged tenant's UUID only
+	// (iface.TenantPurgeHooks).
+	purgeHooks []func(context.Context, string) error
 	// userDisplay is the lazy lookup the unified-clients refactor (Phase 1)
 	// uses to seed a personal tenant's Name from the owner User's FullName
 	// (EnsureTenantForUser) and to render the FatturaPA CedentePrestatore
@@ -221,6 +224,18 @@ func (s *Service) RegisterPostDeleteHook(fn TenantPostDeleteHook) {
 		return
 	}
 	s.postDeleteHooks = append(s.postDeleteHooks, fn)
+}
+
+var _ iface.TenantPurgeHooks = (*Service)(nil)
+
+// RegisterTenantPurgeHook implements iface.TenantPurgeHooks: fn runs once per
+// PurgeTenant (never DeleteTenant), after the post-delete hooks, with the
+// purged tenant's UUID. A nil fn is ignored.
+func (s *Service) RegisterTenantPurgeHook(fn func(ctx context.Context, tenantUUID string) error) {
+	if fn == nil {
+		return
+	}
+	s.purgeHooks = append(s.purgeHooks, fn)
 }
 
 // emitAudit forwards to the compliance sink when wired; no-op otherwise.
@@ -1186,6 +1201,9 @@ func (s *Service) PurgeTenant(ctx context.Context, tenantUUID string) error {
 		}
 	}
 	s.runPostDeleteHooks(ctx, cascadeCtx)
+	// tenantUUID, not cascadeCtx.TenantUUID: the latter is empty when the row
+	// lookup above failed.
+	s.runPurgeHooks(ctx, tenantUUID)
 	s.emitLifecycle(ctx, "tenant.lifecycle.purged", tenantUUID)
 	return nil
 }
@@ -1382,6 +1400,27 @@ func (s *Service) runPostDeleteHooks(ctx context.Context, c TenantPostDeleteCont
 				ResourceID:   c.TenantUUID,
 				Outcome:      "failure",
 				Metadata:     map[string]any{"error": err.Error()},
+			})
+		}
+	}
+}
+
+// runPurgeHooks fans out a hard purge to iface.TenantPurgeHooks subscribers.
+// Best-effort like runPostDeleteHooks: an error is audited and never aborts
+// the remaining hooks or the purge.
+func (s *Service) runPurgeHooks(ctx context.Context, tenantUUID string) {
+	for _, hook := range s.purgeHooks {
+		if hook == nil {
+			continue
+		}
+		if err := hook(ctx, tenantUUID); err != nil {
+			s.emitAudit(ctx, iface.AuditEvent{
+				TenantID:     tenantUUID,
+				Action:       "tenant.cascade.hook_failed",
+				ResourceType: "tenant",
+				ResourceID:   tenantUUID,
+				Outcome:      "failure",
+				Metadata:     map[string]any{"error": err.Error(), "hook": "purge"},
 			})
 		}
 	}
