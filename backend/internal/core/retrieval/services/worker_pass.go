@@ -157,7 +157,9 @@ func (w *Worker) indexPass(ctx context.Context, gates map[string]*corpusGate, na
 // from where the previous pass stopped, so open builds share the page budget
 // across passes; after an Enumerate failure the corpus's remaining tenants
 // are skipped for the rest of the pass, so one broken source costs one call
-// per pass and leaves the budget to the other corpora.
+// per pass and leaves the budget to the other corpora. When any Enumerate
+// failed, the next pass starts right after the first failing pair, so one
+// failing tenant cannot keep the others behind it from being reached.
 func (w *Worker) buildPass(ctx context.Context, gates map[string]*corpusGate, names []string, s WorkerSettings, rep *PassReport) error {
 	if len(names) == 0 {
 		return nil
@@ -185,15 +187,24 @@ func (w *Worker) buildPass(ctx context.Context, gates map[string]*corpusGate, na
 	start := w.buildOffset % len(pairs)
 	w.mu.Unlock()
 	visited := 0
+	firstFail := -1 // visit index of the first pair whose Enumerate failed
 	defer func() {
+		next := start + visited
+		if firstFail >= 0 {
+			// resume right after the first failing pair: without this a pass
+			// that walks the whole list leaves the offset unchanged and
+			// reaches the same failing pair first, forever
+			next = start + firstFail + 1
+		}
 		w.mu.Lock()
-		w.buildOffset = (start + visited) % len(pairs)
+		w.buildOffset = next % len(pairs)
 		w.mu.Unlock()
 	}()
 	pages := 0
 	failed := map[string]bool{}
 	for visited < len(pairs) && pages < buildPagesPerPass {
-		p := pairs[(start+visited)%len(pairs)]
+		idx := visited
+		p := pairs[(start+idx)%len(pairs)]
 		visited++
 		if failed[p.g.Spec.Name] {
 			continue
@@ -206,6 +217,9 @@ func (w *Worker) buildPass(ctx context.Context, gates map[string]*corpusGate, na
 			pages++
 		}
 		if enumFailed {
+			if firstFail < 0 {
+				firstFail = idx
+			}
 			failed[p.g.Spec.Name] = true
 		}
 	}

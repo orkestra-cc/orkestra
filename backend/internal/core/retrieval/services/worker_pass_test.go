@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -401,4 +402,81 @@ func TestBuild_FailingSourceDoesNotStallOtherCorpora(t *testing.T) {
 	for _, tn := range e.tenants.ids {
 		assert.Equal(t, models.ProgressDone, e.progress.get(tn, testCorpus, 1).Status, tn)
 	}
+}
+
+// failingTenants wraps a source and fails Enumerate for the listed tenants,
+// counting every call per tenant.
+type failingTenants struct {
+	*fakeSource
+	bad   map[string]bool
+	mu    sync.Mutex
+	calls map[string]int
+}
+
+func newFailingTenants(src *fakeSource, bad ...string) *failingTenants {
+	f := &failingTenants{fakeSource: src, bad: map[string]bool{}, calls: map[string]int{}}
+	for _, b := range bad {
+		f.bad[b] = true
+	}
+	return f
+}
+
+func (s *failingTenants) Enumerate(ctx context.Context, tenantID, cursor string, limit int) (iface.RetrievalPage, error) {
+	s.mu.Lock()
+	s.calls[tenantID]++
+	s.mu.Unlock()
+	if s.bad[tenantID] {
+		return iface.RetrievalPage{}, errors.New("tenant data broken")
+	}
+	return s.fakeSource.Enumerate(ctx, tenantID, cursor, limit)
+}
+
+// One tenant whose Enumerate keeps failing must not keep the corpus's other
+// tenants from being built: the next pass starts right after it.
+func TestBuild_OneFailingTenantDoesNotStarveItsCorpus(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = []string{"t00", "t01", "t02", "t03", "t04"}
+	src := newFailingTenants(e.source, "t00")
+	e.spec.Source = src
+	e.deps.Catalog = &fakeCatalog{specs: []iface.RetrievalCorpusSpec{e.spec}}
+	for _, tn := range e.tenants.ids {
+		e.putFor(tn, "x")
+	}
+	w := e.newWorker()
+
+	for pass := 1; pass <= 2; pass++ {
+		e.once(t, w)
+		assert.Equal(t, true, src.calls["t00"] <= pass, "failing tenant calls after pass %d", pass)
+	}
+	for _, tn := range e.tenants.ids[1:] {
+		assert.Equal(t, models.ProgressDone, e.progress.get(tn, testCorpus, 1).Status, tn)
+	}
+	for range 8 {
+		e.once(t, w)
+	}
+	assert.Equal(t, true, src.calls["t00"] <= 10, "t00 calls")
+}
+
+// A corpus whose whole source fails costs one Enumerate call per pass, and
+// the tenant that is tried moves on each pass.
+func TestBuild_WholeSourceFailingCostsOneCallPerPass(t *testing.T) {
+	e := newTestWorker(t)
+	e.tenants.ids = tenantIDs(5)
+	src := newFailingTenants(e.source, e.tenants.ids...)
+	e.spec.Source = src
+	e.deps.Catalog = &fakeCatalog{specs: []iface.RetrievalCorpusSpec{e.spec}}
+	w := e.newWorker()
+
+	for pass := 1; pass <= 6; pass++ {
+		e.once(t, w)
+		total := 0
+		for _, n := range src.calls {
+			total += n
+		}
+		assert.Equal(t, pass, total, "calls after pass %d", pass)
+	}
+	for _, tn := range e.tenants.ids {
+		assert.Equal(t, true, src.calls[tn] >= 1, tn)
+	}
+	assert.Equal(t, 2, src.calls["t00"]) // t00 is retried on the sixth pass
 }
