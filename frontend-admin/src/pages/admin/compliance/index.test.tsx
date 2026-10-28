@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -13,6 +13,7 @@ vi.mock('react-toastify', () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
 }));
 beforeEach(() => vi.clearAllMocks());
+afterEach(() => vi.useRealTimers());
 
 // CompliancePage mounts four RTK Query tabs at once (react-bootstrap Tabs
 // renders every pane), so each test stubs all four read endpoints to keep
@@ -451,6 +452,62 @@ describe('CompliancePage', () => {
     expect(row.getByText('Self-service')).toBeInTheDocument();
     expect(row.getByRole('button', { name: /^retry$/i })).toBeInTheDocument();
     expect(row.queryByRole('button', { name: /^reject$/i })).toBeNull();
+  });
+
+  it('refreshes the list while the retry worker may change a request', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const scheduled: ErasureFixture = {
+      uuid: 'er-4',
+      userUuid: 'u-erase-4',
+      status: 'incomplete',
+      mode: 'hard_delete',
+      attempts: 1,
+      nextAttemptAt: '2026-06-04T10:01:00Z',
+      requestedAt: '2026-06-04T10:00:00Z',
+      progress: [
+        { key: 'user', outcome: 'done' },
+        { key: 'crm', outcome: 'pending' }
+      ]
+    };
+    stubReads();
+    // The worker completes er-4 after the first read: it leaves the open list.
+    let reads = 0;
+    server.use(
+      http.get(url('/v1/admin/compliance/erasure-requests'), () => {
+        reads++;
+        return HttpResponse.json({
+          items: reads === 1 ? [scheduled] : []
+        });
+      })
+    );
+    renderWithProviders(<CompliancePage />);
+    await screen.findByText('u-erase-4');
+    const row = rowOf('u-erase-4');
+    expect(row.getByText('1 of 2 producers done')).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(
+      await screen.findByText(/no open erasure requests/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText('u-erase-4')).toBeNull();
+  });
+
+  it('does not refresh when no request has a retry scheduled', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    stubReads();
+    let reads = 0;
+    server.use(
+      http.get(url('/v1/admin/compliance/erasure-requests'), () => {
+        reads++;
+        return HttpResponse.json(incompleteRequests);
+      })
+    );
+    renderWithProviders(<CompliancePage />);
+    await screen.findByText('u-erase-2');
+    expect(reads).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(reads).toBe(1);
   });
 
   it('shows the last run error of an incomplete request', async () => {

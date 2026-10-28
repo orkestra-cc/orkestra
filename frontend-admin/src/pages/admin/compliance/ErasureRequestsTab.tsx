@@ -10,7 +10,6 @@ import { byTimestamp } from 'components/common/advance-table/sorting';
 import {
   useCloseErasureRequestMutation,
   useExecuteErasureRequestMutation,
-  useListErasureRequestsQuery,
   useRejectErasureRequestMutation,
   type ErasureRequest
 } from 'store/api/complianceApi';
@@ -18,15 +17,18 @@ import EmptyState from 'components/common/EmptyState';
 import SearchablePagedTable from 'components/common/advance-table/SearchablePagedTable';
 import { erasureStatusColor, formatDateTime } from './complianceFormat';
 import ReasonModal from './policies/ReasonModal';
+import { useOpenErasureRequests } from './useOpenErasureRequests';
 
 // ErasureRequestsTab drives the GDPR right-to-erasure queue: operators execute
 // a hard delete (step-up-gated on the backend, may be blocked by a legal hold)
 // or reject the request. A request some producer has not finished stays
 // incomplete (ADR-0023 D12): the operator retries it, or, when a producer is no
-// longer installed, closes it as partial with a mandatory note. Destructive 401s are replayed by the global StepUpModal.
+// longer installed, closes it as partial with a mandatory note. The list
+// refreshes while the retry worker may change a request (useOpenErasureRequests).
+// Destructive 401s are replayed by the global StepUpModal.
 const ErasureRequestsTab = () => {
   const { t } = useTranslation();
-  const { data, isLoading } = useListErasureRequestsQuery();
+  const { data, isLoading } = useOpenErasureRequests();
   const [execute] = useExecuteErasureRequestMutation();
   const [reject] = useRejectErasureRequestMutation();
   const [close, { isLoading: closing }] = useCloseErasureRequestMutation();
