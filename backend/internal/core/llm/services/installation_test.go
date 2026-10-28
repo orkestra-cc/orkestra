@@ -379,6 +379,34 @@ func TestInstallation_BudgetExceededBeforeAnyCall(t *testing.T) {
 	}
 }
 
+func TestInstallation_DimensionChangeBetweenBatchesInvalidatesProfileWithoutBreaker(t *testing.T) {
+	env := defaultInstallationEnv(t)
+	ctx := ctxFor("t1")
+	if _, err := env.g.EmbedWithProfile(ctx, env.embedReq()); err != nil {
+		t.Fatal(err)
+	}
+	big := env.embedReq()
+	big.Inputs = make([]string, 40) // two batches of the fake's 32
+	for i := range big.Inputs {
+		big.Inputs[i] = "ab"
+	}
+	env.embed.ChangeDimensionsAfter(len(env.embed.EmbedCalls())+1, 8)
+	for i := range 4 { // more than the breaker threshold
+		_, err := env.g.EmbedWithProfile(ctx, big)
+		if !errors.Is(err, iface.ErrLLMProfileMismatch) || errors.Is(err, iface.ErrLLMProviderUnavailable) {
+			t.Fatalf("call %d err = %v", i, err)
+		}
+		if i == 0 && len(env.store.ledger) != 2 {
+			t.Fatalf("ledger rows = %d", len(env.store.ledger))
+		}
+	}
+	// the verified profile was dropped: the next call re-verifies and, with the
+	// model now serving 8 dimensions, the pinned profile no longer matches.
+	if _, err := env.g.EmbedWithProfile(ctx, env.embedReq()); !errors.Is(err, iface.ErrLLMProfileMismatch) {
+		t.Fatalf("after invalidation err = %v", err)
+	}
+}
+
 func TestInstallation_UnavailableEndpointOpensTheBreaker(t *testing.T) {
 	env := defaultInstallationEnv(t)
 	ctx := ctxFor("t1")

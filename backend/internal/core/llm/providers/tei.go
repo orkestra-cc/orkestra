@@ -202,8 +202,13 @@ func (t *TEI) Embed(ctx context.Context, inputs []string, o TEIEmbedOptions) (*E
 			return fail(malformed("embeddings response"))
 		}
 		for _, v := range vectors {
-			if len(v) == 0 || (dims != 0 && len(v) != dims) {
+			if len(v) == 0 {
 				return fail(malformed("embeddings response"))
+			}
+			if dims != 0 && len(v) != dims {
+				// The model behind the endpoint changed mid-call: a profile
+				// change, not an outage (no breaker verdict, profile re-verified).
+				return fail(fmt.Errorf("%w: embedding dimensions changed within one call", iface.ErrLLMProfileMismatch))
 			}
 			dims = len(v)
 		}

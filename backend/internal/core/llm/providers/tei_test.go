@@ -153,6 +153,22 @@ func TestTEI_FailedLaterBatchReportsCompletedUsage(t *testing.T) {
 	}
 }
 
+func TestTEI_DimensionChangeBetweenBatchesIsProfileMismatch(t *testing.T) {
+	tei, srv := newTEIT(t, teitest.Config{ModelID: "m", Dimensions: 4}, "")
+	srv.ChangeDimensionsAfter(1, 8)
+	inputs := make([]string, 40)
+	for i := range inputs {
+		inputs[i] = "ab"
+	}
+	out, err := tei.Embed(context.Background(), inputs, TEIEmbedOptions{BatchSize: 32})
+	if !errors.Is(err, iface.ErrLLMProfileMismatch) || errors.Is(err, iface.ErrLLMProviderUnavailable) {
+		t.Fatalf("err = %v", err)
+	}
+	if out == nil || out.Usage.InputTokens != 64 {
+		t.Fatalf("completed usage lost: %+v", out)
+	}
+}
+
 func TestTEI_SendsBearerOnlyWhenKeySet(t *testing.T) {
 	ctx := context.Background()
 	tei, srv := newTEIT(t, teitest.Config{ModelID: "m", APIKey: "k1"}, "k1")

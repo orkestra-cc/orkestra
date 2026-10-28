@@ -123,52 +123,50 @@ func Parse(raw string, getenv func(string) string, productionLike bool) ([]Endpo
 		valid = append(valid, ep)
 	}
 
-	valid, warns = dropDuplicateNames(valid, warns)
-	valid, warns = dropDuplicateProfiles(valid, warns)
+	valid, warns = dropDuplicates(valid, warns)
 	if len(valid) == 0 {
 		valid = nil
 	}
 	return valid, warns
 }
 
-func dropDuplicateNames(eps []Endpoint, warns []string) ([]Endpoint, []string) {
-	count := map[string]int{}
-	for _, e := range eps {
-		count[e.Name]++
-	}
-	warned := map[string]bool{}
-	var out []Endpoint
-	for _, e := range eps {
-		if count[e.Name] > 1 {
-			if !warned[e.Name] {
-				warned[e.Name] = true
-				warns = append(warns, fmt.Sprintf("%s: duplicate name %q; every endpoint with this name ignored", EndpointsEnv, e.Name))
-			}
-			continue
-		}
-		out = append(out, e)
-	}
-	return out, warns
-}
-
-func dropDuplicateProfiles(eps []Endpoint, warns []string) ([]Endpoint, []string) {
+// dropDuplicates drops every endpoint involved in a duplicate, directly or
+// transitively. Both kinds of duplicate (name, profile ID) are counted over the
+// full valid list before anything is removed, so an endpoint that shares a
+// profile with one dropped for a name clash is dropped too (ADR-0023 D4).
+func dropDuplicates(eps []Endpoint, warns []string) ([]Endpoint, []string) {
+	names := map[string]int{}
 	byID := map[string][]string{}
 	for _, e := range eps {
+		names[e.Name]++
 		id := e.Profile().ID
 		byID[id] = append(byID[id], e.Name)
 	}
-	warned := map[string]bool{}
-	var out []Endpoint
-	for _, e := range eps {
+	warnedName := map[string]bool{}
+	warnedID := map[string]bool{}
+	dropped := make([]bool, len(eps))
+	for i, e := range eps {
 		id := e.Profile().ID
-		if names := byID[id]; len(names) > 1 {
-			if !warned[id] {
-				warned[id] = true
-				warns = append(warns, fmt.Sprintf("%s: duplicate profile %s (endpoints %q, %q); all ignored", EndpointsEnv, id, names[0], names[1]))
+		if names[e.Name] > 1 {
+			dropped[i] = true
+			if !warnedName[e.Name] {
+				warnedName[e.Name] = true
+				warns = append(warns, fmt.Sprintf("%s: duplicate name %q; every endpoint with this name ignored", EndpointsEnv, e.Name))
 			}
-			continue
 		}
-		out = append(out, e)
+		if n := byID[id]; len(n) > 1 {
+			dropped[i] = true
+			if !warnedID[id] {
+				warnedID[id] = true
+				warns = append(warns, fmt.Sprintf("%s: duplicate profile %s (endpoints %q, %q); all ignored", EndpointsEnv, id, n[0], n[1]))
+			}
+		}
+	}
+	var out []Endpoint
+	for i, e := range eps {
+		if !dropped[i] {
+			out = append(out, e)
+		}
 	}
 	return out, warns
 }

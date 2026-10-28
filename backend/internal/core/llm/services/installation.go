@@ -222,9 +222,9 @@ func (s *InstallationService) EmbedWithProfile(ctx context.Context, req iface.Pi
 	}
 	if err == nil {
 		err = checkDimensions(vectors, len(inputs), v.Profile.Dimensions)
-		if errors.Is(err, iface.ErrLLMProfileMismatch) {
-			s.set.Invalidate(ep.Name)
-		}
+	}
+	if errors.Is(err, iface.ErrLLMProfileMismatch) {
+		s.set.Invalidate(ep.Name)
 	}
 	s.settle(ctx, ep, PurposeRetrievalEmbed, key, ticket, res, usage, err)
 	if err != nil {

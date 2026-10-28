@@ -161,6 +161,26 @@ func TestParse_DuplicateProfileDropsEveryHolder(t *testing.T) {
 	}
 }
 
+// Greptile 4399516223: (a,P),(b,P),(b,Q) -- b is dropped for its name, and a
+// shares profile P with b, so a is involved in a duplicate too.
+func TestParse_DuplicateDropIsTransitive(t *testing.T) {
+	a := embedWith(map[string]string{"name": `"a"`})
+	bP := embedWith(map[string]string{"name": `"b"`, "url": `"http://b1:80"`})
+	bQ := embedWith(map[string]string{"name": `"b"`, "url": `"http://b2:80"`, "model": `"other/model"`})
+	eps, warns := Parse("["+a+","+bP+","+bQ+"]", env(nil), true)
+	if len(eps) != 0 {
+		t.Fatalf("eps = %+v", eps)
+	}
+	var name, profile bool
+	for _, w := range warns {
+		name = name || strings.Contains(w, `duplicate name "b"`)
+		profile = profile || strings.Contains(w, "duplicate profile")
+	}
+	if !name || !profile {
+		t.Fatalf("warns = %v", warns)
+	}
+}
+
 func TestParse_PerEndpointKey(t *testing.T) {
 	rerank := strings.Replace(validRerank, `"truncate":true`, `"truncate":true,"apiKeyEnv":"RETRIEVAL_INFERENCE_API_KEY_RERANK"`, 1)
 	eps, warns := Parse("["+embedWith(nil)+","+rerank+"]", env(map[string]string{
