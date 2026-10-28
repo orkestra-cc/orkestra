@@ -2,8 +2,8 @@
 // search over tenant data with local inference (ADR-0023). It holds the
 // corpus registry, the engine contract, the Qdrant driver, the outbox, the
 // index worker, the search pipeline with its principal resolver and search
-// log, and the search-log retention loop. Compliance wiring (audit sink,
-// data-subject erasure) arrives in PR 6, the admin routes in PR 7.
+// log, the search-log retention loop, and erasure (tombstones, the
+// finalizer, the tenant purge). The admin routes arrive in PR 7.
 package retrieval
 
 import (
