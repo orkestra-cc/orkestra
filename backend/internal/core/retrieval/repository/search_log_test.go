@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -89,5 +90,82 @@ func TestSearchLog_PurgeBeforeSweepsEveryTenant(t *testing.T) {
 	}
 	if count(t, db, bson.M{"uuid": "new1"}) != 1 {
 		t.Fatal("the recent row was purged")
+	}
+}
+
+func TestSearchLog_PurgeBeforeBatches(t *testing.T) {
+	old := searchLogPurgeBatch
+	searchLogPurgeBatch = 10
+	t.Cleanup(func() { searchLogPurgeBatch = old })
+	r, db := newSearchLog(t)
+	now := time.Now().UTC()
+	for i := 0; i < 25; i++ {
+		if err := r.Insert(tctx("t-1"), &models.SearchLog{UUID: fmt.Sprintf("old%d", i), CreatedAt: now.Add(-100 * 24 * time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if err := r.Insert(tctx("t-2"), &models.SearchLog{UUID: fmt.Sprintf("new%d", i), CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := r.PurgeBefore(context.Background(), now.Add(-90*24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 25 {
+		t.Fatalf("purged = %d, want 25", n)
+	}
+	if left := count(t, db, bson.M{}); left != 3 {
+		t.Fatalf("remaining = %d, want 3", left)
+	}
+}
+
+func TestSearchLog_UUIDUniquePerTenant(t *testing.T) {
+	r, _ := newSearchLog(t)
+	if err := r.Insert(tctx("t-1"), &models.SearchLog{UUID: "s1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Insert(tctx("t-1"), &models.SearchLog{UUID: "s1"}); !mongo.IsDuplicateKeyError(err) {
+		t.Fatalf("same tenant+uuid err = %v, want duplicate key", err)
+	}
+	if err := r.Insert(tctx("t-2"), &models.SearchLog{UUID: "s1"}); err != nil {
+		t.Fatalf("other tenant: %v", err)
+	}
+}
+
+func TestSearchLog_InsertCreatedAtAndEmptyArrays(t *testing.T) {
+	r, db := newSearchLog(t)
+	set := time.Date(2026, 1, 2, 3, 4, 5, 678_901_234, time.FixedZone("x", 3600))
+	if err := r.Insert(tctx("t-1"), &models.SearchLog{UUID: "set", CreatedAt: set}); err != nil {
+		t.Fatal(err)
+	}
+	before := time.Now().Add(-time.Second)
+	if err := r.Insert(tctx("t-1"), &models.SearchLog{UUID: "dflt"}); err != nil {
+		t.Fatal(err)
+	}
+	get := func(u string) models.SearchLog {
+		var d models.SearchLog
+		//tenantscope:allow system: test assertion over every tenant
+		if err := db.Collection(CollSearchLog).FindOne(context.Background(), bson.M{"uuid": u}).Decode(&d); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	if got := get("set").CreatedAt; !got.Equal(set.UTC().Truncate(time.Millisecond)) {
+		t.Fatalf("createdAt = %v", got)
+	}
+	if got := get("dflt").CreatedAt; got.Before(before) || got.After(time.Now().Add(time.Second)) {
+		t.Fatalf("default createdAt = %v", got)
+	}
+	var raw bson.M
+	//tenantscope:allow system: test assertion over every tenant
+	if err := db.Collection(CollSearchLog).FindOne(context.Background(), bson.M{"uuid": "set"}).Decode(&raw); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"principals", "sourceIds", "subjects"} {
+		if _, ok := raw[f].(bson.A); !ok {
+			t.Fatalf("%s = %#v, want empty array", f, raw[f])
+		}
 	}
 }

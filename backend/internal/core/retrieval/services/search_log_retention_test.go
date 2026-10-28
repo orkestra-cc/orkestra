@@ -36,3 +36,10 @@ func TestPurgeSearchLog_RefusesNonPositiveDays(t *testing.T) {
 		t.Fatal("purger was called")
 	}
 }
+
+func TestPurgeSearchLog_RefusesDaysAboveMax(t *testing.T) {
+	p := &fakePurger{}
+	if _, err := PurgeSearchLog(context.Background(), p, 3651, time.Now()); err == nil || p.calls != 0 {
+		t.Fatalf("err=%v calls=%d", err, p.calls)
+	}
+}
