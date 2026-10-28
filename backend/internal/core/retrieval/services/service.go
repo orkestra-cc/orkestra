@@ -30,6 +30,7 @@ type Service struct {
 	corpora      map[string]iface.RetrievalCorpusSpec
 	contributors []iface.RetrievalPrincipalContributor
 	contribNames map[string]struct{}
+	outbox       *Outbox
 }
 
 var _ iface.RetrievalCorpusRegistry = (*Service)(nil)
