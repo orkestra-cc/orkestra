@@ -119,21 +119,21 @@
     "@typescript-eslint/eslint-plugin": "^8.70.1",
     "@typescript-eslint/parser": "^8.70.1",
     "@vitejs/plugin-react": "^6.0.5",
-    "@vitest/coverage-v8": "^5.0.2",
+    "@vitest/coverage-v8": "^5.0.5",
     "eslint": "^9.31.0",
     "eslint-config-prettier": "^10.1.5",
     "eslint-plugin-prettier": "^5.5.1",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "fs-extra": "^11.3.0",
-    "happy-dom": "^20.12.0",
+    "happy-dom": "^21.0.4",
     "jsdom": "^30.0.1",
     "msw": "^2.14.6",
     "prettier": "^3.9.4",
     "sass": "^1.105.0",
     "typescript": "^5.9.2",
     "vite": "^8.2.4",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.5"
   },
   "optionalDependencies": {
     "@rollup/rollup-win32-x64-msvc": "^4.62.2"
