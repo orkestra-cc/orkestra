@@ -89,9 +89,14 @@ jobs:
       # serve — so CI must run the same single-node replica set the compose
       # stacks do. A `services:` block cannot pass mongod flags, hence the
       # explicit `docker run`.
+      # GLIBC_TUNABLES: on runners with Linux 6.19+ mongod 8.0 refuses to
+      # start (SERVER-121912, TCMalloc's rseq use). Letting glibc own rseq
+      # makes TCMalloc fall back to per-thread caches, which is safe on any
+      # kernel; drop it once the pinned mongo recognises fixed kernels.
       - name: Start transaction-capable MongoDB
         run: |
           docker run --detach --name mongodb --publish 27017:27017 \
+            --env GLIBC_TUNABLES=glibc.pthread.rseq=1 \
             mongo:8.0.32 --replSet rs0 --bind_ip_all
           for attempt in {1..30}; do
             if docker exec mongodb mongosh --quiet --eval 'db.runCommand({ping: 1}).ok' | grep -q '^1$'; then

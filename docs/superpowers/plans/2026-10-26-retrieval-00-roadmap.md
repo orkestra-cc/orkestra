@@ -669,6 +669,10 @@ of this file.
 | Exported in-memory engine `retrieval/engine/enginefake` | 6 | 6 (PR 4 and 5 keep their package-private fakes: PR 4 `fake*`, PR 5 `search*`) |
 | Audit: retrieval's own events through PR 6's `AuditRelay` (late-wired by compliance via `iface.AuditSinkSetter` on `ServiceRetrieval`); PR 7's admin events resolve `ServiceAuditSink` per call. Both reach the same sink | 6, 7 | — |
 | `retrieval/AGENTS.md` and `docs/site/modules/core/retrieval.mdx` are created by PR 3; later PRs add sections | 3 | 4–8 |
+| **Implementation rulings (PRs 1–3 executed):** `engine.Selector` fails closed — a non-nil empty `SourceIDs`, an empty id, or `SourceIDs` without `TenantID` is refused by `DeleteByFilter`/`Count` (a `Subject`-only selector stays tenant-less for global user erasure) | 3 | 4, 6 |
+| The Qdrant driver refuses malformed filter nodes, drops (and WARN-counts) any candidate outside the query's tenant/principals, treats a blank keyword as an absent arm; `QDRANT_COLLECTION_PREFIX` matches `^[a-z][a-z0-9-]{0,31}$` (no `_`, so names cannot collide) | 3 | 5, 8 |
+| A payload-only update must merge into `_rt` with Qdrant `set_payload` `"key": "_rt"` and send every `_rt` field: the indexed text lives at `_rt.text` | 3 | 4 |
+| Compliance counts an erasure attempt when a run **claims** the request (Claim → 1, ClaimDue `$inc`, EraseNow inserts 1), producer panics are recovered as `failed`, Settle is bounded by the lease; `NewErasureRequestService(repo, dsr, sink, logger)`; a `Pending` producer is retried with backoff and exhausts after 20 attempts (~3 days) | 2 | 6 |
 | Installation inference: an unknown but well-formed profile ID is `ErrLLMProfileMismatch` (search degrades); a caller other than `retrieval` is `ErrLLMModelAccessDenied`; `OnBehalfOf` ≠ ctx tenant is `ErrLLMInvalidRequest`; duplicate endpoint names or profile IDs drop every endpoint involved; the worker's ctx must carry tenant kind `internal`; indexing ledger rows have no `userUuid` | 1 | 4, 5 |
 
 ## Not in step 1

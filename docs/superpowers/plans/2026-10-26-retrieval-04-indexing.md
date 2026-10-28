@@ -188,6 +188,8 @@ The payload-only path of D10/D11 ("updates only the payload when the content has
 // UpdatePayload(p with rev 3, visibleTo ["user:u1"], fields {"stage":"b"}, Dense nil, Text "")
 // Query{TenantID "t1", Principals ["user:u1"], Dense v, Weights{Dense:1}, PerArm 10, Limit 10}
 //   → 1 candidate; Runtime.SourceRevision == 3; Fields["stage"] == "b"; Text == p.Text
+// keyword Query for a word of p.Text as t1/[user:u1] → still found (the BM25 entry of _rt.text survived the merge)
+// p stored with Page 3, UpdatePayload with Page 0 → Runtime.Page == 0 (every _rt field is sent; a merge never clears an omitted key)
 // UpdatePayload(rev 1)                → stored revision stays 3
 // UpdatePayload(rev 4, hash "h2")     → stored revision stays 3, Fields["stage"] stays "b"
 // UpdatePayload(point for "s2")       → Count(Selector{TenantID "t1", SourceIDs ["s2"]}) == 0
@@ -200,7 +202,7 @@ Expected: FAIL to compile (`UpdatePayload` not a method of the driver).
 
 - [ ] **Step 3: Implement `UpdatePayload` in the Qdrant driver**
 
-One `POST /collections/{c}/points/batch?wait=true` request carrying, per point, a `set_payload` operation that sets the keys `_rt` and `f` (every other payload key, including the stored text, is kept) on the selector filter `has_id: [id]` AND `_rt.contentHash` matches the incoming hash AND `_rt.sourceRevision` `lte` the incoming revision. A filter that matches nothing changes nothing, so a missing point is never created. Network/5xx/timeout → `engine.ErrUnavailable`; missing collection → `engine.ErrNotFound`.
+One `POST /collections/{c}/points/batch?wait=true` request carrying, per point, two `set_payload` operations on the selector filter below: one with `"key": "_rt"` that **merges** every `Runtime` field into the nested `_rt` object (send every field, `page` included even when 0, because a merge never clears an omitted key; `_rt.text` — the indexed text stored by PR 3's `Upsert` — is not sent and therefore kept), and one that sets the top-level key `f` (the declared fields, replaced whole). A top-level `set_payload` of `_rt` would replace the object and drop `_rt.text` with its BM25 entry and snippet (verified on Qdrant 1.20 during PR 3's final review). The selector filter is `has_id: [id]` AND `_rt.contentHash` matches the incoming hash AND `_rt.sourceRevision` `lte` the incoming revision. A filter that matches nothing changes nothing, so a missing point is never created. Network/5xx/timeout → `engine.ErrUnavailable`; missing collection → `engine.ErrNotFound`.
 
 - [ ] **Step 4: Run to verify it passes**
 
