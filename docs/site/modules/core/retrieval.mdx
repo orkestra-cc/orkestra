@@ -104,7 +104,7 @@ Not every op applies to every type:
 | `float`, `datetime` | `lt`, `lte`, `gt`, `gte`, `exists` |
 | `bool` | `eq`, `exists` |
 
-Values must match the field type (datetimes as RFC 3339), strings are 1 to 1024 bytes, and `in` needs 1 to 100 values. `exists` takes no value; write absence as `not` around `exists`.
+Values must match the field type (datetimes as RFC 3339), strings are 1 to 1024 bytes, and `in` needs 1 to 100 values. An `integer` range bound (`lt`, `lte`, `gt`, `gte`) must lie within ±2^53 (9007199254740992), the range the engine compares exactly; `eq` and `in` take any 64-bit integer. `exists` takes no value; write absence as `not` around `exists`.
 
 A filter is at most 4 levels deep, has at most 64 nodes and carries at most 100 values per `in`. Search validates a filter against the corpus's declared fields (a violation wraps `iface.ErrRetrievalInvalidFilter` and names the node path), then compiles it into the engine form, where a field is always addressed as a declared filter field. The search log keeps the filter as its JSON text, so a filter that has no JSON form (for example a `json.Number` the encoder rejects) is refused with `iface.ErrRetrievalInvalidFilter` too.
 

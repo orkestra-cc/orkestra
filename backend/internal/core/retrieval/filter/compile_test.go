@@ -63,6 +63,9 @@ func TestCompile_Comparisons(t *testing.T) {
 		{"datetime lte fraction", leaf("since", "lte", "2026-01-02T01:04:05.5Z"), engine.Filter{Field: "since", Range: &engine.Range{Lte: f64(ms + 500)}}},
 		{"datetime time.Time", leaf("since", "gte", time.Date(2026, 1, 2, 1, 4, 5, 0, time.UTC)), engine.Filter{Field: "since", Range: &engine.Range{Gte: f64(ms)}}},
 		{"exists", iface.RetrievalFilter{Field: "team", Op: "exists"}, engine.Filter{Field: "team", Exists: true}},
+		{"integer lte 2^53", leaf("seniority", "lte", int64(1<<53)), engine.Filter{Field: "seniority", Range: &engine.Range{Lte: f64(1 << 53)}}},
+		{"integer gte -2^53 json.Number", leaf("seniority", "gte", json.Number("-9007199254740992")), engine.Filter{Field: "seniority", Range: &engine.Range{Gte: f64(-1 << 53)}}},
+		{"integer eq 2^53+1 stays exact", leaf("seniority", "eq", int64(1<<53+1)), engine.Filter{Field: "seniority", Match: []any{int64(1<<53 + 1)}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -127,6 +130,11 @@ func TestCompile_Rejects(t *testing.T) {
 		{"exists string", leaf("team", "exists", "yes")},
 		{"exists false", leaf("team", "exists", false)},
 		{"exists true", leaf("team", "exists", true)},
+		{"integer gt 2^53+1", leaf("seniority", "gt", int64(1<<53+1))},
+		{"integer lt -(2^53+1)", leaf("seniority", "lt", int64(-1<<53-1))},
+		{"integer gte uint64 max", leaf("seniority", "gte", uint64(math.MaxInt64))},
+		{"integer lte json.Number 2^53+1", leaf("seniority", "lte", json.Number("9007199254740993"))},
+		{"integer gt json.Number -(2^53+1)", leaf("seniority", "gt", json.Number("-9007199254740993"))},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

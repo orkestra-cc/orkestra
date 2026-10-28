@@ -177,7 +177,7 @@ func toInt64(v any) (int64, error) {
 
 // rangeValue converts a comparison operand to the float64 engine.Range holds:
 // the number itself for integer and float fields, Unix milliseconds for
-// datetimes.
+// datetimes. An integer bound beyond ±2^53 is refused rather than rounded.
 func rangeValue(typ iface.RetrievalFieldType, v any) (float64, error) {
 	var out float64
 	switch typ {
@@ -196,7 +196,13 @@ func rangeValue(typ iface.RetrievalFieldType, v any) (float64, error) {
 			return 0, fmt.Errorf("must be an RFC 3339 datetime")
 		}
 		return float64(t.UnixMilli()), nil
-	case iface.RetrievalFieldInteger, iface.RetrievalFieldFloat:
+	case iface.RetrievalFieldInteger:
+		if !isExactRangeInteger(v) {
+			return 0, fmt.Errorf("an integer range bound must be within ±2^53")
+		}
+		i, _ := toInt64(v)
+		return float64(i), nil
+	case iface.RetrievalFieldFloat:
 		n, err := numberToFloat(v)
 		if err != nil {
 			return 0, err

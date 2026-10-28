@@ -23,7 +23,7 @@ PR 3 delivered the registry, the engine contract, the Qdrant driver and the conf
 | `engine/` | Engine-neutral contract: `Engine`, `Point`, `Query`, `Filter`, `Selector`, `Runtime`, `PointID`, sentinels |
 | `engine/qdrant/` | Qdrant REST driver (`New(Config{URL, APIKey, Timeout, MaxResponseBytes, HTTPClient, Logger})`) |
 | `enginetest/` | Conformance suite `Run(t, newEngine)`: 22 cases (incl. `EmptySourceIDsRefused`, `SourceIDsWithoutTenantRefused`, `UpsertReplacesPayload`, tenant-scoped BM25, principal filter, reserved-namespace isolation); imports `engine` and `iface` |
-| `filter/` | `Validate`s a public `iface.RetrievalFilter` against a corpus's declared fields and `Compile`s it into `engine.Filter` (imports `engine`, `iface`) |
+| `filter/` | `Validate`s a public `iface.RetrievalFilter` against a corpus's declared fields and `Compile`s it into `engine.Filter` (imports `engine`, `iface`). `engine.Range` is float64, so both refuse an integer-field range bound beyond ±2^53 (`isExactRangeInteger`) instead of rounding it; `eq`/`in` keep the exact `int64`, matching what indexing stores (`ingest.go` takes any int64, and a float only when integral within ±2^53) |
 
 Later PRs: 6 compliance wiring (audit sink, DSR, `DeleteBySubject`, the retrieval `PIIProducer`); 7 admin page and routes.
 

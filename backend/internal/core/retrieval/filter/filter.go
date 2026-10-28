@@ -166,8 +166,18 @@ func (w *walker) comparison(f *iface.RetrievalFilter, path string) error {
 		if err := checkValue(typ, f.Value); err != nil {
 			return fail(path, "value: %s", err)
 		}
+		if typ == iface.RetrievalFieldInteger && f.Op != iface.RetrievalOpEq && !isExactRangeInteger(f.Value) {
+			return fail(path, "value: an integer range bound must be within ±2^53")
+		}
 	}
 	return nil
+}
+
+// isExactRangeInteger reports that an integer range bound survives the
+// float64 of engine.Range exactly: |n| <= 2^53. eq and in keep the int64.
+func isExactRangeInteger(v any) bool {
+	n, err := toInt64(v)
+	return err == nil && n >= -maxExactFloatInt && n <= maxExactFloatInt
 }
 
 type valueError string
