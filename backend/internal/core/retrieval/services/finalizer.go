@@ -267,6 +267,9 @@ func (f *Finalizer) step(ctx context.Context, cfg FinalizerConfig, e *models.Era
 	if status == models.ErasureStatusDone {
 		return nil
 	}
+	if status == models.ErasureStatusFencing && e.FenceUntil != nil && f.now().Before(*e.FenceUntil) {
+		return f.refence(ctx, e, claim)
+	}
 
 	pctx, cancel := context.WithTimeout(ctx, passTimeout(cfg.Hold))
 	targets, stage, err := f.pass(pctx, e)
@@ -293,6 +296,21 @@ func (f *Finalizer) step(ctx context.Context, cfg FinalizerConfig, e *models.Era
 		"kind": e.Kind, "scope": e.Scope, "attempts": e.Attempts, "collections": len(targets),
 	})
 	return nil
+}
+
+// refence puts back a fencing row claimed before its fence ended (a clock
+// behind the one that wrote fenceUntil): no pass runs and nothing is marked
+// done; the row is next due at its own fenceUntil. MarkFencing with the row's
+// own firstPassAt and fenceUntil reschedules without counting an attempt,
+// which MarkRetry always does.
+func (f *Finalizer) refence(ctx context.Context, e *models.Erasure, claim time.Time) error {
+	mctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), markTimeout)
+	defer cancel()
+	firstPass := *e.FenceUntil
+	if e.FirstPassAt != nil {
+		firstPass = *e.FirstPassAt
+	}
+	return f.settle(ctx, e, f.store.MarkFencing(mctx, e.UUID, claim, firstPass, *e.FenceUntil))
 }
 
 // pass is one finalization pass: the search-log delete (stage 0, every pass),

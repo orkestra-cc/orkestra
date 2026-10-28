@@ -791,6 +791,39 @@ func TestFinalizer_MalformedRowIsRetriedWithoutAnyDelete(t *testing.T) {
 	assert.Equal(t, 1, len(env.eng.Points("c_people_g1")))
 }
 
+// TestFinalizer_FencingRowClaimedBeforeFenceIsRefenced (M5): a fencing row
+// that is due by nextAttemptAt while this replica's clock is still behind its
+// fenceUntil is not marked done and costs no attempt; it is put back to
+// fenceUntil and finalized from then.
+func TestFinalizer_FencingRowClaimedBeforeFenceIsRefenced(t *testing.T) {
+	env := newFinEnv(t, map[string][]string{"people": {"c_people_g1"}}, true)
+	env.eng.Seed("c_people_g1", finPoint("p1", "tA", "s1", "user:u1"))
+	first, fence := env.t0.Add(-time.Minute), env.t0.Add(2*time.Minute)
+	env.store.put(models.Erasure{UUID: "f1", Scope: models.ErasureScopeGlobal, Kind: models.ErasureKindUser, Subject: "user:u1",
+		Status: models.ErasureStatusFencing, FirstPassAt: timePtr(first), FenceUntil: timePtr(fence), NextAttemptAt: timePtr(env.t0)})
+
+	env.runOnce(t, 1)
+	r := env.row(t, "f1")
+	assert.Equal(t, models.ErasureStatusFencing, r.Status)
+	assert.Equal(t, 0, r.Attempts)
+	assert.Equal(t, msTime(fence), *r.NextAttemptAt)
+	assert.Equal(t, msTime(first), *r.FirstPassAt)
+	assert.Equal(t, msTime(fence), *r.FenceUntil)
+	assert.Nil(t, r.DoneAt)
+	assert.Empty(t, env.logs.callLog())
+	assert.Equal(t, 1, len(env.eng.Points("c_people_g1")))
+	assert.Empty(t, env.sink.byAction(AuditErasureFinalized))
+
+	env.clk.Advance(time.Minute)
+	env.runOnce(t, 0) // not due before fenceUntil
+	env.clk.Advance(time.Minute)
+	env.runOnce(t, 1)
+	r = env.row(t, "f1")
+	assert.Equal(t, models.ErasureStatusDone, r.Status)
+	assert.Equal(t, 0, len(env.eng.Points("c_people_g1")))
+	assert.Len(t, env.sink.byAction(AuditErasureFinalized), 1)
+}
+
 func TestFinalizer_RunOnceHonoursBatch(t *testing.T) {
 	env := newFinEnv(t, map[string][]string{}, false)
 	cfg := testFinalizerConfig()
