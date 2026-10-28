@@ -2349,7 +2349,7 @@
     "stats": {
       "pendingErasures": {
         "title": "Pending Erasures",
-        "subtitle": "Awaiting review",
+        "subtitle": "Awaiting review or retry",
         "badge": "Needs attention"
       },
       "activeHolds": {
@@ -2373,6 +2373,8 @@
       "completed": "Completed",
       "executed": "Executed",
       "rejected": "Rejected",
+      "incomplete": "Incomplete",
+      "closed_partial": "Closed (partial)",
       "active": "Active",
       "released": "Released",
       "success": "Success",
@@ -2393,8 +2395,27 @@
       "executeError": "Execute failed (or blocked by a legal hold)",
       "rejectSuccess": "Request rejected",
       "rejectError": "Reject failed",
-      "emptyMessage": "No pending erasure requests.",
-      "emptyHint": "Data-subject erasure requests awaiting review will appear here.",
+      "close": "Close",
+      "closeTitle": "Close a partial erasure",
+      "closeBody": "These producers are no longer installed and will never finish: {{keys}}. Closing records the erasure as partial; it cannot be undone.",
+      "closeSuccess": "Erasure request closed as partial",
+      "closeError": "Close failed",
+      "retry": "Retry",
+      "executeIncomplete": "Erasure started: some producers are not done yet and will be retried",
+      "progress": "{{done}} of {{total}} producers done",
+      "nextRetry": "Next retry {{date}}",
+      "retriesExhausted": "Automatic retries exhausted",
+      "lastError": {
+        "legal_hold_active": "Blocked by a legal hold",
+        "run_failed": "Last run failed"
+      },
+      "busy": "Another run is in progress; try again in a few minutes",
+      "source": {
+        "self_service": "Self-service",
+        "retention": "Retention"
+      },
+      "emptyMessage": "No open erasure requests.",
+      "emptyHint": "Erasure requests awaiting review or retry will appear here.",
       "searchPlaceholder": "Search by subject or reason"
     },
     "holds": {

@@ -1,11 +1,13 @@
 package compliance
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
 	"github.com/orkestra/backend/internal/core/compliance/models"
 	"github.com/orkestra/backend/pkg/sdk/module"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 func indexKeys(s module.IndexSpec) string {
@@ -55,4 +57,41 @@ func TestCollections_PolicyEngine(t *testing.T) {
 			t.Errorf("%s: missing index %s (unique=%v partial=%v)", w.coll, w.keys, w.unique, w.partial)
 		}
 	}
+}
+
+// TestCollections_OneActiveRetentionErasurePerSubject pins the partial unique
+// index that makes a retention run's insert of an incomplete request atomic
+// against another replica's (ADR-0023 D12 retention, review finding on #464),
+// and that its partial filter reaches Mongo as the same bytes on every boot:
+// a Go map marshals its keys in random order, so the filter is an ordered
+// $and of single-key conditions.
+func TestCollections_OneActiveRetentionErasurePerSubject(t *testing.T) {
+	want, err := bson.Marshal(bson.D{{Key: "$and", Value: bson.A{
+		bson.D{{Key: "status", Value: models.ErasureRequestIncomplete}},
+		bson.D{{Key: "source", Value: models.ErasureSourceRetention}},
+	}}})
+	if err != nil {
+		t.Fatalf("marshal want: %v", err)
+	}
+	for _, c := range NewModule().Collections() {
+		if c.Name != models.ErasureRequestsCollection {
+			continue
+		}
+		for _, s := range c.Indexes {
+			if indexKeys(s) != "userUuid" || !s.Unique || len(s.PartialFilter) == 0 {
+				continue
+			}
+			for i := 0; i < 50; i++ {
+				got, err := bson.Marshal(s.PartialFilter)
+				if err != nil {
+					t.Fatalf("marshal partial filter: %v", err)
+				}
+				if !bytes.Equal(got, want) {
+					t.Fatalf("partial filter marshal %d = %v; want %v", i, bson.Raw(got), bson.Raw(want))
+				}
+			}
+			return
+		}
+	}
+	t.Fatalf("%s: missing unique userUuid index partial on {status: incomplete, source: retention}", models.ErasureRequestsCollection)
 }

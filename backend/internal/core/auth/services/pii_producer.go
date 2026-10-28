@@ -8,6 +8,14 @@ import (
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
+// Producer keys for the two auth instances, one per audience tier. Both share
+// Subject "auth"; compliance tracks and exports each by its key. Incomplete
+// erasure requests store these, so they must never change.
+const (
+	PIIProducerKeyOperator = "auth.operator"
+	PIIProducerKeyClient   = "auth.client"
+)
+
 // piiProducer implements iface.PIIProducer for the auth module. It
 // aggregates the PII-bearing repositories (refresh tokens, sessions,
 // email tokens, MFA factors, security events) behind a single subject so
@@ -20,6 +28,7 @@ import (
 // fingerprints, timestamps, user agents, backup-code counts) is
 // included.
 type piiProducer struct {
+	key         string
 	refresh     repository.RefreshTokenRepository
 	sessions    repository.AuthSessionRepository
 	emails      repository.EmailTokenRepository
@@ -41,6 +50,7 @@ type piiProducer struct {
 // the tier's collection-name constants (operator_* or client_*) so the
 // DSR audit row labels are accurate.
 func NewPIIProducer(
+	key string,
 	refresh repository.RefreshTokenRepository,
 	sessions repository.AuthSessionRepository,
 	emails repository.EmailTokenRepository,
@@ -50,6 +60,7 @@ func NewPIIProducer(
 	refreshCollection, sessionsCollection, emailsCollection, mfaCollection string,
 ) iface.PIIProducer {
 	return &piiProducer{
+		key:                key,
 		refresh:            refresh,
 		sessions:           sessions,
 		emails:             emails,
@@ -63,8 +74,13 @@ func NewPIIProducer(
 	}
 }
 
-// Subject is the stable bundle-key identifier for this producer.
+// Subject names the kind of data held. Both tiers share it; audit rows and
+// export bundles reference it, so it stays "auth".
 func (p *piiProducer) Subject() string { return "auth" }
+
+// ProducerKey identifies this tier's instance to compliance (see
+// iface.PIIProducerKeyer).
+func (p *piiProducer) ProducerKey() string { return p.key }
 
 // ExportPersonalData returns every auth-owned record tied to userUUID.
 // Token hashes are scrubbed (users can't do anything with them and they

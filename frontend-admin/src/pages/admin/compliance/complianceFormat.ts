@@ -26,9 +26,12 @@ export const erasureStatusColor = (status: string): BadgeColor => {
     case 'executed':
       return 'success';
     case 'rejected':
+    case 'closed_partial':
       return 'secondary';
     case 'pending':
       return 'warning';
+    case 'incomplete':
+      return 'danger';
     default:
       return 'info';
   }

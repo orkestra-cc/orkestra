@@ -9,6 +9,7 @@ import (
 	"github.com/orkestra/backend/internal/core/compliance/models"
 	"github.com/orkestra/backend/internal/core/compliance/repository"
 	"github.com/orkestra/backend/internal/core/compliance/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
@@ -56,8 +57,8 @@ type ListErasureRequestsOutput struct {
 	}
 }
 
-func (h *ErasureRequestHandler) ListPending(ctx context.Context, _ *struct{}) (*ListErasureRequestsOutput, error) {
-	items, err := h.svc.ListPending(ctx)
+func (h *ErasureRequestHandler) ListOpen(ctx context.Context, _ *struct{}) (*ListErasureRequestsOutput, error) {
+	items, err := h.svc.ListOpen(ctx)
 	if err != nil {
 		return nil, huma.Error500InternalServerError("list erasure requests", err)
 	}
@@ -74,7 +75,9 @@ type ExecuteErasureRequestInput struct {
 }
 type ExecuteErasureRequestOutput struct {
 	Body struct {
-		Purged map[string]iface.PurgeResult `json:"purged"`
+		Status   string                           `json:"status" enum:"completed,incomplete"`
+		Purged   map[string]iface.PurgeResult     `json:"purged"`
+		Progress []models.ErasureProducerProgress `json:"progress"`
 	}
 }
 
@@ -84,18 +87,23 @@ func (h *ErasureRequestHandler) Execute(ctx context.Context, in *ExecuteErasureR
 	if in.Body.Mode == "anonymize" {
 		mode = iface.EraseAnonymize
 	}
-	res, err := h.svc.Execute(ctx, in.ID, mode, actor)
+	out0, err := h.svc.Execute(ctx, in.ID, mode, actor)
 	if errors.Is(err, services.ErrLegalHoldActive) {
 		return nil, huma.Error409Conflict("erasure blocked: the subject is under an active legal hold")
 	}
 	if errors.Is(err, repository.ErrErasureRequestNotFound) {
 		return nil, huma.Error404NotFound("erasure request not found or already resolved")
 	}
+	if errors.Is(err, repository.ErrErasureRequestBusy) {
+		return nil, errcode.Conflict(errcode.ComplianceErasureRequestBusy, "Another erasure run holds this request; try again in a few minutes.")
+	}
 	if err != nil {
 		return nil, huma.Error500InternalServerError("execute erasure request", err)
 	}
 	out := &ExecuteErasureRequestOutput{}
-	out.Body.Purged = res.Purged
+	out.Body.Status = out0.Request.Status
+	out.Body.Purged = out0.Run.Purged
+	out.Body.Progress = out0.Run.Progress
 	return out, nil
 }
 
@@ -110,6 +118,9 @@ type RejectErasureRequestOutput struct{}
 func (h *ErasureRequestHandler) Reject(ctx context.Context, in *RejectErasureRequestInput) (*RejectErasureRequestOutput, error) {
 	actor, _ := ctxauth.GetUserUUID(ctx)
 	err := h.svc.Reject(ctx, in.ID, actor, in.Body.Note)
+	if errors.Is(err, services.ErrErasureRequestStarted) {
+		return nil, errcode.Conflict(errcode.ComplianceErasureRequestStarted, "This erasure has started; it can be retried, not rejected.")
+	}
 	if errors.Is(err, repository.ErrErasureRequestNotFound) {
 		return nil, huma.Error404NotFound("erasure request not found or already resolved")
 	}
@@ -117,6 +128,36 @@ func (h *ErasureRequestHandler) Reject(ctx context.Context, in *RejectErasureReq
 		return nil, huma.Error500InternalServerError("reject erasure request", err)
 	}
 	return &RejectErasureRequestOutput{}, nil
+}
+
+type CloseErasureRequestInput struct {
+	ID   string `path:"id"`
+	Body struct {
+		Note string `json:"note" minLength:"1" maxLength:"500" doc:"Why the remaining erasure is abandoned"`
+	}
+}
+type CloseErasureRequestOutput struct {
+	Body models.ErasureRequest
+}
+
+// Close closes an incomplete request whose remaining producers are no longer
+// installed, recording them as abandoned.
+func (h *ErasureRequestHandler) Close(ctx context.Context, in *CloseErasureRequestInput) (*CloseErasureRequestOutput, error) {
+	actor, _ := ctxauth.GetUserUUID(ctx)
+	req, err := h.svc.ClosePartial(ctx, in.ID, actor, in.Body.Note)
+	switch {
+	case errors.Is(err, services.ErrErasureCloseNoteRequired):
+		return nil, errcode.UnprocessableEntity(errcode.ComplianceErasureCloseNoteRequired, "A note of 1 to 500 characters is required to close an erasure request.")
+	case errors.Is(err, services.ErrErasureRequestNotClosable):
+		return nil, errcode.Conflict(errcode.ComplianceErasureRequestNotClosable, "Only an incomplete request whose remaining producers are no longer installed can be closed; retry it instead.")
+	case errors.Is(err, repository.ErrErasureRequestBusy):
+		return nil, errcode.Conflict(errcode.ComplianceErasureRequestBusy, "Another erasure run holds this request; try again in a few minutes.")
+	case errors.Is(err, repository.ErrErasureRequestNotFound):
+		return nil, huma.Error404NotFound("erasure request not found or already resolved")
+	case err != nil:
+		return nil, huma.Error500InternalServerError("close erasure request", err)
+	}
+	return &CloseErasureRequestOutput{Body: *req}, nil
 }
 
 // RegisterErasureRequestClientRoutes mounts the subject-facing lodge endpoint.
@@ -140,9 +181,9 @@ func RegisterErasureRequestAdminReadRoutes(api huma.API, h *ErasureRequestHandle
 		OperationID: "compliance-erasure-requests-list",
 		Method:      http.MethodGet,
 		Path:        "/v1/admin/compliance/erasure-requests",
-		Summary:     "List pending right-to-erasure requests",
+		Summary:     "List open (pending or incomplete) right-to-erasure requests",
 		Tags:        []string{"Compliance"},
-	}, h.ListPending)
+	}, h.ListOpen)
 }
 
 func RegisterErasureRequestAdminWriteRoutes(api huma.API, h *ErasureRequestHandler) {
@@ -151,6 +192,7 @@ func RegisterErasureRequestAdminWriteRoutes(api huma.API, h *ErasureRequestHandl
 		Method:      http.MethodPost,
 		Path:        "/v1/admin/compliance/erasure-requests/{id}/execute",
 		Summary:     "Execute a right-to-erasure request (runs the DSR erase)",
+		Description: "Runs the erasure of a pending request. An incomplete request is retried with its stored mode and the body's mode is ignored.",
 		Tags:        []string{"Compliance"},
 	}, h.Execute)
 	huma.Register(api, huma.Operation{
@@ -160,4 +202,12 @@ func RegisterErasureRequestAdminWriteRoutes(api huma.API, h *ErasureRequestHandl
 		Summary:     "Reject a right-to-erasure request",
 		Tags:        []string{"Compliance"},
 	}, h.Reject)
+	huma.Register(api, huma.Operation{
+		OperationID: "compliance-erasure-request-close",
+		Method:      http.MethodPost,
+		Path:        "/v1/admin/compliance/erasure-requests/{id}/close",
+		Summary:     "Close an incomplete erasure request whose producers are gone",
+		Description: "Closes an incomplete request whose remaining producers are no longer installed, recording them as abandoned. Requires a note.",
+		Tags:        []string{"Compliance"},
+	}, h.Close)
 }
