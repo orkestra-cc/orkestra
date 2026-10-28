@@ -10,51 +10,49 @@ import (
 type fakePurger struct {
 	calls  int
 	cutoff time.Time
-	err    error
-	// the unchecked sweep: its calls, last cutoff, count and error
-	uncheckedCalls  int
-	uncheckedCutoff time.Time
-	uncheckedN      int64
-	uncheckedErr    error
 }
 
 func (f *fakePurger) PurgeBefore(_ context.Context, cutoff time.Time) (int64, error) {
 	f.calls++
 	f.cutoff = cutoff
-	return 7, f.err
+	return 7, nil
 }
 
-func (f *fakePurger) PurgeUncheckedBefore(_ context.Context, cutoff time.Time) (int64, error) {
-	f.uncheckedCalls++
-	f.uncheckedCutoff = cutoff
-	return f.uncheckedN, f.uncheckedErr
+// fakeSweeper records the unchecked sweep's cutoff and answers n, err.
+type fakeSweeper struct {
+	calls  int
+	cutoff time.Time
+	n      int64
+	err    error
 }
 
-// G2: the retention run also sweeps provisional rows older than the grace,
-// and the count is the total of both sweeps.
-func TestPurgeSearchLog_SweepsUncheckedOlderThanGrace(t *testing.T) {
-	p := &fakePurger{uncheckedN: 2}
+func (f *fakeSweeper) PurgeUncheckedBefore(_ context.Context, cutoff time.Time) (int64, error) {
+	f.calls++
+	f.cutoff = cutoff
+	return f.n, f.err
+}
+
+// G2: the sweep deletes unchecked rows older than the grace (10 minutes).
+func TestSweepUncheckedSearchLog_CutoffIsGraceBeforeNow(t *testing.T) {
+	s := &fakeSweeper{n: 2}
 	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.FixedZone("x", 3600))
-	n, err := PurgeSearchLog(context.Background(), p, DefaultSearchLogRetentionDays, now)
+	n, err := SweepUncheckedSearchLog(context.Background(), s, now)
 	require.NoError(t, err)
-	assert.Equal(t, int64(9), n)
-	assert.Equal(t, 1, p.uncheckedCalls)
-	assert.Equal(t, time.Date(2026, 10, 26, 10, 50, 0, 0, time.UTC), p.uncheckedCutoff)
+	assert.Equal(t, int64(2), n)
+	assert.Equal(t, 1, s.calls)
+	assert.Equal(t, time.Date(2026, 10, 26, 10, 50, 0, 0, time.UTC), s.cutoff)
 	assert.Equal(t, 10*time.Minute, UncheckedSearchLogGrace)
 }
 
-// A failed sweep does not stop the other; both errors are returned with the
-// total deleted, and the next run retries.
-func TestPurgeSearchLog_RunsBothSweepsWhenOneFails(t *testing.T) {
-	retErr, uncErr := errors.New("retention failed"), errors.New("sweep failed")
-	p := &fakePurger{err: retErr, uncheckedN: 1, uncheckedErr: uncErr}
-	n, err := PurgeSearchLog(context.Background(), p, DefaultSearchLogRetentionDays, time.Now())
-	assert.Equal(t, int64(8), n)
-	if !errors.Is(err, retErr) || !errors.Is(err, uncErr) {
-		t.Fatalf("err = %v, want both sweep errors", err)
+// A failed sweep returns the partial count with the error.
+func TestSweepUncheckedSearchLog_ReturnsPartialCountWithError(t *testing.T) {
+	boom := errors.New("sweep failed")
+	s := &fakeSweeper{n: 3, err: boom}
+	n, err := SweepUncheckedSearchLog(context.Background(), s, time.Now())
+	assert.Equal(t, int64(3), n)
+	if !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want %v", err, boom)
 	}
-	assert.Equal(t, 1, p.calls)
-	assert.Equal(t, 1, p.uncheckedCalls)
 }
 
 func TestPurgeSearchLog_CutoffIsDaysBeforeNow(t *testing.T) {
@@ -72,14 +70,14 @@ func TestPurgeSearchLog_RefusesNonPositiveDays(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error")
 	}
-	if p.calls != 0 || p.uncheckedCalls != 0 {
+	if p.calls != 0 {
 		t.Fatal("purger was called")
 	}
 }
 
 func TestPurgeSearchLog_RefusesDaysAboveMax(t *testing.T) {
 	p := &fakePurger{}
-	if _, err := PurgeSearchLog(context.Background(), p, 3651, time.Now()); err == nil || p.calls != 0 || p.uncheckedCalls != 0 {
-		t.Fatalf("err=%v calls=%d unchecked=%d", err, p.calls, p.uncheckedCalls)
+	if _, err := PurgeSearchLog(context.Background(), p, 3651, time.Now()); err == nil || p.calls != 0 {
+		t.Fatalf("err=%v calls=%d", err, p.calls)
 	}
 }

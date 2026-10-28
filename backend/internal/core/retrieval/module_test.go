@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -1025,14 +1026,12 @@ func TestModule_PrincipalsWithoutTenantProviderFailsClosed(t *testing.T) {
 	}
 }
 
-// fakePurger records PurgeBefore cutoffs and answers n or err; the unchecked
-// sweep records its cutoffs and deletes nothing.
+// fakePurger records PurgeBefore cutoffs and answers n or err.
 type fakePurger struct {
-	mu        sync.Mutex
-	cutoffs   []time.Time
-	unchecked []time.Time
-	n         int64
-	err       error
+	mu      sync.Mutex
+	cutoffs []time.Time
+	n       int64
+	err     error
 }
 
 func (p *fakePurger) PurgeBefore(_ context.Context, cutoff time.Time) (int64, error) {
@@ -1040,19 +1039,6 @@ func (p *fakePurger) PurgeBefore(_ context.Context, cutoff time.Time) (int64, er
 	defer p.mu.Unlock()
 	p.cutoffs = append(p.cutoffs, cutoff)
 	return p.n, p.err
-}
-
-func (p *fakePurger) PurgeUncheckedBefore(_ context.Context, cutoff time.Time) (int64, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.unchecked = append(p.unchecked, cutoff)
-	return 0, nil
-}
-
-func (p *fakePurger) uncheckedCalls() []time.Time {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return slices.Clone(p.unchecked)
 }
 
 func (p *fakePurger) calls() []time.Time {
@@ -1113,11 +1099,6 @@ func TestModule_RetentionLoopRunsWithoutEngine(t *testing.T) {
 	if cutoff.Before(wantLo) || cutoff.After(wantHi) {
 		t.Fatalf("cutoff %v outside [%v, %v]", cutoff, wantLo, wantHi)
 	}
-	// G2: every run also sweeps unchecked rows older than the grace.
-	if u := p.uncheckedCalls(); len(u) != len(p.calls()) ||
-		u[0].Before(before.UTC().Add(-services.UncheckedSearchLogGrace)) || u[0].After(time.Now().UTC().Add(-services.UncheckedSearchLogGrace)) {
-		t.Fatalf("unchecked sweeps = %v, retention runs = %d", u, len(p.calls()))
-	}
 	if !strings.Contains(logs.String(), "level=INFO") || !strings.Contains(logs.String(), "deleted=7") {
 		t.Fatalf("missing INFO with the deleted count: %s", logs)
 	}
@@ -1136,6 +1117,121 @@ func TestModule_RetentionFailureWarns(t *testing.T) {
 	}
 	if l := warnLines(logs.String(), "search log retention purge failed"); len(l) == 0 {
 		t.Fatalf("missing retention WARN: %s", logs)
+	}
+}
+
+// fakeSweeper records PurgeUncheckedBefore cutoffs and answers n or err.
+type fakeSweeper struct {
+	mu      sync.Mutex
+	cutoffs []time.Time
+	n       int64
+	err     error
+}
+
+func (s *fakeSweeper) PurgeUncheckedBefore(_ context.Context, cutoff time.Time) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cutoffs = append(s.cutoffs, cutoff)
+	return s.n, s.err
+}
+
+func (s *fakeSweeper) calls() []time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.cutoffs)
+}
+
+func startSweep(t *testing.T, m *Module, s *fakeSweeper) {
+	t.Helper()
+	m.mu.Lock()
+	if m.sweeper == nil {
+		m.mu.Unlock()
+		t.Fatal("unchecked sweep not wired")
+	}
+	m.sweeper = s
+	m.mu.Unlock()
+	m.uncheckedFirst, m.uncheckedEvery = 10*time.Millisecond, 10*time.Millisecond
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// G2: the unchecked-row sweep has its own loop, started whenever a database
+// exists (engine or not), every grace with the grace as cutoff, and ends with
+// Stop. A success logs no WARN.
+func TestModule_UncheckedSweepLoopRunsWithoutEngine(t *testing.T) {
+	t.Setenv("QDRANT_URL", "")
+	m, _, logs := initModule(t)
+	if m.worker != nil {
+		t.Fatal("worker built without an engine")
+	}
+	s := &fakeSweeper{n: 2}
+	before := time.Now()
+	startSweep(t, m, s)
+	waitFor(t, "two sweeps", func() bool { return len(s.calls()) >= 2 })
+	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := m.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	n := len(s.calls())
+	time.Sleep(30 * time.Millisecond)
+	if len(s.calls()) != n {
+		t.Fatal("the unchecked sweep outlived Stop")
+	}
+	cutoff := s.calls()[0]
+	wantLo := before.UTC().Add(-services.UncheckedSearchLogGrace)
+	wantHi := time.Now().UTC().Add(-services.UncheckedSearchLogGrace)
+	if cutoff.Before(wantLo) || cutoff.After(wantHi) {
+		t.Fatalf("cutoff %v outside [%v, %v]", cutoff, wantLo, wantHi)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "unchecked search log sweep deleted provisional rows") || !strings.Contains(out, "deleted=2") {
+		t.Fatalf("missing INFO with the deleted count: %s", out)
+	}
+	if l := warnLines(out, "unchecked"); len(l) != 0 {
+		t.Fatalf("unexpected WARN: %v", l)
+	}
+	if uncheckedSweepFirstRun != services.UncheckedSearchLogGrace || uncheckedSweepEvery != services.UncheckedSearchLogGrace {
+		t.Fatalf("default cadence = %v/%v, want the grace", uncheckedSweepFirstRun, uncheckedSweepEvery)
+	}
+}
+
+// A failed sweep WARNs once per run with a coarse reason and the count, never
+// the error text, and the loop keeps running.
+func TestModule_UncheckedSweepFailureWarns(t *testing.T) {
+	t.Setenv("QDRANT_URL", "")
+	m, _, logs := initModule(t)
+	s := &fakeSweeper{n: 1, err: errors.New("mongo down naming tenant t-secret")}
+	startSweep(t, m, s)
+	waitFor(t, "two sweeps", func() bool { return len(s.calls()) >= 2 })
+	if err := m.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	out := logs.String()
+	l := warnLines(out, "unchecked search log sweep failed; retrying at the next run")
+	if len(l) == 0 || len(l) > len(s.calls()) {
+		t.Fatalf("WARN lines = %d for %d runs: %s", len(l), len(s.calls()), out)
+	}
+	if !strings.Contains(l[0], "reason=error") || !strings.Contains(l[0], "deleted=1") || strings.Contains(out, "t-secret") {
+		t.Fatalf("WARN = %s", l[0])
+	}
+}
+
+// Start's early return keeps the sweep: a module holding only the sweeper
+// (no worker, retention, finalizer or reconcile) still runs it.
+func TestModule_StartRunsTheUncheckedSweepAlone(t *testing.T) {
+	m := NewModule()
+	m.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := &fakeSweeper{}
+	m.sweeper = s
+	m.uncheckedFirst, m.uncheckedEvery = 10*time.Millisecond, 10*time.Millisecond
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "a sweep", func() bool { return len(s.calls()) >= 1 })
+	if err := m.Stop(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 

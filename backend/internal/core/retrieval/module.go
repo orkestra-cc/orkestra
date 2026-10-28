@@ -49,6 +49,11 @@ const (
 	// (precedent: llm's usage retention).
 	searchLogRetentionFirstRun = time.Minute
 	searchLogRetentionEvery    = 24 * time.Hour
+
+	// The unchecked-row sweep first runs one grace after Start, then every
+	// grace, so a row left unchecked is gone within about 20 minutes.
+	uncheckedSweepFirstRun = services.UncheckedSearchLogGrace
+	uncheckedSweepEvery    = services.UncheckedSearchLogGrace
 )
 
 const (
@@ -104,6 +109,10 @@ type Module struct {
 	settings func() searchSettings
 	// retention cadence; zero means the defaults (test seam).
 	retentionFirst, retentionInterval time.Duration
+	// sweeper is the search log's unchecked-row sweep, nil without a
+	// database; its cadence, zero meaning the defaults (test seam).
+	sweeper                        services.UncheckedSearchLogSweeper
+	uncheckedFirst, uncheckedEvery time.Duration
 
 	// finalizer and erasure are nil without a database: the erasure
 	// finalization sweep and the purged-tenant reconciliation.
@@ -116,7 +125,8 @@ type Module struct {
 	finalizerEvery time.Duration
 
 	// One cancel and one done channel cover every background job (the
-	// worker, the retention loop, the finalizer and the reconcile loop).
+	// worker, the retention loop, the unchecked sweep, the finalizer and the
+	// reconcile loop).
 	lifecycleMu sync.Mutex
 	cancel      context.CancelFunc
 	done        chan struct{}
@@ -347,6 +357,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	var (
 		worker    *services.Worker
 		purger    services.SearchLogPurger
+		sweeper   services.UncheckedSearchLogSweeper
 		finalizer *services.Finalizer
 		erasure   *services.ErasureService
 		settings  = func() searchSettings { return readSearchSettings(deps) }
@@ -426,7 +437,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 			Now:        time.Now,
 			Logger:     logger,
 		}), resolver)
-		purger = searchLog
+		purger, sweeper = searchLog, searchLog
 		if gaps := svcs.missing(modules); len(gaps) > 0 {
 			logger.Warn("retrieval: search is missing services; searches fail closed without the authorization, membership or module-status ones and degrade without the inference ones",
 				slog.String("missing", strings.Join(gaps, ", ")))
@@ -446,7 +457,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 
 	m.mu.Lock()
 	m.logger, m.svc, m.eng, m.worker, m.missing = logger, svc, eng, worker, missing
-	m.purger, m.settings = purger, settings
+	m.purger, m.sweeper, m.settings = purger, sweeper, settings
 	m.finalizer, m.erasure = finalizer, erasure
 	m.mu.Unlock()
 	deps.Services.Register(module.ServiceRetrieval, svc)
@@ -497,8 +508,8 @@ func wireErasure(deps *module.Dependencies, svc *services.Service, states *repos
 
 // Start seals corpus registration, then starts the background jobs: the
 // index worker, when built, and, whenever a database handle is present
-// (engine or not), the search-log retention loop, the erasure finalizer and
-// the purged-tenant reconcile loop.
+// (engine or not), the search-log retention loop, the unchecked-row sweep,
+// the erasure finalizer and the purged-tenant reconcile loop.
 // Every module's Init has run by now, so a consumer that declares a
 // dependency on retrieval has registered; a module retried later cannot
 // register a corpus. Sealing comes first so the worker's first pass
@@ -506,13 +517,13 @@ func wireErasure(deps *module.Dependencies, svc *services.Service, states *repos
 // Start while running is a no-op.
 func (m *Module) Start(ctx context.Context) error {
 	m.mu.Lock()
-	svc, worker, purger := m.svc, m.worker, m.purger
+	svc, worker, purger, sweeper := m.svc, m.worker, m.purger, m.sweeper
 	finalizer, erasure := m.finalizer, m.erasure
 	m.mu.Unlock()
 	if svc != nil {
 		svc.Seal()
 	}
-	if worker == nil && purger == nil && finalizer == nil {
+	if worker == nil && purger == nil && sweeper == nil && finalizer == nil {
 		return nil
 	}
 	m.lifecycleMu.Lock()
@@ -538,6 +549,10 @@ func (m *Module) Start(ctx context.Context) error {
 	if purger != nil {
 		wg.Add(1)
 		go func() { defer wg.Done(); m.searchLogRetentionLoop(runCtx) }()
+	}
+	if sweeper != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); m.uncheckedSweepLoop(runCtx) }()
 	}
 	if finalizer != nil {
 		wg.Add(1)
@@ -576,9 +591,8 @@ func (m *Module) searchLogRetentionLoop(ctx context.Context) {
 }
 
 // purgeSearchLog deletes every tenant's rows older than
-// search_log_retention_days (read now, so a change applies at the next run)
-// and the unchecked rows older than services.UncheckedSearchLogGrace. A
-// failure is logged and retried at the next run.
+// search_log_retention_days (read now, so a change applies at the next run).
+// A failure is logged and retried at the next run.
 func (m *Module) purgeSearchLog(ctx context.Context) {
 	m.mu.Lock()
 	purger, settings, logger := m.purger, m.settings, m.logger
@@ -598,6 +612,58 @@ func (m *Module) purgeSearchLog(ctx context.Context) {
 	}
 	logger.InfoContext(ctx, "retrieval: search log retention purge",
 		slog.Int("retention_days", days), slog.Int64("deleted", n))
+}
+
+// uncheckedSweepLoop deletes the search-log rows still unchecked after
+// services.UncheckedSearchLogGrace one grace after Start, then every grace,
+// until ctx ends.
+func (m *Module) uncheckedSweepLoop(ctx context.Context) {
+	first, every := m.uncheckedFirst, m.uncheckedEvery
+	if first <= 0 {
+		first = uncheckedSweepFirstRun
+	}
+	if every <= 0 {
+		every = uncheckedSweepEvery
+	}
+	t := time.NewTimer(first)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			m.sweepUnchecked(ctx)
+			t.Reset(every)
+		}
+	}
+}
+
+// sweepUnchecked runs one unchecked-row sweep. A failure WARNs once with a
+// coarse reason and the count deleted, never the error text or a tenant or
+// user, and is retried at the next run.
+func (m *Module) sweepUnchecked(ctx context.Context) {
+	m.mu.Lock()
+	sweeper, logger := m.sweeper, m.logger
+	m.mu.Unlock()
+	if sweeper == nil {
+		return
+	}
+	n, err := services.SweepUncheckedSearchLog(ctx, sweeper, time.Now())
+	if err != nil {
+		if ctx.Err() != nil {
+			return // stopping
+		}
+		reason := "error"
+		if errors.Is(err, context.DeadlineExceeded) {
+			reason = "deadline"
+		}
+		logger.WarnContext(ctx, "retrieval: unchecked search log sweep failed; retrying at the next run",
+			slog.Int64("deleted", n), slog.String("reason", reason))
+		return
+	}
+	if n > 0 {
+		logger.InfoContext(ctx, "retrieval: unchecked search log sweep deleted provisional rows", slog.Int64("deleted", n))
+	}
 }
 
 // purgedTenantReconcileLoop writes the tombstone of every purged tenant that

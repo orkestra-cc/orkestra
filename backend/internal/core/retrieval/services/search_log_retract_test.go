@@ -76,11 +76,8 @@ func (l *retractingLog) stored() []models.SearchLog {
 	return out
 }
 
-// PurgeBefore and PurgeUncheckedBefore make the fake a SearchLogPurger; the
-// unchecked sweep mirrors repository.SearchLog.PurgeUncheckedBefore over
-// stored().
-func (l *retractingLog) PurgeBefore(context.Context, time.Time) (int64, error) { return 0, nil }
-
+// PurgeUncheckedBefore makes the fake an UncheckedSearchLogSweeper; it
+// mirrors repository.SearchLog.PurgeUncheckedBefore over stored().
 func (l *retractingLog) PurgeUncheckedBefore(_ context.Context, cutoff time.Time) (int64, error) {
 	var n int64
 	for _, r := range l.stored() {
@@ -183,7 +180,7 @@ func TestSearch_LogRowKeptWhenNoErasureCoversIt(t *testing.T) {
 		t.Fatalf("checked = %v, want [%s]", rl.checked, rl.rows[0].UUID)
 	}
 	// A checked row is not touched by the unchecked sweep, however old.
-	n, err := PurgeSearchLog(context.Background(), rl, DefaultSearchLogRetentionDays, time.Now().Add(time.Hour))
+	n, err := SweepUncheckedSearchLog(context.Background(), rl, time.Now().Add(time.Hour))
 	if err != nil || n != 0 {
 		t.Fatalf("sweep n = %d, err = %v", n, err)
 	}
@@ -256,8 +253,8 @@ func TestSearch_NoRetractorNoRecheck(t *testing.T) {
 	}
 }
 
-// requireSweptAfterGrace: a recent unchecked row survives the retention run;
-// once older than UncheckedSearchLogGrace the run deletes it.
+// requireSweptAfterGrace: a recent unchecked row survives the unchecked sweep;
+// once older than UncheckedSearchLogGrace the sweep deletes it.
 func requireSweptAfterGrace(t *testing.T, rl *retractingLog) {
 	t.Helper()
 	st := rl.stored()
@@ -266,13 +263,13 @@ func requireSweptAfterGrace(t *testing.T, rl *retractingLog) {
 	}
 	ctx := context.Background()
 	at := st[0].CreatedAt
-	if n, err := PurgeSearchLog(ctx, rl, DefaultSearchLogRetentionDays, at.Add(UncheckedSearchLogGrace-time.Second)); err != nil || n != 0 {
+	if n, err := SweepUncheckedSearchLog(ctx, rl, at.Add(UncheckedSearchLogGrace-time.Second)); err != nil || n != 0 {
 		t.Fatalf("within the grace: n = %d, err = %v", n, err)
 	}
 	if len(rl.stored()) != 1 {
 		t.Fatal("a recent unchecked row was swept")
 	}
-	if n, err := PurgeSearchLog(ctx, rl, DefaultSearchLogRetentionDays, at.Add(UncheckedSearchLogGrace+time.Second)); err != nil || n != 1 {
+	if n, err := SweepUncheckedSearchLog(ctx, rl, at.Add(UncheckedSearchLogGrace+time.Second)); err != nil || n != 1 {
 		t.Fatalf("after the grace: n = %d, err = %v", n, err)
 	}
 	if len(rl.stored()) != 0 {
@@ -280,7 +277,7 @@ func requireSweptAfterGrace(t *testing.T, rl *retractingLog) {
 	}
 }
 
-// G2: a covered row whose delete fails stays unchecked, and the retention
+// G2: a covered row whose delete fails stays unchecked, and the unchecked
 // sweep removes it once older than the grace, even after the erasure is done.
 func TestSearch_RetractDeleteFailureLeavesRowForTheSweep(t *testing.T) {
 	late := &lateTombstones{coveredLater: true}
