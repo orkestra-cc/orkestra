@@ -141,8 +141,14 @@ describe('SecurityPage AI accounts tab', () => {
     expect(
       await screen.findByRole('tab', { name: /ai accounts/i })
     ).toHaveAttribute('aria-selected', 'true');
+    // The tab content loads after the accounts fetch; under the coverage run
+    // on a loaded host that takes longer than findBy*'s 1 s default.
     expect(
-      await screen.findByRole('button', { name: /link a chatgpt account/i })
+      await screen.findByRole(
+        'button',
+        { name: /link a chatgpt account/i },
+        { timeout: 3000 }
+      )
     ).toBeInTheDocument();
   });
 });
