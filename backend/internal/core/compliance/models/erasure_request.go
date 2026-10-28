@@ -26,6 +26,14 @@ const (
 	ErasureSourceRetention   = "retention"    // retention auto-cleanup
 )
 
+// ActiveRetentionErasurePartialFilter scopes the unique userUuid index of
+// ErasureRequestsCollection to incomplete retention requests: one subject has
+// at most one, so two replicas running retention at once cannot both record
+// and run a request for the same person. Returned fresh per call (a map).
+func ActiveRetentionErasurePartialFilter() map[string]any {
+	return map[string]any{"status": ErasureRequestIncomplete, "source": ErasureSourceRetention}
+}
+
 // Per-producer erasure outcomes.
 const (
 	ProducerOutcomeDone    = "done"

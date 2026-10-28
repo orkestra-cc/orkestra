@@ -285,3 +285,50 @@ func TestMemErasureClosePartialReleasesLeaseAndRefusesStaleSettle(t *testing.T) 
 		t.Fatalf("a stale Settle reopened the row: %+v", row)
 	}
 }
+
+func TestMemErasureRecordProgressIsFencedByLeaseAndKeepsIt(t *testing.T) {
+	r := NewMemRepo()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	r.Put(models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now})
+	plan := []models.ErasureProducerProgress{{Key: "crm", Subject: "crm", Outcome: models.ProducerOutcomePending}}
+
+	l1 := now.Add(5 * time.Minute).Truncate(time.Millisecond)
+	if err := r.RecordProgress(ctx, "r-1", l1, plan); !errors.Is(err, repository.ErrErasureLeaseLost) {
+		t.Fatalf("RecordProgress on a pending row err = %v; want ErrErasureLeaseLost", err)
+	}
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, l1); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if err := r.RecordProgress(ctx, "r-1", l1.Add(time.Second), plan); !errors.Is(err, repository.ErrErasureLeaseLost) {
+		t.Fatalf("RecordProgress with another lease err = %v; want ErrErasureLeaseLost", err)
+	}
+	if err := r.RecordProgress(ctx, "r-1", l1, plan); err != nil {
+		t.Fatalf("RecordProgress: %v", err)
+	}
+	if row := r.Row("r-1"); row.LeaseUntil == nil || !row.LeaseUntil.Equal(l1) || len(row.Progress) != 1 || row.Progress[0].Key != "crm" {
+		t.Fatalf("row = %+v; want crm pending under the same lease", row)
+	}
+}
+
+func TestMemErasureInsertOneActiveRetentionRequestPerSubject(t *testing.T) {
+	r := NewMemRepo()
+	ctx := context.Background()
+	retention := func(id string) *models.ErasureRequest {
+		return &models.ErasureRequest{UUID: id, UserUUID: "u-1", Status: models.ErasureRequestIncomplete, Source: models.ErasureSourceRetention}
+	}
+	if err := r.Insert(ctx, retention("a")); err != nil {
+		t.Fatalf("Insert a: %v", err)
+	}
+	if err := r.Insert(ctx, retention("b")); !errors.Is(err, repository.ErrErasureRequestActive) {
+		t.Fatalf("second retention Insert err = %v; want ErrErasureRequestActive", err)
+	}
+	other := &models.ErasureRequest{UUID: "c", UserUUID: "u-1", Status: models.ErasureRequestIncomplete, Source: models.ErasureSourceSelfService}
+	if err := r.Insert(ctx, other); err != nil {
+		t.Fatalf("self-service Insert next to a retention request: %v", err)
+	}
+	r.Put(models.ErasureRequest{UUID: "a", UserUUID: "u-1", Status: models.ErasureRequestCompleted, Source: models.ErasureSourceRetention})
+	if err := r.Insert(ctx, retention("d")); err != nil {
+		t.Fatalf("retention Insert after the first completed: %v", err)
+	}
+}

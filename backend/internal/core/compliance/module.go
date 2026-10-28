@@ -222,6 +222,10 @@ func (m *Module) Collections() []module.CollectionSpec {
 				{Field: "userUuid", Direction: 1},
 				{Field: "status", Direction: 1},
 			}},
+			// One incomplete retention request per subject: two replicas
+			// running retention at once cannot both record and run one.
+			{OrderedKeys: []module.IndexKey{{Field: "userUuid", Direction: 1}}, Unique: true,
+				PartialFilter: models.ActiveRetentionErasurePartialFilter()},
 		}},
 		// Policy engine (compliance spec §1.1). Platform state managed by
 		// Tier-1 operators; the partial unique index enforces a single

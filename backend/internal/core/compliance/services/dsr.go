@@ -166,6 +166,40 @@ func (s *DSRService) RegisteredKeys() map[string]bool {
 	return out
 }
 
+// PlanProgress returns prior with every registered producer it lacks added as
+// pending (registered producers in registration order, then prior keys no
+// longer registered); added reports whether it added any. A run stores the
+// plan before it calls a producer, so a request whose run dies before Settle
+// still names every producer that held the subject's data, and stays
+// incomplete (never completed) if one of them is later unregistered.
+func (s *DSRService) PlanProgress(prior []models.ErasureProducerProgress) (plan []models.ErasureProducerProgress, added bool) {
+	priorByKey := make(map[string]models.ErasureProducerProgress, len(prior))
+	for _, p := range prior {
+		priorByKey[p.Key] = p
+	}
+	producers := s.registry.List()
+	keys := s.keysFor(producers)
+	registered := make(map[string]bool, len(keys))
+	now := time.Now().UTC()
+	for i, p := range producers {
+		registered[keys[i]] = true
+		if pp, ok := priorByKey[keys[i]]; ok {
+			plan = append(plan, pp)
+			continue
+		}
+		added = true
+		plan = append(plan, models.ErasureProducerProgress{
+			Key: keys[i], Subject: p.Subject(), Outcome: models.ProducerOutcomePending, UpdatedAt: now,
+		})
+	}
+	for _, pp := range prior {
+		if !registered[pp.Key] {
+			plan = append(plan, pp)
+		}
+	}
+	return plan, added
+}
+
 // Export runs every registered producer's ExportPersonalData for
 // userUUID and assembles the bundle. Metadata section is always
 // present; producer keys are added only when the producer returned

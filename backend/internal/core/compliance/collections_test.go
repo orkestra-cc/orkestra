@@ -56,3 +56,22 @@ func TestCollections_PolicyEngine(t *testing.T) {
 		}
 	}
 }
+
+// TestCollections_OneActiveRetentionErasurePerSubject pins the partial unique
+// index that makes a retention run's insert of an incomplete request atomic
+// against another replica's (ADR-0023 D12 retention, review finding on #464).
+func TestCollections_OneActiveRetentionErasurePerSubject(t *testing.T) {
+	for _, c := range NewModule().Collections() {
+		if c.Name != models.ErasureRequestsCollection {
+			continue
+		}
+		for _, s := range c.Indexes {
+			if indexKeys(s) == "userUuid" && s.Unique &&
+				s.PartialFilter["status"] == models.ErasureRequestIncomplete &&
+				s.PartialFilter["source"] == models.ErasureSourceRetention && len(s.PartialFilter) == 2 {
+				return
+			}
+		}
+	}
+	t.Fatalf("%s: missing unique userUuid index partial on {status: incomplete, source: retention}", models.ErasureRequestsCollection)
+}

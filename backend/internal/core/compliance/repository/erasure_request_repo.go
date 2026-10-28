@@ -21,6 +21,11 @@ var ErrErasureRequestBusy = errors.New("compliance: an erasure run holds this re
 // ErrErasureLeaseLost is returned by Settle when the lease was taken over.
 var ErrErasureLeaseLost = errors.New("compliance: the erasure run lease was taken over")
 
+// ErrErasureRequestActive is returned by Insert for an incomplete retention
+// request when the subject already has one (the partial unique index of
+// models.ActiveRetentionErasurePartialFilter): another run owns the subject.
+var ErrErasureRequestActive = errors.New("compliance: the subject already has an incomplete retention erasure")
+
 // ErasureSettlement is the outcome of one leased run.
 type ErasureSettlement struct {
 	Status        string // models.ErasureRequestCompleted or models.ErasureRequestIncomplete
@@ -41,9 +46,13 @@ func NewErasureRequestRepo(db *mongo.Database) *ErasureRequestRepository {
 	return &ErasureRequestRepository{coll: db.Collection(models.ErasureRequestsCollection)}
 }
 
-// Insert appends a new request.
+// Insert appends a new request. An incomplete retention request for a subject
+// that already has one is refused with ErrErasureRequestActive.
 func (r *ErasureRequestRepository) Insert(ctx context.Context, req *models.ErasureRequest) error {
 	_, err := r.coll.InsertOne(ctx, req)
+	if mongo.IsDuplicateKeyError(err) && req.Status == models.ErasureRequestIncomplete && req.Source == models.ErasureSourceRetention {
+		return ErrErasureRequestActive
+	}
 	return err
 }
 
@@ -155,6 +164,25 @@ func (r *ErasureRequestRepository) ClaimDue(ctx context.Context, now, leaseUntil
 		return nil, err
 	}
 	return &req, nil
+}
+
+// RecordProgress stores the progress of a leased run before it calls any
+// producer (every registered producer listed, the new ones pending) and keeps
+// the lease. It is fenced like Settle: ErrErasureLeaseLost when the row is no
+// longer incomplete under exactly leaseUntil.
+func (r *ErasureRequestRepository) RecordProgress(ctx context.Context, uuid string, leaseUntil time.Time, progress []models.ErasureProducerProgress) error {
+	//tenantscope:allow records the producers of a specific erasure request by its own UUID under its lease — cross-tenant by design.
+	res, err := r.coll.UpdateOne(ctx,
+		bson.M{"uuid": uuid, "status": models.ErasureRequestIncomplete, "leaseUntil": leaseUntil.Truncate(time.Millisecond)},
+		bson.M{"$set": bson.M{"progress": progress}},
+	)
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrErasureLeaseLost
+	}
+	return nil
 }
 
 // Settle records the outcome of one leased run and releases the lease. It is

@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/orkestra/backend/internal/core/compliance/models"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -531,5 +532,81 @@ func TestErasureClosePartialReleasesLeaseAndRefusesStaleSettle(t *testing.T) {
 	}
 	if row.Status != models.ErasureRequestClosedPartial {
 		t.Fatalf("a stale Settle reopened the row: %+v", row)
+	}
+}
+
+func TestErasureRecordProgressIsFencedByLeaseAndKeepsIt(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	r := NewErasureRequestRepo(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	insertErasure(t, r, models.ErasureRequest{UUID: "r-1", UserUUID: "u-1", Status: models.ErasureRequestPending, RequestedAt: now})
+	plan := []models.ErasureProducerProgress{
+		{Key: "user", Subject: "user", Outcome: models.ProducerOutcomePending},
+		{Key: "crm", Subject: "crm", Outcome: models.ProducerOutcomePending},
+	}
+
+	l1 := now.Add(5 * time.Minute).Truncate(time.Millisecond)
+	if err := r.RecordProgress(ctx, "r-1", l1, plan); !errors.Is(err, ErrErasureLeaseLost) {
+		t.Fatalf("RecordProgress on a pending row err = %v; want ErrErasureLeaseLost", err)
+	}
+	if _, err := r.Claim(ctx, "r-1", models.ErasureRequestPending, "anonymize", "admin-1", now, l1); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if err := r.RecordProgress(ctx, "r-1", l1.Add(time.Second), plan); !errors.Is(err, ErrErasureLeaseLost) {
+		t.Fatalf("RecordProgress with another lease err = %v; want ErrErasureLeaseLost", err)
+	}
+	if err := r.RecordProgress(ctx, "r-1", l1, plan); err != nil {
+		t.Fatalf("RecordProgress: %v", err)
+	}
+	row, err := r.Get(ctx, "r-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if row.Status != models.ErasureRequestIncomplete || row.LeaseUntil == nil || !row.LeaseUntil.Equal(l1) ||
+		len(row.Progress) != 2 || row.Progress[1].Key != "crm" || row.Progress[1].Outcome != models.ProducerOutcomePending {
+		t.Fatalf("row = %+v; want both producers pending under the same lease", row)
+	}
+}
+
+// TestErasureInsertOneActiveRetentionRequestPerSubject runs the partial unique
+// index the module declares (models.ActiveRetentionErasurePartialFilter) on a
+// real MongoDB: a second incomplete retention request for the same subject is
+// refused with ErrErasureRequestActive, other sources and finished ones are not.
+func TestErasureInsertOneActiveRetentionRequestPerSubject(t *testing.T) {
+	db, cleanup := newTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	if _, err := db.Collection(models.ErasureRequestsCollection).Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "userUuid", Value: 1}},
+		Options: options.Index().SetUnique(true).SetPartialFilterExpression(models.ActiveRetentionErasurePartialFilter()),
+	}); err != nil {
+		t.Fatalf("create index: %v", err)
+	}
+	r := NewErasureRequestRepo(db)
+	now := time.Now().UTC()
+	retention := func(id string) *models.ErasureRequest {
+		return &models.ErasureRequest{UUID: id, UserUUID: "u-1", Status: models.ErasureRequestIncomplete, Source: models.ErasureSourceRetention, RequestedAt: now}
+	}
+	if err := r.Insert(ctx, retention("a")); err != nil {
+		t.Fatalf("Insert a: %v", err)
+	}
+	if err := r.Insert(ctx, retention("b")); !errors.Is(err, ErrErasureRequestActive) {
+		t.Fatalf("second retention Insert err = %v; want ErrErasureRequestActive", err)
+	}
+	other := &models.ErasureRequest{UUID: "c", UserUUID: "u-1", Status: models.ErasureRequestIncomplete, Source: models.ErasureSourceSelfService, RequestedAt: now}
+	if err := r.Insert(ctx, other); err != nil {
+		t.Fatalf("self-service Insert next to a retention request: %v", err)
+	}
+	lease := now.Add(5 * time.Minute).Truncate(time.Millisecond)
+	if _, err := r.Claim(ctx, "a", models.ErasureRequestIncomplete, "", "", now, lease); err != nil {
+		t.Fatalf("Claim a: %v", err)
+	}
+	if err := r.Settle(ctx, "a", lease, ErasureSettlement{Status: models.ErasureRequestCompleted, ResolvedAt: &now}); err != nil {
+		t.Fatalf("Settle a: %v", err)
+	}
+	if err := r.Insert(ctx, retention("d")); err != nil {
+		t.Fatalf("retention Insert after the first completed: %v", err)
 	}
 }

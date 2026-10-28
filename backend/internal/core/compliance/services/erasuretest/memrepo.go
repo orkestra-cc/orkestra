@@ -1,6 +1,6 @@
 // Package erasuretest is an in-memory erasure-request repository with the
-// lease semantics of repository.ErasureRequestRepository. Never used in
-// production.
+// lease semantics of repository.ErasureRequestRepository and its one
+// incomplete retention request per subject. Never used in production.
 package erasuretest
 
 import (
@@ -22,6 +22,7 @@ type MemRepo struct {
 	rows       map[string]models.ErasureRequest
 	failSettle error
 	failInsert error
+	failRecord error
 	onSettle   func(ctx context.Context) error
 }
 
@@ -98,8 +99,20 @@ func (m *MemRepo) Insert(_ context.Context, req *models.ErasureRequest) error {
 	if _, ok := m.rows[req.UUID]; ok {
 		return errDuplicate
 	}
+	if activeRetention(*req) {
+		for _, r := range m.rows {
+			if r.UserUUID == req.UserUUID && activeRetention(r) {
+				return repository.ErrErasureRequestActive
+			}
+		}
+	}
 	m.rows[req.UUID] = clone(*req)
 	return nil
+}
+
+// activeRetention matches the partial unique userUuid index the module declares.
+func activeRetention(r models.ErasureRequest) bool {
+	return r.Status == models.ErasureRequestIncomplete && r.Source == models.ErasureSourceRetention
 }
 
 // Get returns one request by UUID.
@@ -226,6 +239,31 @@ func (m *MemRepo) Settle(ctx context.Context, uuid string, leaseUntil time.Time,
 	if s.ResolvedAt != nil {
 		r.ResolvedAt = cloneTime(s.ResolvedAt)
 	}
+	m.rows[uuid] = r
+	return nil
+}
+
+// FailNextRecordProgress makes the next RecordProgress return err without writing.
+func (m *MemRepo) FailNextRecordProgress(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failRecord = err
+}
+
+// RecordProgress stores the progress of a leased run before it calls any
+// producer, fenced like Settle; the lease is kept.
+func (m *MemRepo) RecordProgress(_ context.Context, uuid string, leaseUntil time.Time, progress []models.ErasureProducerProgress) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.failRecord; err != nil {
+		m.failRecord = nil
+		return err
+	}
+	r, ok := m.rows[uuid]
+	if !ok || r.Status != models.ErasureRequestIncomplete || r.LeaseUntil == nil || !r.LeaseUntil.Equal(leaseUntil.Truncate(time.Millisecond)) {
+		return repository.ErrErasureLeaseLost
+	}
+	r.Progress = append([]models.ErasureProducerProgress(nil), progress...)
 	m.rows[uuid] = r
 	return nil
 }

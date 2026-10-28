@@ -256,3 +256,50 @@ func TestCreateKeyLiveMongoBarrier(t *testing.T) {
 		}
 	}
 }
+
+// staleIncompleteView makes HasIncomplete miss every row, as a replica does
+// when another replica's retention run inserts its request between this
+// replica's HasIncomplete and its insert.
+type staleIncompleteView struct {
+	*repository.ErasureRequestRepository
+}
+
+func (staleIncompleteView) HasIncomplete(context.Context, string) (bool, error) { return false, nil }
+
+// TestRetentionTwoReplicasRecordOneRequestPerSubject: two replicas run
+// retention for the same expired tombstone and both miss the other's request
+// in HasIncomplete. The partial unique index declared by the module refuses
+// the second insert, so the subject gets one request and one purge.
+func TestRetentionTwoReplicasRecordOneRequestPerSubject(t *testing.T) {
+	db, cleanup := newServiceTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	if _, err := db.Collection(models.ErasureRequestsCollection).Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "userUuid", Value: 1}},
+		Options: options.Index().SetUnique(true).SetPartialFilterExpression(models.ActiveRetentionErasurePartialFilter()),
+	}); err != nil {
+		t.Fatalf("create index: %v", err)
+	}
+	insertDoc(t, db, "operator_users", bson.M{"uuid": "u-a", "deletedAt": time.Now().UTC().Add(-10 * 365 * 24 * time.Hour)})
+
+	// The producer stays pending, so the first request remains incomplete.
+	crm := &stubProducer{subject: "crm", purgeResult: iface.PurgeResult{Pending: true}}
+	reg := iface.NewPIIProducerRegistry()
+	reg.Register(crm)
+	dsr := NewDSRService(reg, nil, slog.Default())
+	cfg := func() RetentionConfig { return RetentionConfig{Enabled: true, Years: 5} }
+	repo := repository.NewErasureRequestRepo(db)
+	for replica := 0; replica < 2; replica++ {
+		erasures := NewErasureRequestService(staleIncompleteView{repo}, dsr, nil, slog.Default())
+		if n, err := NewRetentionService(db, erasures, slog.Default(), cfg).RunOnce(ctx); err != nil || n != 0 {
+			t.Fatalf("replica %d RunOnce = %d, %v; want 0, nil", replica, n, err)
+		}
+	}
+	rows, err := repo.ListByStatus(ctx)
+	if err != nil || len(rows) != 1 || rows[0].Source != models.ErasureSourceRetention || rows[0].Status != models.ErasureRequestIncomplete {
+		t.Fatalf("rows = %+v, %v; want one incomplete retention request", rows, err)
+	}
+	if crm.purgeCalls != 1 {
+		t.Fatalf("purge calls = %d; want 1", crm.purgeCalls)
+	}
+}

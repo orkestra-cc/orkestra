@@ -63,6 +63,7 @@ type erasureRequestRepo interface {
 	Resolve(ctx context.Context, uuid, status, resolvedBy, mode, note string) error
 	Claim(ctx context.Context, uuid, fromStatus, mode, actor string, now, leaseUntil time.Time) (*models.ErasureRequest, error)
 	ClaimDue(ctx context.Context, now, leaseUntil time.Time, maxAttempts int) (*models.ErasureRequest, error)
+	RecordProgress(ctx context.Context, uuid string, leaseUntil time.Time, progress []models.ErasureProducerProgress) error
 	Settle(ctx context.Context, uuid string, leaseUntil time.Time, s repository.ErasureSettlement) error
 	HasIncomplete(ctx context.Context, userUUID string) (bool, error)
 	ClosePartial(ctx context.Context, uuid string, now time.Time, abandoned []string, closedBy, note string) error
@@ -228,16 +229,17 @@ func (s *ErasureRequestService) Reject(ctx context.Context, requestUUID, resolve
 	return s.repo.Resolve(ctx, requestUUID, models.ErasureRequestRejected, resolvedBy, "", note)
 }
 
-// EraseNow records an incomplete, leased request for the subject (attempt 1)
-// and runs the erasure at once. The row is written before any producer runs,
-// so a crash leaves a request the worker finishes. A subject already under a
-// legal hold records nothing.
+// EraseNow records an incomplete, leased request for the subject (attempt 1),
+// with every registered producer pending, and runs the erasure at once. The
+// row is written before any producer runs, so a crash leaves a request the
+// worker finishes. A subject already under a legal hold records nothing.
 func (s *ErasureRequestService) EraseNow(ctx context.Context, userUUID, tenantID, source, actor string, mode iface.EraseMode) (*ErasureOutcome, error) {
 	if err := s.dsr.CheckLegalHold(ctx, userUUID); err != nil {
 		return nil, err
 	}
 	now := s.now()
 	lease := now.Add(erasureRunLease)
+	plan, _ := s.dsr.PlanProgress(nil)
 	row := &models.ErasureRequest{
 		UUID:          uuid.NewString(),
 		UserUUID:      userUUID,
@@ -247,6 +249,7 @@ func (s *ErasureRequestService) EraseNow(ctx context.Context, userUUID, tenantID
 		Mode:          eraseModeLabel(mode),
 		ResolvedBy:    actor,
 		RequestedAt:   now,
+		Progress:      plan,
 		Attempts:      1,
 		LeaseUntil:    &lease,
 		NextAttemptAt: &lease,
@@ -277,8 +280,11 @@ func (s *ErasureRequestService) RetryDue(ctx context.Context) (bool, error) {
 }
 
 // run executes the remaining producers of a leased request and settles the
-// outcome. The attempt was counted when the row was claimed, so row.Attempts
-// is this run's number. The run survives caller cancellation (bounded by half
+// outcome. Before any producer runs, every registered producer missing from
+// the stored progress is recorded as pending (under the lease); when that
+// fails no producer runs and the error is returned, the row staying incomplete
+// for the worker. The attempt was counted when the row was claimed, so
+// row.Attempts is this run's number. The run survives caller cancellation (bounded by half
 // the lease) and Settle is bounded by what is left of the lease (at least
 // settleFloor). A run error is returned after settling. When Settle fails or
 // the lease was lost the outcome is not stored: the request is reported as it
@@ -287,6 +293,14 @@ func (s *ErasureRequestService) RetryDue(ctx context.Context) (bool, error) {
 func (s *ErasureRequestService) run(ctx context.Context, row *models.ErasureRequest) (*ErasureOutcome, error) {
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), erasureRunLease/2)
 	defer cancel()
+	if plan, added := s.dsr.PlanProgress(row.Progress); added {
+		if err := s.repo.RecordProgress(runCtx, row.UUID, *row.LeaseUntil, plan); err != nil {
+			s.logger.Warn("compliance: could not record the producers of an erasure run; no producer ran and the worker will retry",
+				slog.String("request", row.UUID), slog.String("error", err.Error()))
+			return nil, err
+		}
+		row.Progress = plan
+	}
 	res, runErr := s.dsr.EraseRemaining(runCtx, row.UserUUID, parseEraseMode(row.Mode), row.Progress)
 
 	attempts := row.Attempts

@@ -695,3 +695,26 @@ func TestProducerKeySuffixWarnsOnce(t *testing.T) {
 		t.Fatalf("warning should be WARN and name the key:\n%s", out)
 	}
 }
+
+// TestPlanProgressAddsMissingRegisteredProducersAsPending pins the plan a run
+// stores before any producer runs: prior entries kept, registered producers it
+// lacks added as pending in registration order, unregistered prior keys last.
+func TestPlanProgressAddsMissingRegisteredProducersAsPending(t *testing.T) {
+	t.Parallel()
+	svc, _ := newDSRService(&stubProducer{subject: "user"}, &stubProducer{subject: "crm"})
+	prior := []models.ErasureProducerProgress{
+		{Key: "gone", Subject: "gone", Outcome: models.ProducerOutcomeFailed, Attempts: 2},
+		{Key: "user", Subject: "user", Outcome: models.ProducerOutcomeDone, Attempts: 1},
+	}
+
+	plan, added := svc.PlanProgress(prior)
+	if !added || len(plan) != 3 ||
+		plan[0].Key != "user" || plan[0].Outcome != models.ProducerOutcomeDone ||
+		plan[1].Key != "crm" || plan[1].Subject != "crm" || plan[1].Outcome != models.ProducerOutcomePending || plan[1].Attempts != 0 ||
+		plan[2].Key != "gone" || plan[2].Outcome != models.ProducerOutcomeFailed {
+		t.Fatalf("PlanProgress = %+v, %v", plan, added)
+	}
+	if again, added := svc.PlanProgress(plan); added || len(again) != 3 {
+		t.Fatalf("PlanProgress of a complete plan = %+v, %v; want unchanged, false", again, added)
+	}
+}

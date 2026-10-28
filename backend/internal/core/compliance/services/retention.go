@@ -2,10 +2,12 @@ package services
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/compliance/models"
+	"github.com/orkestra/backend/internal/core/compliance/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -54,7 +56,9 @@ func (s *RetentionService) Preview(ctx context.Context) ([]string, time.Time, er
 
 // RunOnce hard-deletes every expired tombstone through the erasure workflow,
 // skipping subjects that already have an incomplete erasure (the retry worker
-// owns them) and subjects under an active legal hold (logged and skipped).
+// owns them), subjects whose retention request another replica recorded
+// between that check and this run's insert (the unique index refuses the
+// second one), and subjects under an active legal hold (logged and skipped).
 // No-op when disabled. Returns the number of runs settled completed.
 func (s *RetentionService) RunOnce(ctx context.Context) (int, error) {
 	cfg := s.loadConfig()
@@ -79,6 +83,13 @@ func (s *RetentionService) RunOnce(ctx context.Context) (int, error) {
 			continue
 		}
 		out, err := s.erasures.EraseNow(ctx, id, "", models.ErasureSourceRetention, "system:retention", iface.EraseHardDelete)
+		if errors.Is(err, repository.ErrErasureRequestActive) {
+			// Another replica's retention run recorded the request first; it
+			// (then the retry worker) owns the subject.
+			s.logger.Debug("retention: another run owns the subject's erasure",
+				slog.String("userUuid", id))
+			continue
+		}
 		if err != nil {
 			s.logger.Warn("retention: skip subject",
 				slog.String("userUuid", id),
