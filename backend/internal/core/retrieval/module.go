@@ -222,6 +222,11 @@ func (m *Module) Description() string {
 }
 func (m *Module) Category() module.ModuleCategory { return module.CategoryCore }
 func (m *Module) Dependencies() []string          { return []string{"tenant", "authz", "llm"} }
+
+// HotReloadConfig is true: every config key is read per pass or per call (the
+// worker's Settings closure re-reads lease, batch and poll interval on every
+// pass). The Qdrant settings are environment, not module config.
+func (m *Module) HotReloadConfig() bool { return true }
 func (m *Module) ProvidedServices() []module.ServiceKey {
 	return []module.ServiceKey{module.ServiceRetrieval}
 }

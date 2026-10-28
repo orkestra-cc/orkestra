@@ -28,10 +28,12 @@ A representative slice, not the full list — read the package for the rest.
 | `PasswordHasher` / `AdminAuthInviter` | `auth` | user (admin-direct Tier-2 flows) |
 | `ServiceAccountLister` | `auth` | user |
 | `AuditSink` | `compliance` | every module performing a security-sensitive action |
-| `PIIProducer` | `user`, `auth`, `tenant`, `authz`, `notification` | compliance (the GDPR DSR pipeline) |
+| `PIIProducer` | `user`, `auth`, `tenant`, `authz`, `notification`, `llm` | compliance (the GDPR DSR pipeline) |
 | `KMSProvider` | `compliance` | per-tenant envelope encryption and crypto-shred |
 | [`ObjectStore` / `ObjectStoreProvider`](/sdk/object-storage) | the platform's blob provider | user (avatars), and any module storing uploads |
 | `PDFRenderer` | the platform's PDF renderer (a Gotenberg sidecar, wired by the server binary as an optional service — not by a core module) | any module compositing a printable document (e.g. a receipt) |
+
+`PIIProducer.PurgePersonalData` must be idempotent: compliance calls it again for the same user and mode until the producer reports its purge done, and a call after a completed purge must succeed and report what it found. Return `PurgeResult.Pending` true with a nil error when the erasure is accepted but not finished; the erasure request stays `incomplete` and the producer is called again. On failure return the error together with whatever was erased before it, and compliance keeps those counts. A producer registered more than once under the same `Subject()` (auth registers one per tier) implements the optional `PIIProducerKeyer` (`ProducerKey() string`) so compliance tracks each instance on its own; the key must be unique and stable across restarts, and without it compliance keys the producer by `Subject()`, suffixing later duplicates `#2`, `#3`. Export bundles are keyed by producer key (bundle `version` `"2"`), so every instance is exported.
 
 `AuditSinkSetter` and `KMSProviderSetter` are the setter seams on core services: nil by default, so a fork can wire its own audit or key-management implementation the way the core compliance module does.
 

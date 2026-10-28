@@ -218,7 +218,7 @@ func (m *Module) find(ctx context.Context, text string) (*iface.RetrievalSearchR
 
 ## Configuration
 
-The Qdrant settings are operator environment variables. The three worker settings (group Indexing) and the two search settings (group Search & audit) are module settings that can also be set from the environment; the worker settings are re-read on every pass, the search settings on every use.
+The Qdrant settings are operator environment variables. The three worker settings (group Indexing) and the two search settings (group Search & audit) are module settings that can also be set from the environment; the worker settings are re-read on every pass and the search settings on every use, so changing them takes effect without a restart (the admin settings page shows no restart-required notice).
 
 | Env var | Default | Meaning |
 |---|---|---|

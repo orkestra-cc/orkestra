@@ -153,6 +153,46 @@ func TestTEI_FailedLaterBatchReportsCompletedUsage(t *testing.T) {
 	}
 }
 
+func TestTEI_DimensionChangeBetweenBatchesIsProfileMismatch(t *testing.T) {
+	tei, srv := newTEIT(t, teitest.Config{ModelID: "m", Dimensions: 4}, "")
+	srv.ChangeDimensionsAfter(1, 8)
+	inputs := make([]string, 40)
+	for i := range inputs {
+		inputs[i] = "ab"
+	}
+	out, err := tei.Embed(context.Background(), inputs, TEIEmbedOptions{BatchSize: 32})
+	if !errors.Is(err, iface.ErrLLMProfileMismatch) || errors.Is(err, iface.ErrLLMProviderUnavailable) {
+		t.Fatalf("err = %v", err)
+	}
+	// 64 for the first batch plus 16 for the rejected one the endpoint computed.
+	if out == nil || out.Usage.InputTokens != 80 {
+		t.Fatalf("usage = %+v, want 80", out)
+	}
+}
+
+// Greptile pr-462-findings-2: a rejected response was still computed.
+func TestTEI_RejectedResponsesStillReportTheirUsage(t *testing.T) {
+	serve := func(path, body string) *TEI {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("x-compute-tokens", "7")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(body))
+		}))
+		t.Cleanup(srv.Close)
+		tei, _ := NewTEI(srv.URL, "", teiClient())
+		return tei
+	}
+	ctx := context.Background()
+	out, err := serve("/embed", `[[0.1],[]]`).Embed(ctx, []string{"a", "b"}, TEIEmbedOptions{})
+	if !errors.Is(err, iface.ErrLLMProviderUnavailable) || out == nil || out.Usage.InputTokens != 7 || len(out.Vectors) != 0 {
+		t.Fatalf("embed: out = %+v err = %v", out, err)
+	}
+	_, usage, err := serve("/rerank", `[{"index":0,"score":0.5},{"index":0,"score":0.5}]`).Rerank(ctx, "q", []string{"a", "b"}, TEIRerankOptions{})
+	if !errors.Is(err, iface.ErrLLMProviderUnavailable) || usage.InputTokens != 7 {
+		t.Fatalf("rerank: usage = %+v err = %v", usage, err)
+	}
+}
+
 func TestTEI_SendsBearerOnlyWhenKeySet(t *testing.T) {
 	ctx := context.Background()
 	tei, srv := newTEIT(t, teitest.Config{ModelID: "m", APIKey: "k1"}, "k1")

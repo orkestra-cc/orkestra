@@ -192,20 +192,26 @@ func (d *Driver) transportFailure(caller, timed context.Context, op, reason stri
 	return &transportError{op: op, reason: reason}
 }
 
-// do sends a request and decodes the {"result": ...} envelope into out
-// (ignored when nil).
+// do sends a request and checks that a 2xx answer is a Qdrant reply: a JSON
+// object with a "result" or "status":"ok" (a proxy's HTML 200 is an outage,
+// not a success). The {"result": ...} envelope is decoded into out when out
+// is not nil.
 func (d *Driver) do(ctx context.Context, op, method, path string, body, out any) error {
 	data, err := d.send(ctx, op, method, path, body)
 	if err != nil {
 		return err
 	}
+	var env struct {
+		Result json.RawMessage `json:"result"`
+		Status json.RawMessage `json:"status"`
+	}
+	if err := json.Unmarshal(data, &env); err != nil || (len(env.Result) == 0 && string(env.Status) != `"ok"`) {
+		return &transportError{op: op, reason: "returned an undecodable body"}
+	}
 	if out == nil {
 		return nil
 	}
-	var env struct {
-		Result json.RawMessage `json:"result"`
-	}
-	if err := json.Unmarshal(data, &env); err != nil || len(env.Result) == 0 {
+	if len(env.Result) == 0 {
 		return &transportError{op: op, reason: "returned an undecodable body"}
 	}
 	if err := json.Unmarshal(env.Result, out); err != nil {

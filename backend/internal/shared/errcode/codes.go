@@ -654,3 +654,19 @@ const CompliancePolicyUnavailable = "compliance.policy_unavailable"
 // CompliancePolicyPersistenceFailed signals an unexpected failure of the
 // policy engine; the cause is logged server-side, never returned. 500.
 const CompliancePolicyPersistenceFailed = "compliance.policy_persistence_failed"
+
+// ComplianceErasureRequestBusy signals that another erasure run holds the
+// request's lease. 409.
+const ComplianceErasureRequestBusy = "compliance.erasure_request_busy"
+
+// ComplianceErasureRequestStarted signals a reject of an erasure that has
+// already started; it can be retried, not rejected. 409.
+const ComplianceErasureRequestStarted = "compliance.erasure_request_started"
+
+// ComplianceErasureRequestNotClosable signals a close of a request that still
+// waits on an installed producer. 409.
+const ComplianceErasureRequestNotClosable = "compliance.erasure_request_not_closable"
+
+// ComplianceErasureCloseNoteRequired signals a close without a note of 1 to
+// 500 characters. 422.
+const ComplianceErasureCloseNoteRequired = "compliance.erasure_close_note_required"

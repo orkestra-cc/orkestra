@@ -211,16 +211,23 @@ type execOutcome struct {
 	result   callResult
 }
 
+// reservationWindowEnd is the instant by which a call reserved at reservedAt
+// (taken before Reserve, so never later than the row's own clock) must end: the
+// reservation's expiry minus the ledger-write margin.
+func reservationWindowEnd(cfg BudgetConfig, reservedAt time.Time) time.Time {
+	ttl := cfg.ReservationTTL
+	if ttl <= 0 {
+		ttl = defaultReservationTTL
+	}
+	return reservedAt.Add(ttl - finalizeTimeout)
+}
+
 func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (*execOutcome, error) {
 	if len(cands) == 0 {
 		return nil, iface.ErrLLMNoEligibleModel
 	}
 	first := cands[0]
 	bcfg := r.budget.Config()
-	ttl := bcfg.ReservationTTL
-	if ttl <= 0 {
-		ttl = defaultReservationTTL
-	}
 	reservedAt := time.Now()
 	res, err := r.budget.Reserve(ctx, spec.reserve)
 	if err != nil {
@@ -232,7 +239,7 @@ func (r *Router) run(ctx context.Context, cands []models.Model, spec execSpec) (
 		return nil, err
 	}
 	// A call must end before the reconciler may claim its reservation.
-	windowEnd := reservedAt.Add(ttl - finalizeTimeout)
+	windowEnd := reservationWindowEnd(bcfg, reservedAt)
 
 	var attempts []models.Attempt
 	var lastErr error

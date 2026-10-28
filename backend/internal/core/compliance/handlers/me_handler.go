@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/orkestra/backend/internal/core/compliance/models"
 	"github.com/orkestra/backend/internal/core/compliance/services"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
@@ -22,12 +23,14 @@ import (
 // admin tool for operator-initiated DSR lands later when CSR-side
 // ticketing is wired.
 type MeHandler struct {
-	dsr *services.DSRService
+	dsr      *services.DSRService
+	erasures *services.ErasureRequestService
 }
 
-// NewMeHandler constructs the handler bound to the DSR service.
-func NewMeHandler(dsr *services.DSRService) *MeHandler {
-	return &MeHandler{dsr: dsr}
+// NewMeHandler constructs the handler bound to the DSR service (export) and
+// the erasure request service (self-service erase is a recorded request).
+func NewMeHandler(dsr *services.DSRService, erasures *services.ErasureRequestService) *MeHandler {
+	return &MeHandler{dsr: dsr, erasures: erasures}
 }
 
 // --- DTOs ---
@@ -47,7 +50,9 @@ type ExportOutput struct {
 // rely on the totalRows count as a rough completeness signal.
 type EraseOutput struct {
 	Body struct {
-		Purged    map[string]iface.PurgeResult `json:"purged"`
+		Status    string                       `json:"status" enum:"completed,incomplete" doc:"incomplete: at least one producer is not done; the request is kept and retried"`
+		RequestID string                       `json:"requestId" doc:"The recorded erasure request"`
+		Purged    map[string]iface.PurgeResult `json:"purged" doc:"Per producer key"`
 		TotalRows int                          `json:"totalRows"`
 		Errors    map[string]string            `json:"errors,omitempty"`
 	}
@@ -88,14 +93,18 @@ func (h *MeHandler) Erase(ctx context.Context, _ *struct{}) (*EraseOutput, error
 	if !ok || userUUID == "" {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
-	res, err := h.dsr.Erase(ctx, userUUID, iface.EraseHardDelete)
+	tenantID, _ := ctxauth.GetTenantID(ctx)
+	outcome, err := h.erasures.EraseNow(ctx, userUUID, tenantID, models.ErasureSourceSelfService, userUUID, iface.EraseHardDelete)
 	if errors.Is(err, services.ErrLegalHoldActive) {
 		return nil, huma.Error409Conflict("erasure blocked: the account is under an active legal hold")
 	}
 	if err != nil {
 		return nil, huma.Error500InternalServerError("dsr erase", err)
 	}
+	res := outcome.Run
 	out := &EraseOutput{}
+	out.Body.Status = outcome.Request.Status
+	out.Body.RequestID = outcome.Request.UUID
 	out.Body.Purged = res.Purged
 	for _, r := range res.Purged {
 		out.Body.TotalRows += r.RowsDeleted + r.RowsAnonymized
@@ -116,7 +125,7 @@ func RegisterMeRoutes(api huma.API, h *MeHandler) {
 		Method:      http.MethodPost,
 		Path:        "/v1/me/dsr/export",
 		Summary:     "Export the caller's personal data (GDPR right of access)",
-		Description: "Synchronously collects the caller's personal data across every registered PII producer and returns it inline. Safe to retry — read-only.",
+		Description: "Synchronously collects the caller's personal data across every registered PII producer and returns it inline. Safe to retry — read-only. Bundle keys are producer keys (auth.operator, auth.client, ...); bundle metadata version 2 introduced them.",
 		Tags:        []string{"Compliance", "DSR"},
 	}, h.Export)
 
@@ -125,7 +134,7 @@ func RegisterMeRoutes(api huma.API, h *MeHandler) {
 		Method:      http.MethodPost,
 		Path:        "/v1/me/dsr/erase",
 		Summary:     "Erase the caller's personal data (GDPR right to erasure)",
-		Description: "Irreversibly deletes the caller's personal data across every registered PII producer. After erasure the caller's access token keeps validating until it expires; subsequent refresh fails because the refresh-token rows are wiped.",
+		Description: "Irreversibly deletes the caller's personal data across every registered PII producer. After erasure the caller's access token keeps validating until it expires; subsequent refresh fails because the refresh-token rows are wiped. The erasure is recorded as a request; when a producer is not done the status is incomplete and the request is kept and retried until every producer is done.",
 		Tags:        []string{"Compliance", "DSR"},
 	}, h.Erase)
 }

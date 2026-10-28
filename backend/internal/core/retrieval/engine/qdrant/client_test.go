@@ -310,3 +310,38 @@ func TestDo_NonSuccessBodyIsDrainedForReuse(t *testing.T) {
 		t.Errorf("opened %d connections for 3 refused requests, want 1 (body not drained)", conns)
 	}
 }
+
+func TestDo_RefusesNonQdrantSuccess(t *testing.T) {
+	bodies := map[string]string{
+		"html":          "<html><body>Bad gateway</body></html>",
+		"empty":         "",
+		"json array":    `[]`,
+		"object no env": `{"error":"boom"}`,
+	}
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			srv, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/html")
+				_, _ = io.WriteString(w, body)
+			})
+			d := mustNew(t, Config{URL: srv.URL})
+			ops := map[string]error{
+				"write":  d.Upsert(t.Context(), "c", []engine.Point{testPoint("s1", 1, 0)}),
+				"delete": d.DropCollection(t.Context(), "c"),
+				"filter": d.DeleteByFilter(t.Context(), "c", engine.Selector{TenantID: "T"}),
+			}
+			for op, err := range ops {
+				if !errors.Is(err, engine.ErrUnavailable) {
+					t.Errorf("%s with a 200 %s body = %v, want ErrUnavailable", op, name, err)
+				}
+			}
+		})
+	}
+}
+
+func TestDo_AcceptsStatusOkWithoutResult(t *testing.T) {
+	srv, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request) { okJSON(w, `{"status":"ok","time":0.1}`) })
+	if err := mustNew(t, Config{URL: srv.URL}).DropCollection(t.Context(), "c"); err != nil {
+		t.Fatalf("DropCollection: %v", err)
+	}
+}

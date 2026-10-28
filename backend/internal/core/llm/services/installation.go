@@ -140,12 +140,13 @@ func (s *InstallationService) resolve(ctx context.Context, kind iface.InferenceK
 
 // admit runs steps 5-6: breaker, then budget reservation. On success the
 // caller owns the breaker ticket and the reservation.
-func (s *InstallationService) admit(ctx context.Context, ep installation.Endpoint, purpose string, estimate int) (string, uint64, *Reservation, error) {
+func (s *InstallationService) admit(ctx context.Context, ep installation.Endpoint, purpose string, estimate int) (string, uint64, *Reservation, time.Time, error) {
 	key := "installation:" + ep.Name
 	ticket, err := s.breaker.Allow(key)
 	if err != nil {
-		return "", 0, nil, err
+		return "", 0, nil, time.Time{}, err
 	}
+	reservedAt := time.Now()
 	res, err := s.budget.Reserve(ctx, ReserveInput{
 		ModelUUID: ep.LedgerModelUUID(), Provider: models.ProviderTEI, ModelID: ep.Model,
 		CredentialKind: models.CredentialKindInstallation, Caller: InstallationCaller, Purpose: purpose,
@@ -158,9 +159,27 @@ func (s *InstallationService) admit(ctx context.Context, ep installation.Endpoin
 			outcome = models.OutcomeBudgetBlocked
 		}
 		s.metrics.RecordLLMRequest(models.ProviderTEI, outcome)
-		return "", 0, nil, err
+		return "", 0, nil, time.Time{}, err
 	}
-	return key, ticket, res, nil
+	return key, ticket, res, reservationWindowEnd(s.budget.Config(), reservedAt), nil
+}
+
+// errReservationWindow: the reservation has no time left for a call. It says
+// nothing about the endpoint, so settle gives the breaker no verdict.
+var errReservationWindow = fmt.Errorf("%w: reservation window exhausted", iface.ErrLLMProviderUnavailable)
+
+// callTimeout is the request timeout capped so the call ends before the
+// reconciler may claim its reservation (as Router.run does); a raised
+// request_timeout cannot extend past windowEnd.
+func (s *InstallationService) callTimeout(windowEnd time.Time) (time.Duration, error) {
+	d := s.timeout()
+	if left := time.Until(windowEnd); left < d {
+		if left < minAttemptWindow {
+			return 0, errReservationWindow
+		}
+		d = left
+	}
+	return d, nil
 }
 
 func (s *InstallationService) timeout() time.Duration {
@@ -172,7 +191,7 @@ func (s *InstallationService) timeout() time.Duration {
 
 // settle runs steps 9-10: the breaker verdict and the ledger row.
 func (s *InstallationService) settle(ctx context.Context, ep installation.Endpoint, purpose, key string, ticket uint64, res *Reservation, usage iface.LLMUsage, err error) {
-	if ctx.Err() != nil || errors.Is(err, iface.ErrLLMProfileMismatch) {
+	if ctx.Err() != nil || errors.Is(err, iface.ErrLLMProfileMismatch) || errors.Is(err, errReservationWindow) {
 		s.breaker.Release(key, ticket)
 	} else {
 		s.breaker.Record(key, ticket, err)
@@ -205,26 +224,30 @@ func (s *InstallationService) EmbedWithProfile(ctx context.Context, req iface.Pi
 	for i, in := range req.Inputs {
 		inputs[i] = prefix + in
 	}
-	key, ticket, res, err := s.admit(ctx, ep, PurposeRetrievalEmbed, EstimateEmbedTokens(inputs))
+	key, ticket, res, windowEnd, err := s.admit(ctx, ep, PurposeRetrievalEmbed, EstimateEmbedTokens(inputs))
 	if err != nil {
 		return nil, err
 	}
 
-	callCtx, cancel := context.WithTimeout(ctx, s.timeout())
 	var usage iface.LLMUsage
 	var vectors [][]float32
-	outcome, err := s.set.Adapter(ep.Name).Embed(callCtx, inputs,
-		providers.TEIEmbedOptions{Normalize: ep.Normalize, Truncate: ep.Truncate, BatchSize: v.BatchSize})
-	cancel()
+	var outcome *providers.EmbedOutcome
+	d, err := s.callTimeout(windowEnd)
+	if err == nil {
+		callCtx, cancel := context.WithTimeout(ctx, d)
+		outcome, err = s.set.Adapter(ep.Name).Embed(callCtx, inputs,
+			providers.TEIEmbedOptions{Normalize: ep.Normalize, Truncate: ep.Truncate, BatchSize: v.BatchSize})
+		cancel()
+	}
 	if outcome != nil {
 		usage = outcome.Usage
 		vectors = outcome.Vectors
 	}
 	if err == nil {
 		err = checkDimensions(vectors, len(inputs), v.Profile.Dimensions)
-		if errors.Is(err, iface.ErrLLMProfileMismatch) {
-			s.set.Invalidate(ep.Name)
-		}
+	}
+	if errors.Is(err, iface.ErrLLMProfileMismatch) {
+		s.set.Invalidate(ep.Name)
 	}
 	s.settle(ctx, ep, PurposeRetrievalEmbed, key, ticket, res, usage, err)
 	if err != nil {
@@ -266,15 +289,20 @@ func (s *InstallationService) Rerank(ctx context.Context, req iface.RerankReques
 	for _, d := range req.Documents {
 		estimate += len(d)
 	}
-	key, ticket, res, err := s.admit(ctx, ep, PurposeRetrievalRerank, (estimate+2)/3)
+	key, ticket, res, windowEnd, err := s.admit(ctx, ep, PurposeRetrievalRerank, (estimate+2)/3)
 	if err != nil {
 		return nil, err
 	}
 
-	callCtx, cancel := context.WithTimeout(ctx, s.timeout())
-	scores, usage, err := s.set.Adapter(ep.Name).Rerank(callCtx, req.Query, req.Documents,
-		providers.TEIRerankOptions{Truncate: ep.Truncate, BatchSize: v.BatchSize})
-	cancel()
+	var scores []iface.RerankScore
+	var usage iface.LLMUsage
+	d, err := s.callTimeout(windowEnd)
+	if err == nil {
+		callCtx, cancel := context.WithTimeout(ctx, d)
+		scores, usage, err = s.set.Adapter(ep.Name).Rerank(callCtx, req.Query, req.Documents,
+			providers.TEIRerankOptions{Truncate: ep.Truncate, BatchSize: v.BatchSize})
+		cancel()
+	}
 	s.settle(ctx, ep, PurposeRetrievalRerank, key, ticket, res, usage, err)
 	if err != nil {
 		return nil, err

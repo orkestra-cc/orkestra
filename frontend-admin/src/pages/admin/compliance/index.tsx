@@ -13,7 +13,6 @@ import { useTranslation } from 'react-i18next';
 import {
   useListAuditEventsQuery,
   useListChangeRequestsQuery,
-  useListErasureRequestsQuery,
   useListLegalHoldsQuery,
   useRetentionPreviewQuery
 } from 'store/api/complianceApi';
@@ -25,6 +24,7 @@ import ErasureRequestsTab from './ErasureRequestsTab';
 import LegalHoldsTab from './LegalHoldsTab';
 import PoliciesTab from './PoliciesTab';
 import RetentionTab from './RetentionTab';
+import { useOpenErasureRequests } from './useOpenErasureRequests';
 
 // CompliancePage is the operator-facing GDPR/compliance dashboard (ADR-0009):
 // a summary KPI row, then tabbed surfaces to review and resolve erasure
@@ -82,7 +82,7 @@ const CompliancePage = () => {
 
   // The summary cards share the same RTK Query caches the tabs read, so there
   // is no extra network cost — RTK Query dedupes the in-flight requests.
-  const erasures = useListErasureRequestsQuery();
+  const erasures = useOpenErasureRequests();
   const holds = useListLegalHoldsQuery();
   const retention = useRetentionPreviewQuery();
   const audit = useListAuditEventsQuery({ limit: 50 });
