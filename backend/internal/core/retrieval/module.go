@@ -111,6 +111,9 @@ type Module struct {
 	erasure   *services.ErasureService
 	// reconcile cadence; zero means the defaults (test seam).
 	reconcileFirst, reconcileInterval time.Duration
+	// finalizer sweep interval; zero means finalizerInterval (test seam, set
+	// before Start: the finalizer reads it through its config on every sweep).
+	finalizerEvery time.Duration
 
 	// One cancel and one done channel cover every background job (the
 	// worker, the retention loop, the finalizer and the reconcile loop).
@@ -282,6 +285,19 @@ func finalizerConfig(_ *module.Dependencies) func() services.FinalizerConfig {
 	}
 }
 
+// finalizerConfig is the package finalizerConfig with the module's sweep
+// interval seam applied.
+func (m *Module) finalizerConfig(deps *module.Dependencies) func() services.FinalizerConfig {
+	base := finalizerConfig(deps)
+	return func() services.FinalizerConfig {
+		cfg := base()
+		if m.finalizerEvery > 0 {
+			cfg.Interval = m.finalizerEvery
+		}
+		return cfg
+	}
+}
+
 // Init reads the operator environment and registers the service. It never
 // contacts Qdrant or llm, and never fails: a core Init error is fatal, so
 // missing infrastructure is a log line, not an error.
@@ -416,7 +432,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 				slog.String("missing", strings.Join(gaps, ", ")))
 		}
 
-		finalizer, erasure = wireErasure(deps, svc, states, eng, prefix, logger)
+		finalizer, erasure = wireErasure(deps, svc, states, eng, prefix, m.finalizerConfig(deps), logger)
 	}
 	if deps.DB == nil {
 		// Production always has a DB; the repository constructors would
@@ -445,12 +461,12 @@ func (m *Module) Init(deps *module.Dependencies) error {
 // silently (compliance absent); a tenant service that cannot take the purge
 // hook or list purged tenants gives one WARN.
 func wireErasure(deps *module.Dependencies, svc *services.Service, states *repository.CorpusStates,
-	eng engine.Engine, prefix string, logger *slog.Logger) (*services.Finalizer, *services.ErasureService) {
+	eng engine.Engine, prefix string, cfg func() services.FinalizerConfig, logger *slog.Logger) (*services.Finalizer, *services.ErasureService) {
 	relay := services.NewAuditRelay()
 	store := repository.NewErasureFinalization(deps.DB)
 	logs := repository.NewSearchLogDSR(deps.DB)
 	finalizer := services.NewFinalizer(store, logs, services.NewLiveCollections(states, prefix), eng,
-		finalizerConfig(deps), relay, time.Now, logger)
+		cfg, relay, time.Now, logger)
 
 	hooks, hooksOK := module.GetTyped[iface.TenantPurgeHooks](deps.Services, module.ServiceTenantService)
 	// purged stays a nil interface when absent: reconciliation is then a no-op.

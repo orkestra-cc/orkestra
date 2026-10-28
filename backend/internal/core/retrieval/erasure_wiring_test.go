@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/orkestra/backend/internal/core/retrieval/models"
+	"github.com/orkestra/backend/internal/core/retrieval/repository"
 	"github.com/orkestra/backend/internal/core/retrieval/services"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
@@ -90,10 +92,10 @@ func (s *recordingAuditSink) byAction(action string) []iface.AuditEvent {
 
 // initErasure initializes the module without an engine over db, with tenants
 // (if not nil) under ServiceTenantService and an empty PII producer registry.
-func initErasure(t *testing.T, db *mongo.Database, tenants any) (*Module, *module.ServiceRegistry, *iface.PIIProducerRegistry, *bytes.Buffer) {
+func initErasure(t *testing.T, db *mongo.Database, tenants any) (*Module, *module.ServiceRegistry, *iface.PIIProducerRegistry, *syncBuffer) {
 	t.Helper()
 	t.Setenv("QDRANT_URL", "")
-	var buf bytes.Buffer
+	var buf syncBuffer
 	reg := module.NewServiceRegistry()
 	reg.Register(module.ServiceLLMGateway, fullGateway{})
 	if tenants != nil {
@@ -266,8 +268,11 @@ func TestModule_PurgedTenantReconcileFailureWarns(t *testing.T) {
 	if err := m.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "a reconcile run", func() bool { return hooks.calls() >= 1 })
-	// The WARN follows the call; Stop waits for the loop, so it is written.
+	// Wait for the WARN itself: a Stop landing between the lister call and
+	// the WARN would skip it (the loop returns quietly once stopping).
+	waitFor(t, "the reconcile WARN", func() bool {
+		return len(warnLines(logs.String(), "purged-tenant reconciliation failed")) >= 1
+	})
 	if err := m.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -277,6 +282,93 @@ func TestModule_PurgedTenantReconcileFailureWarns(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "t-secret") {
 		t.Fatalf("WARN carries the error text: %s", l[0])
+	}
+}
+
+// syncBuffer is a bytes.Buffer safe for the module's background loops to
+// write while the test reads it.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// Deferred #25: Start runs the erasure finalizer even without an engine (it
+// is the only path that takes fencing rows to done), and Stop ends it. Over
+// an unreachable database every sweep's claim fails and WARNs, so the WARNs
+// count the sweeps.
+func TestModule_FinalizerRunsWithoutEngineAndStopsWithStop(t *testing.T) {
+	m, _, _, logs := initErasure(t, offlineDB(t), &fakeHooks{})
+	if m.eng != nil || m.finalizer == nil {
+		t.Fatalf("want no engine and a finalizer, got eng=%v finalizer=%v", m.eng, m.finalizer)
+	}
+	m.finalizerEvery = 10 * time.Millisecond
+	m.reconcileFirst = time.Hour
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	sweeps := func() int { return len(warnLines(logs.String(), "erasure finalization sweep failed")) }
+	waitFor(t, "two finalizer sweeps", func() bool { return sweeps() >= 2 })
+	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := m.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	n := sweeps()
+	time.Sleep(100 * time.Millisecond)
+	if sweeps() != n {
+		t.Fatal("the finalizer outlived Stop")
+	}
+}
+
+// With a database, the finalizer started by Start claims and finalizes a due
+// row (no engine and no collection recorded: done at once), and claims
+// nothing once Stop has returned.
+func TestModule_FinalizerFinalizesDueRowsUntilStop(t *testing.T) {
+	db := mongoDB(t)
+	m, _, _, _ := initErasure(t, db, &fakeHooks{})
+	m.finalizerEvery = 10 * time.Millisecond
+	m.reconcileFirst = time.Hour
+	store := repository.NewErasureFinalization(db)
+	ctx := context.Background()
+	first, _, err := store.EnsureSubject(ctx, "t1", "crm:1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status := func(id string) string {
+		e, err := store.Get(ctx, id)
+		if err != nil || e == nil {
+			t.Fatalf("Get %s: %v %v", id, e, err)
+		}
+		return e.EffectiveStatus()
+	}
+	waitFor(t, "the finalizer to close the row", func() bool { return status(first.UUID) == models.ErasureStatusDone })
+	stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := m.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	second, _, err := store.EnsureSubject(ctx, "t1", "crm:2", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := status(second.UUID); got != models.ErasureStatusPending {
+		t.Fatalf("a row recorded after Stop is %q, want pending (the finalizer outlived Stop)", got)
 	}
 }
 
