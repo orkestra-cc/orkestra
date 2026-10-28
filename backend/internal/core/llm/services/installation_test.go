@@ -478,3 +478,63 @@ func TestInstallation_NilMetricsDefaultsToNoop(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Greptile 4402768532: a call must end before the reconciler may claim its
+// reservation, even when request_timeout is raised.
+func TestInstallation_CallTimeoutIsBoundedByTheReservationWindow(t *testing.T) {
+	env := defaultInstallationEnv(t)
+	env.svc.cfg = func() RouterConfig { return RouterConfig{RequestTimeout: time.Hour} }
+
+	reservedAt := time.Now()
+	windowEnd := reservationWindowEnd(BudgetConfig{ReservationTTL: 3 * time.Minute}, reservedAt)
+	if want := reservedAt.Add(3*time.Minute - finalizeTimeout); !windowEnd.Equal(want) {
+		t.Fatalf("windowEnd = %v, want %v", windowEnd, want)
+	}
+	d, err := env.svc.callTimeout(time.Now().Add(20 * time.Second))
+	if err != nil || d <= 0 || d > 20*time.Second {
+		t.Fatalf("raised timeout not capped: d = %v err = %v", d, err)
+	}
+	if d, err = env.svc.callTimeout(time.Now().Add(time.Hour * 2)); err != nil || d != time.Hour {
+		t.Fatalf("far window: d = %v err = %v", d, err)
+	}
+	if _, err = env.svc.callTimeout(time.Now().Add(500 * time.Millisecond)); !errors.Is(err, errReservationWindow) || !errors.Is(err, iface.ErrLLMProviderUnavailable) {
+		t.Fatalf("exhausted window err = %v", err)
+	}
+}
+
+func TestInstallation_ReservationWithNoWindowLeftDoesNotCallOrFeedTheBreaker(t *testing.T) {
+	env := defaultInstallationEnv(t)
+	ctx := ctxFor("t1")
+	if _, err := env.g.EmbedWithProfile(ctx, env.embedReq()); err != nil {
+		t.Fatal(err)
+	}
+	calls := len(env.embed.EmbedCalls())
+	env.svc.budget = NewBudgetService(env.store, func() BudgetConfig { return BudgetConfig{ReservationTTL: finalizeTimeout + 100*time.Millisecond} }, slog.Default())
+	for i := range 4 { // more than the breaker threshold
+		if _, err := env.g.EmbedWithProfile(ctx, env.embedReq()); !errors.Is(err, iface.ErrLLMProviderUnavailable) {
+			t.Fatalf("embed %d err = %v", i, err)
+		}
+		if _, err := env.g.Rerank(ctx, env.rerankReq()); !errors.Is(err, iface.ErrLLMProviderUnavailable) {
+			t.Fatalf("rerank %d err = %v", i, err)
+		}
+	}
+	if len(env.embed.EmbedCalls()) != calls || len(env.rerank.RerankCalls()) != 0 {
+		t.Fatal("endpoint was called with no window left")
+	}
+	// every attempt was ledgered as an error and closed, and the breaker is shut
+	failed := 0
+	for _, ev := range env.store.ledger {
+		if ev.Outcome == models.OutcomeError {
+			failed++
+		} else if ev.Outcome == models.OutcomePending {
+			t.Fatalf("row left pending: %+v", ev)
+		}
+	}
+	if failed != 8 {
+		t.Fatalf("error rows = %d, want 8", failed)
+	}
+	env.svc.budget = NewBudgetService(env.store, fixedBudgetCfg, slog.Default())
+	if _, err := env.g.EmbedWithProfile(ctx, env.embedReq()); err != nil {
+		t.Fatalf("breaker opened by window exhaustion: %v", err)
+	}
+}
