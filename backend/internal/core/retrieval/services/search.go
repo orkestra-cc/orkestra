@@ -175,6 +175,18 @@ func (s *Searcher) Search(ctx context.Context, req iface.RetrievalSearchRequest)
 	// Never fewer than the permitted results without a flag (D5).
 	degraded = degraded || short
 
+	// Step 7: optional rerank of the checked candidates.
+	if g.plan.RerankK > 0 && len(cands) > 0 {
+		if ordered, _, ok := s.rerank(ctx, g.tenantID, g.spec, req.Query, cands, g.plan.RerankK); ok {
+			cands = ordered
+		} else {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			degraded = true
+		}
+	}
+
 	// Step 8: result.
 	cands = cands[:min(len(cands), g.plan.Limit)]
 	return &iface.RetrievalSearchResult{Hits: s.toHits(g.spec, req.Query, cands), Degraded: degraded}, nil
@@ -598,6 +610,80 @@ func (s *Searcher) toHits(spec iface.RetrievalCorpusSpec, query string, cands []
 		})
 	}
 	return hits
+}
+
+// rerank is step 7 over the checked survivors in fused order. It sends the
+// text of the first n = min(k, len(survivors)) to the corpus's rerank
+// endpoint and returns survivors with that head reordered, each head
+// candidate carrying the reranker's score (one score scale, plan decision
+// 7), the rest following in fused order. ok=false, after a WARN with the
+// reason, means the fused order and scores stand (plan decision 1); the
+// caller turns that into Degraded, or into ctx.Err() for a cancelled caller.
+// survivors is never modified. Neither the query, a document nor a provider
+// error text is logged or returned.
+func (s *Searcher) rerank(ctx context.Context, tenantID string, spec iface.RetrievalCorpusSpec, query string,
+	survivors []engine.Candidate, k int) (ordered []engine.Candidate, scores []float32, ok bool) {
+	n := min(k, len(survivors))
+	if n < 1 {
+		return survivors, nil, false
+	}
+	endpoint := spec.Rerank.Endpoint
+	skip := func(reason string) ([]engine.Candidate, []float32, bool) {
+		s.d.Logger.Warn("retrieval: search rerank unavailable; keeping the fused order",
+			slog.String("corpus", spec.Name), slog.String("tenant", tenantID),
+			slog.String("endpoint", endpoint), slog.String("reason", reason))
+		return survivors, nil, false
+	}
+	if s.d.Profiles == nil || s.d.Reranker == nil {
+		return skip("inference_not_configured")
+	}
+	p, err := s.d.Profiles.InferenceProfile(ctx, endpoint)
+	if err != nil {
+		return skip(inferenceErrorReason(err))
+	}
+	switch {
+	case p == nil:
+		return skip("profile_unavailable")
+	case p.Kind != iface.InferenceKindRerank:
+		return skip("endpoint_kind")
+	case !localityAllows(spec.Locality, p.Boundary):
+		return skip("locality")
+	}
+	docs := make([]string, n)
+	for i := range docs {
+		docs[i] = survivors[i].Text
+	}
+	res, err := s.d.Reranker.Rerank(ctx, iface.RerankRequest{
+		Caller:     searchCaller,
+		OnBehalfOf: tenantID,
+		Profile:    p.ID,
+		Query:      query,
+		Documents:  docs,
+		TopN:       n,
+	})
+	if err != nil {
+		return skip(inferenceErrorReason(err))
+	}
+	if res == nil || len(res.Results) != n {
+		return skip("bad_result")
+	}
+	seen := make([]bool, n)
+	for _, r := range res.Results {
+		if r.Index < 0 || r.Index >= n || seen[r.Index] {
+			return skip("bad_result")
+		}
+		seen[r.Index] = true
+	}
+	ordered = make([]engine.Candidate, 0, len(survivors))
+	scores = make([]float32, 0, n)
+	for _, r := range res.Results {
+		c := survivors[r.Index]
+		c.Score = r.Score
+		ordered = append(ordered, c)
+		scores = append(scores, r.Score)
+	}
+	ordered = append(ordered, survivors[n:]...)
+	return ordered, scores, true
 }
 
 // FilterSchema returns a copy of the corpus's declared filter fields.

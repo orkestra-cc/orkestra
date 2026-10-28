@@ -167,11 +167,17 @@ type searchReranker struct {
 	reqs []iface.RerankRequest
 	res  *iface.RerankResult
 	err  error
+	// onCall, when set, runs first (for example to cancel ctx).
+	onCall func()
 }
 
 func (r *searchReranker) Rerank(_ context.Context, req iface.RerankRequest) (*iface.RerankResult, error) {
 	r.mu.Lock()
+	hook := r.onCall
 	defer r.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	req.Documents = slices.Clone(req.Documents)
 	r.reqs = append(r.reqs, req)
 	if r.err != nil {
