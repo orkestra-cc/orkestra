@@ -103,7 +103,7 @@ func deleteInBatches(ctx context.Context, coll *mongo.Collection, filter bson.M,
 		}
 		var cur *mongo.Cursor
 		var err error
-		if label == allowDSR {
+		if label == allowDSR { //nolint:gocritic // dupBranchBody: the branches differ only in their //tenantscope:allow label, which the analyzer reads from the line above each call
 			//tenantscope:allow dsr: data-subject search-log erasure; DeleteByUserAllTenants and DeleteBySubject pass the subject's explicit filter (ADR-0023 D12)
 			cur, err = coll.Find(ctx, filter, findOpts)
 		} else {
@@ -125,7 +125,7 @@ func deleteInBatches(ctx context.Context, coll *mongo.Collection, filter bson.M,
 			in[i] = d["_id"]
 		}
 		var res *mongo.DeleteResult
-		if label == allowDSR {
+		if label == allowDSR { //nolint:gocritic // dupBranchBody: the branches differ only in their //tenantscope:allow label, which the analyzer reads from the line above each call
 			//tenantscope:allow dsr: data-subject search-log erasure; deletes only the rows selected above
 			res, err = coll.DeleteMany(ctx, bson.M{"_id": bson.M{"$in": in}})
 		} else {

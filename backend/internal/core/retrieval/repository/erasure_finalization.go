@@ -48,7 +48,7 @@ func (r *ErasureFinalization) ensure(ctx context.Context, key bson.M, extra bson
 	update := bson.M{"$setOnInsert": set}
 	opts := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)
 	var res *mongo.SingleResult
-	if label == allowDSR {
+	if label == allowDSR { //nolint:gocritic // dupBranchBody: the branches differ only in their //tenantscope:allow label, which the analyzer reads from the line above each call
 		//tenantscope:allow dsr: data-subject tombstone upsert keyed by the explicit natural key EnsureUser or EnsureSubject supplies (ADR-0023 D12)
 		res = r.coll.FindOneAndUpdate(ctx, key, update, opts)
 	} else {
