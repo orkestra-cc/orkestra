@@ -27,20 +27,11 @@ func (f *fakeOutboxStore) Enqueue(ctx context.Context, in []iface.RetrievalInten
 	return nil
 }
 
-type fakeCatalog struct{}
-
-func (fakeCatalog) Corpus(name string) (iface.RetrievalCorpusSpec, bool) {
-	return iface.RetrievalCorpusSpec{Name: name}, name == "crm_contacts"
-}
-func (fakeCatalog) Corpora() []iface.RetrievalCorpusSpec {
-	return []iface.RetrievalCorpusSpec{{Name: "crm_contacts"}}
-}
-
 var outboxNow = time.Date(2026, 10, 26, 10, 0, 0, 0, time.UTC)
 
 func newTestOutbox() (*Outbox, *fakeOutboxStore) {
 	st := &fakeOutboxStore{}
-	return NewOutbox(st, fakeCatalog{}, func() time.Time { return outboxNow }), st
+	return NewOutbox(st, &fakeCatalog{specs: []iface.RetrievalCorpusSpec{{Name: "crm_contacts"}}}, func() time.Time { return outboxNow }), st
 }
 
 func okIntent(id string) iface.RetrievalIntent {
