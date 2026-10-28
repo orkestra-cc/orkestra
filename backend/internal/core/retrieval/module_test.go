@@ -669,3 +669,33 @@ func TestModule_NilDatabaseWarnsOnceAndLeavesTheOutboxUnwired(t *testing.T) {
 		})
 	}
 }
+
+// The worker's lifetime is owned by Stop, not by the Start context: the admin
+// enable endpoint hands StartModule a request context that ends with the
+// response.
+func TestModule_WorkerOutlivesTheStartContext(t *testing.T) {
+	m, _, _, _ := initIndexing(t, offlineDB(t), fullGateway{})
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := m.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	m.lifecycleMu.Lock()
+	done := m.done
+	m.lifecycleMu.Unlock()
+	select {
+	case <-done:
+		t.Fatal("the worker stopped with the Start context")
+	case <-time.After(300 * time.Millisecond):
+	}
+	stopCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stop()
+	if err := m.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop = %v", err)
+	}
+	select {
+	case <-done:
+	default:
+		t.Fatal("Stop returned before the worker ended")
+	}
+}

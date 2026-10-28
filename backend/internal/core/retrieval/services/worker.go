@@ -194,7 +194,7 @@ type keyRun struct {
 	g     *corpusGate
 	e     *models.OutboxEntry
 	rep   *PassReport
-	tctx  context.Context // tenant scope: lease guard, Release, Reschedule, Requeue
+	tctx  context.Context // tenant scope: lease guard (bookkeeping derives from it, see bctx)
 	wctx  context.Context // tctx bounded by the write deadline: Load, Embed, engine calls
 	wrote bool            // an engine write was issued
 }
@@ -451,6 +451,18 @@ func (k *keyRun) remove() {
 	}
 }
 
+// bookkeepingTimeout bounds Release, Reschedule and Requeue once the run
+// context is done (Stop), so the key's lease still ends cleanly.
+const bookkeepingTimeout = 5 * time.Second
+
+// bctx is the context of the bookkeeping calls: the tenant scope without the
+// run's cancellation, bounded by bookkeepingTimeout. Stopping the worker
+// mid-key then releases or reschedules the key instead of leaving it leased
+// until expiry.
+func (k *keyRun) bctx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(k.tctx), bookkeepingTimeout)
+}
+
 // guard reports whether the worker still holds the key's lease at the
 // claim's epoch; otherwise the key is re-queued and processing stops.
 func (k *keyRun) guard() bool {
@@ -467,7 +479,9 @@ func (k *keyRun) guard() bool {
 
 // release ends the lease recording applied; a lost lease re-queues the key.
 func (k *keyRun) release(applied *models.AppliedState) bool {
-	err := k.w.Outbox.Release(k.tctx, k.g.Spec.Name, k.e.SourceID, k.e.Epoch, k.w.owner, applied, k.w.Now())
+	ctx, cancel := k.bctx()
+	defer cancel()
+	err := k.w.Outbox.Release(ctx, k.g.Spec.Name, k.e.SourceID, k.e.Epoch, k.w.owner, applied, k.w.Now())
 	switch {
 	case err == nil:
 		return true
@@ -497,7 +511,9 @@ func (k *keyRun) reschedule(code string, err error) {
 		args = append(args, "reason", err.Error()) // names a field key at most (errInvalidItem)
 	}
 	k.w.Logger.Warn("retrieval: index key rescheduled", args...)
-	rerr := k.w.Outbox.Reschedule(k.tctx, k.g.Spec.Name, k.e.SourceID, k.e.Epoch, k.w.owner, attempts, now.Add(delay), code)
+	ctx, cancel := k.bctx()
+	defer cancel()
+	rerr := k.w.Outbox.Reschedule(ctx, k.g.Spec.Name, k.e.SourceID, k.e.Epoch, k.w.owner, attempts, now.Add(delay), code)
 	switch {
 	case rerr == nil:
 		k.rep.Rescheduled++
@@ -515,7 +531,9 @@ func (k *keyRun) reschedule(code string, err error) {
 
 // requeue marks the key dirty without touching its lease.
 func (k *keyRun) requeue() {
-	if err := k.w.Outbox.Requeue(k.tctx, k.g.Spec.Name, k.e.SourceID, k.w.Now()); err != nil {
+	ctx, cancel := k.bctx()
+	defer cancel()
+	if err := k.w.Outbox.Requeue(ctx, k.g.Spec.Name, k.e.SourceID, k.w.Now()); err != nil {
 		k.w.Logger.Warn("retrieval: requeue failed", "corpus", k.g.Spec.Name, "tenant", k.e.TenantID, "source", k.e.SourceID)
 		return
 	}

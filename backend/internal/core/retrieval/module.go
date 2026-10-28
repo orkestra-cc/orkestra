@@ -254,14 +254,20 @@ func (m *Module) Start(ctx context.Context) error {
 			return nil
 		}
 	}
-	runCtx, cancel := context.WithCancel(ctx)
+	// WithoutCancel: the caller's context may be request-scoped (the admin
+	// enable endpoint hands StartModule the HTTP request context), and a
+	// worker that died with that response would silently stop indexing.
+	// Stop owns the worker's lifetime (precedent: auth's maintenance loop).
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	done := make(chan struct{})
 	go func() { defer close(done); worker.Run(runCtx) }()
 	m.cancel, m.done = cancel, done
 	return nil
 }
 
-// Stop cancels the worker and waits for it (or for ctx).
+// Stop cancels the worker and waits for it (or for ctx). A key held at that
+// moment is still released or rescheduled: the worker's bookkeeping calls
+// outlive the cancellation for a few seconds.
 func (m *Module) Stop(ctx context.Context) error {
 	m.lifecycleMu.Lock()
 	cancel, done := m.cancel, m.done

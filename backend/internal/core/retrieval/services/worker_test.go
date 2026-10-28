@@ -707,3 +707,38 @@ func TestWorker_UntrustworthyLoadReplyIsInvalidItem(t *testing.T) {
 		})
 	}
 }
+
+// Stopping the worker mid-key still ends the lease: the bookkeeping calls
+// (Release, Reschedule, Requeue) outlive the run context for a few seconds,
+// so the key does not stay leased until expiry.
+func TestWorker_CancelMidKeyStillEndsTheLease(t *testing.T) {
+	for _, name := range []string{"during embed", "after the writes"} {
+		t.Run(name, func(t *testing.T) {
+			e := newTestWorker(t)
+			e.tenants.ids = nil
+			e.source.put("t1", item(1))
+			e.enqueue(t, 1)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if name == "during embed" {
+				e.emb.setHook(func(iface.PinnedEmbedRequest) { cancel() })
+			} else {
+				e.eng.setBeforeDeleteOthers(cancel)
+			}
+			_, _ = e.w.RunOnce(ctx) // the pass may report the cancellation
+
+			r := e.row()
+			assert.Equal(t, "", r.LeaseOwner)
+			assert.Nil(t, r.LeaseUntil)
+			if name == "during embed" {
+				assert.Equal(t, true, r.Dirty)
+				assert.Equal(t, codeEmbed, r.LastError)
+				assert.Equal(t, 1, r.Attempts)
+			} else {
+				assert.Equal(t, false, r.Dirty)
+				require.NotNil(t, r.Applied)
+				assert.Equal(t, int64(1), r.Applied.Revision)
+			}
+		})
+	}
+}

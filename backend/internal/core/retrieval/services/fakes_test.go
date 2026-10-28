@@ -557,7 +557,7 @@ func (f *fakeErasures) callCount() int {
 }
 
 // fakeOutbox is an in-memory OutboxStore with repository.Outbox's
-// semantics: rows keyed by (tenant from ctx, corpus, source); Enqueue takes
+// semantics (a done context fails the lease calls, as with the driver): rows keyed by (tenant from ctx, corpus, source); Enqueue takes
 // the $max revision; Claim increments the epoch and clears dirty; Release
 // and Reschedule are fenced on epoch and owner (ErrLeaseLost otherwise);
 // Release never touches dirty; Requeue never touches the lease.
@@ -612,6 +612,9 @@ func (f *fakeOutbox) Enqueue(ctx context.Context, intents []iface.RetrievalInten
 }
 
 func (f *fakeOutbox) Requeue(ctx context.Context, corpus, sourceID string, now time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	t, err := ctxTenant(ctx)
 	if err != nil {
 		return err
@@ -666,6 +669,9 @@ func (f *fakeOutbox) DueTenants(_ context.Context, now time.Time, corpora []stri
 }
 
 func (f *fakeOutbox) Claim(ctx context.Context, now time.Time, corpora []string, owner string, lease time.Duration) (*models.OutboxEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	t, err := ctxTenant(ctx)
 	if err != nil {
 		return nil, err
@@ -692,6 +698,9 @@ func (f *fakeOutbox) Claim(ctx context.Context, now time.Time, corpora []string,
 }
 
 func (f *fakeOutbox) HoldsLease(ctx context.Context, corpus, sourceID string, epoch int64, owner string, now time.Time) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	t, err := ctxTenant(ctx)
 	if err != nil {
 		return false, err
@@ -716,6 +725,9 @@ func (f *fakeOutbox) fenced(ctx context.Context, corpus, sourceID string, epoch 
 }
 
 func (f *fakeOutbox) Release(ctx context.Context, corpus, sourceID string, epoch int64, owner string, applied *models.AppliedState, now time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	r, err := f.fenced(ctx, corpus, sourceID, epoch, owner)
@@ -734,6 +746,9 @@ func (f *fakeOutbox) Release(ctx context.Context, corpus, sourceID string, epoch
 }
 
 func (f *fakeOutbox) Reschedule(ctx context.Context, corpus, sourceID string, epoch int64, owner string, attempts int, next time.Time, code string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	r, err := f.fenced(ctx, corpus, sourceID, epoch, owner)
@@ -953,6 +968,9 @@ func (f *fakeEmbedder) EmbedWithProfile(ctx context.Context, req iface.PinnedEmb
 	f.mu.Unlock()
 	if h != nil {
 		h(req)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err // as a gateway call on a done context
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
