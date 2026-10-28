@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
@@ -426,6 +427,14 @@ func TestSearch_ProfileMismatchFallsBackToKeyword(t *testing.T) { // Review Focu
 		}, true},
 		{"two vectors", func(fx *searchFixture) { fx.embedder.vectors = [][]float32{{1, 2, 3, 4}, {1, 2, 3, 4}} }, false},
 		{"empty vector", func(fx *searchFixture) { fx.embedder.vectors = [][]float32{{}} }, false},
+		// A non-finite value is a bad vector too: the arm degrades, the
+		// search does not fail (F4).
+		{"NaN in the vector", func(fx *searchFixture) {
+			fx.embedder.vec = []float32{0.1, float32(math.NaN()), 0.3, 0.4}
+		}, false},
+		{"+Inf in the vector", func(fx *searchFixture) {
+			fx.embedder.vec = []float32{0.1, 0.2, float32(math.Inf(1)), 0.4}
+		}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

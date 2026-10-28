@@ -148,7 +148,7 @@ A token is a maximal run of runes for which `unicode.IsSpace` is false, when tha
 | No engine (`QDRANT_URL` unset) | `ErrRetrievalNotConfigured` |
 | Engine error or state read error | `ErrRetrievalUnavailable` (cause kept in the chain, only its kind logged) |
 | No active generation yet | empty hits, `degraded: true` |
-| Dense arm cannot run (no companions, profile error, kind, profile-ID mismatch, locality, bad vector) | keyword-only, `degraded: true` (decision 4 for locality: the text never reaches the endpoint) |
+| Dense arm cannot run (no companions, profile error, kind, profile-ID mismatch, locality, bad vector: not exactly one, empty, wrong dimensions, or any NaN/Inf value) | keyword-only, `degraded: true` (decision 4 for locality: the text never reaches the endpoint) |
 | Rerank fails or its endpoint breaks locality | fused order and scores, `degraded: true` (decisions 1, 4) |
 | Page still short after the refill and the last engine answer was full | `degraded: true` (decision 3) |
 | Principal resolution error | `principalError`: `ErrRetrievalForbidden` passes through unchanged; anything else (cap, invalid contributor principal, contributor failure, dependency) is `ErrRetrievalUnavailable: principal resolution failed (<kind>)`, keeping only the module's fixed sentinels and `ctx.Err()` in the chain, never the resolver's error; only the kind is logged (decision 6) |

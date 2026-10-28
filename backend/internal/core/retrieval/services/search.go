@@ -666,10 +666,22 @@ func (s *Searcher) denseVector(ctx context.Context, g gated, pinned PinnedGenera
 		return skip(inferenceErrorReason(err))
 	}
 	if res == nil || len(res.Vectors) != 1 || len(res.Vectors[0]) == 0 ||
-		(p.Dimensions > 0 && len(res.Vectors[0]) != p.Dimensions) {
+		(p.Dimensions > 0 && len(res.Vectors[0]) != p.Dimensions) || !finiteVector(res.Vectors[0]) {
+		// A NaN or Inf would fail the engine query and with it the whole
+		// search; like any unusable vector it only drops the dense arm.
 		return skip("bad_vector")
 	}
 	return res.Vectors[0], true, nil
+}
+
+// finiteVector reports whether every value of v is a finite number.
+func finiteVector(v []float32) bool {
+	for _, x := range v {
+		if f := float64(x); math.IsNaN(f) || math.IsInf(f, 0) {
+			return false
+		}
+	}
+	return true
 }
 
 // inferenceErrorReason classifies an inference error for the log without
