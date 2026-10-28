@@ -15,9 +15,10 @@ Delivery step 1 is in progress. This release ships:
 
 - the SDK contract (`iface.Retrieval*`) and `module.ServiceRetrieval`;
 - corpus registration and its validation;
-- the engine contract and the Qdrant driver, with a conformance suite that any driver must pass.
+- the engine contract and the Qdrant driver, with a conformance suite that any driver must pass;
+- [indexing](#indexing): the transactional outbox, the index worker, chunking and the per-corpus state.
 
-It adds **no route, permission, navigation item or configuration setting yet**. Indexing (the outbox and the worker), search, data-subject erasure, the compliance wiring and the admin page arrive in the next releases. Until then a registered corpus is only a declaration, and `iface.RetrievalOutbox`, `iface.RetrievalSearch` and `iface.RetrievalPrincipalResolver` are not yet implemented by the registered service.
+It adds **no route, permission or navigation item**, and three [indexing settings](#configuration). Search, data-subject erasure, the compliance wiring and the admin page arrive in the next releases. Until then indexed data is not queryable, and `iface.RetrievalSearch` and `iface.RetrievalPrincipalResolver` are not yet implemented by the registered service.
 
 ## Degraded mode
 
@@ -61,7 +62,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 }
 ```
 
-Registration is a local, syntax-only check. It never contacts the engine or `llm`; whether the embedding endpoint exists and satisfies the corpus locality is checked when a profile is resolved, in a later release. The rules:
+Registration is a local, syntax-only check. It never contacts the engine or `llm`; whether the embedding endpoint exists and satisfies the corpus locality is checked by the index worker (see [Health](#health)). The rules:
 
 - The corpus name matches `^[a-z][a-z0-9_]{0,31}$` and is unique in the installation; the owner is a module name; the permission has the form `a.b[.c[.d]]` in lowercase; a `Source` is required.
 - At most 32 filter fields. Names match `^[a-z][a-zA-Z0-9_]{0,63}$` and are unique; the type is one of the six listed under [Filters](#filters); the description is 1 to 500 bytes.
@@ -108,9 +109,53 @@ The engine contract (`Engine`, `Point`, `Query`, `Selector`, `Filter`) is intern
 - **Payload layout.** Runtime fields live under `_rt` (including the indexed text), declared filter fields under `f`. A user filter field is always rendered as `f.<name>`, so a caller cannot reach a runtime field.
 - **Names.** Collections are named `<prefix>_<corpus>_g<generation>`; point ids are UUIDv5 over tenant, corpus, source id and ordinal.
 
+## Indexing
+
+Indexing is asynchronous and never blocks the owner's write. An owner declares a corpus (above), then records an **intent** in the same transaction as the write that changes the item:
+
+```go
+outbox, _ := module.GetTyped[iface.RetrievalOutbox](deps.Services, module.ServiceRetrieval)
+
+// inside the transaction that saves the note
+err := outbox.Enqueue(sessCtx, iface.RetrievalIntent{
+	Corpus: "notes", SourceID: note.ID, Revision: note.Revision,
+})
+```
+
+Pass the `mongo.SessionContext` of the transaction so the intent commits or aborts with the source write. A call carries at most 1000 intents; a `SourceID` is 1 to 256 bytes of valid UTF-8 without NUL; `Revision` is zero or more and must grow with every change of the item. The tenant in the context must be internal and the corpus registered. `Enqueue` needs only the database, not Qdrant: while the engine or the embedding endpoint is down, or the owning module is stopped, intents accumulate and are processed later.
+
+The source must answer two calls:
+
+- `Load(tenantID, ids)` returns the current item for each id, or `Deleted` for one that no longer exists. It answers only for the tenant passed. An item has a title (cut to 512 bytes, then prefixed to every chunk), text, declared filter fields, `VisibleTo` (up to 1000 entries) and `Subjects` (up to 100), each entry 1 to 256 bytes. An item that breaks these rules is retried every 30 minutes with the code `invalid_item`.
+- `Enumerate(tenantID, cursor, limit)` pages through the tenant's items by an opaque cursor (empty to start, empty `Next` to end). The first time a corpus is indexed the worker walks it, 200 ids per page, to enqueue every existing item.
+
+### What the worker does
+
+The worker runs inside the base, one pass every `worker_poll_interval`. For each pass it checks every registered corpus (the embedding endpoint exists, is an embedding endpoint and respects the corpus locality), takes up to `worker_batch` due items round-robin across organizations so a busy one cannot starve the others, and for each item:
+
+1. removes it from the index when it is deleted or covered by an erasure record;
+2. loads it, validates it and splits the text into chunks;
+3. if the indexed text is unchanged since the last run, only refreshes the stored filters and principals and skips the embedding;
+4. otherwise embeds the chunks (32 per call, through the `llm` gateway and its budget), writes the points, and removes the points of older revisions.
+
+A worker holds a short lease on each item and checks it before every write, so two replicas never overwrite each other and an item changed during indexing is simply processed again. A failure reschedules the item with a delay of 5 seconds doubling up to 30 minutes; items are never abandoned. Logs and the stored error carry only the corpus, tenant and item id and one of a closed set of codes (`source`, `source_behind`, `invalid_item`, `embed`, `budget`, `engine`, `deadline`, `tombstone`), never the text.
+
+### Chunking
+
+- `none`: one chunk per item, cut at 64,512 bytes if longer.
+- `fixed`: windows of `maxTokens` tokens, consecutive windows sharing `overlap` tokens, at most 512 chunks per item. `maxTokens` is 1 to 4096 in practice: registration accepts up to 8192, but an item of a corpus configured above 4096 is rejected as `invalid_item`, so stay at or below 4096.
+
+Tokens are counted approximately, without a model: a token is a run of non-whitespace characters of at most 32 characters (a longer run counts as consecutive 32-character pieces). One counted token is roughly one word, while the embedding model's own tokenizer produces roughly 1 to 2 tokens per word in English and Italian, so choose `maxTokens` at most half of the endpoint's maximum input; the endpoint's truncation covers any excess (the tail still reaches the keyword search, not the vector).
+
+Each chunk records where it came from as `charStart` and `charEnd`, offsets in **characters** (Unicode code points) of the item text, not bytes.
+
+### Changing the ingestion settings
+
+The index is built for one *ingestion profile*: the embedding model, the analyzer, the chunking and the enrichment. Renaming the embedding endpoint does not change it (the model does); changing the model, the analyzer or the chunking does. When the declaration no longer matches the index, the corpus becomes `profile_changed`: the worker stops writing, intents keep accumulating and the existing index keeps serving. Rebuilding into a new generation arrives in delivery step 2; until then revert the declaration.
+
 ## Configuration
 
-The Qdrant settings are operator environment variables only; there is no `/admin/modules/retrieval` settings page in this release.
+The Qdrant settings are operator environment variables. The three worker settings are module settings (group Indexing) that can also be set from the environment and are re-read on every pass.
 
 | Env var | Default | Meaning |
 |---|---|---|
@@ -118,7 +163,31 @@ The Qdrant settings are operator environment variables only; there is no `/admin
 | `QDRANT_API_KEY` | unset | API key sent to Qdrant. Always set one outside local development |
 | `QDRANT_COLLECTION_PREFIX` | `orkestra` | Prefix of every collection name; `^[a-z][a-z0-9-]{0,31}$`. No underscore: corpus names may contain one, so prefix `a_b` with corpus `c` would share a collection with prefix `a` and corpus `b_c`. An invalid value logs a warning and the default is used |
 
-The index is derived data: the owner's MongoDB collections stay the source of truth, so losing Qdrant loses no data and recovery is a rebuild (later release). The collection `retrieval_corpus_state` is declared but unused until indexing arrives.
+| Setting (env var) | Default | Bounds | Meaning |
+|---|---|---|---|
+| `worker_lease` (`RETRIEVAL_WORKER_LEASE`) | `2m` | 30s to 15m | How long a worker owns one item while indexing it. Embedding and engine calls end a quarter of the lease before it expires |
+| `worker_batch` (`RETRIEVAL_WORKER_BATCH`) | `32` | 1 to 256 | Items indexed per pass, shared round-robin across organizations |
+| `worker_poll_interval` (`RETRIEVAL_WORKER_POLL_INTERVAL`) | `5s` | 1s to 5m | Pause between passes |
+
+Values outside the bounds are clamped. The index is derived data: the owner's MongoDB collections stay the source of truth, so losing Qdrant loses no data and recovery is a rebuild. The collections are `retrieval_outbox` and `retrieval_tenant_progress` (per organization), `retrieval_corpus_state` (one document per corpus for the installation) and `retrieval_erasures`.
+
+## Health
+
+The module health check (`/v1/admin/modules/health`) reports:
+
+| Message | Meaning and action |
+|---|---|
+| (healthy) | No engine configured (designed degraded mode), or engine reachable and every corpus can be written |
+| `retrieval: indexing disabled: <missing>` | Qdrant is configured but the worker could not start because a service it needs is absent (`LLMPinnedEmbedder`, `LLMInferenceProfiles`, `TenantIDLister`, `ModuleStatusReader`) or there is no database. Intents still accumulate. Check that the `llm` and `tenant` modules are loaded |
+| `retrieval: the vector engine is unavailable` | Qdrant did not answer its health check within 2 seconds. Check `QDRANT_URL`, the API key, the network and the Qdrant version (1.20 or later). Driver details are in the DEBUG log |
+| `retrieval: corpus <c>: local_only corpus uses hosted endpoint "<e>"` | The corpus is `local_only` but its embedding endpoint is hosted. Point the corpus at an endpoint whose boundary is local, or have the owner declare `hosted_allowed` if sending the text to a hosted provider is acceptable |
+| `retrieval: corpus <c>: embed endpoint "<e>" is not configured` | The endpoint name does not exist in `llm`. Create it or fix the declaration |
+| `retrieval: corpus <c>: endpoint "<e>" is not an embedding endpoint` | The endpoint exists but is not an embedding endpoint. Use an embedding endpoint |
+| `retrieval: corpus <c>: inference profile unavailable` | `llm` could not resolve the endpoint (or reports no dimensions). Check the endpoint's configuration and reachability |
+| `retrieval: corpus <c>: vector engine unavailable` | Creating the corpus collection failed. Check Qdrant |
+| `retrieval: corpus <c>: ingestion profile changed; indexing paused until a new generation is built` | The corpus declaration changed the model, analyzer or chunking. Revert the declaration; the build of a new generation is delivery step 2. Nothing is lost: intents are kept and the current index keeps serving |
+
+Several problems are joined with `; `. A corpus whose owner module is stopped is skipped without a message; its intents wait.
 
 ## Legacy RAG contract
 

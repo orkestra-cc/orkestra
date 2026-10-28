@@ -7,29 +7,34 @@ _Parent: [../AGENTS.md](../AGENTS.md)_
 
 ## Purpose
 
-Lets modules declare **corpora** (searchable collections of their own data) and, in later steps, indexes them and answers hybrid (dense + BM25) searches with a principal filter, over a vector engine behind a driver boundary ([ADR-0023](../../../../docs/adr/0023-core-retrieval-module.md)). Inference is local by default: a corpus is `local_only` unless its owner declares `hosted_allowed`.
+Lets modules declare **corpora** (searchable collections of their own data), indexes them through a transactional outbox and a worker (PR 4), and, in later steps, answers hybrid (dense + BM25) searches with a principal filter, over a vector engine behind a driver boundary ([ADR-0023](../../../../docs/adr/0023-core-retrieval-module.md)). Inference is local by default: a corpus is `local_only` unless its owner declares `hosted_allowed`.
 
 ## What it owns
 
-This step (PR 3) delivers the registry, the engine contract, the Qdrant driver and the conformance suite. There is no route, permission, nav item or `ConfigSchema` yet.
+PR 3 delivered the registry, the engine contract, the Qdrant driver and the conformance suite; PR 4 adds indexing (outbox, worker, corpus state, chunking). There is still no route, permission or nav item; `ConfigSchema` holds only the three indexing keys.
 
 | File | Purpose |
 |---|---|
 | `module.go` | `Module`: declarations, `Init` (operator env, builds the engine and the service, registers `module.ServiceRetrieval`), `Start` (seals registration), `HealthCheck` |
-| `repository/collections.go` | `CollCorpusState` constant; no repository code yet |
-| `services/` | `Service` (`New(Options{Engine, CollectionPrefix, Logger})`, `Seal`, `Engine()`, `CollectionPrefix()`): the corpus registry and principal-contributor registry; implements `iface.RetrievalCorpusRegistry` |
+| `repository/` | Collection constants and index specs; `Outbox`, `CorpusStates`, `TenantProgress`, `Erasures` repositories |
+| `models/` | Document shapes: `OutboxEntry` (+ `AppliedState`), `CorpusState`, `TenantProgress`, `Erasure` |
+| `chunk/` | `Split`, `Validate`, `CountTokens`: the `none` and `fixed` strategies and the token approximation |
+| `services/` | `Service` (`New(Options{Engine, CollectionPrefix, Logger})`, `Seal`, `Engine()`, `CollectionPrefix()`, `SetOutbox`): the corpus registry and principal-contributor registry; implements `iface.RetrievalCorpusRegistry` and `iface.RetrievalOutbox`. Also `Outbox`, `Worker` (`worker.go`, `worker_pass.go`, `gate.go`), `Tombstones`, `IngestionProfileHash`, item validation (`ingest.go`) |
 | `engine/` | Engine-neutral contract: `Engine`, `Point`, `Query`, `Filter`, `Selector`, `Runtime`, `PointID`, sentinels |
 | `engine/qdrant/` | Qdrant REST driver (`New(Config{URL, APIKey, Timeout, MaxResponseBytes, HTTPClient, Logger})`) |
 | `enginetest/` | Conformance suite `Run(t, newEngine)`: 22 cases (incl. `EmptySourceIDsRefused`, `SourceIDsWithoutTenantRefused`, `UpsertReplacesPayload`, tenant-scoped BM25, principal filter, reserved-namespace isolation); imports `engine` and `iface` |
 | `filter/` | `Validate`s a public `iface.RetrievalFilter` against a corpus's declared fields (imports `iface`). It only validates in this PR: `Compile` into `engine.Filter` arrives in PR 5 |
 
-Later PRs: 4 outbox, indexing worker and corpus state (`retrieval_corpus_state` shape); 5 search path, filter compilation use and principal resolver; 6 compliance wiring (audit sink, DSR); 7 admin page.
+Later PRs: 5 search path, filter compilation use and principal resolver; 6 compliance wiring (audit sink, DSR); 7 admin page.
 
 ## MongoDB collections
 
 | Collection | Scope | Notes |
 |---|---|---|
-| `retrieval_corpus_state` | installation-wide, `_id` = corpus name | Declared only; the document shape and its repository belong to PR 4 |
+| `retrieval_corpus_state` | installation-wide, `_id` = corpus name | One document per corpus: status, active generation, collection, profile hashes. Reads and writes carry `//tenantscope:allow system:` |
+| `retrieval_outbox` | tenant-scoped (`tenantrepo`) | One row per (tenant, corpus, source) key. `DueTenants` is the only cross-tenant sweep (`system:`) |
+| `retrieval_tenant_progress` | tenant-scoped | Resumable initial build per (tenant, corpus, generation): cursor, enqueued count, lease |
+| `retrieval_erasures` | global + tenant | Tombstones (`scope` `global` for user tombstones, `tenant` otherwise). The insert of a global row is `dsr:`; the covering lookup of global rows is `system:` |
 
 ## Dependencies and load order
 
@@ -47,9 +52,64 @@ Later PRs: 4 outbox, indexing worker and corpus state (`retrieval_corpus_state` 
 
 An invalid URL (`qdrant.New` error) logs a WARN and is treated as not configured; the value is never logged, nor is the key. When not configured, `Init` passes an **untyped nil** engine to `services.New` (a typed-nil driver inside the interface would defeat `Service.Engine()`'s `== nil` check).
 
-`Start` calls `Seal()` first (every module's Init has run by then, so a module retried later with `RetryInit` cannot register a corpus), then starts the index worker goroutine; a second `Start` while running is a no-op. `Stop` cancels the worker and waits for it or the context. `Init` builds the outbox (`SetOutbox`, so `Enqueue` works in every mode) and, when an engine is configured and the gateway (`LLMPinnedEmbedder`, `LLMInferenceProfiles`), tenant lister and module status reader resolve, the worker; otherwise the worker is nil and one WARN names what is missing. Config (group `indexing`, read every pass): `worker_lease` (2m, `RETRIEVAL_WORKER_LEASE`), `worker_batch` (32, 1-256, `RETRIEVAL_WORKER_BATCH`), `worker_poll_interval` (5s, `RETRIEVAL_WORKER_POLL_INTERVAL`). Tests inject an engine through the unexported `Module.newEngine`. The one case where the outbox is not wired is a nil `deps.DB` (production always has one; the repository constructors would panic): `Init` still returns nil with a single WARN naming the missing database, there is no worker, and `Enqueue` returns an error.
+`Start` calls `Seal()` first (every module's Init has run by then, so a module retried later with `RetryInit` cannot register a corpus), then starts the index worker goroutine; a second `Start` while running is a no-op. `Stop` cancels the worker and waits for it or the context. `Init` builds the outbox (`SetOutbox`, so `Enqueue` whenever a database handle is present) and, when an engine is configured and the gateway (`LLMPinnedEmbedder`, `LLMInferenceProfiles`), tenant lister and module status reader resolve, the worker; otherwise the worker is nil and one WARN names what is missing. Config (group `indexing`, read every pass): `worker_lease` (2m, `RETRIEVAL_WORKER_LEASE`), `worker_batch` (32, 1-256, `RETRIEVAL_WORKER_BATCH`), `worker_poll_interval` (5s, `RETRIEVAL_WORKER_POLL_INTERVAL`). Tests inject an engine through the unexported `Module.newEngine`. The one case where the outbox is not wired is a nil `deps.DB` (production always has one; the repository constructors would panic): `Init` still returns nil with a single WARN naming the missing database, there is no worker, and `Enqueue` returns an error.
 
 `HealthCheck` (only `/v1/admin/modules/health`; `/ready` does not consult modules): engine nil returns nil (not configured is the designed degraded mode); worker nil returns `retrieval: indexing disabled: <missing>`; otherwise `engine.Health` under a 2s timeout, and any error returns `iface.ErrRetrievalUnavailable` itself, because the handler copies `err.Error()` into the response. The driver error goes to the DEBUG log. A healthy engine then reports `Worker.Problems()` as `retrieval: <problem>; ...`.
+
+## Indexing
+
+### For owners
+
+- Call `RetrievalOutbox.Enqueue(ctx, intents...)` with the `mongo.SessionContext` of the transaction that writes the source, so the intent commits or aborts with it. At most 1000 intents per call; `SourceID` 1-256 bytes, valid UTF-8, no NUL; `Revision >= 0`. The tenant must be internal; the corpus must be registered. Validation failures wrap `iface.ErrRetrievalInvalidIntent` / `ErrRetrievalUnknownCorpus`.
+- `Revision` is monotonic per item (the outbox keeps the highest with `$max`); a `Load` that returns an older revision than enqueued is retried (`source_behind`).
+- `Load(ctx, tenantID, ids)` answers only for the tenant passed and reports an absent id as `Deleted`; the worker also treats a missing entry as deleted. `Enumerate(ctx, tenantID, cursor, limit)` pages by an opaque cursor (`""` starts; `Next == ""` ends) and feeds the initial build.
+- Item bounds: title cut to 512 bytes (rune boundary) and prefixed to every chunk with `\n\n`; `VisibleTo` <= 1000 and `Subjects` <= 100 entries, each 1-256 bytes; fields must be declared, keyword <= 1024 bytes, keyword[] <= 100 elements. A violation is `invalid_item`.
+
+### Per-key protocol
+
+`Claim` sets `dirty=false` and `epoch += 1` and takes the lease (owner, `leaseUntil`). Every write is preceded by `HoldsLease(epoch, owner)`; `Release` and `Reschedule` are fenced on the same pair and leave `dirty` untouched, so an intent enqueued during the lease survives. A lost lease at a guard re-queues the key (`Requeue`, no release); a `Reschedule` that finds the lease lost does nothing unless the run already wrote to the engine, in which case the key is re-queued. The write deadline is `leaseUntil - lease/4`: Load, Embed and engine calls use a context with that deadline. `services.IndexingFencingWindow` (`2 x MaxWorkerLease` = 30m) is how long a stale worker can still write after losing its lease; PR 6 erasure waits it out.
+
+Processing order of `process` (`worker.go`):
+
+1. Item tombstone covers the key: remove. 2. `Load`: error `source`; absent or deleted: remove; older revision than enqueued: `source_behind`. 3. Subject tombstone against the item's subjects: remove. 4. `normalizeFields`, `validateItem`: `invalid_item`. 5. `chunk.Split` and build points (no points: remove; text cut by the chunk bounds logs a WARN). 6. If `Applied` has the same generation, profile hash, indexed hash and chunk count (revision ignored): `UpdatePayload`, `DeleteOtherRevisions`, then `Count`; a count equal to the points released as payload-only, otherwise fall through. 7. Embed in batches of 32 (`budget` when the tenant budget is exhausted, else `embed`; a wrong vector count or length is `embed`). 8. `Upsert`, `DeleteOtherRevisions`, `Release` with the new `Applied`.
+
+Backoff `5s * 2^(attempts-1)`, capped at 30m; `invalid_item` always waits 30m; keys are never abandoned. `lastError` and the logs carry only these closed codes: `source`, `source_behind`, `invalid_item`, `embed`, `budget`, `engine`, `deadline` (any error that is a `context.DeadlineExceeded`), `tombstone`. Logs name corpus, tenant, source ID, counts and codes, never text, field values, principals or subjects.
+
+### Passes and the initial build
+
+A pass (`RunOnce`) prepares every corpus (the gate below), claims keys round-robin across at most 64 due tenants until `worker_batch` keys are claimed, then advances initial builds. The build loads at most one `Enumerate` page (200 ids) per (corpus, tenant) per pass and at most 16 pages per pass overall; it only enqueues intents, the index pass writes. Passes repeat every `worker_poll_interval`; settings are re-read on every pass and clamped.
+
+### Gate (`prepareCorpus`)
+
+Checks run in this order; the problem text is what `HealthCheck` reports (`%s` corpus, `%q` endpoint).
+
+| Condition | State write | Result | Problem |
+|---|---|---|---|
+| Owner module not started | none | skip | none (expected while disabled; intents are kept) |
+| Endpoint unknown (`ErrLLMNotConfigured`) | error / `endpoint_unknown` | skip | `corpus %s: embed endpoint %q is not configured` |
+| Other profile error, or dimensions <= 0 | none | skip | `corpus %s: inference profile unavailable` |
+| Endpoint is not an embedding endpoint | error / `endpoint_kind` | skip | `corpus %s: endpoint %q is not an embedding endpoint` |
+| `local_only` corpus (or `""`) and endpoint boundary not local | error / `locality` | skip | `corpus %s: local_only corpus uses hosted endpoint %q` |
+| No state or no active generation | `EnsureCollection`, then `active`, generation 1, collection `<prefix>_<corpus>_g1` | gate | engine error: `corpus %s: vector engine unavailable` |
+| State hash differs from the declared hash | `profile_changed` with `DeclaredProfileHash` (written once) | skip | `corpus %s: ingestion profile changed; indexing paused until a new generation is built` |
+| Not active, hash equal | back to `active`, reason cleared | gate | none |
+| Active, hash equal | none | gate | none |
+
+`profile_changed`: intents are kept, nothing is claimed, the active generation keeps serving, and delivery step 2 (generation build) builds the new generation and drains the intents. Reverting the declaration clears it. `ErrStateExists` / `ErrStateConflict` (another replica moved the state) skip the pass silently.
+
+### Ingestion profile hash
+
+`IngestionProfileHash` = `"ing_"` + hex SHA-256 of the JSON of a private struct `{v, embeddingProfile, analyzer{tokenizer, language, stemming, stopWords}, chunking{strategy, maxTokens, overlap}, enrichment{chatEndpoint, promptVersion}|null}` (tags independent of `iface`). `v` (now 1) is bumped when the code's transformation changes (title prefix, tokenization). Normalization: tokenizer `""` becomes `word`; strategy `""` becomes `none`; `none` zeroes `maxTokens` and `overlap`. `EmbedEndpoint` (the endpoint **name**) is excluded: the resolved profile ID identifies the model, and renaming an endpoint must not start a new generation.
+
+### Chunking and the token approximation
+
+A token is a maximal run of runes for which `unicode.IsSpace` is false, when that run has at most 32 runes; a longer run counts as consecutive 32-rune pieces (the last may be shorter). Whitespace is never a token. One counted token approximates one word; subword tokenizers (bge-m3's XLM-R) produce roughly 1-2 model tokens per word in English and Italian, so a window of `MaxTokens` counted tokens may exceed `MaxTokens` model tokens. Operators choose `MaxTokens <= MaxInputTokens/2` of the embedding profile; the profile's `Truncate` covers any excess (the tail of an over-long window still reaches BM25, not the vector). A chunk's text runs from its first token's first rune to its last token's last rune.
+
+`none`: one chunk, cut at `MaxChunkBytes` (64512). `fixed`: windows of `MaxTokens` with `Overlap`, at most `MaxChunksPerItem` (512), each also bounded by `MaxChunkBytes`. `chunk.Validate` accepts `MaxTokens` 1-4096, whereas registration accepts up to 8192: a larger value passes registration and every item then fails as `invalid_item`. Provenance offsets `CharStart`/`CharEnd` are rune offsets in the item text.
+
+### Engine additions and config
+
+`Engine.UpdatePayload` replaces `Runtime` and `Fields` of existing points (vector and text kept) only when the stored content hash matches and the stored revision is not higher; it never creates a point and sends every `_rt` field, `page` included. Config group `indexing`: `worker_lease` (2m, clamp 30s-15m, `RETRIEVAL_WORKER_LEASE`), `worker_batch` (32, 1-256, `RETRIEVAL_WORKER_BATCH`), `worker_poll_interval` (5s, clamp 1s-5m, `RETRIEVAL_WORKER_POLL_INTERVAL`). `HealthCheck` strings: `retrieval: indexing disabled: <missing>`, `retrieval: the vector engine is unavailable` (the bare `iface.ErrRetrievalUnavailable`), `retrieval: <problem>; <problem>`.
 
 ## Corpus registration rules
 
@@ -83,7 +143,7 @@ An invalid URL (`qdrant.New` error) logs a WARN and is treated as not configured
 
 ## Invariants
 
-- No route, permission, Cedar policy, errcode, nav item or `ConfigSchema` field in this step; the Qdrant settings are operator environment only (ADR D4/D9).
+- No route, permission, Cedar policy, errcode or nav item; the Qdrant settings are operator environment only (ADR D4/D9). `ConfigSchema` has only the three indexing keys.
 - `Init` never contacts Qdrant or an inference endpoint, and never returns an error.
 - Logs and errors never carry the API key or the Qdrant URL.
 - No bypass of the principal filter for any platform role (ADR D10).

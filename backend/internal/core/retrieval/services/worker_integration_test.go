@@ -119,6 +119,7 @@ func (e *integrationEnv) enqueueRev(t *testing.T, rev int64) {
 func (e *integrationEnv) outboxRow(t *testing.T) models.OutboxEntry {
 	t.Helper()
 	var r models.OutboxEntry
+	//tenantscope:allow system: test assertion reads a row directly
 	err := e.db.Collection(repository.CollOutbox).FindOne(context.Background(),
 		bson.M{"tenantId": "t1", "corpus": testCorpus, "sourceId": "c1"}).Decode(&r)
 	require.NoError(t, err)

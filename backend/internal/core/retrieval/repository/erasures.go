@@ -99,7 +99,7 @@ func (r *Erasures) Insert(ctx context.Context, e *models.Erasure) error {
 // tenant tombstones of ctx's tenant (kind tenant; item for corpus + sourceIDs;
 // subject in subjects).
 func (r *Erasures) Covering(ctx context.Context, corpus string, sourceIDs, subjects []string) ([]models.Erasure, error) {
-	var out []models.Erasure
+	var out []models.Erasure //nolint:prealloc // filled by Cursor.All; the size is unknown
 	var users []string
 	for _, s := range subjects {
 		if strings.HasPrefix(s, userSubjectPrefix) {

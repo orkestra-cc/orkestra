@@ -538,6 +538,7 @@ func TestModule_RegisteredServiceIsARetrievalOutbox(t *testing.T) {
 	if err := ob.Enqueue(ctx, iface.RetrievalIntent{Corpus: "contacts", SourceID: "c1", Revision: 1}); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
+	//tenantscope:allow system: test assertion counts rows directly
 	n, err := db.Collection(repository.CollOutbox).CountDocuments(context.Background(), bson.M{"tenantId": "t1", "sourceId": "c1"})
 	if err != nil || n != 1 {
 		t.Fatalf("outbox rows = %d, err %v", n, err)
