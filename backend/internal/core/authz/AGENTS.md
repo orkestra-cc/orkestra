@@ -121,11 +121,14 @@ RegisterPermissions(ctx, specs []PermissionSpec) error
 
 The service **additionally** satisfies `iface.AuthzCacheInvalidator` (`InvalidateUserPermissions(ctx, userUUID) error`), resolved with `module.GetTyped[iface.AuthzCacheInvalidator]` against `ServiceAuthzProvider`. It is a separate interface rather than a third method on `AuthzProvider` because `AuthzProvider` is additive-only for forks that implement it. Its only in-tree consumer is the **user** module, after a system-role change.
 
+It also satisfies `iface.AuthzRoleLister` (`ActiveRoleIDs(ctx, userUUID, tenantID) ([]string, error)`, `services/role_lister.go`), resolved the same way and for the same reason (a new narrow interface, no method added to `AuthzProvider`). It returns the sorted, deduplicated UUIDs of the active roles bound to the user in that tenant through non-expired bindings. A role counts when it is a system role (`tenantId ""`) or belongs to the tenant; a role of another tenant, an inactive role and a dangling binding are skipped. Tenant `""` is refused with `ErrRoleListTenantRequired`, and a repository error while reading a role fails the call instead of skipping the role, because a missing role principal would hide records without a flag. No cache, no platform-role bypass: `super_admin` resolves like anyone else.
+
 Consumers:
 - **`shared/middleware/auth.go`** — `RequirePermission`, `RequireSystemPermission` call `HasPermission` on every request; the result is compared against the route's required permission.
 - **The authz module itself** — calls `RegisterPermissions` from the registry post-init hook.
 - **Lazy heal** — `ensureSeeded` also calls `RegisterPermissions` + the internal `SeedSystemRoles` when the catalog is empty at query time.
 - **The user module** — calls `InvalidateUserPermissions` when `PUT /v1/users/{id}` changes a user's system role, so the next decision uses the new role.
+- **The retrieval module** — calls `ActiveRoleIDs` to compute `role:<id>` principals (ADR-0023 D10).
 
 ## System and org roles
 

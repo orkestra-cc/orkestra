@@ -111,7 +111,7 @@ Constants live in `backend/pkg/sdk/module/services.go:13-32`. This is the table 
 | `ServiceOAuthStateService` | auth | `*services.OAuthStateService` | |
 | `ServiceOAuthProviderRepo` | auth | `*repository.OAuthProviderRepository` | |
 | `ServiceLogLevelModuleNames` | main.go (pre-`InitAll`) | `[]string` | catalog of registered module names; consumed by `logging` to render the admin view's per-module rows |
-| `ServiceRetrieval` | retrieval | `*services.Service` (satisfies `iface.RetrievalCorpusRegistry`; later also `RetrievalOutbox`, `RetrievalSearch`, `RetrievalPrincipalResolver`) | corpus registration during consumers' Init; closed when retrieval starts |
+| `ServiceRetrieval` | retrieval | `*services.Service` (satisfies `iface.RetrievalCorpusRegistry`, `RetrievalOutbox`, `RetrievalSearch`, `RetrievalPrincipalResolver`) | corpus registration during consumers' Init; closed when retrieval starts |
 | `ServiceLLMGateway` | llm | `*services.Gateway` (satisfies `iface.LLMGateway`, `iface.KMSProviderSetter`, `iface.AuditSinkSetter`) | consumed by addons; compliance pushes KMS + audit sink into it after its own Init |
 | `ServiceLogLevelResolver` | logging | `*services.LogLevelService` (satisfies `utils.LevelResolver`) | DB-backed `LevelResolver`; main.go hot-swaps it onto `PerModuleLevelHandler` via `utils.SwapLevelResolver` after `InitAll` (ADR-0005 Phase F) |
 

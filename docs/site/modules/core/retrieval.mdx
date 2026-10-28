@@ -16,9 +16,10 @@ Delivery step 1 is in progress. This release ships:
 - the SDK contract (`iface.Retrieval*`) and `module.ServiceRetrieval`;
 - corpus registration and its validation;
 - the engine contract and the Qdrant driver, with a conformance suite that any driver must pass;
-- [indexing](#indexing): the transactional outbox, the index worker, chunking and the per-corpus state.
+- [indexing](#indexing): the transactional outbox, the index worker, chunking and the per-corpus state;
+- [search](#searching-a-corpus): `iface.RetrievalSearch` and `iface.RetrievalPrincipalResolver` on the registered service, the search log and its retention.
 
-It adds **no route, permission or navigation item**, and three [indexing settings](#configuration). Search, data-subject erasure, the compliance wiring and the admin page arrive in the next releases. Until then indexed data is not queryable, and `iface.RetrievalSearch` and `iface.RetrievalPrincipalResolver` are not yet implemented by the registered service.
+It adds **no route, permission or navigation item**: search has no generic HTTP route, a module calls it in process. It adds five [settings](#configuration), three for indexing and two for search. Data-subject erasure (`DeleteBySubject`), the compliance wiring and the admin page arrive in the next releases; until then `DeleteBySubject` returns an error wrapping `errors.ErrUnsupported`.
 
 ## Degraded mode
 
@@ -32,7 +33,7 @@ It adds **no route, permission or navigation item**, and three [indexing setting
 | Qdrant configured but unreachable | Registration still works. The module health check (`/v1/admin/modules/health`) reports the error `retrieval: the vector engine is unavailable`; `/ready` does not consult modules |
 | Qdrant older than 1.20 | The driver refuses it in its health check |
 
-Search will answer `ErrRetrievalNotConfigured` when no engine is configured and `ErrRetrievalUnavailable` when it is configured but down; search itself arrives in a later release.
+Search answers `ErrRetrievalNotConfigured` when no engine is configured and `ErrRetrievalUnavailable` when it is configured but down. When a service search needs is missing at boot (authorization, membership, module status, or the `llm` inference companions), `Init` logs one warning naming them: without the first three every search fails closed, without the inference companions searches answer keyword-only and are marked degraded.
 
 ## Declaring a corpus
 
@@ -94,9 +95,18 @@ A filter node is either a group (`and`, `or`, `not`) or a comparison of one fiel
 | `lt`, `lte`, `gt`, `gte` | Range | `value`, numbers and datetimes |
 | `exists` | The field is present | none |
 
-Not every op applies to every type: `keyword` and `keyword[]` take `eq`, `in` and `exists`; `integer` takes all seven; `float` and `datetime` take the four range ops and `exists`; `bool` takes `eq` and `exists`. Values must match the field type (datetimes as RFC 3339), strings are 1 to 1024 bytes, and `in` needs 1 to 100 values.
+Not every op applies to every type:
 
-A filter is at most 4 levels deep, has at most 64 nodes and carries at most 100 values per `in`. This release validates a filter against a corpus's declared fields (a violation wraps `iface.ErrRetrievalInvalidFilter` and names the node path); compiling it into the engine form and applying it in search belong to later releases.
+| Type | Ops |
+|---|---|
+| `keyword`, `keyword[]` | `eq`, `in`, `exists` |
+| `integer` | `eq`, `in`, `lt`, `lte`, `gt`, `gte`, `exists` |
+| `float`, `datetime` | `lt`, `lte`, `gt`, `gte`, `exists` |
+| `bool` | `eq`, `exists` |
+
+Values must match the field type (datetimes as RFC 3339), strings are 1 to 1024 bytes, and `in` needs 1 to 100 values. An `integer` range bound (`lt`, `lte`, `gt`, `gte`) must lie within ±2^53 (9007199254740992), the range the engine compares exactly; `eq` and `in` take any 64-bit integer. `exists` takes no value; write absence as `not` around `exists`.
+
+A filter is at most 4 levels deep, has at most 64 nodes and carries at most 100 values per `in`. Search validates a filter against the corpus's declared fields (a violation wraps `iface.ErrRetrievalInvalidFilter` and names the node path), then compiles it into the engine form, where a field is always addressed as a declared filter field. The search log keeps the filter as its JSON text, so a filter that has no JSON form (for example a `json.Number` the encoder rejects) is refused with `iface.ErrRetrievalInvalidFilter` too.
 
 ## Engine driver
 
@@ -155,9 +165,60 @@ Each chunk records where it came from as `charStart` and `charEnd`, offsets in *
 
 The index is built for one *ingestion profile*: the embedding model, the analyzer, the chunking and the enrichment. Renaming the embedding endpoint does not change it (the model does); changing the model, the analyzer or the chunking does. When the declaration no longer matches the index, the corpus becomes `profile_changed`: the worker stops writing, intents keep accumulating and the existing index keeps serving. Rebuilding into a new generation arrives in delivery step 2; until then revert the declaration.
 
+## Searching a corpus
+
+A module that searches declares `retrieval` as a dependency, resolves the search interface once and calls it with the **caller's** context: the user and the internal organization in that context decide what comes back.
+
+```go
+func (m *Module) Init(deps *module.Dependencies) error {
+	search, ok := module.GetTyped[iface.RetrievalSearch](deps.Services, module.ServiceRetrieval)
+	if !ok {
+		return errors.New("notes: retrieval service not registered")
+	}
+	m.search = search
+	return nil
+}
+
+func (m *Module) find(ctx context.Context, text string) (*iface.RetrievalSearchResult, error) {
+	res, err := m.search.Search(ctx, iface.RetrievalSearchRequest{
+		Corpus: "notes",
+		Query:  text,
+		Filter: &iface.RetrievalFilter{Field: "status", Op: iface.RetrievalOpEq, Value: "published"},
+		Limit:  10,
+	})
+	if errors.Is(err, iface.ErrRetrievalNotConfigured) {
+		return nil, err // no vector engine on this installation
+	}
+	return res, err
+}
+```
+
+**Never search inside a transaction.** Do not pass the `mongo.SessionContext` of a transaction (unlike `Enqueue`, which needs it): a successful search writes its search-log row with the context it was given, so that row would join your transaction, roll back with it, and leave a served result nobody can account for. Call `Search` before the transaction starts or after it commits, with the request context.
+
+**Request bounds.** `Query` is 1 to 2000 characters and not blank. `Limit` is 1 to 100 (0 means 10). `Mode` is `hybrid` (the default), `dense` or `keyword`. `Fusion` optionally overrides the corpus's weights (each in (0, 10]) and candidates per arm (1 to 500) for this request. `Filter` follows [Filters](#filters). A request outside these bounds fails with `iface.ErrRetrievalInvalidRequest`.
+
+**Who may search.** The organization in the context must be internal, the caller must hold the corpus's permission in it, and the corpus's owning module must be running. The caller's **principals** are resolved on every search: the user, the organization when the user is a member of it, the user's active roles in that organization, and whatever the registered principal contributors add (at most `principal_cap`). A result is returned only when one of its principals is among the item's `VisibleTo`. **Platform administrators get no bypass**: a `super_admin` resolves principals exactly like any other user and sees only what those principals allow.
+
+**Before a result is returned**, every candidate is checked against the erasure records and against the owning module's `Visible` answer, at the indexed revision, within 2 seconds; a check that fails or times out fails the search with `iface.ErrRetrievalVisibilityCheck` rather than returning unchecked data.
+
+**Results.** Each hit carries the source and chunk ids, its rank, a score (the reranker's when the corpus reranks, the fused score otherwise), a snippet of at most 300 characters around the query, its provenance (ordinal, page, character offsets) and the corpus locality.
+
+**`degraded: true`** means the result may be below the corpus's usual quality or completeness, never that it contains anything the caller may not see:
+
+- the dense arm could not run (inference down, the embedding endpoint changed model since the index was built, or it would send the text outside the corpus locality), so the search answered keyword-only;
+- the reranker failed or would break locality, so the fused order stands;
+- the checks dropped results and more permitted ones may exist;
+- the corpus has no index yet (empty hits).
+
+**Errors.** `ErrRetrievalForbidden` (external organization, no permission, no identity), `ErrRetrievalUnknownCorpus`, `ErrRetrievalInvalidRequest`, `ErrRetrievalInvalidFilter`, `ErrRetrievalCorpusUnavailable` (owner module stopped), `ErrRetrievalNotConfigured`, `ErrRetrievalUnavailable` (engine down, principals could not be resolved, the search log could not be written) and `ErrRetrievalVisibilityCheck`. Treat their text as internal: do not show it to end users.
+
+**Every search is logged.** Each search that passes the access checks writes one row to `retrieval_search_log`: who searched, the query and the filter (as its JSON text, with datetimes in RFC 3339), the principals used, which sources came back and which people (subjects) they named, the outcome and timings. A result is returned only after its row is written; if the row cannot be written, the search fails with `ErrRetrievalUnavailable`. Searches refused at the access checks are not logged. Rows are deleted after `search_log_retention_days`. Query text, principals and subjects never go to the application logs.
+
+`iface.RetrievalPrincipalResolver` (same registered service) returns the caller's principal set, for an owner that wants to check visibility the same way. It fails like search does: `ErrRetrievalForbidden` without an identity, `ErrRetrievalUnavailable` when the principals cannot be resolved (a contributor's own error text is never returned). `iface.RetrievalSearch.FilterSchema(corpus)` returns the corpus's declared filter fields.
+
 ## Configuration
 
-The Qdrant settings are operator environment variables. The three worker settings are module settings (group Indexing) that can also be set from the environment and are re-read on every pass, so changing them takes effect without a restart (the admin settings page shows no restart-required notice).
+The Qdrant settings are operator environment variables. The three worker settings (group Indexing) and the two search settings (group Search & audit) are module settings that can also be set from the environment; the worker settings are re-read on every pass and the search settings on every use, so changing them takes effect without a restart (the admin settings page shows no restart-required notice).
 
 | Env var | Default | Meaning |
 |---|---|---|
@@ -170,8 +231,10 @@ The Qdrant settings are operator environment variables. The three worker setting
 | `worker_lease` (`RETRIEVAL_WORKER_LEASE`) | `2m` | 30s to 15m | How long a worker owns one item while indexing it. Embedding and engine calls end a quarter of the lease before it expires |
 | `worker_batch` (`RETRIEVAL_WORKER_BATCH`) | `32` | 1 to 256 | Items indexed per pass, shared round-robin across organizations. Zero or a negative value means the default 32 |
 | `worker_poll_interval` (`RETRIEVAL_WORKER_POLL_INTERVAL`) | `5s` | 1s to 5m | Pause between passes |
+| `principal_cap` (`RETRIEVAL_PRINCIPAL_CAP`) | `256` | 16 to 4096 | Maximum number of principals (user, organization, roles, contributors) a search may carry. A caller above it gets no results (`ErrRetrievalUnavailable`) until the cap is raised: it fails closed rather than dropping principals |
+| `search_log_retention_days` (`RETRIEVAL_SEARCH_LOG_RETENTION_DAYS`) | `90` | 1 to 3650 | Search-log rows older than this are deleted daily (first run a minute after start, then every 24 hours). The log records who searched for what and which people the results named (ADR-0023 D12) |
 
-Values outside the bounds are clamped to the nearest bound, except a `worker_batch` of zero or less, which falls back to 32. The index is derived data: the owner's MongoDB collections stay the source of truth, so losing Qdrant loses no data and recovery is a rebuild. The collections are `retrieval_outbox` and `retrieval_tenant_progress` (per organization), `retrieval_corpus_state` (one document per corpus for the installation) and `retrieval_erasures`.
+Values outside the bounds are clamped to the nearest bound, except a `worker_batch`, `principal_cap` or `search_log_retention_days` of zero or less, which falls back to the default. The index is derived data: the owner's MongoDB collections stay the source of truth, so losing Qdrant loses no data and recovery is a rebuild. The collections are `retrieval_outbox`, `retrieval_tenant_progress` and `retrieval_search_log` (per organization), `retrieval_corpus_state` (one document per corpus for the installation) and `retrieval_erasures`.
 
 ## Health
 
@@ -190,6 +253,8 @@ The module health check (`/v1/admin/modules/health`) reports:
 | `retrieval: corpus <c>: ingestion profile changed; indexing paused until a new generation is built` | The corpus declaration changed the model, analyzer or chunking. Revert the declaration; the build of a new generation is delivery step 2. Nothing is lost: intents are kept and the current index keeps serving |
 
 Several problems are joined with `; `. A corpus whose owner module is stopped is skipped without a message; its intents wait.
+
+The health check does not cover search: a service search needs that is missing at boot is reported once by the `Init` warning (see [Degraded mode](#degraded-mode)), and a failed search-log purge is logged as a warning and retried the next day.
 
 ## Legacy RAG contract
 

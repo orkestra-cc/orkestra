@@ -54,9 +54,12 @@ type integrationEnv struct {
 
 func (e *integrationEnv) newPausingWorker() *Worker { return NewWorker(e.deps) }
 
-// newIntegrationEnv skips unless MONGO_TEST_URI, QDRANT_TEST_URL and
-// QDRANT_TEST_API_KEY are all set. A skip proves nothing about these paths.
-func newIntegrationEnv(t *testing.T) *integrationEnv {
+// integrationStores skips unless MONGO_TEST_URI, QDRANT_TEST_URL and
+// QDRANT_TEST_API_KEY are all set (a skip proves nothing about these paths),
+// then connects to MongoDB (pinged, so an unreachable server fails clearly)
+// and builds the Qdrant driver. The database is retrieval_<dbPrefix>_<ns> and
+// the collection prefix <collPrefix><ns>. Cleanup drops the database.
+func integrationStores(t *testing.T, dbPrefix, collPrefix string) (db *mongo.Database, drv *qdrant.Driver, prefix string) {
 	t.Helper()
 	var vals [3]string
 	for i, name := range []string{"MONGO_TEST_URI", "QDRANT_TEST_URL", "QDRANT_TEST_API_KEY"} {
@@ -68,25 +71,42 @@ func newIntegrationEnv(t *testing.T) *integrationEnv {
 	defer cancel()
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(vals[0]))
 	require.NoError(t, err)
+	require.NoError(t, client.Ping(ctx, nil))
 	stamp := time.Now().UnixNano()
-	db := client.Database(fmt.Sprintf("retrieval_it_%d", stamp))
-	prefix := fmt.Sprintf("it%d", stamp)
-	drv, err := qdrant.New(qdrant.Config{URL: vals[1], APIKey: vals[2]})
+	db = client.Database(fmt.Sprintf("retrieval_%s_%d", dbPrefix, stamp))
+	prefix = fmt.Sprintf("%s%d", collPrefix, stamp)
+	drv, err = qdrant.New(qdrant.Config{URL: vals[1], APIKey: vals[2]})
 	require.NoError(t, err)
-	e := &integrationEnv{workerEnv: newTestWorker(t), db: db, eng: drv, coll: engine.CollectionName(prefix, testCorpus, 1)}
 	t.Cleanup(func() {
-		_ = drv.DropCollection(context.Background(), e.coll)
-		_ = db.Drop(context.Background())
-		_ = client.Disconnect(context.Background())
+		cctx, ccancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer ccancel()
+		if err := db.Drop(cctx); err != nil {
+			t.Logf("cleanup: drop database: %v", err)
+		}
+		if err := client.Disconnect(cctx); err != nil {
+			t.Logf("cleanup: disconnect: %v", err)
+		}
 	})
+	return db, drv, prefix
+}
 
-	for coll, specs := range map[string][]module.IndexSpec{
-		repository.CollOutbox:         repository.OutboxIndexes(),
-		repository.CollTenantProgress: repository.TenantProgressIndexes(),
-		repository.CollErasures:       repository.ErasureIndexes(),
-	} {
+// dropCollection is the cleanup of a test collection; it runs before the
+// database drop (cleanups run last-in first-out).
+func dropCollection(t *testing.T, drv engine.Engine, name string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := drv.DropCollection(ctx, name); err != nil {
+		t.Logf("cleanup: drop collection %s: %v", name, err)
+	}
+}
+
+// ensureIndexes creates the declared indexes of each collection.
+func ensureIndexes(t *testing.T, db *mongo.Database, specs map[string][]module.IndexSpec) {
+	t.Helper()
+	for coll, list := range specs {
 		var ms []mongo.IndexModel
-		for _, s := range specs {
+		for _, s := range list {
 			var keys bson.D
 			for _, k := range s.OrderedKeys {
 				keys = append(keys, bson.E{Key: k.Field, Value: k.Direction})
@@ -96,6 +116,20 @@ func newIntegrationEnv(t *testing.T) *integrationEnv {
 		_, err := db.Collection(coll).Indexes().CreateMany(context.Background(), ms)
 		require.NoError(t, err)
 	}
+}
+
+// newIntegrationEnv builds the worker integration env (see integrationStores).
+func newIntegrationEnv(t *testing.T) *integrationEnv {
+	t.Helper()
+	db, drv, prefix := integrationStores(t, "it", "it")
+	e := &integrationEnv{workerEnv: newTestWorker(t), db: db, eng: drv, coll: engine.CollectionName(prefix, testCorpus, 1)}
+	t.Cleanup(func() { dropCollection(t, drv, e.coll) })
+
+	ensureIndexes(t, db, map[string][]module.IndexSpec{
+		repository.CollOutbox:         repository.OutboxIndexes(),
+		repository.CollTenantProgress: repository.TenantProgressIndexes(),
+		repository.CollErasures:       repository.ErasureIndexes(),
+	})
 
 	e.erasure = repository.NewErasures(db)
 	e.pausing = &pausingEngine{Engine: drv}
