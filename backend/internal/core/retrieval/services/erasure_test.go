@@ -276,3 +276,22 @@ func TestService_DeleteBySubjectDelegates(t *testing.T) {
 	assert.Len(t, env.tombstones(models.ErasureKindSubject), 1)
 	assert.Len(t, sink.byAction(AuditErasureRecorded), 1)
 }
+
+func TestService_AuditSinkSurvivesSetterOrder(t *testing.T) {
+	for _, sinkFirst := range []bool{true, false} {
+		env := newErasureEnv(t, nil, nil)
+		svc := New(Options{})
+		relay := NewAuditRelay() // the relay the ErasureService emits through
+		svc.SetErasure(NewErasureService(env.store, env.fin, func(o string) bool { return o == "crm" }, nil, relay, env.clk.Now, nil))
+		sink := &recordingSink{}
+		if sinkFirst {
+			svc.SetAuditSink(sink)
+			svc.SetAuditRelay(relay)
+		} else {
+			svc.SetAuditRelay(relay)
+			svc.SetAuditSink(sink)
+		}
+		require.NoError(t, svc.DeleteBySubject(context.Background(), "tA", "crm:42"))
+		assert.Equal(t, 1, len(sink.byAction(AuditErasureRecorded)))
+	}
+}

@@ -38,6 +38,7 @@ type Service struct {
 	principals   *PrincipalResolver
 	erasure      *ErasureService
 	audit        *AuditRelay
+	sink         iface.AuditSink // pending until a relay is wired
 }
 
 var (
@@ -110,23 +111,33 @@ func (s *Service) SetErasure(e *ErasureService) {
 	s.mu.Unlock()
 }
 
-// SetAuditRelay wires the relay the module's audit events go through.
+// SetAuditRelay wires the relay the module's audit events go through. A sink
+// pushed earlier by SetAuditSink is adopted by the relay, so the order of the
+// two setters cannot lose it.
 func (s *Service) SetAuditRelay(a *AuditRelay) {
 	s.mu.Lock()
 	s.audit = a
+	sink := s.sink
 	s.mu.Unlock()
+	if a != nil && sink != nil {
+		a.SetAuditSink(sink)
+	}
 }
 
 // SetAuditSink satisfies iface.AuditSinkSetter: compliance publishes its sink
-// here and it is forwarded to the relay.
+// here. It is kept, and forwarded to the current relay when one is wired; nil
+// is ignored.
 func (s *Service) SetAuditSink(sink iface.AuditSink) {
-	s.mu.Lock()
-	if s.audit == nil {
-		s.audit = NewAuditRelay()
+	if sink == nil {
+		return
 	}
+	s.mu.Lock()
+	s.sink = sink
 	relay := s.audit
 	s.mu.Unlock()
-	relay.SetAuditSink(sink)
+	if relay != nil {
+		relay.SetAuditSink(sink)
+	}
 }
 
 // DeleteBySubject implements iface.RetrievalSearch by delegating to the
