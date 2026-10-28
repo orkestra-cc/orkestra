@@ -121,7 +121,8 @@ type Worker struct {
 
 	mu        sync.Mutex
 	problems  []string
-	afterPass func() // test hook: runs after every pass of Run
+	ensured   map[ensureKey]bool // collections ensured by this process
+	afterPass func()             // test hook: runs after every pass of Run
 }
 
 // NewWorker builds a Worker with a fresh owner ID; it performs no I/O.
@@ -135,7 +136,7 @@ func NewWorker(d WorkerDeps) *Worker {
 	if d.Settings == nil {
 		d.Settings = func() WorkerSettings { return WorkerSettings{} }
 	}
-	return &Worker{WorkerDeps: d, owner: uuid.NewString()}
+	return &Worker{WorkerDeps: d, owner: uuid.NewString(), ensured: map[ensureKey]bool{}}
 }
 
 func (w *Worker) settings() WorkerSettings { return ClampWorkerSettings(w.Settings()) }

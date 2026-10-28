@@ -184,7 +184,7 @@ The module health check (`/v1/admin/modules/health`) reports:
 | `retrieval: corpus <c>: embed endpoint "<e>" is not configured` | The endpoint name does not exist in `llm`. Create it or fix the declaration |
 | `retrieval: corpus <c>: endpoint "<e>" is not an embedding endpoint` | The endpoint exists but is not an embedding endpoint. Use an embedding endpoint |
 | `retrieval: corpus <c>: inference profile unavailable` | `llm` could not resolve the endpoint (or reports no dimensions). Check the endpoint's configuration and reachability |
-| `retrieval: corpus <c>: vector engine unavailable` | Creating the corpus collection failed. Check Qdrant |
+| `retrieval: corpus <c>: vector engine unavailable` | Creating the corpus collection, or adding the payload index of a newly declared filter (done once per process the first time the corpus is indexed), failed. The corpus is skipped and retried on the next pass. Check Qdrant |
 | `retrieval: corpus <c>: ingestion profile changed; indexing paused until a new generation is built` | The corpus declaration changed the model, analyzer or chunking. Revert the declaration; the build of a new generation is delivery step 2. Nothing is lost: intents are kept and the current index keeps serving |
 
 Several problems are joined with `; `. A corpus whose owner module is stopped is skipped without a message; its intents wait.

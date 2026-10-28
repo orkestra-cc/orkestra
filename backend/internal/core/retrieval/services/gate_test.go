@@ -204,3 +204,55 @@ func TestGate_UnknownEndpointPersistsErrorAndRecovers(t *testing.T) {
 	assert.Equal(t, 1, st.ActiveGeneration)
 	assert.Empty(t, st.Reason)
 }
+
+// activeState stores an active generation-1 state as another process left it.
+func (e *gateEnv) activeState(t *testing.T) models.CorpusState {
+	t.Helper()
+	st := models.CorpusState{Corpus: "crm_contacts", Owner: "crm", Status: models.CorpusStatusActive,
+		ActiveGeneration: 1, Collection: "orkestra_crm_contacts_g1",
+		IngestionProfileHash: IngestionProfileHash(e.spec.Ingestion, "ip_a"), EmbeddingProfileID: "ip_a",
+		Dimensions: 8, Locality: string(iface.RetrievalLocalOnly)}
+	require.NoError(t, e.states.Insert(context.Background(), &st))
+	return st
+}
+
+// A process that finds an active generation it did not create ensures its
+// collection once, so a filter declared after the bootstrap gets its index.
+func TestGate_EnsuresAnExistingActiveCollectionOncePerProcess(t *testing.T) {
+	e := newGateEnv()
+	e.spec.Filters = append(e.spec.Filters, iface.RetrievalFilterField{Name: "owner", Type: iface.RetrievalFieldKeyword})
+	e.activeState(t)
+	writes := e.states.writes
+
+	g, problem := e.prepare(t)
+	require.NotNil(t, g)
+	assert.Empty(t, problem)
+	require.Len(t, e.eng.specs, 1)
+	assert.Equal(t, engine.CollectionSpec{Name: "orkestra_crm_contacts_g1", Dimensions: 8,
+		Fields: e.spec.Filters, Analyzer: e.spec.Ingestion.Analyzer}, e.eng.specs[0])
+
+	g, problem = e.prepare(t)
+	require.NotNil(t, g)
+	assert.Empty(t, problem)
+	assert.Equal(t, 1, e.eng.callCount("EnsureCollection"))
+	assert.Equal(t, writes, e.states.writes)
+}
+
+func TestGate_EnsureFailureSkipsTheCorpusAndRetries(t *testing.T) {
+	e := newGateEnv()
+	e.activeState(t)
+	e.eng.setEnsureErr(engine.ErrUnavailable)
+
+	g, problem := e.prepare(t)
+	assert.Nil(t, g)
+	assert.Equal(t, "corpus crm_contacts: vector engine unavailable", problem)
+	assert.Equal(t, models.CorpusStatusActive, e.states.get("crm_contacts").Status)
+
+	e.eng.setEnsureErr(nil)
+	g, problem = e.prepare(t)
+	require.NotNil(t, g)
+	assert.Empty(t, problem)
+	assert.Equal(t, 2, e.eng.callCount("EnsureCollection"))
+	_, _ = e.prepare(t)
+	assert.Equal(t, 2, e.eng.callCount("EnsureCollection"))
+}

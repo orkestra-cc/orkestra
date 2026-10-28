@@ -92,8 +92,8 @@ Checks run in this order; the problem text is what `HealthCheck` reports (`%s` c
 | `local_only` corpus (or `""`) and endpoint boundary not local | error / `locality` | skip | `corpus %s: local_only corpus uses hosted endpoint %q` |
 | No state or no active generation | `EnsureCollection`, then `active`, generation 1, collection `<prefix>_<corpus>_g1` | gate | engine error: `corpus %s: vector engine unavailable` |
 | State hash differs from the declared hash | `profile_changed` with `DeclaredProfileHash` (written once) | skip | `corpus %s: ingestion profile changed; indexing paused until a new generation is built` |
-| Not active, hash equal | back to `active`, reason cleared | gate | none |
-| Active, hash equal | none | gate | none |
+| Not active, hash equal | the once-per-process `EnsureCollection` below, then back to `active`, reason cleared | gate | as below |
+| Active, hash equal | none (the first time this process gates the generation: `EnsureCollection` with the current filters, analyzer and stored dimensions, so a filter declared after the bootstrap gets its payload index) | gate | engine error: `corpus %s: vector engine unavailable` (skip, retried next pass) |
 
 `profile_changed`: intents are kept, nothing is claimed, the active generation keeps serving, and delivery step 2 (generation build) builds the new generation and drains the intents. Reverting the declaration clears it. `ErrStateExists` / `ErrStateConflict` (another replica moved the state) skip the pass silently.
 

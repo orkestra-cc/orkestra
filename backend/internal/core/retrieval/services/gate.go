@@ -61,6 +61,9 @@ func (w *Worker) prepareCorpus(ctx context.Context, spec iface.RetrievalCorpusSp
 		}
 		return nil, profileChangedProblem(spec.Name), nil
 	}
+	if problem, err := w.ensureActive(ctx, spec, st); problem != "" || err != nil {
+		return nil, problem, err
+	}
 	if st.Status != models.CorpusStatusActive || st.Reason != "" || st.DeclaredProfileHash != "" {
 		st.Status, st.Reason, st.DeclaredProfileHash = models.CorpusStatusActive, "", ""
 		st.UpdatedAt = w.Now()
@@ -75,19 +78,52 @@ func profileChangedProblem(corpus string) string {
 	return fmt.Sprintf("corpus %s: ingestion profile changed; indexing paused until a new generation is built", corpus)
 }
 
-// bootstrap creates generation 1's collection and records it as active.
-func (w *Worker) bootstrap(ctx context.Context, spec iface.RetrievalCorpusSpec, st *models.CorpusState, profile *iface.InferenceProfile, hash string) (*corpusGate, string, error) {
-	name := engine.CollectionName(w.Prefix, spec.Name, 1)
+// ensureKey names one generation of one corpus.
+type ensureKey struct {
+	corpus     string
+	generation int
+}
+
+// ensureCollection creates the collection or adds the payload indexes of the
+// current spec (EnsureCollection is idempotent). On an engine error the corpus
+// is skipped this pass with a problem; a context error aborts the pass.
+func (w *Worker) ensureCollection(ctx context.Context, spec iface.RetrievalCorpusSpec, name string, generation, dimensions int) (string, error) {
 	err := w.Engine.EnsureCollection(ctx, engine.CollectionSpec{
-		Name: name, Dimensions: profile.Dimensions, Fields: spec.Filters, Analyzer: spec.Ingestion.Analyzer,
+		Name: name, Dimensions: dimensions, Fields: spec.Filters, Analyzer: spec.Ingestion.Analyzer,
 	})
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, "", ctx.Err()
+			return "", ctx.Err()
 		}
 		w.Logger.Warn("retrieval: ensure collection failed", "corpus", spec.Name)
-		return nil, fmt.Sprintf("corpus %s: vector engine unavailable", spec.Name), nil
+		return fmt.Sprintf("corpus %s: vector engine unavailable", spec.Name), nil
 	}
+	w.mu.Lock()
+	w.ensured[ensureKey{spec.Name, generation}] = true
+	w.mu.Unlock()
+	return "", nil
+}
+
+// ensureActive ensures the active generation's collection once per process,
+// the first time the corpus passes the gate: a filter declared after the
+// bootstrap (by this or another replica) then gets its payload index.
+func (w *Worker) ensureActive(ctx context.Context, spec iface.RetrievalCorpusSpec, st *models.CorpusState) (string, error) {
+	w.mu.Lock()
+	done := w.ensured[ensureKey{spec.Name, st.ActiveGeneration}]
+	w.mu.Unlock()
+	if done {
+		return "", nil
+	}
+	return w.ensureCollection(ctx, spec, st.Collection, st.ActiveGeneration, st.Dimensions)
+}
+
+// bootstrap creates generation 1's collection and records it as active.
+func (w *Worker) bootstrap(ctx context.Context, spec iface.RetrievalCorpusSpec, st *models.CorpusState, profile *iface.InferenceProfile, hash string) (*corpusGate, string, error) {
+	name := engine.CollectionName(w.Prefix, spec.Name, 1)
+	if problem, err := w.ensureCollection(ctx, spec, name, 1, profile.Dimensions); problem != "" || err != nil {
+		return nil, problem, err
+	}
+	var err error
 	now := w.Now()
 	fresh := st == nil
 	if fresh {
