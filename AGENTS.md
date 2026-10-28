@@ -83,7 +83,7 @@ Every core module has **two** docs: the in-repo `AGENTS.md` is the AI-facing *co
 | **auth**         | Email/password (argon2id) + OAuth 2.1, MFA + passkeys, JWT, sessions, service accounts     | [AGENTS.md](backend/internal/core/auth/AGENTS.md) | [auth](docs/site/modules/core/auth.mdx) |
 | **navigation**   | Dynamic menu from module NavItems + persisted reorder via `/admin/modules/navigation`      | [AGENTS.md](backend/internal/core/navigation/AGENTS.md) | [navigation](docs/site/modules/core/navigation.mdx) |
 | **logging**      | Tier-1 runtime logging workspace: permanent levels, expiring diagnostics, bounded preview  | [AGENTS.md](backend/internal/core/logging/AGENTS.md) | [logging](docs/site/modules/core/logging.mdx) |
-| **llm**          | Credentials per org, models with capabilities/purposes, per-user grants, gateway for addons (ADR-0022) | [AGENTS.md](backend/internal/core/llm/AGENTS.md) | [llm](docs/site/modules/core/llm.mdx) |
+| **llm**          | Credentials per org, models with capabilities/purposes, per-user grants, gateway for addons (ADR-0022); installation-level inference endpoints for `retrieval` (ADR-0023) | [AGENTS.md](backend/internal/core/llm/AGENTS.md) | [llm](docs/site/modules/core/llm.mdx) |
 | **retrieval**    | Corpora, hybrid search with tenant-scoped BM25, principal filter; Qdrant behind an engine driver (ADR-0023) | [AGENTS.md](backend/internal/core/retrieval/AGENTS.md) | [retrieval](docs/site/modules/core/retrieval.mdx) |
 | **compliance**   | Audit trail + GDPR DSR, per-tenant KMS crypto-shred, legal hold, retention, SOC2, compliance policy engine with four-eyes changes (ADR-0009) | [AGENTS.md](backend/internal/core/compliance/AGENTS.md) | [compliance](docs/site/modules/core/compliance.mdx) |
 

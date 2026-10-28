@@ -70,3 +70,18 @@ func TestLLMMetrics_NilCollectorIsSafe(t *testing.T) {
 	c.RecordLLMRequest("openai", "ok")
 	c.RecordLLMTokens("openai", "input", 1)
 }
+
+func TestLLMMetrics_TEIIsAKnownProvider(t *testing.T) {
+	c := NewCollector()
+	if err := c.Register(); err != nil {
+		t.Fatal(err)
+	}
+	c.RecordLLMRequest("tei", "ok")
+	c.RecordLLMTokens("tei", "input", 5)
+	if got := testutil.ToFloat64(c.llmRequests.WithLabelValues("tei", "ok")); got != 1 {
+		t.Fatalf("tei/ok = %v", got)
+	}
+	if got := testutil.ToFloat64(c.llmTokens.WithLabelValues("tei", "input")); got != 5 {
+		t.Fatalf("tei/input = %v", got)
+	}
+}

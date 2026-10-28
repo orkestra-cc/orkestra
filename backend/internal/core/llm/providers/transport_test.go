@@ -408,3 +408,26 @@ func TestTransport_StreamIdleMarkerOverridesTheClientIdleTimeout(t *testing.T) {
 		t.Fatalf("negative marker = %v", d)
 	}
 }
+
+func TestInstallationHTTPClient_ReachesPrivateHostWhileTheOrgClientCannot(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }))
+	defer srv.Close()
+	org := NewHTTPClient(TransportConfig{ProductionLike: true, Timeout: 2 * time.Second})
+	if _, err := org.Get(srv.URL); !errors.Is(err, ErrDestinationNotPublic) {
+		t.Fatalf("org client err = %v, want ErrDestinationNotPublic", err)
+	}
+	inst := NewInstallationHTTPClient(TransportConfig{ProductionLike: true, Timeout: 2 * time.Second})
+	resp, err := inst.Get(srv.URL)
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("installation client = %v, %v", resp, err)
+	}
+	resp.Body.Close()
+}
+
+func TestInstallationHTTPClient_KeepsTheOtherProtections(t *testing.T) {
+	redirect := httptest.NewServer(http.RedirectHandler("http://example.test/", http.StatusFound))
+	defer redirect.Close()
+	if _, err := NewInstallationHTTPClient(TransportConfig{}).Get(redirect.URL); !errors.Is(err, ErrRedirectRefused) {
+		t.Fatalf("err = %v, want ErrRedirectRefused", err)
+	}
+}

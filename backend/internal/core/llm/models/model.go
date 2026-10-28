@@ -12,6 +12,10 @@ const (
 	CredentialKindOrg         = iface.LLMCredentialKindOrg
 	CredentialKindUserAccount = iface.LLMCredentialKindUserAccount
 
+	// CredentialKindInstallation marks ledger rows of installation-level
+	// inference (operator-declared endpoints); never stored on a credential.
+	CredentialKindInstallation = "installation"
+
 	AccessGranted  = "granted"
 	AccessEveryone = "everyone"
 

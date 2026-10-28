@@ -12,6 +12,7 @@ func TestLLMSentinels_AreDistinctAndWrappable(t *testing.T) {
 		ErrLLMUserAccountRequired, ErrLLMPlanUsageDisabled, ErrLLMUserAccountReauth,
 		ErrLLMBudgetExceeded, ErrLLMQuotaExhausted, ErrLLMCapabilityMismatch,
 		ErrLLMPartialOutput, ErrLLMProviderUnavailable, ErrLLMInvalidRequest,
+		ErrLLMProfileMismatch,
 	}
 	seen := map[string]bool{}
 	for _, e := range all {

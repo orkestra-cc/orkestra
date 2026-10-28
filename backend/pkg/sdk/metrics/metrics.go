@@ -623,7 +623,7 @@ var (
 )
 
 var (
-	llmProviders    = map[string]struct{}{"openai": {}, "anthropic": {}, "gemini": {}, "ollama": {}, "openai_compatible": {}, "mock": {}}
+	llmProviders    = map[string]struct{}{"openai": {}, "anthropic": {}, "gemini": {}, "ollama": {}, "openai_compatible": {}, "mock": {}, "tei": {}}
 	llmOutcomes     = map[string]struct{}{"ok": {}, "fallback": {}, "error": {}, "budget_blocked": {}}
 	llmDirections   = map[string]struct{}{"input": {}, "output": {}}
 	llmSIWCOutcomes = map[string]struct{}{
