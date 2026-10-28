@@ -19,11 +19,12 @@ services:
     # deployment ran 8.0.23 — and CI, which used the same floating tag, was
     # therefore testing on a different patch than the stacks ran, with nothing
     # saying so. Pinning fixed the drift; the 8.0.23 -> 8.0.29 bump that
-    # followed, and 8.0.29 -> 8.0.32 after it, were taken deliberately, as
-    # upgrades rather than pulls.
+    # followed, 8.0.29 -> 8.0.32 after it, and 8.0.32 -> 8.0.34 (mongod 8.0.32
+    # refuses to start on Linux 6.19+, SERVER-121912) were taken deliberately,
+    # as upgrades rather than pulls.
     # Same-series patch upgrade: FCV stays 8.0 and no data migration runs.
     # Keep this in step with .github/workflows/backend.yml, same patch.
-    image: mongo:8.0.32
+    image: mongo:8.0.34
     container_name: ${APP_NAME}-mongodb-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
