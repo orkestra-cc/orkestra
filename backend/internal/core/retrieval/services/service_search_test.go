@@ -22,12 +22,6 @@ func TestService_SearchWithoutSearcherIsNotConfigured(t *testing.T) {
 	assert.Nil(t, res)
 }
 
-func TestService_DeleteBySubjectNotImplemented(t *testing.T) {
-	err := New(Options{}).DeleteBySubject(context.Background(), "t-1", "user:alice")
-	requireIs(t, err, ErrDeleteBySubjectNotImplemented)
-	requireIs(t, err, errors.ErrUnsupported)
-}
-
 func TestService_PrincipalsWithoutResolverFailsClosed(t *testing.T) {
 	fx := newSearchFixture(t)
 	pc, err := New(Options{}).Principals(fx.ctx)

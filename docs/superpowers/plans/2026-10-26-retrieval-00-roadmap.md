@@ -661,13 +661,18 @@ of this file.
 | Registry accessors on `services.Service`: `Corpus(name)`, `Corpora()`, `PrincipalContributors()`, `FilterSchema`, `Engine()`, `CollectionPrefix()`, `Seal()`; defaults `DefaultFusion = {1, 1, 50}`, `DefaultRerankTopK = 20` applied at registration | 3 | 4–7 |
 | `retrieval_corpus_state` document `models.CorpusState` (`_id` corpus, owner, status `active\|profile_changed\|error`, reason, `activeGeneration` (0 = none), collection, `ingestionProfileHash`, `embeddingProfileId`, dimensions, locality, `declaredProfileHash`, version CAS) and `retrieval_tenant_progress` `models.TenantProgress` | 4 | 5, 6, 7 |
 | Config keys `worker_lease` (2m, 30s–15m), `worker_batch` (32), `worker_poll_interval` (5s); `services.MaxWorkerLease` = 15m; every engine write ends at `leaseUntil − lease/4` | 4 | 6 |
-| Erasure fencing window: `clamp(MaxWorkerLease + 30s + 30s, 1m, 1h)` = 16m, independent of the live `worker_lease` | 6 | 6 |
+| Erasure fencing window: `FencingWindow(MaxWorkerLease, 30s)` = `clamp(MaxWorkerLease + 30s + 30s, 1m, 1h)` = 16m, independent of the live `worker_lease`; derived, no config key. `services.IndexingFencingWindow` is deleted | 6 | 6 |
 | `retrieval_search_log` document `models.SearchLog` (uuid, tenantId, userUuid, corpus, query, filter, mode, principals, sourceIds, subjects, hitCount, degraded, outcome, errorKind, timings, createdAt); a failed log write fails the search closed (wraps `ErrRetrievalUnavailable`); config `principal_cap` (256), `search_log_retention_days` (90) | 5 | 6, 7 |
 | A short page after drops is reported with `Degraded: true` (no separate flag) | 5 | 7 |
 | `(*Service).Diagnose`: the normal pipeline with `engine.Query.Diagnostics` set, admin's own principals, same `Visible` check and search-log row | 7 | 7 |
-| `DeleteBySubject` returns a sentinel wrapping `errors.ErrUnsupported` until PR 6 replaces it | 5 | 6 |
+| `DeleteBySubject` returned a sentinel wrapping `errors.ErrUnsupported` in PR 5; PR 6 replaced it (`ErrDeleteBySubjectNotImplemented` is deleted) | 5, 6 | 6 |
 | Exported in-memory engine `retrieval/engine/enginefake` | 6 | 6 (PR 4 and 5 keep their package-private fakes: PR 4 `fake*`, PR 5 `search*`) |
 | Audit: retrieval's own events through PR 6's `AuditRelay` (late-wired by compliance via `iface.AuditSinkSetter` on `ServiceRetrieval`); PR 7's admin events resolve `ServiceAuditSink` per call. Both reach the same sink | 6, 7 | — |
+| `iface.PurgedTenantIDLister` (lists purged tenant ids; tenant's `*services.Service`) beside `iface.TenantPurgeHooks`, for the purge reconcile loop | 6 | 6 |
+| Finalizer stage 0 (search-log delete by kind on every pass, before the engine work), with `SearchLogDSRRepo` | 6 | 6 |
+| Search-log post-write re-check: `SearchLogRetractor` (`DeleteRow`, `MarkChecked`) used by `Searcher.retract`, one tombstone lookup per logged search; rows are inserted `unchecked`, settled by the re-check, and a row left unchecked (failed re-check, delete or mark) is swept within about 20 minutes by the module's own unchecked-sweep loop (every `UncheckedSearchLogGrace`, 10 min, cutoff one grace) via `PurgeUncheckedBefore` and the partial `{unchecked, createdAt}` index | 6 | 7 |
+| `services.ErasureBackoff(attempts)` = 15s·2^(n−1), capped at 15m | 6 | 6 |
+| `services.ValidateOwnerSubject`: `<owner>:<id>`, owner matches the corpus owner shape and is a registered owner, at most 256 bytes, no `user` owner | 6 | 7 |
 | `retrieval/AGENTS.md` and `docs/site/modules/core/retrieval.mdx` are created by PR 3; later PRs add sections | 3 | 4–8 |
 | **Implementation rulings (PRs 1–3 executed):** `engine.Selector` fails closed — a non-nil empty `SourceIDs`, an empty id, or `SourceIDs` without `TenantID` is refused by `DeleteByFilter`/`Count` (a `Subject`-only selector stays tenant-less for global user erasure) | 3 | 4, 6 |
 | The Qdrant driver refuses malformed filter nodes, drops (and WARN-counts) any candidate outside the query's tenant/principals, treats a blank keyword as an absent arm; `QDRANT_COLLECTION_PREFIX` matches `^[a-z][a-z0-9-]{0,31}$` (no `_`, so names cannot collide) | 3 | 5, 8 |

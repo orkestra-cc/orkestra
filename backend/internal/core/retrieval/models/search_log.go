@@ -43,4 +43,10 @@ type SearchLog struct {
 	ErrorKind  string        `bson:"errorKind,omitempty"` // not_configured|unavailable|principals|visibility_check|canceled
 	Timings    SearchTimings `bson:"timings"`
 	CreatedAt  time.Time     `bson:"createdAt"`
+	// Unchecked marks a provisional row: the Searcher writes it true when it
+	// will re-check the row against the erasure tombstones, and clears it
+	// (MarkChecked) once no tombstone covers it, or deletes the row when one
+	// does. A row still unchecked after services.UncheckedSearchLogGrace is
+	// deleted by the retention sweep. Absent on a confirmed row.
+	Unchecked bool `bson:"unchecked,omitempty"`
 }

@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -122,8 +124,8 @@ func TestModule_IndexesLeadWithTenantOrAreDeclaredSweeps(t *testing.T) {
 	}
 	sweeps := map[string][]sweep{
 		repository.CollOutbox:    {{[]string{"dirty", "nextAttemptAt"}, false}, {[]string{"leaseUntil"}, false}},
-		repository.CollErasures:  {{[]string{"uuid"}, true}, {[]string{"scope", "kind", "subject"}, false}},
-		repository.CollSearchLog: {{[]string{"subjects"}, false}, {[]string{"createdAt"}, false}},
+		repository.CollErasures:  {{[]string{"uuid"}, true}, {[]string{"scope", "kind", "subject"}, false}, {[]string{"status", "nextAttemptAt"}, false}},
+		repository.CollSearchLog: {{[]string{"subjects"}, false}, {[]string{"createdAt"}, false}, {[]string{"userUuid"}, false}, {[]string{"unchecked", "createdAt"}, false}},
 	}
 	for _, c := range NewModule().Collections() {
 		for _, idx := range c.Indexes {
@@ -430,6 +432,11 @@ type profilesOnly struct{ fakeProfiles }
 type fakeTenants struct{}
 
 func (fakeTenants) ListActiveTenantIDs(context.Context, string) ([]string, error) { return nil, nil }
+
+// The tenant service also takes the purge hook and lists purged tenants
+// (none), so erasure is fully wired and adds no WARN (P16).
+func (fakeTenants) RegisterTenantPurgeHook(func(context.Context, string) error) {}
+func (fakeTenants) ListPurgedTenantIDs(context.Context) ([]string, error)       { return nil, nil }
 
 type fakeStatus struct{}
 
@@ -838,6 +845,8 @@ func TestCollections_DeclareSearchLog(t *testing.T) {
 		{[]string{"tenantId", "userUuid", "createdAt"}, false},
 		{[]string{"subjects"}, false},
 		{[]string{"createdAt"}, false},
+		{[]string{"userUuid"}, false},
+		{[]string{"unchecked", "createdAt"}, false},
 	}
 	if len(spec.Indexes) != len(want) {
 		t.Fatalf("indexes = %+v", spec.Indexes)
@@ -853,6 +862,10 @@ func TestCollections_DeclareSearchLog(t *testing.T) {
 		if !slices.Equal(fields, want[i].fields) || idx.Unique != want[i].unique {
 			t.Errorf("index %d = %v unique=%v, want %v unique=%v", i, fields, idx.Unique, want[i].fields, want[i].unique)
 		}
+	}
+	// G2: the unchecked sweep's index holds only provisional rows.
+	if pf := spec.Indexes[len(spec.Indexes)-1].PartialFilter; !reflect.DeepEqual(pf, map[string]any{"unchecked": true}) {
+		t.Errorf("unchecked index partial filter = %v", pf)
 	}
 }
 
@@ -1104,6 +1117,121 @@ func TestModule_RetentionFailureWarns(t *testing.T) {
 	}
 	if l := warnLines(logs.String(), "search log retention purge failed"); len(l) == 0 {
 		t.Fatalf("missing retention WARN: %s", logs)
+	}
+}
+
+// fakeSweeper records PurgeUncheckedBefore cutoffs and answers n or err.
+type fakeSweeper struct {
+	mu      sync.Mutex
+	cutoffs []time.Time
+	n       int64
+	err     error
+}
+
+func (s *fakeSweeper) PurgeUncheckedBefore(_ context.Context, cutoff time.Time) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cutoffs = append(s.cutoffs, cutoff)
+	return s.n, s.err
+}
+
+func (s *fakeSweeper) calls() []time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.cutoffs)
+}
+
+func startSweep(t *testing.T, m *Module, s *fakeSweeper) {
+	t.Helper()
+	m.mu.Lock()
+	if m.sweeper == nil {
+		m.mu.Unlock()
+		t.Fatal("unchecked sweep not wired")
+	}
+	m.sweeper = s
+	m.mu.Unlock()
+	m.uncheckedFirst, m.uncheckedEvery = 10*time.Millisecond, 10*time.Millisecond
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// G2: the unchecked-row sweep has its own loop, started whenever a database
+// exists (engine or not), every grace with the grace as cutoff, and ends with
+// Stop. A success logs no WARN.
+func TestModule_UncheckedSweepLoopRunsWithoutEngine(t *testing.T) {
+	t.Setenv("QDRANT_URL", "")
+	m, _, logs := initModule(t)
+	if m.worker != nil {
+		t.Fatal("worker built without an engine")
+	}
+	s := &fakeSweeper{n: 2}
+	before := time.Now()
+	startSweep(t, m, s)
+	waitFor(t, "two sweeps", func() bool { return len(s.calls()) >= 2 })
+	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := m.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	n := len(s.calls())
+	time.Sleep(30 * time.Millisecond)
+	if len(s.calls()) != n {
+		t.Fatal("the unchecked sweep outlived Stop")
+	}
+	cutoff := s.calls()[0]
+	wantLo := before.UTC().Add(-services.UncheckedSearchLogGrace)
+	wantHi := time.Now().UTC().Add(-services.UncheckedSearchLogGrace)
+	if cutoff.Before(wantLo) || cutoff.After(wantHi) {
+		t.Fatalf("cutoff %v outside [%v, %v]", cutoff, wantLo, wantHi)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "unchecked search log sweep deleted provisional rows") || !strings.Contains(out, "deleted=2") {
+		t.Fatalf("missing INFO with the deleted count: %s", out)
+	}
+	if l := warnLines(out, "unchecked"); len(l) != 0 {
+		t.Fatalf("unexpected WARN: %v", l)
+	}
+	if uncheckedSweepFirstRun != services.UncheckedSearchLogGrace || uncheckedSweepEvery != services.UncheckedSearchLogGrace {
+		t.Fatalf("default cadence = %v/%v, want the grace", uncheckedSweepFirstRun, uncheckedSweepEvery)
+	}
+}
+
+// A failed sweep WARNs once per run with a coarse reason and the count, never
+// the error text, and the loop keeps running.
+func TestModule_UncheckedSweepFailureWarns(t *testing.T) {
+	t.Setenv("QDRANT_URL", "")
+	m, _, logs := initModule(t)
+	s := &fakeSweeper{n: 1, err: errors.New("mongo down naming tenant t-secret")}
+	startSweep(t, m, s)
+	waitFor(t, "two sweeps", func() bool { return len(s.calls()) >= 2 })
+	if err := m.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	out := logs.String()
+	l := warnLines(out, "unchecked search log sweep failed; retrying at the next run")
+	if len(l) == 0 || len(l) > len(s.calls()) {
+		t.Fatalf("WARN lines = %d for %d runs: %s", len(l), len(s.calls()), out)
+	}
+	if !strings.Contains(l[0], "reason=error") || !strings.Contains(l[0], "deleted=1") || strings.Contains(out, "t-secret") {
+		t.Fatalf("WARN = %s", l[0])
+	}
+}
+
+// Start's early return keeps the sweep: a module holding only the sweeper
+// (no worker, retention, finalizer or reconcile) still runs it.
+func TestModule_StartRunsTheUncheckedSweepAlone(t *testing.T) {
+	m := NewModule()
+	m.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := &fakeSweeper{}
+	m.sweeper = s
+	m.uncheckedFirst, m.uncheckedEvery = 10*time.Millisecond, 10*time.Millisecond
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "a sweep", func() bool { return len(s.calls()) >= 1 })
+	if err := m.Stop(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 

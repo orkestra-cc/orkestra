@@ -68,9 +68,6 @@ type WorkerSettings struct {
 const (
 	MinWorkerLease = 30 * time.Second
 	MaxWorkerLease = 15 * time.Minute
-	// IndexingFencingWindow is how long a stale worker may still write after
-	// losing its lease (consumed by erasure, PR 6).
-	IndexingFencingWindow = 2 * MaxWorkerLease
 
 	defaultWorkerLease = 2 * time.Minute
 	defaultWorkerBatch = 32
@@ -263,7 +260,7 @@ func (k *keyRun) run() {
 	// 4. validate
 	fields, err := normalizeFields(k.g.Spec.Filters, it.Fields)
 	if err == nil {
-		err = validateItem(it)
+		err = validateItem(it, k.g.Spec.Owner, RegisteredOwner(k.w.Catalog))
 	}
 	if err != nil {
 		// err names a field key at most, never a value (errInvalidItem).

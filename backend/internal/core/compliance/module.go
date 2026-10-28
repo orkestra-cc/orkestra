@@ -396,6 +396,9 @@ func publishAuditSink(registry *module.ServiceRegistry, sink iface.AuditSink) {
 	if gw, ok := module.GetTyped[iface.AuditSinkSetter](registry, module.ServiceLLMGateway); ok {
 		gw.SetAuditSink(sink)
 	}
+	if rs, ok := module.GetTyped[iface.AuditSinkSetter](registry, module.ServiceRetrieval); ok {
+		rs.SetAuditSink(sink)
+	}
 }
 
 // Start launches the background loops: the policy snapshot refresh (every

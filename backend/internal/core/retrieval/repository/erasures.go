@@ -24,14 +24,16 @@ var ErrInvalidErasure = errors.New("retrieval repository: invalid erasure")
 const userSubjectPrefix = "user:"
 
 // ErasureIndexes are the declared indexes of CollErasures; the module and the
-// repository tests share them. {uuid} and {scope, kind, subject} are system
-// sweeps (global user tombstones carry no tenant).
+// repository tests share them. {uuid}, {scope, kind, subject} and
+// {status, nextAttemptAt} are system sweeps (global user tombstones carry no
+// tenant; the finalization sweep claims across tenants).
 func ErasureIndexes() []module.IndexSpec {
 	return []module.IndexSpec{
 		{OrderedKeys: []module.IndexKey{{Field: "uuid", Direction: 1}}, Unique: true},
 		{OrderedKeys: []module.IndexKey{{Field: "scope", Direction: 1}, {Field: "kind", Direction: 1}, {Field: "subject", Direction: 1}}},
 		{OrderedKeys: []module.IndexKey{{Field: "tenantId", Direction: 1}, {Field: "kind", Direction: 1}, {Field: "corpus", Direction: 1}, {Field: "sourceId", Direction: 1}}},
 		{OrderedKeys: []module.IndexKey{{Field: "tenantId", Direction: 1}, {Field: "kind", Direction: 1}, {Field: "subject", Direction: 1}}},
+		{OrderedKeys: []module.IndexKey{{Field: "status", Direction: 1}, {Field: "nextAttemptAt", Direction: 1}}},
 	}
 }
 

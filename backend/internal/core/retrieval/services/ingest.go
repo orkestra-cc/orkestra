@@ -36,8 +36,11 @@ func invalid(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", errInvalidItem, fmt.Sprintf(format, args...))
 }
 
-// validateItem checks the principal and subject lists of an item.
-func validateItem(item iface.RetrievalItem) error {
+// validateItem checks the principal and subject lists of an item. Every
+// subject must be erasable (ValidateSubject): the owner of the item's corpus
+// counts as registered even before isOwner sees it, and isOwner may be nil
+// (only the corpus owner is registered then).
+func validateItem(item iface.RetrievalItem, corpusOwner string, isOwner func(owner string) bool) error {
 	if len(item.VisibleTo) > MaxPrincipalsPerItem {
 		return invalid("too many visibleTo entries")
 	}
@@ -51,7 +54,28 @@ func validateItem(item iface.RetrievalItem) error {
 			}
 		}
 	}
+	registered := func(owner string) bool {
+		return owner == corpusOwner || (isOwner != nil && isOwner(owner))
+	}
+	for _, s := range item.Subjects {
+		if _, err := ValidateSubject(s, registered); err != nil {
+			return invalid("subject is not an erasable user or registered-owner reference")
+		}
+	}
 	return nil
+}
+
+// RegisteredOwner reports whether owner registered a corpus in c; it reads
+// the catalog on every call, so corpora registered later count.
+func RegisteredOwner(c CorpusCatalog) func(owner string) bool {
+	return func(owner string) bool {
+		for _, spec := range c.Corpora() {
+			if spec.Owner == owner {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // normalizeFields checks item fields against the corpus schema and converts

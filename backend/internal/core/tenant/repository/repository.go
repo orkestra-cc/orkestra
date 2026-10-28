@@ -907,3 +907,34 @@ func (r *Repository) CountAllTenants(ctx context.Context) (int64, error) {
 	//tenantscope:allow tenant registry — an "is this installation pristine" probe is platform-global by definition
 	return r.db.Collection(CollTenants).CountDocuments(ctx, bson.M{})
 }
+
+// ListPurgedTenantUUIDs returns the UUID of every tenant whose hard purge has
+// committed (status purged, or a purgedAt marker that a later status change
+// kept), soft-deleted rows included, of any kind. UpdateTenantStatus sets
+// purgedAt only on purge and never clears it, so an archive, suspend or
+// activate after the purge cannot hide the tenant from the durable
+// reconciliation of tenant-purge cleanups in other modules.
+func (r *Repository) ListPurgedTenantUUIDs(ctx context.Context) ([]string, error) {
+	//tenantscope:allow tenant registry — listing purged tenants is inherently cross-tenant (retrieval erasure reconciliation, ADR-0023 D12; mirrors ListTenantsByKind)
+	cur, err := r.db.Collection(CollTenants).Find(ctx,
+		bson.M{"$or": bson.A{
+			bson.M{"status": string(models.TenantStatusPurged)},
+			bson.M{"purgedAt": bson.M{"$exists": true, "$ne": nil}},
+		}},
+		options.Find().SetProjection(bson.M{"uuid": 1}))
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	var rows []struct {
+		UUID string `bson:"uuid"`
+	}
+	if err := cur.All(ctx, &rows); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rows))
+	for i := range rows {
+		out = append(out, rows[i].UUID)
+	}
+	return out, nil
+}

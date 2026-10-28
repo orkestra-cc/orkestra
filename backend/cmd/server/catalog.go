@@ -39,7 +39,7 @@ import (
 //     latter can push the KMS provider and the audit sink into the gateway.
 //   - retrieval: ADR-0023 — corpora, indexing and hybrid search over tenant
 //     data (Qdrant behind an engine driver). Depends on tenant/authz/llm;
-//     inits BEFORE compliance, which pushes its audit sink in later (PR 6).
+//     inits BEFORE compliance, which pushes its audit sink into it from its own Init.
 //   - compliance: ADR-0009 — audit sink + GDPR DSR pipeline + per-tenant KMS
 //     crypto-shred + SOC2 evidence. Depends on user/auth/tenant; inits last so
 //     their PII producers and concrete services are already registered when it

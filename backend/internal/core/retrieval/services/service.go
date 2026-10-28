@@ -1,11 +1,11 @@
 // Package services holds the retrieval module's Service: the corpus registry,
 // the outbox, the index worker, the search pipeline (Searcher) and the
-// principal resolver. Data-subject erasure (DeleteBySubject) arrives in PR 6.
+// principal resolver. Data-subject erasure (DeleteBySubject, the tenant purge
+// and their finalization) is the ErasureService; Service delegates to it.
 package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -36,17 +36,17 @@ type Service struct {
 	outbox       *Outbox
 	searcher     *Searcher
 	principals   *PrincipalResolver
+	erasure      *ErasureService
+	audit        *AuditRelay
+	sink         iface.AuditSink // pending until a relay is wired
 }
 
 var (
 	_ iface.RetrievalCorpusRegistry    = (*Service)(nil)
 	_ iface.RetrievalSearch            = (*Service)(nil)
 	_ iface.RetrievalPrincipalResolver = (*Service)(nil)
+	_ iface.AuditSinkSetter            = (*Service)(nil)
 )
-
-// ErrDeleteBySubjectNotImplemented is returned by DeleteBySubject until
-// ADR-0023 PR 6 wires data-subject erasure.
-var ErrDeleteBySubjectNotImplemented = fmt.Errorf("retrieval: DeleteBySubject arrives with ADR-0023 PR 6: %w", errors.ErrUnsupported)
 
 // New builds a Service. It never contacts the engine.
 func New(opts Options) *Service {
@@ -103,10 +103,53 @@ func (s *Service) Search(ctx context.Context, req iface.RetrievalSearchRequest) 
 	return searcher.Search(ctx, req)
 }
 
-// DeleteBySubject implements iface.RetrievalSearch. It does nothing and
-// returns ErrDeleteBySubjectNotImplemented; PR 6 replaces the body.
-func (s *Service) DeleteBySubject(context.Context, string, string) error {
-	return ErrDeleteBySubjectNotImplemented
+// SetErasure wires the erasure service; module Init calls it once, and only
+// when a database handle is present.
+func (s *Service) SetErasure(e *ErasureService) {
+	s.mu.Lock()
+	s.erasure = e
+	s.mu.Unlock()
+}
+
+// SetAuditRelay wires the relay the module's audit events go through. A sink
+// pushed earlier by SetAuditSink is adopted by the relay, so the order of the
+// two setters cannot lose it.
+func (s *Service) SetAuditRelay(a *AuditRelay) {
+	s.mu.Lock()
+	s.audit = a
+	sink := s.sink
+	s.mu.Unlock()
+	if a != nil && sink != nil {
+		a.SetAuditSink(sink)
+	}
+}
+
+// SetAuditSink satisfies iface.AuditSinkSetter: compliance publishes its sink
+// here. It is kept, and forwarded to the current relay when one is wired; nil
+// is ignored.
+func (s *Service) SetAuditSink(sink iface.AuditSink) {
+	if sink == nil {
+		return
+	}
+	s.mu.Lock()
+	s.sink = sink
+	relay := s.audit
+	s.mu.Unlock()
+	if relay != nil {
+		relay.SetAuditSink(sink)
+	}
+}
+
+// DeleteBySubject implements iface.RetrievalSearch by delegating to the
+// ErasureService. Without one it returns iface.ErrRetrievalNotConfigured.
+func (s *Service) DeleteBySubject(ctx context.Context, tenantID, subject string) error {
+	s.mu.RLock()
+	e := s.erasure
+	s.mu.RUnlock()
+	if e == nil {
+		return fmt.Errorf("%w: erasure is not wired", iface.ErrRetrievalNotConfigured)
+	}
+	return e.DeleteBySubject(ctx, tenantID, subject)
 }
 
 // Principals implements iface.RetrievalPrincipalResolver for the caller in

@@ -2,8 +2,8 @@
 // search over tenant data with local inference (ADR-0023). It holds the
 // corpus registry, the engine contract, the Qdrant driver, the outbox, the
 // index worker, the search pipeline with its principal resolver and search
-// log, and the search-log retention loop. Compliance wiring (audit sink,
-// data-subject erasure) arrives in PR 6, the admin routes in PR 7.
+// log, the search-log retention loop, and erasure (tombstones, the
+// finalizer, the tenant purge). The admin routes arrive in PR 7.
 package retrieval
 
 import (
@@ -49,6 +49,26 @@ const (
 	// (precedent: llm's usage retention).
 	searchLogRetentionFirstRun = time.Minute
 	searchLogRetentionEvery    = 24 * time.Hour
+
+	// The unchecked-row sweep first runs one grace after Start, then every
+	// grace, so a row left unchecked is gone within about 20 minutes.
+	uncheckedSweepFirstRun = services.UncheckedSearchLogGrace
+	uncheckedSweepEvery    = services.UncheckedSearchLogGrace
+)
+
+const (
+	// The erasure finalizer's fence follows the longest lease a worker can
+	// hold, never the live worker_lease (ADR-0023 D12): FencingWindow(15m,
+	// 30s) = 16m. No config key is read.
+	finalizerWriteTimeout = 30 * time.Second
+	finalizerInterval     = 15 * time.Second
+	finalizerBatch        = 50
+	finalizerHold         = 2 * time.Minute
+
+	// Purged tenants without a tombstone are reconciled a minute after
+	// Start, then every 10 minutes (P11).
+	purgedTenantReconcileFirstRun = time.Minute
+	purgedTenantReconcileEvery    = 10 * time.Minute
 )
 
 const (
@@ -89,9 +109,24 @@ type Module struct {
 	settings func() searchSettings
 	// retention cadence; zero means the defaults (test seam).
 	retentionFirst, retentionInterval time.Duration
+	// sweeper is the search log's unchecked-row sweep, nil without a
+	// database; its cadence, zero meaning the defaults (test seam).
+	sweeper                        services.UncheckedSearchLogSweeper
+	uncheckedFirst, uncheckedEvery time.Duration
+
+	// finalizer and erasure are nil without a database: the erasure
+	// finalization sweep and the purged-tenant reconciliation.
+	finalizer *services.Finalizer
+	erasure   *services.ErasureService
+	// reconcile cadence; zero means the defaults (test seam).
+	reconcileFirst, reconcileInterval time.Duration
+	// finalizer sweep interval; zero means finalizerInterval (test seam, set
+	// before Start: the finalizer reads it through its config on every sweep).
+	finalizerEvery time.Duration
 
 	// One cancel and one done channel cover every background job (the
-	// worker and the retention loop).
+	// worker, the retention loop, the unchecked sweep, the finalizer and the
+	// reconcile loop).
 	lifecycleMu sync.Mutex
 	cancel      context.CancelFunc
 	done        chan struct{}
@@ -244,6 +279,35 @@ func (m *Module) Collections() []module.CollectionSpec {
 	}
 }
 
+// finalizerConfig is the erasure finalizer's configuration: constants, with
+// the fence derived from services.MaxWorkerLease, so a live worker_lease
+// change never shortens it (a worker that claimed under the old lease may
+// still write). deps is not read.
+func finalizerConfig(_ *module.Dependencies) func() services.FinalizerConfig {
+	return func() services.FinalizerConfig {
+		return services.FinalizerConfig{
+			Lease:        services.MaxWorkerLease,
+			WriteTimeout: finalizerWriteTimeout,
+			Interval:     finalizerInterval,
+			Batch:        finalizerBatch,
+			Hold:         finalizerHold,
+		}
+	}
+}
+
+// finalizerConfig is the package finalizerConfig with the module's sweep
+// interval seam applied.
+func (m *Module) finalizerConfig(deps *module.Dependencies) func() services.FinalizerConfig {
+	base := finalizerConfig(deps)
+	return func() services.FinalizerConfig {
+		cfg := base()
+		if m.finalizerEvery > 0 {
+			cfg.Interval = m.finalizerEvery
+		}
+		return cfg
+	}
+}
+
 // Init reads the operator environment and registers the service. It never
 // contacts Qdrant or llm, and never fails: a core Init error is fatal, so
 // missing infrastructure is a log line, not an error.
@@ -291,9 +355,12 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	// unset included: owners enqueue intents that the worker drains once an
 	// engine is configured. With a nil DB it stays unwired (Enqueue errors).
 	var (
-		worker   *services.Worker
-		purger   services.SearchLogPurger
-		settings = func() searchSettings { return readSearchSettings(deps) }
+		worker    *services.Worker
+		purger    services.SearchLogPurger
+		sweeper   services.UncheckedSearchLogSweeper
+		finalizer *services.Finalizer
+		erasure   *services.ErasureService
+		settings  = func() searchSettings { return readSearchSettings(deps) }
 	)
 	missing := ""
 	if deps.DB == nil {
@@ -370,11 +437,13 @@ func (m *Module) Init(deps *module.Dependencies) error {
 			Now:        time.Now,
 			Logger:     logger,
 		}), resolver)
-		purger = searchLog
+		purger, sweeper = searchLog, searchLog
 		if gaps := svcs.missing(modules); len(gaps) > 0 {
 			logger.Warn("retrieval: search is missing services; searches fail closed without the authorization, membership or module-status ones and degrade without the inference ones",
 				slog.String("missing", strings.Join(gaps, ", ")))
 		}
+
+		finalizer, erasure = wireErasure(deps, svc, states, eng, prefix, m.finalizerConfig(deps), logger)
 	}
 	if deps.DB == nil {
 		// Production always has a DB; the repository constructors would
@@ -388,15 +457,59 @@ func (m *Module) Init(deps *module.Dependencies) error {
 
 	m.mu.Lock()
 	m.logger, m.svc, m.eng, m.worker, m.missing = logger, svc, eng, worker, missing
-	m.purger, m.settings = purger, settings
+	m.purger, m.sweeper, m.settings = purger, sweeper, settings
+	m.finalizer, m.erasure = finalizer, erasure
 	m.mu.Unlock()
 	deps.Services.Register(module.ServiceRetrieval, svc)
 	return nil
 }
 
+// wireErasure builds erasure over the database (ADR-0023 D12): the finalizer,
+// the erasure service behind DeleteBySubject and the tenant purge hook, and
+// the PII producer. One audit relay serves all of them and the Service, so
+// the sink compliance pushes later through Service.SetAuditSink reaches every
+// erasure event. It contacts nothing. A missing PII registry is skipped
+// silently (compliance absent); a tenant service that cannot take the purge
+// hook or list purged tenants gives one WARN.
+func wireErasure(deps *module.Dependencies, svc *services.Service, states *repository.CorpusStates,
+	eng engine.Engine, prefix string, cfg func() services.FinalizerConfig, logger *slog.Logger) (*services.Finalizer, *services.ErasureService) {
+	relay := services.NewAuditRelay()
+	store := repository.NewErasureFinalization(deps.DB)
+	logs := repository.NewSearchLogDSR(deps.DB)
+	finalizer := services.NewFinalizer(store, logs, services.NewLiveCollections(states, prefix), eng,
+		cfg, relay, time.Now, logger)
+
+	hooks, hooksOK := module.GetTyped[iface.TenantPurgeHooks](deps.Services, module.ServiceTenantService)
+	// purged stays a nil interface when absent: reconciliation is then a no-op.
+	purged, purgedOK := module.GetTyped[iface.PurgedTenantIDLister](deps.Services, module.ServiceTenantService)
+	erasure := services.NewErasureService(store, finalizer, services.RegisteredOwner(svc), purged, relay, time.Now, logger)
+	svc.SetAuditRelay(relay)
+	svc.SetErasure(erasure)
+
+	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
+		reg.Register(services.NewPIIProducer(store, logs, finalizer, time.Now, logger))
+	}
+	if hooksOK {
+		hooks.RegisterTenantPurgeHook(erasure.PurgeTenant)
+	}
+	var absent []string
+	if !hooksOK {
+		absent = append(absent, "TenantPurgeHooks")
+	}
+	if !purgedOK {
+		absent = append(absent, "PurgedTenantIDLister")
+	}
+	if len(absent) > 0 {
+		logger.Warn("retrieval: tenant purge erasure is not fully wired",
+			slog.String("missing", strings.Join(absent, ", ")))
+	}
+	return finalizer, erasure
+}
+
 // Start seals corpus registration, then starts the background jobs: the
-// index worker, when built, and the search-log retention loop, whenever a
-// database handle is present (rows are written with or without an engine).
+// index worker, when built, and, whenever a database handle is present
+// (engine or not), the search-log retention loop, the unchecked-row sweep,
+// the erasure finalizer and the purged-tenant reconcile loop.
 // Every module's Init has run by now, so a consumer that declares a
 // dependency on retrieval has registered; a module retried later cannot
 // register a corpus. Sealing comes first so the worker's first pass
@@ -404,12 +517,13 @@ func (m *Module) Init(deps *module.Dependencies) error {
 // Start while running is a no-op.
 func (m *Module) Start(ctx context.Context) error {
 	m.mu.Lock()
-	svc, worker, purger := m.svc, m.worker, m.purger
+	svc, worker, purger, sweeper := m.svc, m.worker, m.purger, m.sweeper
+	finalizer, erasure := m.finalizer, m.erasure
 	m.mu.Unlock()
 	if svc != nil {
 		svc.Seal()
 	}
-	if worker == nil && purger == nil {
+	if worker == nil && purger == nil && sweeper == nil && finalizer == nil {
 		return nil
 	}
 	m.lifecycleMu.Lock()
@@ -435,6 +549,18 @@ func (m *Module) Start(ctx context.Context) error {
 	if purger != nil {
 		wg.Add(1)
 		go func() { defer wg.Done(); m.searchLogRetentionLoop(runCtx) }()
+	}
+	if sweeper != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); m.uncheckedSweepLoop(runCtx) }()
+	}
+	if finalizer != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); finalizer.Run(runCtx) }()
+	}
+	if erasure != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); m.purgedTenantReconcileLoop(runCtx) }()
 	}
 	go func() { wg.Wait(); close(done) }()
 	m.cancel, m.done = cancel, done
@@ -486,6 +612,110 @@ func (m *Module) purgeSearchLog(ctx context.Context) {
 	}
 	logger.InfoContext(ctx, "retrieval: search log retention purge",
 		slog.Int("retention_days", days), slog.Int64("deleted", n))
+}
+
+// uncheckedSweepLoop deletes the search-log rows still unchecked after
+// services.UncheckedSearchLogGrace one grace after Start, then every grace,
+// until ctx ends.
+func (m *Module) uncheckedSweepLoop(ctx context.Context) {
+	first, every := m.uncheckedFirst, m.uncheckedEvery
+	if first <= 0 {
+		first = uncheckedSweepFirstRun
+	}
+	if every <= 0 {
+		every = uncheckedSweepEvery
+	}
+	t := time.NewTimer(first)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			m.sweepUnchecked(ctx)
+			t.Reset(every)
+		}
+	}
+}
+
+// sweepUnchecked runs one unchecked-row sweep. A failure WARNs once with a
+// coarse reason and the count deleted, never the error text or a tenant or
+// user, and is retried at the next run.
+func (m *Module) sweepUnchecked(ctx context.Context) {
+	m.mu.Lock()
+	sweeper, logger := m.sweeper, m.logger
+	m.mu.Unlock()
+	if sweeper == nil {
+		return
+	}
+	n, err := services.SweepUncheckedSearchLog(ctx, sweeper, time.Now())
+	if err != nil {
+		if ctx.Err() != nil {
+			return // stopping
+		}
+		reason := "error"
+		if errors.Is(err, context.DeadlineExceeded) {
+			reason = "deadline"
+		}
+		logger.WarnContext(ctx, "retrieval: unchecked search log sweep failed; retrying at the next run",
+			slog.Int64("deleted", n), slog.String("reason", reason))
+		return
+	}
+	if n > 0 {
+		logger.InfoContext(ctx, "retrieval: unchecked search log sweep deleted provisional rows", slog.Int64("deleted", n))
+	}
+}
+
+// purgedTenantReconcileLoop writes the tombstone of every purged tenant that
+// has none (a purge hook that never ran or failed) a minute after Start, then
+// every 10 minutes, until ctx ends.
+func (m *Module) purgedTenantReconcileLoop(ctx context.Context) {
+	first, every := m.reconcileFirst, m.reconcileInterval
+	if first <= 0 {
+		first = purgedTenantReconcileFirstRun
+	}
+	if every <= 0 {
+		every = purgedTenantReconcileEvery
+	}
+	t := time.NewTimer(first)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			m.reconcilePurgedTenants(ctx)
+			t.Reset(every)
+		}
+	}
+}
+
+// reconcilePurgedTenants runs one reconciliation. A failure WARNs once
+// without the error text, which may name a tenant, and is retried at the next
+// run.
+func (m *Module) reconcilePurgedTenants(ctx context.Context) {
+	m.mu.Lock()
+	erasure, logger := m.erasure, m.logger
+	m.mu.Unlock()
+	if erasure == nil {
+		return
+	}
+	n, err := erasure.ReconcilePurgedTenants(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return // stopping
+		}
+		reason := "error"
+		if errors.Is(err, context.DeadlineExceeded) {
+			reason = "deadline"
+		}
+		logger.WarnContext(ctx, "retrieval: purged-tenant reconciliation failed; retrying at the next run",
+			slog.Int("created", n), slog.String("reason", reason))
+		return
+	}
+	if n > 0 {
+		logger.InfoContext(ctx, "retrieval: purged-tenant reconciliation recorded tenant tombstones", slog.Int("created", n))
+	}
 }
 
 // Stop cancels the background jobs and waits for them (or for ctx). A key

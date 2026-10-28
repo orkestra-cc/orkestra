@@ -222,3 +222,113 @@ func TestSearchLog_PurgeBeforeReturnsErrorOnDisconnectedClient(t *testing.T) {
 		t.Fatal("cancelled ctx: want error")
 	}
 }
+
+func TestSearchLog_DeleteRowScopedToTenant(t *testing.T) {
+	r, db := newSearchLog(t)
+	if err := r.Insert(tctx("t1"), &models.SearchLog{UUID: "r1", UserUUID: "u1", Corpus: "c", Outcome: models.SearchOutcomeOK}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.DeleteRow(tctx("t2"), "r1"); err != nil || count(t, db, bson.M{"uuid": "r1"}) != 1 {
+		t.Fatalf("other tenant: err = %v", err)
+	}
+	if err := r.DeleteRow(tctx("t1"), "r1"); err != nil || count(t, db, bson.M{"uuid": "r1"}) != 0 {
+		t.Fatalf("own tenant: err = %v", err)
+	}
+	if err := r.DeleteRow(tctx("t1"), "missing"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// G2: MarkChecked clears the provisional marker of the ctx tenant's row only.
+func TestSearchLog_MarkCheckedScopedToTenant(t *testing.T) {
+	r, db := newSearchLog(t)
+	if err := r.Insert(tctx("t1"), &models.SearchLog{UUID: "r1", UserUUID: "u1", Unchecked: true}); err != nil {
+		t.Fatal(err)
+	}
+	if count(t, db, bson.M{"uuid": "r1", "unchecked": true}) != 1 {
+		t.Fatal("the row was not stored unchecked")
+	}
+	if err := r.MarkChecked(tctx("t2"), "r1"); err != nil || count(t, db, bson.M{"uuid": "r1", "unchecked": true}) != 1 {
+		t.Fatalf("other tenant: err = %v", err)
+	}
+	if err := r.MarkChecked(tctx("t1"), "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if count(t, db, bson.M{"uuid": "r1", "unchecked": bson.M{"$exists": true}}) != 0 || count(t, db, bson.M{"uuid": "r1"}) != 1 {
+		t.Fatal("own tenant: the marker was not removed, or the row went")
+	}
+	if err := r.MarkChecked(tctx("t1"), "missing"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ENVIRONMENT", "production")
+	t.Setenv("ENV", "production")
+	if err := r.MarkChecked(context.Background(), "r1"); !errors.Is(err, tenantrepo.ErrTenantScopeMissing) {
+		t.Fatalf("no tenant: err = %v, want ErrTenantScopeMissing", err)
+	}
+}
+
+// G2: the unchecked sweep deletes, across tenants and in bounded batches, only
+// unchecked rows older than the cutoff; recent unchecked rows and checked rows
+// of any age stay.
+func TestSearchLog_PurgeUncheckedBeforeSweepsOnlyOldUncheckedRows(t *testing.T) {
+	old := searchLogPurgeBatch
+	searchLogPurgeBatch = 10
+	t.Cleanup(func() { searchLogPurgeBatch = old })
+	r, db := newSearchLog(t)
+	now := time.Now().UTC()
+	stale := now.Add(-11 * time.Minute)
+	for i := 0; i < 25; i++ {
+		tenant := []string{"t-1", "t-2"}[i%2]
+		if err := r.Insert(tctx(tenant), &models.SearchLog{UUID: fmt.Sprintf("unc%d", i), Unchecked: true, CreatedAt: stale}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keep := []*models.SearchLog{
+		{UUID: "recent-unchecked", Unchecked: true, CreatedAt: now.Add(-time.Minute)},
+		{UUID: "old-checked", CreatedAt: now.Add(-24 * time.Hour)},
+		{UUID: "stale-checked", CreatedAt: stale},
+	}
+	for _, row := range keep {
+		if err := r.Insert(tctx("t-1"), row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := r.PurgeUncheckedBefore(context.Background(), now.Add(-10*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 25 {
+		t.Fatalf("swept = %d, want 25", n)
+	}
+	if left := count(t, db, bson.M{}); left != int64(len(keep)) {
+		t.Fatalf("remaining = %d, want %d", left, len(keep))
+	}
+	for _, row := range keep {
+		if count(t, db, bson.M{"uuid": row.UUID}) != 1 {
+			t.Fatalf("%s was swept", row.UUID)
+		}
+	}
+}
+
+// G2: the sweep is served by the partial {unchecked, createdAt} index.
+func TestSearchLog_UncheckedIndexIsPartial(t *testing.T) {
+	_, db := newSearchLog(t)
+	cur, err := db.Collection(CollSearchLog).Indexes().List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var specs []bson.M
+	if err := cur.All(context.Background(), &specs); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range specs {
+		if s["name"] == "unchecked_1_createdAt_1" {
+			pf, _ := s["partialFilterExpression"].(bson.M)
+			if pf["unchecked"] != true {
+				t.Fatalf("partialFilterExpression = %v", s["partialFilterExpression"])
+			}
+			return
+		}
+	}
+	t.Fatalf("no unchecked_1_createdAt_1 index in %v", specs)
+}
