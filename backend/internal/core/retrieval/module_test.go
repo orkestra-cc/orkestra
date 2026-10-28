@@ -431,6 +431,11 @@ type fakeTenants struct{}
 
 func (fakeTenants) ListActiveTenantIDs(context.Context, string) ([]string, error) { return nil, nil }
 
+// The tenant service also takes the purge hook and lists purged tenants
+// (none), so erasure is fully wired and adds no WARN (P16).
+func (fakeTenants) RegisterTenantPurgeHook(func(context.Context, string) error) {}
+func (fakeTenants) ListPurgedTenantIDs(context.Context) ([]string, error)       { return nil, nil }
+
 type fakeStatus struct{}
 
 func (fakeStatus) IsStarted(string) bool { return true }

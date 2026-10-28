@@ -412,6 +412,30 @@ func TestFencingWindow(t *testing.T) {
 	}
 }
 
+// A config that forgets the fence inputs fails safe: the lease defaults to
+// MaxWorkerLease (the longest a worker can hold a key), not FencingWindow's
+// 2m fallback, so the fence is the production 16m.
+func TestFinalizerConfig_WithDefaultsFailsSafe(t *testing.T) {
+	got := FinalizerConfig{}.withDefaults()
+	assert.Equal(t, FinalizerConfig{
+		Lease: MaxWorkerLease, WriteTimeout: 30 * time.Second,
+		Interval: 15 * time.Second, Batch: 50, Hold: 2 * time.Minute,
+	}, got)
+	assert.Equal(t, 16*time.Minute, FencingWindow(got.Lease, got.WriteTimeout))
+
+	set := FinalizerConfig{Lease: time.Minute, WriteTimeout: 5 * time.Second, Interval: time.Second, Batch: 3, Hold: time.Minute}
+	assert.Equal(t, set, set.withDefaults())
+
+	// End to end: a finalizer built without a config fences for 16m.
+	env := newFinEnv(t, map[string][]string{"people": {"c_people_g1"}}, true)
+	env.fin = NewFinalizer(env.store, env.logs, env.cols, env.eng, nil, NewAuditRelay(), env.clk.Now, nil)
+	id := env.ensureUser(t, "u1")
+	env.runOnce(t, 1)
+	r := env.row(t, id)
+	require.Equal(t, models.ErasureStatusFencing, r.Status)
+	assert.Equal(t, env.t0.Add(16*time.Minute), *r.FenceUntil)
+}
+
 func TestErasureBackoff(t *testing.T) {
 	for attempts, want := range map[int]time.Duration{
 		0: 15 * time.Second, 1: 15 * time.Second, 2: 30 * time.Second, 4: 2 * time.Minute,

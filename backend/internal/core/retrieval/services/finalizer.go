@@ -46,14 +46,15 @@ var (
 
 // CollectionLister names the engine collections an erasure must reach.
 type CollectionLister interface {
-	// LiveCollections maps every corpus in corpus state to the collections of its
-	// active, building and retained generations; a corpus with none is absent.
+	// LiveCollections maps every corpus in corpus state to the collection of its
+	// active generation (delivery step 1 records no other); a corpus with none
+	// is absent.
 	LiveCollections(ctx context.Context) (map[string][]string, error)
 }
 
 // FinalizerConfig is read on every sweep; zero values take the defaults.
 type FinalizerConfig struct {
-	Lease, WriteTimeout time.Duration // inputs of FencingWindow
+	Lease, WriteTimeout time.Duration // inputs of FencingWindow; MaxWorkerLease, 30s
 	Interval            time.Duration // 15s
 	Batch               int           // 50
 	Hold                time.Duration // 2m
@@ -80,7 +81,16 @@ const (
 	markTimeout = 10 * time.Second
 )
 
+// withDefaults fills the zero fields. A missing fence input fails safe: the
+// lease defaults to MaxWorkerLease, the longest a worker can hold a key, not
+// to FencingWindow's own 2m fallback.
 func (c FinalizerConfig) withDefaults() FinalizerConfig {
+	if c.Lease <= 0 {
+		c.Lease = MaxWorkerLease
+	}
+	if c.WriteTimeout <= 0 {
+		c.WriteTimeout = fenceDefaultWrite
+	}
 	if c.Interval <= 0 {
 		c.Interval = defaultFinalizerInterval
 	}
