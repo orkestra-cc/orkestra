@@ -351,6 +351,36 @@ mongod whose only symptom was a failure at setup-finalization time.
 | **frontend-admin**             | 8087      | Operator console (Tier-1)            | Vite dev server, HMR; host `localhost`; consumes the operator API on `localhost:3000` (same site — see below) |
 | **client-frontend**      | 8081      | Tier-2 client demo SPA               | Vite dev server, HMR; host `client.localhost`; consumes the client API on `client.localhost:3000` (same site — see below) |
 
+Frontend dependencies, the same for both dev servers:
+
+- **Where.** `<app>/.docker/node_modules` (gitignored) is bound over
+  `/app/node_modules`, so the Alpine (musl) install never touches the host's
+  `<app>/node_modules`: host tests, lint and the git hooks keep their glibc
+  native bindings. The path contains a `node_modules` segment, so Vite's
+  watcher, ESLint, Prettier and Vitest skip it with their defaults.
+  `orkestra.sh` (`prepare_dev_frontend_dirs`, development deploys only) and
+  `make init` create it, the `node_modules` mount point and the
+  `.npm-cache`/`.vite-cache` bind sources before `up` (`.docker/` is ignored
+  by the root `.gitignore`; the images' `.dockerignore` files keep it out of
+  the production build context). Docker would create a missing one as root,
+  or under a userns-remap daemon as the remapped root (uid 100000), which the
+  uid-1000 container cannot write: a fresh checkout's frontends then looped on
+  an unwritable `.npm-cache`. A dependency or npm cache directory Docker
+  already created stops the deploy with its path: delete it and deploy again.
+- **Install.** `docker/frontend-deps.sh`, mounted read-only, runs before
+  `npm run dev`: `npm ci`, never a plain `npm install` (which would rewrite a
+  lockfile that is behind `package.json`), and only when `package.json` or
+  `package-lock.json` changed since the last install (a stamp in
+  `node_modules`) or `node_modules/.bin/vite` is missing, so a restart skips
+  it. If ci refuses because the two are out of sync, it logs
+  `orkestra dev: package.json and package-lock.json are out of sync …`,
+  installs without reading or writing the lockfile and starts anyway; run
+  `npm install` on the host and commit the lockfile. Any other failure exits,
+  and Docker restarts the container: see `docker logs <container>`.
+  `docker/tests/dev-frontend-deps.test.sh` covers both.
+- **Older checkouts.** Before this layout both containers installed into the
+  host's `node_modules`: run `npm ci` there once on the host.
+
 #### Staging (`docker-compose.staging.yml`)
 
 **Hot-reload stack with staging-like behavior (cookie strict, JWT, CORS, rate limits).** Used as the primary development environment on long-lived VMs that mirror production-style URLs/cookies but still need fast iteration.

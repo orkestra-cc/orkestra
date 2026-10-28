@@ -86,12 +86,17 @@ redis-cli:
 	docker exec -it orkestra-redis redis-cli -a $${REDIS_PASSWORD:-orkestra_redis_secure_2024}
 
 # Plain-bash tests for the env helpers and the validator's secret-hygiene
-# rules (scripts/test-env-file.sh, scripts/test-env-validate.sh). Part of
-# `make ci-backend`: the validator is what gates a staging/production deploy.
+# rules (scripts/test-env-file.sh, scripts/test-env-validate.sh), the
+# orkestra.sh helpers (scripts/test-orkestra-helpers.sh) and the dev
+# frontends' dependency install (docker/tests/dev-frontend-deps.test.sh). Part
+# of `make ci-backend`: the validator is what gates a staging/production deploy.
 backend-script-tests:
-	@bash -n scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh
+	@bash -n scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh \
+	    orkestra.sh scripts/test-orkestra-helpers.sh docker/frontend-deps.sh docker/tests/dev-frontend-deps.test.sh
 	@./scripts/test-env-file.sh
 	@./scripts/test-env-validate.sh
+	@bash scripts/test-orkestra-helpers.sh
+	@bash docker/tests/dev-frontend-deps.test.sh
 
 # Backend (host toolchain escape hatches) --------------------------------
 #
@@ -136,7 +141,7 @@ frontend-admin-deps:
 	@cd frontend-admin && npm install
 
 frontend-admin-clean:
-	@rm -rf frontend-admin/dist/ frontend-admin/node_modules/.vite/
+	@rm -rf frontend-admin/dist/ frontend-admin/node_modules/.vite/ frontend-admin/.docker/node_modules/.vite/
 
 # Frontend client (host npm escape hatches) ------------------------------
 
@@ -147,7 +152,7 @@ frontend-client-typecheck:
 	@cd frontend-client && npm run typecheck
 
 frontend-client-clean:
-	@rm -rf frontend-client/dist/ frontend-client/node_modules/.vite/
+	@rm -rf frontend-client/dist/ frontend-client/node_modules/.vite/ frontend-client/.docker/node_modules/.vite/
 
 # ============================================================================
 # CI parity — single source of truth for "what is a passing build."
@@ -168,7 +173,7 @@ frontend-client-clean:
 BASE_REF ?= origin/dev
 SINCE := $(shell git merge-base HEAD $(BASE_REF) 2>/dev/null || echo HEAD~1)
 CI_CHANGED := $(shell { git diff --name-only $(SINCE)...HEAD 2>/dev/null; git diff --name-only 2>/dev/null; git diff --name-only --cached 2>/dev/null; } | sort -u)
-BACKEND_CHANGED := $(if $(filter backend/% scripts/init.sh scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh docker/docker-compose.% docker/.env.example docker/tests/%,$(CI_CHANGED)),1,)
+BACKEND_CHANGED := $(if $(filter backend/% scripts/init.sh scripts/env-file.sh scripts/env-validate.sh scripts/test-env-file.sh scripts/test-env-validate.sh docker/docker-compose.% docker/.env.example docker/tests/% orkestra.sh scripts/test-orkestra-helpers.sh docker/frontend-deps.sh,$(CI_CHANGED)),1,)
 ADMIN_CHANGED   := $(if $(filter frontend-admin/%,$(CI_CHANGED)),1,)
 CLIENT_CHANGED  := $(if $(filter frontend-client/%,$(CI_CHANGED)),1,)
 MOBILE_CHANGED  := $(if $(filter mobile/%,$(CI_CHANGED)),1,)
