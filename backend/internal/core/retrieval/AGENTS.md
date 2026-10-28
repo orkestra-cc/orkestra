@@ -47,9 +47,9 @@ Later PRs: 4 outbox, indexing worker and corpus state (`retrieval_corpus_state` 
 
 An invalid URL (`qdrant.New` error) logs a WARN and is treated as not configured; the value is never logged, nor is the key. When not configured, `Init` passes an **untyped nil** engine to `services.New` (a typed-nil driver inside the interface would defeat `Service.Engine()`'s `== nil` check).
 
-`Start` calls `Seal()`: every module's Init has run by then (`InitAll` precedes `StartAll`), so a module retried later with `RetryInit` cannot register a corpus. It is idempotent. `Stop` is a no-op until PR 4 adds the worker.
+`Start` calls `Seal()` first (every module's Init has run by then, so a module retried later with `RetryInit` cannot register a corpus), then starts the index worker goroutine; a second `Start` while running is a no-op. `Stop` cancels the worker and waits for it or the context. `Init` builds the outbox (`SetOutbox`, so `Enqueue` works in every mode) and, when an engine is configured and the gateway (`LLMPinnedEmbedder`, `LLMInferenceProfiles`), tenant lister and module status reader resolve, the worker; otherwise the worker is nil and one WARN names what is missing. Config (group `indexing`, read every pass): `worker_lease` (2m, `RETRIEVAL_WORKER_LEASE`), `worker_batch` (32, 1-256, `RETRIEVAL_WORKER_BATCH`), `worker_poll_interval` (5s, `RETRIEVAL_WORKER_POLL_INTERVAL`). Tests inject an engine through the unexported `Module.newEngine`.
 
-`HealthCheck` (only `/v1/admin/modules/health`; `/ready` does not consult modules): engine nil returns nil (not configured is the designed degraded mode); otherwise `engine.Health` under a 2s timeout, and any error returns `iface.ErrRetrievalUnavailable` itself, because the handler copies `err.Error()` into the response. The driver error goes to the DEBUG log.
+`HealthCheck` (only `/v1/admin/modules/health`; `/ready` does not consult modules): engine nil returns nil (not configured is the designed degraded mode); worker nil returns `retrieval: indexing disabled: <missing>`; otherwise `engine.Health` under a 2s timeout, and any error returns `iface.ErrRetrievalUnavailable` itself, because the handler copies `err.Error()` into the response. The driver error goes to the DEBUG log. A healthy engine then reports `Worker.Problems()` as `retrieval: <problem>; ...`.
 
 ## Corpus registration rules
 
