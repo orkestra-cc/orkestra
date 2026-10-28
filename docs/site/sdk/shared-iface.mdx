@@ -30,7 +30,7 @@ A representative slice, not the full list — read the package for the rest.
 | `PasswordHasher` / `AdminAuthInviter` | `auth` | user (admin-direct Tier-2 flows) |
 | `ServiceAccountLister` | `auth` | user |
 | `AuditSink` | `compliance` | every module performing a security-sensitive action |
-| `PIIProducer` | `user`, `auth`, `tenant`, `authz`, `notification`, `llm` | compliance (the GDPR DSR pipeline) |
+| `PIIProducer` | `user`, `auth`, `tenant`, `authz`, `notification`, `llm`, `retrieval` | compliance (the GDPR DSR pipeline) |
 | `KMSProvider` | `compliance` | per-tenant envelope encryption and crypto-shred |
 | [`ObjectStore` / `ObjectStoreProvider`](/sdk/object-storage) | the platform's blob provider | user (avatars), and any module storing uploads |
 | `PDFRenderer` | the platform's PDF renderer (a Gotenberg sidecar, wired by the server binary as an optional service — not by a core module) | any module compositing a printable document (e.g. a receipt) |
