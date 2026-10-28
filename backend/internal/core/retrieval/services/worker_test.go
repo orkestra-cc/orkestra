@@ -32,6 +32,8 @@ type workerEnv struct {
 	source   *fakeSource
 	emb      *fakeEmbedder
 	erasures *fakeErasures
+	progress *fakeProgress
+	tenants  *fakeTenants
 	logs     *lockedBuffer
 	spec     iface.RetrievalCorpusSpec
 	hash     string
@@ -43,14 +45,14 @@ func newTestWorker(t *testing.T) *workerEnv {
 	ing.Chunking = iface.RetrievalChunking{Strategy: "fixed", MaxTokens: 4, Overlap: 1}
 	e := &workerEnv{
 		clk: newClock(), eng: newFakeEngine(), outbox: newFakeOutbox(), source: newFakeSource(),
-		emb: &fakeEmbedder{dims: 8}, erasures: &fakeErasures{}, logs: &lockedBuffer{},
+		emb: &fakeEmbedder{dims: 8}, erasures: &fakeErasures{}, progress: newFakeProgress(), tenants: &fakeTenants{}, logs: &lockedBuffer{},
 	}
 	e.spec = iface.RetrievalCorpusSpec{Name: testCorpus, Owner: "crm",
 		Filters:   []iface.RetrievalFilterField{{Name: "stage", Type: iface.RetrievalFieldKeyword}},
 		Ingestion: ing, Source: e.source}
 	e.hash = IngestionProfileHash(ing, "ip_a")
 	e.deps = WorkerDeps{
-		Outbox: e.outbox, States: newFakeStates(), Tombstones: NewTombstones(e.erasures),
+		Outbox: e.outbox, Progress: e.progress, Tenants: e.tenants, States: newFakeStates(), Tombstones: NewTombstones(e.erasures),
 		Catalog: &fakeCatalog{specs: []iface.RetrievalCorpusSpec{e.spec}}, Engine: e.eng,
 		Profiles: &fakeProfiles{profile: &iface.InferenceProfile{ID: "ip_a", Kind: iface.InferenceKindEmbed,
 			Boundary: iface.InferenceBoundaryLocal, Dimensions: 8}},
@@ -85,7 +87,7 @@ func (e *workerEnv) enqueue(t *testing.T, rev int64) {
 func (e *workerEnv) row() models.OutboxEntry { return e.outbox.row("t1", testCorpus, "c1") }
 
 // runNext prepares the corpus, claims one key of tenant t1 and processes it
-// (Task 11 replaces it with RunOnce). Safe to call off the test goroutine.
+// for tests that need a controlled interleaving. Safe to call off the test goroutine.
 func (e *workerEnv) runNext(w *Worker) (*PassReport, error) {
 	ctx := context.Background()
 	g, problem, err := w.prepareCorpus(ctx, e.spec)
@@ -113,6 +115,14 @@ func (e *workerEnv) processNext(t *testing.T, w *Worker) *PassReport {
 	return rep
 }
 
+// pass runs one full worker pass.
+func (e *workerEnv) pass(t *testing.T, w *Worker) *PassReport {
+	t.Helper()
+	rep, err := w.RunOnce(context.Background())
+	require.NoError(t, err)
+	return &rep
+}
+
 func revisions(points []engine.Point) []int64 {
 	out := make([]int64, len(points))
 	for i, p := range points {
@@ -125,7 +135,7 @@ func (e *workerEnv) indexRev1(t *testing.T) {
 	t.Helper()
 	e.source.put("t1", item(1))
 	e.enqueue(t, 1)
-	rep := e.processNext(t, e.w)
+	rep := e.pass(t, e.w)
 	require.Equal(t, 1, rep.Indexed)
 	require.Len(t, e.eng.points(testColl), 3)
 }
@@ -135,7 +145,7 @@ func TestWorker_IndexesNewItem(t *testing.T) {
 	e.source.put("t1", item(1))
 	e.enqueue(t, 1)
 	claimedAt := e.clk.Now()
-	rep := e.processNext(t, e.w)
+	rep := e.pass(t, e.w)
 	assert.Equal(t, PassReport{Claimed: 1, Indexed: 1}, *rep)
 
 	pts := e.eng.points(testColl)
@@ -177,7 +187,7 @@ func TestWorker_DeletedItemRemovesAllPoints(t *testing.T) {
 	e.indexRev1(t)
 	e.source.remove("t1", "c1")
 	e.enqueue(t, 2)
-	rep := e.processNext(t, e.w)
+	rep := e.pass(t, e.w)
 	assert.Equal(t, 1, rep.Removed)
 	assert.Empty(t, e.eng.points(testColl))
 	r := e.row()
@@ -193,7 +203,7 @@ func TestWorker_MissingItemRemovesAllPoints(t *testing.T) {
 	delete(e.source.items["t1"], "c1") // the owner no longer reports the id at all
 	e.source.mu.Unlock()
 	e.enqueue(t, 2)
-	assert.Equal(t, 1, e.processNext(t, e.w).Removed)
+	assert.Equal(t, 1, e.pass(t, e.w).Removed)
 	assert.Empty(t, e.eng.points(testColl))
 }
 
@@ -202,7 +212,7 @@ func TestWorker_SourceBehindEnqueuedRevisionRetries(t *testing.T) {
 	e.source.put("t1", item(2))
 	e.enqueue(t, 3)
 	now := e.clk.Now()
-	rep := e.processNext(t, e.w)
+	rep := e.pass(t, e.w)
 	assert.Equal(t, 1, rep.Rescheduled)
 	assert.Equal(t, 0, e.eng.writes())
 	assert.Equal(t, 0, e.emb.callCount())
@@ -222,7 +232,7 @@ func TestWorker_TombstonedSubjectWritesNothingAndDeletesPoints(t *testing.T) {
 	it.Text = "a brand new text"
 	e.source.put("t1", it)
 	e.enqueue(t, 2)
-	rep := e.processNext(t, e.w)
+	rep := e.pass(t, e.w)
 	assert.Equal(t, 1, rep.Removed)
 	assert.Equal(t, 1, e.emb.callCount())
 	assert.Equal(t, 1, e.eng.callCount("Upsert"))
@@ -240,7 +250,7 @@ func TestWorker_ItemTombstoneSkipsLoad(t *testing.T) {
 	loads := e.source.loadCount()
 	e.erasures.add(models.Erasure{Scope: models.ErasureScopeTenant, TenantID: "t1", Kind: models.ErasureKindItem, Corpus: testCorpus, SourceID: "c1"})
 	e.enqueue(t, 2)
-	assert.Equal(t, 1, e.processNext(t, e.w).Removed)
+	assert.Equal(t, 1, e.pass(t, e.w).Removed)
 	assert.Equal(t, loads, e.source.loadCount())
 	assert.Empty(t, e.eng.points(testColl))
 }
@@ -252,7 +262,7 @@ func TestWorker_SharingChangeUpdatesPayloadWithoutEmbedding(t *testing.T) {
 	it.VisibleTo = []string{"user:u1"}
 	e.source.put("t1", it)
 	e.enqueue(t, 2)
-	rep := e.processNext(t, e.w)
+	rep := e.pass(t, e.w)
 	assert.Equal(t, PassReport{Claimed: 1, PayloadOnly: 1}, *rep)
 	assert.Equal(t, 1, e.emb.callCount())
 	assert.Equal(t, 1, e.eng.callCount("Upsert"))
@@ -277,7 +287,7 @@ func TestWorker_PayloadPathFallsBackWhenPointsMissing(t *testing.T) {
 	it.VisibleTo = []string{"user:u1"}
 	e.source.put("t1", it)
 	e.enqueue(t, 2)
-	rep := e.processNext(t, e.w)
+	rep := e.pass(t, e.w)
 	assert.Equal(t, PassReport{Claimed: 1, Indexed: 1}, *rep)
 	assert.Equal(t, 2, e.emb.callCount())
 	pts := e.eng.points(testColl)
@@ -292,7 +302,7 @@ func TestWorker_EmbedFailureReschedulesWithBackoff(t *testing.T) {
 	start := e.clk.Now()
 
 	e.emb.setErr(fmt.Errorf("gateway: %w", iface.ErrLLMProviderUnavailable))
-	assert.Equal(t, 1, e.processNext(t, e.w).Rescheduled)
+	assert.Equal(t, 1, e.pass(t, e.w).Rescheduled)
 	r := e.row()
 	assert.Equal(t, 1, r.Attempts)
 	assert.Equal(t, codeEmbed, r.LastError)
@@ -300,17 +310,17 @@ func TestWorker_EmbedFailureReschedulesWithBackoff(t *testing.T) {
 	assert.Equal(t, true, r.Dirty)
 
 	// not due yet
-	assert.Equal(t, 0, e.processNext(t, e.w).Claimed)
+	assert.Equal(t, 0, e.pass(t, e.w).Claimed)
 
 	e.clk.Advance(5 * time.Second)
-	assert.Equal(t, 1, e.processNext(t, e.w).Rescheduled)
+	assert.Equal(t, 1, e.pass(t, e.w).Rescheduled)
 	r = e.row()
 	assert.Equal(t, 2, r.Attempts)
 	assert.Equal(t, start.Add(15*time.Second), r.NextAttemptAt)
 
 	e.clk.Advance(10 * time.Second)
 	e.emb.setErr(iface.ErrLLMBudgetExceeded)
-	e.processNext(t, e.w)
+	e.pass(t, e.w)
 	r = e.row()
 	assert.Equal(t, codeBudget, r.LastError)
 	assert.Equal(t, 3, r.Attempts)
@@ -318,7 +328,7 @@ func TestWorker_EmbedFailureReschedulesWithBackoff(t *testing.T) {
 	e.clk.Advance(20 * time.Second)
 	e.emb.setErr(nil)
 	e.emb.setVecLen(7)
-	e.processNext(t, e.w)
+	e.pass(t, e.w)
 	r = e.row()
 	assert.Equal(t, codeEmbed, r.LastError)
 	assert.Equal(t, 4, r.Attempts)
@@ -329,7 +339,7 @@ func TestWorker_EmbedFailureReschedulesWithBackoff(t *testing.T) {
 	// success clears the failure
 	e.clk.Advance(40 * time.Second)
 	e.emb.setVecLen(0)
-	assert.Equal(t, 1, e.processNext(t, e.w).Indexed)
+	assert.Equal(t, 1, e.pass(t, e.w).Indexed)
 	r = e.row()
 	assert.Equal(t, 0, r.Attempts)
 	assert.Equal(t, "", r.LastError)
@@ -345,7 +355,7 @@ func TestWorker_EmbedsInBatchesOf32(t *testing.T) {
 	it.Text = strings.Join(words, " ") // 4-token windows, step 3: 67 chunks
 	e.source.put("t1", it)
 	e.enqueue(t, 1)
-	assert.Equal(t, 1, e.processNext(t, e.w).Indexed)
+	assert.Equal(t, 1, e.pass(t, e.w).Indexed)
 	require.Equal(t, 3, e.emb.callCount())
 	for i, n := range []int{32, 32, 3} {
 		req, _ := e.emb.call(i)
@@ -361,7 +371,7 @@ func TestWorker_InvalidItemParksForMaxBackoff(t *testing.T) {
 	e.source.put("t1", it)
 	e.enqueue(t, 1)
 	now := e.clk.Now()
-	assert.Equal(t, 1, e.processNext(t, e.w).Rescheduled)
+	assert.Equal(t, 1, e.pass(t, e.w).Rescheduled)
 	r := e.row()
 	assert.Equal(t, codeInvalidItem, r.LastError)
 	assert.Equal(t, 1, r.Attempts)
@@ -402,7 +412,7 @@ func TestWorker_FailureCodes(t *testing.T) {
 			e.enqueue(t, 1)
 			tc.arm(e)
 			now := e.clk.Now()
-			assert.Equal(t, 1, e.processNext(t, e.w).Rescheduled)
+			assert.Equal(t, 1, e.pass(t, e.w).Rescheduled)
 			r := e.row()
 			assert.Equal(t, tc.code, r.LastError)
 			assert.Equal(t, 1, r.Attempts)
@@ -429,7 +439,7 @@ func TestWorker_LostLeaseBeforeAnyWriteRequeues(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	rep := e.processNext(t, e.w)
+	rep := e.pass(t, e.w)
 	assert.Equal(t, 1, rep.Requeued)
 	assert.Equal(t, 0, rep.Indexed)
 	assert.Equal(t, 0, e.eng.writes())

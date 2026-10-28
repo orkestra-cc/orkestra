@@ -784,6 +784,9 @@ type fakeSource struct {
 	err     error
 	loads   int
 	onLoad  func() // runs outside the lock, before the items are read
+
+	enumErr   error
+	enumCalls []enumCall
 }
 
 var _ iface.RetrievalSource = (*fakeSource)(nil)
@@ -868,8 +871,55 @@ func (f *fakeSource) Load(_ context.Context, tenantID string, ids []string) ([]i
 	return out, nil
 }
 
-func (f *fakeSource) Enumerate(context.Context, string, string, int) (iface.RetrievalPage, error) {
-	return iface.RetrievalPage{}, nil
+// enumCall records one Enumerate call.
+type enumCall struct {
+	ctxTenant, ctxKind string
+	tenant, cursor     string
+	limit              int
+	hasDeadline        bool
+}
+
+func (f *fakeSource) Enumerate(ctx context.Context, tenantID, cursor string, limit int) (iface.RetrievalPage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ct, _ := ctxauth.GetTenantID(ctx)
+	ck := ctxauth.TenantKindFromContext(ctx)
+	_, dl := ctx.Deadline()
+	f.enumCalls = append(f.enumCalls, enumCall{ctxTenant: ct, ctxKind: ck, tenant: tenantID, cursor: cursor, limit: limit, hasDeadline: dl})
+	if f.enumErr != nil {
+		return iface.RetrievalPage{}, f.enumErr
+	}
+	ids := make([]string, 0, len(f.items[tenantID]))
+	for id := range f.items[tenantID] {
+		if id > cursor {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	more := len(ids) > limit
+	if more {
+		ids = ids[:limit]
+	}
+	page := iface.RetrievalPage{}
+	for _, id := range ids {
+		page.Items = append(page.Items, iface.RetrievalEnumerated{SourceID: id, Revision: f.items[tenantID][id].Revision})
+	}
+	if more {
+		page.Next = ids[len(ids)-1]
+	}
+	return page, nil
+}
+
+func (f *fakeSource) setEnumErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.enumErr = err
+}
+
+func (f *fakeSource) enumerated() []enumCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]enumCall(nil), f.enumCalls...)
 }
 
 func (f *fakeSource) Visible(context.Context, string, iface.RetrievalPrincipalContext, []string) (map[string]iface.RetrievalVisibility, error) {
@@ -967,4 +1017,104 @@ func (l *lockedBuffer) String() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.b.String()
+}
+
+// fakeProgress mirrors TenantProgress: ClaimBuild creates the row, returns nil
+// when it is done or leased and bumps the epoch; Advance is fenced on epoch
+// and owner (ErrLeaseLost), releases the lease and sets done.
+type fakeProgress struct {
+	mu   sync.Mutex
+	rows map[progressKey]*models.TenantProgress
+}
+
+type progressKey struct {
+	tenant, corpus string
+	generation     int
+}
+
+var _ ProgressStore = (*fakeProgress)(nil)
+
+func newFakeProgress() *fakeProgress {
+	return &fakeProgress{rows: map[progressKey]*models.TenantProgress{}}
+}
+
+func (f *fakeProgress) ClaimBuild(ctx context.Context, corpus string, generation int, owner string, now time.Time, lease time.Duration) (*models.TenantProgress, error) {
+	t, err := ctxTenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	k := progressKey{t, corpus, generation}
+	r, ok := f.rows[k]
+	if !ok {
+		r = &models.TenantProgress{TenantID: t, Corpus: corpus, Generation: generation, Status: models.ProgressBuilding, StartedAt: truncMS(now)}
+		f.rows[k] = r
+	}
+	if r.Status == models.ProgressDone || (r.LeaseUntil != nil && r.LeaseUntil.After(truncMS(now))) {
+		return nil, nil
+	}
+	until := truncMS(now.Add(lease))
+	r.Epoch++
+	r.LeaseOwner, r.LeaseUntil, r.UpdatedAt = owner, &until, truncMS(now)
+	c := *r
+	return &c, nil
+}
+
+func (f *fakeProgress) Advance(ctx context.Context, corpus string, generation int, epoch int64, owner, cursor string, added int64, done bool, now time.Time) error {
+	t, err := ctxTenant(ctx)
+	if err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r, ok := f.rows[progressKey{t, corpus, generation}]
+	if !ok || r.Epoch != epoch || r.LeaseOwner != owner {
+		return repository.ErrLeaseLost
+	}
+	r.Cursor, r.UpdatedAt = cursor, truncMS(now)
+	r.Enqueued += added
+	r.LeaseOwner, r.LeaseUntil = "", nil
+	if done {
+		r.Status = models.ProgressDone
+	}
+	return nil
+}
+
+func (f *fakeProgress) get(tenant, corpus string, generation int) models.TenantProgress {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if r, ok := f.rows[progressKey{tenant, corpus, generation}]; ok {
+		return *r
+	}
+	return models.TenantProgress{}
+}
+
+// fakeTenants is an iface.TenantIDLister.
+type fakeTenants struct {
+	mu   sync.Mutex
+	ids  []string
+	kind string
+}
+
+var _ iface.TenantIDLister = (*fakeTenants)(nil)
+
+func (f *fakeTenants) ListActiveTenantIDs(_ context.Context, kind string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.kind = kind
+	return append([]string(nil), f.ids...), nil
+}
+
+// outboxCount counts the outbox rows of a tenant and corpus.
+func (f *fakeOutbox) rowsOf(tenant, corpus string) []models.OutboxEntry {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []models.OutboxEntry
+	for k, r := range f.rows {
+		if k.tenant == tenant && k.corpus == corpus {
+			out = append(out, *r)
+		}
+	}
+	return out
 }

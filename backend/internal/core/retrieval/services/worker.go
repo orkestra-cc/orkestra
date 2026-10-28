@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -117,6 +118,10 @@ type WorkerDeps struct {
 type Worker struct {
 	WorkerDeps
 	owner string
+
+	mu        sync.Mutex
+	problems  []string
+	afterPass func() // test hook: runs after every pass of Run
 }
 
 // NewWorker builds a Worker with a fresh owner ID; it performs no I/O.
