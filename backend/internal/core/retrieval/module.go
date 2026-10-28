@@ -164,8 +164,9 @@ func (m *Module) Init(deps *module.Dependencies) error {
 
 	svc := services.New(services.Options{Engine: eng, CollectionPrefix: prefix, Logger: logger})
 
-	// The outbox works in every mode, QDRANT_URL unset included: owners
-	// enqueue intents that the worker drains once an engine is configured.
+	// The outbox is wired whenever a database handle is present, QDRANT_URL
+	// unset included: owners enqueue intents that the worker drains once an
+	// engine is configured. With a nil DB it stays unwired (Enqueue errors).
 	var worker *services.Worker
 	missing := ""
 	if deps.DB == nil {

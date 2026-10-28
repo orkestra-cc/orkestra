@@ -122,7 +122,7 @@ err := outbox.Enqueue(sessCtx, iface.RetrievalIntent{
 })
 ```
 
-Pass the `mongo.SessionContext` of the transaction so the intent commits or aborts with the source write. A call carries at most 1000 intents; a `SourceID` is 1 to 256 bytes of valid UTF-8 without NUL; `Revision` is zero or more and must grow with every change of the item. The tenant in the context must be internal and the corpus registered. `Enqueue` needs only the database, not Qdrant: while the engine or the embedding endpoint is down, or the owning module is stopped, intents accumulate and are processed later.
+Pass the `mongo.SessionContext` of the transaction so the intent commits or aborts with the source write. A call carries at most 1000 intents; a `SourceID` is 1 to 256 bytes of valid UTF-8 without NUL; `Revision` is zero or more and must grow with every change of the item. The tenant in the context must be internal and the corpus registered. Keep `Revision` growing even when an item is deleted and later re-created with the same id: a re-created item with a lower revision is never indexed. Recording an intent for an item that is waiting after a failure does not shorten the wait, so an item fixed after an `invalid_item` failure is retried within 30 minutes. `Enqueue` needs only the database, not Qdrant: while the engine or the embedding endpoint is down, or the owning module is stopped, intents accumulate and are processed later.
 
 The source must answer two calls:
 
@@ -131,14 +131,16 @@ The source must answer two calls:
 
 ### What the worker does
 
-The worker runs inside the base, one pass every `worker_poll_interval`. For each pass it checks every registered corpus (the embedding endpoint exists, is an embedding endpoint and respects the corpus locality), takes up to `worker_batch` due items round-robin across organizations so a busy one cannot starve the others, and for each item:
+The worker runs inside the base, one pass every `worker_poll_interval`. For each pass it checks every registered corpus (the embedding endpoint exists, is an embedding endpoint and respects the corpus locality), takes up to `worker_batch` due items round-robin across organizations, and for each item:
 
 1. removes it from the index when it is deleted or covered by an erasure record;
 2. loads it, validates it and splits the text into chunks;
 3. if the indexed text is unchanged since the last run, only refreshes the stored filters and principals and skips the embedding;
 4. otherwise embeds the chunks (32 per call, through the `llm` gateway and its budget), writes the points, and removes the points of older revisions.
 
-A worker holds a short lease on each item and checks it before every write, so two replicas never overwrite each other and an item changed during indexing is simply processed again. A failure reschedules the item with a delay of 5 seconds doubling up to 30 minutes; items are never abandoned. Logs and the stored error carry only the corpus, tenant and item id and one of a closed set of codes (`source`, `source_behind`, `invalid_item`, `embed`, `budget`, `engine`, `deadline`, `tombstone`), never the text.
+A worker holds a short lease on each item and checks it before every write. A worker that stalls past its lease can still finish a write after another replica took the item over; it notices the lost lease at its next lease-checked step and marks the item for another pass, so the item is processed again before it counts as clean, and an item changed during indexing is likewise simply processed again. Stopping the module still releases or reschedules the item being processed, so it does not wait for its lease to expire (except when the stop lands on the lease check itself). A failure reschedules the item with a delay of 5 seconds doubling up to 30 minutes; items are never abandoned. Logs and the stored error carry only the corpus, tenant and item id and one of a closed set of codes (`source`, `source_behind`, `invalid_item`, `embed`, `budget`, `engine`, `deadline`, `tombstone`), never the text.
+
+**Fairness.** Each pass resumes after the last organization the previous pass served, in organization ID order rather than by the age of their backlog, so a busy organization cannot starve the others: with more organizations waiting than `worker_batch`, every one gets an item indexed within `ceil(organizations / worker_batch)` passes. The initial build reads at most 16 pages per pass across all corpora and organizations and starts each pass where the previous one stopped. A source whose `Enumerate` fails is called once per pass and the rest of that pass goes to the other corpora; a finished build costs nothing afterwards. Each replica keeps this position in memory.
 
 ### Chunking
 
@@ -166,10 +168,10 @@ The Qdrant settings are operator environment variables. The three worker setting
 | Setting (env var) | Default | Bounds | Meaning |
 |---|---|---|---|
 | `worker_lease` (`RETRIEVAL_WORKER_LEASE`) | `2m` | 30s to 15m | How long a worker owns one item while indexing it. Embedding and engine calls end a quarter of the lease before it expires |
-| `worker_batch` (`RETRIEVAL_WORKER_BATCH`) | `32` | 1 to 256 | Items indexed per pass, shared round-robin across organizations |
+| `worker_batch` (`RETRIEVAL_WORKER_BATCH`) | `32` | 1 to 256 | Items indexed per pass, shared round-robin across organizations. Zero or a negative value means the default 32 |
 | `worker_poll_interval` (`RETRIEVAL_WORKER_POLL_INTERVAL`) | `5s` | 1s to 5m | Pause between passes |
 
-Values outside the bounds are clamped. The index is derived data: the owner's MongoDB collections stay the source of truth, so losing Qdrant loses no data and recovery is a rebuild. The collections are `retrieval_outbox` and `retrieval_tenant_progress` (per organization), `retrieval_corpus_state` (one document per corpus for the installation) and `retrieval_erasures`.
+Values outside the bounds are clamped to the nearest bound, except a `worker_batch` of zero or less, which falls back to 32. The index is derived data: the owner's MongoDB collections stay the source of truth, so losing Qdrant loses no data and recovery is a rebuild. The collections are `retrieval_outbox` and `retrieval_tenant_progress` (per organization), `retrieval_corpus_state` (one document per corpus for the installation) and `retrieval_erasures`.
 
 ## Health
 
@@ -178,7 +180,7 @@ The module health check (`/v1/admin/modules/health`) reports:
 | Message | Meaning and action |
 |---|---|
 | (healthy) | No engine configured (designed degraded mode), or engine reachable and every corpus can be written |
-| `retrieval: indexing disabled: <missing>` | Qdrant is configured but the worker could not start because a service it needs is absent (`LLMPinnedEmbedder`, `LLMInferenceProfiles`, `TenantIDLister`, `ModuleStatusReader`) or there is no database. Intents still accumulate. Check that the `llm` and `tenant` modules are loaded |
+| `retrieval: indexing disabled: <missing>` | Qdrant is configured but the worker could not start because a service it needs is absent (`LLMPinnedEmbedder`, `LLMInferenceProfiles`, `TenantIDLister`, `ModuleStatusReader`) or there is no database. With a database, intents still accumulate and are indexed once the worker runs; without one, `Enqueue` returns an error. Check that the `llm` and `tenant` modules are loaded |
 | `retrieval: the vector engine is unavailable` | Qdrant did not answer its health check within 2 seconds. Check `QDRANT_URL`, the API key, the network and the Qdrant version (1.20 or later). Driver details are in the DEBUG log |
 | `retrieval: corpus <c>: local_only corpus uses hosted endpoint "<e>"` | The corpus is `local_only` but its embedding endpoint is hosted. Point the corpus at an endpoint whose boundary is local, or have the owner declare `hosted_allowed` if sending the text to a hosted provider is acceptable |
 | `retrieval: corpus <c>: embed endpoint "<e>" is not configured` | The endpoint name does not exist in `llm`. Create it or fix the declaration |
